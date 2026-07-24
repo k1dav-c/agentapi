@@ -1,0 +1,45 @@
+{
+	"name": "agentapi",
+	// Dockerfile removes the base image's expired yarn apt repo and installs
+	// shellcheck (required by `make lint/shellcheck`)
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"features": {
+		// Bun builds the chat UI (see Makefile: `bun run build`, `bun lint`)
+		"ghcr.io/shyim/devcontainers-features/bun:0": {},
+		// Node is still needed by Next.js/ESLint tooling under the hood
+		"ghcr.io/devcontainers/features/node:1": {
+			"version": "lts"
+		}
+	},
+	"remoteUser": "root",
+	"containerUser": "root",
+	// safe.directory: running as root, git refuses the host-owned repo without it
+	"postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && cd chat && bun install",
+	"forwardPorts": [3284, 3000, 6006, 2345],
+	"portsAttributes": {
+		"3284": {
+			"label": "agentapi server"
+		},
+		"3000": {
+			"label": "chat UI (next dev)"
+		},
+		"6006": {
+			"label": "storybook"
+		},
+		"2345": {
+			"label": "delve debugger"
+		}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"golang.go",
+				"esbenp.prettier-vscode",
+				"dbaeumer.vscode-eslint",
+				"bradlc.vscode-tailwindcss"
+			]
+		}
+	}
+}
