@@ -18,6 +18,8 @@ import {
   Mic,
   MicOff,
   LoaderCircle,
+  Clock3,
+  X,
 } from "lucide-react";
 import {Tabs, TabsList, TabsTrigger} from "./ui/tabs";
 import type {ServerStatus} from "./chat-provider";
@@ -111,6 +113,7 @@ export default function MessageInput({
   serverStatus,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
+  const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
   const [inputMode, setInputMode] = useState<"text" | "control">("text");
   const [sentChars, setSentChars] = useState<SentChar[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -122,6 +125,7 @@ export default function MessageInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const speechBaseMessageRef = useRef("");
+  const previousServerStatusRef = useRef(serverStatus);
   const {uploadFiles} = useChat();
 
   useEffect(() => {
@@ -139,6 +143,21 @@ export default function MessageInput({
   useEffect(() => {
     if (serverStatus !== "running") setIsStopping(false);
   }, [serverStatus]);
+
+  useEffect(() => {
+    const previousStatus = previousServerStatusRef.current;
+    previousServerStatusRef.current = serverStatus;
+
+    if (
+      previousStatus === "running" &&
+      serverStatus === "stable" &&
+      queuedMessages.length > 0
+    ) {
+      const [nextMessage, ...remainingMessages] = queuedMessages;
+      setQueuedMessages(remainingMessages);
+      onSendMessage(nextMessage, "user");
+    }
+  }, [onSendMessage, queuedMessages, serverStatus]);
 
   const handleFilesAdded = async (files: File[]) => {
     for (const file of files) {
@@ -169,7 +188,13 @@ export default function MessageInput({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (message.trim() && !disabled) {
-      onSendMessage(message, "user");
+      if (serverStatus === "running") {
+        setQueuedMessages((previous) => [...previous, message]);
+      } else if (serverStatus === "stable") {
+        onSendMessage(message, "user");
+      } else {
+        return;
+      }
       setMessage("");
     }
   };
@@ -402,14 +427,51 @@ export default function MessageInput({
                     onKeyDown={handleKeyDown}
                     placeholder={
                       serverStatus === "running"
-                        ? "Running..."
+                        ? "Type a message to queue..."
                         : "Type a message..."
                     }
                     className="min-h-20 max-h-[400px] w-full resize-none bg-transparent px-4 pb-2 pt-4 text-sm leading-6 outline-none sm:px-5"
-                    disabled={serverStatus !== "stable"}
+                    disabled={
+                      disabled ||
+                      (serverStatus !== "stable" && serverStatus !== "running")
+                    }
                   />
                 )}
               </div>
+
+              {inputMode === "text" && queuedMessages.length > 0 && (
+                <div className="border-t bg-muted/15 px-3 py-2">
+                  <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                    <Clock3 className="size-3" />
+                    <span>Queued · {queuedMessages.length}</span>
+                  </div>
+                  <div className="flex gap-1.5 overflow-x-auto">
+                    {queuedMessages.map((queuedMessage, index) => (
+                      <div
+                        key={`${index}-${queuedMessage}`}
+                        className="flex max-w-64 shrink-0 items-center gap-1 rounded-md border bg-background py-1 pl-2.5 pr-1 text-xs"
+                      >
+                        <span className="truncate">{queuedMessage}</span>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="size-6 shrink-0 text-muted-foreground"
+                          onClick={() =>
+                            setQueuedMessages((previous) =>
+                              previous.filter((_, itemIndex) => itemIndex !== index)
+                            )
+                          }
+                          title="Remove queued message"
+                        >
+                          <X className="size-3" />
+                          <span className="sr-only">Remove queued message</span>
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center justify-between gap-3 border-t bg-muted/25 px-3 py-2.5">
                 <TabsList className="h-8 bg-muted/70 p-0.5">
@@ -474,16 +536,23 @@ export default function MessageInput({
                   </Button>
                   }
 
-                  {inputMode === "text" && serverStatus !== "running" && (
+                  {inputMode === "text" &&
+                    (serverStatus === "stable" || serverStatus === "running") && (
                     <Button
                       type="submit"
                       disabled={disabled || !message.trim()}
                       size="icon"
                       className="rounded-full shadow-sm"
-                      title={"Send Message"}
+                      title={
+                        serverStatus === "running"
+                          ? "Add message to queue"
+                          : "Send message"
+                      }
                     >
                       <SendIcon/>
-                      <span className="sr-only">Send</span>
+                      <span className="sr-only">
+                        {serverStatus === "running" ? "Queue" : "Send"}
+                      </span>
                     </Button>
                   )}
 
