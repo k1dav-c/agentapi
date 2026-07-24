@@ -359,7 +359,7 @@ export default function MessageInput({
       onValueChange={(value) => setInputMode(value as "text" | "control")}
       className="shrink-0 border-t bg-background/85 backdrop-blur-xl"
     >
-      <div className="mx-auto w-full max-w-4xl px-4 pb-4 pt-3 sm:px-6 sm:pb-5">
+      <div className="w-full px-4 pb-4 pt-3 sm:px-6 sm:pb-5">
         <DragDrop
           onFilesAdded={handleFilesAdded}
           disabled={disabled || inputMode === "control"}
