@@ -12,10 +12,11 @@ import {
 import {toast} from "sonner";
 import {getErrorMessage} from "@/lib/error-utils";
 
-interface Message {
+export interface Message {
   id: number;
   role: string;
   content: string;
+  time?: string;
 }
 
 // Draft messages are used to optmistically update the UI
@@ -29,6 +30,23 @@ interface MessageUpdateEvent {
   role: string;
   message: string;
   time: string;
+}
+
+export interface RichContentBlock {
+  type: "text" | "thinking" | "tool_use" | "tool_result";
+  text?: string;
+  thinking?: string;
+  tool_use_id?: string;
+  tool_name?: string;
+  tool_input?: unknown;
+  is_error?: boolean;
+}
+
+export interface RichMessage {
+  message_id: string;
+  role: string;
+  content: RichContentBlock[];
+  timestamp: string;
 }
 
 interface StatusChangeEvent {
@@ -95,6 +113,7 @@ export const AgentType: Record<Exclude<AgentType, "unknown">, AgentColorDisplayN
 
 interface ChatContextValue {
   messages: (Message | DraftMessage)[];
+  richMessages: RichMessage[];
   loading: boolean;
   serverStatus: ServerStatus;
   sendMessage: (message: string, type?: MessageType) => void;
@@ -141,6 +160,7 @@ const useAgentAPIUrl = (): string => {
 
 export function ChatProvider({ children }: PropsWithChildren) {
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
+  const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [serverStatus, setServerStatus] = useState<ServerStatus>("unknown");
   const [agentType, setAgentType] = useState<AgentType>("custom");
@@ -192,6 +212,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
               role: data.role,
               content: data.message,
               id: data.id,
+              time: data.time,
             };
             return updatedMessages;
           } else {
@@ -202,9 +223,26 @@ export function ChatProvider({ children }: PropsWithChildren) {
                 role: data.role,
                 content: data.message,
                 id: data.id,
+                time: data.time,
               },
             ];
           }
+        });
+      });
+
+      eventSource.addEventListener("rich_message_update", (event) => {
+        const data: RichMessage = JSON.parse(event.data);
+        setRichMessages((previous) => {
+          const existingIndex = previous.findIndex(
+            (message) =>
+              message.message_id === data.message_id &&
+              message.role === data.role,
+          );
+          if (existingIndex === -1) return [...previous, data];
+
+          const updated = [...previous];
+          updated[existingIndex] = data;
+          return updated;
         });
       });
 
@@ -391,6 +429,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     <ChatContext.Provider
       value={{
         messages,
+        richMessages,
         loading,
         sendMessage,
         serverStatus,

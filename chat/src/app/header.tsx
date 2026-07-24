@@ -3,6 +3,7 @@
 import { AgentType, useChat } from "@/components/chat-provider";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Activity, Bot, CircleAlert, CircleCheck, LoaderCircle, WifiOff } from "lucide-react";
+import packageInfo from "../../package.json";
 
 export function Header() {
   const { serverStatus, agentType } = useChat();
@@ -44,6 +45,12 @@ export function Header() {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-semibold tracking-tight">AgentAPI</span>
+            <span
+              className="rounded-full border bg-muted/60 px-2 py-0.5 font-mono text-[10px] font-medium text-muted-foreground"
+              title="Build version"
+            >
+              v{packageInfo.version}
+            </span>
             <span className="hidden rounded-full border bg-muted/60 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground sm:inline">
               Live session
             </span>

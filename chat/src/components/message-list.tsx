@@ -10,21 +10,24 @@ import React, {
 } from "react";
 import {
   ArrowDown,
+  CircleAlert,
   Check,
+  CheckCircle2,
   Clipboard,
   Code2,
+  LoaderCircle,
   Sparkles,
   TerminalSquare,
   User,
+  Wrench,
 } from "lucide-react";
 import { Button } from "./ui/button";
-import type { AgentType, ServerStatus } from "./chat-provider";
-
-interface Message {
-  role: string;
-  content: string;
-  id: number;
-}
+import type {
+  AgentType,
+  Message,
+  RichMessage,
+  ServerStatus,
+} from "./chat-provider";
 
 interface DraftMessage extends Omit<Message, "id"> {
   id?: number;
@@ -32,12 +35,23 @@ interface DraftMessage extends Omit<Message, "id"> {
 
 interface MessageListProps {
   messages: (Message | DraftMessage)[];
+  richMessages: RichMessage[];
   serverStatus: ServerStatus;
   agentType: AgentType;
 }
 
+interface ToolCall {
+  id: string;
+  name: string;
+  input?: unknown;
+  result?: string;
+  isError?: boolean;
+  timestamp: string;
+}
+
 export default function MessageList({
   messages,
+  richMessages,
   serverStatus,
   agentType,
 }: MessageListProps) {
@@ -45,6 +59,31 @@ export default function MessageList({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const isAtBottomRef = useRef(true);
   const lastScrollHeightRef = useRef(0);
+  const toolCalls = useMemo(() => collectToolCalls(richMessages), [richMessages]);
+  const timeline = useMemo(() => {
+    const entries = [
+      ...messages.map((message, index) => ({
+        type: "message" as const,
+        key: `message-${message.id ?? `draft-${index}`}`,
+        timestamp: message.time,
+        message,
+        index,
+      })),
+      ...toolCalls.map((toolCall, index) => ({
+        type: "tool" as const,
+        key: `tool-${toolCall.id || index}`,
+        timestamp: toolCall.timestamp,
+        toolCall,
+      })),
+    ];
+
+    return entries.sort((left, right) => {
+      if (!left.timestamp && !right.timestamp) return 0;
+      if (!left.timestamp) return 1;
+      if (!right.timestamp) return -1;
+      return Date.parse(left.timestamp) - Date.parse(right.timestamp);
+    });
+  }, [messages, toolCalls]);
 
   const scrollToBottom = useCallback(
     (behavior: ScrollBehavior = "smooth") => {
@@ -93,17 +132,21 @@ export default function MessageList({
         className="h-full overflow-y-auto overscroll-contain scroll-smooth"
         ref={setScrollArea}
       >
-        {messages.length === 0 ? (
+        {timeline.length === 0 ? (
           <EmptyState serverStatus={serverStatus} agentType={agentType} />
         ) : (
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 px-4 py-8 sm:px-6 sm:py-10">
-            {messages.map((message, index) => (
-              <MessageItem
-                key={message.id ?? `draft-${index}`}
-                message={message}
-                index={index}
-              />
-            ))}
+            {timeline.map((entry) =>
+              entry.type === "message" ? (
+                <MessageItem
+                  key={entry.key}
+                  message={entry.message}
+                  index={entry.index}
+                />
+              ) : (
+                <ToolCallCard key={entry.key} toolCall={entry.toolCall} />
+              ),
+            )}
           </div>
         )}
       </div>
@@ -122,6 +165,117 @@ export default function MessageList({
         </Button>
       )}
     </div>
+  );
+}
+
+function collectToolCalls(richMessages: RichMessage[]): ToolCall[] {
+  const calls = new Map<string, ToolCall>();
+
+  for (const message of richMessages) {
+    for (const block of message.content) {
+      if (block.type === "tool_use" && block.tool_use_id) {
+        calls.set(block.tool_use_id, {
+          ...calls.get(block.tool_use_id),
+          id: block.tool_use_id,
+          name: block.tool_name || "Tool",
+          input: block.tool_input,
+          timestamp: message.timestamp,
+        });
+      }
+
+      if (block.type === "tool_result" && block.tool_use_id) {
+        const existing = calls.get(block.tool_use_id);
+        calls.set(block.tool_use_id, {
+          id: block.tool_use_id,
+          name: existing?.name || "Tool",
+          input: existing?.input,
+          result: block.text ?? "",
+          isError: block.is_error,
+          timestamp: existing?.timestamp || message.timestamp,
+        });
+      }
+    }
+  }
+
+  return [...calls.values()];
+}
+
+function formatToolInput(input: unknown): string {
+  if (input === undefined || input === null) return "";
+  if (typeof input === "string") {
+    try {
+      return JSON.stringify(JSON.parse(input), null, 2);
+    } catch {
+      return input;
+    }
+  }
+
+  try {
+    return JSON.stringify(input, null, 2);
+  } catch {
+    return String(input);
+  }
+}
+
+function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
+  const isPending = toolCall.result === undefined;
+  const input = formatToolInput(toolCall.input);
+
+  return (
+    <details className="group overflow-hidden rounded-xl border bg-card/70 shadow-xs">
+      <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 transition hover:bg-muted/45 [&::-webkit-details-marker]:hidden">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg border bg-background">
+          <Wrench className="size-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">
+            {toolCall.name}
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            {toolCall.isError
+              ? "Tool call failed"
+              : isPending
+                ? "Tool call is running"
+                : "Tool call completed"}
+          </span>
+        </span>
+        {toolCall.isError ? (
+          <CircleAlert className="size-4 shrink-0 text-destructive" />
+        ) : isPending ? (
+          <LoaderCircle className="size-4 shrink-0 animate-spin text-muted-foreground" />
+        ) : (
+          <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        )}
+        <ArrowDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="space-y-4 border-t bg-muted/20 px-4 py-4">
+        {input && <ToolDetail label="Input" content={input} />}
+        {toolCall.result !== undefined && (
+          <ToolDetail
+            label={toolCall.isError ? "Error" : "Result"}
+            content={toolCall.result || "(No output)"}
+          />
+        )}
+        {!input && toolCall.result === undefined && (
+          <p className="text-xs text-muted-foreground">
+            No tool details are available yet.
+          </p>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function ToolDetail({ label, content }: { label: string; content: string }) {
+  return (
+    <section>
+      <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </h3>
+      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border bg-background p-3 font-mono text-xs leading-5">
+        {content}
+      </pre>
+    </section>
   );
 }
 

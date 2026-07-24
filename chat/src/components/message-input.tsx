@@ -15,6 +15,9 @@ import {
   Keyboard,
   MessageSquareText,
   Paperclip,
+  Mic,
+  MicOff,
+  LoaderCircle,
 } from "lucide-react";
 import {Tabs, TabsList, TabsTrigger} from "./ui/tabs";
 import type {ServerStatus} from "./chat-provider";
@@ -35,6 +38,31 @@ interface SentChar {
   id: number;
   timestamp: number;
 }
+
+interface SpeechRecognitionEventLike extends Event {
+  resultIndex: number;
+  results: {
+    [index: number]: {
+      isFinal: boolean;
+      [index: number]: { transcript: string };
+    };
+    length: number;
+  };
+}
+
+interface SpeechRecognitionLike extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((event: Event & { error?: string }) => void) | null;
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
 // List of keys to send as raw input when in control mode
 
@@ -64,8 +92,29 @@ export default function MessageInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const nextCharId = useRef(0);
   const [controlAreaFocused, setControlAreaFocused] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const speechBaseMessageRef = useRef("");
   const {uploadFiles} = useChat();
+
+  useEffect(() => {
+    const speechWindow = window as typeof window & {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    setSpeechSupported(
+      Boolean(speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition),
+    );
+
+    return () => recognitionRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    if (serverStatus !== "running") setIsStopping(false);
+  }, [serverStatus]);
 
   const handleFilesAdded = async (files: File[]) => {
     for (const file of files) {
@@ -204,6 +253,69 @@ export default function MessageInput({
     e.target.value = '';
   };
 
+  const toggleSpeechInput = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const speechWindow = window as typeof window & {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    const Recognition =
+      speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+
+    if (!Recognition) {
+      toast.error("Voice input is not supported by this browser");
+      return;
+    }
+
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = navigator.language;
+    speechBaseMessageRef.current =
+      message && !message.endsWith(" ") ? `${message} ` : message;
+
+    recognition.onresult = (event) => {
+      let transcript = "";
+      for (let index = 0; index < event.results.length; index += 1) {
+        transcript += event.results[index][0].transcript;
+      }
+      setMessage(`${speechBaseMessageRef.current}${transcript}`);
+    };
+    recognition.onerror = (event) => {
+      if (event.error === "not-allowed") {
+        toast.error("Microphone permission was denied.");
+      } else if (event.error !== "aborted") {
+        toast.error("The browser could not recognize speech.");
+      }
+      setIsListening(false);
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+      textareaRef.current?.focus();
+    };
+
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+      setIsListening(true);
+    } catch {
+      recognitionRef.current = null;
+      toast.error("The browser could not recognize speech.");
+    }
+  };
+
+  const handleStop = () => {
+    if (isStopping) return;
+    setIsStopping(true);
+    onSendMessage(specialKeys.Escape, "raw");
+    toast.info("Stop signal sent");
+  };
+
   return (
     <Tabs
       value={inputMode}
@@ -286,6 +398,31 @@ export default function MessageInput({
                 </TabsList>
 
                 <div className="flex min-w-0 flex-row items-center gap-2">
+                  {inputMode === "text" && serverStatus !== "running" && (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant={isListening ? "secondary" : "ghost"}
+                      className={isListening
+                        ? "rounded-full text-destructive"
+                        : "rounded-full text-muted-foreground hover:text-foreground"}
+                      onClick={toggleSpeechInput}
+                      disabled={disabled || !speechSupported}
+                      aria-pressed={isListening}
+                      title={
+                        speechSupported
+                          ? isListening
+                            ? "Stop voice input"
+                            : "Start voice input"
+                          : "Voice input is not supported by this browser"
+                      }
+                    >
+                      {isListening ? <MicOff /> : <Mic />}
+                      <span className="sr-only">
+                        {isListening ? "Stop voice input" : "Start voice input"}
+                      </span>
+                    </Button>
+                  )}
                   {serverStatus !== "running" && <Button
                       type="button"
                       size="icon"
@@ -318,14 +455,16 @@ export default function MessageInput({
                       type="button"
                       variant="destructive"
                       className="rounded-full shadow-sm"
-                      disabled={disabled}
-                      onClick={() => {
-                        onSendMessage(specialKeys.Escape, "raw");
-                      }}
-                      title={"Interrupt"}
+                      disabled={disabled || isStopping}
+                      onClick={handleStop}
+                      title={isStopping ? "Stopping agent" : "Stop agent"}
                     >
-                      <Square/>
-                      <span className="sr-only">Stop</span>
+                      {isStopping
+                        ? <LoaderCircle className="animate-spin" />
+                        : <Square />}
+                      <span className="sr-only">
+                        {isStopping ? "Stopping" : "Stop"}
+                      </span>
                     </Button>
                   )}
 
