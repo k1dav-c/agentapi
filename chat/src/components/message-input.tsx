@@ -81,6 +81,30 @@ const specialKeys: Record<string, string> = {
   Backspace: "\b", // Backspace key
 };
 
+const ctrlMappings: Record<string, string> = {
+  c: "\x03", // Ctrl+C (SIGINT)
+  d: "\x04", // Ctrl+D (EOF)
+  z: "\x1A", // Ctrl+Z (SIGTSTP)
+  l: "\x0C", // Ctrl+L (clear screen)
+  a: "\x01", // Ctrl+A (beginning of line)
+  e: "\x05", // Ctrl+E (end of line)
+  w: "\x17", // Ctrl+W (delete word)
+  u: "\x15", // Ctrl+U (clear line)
+  r: "\x12", // Ctrl+R (reverse history search)
+};
+
+const controlShortcuts = [
+  {label: "Ctrl+C", display: "Ctrl+C", value: ctrlMappings.c},
+  {label: "Ctrl+D", display: "Ctrl+D", value: ctrlMappings.d},
+  {label: "Ctrl+Z", display: "Ctrl+Z", value: ctrlMappings.z},
+  {label: "Ctrl+L", display: "Ctrl+L", value: ctrlMappings.l},
+  {label: "Enter", display: "⏎", value: "\r"},
+  {label: "Tab", display: "Tab", value: specialKeys.Tab},
+  {label: "Escape", display: "Esc", value: specialKeys.Escape},
+  {label: "Arrow up", display: "↑", value: specialKeys.ArrowUp},
+  {label: "Arrow down", display: "↓", value: specialKeys.ArrowDown},
+] as const;
+
 export default function MessageInput({
   onSendMessage,
   disabled = false,
@@ -206,18 +230,6 @@ export default function MessageInput({
 
       // Handle Ctrl+key combinations
       if (e.ctrlKey) {
-        const ctrlMappings: Record<string, string> = {
-          c: "\x03", // Ctrl+C (SIGINT)
-          d: "\x04", // Ctrl+D (EOF)
-          z: "\x1A", // Ctrl+Z (SIGTSTP)
-          l: "\x0C", // Ctrl+L (clear screen)
-          a: "\x01", // Ctrl+A (beginning of line)
-          e: "\x05", // Ctrl+E (end of line)
-          w: "\x17", // Ctrl+W (delete word)
-          u: "\x15", // Ctrl+U (clear line)
-          r: "\x12", // Ctrl+R (reverse history search)
-        };
-
         if (ctrlMappings[e.key.toLowerCase()]) {
           e.preventDefault();
           addSentChar(`Ctrl+${e.key.toUpperCase()}`);
@@ -341,19 +353,45 @@ export default function MessageInput({
             <div className="flex flex-col">
               <div className="flex">
                 {inputMode === "control" && !disabled ? (
-                  <div
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    ref={textareaRef as any}
-                    tabIndex={0}
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    onKeyDown={handleKeyDown as any}
-                    onFocus={() => setControlAreaFocused(true)}
-                    onBlur={() => setControlAreaFocused(false)}
-                    className="flex h-24 w-full cursor-text items-center justify-center p-4 text-center text-sm text-muted-foreground outline-none focus:bg-muted/35"
-                  >
-                    {controlAreaFocused
-                      ? "Press any key to send to terminal (arrows, Ctrl+C, Ctrl+R, etc.)"
-                      : "Click or focus this area to send keystrokes to terminal"}
+                  <div className="flex w-full min-w-0 flex-col">
+                    <div
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      ref={textareaRef as any}
+                      tabIndex={0}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      onKeyDown={handleKeyDown as any}
+                      onFocus={() => setControlAreaFocused(true)}
+                      onBlur={() => setControlAreaFocused(false)}
+                      className="flex h-20 w-full cursor-text items-center justify-center p-4 text-center text-sm text-muted-foreground outline-none focus:bg-muted/35"
+                    >
+                      {controlAreaFocused
+                        ? "Press any key to send to terminal (arrows, Ctrl+C, Ctrl+R, etc.)"
+                        : "Click or focus this area to send keystrokes to terminal"}
+                    </div>
+                    <div
+                      className="flex gap-1.5 overflow-x-auto border-t bg-muted/20 px-3 py-2"
+                      aria-label="Terminal shortcuts"
+                    >
+                      {controlShortcuts.map((shortcut) => (
+                        <Button
+                          key={shortcut.label}
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 shrink-0 px-2.5 font-mono text-[11px]"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            addSentChar(shortcut.display);
+                            onSendMessage(shortcut.value, "raw");
+                            textareaRef.current?.focus();
+                          }}
+                          title={`Send ${shortcut.label}`}
+                        >
+                          {shortcut.display}
+                          <span className="sr-only">Send {shortcut.label}</span>
+                        </Button>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   <TextareaAutosize
