@@ -10,9 +10,9 @@ export default function EmbedPage() {
       }
     >
       <ChatProvider>
-        <div className="flex flex-col h-svh">
+        <main className="flex h-svh flex-col overflow-hidden bg-background">
           <Chat />
-        </div>
+        </main>
       </ChatProvider>
     </Suspense>
   );

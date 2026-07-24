@@ -1,6 +1,24 @@
 "use client";
 
-import React, {useLayoutEffect, useRef, useEffect, useCallback, useMemo, useState} from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  ArrowDown,
+  Check,
+  Clipboard,
+  Code2,
+  Sparkles,
+  TerminalSquare,
+  User,
+} from "lucide-react";
+import { Button } from "./ui/button";
+import type { AgentType, ServerStatus } from "./chat-provider";
 
 interface Message {
   role: string;
@@ -8,211 +26,304 @@ interface Message {
   id: number;
 }
 
-// Draft messages are used to optmistically update the UI
-// before the server responds.
 interface DraftMessage extends Omit<Message, "id"> {
   id?: number;
 }
 
 interface MessageListProps {
   messages: (Message | DraftMessage)[];
+  serverStatus: ServerStatus;
+  agentType: AgentType;
 }
 
-interface ProcessedMessageProps {
-  messageContent: string;
-  index: number;
-}
-
-export default function MessageList({messages}: MessageListProps) {
-  const [scrollAreaRef, setScrollAreaRef] = useState<HTMLDivElement | null>(null);
-
-  // Track if user is at bottom - default to true for initial scroll
+export default function MessageList({
+  messages,
+  serverStatus,
+  agentType,
+}: MessageListProps) {
+  const [scrollArea, setScrollArea] = useState<HTMLDivElement | null>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const isAtBottomRef = useRef(true);
-  // Track the last known scroll height to detect new content
   const lastScrollHeightRef = useRef(0);
-  // Track if we're currently doing a programmatic scroll
-  const isProgrammaticScrollRef = useRef(false);
 
-  const checkIfAtBottom = useCallback(() => {
-    if (!scrollAreaRef) return false;
-    const { scrollTop, scrollHeight, clientHeight } = scrollAreaRef;
-    return scrollTop + clientHeight >= scrollHeight - 10; // 10px tolerance
-  }, [scrollAreaRef]);
+  const scrollToBottom = useCallback(
+    (behavior: ScrollBehavior = "smooth") => {
+      scrollArea?.scrollTo({ top: scrollArea.scrollHeight, behavior });
+      isAtBottomRef.current = true;
+      setShowScrollButton(false);
+    },
+    [scrollArea],
+  );
 
-  // Track Ctrl (Windows/Linux) or Cmd (Mac) key state
-  // This is so that underline is only visible when hover + cmd/ctrl
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey) document.documentElement.classList.add('modifier-pressed');
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (!e.ctrlKey && !e.metaKey) document.documentElement.classList.remove('modifier-pressed');
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-      document.documentElement.classList.remove('modifier-pressed');
-
-    };
-  }, []);
-
-  // Update isAtBottom on scroll
-  useEffect(() => {
-    if (!scrollAreaRef) return;
+    if (!scrollArea) return;
 
     const handleScroll = () => {
-      if (isProgrammaticScrollRef.current) return;
-      isAtBottomRef.current = checkIfAtBottom();
+      const { scrollTop, scrollHeight, clientHeight } = scrollArea;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 32;
+      isAtBottomRef.current = atBottom;
+      setShowScrollButton(!atBottom);
     };
 
-    // Initial check
     handleScroll();
+    scrollArea.addEventListener("scroll", handleScroll, { passive: true });
+    return () => scrollArea.removeEventListener("scroll", handleScroll);
+  }, [scrollArea]);
 
-    scrollAreaRef.addEventListener("scroll", handleScroll);
-    scrollAreaRef.addEventListener("scrollend", () => isProgrammaticScrollRef.current = false);
-    return () => {
-      scrollAreaRef.removeEventListener("scroll", handleScroll)
-      scrollAreaRef.removeEventListener("scrollend", () => isProgrammaticScrollRef.current = false);
-
-    };
-  }, [checkIfAtBottom, scrollAreaRef]);
-
-  // Handle auto-scrolling when messages change
   useLayoutEffect(() => {
-    if (!scrollAreaRef) return;
+    if (!scrollArea) return;
 
-    const currentScrollHeight = scrollAreaRef.scrollHeight;
-
-    // Check if this is new content (scroll height increased)
-    const hasNewContent = currentScrollHeight > lastScrollHeightRef.current;
+    const currentHeight = scrollArea.scrollHeight;
+    const hasNewContent = currentHeight > lastScrollHeightRef.current;
     const isFirstRender = lastScrollHeightRef.current === 0;
-    const isNewUserMessage =
-      messages.length > 0 && messages[messages.length - 1].role === "user";
+    const isNewUserMessage = messages.at(-1)?.role === "user";
 
-    // Auto-scroll only if:
-    // 1. It's the first render, OR
-    // 2. There's new content AND user was at the bottom, OR
-    // 3. The user sent a new message
     if (
       hasNewContent &&
       (isFirstRender || isAtBottomRef.current || isNewUserMessage)
     ) {
-      isProgrammaticScrollRef.current = true;
-      scrollAreaRef.scrollTo({
-        top: currentScrollHeight,
-        behavior: isFirstRender ? "instant" : "smooth",
-      });
-      // After scrolling, we're at the bottom
-      isAtBottomRef.current = true;
+      scrollToBottom(isFirstRender ? "auto" : "smooth");
     }
-
-    // Update the last known scroll height
-    lastScrollHeightRef.current = currentScrollHeight;
-  }, [messages, scrollAreaRef]);
-
-  // If no messages, show a placeholder
-  if (messages.length === 0) {
-    return (
-      <div className="flex-1 p-6 flex items-center justify-center text-muted-foreground">
-        <p>No messages yet. Start the conversation!</p>
-      </div>
-    );
-  }
+    lastScrollHeightRef.current = currentHeight;
+  }, [messages, scrollArea, scrollToBottom]);
 
   return (
-    <div className="overflow-y-auto flex-1" ref={setScrollAreaRef}>
+    <div className="relative min-h-0 flex-1">
       <div
-        className="p-4 flex flex-col gap-4 max-w-4xl mx-auto transition-all duration-300 ease-in-out min-h-0">
-        {messages.map((message, index) => (
-          <div
-            key={message.id ?? "draft"}
-            className={`${message.role === "user" ? "text-right" : ""}`}
-          >
-            <div
-              className={`inline-block rounded-lg ${
-                message.role === "user"
-                  ? "bg-accent-foreground rounded-lg max-w-[90%] px-4 py-3 text-accent"
-                  : "max-w-[80ch]"
-              } ${message.id === undefined ? "animate-pulse" : ""}`}
-            >
-              <div
-                className={`whitespace-pre-wrap break-words text-left text-xs md:text-sm leading-relaxed md:leading-normal ${
-                  message.role === "user" ? "" : "font-mono"
-                }`}
-              >
-                {message.role !== "user" && message.content === "" ? (
-                  <LoadingDots />
-                ) : (
-                  <ProcessedMessage
-                    messageContent={message.content}
-                    index={index}
-                  />
-                )}
-              </div>
-            </div>
+        className="h-full overflow-y-auto overscroll-contain scroll-smooth"
+        ref={setScrollArea}
+      >
+        {messages.length === 0 ? (
+          <EmptyState serverStatus={serverStatus} agentType={agentType} />
+        ) : (
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 px-4 py-8 sm:px-6 sm:py-10">
+            {messages.map((message, index) => (
+              <MessageItem
+                key={message.id ?? `draft-${index}`}
+                message={message}
+                index={index}
+              />
+            ))}
           </div>
-        ))}
+        )}
       </div>
+
+      {showScrollButton && (
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          onClick={() => scrollToBottom()}
+          className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full bg-background/90 shadow-lg backdrop-blur"
+          title="Jump to latest message"
+        >
+          <ArrowDown />
+          <span className="sr-only">Jump to latest message</span>
+        </Button>
+      )}
     </div>
   );
 }
 
+function EmptyState({
+  serverStatus,
+  agentType,
+}: {
+  serverStatus: ServerStatus;
+  agentType: AgentType;
+}) {
+  const isOffline = serverStatus === "offline";
+  const name =
+    agentType === "unknown" ? "your coding agent" : agentType.replace("-", " ");
+
+  return (
+    <div className="mx-auto flex h-full w-full max-w-3xl flex-col items-center justify-center px-6 py-12 text-center">
+      <div className="relative mb-7">
+        <div className="absolute inset-0 scale-150 rounded-full bg-primary/10 blur-2xl" />
+        <div className="relative grid size-16 place-items-center rounded-2xl border bg-card shadow-sm">
+          <TerminalSquare className="size-7" />
+        </div>
+      </div>
+      <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+        <Sparkles className="size-3.5" />
+        Live agent workspace
+      </p>
+      <h1 className="max-w-xl text-balance text-2xl font-semibold tracking-tight sm:text-3xl">
+        {isOffline ? "The agent server is offline" : `Start working with ${name}`}
+      </h1>
+      <p className="mt-3 max-w-lg text-pretty text-sm leading-6 text-muted-foreground">
+        {isOffline
+          ? "AgentAPI is trying to reconnect. Check the server URL and make sure the agent process is running."
+          : "Send a task, attach project files, or switch to Control mode when the terminal needs direct input."}
+      </p>
+      {!isOffline && (
+        <div className="mt-8 grid w-full max-w-lg grid-cols-1 gap-3 text-left sm:grid-cols-2">
+          <Hint icon={Code2} text="Ask the agent to inspect or change code" />
+          <Hint icon={TerminalSquare} text="Send terminal keys in Control mode" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Hint({
+  icon: Icon,
+  text,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  text: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border bg-card/60 p-3 text-xs text-muted-foreground shadow-xs">
+      <Icon className="size-4 shrink-0 text-foreground" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function MessageItem({
+  message,
+  index,
+}: {
+  message: Message | DraftMessage;
+  index: number;
+}) {
+  const isUser = message.role === "user";
+  const isDraft = message.id === undefined;
+
+  if (!isUser) {
+    return (
+      <article className="min-w-0">
+        <div className="mb-2 flex h-7 items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <TerminalSquare className="size-3.5" />
+            <span>Agent output</span>
+            {isDraft && (
+              <span className="normal-case tracking-normal">Updating…</span>
+            )}
+          </div>
+          {message.content && <CopyButton content={message.content} />}
+        </div>
+        {message.content === "" ? (
+          <LoadingDots />
+        ) : (
+          <ProcessedMessage
+            messageContent={message.content}
+            index={index}
+            isUser={false}
+          />
+        )}
+      </article>
+    );
+  }
+
+  return (
+    <article className="flex flex-row-reverse gap-3 sm:gap-4">
+      <div
+        className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border bg-foreground text-background shadow-xs"
+      >
+        <User className="size-4" />
+      </div>
+      <div className="min-w-0 max-w-[85%]">
+        <div className="mb-1.5 flex items-center justify-end gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <span>You</span>
+          {isDraft && <span className="normal-case tracking-normal">Sending…</span>}
+        </div>
+        <div className="rounded-2xl rounded-tr-md bg-foreground px-4 py-3 text-sm leading-6 text-background shadow-sm">
+          {message.content === "" ? (
+            <LoadingDots />
+          ) : (
+            <ProcessedMessage
+              messageContent={message.content}
+              index={index}
+              isUser={isUser}
+            />
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function CopyButton({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(content);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+      title="Copy response"
+    >
+      {copied ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
+      <span className="sr-only">Copy response</span>
+    </button>
+  );
+}
+
 const LoadingDots = () => (
-  <div className="flex space-x-1">
-    <div
-      aria-hidden="true"
-      className={`size-2 rounded-full bg-foreground animate-pulse [animation-delay:0ms]`}
-    />
-    <div
-      aria-hidden="true"
-      className={`size-2 rounded-full bg-foreground animate-pulse [animation-delay:300ms]`}
-    />
-    <div
-      aria-hidden="true"
-      className={`size-2 rounded-full bg-foreground animate-pulse [animation-delay:600ms]`}
-    />
-    <span className="sr-only">Loading...</span>
+  <div className="flex h-6 items-center gap-1.5" aria-label="Agent is responding">
+    {[0, 150, 300].map((delay) => (
+      <span
+        key={delay}
+        className="size-1.5 animate-pulse rounded-full bg-muted-foreground"
+        style={{ animationDelay: `${delay}ms` }}
+      />
+    ))}
   </div>
 );
 
-
 const ProcessedMessage = React.memo(function ProcessedMessage({
-                                                                messageContent,
-                                                                index,
-                                                              }: ProcessedMessageProps) {
-  // Regex to find URLs
-  // https://stackoverflow.com/a/17773849
-  const urlRegex = useMemo<RegExp>(() => /(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})/g, []);
+  messageContent,
+  index,
+  isUser,
+}: {
+  messageContent: string;
+  index: number;
+  isUser: boolean;
+}) {
+  const urlRegex = useMemo(
+    () => /(https?:\/\/[^\s<]+|www\.[^\s<]+)/g,
+    [],
+  );
 
-  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>, url: string) => {
-    if (e.metaKey || e.ctrlKey) {
-      window.open(url, "_blank");
-    } else {
-      e.preventDefault(); // disable normal click to emulate terminal behaviour
-    }
-  }
+  const linkedContent = useMemo(
+    () =>
+      messageContent.split(urlRegex).map((content, partIndex) => {
+        const isUrl = /^(https?:\/\/|www\.)/.test(content);
+        if (!isUrl) return <span key={`${index}-${partIndex}`}>{content}</span>;
 
-  const linkedContent = useMemo(() => {
-    return messageContent.split(urlRegex).map((content, idx) => {
-      if (urlRegex.test(content)) {
+        const href = content.startsWith("www.") ? `https://${content}` : content;
         return (
           <a
-            key={`${index}-${idx}`}
-            href={content}
-            onClick={(e) => handleClick(e, content)}
-            className="cursor-default [.modifier-pressed_&]:hover:underline [.modifier-pressed_&]:hover:cursor-pointer"
+            key={`${index}-${partIndex}`}
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="underline decoration-current/30 underline-offset-4 transition hover:decoration-current"
           >
             {content}
           </a>
         );
-      }
-      return <span key={`${index}-${idx}`}>{content}</span>;
-    });
-  }, [index, messageContent, urlRegex]);
+      }),
+    [index, messageContent, urlRegex],
+  );
 
-  return <>{linkedContent}</>;
+  return (
+    <div
+      className={`text-left ${
+        isUser
+          ? "whitespace-pre-wrap break-words text-sm leading-6"
+          : "overflow-x-auto whitespace-pre font-mono text-[13px] leading-5 [tab-size:4]"
+      }`}
+    >
+      {linkedContent}
+    </div>
+  );
 });

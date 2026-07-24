@@ -12,6 +12,9 @@ import {
   SendIcon,
   Upload,
   Square,
+  Keyboard,
+  MessageSquareText,
+  Paperclip,
 } from "lucide-react";
 import {Tabs, TabsList, TabsTrigger} from "./ui/tabs";
 import type {ServerStatus} from "./chat-provider";
@@ -56,7 +59,7 @@ export default function MessageInput({
   serverStatus,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
-  const [inputMode, setInputMode] = useState("text");
+  const [inputMode, setInputMode] = useState<"text" | "control">("text");
   const [sentChars, setSentChars] = useState<SentChar[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const nextCharId = useRef(0);
@@ -202,8 +205,12 @@ export default function MessageInput({
   };
 
   return (
-    <Tabs value={inputMode} onValueChange={setInputMode}>
-      <div className="max-w-4xl mx-auto w-full p-4 pt-0">
+    <Tabs
+      value={inputMode}
+      onValueChange={(value) => setInputMode(value as "text" | "control")}
+      className="shrink-0 border-t bg-background/85 backdrop-blur-xl"
+    >
+      <div className="mx-auto w-full max-w-4xl px-4 pb-4 pt-3 sm:px-6 sm:pb-5">
         <DragDrop
           onFilesAdded={handleFilesAdded}
           disabled={disabled || inputMode === "control"}
@@ -215,8 +222,10 @@ export default function MessageInput({
             className={"hidden"}
             onChange={handleFileInputChange}
           />
-          <form onSubmit={handleSubmit}
-                className={"rounded-lg border text-base shadow-sm placeholder:text-muted-foreground focus-within:outline-none focus-within:ring-1 focus-within:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"}>
+          <form
+            onSubmit={handleSubmit}
+            className="overflow-hidden rounded-2xl border bg-card shadow-lg shadow-black/5 transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"
+          >
             <div className="flex flex-col">
               <div className="flex">
                 {inputMode === "control" && !disabled ? (
@@ -228,7 +237,7 @@ export default function MessageInput({
                     onKeyDown={handleKeyDown as any}
                     onFocus={() => setControlAreaFocused(true)}
                     onBlur={() => setControlAreaFocused(false)}
-                    className="cursor-text p-4 h-20 text-muted-foreground flex items-center justify-center w-full outline-none text-sm"
+                    className="flex h-24 w-full cursor-text items-center justify-center p-4 text-center text-sm text-muted-foreground outline-none focus:bg-muted/35"
                   >
                     {controlAreaFocused
                       ? "Press any key to send to terminal (arrows, Ctrl+C, Ctrl+R, etc.)"
@@ -246,41 +255,46 @@ export default function MessageInput({
                         ? "Running..."
                         : "Type a message..."
                     }
-                    className="resize-none w-full text-sm outline-none p-4 h-20 max-h-[400px]"
+                    className="min-h-20 max-h-[400px] w-full resize-none bg-transparent px-4 pb-2 pt-4 text-sm leading-6 outline-none sm:px-5"
                     disabled={serverStatus !== "stable"}
                   />
                 )}
               </div>
 
-              <div className="flex items-center justify-between p-4">
-                <TabsList className="bg-transparent">
+              <div className="flex items-center justify-between gap-3 border-t bg-muted/25 px-3 py-2.5">
+                <TabsList className="h-8 bg-muted/70 p-0.5">
                   <TabsTrigger
                     value="text"
+                    className="h-7 gap-1.5 px-2.5 text-xs"
                     onClick={() => {
                       textareaRef.current?.focus();
                     }}
                   >
-                    Text
+                    <MessageSquareText className="size-3.5" />
+                    Chat
                   </TabsTrigger>
                   <TabsTrigger
                     value="control"
+                    className="h-7 gap-1.5 px-2.5 text-xs"
                     onClick={() => {
                       textareaRef.current?.focus();
                     }}
                   >
+                    <Keyboard className="size-3.5" />
                     Control
                   </TabsTrigger>
                 </TabsList>
 
-                <div className={"flex flex-row gap-3"}>
+                <div className="flex min-w-0 flex-row items-center gap-2">
                   {serverStatus !== "running" && <Button
-                      type="submit"
+                      type="button"
                       size="icon"
-                      className="rounded-full"
+                      variant="ghost"
+                      className="rounded-full text-muted-foreground hover:text-foreground"
                       onClick={handleUploadClick}
                       title={"Upload File"}
                   >
-                      <Upload/>
+                      <Paperclip />
                       <span className="sr-only">Upload</span>
                   </Button>
                   }
@@ -290,7 +304,7 @@ export default function MessageInput({
                       type="submit"
                       disabled={disabled || !message.trim()}
                       size="icon"
-                      className="rounded-full"
+                      className="rounded-full shadow-sm"
                       title={"Send Message"}
                     >
                       <SendIcon/>
@@ -301,7 +315,9 @@ export default function MessageInput({
                   {inputMode === "text" && serverStatus === "running" && (
                     <Button
                       size="icon"
-                      className="rounded-full"
+                      type="button"
+                      variant="destructive"
+                      className="rounded-full shadow-sm"
                       disabled={disabled}
                       onClick={() => {
                         onSendMessage(specialKeys.Escape, "raw");
@@ -318,7 +334,7 @@ export default function MessageInput({
                       {sentChars.map((char) => (
                         <span
                           key={char.id}
-                          className="min-w-9 h-9 px-2 rounded border font-mono font-medium text-xs flex items-center justify-center animate-pulse"
+                          className="flex h-8 min-w-8 animate-pulse items-center justify-center rounded-md border bg-background px-2 font-mono text-xs font-medium"
                         >
                       <Char char={char.char}/>
                     </span>
@@ -332,17 +348,19 @@ export default function MessageInput({
           </form>
         </DragDrop>
 
-        <span className="text-xs text-muted-foreground mt-2 block text-center">
+        <div className="mt-2.5 flex items-center justify-center gap-2 text-center text-[11px] text-muted-foreground">
           {inputMode === "text" ? (
             <>
-              Switch to <span className="font-medium">Control</span> mode to
-              send raw keystrokes (↑,↓,Tab,Ctrl+C,Ctrl+R) directly to the
-              terminal. Drag and drop files onto the input area to upload.
+              <Upload className="size-3" />
+              <span>Drop files to attach · Enter to send · Shift+Enter for a new line</span>
             </>
           ) : (
-            <>Control mode - keystrokes sent directly to terminal</>
+            <>
+              <Keyboard className="size-3" />
+              <span>Keystrokes are sent directly to the agent terminal</span>
+            </>
           )}
-        </span>
+        </div>
       </div>
     </Tabs>
   );

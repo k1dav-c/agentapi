@@ -11,10 +11,10 @@ export default function Home() {
       }
     >
       <ChatProvider>
-        <div className="flex flex-col h-svh">
+        <main className="flex h-svh flex-col overflow-hidden bg-background">
           <Header />
           <Chat />
-        </div>
+        </main>
       </ChatProvider>
     </Suspense>
   );

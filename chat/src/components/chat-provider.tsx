@@ -145,18 +145,20 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [serverStatus, setServerStatus] = useState<ServerStatus>("unknown");
   const [agentType, setAgentType] = useState<AgentType>("custom");
   const eventSourceRef = useRef<EventSource | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const agentAPIUrl = useAgentAPIUrl();
 
   // Set up SSE connection to the events endpoint
   useEffect(() => {
+    let disposed = false;
+
     // Function to create and set up EventSource
     const setupEventSource = () => {
+      if (disposed) return null;
+
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
       }
-
-      // Reset messages when establishing a new connection
-      setMessages([]);
 
       if (!agentAPIUrl) {
         console.warn(
@@ -251,10 +253,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
       eventSource.onerror = (error) => {
         console.error("EventSource error:", error);
         setServerStatus("offline");
+        eventSource.close();
 
-        // Try to reconnect after delay
-        setTimeout(() => {
-          if (eventSourceRef.current) {
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+        }
+        reconnectTimeoutRef.current = setTimeout(() => {
+          if (!disposed) {
             setupEventSource();
           }
         }, 3000);
@@ -268,10 +273,16 @@ export function ChatProvider({ children }: PropsWithChildren) {
 
     // Clean up on component unmount
     return () => {
+      disposed = true;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
       if (eventSource) {
         // Check if eventSource was successfully created
         eventSource.close();
       }
+      eventSourceRef.current = null;
     };
   }, [agentAPIUrl]);
 

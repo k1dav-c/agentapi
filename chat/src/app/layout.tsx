@@ -10,8 +10,8 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "AgentAPI Chat",
-  description: "A ChatGPT-like interface for AgentAPI",
+  title: "AgentAPI — Live Agent Session",
+  description: "Chat with and control your remote coding agent.",
 };
 
 export default function RootLayout({

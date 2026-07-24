@@ -22,13 +22,13 @@ export function DragDrop({ onFilesAdded, disabled = false, children, className =
     <div
       {...getRootProps()}
       className={`relative ${className} ${
-        isDragActive && !disabled ? 'border-primary border-2 border-dashed rounded-lg text-center transition-colors' : ''
+        isDragActive && !disabled ? 'rounded-2xl ring-2 ring-primary ring-offset-2 text-center transition-colors' : ''
       }`}
     >
       <input {...getInputProps()} />
       {isDragActive && !disabled && (
-        <div className="absolute inset-0 flex items-center justify-center bg-primary/20z-10">
-          <p className="text-sm text-primary font-medium">Drop the files here</p>
+        <div className="absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-background/90 backdrop-blur-sm">
+          <p className="rounded-full border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-sm">Drop files to attach</p>
         </div>
       )}
       {children}

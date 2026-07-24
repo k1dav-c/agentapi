@@ -76,6 +76,7 @@
   --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
   --sidebar-border: oklch(0.929 0.013 255.508);
   --sidebar-ring: oklch(0.704 0.04 256.788);
+  --surface-glow: oklch(0.93 0.025 250 / 0.75);
 }
 
 .dark {
@@ -110,6 +111,7 @@
   --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.551 0.027 264.364);
+  --surface-glow: oklch(0.24 0.025 260 / 0.7);
 }
 
 @layer base {
@@ -118,5 +120,16 @@
   }
   body {
     @apply bg-background text-foreground;
+    min-width: 320px;
+    text-rendering: optimizeLegibility;
+  }
+
+  button,
+  [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  ::selection {
+    @apply bg-primary/15;
   }
 }
