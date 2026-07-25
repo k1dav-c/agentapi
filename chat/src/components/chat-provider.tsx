@@ -12,6 +12,7 @@ import {
 } from "react";
 import {toast} from "sonner";
 import {getErrorMessage} from "@/lib/error-utils";
+import {getDocumentTitle} from "@/lib/document-title";
 
 export interface Message {
   id: number;
@@ -192,6 +193,19 @@ export function ChatProvider({ children }: PropsWithChildren) {
       // The connection status handler reports connectivity failures.
     }
   }, [agentAPIUrl]);
+  const currentTask = [...messages]
+    .reverse()
+    .find((message) => message.role === "user")
+    ?.content;
+
+  useEffect(() => {
+    document.title = getDocumentTitle({
+      connectionStatus,
+      serverStatus,
+      task: currentTask,
+    });
+  }, [connectionStatus, currentTask, serverStatus]);
+
   // Set up SSE connection to the events endpoint
   useEffect(() => {
     let disposed = false;
