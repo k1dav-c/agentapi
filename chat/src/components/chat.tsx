@@ -1,10 +1,12 @@
 "use client";
 
+import {useState} from "react";
 import {useChat} from "./chat-provider";
 import MessageInput from "./message-input";
 import MessageList from "./message-list";
 
 export function Chat() {
+  const [suggestedPrompt, setSuggestedPrompt] = useState("");
   const {
     messages,
     richMessages,
@@ -21,11 +23,14 @@ export function Chat() {
         richMessages={richMessages}
         serverStatus={serverStatus}
         agentType={agentType}
+        onSelectPrompt={setSuggestedPrompt}
       />
       <MessageInput
         onSendMessage={sendMessage}
         disabled={loading}
         serverStatus={serverStatus}
+        suggestedPrompt={suggestedPrompt}
+        onSuggestedPromptApplied={() => setSuggestedPrompt("")}
       />
     </section>
   );
