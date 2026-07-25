@@ -5,6 +5,7 @@ import {
   useState,
   useEffect,
   useRef,
+  useCallback,
   createContext,
   PropsWithChildren,
   useContext,
@@ -90,6 +91,12 @@ export interface FileUploadResponse {
   filePath?: string;
 }
 
+export interface QueuedMessage {
+  id: number;
+  content: string;
+  time: string;
+}
+
 export type AgentType = "claude" | "goose" | "aider" | "gemini" | "amp" | "codex" | "cursor" | "cursor-agent" | "copilot" | "auggie" | "amazonq" | "opencode" | "custom" | "unknown";
 
 export type AgentColorDisplayNamePair = {
@@ -118,7 +125,10 @@ interface ChatContextValue {
   loading: boolean;
   serverStatus: ServerStatus;
   connectionStatus: ConnectionStatus;
+  queuedMessages: QueuedMessage[];
   sendMessage: (message: string, type?: MessageType) => void;
+  updateQueuedMessage: (id: number, content: string) => Promise<void>;
+  deleteQueuedMessage: (id: number) => Promise<void>;
   uploadFiles: (formData: FormData) => Promise<FileUploadResponse>;
   agentType: AgentType;
 }
@@ -167,11 +177,21 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [serverStatus, setServerStatus] = useState<ServerStatus>("unknown");
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("reconnecting");
+  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [agentType, setAgentType] = useState<AgentType>("custom");
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const agentAPIUrl = useAgentAPIUrl();
-
+  const refreshQueue = useCallback(async () => {
+    try {
+      const response = await fetch(`${agentAPIUrl}/queue`);
+      if (!response.ok) return;
+      const data = await response.json() as {messages: QueuedMessage[]};
+      setQueuedMessages(data.messages ?? []);
+    } catch {
+      // The connection status handler reports connectivity failures.
+    }
+  }, [agentAPIUrl]);
   // Set up SSE connection to the events endpoint
   useEffect(() => {
     let disposed = false;
@@ -268,6 +288,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
 
         // Set agent type
         setAgentType(data.agent_type === "" ? "unknown" : data.agent_type as AgentType);
+        void refreshQueue();
       });
 
       // Handle agent error events
@@ -292,6 +313,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       // Handle connection open (server is online)
       eventSource.onopen = () => {
         setConnectionStatus("connected");
+        void refreshQueue();
         // Connection is established, but we'll wait for status_change event
         // for the actual server status
         console.log("EventSource connection established - messages reset");
@@ -334,7 +356,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       }
       eventSourceRef.current = null;
     };
-  }, [agentAPIUrl]);
+  }, [agentAPIUrl, refreshQueue]);
 
   // Send a new message
   const sendMessage = async (
@@ -380,6 +402,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
           description: fullDetail,
         });
       }
+      await refreshQueue();
 
     } catch (error) {
       console.error("Error sending message:", error);
@@ -437,6 +460,28 @@ export function ChatProvider({ children }: PropsWithChildren) {
     return result;
   }
 
+  const updateQueuedMessage = async (id: number, content: string) => {
+    const response = await fetch(`${agentAPIUrl}/queue/${id}`, {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({content}),
+    });
+    if (!response.ok) {
+      throw new Error("Failed to update queued message");
+    }
+    await refreshQueue();
+  };
+
+  const deleteQueuedMessage = async (id: number) => {
+    const response = await fetch(`${agentAPIUrl}/queue/${id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      throw new Error("Failed to delete queued message");
+    }
+    await refreshQueue();
+  };
+
   return (
     <ChatContext.Provider
       value={{
@@ -446,6 +491,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
         sendMessage,
         serverStatus,
         connectionStatus,
+        queuedMessages,
+        updateQueuedMessage,
+        deleteQueuedMessage,
         uploadFiles,
         agentType,
       }}

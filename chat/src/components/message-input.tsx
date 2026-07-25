@@ -18,13 +18,13 @@ import {
   Mic,
   MicOff,
   LoaderCircle,
+  ListPlus,
   Clock3,
-  CircleCheck,
-  CircleDot,
-  WifiOff,
   Check,
   Pencil,
   X,
+  TriangleAlert,
+  MoreHorizontal,
 } from "lucide-react";
 import {Tabs, TabsList, TabsTrigger} from "./ui/tabs";
 import type {ServerStatus} from "./chat-provider";
@@ -33,11 +33,27 @@ import {useChat} from "./chat-provider";
 import {DragDrop} from "./drag-drop";
 import {toast} from "sonner";
 import {getErrorMessage} from "@/lib/error-utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 
 interface MessageInputProps {
   onSendMessage: (message: string, type: "user" | "raw") => void;
   disabled?: boolean;
   serverStatus: ServerStatus;
+  suggestedPrompt?: string;
+  onSuggestedPromptApplied?: () => void;
 }
 
 interface SentChar {
@@ -112,13 +128,16 @@ const controlShortcuts = [
   {label: "Arrow down", display: "↓", value: specialKeys.ArrowDown},
 ] as const;
 
+const highRiskControlValues = new Set([ctrlMappings.d, ctrlMappings.z]);
+
 export default function MessageInput({
   onSendMessage,
   disabled = false,
   serverStatus,
+  suggestedPrompt = "",
+  onSuggestedPromptApplied,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
-  const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
   const [editingQueuedIndex, setEditingQueuedIndex] = useState<number | null>(null);
   const [editingQueuedMessage, setEditingQueuedMessage] = useState("");
   const [inputMode, setInputMode] = useState<"text" | "control">("text");
@@ -129,11 +148,18 @@ export default function MessageInput({
   const [isStopping, setIsStopping] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
+  const [pendingControl, setPendingControl] = useState<
+    (typeof controlShortcuts)[number] | null
+  >(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const speechBaseMessageRef = useRef("");
-  const previousServerStatusRef = useRef(serverStatus);
-  const {uploadFiles, connectionStatus} = useChat();
+  const {
+    uploadFiles,
+    queuedMessages,
+    updateQueuedMessage,
+    deleteQueuedMessage,
+  } = useChat();
 
   useEffect(() => {
     const speechWindow = window as typeof window & {
@@ -152,31 +178,16 @@ export default function MessageInput({
   }, [serverStatus]);
 
   useEffect(() => {
-    const previousStatus = previousServerStatusRef.current;
-    previousServerStatusRef.current = serverStatus;
-
-    if (
-      previousStatus === "running" &&
-      serverStatus === "stable" &&
-      queuedMessages.length > 0
-    ) {
-      const [nextMessage, ...remainingMessages] = queuedMessages;
-      setQueuedMessages(remainingMessages);
-      setEditingQueuedIndex((currentIndex) => {
-        if (currentIndex === null) return null;
-        if (currentIndex === 0) {
-          setEditingQueuedMessage("");
-          return null;
-        }
-        return currentIndex - 1;
-      });
-      onSendMessage(nextMessage, "user");
-    }
-  }, [onSendMessage, queuedMessages, serverStatus]);
+    if (!suggestedPrompt) return;
+    setMessage(suggestedPrompt);
+    setInputMode("text");
+    onSuggestedPromptApplied?.();
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [onSuggestedPromptApplied, suggestedPrompt]);
 
   const startEditingQueuedMessage = (index: number) => {
     setEditingQueuedIndex(index);
-    setEditingQueuedMessage(queuedMessages[index]);
+    setEditingQueuedMessage(queuedMessages[index].content);
   };
 
   const cancelEditingQueuedMessage = () => {
@@ -184,29 +195,38 @@ export default function MessageInput({
     setEditingQueuedMessage("");
   };
 
-  const saveEditingQueuedMessage = () => {
+  const saveEditingQueuedMessage = async () => {
     if (editingQueuedIndex === null || !editingQueuedMessage.trim()) return;
 
-    setQueuedMessages((previous) =>
-      previous.map((queuedMessage, index) =>
-        index === editingQueuedIndex ? editingQueuedMessage : queuedMessage,
-      ),
-    );
-    cancelEditingQueuedMessage();
+    try {
+      await updateQueuedMessage(
+        queuedMessages[editingQueuedIndex].id,
+        editingQueuedMessage,
+      );
+      cancelEditingQueuedMessage();
+    } catch (error) {
+      toast.error("Failed to update queued message", {
+        description: getErrorMessage(error),
+      });
+    }
   };
 
-  const removeQueuedMessage = (index: number) => {
-    setQueuedMessages((previous) =>
-      previous.filter((_, itemIndex) => itemIndex !== index),
-    );
-    setEditingQueuedIndex((currentIndex) => {
-      if (currentIndex === null) return null;
-      if (currentIndex === index) {
-        setEditingQueuedMessage("");
-        return null;
-      }
-      return currentIndex > index ? currentIndex - 1 : currentIndex;
-    });
+  const removeQueuedMessage = async (index: number) => {
+    try {
+      await deleteQueuedMessage(queuedMessages[index].id);
+      setEditingQueuedIndex((currentIndex) => {
+        if (currentIndex === null) return null;
+        if (currentIndex === index) {
+          setEditingQueuedMessage("");
+          return null;
+        }
+        return currentIndex > index ? currentIndex - 1 : currentIndex;
+      });
+    } catch (error) {
+      toast.error("Failed to delete queued message", {
+        description: getErrorMessage(error),
+      });
+    }
   };
 
   const handleFilesAdded = async (files: File[]) => {
@@ -239,7 +259,10 @@ export default function MessageInput({
     e.preventDefault();
     if (message.trim() && !disabled) {
       if (serverStatus === "running") {
-        setQueuedMessages((previous) => [...previous, message]);
+        onSendMessage(message, "user");
+        toast.success("Added to queue", {
+          description: `Position ${queuedMessages.length + 1}`,
+        });
       } else if (serverStatus === "stable") {
         onSendMessage(message, "user");
       } else {
@@ -285,6 +308,16 @@ export default function MessageInput({
     setSentChars((prev) => [...prev, newChar]);
   };
 
+  const sendControlShortcut = (shortcut: (typeof controlShortcuts)[number]) => {
+    if (highRiskControlValues.has(shortcut.value)) {
+      setPendingControl(shortcut);
+      return;
+    }
+    addSentChar(shortcut.display);
+    onSendMessage(shortcut.value, "raw");
+    textareaRef.current?.focus();
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // In control mode, send special keys as raw messages
     if (inputMode === "control" && !disabled) {
@@ -308,8 +341,14 @@ export default function MessageInput({
       if (e.ctrlKey) {
         if (ctrlMappings[e.key.toLowerCase()]) {
           e.preventDefault();
-          addSentChar(`Ctrl+${e.key.toUpperCase()}`);
-          onSendMessage(ctrlMappings[e.key.toLowerCase()], "raw");
+          const value = ctrlMappings[e.key.toLowerCase()];
+          const shortcut = controlShortcuts.find((item) => item.value === value);
+          if (shortcut) {
+            sendControlShortcut(shortcut);
+          } else {
+            addSentChar(`Ctrl+${e.key.toUpperCase()}`);
+            onSendMessage(value, "raw");
+          }
           return;
         }
       }
@@ -328,8 +367,8 @@ export default function MessageInput({
     }
   };
 
-  const handleUploadClick = (e: MouseEvent<HTMLButtonElement>) => {
-    e.preventDefault();
+  const handleUploadClick = (e?: MouseEvent<HTMLButtonElement>) => {
+    e?.preventDefault();
     fileInputRef.current?.click();
   };
 
@@ -408,9 +447,9 @@ export default function MessageInput({
     <Tabs
       value={inputMode}
       onValueChange={(value) => setInputMode(value as "text" | "control")}
-      className="shrink-0 border-t bg-background/85 backdrop-blur-xl"
+      className="shrink-0 border-t bg-background/90 backdrop-blur-xl"
     >
-      <div className="mx-auto w-full max-w-6xl px-4 pb-[calc(env(safe-area-inset-bottom)+0.25rem)] pt-2 sm:px-6 sm:pb-1 sm:pt-3">
+      <div className="mx-auto w-full max-w-5xl px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 sm:px-6 sm:pb-3 sm:pt-3">
         <DragDrop
           onFilesAdded={handleFilesAdded}
           disabled={disabled || inputMode === "control"}
@@ -431,14 +470,25 @@ export default function MessageInput({
                 {inputMode === "control" && !disabled ? (
                   <div className="flex w-full min-w-0 flex-col">
                     <div
+                      className="flex items-start gap-2 border-b border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300"
+                      role="alert"
+                    >
+                      <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                      <span>
+                        Direct terminal control. Every key is sent immediately and may stop the agent or close its session.
+                      </span>
+                    </div>
+                    <div
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       ref={textareaRef as any}
                       tabIndex={0}
+                      role="application"
+                      aria-label="Direct terminal keyboard input"
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       onKeyDown={handleKeyDown as any}
                       onFocus={() => setControlAreaFocused(true)}
                       onBlur={() => setControlAreaFocused(false)}
-                      className="flex h-20 w-full cursor-text items-center justify-center p-4 text-center text-sm text-muted-foreground outline-none focus:bg-muted/35"
+                      className="flex h-16 w-full cursor-text items-center justify-center p-4 text-center text-sm text-muted-foreground outline-none focus:bg-amber-500/5"
                     >
                       {controlAreaFocused
                         ? "Press any key to send to terminal (arrows, Ctrl+C, Ctrl+R, etc.)"
@@ -456,11 +506,7 @@ export default function MessageInput({
                           variant="outline"
                           className="h-7 shrink-0 px-2.5 font-mono text-[11px]"
                           onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => {
-                            addSentChar(shortcut.display);
-                            onSendMessage(shortcut.value, "raw");
-                            textareaRef.current?.focus();
-                          }}
+                          onClick={() => sendControlShortcut(shortcut)}
                           title={`Send ${shortcut.label}`}
                         >
                           {shortcut.display}
@@ -479,10 +525,12 @@ export default function MessageInput({
                     onKeyDown={handleKeyDown}
                     placeholder={
                       serverStatus === "running"
-                        ? "Type a message to queue..."
-                        : "Type a message..."
+                        ? "Add a follow-up task to the queue…"
+                        : serverStatus === "stable"
+                          ? "Ask the agent to do something…"
+                          : "Reconnecting… Your draft is saved."
                     }
-                    className="min-h-12 max-h-28 w-full resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-6 outline-none sm:h-20 sm:min-h-20 sm:max-h-20 sm:px-5 sm:pb-2 sm:pt-4"
+                    className="min-h-14 max-h-32 w-full resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-6 outline-none sm:min-h-16 sm:px-5"
                     disabled={
                       disabled ||
                       (serverStatus !== "stable" && serverStatus !== "running")
@@ -492,16 +540,20 @@ export default function MessageInput({
               </div>
 
               {inputMode === "text" && queuedMessages.length > 0 && (
-                <div className="border-t bg-muted/15 px-3 py-2">
-                  <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-                    <Clock3 className="size-3" />
-                    <span>Queued · {queuedMessages.length}</span>
-                  </div>
-                  <div className="flex gap-1.5 overflow-x-auto">
+                <details className="group border-t bg-muted/15">
+                  <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
+                    <span className="flex items-center gap-1.5">
+                      <Clock3 className="size-3" />
+                      Queued messages · {queuedMessages.length}
+                    </span>
+                    <span className="text-[10px] group-open:hidden">Show</span>
+                    <span className="hidden text-[10px] group-open:inline">Hide</span>
+                  </summary>
+                  <div className="max-h-40 space-y-1.5 overflow-y-auto border-t px-3 py-2">
                     {queuedMessages.map((queuedMessage, index) => (
                       <div
-                        key={`${index}-${queuedMessage}`}
-                        className="flex max-w-80 shrink-0 items-center gap-1 rounded-md border bg-background py-1 pl-2.5 pr-1 text-xs"
+                        key={queuedMessage.id}
+                        className="flex w-full items-center gap-1 rounded-md border bg-background py-1 pl-2.5 pr-1 text-xs"
                       >
                         {editingQueuedIndex === index ? (
                           <input
@@ -523,7 +575,7 @@ export default function MessageInput({
                             aria-label={`Edit queued message ${index + 1}`}
                           />
                         ) : (
-                          <span className="truncate">{queuedMessage}</span>
+                          <span className="min-w-0 flex-1 truncate">{queuedMessage.content}</span>
                         )}
                         <Button
                           type="button"
@@ -566,71 +618,68 @@ export default function MessageInput({
                       </div>
                     ))}
                   </div>
-                </div>
+                </details>
               )}
 
               <div className="flex items-center justify-between gap-3 border-t bg-muted/25 px-3 py-2.5">
-                <TabsList className="h-8 bg-muted/70 p-0.5">
+                <TabsList className="h-10 bg-muted/70 p-0.5 sm:h-8">
                   <TabsTrigger
                     value="text"
-                    className="h-7 gap-1.5 px-2.5 text-xs"
+                    className="h-9 gap-1.5 px-3 text-xs sm:h-7 sm:px-2.5"
                     onClick={() => {
                       textareaRef.current?.focus();
                     }}
                   >
                     <MessageSquareText className="size-3.5" />
-                    Chat
+                    Task
                   </TabsTrigger>
                   <TabsTrigger
                     value="control"
-                    className="h-7 gap-1.5 px-2.5 text-xs"
+                    className="h-9 gap-1.5 px-3 text-xs data-[state=active]:text-amber-700 dark:data-[state=active]:text-amber-300 sm:h-7 sm:px-2.5"
                     onClick={() => {
                       textareaRef.current?.focus();
                     }}
                   >
                     <Keyboard className="size-3.5" />
-                    Control
+                    Terminal
                   </TabsTrigger>
                 </TabsList>
 
                 <div className="flex min-w-0 flex-row items-center gap-2">
-                  {inputMode === "text" && serverStatus !== "running" && (
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant={isListening ? "secondary" : "ghost"}
-                      className={isListening
-                        ? "rounded-full text-destructive"
-                        : "rounded-full text-muted-foreground hover:text-foreground"}
-                      onClick={toggleSpeechInput}
-                      disabled={disabled || !speechSupported}
-                      aria-pressed={isListening}
-                      title={
-                        speechSupported
-                          ? isListening
-                            ? "Stop voice input"
-                            : "Start voice input"
-                          : "Voice input is not supported by this browser"
-                      }
-                    >
-                      {isListening ? <MicOff /> : <Mic />}
-                      <span className="sr-only">
-                        {isListening ? "Stop voice input" : "Start voice input"}
-                      </span>
-                    </Button>
+                  {inputMode === "text" && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant={isListening ? "secondary" : "ghost"}
+                          className="size-10 rounded-full text-muted-foreground hover:text-foreground"
+                          title="More input options"
+                        >
+                          <MoreHorizontal />
+                          <span className="sr-only">More input options</span>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="min-w-48">
+                        <DropdownMenuItem
+                          onSelect={() => handleUploadClick()}
+                          disabled={disabled || serverStatus === "running"}
+                          className="min-h-10"
+                        >
+                          <Paperclip />
+                          Attach files
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={toggleSpeechInput}
+                          disabled={disabled || !speechSupported}
+                          className="min-h-10"
+                        >
+                          {isListening ? <MicOff /> : <Mic />}
+                          {isListening ? "Stop voice input" : "Start voice input"}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   )}
-                  {serverStatus !== "running" && <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="rounded-full text-muted-foreground hover:text-foreground"
-                      onClick={handleUploadClick}
-                      title={"Upload File"}
-                  >
-                      <Paperclip />
-                      <span className="sr-only">Upload</span>
-                  </Button>
-                  }
 
                   {inputMode === "text" &&
                     (serverStatus === "stable" || serverStatus === "running") && (
@@ -638,16 +687,24 @@ export default function MessageInput({
                       type="submit"
                       disabled={disabled || !message.trim()}
                       size="icon"
-                      className="rounded-full shadow-sm"
+                      className="relative size-10 rounded-full shadow-sm"
                       title={
                         serverStatus === "running"
                           ? "Add message to queue"
                           : "Send message"
                       }
                     >
-                      <SendIcon/>
+                      {serverStatus === "running" ? <ListPlus /> : <SendIcon />}
+                      {serverStatus === "running" && queuedMessages.length > 0 && (
+                        <span
+                          aria-hidden="true"
+                          className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full border-2 border-background bg-amber-500 px-1 text-[10px] font-bold leading-none text-white"
+                        >
+                          {queuedMessages.length}
+                        </span>
+                      )}
                       <span className="sr-only">
-                        {serverStatus === "running" ? "Queue" : "Send"}
+                        {serverStatus === "running" ? "Queue task" : "Send task"}
                       </span>
                     </Button>
                   )}
@@ -657,7 +714,7 @@ export default function MessageInput({
                       size="icon"
                       type="button"
                       variant="destructive"
-                      className="rounded-full shadow-sm"
+                      className="size-10 rounded-full shadow-sm"
                       disabled={disabled || isStopping}
                       onClick={handleStop}
                       title={isStopping ? "Stopping agent" : "Stop agent"}
@@ -690,56 +747,48 @@ export default function MessageInput({
           </form>
         </DragDrop>
 
-        <div className="mt-1.5 flex items-center justify-end gap-3 text-[11px] text-muted-foreground sm:mt-2.5 sm:grid sm:grid-cols-[1fr_auto_1fr]">
-          <div className="hidden items-center gap-1.5 sm:flex">
-            {serverStatus === "running" ? (
-              <LoaderCircle className="size-3 animate-spin text-amber-500" />
-            ) : (
-              <CircleDot className="size-3 text-emerald-500" />
-            )}
-            <span>
-              Agent{" "}
-              {serverStatus === "running"
-                ? "working"
-                : serverStatus === "stable"
-                  ? "ready"
-                  : "status unknown"}
-            </span>
-          </div>
-
-          <div className="hidden items-center justify-center gap-2 text-center sm:flex">
+        <div className="mt-2 hidden items-center justify-center gap-2 text-center text-[11px] text-muted-foreground sm:flex">
             {inputMode === "text" ? (
               <>
                 <Upload className="size-3" />
-                <span>Drop files to attach · Enter to send · Shift+Enter for a new line</span>
+                <span>Enter to send · Shift+Enter for a new line · More options for files and voice</span>
               </>
             ) : (
               <>
                 <Keyboard className="size-3" />
-                <span>Keystrokes are sent directly to the agent terminal</span>
+                <span>Advanced mode: keystrokes are sent directly to the agent terminal</span>
               </>
             )}
-          </div>
-
-          <div className="flex items-center justify-end gap-1.5">
-            {connectionStatus === "connected" ? (
-              <>
-                <CircleCheck className="size-3 text-emerald-500" />
-                <span className="hidden sm:inline">Connected</span>
-              </>
-            ) : (
-              <>
-                <WifiOff className="size-3 text-destructive" />
-                <span className="font-medium text-destructive">
-                  {connectionStatus === "offline"
-                    ? "Network offline"
-                    : "Reconnecting…"}
-                </span>
-              </>
-            )}
-          </div>
         </div>
       </div>
+
+      <Dialog open={pendingControl !== null} onOpenChange={(open) => !open && setPendingControl(null)}>
+        <DialogContent className="w-[calc(100%-2rem)] rounded-xl sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Send {pendingControl?.display} to the terminal?</DialogTitle>
+            <DialogDescription>
+              This shortcut can suspend the process or close the current agent session. It takes effect immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" onClick={() => setPendingControl(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                if (!pendingControl) return;
+                addSentChar(pendingControl.display);
+                onSendMessage(pendingControl.value, "raw");
+                setPendingControl(null);
+              }}
+            >
+              Send shortcut
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Tabs>
   );
 }
