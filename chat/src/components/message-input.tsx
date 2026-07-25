@@ -19,6 +19,11 @@ import {
   MicOff,
   LoaderCircle,
   Clock3,
+  CircleCheck,
+  CircleDot,
+  WifiOff,
+  Check,
+  Pencil,
   X,
 } from "lucide-react";
 import {Tabs, TabsList, TabsTrigger} from "./ui/tabs";
@@ -114,6 +119,8 @@ export default function MessageInput({
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
+  const [editingQueuedIndex, setEditingQueuedIndex] = useState<number | null>(null);
+  const [editingQueuedMessage, setEditingQueuedMessage] = useState("");
   const [inputMode, setInputMode] = useState<"text" | "control">("text");
   const [sentChars, setSentChars] = useState<SentChar[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -126,7 +133,7 @@ export default function MessageInput({
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const speechBaseMessageRef = useRef("");
   const previousServerStatusRef = useRef(serverStatus);
-  const {uploadFiles} = useChat();
+  const {uploadFiles, connectionStatus} = useChat();
 
   useEffect(() => {
     const speechWindow = window as typeof window & {
@@ -155,9 +162,52 @@ export default function MessageInput({
     ) {
       const [nextMessage, ...remainingMessages] = queuedMessages;
       setQueuedMessages(remainingMessages);
+      setEditingQueuedIndex((currentIndex) => {
+        if (currentIndex === null) return null;
+        if (currentIndex === 0) {
+          setEditingQueuedMessage("");
+          return null;
+        }
+        return currentIndex - 1;
+      });
       onSendMessage(nextMessage, "user");
     }
   }, [onSendMessage, queuedMessages, serverStatus]);
+
+  const startEditingQueuedMessage = (index: number) => {
+    setEditingQueuedIndex(index);
+    setEditingQueuedMessage(queuedMessages[index]);
+  };
+
+  const cancelEditingQueuedMessage = () => {
+    setEditingQueuedIndex(null);
+    setEditingQueuedMessage("");
+  };
+
+  const saveEditingQueuedMessage = () => {
+    if (editingQueuedIndex === null || !editingQueuedMessage.trim()) return;
+
+    setQueuedMessages((previous) =>
+      previous.map((queuedMessage, index) =>
+        index === editingQueuedIndex ? editingQueuedMessage : queuedMessage,
+      ),
+    );
+    cancelEditingQueuedMessage();
+  };
+
+  const removeQueuedMessage = (index: number) => {
+    setQueuedMessages((previous) =>
+      previous.filter((_, itemIndex) => itemIndex !== index),
+    );
+    setEditingQueuedIndex((currentIndex) => {
+      if (currentIndex === null) return null;
+      if (currentIndex === index) {
+        setEditingQueuedMessage("");
+        return null;
+      }
+      return currentIndex > index ? currentIndex - 1 : currentIndex;
+    });
+  };
 
   const handleFilesAdded = async (files: File[]) => {
     for (const file of files) {
@@ -359,7 +409,7 @@ export default function MessageInput({
       onValueChange={(value) => setInputMode(value as "text" | "control")}
       className="shrink-0 border-t bg-background/85 backdrop-blur-xl"
     >
-      <div className="w-full px-4 pb-4 pt-3 sm:px-6 sm:pb-5">
+      <div className="mx-auto w-full max-w-6xl px-4 pb-1 pt-3 sm:px-6">
         <DragDrop
           onFilesAdded={handleFilesAdded}
           disabled={disabled || inputMode === "control"}
@@ -422,6 +472,8 @@ export default function MessageInput({
                   <TextareaAutosize
                     autoFocus
                     ref={textareaRef}
+                    minRows={3}
+                    maxRows={3}
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
@@ -430,7 +482,7 @@ export default function MessageInput({
                         ? "Type a message to queue..."
                         : "Type a message..."
                     }
-                    className="min-h-20 max-h-[400px] w-full resize-none bg-transparent px-4 pb-2 pt-4 text-sm leading-6 outline-none sm:px-5"
+                    className="h-20 w-full resize-none overflow-y-auto bg-transparent px-4 pb-2 pt-4 text-sm leading-6 outline-none sm:px-5"
                     disabled={
                       disabled ||
                       (serverStatus !== "stable" && serverStatus !== "running")
@@ -449,19 +501,63 @@ export default function MessageInput({
                     {queuedMessages.map((queuedMessage, index) => (
                       <div
                         key={`${index}-${queuedMessage}`}
-                        className="flex max-w-64 shrink-0 items-center gap-1 rounded-md border bg-background py-1 pl-2.5 pr-1 text-xs"
+                        className="flex max-w-80 shrink-0 items-center gap-1 rounded-md border bg-background py-1 pl-2.5 pr-1 text-xs"
                       >
-                        <span className="truncate">{queuedMessage}</span>
+                        {editingQueuedIndex === index ? (
+                          <input
+                            autoFocus
+                            value={editingQueuedMessage}
+                            onChange={(event) =>
+                              setEditingQueuedMessage(event.target.value)
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                saveEditingQueuedMessage();
+                              } else if (event.key === "Escape") {
+                                event.preventDefault();
+                                cancelEditingQueuedMessage();
+                              }
+                            }}
+                            className="h-6 w-56 min-w-0 bg-transparent text-xs outline-none"
+                            aria-label={`Edit queued message ${index + 1}`}
+                          />
+                        ) : (
+                          <span className="truncate">{queuedMessage}</span>
+                        )}
                         <Button
                           type="button"
                           size="icon"
                           variant="ghost"
                           className="size-6 shrink-0 text-muted-foreground"
                           onClick={() =>
-                            setQueuedMessages((previous) =>
-                              previous.filter((_, itemIndex) => itemIndex !== index)
-                            )
+                            editingQueuedIndex === index
+                              ? saveEditingQueuedMessage()
+                              : startEditingQueuedMessage(index)
                           }
+                          disabled={
+                            editingQueuedIndex === index &&
+                            !editingQueuedMessage.trim()
+                          }
+                          title={
+                            editingQueuedIndex === index
+                              ? "Save queued message"
+                              : "Edit queued message"
+                          }
+                        >
+                          {editingQueuedIndex === index
+                            ? <Check className="size-3" />
+                            : <Pencil className="size-3" />}
+                          <span className="sr-only">
+                            {editingQueuedIndex === index ? "Save" : "Edit"} queued message
+                          </span>
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="size-6 shrink-0 text-muted-foreground"
+                          onClick={() => removeQueuedMessage(index)}
                           title="Remove queued message"
                         >
                           <X className="size-3" />
@@ -594,18 +690,54 @@ export default function MessageInput({
           </form>
         </DragDrop>
 
-        <div className="mt-2.5 flex items-center justify-center gap-2 text-center text-[11px] text-muted-foreground">
-          {inputMode === "text" ? (
-            <>
-              <Upload className="size-3" />
-              <span>Drop files to attach · Enter to send · Shift+Enter for a new line</span>
-            </>
-          ) : (
-            <>
-              <Keyboard className="size-3" />
-              <span>Keystrokes are sent directly to the agent terminal</span>
-            </>
-          )}
+        <div className="mt-2.5 grid grid-cols-[1fr_auto] items-center gap-3 text-[11px] text-muted-foreground sm:grid-cols-[1fr_auto_1fr]">
+          <div className="flex items-center gap-1.5">
+            {serverStatus === "running" ? (
+              <LoaderCircle className="size-3 animate-spin text-amber-500" />
+            ) : (
+              <CircleDot className="size-3 text-emerald-500" />
+            )}
+            <span>
+              Agent{" "}
+              {serverStatus === "running"
+                ? "working"
+                : serverStatus === "stable"
+                  ? "ready"
+                  : "status unknown"}
+            </span>
+          </div>
+
+          <div className="hidden items-center justify-center gap-2 text-center sm:flex">
+            {inputMode === "text" ? (
+              <>
+                <Upload className="size-3" />
+                <span>Drop files to attach · Enter to send · Shift+Enter for a new line</span>
+              </>
+            ) : (
+              <>
+                <Keyboard className="size-3" />
+                <span>Keystrokes are sent directly to the agent terminal</span>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-1.5">
+            {connectionStatus === "connected" ? (
+              <>
+                <CircleCheck className="size-3 text-emerald-500" />
+                <span className="hidden sm:inline">Connected</span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="size-3 text-destructive" />
+                <span className="font-medium text-destructive">
+                  {connectionStatus === "offline"
+                    ? "Network offline"
+                    : "Reconnecting…"}
+                </span>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </Tabs>
