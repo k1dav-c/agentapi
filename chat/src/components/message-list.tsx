@@ -10,6 +10,7 @@ import React, {
 } from "react";
 import {
   ArrowDown,
+  ArrowUp,
   CircleAlert,
   Check,
   CheckCircle2,
@@ -28,6 +29,7 @@ import type {
   RichMessage,
   ServerStatus,
 } from "./chat-provider";
+import {ProcessedMessage} from "./processed-message";
 
 interface DraftMessage extends Omit<Message, "id"> {
   id?: number;
@@ -57,8 +59,13 @@ export default function MessageList({
 }: MessageListProps) {
   const [scrollArea, setScrollArea] = useState<HTMLDivElement | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [canScrollToPreviousUser, setCanScrollToPreviousUser] =
+    useState(false);
   const isAtBottomRef = useRef(true);
   const lastScrollHeightRef = useRef(0);
+  const userMessageCount = messages.filter(
+    (message) => message.role === "user",
+  ).length;
   const toolCalls = useMemo(() => collectToolCalls(richMessages), [richMessages]);
   const timeline = useMemo(() => {
     const entries = [
@@ -67,7 +74,6 @@ export default function MessageList({
         key: `message-${message.id ?? `draft-${index}`}`,
         timestamp: message.time,
         message,
-        index,
       })),
       ...toolCalls.map((toolCall, index) => ({
         type: "tool" as const,
@@ -94,6 +100,17 @@ export default function MessageList({
     [scrollArea],
   );
 
+  const scrollToPreviousUserMessage = useCallback(() => {
+    if (!scrollArea) return;
+
+    const targetTop = getPreviousUserMessageTop(scrollArea);
+    if (targetTop === undefined) return;
+    scrollArea.scrollTo({
+      top: Math.max(0, targetTop - 16),
+      behavior: "smooth",
+    });
+  }, [scrollArea]);
+
   useEffect(() => {
     if (!scrollArea) return;
 
@@ -102,12 +119,15 @@ export default function MessageList({
       const atBottom = scrollTop + clientHeight >= scrollHeight - 32;
       isAtBottomRef.current = atBottom;
       setShowScrollButton(!atBottom);
+      setCanScrollToPreviousUser(
+        getPreviousUserMessageTop(scrollArea) !== undefined,
+      );
     };
 
     handleScroll();
     scrollArea.addEventListener("scroll", handleScroll, { passive: true });
     return () => scrollArea.removeEventListener("scroll", handleScroll);
-  }, [scrollArea]);
+  }, [scrollArea, userMessageCount]);
 
   useLayoutEffect(() => {
     if (!scrollArea) return;
@@ -129,7 +149,7 @@ export default function MessageList({
   return (
     <div className="relative min-h-0 flex-1">
       <div
-        className="h-full overflow-y-auto overscroll-contain scroll-smooth"
+        className="h-full overflow-y-auto overscroll-contain"
         ref={setScrollArea}
       >
         {timeline.length === 0 ? (
@@ -141,7 +161,6 @@ export default function MessageList({
                 <MessageItem
                   key={entry.key}
                   message={entry.message}
-                  index={entry.index}
                 />
               ) : (
                 <ToolCallCard key={entry.key} toolCall={entry.toolCall} />
@@ -150,6 +169,20 @@ export default function MessageList({
           </div>
         )}
       </div>
+
+      {canScrollToPreviousUser && (
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          onClick={scrollToPreviousUserMessage}
+          className="absolute bottom-4 right-4 z-10 rounded-full bg-background/90 shadow-lg backdrop-blur"
+          title="Jump to previous user message"
+        >
+          <ArrowUp />
+          <span className="sr-only">Jump to previous user message</span>
+        </Button>
+      )}
 
       {showScrollButton && (
         <Button
@@ -166,6 +199,22 @@ export default function MessageList({
       )}
     </div>
   );
+}
+
+function getPreviousUserMessageTop(scrollArea: HTMLDivElement) {
+  const scrollAreaTop = scrollArea.getBoundingClientRect().top;
+  const userMessages = Array.from(
+    scrollArea.querySelectorAll<HTMLElement>("[data-user-message]"),
+  );
+
+  return userMessages
+    .map(
+      (message) =>
+        message.getBoundingClientRect().top -
+        scrollAreaTop +
+        scrollArea.scrollTop,
+    )
+    .findLast((position) => position < scrollArea.scrollTop - 8);
 }
 
 function collectToolCalls(richMessages: RichMessage[]): ToolCall[] {
@@ -337,10 +386,8 @@ function Hint({
 
 function MessageItem({
   message,
-  index,
 }: {
   message: Message | DraftMessage;
-  index: number;
 }) {
   const isUser = message.role === "user";
   const isDraft = message.id === undefined;
@@ -363,7 +410,6 @@ function MessageItem({
         ) : (
           <ProcessedMessage
             messageContent={message.content}
-            index={index}
             isUser={false}
           />
         )}
@@ -372,7 +418,10 @@ function MessageItem({
   }
 
   return (
-    <article className="flex flex-row-reverse gap-3 sm:gap-4">
+    <article
+      className="flex scroll-mt-4 flex-row-reverse gap-3 sm:gap-4"
+      data-user-message
+    >
       <div
         className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border bg-foreground text-background shadow-xs"
       >
@@ -389,7 +438,6 @@ function MessageItem({
           ) : (
             <ProcessedMessage
               messageContent={message.content}
-              index={index}
               isUser={isUser}
             />
           )}
@@ -432,52 +480,3 @@ const LoadingDots = () => (
     ))}
   </div>
 );
-
-const ProcessedMessage = React.memo(function ProcessedMessage({
-  messageContent,
-  index,
-  isUser,
-}: {
-  messageContent: string;
-  index: number;
-  isUser: boolean;
-}) {
-  const urlRegex = useMemo(
-    () => /(https?:\/\/[^\s<]+|www\.[^\s<]+)/g,
-    [],
-  );
-
-  const linkedContent = useMemo(
-    () =>
-      messageContent.split(urlRegex).map((content, partIndex) => {
-        const isUrl = /^(https?:\/\/|www\.)/.test(content);
-        if (!isUrl) return <span key={`${index}-${partIndex}`}>{content}</span>;
-
-        const href = content.startsWith("www.") ? `https://${content}` : content;
-        return (
-          <a
-            key={`${index}-${partIndex}`}
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-            className="underline decoration-current/30 underline-offset-4 transition hover:decoration-current"
-          >
-            {content}
-          </a>
-        );
-      }),
-    [index, messageContent, urlRegex],
-  );
-
-  return (
-    <div
-      className={`text-left ${
-        isUser
-          ? "whitespace-pre-wrap break-words text-sm leading-6"
-          : "overflow-x-auto whitespace-pre font-mono text-[13px] leading-5 [tab-size:4]"
-      }`}
-    >
-      {linkedContent}
-    </div>
-  );
-});
