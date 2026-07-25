@@ -6,9 +6,9 @@ import { Activity, Bot, CircleAlert, CircleCheck, LoaderCircle, WifiOff } from "
 import packageInfo from "../../package.json";
 
 export function Header() {
-  const { serverStatus, agentType } = useChat();
+  const { serverStatus, connectionStatus, agentType } = useChat();
 
-  const status = {
+  const agentStatus = {
     stable: {
       label: "Ready",
       detail: "Agent is ready",
@@ -34,6 +34,22 @@ export function Header() {
       className: "text-muted-foreground",
     },
   }[serverStatus];
+  const status =
+    connectionStatus === "offline"
+      ? {
+          label: "Offline",
+          detail: "Network connection lost",
+          icon: WifiOff,
+          className: "text-destructive",
+        }
+      : connectionStatus === "reconnecting"
+        ? {
+            label: "Reconnecting",
+            detail: "Reconnecting to agent server",
+            icon: LoaderCircle,
+            className: "text-amber-600 dark:text-amber-400",
+          }
+        : agentStatus;
   const StatusIcon = status.icon;
 
   return (
@@ -70,7 +86,11 @@ export function Header() {
           className={`flex items-center gap-2 rounded-full border bg-card px-3 py-1.5 text-xs font-medium shadow-xs ${status.className}`}
           title={status.detail}
         >
-          <StatusIcon className={`size-3.5 ${serverStatus === "running" ? "animate-spin" : ""}`} />
+          <StatusIcon className={`size-3.5 ${
+            serverStatus === "running" || connectionStatus === "reconnecting"
+              ? "animate-spin"
+              : ""
+          }`} />
           <span>{status.label}</span>
         </div>
         <ModeToggle />

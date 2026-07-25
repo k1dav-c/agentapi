@@ -83,6 +83,7 @@ function isDraftMessage(message: Message | DraftMessage): boolean {
 type MessageType = "user" | "raw";
 
 export type ServerStatus = "stable" | "running" | "offline" | "unknown";
+export type ConnectionStatus = "connected" | "reconnecting" | "offline";
 
 export interface FileUploadResponse {
   ok: boolean;
@@ -116,6 +117,7 @@ interface ChatContextValue {
   richMessages: RichMessage[];
   loading: boolean;
   serverStatus: ServerStatus;
+  connectionStatus: ConnectionStatus;
   sendMessage: (message: string, type?: MessageType) => void;
   uploadFiles: (formData: FormData) => Promise<FileUploadResponse>;
   agentType: AgentType;
@@ -163,6 +165,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [serverStatus, setServerStatus] = useState<ServerStatus>("unknown");
+  const [connectionStatus, setConnectionStatus] =
+    useState<ConnectionStatus>("reconnecting");
   const [agentType, setAgentType] = useState<AgentType>("custom");
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -171,6 +175,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
   // Set up SSE connection to the events endpoint
   useEffect(() => {
     let disposed = false;
+
+    const handleOffline = () => setConnectionStatus("offline");
+    const handleOnline = () => setConnectionStatus("reconnecting");
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
 
     // Function to create and set up EventSource
     const setupEventSource = () => {
@@ -282,6 +291,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
 
       // Handle connection open (server is online)
       eventSource.onopen = () => {
+        setConnectionStatus("connected");
         // Connection is established, but we'll wait for status_change event
         // for the actual server status
         console.log("EventSource connection established - messages reset");
@@ -290,7 +300,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       // Handle connection errors
       eventSource.onerror = (error) => {
         console.error("EventSource error:", error);
-        setServerStatus("offline");
+        setConnectionStatus(navigator.onLine ? "reconnecting" : "offline");
         eventSource.close();
 
         if (reconnectTimeoutRef.current) {
@@ -312,6 +322,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     // Clean up on component unmount
     return () => {
       disposed = true;
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
@@ -433,6 +445,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         loading,
         sendMessage,
         serverStatus,
+        connectionStatus,
         uploadFiles,
         agentType,
       }}
