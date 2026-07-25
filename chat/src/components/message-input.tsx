@@ -269,6 +269,7 @@ export default function MessageInput({
       serverStatus === "stable" &&
       !disabled &&
       inputMode === "text" &&
+      window.matchMedia("(min-width: 640px) and (pointer: fine)").matches &&
       textareaRef.current
     ) {
       textareaRef.current.focus();
@@ -409,7 +410,7 @@ export default function MessageInput({
       onValueChange={(value) => setInputMode(value as "text" | "control")}
       className="shrink-0 border-t bg-background/85 backdrop-blur-xl"
     >
-      <div className="mx-auto w-full max-w-6xl px-4 pb-1 pt-3 sm:px-6">
+      <div className="mx-auto w-full max-w-6xl px-4 pb-[calc(env(safe-area-inset-bottom)+0.25rem)] pt-2 sm:px-6 sm:pb-1 sm:pt-3">
         <DragDrop
           onFilesAdded={handleFilesAdded}
           disabled={disabled || inputMode === "control"}
@@ -470,10 +471,9 @@ export default function MessageInput({
                   </div>
                 ) : (
                   <TextareaAutosize
-                    autoFocus
                     ref={textareaRef}
-                    minRows={3}
-                    maxRows={3}
+                    minRows={1}
+                    maxRows={4}
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
@@ -482,7 +482,7 @@ export default function MessageInput({
                         ? "Type a message to queue..."
                         : "Type a message..."
                     }
-                    className="h-20 w-full resize-none overflow-y-auto bg-transparent px-4 pb-2 pt-4 text-sm leading-6 outline-none sm:px-5"
+                    className="min-h-12 max-h-28 w-full resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-6 outline-none sm:h-20 sm:min-h-20 sm:max-h-20 sm:px-5 sm:pb-2 sm:pt-4"
                     disabled={
                       disabled ||
                       (serverStatus !== "stable" && serverStatus !== "running")
@@ -690,8 +690,8 @@ export default function MessageInput({
           </form>
         </DragDrop>
 
-        <div className="mt-2.5 grid grid-cols-[1fr_auto] items-center gap-3 text-[11px] text-muted-foreground sm:grid-cols-[1fr_auto_1fr]">
-          <div className="flex items-center gap-1.5">
+        <div className="mt-1.5 flex items-center justify-end gap-3 text-[11px] text-muted-foreground sm:mt-2.5 sm:grid sm:grid-cols-[1fr_auto_1fr]">
+          <div className="hidden items-center gap-1.5 sm:flex">
             {serverStatus === "running" ? (
               <LoaderCircle className="size-3 animate-spin text-amber-500" />
             ) : (
