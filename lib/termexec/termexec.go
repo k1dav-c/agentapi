@@ -82,6 +82,7 @@ func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error
 		// Warning: This depends on xpty internals and may break if xpty changes.
 		// A proper fix would require forking xpty or getting upstream changes.
 		pp := util.GetUnexportedField(xp, "pp").(*xpty.PassthroughPipe)
+		injector := &wideCharInjector{}
 		for {
 			r, _, err := pp.ReadRune()
 			if err != nil {
@@ -97,12 +98,23 @@ func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error
 			// writing to the terminal updates its state. without it,
 			// xp.State will always return an empty string
 			xp.Term.WriteRune(r)
+			if injector.shouldPad(r) {
+				// Keep the emulator's cursor in sync with the two-column
+				// layout the application assumes for wide runes. The
+				// padding is stripped in ReadScreen. See widechar.go.
+				xp.Term.WriteRune(widePadRune)
+			}
 			process.lastScreenUpdate = clock.Now()
 			process.screenUpdateLock.Unlock()
 		}
 	}()
 
 	return process, nil
+}
+
+// Pid returns the OS process ID of the child process.
+func (p *Process) Pid() int {
+	return p.execCmd.Process.Pid
 }
 
 func (p *Process) Signal(sig os.Signal) error {
@@ -124,14 +136,14 @@ func (p *Process) ReadScreen() string {
 		if p.clock.Since(p.lastScreenUpdate) >= 16*time.Millisecond {
 			state := p.xp.State.String()
 			p.screenUpdateLock.RUnlock()
-			return state
+			return stripWidePadding(state)
 		}
 		p.screenUpdateLock.RUnlock()
 		t := p.clock.NewTimer(16 * time.Millisecond)
 		<-t.C
 		t.Stop()
 	}
-	return p.xp.State.String()
+	return stripWidePadding(p.xp.State.String())
 }
 
 // Write sends input to the process via the pseudo terminal.
