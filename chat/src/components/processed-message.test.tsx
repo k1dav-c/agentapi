@@ -61,6 +61,19 @@ describe("ProcessedMessage links", () => {
     expect(html).toContain("<strong>Completed</strong>");
   });
 
+  test("renders GFM tables with readable table structure", () => {
+    const html = render(
+      "| Name | Status |\n| --- | --- |\n| Build | Passed |",
+      true,
+    );
+    expect(html).toContain("<table");
+    expect(html).toContain("<thead");
+    expect(html).toContain("<th");
+    expect(html).toContain("<td");
+    expect(html).toContain(">Build</td>");
+    expect(html).toContain("overflow-x-auto");
+  });
+
   test("highlights case-insensitive raw output search matches", () => {
     const html = renderToStaticMarkup(
       <ProcessedMessage

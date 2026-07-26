@@ -169,6 +169,29 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
             );
           },
           p: ({children}) => <p>{children}</p>,
+          table: ({children}) => (
+            <div className="my-3 max-w-full overflow-x-auto rounded-lg border">
+              <table className="w-full border-collapse text-left text-sm">
+                {children}
+              </table>
+            </div>
+          ),
+          thead: ({children}) => (
+            <thead className="bg-muted/70">{children}</thead>
+          ),
+          th: ({children}) => (
+            <th className="border-b border-r px-3 py-2 font-semibold last:border-r-0">
+              {children}
+            </th>
+          ),
+          td: ({children}) => (
+            <td className="border-b border-r px-3 py-2 align-top last:border-r-0">
+              {children}
+            </td>
+          ),
+          tr: ({children}) => (
+            <tr className="last:[&>td]:border-b-0">{children}</tr>
+          ),
           pre: ({children}) => (
             <pre className="my-2 max-w-full overflow-x-auto rounded-lg bg-black/10 p-3 whitespace-pre">
               {children}
