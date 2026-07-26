@@ -11,6 +11,129 @@ You can use AgentAPI:
 - to create a tool that submits pull request reviews to an agent
 - and much more!
 
+## Changes in this fork
+
+This fork started from the upstream v0.12.2 codebase. It keeps the original
+terminal-emulation and HTTP API model, while extending AgentAPI into a more
+complete workspace for operating long-running coding agents.
+
+### Session workspace and chat UI
+
+The embedded chat UI is organized around tasks instead of a single flat
+transcript. Each user request becomes a navigable task with its associated
+response, thinking blocks, tool calls, and background activity.
+
+The Session Explorer provides:
+
+- links and file paths discovered in the current conversation;
+- an index for jumping directly to earlier tasks;
+- Markdown preview and export for individual tasks;
+- access to the live terminal when the parsed conversation is not sufficient;
+- MCP server and webhook configuration without leaving the chat UI.
+
+The UI also includes improved mobile layouts, attachment handling, searchable
+tool activity, connection-state indicators, and more compact tool-call cards.
+
+### Message queue and connection recovery
+
+Messages submitted while an agent is busy are placed in a FIFO queue instead
+of being rejected. Queued messages can be inspected, edited, or deleted before
+delivery through both the API and chat UI.
+
+Long-running browser sessions are protected by SSE heartbeats, automatic
+reconnection, stale-connection detection, and local recovery of messages that
+failed before reaching the server. The document title and session header expose
+the current task, agent status, and connection state.
+
+Relevant APIs include:
+
+- `GET /queue` and `PUT/DELETE /queue/{id}` for queue management;
+- `GET /events` for live messages, status, errors, rich activity, and heartbeat
+  events;
+- `GET /title` for the current human-readable session title.
+
+### Structured Claude and Codex activity
+
+In addition to parsing terminal snapshots, this fork can watch Claude and Codex
+session logs. This provides structured thinking blocks, tool invocations, tool
+results, usage information, and stable message identifiers that cannot always
+be reconstructed reliably from terminal output alone.
+
+- `GET /rich-messages` returns the structured conversation.
+- `GET /timeline` returns normalized session events suitable for export,
+  auditing, or building another UI.
+- Background and delegated tasks remain visible with their running, completed,
+  or failed state and output details.
+
+Terminal parsing remains the fallback for other agents and for environments
+where a session log is unavailable.
+
+### MCP management
+
+Claude and Codex MCP servers can be managed while AgentAPI is running. The
+implementation preserves unrelated settings in `.mcp.json` or
+`$CODEX_HOME/config.toml`.
+
+The API and Session Explorer support:
+
+- reading or replacing the complete MCP server map;
+- creating, updating, and deleting individual servers;
+- checking remote HTTP connectivity and resolving local stdio executables;
+- saving, importing, exporting, and applying reusable MCP profiles;
+- optionally restarting the PTY agent to apply changes immediately.
+
+When an agent is restarted, AgentAPI itself and its HTTP/SSE clients remain
+online. The child agent receives a new process and session-log watcher, although
+its previous in-memory conversation context is not retained.
+
+### Run-status webhooks
+
+AgentAPI can send an HTTP POST whenever a run changes between `running` and
+`stable`. Webhooks can be initialized with CLI flags or `AGENTAPI_WEBHOOK_*`
+environment variables, then inspected or changed through `GET/PUT /webhook` or
+the Session Explorer.
+
+Delivery runs asynchronously with a configurable timeout and retry count.
+Optional HMAC-SHA256 signatures allow receivers to verify the timestamp and raw
+request body. Signing secrets are write-only: the API reports whether a secret
+exists but never returns its value.
+
+```bash
+agentapi server \
+  --webhook-url https://example.com/agentapi/events \
+  --webhook-secret "$WEBHOOK_SECRET" \
+  -- claude
+```
+
+### Kimi Code CLI
+
+This fork adds the `kimi` agent type, automatic detection for the `kimi`
+executable, chat UI labeling, terminal message formatting, readiness detection,
+and tests for its startup state.
+
+Kimi can use the regular interactive PTY transport:
+
+```bash
+agentapi server -- kimi
+```
+
+It can also use Kimi's native ACP server after completing `/login` once:
+
+```bash
+agentapi server --type=kimi --experimental-acp -- kimi acp
+```
+
+### Runtime reliability
+
+The fork also includes fixes for wide-character terminal cursor tracking,
+PTY lifecycle leaks, concurrent event delivery, message tracking races, ACP
+shutdown, TUI re-render artifacts, and JSONL watcher flushing. These changes are
+intended to keep AgentAPI stable across long sessions, process replacement, and
+temporary browser or network interruptions.
+
+See the [full comparison with upstream](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)
+for the complete commit history.
+
 ## Quickstart
 
 1. Install `agentapi`:
@@ -18,10 +141,13 @@ You can use AgentAPI:
    ```bash
    OS=$(uname -s | tr "[:upper:]" "[:lower:]");
    ARCH=$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/");
-   curl -fsSL "https://github.com/coder/agentapi/releases/latest/download/agentapi-${OS}-${ARCH}" -o agentapi && chmod +x agentapi
+   curl -fsSL "https://github.com/k1dav-c/agentapi/releases/latest/download/agentapi-${OS}-${ARCH}" -o agentapi && chmod +x agentapi
    ```
 
-   Alternatively, you can download the latest release binary from the [releases page](https://github.com/coder/agentapi/releases).
+   Alternatively, you can download this fork's latest binary from the
+   [releases page](https://github.com/k1dav-c/agentapi/releases). Upstream
+   `coder/agentapi` release binaries do not include the features documented in
+   the **Changes in this fork** section.
 
 1. Verify the installation:
 
