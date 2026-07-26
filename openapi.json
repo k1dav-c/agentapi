@@ -252,12 +252,12 @@
             "type": "string"
           },
           "path": {
-            "description": "Config file the servers were read from",
+            "description": "Absolute path of the managed config file: \u003cworking-directory\u003e/.mcp.json for Claude or $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex.",
             "type": "string"
           },
           "servers": {
             "additionalProperties": {},
-            "description": "Currently configured MCP servers, keyed by name",
+            "description": "Agent-native MCP server objects keyed by unique server name. Values are returned verbatim and may contain commands, arguments, environment variables, URLs, or headers.",
             "type": "object"
           }
         },
@@ -279,7 +279,7 @@
           },
           "servers": {
             "additionalProperties": {},
-            "description": "Complete MCP server set to install. Existing MCP servers not listed here are removed.",
+            "description": "Complete agent-native MCP server map. This is replacement semantics: existing MCP servers omitted from this map are removed. An empty object removes every MCP server. Unrelated settings in the config file are preserved.",
             "type": "object"
           }
         },
@@ -299,15 +299,15 @@
             "type": "string"
           },
           "ok": {
-            "description": "Whether the config was written",
+            "description": "True when the complete MCP server map was written successfully.",
             "type": "boolean"
           },
           "path": {
-            "description": "Config file that was written",
+            "description": "Absolute path of the config file that was written.",
             "type": "string"
           },
           "restarted": {
-            "description": "Whether the agent process was restarted",
+            "description": "True when restart=true was requested and the PTY agent process was replaced successfully.",
             "type": "boolean"
           }
         },
@@ -1150,12 +1150,57 @@
     },
     "/mcp": {
       "get": {
-        "description": "Returns configured MCP servers for Claude or Codex and the managed config file path.",
+        "description": "Returns the complete MCP server configuration used by the running agent.\n\nSupported agents and files:\n\n- **Claude:** project-scoped `.mcp.json` in the agent working directory (`mcpServers` object).\n- **Codex:** `$CODEX_HOME/config.toml`, falling back to `~/.codex/config.toml` (`[mcp_servers.*]` tables).\n\nServer values are agent-native and passed through without transport-specific validation. The response can contain environment values or HTTP headers, so treat it as sensitive. Other agent types return `404`.",
         "operationId": "get-mcp",
         "responses": {
           "200": {
             "content": {
               "application/json": {
+                "examples": {
+                  "claude": {
+                    "summary": "Claude project MCP configuration",
+                    "value": {
+                      "path": "/workspace/.mcp.json",
+                      "servers": {
+                        "fetch": {
+                          "args": [
+                            "mcp-server-fetch"
+                          ],
+                          "command": "uvx",
+                          "env": {
+                            "LOG_LEVEL": "info"
+                          }
+                        },
+                        "remote-api": {
+                          "headers": {
+                            "Authorization": "Bearer ${MCP_TOKEN}"
+                          },
+                          "type": "http",
+                          "url": "https://mcp.example.com/mcp"
+                        }
+                      }
+                    }
+                  },
+                  "codex": {
+                    "summary": "Codex user MCP configuration",
+                    "value": {
+                      "path": "/home/agent/.codex/config.toml",
+                      "servers": {
+                        "fetch": {
+                          "args": [
+                            "mcp-server-fetch"
+                          ],
+                          "command": "uvx"
+                        },
+                        "remote-api": {
+                          "bearer_token_env_var": "MCP_TOKEN",
+                          "startup_timeout_sec": 20,
+                          "url": "https://mcp.example.com/mcp"
+                        }
+                      }
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/MCPGetResponseBody"
                 }
@@ -1163,30 +1208,64 @@
             },
             "description": "OK"
           },
-          "default": {
+          "404": {
             "content": {
               "application/problem+json": {
+                "examples": {
+                  "error": {
+                    "summary": "Unsupported agent",
+                    "value": {
+                      "detail": "MCP config management is not supported for this agent type",
+                      "status": 404,
+                      "title": "Not Found"
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ErrorModel"
                 }
               }
             },
-            "description": "Error"
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "error": {
+                    "summary": "Config file failure",
+                    "value": {
+                      "detail": "failed to write MCP config",
+                      "status": 500,
+                      "title": "Internal Server Error"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
-        "summary": "Get mcp"
+        "summary": "Get MCP server configuration",
+        "tags": [
+          "MCP"
+        ]
       },
       "put": {
-        "description": "Replaces the complete MCP server set for Claude or Codex while preserving unrelated config content. Pass ?restart=true to restart the PTY agent and apply changes immediately; this resets the agent conversation context while AgentAPI stays online.",
+        "description": "Replaces the agent's **complete** MCP server map while preserving unrelated config-file content.\n\nImportant behavior:\n\n- Servers omitted from `servers` are removed; send `{\"servers\": {}}` to clear all MCP servers.\n- Values use the target agent's native format and are not validated by AgentAPI.\n- Without `restart=true`, the new configuration is loaded by the next agent session.\n- With `restart=true`, AgentAPI replaces the PTY child process immediately. AgentAPI and its HTTP/SSE endpoints stay online, but the agent's conversation context is reset.\n- Restart is unavailable in ACP, schema-only, and other server modes without a process supervisor; those requests return `400`.\n- A missing or structurally invalid request body returns `422`.\n- Claude and Codex are supported; other agent types return `404`.",
         "operationId": "put-mcp",
         "parameters": [
           {
-            "description": "Restart the agent after writing the config so changes apply immediately. The conversation context is reset.",
+            "description": "Restart the agent after writing the config so changes apply immediately. The conversation context is reset; AgentAPI stays online. Supported only for supervised PTY sessions.",
             "explode": false,
             "in": "query",
             "name": "restart",
             "schema": {
-              "description": "Restart the agent after writing the config so changes apply immediately. The conversation context is reset.",
+              "default": false,
+              "description": "Restart the agent after writing the config so changes apply immediately. The conversation context is reset; AgentAPI stays online. Supported only for supervised PTY sessions.",
               "type": "boolean"
             }
           }
@@ -1194,6 +1273,58 @@
         "requestBody": {
           "content": {
             "application/json": {
+              "examples": {
+                "claude": {
+                  "description": "Writes these entries beneath mcpServers in the project .mcp.json file.",
+                  "summary": "Claude stdio and remote HTTP servers",
+                  "value": {
+                    "servers": {
+                      "fetch": {
+                        "args": [
+                          "mcp-server-fetch"
+                        ],
+                        "command": "uvx",
+                        "env": {
+                          "LOG_LEVEL": "info"
+                        }
+                      },
+                      "remote-api": {
+                        "headers": {
+                          "Authorization": "Bearer ${MCP_TOKEN}"
+                        },
+                        "type": "http",
+                        "url": "https://mcp.example.com/mcp"
+                      }
+                    }
+                  }
+                },
+                "clear-all": {
+                  "description": "Unrelated Claude or Codex settings remain unchanged.",
+                  "summary": "Remove all MCP servers",
+                  "value": {
+                    "servers": {}
+                  }
+                },
+                "codex": {
+                  "description": "Writes these entries as mcp_servers tables in Codex config.toml.",
+                  "summary": "Codex stdio and remote HTTP servers",
+                  "value": {
+                    "servers": {
+                      "fetch": {
+                        "args": [
+                          "mcp-server-fetch"
+                        ],
+                        "command": "uvx"
+                      },
+                      "remote-api": {
+                        "bearer_token_env_var": "MCP_TOKEN",
+                        "startup_timeout_sec": 20,
+                        "url": "https://mcp.example.com/mcp"
+                      }
+                    }
+                  }
+                }
+              },
               "schema": {
                 "$ref": "#/components/schemas/MCPUpdateRequestBody"
               }
@@ -1205,6 +1336,24 @@
           "200": {
             "content": {
               "application/json": {
+                "examples": {
+                  "restarted": {
+                    "summary": "Saved and applied immediately",
+                    "value": {
+                      "ok": true,
+                      "path": "/workspace/.mcp.json",
+                      "restarted": true
+                    }
+                  },
+                  "saved": {
+                    "summary": "Saved for the next session",
+                    "value": {
+                      "ok": true,
+                      "path": "/home/agent/.codex/config.toml",
+                      "restarted": false
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/MCPUpdateResponseBody"
                 }
@@ -1212,7 +1361,47 @@
             },
             "description": "OK"
           },
-          "default": {
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "error": {
+                    "summary": "Restart unavailable",
+                    "value": {
+                      "detail": "agent restart is not supported in this server mode",
+                      "status": 400,
+                      "title": "Bad Request"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "error": {
+                    "summary": "Unsupported agent",
+                    "value": {
+                      "detail": "MCP config management is not supported for this agent type",
+                      "status": 404,
+                      "title": "Not Found"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1220,10 +1409,33 @@
                 }
               }
             },
-            "description": "Error"
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "error": {
+                    "summary": "Config file failure",
+                    "value": {
+                      "detail": "failed to write MCP config",
+                      "status": 500,
+                      "title": "Internal Server Error"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
-        "summary": "Put mcp"
+        "summary": "Replace MCP server configuration",
+        "tags": [
+          "MCP"
+        ]
       }
     },
     "/message": {

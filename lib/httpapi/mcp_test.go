@@ -35,6 +35,12 @@ func TestServer_MCPAPI(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+	schema := server.GetOpenAPI()
+	require.Contains(t, schema, `"summary": "Claude stdio and remote HTTP servers"`)
+	require.Contains(t, schema, `"summary": "Codex stdio and remote HTTP servers"`)
+	require.Contains(t, schema, `"summary": "Remove all MCP servers"`)
+	require.Contains(t, schema, `"summary": "Saved and applied immediately"`)
+	require.Contains(t, schema, `"default": false`)
 	testServer := httptest.NewServer(server.Handler())
 	t.Cleanup(testServer.Close)
 

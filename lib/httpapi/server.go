@@ -26,7 +26,6 @@ import (
 	"github.com/coder/agentapi/lib/mcpconfig"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	st "github.com/coder/agentapi/lib/screentracker"
-	"github.com/coder/agentapi/lib/termexec"
 	"github.com/coder/agentapi/x/acpio"
 	"github.com/coder/quartz"
 	"github.com/danielgtaylor/huma/v2"
@@ -298,13 +297,9 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		}
 		conversation = acpio.NewACPConversation(ctx, acpIO, logger, initialPrompt, emitter, config.Clock)
 	} else {
-		proc, ok := config.AgentIO.(*termexec.Process)
-		if !ok && config.AgentIO != nil {
-			return nil, fmt.Errorf("PTY transport requires termexec.Process")
-		}
 		conversation = st.NewPTY(ctx, st.PTYConversationConfig{
 			AgentType:              config.AgentType,
-			AgentIO:                proc,
+			AgentIO:                config.AgentIO,
 			Clock:                  config.Clock,
 			SnapshotInterval:       snapshotInterval,
 			ScreenStabilityLength:  2 * time.Second,
@@ -500,11 +495,17 @@ func (s *Server) registerRoutes() {
 	})
 
 	huma.Get(s.api, "/mcp", s.getMCP, func(o *huma.Operation) {
-		o.Description = "Returns configured MCP servers for Claude or Codex and the managed config file path."
+		configureMCPGetOperation(o)
 	})
 	huma.Put(s.api, "/mcp", s.updateMCP, func(o *huma.Operation) {
-		o.Description = "Replaces the complete MCP server set for Claude or Codex while preserving unrelated config content. Pass ?restart=true to restart the PTY agent and apply changes immediately; this resets the agent conversation context while AgentAPI stays online."
+		configureMCPUpdateOperation(o)
 	})
+	// Huma populates inferred request/response media types after the operation
+	// configuration callback, so attach named payload examples once both
+	// operations have been registered.
+	mcpPath := s.api.OpenAPI().Paths["/mcp"]
+	addMCPExamples(mcpPath.Get, false)
+	addMCPExamples(mcpPath.Put, true)
 
 	// POST /message endpoint
 	huma.Post(s.api, "/message", s.createMessage, func(o *huma.Operation) {
