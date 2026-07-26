@@ -1323,7 +1323,7 @@ function MessageItem({
         {message.content === "" ? (
           <LoadingDots />
         ) : (
-          <div className="h-[7.5rem] overflow-y-auto overscroll-contain">
+          <div>
             <ProcessedMessage
               messageContent={message.content}
               isUser={false}
