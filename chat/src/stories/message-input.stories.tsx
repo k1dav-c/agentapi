@@ -15,7 +15,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const defaultArgs = {
-  onSendMessage: () => {},
+  onSendMessage: async () => true,
 };
 
 export const ServerStatusStable: Story = {

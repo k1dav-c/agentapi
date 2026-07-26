@@ -25,6 +25,7 @@ import {
   X,
   TriangleAlert,
   MoreHorizontal,
+  RefreshCw,
 } from "lucide-react";
 import {Tabs, TabsList, TabsTrigger} from "./ui/tabs";
 import type {ServerStatus} from "./chat-provider";
@@ -33,6 +34,10 @@ import {useChat} from "./chat-provider";
 import {DragDrop} from "./drag-drop";
 import {toast} from "sonner";
 import {getErrorMessage} from "@/lib/error-utils";
+import {
+  parsePersistedAttachments,
+  removeAttachmentToken,
+} from "@/lib/attachment-state";
 import {
   Dialog,
   DialogContent,
@@ -49,7 +54,7 @@ import {
 } from "./ui/dropdown-menu";
 
 interface MessageInputProps {
-  onSendMessage: (message: string, type: "user" | "raw") => void;
+  onSendMessage: (message: string, type: "user" | "raw") => Promise<boolean>;
   disabled?: boolean;
   serverStatus: ServerStatus;
   suggestedPrompt?: string;
@@ -86,6 +91,18 @@ interface SpeechRecognitionLike extends EventTarget {
 }
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
+
+interface Attachment {
+  id: string;
+  name: string;
+  size: number;
+  file?: File;
+  progress: number;
+  status: "uploading" | "completed" | "failed";
+  filePath?: string;
+  error?: string;
+}
 
 // List of keys to send as raw input when in control mode
 
@@ -138,6 +155,7 @@ export default function MessageInput({
   onSuggestedPromptApplied,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
+  const [hydratedDraftKey, setHydratedDraftKey] = useState<string | null>(null);
   const [editingQueuedIndex, setEditingQueuedIndex] = useState<number | null>(null);
   const [editingQueuedMessage, setEditingQueuedMessage] = useState("");
   const [inputMode, setInputMode] = useState<"text" | "control">("text");
@@ -154,14 +172,23 @@ export default function MessageInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const speechBaseMessageRef = useRef("");
+  const uploadControllersRef = useRef(new Map<string, AbortController>());
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [hydratedAttachmentsKey, setHydratedAttachmentsKey] = useState<
+    string | null
+  >(null);
   const {
     uploadFiles,
     queuedMessages,
     updateQueuedMessage,
     deleteQueuedMessage,
+    storageScope,
   } = useChat();
+  const draftStorageKey = `agentapi.chat.message-draft:${storageScope}`;
+  const attachmentsStorageKey = `agentapi.chat.attachments:${storageScope}`;
 
   useEffect(() => {
+    const uploadControllers = uploadControllersRef.current;
     const speechWindow = window as typeof window & {
       SpeechRecognition?: SpeechRecognitionConstructor;
       webkitSpeechRecognition?: SpeechRecognitionConstructor;
@@ -170,8 +197,78 @@ export default function MessageInput({
       Boolean(speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition),
     );
 
-    return () => recognitionRef.current?.abort();
+    return () => {
+      recognitionRef.current?.abort();
+      uploadControllers.forEach((controller) => controller.abort());
+      uploadControllers.clear();
+    };
   }, []);
+
+  useEffect(() => {
+    try {
+      const savedDraft = window.localStorage.getItem(draftStorageKey);
+      setMessage(savedDraft ?? "");
+    } catch {
+      // Storage may be unavailable in privacy-restricted embedded contexts.
+    } finally {
+      setHydratedDraftKey(draftStorageKey);
+    }
+  }, [draftStorageKey]);
+
+  useEffect(() => {
+    if (hydratedDraftKey !== draftStorageKey) return;
+    try {
+      if (message) {
+        window.localStorage.setItem(draftStorageKey, message);
+      } else {
+        window.localStorage.removeItem(draftStorageKey);
+      }
+    } catch {
+      // Keep the in-memory draft when persistent storage is unavailable.
+    }
+  }, [draftStorageKey, hydratedDraftKey, message]);
+
+  useEffect(() => {
+    try {
+      const restored = parsePersistedAttachments(
+        window.localStorage.getItem(attachmentsStorageKey),
+      );
+      setAttachments(
+        restored.map((attachment) => ({
+          ...attachment,
+          progress: 100,
+          status: "completed",
+        })),
+      );
+    } finally {
+      setHydratedAttachmentsKey(attachmentsStorageKey);
+    }
+  }, [attachmentsStorageKey]);
+
+  useEffect(() => {
+    if (hydratedAttachmentsKey !== attachmentsStorageKey) return;
+    const completed = attachments
+      .filter(
+        (
+          attachment,
+        ): attachment is Attachment & {filePath: string} =>
+          attachment.status === "completed" &&
+          typeof attachment.filePath === "string",
+      )
+      .map(({id, name, size, filePath}) => ({id, name, size, filePath}));
+    try {
+      if (completed.length > 0) {
+        window.localStorage.setItem(
+          attachmentsStorageKey,
+          JSON.stringify(completed),
+        );
+      } else {
+        window.localStorage.removeItem(attachmentsStorageKey);
+      }
+    } catch {
+      // Attachments remain available for the current page session.
+    }
+  }, [attachments, attachmentsStorageKey, hydratedAttachmentsKey]);
 
   useEffect(() => {
     if (serverStatus !== "running") setIsStopping(false);
@@ -205,7 +302,7 @@ export default function MessageInput({
       );
       cancelEditingQueuedMessage();
     } catch (error) {
-      toast.error("Failed to update queued message", {
+      toast.error("Failed to update queued task", {
         description: getErrorMessage(error),
       });
     }
@@ -223,36 +320,101 @@ export default function MessageInput({
         return currentIndex > index ? currentIndex - 1 : currentIndex;
       });
     } catch (error) {
-      toast.error("Failed to delete queued message", {
+      toast.error("Failed to delete queued task", {
         description: getErrorMessage(error),
       });
     }
   };
 
-  const handleFilesAdded = async (files: File[]) => {
-    for (const file of files) {
-      const arrayBuffer = await file.arrayBuffer();
+  const uploadAttachment = async (attachment: Attachment) => {
+    if (!attachment.file) return;
+    const controller = new AbortController();
+    uploadControllersRef.current.set(attachment.id, controller);
+    setAttachments((previous) =>
+      previous.map((item) =>
+        item.id === attachment.id
+          ? {...item, status: "uploading", progress: 0, error: undefined}
+          : item,
+      ),
+    );
 
-      try {
-        // Create Blob from ArrayBuffer
-        const blob = new Blob([arrayBuffer], {type: file.type});
+    const formData = new FormData();
+    formData.append("file", attachment.file, attachment.name);
+    const response = await uploadFiles(formData, {
+      signal: controller.signal,
+      onProgress: (progress) =>
+        setAttachments((previous) =>
+          previous.map((item) =>
+            item.id === attachment.id ? {...item, progress} : item,
+          ),
+        ),
+    });
+    uploadControllersRef.current.delete(attachment.id);
 
-        // Create FormData for upload
-        const formData = new FormData();
-        formData.append('file', blob, file.name);
-
-        // Upload to agent API
-        const response = await uploadFiles(formData);
-        if (response.ok) {
-          setMessage(oldMessage => oldMessage + ' @"' + response.filePath + '"');
-        }
-      } catch (error) {
-        toast.error("Failed to and upload file:", {
-          description: getErrorMessage(error),
-        });
-      }
+    if (response.ok && response.filePath) {
+      setAttachments((previous) =>
+        previous.map((item) =>
+          item.id === attachment.id
+            ? {
+                ...item,
+                status: "completed",
+                progress: 100,
+                filePath: response.filePath,
+              }
+            : item,
+        ),
+      );
+      setMessage((current) => `${current} @"${response.filePath}"`);
+    } else if (!controller.signal.aborted) {
+      setAttachments((previous) =>
+        previous.map((item) =>
+          item.id === attachment.id
+            ? {
+                ...item,
+                status: "failed",
+                error: response.error ?? "Upload failed.",
+              }
+            : item,
+        ),
+      );
     }
+  };
+
+  const handleFilesAdded = async (files: File[]) => {
+    const accepted: Attachment[] = [];
+    for (const file of files) {
+      const attachment: Attachment = {
+        id: crypto.randomUUID(),
+        name: file.name,
+        size: file.size,
+        file,
+        progress: 0,
+        status: file.size > MAX_UPLOAD_SIZE ? "failed" : "uploading",
+        error:
+          file.size > MAX_UPLOAD_SIZE
+            ? "File exceeds the 10 MB upload limit."
+            : undefined,
+      };
+      accepted.push(attachment);
+    }
+    setAttachments((previous) => [...previous, ...accepted]);
+    accepted
+      .filter((attachment) => attachment.status === "uploading")
+      .forEach((attachment) => void uploadAttachment(attachment));
     textareaRef.current?.focus();
+  };
+
+  const removeAttachment = (attachment: Attachment) => {
+    uploadControllersRef.current.get(attachment.id)?.abort();
+    uploadControllersRef.current.delete(attachment.id);
+    setAttachments((previous) =>
+      previous.filter((item) => item.id !== attachment.id),
+    );
+    if (attachment.filePath) {
+      setMessage((current) =>
+        removeAttachmentToken(current, attachment.filePath!),
+      );
+    }
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -260,8 +422,8 @@ export default function MessageInput({
     if (message.trim() && !disabled) {
       if (serverStatus === "running") {
         onSendMessage(message, "user");
-        toast.success("Added to queue", {
-          description: `Position ${queuedMessages.length + 1}`,
+        toast.success("Task queued", {
+          description: `Queue position ${queuedMessages.length + 1}`,
         });
       } else if (serverStatus === "stable") {
         onSendMessage(message, "user");
@@ -269,6 +431,9 @@ export default function MessageInput({
         return;
       }
       setMessage("");
+      setAttachments((previous) =>
+        previous.filter((attachment) => attachment.status !== "completed"),
+      );
     }
   };
 
@@ -482,7 +647,8 @@ export default function MessageInput({
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       ref={textareaRef as any}
                       tabIndex={0}
-                      role="application"
+                      role="textbox"
+                      aria-multiline="true"
                       aria-label="Direct terminal keyboard input"
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       onKeyDown={handleKeyDown as any}
@@ -523,9 +689,10 @@ export default function MessageInput({
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
+                    aria-label="Task message"
                     placeholder={
                       serverStatus === "running"
-                        ? "Add a follow-up task to the queue…"
+                        ? "Add a queued task…"
                         : serverStatus === "stable"
                           ? "Ask the agent to do something…"
                           : "Reconnecting… Your draft is saved."
@@ -539,12 +706,101 @@ export default function MessageInput({
                 )}
               </div>
 
+              {inputMode === "text" && attachments.length > 0 && (
+                <div
+                  className="space-y-1.5 border-t bg-muted/15 px-3 py-2"
+                  aria-label="Attachments"
+                  aria-live="polite"
+                >
+                  {attachments.map((attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="flex min-h-10 items-center gap-2 rounded-lg border bg-background px-2.5 py-1.5 text-xs"
+                    >
+                      <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate font-medium">
+                            {attachment.name}
+                          </span>
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
+                            {formatFileSize(attachment.size)}
+                          </span>
+                        </div>
+                        {attachment.status === "uploading" ? (
+                          <div className="mt-1 flex items-center gap-2">
+                            <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+                              <div
+                                className="h-full rounded-full bg-primary transition-[width]"
+                                style={{width: `${attachment.progress}%`}}
+                              />
+                            </div>
+                            <span className="w-8 text-right text-[10px] text-muted-foreground">
+                              {attachment.progress}%
+                            </span>
+                          </div>
+                        ) : (
+                          <p
+                            className={
+                              attachment.status === "failed"
+                                ? "truncate text-[10px] text-destructive"
+                                : "text-[10px] text-emerald-600 dark:text-emerald-400"
+                            }
+                          >
+                            {attachment.status === "failed"
+                              ? attachment.error
+                              : "Attached"}
+                          </p>
+                        )}
+                      </div>
+                      {attachment.status === "failed" &&
+                        attachment.file &&
+                        attachment.size <= MAX_UPLOAD_SIZE && (
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="size-8"
+                            onClick={() => void uploadAttachment(attachment)}
+                            title="Retry upload"
+                          >
+                            <RefreshCw />
+                            <span className="sr-only">Retry upload</span>
+                          </Button>
+                        )}
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="size-8"
+                        onClick={() => removeAttachment(attachment)}
+                        title={
+                          attachment.status === "uploading"
+                            ? "Cancel upload"
+                            : "Remove attachment"
+                        }
+                      >
+                        <X />
+                        <span className="sr-only">
+                          {attachment.status === "uploading"
+                            ? "Cancel upload"
+                            : "Remove attachment"}
+                        </span>
+                      </Button>
+                    </div>
+                  ))}
+                  <p className="px-1 text-[10px] text-muted-foreground">
+                    Maximum file size: 10 MB per file.
+                  </p>
+                </div>
+              )}
+
               {inputMode === "text" && queuedMessages.length > 0 && (
                 <details className="group border-t bg-muted/15">
                   <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
                     <span className="flex items-center gap-1.5">
                       <Clock3 className="size-3" />
-                      Queued messages · {queuedMessages.length}
+                      Queued tasks · {queuedMessages.length}
                     </span>
                     <span className="text-[10px] group-open:hidden">Show</span>
                     <span className="hidden text-[10px] group-open:inline">Hide</span>
@@ -572,7 +828,7 @@ export default function MessageInput({
                               }
                             }}
                             className="h-6 w-56 min-w-0 bg-transparent text-xs outline-none"
-                            aria-label={`Edit queued message ${index + 1}`}
+                            aria-label={`Edit queued task ${index + 1}`}
                           />
                         ) : (
                           <span className="min-w-0 flex-1 truncate">{queuedMessage.content}</span>
@@ -593,15 +849,15 @@ export default function MessageInput({
                           }
                           title={
                             editingQueuedIndex === index
-                              ? "Save queued message"
-                              : "Edit queued message"
+                              ? "Save queued task"
+                              : "Edit queued task"
                           }
                         >
                           {editingQueuedIndex === index
                             ? <Check className="size-3" />
                             : <Pencil className="size-3" />}
                           <span className="sr-only">
-                            {editingQueuedIndex === index ? "Save" : "Edit"} queued message
+                            {editingQueuedIndex === index ? "Save" : "Edit"} queued task
                           </span>
                         </Button>
                         <Button
@@ -610,10 +866,10 @@ export default function MessageInput({
                           variant="ghost"
                           className="size-6 shrink-0 text-muted-foreground"
                           onClick={() => removeQueuedMessage(index)}
-                          title="Remove queued message"
+                          title="Remove queued task"
                         >
                           <X className="size-3" />
-                          <span className="sr-only">Remove queued message</span>
+                          <span className="sr-only">Remove queued task</span>
                         </Button>
                       </div>
                     ))}
@@ -663,7 +919,7 @@ export default function MessageInput({
                       <DropdownMenuContent align="end" className="min-w-48">
                         <DropdownMenuItem
                           onSelect={() => handleUploadClick()}
-                          disabled={disabled || serverStatus === "running"}
+                          disabled={disabled}
                           className="min-h-10"
                         >
                           <Paperclip />
@@ -685,13 +941,19 @@ export default function MessageInput({
                     (serverStatus === "stable" || serverStatus === "running") && (
                     <Button
                       type="submit"
-                      disabled={disabled || !message.trim()}
+                      disabled={
+                        disabled ||
+                        !message.trim() ||
+                        attachments.some(
+                          (attachment) => attachment.status === "uploading",
+                        )
+                      }
                       size="icon"
                       className="relative size-10 rounded-full shadow-sm"
                       title={
                         serverStatus === "running"
-                          ? "Add message to queue"
-                          : "Send message"
+                          ? "Add task to queue"
+                          : "Send task"
                       }
                     >
                       {serverStatus === "running" ? <ListPlus /> : <SendIcon />}
@@ -810,4 +1072,10 @@ function Char({char}: { char: string }) {
     default:
       return char;
   }
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
