@@ -43,6 +43,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     getBackgroundTaskOutput,
   } = useChat();
   const [open, setOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("background");
   const [loadingTask, setLoadingTask] = useState<string | null>(null);
   const [outputs, setOutputs] = useState<Record<string, string>>({});
   const tasks = useMemo(
@@ -102,7 +103,11 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
             Background tasks, reconstructed links, files, and task navigation.
           </DialogDescription>
         </DialogHeader>
-        <Tabs defaultValue="background" className="min-h-0 gap-0">
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="min-h-0 gap-0"
+        >
           <div className="overflow-x-auto border-b px-3 py-2">
             <TabsList className="grid w-full min-w-[430px] grid-cols-4">
               <TabsTrigger value="background"><SquareTerminal />Tasks</TabsTrigger>
