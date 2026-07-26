@@ -168,7 +168,32 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
               </a>
             );
           },
-          p: ({children}) => <p>{children}</p>,
+          p: ({children}) => <p className="my-2 first:mt-0 last:mb-0">{children}</p>,
+          blockquote: ({children}) => (
+            <blockquote className="my-3 rounded-r-lg border-l-4 border-primary/70 bg-muted/60 px-4 py-2 text-foreground shadow-sm [&>p]:my-1">
+              {children}
+            </blockquote>
+          ),
+          ul: ({children}) => (
+            <ul className="my-3 list-outside list-disc space-y-1 pl-6 marker:text-primary">
+              {children}
+            </ul>
+          ),
+          ol: ({children}) => (
+            <ol className="my-3 list-outside list-decimal space-y-1 pl-6 marker:font-semibold marker:text-primary">
+              {children}
+            </ol>
+          ),
+          li: ({children}) => (
+            <li className="pl-1 [&>p]:my-0">{children}</li>
+          ),
+          code: ({children, className}) => (
+            <code
+              className={`${className ?? ""} rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.9em] font-medium text-foreground`}
+            >
+              {children}
+            </code>
+          ),
           table: ({children}) => (
             <div className="my-3 max-w-full overflow-x-auto rounded-lg border">
               <table className="w-full border-collapse text-left text-sm">
@@ -193,7 +218,7 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
             <tr className="last:[&>td]:border-b-0">{children}</tr>
           ),
           pre: ({children}) => (
-            <pre className="my-2 max-w-full overflow-x-auto rounded-lg bg-black/10 p-3 whitespace-pre">
+            <pre className="my-3 max-w-full overflow-x-auto rounded-lg border border-zinc-700 bg-zinc-950 p-4 text-zinc-100 shadow-inner whitespace-pre [&>code]:border-0 [&>code]:bg-transparent [&>code]:p-0 [&>code]:font-normal [&>code]:text-inherit">
               {children}
             </pre>
           ),

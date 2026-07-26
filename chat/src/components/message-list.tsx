@@ -794,30 +794,18 @@ function ToolCallCard({
         }
       }}
     >
-      <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 transition hover:bg-muted/45 [&::-webkit-details-marker]:hidden">
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg border bg-background">
-          <Wrench className="size-4" />
-        </span>
-        <span className="flex min-w-0 flex-1 items-baseline gap-2">
-          <span className="min-w-0 truncate text-sm font-medium">{toolCall.name}</span>
-          <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
-            {isFailed
-              ? "Tool call failed"
-              : isPending
-                ? "Tool call is running"
-                : "Tool call completed"}
-          </span>
-        </span>
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 transition hover:bg-muted/45 [&::-webkit-details-marker]:hidden">
         {isFailed ? (
-          <CircleAlert className="size-4 shrink-0 text-destructive" />
+          <CircleAlert className="size-3.5 shrink-0 text-destructive" />
         ) : isPending ? (
-          <LoaderCircle className="size-4 shrink-0 animate-spin text-muted-foreground" />
+          <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
         ) : (
-          <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
         )}
-        <ArrowDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">{toolCall.name}</span>
+        <ArrowDown className="size-3 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
-      <div className="space-y-4 border-t bg-muted/20 px-4 py-4">
+      <div className="space-y-3 border-t bg-muted/20 px-3 py-3">
         {input && (
           <ToolDetail label="Input" content={input} searchQuery={searchQuery} />
         )}
@@ -859,16 +847,16 @@ function ToolCallGroup({
 
   return (
     <section className="overflow-hidden rounded-xl border bg-muted/10">
-      <header className="flex items-center justify-between gap-3 border-b bg-muted/25 px-3 py-2">
-        <span className="flex min-w-0 items-center gap-2 text-xs font-medium">
-          <Wrench className="size-3.5 shrink-0 text-muted-foreground" />
+      <header className="flex items-center justify-between gap-2 border-b bg-muted/25 px-3 py-1">
+        <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium">
+          <Wrench className="size-3 shrink-0 text-muted-foreground" />
           <span>{uiCopy.tools.groupLabel(toolCalls.length)}</span>
         </span>
         <Button
           type="button"
           size="sm"
           variant="ghost"
-          className="h-7 shrink-0 px-2 text-xs"
+          className="h-6 shrink-0 px-1.5 text-xs"
           onClick={() =>
             setOpenToolIDs(
               allOpen ? new Set() : new Set(toolCalls.map((tool) => tool.id)),
@@ -879,7 +867,7 @@ function ToolCallGroup({
           {allOpen ? uiCopy.tools.collapseAll : uiCopy.tools.expandAll}
         </Button>
       </header>
-      <div className="space-y-2 p-2">
+      <div className="space-y-1 p-1">
         {toolCalls.map((toolCall) => (
           <ToolCallCard
             key={toolCall.id}
@@ -912,10 +900,10 @@ function ToolDetail({
 }) {
   return (
     <section>
-      <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </h3>
-      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border bg-background p-3 font-mono text-xs leading-5">
+      <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-background p-2 font-mono text-xs leading-5">
         <HighlightedText content={content} query={searchQuery} />
       </pre>
     </section>
@@ -1169,7 +1157,31 @@ function TaskGroup({
 
 function getTaskActivity(task: TaskSection): TaskActivity[] {
   if (task.richActivity.some((item) => item.type === "message")) {
-    return task.richActivity;
+    // Merge tool calls that richActivity didn't already cover.
+    const coveredToolIDs = new Set(
+      task.richActivity
+        .filter((item) => item.type === "tool")
+        .map((item) => (item as Extract<TaskActivity, {type: "tool"}>).toolCall.id),
+    );
+    const uncoveredTools: TaskActivity[] = task.toolCalls
+      .filter((toolCall) => !coveredToolIDs.has(toolCall.id))
+      .map((toolCall) => ({
+        type: "tool" as const,
+        key: `tool-${toolCall.id}`,
+        toolCall,
+      }));
+
+    if (uncoveredTools.length === 0) return task.richActivity;
+
+    return [...task.richActivity, ...uncoveredTools].sort((left, right) => {
+      const leftTime =
+        left.type === "message" ? left.message.time : left.toolCall.timestamp;
+      const rightTime =
+        right.type === "message" ? right.message.time : right.toolCall.timestamp;
+      if (!leftTime) return 1;
+      if (!rightTime) return -1;
+      return Date.parse(leftTime) - Date.parse(rightTime);
+    });
   }
 
   return [

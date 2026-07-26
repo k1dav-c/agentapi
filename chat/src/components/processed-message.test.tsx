@@ -74,6 +74,32 @@ describe("ProcessedMessage links", () => {
     expect(html).toContain("overflow-x-auto");
   });
 
+  test("renders fenced and inline code with visible contrast", () => {
+    const html = render("Use `go test`.\n\n```go\nfunc main() {}\n```", true);
+    expect(html).toContain("<pre");
+    expect(html).toContain("bg-zinc-950");
+    expect(html).toContain("border-zinc-700");
+    expect(html).toContain("bg-muted");
+    expect(html).toContain("go test");
+    expect(html).toContain("func main() {}");
+  });
+
+  test("renders blockquotes with a visible border and background", () => {
+    const html = render("> Important context", true);
+    expect(html).toContain("<blockquote");
+    expect(html).toContain("border-l-4");
+    expect(html).toContain("bg-muted/60");
+  });
+
+  test("renders unordered and ordered lists with visible markers", () => {
+    const html = render("- First\n- Second\n\n1. One\n2. Two", true);
+    expect(html).toContain("<ul");
+    expect(html).toContain("list-disc");
+    expect(html).toContain("<ol");
+    expect(html).toContain("list-decimal");
+    expect(html).toContain("marker:text-primary");
+  });
+
   test("highlights case-insensitive raw output search matches", () => {
     const html = renderToStaticMarkup(
       <ProcessedMessage
