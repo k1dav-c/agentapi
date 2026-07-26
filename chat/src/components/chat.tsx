@@ -75,18 +75,6 @@ export function Chat() {
           </Button>
         </div>
       )}
-      <div className="flex justify-end border-b bg-background/80 px-3 py-2 sm:px-6">
-        <Explorer
-          onNavigateTask={(number) => {
-            window.requestAnimationFrame(() =>
-              document.getElementById(`task-${number}`)?.scrollIntoView({
-                behavior: "smooth",
-                block: "start",
-              }),
-            );
-          }}
-        />
-      </div>
       <MessageList
         messages={messages}
         richMessages={richMessages}
@@ -100,6 +88,18 @@ export function Chat() {
         }}
         onDismissMessage={dismissFailedMessage}
         onStopTask={() => void sendMessage("\x1b", "raw")}
+        headerAction={
+          <Explorer
+            onNavigateTask={(number) => {
+              window.requestAnimationFrame(() =>
+                document.getElementById(`task-${number}`)?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "start",
+                }),
+              );
+            }}
+          />
+        }
       />
       <MessageInput
         onSendMessage={sendMessage}

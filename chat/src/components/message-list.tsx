@@ -59,6 +59,7 @@ interface MessageListProps {
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
   onStopTask: () => void;
+  headerAction?: React.ReactNode;
 }
 
 interface ToolCall {
@@ -124,6 +125,7 @@ export default function MessageList({
   onEditMessage,
   onDismissMessage,
   onStopTask,
+  headerAction,
 }: MessageListProps) {
   const [scrollArea, setScrollArea] = useState<HTMLDivElement | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -461,6 +463,7 @@ export default function MessageList({
                 <span className="hidden sm:inline">Conversation MD</span>
                 <span className="sr-only sm:hidden">Download conversation Markdown</span>
               </Button>
+              {headerAction}
               {taskQuery && filteredTasks.length > 0 && (
                 <div className="flex overflow-hidden rounded-md border bg-background">
                   <Button
