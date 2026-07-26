@@ -950,6 +950,83 @@
           "output_tokens"
         ],
         "type": "object"
+      },
+      "WebhookConfigRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/WebhookConfigRequestBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "max_attempts": {
+            "description": "Maximum number of delivery attempts.",
+            "format": "int64",
+            "maximum": 10,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "secret": {
+            "description": "New signing secret. Omit to preserve the current secret; set to an empty string to clear it.",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "description": "Timeout for each delivery attempt, in seconds.",
+            "format": "int64",
+            "maximum": 3600,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "url": {
+            "description": "Webhook destination. Set to an empty string to disable delivery.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "max_attempts",
+          "timeout_seconds",
+          "url"
+        ],
+        "type": "object"
+      },
+      "WebhookConfigResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/WebhookConfigResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "max_attempts": {
+            "description": "Maximum number of delivery attempts.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "secret_configured": {
+            "description": "Whether an HMAC signing secret is configured. The secret itself is never returned.",
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "description": "Timeout for each delivery attempt, in seconds.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "url": {
+            "description": "Webhook destination. Empty means webhook delivery is disabled.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "max_attempts",
+          "secret_configured",
+          "timeout_seconds",
+          "url"
+        ],
+        "type": "object"
       }
     }
   },
@@ -2146,6 +2223,98 @@
           }
         },
         "summary": "Post upload"
+      }
+    },
+    "/webhook": {
+      "get": {
+        "description": "Returns the mutable run-status webhook configuration. The signing secret is never returned.",
+        "operationId": "get-webhook",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookConfigResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get webhook configuration",
+        "tags": [
+          "Webhook"
+        ]
+      },
+      "put": {
+        "description": "Updates run-status webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent.",
+        "operationId": "put-webhook",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookConfigRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookConfigResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Update webhook configuration",
+        "tags": [
+          "Webhook"
+        ]
       }
     }
   }

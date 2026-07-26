@@ -260,15 +260,10 @@ func (s *Server) updateMCP(
 	response := &MCPUpdateResponse{}
 	response.Body.OK = true
 	response.Body.Path = s.mcpStore.Path()
-	if input.Restart {
-		if err := s.restartAgent(ctx); err != nil {
-			return nil, xerrors.Errorf(
-				"MCP config written to %s, but agent restart failed: %w",
-				s.mcpStore.Path(),
-				err,
-			)
-		}
-		response.Body.Restarted = true
+	restarted, err := s.restartQuery(ctx, input.Restart)
+	if err != nil {
+		return nil, err
 	}
+	response.Body.Restarted = restarted
 	return response, nil
 }

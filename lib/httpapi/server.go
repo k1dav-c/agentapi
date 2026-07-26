@@ -50,29 +50,32 @@ const (
 
 // Server represents the HTTP server
 type Server struct {
-	router       chi.Router
-	api          huma.API
-	port         int
-	srv          *http.Server
-	mu           sync.RWMutex
-	stopOnce     sync.Once
-	logger       *slog.Logger
-	conversation st.Conversation
-	agentio      st.AgentIO
-	agentType    mf.AgentType
-	emitter      *EventEmitter
-	chatBasePath string
-	tempDir      string
-	cwd          string
-	clock        quartz.Clock
-	shutdownCtx  context.Context
-	shutdown     context.CancelFunc
-	transport    Transport
-	messageQueue []QueuedMessage
-	mcpStore     mcpconfig.Store
-	mcpMu        sync.Mutex
-	restartAgent func(context.Context) error
-	nextQueueID  int
+	router             chi.Router
+	api                huma.API
+	port               int
+	srv                *http.Server
+	mu                 sync.RWMutex
+	stopOnce           sync.Once
+	logger             *slog.Logger
+	conversation       st.Conversation
+	agentio            st.AgentIO
+	agentType          mf.AgentType
+	emitter            *EventEmitter
+	chatBasePath       string
+	tempDir            string
+	cwd                string
+	clock              quartz.Clock
+	shutdownCtx        context.Context
+	shutdown           context.CancelFunc
+	transport          Transport
+	messageQueue       []QueuedMessage
+	mcpStore           mcpconfig.Store
+	mcpMu              sync.Mutex
+	webhook            *webhookDispatcher
+	restartAgent       func(context.Context) (int, error)
+	jsonlWatcherCancel context.CancelFunc
+	jsonlParentCtx     context.Context // parent context for spawning new JSONL watchers
+	nextQueueID        int
 	// Consecutive non-validation dispatch failures for the queued message
 	// identified by queueFailID. Used to drop poison messages.
 	queueFailID    int
@@ -140,8 +143,11 @@ type ServerConfig struct {
 	AgentStartedAt         time.Time
 	CWD                    string // Working directory (used by Codex resolver)
 	// RestartAgent replaces the PTY agent process while keeping AgentAPI alive.
+	// It returns the new process PID so the JSONL watcher can be restarted.
 	// It is nil for transports or server modes that cannot restart.
-	RestartAgent func(context.Context) error
+	RestartAgent func(context.Context) (int, error)
+	// Webhook sends an event whenever the agent status changes.
+	Webhook WebhookConfig
 }
 
 // Validate allowed hosts don't contain whitespace, commas, schemes, or ports.
@@ -281,7 +287,16 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		return mf.FormatToolCall(config.AgentType, message)
 	}
 
-	emitter := NewEventEmitter(WithAgentType(config.AgentType))
+	webhook, err := newWebhookDispatcher(config.Webhook, logger, config.AgentType, config.Transport)
+	if err != nil {
+		return nil, xerrors.Errorf("configure webhook: %w", err)
+	}
+	emitterOptions := []EventEmitterOption{
+		WithAgentType(config.AgentType),
+		WithClock(config.Clock),
+		WithStatusChangeHandler(webhook.statusChanged),
+	}
+	emitter := NewEventEmitter(emitterOptions...)
 
 	// Format initial prompt into message parts if provided
 	var initialPrompt []st.MessagePart
@@ -321,24 +336,27 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	logger.Info("Created temporary directory for uploads", "tempDir", tempDir)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	webhook.start(shutdownCtx)
 
 	s := &Server{
-		router:       router,
-		api:          api,
-		port:         config.Port,
-		conversation: conversation,
-		logger:       logger,
-		agentio:      config.AgentIO,
-		agentType:    config.AgentType,
-		emitter:      emitter,
-		chatBasePath: strings.TrimSuffix(config.ChatBasePath, "/"),
-		tempDir:      tempDir,
-		cwd:          config.CWD,
-		clock:        config.Clock,
-		shutdownCtx:  shutdownCtx,
-		shutdown:     shutdownCancel,
-		transport:    config.Transport,
-		restartAgent: config.RestartAgent,
+		router:         router,
+		api:            api,
+		port:           config.Port,
+		conversation:   conversation,
+		logger:         logger,
+		agentio:        config.AgentIO,
+		agentType:      config.AgentType,
+		emitter:        emitter,
+		chatBasePath:   strings.TrimSuffix(config.ChatBasePath, "/"),
+		tempDir:        tempDir,
+		cwd:            config.CWD,
+		clock:          config.Clock,
+		shutdownCtx:    shutdownCtx,
+		shutdown:       shutdownCancel,
+		transport:      config.Transport,
+		webhook:        webhook,
+		restartAgent:   config.RestartAgent,
+		jsonlParentCtx: ctx,
 	}
 	if mcpconfig.SupportedAgent(config.AgentType) {
 		store, err := mcpconfig.NewStore(config.AgentType, config.CWD)
@@ -365,46 +383,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	// Start the JSONL watcher to capture rich structured messages.
 	// This runs alongside the PTY conversation as a sidecar, providing
 	// structured content blocks, tool calls, thinking, and usage data.
-	if config.AgentPID > 0 {
-		var resolver jsonlwatcher.SessionResolver
-		var parser jsonlwatcher.LineParser
-		var sessionEventParser jsonlwatcher.SessionEventParser
-
-		switch config.AgentType {
-		case mf.AgentTypeClaude:
-			resolver = &jsonlwatcher.ClaudeResolver{PID: config.AgentPID}
-			parser = jsonlwatcher.NewClaudeParser()
-			sessionEventParser = jsonlwatcher.NewClaudeSessionEventParser()
-		case mf.AgentTypeCodex:
-			resolver = &jsonlwatcher.CodexResolver{
-				PID:       config.AgentPID,
-				CWD:       config.CWD,
-				NotBefore: config.AgentStartedAt,
-			}
-			parser = jsonlwatcher.NewCodexParser()
-			sessionEventParser = jsonlwatcher.NewCodexSessionEventParser()
-		}
-
-		if resolver != nil && parser != nil {
-			w := jsonlwatcher.New(jsonlwatcher.Config{
-				Resolver: resolver,
-				Parser:   parser,
-				Logger:   logger,
-				OnMessage: func(msg jsonlwatcher.RichMessage) {
-					emitter.EmitRichMessage(msg)
-				},
-				OnLine: func(line []byte) {
-					events, err := sessionEventParser.ParseSessionEvents(line)
-					if err != nil {
-						logger.Debug("Failed to normalize session event", "error", err)
-						return
-					}
-					emitter.EmitSessionEvents(events)
-				},
-			})
-			go w.Start(ctx)
-		}
-	}
+	s.startJSONLWatcher(config.AgentPID)
 
 	return s, nil
 }
@@ -448,6 +427,66 @@ func hostAuthorizationMiddleware(allowedHosts []string, badHostHandler http.Hand
 	}
 }
 
+// startJSONLWatcher stops any existing JSONL watcher and starts a new one
+// for the given agent PID. It is called once during server creation and
+// again after each agent restart so that tool calls, thinking, and usage
+// data from the new session are captured.
+func (s *Server) startJSONLWatcher(pid int) {
+	// Stop the previous watcher, if any.
+	if s.jsonlWatcherCancel != nil {
+		s.jsonlWatcherCancel()
+		s.jsonlWatcherCancel = nil
+	}
+
+	if pid <= 0 {
+		return
+	}
+
+	var resolver jsonlwatcher.SessionResolver
+	var parser jsonlwatcher.LineParser
+	var sessionEventParser jsonlwatcher.SessionEventParser
+
+	switch s.agentType {
+	case mf.AgentTypeClaude:
+		resolver = &jsonlwatcher.ClaudeResolver{PID: pid}
+		parser = jsonlwatcher.NewClaudeParser()
+		sessionEventParser = jsonlwatcher.NewClaudeSessionEventParser()
+	case mf.AgentTypeCodex:
+		resolver = &jsonlwatcher.CodexResolver{
+			PID:       pid,
+			CWD:       s.cwd,
+			NotBefore: time.Now(),
+		}
+		parser = jsonlwatcher.NewCodexParser()
+		sessionEventParser = jsonlwatcher.NewCodexSessionEventParser()
+	}
+
+	if resolver == nil || parser == nil {
+		return
+	}
+
+	watchCtx, cancel := context.WithCancel(s.jsonlParentCtx)
+	s.jsonlWatcherCancel = cancel
+
+	w := jsonlwatcher.New(jsonlwatcher.Config{
+		Resolver: resolver,
+		Parser:   parser,
+		Logger:   s.logger,
+		OnMessage: func(msg jsonlwatcher.RichMessage) {
+			s.emitter.EmitRichMessage(msg)
+		},
+		OnLine: func(line []byte) {
+			events, err := sessionEventParser.ParseSessionEvents(line)
+			if err != nil {
+				s.logger.Debug("Failed to normalize session event", "error", err)
+				return
+			}
+			s.emitter.EmitSessionEvents(events)
+		},
+	})
+	go w.Start(watchCtx)
+}
+
 // sseMiddleware creates middleware that prevents proxy buffering for SSE endpoints
 func sseMiddleware(ctx huma.Context, next func(huma.Context)) {
 	// Disable proxy buffering for SSE endpoints
@@ -486,6 +525,18 @@ func (s *Server) registerRoutes() {
 
 	huma.Get(s.api, "/timeline", s.getTimeline, func(o *huma.Operation) {
 		o.Description = "Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events."
+	})
+
+	huma.Get(s.api, "/webhook", s.getWebhookConfig, func(o *huma.Operation) {
+		o.Tags = []string{"Webhook"}
+		o.Summary = "Get webhook configuration"
+		o.Description = "Returns the mutable run-status webhook configuration. The signing secret is never returned."
+	})
+	huma.Put(s.api, "/webhook", s.updateWebhookConfig, func(o *huma.Operation) {
+		o.Tags = []string{"Webhook"}
+		o.Summary = "Update webhook configuration"
+		o.Description = "Updates run-status webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent."
+		o.Errors = []int{400}
 	})
 
 	huma.Get(s.api, "/mcp", s.getMCP, func(o *huma.Operation) {

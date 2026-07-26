@@ -94,6 +94,7 @@ type EventEmitter struct {
 	screen              string
 	errors              []ErrorBody
 	clock               quartz.Clock
+	onStatusChange      func(previous, current AgentStatus)
 }
 
 func convertStatus(status st.ConversationStatus) AgentStatus {
@@ -135,6 +136,12 @@ func WithAgentType(agentType mf.AgentType) EventEmitterOption {
 func WithClock(clock quartz.Clock) EventEmitterOption {
 	return func(e *EventEmitter) {
 		e.clock = clock
+	}
+}
+
+func WithStatusChangeHandler(handler func(previous, current AgentStatus)) EventEmitterOption {
+	return func(e *EventEmitter) {
+		e.onStatusChange = handler
 	}
 }
 
@@ -220,8 +227,12 @@ func (e *EventEmitter) EmitStatus(newStatus st.ConversationStatus) {
 		return
 	}
 
+	previousStatus := e.status
 	e.notifyChannels(EventTypeStatusChange, StatusChangeBody{Status: newAgentStatus, AgentType: e.agentType})
 	e.status = newAgentStatus
+	if e.onStatusChange != nil {
+		e.onStatusChange(previousStatus, newAgentStatus)
+	}
 }
 
 func (e *EventEmitter) EmitScreen(newScreen string) {

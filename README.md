@@ -85,6 +85,7 @@ There are 4 endpoints:
 - POST `/message` - sends a message to the agent. When a 200 response is returned, AgentAPI has detected that the agent started processing the message
 - GET `/status` - returns the current status of the agent, either "stable" or "running"
 - GET `/events` - an SSE stream of events from the agent: message and status updates
+- GET/PUT `/webhook` - reads or updates run-status webhook delivery without restarting the agent
 - GET `/mcp` - returns configured MCP servers and the managed config path for Claude or Codex
 - PUT `/mcp` - replaces the complete MCP server set; pass `?restart=true` to restart the PTY agent and apply immediately
 - POST `/mcp/check` - checks remote HTTP connectivity and resolves stdio executables
@@ -140,6 +141,50 @@ agentapi server --allowed-origins 'https://example.com,http://localhost:3000' --
 # or
 AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi server -- claude
 ```
+
+#### Run status webhooks
+
+Set `--webhook-url` to send an HTTP POST whenever the run status changes between
+`running` and `stable`:
+
+```bash
+agentapi server \
+  --webhook-url 'https://example.com/agentapi/events' \
+  --webhook-secret 'replace-with-a-secret' \
+  -- claude
+```
+
+The equivalent environment variables are `AGENTAPI_WEBHOOK_URL`,
+`AGENTAPI_WEBHOOK_SECRET`, `AGENTAPI_WEBHOOK_TIMEOUT`, and
+`AGENTAPI_WEBHOOK_MAX_ATTEMPTS`. The timeout defaults to `10s`, and delivery is
+attempted up to 3 times.
+
+The initial values can also be changed while AgentAPI is running from the
+Webhook tab in the chat UI's Session Explorer. Saving an empty URL disables
+delivery. Existing signing secrets are write-only and can be preserved,
+replaced, or cleared from the Explorer.
+
+The request body has this format:
+
+```json
+{
+  "id": "unique-delivery-id",
+  "type": "run.status_changed",
+  "created_at": "2026-07-26T12:00:00Z",
+  "data": {
+    "run_id": "agentapi-process-run-id",
+    "status": "stable",
+    "previous_status": "running",
+    "agent_type": "claude",
+    "transport": "pty"
+  }
+}
+```
+
+Each request includes `X-AgentAPI-Delivery`, `X-AgentAPI-Event`, and
+`X-AgentAPI-Timestamp` headers. When a secret is configured,
+`X-AgentAPI-Signature-256` contains
+`sha256=HMAC_SHA256(secret, timestamp + "." + raw_request_body)`.
 
 ### `agentapi attach`
 

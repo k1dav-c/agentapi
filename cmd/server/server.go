@@ -35,12 +35,12 @@ type agentSupervisor struct {
 	setup  func(context.Context) (*termexec.Process, error)
 }
 
-func (s *agentSupervisor) Restart(ctx context.Context) error {
+func (s *agentSupervisor) Restart(ctx context.Context) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old := s.swap.Current()
 	if old == nil {
-		return xerrors.New("agent process is not running")
+		return 0, xerrors.New("agent process is not running")
 	}
 	s.logger.Info("Restarting agent process")
 	if err := old.Close(s.logger, 10*time.Second); err != nil {
@@ -48,11 +48,11 @@ func (s *agentSupervisor) Restart(ctx context.Context) error {
 	}
 	next, err := s.setup(ctx)
 	if err != nil {
-		return xerrors.Errorf("failed to start new agent process: %w", err)
+		return 0, xerrors.Errorf("failed to start new agent process: %w", err)
 	}
 	s.swap.Set(next)
 	s.logger.Info("Agent process restarted", "pid", next.Pid())
-	return nil
+	return next.Pid(), nil
 }
 
 func (s *agentSupervisor) currentSettled() *termexec.Process {
@@ -259,12 +259,18 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		AgentPID:       agentPID,
 		AgentStartedAt: agentStartedAt,
 		CWD:            cwd,
-		RestartAgent: func() func(context.Context) error {
+		RestartAgent: func() func(context.Context) (int, error) {
 			if supervisor == nil {
 				return nil
 			}
 			return supervisor.Restart
 		}(),
+		Webhook: httpapi.WebhookConfig{
+			URL:         viper.GetString(FlagWebhookURL),
+			Secret:      viper.GetString(FlagWebhookSecret),
+			Timeout:     viper.GetDuration(FlagWebhookTimeout),
+			MaxAttempts: viper.GetInt(FlagWebhookMaxAttempts),
+		},
 		StatePersistenceConfig: screentracker.StatePersistenceConfig{
 			StateFile: stateFile,
 			LoadState: loadState,
@@ -449,21 +455,25 @@ type flagSpec struct {
 }
 
 const (
-	FlagType            = "type"
-	FlagPort            = "port"
-	FlagPrintOpenAPI    = "print-openapi"
-	FlagChatBasePath    = "chat-base-path"
-	FlagTermWidth       = "term-width"
-	FlagTermHeight      = "term-height"
-	FlagAllowedHosts    = "allowed-hosts"
-	FlagAllowedOrigins  = "allowed-origins"
-	FlagExit            = "exit"
-	FlagInitialPrompt   = "initial-prompt"
-	FlagStateFile       = "state-file"
-	FlagLoadState       = "load-state"
-	FlagSaveState       = "save-state"
-	FlagPidFile         = "pid-file"
-	FlagExperimentalACP = "experimental-acp"
+	FlagType               = "type"
+	FlagPort               = "port"
+	FlagPrintOpenAPI       = "print-openapi"
+	FlagChatBasePath       = "chat-base-path"
+	FlagTermWidth          = "term-width"
+	FlagTermHeight         = "term-height"
+	FlagAllowedHosts       = "allowed-hosts"
+	FlagAllowedOrigins     = "allowed-origins"
+	FlagExit               = "exit"
+	FlagInitialPrompt      = "initial-prompt"
+	FlagStateFile          = "state-file"
+	FlagLoadState          = "load-state"
+	FlagSaveState          = "save-state"
+	FlagPidFile            = "pid-file"
+	FlagExperimentalACP    = "experimental-acp"
+	FlagWebhookURL         = "webhook-url"
+	FlagWebhookSecret      = "webhook-secret"
+	FlagWebhookTimeout     = "webhook-timeout"
+	FlagWebhookMaxAttempts = "webhook-max-attempts"
 )
 
 func CreateServerCmd() *cobra.Command {
@@ -507,6 +517,10 @@ func CreateServerCmd() *cobra.Command {
 		{FlagSaveState, "", false, "Save state to state-file on shutdown (defaults to true when state-file is set)", "bool"},
 		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts", "string"},
 		{FlagExperimentalACP, "", false, "Use experimental ACP transport instead of PTY", "bool"},
+		{FlagWebhookURL, "", "", "URL notified when the agent run status changes", "string"},
+		{FlagWebhookSecret, "", "", "Secret used to sign webhook payloads with HMAC-SHA256", "string"},
+		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},
+		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},
 	}
 
 	for _, spec := range flagSpecs {
@@ -521,6 +535,8 @@ func CreateServerCmd() *cobra.Command {
 			serverCmd.Flags().Uint16P(spec.name, spec.shorthand, spec.defaultValue.(uint16), spec.usage)
 		case "stringSlice":
 			serverCmd.Flags().StringSliceP(spec.name, spec.shorthand, spec.defaultValue.([]string), spec.usage)
+		case "duration":
+			serverCmd.Flags().DurationP(spec.name, spec.shorthand, spec.defaultValue.(time.Duration), spec.usage)
 		default:
 			panic(fmt.Sprintf("unknown flag type: %s", spec.flagType))
 		}

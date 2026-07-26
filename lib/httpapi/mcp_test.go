@@ -29,9 +29,9 @@ func TestServer_MCPAPI(t *testing.T) {
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
-		RestartAgent: func(context.Context) error {
+		RestartAgent: func(context.Context) (int, error) {
 			restartCount.Add(1)
-			return nil
+			return 12345, nil
 		},
 	})
 	require.NoError(t, err)

@@ -68,16 +68,18 @@ func (s *Server) requireMCP() error {
 	return nil
 }
 
-func restartQuery(ctx context.Context, restart bool, restartAgent func(context.Context) error) (bool, error) {
+func (s *Server) restartQuery(ctx context.Context, restart bool) (bool, error) {
 	if !restart {
 		return false, nil
 	}
-	if restartAgent == nil {
+	if s.restartAgent == nil {
 		return false, huma.Error400BadRequest("agent restart is not supported in this server mode")
 	}
-	if err := restartAgent(ctx); err != nil {
+	newPID, err := s.restartAgent(ctx)
+	if err != nil {
 		return false, xerrors.Errorf("MCP config was written, but agent restart failed: %w", err)
 	}
+	s.startJSONLWatcher(newPID)
 	return true, nil
 }
 
@@ -110,7 +112,7 @@ func (s *Server) mutateMCP(ctx context.Context, restart bool, mutate func(MCPSer
 		return nil, xerrors.Errorf("failed to write MCP config: %w", err)
 	}
 	s.mcpMu.Unlock()
-	restarted, err := restartQuery(ctx, restart, s.restartAgent)
+	restarted, err := s.restartQuery(ctx, restart)
 	if err != nil {
 		return nil, err
 	}
