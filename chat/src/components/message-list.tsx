@@ -58,7 +58,6 @@ interface MessageListProps {
   onRetryMessage: (clientId: string) => Promise<boolean>;
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
-  onRunTask: (content: string) => void;
   onStopTask: () => void;
 }
 
@@ -124,7 +123,6 @@ export default function MessageList({
   onRetryMessage,
   onEditMessage,
   onDismissMessage,
-  onRunTask,
   onStopTask,
 }: MessageListProps) {
   const [scrollArea, setScrollArea] = useState<HTMLDivElement | null>(null);
@@ -524,7 +522,6 @@ export default function MessageList({
                 onRetryMessage={onRetryMessage}
                 onEditMessage={onEditMessage}
                 onDismissMessage={onDismissMessage}
-                onRunTask={onRunTask}
                 onStopTask={onStopTask}
                 searchQuery={taskQuery}
                 searchResultIndex={searchResultIndex}
@@ -792,7 +789,6 @@ function TaskGroup({
   onRetryMessage,
   onEditMessage,
   onDismissMessage,
-  onRunTask,
   onStopTask,
   searchQuery,
   searchResultIndex,
@@ -804,7 +800,6 @@ function TaskGroup({
   onRetryMessage: (clientId: string) => Promise<boolean>;
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
-  onRunTask: (content: string) => void;
   onStopTask: () => void;
   searchQuery: string;
   searchResultIndex: number;
@@ -934,12 +929,6 @@ function TaskGroup({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onSelect={() => onRunTask(task.prompt.content)}
-              >
-                <RefreshCw />
-                Run again
-              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void copyTask()}>
                 <Clipboard />
                 Copy task and output

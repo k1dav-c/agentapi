@@ -110,7 +110,6 @@ export function Chat() {
             setSuggestedPrompt(content);
           }}
           onDismissMessage={dismissFailedMessage}
-          onRunTask={(content) => void sendMessage(content, "user")}
           onStopTask={() => void sendMessage("\x1b", "raw")}
         />
       ) : (
