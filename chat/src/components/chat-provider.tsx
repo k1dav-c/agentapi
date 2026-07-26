@@ -90,6 +90,11 @@ function isDraftMessage(message: Message | DraftMessage): boolean {
 
 type MessageType = "user" | "raw";
 
+export interface SendResult {
+  ok: boolean;
+  queued: boolean;
+}
+
 export type ServerStatus = "stable" | "running" | "offline" | "unknown";
 export type ConnectionStatus = "connected" | "reconnecting" | "offline";
 
@@ -108,6 +113,17 @@ export interface QueuedMessage {
   id: number;
   content: string;
   time: string;
+}
+
+export interface BackgroundTask {
+  id: string;
+  name: string;
+  status: "running" | "completed" | "failed" | "unknown";
+  agent_type: string;
+  tool_use_id: string;
+  output_path?: string;
+  started_at: string;
+  updated_at: string;
 }
 
 export type AgentType = "claude" | "goose" | "aider" | "gemini" | "amp" | "codex" | "cursor" | "cursor-agent" | "copilot" | "auggie" | "amazonq" | "opencode" | "custom" | "unknown";
@@ -135,11 +151,12 @@ export const AgentType: Record<Exclude<AgentType, "unknown">, AgentColorDisplayN
 interface ChatContextValue {
   messages: (Message | DraftMessage)[];
   richMessages: RichMessage[];
+  backgroundTasks: BackgroundTask[];
   loading: boolean;
   serverStatus: ServerStatus;
   connectionStatus: ConnectionStatus;
   queuedMessages: QueuedMessage[];
-  sendMessage: (message: string, type?: MessageType) => Promise<boolean>;
+  sendMessage: (message: string, type?: MessageType) => Promise<SendResult>;
   retryFailedMessage: (clientId: string) => Promise<boolean>;
   dismissFailedMessage: (clientId: string) => void;
   updateQueuedMessage: (id: number, content: string) => Promise<void>;
@@ -152,6 +169,13 @@ interface ChatContextValue {
   nextReconnectAt: number | null;
   reconnectNow: () => void;
   downloadSession: () => Promise<void>;
+  refreshBackgroundTasks: () => Promise<void>;
+  getBackgroundTaskOutput: (id: string) => Promise<{
+    content: string;
+    path: string;
+    size: number;
+    truncated: boolean;
+  }>;
   storageScope: string;
   agentType: AgentType;
 }
@@ -164,7 +188,7 @@ const STALE_CONNECTION_MS = 45_000;
 
 const ChatContext = createContext<ChatContextValue | undefined>(undefined);
 
-const useAgentAPIUrl = (): string => {
+export const useAgentAPIUrl = (): string => {
   const searchParams = useSearchParams();
   const paramsUrl = searchParams.get("url");
   if (paramsUrl) {
@@ -202,6 +226,7 @@ const useAgentAPIUrl = (): string => {
 export function ChatProvider({ children }: PropsWithChildren) {
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
+  const [backgroundTasks, setBackgroundTasks] = useState<BackgroundTask[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [serverStatus, setServerStatus] = useState<ServerStatus>("unknown");
   const [connectionStatus, setConnectionStatus] =
@@ -218,6 +243,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [failedMessagesHydrated, setFailedMessagesHydrated] = useState(false);
   const agentAPIUrl = useAgentAPIUrl();
   const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
+
   const reconnectNow = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
@@ -240,6 +266,41 @@ export function ChatProvider({ children }: PropsWithChildren) {
       // The connection status handler reports connectivity failures.
     }
   }, [agentAPIUrl]);
+  const refreshBackgroundTasks = useCallback(async () => {
+    try {
+      const response = await fetch(`${agentAPIUrl}/background-tasks`);
+      if (!response.ok) return;
+      const data = await response.json() as {tasks?: BackgroundTask[]};
+      setBackgroundTasks(data.tasks ?? []);
+    } catch {
+      // The primary connection state handles connectivity feedback.
+    }
+  }, [agentAPIUrl]);
+  const getBackgroundTaskOutput = useCallback(async (id: string) => {
+    const response = await fetch(
+      `${agentAPIUrl}/background-tasks/${encodeURIComponent(id)}/output`,
+    );
+    if (!response.ok) throw new Error("Background task output is unavailable");
+    return await response.json() as {
+      content: string;
+      path: string;
+      size: number;
+      truncated: boolean;
+    };
+  }, [agentAPIUrl]);
+
+  useEffect(() => {
+    void refreshBackgroundTasks();
+  }, [refreshBackgroundTasks]);
+
+  const hasRunningBackgroundTasks = backgroundTasks.some(
+    (task) => task.status === "running",
+  );
+  useEffect(() => {
+    if (!hasRunningBackgroundTasks) return;
+    const timer = window.setInterval(() => void refreshBackgroundTasks(), 3000);
+    return () => window.clearInterval(timer);
+  }, [hasRunningBackgroundTasks, refreshBackgroundTasks]);
   const currentTask = [...messages]
     .reverse()
     .find((message) => message.role === "user")
@@ -429,6 +490,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
           updated[existingIndex] = data;
           return updated;
         });
+        if (
+          data.content.some(
+            (block) => block.type === "tool_use" || block.type === "tool_result",
+          )
+        ) {
+          void refreshBackgroundTasks();
+        }
       });
 
       // Handle status changes
@@ -446,6 +514,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         // Set agent type
         setAgentType(data.agent_type === "" ? "unknown" : data.agent_type as AgentType);
         void refreshQueue();
+        void refreshBackgroundTasks();
       });
 
       // Handle agent error events
@@ -522,15 +591,15 @@ export function ChatProvider({ children }: PropsWithChildren) {
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
-  }, [agentAPIUrl, reconnectNonce, reconnectNow, refreshQueue]);
+  }, [agentAPIUrl, reconnectNonce, reconnectNow, refreshBackgroundTasks, refreshQueue]);
 
   // Send a new message
   const sendMessage = async (
     content: string,
     type: "user" | "raw" = "user"
-  ): Promise<boolean> => {
+  ): Promise<SendResult> => {
     // For user messages, require non-empty content
-    if (type === "user" && !content.trim()) return false;
+    if (type === "user" && !content.trim()) return {ok: false, queued: false};
     const clientId = crypto.randomUUID();
 
     // For raw messages, don't set loading state as it's usually fast
@@ -572,6 +641,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
         const fullDetail = `${detail}: ${messages}`;
         throw new Error(fullDetail);
       }
+      const result = await response.json() as {
+        ok?: boolean;
+        queued?: boolean;
+      };
       await refreshQueue();
       if (type === "user") {
         setMessages((previous) =>
@@ -582,7 +655,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
           ),
         );
       }
-      return true;
+      return {
+        ok: result.ok === true,
+        queued: result.queued === true,
+      };
     } catch (error) {
       console.error("Error sending message:", error);
       const message = getErrorMessage(error)
@@ -604,7 +680,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
           ),
         );
       }
-      return false;
+      return {ok: false, queued: false};
     } finally {
       if (type === "user") {
         setLoading(false);
@@ -630,7 +706,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     );
     if (!failedMessage) return false;
     dismissFailedMessage(clientId);
-    return sendMessage(failedMessage.content, "user");
+    const result = await sendMessage(failedMessage.content, "user");
+    return result.ok;
   };
 
   // Upload files to workspace
@@ -720,6 +797,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
+      toast.success("Session JSONL downloaded");
     } catch (error) {
       toast.error("Session download failed", {
         description: getErrorMessage(error),
@@ -733,6 +811,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       value={{
         messages,
         richMessages,
+        backgroundTasks,
         loading,
         sendMessage,
         retryFailedMessage,
@@ -747,6 +826,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         nextReconnectAt,
         reconnectNow,
         downloadSession,
+        refreshBackgroundTasks,
+        getBackgroundTaskOutput,
         storageScope: agentAPIUrl,
         agentType,
       }}

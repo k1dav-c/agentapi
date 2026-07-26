@@ -28,7 +28,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import {Tabs, TabsList, TabsTrigger} from "./ui/tabs";
-import type {ServerStatus} from "./chat-provider";
+import type {SendResult, ServerStatus} from "./chat-provider";
 import TextareaAutosize from "react-textarea-autosize";
 import {useChat} from "./chat-provider";
 import {DragDrop} from "./drag-drop";
@@ -54,7 +54,7 @@ import {
 } from "./ui/dropdown-menu";
 
 interface MessageInputProps {
-  onSendMessage: (message: string, type: "user" | "raw") => Promise<boolean>;
+  onSendMessage: (message: string, type: "user" | "raw") => Promise<SendResult>;
   disabled?: boolean;
   serverStatus: ServerStatus;
   suggestedPrompt?: string;
@@ -156,7 +156,7 @@ export default function MessageInput({
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [hydratedDraftKey, setHydratedDraftKey] = useState<string | null>(null);
-  const [editingQueuedIndex, setEditingQueuedIndex] = useState<number | null>(null);
+  const [editingQueuedID, setEditingQueuedID] = useState<number | null>(null);
   const [editingQueuedMessage, setEditingQueuedMessage] = useState("");
   const [inputMode, setInputMode] = useState<"text" | "control">("text");
   const [sentChars, setSentChars] = useState<SentChar[]>([]);
@@ -282,24 +282,31 @@ export default function MessageInput({
     window.requestAnimationFrame(() => textareaRef.current?.focus());
   }, [onSuggestedPromptApplied, suggestedPrompt]);
 
-  const startEditingQueuedMessage = (index: number) => {
-    setEditingQueuedIndex(index);
-    setEditingQueuedMessage(queuedMessages[index].content);
+  const startEditingQueuedMessage = (id: number, content: string) => {
+    setEditingQueuedID(id);
+    setEditingQueuedMessage(content);
   };
 
   const cancelEditingQueuedMessage = () => {
-    setEditingQueuedIndex(null);
+    setEditingQueuedID(null);
     setEditingQueuedMessage("");
   };
 
+  useEffect(() => {
+    if (
+      editingQueuedID !== null &&
+      !queuedMessages.some((queuedMessage) => queuedMessage.id === editingQueuedID)
+    ) {
+      setEditingQueuedID(null);
+      setEditingQueuedMessage("");
+    }
+  }, [editingQueuedID, queuedMessages]);
+
   const saveEditingQueuedMessage = async () => {
-    if (editingQueuedIndex === null || !editingQueuedMessage.trim()) return;
+    if (editingQueuedID === null || !editingQueuedMessage.trim()) return;
 
     try {
-      await updateQueuedMessage(
-        queuedMessages[editingQueuedIndex].id,
-        editingQueuedMessage,
-      );
+      await updateQueuedMessage(editingQueuedID, editingQueuedMessage);
       cancelEditingQueuedMessage();
     } catch (error) {
       toast.error("Failed to update queued task", {
@@ -308,17 +315,10 @@ export default function MessageInput({
     }
   };
 
-  const removeQueuedMessage = async (index: number) => {
+  const removeQueuedMessage = async (id: number) => {
     try {
-      await deleteQueuedMessage(queuedMessages[index].id);
-      setEditingQueuedIndex((currentIndex) => {
-        if (currentIndex === null) return null;
-        if (currentIndex === index) {
-          setEditingQueuedMessage("");
-          return null;
-        }
-        return currentIndex > index ? currentIndex - 1 : currentIndex;
-      });
+      await deleteQueuedMessage(id);
+      if (editingQueuedID === id) cancelEditingQueuedMessage();
     } catch (error) {
       toast.error("Failed to delete queued task", {
         description: getErrorMessage(error),
@@ -417,19 +417,13 @@ export default function MessageInput({
     }
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (message.trim() && !disabled) {
-      if (serverStatus === "running") {
-        onSendMessage(message, "user");
-        toast.success("Task queued", {
-          description: `Queue position ${queuedMessages.length + 1}`,
-        });
-      } else if (serverStatus === "stable") {
-        onSendMessage(message, "user");
-      } else {
-        return;
-      }
+      if (serverStatus !== "running" && serverStatus !== "stable") return;
+      const result = await onSendMessage(message, "user");
+      if (!result.ok) return;
+      if (result.queued) toast.success("Task queued");
       setMessage("");
       setAttachments((previous) =>
         previous.filter((attachment) => attachment.status !== "completed"),
@@ -796,7 +790,7 @@ export default function MessageInput({
               )}
 
               {inputMode === "text" && queuedMessages.length > 0 && (
-                <details className="group border-t bg-muted/15">
+                <details open className="group border-t bg-muted/15">
                   <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
                     <span className="flex items-center gap-1.5">
                       <Clock3 className="size-3" />
@@ -811,7 +805,7 @@ export default function MessageInput({
                         key={queuedMessage.id}
                         className="flex w-full items-center gap-1 rounded-md border bg-background py-1 pl-2.5 pr-1 text-xs"
                       >
-                        {editingQueuedIndex === index ? (
+                        {editingQueuedID === queuedMessage.id ? (
                           <input
                             autoFocus
                             value={editingQueuedMessage}
@@ -827,7 +821,7 @@ export default function MessageInput({
                                 cancelEditingQueuedMessage();
                               }
                             }}
-                            className="h-6 w-56 min-w-0 bg-transparent text-xs outline-none"
+                            className="h-6 min-w-0 flex-1 bg-transparent text-xs outline-none"
                             aria-label={`Edit queued task ${index + 1}`}
                           />
                         ) : (
@@ -839,25 +833,28 @@ export default function MessageInput({
                           variant="ghost"
                           className="size-6 shrink-0 text-muted-foreground"
                           onClick={() =>
-                            editingQueuedIndex === index
+                            editingQueuedID === queuedMessage.id
                               ? saveEditingQueuedMessage()
-                              : startEditingQueuedMessage(index)
+                              : startEditingQueuedMessage(
+                                  queuedMessage.id,
+                                  queuedMessage.content,
+                                )
                           }
                           disabled={
-                            editingQueuedIndex === index &&
+                            editingQueuedID === queuedMessage.id &&
                             !editingQueuedMessage.trim()
                           }
                           title={
-                            editingQueuedIndex === index
+                            editingQueuedID === queuedMessage.id
                               ? "Save queued task"
                               : "Edit queued task"
                           }
                         >
-                          {editingQueuedIndex === index
+                          {editingQueuedID === queuedMessage.id
                             ? <Check className="size-3" />
                             : <Pencil className="size-3" />}
                           <span className="sr-only">
-                            {editingQueuedIndex === index ? "Save" : "Edit"} queued task
+                            {editingQueuedID === queuedMessage.id ? "Save" : "Edit"} queued task
                           </span>
                         </Button>
                         <Button
@@ -865,7 +862,7 @@ export default function MessageInput({
                           size="icon"
                           variant="ghost"
                           className="size-6 shrink-0 text-muted-foreground"
-                          onClick={() => removeQueuedMessage(index)}
+                          onClick={() => removeQueuedMessage(queuedMessage.id)}
                           title="Remove queued task"
                         >
                           <X className="size-3" />

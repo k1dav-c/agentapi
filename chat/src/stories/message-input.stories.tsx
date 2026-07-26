@@ -15,7 +15,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const defaultArgs = {
-  onSendMessage: async () => true,
+  onSendMessage: async () => ({ok: true, queued: false}),
 };
 
 export const ServerStatusStable: Story = {

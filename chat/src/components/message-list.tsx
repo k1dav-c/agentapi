@@ -20,9 +20,7 @@ import {
   Clock3,
   Code2,
   Download,
-  Eye,
   LoaderCircle,
-  MessageSquarePlus,
   MoreHorizontal,
   Pencil,
   RefreshCw,
@@ -44,7 +42,6 @@ import type {
 import {ProcessedMessage} from "./processed-message";
 import {toast} from "sonner";
 import {taskMatchesQuery, taskToMarkdown} from "@/lib/task-actions";
-import {groupConsecutiveTools} from "@/lib/activity-groups";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -206,6 +203,26 @@ export default function MessageList({
 
     return {prelude, tasks};
   }, [messages, richMessages, toolCalls]);
+  const conversationMarkdown = useMemo(
+    () =>
+      timeline.tasks
+        .map((task, index) => taskToMarkdown(toSearchableTask(task), index + 1))
+        .join("\n"),
+    [timeline.tasks],
+  );
+  const exportConversation = () => {
+    const url = URL.createObjectURL(
+      new Blob([conversationMarkdown], {type: "text/markdown;charset=utf-8"}),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `agentapi-conversation-${new Date().toISOString().replaceAll(":", "-")}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    toast.success("Conversation Markdown downloaded");
+  };
   const filteredTasks = useMemo(
     () =>
       timeline.tasks
@@ -252,12 +269,14 @@ export default function MessageList({
     () =>
       [
         ...timeline.prelude.map((message, index) =>
-          `prelude-${message.id ?? index}:${message.content.length}`),
+          `prelude-${message.id ?? index}:${contentFingerprint(message.content)}`),
         ...timeline.tasks.map((task) =>
-          `${task.key}:${task.prompt.content.length}:${task.responses
-            .map((message) => message.content.length)
+          `${task.key}:${contentFingerprint(task.prompt.content)}:${task.responses
+            .map((message) => contentFingerprint(message.content))
             .join(",")}:${task.toolCalls
-            .map((tool) => `${tool.id}:${tool.result?.length ?? -1}`)
+            .map((tool) =>
+              `${tool.id}:${contentFingerprint(tool.result ?? "")}`,
+            )
             .join(",")}`),
       ].join("|"),
     [timeline],
@@ -432,6 +451,18 @@ export default function MessageList({
                   ? `${filteredTasks.length} tasks · ${totalMatchCount} matches`
                   : `${filteredTasks.length} of ${timeline.tasks.length}`}
               </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 shrink-0"
+                onClick={exportConversation}
+                title="Download the complete conversation as Markdown"
+              >
+                <Download />
+                <span className="hidden sm:inline">Conversation MD</span>
+                <span className="sr-only sm:hidden">Download conversation Markdown</span>
+              </Button>
               {taskQuery && filteredTasks.length > 0 && (
                 <div className="flex overflow-hidden rounded-md border bg-background">
                   <Button
@@ -494,10 +525,6 @@ export default function MessageList({
                 onEditMessage={onEditMessage}
                 onDismissMessage={onDismissMessage}
                 onRunTask={onRunTask}
-                onEditTask={(content) => onSelectPrompt?.(content)}
-                onFollowUp={(content) =>
-                  onSelectPrompt?.(`Follow up on this task:\n\n${content}\n\n`)
-                }
                 onStopTask={onStopTask}
                 searchQuery={taskQuery}
                 searchResultIndex={searchResultIndex}
@@ -737,56 +764,6 @@ function ToolCallCard({
   );
 }
 
-function ToolCallGroup({
-  toolCalls,
-  searchQuery,
-}: {
-  toolCalls: ToolCall[];
-  searchQuery: string;
-}) {
-  const pending = toolCalls.filter((tool) => tool.result === undefined).length;
-  const failed = toolCalls.filter((tool) => tool.isError).length;
-  const [isOpen, setIsOpen] = useState(
-    Boolean(searchQuery) || pending > 0 || failed > 0,
-  );
-
-  useEffect(() => {
-    if (searchQuery || pending > 0 || failed > 0) setIsOpen(true);
-  }, [failed, pending, searchQuery]);
-
-  return (
-    <details
-      className="group ml-3 overflow-hidden rounded-xl border bg-muted/15 sm:ml-8"
-      open={isOpen}
-      onToggle={(event) => setIsOpen(event.currentTarget.open)}
-    >
-      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-3 px-4 py-2.5 [&::-webkit-details-marker]:hidden">
-        <Wrench className="size-4 text-muted-foreground" />
-        <span className="min-w-0 flex-1 text-sm font-medium">
-          Tool activity · {toolCalls.length}
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {failed > 0
-            ? `${failed} failed`
-            : pending > 0
-              ? `${pending} running`
-              : "Completed"}
-        </span>
-        <ArrowDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
-      </summary>
-      <div className="space-y-1 border-t p-2">
-        {toolCalls.map((toolCall) => (
-          <ToolCallCard
-            key={toolCall.id}
-            toolCall={toolCall}
-            searchQuery={searchQuery}
-          />
-        ))}
-      </div>
-    </details>
-  );
-}
-
 function ToolDetail({
   label,
   content,
@@ -816,8 +793,6 @@ function TaskGroup({
   onEditMessage,
   onDismissMessage,
   onRunTask,
-  onEditTask,
-  onFollowUp,
   onStopTask,
   searchQuery,
   searchResultIndex,
@@ -830,8 +805,6 @@ function TaskGroup({
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
   onRunTask: (content: string) => void;
-  onEditTask: (content: string) => void;
-  onFollowUp: (content: string) => void;
   onStopTask: () => void;
   searchQuery: string;
   searchResultIndex: number;
@@ -861,7 +834,6 @@ function TaskGroup({
   }[status];
   const StatusIcon = statusMeta.icon;
   const activity = getTaskActivity(task);
-  const groupedActivity = groupConsecutiveTools(activity);
   const markdown = taskToMarkdown(toSearchableTask(task), number);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const latestTool = [...task.toolCalls].reverse().find(
@@ -905,10 +877,12 @@ function TaskGroup({
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    toast.success(`Task ${number} Markdown downloaded`);
   };
 
   return (
     <section
+      id={`task-${number}`}
       className={`overflow-hidden rounded-2xl border bg-background/70 transition ${
         status === "running"
           ? "border-amber-500/50 shadow-md ring-1 ring-amber-500/15"
@@ -966,18 +940,6 @@ function TaskGroup({
                 <RefreshCw />
                 Run again
               </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() => onEditTask(task.prompt.content)}
-              >
-                <Pencil />
-                Edit and resend
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() => onFollowUp(task.prompt.content)}
-              >
-                <MessageSquarePlus />
-                Create follow-up
-              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void copyTask()}>
                 <Clipboard />
                 Copy task and output
@@ -1009,17 +971,11 @@ function TaskGroup({
           onDismissMessage={onDismissMessage}
           searchQuery={searchQuery}
         />
-        {groupedActivity.map((item) =>
+        {activity.map((item) =>
           item.type === "message" ? (
             <MessageItem
               key={item.key}
               message={item.message}
-              searchQuery={searchQuery}
-            />
-          ) : item.type === "tool-group" ? (
-            <ToolCallGroup
-              key={item.key}
-              toolCalls={item.toolCalls}
               searchQuery={searchQuery}
             />
           ) : (
@@ -1133,6 +1089,15 @@ function formatElapsedTime(seconds: number) {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
+function contentFingerprint(content: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < content.length; index += 1) {
+    hash ^= content.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${content.length}:${hash >>> 0}`;
+}
+
 function EmptyState({
   serverStatus,
   agentType,
@@ -1226,7 +1191,6 @@ function MessageItem({
   const isDraft = message.id === undefined;
   const draft = isDraft ? (message as DraftMessage) : undefined;
   const isFailed = draft?.deliveryStatus === "failed";
-  const [outputMode, setOutputMode] = useState<"raw" | "rendered">("raw");
   const [searchOpen, setSearchOpen] = useState(false);
   const [outputSearchQuery, setOutputSearchQuery] = useState("");
   const effectiveSearchQuery = outputSearchQuery || globalSearchQuery;
@@ -1259,31 +1223,6 @@ function MessageItem({
           </div>
           {message.content && (
             <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() =>
-                  setOutputMode((mode) =>
-                    mode === "raw" ? "rendered" : "raw",
-                  )
-                }
-                className="grid size-9 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                title={
-                  outputMode === "raw"
-                    ? "Render Markdown"
-                    : "Show raw terminal output"
-                }
-                aria-label={
-                  outputMode === "raw"
-                    ? "Render Markdown"
-                    : "Show raw terminal output"
-                }
-              >
-                {outputMode === "raw" ? (
-                  <Eye className="size-3.5" />
-                ) : (
-                  <Code2 className="size-3.5" />
-                )}
-              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -1327,7 +1266,7 @@ function MessageItem({
             <ProcessedMessage
               messageContent={message.content}
               isUser={false}
-              renderMode={outputMode === "rendered" ? "markdown" : "raw"}
+              renderMode="raw"
               searchQuery={effectiveSearchQuery}
             />
           </div>
