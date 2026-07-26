@@ -798,11 +798,9 @@ function ToolCallCard({
         <span className="grid size-8 shrink-0 place-items-center rounded-lg border bg-background">
           <Wrench className="size-4" />
         </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">
-            {toolCall.name}
-          </span>
-          <span className="block text-xs text-muted-foreground">
+        <span className="flex min-w-0 flex-1 items-baseline gap-2">
+          <span className="min-w-0 truncate text-sm font-medium">{toolCall.name}</span>
+          <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
             {isFailed
               ? "Tool call failed"
               : isPending
