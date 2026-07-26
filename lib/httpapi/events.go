@@ -2,12 +2,14 @@ package httpapi
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/coder/quartz"
 
+	"github.com/coder/agentapi/lib/jsonlwatcher"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/util"
@@ -17,10 +19,12 @@ import (
 type EventType string
 
 const (
-	EventTypeMessageUpdate EventType = "message_update"
-	EventTypeStatusChange  EventType = "status_change"
-	EventTypeScreenUpdate  EventType = "screen_update"
-	EventTypeError         EventType = "agent_error"
+	EventTypeMessageUpdate     EventType = "message_update"
+	EventTypeStatusChange      EventType = "status_change"
+	EventTypeScreenUpdate      EventType = "screen_update"
+	EventTypeError             EventType = "agent_error"
+	EventTypeRichMessageUpdate EventType = "rich_message_update"
+	EventTypeHeartbeat         EventType = "heartbeat"
 )
 
 type AgentStatus string
@@ -61,6 +65,16 @@ type ErrorBody struct {
 	Time    time.Time     `json:"time" doc:"Timestamp when the error occurred"`
 }
 
+// RichMessageUpdateBody is the SSE payload for rich message updates.
+type RichMessageUpdateBody = jsonlwatcher.RichMessage
+
+// HeartbeatBody is a periodic SSE keep-alive. It lets clients detect
+// connections that died without a FIN (e.g. after system sleep), which
+// otherwise never produce an error on the client side.
+type HeartbeatBody struct {
+	Time time.Time `json:"time" doc:"Server time when the heartbeat was sent"`
+}
+
 type Event struct {
 	Type    EventType
 	Payload any
@@ -69,6 +83,9 @@ type Event struct {
 type EventEmitter struct {
 	mu                  sync.Mutex
 	messages            []st.ConversationMessage
+	richMessages        []jsonlwatcher.RichMessage
+	sessionEvents       []jsonlwatcher.SessionEvent
+	nextSessionEventID  int
 	status              AgentStatus
 	agentType           mf.AgentType
 	chans               map[int]chan Event
@@ -124,6 +141,8 @@ func WithClock(clock quartz.Clock) EventEmitterOption {
 func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 	e := &EventEmitter{
 		messages:            make([]st.ConversationMessage, 0),
+		sessionEvents:       make([]jsonlwatcher.SessionEvent, 0),
+		nextSessionEventID:  1,
 		status:              AgentStatusRunning,
 		chans:               make(map[int]chan Event),
 		subscriptionBufSize: defaultSubscriptionBufSize,
@@ -236,6 +255,57 @@ func (e *EventEmitter) EmitError(message string, level st.ErrorLevel) {
 	e.notifyChannels(EventTypeError, errorBody)
 }
 
+// EmitRichMessage emits a rich structured message from the JSONL watcher.
+// It stores the message for late subscriber replay. Messages are upserted
+// by (MessageID, Role) because parsers re-emit a message as its content
+// accumulates (e.g. Codex turn updates).
+func (e *EventEmitter) EmitRichMessage(msg jsonlwatcher.RichMessage) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	idx := -1
+	// Search from the end: updates target recent messages.
+	for i := len(e.richMessages) - 1; i >= 0; i-- {
+		if e.richMessages[i].MessageID == msg.MessageID && e.richMessages[i].Role == msg.Role {
+			idx = i
+			break
+		}
+	}
+	if idx >= 0 {
+		e.richMessages[idx] = msg
+	} else {
+		e.richMessages = append(e.richMessages, msg)
+	}
+	e.notifyChannels(EventTypeRichMessageUpdate, RichMessageUpdateBody(msg))
+}
+
+// RichMessages returns a snapshot of all rich messages received so far.
+// The emitter is the single store for rich messages: the JSONL watcher
+// parses and emits, the emitter deduplicates, replays, and serves reads.
+func (e *EventEmitter) RichMessages() []jsonlwatcher.RichMessage {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.richMessages)
+}
+
+// EmitSessionEvents stores normalized events in the same order as the source
+// JSONL records and assigns stable identifiers for the lifetime of this run.
+func (e *EventEmitter) EmitSessionEvents(events []jsonlwatcher.SessionEvent) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, event := range events {
+		event.EventID = e.nextSessionEventID
+		e.nextSessionEventID++
+		e.sessionEvents = append(e.sessionEvents, event)
+	}
+}
+
+func (e *EventEmitter) SessionEvents() []jsonlwatcher.SessionEvent {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.sessionEvents)
+}
+
 // Assumes the caller holds the lock.
 func (e *EventEmitter) currentStateAsEvents() []Event {
 	events := make([]Event, 0, len(e.messages)+2)
@@ -259,6 +329,14 @@ func (e *EventEmitter) currentStateAsEvents() []Event {
 		events = append(events, Event{
 			Type:    EventTypeError,
 			Payload: err,
+		})
+	}
+
+	// Include all rich message events for late subscriber replay
+	for _, msg := range e.richMessages {
+		events = append(events, Event{
+			Type:    EventTypeRichMessageUpdate,
+			Payload: RichMessageUpdateBody(msg),
 		})
 	}
 

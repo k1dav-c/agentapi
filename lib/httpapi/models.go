@@ -3,6 +3,7 @@ package httpapi
 import (
 	"time"
 
+	"github.com/coder/agentapi/lib/jsonlwatcher"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/util"
@@ -78,8 +79,50 @@ type MessageRequest struct {
 // MessageResponse represents a newly created message
 type MessageResponse struct {
 	Body struct {
-		Ok bool `json:"ok" doc:"Indicates whether the message was sent successfully. For messages of type 'user', success means detecting that the agent began executing the task described. For messages of type 'raw', success means the keystrokes were sent to the terminal."`
+		Ok     bool `json:"ok" doc:"Indicates whether the message was accepted."`
+		Queued bool `json:"queued" doc:"Indicates whether a user message was queued because the agent was busy."`
 	}
+}
+
+type QueuedMessage struct {
+	ID      int       `json:"id" doc:"Unique identifier for the queued message."`
+	Content string    `json:"content" doc:"Message content."`
+	Time    time.Time `json:"time" doc:"Timestamp when the message was queued."`
+}
+
+type QueueResponse struct {
+	Body struct {
+		Messages []QueuedMessage `json:"messages" nullable:"false" doc:"Messages waiting to be sent to the agent."`
+	}
+}
+
+type UpdateQueuedMessageRequest struct {
+	ID   int `path:"id" doc:"Queued message identifier."`
+	Body struct {
+		Content string `json:"content" minLength:"1" doc:"Updated message content."`
+	}
+}
+
+type DeleteQueuedMessageRequest struct {
+	ID int `path:"id" doc:"Queued message identifier."`
+}
+
+type QueueMutationResponse struct {
+	Body struct {
+		Ok bool `json:"ok"`
+	}
+}
+
+// RichMessagesResponse represents the list of rich structured messages
+type RichMessagesResponse struct {
+	Body struct {
+		Messages []jsonlwatcher.RichMessage `json:"messages" nullable:"false" doc:"List of rich messages with structured content blocks, model info, and usage"`
+	}
+}
+
+type SessionExportResponse struct {
+	ContentDisposition string `header:"Content-Disposition"`
+	Body               []jsonlwatcher.SessionEvent
 }
 
 type UploadResponse struct {

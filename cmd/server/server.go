@@ -161,6 +161,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	transport := "pty"
 	var process *termexec.Process
 	var acpResult *httpapi.SetupACPResult
+	var agentStartedAt time.Time
 
 	if printOpenAPI {
 		agentIO = nil
@@ -177,6 +178,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		agentIO = acpIO
 		transport = "acp"
 	} else {
+		agentStartedAt = time.Now()
 		proc, err := httpapi.SetupProcess(ctx, httpapi.SetupProcessConfig{
 			Program:        agent,
 			ProgramArgs:    argsToPass[1:],
@@ -191,6 +193,16 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		agentIO = proc
 	}
 	port := viper.GetInt(FlagPort)
+
+	// Extract the agent process PID for the JSONL watcher.
+	// The watcher uses this to find the agent's session JSONL file.
+	var agentPID int
+	if process != nil {
+		agentPID = process.Pid()
+	}
+
+	cwd, _ := os.Getwd()
+
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      agentType,
 		AgentIO:        agentIO,
@@ -200,6 +212,9 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		AllowedHosts:   viper.GetStringSlice(FlagAllowedHosts),
 		AllowedOrigins: viper.GetStringSlice(FlagAllowedOrigins),
 		InitialPrompt:  initialPrompt,
+		AgentPID:       agentPID,
+		AgentStartedAt: agentStartedAt,
+		CWD:            cwd,
 		StatePersistenceConfig: screentracker.StatePersistenceConfig{
 			StateFile: stateFile,
 			LoadState: loadState,

@@ -21,6 +21,7 @@ import (
 	"unicode"
 
 	"github.com/coder/agentapi/internal/version"
+	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/logctx"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	st "github.com/coder/agentapi/lib/screentracker"
@@ -33,6 +34,18 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"golang.org/x/xerrors"
+)
+
+const (
+	// messageQueueDispatchInterval is how often the queue dispatch loop
+	// checks whether the head of the queue can be sent to the agent.
+	messageQueueDispatchInterval = 500 * time.Millisecond
+	// sseHeartbeatInterval is how often a heartbeat event is sent to each
+	// /events subscriber so clients can detect silently dead connections.
+	sseHeartbeatInterval = 15 * time.Second
+	// maxQueueDispatchAttempts is how many consecutive non-transient send
+	// failures are tolerated before a queued message is dropped.
+	maxQueueDispatchAttempts = 5
 )
 
 // Server represents the HTTP server
@@ -54,6 +67,12 @@ type Server struct {
 	shutdownCtx  context.Context
 	shutdown     context.CancelFunc
 	transport    Transport
+	messageQueue []QueuedMessage
+	nextQueueID  int
+	// Consecutive non-validation dispatch failures for the queued message
+	// identified by queueFailID. Used to drop poison messages.
+	queueFailID    int
+	queueFailCount int
 }
 
 func (s *Server) NormalizeSchema(schema any) any {
@@ -113,6 +132,9 @@ type ServerConfig struct {
 	InitialPrompt          string
 	Clock                  quartz.Clock
 	StatePersistenceConfig st.StatePersistenceConfig
+	AgentPID               int // PID of the agent process, 0 to disable JSONL watcher
+	AgentStartedAt         time.Time
+	CWD                    string // Working directory (used by Codex resolver)
 }
 
 // Validate allowed hosts don't contain whitespace, commas, schemes, or ports.
@@ -325,6 +347,51 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	// asynchronously inside conversation.Start() via ReadyForInitialPrompt.
 	if config.AgentIO != nil {
 		s.conversation.Start(ctx)
+		s.startMessageQueue()
+	}
+
+	// Start the JSONL watcher to capture rich structured messages.
+	// This runs alongside the PTY conversation as a sidecar, providing
+	// structured content blocks, tool calls, thinking, and usage data.
+	if config.AgentPID > 0 {
+		var resolver jsonlwatcher.SessionResolver
+		var parser jsonlwatcher.LineParser
+		var sessionEventParser jsonlwatcher.SessionEventParser
+
+		switch config.AgentType {
+		case mf.AgentTypeClaude:
+			resolver = &jsonlwatcher.ClaudeResolver{PID: config.AgentPID}
+			parser = jsonlwatcher.NewClaudeParser()
+			sessionEventParser = jsonlwatcher.NewClaudeSessionEventParser()
+		case mf.AgentTypeCodex:
+			resolver = &jsonlwatcher.CodexResolver{
+				PID:       config.AgentPID,
+				CWD:       config.CWD,
+				NotBefore: config.AgentStartedAt,
+			}
+			parser = jsonlwatcher.NewCodexParser()
+			sessionEventParser = jsonlwatcher.NewCodexSessionEventParser()
+		}
+
+		if resolver != nil && parser != nil {
+			w := jsonlwatcher.New(jsonlwatcher.Config{
+				Resolver: resolver,
+				Parser:   parser,
+				Logger:   logger,
+				OnMessage: func(msg jsonlwatcher.RichMessage) {
+					emitter.EmitRichMessage(msg)
+				},
+				OnLine: func(line []byte) {
+					events, err := sessionEventParser.ParseSessionEvents(line)
+					if err != nil {
+						logger.Debug("Failed to normalize session event", "error", err)
+						return
+					}
+					emitter.EmitSessionEvents(events)
+				},
+			})
+			go w.Start(ctx)
+		}
 	}
 
 	return s, nil
@@ -394,9 +461,31 @@ func (s *Server) registerRoutes() {
 		o.Description = "Returns a list of messages representing the conversation history with the agent."
 	})
 
+	// GET /rich-messages endpoint
+	huma.Get(s.api, "/rich-messages", s.getRichMessages, func(o *huma.Operation) {
+		o.Description = "Returns a list of rich structured messages parsed from the agent's session log. " +
+			"Each message contains structured content blocks (text, thinking, tool_use, tool_result), " +
+			"model information, and token usage data. Only available for agent types with session log " +
+			"support (currently 'claude' and 'codex') running via PTY transport."
+	})
+
+	huma.Get(s.api, "/session/export", s.exportSession, func(o *huma.Operation) {
+		o.Description = "Downloads all normalized events from the current agent session, including text, tool calls, tool results, and system lifecycle events."
+	})
+
 	// POST /message endpoint
 	huma.Post(s.api, "/message", s.createMessage, func(o *huma.Operation) {
-		o.Description = "Send a message to the agent. For messages of type 'user', the agent's status must be 'stable' for the operation to complete successfully. Otherwise, this endpoint will return an error."
+		o.Description = "Send a message to the agent. User messages are queued when the agent is busy."
+	})
+
+	huma.Get(s.api, "/queue", s.getQueue, func(o *huma.Operation) {
+		o.Description = "Returns user messages waiting to be sent to the agent."
+	})
+	huma.Put(s.api, "/queue/{id}", s.updateQueuedMessage, func(o *huma.Operation) {
+		o.Description = "Updates a queued user message."
+	})
+	huma.Delete(s.api, "/queue/{id}", s.deleteQueuedMessage, func(o *huma.Operation) {
+		o.Description = "Deletes a queued user message."
 	})
 
 	huma.Post(s.api, "/upload", s.uploadFiles, func(o *huma.Operation) {
@@ -413,9 +502,11 @@ func (s *Server) registerRoutes() {
 		Middlewares: []func(huma.Context, func(huma.Context)){sseMiddleware},
 	}, map[string]any{
 		// Mapping of event type name to Go struct for that event.
-		"message_update": MessageUpdateBody{},
-		"status_change":  StatusChangeBody{},
-		"agent_error":    ErrorBody{},
+		"message_update":      MessageUpdateBody{},
+		"status_change":       StatusChangeBody{},
+		"agent_error":         ErrorBody{},
+		"rich_message_update": RichMessageUpdateBody{},
+		"heartbeat":           HeartbeatBody{},
 	}, s.subscribeEvents)
 
 	sse.Register(s.api, huma.Operation{
@@ -470,14 +561,53 @@ func (s *Server) getMessages(ctx context.Context, input *struct{}) (*MessagesRes
 	return resp, nil
 }
 
+// getRichMessages handles GET /rich-messages
+func (s *Server) getRichMessages(ctx context.Context, input *struct{}) (*RichMessagesResponse, error) {
+	resp := &RichMessagesResponse{}
+	resp.Body.Messages = s.emitter.RichMessages()
+	if resp.Body.Messages == nil {
+		resp.Body.Messages = []jsonlwatcher.RichMessage{}
+	}
+	return resp, nil
+}
+
+func (s *Server) exportSession(ctx context.Context, input *struct{}) (*SessionExportResponse, error) {
+	events := s.emitter.SessionEvents()
+	if events == nil {
+		events = []jsonlwatcher.SessionEvent{}
+	}
+	return &SessionExportResponse{
+		ContentDisposition: `attachment; filename="agentapi-session.jsonl"`,
+		Body:               events,
+	}, nil
+}
+
 // createMessage handles POST /message
 func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*MessageResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	resp := &MessageResponse{}
 	switch input.Body.Type {
 	case MessageTypeUser:
+		if strings.TrimSpace(input.Body.Content) == "" {
+			return nil, huma.Error400BadRequest("message must not be empty")
+		}
+		// Enqueue when earlier messages are still waiting, even if the
+		// agent is stable, so messages are delivered in FIFO order.
+		if len(s.messageQueue) > 0 || s.conversation.Status() != st.ConversationStatusStable {
+			s.enqueueMessageLocked(input.Body.Content)
+			resp.Body.Ok = true
+			resp.Body.Queued = true
+			return resp, nil
+		}
 		if err := s.conversation.Send(FormatMessage(s.agentType, input.Body.Content)...); err != nil {
+			if errors.Is(err, st.ErrMessageValidationChanging) {
+				s.enqueueMessageLocked(input.Body.Content)
+				resp.Body.Ok = true
+				resp.Body.Queued = true
+				return resp, nil
+			}
 			return nil, xerrors.Errorf("failed to send message: %w", err)
 		}
 	case MessageTypeRaw:
@@ -486,10 +616,106 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 		}
 	}
 
-	resp := &MessageResponse{}
 	resp.Body.Ok = true
 
 	return resp, nil
+}
+
+func (s *Server) getQueue(ctx context.Context, input *struct{}) (*QueueResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	resp := &QueueResponse{}
+	resp.Body.Messages = append([]QueuedMessage(nil), s.messageQueue...)
+	return resp, nil
+}
+
+func (s *Server) updateQueuedMessage(ctx context.Context, input *UpdateQueuedMessageRequest) (*QueueMutationResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	content := strings.TrimSpace(input.Body.Content)
+	if content == "" {
+		return nil, huma.Error400BadRequest("message must not be empty")
+	}
+	for i := range s.messageQueue {
+		if s.messageQueue[i].ID == input.ID {
+			s.messageQueue[i].Content = content
+			resp := &QueueMutationResponse{}
+			resp.Body.Ok = true
+			return resp, nil
+		}
+	}
+	return nil, huma.Error404NotFound("queued message not found")
+}
+
+func (s *Server) deleteQueuedMessage(ctx context.Context, input *DeleteQueuedMessageRequest) (*QueueMutationResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.messageQueue {
+		if s.messageQueue[i].ID == input.ID {
+			s.messageQueue = append(s.messageQueue[:i], s.messageQueue[i+1:]...)
+			resp := &QueueMutationResponse{}
+			resp.Body.Ok = true
+			return resp, nil
+		}
+	}
+	return nil, huma.Error404NotFound("queued message not found")
+}
+
+func (s *Server) enqueueMessageLocked(content string) {
+	s.nextQueueID++
+	s.messageQueue = append(s.messageQueue, QueuedMessage{
+		ID:      s.nextQueueID,
+		Content: content,
+		Time:    s.clock.Now(),
+	})
+}
+
+// startMessageQueue starts the queue dispatch loop. Dispatch is driven by
+// polling rather than by subscribing to status events: an event subscriber
+// channel is closed by the emitter when it fills up (which a slow
+// conversation.Send call could cause), and status events don't fire again
+// when a message fails transient validation while the agent stays stable.
+// Polling is immune to both.
+func (s *Server) startMessageQueue() {
+	s.clock.TickerFunc(s.shutdownCtx, messageQueueDispatchInterval, func() error {
+		s.dispatchNextQueuedMessage()
+		return nil
+	}, "messageQueueDispatch")
+}
+
+func (s *Server) dispatchNextQueuedMessage() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.messageQueue) == 0 || s.conversation.Status() != st.ConversationStatusStable {
+		return
+	}
+	next := s.messageQueue[0]
+	if err := s.conversation.Send(FormatMessage(s.agentType, next.Content)...); err != nil {
+		if errors.Is(err, st.ErrMessageValidationChanging) {
+			// Agent became busy again; retry on a later tick.
+			return
+		}
+		if s.queueFailID != next.ID {
+			s.queueFailID = next.ID
+			s.queueFailCount = 0
+		}
+		s.queueFailCount++
+		s.logger.Error("Failed to send queued message", "queueId", next.ID, "attempt", s.queueFailCount, "error", err)
+		if s.queueFailCount >= maxQueueDispatchAttempts {
+			// Drop the poison message so it doesn't block the queue forever.
+			s.messageQueue = s.messageQueue[1:]
+			s.emitter.EmitError(
+				fmt.Sprintf("Dropped queued message after %d failed attempts: %v", s.queueFailCount, err),
+				st.ErrorLevelError,
+			)
+		}
+		return
+	}
+	s.messageQueue = s.messageQueue[1:]
 }
 
 // uploadFiles handles POST /upload
@@ -553,6 +779,9 @@ func (s *Server) subscribeEvents(ctx context.Context, input *struct{}, send sse.
 		}
 	}
 
+	heartbeat := s.clock.NewTicker(sseHeartbeatInterval, "sseHeartbeat")
+	defer heartbeat.Stop()
+
 	for {
 		select {
 		case event, ok := <-ch:
@@ -565,6 +794,11 @@ func (s *Server) subscribeEvents(ctx context.Context, input *struct{}, send sse.
 			}
 			if err := send.Data(event.Payload); err != nil {
 				s.logger.Error("Failed to send event", "subscriberId", subscriberId, "error", err)
+				return
+			}
+		case <-heartbeat.C:
+			if err := send.Data(HeartbeatBody{Time: s.clock.Now()}); err != nil {
+				s.logger.Error("Failed to send heartbeat", "subscriberId", subscriberId, "error", err)
 				return
 			}
 		case <-s.shutdownCtx.Done():

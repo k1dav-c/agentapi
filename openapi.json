@@ -119,6 +119,20 @@
         },
         "type": "object"
       },
+      "HeartbeatBody": {
+        "additionalProperties": false,
+        "properties": {
+          "time": {
+            "description": "Server time when the heartbeat was sent",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "time"
+        ],
+        "type": "object"
+      },
       "Message": {
         "additionalProperties": false,
         "properties": {
@@ -187,12 +201,17 @@
             "type": "string"
           },
           "ok": {
-            "description": "Indicates whether the message was sent successfully. For messages of type 'user', success means detecting that the agent began executing the task described. For messages of type 'raw', success means the keystrokes were sent to the terminal.",
+            "description": "Indicates whether the message was accepted.",
+            "type": "boolean"
+          },
+          "queued": {
+            "description": "Indicates whether a user message was queued because the agent was busy.",
             "type": "boolean"
           }
         },
         "required": [
-          "ok"
+          "ok",
+          "queued"
         ],
         "type": "object"
       },
@@ -258,6 +277,181 @@
         ],
         "type": "object"
       },
+      "QueueMutationResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/QueueMutationResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "QueueResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/QueueResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "messages": {
+            "description": "Messages waiting to be sent to the agent.",
+            "items": {
+              "$ref": "#/components/schemas/QueuedMessage"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "type": "object"
+      },
+      "QueuedMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "Message content.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier for the queued message.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "time": {
+            "description": "Timestamp when the message was queued.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content",
+          "id",
+          "time"
+        ],
+        "type": "object"
+      },
+      "RichContentBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "is_error": {
+            "description": "Whether the tool result is an error",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "Tool lifecycle status: running, completed, or failed",
+            "type": "string"
+          },
+          "text": {
+            "description": "Text content (for text and tool_result blocks)",
+            "type": "string"
+          },
+          "thinking": {
+            "description": "Thinking/reasoning content",
+            "type": "string"
+          },
+          "tool_input": {
+            "description": "Tool call input parameters"
+          },
+          "tool_name": {
+            "description": "Name of the tool being called",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "Tool use identifier",
+            "type": "string"
+          },
+          "type": {
+            "description": "Content block type: text, thinking, tool_use, or tool_result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "RichMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "Structured content blocks",
+            "items": {
+              "$ref": "#/components/schemas/RichContentBlock"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "message_id": {
+            "description": "Agent's internal message ID",
+            "type": "string"
+          },
+          "model": {
+            "description": "Model that generated this message",
+            "type": "string"
+          },
+          "role": {
+            "description": "Role of the message author (user or assistant)",
+            "type": "string"
+          },
+          "stop_reason": {
+            "description": "Why the model stopped generating",
+            "type": "string"
+          },
+          "timestamp": {
+            "description": "Timestamp of the message",
+            "format": "date-time",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/Usage",
+            "description": "Token usage information"
+          }
+        },
+        "required": [
+          "content",
+          "message_id",
+          "role",
+          "timestamp"
+        ],
+        "type": "object"
+      },
+      "RichMessagesResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/RichMessagesResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "messages": {
+            "description": "List of rich messages with structured content blocks, model info, and usage",
+            "items": {
+              "$ref": "#/components/schemas/RichMessage"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "type": "object"
+      },
       "ScreenUpdateBody": {
         "additionalProperties": false,
         "properties": {
@@ -267,6 +461,58 @@
         },
         "required": [
           "screen"
+        ],
+        "type": "object"
+      },
+      "SessionEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "Text or tool result content",
+            "type": "string"
+          },
+          "id": {
+            "description": "Monotonic event identifier within this AgentAPI run",
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "Event kind: system, text, tool_call, or tool_result",
+            "type": "string"
+          },
+          "role": {
+            "description": "Message role when applicable",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "Agent session identifier",
+            "type": "string"
+          },
+          "source_id": {
+            "description": "Original agent event or message identifier",
+            "type": "string"
+          },
+          "time": {
+            "description": "Timestamp recorded by the agent session",
+            "format": "date-time",
+            "type": "string"
+          },
+          "tool_input": {
+            "description": "Tool input for tool_call events"
+          },
+          "tool_name": {
+            "description": "Tool name for tool_call events",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "Identifier pairing a tool call with its result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "time"
         ],
         "type": "object"
       },
@@ -327,6 +573,27 @@
         "title": "Transport",
         "type": "string"
       },
+      "UpdateQueuedMessageRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/UpdateQueuedMessageRequestBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "content": {
+            "description": "Updated message content.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "type": "object"
+      },
       "UploadResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -349,6 +616,34 @@
         "required": [
           "filePath",
           "ok"
+        ],
+        "type": "object"
+      },
+      "Usage": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_creation_input_tokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "cache_read_input_tokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cache_creation_input_tokens",
+          "cache_read_input_tokens",
+          "input_tokens",
+          "output_tokens"
         ],
         "type": "object"
       }
@@ -402,6 +697,32 @@
                       {
                         "properties": {
                           "data": {
+                            "$ref": "#/components/schemas/HeartbeatBody"
+                          },
+                          "event": {
+                            "const": "heartbeat",
+                            "description": "The event name.",
+                            "type": "string"
+                          },
+                          "id": {
+                            "description": "The event ID.",
+                            "type": "integer"
+                          },
+                          "retry": {
+                            "description": "The retry time in milliseconds.",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "data",
+                          "event"
+                        ],
+                        "title": "Event heartbeat",
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "data": {
                             "$ref": "#/components/schemas/MessageUpdateBody"
                           },
                           "event": {
@@ -423,6 +744,32 @@
                           "event"
                         ],
                         "title": "Event message_update",
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "data": {
+                            "$ref": "#/components/schemas/RichMessage"
+                          },
+                          "event": {
+                            "const": "rich_message_update",
+                            "description": "The event name.",
+                            "type": "string"
+                          },
+                          "id": {
+                            "description": "The event ID.",
+                            "type": "integer"
+                          },
+                          "retry": {
+                            "description": "The retry time in milliseconds.",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "data",
+                          "event"
+                        ],
+                        "title": "Event rich_message_update",
                         "type": "object"
                       },
                       {
@@ -476,7 +823,7 @@
     },
     "/message": {
       "post": {
-        "description": "Send a message to the agent. For messages of type 'user', the agent's status must be 'stable' for the operation to complete successfully. Otherwise, this endpoint will return an error.",
+        "description": "Send a message to the agent. User messages are queued when the agent is busy.",
         "operationId": "post-message",
         "requestBody": {
           "content": {
@@ -541,6 +888,196 @@
           }
         },
         "summary": "Get messages"
+      }
+    },
+    "/queue": {
+      "get": {
+        "description": "Returns user messages waiting to be sent to the agent.",
+        "operationId": "get-queue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get queue"
+      }
+    },
+    "/queue/{id}": {
+      "delete": {
+        "description": "Deletes a queued user message.",
+        "operationId": "delete-queue-by-id",
+        "parameters": [
+          {
+            "description": "Queued message identifier.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Queued message identifier.",
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueMutationResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete queue by ID"
+      },
+      "put": {
+        "description": "Updates a queued user message.",
+        "operationId": "put-queue-by-id",
+        "parameters": [
+          {
+            "description": "Queued message identifier.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Queued message identifier.",
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateQueuedMessageRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueMutationResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Put queue by ID"
+      }
+    },
+    "/rich-messages": {
+      "get": {
+        "description": "Returns a list of rich structured messages parsed from the agent's session log. Each message contains structured content blocks (text, thinking, tool_use, tool_result), model information, and token usage data. Only available for agent types with session log support (currently 'claude' and 'codex') running via PTY transport.",
+        "operationId": "get-rich-messages",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RichMessagesResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get rich messages"
+      }
+    },
+    "/session/export": {
+      "get": {
+        "description": "Downloads all normalized events from the current agent session, including text, tool calls, tool results, and system lifecycle events.",
+        "operationId": "list-session-export",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SessionEvent"
+                  },
+                  "nullable": true,
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List session export"
       }
     },
     "/status": {

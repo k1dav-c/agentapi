@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -104,6 +105,67 @@ func TestServer_redirectToChat(t *testing.T) {
 			require.Equal(t, tc.expectedLocation, loc, "expected Location %q, got %q", tc.expectedLocation, loc)
 		})
 	}
+}
+
+func TestServer_MessageQueueAPI(t *testing.T) {
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeClaude,
+		AgentIO:        nil,
+		Port:           0,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+	})
+	require.NoError(t, err)
+	tsServer := httptest.NewServer(srv.Handler())
+	t.Cleanup(tsServer.Close)
+
+	postBody := bytes.NewBufferString(`{"content":"queued task","type":"user"}`)
+	resp, err := http.Post(tsServer.URL+"/message", "application/json", postBody)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var posted struct {
+		Ok     bool `json:"ok"`
+		Queued bool `json:"queued"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&posted))
+	require.True(t, posted.Ok)
+	require.True(t, posted.Queued)
+
+	resp, err = http.Get(tsServer.URL + "/queue")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	var queue struct {
+		Messages []httpapi.QueuedMessage `json:"messages"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&queue))
+	require.Len(t, queue.Messages, 1)
+	require.Equal(t, "queued task", queue.Messages[0].Content)
+
+	updateBody := bytes.NewBufferString(`{"content":"updated task"}`)
+	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/queue/%d", tsServer.URL, queue.Messages[0].ID), updateBody)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	req, err = http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/queue/%d", tsServer.URL, queue.Messages[0].ID), nil)
+	require.NoError(t, err)
+	resp, err = http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, err = http.Get(tsServer.URL + "/queue")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&queue))
+	require.Empty(t, queue.Messages)
 }
 
 func TestServer_AllowedHosts(t *testing.T) {

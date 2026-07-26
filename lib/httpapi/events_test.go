@@ -1,14 +1,33 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/coder/agentapi/lib/jsonlwatcher"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestEventEmitterSessionEvents(t *testing.T) {
+	emitter := NewEventEmitter()
+	emitter.EmitSessionEvents([]jsonlwatcher.SessionEvent{
+		{Kind: "text"},
+		{Kind: "tool_call", ToolInput: json.RawMessage(`{"cmd":"ls"}`)},
+	})
+
+	events := emitter.SessionEvents()
+	require.Len(t, events, 2)
+	require.Equal(t, 1, events[0].EventID)
+	require.Equal(t, 2, events[1].EventID)
+
+	events[0].Kind = "changed"
+	require.Equal(t, "text", emitter.SessionEvents()[0].Kind)
+}
 
 func TestEventEmitter(t *testing.T) {
 	t.Run("single-subscription", func(t *testing.T) {
@@ -198,4 +217,5 @@ func TestEventEmitter(t *testing.T) {
 		assert.Equal(t, st.ErrorLevelWarning, errorBody.Level)
 		assert.Equal(t, newTime, errorBody.Time)
 	})
+
 }
