@@ -1,14 +1,12 @@
 "use client";
 
 import {useEffect, useState} from "react";
-import {MessagesSquare, RefreshCw, TerminalSquare} from "lucide-react";
+import {RefreshCw} from "lucide-react";
 import {useChat} from "./chat-provider";
 import MessageInput from "./message-input";
 import MessageList from "./message-list";
 import {Explorer} from "./explorer";
-import {TerminalScreen} from "./terminal-screen";
 import {Button} from "./ui/button";
-import {Tabs, TabsList, TabsTrigger} from "./ui/tabs";
 
 export function Chat() {
   const [suggestedPrompt, setSuggestedPrompt] = useState("");
@@ -27,7 +25,6 @@ export function Chat() {
     reconnectNow,
   } = useChat();
   const [reconnectSeconds, setReconnectSeconds] = useState(0);
-  const [view, setView] = useState<"chat" | "terminal">("chat");
 
   useEffect(() => {
     if (!nextReconnectAt) {
@@ -78,16 +75,9 @@ export function Chat() {
           </Button>
         </div>
       )}
-      <div className="flex items-center gap-2 border-b bg-background/80 px-3 py-2 sm:px-6">
-        <Tabs className="min-w-0 flex-1" value={view} onValueChange={(value) => setView(value as typeof view)}>
-          <TabsList className="grid w-full grid-cols-2 sm:w-64">
-            <TabsTrigger value="chat"><MessagesSquare />Chat</TabsTrigger>
-            <TabsTrigger value="terminal"><TerminalSquare />Terminal</TabsTrigger>
-          </TabsList>
-        </Tabs>
+      <div className="flex justify-end border-b bg-background/80 px-3 py-2 sm:px-6">
         <Explorer
           onNavigateTask={(number) => {
-            setView("chat");
             window.requestAnimationFrame(() =>
               document.getElementById(`task-${number}`)?.scrollIntoView({
                 behavior: "smooth",
@@ -97,24 +87,20 @@ export function Chat() {
           }}
         />
       </div>
-      {view === "chat" ? (
-        <MessageList
-          messages={messages}
-          richMessages={richMessages}
-          serverStatus={serverStatus}
-          agentType={agentType}
-          onSelectPrompt={setSuggestedPrompt}
-          onRetryMessage={retryFailedMessage}
-          onEditMessage={(clientId, content) => {
-            dismissFailedMessage(clientId);
-            setSuggestedPrompt(content);
-          }}
-          onDismissMessage={dismissFailedMessage}
-          onStopTask={() => void sendMessage("\x1b", "raw")}
-        />
-      ) : (
-        <TerminalScreen />
-      )}
+      <MessageList
+        messages={messages}
+        richMessages={richMessages}
+        serverStatus={serverStatus}
+        agentType={agentType}
+        onSelectPrompt={setSuggestedPrompt}
+        onRetryMessage={retryFailedMessage}
+        onEditMessage={(clientId, content) => {
+          dismissFailedMessage(clientId);
+          setSuggestedPrompt(content);
+        }}
+        onDismissMessage={dismissFailedMessage}
+        onStopTask={() => void sendMessage("\x1b", "raw")}
+      />
       <MessageInput
         onSendMessage={sendMessage}
         disabled={loading}
