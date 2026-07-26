@@ -302,8 +302,10 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		}
 	default:
 		// Close the process
-		if err := process.Close(logger, 5*time.Second); err != nil {
-			logger.Error("Failed to close process cleanly", "error", err)
+		if process != nil {
+			if err := process.Close(logger, 5*time.Second); err != nil {
+				logger.Error("Failed to close process cleanly", "error", err)
+			}
 		}
 	}
 	return nil
