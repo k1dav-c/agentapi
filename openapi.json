@@ -10,6 +10,114 @@
         "title": "AgentStatus",
         "type": "string"
       },
+      "BackgroundTask": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_type": {
+            "description": "Agent family whose tool metadata produced the task.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Agent-provided background task or session identifier.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Human-readable task name derived from the tool call.",
+            "type": "string"
+          },
+          "output_path": {
+            "description": "Discovered output file path when the agent reported one.",
+            "type": "string"
+          },
+          "started_at": {
+            "description": "Timestamp of the background tool call.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "description": "Best-known task status: running, completed, failed, or unknown.",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "Structured tool call identifier.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "Timestamp of the latest related tool result.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_type",
+          "id",
+          "name",
+          "started_at",
+          "status",
+          "tool_use_id",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "BackgroundTaskOutputResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/BackgroundTaskOutputResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "content",
+          "path",
+          "size",
+          "task_id",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "BackgroundTasksResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/BackgroundTasksResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "tasks": {
+            "description": "Background tasks discovered from structured agent tool metadata.",
+            "items": {
+              "$ref": "#/components/schemas/BackgroundTask"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tasks"
+        ],
+        "type": "object"
+      },
       "ConversationRole": {
         "enum": [
           "agent",
@@ -564,6 +672,41 @@
         ],
         "type": "object"
       },
+      "TitleResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/TitleResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "agent_type": {
+            "description": "Type of the agent being used by the server.",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentStatus",
+            "description": "Current agent status."
+          },
+          "task": {
+            "description": "Latest user task used to derive the title. Empty before the first task.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Current human-readable session title derived from the latest user task and agent status.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_type",
+          "status",
+          "task",
+          "title"
+        ],
+        "type": "object"
+      },
       "Transport": {
         "enum": [
           "acp",
@@ -656,6 +799,90 @@
   },
   "openapi": "3.0.3",
   "paths": {
+    "/background-tasks": {
+      "get": {
+        "description": "Lists Claude Code and Codex background tasks discovered from structured tool calls and results.",
+        "operationId": "get-background-tasks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundTasksResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get background tasks"
+      }
+    },
+    "/background-tasks/{id}/output": {
+      "get": {
+        "description": "Returns the tail of a discovered background task output file. Arbitrary filesystem paths are not accepted.",
+        "operationId": "get-background-tasks-by-id-output",
+        "parameters": [
+          {
+            "description": "Background task identifier.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Background task identifier.",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of trailing bytes to return.",
+            "explode": false,
+            "in": "query",
+            "name": "tail",
+            "schema": {
+              "default": 131072,
+              "description": "Maximum number of trailing bytes to return.",
+              "format": "int64",
+              "maximum": 1048576,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundTaskOutputResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get background tasks by ID output"
+      }
+    },
     "/events": {
       "get": {
         "description": "The events are sent as Server-Sent Events (SSE). Initially, the endpoint returns a list of events needed to reconstruct the current state of the conversation and the agent's status. After that, it only returns events that have occurred since the last event was sent.\n\nNote: When an agent is running, the last message in the conversation history is updated frequently, and the endpoint sends a new message update event each time.",
@@ -1107,6 +1334,35 @@
           }
         },
         "summary": "Get status"
+      }
+    },
+    "/title": {
+      "get": {
+        "description": "Returns the current human-readable session title and the server state used to derive it.",
+        "operationId": "get-title",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TitleResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get title"
       }
     },
     "/upload": {

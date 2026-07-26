@@ -63,6 +63,7 @@ type Server struct {
 	emitter      *EventEmitter
 	chatBasePath string
 	tempDir      string
+	cwd          string
 	clock        quartz.Clock
 	shutdownCtx  context.Context
 	shutdown     context.CancelFunc
@@ -330,6 +331,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		emitter:      emitter,
 		chatBasePath: strings.TrimSuffix(config.ChatBasePath, "/"),
 		tempDir:      tempDir,
+		cwd:          config.CWD,
 		clock:        config.Clock,
 		shutdownCtx:  shutdownCtx,
 		shutdown:     shutdownCancel,

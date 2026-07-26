@@ -59,6 +59,51 @@ type StatusResponse struct {
 	}
 }
 
+// TitleResponse describes the current session title and the state used to
+// derive it. Connection-only states such as browser offline/reconnecting are
+// intentionally not represented because they are client-local.
+type TitleResponse struct {
+	Body struct {
+		Title     string       `json:"title" doc:"Current human-readable session title derived from the latest user task and agent status."`
+		Task      string       `json:"task" doc:"Latest user task used to derive the title. Empty before the first task."`
+		Status    AgentStatus  `json:"status" doc:"Current agent status."`
+		AgentType mf.AgentType `json:"agent_type" doc:"Type of the agent being used by the server."`
+	}
+}
+
+type BackgroundTask struct {
+	ID         string    `json:"id" doc:"Agent-provided background task or session identifier."`
+	Name       string    `json:"name" doc:"Human-readable task name derived from the tool call."`
+	Status     string    `json:"status" doc:"Best-known task status: running, completed, failed, or unknown."`
+	AgentType  string    `json:"agent_type" doc:"Agent family whose tool metadata produced the task."`
+	ToolUseID  string    `json:"tool_use_id" doc:"Structured tool call identifier."`
+	OutputPath string    `json:"output_path,omitempty" doc:"Discovered output file path when the agent reported one."`
+	StartedAt  time.Time `json:"started_at" doc:"Timestamp of the background tool call."`
+	UpdatedAt  time.Time `json:"updated_at" doc:"Timestamp of the latest related tool result."`
+	Output     string    `json:"-"`
+}
+
+type BackgroundTasksResponse struct {
+	Body struct {
+		Tasks []BackgroundTask `json:"tasks" nullable:"false" doc:"Background tasks discovered from structured agent tool metadata."`
+	}
+}
+
+type BackgroundTaskOutputRequest struct {
+	ID   string `path:"id" doc:"Background task identifier."`
+	Tail int    `query:"tail" minimum:"1" maximum:"1048576" default:"131072" doc:"Maximum number of trailing bytes to return."`
+}
+
+type BackgroundTaskOutputResponse struct {
+	Body struct {
+		TaskID    string `json:"task_id"`
+		Path      string `json:"path"`
+		Content   string `json:"content"`
+		Size      int64  `json:"size"`
+		Truncated bool   `json:"truncated"`
+	}
+}
+
 // MessagesResponse represents the list of messages
 type MessagesResponse struct {
 	Body struct {
