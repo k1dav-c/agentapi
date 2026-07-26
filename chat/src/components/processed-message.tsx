@@ -90,6 +90,8 @@ function remarkLinkify() {
 interface ProcessedMessageProps {
   messageContent: string;
   isUser: boolean;
+  renderMode?: "raw" | "markdown";
+  searchQuery?: string;
 }
 
 function linkifyTerminalText(content: string) {
@@ -126,11 +128,23 @@ function linkifyTerminalText(content: string) {
 export const ProcessedMessage = React.memo(function ProcessedMessage({
   messageContent,
   isUser,
+  renderMode = isUser ? "markdown" : "raw",
+  searchQuery = "",
 }: ProcessedMessageProps) {
-  if (!isUser) {
+  if (renderMode === "markdown" && searchQuery.trim()) {
+    return (
+      <div className="min-w-0 whitespace-pre-wrap text-left text-sm leading-6">
+        {highlightTerminalText(messageContent, searchQuery)}
+      </div>
+    );
+  }
+
+  if (renderMode === "raw") {
     return (
       <div className="min-w-0 overflow-x-auto whitespace-pre text-left font-mono text-[13px] leading-5 [tab-size:4]">
-        {linkifyTerminalText(messageContent)}
+        {searchQuery
+          ? highlightTerminalText(messageContent, searchQuery)
+          : linkifyTerminalText(messageContent)}
       </div>
     );
   }
@@ -167,3 +181,27 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
     </div>
   );
 });
+
+function highlightTerminalText(content: string, query: string) {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) return linkifyTerminalText(content);
+
+  const expression = new RegExp(
+    `(${normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
+    "giu",
+  );
+  return content.split(expression).map((part, index) =>
+    part.toLocaleLowerCase() === normalizedQuery.toLocaleLowerCase() ? (
+      <mark
+        key={`${index}-${part}`}
+        className="rounded-sm bg-amber-300 px-0.5 text-black"
+      >
+        {part}
+      </mark>
+    ) : (
+      <React.Fragment key={`${index}-${part}`}>
+        {linkifyTerminalText(part)}
+      </React.Fragment>
+    ),
+  );
+}

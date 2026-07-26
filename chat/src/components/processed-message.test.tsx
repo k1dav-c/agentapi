@@ -48,4 +48,27 @@ describe("ProcessedMessage links", () => {
     expect(html).toContain("gpt-5.6-sol     /model");
     expect(html).toContain("~/agentapi                       │");
   });
+
+  test("can render agent output as Markdown", () => {
+    const html = renderToStaticMarkup(
+      <ProcessedMessage
+        messageContent="**Completed**"
+        isUser={false}
+        renderMode="markdown"
+      />,
+    );
+    expect(html).toContain("<strong>Completed</strong>");
+  });
+
+  test("highlights case-insensitive raw output search matches", () => {
+    const html = renderToStaticMarkup(
+      <ProcessedMessage
+        messageContent="Build complete. BUILD passed."
+        isUser={false}
+        searchQuery="build"
+      />,
+    );
+    expect(html.match(/<mark/g)?.length).toBe(2);
+    expect(html).toContain(">Build</mark>");
+  });
 });
