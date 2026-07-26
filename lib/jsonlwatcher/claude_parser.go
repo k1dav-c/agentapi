@@ -40,7 +40,22 @@ func (p *ClaudeParser) ParseLine(line []byte) ([]RichMessage, error) {
 	}
 }
 
-// Flush finalizes any pending assistant messages.
+// FlushCompleted finalizes only pending messages that have a terminal stop_reason.
+func (p *ClaudeParser) FlushCompleted() []RichMessage {
+	var result []RichMessage
+	for id, msg := range p.pending {
+		if msg.StopReason != "" {
+			result = append(result, *msg)
+			delete(p.pending, id)
+			if p.lastPendingID == id {
+				p.lastPendingID = ""
+			}
+		}
+	}
+	return result
+}
+
+// Flush finalizes all pending assistant messages regardless of state.
 func (p *ClaudeParser) Flush() []RichMessage {
 	return p.finalizePending()
 }

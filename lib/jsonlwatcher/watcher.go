@@ -143,9 +143,17 @@ func (w *Watcher) tailFile(ctx context.Context, path string) {
 			w.processLine(line)
 		}
 
+		// Flush only completed messages (those with a terminal stop_reason).
+		// Without this, the last assistant message (with stop_reason="end_turn")
+		// stays in the parser's pending state indefinitely because no subsequent
+		// JSONL line arrives to trigger finalization. We use FlushCompleted
+		// instead of Flush to avoid emitting partial messages that are still
+		// being assembled across multiple JSONL lines.
+		w.emit(w.parser.FlushCompleted())
+
 		select {
 		case <-ctx.Done():
-			// Flush any pending messages from the parser
+			// Flush all pending messages on shutdown, even incomplete ones.
 			w.emit(w.parser.Flush())
 			return
 		case <-pollTicker.C:

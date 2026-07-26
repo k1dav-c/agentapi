@@ -80,7 +80,12 @@ type LineParser interface {
 	// ParseLine processes a single JSONL line.
 	// Returns completed (fully assembled) messages ready to emit.
 	ParseLine(line []byte) (completed []RichMessage, err error)
-	// Flush finalizes any pending incomplete messages (e.g., on shutdown).
+	// FlushCompleted finalizes only pending messages that have a terminal
+	// stop_reason (e.g. "end_turn", "max_tokens"). Messages still being
+	// assembled (no stop_reason yet) are left in pending. This is safe to
+	// call on every poll cycle without risk of splitting an in-progress turn.
+	FlushCompleted() []RichMessage
+	// Flush finalizes all pending messages regardless of state (e.g., on shutdown).
 	Flush() []RichMessage
 }
 

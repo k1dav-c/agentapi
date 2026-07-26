@@ -102,6 +102,13 @@ func (p *CodexParser) ParseLine(line []byte) ([]RichMessage, error) {
 	}
 }
 
+// FlushCompleted finalizes only completed pending turns.
+// Codex turns are always complete when in pending state (each event
+// is self-contained), so this behaves the same as Flush.
+func (p *CodexParser) FlushCompleted() []RichMessage {
+	return p.finalizeTurn()
+}
+
 // Flush finalizes any pending turn.
 func (p *CodexParser) Flush() []RichMessage {
 	return p.finalizeTurn()
