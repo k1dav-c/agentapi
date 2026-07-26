@@ -1,0 +1,16 @@
+{"type":"session_meta","timestamp":"2026-07-24T10:35:26.383Z","payload":{"session_id":"test-session","cwd":"/home/user/project","originator":"codex-tui","cli_version":"0.144.6"}}
+{"type":"event_msg","timestamp":"2026-07-24T10:35:27.000Z","payload":{"type":"task_started"}}
+{"type":"response_item","timestamp":"2026-07-24T10:35:27.100Z","payload":{"type":"message","id":"sys-1","role":"developer","content":[{"type":"input_text","text":"You are Codex, an agent based on GPT-5."}]}}
+{"type":"response_item","timestamp":"2026-07-24T10:35:27.200Z","payload":{"type":"message","id":"user-1","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/home/user/project</cwd>\n</environment_context>"},{"type":"input_text","text":"List the files in the current directory"}]}}
+{"type":"event_msg","timestamp":"2026-07-24T10:35:27.300Z","payload":{"type":"user_message"}}
+{"type":"response_item","timestamp":"2026-07-24T10:35:28.000Z","payload":{"type":"reasoning","id":"rs_001","summary":[],"encrypted_content":"gAAAA..."}}
+{"type":"event_msg","timestamp":"2026-07-24T10:35:28.100Z","payload":{"type":"agent_message"}}
+{"type":"response_item","timestamp":"2026-07-24T10:35:28.200Z","payload":{"type":"message","id":"msg_001","role":"assistant","content":[{"type":"output_text","text":"Let me check what files are in your directory."}]}}
+{"type":"response_item","timestamp":"2026-07-24T10:35:28.300Z","payload":{"type":"function_call","id":"fc_001","name":"exec_command","call_id":"call_abc123","arguments":"{\"cmd\":\"ls -la\"}"}}
+{"type":"response_item","timestamp":"2026-07-24T10:35:29.000Z","payload":{"type":"function_call_output","id":"fco_001","call_id":"call_abc123","output":"total 8\ndrwxr-xr-x 2 user user 4096 Jul 24 10:35 .\n-rw-r--r-- 1 user user  100 Jul 24 10:35 main.go"}}
+{"type":"event_msg","timestamp":"2026-07-24T10:35:29.100Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":500,"cached_input_tokens":200,"output_tokens":100,"reasoning_output_tokens":20,"total_tokens":600}}}}
+{"type":"response_item","timestamp":"2026-07-24T10:35:30.000Z","payload":{"type":"reasoning","id":"rs_002","summary":[],"encrypted_content":"gBBBB..."}}
+{"type":"event_msg","timestamp":"2026-07-24T10:35:30.100Z","payload":{"type":"agent_message"}}
+{"type":"response_item","timestamp":"2026-07-24T10:35:30.200Z","payload":{"type":"message","id":"msg_002","role":"assistant","content":[{"type":"output_text","text":"Your directory contains a main.go file."}]}}
+{"type":"event_msg","timestamp":"2026-07-24T10:35:30.300Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":800,"cached_input_tokens":400,"output_tokens":50,"reasoning_output_tokens":10,"total_tokens":850}}}}
+{"type":"event_msg","timestamp":"2026-07-24T10:35:31.000Z","payload":{"type":"task_complete"}}
