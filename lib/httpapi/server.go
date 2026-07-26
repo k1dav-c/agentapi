@@ -23,6 +23,7 @@ import (
 	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/logctx"
+	"github.com/coder/agentapi/lib/mcpconfig"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/termexec"
@@ -69,6 +70,8 @@ type Server struct {
 	shutdown     context.CancelFunc
 	transport    Transport
 	messageQueue []QueuedMessage
+	mcpStore     mcpconfig.Store
+	restartAgent func(context.Context) error
 	nextQueueID  int
 	// Consecutive non-validation dispatch failures for the queued message
 	// identified by queueFailID. Used to drop poison messages.
@@ -136,6 +139,9 @@ type ServerConfig struct {
 	AgentPID               int // PID of the agent process, 0 to disable JSONL watcher
 	AgentStartedAt         time.Time
 	CWD                    string // Working directory (used by Codex resolver)
+	// RestartAgent replaces the PTY agent process while keeping AgentAPI alive.
+	// It is nil for transports or server modes that cannot restart.
+	RestartAgent func(context.Context) error
 }
 
 // Validate allowed hosts don't contain whitespace, commas, schemes, or ports.
@@ -336,6 +342,14 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		shutdownCtx:  shutdownCtx,
 		shutdown:     shutdownCancel,
 		transport:    config.Transport,
+		restartAgent: config.RestartAgent,
+	}
+	if mcpconfig.SupportedAgent(config.AgentType) {
+		store, err := mcpconfig.NewStore(config.AgentType, config.CWD)
+		if err != nil {
+			return nil, xerrors.Errorf("create MCP config store: %w", err)
+		}
+		s.mcpStore = store
 	}
 
 	// Register API routes
@@ -483,6 +497,13 @@ func (s *Server) registerRoutes() {
 
 	huma.Get(s.api, "/timeline", s.getTimeline, func(o *huma.Operation) {
 		o.Description = "Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events."
+	})
+
+	huma.Get(s.api, "/mcp", s.getMCP, func(o *huma.Operation) {
+		o.Description = "Returns configured MCP servers for Claude or Codex and the managed config file path."
+	})
+	huma.Put(s.api, "/mcp", s.updateMCP, func(o *huma.Operation) {
+		o.Description = "Replaces the complete MCP server set for Claude or Codex while preserving unrelated config content. Pass ?restart=true to restart the PTY agent and apply changes immediately; this resets the agent conversation context while AgentAPI stays online."
 	})
 
 	// POST /message endpoint

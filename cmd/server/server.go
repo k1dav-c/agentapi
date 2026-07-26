@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/agentapi/lib/screentracker"
@@ -26,6 +27,39 @@ import (
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/termexec"
 )
+
+type agentSupervisor struct {
+	mu     sync.Mutex
+	logger *slog.Logger
+	swap   *termexec.SwappableProcess
+	setup  func(context.Context) (*termexec.Process, error)
+}
+
+func (s *agentSupervisor) Restart(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old := s.swap.Current()
+	if old == nil {
+		return xerrors.New("agent process is not running")
+	}
+	s.logger.Info("Restarting agent process")
+	if err := old.Close(s.logger, 10*time.Second); err != nil {
+		s.logger.Warn("Error closing agent process during restart", "error", err)
+	}
+	next, err := s.setup(ctx)
+	if err != nil {
+		return xerrors.Errorf("failed to start new agent process: %w", err)
+	}
+	s.swap.Set(next)
+	s.logger.Info("Agent process restarted", "pid", next.Pid())
+	return nil
+}
+
+func (s *agentSupervisor) currentSettled() *termexec.Process {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.swap.Current()
+}
 
 type AgentType = msgfmt.AgentType
 
@@ -160,6 +194,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	var agentIO st.AgentIO
 	transport := "pty"
 	var process *termexec.Process
+	var supervisor *agentSupervisor
 	var acpResult *httpapi.SetupACPResult
 	var agentStartedAt time.Time
 
@@ -179,18 +214,27 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		transport = "acp"
 	} else {
 		agentStartedAt = time.Now()
-		proc, err := httpapi.SetupProcess(ctx, httpapi.SetupProcessConfig{
-			Program:        agent,
-			ProgramArgs:    argsToPass[1:],
-			TerminalWidth:  termWidth,
-			TerminalHeight: termHeight,
-			AgentType:      agentType,
-		})
+		setupAgentProcess := func(context.Context) (*termexec.Process, error) {
+			return httpapi.SetupProcess(ctx, httpapi.SetupProcessConfig{
+				Program:        agent,
+				ProgramArgs:    argsToPass[1:],
+				TerminalWidth:  termWidth,
+				TerminalHeight: termHeight,
+				AgentType:      agentType,
+			})
+		}
+		proc, err := setupAgentProcess(ctx)
 		if err != nil {
 			return xerrors.Errorf("failed to setup process: %w", err)
 		}
 		process = proc
-		agentIO = proc
+		swappable := termexec.NewSwappableProcess(proc)
+		supervisor = &agentSupervisor{
+			logger: logger,
+			swap:   swappable,
+			setup:  setupAgentProcess,
+		}
+		agentIO = swappable
 	}
 	port := viper.GetInt(FlagPort)
 
@@ -215,6 +259,12 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		AgentPID:       agentPID,
 		AgentStartedAt: agentStartedAt,
 		CWD:            cwd,
+		RestartAgent: func() func(context.Context) error {
+			if supervisor == nil {
+				return nil
+			}
+			return supervisor.Restart
+		}(),
 		StatePersistenceConfig: screentracker.StatePersistenceConfig{
 			StateFile: stateFile,
 			LoadState: loadState,
@@ -239,18 +289,29 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 
 	logger.Info("Starting server on port", "port", port)
 
-	// Monitor process exit
+	// Monitor process exit, following intentional supervisor swaps.
 	processExitCh := make(chan error, 1)
 	if process != nil {
 		go func() {
 			defer close(processExitCh)
 			defer gracefulCancel()
-			if err := process.Wait(); err != nil {
-				if errors.Is(err, termexec.ErrNonZeroExitCode) {
-					processExitCh <- xerrors.Errorf("========\n%s\n========\n: %w", strings.TrimSpace(process.ReadScreen()), err)
-				} else {
-					processExitCh <- xerrors.Errorf("failed to wait for process: %w", err)
+			current := process
+			for {
+				err := current.Wait()
+				if supervisor != nil {
+					if settled := supervisor.currentSettled(); settled != nil && settled != current {
+						current = settled
+						continue
+					}
 				}
+				if err != nil {
+					if errors.Is(err, termexec.ErrNonZeroExitCode) {
+						processExitCh <- xerrors.Errorf("========\n%s\n========\n: %w", strings.TrimSpace(current.ReadScreen()), err)
+					} else {
+						processExitCh <- xerrors.Errorf("failed to wait for process: %w", err)
+					}
+				}
+				return
 			}
 		}()
 	}
@@ -303,7 +364,11 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	default:
 		// Close the process
 		if process != nil {
-			if err := process.Close(logger, 5*time.Second); err != nil {
+			current := process
+			if supervisor != nil {
+				current = supervisor.currentSettled()
+			}
+			if err := current.Close(logger, 5*time.Second); err != nil {
 				logger.Error("Failed to close process cleanly", "error", err)
 			}
 		}

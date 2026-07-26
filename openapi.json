@@ -241,6 +241,83 @@
         ],
         "type": "object"
       },
+      "MCPGetResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/MCPGetResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "path": {
+            "description": "Config file the servers were read from",
+            "type": "string"
+          },
+          "servers": {
+            "additionalProperties": {},
+            "description": "Currently configured MCP servers, keyed by name",
+            "type": "object"
+          }
+        },
+        "required": [
+          "path",
+          "servers"
+        ],
+        "type": "object"
+      },
+      "MCPUpdateRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/MCPUpdateRequestBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "servers": {
+            "additionalProperties": {},
+            "description": "Complete MCP server set to install. Existing MCP servers not listed here are removed.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "servers"
+        ],
+        "type": "object"
+      },
+      "MCPUpdateResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/MCPUpdateResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "ok": {
+            "description": "Whether the config was written",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "Config file that was written",
+            "type": "string"
+          },
+          "restarted": {
+            "description": "Whether the agent process was restarted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "path",
+          "restarted"
+        ],
+        "type": "object"
+      },
       "Message": {
         "additionalProperties": false,
         "properties": {
@@ -1069,6 +1146,84 @@
           }
         },
         "summary": "Subscribe to events"
+      }
+    },
+    "/mcp": {
+      "get": {
+        "description": "Returns configured MCP servers for Claude or Codex and the managed config file path.",
+        "operationId": "get-mcp",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGetResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get mcp"
+      },
+      "put": {
+        "description": "Replaces the complete MCP server set for Claude or Codex while preserving unrelated config content. Pass ?restart=true to restart the PTY agent and apply changes immediately; this resets the agent conversation context while AgentAPI stays online.",
+        "operationId": "put-mcp",
+        "parameters": [
+          {
+            "description": "Restart the agent after writing the config so changes apply immediately. The conversation context is reset.",
+            "explode": false,
+            "in": "query",
+            "name": "restart",
+            "schema": {
+              "description": "Restart the agent after writing the config so changes apply immediately. The conversation context is reset.",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPUpdateRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPUpdateResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Put mcp"
       }
     },
     "/message": {

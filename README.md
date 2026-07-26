@@ -85,6 +85,8 @@ There are 4 endpoints:
 - POST `/message` - sends a message to the agent. When a 200 response is returned, AgentAPI has detected that the agent started processing the message
 - GET `/status` - returns the current status of the agent, either "stable" or "running"
 - GET `/events` - an SSE stream of events from the agent: message and status updates
+- GET `/mcp` - returns configured MCP servers and the managed config path for Claude or Codex
+- PUT `/mcp` - replaces the complete MCP server set; pass `?restart=true` to restart the PTY agent and apply immediately
 
 #### Allowed hosts
 
