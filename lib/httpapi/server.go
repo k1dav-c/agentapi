@@ -548,8 +548,9 @@ func (s *Server) getMessages(ctx context.Context, input *struct{}) (*MessagesRes
 	defer s.mu.RUnlock()
 
 	resp := &MessagesResponse{}
-	resp.Body.Messages = make([]Message, len(s.conversation.Messages()))
-	for i, msg := range s.conversation.Messages() {
+	msgs := s.conversation.Messages()
+	resp.Body.Messages = make([]Message, len(msgs))
+	for i, msg := range msgs {
 		resp.Body.Messages[i] = Message{
 			Id:      msg.Id,
 			Role:    msg.Role,
