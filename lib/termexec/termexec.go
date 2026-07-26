@@ -24,6 +24,11 @@ type Process struct {
 	screenUpdateLock sync.RWMutex
 	lastScreenUpdate time.Time
 	clock            quartz.Clock
+
+	waitOnce   sync.Once
+	waitState  *os.ProcessState
+	waitErr    error
+	waitDone   chan struct{}
 }
 
 type StartProcessConfig struct {
@@ -50,10 +55,11 @@ func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error
 	// escape sequences.
 	execCmd.Env = append(os.Environ(), "TERM=vt100")
 	if err := xp.StartProcessInTerminal(execCmd); err != nil {
+		xp.Close()
 		return nil, err
 	}
 
-	process := &Process{xp: xp, execCmd: execCmd, clock: clock}
+	process := &Process{xp: xp, execCmd: execCmd, clock: clock, waitDone: make(chan struct{})}
 
 	go func() {
 		// HACK: Working around xpty concurrency limitations
@@ -143,7 +149,10 @@ func (p *Process) ReadScreen() string {
 		<-t.C
 		t.Stop()
 	}
-	return stripWidePadding(p.xp.State.String())
+	p.screenUpdateLock.RLock()
+	state := p.xp.State.String()
+	p.screenUpdateLock.RUnlock()
+	return stripWidePadding(state)
 }
 
 // Write sends input to the process via the pseudo terminal.
@@ -155,49 +164,63 @@ func (p *Process) Write(data []byte) (int, error) {
 // does not exit after the timeout. It then closes the pseudo terminal.
 func (p *Process) Close(logger *slog.Logger, timeout time.Duration) error {
 	logger.Info("Closing process")
+	// Always close the PTY, even if signaling fails.
+	defer func() {
+		if err := p.xp.Close(); err != nil {
+			logger.Error("Failed to close pseudo terminal", "error", err)
+		}
+	}()
+
 	if err := p.execCmd.Process.Signal(os.Interrupt); err != nil {
-		return xerrors.Errorf("failed to send SIGINT to process: %w", err)
+		// If the process already exited, SIGINT fails — that's fine,
+		// just ensure we still close the PTY (handled by defer above).
+		if !errors.Is(err, os.ErrProcessDone) {
+			logger.Error("Failed to send SIGINT to process", "error", err)
+		}
+		return nil
 	}
 
-	exited := make(chan error, 1)
-	go func() {
-		_, err := p.execCmd.Process.Wait()
-		exited <- err
-		close(exited)
-	}()
+	// Wait for the process to exit or force-kill after timeout.
+	// Use doWait to avoid racing with a concurrent Wait() call.
+	go p.doWait()
 
 	timeoutTimer := p.clock.NewTimer(timeout)
 	defer timeoutTimer.Stop()
-	var exitErr error
 	select {
 	case <-timeoutTimer.C:
 		if err := p.execCmd.Process.Kill(); err != nil {
-			exitErr = xerrors.Errorf("failed to forcefully kill the process: %w", err)
+			return xerrors.Errorf("failed to forcefully kill the process: %w", err)
 		}
-		// don't wait for the process to exit to avoid hanging indefinitely
-		// if the process never exits
-	case err := <-exited:
-		var pathErr *os.SyscallError
-		// ECHILD is expected if the process has already exited
-		if err != nil && !(errors.As(err, &pathErr) && errors.Is(pathErr.Err, syscall.ECHILD)) {
-			exitErr = xerrors.Errorf("process exited with error: %w", err)
+		// Don't wait for the process to exit to avoid hanging indefinitely.
+	case <-p.waitDone:
+		if p.waitErr != nil {
+			var pathErr *os.SyscallError
+			// ECHILD is expected if the process has already exited.
+			if !(errors.As(p.waitErr, &pathErr) && errors.Is(pathErr.Err, syscall.ECHILD)) {
+				return xerrors.Errorf("process exited with error: %w", p.waitErr)
+			}
 		}
 	}
-	if err := p.xp.Close(); err != nil {
-		return xerrors.Errorf("failed to close pseudo terminal: %w, exitErr: %w", err, exitErr)
-	}
-	return exitErr
+	return nil
 }
 
 var ErrNonZeroExitCode = xerrors.New("non-zero exit code")
 
+// doWait performs the actual os.Process.Wait exactly once, safe for concurrent callers.
+func (p *Process) doWait() {
+	p.waitOnce.Do(func() {
+		p.waitState, p.waitErr = p.execCmd.Process.Wait()
+		close(p.waitDone)
+	})
+}
+
 // Wait waits for the process to exit.
 func (p *Process) Wait() error {
-	state, err := p.execCmd.Process.Wait()
-	if err != nil {
-		return xerrors.Errorf("process exited with error: %w", err)
+	p.doWait()
+	if p.waitErr != nil {
+		return xerrors.Errorf("process exited with error: %w", p.waitErr)
 	}
-	if state.ExitCode() != 0 {
+	if p.waitState != nil && p.waitState.ExitCode() != 0 {
 		return ErrNonZeroExitCode
 	}
 	return nil
