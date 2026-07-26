@@ -20,11 +20,13 @@ import {
   Clock3,
   Code2,
   Download,
+  Eye,
   LoaderCircle,
   MoreHorizontal,
   Pencil,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   Sparkles,
   TerminalSquare,
   User,
@@ -32,6 +34,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import {useChat} from "./chat-provider";
 import type {
   AgentType,
   DraftMessage,
@@ -42,12 +45,24 @@ import type {
 import {ProcessedMessage} from "./processed-message";
 import {toast} from "sonner";
 import {taskMatchesQuery, taskToMarkdown} from "@/lib/task-actions";
+import {groupConsecutiveTools} from "@/lib/activity-groups";
+import {uiCopy} from "@/lib/ui-copy";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
 
 interface MessageListProps {
   messages: (Message | DraftMessage)[];
@@ -127,6 +142,7 @@ export default function MessageList({
   onStopTask,
   headerAction,
 }: MessageListProps) {
+  const {downloadSession} = useChat();
   const [scrollArea, setScrollArea] = useState<HTMLDivElement | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -203,25 +219,14 @@ export default function MessageList({
 
     return {prelude, tasks};
   }, [messages, richMessages, toolCalls]);
-  const conversationMarkdown = useMemo(
-    () =>
-      timeline.tasks
-        .map((task, index) => taskToMarkdown(toSearchableTask(task), index + 1))
-        .join("\n"),
-    [timeline.tasks],
-  );
+  const [downloadingConversation, setDownloadingConversation] = useState(false);
   const exportConversation = () => {
-    const url = URL.createObjectURL(
-      new Blob([conversationMarkdown], {type: "text/markdown;charset=utf-8"}),
-    );
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `agentapi-conversation-${new Date().toISOString().replaceAll(":", "-")}.md`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    toast.success("Conversation Markdown downloaded");
+    setDownloadingConversation(true);
+    void downloadSession()
+      .catch(() => {
+        // downloadSession already surfaces the error via toast
+      })
+      .finally(() => setDownloadingConversation(false));
   };
   const filteredTasks = useMemo(
     () =>
@@ -429,7 +434,7 @@ export default function MessageList({
                   </button>
                 )}
               </label>
-              <label>
+              <label className="hidden sm:block">
                 <span className="sr-only">Filter tasks</span>
                 <select
                   value={taskFilter}
@@ -446,7 +451,7 @@ export default function MessageList({
                   <option value="tool-error">Tool errors</option>
                 </select>
               </label>
-              <span className="text-xs text-muted-foreground" role="status">
+              <span className="hidden text-xs text-muted-foreground sm:inline" role="status">
                 {taskQuery
                   ? `${filteredTasks.length} tasks · ${totalMatchCount} matches`
                   : `${filteredTasks.length} of ${timeline.tasks.length}`}
@@ -455,14 +460,71 @@ export default function MessageList({
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-9 shrink-0"
+                className="hidden h-9 shrink-0 sm:inline-flex"
                 onClick={exportConversation}
-                title="Download the complete conversation as Markdown"
+                disabled={downloadingConversation}
+                title="Download the session timeline as JSONL"
               >
-                <Download />
-                <span className="hidden sm:inline">Conversation MD</span>
-                <span className="sr-only sm:hidden">Download conversation Markdown</span>
+                {downloadingConversation ? (
+                  <LoaderCircle className="animate-spin" />
+                ) : (
+                  <Download />
+                )}
+                <span className="hidden sm:inline">Conversation JSONL</span>
+                <span className="sr-only sm:hidden">Download conversation JSONL</span>
               </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    className="size-9 shrink-0 sm:hidden"
+                    title={uiCopy.taskToolbar.title}
+                  >
+                    <SlidersHorizontal />
+                    <span className="sr-only">
+                      Open {uiCopy.taskToolbar.title.toLowerCase()}
+                    </span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuLabel>
+                    {taskQuery
+                      ? `${filteredTasks.length} tasks · ${totalMatchCount} matches`
+                      : `${filteredTasks.length} of ${timeline.tasks.length} tasks`}
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {(
+                    [
+                      ["all", uiCopy.taskToolbar.all],
+                      ["running", uiCopy.taskToolbar.running],
+                      ["queued", uiCopy.taskToolbar.queued],
+                      ["failed", uiCopy.taskToolbar.failed],
+                      ["completed", uiCopy.taskToolbar.completed],
+                      ["tool-error", uiCopy.taskToolbar.toolErrors],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <DropdownMenuItem
+                      key={value}
+                      onSelect={() => setTaskFilter(value)}
+                    >
+                      <Check
+                        className={taskFilter === value ? "opacity-100" : "opacity-0"}
+                      />
+                      {label}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={exportConversation}
+                    disabled={downloadingConversation}
+                  >
+                    <Download />
+                    {uiCopy.taskToolbar.download}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               {headerAction}
               {taskQuery && filteredTasks.length > 0 && (
                 <div className="flex overflow-hidden rounded-md border bg-background">
@@ -695,28 +757,39 @@ function formatToolInput(input: unknown): string {
 function ToolCallCard({
   toolCall,
   searchQuery = "",
+  open,
+  onOpenChange,
 }: {
   toolCall: ToolCall;
   searchQuery?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const isFailed = toolCall.status === "failed" || Boolean(toolCall.isError);
   const isPending =
     toolCall.status === "running" ||
     (toolCall.status === undefined && toolCall.result === undefined);
   const input = formatToolInput(toolCall.input);
-  const [isOpen, setIsOpen] = useState(
-    Boolean(searchQuery) || isPending || isFailed,
-  );
+  const [localIsOpen, setLocalIsOpen] = useState(Boolean(searchQuery));
+  const isOpen = open ?? localIsOpen;
 
   useEffect(() => {
-    if (searchQuery || isPending || isFailed) setIsOpen(true);
-  }, [isFailed, isPending, searchQuery]);
+    if (open === undefined && searchQuery) {
+      setLocalIsOpen(true);
+    }
+  }, [open, searchQuery]);
 
   return (
     <details
       className="group overflow-hidden rounded-lg border-l-2 border-y-0 border-r-0 bg-muted/20"
       open={isOpen}
-      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+      onToggle={(event) => {
+        if (open === undefined) {
+          setLocalIsOpen(event.currentTarget.open);
+        } else {
+          onOpenChange?.(event.currentTarget.open);
+        }
+      }}
     >
       <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 transition hover:bg-muted/45 [&::-webkit-details-marker]:hidden">
         <span className="grid size-8 shrink-0 place-items-center rounded-lg border bg-background">
@@ -761,6 +834,69 @@ function ToolCallCard({
         )}
       </div>
     </details>
+  );
+}
+
+function ToolCallGroup({
+  toolCalls,
+  searchQuery,
+}: {
+  toolCalls: ToolCall[];
+  searchQuery: string;
+}) {
+  const [openToolIDs, setOpenToolIDs] = useState<Set<string>>(
+    () =>
+      new Set(searchQuery ? toolCalls.map((tool) => tool.id) : []),
+  );
+  const allOpen = toolCalls.every((tool) => openToolIDs.has(tool.id));
+
+  useEffect(() => {
+    if (searchQuery) {
+      setOpenToolIDs(new Set(toolCalls.map((tool) => tool.id)));
+    }
+  }, [searchQuery, toolCalls]);
+
+  return (
+    <section className="overflow-hidden rounded-xl border bg-muted/10">
+      <header className="flex items-center justify-between gap-3 border-b bg-muted/25 px-3 py-2">
+        <span className="flex min-w-0 items-center gap-2 text-xs font-medium">
+          <Wrench className="size-3.5 shrink-0 text-muted-foreground" />
+          <span>{uiCopy.tools.groupLabel(toolCalls.length)}</span>
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 shrink-0 px-2 text-xs"
+          onClick={() =>
+            setOpenToolIDs(
+              allOpen ? new Set() : new Set(toolCalls.map((tool) => tool.id)),
+            )
+          }
+          aria-expanded={allOpen}
+        >
+          {allOpen ? uiCopy.tools.collapseAll : uiCopy.tools.expandAll}
+        </Button>
+      </header>
+      <div className="space-y-2 p-2">
+        {toolCalls.map((toolCall) => (
+          <ToolCallCard
+            key={toolCall.id}
+            toolCall={toolCall}
+            searchQuery={searchQuery}
+            open={openToolIDs.has(toolCall.id)}
+            onOpenChange={(open) =>
+              setOpenToolIDs((current) => {
+                const next = new Set(current);
+                if (open) next.add(toolCall.id);
+                else next.delete(toolCall.id);
+                return next;
+              })
+            }
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -831,8 +967,12 @@ function TaskGroup({
     },
   }[status];
   const StatusIcon = statusMeta.icon;
-  const activity = getTaskActivity(task);
+  const activity = useMemo(
+    () => groupConsecutiveTools(getTaskActivity(task)),
+    [task],
+  );
   const markdown = taskToMarkdown(toSearchableTask(task), number);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const latestTool = [...task.toolCalls].reverse().find(
     (tool) => tool.result === undefined,
@@ -932,6 +1072,10 @@ function TaskGroup({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setPreviewOpen(true)}>
+                <Eye />
+                Preview Markdown
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void copyTask()}>
                 <Clipboard />
                 Copy task and output
@@ -970,6 +1114,13 @@ function TaskGroup({
               message={item.message}
               searchQuery={searchQuery}
             />
+          ) : item.type === "tool-group" ? (
+            <div key={item.key} className="ml-3 sm:ml-8">
+              <ToolCallGroup
+                toolCalls={item.toolCalls}
+                searchQuery={searchQuery}
+              />
+            </div>
           ) : (
             <div key={item.key} className="ml-3 sm:ml-8">
               <ToolCallCard
@@ -980,6 +1131,37 @@ function TaskGroup({
           ),
         )}
       </div>
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="flex max-h-[85dvh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+          <DialogHeader className="border-b px-5 py-4 pr-12">
+            <DialogTitle>Task {number} Markdown preview</DialogTitle>
+            <DialogDescription>
+              Rendered preview of the Markdown produced by copy and export.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            <ProcessedMessage
+              messageContent={markdown}
+              isUser={false}
+              renderMode="markdown"
+            />
+          </div>
+          <DialogFooter className="gap-2 border-t px-5 py-3">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => void copyTask()}
+            >
+              <Clipboard />
+              Copy
+            </Button>
+            <Button type="button" onClick={exportTask}>
+              <Download />
+              Download
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

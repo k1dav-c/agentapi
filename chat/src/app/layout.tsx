@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
+import {defaultLocale, uiCopy} from "@/lib/ui-copy";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -10,8 +11,8 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "AgentAPI — Live Agent Session",
-  description: "Chat with and control your remote coding agent.",
+  title: uiCopy.metadata.title,
+  description: uiCopy.metadata.description,
 };
 
 export const viewport: Viewport = {
@@ -26,7 +27,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={defaultLocale} suppressHydrationWarning>
       <body className={`${geistSans.variable} antialiased`}>
         <ThemeProvider
           attribute="class"
