@@ -35,8 +35,9 @@ describe("ProcessedMessage links", () => {
 
   test("renders agent output as preformatted terminal text", () => {
     const html = render("first line\nsecond line");
-    expect(html).toContain("whitespace-pre");
-    expect(html).toContain("overflow-x-auto");
+    expect(html).toContain("whitespace-pre-wrap");
+    expect(html).toContain("[overflow-wrap:anywhere]");
+    expect(html).not.toContain("overflow-x-auto");
     expect(html).toContain("first line\nsecond line");
     expect(html).not.toContain("<br");
   });

@@ -141,7 +141,7 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
 
   if (renderMode === "raw") {
     return (
-      <div className="min-w-0 overflow-x-auto whitespace-pre text-left font-mono text-[13px] leading-5 [tab-size:4]">
+      <div className="min-w-0 whitespace-pre-wrap break-words text-left font-mono text-[13px] leading-5 [overflow-wrap:anywhere] [tab-size:4]">
         {searchQuery
           ? highlightTerminalText(messageContent, searchQuery)
           : linkifyTerminalText(messageContent)}
