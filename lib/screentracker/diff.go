@@ -54,3 +54,61 @@ func screenDiff(oldScreen, newScreen string, agentType msgfmt.AgentType) string 
 	}
 	return strings.Join(newSectionLines[startLine:endLine+1], "\n")
 }
+
+// trimPreviousMessageOverlap removes leading lines of newMsg that exactly
+// duplicate the trailing lines of prevMsg.
+//
+// screenDiff detects new content as everything below the first line of the
+// screen that wasn't present in the baseline snapshot. TUI agents sometimes
+// re-render already-finalized transcript lines (e.g. Codex redraws previous
+// cells when starting a new turn), which makes the first mismatching line
+// land above the previous turn's output and the previous message's tail
+// leaks into the head of the new message. An agent legitimately starting a
+// new response with an exact line-by-line copy of its previous message's
+// trailing lines is practically impossible with terminal wrapping, so the
+// overlap is treated as a diff artifact and removed.
+//
+// Lines are compared with trailing whitespace removed (terminal snapshots
+// pad lines to the screen width). Overlaps consisting only of whitespace
+// lines are ignored.
+func trimPreviousMessageOverlap(prevMsg, newMsg string) string {
+	if prevMsg == "" || newMsg == "" {
+		return newMsg
+	}
+	prevLines := strings.Split(prevMsg, "\n")
+	newLines := strings.Split(newMsg, "\n")
+	norm := func(s string) string {
+		return strings.TrimRight(s, " \t")
+	}
+
+	overlap := 0
+	maxOverlap := min(len(prevLines), len(newLines))
+	for n := maxOverlap; n > 0; n-- {
+		match := true
+		hasContent := false
+		for i := 0; i < n; i++ {
+			line := norm(prevLines[len(prevLines)-n+i])
+			if line != norm(newLines[i]) {
+				match = false
+				break
+			}
+			if line != "" {
+				hasContent = true
+			}
+		}
+		if match && hasContent {
+			overlap = n
+			break
+		}
+	}
+	if overlap == 0 {
+		return newMsg
+	}
+
+	remaining := newLines[overlap:]
+	// Drop whitespace-only lines left at the top after the trim.
+	for len(remaining) > 0 && strings.TrimSpace(remaining[0]) == "" {
+		remaining = remaining[1:]
+	}
+	return strings.Join(remaining, "\n")
+}

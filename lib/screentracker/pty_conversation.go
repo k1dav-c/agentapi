@@ -318,6 +318,25 @@ func (c *PTYConversation) lastMessage(role ConversationRole) ConversationMessage
 	return ConversationMessage{}
 }
 
+// previousTurnAgentMessageLocked returns the last agent message from before
+// the last user message, i.e. the finalized message of the previous turn.
+// Returns a zero value if there is no such message. Caller MUST hold c.lock.
+func (c *PTYConversation) previousTurnAgentMessageLocked() ConversationMessage {
+	lastUserIdx := -1
+	for i := len(c.messages) - 1; i >= 0; i-- {
+		if c.messages[i].Role == ConversationRoleUser {
+			lastUserIdx = i
+			break
+		}
+	}
+	for i := lastUserIdx - 1; i >= 0; i-- {
+		if c.messages[i].Role == ConversationRoleAgent {
+			return c.messages[i]
+		}
+	}
+	return ConversationMessage{}
+}
+
 // caller MUST hold c.lock
 func (c *PTYConversation) updateLastAgentMessageLocked(screen string, timestamp time.Time) {
 	if c.writingMessage {
@@ -329,12 +348,22 @@ func (c *PTYConversation) updateLastAgentMessageLocked(screen string, timestamp 
 	if c.cfg.FormatMessage != nil {
 		agentMessage = c.cfg.FormatMessage(agentMessage, lastUserMessage.Message)
 	}
+	restoredFromState := false
 	if c.loadStateStatus == LoadStateSucceeded && !c.userSentMessageAfterLoadState && len(c.messages) > 0 &&
 		c.messages[len(c.messages)-1].Role == ConversationRoleAgent {
 		agentMessage = c.messages[len(c.messages)-1].Message
+		restoredFromState = true
 	}
 	if c.cfg.FormatToolCall != nil {
 		agentMessage, toolCalls = c.cfg.FormatToolCall(agentMessage)
+	}
+	// Guard against TUI re-renders leaking the previous turn's output into
+	// the current turn's message (see trimPreviousMessageOverlap). Skip for
+	// messages restored verbatim from persisted state.
+	if !restoredFromState {
+		if prev := c.previousTurnAgentMessageLocked(); prev.Message != "" {
+			agentMessage = trimPreviousMessageOverlap(prev.Message, agentMessage)
+		}
 	}
 	for _, toolCall := range toolCalls {
 		if c.toolCallMessageSet[toolCall] == false {
