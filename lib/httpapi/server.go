@@ -457,6 +457,9 @@ func (s *Server) registerRoutes() {
 	huma.Get(s.api, "/status", s.getStatus, func(o *huma.Operation) {
 		o.Description = "Returns the current status of the agent."
 	})
+	huma.Get(s.api, "/title", s.getTitle, func(o *huma.Operation) {
+		o.Description = "Returns the current human-readable session title and the server state used to derive it."
+	})
 
 	// GET /messages endpoint
 	huma.Get(s.api, "/messages", s.getMessages, func(o *huma.Operation) {
@@ -469,6 +472,13 @@ func (s *Server) registerRoutes() {
 			"Each message contains structured content blocks (text, thinking, tool_use, tool_result), " +
 			"model information, and token usage data. Only available for agent types with session log " +
 			"support (currently 'claude' and 'codex') running via PTY transport."
+	})
+
+	huma.Get(s.api, "/background-tasks", s.getBackgroundTasks, func(o *huma.Operation) {
+		o.Description = "Lists Claude Code and Codex background tasks discovered from structured tool calls and results."
+	})
+	huma.Get(s.api, "/background-tasks/{id}/output", s.getBackgroundTaskOutput, func(o *huma.Operation) {
+		o.Description = "Returns captured tool output or the tail of a discovered background task output file."
 	})
 
 	huma.Get(s.api, "/session/export", s.exportSession, func(o *huma.Operation) {
@@ -541,6 +551,40 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 	resp.Body.AgentType = s.agentType
 	resp.Body.Transport = s.transport
 
+	return resp, nil
+}
+
+func (s *Server) getTitle(ctx context.Context, input *struct{}) (*TitleResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	status := convertStatus(s.conversation.Status())
+	task := ""
+	messages := s.conversation.Messages()
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == st.ConversationRoleUser {
+			task = strings.Join(strings.Fields(messages[i].Message), " ")
+			break
+		}
+	}
+	runes := []rune(task)
+	if len(runes) > 60 {
+		task = strings.TrimSpace(string(runes[:59])) + "…"
+	}
+	state := "Ready"
+	if status == AgentStatusRunning {
+		state = "Running"
+	}
+	title := state + " · AgentAPI"
+	if task != "" {
+		title = state + " · " + task + " — AgentAPI"
+	}
+
+	resp := &TitleResponse{}
+	resp.Body.Title = title
+	resp.Body.Task = task
+	resp.Body.Status = status
+	resp.Body.AgentType = s.agentType
 	return resp, nil
 }
 

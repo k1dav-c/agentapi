@@ -2,6 +2,7 @@
 
 import {useMemo, useState} from "react";
 import {
+  ChevronDown,
   ExternalLink,
   FileText,
   FolderSearch,
@@ -44,6 +45,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
   } = useChat();
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("background");
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [loadingTask, setLoadingTask] = useState<string | null>(null);
   const [outputs, setOutputs] = useState<Record<string, string>>({});
   const tasks = useMemo(
@@ -85,6 +87,11 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     } finally {
       setLoadingTask(null);
     }
+  };
+  const toggleTask = (id: string) => {
+    const opening = expandedTask !== id;
+    setExpandedTask(opening ? id : null);
+    if (opening) void loadOutput(id);
   };
 
   return (
@@ -132,40 +139,60 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
             </div>
             <div className="space-y-3">
               {backgroundTasks.map((task) => (
-                <article key={task.id} className="rounded-xl border bg-card p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                <article key={task.id} className="overflow-hidden rounded-xl border bg-card">
+                  <button
+                    type="button"
+                    className="flex w-full items-start justify-between gap-3 p-3 text-left transition hover:bg-muted/30"
+                    onClick={() => toggleTask(task.id)}
+                    aria-expanded={expandedTask === task.id}
+                  >
+                    <div className="min-w-0 flex-1">
                       <p className="break-words text-sm font-medium">{task.name}</p>
                       <p className="mt-1 font-mono text-[11px] text-muted-foreground">
                         {task.agent_type} · {task.id}
                       </p>
                     </div>
-                    <TaskStatus status={task.status} />
-                  </div>
-                  {task.output_path && (
-                    <>
-                      <p className="mt-3 break-all font-mono text-[11px] text-muted-foreground">
-                        {task.output_path}
-                      </p>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="mt-2"
-                        onClick={() => void loadOutput(task.id)}
-                        disabled={loadingTask === task.id}
-                      >
-                        {loadingTask === task.id
-                          ? <LoaderCircle className="animate-spin" />
-                          : <FileText />}
-                        Read output
-                      </Button>
-                    </>
-                  )}
-                  {outputs[task.id] !== undefined && (
-                    <pre className="mt-3 max-h-72 overflow-auto whitespace-pre rounded-lg bg-zinc-950 p-3 font-mono text-xs text-zinc-100">
-                      {outputs[task.id] || "(empty output)"}
-                    </pre>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <TaskStatus status={task.status} />
+                      <ChevronDown
+                        className={`size-4 text-muted-foreground transition-transform ${
+                          expandedTask === task.id ? "rotate-180" : ""
+                        }`}
+                      />
+                    </div>
+                  </button>
+                  {expandedTask === task.id && (
+                    <div className="border-t p-3">
+                      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+                        <dt className="text-muted-foreground">Tool use ID</dt>
+                        <dd className="break-all font-mono">{task.tool_use_id}</dd>
+                        <dt className="text-muted-foreground">Started</dt>
+                        <dd>{formatTaskTime(task.started_at)}</dd>
+                        <dt className="text-muted-foreground">Updated</dt>
+                        <dd>{formatTaskTime(task.updated_at)}</dd>
+                        {task.output_path && (
+                          <>
+                            <dt className="text-muted-foreground">Output path</dt>
+                            <dd className="break-all font-mono">{task.output_path}</dd>
+                          </>
+                        )}
+                      </dl>
+                      <div className="mt-3">
+                        <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+                          Output
+                        </p>
+                        {loadingTask === task.id ? (
+                          <div className="flex items-center gap-2 rounded-lg border p-3 text-xs text-muted-foreground">
+                            <LoaderCircle className="size-4 animate-spin" />
+                            Loading output…
+                          </div>
+                        ) : (
+                          <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-950 p-3 font-mono text-xs text-zinc-100 [overflow-wrap:anywhere]">
+                            {outputs[task.id] || "(no output captured yet)"}
+                          </pre>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </article>
               ))}
@@ -254,6 +281,11 @@ function TaskStatus({status}: {status: string}) {
 
 function Empty({text}: {text: string}) {
   return <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">{text}</p>;
+}
+
+function formatTaskTime(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 function discoverLinks(messages: Array<{role: string; content: string}>) {

@@ -830,7 +830,7 @@
     },
     "/background-tasks/{id}/output": {
       "get": {
-        "description": "Returns the tail of a discovered background task output file. Arbitrary filesystem paths are not accepted.",
+        "description": "Returns captured tool output or the tail of a discovered background task output file.",
         "operationId": "get-background-tasks-by-id-output",
         "parameters": [
           {
