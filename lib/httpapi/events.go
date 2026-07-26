@@ -361,7 +361,11 @@ func (e *EventEmitter) Subscribe() (int, <-chan Event, []Event) {
 
 // Assumes the caller holds the lock.
 func (e *EventEmitter) unsubscribeInner(chanId int) {
-	close(e.chans[chanId])
+	ch, ok := e.chans[chanId]
+	if !ok {
+		return
+	}
+	close(ch)
 	delete(e.chans, chanId)
 }
 
