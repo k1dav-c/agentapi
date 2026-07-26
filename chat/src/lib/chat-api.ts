@@ -1,5 +1,4 @@
 import type {
-  BackgroundTask,
   FileUploadResponse,
   QueuedMessage,
   SendResult,
@@ -14,6 +13,19 @@ export interface MCPConfig {
   servers: Record<string, unknown>;
   path: string;
   restarted?: boolean;
+}
+
+export interface MCPCheckResult {
+  name: string;
+  status: "ready" | "unreachable" | "invalid";
+  kind: "stdio" | "http" | "unknown";
+  detail: string;
+  latency_ms?: number;
+}
+
+export interface MCPProfiles {
+  profiles: Record<string, Record<string, unknown>>;
+  path: string;
 }
 
 interface APIErrorDetail {
@@ -59,33 +71,91 @@ export function createChatAPI(baseURL: string) {
       return {servers, path: result.path, restarted: result.restarted};
     },
 
+    async checkMCP(servers?: Record<string, unknown>): Promise<MCPCheckResult[]> {
+      const response = await requireOK(
+        await fetch(`${baseURL}/mcp/check`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(servers ? {servers} : {}),
+        }),
+        "Failed to check MCP servers",
+      );
+      return ((await response.json()) as {results: MCPCheckResult[]}).results;
+    },
+
+    async createMCPServer(name: string, config: unknown, restart = false) {
+      await requireOK(
+        await fetch(`${baseURL}/mcp/servers${restart ? "?restart=true" : ""}`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({name, config}),
+        }),
+        "Failed to create MCP server",
+      );
+    },
+
+    async updateMCPServer(name: string, config: unknown, restart = false) {
+      await requireOK(
+        await fetch(`${baseURL}/mcp/servers/${encodeURIComponent(name)}${restart ? "?restart=true" : ""}`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({config}),
+        }),
+        "Failed to update MCP server",
+      );
+    },
+
+    async deleteMCPServer(name: string, restart = false) {
+      await requireOK(
+        await fetch(`${baseURL}/mcp/servers/${encodeURIComponent(name)}${restart ? "?restart=true" : ""}`, {
+          method: "DELETE",
+        }),
+        "Failed to delete MCP server",
+      );
+    },
+
+    async getMCPProfiles(): Promise<MCPProfiles> {
+      const response = await requireOK(
+        await fetch(`${baseURL}/mcp/profiles`),
+        "Failed to load MCP profiles",
+      );
+      return (await response.json()) as MCPProfiles;
+    },
+
+    async saveMCPProfile(name: string, servers: Record<string, unknown>): Promise<MCPProfiles> {
+      const response = await requireOK(
+        await fetch(`${baseURL}/mcp/profiles/${encodeURIComponent(name)}`, {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({servers}),
+        }),
+        "Failed to save MCP profile",
+      );
+      return (await response.json()) as MCPProfiles;
+    },
+
+    async deleteMCPProfile(name: string): Promise<MCPProfiles> {
+      const response = await requireOK(
+        await fetch(`${baseURL}/mcp/profiles/${encodeURIComponent(name)}`, {method: "DELETE"}),
+        "Failed to delete MCP profile",
+      );
+      return (await response.json()) as MCPProfiles;
+    },
+
+    async applyMCPProfile(name: string, restart = false) {
+      await requireOK(
+        await fetch(`${baseURL}/mcp/profiles/${encodeURIComponent(name)}/apply${restart ? "?restart=true" : ""}`, {
+          method: "POST",
+        }),
+        "Failed to apply MCP profile",
+      );
+    },
+
     async getQueue(): Promise<QueuedMessage[]> {
       const response = await fetch(`${baseURL}/queue`);
       if (!response.ok) return [];
       const data = (await response.json()) as {messages?: QueuedMessage[]};
       return data.messages ?? [];
-    },
-
-    async getBackgroundTasks(): Promise<BackgroundTask[]> {
-      const response = await fetch(`${baseURL}/background-tasks`);
-      if (!response.ok) return [];
-      const data = (await response.json()) as {tasks?: BackgroundTask[]};
-      return data.tasks ?? [];
-    },
-
-    async getBackgroundTaskOutput(id: string) {
-      const response = await requireOK(
-        await fetch(
-          `${baseURL}/background-tasks/${encodeURIComponent(id)}/output`,
-        ),
-        "Background task output is unavailable",
-      );
-      return (await response.json()) as {
-        content: string;
-        path: string;
-        size: number;
-        truncated: boolean;
-      };
     },
 
     async sendMessage(

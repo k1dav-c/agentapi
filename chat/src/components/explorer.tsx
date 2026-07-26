@@ -1,20 +1,24 @@
 "use client";
 
-import {useEffect, useMemo, useState} from "react";
+import {useEffect, useMemo, useRef, useState} from "react";
 import {
-  ChevronDown,
+  Activity,
+  Download,
   ExternalLink,
   FileText,
   FolderSearch,
   Link as LinkIcon,
   ListTree,
   LoaderCircle,
+  Play,
   RefreshCw,
   Save,
   Server,
-  SquareTerminal,
+  Trash2,
+  Upload,
 } from "lucide-react";
 import {toast} from "sonner";
+import {editableMCPServers} from "@/lib/mcp-sample";
 import {useChat} from "./chat-provider";
 import {Button} from "./ui/button";
 import {
@@ -41,23 +45,29 @@ const pathPattern = /(?:^|[\s"'(])((?:\/[\w.@+-]+)+\.[a-zA-Z0-9]{1,10})(?=$|[\s"
 export function Explorer({onNavigateTask}: ExplorerProps) {
   const {
     messages,
-    backgroundTasks,
-    refreshBackgroundTasks,
-    getBackgroundTaskOutput,
     getMCP,
     updateMCP,
+    checkMCP,
+    getMCPProfiles,
+    saveMCPProfile,
+    deleteMCPProfile,
+    applyMCPProfile,
   } = useChat();
   const [open, setOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("background");
-  const [expandedTask, setExpandedTask] = useState<string | null>(null);
-  const [loadingTask, setLoadingTask] = useState<string | null>(null);
-  const [outputs, setOutputs] = useState<Record<string, string>>({});
+  const [activeTab, setActiveTab] = useState("links");
   const [mcpJSON, setMCPJSON] = useState("{}");
+  const [mcpIsSample, setMCPIsSample] = useState(false);
   const [mcpPath, setMCPPath] = useState("");
   const [mcpSupported, setMCPSupported] = useState(true);
   const [mcpLoading, setMCPLoading] = useState(false);
   const [mcpSaving, setMCPSaving] = useState(false);
+  const [mcpChecking, setMCPChecking] = useState(false);
+  const [mcpChecks, setMCPChecks] = useState<Array<{name: string; status: string; detail: string; kind: string; latency_ms?: number}>>([]);
+  const [profiles, setProfiles] = useState<Record<string, Record<string, unknown>>>({});
+  const [profileName, setProfileName] = useState("");
   const [restartAfterSave, setRestartAfterSave] = useState(true);
+  const mcpImportRef = useRef<HTMLInputElement>(null);
+  const profileImportRef = useRef<HTMLInputElement>(null);
   const tasks = useMemo(
     () => messages.filter((message) => message.role === "user"),
     [messages],
@@ -72,48 +82,117 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
         if (!found.has(match[1])) found.set(match[1], task);
       }
     }
-    for (const backgroundTask of backgroundTasks) {
-      if (backgroundTask.output_path && !found.has(backgroundTask.output_path)) {
-        found.set(backgroundTask.output_path, 0);
-      }
-    }
     return [...found].map(([path, sourceTask]) => ({path, sourceTask}));
-  }, [backgroundTasks, messages]);
+  }, [messages]);
 
   const navigate = (number: number) => {
     setOpen(false);
     onNavigateTask(number);
   };
-  const loadOutput = async (id: string) => {
-    setLoadingTask(id);
-    try {
-      const output = await getBackgroundTaskOutput(id);
-      setOutputs((current) => ({
-        ...current,
-        [id]: `${output.truncated ? "…showing tail…\n" : ""}${output.content}`,
-      }));
-    } catch {
-      toast.error("Background task output is unavailable");
-    } finally {
-      setLoadingTask(null);
-    }
-  };
-  const toggleTask = (id: string) => {
-    const opening = expandedTask !== id;
-    setExpandedTask(opening ? id : null);
-    if (opening) void loadOutput(id);
-  };
   const loadMCP = async () => {
     setMCPLoading(true);
     try {
       const config = await getMCP();
-      setMCPJSON(JSON.stringify(config.servers, null, 2));
+      const editable = editableMCPServers(config.servers);
+      setMCPJSON(JSON.stringify(editable.servers, null, 2));
+      setMCPIsSample(editable.isSample);
       setMCPPath(config.path);
       setMCPSupported(true);
+      const profileData = await getMCPProfiles();
+      setProfiles(profileData.profiles);
     } catch {
       setMCPSupported(false);
     } finally {
       setMCPLoading(false);
+    }
+  };
+  const parsedMCP = () => {
+    const servers = JSON.parse(mcpJSON) as unknown;
+    if (!servers || Array.isArray(servers) || typeof servers !== "object") {
+      throw new Error("MCP configuration must be an object");
+    }
+    return servers as Record<string, unknown>;
+  };
+  const runMCPChecks = async () => {
+    setMCPChecking(true);
+    try {
+      setMCPChecks(await checkMCP(parsedMCP()));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not check MCP servers");
+    } finally {
+      setMCPChecking(false);
+    }
+  };
+  const saveProfile = async () => {
+    const name = profileName.trim();
+    if (!name) return toast.error("Enter a profile name");
+    try {
+      const result = await saveMCPProfile(name, parsedMCP());
+      setProfiles(result.profiles);
+      setProfileName("");
+      toast.success(`Profile “${name}” saved`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save profile");
+    }
+  };
+  const applyProfile = async (name: string) => {
+    try {
+      await applyMCPProfile(name, restartAfterSave);
+      await loadMCP();
+      toast.success(`Profile “${name}” applied`);
+    } catch {
+      toast.error("Could not apply profile");
+    }
+  };
+  const removeProfile = async (name: string) => {
+    try {
+      const result = await deleteMCPProfile(name);
+      setProfiles(result.profiles);
+    } catch {
+      toast.error("Could not delete profile");
+    }
+  };
+  const exportProfiles = () => {
+    downloadJSON("agentapi-mcp-profiles.json", {profiles});
+  };
+  const exportMCP = () => {
+    try {
+      downloadJSON("agentapi-mcp-servers.json", {servers: parsedMCP()});
+    } catch {
+      toast.error("MCP configuration must be valid JSON");
+    }
+  };
+  const importMCP = async (file: File) => {
+    try {
+      const value = JSON.parse(await file.text()) as {
+        servers?: Record<string, unknown>;
+      };
+      const servers = value.servers ?? value;
+      if (!servers || Array.isArray(servers) || typeof servers !== "object") {
+        throw new Error();
+      }
+      setMCPJSON(JSON.stringify(servers, null, 2));
+      setMCPIsSample(false);
+      setMCPChecks([]);
+      toast.success("MCP servers loaded for review", {
+        description: "Save servers to write the imported configuration.",
+      });
+    } catch {
+      toast.error("Invalid MCP server export");
+    }
+  };
+  const importProfiles = async (file: File) => {
+    try {
+      const value = JSON.parse(await file.text()) as {profiles?: Record<string, Record<string, unknown>>};
+      if (!value.profiles || typeof value.profiles !== "object") throw new Error();
+      let latest = profiles;
+      for (const [name, servers] of Object.entries(value.profiles)) {
+        latest = (await saveMCPProfile(name, servers)).profiles;
+      }
+      setProfiles(latest);
+      toast.success("MCP profiles imported");
+    } catch {
+      toast.error("Invalid MCP profile export");
     }
   };
   const saveMCP = async () => {
@@ -136,6 +215,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
       );
       setMCPPath(config.path);
       setMCPJSON(JSON.stringify(config.servers, null, 2));
+      setMCPIsSample(false);
       toast.success("MCP servers updated", {
         description: config.restarted
           ? "The agent restarted and is loading the new configuration."
@@ -162,104 +242,27 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
           <span className="sr-only sm:hidden">Open explorer</span>
         </Button>
       </DialogTrigger>
-      <DialogContent className="left-auto right-0 top-0 h-dvh max-h-dvh w-full max-w-xl translate-x-0 translate-y-0 content-start overflow-hidden rounded-none p-0 sm:rounded-none">
+      <DialogContent className="left-auto right-0 top-0 flex h-dvh max-h-dvh w-full max-w-xl translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none p-0 sm:rounded-none">
         <DialogHeader className="border-b px-5 py-4 pr-12">
           <DialogTitle>Session Explorer</DialogTitle>
           <DialogDescription>
-            Tasks, links, files, navigation, and MCP server configuration.
+            Links, files, task navigation, and MCP server configuration.
           </DialogDescription>
         </DialogHeader>
         <Tabs
           value={activeTab}
           onValueChange={setActiveTab}
-          className="min-h-0 gap-0"
+          className="min-h-0 flex-1 gap-0"
         >
-          <div className="overflow-x-auto border-b px-3 py-2">
-            <TabsList className="grid w-full min-w-[520px] grid-cols-5">
-              <TabsTrigger value="background"><SquareTerminal />Tasks</TabsTrigger>
-              <TabsTrigger value="links"><LinkIcon />Links</TabsTrigger>
-              <TabsTrigger value="files"><FileText />Files</TabsTrigger>
-              <TabsTrigger value="index"><ListTree />Index</TabsTrigger>
-              <TabsTrigger value="mcp"><Server />MCP</TabsTrigger>
+          <div className="border-b px-3 py-2">
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="links"><LinkIcon /><span className="max-sm:sr-only">Links</span></TabsTrigger>
+              <TabsTrigger value="files"><FileText /><span className="max-sm:sr-only">Files</span></TabsTrigger>
+              <TabsTrigger value="index"><ListTree /><span className="max-sm:sr-only">Index</span></TabsTrigger>
+              <TabsTrigger value="mcp"><Server /><span className="max-sm:sr-only">MCP</span></TabsTrigger>
             </TabsList>
           </div>
-          <TabsContent value="background" className="min-h-0 overflow-y-auto p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                {backgroundTasks.length} discovered background tasks
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => void refreshBackgroundTasks()}
-              >
-                <RefreshCw />Refresh
-              </Button>
-            </div>
-            <div className="space-y-3">
-              {backgroundTasks.map((task) => (
-                <article key={task.id} className="overflow-hidden rounded-xl border bg-card">
-                  <button
-                    type="button"
-                    className="flex w-full items-start justify-between gap-3 p-3 text-left transition hover:bg-muted/30"
-                    onClick={() => toggleTask(task.id)}
-                    aria-expanded={expandedTask === task.id}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="break-words text-sm font-medium">{task.name}</p>
-                      <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-                        {task.agent_type} · {task.id}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <TaskStatus status={task.status} />
-                      <ChevronDown
-                        className={`size-4 text-muted-foreground transition-transform ${
-                          expandedTask === task.id ? "rotate-180" : ""
-                        }`}
-                      />
-                    </div>
-                  </button>
-                  {expandedTask === task.id && (
-                    <div className="border-t p-3">
-                      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
-                        <dt className="text-muted-foreground">Tool use ID</dt>
-                        <dd className="break-all font-mono">{task.tool_use_id}</dd>
-                        <dt className="text-muted-foreground">Started</dt>
-                        <dd>{formatTaskTime(task.started_at)}</dd>
-                        <dt className="text-muted-foreground">Updated</dt>
-                        <dd>{formatTaskTime(task.updated_at)}</dd>
-                        {task.output_path && (
-                          <>
-                            <dt className="text-muted-foreground">Output path</dt>
-                            <dd className="break-all font-mono">{task.output_path}</dd>
-                          </>
-                        )}
-                      </dl>
-                      <div className="mt-3">
-                        <p className="mb-1.5 text-xs font-medium text-muted-foreground">
-                          Output
-                        </p>
-                        {loadingTask === task.id ? (
-                          <div className="flex items-center gap-2 rounded-lg border p-3 text-xs text-muted-foreground">
-                            <LoaderCircle className="size-4 animate-spin" />
-                            Loading output…
-                          </div>
-                        ) : (
-                          <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-950 p-3 font-mono text-xs text-zinc-100 [overflow-wrap:anywhere]">
-                            {outputs[task.id] || "(no output captured yet)"}
-                          </pre>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </article>
-              ))}
-              {backgroundTasks.length === 0 && <Empty text="No background tasks discovered yet." />}
-            </div>
-          </TabsContent>
-          <TabsContent value="links" className="min-h-0 overflow-y-auto p-4">
+          <TabsContent value="links" className="min-h-0 overflow-y-auto overscroll-contain p-4">
             <div className="space-y-2">
               {links.map((link) => (
                 <div key={`${link.task}-${link.url}`} className="rounded-xl border p-3">
@@ -286,7 +289,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
               {links.length === 0 && <Empty text="No links found in this session." />}
             </div>
           </TabsContent>
-          <TabsContent value="files" className="min-h-0 overflow-y-auto p-4">
+          <TabsContent value="files" className="min-h-0 overflow-y-auto overscroll-contain p-4">
             <div className="space-y-2">
               {files.map((file) => (
                 <button
@@ -297,14 +300,14 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                 >
                   <span className="block break-all font-mono text-xs">{file.path}</span>
                   <span className="mt-1 block text-[11px] text-muted-foreground">
-                    {file.sourceTask > 0 ? `Task ${file.sourceTask}` : "Background task output"}
+                    {`Task ${file.sourceTask}`}
                   </span>
                 </button>
               ))}
               {files.length === 0 && <Empty text="No file paths found in this session." />}
             </div>
           </TabsContent>
-          <TabsContent value="index" className="min-h-0 overflow-y-auto p-4">
+          <TabsContent value="index" className="min-h-0 overflow-y-auto overscroll-contain p-4">
             <div className="space-y-2">
               {tasks.map((task, index) => (
                 <button
@@ -321,7 +324,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
               ))}
             </div>
           </TabsContent>
-          <TabsContent value="mcp" className="min-h-0 overflow-y-auto p-4">
+          <TabsContent value="mcp" className="min-h-0 overflow-y-auto overscroll-contain p-4">
             {mcpLoading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <LoaderCircle className="size-4 animate-spin" />
@@ -331,20 +334,96 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
               <Empty text="MCP config management is available only for Claude and Codex." />
             ) : (
               <div className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-medium">MCP servers</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Enter the complete server map as JSON. Saving replaces the
-                    existing MCP server set.
-                  </p>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-medium">MCP servers</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Enter the complete server map as JSON. Saving replaces the
+                      existing MCP server set.
+                    </p>
+                  </div>
+                  <div className="flex shrink-0">
+                    <input
+                      ref={mcpImportRef}
+                      type="file"
+                      accept="application/json,.json"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) void importMCP(file);
+                        event.target.value = "";
+                      }}
+                    />
+                    <Button type="button" size="icon" variant="ghost" title="Import MCP servers" onClick={() => mcpImportRef.current?.click()}>
+                      <Upload />
+                    </Button>
+                    <Button type="button" size="icon" variant="ghost" title="Export MCP servers" onClick={exportMCP}>
+                      <Download />
+                    </Button>
+                  </div>
                 </div>
                 <textarea
                   value={mcpJSON}
-                  onChange={(event) => setMCPJSON(event.target.value)}
+                  onChange={(event) => {
+                    setMCPJSON(event.target.value);
+                    setMCPIsSample(false);
+                  }}
                   spellCheck={false}
                   aria-label="MCP server configuration"
                   className="min-h-80 w-full resize-y rounded-xl border bg-zinc-950 p-3 font-mono text-xs leading-5 text-zinc-100 outline-none focus:ring-2 focus:ring-ring"
                 />
+                {mcpIsSample && (
+                  <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-800 dark:text-amber-200">
+                    Samples only — replace the filesystem path and remote
+                    Streamable HTTP URL with real values, then save to add these
+                    MCP servers.
+                  </p>
+                )}
+                <div className="space-y-2 rounded-xl border p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium">Connectivity</p>
+                      <p className="text-xs text-muted-foreground">HTTP servers are probed; stdio executables are resolved in PATH.</p>
+                    </div>
+                    <Button type="button" size="sm" variant="outline" onClick={() => void runMCPChecks()} disabled={mcpChecking}>
+                      {mcpChecking ? <LoaderCircle className="animate-spin" /> : <Activity />}
+                      Check
+                    </Button>
+                  </div>
+                  {mcpChecks.map((check) => (
+                    <div key={check.name} className="flex items-start justify-between gap-3 rounded-lg bg-muted/40 p-2 text-xs">
+                      <div className="min-w-0"><p className="font-medium">{check.name} · {check.kind}</p><p className="break-all text-muted-foreground">{check.detail}</p></div>
+                      <TaskStatus status={check.status} />
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-3 rounded-xl border p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div><p className="text-sm font-medium">Profiles</p><p className="text-xs text-muted-foreground">Save, apply, import, or export complete server sets.</p></div>
+                    <div className="flex">
+                      <input ref={profileImportRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) void importProfiles(file);
+                        event.target.value = "";
+                      }} />
+                      <Button type="button" size="icon" variant="ghost" title="Import profiles" onClick={() => profileImportRef.current?.click()}><Upload /></Button>
+                      <Button type="button" size="icon" variant="ghost" title="Export profiles" onClick={exportProfiles}><Download /></Button>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <input value={profileName} onChange={(event) => setProfileName(event.target.value)} placeholder="Profile name" className="min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" />
+                    <Button type="button" size="sm" variant="outline" onClick={() => void saveProfile()}><Save />Save</Button>
+                  </div>
+                  {Object.keys(profiles).sort().map((name) => (
+                    <div key={name} className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2">
+                      <span className="truncate text-sm">{name} <span className="text-xs text-muted-foreground">({Object.keys(profiles[name]).length})</span></span>
+                      <div className="flex">
+                        <Button type="button" size="icon" variant="ghost" title={`Apply ${name}`} onClick={() => void applyProfile(name)}><Play /></Button>
+                        <Button type="button" size="icon" variant="ghost" title={`Delete ${name}`} onClick={() => void removeProfile(name)}><Trash2 /></Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
                 {mcpPath && (
                   <p className="break-all font-mono text-[11px] text-muted-foreground">
                     {mcpPath}
@@ -421,9 +500,14 @@ function Empty({text}: {text: string}) {
   return <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">{text}</p>;
 }
 
-function formatTaskTime(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+function downloadJSON(filename: string, value: unknown) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(
+    new Blob([JSON.stringify(value, null, 2)], {type: "application/json"}),
+  );
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 
 function discoverLinks(messages: Array<{role: string; content: string}>) {

@@ -21,6 +21,7 @@ import {
   Code2,
   Download,
   Eye,
+  FileText,
   LoaderCircle,
   MoreHorizontal,
   Pencil,
@@ -63,6 +64,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
+
+const agentRenderModeStorageKey = "agentapi.chat.agent-output-render-mode";
 
 interface MessageListProps {
   messages: (Message | DraftMessage)[];
@@ -1367,6 +1370,28 @@ function MessageItem({
   const isFailed = draft?.deliveryStatus === "failed";
   const [searchOpen, setSearchOpen] = useState(false);
   const [outputSearchQuery, setOutputSearchQuery] = useState("");
+  const [markdownView, setMarkdownView] = useState(false);
+
+  // localStorage is read after mount so the static export hydrates cleanly.
+  useEffect(() => {
+    setMarkdownView(
+      window.localStorage.getItem(agentRenderModeStorageKey) === "markdown",
+    );
+  }, []);
+  const toggleMarkdownView = () => {
+    setMarkdownView((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(
+          agentRenderModeStorageKey,
+          next ? "markdown" : "raw",
+        );
+      } catch {
+        // Preference persistence is best-effort only.
+      }
+      return next;
+    });
+  };
   const effectiveSearchQuery = outputSearchQuery || globalSearchQuery;
   const matchCount =
     outputSearchQuery.trim() === ""
@@ -1397,6 +1422,32 @@ function MessageItem({
           </div>
           {message.content && (
             <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={toggleMarkdownView}
+                className={`grid size-9 place-items-center rounded-md transition hover:bg-muted hover:text-foreground ${
+                  markdownView
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground"
+                }`}
+                title={
+                  markdownView
+                    ? "Show raw terminal output"
+                    : "Preview as Markdown"
+                }
+                aria-label={
+                  markdownView
+                    ? "Show raw terminal output"
+                    : "Preview output as Markdown"
+                }
+                aria-pressed={markdownView}
+              >
+                {markdownView ? (
+                  <Code2 className="size-3.5" />
+                ) : (
+                  <FileText className="size-3.5" />
+                )}
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -1440,7 +1491,7 @@ function MessageItem({
             <ProcessedMessage
               messageContent={message.content}
               isUser={false}
-              renderMode="raw"
+              renderMode={markdownView ? "markdown" : "raw"}
               searchQuery={effectiveSearchQuery}
             />
           </div>

@@ -87,6 +87,11 @@ There are 4 endpoints:
 - GET `/events` - an SSE stream of events from the agent: message and status updates
 - GET `/mcp` - returns configured MCP servers and the managed config path for Claude or Codex
 - PUT `/mcp` - replaces the complete MCP server set; pass `?restart=true` to restart the PTY agent and apply immediately
+- POST `/mcp/check` - checks remote HTTP connectivity and resolves stdio executables
+- POST `/mcp/servers`, PATCH/DELETE `/mcp/servers/{name}` - creates, updates, or removes one MCP server
+- GET `/mcp/profiles` - exports project-scoped MCP configuration profiles
+- PUT/DELETE `/mcp/profiles/{name}` - imports, replaces, or removes a profile
+- POST `/mcp/profiles/{name}/apply` - replaces the active MCP configuration with a saved profile
 
 #### Allowed hosts
 

@@ -16,8 +16,13 @@ import {getErrorMessage} from "@/lib/error-utils";
 import {getDocumentTitle} from "@/lib/document-title";
 import {getReconnectDelay} from "@/lib/reconnect";
 import {parseFailedMessages} from "@/lib/failed-messages";
-import {createChatAPI, type UploadOptions} from "@/lib/chat-api";
-import type {MCPConfig} from "@/lib/chat-api";
+import {
+  createChatAPI,
+  type MCPCheckResult,
+  type MCPConfig,
+  type MCPProfiles,
+  type UploadOptions,
+} from "@/lib/chat-api";
 
 export interface Message {
   id: number;
@@ -97,17 +102,6 @@ export interface QueuedMessage {
   time: string;
 }
 
-export interface BackgroundTask {
-  id: string;
-  name: string;
-  status: "running" | "completed" | "failed" | "unknown";
-  agent_type: string;
-  tool_use_id: string;
-  output_path?: string;
-  started_at: string;
-  updated_at: string;
-}
-
 export type AgentType = "claude" | "goose" | "aider" | "gemini" | "amp" | "codex" | "cursor" | "cursor-agent" | "copilot" | "auggie" | "amazonq" | "opencode" | "custom" | "unknown";
 
 export type AgentColorDisplayNamePair = {
@@ -133,7 +127,6 @@ export const AgentType: Record<Exclude<AgentType, "unknown">, AgentColorDisplayN
 interface ChatContextValue {
   messages: (Message | DraftMessage)[];
   richMessages: RichMessage[];
-  backgroundTasks: BackgroundTask[];
   loading: boolean;
   serverStatus: ServerStatus;
   connectionStatus: ConnectionStatus;
@@ -151,18 +144,19 @@ interface ChatContextValue {
   nextReconnectAt: number | null;
   reconnectNow: () => void;
   downloadSession: () => Promise<void>;
-  refreshBackgroundTasks: () => Promise<void>;
-  getBackgroundTaskOutput: (id: string) => Promise<{
-    content: string;
-    path: string;
-    size: number;
-    truncated: boolean;
-  }>;
   getMCP: () => Promise<MCPConfig>;
   updateMCP: (
     servers: Record<string, unknown>,
     restart?: boolean,
   ) => Promise<MCPConfig>;
+  checkMCP: (servers?: Record<string, unknown>) => Promise<MCPCheckResult[]>;
+  createMCPServer: (name: string, config: unknown, restart?: boolean) => Promise<void>;
+  updateMCPServer: (name: string, config: unknown, restart?: boolean) => Promise<void>;
+  deleteMCPServer: (name: string, restart?: boolean) => Promise<void>;
+  getMCPProfiles: () => Promise<MCPProfiles>;
+  saveMCPProfile: (name: string, servers: Record<string, unknown>) => Promise<MCPProfiles>;
+  deleteMCPProfile: (name: string) => Promise<MCPProfiles>;
+  applyMCPProfile: (name: string, restart?: boolean) => Promise<void>;
   storageScope: string;
   agentType: AgentType;
 }
@@ -213,7 +207,6 @@ export const useAgentAPIUrl = (): string => {
 export function ChatProvider({ children }: PropsWithChildren) {
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
-  const [backgroundTasks, setBackgroundTasks] = useState<BackgroundTask[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [serverStatus, setServerStatus] = useState<ServerStatus>("unknown");
   const [connectionStatus, setConnectionStatus] =
@@ -251,30 +244,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
       // The connection status handler reports connectivity failures.
     }
   }, [api]);
-  const refreshBackgroundTasks = useCallback(async () => {
-    try {
-      setBackgroundTasks(await api.getBackgroundTasks());
-    } catch {
-      // The primary connection state handles connectivity feedback.
-    }
-  }, [api]);
-  const getBackgroundTaskOutput = useCallback(
-    (id: string) => api.getBackgroundTaskOutput(id),
-    [api],
-  );
-
-  useEffect(() => {
-    void refreshBackgroundTasks();
-  }, [refreshBackgroundTasks]);
-
-  const hasRunningBackgroundTasks = backgroundTasks.some(
-    (task) => task.status === "running",
-  );
-  useEffect(() => {
-    if (!hasRunningBackgroundTasks) return;
-    const timer = window.setInterval(() => void refreshBackgroundTasks(), 3000);
-    return () => window.clearInterval(timer);
-  }, [hasRunningBackgroundTasks, refreshBackgroundTasks]);
   const currentTask = [...messages]
     .reverse()
     .find((message) => message.role === "user")
@@ -464,13 +433,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
           updated[existingIndex] = data;
           return updated;
         });
-        if (
-          data.content.some(
-            (block) => block.type === "tool_use" || block.type === "tool_result",
-          )
-        ) {
-          void refreshBackgroundTasks();
-        }
       });
 
       // Handle status changes
@@ -488,7 +450,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
         // Set agent type
         setAgentType(data.agent_type === "" ? "unknown" : data.agent_type as AgentType);
         void refreshQueue();
-        void refreshBackgroundTasks();
       });
 
       // Handle agent error events
@@ -565,7 +526,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
-  }, [agentAPIUrl, reconnectNonce, reconnectNow, refreshBackgroundTasks, refreshQueue]);
+  }, [agentAPIUrl, reconnectNonce, reconnectNow, refreshQueue]);
 
   // Send a new message
   const sendMessage = async (
@@ -701,7 +662,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
       value={{
         messages,
         richMessages,
-        backgroundTasks,
         loading,
         sendMessage,
         retryFailedMessage,
@@ -716,10 +676,16 @@ export function ChatProvider({ children }: PropsWithChildren) {
         nextReconnectAt,
         reconnectNow,
         downloadSession,
-        refreshBackgroundTasks,
-        getBackgroundTaskOutput,
         getMCP: api.getMCP,
         updateMCP: api.updateMCP,
+        checkMCP: api.checkMCP,
+        createMCPServer: api.createMCPServer,
+        updateMCPServer: api.updateMCPServer,
+        deleteMCPServer: api.deleteMCPServer,
+        getMCPProfiles: api.getMCPProfiles,
+        saveMCPProfile: api.saveMCPProfile,
+        deleteMCPProfile: api.deleteMCPProfile,
+        applyMCPProfile: api.applyMCPProfile,
         storageScope: agentAPIUrl,
         agentType,
       }}
