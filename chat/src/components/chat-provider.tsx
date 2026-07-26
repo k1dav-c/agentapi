@@ -6,6 +6,7 @@ import {
   useEffect,
   useRef,
   useCallback,
+  useMemo,
   createContext,
   PropsWithChildren,
   useContext,
@@ -15,6 +16,8 @@ import {getErrorMessage} from "@/lib/error-utils";
 import {getDocumentTitle} from "@/lib/document-title";
 import {getReconnectDelay} from "@/lib/reconnect";
 import {parseFailedMessages} from "@/lib/failed-messages";
+import {createChatAPI, type UploadOptions} from "@/lib/chat-api";
+import type {MCPConfig} from "@/lib/chat-api";
 
 export interface Message {
   id: number;
@@ -68,22 +71,6 @@ interface ErrorEventData {
   time: string;
 }
 
-interface APIErrorDetail {
-  location: string;
-  message: string;
-  value: null | string | number | boolean | object;
-}
-
-interface APIErrorModel {
-  $schema: string;
-  detail: string;
-  errors: APIErrorDetail[];
-  instance: string;
-  status: number;
-  title: string;
-  type: string;
-}
-
 function isDraftMessage(message: Message | DraftMessage): boolean {
   return message.id === undefined;
 }
@@ -102,11 +89,6 @@ export interface FileUploadResponse {
   ok: boolean;
   filePath?: string;
   error?: string;
-}
-
-interface UploadOptions {
-  signal?: AbortSignal;
-  onProgress?: (progress: number) => void;
 }
 
 export interface QueuedMessage {
@@ -176,6 +158,11 @@ interface ChatContextValue {
     size: number;
     truncated: boolean;
   }>;
+  getMCP: () => Promise<MCPConfig>;
+  updateMCP: (
+    servers: Record<string, unknown>,
+    restart?: boolean,
+  ) => Promise<MCPConfig>;
   storageScope: string;
   agentType: AgentType;
 }
@@ -242,6 +229,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const [failedMessagesHydrated, setFailedMessagesHydrated] = useState(false);
   const agentAPIUrl = useAgentAPIUrl();
+  const api = useMemo(() => createChatAPI(agentAPIUrl), [agentAPIUrl]);
   const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
 
   const reconnectNow = useCallback(() => {
@@ -258,36 +246,22 @@ export function ChatProvider({ children }: PropsWithChildren) {
   }, []);
   const refreshQueue = useCallback(async () => {
     try {
-      const response = await fetch(`${agentAPIUrl}/queue`);
-      if (!response.ok) return;
-      const data = await response.json() as {messages: QueuedMessage[]};
-      setQueuedMessages(data.messages ?? []);
+      setQueuedMessages(await api.getQueue());
     } catch {
       // The connection status handler reports connectivity failures.
     }
-  }, [agentAPIUrl]);
+  }, [api]);
   const refreshBackgroundTasks = useCallback(async () => {
     try {
-      const response = await fetch(`${agentAPIUrl}/background-tasks`);
-      if (!response.ok) return;
-      const data = await response.json() as {tasks?: BackgroundTask[]};
-      setBackgroundTasks(data.tasks ?? []);
+      setBackgroundTasks(await api.getBackgroundTasks());
     } catch {
       // The primary connection state handles connectivity feedback.
     }
-  }, [agentAPIUrl]);
-  const getBackgroundTaskOutput = useCallback(async (id: string) => {
-    const response = await fetch(
-      `${agentAPIUrl}/background-tasks/${encodeURIComponent(id)}/output`,
-    );
-    if (!response.ok) throw new Error("Background task output is unavailable");
-    return await response.json() as {
-      content: string;
-      path: string;
-      size: number;
-      truncated: boolean;
-    };
-  }, [agentAPIUrl]);
+  }, [api]);
+  const getBackgroundTaskOutput = useCallback(
+    (id: string) => api.getBackgroundTaskOutput(id),
+    [api],
+  );
 
   useEffect(() => {
     void refreshBackgroundTasks();
@@ -617,34 +591,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     }
 
     try {
-      const response = await fetch(`${agentAPIUrl}/message`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          content: content,
-          type,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json() as APIErrorModel;
-        console.error("Failed to send message:", errorData);
-        const detail = errorData.detail;
-        const messages =
-          "errors" in errorData
-            ?
-              errorData.errors.map((e: APIErrorDetail) => e.message).join(", ")
-            : "";
-
-        const fullDetail = `${detail}: ${messages}`;
-        throw new Error(fullDetail);
-      }
-      const result = await response.json() as {
-        ok?: boolean;
-        queued?: boolean;
-      };
+      const result = await api.sendMessage(content, type);
       await refreshQueue();
       if (type === "user") {
         setMessages((previous) =>
@@ -656,8 +603,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         );
       }
       return {
-        ok: result.ok === true,
-        queued: result.queued === true,
+        ok: result.ok,
+        queued: result.queued,
       };
     } catch (error) {
       console.error("Error sending message:", error);
@@ -711,80 +658,22 @@ export function ChatProvider({ children }: PropsWithChildren) {
   };
 
   // Upload files to workspace
-  const uploadFiles = (
-    formData: FormData,
-    options: UploadOptions = {},
-  ): Promise<FileUploadResponse> =>
-    new Promise((resolve) => {
-      const request = new XMLHttpRequest();
-      request.open("POST", `${agentAPIUrl}/upload`);
-      request.upload.onprogress = (event) => {
-        if (event.lengthComputable) {
-          options.onProgress?.(
-            Math.min(100, Math.round((event.loaded / event.total) * 100)),
-          );
-        }
-      };
-      request.onload = () => {
-        try {
-          const data = JSON.parse(request.responseText) as
-            | FileUploadResponse
-            | APIErrorModel;
-          if (request.status >= 200 && request.status < 300) {
-            options.onProgress?.(100);
-            resolve(data as FileUploadResponse);
-            return;
-          }
-          const error =
-            "detail" in data ? data.detail : "The upload was rejected.";
-          resolve({ok: false, error});
-        } catch {
-          resolve({ok: false, error: "The server returned an invalid response."});
-        }
-      };
-      request.onerror = () =>
-        resolve({ok: false, error: "The upload connection failed."});
-      request.onabort = () =>
-        resolve({ok: false, error: "Upload cancelled."});
-      options.signal?.addEventListener("abort", () => request.abort(), {
-        once: true,
-      });
-      request.send(formData);
-    });
+  const uploadFiles = (formData: FormData, options: UploadOptions = {}) =>
+    api.uploadFiles(formData, options);
 
   const updateQueuedMessage = async (id: number, content: string) => {
-    const response = await fetch(`${agentAPIUrl}/queue/${id}`, {
-      method: "PUT",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({content}),
-    });
-    if (!response.ok) {
-      throw new Error("Failed to update queued message");
-    }
+    await api.updateQueuedMessage(id, content);
     await refreshQueue();
   };
 
   const deleteQueuedMessage = async (id: number) => {
-    const response = await fetch(`${agentAPIUrl}/queue/${id}`, {
-      method: "DELETE",
-    });
-    if (!response.ok) {
-      throw new Error("Failed to delete queued message");
-    }
+    await api.deleteQueuedMessage(id);
     await refreshQueue();
   };
 
   const downloadSession = async () => {
     try {
-      const response = await fetch(`${agentAPIUrl}/timeline`);
-      if (!response.ok) {
-        throw new Error("Failed to export the current session");
-      }
-      const data = await response.json();
-      const events = data.events;
-      if (!Array.isArray(events)) {
-        throw new Error("The server returned an invalid timeline response");
-      }
+      const events = await api.getTimelineEvents();
       const jsonl = events.map((event) => JSON.stringify(event)).join("\n");
       const blob = new Blob([jsonl === "" ? "" : `${jsonl}\n`], {
         type: "application/x-ndjson",
@@ -829,6 +718,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         downloadSession,
         refreshBackgroundTasks,
         getBackgroundTaskOutput,
+        getMCP: api.getMCP,
+        updateMCP: api.updateMCP,
         storageScope: agentAPIUrl,
         agentType,
       }}
