@@ -107,3 +107,58 @@ func TestDiscoverBackgroundTaskFollowup(t *testing.T) {
 	require.Contains(t, tasks[0].Output, "ok github.com/coder/agentapi")
 	require.Equal(t, now.Add(3*time.Second), tasks[0].UpdatedAt)
 }
+
+func TestBackgroundStatus(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		tool    discoveredTool
+		started bool
+		want    string
+	}{
+		{
+			name: "codex still running",
+			tool: discoveredTool{result: "Script running with cell ID 42", status: "completed"},
+			want: "running",
+		},
+		{
+			name: "codex successful exit",
+			tool: discoveredTool{result: "Process exited with code 0", status: "completed"},
+			want: "completed",
+		},
+		{
+			name: "codex failed exit",
+			tool: discoveredTool{result: "Process exited with code 2", status: "completed"},
+			want: "failed",
+		},
+		{
+			name: "claude completed task",
+			tool: discoveredTool{result: "<task_status>completed</task_status>"},
+			want: "completed",
+		},
+		{
+			name: "claude failed retrieval",
+			tool: discoveredTool{result: `{"retrieval_status":"failed"}`},
+			want: "failed",
+		},
+		{
+			name: "completed followup fallback",
+			tool: discoveredTool{result: "final output", status: "completed"},
+			want: "completed",
+		},
+		{
+			name:    "background start remains running",
+			tool:    discoveredTool{result: "Background task ID: task-1", status: "completed"},
+			started: true,
+			want:    "running",
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, test.want, backgroundStatus(&test.tool, test.started))
+		})
+	}
+}

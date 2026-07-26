@@ -18,9 +18,11 @@ import (
 )
 
 var (
-	backgroundIDPattern = regexp.MustCompile(`(?i)(?:task|shell|session|cell)(?:\s+id)?["':=\s]+([a-z0-9][a-z0-9_-]*)`)
-	outputPathPattern   = regexp.MustCompile(`(?:^|[\s"'=:])(/[^\s"']+\.(?:out|output))(?:\s|$)`)
-	redirectPathPattern = regexp.MustCompile(`(?:^|[\s])>{1,2}\s*([^\s"';&]+\.(?:out|output))(?:\s|$)`)
+	backgroundIDPattern   = regexp.MustCompile(`(?i)(?:task|shell|session|cell)(?:\s+id)?["':=\s]+([a-z0-9][a-z0-9_-]*)`)
+	outputPathPattern     = regexp.MustCompile(`(?:^|[\s"'=:])(/[^\s"']+\.(?:out|output))(?:\s|$)`)
+	redirectPathPattern   = regexp.MustCompile(`(?:^|[\s])>{1,2}\s*([^\s"';&]+\.(?:out|output))(?:\s|$)`)
+	failedExitPattern     = regexp.MustCompile(`(?i)(?:exit code|exited with code)\s*[1-9][0-9]*\b`)
+	successfulExitPattern = regexp.MustCompile(`(?i)(?:exit code|exited with code)\s*0\b`)
 )
 
 type discoveredTool struct {
@@ -263,19 +265,30 @@ func backgroundTaskName(tool *discoveredTool) string {
 }
 
 func backgroundStatus(tool *discoveredTool, started bool) string {
-	if tool.isError || tool.status == "failed" {
+	result := strings.ToLower(tool.result)
+	if tool.isError ||
+		tool.status == "failed" ||
+		tool.status == "cancelled" ||
+		failedExitPattern.MatchString(result) ||
+		strings.Contains(result, `"retrieval_status":"failed"`) ||
+		strings.Contains(result, "<retrieval_status>failed</retrieval_status>") ||
+		strings.Contains(result, "<task_status>failed</task_status>") {
 		return "failed"
 	}
-	result := strings.ToLower(tool.result)
-	if strings.Contains(result, "running") || strings.Contains(result, "still running") {
+	if strings.Contains(result, "still running") ||
+		strings.Contains(result, "process running") ||
+		strings.Contains(result, "script running") ||
+		strings.Contains(result, `"status":"running"`) ||
+		strings.Contains(result, "<task_status>running</task_status>") {
 		return "running"
 	}
-	if strings.Contains(result, "exit code") ||
-		strings.Contains(result, "exited with code") ||
+	if successfulExitPattern.MatchString(result) ||
 		strings.Contains(result, "completed") ||
 		strings.Contains(result, "finished") ||
 		strings.Contains(result, `"retrieval_status":"success"`) ||
-		strings.Contains(result, "<retrieval_status>success</retrieval_status>") {
+		strings.Contains(result, "<retrieval_status>success</retrieval_status>") ||
+		strings.Contains(result, "<task_status>completed</task_status>") ||
+		(!started && tool.status == "completed") {
 		return "completed"
 	}
 	if started {
