@@ -9,7 +9,7 @@ import (
 
 func TestIsAgentReadyForInitialPrompt(t *testing.T) {
 	dir := "testdata/initialization"
-	agentTypes := []AgentType{AgentTypeClaude, AgentTypeGoose, AgentTypeAider, AgentTypeGemini, AgentTypeCopilot, AgentTypeAmp, AgentTypeCodex, AgentTypeCursor, AgentTypeAuggie, AgentTypeAmazonQ, AgentTypeOpencode}
+	agentTypes := []AgentType{AgentTypeClaude, AgentTypeGoose, AgentTypeAider, AgentTypeGemini, AgentTypeCopilot, AgentTypeAmp, AgentTypeCodex, AgentTypeCursor, AgentTypeAuggie, AgentTypeAmazonQ, AgentTypeOpencode, AgentTypeKimi}
 	for _, agentType := range agentTypes {
 		t.Run(string(agentType), func(t *testing.T) {
 			t.Run("ready", func(t *testing.T) {

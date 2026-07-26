@@ -24,6 +24,8 @@ func IsAgentReadyForInitialPrompt(agentType AgentType, message string) bool {
 		return isGenericAgentReadyForInitialPrompt(message)
 	case AgentTypeOpencode:
 		return isOpencodeAgentReadyForInitialPrompt(message)
+	case AgentTypeKimi:
+		return isGenericAgentReadyForInitialPrompt(message)
 	case AgentTypeCustom:
 		return isGenericAgentReadyForInitialPrompt(message)
 	default:

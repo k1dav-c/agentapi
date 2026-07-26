@@ -244,6 +244,7 @@ const (
 	AgentTypeAuggie   AgentType = "auggie"
 	AgentTypeAmazonQ  AgentType = "amazonq"
 	AgentTypeOpencode AgentType = "opencode"
+	AgentTypeKimi     AgentType = "kimi"
 	AgentTypeCustom   AgentType = "custom"
 )
 
@@ -299,6 +300,8 @@ func FormatAgentMessage(agentType AgentType, message string, userInput string) s
 		return formatGenericMessage(message, userInput, agentType)
 	case AgentTypeOpencode:
 		return formatOpencodeMessage(message, userInput)
+	case AgentTypeKimi:
+		return formatGenericMessage(message, userInput, agentType)
 	case AgentTypeCustom:
 		return formatGenericMessage(message, userInput, agentType)
 	default:
