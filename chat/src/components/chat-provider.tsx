@@ -22,6 +22,7 @@ import {
   type MCPConfig,
   type MCPProfiles,
   type UploadOptions,
+  type WebhookConfig,
 } from "@/lib/chat-api";
 
 export interface Message {
@@ -144,6 +145,13 @@ interface ChatContextValue {
   nextReconnectAt: number | null;
   reconnectNow: () => void;
   downloadSession: () => Promise<void>;
+  getWebhook: () => Promise<WebhookConfig>;
+  updateWebhook: (config: {
+    url: string;
+    secret?: string;
+    timeout_seconds: number;
+    max_attempts: number;
+  }) => Promise<WebhookConfig>;
   getMCP: () => Promise<MCPConfig>;
   updateMCP: (
     servers: Record<string, unknown>,
@@ -676,6 +684,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         nextReconnectAt,
         reconnectNow,
         downloadSession,
+        getWebhook: api.getWebhook,
+        updateWebhook: api.updateWebhook,
         getMCP: api.getMCP,
         updateMCP: api.updateMCP,
         checkMCP: api.checkMCP,

@@ -28,6 +28,13 @@ export interface MCPProfiles {
   path: string;
 }
 
+export interface WebhookConfig {
+  url: string;
+  timeout_seconds: number;
+  max_attempts: number;
+  secret_configured: boolean;
+}
+
 interface APIErrorDetail {
   message: string;
 }
@@ -44,6 +51,31 @@ async function requireOK(response: Response, fallback: string) {
 
 export function createChatAPI(baseURL: string) {
   return {
+    async getWebhook(): Promise<WebhookConfig> {
+      const response = await requireOK(
+        await fetch(`${baseURL}/webhook`),
+        "Webhook configuration is unavailable",
+      );
+      return (await response.json()) as WebhookConfig;
+    },
+
+    async updateWebhook(config: {
+      url: string;
+      secret?: string;
+      timeout_seconds: number;
+      max_attempts: number;
+    }): Promise<WebhookConfig> {
+      const response = await requireOK(
+        await fetch(`${baseURL}/webhook`, {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(config),
+        }),
+        "Failed to update webhook configuration",
+      );
+      return (await response.json()) as WebhookConfig;
+    },
+
     async getMCP(): Promise<MCPConfig> {
       const response = await requireOK(
         await fetch(`${baseURL}/mcp`),
