@@ -31,7 +31,7 @@ func screenDiff(oldScreen, newScreen string, agentType msgfmt.AgentType) string 
 	firstNonMatchingLine := len(newLines)
 	for i, line := range newLines[dynamicHeaderEnd+1:] {
 		if !oldLinesMap[line] {
-			firstNonMatchingLine = i
+			firstNonMatchingLine = i + dynamicHeaderEnd + 1
 			break
 		}
 	}
