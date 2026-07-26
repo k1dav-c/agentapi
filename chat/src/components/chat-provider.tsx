@@ -151,6 +151,7 @@ interface ChatContextValue {
   reconnectAttempt: number;
   nextReconnectAt: number | null;
   reconnectNow: () => void;
+  downloadSession: () => Promise<void>;
   storageScope: string;
   agentType: AgentType;
 }
@@ -696,6 +697,37 @@ export function ChatProvider({ children }: PropsWithChildren) {
     await refreshQueue();
   };
 
+  const downloadSession = async () => {
+    try {
+      const response = await fetch(`${agentAPIUrl}/session/export`);
+      if (!response.ok) {
+        throw new Error("Failed to export the current session");
+      }
+      const events = await response.json();
+      if (!Array.isArray(events)) {
+        throw new Error("The server returned an invalid session export");
+      }
+      const jsonl = events.map((event) => JSON.stringify(event)).join("\n");
+      const blob = new Blob([jsonl === "" ? "" : `${jsonl}\n`], {
+        type: "application/x-ndjson",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const timestamp = new Date().toISOString().replaceAll(":", "-");
+      link.href = url;
+      link.download = `agentapi-session-${timestamp}.jsonl`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error("Session download failed", {
+        description: getErrorMessage(error),
+      });
+      throw error;
+    }
+  };
+
   return (
     <ChatContext.Provider
       value={{
@@ -714,6 +746,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         reconnectAttempt,
         nextReconnectAt,
         reconnectNow,
+        downloadSession,
         storageScope: agentAPIUrl,
         agentType,
       }}

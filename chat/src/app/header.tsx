@@ -3,10 +3,11 @@
 import { type ComponentType, useEffect, useMemo, useState } from "react";
 import { AgentType, useChat } from "@/components/chat-provider";
 import { ModeToggle } from "@/components/mode-toggle";
-import { Activity, Bot, CircleAlert, CircleCheck, LoaderCircle, WifiOff } from "lucide-react";
+import { Activity, Bot, CircleAlert, CircleCheck, Download, LoaderCircle, WifiOff } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -20,9 +21,11 @@ export function Header() {
     queuedMessages,
     richMessages,
     messages,
+    downloadSession,
   } = useChat();
   const [runningSince, setRunningSince] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     if (serverStatus !== "running") {
@@ -186,6 +189,26 @@ export function Header() {
                 value={`${queuedMessages.length} ${queuedMessages.length === 1 ? "task" : "tasks"}`}
               />
             </div>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={downloading}
+              onSelect={() => {
+                setDownloading(true);
+                void downloadSession()
+                  .catch(() => {
+                    // The provider reports request failures through the
+                    // rejected promise; keep the menu action retryable.
+                  })
+                  .finally(() => setDownloading(false));
+              }}
+            >
+              {downloading ? (
+                <LoaderCircle className="motion-safe:animate-spin" />
+              ) : (
+                <Download />
+              )}
+              Download session JSONL
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <ModeToggle />
