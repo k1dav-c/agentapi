@@ -13,6 +13,8 @@ import {
 import {toast} from "sonner";
 import {getErrorMessage} from "@/lib/error-utils";
 import {getDocumentTitle} from "@/lib/document-title";
+import {getReconnectDelay} from "@/lib/reconnect";
+import {parseFailedMessages} from "@/lib/failed-messages";
 
 export interface Message {
   id: number;
@@ -23,8 +25,11 @@ export interface Message {
 
 // Draft messages are used to optmistically update the UI
 // before the server responds.
-interface DraftMessage extends Omit<Message, "id"> {
+export interface DraftMessage extends Omit<Message, "id"> {
   id?: number;
+  clientId: string;
+  deliveryStatus: "sending" | "failed";
+  error?: string;
 }
 
 interface MessageUpdateEvent {
@@ -41,6 +46,7 @@ export interface RichContentBlock {
   tool_use_id?: string;
   tool_name?: string;
   tool_input?: unknown;
+  status?: "running" | "completed" | "failed";
   is_error?: boolean;
 }
 
@@ -90,6 +96,12 @@ export type ConnectionStatus = "connected" | "reconnecting" | "offline";
 export interface FileUploadResponse {
   ok: boolean;
   filePath?: string;
+  error?: string;
+}
+
+interface UploadOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: number) => void;
 }
 
 export interface QueuedMessage {
@@ -127,12 +139,27 @@ interface ChatContextValue {
   serverStatus: ServerStatus;
   connectionStatus: ConnectionStatus;
   queuedMessages: QueuedMessage[];
-  sendMessage: (message: string, type?: MessageType) => void;
+  sendMessage: (message: string, type?: MessageType) => Promise<boolean>;
+  retryFailedMessage: (clientId: string) => Promise<boolean>;
+  dismissFailedMessage: (clientId: string) => void;
   updateQueuedMessage: (id: number, content: string) => Promise<void>;
   deleteQueuedMessage: (id: number) => Promise<void>;
-  uploadFiles: (formData: FormData) => Promise<FileUploadResponse>;
+  uploadFiles: (
+    formData: FormData,
+    options?: UploadOptions,
+  ) => Promise<FileUploadResponse>;
+  reconnectAttempt: number;
+  nextReconnectAt: number | null;
+  reconnectNow: () => void;
+  storageScope: string;
   agentType: AgentType;
 }
+
+// The server sends a heartbeat event every 15s. If nothing (heartbeat or
+// otherwise) arrives for this long, the connection is considered dead even
+// when the EventSource still reports itself as open — which happens when
+// the TCP connection dies without a FIN, e.g. after system sleep.
+const STALE_CONNECTION_MS = 45_000;
 
 const ChatContext = createContext<ChatContextValue | undefined>(undefined);
 
@@ -181,8 +208,27 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [agentType, setAgentType] = useState<AgentType>("custom");
   const eventSourceRef = useRef<EventSource | null>(null);
+  const lastEventAtRef = useRef(Date.now());
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const [nextReconnectAt, setNextReconnectAt] = useState<number | null>(null);
+  const [reconnectNonce, setReconnectNonce] = useState(0);
+  const [failedMessagesHydrated, setFailedMessagesHydrated] = useState(false);
   const agentAPIUrl = useAgentAPIUrl();
+  const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
+  const reconnectNow = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    eventSourceRef.current?.close();
+    reconnectAttemptRef.current = 0;
+    setReconnectAttempt(0);
+    setNextReconnectAt(null);
+    setConnectionStatus("reconnecting");
+    setReconnectNonce((value) => value + 1);
+  }, []);
   const refreshQueue = useCallback(async () => {
     try {
       const response = await fetch(`${agentAPIUrl}/queue`);
@@ -206,14 +252,101 @@ export function ChatProvider({ children }: PropsWithChildren) {
     });
   }, [connectionStatus, currentTask, serverStatus]);
 
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(failedMessagesStorageKey);
+      if (!saved) {
+        setFailedMessagesHydrated(true);
+        return;
+      }
+      const failed = parseFailedMessages(saved) as DraftMessage[];
+      setMessages((previous) => {
+        const existing = new Set(
+          previous
+            .filter(isDraftMessage)
+            .map((message) => (message as DraftMessage).clientId),
+        );
+        return [
+          ...previous,
+          ...failed.filter((message) => !existing.has(message.clientId)),
+        ];
+      });
+    } catch {
+      window.localStorage.removeItem(failedMessagesStorageKey);
+    } finally {
+      setFailedMessagesHydrated(true);
+    }
+  }, [failedMessagesStorageKey]);
+
+  useEffect(() => {
+    if (!failedMessagesHydrated) return;
+    const failed = messages.filter(
+      (message): message is DraftMessage =>
+        isDraftMessage(message) &&
+        (message as DraftMessage).deliveryStatus === "failed",
+    );
+    try {
+      if (failed.length > 0) {
+        window.localStorage.setItem(
+          failedMessagesStorageKey,
+          JSON.stringify(failed),
+        );
+      } else {
+        window.localStorage.removeItem(failedMessagesStorageKey);
+      }
+    } catch {
+      // Keep failed messages in memory when storage is unavailable.
+    }
+  }, [failedMessagesHydrated, failedMessagesStorageKey, messages]);
+
   // Set up SSE connection to the events endpoint
   useEffect(() => {
     let disposed = false;
 
-    const handleOffline = () => setConnectionStatus("offline");
-    const handleOnline = () => setConnectionStatus("reconnecting");
+    const handleOffline = () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      eventSourceRef.current?.close();
+      setNextReconnectAt(null);
+      setConnectionStatus("offline");
+    };
+    const handleOnline = () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      reconnectAttemptRef.current = 0;
+      setReconnectAttempt(0);
+      setNextReconnectAt(null);
+      setConnectionStatus("reconnecting");
+      setupEventSource();
+    };
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
+
+    // Reconnect promptly when the tab becomes visible again. Browsers
+    // throttle timers in background tabs, so a scheduled reconnect may not
+    // have fired yet, and a connection that died without a FIN (e.g. after
+    // system sleep) never fires onerror at all. Server heartbeats let us
+    // detect the silent case: no event for STALE_CONNECTION_MS means the
+    // connection is dead even if the EventSource still reports itself open.
+    const handleVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const eventSource = eventSourceRef.current;
+      const stale =
+        Date.now() - lastEventAtRef.current > STALE_CONNECTION_MS;
+      if (
+        !eventSource ||
+        eventSource.readyState === EventSource.CLOSED ||
+        stale
+      ) {
+        reconnectNow();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisible);
+    window.addEventListener("focus", handleVisible);
 
     // Function to create and set up EventSource
     const setupEventSource = () => {
@@ -234,14 +367,22 @@ export function ChatProvider({ children }: PropsWithChildren) {
       const eventSource = new EventSource(`${agentAPIUrl}/events`);
       eventSourceRef.current = eventSource;
 
+      // Server-sent keep-alive; only used to detect dead connections.
+      eventSource.addEventListener("heartbeat", () => {
+        lastEventAtRef.current = Date.now();
+      });
+
       // Handle message updates
       eventSource.addEventListener("message_update", (event) => {
+        lastEventAtRef.current = Date.now();
         const data: MessageUpdateEvent = JSON.parse(event.data);
 
         setMessages((prevMessages) => {
           // Clean up draft messages
           const updatedMessages = [...prevMessages].filter(
-            (m) => !isDraftMessage(m)
+            (message) =>
+              !isDraftMessage(message) ||
+              (message as DraftMessage).deliveryStatus === "failed",
           );
 
           // Check if message with this ID already exists
@@ -291,6 +432,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
 
       // Handle status changes
       eventSource.addEventListener("status_change", (event) => {
+        lastEventAtRef.current = Date.now();
         const data: StatusChangeEvent = JSON.parse(event.data);
         if (data.status === "stable") {
           setServerStatus("stable");
@@ -326,6 +468,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
 
       // Handle connection open (server is online)
       eventSource.onopen = () => {
+        lastEventAtRef.current = Date.now();
+        reconnectAttemptRef.current = 0;
+        setReconnectAttempt(0);
+        setNextReconnectAt(null);
         setConnectionStatus("connected");
         void refreshQueue();
         // Connection is established, but we'll wait for status_change event
@@ -342,49 +488,60 @@ export function ChatProvider({ children }: PropsWithChildren) {
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current);
         }
+        const attempt = reconnectAttemptRef.current + 1;
+        reconnectAttemptRef.current = attempt;
+        setReconnectAttempt(attempt);
+        const delay = getReconnectDelay(attempt);
+        setNextReconnectAt(Date.now() + delay);
         reconnectTimeoutRef.current = setTimeout(() => {
           if (!disposed) {
+            setNextReconnectAt(null);
             setupEventSource();
           }
-        }, 3000);
+        }, delay);
       };
 
       return eventSource;
     };
 
     // Initial setup
-    const eventSource = setupEventSource();
+    setupEventSource();
 
     // Clean up on component unmount
     return () => {
       disposed = true;
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisible);
+      window.removeEventListener("focus", handleVisible);
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
-      if (eventSource) {
-        // Check if eventSource was successfully created
-        eventSource.close();
-      }
+      eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
-  }, [agentAPIUrl, refreshQueue]);
+  }, [agentAPIUrl, reconnectNonce, reconnectNow, refreshQueue]);
 
   // Send a new message
   const sendMessage = async (
     content: string,
     type: "user" | "raw" = "user"
-  ) => {
+  ): Promise<boolean> => {
     // For user messages, require non-empty content
-    if (type === "user" && !content.trim()) return;
+    if (type === "user" && !content.trim()) return false;
+    const clientId = crypto.randomUUID();
 
     // For raw messages, don't set loading state as it's usually fast
     if (type === "user") {
       setMessages((prevMessages) => [
         ...prevMessages,
-        { role: "user", content },
+        {
+          role: "user",
+          content,
+          clientId,
+          deliveryStatus: "sending",
+        },
       ]);
       setLoading(true);
     }
@@ -412,12 +569,19 @@ export function ChatProvider({ children }: PropsWithChildren) {
             : "";
 
         const fullDetail = `${detail}: ${messages}`;
-        toast.error(`Failed to send message`, {
-          description: fullDetail,
-        });
+        throw new Error(fullDetail);
       }
       await refreshQueue();
-
+      if (type === "user") {
+        setMessages((previous) =>
+          previous.filter(
+            (message) =>
+              !isDraftMessage(message) ||
+              (message as DraftMessage).clientId !== clientId,
+          ),
+        );
+      }
+      return true;
     } catch (error) {
       console.error("Error sending message:", error);
       const message = getErrorMessage(error)
@@ -425,54 +589,90 @@ export function ChatProvider({ children }: PropsWithChildren) {
       toast.error(`Error sending message`, {
         description: message,
       });
+      if (type === "user") {
+        setMessages((previous) =>
+          previous.map((item) =>
+            isDraftMessage(item) &&
+            (item as DraftMessage).clientId === clientId
+              ? {
+                  ...(item as DraftMessage),
+                  deliveryStatus: "failed",
+                  error: message,
+                }
+              : item,
+          ),
+        );
+      }
+      return false;
     } finally {
-      // Remove optimistic draft message if still present (may have been replaced by server response via SSE).
-      setMessages((prev) => prev.filter((m) => !isDraftMessage(m)));
       if (type === "user") {
         setLoading(false);
       }
     }
   };
 
+  const dismissFailedMessage = (clientId: string) => {
+    setMessages((previous) =>
+      previous.filter(
+        (message) =>
+          !isDraftMessage(message) ||
+          (message as DraftMessage).clientId !== clientId,
+      ),
+    );
+  };
+
+  const retryFailedMessage = async (clientId: string) => {
+    const failedMessage = messages.find(
+      (message) =>
+        isDraftMessage(message) &&
+        (message as DraftMessage).clientId === clientId,
+    );
+    if (!failedMessage) return false;
+    dismissFailedMessage(clientId);
+    return sendMessage(failedMessage.content, "user");
+  };
+
   // Upload files to workspace
-  const uploadFiles = async (formData: FormData): Promise<FileUploadResponse> => {
-    let result: FileUploadResponse = {ok: true};
-    try{
-      const response = await fetch(`${agentAPIUrl}/upload`, {
-        method: 'POST',
-        body: formData,
+  const uploadFiles = (
+    formData: FormData,
+    options: UploadOptions = {},
+  ): Promise<FileUploadResponse> =>
+    new Promise((resolve) => {
+      const request = new XMLHttpRequest();
+      request.open("POST", `${agentAPIUrl}/upload`);
+      request.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          options.onProgress?.(
+            Math.min(100, Math.round((event.loaded / event.total) * 100)),
+          );
+        }
+      };
+      request.onload = () => {
+        try {
+          const data = JSON.parse(request.responseText) as
+            | FileUploadResponse
+            | APIErrorModel;
+          if (request.status >= 200 && request.status < 300) {
+            options.onProgress?.(100);
+            resolve(data as FileUploadResponse);
+            return;
+          }
+          const error =
+            "detail" in data ? data.detail : "The upload was rejected.";
+          resolve({ok: false, error});
+        } catch {
+          resolve({ok: false, error: "The server returned an invalid response."});
+        }
+      };
+      request.onerror = () =>
+        resolve({ok: false, error: "The upload connection failed."});
+      request.onabort = () =>
+        resolve({ok: false, error: "Upload cancelled."});
+      options.signal?.addEventListener("abort", () => request.abort(), {
+        once: true,
       });
-
-      if (!response.ok) {
-        result.ok = false;
-        const errorData = await response.json() as APIErrorModel;
-        console.error("Failed to send message:", errorData);
-        const detail = errorData.detail;
-        const messages =
-          "errors" in errorData
-            ?
-            errorData.errors.map((e: APIErrorDetail) => e.message).join(", ")
-            : "";
-
-        const fullDetail = `${detail}: ${messages}`;
-        toast.error(`Failed to upload files`, {
-          description: fullDetail,
-        });
-      } else {
-        result = (await response.json()) as FileUploadResponse;
-      }
-
-    } catch (error) {
-      result.ok = false;
-      console.error("Error uploading files:", error);
-      const message = getErrorMessage(error)
-
-      toast.error(`Error uploading files`, {
-        description: message,
-      });
-    }
-    return result;
-  }
+      request.send(formData);
+    });
 
   const updateQueuedMessage = async (id: number, content: string) => {
     const response = await fetch(`${agentAPIUrl}/queue/${id}`, {
@@ -503,12 +703,18 @@ export function ChatProvider({ children }: PropsWithChildren) {
         richMessages,
         loading,
         sendMessage,
+        retryFailedMessage,
+        dismissFailedMessage,
         serverStatus,
         connectionStatus,
         queuedMessages,
         updateQueuedMessage,
         deleteQueuedMessage,
         uploadFiles,
+        reconnectAttempt,
+        nextReconnectAt,
+        reconnectNow,
+        storageScope: agentAPIUrl,
         agentType,
       }}
     >
