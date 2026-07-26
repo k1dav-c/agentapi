@@ -165,9 +165,10 @@ type RichMessagesResponse struct {
 	}
 }
 
-type SessionExportResponse struct {
-	ContentDisposition string `header:"Content-Disposition"`
-	Body               []jsonlwatcher.SessionEvent
+type TimelineResponse struct {
+	Body struct {
+		Events []jsonlwatcher.SessionEvent `json:"events" nullable:"false" doc:"Timeline events including text, thinking, tool calls, tool results, and system lifecycle events."`
+	}
 }
 
 type UploadResponse struct {

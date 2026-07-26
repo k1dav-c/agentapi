@@ -776,13 +776,14 @@ export function ChatProvider({ children }: PropsWithChildren) {
 
   const downloadSession = async () => {
     try {
-      const response = await fetch(`${agentAPIUrl}/session/export`);
+      const response = await fetch(`${agentAPIUrl}/timeline`);
       if (!response.ok) {
         throw new Error("Failed to export the current session");
       }
-      const events = await response.json();
+      const data = await response.json();
+      const events = data.events;
       if (!Array.isArray(events)) {
-        throw new Error("The server returned an invalid session export");
+        throw new Error("The server returned an invalid timeline response");
       }
       const jsonl = events.map((event) => JSON.stringify(event)).join("\n");
       const blob = new Blob([jsonl === "" ? "" : `${jsonl}\n`], {

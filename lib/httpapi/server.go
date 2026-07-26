@@ -481,8 +481,8 @@ func (s *Server) registerRoutes() {
 		o.Description = "Returns captured tool output or the tail of a discovered background task output file."
 	})
 
-	huma.Get(s.api, "/session/export", s.exportSession, func(o *huma.Operation) {
-		o.Description = "Downloads all normalized events from the current agent session, including text, tool calls, tool results, and system lifecycle events."
+	huma.Get(s.api, "/timeline", s.getTimeline, func(o *huma.Operation) {
+		o.Description = "Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events."
 	})
 
 	// POST /message endpoint
@@ -618,15 +618,14 @@ func (s *Server) getRichMessages(ctx context.Context, input *struct{}) (*RichMes
 	return resp, nil
 }
 
-func (s *Server) exportSession(ctx context.Context, input *struct{}) (*SessionExportResponse, error) {
+func (s *Server) getTimeline(ctx context.Context, input *struct{}) (*TimelineResponse, error) {
 	events := s.emitter.SessionEvents()
 	if events == nil {
 		events = []jsonlwatcher.SessionEvent{}
 	}
-	return &SessionExportResponse{
-		ContentDisposition: `attachment; filename="agentapi-session.jsonl"`,
-		Body:               events,
-	}, nil
+	resp := &TimelineResponse{}
+	resp.Body.Events = events
+	return resp, nil
 }
 
 // createMessage handles POST /message

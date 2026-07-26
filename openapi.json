@@ -585,7 +585,7 @@
             "type": "integer"
           },
           "kind": {
-            "description": "Event kind: system, text, tool_call, or tool_result",
+            "description": "Event kind: system, text, thinking, tool_call, or tool_result",
             "type": "string"
           },
           "role": {
@@ -669,6 +669,29 @@
           "agent_type",
           "status",
           "transport"
+        ],
+        "type": "object"
+      },
+      "TimelineResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/TimelineResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "events": {
+            "description": "Timeline events including text, thinking, tool calls, tool results, and system lifecycle events.",
+            "items": {
+              "$ref": "#/components/schemas/SessionEvent"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
         ],
         "type": "object"
       },
@@ -1267,46 +1290,6 @@
         "summary": "Get rich messages"
       }
     },
-    "/session/export": {
-      "get": {
-        "description": "Downloads all normalized events from the current agent session, including text, tool calls, tool results, and system lifecycle events.",
-        "operationId": "list-session-export",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/SessionEvent"
-                  },
-                  "nullable": true,
-                  "type": "array"
-                }
-              }
-            },
-            "description": "OK",
-            "headers": {
-              "Content-Disposition": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorModel"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "List session export"
-      }
-    },
     "/status": {
       "get": {
         "description": "Returns the current status of the agent.",
@@ -1334,6 +1317,35 @@
           }
         },
         "summary": "Get status"
+      }
+    },
+    "/timeline": {
+      "get": {
+        "description": "Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events.",
+        "operationId": "get-timeline",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelineResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get timeline"
       }
     },
     "/title": {

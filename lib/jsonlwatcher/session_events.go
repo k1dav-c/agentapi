@@ -11,7 +11,7 @@ import (
 // export. Optional fields are omitted to match the timeline interchange format.
 type SessionEvent struct {
 	EventID   int             `json:"id" doc:"Monotonic event identifier within this AgentAPI run"`
-	Kind      string          `json:"kind" doc:"Event kind: system, text, tool_call, or tool_result"`
+	Kind      string          `json:"kind" doc:"Event kind: system, text, thinking, tool_call, or tool_result"`
 	Role      *string         `json:"role,omitempty" doc:"Message role when applicable"`
 	EventTime time.Time       `json:"time" doc:"Timestamp recorded by the agent session"`
 	Content   *string         `json:"content,omitempty" doc:"Text or tool result content"`
@@ -145,6 +145,11 @@ func (p *ClaudeSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEve
 			case "text":
 				content := block.Text
 				events = append(events, newSessionEvent("text", optionalString(entry.Message.Role), &content, eventTime, sessionID, nil))
+			case "thinking":
+				if block.Thinking != "" {
+					content := block.Thinking
+					events = append(events, newSessionEvent("thinking", optionalString(entry.Message.Role), &content, eventTime, sessionID, sourceID))
+				}
 			case "tool_use":
 				event := newSessionEvent("tool_call", strptr("assistant"), nil, eventTime, sessionID, sourceID)
 				event.ToolName = optionalString(block.Name)
