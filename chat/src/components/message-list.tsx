@@ -108,11 +108,6 @@ type TaskActivity =
       type: "tool";
       key: string;
       toolCall: ToolCall;
-    }
-  | {
-      type: "prompt";
-      key: string;
-      options: import("@/lib/activity-groups").PromptOption[];
     };
 
 type TaskStatus = "queued" | "running" | "completed" | "failed";
@@ -915,49 +910,6 @@ function ToolDetail({
   );
 }
 
-/**
- * Renders interactive prompt options detected from the terminal screen.
- * These appear when the agent shows a selection dialog (e.g. plan approval,
- * permission prompt) that only exists on the PTY screen, not in JSONL.
- * Each option sends the corresponding number key as a raw keystroke.
- */
-function PromptOptions({options}: {options: import("@/lib/activity-groups").PromptOption[]}) {
-  const {sendMessage} = useChat();
-  const [sent, setSent] = useState<string | null>(null);
-
-  const handleSelect = async (value: string) => {
-    setSent(value);
-    // Send the number key as a raw keystroke, then Enter.
-    await sendMessage(value, "raw");
-    await sendMessage("\r", "raw");
-  };
-
-  return (
-    <div className="ml-3 sm:ml-8 rounded-lg border bg-muted/50 p-4 space-y-2">
-      <p className="text-sm font-medium text-muted-foreground">Select an option:</p>
-      <div className="flex flex-wrap gap-2">
-        {options.map((option) => (
-          <Button
-            key={option.value}
-            type="button"
-            variant={sent === option.value ? "default" : "outline"}
-            size="sm"
-            disabled={sent !== null}
-            onClick={() => void handleSelect(option.value)}
-          >
-            {option.label}
-          </Button>
-        ))}
-      </div>
-      {sent && (
-        <p className="text-xs text-muted-foreground">
-          Selected option {sent}. Waiting for agent...
-        </p>
-      )}
-    </div>
-  );
-}
-
 function TaskGroup({
   task,
   number,
@@ -1151,11 +1103,6 @@ function TaskGroup({
               message={item.message}
               searchQuery={searchQuery}
             />
-          ) : item.type === "prompt" ? (
-            <PromptOptions
-              key={item.key}
-              options={item.options}
-            />
           ) : item.type === "tool-group" ? (
             <div key={item.key} className="ml-3 sm:ml-8">
               <ToolCallGroup
@@ -1208,54 +1155,6 @@ function TaskGroup({
   );
 }
 
-/**
- * Detect an interactive numbered-choice prompt in the last PTY response.
- * Claude Code (and other agents) render selection dialogs like:
- *   ❯ 1. Yes, and auto-accept edits
- *     2. Yes, and manually approve edits
- *     3. No, keep planning
- *
- * These only exist on the terminal screen and are never written to the JSONL
- * transcript, so they must be extracted from the PTY responses.
- */
-function detectPromptFromResponses(
-  responses: (Message | DraftMessage)[],
-): TaskActivity | null {
-  if (responses.length === 0) return null;
-  const last = responses[responses.length - 1];
-  const content = last.content;
-  if (!content) return null;
-
-  // Match lines like "❯ 1. Yes" or "  2. No, keep planning" or "│ ❯ 1. Yes"
-  const optionPattern = /[❯›]\s*(\d+)\.\s+(.+)|^\s*(\d+)\.\s+(.+)/;
-  const lines = content.split("\n");
-  const options: import("@/lib/activity-groups").PromptOption[] = [];
-
-  for (const line of lines) {
-    // Strip box-drawing characters for matching.
-    const cleaned = line.replace(/[│╭╮╰╯─┌┐└┘┤├]/g, "").trim();
-    const match = cleaned.match(optionPattern);
-    if (match) {
-      const number = match[1] || match[3];
-      const label = (match[2] || match[4]).trim()
-        // Remove trailing box-drawing padding.
-        .replace(/\s*[│╭╮╰╯─┌┐└┘┤├]\s*$/, "")
-        .trim();
-      if (number && label) {
-        options.push({label: `${number}. ${label}`, value: number});
-      }
-    }
-  }
-
-  if (options.length < 2) return null;
-
-  return {
-    type: "prompt" as const,
-    key: "prompt-options",
-    options,
-  };
-}
-
 function getTaskActivity(task: TaskSection): TaskActivity[] {
   // Always start with PTY responses — they contain the full process output
   // (intermediate thinking, tool descriptions, progress messages) that JSONL
@@ -1289,14 +1188,6 @@ function getTaskActivity(task: TaskSection): TaskActivity[] {
         toolCall,
       });
     }
-  }
-
-  // Check the last PTY response for an interactive prompt (e.g. plan
-  // approval, permission dialog). These prompts exist only on the terminal
-  // screen and never appear in JSONL rich messages.
-  const promptActivity = detectPromptFromResponses(task.responses);
-  if (promptActivity) {
-    result.push(promptActivity);
   }
 
   return result.sort((left, right) => {
