@@ -2,6 +2,8 @@ package update
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/Masterminds/semver/v3"
@@ -17,8 +20,11 @@ import (
 )
 
 const (
-	repoOwner = "k1dav-c"
-	repoName  = "agentapi"
+	repoOwner               = "k1dav-c"
+	repoName                = "agentapi"
+	checksumAssetName       = "checksums.txt"
+	maxBinarySize           = 256 << 20
+	maxChecksumManifestSize = 1 << 20
 )
 
 // apiBaseURL is the GitHub API base URL. It is a variable so tests can
@@ -120,7 +126,55 @@ func findAssetURL(info *releaseInfo, assetName string) (string, error) {
 	return "", fmt.Errorf("no release binary %q found in release %s (available: %v)", assetName, info.TagName, available)
 }
 
-func downloadBinary(ctx context.Context, url, destDir string) (string, error) {
+func parseChecksumManifest(data []byte, assetName string) (string, error) {
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		name := strings.TrimPrefix(fields[1], "*")
+		if name != assetName {
+			continue
+		}
+		checksum := strings.ToLower(fields[0])
+		decoded, err := hex.DecodeString(checksum)
+		if err != nil || len(decoded) != sha256.Size {
+			return "", fmt.Errorf("invalid SHA-256 checksum for %s", assetName)
+		}
+		return checksum, nil
+	}
+	return "", fmt.Errorf("checksum manifest does not contain %s", assetName)
+}
+
+func fetchExpectedChecksum(ctx context.Context, info *releaseInfo, assetName string) (string, error) {
+	manifestURL, err := findAssetURL(info, checksumAssetName)
+	if err != nil {
+		return "", fmt.Errorf("release has no %s: %w", checksumAssetName, err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("create checksum request: %w", err)
+	}
+	req.Header.Set("User-Agent", "agentapi-update")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("download checksum manifest: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("checksum manifest download returned HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxChecksumManifestSize+1))
+	if err != nil {
+		return "", fmt.Errorf("read checksum manifest: %w", err)
+	}
+	if len(data) > maxChecksumManifestSize {
+		return "", fmt.Errorf("checksum manifest exceeds %d bytes", maxChecksumManifestSize)
+	}
+	return parseChecksumManifest(data, assetName)
+}
+
+func downloadBinary(ctx context.Context, url, destDir, expectedChecksum string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", fmt.Errorf("create download request: %w", err)
@@ -143,10 +197,23 @@ func downloadBinary(ctx context.Context, url, destDir string) (string, error) {
 	}
 	tmpPath := tmpFile.Name()
 
-	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+	hash := sha256.New()
+	written, err := io.Copy(io.MultiWriter(tmpFile, hash), io.LimitReader(resp.Body, maxBinarySize+1))
+	if err != nil {
 		_ = tmpFile.Close()
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("write downloaded binary: %w", err)
+	}
+	if written > maxBinarySize {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("downloaded binary exceeds %d bytes", maxBinarySize)
+	}
+	actualChecksum := hex.EncodeToString(hash.Sum(nil))
+	if !strings.EqualFold(actualChecksum, expectedChecksum) {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, actualChecksum)
 	}
 	if err := tmpFile.Close(); err != nil {
 		_ = os.Remove(tmpPath)
@@ -224,9 +291,13 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 	}
 
 	fmt.Printf("Downloading %s...\n", assetName)
+	expectedChecksum, err := fetchExpectedChecksum(ctx, info, assetName)
+	if err != nil {
+		return fmt.Errorf("verify release metadata: %w", err)
+	}
 
 	// Download the binary.
-	tmpPath, err := downloadBinary(ctx, assetURL, filepath.Dir(exePath))
+	tmpPath, err := downloadBinary(ctx, assetURL, filepath.Dir(exePath), expectedChecksum)
 	if err != nil {
 		return fmt.Errorf("download: %w", err)
 	}

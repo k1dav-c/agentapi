@@ -2,11 +2,14 @@ package update
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -171,7 +174,8 @@ func TestDownloadBinary(t *testing.T) {
 	defer srv.Close()
 
 	destDir := t.TempDir()
-	tmpPath, err := downloadBinary(context.Background(), srv.URL+"/agentapi-linux-amd64", destDir)
+	hash := sha256.Sum256(content)
+	tmpPath, err := downloadBinary(context.Background(), srv.URL+"/agentapi-linux-amd64", destDir, hex.EncodeToString(hash[:]))
 	require.NoError(t, err)
 	defer func() { _ = os.Remove(tmpPath) }()
 
@@ -187,6 +191,29 @@ func TestDownloadBinary(t *testing.T) {
 	info, err := os.Stat(tmpPath)
 	require.NoError(t, err)
 	assert.NotZero(t, info.Mode()&0o111, "file should be executable")
+}
+
+func TestDownloadBinaryRejectsChecksumMismatch(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("tampered"))
+	}))
+	defer srv.Close()
+
+	_, err := downloadBinary(context.Background(), srv.URL, t.TempDir(), strings.Repeat("0", 64))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "checksum mismatch")
+}
+
+func TestParseChecksumManifest(t *testing.T) {
+	t.Parallel()
+	want := strings.Repeat("a", 64)
+	got, err := parseChecksumManifest([]byte(want+"  agentapi-linux-amd64\n"), "agentapi-linux-amd64")
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+
+	_, err = parseChecksumManifest([]byte(want+"  other-file\n"), "agentapi-linux-amd64")
+	require.Error(t, err)
 }
 
 func TestReplaceBinary(t *testing.T) {

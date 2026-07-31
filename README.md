@@ -115,6 +115,10 @@ agentapi update --check  # check without downloading
 agentapi update --force  # skip version comparison
 ```
 
+Release binaries are verified against the release's `checksums.txt` SHA-256
+manifest before the running executable is replaced. An update is rejected if
+the manifest is missing, malformed, or does not match the download.
+
 ### API token authentication
 
 All API endpoints can be protected with a Bearer token. Authentication is
