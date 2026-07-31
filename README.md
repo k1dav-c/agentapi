@@ -94,14 +94,14 @@ environment variables, then inspected or changed through `GET/PUT /webhook` or
 the Session Explorer.
 
 Delivery runs asynchronously with a configurable timeout and retry count.
-Optional HMAC-SHA256 signatures allow receivers to verify the timestamp and raw
-request body. Signing secrets are write-only: the API reports whether a secret
-exists but never returns its value.
+An optional Go `text/template` payload template lets you reshape the POST body
+for any receiver — available fields are `.ID`, `.Type`, `.CreatedAt`, `.RunID`,
+`.Status`, `.PreviousStatus`, `.AgentType`, and `.Transport`. When no template
+is set, the default JSON payload is sent unchanged.
 
 ```bash
 agentapi server \
   --webhook-url https://example.com/agentapi/events \
-  --webhook-secret "$WEBHOOK_SECRET" \
   -- claude
 ```
 
@@ -283,6 +283,7 @@ Endpoints:
   detailed lifecycle (`starting`, `ready`, `running`, `restarting`, `exited`, or
   `failed`), a session ID, and a monotonically increasing run ID
 - GET `/events` - an SSE stream of events from the agent: message and status updates
+- POST `/restart` - restarts the agent PTY process; AgentAPI and its clients stay connected
 - GET `/usage` - returns real-time rate limit utilization from the upstream API (Anthropic or OpenAI)
 - GET/PUT `/webhook` - reads or updates run-status webhook delivery without restarting the agent
 - GET `/mcp` - returns configured MCP servers and the managed config path for Claude or Codex
@@ -363,19 +364,17 @@ Set `--webhook-url` to send an HTTP POST whenever the run status changes between
 ```bash
 agentapi server \
   --webhook-url 'https://example.com/agentapi/events' \
-  --webhook-secret 'replace-with-a-secret' \
   -- claude
 ```
 
 The equivalent environment variables are `AGENTAPI_WEBHOOK_URL`,
-`AGENTAPI_WEBHOOK_SECRET`, `AGENTAPI_WEBHOOK_TIMEOUT`, and
+`AGENTAPI_WEBHOOK_PAYLOAD_TEMPLATE`, `AGENTAPI_WEBHOOK_TIMEOUT`, and
 `AGENTAPI_WEBHOOK_MAX_ATTEMPTS`. The timeout defaults to `10s`, and delivery is
 attempted up to 3 times.
 
 The initial values can also be changed while AgentAPI is running from the
 Webhook tab in the chat UI's Session Explorer. Saving an empty URL disables
-delivery. Existing signing secrets are write-only and can be preserved,
-replaced, or cleared from the Explorer.
+delivery.
 
 The request body has this format:
 
@@ -395,9 +394,7 @@ The request body has this format:
 ```
 
 Each request includes `X-AgentAPI-Delivery`, `X-AgentAPI-Event`, and
-`X-AgentAPI-Timestamp` headers. When a secret is configured,
-`X-AgentAPI-Signature-256` contains
-`sha256=HMAC_SHA256(secret, timestamp + "." + raw_request_body)`.
+`X-AgentAPI-Timestamp` headers.
 
 ### `agentapi update`
 
