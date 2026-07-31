@@ -13,6 +13,7 @@ import {
   LoaderCircle,
   Play,
   RefreshCw,
+  RotateCw,
   Save,
   Server,
   Trash2,
@@ -46,6 +47,7 @@ const pathPattern = /(?:^|[\s"'(])((?:\/[\w.@+-]+)+\.[a-zA-Z0-9]{1,10})(?=$|[\s"
 export function Explorer({onNavigateTask}: ExplorerProps) {
   const {
     messages,
+    restartAgent,
     getWebhook,
     updateWebhook,
     getMCP,
@@ -75,6 +77,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
   const [webhookPayloadTemplate, setWebhookPayloadTemplate] = useState("");
   const [webhookLoading, setWebhookLoading] = useState(false);
   const [webhookSaving, setWebhookSaving] = useState(false);
+  const [restartingAgent, setRestartingAgent] = useState(false);
   const mcpImportRef = useRef<HTMLInputElement>(null);
   const profileImportRef = useRef<HTMLInputElement>(null);
   const tasks = useMemo(
@@ -145,6 +148,18 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
       toast.error(error instanceof Error ? error.message : "Could not update webhook configuration");
     } finally {
       setWebhookSaving(false);
+    }
+  };
+  const handleRestart = async () => {
+    if (!window.confirm("Restart the agent? This will reset the current conversation context.")) return;
+    setRestartingAgent(true);
+    try {
+      await restartAgent();
+      toast.success("Agent restarted");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not restart the agent");
+    } finally {
+      setRestartingAgent(false);
     }
   };
   const parsedMCP = () => {
@@ -286,7 +301,20 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
       </DialogTrigger>
       <DialogContent className="left-auto right-0 top-0 flex h-dvh max-h-dvh w-full max-w-xl translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none p-0 sm:rounded-none">
         <DialogHeader className="border-b px-5 py-4 pr-12">
-          <DialogTitle>Session Explorer</DialogTitle>
+          <div className="flex items-center justify-between gap-2">
+            <DialogTitle>Session Explorer</DialogTitle>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={restartingAgent}
+              onClick={() => void handleRestart()}
+              title="Restart agent process"
+            >
+              {restartingAgent ? <LoaderCircle className="animate-spin" /> : <RotateCw />}
+              Restart
+            </Button>
+          </div>
           <DialogDescription>
             Links, files, task navigation, MCP, and webhook configuration.
           </DialogDescription>

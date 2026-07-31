@@ -146,6 +146,7 @@ interface ChatContextValue {
   nextReconnectAt: number | null;
   reconnectNow: () => void;
   downloadSession: () => Promise<void>;
+  restartAgent: () => Promise<void>;
   getWebhook: () => Promise<WebhookConfig>;
   updateWebhook: (config: {
     url: string;
@@ -685,6 +686,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         nextReconnectAt,
         reconnectNow,
         downloadSession,
+        restartAgent: api.restartAgent,
         getWebhook: api.getWebhook,
         updateWebhook: api.updateWebhook,
         getMCP: api.getMCP,

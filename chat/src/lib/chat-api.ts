@@ -51,6 +51,13 @@ async function requireOK(response: Response, fallback: string) {
 
 export function createChatAPI(baseURL: string) {
   return {
+    async restartAgent(): Promise<void> {
+      await requireOK(
+        await fetch(`${baseURL}/restart`, {method: "POST"}),
+        "Failed to restart the agent",
+      );
+    },
+
     async getWebhook(): Promise<WebhookConfig> {
       const response = await requireOK(
         await fetch(`${baseURL}/webhook`),
