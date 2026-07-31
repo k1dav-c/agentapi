@@ -357,34 +357,15 @@ func parseInt(s string) int {
 
 // --- Handler ---
 
-// getUsage handles GET /usage. It tries the provider matching the running
-// agent type first, then falls back to any provider with available
-// credentials. This way a Codex agent with Claude credentials (or vice
-// versa) still returns useful data.
+// getUsage handles GET /usage. It calls the provider matching the running
+// agent type directly.
 func (s *Server) getUsage(ctx context.Context, _ *struct{}) (*UsageResponse, error) {
-	// Build an ordered list: preferred provider first, then the other.
-	type providerFunc func(context.Context) (*UsageResponse, error)
-	providers := []struct {
-		name string
-		fn   providerFunc
-	}{
-		{"anthropic", s.getAnthropicUsage},
-		{"openai", s.getOpenAIUsage},
+	switch s.agentType {
+	case mf.AgentTypeCodex:
+		return s.getOpenAIUsage(ctx)
+	default:
+		return s.getAnthropicUsage(ctx)
 	}
-	if s.agentType == mf.AgentTypeCodex {
-		// Swap so OpenAI is tried first for Codex agents.
-		providers[0], providers[1] = providers[1], providers[0]
-	}
-
-	var lastErr error
-	for _, p := range providers {
-		resp, err := p.fn(ctx)
-		if err == nil {
-			return resp, nil
-		}
-		lastErr = err
-	}
-	return nil, lastErr
 }
 
 func (s *Server) getAnthropicUsage(ctx context.Context) (*UsageResponse, error) {
