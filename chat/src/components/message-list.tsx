@@ -1257,63 +1257,55 @@ function detectPromptFromResponses(
 }
 
 function getTaskActivity(task: TaskSection): TaskActivity[] {
-  if (task.richActivity.some((item) => item.type === "message")) {
-    // Merge tool calls that richActivity didn't already cover.
-    const coveredToolIDs = new Set(
-      task.richActivity
-        .filter((item) => item.type === "tool")
-        .map((item) => (item as Extract<TaskActivity, {type: "tool"}>).toolCall.id),
-    );
-    const uncoveredTools: TaskActivity[] = task.toolCalls
-      .filter((toolCall) => !coveredToolIDs.has(toolCall.id))
-      .map((toolCall) => ({
+  // Always start with PTY responses — they contain the full process output
+  // (intermediate thinking, tool descriptions, progress messages) that JSONL
+  // rich messages don't capture.
+  const result: TaskActivity[] = task.responses.map((message, index) => ({
+    type: "message" as const,
+    key: `response-${message.id ?? index}`,
+    message,
+  }));
+
+  // Merge tool calls from rich activity and any uncovered tool calls.
+  const coveredToolIDs = new Set(
+    task.richActivity
+      .filter((item) => item.type === "tool")
+      .map((item) => (item as Extract<TaskActivity, {type: "tool"}>).toolCall.id),
+  );
+
+  // Add tool calls from richActivity (these have structured input/output).
+  for (const item of task.richActivity) {
+    if (item.type === "tool") {
+      result.push(item);
+    }
+  }
+
+  // Add any tool calls not already covered by richActivity.
+  for (const toolCall of task.toolCalls) {
+    if (!coveredToolIDs.has(toolCall.id)) {
+      result.push({
         type: "tool" as const,
         key: `tool-${toolCall.id}`,
         toolCall,
-      }));
-
-    const result = uncoveredTools.length === 0
-      ? [...task.richActivity]
-      : [...task.richActivity, ...uncoveredTools].sort((left, right) => {
-          const leftTime =
-            left.type === "message" ? left.message.time :
-            left.type === "tool" ? left.toolCall.timestamp : undefined;
-          const rightTime =
-            right.type === "message" ? right.message.time :
-            right.type === "tool" ? right.toolCall.timestamp : undefined;
-          if (!leftTime) return 1;
-          if (!rightTime) return -1;
-          return Date.parse(leftTime) - Date.parse(rightTime);
-        });
-
-    // Check the last PTY response for an interactive prompt (e.g. plan
-    // approval, permission dialog). These prompts exist only on the terminal
-    // screen and never appear in JSONL rich messages, so they would be lost
-    // without this check.
-    const promptActivity = detectPromptFromResponses(task.responses);
-    if (promptActivity) {
-      result.push(promptActivity);
+      });
     }
-
-    return result;
   }
 
-  return [
-    ...task.responses.map((message, index) => ({
-      type: "message" as const,
-      key: `response-${message.id ?? index}`,
-      message,
-    })),
-    ...task.toolCalls.map((toolCall) => ({
-      type: "tool" as const,
-      key: `tool-${toolCall.id}`,
-      toolCall,
-    })),
-  ].sort((left, right) => {
+  // Check the last PTY response for an interactive prompt (e.g. plan
+  // approval, permission dialog). These prompts exist only on the terminal
+  // screen and never appear in JSONL rich messages.
+  const promptActivity = detectPromptFromResponses(task.responses);
+  if (promptActivity) {
+    result.push(promptActivity);
+  }
+
+  return result.sort((left, right) => {
     const leftTime =
-      left.type === "message" ? left.message.time : left.toolCall.timestamp;
+      left.type === "message" ? left.message.time :
+      left.type === "tool" ? left.toolCall.timestamp : undefined;
     const rightTime =
-      right.type === "message" ? right.message.time : right.toolCall.timestamp;
+      right.type === "message" ? right.message.time :
+      right.type === "tool" ? right.toolCall.timestamp : undefined;
     if (!leftTime) return 1;
     if (!rightTime) return -1;
     return Date.parse(leftTime) - Date.parse(rightTime);
