@@ -163,13 +163,13 @@ func TestBuildAnthropicUsage(t *testing.T) {
 		},
 	}
 	headers := map[string]string{
-		http.CanonicalHeaderKey("anthropic-ratelimit-unified-status"):           "allowed",
-		http.CanonicalHeaderKey("anthropic-ratelimit-unified-5h-utilization"):   "0.08",
-		http.CanonicalHeaderKey("anthropic-ratelimit-unified-5h-reset"):         "1785499200",
-		http.CanonicalHeaderKey("anthropic-ratelimit-unified-5h-status"):        "allowed",
-		http.CanonicalHeaderKey("anthropic-ratelimit-unified-7d-utilization"):   "0.05",
-		http.CanonicalHeaderKey("anthropic-ratelimit-unified-7d-reset"):         "1785945600",
-		http.CanonicalHeaderKey("anthropic-ratelimit-unified-7d-status"):        "allowed",
+		http.CanonicalHeaderKey("anthropic-ratelimit-unified-status"):               "allowed",
+		http.CanonicalHeaderKey("anthropic-ratelimit-unified-5h-utilization"):       "0.08",
+		http.CanonicalHeaderKey("anthropic-ratelimit-unified-5h-reset"):             "1785499200",
+		http.CanonicalHeaderKey("anthropic-ratelimit-unified-5h-status"):            "allowed",
+		http.CanonicalHeaderKey("anthropic-ratelimit-unified-7d-utilization"):       "0.05",
+		http.CanonicalHeaderKey("anthropic-ratelimit-unified-7d-reset"):             "1785945600",
+		http.CanonicalHeaderKey("anthropic-ratelimit-unified-7d-status"):            "allowed",
 		http.CanonicalHeaderKey("anthropic-ratelimit-unified-representative-claim"): "five_hour",
 	}
 

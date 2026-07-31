@@ -26,24 +26,24 @@ type UsageResponse struct {
 // For Codex agents, it comes from OpenAI's rate limit headers.
 type UsageResponseBody struct {
 	// Common fields.
-	Provider string `json:"provider" doc:"The API provider (anthropic or openai)."`
+	Provider  string `json:"provider" doc:"The API provider (anthropic or openai)."`
 	AgentType string `json:"agent_type" doc:"The agent type this usage applies to."`
 
 	// Anthropic-specific fields (present when provider is anthropic).
-	SubscriptionType    string  `json:"subscription_type,omitempty" doc:"Subscription plan type (e.g. pro, max). Anthropic only."`
-	RateLimitTier       string  `json:"rate_limit_tier,omitempty" doc:"Rate limit tier identifier. Anthropic only."`
-	Status              string  `json:"status,omitempty" doc:"Overall rate limit status (allowed or limited). Anthropic only."`
-	FiveHourUtilization float64 `json:"five_hour_utilization,omitempty" doc:"Utilization for the 5-hour window (0.0 to 1.0). Anthropic only."`
+	SubscriptionType    string     `json:"subscription_type,omitempty" doc:"Subscription plan type (e.g. pro, max). Anthropic only."`
+	RateLimitTier       string     `json:"rate_limit_tier,omitempty" doc:"Rate limit tier identifier. Anthropic only."`
+	Status              string     `json:"status,omitempty" doc:"Overall rate limit status (allowed or limited). Anthropic only."`
+	FiveHourUtilization float64    `json:"five_hour_utilization,omitempty" doc:"Utilization for the 5-hour window (0.0 to 1.0). Anthropic only."`
 	FiveHourReset       *time.Time `json:"five_hour_reset,omitempty" doc:"When the 5-hour window resets. Anthropic only."`
-	FiveHourStatus      string  `json:"five_hour_status,omitempty" doc:"Rate limit status for the 5-hour window. Anthropic only."`
-	SevenDayUtilization float64 `json:"seven_day_utilization,omitempty" doc:"Utilization for the 7-day window (0.0 to 1.0). Anthropic only."`
+	FiveHourStatus      string     `json:"five_hour_status,omitempty" doc:"Rate limit status for the 5-hour window. Anthropic only."`
+	SevenDayUtilization float64    `json:"seven_day_utilization,omitempty" doc:"Utilization for the 7-day window (0.0 to 1.0). Anthropic only."`
 	SevenDayReset       *time.Time `json:"seven_day_reset,omitempty" doc:"When the 7-day window resets. Anthropic only."`
-	SevenDayStatus      string  `json:"seven_day_status,omitempty" doc:"Rate limit status for the 7-day window. Anthropic only."`
-	OverageUtilization  float64 `json:"overage_utilization,omitempty" doc:"Utilization for the overage window (0.0 to 1.0). Anthropic only."`
+	SevenDayStatus      string     `json:"seven_day_status,omitempty" doc:"Rate limit status for the 7-day window. Anthropic only."`
+	OverageUtilization  float64    `json:"overage_utilization,omitempty" doc:"Utilization for the overage window (0.0 to 1.0). Anthropic only."`
 	OverageReset        *time.Time `json:"overage_reset,omitempty" doc:"When the overage window resets. Anthropic only."`
-	OverageStatus       string  `json:"overage_status,omitempty" doc:"Rate limit status for the overage window. Anthropic only."`
-	RepresentativeClaim string  `json:"representative_claim,omitempty" doc:"The window currently governing the rate limit. Anthropic only."`
-	FallbackPercentage  float64 `json:"fallback_percentage,omitempty" doc:"Percentage of rate limit available as fallback (0.0 to 1.0). Anthropic only."`
+	OverageStatus       string     `json:"overage_status,omitempty" doc:"Rate limit status for the overage window. Anthropic only."`
+	RepresentativeClaim string     `json:"representative_claim,omitempty" doc:"The window currently governing the rate limit. Anthropic only."`
+	FallbackPercentage  float64    `json:"fallback_percentage,omitempty" doc:"Percentage of rate limit available as fallback (0.0 to 1.0). Anthropic only."`
 
 	// OpenAI-specific fields (present when provider is openai).
 	LimitRequests     int    `json:"limit_requests,omitempty" doc:"Maximum requests allowed in the current window. OpenAI only."`

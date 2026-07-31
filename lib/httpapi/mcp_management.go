@@ -126,7 +126,8 @@ func (s *Server) mutateMCP(ctx context.Context, restart bool, mutate func(MCPSer
 func (s *Server) createMCPServer(ctx context.Context, input *struct {
 	Restart bool `query:"restart" default:"false"`
 	Body    MCPServerMutationBody
-}) (*MCPUpdateResponse, error) {
+},
+) (*MCPUpdateResponse, error) {
 	return s.mutateMCP(ctx, input.Restart, func(servers MCPServers) error {
 		if _, exists := servers[input.Body.Name]; exists {
 			return huma.Error409Conflict("an MCP server with this name already exists")
@@ -140,7 +141,8 @@ func (s *Server) patchMCPServer(ctx context.Context, input *struct {
 	Name    string `path:"name"`
 	Restart bool   `query:"restart" default:"false"`
 	Body    MCPServerConfigBody
-}) (*MCPUpdateResponse, error) {
+},
+) (*MCPUpdateResponse, error) {
 	return s.mutateMCP(ctx, input.Restart, func(servers MCPServers) error {
 		if _, exists := servers[input.Name]; !exists {
 			return huma.Error404NotFound("MCP server was not found")
@@ -153,7 +155,8 @@ func (s *Server) patchMCPServer(ctx context.Context, input *struct {
 func (s *Server) deleteMCPServer(ctx context.Context, input *struct {
 	Name    string `path:"name"`
 	Restart bool   `query:"restart" default:"false"`
-}) (*MCPUpdateResponse, error) {
+},
+) (*MCPUpdateResponse, error) {
 	return s.mutateMCP(ctx, input.Restart, func(servers MCPServers) error {
 		if _, exists := servers[input.Name]; !exists {
 			return huma.Error404NotFound("MCP server was not found")
@@ -311,7 +314,8 @@ func (s *Server) getMCPProfiles(_ context.Context, _ *struct{}) (*MCPProfilesRes
 func (s *Server) putMCPProfile(_ context.Context, input *struct {
 	Name string `path:"name"`
 	Body MCPProfileBody
-}) (*MCPProfilesResponse, error) {
+},
+) (*MCPProfilesResponse, error) {
 	if err := s.requireMCP(); err != nil {
 		return nil, err
 	}
@@ -336,7 +340,8 @@ func (s *Server) putMCPProfile(_ context.Context, input *struct {
 
 func (s *Server) deleteMCPProfile(_ context.Context, input *struct {
 	Name string `path:"name"`
-}) (*MCPProfilesResponse, error) {
+},
+) (*MCPProfilesResponse, error) {
 	if err := s.requireMCP(); err != nil {
 		return nil, err
 	}
@@ -362,7 +367,8 @@ func (s *Server) deleteMCPProfile(_ context.Context, input *struct {
 func (s *Server) applyMCPProfile(ctx context.Context, input *struct {
 	Name    string `path:"name"`
 	Restart bool   `query:"restart" default:"false"`
-}) (*MCPUpdateResponse, error) {
+},
+) (*MCPUpdateResponse, error) {
 	if err := s.requireMCP(); err != nil {
 		return nil, err
 	}

@@ -266,14 +266,14 @@ func TestTailFile(t *testing.T) {
 	}
 
 	// Append more data
-	f, _ = os.OpenFile(jsonlPath, os.O_APPEND|os.O_WRONLY, 0644)
+	f, _ = os.OpenFile(jsonlPath, os.O_APPEND|os.O_WRONLY, 0o644)
 	f.WriteString(`{"type":"assistant","uuid":"a1","timestamp":"2026-07-24T09:35:26.000Z","message":{"id":"msg_001","role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"hi there"}],"stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":10}}}` + "\n")
 	f.Sync()
 	f.Close()
 	time.Sleep(500 * time.Millisecond)
 
 	// Trigger finalization with another user message
-	f, _ = os.OpenFile(jsonlPath, os.O_APPEND|os.O_WRONLY, 0644)
+	f, _ = os.OpenFile(jsonlPath, os.O_APPEND|os.O_WRONLY, 0o644)
 	f.WriteString(`{"type":"user","uuid":"u2","timestamp":"2026-07-24T09:35:27.000Z","message":{"role":"user","content":"thanks"}}` + "\n")
 	f.Sync()
 	f.Close()

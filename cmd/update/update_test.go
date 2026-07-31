@@ -91,10 +91,10 @@ func TestVersionComparison(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		current    string
-		latest     string
-		wantNewer  bool
+		name      string
+		current   string
+		latest    string
+		wantNewer bool
 	}{
 		{"newer available", "0.12.2", "0.13.0", true},
 		{"same version", "0.12.2", "0.12.2", false},

@@ -218,7 +218,6 @@ func TestE2E(t *testing.T) {
 		msgResp3, err := waitForMessagesWithCount(ctx, t, apiClient3, 3, operationTimeout, "restart with same initial prompt")
 		require.NoError(t, err, "Failed to get messages after restart with same initial prompt")
 		require.Len(t, msgResp3.Messages, 3, "Expected 3 messages (same initial prompt should not be sent again)")
-
 	})
 
 	t.Run("state_persistence_different_initial_prompt", func(t *testing.T) {
@@ -267,7 +266,6 @@ func TestE2E(t *testing.T) {
 		// Verify the new initial prompt and response were added
 		require.Equal(t, initialPrompt2, strings.TrimSpace(msgResp2.Messages[3].Content))
 		require.Equal(t, "Echo: Different initial prompt", strings.TrimSpace(msgResp2.Messages[4].Content))
-
 	})
 
 	t.Run("acp_basic", func(t *testing.T) {

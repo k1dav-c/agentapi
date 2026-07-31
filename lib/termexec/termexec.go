@@ -3,6 +3,7 @@ package termexec
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -10,8 +11,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"fmt"
 
 	"github.com/ActiveState/termtest/xpty"
 	"github.com/coder/agentapi/lib/logctx"
@@ -26,10 +25,10 @@ type Process struct {
 	lastScreenUpdate time.Time
 	clock            quartz.Clock
 
-	waitOnce   sync.Once
-	waitState  *os.ProcessState
-	waitErr    error
-	waitDone   chan struct{}
+	waitOnce  sync.Once
+	waitState *os.ProcessState
+	waitErr   error
+	waitDone  chan struct{}
 
 	// readerDone is closed when the PTY reader goroutine exits.
 	// Use ReaderDone() to get the channel, ReaderErr() for the cause.

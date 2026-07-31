@@ -119,7 +119,7 @@ func (w *wideCharInjector) handleControlCode(r rune) {
 
 // isControlCode matches vt10x's definition.
 func isControlCode(r rune) bool {
-	return r < 0x20 || r == 0177
+	return r < 0x20 || r == 0o177
 }
 
 // stripWidePadding removes the injected padding runes from a screen

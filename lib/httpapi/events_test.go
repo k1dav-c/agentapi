@@ -217,5 +217,4 @@ func TestEventEmitter(t *testing.T) {
 		assert.Equal(t, st.ErrorLevelWarning, errorBody.Level)
 		assert.Equal(t, newTime, errorBody.Time)
 	})
-
 }
