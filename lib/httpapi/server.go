@@ -558,10 +558,16 @@ func (s *Server) registerRoutes() {
 		o.Description = "Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events."
 	})
 
+	huma.Post(s.api, "/restart", s.restartAgentHandler, func(o *huma.Operation) {
+		o.Summary = "Restart agent process"
+		o.Description = "Restarts the agent PTY process. The current conversation context will be lost. Returns 400 if restart is not supported (e.g. ACP transport)."
+		o.Errors = []int{400}
+	})
+
 	huma.Get(s.api, "/webhook", s.getWebhookConfig, func(o *huma.Operation) {
 		o.Tags = []string{"Webhook"}
 		o.Summary = "Get webhook configuration"
-		o.Description = "Returns the mutable run-status webhook configuration. The signing secret is never returned."
+		o.Description = "Returns the mutable run-status webhook configuration."
 	})
 	huma.Put(s.api, "/webhook", s.updateWebhookConfig, func(o *huma.Operation) {
 		o.Tags = []string{"Webhook"}
