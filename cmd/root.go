@@ -6,6 +6,7 @@ import (
 
 	"github.com/coder/agentapi/cmd/attach"
 	"github.com/coder/agentapi/cmd/server"
+	"github.com/coder/agentapi/cmd/update"
 	"github.com/coder/agentapi/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -28,4 +29,5 @@ func Execute() {
 func init() {
 	rootCmd.AddCommand(server.CreateServerCmd())
 	rootCmd.AddCommand(attach.AttachCmd)
+	rootCmd.AddCommand(update.UpdateCmd)
 }
