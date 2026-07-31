@@ -381,6 +381,19 @@ func (e *EventEmitter) SessionEvents() []jsonlwatcher.SessionEvent {
 	return slices.Clone(e.sessionEvents)
 }
 
+// Reset clears all conversation state — messages, rich messages, timeline,
+// errors, and screen. Used when restarting with a clean slate.
+func (e *EventEmitter) Reset() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.messages = nil
+	e.richMessages = nil
+	e.sessionEvents = nil
+	e.nextSessionEventID = 1
+	e.errors = nil
+	e.screen = ""
+}
+
 // Assumes the caller holds the lock.
 func (e *EventEmitter) currentStateAsEvents() []Event {
 	events := make([]Event, 0, len(e.messages)+2)

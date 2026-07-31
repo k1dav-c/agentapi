@@ -89,6 +89,8 @@ type Conversation interface {
 	Status() ConversationStatus
 	Text() string
 	SaveState() error
+	// Reset clears all conversation state back to the initial empty state.
+	Reset()
 }
 
 // Emitter receives conversation state updates.

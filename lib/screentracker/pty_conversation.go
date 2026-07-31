@@ -793,3 +793,24 @@ func (c *PTYConversation) loadStateLocked() (error, bool) {
 	c.cfg.Logger.Info("Successfully loaded state", "path", stateFile, "messages", len(c.messages))
 	return nil, false
 }
+
+// Reset clears all conversation state back to the initial empty state.
+func (c *PTYConversation) Reset() {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	c.messages = []ConversationMessage{
+		{
+			Message: "",
+			Role:    ConversationRoleAgent,
+			Time:    c.cfg.Clock.Now(),
+		},
+	}
+	c.screenBeforeLastUserMessage = ""
+	c.snapshotBuffer = NewRingBuffer[screenSnapshot](c.stableSnapshotsThreshold)
+	c.toolCallMessageSet = make(map[string]bool)
+	c.dirty = false
+	c.userSentMessageAfterLoadState = false
+	c.initialPromptReady = false
+	c.initialPromptSent = false
+}
