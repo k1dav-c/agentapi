@@ -167,19 +167,67 @@ func buildAnthropicUsage(creds *claudeCredentials, headers map[string]string) Us
 // openaiAPIBaseURL is the OpenAI API base URL. Overridable in tests.
 var openaiAPIBaseURL = "https://api.openai.com"
 
-// readOpenAIAPIKey reads the OpenAI API key from the OPENAI_API_KEY environment
-// variable. Codex uses this for authentication when configured with
-// preferred_auth_method = "apikey".
+// codexAuth holds the OAuth credentials from ~/.codex/auth.json.
+type codexAuth struct {
+	AuthMode string `json:"auth_mode"`
+	APIKey   string `json:"OPENAI_API_KEY"`
+	Tokens   *struct {
+		AccessToken string `json:"access_token"`
+	} `json:"tokens"`
+}
+
+// readOpenAIAPIKey tries to find an OpenAI API key or Codex OAuth token.
+// Priority: OPENAI_API_KEY env var → ~/.codex/auth.json.
 func readOpenAIAPIKey() (string, error) {
-	key := os.Getenv("OPENAI_API_KEY")
-	if key == "" {
-		return "", fmt.Errorf("OPENAI_API_KEY environment variable is not set")
+	// 1. Environment variable (explicit API key).
+	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+		return key, nil
 	}
-	return key, nil
+
+	// 2. Codex CLI auth.json (ChatGPT OAuth or API key stored by codex login).
+	home, err := os.UserHomeDir()
+	if err == nil {
+		authPath := filepath.Join(home, ".codex", "auth.json")
+		if data, err := os.ReadFile(authPath); err == nil {
+			var auth codexAuth
+			if err := json.Unmarshal(data, &auth); err == nil {
+				// Prefer explicit API key if stored.
+				if auth.APIKey != "" && auth.APIKey != "None" {
+					return auth.APIKey, nil
+				}
+				// Fall back to ChatGPT OAuth access token.
+				if auth.Tokens != nil && auth.Tokens.AccessToken != "" {
+					return auth.Tokens.AccessToken, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no OpenAI credentials found (set OPENAI_API_KEY or run codex login)")
 }
 
 // fetchOpenAIRateLimits makes a minimal API request and extracts rate limit headers.
+// It tries the OpenAI Platform API first; if that fails with 401/429 (common when
+// using a ChatGPT OAuth token instead of a Platform API key), it tries the ChatGPT
+// backend API that Codex CLI uses.
 func fetchOpenAIRateLimits(ctx context.Context, apiKey string) (map[string]string, error) {
+	// Try OpenAI Platform API first.
+	headers, err := fetchOpenAIPlatformRateLimits(ctx, apiKey)
+	if err == nil {
+		return headers, nil
+	}
+
+	// Fall back to ChatGPT backend API (used by Codex CLI with OAuth login).
+	headers, chatgptErr := fetchChatGPTRateLimits(ctx, apiKey)
+	if chatgptErr == nil {
+		return headers, nil
+	}
+
+	// Return the original Platform API error since it's more actionable.
+	return nil, err
+}
+
+func fetchOpenAIPlatformRateLimits(ctx context.Context, apiKey string) (map[string]string, error) {
 	url := openaiAPIBaseURL + "/v1/chat/completions"
 	body := `{"model":"gpt-4o-mini","max_completion_tokens":1,"messages":[{"role":"user","content":"."}]}`
 
@@ -207,6 +255,66 @@ func fetchOpenAIRateLimits(ctx context.Context, apiKey string) (map[string]strin
 			headers[http.CanonicalHeaderKey(key)] = vals[0]
 		}
 	}
+	return headers, nil
+}
+
+// chatgptBackendURL is the ChatGPT backend API base URL. Overridable in tests.
+var chatgptBackendURL = "https://chatgpt.com/backend-api"
+
+func fetchChatGPTRateLimits(ctx context.Context, token string) (map[string]string, error) {
+	url := chatgptBackendURL + "/accounts/check/v4-2023-04-27"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request ChatGPT API: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil, fmt.Errorf("ChatGPT API returned HTTP %d", resp.StatusCode)
+	}
+
+	// Parse the JSON response body to extract plan/usage info.
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("parse ChatGPT response: %w", err)
+	}
+
+	// Convert relevant fields into a flat header-like map for buildOpenAIUsage.
+	headers := make(map[string]string)
+	// Extract plan_type from the account info.
+	if accounts, ok := result["accounts"].(map[string]any); ok {
+		for _, acct := range accounts {
+			if a, ok := acct.(map[string]any); ok {
+				if planType, ok := a["plan_type"].(string); ok {
+					headers["X-Chatgpt-Plan-Type"] = planType
+				}
+				if rateLimits, ok := a["rate_limits"].([]any); ok {
+					for _, rl := range rateLimits {
+						if r, ok := rl.(map[string]any); ok {
+							if limit, ok := r["limit"].(float64); ok {
+								headers["X-Ratelimit-Limit-Requests"] = fmt.Sprintf("%.0f", limit)
+							}
+							if remaining, ok := r["remaining"].(float64); ok {
+								headers["X-Ratelimit-Remaining-Requests"] = fmt.Sprintf("%.0f", remaining)
+							}
+							if reset, ok := r["reset"].(string); ok {
+								headers["X-Ratelimit-Reset-Requests"] = reset
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return headers, nil
 }
 
