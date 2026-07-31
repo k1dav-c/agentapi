@@ -1,6 +1,12 @@
+export interface PromptOption {
+  label: string;
+  value: string;
+}
+
 export type GroupableActivity<TMessage, TTool> =
   | {type: "message"; key: string; message: TMessage}
-  | {type: "tool"; key: string; toolCall: TTool};
+  | {type: "tool"; key: string; toolCall: TTool}
+  | {type: "prompt"; key: string; options: PromptOption[]};
 
 export type GroupedActivity<TMessage, TTool> =
   | GroupableActivity<TMessage, TTool>
