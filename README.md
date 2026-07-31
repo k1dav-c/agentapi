@@ -122,7 +122,7 @@ All API endpoints can be protected with a Bearer token. Authentication is
 
 ```bash
 # Auto-generate a random token (printed to stderr on startup)
-agentapi server --api-token=generate -- claude
+agentapi server --api-token -- claude
 
 # Use a specific token
 agentapi server --api-token=my-secret -- claude
@@ -293,8 +293,8 @@ Set `--api-token` to require a Bearer token on all API requests (static chat
 UI routes are exempt):
 
 ```bash
-agentapi server --api-token=generate -- claude   # auto-generate and print to stderr
-agentapi server --api-token=my-secret -- claude   # use a specific token
+agentapi server --api-token -- claude             # auto-generate and print to stderr
+agentapi server --api-token=my-secret -- claude    # use a specific token
 ```
 
 The equivalent environment variable is `AGENTAPI_API_TOKEN`. When set, clients

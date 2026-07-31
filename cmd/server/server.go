@@ -539,7 +539,7 @@ func CreateServerCmd() *cobra.Command {
 		{FlagWebhookSecret, "", "", "Secret used to sign webhook payloads with HMAC-SHA256", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},
 		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},
-		{FlagAPIToken, "", "", "API token for Bearer authentication. Use 'generate' to auto-generate a random token. Empty (default) disables authentication.", "string"},
+		{FlagAPIToken, "", "", "API token for Bearer authentication. If set without a value, a random token is generated. Empty (default) disables authentication.", "string"},
 	}
 
 	for _, spec := range flagSpecs {
@@ -563,6 +563,10 @@ func CreateServerCmd() *cobra.Command {
 			panic(fmt.Sprintf("failed to bind flag %s: %v", spec.name, err))
 		}
 	}
+
+	// --api-token without a value auto-generates a token; --api-token=VALUE
+	// uses the given value; omitting the flag entirely disables authentication.
+	serverCmd.Flags().Lookup(FlagAPIToken).NoOptDefVal = "generate"
 
 	serverCmd.Flags().Bool(FlagExit, false, "Exit immediately after parsing arguments")
 	if err := serverCmd.Flags().MarkHidden(FlagExit); err != nil {
