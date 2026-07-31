@@ -222,7 +222,7 @@
             "type": "string"
           },
           "path": {
-            "description": "Absolute path of the managed config file: <working-directory>/.mcp.json for Claude or $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex.",
+            "description": "Absolute path of the managed config file: \u003cworking-directory\u003e/.mcp.json for Claude or $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex.",
             "type": "string"
           },
           "servers": {
@@ -948,6 +948,122 @@
           "cache_read_input_tokens",
           "input_tokens",
           "output_tokens"
+        ],
+        "type": "object"
+      },
+      "UsageResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/UsageResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "agent_type": {
+            "description": "The agent type this usage applies to.",
+            "type": "string"
+          },
+          "fallback_percentage": {
+            "description": "Percentage of rate limit available as fallback (0.0 to 1.0). Anthropic only.",
+            "format": "double",
+            "type": "number"
+          },
+          "five_hour_reset": {
+            "description": "When the 5-hour window resets. Anthropic only.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "five_hour_status": {
+            "description": "Rate limit status for the 5-hour window. Anthropic only.",
+            "type": "string"
+          },
+          "five_hour_utilization": {
+            "description": "Utilization for the 5-hour window (0.0 to 1.0). Anthropic only.",
+            "format": "double",
+            "type": "number"
+          },
+          "limit_requests": {
+            "description": "Maximum requests allowed in the current window. OpenAI only.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "limit_tokens": {
+            "description": "Maximum tokens allowed in the current window. OpenAI only.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "overage_reset": {
+            "description": "When the overage window resets. Anthropic only.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "overage_status": {
+            "description": "Rate limit status for the overage window. Anthropic only.",
+            "type": "string"
+          },
+          "overage_utilization": {
+            "description": "Utilization for the overage window (0.0 to 1.0). Anthropic only.",
+            "format": "double",
+            "type": "number"
+          },
+          "provider": {
+            "description": "The API provider (anthropic or openai).",
+            "type": "string"
+          },
+          "rate_limit_tier": {
+            "description": "Rate limit tier identifier. Anthropic only.",
+            "type": "string"
+          },
+          "remaining_requests": {
+            "description": "Remaining requests in the current window. OpenAI only.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "remaining_tokens": {
+            "description": "Remaining tokens in the current window. OpenAI only.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "representative_claim": {
+            "description": "The window currently governing the rate limit. Anthropic only.",
+            "type": "string"
+          },
+          "reset_requests": {
+            "description": "Duration until the request limit resets (e.g. 6m30s). OpenAI only.",
+            "type": "string"
+          },
+          "reset_tokens": {
+            "description": "Duration until the token limit resets (e.g. 30s). OpenAI only.",
+            "type": "string"
+          },
+          "seven_day_reset": {
+            "description": "When the 7-day window resets. Anthropic only.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "seven_day_status": {
+            "description": "Rate limit status for the 7-day window. Anthropic only.",
+            "type": "string"
+          },
+          "seven_day_utilization": {
+            "description": "Utilization for the 7-day window (0.0 to 1.0). Anthropic only.",
+            "format": "double",
+            "type": "number"
+          },
+          "status": {
+            "description": "Overall rate limit status (allowed or limited). Anthropic only.",
+            "type": "string"
+          },
+          "subscription_type": {
+            "description": "Subscription plan type (e.g. pro, max). Anthropic only.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_type",
+          "provider"
         ],
         "type": "object"
       },
@@ -2223,6 +2339,38 @@
           }
         },
         "summary": "Post upload"
+      }
+    },
+    "/usage": {
+      "get": {
+        "description": "Returns the current rate limit utilization from the Anthropic API, including 5-hour and 7-day window usage, overage status, and subscription info.",
+        "operationId": "get-usage",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get rate limit usage",
+        "tags": [
+          "Usage"
+        ]
       }
     },
     "/webhook": {
