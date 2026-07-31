@@ -105,6 +105,59 @@ agentapi server \
   -- claude
 ```
 
+### Self-update
+
+AgentAPI can update itself from the command line:
+
+```bash
+agentapi update          # download and install the latest release
+agentapi update --check  # check without downloading
+agentapi update --force  # skip version comparison
+```
+
+### API token authentication
+
+All API endpoints can be protected with a Bearer token. Authentication is
+**disabled by default** for backward compatibility.
+
+```bash
+# Auto-generate a random token (printed to stderr on startup)
+agentapi server --api-token=generate -- claude
+
+# Use a specific token
+agentapi server --api-token=my-secret -- claude
+
+# Via environment variable
+AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
+```
+
+When enabled, every API request must include `Authorization: Bearer <token>`.
+Static file routes (`/`, `/chat/*`) are exempt so browsers can open the chat
+UI without a token.
+
+### Rate limit usage
+
+`GET /usage` returns real-time rate limit utilization from the upstream API
+provider. The endpoint dispatches automatically based on the running agent
+type:
+
+- **Claude** — reads the OAuth token from `~/.claude/.credentials.json` and
+  extracts Anthropic's unified rate limit headers (5-hour / 7-day / overage
+  utilization, subscription type, reset times).
+- **Codex** — reads `OPENAI_API_KEY` and extracts OpenAI's `x-ratelimit-*`
+  headers (request and token limits, remaining quota, reset durations).
+
+```bash
+curl http://localhost:3284/usage
+```
+
+### Interactive prompt support
+
+The chat UI detects interactive TUI prompts — such as Claude Code's plan
+approval dialog or permission confirmation — and renders them as clickable
+buttons. Previously these prompts were invisible when structured JSONL
+messages were available, causing the agent to appear stuck.
+
 ### Kimi Code CLI
 
 This fork adds the `kimi` agent type, automatic detection for the `kimi`
@@ -218,12 +271,13 @@ An OpenAPI schema is available in [openapi.json](openapi.json).
 
 By default, the server runs on port 3284. Additionally, the server exposes the same OpenAPI schema at http://localhost:3284/openapi.json and the available endpoints in a documentation UI at http://localhost:3284/docs.
 
-There are 4 endpoints:
+Endpoints:
 
 - GET `/messages` - returns a list of all messages in the conversation with the agent
 - POST `/message` - sends a message to the agent. When a 200 response is returned, AgentAPI has detected that the agent started processing the message
 - GET `/status` - returns the current status of the agent, either "stable" or "running"
 - GET `/events` - an SSE stream of events from the agent: message and status updates
+- GET `/usage` - returns real-time rate limit utilization from the upstream API (Anthropic or OpenAI)
 - GET/PUT `/webhook` - reads or updates run-status webhook delivery without restarting the agent
 - GET `/mcp` - returns configured MCP servers and the managed config path for Claude or Codex
 - PUT `/mcp` - replaces the complete MCP server set; pass `?restart=true` to restart the PTY agent and apply immediately
@@ -232,6 +286,20 @@ There are 4 endpoints:
 - GET `/mcp/profiles` - exports project-scoped MCP configuration profiles
 - PUT/DELETE `/mcp/profiles/{name}` - imports, replaces, or removes a profile
 - POST `/mcp/profiles/{name}/apply` - replaces the active MCP configuration with a saved profile
+
+#### API token authentication
+
+Set `--api-token` to require a Bearer token on all API requests (static chat
+UI routes are exempt):
+
+```bash
+agentapi server --api-token=generate -- claude   # auto-generate and print to stderr
+agentapi server --api-token=my-secret -- claude   # use a specific token
+```
+
+The equivalent environment variable is `AGENTAPI_API_TOKEN`. When set, clients
+must include `Authorization: Bearer <token>` on every API call. Without
+`--api-token`, authentication is disabled (backward compatible).
 
 #### Allowed hosts
 
@@ -324,6 +392,16 @@ Each request includes `X-AgentAPI-Delivery`, `X-AgentAPI-Event`, and
 `X-AgentAPI-Timestamp` headers. When a secret is configured,
 `X-AgentAPI-Signature-256` contains
 `sha256=HMAC_SHA256(secret, timestamp + "." + raw_request_body)`.
+
+### `agentapi update`
+
+Update the agentapi binary to the latest release from GitHub.
+
+```bash
+agentapi update          # download and install the latest version
+agentapi update --check  # only check if an update is available
+agentapi update --force  # update even if already at the latest version
+```
 
 ### `agentapi attach`
 
