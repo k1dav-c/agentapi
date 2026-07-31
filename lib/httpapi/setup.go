@@ -36,8 +36,7 @@ func SetupProcess(ctx context.Context, config SetupProcessConfig) (*termexec.Pro
 		TerminalHeight: config.TerminalHeight,
 	})
 	if err != nil {
-		logger.Error(fmt.Sprintf("Error starting process: %v", err))
-		os.Exit(1)
+		return nil, fmt.Errorf("failed to start process: %w", err)
 	}
 
 	// Hack for sourcegraph amp to stop the animation.
