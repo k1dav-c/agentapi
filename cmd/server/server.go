@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -249,6 +251,18 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 
 	cwd, _ := os.Getwd()
 
+	apiToken := viper.GetString(FlagAPIToken)
+	if apiToken == "generate" {
+		var tokenBytes [32]byte
+		if _, err := rand.Read(tokenBytes[:]); err != nil {
+			return xerrors.Errorf("generate API token: %w", err)
+		}
+		apiToken = hex.EncodeToString(tokenBytes[:])
+		fmt.Fprintf(os.Stderr, "API token: %s\n", apiToken)
+	} else if apiToken != "" {
+		logger.Info("API token authentication enabled")
+	}
+
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      agentType,
 		AgentIO:        agentIO,
@@ -267,7 +281,8 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			}
 			return supervisor.Restart
 		}(),
-		Webhook: httpapi.WebhookConfig{
+		APIToken: apiToken,
+		Webhook:  httpapi.WebhookConfig{
 			URL:         viper.GetString(FlagWebhookURL),
 			Secret:      viper.GetString(FlagWebhookSecret),
 			Timeout:     viper.GetDuration(FlagWebhookTimeout),
@@ -476,6 +491,7 @@ const (
 	FlagWebhookSecret      = "webhook-secret"
 	FlagWebhookTimeout     = "webhook-timeout"
 	FlagWebhookMaxAttempts = "webhook-max-attempts"
+	FlagAPIToken           = "api-token"
 )
 
 func CreateServerCmd() *cobra.Command {
@@ -523,6 +539,7 @@ func CreateServerCmd() *cobra.Command {
 		{FlagWebhookSecret, "", "", "Secret used to sign webhook payloads with HMAC-SHA256", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},
 		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},
+		{FlagAPIToken, "", "", "API token for Bearer authentication. Use 'generate' to auto-generate a random token. Empty (default) disables authentication.", "string"},
 	}
 
 	for _, spec := range flagSpecs {
