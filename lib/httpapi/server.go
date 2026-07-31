@@ -574,9 +574,9 @@ func (s *Server) registerRoutes() {
 		o.Description = "Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events."
 	})
 
-	huma.Post(s.api, "/restart", s.restartAgentHandler, func(o *huma.Operation) {
-		o.Summary = "Restart agent process"
-		o.Description = "Restarts the agent PTY process. The current conversation context will be lost. Returns 400 if restart is not supported (e.g. ACP transport)."
+	huma.Delete(s.api, "/messages", s.deleteMessages, func(o *huma.Operation) {
+		o.Summary = "Delete all messages and restart"
+		o.Description = "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent PTY process. Returns 400 if restart is not supported (e.g. ACP transport)."
 		o.Errors = []int{400}
 	})
 

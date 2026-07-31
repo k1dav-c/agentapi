@@ -7,16 +7,30 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 )
 
-type RestartResponse struct {
+type DeleteMessagesResponse struct {
 	Body struct {
 		Restarted bool `json:"restarted" doc:"Whether the agent process was restarted."`
 	}
 }
 
-func (s *Server) restartAgentHandler(ctx context.Context, _ *struct{}) (*RestartResponse, error) {
+// deleteMessages clears all conversation state (messages, rich messages,
+// timeline, errors) and restarts the agent process.
+func (s *Server) deleteMessages(ctx context.Context, _ *struct{}) (*DeleteMessagesResponse, error) {
 	if s.restartAgent == nil {
 		return nil, huma.Error400BadRequest("agent restart is not supported in this server mode")
 	}
+
+	// Clear all conversation state.
+	s.emitter.Reset()
+	s.conversation.Reset()
+	s.mu.Lock()
+	s.messageQueue = nil
+	s.nextQueueID = 0
+	s.queueFailID = 0
+	s.queueFailCount = 0
+	s.mu.Unlock()
+
+	// Restart the agent process.
 	s.emitter.SetLifecycle(LifecycleRestarting)
 	newPID, err := s.restartAgent(ctx)
 	if err != nil {
@@ -25,7 +39,8 @@ func (s *Server) restartAgentHandler(ctx context.Context, _ *struct{}) (*Restart
 	}
 	s.startJSONLWatcher(newPID)
 	s.emitter.SetLifecycle(LifecycleStarting)
-	response := &RestartResponse{}
+
+	response := &DeleteMessagesResponse{}
 	response.Body.Restarted = true
 	return response, nil
 }
