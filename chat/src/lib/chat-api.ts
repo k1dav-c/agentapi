@@ -51,10 +51,10 @@ async function requireOK(response: Response, fallback: string) {
 
 export function createChatAPI(baseURL: string) {
   return {
-    async restartAgent(): Promise<void> {
+    async deleteMessages(): Promise<void> {
       await requireOK(
-        await fetch(`${baseURL}/restart`, {method: "POST"}),
-        "Failed to restart the agent",
+        await fetch(`${baseURL}/messages`, {method: "DELETE"}),
+        "Failed to delete messages and restart the agent",
       );
     },
 

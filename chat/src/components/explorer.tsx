@@ -47,7 +47,7 @@ const pathPattern = /(?:^|[\s"'(])((?:\/[\w.@+-]+)+\.[a-zA-Z0-9]{1,10})(?=$|[\s"
 export function Explorer({onNavigateTask}: ExplorerProps) {
   const {
     messages,
-    restartAgent,
+    deleteMessages,
     getWebhook,
     updateWebhook,
     getMCP,
@@ -151,11 +151,11 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     }
   };
   const handleRestart = async () => {
-    if (!window.confirm("Restart the agent? This will reset the current conversation context.")) return;
+    if (!window.confirm("Clear all messages and restart the agent?")) return;
     setRestartingAgent(true);
     try {
-      await restartAgent();
-      toast.success("Agent restarted");
+      await deleteMessages();
+      toast.success("Messages cleared and agent restarted");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not restart the agent");
     } finally {
