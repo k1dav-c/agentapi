@@ -19,6 +19,26 @@
         "title": "ConversationRole",
         "type": "string"
       },
+      "DeleteMessagesResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/DeleteMessagesResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "restarted": {
+            "description": "Whether the agent process was restarted.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "restarted"
+        ],
+        "type": "object"
+      },
       "ErrorBody": {
         "additionalProperties": false,
         "properties": {
@@ -235,7 +255,7 @@
             "type": "string"
           },
           "path": {
-            "description": "Absolute path of the managed config file: <working-directory>/.mcp.json for Claude or $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex.",
+            "description": "Absolute path of the managed config file: \u003cworking-directory\u003e/.mcp.json for Claude or $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex.",
             "type": "string"
           },
           "servers": {
@@ -600,26 +620,6 @@
           "content",
           "id",
           "time"
-        ],
-        "type": "object"
-      },
-      "RestartResponseBody": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "example": "https://example.com/schemas/RestartResponseBody.json",
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "restarted": {
-            "description": "Whether the agent process was restarted.",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "restarted"
         ],
         "type": "object"
       },
@@ -2088,6 +2088,43 @@
       }
     },
     "/messages": {
+      "delete": {
+        "description": "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent PTY process. Returns 400 if restart is not supported (e.g. ACP transport).",
+        "operationId": "delete-messages",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMessagesResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Delete all messages and restart"
+      },
       "get": {
         "description": "Returns a list of messages representing the conversation history with the agent.",
         "operationId": "get-messages",
@@ -2235,45 +2272,6 @@
           }
         },
         "summary": "Put queue by ID"
-      }
-    },
-    "/restart": {
-      "post": {
-        "description": "Restarts the agent PTY process. The current conversation context will be lost. Returns 400 if restart is not supported (e.g. ACP transport).",
-        "operationId": "post-restart",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RestartResponseBody"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorModel"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorModel"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          }
-        },
-        "summary": "Restart agent process"
       }
     },
     "/rich-messages": {
