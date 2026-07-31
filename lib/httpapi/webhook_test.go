@@ -1,9 +1,6 @@
 package httpapi
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -82,7 +79,6 @@ func TestWebhookStatusChangesOnly(t *testing.T) {
 func TestWebhookSend(t *testing.T) {
 	t.Parallel()
 
-	const secret = "test-secret"
 	var receivedBody []byte
 	var receivedHeader http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +91,7 @@ func TestWebhookSend(t *testing.T) {
 	defer server.Close()
 
 	dispatcher, err := newWebhookDispatcher(
-		WebhookConfig{URL: server.URL, Secret: secret},
+		WebhookConfig{URL: server.URL},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeClaude,
 		TransportACP,
@@ -122,11 +118,7 @@ func TestWebhookSend(t *testing.T) {
 	assert.Equal(t, event.ID, receivedHeader.Get("X-AgentAPI-Delivery"))
 	assert.Equal(t, event.Type, receivedHeader.Get("X-AgentAPI-Event"))
 	assert.Equal(t, "1700000000", receivedHeader.Get("X-AgentAPI-Timestamp"))
-
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte("1700000000."))
-	_, _ = mac.Write(body)
-	assert.Equal(t, "sha256="+hex.EncodeToString(mac.Sum(nil)), receivedHeader.Get("X-AgentAPI-Signature-256"))
+	assert.Empty(t, receivedHeader.Get("X-AgentAPI-Signature-256"))
 }
 
 func TestWebhookSendRejectsNonSuccessfulResponse(t *testing.T) {
@@ -149,13 +141,64 @@ func TestWebhookSendRejectsNonSuccessfulResponse(t *testing.T) {
 	require.ErrorContains(t, err, "503 Service Unavailable")
 }
 
+func TestWebhookCustomPayloadTemplate(t *testing.T) {
+	t.Parallel()
+
+	var receivedBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		receivedBody, err = io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	tmpl := `{"event":"{{.Type}}","status":"{{.Status}}","prev":"{{.PreviousStatus}}","agent":"{{.AgentType}}"}`
+	dispatcher, err := newWebhookDispatcher(
+		WebhookConfig{URL: server.URL, PayloadTemplate: tmpl},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		mf.AgentTypeClaude,
+		TransportPTY,
+	)
+	require.NoError(t, err)
+
+	event := WebhookEvent{
+		ID:        "delivery-tmpl",
+		Type:      webhookEventRunStatusChanged,
+		CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
+		Data: WebhookEventData{
+			RunID:          "run-1",
+			Status:         AgentStatusStable,
+			PreviousStatus: AgentStatusRunning,
+			AgentType:      mf.AgentTypeClaude,
+			Transport:      TransportPTY,
+		},
+	}
+	body, err := dispatcher.renderBody(event)
+	require.NoError(t, err)
+	require.NoError(t, dispatcher.send(t.Context(), event, body))
+
+	assert.JSONEq(t, `{"event":"run.status_changed","status":"stable","prev":"running","agent":"claude"}`, string(receivedBody))
+}
+
+func TestWebhookInvalidPayloadTemplate(t *testing.T) {
+	t.Parallel()
+
+	_, err := newWebhookDispatcher(
+		WebhookConfig{URL: "https://example.com/hook", PayloadTemplate: "{{.Invalid"},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		mf.AgentTypeClaude,
+		TransportPTY,
+	)
+	require.ErrorContains(t, err, "invalid webhook payload template")
+}
+
 func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
 	t.Parallel()
 
 	dispatcher, err := newWebhookDispatcher(
 		WebhookConfig{
 			URL:         "https://initial.example.com/hook",
-			Secret:      "initial-secret",
 			Timeout:     5 * time.Second,
 			MaxAttempts: 2,
 		},
@@ -166,6 +209,7 @@ func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
 	require.NoError(t, err)
 	server := &Server{webhook: dispatcher}
 
+	// Update URL, timeout, and max attempts.
 	request := &WebhookConfigRequest{}
 	request.Body.URL = "https://updated.example.com/hook"
 	request.Body.TimeoutSeconds = 12
@@ -175,16 +219,33 @@ func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
 	assert.Equal(t, request.Body.URL, response.Body.URL)
 	assert.Equal(t, 12, response.Body.TimeoutSeconds)
 	assert.Equal(t, 4, response.Body.MaxAttempts)
-	assert.True(t, response.Body.SecretConfigured)
-	assert.Equal(t, "initial-secret", dispatcher.configSnapshot().Secret)
+	assert.Empty(t, response.Body.PayloadTemplate)
 
-	clearSecret := ""
+	// Set a payload template.
+	tmpl := `{"s":"{{.Status}}"}`
+	request.Body.PayloadTemplate = &tmpl
+	response, err = server.updateWebhookConfig(t.Context(), request)
+	require.NoError(t, err)
+	assert.Equal(t, tmpl, response.Body.PayloadTemplate)
+
+	// Omit PayloadTemplate (nil) — should preserve existing.
+	request.Body.PayloadTemplate = nil
+	response, err = server.updateWebhookConfig(t.Context(), request)
+	require.NoError(t, err)
+	assert.Equal(t, tmpl, response.Body.PayloadTemplate)
+
+	// Clear PayloadTemplate with empty string.
+	clearTmpl := ""
+	request.Body.PayloadTemplate = &clearTmpl
+	response, err = server.updateWebhookConfig(t.Context(), request)
+	require.NoError(t, err)
+	assert.Empty(t, response.Body.PayloadTemplate)
+
+	// Disable webhook by clearing URL.
 	request.Body.URL = ""
-	request.Body.Secret = &clearSecret
 	response, err = server.updateWebhookConfig(t.Context(), request)
 	require.NoError(t, err)
 	assert.Empty(t, response.Body.URL)
-	assert.False(t, response.Body.SecretConfigured)
 
 	dispatcher.statusChanged(AgentStatusRunning, AgentStatusStable)
 	assert.Empty(t, dispatcher.queue)

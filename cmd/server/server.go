@@ -281,11 +281,11 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			return supervisor.Restart
 		}(),
 		APIToken: apiToken,
-		Webhook:  httpapi.WebhookConfig{
-			URL:         viper.GetString(FlagWebhookURL),
-			Secret:      viper.GetString(FlagWebhookSecret),
-			Timeout:     viper.GetDuration(FlagWebhookTimeout),
-			MaxAttempts: viper.GetInt(FlagWebhookMaxAttempts),
+		Webhook: httpapi.WebhookConfig{
+			URL:             viper.GetString(FlagWebhookURL),
+			Timeout:         viper.GetDuration(FlagWebhookTimeout),
+			MaxAttempts:     viper.GetInt(FlagWebhookMaxAttempts),
+			PayloadTemplate: viper.GetString(FlagWebhookPayloadTemplate),
 		},
 		StatePersistenceConfig: screentracker.StatePersistenceConfig{
 			StateFile: stateFile,
@@ -293,7 +293,6 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			SaveState: saveState,
 		},
 	})
-
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}
@@ -471,26 +470,26 @@ type flagSpec struct {
 }
 
 const (
-	FlagType               = "type"
-	FlagPort               = "port"
-	FlagPrintOpenAPI       = "print-openapi"
-	FlagChatBasePath       = "chat-base-path"
-	FlagTermWidth          = "term-width"
-	FlagTermHeight         = "term-height"
-	FlagAllowedHosts       = "allowed-hosts"
-	FlagAllowedOrigins     = "allowed-origins"
-	FlagExit               = "exit"
-	FlagInitialPrompt      = "initial-prompt"
-	FlagStateFile          = "state-file"
-	FlagLoadState          = "load-state"
-	FlagSaveState          = "save-state"
-	FlagPidFile            = "pid-file"
-	FlagExperimentalACP    = "experimental-acp"
-	FlagWebhookURL         = "webhook-url"
-	FlagWebhookSecret      = "webhook-secret"
-	FlagWebhookTimeout     = "webhook-timeout"
-	FlagWebhookMaxAttempts = "webhook-max-attempts"
-	FlagAPIToken           = "api-token"
+	FlagType                   = "type"
+	FlagPort                   = "port"
+	FlagPrintOpenAPI           = "print-openapi"
+	FlagChatBasePath           = "chat-base-path"
+	FlagTermWidth              = "term-width"
+	FlagTermHeight             = "term-height"
+	FlagAllowedHosts           = "allowed-hosts"
+	FlagAllowedOrigins         = "allowed-origins"
+	FlagExit                   = "exit"
+	FlagInitialPrompt          = "initial-prompt"
+	FlagStateFile              = "state-file"
+	FlagLoadState              = "load-state"
+	FlagSaveState              = "save-state"
+	FlagPidFile                = "pid-file"
+	FlagExperimentalACP        = "experimental-acp"
+	FlagWebhookURL             = "webhook-url"
+	FlagWebhookTimeout         = "webhook-timeout"
+	FlagWebhookMaxAttempts     = "webhook-max-attempts"
+	FlagWebhookPayloadTemplate = "webhook-payload-template"
+	FlagAPIToken               = "api-token"
 )
 
 func CreateServerCmd() *cobra.Command {
@@ -535,9 +534,9 @@ func CreateServerCmd() *cobra.Command {
 		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts", "string"},
 		{FlagExperimentalACP, "", false, "Use experimental ACP transport instead of PTY", "bool"},
 		{FlagWebhookURL, "", "", "URL notified when the agent run status changes", "string"},
-		{FlagWebhookSecret, "", "", "Secret used to sign webhook payloads with HMAC-SHA256", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},
 		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},
+		{FlagWebhookPayloadTemplate, "", "", "Go text/template for custom webhook POST body. Available fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport", "string"},
 		{FlagAPIToken, "", "", "API token for Bearer authentication. If set without a value, a random token is generated. Empty (default) disables authentication.", "string"},
 	}
 

@@ -32,7 +32,7 @@ export interface WebhookConfig {
   url: string;
   timeout_seconds: number;
   max_attempts: number;
-  secret_configured: boolean;
+  payload_template: string;
 }
 
 interface APIErrorDetail {
@@ -61,9 +61,9 @@ export function createChatAPI(baseURL: string) {
 
     async updateWebhook(config: {
       url: string;
-      secret?: string;
       timeout_seconds: number;
       max_attempts: number;
+      payload_template?: string;
     }): Promise<WebhookConfig> {
       const response = await requireOK(
         await fetch(`${baseURL}/webhook`, {

@@ -222,7 +222,7 @@
             "type": "string"
           },
           "path": {
-            "description": "Absolute path of the managed config file: \u003cworking-directory\u003e/.mcp.json for Claude or $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex.",
+            "description": "Absolute path of the managed config file: <working-directory>/.mcp.json for Claude or $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex.",
             "type": "string"
           },
           "servers": {
@@ -1084,8 +1084,8 @@
             "minimum": 1,
             "type": "integer"
           },
-          "secret": {
-            "description": "New signing secret. Omit to preserve the current secret; set to an empty string to clear it.",
+          "payload_template": {
+            "description": "Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport.",
             "type": "string"
           },
           "timeout_seconds": {
@@ -1122,9 +1122,9 @@
             "format": "int64",
             "type": "integer"
           },
-          "secret_configured": {
-            "description": "Whether an HMAC signing secret is configured. The secret itself is never returned.",
-            "type": "boolean"
+          "payload_template": {
+            "description": "Go text/template for the webhook POST body. Empty means the default JSON payload is used.",
+            "type": "string"
           },
           "timeout_seconds": {
             "description": "Timeout for each delivery attempt, in seconds.",
@@ -1138,7 +1138,7 @@
         },
         "required": [
           "max_attempts",
-          "secret_configured",
+          "payload_template",
           "timeout_seconds",
           "url"
         ],

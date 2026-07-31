@@ -149,9 +149,9 @@ interface ChatContextValue {
   getWebhook: () => Promise<WebhookConfig>;
   updateWebhook: (config: {
     url: string;
-    secret?: string;
     timeout_seconds: number;
     max_attempts: number;
+    payload_template?: string;
   }) => Promise<WebhookConfig>;
   getMCP: () => Promise<MCPConfig>;
   updateMCP: (

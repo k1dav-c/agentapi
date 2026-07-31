@@ -3,9 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -14,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+	"text/template"
 	"time"
 
 	mf "github.com/coder/agentapi/lib/msgfmt"
@@ -28,10 +27,10 @@ const (
 )
 
 type WebhookConfig struct {
-	URL         string
-	Secret      string
-	Timeout     time.Duration
-	MaxAttempts int
+	URL             string
+	Timeout         time.Duration
+	MaxAttempts     int
+	PayloadTemplate string
 }
 
 func (c WebhookConfig) validate() error {
@@ -71,9 +70,22 @@ type WebhookEventData struct {
 	Transport      Transport    `json:"transport" doc:"Backend transport being used."`
 }
 
+// WebhookTemplateData is the context available to custom payload templates.
+type WebhookTemplateData struct {
+	ID             string
+	Type           string
+	CreatedAt      time.Time
+	RunID          string
+	Status         string
+	PreviousStatus string
+	AgentType      string
+	Transport      string
+}
+
 type webhookDispatcher struct {
 	mu        sync.RWMutex
 	config    WebhookConfig
+	tmpl      *template.Template // nil when using the default JSON payload
 	client    *http.Client
 	logger    *slog.Logger
 	runID     string
@@ -82,13 +94,29 @@ type webhookDispatcher struct {
 	queue     chan WebhookEvent
 }
 
+func parseWebhookTemplate(templateStr string) (*template.Template, error) {
+	if templateStr == "" {
+		return nil, nil
+	}
+	tmpl, err := template.New("webhook").Parse(templateStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid webhook payload template: %w", err)
+	}
+	return tmpl, nil
+}
+
 func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType mf.AgentType, transport Transport) (*webhookDispatcher, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
 	config = webhookConfigWithDefaults(config)
+	tmpl, err := parseWebhookTemplate(config.PayloadTemplate)
+	if err != nil {
+		return nil, err
+	}
 	return &webhookDispatcher{
 		config:    config,
+		tmpl:      tmpl,
 		client:    &http.Client{Timeout: config.Timeout},
 		logger:    logger,
 		runID:     randomWebhookID(),
@@ -119,9 +147,14 @@ func (d *webhookDispatcher) updateConfig(config WebhookConfig) error {
 	if err := config.validate(); err != nil {
 		return err
 	}
+	tmpl, err := parseWebhookTemplate(config.PayloadTemplate)
+	if err != nil {
+		return err
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.config = config
+	d.tmpl = tmpl
 	d.client = &http.Client{Timeout: config.Timeout}
 	return nil
 }
@@ -170,10 +203,36 @@ func (d *webhookDispatcher) start(ctx context.Context) {
 	}()
 }
 
+func (d *webhookDispatcher) renderBody(event WebhookEvent) ([]byte, error) {
+	d.mu.RLock()
+	tmpl := d.tmpl
+	d.mu.RUnlock()
+
+	if tmpl == nil {
+		return json.Marshal(event)
+	}
+
+	data := WebhookTemplateData{
+		ID:             event.ID,
+		Type:           event.Type,
+		CreatedAt:      event.CreatedAt,
+		RunID:          event.Data.RunID,
+		Status:         string(event.Data.Status),
+		PreviousStatus: string(event.Data.PreviousStatus),
+		AgentType:      string(event.Data.AgentType),
+		Transport:      string(event.Data.Transport),
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("execute webhook template: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
 func (d *webhookDispatcher) deliver(ctx context.Context, event WebhookEvent) {
-	body, err := json.Marshal(event)
+	body, err := d.renderBody(event)
 	if err != nil {
-		d.logger.Error("Failed to encode webhook event", "error", err)
+		d.logger.Error("Failed to render webhook body", "error", err)
 		return
 	}
 	config := d.configSnapshot()
@@ -217,12 +276,6 @@ func (d *webhookDispatcher) sendWithConfig(ctx context.Context, config WebhookCo
 	request.Header.Set("X-AgentAPI-Delivery", event.ID)
 	request.Header.Set("X-AgentAPI-Event", event.Type)
 	request.Header.Set("X-AgentAPI-Timestamp", timestamp)
-	if config.Secret != "" {
-		mac := hmac.New(sha256.New, []byte(config.Secret))
-		_, _ = mac.Write([]byte(timestamp + "."))
-		_, _ = mac.Write(body)
-		request.Header.Set("X-AgentAPI-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
-	}
 
 	response, err := client.Do(request)
 	if err != nil {
@@ -237,19 +290,19 @@ func (d *webhookDispatcher) sendWithConfig(ctx context.Context, config WebhookCo
 
 type WebhookConfigResponse struct {
 	Body struct {
-		URL              string `json:"url" doc:"Webhook destination. Empty means webhook delivery is disabled."`
-		TimeoutSeconds   int    `json:"timeout_seconds" doc:"Timeout for each delivery attempt, in seconds."`
-		MaxAttempts      int    `json:"max_attempts" doc:"Maximum number of delivery attempts."`
-		SecretConfigured bool   `json:"secret_configured" doc:"Whether an HMAC signing secret is configured. The secret itself is never returned."`
+		URL             string `json:"url" doc:"Webhook destination. Empty means webhook delivery is disabled."`
+		TimeoutSeconds  int    `json:"timeout_seconds" doc:"Timeout for each delivery attempt, in seconds."`
+		MaxAttempts     int    `json:"max_attempts" doc:"Maximum number of delivery attempts."`
+		PayloadTemplate string `json:"payload_template" doc:"Go text/template for the webhook POST body. Empty means the default JSON payload is used."`
 	}
 }
 
 type WebhookConfigRequest struct {
 	Body struct {
-		URL            string  `json:"url" doc:"Webhook destination. Set to an empty string to disable delivery."`
-		Secret         *string `json:"secret,omitempty" doc:"New signing secret. Omit to preserve the current secret; set to an empty string to clear it."`
-		TimeoutSeconds int     `json:"timeout_seconds" minimum:"1" maximum:"3600" doc:"Timeout for each delivery attempt, in seconds."`
-		MaxAttempts    int     `json:"max_attempts" minimum:"1" maximum:"10" doc:"Maximum number of delivery attempts."`
+		URL             string  `json:"url" doc:"Webhook destination. Set to an empty string to disable delivery."`
+		TimeoutSeconds  int     `json:"timeout_seconds" minimum:"1" maximum:"3600" doc:"Timeout for each delivery attempt, in seconds."`
+		MaxAttempts     int     `json:"max_attempts" minimum:"1" maximum:"10" doc:"Maximum number of delivery attempts."`
+		PayloadTemplate *string `json:"payload_template,omitempty" doc:"Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport."`
 	}
 }
 
@@ -259,21 +312,21 @@ func (s *Server) getWebhookConfig(_ context.Context, _ *struct{}) (*WebhookConfi
 	response.Body.URL = config.URL
 	response.Body.TimeoutSeconds = int(config.Timeout / time.Second)
 	response.Body.MaxAttempts = config.MaxAttempts
-	response.Body.SecretConfigured = config.Secret != ""
+	response.Body.PayloadTemplate = config.PayloadTemplate
 	return response, nil
 }
 
 func (s *Server) updateWebhookConfig(_ context.Context, request *WebhookConfigRequest) (*WebhookConfigResponse, error) {
 	current := s.webhook.configSnapshot()
-	secret := current.Secret
-	if request.Body.Secret != nil {
-		secret = *request.Body.Secret
+	payloadTemplate := current.PayloadTemplate
+	if request.Body.PayloadTemplate != nil {
+		payloadTemplate = *request.Body.PayloadTemplate
 	}
 	config := WebhookConfig{
-		URL:         request.Body.URL,
-		Secret:      secret,
-		Timeout:     time.Duration(request.Body.TimeoutSeconds) * time.Second,
-		MaxAttempts: request.Body.MaxAttempts,
+		URL:             request.Body.URL,
+		Timeout:         time.Duration(request.Body.TimeoutSeconds) * time.Second,
+		MaxAttempts:     request.Body.MaxAttempts,
+		PayloadTemplate: payloadTemplate,
 	}
 	if err := s.webhook.updateConfig(config); err != nil {
 		return nil, huma.Error400BadRequest(err.Error())

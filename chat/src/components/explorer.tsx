@@ -70,11 +70,9 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
   const [profileName, setProfileName] = useState("");
   const [restartAfterSave, setRestartAfterSave] = useState(true);
   const [webhookURL, setWebhookURL] = useState("");
-  const [webhookSecret, setWebhookSecret] = useState("");
-  const [webhookSecretConfigured, setWebhookSecretConfigured] = useState(false);
-  const [webhookClearSecret, setWebhookClearSecret] = useState(false);
   const [webhookTimeout, setWebhookTimeout] = useState(10);
   const [webhookMaxAttempts, setWebhookMaxAttempts] = useState(3);
+  const [webhookPayloadTemplate, setWebhookPayloadTemplate] = useState("");
   const [webhookLoading, setWebhookLoading] = useState(false);
   const [webhookSaving, setWebhookSaving] = useState(false);
   const mcpImportRef = useRef<HTMLInputElement>(null);
@@ -122,11 +120,9 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     try {
       const config = await getWebhook();
       setWebhookURL(config.url);
-      setWebhookSecret("");
-      setWebhookSecretConfigured(config.secret_configured);
-      setWebhookClearSecret(false);
       setWebhookTimeout(config.timeout_seconds);
       setWebhookMaxAttempts(config.max_attempts);
+      setWebhookPayloadTemplate(config.payload_template);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load webhook configuration");
     } finally {
@@ -138,18 +134,12 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     try {
       const config = await updateWebhook({
         url: webhookURL.trim(),
-        ...(webhookClearSecret
-          ? {secret: ""}
-          : webhookSecret !== ""
-            ? {secret: webhookSecret}
-            : {}),
         timeout_seconds: webhookTimeout,
         max_attempts: webhookMaxAttempts,
+        payload_template: webhookPayloadTemplate,
       });
       setWebhookURL(config.url);
-      setWebhookSecret("");
-      setWebhookSecretConfigured(config.secret_configured);
-      setWebhookClearSecret(false);
+      setWebhookPayloadTemplate(config.payload_template);
       toast.success(config.url ? "Webhook configuration updated" : "Webhook disabled");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update webhook configuration");
@@ -542,7 +532,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                 <div>
                   <h3 className="text-sm font-medium">Run status webhook</h3>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    Send a signed HTTP POST when the run changes between running and stable.
+                    Send an HTTP POST when the run changes between running and stable.
                     Startup flags provide the initial values; changes here apply immediately.
                   </p>
                 </div>
@@ -560,37 +550,20 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                   </span>
                 </label>
                 <label className="block space-y-1.5">
-                  <span className="text-xs font-medium">Signing secret</span>
-                  <input
-                    type="password"
-                    value={webhookSecret}
-                    onChange={(event) => {
-                      setWebhookSecret(event.target.value);
-                      setWebhookClearSecret(false);
-                    }}
-                    disabled={webhookClearSecret}
-                    placeholder={webhookSecretConfigured ? "Configured — leave blank to keep" : "Optional HMAC secret"}
-                    autoComplete="new-password"
-                    className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  <span className="text-xs font-medium">Payload template</span>
+                  <textarea
+                    value={webhookPayloadTemplate}
+                    onChange={(event) => setWebhookPayloadTemplate(event.target.value)}
+                    placeholder={'{"event":"{{.Type}}","status":"{{.Status}}"}'}
+                    spellCheck={false}
+                    rows={3}
+                    className="w-full resize-y rounded-md border bg-background p-3 font-mono text-xs leading-5"
                   />
                   <span className="block text-[11px] text-muted-foreground">
-                    Secrets are write-only and are never returned by the API.
+                    Go text/template for the POST body. Leave empty for the default JSON payload.
+                    Fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport.
                   </span>
                 </label>
-                {webhookSecretConfigured && (
-                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <input
-                      type="checkbox"
-                      checked={webhookClearSecret}
-                      onChange={(event) => {
-                        setWebhookClearSecret(event.target.checked);
-                        if (event.target.checked) setWebhookSecret("");
-                      }}
-                      className="size-4 accent-primary"
-                    />
-                    Clear the configured signing secret
-                  </label>
-                )}
                 <div className="grid grid-cols-2 gap-3">
                   <label className="block space-y-1.5">
                     <span className="text-xs font-medium">Timeout (seconds)</span>
