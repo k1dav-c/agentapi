@@ -539,6 +539,12 @@ func (s *Server) registerRoutes() {
 		o.Errors = []int{400}
 	})
 
+	huma.Get(s.api, "/usage", s.getUsage, func(o *huma.Operation) {
+		o.Tags = []string{"Usage"}
+		o.Summary = "Get rate limit usage"
+		o.Description = "Returns the current rate limit utilization from the Anthropic API, including 5-hour and 7-day window usage, overage status, and subscription info."
+	})
+
 	huma.Get(s.api, "/mcp", s.getMCP, func(o *huma.Operation) {
 		configureMCPGetOperation(o)
 	})
