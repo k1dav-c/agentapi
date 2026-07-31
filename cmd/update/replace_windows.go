@@ -3,9 +3,8 @@
 package update
 
 import (
+	"fmt"
 	"os"
-
-	"golang.org/x/xerrors"
 )
 
 func replaceBinary(newPath, currentPath string) error {
@@ -15,14 +14,14 @@ func replaceBinary(newPath, currentPath string) error {
 
 	// Rename the current binary out of the way.
 	if err := os.Rename(currentPath, oldPath); err != nil {
-		return xerrors.Errorf("rename current binary: %w", err)
+		return fmt.Errorf("rename current binary: %w", err)
 	}
 
 	// Move the new binary into place.
 	if err := os.Rename(newPath, currentPath); err != nil {
 		// Try to restore the old binary.
 		_ = os.Rename(oldPath, currentPath)
-		return xerrors.Errorf("rename new binary: %w", err)
+		return fmt.Errorf("rename new binary: %w", err)
 	}
 
 	// Best-effort cleanup (may fail if the old binary is still locked).

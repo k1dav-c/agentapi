@@ -3,10 +3,10 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/coder/agentapi/lib/mcpconfig"
 	"github.com/danielgtaylor/huma/v2"
-	"golang.org/x/xerrors"
 )
 
 type MCPServers map[string]any
@@ -191,7 +191,7 @@ func toConfigServers(servers MCPServers) (mcpconfig.Servers, error) {
 	for name, config := range servers {
 		raw, err := json.Marshal(config)
 		if err != nil {
-			return nil, xerrors.Errorf("encode MCP server %q: %w", name, err)
+			return nil, fmt.Errorf("encode MCP server %q: %w", name, err)
 		}
 		output[name] = raw
 	}
@@ -203,7 +203,7 @@ func fromConfigServers(servers mcpconfig.Servers) (MCPServers, error) {
 	for name, raw := range servers {
 		var config any
 		if err := json.Unmarshal(raw, &config); err != nil {
-			return nil, xerrors.Errorf("decode MCP server %q: %w", name, err)
+			return nil, fmt.Errorf("decode MCP server %q: %w", name, err)
 		}
 		output[name] = config
 	}
@@ -221,7 +221,7 @@ func (s *Server) getMCP(
 	}
 	servers, err := s.mcpStore.Read()
 	if err != nil {
-		return nil, xerrors.Errorf("failed to read MCP config: %w", err)
+		return nil, fmt.Errorf("failed to read MCP config: %w", err)
 	}
 	apiServers, err := fromConfigServers(servers)
 	if err != nil {
@@ -255,7 +255,7 @@ func (s *Server) updateMCP(
 		return nil, huma.Error400BadRequest(err.Error())
 	}
 	if err := s.mcpStore.Replace(servers); err != nil {
-		return nil, xerrors.Errorf("failed to write MCP config: %w", err)
+		return nil, fmt.Errorf("failed to write MCP config: %w", err)
 	}
 	response := &MCPUpdateResponse{}
 	response.Body.OK = true

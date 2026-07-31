@@ -33,7 +33,6 @@ import (
 	"github.com/danielgtaylor/huma/v2/sse"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -250,11 +249,11 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 
 	allowedHosts, err := parseAllowedHosts(config.AllowedHosts)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to parse allowed hosts: %w", err)
+		return nil, fmt.Errorf("failed to parse allowed hosts: %w", err)
 	}
 	allowedOrigins, err := parseAllowedOrigins(config.AllowedOrigins)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to parse allowed origins: %w", err)
+		return nil, fmt.Errorf("failed to parse allowed origins: %w", err)
 	}
 
 	logger.Info(fmt.Sprintf("Allowed hosts: %s", strings.Join(allowedHosts, ", ")))
@@ -298,7 +297,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 
 	webhook, err := newWebhookDispatcher(config.Webhook, logger, config.AgentType, config.Transport)
 	if err != nil {
-		return nil, xerrors.Errorf("configure webhook: %w", err)
+		return nil, fmt.Errorf("configure webhook: %w", err)
 	}
 	emitterOptions := []EventEmitterOption{
 		WithAgentType(config.AgentType),
@@ -340,7 +339,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	// Create temporary directory for uploads
 	tempDir, err := os.MkdirTemp("", "agentapi-uploads-")
 	if err != nil {
-		return nil, xerrors.Errorf("failed to create temporary directory: %w", err)
+		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
 	}
 	logger.Info("Created temporary directory for uploads", "tempDir", tempDir)
 
@@ -370,7 +369,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	if mcpconfig.SupportedAgent(config.AgentType) {
 		store, err := mcpconfig.NewStore(config.AgentType, config.CWD)
 		if err != nil {
-			return nil, xerrors.Errorf("create MCP config store: %w", err)
+			return nil, fmt.Errorf("create MCP config store: %w", err)
 		}
 		s.mcpStore = store
 	}
@@ -767,11 +766,11 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 				resp.Body.Queued = true
 				return resp, nil
 			}
-			return nil, xerrors.Errorf("failed to send message: %w", err)
+			return nil, fmt.Errorf("failed to send message: %w", err)
 		}
 	case MessageTypeRaw:
 		if _, err := s.agentio.Write([]byte(input.Body.Content)); err != nil {
-			return nil, xerrors.Errorf("failed to send message: %w", err)
+			return nil, fmt.Errorf("failed to send message: %w", err)
 		}
 	}
 
@@ -890,7 +889,7 @@ func (s *Server) uploadFiles(ctx context.Context, input *struct {
 	const maxFileSize = 10 << 20 // 10MB
 	buf, err := io.ReadAll(io.LimitReader(file, maxFileSize+1))
 	if err != nil {
-		return nil, xerrors.Errorf("failed to upload file: %w", err)
+		return nil, fmt.Errorf("failed to upload file: %w", err)
 	}
 	if len(buf) > maxFileSize {
 		return nil, huma.Error400BadRequest("file size exceeds 10MB limit")
@@ -904,7 +903,7 @@ func (s *Server) uploadFiles(ctx context.Context, input *struct {
 	uploadDir := filepath.Join(s.tempDir, checksum)
 	err = os.MkdirAll(uploadDir, 0o755)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to create upload directory: %w", err)
+		return nil, fmt.Errorf("failed to create upload directory: %w", err)
 	}
 
 	// Save individual file with original filename (extract just the base filename for security)
@@ -913,7 +912,7 @@ func (s *Server) uploadFiles(ctx context.Context, input *struct {
 	outPath := filepath.Join(uploadDir, filename)
 	err = os.WriteFile(outPath, buf, 0o644)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to write file: %w", err)
+		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
 	resp := &UploadResponse{}

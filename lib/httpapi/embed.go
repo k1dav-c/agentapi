@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/spf13/afero"
-	"golang.org/x/xerrors"
 )
 
 //go:embed chat/*
@@ -25,14 +24,14 @@ func createModifiedFS(baseFS fs.FS, oldBasePath string, newBasePath string) (*af
 
 	if err := afero.Walk(ro, ".", func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
-			return xerrors.Errorf("failed to walk: %w", err)
+			return fmt.Errorf("failed to walk: %w", err)
 		}
 		if info.IsDir() {
 			return nil
 		}
 		byteContents, err := afero.ReadFile(ro, path)
 		if err != nil {
-			return xerrors.Errorf("failed to read file: %w", err)
+			return fmt.Errorf("failed to read file: %w", err)
 		}
 		contents := string(byteContents)
 		if newBasePath == "/" {
@@ -40,11 +39,11 @@ func createModifiedFS(baseFS fs.FS, oldBasePath string, newBasePath string) (*af
 		}
 		contents = strings.ReplaceAll(contents, oldBasePath, newBasePath)
 		if err := afero.WriteFile(overlay, path, []byte(contents), 0o644); err != nil {
-			return xerrors.Errorf("failed to write file: %w", err)
+			return fmt.Errorf("failed to write file: %w", err)
 		}
 		return nil
 	}); err != nil {
-		return nil, xerrors.Errorf("afero.Walk: %w", err)
+		return nil, fmt.Errorf("afero.Walk: %w", err)
 	}
 
 	return afero.NewHttpFs(newFS), nil

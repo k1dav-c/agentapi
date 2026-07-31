@@ -2,12 +2,12 @@ package screentracker
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/coder/agentapi/lib/util"
 	"github.com/danielgtaylor/huma/v2"
-	"golang.org/x/xerrors"
 )
 
 type ConversationStatus string
@@ -51,9 +51,9 @@ var ErrorLevelValues = []ErrorLevel{
 }
 
 var (
-	ErrMessageValidationWhitespace = xerrors.New("message must be trimmed of leading and trailing whitespace")
-	ErrMessageValidationEmpty      = xerrors.New("message must not be empty")
-	ErrMessageValidationChanging   = xerrors.New("message can only be sent when the agent is waiting for user input")
+	ErrMessageValidationWhitespace = errors.New("message must be trimmed of leading and trailing whitespace")
+	ErrMessageValidationEmpty      = errors.New("message must not be empty")
+	ErrMessageValidationChanging   = errors.New("message can only be sent when the agent is waiting for user input")
 )
 
 type AgentIO interface {

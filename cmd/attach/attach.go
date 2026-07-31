@@ -18,7 +18,6 @@ import (
 	"github.com/spf13/cobra"
 	sse "github.com/tmaxmax/go-sse"
 	"golang.org/x/term"
-	"golang.org/x/xerrors"
 )
 
 type ChannelWriter struct {
@@ -79,7 +78,7 @@ func ReadScreenOverHTTP(ctx context.Context, url string, ch chan<- httpapi.Scree
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return xerrors.Errorf("failed to do request: %w", err)
+		return fmt.Errorf("failed to do request: %w", err)
 	}
 	defer func() {
 		_ = res.Body.Close()
@@ -91,11 +90,11 @@ func ReadScreenOverHTTP(ctx context.Context, url string, ch chan<- httpapi.Scree
 		MaxEventSize: 256 * 1024,
 	}) {
 		if err != nil {
-			return xerrors.Errorf("failed to read sse: %w", err)
+			return fmt.Errorf("failed to read sse: %w", err)
 		}
 		var screen httpapi.ScreenUpdateBody
 		if err := json.Unmarshal([]byte(ev.Data), &screen); err != nil {
-			return xerrors.Errorf("failed to unmarshal screen: %w", err)
+			return fmt.Errorf("failed to unmarshal screen: %w", err)
 		}
 		ch <- screen
 	}
@@ -109,20 +108,20 @@ func WriteRawInputOverHTTP(ctx context.Context, url string, msg string) error {
 	}
 	messageRequestBytes, err := json.Marshal(messageRequest)
 	if err != nil {
-		return xerrors.Errorf("failed to marshal message request: %w", err)
+		return fmt.Errorf("failed to marshal message request: %w", err)
 	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(messageRequestBytes))
 	req.Header.Set("Content-Type", "application/json")
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return xerrors.Errorf("failed to do request: %w", err)
+		return fmt.Errorf("failed to do request: %w", err)
 	}
 	defer func() {
 		_ = res.Body.Close()
 	}()
 	if res.StatusCode != http.StatusOK {
-		return xerrors.Errorf("failed to write raw input: %w", errors.New(res.Status))
+		return fmt.Errorf("failed to write raw input: %w", errors.New(res.Status))
 	}
 
 	return nil
@@ -131,17 +130,17 @@ func WriteRawInputOverHTTP(ctx context.Context, url string, msg string) error {
 func checkACPMode(remoteURL string) (bool, error) {
 	resp, err := http.Get(remoteURL + "/status")
 	if err != nil {
-		return false, xerrors.Errorf("failed to check server status: %w", err)
+		return false, fmt.Errorf("failed to check server status: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return false, xerrors.Errorf("unexpected %d response from server: %s", resp.StatusCode, resp.Status)
+		return false, fmt.Errorf("unexpected %d response from server: %s", resp.StatusCode, resp.Status)
 	}
 
 	var status httpapi.StatusResponse
 	if err := json.NewDecoder(resp.Body).Decode(&status.Body); err != nil {
-		return false, xerrors.Errorf("failed to decode server status: %w", err)
+		return false, fmt.Errorf("failed to decode server status: %w", err)
 	}
 
 	return status.Body.Transport == httpapi.TransportACP, nil
@@ -152,7 +151,7 @@ func runAttach(remoteURL string) error {
 	if isACP, err := checkACPMode(remoteURL); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "WARN: Unable to check server: %s", err.Error())
 	} else if isACP {
-		return xerrors.New("attach is not yet supported in ACP mode")
+		return errors.New("attach is not yet supported in ACP mode")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -161,7 +160,7 @@ func runAttach(remoteURL string) error {
 
 	oldState, err := term.MakeRaw(stdin)
 	if err != nil {
-		return xerrors.Errorf("failed to make raw: %w", err)
+		return fmt.Errorf("failed to make raw: %w", err)
 	}
 	defer func() {
 		_ = term.Restore(stdin, oldState)
@@ -181,7 +180,7 @@ func runAttach(remoteURL string) error {
 			if errors.Is(err, context.Canceled) {
 				return
 			}
-			readScreenErrCh <- xerrors.Errorf("failed to read screen: %w", err)
+			readScreenErrCh <- fmt.Errorf("failed to read screen: %w", err)
 		}
 	}()
 	writeRawInputErrCh := make(chan error, 1)
@@ -201,7 +200,7 @@ func runAttach(remoteURL string) error {
 					continue
 				}
 				if err := WriteRawInputOverHTTP(ctx, remoteURL+"/message", input); err != nil {
-					writeRawInputErrCh <- xerrors.Errorf("failed to write raw input: %w", err)
+					writeRawInputErrCh <- fmt.Errorf("failed to write raw input: %w", err)
 					return
 				}
 			}

@@ -2,6 +2,7 @@ package acpio
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -10,7 +11,6 @@ import (
 
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/quartz"
-	"golang.org/x/xerrors"
 )
 
 // Compile-time assertion that ACPConversation implements st.Conversation
@@ -226,14 +226,14 @@ func (c *ACPConversation) executePrompt(messageParts []st.MessagePart) error {
 	default:
 	}
 
-	var err error
+	var promptErr error
 	for _, part := range messageParts {
 		if c.ctx.Err() != nil {
-			err = c.ctx.Err()
+			promptErr = c.ctx.Err()
 			break
 		}
 		if partErr := part.Do(c.agentIO); partErr != nil {
-			err = partErr
+			promptErr = partErr
 			break
 		}
 	}
@@ -250,30 +250,23 @@ func (c *ACPConversation) executePrompt(messageParts []st.MessagePart) error {
 	c.mu.Lock()
 	c.prompting = false
 
-	if err != nil {
-		c.logger.Error("ACPConversation message failed", "error", err)
+	if promptErr != nil {
+		c.logger.Error("ACPConversation message failed", "error", promptErr)
 		// Remove the agent's streaming message on error (may be empty or partial)
 		if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == st.ConversationRoleAgent {
 			c.messages = c.messages[:len(c.messages)-1]
 		}
-		messages := slices.Clone(c.messages)
-		status := c.statusLocked()
-		screen := c.streamingResponse.String()
-		c.mu.Unlock()
-
-		c.emitter.EmitMessages(messages)
-		c.emitter.EmitStatus(status)
-		c.emitter.EmitScreen(screen)
-		return err
+	} else {
+		// Final response should already be in the last message via streaming
+		// but ensure it's finalized.
+		response := c.streamingResponse.String()
+		if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == st.ConversationRoleAgent {
+			c.messages[len(c.messages)-1].Message = response
+		}
+		c.logger.Debug("ACPConversation message complete", "responseLen", len(response))
 	}
 
-	// Final response should already be in the last message via streaming
-	// but ensure it's finalized
-	response := c.streamingResponse.String()
-	if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == st.ConversationRoleAgent {
-		// Intentionally not trimming space here.
-		c.messages[len(c.messages)-1].Message = response
-	}
+	// Snapshot state and emit once regardless of success/failure.
 	messages := slices.Clone(c.messages)
 	status := c.statusLocked()
 	screen := c.streamingResponse.String()
@@ -283,10 +276,9 @@ func (c *ACPConversation) executePrompt(messageParts []st.MessagePart) error {
 	c.emitter.EmitStatus(status)
 	c.emitter.EmitScreen(screen)
 
-	c.logger.Debug("ACPConversation message complete", "responseLen", len(response))
-	return nil
+	return promptErr
 }
 
 func (c *ACPConversation) SaveState() error {
-	return xerrors.Errorf("ACP mode doesn't support state persistence")
+	return fmt.Errorf("ACP mode doesn't support state persistence")
 }

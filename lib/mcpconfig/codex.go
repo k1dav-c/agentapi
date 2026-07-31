@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
-	"golang.org/x/xerrors"
 )
 
 type codexStore struct {
@@ -22,7 +22,7 @@ func newCodexStore() (*codexStore, error) {
 	if root == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return nil, xerrors.Errorf("resolve home dir: %w", err)
+			return nil, fmt.Errorf("resolve home dir: %w", err)
 		}
 		root = filepath.Join(home, ".codex")
 	}
@@ -37,19 +37,19 @@ func (s *codexStore) Read() (Servers, error) {
 		return Servers{}, nil
 	}
 	if err != nil {
-		return nil, xerrors.Errorf("read %s: %w", s.path, err)
+		return nil, fmt.Errorf("read %s: %w", s.path, err)
 	}
 	var document struct {
 		MCPServers map[string]any `toml:"mcp_servers"`
 	}
 	if err := toml.Unmarshal(data, &document); err != nil {
-		return nil, xerrors.Errorf("parse %s: %w", s.path, err)
+		return nil, fmt.Errorf("parse %s: %w", s.path, err)
 	}
 	servers := Servers{}
 	for name, config := range document.MCPServers {
 		raw, err := json.Marshal(config)
 		if err != nil {
-			return nil, xerrors.Errorf("encode mcp server %q: %w", name, err)
+			return nil, fmt.Errorf("encode mcp server %q: %w", name, err)
 		}
 		servers[name] = raw
 	}
@@ -66,7 +66,7 @@ var (
 func (s *codexStore) Replace(servers Servers) error {
 	data, err := os.ReadFile(s.path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return xerrors.Errorf("read %s: %w", s.path, err)
+		return fmt.Errorf("read %s: %w", s.path, err)
 	}
 
 	var kept []string
@@ -100,10 +100,10 @@ func (s *codexStore) Replace(servers Servers) error {
 	}
 	content += "\n"
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return xerrors.Errorf("create %s: %w", filepath.Dir(s.path), err)
+		return fmt.Errorf("create %s: %w", filepath.Dir(s.path), err)
 	}
 	if err := os.WriteFile(s.path, []byte(content), 0o644); err != nil {
-		return xerrors.Errorf("write %s: %w", s.path, err)
+		return fmt.Errorf("write %s: %w", s.path, err)
 	}
 	return nil
 }
@@ -118,13 +118,13 @@ func encodeCodexServers(servers Servers) (string, error) {
 		decoder := json.NewDecoder(bytes.NewReader(raw))
 		decoder.UseNumber()
 		if err := decoder.Decode(&config); err != nil {
-			return "", xerrors.Errorf("parse mcp server %q: %w", name, err)
+			return "", fmt.Errorf("parse mcp server %q: %w", name, err)
 		}
 		decoded[name] = normalizeJSONNumbers(config)
 	}
 	var output bytes.Buffer
 	if err := toml.NewEncoder(&output).Encode(map[string]any{"mcp_servers": decoded}); err != nil {
-		return "", xerrors.Errorf("encode mcp_servers as TOML: %w", err)
+		return "", fmt.Errorf("encode mcp_servers as TOML: %w", err)
 	}
 	return output.String(), nil
 }

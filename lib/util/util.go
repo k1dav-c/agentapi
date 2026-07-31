@@ -2,13 +2,13 @@ package util
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
 
 	"github.com/coder/quartz"
 	"github.com/danielgtaylor/huma/v2"
-	"golang.org/x/xerrors"
 )
 
 type WaitTimeout struct {
@@ -19,7 +19,7 @@ type WaitTimeout struct {
 	Clock       quartz.Clock
 }
 
-var WaitTimedOut = xerrors.New("timeout waiting for condition")
+var WaitTimedOut = errors.New("timeout waiting for condition")
 
 // WaitFor waits for a condition to be true or the timeout to expire.
 // It will wait for the condition to be true with exponential backoff.
@@ -44,7 +44,7 @@ func WaitFor(ctx context.Context, timeout WaitTimeout, condition func() (bool, e
 		timeoutDuration = 10 * time.Second
 	}
 	if minInterval > maxInterval {
-		return xerrors.Errorf("minInterval is greater than maxInterval")
+		return fmt.Errorf("minInterval is greater than maxInterval")
 	}
 
 	timeoutTimer := clock.NewTimer(timeoutDuration)

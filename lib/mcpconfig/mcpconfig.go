@@ -4,12 +4,12 @@ package mcpconfig
 
 import (
 	"encoding/json"
+	"errors"
 
 	mf "github.com/coder/agentapi/lib/msgfmt"
-	"golang.org/x/xerrors"
 )
 
-var ErrUnsupportedAgent = xerrors.New("MCP configuration is not supported for this agent type")
+var ErrUnsupportedAgent = errors.New("MCP configuration is not supported for this agent type")
 
 type Servers map[string]json.RawMessage
 

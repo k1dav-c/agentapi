@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"golang.org/x/xerrors"
 )
 
 type MCPServerMutationBody struct {
@@ -77,7 +77,7 @@ func (s *Server) restartQuery(ctx context.Context, restart bool) (bool, error) {
 	}
 	newPID, err := s.restartAgent(ctx)
 	if err != nil {
-		return false, xerrors.Errorf("MCP config was written, but agent restart failed: %w", err)
+		return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", err)
 	}
 	s.startJSONLWatcher(newPID)
 	return true, nil
@@ -91,7 +91,7 @@ func (s *Server) mutateMCP(ctx context.Context, restart bool, mutate func(MCPSer
 	stored, err := s.mcpStore.Read()
 	if err != nil {
 		s.mcpMu.Unlock()
-		return nil, xerrors.Errorf("failed to read MCP config: %w", err)
+		return nil, fmt.Errorf("failed to read MCP config: %w", err)
 	}
 	servers, err := fromConfigServers(stored)
 	if err != nil {
@@ -109,7 +109,7 @@ func (s *Server) mutateMCP(ctx context.Context, restart bool, mutate func(MCPSer
 	}
 	if err := s.mcpStore.Replace(encoded); err != nil {
 		s.mcpMu.Unlock()
-		return nil, xerrors.Errorf("failed to write MCP config: %w", err)
+		return nil, fmt.Errorf("failed to write MCP config: %w", err)
 	}
 	s.mcpMu.Unlock()
 	restarted, err := s.restartQuery(ctx, restart)
@@ -171,7 +171,7 @@ func (s *Server) checkMCP(ctx context.Context, input *struct{ Body MCPCheckBody 
 	if servers == nil {
 		stored, err := s.mcpStore.Read()
 		if err != nil {
-			return nil, xerrors.Errorf("failed to read MCP config: %w", err)
+			return nil, fmt.Errorf("failed to read MCP config: %w", err)
 		}
 		servers, err = fromConfigServers(stored)
 		if err != nil {
@@ -260,7 +260,7 @@ func (s *Server) readMCPProfiles() (map[string]MCPServers, error) {
 		return nil, err
 	}
 	if err := json.Unmarshal(data, &profiles); err != nil {
-		return nil, xerrors.Errorf("parse MCP profiles: %w", err)
+		return nil, fmt.Errorf("parse MCP profiles: %w", err)
 	}
 	return profiles, nil
 }
@@ -300,7 +300,7 @@ func (s *Server) getMCPProfiles(_ context.Context, _ *struct{}) (*MCPProfilesRes
 	}
 	profiles, err := s.readMCPProfiles()
 	if err != nil {
-		return nil, xerrors.Errorf("failed to read MCP profiles: %w", err)
+		return nil, fmt.Errorf("failed to read MCP profiles: %w", err)
 	}
 	response := &MCPProfilesResponse{}
 	response.Body.Profiles = profiles
@@ -326,7 +326,7 @@ func (s *Server) putMCPProfile(_ context.Context, input *struct {
 	}
 	profiles[input.Name] = input.Body.Servers
 	if err := s.writeMCPProfiles(profiles); err != nil {
-		return nil, xerrors.Errorf("failed to write MCP profiles: %w", err)
+		return nil, fmt.Errorf("failed to write MCP profiles: %w", err)
 	}
 	response := &MCPProfilesResponse{}
 	response.Body.Profiles = profiles
@@ -351,7 +351,7 @@ func (s *Server) deleteMCPProfile(_ context.Context, input *struct {
 	}
 	delete(profiles, input.Name)
 	if err := s.writeMCPProfiles(profiles); err != nil {
-		return nil, xerrors.Errorf("failed to write MCP profiles: %w", err)
+		return nil, fmt.Errorf("failed to write MCP profiles: %w", err)
 	}
 	response := &MCPProfilesResponse{}
 	response.Body.Profiles = profiles

@@ -21,7 +21,6 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"golang.org/x/xerrors"
 
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/logctx"
@@ -42,7 +41,7 @@ func (s *agentSupervisor) Restart(ctx context.Context) (int, error) {
 	defer s.mu.Unlock()
 	old := s.swap.Current()
 	if old == nil {
-		return 0, xerrors.New("agent process is not running")
+		return 0, errors.New("agent process is not running")
 	}
 	s.logger.Info("Restarting agent process")
 	if err := old.Close(s.logger, 10*time.Second); err != nil {
@@ -50,7 +49,7 @@ func (s *agentSupervisor) Restart(ctx context.Context) (int, error) {
 	}
 	next, err := s.setup(ctx)
 	if err != nil {
-		return 0, xerrors.Errorf("failed to start new agent process: %w", err)
+		return 0, fmt.Errorf("failed to start new agent process: %w", err)
 	}
 	s.swap.Set(next)
 	s.logger.Info("Agent process restarted", "pid", next.Pid())
@@ -120,17 +119,17 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	agentTypeValue := viper.GetString(FlagType)
 	agentType, err := parseAgentType(agent, agentTypeValue)
 	if err != nil {
-		return xerrors.Errorf("failed to parse agent type: %w", err)
+		return fmt.Errorf("failed to parse agent type: %w", err)
 	}
 
 	termWidth := viper.GetUint16(FlagTermWidth)
 	termHeight := viper.GetUint16(FlagTermHeight)
 
 	if termWidth < 10 {
-		return xerrors.Errorf("term width must be at least 10")
+		return fmt.Errorf("term width must be at least 10")
 	}
 	if termHeight < 10 {
-		return xerrors.Errorf("term height must be at least 10")
+		return fmt.Errorf("term height must be at least 10")
 	}
 
 	// Read stdin if it's piped, to be used as initial prompt
@@ -138,7 +137,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	if initialPrompt == "" {
 		if !isatty.IsTerminal(os.Stdin.Fd()) {
 			if stdinData, err := io.ReadAll(os.Stdin); err != nil {
-				return xerrors.Errorf("failed to read stdin: %w", err)
+				return fmt.Errorf("failed to read stdin: %w", err)
 			} else if len(stdinData) > 0 {
 				initialPrompt = string(stdinData)
 				logger.Info("Read initial prompt from stdin", "bytes", len(stdinData))
@@ -166,17 +165,17 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		}
 	} else {
 		if viper.IsSet(FlagLoadState) && viper.GetBool(FlagLoadState) {
-			return xerrors.Errorf("--load-state requires --state-file to be set")
+			return fmt.Errorf("--load-state requires --state-file to be set")
 		}
 		if viper.IsSet(FlagSaveState) && viper.GetBool(FlagSaveState) {
-			return xerrors.Errorf("--save-state requires --state-file to be set")
+			return fmt.Errorf("--save-state requires --state-file to be set")
 		}
 	}
 
 	experimentalACP := viper.GetBool(FlagExperimentalACP)
 
 	if experimentalACP && (saveState || loadState) {
-		return xerrors.Errorf("ACP mode doesn't support state persistence")
+		return fmt.Errorf("ACP mode doesn't support state persistence")
 	}
 
 	pidFile := viper.GetString(FlagPidFile)
@@ -184,7 +183,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	// Write PID file if configured
 	if pidFile != "" {
 		if err := writePIDFile(pidFile, logger); err != nil {
-			return xerrors.Errorf("failed to write PID file: %w", err)
+			return fmt.Errorf("failed to write PID file: %w", err)
 		}
 		defer cleanupPIDFile(pidFile, logger)
 	}
@@ -192,7 +191,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	printOpenAPI := viper.GetBool(FlagPrintOpenAPI)
 
 	if printOpenAPI && experimentalACP {
-		return xerrors.Errorf("flags --%s and --%s are mutually exclusive", FlagPrintOpenAPI, FlagExperimentalACP)
+		return fmt.Errorf("flags --%s and --%s are mutually exclusive", FlagPrintOpenAPI, FlagExperimentalACP)
 	}
 
 	var agentIO st.AgentIO
@@ -211,7 +210,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			ProgramArgs: argsToPass[1:],
 		})
 		if err != nil {
-			return xerrors.Errorf("failed to setup ACP: %w", err)
+			return fmt.Errorf("failed to setup ACP: %w", err)
 		}
 		acpIO := acpResult.AgentIO
 		agentIO = acpIO
@@ -229,7 +228,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		}
 		proc, err := setupAgentProcess(ctx)
 		if err != nil {
-			return xerrors.Errorf("failed to setup process: %w", err)
+			return fmt.Errorf("failed to setup process: %w", err)
 		}
 		process = proc
 		swappable := termexec.NewSwappableProcess(proc)
@@ -255,7 +254,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	if apiToken == "generate" {
 		var tokenBytes [32]byte
 		if _, err := rand.Read(tokenBytes[:]); err != nil {
-			return xerrors.Errorf("generate API token: %w", err)
+			return fmt.Errorf("generate API token: %w", err)
 		}
 		apiToken = hex.EncodeToString(tokenBytes[:])
 		fmt.Fprintf(os.Stderr, "API token: %s\n", apiToken)
@@ -296,7 +295,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	})
 
 	if err != nil {
-		return xerrors.Errorf("failed to create server: %w", err)
+		return fmt.Errorf("failed to create server: %w", err)
 	}
 	if printOpenAPI {
 		fmt.Println(srv.GetOpenAPI())
@@ -329,9 +328,9 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 				}
 				if err != nil {
 					if errors.Is(err, termexec.ErrNonZeroExitCode) {
-						processExitCh <- xerrors.Errorf("========\n%s\n========\n: %w", strings.TrimSpace(current.ReadScreen()), err)
+						processExitCh <- fmt.Errorf("========\n%s\n========\n: %w", strings.TrimSpace(current.ReadScreen()), err)
 					} else {
-						processExitCh <- xerrors.Errorf("failed to wait for process: %w", err)
+						processExitCh <- fmt.Errorf("failed to wait for process: %w", err)
 					}
 				}
 				return
@@ -343,7 +342,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			defer close(processExitCh)
 			defer close(acpResult.Done) // Signal cleanup goroutine to exit
 			if err := acpResult.Wait(); err != nil {
-				processExitCh <- xerrors.Errorf("ACP process exited: %w", err)
+				processExitCh <- fmt.Errorf("ACP process exited: %w", err)
 			}
 			if err := srv.Stop(ctx); err != nil {
 				logger.Error("Failed to stop server", "error", err)
@@ -363,7 +362,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	select {
 	case err := <-serverErrCh:
 		if err != nil {
-			return xerrors.Errorf("failed to start server: %w", err)
+			return fmt.Errorf("failed to start server: %w", err)
 		}
 	case <-gracefulCtx.Done():
 	}
@@ -382,7 +381,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	select {
 	case err := <-processExitCh:
 		if err != nil {
-			return xerrors.Errorf("agent exited with error: %w", err)
+			return fmt.Errorf("agent exited with error: %w", err)
 		}
 	default:
 		// Close the process
@@ -416,7 +415,7 @@ func writePIDFile(pidFile string, logger *slog.Logger) error {
 	// Create directory if it doesn't exist
 	dir := filepath.Dir(pidFile)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return xerrors.Errorf("failed to create PID file directory: %w", err)
+		return fmt.Errorf("failed to create PID file directory: %w", err)
 	}
 
 	// Check if PID file already exists
@@ -424,17 +423,17 @@ func writePIDFile(pidFile string, logger *slog.Logger) error {
 		existingPIDStr := strings.TrimSpace(string(existingPIDData))
 		if existingPID, err := strconv.Atoi(existingPIDStr); err == nil {
 			if isProcessRunning(existingPID) {
-				return xerrors.Errorf("another instance is already running with PID %d (PID file: %s)", existingPID, pidFile)
+				return fmt.Errorf("another instance is already running with PID %d (PID file: %s)", existingPID, pidFile)
 			}
 			logger.Warn("Found stale PID file, will overwrite", "pidFile", pidFile, "stalePID", existingPID)
 		}
 	} else if !os.IsNotExist(err) {
-		return xerrors.Errorf("failed to read existing PID file: %w", err)
+		return fmt.Errorf("failed to read existing PID file: %w", err)
 	}
 
 	// Write PID file
 	if err := os.WriteFile(pidFile, []byte(pidContent), 0o600); err != nil {
-		return xerrors.Errorf("failed to write PID file: %w", err)
+		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 
 	logger.Info("Wrote PID file", "pidFile", pidFile, "pid", pid)

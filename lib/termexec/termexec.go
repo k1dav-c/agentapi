@@ -11,11 +11,12 @@ import (
 	"syscall"
 	"time"
 
+	"fmt"
+
 	"github.com/ActiveState/termtest/xpty"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/util"
 	"github.com/coder/quartz"
-	"golang.org/x/xerrors"
 )
 
 type Process struct {
@@ -29,6 +30,11 @@ type Process struct {
 	waitState  *os.ProcessState
 	waitErr    error
 	waitDone   chan struct{}
+
+	// readerDone is closed when the PTY reader goroutine exits.
+	// Use ReaderDone() to get the channel, ReaderErr() for the cause.
+	readerDone chan struct{}
+	readerErr  error // written before readerDone is closed, read-safe after
 }
 
 type StartProcessConfig struct {
@@ -59,45 +65,42 @@ func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error
 		return nil, err
 	}
 
-	process := &Process{xp: xp, execCmd: execCmd, clock: clock, waitDone: make(chan struct{})}
+	process := &Process{xp: xp, execCmd: execCmd, clock: clock, waitDone: make(chan struct{}), readerDone: make(chan struct{})}
 
 	go func() {
-		// HACK: Working around xpty concurrency limitations
+		// Signal reader exit so callers (e.g. the supervisor) can detect
+		// when the PTY output stream ends.
+		defer close(process.readerDone)
+
+		// Working around xpty concurrency limitations:
 		//
-		// Problem:
-		// 1. We need to track when the terminal screen was last updated (for ReadScreen)
-		// 2. xpty only updates terminal state through xp.ReadRune()
-		// 3. xp.ReadRune() has a bug - it panics when SetReadDeadline is used
-		// 4. Without deadlines, ReadRune blocks until the process outputs data
+		// We need to track when the terminal screen was last updated (for ReadScreen),
+		// but xpty only updates terminal state through xp.ReadRune(), which blocks
+		// indefinitely until the process outputs data and panics when SetReadDeadline
+		// is used.
 		//
-		// Why this matters:
 		// If we wrapped ReadRune + lastScreenUpdate in a mutex, this goroutine would
-		// hold the lock while waiting for process output. Since ReadRune blocks indefinitely,
-		// ReadScreen callers would be locked out until new output arrives. Even worse,
-		// after output arrives, this goroutine could immediately reacquire the lock
-		// for the next ReadRune call, potentially starving ReadScreen callers indefinitely.
+		// hold the lock while waiting for process output, starving ReadScreen callers.
 		//
-		// Solution:
-		// Instead of using xp.ReadRune(), we directly use its internal components:
-		// - pp.ReadRune() - handles the blocking read from the process
-		// - xp.Term.WriteRune() - updates the terminal state
+		// Instead, we directly use xpty's internal components:
+		// - pp.ReadRune() — handles the blocking read from the process (lock-free)
+		// - xp.Term.WriteRune() — updates the terminal state (under mutex)
 		//
-		// This lets us apply the mutex only around the terminal update and timestamp,
-		// keeping reads non-blocking while maintaining thread safety.
-		//
-		// Warning: This depends on xpty internals and may break if xpty changes.
+		// Warning: This depends on xpty internals (the unexported "pp" field) and
+		// may break if xpty changes. The xpty version is pinned to v0.6.0.
 		// A proper fix would require forking xpty or getting upstream changes.
 		pp := util.GetUnexportedField(xp, "pp").(*xpty.PassthroughPipe)
 		injector := &wideCharInjector{}
 		for {
 			r, _, err := pp.ReadRune()
 			if err != nil {
-				if err != io.EOF {
-					logger.Error("Error reading from pseudo terminal", "error", err)
+				if errors.Is(err, io.EOF) {
+					// Normal shutdown: PTY closed or process exited.
+					logger.Debug("PTY reader stopped: EOF")
+				} else {
+					logger.Error("PTY reader stopped: unexpected error reading from pseudo terminal", "error", err)
 				}
-				// TODO: handle this error better. if this happens, the terminal
-				// state will never be updated anymore and the process will appear
-				// unresponsive.
+				process.readerErr = err
 				return
 			}
 			process.screenUpdateLock.Lock()
@@ -116,6 +119,19 @@ func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error
 	}()
 
 	return process, nil
+}
+
+// ReaderDone returns a channel that is closed when the PTY reader goroutine exits.
+// After this channel closes, ReadScreen will always return a stale snapshot and
+// Write will accept input that the agent will never see.
+func (p *Process) ReaderDone() <-chan struct{} {
+	return p.readerDone
+}
+
+// ReaderErr returns the error that caused the PTY reader goroutine to stop.
+// Only valid after ReaderDone() is closed; returns nil before that.
+func (p *Process) ReaderErr() error {
+	return p.readerErr
 }
 
 // Pid returns the OS process ID of the child process.
@@ -189,7 +205,7 @@ func (p *Process) Close(logger *slog.Logger, timeout time.Duration) error {
 	select {
 	case <-timeoutTimer.C:
 		if err := p.execCmd.Process.Kill(); err != nil {
-			return xerrors.Errorf("failed to forcefully kill the process: %w", err)
+			return fmt.Errorf("failed to forcefully kill the process: %w", err)
 		}
 		// Don't wait for the process to exit to avoid hanging indefinitely.
 	case <-p.waitDone:
@@ -197,14 +213,14 @@ func (p *Process) Close(logger *slog.Logger, timeout time.Duration) error {
 			var pathErr *os.SyscallError
 			// ECHILD is expected if the process has already exited.
 			if !(errors.As(p.waitErr, &pathErr) && errors.Is(pathErr.Err, syscall.ECHILD)) {
-				return xerrors.Errorf("process exited with error: %w", p.waitErr)
+				return fmt.Errorf("process exited with error: %w", p.waitErr)
 			}
 		}
 	}
 	return nil
 }
 
-var ErrNonZeroExitCode = xerrors.New("non-zero exit code")
+var ErrNonZeroExitCode = errors.New("non-zero exit code")
 
 // doWait performs the actual os.Process.Wait exactly once, safe for concurrent callers.
 func (p *Process) doWait() {
@@ -218,7 +234,7 @@ func (p *Process) doWait() {
 func (p *Process) Wait() error {
 	p.doWait()
 	if p.waitErr != nil {
-		return xerrors.Errorf("process exited with error: %w", p.waitErr)
+		return fmt.Errorf("process exited with error: %w", p.waitErr)
 	}
 	if p.waitState != nil && p.waitState.ExitCode() != 0 {
 		return ErrNonZeroExitCode

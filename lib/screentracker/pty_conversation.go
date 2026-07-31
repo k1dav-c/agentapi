@@ -14,7 +14,6 @@ import (
 	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/util"
 	"github.com/coder/quartz"
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -444,7 +443,7 @@ func (c *PTYConversation) sendMessage(ctx context.Context, messageParts ...Messa
 		c.lock.Lock()
 		defer c.lock.Unlock()
 		c.writingMessage = false
-		return xerrors.Errorf("failed to send message: %w", err)
+		return fmt.Errorf("failed to send message: %w", err)
 	}
 
 	c.lock.Lock()
@@ -478,7 +477,7 @@ func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...Me
 	screenBeforeMessage := c.cfg.AgentIO.ReadScreen()
 	for _, part := range messageParts {
 		if err := part.Do(c.cfg.AgentIO); err != nil {
-			return xerrors.Errorf("failed to write message part: %w", err)
+			return fmt.Errorf("failed to write message part: %w", err)
 		}
 	}
 	// Phase 1: wait for the screen to stabilize after the
@@ -506,7 +505,7 @@ func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...Me
 	}); err != nil {
 		if !errors.Is(err, util.WaitTimedOut) {
 			// Context cancellation or condition errors are fatal.
-			return xerrors.Errorf("failed to wait for screen to stabilize: %w", err)
+			return fmt.Errorf("failed to wait for screen to stabilize: %w", err)
 		}
 		// Phase 1 timeout is non-fatal: the agent may not echo
 		// input (e.g. TUI agents buffer bracketed-paste content
@@ -533,7 +532,7 @@ func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...Me
 		if c.cfg.Clock.Since(lastCarriageReturnTime) >= 3*time.Second {
 			lastCarriageReturnTime = c.cfg.Clock.Now()
 			if _, err := c.cfg.AgentIO.Write([]byte("\r")); err != nil {
-				return false, xerrors.Errorf("failed to write carriage return: %w", err)
+				return false, fmt.Errorf("failed to write carriage return: %w", err)
 			}
 		}
 		crTimer := c.cfg.Clock.NewTimer(25 * time.Millisecond)
@@ -548,7 +547,7 @@ func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...Me
 
 		return screen != screenBeforeCarriageReturn, nil
 	}); err != nil {
-		return xerrors.Errorf("failed to wait for processing to start: %w", err)
+		return fmt.Errorf("failed to wait for processing to start: %w", err)
 	}
 
 	return nil
@@ -673,14 +672,14 @@ func (c *PTYConversation) SaveState() error {
 	// Create directory if it doesn't exist
 	dir := filepath.Dir(stateFile)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return xerrors.Errorf("failed to create state directory: %w", err)
+		return fmt.Errorf("failed to create state directory: %w", err)
 	}
 
 	// Use atomic write: write to temp file, then rename to target path
 	tempFile := stateFile + ".tmp"
 	f, err := os.OpenFile(tempFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return xerrors.Errorf("failed to create temp state file: %w", err)
+		return fmt.Errorf("failed to create temp state file: %w", err)
 	}
 
 	// Clean up temp file on error (before successful rename)
@@ -702,23 +701,23 @@ func (c *PTYConversation) SaveState() error {
 		InitialPromptSent: c.initialPromptSent,
 	}); err != nil {
 		_ = f.Close()
-		return xerrors.Errorf("failed to encode state: %w", err)
+		return fmt.Errorf("failed to encode state: %w", err)
 	}
 
 	// Flush to disk before rename for crash safety
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
-		return xerrors.Errorf("failed to sync state file: %w", err)
+		return fmt.Errorf("failed to sync state file: %w", err)
 	}
 
 	// Close file before rename
 	if err := f.Close(); err != nil {
-		return xerrors.Errorf("failed to close temp state file: %w", err)
+		return fmt.Errorf("failed to close temp state file: %w", err)
 	}
 
 	// Atomic rename
 	if err := os.Rename(tempFile, stateFile); err != nil {
-		return xerrors.Errorf("failed to rename state file: %w", err)
+		return fmt.Errorf("failed to rename state file: %w", err)
 	}
 	renamed = true
 
@@ -743,13 +742,13 @@ func (c *PTYConversation) loadStateLocked() (error, bool) {
 	// Check if file exists
 	if _, err := os.Stat(stateFile); os.IsNotExist(err) {
 		c.cfg.Logger.Info("No previous state to load (file does not exist)", "path", stateFile)
-		return xerrors.Errorf("No previous state to load (file does not exist)"), false
+		return fmt.Errorf("No previous state to load (file does not exist)"), false
 	}
 
 	// Open state file
 	f, err := os.Open(stateFile)
 	if err != nil {
-		return xerrors.Errorf("failed to open state file: %w", err), true
+		return fmt.Errorf("failed to open state file: %w", err), true
 	}
 	defer func() {
 		if closeErr := f.Close(); closeErr != nil {
@@ -760,12 +759,12 @@ func (c *PTYConversation) loadStateLocked() (error, bool) {
 	var agentState AgentState
 	decoder := json.NewDecoder(f)
 	if err := decoder.Decode(&agentState); err != nil {
-		return xerrors.Errorf("failed to unmarshal state (corrupted or invalid JSON): %w", err), true
+		return fmt.Errorf("failed to unmarshal state (corrupted or invalid JSON): %w", err), true
 	}
 
 	// Validate version
 	if agentState.Version != 1 {
-		return xerrors.Errorf("unsupported state file version %d (expected 1)", agentState.Version), true
+		return fmt.Errorf("unsupported state file version %d (expected 1)", agentState.Version), true
 	}
 
 	// Handle initial prompt restoration:
