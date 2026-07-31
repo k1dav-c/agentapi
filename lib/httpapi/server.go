@@ -148,6 +148,10 @@ type ServerConfig struct {
 	RestartAgent func(context.Context) (int, error)
 	// Webhook sends an event whenever the agent status changes.
 	Webhook WebhookConfig
+	// APIToken, if non-empty, enables Bearer token authentication on all API
+	// endpoints. Static file routes (/chat/*, /) are exempt so browsers can
+	// load the chat UI without a token.
+	APIToken string
 }
 
 // Validate allowed hosts don't contain whitespace, commas, schemes, or ports.
@@ -261,6 +265,11 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		http.Error(w, "Invalid host header. Allowed hosts: "+strings.Join(allowedHosts, ", "), http.StatusBadRequest)
 	})
 	router.Use(hostAuthorizationMiddleware(allowedHosts, badHostHandler))
+
+	if config.APIToken != "" {
+		logger.Info("API token authentication enabled")
+		router.Use(tokenAuthMiddleware(config.APIToken))
+	}
 
 	corsMiddleware := cors.New(cors.Options{
 		AllowedOrigins:   allowedOrigins,
@@ -423,6 +432,29 @@ func hostAuthorizationMiddleware(allowedHosts []string, badHostHandler http.Hand
 				}
 			}
 			badHostHandler.ServeHTTP(w, r)
+		})
+	}
+}
+
+// tokenAuthMiddleware enforces Bearer token authentication on all requests
+// except static file routes (/chat/* and /) so browsers can load the UI.
+func tokenAuthMiddleware(token string) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Exempt static file routes so browsers can open the chat UI.
+			path := r.URL.Path
+			if path == "/" || strings.HasPrefix(path, "/chat") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			auth := r.Header.Get("Authorization")
+			const prefix = "Bearer "
+			if !strings.HasPrefix(auth, prefix) || strings.TrimPrefix(auth, prefix) != token {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
 		})
 	}
 }
