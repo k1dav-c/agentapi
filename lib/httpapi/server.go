@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -299,8 +300,13 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("configure webhook: %w", err)
 	}
+	var sessionBytes [16]byte
+	if _, err := rand.Read(sessionBytes[:]); err != nil {
+		return nil, fmt.Errorf("generate session ID: %w", err)
+	}
 	emitterOptions := []EventEmitterOption{
 		WithAgentType(config.AgentType),
+		WithSessionID(hex.EncodeToString(sessionBytes[:])),
 		WithClock(config.Clock),
 		WithStatusChangeHandler(webhook.statusChanged),
 	}
@@ -399,6 +405,16 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 // Handler returns the underlying chi.Router for testing purposes.
 func (s *Server) Handler() http.Handler {
 	return s.router
+}
+
+// MarkAgentExited records the terminal lifecycle state before the HTTP server
+// shuts down. A nil error represents a clean process exit.
+func (s *Server) MarkAgentExited(err error) {
+	if err != nil {
+		s.emitter.SetLifecycle(LifecycleFailed)
+		return
+	}
+	s.emitter.SetLifecycle(LifecycleExited)
 }
 
 // hostAuthorizationMiddleware enforces that the request Host header matches one of the allowed
@@ -661,11 +677,13 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	status := s.conversation.Status()
-	agentStatus := convertStatus(status)
+	snapshot := s.emitter.StatusSnapshot()
 
 	resp := &StatusResponse{}
-	resp.Body.Status = agentStatus
+	resp.Body.Status = snapshot.Status
+	resp.Body.Lifecycle = snapshot.Lifecycle
+	resp.Body.SessionID = snapshot.SessionID
+	resp.Body.RunID = snapshot.RunID
 	resp.Body.AgentType = s.agentType
 	resp.Body.Transport = s.transport
 

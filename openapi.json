@@ -133,6 +133,19 @@
         ],
         "type": "object"
       },
+      "LifecycleState": {
+        "enum": [
+          "exited",
+          "failed",
+          "ready",
+          "restarting",
+          "running",
+          "starting"
+        ],
+        "example": "starting",
+        "title": "LifecycleState",
+        "type": "string"
+      },
       "MCPCheckBody": {
         "additionalProperties": false,
         "properties": {
@@ -789,13 +802,30 @@
             "description": "Type of the agent being used by the server.",
             "type": "string"
           },
+          "lifecycle": {
+            "$ref": "#/components/schemas/LifecycleState",
+            "description": "Detailed process lifecycle state."
+          },
+          "run_id": {
+            "description": "Monotonically increasing run identifier within the session.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "description": "Identifier for this AgentAPI server session.",
+            "type": "string"
+          },
           "status": {
             "$ref": "#/components/schemas/AgentStatus",
-            "description": "Agent status"
+            "description": "Backward-compatible agent activity status."
           }
         },
         "required": [
           "agent_type",
+          "lifecycle",
+          "run_id",
+          "session_id",
           "status"
         ],
         "type": "object"
@@ -814,9 +844,23 @@
             "description": "Type of the agent being used by the server.",
             "type": "string"
           },
+          "lifecycle": {
+            "$ref": "#/components/schemas/LifecycleState",
+            "description": "Detailed process lifecycle state."
+          },
+          "run_id": {
+            "description": "Monotonically increasing run identifier within the session.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "description": "Identifier for this AgentAPI server session.",
+            "type": "string"
+          },
           "status": {
             "$ref": "#/components/schemas/AgentStatus",
-            "description": "Current agent status. 'running' means that the agent is processing a message, 'stable' means that the agent is idle and waiting for input."
+            "description": "Current backward-compatible activity status."
           },
           "transport": {
             "$ref": "#/components/schemas/Transport",
@@ -825,6 +869,9 @@
         },
         "required": [
           "agent_type",
+          "lifecycle",
+          "run_id",
+          "session_id",
           "status",
           "transport"
         ],

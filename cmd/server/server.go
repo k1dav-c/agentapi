@@ -326,11 +326,14 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 					}
 				}
 				if err != nil {
+					srv.MarkAgentExited(err)
 					if errors.Is(err, termexec.ErrNonZeroExitCode) {
 						processExitCh <- fmt.Errorf("========\n%s\n========\n: %w", strings.TrimSpace(current.ReadScreen()), err)
 					} else {
 						processExitCh <- fmt.Errorf("failed to wait for process: %w", err)
 					}
+				} else {
+					srv.MarkAgentExited(nil)
 				}
 				return
 			}
@@ -341,7 +344,10 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			defer close(processExitCh)
 			defer close(acpResult.Done) // Signal cleanup goroutine to exit
 			if err := acpResult.Wait(); err != nil {
+				srv.MarkAgentExited(err)
 				processExitCh <- fmt.Errorf("ACP process exited: %w", err)
+			} else {
+				srv.MarkAgentExited(nil)
 			}
 			if err := srv.Stop(ctx); err != nil {
 				logger.Error("Failed to stop server", "error", err)

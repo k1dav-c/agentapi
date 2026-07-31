@@ -37,7 +37,7 @@ func TestEventEmitter(t *testing.T) {
 		assert.Equal(t, []Event{
 			{
 				Type:    EventTypeStatusChange,
-				Payload: StatusChangeBody{Status: AgentStatusRunning},
+				Payload: StatusChangeBody{Status: AgentStatusRunning, Lifecycle: LifecycleStarting},
 			},
 			{
 				Type:    EventTypeScreenUpdate,
@@ -75,7 +75,7 @@ func TestEventEmitter(t *testing.T) {
 		newEvent = <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeStatusChange,
-			Payload: StatusChangeBody{Status: AgentStatusStable, AgentType: ""},
+			Payload: StatusChangeBody{Status: AgentStatusStable, Lifecycle: LifecycleReady, AgentType: ""},
 		}, newEvent)
 	})
 

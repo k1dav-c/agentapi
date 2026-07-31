@@ -279,7 +279,9 @@ Endpoints:
 
 - GET `/messages` - returns a list of all messages in the conversation with the agent
 - POST `/message` - sends a message to the agent. When a 200 response is returned, AgentAPI has detected that the agent started processing the message
-- GET `/status` - returns the current status of the agent, either "stable" or "running"
+- GET `/status` - returns the backward-compatible `stable`/`running` status,
+  detailed lifecycle (`starting`, `ready`, `running`, `restarting`, `exited`, or
+  `failed`), a session ID, and a monotonically increasing run ID
 - GET `/events` - an SSE stream of events from the agent: message and status updates
 - GET `/usage` - returns real-time rate limit utilization from the upstream API (Anthropic or OpenAI)
 - GET/PUT `/webhook` - reads or updates run-status webhook delivery without restarting the agent

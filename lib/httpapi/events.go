@@ -43,6 +43,26 @@ func (a AgentStatus) Schema(r huma.Registry) *huma.Schema {
 	return util.OpenAPISchema(r, "AgentStatus", AgentStatusValues)
 }
 
+type LifecycleState string
+
+const (
+	LifecycleStarting   LifecycleState = "starting"
+	LifecycleReady      LifecycleState = "ready"
+	LifecycleRunning    LifecycleState = "running"
+	LifecycleRestarting LifecycleState = "restarting"
+	LifecycleExited     LifecycleState = "exited"
+	LifecycleFailed     LifecycleState = "failed"
+)
+
+var LifecycleStateValues = []LifecycleState{
+	LifecycleStarting, LifecycleReady, LifecycleRunning,
+	LifecycleRestarting, LifecycleExited, LifecycleFailed,
+}
+
+func (l LifecycleState) Schema(r huma.Registry) *huma.Schema {
+	return util.OpenAPISchema(r, "LifecycleState", LifecycleStateValues)
+}
+
 type MessageUpdateBody struct {
 	Id      int                 `json:"id" doc:"Unique identifier for the message. This identifier also represents the order of the message in the conversation history."`
 	Role    st.ConversationRole `json:"role" doc:"Role of the message author"`
@@ -51,8 +71,11 @@ type MessageUpdateBody struct {
 }
 
 type StatusChangeBody struct {
-	Status    AgentStatus  `json:"status" doc:"Agent status"`
-	AgentType mf.AgentType `json:"agent_type" doc:"Type of the agent being used by the server."`
+	Status    AgentStatus    `json:"status" doc:"Backward-compatible agent activity status."`
+	Lifecycle LifecycleState `json:"lifecycle" doc:"Detailed process lifecycle state."`
+	SessionID string         `json:"session_id" doc:"Identifier for this AgentAPI server session."`
+	RunID     uint64         `json:"run_id" doc:"Monotonically increasing run identifier within the session."`
+	AgentType mf.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
 }
 
 type ScreenUpdateBody struct {
@@ -87,6 +110,9 @@ type EventEmitter struct {
 	sessionEvents       []jsonlwatcher.SessionEvent
 	nextSessionEventID  int
 	status              AgentStatus
+	lifecycle           LifecycleState
+	sessionID           string
+	runID               uint64
 	agentType           mf.AgentType
 	chans               map[int]chan Event
 	chanIdx             int
@@ -133,6 +159,10 @@ func WithAgentType(agentType mf.AgentType) EventEmitterOption {
 	}
 }
 
+func WithSessionID(sessionID string) EventEmitterOption {
+	return func(e *EventEmitter) { e.sessionID = sessionID }
+}
+
 func WithClock(clock quartz.Clock) EventEmitterOption {
 	return func(e *EventEmitter) {
 		e.clock = clock
@@ -151,6 +181,7 @@ func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 		sessionEvents:       make([]jsonlwatcher.SessionEvent, 0),
 		nextSessionEventID:  1,
 		status:              AgentStatusRunning,
+		lifecycle:           LifecycleStarting,
 		chans:               make(map[int]chan Event),
 		subscriptionBufSize: defaultSubscriptionBufSize,
 	}
@@ -223,15 +254,48 @@ func (e *EventEmitter) EmitStatus(newStatus st.ConversationStatus) {
 	defer e.mu.Unlock()
 
 	newAgentStatus := convertStatus(newStatus)
-	if e.status == newAgentStatus {
+	newLifecycle := LifecycleRunning
+	if newStatus == st.ConversationStatusInitializing {
+		newLifecycle = LifecycleStarting
+	} else if newStatus == st.ConversationStatusStable {
+		newLifecycle = LifecycleReady
+	}
+	if e.status == newAgentStatus && e.lifecycle == newLifecycle {
 		return
 	}
 
 	previousStatus := e.status
-	e.notifyChannels(EventTypeStatusChange, StatusChangeBody{Status: newAgentStatus, AgentType: e.agentType})
+	if newLifecycle == LifecycleRunning && e.lifecycle == LifecycleReady {
+		e.runID++
+	}
 	e.status = newAgentStatus
-	if e.onStatusChange != nil {
+	e.lifecycle = newLifecycle
+	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	if e.onStatusChange != nil && previousStatus != newAgentStatus {
 		e.onStatusChange(previousStatus, newAgentStatus)
+	}
+}
+
+func (e *EventEmitter) SetLifecycle(lifecycle LifecycleState) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.lifecycle == lifecycle {
+		return
+	}
+	e.lifecycle = lifecycle
+	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+}
+
+func (e *EventEmitter) StatusSnapshot() StatusChangeBody {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.statusChangeBody()
+}
+
+func (e *EventEmitter) statusChangeBody() StatusChangeBody {
+	return StatusChangeBody{
+		Status: e.status, Lifecycle: e.lifecycle, SessionID: e.sessionID,
+		RunID: e.runID, AgentType: e.agentType,
 	}
 }
 
@@ -328,7 +392,7 @@ func (e *EventEmitter) currentStateAsEvents() []Event {
 	}
 	events = append(events, Event{
 		Type:    EventTypeStatusChange,
-		Payload: StatusChangeBody{Status: e.status, AgentType: e.agentType},
+		Payload: e.statusChangeBody(),
 	})
 	events = append(events, Event{
 		Type:    EventTypeScreenUpdate,

@@ -53,9 +53,12 @@ type Message struct {
 // StatusResponse represents the server status
 type StatusResponse struct {
 	Body struct {
-		Status    AgentStatus  `json:"status" doc:"Current agent status. 'running' means that the agent is processing a message, 'stable' means that the agent is idle and waiting for input."`
-		AgentType mf.AgentType `json:"agent_type" doc:"Type of the agent being used by the server."`
-		Transport Transport    `json:"transport" doc:"Backend transport being used ('acp' or 'pty')."`
+		Status    AgentStatus    `json:"status" doc:"Current backward-compatible activity status."`
+		Lifecycle LifecycleState `json:"lifecycle" doc:"Detailed process lifecycle state."`
+		SessionID string         `json:"session_id" doc:"Identifier for this AgentAPI server session."`
+		RunID     uint64         `json:"run_id" doc:"Monotonically increasing run identifier within the session."`
+		AgentType mf.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
+		Transport Transport      `json:"transport" doc:"Backend transport being used ('acp' or 'pty')."`
 	}
 }
 
