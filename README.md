@@ -283,7 +283,7 @@ Endpoints:
   detailed lifecycle (`starting`, `ready`, `running`, `restarting`, `exited`, or
   `failed`), a session ID, and a monotonically increasing run ID
 - GET `/events` - an SSE stream of events from the agent: message and status updates
-- POST `/restart` - restarts the agent PTY process; AgentAPI and its clients stay connected
+- DELETE `/messages` - clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent process
 - GET `/usage` - returns real-time rate limit utilization from the upstream API (Anthropic or OpenAI)
 - GET/PUT `/webhook` - reads or updates run-status webhook delivery without restarting the agent
 - GET `/mcp` - returns configured MCP servers and the managed config path for Claude or Codex
