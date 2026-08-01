@@ -247,7 +247,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setConnectionStatus("reconnecting");
     setReconnectNonce((value) => value + 1);
   }, []);
-  const refreshQueue = useCallback(async () => {
+  const lastQueueRefreshRef = useRef(0);
+  const refreshQueue = useCallback(async (force = false) => {
+    const now = Date.now();
+    // Throttle: skip if last refresh was less than 30s ago, unless forced.
+    if (!force && now - lastQueueRefreshRef.current < 30_000) return;
+    lastQueueRefreshRef.current = now;
     try {
       setQueuedMessages(await api.getQueue());
     } catch {
@@ -563,7 +568,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
 
     try {
       const result = await api.sendMessage(content, type);
-      await refreshQueue();
+      await refreshQueue(true);
       if (type === "user") {
         setMessages((previous) =>
           previous.filter(
@@ -634,12 +639,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
 
   const updateQueuedMessage = async (id: number, content: string) => {
     await api.updateQueuedMessage(id, content);
-    await refreshQueue();
+    await refreshQueue(true);
   };
 
   const deleteQueuedMessage = async (id: number) => {
     await api.deleteQueuedMessage(id);
-    await refreshQueue();
+    await refreshQueue(true);
   };
 
   const downloadSession = async () => {
