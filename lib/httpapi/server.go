@@ -271,6 +271,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		router.Use(tokenAuthMiddleware(config.APIToken))
 	}
 
+	router.Use(requestLogMiddleware(logger))
+
 	corsMiddleware := cors.New(cors.Options{
 		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -470,6 +472,42 @@ func tokenAuthMiddleware(token string) func(next http.Handler) http.Handler {
 				return
 			}
 			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// responseWriter wraps http.ResponseWriter to capture the status code.
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (w *responseWriter) WriteHeader(code int) {
+	w.statusCode = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// requestLogMiddleware logs every HTTP request with method, path, and response status.
+// SSE and static file routes are excluded to avoid noise.
+func requestLogMiddleware(logger *slog.Logger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			path := r.URL.Path
+			// Skip noisy routes: static files, SSE streams, and docs.
+			if path == "/" || strings.HasPrefix(path, "/chat") ||
+				path == "/events" || path == "/internal/screen" ||
+				path == "/docs" || path == "/openapi.json" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+			next.ServeHTTP(rw, r)
+			logger.Info("request",
+				"method", r.Method,
+				"path", path,
+				"status", rw.statusCode,
+			)
 		})
 	}
 }
