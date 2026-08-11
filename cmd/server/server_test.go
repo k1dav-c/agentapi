@@ -5,6 +5,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -679,6 +681,28 @@ func TestPIDFileOperations(t *testing.T) {
 		err = writePIDFile(pidFile, discardLogger)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "another instance is already running")
+	})
+
+	t.Run("writePIDFile replaces PID reused by another executable", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skip("executable ownership check uses Linux procfs")
+		}
+
+		tmpDir := t.TempDir()
+		pidFile := tmpDir + "/test.pid"
+		foreignProcess := exec.Command("sleep", "30")
+		require.NoError(t, foreignProcess.Start())
+		t.Cleanup(func() {
+			_ = foreignProcess.Process.Kill()
+			_ = foreignProcess.Wait()
+		})
+
+		require.NoError(t, os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", foreignProcess.Process.Pid)), 0o600))
+		require.NoError(t, writePIDFile(pidFile, discardLogger))
+
+		data, err := os.ReadFile(pidFile)
+		require.NoError(t, err)
+		assert.Equal(t, fmt.Sprintf("%d\n", os.Getpid()), string(data))
 	})
 
 	t.Run("cleanupPIDFile removes file", func(t *testing.T) {
