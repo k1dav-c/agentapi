@@ -75,10 +75,17 @@ export function TaskGroup({
     },
   }[status];
   const StatusIcon = statusMeta.icon;
-  const activity = useMemo(
-    () => groupConsecutiveTools(getTaskActivity(task)),
-    [task],
-  );
+  const activity = useMemo(() => {
+    const raw = getTaskActivity(task);
+    // When rich activity provides real interleaving (text + tool entries),
+    // tools are already positioned where they occurred in the conversation.
+    // Only group consecutive tools in the fallback path (PTY-only), where
+    // all tools are clustered together without interleaving context.
+    const hasRichInterleaving =
+      task.richActivity.some(item => item.type === "message") &&
+      task.richActivity.some(item => item.type === "tool");
+    return hasRichInterleaving ? raw : groupConsecutiveTools(raw);
+  }, [task]);
   const markdown = taskToMarkdown(toSearchableTask(task), number);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
