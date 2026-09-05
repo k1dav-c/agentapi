@@ -56,17 +56,11 @@ func (r *ClaudeResolver) Resolve() (string, error) {
 
 	encodedCWD := encodeCWD(meta.CWD)
 
-	// Try the direct session first.
-	if meta.SessionID != "" {
-		jsonlPath := filepath.Join(home, ".claude", "projects", encodedCWD, meta.SessionID+".jsonl")
-		if _, err := os.Stat(jsonlPath); err == nil {
-			return jsonlPath, nil
-		}
-	}
-
-	// If the session has a parkedJobId, scan other session files to find
+	// If the session has a parkedJobId, scan other session files first to find
 	// the background process that has the matching jobId — its sessionId
-	// points to the active JSONL file.
+	// points to the active JSONL file. The original JSONL can continue to
+	// exist after parking, so checking it first would permanently select a
+	// stale session.
 	if meta.ParkedJobID != "" {
 		sessionsDir := filepath.Join(home, ".claude", "sessions")
 		entries, err := os.ReadDir(sessionsDir)
@@ -90,6 +84,15 @@ func (r *ClaudeResolver) Resolve() (string, error) {
 					}
 				}
 			}
+		}
+	}
+
+	// Use the direct session when it has not been parked (or while the parked
+	// session metadata/file has not appeared yet).
+	if meta.SessionID != "" {
+		jsonlPath := filepath.Join(home, ".claude", "projects", encodedCWD, meta.SessionID+".jsonl")
+		if _, err := os.Stat(jsonlPath); err == nil {
+			return jsonlPath, nil
 		}
 	}
 

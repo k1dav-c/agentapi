@@ -61,9 +61,18 @@ func (w *Watcher) Start(ctx context.Context) {
 		// Only fails when ctx is canceled.
 		return
 	}
-	w.logger.Info("Resolved JSONL path", "path", jsonlPath)
-
-	w.tailFile(ctx, jsonlPath)
+	for ctx.Err() == nil {
+		w.logger.Info("Resolved JSONL path", "path", jsonlPath)
+		nextPath := w.tailFile(ctx, jsonlPath)
+		if nextPath == "" {
+			return
+		}
+		// A resolver may move to a different session file while the agent is
+		// running (Claude session parking does this). Finish the old parser
+		// state before reading the replacement file from its beginning.
+		w.emit(w.parser.Flush())
+		jsonlPath = nextPath
+	}
 }
 
 // waitForSessionFile polls until the resolver can find the JSONL file or
@@ -90,7 +99,7 @@ func (w *Watcher) waitForSessionFile(ctx context.Context) (string, error) {
 }
 
 // tailFile opens the JSONL file and reads new lines as they're appended.
-func (w *Watcher) tailFile(ctx context.Context, path string) {
+func (w *Watcher) tailFile(ctx context.Context, path string) string {
 	// Wait for the file to exist
 	var f *os.File
 	ticker := time.NewTicker(sessionPollInterval)
@@ -104,11 +113,11 @@ func (w *Watcher) tailFile(ctx context.Context, path string) {
 		}
 		if !os.IsNotExist(err) {
 			w.logger.Error("Failed to open JSONL file", "path", path, "error", err)
-			return
+			return ""
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return ""
 		case <-ticker.C:
 			// retry
 		}
@@ -121,6 +130,8 @@ func (w *Watcher) tailFile(ctx context.Context, path string) {
 	reader := bufio.NewReader(f)
 	pollTicker := time.NewTicker(pollInterval)
 	defer pollTicker.Stop()
+	resolveTicker := time.NewTicker(sessionPollInterval)
+	defer resolveTicker.Stop()
 
 	for {
 		// Read all available complete lines
@@ -138,7 +149,7 @@ func (w *Watcher) tailFile(ctx context.Context, path string) {
 					break
 				}
 				w.logger.Error("Error reading JSONL file", "error", err)
-				return
+				return ""
 			}
 			w.processLine(line)
 		}
@@ -155,9 +166,15 @@ func (w *Watcher) tailFile(ctx context.Context, path string) {
 		case <-ctx.Done():
 			// Flush all pending messages on shutdown, even incomplete ones.
 			w.emit(w.parser.Flush())
-			return
+			return ""
 		case <-pollTicker.C:
 			// continue reading
+		case <-resolveTicker.C:
+			resolvedPath, err := w.resolver.Resolve()
+			if err == nil && resolvedPath != path {
+				w.logger.Info("JSONL session path changed", "old_path", path, "new_path", resolvedPath)
+				return resolvedPath
+			}
 		}
 	}
 }
