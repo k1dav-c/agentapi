@@ -216,6 +216,70 @@ func TestTrimEmptyLines(t *testing.T) {
 	}
 }
 
+func TestCollapseBlankLines(t *testing.T) {
+	cases := []struct {
+		name           string
+		input          []string
+		maxConsecutive int
+		expected       []string
+	}{
+		{
+			name:           "no blank lines",
+			input:          []string{"Hello", "World"},
+			maxConsecutive: 1,
+			expected:       []string{"Hello", "World"},
+		},
+		{
+			name:           "single blank line preserved",
+			input:          []string{"Hello", "", "World"},
+			maxConsecutive: 1,
+			expected:       []string{"Hello", "", "World"},
+		},
+		{
+			name:           "multiple blank lines collapsed to one",
+			input:          []string{"Hello", "", "", "", "", "", "World"},
+			maxConsecutive: 1,
+			expected:       []string{"Hello", "", "World"},
+		},
+		{
+			name:           "TUI-style massive blank gap",
+			input:          append(append([]string{"Content above"}, make([]string, 100)...), "Content below"),
+			maxConsecutive: 1,
+			expected:       []string{"Content above", "", "Content below"},
+		},
+		{
+			name:           "whitespace-only lines count as blank",
+			input:          []string{"Hello", "   ", "\t", "  \t  ", "World"},
+			maxConsecutive: 1,
+			expected:       []string{"Hello", "   ", "World"},
+		},
+		{
+			name:           "multiple separate groups",
+			input:          []string{"A", "", "", "", "B", "", "", "", "C"},
+			maxConsecutive: 1,
+			expected:       []string{"A", "", "B", "", "C"},
+		},
+		{
+			name:           "max consecutive 2",
+			input:          []string{"A", "", "", "", "", "B"},
+			maxConsecutive: 2,
+			expected:       []string{"A", "", "", "B"},
+		},
+		{
+			name:           "empty input",
+			input:          []string{""},
+			maxConsecutive: 1,
+			expected:       []string{""},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			result := collapseBlankLines(strings.Join(c.input, "\n"), c.maxConsecutive)
+			assert.Equal(t, strings.Join(c.expected, "\n"), result)
+		})
+	}
+}
+
 func TestFormatAgentMessage(t *testing.T) {
 	dir := "testdata/format"
 	agentTypes := []AgentType{AgentTypeClaude, AgentTypeGoose, AgentTypeAider, AgentTypeGemini, AgentTypeCopilot, AgentTypeAmp, AgentTypeCodex, AgentTypeCursor, AgentTypeAuggie, AgentTypeAmazonQ, AgentTypeOpencode, AgentTypeKimi, AgentTypeCustom}
