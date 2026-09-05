@@ -13,9 +13,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Code2,
   Download,
-  FileText,
   LoaderCircle,
   Search,
   SlidersHorizontal,
@@ -55,8 +53,6 @@ import {
 import {MessageItem} from "./message-list/message-item";
 import {TaskGroup} from "./message-list/task-group";
 import {EmptyState} from "./message-list/empty-state";
-
-const agentRenderModeStorageKey = "agentapi.chat.agent-output-render-mode";
 
 // How many recent tasks to show before collapsing older ones behind a
 // "Show N older tasks" button. Keeps the initial render lightweight for
@@ -99,17 +95,6 @@ export default function MessageList({
   const [showAllTasks, setShowAllTasks] = useState(false);
   const [taskQuery, setTaskQuery] = useState("");
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
-  const [globalRenderMode, setGlobalRenderMode] = useState<"raw" | "markdown">(() => {
-    if (typeof window === "undefined") return "raw";
-    return window.localStorage.getItem(agentRenderModeStorageKey) === "markdown" ? "markdown" : "raw";
-  });
-  const toggleGlobalRenderMode = () => {
-    setGlobalRenderMode((current) => {
-      const next = current === "markdown" ? "raw" : "markdown";
-      try { window.localStorage.setItem(agentRenderModeStorageKey, next); } catch { /* best-effort */ }
-      return next;
-    });
-  };
   const [currentSearchResult, setCurrentSearchResult] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const isAtBottomRef = useRef(true);
@@ -160,6 +145,14 @@ export default function MessageList({
               content: block.text,
               time: message.timestamp,
             },
+          });
+        }
+        if (block.type === "thinking" && block.thinking) {
+          target.richActivity.push({
+            type: "thinking",
+            key: `rich-thinking-${message.message_id}-${index}`,
+            content: block.thinking,
+            timestamp: message.timestamp,
           });
         }
         if (block.type === "tool_use" && block.tool_use_id) {
@@ -393,18 +386,6 @@ export default function MessageList({
                   ? `${filteredTasks.length} tasks · ${totalMatchCount} matches`
                   : `${filteredTasks.length} of ${timeline.tasks.length}`}
               </span>
-              <button
-                type="button"
-                onClick={toggleGlobalRenderMode}
-                className={`grid size-9 place-items-center rounded-md outline-none transition hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring ${
-                  globalRenderMode === "markdown" ? "bg-muted text-foreground" : "text-muted-foreground"
-                }`}
-                title={globalRenderMode === "markdown" ? "Show raw terminal output" : "Preview as Markdown"}
-                aria-label={globalRenderMode === "markdown" ? "Show raw terminal output" : "Preview as Markdown"}
-                aria-pressed={globalRenderMode === "markdown"}
-              >
-                {globalRenderMode === "markdown" ? <Code2 className="size-3.5" /> : <FileText className="size-3.5" />}
-              </button>
               <Button
                 type="button"
                 size="sm"
@@ -502,7 +483,7 @@ export default function MessageList({
           </div>
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-7 px-3 py-6 sm:px-6 sm:py-10">
             {timeline.prelude.map((message, index) => (
-              <MessageItem key={`prelude-${message.id ?? index}`} message={message} renderMode={globalRenderMode} />
+              <MessageItem key={`prelude-${message.id ?? index}`} message={message} />
             ))}
             {hiddenTaskCount > 0 && (
               <Button
@@ -555,7 +536,6 @@ export default function MessageList({
                   Boolean(taskQuery) &&
                   searchResultIndex === currentSearchResult
                 }
-                renderMode={globalRenderMode}
               />
               </React.Fragment>
               );

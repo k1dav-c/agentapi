@@ -35,6 +35,12 @@ export type TaskActivity =
       type: "tool";
       key: string;
       toolCall: ToolCall;
+    }
+  | {
+      type: "thinking";
+      key: string;
+      content: string;
+      timestamp: string;
     };
 
 export type TaskStatus = "queued" | "running" | "completed" | "failed";
@@ -122,7 +128,9 @@ export function getTaskActivity(task: TaskSection): TaskActivity[] {
   // actual interleaving (text → tool → text → tool) from the JSONL session
   // log. Use it directly instead of the PTY blob + sorted tool calls, which
   // collapses all text into one entry and clusters tools together.
-  const hasRichText = task.richActivity.some(item => item.type === "message");
+  const hasRichText = task.richActivity.some(
+    item => item.type === "message" || item.type === "thinking",
+  );
   const hasRichTools = task.richActivity.some(item => item.type === "tool");
 
   if (hasRichText && hasRichTools) {
@@ -179,10 +187,10 @@ export function getTaskActivity(task: TaskSection): TaskActivity[] {
   return result.sort((left, right) => {
     const leftTime =
       left.type === "message" ? left.message.time :
-      left.type === "tool" ? left.toolCall.timestamp : undefined;
+      left.type === "tool" ? left.toolCall.timestamp : left.timestamp;
     const rightTime =
       right.type === "message" ? right.message.time :
-      right.type === "tool" ? right.toolCall.timestamp : undefined;
+      right.type === "tool" ? right.toolCall.timestamp : right.timestamp;
     if (!leftTime) return 1;
     if (!rightTime) return -1;
     return Date.parse(leftTime) - Date.parse(rightTime);

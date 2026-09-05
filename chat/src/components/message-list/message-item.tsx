@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Check, Clipboard, Pencil, RefreshCw, Search, TerminalSquare, User, X } from "lucide-react";
+import { Check, Clipboard, Code2, FileText, Pencil, RefreshCw, Search, TerminalSquare, User, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
 import { ProcessedMessage } from "../processed-message";
@@ -72,14 +72,12 @@ export function MessageItem({
   onEditMessage,
   onDismissMessage,
   searchQuery: globalSearchQuery = "",
-  renderMode = "raw",
 }: {
   message: Message | DraftMessage;
   onRetryMessage?: (clientId: string) => Promise<boolean>;
   onEditMessage?: (clientId: string, content: string) => void;
   onDismissMessage?: (clientId: string) => void;
   searchQuery?: string;
-  renderMode?: "raw" | "markdown";
 }) {
   const isUser = message.role === "user";
   const isDraft = message.id === undefined;
@@ -87,6 +85,7 @@ export function MessageItem({
   const isFailed = draft?.deliveryStatus === "failed";
   const [searchOpen, setSearchOpen] = useState(false);
   const [outputSearchQuery, setOutputSearchQuery] = useState("");
+  const [renderMode, setRenderMode] = useState<"raw" | "markdown">("raw");
   const effectiveSearchQuery = outputSearchQuery || globalSearchQuery;
   const matchCount =
     outputSearchQuery.trim() === ""
@@ -117,6 +116,20 @@ export function MessageItem({
           </div>
           {message.content && (
             <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => setRenderMode((mode) => mode === "raw" ? "markdown" : "raw")}
+                    className={`grid size-9 place-items-center rounded-md text-muted-foreground outline-none transition hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring ${renderMode === "markdown" ? "bg-muted text-foreground" : ""}`}
+                    aria-label={renderMode === "markdown" ? "Show this block as raw text" : "Preview this block as Markdown"}
+                    aria-pressed={renderMode === "markdown"}
+                  >
+                    {renderMode === "markdown" ? <Code2 className="size-3.5" /> : <FileText className="size-3.5" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{renderMode === "markdown" ? "Show raw" : "Preview Markdown"}</TooltipContent>
+              </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button

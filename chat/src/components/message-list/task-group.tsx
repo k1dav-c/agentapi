@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, CircleAlert, Clock3, Clipboard, Download, Eye, LoaderCircle, MoreHorizontal } from "lucide-react";
+import { Brain, CheckCircle2, CircleAlert, Clock3, Clipboard, Download, Eye, LoaderCircle, MoreHorizontal } from "lucide-react";
 import { Button } from "../ui/button";
 import { ProcessedMessage } from "../processed-message";
 import { toast } from "sonner";
@@ -38,7 +38,6 @@ export function TaskGroup({
   searchQuery,
   searchResultIndex,
   isCurrentSearchResult,
-  renderMode = "raw",
 }: {
   task: TaskSection;
   number: number;
@@ -50,7 +49,6 @@ export function TaskGroup({
   searchQuery: string;
   searchResultIndex: number;
   isCurrentSearchResult: boolean;
-  renderMode?: "raw" | "markdown";
 }) {
   const statusMeta = {
     queued: {
@@ -82,7 +80,7 @@ export function TaskGroup({
     // Only group consecutive tools in the fallback path (PTY-only), where
     // all tools are clustered together without interleaving context.
     const hasRichInterleaving =
-      task.richActivity.some(item => item.type === "message") &&
+      task.richActivity.some(item => item.type === "message" || item.type === "thinking") &&
       task.richActivity.some(item => item.type === "tool");
     return hasRichInterleaving ? raw : groupConsecutiveTools(raw);
   }, [task]);
@@ -228,8 +226,9 @@ export function TaskGroup({
               key={item.key}
               message={item.message}
               searchQuery={searchQuery}
-              renderMode={renderMode}
             />
+          ) : item.type === "thinking" ? (
+            <ThinkingBlock key={item.key} content={item.content} />
           ) : item.type === "tool-group" ? (
             <div key={item.key} className="ml-3 sm:ml-8">
               <ToolCallGroup
@@ -279,5 +278,30 @@ export function TaskGroup({
         </DialogContent>
       </Dialog>
     </section>
+  );
+}
+
+function ThinkingBlock({content}: {content: string}) {
+  const [renderMode, setRenderMode] = useState<"raw" | "markdown">("raw");
+  return (
+    <details className="ml-3 overflow-hidden rounded-lg border-l-2 border-y-0 border-r-0 bg-muted/20 sm:ml-8">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-muted/45 [&::-webkit-details-marker]:hidden">
+        <Brain className="size-3.5 shrink-0" />
+        <span className="flex-1">Thinking</span>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            setRenderMode((mode) => mode === "raw" ? "markdown" : "raw");
+          }}
+          className="rounded px-2 py-1 hover:bg-muted"
+        >
+          {renderMode === "markdown" ? "Raw" : "Preview"}
+        </button>
+      </summary>
+      <div className="border-t bg-muted/20 px-3 py-3">
+        <ProcessedMessage messageContent={content} isUser={false} renderMode={renderMode} />
+      </div>
+    </details>
   );
 }
