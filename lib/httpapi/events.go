@@ -347,7 +347,17 @@ func (e *EventEmitter) EmitRichMessage(msg jsonlwatcher.RichMessage) {
 		}
 	}
 	if idx >= 0 {
-		e.richMessages[idx] = msg
+		// Merge: keep the longer content slice to avoid losing blocks
+		// when a parser re-emits a partial message after a flush.
+		existing := e.richMessages[idx]
+		if len(msg.Content) >= len(existing.Content) {
+			e.richMessages[idx] = msg
+		} else {
+			// Update metadata but keep the richer content.
+			existing.StopReason = msg.StopReason
+			existing.Model = msg.Model
+			existing.Usage = msg.Usage
+		}
 	} else {
 		e.richMessages = append(e.richMessages, msg)
 	}
