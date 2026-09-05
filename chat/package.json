@@ -57,5 +57,5 @@
     "storybook": "storybook dev -p 6006",
     "test": "bun test"
   },
-  "version": "0.12.2"
+  "version": "0.13.0"
 }
