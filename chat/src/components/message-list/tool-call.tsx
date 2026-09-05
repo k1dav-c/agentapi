@@ -63,23 +63,46 @@ export function ToolDetail({
   );
 }
 
+// Parse AskUserQuestion / ExitPlanMode tool input into renderable options
+function parseInteractiveToolInput(name: string, rawInput: unknown): {
+  questions: { question: string; header?: string; options: { label: string; description?: string }[]; multiSelect?: boolean }[];
+} | null {
+  if (!rawInput || typeof rawInput !== "object") return null;
+  const input = rawInput as Record<string, unknown>;
+
+  // AskUserQuestion
+  if (name === "AskUserQuestion" && Array.isArray(input.questions)) {
+    return { questions: input.questions as { question: string; header?: string; options: { label: string; description?: string }[]; multiSelect?: boolean }[] };
+  }
+
+  // ExitPlanMode — no options to render, but signal that it's a plan approval
+  if (name === "ExitPlanMode") {
+    return { questions: [] };
+  }
+
+  return null;
+}
+
 export function ToolCallCard({
   toolCall,
   searchQuery = "",
   open,
   onOpenChange,
+  onSendRaw,
 }: {
   toolCall: ToolCall;
   searchQuery?: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  onSendRaw?: (data: string) => void;
 }) {
   const isFailed = toolCall.status === "failed" || Boolean(toolCall.isError);
   const isPending =
     toolCall.status === "running" ||
     (toolCall.status === undefined && toolCall.result === undefined);
   const input = formatToolInput(toolCall.input);
-  const [localIsOpen, setLocalIsOpen] = useState(Boolean(searchQuery));
+  const interactiveInput = isPending ? parseInteractiveToolInput(toolCall.name, toolCall.input) : null;
+  const [localIsOpen, setLocalIsOpen] = useState(Boolean(searchQuery) || Boolean(interactiveInput));
   const isOpen = open ?? localIsOpen;
 
   useEffect(() => {
@@ -124,8 +147,41 @@ export function ToolCallCard({
         <ArrowDown className="size-3 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
       <div className="space-y-3 border-t bg-muted/20 px-3 py-3">
-        {input && (
-          <ToolDetail label="Input" content={input} searchQuery={searchQuery} />
+        {interactiveInput && interactiveInput.questions.length > 0 ? (
+          interactiveInput.questions.map((q, qi) => (
+            <div key={qi} className="space-y-2">
+              <p className="text-xs font-medium text-foreground">{q.question}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {q.options.map((opt, oi) => (
+                  <button
+                    key={oi}
+                    type="button"
+                    onClick={() => onSendRaw?.(`${oi + 1}\r`)}
+                    className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    title={opt.description}
+                  >
+                    <span className="grid size-5 place-items-center rounded bg-muted text-[10px] font-bold">{oi + 1}</span>
+                    <span className="max-w-52 truncate">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+              {q.options.some(o => o.description) && (
+                <div className="space-y-1 pt-1">
+                  {q.options.map((opt, oi) => opt.description ? (
+                    <p key={oi} className="text-[11px] text-muted-foreground">
+                      <span className="font-medium">{oi + 1}.</span> {opt.label} — {opt.description}
+                    </p>
+                  ) : null)}
+                </div>
+              )}
+            </div>
+          ))
+        ) : (
+          <>
+            {input && (
+              <ToolDetail label="Input" content={input} searchQuery={searchQuery} />
+            )}
+          </>
         )}
         {toolCall.result !== undefined && (
           <ToolDetail
@@ -134,7 +190,7 @@ export function ToolCallCard({
             searchQuery={searchQuery}
           />
         )}
-        {!input && toolCall.result === undefined && (
+        {!input && !interactiveInput && toolCall.result === undefined && (
           <p className="text-xs text-muted-foreground">
             No tool details are available yet.
           </p>
@@ -147,9 +203,11 @@ export function ToolCallCard({
 export function ToolCallGroup({
   toolCalls,
   searchQuery,
+  onSendRaw,
 }: {
   toolCalls: ToolCall[];
   searchQuery: string;
+  onSendRaw?: (data: string) => void;
 }) {
   const [openToolIDs, setOpenToolIDs] = useState<Set<string>>(
     () =>
@@ -191,6 +249,7 @@ export function ToolCallGroup({
             key={toolCall.id}
             toolCall={toolCall}
             searchQuery={searchQuery}
+            onSendRaw={onSendRaw}
             open={openToolIDs.has(toolCall.id)}
             onOpenChange={(open) =>
               setOpenToolIDs((current) => {

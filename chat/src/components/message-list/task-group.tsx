@@ -238,6 +238,7 @@ export function TaskGroup({
               <ToolCallGroup
                 toolCalls={item.toolCalls}
                 searchQuery={searchQuery}
+                onSendRaw={onSendRaw}
               />
             </div>
           ) : (
@@ -245,6 +246,7 @@ export function TaskGroup({
               <ToolCallCard
                 toolCall={item.toolCall}
                 searchQuery={searchQuery}
+                onSendRaw={onSendRaw}
               />
             </div>
           ),
