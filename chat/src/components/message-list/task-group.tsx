@@ -10,7 +10,7 @@ import { groupConsecutiveTools } from "@/lib/activity-groups";
 import { formatElapsedTime } from "@/lib/format-time";
 import { ToolCallCard, ToolCallGroup } from "./tool-call";
 import { MessageItem } from "./message-item";
-import type { TaskSection, TaskActivity, TaskStatus } from "@/lib/task-timeline";
+import type { TaskSection, TaskStatus } from "@/lib/task-timeline";
 import { getTaskActivity, toSearchableTask } from "@/lib/task-timeline";
 import {
   Dialog,
