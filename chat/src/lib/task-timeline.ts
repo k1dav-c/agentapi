@@ -139,7 +139,19 @@ export function getTaskActivity(task: TaskSection): TaskActivity[] {
         .filter((item): item is Extract<TaskActivity, {type: "tool"}> => item.type === "tool")
         .map(item => item.toolCall.id),
     );
-    const result: TaskActivity[] = [...task.richActivity];
+    // Start with PTY responses — they contain the full terminal output
+    // (progress indicators, agent status lines, intermediate text) that
+    // rich messages don't capture. Rich activity is appended after to
+    // provide structured interleaving of text and tool calls.
+    const result: TaskActivity[] = task.responses.map((message, index) => ({
+      type: "message" as const,
+      key: `response-${message.id ?? index}`,
+      message,
+    }));
+    // Add rich activity (interleaved text + tool blocks from JSONL)
+    for (const item of task.richActivity) {
+      result.push(item);
+    }
     // Append any tool calls not already covered by rich activity.
     for (const toolCall of task.toolCalls) {
       if (!coveredToolIDs.has(toolCall.id)) {
