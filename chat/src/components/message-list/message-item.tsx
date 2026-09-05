@@ -154,19 +154,64 @@ export function MessageItem({
     return false;
   }, [isUser, message.content]);
 
-  // Extract numbered options from selection UI for quick action buttons
+  // Extract selectable options from the TUI prompt for quick action buttons.
+  // Handles numbered options (❯ 1. Label), non-numbered cursor options
+  // (❯ Yes, I trust), and Enter-only confirmations.
   const selectableOptions = useMemo(() => {
     if (!terminalActionNeeded || !message.content) return [];
     const lines = message.content.split("\n");
-    const options: { number: string; label: string }[] = [];
+    const options: { key: string; label: string }[] = [];
+
+    // Pass 1: numbered options (❯ 1. Label / > 2. Label)
     for (const line of lines) {
-      // Match "❯ 1. Label" or "  2. Label" or "> 1. Label"
       const match = line.match(/^\s*[❯›>]?\s*(\d+)\.\s+(.+)/);
       if (match) {
-        options.push({ number: match[1], label: match[2].trim() });
+        options.push({ key: match[1], label: match[2].trim() });
       }
     }
-    return options;
+    if (options.length > 0) return options;
+
+    // Pass 2: non-numbered cursor options (❯ Yes, I trust / No, exit)
+    // Only match lines starting with ❯ or indented option-like text
+    const cursorOptions: { key: string; label: string }[] = [];
+    for (const line of lines) {
+      const cursorMatch = line.match(/^\s*[❯›]\s+(.+)/);
+      if (cursorMatch) {
+        const label = cursorMatch[1].trim();
+        // Skip noise like status lines or decorative text
+        if (label.length > 2 && label.length < 80 && !label.startsWith("─") && !label.startsWith("╌")) {
+          cursorOptions.push({ key: "\r", label }); // Enter to select current
+        }
+      }
+    }
+    // Also look for non-cursor sibling options (indented lines near ❯)
+    let inOptionBlock = false;
+    for (const line of lines) {
+      if (/^\s*[❯›]\s+/.test(line)) {
+        inOptionBlock = true;
+        continue;
+      }
+      if (inOptionBlock) {
+        const optMatch = line.match(/^\s{2,}(\S.+)/);
+        if (optMatch) {
+          const label = optMatch[1].trim();
+          if (label.length > 2 && label.length < 80 && !label.startsWith("─") && !label.includes("to confirm") && !label.includes("to cancel")) {
+            // Arrow down + Enter to select this option
+            cursorOptions.push({ key: "\x1b[B\r", label });
+          }
+        } else {
+          inOptionBlock = false;
+        }
+      }
+    }
+    if (cursorOptions.length > 0) return cursorOptions;
+
+    // Pass 3: Enter-only confirmation (Press Enter to continue)
+    if (/Press Enter/i.test(message.content)) {
+      return [{ key: "\r", label: "Press Enter to continue" }];
+    }
+
+    return [];
   }, [terminalActionNeeded, message.content]);
   const matchCount =
     outputSearchQuery.trim() === ""
@@ -266,19 +311,17 @@ export function MessageItem({
             </div>
             {selectableOptions.length > 0 && onSendRaw && (
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectableOptions.map((opt) => (
+                {selectableOptions.map((opt, i) => (
                   <button
-                    key={opt.number}
+                    key={`${opt.key}-${i}`}
                     type="button"
-                    onClick={() => {
-                      // Navigate to the option (arrow keys) then confirm (Enter).
-                      // Sending the number key directly selects in Claude's UI.
-                      onSendRaw(opt.number + "\r");
-                    }}
+                    onClick={() => onSendRaw(opt.key.length === 1 ? opt.key + "\r" : opt.key)}
                     className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <span className="grid size-5 place-items-center rounded bg-muted text-[10px] font-bold">{opt.number}</span>
-                    <span className="max-w-48 truncate">{opt.label}</span>
+                    {/^\d+$/.test(opt.key) && (
+                      <span className="grid size-5 place-items-center rounded bg-muted text-[10px] font-bold">{opt.key}</span>
+                    )}
+                    <span className="max-w-52 truncate">{opt.label}</span>
                   </button>
                 ))}
               </div>
