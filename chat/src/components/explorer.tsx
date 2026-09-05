@@ -349,7 +349,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                   {link.task > 0 && (
                     <button
                       type="button"
-                      className="mt-2 text-xs text-muted-foreground hover:text-foreground"
+                      className="mt-2 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                       onClick={() => navigate(link.task)}
                     >
                       Go to Task {link.task}
@@ -366,7 +366,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                 <button
                   key={file.path}
                   type="button"
-                  className="block w-full rounded-xl border p-3 text-left hover:bg-muted/40"
+                  className="block w-full rounded-xl border p-3 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => file.sourceTask > 0 && navigate(file.sourceTask)}
                 >
                   <span className="block break-all font-mono text-xs">{file.path}</span>
@@ -384,7 +384,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                 <button
                   key={task.id ?? index}
                   type="button"
-                  className="block w-full rounded-xl border p-3 text-left hover:bg-muted/40"
+                  className="block w-full rounded-xl border p-3 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => navigate(index + 1)}
                 >
                   <span className="text-[11px] font-semibold uppercase text-muted-foreground">
@@ -441,10 +441,10 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                   }}
                   spellCheck={false}
                   aria-label="MCP server configuration"
-                  className="min-h-80 w-full resize-y rounded-xl border bg-zinc-950 p-3 font-mono text-xs leading-5 text-zinc-100 outline-none focus:ring-2 focus:ring-ring"
+                  className="min-h-80 w-full resize-y rounded-xl border border-code-block-border bg-code-block-bg p-3 font-mono text-xs leading-5 text-code-block-text outline-none focus:ring-2 focus:ring-ring"
                 />
                 {mcpIsSample && (
-                  <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-800 dark:text-amber-200">
+                  <p className="rounded-lg border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-xs leading-5 text-status-warning">
                     Samples only — replace the filesystem path and remote
                     Streamable HTTP URL with real values, then save to add these
                     MCP servers.
@@ -638,9 +638,9 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
 function TaskStatus({status}: {status: string}) {
   const color =
     status === "running"
-      ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+      ? "bg-status-warning/15 text-status-warning"
       : status === "completed"
-        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+        ? "bg-status-success/15 text-status-success"
         : status === "failed"
           ? "bg-destructive/15 text-destructive"
           : "bg-muted text-muted-foreground";

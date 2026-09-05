@@ -2,6 +2,7 @@
 
 import {useState, FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, ChangeEvent} from "react";
 import {Button} from "./ui/button";
+import {Tooltip, TooltipTrigger, TooltipContent} from "./ui/tooltip";
 import {
   ArrowDownIcon,
   ArrowLeftIcon,
@@ -629,7 +630,7 @@ export default function MessageInput({
                 {inputMode === "control" && !disabled ? (
                   <div className="flex w-full min-w-0 flex-col">
                     <div
-                      className="flex items-start gap-2 border-b border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300"
+                      className="flex items-start gap-2 border-b border-status-warning/25 bg-status-warning/10 px-3 py-2 text-xs text-status-warning"
                       role="alert"
                     >
                       <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
@@ -648,7 +649,7 @@ export default function MessageInput({
                       onKeyDown={handleKeyDown as any}
                       onFocus={() => setControlAreaFocused(true)}
                       onBlur={() => setControlAreaFocused(false)}
-                      className="flex h-16 w-full cursor-text items-center justify-center p-4 text-center text-sm text-muted-foreground outline-none focus:bg-amber-500/5"
+                      className="flex h-16 w-full cursor-text items-center justify-center p-4 text-center text-sm text-muted-foreground outline-none focus:bg-status-warning/5"
                     >
                       {controlAreaFocused
                         ? "Press any key to send to terminal (arrows, Ctrl+C, Ctrl+R, etc.)"
@@ -738,7 +739,7 @@ export default function MessageInput({
                             className={
                               attachment.status === "failed"
                                 ? "truncate text-[10px] text-destructive"
-                                : "text-[10px] text-emerald-600 dark:text-emerald-400"
+                                : "text-[10px] text-status-success"
                             }
                           >
                             {attachment.status === "failed"
@@ -888,7 +889,7 @@ export default function MessageInput({
                   </TabsTrigger>
                   <TabsTrigger
                     value="control"
-                    className="h-9 gap-1.5 px-3 text-xs data-[state=active]:text-amber-700 dark:data-[state=active]:text-amber-300 sm:h-7 sm:px-2.5"
+                    className="h-9 gap-1.5 px-3 text-xs data-[state=active]:text-status-warning sm:h-7 sm:px-2.5"
                     onClick={() => {
                       textareaRef.current?.focus();
                     }}
@@ -899,6 +900,24 @@ export default function MessageInput({
                 </TabsList>
 
                 <div className="flex min-w-0 flex-row items-center gap-2">
+                  {inputMode === "text" && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="size-10 rounded-full text-muted-foreground hover:text-foreground"
+                          onClick={(e) => handleUploadClick(e)}
+                          disabled={disabled}
+                        >
+                          <Paperclip />
+                          <span className="sr-only">Attach files</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Attach files</TooltipContent>
+                    </Tooltip>
+                  )}
                   {inputMode === "text" && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -914,14 +933,6 @@ export default function MessageInput({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="min-w-48">
-                        <DropdownMenuItem
-                          onSelect={() => handleUploadClick()}
-                          disabled={disabled}
-                          className="min-h-10"
-                        >
-                          <Paperclip />
-                          Attach files
-                        </DropdownMenuItem>
                         <DropdownMenuItem
                           onSelect={toggleSpeechInput}
                           disabled={disabled || !speechSupported}
@@ -957,7 +968,7 @@ export default function MessageInput({
                       {serverStatus === "running" && queuedMessages.length > 0 && (
                         <span
                           aria-hidden="true"
-                          className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full border-2 border-background bg-amber-500 px-1 text-[10px] font-bold leading-none text-white"
+                          className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full border-2 border-background bg-status-warning px-1 text-[10px] font-bold leading-none text-foreground"
                         >
                           {queuedMessages.length}
                         </span>

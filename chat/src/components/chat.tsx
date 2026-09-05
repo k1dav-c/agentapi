@@ -7,9 +7,12 @@ import MessageInput from "./message-input";
 import MessageList from "./message-list";
 import {Explorer} from "./explorer";
 import {Button} from "./ui/button";
+import {KeyboardShortcutsDialog, useKeyboardShortcutsKey} from "./keyboard-shortcuts";
 
 export function Chat() {
   const [suggestedPrompt, setSuggestedPrompt] = useState("");
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  useKeyboardShortcutsKey(() => setShortcutsOpen(true));
   const {
     messages,
     richMessages,
@@ -52,7 +55,7 @@ export function Chat() {
       </div>
       {connectionStatus !== "connected" && (
         <div
-          className="flex min-h-10 shrink-0 items-center justify-center gap-3 border-b bg-amber-500/10 px-3 py-1.5 text-xs text-amber-900 dark:text-amber-200"
+          className="flex min-h-10 shrink-0 items-center justify-center gap-3 border-b bg-status-warning/10 px-3 py-1.5 text-xs text-status-warning"
           role="status"
         >
           <span>
@@ -108,6 +111,7 @@ export function Chat() {
         suggestedPrompt={suggestedPrompt}
         onSuggestedPromptApplied={() => setSuggestedPrompt("")}
       />
+      <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </section>
   );
 }
