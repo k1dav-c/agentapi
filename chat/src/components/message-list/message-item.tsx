@@ -90,25 +90,63 @@ export function MessageItem({
 
   // Detect when the agent's terminal output contains an interactive TUI
   // prompt that requires the user to switch to Terminal mode to respond.
-  // These are elements rendered by Claude Code's Ink-based UI that cannot
-  // be operated from the chat text input: selection menus, confirmation
-  // dialogs, permission prompts, login flows, etc.
+  // Covers Claude Code (Ink UI) and Codex (TUI) interactive elements:
+  // selection menus, confirmation dialogs, permission prompts, login
+  // flows, plan approval, AskUserQuestion, MCP elicitation, etc.
   const terminalActionNeeded = useMemo(() => {
     if (isUser || !message.content) return null;
     const c = message.content;
 
-    // Selection indicators (❯ = cursor, numbered options)
-    const hasSelectionUI = /❯\s*\d+\./m.test(c) || /❯\s*(Yes|No|Skip)/m.test(c);
-    // Confirmation prompts
-    const hasConfirmPrompt = c.includes("Enter to confirm") || c.includes("Esc to cancel");
-    // Question prompts (AskUserQuestion, permission prompts)
-    const hasQuestionUI = /\?\s*$|\?\s*\n/m.test(c) && (c.includes("❯") || /\d+\.\s/.test(c));
-    // Auth/login flows
-    const hasAuthUI = c.includes("authorize") || c.includes("Login") || c.includes("/login");
-    // Permission prompts
-    const hasPermissionUI = c.includes("Allow") && (c.includes("Deny") || c.includes("once"));
+    // --- Selection / choice UI ---
+    // Claude uses ❯, Codex uses > or ›  as cursor indicator
+    const hasCursorSelection = /[❯›]\s*\d+\./m.test(c) || /[❯›]\s*(Yes|No|Skip)/m.test(c);
+    // Codex: "> N." at line start (but NOT shell output "$ >" or quote ">")
+    const hasCodexSelection = /^\s*>\s*\d+\.\s/m.test(c) && /Press Enter/i.test(c);
 
-    if (hasSelectionUI || hasConfirmPrompt || hasQuestionUI || hasAuthUI || hasPermissionUI) {
+    // --- Confirmation / action prompts ---
+    const hasConfirmPrompt =
+      c.includes("Enter to confirm") ||
+      c.includes("Esc to cancel") ||
+      /Press Enter to (continue|connect|install|retry|open)/i.test(c);
+
+    // --- Permission / approval ---
+    // "Do you want to proceed?" / "Allow" + numbered options
+    const hasPermissionUI =
+      (c.includes("Do you want to") && /[❯›>]\s*\d/m.test(c)) ||
+      (c.includes("Allow") && c.includes("Deny"));
+
+    // --- Auth / login flows ---
+    // Match authorize/authentication/Login/sign in, but NOT when they
+    // appear as part of a file path or code (require surrounding context)
+    const hasAuthUI =
+      /authori[zs][ae]/i.test(c) ||
+      /\bsign in\b/i.test(c) ||
+      c.includes("needs your input") ||
+      c.includes("needs your approval") ||
+      c.includes("run /login") ||
+      c.includes("run /mcp");
+
+    // --- MCP elicitation ---
+    const hasMcpUI =
+      c.includes("MCP server needs your input") ||
+      c.includes("MCP server needs your") ||
+      c.includes("Do you want to allow this connection");
+
+    // --- Plan mode ---
+    const hasPlanUI =
+      (c.includes("Would you like to proceed") && /[❯›>]\s*\d/m.test(c)) ||
+      (c.includes("Ready to code") && /[❯›>]\s*\d/m.test(c));
+
+    // --- Codex-specific ---
+    const hasCodexApproval =
+      (/wants to edit\b/i.test(c) && !c.includes("Do you want")) ||
+      (/wants to run\b/i.test(c) && !c.includes("Do you want")) ||
+      (c.includes("approve") && /network access/i.test(c));
+
+    if (
+      hasCursorSelection || hasCodexSelection || hasConfirmPrompt ||
+      hasPermissionUI || hasAuthUI || hasMcpUI || hasPlanUI || hasCodexApproval
+    ) {
       return "This prompt requires terminal input. Switch to the Terminal tab below to respond.";
     }
     return null;
