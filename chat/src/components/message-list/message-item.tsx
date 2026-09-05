@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { Check, Clipboard, Code2, FileText, Pencil, RefreshCw, Search, TerminalSquare, User, X } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { Check, Clipboard, Code2, FileText, Keyboard, Pencil, RefreshCw, Search, TerminalSquare, User, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
 import { ProcessedMessage } from "../processed-message";
@@ -87,6 +87,20 @@ export function MessageItem({
   const [outputSearchQuery, setOutputSearchQuery] = useState("");
   const [renderMode, setRenderMode] = useState<"raw" | "markdown">("raw");
   const effectiveSearchQuery = outputSearchQuery || globalSearchQuery;
+
+  // Detect when the agent's terminal output contains an interactive prompt
+  // that requires the user to switch to Terminal mode to respond.
+  const terminalActionNeeded = useMemo(() => {
+    if (isUser || !message.content) return null;
+    const c = message.content;
+    if (c.includes("Would you like to proceed?") && c.includes("❯"))
+      return "Plan approval requires terminal input. Switch to Terminal mode to select an option.";
+    if (c.includes("Yes, I trust this folder") && c.includes("Enter to confirm"))
+      return "Trust confirmation requires terminal input. Switch to Terminal mode and press Enter.";
+    if (c.includes("Enter to confirm") && c.includes("❯"))
+      return "This prompt requires terminal input. Switch to Terminal mode to respond.";
+    return null;
+  }, [isUser, message.content]);
   const matchCount =
     outputSearchQuery.trim() === ""
       ? 0
@@ -169,6 +183,15 @@ export function MessageItem({
               </span>
             )}
           </label>
+        )}
+        {terminalActionNeeded && (
+          <div
+            className="mb-2 flex items-center gap-2 rounded-lg border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-xs text-status-warning"
+            role="alert"
+          >
+            <Keyboard className="size-3.5 shrink-0" />
+            <span>{terminalActionNeeded}</span>
+          </div>
         )}
         {message.content === "" ? (
           <LoadingDots />
