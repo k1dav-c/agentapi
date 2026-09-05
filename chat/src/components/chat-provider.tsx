@@ -59,11 +59,21 @@ export interface RichContentBlock {
   is_error?: boolean;
 }
 
+export interface Usage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+}
+
 export interface RichMessage {
   message_id: string;
   role: string;
   content: RichContentBlock[];
   timestamp: string;
+  usage?: Usage;
+  model?: string;
+  stop_reason?: string;
 }
 
 interface StatusChangeEvent {
@@ -169,6 +179,7 @@ interface ChatContextValue {
   applyMCPProfile: (name: string, restart?: boolean) => Promise<void>;
   storageScope: string;
   agentType: AgentType;
+  customTitle?: string;
 }
 
 // The server sends a heartbeat event every 15s. If nothing (heartbeat or
@@ -215,6 +226,8 @@ export const useAgentAPIUrl = (): string => {
 };
 
 export function ChatProvider({ children }: PropsWithChildren) {
+  const searchParams = useSearchParams();
+  const customTitle = searchParams.get("title") ?? undefined;
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -269,8 +282,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
       connectionStatus,
       serverStatus,
       task: currentTask,
+      customTitle,
     });
-  }, [connectionStatus, currentTask, serverStatus]);
+  }, [connectionStatus, currentTask, customTitle, serverStatus]);
 
   useEffect(() => {
     try {
@@ -710,6 +724,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         applyMCPProfile: api.applyMCPProfile,
         storageScope: agentAPIUrl,
         agentType,
+        customTitle,
       }}
     >
       {children}
