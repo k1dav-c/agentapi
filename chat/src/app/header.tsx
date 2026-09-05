@@ -3,7 +3,9 @@
 import { type ComponentType, useEffect, useMemo, useState } from "react";
 import { AgentType, useChat } from "@/components/chat-provider";
 import { ModeToggle } from "@/components/mode-toggle";
-import { Activity, Bot, CircleAlert, CircleCheck, Download, LoaderCircle, WifiOff } from "lucide-react";
+import { Activity, Bot, CircleAlert, CircleCheck, Download, Hash, Keyboard, LoaderCircle, WifiOff } from "lucide-react";
+import { computeTokenTotals, formatTokenCount } from "@/lib/session-status";
+import { KeyboardShortcutsDialog, useKeyboardShortcutsKey } from "@/components/keyboard-shortcuts";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,10 +24,13 @@ export function Header() {
     richMessages,
     messages,
     downloadSession,
+    customTitle,
   } = useChat();
   const [runningSince, setRunningSince] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [downloading, setDownloading] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  useKeyboardShortcutsKey(() => setShortcutsOpen(true));
 
   useEffect(() => {
     if (serverStatus !== "running") {
@@ -64,18 +69,20 @@ export function Header() {
     return null;
   }, [messages, richMessages]);
 
+  const tokenTotals = useMemo(() => computeTokenTotals(richMessages), [richMessages]);
+
   const agentStatus = {
     stable: {
       label: "Ready",
       detail: "Agent is ready",
       icon: CircleCheck,
-      className: "text-emerald-600 dark:text-emerald-400",
+      className: "text-status-success",
     },
     running: {
       label: "Working",
       detail: "Agent is processing",
       icon: LoaderCircle,
-      className: "text-amber-600 dark:text-amber-400",
+      className: "text-status-warning",
     },
     offline: {
       label: "Offline",
@@ -103,7 +110,7 @@ export function Header() {
             label: "Reconnecting",
             detail: "Reconnecting to agent server",
             icon: LoaderCircle,
-            className: "text-amber-600 dark:text-amber-400",
+            className: "text-status-warning",
           }
         : agentStatus;
   const StatusIcon = status.icon;
@@ -126,7 +133,7 @@ export function Header() {
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-semibold tracking-tight">AgentAPI</span>
+            <span className="truncate text-sm font-semibold tracking-tight">{customTitle || "AgentAPI"}</span>
           </div>
           <p className="hidden truncate text-xs text-muted-foreground sm:block">
             {agentType === "unknown"
@@ -188,6 +195,13 @@ export function Header() {
                 label="Queue"
                 value={`${queuedMessages.length} ${queuedMessages.length === 1 ? "task" : "tasks"}`}
               />
+              {tokenTotals.total > 0 && (
+                <SessionDetail
+                  icon={Hash}
+                  label="Tokens"
+                  value={`${formatTokenCount(tokenTotals.input)} in · ${formatTokenCount(tokenTotals.output)} out`}
+                />
+              )}
             </div>
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -209,10 +223,24 @@ export function Header() {
               )}
               Download session JSONL
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setShortcutsOpen(true)}>
+              <Keyboard />
+              Keyboard shortcuts
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {tokenTotals.total > 0 && (
+          <span
+            className="hidden items-center gap-1 rounded-full border bg-card px-2.5 py-1.5 text-[11px] font-medium tabular-nums text-muted-foreground shadow-xs sm:flex"
+            title={`${tokenTotals.input.toLocaleString()} input + ${tokenTotals.output.toLocaleString()} output tokens`}
+          >
+            <Hash className="size-3" />
+            {formatTokenCount(tokenTotals.total)}
+          </span>
+        )}
         <ModeToggle />
       </div>
+      <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </header>
   );
 }
