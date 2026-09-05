@@ -88,17 +88,29 @@ export function MessageItem({
   const [renderMode, setRenderMode] = useState<"raw" | "markdown">("raw");
   const effectiveSearchQuery = outputSearchQuery || globalSearchQuery;
 
-  // Detect when the agent's terminal output contains an interactive prompt
-  // that requires the user to switch to Terminal mode to respond.
+  // Detect when the agent's terminal output contains an interactive TUI
+  // prompt that requires the user to switch to Terminal mode to respond.
+  // These are elements rendered by Claude Code's Ink-based UI that cannot
+  // be operated from the chat text input: selection menus, confirmation
+  // dialogs, permission prompts, login flows, etc.
   const terminalActionNeeded = useMemo(() => {
     if (isUser || !message.content) return null;
     const c = message.content;
-    if (c.includes("Would you like to proceed?") && c.includes("❯"))
-      return "Plan approval requires terminal input. Switch to Terminal mode to select an option.";
-    if (c.includes("Yes, I trust this folder") && c.includes("Enter to confirm"))
-      return "Trust confirmation requires terminal input. Switch to Terminal mode and press Enter.";
-    if (c.includes("Enter to confirm") && c.includes("❯"))
-      return "This prompt requires terminal input. Switch to Terminal mode to respond.";
+
+    // Selection indicators (❯ = cursor, numbered options)
+    const hasSelectionUI = /❯\s*\d+\./m.test(c) || /❯\s*(Yes|No|Skip)/m.test(c);
+    // Confirmation prompts
+    const hasConfirmPrompt = c.includes("Enter to confirm") || c.includes("Esc to cancel");
+    // Question prompts (AskUserQuestion, permission prompts)
+    const hasQuestionUI = /\?\s*$|\?\s*\n/m.test(c) && (c.includes("❯") || /\d+\.\s/.test(c));
+    // Auth/login flows
+    const hasAuthUI = c.includes("authorize") || c.includes("Login") || c.includes("/login");
+    // Permission prompts
+    const hasPermissionUI = c.includes("Allow") && (c.includes("Deny") || c.includes("once"));
+
+    if (hasSelectionUI || hasConfirmPrompt || hasQuestionUI || hasAuthUI || hasPermissionUI) {
+      return "This prompt requires terminal input. Switch to the Terminal tab below to respond.";
+    }
     return null;
   }, [isUser, message.content]);
   const matchCount =
