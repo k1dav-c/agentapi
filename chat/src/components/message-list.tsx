@@ -70,6 +70,7 @@ interface MessageListProps {
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
   onStopTask: () => void;
+  onSendRaw?: (data: string) => void;
   headerAction?: React.ReactNode;
 }
 
@@ -83,6 +84,7 @@ export default function MessageList({
   onEditMessage,
   onDismissMessage,
   onStopTask,
+  onSendRaw,
   headerAction,
 }: MessageListProps) {
   const {downloadSession} = useChat();
@@ -483,7 +485,7 @@ export default function MessageList({
           </div>
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-7 px-3 py-6 sm:px-6 sm:py-10">
             {timeline.prelude.map((message, index) => (
-              <MessageItem key={`prelude-${message.id ?? index}`} message={message} />
+              <MessageItem key={`prelude-${message.id ?? index}`} message={message} onSendRaw={onSendRaw} />
             ))}
             {hiddenTaskCount > 0 && (
               <Button
@@ -530,6 +532,7 @@ export default function MessageList({
                 onEditMessage={onEditMessage}
                 onDismissMessage={onDismissMessage}
                 onStopTask={onStopTask}
+                onSendRaw={onSendRaw}
                 searchQuery={taskQuery}
                 searchResultIndex={searchResultIndex}
                 isCurrentSearchResult={

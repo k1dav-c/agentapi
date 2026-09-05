@@ -72,12 +72,14 @@ export function MessageItem({
   onEditMessage,
   onDismissMessage,
   searchQuery: globalSearchQuery = "",
+  onSendRaw,
 }: {
   message: Message | DraftMessage;
   onRetryMessage?: (clientId: string) => Promise<boolean>;
   onEditMessage?: (clientId: string, content: string) => void;
   onDismissMessage?: (clientId: string) => void;
   searchQuery?: string;
+  onSendRaw?: (data: string) => void;
 }) {
   const isUser = message.role === "user";
   const isDraft = message.id === undefined;
@@ -147,10 +149,25 @@ export function MessageItem({
       hasCursorSelection || hasCodexSelection || hasConfirmPrompt ||
       hasPermissionUI || hasAuthUI || hasMcpUI || hasPlanUI || hasCodexApproval
     ) {
-      return "This prompt requires terminal input. Switch to the Terminal tab below to respond.";
+      return true;
     }
-    return null;
+    return false;
   }, [isUser, message.content]);
+
+  // Extract numbered options from selection UI for quick action buttons
+  const selectableOptions = useMemo(() => {
+    if (!terminalActionNeeded || !message.content) return [];
+    const lines = message.content.split("\n");
+    const options: { number: string; label: string }[] = [];
+    for (const line of lines) {
+      // Match "❯ 1. Label" or "  2. Label" or "> 1. Label"
+      const match = line.match(/^\s*[❯›>]?\s*(\d+)\.\s+(.+)/);
+      if (match) {
+        options.push({ number: match[1], label: match[2].trim() });
+      }
+    }
+    return options;
+  }, [terminalActionNeeded, message.content]);
   const matchCount =
     outputSearchQuery.trim() === ""
       ? 0
@@ -236,11 +253,36 @@ export function MessageItem({
         )}
         {terminalActionNeeded && (
           <div
-            className="mb-2 flex items-center gap-2 rounded-lg border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-xs text-status-warning"
+            className="mb-2 rounded-lg border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-xs"
             role="alert"
           >
-            <Keyboard className="size-3.5 shrink-0" />
-            <span>{terminalActionNeeded}</span>
+            <div className="flex items-center gap-2 text-status-warning">
+              <Keyboard className="size-3.5 shrink-0" />
+              <span>
+                {selectableOptions.length > 0
+                  ? "Select an option or switch to Terminal tab for more control."
+                  : "This prompt requires terminal input. Switch to the Terminal tab below to respond."}
+              </span>
+            </div>
+            {selectableOptions.length > 0 && onSendRaw && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {selectableOptions.map((opt) => (
+                  <button
+                    key={opt.number}
+                    type="button"
+                    onClick={() => {
+                      // Navigate to the option (arrow keys) then confirm (Enter).
+                      // Sending the number key directly selects in Claude's UI.
+                      onSendRaw(opt.number + "\r");
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span className="grid size-5 place-items-center rounded bg-muted text-[10px] font-bold">{opt.number}</span>
+                    <span className="max-w-48 truncate">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {message.content === "" ? (

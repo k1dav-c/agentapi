@@ -35,6 +35,7 @@ export function TaskGroup({
   onEditMessage,
   onDismissMessage,
   onStopTask,
+  onSendRaw,
   searchQuery,
   searchResultIndex,
   isCurrentSearchResult,
@@ -46,6 +47,7 @@ export function TaskGroup({
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
   onStopTask: () => void;
+  onSendRaw?: (data: string) => void;
   searchQuery: string;
   searchResultIndex: number;
   isCurrentSearchResult: boolean;
@@ -219,6 +221,7 @@ export function TaskGroup({
           onEditMessage={onEditMessage}
           onDismissMessage={onDismissMessage}
           searchQuery={searchQuery}
+          onSendRaw={onSendRaw}
         />
         {activity.map((item) =>
           item.type === "message" ? (
@@ -226,6 +229,7 @@ export function TaskGroup({
               key={item.key}
               message={item.message}
               searchQuery={searchQuery}
+              onSendRaw={onSendRaw}
             />
           ) : item.type === "thinking" ? (
             <ThinkingBlock key={item.key} content={item.content} />

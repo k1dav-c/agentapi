@@ -91,6 +91,7 @@ export function Chat() {
         }}
         onDismissMessage={dismissFailedMessage}
         onStopTask={() => void sendMessage("\x1b", "raw")}
+        onSendRaw={(data) => void sendMessage(data, "raw")}
         headerAction={
           <Explorer
             onNavigateTask={(number) => {
