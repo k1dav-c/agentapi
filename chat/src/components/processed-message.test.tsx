@@ -77,11 +77,13 @@ describe("ProcessedMessage links", () => {
   test("renders fenced and inline code with visible contrast", () => {
     const html = render("Use `go test`.\n\n```go\nfunc main() {}\n```", true);
     expect(html).toContain("<pre");
-    expect(html).toContain("bg-zinc-950");
-    expect(html).toContain("border-zinc-700");
+    expect(html).toContain("bg-code-block-bg");
+    expect(html).toContain("border-code-block-border");
     expect(html).toContain("bg-muted");
     expect(html).toContain("go test");
-    expect(html).toContain("func main() {}");
+    // With syntax highlighting, "func main() {}" is split across <span> elements
+    expect(html).toContain("func");
+    expect(html).toContain("main");
   });
 
   test("renders blockquotes with a visible border and background", () => {
