@@ -296,9 +296,21 @@ export function MessageItem({
             )}
           </label>
         )}
+        {message.content === "" ? (
+          <LoadingDots />
+        ) : (
+          <div className="rounded-xl border bg-card/50 px-4 py-3">
+            <ProcessedMessage
+              messageContent={message.content}
+              isUser={false}
+              renderMode={renderMode}
+              searchQuery={effectiveSearchQuery}
+            />
+          </div>
+        )}
         {terminalActionNeeded && (
           <div
-            className="mb-2 rounded-lg border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-xs"
+            className="mt-2 rounded-lg border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-xs"
             role="alert"
           >
             <div className="flex items-center gap-2 text-status-warning">
@@ -326,18 +338,6 @@ export function MessageItem({
                 ))}
               </div>
             )}
-          </div>
-        )}
-        {message.content === "" ? (
-          <LoadingDots />
-        ) : (
-          <div className="rounded-xl border bg-card/50 px-4 py-3">
-            <ProcessedMessage
-              messageContent={message.content}
-              isUser={false}
-              renderMode={renderMode}
-              searchQuery={effectiveSearchQuery}
-            />
           </div>
         )}
       </article>
