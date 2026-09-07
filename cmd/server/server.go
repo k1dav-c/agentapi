@@ -423,22 +423,45 @@ func writePIDFile(pidFile string, logger *slog.Logger) error {
 		return fmt.Errorf("failed to create PID file directory: %w", err)
 	}
 
-	// Check if PID file already exists
-	if existingPIDData, err := os.ReadFile(pidFile); err == nil {
-		existingPIDStr := strings.TrimSpace(string(existingPIDData))
-		if existingPID, err := strconv.Atoi(existingPIDStr); err == nil {
-			if isProcessRunning(existingPID) {
-				return fmt.Errorf("another instance is already running with PID %d (PID file: %s)", existingPID, pidFile)
+	// Create the PID file exclusively so two servers cannot both pass a
+	// check-then-write sequence. If the file belongs to a dead process (or is
+	// malformed), remove it and retry the exclusive create.
+	for {
+		file, err := os.OpenFile(pidFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			if _, writeErr := file.WriteString(pidContent); writeErr != nil {
+				_ = file.Close()
+				_ = os.Remove(pidFile)
+				return fmt.Errorf("failed to write PID file: %w", writeErr)
 			}
-			logger.Warn("Found stale PID file, will overwrite", "pidFile", pidFile, "stalePID", existingPID)
+			if closeErr := file.Close(); closeErr != nil {
+				_ = os.Remove(pidFile)
+				return fmt.Errorf("failed to close PID file: %w", closeErr)
+			}
+			break
 		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read existing PID file: %w", err)
-	}
+		if !os.IsExist(err) {
+			return fmt.Errorf("failed to create PID file: %w", err)
+		}
 
-	// Write PID file
-	if err := os.WriteFile(pidFile, []byte(pidContent), 0o600); err != nil {
-		return fmt.Errorf("failed to write PID file: %w", err)
+		existingPIDData, readErr := os.ReadFile(pidFile)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				continue // The owner removed it between OpenFile and ReadFile.
+			}
+			return fmt.Errorf("failed to read existing PID file: %w", readErr)
+		}
+
+		existingPIDStr := strings.TrimSpace(string(existingPIDData))
+		existingPID, parseErr := strconv.Atoi(existingPIDStr)
+		if parseErr == nil && isProcessRunning(existingPID) {
+			return fmt.Errorf("another instance is already running with PID %d (PID file: %s)", existingPID, pidFile)
+		}
+
+		logger.Warn("Removing stale PID file before retrying", "pidFile", pidFile, "stalePID", existingPIDStr)
+		if removeErr := os.Remove(pidFile); removeErr != nil && !os.IsNotExist(removeErr) {
+			return fmt.Errorf("failed to remove stale PID file: %w", removeErr)
+		}
 	}
 
 	logger.Info("Wrote PID file", "pidFile", pidFile, "pid", pid)

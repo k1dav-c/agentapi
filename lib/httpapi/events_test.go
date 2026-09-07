@@ -29,6 +29,36 @@ func TestEventEmitterSessionEvents(t *testing.T) {
 	require.Equal(t, "text", emitter.SessionEvents()[0].Kind)
 }
 
+func TestEventEmitterMergesClaudeRichMessageDeltas(t *testing.T) {
+	emitter := NewEventEmitter(WithSubscriptionBufSize(10))
+	_, ch, _ := emitter.Subscribe()
+
+	emitter.EmitRichMessage(jsonlwatcher.RichMessage{
+		MessageID: "msg_1",
+		Role:      "assistant",
+		Content: []jsonlwatcher.RichContentBlock{
+			{Type: "thinking", Thinking: "checking files"},
+			{Type: "text", Text: "1. Read files"},
+			{Type: "tool_use", ToolUseID: "tool_1", ToolName: "Read"},
+		},
+	})
+	<-ch
+
+	emitter.EmitRichMessage(jsonlwatcher.RichMessage{
+		MessageID: "msg_1",
+		Role:      "assistant",
+		Content: []jsonlwatcher.RichContentBlock{
+			{Type: "tool_use", ToolUseID: "tool_2", ToolName: "Read"},
+		},
+	})
+
+	event := <-ch
+	update := event.Payload.(RichMessageUpdateBody)
+	require.Len(t, update.Content, 4)
+	require.Equal(t, "tool_2", update.Content[3].ToolUseID)
+	require.Equal(t, update.Content, emitter.RichMessages()[0].Content)
+}
+
 func TestEventEmitter(t *testing.T) {
 	t.Run("single-subscription", func(t *testing.T) {
 		emitter := NewEventEmitter(WithSubscriptionBufSize(10))

@@ -1,0 +1,80 @@
+/*
+ * Syntax highlighting theme using design-system tokens.
+ * Maps highlight.js / rehype-highlight classes to --hl-* CSS custom properties
+ * defined in globals.css (light + dark variants).
+ */
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in,
+.hljs-literal {
+  color: var(--hl-keyword);
+}
+
+.hljs-string,
+.hljs-doctag,
+.hljs-template-variable,
+.hljs-template-tag {
+  color: var(--hl-string);
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+
+.hljs-title,
+.hljs-title\.function_,
+.hljs-section {
+  color: var(--hl-function);
+}
+
+.hljs-number,
+.hljs-regexp {
+  color: var(--hl-number);
+}
+
+.hljs-symbol,
+.hljs-operator,
+.hljs-punctuation {
+  color: var(--hl-operator);
+}
+
+.hljs-type,
+.hljs-title\.class_,
+.hljs-name,
+.hljs-tag {
+  color: var(--hl-type);
+}
+
+.hljs-variable,
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-params {
+  color: var(--hl-variable);
+}
+
+.hljs-meta,
+.hljs-meta .hljs-keyword {
+  color: var(--hl-operator);
+}
+
+.hljs-deletion {
+  color: var(--destructive);
+  background: oklch(from var(--destructive) l c h / 0.1);
+}
+
+.hljs-addition {
+  color: var(--hl-string);
+  background: oklch(from var(--hl-string) l c h / 0.1);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: bold;
+}

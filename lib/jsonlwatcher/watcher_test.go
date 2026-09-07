@@ -19,6 +19,82 @@ func (r *staticResolver) Resolve() (string, error) {
 	return r.path, nil
 }
 
+type switchingResolver struct {
+	mu   sync.RWMutex
+	path string
+}
+
+func (r *switchingResolver) Resolve() (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.path, nil
+}
+
+func (r *switchingResolver) setPath(path string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.path = path
+}
+
+func TestWatcherSwitchesSessionFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	firstPath := filepath.Join(tmpDir, "foreground.jsonl")
+	secondPath := filepath.Join(tmpDir, "parked.jsonl")
+	firstLine := `{"type":"assistant","uuid":"a1","timestamp":"2026-09-05T00:00:00Z","message":{"id":"msg_1","role":"assistant","content":[{"type":"tool_use","id":"tool_1","name":"Read","input":{"file_path":"one"}}],"stop_reason":"tool_use"}}` + "\n"
+	secondLine := `{"type":"assistant","uuid":"a2","timestamp":"2026-09-05T00:00:01Z","message":{"id":"msg_2","role":"assistant","content":[{"type":"tool_use","id":"tool_2","name":"Write","input":{"file_path":"two"}}],"stop_reason":"tool_use"}}` + "\n"
+	if err := os.WriteFile(firstPath, []byte(firstLine), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondPath, []byte(secondLine), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := &switchingResolver{path: firstPath}
+	var mu sync.Mutex
+	var messages []RichMessage
+	lineCount := 0
+	w := New(Config{
+		Resolver: resolver,
+		Parser:   NewClaudeParser(),
+		OnMessage: func(message RichMessage) {
+			mu.Lock()
+			defer mu.Unlock()
+			messages = append(messages, message)
+		},
+		OnLine: func([]byte) {
+			mu.Lock()
+			defer mu.Unlock()
+			lineCount++
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Start(ctx)
+
+	waitFor := func(condition func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			mu.Lock()
+			done := condition()
+			mu.Unlock()
+			if done {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatal("timed out waiting for watcher")
+	}
+
+	waitFor(func() bool { return lineCount == 1 && len(messages) >= 1 })
+	resolver.setPath(secondPath)
+	waitFor(func() bool { return lineCount == 2 && len(messages) >= 2 })
+
+	if got := messages[len(messages)-1].Content[0].ToolUseID; got != "tool_2" {
+		t.Fatalf("last tool use ID = %q, want tool_2", got)
+	}
+}
+
 func TestClaudeParser_ContentBlocks(t *testing.T) {
 	tests := []struct {
 		name     string

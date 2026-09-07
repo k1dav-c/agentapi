@@ -229,6 +229,29 @@ func trimEmptyLines(message string) string {
 	return strings.Join(lines, "\n")
 }
 
+// collapseBlankLines reduces runs of consecutive blank lines to at most
+// maxConsecutive blank lines. A "blank line" is one that is empty or
+// contains only whitespace. This prevents TUI full-screen rendering
+// artifacts from producing huge gaps in the output when consumed via
+// AgentAPI.
+func collapseBlankLines(message string, maxConsecutive int) string {
+	lines := strings.Split(message, "\n")
+	var result []string
+	consecutive := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			consecutive++
+			if consecutive <= maxConsecutive {
+				result = append(result, line)
+			}
+		} else {
+			consecutive = 0
+			result = append(result, line)
+		}
+	}
+	return strings.Join(result, "\n")
+}
+
 type AgentType string
 
 // Remember to add the display name to the agentapi/chat/src/components/chat-provider.tsx
@@ -277,34 +300,39 @@ func formatAmpMessage(message string, userInput string) string {
 }
 
 func FormatAgentMessage(agentType AgentType, message string, userInput string) string {
+	var formatted string
 	switch agentType {
 	case AgentTypeClaude:
-		return formatGenericMessage(message, userInput, agentType)
+		formatted = formatGenericMessage(message, userInput, agentType)
 	case AgentTypeGoose:
-		return formatGenericMessage(message, userInput, agentType)
+		formatted = formatGenericMessage(message, userInput, agentType)
 	case AgentTypeAider:
-		return formatGenericMessage(message, userInput, agentType)
+		formatted = formatGenericMessage(message, userInput, agentType)
 	case AgentTypeCodex:
-		return formatCodexMessage(message, userInput)
+		formatted = formatCodexMessage(message, userInput)
 	case AgentTypeGemini:
-		return formatGenericMessage(message, userInput, agentType)
+		formatted = formatGenericMessage(message, userInput, agentType)
 	case AgentTypeCopilot:
-		return formatGenericMessage(message, userInput, agentType)
+		formatted = formatGenericMessage(message, userInput, agentType)
 	case AgentTypeAmp:
-		return formatAmpMessage(message, userInput)
+		formatted = formatAmpMessage(message, userInput)
 	case AgentTypeCursor:
-		return formatGenericMessage(message, userInput, agentType)
+		formatted = formatGenericMessage(message, userInput, agentType)
 	case AgentTypeAuggie:
-		return formatGenericMessage(message, userInput, agentType)
+		formatted = formatGenericMessage(message, userInput, agentType)
 	case AgentTypeAmazonQ:
-		return formatGenericMessage(message, userInput, agentType)
+		formatted = formatGenericMessage(message, userInput, agentType)
 	case AgentTypeOpencode:
-		return formatOpencodeMessage(message, userInput)
+		formatted = formatOpencodeMessage(message, userInput)
 	case AgentTypeKimi:
-		return formatGenericMessage(message, userInput, agentType)
+		formatted = formatGenericMessage(message, userInput, agentType)
 	case AgentTypeCustom:
-		return formatGenericMessage(message, userInput, agentType)
+		formatted = formatGenericMessage(message, userInput, agentType)
 	default:
-		return message
+		formatted = message
 	}
+	// Collapse consecutive blank lines left over from TUI full-screen
+	// rendering. Applied once at the top level so every agent type
+	// benefits automatically.
+	return collapseBlankLines(formatted, 1)
 }

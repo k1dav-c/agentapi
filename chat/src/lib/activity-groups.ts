@@ -1,6 +1,7 @@
 export type GroupableActivity<TMessage, TTool> =
   | {type: "message"; key: string; message: TMessage}
-  | {type: "tool"; key: string; toolCall: TTool};
+  | {type: "tool"; key: string; toolCall: TTool}
+  | {type: "thinking"; key: string; content: string; timestamp: string};
 
 export type GroupedActivity<TMessage, TTool> =
   | GroupableActivity<TMessage, TTool>

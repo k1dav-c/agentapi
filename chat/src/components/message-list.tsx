@@ -13,40 +13,21 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  CircleAlert,
-  Check,
-  CheckCircle2,
-  Clipboard,
-  Clock3,
-  Code2,
   Download,
-  Eye,
-  FileText,
   LoaderCircle,
-  MoreHorizontal,
-  Pencil,
-  RefreshCw,
   Search,
   SlidersHorizontal,
-  Sparkles,
-  TerminalSquare,
-  User,
-  Wrench,
   X,
 } from "lucide-react";
 import { Button } from "./ui/button";
-import {useChat} from "./chat-provider";
+import {useChat, AgentType} from "./chat-provider";
 import type {
-  AgentType,
   DraftMessage,
   Message,
   RichMessage,
   ServerStatus,
 } from "./chat-provider";
-import {ProcessedMessage} from "./processed-message";
-import {toast} from "sonner";
-import {taskMatchesQuery, taskToMarkdown} from "@/lib/task-actions";
-import {groupConsecutiveTools} from "@/lib/activity-groups";
+import {taskMatchesQuery} from "@/lib/task-actions";
 import {uiCopy} from "@/lib/ui-copy";
 import {
   DropdownMenu,
@@ -56,16 +37,28 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import {contentFingerprint} from "@/lib/content-fingerprint";
+import {formatDateLabel} from "@/lib/format-time";
+import {getPreviousUserMessageTop, getNextUserMessageTop} from "@/lib/scroll-anchors";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
+  type TaskSection,
+  type TaskFilter,
+  type ToolCall,
+  collectToolCalls,
+  findTaskAtTime,
+  getTaskStatus,
+  toSearchableTask,
+  countTaskMatches,
+} from "@/lib/task-timeline";
+import {MessageItem} from "./message-list/message-item";
+import {TaskGroup} from "./message-list/task-group";
+import {EmptyState} from "./message-list/empty-state";
 
-const agentRenderModeStorageKey = "agentapi.chat.agent-output-render-mode";
+// How many recent tasks to show before collapsing older ones behind a
+// "Show N older tasks" button. Keeps the initial render lightweight for
+// long sessions. Full virtualization (e.g. react-virtuoso) would be the
+// proper fix for very long conversations.
+const VISIBLE_TASKS_DEFAULT = 5;
 
 interface MessageListProps {
   messages: (Message | DraftMessage)[];
@@ -77,60 +70,8 @@ interface MessageListProps {
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
   onStopTask: () => void;
+  onSendRaw?: (data: string) => void;
   headerAction?: React.ReactNode;
-}
-
-interface ToolCall {
-  id: string;
-  name: string;
-  input?: unknown;
-  result?: string;
-  status?: "running" | "completed" | "failed";
-  isError?: boolean;
-  timestamp: string;
-}
-
-interface TaskSection {
-  key: string;
-  prompt: Message | DraftMessage;
-  responses: (Message | DraftMessage)[];
-  toolCalls: ToolCall[];
-  richActivity: TaskActivity[];
-}
-
-type TaskActivity =
-  | {
-      type: "message";
-      key: string;
-      message: Message | DraftMessage;
-    }
-  | {
-      type: "tool";
-      key: string;
-      toolCall: ToolCall;
-    };
-
-type TaskStatus = "queued" | "running" | "completed" | "failed";
-type TaskFilter = "all" | TaskStatus | "tool-error";
-
-function getTaskStatus(
-  task: TaskSection,
-  index: number,
-  taskCount: number,
-  serverStatus: ServerStatus,
-): TaskStatus {
-  if (
-    task.prompt.id === undefined &&
-    (task.prompt as DraftMessage).deliveryStatus === "failed"
-  ) {
-    return "failed";
-  }
-  if (task.prompt.id === undefined) {
-    return serverStatus === "running" ? "queued" : "running";
-  }
-  if (task.toolCalls.some((tool) => tool.isError)) return "failed";
-  if (index === taskCount - 1 && serverStatus === "running") return "running";
-  return "completed";
 }
 
 export default function MessageList({
@@ -143,6 +84,7 @@ export default function MessageList({
   onEditMessage,
   onDismissMessage,
   onStopTask,
+  onSendRaw,
   headerAction,
 }: MessageListProps) {
   const {downloadSession} = useChat();
@@ -188,7 +130,7 @@ export default function MessageList({
       target?.toolCalls.push(toolCall);
     }
 
-    const callsByID = new Map(toolCalls.map((toolCall) => [toolCall.id, toolCall]));
+    const callsByID = new Map<string, ToolCall>(toolCalls.map((tc) => [tc.id, tc]));
     for (const message of richMessages) {
       if (message.role !== "assistant") continue;
       const target = findTaskAtTime(tasks, message.timestamp);
@@ -207,13 +149,21 @@ export default function MessageList({
             },
           });
         }
+        if (block.type === "thinking" && block.thinking) {
+          target.richActivity.push({
+            type: "thinking",
+            key: `rich-thinking-${message.message_id}-${index}`,
+            content: block.thinking,
+            timestamp: message.timestamp,
+          });
+        }
         if (block.type === "tool_use" && block.tool_use_id) {
-          const toolCall = callsByID.get(block.tool_use_id);
-          if (toolCall) {
+          const tc = callsByID.get(block.tool_use_id);
+          if (tc) {
             target.richActivity.push({
               type: "tool",
               key: `rich-tool-${block.tool_use_id}`,
-              toolCall,
+              toolCall: tc,
             });
           }
         }
@@ -226,9 +176,7 @@ export default function MessageList({
   const exportConversation = () => {
     setDownloadingConversation(true);
     void downloadSession()
-      .catch(() => {
-        // downloadSession already surfaces the error via toast
-      })
+      .catch(() => {})
       .finally(() => setDownloadingConversation(false));
   };
   const filteredTasks = useMemo(
@@ -237,12 +185,7 @@ export default function MessageList({
         .map((task, index) => ({
           task,
           index,
-          status: getTaskStatus(
-            task,
-            index,
-            timeline.tasks.length,
-            serverStatus,
-          ),
+          status: getTaskStatus(task, index, timeline.tasks.length, serverStatus),
           matchCount: countTaskMatches(task, taskQuery),
         }))
         .filter(({task, status, matchCount}) => {
@@ -262,17 +205,14 @@ export default function MessageList({
   );
   const filtersActive = taskQuery.trim() !== "" || taskFilter !== "all";
   const totalMatchCount = filteredTasks.reduce(
-    (total, task) => total + task.matchCount,
-    0,
+    (total, task) => total + task.matchCount, 0,
   );
   const hiddenTaskCount =
-    !filtersActive && !showAllTasks && filteredTasks.length > 8
-      ? filteredTasks.length - 8
+    !filtersActive && !showAllTasks && filteredTasks.length > VISIBLE_TASKS_DEFAULT
+      ? filteredTasks.length - VISIBLE_TASKS_DEFAULT
       : 0;
   const visibleTasks =
-    hiddenTaskCount > 0
-      ? filteredTasks.slice(hiddenTaskCount)
-      : filteredTasks;
+    hiddenTaskCount > 0 ? filteredTasks.slice(hiddenTaskCount) : filteredTasks;
   const contentSignature = useMemo(
     () =>
       [
@@ -282,9 +222,7 @@ export default function MessageList({
           `${task.key}:${contentFingerprint(task.prompt.content)}:${task.responses
             .map((message) => contentFingerprint(message.content))
             .join(",")}:${task.toolCalls
-            .map((tool) =>
-              `${tool.id}:${contentFingerprint(tool.result ?? "")}`,
-            )
+            .map((tool) => `${tool.id}:${contentFingerprint(tool.result ?? "")}`)
             .join(",")}`),
       ].join("|"),
     [timeline],
@@ -339,13 +277,9 @@ export default function MessageList({
 
   const scrollToPreviousUserMessage = useCallback(() => {
     if (!scrollArea) return;
-
     const targetTop = getPreviousUserMessageTop(scrollArea);
     if (targetTop === undefined) return;
-    scrollArea.scrollTo({
-      top: Math.max(0, targetTop - 16),
-      behavior: "smooth",
-    });
+    scrollArea.scrollTo({ top: Math.max(0, targetTop - 16), behavior: "smooth" });
   }, [scrollArea]);
 
   const scrollToNextUserMessage = useCallback(() => {
@@ -357,19 +291,15 @@ export default function MessageList({
 
   useEffect(() => {
     if (!scrollArea) return;
-
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = scrollArea;
       const atBottom = scrollTop + clientHeight >= scrollHeight - 32;
       isAtBottomRef.current = atBottom;
       setShowScrollButton(!atBottom);
       if (atBottom) setUnreadCount(0);
-      setCanScrollToPreviousUser(
-        getPreviousUserMessageTop(scrollArea) !== undefined,
-      );
+      setCanScrollToPreviousUser(getPreviousUserMessageTop(scrollArea) !== undefined);
       setCanScrollToNextUser(getNextUserMessageTop(scrollArea) !== undefined);
     };
-
     handleScroll();
     scrollArea.addEventListener("scroll", handleScroll, { passive: true });
     return () => scrollArea.removeEventListener("scroll", handleScroll);
@@ -377,12 +307,10 @@ export default function MessageList({
 
   useLayoutEffect(() => {
     if (!scrollArea) return;
-
     const currentHeight = scrollArea.scrollHeight;
     const hasNewContent = currentHeight > lastScrollHeightRef.current;
     const isFirstRender = lastScrollHeightRef.current === 0;
     const isNewUserMessage = messages.at(-1)?.role === "user";
-
     if (
       hasNewContent &&
       (isFirstRender || isAtBottomRef.current || isNewUserMessage)
@@ -408,9 +336,9 @@ export default function MessageList({
           />
         ) : (
           <>
-          <div className="sticky top-0 z-10 border-b bg-background/90 px-3 py-2 backdrop-blur-xl sm:px-6">
-            <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-2">
-              <label className="flex min-h-9 min-w-48 flex-1 items-center gap-2 rounded-lg border bg-background px-3 text-xs">
+          <div className="sticky top-0 z-10 border-b bg-background/90 px-3 py-1 backdrop-blur-xl sm:px-6 sm:py-2">
+            <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-1.5 sm:gap-2">
+              <label className="flex min-h-8 min-w-48 flex-1 items-center gap-2 rounded-lg border bg-background px-3 text-xs sm:min-h-9">
                 <Search className="size-3.5 text-muted-foreground" />
                 <span className="sr-only">Search all tasks</span>
                 <input
@@ -432,6 +360,7 @@ export default function MessageList({
                     type="button"
                     onClick={() => setTaskQuery("")}
                     aria-label="Clear task search"
+                    className="grid size-7 place-items-center rounded-md outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <X className="size-3.5" />
                   </button>
@@ -512,9 +441,6 @@ export default function MessageList({
                       key={value}
                       onSelect={() => setTaskFilter(value)}
                     >
-                      <Check
-                        className={taskFilter === value ? "opacity-100" : "opacity-0"}
-                      />
                       {label}
                     </DropdownMenuItem>
                   ))}
@@ -559,7 +485,7 @@ export default function MessageList({
           </div>
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-7 px-3 py-6 sm:px-6 sm:py-10">
             {timeline.prelude.map((message, index) => (
-              <MessageItem key={`prelude-${message.id ?? index}`} message={message} />
+              <MessageItem key={`prelude-${message.id ?? index}`} message={message} onSendRaw={onSendRaw} />
             ))}
             {hiddenTaskCount > 0 && (
               <Button
@@ -577,13 +503,28 @@ export default function MessageList({
                 No tasks match the current search and filter.
               </div>
             )}
-            {visibleTasks.map(({task, index, status}) => {
+            {visibleTasks.map(({task, index, status}, visibleIndex) => {
               const searchResultIndex = filteredTasks.findIndex(
                 (entry) => entry.task.key === task.key,
               );
+              const prevDate = visibleIndex > 0
+                ? visibleTasks[visibleIndex - 1].task.prompt.time
+                : undefined;
+              const currentDate = task.prompt.time;
+              const showDateSep = currentDate && (
+                !prevDate ||
+                new Date(currentDate).toDateString() !== new Date(prevDate).toDateString()
+              );
               return (
+              <React.Fragment key={task.key}>
+              {showDateSep && (
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <div className="h-px flex-1 bg-border" />
+                  <span>{formatDateLabel(currentDate)}</span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+              )}
               <TaskGroup
-                key={task.key}
                 task={task}
                 number={index + 1}
                 status={status}
@@ -591,6 +532,7 @@ export default function MessageList({
                 onEditMessage={onEditMessage}
                 onDismissMessage={onDismissMessage}
                 onStopTask={onStopTask}
+                onSendRaw={onSendRaw}
                 searchQuery={taskQuery}
                 searchResultIndex={searchResultIndex}
                 isCurrentSearchResult={
@@ -598,6 +540,7 @@ export default function MessageList({
                   searchResultIndex === currentSearchResult
                 }
               />
+              </React.Fragment>
               );
             })}
           </div>
@@ -653,1006 +596,4 @@ export default function MessageList({
       )}
     </div>
   );
-}
-
-function getPreviousUserMessageTop(scrollArea: HTMLDivElement) {
-  const scrollAreaTop = scrollArea.getBoundingClientRect().top;
-  const userMessages = Array.from(
-    scrollArea.querySelectorAll<HTMLElement>("[data-user-message]"),
-  );
-
-  return userMessages
-    .map(
-      (message) =>
-        message.getBoundingClientRect().top -
-        scrollAreaTop +
-        scrollArea.scrollTop,
-    )
-    .findLast((position) => position < scrollArea.scrollTop - 8);
-}
-
-function getNextUserMessageTop(scrollArea: HTMLDivElement) {
-  const scrollAreaTop = scrollArea.getBoundingClientRect().top;
-  const positions = Array.from(
-    scrollArea.querySelectorAll<HTMLElement>("[data-user-message]"),
-  ).map(
-    (message) =>
-      message.getBoundingClientRect().top -
-      scrollAreaTop +
-      scrollArea.scrollTop,
-  );
-  return positions.find((position) => position > scrollArea.scrollTop + 24);
-}
-
-function collectToolCalls(richMessages: RichMessage[]): ToolCall[] {
-  const calls = new Map<string, ToolCall>();
-
-  for (const message of richMessages) {
-    for (const block of message.content) {
-      if (block.type === "tool_use" && block.tool_use_id) {
-        calls.set(block.tool_use_id, {
-          ...calls.get(block.tool_use_id),
-          id: block.tool_use_id,
-          name: block.tool_name || "Tool",
-          input: block.tool_input,
-          status: block.status || "running",
-          timestamp: message.timestamp,
-        });
-      }
-
-      if (block.type === "tool_result" && block.tool_use_id) {
-        const existing = calls.get(block.tool_use_id);
-        calls.set(block.tool_use_id, {
-          id: block.tool_use_id,
-          name: existing?.name || "Tool",
-          input: existing?.input,
-          result: block.text ?? "",
-          status: block.status || (block.is_error ? "failed" : "completed"),
-          isError: block.status === "failed" || block.is_error,
-          timestamp: existing?.timestamp || message.timestamp,
-        });
-      }
-    }
-  }
-
-  return [...calls.values()];
-}
-
-function findTaskAtTime(tasks: TaskSection[], timestamp: string) {
-  const targetTime = Date.parse(timestamp);
-  if (Number.isNaN(targetTime)) return undefined;
-
-  let low = 0;
-  let high = tasks.length - 1;
-  let match: TaskSection | undefined;
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    const promptTime = tasks[middle].prompt.time
-      ? Date.parse(tasks[middle].prompt.time!)
-      : Number.NaN;
-    if (Number.isNaN(promptTime) || promptTime > targetTime) {
-      high = middle - 1;
-    } else {
-      match = tasks[middle];
-      low = middle + 1;
-    }
-  }
-  return match;
-}
-
-function formatToolInput(input: unknown): string {
-  if (input === undefined || input === null) return "";
-  if (typeof input === "string") {
-    try {
-      return JSON.stringify(JSON.parse(input), null, 2);
-    } catch {
-      return input;
-    }
-  }
-
-  try {
-    return JSON.stringify(input, null, 2);
-  } catch {
-    return String(input);
-  }
-}
-
-function ToolCallCard({
-  toolCall,
-  searchQuery = "",
-  open,
-  onOpenChange,
-}: {
-  toolCall: ToolCall;
-  searchQuery?: string;
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-}) {
-  const isFailed = toolCall.status === "failed" || Boolean(toolCall.isError);
-  const isPending =
-    toolCall.status === "running" ||
-    (toolCall.status === undefined && toolCall.result === undefined);
-  const input = formatToolInput(toolCall.input);
-  const [localIsOpen, setLocalIsOpen] = useState(Boolean(searchQuery));
-  const isOpen = open ?? localIsOpen;
-
-  useEffect(() => {
-    if (open === undefined && searchQuery) {
-      setLocalIsOpen(true);
-    }
-  }, [open, searchQuery]);
-
-  return (
-    <details
-      className="group overflow-hidden rounded-lg border-l-2 border-y-0 border-r-0 bg-muted/20"
-      open={isOpen}
-      onToggle={(event) => {
-        if (open === undefined) {
-          setLocalIsOpen(event.currentTarget.open);
-        } else {
-          onOpenChange?.(event.currentTarget.open);
-        }
-      }}
-    >
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 transition hover:bg-muted/45 [&::-webkit-details-marker]:hidden">
-        {isFailed ? (
-          <CircleAlert className="size-3.5 shrink-0 text-destructive" />
-        ) : isPending ? (
-          <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-        ) : (
-          <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-        )}
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">{toolCall.name}</span>
-        <ArrowDown className="size-3 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
-      </summary>
-      <div className="space-y-3 border-t bg-muted/20 px-3 py-3">
-        {input && (
-          <ToolDetail label="Input" content={input} searchQuery={searchQuery} />
-        )}
-        {toolCall.result !== undefined && (
-          <ToolDetail
-            label={isFailed ? "Error" : "Result"}
-            content={toolCall.result || "(No output)"}
-            searchQuery={searchQuery}
-          />
-        )}
-        {!input && toolCall.result === undefined && (
-          <p className="text-xs text-muted-foreground">
-            No tool details are available yet.
-          </p>
-        )}
-      </div>
-    </details>
-  );
-}
-
-function ToolCallGroup({
-  toolCalls,
-  searchQuery,
-}: {
-  toolCalls: ToolCall[];
-  searchQuery: string;
-}) {
-  const [openToolIDs, setOpenToolIDs] = useState<Set<string>>(
-    () =>
-      new Set(searchQuery ? toolCalls.map((tool) => tool.id) : []),
-  );
-  const allOpen = toolCalls.every((tool) => openToolIDs.has(tool.id));
-
-  useEffect(() => {
-    if (searchQuery) {
-      setOpenToolIDs(new Set(toolCalls.map((tool) => tool.id)));
-    }
-  }, [searchQuery, toolCalls]);
-
-  return (
-    <section className="overflow-hidden rounded-xl border bg-muted/10">
-      <header className="flex items-center justify-between gap-2 border-b bg-muted/25 px-3 py-1">
-        <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium">
-          <Wrench className="size-3 shrink-0 text-muted-foreground" />
-          <span>{uiCopy.tools.groupLabel(toolCalls.length)}</span>
-        </span>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-6 shrink-0 px-1.5 text-xs"
-          onClick={() =>
-            setOpenToolIDs(
-              allOpen ? new Set() : new Set(toolCalls.map((tool) => tool.id)),
-            )
-          }
-          aria-expanded={allOpen}
-        >
-          {allOpen ? uiCopy.tools.collapseAll : uiCopy.tools.expandAll}
-        </Button>
-      </header>
-      <div className="space-y-1 p-1">
-        {toolCalls.map((toolCall) => (
-          <ToolCallCard
-            key={toolCall.id}
-            toolCall={toolCall}
-            searchQuery={searchQuery}
-            open={openToolIDs.has(toolCall.id)}
-            onOpenChange={(open) =>
-              setOpenToolIDs((current) => {
-                const next = new Set(current);
-                if (open) next.add(toolCall.id);
-                else next.delete(toolCall.id);
-                return next;
-              })
-            }
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ToolDetail({
-  label,
-  content,
-  searchQuery,
-}: {
-  label: string;
-  content: string;
-  searchQuery: string;
-}) {
-  return (
-    <section>
-      <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        {label}
-      </h3>
-      <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-background p-2 font-mono text-xs leading-5">
-        <HighlightedText content={content} query={searchQuery} />
-      </pre>
-    </section>
-  );
-}
-
-function TaskGroup({
-  task,
-  number,
-  status,
-  onRetryMessage,
-  onEditMessage,
-  onDismissMessage,
-  onStopTask,
-  searchQuery,
-  searchResultIndex,
-  isCurrentSearchResult,
-}: {
-  task: TaskSection;
-  number: number;
-  status: TaskStatus;
-  onRetryMessage: (clientId: string) => Promise<boolean>;
-  onEditMessage: (clientId: string, content: string) => void;
-  onDismissMessage: (clientId: string) => void;
-  onStopTask: () => void;
-  searchQuery: string;
-  searchResultIndex: number;
-  isCurrentSearchResult: boolean;
-}) {
-  const statusMeta = {
-    queued: {
-      label: "Queued",
-      icon: Clock3,
-      className: "text-muted-foreground",
-    },
-    running: {
-      label: "Running",
-      icon: LoaderCircle,
-      className: "text-amber-600 dark:text-amber-400",
-    },
-    completed: {
-      label: "Completed",
-      icon: CheckCircle2,
-      className: "text-emerald-600 dark:text-emerald-400",
-    },
-    failed: {
-      label: "Failed",
-      icon: CircleAlert,
-      className: "text-destructive",
-    },
-  }[status];
-  const StatusIcon = statusMeta.icon;
-  const activity = useMemo(
-    () => groupConsecutiveTools(getTaskActivity(task)),
-    [task],
-  );
-  const markdown = taskToMarkdown(toSearchableTask(task), number);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const latestTool = [...task.toolCalls].reverse().find(
-    (tool) => tool.result === undefined,
-  ) ?? task.toolCalls.at(-1);
-
-  useEffect(() => {
-    if (status !== "running") {
-      setElapsedSeconds(0);
-      return;
-    }
-    const startedAt = task.prompt.time
-      ? Date.parse(task.prompt.time)
-      : Date.now();
-    const update = () =>
-      setElapsedSeconds(
-        Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
-      );
-    update();
-    const timer = window.setInterval(update, 1000);
-    return () => window.clearInterval(timer);
-  }, [status, task.prompt.time]);
-
-  const copyTask = async () => {
-    try {
-      await navigator.clipboard.writeText(markdown);
-      toast.success("Task copied");
-    } catch {
-      toast.error("Could not copy the task");
-    }
-  };
-
-  const exportTask = () => {
-    const url = URL.createObjectURL(
-      new Blob([markdown], {type: "text/markdown;charset=utf-8"}),
-    );
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `agentapi-task-${number}.md`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    toast.success(`Task ${number} Markdown downloaded`);
-  };
-
-  return (
-    <section
-      id={`task-${number}`}
-      className={`overflow-hidden rounded-2xl border bg-background/70 transition ${
-        status === "running"
-          ? "border-amber-500/50 shadow-md ring-1 ring-amber-500/15"
-          : status === "completed"
-            ? "shadow-none"
-            : "shadow-sm"
-      } ${isCurrentSearchResult ? "ring-2 ring-primary/50" : ""}`}
-      data-status={status}
-      data-search-result={searchResultIndex}
-    >
-      <header
-        className={`flex min-h-11 items-center justify-between gap-3 border-b px-4 py-2 ${
-          status === "running" ? "bg-amber-500/10" : "bg-muted/20"
-        }`}
-      >
-        <div className="min-w-0">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Task {number}
-          </span>
-          {status === "running" && (
-            <p className="truncate text-xs text-foreground">
-              {latestTool ? `Using ${latestTool.name}` : "Processing task"}
-              {" · "}
-              {formatElapsedTime(elapsedSeconds)}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          <span
-            className={`flex items-center gap-1.5 text-xs font-medium ${statusMeta.className}`}
-            role="status"
-          >
-            <StatusIcon
-              className={`size-3.5 ${status === "running" ? "motion-safe:animate-spin" : ""}`}
-            />
-            {statusMeta.label}
-          </span>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="size-8"
-                title={`Task ${number} actions`}
-              >
-                <MoreHorizontal />
-                <span className="sr-only">Task {number} actions</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => setPreviewOpen(true)}>
-                <Eye />
-                Preview Markdown
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => void copyTask()}>
-                <Clipboard />
-                Copy task and output
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={exportTask}>
-                <Download />
-                Export Markdown
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {status === "running" && (
-            <Button
-              type="button"
-              size="sm"
-              variant="destructive"
-              className="h-8"
-              onClick={onStopTask}
-            >
-              Stop
-            </Button>
-          )}
-        </div>
-      </header>
-      <div className={`p-4 sm:p-5 ${status === "completed" ? "space-y-4" : "space-y-6"}`}>
-        <MessageItem
-          message={task.prompt}
-          onRetryMessage={onRetryMessage}
-          onEditMessage={onEditMessage}
-          onDismissMessage={onDismissMessage}
-          searchQuery={searchQuery}
-        />
-        {activity.map((item) =>
-          item.type === "message" ? (
-            <MessageItem
-              key={item.key}
-              message={item.message}
-              searchQuery={searchQuery}
-            />
-          ) : item.type === "tool-group" ? (
-            <div key={item.key} className="ml-3 sm:ml-8">
-              <ToolCallGroup
-                toolCalls={item.toolCalls}
-                searchQuery={searchQuery}
-              />
-            </div>
-          ) : (
-            <div key={item.key} className="ml-3 sm:ml-8">
-              <ToolCallCard
-                toolCall={item.toolCall}
-                searchQuery={searchQuery}
-              />
-            </div>
-          ),
-        )}
-      </div>
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="flex max-h-[85dvh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
-          <DialogHeader className="border-b px-5 py-4 pr-12">
-            <DialogTitle>Task {number} Markdown preview</DialogTitle>
-            <DialogDescription>
-              Rendered preview of the Markdown produced by copy and export.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-            <ProcessedMessage
-              messageContent={markdown}
-              isUser={false}
-              renderMode="markdown"
-            />
-          </div>
-          <DialogFooter className="gap-2 border-t px-5 py-3">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => void copyTask()}
-            >
-              <Clipboard />
-              Copy
-            </Button>
-            <Button type="button" onClick={exportTask}>
-              <Download />
-              Download
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </section>
-  );
-}
-
-function getTaskActivity(task: TaskSection): TaskActivity[] {
-  // Always start with PTY responses — they contain the full process output
-  // (intermediate thinking, tool descriptions, progress messages) that JSONL
-  // rich messages don't capture.
-  const result: TaskActivity[] = task.responses.map((message, index) => ({
-    type: "message" as const,
-    key: `response-${message.id ?? index}`,
-    message,
-  }));
-
-  // Merge tool calls from rich activity and any uncovered tool calls.
-  const coveredToolIDs = new Set(
-    task.richActivity
-      .filter((item) => item.type === "tool")
-      .map((item) => (item as Extract<TaskActivity, {type: "tool"}>).toolCall.id),
-  );
-
-  // Add tool calls from richActivity (these have structured input/output).
-  for (const item of task.richActivity) {
-    if (item.type === "tool") {
-      result.push(item);
-    }
-  }
-
-  // Add any tool calls not already covered by richActivity.
-  for (const toolCall of task.toolCalls) {
-    if (!coveredToolIDs.has(toolCall.id)) {
-      result.push({
-        type: "tool" as const,
-        key: `tool-${toolCall.id}`,
-        toolCall,
-      });
-    }
-  }
-
-  return result.sort((left, right) => {
-    const leftTime =
-      left.type === "message" ? left.message.time :
-      left.type === "tool" ? left.toolCall.timestamp : undefined;
-    const rightTime =
-      right.type === "message" ? right.message.time :
-      right.type === "tool" ? right.toolCall.timestamp : undefined;
-    if (!leftTime) return 1;
-    if (!rightTime) return -1;
-    return Date.parse(leftTime) - Date.parse(rightTime);
-  });
-}
-
-function toSearchableTask(task: TaskSection) {
-  const activity = getTaskActivity(task);
-  return {
-    prompt: task.prompt.content,
-    responses: activity
-      .filter(
-        (item): item is Extract<TaskActivity, {type: "message"}> =>
-          item.type === "message",
-      )
-      .map((item) => item.message.content),
-    tools: task.toolCalls.map((tool) => ({
-      name: tool.name,
-      input: formatToolInput(tool.input),
-      result: tool.result,
-      isError: tool.isError,
-    })),
-  };
-}
-
-function countTaskMatches(task: TaskSection, query: string) {
-  const normalized = query.trim().toLocaleLowerCase();
-  if (!normalized) return 0;
-  const searchable = toSearchableTask(task);
-  return [
-    searchable.prompt,
-    ...searchable.responses,
-    ...searchable.tools.flatMap((tool) => [
-      tool.name,
-      tool.input ?? "",
-      tool.result ?? "",
-    ]),
-  ].reduce(
-    (total, content) =>
-      total + content.toLocaleLowerCase().split(normalized).length - 1,
-    0,
-  );
-}
-
-function HighlightedText({
-  content,
-  query,
-}: {
-  content: string;
-  query: string;
-}) {
-  const normalized = query.trim();
-  if (!normalized) return content;
-  const expression = new RegExp(
-    `(${normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
-    "giu",
-  );
-  return content.split(expression).map((part, index) =>
-    part.toLocaleLowerCase() === normalized.toLocaleLowerCase() ? (
-      <mark
-        key={`${index}-${part}`}
-        className="rounded-sm bg-amber-300 px-0.5 text-black"
-      >
-        {part}
-      </mark>
-    ) : (
-      <React.Fragment key={`${index}-${part}`}>{part}</React.Fragment>
-    ),
-  );
-}
-
-function formatElapsedTime(seconds: number) {
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-}
-
-function contentFingerprint(content: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < content.length; index += 1) {
-    hash ^= content.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `${content.length}:${hash >>> 0}`;
-}
-
-function EmptyState({
-  serverStatus,
-  agentType,
-  onSelectPrompt,
-}: {
-  serverStatus: ServerStatus;
-  agentType: AgentType;
-  onSelectPrompt?: (prompt: string) => void;
-}) {
-  const isOffline = serverStatus === "offline";
-  const name =
-    agentType === "unknown" ? "your coding agent" : agentType.replace("-", " ");
-
-  return (
-    <div className="mx-auto flex h-full w-full max-w-3xl flex-col items-center justify-center px-6 py-12 text-center">
-      <div className="relative mb-7">
-        <div className="absolute inset-0 scale-150 rounded-full bg-primary/10 blur-2xl" />
-        <div className="relative grid size-16 place-items-center rounded-2xl border bg-card shadow-sm">
-          <TerminalSquare className="size-7" />
-        </div>
-      </div>
-      <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-        <Sparkles className="size-3.5" />
-        Live agent workspace
-      </p>
-      <h1 className="max-w-xl text-balance text-2xl font-semibold tracking-tight sm:text-3xl">
-        {isOffline ? "The agent server is offline" : `Start working with ${name}`}
-      </h1>
-      <p className="mt-3 max-w-lg text-pretty text-sm leading-6 text-muted-foreground">
-        {isOffline
-          ? "AgentAPI is trying to reconnect. Check the server URL and make sure the agent process is running."
-            : "Send a task, attach project files, or switch to Terminal input when the agent needs direct keystrokes."}
-      </p>
-      {!isOffline && (
-        <div className="mt-8 grid w-full max-w-lg grid-cols-1 gap-3 text-left sm:grid-cols-2">
-          <PromptHint
-            icon={Code2}
-            text="Review the current codebase"
-            prompt="Review the current codebase and suggest the highest-impact improvements."
-            onSelect={onSelectPrompt}
-          />
-          <PromptHint
-            icon={TerminalSquare}
-            text="Investigate a failing test"
-            prompt="Run the test suite, investigate any failures, and explain the root cause."
-            onSelect={onSelectPrompt}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PromptHint({
-  icon: Icon,
-  text,
-  prompt,
-  onSelect,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  text: string;
-  prompt: string;
-  onSelect?: (prompt: string) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect?.(prompt)}
-      className="flex min-h-12 items-center gap-3 rounded-xl border bg-card/60 p-3 text-left text-xs text-muted-foreground shadow-xs transition hover:bg-card hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2"
-    >
-      <Icon className="size-4 shrink-0 text-foreground" />
-      <span>{text}</span>
-    </button>
-  );
-}
-
-function MessageItem({
-  message,
-  onRetryMessage,
-  onEditMessage,
-  onDismissMessage,
-  searchQuery: globalSearchQuery = "",
-}: {
-  message: Message | DraftMessage;
-  onRetryMessage?: (clientId: string) => Promise<boolean>;
-  onEditMessage?: (clientId: string, content: string) => void;
-  onDismissMessage?: (clientId: string) => void;
-  searchQuery?: string;
-}) {
-  const isUser = message.role === "user";
-  const isDraft = message.id === undefined;
-  const draft = isDraft ? (message as DraftMessage) : undefined;
-  const isFailed = draft?.deliveryStatus === "failed";
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [outputSearchQuery, setOutputSearchQuery] = useState("");
-  const [markdownView, setMarkdownView] = useState(false);
-
-  // localStorage is read after mount so the static export hydrates cleanly.
-  useEffect(() => {
-    setMarkdownView(
-      window.localStorage.getItem(agentRenderModeStorageKey) === "markdown",
-    );
-  }, []);
-  const toggleMarkdownView = () => {
-    setMarkdownView((current) => {
-      const next = !current;
-      try {
-        window.localStorage.setItem(
-          agentRenderModeStorageKey,
-          next ? "markdown" : "raw",
-        );
-      } catch {
-        // Preference persistence is best-effort only.
-      }
-      return next;
-    });
-  };
-  const effectiveSearchQuery = outputSearchQuery || globalSearchQuery;
-  const matchCount =
-    outputSearchQuery.trim() === ""
-      ? 0
-      : message.content
-          .toLocaleLowerCase()
-          .split(outputSearchQuery.trim().toLocaleLowerCase()).length - 1;
-
-  if (!isUser) {
-    return (
-      <article className="min-w-0">
-        <div className="mb-2 flex min-h-9 flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <TerminalSquare className="size-3.5" />
-            <span>Agent output</span>
-            {message.time && (
-              <time
-                dateTime={message.time}
-                className="font-normal normal-case tracking-normal"
-                title={new Date(message.time).toLocaleString()}
-              >
-                {formatMessageTime(message.time)}
-              </time>
-            )}
-            {isDraft && (
-              <span className="normal-case tracking-normal">Updating…</span>
-            )}
-          </div>
-          {message.content && (
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={toggleMarkdownView}
-                className={`grid size-9 place-items-center rounded-md transition hover:bg-muted hover:text-foreground ${
-                  markdownView
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground"
-                }`}
-                title={
-                  markdownView
-                    ? "Show raw terminal output"
-                    : "Preview as Markdown"
-                }
-                aria-label={
-                  markdownView
-                    ? "Show raw terminal output"
-                    : "Preview output as Markdown"
-                }
-                aria-pressed={markdownView}
-              >
-                {markdownView ? (
-                  <Code2 className="size-3.5" />
-                ) : (
-                  <FileText className="size-3.5" />
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchOpen((open) => !open);
-                  if (searchOpen) setOutputSearchQuery("");
-                }}
-                className="grid size-9 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                title="Search output"
-                aria-label="Search output"
-                aria-expanded={searchOpen}
-              >
-                <Search className="size-3.5" />
-              </button>
-              <CopyButton content={message.content} />
-            </div>
-          )}
-        </div>
-        {searchOpen && (
-          <label className="mb-2 flex items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-xs">
-            <Search className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="sr-only">Search this agent output</span>
-            <input
-              autoFocus
-              type="search"
-              value={outputSearchQuery}
-              onChange={(event) => setOutputSearchQuery(event.target.value)}
-              placeholder="Search this output…"
-              className="min-w-0 flex-1 bg-transparent outline-none"
-            />
-            {outputSearchQuery && (
-              <span className="shrink-0 text-muted-foreground" role="status">
-                {matchCount} {matchCount === 1 ? "match" : "matches"}
-              </span>
-            )}
-          </label>
-        )}
-        {message.content === "" ? (
-          <LoadingDots />
-        ) : (
-          <div>
-            <ProcessedMessage
-              messageContent={message.content}
-              isUser={false}
-              renderMode={markdownView ? "markdown" : "raw"}
-              searchQuery={effectiveSearchQuery}
-            />
-          </div>
-        )}
-      </article>
-    );
-  }
-
-  return (
-    <article
-      className="flex scroll-mt-4 flex-row-reverse gap-3 border-t pt-7 first:border-t-0 first:pt-0 sm:gap-4"
-      data-user-message
-    >
-      <div
-        className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border bg-foreground text-background shadow-xs"
-      >
-        <User className="size-4" />
-      </div>
-      <div className="min-w-0 max-w-[85%]">
-        <div className="mb-1.5 flex min-h-9 items-center justify-end gap-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <span>You</span>
-            {message.time && (
-              <time
-                dateTime={message.time}
-                className="font-normal normal-case tracking-normal"
-                title={new Date(message.time).toLocaleString()}
-              >
-                {formatMessageTime(message.time)}
-              </time>
-            )}
-          {isDraft && !isFailed && (
-            <span className="normal-case tracking-normal">Sending…</span>
-          )}
-          {isFailed && (
-            <span className="normal-case tracking-normal text-destructive">
-              Not sent
-            </span>
-          )}
-          </div>
-          {message.content && (
-            <CopyButton content={message.content} label="task" />
-          )}
-        </div>
-        <div className="rounded-2xl rounded-tr-md bg-foreground px-4 py-3 text-sm leading-6 text-background shadow-sm">
-          {message.content === "" ? (
-            <LoadingDots />
-          ) : (
-            <ProcessedMessage
-              messageContent={message.content}
-              isUser={isUser}
-              searchQuery={globalSearchQuery}
-            />
-          )}
-        </div>
-        {isFailed && draft && (
-          <div
-            className="mt-2 flex flex-wrap justify-end gap-1"
-            role="alert"
-            aria-label={`Message was not sent${draft.error ? `: ${draft.error}` : ""}`}
-          >
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => void onRetryMessage?.(draft.clientId)}
-            >
-              <RefreshCw />
-              Retry
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => onEditMessage?.(draft.clientId, draft.content)}
-            >
-              <Pencil />
-              Edit
-            </Button>
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              onClick={() => onDismissMessage?.(draft.clientId)}
-              title="Dismiss failed message"
-            >
-              <X />
-              <span className="sr-only">Dismiss failed message</span>
-            </Button>
-          </div>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function CopyButton({
-  content,
-  label = "response",
-}: {
-  content: string;
-  label?: "task" | "response";
-}) {
-  const [copied, setCopied] = useState(false);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      // Clipboard access can be blocked in embedded or non-secure contexts.
-      setCopied(false);
-      toast.error(`Could not copy the ${label}`, {
-        description: "Clipboard access may be blocked in this browser context.",
-      });
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={copy}
-      className="grid size-11 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground sm:size-9"
-      title={copied ? `Copied ${label}` : `Copy ${label}`}
-      aria-label={copied ? `Copied ${label}` : `Copy ${label}`}
-    >
-      {copied ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
-    </button>
-  );
-}
-
-const LoadingDots = () => (
-  <div
-    className="flex h-6 items-center gap-1.5"
-    role="status"
-    aria-live="polite"
-    aria-label="Agent is responding"
-  >
-    {[0, 150, 300].map((delay) => (
-      <span
-        key={delay}
-        className="size-1.5 animate-pulse rounded-full bg-muted-foreground"
-        style={{ animationDelay: `${delay}ms` }}
-      />
-    ))}
-  </div>
-);
-
-function formatMessageTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
 }

@@ -1,8 +1,11 @@
 import React from "react";
 import {LinkifyIt} from "linkify-it";
+import {Check, Clipboard} from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import {common} from "@/lib/highlight-langs";
 
 type MarkdownNode = {
   type: string;
@@ -125,6 +128,45 @@ function linkifyTerminalText(content: string) {
   return parts;
 }
 
+function CodeBlockCopy({ children }: { children: React.ReactNode }) {
+  const [copied, setCopied] = React.useState(false);
+
+  const getCodeString = (node: React.ReactNode): string => {
+    if (typeof node === "string") return node;
+    if (Array.isArray(node)) return node.map(getCodeString).join("");
+    if (React.isValidElement(node) && node.props) {
+      return getCodeString((node.props as { children?: React.ReactNode }).children ?? "");
+    }
+    return "";
+  };
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(getCodeString(children));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // Clipboard access may be blocked
+    }
+  };
+
+  return (
+    <div className="group/code relative my-3">
+      <pre className="max-w-full overflow-x-auto rounded-lg border border-code-block-border bg-code-block-bg p-4 text-code-block-text shadow-inner whitespace-pre [&>code]:border-0 [&>code]:bg-transparent [&>code]:p-0 [&>code]:font-normal [&>code]:text-inherit">
+        {children}
+      </pre>
+      <button
+        type="button"
+        onClick={() => void handleCopy()}
+        className="absolute right-2 top-2 grid size-8 place-items-center rounded-md border border-code-block-border bg-code-block-bg text-code-block-text opacity-0 transition hover:bg-code-block-border focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover/code:opacity-100"
+        aria-label={copied ? "Copied" : "Copy code"}
+      >
+        {copied ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
+      </button>
+    </div>
+  );
+}
+
 export const ProcessedMessage = React.memo(function ProcessedMessage({
   messageContent,
   isUser,
@@ -153,6 +195,7 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
     <div className="min-w-0 text-left text-sm leading-6">
       <ReactMarkdown
         remarkPlugins={[remarkLinkify, remarkGfm, remarkBreaks]}
+        rehypePlugins={[[rehypeHighlight, {languages: common}]]}
         components={{
           a: (properties) => {
             const {children, ...anchorProps} = properties;
@@ -217,11 +260,7 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
           tr: ({children}) => (
             <tr className="last:[&>td]:border-b-0">{children}</tr>
           ),
-          pre: ({children}) => (
-            <pre className="my-3 max-w-full overflow-x-auto rounded-lg border border-zinc-700 bg-zinc-950 p-4 text-zinc-100 shadow-inner whitespace-pre [&>code]:border-0 [&>code]:bg-transparent [&>code]:p-0 [&>code]:font-normal [&>code]:text-inherit">
-              {children}
-            </pre>
-          ),
+          pre: ({children}) => <CodeBlockCopy>{children}</CodeBlockCopy>,
         }}
       >
         {messageContent}
@@ -242,7 +281,7 @@ function highlightTerminalText(content: string, query: string) {
     part.toLocaleLowerCase() === normalizedQuery.toLocaleLowerCase() ? (
       <mark
         key={`${index}-${part}`}
-        className="rounded-sm bg-amber-300 px-0.5 text-black"
+        className="rounded-sm bg-search-highlight px-0.5 text-search-highlight-text"
       >
         {part}
       </mark>

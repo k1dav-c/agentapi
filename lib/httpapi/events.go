@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -347,11 +348,44 @@ func (e *EventEmitter) EmitRichMessage(msg jsonlwatcher.RichMessage) {
 		}
 	}
 	if idx >= 0 {
-		e.richMessages[idx] = msg
+		existing := e.richMessages[idx]
+		existing.Content = mergeRichContent(existing.Content, msg.Content)
+		existing.StopReason = msg.StopReason
+		existing.Model = msg.Model
+		existing.Usage = msg.Usage
+		e.richMessages[idx] = existing
+		msg = existing
 	} else {
 		e.richMessages = append(e.richMessages, msg)
 	}
+	// Always broadcast the merged snapshot. Broadcasting the incoming Claude
+	// delta would make clients replace a complete message with its last block.
 	e.notifyChannels(EventTypeRichMessageUpdate, RichMessageUpdateBody(msg))
+}
+
+func mergeRichContent(existing, incoming []jsonlwatcher.RichContentBlock) []jsonlwatcher.RichContentBlock {
+	merged := slices.Clone(existing)
+	seen := make(map[string]struct{}, len(existing))
+	for _, block := range existing {
+		seen[richContentBlockKey(block)] = struct{}{}
+	}
+	for _, block := range incoming {
+		key := richContentBlockKey(block)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, block)
+	}
+	return merged
+}
+
+func richContentBlockKey(block jsonlwatcher.RichContentBlock) string {
+	if block.ToolUseID != "" {
+		return block.Type + ":" + block.ToolUseID
+	}
+	encoded, _ := json.Marshal(block)
+	return string(encoded)
 }
 
 // RichMessages returns a snapshot of all rich messages received so far.

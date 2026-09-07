@@ -14,12 +14,20 @@ import (
 type ClaudeParser struct {
 	pending       map[string]*RichMessage
 	lastPendingID string
+	// flushed keeps track of messages that were emitted by FlushCompleted
+	// but may still receive additional content blocks. Claude stamps
+	// stop_reason on every JSONL line of a turn, so FlushCompleted can
+	// fire between blocks of the same message.id. When a new block
+	// arrives for a flushed message, we re-attach it to pending with
+	// its accumulated content intact.
+	flushed map[string]*RichMessage
 }
 
 // NewClaudeParser creates a new ClaudeParser.
 func NewClaudeParser() *ClaudeParser {
 	return &ClaudeParser{
 		pending: make(map[string]*RichMessage),
+		flushed: make(map[string]*RichMessage),
 	}
 }
 
@@ -41,11 +49,14 @@ func (p *ClaudeParser) ParseLine(line []byte) ([]RichMessage, error) {
 }
 
 // FlushCompleted finalizes only pending messages that have a terminal stop_reason.
+// Flushed messages are kept in p.flushed so that additional content blocks
+// arriving for the same message.id can be appended (see handleAssistant).
 func (p *ClaudeParser) FlushCompleted() []RichMessage {
 	var result []RichMessage
 	for id, msg := range p.pending {
 		if msg.StopReason != "" {
 			result = append(result, *msg)
+			p.flushed[id] = msg
 			delete(p.pending, id)
 			if p.lastPendingID == id {
 				p.lastPendingID = ""
@@ -57,7 +68,10 @@ func (p *ClaudeParser) FlushCompleted() []RichMessage {
 
 // Flush finalizes all pending assistant messages regardless of state.
 func (p *ClaudeParser) Flush() []RichMessage {
-	return p.finalizePending()
+	result := p.finalizePending()
+	// Clear flushed map — on shutdown everything is done.
+	clear(p.flushed)
+	return result
 }
 
 func (p *ClaudeParser) handleAssistant(entry *JSONLLine) []RichMessage {
@@ -72,19 +86,31 @@ func (p *ClaudeParser) handleAssistant(entry *JSONLLine) []RichMessage {
 	var completed []RichMessage
 
 	// If we see a new message.id, finalize the previous pending message
+	// and clear any flushed entries for the old ID (they are fully done).
 	if p.lastPendingID != "" && p.lastPendingID != msgID {
 		completed = p.finalizePending()
+		// A new message.id means the previous turn is truly complete.
+		// Clear its flushed entry so it won't be re-attached.
+		delete(p.flushed, p.lastPendingID)
 	}
 
-	// Get or create the pending message for this message.id
+	// Get or create the pending message for this message.id.
+	// Check flushed first: if this message was already emitted by
+	// FlushCompleted, re-attach it so new blocks are appended to
+	// the existing content rather than starting from empty.
 	rich, exists := p.pending[msgID]
 	if !exists {
-		ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
-		rich = &RichMessage{
-			MessageID: msgID,
-			Role:      "assistant",
-			Model:     entry.Message.Model,
-			Timestamp: ts,
+		if prev, wasFlushed := p.flushed[msgID]; wasFlushed {
+			rich = prev
+			delete(p.flushed, msgID)
+		} else {
+			ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
+			rich = &RichMessage{
+				MessageID: msgID,
+				Role:      "assistant",
+				Model:     entry.Message.Model,
+				Timestamp: ts,
+			}
 		}
 		p.pending[msgID] = rich
 	}

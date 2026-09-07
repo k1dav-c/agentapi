@@ -16,10 +16,12 @@ export function getDocumentTitle({
   connectionStatus,
   serverStatus,
   task,
+  customTitle,
 }: {
   connectionStatus: ConnectionStatus;
   serverStatus: ServerStatus;
   task?: string;
+  customTitle?: string;
 }) {
   const status =
     connectionStatus === "offline"
@@ -32,8 +34,9 @@ export function getDocumentTitle({
             ? "✓ Ready"
             : "○ Connecting";
   const taskSummary = task ? summarizeTask(task) : "";
+  const suffix = customTitle || "AgentAPI";
 
   return taskSummary
-    ? `${status} · ${taskSummary} — AgentAPI`
-    : `${status} · ${DEFAULT_TITLE}`;
+    ? `${status} · ${taskSummary} — ${suffix}`
+    : `${status} · ${customTitle || DEFAULT_TITLE}`;
 }

@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.13.0
+
+### Features
+- Render Claude thinking blocks as collapsible sections in the task timeline
+- Per-message markdown/raw render toggle (replaces global toolbar toggle)
+
+### Fixes
+- Merge rich message content blocks on re-emit instead of dropping earlier blocks during Claude delta streaming
+- Switch tailed JSONL file at runtime when Claude Code parks a session to a new path
+- Reorder resolver priority so ParkedJobID scan runs before direct file check, preventing stale session selection
+
 ## v0.12.2
 
 ### Fixes

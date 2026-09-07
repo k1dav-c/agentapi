@@ -31,6 +31,9 @@ The Session Explorer provides:
 - access to the live terminal when the parsed conversation is not sufficient;
 - MCP server and webhook configuration without leaving the chat UI.
 
+Each message has its own markdown/raw toggle so you can switch render
+modes without affecting the rest of the conversation.
+
 The UI also includes improved mobile layouts, attachment handling, searchable
 tool activity, connection-state indicators, and more compact tool-call cards.
 
@@ -64,6 +67,8 @@ be reconstructed reliably from terminal output alone.
   auditing, or building another UI.
 - Background and delegated tasks remain visible with their running, completed,
   or failed state and output details.
+- Claude thinking blocks are rendered inline as collapsible sections in the
+  task timeline.
 
 Terminal parsing remains the fallback for other agents and for environments
 where a session log is unavailable.
@@ -184,7 +189,9 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 
 The fork also includes fixes for wide-character terminal cursor tracking,
 PTY lifecycle leaks, concurrent event delivery, message tracking races, ACP
-shutdown, TUI re-render artifacts, and JSONL watcher flushing. These changes are
+shutdown, TUI re-render artifacts, JSONL watcher flushing, rich message
+content-block merging during Claude delta streaming, and runtime session-file
+switching when Claude Code parks a session to a new JSONL. These changes are
 intended to keep AgentAPI stable across long sessions, process replacement, and
 temporary browser or network interruptions.
 
