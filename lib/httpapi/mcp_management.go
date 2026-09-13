@@ -75,11 +75,16 @@ func (s *Server) restartQuery(ctx context.Context, restart bool) (bool, error) {
 	if s.restartAgent == nil {
 		return false, huma.Error400BadRequest("agent restart is not supported in this server mode")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.emitter.SetLifecycle(LifecycleRestarting)
 	newPID, err := s.restartAgent(ctx)
 	if err != nil {
+		s.emitter.SetLifecycle(LifecycleFailed)
 		return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", err)
 	}
 	s.startJSONLWatcher(newPID)
+	s.emitter.SetLifecycle(LifecycleStarting)
 	return true, nil
 }
 

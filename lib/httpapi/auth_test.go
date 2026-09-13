@@ -78,7 +78,7 @@ func TestTokenAuthMiddleware(t *testing.T) {
 		middleware := tokenAuthMiddleware("secret-token")
 		handler := middleware(okHandler)
 
-		for _, path := range []string{"/status", "/messages", "/message", "/events", "/usage", "/webhook", "/mcp"} {
+		for _, path := range []string{"/status", "/messages", "/message", "/events", "/usage", "/webhook", "/mcp", "/handoff", "/handoff/reply"} {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)

@@ -71,7 +71,10 @@ type Server struct {
 	messageQueue       []QueuedMessage
 	mcpStore           mcpconfig.Store
 	mcpMu              sync.Mutex
+	temporalMu         sync.Mutex
 	webhook            *webhookDispatcher
+	handoffSuppressed  string
+	handoffReceipts    map[string]handoffReceipt
 	restartAgent       func(context.Context) (int, error)
 	jsonlWatcherCancel context.CancelFunc
 	jsonlParentCtx     context.Context // parent context for spawning new JSONL watchers
@@ -587,12 +590,18 @@ func sseMiddleware(ctx huma.Context, next func(huma.Context)) {
 
 // registerRoutes sets up all API endpoints
 func (s *Server) registerRoutes() {
+	s.registerTemporalRoutes()
+	huma.Get(s.api, "/handoff", s.getPendingHandoff)
+	huma.Post(s.api, "/handoff/reply", s.replyHandoff)
 	// GET /status endpoint
 	huma.Get(s.api, "/status", s.getStatus, func(o *huma.Operation) {
 		o.Description = "Returns the current status of the agent."
 	})
 	huma.Get(s.api, "/title", s.getTitle, func(o *huma.Operation) {
 		o.Description = "Returns the current human-readable session title and the server state used to derive it."
+	})
+	huma.Get(s.api, "/workspace", s.getWorkspace, func(o *huma.Operation) {
+		o.Description = "Returns the Coder workspace URL injected into the process, when available."
 	})
 
 	// GET /messages endpoint
@@ -762,6 +771,17 @@ func (s *Server) getTitle(ctx context.Context, input *struct{}) (*TitleResponse,
 	return resp, nil
 }
 
+func (s *Server) getWorkspace(_ context.Context, _ *struct{}) (*WorkspaceResponse, error) {
+	var response WorkspaceResponse
+	base := strings.TrimRight(os.Getenv("CODER_URL"), "/")
+	owner := strings.TrimSpace(os.Getenv("CODER_WORKSPACE_OWNER_NAME"))
+	name := strings.TrimSpace(os.Getenv("CODER_WORKSPACE_NAME"))
+	if base != "" && owner != "" && name != "" {
+		response.Body.URL = base + "/@" + url.PathEscape(owner) + "/" + url.PathEscape(name)
+	}
+	return &response, nil
+}
+
 // getMessages handles GET /messages
 func (s *Server) getMessages(ctx context.Context, input *struct{}) (*MessagesResponse, error) {
 	s.mu.RLock()
@@ -806,6 +826,7 @@ func (s *Server) getTimeline(ctx context.Context, input *struct{}) (*TimelineRes
 func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*MessageResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	pending := s.pendingHandoffLocked()
 
 	resp := &MessageResponse{}
 	switch input.Body.Type {
@@ -837,6 +858,9 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 	}
 
 	resp.Body.Ok = true
+	if pending != nil {
+		s.handoffSuppressed = pending.ID
+	}
 
 	return resp, nil
 }
@@ -909,6 +933,14 @@ func (s *Server) startMessageQueue() {
 func (s *Server) dispatchNextQueuedMessage() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.emitter != nil && s.transport == TransportPTY {
+		s.emitter.mu.Lock()
+		terminalQuestion := isTerminalQuestion(s.emitter.screen)
+		s.emitter.mu.Unlock()
+		if terminalQuestion {
+			return
+		}
+	}
 
 	if len(s.messageQueue) == 0 || s.conversation.Status() != st.ConversationStatusStable {
 		return
