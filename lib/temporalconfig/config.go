@@ -10,7 +10,6 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,34 +40,8 @@ type ProfilesDocument struct {
 
 func Defaults() Config {
 	return Config{AgentURL: "http://localhost:3284", TemporalAddress: "localhost:7233",
-		Namespace: defaultNamespace(), AllowedUsers: []string{}, AgentTokenEnv: "AGENTAPI_API_TOKEN",
+		Namespace: "default", AllowedUsers: []string{}, AgentTokenEnv: "AGENTAPI_API_TOKEN",
 		TemporalAPIKeyEnv: "TEMPORAL_API_KEY", BotTokenEnv: "DISCORD_BOT_TOKEN"}
-}
-
-func defaultNamespace() string {
-	name := strings.TrimSpace(os.Getenv("AGENTAPI_SESSION_NAME"))
-	if name == "" {
-		name = strings.TrimSpace(os.Getenv("CODER_WORKSPACE_NAME"))
-	}
-	if name == "" {
-		return "default"
-	}
-	var builder strings.Builder
-	for _, r := range strings.ToLower(name) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
-			builder.WriteRune(r)
-		} else {
-			builder.WriteByte('-')
-		}
-	}
-	value := strings.Trim(builder.String(), "-_.")
-	if len(value) > 64 {
-		value = strings.TrimRight(value[:64], "-_.")
-	}
-	if value == "" {
-		return "default"
-	}
-	return value
 }
 
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)

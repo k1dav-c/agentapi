@@ -55,19 +55,14 @@ the server (for example, in a process supervisor). The browser can come and go.
    See [Discord Gateway intents](https://docs.discord.com/developers/events/gateway).
 
 4. Start the bridge in another terminal or service, with credentials supplied
-   through its environment:
+   from the saved Temporal configuration:
 
    ```bash
-   export DISCORD_BOT_TOKEN='<bot token>'
-   export DISCORD_CHANNEL_ID='<channel ID>'
-   export DISCORD_ALLOWED_USER_IDS='<your user ID>'
-   ./out/agentapi discord
+   ./out/agentapi discord --config .agentapi/temporal.json
    ```
 
-   The configuration file may also contain the AgentAPI token, Temporal API
-   key, and Discord bot token. Environment variables named by the corresponding
-   `*_ENV` settings override stored values when both are present. Protect this
-   file because stored credentials are plaintext.
+   The configuration file contains the AgentAPI token, Temporal API key, and
+   Discord bot token. Protect this file because stored credentials are plaintext.
 
    If AgentAPI requires authentication, set `AGENTAPI_API_TOKEN` in the bridge
    to the same token used by the server. The bridge does not automatically
@@ -114,15 +109,15 @@ To use a saved config instead, mount it at `/data/temporal.json` and set
 | Environment variable | CLI flag | Default / purpose |
 | --- | --- | --- |
 | `AGENTAPI_DISCORD_AGENT_URL` | `--agent-url` | `http://localhost:3284` |
-| `AGENTAPI_API_TOKEN` | `--agent-token` | Optional server Bearer token |
+| JSON `agent_token` | `--agent-token` | Optional server Bearer token |
 | `TEMPORAL_ADDRESS` | `--temporal-address` | `localhost:7233` |
 | `TEMPORAL_NAMESPACE` | `--temporal-namespace` | `default` |
 | `TEMPORAL_TLS` | `--temporal-tls` | `false` |
-| `TEMPORAL_API_KEY` | `--temporal-api-key` | Optional; automatically enables TLS |
+| JSON `temporal_api_key` | `--temporal-api-key` | Optional; automatically enables TLS |
 | `AGENTAPI_DISCORD_TASK_QUEUE` | `--task-queue` | Derived from AgentAPI URL and Discord channel |
-| `DISCORD_BOT_TOKEN` | `--bot-token` | Required |
-| `DISCORD_CHANNEL_ID` | `--channel-id` | Required |
-| `DISCORD_ALLOWED_USER_IDS` | `--allowed-users` | Required, comma-separated user IDs |
+| JSON `bot_token` | `--bot-token` | Required |
+| JSON `channel_id` | `--channel-id` | Required |
+| JSON `allowed_users` | `--allowed-users` | Required, comma-separated user IDs |
 
 For Temporal Cloud, provide its address, namespace and API key. Custom CA and
 mutual TLS certificate flags are not implemented. The worker must be able to

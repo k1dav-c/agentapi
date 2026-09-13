@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestHelpDoesNotExposeEnvironmentCredentials(t *testing.T) {
+func TestCredentialsAreLoadedFromConfigInsteadOfEnvironment(t *testing.T) {
 	for _, key := range []string{"AGENTAPI_API_TOKEN", "TEMPORAL_API_KEY", "DISCORD_BOT_TOKEN"} {
 		t.Setenv(key, "private-test-credential")
 	}
@@ -21,6 +21,6 @@ func TestHelpDoesNotExposeEnvironmentCredentials(t *testing.T) {
 	for _, name := range []string{"agent-token", "temporal-api-key", "bot-token"} {
 		value, err := command.Flags().GetString(name)
 		require.NoError(t, err)
-		require.Equal(t, "private-test-credential", value)
+		require.Empty(t, value)
 	}
 }

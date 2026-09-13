@@ -86,7 +86,7 @@ export function TemporalSettings() {
   };
   if (loading) return <div className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Loading Temporal settings…</div>;
   return <div className="space-y-4">
-    <div><h3 className="text-sm font-medium">Temporal handoff</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">Settings are saved in the project and used by the <code>agentapi discord</code> worker. Environment variables override stored secrets when present.</p></div>
+    <div><h3 className="text-sm font-medium">Temporal handoff</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">Settings are saved in the project and used by the <code>agentapi discord</code> worker. Credentials are loaded from this JSON configuration.</p></div>
     <div className="grid grid-cols-2 gap-3">
       <label className="space-y-1.5"><span className="text-xs font-medium">AgentAPI URL</span><input value={config.agent_url} onChange={(e) => update("agent_url", e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-sm" /></label>
       <label className="space-y-1.5"><span className="text-xs font-medium">Temporal address</span><input value={config.temporal_address} onChange={(e) => update("temporal_address", e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-sm" /></label>
@@ -96,9 +96,6 @@ export function TemporalSettings() {
       <label className="space-y-1.5"><span className="text-xs font-medium">Allowed user IDs</span><input value={config.allowed_users.join(", ")} onChange={(e) => update("allowed_users", e.target.value.split(",").map((v) => v.trim()).filter(Boolean))} className="h-9 w-full rounded-md border bg-background px-2 text-sm" /></label>
     </div>
     <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={config.temporal_tls} onChange={(e) => update("temporal_tls", e.target.checked)} />Use TLS for Temporal</label>
-    <div className="grid grid-cols-3 gap-3">
-      {([["agent_token_env", "Agent token env"], ["temporal_api_key_env", "Temporal API key env"], ["bot_token_env", "Discord bot token env"]] as const).map(([key, label]) => <label key={key} className="space-y-1.5"><span className="text-xs font-medium">{label}</span><input value={config[key]} onChange={(e) => update(key, e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-xs" /></label>)}
-    </div>
     <div className="grid grid-cols-3 gap-3">
       {([["agent_token", "AgentAPI token"], ["temporal_api_key", "Temporal API key"], ["bot_token", "Discord bot token"]] as const).map(([key, label]) => <label key={key} className="space-y-1.5"><span className="text-xs font-medium">{label}</span><input type="password" value={config[key] ?? ""} onChange={(e) => update(key, e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-xs" /></label>)}
     </div>
