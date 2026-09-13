@@ -22,6 +22,7 @@ import {
 import {toast} from "sonner";
 import {editableMCPServers} from "@/lib/mcp-sample";
 import {useChat} from "./chat-provider";
+import {TemporalSettings} from "./temporal-settings";
 import {Button} from "./ui/button";
 import {
   Dialog,
@@ -48,8 +49,6 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
   const {
     messages,
     deleteMessages,
-    getWebhook,
-    updateWebhook,
     getMCP,
     updateMCP,
     checkMCP,
@@ -71,12 +70,6 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
   const [profiles, setProfiles] = useState<Record<string, Record<string, unknown>>>({});
   const [profileName, setProfileName] = useState("");
   const [restartAfterSave, setRestartAfterSave] = useState(true);
-  const [webhookURL, setWebhookURL] = useState("");
-  const [webhookTimeout, setWebhookTimeout] = useState(10);
-  const [webhookMaxAttempts, setWebhookMaxAttempts] = useState(3);
-  const [webhookPayloadTemplate, setWebhookPayloadTemplate] = useState("");
-  const [webhookLoading, setWebhookLoading] = useState(false);
-  const [webhookSaving, setWebhookSaving] = useState(false);
   const [restartingAgent, setRestartingAgent] = useState(false);
   const mcpImportRef = useRef<HTMLInputElement>(null);
   const profileImportRef = useRef<HTMLInputElement>(null);
@@ -116,38 +109,6 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
       setMCPSupported(false);
     } finally {
       setMCPLoading(false);
-    }
-  };
-  const loadWebhook = async () => {
-    setWebhookLoading(true);
-    try {
-      const config = await getWebhook();
-      setWebhookURL(config.url);
-      setWebhookTimeout(config.timeout_seconds);
-      setWebhookMaxAttempts(config.max_attempts);
-      setWebhookPayloadTemplate(config.payload_template);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not load webhook configuration");
-    } finally {
-      setWebhookLoading(false);
-    }
-  };
-  const saveWebhook = async () => {
-    setWebhookSaving(true);
-    try {
-      const config = await updateWebhook({
-        url: webhookURL.trim(),
-        timeout_seconds: webhookTimeout,
-        max_attempts: webhookMaxAttempts,
-        payload_template: webhookPayloadTemplate,
-      });
-      setWebhookURL(config.url);
-      setWebhookPayloadTemplate(config.payload_template);
-      toast.success(config.url ? "Webhook configuration updated" : "Webhook disabled");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not update webhook configuration");
-    } finally {
-      setWebhookSaving(false);
     }
   };
   const handleRestart = async () => {
@@ -286,7 +247,6 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
 
   useEffect(() => {
     if (open && activeTab === "mcp") void loadMCP();
-    if (open && activeTab === "webhook") void loadWebhook();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, open]);
 
@@ -316,7 +276,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
             </Button>
           </div>
           <DialogDescription>
-            Links, files, task navigation, MCP, and webhook configuration.
+            Links, files, task navigation, MCP, and Temporal configuration.
           </DialogDescription>
         </DialogHeader>
         <Tabs
@@ -330,7 +290,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
               <TabsTrigger value="files"><FileText /><span className="max-sm:sr-only">Files</span></TabsTrigger>
               <TabsTrigger value="index"><ListTree /><span className="max-sm:sr-only">Index</span></TabsTrigger>
               <TabsTrigger value="mcp"><Server /><span className="max-sm:sr-only">MCP</span></TabsTrigger>
-              <TabsTrigger value="webhook"><BellRing /><span className="max-sm:sr-only">Webhook</span></TabsTrigger>
+              <TabsTrigger value="temporal"><BellRing /><span className="max-sm:sr-only">Temporal</span></TabsTrigger>
             </TabsList>
           </div>
           <TabsContent value="links" className="min-h-0 overflow-y-auto overscroll-contain p-4">
@@ -549,85 +509,8 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
               </div>
             )}
           </TabsContent>
-          <TabsContent value="webhook" className="min-h-0 overflow-y-auto overscroll-contain p-4">
-            {webhookLoading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <LoaderCircle className="size-4 animate-spin" />
-                Loading webhook configuration…
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-medium">Run status webhook</h3>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    Send an HTTP POST when the run changes between running and stable.
-                    Startup flags provide the initial values; changes here apply immediately.
-                  </p>
-                </div>
-                <label className="block space-y-1.5">
-                  <span className="text-xs font-medium">Webhook URL</span>
-                  <input
-                    type="url"
-                    value={webhookURL}
-                    onChange={(event) => setWebhookURL(event.target.value)}
-                    placeholder="https://example.com/agentapi/events"
-                    className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  />
-                  <span className="block text-[11px] text-muted-foreground">
-                    Leave empty and save to disable delivery.
-                  </span>
-                </label>
-                <label className="block space-y-1.5">
-                  <span className="text-xs font-medium">Payload template</span>
-                  <textarea
-                    value={webhookPayloadTemplate}
-                    onChange={(event) => setWebhookPayloadTemplate(event.target.value)}
-                    placeholder={'{"event":"{{.Type}}","status":"{{.Status}}"}'}
-                    spellCheck={false}
-                    rows={3}
-                    className="w-full resize-y rounded-md border bg-background p-3 font-mono text-xs leading-5"
-                  />
-                  <span className="block text-[11px] text-muted-foreground">
-                    Go text/template for the POST body. Leave empty for the default JSON payload.
-                    Fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport.
-                  </span>
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="block space-y-1.5">
-                    <span className="text-xs font-medium">Timeout (seconds)</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={3600}
-                      value={webhookTimeout}
-                      onChange={(event) => setWebhookTimeout(Number(event.target.value))}
-                      className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                    />
-                  </label>
-                  <label className="block space-y-1.5">
-                    <span className="text-xs font-medium">Max attempts</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={webhookMaxAttempts}
-                      onChange={(event) => setWebhookMaxAttempts(Number(event.target.value))}
-                      className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                    />
-                  </label>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <Button type="button" variant="ghost" onClick={() => void loadWebhook()} disabled={webhookLoading || webhookSaving}>
-                    <RefreshCw />
-                    Reload
-                  </Button>
-                  <Button type="button" onClick={() => void saveWebhook()} disabled={webhookLoading || webhookSaving}>
-                    {webhookSaving ? <LoaderCircle className="animate-spin" /> : <Save />}
-                    Save webhook
-                  </Button>
-                </div>
-              </div>
-            )}
+          <TabsContent value="temporal" className="min-h-0 overflow-y-auto overscroll-contain p-4">
+            <TemporalSettings />
           </TabsContent>
         </Tabs>
       </DialogContent>

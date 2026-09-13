@@ -10,6 +10,66 @@
         "title": "AgentStatus",
         "type": "string"
       },
+      "Config": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_token": {
+            "type": "string"
+          },
+          "agent_token_env": {
+            "type": "string"
+          },
+          "agent_url": {
+            "type": "string"
+          },
+          "allowed_users": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "bot_token": {
+            "type": "string"
+          },
+          "bot_token_env": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "task_queue": {
+            "type": "string"
+          },
+          "temporal_address": {
+            "type": "string"
+          },
+          "temporal_api_key": {
+            "type": "string"
+          },
+          "temporal_api_key_env": {
+            "type": "string"
+          },
+          "temporal_tls": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agent_token_env",
+          "agent_url",
+          "allowed_users",
+          "bot_token_env",
+          "channel_id",
+          "namespace",
+          "task_queue",
+          "temporal_address",
+          "temporal_api_key_env",
+          "temporal_tls"
+        ],
+        "type": "object"
+      },
       "ConversationRole": {
         "enum": [
           "agent",
@@ -36,6 +96,25 @@
         },
         "required": [
           "restarted"
+        ],
+        "type": "object"
+      },
+      "Document": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/Document.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "config": {
+            "$ref": "#/components/schemas/Config"
+          }
+        },
+        "required": [
+          "config"
         ],
         "type": "object"
       },
@@ -255,7 +334,7 @@
             "type": "string"
           },
           "path": {
-            "description": "Absolute path of the managed config file: <working-directory>/.mcp.json for Claude or $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex.",
+            "description": "Absolute path of the managed config file: \u003cworking-directory\u003e/.mcp.json for Claude or $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex.",
             "type": "string"
           },
           "servers": {
@@ -556,6 +635,47 @@
         ],
         "type": "object"
       },
+      "Pending": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/Pending.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/Request"
+          }
+        },
+        "required": [
+          "request"
+        ],
+        "type": "object"
+      },
+      "ProfilesDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/ProfilesDocument.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "profiles": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Config"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "profiles"
+        ],
+        "type": "object"
+      },
       "QueueMutationResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -620,6 +740,89 @@
           "content",
           "id",
           "time"
+        ],
+        "type": "object"
+      },
+      "Reply": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/Reply.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content",
+          "id",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "Request": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_type": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "run_id": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_type",
+          "content",
+          "id",
+          "kind",
+          "run_id",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "Result": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/Result.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome"
         ],
         "type": "object"
       },
@@ -874,6 +1077,55 @@
           "session_id",
           "status",
           "transport"
+        ],
+        "type": "object"
+      },
+      "TemporalConfigResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/TemporalConfigResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "config": {
+            "$ref": "#/components/schemas/Config"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "config",
+          "path"
+        ],
+        "type": "object"
+      },
+      "TemporalProfilesResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/TemporalProfilesResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "profiles": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Config"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "path",
+          "profiles"
         ],
         "type": "object"
       },
@@ -1210,6 +1462,26 @@
           "url"
         ],
         "type": "object"
+      },
+      "WorkspaceResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/WorkspaceResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "url": {
+            "description": "Coder workspace URL, when running inside a Coder workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
       }
     }
   },
@@ -1383,6 +1655,72 @@
           }
         },
         "summary": "Subscribe to events"
+      }
+    },
+    "/handoff": {
+      "get": {
+        "operationId": "get-handoff",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get handoff"
+      }
+    },
+    "/handoff/reply": {
+      "post": {
+        "operationId": "post-handoff-reply",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Reply"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Post handoff reply"
       }
     },
     "/mcp": {
@@ -2332,6 +2670,277 @@
         "summary": "Get status"
       }
     },
+    "/temporal": {
+      "get": {
+        "operationId": "get-temporal",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporalConfigResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get temporal",
+        "tags": [
+          "Temporal"
+        ]
+      },
+      "put": {
+        "operationId": "put-temporal",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporalConfigResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Put temporal",
+        "tags": [
+          "Temporal"
+        ]
+      }
+    },
+    "/temporal/profiles": {
+      "get": {
+        "operationId": "get-temporal-profiles",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporalProfilesResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get temporal profiles",
+        "tags": [
+          "Temporal"
+        ]
+      },
+      "put": {
+        "operationId": "put-temporal-profiles",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfilesDocument"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporalProfilesResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Put temporal profiles",
+        "tags": [
+          "Temporal"
+        ]
+      }
+    },
+    "/temporal/profiles/{name}": {
+      "delete": {
+        "operationId": "delete-temporal-profiles-by-name",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporalProfilesResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete temporal profiles by name",
+        "tags": [
+          "Temporal"
+        ]
+      },
+      "put": {
+        "operationId": "put-temporal-profiles-by-name",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporalProfilesResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Put temporal profiles by name",
+        "tags": [
+          "Temporal"
+        ]
+      }
+    },
+    "/temporal/profiles/{name}/apply": {
+      "post": {
+        "operationId": "post-temporal-profiles-by-name-apply",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporalConfigResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Post temporal profiles by name apply",
+        "tags": [
+          "Temporal"
+        ]
+      }
+    },
     "/timeline": {
       "get": {
         "description": "Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events.",
@@ -2567,6 +3176,35 @@
         "tags": [
           "Webhook"
         ]
+      }
+    },
+    "/workspace": {
+      "get": {
+        "description": "Returns the Coder workspace URL injected into the process, when available.",
+        "operationId": "get-workspace",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get workspace"
       }
     }
   }

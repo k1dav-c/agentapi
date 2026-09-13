@@ -22,7 +22,6 @@ import {
   type MCPConfig,
   type MCPProfiles,
   type UploadOptions,
-  type WebhookConfig,
 } from "@/lib/chat-api";
 
 export interface Message {
@@ -157,13 +156,13 @@ interface ChatContextValue {
   reconnectNow: () => void;
   downloadSession: () => Promise<void>;
   deleteMessages: () => Promise<void>;
-  getWebhook: () => Promise<WebhookConfig>;
-  updateWebhook: (config: {
-    url: string;
-    timeout_seconds: number;
-    max_attempts: number;
-    payload_template?: string;
-  }) => Promise<WebhookConfig>;
+  getTemporal: ReturnType<typeof createChatAPI>["getTemporal"];
+  updateTemporal: ReturnType<typeof createChatAPI>["updateTemporal"];
+  getTemporalProfiles: ReturnType<typeof createChatAPI>["getTemporalProfiles"];
+  saveTemporalProfile: ReturnType<typeof createChatAPI>["saveTemporalProfile"];
+  importTemporalProfiles: ReturnType<typeof createChatAPI>["importTemporalProfiles"];
+  deleteTemporalProfile: ReturnType<typeof createChatAPI>["deleteTemporalProfile"];
+  applyTemporalProfile: ReturnType<typeof createChatAPI>["applyTemporalProfile"];
   getMCP: () => Promise<MCPConfig>;
   updateMCP: (
     servers: Record<string, unknown>,
@@ -180,6 +179,7 @@ interface ChatContextValue {
   storageScope: string;
   agentType: AgentType;
   customTitle?: string;
+  workspaceUrl?: string;
 }
 
 // The server sends a heartbeat event every 15s. If nothing (heartbeat or
@@ -228,6 +228,16 @@ export const useAgentAPIUrl = (): string => {
 export function ChatProvider({ children }: PropsWithChildren) {
   const searchParams = useSearchParams();
   const customTitle = searchParams.get("title") ?? undefined;
+  const workspaceUrl = (() => {
+    const value = searchParams.get("workspace");
+    if (!value) return undefined;
+    try {
+      const url = new URL(value, window.location.origin);
+      return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -710,8 +720,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
           setMessages([]);
           setRichMessages([]);
         },
-        getWebhook: api.getWebhook,
-        updateWebhook: api.updateWebhook,
+        getTemporal: api.getTemporal,
+        updateTemporal: api.updateTemporal,
+        getTemporalProfiles: api.getTemporalProfiles,
+        saveTemporalProfile: api.saveTemporalProfile,
+        importTemporalProfiles: api.importTemporalProfiles,
+        deleteTemporalProfile: api.deleteTemporalProfile,
+        applyTemporalProfile: api.applyTemporalProfile,
         getMCP: api.getMCP,
         updateMCP: api.updateMCP,
         checkMCP: api.checkMCP,
@@ -725,6 +740,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         storageScope: agentAPIUrl,
         agentType,
         customTitle,
+        workspaceUrl,
       }}
     >
       {children}

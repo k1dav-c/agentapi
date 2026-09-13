@@ -74,6 +74,14 @@ type TitleResponse struct {
 	}
 }
 
+// WorkspaceResponse exposes the non-secret Coder workspace link injected into
+// an AgentAPI process. It is empty outside Coder.
+type WorkspaceResponse struct {
+	Body struct {
+		URL string `json:"url" doc:"Coder workspace URL, when running inside a Coder workspace."`
+	}
+}
+
 // MessagesResponse represents the list of messages
 type MessagesResponse struct {
 	Body struct {

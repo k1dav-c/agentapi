@@ -114,6 +114,7 @@ type EventEmitter struct {
 	lifecycle           LifecycleState
 	sessionID           string
 	runID               uint64
+	handoffRevision     uint64
 	agentType           mf.AgentType
 	chans               map[int]chan Event
 	chanIdx             int
@@ -266,6 +267,7 @@ func (e *EventEmitter) EmitStatus(newStatus st.ConversationStatus) {
 	}
 
 	previousStatus := e.status
+	e.handoffRevision++
 	if newLifecycle == LifecycleRunning && e.lifecycle == LifecycleReady {
 		e.runID++
 	}
@@ -284,6 +286,7 @@ func (e *EventEmitter) SetLifecycle(lifecycle LifecycleState) {
 		return
 	}
 	e.lifecycle = lifecycle
+	e.handoffRevision++
 	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
 }
 
@@ -420,6 +423,7 @@ func (e *EventEmitter) SessionEvents() []jsonlwatcher.SessionEvent {
 func (e *EventEmitter) Reset() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.handoffRevision++
 	e.messages = nil
 	e.richMessages = nil
 	e.sessionEvents = nil

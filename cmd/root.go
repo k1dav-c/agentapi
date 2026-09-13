@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/coder/agentapi/cmd/attach"
+	"github.com/coder/agentapi/cmd/discord"
 	"github.com/coder/agentapi/cmd/server"
 	"github.com/coder/agentapi/cmd/update"
 	"github.com/coder/agentapi/internal/version"
@@ -27,6 +28,7 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.AddCommand(discord.CreateCommand())
 	rootCmd.AddCommand(server.CreateServerCmd())
 	rootCmd.AddCommand(attach.AttachCmd)
 	rootCmd.AddCommand(update.UpdateCmd)

@@ -29,7 +29,7 @@ The Session Explorer provides:
 - an index for jumping directly to earlier tasks;
 - Markdown preview and export for individual tasks;
 - access to the live terminal when the parsed conversation is not sufficient;
-- MCP server and webhook configuration without leaving the chat UI.
+- MCP server and Temporal/Discord configuration without leaving the chat UI.
 
 Each message has its own markdown/raw toggle so you can switch render
 modes without affecting the rest of the conversation.
@@ -109,6 +109,19 @@ agentapi server \
   --webhook-url https://example.com/agentapi/events \
   -- claude
 ```
+
+### Discord replies through Temporal
+
+The optional `agentapi discord` service lets you continue the same agent session
+from Discord after closing the web UI. It starts a Temporal workflow for a pending
+response, sends a bot notification, and waits for a `human_response` signal when
+an allowed Discord user replies to that notification. A worker Activity then
+submits the reply to AgentAPI. The web UI remains usable throughout.
+
+This supports ordinary conversational follow-ups and recognized numbered PTY
+confirmation dialogs. Notifications are independent of browser presence.
+AgentAPI and the bridge must remain running; Temporal preserves workflow state,
+not the agent's terminal process. See [setup, configuration and limitations](docs/discord-temporal.md).
 
 ### Self-update
 
@@ -379,9 +392,10 @@ The equivalent environment variables are `AGENTAPI_WEBHOOK_URL`,
 `AGENTAPI_WEBHOOK_MAX_ATTEMPTS`. The timeout defaults to `10s`, and delivery is
 attempted up to 3 times.
 
-The initial values can also be changed while AgentAPI is running from the
-Webhook tab in the chat UI's Session Explorer. Saving an empty URL disables
-delivery.
+The initial webhook values can still be changed while AgentAPI is running with
+`GET/PUT /webhook`. Session Explorer now uses its Temporal tab for Temporal and
+Discord bridge settings. The legacy webhook API remains available for
+compatibility, but is no longer the Session Explorer integration.
 
 The request body has this format:
 

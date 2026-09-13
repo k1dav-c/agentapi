@@ -19,16 +19,17 @@ func (s *Server) deleteMessages(ctx context.Context, _ *struct{}) (*DeleteMessag
 	if s.restartAgent == nil {
 		return nil, huma.Error400BadRequest("agent restart is not supported in this server mode")
 	}
+	// Serialize process replacement with browser and Discord input delivery.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Clear all conversation state.
 	s.emitter.Reset()
 	s.conversation.Reset()
-	s.mu.Lock()
 	s.messageQueue = nil
 	s.nextQueueID = 0
 	s.queueFailID = 0
 	s.queueFailCount = 0
-	s.mu.Unlock()
 
 	// Restart the agent process.
 	s.emitter.SetLifecycle(LifecycleRestarting)
