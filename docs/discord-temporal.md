@@ -79,31 +79,6 @@ the web UI's option buttons. Other text is rejected for terminal requests, which
 remain open so you can correct the reply. For a regular conversation response,
 your reply is submitted as a normal user message and appears in the chat history.
 
-### Coolify with Docker Compose
-
-Use [`docker-compose.discord.yml`](../docker-compose.discord.yml) as the
-Coolify Compose file. Set the image and connection values in Coolify's
-environment settings:
-
-```text
-AGENTAPI_DISCORD_IMAGE=ghcr.io/<owner>/<repo>/agentapi-discord:latest
-AGENTAPI_DISCORD_AGENT_URL=https://agentapi.example.com
-TEMPORAL_ADDRESS=your-namespace.tmprl.cloud:7233
-TEMPORAL_NAMESPACE=your-namespace
-TEMPORAL_TLS=true
-TEMPORAL_API_KEY=...
-DISCORD_BOT_TOKEN=...
-DISCORD_CHANNEL_ID=...
-DISCORD_ALLOWED_USER_IDS=...
-AGENTAPI_API_TOKEN=...
-```
-
-The Worker makes outbound connections to AgentAPI, Temporal, and Discord, so it
-does not need a public domain or an exposed port in Coolify. If AgentAPI or
-Temporal runs in another Coolify resource, use its internal hostname and port.
-To use a saved config instead, mount it at `/data/temporal.json` and set
-`AGENTAPI_TEMPORAL_CONFIG=/data/temporal.json`.
-
 ## Configuration
 
 | Environment variable | CLI flag | Default / purpose |
