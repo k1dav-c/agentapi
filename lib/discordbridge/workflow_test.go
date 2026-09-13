@@ -103,14 +103,12 @@ func TestNotificationRetainsQuestionAtEndOfLongOutput(t *testing.T) {
 	require.True(t, strings.HasSuffix(excerpt, "1. Continue\n2. Cancel"))
 }
 
-func TestBridgeRequiresExplicitReplyUsersAndDedicatedQueue(t *testing.T) {
+func TestBridgeRequiresExplicitReplyUsers(t *testing.T) {
 	c := Config{AgentURL: "http://localhost:3284", BotToken: "token", ChannelID: "channel", TemporalAddress: "localhost:7233", Namespace: "default"}
 	require.ErrorContains(t, c.validate(), "allowed Discord user")
 	c.AllowedUsers = []string{" person ", ""}
 	require.NoError(t, c.validate())
 	require.Equal(t, []string{"person"}, c.AllowedUsers)
-	originalQueue := c.TaskQueue
-	c.AgentURL, c.TaskQueue = "http://localhost:3285", ""
 	require.NoError(t, c.validate())
-	require.NotEqual(t, originalQueue, c.TaskQueue)
+	require.Empty(t, c.TaskQueue)
 }

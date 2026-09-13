@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,8 +20,10 @@ import (
 	"github.com/coder/agentapi/lib/handoff"
 	enums "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
+	workflowservice "go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 type Config struct {
@@ -63,14 +68,43 @@ func (c *Config) validate() error {
 	if len(users) == 0 {
 		return fmt.Errorf("at least one allowed Discord user ID is required")
 	}
-	if c.TemporalAddress == "" || c.Namespace == "" {
+	if c.TemporalAddress == "" {
 		return fmt.Errorf("Temporal address and namespace are required")
 	}
-	if c.TaskQueue == "" {
-		sum := sha256.Sum256([]byte(c.AgentURL + "\n" + c.ChannelID))
-		c.TaskQueue = fmt.Sprintf("agentapi-discord-%x", sum[:8])
-	}
 	return nil
+}
+
+func legacyTaskQueue(config Config) string {
+	sum := sha256.Sum256([]byte(config.AgentURL + "\n" + config.ChannelID))
+	return fmt.Sprintf("agentapi-discord-%x", sum[:8])
+}
+
+func resolveAgentSession(ctx context.Context, config Config) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, config.AgentURL+"/status", nil)
+	if err != nil {
+		return "", err
+	}
+	if config.AgentToken != "" {
+		req.Header.Set("Authorization", "Bearer "+config.AgentToken)
+	}
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		return "", fmt.Errorf("resolve AgentAPI session: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("resolve AgentAPI session: HTTP %d", resp.StatusCode)
+	}
+	var status struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&status); err != nil {
+		return "", fmt.Errorf("decode AgentAPI session: %w", err)
+	}
+	if strings.TrimSpace(status.SessionID) == "" {
+		return "", fmt.Errorf("AgentAPI returned an empty session ID")
+	}
+	return status.SessionID, nil
 }
 
 // Run starts a worker, Discord Gateway connection and pending-request scanner.
@@ -78,6 +112,16 @@ func (c *Config) validate() error {
 func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	if err := config.validate(); err != nil {
 		return err
+	}
+	sessionID, err := resolveAgentSession(ctx, config)
+	if err != nil {
+		return err
+	}
+	if config.Namespace == "" || config.Namespace == "default" {
+		config.Namespace = sessionID
+	}
+	if config.TaskQueue == "" || config.TaskQueue == legacyTaskQueue(config) {
+		config.TaskQueue = "agentapi-discord-" + sessionID
 	}
 	options := client.Options{HostPort: config.TemporalAddress, Namespace: config.Namespace}
 	if config.TemporalTLS || config.TemporalAPIKey != "" {
@@ -91,6 +135,24 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 		return fmt.Errorf("connect to Temporal: %w", err)
 	}
 	defer temporalClient.Close()
+	namespaceClient, err := client.NewNamespaceClient(options)
+	if err != nil {
+		return fmt.Errorf("create Temporal namespace client: %w", err)
+	}
+	defer namespaceClient.Close()
+	if _, err := namespaceClient.Describe(ctx, config.Namespace); err != nil {
+		var notFound *serviceerror.NamespaceNotFound
+		if !errors.As(err, &notFound) {
+			return fmt.Errorf("check Temporal namespace: %w", err)
+		}
+		if err := namespaceClient.Register(ctx, &workflowservice.RegisterNamespaceRequest{
+			Namespace:                        config.Namespace,
+			Description:                      "AgentAPI session namespace",
+			WorkflowExecutionRetentionPeriod: durationpb.New(7 * 24 * time.Hour),
+		}); err != nil {
+			return fmt.Errorf("register Temporal namespace %q: %w", config.Namespace, err)
+		}
+	}
 	discord, err := discordgo.New("Bot " + config.BotToken)
 	if err != nil {
 		return fmt.Errorf("configure Discord: %w", err)
@@ -158,6 +220,38 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 		}
 		// This acknowledges durable signal acceptance, not PTY execution.
 		_ = session.MessageReactionAdd(event.ChannelID, event.ID, "📨", discordgo.WithContext(requestCtx))
+	})
+	discord.AddHandler(func(session *discordgo.Session, event *discordgo.InteractionCreate) {
+		if event.Type != discordgo.InteractionMessageComponent || event.Member == nil || !allowed[event.Member.User.ID] || event.Message == nil {
+			return
+		}
+		data := event.MessageComponentData()
+		parts := strings.Split(data.CustomID, ":")
+		if len(parts) != 3 || parts[0] != "agentapi-option" || len(parts[1]) != 64 {
+			return
+		}
+		if _, err := strconv.Atoi(parts[2]); err != nil {
+			return
+		}
+		workflowID := workflowIDFromMessage(event.Message, "")
+		if workflowID == "" && event.Message.Author != nil {
+			workflowID = workflowIDFromMessage(event.Message, event.Message.Author.ID)
+		}
+		if workflowID == "" || strings.TrimPrefix(workflowID, workflowPrefix) != parts[1] {
+			return
+		}
+		requestCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+		defer cancel()
+		err := temporalClient.SignalWorkflow(requestCtx, workflowID, "", ReplySignal, handoff.Reply{RequestID: parts[1], ID: event.ID, Content: parts[2]})
+		if err == nil {
+			// Acknowledge first, then remove the option buttons from the original
+			// notification so the same choice cannot be submitted twice.
+			_ = session.InteractionRespond(event.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseDeferredMessageUpdate})
+			empty := []discordgo.MessageComponent{}
+			_, _ = session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: event.Message.ID, Channel: event.ChannelID, Components: &empty}, discordgo.WithContext(requestCtx))
+			return
+		}
+		_ = session.InteractionRespond(event.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: "❌ Option could not be submitted", Flags: discordgo.MessageFlagsEphemeral}})
 	})
 	w := worker.New(temporalClient, config.TaskQueue, worker.Options{})
 	w.RegisterWorkflow(HumanReplyWorkflow)

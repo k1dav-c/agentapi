@@ -97,6 +97,7 @@ func notificationExcerpt(text string) string {
 }
 
 var ansiSequence = regexp.MustCompile(`\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])`)
+var terminalOptionLine = regexp.MustCompile(`(?m)^\s*[❯›>]?\s*(\d+)\.\s+(.+)$`)
 
 func stripANSI(text string) string {
 	return strings.TrimSpace(ansiSequence.ReplaceAllString(text, ""))
@@ -112,6 +113,19 @@ func threadTitle(text string) string {
 		return "AgentAPI handoff"
 	}
 	return text
+}
+
+func terminalOptions(text string) []string {
+	text = stripANSI(text)
+	matches := terminalOptionLine.FindAllStringSubmatch(text, -1)
+	options := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if len(options) == 5 {
+			break
+		}
+		options = append(options, match[1])
+	}
+	return options
 }
 
 func (a *Activities) DiscordNotify(ctx context.Context, request handoff.Request) (string, error) {
@@ -156,6 +170,15 @@ func (a *Activities) DiscordNotify(ctx context.Context, request handoff.Request)
 			}},
 		}
 	}
+	if request.Kind == "terminal" {
+		buttons := make([]discordgo.MessageComponent, 0, len(terminalOptions(request.Content)))
+		for _, option := range terminalOptions(request.Content) {
+			buttons = append(buttons, discordgo.Button{Label: option, Style: discordgo.PrimaryButton, CustomID: "agentapi-option:" + request.ID + ":" + option})
+		}
+		if len(buttons) > 0 {
+			payload.MessageSend.Components = append(payload.MessageSend.Components, discordgo.ActionsRow{Components: buttons})
+		}
+	}
 	a.mu.Lock()
 	threadID := a.threadBySession[request.SessionID]
 	a.mu.Unlock()
@@ -174,7 +197,10 @@ func (a *Activities) DiscordNotify(ctx context.Context, request handoff.Request)
 	}
 	if threadID == "" {
 		// Keep each session isolated in its own Discord thread.
-		threadName := truncate(threadTitle(request.Content), 100)
+		threadName := truncate(threadTitle(request.Question), 100)
+		if request.Question == "" {
+			threadName = truncate(threadTitle(request.Content), 100)
+		}
 		thread, err := a.Discord.MessageThreadStart(a.ChannelID, message.ID, threadName, 1440, discordgo.WithContext(ctx))
 		if err != nil {
 			return "", err

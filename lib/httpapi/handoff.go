@@ -20,7 +20,11 @@ var terminalConfirmation = regexp.MustCompile(`(?i)(enter to confirm|press enter
 var terminalOption = regexp.MustCompile(`(?m)^\s*[❯›>]?\s*(\d+)\.\s+`)
 
 func isTerminalQuestion(content string) bool {
-	return terminalSelection.MatchString(content) && terminalConfirmation.MatchString(content)
+	if terminalSelection.MatchString(content) && terminalConfirmation.MatchString(content) {
+		return true
+	}
+	options := terminalOption.FindAllString(content, -1)
+	return len(options) >= 2 && regexp.MustCompile(`(?i)(choose|select|option|continue|cancel|allow|deny|approve|permission)`).MatchString(content)
 }
 
 // Only expose deliberate, bounded terminal actions. Discord text never becomes
@@ -34,6 +38,9 @@ func terminalReply(content, answer string) (string, bool) {
 		return "\x1b", true
 	}
 	answer = strings.TrimSpace(answer)
+	if len(terminalOption.FindAllString(content, -1)) < 2 {
+		return answer + "\r", answer != ""
+	}
 	if _, err := strconv.Atoi(answer); err != nil || len(answer) != 1 {
 		return "", false
 	}
@@ -69,7 +76,12 @@ func (s *Server) pendingHandoffLocked() *handoff.Request {
 	if status.Lifecycle != LifecycleReady || s.conversation.Status() != st.ConversationStatusStable {
 		return nil
 	}
-	kind, content := "message", ""
+	kind, content, question := "message", "", ""
+	for _, message := range messages {
+		if message.Role == st.ConversationRoleUser {
+			question = message.Message
+		}
+	}
 	if s.transport == TransportPTY && isTerminalQuestion(screen) {
 		kind, content = "terminal", screen
 	} else {
@@ -96,7 +108,7 @@ func (s *Server) pendingHandoffLocked() *handoff.Request {
 		return nil
 	}
 	return &handoff.Request{ID: id, SessionID: status.SessionID, RunID: status.RunID,
-		AgentType: string(status.AgentType), Kind: kind, Content: content}
+		AgentType: string(status.AgentType), Kind: kind, Question: question, Content: content}
 }
 
 func (s *Server) getPendingHandoff(_ context.Context, _ *struct{}) (*PendingHandoffResponse, error) {

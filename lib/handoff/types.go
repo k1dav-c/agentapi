@@ -7,6 +7,7 @@ type Request struct {
 	RunID     uint64 `json:"run_id"`
 	AgentType string `json:"agent_type"`
 	Kind      string `json:"kind"` // message or terminal
+	Question  string `json:"question,omitempty"`
 	Content   string `json:"content"`
 }
 

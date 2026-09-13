@@ -785,6 +785,9 @@
           "kind": {
             "type": "string"
           },
+          "question": {
+            "type": "string"
+          },
           "run_id": {
             "format": "int64",
             "minimum": 0,
