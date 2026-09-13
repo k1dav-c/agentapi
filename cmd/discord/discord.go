@@ -42,7 +42,7 @@ func CreateCommand() *cobra.Command {
 	f.StringVar(&config.AgentURL, "agent-url", env("AGENTAPI_DISCORD_AGENT_URL", "http://localhost:3284"), "AgentAPI base URL reachable from this worker")
 	f.StringVar(&config.AgentToken, "agent-token", env("AGENTAPI_API_TOKEN", ""), "AgentAPI Bearer token (prefer AGENTAPI_API_TOKEN)")
 	f.StringVar(&config.TemporalAddress, "temporal-address", env("TEMPORAL_ADDRESS", "localhost:7233"), "Temporal host:port")
-	f.StringVar(&config.Namespace, "temporal-namespace", env("TEMPORAL_NAMESPACE", "default"), "Temporal namespace")
+	f.StringVar(&config.Namespace, "temporal-namespace", env("TEMPORAL_NAMESPACE", temporalconfig.Defaults().Namespace), "Temporal namespace")
 	f.StringVar(&config.TaskQueue, "task-queue", env("AGENTAPI_DISCORD_TASK_QUEUE", ""), "Dedicated task queue for this AgentAPI endpoint (default: derived from URL and channel)")
 	f.BoolVar(&config.TemporalTLS, "temporal-tls", env("TEMPORAL_TLS", "false") == "true", "Use TLS for Temporal")
 	f.StringVar(&config.TemporalAPIKey, "temporal-api-key", env("TEMPORAL_API_KEY", ""), "Temporal API key; enables TLS (prefer TEMPORAL_API_KEY)")

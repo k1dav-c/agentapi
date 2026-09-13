@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/coder/agentapi/lib/handoff"
@@ -15,11 +17,15 @@ import (
 )
 
 type Activities struct {
-	AgentURL   string
-	AgentToken string
-	ChannelID  string
-	Discord    *discordgo.Session
-	HTTP       *http.Client
+	AgentURL        string
+	AgentToken      string
+	ChannelID       string
+	WorkspaceURL    string
+	Discord         *discordgo.Session
+	HTTP            *http.Client
+	mu              sync.Mutex
+	threadBySession map[string]string
+	messageChannel  map[string]string
 }
 
 func (a *Activities) agentRequest(ctx context.Context, method, path string, body, output any) error {
@@ -82,11 +88,30 @@ func truncate(text string, size int) string {
 // Keep the end of long output so the current question/options remain visible.
 // 1700 Unicode runes also fit Discord's limit when every rune is a surrogate pair.
 func notificationExcerpt(text string) string {
+	text = stripANSI(text)
 	runes := []rune(text)
 	if len(runes) <= 1700 {
 		return text
 	}
 	return "…" + string(runes[len(runes)-1699:])
+}
+
+var ansiSequence = regexp.MustCompile(`\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])`)
+
+func stripANSI(text string) string {
+	return strings.TrimSpace(ansiSequence.ReplaceAllString(text, ""))
+}
+
+func threadTitle(text string) string {
+	text = stripANSI(text)
+	if index := strings.IndexAny(text, "\r\n"); index >= 0 {
+		text = text[:index]
+	}
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return "AgentAPI handoff"
+	}
+	return text
 }
 
 func (a *Activities) DiscordNotify(ctx context.Context, request handoff.Request) (string, error) {
@@ -118,12 +143,27 @@ func (a *Activities) DiscordNotify(ctx context.Context, request handoff.Request)
 			Embeds: []*discordgo.MessageEmbed{{
 				Title:       truncate(request.AgentType+" · waiting for your reply", 200),
 				Description: notificationExcerpt(request.Content),
+				URL:         a.WorkspaceURL,
 				Footer:      &discordgo.MessageEmbedFooter{Text: workflowPrefix + request.ID},
 			}},
 		},
 		Nonce: request.ID[:24], EnforceNonce: true,
 	}
-	endpoint := discordgo.EndpointChannelMessages(a.ChannelID)
+	if a.WorkspaceURL != "" {
+		payload.MessageSend.Components = []discordgo.MessageComponent{
+			discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+				discordgo.Button{Label: "Open Coder workspace", Style: discordgo.LinkButton, URL: a.WorkspaceURL},
+			}},
+		}
+	}
+	a.mu.Lock()
+	threadID := a.threadBySession[request.SessionID]
+	a.mu.Unlock()
+	channelID := a.ChannelID
+	if threadID != "" {
+		channelID = threadID
+	}
+	endpoint := discordgo.EndpointChannelMessages(channelID)
 	data, err := a.Discord.RequestWithBucketID(http.MethodPost, endpoint, payload, endpoint, discordgo.WithContext(ctx))
 	if err != nil {
 		return "", err
@@ -132,6 +172,25 @@ func (a *Activities) DiscordNotify(ctx context.Context, request handoff.Request)
 	if err := json.Unmarshal(data, &message); err != nil {
 		return "", err
 	}
+	if threadID == "" {
+		// Keep each session isolated in its own Discord thread.
+		threadName := truncate(threadTitle(request.Content), 100)
+		thread, err := a.Discord.MessageThreadStart(a.ChannelID, message.ID, threadName, 1440, discordgo.WithContext(ctx))
+		if err != nil {
+			return "", err
+		}
+		threadID = thread.ID
+	}
+	a.mu.Lock()
+	if a.threadBySession == nil {
+		a.threadBySession = make(map[string]string)
+	}
+	if a.messageChannel == nil {
+		a.messageChannel = make(map[string]string)
+	}
+	a.threadBySession[request.SessionID] = threadID
+	a.messageChannel[message.ID] = channelID
+	a.mu.Unlock()
 	return message.ID, nil
 }
 
@@ -146,8 +205,14 @@ func (a *Activities) DiscordFeedback(ctx context.Context, input FeedbackInput) e
 	if text == "" {
 		return fmt.Errorf("unknown reply outcome %q", input.Outcome)
 	}
+	a.mu.Lock()
+	channelID := a.messageChannel[input.MessageID]
+	a.mu.Unlock()
+	if channelID == "" {
+		channelID = a.ChannelID
+	}
 	_, err := a.Discord.ChannelMessageEditComplex(&discordgo.MessageEdit{
-		ID: input.MessageID, Channel: a.ChannelID, Content: &text,
+		ID: input.MessageID, Channel: channelID, Content: &text,
 		AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}},
 	}, discordgo.WithContext(ctx))
 	return err

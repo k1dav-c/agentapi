@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -31,6 +32,16 @@ type Config struct {
 	BotToken        string
 	ChannelID       string
 	AllowedUsers    []string
+}
+
+func coderWorkspaceURL() string {
+	base := strings.TrimRight(os.Getenv("CODER_URL"), "/")
+	owner := strings.TrimSpace(os.Getenv("CODER_WORKSPACE_OWNER_NAME"))
+	name := strings.TrimSpace(os.Getenv("CODER_WORKSPACE_NAME"))
+	if base == "" || owner == "" || name == "" {
+		return ""
+	}
+	return base + "/@" + url.PathEscape(owner) + "/" + url.PathEscape(name)
 }
 
 func (c *Config) validate() error {
@@ -88,7 +99,8 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	discord.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentMessageContent
 	activities := &Activities{
 		AgentURL: config.AgentURL, AgentToken: config.AgentToken, ChannelID: config.ChannelID,
-		Discord: discord, HTTP: &http.Client{Timeout: 20 * time.Second,
+		WorkspaceURL: coderWorkspaceURL(),
+		Discord:      discord, HTTP: &http.Client{Timeout: 20 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}
 	// Resolve identity before registering handlers; never trust a user-supplied
@@ -102,16 +114,34 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 		allowed[id] = true
 	}
 	discord.AddHandler(func(session *discordgo.Session, event *discordgo.MessageCreate) {
-		if event.Message == nil || event.Author == nil || event.Author.Bot || !allowed[event.Author.ID] || event.ChannelID != config.ChannelID || event.MessageReference == nil || strings.TrimSpace(event.Content) == "" {
+		if event.Message == nil || event.Author == nil || event.Author.Bot || !allowed[event.Author.ID] || strings.TrimSpace(event.Content) == "" {
 			return
 		}
 		ref := event.MessageReference
-		if ref.ChannelID != "" && ref.ChannelID != config.ChannelID {
+		if event.ChannelID == config.ChannelID && ref == nil {
 			return
 		}
 		requestCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 		defer cancel()
-		original, err := session.ChannelMessage(config.ChannelID, ref.MessageID, discordgo.WithContext(requestCtx))
+		var original *discordgo.Message
+		var err error
+		if ref != nil && ref.MessageID != "" {
+			referenceChannel := ref.ChannelID
+			if referenceChannel == "" {
+				referenceChannel = event.ChannelID
+			}
+			original, err = session.ChannelMessage(referenceChannel, ref.MessageID, discordgo.WithContext(requestCtx))
+			if err != nil && referenceChannel != config.ChannelID {
+				// Discord may report the parent channel for a thread reference.
+				original, err = session.ChannelMessage(config.ChannelID, ref.MessageID, discordgo.WithContext(requestCtx))
+			}
+		}
+		if original == nil && event.ChannelID != config.ChannelID {
+			// A normal message typed inside a thread has no MessageReference.
+			// Message-thread IDs are also the starter-message IDs, so resolve the
+			// workflow from that starter in the configured parent channel.
+			original, err = session.ChannelMessage(config.ChannelID, event.ChannelID, discordgo.WithContext(requestCtx))
+		}
 		if err != nil {
 			logger.Warn("Could not read referenced Discord message")
 			return
@@ -123,11 +153,11 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 		reply := handoff.Reply{RequestID: strings.TrimPrefix(workflowID, workflowPrefix), ID: event.ID, Content: event.Content}
 		if err := temporalClient.SignalWorkflow(requestCtx, workflowID, "", ReplySignal, reply); err != nil {
 			logger.Warn("Discord reply was not accepted by Temporal", "message_id", event.ID)
-			_ = session.MessageReactionAdd(config.ChannelID, event.ID, "❌", discordgo.WithContext(requestCtx))
+			_ = session.MessageReactionAdd(event.ChannelID, event.ID, "❌", discordgo.WithContext(requestCtx))
 			return
 		}
 		// This acknowledges durable signal acceptance, not PTY execution.
-		_ = session.MessageReactionAdd(config.ChannelID, event.ID, "📨", discordgo.WithContext(requestCtx))
+		_ = session.MessageReactionAdd(event.ChannelID, event.ID, "📨", discordgo.WithContext(requestCtx))
 	})
 	w := worker.New(temporalClient, config.TaskQueue, worker.Options{})
 	w.RegisterWorkflow(HumanReplyWorkflow)

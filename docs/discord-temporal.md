@@ -48,7 +48,8 @@ the server (for example, in a process supervisor). The browser can come and go.
 3. Create a Discord application/bot and invite it into your server. Enable
    **Message Content Intent** in its Bot settings. Give it **View Channel**,
    **Send Messages**, **Embed Links**, **Read Message History**, and
-   **Add Reactions** in the notification channel. Get the channel ID and your
+   **Add Reactions**, **Create Public Threads**, and **Send Messages in Threads**
+   in the notification channel. Get the channel ID and your
    user ID using Discord's Developer Mode. This integration uses a bot's
    outbound Gateway connection; it does not require a public callback URL.
    See [Discord Gateway intents](https://docs.discord.com/developers/events/gateway).
