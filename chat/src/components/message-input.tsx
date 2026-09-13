@@ -134,6 +134,8 @@ const ctrlMappings: Record<string, string> = {
   r: "\x12", // Ctrl+R (reverse history search)
 };
 
+const altArrowUp = {label: "Alt+Arrow up", display: "Alt+↑", value: "\x1b[1;3A"} as const;
+
 const controlShortcuts = [
   {label: "Ctrl+C", display: "Ctrl+C", value: ctrlMappings.c},
   {label: "Ctrl+D", display: "Ctrl+D", value: ctrlMappings.d},
@@ -143,6 +145,7 @@ const controlShortcuts = [
   {label: "Tab", display: "Tab", value: specialKeys.Tab},
   {label: "Escape", display: "Esc", value: specialKeys.Escape},
   {label: "Arrow up", display: "↑", value: specialKeys.ArrowUp},
+  altArrowUp,
   {label: "Arrow down", display: "↓", value: specialKeys.ArrowDown},
 ] as const;
 
@@ -481,6 +484,12 @@ export default function MessageInput({
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // In control mode, send special keys as raw messages
     if (inputMode === "control" && !disabled) {
+      if (e.key === "ArrowUp" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        e.preventDefault();
+        sendControlShortcut(altArrowUp);
+        return;
+      }
+
       // Check if the pressed key is in our special keys map
       if (specialKeys[e.key]) {
         e.preventDefault();

@@ -126,7 +126,7 @@ export function Header() {
       : status.detail;
 
   return (
-    <header className="z-20 flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center justify-between border-b bg-background/90 px-3 pt-[env(safe-area-inset-top)] backdrop-blur-xl sm:h-16 sm:px-6 sm:pt-0">
+    <header className="sticky top-0 z-20 flex min-h-14 shrink-0 items-center justify-between border-b bg-background/95 px-3 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl sm:h-16 sm:min-h-0 sm:px-6 sm:py-0">
       <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
         <div className="hidden size-9 shrink-0 place-items-center rounded-xl bg-foreground text-background shadow-sm min-[380px]:grid">
           <Activity className="size-4" />

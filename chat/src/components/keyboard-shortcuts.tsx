@@ -32,6 +32,7 @@ const shortcuts = [
   {
     section: "Terminal Mode",
     items: [
+      { keys: ["Alt", "↑"], label: "Send Alt+Up to agent" },
       { keys: ["Ctrl", "C"], label: "Interrupt" },
       { keys: ["Ctrl", "D"], label: "Send EOF" },
       { keys: ["Ctrl", "Z"], label: "Suspend" },

@@ -1,3 +1,4 @@
+import type {TemporalConfig, TemporalConfigResponse, TemporalProfilesResponse} from "./temporal-config";
 import type {
   FileUploadResponse,
   QueuedMessage,
@@ -28,13 +29,6 @@ export interface MCPProfiles {
   path: string;
 }
 
-export interface WebhookConfig {
-  url: string;
-  timeout_seconds: number;
-  max_attempts: number;
-  payload_template: string;
-}
-
 interface APIErrorDetail {
   message: string;
 }
@@ -49,6 +43,19 @@ async function requireOK(response: Response, fallback: string) {
   return response;
 }
 
+async function temporalRequest<T>(url: string, method = "GET", body?: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method,
+    headers: body === undefined ? undefined : {"Content-Type": "application/json"},
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => null) as APIErrorModel | null;
+    throw new Error(error?.detail || error?.errors?.[0]?.message || "Temporal settings request failed");
+  }
+  return response.json() as Promise<T>;
+}
+
 export function createChatAPI(baseURL: string) {
   return {
     async deleteMessages(): Promise<void> {
@@ -58,29 +65,32 @@ export function createChatAPI(baseURL: string) {
       );
     },
 
-    async getWebhook(): Promise<WebhookConfig> {
-      const response = await requireOK(
-        await fetch(`${baseURL}/webhook`),
-        "Webhook configuration is unavailable",
-      );
-      return (await response.json()) as WebhookConfig;
+    async getTemporal(): Promise<TemporalConfigResponse> {
+      return temporalRequest(`${baseURL}/temporal`);
     },
 
-    async updateWebhook(config: {
-      url: string;
-      timeout_seconds: number;
-      max_attempts: number;
-      payload_template?: string;
-    }): Promise<WebhookConfig> {
-      const response = await requireOK(
-        await fetch(`${baseURL}/webhook`, {
-          method: "PUT",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(config),
-        }),
-        "Failed to update webhook configuration",
-      );
-      return (await response.json()) as WebhookConfig;
+    async updateTemporal(config: TemporalConfig): Promise<TemporalConfigResponse> {
+      return temporalRequest(`${baseURL}/temporal`, "PUT", {config});
+    },
+
+    async getTemporalProfiles(): Promise<TemporalProfilesResponse> {
+      return temporalRequest(`${baseURL}/temporal/profiles`);
+    },
+
+    async saveTemporalProfile(name: string, config: TemporalConfig): Promise<TemporalProfilesResponse> {
+      return temporalRequest(`${baseURL}/temporal/profiles/${encodeURIComponent(name)}`, "PUT", {config});
+    },
+
+    async importTemporalProfiles(profiles: Record<string, TemporalConfig>): Promise<TemporalProfilesResponse> {
+      return temporalRequest(`${baseURL}/temporal/profiles`, "PUT", {profiles});
+    },
+
+    async deleteTemporalProfile(name: string): Promise<TemporalProfilesResponse> {
+      return temporalRequest(`${baseURL}/temporal/profiles/${encodeURIComponent(name)}`, "DELETE");
+    },
+
+    async applyTemporalProfile(name: string): Promise<TemporalConfigResponse> {
+      return temporalRequest(`${baseURL}/temporal/profiles/${encodeURIComponent(name)}/apply`, "POST");
     },
 
     async getMCP(): Promise<MCPConfig> {

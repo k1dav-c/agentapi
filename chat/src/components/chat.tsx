@@ -1,7 +1,7 @@
 "use client";
 
 import {useEffect, useState} from "react";
-import {RefreshCw} from "lucide-react";
+import {ExternalLink, RefreshCw} from "lucide-react";
 import {useChat} from "./chat-provider";
 import MessageInput from "./message-input";
 import MessageList from "./message-list";
@@ -26,8 +26,21 @@ export function Chat() {
     reconnectAttempt,
     nextReconnectAt,
     reconnectNow,
+    storageScope,
+    workspaceUrl,
   } = useChat();
   const [reconnectSeconds, setReconnectSeconds] = useState(0);
+  const [coderWorkspaceUrl, setCoderWorkspaceUrl] = useState(workspaceUrl);
+
+  useEffect(() => {
+    if (workspaceUrl) return;
+    let active = true;
+    fetch(`${storageScope}/workspace`)
+      .then((response) => response.ok ? response.json() as Promise<{url?: string}> : null)
+      .then((value) => { if (active && value?.url) setCoderWorkspaceUrl(value.url); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [storageScope, workspaceUrl]);
 
   useEffect(() => {
     if (!nextReconnectAt) {
@@ -93,16 +106,31 @@ export function Chat() {
         onStopTask={() => void sendMessage("\x1b", "raw")}
         onSendRaw={(data) => void sendMessage(data, "raw")}
         headerAction={
-          <Explorer
-            onNavigateTask={(number) => {
-              window.requestAnimationFrame(() =>
-                document.getElementById(`task-${number}`)?.scrollIntoView({
-                  behavior: "smooth",
-                  block: "start",
-                }),
-              );
-            }}
-          />
+          <div className="flex items-center gap-1">
+            <Explorer
+              onNavigateTask={(number) => {
+                window.requestAnimationFrame(() =>
+                  document.getElementById(`task-${number}`)?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                  }),
+                );
+              }}
+            />
+            {coderWorkspaceUrl && (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-9 rounded-full"
+                title="Open Coder workspace"
+                aria-label="Open Coder workspace"
+                onClick={() => window.open(coderWorkspaceUrl, "_blank", "noopener,noreferrer")}
+              >
+                <ExternalLink className="size-4" />
+              </Button>
+            )}
+          </div>
         }
       />
       <MessageInput
