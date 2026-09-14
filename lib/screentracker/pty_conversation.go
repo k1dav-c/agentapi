@@ -135,6 +135,26 @@ type PTYConversation struct {
 	screenBeforeLastUserMessage string
 	lock                        sync.Mutex
 
+	// stableCount is the number of consecutive identical snapshots,
+	// including the most recent one. Maintained incrementally by
+	// snapshotLocked so stability checks don't have to compare every
+	// snapshot in the buffer on each tick.
+	stableCount        int
+	lastSnapshotScreen string
+
+	// fmtCache short-circuits updateLastAgentMessageLocked when the screen
+	// hasn't changed since the last (expensive) diff+format pass. Any
+	// mutation of the other inputs to that computation (messages,
+	// screenBeforeLastUserMessage, load-state status) must invalidate it
+	// by setting fmtCacheValid to false.
+	fmtCacheValid  bool
+	fmtCacheScreen string
+
+	// ReadyForInitialPrompt scans the screen with regexps; only re-run it
+	// when the screen differs from the one last checked.
+	readinessChecked     bool
+	readinessCheckScreen string
+
 	// outboundQueue holds messages waiting to be sent to the agent.
 	// Buffer size is 1. Callers are expected to be serialized (the HTTP
 	// layer holds s.mu, and Send blocks until the message is processed),
@@ -220,8 +240,12 @@ func (c *PTYConversation) Start(ctx context.Context) {
 		// Signal send loop if agent is ready and queue has items.
 		// We check readiness independently of statusLocked() because
 		// statusLocked() returns "changing" when queue has items.
-		if !c.initialPromptReady && c.cfg.ReadyForInitialPrompt(screen) {
-			c.initialPromptReady = true
+		if !c.initialPromptReady && (!c.readinessChecked || screen != c.readinessCheckScreen) {
+			c.readinessChecked = true
+			c.readinessCheckScreen = screen
+			if c.cfg.ReadyForInitialPrompt(screen) {
+				c.initialPromptReady = true
+			}
 		}
 
 		var loadErr string
@@ -235,6 +259,9 @@ func (c *PTYConversation) Start(ctx context.Context) {
 			} else {
 				c.loadStateStatus = LoadStateSucceeded
 			}
+			// Load-state status and restored messages feed into
+			// updateLastAgentMessageLocked; force a fresh pass.
+			c.fmtCacheValid = false
 		}
 
 		if c.initialPromptReady && len(c.cfg.InitialPrompt) > 0 && !c.initialPromptSent {
@@ -341,6 +368,12 @@ func (c *PTYConversation) updateLastAgentMessageLocked(screen string, timestamp 
 	if c.writingMessage {
 		return
 	}
+	// The result only depends on the screen and on conversation state that
+	// invalidates fmtCache when mutated, so an unchanged screen means the
+	// whole diff+format pass would produce the same outcome as last time.
+	if c.fmtCacheValid && screen == c.fmtCacheScreen {
+		return
+	}
 	agentMessage := screenDiff(c.screenBeforeLastUserMessage, screen, c.cfg.AgentType)
 	lastUserMessage := c.lastMessage(ConversationRoleUser)
 	var toolCalls []string
@@ -370,6 +403,11 @@ func (c *PTYConversation) updateLastAgentMessageLocked(screen string, timestamp 
 			c.cfg.Logger.Info("Tool call detected", "toolCall", toolCall)
 		}
 	}
+	// The computation for this screen is complete past this point; record it
+	// so identical screens can skip the pass entirely on subsequent ticks.
+	c.fmtCacheValid = true
+	c.fmtCacheScreen = screen
+
 	shouldCreateNewMessage := len(c.messages) == 0 || c.messages[len(c.messages)-1].Role == ConversationRoleUser
 	lastAgentMessage := c.lastMessage(ConversationRoleAgent)
 	if lastAgentMessage.Message == agentMessage {
@@ -400,6 +438,12 @@ func (c *PTYConversation) snapshotLocked(screen string) {
 		timestamp: c.cfg.Clock.Now(),
 		screen:    screen,
 	}
+	if c.snapshotBuffer.Len() > 0 && screen == c.lastSnapshotScreen {
+		c.stableCount++
+	} else {
+		c.stableCount = 1
+	}
+	c.lastSnapshotScreen = screen
 	c.snapshotBuffer.Add(snapshot)
 	c.updateLastAgentMessageLocked(screen, snapshot.timestamp)
 }
@@ -456,6 +500,9 @@ func (c *PTYConversation) sendMessage(ctx context.Context, messageParts ...Messa
 	})
 	c.userSentMessageAfterLoadState = true
 	c.writingMessage = false
+	// screenBeforeLastUserMessage and messages changed; the next
+	// updateLastAgentMessageLocked pass must recompute the diff.
+	c.fmtCacheValid = false
 	c.lock.Unlock()
 	return nil
 }
@@ -562,17 +609,11 @@ func (c *PTYConversation) Status() ConversationStatus {
 
 // isScreenStableLocked returns true if the screen content has been stable
 // for the required number of snapshots. Caller MUST hold c.lock.
+// Equivalent to "buffer is full and all snapshots are identical", computed
+// incrementally via stableCount instead of comparing every snapshot.
 func (c *PTYConversation) isScreenStableLocked() bool {
-	snapshots := c.snapshotBuffer.GetAll()
-	if len(snapshots) < c.stableSnapshotsThreshold {
-		return false
-	}
-	for i := 1; i < len(snapshots); i++ {
-		if snapshots[0].screen != snapshots[i].screen {
-			return false
-		}
-	}
-	return true
+	return c.snapshotBuffer.Len() >= c.stableSnapshotsThreshold &&
+		c.stableCount >= c.stableSnapshotsThreshold
 }
 
 // caller MUST hold c.lock
@@ -585,7 +626,6 @@ func (c *PTYConversation) statusLocked() ConversationStatus {
 		panic("stable snapshots threshold is 0. can't check stability")
 	}
 
-	snapshots := c.snapshotBuffer.GetAll()
 	if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == ConversationRoleUser {
 		// if the last message is a user message then the snapshot loop hasn't
 		// been triggered since the last user message, and we should assume
@@ -593,7 +633,7 @@ func (c *PTYConversation) statusLocked() ConversationStatus {
 		return ConversationStatusChanging
 	}
 
-	if len(snapshots) != c.stableSnapshotsThreshold {
+	if c.snapshotBuffer.Len() != c.stableSnapshotsThreshold {
 		return ConversationStatusInitializing
 	}
 
@@ -808,9 +848,14 @@ func (c *PTYConversation) Reset() {
 	}
 	c.screenBeforeLastUserMessage = ""
 	c.snapshotBuffer = NewRingBuffer[screenSnapshot](c.stableSnapshotsThreshold)
+	c.stableCount = 0
+	c.lastSnapshotScreen = ""
+	c.fmtCacheValid = false
 	c.toolCallMessageSet = make(map[string]bool)
 	c.dirty = false
 	c.userSentMessageAfterLoadState = false
 	c.initialPromptReady = false
 	c.initialPromptSent = false
+	c.readinessChecked = false
+	c.readinessCheckScreen = ""
 }

@@ -40,3 +40,8 @@ func (b *RingBuffer[T]) GetAll() []T {
 func (b *RingBuffer[T]) Capacity() int {
 	return b.size
 }
+
+// Len returns the number of items currently in the buffer
+func (b *RingBuffer[T]) Len() int {
+	return b.count
+}
