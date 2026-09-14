@@ -18,13 +18,14 @@ import (
 var terminalSelection = regexp.MustCompile(`(?m)^\s*[❯›>]\s*(\d+)\.\s+`)
 var terminalConfirmation = regexp.MustCompile(`(?i)(enter to confirm|press enter|esc to cancel|would you like to proceed|do you want to proceed)`)
 var terminalOption = regexp.MustCompile(`(?m)^\s*[❯›>]?\s*(\d+)\.\s+`)
+var terminalQuestionKeyword = regexp.MustCompile(`(?i)(choose|select|option|continue|cancel|allow|deny|approve|permission)`)
 
 func isTerminalQuestion(content string) bool {
 	if terminalSelection.MatchString(content) && terminalConfirmation.MatchString(content) {
 		return true
 	}
 	options := terminalOption.FindAllString(content, -1)
-	return len(options) >= 2 && regexp.MustCompile(`(?i)(choose|select|option|continue|cancel|allow|deny|approve|permission)`).MatchString(content)
+	return len(options) >= 2 && terminalQuestionKeyword.MatchString(content)
 }
 
 // Only expose deliberate, bounded terminal actions. Discord text never becomes

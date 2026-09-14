@@ -83,6 +83,14 @@ type Server struct {
 	// identified by queueFailID. Used to drop poison messages.
 	queueFailID    int
 	queueFailCount int
+
+	// Memoized isTerminalQuestion result for the dispatch loop. The screen
+	// string is pointer-stable while unchanged (termexec render cache), so
+	// the equality check below is cheap and the multi-regexp scan only runs
+	// when the screen actually changes. Guarded by s.mu.
+	terminalQuestionScreen string
+	terminalQuestionResult bool
+	terminalQuestionValid  bool
 }
 
 func (s *Server) NormalizeSchema(schema any) any {
@@ -935,9 +943,14 @@ func (s *Server) dispatchNextQueuedMessage() {
 	defer s.mu.Unlock()
 	if s.emitter != nil && s.transport == TransportPTY {
 		s.emitter.mu.Lock()
-		terminalQuestion := isTerminalQuestion(s.emitter.screen)
+		screen := s.emitter.screen
 		s.emitter.mu.Unlock()
-		if terminalQuestion {
+		if !s.terminalQuestionValid || screen != s.terminalQuestionScreen {
+			s.terminalQuestionResult = isTerminalQuestion(screen)
+			s.terminalQuestionScreen = screen
+			s.terminalQuestionValid = true
+		}
+		if s.terminalQuestionResult {
 			return
 		}
 	}

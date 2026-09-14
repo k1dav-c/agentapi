@@ -34,6 +34,17 @@ type Process struct {
 	// Use ReaderDone() to get the channel, ReaderErr() for the cause.
 	readerDone chan struct{}
 	readerErr  error // written before readerDone is closed, read-safe after
+
+	// Render cache: rendering the vt10x state is O(rows*cols) and the
+	// snapshot loop calls ReadScreen every 25ms, so reuse the previous
+	// render while no PTY output has arrived. Returning the identical
+	// string also lets downstream equality checks short-circuit on
+	// pointer equality. renderMu is always acquired while holding
+	// screenUpdateLock (read or write side is fine for cache purposes).
+	renderMu       sync.Mutex
+	renderValid    bool
+	renderedAt     time.Time
+	renderedScreen string
 }
 
 type StartProcessConfig struct {
@@ -155,9 +166,9 @@ func (p *Process) ReadScreen() string {
 	for range 3 {
 		p.screenUpdateLock.RLock()
 		if p.clock.Since(p.lastScreenUpdate) >= 16*time.Millisecond {
-			state := p.xp.State.String()
+			screen := p.renderScreenRLocked()
 			p.screenUpdateLock.RUnlock()
-			return stripWidePadding(state)
+			return screen
 		}
 		p.screenUpdateLock.RUnlock()
 		t := p.clock.NewTimer(16 * time.Millisecond)
@@ -165,9 +176,29 @@ func (p *Process) ReadScreen() string {
 		t.Stop()
 	}
 	p.screenUpdateLock.RLock()
-	state := p.xp.State.String()
+	screen := p.renderScreenRLocked()
 	p.screenUpdateLock.RUnlock()
-	return stripWidePadding(state)
+	return screen
+}
+
+// renderScreenRLocked renders the terminal state to a string, reusing the
+// cached render when no PTY output has arrived since it was taken.
+// Caller MUST hold p.screenUpdateLock (read lock is sufficient: the lock
+// prevents the reader goroutine from mutating terminal state and
+// lastScreenUpdate, while renderMu serializes cache access between
+// concurrent ReadScreen callers).
+func (p *Process) renderScreenRLocked() string {
+	ts := p.lastScreenUpdate
+	p.renderMu.Lock()
+	defer p.renderMu.Unlock()
+	if p.renderValid && p.renderedAt.Equal(ts) {
+		return p.renderedScreen
+	}
+	screen := stripWidePadding(p.xp.State.String())
+	p.renderValid = true
+	p.renderedAt = ts
+	p.renderedScreen = screen
+	return screen
 }
 
 // Write sends input to the process via the pseudo terminal.
