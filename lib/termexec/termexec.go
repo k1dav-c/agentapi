@@ -34,8 +34,9 @@ type Process struct {
 
 	// readerDone is closed when the PTY reader goroutine exits.
 	// Use ReaderDone() to get the channel, ReaderErr() for the cause.
-	readerDone chan struct{}
-	readerErr  error // written before readerDone is closed, read-safe after
+	readerDone    chan struct{}
+	screenUpdates chan struct{}
+	readerErr     error // written before readerDone is closed, read-safe after
 
 	// Render cache: rendering the vt10x state is O(rows*cols) and the
 	// snapshot loop calls ReadScreen every 25ms, so reuse the previous
@@ -77,7 +78,7 @@ func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error
 		return nil, err
 	}
 
-	process := &Process{xp: xp, execCmd: execCmd, clock: clock, waitDone: make(chan struct{}), readerDone: make(chan struct{})}
+	process := &Process{xp: xp, execCmd: execCmd, clock: clock, waitDone: make(chan struct{}), readerDone: make(chan struct{}), screenUpdates: make(chan struct{}, 1)}
 
 	go func() {
 		// Signal reader exit so callers (e.g. the supervisor) can detect
@@ -127,6 +128,7 @@ func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error
 			}
 			process.lastScreenUpdate = clock.Now()
 			process.screenUpdateLock.Unlock()
+			process.notifyScreenUpdate()
 		}
 	}()
 
@@ -318,4 +320,15 @@ func (p *Process) Wait() error {
 		return ErrNonZeroExitCode
 	}
 	return nil
+}
+
+// ScreenUpdates coalesces PTY output notifications for one snapshot consumer.
+// The channel remains open when the process exits, avoiding a busy receive loop.
+func (p *Process) ScreenUpdates() <-chan struct{} { return p.screenUpdates }
+
+func (p *Process) notifyScreenUpdate() {
+	select {
+	case p.screenUpdates <- struct{}{}:
+	default:
+	}
 }
