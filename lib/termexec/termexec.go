@@ -8,11 +8,13 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/ActiveState/termtest/xpty"
+	"github.com/ActiveState/vt10x"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/util"
 	"github.com/coder/quartz"
@@ -194,11 +196,57 @@ func (p *Process) renderScreenRLocked() string {
 	if p.renderValid && p.renderedAt.Equal(ts) {
 		return p.renderedScreen
 	}
-	screen := stripWidePadding(p.xp.State.String())
+	screen := renderScreen(p.xp.State)
 	p.renderValid = true
 	p.renderedAt = ts
 	p.renderedScreen = screen
 	return screen
+}
+
+// renderScreen renders only rows 0..lastContentRow. For sequential-output
+// agents the cursor tracks the content extent, but TUI agents (e.g. Claude
+// Code's Ink framework) may position content below the cursor via absolute
+// cursor movement. We use max(cursorY, lastNonEmptyRow) to cover both cases,
+// cutting the per-snapshot cost from 80×1000 to 80×(actual content rows).
+func renderScreen(state *vt10x.State) string {
+	state.Lock()
+	defer state.Unlock()
+	rows, cols := state.Size()
+	_, cursorY := state.Cursor()
+	// Scan backwards from the bottom to find the last row with content.
+	// This handles TUI agents that write below the cursor position.
+	lastContent := cursorY
+	for y := rows - 1; y > cursorY; y-- {
+		for x := 0; x < cols; x++ {
+			r, _, _ := state.Cell(x, y)
+			if r != 0 && r != ' ' && r != widePadRune {
+				lastContent = y
+				goto found
+			}
+		}
+	}
+found:
+	renderRows := lastContent + 1
+	if renderRows > rows {
+		renderRows = rows
+	}
+	var screen strings.Builder
+	screen.Grow(renderRows * (cols + 1))
+	for y := 0; y < renderRows; y++ {
+		for x := 0; x < cols; x++ {
+			r, _, _ := state.Cell(x, y)
+			if r == widePadRune {
+				continue
+			}
+			if r >= 0 && r < 128 {
+				screen.WriteByte(byte(r))
+			} else {
+				screen.WriteRune(r)
+			}
+		}
+		screen.WriteByte('\n')
+	}
+	return screen.String()
 }
 
 // Write sends input to the process via the pseudo terminal.
