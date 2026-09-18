@@ -22,7 +22,11 @@ func (s *SwappableProcess) Current() *Process {
 func (s *SwappableProcess) Set(process *Process) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	previous := s.current
 	s.current = process
+	// Wake a consumer waiting on the previous process so it rebinds.
+	previous.notifyScreenUpdate()
+	process.notifyScreenUpdate()
 }
 
 func (s *SwappableProcess) Write(data []byte) (int, error) {
@@ -31,4 +35,8 @@ func (s *SwappableProcess) Write(data []byte) (int, error) {
 
 func (s *SwappableProcess) ReadScreen() string {
 	return s.Current().ReadScreen()
+}
+
+func (s *SwappableProcess) ScreenUpdates() <-chan struct{} {
+	return s.Current().ScreenUpdates()
 }

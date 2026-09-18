@@ -124,7 +124,7 @@ func (cfg PTYConversationConfig) getStableSnapshotsThreshold() int {
 }
 
 // PTYConversation is a conversation that uses a pseudo-terminal (PTY) for communication.
-// It uses a combination of polling and diffs to detect changes in the screen.
+// It snapshots on output and samples until the screen is stable.
 type PTYConversation struct {
 	cfg     PTYConversationConfig
 	emitter Emitter
@@ -170,6 +170,7 @@ type PTYConversation struct {
 	// stableSignal is used by the snapshot loop to signal the send loop
 	// when the agent is stable and there are items in the outbound queue.
 	stableSignal chan struct{}
+	snapshotWake chan struct{}
 	// toolCallMessageSet keeps track of the tool calls that have been detected & logged in the current agent message
 	toolCallMessageSet map[string]bool
 	// dirty tracks whether the conversation state has changed since the last save
@@ -216,6 +217,7 @@ func NewPTY(ctx context.Context, cfg PTYConversationConfig, emitter Emitter) *PT
 		},
 		outboundQueue:                 make(chan outboundMessage, 1),
 		stableSignal:                  make(chan struct{}, 1),
+		snapshotWake:                  make(chan struct{}, 1),
 		toolCallMessageSet:            make(map[string]bool),
 		dirty:                         false,
 		userSentMessageAfterLoadState: false,
@@ -229,8 +231,7 @@ func NewPTY(ctx context.Context, cfg PTYConversationConfig, emitter Emitter) *PT
 }
 
 func (c *PTYConversation) Start(ctx context.Context) {
-	// Snapshot loop
-	c.cfg.Clock.TickerFunc(ctx, c.cfg.SnapshotInterval, func() error {
+	snapshot := func() error {
 		c.lock.Lock()
 		screen := c.cfg.AgentIO.ReadScreen()
 		c.snapshotLocked(screen)
@@ -290,7 +291,13 @@ func (c *PTYConversation) Start(ctx context.Context) {
 		c.emitter.EmitMessages(messages)
 		c.emitter.EmitScreen(screen)
 		return nil
-	}, "snapshot")
+	}
+	if source, ok := c.cfg.AgentIO.(interface{ ScreenUpdates() <-chan struct{} }); ok {
+		go c.watchScreen(ctx, source, snapshot)
+	} else {
+		// Keep compatibility with AgentIO implementations without notifications.
+		c.cfg.Clock.TickerFunc(ctx, c.cfg.SnapshotInterval, snapshot, "snapshot")
+	}
 
 	// Send loop - primary call site for sendLocked() in production
 	go func() {
@@ -321,6 +328,7 @@ func (c *PTYConversation) Start(ctx context.Context) {
 					c.lock.Lock()
 					c.sendingMessage = false
 					c.lock.Unlock()
+					c.wakeSnapshot()
 					if msg.errCh != nil {
 						msg.errCh <- err
 						// Close so the Send() caller's <-errCh never blocks
@@ -467,6 +475,7 @@ func (c *PTYConversation) Send(messageParts ...MessagePart) error {
 
 	errCh := make(chan error, 1)
 	c.outboundQueue <- outboundMessage{parts: messageParts, errCh: errCh}
+	c.wakeSnapshot()
 	return <-errCh
 }
 
@@ -836,6 +845,7 @@ func (c *PTYConversation) loadStateLocked() (error, bool) {
 
 // Reset clears all conversation state back to the initial empty state.
 func (c *PTYConversation) Reset() {
+	defer c.wakeSnapshot()
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -858,4 +868,70 @@ func (c *PTYConversation) Reset() {
 	c.initialPromptSent = false
 	c.readinessChecked = false
 	c.readinessCheckScreen = ""
+}
+
+func (c *PTYConversation) wakeSnapshot() {
+	select {
+	case c.snapshotWake <- struct{}{}:
+	default:
+	}
+}
+
+// watchScreen uses an adaptive interval: the base SnapshotInterval (25ms)
+// while the screen is settling toward stability, and a longer activeInterval
+// (6× base) while the agent is actively streaming output. Once fully settled,
+// it sleeps without a timer until PTY output, a queued send, or Reset wakes
+// it. Buffering notifications coalesces bursts and keeps rendering bounded.
+func (c *PTYConversation) watchScreen(ctx context.Context, source interface{ ScreenUpdates() <-chan struct{} }, snapshot func() error) {
+	settleInterval := c.cfg.SnapshotInterval           // 25ms — for stability detection
+	activeInterval := c.cfg.SnapshotInterval * 6        // 150ms — during streaming
+	interval := settleInterval
+	var prevScreen string
+
+	for {
+		timer := c.cfg.Clock.NewTimer(interval, "snapshot")
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		// Consume output already covered by the next snapshot. Output arriving
+		// during or after the read remains pending, so no final update is lost.
+		select {
+		case <-source.ScreenUpdates():
+		default:
+		}
+		select {
+		case <-c.snapshotWake:
+		default:
+		}
+		if err := snapshot(); err != nil {
+			return
+		}
+		c.lock.Lock()
+		curScreen := c.lastSnapshotScreen
+		settled := c.isScreenStableLocked() && !c.sendingMessage && !c.writingMessage && len(c.outboundQueue) == 0
+		c.lock.Unlock()
+
+		if settled {
+			prevScreen = curScreen
+			// Park until something happens.
+			select {
+			case <-ctx.Done():
+				return
+			case <-source.ScreenUpdates():
+			case <-c.snapshotWake:
+			}
+			interval = settleInterval // just woke — sample fast
+		} else if curScreen != prevScreen {
+			// Screen is actively changing — no point sampling at full rate.
+			interval = activeInterval
+		} else {
+			// Screen stopped changing but stableCount hasn't reached
+			// threshold yet — keep the fast cadence for quick detection.
+			interval = settleInterval
+		}
+		prevScreen = curScreen
+	}
 }

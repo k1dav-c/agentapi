@@ -101,6 +101,8 @@ func TestHandoffRestartInvalidatesEvenIdenticalPrompt(t *testing.T) {
 func TestHandoffTerminalReplyAndQueueGate(t *testing.T) {
 	s, c, terminal := handoffServer()
 	s.emitter.EmitScreen("Do you want to proceed?\n❯ 1. Yes\n  2. No\nEnter to confirm")
+	s.dispatchNextQueuedMessage()
+	require.False(t, s.terminalQuestionValid, "empty queues should not scan the terminal")
 	s.messageQueue = []QueuedMessage{{ID: 1, Content: "later"}}
 	pending := s.pendingHandoffLocked()
 	require.Equal(t, "terminal", pending.Kind)
