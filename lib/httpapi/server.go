@@ -941,6 +941,10 @@ func (s *Server) startMessageQueue() {
 func (s *Server) dispatchNextQueuedMessage() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Screen inspection is only needed when a message can be dispatched.
+	if len(s.messageQueue) == 0 || s.conversation.Status() != st.ConversationStatusStable {
+		return
+	}
 	if s.emitter != nil && s.transport == TransportPTY {
 		s.emitter.mu.Lock()
 		screen := s.emitter.screen
@@ -955,9 +959,6 @@ func (s *Server) dispatchNextQueuedMessage() {
 		}
 	}
 
-	if len(s.messageQueue) == 0 || s.conversation.Status() != st.ConversationStatusStable {
-		return
-	}
 	next := s.messageQueue[0]
 	if err := s.conversation.Send(FormatMessage(s.agentType, next.Content)...); err != nil {
 		if errors.Is(err, st.ErrMessageValidationChanging) {
