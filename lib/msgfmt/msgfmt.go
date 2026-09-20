@@ -6,6 +6,17 @@ import (
 
 const WhiteSpaceChars = " \t\n\r\f\v"
 
+// isWhiteSpace checks if a rune is a whitespace character.
+// Using a switch compiles to a jump table, avoiding the per-rune
+// strings.ContainsRune iteration over WhiteSpaceChars.
+func isWhiteSpace(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n', '\r', '\f', '\v':
+		return true
+	}
+	return false
+}
+
 func TrimWhitespace(msg string) string {
 	return strings.Trim(msg, WhiteSpaceChars)
 }
@@ -47,7 +58,7 @@ func normalizeAndGetRuneLineMapping(msgRaw string) ([]rune, []string, []int) {
 	var runes []rune
 	for lineIdx, line := range msgLines {
 		for _, r := range line {
-			if !strings.ContainsRune(WhiteSpaceChars, r) {
+			if !isWhiteSpace(r) {
 				runes = append(runes, r)
 				msgRuneLineLocations = append(msgRuneLineLocations, lineIdx)
 			}

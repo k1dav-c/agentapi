@@ -10,7 +10,7 @@ import (
 func screenDiff(oldScreen, newScreen string, agentType msgfmt.AgentType) string {
 	oldLines := strings.Split(oldScreen, "\n")
 	newLines := strings.Split(newScreen, "\n")
-	oldLinesMap := make(map[string]bool)
+	oldLinesMap := make(map[string]bool, len(oldLines))
 
 	// -1 indicates no header
 	dynamicHeaderEnd := -1
@@ -84,6 +84,11 @@ func trimPreviousMessageOverlap(prevMsg, newMsg string) string {
 	overlap := 0
 	maxOverlap := min(len(prevLines), len(newLines))
 	for n := maxOverlap; n > 0; n-- {
+		// Fast reject: the first line of the candidate overlap must match.
+		// This turns the common no-overlap case into O(n) instead of O(n²).
+		if norm(prevLines[len(prevLines)-n]) != norm(newLines[0]) {
+			continue
+		}
 		match := true
 		hasContent := false
 		for i := 0; i < n; i++ {

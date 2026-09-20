@@ -67,6 +67,14 @@ func BenchmarkTrimPreviousMessageOverlap(b *testing.B) {
 		}
 	})
 
+	b.Run("no_overlap/200_lines", func(b *testing.B) {
+		prev := makeParagraph(200, "old-")
+		new_ := makeParagraph(200, "new-")
+		for b.Loop() {
+			trimPreviousMessageOverlap(prev, new_)
+		}
+	})
+
 	b.Run("overlap_50_lines", func(b *testing.B) {
 		shared := makeParagraph(50, "shared-")
 		prev := makeParagraph(100, "old-") + "\n" + shared

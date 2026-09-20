@@ -83,7 +83,12 @@ func (s *Server) pendingHandoffLocked() *handoff.Request {
 			question = message.Message
 		}
 	}
-	if s.transport == TransportPTY && isTerminalQuestion(screen) {
+	if !s.terminalQuestionValid || screen != s.terminalQuestionScreen {
+		s.terminalQuestionResult = isTerminalQuestion(screen)
+		s.terminalQuestionScreen = screen
+		s.terminalQuestionValid = true
+	}
+	if s.transport == TransportPTY && s.terminalQuestionResult {
 		kind, content = "terminal", screen
 	} else {
 		if len(s.messageQueue) > 0 {
