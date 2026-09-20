@@ -280,7 +280,8 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			}
 			return supervisor.Restart
 		}(),
-		APIToken: apiToken,
+		APIToken:    apiToken,
+		EnablePprof: viper.GetBool(FlagPprof),
 		Webhook: httpapi.WebhookConfig{
 			URL:             viper.GetString(FlagWebhookURL),
 			Timeout:         viper.GetDuration(FlagWebhookTimeout),
@@ -519,6 +520,7 @@ const (
 	FlagWebhookMaxAttempts     = "webhook-max-attempts"
 	FlagWebhookPayloadTemplate = "webhook-payload-template"
 	FlagAPIToken               = "api-token"
+	FlagPprof                  = "pprof"
 )
 
 func CreateServerCmd() *cobra.Command {
@@ -567,6 +569,7 @@ func CreateServerCmd() *cobra.Command {
 		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},
 		{FlagWebhookPayloadTemplate, "", "", "Go text/template for custom webhook POST body. Available fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport", "string"},
 		{FlagAPIToken, "", "", "API token for Bearer authentication. If set without a value, a random token is generated. Empty (default) disables authentication.", "string"},
+		{FlagPprof, "", false, "Enable /debug/pprof/ endpoints for CPU and memory profiling", "bool"},
 	}
 
 	for _, spec := range flagSpecs {

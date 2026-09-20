@@ -33,6 +33,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/danielgtaylor/huma/v2/sse"
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 )
 
@@ -91,6 +92,8 @@ type Server struct {
 	terminalQuestionScreen string
 	terminalQuestionResult bool
 	terminalQuestionValid  bool
+
+	enablePprof bool
 }
 
 func (s *Server) NormalizeSchema(schema any) any {
@@ -163,6 +166,9 @@ type ServerConfig struct {
 	// endpoints. Static file routes (/chat/*, /) are exempt so browsers can
 	// load the chat UI without a token.
 	APIToken string
+	// EnablePprof mounts /debug/pprof/* endpoints for live CPU and memory
+	// profiling. Off by default; enabled via --pprof flag.
+	EnablePprof bool
 }
 
 // Validate allowed hosts don't contain whitespace, commas, schemes, or ports.
@@ -384,6 +390,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		webhook:        webhook,
 		restartAgent:   config.RestartAgent,
 		jsonlParentCtx: ctx,
+		enablePprof:    config.EnablePprof,
 	}
 	if mcpconfig.SupportedAgent(config.AgentType) {
 		store, err := mcpconfig.NewStore(config.AgentType, config.CWD)
@@ -720,6 +727,10 @@ func (s *Server) registerRoutes() {
 	}, map[string]any{
 		"screen": ScreenUpdateBody{},
 	}, s.subscribeScreen)
+
+	if s.enablePprof {
+		s.router.Mount("/debug", chimw.Profiler())
+	}
 
 	s.router.Handle("/", http.HandlerFunc(s.redirectToChat))
 
