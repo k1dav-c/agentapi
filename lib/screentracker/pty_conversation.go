@@ -921,9 +921,14 @@ func (c *PTYConversation) watchScreen(ctx context.Context, source interface{ Scr
 			case <-ctx.Done():
 				return
 			case <-source.ScreenUpdates():
+				// PTY output while settled. TUI agents like Codex
+				// continuously redraw without changing visible content,
+				// so use the longer activeInterval to avoid burning
+				// CPU on renders that produce identical screens.
+				interval = activeInterval
 			case <-c.snapshotWake:
+				interval = settleInterval // user action — sample fast
 			}
-			interval = settleInterval // just woke — sample fast
 		} else if curScreen != prevScreen {
 			// Screen is actively changing — no point sampling at full rate.
 			interval = activeInterval

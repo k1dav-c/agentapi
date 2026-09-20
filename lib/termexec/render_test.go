@@ -68,6 +68,15 @@ func BenchmarkRenderScreen(b *testing.B) {
 					renderedBenchmark = renderScreen(&state)
 				}
 			})
+			b.Run("hwm-cached", func(b *testing.B) {
+				hwm := 0
+				// Prime the high-water mark with one render.
+				renderScreenWithHWM(&state, &hwm)
+				b.ReportAllocs()
+				for b.Loop() {
+					renderedBenchmark = renderScreenWithHWM(&state, &hwm)
+				}
+			})
 		})
 	}
 }

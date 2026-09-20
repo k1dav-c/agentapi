@@ -48,6 +48,12 @@ type Process struct {
 	renderValid    bool
 	renderedAt     time.Time
 	renderedScreen string
+
+	// contentHighWaterMark tracks the highest row that has ever contained
+	// non-empty content. The backward scan in renderScreen uses this as a
+	// ceiling instead of scanning from row 999, which saves ~75K Cell()
+	// calls per render for agents with content in the first ~50 rows.
+	contentHighWaterMark int
 }
 
 type StartProcessConfig struct {
@@ -198,9 +204,17 @@ func (p *Process) renderScreenRLocked() string {
 	if p.renderValid && p.renderedAt.Equal(ts) {
 		return p.renderedScreen
 	}
-	screen := renderScreen(p.xp.State)
+	screen := renderScreenWithHWM(p.xp.State, &p.contentHighWaterMark)
 	p.renderValid = true
 	p.renderedAt = ts
+	// Content-stable optimization: if the render produced the same
+	// content as the cached version (common during TUI cosmetic redraws),
+	// reuse the existing string reference so downstream equality checks
+	// short-circuit on pointer equality (Go's == on strings checks
+	// pointer+length first).
+	if screen == p.renderedScreen {
+		return p.renderedScreen
+	}
 	p.renderedScreen = screen
 	return screen
 }
@@ -210,15 +224,42 @@ func (p *Process) renderScreenRLocked() string {
 // Code's Ink framework) may position content below the cursor via absolute
 // cursor movement. We use max(cursorY, lastNonEmptyRow) to cover both cases,
 // cutting the per-snapshot cost from 80×1000 to 80×(actual content rows).
+//
+// The standalone function is used by tests; production code uses
+// Process.renderScreenRLocked which delegates to renderScreenWithHWM to
+// benefit from the high-water mark cache.
 func renderScreen(state *vt10x.State) string {
+	hwm := 0
+	return renderScreenWithHWM(state, &hwm)
+}
+
+// renderScreenWithHWM is the inner render that caches the highest row with
+// content across calls (contentHighWaterMark). On repeated renders the
+// backward scan starts from max(hwm+margin, cursorY) instead of row 999,
+// avoiding ~75K Cell() calls per render for sequential-output agents.
+func renderScreenWithHWM(state *vt10x.State, hwm *int) string {
 	state.Lock()
 	defer state.Unlock()
 	rows, cols := state.Size()
 	_, cursorY := state.Cursor()
-	// Scan backwards from the bottom to find the last row with content.
-	// This handles TUI agents that write below the cursor position.
+
+	// Determine the ceiling for the backward scan. Start from the
+	// high-water mark + a small margin (to catch newly-written rows),
+	// clamped to the terminal height. On the first render (*hwm == 0)
+	// or if the cursor jumped past the HWM, fall back to the full scan.
+	scanCeil := rows - 1
+	if prev := *hwm; prev > 0 && prev >= cursorY {
+		// Allow 5 rows of growth beyond the cached extent before
+		// falling back to a full scan.
+		ceil := prev + 5
+		if ceil < scanCeil {
+			scanCeil = ceil
+		}
+	}
+
+	// Scan backwards from scanCeil to find the last row with content.
 	lastContent := cursorY
-	for y := rows - 1; y > cursorY; y-- {
+	for y := scanCeil; y > cursorY; y-- {
 		for x := 0; x < cols; x++ {
 			r, _, _ := state.Cell(x, y)
 			if r != 0 && r != ' ' && r != widePadRune {
@@ -228,6 +269,11 @@ func renderScreen(state *vt10x.State) string {
 		}
 	}
 found:
+	// Update high-water mark — only raise, never lower.
+	if lastContent > *hwm {
+		*hwm = lastContent
+	}
+
 	renderRows := lastContent + 1
 	if renderRows > rows {
 		renderRows = rows
