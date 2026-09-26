@@ -84,7 +84,7 @@ type Server struct {
 	queueFailID    int
 	queueFailCount int
 
-	// Memoized isTerminalQuestion result for the dispatch loop. The screen
+	// Memoized isTerminalQuestionScreen result for the dispatch loop. The screen
 	// string is pointer-stable while unchanged (termexec render cache), so
 	// the equality check below is cheap and the multi-regexp scan only runs
 	// when the screen actually changes. Guarded by s.mu.
@@ -305,6 +305,10 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		return mf.IsAgentReadyForInitialPrompt(config.AgentType, message)
 	}
 
+	stabilityScreen := func(screen string) string {
+		return mf.StabilityRegion(config.AgentType, screen)
+	}
+
 	formatToolCall := func(message string) (string, []string) {
 		return mf.FormatToolCall(config.AgentType, message)
 	}
@@ -348,6 +352,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			ScreenStabilityLength:  2 * time.Second,
 			FormatMessage:          formatMessage,
 			ReadyForInitialPrompt:  isAgentReadyForInitialPrompt,
+			StabilityScreen:        stabilityScreen,
 			FormatToolCall:         formatToolCall,
 			InitialPrompt:          initialPrompt,
 			Logger:                 logger,
@@ -842,9 +847,27 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 		if strings.TrimSpace(input.Body.Content) == "" {
 			return nil, huma.Error400BadRequest("message must not be empty")
 		}
+		var screen string
+		if s.transport == TransportPTY {
+			screen = s.currentScreenLocked()
+		}
+		if keys, ok := freeTextReplyKeys(s.agentType, screen); ok {
+			if err := s.conversation.Send(formatFreeTextReply(s.agentType, keys, input.Body.Content)...); err != nil {
+				if errors.Is(err, st.ErrMessageValidationChanging) {
+					return nil, huma.Error409Conflict("the agent's prompt is still updating; try again in a moment")
+				}
+				return nil, fmt.Errorf("failed to send reply to the agent's prompt: %w", err)
+			}
+			break
+		}
 		// Enqueue when earlier messages are still waiting, even if the
-		// agent is stable, so messages are delivered in FIFO order.
-		if len(s.messageQueue) > 0 || s.conversation.Status() != st.ConversationStatusStable {
+		// agent is stable, so messages are delivered in FIFO order. Never
+		// type a message into an interactive prompt either: the prompt
+		// ignores the text and the carriage return would pick the
+		// highlighted option (e.g. approve a permission request). The
+		// queue holds it until the prompt is answered.
+		if len(s.messageQueue) > 0 || s.conversation.Status() != st.ConversationStatusStable ||
+			(screen != "" && isTerminalQuestionScreen(s.agentType, screen)) {
 			s.enqueueMessageLocked(input.Body.Content)
 			resp.Body.Ok = true
 			resp.Body.Queued = true
@@ -950,7 +973,7 @@ func (s *Server) dispatchNextQueuedMessage() {
 		screen := s.emitter.screen
 		s.emitter.mu.Unlock()
 		if !s.terminalQuestionValid || screen != s.terminalQuestionScreen {
-			s.terminalQuestionResult = isTerminalQuestion(screen)
+			s.terminalQuestionResult = isTerminalQuestionScreen(s.agentType, screen)
 			s.terminalQuestionScreen = screen
 			s.terminalQuestionValid = true
 		}
@@ -971,13 +994,16 @@ func (s *Server) dispatchNextQueuedMessage() {
 		}
 		s.queueFailCount++
 		s.logger.Error("Failed to send queued message", "queueId", next.ID, "attempt", s.queueFailCount, "error", err)
-		if s.queueFailCount >= maxQueueDispatchAttempts {
+		// A message the agent didn't react to may still be in its input
+		// box; retrying would type it a second time.
+		if s.queueFailCount >= maxQueueDispatchAttempts || errors.Is(err, st.ErrMessageNotSubmitted) {
 			// Drop the poison message so it doesn't block the queue forever.
 			s.messageQueue = s.messageQueue[1:]
-			s.emitter.EmitError(
-				fmt.Sprintf("Dropped queued message after %d failed attempts: %v", s.queueFailCount, err),
-				st.ErrorLevelError,
-			)
+			msg := fmt.Sprintf("Dropped queued message after %d failed attempts: %v", s.queueFailCount, err)
+			if errors.Is(err, st.ErrMessageNotSubmitted) {
+				msg = fmt.Sprintf("Queued message was typed but the agent did not submit it; check the agent's input box: %v", err)
+			}
+			s.emitter.EmitError(msg, st.ErrorLevelError)
 		}
 		return
 	}
