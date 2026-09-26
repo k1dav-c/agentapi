@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Features
+- Agents panel: lists the sub-agents Codex spawns (name, nickname, status, current shell command, last message, elapsed time, tokens) and updates live; open it from the header or with Alt+↑ in chat mode. Backed by the new `GET /agents` endpoint and `agents_update` SSE event, read from Codex's per-agent session logs
+
+### Fixes
+- Codex: the rich-message/timeline watcher no longer switches to a sub-agent's session log (sub-agent logs share the cwd and are newer than the main one)
+- Codex: detect the composer regardless of how many footer lines follow it (Codex v0.157+), so an idle Codex no longer reports `running` forever
+- Claude Code: ignore the footer and background agents panel below the input box when detecting stability, so ticking subagent timers no longer keep the status `running`
+- Message sending compares only the region above the input box, so a changing footer is not mistaken for the agent accepting the message
+- Queue dispatch only looks for interactive terminal prompts near the bottom of the screen and never while the agent's input box is visible, so numbered lists in earlier output no longer block the queue
+- Queued messages the agent never submitted are dropped with an error instead of being retyped into the input box
+- Codex: messages are no longer merged with a leftover composer draft. When a turn with queued follow-up inputs is interrupted, Codex puts them back into the composer, and the next message sent through AgentAPI was appended to that text (Codex received "Then reply XReply with Y"). The composer is now cleared before each message
+- Codex follow-up questions (question tool): a chat message sent while a question is showing becomes that question's free-text answer ("None of the above" + notes) instead of being typed into the dialog, where Enter would pick the default option. The question dialog (including its notes field and a user message just above it) is no longer mistaken for the composer. The tool card renders Codex's questions with option buttons and follows the question Codex is currently asking
+- Option buttons and Discord option replies send only the digit for Codex too, which, like Claude Code, selects on the digit; the extra Enter answered the next question with its default
+- Claude plan mode: a chat message sent while the ExitPlanMode approval dialog is showing is delivered as "Tell Claude what to change" feedback instead of approving the plan (the carriage return used to pick "Yes, and use auto mode")
+- Chat messages sent while any other interactive prompt (e.g. a permission request) is showing are queued until it is answered instead of being typed into it and approving the highlighted option
+- Discord free-text replies to the plan approval dialog are delivered as plan feedback
+- Option buttons (chat UI) and Discord option replies no longer append Enter for Claude Code, which selects on the digit alone; the extra Enter submitted empty plan feedback (rejecting the plan) or approved the next prompt. Enter-only options no longer send Enter twice
+
 ## v0.13.0
 
 ### Features
