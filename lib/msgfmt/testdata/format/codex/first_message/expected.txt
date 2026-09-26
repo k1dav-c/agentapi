@@ -6,5 +6,3 @@
  /status - show current session configuration and token usage
  /diff - show git diff (including untracked files)
  /prompts - show example prompts
-
-gpt-5.1-codex-max default · 100% left · ~/Documents/work/coder_o…

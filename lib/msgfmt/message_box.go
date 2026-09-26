@@ -58,11 +58,22 @@ func removeMessageBox(msg string) string {
 	return strings.Join(lines, "\n")
 }
 
+// removeClaudeMessageBox removes the Claude Code input box together with
+// everything rendered below it (footer, background agents/tasks panel).
+func removeClaudeMessageBox(msg string) string {
+	lines := strings.Split(msg, "\n")
+	if top, _ := findClaudeInputBox(lines); top != -1 {
+		return strings.Join(lines[:top], "\n")
+	}
+	return removeMessageBox(msg)
+}
+
+// removeCodexMessageBox removes the Codex composer and the footer lines
+// rendered below it.
 func removeCodexMessageBox(msg string) string {
 	lines := strings.Split(msg, "\n")
-	if len(lines) >= 3 && strings.Contains(lines[len(lines)-3], "›") {
-		idx := len(lines) - 3
-		lines = append(lines[:idx], lines[idx+2])
+	if idx := findCodexInputLine(lines); idx != -1 {
+		lines = lines[:idx]
 	}
 	return strings.Join(lines, "\n")
 }
