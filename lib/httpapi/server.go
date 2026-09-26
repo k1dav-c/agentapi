@@ -37,6 +37,10 @@ import (
 )
 
 const (
+	// agentPollInterval is how often sub-agent session files are checked
+	// for changes.
+	agentPollInterval = time.Second
+
 	// messageQueueDispatchInterval is how often the queue dispatch loop
 	// checks whether the head of the queue can be sent to the agent.
 	messageQueueDispatchInterval = 500 * time.Millisecond
@@ -546,6 +550,7 @@ func (s *Server) startJSONLWatcher(pid int) {
 	var resolver jsonlwatcher.SessionResolver
 	var parser jsonlwatcher.LineParser
 	var sessionEventParser jsonlwatcher.SessionEventParser
+	var agentTracker *jsonlwatcher.CodexAgentTracker
 
 	switch s.agentType {
 	case mf.AgentTypeClaude:
@@ -553,11 +558,13 @@ func (s *Server) startJSONLWatcher(pid int) {
 		parser = jsonlwatcher.NewClaudeParser()
 		sessionEventParser = jsonlwatcher.NewClaudeSessionEventParser()
 	case mf.AgentTypeCodex:
-		resolver = &jsonlwatcher.CodexResolver{
+		codexResolver := &jsonlwatcher.CodexResolver{
 			PID:       pid,
 			CWD:       s.cwd,
 			NotBefore: time.Now(),
 		}
+		resolver = codexResolver
+		agentTracker = jsonlwatcher.NewCodexAgentTracker(codexResolver)
 		parser = jsonlwatcher.NewCodexParser()
 		sessionEventParser = jsonlwatcher.NewCodexSessionEventParser()
 	}
@@ -586,6 +593,13 @@ func (s *Server) startJSONLWatcher(pid int) {
 		},
 	})
 	go w.Start(watchCtx)
+
+	if agentTracker != nil {
+		// Drop the previous run's sub-agents; the tracker only reports
+		// changes relative to an empty list.
+		s.emitter.EmitAgents(nil)
+		go agentTracker.Run(watchCtx, agentPollInterval, s.emitter.EmitAgents)
+	}
 }
 
 // sseMiddleware creates middleware that prevents proxy buffering for SSE endpoints
@@ -628,6 +642,10 @@ func (s *Server) registerRoutes() {
 			"Each message contains structured content blocks (text, thinking, tool_use, tool_result), " +
 			"model information, and token usage data. Only available for agent types with session log " +
 			"support (currently 'claude' and 'codex') running via PTY transport."
+	})
+
+	huma.Get(s.api, "/agents", s.getAgents, func(o *huma.Operation) {
+		o.Description = "Returns the sub-agents spawned during the current agent session with their status and current activity. Currently populated for Codex."
 	})
 
 	huma.Get(s.api, "/timeline", s.getTimeline, func(o *huma.Operation) {
@@ -712,6 +730,7 @@ func (s *Server) registerRoutes() {
 		"status_change":       StatusChangeBody{},
 		"agent_error":         ErrorBody{},
 		"rich_message_update": RichMessageUpdateBody{},
+		"agents_update":       AgentsUpdateBody{},
 		"heartbeat":           HeartbeatBody{},
 	}, s.subscribeEvents)
 
@@ -822,6 +841,12 @@ func (s *Server) getRichMessages(ctx context.Context, input *struct{}) (*RichMes
 	if resp.Body.Messages == nil {
 		resp.Body.Messages = []jsonlwatcher.RichMessage{}
 	}
+	return resp, nil
+}
+
+func (s *Server) getAgents(ctx context.Context, input *struct{}) (*AgentsResponse, error) {
+	resp := &AgentsResponse{}
+	resp.Body.Agents = s.emitter.Agents()
 	return resp, nil
 }
 

@@ -143,6 +143,10 @@ type RichMessagesResponse struct {
 	}
 }
 
+type AgentsResponse struct {
+	Body AgentsUpdateBody
+}
+
 type TimelineResponse struct {
 	Body struct {
 		Events []jsonlwatcher.SessionEvent `json:"events" nullable:"false" doc:"Timeline events including text, thinking, tool calls, tool results, and system lifecycle events."`

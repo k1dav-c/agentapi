@@ -10,6 +10,29 @@
         "title": "AgentStatus",
         "type": "string"
       },
+      "AgentsUpdateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/AgentsUpdateBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "agents": {
+            "description": "Sub-agents spawned during the session, ordered by spawn time",
+            "items": {
+              "$ref": "#/components/schemas/SubAgent"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "agents"
+        ],
+        "type": "object"
+      },
       "Config": {
         "additionalProperties": false,
         "properties": {
@@ -334,7 +357,7 @@
             "type": "string"
           },
           "path": {
-            "description": "Absolute path of the managed config file: <working-directory>/.mcp.json for Claude or $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex.",
+            "description": "Absolute path of the managed config file: \u003cworking-directory\u003e/.mcp.json for Claude or $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex.",
             "type": "string"
           },
           "servers": {
@@ -1080,6 +1103,79 @@
         ],
         "type": "object"
       },
+      "SubAgent": {
+        "additionalProperties": false,
+        "properties": {
+          "activity": {
+            "description": "What the sub-agent is doing right now, e.g. the shell command it is running",
+            "type": "string"
+          },
+          "depth": {
+            "description": "Nesting depth; direct children of the main agent have depth 1",
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_message": {
+            "description": "Most recent message the sub-agent produced",
+            "type": "string"
+          },
+          "nickname": {
+            "description": "Display nickname assigned by the agent",
+            "type": "string"
+          },
+          "parent_thread_id": {
+            "description": "Thread that spawned this sub-agent",
+            "type": "string"
+          },
+          "path": {
+            "description": "Sub-agent path in the agent tree, e.g. /root/worker",
+            "type": "string"
+          },
+          "role": {
+            "description": "Sub-agent role, when one was requested",
+            "type": "string"
+          },
+          "started_at": {
+            "description": "When the sub-agent was spawned",
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "description": "Lifecycle state of the sub-agent's current or last turn",
+            "enum": [
+              "completed",
+              "failed",
+              "interrupted",
+              "running"
+            ],
+            "type": "string"
+          },
+          "thread_id": {
+            "description": "Sub-agent thread identifier",
+            "type": "string"
+          },
+          "total_tokens": {
+            "description": "Total tokens used by the sub-agent",
+            "format": "int64",
+            "type": "integer"
+          },
+          "updated_at": {
+            "description": "Time of the sub-agent's latest recorded activity",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "depth",
+          "parent_thread_id",
+          "path",
+          "started_at",
+          "status",
+          "thread_id",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "TemporalConfigResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -1492,6 +1588,35 @@
   },
   "openapi": "3.0.3",
   "paths": {
+    "/agents": {
+      "get": {
+        "description": "Returns the sub-agents spawned during the current agent session with their status and current activity. Currently populated for Codex.",
+        "operationId": "get-agents",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentsUpdateBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get agents"
+      }
+    },
     "/events": {
       "get": {
         "description": "The events are sent as Server-Sent Events (SSE). Initially, the endpoint returns a list of events needed to reconstruct the current state of the conversation and the agent's status. After that, it only returns events that have occurred since the last event was sent.\n\nNote: When an agent is running, the last message in the conversation history is updated frequently, and the endpoint sends a new message update event each time.",
@@ -1504,6 +1629,32 @@
                   "description": "Each oneOf object in the array represents one possible Server Sent Events (SSE) message, serialized as UTF-8 text according to the SSE specification.",
                   "items": {
                     "oneOf": [
+                      {
+                        "properties": {
+                          "data": {
+                            "$ref": "#/components/schemas/AgentsUpdateBody"
+                          },
+                          "event": {
+                            "const": "agents_update",
+                            "description": "The event name.",
+                            "type": "string"
+                          },
+                          "id": {
+                            "description": "The event ID.",
+                            "type": "integer"
+                          },
+                          "retry": {
+                            "description": "The retry time in milliseconds.",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "data",
+                          "event"
+                        ],
+                        "title": "Event agents_update",
+                        "type": "object"
+                      },
                       {
                         "properties": {
                           "data": {
