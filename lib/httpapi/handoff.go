@@ -11,14 +11,42 @@ import (
 	"strings"
 
 	"github.com/coder/agentapi/lib/handoff"
+	mf "github.com/coder/agentapi/lib/msgfmt"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/danielgtaylor/huma/v2"
 )
 
 var terminalSelection = regexp.MustCompile(`(?m)^\s*[❯›>]\s*(\d+)\.\s+`)
-var terminalConfirmation = regexp.MustCompile(`(?i)(enter to confirm|press enter|esc to cancel|would you like to proceed|do you want to proceed)`)
+var terminalConfirmation = regexp.MustCompile(`(?i)(enter\s+to\s+confirm|enter\s+to\s+submit|press\s+enter|esc\s+to\s+cancel|enter\s+select|would\s+you\s+like\s+to\s+proceed|do\s+you\s+want\s+to\s+proceed)`)
 var terminalOption = regexp.MustCompile(`(?m)^\s*[❯›>]?\s*(\d+)\.\s+`)
 var terminalQuestionKeyword = regexp.MustCompile(`(?i)(choose|select|option|continue|cancel|allow|deny|approve|permission)`)
+
+// terminalQuestionTailLines bounds how much of the bottom of the screen is
+// inspected for an interactive prompt. The PTY screen includes scrollback, so
+// scanning all of it would match numbered lists in earlier agent output and
+// block the message queue indefinitely.
+const terminalQuestionTailLines = 40
+
+// isTerminalQuestionScreen reports whether the agent is currently showing an
+// interactive terminal prompt (selection list, confirmation) that a queued
+// message must not be typed into.
+func isTerminalQuestionScreen(agentType mf.AgentType, screen string) bool {
+	if visible, ok := mf.HasInputBox(agentType, screen); ok && visible {
+		// The agent's own input box is showing, so it's waiting for a
+		// message rather than an answer to a dialog.
+		return false
+	}
+	return isTerminalQuestion(screenTail(screen, terminalQuestionTailLines))
+}
+
+// screenTail returns the last n lines of screen, ignoring trailing blank lines.
+func screenTail(screen string, n int) string {
+	lines := strings.Split(strings.TrimRight(screen, " \t\r\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
+}
 
 func isTerminalQuestion(content string) bool {
 	if terminalSelection.MatchString(content) && terminalConfirmation.MatchString(content) {
@@ -31,7 +59,13 @@ func isTerminalQuestion(content string) bool {
 // Only expose deliberate, bounded terminal actions. Discord text never becomes
 // arbitrary terminal escape sequences. The browser's terminal remains available
 // for unsupported prompts.
-func terminalReply(content, answer string) (string, bool) {
+//
+// Claude Code and Codex select a numbered option as soon as its digit is
+// typed, so no carriage return follows it there: a trailing Enter would
+// submit an empty feedback field (plan dialog "Tell Claude what to change"),
+// answer the next question with its default, or land on the next prompt and
+// approve it.
+func terminalReply(agentType mf.AgentType, content, answer string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(answer)) {
 	case "enter":
 		return "\r", true
@@ -47,6 +81,9 @@ func terminalReply(content, answer string) (string, bool) {
 	}
 	for _, match := range terminalOption.FindAllStringSubmatch(content, -1) {
 		if match[1] == answer {
+			if agentType == mf.AgentTypeClaude || agentType == mf.AgentTypeCodex {
+				return answer, true
+			}
 			return answer + "\r", true
 		}
 	}
@@ -83,7 +120,7 @@ func (s *Server) pendingHandoffLocked() *handoff.Request {
 			question = message.Message
 		}
 	}
-	if s.transport == TransportPTY && isTerminalQuestion(screen) {
+	if s.transport == TransportPTY && isTerminalQuestionScreen(s.agentType, screen) {
 		kind, content = "terminal", screen
 	} else {
 		if len(s.messageQueue) > 0 {
@@ -136,9 +173,15 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "superseded"}}, nil
 	}
 	content := reply.Content
-	if pending.Kind == "terminal" {
+	// Free text answering a prompt with a text field (Claude's plan
+	// feedback, Codex's question notes) goes into that field.
+	freeTextKeys, freeText := "", false
+	if pending.Kind == "terminal" && !isTerminalKeyAnswer(content) {
+		freeTextKeys, freeText = freeTextReplyKeys(s.agentType, pending.Content)
+	}
+	if pending.Kind == "terminal" && !freeText {
 		var ok bool
-		content, ok = terminalReply(pending.Content, content)
+		content, ok = terminalReply(s.agentType, pending.Content, content)
 		if !ok {
 			return &HandoffReplyResponse{Body: handoff.Result{Outcome: "invalid"}}, nil
 		}
@@ -155,7 +198,9 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 	result := handoff.Result{Outcome: "uncertain"}
 	s.handoffReceipts[pending.ID] = handoffReceipt{reply.ID, result}
 	var err error
-	if pending.Kind == "terminal" {
+	if freeText {
+		err = s.conversation.Send(formatFreeTextReply(s.agentType, freeTextKeys, strings.TrimSpace(content))...)
+	} else if pending.Kind == "terminal" {
 		var n int
 		n, err = s.agentio.Write([]byte(content))
 		if err == nil && n != len(content) {

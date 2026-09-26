@@ -1,0 +1,30 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  You’re now using Luna, a faster model for simpler tasks.
+  Use your reset to continue using the most advanced models, or wait for usage
+  to reset after 7:59 PM.
+
+
+› 1. Upgrade
+  2. Reset usage
+  3. Continue with Luna Reserve
+
+  Press enter to confirm or esc to continue working

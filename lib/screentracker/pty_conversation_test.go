@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -507,6 +508,7 @@ func TestMessages(t *testing.T) {
 		// Then: Send fails with a Phase 2 error (not Phase 1).
 		require.Error(t, sendErr)
 		assert.Contains(t, sendErr.Error(), "failed to wait for processing to start")
+		assert.ErrorIs(t, sendErr, st.ErrMessageNotSubmitted)
 	})
 
 	t.Run("send-message-no-echo-context-cancelled", func(t *testing.T) {
@@ -1773,4 +1775,103 @@ func TestSendRejectsWhenInitialPromptNotReady(t *testing.T) {
 	// Send() rejects immediately instead of blocking forever.
 	err := c.Send(st.MessagePartText{Content: "hello"})
 	assert.ErrorIs(t, err, st.ErrMessageValidationChanging)
+}
+
+// tickingAgent simulates a TUI that keeps redrawing a footer below its input
+// box (e.g. Claude Code's background agents panel with running timers).
+// Everything after "|" changes on every read.
+type tickingAgent struct {
+	mu      sync.Mutex
+	prompt  string
+	ticks   int
+	onWrite func(a *tickingAgent, data []byte)
+}
+
+func (a *tickingAgent) ReadScreen() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.ticks++
+	return fmt.Sprintf("%s|%ds", a.prompt, a.ticks)
+}
+
+func (a *tickingAgent) Write(data []byte) (int, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.onWrite != nil {
+		a.onWrite(a, data)
+	}
+	return len(data), nil
+}
+
+func stripFooter(screen string) string {
+	if i := strings.Index(screen, "|"); i != -1 {
+		return screen[:i]
+	}
+	return screen
+}
+
+func TestStabilityScreen(t *testing.T) {
+	changing := st.ConversationStatusChanging
+	stable := st.ConversationStatusStable
+	initializing := st.ConversationStatusInitializing
+
+	statusTest(t, statusTestParams{
+		cfg: st.PTYConversationConfig{
+			SnapshotInterval:      1 * time.Second,
+			ScreenStabilityLength: 2 * time.Second,
+			StabilityScreen:       stripFooter,
+		},
+		steps: []statusTestStep{
+			{snapshot: "idle|1s", status: initializing},
+			{snapshot: "idle|2s", status: initializing},
+			{snapshot: "idle|3s", status: stable},
+			{snapshot: "idle|4s", status: stable},
+			{snapshot: "busy|5s", status: changing},
+		},
+	})
+
+	newTickingConversation := func(ctx context.Context, t *testing.T, agent *tickingAgent) (*st.PTYConversation, *quartz.Mock) {
+		t.Helper()
+		mClock := quartz.NewMock(t)
+		c := st.NewPTY(ctx, st.PTYConversationConfig{
+			Clock:                 mClock,
+			AgentIO:               agent,
+			SnapshotInterval:      100 * time.Millisecond,
+			ScreenStabilityLength: 200 * time.Millisecond,
+			StabilityScreen:       stripFooter,
+			Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
+		}, &testEmitter{})
+		c.Start(ctx)
+		advanceUntil(ctx, t, mClock, func() bool { return c.Status() == stable })
+		return c, mClock
+	}
+
+	t.Run("send succeeds when agent reacts despite ticking footer", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		t.Cleanup(cancel)
+		agent := &tickingAgent{prompt: "> ", onWrite: func(a *tickingAgent, data []byte) {
+			if string(data) == "\r" {
+				a.prompt = "working..."
+			} else {
+				a.prompt += string(data)
+			}
+		}}
+		c, mClock := newTickingConversation(ctx, t, agent)
+		sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: "hello"})
+	})
+
+	t.Run("ticking footer is not mistaken for the agent reacting", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		t.Cleanup(cancel)
+		// The agent ignores all input; only the footer keeps changing.
+		c, mClock := newTickingConversation(ctx, t, &tickingAgent{prompt: "> "})
+		var sendErr error
+		var sendDone atomic.Bool
+		go func() {
+			sendErr = c.Send(st.MessagePartText{Content: "hello"})
+			sendDone.Store(true)
+		}()
+		advanceUntil(ctx, t, mClock, func() bool { return sendDone.Load() })
+		assert.ErrorIs(t, sendErr, st.ErrMessageNotSubmitted)
+	})
 }

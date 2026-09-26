@@ -14,13 +14,8 @@ Allow this action? Use 't' to trust (always allow) this tool for the session. [y
 
 > t
 
-
  ⋮ 
  ● Completed in 0.0s
-
-
-
-
 
 🛠️  Using tool: execute_bash
  ⋮ 
@@ -28,7 +23,6 @@ Allow this action? Use 't' to trust (always allow) this tool for the session. [y
 git status --porcelain | grep '^??' | wc -l
  ⋮ 
  ↳ Purpose: Count untracked files using git status
-
 
 Allow this action? Use 't' to trust (always allow) this tool for the session. [y/n/t]:
 
@@ -39,9 +33,7 @@ Allow this action? Use 't' to trust (always allow) this tool for the session. [y
  ⋮ 
  ● Completed in 0.24s
 
-
 > There are 8 untracked files in the repository.
-
 
 🛠️  Using tool: coder_report_task (trusted) from mcp server coder
  ⋮ 

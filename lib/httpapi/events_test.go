@@ -29,6 +29,35 @@ func TestEventEmitterSessionEvents(t *testing.T) {
 	require.Equal(t, "text", emitter.SessionEvents()[0].Kind)
 }
 
+func TestEventEmitterAgents(t *testing.T) {
+	emitter := NewEventEmitter()
+	require.Equal(t, []jsonlwatcher.SubAgent{}, emitter.Agents())
+	_, _, state := emitter.Subscribe()
+	for _, event := range state {
+		require.NotEqual(t, EventTypeAgentsUpdate, event.Type, "no replay without sub-agents")
+	}
+
+	_, ch, _ := emitter.Subscribe()
+	agents := []jsonlwatcher.SubAgent{{ThreadID: "a", Path: "/root/worker", Status: jsonlwatcher.SubAgentRunning}}
+	emitter.EmitAgents(agents)
+	event := <-ch
+	require.Equal(t, EventTypeAgentsUpdate, event.Type)
+	require.Equal(t, AgentsUpdateBody{Agents: agents}, event.Payload)
+
+	// Late subscribers get the current list replayed.
+	_, _, state = emitter.Subscribe()
+	var replayed []jsonlwatcher.SubAgent
+	for _, event := range state {
+		if event.Type == EventTypeAgentsUpdate {
+			replayed = event.Payload.(AgentsUpdateBody).Agents
+		}
+	}
+	require.Equal(t, agents, replayed)
+
+	emitter.Reset()
+	require.Empty(t, emitter.Agents())
+}
+
 func TestEventEmitterMergesClaudeRichMessageDeltas(t *testing.T) {
 	emitter := NewEventEmitter(WithSubscriptionBufSize(10))
 	_, ch, _ := emitter.Subscribe()

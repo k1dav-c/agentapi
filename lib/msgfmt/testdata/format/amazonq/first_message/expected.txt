@@ -8,5 +8,4 @@ Welcome to Amazon Q!
 ctrl + j new lines
 ctrl + s fuzzy search
 
-
 🤖 You are chatting with claude-sonnet-4

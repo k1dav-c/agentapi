@@ -6,5 +6,3 @@
 
 codex
 There are 2 untracked files (`.env` and `forge.yaml`).
-
-gpt-5.1-codex-max default · 100% left · ~/Documents/work/coder_o…

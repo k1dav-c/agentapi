@@ -3,7 +3,6 @@
   2. Your workspace is automatically indexed for best results
   3. Commands will run automatically
 
-
   💡 For automation, use 'auggie --print "your task"'
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  › Which repo is this ? 
@@ -43,6 +42,5 @@
  » This is the AgentAPI repository by Coder.
 
    AgentAPI is a tool that provides an HTTP API to control various coding agents including:
-
 
  ⠞ Processing response... (2s • esc to interrupt)

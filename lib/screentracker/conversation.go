@@ -54,6 +54,10 @@ var (
 	ErrMessageValidationWhitespace = errors.New("message must be trimmed of leading and trailing whitespace")
 	ErrMessageValidationEmpty      = errors.New("message must not be empty")
 	ErrMessageValidationChanging   = errors.New("message can only be sent when the agent is waiting for user input")
+	// ErrMessageNotSubmitted means the message was typed into the agent but
+	// the agent never reacted to the carriage return. The text may still be
+	// sitting in the agent's input box, so resending it would duplicate it.
+	ErrMessageNotSubmitted = errors.New("agent did not react to the submitted message")
 )
 
 type AgentIO interface {

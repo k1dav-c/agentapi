@@ -278,6 +278,13 @@ func formatGenericMessage(message string, userInput string, agentType AgentType)
 	return message
 }
 
+func formatClaudeMessage(message string, userInput string) string {
+	message = RemoveUserInput(message, userInput, AgentTypeClaude)
+	message = removeClaudeMessageBox(message)
+	message = trimEmptyLines(message)
+	return message
+}
+
 func formatCodexMessage(message string, userInput string) string {
 	message = RemoveUserInput(message, userInput, AgentTypeCodex)
 	message = removeCodexMessageBox(message)
@@ -303,7 +310,7 @@ func FormatAgentMessage(agentType AgentType, message string, userInput string) s
 	var formatted string
 	switch agentType {
 	case AgentTypeClaude:
-		formatted = formatGenericMessage(message, userInput, agentType)
+		formatted = formatClaudeMessage(message, userInput)
 	case AgentTypeGoose:
 		formatted = formatGenericMessage(message, userInput, agentType)
 	case AgentTypeAider:

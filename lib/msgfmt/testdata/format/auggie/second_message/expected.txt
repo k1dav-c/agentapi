@@ -3,7 +3,6 @@
   2. Your workspace is automatically indexed for best results
   3. Commands will run automatically
 
-
   💡 For automation, use 'auggie --print "your task"'
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  › Which repo is this ? 

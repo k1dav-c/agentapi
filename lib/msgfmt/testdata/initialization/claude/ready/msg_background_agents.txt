@@ -1,0 +1,40 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker · r…
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ↓ to manage
+
+  ● main
+  ◯ general-purpose  Sleep 50 then answer A               23s · ↓ 22.5k tokens
+  ◯ general-purpose  Sleep 55 then answer B               21s · ↓ 22.5k tokens

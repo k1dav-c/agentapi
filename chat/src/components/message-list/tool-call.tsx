@@ -6,6 +6,8 @@ import { Button } from "../ui/button";
 import { uiCopy } from "@/lib/ui-copy";
 import { formatToolInput, getToolSummary } from "@/lib/tool-format";
 import type { ToolCall } from "@/lib/task-timeline";
+import { currentPromptQuestion, parseInteractiveToolInput } from "@/lib/interactive-tool";
+import { useChat } from "../chat-provider";
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return "< 1s";
@@ -63,26 +65,6 @@ export function ToolDetail({
   );
 }
 
-// Parse AskUserQuestion / ExitPlanMode tool input into renderable options
-function parseInteractiveToolInput(name: string, rawInput: unknown): {
-  questions: { question: string; header?: string; options: { label: string; description?: string }[]; multiSelect?: boolean }[];
-} | null {
-  if (!rawInput || typeof rawInput !== "object") return null;
-  const input = rawInput as Record<string, unknown>;
-
-  // AskUserQuestion
-  if (name === "AskUserQuestion" && Array.isArray(input.questions)) {
-    return { questions: input.questions as { question: string; header?: string; options: { label: string; description?: string }[]; multiSelect?: boolean }[] };
-  }
-
-  // ExitPlanMode — no options to render, but signal that it's a plan approval
-  if (name === "ExitPlanMode") {
-    return { questions: [] };
-  }
-
-  return null;
-}
-
 export function ToolCallCard({
   toolCall,
   searchQuery = "",
@@ -103,6 +85,13 @@ export function ToolCallCard({
   const input = formatToolInput(toolCall.input);
   const interactiveInput = isPending ? parseInteractiveToolInput(toolCall.name, toolCall.input) : null;
   const [localIsOpen, setLocalIsOpen] = useState(Boolean(searchQuery) || Boolean(interactiveInput));
+  // The agent's prompt shows one question at a time and moves on as each is
+  // answered, so only the question it is asking accepts clicks. Codex prints
+  // which one that is; otherwise count the answers given here.
+  const [answeredCount, setAnsweredCount] = useState(0);
+  const { messages } = useChat();
+  const lastAgentOutput = messages.findLast((message) => message.role === "agent")?.content ?? "";
+  const activeQuestion = currentPromptQuestion(lastAgentOutput) ?? answeredCount;
   const isOpen = open ?? localIsOpen;
 
   useEffect(() => {
@@ -149,15 +138,22 @@ export function ToolCallCard({
       <div className="space-y-3 border-t bg-muted/20 px-3 py-3">
         {interactiveInput && interactiveInput.questions.length > 0 ? (
           interactiveInput.questions.map((q, qi) => (
-            <div key={qi} className="space-y-2">
+            <div key={qi} className={`space-y-2 ${qi === activeQuestion ? "" : "opacity-60"}`}>
               <p className="text-xs font-medium text-foreground">{q.question}</p>
               <div className="flex flex-wrap gap-1.5">
                 {q.options.map((opt, oi) => (
                   <button
                     key={oi}
                     type="button"
-                    onClick={() => onSendRaw?.(`${oi + 1}\r`)}
-                    className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    disabled={qi !== activeQuestion}
+                    onClick={() => {
+                      // Both Claude Code and Codex pick an option as soon as
+                      // its digit is typed; an extra Enter would answer the
+                      // next question with its default.
+                      onSendRaw?.(String(oi + 1));
+                      setAnsweredCount(qi + 1);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
                     title={opt.description}
                   >
                     <span className="grid size-5 place-items-center rounded bg-muted text-[10px] font-bold">{oi + 1}</span>
@@ -165,6 +161,11 @@ export function ToolCallCard({
                   </button>
                 ))}
               </div>
+              {qi === activeQuestion && (
+                <p className="text-[11px] text-muted-foreground">
+                  Or type your own answer in the message box.
+                </p>
+              )}
               {q.options.some(o => o.description) && (
                 <div className="space-y-1 pt-1">
                   {q.options.map((opt, oi) => opt.description ? (

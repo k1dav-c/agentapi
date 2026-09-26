@@ -37,6 +37,10 @@ import (
 )
 
 const (
+	// agentPollInterval is how often sub-agent session files are checked
+	// for changes.
+	agentPollInterval = time.Second
+
 	// messageQueueDispatchInterval is how often the queue dispatch loop
 	// checks whether the head of the queue can be sent to the agent.
 	messageQueueDispatchInterval = 500 * time.Millisecond
@@ -84,7 +88,7 @@ type Server struct {
 	queueFailID    int
 	queueFailCount int
 
-	// Memoized isTerminalQuestion result for the dispatch loop. The screen
+	// Memoized isTerminalQuestionScreen result for the dispatch loop. The screen
 	// string is pointer-stable while unchanged (termexec render cache), so
 	// the equality check below is cheap and the multi-regexp scan only runs
 	// when the screen actually changes. Guarded by s.mu.
@@ -305,6 +309,10 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		return mf.IsAgentReadyForInitialPrompt(config.AgentType, message)
 	}
 
+	stabilityScreen := func(screen string) string {
+		return mf.StabilityRegion(config.AgentType, screen)
+	}
+
 	formatToolCall := func(message string) (string, []string) {
 		return mf.FormatToolCall(config.AgentType, message)
 	}
@@ -348,6 +356,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			ScreenStabilityLength:  2 * time.Second,
 			FormatMessage:          formatMessage,
 			ReadyForInitialPrompt:  isAgentReadyForInitialPrompt,
+			StabilityScreen:        stabilityScreen,
 			FormatToolCall:         formatToolCall,
 			InitialPrompt:          initialPrompt,
 			Logger:                 logger,
@@ -541,6 +550,7 @@ func (s *Server) startJSONLWatcher(pid int) {
 	var resolver jsonlwatcher.SessionResolver
 	var parser jsonlwatcher.LineParser
 	var sessionEventParser jsonlwatcher.SessionEventParser
+	var agentTracker *jsonlwatcher.CodexAgentTracker
 
 	switch s.agentType {
 	case mf.AgentTypeClaude:
@@ -548,11 +558,13 @@ func (s *Server) startJSONLWatcher(pid int) {
 		parser = jsonlwatcher.NewClaudeParser()
 		sessionEventParser = jsonlwatcher.NewClaudeSessionEventParser()
 	case mf.AgentTypeCodex:
-		resolver = &jsonlwatcher.CodexResolver{
+		codexResolver := &jsonlwatcher.CodexResolver{
 			PID:       pid,
 			CWD:       s.cwd,
 			NotBefore: time.Now(),
 		}
+		resolver = codexResolver
+		agentTracker = jsonlwatcher.NewCodexAgentTracker(codexResolver)
 		parser = jsonlwatcher.NewCodexParser()
 		sessionEventParser = jsonlwatcher.NewCodexSessionEventParser()
 	}
@@ -581,6 +593,13 @@ func (s *Server) startJSONLWatcher(pid int) {
 		},
 	})
 	go w.Start(watchCtx)
+
+	if agentTracker != nil {
+		// Drop the previous run's sub-agents; the tracker only reports
+		// changes relative to an empty list.
+		s.emitter.EmitAgents(nil)
+		go agentTracker.Run(watchCtx, agentPollInterval, s.emitter.EmitAgents)
+	}
 }
 
 // sseMiddleware creates middleware that prevents proxy buffering for SSE endpoints
@@ -623,6 +642,10 @@ func (s *Server) registerRoutes() {
 			"Each message contains structured content blocks (text, thinking, tool_use, tool_result), " +
 			"model information, and token usage data. Only available for agent types with session log " +
 			"support (currently 'claude' and 'codex') running via PTY transport."
+	})
+
+	huma.Get(s.api, "/agents", s.getAgents, func(o *huma.Operation) {
+		o.Description = "Returns the sub-agents spawned during the current agent session with their status and current activity. Currently populated for Codex."
 	})
 
 	huma.Get(s.api, "/timeline", s.getTimeline, func(o *huma.Operation) {
@@ -707,6 +730,7 @@ func (s *Server) registerRoutes() {
 		"status_change":       StatusChangeBody{},
 		"agent_error":         ErrorBody{},
 		"rich_message_update": RichMessageUpdateBody{},
+		"agents_update":       AgentsUpdateBody{},
 		"heartbeat":           HeartbeatBody{},
 	}, s.subscribeEvents)
 
@@ -820,6 +844,12 @@ func (s *Server) getRichMessages(ctx context.Context, input *struct{}) (*RichMes
 	return resp, nil
 }
 
+func (s *Server) getAgents(ctx context.Context, input *struct{}) (*AgentsResponse, error) {
+	resp := &AgentsResponse{}
+	resp.Body.Agents = s.emitter.Agents()
+	return resp, nil
+}
+
 func (s *Server) getTimeline(ctx context.Context, input *struct{}) (*TimelineResponse, error) {
 	events := s.emitter.SessionEvents()
 	if events == nil {
@@ -842,9 +872,27 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 		if strings.TrimSpace(input.Body.Content) == "" {
 			return nil, huma.Error400BadRequest("message must not be empty")
 		}
+		var screen string
+		if s.transport == TransportPTY {
+			screen = s.currentScreenLocked()
+		}
+		if keys, ok := freeTextReplyKeys(s.agentType, screen); ok {
+			if err := s.conversation.Send(formatFreeTextReply(s.agentType, keys, input.Body.Content)...); err != nil {
+				if errors.Is(err, st.ErrMessageValidationChanging) {
+					return nil, huma.Error409Conflict("the agent's prompt is still updating; try again in a moment")
+				}
+				return nil, fmt.Errorf("failed to send reply to the agent's prompt: %w", err)
+			}
+			break
+		}
 		// Enqueue when earlier messages are still waiting, even if the
-		// agent is stable, so messages are delivered in FIFO order.
-		if len(s.messageQueue) > 0 || s.conversation.Status() != st.ConversationStatusStable {
+		// agent is stable, so messages are delivered in FIFO order. Never
+		// type a message into an interactive prompt either: the prompt
+		// ignores the text and the carriage return would pick the
+		// highlighted option (e.g. approve a permission request). The
+		// queue holds it until the prompt is answered.
+		if len(s.messageQueue) > 0 || s.conversation.Status() != st.ConversationStatusStable ||
+			(screen != "" && isTerminalQuestionScreen(s.agentType, screen)) {
 			s.enqueueMessageLocked(input.Body.Content)
 			resp.Body.Ok = true
 			resp.Body.Queued = true
@@ -950,7 +998,7 @@ func (s *Server) dispatchNextQueuedMessage() {
 		screen := s.emitter.screen
 		s.emitter.mu.Unlock()
 		if !s.terminalQuestionValid || screen != s.terminalQuestionScreen {
-			s.terminalQuestionResult = isTerminalQuestion(screen)
+			s.terminalQuestionResult = isTerminalQuestionScreen(s.agentType, screen)
 			s.terminalQuestionScreen = screen
 			s.terminalQuestionValid = true
 		}
@@ -971,13 +1019,16 @@ func (s *Server) dispatchNextQueuedMessage() {
 		}
 		s.queueFailCount++
 		s.logger.Error("Failed to send queued message", "queueId", next.ID, "attempt", s.queueFailCount, "error", err)
-		if s.queueFailCount >= maxQueueDispatchAttempts {
+		// A message the agent didn't react to may still be in its input
+		// box; retrying would type it a second time.
+		if s.queueFailCount >= maxQueueDispatchAttempts || errors.Is(err, st.ErrMessageNotSubmitted) {
 			// Drop the poison message so it doesn't block the queue forever.
 			s.messageQueue = s.messageQueue[1:]
-			s.emitter.EmitError(
-				fmt.Sprintf("Dropped queued message after %d failed attempts: %v", s.queueFailCount, err),
-				st.ErrorLevelError,
-			)
+			msg := fmt.Sprintf("Dropped queued message after %d failed attempts: %v", s.queueFailCount, err)
+			if errors.Is(err, st.ErrMessageNotSubmitted) {
+				msg = fmt.Sprintf("Queued message was typed but the agent did not submit it; check the agent's input box: %v", err)
+			}
+			s.emitter.EmitError(msg, st.ErrorLevelError)
 		}
 		return
 	}

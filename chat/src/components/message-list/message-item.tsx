@@ -7,7 +7,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
 import { ProcessedMessage } from "../processed-message";
 import { toast } from "sonner";
 import { formatMessageTime } from "@/lib/format-time";
-import type { DraftMessage, Message } from "../chat-provider";
+import { useChat, type DraftMessage, type Message } from "../chat-provider";
+import { terminalOptionKeystrokes } from "@/lib/terminal-option";
 
 export function CopyButton({
   content,
@@ -82,6 +83,7 @@ export function MessageItem({
   onSendRaw?: (data: string) => void;
 }) {
   const isUser = message.role === "user";
+  const { agentType } = useChat();
   const isDraft = message.id === undefined;
   const draft = isDraft ? (message as DraftMessage) : undefined;
   const isFailed = draft?.deliveryStatus === "failed";
@@ -327,7 +329,7 @@ export function MessageItem({
                   <button
                     key={`${opt.key}-${i}`}
                     type="button"
-                    onClick={() => onSendRaw(opt.key.length === 1 ? opt.key + "\r" : opt.key)}
+                    onClick={() => onSendRaw(terminalOptionKeystrokes(agentType, opt.key))}
                     className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {/^\d+$/.test(opt.key) && (

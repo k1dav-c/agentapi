@@ -1,9 +1,11 @@
 package msgfmt
 
+import "strings"
+
 func IsAgentReadyForInitialPrompt(agentType AgentType, message string) bool {
 	switch agentType {
 	case AgentTypeClaude:
-		return isGenericAgentReadyForInitialPrompt(message)
+		return isClaudeAgentReadyForInitialPrompt(message)
 	case AgentTypeGoose:
 		return isGenericAgentReadyForInitialPrompt(message)
 	case AgentTypeAider:
@@ -55,4 +57,9 @@ func isAmpAgentReadyForInitialPrompt(message string) bool {
 	message = trimEmptyLines(message)
 	messageWithoutInputBox := removeAmpMessageBox(message)
 	return len(messageWithoutInputBox) != len(message)
+}
+
+func isClaudeAgentReadyForInitialPrompt(message string) bool {
+	top, _ := findClaudeInputBox(strings.Split(message, "\n"))
+	return top != -1 || isGenericAgentReadyForInitialPrompt(message)
 }

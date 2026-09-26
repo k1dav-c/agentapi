@@ -1,0 +1,18 @@
+› I want to build a small CLI tool. Ask me questions first.
+
+
+
+
+  Question 2/3 (2 unanswered)
+  Where would you and potentially your wife run it?
+
+  › 1. This machine only            Optimize setup for the current
+                                    environment.
+    2. Same operating system        Support multiple computers running the
+                                    same OS; specify which OS in free text.
+    3. Different operating systems  Support a mix of Windows, macOS, or Linux;
+                                    specify which in free text.
+    4. None of the above            Optionally, add details in notes (tab)
+
+  tab to add notes | enter to submit answer | ←/→ to navigate questions
+  esc to interrupt
