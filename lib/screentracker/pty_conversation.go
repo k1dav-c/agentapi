@@ -105,6 +105,11 @@ type PTYConversationConfig struct {
 	FormatMessage func(message string, userInput string) string
 	// ReadyForInitialPrompt detects whether the agent has initialized and is ready to accept the initial prompt
 	ReadyForInitialPrompt func(message string) bool
+	// StabilityScreen returns the part of the screen used to decide whether
+	// the agent is still working. It lets agents exclude regions that keep
+	// changing while idle (e.g. a background agents panel with ticking
+	// timers below the input box). Defaults to the whole screen.
+	StabilityScreen func(screen string) string
 	// FormatToolCall removes the coder report_task tool call from the agent message and also returns the array of removed tool calls
 	FormatToolCall func(message string) (string, []string)
 	// InitialPrompt is the initial prompt to send to the agent once ready
@@ -135,11 +140,13 @@ type PTYConversation struct {
 	screenBeforeLastUserMessage string
 	lock                        sync.Mutex
 
-	// stableCount is the number of consecutive identical snapshots,
+	// stableCount is the number of consecutive snapshots with an identical
+	// stability region (see PTYConversationConfig.StabilityScreen),
 	// including the most recent one. Maintained incrementally by
 	// snapshotLocked so stability checks don't have to compare every
 	// snapshot in the buffer on each tick.
-	stableCount        int
+	stableCount int
+	// lastSnapshotScreen is the stability region of the most recent snapshot.
 	lastSnapshotScreen string
 
 	// fmtCache short-circuits updateLastAgentMessageLocked when the screen
@@ -226,6 +233,9 @@ func NewPTY(ctx context.Context, cfg PTYConversationConfig, emitter Emitter) *PT
 	}
 	if c.cfg.ReadyForInitialPrompt == nil {
 		c.cfg.ReadyForInitialPrompt = func(string) bool { return true }
+	}
+	if c.cfg.StabilityScreen == nil {
+		c.cfg.StabilityScreen = func(screen string) string { return screen }
 	}
 	return c
 }
@@ -446,12 +456,13 @@ func (c *PTYConversation) snapshotLocked(screen string) {
 		timestamp: c.cfg.Clock.Now(),
 		screen:    screen,
 	}
-	if c.snapshotBuffer.Len() > 0 && screen == c.lastSnapshotScreen {
+	region := c.cfg.StabilityScreen(screen)
+	if c.snapshotBuffer.Len() > 0 && region == c.lastSnapshotScreen {
 		c.stableCount++
 	} else {
 		c.stableCount = 1
 	}
-	c.lastSnapshotScreen = screen
+	c.lastSnapshotScreen = region
 	c.snapshotBuffer.Add(snapshot)
 	c.updateLastAgentMessageLocked(screen, snapshot.timestamp)
 }
@@ -530,7 +541,13 @@ func (c *PTYConversation) sendMessage(ctx context.Context, messageParts ...Messa
 // started processing. This phase is fatal on timeout: if the
 // agent doesn't react to Enter, it's unresponsive.
 func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...MessagePart) error {
-	screenBeforeMessage := c.cfg.AgentIO.ReadScreen()
+	// Compare stability regions rather than whole screens so output that
+	// changes on its own (e.g. timers below the input box) is not mistaken
+	// for the agent echoing input or reacting to the carriage return.
+	readRegion := func() string {
+		return c.cfg.StabilityScreen(c.cfg.AgentIO.ReadScreen())
+	}
+	screenBeforeMessage := readRegion()
 	for _, part := range messageParts {
 		if err := part.Do(c.cfg.AgentIO); err != nil {
 			return fmt.Errorf("failed to write message part: %w", err)
@@ -544,7 +561,7 @@ func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...Me
 		InitialWait: true,
 		Clock:       c.cfg.Clock,
 	}, func() (bool, error) {
-		screen := c.cfg.AgentIO.ReadScreen()
+		screen := readRegion()
 		if screen != screenBeforeMessage {
 			stabilityTimer := c.cfg.Clock.NewTimer(1 * time.Second)
 			select {
@@ -554,7 +571,7 @@ func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...Me
 			case <-stabilityTimer.C:
 			}
 			stabilityTimer.Stop()
-			newScreen := c.cfg.AgentIO.ReadScreen()
+			newScreen := readRegion()
 			return newScreen == screen, nil
 		}
 		return false, nil
@@ -575,7 +592,7 @@ func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...Me
 
 	// Phase 2: wait for the screen to change after the
 	// carriage return is written (processing detection).
-	screenBeforeCarriageReturn := c.cfg.AgentIO.ReadScreen()
+	screenBeforeCarriageReturn := readRegion()
 	lastCarriageReturnTime := time.Time{}
 	if err := util.WaitFor(ctx, util.WaitTimeout{
 		Timeout:     writeStabilizeProcessTimeout,
@@ -599,10 +616,13 @@ func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...Me
 		case <-crTimer.C:
 		}
 		crTimer.Stop()
-		screen := c.cfg.AgentIO.ReadScreen()
+		screen := readRegion()
 
 		return screen != screenBeforeCarriageReturn, nil
 	}); err != nil {
+		if errors.Is(err, util.WaitTimedOut) {
+			return fmt.Errorf("failed to wait for processing to start: %w", ErrMessageNotSubmitted)
+		}
 		return fmt.Errorf("failed to wait for processing to start: %w", err)
 	}
 
