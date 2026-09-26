@@ -1,8 +1,5 @@
   I'll check the repository's root, name, remotes, and current branch.
 
-
-
-   
  ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
  │ $ git rev-parse --show-toplevel in .                                                                                                                                                                        │
  │ $ basename "$(git rev-parse --show-toplevel)" in .                                                                                                                                                          │

@@ -8,7 +8,6 @@ chat:
 Please add chat/src/components/ChatInterface.tsx to the chat so I can see the   
 full context and make any necessary changes.                                    
                                                                                 
-                                                                                
 Tokens: 8.8k sent, 91 received. Cost: $0.03 message, $0.03 session.             
                                                                                 
 chat/src/components/ChatInterface.tsx                                           
@@ -26,7 +25,6 @@ Here's the SEARCH/REPLACE block to update the code to match the snippet you
 shared:                                                                         
                                                                                 
 chat/src/components/ChatInterface.tsx                                           
-                                                                                
                                                                                 
 <<<<<<< SEARCH                                                                  
     // Set up polling for messages and server status                            
@@ -62,7 +60,6 @@ chat/src/components/ChatInterface.tsx
     }, []);                                                                     
 >>>>>>> REPLACE                                                                 
                                                                                 
-                                                                                
 This change will:                                                               
                                                                                 
  1 Keep the message polling interval at 1000ms                                  
@@ -70,7 +67,6 @@ This change will:
    checks)                                                                      
  3 Remove the dependencies from the useEffect dependency array, which means the 
    effect will only run once when the component mounts                          
-                                                                                
                                                                                 
 Tokens: 7.9k sent, 399 received. Cost: $0.03 message, $0.06 session.            
 Applied edit to chat/src/components/ChatInterface.tsx                           

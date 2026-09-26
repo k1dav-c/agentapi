@@ -14,18 +14,11 @@ Allow this action? Use 't' to trust (always allow) this tool for the session. [y
 
 > y
 
-
  ⋮
  ● Completed in 0.0s
 
-
-
-
-
 Tool validation failed:
 Failed to validate tool parameters: Path is not a file:
-
-
 
 🛠️  Using tool: fs_read (trusted)
  ⋮
@@ -35,17 +28,12 @@ Failed to validate tool parameters: Path is not a file:
  ⋮
  ● Completed in 0.1s
 
-
-
-
-
 🛠️  Using tool: execute_bash
  ⋮
  ● I will run the following shell command:
 find /Users/jkmr/Documents/work/agentapi -name "*.go" -exec grep -l "formatCodexMessage" {} \;
  ⋮
  ↳ Purpose: Search for Go files containing formatCodexMessage function
-
 
 Allow this action? Use 't' to trust (always allow) this tool for the session. [y/n/t]:
 
@@ -55,7 +43,6 @@ Allow this action? Use 't' to trust (always allow) this tool for the session. [y
 
  ⋮
  ● Completed in 0.449s
-
 
 > The formatCodexMessage function is located in the file:
 

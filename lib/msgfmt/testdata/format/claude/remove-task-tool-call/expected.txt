@@ -21,7 +21,6 @@
      … +334 lines (ctrl+o to expand)
 
 
-
 ● I've built a complete snake game for you! The game is saved
   at /home/coder/snake-game.html.
 
