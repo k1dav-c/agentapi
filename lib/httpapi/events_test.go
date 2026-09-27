@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/quartz"
@@ -96,7 +97,7 @@ func TestEventEmitter(t *testing.T) {
 		assert.Equal(t, []Event{
 			{
 				Type:    EventTypeStatusChange,
-				Payload: StatusChangeBody{Status: AgentStatusRunning, Lifecycle: LifecycleStarting},
+				Payload: StatusChangeBody{Status: AgentStatusRunning, Lifecycle: LifecycleStarting, Version: version.Version},
 			},
 			{
 				Type:    EventTypeScreenUpdate,
@@ -134,7 +135,7 @@ func TestEventEmitter(t *testing.T) {
 		newEvent = <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeStatusChange,
-			Payload: StatusChangeBody{Status: AgentStatusStable, Lifecycle: LifecycleReady, AgentType: ""},
+			Payload: StatusChangeBody{Status: AgentStatusStable, Lifecycle: LifecycleReady, AgentType: "", Version: version.Version},
 		}, newEvent)
 	})
 

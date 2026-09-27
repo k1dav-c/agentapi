@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/quartz"
 
+	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	st "github.com/coder/agentapi/lib/screentracker"
@@ -78,6 +79,7 @@ type StatusChangeBody struct {
 	SessionID string         `json:"session_id" doc:"Identifier for this AgentAPI server session."`
 	RunID     uint64         `json:"run_id" doc:"Monotonically increasing run identifier within the session."`
 	AgentType mf.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
+	Version   string         `json:"agentapi_version" doc:"Version of the AgentAPI server."`
 }
 
 type ScreenUpdateBody struct {
@@ -307,7 +309,7 @@ func (e *EventEmitter) StatusSnapshot() StatusChangeBody {
 func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 	return StatusChangeBody{
 		Status: e.status, Lifecycle: e.lifecycle, SessionID: e.sessionID,
-		RunID: e.runID, AgentType: e.agentType,
+		RunID: e.runID, AgentType: e.agentType, Version: version.Version,
 	}
 }
 

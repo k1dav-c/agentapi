@@ -6,7 +6,7 @@ import { AgentType, useChat } from "./chat-provider";
 import { computeTokenTotals, formatTokenCount, getStatusMeta } from "@/lib/session-status";
 
 export function EmbedStatusBar() {
-  const { serverStatus, connectionStatus, agentType, richMessages, customTitle } = useChat();
+  const { serverStatus, connectionStatus, agentType, agentapiVersion, richMessages, customTitle } = useChat();
 
   const status = useMemo(
     () => getStatusMeta(serverStatus, connectionStatus),
@@ -33,6 +33,9 @@ export function EmbedStatusBar() {
           }`}
         />
         <span className="truncate font-medium">{agentName}</span>
+        {agentapiVersion && (
+          <span className="shrink-0 text-muted-foreground">v{agentapiVersion}</span>
+        )}
       </div>
       {tokenTotals.total > 0 && (
         <span className="flex shrink-0 items-center gap-1 tabular-nums text-muted-foreground">

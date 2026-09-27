@@ -59,6 +59,7 @@ type StatusResponse struct {
 		RunID     uint64         `json:"run_id" doc:"Monotonically increasing run identifier within the session."`
 		AgentType mf.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
 		Transport Transport      `json:"transport" doc:"Backend transport being used ('acp' or 'pty')."`
+		Version   string         `json:"agentapi_version" doc:"Version of the AgentAPI server."`
 	}
 }
 

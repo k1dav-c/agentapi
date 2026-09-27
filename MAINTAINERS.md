@@ -2,27 +2,27 @@
 
 ## Release Process
 
-Before performing a release, perform a local "smoke-test":
+Releases are automated by `.github/workflows/release.yml`. Every push to `main`
+runs `next-version.sh`, which picks the next version from the
+[Conventional Commits](https://www.conventionalcommits.org/) since the last
+`vX.Y.Z` tag:
 
-  - For most changes, simply running `go test ./e2e` may be sufficient.
-  - For agent-specific changes, manual testing may be required.
+| Commits since the last release                                   | Bump  |
+|------------------------------------------------------------------|-------|
+| `type!:` subject or a `BREAKING CHANGE:` footer                  | major |
+| `feat:`                                                          | minor |
+| anything else (`fix:`, `perf:`, `refactor:`, non-conventional…)  | patch |
+| only `docs:` / `chore:` / `test:` / `ci:` / `style:` / `build:`  | none  |
 
-If everything seems OK, you can proceed to do the following:
+The workflow then builds the binaries with the version stamped in
+(`make build VERSION=X.Y.Z`), creates the `vX.Y.Z` tag and GitHub release with
+generated notes, and attaches the binaries and `checksums.txt`. The running
+version is shown in the chat UI header and reported as `agentapi_version` by
+`GET /status` and the `status_change` SSE event.
 
-1. Update the version string in `internal/version/version.go` and run `make gen`.
-2. Add details in `CHANGELOG.md` on what changed.
-3. Create a PR with the subject `chore: update version to X.Y.Z`
-4. Once the above PR is approved and merged, update your local branch and run `release.sh`.
-   If the script reports errors, fix them before continuing.
-   If there are no issues, it will output the Github tag URL.
+To force a release or a specific bump, run the workflow manually
+(Actions → Release → Run workflow) and pick `patch`, `minor` or `major`.
 
-5. Visit `https://github.com/coder/agentapi/releases/tag/vX.Y.Z` and "Create release from tag".
-
-   - Select the tag you pushed previously.
-   - Select the previous tag and "Generate release notes". Amend as required.
-   - **IMPORTANT:** un-check "Set as latest release" and check "Set as a pre-release".
-   - Click "Publish Release". This will trigger a "Build Release Binaries" CI job.
-
-7. Visit `https://github.com/coder/agentapi/actions/workflows/release.yml` and monitor the status of the job that was created in the previous step. This will upload the built assets to the corresponding release.
-
-8. Once the updated assets are released, you can now visit `https://github.com/coder/agentapi/releases/tag/vX.Y.Z`, click "Edit" (✎), and check "Set as latest release".
+Before merging agent-specific changes, perform a local smoke test
+(`go test ./e2e`, plus manual testing where needed), and move the
+`## Unreleased` notes in `CHANGELOG.md` under the upcoming version.
