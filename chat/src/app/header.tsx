@@ -3,7 +3,7 @@
 import { type ComponentType, useEffect, useMemo, useState } from "react";
 import { AgentType, useChat } from "@/components/chat-provider";
 import { ModeToggle } from "@/components/mode-toggle";
-import { Activity, Bot, CircleAlert, CircleCheck, Download, Hash, Keyboard, LoaderCircle, WifiOff } from "lucide-react";
+import { Activity, Bot, CircleAlert, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Tag, WifiOff } from "lucide-react";
 import { computeTokenTotals, formatTokenCount } from "@/lib/session-status";
 import { KeyboardShortcutsDialog, useKeyboardShortcutsKey } from "@/components/keyboard-shortcuts";
 import {
@@ -25,6 +25,7 @@ export function Header() {
     messages,
     downloadSession,
     customTitle,
+    agentapiVersion,
   } = useChat();
   const [runningSince, setRunningSince] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -139,6 +140,7 @@ export function Header() {
             {agentType === "unknown"
               ? "Remote coding agent"
               : AgentType[agentType].displayName}
+            {agentapiVersion && ` · v${agentapiVersion}`}
           </p>
         </div>
       </div>
@@ -185,6 +187,13 @@ export function Header() {
                     : AgentType[agentType].displayName
                 }
               />
+              {agentapiVersion && (
+                <SessionDetail
+                  icon={Tag}
+                  label="Version"
+                  value={`AgentAPI v${agentapiVersion}`}
+                />
+              )}
               <SessionDetail
                 icon={Activity}
                 label="Activity"

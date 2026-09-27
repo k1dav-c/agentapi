@@ -1028,6 +1028,10 @@
             "description": "Type of the agent being used by the server.",
             "type": "string"
           },
+          "agentapi_version": {
+            "description": "Version of the AgentAPI server.",
+            "type": "string"
+          },
           "lifecycle": {
             "$ref": "#/components/schemas/LifecycleState",
             "description": "Detailed process lifecycle state."
@@ -1049,6 +1053,7 @@
         },
         "required": [
           "agent_type",
+          "agentapi_version",
           "lifecycle",
           "run_id",
           "session_id",
@@ -1068,6 +1073,10 @@
           },
           "agent_type": {
             "description": "Type of the agent being used by the server.",
+            "type": "string"
+          },
+          "agentapi_version": {
+            "description": "Version of the AgentAPI server.",
             "type": "string"
           },
           "lifecycle": {
@@ -1095,6 +1104,7 @@
         },
         "required": [
           "agent_type",
+          "agentapi_version",
           "lifecycle",
           "run_id",
           "session_id",
@@ -1584,7 +1594,7 @@
   "info": {
     "description": "HTTP API for Claude Code, Goose, and Aider.\n\nhttps://github.com/coder/agentapi",
     "title": "AgentAPI",
-    "version": "0.13.0"
+    "version": "0.0.0-dev"
   },
   "openapi": "3.0.3",
   "paths": {

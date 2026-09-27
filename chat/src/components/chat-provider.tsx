@@ -79,6 +79,7 @@ export interface RichMessage {
 interface StatusChangeEvent {
   status: string;
   agent_type: string;
+  agentapi_version?: string;
 }
 
 interface ErrorEventData {
@@ -180,6 +181,9 @@ interface ChatContextValue {
   applyMCPProfile: (name: string, restart?: boolean) => Promise<void>;
   storageScope: string;
   agentType: AgentType;
+  // AgentAPI server version (e.g. "0.14.0"); empty until the first status
+  // event or when talking to a server that predates version reporting.
+  agentapiVersion: string;
   customTitle?: string;
   workspaceUrl?: string;
 }
@@ -249,6 +253,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     useState<ConnectionStatus>("reconnecting");
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [agentType, setAgentType] = useState<AgentType>("custom");
+  const [agentapiVersion, setAgentapiVersion] = useState("");
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastEventAtRef = useRef(Date.now());
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -499,6 +504,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
 
         // Set agent type
         setAgentType(data.agent_type === "" ? "unknown" : data.agent_type as AgentType);
+        setAgentapiVersion(data.agentapi_version ?? "");
         void refreshQueue();
       });
 
@@ -751,6 +757,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         applyMCPProfile: api.applyMCPProfile,
         storageScope: agentAPIUrl,
         agentType,
+        agentapiVersion,
         customTitle,
         workspaceUrl,
       }}
