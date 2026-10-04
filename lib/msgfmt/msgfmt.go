@@ -268,6 +268,7 @@ const (
 	AgentTypeAmazonQ  AgentType = "amazonq"
 	AgentTypeOpencode AgentType = "opencode"
 	AgentTypeKimi     AgentType = "kimi"
+	AgentTypePi       AgentType = "pi"
 	AgentTypeCustom   AgentType = "custom"
 )
 
@@ -295,6 +296,17 @@ func formatCodexMessage(message string, userInput string) string {
 func formatOpencodeMessage(message string, userInput string) string {
 	message = RemoveUserInput(message, userInput, AgentTypeOpencode)
 	message = removeOpencodeMessageBox(message)
+	message = trimEmptyLines(message)
+	return message
+}
+
+// piMarkdownMarkers are the inline Markdown markers Pi drops when it renders
+// the user's message in the transcript.
+var piMarkdownMarkers = strings.NewReplacer("`", "", "**", "")
+
+func formatPiMessage(message string, userInput string) string {
+	message = RemoveUserInput(message, piMarkdownMarkers.Replace(userInput), AgentTypePi)
+	message = removePiMessageBox(message)
 	message = trimEmptyLines(message)
 	return message
 }
@@ -333,6 +345,8 @@ func FormatAgentMessage(agentType AgentType, message string, userInput string) s
 		formatted = formatOpencodeMessage(message, userInput)
 	case AgentTypeKimi:
 		formatted = formatGenericMessage(message, userInput, agentType)
+	case AgentTypePi:
+		formatted = formatPiMessage(message, userInput)
 	case AgentTypeCustom:
 		formatted = formatGenericMessage(message, userInput, agentType)
 	default:

@@ -1,0 +1,14 @@
+ Warning: No models available. Use /login to log into a provider via OAuth or
+ API key. See:
+
+ /home/k1dave6412/.local/lib/node_modules/@earendil-works/pi-coding-agent/docs/
+ providers.md
+
+ /home/k1dave6412/.local/lib/node_modules/@earendil-works/pi-coding-agent/docs/
+ models.md
+
+────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────
+~
+0.0%/0 (auto)                                                            unknown

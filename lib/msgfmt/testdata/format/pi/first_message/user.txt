@@ -1,0 +1,1 @@
+Run `ls /etc | head -3` with bash, then tell me how many lines it printed.

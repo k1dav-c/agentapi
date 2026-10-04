@@ -1,0 +1,9 @@
+ $ ls /etc | head -3
+
+ adduser.conf
+ alternatives
+ apparmor
+
+ Took 0.0s
+
+ It printed 3 lines.

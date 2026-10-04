@@ -78,6 +78,16 @@ func removeCodexMessageBox(msg string) string {
 	return strings.Join(lines, "\n")
 }
 
+// removePiMessageBox removes the Pi editor together with the footer below
+// it (working directory, context usage and model).
+func removePiMessageBox(msg string) string {
+	lines := strings.Split(msg, "\n")
+	if top, _ := findPiInputBox(lines); top != -1 {
+		return strings.Join(lines[:top], "\n")
+	}
+	return msg
+}
+
 func removeOpencodeMessageBox(msg string) string {
 	lines := strings.Split(msg, "\n")
 	//

@@ -1,0 +1,25 @@
+
+
+ Run ls /etc | head -3 with bash, then tell me how many lines it printed.
+
+
+
+ $ ls /etc | head -3
+
+ adduser.conf
+ alternatives
+ apparmor
+
+ Took 0.0s
+
+
+ It printed 3 lines.
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────
+~
+↑2.4k ↓38 $0.005 (sub) 0.4%/272k (auto)                     gpt-6.1-sol • medium

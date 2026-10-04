@@ -151,6 +151,8 @@ func FormatToolCall(agentType AgentType, message string) (string, []string) {
 		return message, []string{}
 	case AgentTypeKimi:
 		return message, []string{}
+	case AgentTypePi:
+		return message, []string{}
 	case AgentTypeCustom:
 		return message, []string{}
 	default:

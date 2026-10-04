@@ -17,6 +17,9 @@ const (
 	// codexInputSearchLines bounds how far above the last non-empty line
 	// the Codex composer may sit (footer, warnings, agent hints).
 	codexInputSearchLines = 10
+	// piFooterLines bounds how many lines Pi renders below its editor
+	// (footer, autocomplete list, extension status lines).
+	piFooterLines = 16
 )
 
 // InputBoxScanLines is how many lines at the bottom of the screen (ignoring
@@ -78,6 +81,40 @@ func findClaudeInputBox(lines []string) (int, int) {
 	return -1, -1
 }
 
+// isPiEditorBorder reports whether the line is a full-width rule, the kind
+// Pi draws above and below its editor.
+func isPiEditorBorder(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return len(trimmed) >= 20*len("─") && strings.Trim(trimmed, "─") == ""
+}
+
+// findPiInputBox locates the Pi editor:
+//
+//	────────────────
+//	draft text (no prompt glyph)
+//	────────────────
+//	~/project (main)
+//	0.0%/200k (auto)                     gpt-5.5 • medium
+//
+// It returns the indices of the top and bottom rules, or -1, -1 when no
+// editor is visible. Only the bottom-most pair counts: Pi also frames
+// notices (e.g. "Update Available") with the same rules higher up.
+func findPiInputBox(lines []string) (int, int) {
+	last := lastNonEmptyLine(lines)
+	for bottom := last; bottom >= max(last-piFooterLines, 1); bottom-- {
+		if !isPiEditorBorder(lines[bottom]) {
+			continue
+		}
+		for top := bottom - 1; top >= max(bottom-1-maxInputBoxHeight, 0); top-- {
+			if isPiEditorBorder(lines[top]) {
+				return top, bottom
+			}
+		}
+		return -1, -1
+	}
+	return -1, -1
+}
+
 // findCodexInputLine locates the Codex composer line ("› Ask Codex to do
 // anything" or a draft) and returns its index, or -1 if none is visible.
 // Depending on the Codex version the composer is followed by one or more
@@ -121,6 +158,10 @@ func HasInputBox(agentType AgentType, screen string) (visible bool, ok bool) {
 	if agentType == AgentTypeCodex {
 		return findCodexInputLine(strings.Split(screen, "\n")) != -1, true
 	}
+	if agentType == AgentTypePi {
+		top, _ := findPiInputBox(strings.Split(screen, "\n"))
+		return top != -1, true
+	}
 	return false, false
 }
 
@@ -133,6 +174,12 @@ func StabilityRegion(agentType AgentType, screen string) string {
 	if agentType == AgentTypeClaude {
 		lines := strings.Split(screen, "\n")
 		if _, bottom := findClaudeInputBox(lines); bottom != -1 {
+			return strings.Join(lines[:bottom+1], "\n")
+		}
+	}
+	if agentType == AgentTypePi {
+		lines := strings.Split(screen, "\n")
+		if _, bottom := findPiInputBox(lines); bottom != -1 {
 			return strings.Join(lines[:bottom+1], "\n")
 		}
 	}

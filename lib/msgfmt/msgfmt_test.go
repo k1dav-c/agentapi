@@ -282,7 +282,7 @@ func TestCollapseBlankLines(t *testing.T) {
 
 func TestFormatAgentMessage(t *testing.T) {
 	dir := "testdata/format"
-	agentTypes := []AgentType{AgentTypeClaude, AgentTypeGoose, AgentTypeAider, AgentTypeGemini, AgentTypeCopilot, AgentTypeAmp, AgentTypeCodex, AgentTypeCursor, AgentTypeAuggie, AgentTypeAmazonQ, AgentTypeOpencode, AgentTypeKimi, AgentTypeCustom}
+	agentTypes := []AgentType{AgentTypeClaude, AgentTypeGoose, AgentTypeAider, AgentTypeGemini, AgentTypeCopilot, AgentTypeAmp, AgentTypeCodex, AgentTypeCursor, AgentTypeAuggie, AgentTypeAmazonQ, AgentTypeOpencode, AgentTypeKimi, AgentTypePi, AgentTypeCustom}
 	for _, agentType := range agentTypes {
 		t.Run(string(agentType), func(t *testing.T) {
 			cases, err := testdataDir.ReadDir(path.Join(dir, string(agentType)))

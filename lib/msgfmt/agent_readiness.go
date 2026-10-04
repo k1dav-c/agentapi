@@ -28,6 +28,9 @@ func IsAgentReadyForInitialPrompt(agentType AgentType, message string) bool {
 		return isOpencodeAgentReadyForInitialPrompt(message)
 	case AgentTypeKimi:
 		return isGenericAgentReadyForInitialPrompt(message)
+	case AgentTypePi:
+		top, _ := findPiInputBox(strings.Split(message, "\n"))
+		return top != -1
 	case AgentTypeCustom:
 		return isGenericAgentReadyForInitialPrompt(message)
 	default:
