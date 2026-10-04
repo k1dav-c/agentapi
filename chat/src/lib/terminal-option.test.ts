@@ -124,3 +124,24 @@ describe("multi-select questions", () => {
     expect(isMultiSelect(parseTerminalOptions("Proceed?\n❯ 1. Yes\n  2. No"))).toBe(false);
   });
 });
+
+describe("Pi dialogs", () => {
+  const prompt = readFileSync(new URL("../../../lib/httpapi/testdata/pi_trust_dialog.txt", import.meta.url), "utf8");
+  test("project trust: the arrow marks the highlighted option", () => {
+    const options = parseTerminalOptions(prompt);
+    expect(options.map((option) => option.label)).toEqual([
+      "Trust",
+      "Trust parent folder (/tmp/claude-1000)",
+      "Trust (this session only)",
+      "Do not trust",
+      "Do not trust (this session only)",
+    ]);
+    expect(options[0].key).toBe("\r");
+    expect(options[3].key).toBe("\x1b[B\x1b[B\x1b[B\r");
+  });
+  test("project trust: question and folder", () => {
+    const {title, context} = describeTerminalPrompt(prompt);
+    expect(title).toBe("Trust project folder?");
+    expect(context[0]).toBe("/tmp/claude-1000/pi-trust-proj");
+  });
+});

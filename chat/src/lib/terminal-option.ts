@@ -30,7 +30,9 @@ export const MULTI_SELECT_CONTINUE = "\x1b[C";
 const checkboxRe = /^\[([ ✔✓xX])\]\s+(.*)/;
 
 const numberedOptionRe = /^\s*[❯›>]?\s*(\d+)\.\s+(.+)/;
-const cursorOptionRe = /^\s*[❯›]\s+(.+)/;
+// The highlighted row of an unnumbered list: "❯" (Claude Code), "›" (Codex)
+// or "→" (Pi).
+const cursorOptionRe = /^\s*[❯›→]\s+(.+)/;
 const hintRe = /to (confirm|cancel)|enter (continue|select)|esc (skip|back|to)/i;
 
 // Extracts the choices of the interactive prompt at the bottom of the
