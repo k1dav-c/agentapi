@@ -363,6 +363,8 @@ func (s *Server) getUsage(ctx context.Context, _ *struct{}) (*UsageResponse, err
 	switch s.agentType {
 	case mf.AgentTypeCodex:
 		return s.getOpenAIUsage(ctx)
+	case mf.AgentTypePi:
+		return s.getPiUsage(ctx)
 	default:
 		return s.getAnthropicUsage(ctx)
 	}
@@ -403,5 +405,120 @@ func (s *Server) getOpenAIUsage(ctx context.Context) (*UsageResponse, error) {
 	}
 
 	body := buildOpenAIUsage(headers)
+	return &UsageResponse{Body: body}, nil
+}
+
+// --- Pi ---
+
+// piCredential is one provider login in Pi's auth.json: an OAuth token
+// ("access") or an API key ("key", which may be a shell command starting
+// with "!" that only Pi can run).
+type piCredential struct {
+	Type   string `json:"type"`
+	Access string `json:"access"`
+	Key    string `json:"key"`
+}
+
+func (c piCredential) token() string {
+	if c.Access != "" {
+		return c.Access
+	}
+	if c.Key != "" && !strings.HasPrefix(c.Key, "!") {
+		return c.Key
+	}
+	return ""
+}
+
+func piAgentDir() (string, error) {
+	if dir := os.Getenv("PI_CODING_AGENT_DIR"); dir != "" {
+		return dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("detect home directory: %w", err)
+	}
+	return filepath.Join(home, ".pi", "agent"), nil
+}
+
+// piUsageLogin picks the provider whose limits /usage reports for Pi: its
+// default provider when that is one AgentAPI can query, else the first
+// OpenAI or Anthropic login. It returns the provider ("openai" or
+// "anthropic") and the token to query it with.
+func piUsageLogin(agentDir string) (string, string, error) {
+	var auth map[string]piCredential
+	if data, err := os.ReadFile(filepath.Join(agentDir, "auth.json")); err == nil {
+		if err := json.Unmarshal(data, &auth); err != nil {
+			return "", "", fmt.Errorf("parse Pi auth.json: %w", err)
+		}
+	}
+	var settings struct {
+		DefaultProvider string `json:"defaultProvider"`
+	}
+	if data, err := os.ReadFile(filepath.Join(agentDir, "settings.json")); err == nil {
+		_ = json.Unmarshal(data, &settings)
+	}
+
+	// Pi provider IDs AgentAPI can query, mapped to the usage provider.
+	providers := []struct{ pi, usage, env string }{
+		{"openai-codex", "openai", ""},
+		{"openai", "openai", "OPENAI_API_KEY"},
+		{"anthropic", "anthropic", ""},
+	}
+	lookup := func(pi string) (string, string) {
+		for _, p := range providers {
+			if p.pi != pi {
+				continue
+			}
+			if token := auth[pi].token(); token != "" {
+				return p.usage, token
+			}
+			if p.env != "" && os.Getenv(p.env) != "" {
+				return p.usage, os.Getenv(p.env)
+			}
+		}
+		return "", ""
+	}
+	if usage, token := lookup(settings.DefaultProvider); token != "" {
+		return usage, token, nil
+	}
+	for _, p := range providers {
+		if usage, token := lookup(p.pi); token != "" {
+			return usage, token, nil
+		}
+	}
+	return "", "", fmt.Errorf("no OpenAI or Anthropic login found for Pi (run /login in Pi)")
+}
+
+func (s *Server) getPiUsage(ctx context.Context) (*UsageResponse, error) {
+	agentDir, err := piAgentDir()
+	if err != nil {
+		return nil, huma.Error500InternalServerError(err.Error())
+	}
+	provider, token, err := piUsageLogin(agentDir)
+	if err != nil {
+		return nil, huma.Error404NotFound(fmt.Sprintf("usage is not available: %v", err))
+	}
+
+	var body UsageResponseBody
+	if provider == "anthropic" {
+		headers, err := fetchAnthropicRateLimits(ctx, token)
+		if err != nil {
+			return nil, huma.Error502BadGateway(fmt.Sprintf("failed to fetch rate limits from Anthropic API: %v", err))
+		}
+		creds := &claudeCredentials{}
+		creds.ClaudeAIOAuth = &struct {
+			AccessToken      string `json:"accessToken"`
+			SubscriptionType string `json:"subscriptionType"`
+			RateLimitTier    string `json:"rateLimitTier"`
+		}{AccessToken: token}
+		body = buildAnthropicUsage(creds, headers)
+	} else {
+		headers, err := fetchOpenAIRateLimits(ctx, token)
+		if err != nil {
+			return nil, huma.Error502BadGateway(fmt.Sprintf("failed to fetch rate limits from OpenAI API: %v", err))
+		}
+		body = buildOpenAIUsage(headers)
+	}
+	body.AgentType = string(mf.AgentTypePi)
 	return &UsageResponse{Body: body}, nil
 }
