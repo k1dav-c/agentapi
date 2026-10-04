@@ -59,7 +59,7 @@ export function BackgroundAlerts() {
       link.setAttribute("data-agentapi-icon", "");
       document.head.appendChild(link);
     }
-    link.href = faviconDataUrl(badge, agentType === "claude" ? "#d97757" : "#e8eaf0");
+    link.href = faviconDataUrl(badge, agentType);
   }, [kind, unseenFinish, agentType]);
 
   return null;

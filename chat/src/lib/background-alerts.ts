@@ -1,3 +1,4 @@
+import {agentMarkSvg} from "./agent-mark";
 import type { AgentStateKind } from "./session-status";
 
 export type BackgroundAlert = "needs-you" | "finished";
@@ -15,7 +16,7 @@ export type FaviconBadge = "needs-you" | "working" | "finished" | null;
 
 // The tab icon: the agent mark (as in the header) with a state dot, so a
 // background tab shows at a glance whether the agent needs you.
-export function faviconDataUrl(badge: FaviconBadge, markColor: string): string {
+export function faviconDataUrl(badge: FaviconBadge, agentType: string): string {
   const dot = {
     "needs-you": "#c27c0e",
     working: "#4f6bed",
@@ -27,7 +28,7 @@ export function faviconDataUrl(badge: FaviconBadge, markColor: string): string {
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">` +
     `<rect x="1" y="1" width="30" height="30" rx="8" fill="#232733"/>` +
-    `<rect x="10" y="10" width="12" height="12" rx="3" fill="${markColor}"/>` +
+    agentMarkSvg(agentType, 10, 10, 12) +
     badgeSvg +
     `</svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;

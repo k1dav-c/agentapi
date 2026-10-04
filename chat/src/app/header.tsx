@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { notificationsEnabled, onNotificationsPreferenceChange, setNotificationsEnabled } from "@/lib/background-alerts";
 import { AgentType, useChat } from "@/components/chat-provider";
 import { ModeToggle } from "@/components/mode-toggle";
+import { AgentMark } from "@/components/agent-mark";
 import { Activity, BellOff, BellRing, Bot, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Moon, Sun, Tag } from "lucide-react";
 import { useTheme } from "next-themes";
 import { computeTokenTotals, formatTokenCount, getStatusMeta } from "@/lib/session-status";
@@ -95,11 +96,7 @@ export function Header() {
   return (
     <header className="sticky top-[env(safe-area-inset-top,0px)] z-20 flex h-12 shrink-0 items-center gap-3 border-b bg-background/95 px-3 backdrop-blur-xl sm:px-5">
       <div className="flex min-w-0 items-center gap-2.5">
-        <span
-          aria-hidden="true"
-          className="size-2.5 shrink-0 rounded-[3px]"
-          style={{ background: agentType === "claude" ? "var(--agent-claude)" : "var(--foreground)" }}
-        />
+        <AgentMark agentType={agentType} />
         <h1 className="truncate text-sm font-semibold tracking-tight">{customTitle || agentName}</h1>
         {agentapiVersion && (
           <span className="hidden truncate font-mono text-[11px] text-muted-foreground md:inline">
