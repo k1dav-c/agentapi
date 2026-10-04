@@ -716,6 +716,7 @@ func (s *Server) registerRoutes() {
 		"agent_error":         ErrorBody{},
 		"rich_message_update": RichMessageUpdateBody{},
 		"heartbeat":           HeartbeatBody{},
+		"session_sync":        SessionSyncBody{},
 	}, s.subscribeEvents)
 
 	sse.Register(s.api, huma.Operation{
@@ -1062,13 +1063,28 @@ func (s *Server) uploadFiles(ctx context.Context, input *struct {
 }
 
 // subscribeEvents is an SSE endpoint that sends events to the client
-func (s *Server) subscribeEvents(ctx context.Context, input *struct{}, send sse.Sender) {
-	subscriberId, ch, stateEvents := s.emitter.Subscribe()
+// SubscribeEventsInput lets a client that cached the conversation resume
+// from where it left off.
+type SubscribeEventsInput struct {
+	Sync  bool   `query:"sync" doc:"Opt in to session_sync events and incremental replay. Clients that don't opt in get the full replay and no session_sync events, as before."`
+	Since uint64 `query:"since" doc:"With sync: highest seq the client has applied. With a matching epoch, the replay holds only later changes."`
+	Epoch string `query:"epoch" doc:"With sync: epoch from the client's last session_sync. If it doesn't match, the full state is replayed."`
+}
+
+func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInput, send sse.Sender) {
+	// session_sync is opt-in: existing clients (e.g. agentapi-sdk-go) reject
+	// event types they don't know.
+	sync := input.Sync
+	since, epoch := input.Since, input.Epoch
+	if !sync {
+		since, epoch = 0, ""
+	}
+	subscriberId, ch, stateEvents := s.emitter.SubscribeSince(since, epoch)
 	defer s.emitter.Unsubscribe(subscriberId)
 
 	s.logger.Info("New subscriber", "subscriberId", subscriberId)
 	for _, event := range stateEvents {
-		if event.Type == EventTypeScreenUpdate {
+		if event.Type == EventTypeScreenUpdate || (event.Type == EventTypeSessionSync && !sync) {
 			continue
 		}
 		if err := send.Data(event.Payload); err != nil {
@@ -1087,7 +1103,7 @@ func (s *Server) subscribeEvents(ctx context.Context, input *struct{}, send sse.
 				s.logger.Info("Channel closed", "subscriberId", subscriberId)
 				return
 			}
-			if event.Type == EventTypeScreenUpdate {
+			if event.Type == EventTypeScreenUpdate || (event.Type == EventTypeSessionSync && !sync) {
 				continue
 			}
 			if err := send.Data(event.Payload); err != nil {

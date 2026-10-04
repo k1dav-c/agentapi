@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -27,6 +29,7 @@ const (
 	EventTypeError             EventType = "agent_error"
 	EventTypeRichMessageUpdate EventType = "rich_message_update"
 	EventTypeHeartbeat         EventType = "heartbeat"
+	EventTypeSessionSync       EventType = "session_sync"
 )
 
 type AgentStatus string
@@ -70,6 +73,16 @@ type MessageUpdateBody struct {
 	Role    st.ConversationRole `json:"role" doc:"Role of the message author"`
 	Message string              `json:"message" doc:"Message content. The message is formatted as it appears in the agent's terminal session, meaning that, by default, it consists of lines of text with 80 characters per line."`
 	Time    time.Time           `json:"time" doc:"Timestamp of the message"`
+	Seq     uint64              `json:"seq" doc:"Sequence number of this change. Pass the highest one seen as ?since= when reconnecting to /events to receive only later changes."`
+}
+
+// SessionSyncBody is the first event on /events. It tells the client whether
+// the replay that follows is the full state (discard anything cached) or
+// only the changes after the ?since= sequence it asked for.
+type SessionSyncBody struct {
+	Epoch string `json:"epoch" doc:"Identifies this conversation state. It changes when the server restarts or the conversation is reset; a cache from another epoch must be discarded."`
+	Full  bool   `json:"full" doc:"True when the replay that follows is the full state rather than the changes after ?since=."`
+	Seq   uint64 `json:"seq" doc:"Highest sequence number in the replay that follows (the ?since= value when it holds nothing new). The replay is complete once a change with this seq has arrived."`
 }
 
 type StatusChangeBody struct {
@@ -96,7 +109,10 @@ type ErrorBody struct {
 }
 
 // RichMessageUpdateBody is the SSE payload for rich message updates.
-type RichMessageUpdateBody = jsonlwatcher.RichMessage
+type RichMessageUpdateBody struct {
+	jsonlwatcher.RichMessage
+	Seq uint64 `json:"seq" doc:"Sequence number of this change; see message_update."`
+}
 
 // HeartbeatBody is a periodic SSE keep-alive. It lets clients detect
 // connections that died without a FIN (e.g. after system sleep), which
@@ -111,8 +127,16 @@ type Event struct {
 }
 
 type EventEmitter struct {
-	mu                  sync.Mutex
-	messages            []st.ConversationMessage
+	mu       sync.Mutex
+	messages []st.ConversationMessage
+	// epoch identifies the current conversation state; seq numbers every
+	// message and rich message change so a reconnecting client can ask for
+	// only what it hasn't seen. messageSeq and richSeq hold the seq of each
+	// entry's latest change.
+	epoch               string
+	seq                 uint64
+	messageSeq          []uint64
+	richSeq             []uint64
 	richMessages        []jsonlwatcher.RichMessage
 	sessionEvents       []jsonlwatcher.SessionEvent
 	nextSessionEventID  int
@@ -197,6 +221,7 @@ func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 		lifecycle:           LifecycleStarting,
 		chans:               make(map[int]chan Event),
 		subscriptionBufSize: defaultSubscriptionBufSize,
+		epoch:               newEpoch(),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -232,10 +257,18 @@ func (e *EventEmitter) notifyChannels(eventType EventType, payload any) {
 
 // EmitMessages assumes that only the last message can change or new messages can be added.
 // If a new message is injected between existing messages (identified by Id), the behavior is undefined.
+func newEpoch() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 func (e *EventEmitter) EmitMessages(newMessages []st.ConversationMessage) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	seqs := make([]uint64, len(newMessages))
+	copy(seqs, e.messageSeq)
 	maxLength := max(len(e.messages), len(newMessages))
 	for i := range maxLength {
 		var oldMsg st.ConversationMessage
@@ -250,16 +283,20 @@ func (e *EventEmitter) EmitMessages(newMessages []st.ConversationMessage) {
 			if i >= len(newMessages) {
 				continue
 			}
+			e.seq++
+			seqs[i] = e.seq
 			e.notifyChannels(EventTypeMessageUpdate, MessageUpdateBody{
 				Id:      newMessages[i].Id,
 				Role:    newMessages[i].Role,
 				Message: newMessages[i].Message,
 				Time:    newMessages[i].Time,
+				Seq:     e.seq,
 			})
 		}
 	}
 
 	e.messages = newMessages
+	e.messageSeq = seqs
 }
 
 func (e *EventEmitter) EmitStatus(newStatus st.ConversationStatus) {
@@ -423,10 +460,14 @@ func (e *EventEmitter) EmitRichMessage(msg jsonlwatcher.RichMessage) {
 		msg = existing
 	} else {
 		e.richMessages = append(e.richMessages, msg)
+		e.richSeq = append(e.richSeq, 0)
+		idx = len(e.richMessages) - 1
 	}
+	e.seq++
+	e.richSeq[idx] = e.seq
 	// Always broadcast the merged snapshot. Broadcasting the incoming Claude
 	// delta would make clients replace a complete message with its last block.
-	e.notifyChannels(EventTypeRichMessageUpdate, RichMessageUpdateBody(msg))
+	e.notifyChannels(EventTypeRichMessageUpdate, RichMessageUpdateBody{RichMessage: msg, Seq: e.seq})
 }
 
 func mergeRichContent(existing, incoming []jsonlwatcher.RichContentBlock) []jsonlwatcher.RichContentBlock {
@@ -488,7 +529,13 @@ func (e *EventEmitter) Reset() {
 	defer e.mu.Unlock()
 	e.handoffRevision++
 	e.messages = nil
+	e.messageSeq = nil
 	e.richMessages = nil
+	e.richSeq = nil
+	// A new epoch makes reconnecting clients drop their cache; connected
+	// clients are told now so they clear the old conversation.
+	e.epoch = newEpoch()
+	e.notifyChannels(EventTypeSessionSync, SessionSyncBody{Epoch: e.epoch, Full: true})
 	e.sessionEvents = nil
 	e.nextSessionEventID = 1
 	e.errors = nil
@@ -502,12 +549,30 @@ func (e *EventEmitter) Reset() {
 }
 
 // Assumes the caller holds the lock.
-func (e *EventEmitter) currentStateAsEvents() []Event {
-	events := make([]Event, 0, len(e.messages)+2)
-	for _, msg := range e.messages {
+// currentStateAsEvents returns the events that rebuild the current state for
+// a new subscriber. With a matching epoch, only messages and rich messages
+// changed after since are included; otherwise everything is.
+func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string) []Event {
+	// since 0 asks for everything: the client must replace its state rather
+	// than merge into what it holds.
+	full := epoch != e.epoch || since == 0 || since > e.seq
+	if full {
+		since = 0
+	}
+	events := make([]Event, 0, len(e.messages)+3)
+	// The session sync goes first; its Seq is filled in below with the
+	// highest seq in the replay, so the client knows when the replay is
+	// complete and can apply it at once.
+	events = append(events, Event{Type: EventTypeSessionSync})
+	replaySeq := since
+	for i, msg := range e.messages {
+		if e.messageSeq[i] <= since {
+			continue
+		}
+		replaySeq = max(replaySeq, e.messageSeq[i])
 		events = append(events, Event{
 			Type:    EventTypeMessageUpdate,
-			Payload: MessageUpdateBody{Id: msg.Id, Role: msg.Role, Message: msg.Message, Time: msg.Time},
+			Payload: MessageUpdateBody{Id: msg.Id, Role: msg.Role, Message: msg.Message, Time: msg.Time, Seq: e.messageSeq[i]},
 		})
 	}
 	events = append(events, Event{
@@ -527,14 +592,19 @@ func (e *EventEmitter) currentStateAsEvents() []Event {
 		})
 	}
 
-	// Include all rich message events for late subscriber replay
-	for _, msg := range e.richMessages {
+	// Include rich message events for late subscriber replay
+	for i, msg := range e.richMessages {
+		if e.richSeq[i] <= since {
+			continue
+		}
+		replaySeq = max(replaySeq, e.richSeq[i])
 		events = append(events, Event{
 			Type:    EventTypeRichMessageUpdate,
-			Payload: RichMessageUpdateBody(msg),
+			Payload: RichMessageUpdateBody{RichMessage: msg, Seq: e.richSeq[i]},
 		})
 	}
 
+	events[0].Payload = SessionSyncBody{Epoch: e.epoch, Full: full, Seq: replaySeq}
 	return events
 }
 
@@ -543,9 +613,16 @@ func (e *EventEmitter) currentStateAsEvents() []Event {
 // - a channel for receiving events.
 // - a list of events that allow to recreate the state of the conversation right before the subscription was created.
 func (e *EventEmitter) Subscribe() (int, <-chan Event, []Event) {
+	return e.SubscribeSince(0, "")
+}
+
+// SubscribeSince is Subscribe for a client that already has the state up to
+// sequence since in epoch: the returned events start with a session_sync and
+// hold only later changes, or the full state if the epoch doesn't match.
+func (e *EventEmitter) SubscribeSince(since uint64, epoch string) (int, <-chan Event, []Event) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	stateEvents := e.currentStateAsEvents()
+	stateEvents := e.currentStateAsEvents(since, epoch)
 
 	// Once a channel becomes full, it will be closed.
 	ch := make(chan Event, e.subscriptionBufSize)

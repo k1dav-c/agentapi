@@ -56,7 +56,7 @@ func TestEventEmitterMergesClaudeRichMessageDeltas(t *testing.T) {
 	})
 
 	event := <-ch
-	update := event.Payload.(RichMessageUpdateBody)
+	update := event.Payload.(RichMessageUpdateBody).RichMessage
 	require.Len(t, update.Content, 4)
 	require.Equal(t, "tool_2", update.Content[3].ToolUseID)
 	require.Equal(t, update.Content, emitter.RichMessages()[0].Content)
@@ -68,6 +68,10 @@ func TestEventEmitter(t *testing.T) {
 		_, ch, stateEvents := emitter.Subscribe()
 		assert.Empty(t, ch)
 		assert.Equal(t, []Event{
+			{
+				Type:    EventTypeSessionSync,
+				Payload: SessionSyncBody{Epoch: emitter.epoch, Full: true},
+			},
 			{
 				Type:    EventTypeStatusChange,
 				Payload: StatusChangeBody{Status: AgentStatusRunning, Lifecycle: LifecycleStarting, Version: version.Version},
@@ -85,7 +89,7 @@ func TestEventEmitter(t *testing.T) {
 		newEvent := <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeMessageUpdate,
-			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world!", Role: st.ConversationRoleUser, Time: now},
+			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world!", Role: st.ConversationRoleUser, Time: now, Seq: 1},
 		}, newEvent)
 
 		emitter.EmitMessages([]st.ConversationMessage{
@@ -95,13 +99,13 @@ func TestEventEmitter(t *testing.T) {
 		newEvent = <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeMessageUpdate,
-			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world! (updated)", Role: st.ConversationRoleUser, Time: now},
+			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world! (updated)", Role: st.ConversationRoleUser, Time: now, Seq: 2},
 		}, newEvent)
 
 		newEvent = <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeMessageUpdate,
-			Payload: MessageUpdateBody{Id: 2, Message: "What's up?", Role: st.ConversationRoleAgent, Time: now},
+			Payload: MessageUpdateBody{Id: 2, Message: "What's up?", Role: st.ConversationRoleAgent, Time: now, Seq: 3},
 		}, newEvent)
 
 		emitter.EmitStatus(st.ConversationStatusStable)
@@ -128,7 +132,7 @@ func TestEventEmitter(t *testing.T) {
 			newEvent := <-ch
 			assert.Equal(t, Event{
 				Type:    EventTypeMessageUpdate,
-				Payload: MessageUpdateBody{Id: 1, Message: "Hello, world!", Role: st.ConversationRoleUser, Time: now},
+				Payload: MessageUpdateBody{Id: 1, Message: "Hello, world!", Role: st.ConversationRoleUser, Time: now, Seq: 1},
 			}, newEvent)
 		}
 	})
@@ -223,8 +227,8 @@ func TestEventEmitter(t *testing.T) {
 		emitter := NewEventEmitter(WithClock(mockClock), WithSubscriptionBufSize(10))
 		_, ch, stateEvents := emitter.Subscribe()
 
-		// Verify initial state events
-		assert.Len(t, stateEvents, 2)
+		// Verify initial state events: session sync, status, screen
+		assert.Len(t, stateEvents, 3)
 
 		// Emit an error and verify it uses the mock clock time
 		emitter.EmitError("test error", st.ErrorLevelError)
@@ -310,4 +314,73 @@ func TestEventEmitterTerminalPrompt(t *testing.T) {
 	events := statusEvents()
 	require.Len(t, events, 1)
 	require.Empty(t, events[0].TerminalPrompt)
+}
+
+func TestEventEmitterIncrementalReplay(t *testing.T) {
+	emitter := NewEventEmitter(WithSubscriptionBufSize(10))
+	now := time.Now()
+	rich := func(id, text string) jsonlwatcher.RichMessage {
+		return jsonlwatcher.RichMessage{MessageID: id, Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "text", Text: text}}}
+	}
+	emitter.EmitMessages([]st.ConversationMessage{{Id: 0, Role: st.ConversationRoleUser, Message: "one", Time: now}})
+	emitter.EmitRichMessage(rich("m1", "first"))
+	emitter.EmitRichMessage(rich("m2", "second"))
+
+	_, _, state := emitter.Subscribe()
+	sync := state[0].Payload.(SessionSyncBody)
+	require.True(t, sync.Full)
+	require.Equal(t, uint64(3), sync.Seq)
+
+	// Later changes: a new message, and an update to an existing rich message.
+	emitter.EmitMessages([]st.ConversationMessage{
+		{Id: 0, Role: st.ConversationRoleUser, Message: "one", Time: now},
+		{Id: 1, Role: st.ConversationRoleAgent, Message: "two", Time: now},
+	})
+	emitter.EmitRichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "tool_use", ToolUseID: "t1"}}})
+
+	kinds := func(events []Event) []string {
+		var out []string
+		for _, ev := range events {
+			switch p := ev.Payload.(type) {
+			case MessageUpdateBody:
+				out = append(out, fmt.Sprintf("message %d", p.Id))
+			case RichMessageUpdateBody:
+				out = append(out, "rich "+p.MessageID)
+			}
+		}
+		return out
+	}
+
+	// Resuming from the first replay gets only what changed since.
+	_, _, state = emitter.SubscribeSince(sync.Seq, sync.Epoch)
+	require.Equal(t, SessionSyncBody{Epoch: sync.Epoch, Full: false, Seq: 5}, state[0].Payload)
+	require.Equal(t, []string{"message 1", "rich m1"}, kinds(state))
+	updated := state[len(state)-1].Payload.(RichMessageUpdateBody)
+	require.Len(t, updated.Content, 2, "the replayed rich message is the merged snapshot")
+
+	// Up to date: nothing to replay.
+	_, _, state = emitter.SubscribeSince(5, sync.Epoch)
+	require.Equal(t, SessionSyncBody{Epoch: sync.Epoch, Full: false, Seq: 5}, state[0].Payload)
+	require.Empty(t, kinds(state))
+
+	// An unknown epoch, or a seq from the future, gets the full state.
+	for _, tc := range []struct {
+		since uint64
+		epoch string
+	}{{3, "other"}, {99, sync.Epoch}, {0, sync.Epoch}} {
+		_, _, state = emitter.SubscribeSince(tc.since, tc.epoch)
+		require.True(t, state[0].Payload.(SessionSyncBody).Full)
+		require.Equal(t, []string{"message 0", "message 1", "rich m1", "rich m2"}, kinds(state))
+	}
+
+	// A reset starts a new epoch and tells connected clients right away.
+	_, ch, _ := emitter.Subscribe()
+	emitter.Reset()
+	reset := (<-ch).Payload.(SessionSyncBody)
+	require.True(t, reset.Full)
+	require.Zero(t, reset.Seq, "nothing to wait for after a reset")
+	require.NotEqual(t, sync.Epoch, reset.Epoch)
+	_, _, state = emitter.SubscribeSince(5, sync.Epoch)
+	require.True(t, state[0].Payload.(SessionSyncBody).Full)
+	require.Empty(t, kinds(state))
 }

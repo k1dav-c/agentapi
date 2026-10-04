@@ -598,6 +598,12 @@
             "$ref": "#/components/schemas/ConversationRole",
             "description": "Role of the message author"
           },
+          "seq": {
+            "description": "Sequence number of this change. Pass the highest one seen as ?since= when reconnecting to /events to receive only later changes.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "time": {
             "description": "Timestamp of the message",
             "format": "date-time",
@@ -608,6 +614,7 @@
           "id",
           "message",
           "role",
+          "seq",
           "time"
         ],
         "type": "object"
@@ -911,6 +918,58 @@
         ],
         "type": "object"
       },
+      "RichMessageUpdateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "Structured content blocks",
+            "items": {
+              "$ref": "#/components/schemas/RichContentBlock"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "message_id": {
+            "description": "Agent's internal message ID",
+            "type": "string"
+          },
+          "model": {
+            "description": "Model that generated this message",
+            "type": "string"
+          },
+          "role": {
+            "description": "Role of the message author (user or assistant)",
+            "type": "string"
+          },
+          "seq": {
+            "description": "Sequence number of this change; see message_update.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stop_reason": {
+            "description": "Why the model stopped generating",
+            "type": "string"
+          },
+          "timestamp": {
+            "description": "Timestamp of the message",
+            "format": "date-time",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/Usage",
+            "description": "Token usage information"
+          }
+        },
+        "required": [
+          "content",
+          "message_id",
+          "role",
+          "seq",
+          "timestamp"
+        ],
+        "type": "object"
+      },
       "RichMessagesResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -995,6 +1054,31 @@
           "id",
           "kind",
           "time"
+        ],
+        "type": "object"
+      },
+      "SessionSyncBody": {
+        "additionalProperties": false,
+        "properties": {
+          "epoch": {
+            "description": "Identifies this conversation state. It changes when the server restarts or the conversation is reset; a cache from another epoch must be discarded.",
+            "type": "string"
+          },
+          "full": {
+            "description": "True when the replay that follows is the full state rather than the changes after ?since=.",
+            "type": "boolean"
+          },
+          "seq": {
+            "description": "Highest sequence number in the replay that follows (the ?since= value when it holds nothing new). The replay is complete once a change with this seq has arrived.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "epoch",
+          "full",
+          "seq"
         ],
         "type": "object"
       },
@@ -1516,6 +1600,40 @@
       "get": {
         "description": "The events are sent as Server-Sent Events (SSE). Initially, the endpoint returns a list of events needed to reconstruct the current state of the conversation and the agent's status. After that, it only returns events that have occurred since the last event was sent.\n\nNote: When an agent is running, the last message in the conversation history is updated frequently, and the endpoint sends a new message update event each time.",
         "operationId": "subscribeEvents",
+        "parameters": [
+          {
+            "description": "Opt in to session_sync events and incremental replay. Clients that don't opt in get the full replay and no session_sync events, as before.",
+            "explode": false,
+            "in": "query",
+            "name": "sync",
+            "schema": {
+              "description": "Opt in to session_sync events and incremental replay. Clients that don't opt in get the full replay and no session_sync events, as before.",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "With sync: epoch from the client's last session_sync. If it doesn't match, the full state is replayed.",
+            "explode": false,
+            "in": "query",
+            "name": "epoch",
+            "schema": {
+              "description": "With sync: epoch from the client's last session_sync. If it doesn't match, the full state is replayed.",
+              "type": "string"
+            }
+          },
+          {
+            "description": "With sync: highest seq the client has applied. With a matching epoch, the replay holds only later changes.",
+            "explode": false,
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "description": "With sync: highest seq the client has applied. With a matching epoch, the replay holds only later changes.",
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1605,7 +1723,7 @@
                       {
                         "properties": {
                           "data": {
-                            "$ref": "#/components/schemas/RichMessage"
+                            "$ref": "#/components/schemas/RichMessageUpdateBody"
                           },
                           "event": {
                             "const": "rich_message_update",
@@ -1626,6 +1744,32 @@
                           "event"
                         ],
                         "title": "Event rich_message_update",
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "data": {
+                            "$ref": "#/components/schemas/SessionSyncBody"
+                          },
+                          "event": {
+                            "const": "session_sync",
+                            "description": "The event name.",
+                            "type": "string"
+                          },
+                          "id": {
+                            "description": "The event ID.",
+                            "type": "integer"
+                          },
+                          "retry": {
+                            "description": "The retry time in milliseconds.",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "data",
+                          "event"
+                        ],
+                        "title": "Event session_sync",
                         "type": "object"
                       },
                       {
