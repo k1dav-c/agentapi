@@ -498,6 +498,7 @@ export default function MessageList({
               )}
               <TaskGroup
                 task={task}
+                agentType={agentType}
                 number={index + 1}
                 status={status}
                 onRetryMessage={onRetryMessage}

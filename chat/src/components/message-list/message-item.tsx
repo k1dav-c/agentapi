@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Check, Clipboard, Code2, FileText, Pencil, RefreshCw, Search, TerminalSquare, X } from "lucide-react";
+import { Check, Clipboard, Code2, FileText, Pencil, RefreshCw, Search, TerminalSquare, UserRound, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
 import { ProcessedMessage } from "../processed-message";
@@ -187,20 +187,26 @@ export function MessageItem({
   }
 
   return (
-    <article className="group scroll-mt-16" data-user-message>
-      <div className="flex items-start gap-3">
-        <div className="prompt-text min-w-0 flex-1 text-foreground">
+    <article className="group scroll-mt-16" data-user-message aria-label="Your message">
+      <div className="rounded-xl border border-prompt-border bg-prompt px-4 pb-3 pt-2.5">
+        <div className="mb-1 flex min-h-7 items-center gap-2">
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+            <UserRound aria-hidden="true" className="size-3.5 text-muted-foreground" />
+            You
+          </span>
+          {message.content && (
+            <div className="ml-auto opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+              <CopyButton content={message.content} label="task" />
+            </div>
+          )}
+        </div>
+        <div className="prompt-text min-w-0 text-foreground">
           {message.content === "" ? (
             <LoadingDots />
           ) : (
             <ProcessedMessage messageContent={message.content} isUser={isUser} searchQuery={globalSearchQuery} />
           )}
         </div>
-        {message.content && (
-          <div className="opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-            <CopyButton content={message.content} label="task" />
-          </div>
-        )}
       </div>
       {isDraft && !isFailed && <p className="mt-1 text-xs text-muted-foreground">Sending…</p>}
       {isFailed && draft && (

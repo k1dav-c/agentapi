@@ -9,6 +9,8 @@ import { taskToMarkdown } from "@/lib/task-actions";
 import { groupConsecutiveTools } from "@/lib/activity-groups";
 import { ToolCallCard, ToolCallGroup } from "./tool-call";
 import { MessageItem } from "./message-item";
+import { AgentMark } from "../agent-mark";
+import { AgentType } from "../chat-provider";
 import type { TaskSection, TaskStatus } from "@/lib/task-timeline";
 import { getTaskActivity, hasStructuredTranscript, toSearchableTask } from "@/lib/task-timeline";
 import { splitThinking } from "@/lib/thinking";
@@ -42,6 +44,7 @@ export function TaskGroup({
   isCurrentSearchResult,
   deferred = false,
   waitingForUser = false,
+  agentType = "unknown",
 }: {
   task: TaskSection;
   number: number;
@@ -59,7 +62,10 @@ export function TaskGroup({
   deferred?: boolean;
   // The agent is showing a prompt for this (the latest) task.
   waitingForUser?: boolean;
+  // Names the agent's side of the task.
+  agentType?: string;
 }) {
+  const agentName = AgentType[agentType as keyof typeof AgentType]?.displayName ?? "Agent";
   const statusMeta = waitingForUser
     ? {label: "Waiting for you", className: "text-state-needs"}
     : {
@@ -213,7 +219,14 @@ export function TaskGroup({
           onDismissMessage={onDismissMessage}
           searchQuery={searchQuery}
         />
-        <div className="mt-4 space-y-4">
+        <div className="mt-5 space-y-4">
+          {(deferred || activity.length > 0) && (
+            // The agent's turn, so it doesn't read as part of your message.
+            <div className="flex items-center gap-2 text-xs font-semibold text-foreground" data-agent-turn>
+              <AgentMark agentType={agentType} />
+              {agentName}
+            </div>
+          )}
           {deferred && (
             <p className="text-xs text-muted-foreground" role="status">
               {task.richActivity.length + task.responses.length} steps · loading…
