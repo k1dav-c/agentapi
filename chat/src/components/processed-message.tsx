@@ -192,7 +192,7 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
   }
 
   return (
-    <div className="min-w-0 text-left text-sm leading-6">
+    <div className="prose-transcript min-w-0 text-left text-[15px] leading-[1.7]">
       <ReactMarkdown
         remarkPlugins={[remarkLinkify, remarkGfm, remarkBreaks]}
         rehypePlugins={[[rehypeHighlight, {languages: common}]]}
@@ -211,19 +211,19 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
               </a>
             );
           },
-          p: ({children}) => <p className="my-2 first:mt-0 last:mb-0">{children}</p>,
+          p: ({children}) => <p className="my-2.5 first:mt-0 last:mb-0">{children}</p>,
           blockquote: ({children}) => (
-            <blockquote className="my-3 rounded-r-lg border-l-4 border-primary/70 bg-muted/60 px-4 py-2 text-foreground shadow-sm [&>p]:my-1">
+            <blockquote className="my-3 border-l-2 border-border pl-4 text-muted-foreground [&>p]:my-1">
               {children}
             </blockquote>
           ),
           ul: ({children}) => (
-            <ul className="my-3 list-outside list-disc space-y-1 pl-6 marker:text-primary">
+            <ul className="my-3 list-outside list-disc space-y-1 pl-6 marker:text-muted-foreground">
               {children}
             </ul>
           ),
           ol: ({children}) => (
-            <ol className="my-3 list-outside list-decimal space-y-1 pl-6 marker:font-semibold marker:text-primary">
+            <ol className="my-3 list-outside list-decimal space-y-1 pl-6 marker:font-mono marker:text-[0.8em] marker:text-muted-foreground">
               {children}
             </ol>
           ),
@@ -232,7 +232,7 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
           ),
           code: ({children, className}) => (
             <code
-              className={`${className ?? ""} rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.9em] font-medium text-foreground`}
+              className={`${className ?? ""} rounded-[5px] border border-border bg-muted px-1 py-px font-mono text-[0.86em] text-foreground`}
             >
               {children}
             </code>

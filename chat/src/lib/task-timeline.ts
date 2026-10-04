@@ -123,86 +123,59 @@ export function findTaskAtTime(tasks: TaskSection[], timestamp: string) {
   return match;
 }
 
-export function getTaskActivity(task: TaskSection): TaskActivity[] {
-  // When rich activity contains both text and tool entries, it preserves the
-  // actual interleaving (text → tool → text → tool) from the JSONL session
-  // log. Use it directly instead of the PTY blob + sorted tool calls, which
-  // collapses all text into one entry and clusters tools together.
-  const hasRichText = task.richActivity.some(
-    item => item.type === "message" || item.type === "thinking",
+// Whether the task has a structured transcript (text or thinking from the
+// agent's JSONL session log) rather than only parsed screen output.
+export function hasStructuredTranscript(task: TaskSection): boolean {
+  return task.richActivity.some(
+    (item) => item.type === "message" || item.type === "thinking",
   );
-  const hasRichTools = task.richActivity.some(item => item.type === "tool");
+}
 
-  if (hasRichText && hasRichTools) {
-    const coveredToolIDs = new Set(
-      task.richActivity
-        .filter((item): item is Extract<TaskActivity, {type: "tool"}> => item.type === "tool")
-        .map(item => item.toolCall.id),
-    );
-    // Start with PTY responses — they contain the full terminal output
-    // (progress indicators, agent status lines, intermediate text) that
-    // rich messages don't capture. Rich activity is appended after to
-    // provide structured interleaving of text and tool calls.
-    const result: TaskActivity[] = task.responses.map((message, index) => ({
-      type: "message" as const,
-      key: `response-${message.id ?? index}`,
-      message,
-    }));
-    // Add rich activity (interleaved text + tool blocks from JSONL)
-    for (const item of task.richActivity) {
-      result.push(item);
-    }
-    // Append any tool calls not already covered by rich activity.
-    for (const toolCall of task.toolCalls) {
-      if (!coveredToolIDs.has(toolCall.id)) {
-        result.push({
-          type: "tool" as const,
-          key: `tool-${toolCall.id}`,
-          toolCall,
-        });
-      }
-    }
-    return result;
-  }
-
-  // Fallback: PTY responses + tool calls sorted by timestamp.
-  // Used when the agent doesn't emit JSONL rich messages (no interleaving
-  // info available).
-  const result: TaskActivity[] = task.responses.map((message, index) => ({
+// The activity to show for a task, in order.
+//
+// With a structured transcript, that transcript is the content: it keeps
+// the real order of text, thinking and tools, and its Markdown renders
+// properly. The text parsed from the terminal screen repeats the same
+// answer (often cut off), so it is left out; TaskGroup offers it as
+// "Terminal output". While the task is still running (live), the latest
+// screen text is kept at the end, because the agent only writes a text
+// block to its log once the block is finished.
+//
+// Without a transcript, the screen text and the tool calls are shown in
+// time order.
+export function getTaskActivity(task: TaskSection, {live = false}: {live?: boolean} = {}): TaskActivity[] {
+  const coveredToolIDs = new Set(
+    task.richActivity
+      .filter((item): item is Extract<TaskActivity, {type: "tool"}> => item.type === "tool")
+      .map((item) => item.toolCall.id),
+  );
+  const uncoveredTools: TaskActivity[] = task.toolCalls
+    .filter((toolCall) => !coveredToolIDs.has(toolCall.id))
+    .map((toolCall) => ({type: "tool" as const, key: `tool-${toolCall.id}`, toolCall}));
+  const screenText = (message: Message | DraftMessage, index: number): TaskActivity => ({
     type: "message" as const,
     key: `response-${message.id ?? index}`,
     message,
-  }));
+  });
 
-  const coveredToolIDs = new Set(
-    task.richActivity
-      .filter((item) => item.type === "tool")
-      .map((item) => (item as Extract<TaskActivity, {type: "tool"}>).toolCall.id),
-  );
-
-  for (const item of task.richActivity) {
-    if (item.type === "tool") {
-      result.push(item);
-    }
+  if (hasStructuredTranscript(task)) {
+    const result = [...task.richActivity, ...uncoveredTools];
+    const latest = task.responses.at(-1);
+    if (live && latest) result.push(screenText(latest, task.responses.length - 1));
+    return result;
   }
 
-  for (const toolCall of task.toolCalls) {
-    if (!coveredToolIDs.has(toolCall.id)) {
-      result.push({
-        type: "tool" as const,
-        key: `tool-${toolCall.id}`,
-        toolCall,
-      });
-    }
-  }
-
+  const result: TaskActivity[] = [
+    ...task.responses.map(screenText),
+    ...task.richActivity.filter((item) => item.type === "tool"),
+    ...uncoveredTools,
+  ];
+  const timeOf = (item: TaskActivity) =>
+    item.type === "message" ? item.message.time :
+    item.type === "tool" ? item.toolCall.timestamp : item.timestamp;
   return result.sort((left, right) => {
-    const leftTime =
-      left.type === "message" ? left.message.time :
-      left.type === "tool" ? left.toolCall.timestamp : left.timestamp;
-    const rightTime =
-      right.type === "message" ? right.message.time :
-      right.type === "tool" ? right.toolCall.timestamp : right.timestamp;
+    const leftTime = timeOf(left);
+    const rightTime = timeOf(right);
     if (!leftTime) return 1;
     if (!rightTime) return -1;
     return Date.parse(leftTime) - Date.parse(rightTime);

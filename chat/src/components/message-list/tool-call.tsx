@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { ArrowDown, CheckCircle2, CircleAlert, LoaderCircle, Wrench } from "lucide-react";
+import { ArrowDown, Wrench } from "lucide-react";
 import { Button } from "../ui/button";
 import { uiCopy } from "@/lib/ui-copy";
-import { formatToolInput, getToolSummary } from "@/lib/tool-format";
+import { formatToolInput, getExitCode, getToolCommand, getToolSummary } from "@/lib/tool-format";
 import type { ToolCall } from "@/lib/task-timeline";
 import { currentPromptQuestion, parseInteractiveToolInput } from "@/lib/interactive-tool";
 import { useChat } from "../chat-provider";
@@ -58,10 +58,22 @@ export function ToolDetail({
       <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </h3>
-      <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-background p-2 font-mono text-xs leading-5">
+      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-term p-2.5 font-mono text-xs leading-[1.55] text-term-foreground">
         <HighlightedText content={content} query={searchQuery} />
       </pre>
     </section>
+  );
+}
+
+function ToolChip({children, tone}: {children: React.ReactNode; tone?: "ok" | "fault"}) {
+  return (
+    <span
+      className={`shrink-0 rounded-[4px] border px-1.5 font-mono text-[11px] leading-[18px] tabular-nums ${
+        tone === "ok" ? "border-state-ready/40 text-state-ready" : tone === "fault" ? "border-state-fault/40 text-state-fault" : "text-muted-foreground"
+      }`}
+    >
+      {children}
+    </span>
   );
 }
 
@@ -100,9 +112,20 @@ export function ToolCallCard({
     }
   }, [open, searchQuery]);
 
+  const command = getToolCommand(toolCall.name, toolCall.input);
+  const exitCode = getExitCode(toolCall.result);
+  const durationMs =
+    toolCall.resultTimestamp && toolCall.timestamp
+      ? Date.parse(toolCall.resultTimestamp) - Date.parse(toolCall.timestamp)
+      : 0;
+  const preview =
+    command && !isOpen && toolCall.result
+      ? toolCall.result.replace(/\s+$/, "").split("\n").slice(0, 4).join("\n")
+      : "";
+
   return (
     <details
-      className="group overflow-hidden rounded-lg border-l-2 border-y-0 border-r-0 bg-muted/20"
+      className="group overflow-hidden rounded-md border bg-muted/35"
       open={isOpen}
       onToggle={(event) => {
         if (open === undefined) {
@@ -112,30 +135,40 @@ export function ToolCallCard({
         }
       }}
     >
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 transition hover:bg-muted/45 [&::-webkit-details-marker]:hidden">
-        {isFailed ? (
-          <CircleAlert className="size-3.5 shrink-0 text-destructive" />
-        ) : isPending ? (
-          <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-        ) : (
-          <CheckCircle2 className="size-3.5 shrink-0 text-status-success" />
-        )}
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">
-          {toolCall.name}
-          {(() => {
-            const summary = getToolSummary(toolCall.name, toolCall.input);
-            return summary ? <span className="ml-1.5 font-normal text-muted-foreground">— {summary}</span> : null;
-          })()}
+      <summary className="block cursor-pointer list-none outline-none transition hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <span className="flex min-h-8 items-center gap-2.5 px-2.5 py-1 font-mono text-[12.5px] leading-5">
+          {isPending ? (
+            <span aria-label="Running" className="size-1.5 shrink-0 rounded-full bg-state-working motion-safe:animate-pulse" />
+          ) : null}
+          {command ? (
+            <span className="min-w-0 flex-1 truncate">
+              <span className="mr-2 text-muted-foreground" aria-hidden="true">$</span>
+              {command.split("\n")[0]}
+            </span>
+          ) : (
+            <span className="min-w-0 flex-1 truncate">
+              <span className="font-sans text-xs font-semibold">{toolCall.name}</span>
+              {(() => {
+                const summary = getToolSummary(toolCall.name, toolCall.input);
+                return summary ? <span className="ml-2 text-muted-foreground">{summary}</span> : null;
+              })()}
+            </span>
+          )}
+          {exitCode !== undefined ? (
+            <ToolChip tone={exitCode === 0 ? "ok" : "fault"}>exit {exitCode}</ToolChip>
+          ) : isFailed ? (
+            <ToolChip tone="fault">error</ToolChip>
+          ) : null}
+          {durationMs > 0 && <ToolChip>{formatDuration(durationMs)}</ToolChip>}
+          <ArrowDown className="size-3 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
         </span>
-        {toolCall.resultTimestamp && toolCall.timestamp && (() => {
-          const ms = Date.parse(toolCall.resultTimestamp) - Date.parse(toolCall.timestamp);
-          return ms > 0 ? (
-            <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground">{formatDuration(ms)}</span>
-          ) : null;
-        })()}
-        <ArrowDown className="size-3 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+        {preview && (
+          <pre className="max-h-[5.5rem] overflow-hidden whitespace-pre-wrap break-words bg-term px-3 py-2 font-mono text-xs leading-[1.55] text-term-foreground [overflow-wrap:anywhere]">
+            {preview}
+          </pre>
+        )}
       </summary>
-      <div className="space-y-3 border-t bg-muted/20 px-3 py-3">
+      <div className="space-y-3 border-t px-3 py-3">
         {interactiveInput && interactiveInput.questions.length > 0 ? (
           interactiveInput.questions.map((q, qi) => (
             <div key={qi} className={`space-y-2 ${qi === activeQuestion ? "" : "opacity-60"}`}>
@@ -223,8 +256,8 @@ export function ToolCallGroup({
   }, [searchQuery, toolCalls]);
 
   return (
-    <section className="overflow-hidden rounded-xl border bg-muted/10">
-      <header className="flex items-center justify-between gap-2 border-b bg-muted/25 px-3 py-1">
+    <section className="space-y-1.5">
+      <header className="flex items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium">
           <Wrench className="size-3 shrink-0 text-muted-foreground" />
           <span>{uiCopy.tools.groupLabel(toolCalls.length)}</span>
@@ -244,7 +277,7 @@ export function ToolCallGroup({
           {allOpen ? uiCopy.tools.collapseAll : uiCopy.tools.expandAll}
         </Button>
       </header>
-      <div className="space-y-1 p-1">
+      <div className="space-y-1.5">
         {toolCalls.map((toolCall) => (
           <ToolCallCard
             key={toolCall.id}

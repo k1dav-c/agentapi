@@ -13,14 +13,11 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Download,
-  LoaderCircle,
   Search,
-  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { Button } from "./ui/button";
-import {useChat, AgentType} from "./chat-provider";
+import {AgentType} from "./chat-provider";
 import type {
   DraftMessage,
   Message,
@@ -29,14 +26,6 @@ import type {
 } from "./chat-provider";
 import {taskMatchesQuery} from "@/lib/task-actions";
 import {uiCopy} from "@/lib/ui-copy";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
 import {contentFingerprint} from "@/lib/content-fingerprint";
 import {formatDateLabel} from "@/lib/format-time";
 import {getPreviousUserMessageTop, getNextUserMessageTop} from "@/lib/scroll-anchors";
@@ -50,9 +39,11 @@ import {
   toSearchableTask,
   countTaskMatches,
 } from "@/lib/task-timeline";
-import {MessageItem} from "./message-list/message-item";
+import {createPortal} from "react-dom";
+import {HEADER_ACTIONS_ID} from "@/app/header";
+import {useChat} from "./chat-provider";
 import {TaskGroup} from "./message-list/task-group";
-import {EmptyState} from "./message-list/empty-state";
+import {EmptyState, StartupScreen} from "./message-list/empty-state";
 
 // How many recent tasks to show before collapsing older ones behind a
 // "Show N older tasks" button. Keeps the initial render lightweight for
@@ -65,7 +56,6 @@ interface MessageListProps {
   richMessages: RichMessage[];
   serverStatus: ServerStatus;
   agentType: AgentType;
-  onSelectPrompt?: (prompt: string) => void;
   onRetryMessage: (clientId: string) => Promise<boolean>;
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
@@ -79,7 +69,6 @@ export default function MessageList({
   richMessages,
   serverStatus,
   agentType,
-  onSelectPrompt,
   onRetryMessage,
   onEditMessage,
   onDismissMessage,
@@ -87,7 +76,6 @@ export default function MessageList({
   onSendRaw,
   headerAction,
 }: MessageListProps) {
-  const {downloadSession} = useChat();
   const [scrollArea, setScrollArea] = useState<HTMLDivElement | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -98,6 +86,12 @@ export default function MessageList({
   const [taskQuery, setTaskQuery] = useState("");
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [currentSearchResult, setCurrentSearchResult] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const {terminalPrompt} = useChat();
+  // The page's actions render into the header's slot (one top bar); the
+  // embed page has no header, so they get their own row there.
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => setHeaderSlot(document.getElementById(HEADER_ACTIONS_ID)), []);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const isAtBottomRef = useRef(true);
   const lastScrollHeightRef = useRef(0);
@@ -172,13 +166,6 @@ export default function MessageList({
 
     return {prelude, tasks};
   }, [messages, richMessages, toolCalls]);
-  const [downloadingConversation, setDownloadingConversation] = useState(false);
-  const exportConversation = () => {
-    setDownloadingConversation(true);
-    void downloadSession()
-      .catch(() => {})
-      .finally(() => setDownloadingConversation(false));
-  };
   const filteredTasks = useMemo(
     () =>
       timeline.tasks
@@ -213,6 +200,25 @@ export default function MessageList({
       : 0;
   const visibleTasks =
     hiddenTaskCount > 0 ? filteredTasks.slice(hiddenTaskCount) : filteredTasks;
+
+  // A reload lands at the latest task, so only that one renders right away.
+  // Older tasks show their prompt and fill in one at a time while the browser
+  // is idle, newest first: rendering every step of several long tasks at once
+  // froze slower devices for seconds. Search and filters render everything.
+  const [renderedTaskKeys, setRenderedTaskKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const olderTaskKeys = visibleTasks.slice(0, -1).map(({task}) => task.key).join("\n");
+  useEffect(() => {
+    if (filtersActive || olderTaskKeys === "") return;
+    const next = olderTaskKeys.split("\n").reverse().find((key) => !renderedTaskKeys.has(key));
+    if (next === undefined) return;
+    const render = () => setRenderedTaskKeys((previous) => new Set(previous).add(next));
+    if (typeof window.requestIdleCallback === "function") {
+      const handle = window.requestIdleCallback(render, {timeout: 500});
+      return () => window.cancelIdleCallback(handle);
+    }
+    const handle = window.setTimeout(render, 50);
+    return () => window.clearTimeout(handle);
+  }, [filtersActive, olderTaskKeys, renderedTaskKeys]);
   const contentSignature = useMemo(
     () =>
       [
@@ -250,13 +256,17 @@ export default function MessageList({
     const handleGlobalSearchShortcut = (event: globalThis.KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
+        setSearchOpen(true);
+        window.requestAnimationFrame(() => {
+          searchInputRef.current?.focus();
+          searchInputRef.current?.select();
+        });
       } else if (
         event.key === "Escape" &&
         document.activeElement === searchInputRef.current
       ) {
         setTaskQuery("");
+        setSearchOpen(false);
         searchInputRef.current?.blur();
       }
     };
@@ -291,12 +301,18 @@ export default function MessageList({
 
   useEffect(() => {
     if (!scrollArea) return;
+    let lastScrollTop = scrollArea.scrollTop;
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = scrollArea;
       const atBottom = scrollTop + clientHeight >= scrollHeight - 32;
-      isAtBottomRef.current = atBottom;
-      setShowScrollButton(!atBottom);
-      if (atBottom) setUnreadCount(0);
+      // Only scrolling up leaves the bottom. The view can also end up above
+      // the bottom when the area shrinks (the dock or composer grows); that
+      // must not unpin it.
+      if (atBottom) isAtBottomRef.current = true;
+      else if (scrollTop < lastScrollTop - 2) isAtBottomRef.current = false;
+      lastScrollTop = scrollTop;
+      setShowScrollButton(!isAtBottomRef.current);
+      if (isAtBottomRef.current) setUnreadCount(0);
       setCanScrollToPreviousUser(getPreviousUserMessageTop(scrollArea) !== undefined);
       setCanScrollToNextUser(getNextUserMessageTop(scrollArea) !== undefined);
     };
@@ -304,6 +320,22 @@ export default function MessageList({
     scrollArea.addEventListener("scroll", handleScroll, { passive: true });
     return () => scrollArea.removeEventListener("scroll", handleScroll);
   }, [scrollArea, userMessageCount]);
+
+  const isEmpty = timeline.tasks.length === 0;
+  // Stay pinned to the bottom while content grows anywhere (older tasks
+  // rendering progressively, a thinking note expanding) if the reader is
+  // already there.
+  useEffect(() => {
+    if (!scrollArea) return;
+    const content = scrollArea.firstElementChild;
+    if (!content) return;
+    const observer = new ResizeObserver(() => {
+      if (isAtBottomRef.current) scrollArea.scrollTop = scrollArea.scrollHeight;
+    });
+    observer.observe(scrollArea);
+    for (const child of Array.from(scrollArea.children)) observer.observe(child);
+    return () => observer.disconnect();
+  }, [scrollArea, isEmpty, searchOpen, filtersActive]);
 
   useLayoutEffect(() => {
     if (!scrollArea) return;
@@ -322,27 +354,44 @@ export default function MessageList({
     lastScrollHeightRef.current = currentHeight;
   }, [contentSignature, messages, scrollArea, scrollToBottom, serverStatus]);
 
+  const actions = (
+    <>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="size-8 rounded-full text-muted-foreground"
+        title="Search tasks (⌘F)"
+        aria-label="Search tasks"
+        aria-expanded={searchOpen}
+        onClick={() => setSearchOpen((open) => !open)}
+      >
+        <Search className="size-4" />
+      </Button>
+      {headerAction}
+    </>
+  );
+
   return (
     <div className="relative min-h-0 flex-1">
+      {headerSlot ? (
+        createPortal(actions, headerSlot)
+      ) : (
+        <div className="flex items-center justify-end gap-0.5 border-b px-2 py-1">{actions}</div>
+      )}
       <div
         className="h-full overflow-y-auto overscroll-contain"
         ref={setScrollArea}
       >
-        {timeline.prelude.length === 0 && timeline.tasks.length === 0 ? (
-          <EmptyState
-            serverStatus={serverStatus}
-            agentType={agentType}
-            onSelectPrompt={onSelectPrompt}
-          />
-        ) : (
-          <>
-          <div className="sticky top-0 z-10 border-b bg-background/90 px-3 py-1 backdrop-blur-xl sm:px-6 sm:py-2">
-            <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-1.5 sm:gap-2">
-              <label className="flex min-h-8 min-w-48 flex-1 items-center gap-2 rounded-lg border bg-background px-3 text-xs sm:min-h-9">
+        {(searchOpen || filtersActive) && (
+          <div className="sticky top-0 z-10 border-b bg-background/95 px-3 py-1.5 backdrop-blur-xl sm:px-6">
+            <div className="mx-auto flex w-full max-w-[72rem] flex-wrap items-center gap-1.5 sm:gap-2">
+              <label className="flex min-h-8 min-w-48 flex-1 items-center gap-2 rounded-md border bg-card px-2.5 text-xs">
                 <Search className="size-3.5 text-muted-foreground" />
                 <span className="sr-only">Search all tasks</span>
                 <input
                   ref={searchInputRef}
+                  autoFocus
                   type="search"
                   value={taskQuery}
                   onChange={(event) => setTaskQuery(event.target.value)}
@@ -355,153 +404,77 @@ export default function MessageList({
                     }
                   }}
                 />
-                {taskQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setTaskQuery("")}
-                    aria-label="Clear task search"
-                    className="grid size-7 place-items-center rounded-md outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                )}
               </label>
-              <label className="hidden sm:block">
+              <label>
                 <span className="sr-only">Filter tasks</span>
                 <select
                   value={taskFilter}
-                  onChange={(event) =>
-                    setTaskFilter(event.target.value as TaskFilter)
-                  }
-                  className="min-h-9 rounded-lg border bg-background px-3 text-xs outline-none focus:ring-2 focus:ring-ring"
+                  onChange={(event) => setTaskFilter(event.target.value as TaskFilter)}
+                  className="min-h-8 rounded-md border bg-card px-2 text-xs outline-none focus:ring-2 focus:ring-ring"
                 >
-                  <option value="all">All tasks</option>
-                  <option value="running">Running</option>
-                  <option value="queued">Queued</option>
-                  <option value="failed">Failed</option>
-                  <option value="completed">Completed</option>
-                  <option value="tool-error">Tool errors</option>
+                  <option value="all">{uiCopy.taskToolbar.all}</option>
+                  <option value="running">{uiCopy.taskToolbar.running}</option>
+                  <option value="queued">{uiCopy.taskToolbar.queued}</option>
+                  <option value="failed">{uiCopy.taskToolbar.failed}</option>
+                  <option value="completed">{uiCopy.taskToolbar.completed}</option>
+                  <option value="tool-error">{uiCopy.taskToolbar.toolErrors}</option>
                 </select>
               </label>
-              <span className="hidden text-xs text-muted-foreground sm:inline" role="status">
+              <span className="text-xs tabular-nums text-muted-foreground" role="status">
                 {taskQuery
                   ? `${filteredTasks.length} tasks · ${totalMatchCount} matches`
                   : `${filteredTasks.length} of ${timeline.tasks.length}`}
               </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="hidden h-9 shrink-0 sm:inline-flex"
-                onClick={exportConversation}
-                disabled={downloadingConversation}
-                title="Download the session timeline as JSONL"
-              >
-                {downloadingConversation ? (
-                  <LoaderCircle className="animate-spin" />
-                ) : (
-                  <Download />
-                )}
-                <span className="hidden sm:inline">Conversation JSONL</span>
-                <span className="sr-only sm:hidden">Download conversation JSONL</span>
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="outline"
-                    className="size-9 shrink-0 sm:hidden"
-                    title={uiCopy.taskToolbar.title}
-                  >
-                    <SlidersHorizontal />
-                    <span className="sr-only">
-                      Open {uiCopy.taskToolbar.title.toLowerCase()}
-                    </span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52">
-                  <DropdownMenuLabel>
-                    {taskQuery
-                      ? `${filteredTasks.length} tasks · ${totalMatchCount} matches`
-                      : `${filteredTasks.length} of ${timeline.tasks.length} tasks`}
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {(
-                    [
-                      ["all", uiCopy.taskToolbar.all],
-                      ["running", uiCopy.taskToolbar.running],
-                      ["queued", uiCopy.taskToolbar.queued],
-                      ["failed", uiCopy.taskToolbar.failed],
-                      ["completed", uiCopy.taskToolbar.completed],
-                      ["tool-error", uiCopy.taskToolbar.toolErrors],
-                    ] as const
-                  ).map(([value, label]) => (
-                    <DropdownMenuItem
-                      key={value}
-                      onSelect={() => setTaskFilter(value)}
-                    >
-                      {label}
-                    </DropdownMenuItem>
-                  ))}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onSelect={exportConversation}
-                    disabled={downloadingConversation}
-                  >
-                    <Download />
-                    {uiCopy.taskToolbar.download}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              {headerAction}
               {taskQuery && filteredTasks.length > 0 && (
-                <div className="flex overflow-hidden rounded-md border bg-background">
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="size-8 rounded-none"
-                    onClick={() => navigateSearchResults(-1)}
-                    title="Previous matching task"
-                  >
+                <div className="flex overflow-hidden rounded-md border bg-card">
+                  <Button type="button" size="icon" variant="ghost" className="size-8 rounded-none" onClick={() => navigateSearchResults(-1)} title="Previous matching task">
                     <ArrowLeft />
                     <span className="sr-only">Previous matching task</span>
                   </Button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="size-8 rounded-none border-l"
-                    onClick={() => navigateSearchResults(1)}
-                    title="Next matching task"
-                  >
+                  <Button type="button" size="icon" variant="ghost" className="size-8 rounded-none border-l" onClick={() => navigateSearchResults(1)} title="Next matching task">
                     <ArrowRight />
                     <span className="sr-only">Next matching task</span>
                   </Button>
                 </div>
               )}
-            </div>
-          </div>
-          <div className="mx-auto flex w-full max-w-5xl flex-col gap-7 px-3 py-6 sm:px-6 sm:py-10">
-            {timeline.prelude.map((message, index) => (
-              <MessageItem key={`prelude-${message.id ?? index}`} message={message} onSendRaw={onSendRaw} />
-            ))}
-            {hiddenTaskCount > 0 && (
               <Button
                 type="button"
-                variant="outline"
-                onClick={() => setShowAllTasks(true)}
-                className="mx-auto rounded-full"
+                size="icon"
+                variant="ghost"
+                className="size-8"
+                onClick={() => {
+                  setTaskQuery("");
+                  setTaskFilter("all");
+                  setSearchOpen(false);
+                }}
+                title="Close search"
               >
-                Show {hiddenTaskCount} older{" "}
-                {hiddenTaskCount === 1 ? "task" : "tasks"}
+                <X />
+                <span className="sr-only">Close search</span>
               </Button>
-            )}
-            {visibleTasks.length === 0 && (
-              <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-                No tasks match the current search and filter.
+            </div>
+          </div>
+        )}
+        {timeline.tasks.length === 0 ? (
+          <EmptyState
+            serverStatus={serverStatus}
+            agentType={agentType}
+            startup={timeline.prelude}
+          />
+        ) : (
+          <div className="mx-auto w-full max-w-[72rem] px-4 pb-10 pt-3 sm:px-6">
+            {timeline.prelude.length > 0 && <StartupScreen messages={timeline.prelude} />}
+            {hiddenTaskCount > 0 && (
+              <div className="py-4 sm:pl-[4.75rem]">
+                <Button type="button" variant="outline" size="sm" onClick={() => setShowAllTasks(true)} className="h-8 rounded-full text-xs">
+                  Show {hiddenTaskCount} older {hiddenTaskCount === 1 ? "task" : "tasks"}
+                </Button>
               </div>
+            )}
+            {visibleTasks.length === 0 && filtersActive && (
+              <p className="py-10 text-center text-sm text-muted-foreground">
+                No tasks match the current search and filter.
+              </p>
             )}
             {visibleTasks.map(({task, index, status}, visibleIndex) => {
               const searchResultIndex = filteredTasks.findIndex(
@@ -515,13 +488,12 @@ export default function MessageList({
                 !prevDate ||
                 new Date(currentDate).toDateString() !== new Date(prevDate).toDateString()
               );
+              const isLatest = index === timeline.tasks.length - 1;
               return (
               <React.Fragment key={task.key}>
               {showDateSep && (
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  <div className="h-px flex-1 bg-border" />
-                  <span>{formatDateLabel(currentDate)}</span>
-                  <div className="h-px flex-1 bg-border" />
+                <div className="date-label pt-5 font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground sm:pl-[4.75rem]">
+                  {formatDateLabel(currentDate)}
                 </div>
               )}
               <TaskGroup
@@ -539,12 +511,17 @@ export default function MessageList({
                   Boolean(taskQuery) &&
                   searchResultIndex === currentSearchResult
                 }
+                deferred={
+                  !filtersActive &&
+                  visibleIndex < visibleTasks.length - 1 &&
+                  !renderedTaskKeys.has(task.key)
+                }
+                waitingForUser={isLatest && Boolean(terminalPrompt)}
               />
               </React.Fragment>
               );
             })}
           </div>
-          </>
         )}
       </div>
 

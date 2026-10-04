@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import type { RichMessage, ServerStatus } from "@/components/chat-provider";
-import { CircleAlert, CircleCheck, LoaderCircle, WifiOff } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleDot, LoaderCircle, WifiOff } from "lucide-react";
 
 export interface TokenTotals {
   input: number;
@@ -32,61 +32,47 @@ export function computeTokenTotals(richMessages: RichMessage[]): TokenTotals {
   return totals;
 }
 
+// What the agent is doing, from the user's point of view. "needs-you" wins
+// over the activity status: an agent waiting on a dialog looks stable, but
+// nothing (queued tasks included) moves until someone answers it.
+export type AgentStateKind = "working" | "needs-you" | "ready" | "offline" | "reconnecting" | "connecting";
+
 export interface StatusMeta {
+  kind: AgentStateKind;
   label: string;
   detail: string;
   icon: ComponentType<{ className?: string }>;
+  // Text color class for the state (see --state-* tokens in globals.css).
   className: string;
+}
+
+const STATE_META: Record<AgentStateKind, Omit<StatusMeta, "kind">> = {
+  working: { label: "Working", detail: "Agent is working", icon: LoaderCircle, className: "text-state-working" },
+  "needs-you": { label: "Needs you", detail: "Agent is waiting for your answer", icon: CircleDot, className: "text-state-needs" },
+  ready: { label: "Ready", detail: "Agent is ready", icon: CircleCheck, className: "text-state-ready" },
+  offline: { label: "Offline", detail: "Network connection lost", icon: WifiOff, className: "text-state-fault" },
+  reconnecting: { label: "Reconnecting", detail: "Reconnecting to the agent server", icon: LoaderCircle, className: "text-muted-foreground" },
+  connecting: { label: "Connecting", detail: "Waiting for agent status", icon: CircleAlert, className: "text-muted-foreground" },
+};
+
+export function getAgentState(
+  serverStatus: ServerStatus,
+  connectionStatus: string,
+  terminalPrompt = "",
+): AgentStateKind {
+  if (connectionStatus === "offline" || serverStatus === "offline") return "offline";
+  if (connectionStatus === "reconnecting") return "reconnecting";
+  if (terminalPrompt) return "needs-you";
+  if (serverStatus === "running") return "working";
+  if (serverStatus === "stable") return "ready";
+  return "connecting";
 }
 
 export function getStatusMeta(
   serverStatus: ServerStatus,
   connectionStatus: string,
+  terminalPrompt = "",
 ): StatusMeta {
-  const agentStatus: Record<ServerStatus, StatusMeta> = {
-    stable: {
-      label: "Ready",
-      detail: "Agent is ready",
-      icon: CircleCheck,
-      className: "text-status-success",
-    },
-    running: {
-      label: "Working",
-      detail: "Agent is processing",
-      icon: LoaderCircle,
-      className: "text-status-warning",
-    },
-    offline: {
-      label: "Offline",
-      detail: "Reconnecting to server",
-      icon: WifiOff,
-      className: "text-destructive",
-    },
-    unknown: {
-      label: "Connecting",
-      detail: "Waiting for agent status",
-      icon: CircleAlert,
-      className: "text-muted-foreground",
-    },
-  };
-
-  if (connectionStatus === "offline") {
-    return {
-      label: "Offline",
-      detail: "Network connection lost",
-      icon: WifiOff,
-      className: "text-destructive",
-    };
-  }
-
-  if (connectionStatus === "reconnecting") {
-    return {
-      label: "Reconnecting",
-      detail: "Reconnecting to agent server",
-      icon: LoaderCircle,
-      className: "text-status-warning",
-    };
-  }
-
-  return agentStatus[serverStatus];
+  const kind = getAgentState(serverStatus, connectionStatus, terminalPrompt);
+  return { kind, ...STATE_META[kind] };
 }

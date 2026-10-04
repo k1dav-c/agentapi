@@ -16,7 +16,8 @@ import (
 //   - response_item/function_call and function_call_output for tool calls
 //   - response_item/custom_tool_call and custom_tool_call_output for
 //     freeform tools (e.g. the exec tool)
-//   - response_item/reasoning for thinking (content is encrypted)
+//   - response_item/reasoning for thinking: the raw reasoning is encrypted,
+//     but a readable summary is logged for substantial reasoning
 //   - event_msg/token_count for usage info
 //   - Turns are bounded by event_msg/task_started and task_complete
 //
@@ -60,6 +61,7 @@ type codexPayload struct {
 	Status  string          `json:"status"`    // optional tool lifecycle status
 	Error   json.RawMessage `json:"error"`     // optional structured tool error
 	Info    *codexTokenInfo `json:"info"`      // token_count info
+	Summary json.RawMessage `json:"summary"`   // reasoning summary blocks
 }
 
 type codexTokenInfo struct {
@@ -294,12 +296,40 @@ func codexToolResultStatus(payload *codexPayload) (string, bool) {
 func (p *CodexParser) handleReasoning(payload *codexPayload, timestamp string) []RichMessage {
 	p.ensureCurrentTurn(payload.ID, timestamp)
 
-	// Codex reasoning content is encrypted, so we just record its existence
+	// The raw reasoning is only logged encrypted. What can be shown is the
+	// summary Codex writes for substantial reasoning (the "thinking" headings
+	// in its TUI) and raw reasoning text, which some models expose. A record
+	// with neither has nothing readable, so it adds no block.
+	thinking := strings.TrimSpace(strings.Join(append(
+		codexReasoningTexts(payload.Summary, "summary_text"),
+		codexReasoningTexts(payload.Content, "reasoning_text")...), "\n\n"))
+	if thinking == "" {
+		return p.turnSnapshot()
+	}
 	p.currentTurn.Content = append(p.currentTurn.Content, RichContentBlock{
 		Type:     "thinking",
-		Thinking: "(encrypted)",
+		Thinking: thinking,
 	})
 	return p.turnSnapshot()
+}
+
+// codexReasoningTexts returns the text of the blocks of the given type in a
+// reasoning record's summary or content array.
+func codexReasoningTexts(raw json.RawMessage, blockType string) []string {
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &blocks) != nil {
+		return nil
+	}
+	var texts []string
+	for _, block := range blocks {
+		if block.Type == blockType && strings.TrimSpace(block.Text) != "" {
+			texts = append(texts, strings.TrimSpace(block.Text))
+		}
+	}
+	return texts
 }
 
 // ensureCurrentTurn creates a new assistant turn if none exists.

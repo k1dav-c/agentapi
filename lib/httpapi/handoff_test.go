@@ -345,3 +345,38 @@ func TestFormatMessageClearsCodexComposer(t *testing.T) {
 	require.Len(t, reply, 4)
 	require.Equal(t, "note", reply[2].String())
 }
+
+func TestScreenTail(t *testing.T) {
+	naive := func(screen string, n int) string {
+		lines := strings.Split(strings.TrimRight(screen, " \t\r\n"), "\n")
+		if len(lines) > n {
+			lines = lines[len(lines)-n:]
+		}
+		return strings.Join(lines, "\n")
+	}
+	for _, screen := range []string{"", "one", "a\nb\nc", "a\nb\nc\n\n  \n", "\n\na\n", strings.Repeat("x\n", 100) + "end  \n \n"} {
+		for _, n := range []int{1, 2, 3, 40, 200} {
+			require.Equal(t, naive(screen, n), screenTail(screen, n), "screen %q n %d", screen, n)
+		}
+	}
+}
+
+// Detection only looks at the bottom of the screen, so a fixture must be
+// classified the same when it sits under a long transcript and above the
+// blank padding of AgentAPI's 1000-row terminal.
+func TestTerminalQuestionScreenOnFullHeightScreen(t *testing.T) {
+	above := strings.Repeat("● earlier output in the transcript\n", 900)
+	padding := strings.Repeat(strings.Repeat(" ", 80)+"\n", 200)
+	entries, err := os.ReadDir("testdata")
+	require.NoError(t, err)
+	for _, entry := range entries {
+		agent := mf.AgentTypeClaude
+		if strings.HasPrefix(entry.Name(), "codex_") {
+			agent = mf.AgentTypeCodex
+		}
+		screen := readScreenFixture(t, entry.Name())
+		full := above + screen + "\n" + padding
+		require.Equal(t, isTerminalQuestionScreen(agent, screen), isTerminalQuestionScreen(agent, full), entry.Name())
+		require.Equal(t, isCodexUpdatePrompt(screen), isCodexUpdatePrompt(full), entry.Name())
+	}
+}

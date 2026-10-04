@@ -95,6 +95,50 @@ func TestWatcherSwitchesSessionFiles(t *testing.T) {
 	}
 }
 
+// Claude Code may advertise a session id whose JSONL is never written (e.g.
+// the user runs /clear before the first message). The watcher must follow
+// the resolver to the new session instead of waiting for the old file.
+func TestWatcherFollowsSessionThatIsNeverCreated(t *testing.T) {
+	tmpDir := t.TempDir()
+	missingPath := filepath.Join(tmpDir, "never-created.jsonl")
+	activePath := filepath.Join(tmpDir, "active.jsonl")
+	line := `{"type":"assistant","uuid":"a1","timestamp":"2026-10-03T00:00:00Z","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn"}}` + "\n"
+	if err := os.WriteFile(activePath, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := &switchingResolver{path: missingPath}
+	var mu sync.Mutex
+	var messages []RichMessage
+	w := New(Config{
+		Resolver: resolver,
+		Parser:   NewClaudeParser(),
+		OnMessage: func(message RichMessage) {
+			mu.Lock()
+			defer mu.Unlock()
+			messages = append(messages, message)
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Start(ctx)
+
+	time.Sleep(2 * sessionPollInterval)
+	resolver.setPath(activePath)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(messages)
+		mu.Unlock()
+		if n > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("watcher never switched away from the session file that was never created")
+}
+
 func TestClaudeParser_ContentBlocks(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -417,6 +461,8 @@ func TestEncodeCWD(t *testing.T) {
 		{"/home/k1dave6412", "-home-k1dave6412"},
 		{"/", "-"},
 		{"/home/user/projects/myapp", "-home-user-projects-myapp"},
+		{"/home/k1dave6412/.cache/rich-proj", "-home-k1dave6412--cache-rich-proj"},
+		{"/home/user/cpt_sft baseline", "-home-user-cpt-sft-baseline"},
 	}
 
 	for _, tt := range tests {

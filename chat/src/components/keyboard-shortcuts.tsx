@@ -18,8 +18,9 @@ const shortcuts = [
     section: "General",
     items: [
       { keys: ["⌘", "F"], label: "Search tasks" },
+      { keys: ["⌘", "K"], label: "Open the Explorer" },
+      { keys: ["1", "–", "9"], label: "Answer the agent's question" },
       { keys: ["?"], label: "Show shortcuts" },
-      { keys: ["Alt", "↑"], label: "Show sub-agents" },
     ],
   },
   {
@@ -31,13 +32,12 @@ const shortcuts = [
     ],
   },
   {
-    section: "Terminal Mode",
+    section: "TTY mode (terminal button in the header)",
     items: [
-      { keys: ["Alt", "↑"], label: "Send Alt+Up to agent" },
-      { keys: ["Ctrl", "C"], label: "Interrupt" },
-      { keys: ["Ctrl", "D"], label: "Send EOF" },
-      { keys: ["Ctrl", "Z"], label: "Suspend" },
-      { keys: ["Ctrl", "L"], label: "Clear screen" },
+      { keys: ["Any key"], label: "Sent straight to the agent" },
+      { keys: ["Ctrl", "C"], label: "Interrupt (also on the key bar)" },
+      { keys: ["Ctrl", "D"], label: "End of input (key bar: press twice)" },
+      { keys: ["Esc"], label: "Cancel or go back in the agent" },
     ],
   },
 ];

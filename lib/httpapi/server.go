@@ -37,10 +37,6 @@ import (
 )
 
 const (
-	// agentPollInterval is how often sub-agent session files are checked
-	// for changes.
-	agentPollInterval = time.Second
-
 	// messageQueueDispatchInterval is how often the queue dispatch loop
 	// checks whether the head of the queue can be sent to the agent.
 	messageQueueDispatchInterval = 500 * time.Millisecond
@@ -95,6 +91,9 @@ type Server struct {
 	terminalQuestionScreen string
 	terminalQuestionResult bool
 	terminalQuestionValid  bool
+
+	// When the Codex update dialog was last dismissed. Guarded by s.mu.
+	codexUpdateDismissedAt time.Time
 }
 
 func (s *Server) NormalizeSchema(schema any) any {
@@ -550,7 +549,6 @@ func (s *Server) startJSONLWatcher(pid int) {
 	var resolver jsonlwatcher.SessionResolver
 	var parser jsonlwatcher.LineParser
 	var sessionEventParser jsonlwatcher.SessionEventParser
-	var agentTracker *jsonlwatcher.CodexAgentTracker
 
 	switch s.agentType {
 	case mf.AgentTypeClaude:
@@ -558,13 +556,11 @@ func (s *Server) startJSONLWatcher(pid int) {
 		parser = jsonlwatcher.NewClaudeParser()
 		sessionEventParser = jsonlwatcher.NewClaudeSessionEventParser()
 	case mf.AgentTypeCodex:
-		codexResolver := &jsonlwatcher.CodexResolver{
+		resolver = &jsonlwatcher.CodexResolver{
 			PID:       pid,
 			CWD:       s.cwd,
 			NotBefore: time.Now(),
 		}
-		resolver = codexResolver
-		agentTracker = jsonlwatcher.NewCodexAgentTracker(codexResolver)
 		parser = jsonlwatcher.NewCodexParser()
 		sessionEventParser = jsonlwatcher.NewCodexSessionEventParser()
 	}
@@ -593,13 +589,6 @@ func (s *Server) startJSONLWatcher(pid int) {
 		},
 	})
 	go w.Start(watchCtx)
-
-	if agentTracker != nil {
-		// Drop the previous run's sub-agents; the tracker only reports
-		// changes relative to an empty list.
-		s.emitter.EmitAgents(nil)
-		go agentTracker.Run(watchCtx, agentPollInterval, s.emitter.EmitAgents)
-	}
 }
 
 // sseMiddleware creates middleware that prevents proxy buffering for SSE endpoints
@@ -642,10 +631,6 @@ func (s *Server) registerRoutes() {
 			"Each message contains structured content blocks (text, thinking, tool_use, tool_result), " +
 			"model information, and token usage data. Only available for agent types with session log " +
 			"support (currently 'claude' and 'codex') running via PTY transport."
-	})
-
-	huma.Get(s.api, "/agents", s.getAgents, func(o *huma.Operation) {
-		o.Description = "Returns the sub-agents spawned during the current agent session with their status and current activity. Currently populated for Codex."
 	})
 
 	huma.Get(s.api, "/timeline", s.getTimeline, func(o *huma.Operation) {
@@ -730,8 +715,8 @@ func (s *Server) registerRoutes() {
 		"status_change":       StatusChangeBody{},
 		"agent_error":         ErrorBody{},
 		"rich_message_update": RichMessageUpdateBody{},
-		"agents_update":       AgentsUpdateBody{},
 		"heartbeat":           HeartbeatBody{},
+		"session_sync":        SessionSyncBody{},
 	}, s.subscribeEvents)
 
 	sse.Register(s.api, huma.Operation{
@@ -766,6 +751,7 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 	resp.Body.AgentType = s.agentType
 	resp.Body.Transport = s.transport
 	resp.Body.Version = snapshot.Version
+	resp.Body.TerminalPrompt = snapshot.TerminalPrompt
 
 	return resp, nil
 }
@@ -842,12 +828,6 @@ func (s *Server) getRichMessages(ctx context.Context, input *struct{}) (*RichMes
 	if resp.Body.Messages == nil {
 		resp.Body.Messages = []jsonlwatcher.RichMessage{}
 	}
-	return resp, nil
-}
-
-func (s *Server) getAgents(ctx context.Context, input *struct{}) (*AgentsResponse, error) {
-	resp := &AgentsResponse{}
-	resp.Body.Agents = s.emitter.Agents()
 	return resp, nil
 }
 
@@ -982,6 +962,7 @@ func (s *Server) enqueueMessageLocked(content string) {
 // Polling is immune to both.
 func (s *Server) startMessageQueue() {
 	s.clock.TickerFunc(s.shutdownCtx, messageQueueDispatchInterval, func() error {
+		s.dismissCodexUpdatePrompt()
 		s.dispatchNextQueuedMessage()
 		return nil
 	}, "messageQueueDispatch")
@@ -1082,13 +1063,28 @@ func (s *Server) uploadFiles(ctx context.Context, input *struct {
 }
 
 // subscribeEvents is an SSE endpoint that sends events to the client
-func (s *Server) subscribeEvents(ctx context.Context, input *struct{}, send sse.Sender) {
-	subscriberId, ch, stateEvents := s.emitter.Subscribe()
+// SubscribeEventsInput lets a client that cached the conversation resume
+// from where it left off.
+type SubscribeEventsInput struct {
+	Sync  bool   `query:"sync" doc:"Opt in to session_sync events and incremental replay. Clients that don't opt in get the full replay and no session_sync events, as before."`
+	Since uint64 `query:"since" doc:"With sync: highest seq the client has applied. With a matching epoch, the replay holds only later changes."`
+	Epoch string `query:"epoch" doc:"With sync: epoch from the client's last session_sync. If it doesn't match, the full state is replayed."`
+}
+
+func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInput, send sse.Sender) {
+	// session_sync is opt-in: existing clients (e.g. agentapi-sdk-go) reject
+	// event types they don't know.
+	sync := input.Sync
+	since, epoch := input.Since, input.Epoch
+	if !sync {
+		since, epoch = 0, ""
+	}
+	subscriberId, ch, stateEvents := s.emitter.SubscribeSince(since, epoch)
 	defer s.emitter.Unsubscribe(subscriberId)
 
 	s.logger.Info("New subscriber", "subscriberId", subscriberId)
 	for _, event := range stateEvents {
-		if event.Type == EventTypeScreenUpdate {
+		if event.Type == EventTypeScreenUpdate || (event.Type == EventTypeSessionSync && !sync) {
 			continue
 		}
 		if err := send.Data(event.Payload); err != nil {
@@ -1107,7 +1103,7 @@ func (s *Server) subscribeEvents(ctx context.Context, input *struct{}, send sse.
 				s.logger.Info("Channel closed", "subscriberId", subscriberId)
 				return
 			}
-			if event.Type == EventTypeScreenUpdate {
+			if event.Type == EventTypeScreenUpdate || (event.Type == EventTypeSessionSync && !sync) {
 				continue
 			}
 			if err := send.Data(event.Payload); err != nil {

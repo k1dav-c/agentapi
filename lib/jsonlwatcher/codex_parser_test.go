@@ -48,8 +48,8 @@ func TestCodexParser_BasicTurn(t *testing.T) {
 		t.Errorf("user text = %q, want 'List files'", all[0].Content[0].Text)
 	}
 
-	// reasoning (encrypted) — starts the turn and emits an update
-	completed, _ = parser.ParseLine([]byte(`{"type":"response_item","timestamp":"2026-07-24T10:35:28.000Z","payload":{"type":"reasoning","id":"rs_001","encrypted_content":"gAAA"}}`))
+	// reasoning with a readable summary — starts the turn and emits an update
+	completed, _ = parser.ParseLine([]byte(`{"type":"response_item","timestamp":"2026-07-24T10:35:28.000Z","payload":{"type":"reasoning","id":"rs_001","summary":[{"type":"summary_text","text":"**Listing files**\n\nI'll run ls."}],"encrypted_content":"gAAA"}}`))
 	all = applyRich(all, completed)
 
 	// assistant message — updates the same turn
@@ -101,6 +101,9 @@ func TestCodexParser_BasicTurn(t *testing.T) {
 	}
 	if assistantMsg.Content[0].Type != "thinking" {
 		t.Errorf("content[0].Type = %q, want thinking", assistantMsg.Content[0].Type)
+	}
+	if want := "**Listing files**\n\nI'll run ls."; assistantMsg.Content[0].Thinking != want {
+		t.Errorf("content[0].Thinking = %q, want %q", assistantMsg.Content[0].Thinking, want)
 	}
 	if assistantMsg.Content[1].Type != "text" {
 		t.Errorf("content[1].Type = %q, want text", assistantMsg.Content[1].Type)
@@ -377,5 +380,32 @@ func TestCodexParser_MultipleToolCalls(t *testing.T) {
 	}
 	if all[2].Content[0].ToolUseID != "call_2" {
 		t.Errorf("all[2] ToolUseID = %q, want call_2", all[2].Content[0].ToolUseID)
+	}
+}
+
+func TestCodexParser_Reasoning(t *testing.T) {
+	parse := func(payload string) []RichContentBlock {
+		t.Helper()
+		parser := NewCodexParser()
+		parser.ParseLine([]byte(`{"type":"event_msg","timestamp":"2026-10-04T00:00:00Z","payload":{"type":"task_started"}}`))
+		completed, err := parser.ParseLine([]byte(`{"type":"response_item","timestamp":"2026-10-04T00:00:01Z","payload":` + payload + `}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(completed) == 0 {
+			return nil
+		}
+		return completed[len(completed)-1].Content
+	}
+
+	// Only encrypted reasoning: nothing readable, so no thinking block.
+	if blocks := parse(`{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAAA"}`); len(blocks) != 0 {
+		t.Fatalf("encrypted-only reasoning produced blocks: %+v", blocks)
+	}
+
+	// Several summary parts and raw reasoning text are joined.
+	blocks := parse(`{"type":"reasoning","id":"rs_2","summary":[{"type":"summary_text","text":"**One**"},{"type":"summary_text","text":"**Two**"}],"content":[{"type":"reasoning_text","text":"raw"}],"encrypted_content":"gAAAA"}`)
+	if len(blocks) != 1 || blocks[0].Type != "thinking" || blocks[0].Thinking != "**One**\n\n**Two**\n\nraw" {
+		t.Fatalf("blocks = %+v", blocks)
 	}
 }

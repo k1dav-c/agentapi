@@ -4,17 +4,8 @@ import {useState, FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, Chang
 import {Button} from "./ui/button";
 import {Tooltip, TooltipTrigger, TooltipContent} from "./ui/tooltip";
 import {
-  ArrowDownIcon,
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  ArrowUpIcon,
-  CornerDownLeftIcon,
-  DeleteIcon,
   SendIcon,
-  Upload,
   Square,
-  Keyboard,
-  MessageSquareText,
   Paperclip,
   Mic,
   MicOff,
@@ -24,11 +15,9 @@ import {
   Check,
   Pencil,
   X,
-  TriangleAlert,
   MoreHorizontal,
   RefreshCw,
 } from "lucide-react";
-import {Tabs, TabsList, TabsTrigger} from "./ui/tabs";
 import type {SendResult, ServerStatus} from "./chat-provider";
 import TextareaAutosize from "react-textarea-autosize";
 import {useChat} from "./chat-provider";
@@ -39,14 +28,6 @@ import {
   parsePersistedAttachments,
   removeAttachmentToken,
 } from "@/lib/attachment-state";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -60,12 +41,8 @@ interface MessageInputProps {
   serverStatus: ServerStatus;
   suggestedPrompt?: string;
   onSuggestedPromptApplied?: () => void;
-}
-
-interface SentChar {
-  char: string;
-  id: number;
-  timestamp: number;
+  // Shown above the composer: the agent's state strip and decision card.
+  dock?: React.ReactNode;
 }
 
 interface SpeechRecognitionEventLike extends Event {
@@ -105,74 +82,22 @@ interface Attachment {
   error?: string;
 }
 
-// List of keys to send as raw input when in control mode
-
-const specialKeys: Record<string, string> = {
-  ArrowUp: "\x1b[A", // Escape sequence for up arrow
-  ArrowDown: "\x1b[B", // Escape sequence for down arrow
-  ArrowRight: "\x1b[C", // Escape sequence for right arrow
-  ArrowLeft: "\x1b[D", // Escape sequence for left arrow
-  Escape: "\x1b", // Escape key
-  Tab: "\t", // Tab key
-  Delete: "\x1b[3~", // Delete key
-  Home: "\x1b[H", // Home key
-  End: "\x1b[F", // End key
-  PageUp: "\x1b[5~", // Page Up
-  PageDown: "\x1b[6~", // Page Down
-  Backspace: "\b", // Backspace key
-};
-
-const ctrlMappings: Record<string, string> = {
-  c: "\x03", // Ctrl+C (SIGINT)
-  d: "\x04", // Ctrl+D (EOF)
-  z: "\x1A", // Ctrl+Z (SIGTSTP)
-  l: "\x0C", // Ctrl+L (clear screen)
-  a: "\x01", // Ctrl+A (beginning of line)
-  e: "\x05", // Ctrl+E (end of line)
-  w: "\x17", // Ctrl+W (delete word)
-  u: "\x15", // Ctrl+U (clear line)
-  r: "\x12", // Ctrl+R (reverse history search)
-};
-
-const altArrowUp = {label: "Alt+Arrow up", display: "Alt+↑", value: "\x1b[1;3A"} as const;
-
-const controlShortcuts = [
-  {label: "Ctrl+C", display: "Ctrl+C", value: ctrlMappings.c},
-  {label: "Ctrl+D", display: "Ctrl+D", value: ctrlMappings.d},
-  {label: "Ctrl+Z", display: "Ctrl+Z", value: ctrlMappings.z},
-  {label: "Ctrl+L", display: "Ctrl+L", value: ctrlMappings.l},
-  {label: "Enter", display: "⏎", value: "\r"},
-  {label: "Tab", display: "Tab", value: specialKeys.Tab},
-  {label: "Escape", display: "Esc", value: specialKeys.Escape},
-  {label: "Arrow up", display: "↑", value: specialKeys.ArrowUp},
-  altArrowUp,
-  {label: "Arrow down", display: "↓", value: specialKeys.ArrowDown},
-] as const;
-
-const highRiskControlValues = new Set([ctrlMappings.d, ctrlMappings.z]);
-
 export default function MessageInput({
   onSendMessage,
   disabled = false,
   serverStatus,
   suggestedPrompt = "",
   onSuggestedPromptApplied,
+  dock,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [hydratedDraftKey, setHydratedDraftKey] = useState<string | null>(null);
   const [editingQueuedID, setEditingQueuedID] = useState<number | null>(null);
   const [editingQueuedMessage, setEditingQueuedMessage] = useState("");
-  const [inputMode, setInputMode] = useState<"text" | "control">("text");
-  const [sentChars, setSentChars] = useState<SentChar[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const nextCharId = useRef(0);
-  const [controlAreaFocused, setControlAreaFocused] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
-  const [pendingControl, setPendingControl] = useState<
-    (typeof controlShortcuts)[number] | null
-  >(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const speechBaseMessageRef = useRef("");
@@ -187,6 +112,7 @@ export default function MessageInput({
     updateQueuedMessage,
     deleteQueuedMessage,
     storageScope,
+    terminalPrompt,
   } = useChat();
   const draftStorageKey = `agentapi.chat.message-draft:${storageScope}`;
   const attachmentsStorageKey = `agentapi.chat.attachments:${storageScope}`;
@@ -281,7 +207,6 @@ export default function MessageInput({
   useEffect(() => {
     if (!suggestedPrompt) return;
     setMessage(suggestedPrompt);
-    setInputMode("text");
     onSuggestedPromptApplied?.();
     window.requestAnimationFrame(() => textareaRef.current?.focus());
   }, [onSuggestedPromptApplied, suggestedPrompt]);
@@ -435,102 +360,20 @@ export default function MessageInput({
     }
   };
 
-  // Remove sent characters after they expire (2 seconds)
-  useEffect(() => {
-    if (sentChars.length === 0) return;
-
-    const interval = setInterval(() => {
-      const now = Date.now();
-      setSentChars((chars) =>
-        chars.filter((char) => now - char.timestamp < 2000)
-      );
-    }, 100);
-
-    return () => clearInterval(interval);
-  }, [sentChars]);
-
   // Autofocus on the message input box on user's turn
   useEffect(() => {
     if (
       serverStatus === "stable" &&
       !disabled &&
-      inputMode === "text" &&
       window.matchMedia("(min-width: 640px) and (pointer: fine)").matches &&
       textareaRef.current
     ) {
       textareaRef.current.focus();
     }
-  }, [serverStatus, disabled, inputMode]);
-
-  const addSentChar = (char: string) => {
-    const newChar: SentChar = {
-      char,
-      id: nextCharId.current++,
-      timestamp: Date.now(),
-    };
-    setSentChars((prev) => [...prev, newChar]);
-  };
-
-  const sendControlShortcut = (shortcut: (typeof controlShortcuts)[number]) => {
-    if (highRiskControlValues.has(shortcut.value)) {
-      setPendingControl(shortcut);
-      return;
-    }
-    addSentChar(shortcut.display);
-    onSendMessage(shortcut.value, "raw");
-    textareaRef.current?.focus();
-  };
+  }, [serverStatus, disabled]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // In control mode, send special keys as raw messages
-    if (inputMode === "control" && !disabled) {
-      if (e.key === "ArrowUp" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-        e.preventDefault();
-        sendControlShortcut(altArrowUp);
-        return;
-      }
-
-      // Check if the pressed key is in our special keys map
-      if (specialKeys[e.key]) {
-        e.preventDefault();
-        addSentChar(e.key);
-        onSendMessage(specialKeys[e.key], "raw");
-        return;
-      }
-
-      // Handle Enter as raw newline when in control mode
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        addSentChar("⏎");
-        onSendMessage("\r", "raw");
-        return;
-      }
-
-      // Handle Ctrl+key combinations
-      if (e.ctrlKey) {
-        if (ctrlMappings[e.key.toLowerCase()]) {
-          e.preventDefault();
-          const value = ctrlMappings[e.key.toLowerCase()];
-          const shortcut = controlShortcuts.find((item) => item.value === value);
-          if (shortcut) {
-            sendControlShortcut(shortcut);
-          } else {
-            addSentChar(`Ctrl+${e.key.toUpperCase()}`);
-            onSendMessage(value, "raw");
-          }
-          return;
-        }
-      }
-
-      // If it's a printable character (length 1), send it as raw input
-      if (e.key.length === 1) {
-        e.preventDefault();
-        addSentChar(e.key);
-        onSendMessage(e.key, "raw");
-        return;
-      }
-    } else if (e.key === "Enter" && !e.shiftKey) {
-      // Normal Enter handling for text mode with non-empty message
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
     }
@@ -608,20 +451,19 @@ export default function MessageInput({
   const handleStop = () => {
     if (isStopping) return;
     setIsStopping(true);
-    onSendMessage(specialKeys.Escape, "raw");
+    onSendMessage("\x1b", "raw");
     toast.info("Stop signal sent");
   };
 
   return (
-    <Tabs
-      value={inputMode}
-      onValueChange={(value) => setInputMode(value as "text" | "control")}
-      className="shrink-0 border-t bg-background/90 backdrop-blur-xl"
-    >
-      <div className="mx-auto w-full max-w-5xl px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 sm:px-6 sm:pb-3 sm:pt-3">
+    <div className="shrink-0 border-t bg-background/90 backdrop-blur-xl">
+      {/* Aligned with the transcript's text column (past the time rail). */}
+      <div className="mx-auto w-full max-w-[72rem] px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 sm:px-6 sm:pb-3 sm:pt-3">
+       <div className="grid max-w-[46rem] grid-cols-[minmax(0,1fr)] gap-2 sm:ml-[4.75rem]">
+        {dock}
         <DragDrop
           onFilesAdded={handleFilesAdded}
-          disabled={disabled || inputMode === "control"}
+          disabled={disabled}
         >
           <input
             ref={fileInputRef}
@@ -636,56 +478,6 @@ export default function MessageInput({
           >
             <div className="flex flex-col">
               <div className="flex">
-                {inputMode === "control" && !disabled ? (
-                  <div className="flex w-full min-w-0 flex-col">
-                    <div
-                      className="flex items-start gap-2 border-b border-status-warning/25 bg-status-warning/10 px-3 py-2 text-xs text-status-warning"
-                      role="alert"
-                    >
-                      <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-                      <span>
-                        Direct terminal control. Every key is sent immediately and may stop the agent or close its session.
-                      </span>
-                    </div>
-                    <div
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      ref={textareaRef as any}
-                      tabIndex={0}
-                      role="textbox"
-                      aria-multiline="true"
-                      aria-label="Direct terminal keyboard input"
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      onKeyDown={handleKeyDown as any}
-                      onFocus={() => setControlAreaFocused(true)}
-                      onBlur={() => setControlAreaFocused(false)}
-                      className="flex h-16 w-full cursor-text items-center justify-center p-4 text-center text-sm text-muted-foreground outline-none focus:bg-status-warning/5"
-                    >
-                      {controlAreaFocused
-                        ? "Press any key to send to terminal (arrows, Ctrl+C, Ctrl+R, etc.)"
-                        : "Click or focus this area to send keystrokes to terminal"}
-                    </div>
-                    <div
-                      className="flex gap-1.5 overflow-x-auto border-t bg-muted/20 px-3 py-2"
-                      aria-label="Terminal shortcuts"
-                    >
-                      {controlShortcuts.map((shortcut) => (
-                        <Button
-                          key={shortcut.label}
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-7 shrink-0 px-2.5 font-mono text-[11px]"
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => sendControlShortcut(shortcut)}
-                          title={`Send ${shortcut.label}`}
-                        >
-                          {shortcut.display}
-                          <span className="sr-only">Send {shortcut.label}</span>
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
                   <TextareaAutosize
                     ref={textareaRef}
                     minRows={1}
@@ -695,11 +487,13 @@ export default function MessageInput({
                     onKeyDown={handleKeyDown}
                     aria-label="Task message"
                     placeholder={
-                      serverStatus === "running"
-                        ? "Add a queued task…"
-                        : serverStatus === "stable"
-                          ? "Ask the agent to do something…"
-                          : "Reconnecting… Your draft is saved."
+                      terminalPrompt
+                        ? "Queue a task (runs after you answer)…"
+                        : serverStatus === "running"
+                          ? "Queue a follow-up…"
+                          : serverStatus === "stable"
+                            ? "Describe a task…"
+                            : "Reconnecting… Your draft is saved."
                     }
                     className="min-h-14 max-h-32 w-full resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-6 outline-none sm:min-h-16 sm:px-5"
                     disabled={
@@ -707,10 +501,9 @@ export default function MessageInput({
                       (serverStatus !== "stable" && serverStatus !== "running")
                     }
                   />
-                )}
               </div>
 
-              {inputMode === "text" && attachments.length > 0 && (
+              {attachments.length > 0 && (
                 <div
                   className="space-y-1.5 border-t bg-muted/15 px-3 py-2"
                   aria-label="Attachments"
@@ -799,12 +592,13 @@ export default function MessageInput({
                 </div>
               )}
 
-              {inputMode === "text" && queuedMessages.length > 0 && (
+              {queuedMessages.length > 0 && (
                 <details open className="group border-t bg-muted/15">
                   <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
                     <span className="flex items-center gap-1.5">
                       <Clock3 className="size-3" />
                       Queued tasks · {queuedMessages.length}
+                      {terminalPrompt && <span className="text-state-needs">· held until you answer the agent</span>}
                     </span>
                     <span className="text-[10px] group-open:hidden">Show</span>
                     <span className="hidden text-[10px] group-open:inline">Hide</span>
@@ -884,32 +678,9 @@ export default function MessageInput({
                 </details>
               )}
 
-              <div className="flex items-center justify-between gap-3 border-t bg-muted/25 px-3 py-2.5">
-                <TabsList className="h-10 bg-muted/70 p-0.5 sm:h-8">
-                  <TabsTrigger
-                    value="text"
-                    className="h-9 gap-1.5 px-3 text-xs sm:h-7 sm:px-2.5"
-                    onClick={() => {
-                      textareaRef.current?.focus();
-                    }}
-                  >
-                    <MessageSquareText className="size-3.5" />
-                    Task
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="control"
-                    className="h-9 gap-1.5 px-3 text-xs data-[state=active]:text-status-warning sm:h-7 sm:px-2.5"
-                    onClick={() => {
-                      textareaRef.current?.focus();
-                    }}
-                  >
-                    <Keyboard className="size-3.5" />
-                    Terminal
-                  </TabsTrigger>
-                </TabsList>
+              <div className="flex items-center justify-end gap-3 border-t bg-muted/25 px-3 py-2">
 
                 <div className="flex min-w-0 flex-row items-center gap-2">
-                  {inputMode === "text" && (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -926,8 +697,6 @@ export default function MessageInput({
                       </TooltipTrigger>
                       <TooltipContent>Attach files</TooltipContent>
                     </Tooltip>
-                  )}
-                  {inputMode === "text" && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
@@ -952,10 +721,8 @@ export default function MessageInput({
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
-                  )}
 
-                  {inputMode === "text" &&
-                    (serverStatus === "stable" || serverStatus === "running") && (
+                  {(serverStatus === "stable" || serverStatus === "running") && (
                     <Button
                       type="submit"
                       disabled={
@@ -988,7 +755,7 @@ export default function MessageInput({
                     </Button>
                   )}
 
-                  {inputMode === "text" && serverStatus === "running" && (
+                  {serverStatus === "running" && (
                     <Button
                       size="icon"
                       type="button"
@@ -1007,18 +774,6 @@ export default function MessageInput({
                     </Button>
                   )}
 
-                  {inputMode === "control" && !disabled && (
-                    <div className="flex items-center gap-1">
-                      {sentChars.map((char) => (
-                        <span
-                          key={char.id}
-                          className="flex h-8 min-w-8 animate-pulse items-center justify-center rounded-md border bg-background px-2 font-mono text-xs font-medium"
-                        >
-                      <Char char={char.char}/>
-                    </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
 
               </div>
@@ -1026,70 +781,16 @@ export default function MessageInput({
           </form>
         </DragDrop>
 
-        <div className="mt-2 hidden items-center justify-center gap-2 text-center text-[11px] text-muted-foreground sm:flex">
-            {inputMode === "text" ? (
-              <>
-                <Upload className="size-3" />
-                <span>Enter to send · Shift+Enter for a new line · More options for files and voice</span>
-              </>
-            ) : (
-              <>
-                <Keyboard className="size-3" />
-                <span>Advanced mode: keystrokes are sent directly to the agent terminal</span>
-              </>
-            )}
-        </div>
+        <p className="hidden text-center text-[11px] text-muted-foreground sm:block">
+          Enter to send · Shift+Enter for a new line · Keys for the terminal itself: TTY mode
+        </p>
+       </div>
       </div>
 
-      <Dialog open={pendingControl !== null} onOpenChange={(open) => !open && setPendingControl(null)}>
-        <DialogContent className="w-[calc(100%-2rem)] rounded-xl sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Send {pendingControl?.display} to the terminal?</DialogTitle>
-            <DialogDescription>
-              This shortcut can suspend the process or close the current agent session. It takes effect immediately.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2">
-            <Button type="button" variant="outline" onClick={() => setPendingControl(null)}>
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => {
-                if (!pendingControl) return;
-                addSentChar(pendingControl.display);
-                onSendMessage(pendingControl.value, "raw");
-                setPendingControl(null);
-              }}
-            >
-              Send shortcut
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </Tabs>
+    </div>
   );
 }
 
-function Char({char}: { char: string }) {
-  switch (char) {
-    case "ArrowUp":
-      return <ArrowUpIcon className="h-4 w-4"/>;
-    case "ArrowDown":
-      return <ArrowDownIcon className="h-4 w-4"/>;
-    case "ArrowRight":
-      return <ArrowRightIcon className="h-4 w-4"/>;
-    case "ArrowLeft":
-      return <ArrowLeftIcon className="h-4 w-4"/>;
-    case "⏎":
-      return <CornerDownLeftIcon className="h-4 w-4"/>;
-    case "Backspace":
-      return <DeleteIcon className="h-4 w-4"/>;
-    default:
-      return char;
-  }
-}
 
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;

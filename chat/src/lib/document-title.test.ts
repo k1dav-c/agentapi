@@ -9,7 +9,18 @@ describe("getDocumentTitle", () => {
         serverStatus: "running",
         task: "Implement dynamic browser titles",
       }),
-    ).toBe("● Running · Implement dynamic browser titles — AgentAPI");
+    ).toBe("● Working · Implement dynamic browser titles — AgentAPI");
+  });
+
+  test("an open prompt reads as needing the user, even while stable", () => {
+    expect(
+      getDocumentTitle({
+        connectionStatus: "connected",
+        serverStatus: "stable",
+        terminalPrompt: "Do you want to proceed?\n❯ 1. Yes",
+        task: "Rebuild the chat UI",
+      }),
+    ).toBe("◆ Needs you · Rebuild the chat UI — AgentAPI");
   });
 
   test("prioritizes connection state over agent state", () => {

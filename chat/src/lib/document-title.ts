@@ -2,6 +2,7 @@ import type {
   ConnectionStatus,
   ServerStatus,
 } from "@/components/chat-provider";
+import { getAgentState } from "./session-status";
 
 const DEFAULT_TITLE = "AgentAPI — Live Agent Session";
 const MAX_TASK_LENGTH = 60;
@@ -15,24 +16,26 @@ function summarizeTask(content: string) {
 export function getDocumentTitle({
   connectionStatus,
   serverStatus,
+  terminalPrompt,
   task,
   customTitle,
 }: {
   connectionStatus: ConnectionStatus;
   serverStatus: ServerStatus;
+  terminalPrompt?: string;
   task?: string;
   customTitle?: string;
 }) {
-  const status =
-    connectionStatus === "offline"
-      ? "○ Offline"
-      : connectionStatus === "reconnecting"
-        ? "↻ Reconnecting"
-        : serverStatus === "running"
-          ? "● Running"
-          : serverStatus === "stable"
-            ? "✓ Ready"
-            : "○ Connecting";
+  // The tab title is how people notice an agent in a background tab, so it
+  // leads with the state, and "Needs you" is the loudest.
+  const status = {
+    offline: "○ Offline",
+    reconnecting: "↻ Reconnecting",
+    "needs-you": "◆ Needs you",
+    working: "● Working",
+    ready: "✓ Ready",
+    connecting: "○ Connecting",
+  }[getAgentState(serverStatus, connectionStatus, terminalPrompt)];
   const taskSummary = task ? summarizeTask(task) : "";
   const suffix = customTitle || "AgentAPI";
 

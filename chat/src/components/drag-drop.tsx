@@ -25,7 +25,7 @@ export function DragDrop({ onFilesAdded, disabled = false, children, className =
         isDragActive && !disabled ? 'rounded-2xl ring-2 ring-primary ring-offset-2 text-center transition-colors' : ''
       }`}
     >
-      <input {...getInputProps()} />
+      <input {...getInputProps({ "aria-label": "Attach files" })} />
       {isDragActive && !disabled && (
         <div className="absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-background/90 backdrop-blur-sm">
           <p className="rounded-full border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-sm">Drop files to attach</p>
