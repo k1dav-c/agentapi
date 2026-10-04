@@ -157,7 +157,7 @@ func (p *CodexParser) handleResponseItem(payload *codexPayload, timestamp string
 	case "function_call":
 		return p.handleFunctionCall(payload, timestamp, payload.Args)
 	case "custom_tool_call":
-		return p.handleFunctionCall(payload, timestamp, payload.Input)
+		return p.handleFunctionCall(payload, timestamp, codexExecInput(payload.Name, payload.Input))
 	case "function_call_output", "custom_tool_call_output":
 		return p.handleFunctionCallOutput(payload, timestamp)
 	case "reasoning":
@@ -262,6 +262,12 @@ func (p *CodexParser) handleFunctionCall(payload *codexPayload, timestamp string
 func (p *CodexParser) handleFunctionCallOutput(payload *codexPayload, timestamp string) []RichMessage {
 	text := parseCodexOutput(payload.Output)
 	status, isError := codexToolResultStatus(payload)
+	if output, exitCode, ok := codexExecOutput(text); ok {
+		text = output
+		if exitCode != 0 {
+			status, isError = "failed", true
+		}
+	}
 
 	ts, _ := time.Parse(time.RFC3339Nano, timestamp)
 	// Emit immediately: the corresponding tool_use block was already

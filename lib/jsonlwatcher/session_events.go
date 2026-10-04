@@ -92,7 +92,7 @@ func (p *CodexSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEven
 		case "function_call", "custom_tool_call":
 			input := payload.Args
 			if payload.Type == "custom_tool_call" {
-				input = payload.Input
+				input = codexExecInput(payload.Name, payload.Input)
 			}
 			event := newSessionEvent("tool_call", strptr("assistant"), nil, eventTime, sessionID, sourceID)
 			event.ToolName = optionalString(payload.Name)
@@ -101,6 +101,9 @@ func (p *CodexSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEven
 			return []SessionEvent{event}, nil
 		case "function_call_output", "custom_tool_call_output":
 			content := parseCodexOutput(payload.Output)
+			if output, _, ok := codexExecOutput(content); ok {
+				content = output
+			}
 			event := newSessionEvent("tool_result", nil, &content, eventTime, sessionID, nil)
 			event.ToolUseID = optionalString(payload.CallID)
 			return []SessionEvent{event}, nil
