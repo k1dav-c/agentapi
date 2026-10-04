@@ -110,6 +110,7 @@ interface StatusChangeEvent {
   agent_type: string;
   agentapi_version?: string;
   terminal_columns?: number;
+  session_name?: string;
   terminal_prompt?: string;
 }
 
@@ -222,6 +223,9 @@ interface ChatContextValue {
   agentapiVersion: string;
   // Width of the agent's terminal; 0 until the server reports it.
   terminalColumns: number;
+  // What the agent calls the session (Claude Code's title, Codex's thread
+  // name, Pi's /name); empty until it names it.
+  sessionName: string;
   customTitle?: string;
   workspaceUrl?: string;
 }
@@ -293,6 +297,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [agentType, setAgentType] = useState<AgentType>("custom");
   const [agentapiVersion, setAgentapiVersion] = useState("");
   const [terminalColumns, setTerminalColumns] = useState(0);
+  const [sessionName, setSessionName] = useState("");
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastEventAtRef = useRef(Date.now());
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -613,6 +618,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         setAgentType(data.agent_type === "" ? "unknown" : data.agent_type as AgentType);
         setAgentapiVersion(data.agentapi_version ?? "");
         setTerminalColumns(data.terminal_columns ?? 0);
+        setSessionName(data.session_name ?? "");
         setTerminalPrompt(data.terminal_prompt ?? "");
         void refreshQueue();
       });
@@ -934,6 +940,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         agentType,
         agentapiVersion,
         terminalColumns,
+        sessionName,
         customTitle,
         workspaceUrl,
       }}

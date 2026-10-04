@@ -6,7 +6,7 @@ import { notificationsEnabled, onNotificationsPreferenceChange, setNotifications
 import { AgentType, useChat } from "@/components/chat-provider";
 import { ModeToggle } from "@/components/mode-toggle";
 import { AgentMark } from "@/components/agent-mark";
-import { Activity, BellOff, BellRing, Bot, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Moon, Sun, Tag } from "lucide-react";
+import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Moon, Sun, Tag } from "lucide-react";
 import { useTheme } from "next-themes";
 import { computeTokenTotals, formatTokenCount, getStatusMeta } from "@/lib/session-status";
 import { useWorkingElapsed } from "@/lib/use-elapsed";
@@ -32,6 +32,7 @@ export function Header() {
     downloadSession,
     customTitle,
     agentapiVersion,
+    sessionName,
   } = useChat();
   const [downloading, setDownloading] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -95,17 +96,39 @@ export function Header() {
 
   return (
     <header className="sticky top-[env(safe-area-inset-top,0px)] z-20 flex h-12 shrink-0 items-center gap-3 border-b bg-background/95 px-3 backdrop-blur-xl sm:px-5">
-      <div className="flex min-w-0 items-center gap-2.5">
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
         <AgentMark agentType={agentType} />
-        <h1 className="truncate text-sm font-semibold tracking-tight">{customTitle || agentName}</h1>
+        {/* On a phone there is room for one name: the session's, next to the
+            agent's mark. The agent name stays in the heading for screen
+            readers and comes back on wider screens. */}
+        <h1
+          className={`text-sm font-semibold tracking-tight ${
+            sessionName ? "sr-only sm:not-sr-only sm:max-w-[40%] sm:shrink-0 sm:truncate" : "truncate"
+          }`}
+        >
+          {customTitle || agentName}
+        </h1>
+        {sessionName && (
+          // What the agent calls this session, to tell sessions apart.
+          <>
+            <span aria-hidden="true" className="-mx-1 hidden shrink-0 text-sm text-muted-foreground/50 sm:inline">/</span>
+            <span
+              className="min-w-0 truncate text-sm font-medium text-foreground sm:font-normal sm:text-muted-foreground"
+              title={sessionName}
+              data-session-name
+            >
+              {sessionName}
+            </span>
+          </>
+        )}
         {agentapiVersion && (
-          <span className="hidden truncate font-mono text-[11px] text-muted-foreground md:inline">
+          <span className="hidden shrink-0 font-mono text-[11px] text-muted-foreground lg:inline">
             v{agentapiVersion}
           </span>
         )}
       </div>
 
-      <div className="ml-auto flex min-w-0 items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1.5">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -128,6 +151,7 @@ export function Header() {
             <div className="space-y-3 px-2 py-2 text-xs">
               <SessionDetail icon={StatusIcon} label="Status" value={status.label} valueClassName={status.className} />
               <SessionDetail icon={Bot} label="Agent" value={agentType === "unknown" ? "Unknown" : AgentType[agentType].displayName} />
+              {sessionName && <SessionDetail icon={MessageSquareText} label="Session" value={sessionName} />}
               {agentapiVersion && <SessionDetail icon={Tag} label="Version" value={`AgentAPI v${agentapiVersion}`} />}
               <SessionDetail icon={Activity} label="Activity" value={activityDetail} />
               <SessionDetail
