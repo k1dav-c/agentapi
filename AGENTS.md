@@ -7,7 +7,16 @@ This file provides guidance to AI agents working with code in this repository.
 - `make build` - Build the binary to `out/agentapi` (includes chat UI build)
 - `make embed` - Build the chat UI and embed it into Go
 - `go build -o out/agentapi main.go` - Direct Go build without chat UI
-- `go generate ./...` - Generate OpenAPI schema and version info
+- `make gen` (`go generate ./...`) - Generate OpenAPI schema and version info
+
+## Generated files
+
+- Regenerate `openapi.json` only with `make gen`, and commit its output after
+  changing any API model or huma doc string.
+- Don't write it with `go run main.go server --print-openapi dummy > openapi.json`:
+  that escapes `<` and `>` in descriptions as `\u003c` / `\u003e`, while
+  `make gen` doesn't. The Release workflow runs `make gen` and fails with
+  "Unstaged changes" on any difference, so a push to `main` doesn't release.
 
 ## Testing
 
@@ -76,6 +85,8 @@ Agents with auto-detection:
 - `claude` - Claude Code (default)
 - `goose` - Goose
 - `aider` - Aider
+- `kimi` - Kimi Code
+- `pi` - Pi coding agent
 
 ## Project Structure
 
