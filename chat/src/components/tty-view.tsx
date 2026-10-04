@@ -6,21 +6,29 @@ import {toast} from "sonner";
 import type {Terminal} from "@xterm/xterm";
 import {useChat} from "./chat-provider";
 import {Button} from "./ui/button";
-import {OrderedInput, screenToTerminalOutput} from "@/lib/tty";
+import {OrderedInput, fitTerminalFontSize, screenToTerminalOutput} from "@/lib/tty";
 import {terminalShortcuts, type TerminalShortcut} from "@/lib/terminal-keys";
 
-// AgentAPI runs the agent in an 80-column terminal by default; the mirror
-// uses the same width so lines wrap exactly as the agent drew them.
-const TTY_COLUMNS = 80;
+// The mirror uses the width of the agent's terminal (80 columns unless
+// AgentAPI was started with --term-width), so lines wrap exactly as the
+// agent drew them. The font scales to fill the window instead.
+const DEFAULT_COLUMNS = 80;
 const FONT_SIZE = 13;
 const LINE_HEIGHT = 1.2;
+// Horizontal padding of the terminal panel (p-2 on both sides).
+const PANEL_PADDING = 16;
 
 // TTY mode: an escape hatch for when the chat view looks wrong. It shows
 // the agent's emulated terminal screen as-is and sends every keystroke
 // straight to the agent, like attaching to the terminal.
 export function TtyView({onExit}: {onExit: () => void}) {
-  const {storageScope, sendTerminalInput} = useChat();
+  const {storageScope, sendTerminalInput, terminalColumns} = useChat();
+  const columns = terminalColumns || DEFAULT_COLUMNS;
+  const columnsRef = useRef(columns);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Re-fits the terminal to the panel; set once the terminal exists.
+  const fitRef = useRef<() => void>(() => {});
   const [connected, setConnected] = useState(false);
   // Width of one terminal cell, for the column ruler.
   const [cellWidth, setCellWidth] = useState(0);
@@ -62,7 +70,7 @@ export function TtyView({onExit}: {onExit: () => void}) {
       let rowHeight = FONT_SIZE * LINE_HEIGHT;
       const rowsFor = () => Math.max(10, Math.floor(container.clientHeight / rowHeight));
       term = new Terminal({
-        cols: TTY_COLUMNS,
+        cols: columnsRef.current,
         rows: rowsFor(),
         fontSize: FONT_SIZE,
         lineHeight: LINE_HEIGHT,
@@ -72,13 +80,31 @@ export function TtyView({onExit}: {onExit: () => void}) {
         theme: {background: "#0b0d10", foreground: "#e6e6e6"},
       });
       term.open(container);
-      const screen = container.querySelector(".xterm-screen");
-      if (screen) setCellWidth(screen.getBoundingClientRect().width / TTY_COLUMNS);
-      const firstRow = container.querySelector(".xterm-rows > div");
-      if (firstRow && firstRow.getBoundingClientRect().height > 0) {
-        rowHeight = firstRow.getBoundingClientRect().height;
-        term.resize(TTY_COLUMNS, rowsFor());
-      }
+      // Measures the rendered cells, then sizes the ruler and the rows.
+      const measure = () => {
+        if (!term) return;
+        const screen = container.querySelector(".xterm-screen");
+        if (screen) setCellWidth(screen.getBoundingClientRect().width / term.cols);
+        const firstRow = container.querySelector(".xterm-rows > div");
+        if (firstRow && firstRow.getBoundingClientRect().height > 0) {
+          rowHeight = firstRow.getBoundingClientRect().height;
+        }
+        if (term.rows !== rowsFor()) term.resize(term.cols, rowsFor());
+      };
+      measure();
+      // Cell width per pixel of font size, from the first render.
+      const firstScreen = container.querySelector(".xterm-screen");
+      const cellWidthPerPx = firstScreen ? firstScreen.getBoundingClientRect().width / term.cols / FONT_SIZE : 0.6;
+      fitRef.current = () => {
+        const panel = panelRef.current;
+        if (!term || !panel) return;
+        if (term.cols !== columnsRef.current) term.resize(columnsRef.current, term.rows);
+        const size = fitTerminalFontSize(panel.clientWidth - PANEL_PADDING, term.cols, cellWidthPerPx);
+        if (term.options.fontSize !== size) term.options.fontSize = size;
+        // xterm re-measures its cells on the next frame.
+        window.requestAnimationFrame(measure);
+      };
+      fitRef.current();
       // The snapshot has no cursor position, so don't draw a cursor, and
       // have xterm wrap pastes so a multi-line paste isn't submitted line
       // by line.
@@ -123,10 +149,9 @@ export function TtyView({onExit}: {onExit: () => void}) {
         if (!frame) frame = window.requestAnimationFrame(render);
       });
 
-      resizeObserver = new ResizeObserver(() => {
-        if (term && term.rows !== rowsFor()) term.resize(TTY_COLUMNS, rowsFor());
-      });
+      resizeObserver = new ResizeObserver(() => fitRef.current());
       resizeObserver.observe(container);
+      if (panelRef.current) resizeObserver.observe(panelRef.current);
     });
 
     return () => {
@@ -135,8 +160,15 @@ export function TtyView({onExit}: {onExit: () => void}) {
       resizeObserver?.disconnect();
       eventSource?.close();
       term?.dispose();
+      fitRef.current = () => {};
     };
   }, [storageScope]);
+
+  // The server reports its terminal width after connecting.
+  useEffect(() => {
+    columnsRef.current = columns;
+    fitRef.current();
+  }, [columns]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -147,7 +179,7 @@ export function TtyView({onExit}: {onExit: () => void}) {
           {connected ? "Keys go straight to the agent" : "Connecting to the terminal…"}
         </span>
         <span className="hidden font-mono text-[11px] text-muted-foreground md:inline">
-          {TTY_COLUMNS} columns · full-width characters take 2
+          {columns} columns · full-width characters take 2
         </span>
         <Button type="button" size="sm" variant="outline" className="ml-auto h-8" onClick={onExit}>
           <ArrowLeft />
@@ -156,14 +188,14 @@ export function TtyView({onExit}: {onExit: () => void}) {
       </div>
       {/* mx-auto rather than flex centering: a centered flex child wider
           than a phone screen would be clipped on the left. */}
-      <div className="min-h-0 flex-1 overflow-x-auto bg-[#0b0d10] p-2">
+      <div ref={panelRef} className="min-h-0 flex-1 overflow-x-auto bg-[#0b0d10] p-2">
         <div className="mx-auto flex h-full w-fit flex-col">
           {cellWidth > 0 && (
             // Column ruler: a tick and label every 10 columns, so you can
             // tell whether odd-looking output is the agent's or ours.
-            <div aria-hidden="true" className="relative mb-1 h-4 shrink-0 font-mono text-[10px] text-term-dim" style={{width: cellWidth * TTY_COLUMNS}}>
-              {Array.from({length: TTY_COLUMNS / 10}, (_, i) => (i + 1) * 10).map((column) => (
-                <span key={column} className="absolute bottom-0 border-r border-term-dim/50 pr-1 leading-none" style={{right: (TTY_COLUMNS - column) * cellWidth}}>
+            <div aria-hidden="true" className="relative mb-1 h-4 shrink-0 font-mono text-[10px] text-term-dim" style={{width: cellWidth * columns}}>
+              {Array.from({length: Math.floor(columns / 10)}, (_, i) => (i + 1) * 10).map((column) => (
+                <span key={column} className="absolute bottom-0 border-r border-term-dim/50 pr-1 leading-none" style={{right: (columns - column) * cellWidth}}>
                   {column}
                 </span>
               ))}

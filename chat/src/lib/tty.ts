@@ -52,3 +52,17 @@ export class OrderedInput {
     await this.flush();
   }
 }
+
+// Font sizes the terminal mirror may use. Below the minimum the text gets
+// hard to read, so a narrow screen scrolls sideways instead.
+export const TTY_MIN_FONT_SIZE = 11;
+export const TTY_MAX_FONT_SIZE = 20;
+
+// The font size at which `columns` terminal cells fill `availableWidth`
+// pixels, in half-pixel steps. cellWidthPerPx is the width of one cell per
+// pixel of font size, measured from the rendered terminal.
+export function fitTerminalFontSize(availableWidth: number, columns: number, cellWidthPerPx: number): number {
+  if (availableWidth <= 0 || columns <= 0 || cellWidthPerPx <= 0) return TTY_MIN_FONT_SIZE;
+  const size = Math.floor((availableWidth / (columns * cellWidthPerPx)) * 2) / 2;
+  return Math.min(TTY_MAX_FONT_SIZE, Math.max(TTY_MIN_FONT_SIZE, size));
+}

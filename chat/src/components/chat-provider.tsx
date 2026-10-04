@@ -109,6 +109,7 @@ interface StatusChangeEvent {
   status: string;
   agent_type: string;
   agentapi_version?: string;
+  terminal_columns?: number;
   terminal_prompt?: string;
 }
 
@@ -219,6 +220,8 @@ interface ChatContextValue {
   // AgentAPI server version (e.g. "0.14.0"); empty until the first status
   // event or when talking to a server that predates version reporting.
   agentapiVersion: string;
+  // Width of the agent's terminal; 0 until the server reports it.
+  terminalColumns: number;
   customTitle?: string;
   workspaceUrl?: string;
 }
@@ -289,6 +292,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [agentType, setAgentType] = useState<AgentType>("custom");
   const [agentapiVersion, setAgentapiVersion] = useState("");
+  const [terminalColumns, setTerminalColumns] = useState(0);
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastEventAtRef = useRef(Date.now());
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -608,6 +612,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         // Set agent type
         setAgentType(data.agent_type === "" ? "unknown" : data.agent_type as AgentType);
         setAgentapiVersion(data.agentapi_version ?? "");
+        setTerminalColumns(data.terminal_columns ?? 0);
         setTerminalPrompt(data.terminal_prompt ?? "");
         void refreshQueue();
       });
@@ -928,6 +933,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         storageScope: agentAPIUrl,
         agentType,
         agentapiVersion,
+        terminalColumns,
         customTitle,
         workspaceUrl,
       }}
