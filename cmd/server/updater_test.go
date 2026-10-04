@@ -18,6 +18,8 @@ func TestAgentUpdater(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	require.Nil(t, agentUpdater(AgentTypeClaude, "claude", logger))
+	// Codex-type wrappers aren't the Codex CLI and have no update command.
+	require.Nil(t, agentUpdater(AgentTypeCodex, "python3", logger))
 
 	dir := t.TempDir()
 	record := filepath.Join(dir, "record")
@@ -33,5 +35,5 @@ func TestAgentUpdater(t *testing.T) {
 	// A failing update must not panic or block the restart.
 	require.NoError(t, os.WriteFile(program, []byte("#!/bin/sh\nexit 3\n"), 0o755))
 	agentUpdater(AgentTypeCodex, program, logger)(context.Background())
-	agentUpdater(AgentTypeCodex, filepath.Join(dir, "missing"), logger)(context.Background())
+	agentUpdater(AgentTypeCodex, filepath.Join(dir, "missing", "codex"), logger)(context.Background())
 }

@@ -47,6 +47,14 @@ func configSetsCodexReasoningSummary(path string) bool {
 	return false
 }
 
+// isCodexCLI reports whether program is the Codex CLI itself. Codex-type
+// agents can also be wrappers or test doubles, which must not get Codex
+// flags or subcommands.
+func isCodexCLI(program string) bool {
+	name := filepath.Base(program)
+	return name == "codex" || name == "codex.exe"
+}
+
 // codexConfigPath returns $CODEX_HOME/config.toml, defaulting to
 // ~/.codex/config.toml.
 func codexConfigPath() string {

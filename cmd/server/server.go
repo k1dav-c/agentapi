@@ -73,7 +73,7 @@ const agentUpdateTimeout = 3 * time.Minute
 // to start the latest release. Claude Code updates itself in the
 // background, so restarting already starts its latest version.
 func agentUpdater(agentType AgentType, program string, logger *slog.Logger) func(context.Context) {
-	if agentType != AgentTypeCodex {
+	if agentType != AgentTypeCodex || !isCodexCLI(program) {
 		return nil
 	}
 	return func(ctx context.Context) {
@@ -263,7 +263,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	} else {
 		agentStartedAt = time.Now()
 		programArgs := argsToPass[1:]
-		if agentType == AgentTypeCodex {
+		if agentType == AgentTypeCodex && isCodexCLI(agent) {
 			programArgs = withCodexReasoningSummary(programArgs, codexConfigPath())
 		}
 		setupAgentProcess := func(context.Context) (*termexec.Process, error) {

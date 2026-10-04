@@ -31,3 +31,12 @@ func TestWithCodexReasoningSummary(t *testing.T) {
 	// Comments and other keys don't count.
 	require.Equal(t, append(auto, "x"), withCodexReasoningSummary([]string{"x"}, write("# model_reasoning_summary = \"none\"\nmodel_reasoning_effort = \"high\"\n")))
 }
+
+func TestIsCodexCLI(t *testing.T) {
+	for _, program := range []string{"codex", "/usr/local/bin/codex", "codex.exe"} {
+		require.True(t, isCodexCLI(program), program)
+	}
+	for _, program := range []string{"python3", "codex-wrapper.sh", "/opt/codex/run", "npx"} {
+		require.False(t, isCodexCLI(program), program)
+	}
+}

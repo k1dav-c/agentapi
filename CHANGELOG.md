@@ -8,9 +8,9 @@
 
 ### Features
 - TTY mode: an escape hatch for when the chat view looks wrong. The terminal button in the chat header swaps the conversation for the agent's terminal screen (xterm.js) and sends every key straight to the agent, including arrows, Ctrl/Alt keys, multi-line paste (as one bracketed paste) and IME input. "Back to chat" returns to the chat view; the conversation is unaffected
-- Codex: thinking shows in the chat. AgentAPI starts Codex with `-c model_reasoning_summary="auto"` so it logs readable reasoning summaries (otherwise its session log only holds encrypted reasoning), unless `model_reasoning_summary` is already set on the command line or in `$CODEX_HOME/config.toml`
+- Codex: thinking shows in the chat. AgentAPI starts Codex with `-c model_reasoning_summary="auto"` so it logs readable reasoning summaries (otherwise its session log only holds encrypted reasoning), unless `model_reasoning_summary` is already set on the command line or in `$CODEX_HOME/config.toml`. Only applies when the program is the `codex` CLI itself, not a wrapper started with `--type codex`
 - Explorer: Links, Files and Index list the newest task first; items keep their task numbers
-- Codex: restarting the agent (Explorer → Restart, `DELETE /messages`, or an MCP change with restart) runs `codex update` before starting it again, so the restarted Codex is the latest release. A failed update (e.g. offline) still restarts the installed version. Claude Code updates itself in the background, so its restart already starts the latest version
+- Codex: restarting the agent (Explorer → Restart, `DELETE /messages`, or an MCP change with restart) runs `codex update` before starting it again (only when the program is the `codex` CLI), so the restarted Codex is the latest release. A failed update (e.g. offline) still restarts the installed version. Claude Code updates itself in the background, so its restart already starts the latest version
 
 ### Removed
 - The sub-agents (Agents) panel, together with the `GET /agents` endpoint and the `agents_update` SSE event
