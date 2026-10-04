@@ -19,6 +19,11 @@ const (
 	codexInputSearchLines = 10
 )
 
+// InputBoxScanLines is how many lines at the bottom of the screen (ignoring
+// trailing blank lines) input box detection can look at. Callers that only
+// need HasInputBox can pass just that tail instead of the whole screen.
+const InputBoxScanLines = inputBoxSearchLines + maxInputBoxHeight + 2
+
 // numberedOptionRe matches selection-list entries such as "❯ 1. Yes" or
 // "› 2. Reset usage". These share the prompt glyph with input boxes but
 // belong to dialogs, so they must never be mistaken for an input box.

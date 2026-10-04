@@ -19,7 +19,31 @@ import (
 var terminalSelection = regexp.MustCompile(`(?m)^\s*[❯›>]\s*(\d+)\.\s+`)
 var terminalConfirmation = regexp.MustCompile(`(?i)(enter\s+to\s+confirm|enter\s+to\s+submit|press\s+enter|esc\s+to\s+cancel|enter\s+select|would\s+you\s+like\s+to\s+proceed|do\s+you\s+want\s+to\s+proceed)`)
 var terminalOption = regexp.MustCompile(`(?m)^\s*[❯›>]?\s*(\d+)\.\s+`)
-var terminalQuestionKeyword = regexp.MustCompile(`(?i)(choose|select|option|continue|cancel|allow|deny|approve|permission)`)
+
+// terminalQuestionKeywords must appear (case-insensitively) next to a
+// numbered list for it to count as a prompt.
+var terminalQuestionKeywords = []string{"choose", "select", "option", "continue", "cancel", "allow", "deny", "approve", "permission"}
+
+// Prompt detection runs on every screen change. Go's regexps are slow on
+// the case-insensitive alternations above, and agent output almost never
+// contains these words, so each regexp is only tried once a plain substring
+// check shows it could match.
+var terminalConfirmationWords = []string{"enter", "esc", "proceed"}
+
+func containsAny(s string, words []string) bool {
+	for _, word := range words {
+		if strings.Contains(s, word) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasConfirmationHint reports whether content (lower is its lowercase form)
+// shows a confirmation hint such as "Enter to confirm · Esc to cancel".
+func hasConfirmationHint(content, lower string) bool {
+	return containsAny(lower, terminalConfirmationWords) && terminalConfirmation.MatchString(content)
+}
 
 // terminalQuestionTailLines bounds how much of the bottom of the screen is
 // inspected for an interactive prompt. The PTY screen includes scrollback, so
@@ -31,6 +55,9 @@ const terminalQuestionTailLines = 40
 // interactive terminal prompt (selection list, confirmation) that a queued
 // message must not be typed into.
 func isTerminalQuestionScreen(agentType mf.AgentType, screen string) bool {
+	// Only the bottom of the screen matters, and the screen can be a
+	// thousand lines; this runs on every screen change.
+	screen = screenTail(screen, max(mf.InputBoxScanLines, terminalQuestionTailLines))
 	visible, ok := mf.HasInputBox(agentType, screen)
 	if ok && visible {
 		// The agent's own input box is showing, so it's waiting for a
@@ -38,29 +65,40 @@ func isTerminalQuestionScreen(agentType mf.AgentType, screen string) bool {
 		return false
 	}
 	tail := screenTail(screen, terminalQuestionTailLines)
-	if ok && terminalConfirmation.MatchString(tail) {
+	lower := strings.ToLower(tail)
+	if ok && hasConfirmationHint(tail, lower) {
 		// The input box is gone and a confirmation hint is showing, e.g.
 		// Claude Code's folder trust dialog, whose options aren't numbered.
 		return true
 	}
-	return isTerminalQuestion(tail)
+	return isTerminalQuestionText(tail, lower)
 }
 
 // screenTail returns the last n lines of screen, ignoring trailing blank lines.
+// It scans back from the end instead of splitting the whole screen.
 func screenTail(screen string, n int) string {
-	lines := strings.Split(strings.TrimRight(screen, " \t\r\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
+	screen = strings.TrimRight(screen, " \t\r\n")
+	start := len(screen)
+	for range n {
+		i := strings.LastIndexByte(screen[:start], '\n')
+		if i < 0 {
+			return screen
+		}
+		start = i
 	}
-	return strings.Join(lines, "\n")
+	return screen[start+1:]
 }
 
 func isTerminalQuestion(content string) bool {
-	if terminalSelection.MatchString(content) && terminalConfirmation.MatchString(content) {
+	return isTerminalQuestionText(content, strings.ToLower(content))
+}
+
+func isTerminalQuestionText(content, lower string) bool {
+	if hasConfirmationHint(content, lower) && strings.ContainsAny(content, "❯›>") &&
+		terminalSelection.MatchString(content) {
 		return true
 	}
-	options := terminalOption.FindAllString(content, -1)
-	return len(options) >= 2 && terminalQuestionKeyword.MatchString(content)
+	return containsAny(lower, terminalQuestionKeywords) && len(terminalOption.FindAllString(content, -1)) >= 2
 }
 
 // Only expose deliberate, bounded terminal actions. Discord text never becomes

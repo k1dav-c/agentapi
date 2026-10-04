@@ -35,6 +35,7 @@ var (
 // composer whenever a newer release exists, instead of a banner. Until it is
 // answered no message or initial prompt can be delivered.
 func isCodexUpdatePrompt(screen string) bool {
+	screen = screenTail(screen, max(mf.InputBoxScanLines, codexUpdatePromptTailLines))
 	if visible, _ := mf.HasInputBox(mf.AgentTypeCodex, screen); visible {
 		return false
 	}
