@@ -152,7 +152,7 @@ export function Chat() {
                     type="button"
                     size="icon"
                     variant="ghost"
-                    className="hidden size-8 rounded-full text-muted-foreground sm:inline-flex"
+                    className="size-8 rounded-full text-muted-foreground"
                     title="Open Coder workspace"
                     aria-label="Open Coder workspace"
                     onClick={() => window.open(coderWorkspaceUrl, "_blank", "noopener,noreferrer")}
