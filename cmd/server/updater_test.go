@@ -36,4 +36,13 @@ func TestAgentUpdater(t *testing.T) {
 	require.NoError(t, os.WriteFile(program, []byte("#!/bin/sh\nexit 3\n"), 0o755))
 	agentUpdater(AgentTypeCodex, program, logger)(context.Background())
 	agentUpdater(AgentTypeCodex, filepath.Join(dir, "missing", "codex"), logger)(context.Background())
+
+	// Pi updates itself only, not its installed packages.
+	require.Nil(t, agentUpdater(AgentTypePi, "pi-wrapper", logger))
+	pi := filepath.Join(dir, "pi")
+	require.NoError(t, os.WriteFile(pi, []byte("#!/bin/sh\necho \"$*\" > "+record+"\n"), 0o755))
+	agentUpdater(AgentTypePi, pi, logger)(context.Background())
+	got, err = os.ReadFile(record)
+	require.NoError(t, err)
+	require.Equal(t, "update --self\n", string(got))
 }

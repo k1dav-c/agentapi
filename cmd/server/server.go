@@ -69,19 +69,26 @@ func (s *agentSupervisor) Restart(ctx context.Context) (int, error) {
 const agentUpdateTimeout = 3 * time.Minute
 
 // agentUpdater returns a function that updates the agent CLI, or nil when
-// AgentAPI doesn't update this agent. Codex only updates when asked (its
-// startup dialog is skipped by AgentAPI), so a restart runs `codex update`
-// to start the latest release. Claude Code updates itself in the
-// background, so restarting already starts its latest version.
+// AgentAPI doesn't update this agent. Codex and Pi only update when asked
+// (they just announce a new version at startup), so a restart runs `codex
+// update` or `pi update --self` to start the latest release. Claude Code
+// updates itself in the background, so restarting already starts its
+// latest version.
 func agentUpdater(agentType AgentType, program string, logger *slog.Logger) func(context.Context) {
-	if agentType != AgentTypeCodex || !isCodexCLI(program) {
+	var args, env []string
+	switch {
+	case agentType == AgentTypeCodex && isCodexCLI(program):
+		args, env = []string{"update"}, []string{"CODEX_NON_INTERACTIVE=1"}
+	case agentType == AgentTypePi && isPiCLI(program):
+		args = []string{"update", "--self"}
+	default:
 		return nil
 	}
 	return func(ctx context.Context) {
 		ctx, cancel := context.WithTimeout(ctx, agentUpdateTimeout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, program, "update")
-		cmd.Env = append(os.Environ(), "CODEX_NON_INTERACTIVE=1")
+		cmd := exec.CommandContext(ctx, program, args...)
+		cmd.Env = append(os.Environ(), env...)
 		start := time.Now()
 		output, err := cmd.CombinedOutput()
 		if err != nil {
