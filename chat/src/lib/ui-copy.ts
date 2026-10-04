@@ -22,6 +22,5 @@ export const uiCopy = {
     failed: "Failed",
     completed: "Completed",
     toolErrors: "Tool errors",
-    download: "Download conversation",
   },
 } as const;

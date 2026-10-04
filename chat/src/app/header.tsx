@@ -150,25 +150,25 @@ export function Header() {
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className={`relative flex min-h-10 items-center gap-1.5 rounded-full border bg-card px-2.5 text-xs font-medium shadow-xs outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:gap-2 sm:px-3 ${status.className}`}
+              className={`relative flex items-center gap-1 rounded-full border bg-card px-2.5 py-1.5 text-[11px] font-medium shadow-xs outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring ${status.className}`}
               title={`${activityDetail}. Open session details`}
               aria-label={`${status.label}. Open session details`}
             >
-              <StatusIcon className={`size-3.5 ${
+              <StatusIcon className={`size-3 ${
                 serverStatus === "running" || connectionStatus === "reconnecting"
                   ? "motion-safe:animate-spin"
                   : ""
               }`} />
               <span className="hidden min-[380px]:inline">{status.label}</span>
               {queuedMessages.length > 0 && (
-                <span className="grid min-w-5 place-items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-foreground">
+                <span className="grid min-w-4 place-items-center rounded-full bg-muted px-1 text-[10px] leading-4 text-foreground">
                   {queuedMessages.length}
                   <span className="sr-only"> queued tasks</span>
                 </span>
               )}
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64 p-2">
+          <DropdownMenuContent align="end" className="w-72 p-2">
             <DropdownMenuLabel>Session details</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <div className="space-y-3 px-2 py-2 text-xs">
@@ -230,7 +230,7 @@ export function Header() {
               ) : (
                 <Download />
               )}
-              Download session JSONL
+              Download conversation JSONL
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setShortcutsOpen(true)}>
               <Keyboard />

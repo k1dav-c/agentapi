@@ -13,14 +13,12 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Download,
-  LoaderCircle,
   Search,
   SlidersHorizontal,
   X,
 } from "lucide-react";
 import { Button } from "./ui/button";
-import {useChat, AgentType} from "./chat-provider";
+import {AgentType} from "./chat-provider";
 import type {
   DraftMessage,
   Message,
@@ -88,7 +86,6 @@ export default function MessageList({
   onSendRaw,
   headerAction,
 }: MessageListProps) {
-  const {downloadSession} = useChat();
   const [scrollArea, setScrollArea] = useState<HTMLDivElement | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -173,13 +170,6 @@ export default function MessageList({
 
     return {prelude, tasks};
   }, [messages, richMessages, toolCalls]);
-  const [downloadingConversation, setDownloadingConversation] = useState(false);
-  const exportConversation = () => {
-    setDownloadingConversation(true);
-    void downloadSession()
-      .catch(() => {})
-      .finally(() => setDownloadingConversation(false));
-  };
   const filteredTasks = useMemo(
     () =>
       timeline.tasks
@@ -389,23 +379,6 @@ export default function MessageList({
                   ? `${filteredTasks.length} tasks · ${totalMatchCount} matches`
                   : `${filteredTasks.length} of ${timeline.tasks.length}`}
               </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="hidden h-9 shrink-0 sm:inline-flex"
-                onClick={exportConversation}
-                disabled={downloadingConversation}
-                title="Download the session timeline as JSONL"
-              >
-                {downloadingConversation ? (
-                  <LoaderCircle className="animate-spin" />
-                ) : (
-                  <Download />
-                )}
-                <span className="hidden sm:inline">Conversation JSONL</span>
-                <span className="sr-only sm:hidden">Download conversation JSONL</span>
-              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -445,14 +418,6 @@ export default function MessageList({
                       {label}
                     </DropdownMenuItem>
                   ))}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onSelect={exportConversation}
-                    disabled={downloadingConversation}
-                  >
-                    <Download />
-                    {uiCopy.taskToolbar.download}
-                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               {headerAction}
