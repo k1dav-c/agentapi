@@ -6,6 +6,9 @@
 - The chat UI shows the AgentAPI version next to the agent name (header, session details and embed status bar). The server reports it as `agentapi_version` in `GET /status` and the `status_change` SSE event
 - Releases are cut automatically on every push to `main`: the version is bumped from Conventional Commits (breaking → major, `feat` → minor, otherwise patch), tagged `vX.Y.Z`, and stamped into the release binaries
 
+### Features
+- Codex: restarting the agent (Explorer → Restart, `DELETE /messages`, or an MCP change with restart) runs `codex update` before starting it again, so the restarted Codex is the latest release. A failed update (e.g. offline) still restarts the installed version. Claude Code updates itself in the background, so its restart already starts the latest version
+
 ### Removed
 - The sub-agents (Agents) panel, together with the `GET /agents` endpoint and the `agents_update` SSE event
 

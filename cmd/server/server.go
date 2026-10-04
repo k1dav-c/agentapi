@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -34,6 +35,9 @@ type agentSupervisor struct {
 	logger *slog.Logger
 	swap   *termexec.SwappableProcess
 	setup  func(context.Context) (*termexec.Process, error)
+	// update, when set, runs between stopping the old process and starting
+	// the new one so a restart picks up the latest agent CLI.
+	update func(context.Context)
 }
 
 func (s *agentSupervisor) Restart(ctx context.Context) (int, error) {
@@ -47,6 +51,9 @@ func (s *agentSupervisor) Restart(ctx context.Context) (int, error) {
 	if err := old.Close(s.logger, 10*time.Second); err != nil {
 		s.logger.Warn("Error closing agent process during restart", "error", err)
 	}
+	if s.update != nil {
+		s.update(ctx)
+	}
 	next, err := s.setup(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to start new agent process: %w", err)
@@ -54,6 +61,44 @@ func (s *agentSupervisor) Restart(ctx context.Context) (int, error) {
 	s.swap.Set(next)
 	s.logger.Info("Agent process restarted", "pid", next.Pid())
 	return next.Pid(), nil
+}
+
+// agentUpdateTimeout bounds how long a restart waits for the agent CLI to
+// update itself before starting the installed version anyway.
+const agentUpdateTimeout = 3 * time.Minute
+
+// agentUpdater returns a function that updates the agent CLI, or nil when
+// AgentAPI doesn't update this agent. Codex only updates when asked (its
+// startup dialog is skipped by AgentAPI), so a restart runs `codex update`
+// to start the latest release. Claude Code updates itself in the
+// background, so restarting already starts its latest version.
+func agentUpdater(agentType AgentType, program string, logger *slog.Logger) func(context.Context) {
+	if agentType != AgentTypeCodex {
+		return nil
+	}
+	return func(ctx context.Context) {
+		ctx, cancel := context.WithTimeout(ctx, agentUpdateTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, program, "update")
+		cmd.Env = append(os.Environ(), "CODEX_NON_INTERACTIVE=1")
+		start := time.Now()
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			logger.Warn("Failed to update the agent CLI before restarting; starting the installed version",
+				"program", program, "error", err, "output", tailLines(string(output), 10))
+			return
+		}
+		logger.Info("Updated the agent CLI before restarting", "program", program,
+			"duration", time.Since(start).Round(time.Millisecond), "output", tailLines(string(output), 3))
+	}
+}
+
+func tailLines(s string, n int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (s *agentSupervisor) currentSettled() *termexec.Process {
@@ -236,6 +281,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			logger: logger,
 			swap:   swappable,
 			setup:  setupAgentProcess,
+			update: agentUpdater(agentType, agent, logger),
 		}
 		agentIO = swappable
 	}
