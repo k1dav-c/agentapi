@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-AgentAPI is a Go HTTP server that controls coding agents (Claude Code, Aider, Goose, Codex, Gemini, Copilot, Amp, Cursor, Auggie, AmazonQ, Opencode) through terminal emulation. It runs agents in an in-memory terminal emulator, translates HTTP API calls into terminal keystrokes, and parses terminal output into structured messages. It also embeds a Next.js chat web UI.
+AgentAPI is a Go HTTP server that controls coding agents (Claude Code, Aider, Goose, Codex, Gemini, Copilot, Amp, Cursor, Auggie, AmazonQ, Opencode, Kimi, Pi) through terminal emulation. It runs agents in an in-memory terminal emulator, translates HTTP API calls into terminal keystrokes, and parses terminal output into structured messages. It also embeds a Next.js chat web UI.
 
 ## Build & Run
 
@@ -49,7 +49,7 @@ Tests use `CGO_ENABLED=0`. The project uses `testify` (assert/require) and `code
 - **`lib/screentracker/`** — Core conversation engine. `Conversation` interface with `PTYConversation` implementation. Manages terminal snapshots, screen diffing, message splitting, and status detection (stable vs. changing).
 - **`lib/termexec/`** — Terminal process execution. Wraps PTY creation and process lifecycle.
 - **`lib/msgfmt/`** — Agent-specific message formatting. Strips echoed user input and TUI elements (input boxes, borders) from terminal output. Each agent type has different formatting quirks.
-- **`lib/jsonlwatcher/`** — Watches agent JSONL session logs (Claude, Codex) for rich structured messages (tool calls, thinking, usage data). Runs as a sidecar alongside PTY.
+- **`lib/jsonlwatcher/`** — Watches agent JSONL session logs (Claude, Codex, Pi) for rich structured messages (tool calls, thinking, usage data). Runs as a sidecar alongside PTY.
 - **`x/acpio/`** — Experimental ACP (Agent Communication Protocol) transport, alternative to PTY.
 - **`cmd/`** — CLI commands via cobra/viper. `server` and `attach` subcommands.
 
