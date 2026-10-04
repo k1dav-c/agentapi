@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
+import "@xterm/xterm/css/xterm.css";
 import "./globals.css";
 import "./hljs-theme.css";
 import { Toaster } from "@/components/ui/sonner";

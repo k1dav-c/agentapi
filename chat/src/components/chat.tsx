@@ -1,17 +1,19 @@
 "use client";
 
 import {useEffect, useState} from "react";
-import {ExternalLink, RefreshCw} from "lucide-react";
+import {ExternalLink, RefreshCw, TerminalSquare} from "lucide-react";
 import {useChat} from "./chat-provider";
 import MessageInput from "./message-input";
 import MessageList from "./message-list";
 import {Explorer} from "./explorer";
+import {TtyView} from "./tty-view";
 import {Button} from "./ui/button";
 import {KeyboardShortcutsDialog, useKeyboardShortcutsKey} from "./keyboard-shortcuts";
 
 export function Chat() {
   const [suggestedPrompt, setSuggestedPrompt] = useState("");
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [ttyMode, setTtyMode] = useState(false);
   useKeyboardShortcutsKey(() => setShortcutsOpen(true));
   const {
     messages,
@@ -91,55 +93,72 @@ export function Chat() {
           </Button>
         </div>
       )}
-      <MessageList
-        messages={messages}
-        richMessages={richMessages}
-        serverStatus={serverStatus}
-        agentType={agentType}
-        onSelectPrompt={setSuggestedPrompt}
-        onRetryMessage={retryFailedMessage}
-        onEditMessage={(clientId, content) => {
-          dismissFailedMessage(clientId);
-          setSuggestedPrompt(content);
-        }}
-        onDismissMessage={dismissFailedMessage}
-        onStopTask={() => void sendMessage("\x1b", "raw")}
-        onSendRaw={(data) => void sendMessage(data, "raw")}
-        headerAction={
-          <div className="flex items-center gap-1">
-            <Explorer
-              onNavigateTask={(number) => {
-                window.requestAnimationFrame(() =>
-                  document.getElementById(`task-${number}`)?.scrollIntoView({
-                    behavior: "smooth",
-                    block: "start",
-                  }),
-                );
-              }}
-            />
-            {coderWorkspaceUrl && (
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="size-9 rounded-full"
-                title="Open Coder workspace"
-                aria-label="Open Coder workspace"
-                onClick={() => window.open(coderWorkspaceUrl, "_blank", "noopener,noreferrer")}
-              >
-                <ExternalLink className="size-4" />
-              </Button>
-            )}
-          </div>
-        }
-      />
-      <MessageInput
-        onSendMessage={sendMessage}
-        disabled={loading}
-        serverStatus={serverStatus}
-        suggestedPrompt={suggestedPrompt}
-        onSuggestedPromptApplied={() => setSuggestedPrompt("")}
-      />
+      {ttyMode ? (
+        <TtyView onExit={() => setTtyMode(false)} />
+      ) : (
+        <>
+          <MessageList
+            messages={messages}
+            richMessages={richMessages}
+            serverStatus={serverStatus}
+            agentType={agentType}
+            onSelectPrompt={setSuggestedPrompt}
+            onRetryMessage={retryFailedMessage}
+            onEditMessage={(clientId, content) => {
+              dismissFailedMessage(clientId);
+              setSuggestedPrompt(content);
+            }}
+            onDismissMessage={dismissFailedMessage}
+            onStopTask={() => void sendMessage("\x1b", "raw")}
+            onSendRaw={(data) => void sendMessage(data, "raw")}
+            headerAction={
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-9 rounded-full"
+                  title="TTY mode: use the agent's terminal directly"
+                  aria-label="Switch to TTY mode"
+                  onClick={() => setTtyMode(true)}
+                >
+                  <TerminalSquare className="size-4" />
+                </Button>
+                <Explorer
+                  onNavigateTask={(number) => {
+                    window.requestAnimationFrame(() =>
+                      document.getElementById(`task-${number}`)?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                      }),
+                    );
+                  }}
+                />
+                {coderWorkspaceUrl && (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-9 rounded-full"
+                    title="Open Coder workspace"
+                    aria-label="Open Coder workspace"
+                    onClick={() => window.open(coderWorkspaceUrl, "_blank", "noopener,noreferrer")}
+                  >
+                    <ExternalLink className="size-4" />
+                  </Button>
+                )}
+              </div>
+            }
+          />
+          <MessageInput
+            onSendMessage={sendMessage}
+            disabled={loading}
+            serverStatus={serverStatus}
+            suggestedPrompt={suggestedPrompt}
+            onSuggestedPromptApplied={() => setSuggestedPrompt("")}
+          />
+        </>
+      )}
       <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </section>
   );

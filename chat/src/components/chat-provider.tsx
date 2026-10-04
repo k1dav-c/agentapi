@@ -148,6 +148,8 @@ interface ChatContextValue {
   connectionStatus: ConnectionStatus;
   queuedMessages: QueuedMessage[];
   sendMessage: (message: string, type?: MessageType) => Promise<SendResult>;
+  // Sends keystrokes to the agent's terminal as-is (TTY mode).
+  sendTerminalInput: (data: string) => Promise<void>;
   retryFailedMessage: (clientId: string) => Promise<boolean>;
   dismissFailedMessage: (clientId: string) => void;
   updateQueuedMessage: (id: number, content: string) => Promise<void>;
@@ -716,6 +718,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
         terminalPrompt,
         loading,
         sendMessage,
+        sendTerminalInput: async (data: string) => {
+          await api.sendMessage(data, "raw");
+        },
         retryFailedMessage,
         dismissFailedMessage,
         serverStatus,
