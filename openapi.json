@@ -334,7 +334,7 @@
             "type": "string"
           },
           "path": {
-            "description": "Absolute path of the managed config file: <working-directory>/.mcp.json for Claude or $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex.",
+            "description": "Absolute path of the managed config file: \u003cworking-directory\u003e/.mcp.json for Claude, $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex, or $PI_CODING_AGENT_DIR/mcp.json (default ~/.pi/agent/mcp.json) for Pi.",
             "type": "string"
           },
           "servers": {
@@ -1889,7 +1889,7 @@
     },
     "/mcp": {
       "get": {
-        "description": "Returns the complete MCP server configuration used by the running agent.\n\nSupported agents and files:\n\n- **Claude:** project-scoped `.mcp.json` in the agent working directory (`mcpServers` object).\n- **Codex:** `$CODEX_HOME/config.toml`, falling back to `~/.codex/config.toml` (`[mcp_servers.*]` tables).\n\nServer values are agent-native and passed through without transport-specific validation. The response can contain environment values or HTTP headers, so treat it as sensitive. Other agent types return `404`.",
+        "description": "Returns the complete MCP server configuration used by the running agent.\n\nSupported agents and files:\n\n- **Claude:** project-scoped `.mcp.json` in the agent working directory (`mcpServers` object).\n- **Codex:** `$CODEX_HOME/config.toml`, falling back to `~/.codex/config.toml` (`[mcp_servers.*]` tables).\n- **Pi:** user-level `$PI_CODING_AGENT_DIR/mcp.json`, falling back to `~/.pi/agent/mcp.json` (`mcpServers` object).\n\nServer values are agent-native and passed through without transport-specific validation. The response can contain environment values or HTTP headers, so treat it as sensitive. Other agent types return `404`.",
         "operationId": "get-mcp",
         "responses": {
           "200": {

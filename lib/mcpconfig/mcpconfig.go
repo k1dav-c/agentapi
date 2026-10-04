@@ -25,11 +25,13 @@ func NewStore(agentType mf.AgentType, workDir string) (Store, error) {
 		return newClaudeStore(workDir)
 	case mf.AgentTypeCodex:
 		return newCodexStore()
+	case mf.AgentTypePi:
+		return newPiStore()
 	default:
 		return nil, ErrUnsupportedAgent
 	}
 }
 
 func SupportedAgent(agentType mf.AgentType) bool {
-	return agentType == mf.AgentTypeClaude || agentType == mf.AgentTypeCodex
+	return agentType == mf.AgentTypeClaude || agentType == mf.AgentTypeCodex || agentType == mf.AgentTypePi
 }

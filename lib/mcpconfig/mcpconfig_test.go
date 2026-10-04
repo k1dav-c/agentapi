@@ -87,3 +87,25 @@ func TestUnsupportedAgent(t *testing.T) {
 	assert.True(t, SupportedAgent(mf.AgentTypeClaude))
 	assert.True(t, SupportedAgent(mf.AgentTypeCodex))
 }
+
+func TestPiStore(t *testing.T) {
+	agentDir := filepath.Join(t.TempDir(), "agent")
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+	store, err := NewStore(mf.AgentTypePi, "")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(agentDir, "mcp.json"), store.Path())
+	assert.True(t, SupportedAgent(mf.AgentTypePi))
+
+	servers, err := store.Read()
+	require.NoError(t, err)
+	assert.Empty(t, servers, "no config file yet")
+
+	// The agent dir doesn't exist yet either.
+	require.NoError(t, store.Replace(Servers{
+		"docs": json.RawMessage(`{"url":"https://example.com/mcp","headers":{"Authorization":"Bearer ${DOCS_TOKEN}"}}`),
+	}))
+	servers, err = store.Read()
+	require.NoError(t, err)
+	require.Len(t, servers, 1)
+	assert.JSONEq(t, `{"url":"https://example.com/mcp","headers":{"Authorization":"Bearer ${DOCS_TOKEN}"}}`, string(servers["docs"]))
+}

@@ -14,7 +14,7 @@ type MCPServers map[string]any
 type MCPGetResponse struct {
 	Body struct {
 		Servers MCPServers `json:"servers" nullable:"false" doc:"Agent-native MCP server objects keyed by unique server name. Values are returned verbatim and may contain commands, arguments, environment variables, URLs, or headers."`
-		Path    string     `json:"path" doc:"Absolute path of the managed config file: <working-directory>/.mcp.json for Claude or $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex."`
+		Path    string     `json:"path" doc:"Absolute path of the managed config file: <working-directory>/.mcp.json for Claude, $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex, or $PI_CODING_AGENT_DIR/mcp.json (default ~/.pi/agent/mcp.json) for Pi."`
 	}
 }
 
@@ -39,6 +39,7 @@ Supported agents and files:
 
 - **Claude:** project-scoped ` + "`.mcp.json`" + ` in the agent working directory (` + "`mcpServers`" + ` object).
 - **Codex:** ` + "`$CODEX_HOME/config.toml`" + `, falling back to ` + "`~/.codex/config.toml`" + ` (` + "`[mcp_servers.*]`" + ` tables).
+- **Pi:** user-level ` + "`$PI_CODING_AGENT_DIR/mcp.json`" + `, falling back to ` + "`~/.pi/agent/mcp.json`" + ` (` + "`mcpServers`" + ` object).
 
 Server values are agent-native and passed through without transport-specific validation. The response can contain environment values or HTTP headers, so treat it as sensitive. Other agent types return ` + "`404`" + `.`
 	operation.Errors = []int{404, 500}
@@ -57,7 +58,7 @@ Important behavior:
 - With ` + "`restart=true`" + `, AgentAPI replaces the PTY child process immediately. AgentAPI and its HTTP/SSE endpoints stay online, but the agent's conversation context is reset.
 - Restart is unavailable in ACP, schema-only, and other server modes without a process supervisor; those requests return ` + "`400`" + `.
 - A missing or structurally invalid request body returns ` + "`422`" + `.
-- Claude and Codex are supported; other agent types return ` + "`404`" + `.`
+- Claude, Codex and Pi are supported; other agent types return ` + "`404`" + `.`
 	operation.Errors = []int{400, 404, 500}
 }
 
