@@ -1,5 +1,7 @@
 # AgentAPI
 
+English | [繁體中文](README.zh-TW.md)
+
 Control [Claude Code](https://github.com/anthropics/claude-code), [AmazonQ](https://aws.amazon.com/developer/learning/q-developer-cli/), [Opencode](https://opencode.ai/), [Goose](https://github.com/block/goose), [Aider](https://github.com/Aider-AI/aider), [Gemini](https://github.com/google-gemini/gemini-cli), [GitHub Copilot](https://github.com/github/copilot-cli), [Sourcegraph Amp](https://ampcode.com/), [Codex](https://github.com/openai/codex), [Kimi Code](https://www.kimi.com/zh-tw/help/kimi-code/cli-getting-started), [Pi](https://pi.dev/), [Auggie](https://docs.augmentcode.com/cli/overview), and [Cursor CLI](https://cursor.com/en/cli) with an HTTP API.
 
 ![agentapi-chat](https://github.com/user-attachments/assets/57032c9f-4146-4b66-b219-09e38ab7690d)
@@ -23,7 +25,8 @@ The embedded chat UI is organized around tasks instead of a single flat
 transcript. Each user request becomes a navigable task with its associated
 response, thinking blocks, tool calls, and background activity.
 
-Tasks read as a transcript: a time rail, the prompt as the heading, the
+Tasks read as a transcript: a time rail, your prompt in a tinted block
+labelled "You", the agent's turn opening with its mark and name (e.g. Pi), the
 agent's reply as Markdown, tool calls as one-line rows (`$ command`, exit
 code, duration, output preview), and thinking as margin notes on wide
 screens. A status strip above the composer shows what the agent is doing
