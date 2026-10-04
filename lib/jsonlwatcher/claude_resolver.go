@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -94,6 +95,12 @@ func (r *ClaudeResolver) Resolve() (string, error) {
 		if _, err := os.Stat(jsonlPath); err == nil {
 			return jsonlPath, nil
 		}
+		// Session ids are unique, so if the project directory name doesn't
+		// match our encoding (e.g. Claude Code shortens very long paths),
+		// find the file by id instead.
+		if matches, _ := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", meta.SessionID+".jsonl")); len(matches) > 0 {
+			return matches[0], nil
+		}
 	}
 
 	// Fallback: return the original path (may not exist yet).
@@ -103,9 +110,14 @@ func (r *ClaudeResolver) Resolve() (string, error) {
 	return filepath.Join(home, ".claude", "projects", encodedCWD, meta.SessionID+".jsonl"), nil
 }
 
-// encodeCWD encodes a working directory path for use as a Claude projects
-// directory name. It replaces path separators with dashes.
-// For example, "/home/k1dave6412" becomes "-home-k1dave6412".
+// nonAlphanumericRe matches the characters Claude Code replaces with a dash
+// when naming a project directory.
+var nonAlphanumericRe = regexp.MustCompile(`[^a-zA-Z0-9]`)
+
+// encodeCWD encodes a working directory path the way Claude Code names its
+// projects directory: every character other than an ASCII letter or digit
+// becomes a dash. For example, "/home/k1dave6412" becomes "-home-k1dave6412"
+// and "/home/me/.cache/my_app" becomes "-home-me--cache-my-app".
 func encodeCWD(cwd string) string {
-	return strings.ReplaceAll(cwd, string(filepath.Separator), "-")
+	return nonAlphanumericRe.ReplaceAllString(cwd, "-")
 }

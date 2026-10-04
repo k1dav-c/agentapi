@@ -119,7 +119,15 @@ func (w *Watcher) tailFile(ctx context.Context, path string) string {
 		case <-ctx.Done():
 			return ""
 		case <-ticker.C:
-			// retry
+			// The file may never appear: Claude Code can switch to another
+			// session (e.g. /clear, or a session id that is replaced before
+			// anything is written) without ever creating the one it
+			// advertised first. Follow the resolver instead of waiting on
+			// a path that is no longer current.
+			if resolvedPath, err := w.resolver.Resolve(); err == nil && resolvedPath != path {
+				w.logger.Info("JSONL session path changed before the file was created", "old_path", path, "new_path", resolvedPath)
+				return resolvedPath
+			}
 		}
 	}
 	defer f.Close()
