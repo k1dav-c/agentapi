@@ -23,19 +23,42 @@ The embedded chat UI is organized around tasks instead of a single flat
 transcript. Each user request becomes a navigable task with its associated
 response, thinking blocks, tool calls, and background activity.
 
+Tasks read as a transcript: a time rail, the prompt as the heading, the
+agent's reply as Markdown, tool calls as one-line rows (`$ command`, exit
+code, duration, output preview), and thinking as margin notes on wide
+screens. A status strip above the composer shows what the agent is doing
+right now, and the header, tab title and queue say "Needs you" while the
+agent waits for an answer. Long tasks show their latest 40 steps first.
+
 The Session Explorer provides:
 
 - links and file paths discovered in the current conversation;
 - an index for jumping directly to earlier tasks;
 - Markdown preview and export for individual tasks;
 - access to the live terminal when the parsed conversation is not sufficient;
-- MCP server and Temporal/Discord configuration without leaving the chat UI.
+- MCP server and Temporal/Discord configuration without leaving the chat UI;
+- a Session tab with a two-step Restart (open the Explorer with ⌘K / Ctrl+K).
 
 Each message has its own markdown/raw toggle so you can switch render
 modes without affecting the rest of the conversation.
 
 The UI also includes improved mobile layouts, attachment handling, searchable
 tool activity, connection-state indicators, and more compact tool-call cards.
+The header shows the agent's mark (Claude's orange square, Pi's logo) and the
+AgentAPI version.
+
+**TTY mode** is an escape hatch for when the chat view looks wrong: the
+terminal button in the header swaps the conversation for the agent's terminal
+screen (xterm.js) and sends every key straight to the agent, including arrows,
+Ctrl/Alt keys, pastes and IME input. A key bar provides Esc, Tab, arrows,
+Enter and Ctrl keys on phones. The font grows with the window (11–20px); the
+mirror uses the agent's real terminal width, so start AgentAPI with
+`--term-width 120` if you want longer lines.
+
+**Background alerts**: while the tab is in the background, its icon shows an
+amber dot when the agent needs you, a blue dot while it works, and a green dot
+when a task finished. Browser notifications can be turned on from the status
+menu.
 
 ### Message queue and connection recovery
 
@@ -48,17 +71,23 @@ reconnection, stale-connection detection, and local recovery of messages that
 failed before reaching the server. The document title and session header expose
 the current task, agent status, and connection state.
 
+Reopening a long conversation is fast: the chat caches the transcript in the
+browser (IndexedDB), shows it immediately, and then asks the server only for
+what changed since.
+
 Relevant APIs include:
 
 - `GET /queue` and `PUT/DELETE /queue/{id}` for queue management;
 - `GET /events` for live messages, status, errors, rich activity, and heartbeat
-  events;
+  events. With `?sync=1` the stream starts with a `session_sync` event and
+  every update carries a `seq`; reconnecting with `&since=<seq>&epoch=<epoch>`
+  replays only what changed;
 - `GET /title` for the current human-readable session title.
 
-### Structured Claude and Codex activity
+### Structured Claude, Codex and Pi activity
 
-In addition to parsing terminal snapshots, this fork can watch Claude and Codex
-session logs. This provides structured thinking blocks, tool invocations, tool
+In addition to parsing terminal snapshots, this fork can watch Claude, Codex
+and Pi session logs. This provides structured thinking blocks, tool invocations, tool
 results, usage information, and stable message identifiers that cannot always
 be reconstructed reliably from terminal output alone.
 
@@ -69,15 +98,18 @@ be reconstructed reliably from terminal output alone.
   or failed state and output details.
 - Claude thinking blocks are rendered inline as collapsible sections in the
   task timeline.
+- Codex is started with `-c model_reasoning_summary="auto"` (unless you set it
+  yourself) so its log holds readable reasoning summaries instead of only
+  encrypted reasoning.
 
 Terminal parsing remains the fallback for other agents and for environments
 where a session log is unavailable.
 
 ### MCP management
 
-Claude and Codex MCP servers can be managed while AgentAPI is running. The
-implementation preserves unrelated settings in `.mcp.json` or
-`$CODEX_HOME/config.toml`.
+Claude, Codex and Pi MCP servers can be managed while AgentAPI is running. The
+implementation preserves unrelated settings in `.mcp.json` (Claude),
+`$CODEX_HOME/config.toml` (Codex) or `~/.pi/agent/mcp.json` (Pi).
 
 The API and Session Explorer support:
 
@@ -89,7 +121,9 @@ The API and Session Explorer support:
 
 When an agent is restarted, AgentAPI itself and its HTTP/SSE clients remain
 online. The child agent receives a new process and session-log watcher, although
-its previous in-memory conversation context is not retained.
+its previous in-memory conversation context is not retained. Before restarting,
+AgentAPI updates Codex (`codex update`) and Pi (`pi update --self`), so the
+restarted agent is the latest release; Claude Code updates itself.
 
 ### Run-status webhooks
 
@@ -166,8 +200,11 @@ type:
 - **Claude** — reads the OAuth token from `~/.claude/.credentials.json` and
   extracts Anthropic's unified rate limit headers (5-hour / 7-day / overage
   utilization, subscription type, reset times).
-- **Codex** — reads `OPENAI_API_KEY` and extracts OpenAI's `x-ratelimit-*`
-  headers (request and token limits, remaining quota, reset durations).
+- **Codex** — reads `OPENAI_API_KEY` (or the token in `~/.codex/auth.json`)
+  and extracts OpenAI's `x-ratelimit-*` headers (request and token limits,
+  remaining quota, reset durations).
+- **Pi** — uses the OpenAI or Anthropic login in Pi's `auth.json`, preferring
+  Pi's default provider.
 
 ```bash
 curl http://localhost:3284/usage
@@ -176,9 +213,12 @@ curl http://localhost:3284/usage
 ### Interactive prompt support
 
 The chat UI detects interactive TUI prompts — such as Claude Code's plan
-approval dialog or permission confirmation — and renders them as clickable
-buttons. Previously these prompts were invisible when structured JSONL
-messages were available, causing the agent to appear stuck.
+approval dialog or permission confirmation, Codex's approvals, and Pi's project
+trust prompt — and docks them above the composer as a decision card. Number
+keys pick an option. Multi-select questions (Claude Code's AskUserQuestion with
+`multiSelect`) show checkboxes and a Continue button that moves on to the next
+question or the review step. A numbered list in the agent's answer is not
+mistaken for options. `GET /status` reports the prompt as `terminal_prompt`.
 
 ### Kimi Code CLI
 
@@ -197,6 +237,34 @@ It can also use Kimi's native ACP server after completing `/login` once:
 ```bash
 agentapi server --type=kimi --experimental-acp -- kimi acp
 ```
+
+### Pi coding agent
+
+The `pi` agent type runs the [Pi coding agent](https://pi.dev/)
+(`npm install -g @earendil-works/pi-coding-agent`) in its interactive terminal
+UI. It is auto-detected when the executable name is `pi`:
+
+```bash
+agentapi server -- pi
+```
+
+Log in once with `/login` in Pi (TTY mode in the chat UI works), or set a
+provider key such as `ANTHROPIC_API_KEY`. AgentAPI follows Pi's session log
+(`~/.pi/agent/sessions/`, or `$PI_CODING_AGENT_DIR` /
+`$PI_CODING_AGENT_SESSION_DIR`) for structured messages, so the chat shows
+Pi's tool calls, thinking and token usage like it does for Claude Code and
+Codex.
+
+Pi's dialogs (such as the project trust prompt) can be answered from the chat,
+and the header and tab icon show Pi's logo. The Explorer's MCP tab manages
+Pi's user-level servers in `~/.pi/agent/mcp.json`, and restarting the agent
+runs `pi update --self` first.
+
+AgentAPI starts Pi with its own `--session-id` (a new one on every start or
+restart) so it follows the right session log even when several Pi processes
+share a directory. If you pass `--session`, `--continue`, `--resume` or
+`--session-id` yourself, AgentAPI leaves the session to you; with
+`--continue`/`--resume` the chat falls back to the terminal output.
 
 ### Runtime reliability
 
@@ -267,34 +335,18 @@ Run an HTTP server that lets you control an agent. If you'd like to start an age
 ```bash
 agentapi server -- claude --allowedTools "Bash(git*) Edit Replace"
 ```
-### Pi coding agent
-
-The `pi` agent type runs the [Pi coding agent](https://pi.dev/)
-(`npm install -g @earendil-works/pi-coding-agent`) in its interactive terminal
-UI. It is auto-detected when the executable name is `pi`:
-
-```bash
-agentapi server -- pi
-```
-
-Log in once with `/login` in Pi (TTY mode in the chat UI works), or set a
-provider key such as `ANTHROPIC_API_KEY`. AgentAPI follows Pi's session log
-(`~/.pi/agent/sessions/`, or `$PI_CODING_AGENT_DIR` /
-`$PI_CODING_AGENT_SESSION_DIR`) for structured messages, so the chat shows
-Pi's tool calls, thinking and token usage like it does for Claude Code and
-Codex.
-
-Pi's dialogs (such as the project trust prompt) can be answered from the chat.
-The Explorer's MCP tab manages Pi's user-level servers in
-`~/.pi/agent/mcp.json`, and restarting the agent runs `pi update --self`
-first.
-
 
 You may also use `agentapi` to run the Aider and Goose agents:
 
 ```bash
 agentapi server -- aider --model sonnet --api-key anthropic=sk-ant-apio3-XXX
 agentapi server -- goose
+```
+
+Pi runs through its interactive terminal UI (see [Pi coding agent](#pi-coding-agent)):
+
+```bash
+agentapi server -- pi
 ```
 
 Kimi Code can run through its interactive terminal UI:
@@ -323,12 +375,14 @@ Endpoints:
 - POST `/message` - sends a message to the agent. When a 200 response is returned, AgentAPI has detected that the agent started processing the message
 - GET `/status` - returns the backward-compatible `stable`/`running` status,
   detailed lifecycle (`starting`, `ready`, `running`, `restarting`, `exited`, or
-  `failed`), a session ID, and a monotonically increasing run ID
-- GET `/events` - an SSE stream of events from the agent: message and status updates
+  `failed`), a session ID, a monotonically increasing run ID, the AgentAPI
+  version, the agent's open dialog (`terminal_prompt`) and the terminal width
+  (`terminal_columns`)
+- GET `/events` - an SSE stream of events from the agent: message and status updates (`?sync=1` for incremental replay on reconnect)
 - DELETE `/messages` - clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent process
-- GET `/usage` - returns real-time rate limit utilization from the upstream API (Anthropic or OpenAI)
+- GET `/usage` - returns real-time rate limit utilization from the upstream API (Anthropic or OpenAI) for Claude, Codex or Pi
 - GET/PUT `/webhook` - reads or updates run-status webhook delivery without restarting the agent
-- GET `/mcp` - returns configured MCP servers and the managed config path for Claude or Codex
+- GET `/mcp` - returns configured MCP servers and the managed config path for Claude, Codex or Pi
 - PUT `/mcp` - replaces the complete MCP server set; pass `?restart=true` to restart the PTY agent and apply immediately
 - POST `/mcp/check` - checks remote HTTP connectivity and resolves stdio executables
 - POST `/mcp/servers`, PATCH/DELETE `/mcp/servers/{name}` - creates, updates, or removes one MCP server
