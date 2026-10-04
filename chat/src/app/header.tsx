@@ -1,9 +1,11 @@
 "use client";
 
-import { type ComponentType, useMemo, useState } from "react";
+import { type ComponentType, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { notificationsEnabled, onNotificationsPreferenceChange, setNotificationsEnabled } from "@/lib/background-alerts";
 import { AgentType, useChat } from "@/components/chat-provider";
 import { ModeToggle } from "@/components/mode-toggle";
-import { Activity, Bot, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Moon, Sun, Tag } from "lucide-react";
+import { Activity, BellOff, BellRing, Bot, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Moon, Sun, Tag } from "lucide-react";
 import { useTheme } from "next-themes";
 import { computeTokenTotals, formatTokenCount, getStatusMeta } from "@/lib/session-status";
 import { useWorkingElapsed } from "@/lib/use-elapsed";
@@ -35,6 +37,31 @@ export function Header() {
   useKeyboardShortcutsKey(() => setShortcutsOpen(true));
   const elapsed = useWorkingElapsed(serverStatus);
   const { resolvedTheme, setTheme } = useTheme();
+  const [notify, setNotify] = useState(false);
+  useEffect(() => {
+    const sync = () => setNotify(notificationsEnabled() && typeof Notification !== "undefined" && Notification.permission === "granted");
+    sync();
+    return onNotificationsPreferenceChange(sync);
+  }, []);
+  // Notifications when the agent needs you or finishes while this tab is in
+  // the background. Turning them on asks the browser for permission.
+  const toggleNotifications = async () => {
+    if (notify) {
+      setNotificationsEnabled(false);
+      return;
+    }
+    if (typeof Notification === "undefined") {
+      toast.error("This browser can't show notifications here", {description: "They need a secure (https) page."});
+      return;
+    }
+    const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
+    if (permission !== "granted") {
+      toast.error("Notifications are blocked for this site", {description: "Allow them in the browser's site settings, then try again."});
+      return;
+    }
+    setNotificationsEnabled(true);
+    toast.success("You'll be notified when the agent needs you or finishes");
+  };
 
   const latestTool = useMemo(() => {
     const latestTaskTime = [...messages]
@@ -134,6 +161,10 @@ export function Header() {
             >
               {downloading ? <LoaderCircle className="motion-safe:animate-spin" /> : <Download />}
               Download conversation JSONL
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={(event) => { event.preventDefault(); void toggleNotifications(); }}>
+              {notify ? <BellRing /> : <BellOff />}
+              {notify ? "Background notifications on" : "Notify me in the background"}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setShortcutsOpen(true)}>
               <Keyboard />

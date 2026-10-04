@@ -8,6 +8,7 @@ import MessageList from "./message-list";
 import dynamic from "next/dynamic";
 import {TtyView} from "./tty-view";
 import {DecisionCard, StateStrip} from "./dock";
+import {BackgroundAlerts} from "./background-alerts";
 
 // The Explorer (task index, MCP and Temporal settings) isn't needed for the
 // first paint, so it loads right after, keeping the initial bundle small.
@@ -178,6 +179,7 @@ export function Chat() {
         </>
       )}
       <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <BackgroundAlerts />
     </section>
   );
 }
