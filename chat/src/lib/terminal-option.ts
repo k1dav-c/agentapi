@@ -18,7 +18,16 @@ export interface TerminalOption {
   // options, otherwise the raw sequence that selects the option.
   key: string;
   label: string;
+  // Set on the checkbox options of a multi-select question, where typing
+  // the digit toggles the option instead of answering.
+  checked?: boolean;
 }
+
+// Moves a multi-select question on to the next question, or to the review
+// step where the answers are submitted.
+export const MULTI_SELECT_CONTINUE = "\x1b[C";
+
+const checkboxRe = /^\[([ ✔✓xX])\]\s+(.*)/;
 
 const numberedOptionRe = /^\s*[❯›>]?\s*(\d+)\.\s+(.+)/;
 const cursorOptionRe = /^\s*[❯›]\s+(.+)/;
@@ -43,7 +52,11 @@ export function parseTerminalOptions(prompt: string): TerminalOption[] {
       current = [];
       continue;
     }
-    current.push({key: match[1], label: match[2].trim()});
+    const label = match[2].trim();
+    const checkbox = label.match(checkboxRe);
+    current.push(checkbox
+      ? {key: match[1], label: checkbox[2].trim(), checked: checkbox[1] !== " "}
+      : {key: match[1], label});
     last = current;
   }
   if (last.length > 1) return last;
@@ -78,6 +91,12 @@ export function parseTerminalOptions(prompt: string): TerminalOption[] {
   return [];
 }
 
+export function isMultiSelect(options: TerminalOption[]): boolean {
+  return options.some((option) => option.checked !== undefined);
+}
+
+// Claude Code's tab bar over a question form: "←  ☐ Fruits  ✔ Submit  →".
+const tabBarRe = /^←\s.*→$/;
 const borderRe = /^\s*[─━═-]{10,}\s*$/;
 const hintLineRe = /(to (confirm|cancel|amend)|enter (continue|select)|esc (skip|back|to|quit))/i;
 
@@ -87,14 +106,20 @@ const hintLineRe = /(to (confirm|cancel|amend)|enter (continue|select)|esc (skip
 // lines; the dialog begins after the last horizontal rule or blank gap.
 export function describeTerminalPrompt(prompt: string): { title: string; context: string[] } {
   const lines = prompt.split("\n").map((line) => line.replace(/\s+$/, ""));
-  let optionStart = lines.findIndex((line) => numberedOptionRe.test(line) || cursorOptionRe.test(line));
-  if (optionStart === -1) optionStart = lines.length;
+  // The dialog's options are the last list on screen; a "❯" higher up can be
+  // the agent's input line in the transcript above it.
+  let optionStart = lines.findLastIndex((line) => line.match(numberedOptionRe)?.[1] === "1");
+  if (optionStart === -1) {
+    optionStart = lines.findLastIndex((line) => cursorOptionRe.test(line));
+    if (optionStart === -1) optionStart = lines.length;
+    while (optionStart > 0 && /^\s{2,}\S/.test(lines[optionStart - 1])) optionStart--;
+  }
   let start = 0;
   for (let i = optionStart - 1; i >= 0; i--) {
     if (borderRe.test(lines[i])) { start = i + 1; break; }
     if (i > 0 && lines[i].trim() === "" && lines[i - 1].trim() === "" ) { start = i + 1; break; }
   }
-  const block = lines.slice(start, optionStart).map((line) => line.trim()).filter((line) => line && !hintLineRe.test(line));
+  const block = lines.slice(start, optionStart).map((line) => line.trim()).filter((line) => line && !hintLineRe.test(line) && !tabBarRe.test(line));
   let questionIndex = -1;
   for (let i = block.length - 1; i >= 0; i--) {
     if (block[i].includes("?")) { questionIndex = i; break; }

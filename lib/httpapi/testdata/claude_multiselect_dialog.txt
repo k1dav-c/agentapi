@@ -1,0 +1,24 @@
+  想調整天數、預算或旅伴類型（親子、情侶、美食團）的話，跟我說一聲，我再幫你改。
+
+✻ Brewed for 22s · done 2:44 PM
+
+❯ Use the AskUserQuestion tool once with multiSelect: true
+────────────────────────────────────────────────────────────────────────────────
+←  ☒ Fruits  ✔ Submit  →
+
+Which fruits do you like?
+
+❯ 1. [✔] Apple
+         Crisp and sweet, an everyday classic.
+  2. [ ] Banana
+         Soft, sweet, and easy to peel.
+  3. [✔] Cherry
+         Small, juicy stone fruit.
+  4. [ ] Durian
+         Creamy tropical fruit with a strong smell.
+  5. [ ] Type something
+     Submit
+────────────────────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

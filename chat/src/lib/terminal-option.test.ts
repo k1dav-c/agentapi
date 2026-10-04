@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {describeTerminalPrompt, parseTerminalOptions, terminalOptionKeystrokes} from "./terminal-option";
+import {describeTerminalPrompt, isMultiSelect, parseTerminalOptions, terminalOptionKeystrokes} from "./terminal-option";
 import {readFileSync} from "node:fs";
 
 describe("terminalOptionKeystrokes", () => {
@@ -99,5 +99,28 @@ describe("describeTerminalPrompt", () => {
   test("Claude folder trust", () => {
     const {title} = describeTerminalPrompt(fixture("claude_trust_dialog.txt"));
     expect(title).toBe("Quick safety check: Is this a project you created or one you trust?");
+  });
+
+  test("Claude multi-select: the tab bar is not context", () => {
+    expect(describeTerminalPrompt(fixture("claude_multiselect_dialog.txt"))).toEqual({title: "Which fruits do you like?", context: []});
+  });
+});
+
+describe("multi-select questions", () => {
+  const prompt = readFileSync(new URL("../../../lib/httpapi/testdata/claude_multiselect_dialog.txt", import.meta.url), "utf8");
+  test("checkbox options carry their state without the box", () => {
+    const options = parseTerminalOptions(prompt);
+    expect(isMultiSelect(options)).toBe(true);
+    expect(options.map((option) => [option.key, option.label, option.checked])).toEqual([
+      ["1", "Apple", true],
+      ["2", "Banana", false],
+      ["3", "Cherry", true],
+      ["4", "Durian", false],
+      ["5", "Type something", false],
+      ["6", "Chat about this", undefined],
+    ]);
+  });
+  test("single-select options are not multi-select", () => {
+    expect(isMultiSelect(parseTerminalOptions("Proceed?\n❯ 1. Yes\n  2. No"))).toBe(false);
   });
 });

@@ -21,6 +21,7 @@
 - The sub-agents (Agents) panel, together with the `GET /agents` endpoint and the `agents_update` SSE event
 
 ### Fixes
+- Chat: multi-select questions from Claude Code (AskUserQuestion with `multiSelect`) can be answered in the decision card. Options show as checkboxes that toggle on click or with their number key, and Continue moves on to the next question or the review step. Previously each option was a one-shot button, so the answer could not be submitted from the chat. The question form's tab bar no longer shows as context, and an input line left on screen above a dialog no longer becomes its title
 - Chat: a queued task no longer lingers as "queued" for up to 30 s after the server has sent it to the agent, which looked like a message that failed to send
 - Chat: the Geist webfont never applied (its CSS variable was defined on <body> while Tailwind sets font-family on <html>), so the UI used the system font
 - Chat accessibility: the composer's Task/Terminal tabs controlled panels that didn't exist, the attachment input had no label, the page had no level-one heading, and light-theme state colors were below 4.5:1 contrast

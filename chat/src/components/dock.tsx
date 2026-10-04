@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { TerminalSquare } from "lucide-react";
+import { Check, TerminalSquare } from "lucide-react";
 import { useChat } from "./chat-provider";
 import { computeTokenTotals, formatTokenCount, getAgentState } from "@/lib/session-status";
 import { useWorkingElapsed } from "@/lib/use-elapsed";
-import { describeTerminalPrompt, parseTerminalOptions, terminalOptionKeystrokes } from "@/lib/terminal-option";
+import { MULTI_SELECT_CONTINUE, describeTerminalPrompt, isMultiSelect, parseTerminalOptions, terminalOptionKeystrokes } from "@/lib/terminal-option";
 import { getToolCommand } from "@/lib/tool-format";
 import { splitThinking } from "@/lib/thinking";
 
@@ -76,6 +76,7 @@ export function DecisionCard({ onOpenTerminal }: { onOpenTerminal?: () => void }
   const [sentFor, setSentFor] = useState("");
   const options = useMemo(() => parseTerminalOptions(terminalPrompt), [terminalPrompt]);
   const { title, context } = useMemo(() => describeTerminalPrompt(terminalPrompt), [terminalPrompt]);
+  const multi = isMultiSelect(options);
   const sent = sentFor !== "" && sentFor === terminalPrompt;
   // Forget the answer once the dialog closes, so the same question asked
   // again (e.g. the same permission for another command) can be answered.
@@ -85,8 +86,17 @@ export function DecisionCard({ onOpenTerminal }: { onOpenTerminal?: () => void }
 
   const choose = (key: string) => {
     if (sent) return;
-    setSentFor(terminalPrompt);
+    const option = options.find((candidate) => candidate.key === key);
+    // A checkbox toggles and the question stays open, so it doesn't lock
+    // the card; the redrawn prompt shows the new state.
+    if (option?.checked === undefined) setSentFor(terminalPrompt);
     void sendTerminalInput(terminalOptionKeystrokes(agentType, key));
+  };
+
+  const continueMulti = () => {
+    if (sent) return;
+    setSentFor(terminalPrompt);
+    void sendTerminalInput(MULTI_SELECT_CONTINUE);
   };
 
   useEffect(() => {
@@ -117,7 +127,7 @@ export function DecisionCard({ onOpenTerminal }: { onOpenTerminal?: () => void }
           {options.length > 0 && options.every((option) => /^\d+$/.test(option.key)) && (
             <>
               <kbd className="rounded border border-b-2 px-1 font-mono text-[10px]">1</kbd>–
-              <kbd className="rounded border border-b-2 px-1 font-mono text-[10px]">{options.length}</kbd> to choose
+              <kbd className="rounded border border-b-2 px-1 font-mono text-[10px]">{multi ? options.filter((option) => option.checked !== undefined).length : options.length}</kbd> {multi ? "to toggle" : "to choose"}
             </>
           )}
         </span>
@@ -134,6 +144,8 @@ export function DecisionCard({ onOpenTerminal }: { onOpenTerminal?: () => void }
               key={`${option.key}-${index}`}
               type="button"
               disabled={sent}
+              role={option.checked === undefined ? undefined : "checkbox"}
+              aria-checked={option.checked}
               onClick={() => choose(option.key)}
               className="flex min-h-10 items-center gap-3 rounded-lg border px-2.5 py-1.5 text-left text-[13px] outline-none transition hover:border-state-needs/60 hover:bg-state-needs/10 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
             >
@@ -141,10 +153,28 @@ export function DecisionCard({ onOpenTerminal }: { onOpenTerminal?: () => void }
                 {/^\d+$/.test(option.key) ? option.key : index + 1}
               </kbd>
               <span className="min-w-0 flex-1">{option.label}</span>
+              {option.checked !== undefined && (
+                <span
+                  aria-hidden="true"
+                  className={`grid size-4 shrink-0 place-items-center rounded border ${option.checked ? "border-state-needs bg-state-needs text-background" : "border-muted-foreground/50"}`}
+                >
+                  {option.checked && <Check className="size-3" strokeWidth={3} />}
+                </span>
+              )}
             </button>
           ))
         ) : (
           <p className="text-xs text-muted-foreground">This prompt needs typed input.</p>
+        )}
+        {multi && (
+          <button
+            type="button"
+            disabled={sent}
+            onClick={continueMulti}
+            className="min-h-10 rounded-lg bg-state-needs px-3 text-[13px] font-semibold text-background outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+          >
+            Continue
+          </button>
         )}
         <div className="flex items-center justify-between gap-3 pt-0.5 text-[11px] text-muted-foreground">
           <span role="status">{sent ? "Answer sent. Waiting for the agent…" : ""}</span>
