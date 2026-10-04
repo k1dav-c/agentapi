@@ -73,11 +73,16 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
   const [restartingAgent, setRestartingAgent] = useState(false);
   const mcpImportRef = useRef<HTMLInputElement>(null);
   const profileImportRef = useRef<HTMLInputElement>(null);
+  // Every list is newest first; items keep their task number.
   const tasks = useMemo(
-    () => messages.filter((message) => message.role === "user"),
+    () =>
+      messages
+        .filter((message) => message.role === "user")
+        .map((message, index) => ({message, number: index + 1}))
+        .reverse(),
     [messages],
   );
-  const links = useMemo(() => discoverLinks(messages), [messages]);
+  const links = useMemo(() => discoverLinks(messages).reverse(), [messages]);
   const files = useMemo(() => {
     const found = new Map<string, number>();
     let task = 0;
@@ -87,7 +92,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
         if (!found.has(match[1])) found.set(match[1], task);
       }
     }
-    return [...found].map(([path, sourceTask]) => ({path, sourceTask}));
+    return [...found].map(([path, sourceTask]) => ({path, sourceTask})).reverse();
   }, [messages]);
 
   const navigate = (number: number) => {
@@ -340,17 +345,17 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
           </TabsContent>
           <TabsContent value="index" className="min-h-0 overflow-y-auto overscroll-contain p-4">
             <div className="space-y-2">
-              {tasks.map((task, index) => (
+              {tasks.map(({message, number}) => (
                 <button
-                  key={task.id ?? index}
+                  key={message.id ?? `task-${number}`}
                   type="button"
                   className="block w-full rounded-xl border p-3 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => navigate(index + 1)}
+                  onClick={() => navigate(number)}
                 >
                   <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                    Task {index + 1}
+                    Task {number}
                   </span>
-                  <span className="mt-1 block line-clamp-2 text-sm">{task.content}</span>
+                  <span className="mt-1 block line-clamp-2 text-sm">{message.content}</span>
                 </button>
               ))}
             </div>
