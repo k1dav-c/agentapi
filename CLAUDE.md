@@ -70,7 +70,7 @@ The `exhaustive` golangci-lint checker is enabled for both switches and maps. Wh
 ## Conventions
 
 - Versioning: `internal/version.Version` stays `0.0.0-dev` in source; builds stamp the real version via `-ldflags -X` (`make build` uses the latest `vX.Y.Z` tag). Releases are cut by CI on push to `main` from Conventional Commit messages (`next-version.sh`), so use `feat:`/`fix:`/`feat!:` prefixes accordingly
-- OpenAPI schema is auto-generated: `go run main.go server --print-openapi dummy > openapi.json` (via `go generate`)
+- OpenAPI schema is auto-generated: run `make gen` and commit `openapi.json`. Don't redirect `server --print-openapi` into the file yourself: it escapes `<`/`>` as `\u003c`/`\u003e`, `make gen` doesn't, and the Release workflow fails on the difference
 - The chat UI build output goes to `lib/httpapi/chat/` with a magic base path placeholder that gets replaced at runtime
 - Environment variables use `AGENTAPI_` prefix (e.g., `AGENTAPI_ALLOWED_HOSTS`)
 - Server defaults: port 3284, chat at `/chat`, docs at `/docs`
