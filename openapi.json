@@ -334,7 +334,7 @@
             "type": "string"
           },
           "path": {
-            "description": "Absolute path of the managed config file: \u003cworking-directory\u003e/.mcp.json for Claude, $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex, or $PI_CODING_AGENT_DIR/mcp.json (default ~/.pi/agent/mcp.json) for Pi.",
+            "description": "Absolute path of the managed config file: <working-directory>/.mcp.json for Claude, $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex, or $PI_CODING_AGENT_DIR/mcp.json (default ~/.pi/agent/mcp.json) for Pi.",
             "type": "string"
           },
           "servers": {
