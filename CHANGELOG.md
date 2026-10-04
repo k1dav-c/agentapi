@@ -21,6 +21,7 @@
 - The sub-agents (Agents) panel, together with the `GET /agents` endpoint and the `agents_update` SSE event
 
 ### Fixes
+- Chat: a queued task no longer lingers as "queued" for up to 30 s after the server has sent it to the agent, which looked like a message that failed to send
 - Chat: the Geist webfont never applied (its CSS variable was defined on <body> while Tailwind sets font-family on <html>), so the UI used the system font
 - Chat accessibility: the composer's Task/Terminal tabs controlled panels that didn't exist, the attachment input had no label, the page had no level-one heading, and light-theme state colors were below 4.5:1 contrast
 - Codex: reasoning that is only logged encrypted no longer shows as an "(encrypted)" thinking block; reasoning summaries are shown instead

@@ -382,13 +382,19 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setReconnectNonce((value) => value + 1);
   }, []);
   const lastQueueRefreshRef = useRef(0);
+  const queuedCountRef = useRef(0);
   const refreshQueue = useCallback(async (force = false) => {
     const now = Date.now();
     // Throttle: skip if last refresh was less than 30s ago, unless forced.
-    if (!force && now - lastQueueRefreshRef.current < 30_000) return;
+    // A non-empty queue is never throttled: the server sends a queued task
+    // as soon as the agent is free, and a stale entry looks like a message
+    // that failed to send.
+    if (!force && queuedCountRef.current === 0 && now - lastQueueRefreshRef.current < 30_000) return;
     lastQueueRefreshRef.current = now;
     try {
-      setQueuedMessages(await api.getQueue());
+      const queue = await api.getQueue();
+      queuedCountRef.current = queue.length;
+      setQueuedMessages(queue);
     } catch {
       // The connection status handler reports connectivity failures.
     }
