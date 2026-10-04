@@ -7,8 +7,6 @@
 - `GET /events?sync=1` (opt-in): the stream starts with a `session_sync` event and every `message_update` / `rich_message_update` carries a `seq`. Reconnecting with `&since=<seq>&epoch=<epoch>` replays only what changed since; a different epoch (server restart, conversation reset) replays everything, and a reset notifies connected clients. Clients that don't pass `sync` get the same stream as before
 - The chat UI shows the AgentAPI version next to the agent name (header, session details and embed status bar). The server reports it as `agentapi_version` in `GET /status` and the `status_change` SSE event
 - Releases are cut automatically on every push to `main`: the version is bumped from Conventional Commits (breaking → major, `feat` → minor, otherwise patch), tagged `vX.Y.Z`, and stamped into the release binaries
-
-### Features
 - TTY mode: an escape hatch for when the chat view looks wrong. The terminal button in the chat header swaps the conversation for the agent's terminal screen (xterm.js) and sends every key straight to the agent, including arrows, Ctrl/Alt keys, multi-line paste (as one bracketed paste) and IME input. "Back to chat" returns to the chat view; the conversation is unaffected
 - Codex: thinking shows in the chat. AgentAPI starts Codex with `-c model_reasoning_summary="auto"` so it logs readable reasoning summaries (otherwise its session log only holds encrypted reasoning), unless `model_reasoning_summary` is already set on the command line or in `$CODEX_HOME/config.toml`. Only applies when the program is the `codex` CLI itself, not a wrapper started with `--type codex`
 - Explorer: Links, Files and Index list the newest task first; items keep their task numbers
