@@ -56,7 +56,6 @@ interface MessageListProps {
   richMessages: RichMessage[];
   serverStatus: ServerStatus;
   agentType: AgentType;
-  onSelectPrompt?: (prompt: string) => void;
   onRetryMessage: (clientId: string) => Promise<boolean>;
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
@@ -70,7 +69,6 @@ export default function MessageList({
   richMessages,
   serverStatus,
   agentType,
-  onSelectPrompt,
   onRetryMessage,
   onEditMessage,
   onDismissMessage,
@@ -461,7 +459,6 @@ export default function MessageList({
           <EmptyState
             serverStatus={serverStatus}
             agentType={agentType}
-            onSelectPrompt={onSelectPrompt}
             startup={timeline.prelude}
           />
         ) : (

@@ -115,7 +115,6 @@ export function Chat() {
             richMessages={richMessages}
             serverStatus={serverStatus}
             agentType={agentType}
-            onSelectPrompt={setSuggestedPrompt}
             onRetryMessage={retryFailedMessage}
             onEditMessage={(clientId, content) => {
               dismissFailedMessage(clientId);
