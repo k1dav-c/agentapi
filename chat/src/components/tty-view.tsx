@@ -7,6 +7,7 @@ import type {Terminal} from "@xterm/xterm";
 import {useChat} from "./chat-provider";
 import {Button} from "./ui/button";
 import {OrderedInput, screenToTerminalOutput} from "@/lib/tty";
+import {terminalShortcuts, type TerminalShortcut} from "@/lib/terminal-keys";
 
 // AgentAPI runs the agent in an 80-column terminal by default; the mirror
 // uses the same width so lines wrap exactly as the agent drew them.
@@ -23,6 +24,24 @@ export function TtyView({onExit}: {onExit: () => void}) {
   const [connected, setConnected] = useState(false);
   // Width of one terminal cell, for the column ruler.
   const [cellWidth, setCellWidth] = useState(0);
+  const inputRef = useRef<OrderedInput | null>(null);
+  const termRef = useRef<Terminal | null>(null);
+  // A risky shortcut (Ctrl+D, Ctrl+Z) waiting for its second press.
+  const [armed, setArmed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!armed) return;
+    const timer = window.setTimeout(() => setArmed(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [armed]);
+  const pressShortcut = (shortcut: TerminalShortcut) => {
+    if (shortcut.risky && armed !== shortcut.label) {
+      setArmed(shortcut.label);
+      return;
+    }
+    setArmed(null);
+    inputRef.current?.push(shortcut.value);
+    termRef.current?.focus();
+  };
   // The provider recreates this function on every render; read it through
   // a ref so the terminal isn't rebuilt each time.
   const sendRef = useRef(sendTerminalInput);
@@ -72,6 +91,8 @@ export function TtyView({onExit}: {onExit: () => void}) {
         });
       });
       term.onData((data) => input.push(data));
+      inputRef.current = input;
+      termRef.current = term;
 
       // Redraw the latest snapshot at most once per frame, keeping the
       // reader's place if they scrolled up.
@@ -150,6 +171,27 @@ export function TtyView({onExit}: {onExit: () => void}) {
           )}
           <div ref={containerRef} className="min-h-0 flex-1" aria-label="Agent terminal" />
         </div>
+      </div>
+      {/* Keys a phone keyboard can't send. Buttons don't take focus, so the
+          terminal (and the on-screen keyboard) stays active. */}
+      <div
+        className="flex shrink-0 gap-1.5 overflow-x-auto border-t bg-background/95 px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2"
+        aria-label="Terminal keys"
+      >
+        {terminalShortcuts.map((shortcut) => (
+          <button
+            key={shortcut.label}
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => pressShortcut(shortcut)}
+            title={shortcut.risky ? `Send ${shortcut.label} (press twice)` : `Send ${shortcut.label}`}
+            className={`h-8 shrink-0 rounded-md border px-2.5 font-mono text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring ${
+              armed === shortcut.label ? "border-state-fault bg-state-fault text-white" : "bg-card hover:bg-muted"
+            }`}
+          >
+            {armed === shortcut.label ? `${shortcut.display} again` : shortcut.display}
+          </button>
+        ))}
       </div>
     </div>
   );
