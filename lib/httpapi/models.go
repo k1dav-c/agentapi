@@ -62,6 +62,8 @@ type StatusResponse struct {
 		Version   string         `json:"agentapi_version" doc:"Version of the AgentAPI server."`
 		// See StatusChangeBody.TerminalPrompt.
 		TerminalPrompt string `json:"terminal_prompt" doc:"Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise."`
+		// See StatusChangeBody.SessionName.
+		SessionName string `json:"session_name,omitempty" doc:"Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it."`
 		// See StatusChangeBody.TerminalColumns.
 		TerminalColumns uint16 `json:"terminal_columns,omitempty" doc:"Width of the emulated terminal the agent runs in, in columns (PTY transport only)."`
 	}

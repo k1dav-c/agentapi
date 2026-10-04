@@ -98,6 +98,9 @@ type StatusChangeBody struct {
 	TerminalPrompt string `json:"terminal_prompt" doc:"Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise."`
 	// TerminalColumns lets a terminal mirror wrap lines where the agent's
 	// terminal does.
+	// SessionName is what the agent calls the session, for telling
+	// sessions apart.
+	SessionName     string `json:"session_name,omitempty" doc:"Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it."`
 	TerminalColumns uint16 `json:"terminal_columns,omitempty" doc:"Width of the emulated terminal the agent runs in, in columns (PTY transport only)."`
 }
 
@@ -150,6 +153,7 @@ type EventEmitter struct {
 	handoffRevision     uint64
 	agentType           mf.AgentType
 	terminalColumns     uint16
+	sessionName         string
 	chans               map[int]chan Event
 	chanIdx             int
 	subscriptionBufSize uint
@@ -348,6 +352,17 @@ func (e *EventEmitter) SetLifecycle(lifecycle LifecycleState) {
 	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
 }
 
+// SetSessionName records the name the agent gave its session.
+func (e *EventEmitter) SetSessionName(name string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.sessionName == name {
+		return
+	}
+	e.sessionName = name
+	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+}
+
 func (e *EventEmitter) StatusSnapshot() StatusChangeBody {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -359,6 +374,7 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 		Status: e.status, Lifecycle: e.lifecycle, SessionID: e.sessionID,
 		RunID: e.runID, AgentType: e.agentType, Version: version.Version,
 		TerminalPrompt: e.terminalPrompt, TerminalColumns: e.terminalColumns,
+		SessionName: e.sessionName,
 	}
 }
 
@@ -551,6 +567,7 @@ func (e *EventEmitter) Reset() {
 	e.errors = nil
 	e.screen = ""
 	e.terminalPrompt = ""
+	e.sessionName = ""
 	e.pendingPrompt = ""
 	if e.promptTimer != nil {
 		e.promptTimer.Stop()

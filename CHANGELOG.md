@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Features
+- The chat header shows the session name, the one the agent gives it: Claude Code's title (or its `/rename`), Codex's thread name, or Pi's `/name`. On a phone it replaces the agent name next to the agent's mark. `GET /status` and `status_change` report it as `session_name`
 - Chat: your messages read as yours. Each prompt sits in a tinted block labelled "You", and the agent's turn starts with its mark and name (e.g. Pi), so the prompt and the reply no longer run together
 - Pi coding agent support (`--type=pi`, auto-detected for the `pi` executable). The chat shows Pi's replies, tool calls, thinking and token usage from its session log, and knows when Pi is ready for input from its editor
 - Pi in the chat: the header and tab icon show Pi's logo; Pi's dialogs (such as project trust) appear as a question card; the Explorer's MCP tab edits Pi's servers (`~/.pi/agent/mcp.json`); `GET /usage` reports the limits of the provider Pi is logged in to; and Restart runs `pi update --self` first, like `codex update` for Codex

@@ -1107,6 +1107,10 @@
             "description": "Identifier for this AgentAPI server session.",
             "type": "string"
           },
+          "session_name": {
+            "description": "Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it.",
+            "type": "string"
+          },
           "status": {
             "$ref": "#/components/schemas/AgentStatus",
             "description": "Backward-compatible agent activity status."
@@ -1163,6 +1167,10 @@
           },
           "session_id": {
             "description": "Identifier for this AgentAPI server session.",
+            "type": "string"
+          },
+          "session_name": {
+            "description": "Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it.",
             "type": "string"
           },
           "status": {

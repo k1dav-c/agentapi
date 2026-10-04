@@ -584,6 +584,27 @@ func (s *Server) startJSONLWatcher(pid int) {
 	watchCtx, cancel := context.WithCancel(s.jsonlParentCtx)
 	s.jsonlWatcherCancel = cancel
 
+	// A new agent process starts a new session, unnamed until the agent
+	// names it.
+	s.emitter.SetSessionName("")
+	namer := jsonlwatcher.NewSessionNamer(string(s.agentType))
+	if polled, ok := namer.(jsonlwatcher.PolledSessionNamer); ok {
+		go func() {
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-watchCtx.Done():
+					return
+				case <-ticker.C:
+					if name, changed := polled.Poll(); changed {
+						s.emitter.SetSessionName(name)
+					}
+				}
+			}
+		}()
+	}
+
 	w := jsonlwatcher.New(jsonlwatcher.Config{
 		Resolver: resolver,
 		Parser:   parser,
@@ -592,6 +613,11 @@ func (s *Server) startJSONLWatcher(pid int) {
 			s.emitter.EmitRichMessage(msg)
 		},
 		OnLine: func(line []byte) {
+			if namer != nil {
+				if name, changed := namer.Name(line); changed {
+					s.emitter.SetSessionName(name)
+				}
+			}
 			events, err := sessionEventParser.ParseSessionEvents(line)
 			if err != nil {
 				s.logger.Debug("Failed to normalize session event", "error", err)
@@ -765,6 +791,7 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 	resp.Body.Version = snapshot.Version
 	resp.Body.TerminalPrompt = snapshot.TerminalPrompt
 	resp.Body.TerminalColumns = snapshot.TerminalColumns
+	resp.Body.SessionName = snapshot.SessionName
 
 	return resp, nil
 }
