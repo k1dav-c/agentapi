@@ -563,6 +563,14 @@ func (s *Server) startJSONLWatcher(pid int) {
 		}
 		parser = jsonlwatcher.NewCodexParser()
 		sessionEventParser = jsonlwatcher.NewCodexSessionEventParser()
+	case mf.AgentTypePi:
+		resolver = &jsonlwatcher.PiResolver{
+			PID:       pid,
+			CWD:       s.cwd,
+			NotBefore: time.Now(),
+		}
+		parser = jsonlwatcher.NewPiParser()
+		sessionEventParser = jsonlwatcher.NewPiSessionEventParser()
 	}
 
 	if resolver == nil || parser == nil {
