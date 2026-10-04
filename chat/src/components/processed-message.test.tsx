@@ -86,11 +86,10 @@ describe("ProcessedMessage links", () => {
     expect(html).toContain("main");
   });
 
-  test("renders blockquotes with a visible border and background", () => {
+  test("renders blockquotes with a visible rule", () => {
     const html = render("> Important context", true);
     expect(html).toContain("<blockquote");
-    expect(html).toContain("border-l-4");
-    expect(html).toContain("bg-muted/60");
+    expect(html).toContain("border-l-2");
   });
 
   test("renders unordered and ordered lists with visible markers", () => {
@@ -99,7 +98,7 @@ describe("ProcessedMessage links", () => {
     expect(html).toContain("list-disc");
     expect(html).toContain("<ol");
     expect(html).toContain("list-decimal");
-    expect(html).toContain("marker:text-primary");
+    expect(html).toContain("marker:text-muted-foreground");
   });
 
   test("highlights case-insensitive raw output search matches", () => {
