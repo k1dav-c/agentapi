@@ -160,21 +160,23 @@ export function TaskGroup({
   return (
     <section
       id={`task-${number}`}
-      className={`task-entry grid scroll-mt-16 grid-cols-1 gap-x-6 py-7 sm:grid-cols-[3.25rem_minmax(0,1fr)] ${
+      className={`task-entry relative scroll-mt-16 py-7 ${
         isCurrentSearchResult ? "rounded-lg ring-2 ring-ring" : ""
       }`}
       data-status={waitingForUser ? "waiting" : status}
       data-search-result={searchResultIndex}
     >
-      <div className="hidden pt-px text-right font-mono text-[11px] leading-5 tabular-nums text-muted-foreground sm:block">
+      {/* The time rail hangs in the left margin when there is room for it,
+          so the text column itself stays centered. */}
+      <div className="absolute right-full top-7 mr-6 hidden w-[3.25rem] pt-px text-right font-mono text-[11px] leading-5 tabular-nums text-muted-foreground lg:block">
         {startTime && <time dateTime={startedAt}>{startTime}</time>}
         {duration && <div className={status === "running" ? "text-state-working" : ""}>{duration}</div>}
       </div>
-      <div className="min-w-0 max-w-[46rem] xl:mr-[17rem] xl:flow-root">
+      <div className="min-w-0 min-[84rem]:flow-root">
         <header className="mb-2 flex min-h-7 items-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.06em] text-muted-foreground">
           <span>Task {number}</span>
           {(startTime || duration) && (
-            <span className="normal-case tracking-normal tabular-nums sm:hidden">
+            <span className="normal-case tracking-normal tabular-nums lg:hidden">
               {[startTime, duration].filter(Boolean).join(" · ")}
             </span>
           )}
@@ -319,7 +321,8 @@ export function TaskGroup({
 // Thinking as a sidenote: on wide screens it sits in the right margin next to
 // the step it explains; narrower screens show a one-line row that expands.
 function ThinkingNote({content}: {content: string}) {
-  const wide = useMediaQuery("(min-width: 1280px)");
+  // Wide enough for a 17rem note in the margin beside the centered column.
+  const wide = useMediaQuery("(min-width: 84rem)");
   const [open, setOpen] = useState(false);
   const {title, body} = splitThinking(content);
   if (wide) {

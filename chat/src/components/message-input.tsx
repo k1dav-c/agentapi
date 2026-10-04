@@ -458,8 +458,8 @@ export default function MessageInput({
   return (
     <div className="shrink-0 border-t bg-background/90 backdrop-blur-xl">
       {/* Aligned with the transcript's text column (past the time rail). */}
-      <div className="mx-auto w-full max-w-[72rem] px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 sm:px-6 sm:pb-3 sm:pt-3">
-       <div className="grid max-w-[46rem] grid-cols-[minmax(0,1fr)] gap-2 sm:ml-[4.75rem]">
+      <div className="mx-auto w-full max-w-[49rem] px-4 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 sm:px-6 sm:pb-3 sm:pt-3">
+       <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
         {dock}
         <DragDrop
           onFilesAdded={handleFilesAdded}

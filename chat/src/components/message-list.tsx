@@ -385,7 +385,7 @@ export default function MessageList({
       >
         {(searchOpen || filtersActive) && (
           <div className="sticky top-0 z-10 border-b bg-background/95 px-3 py-1.5 backdrop-blur-xl sm:px-6">
-            <div className="mx-auto flex w-full max-w-[72rem] flex-wrap items-center gap-1.5 sm:gap-2">
+            <div className="mx-auto flex w-full max-w-[46rem] flex-wrap items-center gap-1.5 sm:gap-2">
               <label className="flex min-h-8 min-w-48 flex-1 items-center gap-2 rounded-md border bg-card px-2.5 text-xs">
                 <Search className="size-3.5 text-muted-foreground" />
                 <span className="sr-only">Search all tasks</span>
@@ -462,10 +462,12 @@ export default function MessageList({
             startup={timeline.prelude}
           />
         ) : (
-          <div className="mx-auto w-full max-w-[72rem] px-4 pb-10 pt-3 sm:px-6">
+          <div className="mx-auto w-full max-w-[49rem] px-4 pb-10 pt-3 sm:px-6">
+            {/* One reading column, centered: 46rem of text inside the padding.
+                The time rail and thinking notes sit in the margins beside it. */}
             {timeline.prelude.length > 0 && <StartupScreen messages={timeline.prelude} />}
             {hiddenTaskCount > 0 && (
-              <div className="py-4 sm:pl-[4.75rem]">
+              <div className="py-4">
                 <Button type="button" variant="outline" size="sm" onClick={() => setShowAllTasks(true)} className="h-8 rounded-full text-xs">
                   Show {hiddenTaskCount} older {hiddenTaskCount === 1 ? "task" : "tasks"}
                 </Button>
@@ -492,7 +494,7 @@ export default function MessageList({
               return (
               <React.Fragment key={task.key}>
               {showDateSep && (
-                <div className="date-label pt-5 font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground sm:pl-[4.75rem]">
+                <div className="date-label pt-5 font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
                   {formatDateLabel(currentDate)}
                 </div>
               )}

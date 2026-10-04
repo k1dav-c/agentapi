@@ -11,18 +11,15 @@ import { MessageItem } from "./message-item";
 // terminal never become tasks), it holds the real conversation and opens.
 export function StartupScreen({
   messages,
-  inset = true,
 }: {
   messages: (Message | DraftMessage)[];
-  // Align with the task column (past the time rail).
-  inset?: boolean;
 }) {
   // Agent replies start with ● (Claude Code) or • (Codex); a startup
   // banner has none.
   const substantial = messages.some((message) => /^\s*[●•⏺]\s+\S/m.test(message.content));
   const [open, setOpen] = useState(substantial);
   return (
-    <div className={`py-3 ${inset ? "sm:pl-[4.75rem]" : ""}`}>
+    <div className="py-3">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -66,13 +63,13 @@ export function EmptyState({
       : "Describe a task below. Tasks you send while the agent is busy wait in the queue and run in order.";
 
   return (
-    <div className="mx-auto flex min-h-full w-full max-w-[44rem] flex-col justify-center px-6 py-12">
+    <div className="mx-auto flex min-h-full w-full max-w-[49rem] flex-col justify-center px-6 py-12">
       <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">New session</p>
       <h2 className="mt-2 text-balance text-3xl font-semibold tracking-[-0.02em] sm:text-4xl">{heading}</h2>
       <p className="mt-3 max-w-[34rem] text-pretty text-[15px] leading-[1.65] text-muted-foreground">{detail}</p>
       {startup.length > 0 && (
         <div className="mt-6">
-          <StartupScreen messages={startup} inset={false} />
+          <StartupScreen messages={startup} />
         </div>
       )}
     </div>
