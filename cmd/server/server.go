@@ -262,10 +262,14 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		transport = "acp"
 	} else {
 		agentStartedAt = time.Now()
+		programArgs := argsToPass[1:]
+		if agentType == AgentTypeCodex {
+			programArgs = withCodexReasoningSummary(programArgs, codexConfigPath())
+		}
 		setupAgentProcess := func(context.Context) (*termexec.Process, error) {
 			return httpapi.SetupProcess(ctx, httpapi.SetupProcessConfig{
 				Program:        agent,
-				ProgramArgs:    argsToPass[1:],
+				ProgramArgs:    programArgs,
 				TerminalWidth:  termWidth,
 				TerminalHeight: termHeight,
 				AgentType:      agentType,

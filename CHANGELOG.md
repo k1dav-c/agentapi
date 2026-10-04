@@ -8,6 +8,7 @@
 
 ### Features
 - TTY mode: an escape hatch for when the chat view looks wrong. The terminal button in the chat header swaps the conversation for the agent's terminal screen (xterm.js) and sends every key straight to the agent, including arrows, Ctrl/Alt keys, multi-line paste (as one bracketed paste) and IME input. "Back to chat" returns to the chat view; the conversation is unaffected
+- Codex: thinking shows in the chat. AgentAPI starts Codex with `-c model_reasoning_summary="auto"` so it logs readable reasoning summaries (otherwise its session log only holds encrypted reasoning), unless `model_reasoning_summary` is already set on the command line or in `$CODEX_HOME/config.toml`
 - Explorer: Links, Files and Index list the newest task first; items keep their task numbers
 - Codex: restarting the agent (Explorer → Restart, `DELETE /messages`, or an MCP change with restart) runs `codex update` before starting it again, so the restarted Codex is the latest release. A failed update (e.g. offline) still restarts the installed version. Claude Code updates itself in the background, so its restart already starts the latest version
 
@@ -15,6 +16,7 @@
 - The sub-agents (Agents) panel, together with the `GET /agents` endpoint and the `agents_update` SSE event
 
 ### Fixes
+- Codex: reasoning that is only logged encrypted no longer shows as an "(encrypted)" thinking block; reasoning summaries are shown instead
 - Chat: option buttons ("Select an option or switch to Terminal tab…") no longer appear under answers that merely contain a numbered list or words like "allow", "approve" or "sign in". The server now reports the prompt the agent is actually showing as `terminal_prompt` in `GET /status` and `status_change` (only when its input box is gone), and the chat shows a single option bar from it at the end of the conversation. A prompt is reported once it has been on screen for a second (Claude Code ignores keys sent the moment a dialog is drawn) and cleared as soon as it changes or goes away. Options come from the last numbered list in the prompt, and unnumbered options (Claude's folder trust dialog) move the cursor by the right number of rows
 - Claude Code: agent replies are split into separate blocks again after a resumed session (`--continue`, `/resume`) or `/clear`. Claude Code can advertise a session id whose JSONL file is never written; the watcher waited for that file forever and never picked up the session actually in use, so the chat UI fell back to one undivided block of screen text
 - Claude Code: rich messages work in working directories containing `.`, `_` or other non-alphanumeric characters (e.g. `~/.cache/app`, `cpt_sft_baseline`). Claude Code turns every such character into `-` in its project directory name; only `/` was converted. Session files are also found by id if the directory name still doesn't match
