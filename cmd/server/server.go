@@ -24,6 +24,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
 	st "github.com/coder/agentapi/lib/screentracker"
@@ -122,6 +123,7 @@ const (
 	AgentTypeAmazonQ  AgentType = msgfmt.AgentTypeAmazonQ
 	AgentTypeOpencode AgentType = msgfmt.AgentTypeOpencode
 	AgentTypeKimi     AgentType = msgfmt.AgentTypeKimi
+	AgentTypePi       AgentType = msgfmt.AgentTypePi
 	AgentTypeCustom   AgentType = msgfmt.AgentTypeCustom
 )
 
@@ -141,6 +143,7 @@ var agentTypeAliases = map[string]AgentType{
 	"amazonq":      AgentTypeAmazonQ,
 	"opencode":     AgentTypeOpencode,
 	"kimi":         AgentTypeKimi,
+	"pi":           AgentTypePi,
 	"custom":       AgentTypeCustom,
 }
 
@@ -267,13 +270,21 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			programArgs = withCodexReasoningSummary(programArgs, codexConfigPath())
 		}
 		setupAgentProcess := func(context.Context) (*termexec.Process, error) {
-			return httpapi.SetupProcess(ctx, httpapi.SetupProcessConfig{
+			args := programArgs
+			if agentType == AgentTypePi && isPiCLI(agent) {
+				args = withPiSessionID(args)
+			}
+			proc, err := httpapi.SetupProcess(ctx, httpapi.SetupProcessConfig{
 				Program:        agent,
-				ProgramArgs:    programArgs,
+				ProgramArgs:    args,
 				TerminalWidth:  termWidth,
 				TerminalHeight: termHeight,
 				AgentType:      agentType,
 			})
+			if err == nil && agentType == AgentTypePi {
+				jsonlwatcher.RegisterPiSession(proc.Pid(), piSessionOptions(args))
+			}
+			return proc, err
 		}
 		proc, err := setupAgentProcess(ctx)
 		if err != nil {

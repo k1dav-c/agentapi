@@ -87,6 +87,11 @@ func TestParseAgentType(t *testing.T) {
 			want:         AgentTypeKimi,
 		},
 		{
+			firstArg:     "pi",
+			agentTypeVar: "",
+			want:         AgentTypePi,
+		},
+		{
 			firstArg:     "auggie",
 			agentTypeVar: "",
 			want:         AgentTypeAuggie,
@@ -150,6 +155,11 @@ func TestParseAgentType(t *testing.T) {
 			firstArg:     "claude",
 			agentTypeVar: "kimi",
 			want:         AgentTypeKimi,
+		},
+		{
+			firstArg:     "claude",
+			agentTypeVar: "pi",
+			want:         AgentTypePi,
 		},
 		{
 			firstArg:     "claude",
