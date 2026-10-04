@@ -39,6 +39,7 @@ export function TaskGroup({
   searchQuery,
   searchResultIndex,
   isCurrentSearchResult,
+  deferred = false,
 }: {
   task: TaskSection;
   number: number;
@@ -51,6 +52,9 @@ export function TaskGroup({
   searchQuery: string;
   searchResultIndex: number;
   isCurrentSearchResult: boolean;
+  // Render only the prompt and a step count for now; the list renders the
+  // full activity of older tasks progressively after the page has loaded.
+  deferred?: boolean;
 }) {
   const statusMeta = {
     queued: {
@@ -76,6 +80,7 @@ export function TaskGroup({
   }[status];
   const StatusIcon = statusMeta.icon;
   const activity = useMemo(() => {
+    if (deferred) return [];
     const raw = getTaskActivity(task);
     // When rich activity provides real interleaving (text + tool entries),
     // tools are already positioned where they occurred in the conversation.
@@ -85,8 +90,10 @@ export function TaskGroup({
       task.richActivity.some(item => item.type === "message" || item.type === "thinking") &&
       task.richActivity.some(item => item.type === "tool");
     return hasRichInterleaving ? raw : groupConsecutiveTools(raw);
-  }, [task]);
-  const markdown = taskToMarkdown(toSearchableTask(task), number);
+  }, [task, deferred]);
+  // Converting a whole task to Markdown is costly for long tasks and only
+  // needed for copy, export and preview, so do it on demand.
+  const toMarkdown = () => taskToMarkdown(toSearchableTask(task), number);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const latestTool = [...task.toolCalls].reverse().find(
@@ -112,7 +119,7 @@ export function TaskGroup({
 
   const copyTask = async () => {
     try {
-      await navigator.clipboard.writeText(markdown);
+      await navigator.clipboard.writeText(toMarkdown());
       toast.success("Task copied");
     } catch {
       toast.error("Could not copy the task");
@@ -121,7 +128,7 @@ export function TaskGroup({
 
   const exportTask = () => {
     const url = URL.createObjectURL(
-      new Blob([markdown], {type: "text/markdown;charset=utf-8"}),
+      new Blob([toMarkdown()], {type: "text/markdown;charset=utf-8"}),
     );
     const link = document.createElement("a");
     link.href = url;
@@ -222,6 +229,11 @@ export function TaskGroup({
           onDismissMessage={onDismissMessage}
           searchQuery={searchQuery}
         />
+        {deferred && (
+          <p className="text-xs text-muted-foreground" role="status">
+            {task.richActivity.length + task.responses.length} steps · loading…
+          </p>
+        )}
         {activity.map((item) =>
           item.type === "message" ? (
             <MessageItem
@@ -260,7 +272,7 @@ export function TaskGroup({
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             <ProcessedMessage
-              messageContent={markdown}
+              messageContent={previewOpen ? toMarkdown() : ""}
               isUser={false}
               renderMode="markdown"
             />

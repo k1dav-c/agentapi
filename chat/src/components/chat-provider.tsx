@@ -16,6 +16,7 @@ import {getErrorMessage} from "@/lib/error-utils";
 import {getDocumentTitle} from "@/lib/document-title";
 import {getReconnectDelay} from "@/lib/reconnect";
 import {parseFailedMessages} from "@/lib/failed-messages";
+import {clearSession, loadSession, mergeByKey, saveSession} from "@/lib/session-cache";
 import {
   createChatAPI,
   type MCPCheckResult,
@@ -45,6 +46,35 @@ interface MessageUpdateEvent {
   role: string;
   message: string;
   time: string;
+  seq?: number;
+}
+
+interface SessionSyncEvent {
+  epoch: string;
+  full: boolean;
+  seq: number;
+}
+
+// How long incoming conversation events are collected before they are
+// applied together. A reload replays the whole session as one event per
+// message; applying them one by one re-rendered the transcript each time.
+const EVENT_FLUSH_MS = 32;
+// Minimum time between writes of the conversation cache.
+const CACHE_SAVE_INTERVAL_MS = 2000;
+// How long to wait for the cache before connecting without it.
+const CACHE_LOAD_TIMEOUT_MS = 400;
+// While a reconnect replays state, updates are held until the replay is
+// complete and applied at once; a very long replay still shows progress
+// this often.
+const REPLAY_FLUSH_MAX_MS = 1500;
+
+const richMessageKey = (message: RichMessage) => `${message.message_id}\u0000${message.role}`;
+
+// Drops the transport-only change sequence before an update is stored.
+function withoutSeq<T extends {seq?: number}>(item: T): Omit<T, "seq"> {
+  const copy = {...item};
+  delete copy.seq;
+  return copy;
 }
 
 export interface RichContentBlock {
@@ -269,6 +299,75 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const agentAPIUrl = useAgentAPIUrl();
   const api = useMemo(() => createChatAPI(agentAPIUrl), [agentAPIUrl]);
   const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
+  // Server conversation state the client holds: its epoch and the highest
+  // change sequence applied. Sent as /events?since=&epoch= so a reconnect
+  // only receives what changed.
+  const syncRef = useRef({epoch: "", seq: 0});
+  // Events received but not applied yet; see EVENT_FLUSH_MS.
+  const pendingRef = useRef({
+    messages: new Map<number, Message & {seq?: number}>(),
+    rich: new Map<string, RichMessage & {seq?: number}>(),
+    replace: false,
+  });
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cacheLoadedForRef = useRef("");
+  // Highest seq received on this connection, and the seq the current replay
+  // ends at (session_sync.seq) while it is still arriving.
+  const receivedSeqRef = useRef(0);
+  const replayEndRef = useRef<number | null>(null);
+
+  const flushEvents = useCallback(() => {
+    flushTimerRef.current = null;
+    const pending = pendingRef.current;
+    const {replace} = pending;
+    const messageUpdates = [...pending.messages.values()];
+    const richUpdates = [...pending.rich.values()];
+    pending.messages = new Map();
+    pending.rich = new Map();
+    pending.replace = false;
+    let applied = syncRef.current.seq;
+    for (const update of [...messageUpdates, ...richUpdates]) applied = Math.max(applied, update.seq ?? 0);
+    syncRef.current = {...syncRef.current, seq: applied};
+
+    if (replace || messageUpdates.length > 0) {
+      setMessages((previous) => {
+        // A server message supersedes drafts that are still being sent;
+        // failed drafts stay until they are retried or dismissed.
+        const kept = previous.filter(
+          (message) =>
+            (replace ? isDraftMessage(message) : true) &&
+            (!isDraftMessage(message) || (message as DraftMessage).deliveryStatus === "failed"),
+        );
+        return mergeByKey(
+          kept,
+          messageUpdates.map(withoutSeq),
+          (message) => (isDraftMessage(message) ? undefined : String((message as Message).id)),
+        );
+      });
+    }
+    if (replace || richUpdates.length > 0) {
+      setRichMessages((previous) =>
+        mergeByKey(replace ? [] : previous, richUpdates.map(withoutSeq), richMessageKey),
+      );
+    }
+  }, []);
+
+  const scheduleFlush = useCallback((seq?: number) => {
+    if (seq !== undefined) receivedSeqRef.current = Math.max(receivedSeqRef.current, seq);
+    const replayEnd = replayEndRef.current;
+    if (replayEnd !== null && receivedSeqRef.current >= replayEnd) {
+      // The replay is complete: apply it now in one render.
+      replayEndRef.current = null;
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = setTimeout(flushEvents, 0);
+      return;
+    }
+    if (flushTimerRef.current) return;
+    flushTimerRef.current = setTimeout(
+      flushEvents,
+      replayEndRef.current !== null ? REPLAY_FLUSH_MAX_MS : EVENT_FLUSH_MS,
+    );
+  }, [flushEvents]);
 
   const reconnectNow = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -420,8 +519,42 @@ export function ChatProvider({ children }: PropsWithChildren) {
         return null; // Don't try to connect if URL is empty
       }
 
-      const eventSource = new EventSource(`${agentAPIUrl}/events`);
+      const {epoch, seq} = syncRef.current;
+      const eventSource = new EventSource(
+        epoch
+          ? `${agentAPIUrl}/events?sync=1&since=${seq}&epoch=${encodeURIComponent(epoch)}`
+          : `${agentAPIUrl}/events?sync=1`,
+      );
       eventSourceRef.current = eventSource;
+      // Servers that predate session_sync replay everything on every
+      // connection without saying so; treat that replay as the full state.
+      let synced = false;
+      const assumeFullReplay = () => {
+        if (synced) return;
+        synced = true;
+        syncRef.current = {epoch: "", seq: 0};
+        pendingRef.current.messages.clear();
+        pendingRef.current.rich.clear();
+        pendingRef.current.replace = true;
+      };
+
+      eventSource.addEventListener("session_sync", (event) => {
+        lastEventAtRef.current = Date.now();
+        synced = true;
+        const data: SessionSyncEvent = JSON.parse(event.data);
+        const full = data.full || data.epoch !== syncRef.current.epoch;
+        if (full) {
+          // Everything that follows is the full state: replace what the
+          // cache or an earlier connection left.
+          pendingRef.current.messages.clear();
+          pendingRef.current.rich.clear();
+          pendingRef.current.replace = true;
+          syncRef.current = {epoch: data.epoch, seq: 0};
+        }
+        receivedSeqRef.current = syncRef.current.seq;
+        replayEndRef.current = data.seq > receivedSeqRef.current ? data.seq : null;
+        if (full || replayEndRef.current === null) scheduleFlush();
+      });
 
       // Server-sent keep-alive; only used to detect dead connections.
       eventSource.addEventListener("heartbeat", () => {
@@ -431,64 +564,30 @@ export function ChatProvider({ children }: PropsWithChildren) {
       // Handle message updates
       eventSource.addEventListener("message_update", (event) => {
         lastEventAtRef.current = Date.now();
+        assumeFullReplay();
         const data: MessageUpdateEvent = JSON.parse(event.data);
-
-        setMessages((prevMessages) => {
-          // Clean up draft messages
-          const updatedMessages = [...prevMessages].filter(
-            (message) =>
-              !isDraftMessage(message) ||
-              (message as DraftMessage).deliveryStatus === "failed",
-          );
-
-          // Check if message with this ID already exists
-          const existingIndex = updatedMessages.findIndex(
-            (m) => m.id === data.id
-          );
-
-          if (existingIndex !== -1) {
-            // Update existing message
-            updatedMessages[existingIndex] = {
-              role: data.role,
-              content: data.message,
-              id: data.id,
-              time: data.time,
-            };
-            return updatedMessages;
-          } else {
-            // Add new message
-            return [
-              ...updatedMessages,
-              {
-                role: data.role,
-                content: data.message,
-                id: data.id,
-                time: data.time,
-              },
-            ];
-          }
-        });
+        pendingRef.current.messages.set(data.id, {
+          role: data.role,
+          content: data.message,
+          id: data.id,
+          time: data.time,
+          seq: data.seq,
+        } as Message & {seq?: number});
+        scheduleFlush(data.seq);
       });
 
       eventSource.addEventListener("rich_message_update", (event) => {
-        const data: RichMessage = JSON.parse(event.data);
-        setRichMessages((previous) => {
-          const existingIndex = previous.findIndex(
-            (message) =>
-              message.message_id === data.message_id &&
-              message.role === data.role,
-          );
-          if (existingIndex === -1) return [...previous, data];
-
-          const updated = [...previous];
-          updated[existingIndex] = data;
-          return updated;
-        });
+        lastEventAtRef.current = Date.now();
+        assumeFullReplay();
+        const data: RichMessage & {seq?: number} = JSON.parse(event.data);
+        pendingRef.current.rich.set(richMessageKey(data), data);
+        scheduleFlush(data.seq);
       });
 
       // Handle status changes
       eventSource.addEventListener("status_change", (event) => {
         lastEventAtRef.current = Date.now();
+        assumeFullReplay();
         const data: StatusChangeEvent = JSON.parse(event.data);
         if (data.status === "stable") {
           setServerStatus("stable");
@@ -562,8 +661,28 @@ export function ChatProvider({ children }: PropsWithChildren) {
       return eventSource;
     };
 
-    // Initial setup
-    setupEventSource();
+    // Show the cached transcript right away and connect from where it
+    // left off. Without a cache (or if it is slow to read) connect anyway.
+    let started = false;
+    const start = () => {
+      if (started || disposed) return;
+      started = true;
+      setupEventSource();
+    };
+    if (cacheLoadedForRef.current !== agentAPIUrl) {
+      cacheLoadedForRef.current = agentAPIUrl;
+      void loadSession<Message, RichMessage>(agentAPIUrl).then((cached) => {
+        if (cached && !started && !disposed) {
+          syncRef.current = {epoch: cached.epoch, seq: cached.seq};
+          setMessages((previous) => [...cached.messages, ...previous.filter(isDraftMessage)]);
+          setRichMessages(cached.richMessages);
+        }
+        start();
+      });
+      setTimeout(start, CACHE_LOAD_TIMEOUT_MS);
+    } else {
+      start();
+    }
 
     // Clean up on component unmount
     return () => {
@@ -579,7 +698,48 @@ export function ChatProvider({ children }: PropsWithChildren) {
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
-  }, [agentAPIUrl, reconnectNonce, reconnectNow, refreshQueue]);
+  }, [agentAPIUrl, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush]);
+
+  // Keep the conversation cache current, at most every
+  // CACHE_SAVE_INTERVAL_MS, and once more when the page is hidden.
+  const saveRequestRef = useRef<() => void>(() => {});
+  const latestRef = useRef({messages, richMessages});
+  latestRef.current = {messages, richMessages};
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastSave = 0;
+    const save = () => {
+      timer = null;
+      lastSave = Date.now();
+      const {epoch, seq} = syncRef.current;
+      if (!epoch) return;
+      void saveSession(agentAPIUrl, {
+        epoch,
+        seq,
+        messages: latestRef.current.messages.filter((message) => !isDraftMessage(message)) as Message[],
+        richMessages: latestRef.current.richMessages,
+        savedAt: Date.now(),
+      });
+    };
+    const onHide = () => {
+      if (document.visibilityState === "hidden") save();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", save);
+    saveRequestRef.current = () => {
+      if (timer) return;
+      timer = setTimeout(save, Math.max(0, lastSave + CACHE_SAVE_INTERVAL_MS - Date.now()));
+    };
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", save);
+      if (timer) clearTimeout(timer);
+      saveRequestRef.current = () => {};
+    };
+  }, [agentAPIUrl]);
+  useEffect(() => {
+    saveRequestRef.current();
+  }, [messages, richMessages]);
 
   // Send a new message
   const sendMessage = async (
@@ -735,6 +895,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         downloadSession,
         deleteMessages: async () => {
           await api.deleteMessages();
+          syncRef.current = {epoch: "", seq: 0};
+          void clearSession(agentAPIUrl);
           setMessages([]);
           setRichMessages([]);
         },

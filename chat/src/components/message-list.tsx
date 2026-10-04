@@ -204,6 +204,25 @@ export default function MessageList({
       : 0;
   const visibleTasks =
     hiddenTaskCount > 0 ? filteredTasks.slice(hiddenTaskCount) : filteredTasks;
+
+  // A reload lands at the latest task, so only that one renders right away.
+  // Older tasks show their prompt and fill in one at a time while the browser
+  // is idle, newest first: rendering every step of several long tasks at once
+  // froze slower devices for seconds. Search and filters render everything.
+  const [renderedTaskKeys, setRenderedTaskKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const olderTaskKeys = visibleTasks.slice(0, -1).map(({task}) => task.key).join("\n");
+  useEffect(() => {
+    if (filtersActive || olderTaskKeys === "") return;
+    const next = olderTaskKeys.split("\n").reverse().find((key) => !renderedTaskKeys.has(key));
+    if (next === undefined) return;
+    const render = () => setRenderedTaskKeys((previous) => new Set(previous).add(next));
+    if (typeof window.requestIdleCallback === "function") {
+      const handle = window.requestIdleCallback(render, {timeout: 500});
+      return () => window.cancelIdleCallback(handle);
+    }
+    const handle = window.setTimeout(render, 50);
+    return () => window.clearTimeout(handle);
+  }, [filtersActive, olderTaskKeys, renderedTaskKeys]);
   const contentSignature = useMemo(
     () =>
       [
@@ -504,6 +523,11 @@ export default function MessageList({
                 isCurrentSearchResult={
                   Boolean(taskQuery) &&
                   searchResultIndex === currentSearchResult
+                }
+                deferred={
+                  !filtersActive &&
+                  visibleIndex < visibleTasks.length - 1 &&
+                  !renderedTaskKeys.has(task.key)
                 }
               />
               </React.Fragment>
