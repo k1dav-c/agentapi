@@ -284,6 +284,11 @@ provider key such as `ANTHROPIC_API_KEY`. AgentAPI follows Pi's session log
 Pi's tool calls, thinking and token usage like it does for Claude Code and
 Codex.
 
+Pi's dialogs (such as the project trust prompt) can be answered from the chat.
+The Explorer's MCP tab manages Pi's user-level servers in
+`~/.pi/agent/mcp.json`, and restarting the agent runs `pi update --self`
+first.
+
 
 You may also use `agentapi` to run the Aider and Goose agents:
 

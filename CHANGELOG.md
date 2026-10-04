@@ -4,6 +4,8 @@
 
 ### Features
 - Pi coding agent support (`--type=pi`, auto-detected for the `pi` executable). The chat shows Pi's replies, tool calls, thinking and token usage from its session log, and knows when Pi is ready for input from its editor
+- Pi in the chat: the header and tab icon show Pi's logo; Pi's dialogs (such as project trust) appear as a question card; the Explorer's MCP tab edits Pi's servers (`~/.pi/agent/mcp.json`); `GET /usage` reports the limits of the provider Pi is logged in to; and Restart runs `pi update --self` first, like `codex update` for Codex
+- TTY mode fills the window: the terminal font grows with the window (11–20px) instead of a fixed 13px, and the mirror uses the agent's real terminal width. `GET /status` and `status_change` report it as `terminal_columns`, so servers started with `--term-width` line up too
 - Chat: background-tab alerts. The tab icon shows an amber dot while the agent needs you, a blue dot while it works, and a green dot when a task finished while you were away. Optional browser notifications (status menu → Notify me in the background) fire when the agent needs you or finishes while the tab is hidden
 - Chat: the composer is just a task box (text, files, voice, send). The Terminal tab's keystroke pad is gone; TTY mode covers typing into the agent and now has a key bar (Esc, Tab, arrows, Enter, Ctrl+C/L, and Ctrl+D/Z with a second press) for phones
 - Chat: a new session shows only the agent's state and how tasks queue; the suggested starter prompts are gone
