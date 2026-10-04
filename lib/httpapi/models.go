@@ -60,6 +60,8 @@ type StatusResponse struct {
 		AgentType mf.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
 		Transport Transport      `json:"transport" doc:"Backend transport being used ('acp' or 'pty')."`
 		Version   string         `json:"agentapi_version" doc:"Version of the AgentAPI server."`
+		// See StatusChangeBody.TerminalPrompt.
+		TerminalPrompt string `json:"terminal_prompt" doc:"Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise."`
 	}
 }
 

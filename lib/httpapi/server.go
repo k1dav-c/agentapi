@@ -750,6 +750,7 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 	resp.Body.AgentType = s.agentType
 	resp.Body.Transport = s.transport
 	resp.Body.Version = snapshot.Version
+	resp.Body.TerminalPrompt = snapshot.TerminalPrompt
 
 	return resp, nil
 }

@@ -79,6 +79,7 @@ interface StatusChangeEvent {
   status: string;
   agent_type: string;
   agentapi_version?: string;
+  terminal_prompt?: string;
 }
 
 interface ErrorEventData {
@@ -139,6 +140,9 @@ export const AgentType: Record<Exclude<AgentType, "unknown">, AgentColorDisplayN
 interface ChatContextValue {
   messages: (Message | DraftMessage)[];
   richMessages: RichMessage[];
+  // Bottom of the terminal while the agent shows an interactive prompt
+  // (selection list, confirmation) that must be answered; empty otherwise.
+  terminalPrompt: string;
   loading: boolean;
   serverStatus: ServerStatus;
   connectionStatus: ConnectionStatus;
@@ -244,6 +248,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   })();
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
+  const [terminalPrompt, setTerminalPrompt] = useState("");
   const [loading, setLoading] = useState<boolean>(false);
   const [serverStatus, setServerStatus] = useState<ServerStatus>("unknown");
   const [connectionStatus, setConnectionStatus] =
@@ -494,6 +499,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         // Set agent type
         setAgentType(data.agent_type === "" ? "unknown" : data.agent_type as AgentType);
         setAgentapiVersion(data.agentapi_version ?? "");
+        setTerminalPrompt(data.terminal_prompt ?? "");
         void refreshQueue();
       });
 
@@ -707,6 +713,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       value={{
         messages,
         richMessages,
+        terminalPrompt,
         loading,
         sendMessage,
         retryFailedMessage,

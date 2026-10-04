@@ -31,12 +31,19 @@ const terminalQuestionTailLines = 40
 // interactive terminal prompt (selection list, confirmation) that a queued
 // message must not be typed into.
 func isTerminalQuestionScreen(agentType mf.AgentType, screen string) bool {
-	if visible, ok := mf.HasInputBox(agentType, screen); ok && visible {
+	visible, ok := mf.HasInputBox(agentType, screen)
+	if ok && visible {
 		// The agent's own input box is showing, so it's waiting for a
 		// message rather than an answer to a dialog.
 		return false
 	}
-	return isTerminalQuestion(screenTail(screen, terminalQuestionTailLines))
+	tail := screenTail(screen, terminalQuestionTailLines)
+	if ok && terminalConfirmation.MatchString(tail) {
+		// The input box is gone and a confirmation hint is showing, e.g.
+		// Claude Code's folder trust dialog, whose options aren't numbered.
+		return true
+	}
+	return isTerminalQuestion(tail)
 }
 
 // screenTail returns the last n lines of screen, ignoring trailing blank lines.

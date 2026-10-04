@@ -1,14 +1,13 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { Check, Clipboard, Code2, FileText, Keyboard, Pencil, RefreshCw, Search, TerminalSquare, User, X } from "lucide-react";
+import React, { useState } from "react";
+import { Check, Clipboard, Code2, FileText, Pencil, RefreshCw, Search, TerminalSquare, User, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
 import { ProcessedMessage } from "../processed-message";
 import { toast } from "sonner";
 import { formatMessageTime } from "@/lib/format-time";
-import { useChat, type DraftMessage, type Message } from "../chat-provider";
-import { terminalOptionKeystrokes } from "@/lib/terminal-option";
+import type { DraftMessage, Message } from "../chat-provider";
 
 export function CopyButton({
   content,
@@ -73,17 +72,14 @@ export function MessageItem({
   onEditMessage,
   onDismissMessage,
   searchQuery: globalSearchQuery = "",
-  onSendRaw,
 }: {
   message: Message | DraftMessage;
   onRetryMessage?: (clientId: string) => Promise<boolean>;
   onEditMessage?: (clientId: string, content: string) => void;
   onDismissMessage?: (clientId: string) => void;
   searchQuery?: string;
-  onSendRaw?: (data: string) => void;
 }) {
   const isUser = message.role === "user";
-  const { agentType } = useChat();
   const isDraft = message.id === undefined;
   const draft = isDraft ? (message as DraftMessage) : undefined;
   const isFailed = draft?.deliveryStatus === "failed";
@@ -92,129 +88,6 @@ export function MessageItem({
   const [renderMode, setRenderMode] = useState<"raw" | "markdown">("raw");
   const effectiveSearchQuery = outputSearchQuery || globalSearchQuery;
 
-  // Detect when the agent's terminal output contains an interactive TUI
-  // prompt that requires the user to switch to Terminal mode to respond.
-  // Covers Claude Code (Ink UI) and Codex (TUI) interactive elements:
-  // selection menus, confirmation dialogs, permission prompts, login
-  // flows, plan approval, AskUserQuestion, MCP elicitation, etc.
-  const terminalActionNeeded = useMemo(() => {
-    if (isUser || !message.content) return null;
-    const c = message.content;
-
-    // --- Selection / choice UI ---
-    // Claude uses ❯, Codex uses > or ›  as cursor indicator
-    const hasCursorSelection = /[❯›]\s*\d+\./m.test(c) || /[❯›]\s*(Yes|No|Skip)/m.test(c);
-    // Codex: "> N." at line start (but NOT shell output "$ >" or quote ">")
-    const hasCodexSelection = /^\s*>\s*\d+\.\s/m.test(c) && /Press Enter/i.test(c);
-
-    // --- Confirmation / action prompts ---
-    const hasConfirmPrompt =
-      c.includes("Enter to confirm") ||
-      c.includes("Esc to cancel") ||
-      /Press Enter to (continue|connect|install|retry|open)/i.test(c);
-
-    // --- Permission / approval ---
-    // "Do you want to proceed?" / "Allow" + numbered options
-    const hasPermissionUI =
-      (c.includes("Do you want to") && /[❯›>]\s*\d/m.test(c)) ||
-      (c.includes("Allow") && c.includes("Deny"));
-
-    // --- Auth / login flows ---
-    // Match authorize/authentication/Login/sign in, but NOT when they
-    // appear as part of a file path or code (require surrounding context)
-    const hasAuthUI =
-      /authori[zs][ae]/i.test(c) ||
-      /\bsign in\b/i.test(c) ||
-      c.includes("needs your input") ||
-      c.includes("needs your approval") ||
-      c.includes("run /login") ||
-      c.includes("run /mcp");
-
-    // --- MCP elicitation ---
-    const hasMcpUI =
-      c.includes("MCP server needs your input") ||
-      c.includes("MCP server needs your") ||
-      c.includes("Do you want to allow this connection");
-
-    // --- Plan mode ---
-    const hasPlanUI =
-      (c.includes("Would you like to proceed") && /[❯›>]\s*\d/m.test(c)) ||
-      (c.includes("Ready to code") && /[❯›>]\s*\d/m.test(c));
-
-    // --- Codex-specific ---
-    const hasCodexApproval =
-      (/wants to edit\b/i.test(c) && !c.includes("Do you want")) ||
-      (/wants to run\b/i.test(c) && !c.includes("Do you want")) ||
-      (c.includes("approve") && /network access/i.test(c));
-
-    if (
-      hasCursorSelection || hasCodexSelection || hasConfirmPrompt ||
-      hasPermissionUI || hasAuthUI || hasMcpUI || hasPlanUI || hasCodexApproval
-    ) {
-      return true;
-    }
-    return false;
-  }, [isUser, message.content]);
-
-  // Extract selectable options from the TUI prompt for quick action buttons.
-  // Handles numbered options (❯ 1. Label), non-numbered cursor options
-  // (❯ Yes, I trust), and Enter-only confirmations.
-  const selectableOptions = useMemo(() => {
-    if (!terminalActionNeeded || !message.content) return [];
-    const lines = message.content.split("\n");
-    const options: { key: string; label: string }[] = [];
-
-    // Pass 1: numbered options (❯ 1. Label / > 2. Label)
-    for (const line of lines) {
-      const match = line.match(/^\s*[❯›>]?\s*(\d+)\.\s+(.+)/);
-      if (match) {
-        options.push({ key: match[1], label: match[2].trim() });
-      }
-    }
-    if (options.length > 0) return options;
-
-    // Pass 2: non-numbered cursor options (❯ Yes, I trust / No, exit)
-    // Only match lines starting with ❯ or indented option-like text
-    const cursorOptions: { key: string; label: string }[] = [];
-    for (const line of lines) {
-      const cursorMatch = line.match(/^\s*[❯›]\s+(.+)/);
-      if (cursorMatch) {
-        const label = cursorMatch[1].trim();
-        // Skip noise like status lines or decorative text
-        if (label.length > 2 && label.length < 80 && !label.startsWith("─") && !label.startsWith("╌")) {
-          cursorOptions.push({ key: "\r", label }); // Enter to select current
-        }
-      }
-    }
-    // Also look for non-cursor sibling options (indented lines near ❯)
-    let inOptionBlock = false;
-    for (const line of lines) {
-      if (/^\s*[❯›]\s+/.test(line)) {
-        inOptionBlock = true;
-        continue;
-      }
-      if (inOptionBlock) {
-        const optMatch = line.match(/^\s{2,}(\S.+)/);
-        if (optMatch) {
-          const label = optMatch[1].trim();
-          if (label.length > 2 && label.length < 80 && !label.startsWith("─") && !label.includes("to confirm") && !label.includes("to cancel")) {
-            // Arrow down + Enter to select this option
-            cursorOptions.push({ key: "\x1b[B\r", label });
-          }
-        } else {
-          inOptionBlock = false;
-        }
-      }
-    }
-    if (cursorOptions.length > 0) return cursorOptions;
-
-    // Pass 3: Enter-only confirmation (Press Enter to continue)
-    if (/Press Enter/i.test(message.content)) {
-      return [{ key: "\r", label: "Press Enter to continue" }];
-    }
-
-    return [];
-  }, [terminalActionNeeded, message.content]);
   const matchCount =
     outputSearchQuery.trim() === ""
       ? 0
@@ -308,38 +181,6 @@ export function MessageItem({
               renderMode={renderMode}
               searchQuery={effectiveSearchQuery}
             />
-          </div>
-        )}
-        {terminalActionNeeded && (
-          <div
-            className="mt-2 rounded-lg border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-xs"
-            role="alert"
-          >
-            <div className="flex items-center gap-2 text-status-warning">
-              <Keyboard className="size-3.5 shrink-0" />
-              <span>
-                {selectableOptions.length > 0
-                  ? "Select an option or switch to Terminal tab for more control."
-                  : "This prompt requires terminal input. Switch to the Terminal tab below to respond."}
-              </span>
-            </div>
-            {selectableOptions.length > 0 && onSendRaw && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectableOptions.map((opt, i) => (
-                  <button
-                    key={`${opt.key}-${i}`}
-                    type="button"
-                    onClick={() => onSendRaw(terminalOptionKeystrokes(agentType, opt.key))}
-                    className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {/^\d+$/.test(opt.key) && (
-                      <span className="grid size-5 place-items-center rounded bg-muted text-[10px] font-bold">{opt.key}</span>
-                    )}
-                    <span className="max-w-52 truncate">{opt.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         )}
       </article>

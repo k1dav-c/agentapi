@@ -53,6 +53,7 @@ import {
 import {MessageItem} from "./message-list/message-item";
 import {TaskGroup} from "./message-list/task-group";
 import {EmptyState} from "./message-list/empty-state";
+import {TerminalPromptBar} from "./message-list/terminal-prompt-bar";
 
 // How many recent tasks to show before collapsing older ones behind a
 // "Show N older tasks" button. Keeps the initial render lightweight for
@@ -485,7 +486,7 @@ export default function MessageList({
           </div>
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-7 px-3 py-6 sm:px-6 sm:py-10">
             {timeline.prelude.map((message, index) => (
-              <MessageItem key={`prelude-${message.id ?? index}`} message={message} onSendRaw={onSendRaw} />
+              <MessageItem key={`prelude-${message.id ?? index}`} message={message} />
             ))}
             {hiddenTaskCount > 0 && (
               <Button
@@ -543,6 +544,7 @@ export default function MessageList({
               </React.Fragment>
               );
             })}
+            <TerminalPromptBar onSendRaw={onSendRaw} />
           </div>
           </>
         )}

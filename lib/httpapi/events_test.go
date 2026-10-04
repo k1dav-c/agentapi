@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/jsonlwatcher"
+	mf "github.com/coder/agentapi/lib/msgfmt"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
@@ -248,4 +250,64 @@ func TestEventEmitter(t *testing.T) {
 		assert.Equal(t, st.ErrorLevelWarning, errorBody.Level)
 		assert.Equal(t, newTime, errorBody.Time)
 	})
+}
+
+func TestEventEmitterTerminalPrompt(t *testing.T) {
+	clock := quartz.NewMock(t)
+	emitter := NewEventEmitter(WithAgentType(mf.AgentTypeClaude), WithClock(clock))
+	_, ch, _ := emitter.Subscribe()
+	statusEvents := func() []StatusChangeBody {
+		var bodies []StatusChangeBody
+		for {
+			select {
+			case event := <-ch:
+				if event.Type == EventTypeStatusChange {
+					bodies = append(bodies, event.Payload.(StatusChangeBody))
+				}
+			default:
+				return bodies
+			}
+		}
+	}
+
+	// A numbered list in an answer, with the input box below it, is not a
+	// prompt, even when it mentions words like "select", "allow" or "approve".
+	emitter.EmitScreen(readScreenFixture(t, "claude_numbered_answer.txt"))
+	require.Empty(t, emitter.StatusSnapshot().TerminalPrompt)
+	require.Empty(t, statusEvents())
+
+	for _, fixture := range []string{"claude_permission_dialog.txt", "claude_trust_dialog.txt"} {
+		hadPrompt := emitter.StatusSnapshot().TerminalPrompt != ""
+		emitter.EmitScreen(readScreenFixture(t, fixture))
+		// A previous prompt is cleared at once; the new one is published
+		// only once it has stayed on screen for a while.
+		require.Empty(t, emitter.StatusSnapshot().TerminalPrompt, fixture)
+		require.Len(t, statusEvents(), map[bool]int{true: 1, false: 0}[hadPrompt], fixture)
+		clock.Advance(terminalPromptSettle).MustWait(context.Background())
+		prompt := emitter.StatusSnapshot().TerminalPrompt
+		require.Contains(t, prompt, "❯", fixture)
+		events := statusEvents()
+		require.Len(t, events, 1, fixture)
+		require.Equal(t, prompt, events[0].TerminalPrompt)
+	}
+
+	// A prompt that disappears before it settles is never published.
+	emitter.EmitScreen(readScreenFixture(t, "claude_numbered_answer.txt"))
+	statusEvents()
+	emitter.EmitScreen(readScreenFixture(t, "claude_trust_dialog.txt"))
+	emitter.EmitScreen(readScreenFixture(t, "claude_numbered_answer.txt"))
+	clock.Advance(terminalPromptSettle).MustWait(context.Background())
+	require.Empty(t, emitter.StatusSnapshot().TerminalPrompt)
+	require.Empty(t, statusEvents())
+
+	emitter.EmitScreen(readScreenFixture(t, "claude_trust_dialog.txt"))
+	clock.Advance(terminalPromptSettle).MustWait(context.Background())
+	require.NotEmpty(t, statusEvents())
+
+	// Back at the input box: the prompt is cleared at once and clients are told.
+	emitter.EmitScreen(readScreenFixture(t, "claude_numbered_answer.txt"))
+	require.Empty(t, emitter.StatusSnapshot().TerminalPrompt)
+	events := statusEvents()
+	require.Len(t, events, 1)
+	require.Empty(t, events[0].TerminalPrompt)
 }

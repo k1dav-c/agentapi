@@ -1026,6 +1026,10 @@
           "status": {
             "$ref": "#/components/schemas/AgentStatus",
             "description": "Backward-compatible agent activity status."
+          },
+          "terminal_prompt": {
+            "description": "Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise.",
+            "type": "string"
           }
         },
         "required": [
@@ -1034,7 +1038,8 @@
           "lifecycle",
           "run_id",
           "session_id",
-          "status"
+          "status",
+          "terminal_prompt"
         ],
         "type": "object"
       },
@@ -1074,6 +1079,10 @@
             "$ref": "#/components/schemas/AgentStatus",
             "description": "Current backward-compatible activity status."
           },
+          "terminal_prompt": {
+            "description": "Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise.",
+            "type": "string"
+          },
           "transport": {
             "$ref": "#/components/schemas/Transport",
             "description": "Backend transport being used ('acp' or 'pty')."
@@ -1086,6 +1095,7 @@
           "run_id",
           "session_id",
           "status",
+          "terminal_prompt",
           "transport"
         ],
         "type": "object"

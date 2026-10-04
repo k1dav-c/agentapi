@@ -79,6 +79,10 @@ type StatusChangeBody struct {
 	RunID     uint64         `json:"run_id" doc:"Monotonically increasing run identifier within the session."`
 	AgentType mf.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
 	Version   string         `json:"agentapi_version" doc:"Version of the AgentAPI server."`
+	// TerminalPrompt is the bottom of the screen while the agent shows an
+	// interactive prompt (selection list, confirmation) instead of its input
+	// box, and empty otherwise.
+	TerminalPrompt string `json:"terminal_prompt" doc:"Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise."`
 }
 
 type ScreenUpdateBody struct {
@@ -122,9 +126,14 @@ type EventEmitter struct {
 	chanIdx             int
 	subscriptionBufSize uint
 	screen              string
-	errors              []ErrorBody
-	clock               quartz.Clock
-	onStatusChange      func(previous, current AgentStatus)
+	terminalPrompt      string
+	// pendingPrompt is a prompt seen on screen that hasn't been shown long
+	// enough to be published; promptTimer publishes it.
+	pendingPrompt  string
+	promptTimer    *quartz.Timer
+	errors         []ErrorBody
+	clock          quartz.Clock
+	onStatusChange func(previous, current AgentStatus)
 }
 
 func convertStatus(status st.ConversationStatus) AgentStatus {
@@ -302,6 +311,7 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 	return StatusChangeBody{
 		Status: e.status, Lifecycle: e.lifecycle, SessionID: e.sessionID,
 		RunID: e.runID, AgentType: e.agentType, Version: version.Version,
+		TerminalPrompt: e.terminalPrompt,
 	}
 }
 
@@ -315,6 +325,57 @@ func (e *EventEmitter) EmitScreen(newScreen string) {
 
 	e.notifyChannels(EventTypeScreenUpdate, ScreenUpdateBody{Screen: strings.TrimRight(newScreen, mf.WhiteSpaceChars)})
 	e.screen = newScreen
+
+	// Clients decide whether to offer prompt options from this rather than
+	// guessing from message text, where a numbered list in an answer looks
+	// just like a selection menu.
+	prompt := ""
+	if isTerminalQuestionScreen(e.agentType, newScreen) {
+		prompt = screenTail(newScreen, terminalQuestionTailLines)
+	}
+	e.updateTerminalPromptLocked(prompt)
+}
+
+// terminalPromptSettle is how long a prompt must stay on screen before it is
+// published. Claude Code draws its dialogs before it accepts keys, so an
+// option picked the moment the prompt appeared could be ignored.
+const terminalPromptSettle = time.Second
+
+// updateTerminalPromptLocked publishes a new prompt once it has settled, and
+// clears a prompt that went away or changed immediately. Caller holds e.mu.
+func (e *EventEmitter) updateTerminalPromptLocked(prompt string) {
+	if prompt == e.pendingPrompt && e.promptTimer != nil {
+		return
+	}
+	if e.promptTimer != nil {
+		e.promptTimer.Stop()
+		e.promptTimer = nil
+	}
+	e.pendingPrompt = ""
+	if prompt == e.terminalPrompt {
+		return
+	}
+	// Clear a published prompt as soon as it changes: its options would
+	// answer a dialog that is no longer showing.
+	if e.terminalPrompt != "" {
+		e.terminalPrompt = ""
+		e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	}
+	if prompt == "" {
+		return
+	}
+	e.pendingPrompt = prompt
+	e.promptTimer = e.clock.AfterFunc(terminalPromptSettle, func() {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if e.pendingPrompt != prompt {
+			return
+		}
+		e.pendingPrompt = ""
+		e.promptTimer = nil
+		e.terminalPrompt = prompt
+		e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	}, "EventEmitter", "terminalPrompt")
 }
 
 func (e *EventEmitter) EmitError(message string, level st.ErrorLevel) {
@@ -432,6 +493,12 @@ func (e *EventEmitter) Reset() {
 	e.nextSessionEventID = 1
 	e.errors = nil
 	e.screen = ""
+	e.terminalPrompt = ""
+	e.pendingPrompt = ""
+	if e.promptTimer != nil {
+		e.promptTimer.Stop()
+		e.promptTimer = nil
+	}
 }
 
 // Assumes the caller holds the lock.

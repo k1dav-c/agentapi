@@ -221,7 +221,6 @@ export function TaskGroup({
           onEditMessage={onEditMessage}
           onDismissMessage={onDismissMessage}
           searchQuery={searchQuery}
-          onSendRaw={onSendRaw}
         />
         {activity.map((item) =>
           item.type === "message" ? (
@@ -229,7 +228,6 @@ export function TaskGroup({
               key={item.key}
               message={item.message}
               searchQuery={searchQuery}
-              onSendRaw={onSendRaw}
             />
           ) : item.type === "thinking" ? (
             <ThinkingBlock key={item.key} content={item.content} />
