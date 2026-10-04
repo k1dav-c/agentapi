@@ -1,6 +1,6 @@
 # AgentAPI
 
-Control [Claude Code](https://github.com/anthropics/claude-code), [AmazonQ](https://aws.amazon.com/developer/learning/q-developer-cli/), [Opencode](https://opencode.ai/), [Goose](https://github.com/block/goose), [Aider](https://github.com/Aider-AI/aider), [Gemini](https://github.com/google-gemini/gemini-cli), [GitHub Copilot](https://github.com/github/copilot-cli), [Sourcegraph Amp](https://ampcode.com/), [Codex](https://github.com/openai/codex), [Kimi Code](https://www.kimi.com/zh-tw/help/kimi-code/cli-getting-started), [Auggie](https://docs.augmentcode.com/cli/overview), and [Cursor CLI](https://cursor.com/en/cli) with an HTTP API.
+Control [Claude Code](https://github.com/anthropics/claude-code), [AmazonQ](https://aws.amazon.com/developer/learning/q-developer-cli/), [Opencode](https://opencode.ai/), [Goose](https://github.com/block/goose), [Aider](https://github.com/Aider-AI/aider), [Gemini](https://github.com/google-gemini/gemini-cli), [GitHub Copilot](https://github.com/github/copilot-cli), [Sourcegraph Amp](https://ampcode.com/), [Codex](https://github.com/openai/codex), [Kimi Code](https://www.kimi.com/zh-tw/help/kimi-code/cli-getting-started), [Pi](https://pi.dev/), [Auggie](https://docs.augmentcode.com/cli/overview), and [Cursor CLI](https://cursor.com/en/cli) with an HTTP API.
 
 ![agentapi-chat](https://github.com/user-attachments/assets/57032c9f-4146-4b66-b219-09e38ab7690d)
 
@@ -267,6 +267,23 @@ Run an HTTP server that lets you control an agent. If you'd like to start an age
 ```bash
 agentapi server -- claude --allowedTools "Bash(git*) Edit Replace"
 ```
+### Pi coding agent
+
+The `pi` agent type runs the [Pi coding agent](https://pi.dev/)
+(`npm install -g @earendil-works/pi-coding-agent`) in its interactive terminal
+UI. It is auto-detected when the executable name is `pi`:
+
+```bash
+agentapi server -- pi
+```
+
+Log in once with `/login` in Pi (TTY mode in the chat UI works), or set a
+provider key such as `ANTHROPIC_API_KEY`. AgentAPI follows Pi's session log
+(`~/.pi/agent/sessions/`, or `$PI_CODING_AGENT_DIR` /
+`$PI_CODING_AGENT_SESSION_DIR`) for structured messages, so the chat shows
+Pi's tool calls, thinking and token usage like it does for Claude Code and
+Codex.
+
 
 You may also use `agentapi` to run the Aider and Goose agents:
 
@@ -289,7 +306,7 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 ```
 
 > [!NOTE]
-> When using Claude, Codex, Opencode, Copilot, Gemini, Amp or CursorCLI, always specify the agent type explicitly (eg: `agentapi server --type=codex -- codex`), or message formatting may break. Kimi is auto-detected when the executable name is `kimi`; use `--type=kimi` for wrappers or ACP mode.
+> When using Claude, Codex, Opencode, Copilot, Gemini, Amp or CursorCLI, always specify the agent type explicitly (eg: `agentapi server --type=codex -- codex`), or message formatting may break. Kimi and Pi are auto-detected when the executable name is `kimi` or `pi`; use `--type=kimi` / `--type=pi` for wrappers or ACP mode.
 
 An OpenAPI schema is available in [openapi.json](openapi.json).
 
