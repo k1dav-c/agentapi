@@ -61,9 +61,13 @@ export function getTaskStatus(
   if (task.prompt.id === undefined) {
     return serverStatus === "running" ? "queued" : "running";
   }
-  if (task.toolCalls.some((tool) => tool.isError)) return "failed";
   if (index === taskCount - 1 && serverStatus === "running") return "running";
-  return "completed";
+  // Agents often run commands that fail on purpose or recover from one (a
+  // grep with no match exits 1), so a failed command only fails the task
+  // when it is the task's last step: the agent stopped there.
+  const lastStep = task.richActivity.findLast((item) => item.type !== "thinking");
+  if (lastStep) return lastStep.type === "tool" && lastStep.toolCall.isError ? "failed" : "completed";
+  return task.toolCalls.at(-1)?.isError ? "failed" : "completed";
 }
 
 export function collectToolCalls(richMessages: RichMessage[]): ToolCall[] {

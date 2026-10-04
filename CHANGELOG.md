@@ -25,6 +25,7 @@
 - The sub-agents (Agents) panel, together with the `GET /agents` endpoint and the `agents_update` SSE event
 
 ### Fixes
+- Chat: a task is marked Failed only when it ends on a failed command. A command the agent went on from (a missing directory, a grep with no match) used to mark the whole task Failed
 - Codex code mode: commands run through Codex's `exec` tool show as `$ <command>` with their real output and exit code. They showed as the JavaScript snippet Codex runs (`text(await tools.exec_command({cmd:...}))`) with only a "Script completed / Wall time / Output:" header, the output itself cut off. `GET /rich-messages` and `GET /timeline` carry the command as `{"cmd", "script"}` and the output without the header
 - Chat: multi-select questions from Claude Code (AskUserQuestion with `multiSelect`) can be answered in the decision card. Options show as checkboxes that toggle on click or with their number key, and Continue moves on to the next question or the review step. Previously each option was a one-shot button, so the answer could not be submitted from the chat. The question form's tab bar no longer shows as context, and an input line left on screen above a dialog no longer becomes its title
 - Chat: a queued task no longer lingers as "queued" for up to 30 s after the server has sent it to the agent, which looked like a message that failed to send

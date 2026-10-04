@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {getTaskActivity, type TaskSection, type ToolCall} from "./task-timeline";
+import {getTaskActivity, getTaskStatus, type TaskSection, type ToolCall} from "./task-timeline";
 
 const tool = (id: string, timestamp: string): ToolCall => ({id, name: "Bash", input: {command: "ls"}, timestamp});
 
@@ -51,5 +51,27 @@ describe("splitThinking", () => {
   });
   test("falls back to the first line", () => {
     expect(splitThinking("Need to check the queue first.\nThen the status.")).toEqual({title: "Need to check the queue first.", body: "Need to check the queue first.\nThen the status."});
+  });
+});
+
+describe("getTaskStatus", () => {
+  const failed: ToolCall = {...tool("t1", "2026-10-04T08:00:02Z"), isError: true, status: "failed", result: "Exit code: 2"};
+  const reply = {type: "message" as const, key: "m1", message: {id: 2, role: "assistant" as const, content: "The directory doesn't exist.", time: "2026-10-04T08:00:03Z"}};
+
+  test("a failed command the agent went on from doesn't fail the task", () => {
+    const t = task({toolCalls: [failed], richActivity: [{type: "tool", key: "t1", toolCall: failed}, reply]});
+    expect(getTaskStatus(t, 0, 1, "stable")).toBe("completed");
+  });
+  test("a task that ends on a failed command failed", () => {
+    const t = task({toolCalls: [failed], richActivity: [reply, {type: "tool", key: "t1", toolCall: failed}]});
+    expect(getTaskStatus(t, 0, 1, "stable")).toBe("failed");
+  });
+  test("the latest task is running while the agent works, even right after a failed command", () => {
+    const t = task({toolCalls: [failed], richActivity: [{type: "tool", key: "t1", toolCall: failed}]});
+    expect(getTaskStatus(t, 0, 1, "running")).toBe("running");
+  });
+  test("without a session log, the last tool call decides", () => {
+    expect(getTaskStatus(task({toolCalls: [failed, tool("t2", "2026-10-04T08:00:04Z")]}), 0, 1, "stable")).toBe("completed");
+    expect(getTaskStatus(task({toolCalls: [failed]}), 0, 1, "stable")).toBe("failed");
   });
 });
