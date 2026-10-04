@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Features
+- Chat: reopening a long conversation is fast. The transcript is cached in the browser (IndexedDB) and shown immediately; the page then asks the server only for what changed. Incoming updates are applied in batches (a reload used to re-render once per replayed message), and older tasks render progressively while the browser is idle. On a 13-task, 764-message session the latest reply appears after 0.3 s instead of 1.8 s, and on a phone-class CPU after 1.2 s instead of 7.2 s
+- `GET /events?sync=1` (opt-in): the stream starts with a `session_sync` event and every `message_update` / `rich_message_update` carries a `seq`. Reconnecting with `&since=<seq>&epoch=<epoch>` replays only what changed since; a different epoch (server restart, conversation reset) replays everything, and a reset notifies connected clients. Clients that don't pass `sync` get the same stream as before
 - The chat UI shows the AgentAPI version next to the agent name (header, session details and embed status bar). The server reports it as `agentapi_version` in `GET /status` and the `status_change` SSE event
 - Releases are cut automatically on every push to `main`: the version is bumped from Conventional Commits (breaking → major, `feat` → minor, otherwise patch), tagged `vX.Y.Z`, and stamped into the release binaries
 
