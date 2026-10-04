@@ -26,7 +26,6 @@ const (
 	EventTypeScreenUpdate      EventType = "screen_update"
 	EventTypeError             EventType = "agent_error"
 	EventTypeRichMessageUpdate EventType = "rich_message_update"
-	EventTypeAgentsUpdate      EventType = "agents_update"
 	EventTypeHeartbeat         EventType = "heartbeat"
 )
 
@@ -95,12 +94,6 @@ type ErrorBody struct {
 // RichMessageUpdateBody is the SSE payload for rich message updates.
 type RichMessageUpdateBody = jsonlwatcher.RichMessage
 
-// AgentsUpdateBody is the SSE payload carrying the full list of sub-agents
-// whenever any of them changes.
-type AgentsUpdateBody struct {
-	Agents []jsonlwatcher.SubAgent `json:"agents" nullable:"false" doc:"Sub-agents spawned during the session, ordered by spawn time"`
-}
-
 // HeartbeatBody is a periodic SSE keep-alive. It lets clients detect
 // connections that died without a FIN (e.g. after system sleep), which
 // otherwise never produce an error on the client side.
@@ -119,7 +112,6 @@ type EventEmitter struct {
 	richMessages        []jsonlwatcher.RichMessage
 	sessionEvents       []jsonlwatcher.SessionEvent
 	nextSessionEventID  int
-	agents              []jsonlwatcher.SubAgent
 	status              AgentStatus
 	lifecycle           LifecycleState
 	sessionID           string
@@ -422,28 +414,6 @@ func (e *EventEmitter) EmitSessionEvents(events []jsonlwatcher.SessionEvent) {
 	}
 }
 
-// EmitAgents replaces the sub-agent list and broadcasts it.
-func (e *EventEmitter) EmitAgents(agents []jsonlwatcher.SubAgent) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.agents = slices.Clone(agents)
-	e.notifyChannels(EventTypeAgentsUpdate, AgentsUpdateBody{Agents: e.agentsLocked()})
-}
-
-// Agents returns a snapshot of the current sub-agents.
-func (e *EventEmitter) Agents() []jsonlwatcher.SubAgent {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.agentsLocked()
-}
-
-func (e *EventEmitter) agentsLocked() []jsonlwatcher.SubAgent {
-	if e.agents == nil {
-		return []jsonlwatcher.SubAgent{}
-	}
-	return slices.Clone(e.agents)
-}
-
 func (e *EventEmitter) SessionEvents() []jsonlwatcher.SessionEvent {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -460,7 +430,6 @@ func (e *EventEmitter) Reset() {
 	e.richMessages = nil
 	e.sessionEvents = nil
 	e.nextSessionEventID = 1
-	e.agents = nil
 	e.errors = nil
 	e.screen = ""
 }
@@ -488,13 +457,6 @@ func (e *EventEmitter) currentStateAsEvents() []Event {
 		events = append(events, Event{
 			Type:    EventTypeError,
 			Payload: err,
-		})
-	}
-
-	if len(e.agents) > 0 {
-		events = append(events, Event{
-			Type:    EventTypeAgentsUpdate,
-			Payload: AgentsUpdateBody{Agents: e.agentsLocked()},
 		})
 	}
 

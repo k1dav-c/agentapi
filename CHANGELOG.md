@@ -5,7 +5,9 @@
 ### Features
 - The chat UI shows the AgentAPI version next to the agent name (header, session details and embed status bar). The server reports it as `agentapi_version` in `GET /status` and the `status_change` SSE event
 - Releases are cut automatically on every push to `main`: the version is bumped from Conventional Commits (breaking → major, `feat` → minor, otherwise patch), tagged `vX.Y.Z`, and stamped into the release binaries
-- Agents panel: lists the sub-agents Codex spawns (name, nickname, status, current shell command, last message, elapsed time, tokens) and updates live; open it from the header or with Alt+↑ in chat mode. Backed by the new `GET /agents` endpoint and `agents_update` SSE event, read from Codex's per-agent session logs
+
+### Removed
+- The sub-agents (Agents) panel, together with the `GET /agents` endpoint and the `agents_update` SSE event
 
 ### Fixes
 - Claude Code: agent replies are split into separate blocks again after a resumed session (`--continue`, `/resume`) or `/clear`. Claude Code can advertise a session id whose JSONL file is never written; the watcher waited for that file forever and never picked up the session actually in use, so the chat UI fell back to one undivided block of screen text

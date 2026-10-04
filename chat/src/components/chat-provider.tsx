@@ -16,7 +16,6 @@ import {getErrorMessage} from "@/lib/error-utils";
 import {getDocumentTitle} from "@/lib/document-title";
 import {getReconnectDelay} from "@/lib/reconnect";
 import {parseFailedMessages} from "@/lib/failed-messages";
-import type {SubAgent} from "@/lib/agents";
 import {
   createChatAPI,
   type MCPCheckResult,
@@ -140,7 +139,6 @@ export const AgentType: Record<Exclude<AgentType, "unknown">, AgentColorDisplayN
 interface ChatContextValue {
   messages: (Message | DraftMessage)[];
   richMessages: RichMessage[];
-  agents: SubAgent[];
   loading: boolean;
   serverStatus: ServerStatus;
   connectionStatus: ConnectionStatus;
@@ -246,7 +244,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
   })();
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
-  const [agents, setAgents] = useState<SubAgent[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [serverStatus, setServerStatus] = useState<ServerStatus>("unknown");
   const [connectionStatus, setConnectionStatus] =
@@ -418,8 +415,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
 
       const eventSource = new EventSource(`${agentAPIUrl}/events`);
       eventSourceRef.current = eventSource;
-      // The server replays the sub-agent list only when it is non-empty.
-      setAgents([]);
 
       // Server-sent keep-alive; only used to detect dead connections.
       eventSource.addEventListener("heartbeat", () => {
@@ -482,12 +477,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
           updated[existingIndex] = data;
           return updated;
         });
-      });
-
-      eventSource.addEventListener("agents_update", (event) => {
-        lastEventAtRef.current = Date.now();
-        const data: {agents?: SubAgent[]} = JSON.parse(event.data);
-        setAgents(data.agents ?? []);
       });
 
       // Handle status changes
@@ -718,7 +707,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
       value={{
         messages,
         richMessages,
-        agents,
         loading,
         sendMessage,
         retryFailedMessage,

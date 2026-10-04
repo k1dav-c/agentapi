@@ -32,34 +32,7 @@ type codexSessionMeta struct {
 		SessionID      string `json:"session_id"`
 		ParentThreadID string `json:"parent_thread_id"`
 		CWD            string `json:"cwd"`
-		AgentPath      string `json:"agent_path"`
-		AgentNickname  string `json:"agent_nickname"`
-		// Sub-agent files start with a copy of the parent's history; the
-		// sub-agent's own records begin at this line index.
-		HistoryStart int `json:"subagent_history_start_ordinal"`
-		// Source is a plain string ("cli") for main threads and an object
-		// describing the spawn for sub-agents; see subAgentSpawn.
-		Source json.RawMessage `json:"source"`
 	} `json:"payload"`
-}
-
-// codexThreadSpawn describes how a sub-agent thread was spawned.
-type codexThreadSpawn struct {
-	Depth     int     `json:"depth"`
-	AgentRole *string `json:"agent_role"`
-}
-
-// subAgentSpawn returns the spawn details of a sub-agent thread, or nil.
-func (m *codexSessionMeta) subAgentSpawn() *codexThreadSpawn {
-	var source struct {
-		Subagent *struct {
-			ThreadSpawn *codexThreadSpawn `json:"thread_spawn"`
-		} `json:"subagent"`
-	}
-	if err := json.Unmarshal(m.Payload.Source, &source); err != nil || source.Subagent == nil {
-		return nil
-	}
-	return source.Subagent.ThreadSpawn
 }
 
 // isSubAgent reports whether the file belongs to a sub-agent thread rather

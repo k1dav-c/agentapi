@@ -19,7 +19,6 @@ const shortcuts = [
     items: [
       { keys: ["⌘", "F"], label: "Search tasks" },
       { keys: ["?"], label: "Show shortcuts" },
-      { keys: ["Alt", "↑"], label: "Show sub-agents" },
     ],
   },
   {

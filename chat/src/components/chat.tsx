@@ -6,7 +6,6 @@ import {useChat} from "./chat-provider";
 import MessageInput from "./message-input";
 import MessageList from "./message-list";
 import {Explorer} from "./explorer";
-import {AgentsPanel} from "./agents-panel";
 import {Button} from "./ui/button";
 import {KeyboardShortcutsDialog, useKeyboardShortcutsKey} from "./keyboard-shortcuts";
 
@@ -108,7 +107,6 @@ export function Chat() {
         onSendRaw={(data) => void sendMessage(data, "raw")}
         headerAction={
           <div className="flex items-center gap-1">
-            <AgentsPanel />
             <Explorer
               onNavigateTask={(number) => {
                 window.requestAnimationFrame(() =>
