@@ -342,6 +342,12 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		AgentPID:       agentPID,
 		AgentStartedAt: agentStartedAt,
 		CWD:            cwd,
+		TerminalColumns: func() uint16 {
+			if transport == "pty" {
+				return termWidth
+			}
+			return 0
+		}(),
 		RestartAgent: func() func(context.Context) (int, error) {
 			if supervisor == nil {
 				return nil

@@ -1111,6 +1111,12 @@
             "$ref": "#/components/schemas/AgentStatus",
             "description": "Backward-compatible agent activity status."
           },
+          "terminal_columns": {
+            "description": "Width of the emulated terminal the agent runs in, in columns (PTY transport only).",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
           "terminal_prompt": {
             "description": "Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise.",
             "type": "string"
@@ -1162,6 +1168,12 @@
           "status": {
             "$ref": "#/components/schemas/AgentStatus",
             "description": "Current backward-compatible activity status."
+          },
+          "terminal_columns": {
+            "description": "Width of the emulated terminal the agent runs in, in columns (PTY transport only).",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
           },
           "terminal_prompt": {
             "description": "Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise.",
@@ -1994,7 +2006,7 @@
         ]
       },
       "put": {
-        "description": "Replaces the agent's **complete** MCP server map while preserving unrelated config-file content.\n\nImportant behavior:\n\n- Servers omitted from `servers` are removed; send `{\"servers\": {}}` to clear all MCP servers.\n- Values use the target agent's native format and are not validated by AgentAPI.\n- Without `restart=true`, the new configuration is loaded by the next agent session.\n- With `restart=true`, AgentAPI replaces the PTY child process immediately. AgentAPI and its HTTP/SSE endpoints stay online, but the agent's conversation context is reset.\n- Restart is unavailable in ACP, schema-only, and other server modes without a process supervisor; those requests return `400`.\n- A missing or structurally invalid request body returns `422`.\n- Claude and Codex are supported; other agent types return `404`.",
+        "description": "Replaces the agent's **complete** MCP server map while preserving unrelated config-file content.\n\nImportant behavior:\n\n- Servers omitted from `servers` are removed; send `{\"servers\": {}}` to clear all MCP servers.\n- Values use the target agent's native format and are not validated by AgentAPI.\n- Without `restart=true`, the new configuration is loaded by the next agent session.\n- With `restart=true`, AgentAPI replaces the PTY child process immediately. AgentAPI and its HTTP/SSE endpoints stay online, but the agent's conversation context is reset.\n- Restart is unavailable in ACP, schema-only, and other server modes without a process supervisor; those requests return `400`.\n- A missing or structurally invalid request body returns `422`.\n- Claude, Codex and Pi are supported; other agent types return `404`.",
         "operationId": "put-mcp",
         "parameters": [
           {

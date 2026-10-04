@@ -156,6 +156,9 @@ type ServerConfig struct {
 	AgentPID               int // PID of the agent process, 0 to disable JSONL watcher
 	AgentStartedAt         time.Time
 	CWD                    string // Working directory (used by Codex resolver)
+	// TerminalColumns is the width of the agent's emulated terminal, 0 when
+	// the transport has no terminal.
+	TerminalColumns uint16
 	// RestartAgent replaces the PTY agent process while keeping AgentAPI alive.
 	// It returns the new process PID so the JSONL watcher can be restarted.
 	// It is nil for transports or server modes that cannot restart.
@@ -327,6 +330,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	emitterOptions := []EventEmitterOption{
 		WithAgentType(config.AgentType),
 		WithSessionID(hex.EncodeToString(sessionBytes[:])),
+		WithTerminalColumns(config.TerminalColumns),
 		WithClock(config.Clock),
 		WithStatusChangeHandler(webhook.statusChanged),
 	}
@@ -760,6 +764,7 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 	resp.Body.Transport = s.transport
 	resp.Body.Version = snapshot.Version
 	resp.Body.TerminalPrompt = snapshot.TerminalPrompt
+	resp.Body.TerminalColumns = snapshot.TerminalColumns
 
 	return resp, nil
 }

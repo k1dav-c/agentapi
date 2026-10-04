@@ -96,6 +96,9 @@ type StatusChangeBody struct {
 	// interactive prompt (selection list, confirmation) instead of its input
 	// box, and empty otherwise.
 	TerminalPrompt string `json:"terminal_prompt" doc:"Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise."`
+	// TerminalColumns lets a terminal mirror wrap lines where the agent's
+	// terminal does.
+	TerminalColumns uint16 `json:"terminal_columns,omitempty" doc:"Width of the emulated terminal the agent runs in, in columns (PTY transport only)."`
 }
 
 type ScreenUpdateBody struct {
@@ -146,6 +149,7 @@ type EventEmitter struct {
 	runID               uint64
 	handoffRevision     uint64
 	agentType           mf.AgentType
+	terminalColumns     uint16
 	chans               map[int]chan Event
 	chanIdx             int
 	subscriptionBufSize uint
@@ -194,6 +198,12 @@ func WithAgentType(agentType mf.AgentType) EventEmitterOption {
 	return func(e *EventEmitter) {
 		e.agentType = agentType
 	}
+}
+
+// WithTerminalColumns sets the width of the agent's terminal reported in
+// status updates.
+func WithTerminalColumns(columns uint16) EventEmitterOption {
+	return func(e *EventEmitter) { e.terminalColumns = columns }
 }
 
 func WithSessionID(sessionID string) EventEmitterOption {
@@ -348,7 +358,7 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 	return StatusChangeBody{
 		Status: e.status, Lifecycle: e.lifecycle, SessionID: e.sessionID,
 		RunID: e.runID, AgentType: e.agentType, Version: version.Version,
-		TerminalPrompt: e.terminalPrompt,
+		TerminalPrompt: e.terminalPrompt, TerminalColumns: e.terminalColumns,
 	}
 }
 
