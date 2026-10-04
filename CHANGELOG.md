@@ -8,6 +8,7 @@
 - Agents panel: lists the sub-agents Codex spawns (name, nickname, status, current shell command, last message, elapsed time, tokens) and updates live; open it from the header or with Alt+↑ in chat mode. Backed by the new `GET /agents` endpoint and `agents_update` SSE event, read from Codex's per-agent session logs
 
 ### Fixes
+- Codex v0.158+: the full-screen "Update available" dialog shown at startup is skipped with Esc (this launch only). Until it was answered every message, including the initial prompt, stayed in the queue
 - Codex: the rich-message/timeline watcher no longer switches to a sub-agent's session log (sub-agent logs share the cwd and are newer than the main one)
 - Codex: detect the composer regardless of how many footer lines follow it (Codex v0.157+), so an idle Codex no longer reports `running` forever
 - Claude Code: ignore the footer and background agents panel below the input box when detecting stability, so ticking subagent timers no longer keep the status `running`

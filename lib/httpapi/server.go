@@ -95,6 +95,9 @@ type Server struct {
 	terminalQuestionScreen string
 	terminalQuestionResult bool
 	terminalQuestionValid  bool
+
+	// When the Codex update dialog was last dismissed. Guarded by s.mu.
+	codexUpdateDismissedAt time.Time
 }
 
 func (s *Server) NormalizeSchema(schema any) any {
@@ -982,6 +985,7 @@ func (s *Server) enqueueMessageLocked(content string) {
 // Polling is immune to both.
 func (s *Server) startMessageQueue() {
 	s.clock.TickerFunc(s.shutdownCtx, messageQueueDispatchInterval, func() error {
+		s.dismissCodexUpdatePrompt()
 		s.dispatchNextQueuedMessage()
 		return nil
 	}, "messageQueueDispatch")
