@@ -402,10 +402,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
     document.title = getDocumentTitle({
       connectionStatus,
       serverStatus,
+      terminalPrompt,
       task: currentTask,
       customTitle,
     });
-  }, [connectionStatus, currentTask, customTitle, serverStatus]);
+  }, [connectionStatus, currentTask, customTitle, serverStatus, terminalPrompt]);
 
   useEffect(() => {
     try {

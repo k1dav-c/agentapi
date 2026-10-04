@@ -58,7 +58,30 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     applyMCPProfile,
   } = useChat();
   const [open, setOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("links");
+  const [activeTab, setActiveTab] = useState("index");
+  const [filter, setFilter] = useState("");
+  const [confirmRestart, setConfirmRestart] = useState(false);
+  const matches = (text: string) => text.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase());
+
+  // ⌘K / Ctrl+K opens the Explorer on task navigation.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setActiveTab("index");
+        setOpen((value) => !value);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Restart asks for a second click instead of a browser confirm dialog.
+  useEffect(() => {
+    if (!confirmRestart) return;
+    const timer = window.setTimeout(() => setConfirmRestart(false), 4000);
+    return () => window.clearTimeout(timer);
+  }, [confirmRestart]);
   const [mcpJSON, setMCPJSON] = useState("{}");
   const [mcpIsSample, setMCPIsSample] = useState(false);
   const [mcpPath, setMCPPath] = useState("");
@@ -117,7 +140,11 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     }
   };
   const handleRestart = async () => {
-    if (!window.confirm("Clear all messages and restart the agent?")) return;
+    if (!confirmRestart) {
+      setConfirmRestart(true);
+      return;
+    }
+    setConfirmRestart(false);
     setRestartingAgent(true);
     try {
       await deleteMessages();
@@ -258,30 +285,22 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button type="button" size="sm" variant="outline" className="h-9">
-          <FolderSearch />
-          <span className="hidden sm:inline">Explorer</span>
-          <span className="sr-only sm:hidden">Open explorer</span>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="size-8 rounded-full text-muted-foreground"
+          title="Explorer (⌘K)"
+        >
+          <FolderSearch className="size-4" />
+          <span className="sr-only">Open explorer</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="left-auto right-0 top-0 flex h-dvh max-h-dvh w-full max-w-xl translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none p-0 sm:rounded-none">
         <DialogHeader className="border-b px-5 py-4 pr-12">
-          <div className="flex items-center justify-between gap-2">
-            <DialogTitle>Session Explorer</DialogTitle>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={restartingAgent}
-              onClick={() => void handleRestart()}
-              title="Restart agent process"
-            >
-              {restartingAgent ? <LoaderCircle className="animate-spin" /> : <RotateCw />}
-              Restart
-            </Button>
-          </div>
+          <DialogTitle>Explorer</DialogTitle>
           <DialogDescription>
-            Links, files, task navigation, MCP, and Temporal configuration.
+            Jump to a task, file or link. Agent settings are under MCP, Temporal and Session.
           </DialogDescription>
         </DialogHeader>
         <Tabs
@@ -290,18 +309,30 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
           className="min-h-0 flex-1 gap-0"
         >
           <div className="border-b px-3 py-2">
-            <TabsList className="grid w-full grid-cols-5">
-              <TabsTrigger value="links"><LinkIcon /><span className="max-sm:sr-only">Links</span></TabsTrigger>
-              <TabsTrigger value="files"><FileText /><span className="max-sm:sr-only">Files</span></TabsTrigger>
+            <TabsList className="grid w-full grid-cols-6">
               <TabsTrigger value="index"><ListTree /><span className="max-sm:sr-only">Index</span></TabsTrigger>
+              <TabsTrigger value="files"><FileText /><span className="max-sm:sr-only">Files</span></TabsTrigger>
+              <TabsTrigger value="links"><LinkIcon /><span className="max-sm:sr-only">Links</span></TabsTrigger>
               <TabsTrigger value="mcp"><Server /><span className="max-sm:sr-only">MCP</span></TabsTrigger>
               <TabsTrigger value="temporal"><BellRing /><span className="max-sm:sr-only">Temporal</span></TabsTrigger>
+              <TabsTrigger value="session"><RotateCw /><span className="max-sm:sr-only">Session</span></TabsTrigger>
             </TabsList>
+            {["index", "files", "links"].includes(activeTab) && (
+              <input
+                autoFocus
+                type="search"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                placeholder={`Filter ${activeTab === "index" ? "tasks" : activeTab}…`}
+                aria-label={`Filter ${activeTab}`}
+                className="mt-2 h-8 w-full rounded-md border bg-card px-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+            )}
           </div>
           <TabsContent value="links" className="min-h-0 overflow-y-auto overscroll-contain p-4">
-            <div className="space-y-2">
-              {links.map((link) => (
-                <div key={`${link.task}-${link.url}`} className="rounded-xl border p-3">
+            <div className="divide-y">
+              {links.filter((link) => matches(link.url)).map((link) => (
+                <div key={`${link.task}-${link.url}`} className="px-1 py-2.5">
                   <a
                     href={link.url}
                     target="_blank"
@@ -326,12 +357,12 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
             </div>
           </TabsContent>
           <TabsContent value="files" className="min-h-0 overflow-y-auto overscroll-contain p-4">
-            <div className="space-y-2">
-              {files.map((file) => (
+            <div className="divide-y">
+              {files.filter((file) => matches(file.path)).map((file) => (
                 <button
                   key={file.path}
                   type="button"
-                  className="block w-full rounded-xl border p-3 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                  className="block w-full rounded-sm px-1 py-2.5 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => file.sourceTask > 0 && navigate(file.sourceTask)}
                 >
                   <span className="block break-all font-mono text-xs">{file.path}</span>
@@ -344,12 +375,12 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
             </div>
           </TabsContent>
           <TabsContent value="index" className="min-h-0 overflow-y-auto overscroll-contain p-4">
-            <div className="space-y-2">
-              {tasks.map(({message, number}) => (
+            <div className="divide-y">
+              {tasks.filter(({message, number}) => matches(`${number} ${message.content}`)).map(({message, number}) => (
                 <button
                   key={message.id ?? `task-${number}`}
                   type="button"
-                  className="block w-full rounded-xl border p-3 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                  className="block w-full rounded-sm px-1 py-2.5 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => navigate(number)}
                 >
                   <span className="text-[11px] font-semibold uppercase text-muted-foreground">
@@ -516,6 +547,23 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
           </TabsContent>
           <TabsContent value="temporal" className="min-h-0 overflow-y-auto overscroll-contain p-4">
             <TemporalSettings />
+          </TabsContent>
+          <TabsContent value="session" className="min-h-0 overflow-y-auto overscroll-contain p-4">
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold">Restart the agent</h3>
+              <p className="text-sm text-muted-foreground">
+                Stops the agent process, clears this conversation and starts the agent again. Codex is updated to its latest release first.
+              </p>
+              <Button
+                type="button"
+                variant={confirmRestart ? "destructive" : "outline"}
+                disabled={restartingAgent}
+                onClick={() => void handleRestart()}
+              >
+                {restartingAgent ? <LoaderCircle className="animate-spin" /> : <RotateCw />}
+                {restartingAgent ? "Restarting…" : confirmRestart ? "Click again to restart" : "Restart agent"}
+              </Button>
+            </div>
           </TabsContent>
         </Tabs>
       </DialogContent>

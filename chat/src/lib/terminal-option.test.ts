@@ -1,5 +1,6 @@
 import {describe, expect, test} from "bun:test";
-import {parseTerminalOptions, terminalOptionKeystrokes} from "./terminal-option";
+import {describeTerminalPrompt, parseTerminalOptions, terminalOptionKeystrokes} from "./terminal-option";
+import {readFileSync} from "node:fs";
 
 describe("terminalOptionKeystrokes", () => {
   test("Claude selects numbered options without Enter", () => {
@@ -72,5 +73,31 @@ describe("parseTerminalOptions", () => {
 
   test("plain text has no options", () => {
     expect(parseTerminalOptions("just text")).toEqual([]);
+  });
+});
+
+describe("describeTerminalPrompt", () => {
+  const fixture = (name: string) => readFileSync(new URL(`../../../lib/httpapi/testdata/${name}`, import.meta.url), "utf8");
+
+  test("Claude permission dialog: question and the command to approve", () => {
+    const {title, context} = describeTerminalPrompt(fixture("claude_permission_dialog.txt"));
+    expect(title).toBe("Do you want to create c.txt?");
+    expect(context).toContain("Create file");
+  });
+
+  test("Codex folder trust: the question ends mid-line", () => {
+    const {title, context} = describeTerminalPrompt(fixture("codex_trust_prompt.txt"));
+    expect(title).toBe("Trust this folder?");
+    expect(context.join(" ")).toContain("Codex can read, edit, and run files here");
+  });
+
+  test("Codex update dialog has no question: the first line is the title", () => {
+    const {title} = describeTerminalPrompt(fixture("codex_update_prompt.txt"));
+    expect(title).toStartWith("Update available");
+  });
+
+  test("Claude folder trust", () => {
+    const {title} = describeTerminalPrompt(fixture("claude_trust_dialog.txt"));
+    expect(title).toBe("Quick safety check: Is this a project you created or one you trust?");
   });
 });

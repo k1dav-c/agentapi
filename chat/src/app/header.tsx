@@ -1,10 +1,12 @@
 "use client";
 
-import { type ComponentType, useEffect, useMemo, useState } from "react";
+import { type ComponentType, useMemo, useState } from "react";
 import { AgentType, useChat } from "@/components/chat-provider";
 import { ModeToggle } from "@/components/mode-toggle";
-import { Activity, Bot, CircleAlert, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Tag, WifiOff } from "lucide-react";
-import { computeTokenTotals, formatTokenCount } from "@/lib/session-status";
+import { Activity, Bot, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Moon, Sun, Tag } from "lucide-react";
+import { useTheme } from "next-themes";
+import { computeTokenTotals, formatTokenCount, getStatusMeta } from "@/lib/session-status";
+import { useWorkingElapsed } from "@/lib/use-elapsed";
 import { KeyboardShortcutsDialog, useKeyboardShortcutsKey } from "@/components/keyboard-shortcuts";
 import {
   DropdownMenu,
@@ -19,6 +21,7 @@ export function Header() {
   const {
     serverStatus,
     connectionStatus,
+    terminalPrompt,
     agentType,
     queuedMessages,
     richMessages,
@@ -27,29 +30,11 @@ export function Header() {
     customTitle,
     agentapiVersion,
   } = useChat();
-  const [runningSince, setRunningSince] = useState<number | null>(null);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   useKeyboardShortcutsKey(() => setShortcutsOpen(true));
-
-  useEffect(() => {
-    if (serverStatus !== "running") {
-      setRunningSince(null);
-      setElapsedSeconds(0);
-      return;
-    }
-    setRunningSince((current) => current ?? Date.now());
-  }, [serverStatus]);
-
-  useEffect(() => {
-    if (runningSince === null) return;
-    const updateElapsed = () =>
-      setElapsedSeconds(Math.floor((Date.now() - runningSince) / 1000));
-    updateElapsed();
-    const timer = window.setInterval(updateElapsed, 1000);
-    return () => window.clearInterval(timer);
-  }, [runningSince]);
+  const elapsed = useWorkingElapsed(serverStatus);
+  const { resolvedTheme, setTheme } = useTheme();
 
   const latestTool = useMemo(() => {
     const latestTaskTime = [...messages]
@@ -71,100 +56,45 @@ export function Header() {
   }, [messages, richMessages]);
 
   const tokenTotals = useMemo(() => computeTokenTotals(richMessages), [richMessages]);
-
-  const agentStatus = {
-    stable: {
-      label: "Ready",
-      detail: "Agent is ready",
-      icon: CircleCheck,
-      className: "text-status-success",
-    },
-    running: {
-      label: "Working",
-      detail: "Agent is processing",
-      icon: LoaderCircle,
-      className: "text-status-warning",
-    },
-    offline: {
-      label: "Offline",
-      detail: "Reconnecting to server",
-      icon: WifiOff,
-      className: "text-destructive",
-    },
-    unknown: {
-      label: "Connecting",
-      detail: "Waiting for agent status",
-      icon: CircleAlert,
-      className: "text-muted-foreground",
-    },
-  }[serverStatus];
-  const status =
-    connectionStatus === "offline"
-      ? {
-          label: "Offline",
-          detail: "Network connection lost",
-          icon: WifiOff,
-          className: "text-destructive",
-        }
-      : connectionStatus === "reconnecting"
-        ? {
-            label: "Reconnecting",
-            detail: "Reconnecting to agent server",
-            icon: LoaderCircle,
-            className: "text-status-warning",
-          }
-        : agentStatus;
+  const status = getStatusMeta(serverStatus, connectionStatus, terminalPrompt);
   const StatusIcon = status.icon;
-  const elapsed =
-    elapsedSeconds < 60
-      ? `${elapsedSeconds}s`
-      : `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`;
   const activityDetail =
-    serverStatus === "running"
-      ? [latestTool ? `Using ${latestTool}` : "Processing task", elapsed]
-          .filter(Boolean)
-          .join(" · ")
+    status.kind === "working"
+      ? [latestTool ? `Using ${latestTool}` : "Processing task", elapsed].filter(Boolean).join(" · ")
       : status.detail;
+  const agentName = agentType === "unknown" ? "Remote coding agent" : AgentType[agentType].displayName;
+  const held = status.kind === "needs-you" && queuedMessages.length > 0;
 
   return (
-    <header className="sticky top-0 z-20 flex min-h-14 shrink-0 items-center justify-between border-b bg-background/95 px-3 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl sm:h-16 sm:min-h-0 sm:px-6 sm:py-0">
-      <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
-        <div className="hidden size-9 shrink-0 place-items-center rounded-xl bg-foreground text-background shadow-sm min-[380px]:grid">
-          <Activity className="size-4" />
-        </div>
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-semibold tracking-tight">{customTitle || "AgentAPI"}</span>
-          </div>
-          <p className="hidden truncate text-xs text-muted-foreground sm:block">
-            {agentType === "unknown"
-              ? "Remote coding agent"
-              : AgentType[agentType].displayName}
-            {agentapiVersion && ` · v${agentapiVersion}`}
-          </p>
-        </div>
+    <header className="sticky top-[env(safe-area-inset-top,0px)] z-20 flex h-12 shrink-0 items-center gap-3 border-b bg-background/95 px-3 backdrop-blur-xl sm:px-5">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span
+          aria-hidden="true"
+          className="size-2.5 shrink-0 rounded-[3px]"
+          style={{ background: agentType === "claude" ? "var(--agent-claude)" : "var(--foreground)" }}
+        />
+        <h1 className="truncate text-sm font-semibold tracking-tight">{customTitle || agentName}</h1>
+        {agentapiVersion && (
+          <span className="hidden truncate font-mono text-[11px] text-muted-foreground md:inline">
+            v{agentapiVersion}
+          </span>
+        )}
       </div>
 
-      <div className="flex items-center gap-2 sm:gap-3">
+      <div className="ml-auto flex min-w-0 items-center gap-1.5">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className={`relative flex items-center gap-1 rounded-full border bg-card px-2.5 py-1.5 text-[11px] font-medium shadow-xs outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring ${status.className}`}
+              data-state-kind={status.kind}
+              className={`state-pill relative flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 text-xs font-medium tabular-nums outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring ${status.className}`}
               title={`${activityDetail}. Open session details`}
               aria-label={`${status.label}. Open session details`}
             >
-              <StatusIcon className={`size-3 ${
-                serverStatus === "running" || connectionStatus === "reconnecting"
-                  ? "motion-safe:animate-spin"
-                  : ""
-              }`} />
-              <span className="hidden min-[380px]:inline">{status.label}</span>
-              {queuedMessages.length > 0 && (
-                <span className="grid min-w-4 place-items-center rounded-full bg-muted px-1 text-[10px] leading-4 text-foreground">
-                  {queuedMessages.length}
-                  <span className="sr-only"> queued tasks</span>
-                </span>
+              <span aria-hidden="true" className="state-led size-1.5 rounded-full bg-current" />
+              <span>{status.label}</span>
+              {status.kind === "working" && elapsed && (
+                <span className="hidden text-muted-foreground min-[420px]:inline">{elapsed}</span>
               )}
             </button>
           </DropdownMenuTrigger>
@@ -172,37 +102,14 @@ export function Header() {
             <DropdownMenuLabel>Session details</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <div className="space-y-3 px-2 py-2 text-xs">
-              <SessionDetail
-                icon={StatusIcon}
-                label="Status"
-                value={status.label}
-                valueClassName={status.className}
-              />
-              <SessionDetail
-                icon={Bot}
-                label="Agent"
-                value={
-                  agentType === "unknown"
-                    ? "Unknown"
-                    : AgentType[agentType].displayName
-                }
-              />
-              {agentapiVersion && (
-                <SessionDetail
-                  icon={Tag}
-                  label="Version"
-                  value={`AgentAPI v${agentapiVersion}`}
-                />
-              )}
-              <SessionDetail
-                icon={Activity}
-                label="Activity"
-                value={activityDetail}
-              />
+              <SessionDetail icon={StatusIcon} label="Status" value={status.label} valueClassName={status.className} />
+              <SessionDetail icon={Bot} label="Agent" value={agentType === "unknown" ? "Unknown" : AgentType[agentType].displayName} />
+              {agentapiVersion && <SessionDetail icon={Tag} label="Version" value={`AgentAPI v${agentapiVersion}`} />}
+              <SessionDetail icon={Activity} label="Activity" value={activityDetail} />
               <SessionDetail
                 icon={CircleCheck}
                 label="Queue"
-                value={`${queuedMessages.length} ${queuedMessages.length === 1 ? "task" : "tasks"}`}
+                value={`${queuedMessages.length} ${queuedMessages.length === 1 ? "task" : "tasks"}${held ? " · held" : ""}`}
               />
               {tokenTotals.total > 0 && (
                 <SessionDetail
@@ -225,34 +132,48 @@ export function Header() {
                   .finally(() => setDownloading(false));
               }}
             >
-              {downloading ? (
-                <LoaderCircle className="motion-safe:animate-spin" />
-              ) : (
-                <Download />
-              )}
+              {downloading ? <LoaderCircle className="motion-safe:animate-spin" /> : <Download />}
               Download conversation JSONL
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setShortcutsOpen(true)}>
               <Keyboard />
               Keyboard shortcuts
             </DropdownMenuItem>
+            <DropdownMenuItem className="sm:hidden" onSelect={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}>
+              {resolvedTheme === "dark" ? <Sun /> : <Moon />}
+              {resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        {tokenTotals.total > 0 && (
+        {queuedMessages.length > 0 && (
           <span
-            className="hidden items-center gap-1 rounded-full border bg-card px-2.5 py-1.5 text-[11px] font-medium tabular-nums text-muted-foreground shadow-xs sm:flex"
-            title={`${tokenTotals.input.toLocaleString()} input + ${tokenTotals.output.toLocaleString()} output tokens`}
+            className={`hidden h-7 items-center rounded-full border px-2.5 text-xs tabular-nums sm:flex ${held ? "text-state-needs" : "text-muted-foreground"}`}
+            title={held ? "Queued tasks run after you answer the agent" : "Tasks waiting to run"}
           >
-            <Hash className="size-3" />
-            {formatTokenCount(tokenTotals.total)}
+            {queuedMessages.length} queued{held ? " · held" : ""}
           </span>
         )}
-        <ModeToggle />
+        {tokenTotals.total > 0 && (
+          <span
+            className="hidden h-7 items-center gap-1 rounded-full border px-2.5 text-xs tabular-nums text-muted-foreground md:flex"
+            title={`${tokenTotals.input.toLocaleString()} input + ${tokenTotals.output.toLocaleString()} output tokens`}
+          >
+            {formatTokenCount(tokenTotals.total)} tokens
+          </span>
+        )}
+        <div id={HEADER_ACTIONS_ID} className="flex items-center gap-0.5" />
+        <div className="hidden sm:block">
+          <ModeToggle />
+        </div>
       </div>
       <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </header>
   );
 }
+
+// The page's own actions (search, TTY, Explorer) render into this slot so
+// the app has a single top bar; see MessageList.
+export const HEADER_ACTIONS_ID = "header-actions";
 
 function SessionDetail({
   icon: Icon,

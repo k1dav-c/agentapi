@@ -21,6 +21,8 @@ export function TtyView({onExit}: {onExit: () => void}) {
   const {storageScope, sendTerminalInput} = useChat();
   const containerRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
+  // Width of one terminal cell, for the column ruler.
+  const [cellWidth, setCellWidth] = useState(0);
   // The provider recreates this function on every render; read it through
   // a ref so the terminal isn't rebuilt each time.
   const sendRef = useRef(sendTerminalInput);
@@ -51,6 +53,8 @@ export function TtyView({onExit}: {onExit: () => void}) {
         theme: {background: "#0b0d10", foreground: "#e6e6e6"},
       });
       term.open(container);
+      const screen = container.querySelector(".xterm-screen");
+      if (screen) setCellWidth(screen.getBoundingClientRect().width / TTY_COLUMNS);
       const firstRow = container.querySelector(".xterm-rows > div");
       if (firstRow && firstRow.getBoundingClientRect().height > 0) {
         rowHeight = firstRow.getBoundingClientRect().height;
@@ -116,10 +120,13 @@ export function TtyView({onExit}: {onExit: () => void}) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-background/95 px-3 py-2 text-xs sm:px-4">
-        <TerminalSquare className="size-4 shrink-0 text-status-warning" />
+        <TerminalSquare className="size-4 shrink-0 text-muted-foreground" />
         <span className="font-semibold">TTY mode</span>
         <span className="text-muted-foreground">
           {connected ? "Keys go straight to the agent" : "Connecting to the terminal…"}
+        </span>
+        <span className="hidden font-mono text-[11px] text-muted-foreground md:inline">
+          {TTY_COLUMNS} columns · full-width characters take 2
         </span>
         <Button type="button" size="sm" variant="outline" className="ml-auto h-8" onClick={onExit}>
           <ArrowLeft />
@@ -129,7 +136,20 @@ export function TtyView({onExit}: {onExit: () => void}) {
       {/* mx-auto rather than flex centering: a centered flex child wider
           than a phone screen would be clipped on the left. */}
       <div className="min-h-0 flex-1 overflow-x-auto bg-[#0b0d10] p-2">
-        <div ref={containerRef} className="mx-auto h-full w-fit" aria-label="Agent terminal" />
+        <div className="mx-auto flex h-full w-fit flex-col">
+          {cellWidth > 0 && (
+            // Column ruler: a tick and label every 10 columns, so you can
+            // tell whether odd-looking output is the agent's or ours.
+            <div aria-hidden="true" className="relative mb-1 h-4 shrink-0 font-mono text-[10px] text-term-dim" style={{width: cellWidth * TTY_COLUMNS}}>
+              {Array.from({length: TTY_COLUMNS / 10}, (_, i) => (i + 1) * 10).map((column) => (
+                <span key={column} className="absolute bottom-0 border-r border-term-dim/50 pr-1 leading-none" style={{right: (TTY_COLUMNS - column) * cellWidth}}>
+                  {column}
+                </span>
+              ))}
+            </div>
+          )}
+          <div ref={containerRef} className="min-h-0 flex-1" aria-label="Agent terminal" />
+        </div>
       </div>
     </div>
   );

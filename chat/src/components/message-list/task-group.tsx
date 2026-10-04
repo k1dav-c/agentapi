@@ -1,17 +1,18 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Brain, CheckCircle2, CircleAlert, Clock3, Clipboard, Download, Eye, LoaderCircle, MoreHorizontal } from "lucide-react";
+import { ChevronRight, Clipboard, Download, Eye, MoreHorizontal, TerminalSquare } from "lucide-react";
 import { Button } from "../ui/button";
 import { ProcessedMessage } from "../processed-message";
 import { toast } from "sonner";
 import { taskToMarkdown } from "@/lib/task-actions";
 import { groupConsecutiveTools } from "@/lib/activity-groups";
-import { formatElapsedTime } from "@/lib/format-time";
 import { ToolCallCard, ToolCallGroup } from "./tool-call";
 import { MessageItem } from "./message-item";
 import type { TaskSection, TaskStatus } from "@/lib/task-timeline";
-import { getTaskActivity, toSearchableTask } from "@/lib/task-timeline";
+import { getTaskActivity, hasStructuredTranscript, toSearchableTask } from "@/lib/task-timeline";
+import { splitThinking } from "@/lib/thinking";
+import { useMediaQuery } from "@/lib/use-media-query";
 import {
   Dialog,
   DialogContent,
@@ -40,6 +41,7 @@ export function TaskGroup({
   searchResultIndex,
   isCurrentSearchResult,
   deferred = false,
+  waitingForUser = false,
 }: {
   task: TaskSection;
   number: number;
@@ -55,33 +57,21 @@ export function TaskGroup({
   // Render only the prompt and a step count for now; the list renders the
   // full activity of older tasks progressively after the page has loaded.
   deferred?: boolean;
+  // The agent is showing a prompt for this (the latest) task.
+  waitingForUser?: boolean;
 }) {
-  const statusMeta = {
-    queued: {
-      label: "Queued",
-      icon: Clock3,
-      className: "text-muted-foreground",
-    },
-    running: {
-      label: "Running",
-      icon: LoaderCircle,
-      className: "text-status-warning",
-    },
-    completed: {
-      label: "Completed",
-      icon: CheckCircle2,
-      className: "text-status-success",
-    },
-    failed: {
-      label: "Failed",
-      icon: CircleAlert,
-      className: "text-destructive",
-    },
-  }[status];
-  const StatusIcon = statusMeta.icon;
+  const statusMeta = waitingForUser
+    ? {label: "Waiting for you", className: "text-state-needs"}
+    : {
+        queued: {label: "Queued", className: "text-muted-foreground"},
+        running: {label: "Working", className: "text-state-working"},
+        completed: {label: "Done", className: "text-state-ready"},
+        failed: {label: "Failed", className: "text-state-fault"},
+      }[status];
+  const live = status === "running";
   const activity = useMemo(() => {
     if (deferred) return [];
-    const raw = getTaskActivity(task);
+    const raw = getTaskActivity(task, {live});
     // When rich activity provides real interleaving (text + tool entries),
     // tools are already positioned where they occurred in the conversation.
     // Only group consecutive tools in the fallback path (PTY-only), where
@@ -90,15 +80,29 @@ export function TaskGroup({
       task.richActivity.some(item => item.type === "message" || item.type === "thinking") &&
       task.richActivity.some(item => item.type === "tool");
     return hasRichInterleaving ? raw : groupConsecutiveTools(raw);
-  }, [task, deferred]);
+  }, [task, deferred, live]);
+  const structured = hasStructuredTranscript(task);
+  // A long task shows its latest steps; earlier ones load on request.
+  // Rendering hundreds of steps (Markdown, highlighted code) at once froze
+  // slower devices. Search shows every step so matches can be found.
+  const [showAllSteps, setShowAllSteps] = useState(false);
+  const hiddenSteps = searchQuery || showAllSteps ? 0 : Math.max(0, activity.length - STEP_WINDOW);
+  const visibleActivity = hiddenSteps > 0 ? activity.slice(hiddenSteps) : activity;
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const startedAt = task.prompt.time;
+  const finishedAt = useMemo(() => {
+    const times = [
+      ...task.richActivity.map((item) =>
+        item.type === "message" ? item.message.time : item.type === "tool" ? item.toolCall.resultTimestamp ?? item.toolCall.timestamp : item.timestamp),
+      ...task.responses.map((message) => message.time),
+    ].filter((time): time is string => Boolean(time));
+    return times.sort().at(-1);
+  }, [task]);
   // Converting a whole task to Markdown is costly for long tasks and only
   // needed for copy, export and preview, so do it on demand.
   const toMarkdown = () => taskToMarkdown(toSearchableTask(task), number);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const latestTool = [...task.toolCalls].reverse().find(
-    (tool) => tool.result === undefined,
-  ) ?? task.toolCalls.at(-1);
 
   useEffect(() => {
     if (status !== "running") {
@@ -116,6 +120,12 @@ export function TaskGroup({
     const timer = window.setInterval(update, 1000);
     return () => window.clearInterval(timer);
   }, [status, task.prompt.time]);
+
+  const duration = status === "running"
+    ? formatClock(elapsedSeconds)
+    : startedAt && finishedAt
+      ? formatClock(Math.max(0, Math.round((Date.parse(finishedAt) - Date.parse(startedAt)) / 1000)))
+      : "";
 
   const copyTask = async () => {
     try {
@@ -140,88 +150,62 @@ export function TaskGroup({
     toast.success(`Task ${number} Markdown downloaded`);
   };
 
+  const startTime = startedAt ? formatClockTime(startedAt) : "";
   return (
     <section
       id={`task-${number}`}
-      className={`overflow-hidden rounded-2xl border bg-background/70 transition ${
-        status === "running"
-          ? "border-status-warning/50 shadow-md ring-1 ring-status-warning/15"
-          : status === "completed"
-            ? "shadow-none"
-            : "shadow-sm"
-      } ${isCurrentSearchResult ? "ring-2 ring-primary/50" : ""}`}
-      data-status={status}
+      className={`task-entry grid scroll-mt-16 grid-cols-1 gap-x-6 py-7 sm:grid-cols-[3.25rem_minmax(0,1fr)] ${
+        isCurrentSearchResult ? "rounded-lg ring-2 ring-ring" : ""
+      }`}
+      data-status={waitingForUser ? "waiting" : status}
       data-search-result={searchResultIndex}
     >
-      <header
-        className={`flex min-h-11 items-center justify-between gap-3 border-b px-4 py-2 ${
-          status === "running" ? "bg-status-warning/10" : "bg-muted/20"
-        }`}
-      >
-        <div className="min-w-0">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Task {number}
-          </span>
-          {status === "running" && (
-            <p className="truncate text-xs text-foreground">
-              {latestTool ? `Using ${latestTool.name}` : "Processing task"}
-              {" · "}
-              {formatElapsedTime(elapsedSeconds)}
-            </p>
+      <div className="hidden pt-px text-right font-mono text-[11px] leading-5 tabular-nums text-muted-foreground sm:block">
+        {startTime && <time dateTime={startedAt}>{startTime}</time>}
+        {duration && <div className={status === "running" ? "text-state-working" : ""}>{duration}</div>}
+      </div>
+      <div className="min-w-0 max-w-[46rem] xl:mr-[17rem] xl:flow-root">
+        <header className="mb-2 flex min-h-7 items-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.06em] text-muted-foreground">
+          <span>Task {number}</span>
+          {(startTime || duration) && (
+            <span className="normal-case tracking-normal tabular-nums sm:hidden">
+              {[startTime, duration].filter(Boolean).join(" · ")}
+            </span>
           )}
-        </div>
-        <div className="flex items-center gap-1">
-          <span
-            className={`flex items-center gap-1.5 text-xs font-medium ${statusMeta.className}`}
-            role="status"
-          >
-            <StatusIcon
-              className={`size-3.5 ${status === "running" ? "motion-safe:animate-spin" : ""}`}
-            />
+          <span className={`flex items-center gap-1.5 font-sans text-xs normal-case tracking-normal ${statusMeta.className}`} role="status">
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
             {statusMeta.label}
           </span>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="size-8"
-                title={`Task ${number} actions`}
-              >
-                <MoreHorizontal />
-                <span className="sr-only">Task {number} actions</span>
+          <div className="ml-auto flex items-center gap-1 font-sans normal-case tracking-normal">
+            {status === "running" && (
+              <Button type="button" size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={onStopTask}>
+                Stop
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => setPreviewOpen(true)}>
-                <Eye />
-                Preview Markdown
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => void copyTask()}>
-                <Clipboard />
-                Copy task and output
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={exportTask}>
-                <Download />
-                Export Markdown
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {status === "running" && (
-            <Button
-              type="button"
-              size="sm"
-              variant="destructive"
-              className="h-8"
-              onClick={onStopTask}
-            >
-              Stop
-            </Button>
-          )}
-        </div>
-      </header>
-      <div className={`p-4 sm:p-5 ${status === "completed" ? "space-y-4" : "space-y-6"}`}>
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" size="icon" variant="ghost" className="size-7 text-muted-foreground" title={`Task ${number} actions`}>
+                  <MoreHorizontal />
+                  <span className="sr-only">Task {number} actions</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setPreviewOpen(true)}>
+                  <Eye />
+                  Preview Markdown
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void copyTask()}>
+                  <Clipboard />
+                  Copy task and output
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={exportTask}>
+                  <Download />
+                  Export Markdown
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </header>
         <MessageItem
           message={task.prompt}
           onRetryMessage={onRetryMessage}
@@ -229,38 +213,60 @@ export function TaskGroup({
           onDismissMessage={onDismissMessage}
           searchQuery={searchQuery}
         />
-        {deferred && (
-          <p className="text-xs text-muted-foreground" role="status">
-            {task.richActivity.length + task.responses.length} steps · loading…
-          </p>
-        )}
-        {activity.map((item) =>
-          item.type === "message" ? (
-            <MessageItem
-              key={item.key}
-              message={item.message}
-              searchQuery={searchQuery}
-            />
-          ) : item.type === "thinking" ? (
-            <ThinkingBlock key={item.key} content={item.content} />
-          ) : item.type === "tool-group" ? (
-            <div key={item.key} className="ml-3 sm:ml-8">
-              <ToolCallGroup
-                toolCalls={item.toolCalls}
+        <div className="mt-4 space-y-4">
+          {deferred && (
+            <p className="text-xs text-muted-foreground" role="status">
+              {task.richActivity.length + task.responses.length} steps · loading…
+            </p>
+          )}
+          {hiddenSteps > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAllSteps(true)}
+              className="flex items-center gap-1.5 rounded text-xs text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ChevronRight className="size-3" />
+              Show {hiddenSteps} earlier {hiddenSteps === 1 ? "step" : "steps"}
+            </button>
+          )}
+          {visibleActivity.map((item, index) =>
+            item.type === "message" ? (
+              <MessageItem
+                key={item.key}
+                // While a task with a transcript runs, the last item is the
+                // live terminal screen; its tail is what is happening now.
+                message={live && structured && index === visibleActivity.length - 1 ? withLastLines(item.message, 10) : item.message}
                 searchQuery={searchQuery}
-                onSendRaw={onSendRaw}
               />
+            ) : item.type === "thinking" ? (
+              <ThinkingNote key={item.key} content={item.content} />
+            ) : item.type === "tool-group" ? (
+              <ToolCallGroup key={item.key} toolCalls={item.toolCalls} searchQuery={searchQuery} onSendRaw={onSendRaw} />
+            ) : (
+              <ToolCallCard key={item.key} toolCall={item.toolCall} searchQuery={searchQuery} onSendRaw={onSendRaw} />
+            ),
+          )}
+          {!deferred && structured && !live && task.responses.length > 0 && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setTerminalOpen((open) => !open)}
+                aria-expanded={terminalOpen}
+                className="flex items-center gap-1.5 rounded text-xs text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <TerminalSquare className="size-3.5" />
+                {terminalOpen ? "Hide terminal output" : "Terminal output"}
+              </button>
+              {terminalOpen && (
+                <div className="mt-2 space-y-2">
+                  {task.responses.map((message, index) => (
+                    <MessageItem key={`terminal-${message.id ?? index}`} message={message} searchQuery={searchQuery} />
+                  ))}
+                </div>
+              )}
             </div>
-          ) : (
-            <div key={item.key} className="ml-3 sm:ml-8">
-              <ToolCallCard
-                toolCall={item.toolCall}
-                searchQuery={searchQuery}
-                onSendRaw={onSendRaw}
-              />
-            </div>
-          ),
-        )}
+          )}
+        </div>
       </div>
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="flex max-h-[85dvh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
@@ -297,27 +303,63 @@ export function TaskGroup({
   );
 }
 
-function ThinkingBlock({content}: {content: string}) {
-  const [renderMode, setRenderMode] = useState<"raw" | "markdown">("raw");
+// Thinking as a sidenote: on wide screens it sits in the right margin next to
+// the step it explains; narrower screens show a one-line row that expands.
+function ThinkingNote({content}: {content: string}) {
+  const wide = useMediaQuery("(min-width: 1280px)");
+  const [open, setOpen] = useState(false);
+  const {title, body} = splitThinking(content);
+  if (wide) {
+    return (
+      <aside className="float-right clear-right -mr-[17rem] mb-3 w-60 border-l pl-3.5 text-[12.5px] leading-[1.55] text-muted-foreground">
+        <span className="mb-0.5 block font-mono text-[10.5px] uppercase tracking-[0.06em]">Thinking</span>
+        <b className="block font-semibold text-foreground">{title}</b>
+        {body && body !== title && (
+          <p className={`mt-0.5 whitespace-pre-wrap ${open ? "" : "line-clamp-6"}`}>{body}</p>
+        )}
+        {body.length > 360 && (
+          <button type="button" onClick={() => setOpen((value) => !value)} className="mt-1 text-[11px] underline-offset-2 hover:underline">
+            {open ? "Less" : "More"}
+          </button>
+        )}
+      </aside>
+    );
+  }
   return (
-    <details className="ml-3 overflow-hidden rounded-lg border-l-2 border-y-0 border-r-0 bg-muted/20 sm:ml-8">
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-muted/45 [&::-webkit-details-marker]:hidden">
-        <Brain className="size-3.5 shrink-0" />
-        <span className="flex-1">Thinking</span>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.preventDefault();
-            setRenderMode((mode) => mode === "raw" ? "markdown" : "raw");
-          }}
-          className="rounded px-2 py-1 hover:bg-muted"
-        >
-          {renderMode === "markdown" ? "Raw" : "Preview"}
-        </button>
-      </summary>
-      <div className="border-t bg-muted/20 px-3 py-3">
-        <ProcessedMessage messageContent={content} isUser={false} renderMode={renderMode} />
-      </div>
-    </details>
+    <div className="text-xs text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="flex max-w-full items-center gap-1.5 rounded outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <ChevronRight className={`size-3 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
+        <span className="truncate">Thinking · {title}</span>
+      </button>
+      {open && body && <p className="mt-1.5 whitespace-pre-wrap border-l pl-3.5 leading-[1.55]">{body}</p>}
+    </div>
   );
+}
+
+const STEP_WINDOW = 40;
+
+function withLastLines<T extends {content: string}>(message: T, count: number): T {
+  const lines = message.content.replace(/\s+$/, "").split("\n");
+  return lines.length <= count ? message : {...message, content: lines.slice(-count).join("\n")};
+}
+
+function formatClock(totalSeconds: number) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatClockTime(iso: string) {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", hour12: false});
 }

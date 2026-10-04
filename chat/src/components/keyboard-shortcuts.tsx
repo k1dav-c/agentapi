@@ -18,6 +18,8 @@ const shortcuts = [
     section: "General",
     items: [
       { keys: ["⌘", "F"], label: "Search tasks" },
+      { keys: ["⌘", "K"], label: "Open the Explorer" },
+      { keys: ["1", "–", "9"], label: "Answer the agent's question" },
       { keys: ["?"], label: "Show shortcuts" },
     ],
   },

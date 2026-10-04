@@ -28,7 +28,7 @@ import {
   MoreHorizontal,
   RefreshCw,
 } from "lucide-react";
-import {Tabs, TabsList, TabsTrigger} from "./ui/tabs";
+import {Tabs, TabsContent, TabsList, TabsTrigger} from "./ui/tabs";
 import type {SendResult, ServerStatus} from "./chat-provider";
 import TextareaAutosize from "react-textarea-autosize";
 import {useChat} from "./chat-provider";
@@ -60,6 +60,8 @@ interface MessageInputProps {
   serverStatus: ServerStatus;
   suggestedPrompt?: string;
   onSuggestedPromptApplied?: () => void;
+  // Shown above the composer: the agent's state strip and decision card.
+  dock?: React.ReactNode;
 }
 
 interface SentChar {
@@ -157,6 +159,7 @@ export default function MessageInput({
   serverStatus,
   suggestedPrompt = "",
   onSuggestedPromptApplied,
+  dock,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [hydratedDraftKey, setHydratedDraftKey] = useState<string | null>(null);
@@ -187,6 +190,7 @@ export default function MessageInput({
     updateQueuedMessage,
     deleteQueuedMessage,
     storageScope,
+    terminalPrompt,
   } = useChat();
   const draftStorageKey = `agentapi.chat.message-draft:${storageScope}`;
   const attachmentsStorageKey = `agentapi.chat.attachments:${storageScope}`;
@@ -618,7 +622,10 @@ export default function MessageInput({
       onValueChange={(value) => setInputMode(value as "text" | "control")}
       className="shrink-0 border-t bg-background/90 backdrop-blur-xl"
     >
-      <div className="mx-auto w-full max-w-5xl px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 sm:px-6 sm:pb-3 sm:pt-3">
+      {/* Aligned with the transcript's text column (past the time rail). */}
+      <div className="mx-auto w-full max-w-[72rem] px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 sm:px-6 sm:pb-3 sm:pt-3">
+       <div className="grid max-w-[46rem] grid-cols-[minmax(0,1fr)] gap-2 sm:ml-[4.75rem]">
+        {dock}
         <DragDrop
           onFilesAdded={handleFilesAdded}
           disabled={disabled || inputMode === "control"}
@@ -695,11 +702,13 @@ export default function MessageInput({
                     onKeyDown={handleKeyDown}
                     aria-label="Task message"
                     placeholder={
-                      serverStatus === "running"
-                        ? "Add a queued task…"
-                        : serverStatus === "stable"
-                          ? "Ask the agent to do something…"
-                          : "Reconnecting… Your draft is saved."
+                      terminalPrompt
+                        ? "Queue a task (runs after you answer)…"
+                        : serverStatus === "running"
+                          ? "Queue a follow-up…"
+                          : serverStatus === "stable"
+                            ? "Describe a task…"
+                            : "Reconnecting… Your draft is saved."
                     }
                     className="min-h-14 max-h-32 w-full resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-6 outline-none sm:min-h-16 sm:px-5"
                     disabled={
@@ -805,6 +814,7 @@ export default function MessageInput({
                     <span className="flex items-center gap-1.5">
                       <Clock3 className="size-3" />
                       Queued tasks · {queuedMessages.length}
+                      {terminalPrompt && <span className="text-state-needs">· held until you answer the agent</span>}
                     </span>
                     <span className="text-[10px] group-open:hidden">Show</span>
                     <span className="hidden text-[10px] group-open:inline">Hide</span>
@@ -885,6 +895,10 @@ export default function MessageInput({
               )}
 
               <div className="flex items-center justify-between gap-3 border-t bg-muted/25 px-3 py-2.5">
+                {/* The composer above is the content of both tabs; these
+                    empty panels give the tabs the elements they control. */}
+                <TabsContent value="text" forceMount className="hidden" />
+                <TabsContent value="control" forceMount className="hidden" />
                 <TabsList className="h-10 bg-muted/70 p-0.5 sm:h-8">
                   <TabsTrigger
                     value="text"
@@ -894,7 +908,7 @@ export default function MessageInput({
                     }}
                   >
                     <MessageSquareText className="size-3.5" />
-                    Task
+                    <span className="max-sm:sr-only">Task</span>
                   </TabsTrigger>
                   <TabsTrigger
                     value="control"
@@ -904,7 +918,7 @@ export default function MessageInput({
                     }}
                   >
                     <Keyboard className="size-3.5" />
-                    Terminal
+                    <span className="max-sm:sr-only">Terminal</span>
                   </TabsTrigger>
                 </TabsList>
 
@@ -1039,6 +1053,7 @@ export default function MessageInput({
               </>
             )}
         </div>
+       </div>
       </div>
 
       <Dialog open={pendingControl !== null} onOpenChange={(open) => !open && setPendingControl(null)}>

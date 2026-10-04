@@ -1,12 +1,25 @@
 "use client";
 
 import {useEffect, useState} from "react";
-import {ExternalLink, RefreshCw, TerminalSquare} from "lucide-react";
+import {ExternalLink, FolderSearch, RefreshCw, TerminalSquare} from "lucide-react";
 import {useChat} from "./chat-provider";
 import MessageInput from "./message-input";
 import MessageList from "./message-list";
-import {Explorer} from "./explorer";
+import dynamic from "next/dynamic";
 import {TtyView} from "./tty-view";
+import {DecisionCard, StateStrip} from "./dock";
+
+// The Explorer (task index, MCP and Temporal settings) isn't needed for the
+// first paint, so it loads right after, keeping the initial bundle small.
+// The placeholder matches its trigger button.
+const Explorer = dynamic(() => import("./explorer").then((module) => module.Explorer), {
+  ssr: false,
+  loading: () => (
+    <span aria-hidden="true" className="grid size-8 place-items-center rounded-full text-muted-foreground">
+      <FolderSearch className="size-4" />
+    </span>
+  ),
+});
 import {Button} from "./ui/button";
 import {KeyboardShortcutsDialog, useKeyboardShortcutsKey} from "./keyboard-shortcuts";
 
@@ -59,7 +72,7 @@ export function Chat() {
   }, [nextReconnectAt]);
 
   return (
-    <section className="relative flex min-h-0 flex-1 flex-col bg-[radial-gradient(circle_at_top,_var(--surface-glow),_transparent_42%)]">
+    <section className="relative flex min-h-0 flex-1 flex-col">
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {serverStatus === "running"
           ? "Agent is working"
@@ -112,12 +125,12 @@ export function Chat() {
             onStopTask={() => void sendMessage("\x1b", "raw")}
             onSendRaw={(data) => void sendMessage(data, "raw")}
             headerAction={
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-0.5">
                 <Button
                   type="button"
                   size="icon"
                   variant="ghost"
-                  className="size-9 rounded-full"
+                  className="size-8 rounded-full text-muted-foreground"
                   title="TTY mode: use the agent's terminal directly"
                   aria-label="Switch to TTY mode"
                   onClick={() => setTtyMode(true)}
@@ -139,7 +152,7 @@ export function Chat() {
                     type="button"
                     size="icon"
                     variant="ghost"
-                    className="size-9 rounded-full"
+                    className="hidden size-8 rounded-full text-muted-foreground sm:inline-flex"
                     title="Open Coder workspace"
                     aria-label="Open Coder workspace"
                     onClick={() => window.open(coderWorkspaceUrl, "_blank", "noopener,noreferrer")}
@@ -151,6 +164,12 @@ export function Chat() {
             }
           />
           <MessageInput
+            dock={
+              <>
+                <StateStrip />
+                <DecisionCard onOpenTerminal={() => setTtyMode(true)} />
+              </>
+            }
             onSendMessage={sendMessage}
             disabled={loading}
             serverStatus={serverStatus}
