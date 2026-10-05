@@ -1,13 +1,14 @@
 "use client";
 
 import {useEffect, useRef, useState} from "react";
-import {ArrowLeft, TerminalSquare} from "lucide-react";
+import {ArrowLeft, Keyboard, KeyboardOff, TerminalSquare} from "lucide-react";
 import {toast} from "sonner";
 import type {Terminal} from "@xterm/xterm";
 import {useChat} from "./chat-provider";
 import {Button} from "./ui/button";
 import {OrderedInput, fitTerminalFontSize, screenToTerminalOutput} from "@/lib/tty";
-import {terminalShortcuts, type TerminalShortcut} from "@/lib/terminal-keys";
+import {keyboardInset, terminalShortcuts, type TerminalShortcut} from "@/lib/terminal-keys";
+import {useMediaQuery} from "@/lib/use-media-query";
 
 // The mirror uses the width of the agent's terminal (80 columns unless
 // AgentAPI was started with --term-width), so lines wrap exactly as the
@@ -34,6 +35,39 @@ export function TtyView({onExit}: {onExit: () => void}) {
   const [cellWidth, setCellWidth] = useState(0);
   const inputRef = useRef<OrderedInput | null>(null);
   const termRef = useRef<Terminal | null>(null);
+  // Touch screens type through an on-screen keyboard, which only opens
+  // while the terminal's (hidden) input has focus.
+  const touch = useMediaQuery("(pointer: coarse)");
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  // How much of the page the on-screen keyboard covers (iOS doesn't shrink
+  // the page for it), so the key bar can sit above it.
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const update = () => setInset(keyboardInset(window.innerHeight, viewport));
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+    };
+  }, []);
+  const toggleKeyboard = () => {
+    const term = termRef.current;
+    if (!term) return;
+    // Focus from the tap itself: iOS opens the keyboard only for focus
+    // that happens inside a user gesture.
+    if (keyboardOpen) {
+      term.blur();
+      return;
+    }
+    // Focus without scrolling the terminal sideways to the cursor.
+    const textarea = term.textarea;
+    if (textarea) textarea.focus({preventScroll: true});
+    else term.focus();
+  };
   // A risky shortcut (Ctrl+D, Ctrl+Z) waiting for its second press.
   const [armed, setArmed] = useState<string | null>(null);
   useEffect(() => {
@@ -48,7 +82,8 @@ export function TtyView({onExit}: {onExit: () => void}) {
     }
     setArmed(null);
     inputRef.current?.push(shortcut.value);
-    termRef.current?.focus();
+    // On a touch screen, don't bring back a keyboard the user put away.
+    if (!touch || keyboardOpen) termRef.current?.focus();
   };
   // The provider recreates this function on every render; read it through
   // a ref so the terminal isn't rebuilt each time.
@@ -109,7 +144,21 @@ export function TtyView({onExit}: {onExit: () => void}) {
       // have xterm wrap pastes so a multi-line paste isn't submitted line
       // by line.
       term.write("\x1b[?25l\x1b[?2004h");
-      term.focus();
+      // The input xterm types through: tell phone keyboards it is a
+      // terminal (no autocorrect or capitals) and track whether it has
+      // focus, which is whether the on-screen keyboard is up.
+      const textarea = container.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea");
+      if (textarea) {
+        textarea.setAttribute("autocapitalize", "off");
+        textarea.setAttribute("autocorrect", "off");
+        textarea.setAttribute("spellcheck", "false");
+        textarea.setAttribute("enterkeyhint", "enter");
+        textarea.addEventListener("focus", () => setKeyboardOpen(true));
+        textarea.addEventListener("blur", () => setKeyboardOpen(false));
+      }
+      // On a touch screen the keyboard opens when asked for (the keyboard
+      // button, or a tap on the terminal), not as soon as TTY mode opens.
+      if (!window.matchMedia("(pointer: coarse)").matches) term.focus();
 
       const input = new OrderedInput((data) => sendRef.current(data), (error) => {
         toast.error("Could not send keys to the agent", {
@@ -170,14 +219,20 @@ export function TtyView({onExit}: {onExit: () => void}) {
     fitRef.current();
   }, [columns]);
 
+  // Keep the last lines in view when the keyboard opens or closes.
+  useEffect(() => {
+    termRef.current?.scrollToBottom();
+  }, [inset, keyboardOpen]);
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col" style={inset ? {paddingBottom: inset} : undefined}>
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-background/95 px-3 py-2 text-xs sm:px-4">
         <TerminalSquare className="size-4 shrink-0 text-muted-foreground" />
         <span className="font-semibold">TTY mode</span>
-        <span className="text-muted-foreground">
+        <span className="hidden text-muted-foreground sm:inline">
           {connected ? "Keys go straight to the agent" : "Connecting to the terminal…"}
         </span>
+        {!connected && <span className="text-muted-foreground sm:hidden">Connecting…</span>}
         <span className="hidden font-mono text-[11px] text-muted-foreground md:inline">
           {columns} columns · full-width characters take 2
         </span>
@@ -206,24 +261,40 @@ export function TtyView({onExit}: {onExit: () => void}) {
       </div>
       {/* Keys a phone keyboard can't send. Buttons don't take focus, so the
           terminal (and the on-screen keyboard) stays active. */}
-      <div
-        className="flex shrink-0 gap-1.5 overflow-x-auto border-t bg-background/95 px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2"
-        aria-label="Terminal keys"
-      >
-        {terminalShortcuts.map((shortcut) => (
+      <div className="flex shrink-0 items-start gap-1.5 border-t bg-background/95 px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2">
+        {touch && (
           <button
-            key={shortcut.label}
             type="button"
             onMouseDown={(event) => event.preventDefault()}
-            onClick={() => pressShortcut(shortcut)}
-            title={shortcut.risky ? `Send ${shortcut.label} (press twice)` : `Send ${shortcut.label}`}
-            className={`h-8 shrink-0 rounded-md border px-2.5 font-mono text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring ${
-              armed === shortcut.label ? "border-state-fault bg-state-fault text-white" : "bg-card hover:bg-muted"
+            onClick={toggleKeyboard}
+            aria-pressed={keyboardOpen}
+            aria-label={keyboardOpen ? "Hide keyboard" : "Show keyboard"}
+            title={keyboardOpen ? "Hide keyboard" : "Show keyboard"}
+            className={`flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-ring ${
+              keyboardOpen ? "border-foreground bg-foreground text-background" : "bg-card hover:bg-muted"
             }`}
           >
-            {armed === shortcut.label ? `${shortcut.display} again` : shortcut.display}
+            {keyboardOpen ? <KeyboardOff className="size-4" /> : <Keyboard className="size-4" />}
+            {keyboardOpen ? "Hide" : "Keyboard"}
           </button>
-        ))}
+        )}
+        <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto" role="group" aria-label="Terminal keys">
+          {terminalShortcuts.map((shortcut) => (
+            <button
+              key={shortcut.label}
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => pressShortcut(shortcut)}
+              title={shortcut.risky ? `Send ${shortcut.label} (press twice)` : `Send ${shortcut.label}`}
+              aria-label={armed === shortcut.label ? `Send ${shortcut.label}: press again to confirm` : `Send ${shortcut.label}`}
+              className={`h-8 shrink-0 rounded-md border px-2.5 font-mono text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring ${
+                armed === shortcut.label ? "border-state-fault bg-state-fault text-white" : "bg-card hover:bg-muted"
+              }`}
+            >
+              {armed === shortcut.label ? `${shortcut.display} again` : shortcut.display}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

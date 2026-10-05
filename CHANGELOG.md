@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Features
+- TTY mode works on phones: a Keyboard button in the key bar opens and closes the on-screen keyboard (it no longer pops up when TTY mode opens), the key bar stays above the keyboard on iOS, and the bar has ←, → and Shift+Tab. The terminal input turns off autocorrect and auto-capitalization
 - Chat: Codex shows its logo (the OpenAI mark, as on Codex's own pages) in the header, the agent's turn and the tab icon, drawn in the text color so it follows dark mode
 - The chat header shows the session name, the one the agent gives it: Claude Code's title (or its `/rename`), Codex's thread name, or Pi's `/name`. On a phone it replaces the agent name next to the agent's mark. `GET /status` and `status_change` report it as `session_name`
 - Chat: your messages read as yours. Each prompt sits in a tinted block labelled "You", and the agent's turn starts with its mark and name (e.g. Pi), so the prompt and the reply no longer run together
