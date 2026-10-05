@@ -15,6 +15,7 @@ import type { TaskSection, TaskStatus } from "@/lib/task-timeline";
 import { getTaskActivity, hasStructuredTranscript, toSearchableTask } from "@/lib/task-timeline";
 import { splitThinking } from "@/lib/thinking";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { useThrottledValue } from "@/lib/use-throttled";
 import {
   Dialog,
   DialogContent,
@@ -246,11 +247,14 @@ export function TaskGroup({
           )}
           {visibleActivity.map((item, index) =>
             item.type === "message" ? (
-              live && structured && index === visibleActivity.length - 1 ? (
-                // While a task with a transcript runs, the last item is the
-                // live terminal screen; its tail is what is happening now.
+              live && index === visibleActivity.length - 1 ? (
+                // While a task runs, the last item is the live terminal
+                // screen. With a transcript, only its tail is shown (the
+                // rest is in the transcript). Either way it is redrawn at
+                // most once a second and doesn't shrink, from the first
+                // screen on, so the switch to a transcript doesn't remount it.
                 <GrowOnly key={item.key}>
-                  <MessageItem message={withLastLines(item.message, 10)} searchQuery={searchQuery} />
+                  <LiveTail message={structured ? withLastLines(item.message, 10) : item.message} searchQuery={searchQuery} />
                 </GrowOnly>
               ) : (
                 <MessageItem key={item.key} message={item.message} searchQuery={searchQuery} />
@@ -360,6 +364,14 @@ function ThinkingNote({content}: {content: string}) {
 }
 
 const STEP_WINDOW = 40;
+
+// The live screen tail, redrawn at most once a second. Agents animate
+// parts of their screen several times a second (Claude Code blinks the
+// bullet of a running tool); the latest screen still shows within a second.
+function LiveTail({message, searchQuery}: {message: React.ComponentProps<typeof MessageItem>["message"]; searchQuery: string}) {
+  const shown = useThrottledValue(message, 1000);
+  return <MessageItem message={shown} searchQuery={searchQuery} />;
+}
 
 // Keeps the tallest height its content has had. The live screen tail
 // grows and shrinks as the agent redraws; holding its height keeps the

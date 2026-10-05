@@ -30,6 +30,7 @@
 - The sub-agents (Agents) panel, together with the `GET /agents` endpoint and the `agents_update` SSE event
 
 ### Fixes
+- Chat: the live screen of a running task is redrawn at most once a second and never shrinks, from the first screen on. Claude Code blinks the bullet of a running tool, which the server can't tell from ordinary text. Measured on the same task, the running task now changes on screen about 1.6–2 times a second (its clock included) instead of 3.7–6.8 for Claude Code, Codex and Pi
 - Claude Code: its spinner before the timer shows (`· Contemplating…`) and the elapsed time on a running tool (`· 2s`, `(3s)`) are left out of messages too
 - Chat: while a task runs, the live screen tail keeps the tallest height it has had, so the task doesn't jump up and down as the agent redraws
 - The live screen no longer flickers while an agent works. Its own status line (Codex's `◦ Working (19s • esc to interrupt)`, Claude Code's `✻ Fermenting… (6s · ↓ 80 tokens)` and tip, Pi's `⠼ Working` and `Elapsed 2.0s`) is left out of messages, so a spinner frame or a ticking second no longer counts as a change: during a Codex task the chat gets about 0.7 updates a second instead of 2.5
