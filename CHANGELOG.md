@@ -28,6 +28,7 @@
 - The sub-agents (Agents) panel, together with the `GET /agents` endpoint and the `agents_update` SSE event
 
 ### Fixes
+- Chat: the dark mode button stays in the header on phones instead of moving into the status menu
 - Chat: the conversation is centered. The text column sat about 8rem left of center, past a time rail and with 17rem kept free on the right for thinking notes; now the 46rem column and the composer are centered, the time rail hangs in the left margin (shown inline when there is no room) and thinking notes use the right margin from 84rem up
 - Chat: the Open Coder workspace button stays in the header on small screens instead of disappearing below 640px
 - Chat: a task is marked Failed only when it ends on a failed command. A command the agent went on from (a missing directory, a grep with no match) used to mark the whole task Failed

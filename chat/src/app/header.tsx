@@ -6,8 +6,7 @@ import { notificationsEnabled, onNotificationsPreferenceChange, setNotifications
 import { AgentType, useChat } from "@/components/chat-provider";
 import { ModeToggle } from "@/components/mode-toggle";
 import { AgentMark } from "@/components/agent-mark";
-import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Moon, Sun, Tag } from "lucide-react";
-import { useTheme } from "next-themes";
+import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Tag } from "lucide-react";
 import { computeTokenTotals, formatTokenCount, getStatusMeta } from "@/lib/session-status";
 import { useWorkingElapsed } from "@/lib/use-elapsed";
 import { KeyboardShortcutsDialog, useKeyboardShortcutsKey } from "@/components/keyboard-shortcuts";
@@ -38,7 +37,6 @@ export function Header() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   useKeyboardShortcutsKey(() => setShortcutsOpen(true));
   const elapsed = useWorkingElapsed(serverStatus);
-  const { resolvedTheme, setTheme } = useTheme();
   const [notify, setNotify] = useState(false);
   useEffect(() => {
     const sync = () => setNotify(notificationsEnabled() && typeof Notification !== "undefined" && Notification.permission === "granted");
@@ -191,10 +189,6 @@ export function Header() {
               <Keyboard />
               Keyboard shortcuts
             </DropdownMenuItem>
-            <DropdownMenuItem className="sm:hidden" onSelect={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}>
-              {resolvedTheme === "dark" ? <Sun /> : <Moon />}
-              {resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         {queuedMessages.length > 0 && (
@@ -214,9 +208,7 @@ export function Header() {
           </span>
         )}
         <div id={HEADER_ACTIONS_ID} className="flex items-center gap-0.5" />
-        <div className="hidden sm:block">
-          <ModeToggle />
-        </div>
+        <ModeToggle />
       </div>
       <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </header>
