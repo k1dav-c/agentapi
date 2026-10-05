@@ -5,6 +5,8 @@ import { Check, Clipboard, Code2, FileText, Pencil, RefreshCw, Search, TerminalS
 import { Button } from "../ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
 import { ProcessedMessage } from "../processed-message";
+import { MessageImages } from "../image-preview";
+import { withoutUploadedImages } from "@/lib/uploads";
 import { toast } from "sonner";
 import { formatMessageTime } from "@/lib/format-time";
 import type { DraftMessage, Message } from "../chat-provider";
@@ -204,8 +206,12 @@ export function MessageItem({
           {message.content === "" ? (
             <LoadingDots />
           ) : (
-            <ProcessedMessage messageContent={message.content} isUser={isUser} searchQuery={globalSearchQuery} />
+            // Uploaded images show as thumbnails below, not as their paths.
+            withoutUploadedImages(message.content) && (
+              <ProcessedMessage messageContent={withoutUploadedImages(message.content)} isUser={isUser} searchQuery={globalSearchQuery} />
+            )
           )}
+          {message.content && <MessageImages content={message.content} />}
         </div>
       </div>
       {isDraft && !isFailed && <p className="mt-1 text-xs text-muted-foreground">Sending…</p>}

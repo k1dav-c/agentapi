@@ -22,6 +22,8 @@ import type {SendResult, ServerStatus} from "./chat-provider";
 import TextareaAutosize from "react-textarea-autosize";
 import {useChat} from "./chat-provider";
 import {DragDrop} from "./drag-drop";
+import {ImageThumb, useObjectURL} from "./image-preview";
+import {filesToUploadFromPaste, isImageFile, pastedFileName, uploadedImageURL} from "@/lib/uploads";
 import {toast} from "sonner";
 import {getErrorMessage} from "@/lib/error-utils";
 import {
@@ -485,6 +487,15 @@ export default function MessageInput({
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
+                    onPaste={(event) => {
+                      // A pasted screenshot or image is uploaded like an
+                      // attachment; pasted text pastes as usual.
+                      const files = filesToUploadFromPaste(event.clipboardData);
+                      if (files.length === 0) return;
+                      event.preventDefault();
+                      const now = new Date();
+                      void handleFilesAdded(files.map((file) => new File([file], pastedFileName(file.name, file.type, now), {type: file.type})));
+                    }}
                     aria-label="Task message"
                     placeholder={
                       terminalPrompt
@@ -514,7 +525,7 @@ export default function MessageInput({
                       key={attachment.id}
                       className="flex min-h-10 items-center gap-2 rounded-lg border bg-background px-2.5 py-1.5 text-xs"
                     >
-                      <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+                      <AttachmentIcon attachment={attachment} baseURL={storageScope} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
                           <span className="truncate font-medium">
@@ -796,4 +807,14 @@ function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// An image attachment shows a thumbnail: from the browser while it uploads
+// (or after a paste), then from the server.
+function AttachmentIcon({attachment, baseURL}: {attachment: Attachment; baseURL: string}) {
+  const image = isImageFile({name: attachment.name, type: attachment.file?.type});
+  const local = useObjectURL(image ? attachment.file : undefined);
+  const src = local ?? (attachment.filePath ? uploadedImageURL(baseURL, attachment.filePath) : undefined);
+  if (!image || !src) return <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />;
+  return <ImageThumb src={src} name={attachment.name} className="size-9" />;
 }

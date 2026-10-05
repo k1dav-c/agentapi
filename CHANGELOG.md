@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Features
+- Chat: paste an image into the composer to attach it (a pasted screenshot is uploaded and named `pasted-<date>-<time>.png`; pasted text still pastes as text). Image attachments and the images in sent messages show as thumbnails that open full size, and the message shows the thumbnails instead of the upload paths
 - `GET /uploads/{checksum}/{name}` returns an uploaded image so the chat can show it. It reads only the server's own upload directory (through `os.Root`, so symlinks can't lead out), serves only PNG, JPEG, GIF, WebP and BMP as judged by the content (not SVG or HTML), and sends `nosniff` and a sandboxing CSP
 - TTY mode key bar: the most used keys come first (↑, ↓, Enter, Esc, ←, →), so they fit a phone screen without scrolling; Enter is labelled "Enter"
 - TTY mode works on phones: a Keyboard button in the key bar opens and closes the on-screen keyboard (it no longer pops up when TTY mode opens), the key bar stays above the keyboard on iOS, and the bar has ←, → and Shift+Tab. The terminal input turns off autocorrect and auto-capitalization

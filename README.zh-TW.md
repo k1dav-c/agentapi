@@ -39,6 +39,8 @@ AgentAPI 可以用來：
 
 每則訊息都有自己的 markdown/raw 切換開關，可以個別切換顯示模式，不會影響對話的其他部分。
 
+可以直接在輸入框貼上圖片：貼上的截圖會像附件一樣上傳，貼上文字則照常貼上。附件中的圖片和已送出訊息裡的圖片會顯示成縮圖，點開可看原圖；agent 收到的是檔案路徑。
+
 介面也改善了行動裝置版面、附件處理、可搜尋的工具活動、連線狀態指示，以及更精簡的
 工具呼叫卡片。標頭會顯示 agent 的標誌（Claude 的橘色方塊、Pi 的 logo）和 AgentAPI 版本。
 
@@ -321,6 +323,8 @@ OpenAPI schema 可在 [openapi.json](openapi.json) 取得。
   終端機寬度（`terminal_columns`）
 - GET `/events` - agent 事件的 SSE 串流：訊息與狀態更新（加上 `?sync=1` 可在重新連線時增量重播）
 - DELETE `/messages` - 清除所有對話狀態（訊息、結構化訊息、時間軸、錯誤），並重新啟動 agent 行程
+- POST `/upload`：把檔案（最大 10 MB）存到伺服器的暫存上傳目錄並回傳路徑，訊息以 `@"<路徑>"` 引用
+- GET `/uploads/{checksum}/{name}`：回傳上傳的圖片（依內容判斷 PNG、JPEG、GIF、WebP 或 BMP）供聊天介面顯示，其他檔案一律拒絕
 - GET/PUT `/webhook` - 讀取或更新執行狀態 webhook 的傳送設定，不需要重新啟動 agent
 - GET `/mcp` - 回傳 Claude、Codex 或 Pi 已設定的 MCP 伺服器，以及受管理的設定檔路徑
 - PUT `/mcp` - 取代整組 MCP 伺服器；傳入 `?restart=true` 可重新啟動 PTY agent 並立即套用

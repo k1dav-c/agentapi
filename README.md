@@ -45,6 +45,11 @@ The Session Explorer provides:
 Each message has its own markdown/raw toggle so you can switch render
 modes without affecting the rest of the conversation.
 
+Images can be pasted straight into the composer (a pasted screenshot is
+uploaded like an attachment; pasted text still pastes as text). Image
+attachments and the images in sent messages show as thumbnails that open full
+size; the agent gets the file path.
+
 The UI also includes improved mobile layouts, attachment handling, searchable
 tool activity, connection-state indicators, and more compact tool-call cards.
 The header shows the agent's mark (Claude's orange square, Pi's logo) and the
@@ -364,6 +369,8 @@ Endpoints:
   (`terminal_columns`)
 - GET `/events` - an SSE stream of events from the agent: message and status updates (`?sync=1` for incremental replay on reconnect)
 - DELETE `/messages` - clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent process
+- POST `/upload` - stores a file (up to 10 MB) in the server's temporary upload directory and returns its path, which a message references as `@"<path>"`
+- GET `/uploads/{checksum}/{name}` - returns an uploaded image (PNG, JPEG, GIF, WebP or BMP, judged by content) for the chat to show; other files are refused
 - GET/PUT `/webhook` - reads or updates run-status webhook delivery without restarting the agent
 - GET `/mcp` - returns configured MCP servers and the managed config path for Claude, Codex or Pi
 - PUT `/mcp` - replaces the complete MCP server set; pass `?restart=true` to restart the PTY agent and apply immediately
