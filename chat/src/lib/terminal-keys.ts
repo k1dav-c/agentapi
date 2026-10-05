@@ -16,17 +16,19 @@ export interface TerminalShortcut {
   risky?: boolean;
 }
 
+// Most used first (picking an option: arrows and Enter), so they're in
+// reach without scrolling the key bar on a phone.
 export const terminalShortcuts: TerminalShortcut[] = [
-  {label: "Escape", display: "Esc", value: "\x1b"},
-  {label: "Tab", display: "Tab", value: "\t"},
-  {label: "Shift+Tab", display: "⇧Tab", value: "\x1b[Z"},
   {label: "Arrow up", display: "↑", value: "\x1b[A"},
   {label: "Arrow down", display: "↓", value: "\x1b[B"},
+  {label: "Enter", display: "Enter", value: "\r"},
+  {label: "Escape", display: "Esc", value: "\x1b"},
   {label: "Arrow left", display: "←", value: "\x1b[D"},
   {label: "Arrow right", display: "→", value: "\x1b[C"},
-  {label: "Alt+Arrow up", display: "Alt+↑", value: "\x1b[1;3A"},
-  {label: "Enter", display: "⏎", value: "\r"},
+  {label: "Tab", display: "Tab", value: "\t"},
+  {label: "Shift+Tab", display: "⇧Tab", value: "\x1b[Z"},
   {label: "Ctrl+C", display: "Ctrl+C", value: ctrlKeys.c},
+  {label: "Alt+Arrow up", display: "Alt+↑", value: "\x1b[1;3A"},
   {label: "Ctrl+L", display: "Ctrl+L", value: ctrlKeys.l},
   {label: "Ctrl+D", display: "Ctrl+D", value: ctrlKeys.d, risky: true},
   {label: "Ctrl+Z", display: "Ctrl+Z", value: ctrlKeys.z, risky: true},

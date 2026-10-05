@@ -8,6 +8,10 @@ describe("terminalShortcuts", () => {
     expect(value("Arrow right")).toBe("\x1b[C");
     expect(value("Shift+Tab")).toBe("\x1b[Z");
   });
+  test("arrows and Enter come first, the keys that end or suspend the agent last", () => {
+    expect(terminalShortcuts.slice(0, 3).map((key) => key.label)).toEqual(["Arrow up", "Arrow down", "Enter"]);
+    expect(terminalShortcuts.slice(-2).map((key) => key.label)).toEqual(["Ctrl+D", "Ctrl+Z"]);
+  });
   test("only keys that can end or suspend the agent need a second press", () => {
     expect(terminalShortcuts.filter((key) => key.risky).map((key) => key.label)).toEqual(["Ctrl+D", "Ctrl+Z"]);
   });
