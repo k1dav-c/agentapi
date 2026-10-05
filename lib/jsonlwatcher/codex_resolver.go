@@ -142,7 +142,7 @@ func readCodexSessionMeta(path string) (*codexSessionMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var meta codexSessionMeta
 	if err := json.NewDecoder(bufio.NewReader(f)).Decode(&meta); err != nil {

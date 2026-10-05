@@ -287,7 +287,7 @@ func (s *Server) writeMCPProfiles(profiles map[string]MCPServers) error {
 		return err
 	}
 	tempPath := temporary.Name()
-	defer os.Remove(tempPath)
+	defer func() { _ = os.Remove(tempPath) }()
 	if _, err := temporary.Write(append(data, '\n')); err != nil {
 		_ = temporary.Close()
 		return err

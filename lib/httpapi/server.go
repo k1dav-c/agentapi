@@ -575,6 +575,10 @@ func (s *Server) startJSONLWatcher(pid int) {
 		}
 		parser = jsonlwatcher.NewPiParser()
 		sessionEventParser = jsonlwatcher.NewPiSessionEventParser()
+	case mf.AgentTypeGoose, mf.AgentTypeAider, mf.AgentTypeGemini, mf.AgentTypeCopilot, mf.AgentTypeAmp,
+		mf.AgentTypeCursor, mf.AgentTypeAuggie, mf.AgentTypeAmazonQ, mf.AgentTypeOpencode, mf.AgentTypeKimi,
+		mf.AgentTypeCustom:
+		// No session log to follow; the chat uses the terminal output.
 	}
 
 	if resolver == nil || parser == nil {

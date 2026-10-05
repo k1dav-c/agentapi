@@ -387,7 +387,9 @@ func TestCodexParser_Reasoning(t *testing.T) {
 	parse := func(payload string) []RichContentBlock {
 		t.Helper()
 		parser := NewCodexParser()
-		parser.ParseLine([]byte(`{"type":"event_msg","timestamp":"2026-10-04T00:00:00Z","payload":{"type":"task_started"}}`))
+		if _, err := parser.ParseLine([]byte(`{"type":"event_msg","timestamp":"2026-10-04T00:00:00Z","payload":{"type":"task_started"}}`)); err != nil {
+			t.Fatal(err)
+		}
 		completed, err := parser.ParseLine([]byte(`{"type":"response_item","timestamp":"2026-10-04T00:00:01Z","payload":` + payload + `}`))
 		if err != nil {
 			t.Fatal(err)

@@ -935,7 +935,6 @@ func (c *PTYConversation) watchScreen(ctx context.Context, source interface{ Scr
 		c.lock.Unlock()
 
 		if settled {
-			prevScreen = curScreen
 			// Park until something happens.
 			select {
 			case <-ctx.Done():

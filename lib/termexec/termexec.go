@@ -74,7 +74,7 @@ func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error
 	// escape sequences.
 	execCmd.Env = append(os.Environ(), "TERM=vt100")
 	if err := xp.StartProcessInTerminal(execCmd); err != nil {
-		xp.Close()
+		_ = xp.Close()
 		return nil, err
 	}
 

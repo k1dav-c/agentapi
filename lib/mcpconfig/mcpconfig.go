@@ -27,6 +27,10 @@ func NewStore(agentType mf.AgentType, workDir string) (Store, error) {
 		return newCodexStore()
 	case mf.AgentTypePi:
 		return newPiStore()
+	case mf.AgentTypeGoose, mf.AgentTypeAider, mf.AgentTypeGemini, mf.AgentTypeCopilot, mf.AgentTypeAmp,
+		mf.AgentTypeCursor, mf.AgentTypeAuggie, mf.AgentTypeAmazonQ, mf.AgentTypeOpencode, mf.AgentTypeKimi,
+		mf.AgentTypeCustom:
+		return nil, ErrUnsupportedAgent
 	default:
 		return nil, ErrUnsupportedAgent
 	}

@@ -370,9 +370,15 @@ func TestTailFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.WriteString(`{"type":"user","uuid":"u1","timestamp":"2026-07-24T09:35:19.000Z","message":{"role":"user","content":"hello"}}` + "\n")
-	f.Sync()
-	f.Close()
+	if _, err := f.WriteString(`{"type":"user","uuid":"u1","timestamp":"2026-07-24T09:35:19.000Z","message":{"role":"user","content":"hello"}}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -386,17 +392,35 @@ func TestTailFile(t *testing.T) {
 	}
 
 	// Append more data
-	f, _ = os.OpenFile(jsonlPath, os.O_APPEND|os.O_WRONLY, 0o644)
-	f.WriteString(`{"type":"assistant","uuid":"a1","timestamp":"2026-07-24T09:35:26.000Z","message":{"id":"msg_001","role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"hi there"}],"stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":10}}}` + "\n")
-	f.Sync()
-	f.Close()
+	f, err = os.OpenFile(jsonlPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"type":"assistant","uuid":"a1","timestamp":"2026-07-24T09:35:26.000Z","message":{"id":"msg_001","role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"hi there"}],"stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":10}}}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 	time.Sleep(500 * time.Millisecond)
 
 	// Trigger finalization with another user message
-	f, _ = os.OpenFile(jsonlPath, os.O_APPEND|os.O_WRONLY, 0o644)
-	f.WriteString(`{"type":"user","uuid":"u2","timestamp":"2026-07-24T09:35:27.000Z","message":{"role":"user","content":"thanks"}}` + "\n")
-	f.Sync()
-	f.Close()
+	f, err = os.OpenFile(jsonlPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"type":"user","uuid":"u2","timestamp":"2026-07-24T09:35:27.000Z","message":{"role":"user","content":"thanks"}}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 	time.Sleep(500 * time.Millisecond)
 
 	msgs = messages()

@@ -64,7 +64,7 @@ func TestServer_MCPAPI(t *testing.T) {
 
 	response, err = http.Get(testServer.URL + "/mcp")
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	require.Equal(t, http.StatusOK, response.StatusCode)
 	var result struct {
 		Servers map[string]any `json:"servers"`
@@ -92,7 +92,7 @@ func TestServer_MCPUnsupportedAgent(t *testing.T) {
 
 	response, err := http.Get(testServer.URL + "/mcp")
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	require.Equal(t, http.StatusNotFound, response.StatusCode)
 }
 
@@ -121,7 +121,7 @@ func TestServer_MCPRestartUnavailable(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	require.Equal(t, http.StatusBadRequest, response.StatusCode)
 }
 
@@ -154,7 +154,7 @@ func TestServer_MCPManagement(t *testing.T) {
 		request.Header.Set("Content-Type", "application/json")
 		response, responseErr := http.DefaultClient.Do(request)
 		require.NoError(t, responseErr)
-		defer response.Body.Close()
+		defer func() { _ = response.Body.Close() }()
 		data, readErr := io.ReadAll(response.Body)
 		require.NoError(t, readErr)
 		require.Equal(t, status, response.StatusCode, string(data))
@@ -188,7 +188,7 @@ func TestServer_MCPManagement(t *testing.T) {
 
 	response, err := http.Get(testServer.URL + "/mcp")
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	var config struct {
 		Servers map[string]any `json:"servers"`
 	}

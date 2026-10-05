@@ -130,7 +130,7 @@ func (w *Watcher) tailFile(ctx context.Context, path string) string {
 			}
 		}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	ticker.Stop()
 
 	w.logger.Info("Opened JSONL file for tailing", "path", path)

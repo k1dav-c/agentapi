@@ -91,7 +91,7 @@ func resolveAgentSession(ctx context.Context, config Config) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve AgentAPI session: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("resolve AgentAPI session: HTTP %d", resp.StatusCode)
 	}

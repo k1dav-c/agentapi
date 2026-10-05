@@ -124,7 +124,7 @@ func TestServer_MessageQueueAPI(t *testing.T) {
 	postBody := bytes.NewBufferString(`{"content":"queued task","type":"user"}`)
 	resp, err := http.Post(tsServer.URL+"/message", "application/json", postBody)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var posted struct {
@@ -137,7 +137,7 @@ func TestServer_MessageQueueAPI(t *testing.T) {
 
 	resp, err = http.Get(tsServer.URL + "/queue")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var queue struct {
 		Messages []httpapi.QueuedMessage `json:"messages"`
 	}
@@ -151,19 +151,19 @@ func TestServer_MessageQueueAPI(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err = http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	req, err = http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/queue/%d", tsServer.URL, queue.Messages[0].ID), nil)
 	require.NoError(t, err)
 	resp, err = http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	resp, err = http.Get(tsServer.URL + "/queue")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&queue))
 	require.Empty(t, queue.Messages)
 }
