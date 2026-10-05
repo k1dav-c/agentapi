@@ -352,6 +352,9 @@ func FormatAgentMessage(agentType AgentType, message string, userInput string) s
 	default:
 		formatted = message
 	}
+	if stripped := removeAgentStatusLines(agentType, formatted); stripped != formatted {
+		formatted = trimEmptyLines(stripped)
+	}
 	// Collapse consecutive blank lines left over from TUI full-screen
 	// rendering. Applied once at the top level so every agent type
 	// benefits automatically.
