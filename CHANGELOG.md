@@ -29,6 +29,7 @@
 - The sub-agents (Agents) panel, together with the `GET /agents` endpoint and the `agents_update` SSE event
 
 ### Fixes
+- Chat: while a task runs, the live screen tail keeps the tallest height it has had, so the task doesn't jump up and down as the agent redraws
 - The live screen no longer flickers while an agent works. Its own status line (Codex's `◦ Working (19s • esc to interrupt)`, Claude Code's `✻ Fermenting… (6s · ↓ 80 tokens)` and tip, Pi's `⠼ Working` and `Elapsed 2.0s`) is left out of messages, so a spinner frame or a ticking second no longer counts as a change: during a Codex task the chat gets about 0.7 updates a second instead of 2.5
 - iPhone: tapping into a field (TTY mode, the composer, search, the Explorer) no longer zooms the page. On touch screens text fields use at least 16px, the size below which iOS Safari zooms in; pinch zoom still works
 - TTY mode on iPhone: the key bar sits above Safari's arrows-and-Done bar instead of under it. That bar sits on top of the keyboard but isn't counted in the space the keyboard takes

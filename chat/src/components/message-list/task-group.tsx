@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, Clipboard, Download, Eye, MoreHorizontal, TerminalSquare } from "lucide-react";
 import { Button } from "../ui/button";
 import { ProcessedMessage } from "../processed-message";
@@ -246,13 +246,15 @@ export function TaskGroup({
           )}
           {visibleActivity.map((item, index) =>
             item.type === "message" ? (
-              <MessageItem
-                key={item.key}
+              live && structured && index === visibleActivity.length - 1 ? (
                 // While a task with a transcript runs, the last item is the
                 // live terminal screen; its tail is what is happening now.
-                message={live && structured && index === visibleActivity.length - 1 ? withLastLines(item.message, 10) : item.message}
-                searchQuery={searchQuery}
-              />
+                <GrowOnly key={item.key}>
+                  <MessageItem message={withLastLines(item.message, 10)} searchQuery={searchQuery} />
+                </GrowOnly>
+              ) : (
+                <MessageItem key={item.key} message={item.message} searchQuery={searchQuery} />
+              )
             ) : item.type === "thinking" ? (
               <ThinkingNote key={item.key} content={item.content} />
             ) : item.type === "tool-group" ? (
@@ -358,6 +360,28 @@ function ThinkingNote({content}: {content: string}) {
 }
 
 const STEP_WINDOW = 40;
+
+// Keeps the tallest height its content has had. The live screen tail
+// grows and shrinks as the agent redraws; holding its height keeps the
+// rest of the task from jumping up and down while it runs.
+function GrowOnly({children}: {children: React.ReactNode}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [minHeight, setMinHeight] = useState(0);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => {
+      setMinHeight((height) => Math.max(height, element.offsetHeight));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={ref} style={minHeight ? {minHeight} : undefined} data-live-tail>
+      {children}
+    </div>
+  );
+}
 
 function withLastLines<T extends {content: string}>(message: T, count: number): T {
   const lines = message.content.replace(/\s+$/, "").split("\n");
