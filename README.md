@@ -194,25 +194,6 @@ When enabled, every API request must include `Authorization: Bearer <token>`.
 Static file routes (`/`, `/chat/*`) are exempt so browsers can open the chat
 UI without a token.
 
-### Rate limit usage
-
-`GET /usage` returns real-time rate limit utilization from the upstream API
-provider. The endpoint dispatches automatically based on the running agent
-type:
-
-- **Claude** — reads the OAuth token from `~/.claude/.credentials.json` and
-  extracts Anthropic's unified rate limit headers (5-hour / 7-day / overage
-  utilization, subscription type, reset times).
-- **Codex** — reads `OPENAI_API_KEY` (or the token in `~/.codex/auth.json`)
-  and extracts OpenAI's `x-ratelimit-*` headers (request and token limits,
-  remaining quota, reset durations).
-- **Pi** — uses the OpenAI or Anthropic login in Pi's `auth.json`, preferring
-  Pi's default provider.
-
-```bash
-curl http://localhost:3284/usage
-```
-
 ### Interactive prompt support
 
 The chat UI detects interactive TUI prompts — such as Claude Code's plan
@@ -383,7 +364,6 @@ Endpoints:
   (`terminal_columns`)
 - GET `/events` - an SSE stream of events from the agent: message and status updates (`?sync=1` for incremental replay on reconnect)
 - DELETE `/messages` - clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent process
-- GET `/usage` - returns real-time rate limit utilization from the upstream API (Anthropic or OpenAI) for Claude, Codex or Pi
 - GET/PUT `/webhook` - reads or updates run-status webhook delivery without restarting the agent
 - GET `/mcp` - returns configured MCP servers and the managed config path for Claude, Codex or Pi
 - PUT `/mcp` - replaces the complete MCP server set; pass `?restart=true` to restart the PTY agent and apply immediately

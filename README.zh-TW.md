@@ -164,22 +164,6 @@ AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
 啟用後，每個 API 請求都必須帶上 `Authorization: Bearer <token>`。靜態檔案路由
 （`/`、`/chat/*`）不受限制，讓瀏覽器不需要 token 也能開啟聊天介面。
 
-### 速率限制用量
-
-`GET /usage` 會回傳上游 API 供應商的即時速率限制使用率。這個端點會根據正在執行的
-agent 類型自動分派：
-
-- **Claude** —— 從 `~/.claude/.credentials.json` 讀取 OAuth token，並擷取 Anthropic
-  的統一速率限制標頭（5 小時／7 天／超額使用率、訂閱類型、重設時間）。
-- **Codex** —— 讀取 `OPENAI_API_KEY`（或 `~/.codex/auth.json` 中的 token），並擷取
-  OpenAI 的 `x-ratelimit-*` 標頭（請求與 token 限制、剩餘額度、重設時間）。
-- **Pi** —— 使用 Pi 的 `auth.json` 中的 OpenAI 或 Anthropic 登入資訊，優先採用 Pi 的
-  預設供應商。
-
-```bash
-curl http://localhost:3284/usage
-```
-
 ### 互動式提示支援
 
 聊天介面會偵測互動式 TUI 提示 —— 例如 Claude Code 的計畫核准對話框或權限確認、Codex
@@ -337,7 +321,6 @@ OpenAPI schema 可在 [openapi.json](openapi.json) 取得。
   終端機寬度（`terminal_columns`）
 - GET `/events` - agent 事件的 SSE 串流：訊息與狀態更新（加上 `?sync=1` 可在重新連線時增量重播）
 - DELETE `/messages` - 清除所有對話狀態（訊息、結構化訊息、時間軸、錯誤），並重新啟動 agent 行程
-- GET `/usage` - 回傳 Claude、Codex 或 Pi 在上游 API（Anthropic 或 OpenAI）的即時速率限制使用率
 - GET/PUT `/webhook` - 讀取或更新執行狀態 webhook 的傳送設定，不需要重新啟動 agent
 - GET `/mcp` - 回傳 Claude、Codex 或 Pi 已設定的 MCP 伺服器，以及受管理的設定檔路徑
 - PUT `/mcp` - 取代整組 MCP 伺服器；傳入 `?restart=true` 可重新啟動 PTY agent 並立即套用

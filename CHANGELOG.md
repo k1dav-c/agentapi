@@ -23,6 +23,7 @@
 - Codex: restarting the agent (Explorer → Restart, `DELETE /messages`, or an MCP change with restart) runs `codex update` before starting it again (only when the program is the `codex` CLI), so the restarted Codex is the latest release. A failed update (e.g. offline) still restarts the installed version. Claude Code updates itself in the background, so its restart already starts the latest version
 
 ### Removed
+- `GET /usage` (upstream rate-limit utilization for Claude, Codex and Pi). The chat never used it, and its ChatGPT lookup no longer worked
 - The sub-agents (Agents) panel, together with the `GET /agents` endpoint and the `agents_update` SSE event
 
 ### Fixes
