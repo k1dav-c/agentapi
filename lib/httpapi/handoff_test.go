@@ -380,3 +380,40 @@ func TestTerminalQuestionScreenOnFullHeightScreen(t *testing.T) {
 		require.Equal(t, isCodexUpdatePrompt(screen), isCodexUpdatePrompt(full), entry.Name())
 	}
 }
+
+func TestFormatMessageClosesClaudeFileSuggestions(t *testing.T) {
+	t.Parallel()
+	// typed is everything sent to the terminal; visible is the message part
+	// Send validates (it must stay trimmed).
+	split := func(parts []st.MessagePart) (typed, visible string) {
+		for _, part := range parts {
+			text, ok := part.(st.MessagePartText)
+			require.True(t, ok)
+			typed += text.Content
+			if !text.Hidden {
+				visible += text.Content
+			}
+		}
+		return typed, visible
+	}
+	// A message ending in an attachment gets a space after it, so Enter
+	// submits it, and still validates as trimmed.
+	typed, visible := split(FormatMessage(mf.AgentTypeClaude, `look @"/tmp/agentapi-uploads-1/0123456789abcdef/a b.png"`))
+	require.Equal(t, "\x1b[200~look @\"/tmp/agentapi-uploads-1/0123456789abcdef/a b.png\" \x1b[201~", typed)
+	require.Equal(t, `look @"/tmp/agentapi-uploads-1/0123456789abcdef/a b.png"`, visible)
+	typed, _ = split(FormatMessage(mf.AgentTypeClaude, "check @README.md\n"))
+	require.Equal(t, "\x1b[200~check @README.md \x1b[201~", typed)
+
+	// Mentions elsewhere, e-mail addresses and other agents are left alone.
+	for _, tc := range []struct {
+		agent   mf.AgentType
+		message string
+	}{
+		{mf.AgentTypeClaude, `@"/tmp/a.png" what is this?`},
+		{mf.AgentTypeClaude, "mail me@example.com"},
+		{mf.AgentTypePi, `look @"/tmp/a.png"`},
+	} {
+		typed, _ := split(FormatMessage(tc.agent, tc.message))
+		require.Equal(t, "\x1b[200~"+tc.message+"\x1b[201~", typed, tc.message)
+	}
+}

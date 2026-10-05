@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"regexp"
 	"strings"
 
 	mf "github.com/coder/agentapi/lib/msgfmt"
@@ -40,8 +41,26 @@ const codexClearComposerLines = 32
 // be appended to that leftover draft.
 var clearCodexComposer = strings.Repeat("\x05\x15\x7f", codexClearComposerLines)
 
+// claudeTrailingMentionRe matches a message that ends with an @-mention of
+// a file (@"path with spaces" or @path).
+var claudeTrailingMentionRe = regexp.MustCompile(`(?:^|\s)@(?:"[^"]*"|\S+)$`)
+
 func FormatMessage(agentType mf.AgentType, message string) []st.MessagePart {
 	message = mf.TrimWhitespace(message)
+	// Claude Code opens its file suggestions for an @-mention at the end of
+	// the input, and the Enter that should submit the message picks a
+	// suggestion instead: a message ending in an attachment (@"<upload
+	// path>") stayed in the input box. A space after the mention closes the
+	// suggestions. It is typed as a hidden part: the message itself stays
+	// trimmed (Send rejects surrounding whitespace).
+	if agentType == mf.AgentTypeClaude && claudeTrailingMentionRe.MatchString(message) {
+		return []st.MessagePart{
+			st.MessagePartText{Content: "\x1b[200~", Hidden: true},
+			st.MessagePartText{Content: message},
+			st.MessagePartText{Content: " ", Hidden: true},
+			st.MessagePartText{Content: "\x1b[201~", Hidden: true},
+		}
+	}
 	if agentType == mf.AgentTypeCodex {
 		return append([]st.MessagePart{st.MessagePartText{Content: clearCodexComposer, Hidden: true}}, formatPaste(message)...)
 	}
