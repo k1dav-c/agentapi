@@ -21,8 +21,8 @@ describe("alertForTransition", () => {
 
 describe("faviconDataUrl", () => {
   test("adds a state dot only when there is a badge", () => {
-    expect(decodeURIComponent(faviconDataUrl(null, "codex"))).not.toContain("<circle");
-    expect(decodeURIComponent(faviconDataUrl("needs-you", "codex"))).toContain('fill="#c27c0e"');
+    expect(decodeURIComponent(faviconDataUrl(null, "aider"))).not.toContain("<circle");
+    expect(decodeURIComponent(faviconDataUrl("needs-you", "aider"))).toContain('fill="#c27c0e"');
   });
 
   test("draws the agent's mark", () => {
@@ -30,5 +30,8 @@ describe("faviconDataUrl", () => {
     const pi = decodeURIComponent(faviconDataUrl("working", "pi"));
     for (const color of ["#F09082", "#4D9ABF", "#F1BE58"]) expect(pi).toContain(`fill="${color}"`);
     expect(pi).toContain('viewBox="0 0 469.43 469.43"');
+    const codex = decodeURIComponent(faviconDataUrl(null, "codex"));
+    expect(codex).toContain('viewBox="0 0 24 24"');
+    expect(codex).toContain('fill="#e8eaf0"');
   });
 });
