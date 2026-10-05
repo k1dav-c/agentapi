@@ -14,7 +14,7 @@ jobs:
             - name: Set up Go
               uses: actions/setup-go@v5
               with:
-                  go-version: "stable"
+                  go-version-file: go.mod
 
             - name: Test
               run: CGO_ENABLED=0 go test -count=1 -v ./...
@@ -27,7 +27,7 @@ jobs:
             - name: Set up Go
               uses: actions/setup-go@v5
               with:
-                  go-version: "stable"
+                  go-version-file: go.mod
 
             - name: Set up Bun
               uses: oven-sh/setup-bun@v2
