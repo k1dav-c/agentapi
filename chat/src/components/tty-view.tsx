@@ -7,7 +7,7 @@ import type {Terminal} from "@xterm/xterm";
 import {useChat} from "./chat-provider";
 import {Button} from "./ui/button";
 import {OrderedInput, fitTerminalFontSize, screenToTerminalOutput} from "@/lib/tty";
-import {keyboardInset, terminalShortcuts, type TerminalShortcut} from "@/lib/terminal-keys";
+import {IOS_FORM_BAR_HEIGHT, isIOS, keyboardInset, terminalShortcuts, type TerminalShortcut} from "@/lib/terminal-keys";
 import {useMediaQuery} from "@/lib/use-media-query";
 
 // The mirror uses the width of the agent's terminal (80 columns unless
@@ -45,7 +45,8 @@ export function TtyView({onExit}: {onExit: () => void}) {
   useEffect(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
-    const update = () => setInset(keyboardInset(window.innerHeight, viewport));
+    const formBar = isIOS(navigator.userAgent, navigator.platform, navigator.maxTouchPoints) ? IOS_FORM_BAR_HEIGHT : 0;
+    const update = () => setInset(keyboardInset(window.innerHeight, viewport, formBar));
     update();
     viewport.addEventListener("resize", update);
     viewport.addEventListener("scroll", update);

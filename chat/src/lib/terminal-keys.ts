@@ -32,14 +32,29 @@ export const terminalShortcuts: TerminalShortcut[] = [
   {label: "Ctrl+Z", display: "Ctrl+Z", value: ctrlKeys.z, risky: true},
 ];
 
+// Height of the bar iOS Safari shows above its keyboard for form fields
+// (previous/next arrows and Done). It sits over the visual viewport rather
+// than shrinking it, so it isn't part of the measured overlap.
+export const IOS_FORM_BAR_HEIGHT = 44;
+
 // How far an on-screen keyboard overlaps the bottom of the page, in CSS
 // pixels: the part of the layout viewport (innerHeight) below the visual
-// viewport. Browsers that shrink the layout for the keyboard (Android with
+// viewport, plus formBar (iOS's arrows-and-Done bar) while a keyboard is up.
+// Browsers that shrink the layout for the keyboard (Android with
 // interactive-widget=resizes-content) report no overlap; iOS Safari keeps
 // the layout and only shrinks the visual viewport.
-export function keyboardInset(innerHeight: number, viewport: {height: number; offsetTop: number} | null): number {
+export function keyboardInset(
+  innerHeight: number,
+  viewport: {height: number; offsetTop: number} | null,
+  formBar = 0,
+): number {
   if (!viewport) return 0;
   const inset = Math.round(innerHeight - viewport.height - viewport.offsetTop);
   // Ignore small differences (browser chrome sliding in and out).
-  return inset > 80 ? inset : 0;
+  return inset > 80 ? inset + formBar : 0;
+}
+
+// iOS and iPadOS (which reports itself as a Mac with a touch screen).
+export function isIOS(userAgent: string, platform: string, maxTouchPoints: number): boolean {
+  return /iP(hone|od|ad)/.test(userAgent) || (platform === "MacIntel" && maxTouchPoints > 1);
 }
