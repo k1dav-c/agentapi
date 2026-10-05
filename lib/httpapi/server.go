@@ -766,6 +766,10 @@ func (s *Server) registerRoutes() {
 		"screen": ScreenUpdateBody{},
 	}, s.subscribeScreen)
 
+	// Uploaded images, for the chat to show (not part of the OpenAPI
+	// schema: the response is the image itself).
+	s.router.Get("/uploads/{checksum}/{name}", s.serveUpload)
+
 	s.router.Handle("/", http.HandlerFunc(s.redirectToChat))
 
 	// Serve static files for the chat interface under /chat
