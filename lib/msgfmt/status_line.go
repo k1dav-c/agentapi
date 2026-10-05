@@ -21,6 +21,18 @@ var agentStatusLines = map[AgentType][]*regexp.Regexp{
 		regexp.MustCompile(`^\s*─*\s*[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+Working\b.*$`),
 		regexp.MustCompile(`^\s*Elapsed \d+(?:\.\d+)?s\s*$`),
 	},
+	// No status line patterns for these yet.
+	AgentTypeGoose:    nil,
+	AgentTypeAider:    nil,
+	AgentTypeGemini:   nil,
+	AgentTypeCopilot:  nil,
+	AgentTypeAmp:      nil,
+	AgentTypeCursor:   nil,
+	AgentTypeAuggie:   nil,
+	AgentTypeAmazonQ:  nil,
+	AgentTypeOpencode: nil,
+	AgentTypeKimi:     nil,
+	AgentTypeCustom:   nil,
 }
 
 // claudeSpinnerTipRe matches the tip Claude Code shows under its spinner,
