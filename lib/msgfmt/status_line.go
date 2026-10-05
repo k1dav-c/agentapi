@@ -12,8 +12,12 @@ import (
 // show their own working state and elapsed time). These patterns match
 // only those lines, from each agent's real screen.
 var agentStatusLines = map[AgentType][]*regexp.Regexp{
-	// "✻ Fermenting… (6s · ↓ 80 tokens)", "· Fermenting… (esc to interrupt)"
-	AgentTypeClaude: {regexp.MustCompile(`^\s*[·✢✳✶✻✽*]\s+\S[^()]*…\s*\((?:\d+[smh]\b|[^)]*esc to interrupt)[^)]*\)\s*$`)},
+	// "✻ Fermenting… (6s · ↓ 80 tokens)", "· Fermenting… (esc to interrupt)",
+	// and before its timer shows, just "· Contemplating…"
+	AgentTypeClaude: {
+		regexp.MustCompile(`^\s*[·✢✳✶✻✽*]\s+\S[^()]*…\s*\((?:\d+[smh]\b|[^)]*esc to interrupt)[^)]*\)\s*$`),
+		regexp.MustCompile(`^\s*[·✢✳✶✻✽*]\s+[A-Z][a-z]+…\s*$`),
+	},
 	// "◦ Working (19s • esc to interrupt) · 1 background terminal running · /ps to view…"
 	AgentTypeCodex: {regexp.MustCompile(`^\s*[•◦]\s+Working\s+\(\d+[smh][^)]*\).*$`)},
 	// "── ⠼ Working ────", and "Elapsed 2.0s" under a command that is running
@@ -34,6 +38,11 @@ var agentStatusLines = map[AgentType][]*regexp.Regexp{
 	AgentTypeKimi:     nil,
 	AgentTypeCustom:   nil,
 }
+
+// claudeToolTimerRe matches the elapsed time Claude Code appends to a
+// running tool's lines ("Waiting 8 seconds · 2s", "$ sleep 8 (3s)"),
+// which ticks every second.
+var claudeToolTimerRe = regexp.MustCompile(`(?: · \d+[smh]| \(\d+[smh]\))\s*$`)
 
 // claudeSpinnerTipRe matches the tip Claude Code shows under its spinner,
 // which goes with it.
@@ -61,9 +70,13 @@ func removeAgentStatusLines(agentType AgentType, message string) string {
 			drop = true
 		}
 		droppedPrevious = drop
-		if !drop {
-			kept = append(kept, line)
+		if drop {
+			continue
 		}
+		if agentType == AgentTypeClaude {
+			line = claudeToolTimerRe.ReplaceAllString(line, "")
+		}
+		kept = append(kept, line)
 	}
 	return strings.Join(kept, "\n")
 }

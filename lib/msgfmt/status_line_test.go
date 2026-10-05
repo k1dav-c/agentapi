@@ -26,6 +26,18 @@ func TestRemoveAgentStatusLines(t *testing.T) {
 			"kept",
 		},
 		{
+			"claude spinner before its timer shows",
+			AgentTypeClaude,
+			"● Running 1 shell command…\n· Contemplating…\n✢ Contemplating…",
+			"● Running 1 shell command…",
+		},
+		{
+			"claude tool timers",
+			AgentTypeClaude,
+			"● Waiting 8 seconds then printing a · 2s\n  ⎿  $ sleep 8 && echo a (3s)\n  Took 1m (2 tools)",
+			"● Waiting 8 seconds then printing a\n  ⎿  $ sleep 8 && echo a\n  Took 1m (2 tools)",
+		},
+		{
 			"claude keeps the finished line and ordinary bullets",
 			AgentTypeClaude,
 			"✻ Brewed for 22s · done 2:44 PM\n* a list item… (see below)\n● Tip: not a spinner tip",
