@@ -225,3 +225,16 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* iOS Safari zooms the page into any focused field whose text is smaller
+   than 16px, and stays zoomed. On touch screens every field is at least
+   16px, including xterm's hidden input (sized inline to the terminal
+   font) that TTY mode types through. Pinch zoom stays available. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select,
+  .xterm .xterm-helper-textarea {
+    font-size: max(16px, 1em) !important;
+  }
+}
