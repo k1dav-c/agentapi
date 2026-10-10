@@ -253,7 +253,7 @@ export function TaskGroup({
                 // rest is in the transcript). Either way it is redrawn at
                 // most once a second and doesn't shrink, from the first
                 // screen on, so the switch to a transcript doesn't remount it.
-                <GrowOnly key={item.key}>
+                <GrowOnly key={item.key} resetKey={structured ? "tail" : "screen"}>
                   <LiveTail message={structured ? withLastLines(item.message, 10) : item.message} searchQuery={searchQuery} />
                 </GrowOnly>
               ) : (
@@ -375,19 +375,25 @@ function LiveTail({message, searchQuery}: {message: React.ComponentProps<typeof 
 
 // Keeps the tallest height its content has had. The live screen tail
 // grows and shrinks as the agent redraws; holding its height keeps the
-// rest of the task from jumping up and down while it runs.
-function GrowOnly({children}: {children: React.ReactNode}) {
+// rest of the task from jumping up and down while it runs. A new resetKey
+// drops the held height: the whole first screen (hundreds of rows) must
+// not hold the space once only the tail of a transcript is shown.
+function GrowOnly({resetKey, children}: {resetKey: string; children: React.ReactNode}) {
   const ref = useRef<HTMLDivElement>(null);
-  const [minHeight, setMinHeight] = useState(0);
+  const [held, setHeld] = useState({resetKey, height: 0});
+  const minHeight = held.resetKey === resetKey ? held.height : 0;
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
     const observer = new ResizeObserver(() => {
-      setMinHeight((height) => Math.max(height, element.offsetHeight));
+      setHeld((current) => {
+        const height = Math.max(current.resetKey === resetKey ? current.height : 0, element.offsetHeight);
+        return current.resetKey === resetKey && current.height === height ? current : {resetKey, height};
+      });
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [resetKey]);
   return (
     <div ref={ref} style={minHeight ? {minHeight} : undefined} data-live-tail>
       {children}
