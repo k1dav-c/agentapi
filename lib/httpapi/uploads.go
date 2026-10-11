@@ -1,13 +1,18 @@
 package httpapi
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path"
 	"regexp"
 
+	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -87,4 +92,77 @@ func (s *Server) serveUpload(w http.ResponseWriter, r *http.Request) {
 	// doesn't change.
 	header.Set("Cache-Control", "private, max-age=86400, immutable")
 	http.ServeContent(w, r, name, info.ModTime(), f)
+}
+
+// storeRichImages saves the images in msg's tool results (such as an image
+// file the agent read) to the upload directory and sets their URL, so the
+// chat can show them through GET /uploads without carrying the image in
+// every message. Images whose content isn't a previewable raster image, or
+// that can't be saved, are dropped.
+func (s *Server) storeRichImages(msg *jsonlwatcher.RichMessage) {
+	for i := range msg.Content {
+		block := &msg.Content[i]
+		if len(block.Images) == 0 {
+			continue
+		}
+		var stored []jsonlwatcher.RichImage
+		for _, image := range block.Images {
+			url, err := s.storeImage(image.Data)
+			if err != nil {
+				s.logger.Debug("Failed to store tool result image", "tool_use_id", block.ToolUseID, "error", err)
+				continue
+			}
+			stored = append(stored, jsonlwatcher.RichImage{MediaType: image.MediaType, URL: url})
+		}
+		block.Images = stored
+	}
+}
+
+// imageExtensions names a stored image by its sniffed content type.
+var imageExtensions = map[string]string{
+	"image/png":  "png",
+	"image/jpeg": "jpg",
+	"image/gif":  "gif",
+	"image/webp": "webp",
+	"image/bmp":  "bmp",
+}
+
+// storeImage saves data as <upload dir>/<checksum>/image.<ext>, the layout
+// POST /upload uses, and returns the path GET /uploads serves it at.
+func (s *Server) storeImage(data []byte) (string, error) {
+	contentType := http.DetectContentType(data)
+	if !previewableImageTypes[contentType] {
+		return "", fmt.Errorf("not a previewable image: %s", contentType)
+	}
+	if s.tempDir == "" {
+		return "", errors.New("no upload directory")
+	}
+	hash := sha256.Sum256(data)
+	checksum := hex.EncodeToString(hash[:8])
+	name := "image." + imageExtensions[contentType]
+	root, err := os.OpenRoot(s.tempDir)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = root.Close() }()
+	if err := root.Mkdir(checksum, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
+		return "", err
+	}
+	file := path.Join(checksum, name)
+	// The name is the content's checksum: a file already there is this image.
+	if _, err := root.Stat(file); err == nil {
+		return "/uploads/" + checksum + "/" + name, nil
+	}
+	f, err := root.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	return "/uploads/" + checksum + "/" + name, nil
 }

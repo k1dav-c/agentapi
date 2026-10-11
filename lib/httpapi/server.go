@@ -614,6 +614,7 @@ func (s *Server) startJSONLWatcher(pid int) {
 		Parser:   parser,
 		Logger:   s.logger,
 		OnMessage: func(msg jsonlwatcher.RichMessage) {
+			s.storeRichImages(&msg)
 			s.emitter.EmitRichMessage(msg)
 		},
 		OnLine: func(line []byte) {
