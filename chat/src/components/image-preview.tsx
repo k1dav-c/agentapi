@@ -35,11 +35,14 @@ export function ImageThumb({ src, name, className = "size-20" }: { src: string; 
           <img src={src} alt={name} className="size-full object-cover" loading="lazy" onError={() => setFailed(true)} />
         </button>
       </DialogTrigger>
-      <DialogContent className="flex max-h-[90dvh] w-auto max-w-[min(64rem,calc(100vw-2rem))] flex-col gap-2 p-3 sm:max-w-[min(64rem,calc(100vw-2rem))]">
+      {/* Centered with inset-x-0 and mx-auto rather than the dialog's
+          left-1/2 and translate: with those, a dialog that fits its image
+          can only be half the window wide. */}
+      <DialogContent className="inset-x-0 mx-auto flex max-h-[90dvh] w-fit max-w-[min(64rem,calc(100vw-2rem))] translate-x-0 flex-col gap-2 p-3 data-[state=closed]:slide-out-to-left-0 data-[state=open]:slide-in-from-left-0 sm:max-w-[min(64rem,calc(100vw-2rem))]">
         <DialogTitle className="truncate pr-8 text-sm font-medium">{name}</DialogTitle>
         <DialogDescription className="sr-only">Uploaded image</DialogDescription>
         {/* eslint-disable-next-line @next/next/no-img-element -- served by AgentAPI, not optimizable */}
-        <img src={src} alt={name} className="min-h-0 max-w-full flex-1 rounded-md object-contain" />
+        <img src={src} alt={name} className="max-h-[calc(90dvh-3.5rem)] max-w-full rounded-md object-contain" />
       </DialogContent>
     </Dialog>
   );
