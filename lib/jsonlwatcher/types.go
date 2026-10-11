@@ -53,8 +53,17 @@ type ContentBlock struct {
 
 // ToolResultContent represents a content block inside a tool_result.
 type ToolResultContent struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type   string       `json:"type"`
+	Text   string       `json:"text,omitempty"`
+	Source *ImageSource `json:"source,omitempty"` // for type "image"
+}
+
+// ImageSource is the image of an "image" content block, such as the one
+// Claude Code's Read tool returns for an image file.
+type ImageSource struct {
+	Type      string `json:"type"` // "base64"
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
 }
 
 // ToolResultBlock represents a tool_result in a user message.
@@ -106,6 +115,16 @@ type RichContentBlock struct {
 	ToolInput json.RawMessage `json:"tool_input,omitempty" doc:"Tool call input parameters"`
 	Status    string          `json:"status,omitempty" doc:"Tool lifecycle status: running, completed, or failed"`
 	IsError   *bool           `json:"is_error,omitempty" doc:"Whether the tool result is an error"`
+	Images    []RichImage     `json:"images,omitempty" doc:"Images in a tool result (for example an image file the agent read)"`
+}
+
+// RichImage is an image in a tool result. The parser fills Data; the
+// server stores it and replaces it with URL, so clients never get the
+// image inline.
+type RichImage struct {
+	MediaType string `json:"media_type" doc:"MIME type of the image"`
+	URL       string `json:"url,omitempty" doc:"Server path that serves the image, relative to the API root (e.g. /uploads/<checksum>/image.png)"`
+	Data      []byte `json:"-"`
 }
 
 // RichMessage is a fully assembled message with all its content blocks.

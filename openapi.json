@@ -836,6 +836,14 @@
       "RichContentBlock": {
         "additionalProperties": false,
         "properties": {
+          "images": {
+            "description": "Images in a tool result (for example an image file the agent read)",
+            "items": {
+              "$ref": "#/components/schemas/RichImage"
+            },
+            "nullable": true,
+            "type": "array"
+          },
           "is_error": {
             "description": "Whether the tool result is an error",
             "type": "boolean"
@@ -870,6 +878,23 @@
         },
         "required": [
           "type"
+        ],
+        "type": "object"
+      },
+      "RichImage": {
+        "additionalProperties": false,
+        "properties": {
+          "media_type": {
+            "description": "MIME type of the image",
+            "type": "string"
+          },
+          "url": {
+            "description": "Server path that serves the image, relative to the API root (e.g. /uploads/<checksum>/image.png)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_type"
         ],
         "type": "object"
       },

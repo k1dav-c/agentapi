@@ -496,3 +496,25 @@ func TestEncodeCWD(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeParser_ToolResultImage(t *testing.T) {
+	parser := NewClaudeParser()
+
+	// What Claude Code logs when Read opens an image file.
+	line := `{"type":"user","uuid":"u1","timestamp":"2026-07-24T09:35:27.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_img","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"not base64!"}}]}]}}`
+	completed, _ := parser.ParseLine([]byte(line))
+
+	if len(completed) != 1 || len(completed[0].Content) != 1 {
+		t.Fatalf("expected 1 message with 1 block, got %+v", completed)
+	}
+	block := completed[0].Content[0]
+	if block.Text != "" {
+		t.Errorf("Text = %q, want empty", block.Text)
+	}
+	if len(block.Images) != 1 {
+		t.Fatalf("expected 1 image (the undecodable one skipped), got %d", len(block.Images))
+	}
+	if block.Images[0].MediaType != "image/png" || string(block.Images[0].Data) != "\x89PNG\r\n\x1a\n" {
+		t.Errorf("image = %q %q", block.Images[0].MediaType, block.Images[0].Data)
+	}
+}

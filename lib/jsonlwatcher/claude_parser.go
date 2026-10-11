@@ -1,6 +1,7 @@
 package jsonlwatcher
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"time"
 )
@@ -168,6 +169,7 @@ func (p *ClaudeParser) handleUser(entry *JSONLLine) []RichMessage {
 					ToolUseID: tr.ToolUseID,
 					IsError:   tr.IsError,
 					Text:      parseToolResultContent(tr.Content),
+					Images:    parseToolResultImages(tr.Content),
 				}
 				rich.Content = append(rich.Content, block)
 			}
@@ -207,6 +209,28 @@ func contentBlockToRich(block ContentBlock) RichContentBlock {
 	default:
 		return RichContentBlock{Type: block.Type, Text: block.Text}
 	}
+}
+
+// parseToolResultImages returns the base64 images in a tool_result
+// content array (Claude Code's Read returns an image file this way).
+// Images that don't decode are skipped.
+func parseToolResultImages(raw json.RawMessage) []RichImage {
+	var blocks []ToolResultContent
+	if len(raw) == 0 || raw[0] != '[' || json.Unmarshal(raw, &blocks) != nil {
+		return nil
+	}
+	var images []RichImage
+	for _, b := range blocks {
+		if b.Type != "image" || b.Source == nil || b.Source.Type != "base64" {
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(b.Source.Data)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		images = append(images, RichImage{MediaType: b.Source.MediaType, Data: data})
+	}
+	return images
 }
 
 // parseToolResultContent extracts text from a tool_result content field,
