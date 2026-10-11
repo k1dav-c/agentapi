@@ -11,6 +11,8 @@ export interface ToolCall {
   name: string;
   input?: unknown;
   result?: string;
+  // Paths (relative to the AgentAPI URL) of the images in the result.
+  images?: string[];
   status?: "running" | "completed" | "failed";
   isError?: boolean;
   timestamp: string;
@@ -88,11 +90,13 @@ export function collectToolCalls(richMessages: RichMessage[]): ToolCall[] {
 
       if (block.type === "tool_result" && block.tool_use_id) {
         const existing = calls.get(block.tool_use_id);
+        const images = block.images?.flatMap((image) => (image.url ? [image.url] : []));
         calls.set(block.tool_use_id, {
           id: block.tool_use_id,
           name: existing?.name || "Tool",
           input: existing?.input,
           result: block.text ?? "",
+          ...(images?.length ? {images} : {}),
           status: block.status || (block.is_error ? "failed" : "completed"),
           isError: block.status === "failed" || block.is_error,
           timestamp: existing?.timestamp || message.timestamp,

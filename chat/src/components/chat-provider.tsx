@@ -86,6 +86,9 @@ export interface RichContentBlock {
   tool_input?: unknown;
   status?: "running" | "completed" | "failed";
   is_error?: boolean;
+  // Images in a tool result (an image file the agent read), served by
+  // AgentAPI at url.
+  images?: {media_type: string; url?: string}[];
 }
 
 export interface Usage {

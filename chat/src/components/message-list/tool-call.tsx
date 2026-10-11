@@ -8,6 +8,7 @@ import { formatToolInput, getExitCode, getToolCommand, getToolSummary } from "@/
 import type { ToolCall } from "@/lib/task-timeline";
 import { currentPromptQuestion, parseInteractiveToolInput } from "@/lib/interactive-tool";
 import { useChat } from "../chat-provider";
+import { ImageThumb } from "../image-preview";
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return "< 1s";
@@ -101,7 +102,7 @@ export function ToolCallCard({
   // answered, so only the question it is asking accepts clicks. Codex prints
   // which one that is; otherwise count the answers given here.
   const [answeredCount, setAnsweredCount] = useState(0);
-  const { messages } = useChat();
+  const { messages, storageScope } = useChat();
   const lastAgentOutput = messages.findLast((message) => message.role === "agent")?.content ?? "";
   const activeQuestion = currentPromptQuestion(lastAgentOutput) ?? answeredCount;
   const isOpen = open ?? localIsOpen;
@@ -122,6 +123,12 @@ export function ToolCallCard({
     command && !isOpen && toolCall.result
       ? toolCall.result.replace(/\s+$/, "").split("\n").slice(0, 4).join("\n")
       : "";
+
+  // Images in the result (an image file the agent read), named after the
+  // file when the tool says which.
+  const filePath = (toolCall.input as {file_path?: unknown} | undefined)?.file_path;
+  const imageName = typeof filePath === "string" && filePath ? filePath.split("/").pop()! : "image";
+  const images = toolCall.images ?? [];
 
   return (
     <details
@@ -166,6 +173,20 @@ export function ToolCallCard({
           <pre className="max-h-[5.5rem] overflow-hidden whitespace-pre-wrap break-words bg-term px-3 py-2 font-mono text-xs leading-[1.55] text-term-foreground [overflow-wrap:anywhere]">
             {preview}
           </pre>
+        )}
+        {images.length > 0 && (
+          // Shown while the card is closed too. A click opens the image,
+          // not the card.
+          <span className="flex flex-wrap gap-2 px-2.5 pb-2" onClick={(event) => event.preventDefault()}>
+            {images.map((url, index) => (
+              <ImageThumb
+                key={url}
+                src={`${storageScope}${url}`}
+                name={images.length > 1 ? `${imageName} (${index + 1})` : imageName}
+                className="size-24"
+              />
+            ))}
+          </span>
         )}
       </summary>
       <div className="space-y-3 border-t px-3 py-3">
@@ -220,7 +241,7 @@ export function ToolCallCard({
         {toolCall.result !== undefined && (
           <ToolDetail
             label={isFailed ? "Error" : "Result"}
-            content={toolCall.result || "(No output)"}
+            content={toolCall.result || (images.length > 0 ? "(Image)" : "(No output)")}
             searchQuery={searchQuery}
           />
         )}

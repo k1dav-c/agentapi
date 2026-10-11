@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {getTaskActivity, getTaskStatus, type TaskSection, type ToolCall} from "./task-timeline";
+import {collectToolCalls, getTaskActivity, getTaskStatus, type TaskSection, type ToolCall} from "./task-timeline";
 
 const tool = (id: string, timestamp: string): ToolCall => ({id, name: "Bash", input: {command: "ls"}, timestamp});
 
@@ -73,5 +73,20 @@ describe("getTaskStatus", () => {
   test("without a session log, the last tool call decides", () => {
     expect(getTaskStatus(task({toolCalls: [failed, tool("t2", "2026-10-04T08:00:04Z")]}), 0, 1, "stable")).toBe("completed");
     expect(getTaskStatus(task({toolCalls: [failed]}), 0, 1, "stable")).toBe("failed");
+  });
+});
+
+describe("collectToolCalls", () => {
+  test("keeps the stored images of a result", () => {
+    const [call] = collectToolCalls([
+      {message_id: "a", role: "assistant", timestamp: "2026-10-11T00:00:00Z", content: [
+        {type: "tool_use", tool_use_id: "t1", tool_name: "Read", tool_input: {file_path: "/tmp/shot.png"}},
+      ]},
+      {message_id: "u", role: "user", timestamp: "2026-10-11T00:00:01Z", content: [
+        {type: "tool_result", tool_use_id: "t1", images: [{media_type: "image/png", url: "/uploads/0123456789abcdef/image.png"}, {media_type: "image/png"}]},
+      ]},
+    ]);
+    expect(call.images).toEqual(["/uploads/0123456789abcdef/image.png"]);
+    expect(call.result).toBe("");
   });
 });
