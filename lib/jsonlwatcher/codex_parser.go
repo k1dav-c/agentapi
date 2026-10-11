@@ -2,6 +2,7 @@ package jsonlwatcher
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -78,8 +79,9 @@ type codexTokenUsage struct {
 
 // codexContentBlock is a content block in a Codex message.
 type codexContentBlock struct {
-	Type string `json:"type"` // input_text, output_text
-	Text string `json:"text"`
+	Type     string `json:"type"` // input_text, output_text, input_image
+	Text     string `json:"text"`
+	ImageURL string `json:"image_url,omitempty"` // input_image: a data: URL
 }
 
 // ParseLine processes a single Codex JSONL line.
@@ -283,6 +285,7 @@ func (p *CodexParser) handleFunctionCallOutput(payload *codexPayload, timestamp 
 				Text:      text,
 				Status:    status,
 				IsError:   &isError,
+				Images:    parseCodexOutputImages(payload.Output),
 			},
 		},
 	}}
@@ -393,6 +396,41 @@ func parseCodexOutput(raw json.RawMessage) string {
 	}
 
 	return string(raw)
+}
+
+// parseCodexOutputImages returns the images in a tool output: Codex's
+// view_image returns the image as an input_image block holding a base64
+// data: URL. Images that don't decode are skipped.
+func parseCodexOutputImages(raw json.RawMessage) []RichImage {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		raw = []byte(s)
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return nil
+	}
+	var blocks []codexContentBlock
+	if json.Unmarshal(trimmed, &blocks) != nil {
+		return nil
+	}
+	var images []RichImage
+	for _, b := range blocks {
+		if b.Type != "input_image" {
+			continue
+		}
+		header, data, ok := strings.Cut(strings.TrimPrefix(b.ImageURL, "data:"), ",")
+		mediaType, isBase64 := strings.CutSuffix(header, ";base64")
+		if !ok || !isBase64 || !strings.HasPrefix(b.ImageURL, "data:") {
+			continue
+		}
+		decoded, err := base64.StdEncoding.DecodeString(data)
+		if err != nil || len(decoded) == 0 {
+			continue
+		}
+		images = append(images, RichImage{MediaType: mediaType, Data: decoded})
+	}
+	return images
 }
 
 // parseCodexOutputBlocks parses a serialized array of {type, text}

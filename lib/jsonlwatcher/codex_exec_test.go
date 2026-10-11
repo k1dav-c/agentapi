@@ -108,3 +108,20 @@ func TestCodexExecFailedCommandIsAFailedResult(t *testing.T) {
 	assert.Equal(t, "failed", result.Status)
 	assert.Equal(t, "Exit code: 1", result.Text)
 }
+
+func TestCodexViewImageResult(t *testing.T) {
+	// What Codex logs when its view_image tool opens an image file.
+	call := `{"timestamp":"2026-10-05T06:50:50.707Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_img","name":"exec","input":"const r=await tools.view_image({path:\"/tmp/shot.png\"});\nimage(r);\n"}}`
+	output := `{"timestamp":"2026-10-05T06:50:50.783Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_img","output":[{"type":"input_text","text":"Script completed\nWall time 0.0 seconds\nOutput:\n"},{"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo=","detail":"high"},{"type":"input_image","image_url":"https://example.com/remote.png"}]}}`
+	p := NewCodexParser()
+	_, err := p.ParseLine([]byte(call))
+	require.NoError(t, err)
+	msgs, err := p.ParseLine([]byte(output))
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	result := msgs[0].Content[0]
+	assert.Equal(t, "tool_result", result.Type)
+	require.Len(t, result.Images, 1, "only the data: URL image is kept")
+	assert.Equal(t, "image/png", result.Images[0].MediaType)
+	assert.Equal(t, "\x89PNG\r\n\x1a\n", string(result.Images[0].Data))
+}
