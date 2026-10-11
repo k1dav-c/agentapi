@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {getExitCode, getToolCommand, getToolSummary} from "./tool-format";
+import {getExitCode, getToolImagePath, getToolCommand, getToolSummary} from "./tool-format";
 
 describe("getToolCommand", () => {
   test("Claude Bash", () => {
@@ -26,5 +26,15 @@ describe("getExitCode", () => {
     expect(getExitCode("Exit code: 1\nWall time: 0.2s")).toBe(1);
     expect(getExitCode("Process exited with code 0")).toBe(0);
     expect(getExitCode("ok  github.com/x 0.6s")).toBeUndefined();
+  });
+});
+
+describe("getToolImagePath", () => {
+  test("Claude's Read, a {path} tool and Codex's view_image script", () => {
+    expect(getToolImagePath({file_path: "/tmp/a/shot.png"})).toBe("/tmp/a/shot.png");
+    expect(getToolImagePath({path: "/tmp/b.png"})).toBe("/tmp/b.png");
+    expect(getToolImagePath('const r=await tools.view_image({path:"/tmp/c d.png"});\nimage(r);\n')).toBe("/tmp/c d.png");
+    expect(getToolImagePath("text(await tools.exec_command({cmd:\"ls\"}));")).toBeUndefined();
+    expect(getToolImagePath(undefined)).toBeUndefined();
   });
 });

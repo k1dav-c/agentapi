@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { ArrowDown, Wrench } from "lucide-react";
 import { Button } from "../ui/button";
 import { uiCopy } from "@/lib/ui-copy";
-import { formatToolInput, getExitCode, getToolCommand, getToolSummary } from "@/lib/tool-format";
+import { formatToolInput, getExitCode, getToolCommand, getToolImagePath, getToolSummary } from "@/lib/tool-format";
 import type { ToolCall } from "@/lib/task-timeline";
 import { currentPromptQuestion, parseInteractiveToolInput } from "@/lib/interactive-tool";
 import { useChat } from "../chat-provider";
@@ -126,8 +126,7 @@ export function ToolCallCard({
 
   // Images in the result (an image file the agent read), named after the
   // file when the tool says which.
-  const filePath = (toolCall.input as {file_path?: unknown} | undefined)?.file_path;
-  const imageName = typeof filePath === "string" && filePath ? filePath.split("/").pop()! : "image";
+  const imageName = getToolImagePath(toolCall.input)?.split("/").pop() || "image";
   const images = toolCall.images ?? [];
 
   return (

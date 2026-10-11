@@ -73,3 +73,21 @@ export function getExitCode(result: string | undefined): number | undefined {
   const match = result?.match(/exit(?:ed with)? code:?\s*(-?\d+)/i);
   return match ? Number(match[1]) : undefined;
 }
+
+// The file an image-reading tool opened: Claude Code's Read ({file_path}),
+// a {path} tool, or Codex's exec script calling tools.view_image({path}).
+export function getToolImagePath(input: unknown): string | undefined {
+  if (typeof input === "string") {
+    const match = input.match(/view_image\(\s*\{[^{}]*?\bpath\s*:\s*("(?:[^"\\]|\\.)*")/);
+    if (!match) return undefined;
+    try {
+      return JSON.parse(match[1]) as string;
+    } catch {
+      return undefined;
+    }
+  }
+  if (!input || typeof input !== "object") return undefined;
+  const {file_path: filePath, path} = input as {file_path?: unknown; path?: unknown};
+  if (typeof filePath === "string" && filePath) return filePath;
+  return typeof path === "string" && path ? path : undefined;
+}
