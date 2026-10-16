@@ -16,7 +16,9 @@ You can use AgentAPI:
 ## Changes in this fork
 
 This fork started from the upstream v0.12.2 codebase. It keeps the original
-terminal-emulation and HTTP API model, while extending AgentAPI into a more
+terminal-emulation and HTTP API model as the default, adds an opt-in
+[native transport](#native-transport) that drives Claude Code, Codex and Pi
+through their own structured protocols, and extends AgentAPI into a more
 complete workspace for operating long-running coding agents.
 
 ### Session workspace and chat UI
@@ -69,18 +71,11 @@ when a task finished. Browser notifications can be turned on from the status
 menu.
 
 **Native transport** (`--transport native`): what the agent asks for (a tool
-approval, its questions, a plan to approve) docks above the composer as a card.
-Approvals show the command and options styled by what they do (allow, always
-allow, deny), with optional feedback sent along with a denial; plans render as
-Markdown and can be approved or sent back with feedback; questions take one
-step each (single or multiple choice, typed or hidden answers) and are
-submitted together. Number keys pick options, and the tool call's row says
-whether it waits for approval, was approved or was denied. While the agent
-works, the send button's menu adds **Steer** (put the message into the turn it
-is working on, ⌘/Ctrl+Enter) and **Interrupt & send** (⌘/Ctrl+Shift+Enter)
-next to queueing, and Stop interrupts the turn. Queued tasks can be moved up
-and down or steered in right away. There is no terminal, so TTY mode and the
-other screen views are hidden (also for ACP).
+approval, its questions, a plan to approve) docks above the composer as a
+card, and while the agent works the send button can also steer the message
+into the running turn or interrupt it. There is no terminal, so TTY mode and
+the other screen views are hidden (also for ACP). See
+[Native transport](#native-transport).
 
 ### Message queue and connection recovery
 
@@ -111,15 +106,129 @@ replay's `seq`, later changes their own), so a plain `EventSource` that
 reconnects by itself resumes from its `Last-Event-ID`; put the `epoch` from
 `GET /status` in the URL.
 
-### Persistent native sessions
+### Native transport
 
-With the native transport, `--state-db <file>` keeps the conversation in a
-SQLite file: messages, rich messages (tool calls, thinking), the timeline,
-requests and the queue, plus the agent's own session ID. When AgentAPI starts
-again with the same file, the chat shows the conversation as it was, queued
-messages are still queued, and the agent resumes its session, so it remembers
-the conversation too. Browser caches stay valid, because the conversation keeps
-its epoch.
+By default AgentAPI runs the agent in a terminal emulator and reads its screen
+(the PTY transport). With `--transport native` it drives Claude Code, Codex
+and Pi through their own structured protocols instead: Claude Code's
+stream-json input and output with its control protocol, `codex app-server`
+(JSON-RPC over stdio) and `pi --mode rpc`. Messages, rich messages (tool
+calls, thinking, usage) and the timeline come straight from the protocol, so
+there is no screen to parse and no session log to follow, and what the agent
+asks for arrives as structured requests instead of terminal dialogs.
+
+```bash
+agentapi server --transport native -- claude --model sonnet
+agentapi server --transport native -- codex -a on-request
+agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6-luna --thinking low
+```
+
+- The native transport is opt-in; PTY stays the default (`--transport pty`).
+  `--transport acp` is the same as `--experimental-acp`, which can't be
+  combined with `--transport native`.
+- The agent type picks the adapter: `claude`, `codex` or `pi`, from the
+  executable name or `--type`. Other agent types are refused at startup. To
+  work on the chat without a real agent,
+  `--transport native --type custom -- native-demo` runs a simulated one (see
+  [chat/README.md](chat/README.md)).
+- Text and thinking grow live: a rich message is replaced as a whole as it
+  streams (at most ten snapshots a second per message). For Claude Code,
+  AgentAPI asks for summarized adaptive thinking; every Codex turn asks for
+  detailed reasoning summaries; Pi's thinking streams as Pi writes it.
+- `GET /status` reports `transport` (`native`), the agent's `capabilities` and
+  `pending_requests`, and `status_change` events carry the transport too.
+  While the agent waits only on a request, `status` is `stable`, as it is for
+  a terminal dialog.
+
+#### Logging in
+
+Native mode uses the agent CLI's own stored login. There is no terminal, so
+`/login` from the chat's TTY mode isn't available: log in once with the CLI
+itself, on the machine and as the user account that runs AgentAPI (or once in
+PTY mode).
+
+- Claude Code: `claude auth login` (Claude subscription by default, `--console`
+  for Anthropic Console API billing). `claude auth status` shows the login.
+- Codex: `codex login` (ChatGPT plan), or
+  `printenv OPENAI_API_KEY | codex login --with-api-key` for an API key.
+  `codex login status` shows the login.
+- Pi: `/login` inside `pi`, or a provider key such as `ANTHROPIC_API_KEY` in
+  AgentAPI's environment.
+
+#### Requests: approvals, questions and plans
+
+Tool approvals, questions (Claude's `AskUserQuestion`, Codex's
+`request_user_input`, dialogs from Pi extensions) and plan approvals (Claude's
+`ExitPlanMode`) arrive as requests:
+
+- `GET /requests` lists the pending requests and the 50 most recently closed
+  ones, and `GET /requests/{id}` returns one. `/events` sends a
+  `request_update` event whenever one opens or closes, and `GET /status`
+  counts the pending ones in `pending_requests`. Other transports return an
+  empty list.
+- `POST /requests/{id}/respond` answers one: `option_id` for approvals and
+  plans (with optional `text` as feedback when the request has `feedback`),
+  `answers` keyed by question ID for questions. A request is answered at most
+  once: 409 when it is no longer pending (already answered, withdrawn or
+  expired), 400 when the answer doesn't fit the request.
+- Each request has a `status` (`pending`, `resolved`, `withdrawn`, `expired`)
+  and a `response_capability`: `live` (the agent is waiting), `message` (the
+  agent stopped waiting; answer with a new message) or `not_resumable` (the
+  agent that asked exited or was restarted). When a turn ends, its open
+  questions become `message` and its approvals and plans `not_resumable`.
+- Answers to secret questions are stored and reported as `[redacted]`; only the
+  agent gets them.
+- The Discord bridge's `/handoff` offers the oldest pending request with
+  numbered choices: a number picks an option, other text answers a single
+  question or goes with the deny option as feedback.
+
+In the chat, requests dock above the composer as a decision card. Approvals
+show the command and options styled by what they do (allow, always allow,
+deny), with optional feedback sent along with a denial; plans render as
+Markdown and can be approved or sent back with feedback; questions take one
+step each (single or multiple choice, typed or hidden answers) and are
+submitted together. Number keys pick options. The tool call's row says whether
+it waits for approval, was approved or was denied, and `AskUserQuestion`,
+`request_user_input` and `ExitPlanMode` calls are answered on the card only. A
+request answered elsewhere or no longer pending leaves the card, and a question
+the agent stopped waiting for points out that a normal message can still
+answer it. The header, tab title, tab icon and notifications say "Needs you"
+while a request is pending.
+
+#### Steer, interrupt and the queue
+
+- `POST /message` takes `dispatch_mode`: `queue` (the default, as on every
+  transport: send the message once the agent is idle), `steer` (add it to the
+  turn the agent is working on; the reply says `steered`) or `interrupt` (stop
+  that turn and send the message next). When no turn is running, both send the
+  message as usual. They need the native transport and the matching
+  capability, otherwise the answer is 400.
+- `POST /interrupt` stops the running turn (409 if there is none).
+- `POST /queue/{id}/steer` moves a queued message into the running turn (409
+  if no turn is running; the message stays queued).
+- `PUT /queue` with `{"ids": [...]}` reorders the queue. It must list every
+  queued message once (409 otherwise). This works on every transport.
+
+`GET /status` reports `capabilities`: `steer`, `interrupt`, `resume` (the
+session can be resumed when AgentAPI starts again, see
+[Persistent sessions](#persistent-sessions)) and `images` (image attachments,
+`@"<path>"` references to PNG, JPEG, GIF or WebP files up to 10 MB, are sent
+to the agent as images as well as paths).
+
+In the chat, while the agent works, the send button's menu adds **Steer**
+(⌘/Ctrl+Enter) and **Interrupt & send** (⌘/Ctrl+Shift+Enter) next to queueing
+(Enter), and Stop interrupts the turn (`POST /interrupt`). Queued tasks can be
+steered in right away, and moved up and down on every transport.
+
+#### Persistent sessions
+
+`--state-db <file>` keeps the conversation in a SQLite file: messages, rich
+messages (tool calls, thinking), the timeline, requests and the queue, plus
+the agent's own session ID. When AgentAPI starts again with the same file, the
+chat shows the conversation as it was, queued messages are still queued, and
+the agent resumes its session, so it remembers the conversation too. Browser
+caches stay valid, because the conversation keeps its epoch. Without
+`--state-db`, every start of AgentAPI is a new agent session.
 
 ```bash
 agentapi server --transport native --state-db ~/.agentapi/myproject.db -- claude
@@ -133,9 +242,194 @@ agentapi server --transport native --state-db ~/.agentapi/myproject.db -- claude
   refuses to start with another one's file.
 - Restart (Explorer → Restart, `DELETE /messages`) clears the stored
   conversation and starts a new session.
+- Writes are batched every 200 ms, so streaming doesn't wait for the disk.
 - `--state-db` needs `--transport native`. With the PTY transport the agent
   can't resume its session; `--state-file` still saves the screen-derived
-  messages there.
+  messages there. The native transport doesn't take `--state-file`.
+
+#### Claude Code
+
+AgentAPI runs `claude -p` headless with stream-json on stdin and stdout. Tool
+calls carry their input, result, status and images, and each assistant message
+has its model, stop reason and token usage.
+
+- Approvals offer Allow, Deny (with optional feedback for Claude) and, when
+  Claude Code suggests a permission rule, "Allow always", which applies the
+  rule to this session only. Commands Claude Code considers read-only run
+  without asking.
+- Questions list Claude's options; any other answer is accepted too.
+- Plans show the plan and offer "Yes, and auto-accept edits", "Yes, and
+  manually approve edits" and "No, keep planning". Feedback sent with No makes
+  Claude revise the plan and ask again.
+
+Claude Code supports `steer` (a steered message joins the running turn at
+Claude's next step), `interrupt`, `resume` and `images`. The session name is
+the title Claude Code generates after the first prompt. A turn ends when
+Claude Code reports it is idle, so a background subagent and the turn it wakes
+up when it finishes belong to the turn that started it; the subagent's own
+steps are left out of the conversation, as in the session log, and its tool
+call shows as running until it reports.
+
+Command line and environment:
+
+- AgentAPI adds `-p --output-format stream-json --input-format stream-json
+  --verbose --include-partial-messages --replay-user-messages
+  --permission-prompt-tool stdio`, and `--session-id` for a new session or
+  `--resume` for a resumed one.
+- Unless you choose otherwise it adds `--permission-mode default` (managed or
+  user settings may otherwise make the default `bypassPermissions`, which
+  would skip every approval) and `--thinking adaptive --thinking-display
+  summarized` (without it thinking is empty). Your `--permission-mode`,
+  `--dangerously-skip-permissions`, `--thinking`, `--max-thinking-tokens` or
+  `--thinking-display` wins.
+- Flags that conflict with the protocol or the session AgentAPI manages are
+  rejected at startup: `-p`/`--print`, `--output-format`, `--input-format`,
+  `-r`/`--resume`, `-c`/`--continue`, `--session-id`, `--fork-session`,
+  `--from-pr`, `--teleport`, `--permission-prompt-tool`,
+  `--permission-prompts`, `--bg`/`--background`, `--cloud`, `--desktop` and
+  `--remote-control`. Your own copies of `--verbose`,
+  `--include-partial-messages` and `--replay-user-messages` are dropped.
+  Everything else (`--model`, `--allowedTools`, `--mcp-config`,
+  `--append-system-prompt`, ...) is passed through.
+- Started from inside a Claude Code session (for example by its Bash tool),
+  the child would inherit that session's variables. AgentAPI removes
+  `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`,
+  `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ATTENDED`,
+  `CLAUDE_CODE_EXECPATH`, `CLAUDE_CODE_MESSAGING_SOCKET`,
+  `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_PID`,
+  `CLAUDE_EFFORT`, `CLAUDE_AGENT_SDK_VERSION`, `AI_AGENT` and
+  `CLAUDE_CODE_SDK_READS_SESSION_STATE`, and sets
+  `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` and
+  `CLAUDE_CODE_ENTRYPOINT=sdk-cli`. Configuration such as `CLAUDE_CONFIG_DIR`
+  and `ANTHROPIC_*` is kept.
+
+Resuming a session keeps Claude's context; Claude Code doesn't replay the
+earlier messages, so the chat shows them only from the `--state-db` file. A
+session can be resumed once it had a turn; with `--no-session-persistence` it
+can't, and `resume` is false. Requests still open when Claude Code exits or
+restarts can't be answered anymore. Stopping closes Claude Code's input so it
+finishes on its own, then sends SIGTERM after 3 s and SIGKILL 2 s later. Slash
+commands that need the interactive UI don't work.
+
+#### Codex
+
+AgentAPI starts `codex app-server` and starts or resumes a thread. Messages,
+rich messages and the timeline have the same shape the session-log parser
+produces, so the chat shows Codex's replies, reasoning summaries, commands (the
+command itself, not the `bash -lc` wrapper), file edits, MCP tool calls, plan
+updates and token usage as they stream. Every turn asks for detailed reasoning
+summaries unless you choose `model_reasoning_summary` with `-c`; whether the
+model writes any depends on the model and the reasoning effort.
+
+Codex's command line after `codex` is handled like this:
+
+- `-c`/`--config`, `--enable`, `--disable`, `--code-mode-host`,
+  `--strict-config` and `--analytics-default-enabled` are passed to
+  `codex app-server`.
+- `-m`/`--model`, `-s`/`--sandbox`, `-a`/`--ask-for-approval`
+  (`untrusted`, `on-request`, `never`) and `-C`/`--cd` become the thread's
+  settings; `--dangerously-bypass-approvals-and-sandbox` means `-a never -s
+  danger-full-access`. Without them, Codex's config decides (including `-c
+  sandbox_mode=...`). Codex 0.160 refuses `approval_policy = "untrusted"` in
+  its config, so use `-a untrusted` for that policy.
+- `--no-alt-screen`, `--no-daemon` and `--stdio` are ignored.
+- A prompt, a subcommand (other than `app-server`), `-p`/`--profile`,
+  `-i`/`--image`, `--oss`, `--local-provider`, `--search`, `--add-dir`,
+  `--approve-for-me`, `--dangerously-bypass-hook-trust`, `--remote`,
+  `--remote-auth-token-env`, `--worktree`, `--listen`, `--help`, `--version`
+  and unknown flags are rejected at startup with an explanation. Use
+  `--initial-prompt` for a first message and attach images to messages
+  instead.
+
+Codex supports `steer`, `interrupt`, `resume` and `images`. Command, file-edit
+and MCP tool approvals, permission requests, MCP form elicitations and
+`request_user_input` questions (plan mode) arrive as requests; their option
+IDs are Codex's own decisions (`accept`, `acceptForSession`,
+`acceptWithExecpolicyAmendment`, `decline`, `cancel`, …), nothing is approved
+automatically, and requests AgentAPI can't show are declined. A steered message
+joins the running turn at Codex's next model request (the current output keeps
+streaming); the reply to it is filed under the steering message. An interrupt
+ends the turn within milliseconds, and tool calls it cut short show as failed.
+
+The session reference is Codex's thread ID. Resuming it continues the thread
+with its context; a turn that was running when the process died comes back as
+interrupted, approvals that were pending are gone, and Codex's earlier turns
+are not loaded into AgentAPI's conversation (the chat shows them only from the
+`--state-db` file). A thread that can't be resumed is replaced by a new one,
+with a warning. Codex doesn't name threads itself; a name set elsewhere
+(`thread/name/updated`) becomes the session name. MCP servers managed from the
+Explorer live in `$CODEX_HOME/config.toml`, which app-server reads when it
+starts, so restart the agent to apply changes.
+
+Slash commands (`/model`, `/review`, …) are not available. Command output
+streams as a preview that Codex may leave incomplete, and the full output
+replaces it when the command ends. Variables a parent Codex session sets
+(`CODEX_THREAD_ID`, `CODEX_SANDBOX`, …) are removed from app-server's
+environment.
+
+#### Pi
+
+AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and
+stdout).
+
+- **Flags.** AgentAPI adds `--mode rpc --session-id <id>` (a new
+  `agentapi-<hex>` ID for every new session, including after a restart). It
+  refuses options that pick the mode or the session or make Pi exit (`--mode`,
+  `--print`/`-p`, `--session`, `--session-id`, `--continue`/`-c`,
+  `--resume`/`-r`, `--fork`, `--no-session`, `--export`, `--list-models`,
+  `--help`/`-h`, `--version`/`-v`), `@file` arguments, messages after `--` and
+  subcommands (`pi install`, `remove`, `uninstall`, `update`, `list`,
+  `config`, `auth`, `mcp`), with an error that names the option. It drops the
+  TUI-only `--tui-mode` and `--use-theme`. Everything else is passed on
+  (`--provider`, `--model`, `--thinking`, `--session-dir`, `-e`, `--approve`,
+  extension flags); `--flag=value` is split for Pi's built-in options, which
+  Pi only reads in the two-token form. Set the thinking level with
+  `--thinking`.
+- **Capabilities.** Steer (`dispatch_mode: "steer"` is sent as a prompt with
+  `streamingBehavior: "steer"`), interrupt (`POST /interrupt` sends `abort`; the
+  turn ends as interrupted, without the "This operation was aborted" error Pi
+  adds when it aborts during a tool), resume, and images (attached images go to
+  Pi as base64 `images`; reported only when the model accepts images).
+- **Messages.** Text and thinking stream into the rich messages as they arrive,
+  bash output streams into the tool result, and the final messages have the
+  same shape as the ones parsed from Pi's session log. Images in tool results
+  (an image file Pi reads) are kept.
+- **Requests.** Stock Pi has no tool approvals. Dialogs that extensions open
+  (`select`, `confirm`, `input`, `editor`) become requests: a `select` or
+  `confirm` while a tool runs is an approval of that tool call (option IDs are
+  the extension's labels), any `confirm` takes `yes`/`no`, and other dialogs
+  are questions (`choice` or `value`; option `cancel` dismisses them). A dialog
+  Pi times out is withdrawn. An extension's `notify` with level error shows as
+  an error, and its `setTitle` stands in for the session name until Pi has one;
+  Pi's own name (`--name`, renames) is the session name.
+- **Resume.** Pi's session ID is the session reference. Resuming starts Pi with
+  the same `--session-id` (keep the same directory and `--session-dir`), so Pi
+  keeps the context; Pi doesn't replay earlier messages, so the chat shows them
+  only from the `--state-db` file.
+- **Shutdown.** Stopping AgentAPI (or a restart) aborts a running turn first,
+  so the session log doesn't end in a tool call without result, then closes
+  stdin, then sends SIGTERM and SIGKILL to Pi's process group if it doesn't
+  exit.
+- **Environment and commands.** Pi's TUI commands (`/settings`, `/login` and
+  the like) are unavailable; extension slash commands work. Variables that
+  mark a parent agent session (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`,
+  `CODEX_THREAD_ID`, `PI_CODING_AGENT`, `AI_AGENT`) are removed from Pi's
+  environment.
+
+#### Limitations
+
+- There is no terminal. The chat hides TTY mode, the terminal prompt card, the
+  live screen tail and "Terminal output" (for ACP too), `raw` messages (keys
+  for the terminal) are refused with 400, and slash commands that need the
+  agent's interactive UI don't work.
+- Restart (Explorer → Restart, `DELETE /messages`, or `?restart=true` on the
+  MCP endpoints) replaces the agent with a new one in a new session and clears
+  the conversation; requests still open become `not_resumable`. Unlike a PTY
+  restart, it doesn't run `codex update` or `pi update --self` first.
+- Without `--state-db`, the next start of AgentAPI is a new session; the
+  agent's earlier session isn't resumed.
+- Images reach the agent only as `@"<path>"` attachments of a message, not as
+  command-line flags (`codex -i` and Pi's `@file` are refused).
 
 ### Structured Claude, Codex and Pi activity
 
@@ -156,82 +450,9 @@ be reconstructed reliably from terminal output alone.
   encrypted reasoning.
 
 Terminal parsing remains the fallback for other agents and for environments
-where a session log is unavailable.
-
-### Native transport for Claude Code
-
-`--transport native` drives Claude Code through its own stream-json protocol
-instead of its terminal UI:
-
-```bash
-agentapi server --transport native -- claude --model sonnet
-```
-
-AgentAPI runs `claude -p` headless with stream-json on stdin and stdout.
-Messages, rich messages and the timeline come straight from the protocol:
-text and thinking grow live, tool calls carry their input, result, status and
-images, and each assistant message has its model, stop reason and token usage.
-Tool approvals, `AskUserQuestion` and plan approvals (`ExitPlanMode`) arrive as
-requests (`GET /requests`, `POST /requests/{id}/respond`):
-
-- Approvals offer Allow, Deny (with optional feedback for Claude) and, when
-  Claude Code suggests a permission rule, "Allow always", which applies the
-  rule to this session only. Commands Claude Code considers read-only run
-  without asking.
-- Questions list Claude's options; any other answer is accepted too.
-- Plans show the plan and offer "Yes, and auto-accept edits", "Yes, and
-  manually approve edits" and "No, keep planning". Feedback sent with No makes
-  Claude revise the plan and ask again.
-
-`GET /status` reports the capabilities `steer` (a message sent with
-`dispatch_mode: steer` joins the running turn at Claude's next step),
-`interrupt`, `resume` and `images` (images attached to a message are sent to
-Claude). The session name is the title Claude Code generates after the first
-prompt. A turn ends when Claude Code reports it is idle, so a background
-subagent and the turn it wakes up when it finishes belong to the turn that
-started it; the subagent's own steps are left out of the conversation, as in
-the session log, and its tool call shows as running until it reports.
-
-Command line and environment:
-
-- AgentAPI adds `-p --output-format stream-json --input-format stream-json
-  --verbose --include-partial-messages --replay-user-messages
-  --permission-prompt-tool stdio`, and `--session-id` for a new session or
-  `--resume` for a resumed one.
-- Unless you choose otherwise it adds `--permission-mode default` (managed or
-  user settings may otherwise make the default `bypassPermissions`, which
-  would skip every approval) and `--thinking adaptive --thinking-display
-  summarized` (without it thinking is empty). Your `--permission-mode`,
-  `--dangerously-skip-permissions`, `--thinking`, `--max-thinking-tokens` or
-  `--thinking-display` wins.
-- Flags that conflict with the protocol or the session AgentAPI manages are
-  rejected at startup: `-p`/`--print`, `--output-format`, `--input-format`,
-  `-r`/`--resume`, `-c`/`--continue`, `--session-id`, `--fork-session`,
-  `--from-pr`, `--teleport`, `--permission-prompt-tool`,
-  `--permission-prompts`, `--bg`, `--cloud`, `--desktop` and
-  `--remote-control`. Your own copies of `--verbose`,
-  `--include-partial-messages` and `--replay-user-messages` are dropped.
-  Everything else (`--model`, `--allowedTools`, `--mcp-config`,
-  `--append-system-prompt`, ...) is passed through.
-- Started from inside a Claude Code session (for example by its Bash tool),
-  the child would inherit that session's variables. AgentAPI removes
-  `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`,
-  `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ATTENDED`,
-  `CLAUDE_CODE_EXECPATH`, `CLAUDE_CODE_MESSAGING_SOCKET`,
-  `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_PID`,
-  `CLAUDE_EFFORT`, `CLAUDE_AGENT_SDK_VERSION` and `AI_AGENT`, and sets
-  `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` and
-  `CLAUDE_CODE_ENTRYPOINT=sdk-cli`. Configuration such as `CLAUDE_CONFIG_DIR`
-  and `ANTHROPIC_*` is kept.
-
-Resuming a session keeps Claude's context but doesn't bring back the earlier
-messages in the chat (Claude Code doesn't replay them). A session can be
-resumed once it had a turn; with `--no-session-persistence` it can't, and
-`resume` is false. Requests still open when Claude Code exits or restarts
-can't be answered anymore. Stopping closes Claude Code's input so it finishes
-on its own, then sends SIGTERM after 3 s and SIGKILL 2 s later. There is no
-terminal: TTY mode, terminal prompts and the live screen aren't available,
-and slash commands that need the interactive UI don't work.
+where a session log is unavailable. With the
+[native transport](#native-transport), the same endpoints are filled from the
+agent's protocol instead of its session log.
 
 ### MCP management
 
@@ -245,13 +466,14 @@ The API and Session Explorer support:
 - creating, updating, and deleting individual servers;
 - checking remote HTTP connectivity and resolving local stdio executables;
 - saving, importing, exporting, and applying reusable MCP profiles;
-- optionally restarting the PTY agent to apply changes immediately.
+- optionally restarting the agent to apply changes immediately.
 
 When an agent is restarted, AgentAPI itself and its HTTP/SSE clients remain
 online. The child agent receives a new process and session-log watcher, although
-its previous in-memory conversation context is not retained. Before restarting,
-AgentAPI updates Codex (`codex update`) and Pi (`pi update --self`), so the
-restarted agent is the latest release; Claude Code updates itself.
+its previous in-memory conversation context is not retained. Before a PTY
+restart, AgentAPI updates Codex (`codex update`) and Pi (`pi update --self`), so
+the restarted agent is the latest release; Claude Code updates itself. A
+native-transport restart doesn't run these updates.
 
 ### Run-status webhooks
 
@@ -280,8 +502,9 @@ response, sends a bot notification, and waits for a `human_response` signal when
 an allowed Discord user replies to that notification. A worker Activity then
 submits the reply to AgentAPI. The web UI remains usable throughout.
 
-This supports ordinary conversational follow-ups and recognized numbered PTY
-confirmation dialogs. Notifications are independent of browser presence.
+This supports ordinary conversational follow-ups, recognized numbered PTY
+confirmation dialogs and, with the native transport, pending
+[requests](#requests-approvals-questions-and-plans). Notifications are independent of browser presence.
 AgentAPI and the bridge must remain running; Temporal preserves workflow state,
 not the agent's terminal process. See [setup, configuration and limitations](docs/discord-temporal.md).
 
@@ -349,6 +572,8 @@ keys pick an option. Multi-select questions (Claude Code's AskUserQuestion with
 `multiSelect`) show checkboxes and a Continue button that moves on to the next
 question or the review step. A numbered list in the agent's answer is not
 mistaken for options. `GET /status` reports the prompt as `terminal_prompt`.
+With the [native transport](#native-transport) there are no terminal prompts;
+approvals, questions and plans arrive as structured requests instead.
 
 ### Kimi Code CLI
 
@@ -396,116 +621,8 @@ share a directory. If you pass `--session`, `--continue`, `--resume` or
 `--session-id` yourself, AgentAPI leaves the session to you; with
 `--continue`/`--resume` the chat falls back to the terminal output.
 
-### Native transport for Pi
-
-With `--transport native`, AgentAPI drives Pi through its RPC mode
-(`pi --mode rpc`, JSON over stdin and stdout) instead of its terminal UI:
-
-```bash
-agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6-luna --thinking low
-```
-
-- **Flags.** AgentAPI adds `--mode rpc --session-id <id>` (a new
-  `agentapi-<hex>` ID on every start and restart). It refuses options that pick
-  the mode or the session or make Pi exit (`--mode`, `--print`/`-p`,
-  `--session`, `--session-id`, `--continue`/`-c`, `--resume`/`-r`, `--fork`,
-  `--no-session`, `--export`, `--list-models`, `--help`, `--version`), `@file`
-  arguments, messages after `--` and subcommands such as `pi install`, with an
-  error that names the option. It drops the TUI-only `--tui-mode` and
-  `--use-theme`. Everything else is passed on (`--provider`, `--model`,
-  `--thinking`, `--session-dir`, `-e`, `--approve`, extension flags);
-  `--flag=value` is split for Pi's built-in options, which Pi only reads in the
-  two-token form. Set the thinking level with `--thinking`.
-- **Capabilities.** Steer (`dispatch_mode: "steer"` is sent as a prompt with
-  `streamingBehavior: "steer"`), interrupt (`POST /interrupt` sends `abort`; the
-  turn ends as interrupted, without the "This operation was aborted" error Pi
-  adds when it aborts during a tool), resume, and images (attached images go to
-  Pi as base64 `images`; reported only when the model accepts images).
-- **Messages.** Text and thinking stream into the rich messages as they arrive
-  (at most ten snapshots a second per message), bash output streams into the
-  tool result, and the final messages have the same shape as the ones parsed
-  from Pi's session log. Images in tool results (an image file Pi reads) are
-  kept.
-- **Requests.** Stock Pi has no tool approvals. Dialogs that extensions open
-  (`select`, `confirm`, `input`, `editor`) become requests: a `select` or
-  `confirm` while a tool runs is an approval of that tool call (option IDs are
-  the extension's labels), any `confirm` takes `yes`/`no`, and other dialogs
-  are questions (`choice` or `value`; option `cancel` dismisses them). A dialog
-  Pi times out is withdrawn. An extension's `notify` with level error shows as
-  an error, and its `setTitle` stands in for the session name until Pi has one;
-  Pi's own name (`--name`, renames) is the session name.
-- **Resume.** Pi's session ID is the session reference. Resuming starts Pi with
-  the same `--session-id` (keep the same directory and `--session-dir`), so Pi
-  keeps the context; earlier messages are not shown again in the chat.
-- **Shutdown.** Stopping AgentAPI (or a restart) aborts a running turn first,
-  so the session log doesn't end in a tool call without result, then closes
-  stdin, then sends SIGTERM and SIGKILL to Pi's process group if it doesn't
-  exit.
-- **Limitations.** There is no terminal, so TTY mode and Pi's TUI commands
-  (`/settings`, `/login` and the like) are unavailable; log in to Pi in a
-  terminal first. Extension slash commands work. Variables that mark a parent
-  agent session (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CODEX_THREAD_ID`,
-  `PI_CODING_AGENT`, `AI_AGENT`) are removed from Pi's environment.
-### Native transport: Codex
-
-With `--transport native`, AgentAPI drives Codex through `codex app-server`,
-its JSON-RPC protocol over stdio, instead of its terminal UI:
-
-```bash
-agentapi server --transport native -- codex -a on-request
-```
-
-Messages, rich messages and the timeline come straight from the protocol, in
-the same shape the session-log parser produces, so the chat shows Codex's
-replies, reasoning summaries, commands (the command itself, not the
-`bash -lc` wrapper), file edits, MCP tool calls, plan updates and token usage
-as they stream. Every turn asks for detailed reasoning summaries unless you
-choose `model_reasoning_summary` with `-c`; whether the model writes any
-depends on the model and the reasoning effort.
-
-Codex's command line after `codex` is handled like this:
-
-- `-c`/`--config`, `--enable`, `--disable` and `--strict-config` are passed to
-  `codex app-server`.
-- `-m`/`--model`, `-s`/`--sandbox`, `-a`/`--ask-for-approval`
-  (`untrusted`, `on-request`, `never`) and `-C`/`--cd` become the thread's
-  settings; `--dangerously-bypass-approvals-and-sandbox` means `-a never -s
-  danger-full-access`. Without them, Codex's config decides (including `-c
-  sandbox_mode=...`). Codex 0.160 refuses `approval_policy = "untrusted"` in
-  its config, so use `-a untrusted` for that policy.
-- `--no-alt-screen` and `--no-daemon` are ignored.
-- A prompt, a subcommand (other than `app-server`), `-p`/`--profile`,
-  `-i`/`--image`, `--oss`, `--local-provider`, `--search`, `--add-dir`,
-  `--approve-for-me`, `--remote`, `--worktree` and unknown flags are rejected
-  at startup with an explanation. Use `--initial-prompt` for a first message
-  and attach images to messages instead.
-
-The agent supports `steer`, `interrupt`, `resume` and `images` (see
-`capabilities` in `GET /status`). Command, file-edit and MCP tool approvals,
-permission requests, MCP form elicitations and `request_user_input` questions
-(plan mode) arrive as requests (`GET /requests`); their option IDs are
-Codex's own decisions (`accept`, `acceptForSession`,
-`acceptWithExecpolicyAmendment`, `decline`, `cancel`, …) and nothing is
-approved automatically. A steered message joins the running turn at Codex's
-next model request (the current output keeps streaming); the reply to it is
-filed under the steering message. An interrupt ends the turn within
-milliseconds, and tool calls it cut short show as failed.
-
-The session reference is Codex's thread ID. Resuming it continues the thread
-with its context; a turn that was running when the process died comes back
-as interrupted, approvals that were pending are gone, and earlier messages
-are not loaded into AgentAPI's conversation. A thread that can't be resumed
-is replaced by a new one, with a warning. Codex doesn't name threads itself;
-a name set elsewhere (`thread/name/updated`) becomes the session name. MCP
-servers managed from the Explorer live in `$CODEX_HOME/config.toml`, which
-app-server reads when it starts, so restart the agent to apply changes.
-
-Limitations: there is no terminal, so TTY mode, slash commands (`/model`,
-`/review`, …) and terminal dialogs are not available; command output streams
-as a preview that Codex may leave incomplete, and the full output replaces it
-when the command ends. Variables a parent Codex session sets
-(`CODEX_THREAD_ID`, `CODEX_SANDBOX`, …) are removed from app-server's
-environment.
+To drive Pi through its RPC mode instead of its terminal UI, see
+[Native transport](#native-transport).
 
 ### Runtime reliability
 
@@ -613,14 +730,24 @@ By default, the server runs on port 3284. Additionally, the server exposes the s
 Endpoints:
 
 - GET `/messages` - returns a list of all messages in the conversation with the agent
-- POST `/message` - sends a message to the agent. When a 200 response is returned, AgentAPI has detected that the agent started processing the message
+- POST `/message` - sends a message to the agent. When a 200 response is returned, AgentAPI has detected that the agent started processing the message, or queued it (`queued`) while the agent is busy. `dispatch_mode` chooses what happens while the agent is busy: `queue` (default), `steer` (add it to the running turn; `steered` in the reply) or `interrupt` (stop the turn and send it next); `steer` and `interrupt` need the native transport
 - GET `/status` - returns the backward-compatible `stable`/`running` status,
   detailed lifecycle (`starting`, `ready`, `running`, `restarting`, `exited`, or
-  `failed`), a session ID, a monotonically increasing run ID, the AgentAPI
-  version, the agent's open dialog (`terminal_prompt`) and the terminal width
-  (`terminal_columns`)
-- GET `/events` - an SSE stream of events from the agent: message and status updates (`?sync=1` for incremental replay on reconnect)
-- DELETE `/messages` - clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent process
+  `failed`), the transport (`pty`, `acp` or `native`), a session ID, a
+  monotonically increasing run ID, the conversation's `epoch` (for
+  `/events?sync=1`), the session name, the AgentAPI version, the agent's open
+  dialog (`terminal_prompt`) and the terminal width (`terminal_columns`). With
+  the native transport it also reports `capabilities` (`steer`, `interrupt`,
+  `resume`, `images`) and `pending_requests`
+- GET `/events` - an SSE stream of events from the agent: message and status updates, and `request_update` with the native transport. With `?sync=1` it replays incrementally on reconnect (`&since=<seq>&epoch=<epoch>`), and events carry SSE ids so a reconnecting `EventSource` resumes from its `Last-Event-ID`
+- DELETE `/messages` - clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent process (native transport: in a new session)
+- GET `/queue` - returns the messages waiting to be sent to the agent
+- PUT `/queue` - reorders the queue; the body (`{"ids": [...]}`) lists every queued message once
+- PUT/DELETE `/queue/{id}` - edits or removes a queued message
+- POST `/queue/{id}/steer` - moves a queued message into the turn the agent is working on (native transport)
+- POST `/interrupt` - stops the turn the agent is working on (native transport)
+- GET `/requests`, GET `/requests/{id}` - the requests (tool approvals, questions, plans) the agent is waiting on and the recently closed ones (native transport; empty otherwise)
+- POST `/requests/{id}/respond` - answers a pending request (`option_id`, or `answers` keyed by question ID, with optional `text`); see [Requests](#requests-approvals-questions-and-plans)
 - POST `/upload` - stores a file (up to 10 MB) in the server's temporary upload directory and returns its path, which a message references as `@"<path>"`
 - GET `/uploads/{checksum}/{name}` - returns an uploaded image (PNG, JPEG, GIF, WebP or BMP, judged by content) for the chat to show; other files are refused
 - GET/PUT `/webhook` - reads or updates run-status webhook delivery without restarting the agent
@@ -632,6 +759,28 @@ Endpoints:
 - PUT/DELETE `/mcp/profiles/{name}` - imports, replaces, or removes a profile
 - POST `/mcp/profiles/{name}/apply` - replaces the active MCP configuration with a saved profile
 - GET/POST/DELETE `/auth/session` - reports whether the API needs a token and whether the caller has one, signs a browser in with the token (session cookie), or signs it out; see [API token authentication](#api-token-authentication)
+
+#### Transport and session state
+
+`--transport` chooses how AgentAPI drives the agent:
+
+- `pty` (default): runs the agent's terminal UI in a terminal emulator and
+  parses its screen.
+- `acp`: the experimental ACP transport, the same as `--experimental-acp`.
+- `native`: the agent's own structured protocol, for Claude Code, Codex and
+  Pi; see [Native transport](#native-transport).
+
+```bash
+agentapi server --transport native -- claude
+agentapi server --transport native --state-db ~/.agentapi/myproject.db -- codex
+```
+
+`--state-db <file>` (native transport only) keeps the conversation in a SQLite
+file and resumes the agent's session when AgentAPI starts again with the same
+file; see [Persistent sessions](#persistent-sessions). `--state-file <file>`
+(PTY transport only) saves the screen-derived messages on shutdown and loads
+them on startup (`--save-state` and `--load-state` default to true when it is
+set).
 
 #### API token authentication
 
