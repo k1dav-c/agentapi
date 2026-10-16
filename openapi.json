@@ -1636,6 +1636,10 @@
           "terminal_prompt": {
             "description": "Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise.",
             "type": "string"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/Transport",
+            "description": "Backend transport being used ('pty', 'acp' or 'native')."
           }
         },
         "required": [

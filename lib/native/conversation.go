@@ -527,7 +527,7 @@ func (c *Conversation) Respond(ctx context.Context, id string, response Response
 	if r.Status == RequestStatusPending {
 		now := c.cfg.Clock.Now()
 		r.Status = RequestStatusResolved
-		resp := response
+		resp := redactSecrets(r.Request, response)
 		r.Response = &resp
 		r.ClosedAt = &now
 	}
@@ -536,6 +536,25 @@ func (c *Conversation) Respond(ctx context.Context, id string, response Response
 	c.cfg.Emitter.EmitStatus(c.statusLocked())
 	c.mu.Unlock()
 	return state, nil
+}
+
+// redactedAnswer replaces the answers to secret questions in stored and
+// published request states. The agent gets the real answer.
+const redactedAnswer = "[redacted]"
+
+func redactSecrets(req Request, resp Response) Response {
+	for _, q := range req.Questions {
+		if !q.Secret || len(resp.Answers[q.ID]) == 0 {
+			continue
+		}
+		answers := make(map[string][]string, len(resp.Answers))
+		for id, a := range resp.Answers {
+			answers[id] = a
+		}
+		answers[q.ID] = []string{redactedAnswer}
+		resp.Answers = answers
+	}
+	return resp
 }
 
 // validateResponse checks that a response answers the request.

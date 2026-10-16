@@ -93,6 +93,7 @@ type StatusChangeBody struct {
 	SessionID string         `json:"session_id" doc:"Identifier for this AgentAPI server session."`
 	RunID     uint64         `json:"run_id" doc:"Monotonically increasing run identifier within the session."`
 	AgentType mf.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
+	Transport Transport      `json:"transport,omitempty" doc:"Backend transport being used ('pty', 'acp' or 'native')."`
 	Version   string         `json:"agentapi_version" doc:"Version of the AgentAPI server."`
 	// TerminalPrompt is the bottom of the screen while the agent shows an
 	// interactive prompt (selection list, confirmation) instead of its input
@@ -169,6 +170,7 @@ type EventEmitter struct {
 	runID               uint64
 	handoffRevision     uint64
 	agentType           mf.AgentType
+	transport           Transport
 	terminalColumns     uint16
 	sessionName         string
 	chans               map[int]chan Event
@@ -219,6 +221,11 @@ func WithAgentType(agentType mf.AgentType) EventEmitterOption {
 	return func(e *EventEmitter) {
 		e.agentType = agentType
 	}
+}
+
+// WithTransport sets the transport reported in status updates.
+func WithTransport(transport Transport) EventEmitterOption {
+	return func(e *EventEmitter) { e.transport = transport }
 }
 
 // WithTerminalColumns sets the width of the agent's terminal reported in
@@ -395,7 +402,7 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 	}
 	return StatusChangeBody{
 		Status: e.status, Lifecycle: e.lifecycle, SessionID: e.sessionID,
-		RunID: e.runID, AgentType: e.agentType, Version: version.Version,
+		RunID: e.runID, AgentType: e.agentType, Transport: e.transport, Version: version.Version,
 		TerminalPrompt: e.terminalPrompt, TerminalColumns: e.terminalColumns,
 		SessionName: e.sessionName, PendingRequests: pending, Capabilities: e.capabilities,
 	}

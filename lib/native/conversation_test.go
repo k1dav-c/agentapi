@@ -340,3 +340,24 @@ func TestInputFromText(t *testing.T) {
 	assert.Equal(t, []native.Image{{Path: png, MediaType: "image/png"}}, in.Images)
 	assert.Contains(t, in.Text, png)
 }
+
+func TestSecretAnswersAreRedacted(t *testing.T) {
+	c, factory, rec := start(t, nil, native.Config{})
+	a := factory.Last()
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
+	a.Sink().RequestOpened(native.Request{
+		ID: "q", Kind: native.RequestKindQuestion,
+		Questions: []native.Question{{ID: "token", Question: "Token?", Secret: true}, {ID: "name", Question: "Name?"}},
+	})
+	answers := map[string][]string{"token": {"s3cret"}, "name": {"bob"}}
+	state, err := c.Respond(context.Background(), "q", native.Response{Answers: answers})
+	require.NoError(t, err)
+	assert.Equal(t, map[string][]string{"token": {"[redacted]"}, "name": {"bob"}}, state.Response.Answers)
+	assert.Equal(t, []string{"s3cret"}, a.Responses()[0].Response.Answers["token"], "the agent gets the answer")
+	assert.Equal(t, []string{"s3cret"}, answers["token"], "the caller's map is not changed")
+	for _, r := range rec.requests {
+		if r.Response != nil {
+			assert.NotContains(t, r.Response.Answers["token"], "s3cret")
+		}
+	}
+}

@@ -399,6 +399,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 	emitterOptions := []EventEmitterOption{
 		WithAgentType(config.AgentType),
+		WithTransport(config.Transport),
 		WithSessionID(hex.EncodeToString(sessionBytes[:])),
 		WithTerminalColumns(config.TerminalColumns),
 		WithClock(config.Clock),
@@ -1051,7 +1052,7 @@ func (s *Server) getQueue(ctx context.Context, input *struct{}) (*QueueResponse,
 	defer s.mu.RUnlock()
 
 	resp := &QueueResponse{}
-	resp.Body.Messages = append([]QueuedMessage(nil), s.messageQueue...)
+	resp.Body.Messages = append([]QueuedMessage{}, s.messageQueue...)
 	return resp, nil
 }
 
