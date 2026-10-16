@@ -394,9 +394,25 @@ The equivalent environment variable is `AGENTAPI_API_TOKEN`. When set, clients
 must include `Authorization: Bearer <token>` on every API call. Without
 `--api-token`, authentication is disabled (backward compatible).
 
+#### Bind address
+
+By default, the server listens on all network interfaces. Use `--bind` (or
+`AGENTAPI_BIND`) to listen on one address only, e.g. loopback so nothing else
+on the network can connect. It takes an IP address or hostname without a port;
+the port stays `--port`.
+
+```bash
+agentapi server --bind 127.0.0.1 -- claude
+agentapi server --bind ::1 -- claude          # IPv6 loopback
+AGENTAPI_BIND=127.0.0.1 agentapi server -- claude
+```
+
+`--bind` decides who can connect; `--allowed-hosts` below decides which `Host`
+headers are accepted from those who can.
+
 #### Allowed hosts
 
-By default, the server only allows requests with the host header set to `localhost`. If you'd like to host AgentAPI elsewhere, you can change this by using the `AGENTAPI_ALLOWED_HOSTS` environment variable or the `--allowed-hosts` flag. Hosts must be hostnames only (no ports); the server ignores the port portion of incoming requests when authorizing.
+By default, the server only allows requests with the host header set to `localhost`. If you'd like to host AgentAPI elsewhere, you can change this by using the `AGENTAPI_ALLOWED_HOSTS` environment variable or the `--allowed-hosts` flag. Hosts must be hostnames only (no ports); the server ignores the port portion of incoming requests when authorizing. This checks the `Host` header only; to keep the server off the network altogether, also listen on loopback with `--bind 127.0.0.1` (see [Bind address](#bind-address)).
 
 To allow requests from any host, use `*` as the allowed host.
 

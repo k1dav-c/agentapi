@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1051,4 +1052,109 @@ func TestServer_Stop_Idempotency(t *testing.T) {
 	defer cancel3()
 	err = srv.Stop(stopCtx3)
 	require.NoError(t, err)
+}
+
+func TestParseBindAddress(t *testing.T) {
+	t.Parallel()
+	valid := map[string]string{
+		"":            "",
+		"127.0.0.1":   "127.0.0.1",
+		"0.0.0.0":     "0.0.0.0",
+		"::1":         "::1",
+		"[::1]":       "::1",
+		"::":          "::",
+		"fe80::1":     "fe80::1",
+		"localhost":   "localhost",
+		"my-host.lan": "my-host.lan",
+		" 10.0.0.2 ":  "10.0.0.2",
+	}
+	for input, want := range valid {
+		got, err := httpapi.ParseBindAddress(input)
+		require.NoError(t, err, "input %q", input)
+		assert.Equal(t, want, got, "input %q", input)
+	}
+	for _, input := range []string{
+		"127.0.0.1:3284",
+		"localhost:80",
+		"[::1]:3284",
+		"[localhost]",
+		"http://localhost",
+		"local host",
+		"a,b",
+		"-bad.example",
+		"under_score",
+	} {
+		_, err := httpapi.ParseBindAddress(input)
+		assert.Error(t, err, "input %q", input)
+	}
+}
+
+func TestServer_ListenAddr(t *testing.T) {
+	t.Parallel()
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for bind, want := range map[string]string{
+		"":          ":3284",
+		"127.0.0.1": "127.0.0.1:3284",
+		"::1":       "[::1]:3284",
+		"[::1]":     "[::1]:3284",
+		"localhost": "localhost:3284",
+	} {
+		srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+			AgentType:      msgfmt.AgentTypeClaude,
+			Port:           3284,
+			ChatBasePath:   "/chat",
+			AllowedHosts:   []string{"*"},
+			AllowedOrigins: []string{"*"},
+			Bind:           bind,
+		})
+		require.NoError(t, err, "bind %q", bind)
+		assert.Equal(t, want, srv.ListenAddr(), "bind %q", bind)
+		require.NoError(t, srv.Stop(context.Background()))
+	}
+
+	_, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeClaude,
+		Port:           3284,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		Bind:           "127.0.0.1:3284",
+	})
+	require.ErrorContains(t, err, "must not include a port")
+}
+
+func TestServer_StartBindsLoopback(t *testing.T) {
+	t.Parallel()
+	// Find a free port, then let the server listen on it.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	require.NoError(t, ln.Close())
+
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeClaude,
+		Port:           port,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		Bind:           "127.0.0.1",
+	})
+	require.NoError(t, err)
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Start() }()
+	t.Cleanup(func() {
+		_ = srv.Stop(context.Background())
+		<-errCh
+	})
+
+	url := fmt.Sprintf("http://127.0.0.1:%d/status", port)
+	require.Eventually(t, func() bool {
+		resp, err := http.Get(url)
+		if err != nil {
+			return false
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, 5*time.Second, 20*time.Millisecond)
 }

@@ -256,6 +256,7 @@ func TestServerCmd_AllArgs_Defaults(t *testing.T) {
 		{"term-height default", FlagTermHeight, uint16(1000), func() any { return viper.GetUint16(FlagTermHeight) }},
 		{"allowed-hosts default", FlagAllowedHosts, []string{"localhost", "127.0.0.1", "[::1]"}, func() any { return viper.GetStringSlice(FlagAllowedHosts) }},
 		{"allowed-origins default", FlagAllowedOrigins, []string{"http://localhost:3284", "http://localhost:3000", "http://localhost:3001"}, func() any { return viper.GetStringSlice(FlagAllowedOrigins) }},
+		{"bind default", FlagBind, "", func() any { return viper.GetString(FlagBind) }},
 	}
 
 	for _, tt := range tests {
@@ -290,6 +291,7 @@ func TestServerCmd_AllEnvVars(t *testing.T) {
 		{"AGENTAPI_TERM_HEIGHT", "AGENTAPI_TERM_HEIGHT", "500", uint16(500), func() any { return viper.GetUint16(FlagTermHeight) }},
 		{"AGENTAPI_ALLOWED_HOSTS", "AGENTAPI_ALLOWED_HOSTS", "localhost example.com", []string{"localhost", "example.com"}, func() any { return viper.GetStringSlice(FlagAllowedHosts) }},
 		{"AGENTAPI_ALLOWED_ORIGINS", "AGENTAPI_ALLOWED_ORIGINS", "https://example.com http://localhost:3000", []string{"https://example.com", "http://localhost:3000"}, func() any { return viper.GetStringSlice(FlagAllowedOrigins) }},
+		{"AGENTAPI_BIND", "AGENTAPI_BIND", "127.0.0.1", "127.0.0.1", func() any { return viper.GetString(FlagBind) }},
 	}
 
 	for _, tt := range tests {
@@ -359,6 +361,13 @@ func TestServerCmd_ArgsPrecedenceOverEnv(t *testing.T) {
 			[]string{"--term-height", "600"},
 			uint16(600),
 			func() any { return viper.GetUint16(FlagTermHeight) },
+		},
+		{
+			"bind: CLI overrides env",
+			"AGENTAPI_BIND", "0.0.0.0",
+			[]string{"--bind", "::1"},
+			"::1",
+			func() any { return viper.GetString(FlagBind) },
 		},
 		{
 			"allowed-origins: CLI overrides env",

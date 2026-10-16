@@ -233,6 +233,11 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		return fmt.Errorf("ACP mode doesn't support state persistence")
 	}
 
+	bind, err := httpapi.ParseBindAddress(viper.GetString(FlagBind))
+	if err != nil {
+		return fmt.Errorf("invalid --%s: %w", FlagBind, err)
+	}
+
 	pidFile := viper.GetString(FlagPidFile)
 
 	// Write PID file if configured
@@ -355,6 +360,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			return supervisor.Restart
 		}(),
 		APIToken: apiToken,
+		Bind:     bind,
 		Webhook: httpapi.WebhookConfig{
 			URL:             viper.GetString(FlagWebhookURL),
 			Timeout:         viper.GetDuration(FlagWebhookTimeout),
@@ -382,7 +388,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	// Setup signal handlers (they will call gracefulCancel)
 	handleSignals(gracefulCtx, gracefulCancel, logger, srv)
 
-	logger.Info("Starting server on port", "port", port)
+	logger.Info("Starting server on port", "port", port, "address", srv.ListenAddr())
 
 	// Monitor process exit, following intentional supervisor swaps.
 	processExitCh := make(chan error, 1)
@@ -593,6 +599,7 @@ const (
 	FlagWebhookMaxAttempts     = "webhook-max-attempts"
 	FlagWebhookPayloadTemplate = "webhook-payload-template"
 	FlagAPIToken               = "api-token"
+	FlagBind                   = "bind"
 )
 
 func CreateServerCmd() *cobra.Command {
@@ -641,6 +648,7 @@ func CreateServerCmd() *cobra.Command {
 		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},
 		{FlagWebhookPayloadTemplate, "", "", "Go text/template for custom webhook POST body. Available fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport", "string"},
 		{FlagAPIToken, "", "", "API token for Bearer authentication. If set without a value, a random token is generated. Empty (default) disables authentication.", "string"},
+		{FlagBind, "", "", "Address to listen on: an IP address or hostname without a port (e.g. 127.0.0.1 or ::1). Empty (default) listens on all interfaces", "string"},
 	}
 
 	for _, spec := range flagSpecs {

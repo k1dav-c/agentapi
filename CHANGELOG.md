@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Features
+- `--bind` (`AGENTAPI_BIND`) picks the address the server listens on, e.g. `--bind 127.0.0.1` or `--bind ::1` for loopback only. It takes an IP address or hostname without a port; the default still listens on all interfaces
 - Chat: an image the agent reads (Claude Code's Read or Codex's view_image on a PNG, a screenshot) shows as a thumbnail on the tool call, also while the card is closed; clicking it opens the image full size. It is the image the agent saw, kept from the session log, so it still shows after the file is gone
 - Rich messages: a `tool_result` block lists its images in `images` (`media_type`, `url`). The server saves them to its upload directory and serves them through `GET /uploads/{checksum}/{name}`, with the same checks as uploaded images; messages never carry the image data
 - Chat: paste an image into the composer to attach it (a pasted screenshot is uploaded and named `pasted-<date>-<time>.png`; pasted text still pastes as text). Image attachments and the images in sent messages show as thumbnails that open full size, and the message shows the thumbnails instead of the upload paths

@@ -10,12 +10,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -53,6 +55,7 @@ type Server struct {
 	router             chi.Router
 	api                huma.API
 	port               int
+	bind               string
 	srv                *http.Server
 	mu                 sync.RWMutex
 	stopOnce           sync.Once
@@ -169,6 +172,9 @@ type ServerConfig struct {
 	// endpoints. Static file routes (/chat/*, /) are exempt so browsers can
 	// load the chat UI without a token.
 	APIToken string
+	// Bind is the address the server listens on: an IP address or hostname
+	// without a port. Empty listens on all interfaces.
+	Bind string
 }
 
 // Validate allowed hosts don't contain whitespace, commas, schemes, or ports.
@@ -255,6 +261,52 @@ func parseAllowedOrigins(input []string) ([]string, error) {
 	return origins, nil
 }
 
+// ParseBindAddress validates the address to listen on: an IP address or a
+// hostname, without a port. IPv6 addresses may be bracketed ("[::1]"); the
+// brackets are removed. Empty means all interfaces.
+func ParseBindAddress(input string) (string, error) {
+	addr := strings.TrimSpace(input)
+	if addr == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(addr, "[") && strings.HasSuffix(addr, "]") {
+		addr = addr[1 : len(addr)-1]
+		if net.ParseIP(addr) == nil {
+			return "", fmt.Errorf("'%s' is not a valid IPv6 address", input)
+		}
+		return addr, nil
+	}
+	if net.ParseIP(addr) != nil {
+		return addr, nil
+	}
+	if _, _, err := net.SplitHostPort(addr); err == nil {
+		return "", fmt.Errorf("'%s' must not include a port; use --port", input)
+	}
+	if !isValidHostname(addr) {
+		return "", fmt.Errorf("'%s' is not a valid IP address or hostname", input)
+	}
+	return addr, nil
+}
+
+// isValidHostname reports whether name is a DNS hostname (RFC 1123 labels).
+func isValidHostname(name string) bool {
+	name = strings.TrimSuffix(name, ".")
+	if name == "" || len(name) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(name, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // NewServer creates a new server instance
 func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	router := chi.NewMux()
@@ -272,6 +324,10 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	allowedOrigins, err := parseAllowedOrigins(config.AllowedOrigins)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse allowed origins: %w", err)
+	}
+	bind, err := ParseBindAddress(config.Bind)
+	if err != nil {
+		return nil, fmt.Errorf("invalid bind address: %w", err)
 	}
 
 	logger.Info(fmt.Sprintf("Allowed hosts: %s", strings.Join(allowedHosts, ", ")))
@@ -381,6 +437,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		router:         router,
 		api:            api,
 		port:           config.Port,
+		bind:           bind,
 		conversation:   conversation,
 		logger:         logger,
 		agentio:        config.AgentIO,
@@ -1205,11 +1262,16 @@ func (s *Server) subscribeScreen(ctx context.Context, input *struct{}, send sse.
 	}
 }
 
+// ListenAddr returns the address Start listens on, e.g. ":3284" (all
+// interfaces), "127.0.0.1:3284" or "[::1]:3284".
+func (s *Server) ListenAddr() string {
+	return net.JoinHostPort(s.bind, strconv.Itoa(s.port))
+}
+
 // Start starts the HTTP server
 func (s *Server) Start() error {
-	addr := fmt.Sprintf(":%d", s.port)
 	s.srv = &http.Server{
-		Addr:    addr,
+		Addr:    s.ListenAddr(),
 		Handler: s.router,
 	}
 

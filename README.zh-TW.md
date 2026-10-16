@@ -346,9 +346,24 @@ agentapi server --api-token=my-secret -- claude    # use a specific token
 對應的環境變數是 `AGENTAPI_API_TOKEN`。設定之後，用戶端每次呼叫 API 都必須帶上
 `Authorization: Bearer <token>`。沒有設定 `--api-token` 時，驗證功能為停用（向下相容）。
 
+#### 監聽位址
+
+伺服器預設監聽所有網路介面。用 `--bind`（或 `AGENTAPI_BIND`）可以只監聽一個位址，
+例如只監聽 loopback，讓網路上的其他機器無法連線。它接受不含連接埠的 IP 位址或主機
+名稱；連接埠仍由 `--port` 指定。
+
+```bash
+agentapi server --bind 127.0.0.1 -- claude
+agentapi server --bind ::1 -- claude          # IPv6 loopback
+AGENTAPI_BIND=127.0.0.1 agentapi server -- claude
+```
+
+`--bind` 決定誰能連線；下方的 `--allowed-hosts` 決定連得上的請求可以使用哪些
+`Host` 標頭。
+
 #### 允許的主機
 
-伺服器預設只接受 host 標頭為 `localhost` 的請求。如果想在其他地方架設 AgentAPI，可以透過 `AGENTAPI_ALLOWED_HOSTS` 環境變數或 `--allowed-hosts` 旗標修改。主機只能填主機名稱（不含連接埠）；伺服器在授權時會忽略傳入請求中的連接埠部分。
+伺服器預設只接受 host 標頭為 `localhost` 的請求。如果想在其他地方架設 AgentAPI，可以透過 `AGENTAPI_ALLOWED_HOSTS` 環境變數或 `--allowed-hosts` 旗標修改。主機只能填主機名稱（不含連接埠）；伺服器在授權時會忽略傳入請求中的連接埠部分。這只檢查 `Host` 標頭；若要讓伺服器完全不對網路開放，請再用 `--bind 127.0.0.1` 只監聽 loopback（見[監聽位址](#監聽位址)）。
 
 要允許來自任何主機的請求，請用 `*` 作為允許的主機。
 
