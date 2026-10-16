@@ -86,3 +86,11 @@ func TestTokenAuthMiddleware(t *testing.T) {
 		}
 	})
 }
+
+func TestSecretEqual(t *testing.T) {
+	t.Parallel()
+	assert.True(t, secretEqual("abc", "abc"))
+	assert.False(t, secretEqual("abc", "abd"))
+	assert.False(t, secretEqual("ab", "abc"))
+	assert.False(t, secretEqual("", "abc"))
+}

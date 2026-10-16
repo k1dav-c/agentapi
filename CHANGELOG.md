@@ -35,6 +35,7 @@
 - The sub-agents (Agents) panel, together with the `GET /agents` endpoint and the `agents_update` SSE event
 
 ### Fixes
+- API tokens are compared in constant time, so response timing no longer hints at how much of a guessed token was right
 - Claude Code: a message that ends with an attachment (`@"<path>"`) is sent. Claude Code opened its file suggestions for the trailing mention and the Enter picked a suggestion instead, so the message stayed in its input box
 - Chat: the live screen of a running task is redrawn at most once a second and never shrinks, from the first screen on. Claude Code blinks the bullet of a running tool, which the server can't tell from ordinary text. Measured on the same task, the running task now changes on screen about 1.6–2 times a second (its clock included) instead of 3.7–6.8 for Claude Code, Codex and Pi
 - Claude Code: its spinner before the timer shows (`· Contemplating…`) and the elapsed time on a running tool (`· 2s`, `(3s)`) are left out of messages too

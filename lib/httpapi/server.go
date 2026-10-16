@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -547,13 +548,21 @@ func tokenAuthMiddleware(token string) func(next http.Handler) http.Handler {
 
 			auth := r.Header.Get("Authorization")
 			const prefix = "Bearer "
-			if !strings.HasPrefix(auth, prefix) || strings.TrimPrefix(auth, prefix) != token {
+			if !strings.HasPrefix(auth, prefix) || !secretEqual(strings.TrimPrefix(auth, prefix), token) {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// secretEqual compares two secrets in constant time. Both sides are hashed
+// first so the comparison doesn't leak the expected length either.
+func secretEqual(given, expected string) bool {
+	g := sha256.Sum256([]byte(given))
+	e := sha256.Sum256([]byte(expected))
+	return subtle.ConstantTimeCompare(g[:], e[:]) == 1
 }
 
 // responseWriter wraps http.ResponseWriter to capture the status code.
