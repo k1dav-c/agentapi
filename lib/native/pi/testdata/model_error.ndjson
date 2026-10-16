@@ -1,0 +1,38 @@
+{"dir":"meta","pi_version":"1.0.2","scenario":"model_error","argv":["pi","--mode","rpc","--model","openai-codex/gpt-5.3-codex-spark","--thinking","medium","--session-dir","/tmp/agentapi-native/pi/sessions","--session-id","agentapi-fixture-simple","--name","simple fixture"],"cwd":"/tmp/agentapi-native/pi/scratch","notes":"Captured by the original simple_text run: gpt-5.3-codex-spark is rejected for a ChatGPT-account Codex login, so the provider error arrives as an assistant message with stopReason \"error\" (no message_update, no auto_retry). Also includes post-turn queries, unknown command and malformed JSON."}
+{"dir":"in","t":2462,"msg":{"id":"s1","type":"get_state"}}
+{"dir":"out","t":2464,"msg":{"id":"s1","type":"response","command":"get_state","success":true,"data":{"model":{"id":"gpt-5.3-codex-spark","name":"GPT-5.3 Codex Spark","api":"openai-codex-responses","provider":"openai-codex","baseUrl":"https://chatgpt.com/backend-api","reasoning":true,"input":["text"],"cost":{"input":1.75,"output":14,"cacheRead":0.175,"cacheWrite":0},"contextWindow":128000,"maxTokens":128000,"thinkingLevelMap":{"xhigh":"xhigh","minimal":"low"},"compat":{"supportsOpenAIGrammarTools":true},"type":"chat"},"thinkingLevel":"medium","isStreaming":false,"isCompacting":false,"steeringMode":"one-at-a-time","followUpMode":"one-at-a-time","sessionFile":"/tmp/agentapi-native/pi/sessions/2026-10-16T07-52-57-132Z_agentapi-fixture-simple.jsonl","sessionId":"agentapi-fixture-simple","sessionName":"simple fixture","autoCompactionEnabled":true,"messageCount":0,"pendingMessageCount":0}}}
+{"dir":"in","t":2465,"msg":{"id":"s2","type":"get_available_thinking_levels"}}
+{"dir":"out","t":2465,"msg":{"id":"s2","type":"response","command":"get_available_thinking_levels","success":true,"data":{"elided":true}}}
+{"dir":"in","t":2466,"msg":{"id":"s3","type":"get_commands"}}
+{"dir":"out","t":2466,"msg":{"id":"s3","type":"response","command":"get_commands","success":true,"data":{"elided":true}}}
+{"dir":"in","t":2467,"msg":{"id":"p1","type":"prompt","message":"Think step by step about what 17*23 is, then reply with just the number."}}
+{"dir":"out","t":2472,"msg":{"id":"p1","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}}
+{"dir":"out","t":2472,"msg":{"type":"agent_start"}}
+{"dir":"out","t":2473,"msg":{"type":"turn_start"}}
+{"dir":"out","t":2473,"msg":{"type":"message_start","message":{"role":"system","content":"","sections":{"preamble":"<elided>"},"timestamp":1792137178738,"toolsAdded":[]}}}
+{"dir":"out","t":2473,"msg":{"type":"message_end","message":{"role":"system","content":"","sections":{"preamble":"<elided>"},"timestamp":1792137178738,"toolsAdded":[]}}}
+{"dir":"out","t":2474,"msg":{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"Think step by step about what 17*23 is, then reply with just the number."}],"timestamp":1792137178736}}}
+{"dir":"out","t":2474,"msg":{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"Think step by step about what 17*23 is, then reply with just the number."}],"timestamp":1792137178736}}}
+{"dir":"out","t":5016,"msg":{"type":"message_start","message":{"role":"assistant","content":[],"api":"openai-codex-responses","provider":"openai-codex","model":"gpt-5.3-codex-spark","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","timestamp":1792137178762,"errorMessage":"Codex error: The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.","thinkingLevel":"medium"}}}
+{"dir":"out","t":5016,"msg":{"type":"message_end","message":{"role":"assistant","content":[],"api":"openai-codex-responses","provider":"openai-codex","model":"gpt-5.3-codex-spark","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","timestamp":1792137178762,"errorMessage":"Codex error: The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.","thinkingLevel":"medium"}}}
+{"dir":"out","t":5017,"msg":{"type":"turn_end","message":{"role":"assistant","content":[],"api":"openai-codex-responses","provider":"openai-codex","model":"gpt-5.3-codex-spark","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","timestamp":1792137178762,"errorMessage":"Codex error: The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.","thinkingLevel":"medium"},"toolResults":[]}}
+{"dir":"out","t":5019,"msg":{"type":"agent_end","messages":[],"willRetry":false}}
+{"dir":"out","t":5023,"msg":{"type":"agent_settled"}}
+{"dir":"in","t":6023,"msg":{"id":"q1","type":"get_last_assistant_text"}}
+{"dir":"out","t":6024,"msg":{"id":"q1","type":"response","command":"get_last_assistant_text","success":true,"data":{}}}
+{"dir":"in","t":6024,"msg":{"id":"q2","type":"get_session_stats"}}
+{"dir":"out","t":6027,"msg":{"id":"q2","type":"response","command":"get_session_stats","success":true,"data":{"elided":true}}}
+{"dir":"in","t":6027,"msg":{"id":"q3","type":"set_session_name","name":"renamed fixture"}}
+{"dir":"out","t":6028,"msg":{"type":"session_info_changed","name":"renamed fixture"}}
+{"dir":"out","t":6028,"msg":{"id":"q3","type":"response","command":"set_session_name","success":true}}
+{"dir":"in","t":6028,"msg":{"id":"q4","type":"get_state"}}
+{"dir":"out","t":6028,"msg":{"id":"q4","type":"response","command":"get_state","success":true,"data":{"model":{"id":"gpt-5.3-codex-spark","name":"GPT-5.3 Codex Spark","api":"openai-codex-responses","provider":"openai-codex","baseUrl":"https://chatgpt.com/backend-api","reasoning":true,"input":["text"],"cost":{"input":1.75,"output":14,"cacheRead":0.175,"cacheWrite":0},"contextWindow":128000,"maxTokens":128000,"thinkingLevelMap":{"xhigh":"xhigh","minimal":"low"},"compat":{"supportsOpenAIGrammarTools":true},"type":"chat"},"thinkingLevel":"medium","isStreaming":false,"isCompacting":false,"steeringMode":"one-at-a-time","followUpMode":"one-at-a-time","sessionFile":"/tmp/agentapi-native/pi/sessions/2026-10-16T07-52-57-132Z_agentapi-fixture-simple.jsonl","sessionId":"agentapi-fixture-simple","sessionName":"renamed fixture","autoCompactionEnabled":true,"messageCount":3,"pendingMessageCount":0}}}
+{"dir":"in","t":6029,"msg":{"id":"q5","type":"get_messages"}}
+{"dir":"out","t":6029,"msg":{"id":"q5","type":"response","command":"get_messages","success":true,"data":{"elided":true}}}
+{"dir":"in","t":6030,"msg":{"id":"q6","type":"get_entries"}}
+{"dir":"out","t":6030,"msg":{"id":"q6","type":"response","command":"get_entries","success":true,"data":{"elided":true}}}
+{"dir":"in","t":6031,"msg":{"id":"bad1","type":"no_such_command"}}
+{"dir":"out","t":6032,"msg":{"id":"bad1","type":"response","command":"no_such_command","success":false,"error":"Unknown command: no_such_command"}}
+{"dir":"in","t":7032,"raw":"{not json"}
+{"dir":"out","t":7033,"msg":{"type":"response","command":"parse","success":false,"error":"Failed to parse command: Expected property name or '}' in JSON at position 1 (line 1 column 2)"}}
+{"dir":"meta","event":"exit","how":"stdin","t_close":8032,"t_exit":8248,"exit_code":0}

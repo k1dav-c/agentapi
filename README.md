@@ -365,6 +365,56 @@ share a directory. If you pass `--session`, `--continue`, `--resume` or
 `--session-id` yourself, AgentAPI leaves the session to you; with
 `--continue`/`--resume` the chat falls back to the terminal output.
 
+### Native transport for Pi
+
+With `--transport native`, AgentAPI drives Pi through its RPC mode
+(`pi --mode rpc`, JSON over stdin and stdout) instead of its terminal UI:
+
+```bash
+agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6-luna --thinking low
+```
+
+- **Flags.** AgentAPI adds `--mode rpc --session-id <id>` (a new
+  `agentapi-<hex>` ID on every start and restart). It refuses options that pick
+  the mode or the session or make Pi exit (`--mode`, `--print`/`-p`,
+  `--session`, `--session-id`, `--continue`/`-c`, `--resume`/`-r`, `--fork`,
+  `--no-session`, `--export`, `--list-models`, `--help`, `--version`), `@file`
+  arguments, messages after `--` and subcommands such as `pi install`, with an
+  error that names the option. It drops the TUI-only `--tui-mode` and
+  `--use-theme`. Everything else is passed on (`--provider`, `--model`,
+  `--thinking`, `--session-dir`, `-e`, `--approve`, extension flags);
+  `--flag=value` is split for Pi's built-in options, which Pi only reads in the
+  two-token form. Set the thinking level with `--thinking`.
+- **Capabilities.** Steer (`dispatch_mode: "steer"` is sent as a prompt with
+  `streamingBehavior: "steer"`), interrupt (`POST /interrupt` sends `abort`; the
+  turn ends as interrupted, without the "This operation was aborted" error Pi
+  adds when it aborts during a tool), resume, and images (attached images go to
+  Pi as base64 `images`; reported only when the model accepts images).
+- **Messages.** Text and thinking stream into the rich messages as they arrive
+  (at most ten snapshots a second per message), bash output streams into the
+  tool result, and the final messages have the same shape as the ones parsed
+  from Pi's session log. Images in tool results (an image file Pi reads) are
+  kept.
+- **Requests.** Stock Pi has no tool approvals. Dialogs that extensions open
+  (`select`, `confirm`, `input`, `editor`) become requests: a `select` or
+  `confirm` while a tool runs is an approval of that tool call (option IDs are
+  the extension's labels), any `confirm` takes `yes`/`no`, and other dialogs
+  are questions (`choice` or `value`; option `cancel` dismisses them). A dialog
+  Pi times out is withdrawn. An extension's `notify` with level error shows as
+  an error, and its `setTitle` stands in for the session name until Pi has one;
+  Pi's own name (`--name`, renames) is the session name.
+- **Resume.** Pi's session ID is the session reference. Resuming starts Pi with
+  the same `--session-id` (keep the same directory and `--session-dir`), so Pi
+  keeps the context; earlier messages are not shown again in the chat.
+- **Shutdown.** Stopping AgentAPI (or a restart) aborts a running turn first,
+  so the session log doesn't end in a tool call without result, then closes
+  stdin, then sends SIGTERM and SIGKILL to Pi's process group if it doesn't
+  exit.
+- **Limitations.** There is no terminal, so TTY mode and Pi's TUI commands
+  (`/settings`, `/login` and the like) are unavailable; log in to Pi in a
+  terminal first. Extension slash commands work. Variables that mark a parent
+  agent session (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CODEX_THREAD_ID`,
+  `PI_CODING_AGENT`, `AI_AGENT`) are removed from Pi's environment.
 ### Native transport: Codex
 
 With `--transport native`, AgentAPI drives Codex through `codex app-server`,

@@ -302,6 +302,46 @@ AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新�
 `--session`、`--continue`、`--resume` 或 `--session-id`，AgentAPI 就會把工作階段交給你
 處理；使用 `--continue`/`--resume` 時，聊天介面會退回使用終端機輸出。
 
+### Pi 的原生傳輸
+
+使用 `--transport native` 時，AgentAPI 會透過 Pi 的 RPC 模式（`pi --mode rpc`，經由
+stdin 與 stdout 傳送 JSON）來驅動 Pi，而不是透過它的終端機介面：
+
+```bash
+agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6-luna --thinking low
+```
+
+- **旗標。** AgentAPI 會加上 `--mode rpc --session-id <id>`（每次啟動與重新啟動都會用新的
+  `agentapi-<hex>` ID）。會挑選模式或工作階段、或讓 Pi 直接結束的選項（`--mode`、
+  `--print`/`-p`、`--session`、`--session-id`、`--continue`/`-c`、`--resume`/`-r`、
+  `--fork`、`--no-session`、`--export`、`--list-models`、`--help`、`--version`）、`@file`
+  參數、`--` 之後的訊息，以及 `pi install` 這類子命令都會被拒絕，錯誤訊息會指出是哪個選項。
+  只影響 TUI 的 `--tui-mode` 與 `--use-theme` 會被丟棄。其他參數都會原樣傳下去（`--provider`、
+  `--model`、`--thinking`、`--session-dir`、`-e`、`--approve`、擴充功能的旗標）；Pi 內建選項的
+  `--flag=value` 會拆成兩個參數，因為 Pi 只認得這種寫法。思考等級請用 `--thinking` 設定。
+- **能力。** 支援插話（`dispatch_mode: "steer"` 會以帶 `streamingBehavior: "steer"` 的 prompt
+  送出）、中斷（`POST /interrupt` 會送出 `abort`；回合會以中斷結束，不會出現 Pi 在工具執行中
+  中止時多加的「This operation was aborted」錯誤）、續接工作階段，以及圖片（附加的圖片會以
+  base64 的 `images` 交給 Pi；只有模型接受圖片時才會回報這項能力）。
+- **訊息。** 文字與思考內容會在抵達時串流進 rich messages（每則訊息每秒最多十次快照），
+  bash 的輸出會串流進工具結果，最終訊息的形狀和從 Pi 工作階段紀錄檔解析出來的相同。工具結果
+  中的圖片（Pi 讀取的圖片檔）也會保留。
+- **請求。** 原版 Pi 沒有工具核准。擴充功能開啟的對話框（`select`、`confirm`、`input`、
+  `editor`）會變成請求：工具執行中出現的 `select` 或 `confirm` 是對那次工具呼叫的核准（選項 ID
+  就是擴充功能給的標籤），所有 `confirm` 都用 `yes`/`no` 回答，其他對話框則是問題（`choice` 或
+  `value`；選項 `cancel` 會關掉對話框）。Pi 逾時的對話框會被撤回。擴充功能以 error 等級發出的
+  `notify` 會顯示為錯誤，它的 `setTitle` 會在 Pi 還沒有名稱時暫代工作階段名稱；Pi 自己的名稱
+  （`--name`、重新命名）就是工作階段名稱。
+- **續接。** Pi 的工作階段 ID 就是工作階段參照。續接時會用同一個 `--session-id` 啟動 Pi
+  （請維持相同的目錄與 `--session-dir`），所以 Pi 會保留上下文；先前的訊息不會再顯示在聊天
+  介面中。
+- **關閉。** 停止 AgentAPI（或重新啟動）時會先中止正在執行的回合，這樣工作階段紀錄檔就不會
+  停在一個沒有結果的工具呼叫上，接著關閉 stdin，如果 Pi 還沒結束，再對 Pi 的行程群組送出
+  SIGTERM 與 SIGKILL。
+- **限制。** 沒有終端機，所以無法使用 TTY mode 和 Pi 的 TUI 命令（`/settings`、`/login`
+  等）；請先在終端機中登入 Pi。擴充功能的斜線命令可以使用。標示上層 agent 工作階段的環境變數
+  （`CLAUDECODE`、`CLAUDE_CODE_ENTRYPOINT`、`CODEX_THREAD_ID`、`PI_CODING_AGENT`、
+  `AI_AGENT`）會從 Pi 的環境中移除。
 ### Native transport：Codex
 
 使用 `--transport native` 時，AgentAPI 會透過 `codex app-server`（Codex 走 stdio 的
