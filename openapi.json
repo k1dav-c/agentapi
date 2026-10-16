@@ -1675,6 +1675,10 @@
             "$ref": "#/components/schemas/Capabilities",
             "description": "Optional operations the agent supports. Native transport only."
           },
+          "epoch": {
+            "description": "Identifies the current conversation state; pass it as epoch to /events?sync=1 (see session_sync).",
+            "type": "string"
+          },
           "lifecycle": {
             "$ref": "#/components/schemas/LifecycleState",
             "description": "Detailed process lifecycle state."
@@ -1720,6 +1724,7 @@
         "required": [
           "agent_type",
           "agentapi_version",
+          "epoch",
           "lifecycle",
           "run_id",
           "session_id",
@@ -2184,6 +2189,17 @@
             "name": "since",
             "schema": {
               "description": "With sync: highest seq the client has applied. With a matching epoch, the replay holds only later changes.",
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "With sync: used as since when since is not given. With sync, events carry SSE ids: the last event of the replay has the replay's seq and each later message, rich message or request update has its own, so a reconnecting EventSource resumes where it left off (pass epoch in the URL, e.g. from GET /status).",
+            "in": "header",
+            "name": "Last-Event-ID",
+            "schema": {
+              "description": "With sync: used as since when since is not given. With sync, events carry SSE ids: the last event of the replay has the replay's seq and each later message, rich message or request update has its own, so a reconnecting EventSource resumes where it left off (pass epoch in the URL, e.g. from GET /status).",
               "format": "int64",
               "minimum": 0,
               "type": "integer"

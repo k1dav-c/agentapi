@@ -30,6 +30,7 @@ import (
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/statedb"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/termexec"
 )
@@ -249,7 +250,11 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		return fmt.Errorf("ACP mode doesn't support state persistence")
 	}
 	if useNative && (saveState || loadState) {
-		return fmt.Errorf("the native transport doesn't support --%s", FlagStateFile)
+		return fmt.Errorf("the native transport doesn't support --%s; use --%s", FlagStateFile, FlagStateDB)
+	}
+	stateDBPath := viper.GetString(FlagStateDB)
+	if stateDBPath != "" && !useNative {
+		return fmt.Errorf("--%s needs --%s native (with the PTY transport the agent can't resume its session; use --%s)", FlagStateDB, FlagTransport, FlagStateFile)
 	}
 
 	bind, err := httpapi.ParseBindAddress(viper.GetString(FlagBind))
@@ -354,6 +359,23 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		agentPID = process.Pid()
 	}
 
+	var stateDB *statedb.DB
+	uploadDir := ""
+	if stateDBPath != "" && !printOpenAPI {
+		var err error
+		stateDB, err = statedb.Open(stateDBPath, logger)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := stateDB.Close(); err != nil {
+				logger.Error("Failed to close the state database", "error", err)
+			}
+		}()
+		// Messages refer to uploads by path, so keep them with the state.
+		uploadDir = stateDBPath + ".uploads"
+	}
+
 	apiToken := viper.GetString(FlagAPIToken)
 	if apiToken == "generate" {
 		var tokenBytes [32]byte
@@ -396,6 +418,8 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		APIToken:      apiToken,
 		Bind:          bind,
 		NativeFactory: adapterFactory,
+		StateDB:       stateDB,
+		UploadDir:     uploadDir,
 		Webhook: httpapi.WebhookConfig{
 			URL:             viper.GetString(FlagWebhookURL),
 			Timeout:         viper.GetDuration(FlagWebhookTimeout),
@@ -654,6 +678,7 @@ const (
 	FlagPidFile                = "pid-file"
 	FlagExperimentalACP        = "experimental-acp"
 	FlagTransport              = "transport"
+	FlagStateDB                = "state-db"
 	FlagWebhookURL             = "webhook-url"
 	FlagWebhookTimeout         = "webhook-timeout"
 	FlagWebhookMaxAttempts     = "webhook-max-attempts"
@@ -703,6 +728,7 @@ func CreateServerCmd() *cobra.Command {
 		{FlagSaveState, "", false, "Save state to state-file on shutdown (defaults to true when state-file is set)", "bool"},
 		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts", "string"},
 		{FlagExperimentalACP, "", false, "Use experimental ACP transport instead of PTY", "bool"},
+		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) and resumes the agent's session when AgentAPI restarts. Native transport only", "string"},
 		{FlagTransport, "", "pty", "How to drive the agent: pty (its terminal UI), acp (same as --experimental-acp) or native (its own structured protocol; claude, codex and pi)", "string"},
 		{FlagWebhookURL, "", "", "URL notified when the agent run status changes", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},

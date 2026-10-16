@@ -30,6 +30,7 @@ import (
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/x/acpio"
 	"github.com/coder/quartz"
 	"github.com/danielgtaylor/huma/v2"
@@ -64,6 +65,10 @@ type Server struct {
 	logger             *slog.Logger
 	conversation       st.Conversation
 	native             *native.Conversation // nil unless the transport is native
+	stateDB            *statedb.DB          // nil unless the conversation is kept
+	keepUploads        bool
+	savedQueue         []QueuedMessage // the queue as last stored in stateDB
+	savedNextQueueID   int
 	agentio            st.AgentIO
 	agentType          mf.AgentType
 	emitter            *EventEmitter
@@ -175,6 +180,12 @@ type ServerConfig struct {
 	NativeFactory native.Factory
 	// NativeResumeRef resumes an earlier native session.
 	NativeResumeRef string
+	// StateDB, if set, stores the conversation and restores it on start
+	// (native transport only).
+	StateDB *statedb.DB
+	// UploadDir is where uploads and tool result images are kept. Empty
+	// means a temporary directory that is removed on stop.
+	UploadDir string
 	// APIToken, if non-empty, enables token authentication on all API
 	// endpoints: a Bearer header, or the session cookie POST /auth/session
 	// sets for browsers. Static file routes (/chat/*, /) and /auth/session
@@ -397,6 +408,19 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	if _, err := rand.Read(sessionBytes[:]); err != nil {
 		return nil, fmt.Errorf("generate session ID: %w", err)
 	}
+	var restored statedb.Snapshot
+	if config.StateDB != nil {
+		if config.Transport != TransportNative {
+			return nil, fmt.Errorf("a state database needs the native transport")
+		}
+		restored, err = config.StateDB.Load()
+		if err != nil {
+			return nil, fmt.Errorf("load state database: %w", err)
+		}
+		if err := checkRestoredIdentity(restored, config); err != nil {
+			return nil, err
+		}
+	}
 	emitterOptions := []EventEmitterOption{
 		WithAgentType(config.AgentType),
 		WithTransport(config.Transport),
@@ -405,7 +429,28 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		WithClock(config.Clock),
 		WithStatusChangeHandler(webhook.statusChanged),
 	}
+	if config.StateDB != nil {
+		emitterOptions = append(emitterOptions, WithPersister(config.StateDB))
+	}
 	emitter := NewEventEmitter(emitterOptions...)
+	resumeRef := config.NativeResumeRef
+	var restoredMessages []st.ConversationMessage
+	if config.StateDB != nil {
+		if restored.Empty() {
+			config.StateDB.SetMeta(statedb.MetaAgentType, string(config.AgentType))
+			config.StateDB.SetMeta(statedb.MetaTransport, string(config.Transport))
+			config.StateDB.SetMeta(statedb.MetaCWD, config.CWD)
+			config.StateDB.SetSeq(emitter.Epoch(), 0)
+		} else {
+			state := emitterStateFromSnapshot(restored)
+			emitter.Restore(state)
+			restoredMessages = state.Messages
+			if resumeRef == "" {
+				resumeRef = restored.Meta[statedb.MetaSessionRef]
+			}
+			logger.Info("Restored conversation from the state database", "messages", len(state.Messages), "resume", resumeRef != "")
+		}
+	}
 
 	// Format initial prompt into message parts if provided
 	var initialPrompt []st.MessagePart
@@ -416,18 +461,22 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	var conversation st.Conversation
 	var nativeConversation *native.Conversation
 	observer := &nativeObserver{emitter: emitter}
+	if config.StateDB != nil {
+		observer.persister = config.StateDB
+	}
 	if config.Transport == TransportNative {
 		if config.NativeFactory == nil {
 			return nil, fmt.Errorf("native transport requires an adapter factory")
 		}
 		nativeConversation = native.NewConversation(native.Config{
-			Factory:       config.NativeFactory,
-			ResumeRef:     config.NativeResumeRef,
-			InitialPrompt: config.InitialPrompt,
-			Emitter:       emitter,
-			Observer:      observer,
-			Logger:        logger,
-			Clock:         config.Clock,
+			Factory:         config.NativeFactory,
+			ResumeRef:       resumeRef,
+			InitialMessages: restoredMessages,
+			InitialPrompt:   config.InitialPrompt,
+			Emitter:         emitter,
+			Observer:        observer,
+			Logger:          logger,
+			Clock:           config.Clock,
 		})
 		conversation = nativeConversation
 	} else if config.Transport == TransportACP {
@@ -454,12 +503,20 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		}, emitter)
 	}
 
-	// Create temporary directory for uploads
-	tempDir, err := os.MkdirTemp("", "agentapi-uploads-")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
+	// Create the directory for uploads: a temporary one unless the
+	// conversation is kept, whose messages refer to uploads by path.
+	tempDir := config.UploadDir
+	if tempDir != "" {
+		if err := os.MkdirAll(tempDir, 0o700); err != nil {
+			return nil, fmt.Errorf("failed to create upload directory: %w", err)
+		}
+	} else {
+		tempDir, err = os.MkdirTemp("", "agentapi-uploads-")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temporary directory: %w", err)
+		}
 	}
-	logger.Info("Created temporary directory for uploads", "tempDir", tempDir)
+	logger.Info("Using upload directory", "tempDir", tempDir)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	webhook.start(shutdownCtx)
@@ -486,6 +543,21 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		webhook:        webhook,
 		restartAgent:   config.RestartAgent,
 		jsonlParentCtx: ctx,
+		stateDB:        config.StateDB,
+		keepUploads:    config.UploadDir != "",
+	}
+	if config.StateDB != nil && !restored.Empty() {
+		s.restoreQueue(restored)
+		// The agent that asked is gone; its requests can't be answered.
+		now := config.Clock.Now()
+		for _, r := range emitter.Requests() {
+			if r.Status == native.RequestStatusPending {
+				r.Status = native.RequestStatusExpired
+				r.Capability = native.ResponseNotResumable
+				r.ClosedAt = &now
+				emitter.EmitRequest(r)
+			}
+		}
 	}
 	if mcpconfig.SupportedAgent(config.AgentType) {
 		store, err := mcpconfig.NewStore(config.AgentType, config.CWD)
@@ -879,6 +951,7 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 	resp.Body.SessionName = snapshot.SessionName
 	resp.Body.PendingRequests = snapshot.PendingRequests
 	resp.Body.Capabilities = snapshot.Capabilities
+	resp.Body.Epoch = s.emitter.Epoch()
 
 	return resp, nil
 }
@@ -1116,6 +1189,7 @@ func (s *Server) startMessageQueue() {
 	s.clock.TickerFunc(s.shutdownCtx, messageQueueDispatchInterval, func() error {
 		s.dismissCodexUpdatePrompt()
 		s.dispatchNextQueuedMessage()
+		s.persistQueue()
 		return nil
 	}, "messageQueueDispatch")
 }
@@ -1218,6 +1292,19 @@ func (s *Server) uploadFiles(ctx context.Context, input *struct {
 	return resp, nil
 }
 
+// eventSeq is the seq of a change event, 0 for other events.
+func eventSeq(event Event) uint64 {
+	switch body := event.Payload.(type) {
+	case MessageUpdateBody:
+		return body.Seq
+	case RichMessageUpdateBody:
+		return body.Seq
+	case RequestUpdateBody:
+		return body.Seq
+	}
+	return 0
+}
+
 // subscribeEvents is an SSE endpoint that sends events to the client
 // SubscribeEventsInput lets a client that cached the conversation resume
 // from where it left off.
@@ -1225,6 +1312,8 @@ type SubscribeEventsInput struct {
 	Sync  bool   `query:"sync" doc:"Opt in to session_sync events and incremental replay. Clients that don't opt in get the full replay and no session_sync events, as before."`
 	Since uint64 `query:"since" doc:"With sync: highest seq the client has applied. With a matching epoch, the replay holds only later changes."`
 	Epoch string `query:"epoch" doc:"With sync: epoch from the client's last session_sync. If it doesn't match, the full state is replayed."`
+	// LastEventID is sent by EventSource when it reconnects by itself.
+	LastEventID uint64 `header:"Last-Event-ID" doc:"With sync: used as since when since is not given. With sync, events carry SSE ids: the last event of the replay has the replay's seq and each later message, rich message or request update has its own, so a reconnecting EventSource resumes where it left off (pass epoch in the URL, e.g. from GET /status)."`
 }
 
 func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInput, send sse.Sender) {
@@ -1232,6 +1321,9 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 	// event types they don't know.
 	sync := input.Sync
 	since, epoch := input.Since, input.Epoch
+	if since == 0 {
+		since = input.LastEventID
+	}
 	if !sync {
 		since, epoch = 0, ""
 	}
@@ -1239,11 +1331,25 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 	defer s.emitter.Unsubscribe(subscriberId)
 
 	s.logger.Info("New subscriber", "subscriberId", subscriberId)
+	replay := make([]Event, 0, len(stateEvents))
+	var replaySeq uint64
 	for _, event := range stateEvents {
+		if body, ok := event.Payload.(SessionSyncBody); ok {
+			replaySeq = body.Seq
+		}
 		if event.Type == EventTypeScreenUpdate || (event.Type == EventTypeSessionSync && !sync) {
 			continue
 		}
-		if err := send.Data(event.Payload); err != nil {
+		replay = append(replay, event)
+	}
+	for i, event := range replay {
+		msg := sse.Message{Data: event.Payload}
+		// Replayed changes are not in seq order, so only the end of the
+		// replay says how far the client is.
+		if sync && i == len(replay)-1 {
+			msg.ID = int(replaySeq)
+		}
+		if err := send(msg); err != nil {
 			s.logger.Error("Failed to send event", "subscriberId", subscriberId, "error", err)
 			return
 		}
@@ -1262,7 +1368,11 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 			if event.Type == EventTypeScreenUpdate || (event.Type == EventTypeSessionSync && !sync) {
 				continue
 			}
-			if err := send.Data(event.Payload); err != nil {
+			msg := sse.Message{Data: event.Payload}
+			if sync {
+				msg.ID = int(eventSeq(event))
+			}
+			if err := send(msg); err != nil {
 				s.logger.Error("Failed to send event", "subscriberId", subscriberId, "error", err)
 				return
 			}
@@ -1338,6 +1448,7 @@ func (s *Server) Start() error {
 func (s *Server) Stop(ctx context.Context) error {
 	var err error
 	s.stopOnce.Do(func() {
+		s.persistQueue()
 		s.shutdown()
 		if s.native != nil {
 			if closeErr := s.native.Close(); closeErr != nil {
@@ -1359,6 +1470,9 @@ func (s *Server) Stop(ctx context.Context) error {
 
 // cleanupTempDir removes the temporary directory and all its contents
 func (s *Server) cleanupTempDir() {
+	if s.keepUploads {
+		return
+	}
 	if err := os.RemoveAll(s.tempDir); err != nil {
 		s.logger.Error("Failed to clean up temporary directory", "tempDir", s.tempDir, "error", err)
 	} else {

@@ -82,8 +82,11 @@ type Config struct {
 	// Factory creates the adapter, again on every restart.
 	Factory Factory
 	// ResumeRef resumes an earlier session on the first start.
-	ResumeRef     string
-	InitialPrompt string
+	ResumeRef string
+	// InitialMessages continues an earlier conversation (restored after
+	// AgentAPI restarted). The initial prompt is not sent again.
+	InitialMessages []st.ConversationMessage
+	InitialPrompt   string
 	Emitter       st.Emitter
 	Observer      Observer
 	Logger        *slog.Logger
@@ -153,7 +156,7 @@ func NewConversation(cfg Config) *Conversation {
 	if cfg.StartTimeout == 0 {
 		cfg.StartTimeout = 2 * time.Minute
 	}
-	return &Conversation{
+	c := &Conversation{
 		cfg:        cfg,
 		agentIdx:   -1,
 		owner:      make(map[string]int),
@@ -162,7 +165,13 @@ func NewConversation(cfg Config) *Conversation {
 		responding: make(map[string]bool),
 		sessionRef: cfg.ResumeRef,
 		exited:     make(chan error, 1),
+		messages:   slices.Clone(cfg.InitialMessages),
+		promptSent: len(cfg.InitialMessages) > 0,
 	}
+	for _, m := range c.messages {
+		c.nextID = max(c.nextID, m.Id+1)
+	}
+	return c
 }
 
 // Start launches the agent in the background. Status reports initializing

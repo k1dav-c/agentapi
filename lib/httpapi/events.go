@@ -17,6 +17,7 @@ import (
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/lib/util"
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -185,6 +186,39 @@ type EventEmitter struct {
 	errors         []ErrorBody
 	clock          quartz.Clock
 	onStatusChange func(previous, current AgentStatus)
+	// persister, if set, stores every change of the conversation state.
+	persister Persister
+}
+
+// Persister stores conversation state changes so they survive a restart.
+// The emitter calls it with its lock held, so its methods must not block
+// (statedb.DB queues the writes).
+type Persister interface {
+	PutMessage(msg st.ConversationMessage, seq uint64)
+	// TruncateMessages removes the messages with an ID of at least fromID.
+	TruncateMessages(fromID int)
+	PutRichMessage(pos int, msg jsonlwatcher.RichMessage, seq uint64)
+	AppendSessionEvents(events []jsonlwatcher.SessionEvent)
+	PutRequest(state native.RequestState, seq uint64)
+	DeleteRequest(id string)
+	SetSeq(epoch string, seq uint64)
+	SetMeta(key, value string)
+	// Reset removes the conversation; epoch is the new epoch.
+	Reset(epoch string)
+}
+
+// EmitterState is conversation state restored from a Persister.
+type EmitterState struct {
+	Epoch         string
+	Seq           uint64
+	Messages      []st.ConversationMessage
+	MessageSeqs   []uint64
+	RichMessages  []jsonlwatcher.RichMessage
+	RichSeqs      []uint64
+	SessionEvents []jsonlwatcher.SessionEvent
+	Requests      []native.RequestState
+	RequestSeqs   []uint64
+	SessionName   string
 }
 
 func convertStatus(status st.ConversationStatus) AgentStatus {
@@ -242,6 +276,41 @@ func WithClock(clock quartz.Clock) EventEmitterOption {
 	return func(e *EventEmitter) {
 		e.clock = clock
 	}
+}
+
+// WithPersister stores every change of the conversation state with p.
+func WithPersister(p Persister) EventEmitterOption {
+	return func(e *EventEmitter) { e.persister = p }
+}
+
+// Restore replaces the conversation state with state, without storing it
+// again. Call it before anyone subscribes.
+func (e *EventEmitter) Restore(state EmitterState) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if state.Epoch != "" {
+		e.epoch = state.Epoch
+	}
+	e.seq = state.Seq
+	e.messages = slices.Clone(state.Messages)
+	e.messageSeq = slices.Clone(state.MessageSeqs)
+	e.richMessages = slices.Clone(state.RichMessages)
+	e.richSeq = slices.Clone(state.RichSeqs)
+	e.sessionEvents = slices.Clone(state.SessionEvents)
+	e.nextSessionEventID = 1
+	for _, ev := range e.sessionEvents {
+		e.nextSessionEventID = max(e.nextSessionEventID, ev.EventID+1)
+	}
+	e.requests = slices.Clone(state.Requests)
+	e.requestSeq = slices.Clone(state.RequestSeqs)
+	e.sessionName = state.SessionName
+}
+
+// Epoch identifies the current conversation state; see SessionSyncBody.
+func (e *EventEmitter) Epoch() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.epoch
 }
 
 func WithStatusChangeHandler(handler func(previous, current AgentStatus)) EventEmitterOption {
@@ -323,6 +392,9 @@ func (e *EventEmitter) EmitMessages(newMessages []st.ConversationMessage) {
 			}
 			e.seq++
 			seqs[i] = e.seq
+			if e.persister != nil {
+				e.persister.PutMessage(newMessages[i], e.seq)
+			}
 			e.notifyChannels(EventTypeMessageUpdate, MessageUpdateBody{
 				Id:      newMessages[i].Id,
 				Role:    newMessages[i].Role,
@@ -333,6 +405,12 @@ func (e *EventEmitter) EmitMessages(newMessages []st.ConversationMessage) {
 		}
 	}
 
+	if e.persister != nil {
+		if len(newMessages) < len(e.messages) {
+			e.persister.TruncateMessages(e.messages[len(newMessages)].Id)
+		}
+		e.persister.SetSeq(e.epoch, e.seq)
+	}
 	e.messages = newMessages
 	e.messageSeq = seqs
 }
@@ -384,6 +462,9 @@ func (e *EventEmitter) SetSessionName(name string) {
 		return
 	}
 	e.sessionName = name
+	if e.persister != nil {
+		e.persister.SetMeta(statedb.MetaSessionName, name)
+	}
 	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
 }
 
@@ -435,6 +516,10 @@ func (e *EventEmitter) EmitRequest(state native.RequestState) {
 	}
 	e.seq++
 	e.requestSeq[idx] = e.seq
+	if e.persister != nil {
+		e.persister.PutRequest(state, e.seq)
+		e.persister.SetSeq(e.epoch, e.seq)
+	}
 	e.trimRequestsLocked()
 	e.handoffRevision++
 	e.notifyChannels(EventTypeRequestUpdate, RequestUpdateBody{RequestState: state, Seq: e.seq})
@@ -459,6 +544,9 @@ func (e *EventEmitter) trimRequestsLocked() {
 		if e.requests[i].Status == native.RequestStatusPending {
 			i++
 			continue
+		}
+		if e.persister != nil {
+			e.persister.DeleteRequest(e.requests[i].ID)
 		}
 		e.requests = slices.Delete(e.requests, i, i+1)
 		e.requestSeq = slices.Delete(e.requestSeq, i, i+1)
@@ -600,6 +688,10 @@ func (e *EventEmitter) emitRichMessage(msg jsonlwatcher.RichMessage, replace boo
 	}
 	e.seq++
 	e.richSeq[idx] = e.seq
+	if e.persister != nil {
+		e.persister.PutRichMessage(idx, msg, e.seq)
+		e.persister.SetSeq(e.epoch, e.seq)
+	}
 	// Always broadcast the merged snapshot. Broadcasting the incoming Claude
 	// delta would make clients replace a complete message with its last block.
 	e.notifyChannels(EventTypeRichMessageUpdate, RichMessageUpdateBody{RichMessage: msg, Seq: e.seq})
@@ -649,6 +741,9 @@ func (e *EventEmitter) EmitSessionEvents(events []jsonlwatcher.SessionEvent) {
 		e.nextSessionEventID++
 		e.sessionEvents = append(e.sessionEvents, event)
 	}
+	if e.persister != nil && len(events) > 0 {
+		e.persister.AppendSessionEvents(e.sessionEvents[len(e.sessionEvents)-len(events):])
+	}
 }
 
 func (e *EventEmitter) SessionEvents() []jsonlwatcher.SessionEvent {
@@ -672,6 +767,9 @@ func (e *EventEmitter) Reset() {
 	// A new epoch makes reconnecting clients drop their cache; connected
 	// clients are told now so they clear the old conversation.
 	e.epoch = newEpoch()
+	if e.persister != nil {
+		e.persister.Reset(e.epoch)
+	}
 	e.notifyChannels(EventTypeSessionSync, SessionSyncBody{Epoch: e.epoch, Full: true})
 	e.sessionEvents = nil
 	e.nextSessionEventID = 1

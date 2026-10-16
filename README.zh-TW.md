@@ -83,6 +83,29 @@ agent 狀態和連線狀態。
   用 `&since=<seq>&epoch=<epoch>` 重新連線時，只會重播有變動的部分；
 - `GET /title`：取得目前工作階段的可讀標題。
 
+加上 `?sync=1` 時，事件也會帶有 SSE id（重播的最後一個事件是重播的 `seq`，之後的變更
+各自帶自己的 `seq`），所以一般的 `EventSource` 自動重新連線時，會從它的 `Last-Event-ID`
+接續；請把 `GET /status` 回傳的 `epoch` 放進網址。
+
+### 持久保存的 native 工作階段
+
+使用 native transport 時，`--state-db <檔案>` 會把對話保存在一個 SQLite 檔案裡：訊息、
+結構化訊息（工具呼叫、思考）、時間軸、請求和佇列，以及 agent 自己的工作階段 ID。
+AgentAPI 用同一個檔案再次啟動時，聊天介面會顯示原本的對話，排隊中的訊息仍在佇列裡，
+agent 也會接續它的工作階段，所以它也記得先前的對話。因為對話的 epoch 不變，瀏覽器的
+快取也仍然有效。
+
+```bash
+agentapi server --transport native --state-db ~/.agentapi/myproject.db -- claude
+```
+
+- AgentAPI 停止時尚未回覆的請求會標示為已過期：提出請求的 agent 已經不在了。
+- 上傳的檔案會保存在資料庫旁（`<檔案>.uploads`），因為訊息是用路徑引用它們。
+- 一個檔案只屬於一種 agent 類型、transport 和工作目錄；用到別人的檔案時，AgentAPI 會拒絕啟動。
+- 重新啟動（Explorer → Restart、`DELETE /messages`）會清除保存的對話，並開始新的工作階段。
+- `--state-db` 需要 `--transport native`。使用 PTY transport 時 agent 無法接續工作階段；
+  `--state-file` 仍會在那裡保存從畫面解析出的訊息。
+
 ### Claude、Codex 與 Pi 的結構化活動
 
 除了解析終端機快照之外，這個 fork 也能監看 Claude、Codex 和 Pi 的工作階段紀錄檔。

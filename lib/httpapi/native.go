@@ -14,6 +14,7 @@ import (
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/statedb"
 )
 
 // nativeCallTimeout bounds a call into a native adapter made while the
@@ -24,6 +25,8 @@ const nativeCallTimeout = 30 * time.Second
 // event emitter.
 type nativeObserver struct {
 	emitter *EventEmitter
+	// persister stores the session ref, if state is persisted.
+	persister Persister
 	// storeImages saves tool result images and replaces their data with
 	// URLs. Set once the server exists.
 	storeImages func(*jsonlwatcher.RichMessage)
@@ -47,8 +50,12 @@ func (o *nativeObserver) SessionEvents(events []jsonlwatcher.SessionEvent) {
 func (o *nativeObserver) SessionName(name string) { o.emitter.SetSessionName(name) }
 
 // SessionRef is not published; the session ID shown to clients is
-// AgentAPI's own.
-func (o *nativeObserver) SessionRef(string) {}
+// AgentAPI's own. It is stored to resume the session after a restart.
+func (o *nativeObserver) SessionRef(ref string) {
+	if o.persister != nil {
+		o.persister.SetMeta(statedb.MetaSessionRef, ref)
+	}
+}
 
 func (o *nativeObserver) RequestUpdated(state native.RequestState) { o.emitter.EmitRequest(state) }
 

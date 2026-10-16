@@ -106,6 +106,37 @@ Relevant APIs include:
   replays only what changed;
 - `GET /title` for the current human-readable session title.
 
+With `?sync=1`, events also carry SSE ids (the end of the replay has the
+replay's `seq`, later changes their own), so a plain `EventSource` that
+reconnects by itself resumes from its `Last-Event-ID`; put the `epoch` from
+`GET /status` in the URL.
+
+### Persistent native sessions
+
+With the native transport, `--state-db <file>` keeps the conversation in a
+SQLite file: messages, rich messages (tool calls, thinking), the timeline,
+requests and the queue, plus the agent's own session ID. When AgentAPI starts
+again with the same file, the chat shows the conversation as it was, queued
+messages are still queued, and the agent resumes its session, so it remembers
+the conversation too. Browser caches stay valid, because the conversation keeps
+its epoch.
+
+```bash
+agentapi server --transport native --state-db ~/.agentapi/myproject.db -- claude
+```
+
+- Requests that were open when AgentAPI stopped are marked expired: the agent
+  that asked is gone.
+- Uploads are kept next to the file (`<file>.uploads`), because messages refer
+  to them by path.
+- A file belongs to one agent type, transport and working directory; AgentAPI
+  refuses to start with another one's file.
+- Restart (Explorer → Restart, `DELETE /messages`) clears the stored
+  conversation and starts a new session.
+- `--state-db` needs `--transport native`. With the PTY transport the agent
+  can't resume its session; `--state-file` still saves the screen-derived
+  messages there.
+
 ### Structured Claude, Codex and Pi activity
 
 In addition to parsing terminal snapshots, this fork can watch Claude, Codex

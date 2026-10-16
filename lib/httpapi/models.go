@@ -94,6 +94,8 @@ type StatusResponse struct {
 		PendingRequests int `json:"pending_requests,omitempty" doc:"Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests."`
 		// See StatusChangeBody.Capabilities.
 		Capabilities *native.Capabilities `json:"capabilities,omitempty" doc:"Optional operations the agent supports. Native transport only."`
+		// Epoch lets a client resume /events without a cache.
+		Epoch string `json:"epoch" doc:"Identifies the current conversation state; pass it as epoch to /events?sync=1 (see session_sync)."`
 	}
 }
 
