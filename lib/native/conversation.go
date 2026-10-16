@@ -119,10 +119,14 @@ type Conversation struct {
 	// agentIdx is the index in messages of the agent message being built,
 	// or -1 until the agent says something after the last user message.
 	agentIdx int
-	// segment lists the rich messages whose text makes up the agent message
-	// at agentIdx, in the order they appeared; texts holds their text.
-	segment []string
-	texts   map[string]string
+	// owner maps a rich message to the agent message its text belongs to,
+	// and parts lists the rich messages of each agent message in the order
+	// they appeared; texts holds their text. A rich message keeps its agent
+	// message even if it is still updated after a later user message (a
+	// steer), so its text isn't repeated in the next agent message.
+	owner map[string]int
+	parts map[int][]string
+	texts map[string]string
 
 	requests []*RequestState
 	// responding marks requests whose answer is being delivered, so a second
@@ -152,6 +156,8 @@ func NewConversation(cfg Config) *Conversation {
 	return &Conversation{
 		cfg:        cfg,
 		agentIdx:   -1,
+		owner:      make(map[string]int),
+		parts:      make(map[int][]string),
 		texts:      make(map[string]string),
 		responding: make(map[string]bool),
 		sessionRef: cfg.ResumeRef,
@@ -623,7 +629,8 @@ func (c *Conversation) resetMessagesLocked() {
 	c.messages = nil
 	c.nextID = 0
 	c.agentIdx = -1
-	c.segment = nil
+	c.owner = make(map[string]int)
+	c.parts = make(map[int][]string)
 	c.texts = make(map[string]string)
 }
 
@@ -633,7 +640,6 @@ func (c *Conversation) appendUserMessageLocked(text string) int {
 	})
 	c.nextID++
 	c.agentIdx = -1
-	c.segment = nil
 	return len(c.messages) - 1
 }
 
@@ -647,7 +653,6 @@ func (c *Conversation) removeMessageLocked(idx int) {
 	c.messages = c.messages[:idx]
 	c.nextID--
 	c.agentIdx = -1
-	c.segment = nil
 }
 
 func (c *Conversation) findRequestLocked(id string) *RequestState {
@@ -748,7 +753,6 @@ func (s *sink) TurnCompleted(result TurnResult) {
 	}
 	c.turnActive = false
 	c.agentIdx = -1
-	c.segment = nil
 	changed := c.expireRequestsLocked(ResponseMessage)
 	for _, state := range changed {
 		c.cfg.Observer.RequestUpdated(state)
@@ -772,35 +776,33 @@ func (s *sink) RichMessage(msg jsonlwatcher.RichMessage) {
 		return
 	}
 	text := assistantText(msg)
-	if _, seen := c.texts[msg.MessageID]; !seen && text == "" {
-		// Wait for text before tying the message to the agent message, so
-		// a message made only of tool calls doesn't start one.
-		c.mu.Unlock()
-		return
+	idx, owned := c.owner[msg.MessageID]
+	if !owned {
+		if text == "" {
+			// Wait for text before tying the message to an agent message,
+			// so a message made only of tool calls doesn't start one.
+			c.mu.Unlock()
+			return
+		}
+		if c.agentIdx < 0 {
+			c.messages = append(c.messages, st.ConversationMessage{
+				Id: c.nextID, Role: st.ConversationRoleAgent, Time: c.cfg.Clock.Now(),
+			})
+			c.nextID++
+			c.agentIdx = len(c.messages) - 1
+		}
+		idx = c.agentIdx
+		c.owner[msg.MessageID] = idx
+		c.parts[idx] = append(c.parts[idx], msg.MessageID)
 	}
 	c.texts[msg.MessageID] = text
-	if !slices.Contains(c.segment, msg.MessageID) {
-		c.segment = append(c.segment, msg.MessageID)
-	}
 	var parts []string
-	for _, id := range c.segment {
+	for _, id := range c.parts[idx] {
 		if t := c.texts[id]; t != "" {
 			parts = append(parts, t)
 		}
 	}
-	joined := strings.Join(parts, "\n\n")
-	if c.agentIdx < 0 {
-		if joined == "" {
-			c.mu.Unlock()
-			return
-		}
-		c.messages = append(c.messages, st.ConversationMessage{
-			Id: c.nextID, Role: st.ConversationRoleAgent, Time: c.cfg.Clock.Now(),
-		})
-		c.nextID++
-		c.agentIdx = len(c.messages) - 1
-	}
-	c.messages[c.agentIdx].Message = joined
+	c.messages[idx].Message = strings.Join(parts, "\n\n")
 	c.cfg.Emitter.EmitMessages(slices.Clone(c.messages))
 	c.mu.Unlock()
 }

@@ -145,12 +145,15 @@ func TestSteerAndInterrupt(t *testing.T) {
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
 	a.Sink().RichMessage(text("m1", "first part"))
 	require.NoError(t, c.Steer(context.Background(), native.Input{Text: "also this"}))
+	// The first message is still streaming after the steer; it stays in
+	// the first agent message.
+	a.Sink().RichMessage(text("m1", "first part, finished"))
 	a.Sink().RichMessage(text("m2", "second part"))
 	require.NoError(t, c.Interrupt(context.Background()))
 
 	msgs := c.Messages()
 	require.Len(t, msgs, 4)
-	assert.Equal(t, "first part", msgs[1].Message)
+	assert.Equal(t, "first part, finished", msgs[1].Message)
 	assert.Equal(t, "also this", msgs[2].Message)
 	assert.Equal(t, "second part", msgs[3].Message)
 	assert.Equal(t, []native.Input{{Text: "also this"}}, a.Steers())
