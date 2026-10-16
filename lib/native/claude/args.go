@@ -80,9 +80,12 @@ type parsedArgs struct {
 	// permissionMode: the user chose a permission mode (or to skip
 	// permissions).
 	permissionMode bool
-	thinking       bool
-	thinkingOff    bool
-	thinkingShow   bool
+	// bypass: the session runs in bypassPermissions, the default when the
+	// user chooses no mode.
+	bypass       bool
+	thinking     bool
+	thinkingOff  bool
+	thinkingShow bool
 	// noPersistence: sessions are not saved, so they can't be resumed.
 	noPersistence bool
 }
@@ -94,8 +97,11 @@ func ValidateArgs(args []string) error {
 	return err
 }
 
+// modeBypass is the permission mode used when the user chooses none.
+const modeBypass = "bypassPermissions"
+
 func parseArgs(args []string) (parsedArgs, error) {
-	var p parsedArgs
+	p := parsedArgs{bypass: true}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -126,8 +132,12 @@ func parseArgs(args []string) (parsedArgs, error) {
 			}
 		}
 		switch name {
-		case "--permission-mode", "--dangerously-skip-permissions":
+		case "--permission-mode":
 			p.permissionMode = true
+			p.bypass = value == modeBypass
+		case "--dangerously-skip-permissions":
+			p.permissionMode = true
+			p.bypass = true
 		case "--thinking":
 			p.thinking = true
 			p.thinkingOff = value == "disabled"
@@ -154,9 +164,10 @@ func buildArgs(p parsedArgs, sessionID, resumeRef string) []string {
 		args = append(args, "--session-id="+sessionID)
 	}
 	if !p.permissionMode {
-		// Without an explicit mode Claude Code uses the settings' default,
-		// which managed or user settings may set to bypassPermissions.
-		args = append(args, "--permission-mode", "default")
+		// Tools run without asking unless the user picks a mode (e.g.
+		// --permission-mode default to approve them from the chat).
+		// Questions and plans still come as requests.
+		args = append(args, "--permission-mode", modeBypass)
 	}
 	if !p.thinking {
 		args = append(args, "--thinking", "adaptive")

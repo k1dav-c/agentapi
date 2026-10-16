@@ -30,6 +30,7 @@ const (
 	optionDeny        = "deny"
 	optionAcceptEdits = "acceptEdits"
 	optionDefault     = "default"
+	optionBypass      = modeBypass
 )
 
 const (
@@ -57,7 +58,9 @@ type askQuestion struct {
 }
 
 // newPendingRequest maps a can_use_tool request to a native request.
-func newPendingRequest(id string, r canUseTool) *pendingRequest {
+// newPendingRequest describes a can_use_tool request. bypass says the
+// session runs in bypassPermissions, so approving a plan can keep it.
+func newPendingRequest(id string, r canUseTool, bypass bool) *pendingRequest {
 	p := &pendingRequest{raw: r, req: native.Request{
 		ID:        id,
 		ToolName:  r.ToolName,
@@ -70,7 +73,7 @@ func newPendingRequest(id string, r canUseTool) *pendingRequest {
 			return p
 		}
 	case toolExitPlanMode:
-		p.plan()
+		p.plan(bypass)
 		return p
 	}
 	p.approval()
@@ -147,7 +150,7 @@ func (p *pendingRequest) question() bool {
 	return true
 }
 
-func (p *pendingRequest) plan() {
+func (p *pendingRequest) plan(bypass bool) {
 	var input struct {
 		Plan string `json:"plan"`
 	}
@@ -156,11 +159,15 @@ func (p *pendingRequest) plan() {
 	p.req.Title = "Approve the plan?"
 	p.req.Detail = input.Plan
 	p.req.Feedback = true
-	p.req.Options = []native.RequestOption{
+	p.req.Options = nil
+	if bypass {
+		p.req.Options = append(p.req.Options, native.RequestOption{ID: optionBypass, Label: "Yes, and don't ask again", Description: "Back to bypassing permissions, as the session started.", Kind: native.OptionKindAllow})
+	}
+	p.req.Options = append(p.req.Options, []native.RequestOption{
 		{ID: optionAcceptEdits, Label: "Yes, and auto-accept edits", Kind: native.OptionKindAllow},
 		{ID: optionDefault, Label: "Yes, and manually approve edits", Kind: native.OptionKindAllow},
 		{ID: optionDeny, Label: "No, keep planning", Description: "Claude revises the plan; say what to change.", Kind: native.OptionKindDeny},
-	}
+	}...)
 }
 
 // response builds the can_use_tool answer for resp.
@@ -210,7 +217,7 @@ func (p *pendingRequest) response(resp native.Response) (map[string]any, error) 
 		return allow(encoded, "user_temporary"), nil
 	case native.RequestKindPlan:
 		switch resp.OptionID {
-		case optionAcceptEdits, optionDefault:
+		case optionBypass, optionAcceptEdits, optionDefault:
 			out := allow(r.Input, "user_temporary")
 			out["updatedPermissions"] = []map[string]any{{"type": "setMode", "mode": resp.OptionID, "destination": "session"}}
 			return out, nil

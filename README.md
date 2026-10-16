@@ -276,12 +276,14 @@ Command line and environment:
   --verbose --include-partial-messages --replay-user-messages
   --permission-prompt-tool stdio`, and `--session-id` for a new session or
   `--resume` for a resumed one.
-- Unless you choose otherwise it adds `--permission-mode default` (managed or
-  user settings may otherwise make the default `bypassPermissions`, which
-  would skip every approval) and `--thinking adaptive --thinking-display
-  summarized` (without it thinking is empty). Your `--permission-mode`,
-  `--dangerously-skip-permissions`, `--thinking`, `--max-thinking-tokens` or
-  `--thinking-display` wins.
+- Unless you choose otherwise it adds `--permission-mode bypassPermissions`,
+  so tools run without asking; questions (AskUserQuestion) and plans
+  (ExitPlanMode) still come as requests, and approving a plan offers to keep
+  bypassing. Pass `--permission-mode default` (or `acceptEdits`, `plan`, …) to
+  approve tool calls from the chat. It also adds `--thinking adaptive
+  --thinking-display summarized` (without it thinking is empty). Your
+  `--permission-mode`, `--dangerously-skip-permissions`, `--thinking`,
+  `--max-thinking-tokens` or `--thinking-display` wins.
 - Flags that conflict with the protocol or the session AgentAPI manages are
   rejected at startup: `-p`/`--print`, `--output-format`, `--input-format`,
   `-r`/`--resume`, `-c`/`--continue`, `--session-id`, `--fork-session`,

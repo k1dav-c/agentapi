@@ -19,7 +19,7 @@ func TestArgs(t *testing.T) {
 		assert.Equal(t, []string{
 			"-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose",
 			"--include-partial-messages", "--replay-user-messages", "--permission-prompt-tool", "stdio",
-			"--session-id=sid", "--permission-mode", "default", "--thinking", "adaptive", "--thinking-display", "summarized",
+			"--session-id=sid", "--permission-mode", "bypassPermissions", "--thinking", "adaptive", "--thinking-display", "summarized",
 			"--model", "haiku", "--allowedTools", "Read", "Edit", "--mcp-config", "a.json",
 		}, args)
 	})
@@ -38,11 +38,12 @@ func TestArgs(t *testing.T) {
 			absent   []string
 			contains []string
 		}{
-			{args: []string{"--permission-mode", "acceptEdits"}, absent: []string{"default"}},
-			{args: []string{"--permission-mode=plan"}, absent: []string{"default"}},
-			{args: []string{"--dangerously-skip-permissions"}, absent: []string{"default"}},
-			// Allowing bypass as an option doesn't choose it.
-			{args: []string{"--allow-dangerously-skip-permissions"}, contains: []string{"default"}},
+			{args: []string{"--permission-mode", "acceptEdits"}, absent: []string{"bypassPermissions"}},
+			{args: []string{"--permission-mode=plan"}, absent: []string{"bypassPermissions"}},
+			{args: []string{"--permission-mode", "default"}, absent: []string{"bypassPermissions"}},
+			{args: []string{"--dangerously-skip-permissions"}, absent: []string{"--permission-mode"}},
+			// Allowing bypass as an option doesn't choose a mode.
+			{args: []string{"--allow-dangerously-skip-permissions"}, contains: []string{"bypassPermissions"}},
 			{args: []string{"--thinking", "disabled"}, absent: []string{"adaptive", "summarized"}},
 			{args: []string{"--max-thinking-tokens", "1000"}, absent: []string{"adaptive"}, contains: []string{"summarized"}},
 			{args: []string{"--thinking-display", "omitted"}, absent: []string{"summarized"}, contains: []string{"adaptive"}},
@@ -143,4 +144,23 @@ func TestEnv(t *testing.T) {
 		"CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1",
 		"CLAUDE_CODE_ENTRYPOINT=sdk-cli",
 	}, env)
+}
+
+func TestPlanOptionsFollowBypass(t *testing.T) {
+	t.Parallel()
+	ids := func(args ...string) []string {
+		p, err := parseArgs(args)
+		require.NoError(t, err)
+		req := newPendingRequest("r", canUseTool{ToolName: toolExitPlanMode, Input: []byte(`{"plan":"x"}`)}, p.bypass)
+		var out []string
+		for _, o := range req.req.Options {
+			out = append(out, o.ID)
+		}
+		return out
+	}
+	assert.Equal(t, []string{"bypassPermissions", "acceptEdits", "default", "deny"}, ids())
+	assert.Equal(t, []string{"bypassPermissions", "acceptEdits", "default", "deny"}, ids("--permission-mode=bypassPermissions"))
+	assert.Equal(t, []string{"bypassPermissions", "acceptEdits", "default", "deny"}, ids("--dangerously-skip-permissions"))
+	assert.Equal(t, []string{"acceptEdits", "default", "deny"}, ids("--permission-mode", "plan"))
+	assert.Equal(t, []string{"acceptEdits", "default", "deny"}, ids("--permission-mode", "default"))
 }

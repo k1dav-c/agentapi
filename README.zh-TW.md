@@ -219,9 +219,11 @@ Claude Code 支援 `steer`（steer 的訊息會在 Claude 的下一步加入正�
 - AgentAPI 會加上 `-p --output-format stream-json --input-format stream-json --verbose
   --include-partial-messages --replay-user-messages --permission-prompt-tool stdio`，
   新的工作階段加上 `--session-id`，恢復的工作階段加上 `--resume`。
-- 除非你另有指定，否則會加上 `--permission-mode default`（受管理或使用者的設定可能會把
-  預設值設成 `bypassPermissions`，那樣就會略過所有核准），以及 `--thinking adaptive
-  --thinking-display summarized`（少了它思考內容會是空的）。你自己的
+- 除非你另有指定，否則會加上 `--permission-mode bypassPermissions`，工具會直接執行、
+  不會詢問；提問（AskUserQuestion）和計畫（ExitPlanMode）仍然會以請求的形式出現，
+  核准計畫時也可以選擇繼續略過權限。想在聊天介面核准工具呼叫，請加上
+  `--permission-mode default`（或 `acceptEdits`、`plan` 等）。另外也會加上
+  `--thinking adaptive --thinking-display summarized`（少了它思考內容會是空的）。你自己的
   `--permission-mode`、`--dangerously-skip-permissions`、`--thinking`、
   `--max-thinking-tokens` 或 `--thinking-display` 優先。
 - 和協定或 AgentAPI 管理的工作階段衝突的參數會在啟動時被拒絕：`-p`/`--print`、

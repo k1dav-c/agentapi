@@ -687,7 +687,7 @@ func (a *Adapter) handleControlRequest(f *frame) {
 	if json.Unmarshal(f.Request, &r) != nil {
 		return
 	}
-	p := newPendingRequest(f.RequestID, r)
+	p := newPendingRequest(f.RequestID, r, a.args.bypass)
 	p.req.CreatedAt = a.cfg.Clock.Now()
 	a.mu.Lock()
 	a.requests[f.RequestID] = p
