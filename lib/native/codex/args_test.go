@@ -1,0 +1,72 @@
+package codex
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestParseArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want launchOptions
+		err  string
+	}{
+		{name: "none", want: launchOptions{}},
+		{
+			name: "config passes through",
+			args: []string{"-c", `sandbox_mode="danger-full-access"`, "--config=approval_policy=\"untrusted\"", "--enable", "x", "--disable=y", "--strict-config"},
+			want: launchOptions{appServerArgs: []string{"-c", `sandbox_mode="danger-full-access"`, "--config", `approval_policy="untrusted"`, "--enable", "x", "--disable", "y", "--strict-config"}},
+		},
+		{
+			name: "reasoning summary chosen by the user",
+			args: []string{"-c", `model_reasoning_summary="concise"`},
+			want: launchOptions{appServerArgs: []string{"-c", `model_reasoning_summary="concise"`}, summaryFromUser: true},
+		},
+		{
+			name: "top-level flags become thread settings",
+			args: []string{"-m", "gpt-6-luna", "--sandbox=read-only", "-a", "on-request", "--cd", "/repo"},
+			want: launchOptions{model: "gpt-6-luna", sandbox: "read-only", approvalPolicy: "on-request", cwd: "/repo"},
+		},
+		{name: "relative cd", args: []string{"-C", "sub/dir"}, want: launchOptions{cwd: "/work/sub/dir"}},
+		{
+			name: "bypass",
+			args: []string{"--dangerously-bypass-approvals-and-sandbox"},
+			want: launchOptions{approvalPolicy: "never", sandbox: "danger-full-access"},
+		},
+		{name: "app-server subcommand is allowed", args: []string{"app-server", "-c", "a=1"}, want: launchOptions{appServerArgs: []string{"-c", "a=1"}}},
+		{name: "terminal-only flags are dropped", args: []string{"--no-alt-screen", "--no-daemon"}, want: launchOptions{}},
+		{name: "bad sandbox", args: []string{"-s", "open"}, err: `unknown sandbox mode "open"`},
+		{name: "bad policy", args: []string{"-a", "sometimes"}, err: `unknown approval policy "sometimes"`},
+		{name: "missing value", args: []string{"-m"}, err: "-m needs a value"},
+		{name: "profile", args: []string{"-p", "work"}, err: "codex flag -p is not supported with --transport native: profiles"},
+		{name: "image", args: []string{"--image", "a.png"}, err: "--image is not supported"},
+		{name: "unknown flag", args: []string{"--frobnicate"}, err: "codex flag --frobnicate is not supported"},
+		{name: "prompt", args: []string{"fix the bug"}, err: `codex argument "fix the bug" is not supported`},
+		{name: "subcommand", args: []string{"exec", "hi"}, err: `codex argument "exec" is not supported`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseArgs(tt.args, "/work")
+			if tt.err != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestNewFactoryRejectsBadArgs(t *testing.T) {
+	_, err := NewFactory(Config{Program: "codex", Args: []string{"resume", "--last"}})
+	require.Error(t, err)
+}
+
+func TestCleanEnv(t *testing.T) {
+	assert.Equal(t, []string{"HOME=/h", "CODEX_HOME=/c", "CODEX_THREAD_IDX=1"},
+		cleanEnv([]string{"HOME=/h", "CODEX_THREAD_ID=t", "CODEX_HOME=/c", "CODEX_SANDBOX_NETWORK_DISABLED=1", "CODEX_SANDBOX=seatbelt", "CODEX_THREAD_IDX=1"}))
+}

@@ -290,6 +290,67 @@ share a directory. If you pass `--session`, `--continue`, `--resume` or
 `--session-id` yourself, AgentAPI leaves the session to you; with
 `--continue`/`--resume` the chat falls back to the terminal output.
 
+### Native transport: Codex
+
+With `--transport native`, AgentAPI drives Codex through `codex app-server`,
+its JSON-RPC protocol over stdio, instead of its terminal UI:
+
+```bash
+agentapi server --transport native -- codex -a on-request
+```
+
+Messages, rich messages and the timeline come straight from the protocol, in
+the same shape the session-log parser produces, so the chat shows Codex's
+replies, reasoning summaries, commands (the command itself, not the
+`bash -lc` wrapper), file edits, MCP tool calls, plan updates and token usage
+as they stream. Every turn asks for detailed reasoning summaries unless you
+choose `model_reasoning_summary` with `-c`; whether the model writes any
+depends on the model and the reasoning effort.
+
+Codex's command line after `codex` is handled like this:
+
+- `-c`/`--config`, `--enable`, `--disable` and `--strict-config` are passed to
+  `codex app-server`.
+- `-m`/`--model`, `-s`/`--sandbox`, `-a`/`--ask-for-approval`
+  (`untrusted`, `on-request`, `never`) and `-C`/`--cd` become the thread's
+  settings; `--dangerously-bypass-approvals-and-sandbox` means `-a never -s
+  danger-full-access`. Without them, Codex's config decides (including `-c
+  sandbox_mode=...`). Codex 0.160 refuses `approval_policy = "untrusted"` in
+  its config, so use `-a untrusted` for that policy.
+- `--no-alt-screen` and `--no-daemon` are ignored.
+- A prompt, a subcommand (other than `app-server`), `-p`/`--profile`,
+  `-i`/`--image`, `--oss`, `--local-provider`, `--search`, `--add-dir`,
+  `--approve-for-me`, `--remote`, `--worktree` and unknown flags are rejected
+  at startup with an explanation. Use `--initial-prompt` for a first message
+  and attach images to messages instead.
+
+The agent supports `steer`, `interrupt`, `resume` and `images` (see
+`capabilities` in `GET /status`). Command, file-edit and MCP tool approvals,
+permission requests, MCP form elicitations and `request_user_input` questions
+(plan mode) arrive as requests (`GET /requests`); their option IDs are
+Codex's own decisions (`accept`, `acceptForSession`,
+`acceptWithExecpolicyAmendment`, `decline`, `cancel`, …) and nothing is
+approved automatically. A steered message joins the running turn at Codex's
+next model request (the current output keeps streaming); the reply to it is
+filed under the steering message. An interrupt ends the turn within
+milliseconds, and tool calls it cut short show as failed.
+
+The session reference is Codex's thread ID. Resuming it continues the thread
+with its context; a turn that was running when the process died comes back
+as interrupted, approvals that were pending are gone, and earlier messages
+are not loaded into AgentAPI's conversation. A thread that can't be resumed
+is replaced by a new one, with a warning. Codex doesn't name threads itself;
+a name set elsewhere (`thread/name/updated`) becomes the session name. MCP
+servers managed from the Explorer live in `$CODEX_HOME/config.toml`, which
+app-server reads when it starts, so restart the agent to apply changes.
+
+Limitations: there is no terminal, so TTY mode, slash commands (`/model`,
+`/review`, …) and terminal dialogs are not available; command output streams
+as a preview that Codex may leave incomplete, and the full output replaces it
+when the command ends. Variables a parent Codex session sets
+(`CODEX_THREAD_ID`, `CODEX_SANDBOX`, …) are removed from app-server's
+environment.
+
 ### Runtime reliability
 
 The fork also includes fixes for wide-character terminal cursor tracking,

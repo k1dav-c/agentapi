@@ -242,6 +242,52 @@ AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新�
 `--session`、`--continue`、`--resume` 或 `--session-id`，AgentAPI 就會把工作階段交給你
 處理；使用 `--continue`/`--resume` 時，聊天介面會退回使用終端機輸出。
 
+### Native transport：Codex
+
+使用 `--transport native` 時，AgentAPI 會透過 `codex app-server`（Codex 走 stdio 的
+JSON-RPC 協定）來驅動 Codex，而不是透過它的終端機介面：
+
+```bash
+agentapi server --transport native -- codex -a on-request
+```
+
+訊息、結構化訊息和時間軸都直接來自協定，形狀和工作階段紀錄檔解析器產生的相同，因此聊天
+介面會即時串流顯示 Codex 的回覆、推理摘要、指令（指令本身，而不是 `bash -lc` 包裝）、
+檔案編輯、MCP 工具呼叫、計畫更新和 token 用量。每個 turn 都會要求詳細的推理摘要，除非你用
+`-c` 自己指定 `model_reasoning_summary`；模型會不會寫出摘要，取決於模型和推理強度。
+
+`codex` 後面的命令列參數會這樣處理：
+
+- `-c`/`--config`、`--enable`、`--disable` 和 `--strict-config` 會傳給 `codex app-server`。
+- `-m`/`--model`、`-s`/`--sandbox`、`-a`/`--ask-for-approval`（`untrusted`、`on-request`、
+  `never`）和 `-C`/`--cd` 會變成 thread 的設定；`--dangerously-bypass-approvals-and-sandbox`
+  等同 `-a never -s danger-full-access`。沒有指定時由 Codex 的設定決定（包括 `-c
+  sandbox_mode=...`）。Codex 0.160 不接受設定檔裡的 `approval_policy = "untrusted"`，
+  要用這個政策請改用 `-a untrusted`。
+- `--no-alt-screen` 和 `--no-daemon` 會被忽略。
+- 提示文字、子指令（`app-server` 以外）、`-p`/`--profile`、`-i`/`--image`、`--oss`、
+  `--local-provider`、`--search`、`--add-dir`、`--approve-for-me`、`--remote`、`--worktree`
+  和未知的旗標，會在啟動時被拒絕並說明原因。第一則訊息請用 `--initial-prompt`，圖片請附加在
+  訊息上。
+
+這個 agent 支援 `steer`、`interrupt`、`resume` 和 `images`（見 `GET /status` 的
+`capabilities`）。指令、檔案編輯和 MCP 工具的核准、權限請求、MCP 表單 elicitation，以及
+`request_user_input` 問題（plan mode）都會變成請求（`GET /requests`）；選項 ID 就是 Codex
+自己的決定值（`accept`、`acceptForSession`、`acceptWithExecpolicyAmendment`、`decline`、
+`cancel` 等），而且不會自動核准任何東西。steer 的訊息會在 Codex 下一次向模型發出請求時加入
+執行中的 turn（目前的輸出會繼續串流），對它的回覆會歸在該則 steer 訊息底下。interrupt 會在
+幾毫秒內結束 turn，被中斷的工具呼叫會顯示為失敗。
+
+工作階段參照是 Codex 的 thread ID。恢復時會接續該 thread 並保留上下文；行程結束時正在執行
+的 turn 會以 interrupted 狀態回來，當時待處理的核准會消失，先前的訊息也不會載入 AgentAPI 的
+對話。無法恢復的 thread 會換成新的 thread，並顯示警告。Codex 不會自己替 thread 命名；在別處
+設定的名稱（`thread/name/updated`）會成為工作階段名稱。Explorer 管理的 MCP 伺服器寫在
+`$CODEX_HOME/config.toml`，app-server 啟動時才會讀取，所以要重新啟動 agent 才會套用。
+
+限制：沒有終端機，所以無法使用 TTY mode、斜線指令（`/model`、`/review` 等）和終端機對話框；
+指令輸出串流時只是預覽，Codex 可能漏掉部分內容，指令結束後會換成完整輸出。上層 Codex 工作
+階段設定的變數（`CODEX_THREAD_ID`、`CODEX_SANDBOX` 等）會從 app-server 的環境中移除。
+
 ### 執行穩定性
 
 這個 fork 也修正了許多問題，包括：寬字元的終端機游標追蹤、PTY 生命週期洩漏、並行事件

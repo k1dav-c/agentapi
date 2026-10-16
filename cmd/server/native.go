@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/codex"
 	"github.com/coder/agentapi/lib/native/demo"
 )
 
@@ -21,7 +22,14 @@ type nativeAdapterConfig struct {
 // transport.
 func nativeFactory(agentType AgentType, cfg nativeAdapterConfig) (native.Factory, error) {
 	switch agentType {
-	case AgentTypeClaude, AgentTypeCodex, AgentTypePi:
+	case AgentTypeCodex:
+		return codex.NewFactory(codex.Config{
+			Program: cfg.Program,
+			Args:    cfg.Args,
+			CWD:     cfg.CWD,
+			Logger:  cfg.Logger,
+		})
+	case AgentTypeClaude, AgentTypePi:
 		return nil, fmt.Errorf("the native transport for %s is not available yet", agentType)
 	case AgentTypeCustom:
 		// A simulated agent for developing clients; see lib/native/demo.
