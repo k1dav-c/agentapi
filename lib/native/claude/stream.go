@@ -52,6 +52,20 @@ type frame struct {
 	TerminalReason string          `json:"terminal_reason"`
 	Errors         []string        `json:"errors"`
 	APIErrorStatus json.RawMessage `json:"api_error_status"`
+
+	// assistant: the kind of API error a synthetic message reports, e.g.
+	// "authentication_failed". Raw, so a frame with another shape still
+	// parses.
+	Error json.RawMessage `json:"error"`
+}
+
+// assistantError returns the error kind of an assistant frame, or "".
+func (f *frame) assistantError() string {
+	var kind string
+	if json.Unmarshal(f.Error, &kind) != nil {
+		return ""
+	}
+	return kind
 }
 
 // subagent reports whether the frame belongs to a subagent.

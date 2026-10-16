@@ -26,6 +26,7 @@ func (h *harness) boot() {
 	init := h.expectSent("initialize")
 	h.feedJSON(`{"id":` + string(init.ID) + `,"result":{"userAgent":"agentapi/0.160.0"}}`)
 	h.expectSent("initialized")
+	h.answerAccount()
 	start := h.expectSent("thread/start")
 	h.feedJSON(`{"id":` + string(start.ID) + `,"result":{"thread":{"id":"` + testThread + `","cwd":"/work","cliVersion":"0.160.0"},"model":"gpt-6-luna","cwd":"/work"}}`)
 	h.settle()

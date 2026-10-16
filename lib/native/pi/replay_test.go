@@ -436,6 +436,9 @@ func TestReplayModelError(t *testing.T) {
 	assert.Equal(t, "error", last.StopReason)
 	require.Len(t, texts(last, "text"), 1)
 	assert.True(t, strings.HasPrefix(texts(last, "text")[0], "Error: Codex error"))
+	h.sink.mu.Lock()
+	assert.Empty(t, h.sink.logins, "a model the account can't use is not a login problem")
+	h.sink.mu.Unlock()
 }
 
 func TestExitWhileRequestPending(t *testing.T) {

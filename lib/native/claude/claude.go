@@ -39,7 +39,10 @@ type Config struct {
 	Env []string
 	// StartProcess starts the process; nil runs it with os/exec.
 	StartProcess StartProcess
-	Clock        quartz.Clock
+	// AuthStatus runs `auth status` before the session starts; nil runs it
+	// with os/exec.
+	AuthStatus AuthStatus
+	Clock      quartz.Clock
 	// SnapshotInterval is the least time between two snapshots of a
 	// streaming message; zero means 100ms.
 	SnapshotInterval time.Duration
@@ -75,6 +78,9 @@ func New(cfg Config, resumeRef string) (*Adapter, error) {
 	}
 	if cfg.StartProcess == nil {
 		cfg.StartProcess = startExec
+	}
+	if cfg.AuthStatus == nil {
+		cfg.AuthStatus = runAuthStatus
 	}
 	if cfg.Clock == nil {
 		cfg.Clock = quartz.NewReal()
@@ -128,6 +134,8 @@ type Adapter struct {
 	// result is the latest result of the current turn.
 	result      *native.TurnResult
 	interrupted bool
+	// authFailed: the CLI reported a login failure in the current turn.
+	authFailed  bool
 	refReported bool
 	titleAsked  bool
 	controlSeq  int
@@ -175,14 +183,18 @@ func (a *Adapter) Capabilities() native.Capabilities {
 	return native.Capabilities{Steer: true, Interrupt: true, Resume: !a.args.noPersistence, Images: true}
 }
 
-// Start implements native.Adapter: it starts the CLI and completes the
-// initialize handshake.
+// Start implements native.Adapter: it checks the login, starts the CLI and
+// completes the initialize handshake. Without a login it returns a
+// native.LoginRequiredError.
 func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	cmd := Command{
 		Program: a.cfg.Program,
 		Args:    buildArgs(a.args, a.sessionID, a.resumeRef),
 		Env:     buildEnv(a.cfg.Env),
 		Dir:     a.cfg.CWD,
+	}
+	if err := a.checkLogin(ctx, cmd.Env); err != nil {
+		return err
 	}
 	a.cfg.Logger.Info("Starting Claude Code", "program", cmd.Program, "args", cmd.Args, "resume", a.resumeRef != "")
 	proc, err := a.cfg.StartProcess(cmd)
@@ -614,6 +626,11 @@ func (a *Adapter) handleLine(line []byte) {
 		a.sendRich(a.parser.streamEvent(&f))
 	case "assistant":
 		a.turnActivity()
+		if f.assistantError() == "authentication_failed" {
+			a.mu.Lock()
+			a.authFailed = true
+			a.mu.Unlock()
+		}
 		msgs, events := a.parser.assistant(&f)
 		a.sendRich(msgs)
 		a.sendEvents(events)
@@ -760,7 +777,13 @@ func (a *Adapter) handleResult(f *frame) {
 	started := a.started
 	a.result = &result
 	byResult := !a.sessionStates
+	authFailed := a.authFailed
 	a.mu.Unlock()
+	if result.Error != "" && (authFailed || authFailure(f)) {
+		// Reported before the turn ends, so the failed turn doesn't look
+		// like the end of the problem.
+		a.sink.LoginRequired(loginHint)
+	}
 	if !inTurn {
 		// A result outside a turn ends nothing; an error in it is still
 		// worth showing.
@@ -825,6 +848,7 @@ func (a *Adapter) endTurn() {
 	a.turnReported = false
 	a.result = nil
 	a.interrupted = false
+	a.authFailed = false
 	// The CLI withdraws its requests when a turn ends.
 	a.requests = make(map[string]*pendingRequest)
 	a.mu.Unlock()

@@ -454,3 +454,46 @@ func TestLoginClearedByAWorkingTurn(t *testing.T) {
 	a.Sink().TurnCompleted(native.TurnResult{})
 	assert.Nil(t, c.LoginRequired())
 }
+
+func TestLoginRetriesDontRepeatStartWarnings(t *testing.T) {
+	login := native.LoginRequired{Agent: "Codex", Message: "Codex is not logged in.", Command: "codex login"}
+	factory := &nativetest.Factory{Configure: func(a *nativetest.Adapter) {
+		a.StartWarning = "Codex could not find bubblewrap on PATH."
+		a.StartErr = &native.LoginRequiredError{Login: login}
+	}}
+	rec := &recorder{}
+	c := native.NewConversation(native.Config{Factory: factory.New, Emitter: rec, Observer: rec, LoginRetryInterval: time.Hour})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer func() { _ = c.Close() }()
+	c.Start(ctx)
+	require.Eventually(t, func() bool { return c.LoginRequired() != nil }, 5*time.Second, time.Millisecond)
+	// The fourth adapter exists once the third attempt has returned.
+	for attempts := 2; attempts <= 4; attempts++ {
+		require.NoError(t, c.RetryLogin(context.Background()))
+		require.Eventually(t, func() bool { return len(factory.Adapters()) == attempts }, 5*time.Second, time.Millisecond)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	require.Len(t, rec.errors, 2, "the first attempt's warning and the login, once each: %q", rec.errors)
+	assert.Contains(t, rec.errors[0], "bubblewrap")
+	assert.Contains(t, rec.errors[1], "codex login")
+}
+
+func TestRestartAfterLostLoginShowsWarnings(t *testing.T) {
+	c, factory, rec := start(t, func(a *nativetest.Adapter) {
+		if a.ResumeRef != "" {
+			a.StartWarning = "Could not resume the thread; starting a new one."
+		}
+		a.Ref = "session-1"
+	}, native.Config{})
+	a := factory.Last()
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
+	a.Sink().LoginRequired(native.LoginRequired{Agent: "Codex", Message: "Codex is not logged in.", Command: "codex login"})
+	a.Sink().TurnCompleted(native.TurnResult{Error: "401 Unauthorized"})
+	require.NoError(t, c.RetryLogin(context.Background()))
+	require.Eventually(t, func() bool { return len(factory.Adapters()) == 2 && c.Idle() }, 5*time.Second, time.Millisecond)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	assert.Contains(t, rec.errors[len(rec.errors)-1], "Could not resume", "the restarted agent's warnings show")
+}

@@ -150,6 +150,9 @@ type turnInterruptParams struct {
 type turnError struct {
 	Message           string  `json:"message"`
 	AdditionalDetails *string `json:"additionalDetails"`
+	// CodexErrorInfo is a code ("unauthorized") or an object keyed by the
+	// kind of failure, with the upstream httpStatusCode.
+	CodexErrorInfo json.RawMessage `json:"codexErrorInfo"`
 }
 
 type turn struct {

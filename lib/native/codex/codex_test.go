@@ -339,6 +339,7 @@ func TestResumeMissingThreadStartsNewOne(t *testing.T) {
 	init := h.expectSent("initialize")
 	h.feedJSON(`{"id":` + string(init.ID) + `,"result":{"userAgent":"agentapi/0.160.0"}}`)
 	h.expectSent("initialized")
+	h.answerAccount()
 	resume := h.expectSent("thread/resume")
 	h.feedJSON(`{"id":` + string(resume.ID) + `,"error":{"code":-32600,"message":"no rollout found for thread id 00000000-0000-0000-0000-000000000000"}}`)
 	start := h.expectSent("thread/start")

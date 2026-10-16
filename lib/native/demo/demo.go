@@ -13,11 +13,16 @@
 //   - "plan": a plan to approve or reject with feedback
 //   - "long": a turn that keeps working for about half a minute, to try
 //     steering, interrupting and the queue
+//   - "login": the agent loses its login (Sink.LoginRequired). The next
+//     start (Check again, POST /login/retry) still finds no login, so the
+//     conversation waits and tries again by itself; the start after that
+//     works.
 package demo
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -43,11 +48,27 @@ type Options struct {
 	Now func() time.Time
 }
 
+// LoginHint is what the demo reports when it simulates a missing login.
+var LoginHint = native.LoginRequired{
+	Agent:   "Native demo",
+	Message: "The demo agent is not logged in.",
+	Command: "native-demo login",
+	Detail:  "Nothing to run: this login is simulated. **Check again** restarts the demo, whose first start still finds no login; AgentAPI then tries again by itself and the start after that works.",
+}
+
+// loginState is shared by the adapters of one factory: how many starts
+// still find no login.
+type loginState struct {
+	mu         sync.Mutex
+	startsLeft int
+}
+
 // Adapter is the simulated agent.
 type Adapter struct {
 	step      time.Duration
 	now       func() time.Time
 	resumeRef string
+	login     *loginState
 
 	mu      sync.Mutex
 	sink    native.Sink
@@ -73,10 +94,14 @@ func New(resumeRef string, opts Options) *Adapter {
 	return &Adapter{step: opts.Step, now: opts.Now, resumeRef: resumeRef, done: make(chan struct{})}
 }
 
-// Factory returns a native.Factory creating demo adapters.
+// Factory returns a native.Factory creating demo adapters. Its adapters
+// share the simulated login.
 func Factory(opts Options) native.Factory {
+	login := &loginState{}
 	return func(resumeRef string) (native.Adapter, error) {
-		return New(resumeRef, opts), nil
+		a := New(resumeRef, opts)
+		a.login = login
+		return a, nil
 	}
 }
 
@@ -97,6 +122,17 @@ func (a *Adapter) Start(_ context.Context, sink native.Sink) error {
 	defer a.mu.Unlock()
 	if a.closed {
 		return native.ErrNotStarted
+	}
+	if a.login != nil {
+		a.login.mu.Lock()
+		waiting := a.login.startsLeft > 0
+		if waiting {
+			a.login.startsLeft--
+		}
+		a.login.mu.Unlock()
+		if waiting {
+			return &native.LoginRequiredError{Login: LoginHint}
+		}
 	}
 	a.sink = sink
 	a.started = true
@@ -232,6 +268,9 @@ type script struct {
 	tools    int
 }
 
+// errLoginLost ends a turn whose login is gone.
+var errLoginLost = errors.New("login lost")
+
 // errInterrupted ends a turn that was interrupted.
 type errInterrupted struct{}
 
@@ -247,6 +286,10 @@ func (a *Adapter) run(t *turn, n int, input native.Input) {
 		s.outcomes = append(s.outcomes, fmt.Sprintf("Looked at %d attached image(s)", len(input.Images)))
 	}
 	if err := s.play(); err != nil {
+		if errors.Is(err, errLoginLost) {
+			a.finish(t, native.TurnResult{StopReason: "error", Error: "Native demo: the API answered 401 Unauthorized (simulated)"})
+			return
+		}
 		a.finish(t, native.TurnResult{StopReason: "interrupted"})
 		return
 	}
@@ -262,6 +305,9 @@ func (s *script) play() error {
 	}
 	if err := s.tool(work, "Bash", map[string]any{"command": "ls", "description": "List the workspace"}, nil); err != nil {
 		return err
+	}
+	if words["login"] {
+		return s.loseLogin()
 	}
 	if words["approve"] {
 		if err := s.tool(work, "Bash", map[string]any{"command": "rm -rf ./build && make release", "description": "Rebuild the release"}, s.approval); err != nil {
@@ -279,6 +325,19 @@ func (s *script) play() error {
 		}
 	}
 	return s.reply(words["long"])
+}
+
+// loseLogin reports a lost login the way a real agent does: the login
+// first, then the failed turn. The next start of the factory's adapters
+// still finds no login.
+func (s *script) loseLogin() error {
+	if l := s.a.login; l != nil {
+		l.mu.Lock()
+		l.startsLeft = 1
+		l.mu.Unlock()
+	}
+	s.sink.LoginRequired(LoginHint)
+	return errLoginLost
 }
 
 // message is a rich message being built; send reports its current state.

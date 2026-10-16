@@ -22,6 +22,7 @@ type observer struct {
 	mu       sync.Mutex
 	rich     map[string]jsonlwatcher.RichMessage
 	requests map[string]native.RequestState
+	logins   []*native.LoginRequired
 }
 
 func (o *observer) Started(native.Capabilities) {}
@@ -33,7 +34,12 @@ func (o *observer) RichMessage(m jsonlwatcher.RichMessage) {
 func (o *observer) SessionEvents([]jsonlwatcher.SessionEvent) {}
 func (o *observer) SessionName(string)                        {}
 func (o *observer) SessionRef(string)                         {}
-func (o *observer) LoginRequired(*native.LoginRequired)       {}
+func (o *observer) LoginRequired(l *native.LoginRequired) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.logins = append(o.logins, l)
+}
+
 func (o *observer) RequestUpdated(s native.RequestState) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -177,4 +183,34 @@ func TestInterruptExpiresRequests(t *testing.T) {
 	assert.Equal(t, native.ResponseMessage, state.Capability)
 	_, err := c.Respond(context.Background(), req.ID, native.Response{Answers: map[string][]string{"pm": {"bun"}}})
 	assert.ErrorIs(t, err, native.ErrRequestNotFound)
+}
+
+func TestLogin(t *testing.T) {
+	obs := &observer{rich: map[string]jsonlwatcher.RichMessage{}, requests: map[string]native.RequestState{}}
+	c := native.NewConversation(native.Config{
+		Factory:            demo.Factory(demo.Options{Step: time.Millisecond}),
+		Observer:           obs,
+		LoginRetryInterval: 20 * time.Millisecond,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		_ = c.Close()
+		cancel()
+	})
+	c.Start(ctx)
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "pretend you need a login"}))
+	require.Eventually(t, func() bool { return c.Idle() && c.LoginRequired() != nil }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, demo.LoginHint.Command, c.LoginRequired().Command)
+
+	// Check again: the first start still has no login, the conversation
+	// tries again by itself, and that start works.
+	require.NoError(t, c.RetryLogin(context.Background()))
+	require.Eventually(t, func() bool { return c.Idle() && c.LoginRequired() == nil }, 5*time.Second, time.Millisecond)
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+	require.GreaterOrEqual(t, len(obs.logins), 3)
+	assert.Nil(t, obs.logins[len(obs.logins)-1])
+	assert.Equal(t, "pretend you need a login", c.Messages()[0].Message, "the conversation is kept")
 }

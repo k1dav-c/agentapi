@@ -186,6 +186,7 @@ type recSink struct {
 	names    []string
 	errs     []string
 	results  []native.TurnResult
+	logins   []native.LoginRequired
 }
 
 func (s *recSink) enter() func() {
@@ -255,7 +256,18 @@ func (s *recSink) SessionRef(r string) {
 	s.mu.Unlock()
 }
 
-func (s *recSink) LoginRequired(native.LoginRequired) {}
+func (s *recSink) LoginRequired(l native.LoginRequired) {
+	defer s.enter()()
+	s.mu.Lock()
+	s.logins = append(s.logins, l)
+	s.mu.Unlock()
+	s.record("login_required")
+}
+
+// loggedIn is an AuthStatus that reports a login.
+func loggedIn(context.Context, Command) ([]byte, error) {
+	return []byte(`{"loggedIn":true,"authMethod":"claude.ai"}`), nil
+}
 
 func (s *recSink) Error(m string, _ st.ErrorLevel) {
 	defer s.enter()()
@@ -375,6 +387,9 @@ func newReplay(t *testing.T, cfg Config, resumeRef string, stderr string) *repla
 	cfg.StartProcess = func(c Command) (Process, error) {
 		r.cmd = c
 		return r.proc, nil
+	}
+	if cfg.AuthStatus == nil {
+		cfg.AuthStatus = loggedIn
 	}
 	if cfg.Program == "" {
 		cfg.Program = "claude"

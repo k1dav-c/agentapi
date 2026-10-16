@@ -22,6 +22,9 @@ import (
 func started(t *testing.T, cfg Config, proc *fakeProcess) (*Adapter, *recSink) {
 	t.Helper()
 	cfg.StartProcess = func(Command) (Process, error) { return proc, nil }
+	if cfg.AuthStatus == nil {
+		cfg.AuthStatus = loggedIn
+	}
 	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg.Env = []string{}
 	a, err := New(cfg, "")
@@ -44,6 +47,7 @@ func TestStartFailure(t *testing.T) {
 		proc := newFakeProcess("No conversation found with session ID: 6943de8c\n")
 		a, err := New(Config{
 			StartProcess: func(Command) (Process, error) { return proc, nil },
+			AuthStatus:   loggedIn,
 			Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		}, "6943de8c")
 		require.NoError(t, err)
@@ -62,6 +66,7 @@ func TestStartFailure(t *testing.T) {
 		proc := newFakeProcess("No conversation found with session ID: 6943de8c\n")
 		a, err := New(Config{
 			StartProcess: func(Command) (Process, error) { return proc, nil },
+			AuthStatus:   loggedIn,
 			Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		}, "6943de8c")
 		require.NoError(t, err)
@@ -80,6 +85,7 @@ func TestStartFailure(t *testing.T) {
 		proc := newFakeProcess("")
 		a, err := New(Config{
 			StartProcess: func(Command) (Process, error) { return proc, nil },
+			AuthStatus:   loggedIn,
 			Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 			StopTimeout:  10 * time.Millisecond,
 		}, "")

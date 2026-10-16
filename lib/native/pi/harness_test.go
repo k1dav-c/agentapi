@@ -209,6 +209,7 @@ type recSink struct {
 	refs     []string
 	errors   []string
 	started  int
+	logins   []native.LoginRequired
 }
 
 func (s *recSink) add(entry string) { s.log = append(s.log, entry) }
@@ -265,7 +266,12 @@ func (s *recSink) SessionRef(r string) {
 	s.refs = append(s.refs, r)
 }
 
-func (s *recSink) LoginRequired(native.LoginRequired) {}
+func (s *recSink) LoginRequired(l native.LoginRequired) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.logins = append(s.logins, l)
+	s.add("login_required")
+}
 
 func (s *recSink) Error(m string, _ st.ErrorLevel) {
 	s.mu.Lock()

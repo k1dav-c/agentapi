@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/coder/agentapi/lib/native"
+	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // Response is a recorded Respond call.
@@ -23,7 +24,10 @@ type Adapter struct {
 	// ResumeRef is the ref the factory created the adapter with.
 	ResumeRef string
 	StartErr  error
-	TurnErr   error
+	// StartWarning is reported with Sink.Error at the start, before
+	// StartErr is returned.
+	StartWarning string
+	TurnErr      error
 	// RespondErr is returned by Respond.
 	RespondErr error
 	// AutoStartTurn reports TurnStarted when a turn is sent.
@@ -55,6 +59,9 @@ func (a *Adapter) Start(_ context.Context, sink native.Sink) error {
 	a.mu.Lock()
 	a.sink = sink
 	a.mu.Unlock()
+	if a.StartWarning != "" {
+		sink.Error(a.StartWarning, st.ErrorLevelWarning)
+	}
 	if a.StartErr != nil {
 		return a.StartErr
 	}

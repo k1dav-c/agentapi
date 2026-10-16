@@ -44,6 +44,10 @@ Words in your message make it ask for things:
 - `plan`: a Markdown plan to approve or send back with feedback
 - `long`: a turn that keeps working for about half a minute, to try steering,
   Stop, Interrupt & send and reordering the queue
+- `login`: the agent loses its login, so the login card docks above the
+  composer. Check again restarts the demo, whose first start still finds no
+  login: the card stays, now saying AgentAPI checks by itself, and the next
+  start (about 5 seconds later, or Check again) works
 
 Steering appends to the reply, and Stop ends the turn as interrupted. The
 adapter lives in `lib/native/demo`.

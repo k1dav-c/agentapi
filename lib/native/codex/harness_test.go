@@ -101,6 +101,7 @@ type recorder struct {
 	refs        []string
 	errors      []string
 	events      []jsonlwatcher.SessionEvent
+	logins      []native.LoginRequired
 }
 
 var _ native.Sink = (*recorder)(nil)
@@ -170,7 +171,11 @@ func (r *recorder) SessionRef(ref string) {
 	r.refs = append(r.refs, ref)
 }
 
-func (r *recorder) LoginRequired(native.LoginRequired) {}
+func (r *recorder) LoginRequired(l native.LoginRequired) {
+	defer r.enter()()
+	r.logins = append(r.logins, l)
+	r.log = append(r.log, "login_required")
+}
 
 func (r *recorder) Error(message string, level st.ErrorLevel) {
 	defer r.enter()()
@@ -225,6 +230,7 @@ func (r *recorder) snapshot() recorderState {
 		log: slices.Clone(r.log), completions: slices.Clone(r.completions), started: r.started,
 		opened: slices.Clone(r.opened), closed: slices.Clone(r.closed), names: slices.Clone(r.names),
 		refs: slices.Clone(r.refs), errors: slices.Clone(r.errors), events: slices.Clone(r.events),
+		logins: slices.Clone(r.logins),
 	}
 }
 
@@ -238,6 +244,7 @@ type recorderState struct {
 	refs        []string
 	errors      []string
 	events      []jsonlwatcher.SessionEvent
+	logins      []native.LoginRequired
 }
 
 func (s recorderState) eventsOf(kind string) []jsonlwatcher.SessionEvent {
@@ -382,6 +389,13 @@ func (h *harness) feedJSON(s string) {
 	var buf bytes.Buffer
 	require.NoError(h.t, json.Compact(&buf, []byte(s)))
 	h.feed(buf.Bytes())
+}
+
+// answerAccount answers account/read with a ChatGPT login.
+func (h *harness) answerAccount() {
+	h.t.Helper()
+	read := h.expectSent("account/read")
+	h.feedJSON(`{"id":` + string(read.ID) + `,"result":{"account":{"type":"chatgpt","email":null,"planType":"plus"},"requiresOpenaiAuth":true}}`)
 }
 
 // expectSent returns the next message the adapter wrote and checks its
@@ -558,6 +572,8 @@ func (h *harness) replayOut(raw json.RawMessage, idMap map[string]json.RawMessag
 		mapID(h.expectSent("initialize"))
 	case "initialized":
 		h.expectSent("initialized")
+		// The captures predate the login check.
+		h.answerAccount()
 	case "thread/start", "thread/resume":
 		mapID(h.expectSent(msg.Method))
 	case "turn/start":

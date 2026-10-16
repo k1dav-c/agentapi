@@ -88,6 +88,8 @@ type parsedArgs struct {
 	thinkingShow bool
 	// noPersistence: sessions are not saved, so they can't be resumed.
 	noPersistence bool
+	// settings: the user passed --settings, which can hold credentials.
+	settings bool
 }
 
 // ValidateArgs checks the user's Claude Code arguments (after the program)
@@ -147,6 +149,8 @@ func parseArgs(args []string) (parsedArgs, error) {
 			p.thinkingShow = true
 		case "--no-session-persistence":
 			p.noPersistence = true
+		case "--settings":
+			p.settings = true
 		}
 	}
 	return p, nil

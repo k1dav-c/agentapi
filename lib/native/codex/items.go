@@ -82,6 +82,9 @@ type turnState struct {
 	interrupted time.Time
 	// failure is the error of a failed turn, from the error notification.
 	failure string
+	// loginReported: the turn failed for want of a login, and the sink
+	// was told.
+	loginReported bool
 }
 
 func (t *turnState) current() *segment { return t.segments[len(t.segments)-1] }

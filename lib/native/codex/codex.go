@@ -174,7 +174,8 @@ func (a *Adapter) command() []string {
 }
 
 // Start implements native.Adapter: it starts app-server, initializes the
-// connection and starts (or resumes) the thread.
+// connection, checks the login and starts (or resumes) the thread. Without
+// a login it returns a native.LoginRequiredError.
 func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	a.mu.Lock()
 	if a.closed {
@@ -264,6 +265,9 @@ func (a *Adapter) handshake(ctx context.Context) error {
 		a.log.Debug("Connected to codex app-server", "userAgent", info.UserAgent)
 	}
 	if err := a.notify("initialized", nil); err != nil {
+		return err
+	}
+	if err := a.checkLogin(ctx); err != nil {
 		return err
 	}
 

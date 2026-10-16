@@ -76,6 +76,8 @@ const (
 	cmdTurn
 	cmdSteer
 	cmdAbort
+	// cmdQuery only wants the response.
+	cmdQuery
 )
 
 // cmdResult is the outcome of a command.
@@ -175,7 +177,8 @@ func newAdapter(cfg Config, resumeRef string, spawn spawnFunc) (*Adapter, error)
 }
 
 // Start launches Pi and waits for its first get_state response, which
-// says the session is open: RPC mode has no ready message.
+// says the session is open: RPC mode has no ready message. Without a model
+// provider it returns a native.LoginRequiredError.
 func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	sessionID := a.resumeRef
 	if sessionID == "" {
@@ -241,6 +244,14 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	}
 	if res.err != nil {
 		return fmt.Errorf("pi didn't open its session: %w", res.err)
+	}
+	if !stateHasModel(res.data) {
+		// The session was left unreported, so a start that waits for a
+		// login doesn't report one each time it is tried again.
+		if err := a.checkLogin(ctx, res.data); err != nil {
+			return err
+		}
+		a.post(func() { a.handleState(res.data) })
 	}
 	a.mu.Lock()
 	a.started = true

@@ -295,11 +295,18 @@ func (s *loopState) notification(msg rpcMessage) {
 			return
 		}
 		text := turnErrorText(&n.Error)
-		if n.WillRetry {
+		switch {
+		case n.WillRetry:
 			s.warn(text)
-		} else if s.turn != nil && (n.TurnID == "" || n.TurnID == s.turn.id) {
+		case s.turn != nil && (n.TurnID == "" || n.TurnID == s.turn.id):
 			s.turn.failure = text
-		} else {
+			if isAuthError(&n.Error) {
+				s.reportLogin(s.turn)
+			}
+		default:
+			if isAuthError(&n.Error) {
+				s.reportLogin(nil)
+			}
 			s.sink().Error(text, st.ErrorLevelError)
 		}
 	case "thread/name/updated":
@@ -552,6 +559,9 @@ func (s *loopState) completeTurn(tr turn) {
 		result.Error = t.failure
 		if tr.Error != nil {
 			result.Error = turnErrorText(tr.Error)
+			if isAuthError(tr.Error) {
+				s.reportLogin(t)
+			}
 		}
 		if result.Error == "" {
 			result.Error = "The Codex turn failed"

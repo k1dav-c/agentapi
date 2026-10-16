@@ -143,17 +143,39 @@ agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6
 #### Logging in
 
 Native mode uses the agent CLI's own stored login. There is no terminal, so
-`/login` from the chat's TTY mode isn't available: log in once with the CLI
-itself, on the machine and as the user account that runs AgentAPI (or once in
-PTY mode).
+`/login` from the chat's TTY mode isn't available: log in with the CLI itself,
+in a terminal on the machine and as the user account that runs AgentAPI (or
+once in PTY mode).
 
 - Claude Code: `claude auth login` (Claude subscription by default, `--console`
-  for Anthropic Console API billing). `claude auth status` shows the login.
+  for Anthropic Console API billing). On a machine without a browser,
+  `claude setup-token` creates a token for `CLAUDE_CODE_OAUTH_TOKEN`.
+  `claude auth status` shows the login.
 - Codex: `codex login` (ChatGPT plan), or
   `printenv OPENAI_API_KEY | codex login --with-api-key` for an API key.
   `codex login status` shows the login.
 - Pi: `/login` inside `pi`, or a provider key such as `ANTHROPIC_API_KEY` in
   AgentAPI's environment.
+
+AgentAPI checks the login when it starts the agent: Claude Code with
+`claude auth status --json` (an API key, `CLAUDE_CODE_OAUTH_TOKEN`, an
+`apiKeyHelper`, Bedrock and Vertex count as logged in), Codex with
+app-server's `account/read`, and Pi from its state (no model and no available
+models). If the agent isn't logged in, AgentAPI keeps running instead of
+exiting: `GET /status` and `status_change` report `login_required` (the agent,
+what is wrong, the command to run, more help, and the host and user to run it
+on and as), the chat docks a card with the command and a copy button above the
+composer, and messages sent meanwhile wait in the queue. AgentAPI starts the
+agent again every 5 seconds, so it notices the login by itself; **Check
+again** in the chat (`POST /login/retry`) checks right away. When the check
+itself fails (an older CLI, a wrapper program), the agent starts as before.
+
+A login can also stop working while the agent runs (an expired token, a
+revoked key). A turn that fails with a login error (`Not logged in`, an HTTP
+401, `Invalid API key`, a refresh token that no longer works, Pi's
+`No API key found`) reports `login_required` the same way. Log in, then press
+Check again (`POST /login/retry`): AgentAPI restarts the agent, which resumes
+its session, and the conversation stays. A turn that works clears it too.
 
 #### Requests: approvals, questions and plans
 
@@ -740,7 +762,8 @@ Endpoints:
   `/events?sync=1`), the session name, the AgentAPI version, the agent's open
   dialog (`terminal_prompt`) and the terminal width (`terminal_columns`). With
   the native transport it also reports `capabilities` (`steer`, `interrupt`,
-  `resume`, `images`) and `pending_requests`
+  `resume`, `images`), `pending_requests`, and `login_required` while the
+  agent waits for someone to log it in (see [Logging in](#logging-in))
 - GET `/events` - an SSE stream of events from the agent: message and status updates, and `request_update` with the native transport. With `?sync=1` it replays incrementally on reconnect (`&since=<seq>&epoch=<epoch>`), and events carry SSE ids so a reconnecting `EventSource` resumes from its `Last-Event-ID`
 - DELETE `/messages` - clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent process (native transport: in a new session)
 - GET `/queue` - returns the messages waiting to be sent to the agent
@@ -748,6 +771,7 @@ Endpoints:
 - PUT/DELETE `/queue/{id}` - edits or removes a queued message
 - POST `/queue/{id}/steer` - moves a queued message into the turn the agent is working on (native transport)
 - POST `/interrupt` - stops the turn the agent is working on (native transport)
+- POST `/login/retry` - checks the agent's login again now while `login_required` is reported, restarting an agent that lost its login on its session (native transport; 409 if no login is needed); see [Logging in](#logging-in)
 - GET `/requests`, GET `/requests/{id}` - the requests (tool approvals, questions, plans) the agent is waiting on and the recently closed ones (native transport; empty otherwise)
 - POST `/requests/{id}/respond` - answers a pending request (`option_id`, or `answers` keyed by question ID, with optional `text`); see [Requests](#requests-approvals-questions-and-plans)
 - POST `/upload` - stores a file (up to 10 MB) in the server's temporary upload directory and returns its path, which a message references as `@"<path>"`

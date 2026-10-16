@@ -40,6 +40,8 @@ type loopState struct {
 	// The outcome of the turn so far.
 	stopReason string
 	errMessage string
+	// loginReported: the sink was told the provider login is missing.
+	loginReported bool
 	// turnDialogs are the dialogs opened during the current turn.
 	turnDialogs []string
 }
@@ -212,7 +214,8 @@ func (a *Adapter) handleResponse(r response) {
 
 	switch p.kind {
 	case cmdInit:
-		if res.err == nil {
+		// Without a model, Start checks the login first.
+		if res.err == nil && stateHasModel(r.Data) {
 			a.handleState(r.Data)
 		}
 	case cmdTurn, cmdSteer:
@@ -224,8 +227,14 @@ func (a *Adapter) handleResponse(r response) {
 				a.loop.stopReason = "error"
 				a.loop.errMessage = res.err.Error()
 				a.endTurn()
+			} else if isAuthError(res.err.Error()) {
+				a.reportLogin()
 			}
 		case res.err != nil:
+			// The caller gets the error ("No API key found for …").
+			if isAuthError(res.err.Error()) {
+				a.reportLogin()
+			}
 		case res.disposition == "handled":
 			// An extension command ran without starting a run. A prompt
 			// that started the turn ends it.
@@ -236,6 +245,7 @@ func (a *Adapter) handleResponse(r response) {
 		default:
 			a.beginTurn()
 		}
+	case cmdQuery:
 	case cmdAbort:
 		if res.err != nil {
 			a.loop.sink.Error("Pi couldn't stop the turn: "+res.err.Error(), st.ErrorLevelWarning)
@@ -357,6 +367,7 @@ func (a *Adapter) beginTurn() {
 	a.loop.stopReason = ""
 	a.loop.errMessage = ""
 	a.loop.turnDialogs = nil
+	a.loop.loginReported = false
 	a.loop.sink.TurnStarted()
 }
 
@@ -389,6 +400,9 @@ func (a *Adapter) endTurn() {
 	}
 	a.loop.stopReason = ""
 	a.loop.errMessage = ""
+	if result.Error != "" && isAuthError(result.Error) {
+		a.reportLogin()
+	}
 	a.loop.sink.TurnCompleted(result)
 }
 

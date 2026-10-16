@@ -150,6 +150,9 @@ type Conversation struct {
 	// loginRetry asks the waiting loop to try again now.
 	login      *LoginRequired
 	loginRetry chan struct{}
+	// loginWaiting: a start found no login, so the agent is being started
+	// again until one works.
+	loginWaiting bool
 }
 
 // NewConversation creates a conversation. Nothing runs until Start.
@@ -250,6 +253,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resumeRef string) er
 	c.starting = false
 	sendPrompt := c.cfg.InitialPrompt != "" && !c.promptSent
 	c.promptSent = true
+	c.loginWaiting = false
 	if c.login != nil {
 		c.login = nil
 		c.cfg.Observer.LoginRequired(nil)
@@ -276,6 +280,7 @@ func (c *Conversation) awaitLogin(ctx context.Context, gen int, resumeRef string
 	}
 	changed := c.setLoginLocked(login)
 	c.adapter = nil
+	c.loginWaiting = true
 	c.mu.Unlock()
 	if changed {
 		c.cfg.Logger.Warn("The agent needs a login", "agent", login.Agent, "command", login.Command)
@@ -1071,7 +1076,14 @@ func (s *sink) SessionRef(ref string) {
 func (s *sink) Error(message string, level st.ErrorLevel) {
 	c := s.c
 	current := s.lock()
+	// While the agent waits for a login it is started again every few
+	// seconds; what each attempt reports was shown after the first one.
+	repeated := c.loginWaiting && !c.started
 	c.mu.Unlock()
+	if current && repeated {
+		c.cfg.Logger.Debug("Agent message while it waits for a login", "message", message)
+		return
+	}
 	if current {
 		c.cfg.Emitter.EmitError(message, level)
 	}

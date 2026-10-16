@@ -115,16 +115,33 @@ agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6
 #### 登入
 
 Native 模式使用 agent CLI 自己保存的登入資訊。這種模式沒有終端機，所以無法在聊天介面的
-TTY mode 裡執行 `/login`：請在執行 AgentAPI 的同一台機器、以同一個使用者帳號，先用 CLI
-本身登入一次（或在 PTY 模式下登入一次）。
+TTY mode 裡執行 `/login`：請在執行 AgentAPI 的那台機器上開一個終端機，以執行 AgentAPI
+的同一個使用者帳號，用 CLI 本身登入（或在 PTY 模式下登入一次）。
 
 - Claude Code：`claude auth login`（預設使用 Claude 訂閱，`--console` 則改用 Anthropic
-  Console 的 API 計費）。`claude auth status` 會顯示登入狀態。
+  Console 的 API 計費）。在沒有瀏覽器的機器上，`claude setup-token` 會建立一個給
+  `CLAUDE_CODE_OAUTH_TOKEN` 使用的 token。`claude auth status` 會顯示登入狀態。
 - Codex：`codex login`（ChatGPT 方案），使用 API 金鑰時則用
   `printenv OPENAI_API_KEY | codex login --with-api-key`。`codex login status` 會顯示
   登入狀態。
 - Pi：在 `pi` 裡執行 `/login`，或在 AgentAPI 的環境中設定供應商金鑰，例如
   `ANTHROPIC_API_KEY`。
+
+AgentAPI 啟動 agent 時會先檢查登入：Claude Code 用 `claude auth status --json`（API
+金鑰、`CLAUDE_CODE_OAUTH_TOKEN`、`apiKeyHelper`、Bedrock 與 Vertex 都算已登入），Codex
+用 app-server 的 `account/read`，Pi 則看它的狀態（沒有模型，也沒有可用的模型）。agent
+尚未登入時，AgentAPI 不會結束，而是繼續執行：`GET /status` 和 `status_change` 會回報
+`login_required`（哪個 agent、哪裡有問題、要執行的指令、更多說明，以及要在哪台主機、
+以哪個使用者執行），聊天介面會在輸入框上方顯示一張附有指令和複製按鈕的卡片，這段期間
+送出的訊息會在佇列中等候。AgentAPI 每 5 秒重新啟動一次 agent，所以會自己發現你已經
+登入；聊天介面的「Check again」（`POST /login/retry`）則會立刻再檢查一次。如果檢查本身
+失敗（較舊的 CLI、包裝程式），agent 會照常啟動。
+
+agent 執行期間登入也可能失效（token 過期、金鑰被撤銷）。回合因登入錯誤而失敗時
+（`Not logged in`、HTTP 401、`Invalid API key`、無法再使用的 refresh token、Pi 的
+`No API key found`），同樣會回報 `login_required`。登入之後按「Check again」
+（`POST /login/retry`）：AgentAPI 會重新啟動 agent 並接續它的工作階段，對話內容會保留。
+之後有回合成功時也會清除這個狀態。
 
 #### 請求：核准、提問與計畫
 
@@ -616,7 +633,8 @@ OpenAPI schema 可在 [openapi.json](openapi.json) 取得。
   （`pty`、`acp` 或 `native`）、工作階段 ID、單調遞增的執行 ID、對話的 `epoch`（給
   `/events?sync=1` 使用）、工作階段名稱、AgentAPI 版本、agent 目前開啟的對話框
   （`terminal_prompt`）以及終端機寬度（`terminal_columns`）。使用 native transport 時
-  還會回報 `capabilities`（`steer`、`interrupt`、`resume`、`images`）和 `pending_requests`
+  還會回報 `capabilities`（`steer`、`interrupt`、`resume`、`images`）、`pending_requests`，
+  以及 agent 等待登入期間的 `login_required`（見[登入](#登入)）
 - GET `/events` - agent 事件的 SSE 串流：訊息與狀態更新，使用 native transport 時還有 `request_update`。加上 `?sync=1` 可在重新連線時增量重播（`&since=<seq>&epoch=<epoch>`），事件也會帶有 SSE id，所以重新連線的 `EventSource` 會從它的 `Last-Event-ID` 接續
 - DELETE `/messages` - 清除所有對話狀態（訊息、結構化訊息、時間軸、錯誤），並重新啟動 agent 行程（native transport：開始新的工作階段）
 - GET `/queue` - 回傳等待送給 agent 的訊息
@@ -624,6 +642,7 @@ OpenAPI schema 可在 [openapi.json](openapi.json) 取得。
 - PUT/DELETE `/queue/{id}` - 編輯或移除一則排隊中的訊息
 - POST `/queue/{id}/steer` - 把排隊中的訊息移進 agent 正在進行的回合（native transport）
 - POST `/interrupt` - 停止 agent 正在進行的回合（native transport）
+- POST `/login/retry` - 在回報 `login_required` 期間立刻再檢查一次 agent 的登入；執行中失去登入的 agent 會重新啟動並接續原本的工作階段（native transport；不需要登入時回傳 409）；見[登入](#登入)
 - GET `/requests`、GET `/requests/{id}` - agent 正在等待的請求（工具核准、提問、計畫）以及最近關閉的請求（native transport；其他 transport 為空）
 - POST `/requests/{id}/respond` - 回覆一個待處理的請求（`option_id`，或以問題 ID 為鍵的 `answers`，可另附 `text`）；見[請求](#請求核准提問與計畫)
 - POST `/upload`：把檔案（最大 10 MB）存到伺服器的暫存上傳目錄並回傳路徑，訊息以 `@"<路徑>"` 引用
