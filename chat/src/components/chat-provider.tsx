@@ -26,6 +26,8 @@ import {
   type MCPProfiles,
   type UploadOptions,
 } from "@/lib/chat-api";
+import type {Capabilities, DispatchMode, Transport} from "@/lib/dispatch";
+import {mergeRequests, type NativeRequest, type RequestResponse} from "@/lib/native-requests";
 
 export interface Message {
   id: number;
@@ -117,6 +119,9 @@ interface StatusChangeEvent {
   terminal_columns?: number;
   session_name?: string;
   terminal_prompt?: string;
+  // Native transport only.
+  pending_requests?: number;
+  capabilities?: Capabilities;
 }
 
 interface ErrorEventData {
@@ -134,6 +139,8 @@ type MessageType = "user" | "raw";
 export interface SendResult {
   ok: boolean;
   queued: boolean;
+  // The message was added to the turn the agent is working on.
+  steered?: boolean;
 }
 
 export type ServerStatus = "stable" | "running" | "offline" | "unknown";
@@ -185,7 +192,22 @@ interface ChatContextValue {
   serverStatus: ServerStatus;
   connectionStatus: ConnectionStatus;
   queuedMessages: QueuedMessage[];
-  sendMessage: (message: string, type?: MessageType) => Promise<SendResult>;
+  // How the server drives the agent; "pty" until /status says otherwise.
+  transport: Transport;
+  // Optional operations of a native agent; null for other transports.
+  capabilities: Capabilities | null;
+  // Number of requests the agent waits on (native transport).
+  pendingRequests: number;
+  // Requests the agent made (native transport): pending ones and the most
+  // recently closed, oldest first.
+  requests: NativeRequest[];
+  respondToRequest: (id: string, response: RequestResponse) => Promise<NativeRequest>;
+  refreshRequests: () => Promise<void>;
+  // Stops the turn the agent is working on (native transport).
+  interrupt: () => Promise<void>;
+  steerQueuedMessage: (id: number) => Promise<void>;
+  reorderQueue: (ids: number[]) => Promise<void>;
+  sendMessage: (message: string, type?: MessageType, mode?: DispatchMode) => Promise<SendResult>;
   // Sends keystrokes to the agent's terminal as-is (TTY mode).
   sendTerminalInput: (data: string) => Promise<void>;
   retryFailedMessage: (clientId: string) => Promise<boolean>;
@@ -303,6 +325,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [agentapiVersion, setAgentapiVersion] = useState("");
   const [terminalColumns, setTerminalColumns] = useState(0);
   const [sessionName, setSessionName] = useState("");
+  const [transport, setTransport] = useState<Transport>("pty");
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [pendingRequests, setPendingRequests] = useState(0);
+  const [requests, setRequests] = useState<NativeRequest[]>([]);
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastEventAtRef = useRef(Date.now());
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -322,6 +348,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const pendingRef = useRef({
     messages: new Map<number, Message & {seq?: number}>(),
     rich: new Map<string, RichMessage & {seq?: number}>(),
+    requests: new Map<string, NativeRequest>(),
     replace: false,
   });
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -337,11 +364,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
     const {replace} = pending;
     const messageUpdates = [...pending.messages.values()];
     const richUpdates = [...pending.rich.values()];
+    const requestUpdates = [...pending.requests.values()];
     pending.messages = new Map();
     pending.rich = new Map();
+    pending.requests = new Map();
     pending.replace = false;
     let applied = syncRef.current.seq;
-    for (const update of [...messageUpdates, ...richUpdates]) applied = Math.max(applied, update.seq ?? 0);
+    for (const update of [...messageUpdates, ...richUpdates, ...requestUpdates]) applied = Math.max(applied, update.seq ?? 0);
     syncRef.current = {...syncRef.current, seq: applied};
 
     if (replace || messageUpdates.length > 0) {
@@ -364,6 +393,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
       setRichMessages((previous) =>
         mergeByKey(replace ? [] : previous, richUpdates.map(withoutSeq), richMessageKey),
       );
+    }
+    if (replace || requestUpdates.length > 0) {
+      // Requests keep their seq: it decides between an event and a state
+      // read from the REST API (see mergeRequests).
+      setRequests((previous) => mergeRequests(replace ? [] : previous, requestUpdates));
     }
   }, []);
 
@@ -424,10 +458,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
       connectionStatus,
       serverStatus,
       terminalPrompt,
+      pendingRequests,
       task: currentTask,
       customTitle,
     });
-  }, [connectionStatus, currentTask, customTitle, serverStatus, terminalPrompt]);
+  }, [connectionStatus, currentTask, customTitle, pendingRequests, serverStatus, terminalPrompt]);
 
   useEffect(() => {
     try {
@@ -558,6 +593,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         syncRef.current = {epoch: "", seq: 0};
         pendingRef.current.messages.clear();
         pendingRef.current.rich.clear();
+        pendingRef.current.requests.clear();
         pendingRef.current.replace = true;
       };
 
@@ -571,6 +607,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
           // cache or an earlier connection left.
           pendingRef.current.messages.clear();
           pendingRef.current.rich.clear();
+          pendingRef.current.requests.clear();
           pendingRef.current.replace = true;
           syncRef.current = {epoch: data.epoch, seq: 0};
         }
@@ -607,6 +644,16 @@ export function ChatProvider({ children }: PropsWithChildren) {
         scheduleFlush(data.seq);
       });
 
+      // A request the agent waits on (native transport) opened or changed.
+      // Requests are part of the replay, like messages.
+      eventSource.addEventListener("request_update", (event) => {
+        lastEventAtRef.current = Date.now();
+        assumeFullReplay();
+        const data: NativeRequest = JSON.parse(event.data);
+        pendingRef.current.requests.set(data.id, data);
+        scheduleFlush(data.seq);
+      });
+
       // Handle status changes
       eventSource.addEventListener("status_change", (event) => {
         lastEventAtRef.current = Date.now();
@@ -626,6 +673,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
         setTerminalColumns(data.terminal_columns ?? 0);
         setSessionName(data.session_name ?? "");
         setTerminalPrompt(data.terminal_prompt ?? "");
+        setPendingRequests(data.pending_requests ?? 0);
+        setCapabilities(data.capabilities ?? null);
+        // Only the native transport reports capabilities; knowing it from
+        // the first event avoids showing terminal controls until /status
+        // answers.
+        if (data.capabilities) setTransport("native");
         void refreshQueue();
       });
 
@@ -656,6 +709,15 @@ export function ChatProvider({ children }: PropsWithChildren) {
         setNextReconnectAt(null);
         setConnectionStatus("connected");
         void refreshQueue();
+        // The transport is only reported by /status. It decides whether
+        // the terminal (TTY mode, raw keys) exists at all.
+        void api.getStatus().then((status) => {
+          if (disposed) return;
+          setTransport(status.transport);
+          if (status.capabilities) setCapabilities(status.capabilities);
+        }).catch(() => {
+          // Reported through the connection status.
+        });
         // Connection is established, but we'll wait for status_change event
         // for the actual server status
         console.log("EventSource connection established - messages reset");
@@ -706,11 +768,15 @@ export function ChatProvider({ children }: PropsWithChildren) {
     };
     if (cacheLoadedForRef.current !== agentAPIUrl) {
       cacheLoadedForRef.current = agentAPIUrl;
-      void loadSession<Message, RichMessage>(agentAPIUrl).then((cached) => {
+      void loadSession<Message, RichMessage, NativeRequest>(agentAPIUrl).then((cached) => {
         if (cached && !started && !disposed) {
           syncRef.current = {epoch: cached.epoch, seq: cached.seq};
           setMessages((previous) => [...cached.messages, ...previous.filter(isDraftMessage)]);
           setRichMessages(cached.richMessages);
+          setRequests(cached.requests ?? []);
+          if (cached.transport === "pty" || cached.transport === "acp" || cached.transport === "native") {
+            setTransport(cached.transport);
+          }
         }
         start();
       });
@@ -733,13 +799,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
-  }, [agentAPIUrl, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush]);
+  }, [agentAPIUrl, api, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush]);
 
   // Keep the conversation cache current, at most every
   // CACHE_SAVE_INTERVAL_MS, and once more when the page is hidden.
   const saveRequestRef = useRef<() => void>(() => {});
-  const latestRef = useRef({messages, richMessages});
-  latestRef.current = {messages, richMessages};
+  const latestRef = useRef({messages, richMessages, requests, transport});
+  latestRef.current = {messages, richMessages, requests, transport};
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let lastSave = 0;
@@ -753,6 +819,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         seq,
         messages: latestRef.current.messages.filter((message) => !isDraftMessage(message)) as Message[],
         richMessages: latestRef.current.richMessages,
+        requests: latestRef.current.requests,
+        transport: latestRef.current.transport,
         savedAt: Date.now(),
       });
     };
@@ -774,12 +842,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
   }, [agentAPIUrl]);
   useEffect(() => {
     saveRequestRef.current();
-  }, [messages, richMessages]);
+  }, [messages, richMessages, requests]);
 
   // Send a new message
   const sendMessage = async (
     content: string,
-    type: "user" | "raw" = "user"
+    type: "user" | "raw" = "user",
+    mode: DispatchMode = "queue",
   ): Promise<SendResult> => {
     // For user messages, require non-empty content
     if (type === "user" && !content.trim()) return {ok: false, queued: false};
@@ -800,7 +869,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     }
 
     try {
-      const result = await api.sendMessage(content, type);
+      const result = await api.sendMessage(content, type, mode);
       await refreshQueue(true);
       if (type === "user") {
         setMessages((previous) =>
@@ -814,6 +883,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       return {
         ok: result.ok,
         queued: result.queued,
+        steered: result.steered,
       };
     } catch (error) {
       console.error("Error sending message:", error);
@@ -880,6 +950,44 @@ export function ChatProvider({ children }: PropsWithChildren) {
     await refreshQueue(true);
   };
 
+  const steerQueuedMessage = async (id: number) => {
+    try {
+      await api.steerQueuedMessage(id);
+    } finally {
+      await refreshQueue(true);
+    }
+  };
+
+  const reorderQueue = async (ids: number[]) => {
+    // Show the new order at once; the refresh corrects it if the server
+    // refused.
+    setQueuedMessages((previous) =>
+      ids.flatMap((id) => previous.filter((message) => message.id === id)),
+    );
+    try {
+      await api.reorderQueue(ids);
+    } finally {
+      await refreshQueue(true);
+    }
+  };
+
+  const refreshRequests = useCallback(async () => {
+    const latest = await api.getRequests();
+    setRequests((previous) => mergeRequests(previous, latest));
+  }, [api]);
+
+  const respondToRequest = async (id: string, response: RequestResponse) => {
+    try {
+      const state = await api.respondRequest(id, response);
+      setRequests((previous) => mergeRequests(previous, [state]));
+      return state;
+    } catch (error) {
+      // Whatever went wrong, show the request as the server has it now.
+      void refreshRequests().catch(() => undefined);
+      throw error;
+    }
+  };
+
   const downloadSession = async () => {
     try {
       const events = await api.getTimelineEvents();
@@ -916,6 +1024,15 @@ export function ChatProvider({ children }: PropsWithChildren) {
         sendTerminalInput: async (data: string) => {
           await api.sendMessage(data, "raw");
         },
+        transport,
+        capabilities,
+        pendingRequests,
+        requests,
+        respondToRequest,
+        refreshRequests,
+        interrupt: api.interrupt,
+        steerQueuedMessage,
+        reorderQueue,
         retryFailedMessage,
         dismissFailedMessage,
         serverStatus,
@@ -934,6 +1051,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
           void clearSession(agentAPIUrl);
           setMessages([]);
           setRichMessages([]);
+          setRequests([]);
         },
         getTemporal: api.getTemporal,
         updateTemporal: api.updateTemporal,

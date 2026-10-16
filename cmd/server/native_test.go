@@ -19,6 +19,6 @@ func TestNativeFactoryDemo(t *testing.T) {
 	// Only the exact program name with the custom type selects the demo.
 	_, err = nativeFactory(AgentTypeCustom, nativeAdapterConfig{Program: "/usr/bin/native-demo"})
 	assert.Error(t, err)
-	_, err = nativeFactory(AgentTypeClaude, nativeAdapterConfig{Program: "native-demo"})
+	_, err = nativeFactory(AgentTypeGoose, nativeAdapterConfig{Program: "native-demo"})
 	assert.Error(t, err)
 }

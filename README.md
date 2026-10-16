@@ -68,6 +68,20 @@ amber dot when the agent needs you, a blue dot while it works, and a green dot
 when a task finished. Browser notifications can be turned on from the status
 menu.
 
+**Native transport** (`--transport native`): what the agent asks for (a tool
+approval, its questions, a plan to approve) docks above the composer as a card.
+Approvals show the command and options styled by what they do (allow, always
+allow, deny), with optional feedback sent along with a denial; plans render as
+Markdown and can be approved or sent back with feedback; questions take one
+step each (single or multiple choice, typed or hidden answers) and are
+submitted together. Number keys pick options, and the tool call's row says
+whether it waits for approval, was approved or was denied. While the agent
+works, the send button's menu adds **Steer** (put the message into the turn it
+is working on, ⌘/Ctrl+Enter) and **Interrupt & send** (⌘/Ctrl+Shift+Enter)
+next to queueing, and Stop interrupts the turn. Queued tasks can be moved up
+and down or steered in right away. There is no terminal, so TTY mode and the
+other screen views are hidden (also for ACP).
+
 ### Message queue and connection recovery
 
 Messages submitted while an agent is busy are placed in a FIFO queue instead

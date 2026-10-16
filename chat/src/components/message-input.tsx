@@ -17,6 +17,11 @@ import {
   X,
   MoreHorizontal,
   RefreshCw,
+  ChevronUp,
+  ArrowUp,
+  ArrowDown,
+  CornerDownRight,
+  OctagonX,
 } from "lucide-react";
 import type {SendResult, ServerStatus} from "./chat-provider";
 import TextareaAutosize from "react-textarea-autosize";
@@ -34,11 +39,23 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import {
+  canInterrupt,
+  canSteer,
+  dispatchModeForKey,
+  dispatchModes,
+  moveInQueue,
+  sendNotice,
+  turnActive,
+  type DispatchMode,
+} from "@/lib/dispatch";
 
 interface MessageInputProps {
-  onSendMessage: (message: string, type: "user" | "raw") => Promise<SendResult>;
+  onSendMessage: (message: string, type: "user" | "raw", mode?: DispatchMode) => Promise<SendResult>;
   disabled?: boolean;
   serverStatus: ServerStatus;
   suggestedPrompt?: string;
@@ -115,7 +132,24 @@ export default function MessageInput({
     deleteQueuedMessage,
     storageScope,
     terminalPrompt,
+    transport,
+    capabilities,
+    pendingRequests,
+    interrupt,
+    steerQueuedMessage,
+    reorderQueue,
   } = useChat();
+  const dispatch = {transport, capabilities, serverStatus, pendingRequests};
+  const modes = dispatchModes(dispatch);
+  const steerable = canSteer(dispatch);
+  const interruptible = canInterrupt(dispatch);
+  const active = turnActive(dispatch);
+  const waitingForAnswer = Boolean(terminalPrompt) || pendingRequests > 0;
+  // Shortcut labels: ⌘ on Apple devices, Ctrl elsewhere.
+  const [modKey, setModKey] = useState("Ctrl");
+  useEffect(() => {
+    if (/Mac|iPhone|iPad/.test(navigator.platform)) setModKey("⌘");
+  }, []);
   const draftStorageKey = `agentapi.chat.message-draft:${storageScope}`;
   const attachmentsStorageKey = `agentapi.chat.attachments:${storageScope}`;
 
@@ -203,8 +237,8 @@ export default function MessageInput({
   }, [attachments, attachmentsStorageKey, hydratedAttachmentsKey]);
 
   useEffect(() => {
-    if (serverStatus !== "running") setIsStopping(false);
-  }, [serverStatus]);
+    if (!active) setIsStopping(false);
+  }, [active]);
 
   useEffect(() => {
     if (!suggestedPrompt) return;
@@ -348,17 +382,41 @@ export default function MessageInput({
     }
   };
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const submit = async (mode: DispatchMode = "queue") => {
     if (message.trim() && !disabled) {
       if (serverStatus !== "running" && serverStatus !== "stable") return;
-      const result = await onSendMessage(message, "user");
+      const result = await onSendMessage(message, "user", mode);
       if (!result.ok) return;
-      if (result.queued) toast.success("Task queued");
+      const notice = sendNotice(result, mode);
+      if (notice) toast.success(notice);
       setMessage("");
       setAttachments((previous) =>
         previous.filter((attachment) => attachment.status !== "completed"),
       );
+    }
+  };
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    void submit("queue");
+  };
+
+  const steerQueued = async (id: number) => {
+    try {
+      await steerQueuedMessage(id);
+      toast.success("Added to the current turn");
+    } catch (error) {
+      toast.error("Failed to steer the agent", {description: getErrorMessage(error)});
+    }
+  };
+
+  const moveQueued = async (id: number, delta: number) => {
+    const ids = moveInQueue(queuedMessages.map((queued) => queued.id), id, delta);
+    if (!ids) return;
+    try {
+      await reorderQueue(ids);
+    } catch (error) {
+      toast.error("Failed to reorder the queue", {description: getErrorMessage(error)});
     }
   };
 
@@ -375,9 +433,13 @@ export default function MessageInput({
   }, [serverStatus, disabled]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    const mode = dispatchModeForKey(
+      {key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, isComposing: e.nativeEvent.isComposing},
+      modes,
+    );
+    if (mode) {
       e.preventDefault();
-      handleSubmit(e);
+      void submit(mode);
     }
   };
 
@@ -453,9 +515,26 @@ export default function MessageInput({
   const handleStop = () => {
     if (isStopping) return;
     setIsStopping(true);
+    if (transport === "native") {
+      interrupt().then(
+        () => toast.info("Stopping the agent"),
+        (error) => {
+          setIsStopping(false);
+          toast.error("Failed to stop the agent", {description: getErrorMessage(error)});
+        },
+      );
+      return;
+    }
     onSendMessage("\x1b", "raw");
     toast.info("Stop signal sent");
   };
+  // The native transport stops a turn with POST /interrupt when the agent
+  // supports it; the others send Esc to the terminal.
+  const showStop = transport === "native" ? interruptible : serverStatus === "running";
+  const sendBlocked =
+    disabled ||
+    !message.trim() ||
+    attachments.some((attachment) => attachment.status === "uploading");
 
   return (
     <div className="shrink-0 border-t bg-background/90 backdrop-blur-xl">
@@ -498,10 +577,10 @@ export default function MessageInput({
                     }}
                     aria-label="Task message"
                     placeholder={
-                      terminalPrompt
+                      waitingForAnswer
                         ? "Queue a task (runs after you answer)…"
                         : serverStatus === "running"
-                          ? "Queue a follow-up…"
+                          ? steerable ? "Queue a follow-up, or steer the agent…" : "Queue a follow-up…"
                           : serverStatus === "stable"
                             ? "Describe a task…"
                             : "Reconnecting… Your draft is saved."
@@ -609,7 +688,7 @@ export default function MessageInput({
                     <span className="flex items-center gap-1.5">
                       <Clock3 className="size-3" />
                       Queued tasks · {queuedMessages.length}
-                      {terminalPrompt && <span className="text-state-needs">· held until you answer the agent</span>}
+                      {waitingForAnswer && <span className="text-state-needs">· held until you answer the agent</span>}
                     </span>
                     <span className="text-[10px] group-open:hidden">Show</span>
                     <span className="hidden text-[10px] group-open:inline">Hide</span>
@@ -641,6 +720,47 @@ export default function MessageInput({
                           />
                         ) : (
                           <span className="min-w-0 flex-1 truncate">{queuedMessage.content}</span>
+                        )}
+                        {steerable && editingQueuedID !== queuedMessage.id && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 shrink-0 gap-1 px-2 text-[11px] text-state-working sm:h-6"
+                            onClick={() => void steerQueued(queuedMessage.id)}
+                            title="Steer now: add this task to the turn the agent is working on"
+                          >
+                            <CornerDownRight className="size-3" />
+                            Steer<span className="hidden sm:inline"> now</span>
+                          </Button>
+                        )}
+                        {queuedMessages.length > 1 && editingQueuedID !== queuedMessage.id && (
+                          <>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="size-7 shrink-0 text-muted-foreground sm:size-6"
+                              disabled={index === 0}
+                              onClick={() => void moveQueued(queuedMessage.id, -1)}
+                              title="Move up: send earlier"
+                            >
+                              <ArrowUp className="size-3" />
+                              <span className="sr-only">Move queued task {index + 1} up</span>
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="size-7 shrink-0 text-muted-foreground sm:size-6"
+                              disabled={index === queuedMessages.length - 1}
+                              onClick={() => void moveQueued(queuedMessage.id, 1)}
+                              title="Move down: send later"
+                            >
+                              <ArrowDown className="size-3" />
+                              <span className="sr-only">Move queued task {index + 1} down</span>
+                            </Button>
+                          </>
                         )}
                         <Button
                           type="button"
@@ -734,17 +854,12 @@ export default function MessageInput({
                     </DropdownMenu>
 
                   {(serverStatus === "stable" || serverStatus === "running") && (
+                   <div className="flex items-center" data-send-group>
                     <Button
                       type="submit"
-                      disabled={
-                        disabled ||
-                        !message.trim() ||
-                        attachments.some(
-                          (attachment) => attachment.status === "uploading",
-                        )
-                      }
+                      disabled={sendBlocked}
                       size="icon"
-                      className="relative size-10 rounded-full shadow-sm"
+                      className={`relative size-10 shadow-sm ${modes.length > 1 ? "rounded-l-full rounded-r-none" : "rounded-full"}`}
                       title={
                         serverStatus === "running"
                           ? "Add task to queue"
@@ -764,9 +879,60 @@ export default function MessageInput({
                         {serverStatus === "running" ? "Queue task" : "Send task"}
                       </span>
                     </Button>
+                    {modes.length > 1 && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            size="icon"
+                            disabled={sendBlocked}
+                            className="h-10 w-8 rounded-l-none rounded-r-full border-l border-primary-foreground/20 shadow-sm"
+                            title="More ways to send"
+                          >
+                            <ChevronUp className="size-4" />
+                            <span className="sr-only">More ways to send</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" side="top" className="w-72">
+                          <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">While the agent works</DropdownMenuLabel>
+                          <DropdownMenuItem className="min-h-11 items-start" onSelect={() => void submit("queue")}>
+                            <ListPlus className="mt-0.5" />
+                            <span className="grid flex-1">
+                              <span>Queue</span>
+                              <span className="text-[11px] text-muted-foreground">Send once this turn ends</span>
+                            </span>
+                            <ShortcutHint keys={["Enter"]} />
+                          </DropdownMenuItem>
+                          {modes.includes("steer") && (
+                            <DropdownMenuItem className="min-h-11 items-start" onSelect={() => void submit("steer")}>
+                              <CornerDownRight className="mt-0.5" />
+                              <span className="grid flex-1">
+                                <span>Steer</span>
+                                <span className="text-[11px] text-muted-foreground">Add to the turn it is working on</span>
+                              </span>
+                              <ShortcutHint keys={[modKey, "Enter"]} />
+                            </DropdownMenuItem>
+                          )}
+                          {modes.includes("interrupt") && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem className="min-h-11 items-start" variant="destructive" onSelect={() => void submit("interrupt")}>
+                                <OctagonX className="mt-0.5" />
+                                <span className="grid flex-1">
+                                  <span>Interrupt &amp; send</span>
+                                  <span className="text-[11px] text-muted-foreground">Stop this turn, then send</span>
+                                </span>
+                                <ShortcutHint keys={[modKey, "⇧", "Enter"]} />
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                   </div>
                   )}
 
-                  {serverStatus === "running" && (
+                  {showStop && (
                     <Button
                       size="icon"
                       type="button"
@@ -793,7 +959,14 @@ export default function MessageInput({
         </DragDrop>
 
         <p className="hidden text-center text-[11px] text-muted-foreground sm:block">
-          Enter to send · Shift+Enter for a new line · Keys for the terminal itself: TTY mode
+          {transport === "pty"
+            ? "Enter to send · Shift+Enter for a new line · Keys for the terminal itself: TTY mode"
+            : [
+                "Enter to send",
+                transport === "native" && capabilities?.steer ? `${modKey}+Enter to steer while it works` : "",
+                transport === "native" && capabilities?.interrupt ? `${modKey}+Shift+Enter to interrupt & send` : "",
+                "Shift+Enter for a new line",
+              ].filter(Boolean).join(" · ")}
         </p>
        </div>
       </div>
@@ -802,6 +975,16 @@ export default function MessageInput({
   );
 }
 
+
+function ShortcutHint({keys}: {keys: string[]}) {
+  return (
+    <span className="ml-auto hidden shrink-0 items-center gap-0.5 pt-0.5 sm:flex" aria-hidden="true">
+      {keys.map((key) => (
+        <kbd key={key} className="rounded border border-b-2 px-1 font-mono text-[10px] text-muted-foreground">{key}</kbd>
+      ))}
+    </span>
+  );
+}
 
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;

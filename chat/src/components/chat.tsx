@@ -9,6 +9,9 @@ import dynamic from "next/dynamic";
 import {TtyView} from "./tty-view";
 import {requestCredentials} from "@/lib/auth";
 import {DecisionCard, StateStrip} from "./dock";
+import {RequestCard} from "./request-card";
+import {toast} from "sonner";
+import {getErrorMessage} from "@/lib/error-utils";
 import {BackgroundAlerts} from "./background-alerts";
 
 // The Explorer (task index, MCP and Temporal settings) isn't needed for the
@@ -45,7 +48,27 @@ export function Chat() {
     reconnectNow,
     storageScope,
     workspaceUrl,
+    transport,
+    capabilities,
+    interrupt,
   } = useChat();
+  // Only the PTY transport has a terminal: TTY mode, raw keys and the
+  // terminal prompt card need it.
+  const hasTerminal = transport === "pty";
+  useEffect(() => {
+    if (!hasTerminal) setTtyMode(false);
+  }, [hasTerminal]);
+  const stopTask =
+    transport === "native"
+      ? capabilities?.interrupt
+        ? () => {
+            interrupt().then(
+              () => toast.info("Stopping the agent"),
+              (error) => toast.error("Failed to stop the agent", {description: getErrorMessage(error)}),
+            );
+          }
+        : undefined
+      : () => void sendMessage("\x1b", "raw");
   const [reconnectSeconds, setReconnectSeconds] = useState(0);
   const [coderWorkspaceUrl, setCoderWorkspaceUrl] = useState(workspaceUrl);
 
@@ -108,7 +131,7 @@ export function Chat() {
           </Button>
         </div>
       )}
-      {ttyMode ? (
+      {ttyMode && hasTerminal ? (
         <TtyView onExit={() => setTtyMode(false)} />
       ) : (
         <>
@@ -123,21 +146,23 @@ export function Chat() {
               setSuggestedPrompt(content);
             }}
             onDismissMessage={dismissFailedMessage}
-            onStopTask={() => void sendMessage("\x1b", "raw")}
-            onSendRaw={(data) => void sendMessage(data, "raw")}
+            onStopTask={stopTask}
+            onSendRaw={hasTerminal ? (data) => void sendMessage(data, "raw") : undefined}
             headerAction={
               <div className="flex items-center gap-0.5">
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="size-8 rounded-full text-muted-foreground"
-                  title="TTY mode: use the agent's terminal directly"
-                  aria-label="Switch to TTY mode"
-                  onClick={() => setTtyMode(true)}
-                >
-                  <TerminalSquare className="size-4" />
-                </Button>
+                {hasTerminal && (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-8 rounded-full text-muted-foreground"
+                    title="TTY mode: use the agent's terminal directly"
+                    aria-label="Switch to TTY mode"
+                    onClick={() => setTtyMode(true)}
+                  >
+                    <TerminalSquare className="size-4" />
+                  </Button>
+                )}
                 <Explorer
                   onNavigateTask={(number) => {
                     window.requestAnimationFrame(() =>
@@ -168,7 +193,8 @@ export function Chat() {
             dock={
               <>
                 <StateStrip />
-                <DecisionCard onOpenTerminal={() => setTtyMode(true)} />
+                {hasTerminal && <DecisionCard onOpenTerminal={() => setTtyMode(true)} />}
+                {transport === "native" && <RequestCard />}
               </>
             }
             onSendMessage={sendMessage}

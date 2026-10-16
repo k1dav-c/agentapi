@@ -11,8 +11,8 @@ import { alertForTransition, faviconDataUrl, notificationsEnabled, type FaviconB
 // notification when the agent needs them or finishes while the tab is in
 // the background.
 export function BackgroundAlerts() {
-  const { serverStatus, connectionStatus, terminalPrompt, agentType, messages } = useChat();
-  const kind = getAgentState(serverStatus, connectionStatus, terminalPrompt);
+  const { serverStatus, connectionStatus, terminalPrompt, pendingRequests, requests, agentType, messages } = useChat();
+  const kind = getAgentState(serverStatus, connectionStatus, terminalPrompt, pendingRequests);
   const previous = useRef(kind);
   // A task finished while the tab was hidden and hasn't been seen yet.
   const [unseenFinish, setUnseenFinish] = useState(false);
@@ -34,7 +34,11 @@ export function BackgroundAlerts() {
     if (alert === "finished") setUnseenFinish(true);
     if (!notificationsEnabled() || typeof Notification === "undefined" || Notification.permission !== "granted") return;
     const notification = new Notification(alert === "needs-you" ? `${name} needs you` : `${name} finished`, {
-      body: alert === "needs-you" ? describeTerminalPrompt(terminalPrompt).title : task.replace(/\s+/g, " ").slice(0, 120),
+      body: alert === "needs-you"
+        ? terminalPrompt
+          ? describeTerminalPrompt(terminalPrompt).title
+          : requests.find((request) => request.status === "pending")?.title ?? "The agent is waiting for your answer"
+        : task.replace(/\s+/g, " ").slice(0, 120),
       tag: `agentapi-${alert}`,
     });
     notification.onclick = () => {

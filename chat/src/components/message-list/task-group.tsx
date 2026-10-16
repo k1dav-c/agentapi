@@ -10,7 +10,7 @@ import { groupConsecutiveTools } from "@/lib/activity-groups";
 import { ToolCallCard, ToolCallGroup } from "./tool-call";
 import { MessageItem } from "./message-item";
 import { AgentMark } from "../agent-mark";
-import { AgentType } from "../chat-provider";
+import { AgentType, useChat } from "../chat-provider";
 import type { TaskSection, TaskStatus } from "@/lib/task-timeline";
 import { getTaskActivity, hasStructuredTranscript, toSearchableTask } from "@/lib/task-timeline";
 import { splitThinking } from "@/lib/thinking";
@@ -53,7 +53,7 @@ export function TaskGroup({
   onRetryMessage: (clientId: string) => Promise<boolean>;
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
-  onStopTask: () => void;
+  onStopTask?: () => void;
   onSendRaw?: (data: string) => void;
   searchQuery: string;
   searchResultIndex: number;
@@ -76,9 +76,14 @@ export function TaskGroup({
         failed: {label: "Failed", className: "text-state-fault"},
       }[status];
   const live = status === "running";
+  // Only a terminal has a live screen to show at the end of a running task
+  // and screen text to offer as "Terminal output"; the native transport
+  // streams its transcript instead.
+  const { transport } = useChat();
+  const hasScreen = transport === "pty";
   const activity = useMemo(() => {
     if (deferred) return [];
-    const raw = getTaskActivity(task, {live});
+    const raw = getTaskActivity(task, {live: live && hasScreen, transcriptOnly: transport === "native"});
     // When rich activity provides real interleaving (text + tool entries),
     // tools are already positioned where they occurred in the conversation.
     // Only group consecutive tools in the fallback path (PTY-only), where
@@ -87,7 +92,7 @@ export function TaskGroup({
       task.richActivity.some(item => item.type === "message" || item.type === "thinking") &&
       task.richActivity.some(item => item.type === "tool");
     return hasRichInterleaving ? raw : groupConsecutiveTools(raw);
-  }, [task, deferred, live]);
+  }, [task, deferred, live, hasScreen, transport]);
   const structured = hasStructuredTranscript(task);
   // A long task shows its latest steps; earlier ones load on request.
   // Rendering hundreds of steps (Markdown, highlighted code) at once froze
@@ -186,7 +191,7 @@ export function TaskGroup({
             {statusMeta.label}
           </span>
           <div className="ml-auto flex items-center gap-1 font-sans normal-case tracking-normal">
-            {status === "running" && (
+            {status === "running" && onStopTask && (
               <Button type="button" size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={onStopTask}>
                 Stop
               </Button>
@@ -247,7 +252,7 @@ export function TaskGroup({
           )}
           {visibleActivity.map((item, index) =>
             item.type === "message" ? (
-              live && index === visibleActivity.length - 1 ? (
+              live && hasScreen && index === visibleActivity.length - 1 ? (
                 // While a task runs, the last item is the live terminal
                 // screen. With a transcript, only its tail is shown (the
                 // rest is in the transcript). Either way it is redrawn at
@@ -267,7 +272,7 @@ export function TaskGroup({
               <ToolCallCard key={item.key} toolCall={item.toolCall} searchQuery={searchQuery} onSendRaw={onSendRaw} />
             ),
           )}
-          {!deferred && structured && !live && task.responses.length > 0 && (
+          {!deferred && hasScreen && structured && !live && task.responses.length > 0 && (
             <div>
               <button
                 type="button"

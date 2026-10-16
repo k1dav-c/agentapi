@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useChat } from "./chat-provider";
 import {
   Dialog,
   DialogContent,
@@ -13,7 +14,13 @@ interface KeyboardShortcutsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const shortcuts = [
+const shortcuts: {
+  section: string;
+  // Only with a terminal (PTY transport).
+  terminal?: boolean;
+  // Only for a native agent with this capability.
+  items: {keys: string[]; label: string; needs?: "steer" | "interrupt"}[];
+}[] = [
   {
     section: "General",
     items: [
@@ -28,11 +35,14 @@ const shortcuts = [
     items: [
       { keys: ["Enter"], label: "Send task" },
       { keys: ["Shift", "Enter"], label: "New line" },
+      { keys: ["⌘", "Enter"], label: "Steer: add to the agent's current turn", needs: "steer" },
+      { keys: ["⌘", "Shift", "Enter"], label: "Interrupt the agent and send", needs: "interrupt" },
       { keys: ["Esc"], label: "Cancel edit" },
     ],
   },
   {
     section: "TTY mode (terminal button in the header)",
+    terminal: true,
     items: [
       { keys: ["Any key"], label: "Sent straight to the agent" },
       { keys: ["Ctrl", "C"], label: "Interrupt (also on the key bar)" },
@@ -62,6 +72,13 @@ export function useKeyboardShortcutsKey(onOpen: () => void) {
 }
 
 export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcutsDialogProps) {
+  const { transport, capabilities } = useChat();
+  const shown = shortcuts
+    .filter((group) => !group.terminal || transport === "pty")
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => !item.needs || (transport === "native" && capabilities?.[item.needs])),
+    }));
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -69,7 +86,7 @@ export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcut
           <DialogTitle>Keyboard shortcuts</DialogTitle>
         </DialogHeader>
         <div className="space-y-5 py-2">
-          {shortcuts.map((group) => (
+          {shown.map((group) => (
             <div key={group.section}>
               <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {group.section}

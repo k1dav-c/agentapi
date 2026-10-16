@@ -24,6 +24,7 @@ export function Header() {
     serverStatus,
     connectionStatus,
     terminalPrompt,
+    pendingRequests,
     agentType,
     queuedMessages,
     richMessages,
@@ -83,7 +84,7 @@ export function Header() {
   }, [messages, richMessages]);
 
   const tokenTotals = useMemo(() => computeTokenTotals(richMessages), [richMessages]);
-  const status = getStatusMeta(serverStatus, connectionStatus, terminalPrompt);
+  const status = getStatusMeta(serverStatus, connectionStatus, terminalPrompt, pendingRequests);
   const StatusIcon = status.icon;
   const activityDetail =
     status.kind === "working"

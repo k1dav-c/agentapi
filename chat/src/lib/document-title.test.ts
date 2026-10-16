@@ -23,6 +23,17 @@ describe("getDocumentTitle", () => {
     ).toBe("◆ Needs you · Rebuild the chat UI — AgentAPI");
   });
 
+  test("a request the agent waits on (native transport) reads as needing the user", () => {
+    expect(
+      getDocumentTitle({
+        connectionStatus: "connected",
+        serverStatus: "stable",
+        pendingRequests: 1,
+        task: "Ship the release",
+      }),
+    ).toBe("◆ Needs you · Ship the release — AgentAPI");
+  });
+
   test("prioritizes connection state over agent state", () => {
     expect(
       getDocumentTitle({

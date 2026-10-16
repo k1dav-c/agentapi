@@ -55,14 +55,17 @@ const STATE_META: Record<AgentStateKind, Omit<StatusMeta, "kind">> = {
   connecting: { label: "Connecting", detail: "Waiting for agent status", icon: CircleAlert, className: "text-muted-foreground" },
 };
 
+// The agent needs you while its terminal shows a prompt (PTY) or while it
+// waits on requests (native transport: approvals, questions, plans).
 export function getAgentState(
   serverStatus: ServerStatus,
   connectionStatus: string,
   terminalPrompt = "",
+  pendingRequests = 0,
 ): AgentStateKind {
   if (connectionStatus === "offline" || serverStatus === "offline") return "offline";
   if (connectionStatus === "reconnecting") return "reconnecting";
-  if (terminalPrompt) return "needs-you";
+  if (terminalPrompt || pendingRequests > 0) return "needs-you";
   if (serverStatus === "running") return "working";
   if (serverStatus === "stable") return "ready";
   return "connecting";
@@ -72,7 +75,8 @@ export function getStatusMeta(
   serverStatus: ServerStatus,
   connectionStatus: string,
   terminalPrompt = "",
+  pendingRequests = 0,
 ): StatusMeta {
-  const kind = getAgentState(serverStatus, connectionStatus, terminalPrompt);
+  const kind = getAgentState(serverStatus, connectionStatus, terminalPrompt, pendingRequests);
   return { kind, ...STATE_META[kind] };
 }

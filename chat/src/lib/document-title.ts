@@ -17,12 +17,14 @@ export function getDocumentTitle({
   connectionStatus,
   serverStatus,
   terminalPrompt,
+  pendingRequests = 0,
   task,
   customTitle,
 }: {
   connectionStatus: ConnectionStatus;
   serverStatus: ServerStatus;
   terminalPrompt?: string;
+  pendingRequests?: number;
   task?: string;
   customTitle?: string;
 }) {
@@ -35,7 +37,7 @@ export function getDocumentTitle({
     working: "● Working",
     ready: "✓ Ready",
     connecting: "○ Connecting",
-  }[getAgentState(serverStatus, connectionStatus, terminalPrompt)];
+  }[getAgentState(serverStatus, connectionStatus, terminalPrompt, pendingRequests)];
   const taskSummary = task ? summarizeTask(task) : "";
   const suffix = customTitle || "AgentAPI";
 

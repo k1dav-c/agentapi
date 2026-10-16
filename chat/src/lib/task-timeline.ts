@@ -151,7 +151,15 @@ export function hasStructuredTranscript(task: TaskSection): boolean {
 //
 // Without a transcript, the screen text and the tool calls are shown in
 // time order.
-export function getTaskActivity(task: TaskSection, {live = false}: {live?: boolean} = {}): TaskActivity[] {
+//
+// transcriptOnly (the native transport) never shows the agent messages: they
+// are the transcript's text joined, so they would repeat it. A message
+// steered into a running turn starts a task whose reply belongs to the
+// transcript of the task before it.
+export function getTaskActivity(
+  task: TaskSection,
+  {live = false, transcriptOnly = false}: {live?: boolean; transcriptOnly?: boolean} = {},
+): TaskActivity[] {
   const coveredToolIDs = new Set(
     task.richActivity
       .filter((item): item is Extract<TaskActivity, {type: "tool"}> => item.type === "tool")
@@ -166,6 +174,7 @@ export function getTaskActivity(task: TaskSection, {live = false}: {live?: boole
     message,
   });
 
+  if (transcriptOnly) return [...task.richActivity, ...uncoveredTools];
   if (hasStructuredTranscript(task)) {
     const result = [...task.richActivity, ...uncoveredTools];
     const latest = task.responses.at(-1);

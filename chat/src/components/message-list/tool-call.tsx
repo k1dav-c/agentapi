@@ -9,6 +9,7 @@ import type { ToolCall } from "@/lib/task-timeline";
 import { currentPromptQuestion, parseInteractiveToolInput } from "@/lib/interactive-tool";
 import { useChat } from "../chat-provider";
 import { ImageThumb } from "../image-preview";
+import { toolRequestBadge, type Tone } from "@/lib/native-requests";
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return "< 1s";
@@ -66,11 +67,17 @@ export function ToolDetail({
   );
 }
 
-function ToolChip({children, tone}: {children: React.ReactNode; tone?: "ok" | "fault"}) {
+function ToolChip({children, tone}: {children: React.ReactNode; tone?: Tone}) {
   return (
     <span
       className={`shrink-0 rounded-[4px] border px-1.5 font-mono text-[11px] leading-[18px] tabular-nums ${
-        tone === "ok" ? "border-state-ready/40 text-state-ready" : tone === "fault" ? "border-state-fault/40 text-state-fault" : "text-muted-foreground"
+        tone === "ok"
+          ? "border-state-ready/40 text-state-ready"
+          : tone === "fault"
+            ? "border-state-fault/40 text-state-fault"
+            : tone === "needs"
+              ? "border-state-needs/50 text-state-needs"
+              : "text-muted-foreground"
       }`}
     >
       {children}
@@ -96,13 +103,18 @@ export function ToolCallCard({
     toolCall.status === "running" ||
     (toolCall.status === undefined && toolCall.result === undefined);
   const input = formatToolInput(toolCall.input);
-  const interactiveInput = isPending ? parseInteractiveToolInput(toolCall.name, toolCall.input) : null;
+  const { messages, storageScope, transport, requests } = useChat();
+  // On the native transport the agent's questions and plans are answered on
+  // their request card; the tool call only shows the request's state.
+  const native = transport === "native";
+  const interactiveInput = isPending && !native ? parseInteractiveToolInput(toolCall.name, toolCall.input) : null;
+  const request = native ? requests.findLast((candidate) => candidate.tool_use_id === toolCall.id) : undefined;
+  const requestBadge = request ? toolRequestBadge(request) : null;
   const [localIsOpen, setLocalIsOpen] = useState(Boolean(searchQuery) || Boolean(interactiveInput));
   // The agent's prompt shows one question at a time and moves on as each is
   // answered, so only the question it is asking accepts clicks. Codex prints
   // which one that is; otherwise count the answers given here.
   const [answeredCount, setAnsweredCount] = useState(0);
-  const { messages, storageScope } = useChat();
   const lastAgentOutput = messages.findLast((message) => message.role === "agent")?.content ?? "";
   const activeQuestion = currentPromptQuestion(lastAgentOutput) ?? answeredCount;
   const isOpen = open ?? localIsOpen;
@@ -144,7 +156,10 @@ export function ToolCallCard({
       <summary className="block cursor-pointer list-none outline-none transition hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         <span className="flex min-h-8 items-center gap-2.5 px-2.5 py-1 font-mono text-[12.5px] leading-5">
           {isPending ? (
-            <span aria-label="Running" className="size-1.5 shrink-0 rounded-full bg-state-working motion-safe:animate-pulse" />
+            <span
+              aria-label={request?.status === "pending" ? "Waiting for you" : "Running"}
+              className={`size-1.5 shrink-0 rounded-full motion-safe:animate-pulse ${request?.status === "pending" ? "bg-state-needs" : "bg-state-working"}`}
+            />
           ) : null}
           {command ? (
             <span className="min-w-0 flex-1 truncate">
@@ -159,6 +174,11 @@ export function ToolCallCard({
                 return summary ? <span className="ml-2 text-muted-foreground">{summary}</span> : null;
               })()}
             </span>
+          )}
+          {requestBadge && (
+            <ToolChip tone={requestBadge.tone}>
+              <span data-request-state={request?.status}>{requestBadge.label}</span>
+            </ToolChip>
           )}
           {exitCode !== undefined ? (
             <ToolChip tone={exitCode === 0 ? "ok" : "fault"}>exit {exitCode}</ToolChip>
@@ -194,7 +214,7 @@ export function ToolCallCard({
             <div key={qi} className={`space-y-2 ${qi === activeQuestion ? "" : "opacity-60"}`}>
               <p className="text-xs font-medium text-foreground">{q.question}</p>
               <div className="flex flex-wrap gap-1.5">
-                {q.options.map((opt, oi) => (
+                {(q.options ?? []).map((opt, oi) => (
                   <button
                     key={oi}
                     type="button"
@@ -219,7 +239,7 @@ export function ToolCallCard({
                   Or type your own answer in the message box.
                 </p>
               )}
-              {q.options.some(o => o.description) && (
+              {q.options?.some(o => o.description) && (
                 <div className="space-y-1 pt-1">
                   {q.options.map((opt, oi) => opt.description ? (
                     <p key={oi} className="text-[11px] text-muted-foreground">

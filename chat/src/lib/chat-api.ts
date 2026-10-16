@@ -5,6 +5,8 @@ import type {
   QueuedMessage,
   SendResult,
 } from "@/components/chat-provider";
+import type {Capabilities, DispatchMode, Transport} from "./dispatch";
+import {RespondError, type NativeRequest, type RequestResponse} from "./native-requests";
 
 export interface UploadOptions {
   signal?: AbortSignal;
@@ -42,6 +44,20 @@ interface APIErrorModel {
 async function requireOK(response: Response, fallback: string) {
   if (!response.ok) throw new Error(fallback);
   return response;
+}
+
+// The server's error message (huma's detail plus field errors), or fallback.
+async function errorDetail(response: Response, fallback: string): Promise<string> {
+  const error = await response.json().catch(() => null) as APIErrorModel | null;
+  const details = error?.errors?.map((item) => item.message).join(", ");
+  if (!error?.detail) return fallback;
+  return details ? `${error.detail}: ${details}` : error.detail;
+}
+
+export interface ServerStatusInfo {
+  transport: Transport;
+  capabilities?: Capabilities;
+  pending_requests?: number;
 }
 
 async function temporalRequest<T>(baseURL: string, url: string, method = "GET", body?: unknown): Promise<T> {
@@ -209,28 +225,83 @@ export function createChatAPI(baseURL: string) {
       return data.messages ?? [];
     },
 
+    async getStatus(): Promise<ServerStatusInfo> {
+      const response = await requireOK(await fetch(`${baseURL}/status`), "Failed to read the agent status");
+      const data = (await response.json()) as Partial<ServerStatusInfo>;
+      return {
+        transport: data.transport === "acp" || data.transport === "native" ? data.transport : "pty",
+        capabilities: data.capabilities,
+        pending_requests: data.pending_requests,
+      };
+    },
+
     async sendMessage(
       content: string,
       type: "user" | "raw",
+      mode: DispatchMode = "queue",
     ): Promise<SendResult> {
       const response = await fetch(`${baseURL}/message`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({content, type}),
+        // Only send dispatch_mode when it isn't the default, so older
+        // servers that don't know the field keep accepting messages.
+        body: JSON.stringify(mode === "queue" ? {content, type} : {content, type, dispatch_mode: mode}),
       });
       if (response.status === 401) {
         throw new Error("Not signed in: this server needs its API token.");
       }
       if (!response.ok) {
-        const error = (await response.json()) as APIErrorModel;
-        const details = error.errors?.map((item) => item.message).join(", ");
-        throw new Error(details ? `${error.detail}: ${details}` : error.detail);
+        throw new Error(await errorDetail(response, "Failed to send the message"));
       }
       const result = (await response.json()) as {
         ok?: boolean;
         queued?: boolean;
+        steered?: boolean;
       };
-      return {ok: result.ok === true, queued: result.queued === true};
+      return {ok: result.ok === true, queued: result.queued === true, steered: result.steered === true};
+    },
+
+    async interrupt(): Promise<void> {
+      const response = await fetch(`${baseURL}/interrupt`, {method: "POST"});
+      if (!response.ok) throw new Error(await errorDetail(response, "Failed to stop the agent"));
+    },
+
+    async getRequests(): Promise<NativeRequest[]> {
+      const response = await requireOK(await fetch(`${baseURL}/requests`), "Failed to load the agent's requests");
+      const data = (await response.json()) as {requests?: NativeRequest[]};
+      return data.requests ?? [];
+    },
+
+    async respondRequest(id: string, body: RequestResponse): Promise<NativeRequest> {
+      const response = await fetch(`${baseURL}/requests/${encodeURIComponent(id)}/respond`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        throw new RespondError(await errorDetail(response, "Failed to answer the agent"), response.status);
+      }
+      const data = (await response.json()) as NativeRequest & {$schema?: string};
+      delete data.$schema;
+      return data;
+    },
+
+    async steerQueuedMessage(id: number): Promise<void> {
+      const response = await fetch(`${baseURL}/queue/${id}/steer`, {method: "POST"});
+      if (!response.ok) throw new Error(await errorDetail(response, "Failed to add the task to the current turn"));
+    },
+
+    async reorderQueue(ids: number[]): Promise<void> {
+      const response = await fetch(`${baseURL}/queue`, {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ids}),
+      });
+      if (!response.ok) {
+        throw new Error(response.status === 409
+          ? "The queue changed in the meantime; try again"
+          : await errorDetail(response, "Failed to reorder the queue"));
+      }
     },
 
     uploadFiles(

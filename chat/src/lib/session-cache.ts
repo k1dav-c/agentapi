@@ -4,13 +4,19 @@
 // IndexedDB rather than localStorage: long sessions exceed localStorage's
 // ~5 MB quota, and localStorage reads block the page while they parse.
 
-export interface CachedSession<M, R> {
+export interface CachedSession<M, R, Q = unknown> {
   // Server conversation state the cache belongs to (session_sync.epoch).
   epoch: string;
   // Highest change sequence applied; sent back as /events?since=.
   seq: number;
   messages: M[];
   richMessages: R[];
+  // Requests the agent made (native transport). Missing in caches written
+  // before requests existed.
+  requests?: Q[];
+  // How the server drives the agent ("pty", "acp", "native"), so the cached
+  // transcript renders for the right transport before /status answers.
+  transport?: string;
   savedAt: number;
 }
 
@@ -37,17 +43,18 @@ function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => 
 
 // Loads the cached session for key, or null when there is none or storage is
 // unavailable (private mode, blocked site data). Never throws.
-export async function loadSession<M, R>(key: string): Promise<CachedSession<M, R> | null> {
+export async function loadSession<M, R, Q = unknown>(key: string): Promise<CachedSession<M, R, Q> | null> {
   try {
     if (typeof indexedDB === "undefined") return null;
-    const value = await withStore<CachedSession<M, R> | undefined>("readonly", (store) => store.get(key));
-    return value && typeof value.epoch === "string" && Array.isArray(value.messages) ? value : null;
+    const value = await withStore<CachedSession<M, R, Q> | undefined>("readonly", (store) => store.get(key));
+    if (!value || typeof value.epoch !== "string" || !Array.isArray(value.messages)) return null;
+    return Array.isArray(value.requests) ? value : {...value, requests: []};
   } catch {
     return null;
   }
 }
 
-export async function saveSession<M, R>(key: string, session: CachedSession<M, R>): Promise<void> {
+export async function saveSession<M, R, Q = unknown>(key: string, session: CachedSession<M, R, Q>): Promise<void> {
   try {
     if (typeof indexedDB === "undefined") return;
     await withStore("readwrite", (store) => store.put(session, key));

@@ -59,7 +59,8 @@ interface MessageListProps {
   onRetryMessage: (clientId: string) => Promise<boolean>;
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
-  onStopTask: () => void;
+  // Stops the running task; unset when it can't be stopped.
+  onStopTask?: () => void;
   onSendRaw?: (data: string) => void;
   headerAction?: React.ReactNode;
 }
@@ -87,7 +88,7 @@ export default function MessageList({
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [currentSearchResult, setCurrentSearchResult] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
-  const {terminalPrompt} = useChat();
+  const {terminalPrompt, pendingRequests} = useChat();
   // The page's actions render into the header's slot (one top bar); the
   // embed page has no header, so they get their own row there.
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
@@ -519,7 +520,7 @@ export default function MessageList({
                   visibleIndex < visibleTasks.length - 1 &&
                   !renderedTaskKeys.has(task.key)
                 }
-                waitingForUser={isLatest && Boolean(terminalPrompt)}
+                waitingForUser={isLatest && (Boolean(terminalPrompt) || pendingRequests > 0)}
               />
               </React.Fragment>
               );
