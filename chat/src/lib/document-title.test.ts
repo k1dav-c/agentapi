@@ -63,4 +63,15 @@ describe("getDocumentTitle", () => {
       }),
     ).toBe("↻ Reconnecting · AgentAPI — Live Agent Session");
   });
+
+  test("an agent waiting for a login (native transport) reads as needing the user", () => {
+    expect(
+      getDocumentTitle({
+        connectionStatus: "connected",
+        serverStatus: "running",
+        loginRequired: true,
+        task: "Fix the flaky test",
+      }),
+    ).toBe("◆ Needs you · Fix the flaky test — AgentAPI");
+  });
 });

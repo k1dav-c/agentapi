@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AgentType, useChat } from "./chat-provider";
 import { getAgentState } from "@/lib/session-status";
 import { describeTerminalPrompt } from "@/lib/terminal-option";
+import { loginTitle } from "@/lib/login";
 import { alertForTransition, faviconDataUrl, notificationsEnabled, type FaviconBadge } from "@/lib/background-alerts";
 
 // Lets people who aren't looking at the tab know what the agent is doing:
@@ -11,8 +12,8 @@ import { alertForTransition, faviconDataUrl, notificationsEnabled, type FaviconB
 // notification when the agent needs them or finishes while the tab is in
 // the background.
 export function BackgroundAlerts() {
-  const { serverStatus, connectionStatus, terminalPrompt, pendingRequests, requests, agentType, messages } = useChat();
-  const kind = getAgentState(serverStatus, connectionStatus, terminalPrompt, pendingRequests);
+  const { serverStatus, connectionStatus, terminalPrompt, pendingRequests, loginRequired, requests, agentType, messages } = useChat();
+  const kind = getAgentState(serverStatus, connectionStatus, terminalPrompt, pendingRequests, loginRequired !== null);
   const previous = useRef(kind);
   // A task finished while the tab was hidden and hasn't been seen yet.
   const [unseenFinish, setUnseenFinish] = useState(false);
@@ -37,7 +38,9 @@ export function BackgroundAlerts() {
       body: alert === "needs-you"
         ? terminalPrompt
           ? describeTerminalPrompt(terminalPrompt).title
-          : requests.find((request) => request.status === "pending")?.title ?? "The agent is waiting for your answer"
+          : loginRequired
+            ? `${loginTitle(loginRequired)}: run ${loginRequired.command}`
+            : requests.find((request) => request.status === "pending")?.title ?? "The agent is waiting for your answer"
         : task.replace(/\s+/g, " ").slice(0, 120),
       tag: `agentapi-${alert}`,
     });

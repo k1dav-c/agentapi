@@ -28,6 +28,7 @@ import {
 } from "@/lib/chat-api";
 import type {Capabilities, DispatchMode, Transport} from "@/lib/dispatch";
 import {mergeRequests, type NativeRequest, type RequestResponse} from "@/lib/native-requests";
+import {isLoginNotice, parseLoginRequired, type LoginRequired} from "@/lib/login";
 
 export interface Message {
   id: number;
@@ -122,6 +123,8 @@ interface StatusChangeEvent {
   // Native transport only.
   pending_requests?: number;
   capabilities?: Capabilities;
+  login_required?: unknown;
+  lifecycle?: string;
 }
 
 interface ErrorEventData {
@@ -198,6 +201,13 @@ interface ChatContextValue {
   capabilities: Capabilities | null;
   // Number of requests the agent waits on (native transport).
   pendingRequests: number;
+  // Set while the agent waits for someone to log it in (native transport).
+  loginRequired: LoginRequired | null;
+  // The agent waits for the login at startup, so AgentAPI retries by
+  // itself; otherwise it lost the login while running.
+  loginWaitsAtStart: boolean;
+  // Checks the login again now (POST /login/retry).
+  retryLogin: () => Promise<void>;
   // Requests the agent made (native transport): pending ones and the most
   // recently closed, oldest first.
   requests: NativeRequest[];
@@ -328,6 +338,14 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [transport, setTransport] = useState<Transport>("pty");
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [pendingRequests, setPendingRequests] = useState(0);
+  const [loginRequired, setLoginRequiredState] = useState<LoginRequired | null>(null);
+  // The login as the event handlers see it, to skip errors the card shows.
+  const loginRef = useRef<LoginRequired | null>(null);
+  const setLoginRequired = useCallback((login: LoginRequired | null) => {
+    loginRef.current = login;
+    setLoginRequiredState(login);
+  }, []);
+  const [lifecycle, setLifecycle] = useState("");
   const [requests, setRequests] = useState<NativeRequest[]>([]);
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastEventAtRef = useRef(Date.now());
@@ -459,10 +477,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
       serverStatus,
       terminalPrompt,
       pendingRequests,
+      loginRequired: loginRequired !== null,
       task: currentTask,
       customTitle,
     });
-  }, [connectionStatus, currentTask, customTitle, pendingRequests, serverStatus, terminalPrompt]);
+  }, [connectionStatus, currentTask, customTitle, loginRequired, pendingRequests, serverStatus, terminalPrompt]);
 
   useEffect(() => {
     try {
@@ -675,6 +694,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         setTerminalPrompt(data.terminal_prompt ?? "");
         setPendingRequests(data.pending_requests ?? 0);
         setCapabilities(data.capabilities ?? null);
+        setLoginRequired(parseLoginRequired(data.login_required));
+        setLifecycle(data.lifecycle ?? "");
         // Only the native transport reports capabilities; knowing it from
         // the first event avoids showing terminal controls until /status
         // answers.
@@ -687,6 +708,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         const messageEvent = event as MessageEvent;
         try {
           const data: ErrorEventData = JSON.parse(messageEvent.data);
+          // The login card says it already, and stays until it is fixed.
+          if (isLoginNotice(data.message, loginRef.current)) return;
 
           // Display error as toast notification that persists until manually dismissed
           if (data.level === "error") {
@@ -715,6 +738,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
           if (disposed) return;
           setTransport(status.transport);
           if (status.capabilities) setCapabilities(status.capabilities);
+          setLoginRequired(status.login_required);
         }).catch(() => {
           // Reported through the connection status.
         });
@@ -799,7 +823,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
-  }, [agentAPIUrl, api, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush]);
+  }, [agentAPIUrl, api, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush, setLoginRequired]);
 
   // Keep the conversation cache current, at most every
   // CACHE_SAVE_INTERVAL_MS, and once more when the page is hidden.
@@ -988,6 +1012,15 @@ export function ChatProvider({ children }: PropsWithChildren) {
     }
   };
 
+  const retryLogin = async () => {
+    const outcome = await api.retryLogin();
+    if (outcome === "not-waiting") {
+      // The status is out of date: the agent doesn't wait any more.
+      const status = await api.getStatus();
+      setLoginRequired(status.login_required);
+    }
+  };
+
   const downloadSession = async () => {
     try {
       const events = await api.getTimelineEvents();
@@ -1027,6 +1060,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
         transport,
         capabilities,
         pendingRequests,
+        loginRequired,
+        loginWaitsAtStart: lifecycle === "starting",
+        retryLogin,
         requests,
         respondToRequest,
         refreshRequests,

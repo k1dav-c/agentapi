@@ -135,16 +135,20 @@ export default function MessageInput({
     transport,
     capabilities,
     pendingRequests,
+    loginRequired,
+    loginWaitsAtStart,
     interrupt,
     steerQueuedMessage,
     reorderQueue,
   } = useChat();
-  const dispatch = {transport, capabilities, serverStatus, pendingRequests};
+  // An agent waiting for a login at startup has no turn to steer or stop.
+  const dispatch = {transport, capabilities: loginWaitsAtStart ? null : capabilities, serverStatus, pendingRequests};
   const modes = dispatchModes(dispatch);
   const steerable = canSteer(dispatch);
   const interruptible = canInterrupt(dispatch);
   const active = turnActive(dispatch);
   const waitingForAnswer = Boolean(terminalPrompt) || pendingRequests > 0;
+  const waitingForLogin = loginRequired !== null;
   // Shortcut labels: ⌘ on Apple devices, Ctrl elsewhere.
   const [modKey, setModKey] = useState("Ctrl");
   useEffect(() => {
@@ -577,13 +581,15 @@ export default function MessageInput({
                     }}
                     aria-label="Task message"
                     placeholder={
-                      waitingForAnswer
-                        ? "Queue a task (runs after you answer)…"
-                        : serverStatus === "running"
-                          ? steerable ? "Queue a follow-up, or steer the agent…" : "Queue a follow-up…"
-                          : serverStatus === "stable"
-                            ? "Describe a task…"
-                            : "Reconnecting… Your draft is saved."
+                      waitingForLogin
+                        ? "Queue a task (runs after the agent is logged in)…"
+                        : waitingForAnswer
+                          ? "Queue a task (runs after you answer)…"
+                          : serverStatus === "running"
+                            ? steerable ? "Queue a follow-up, or steer the agent…" : "Queue a follow-up…"
+                            : serverStatus === "stable"
+                              ? "Describe a task…"
+                              : "Reconnecting… Your draft is saved."
                     }
                     className="min-h-14 max-h-32 w-full resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-6 outline-none sm:min-h-16 sm:px-5"
                     disabled={

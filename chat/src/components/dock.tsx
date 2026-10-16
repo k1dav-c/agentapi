@@ -8,13 +8,14 @@ import { useWorkingElapsed } from "@/lib/use-elapsed";
 import { MULTI_SELECT_CONTINUE, describeTerminalPrompt, isMultiSelect, parseTerminalOptions, terminalOptionKeystrokes } from "@/lib/terminal-option";
 import { getToolCommand } from "@/lib/tool-format";
 import { splitThinking } from "@/lib/thinking";
+import { loginTitle } from "@/lib/login";
 
 // The strip above the composer: what the agent is doing right now. It only
 // shows while the agent works or waits for you; a ready agent needs no
 // chrome.
 export function StateStrip() {
-  const { serverStatus, connectionStatus, terminalPrompt, pendingRequests, messages, richMessages, queuedMessages } = useChat();
-  const kind = getAgentState(serverStatus, connectionStatus, terminalPrompt, pendingRequests);
+  const { serverStatus, connectionStatus, terminalPrompt, pendingRequests, loginRequired, messages, richMessages, queuedMessages } = useChat();
+  const kind = getAgentState(serverStatus, connectionStatus, terminalPrompt, pendingRequests, loginRequired !== null);
   const elapsed = useWorkingElapsed(serverStatus);
 
   const { activity, tokens } = useMemo(() => {
@@ -55,7 +56,7 @@ export function StateStrip() {
         </span>
         <span className="min-w-0 flex-1 truncate font-mono text-[11.5px]">
           {needs
-            ? `The agent is waiting for your answer${pendingRequests > 1 ? ` · ${pendingRequests} requests` : ""}${queuedMessages.length ? ` · ${queuedMessages.length} queued ${queuedMessages.length === 1 ? "task waits" : "tasks wait"}` : ""}`
+            ? `${loginRequired ? loginTitle(loginRequired) : `The agent is waiting for your answer${pendingRequests > 1 ? ` · ${pendingRequests} requests` : ""}`}${queuedMessages.length ? ` · ${queuedMessages.length} queued ${queuedMessages.length === 1 ? "task waits" : "tasks wait"}` : ""}`
             : activity || "Working on the task"}
         </span>
         {!needs && elapsed && <span className="shrink-0">{elapsed}</span>}

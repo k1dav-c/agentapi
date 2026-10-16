@@ -10,6 +10,7 @@ import {TtyView} from "./tty-view";
 import {requestCredentials} from "@/lib/auth";
 import {DecisionCard, StateStrip} from "./dock";
 import {RequestCard} from "./request-card";
+import {LoginCard} from "./login-card";
 import {toast} from "sonner";
 import {getErrorMessage} from "@/lib/error-utils";
 import {BackgroundAlerts} from "./background-alerts";
@@ -194,6 +195,7 @@ export function Chat() {
               <>
                 <StateStrip />
                 {hasTerminal && <DecisionCard onOpenTerminal={() => setTtyMode(true)} />}
+                {transport === "native" && <LoginCard />}
                 {transport === "native" && <RequestCard />}
               </>
             }

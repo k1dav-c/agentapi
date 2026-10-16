@@ -55,17 +55,19 @@ const STATE_META: Record<AgentStateKind, Omit<StatusMeta, "kind">> = {
   connecting: { label: "Connecting", detail: "Waiting for agent status", icon: CircleAlert, className: "text-muted-foreground" },
 };
 
-// The agent needs you while its terminal shows a prompt (PTY) or while it
-// waits on requests (native transport: approvals, questions, plans).
+// The agent needs you while its terminal shows a prompt (PTY), while it
+// waits on requests (native transport: approvals, questions, plans) or
+// while it waits for someone to log it in (native transport).
 export function getAgentState(
   serverStatus: ServerStatus,
   connectionStatus: string,
   terminalPrompt = "",
   pendingRequests = 0,
+  loginRequired = false,
 ): AgentStateKind {
   if (connectionStatus === "offline" || serverStatus === "offline") return "offline";
   if (connectionStatus === "reconnecting") return "reconnecting";
-  if (terminalPrompt || pendingRequests > 0) return "needs-you";
+  if (terminalPrompt || pendingRequests > 0 || loginRequired) return "needs-you";
   if (serverStatus === "running") return "working";
   if (serverStatus === "stable") return "ready";
   return "connecting";
@@ -76,7 +78,11 @@ export function getStatusMeta(
   connectionStatus: string,
   terminalPrompt = "",
   pendingRequests = 0,
+  loginRequired = false,
 ): StatusMeta {
-  const kind = getAgentState(serverStatus, connectionStatus, terminalPrompt, pendingRequests);
-  return { kind, ...STATE_META[kind] };
+  const kind = getAgentState(serverStatus, connectionStatus, terminalPrompt, pendingRequests, loginRequired);
+  const meta = { kind, ...STATE_META[kind] };
+  // A login comes before any answer: the agent can't run without it.
+  if (kind === "needs-you" && loginRequired) meta.detail = "Agent is waiting for you to log in";
+  return meta;
 }

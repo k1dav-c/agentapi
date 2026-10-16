@@ -7,6 +7,7 @@ import type {
 } from "@/components/chat-provider";
 import type {Capabilities, DispatchMode, Transport} from "./dispatch";
 import {RespondError, type NativeRequest, type RequestResponse} from "./native-requests";
+import {loginRetryOutcome, parseLoginRequired, type LoginRequired, type LoginRetryOutcome} from "./login";
 
 export interface UploadOptions {
   signal?: AbortSignal;
@@ -58,6 +59,8 @@ export interface ServerStatusInfo {
   transport: Transport;
   capabilities?: Capabilities;
   pending_requests?: number;
+  // Set while the agent waits for someone to log it in (native transport).
+  login_required: LoginRequired | null;
 }
 
 async function temporalRequest<T>(baseURL: string, url: string, method = "GET", body?: unknown): Promise<T> {
@@ -227,12 +230,22 @@ export function createChatAPI(baseURL: string) {
 
     async getStatus(): Promise<ServerStatusInfo> {
       const response = await requireOK(await fetch(`${baseURL}/status`), "Failed to read the agent status");
-      const data = (await response.json()) as Partial<ServerStatusInfo>;
+      const data = (await response.json()) as Partial<Omit<ServerStatusInfo, "login_required">> & {login_required?: unknown};
       return {
         transport: data.transport === "acp" || data.transport === "native" ? data.transport : "pty",
         capabilities: data.capabilities,
         pending_requests: data.pending_requests,
+        login_required: parseLoginRequired(data.login_required),
       };
+    },
+
+    // Asks AgentAPI to check the agent's login again now. "not-waiting"
+    // (409): the agent doesn't wait for a login any more.
+    async retryLogin(): Promise<LoginRetryOutcome> {
+      const response = await fetch(`${baseURL}/login/retry`, {method: "POST"});
+      const outcome = loginRetryOutcome(response.status);
+      if (!outcome) throw new Error(await errorDetail(response, "Failed to check the login"));
+      return outcome;
     },
 
     async sendMessage(
