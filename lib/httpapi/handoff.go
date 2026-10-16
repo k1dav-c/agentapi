@@ -92,10 +92,6 @@ func screenTail(screen string, n int) string {
 	return screen[start+1:]
 }
 
-func isTerminalQuestion(content string) bool {
-	return isTerminalQuestionText(content, strings.ToLower(content))
-}
-
 func isTerminalQuestionText(content, lower string) bool {
 	if hasConfirmationHint(content, lower) && strings.ContainsAny(content, "❯›>") &&
 		terminalSelection.MatchString(content) {

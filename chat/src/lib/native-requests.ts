@@ -70,7 +70,7 @@ function applyUpdate(existing: NativeRequest | undefined, update: NativeRequest)
 
 // Drops the answers to secret questions, so they are neither kept in memory
 // nor written to the session cache.
-export function redactSecrets(request: NativeRequest): NativeRequest {
+function redactSecrets(request: NativeRequest): NativeRequest {
   const secret = request.questions?.filter((question) => question.secret).map((question) => question.id) ?? [];
   const answers = request.response?.answers;
   if (!answers || !secret.some((id) => id in answers)) return request;
@@ -102,15 +102,6 @@ export function mergeRequests(previous: NativeRequest[], updates: Iterable<Nativ
 // The requests the agent is waiting on, oldest first.
 export function pendingRequests(requests: NativeRequest[]): NativeRequest[] {
   return requests.filter((request) => request.status === "pending");
-}
-
-// The latest state of the request about each tool call, by tool_use_id.
-export function requestsByToolUse(requests: NativeRequest[]): Map<string, NativeRequest> {
-  const byTool = new Map<string, NativeRequest>();
-  for (const request of requests) {
-    if (request.tool_use_id) byTool.set(request.tool_use_id, request);
-  }
-  return byTool;
 }
 
 export type Tone = "needs" | "ok" | "fault" | "muted";

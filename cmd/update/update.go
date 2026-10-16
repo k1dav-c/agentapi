@@ -96,11 +96,7 @@ func parseVersion(v string) (*semver.Version, error) {
 }
 
 func binaryAssetName() string {
-	name := fmt.Sprintf("agentapi-%s-%s", runtime.GOOS, runtime.GOARCH)
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	return name
+	return buildAssetName(runtime.GOOS, runtime.GOARCH)
 }
 
 // buildAssetName builds an asset name for a given os/arch pair. This is

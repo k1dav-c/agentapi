@@ -34,7 +34,7 @@ func TestTokenAuthMiddleware(t *testing.T) {
 
 	t.Run("valid token passes", func(t *testing.T) {
 		t.Parallel()
-		middleware := tokenAuthMiddleware("secret-token")
+		middleware := newTokenAuth("secret-token").middleware
 		handler := middleware(okHandler)
 
 		req := httptest.NewRequest(http.MethodGet, "/status", nil)
@@ -46,7 +46,7 @@ func TestTokenAuthMiddleware(t *testing.T) {
 
 	t.Run("missing token returns 401", func(t *testing.T) {
 		t.Parallel()
-		middleware := tokenAuthMiddleware("secret-token")
+		middleware := newTokenAuth("secret-token").middleware
 		handler := middleware(okHandler)
 
 		req := httptest.NewRequest(http.MethodGet, "/status", nil)
@@ -57,7 +57,7 @@ func TestTokenAuthMiddleware(t *testing.T) {
 
 	t.Run("wrong token returns 401", func(t *testing.T) {
 		t.Parallel()
-		middleware := tokenAuthMiddleware("secret-token")
+		middleware := newTokenAuth("secret-token").middleware
 		handler := middleware(okHandler)
 
 		req := httptest.NewRequest(http.MethodGet, "/status", nil)
@@ -69,7 +69,7 @@ func TestTokenAuthMiddleware(t *testing.T) {
 
 	t.Run("chat path exempt from auth", func(t *testing.T) {
 		t.Parallel()
-		middleware := tokenAuthMiddleware("secret-token")
+		middleware := newTokenAuth("secret-token").middleware
 		handler := middleware(okHandler)
 
 		for _, path := range []string{"/", "/chat", "/chat/", "/chat/index.html"} {
@@ -82,7 +82,7 @@ func TestTokenAuthMiddleware(t *testing.T) {
 
 	t.Run("api paths require auth", func(t *testing.T) {
 		t.Parallel()
-		middleware := tokenAuthMiddleware("secret-token")
+		middleware := newTokenAuth("secret-token").middleware
 		handler := middleware(okHandler)
 
 		for _, path := range []string{"/status", "/messages", "/message", "/events", "/internal/screen", "/uploads/0123456789abcdef/a.png", "/webhook", "/mcp", "/handoff", "/handoff/reply", "/openapi.json", "/docs"} {
@@ -176,7 +176,7 @@ func TestTokenAuthMiddleware_Cookie(t *testing.T) {
 	okHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := tokenAuthMiddleware("secret-token")(okHandler)
+	handler := newTokenAuth("secret-token").middleware(okHandler)
 	serve := func(mutate func(*http.Request)) int {
 		req := httptest.NewRequest(http.MethodGet, "/status", nil)
 		mutate(req)
@@ -199,7 +199,7 @@ func TestTokenAuthMiddleware_AuthSessionExempt(t *testing.T) {
 	okHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := tokenAuthMiddleware("secret-token")(okHandler)
+	handler := newTokenAuth("secret-token").middleware(okHandler)
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
 		req := httptest.NewRequest(method, authSessionPath, nil)
 		rec := httptest.NewRecorder()

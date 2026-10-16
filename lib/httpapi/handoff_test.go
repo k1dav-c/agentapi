@@ -417,3 +417,7 @@ func TestFormatMessageClosesClaudeFileSuggestions(t *testing.T) {
 		require.Equal(t, "\x1b[200~"+tc.message+"\x1b[201~", typed, tc.message)
 	}
 }
+
+func isTerminalQuestion(content string) bool {
+	return isTerminalQuestionText(content, strings.ToLower(content))
+}

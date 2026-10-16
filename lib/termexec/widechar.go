@@ -1,8 +1,6 @@
 package termexec
 
 import (
-	"strings"
-
 	"github.com/mattn/go-runewidth"
 )
 
@@ -120,10 +118,4 @@ func (w *wideCharInjector) handleControlCode(r rune) {
 // isControlCode matches vt10x's definition.
 func isControlCode(r rune) bool {
 	return r < 0x20 || r == 0o177
-}
-
-// stripWidePadding removes the injected padding runes from a screen
-// snapshot before it's handed to consumers.
-func stripWidePadding(screen string) string {
-	return strings.ReplaceAll(screen, string(widePadRune), "")
 }

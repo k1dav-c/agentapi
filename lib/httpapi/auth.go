@@ -21,7 +21,7 @@ const (
 	// sessionCookieContext is the HMAC message the cookie value is derived
 	// with. Bump the version to invalidate every cookie already issued.
 	sessionCookieContext = "agentapi-session-v1"
-	// authSessionPath is exempt from tokenAuthMiddleware; its handlers check
+	// authSessionPath is exempt from tokenAuth.middleware; its handlers check
 	// credentials themselves.
 	authSessionPath = "/auth/session"
 )
@@ -91,15 +91,11 @@ func (a *tokenAuth) authenticated(r *http.Request) bool {
 	return a.bearerValid(r.Header.Get("Authorization")) || a.cookieValid(r)
 }
 
-// tokenAuthMiddleware enforces token authentication on all requests except
-// static file routes (/chat/* and /), so browsers can load the UI, and
+// middleware enforces token authentication on all requests except static
+// file routes (/chat/* and /), so browsers can load the UI, and
 // /auth/session, whose handlers check credentials themselves. CORS
 // preflight requests are answered by the CORS middleware before this one
 // runs.
-func tokenAuthMiddleware(token string) func(next http.Handler) http.Handler {
-	return newTokenAuth(token).middleware
-}
-
 func (a *tokenAuth) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path

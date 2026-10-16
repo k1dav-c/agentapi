@@ -72,13 +72,9 @@ export async function exchangeToken(baseURL: string, token: string): Promise<boo
   return response.ok;
 }
 
-export async function signOut(baseURL: string): Promise<void> {
-  await fetch(`${baseURL}/auth/session`, {method: "DELETE", credentials: "include"});
-}
-
 // GET /auth/session. Null when the server doesn't have it (older servers)
 // or can't be reached.
-export async function getAuthSession(baseURL: string): Promise<AuthSessionState | null> {
+async function getAuthSession(baseURL: string): Promise<AuthSessionState | null> {
   const read = async (credentials: RequestCredentials) => {
     const response = await fetch(`${baseURL}/auth/session`, {credentials});
     if (!response.ok) return null;
