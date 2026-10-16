@@ -98,6 +98,66 @@ agent 狀態和連線狀態。
 
 對於其他 agent，或是拿不到工作階段紀錄檔的環境，仍然會退回使用終端機解析。
 
+### Claude Code 的原生傳輸方式
+
+`--transport native` 會透過 Claude Code 自己的 stream-json 協定來驅動它，而不是操作它的
+終端機介面：
+
+```bash
+agentapi server --transport native -- claude --model sonnet
+```
+
+AgentAPI 會以 headless 模式執行 `claude -p`，stdin 和 stdout 都使用 stream-json。訊息、
+rich messages 和時間軸都直接來自協定：文字和思考內容會即時增長，工具呼叫會帶有輸入、
+結果、狀態和圖片，每則 assistant 訊息都有模型、停止原因和 token 用量。工具核准、
+`AskUserQuestion` 和計畫核准（`ExitPlanMode`）會以 requests 的形式送達
+（`GET /requests`、`POST /requests/{id}/respond`）：
+
+- 核准提供 Allow、Deny（可附上給 Claude 的回饋），以及在 Claude Code 建議了權限規則時的
+  「Allow always」，這個規則只套用在這個工作階段。Claude Code 認定為唯讀的指令不會詢問就
+  直接執行。
+- 問題會列出 Claude 提供的選項；其他答案也會被接受。
+- 計畫會顯示計畫內容，並提供「Yes, and auto-accept edits」、「Yes, and manually approve
+  edits」和「No, keep planning」。選 No 時附上的回饋會讓 Claude 修改計畫後再詢問一次。
+
+`GET /status` 會回報這些能力：`steer`（以 `dispatch_mode: steer` 送出的訊息會在 Claude
+的下一步加入正在進行的回合）、`interrupt`、`resume` 和 `images`（附加在訊息中的圖片會送給
+Claude）。工作階段名稱是 Claude Code 在第一個提示之後產生的標題。回合會在 Claude Code
+回報閒置時結束，所以背景子 agent 以及它完成時喚醒的回合，都屬於啟動它的那個回合；子 agent
+自己的步驟不會出現在對話中（和工作階段紀錄檔一樣），它的工具呼叫在它回報之前會顯示為執行中。
+
+命令列與環境變數：
+
+- AgentAPI 會加上 `-p --output-format stream-json --input-format stream-json --verbose
+  --include-partial-messages --replay-user-messages --permission-prompt-tool stdio`，
+  新的工作階段加上 `--session-id`，恢復的工作階段加上 `--resume`。
+- 除非你另有指定，否則會加上 `--permission-mode default`（受管理或使用者的設定可能會把
+  預設值設成 `bypassPermissions`，那樣就會略過所有核准），以及 `--thinking adaptive
+  --thinking-display summarized`（少了它思考內容會是空的）。你自己的
+  `--permission-mode`、`--dangerously-skip-permissions`、`--thinking`、
+  `--max-thinking-tokens` 或 `--thinking-display` 優先。
+- 和協定或 AgentAPI 管理的工作階段衝突的參數會在啟動時被拒絕：`-p`/`--print`、
+  `--output-format`、`--input-format`、`-r`/`--resume`、`-c`/`--continue`、
+  `--session-id`、`--fork-session`、`--from-pr`、`--teleport`、
+  `--permission-prompt-tool`、`--permission-prompts`、`--bg`、`--cloud`、`--desktop`
+  和 `--remote-control`。你自己傳入的 `--verbose`、`--include-partial-messages` 和
+  `--replay-user-messages` 會被移除。其他參數（`--model`、`--allowedTools`、
+  `--mcp-config`、`--append-system-prompt` 等）都會原樣傳遞。
+- 從 Claude Code 工作階段內部啟動時（例如由它的 Bash 工具啟動），子行程會繼承那個工作階段
+  的環境變數。AgentAPI 會移除 `CLAUDECODE`、`CLAUDE_CODE_ENTRYPOINT`、
+  `CLAUDE_CODE_SESSION_ID`、`CLAUDE_CODE_CHILD_SESSION`、`CLAUDE_CODE_SESSION_ATTENDED`、
+  `CLAUDE_CODE_EXECPATH`、`CLAUDE_CODE_MESSAGING_SOCKET`、`CLAUDE_CODE_MESSAGING_TOKEN`、
+  `CLAUDE_CODE_SSE_PORT`、`CLAUDE_PID`、`CLAUDE_EFFORT`、`CLAUDE_AGENT_SDK_VERSION` 和
+  `AI_AGENT`，並設定 `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` 和
+  `CLAUDE_CODE_ENTRYPOINT=sdk-cli`。`CLAUDE_CONFIG_DIR` 和 `ANTHROPIC_*` 等設定會保留。
+
+恢復工作階段會保留 Claude 的上下文，但不會把先前的訊息帶回聊天介面（Claude Code 不會重播
+它們）。工作階段在有過一個回合之後才能恢復；使用 `--no-session-persistence` 時則無法恢復，
+`resume` 為 false。Claude Code 結束或重新啟動時仍未處理的 requests 就無法再回答。停止時會
+先關閉 Claude Code 的輸入，讓它自行結束，3 秒後送出 SIGTERM，再過 2 秒送出 SIGKILL。這種
+模式沒有終端機：TTY mode、終端機提示和即時畫面都無法使用，需要互動式介面的斜線指令也無法
+運作。
+
 ### MCP 管理
 
 AgentAPI 執行期間可以管理 Claude、Codex 和 Pi 的 MCP 伺服器。實作上會保留

@@ -127,6 +127,81 @@ be reconstructed reliably from terminal output alone.
 Terminal parsing remains the fallback for other agents and for environments
 where a session log is unavailable.
 
+### Native transport for Claude Code
+
+`--transport native` drives Claude Code through its own stream-json protocol
+instead of its terminal UI:
+
+```bash
+agentapi server --transport native -- claude --model sonnet
+```
+
+AgentAPI runs `claude -p` headless with stream-json on stdin and stdout.
+Messages, rich messages and the timeline come straight from the protocol:
+text and thinking grow live, tool calls carry their input, result, status and
+images, and each assistant message has its model, stop reason and token usage.
+Tool approvals, `AskUserQuestion` and plan approvals (`ExitPlanMode`) arrive as
+requests (`GET /requests`, `POST /requests/{id}/respond`):
+
+- Approvals offer Allow, Deny (with optional feedback for Claude) and, when
+  Claude Code suggests a permission rule, "Allow always", which applies the
+  rule to this session only. Commands Claude Code considers read-only run
+  without asking.
+- Questions list Claude's options; any other answer is accepted too.
+- Plans show the plan and offer "Yes, and auto-accept edits", "Yes, and
+  manually approve edits" and "No, keep planning". Feedback sent with No makes
+  Claude revise the plan and ask again.
+
+`GET /status` reports the capabilities `steer` (a message sent with
+`dispatch_mode: steer` joins the running turn at Claude's next step),
+`interrupt`, `resume` and `images` (images attached to a message are sent to
+Claude). The session name is the title Claude Code generates after the first
+prompt. A turn ends when Claude Code reports it is idle, so a background
+subagent and the turn it wakes up when it finishes belong to the turn that
+started it; the subagent's own steps are left out of the conversation, as in
+the session log, and its tool call shows as running until it reports.
+
+Command line and environment:
+
+- AgentAPI adds `-p --output-format stream-json --input-format stream-json
+  --verbose --include-partial-messages --replay-user-messages
+  --permission-prompt-tool stdio`, and `--session-id` for a new session or
+  `--resume` for a resumed one.
+- Unless you choose otherwise it adds `--permission-mode default` (managed or
+  user settings may otherwise make the default `bypassPermissions`, which
+  would skip every approval) and `--thinking adaptive --thinking-display
+  summarized` (without it thinking is empty). Your `--permission-mode`,
+  `--dangerously-skip-permissions`, `--thinking`, `--max-thinking-tokens` or
+  `--thinking-display` wins.
+- Flags that conflict with the protocol or the session AgentAPI manages are
+  rejected at startup: `-p`/`--print`, `--output-format`, `--input-format`,
+  `-r`/`--resume`, `-c`/`--continue`, `--session-id`, `--fork-session`,
+  `--from-pr`, `--teleport`, `--permission-prompt-tool`,
+  `--permission-prompts`, `--bg`, `--cloud`, `--desktop` and
+  `--remote-control`. Your own copies of `--verbose`,
+  `--include-partial-messages` and `--replay-user-messages` are dropped.
+  Everything else (`--model`, `--allowedTools`, `--mcp-config`,
+  `--append-system-prompt`, ...) is passed through.
+- Started from inside a Claude Code session (for example by its Bash tool),
+  the child would inherit that session's variables. AgentAPI removes
+  `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`,
+  `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ATTENDED`,
+  `CLAUDE_CODE_EXECPATH`, `CLAUDE_CODE_MESSAGING_SOCKET`,
+  `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_PID`,
+  `CLAUDE_EFFORT`, `CLAUDE_AGENT_SDK_VERSION` and `AI_AGENT`, and sets
+  `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` and
+  `CLAUDE_CODE_ENTRYPOINT=sdk-cli`. Configuration such as `CLAUDE_CONFIG_DIR`
+  and `ANTHROPIC_*` is kept.
+
+Resuming a session keeps Claude's context but doesn't bring back the earlier
+messages in the chat (Claude Code doesn't replay them). A session can be
+resumed once it had a turn; with `--no-session-persistence` it can't, and
+`resume` is false. Requests still open when Claude Code exits or restarts
+can't be answered anymore. Stopping closes Claude Code's input so it finishes
+on its own, then sends SIGTERM after 3 s and SIGKILL 2 s later. There is no
+terminal: TTY mode, terminal prompts and the live screen aren't available,
+and slash commands that need the interactive UI don't work.
+
 ### MCP management
 
 Claude, Codex and Pi MCP servers can be managed while AgentAPI is running. The
