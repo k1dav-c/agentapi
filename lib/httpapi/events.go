@@ -111,6 +111,9 @@ type StatusChangeBody struct {
 	PendingRequests int `json:"pending_requests,omitempty" doc:"Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests."`
 	// Capabilities is set for the native transport.
 	Capabilities *native.Capabilities `json:"capabilities,omitempty" doc:"Optional operations the agent supports. Native transport only."`
+	// LoginRequired is set while the agent can't work until the user logs
+	// in (native transport).
+	LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only."`
 }
 
 type ScreenUpdateBody struct {
@@ -163,6 +166,7 @@ type EventEmitter struct {
 	requests            []native.RequestState
 	requestSeq          []uint64
 	capabilities        *native.Capabilities
+	loginRequired       *native.LoginRequired
 	sessionEvents       []jsonlwatcher.SessionEvent
 	nextSessionEventID  int
 	status              AgentStatus
@@ -486,6 +490,7 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 		RunID: e.runID, AgentType: e.agentType, Transport: e.transport, Version: version.Version,
 		TerminalPrompt: e.terminalPrompt, TerminalColumns: e.terminalColumns,
 		SessionName: e.sessionName, PendingRequests: pending, Capabilities: e.capabilities,
+		LoginRequired: e.loginRequired,
 	}
 }
 
@@ -497,6 +502,23 @@ func (e *EventEmitter) SetCapabilities(caps native.Capabilities) {
 		return
 	}
 	e.capabilities = &caps
+	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+}
+
+// SetLoginRequired records that the agent waits for a login (nil: it no
+// longer does).
+func (e *EventEmitter) SetLoginRequired(login *native.LoginRequired) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if login == nil && e.loginRequired == nil {
+		return
+	}
+	if login != nil {
+		copied := *login
+		login = &copied
+	}
+	e.loginRequired = login
+	e.handoffRevision++
 	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
 }
 

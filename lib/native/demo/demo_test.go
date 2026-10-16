@@ -33,6 +33,7 @@ func (o *observer) RichMessage(m jsonlwatcher.RichMessage) {
 func (o *observer) SessionEvents([]jsonlwatcher.SessionEvent) {}
 func (o *observer) SessionName(string)                        {}
 func (o *observer) SessionRef(string)                         {}
+func (o *observer) LoginRequired(*native.LoginRequired)       {}
 func (o *observer) RequestUpdated(s native.RequestState) {
 	o.mu.Lock()
 	defer o.mu.Unlock()

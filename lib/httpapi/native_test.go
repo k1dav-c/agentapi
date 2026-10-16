@@ -344,3 +344,23 @@ func itoa(i int) string {
 	b, _ := json.Marshal(i)
 	return string(b)
 }
+
+func TestNative_LoginRequired(t *testing.T) {
+	n := newNativeServer(t, nil)
+	a := n.factory.Last()
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/login/retry", nil, nil))
+
+	n.send("hello", "")
+	a.Sink().LoginRequired(native.LoginRequired{Agent: "Claude Code", Message: "Claude Code is not logged in.", Command: "claude auth login"})
+	var status httpapi.StatusChangeBody
+	n.do(http.MethodGet, "/status", nil, &status)
+	require.NotNil(t, status.LoginRequired)
+	assert.Equal(t, "claude auth login", status.LoginRequired.Command)
+
+	require.Equal(t, http.StatusOK, n.do(http.MethodPost, "/login/retry", nil, nil))
+	require.Eventually(t, func() bool {
+		var after httpapi.StatusChangeBody
+		n.do(http.MethodGet, "/status", nil, &after)
+		return after.LoginRequired == nil && len(n.factory.Adapters()) == 2
+	}, 5*time.Second, 10*time.Millisecond)
+}

@@ -255,6 +255,8 @@ func (s *recSink) SessionRef(r string) {
 	s.mu.Unlock()
 }
 
+func (s *recSink) LoginRequired(native.LoginRequired) {}
+
 func (s *recSink) Error(m string, _ st.ErrorLevel) {
 	defer s.enter()()
 	s.mu.Lock()

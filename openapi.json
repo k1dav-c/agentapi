@@ -327,6 +327,41 @@
         "title": "LifecycleState",
         "type": "string"
       },
+      "LoginRequired": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "description": "Agent that needs a login, e.g. Claude Code.",
+            "type": "string"
+          },
+          "command": {
+            "description": "Command to run in a terminal to log in, e.g. claude auth login.",
+            "type": "string"
+          },
+          "detail": {
+            "description": "More help, or the agent's own error message.",
+            "type": "string"
+          },
+          "host": {
+            "description": "Machine to run the command on: the one AgentAPI runs on.",
+            "type": "string"
+          },
+          "message": {
+            "description": "What is wrong, e.g. Claude Code is not logged in.",
+            "type": "string"
+          },
+          "user": {
+            "description": "User to run the command as: the one AgentAPI runs as.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent",
+          "command",
+          "message"
+        ],
+        "type": "object"
+      },
       "MCPCheckBody": {
         "additionalProperties": false,
         "properties": {
@@ -1604,6 +1639,10 @@
             "$ref": "#/components/schemas/LifecycleState",
             "description": "Detailed process lifecycle state."
           },
+          "login_required": {
+            "$ref": "#/components/schemas/LoginRequired",
+            "description": "Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only."
+          },
           "pending_requests": {
             "description": "Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests.",
             "format": "int64",
@@ -1682,6 +1721,10 @@
           "lifecycle": {
             "$ref": "#/components/schemas/LifecycleState",
             "description": "Detailed process lifecycle state."
+          },
+          "login_required": {
+            "$ref": "#/components/schemas/LoginRequired",
+            "description": "Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only."
           },
           "pending_requests": {
             "description": "Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests.",
@@ -2532,6 +2575,55 @@
           }
         },
         "summary": "Interrupt the agent"
+      }
+    },
+    "/login/retry": {
+      "post": {
+        "description": "While `login_required` is reported in GET /status, checks again now whether the user logged in (AgentAPI also checks every few seconds while the agent waits at startup). If the agent lost its login while running, it is restarted and resumes its session. Native transport only; returns 409 if no login is needed.",
+        "operationId": "post-login-retry",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterruptResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Check the agent's login again"
       }
     },
     "/mcp": {

@@ -36,6 +36,10 @@ var _ native.Observer = (*nativeObserver)(nil)
 
 func (o *nativeObserver) Started(caps native.Capabilities) { o.emitter.SetCapabilities(caps) }
 
+func (o *nativeObserver) LoginRequired(login *native.LoginRequired) {
+	o.emitter.SetLoginRequired(login)
+}
+
 func (o *nativeObserver) RichMessage(msg jsonlwatcher.RichMessage) {
 	if o.storeImages != nil {
 		o.storeImages(&msg)
@@ -198,6 +202,21 @@ func (s *Server) respondRequestLocked(ctx context.Context, id string, response n
 	}
 }
 
+func (s *Server) retryLogin(ctx context.Context, _ *struct{}) (*InterruptResponse, error) {
+	if err := s.requireNative(); err != nil {
+		return nil, err
+	}
+	if err := s.native.RetryLogin(ctx); err != nil {
+		if errors.Is(err, native.ErrNoLoginRequired) {
+			return nil, huma.Error409Conflict("the agent is not waiting for a login")
+		}
+		return nil, fmt.Errorf("failed to check the login: %w", err)
+	}
+	resp := &InterruptResponse{}
+	resp.Body.Ok = true
+	return resp, nil
+}
+
 func (s *Server) interrupt(ctx context.Context, _ *struct{}) (*InterruptResponse, error) {
 	if err := s.requireNative(); err != nil {
 		return nil, err
@@ -341,6 +360,11 @@ func (s *Server) registerNativeRoutes() {
 		o.Summary = "Answer a request"
 		o.Description = "Answers a pending request. Approvals and plans take `option_id` (one of the request's options, optionally with `text` as feedback); questions take `answers` keyed by question id. Returns 409 if the request is no longer pending (already answered, withdrawn or expired) and 400 if the answer doesn't fit the request. A request is answered at most once."
 		o.Errors = []int{400, 404, 409}
+	})
+	huma.Post(s.api, "/login/retry", s.retryLogin, func(o *huma.Operation) {
+		o.Summary = "Check the agent's login again"
+		o.Description = "While `login_required` is reported in GET /status, checks again now whether the user logged in (AgentAPI also checks every few seconds while the agent waits at startup). If the agent lost its login while running, it is restarted and resumes its session. Native transport only; returns 409 if no login is needed."
+		o.Errors = []int{400, 409}
 	})
 	huma.Post(s.api, "/interrupt", s.interrupt, func(o *huma.Operation) {
 		o.Summary = "Interrupt the agent"

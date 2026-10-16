@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -35,6 +36,32 @@ var (
 	// ErrNotStarted is returned before Start has completed.
 	ErrNotStarted = errors.New("agent session has not started")
 )
+
+// ErrNoLoginRequired is returned by RetryLogin when the agent is not
+// waiting for a login.
+var ErrNoLoginRequired = errors.New("the agent is not waiting for a login")
+
+// LoginRequired tells the user how to log the agent in. Native mode has no
+// terminal, so the login happens in one the user opens themselves.
+type LoginRequired struct {
+	Agent   string `json:"agent" doc:"Agent that needs a login, e.g. Claude Code."`
+	Message string `json:"message" doc:"What is wrong, e.g. Claude Code is not logged in."`
+	Command string `json:"command" doc:"Command to run in a terminal to log in, e.g. claude auth login."`
+	Detail  string `json:"detail,omitempty" doc:"More help, or the agent's own error message."`
+	Host    string `json:"host,omitempty" doc:"Machine to run the command on: the one AgentAPI runs on."`
+	User    string `json:"user,omitempty" doc:"User to run the command as: the one AgentAPI runs as."`
+}
+
+// LoginRequiredError is returned by Adapter.Start when the agent can't work
+// until the user logs in. The conversation waits and starts the agent again
+// instead of giving up.
+type LoginRequiredError struct {
+	Login LoginRequired
+}
+
+func (e *LoginRequiredError) Error() string {
+	return fmt.Sprintf("%s Log in with `%s`.", e.Login.Message, e.Login.Command)
+}
 
 // Capabilities says which optional operations an adapter supports. Callers
 // decide what to offer from these, never from the agent type.
@@ -204,6 +231,9 @@ type Sink interface {
 	SessionName(string)
 	// SessionRef reports the identifier needed to resume the session.
 	SessionRef(string)
+	// LoginRequired reports that the agent lost its login (e.g. an expired
+	// token) while running.
+	LoginRequired(LoginRequired)
 	// Error reports a problem the user should know about.
 	Error(message string, level st.ErrorLevel)
 }

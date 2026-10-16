@@ -170,6 +170,8 @@ func (r *recorder) SessionRef(ref string) {
 	r.refs = append(r.refs, ref)
 }
 
+func (r *recorder) LoginRequired(native.LoginRequired) {}
+
 func (r *recorder) Error(message string, level st.ErrorLevel) {
 	defer r.enter()()
 	r.errors = append(r.errors, string(level)+": "+message)

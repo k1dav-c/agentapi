@@ -27,6 +27,7 @@ type recorder struct {
 	requests []native.RequestState
 	refs     []string
 	names    []string
+	logins   []*native.LoginRequired
 }
 
 func (r *recorder) EmitMessages(m []st.ConversationMessage) {
@@ -48,6 +49,7 @@ func (r *recorder) EmitError(m string, _ st.ErrorLevel) {
 }
 
 func (r *recorder) Started(native.Capabilities)               {}
+func (r *recorder) LoginRequired(l *native.LoginRequired)     { r.logins = append(r.logins, l) }
 func (r *recorder) RichMessage(m jsonlwatcher.RichMessage)    { r.rich = append(r.rich, m) }
 func (r *recorder) SessionEvents([]jsonlwatcher.SessionEvent) {}
 func (r *recorder) SessionName(n string)                      { r.names = append(r.names, n) }
@@ -360,4 +362,95 @@ func TestSecretAnswersAreRedacted(t *testing.T) {
 			assert.NotContains(t, r.Response.Answers["token"], "s3cret")
 		}
 	}
+}
+
+func TestLoginRequiredAtStartWaitsAndRetries(t *testing.T) {
+	login := native.LoginRequired{Agent: "Claude Code", Message: "Claude Code is not logged in.", Command: "claude auth login"}
+	loggedIn := false
+	var mu sync.Mutex
+	factory := &nativetest.Factory{Configure: func(a *nativetest.Adapter) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !loggedIn {
+			a.StartErr = &native.LoginRequiredError{Login: login}
+		}
+	}}
+	rec := &recorder{}
+	c := native.NewConversation(native.Config{
+		Factory: factory.New, Emitter: rec, Observer: rec,
+		// Long enough that only RetryLogin retries.
+		LoginRetryInterval: time.Hour,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer func() { _ = c.Close() }()
+	c.Start(ctx)
+
+	require.Eventually(t, func() bool { return c.LoginRequired() != nil }, 5*time.Second, time.Millisecond)
+	got := c.LoginRequired()
+	assert.Equal(t, "claude auth login", got.Command)
+	assert.NotEmpty(t, got.Host)
+	assert.NotEmpty(t, got.User)
+	assert.Equal(t, st.ConversationStatusInitializing, c.Status())
+	select {
+	case err := <-c.Exited():
+		t.Fatalf("a missing login is not an exit: %v", err)
+	default:
+	}
+	// Messages wait in the caller's queue.
+	assert.ErrorIs(t, c.StartTurn(context.Background(), native.Input{Text: "hi"}), st.ErrMessageValidationChanging)
+	rec.mu.Lock()
+	assert.Len(t, rec.errors, 1)
+	assert.Contains(t, rec.errors[0], "claude auth login")
+	rec.mu.Unlock()
+
+	// Still not logged in: one more attempt, no second error.
+	require.NoError(t, c.RetryLogin(context.Background()))
+	require.Eventually(t, func() bool { return len(factory.Adapters()) == 2 }, 5*time.Second, time.Millisecond)
+	assert.NotNil(t, c.LoginRequired())
+
+	mu.Lock()
+	loggedIn = true
+	mu.Unlock()
+	require.NoError(t, c.RetryLogin(context.Background()))
+	require.Eventually(t, func() bool { return c.Idle() }, 5*time.Second, time.Millisecond)
+	assert.Nil(t, c.LoginRequired())
+	assert.Nil(t, rec.logins[len(rec.logins)-1], "observers learn the login is fixed")
+	rec.mu.Lock()
+	assert.Len(t, rec.errors, 1)
+	rec.mu.Unlock()
+	assert.ErrorIs(t, c.RetryLogin(context.Background()), native.ErrNoLoginRequired)
+}
+
+func TestLoginLostWhileRunningResumesOnRetry(t *testing.T) {
+	c, factory, _ := start(t, func(a *nativetest.Adapter) {
+		if a.ResumeRef == "" {
+			a.Ref = "session-1"
+		}
+	}, native.Config{})
+	first := factory.Last()
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
+	first.Sink().LoginRequired(native.LoginRequired{Agent: "Codex", Message: "Codex's login expired.", Command: "codex login"})
+	first.Sink().TurnCompleted(native.TurnResult{Error: "401 Unauthorized"})
+	require.NotNil(t, c.LoginRequired())
+
+	require.NoError(t, c.RetryLogin(context.Background()))
+	require.Eventually(t, func() bool { return len(factory.Adapters()) == 2 && c.Idle() }, 5*time.Second, time.Millisecond)
+	second := factory.Last()
+	assert.True(t, first.Closed())
+	assert.Equal(t, "session-1", second.ResumeRef, "the session is resumed")
+	assert.Len(t, c.Messages(), 1, "the conversation is kept")
+	assert.Nil(t, c.LoginRequired())
+}
+
+func TestLoginClearedByAWorkingTurn(t *testing.T) {
+	c, factory, _ := start(t, nil, native.Config{})
+	a := factory.Last()
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
+	a.Sink().LoginRequired(native.LoginRequired{Agent: "Pi", Message: "No API key.", Command: "pi"})
+	a.Sink().TurnCompleted(native.TurnResult{Error: "no api key"})
+	require.NotNil(t, c.LoginRequired())
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "two"}))
+	a.Sink().TurnCompleted(native.TurnResult{})
+	assert.Nil(t, c.LoginRequired())
 }

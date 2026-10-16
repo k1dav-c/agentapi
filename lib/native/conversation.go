@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"os/user"
 	"slices"
 	"strings"
 	"sync"
@@ -54,6 +56,9 @@ type RequestState struct {
 type Observer interface {
 	// Started reports that an agent accepts turns, and what it supports.
 	Started(Capabilities)
+	// LoginRequired reports that the agent waits for the user to log in,
+	// or with nil that it no longer does.
+	LoginRequired(*LoginRequired)
 	RichMessage(jsonlwatcher.RichMessage)
 	SessionEvents([]jsonlwatcher.SessionEvent)
 	SessionName(string)
@@ -64,6 +69,7 @@ type Observer interface {
 type nopObserver struct{}
 
 func (nopObserver) Started(Capabilities)                      {}
+func (nopObserver) LoginRequired(*LoginRequired)              {}
 func (nopObserver) RichMessage(jsonlwatcher.RichMessage)      {}
 func (nopObserver) SessionEvents([]jsonlwatcher.SessionEvent) {}
 func (nopObserver) SessionName(string)                        {}
@@ -87,13 +93,16 @@ type Config struct {
 	// AgentAPI restarted). The initial prompt is not sent again.
 	InitialMessages []st.ConversationMessage
 	InitialPrompt   string
-	Emitter       st.Emitter
-	Observer      Observer
-	Logger        *slog.Logger
-	Clock         quartz.Clock
+	Emitter         st.Emitter
+	Observer        Observer
+	Logger          *slog.Logger
+	Clock           quartz.Clock
 	// StartTimeout bounds how long Start waits for the agent to accept
 	// turns. Zero means two minutes.
 	StartTimeout time.Duration
+	// LoginRetryInterval is how often the agent is started again while it
+	// waits for a login. Zero means five seconds.
+	LoginRetryInterval time.Duration
 }
 
 // maxClosedRequests is how many answered or expired requests are kept for
@@ -137,6 +146,10 @@ type Conversation struct {
 	responding map[string]bool
 
 	exited chan error
+	// login is set while the agent waits for the user to log in;
+	// loginRetry asks the waiting loop to try again now.
+	login      *LoginRequired
+	loginRetry chan struct{}
 }
 
 // NewConversation creates a conversation. Nothing runs until Start.
@@ -156,6 +169,9 @@ func NewConversation(cfg Config) *Conversation {
 	if cfg.StartTimeout == 0 {
 		cfg.StartTimeout = 2 * time.Minute
 	}
+	if cfg.LoginRetryInterval == 0 {
+		cfg.LoginRetryInterval = 5 * time.Second
+	}
 	c := &Conversation{
 		cfg:        cfg,
 		agentIdx:   -1,
@@ -165,6 +181,7 @@ func NewConversation(cfg Config) *Conversation {
 		responding: make(map[string]bool),
 		sessionRef: cfg.ResumeRef,
 		exited:     make(chan error, 1),
+		loginRetry: make(chan struct{}, 1),
 		messages:   slices.Clone(cfg.InitialMessages),
 		promptSent: len(cfg.InitialMessages) > 0,
 	}
@@ -212,6 +229,11 @@ func (c *Conversation) launch(ctx context.Context, gen int, resumeRef string) er
 	defer cancel()
 	if err := adapter.Start(startCtx, &sink{c: c, gen: gen}); err != nil {
 		_ = adapter.Close()
+		var login *LoginRequiredError
+		if errors.As(err, &login) {
+			c.awaitLogin(ctx, gen, resumeRef, login.Login)
+			return nil
+		}
 		return err
 	}
 	go func() {
@@ -228,6 +250,10 @@ func (c *Conversation) launch(ctx context.Context, gen int, resumeRef string) er
 	c.starting = false
 	sendPrompt := c.cfg.InitialPrompt != "" && !c.promptSent
 	c.promptSent = true
+	if c.login != nil {
+		c.login = nil
+		c.cfg.Observer.LoginRequired(nil)
+	}
 	c.cfg.Observer.Started(adapter.Capabilities())
 	c.cfg.Emitter.EmitStatus(c.statusLocked())
 	c.mu.Unlock()
@@ -237,6 +263,126 @@ func (c *Conversation) launch(ctx context.Context, gen int, resumeRef string) er
 			c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), st.ErrorLevelError)
 		}
 	}
+	return nil
+}
+
+// awaitLogin records that the agent of generation gen needs a login and
+// starts it again after LoginRetryInterval, or sooner on RetryLogin.
+func (c *Conversation) awaitLogin(ctx context.Context, gen int, resumeRef string, login LoginRequired) {
+	c.mu.Lock()
+	if gen != c.generation {
+		c.mu.Unlock()
+		return
+	}
+	changed := c.setLoginLocked(login)
+	c.adapter = nil
+	c.mu.Unlock()
+	if changed {
+		c.cfg.Logger.Warn("The agent needs a login", "agent", login.Agent, "command", login.Command)
+		c.cfg.Emitter.EmitError(loginErrorText(login), st.ErrorLevelWarning)
+	}
+	go func() {
+		timer := c.cfg.Clock.NewTimer(c.cfg.LoginRetryInterval, "Conversation", "loginRetry")
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		case <-c.loginRetry:
+		}
+		c.mu.Lock()
+		current := gen == c.generation
+		c.mu.Unlock()
+		if !current {
+			return
+		}
+		if err := c.launch(ctx, gen, resumeRef); err != nil {
+			c.cfg.Logger.Error("Failed to start the agent", "error", err)
+			c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to start the agent: %v", err), st.ErrorLevelError)
+			c.signalExit(gen, err)
+		}
+	}()
+}
+
+// setLoginLocked records login and reports whether it differs from the
+// login already recorded.
+func (c *Conversation) setLoginLocked(login LoginRequired) bool {
+	if login.Host == "" {
+		login.Host, _ = os.Hostname()
+	}
+	if login.User == "" {
+		if u, err := user.Current(); err == nil {
+			login.User = u.Username
+		}
+	}
+	changed := c.login == nil || *c.login != login
+	c.login = &login
+	c.cfg.Observer.LoginRequired(&login)
+	return changed
+}
+
+func loginErrorText(login LoginRequired) string {
+	where := ""
+	if login.Host != "" && login.User != "" {
+		where = fmt.Sprintf(" on %s as %s", login.Host, login.User)
+	}
+	return fmt.Sprintf("%s Run `%s` in a terminal%s; AgentAPI picks up the login by itself.", login.Message, login.Command, where)
+}
+
+// LoginRequired returns what the agent waits for to log in, or nil.
+func (c *Conversation) LoginRequired() *LoginRequired {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.login == nil {
+		return nil
+	}
+	login := *c.login
+	return &login
+}
+
+// RetryLogin checks again whether the user logged in. While the agent waits
+// at startup it is started again now; if it lost its login while running,
+// it is replaced by a new process that resumes the session.
+func (c *Conversation) RetryLogin(ctx context.Context) error {
+	c.mu.Lock()
+	if c.login == nil {
+		c.mu.Unlock()
+		return ErrNoLoginRequired
+	}
+	if !c.started {
+		c.mu.Unlock()
+		select {
+		case c.loginRetry <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+	c.generation++
+	gen := c.generation
+	old := c.adapter
+	c.adapter = nil
+	c.started = false
+	c.starting = true
+	c.turnActive = false
+	ref := c.sessionRef
+	runCtx := c.ctx
+	for _, state := range c.expireRequestsLocked(ResponseNotResumable) {
+		c.cfg.Observer.RequestUpdated(state)
+	}
+	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
+	c.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+	if runCtx == nil {
+		runCtx = context.Background()
+	}
+	go func() {
+		if err := c.launch(runCtx, gen, ref); err != nil {
+			c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to start the agent: %v", err), st.ErrorLevelError)
+			c.signalExit(gen, err)
+		}
+	}()
 	return nil
 }
 
@@ -787,6 +933,10 @@ func (s *sink) TurnCompleted(result TurnResult) {
 	}
 	if result.Error != "" {
 		c.cfg.Emitter.EmitError(result.Error, st.ErrorLevelError)
+	} else if c.login != nil {
+		// A turn worked, so the agent is logged in again.
+		c.login = nil
+		c.cfg.Observer.LoginRequired(nil)
 	}
 	c.cfg.Emitter.EmitStatus(c.statusLocked())
 	c.mu.Unlock()
@@ -885,6 +1035,20 @@ func (s *sink) RequestClosed(id string) {
 	c.cfg.Observer.RequestUpdated(*r)
 	c.cfg.Emitter.EmitStatus(c.statusLocked())
 	c.mu.Unlock()
+}
+
+func (s *sink) LoginRequired(login LoginRequired) {
+	c := s.c
+	if !s.lock() {
+		c.mu.Unlock()
+		return
+	}
+	changed := c.setLoginLocked(login)
+	stored := *c.login
+	c.mu.Unlock()
+	if changed {
+		c.cfg.Emitter.EmitError(loginErrorText(stored), st.ErrorLevelError)
+	}
 }
 
 func (s *sink) SessionName(name string) {
