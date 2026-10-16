@@ -246,7 +246,7 @@ func (s *Server) updateMCP(
 			"MCP config management is not supported for this agent type",
 		)
 	}
-	if input.Restart && s.restartAgent == nil {
+	if input.Restart && !s.canRestart() {
 		return nil, huma.Error400BadRequest(
 			"agent restart is not supported in this server mode",
 		)

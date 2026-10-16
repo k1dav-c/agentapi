@@ -29,6 +29,7 @@ import (
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/termexec"
 )
@@ -230,9 +231,25 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	}
 
 	experimentalACP := viper.GetBool(FlagExperimentalACP)
+	useNative := false
+	switch transportFlag := viper.GetString(FlagTransport); transportFlag {
+	case "", "pty":
+	case "acp":
+		experimentalACP = true
+	case "native":
+		useNative = true
+	default:
+		return fmt.Errorf("unknown --%s %q (one of: pty, acp, native)", FlagTransport, transportFlag)
+	}
+	if experimentalACP && useNative {
+		return fmt.Errorf("--%s and --%s=native are mutually exclusive", FlagExperimentalACP, FlagTransport)
+	}
 
 	if experimentalACP && (saveState || loadState) {
 		return fmt.Errorf("ACP mode doesn't support state persistence")
+	}
+	if useNative && (saveState || loadState) {
+		return fmt.Errorf("the native transport doesn't support --%s", FlagStateFile)
 	}
 
 	bind, err := httpapi.ParseBindAddress(viper.GetString(FlagBind))
@@ -262,6 +279,8 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	var supervisor *agentSupervisor
 	var acpResult *httpapi.SetupACPResult
 	var agentStartedAt time.Time
+	var adapterFactory native.Factory
+	cwd, _ := os.Getwd()
 
 	if printOpenAPI {
 		agentIO = nil
@@ -277,6 +296,18 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		acpIO := acpResult.AgentIO
 		agentIO = acpIO
 		transport = "acp"
+	} else if useNative {
+		var err error
+		adapterFactory, err = nativeFactory(agentType, nativeAdapterConfig{
+			Program: agent,
+			Args:    argsToPass[1:],
+			CWD:     cwd,
+			Logger:  logger,
+		})
+		if err != nil {
+			return err
+		}
+		transport = "native"
 	} else {
 		agentStartedAt = time.Now()
 		programArgs := argsToPass[1:]
@@ -323,8 +354,6 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		agentPID = process.Pid()
 	}
 
-	cwd, _ := os.Getwd()
-
 	apiToken := viper.GetString(FlagAPIToken)
 	if apiToken == "generate" {
 		var tokenBytes [32]byte
@@ -364,8 +393,9 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			}
 			return supervisor.Restart
 		}(),
-		APIToken: apiToken,
-		Bind:     bind,
+		APIToken:      apiToken,
+		Bind:          bind,
+		NativeFactory: adapterFactory,
 		Webhook: httpapi.WebhookConfig{
 			URL:             viper.GetString(FlagWebhookURL),
 			Timeout:         viper.GetDuration(FlagWebhookTimeout),
@@ -421,6 +451,20 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 					srv.MarkAgentExited(nil)
 				}
 				return
+			}
+		}()
+	}
+	if exited := srv.NativeExited(); exited != nil {
+		go func() {
+			defer close(processExitCh)
+			defer gracefulCancel()
+			select {
+			case err := <-exited:
+				srv.MarkAgentExited(err)
+				if err != nil {
+					processExitCh <- fmt.Errorf("agent exited: %w", err)
+				}
+			case <-gracefulCtx.Done():
 			}
 		}()
 	}
@@ -609,6 +653,7 @@ const (
 	FlagSaveState              = "save-state"
 	FlagPidFile                = "pid-file"
 	FlagExperimentalACP        = "experimental-acp"
+	FlagTransport              = "transport"
 	FlagWebhookURL             = "webhook-url"
 	FlagWebhookTimeout         = "webhook-timeout"
 	FlagWebhookMaxAttempts     = "webhook-max-attempts"
@@ -658,6 +703,7 @@ func CreateServerCmd() *cobra.Command {
 		{FlagSaveState, "", false, "Save state to state-file on shutdown (defaults to true when state-file is set)", "bool"},
 		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts", "string"},
 		{FlagExperimentalACP, "", false, "Use experimental ACP transport instead of PTY", "bool"},
+		{FlagTransport, "", "pty", "How to drive the agent: pty (its terminal UI), acp (same as --experimental-acp) or native (its own structured protocol; claude, codex and pi)", "string"},
 		{FlagWebhookURL, "", "", "URL notified when the agent run status changes", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},
 		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},

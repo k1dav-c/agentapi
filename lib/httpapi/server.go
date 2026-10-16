@@ -28,6 +28,7 @@ import (
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/mcpconfig"
 	mf "github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/x/acpio"
 	"github.com/coder/quartz"
@@ -62,6 +63,7 @@ type Server struct {
 	stopOnce           sync.Once
 	logger             *slog.Logger
 	conversation       st.Conversation
+	native             *native.Conversation // nil unless the transport is native
 	agentio            st.AgentIO
 	agentType          mf.AgentType
 	emitter            *EventEmitter
@@ -169,6 +171,10 @@ type ServerConfig struct {
 	RestartAgent func(context.Context) (int, error)
 	// Webhook sends an event whenever the agent status changes.
 	Webhook WebhookConfig
+	// NativeFactory creates the agent adapter for the native transport.
+	NativeFactory native.Factory
+	// NativeResumeRef resumes an earlier native session.
+	NativeResumeRef string
 	// APIToken, if non-empty, enables token authentication on all API
 	// endpoints: a Bearer header, or the session cookie POST /auth/session
 	// sets for browsers. Static file routes (/chat/*, /) and /auth/session
@@ -407,7 +413,23 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 
 	var conversation st.Conversation
-	if config.Transport == TransportACP {
+	var nativeConversation *native.Conversation
+	observer := &nativeObserver{emitter: emitter}
+	if config.Transport == TransportNative {
+		if config.NativeFactory == nil {
+			return nil, fmt.Errorf("native transport requires an adapter factory")
+		}
+		nativeConversation = native.NewConversation(native.Config{
+			Factory:       config.NativeFactory,
+			ResumeRef:     config.NativeResumeRef,
+			InitialPrompt: config.InitialPrompt,
+			Emitter:       emitter,
+			Observer:      observer,
+			Logger:        logger,
+			Clock:         config.Clock,
+		})
+		conversation = nativeConversation
+	} else if config.Transport == TransportACP {
 		// For ACP, cast AgentIO to *acpio.ACPAgentIO
 		acpIO, ok := config.AgentIO.(*acpio.ACPAgentIO)
 		if !ok {
@@ -448,6 +470,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		bind:           bind,
 		auth:           auth,
 		conversation:   conversation,
+		native:         nativeConversation,
 		logger:         logger,
 		agentio:        config.AgentIO,
 		agentType:      config.AgentType,
@@ -471,6 +494,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		s.mcpStore = store
 	}
 
+	observer.storeImages = s.storeRichImages
+
 	// Register API routes
 	s.registerRoutes()
 
@@ -480,7 +505,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	// termexec.StartProcess() blocks until the PTY is created and the process
 	// is active. Agent readiness (waiting for the prompt) is handled
 	// asynchronously inside conversation.Start() via ReadyForInitialPrompt.
-	if config.AgentIO != nil {
+	if config.AgentIO != nil || s.native != nil {
 		s.conversation.Start(ctx)
 		s.startMessageQueue()
 	}
@@ -500,6 +525,15 @@ func (s *Server) Handler() http.Handler {
 
 // MarkAgentExited records the terminal lifecycle state before the HTTP server
 // shuts down. A nil error represents a clean process exit.
+// NativeExited delivers the agent's exit when it runs over the native
+// transport and exits on its own; it is nil for other transports.
+func (s *Server) NativeExited() <-chan error {
+	if s.native == nil {
+		return nil
+	}
+	return s.native.Exited()
+}
+
 func (s *Server) MarkAgentExited(err error) {
 	if err != nil {
 		s.emitter.SetLifecycle(LifecycleFailed)
@@ -694,6 +728,7 @@ func sseMiddleware(ctx huma.Context, next func(huma.Context)) {
 func (s *Server) registerRoutes() {
 	s.registerAuthRoutes()
 	s.registerTemporalRoutes()
+	s.registerNativeRoutes()
 	huma.Get(s.api, "/handoff", s.getPendingHandoff)
 	huma.Post(s.api, "/handoff/reply", s.replyHandoff)
 	// GET /status endpoint
@@ -798,6 +833,7 @@ func (s *Server) registerRoutes() {
 		"rich_message_update": RichMessageUpdateBody{},
 		"heartbeat":           HeartbeatBody{},
 		"session_sync":        SessionSyncBody{},
+		"request_update":      RequestUpdateBody{},
 	}, s.subscribeEvents)
 
 	sse.Register(s.api, huma.Operation{
@@ -839,6 +875,8 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 	resp.Body.TerminalPrompt = snapshot.TerminalPrompt
 	resp.Body.TerminalColumns = snapshot.TerminalColumns
 	resp.Body.SessionName = snapshot.SessionName
+	resp.Body.PendingRequests = snapshot.PendingRequests
+	resp.Body.Capabilities = snapshot.Capabilities
 
 	return resp, nil
 }
@@ -935,10 +973,26 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 	pending := s.pendingHandoffLocked()
 
 	resp := &MessageResponse{}
+	mode := input.Body.DispatchMode
+	if mode == "" {
+		mode = DispatchQueue
+	}
+	if !slices.Contains(DispatchModeValues, mode) {
+		return nil, huma.Error400BadRequest(fmt.Sprintf("unknown dispatch_mode %q", mode))
+	}
+	if mode != DispatchQueue && (s.native == nil || input.Body.Type != MessageTypeUser) {
+		return nil, huma.Error400BadRequest("dispatch_mode steer and interrupt need the native transport and a user message")
+	}
 	switch input.Body.Type {
 	case MessageTypeUser:
 		if strings.TrimSpace(input.Body.Content) == "" {
 			return nil, huma.Error400BadRequest("message must not be empty")
+		}
+		if s.native != nil {
+			if err := s.createNativeMessageLocked(input.Body.Content, mode, resp); err != nil {
+				return nil, err
+			}
+			break
 		}
 		var screen string
 		if s.transport == TransportPTY {
@@ -961,14 +1015,14 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 		// queue holds it until the prompt is answered.
 		if len(s.messageQueue) > 0 || s.conversation.Status() != st.ConversationStatusStable ||
 			(screen != "" && isTerminalQuestionScreen(s.agentType, screen)) {
-			s.enqueueMessageLocked(input.Body.Content)
+			s.enqueueMessageLocked(input.Body.Content, false)
 			resp.Body.Ok = true
 			resp.Body.Queued = true
 			return resp, nil
 		}
 		if err := s.conversation.Send(FormatMessage(s.agentType, input.Body.Content)...); err != nil {
 			if errors.Is(err, st.ErrMessageValidationChanging) {
-				s.enqueueMessageLocked(input.Body.Content)
+				s.enqueueMessageLocked(input.Body.Content, false)
 				resp.Body.Ok = true
 				resp.Body.Queued = true
 				return resp, nil
@@ -976,6 +1030,9 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 			return nil, fmt.Errorf("failed to send message: %w", err)
 		}
 	case MessageTypeRaw:
+		if s.agentio == nil {
+			return nil, huma.Error400BadRequest("raw messages need a terminal; the native transport has none")
+		}
 		if _, err := s.agentio.Write([]byte(input.Body.Content)); err != nil {
 			return nil, fmt.Errorf("failed to send message: %w", err)
 		}
@@ -1032,13 +1089,19 @@ func (s *Server) deleteQueuedMessage(ctx context.Context, input *DeleteQueuedMes
 	return nil, huma.Error404NotFound("queued message not found")
 }
 
-func (s *Server) enqueueMessageLocked(content string) {
+// enqueueMessageLocked queues a message last, or first if front is set.
+func (s *Server) enqueueMessageLocked(content string, front bool) {
 	s.nextQueueID++
-	s.messageQueue = append(s.messageQueue, QueuedMessage{
+	msg := QueuedMessage{
 		ID:      s.nextQueueID,
 		Content: content,
 		Time:    s.clock.Now(),
-	})
+	}
+	if front {
+		s.messageQueue = slices.Insert(s.messageQueue, 0, msg)
+		return
+	}
+	s.messageQueue = append(s.messageQueue, msg)
 }
 
 // startMessageQueue starts the queue dispatch loop. Dispatch is driven by
@@ -1058,6 +1121,10 @@ func (s *Server) startMessageQueue() {
 func (s *Server) dispatchNextQueuedMessage() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.native != nil {
+		s.dispatchNativeQueuedLocked()
+		return
+	}
 	// Screen inspection is only needed when a message can be dispatched.
 	if len(s.messageQueue) == 0 || s.conversation.Status() != st.ConversationStatusStable {
 		return
@@ -1270,6 +1337,11 @@ func (s *Server) Stop(ctx context.Context) error {
 	var err error
 	s.stopOnce.Do(func() {
 		s.shutdown()
+		if s.native != nil {
+			if closeErr := s.native.Close(); closeErr != nil {
+				s.logger.Error("Failed to stop the agent", "error", closeErr)
+			}
+		}
 
 		// Clean up temporary directory
 		s.cleanupTempDir()

@@ -4,14 +4,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/coder/agentapi/lib/handoff"
 	mf "github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -165,7 +168,11 @@ func (s *Server) pendingHandoffLocked() *handoff.Request {
 			question = message.Message
 		}
 	}
-	if s.transport == TransportPTY && isTerminalQuestionScreen(s.agentType, screen) {
+	if r, text, ok := s.pendingNativeHandoff(); ok {
+		// Include the request ID: two identical approvals are different
+		// requests.
+		kind, content = "request", r.ID+"\n"+text
+	} else if s.transport == TransportPTY && isTerminalQuestionScreen(s.agentType, screen) {
 		kind, content = "terminal", screen
 	} else {
 		if len(s.messageQueue) > 0 {
@@ -190,8 +197,20 @@ func (s *Server) pendingHandoffLocked() *handoff.Request {
 	if id == s.handoffSuppressed {
 		return nil
 	}
+	if kind == "request" {
+		// Clients show the request, not its ID.
+		_, content, _ = strings.Cut(content, "\n")
+	}
 	return &handoff.Request{ID: id, SessionID: status.SessionID, RunID: status.RunID,
 		AgentType: string(status.AgentType), Kind: kind, Question: question, Content: content}
+}
+
+// pendingNativeHandoff returns the oldest pending native request.
+func (s *Server) pendingNativeHandoff() (native.RequestState, string, bool) {
+	if s.native == nil {
+		return native.RequestState{}, "", false
+	}
+	return s.pendingNativeHandoffLocked()
 }
 
 func (s *Server) getPendingHandoff(_ context.Context, _ *struct{}) (*PendingHandoffResponse, error) {
@@ -218,6 +237,9 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "superseded"}}, nil
 	}
 	content := reply.Content
+	if pending.Kind == "request" {
+		return s.replyNativeHandoffLocked(pending.ID, reply.ID, content), nil
+	}
 	// Free text answering a prompt with a text field (Claude's plan
 	// feedback, Codex's question notes) goes into that field.
 	freeTextKeys, freeText := "", false
@@ -233,13 +255,7 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 	}
 	// Reserve before touching the PTY. A failed/partial write must never be
 	// retried automatically; it may already have approved an operation.
-	if s.handoffReceipts == nil {
-		s.handoffReceipts = make(map[string]handoffReceipt)
-	}
-	if len(s.handoffReceipts) >= 256 {
-		clear(s.handoffReceipts)
-	}
-	s.handoffSuppressed = pending.ID
+	s.reserveHandoffLocked(pending.ID)
 	result := handoff.Result{Outcome: "uncertain"}
 	s.handoffReceipts[pending.ID] = handoffReceipt{reply.ID, result}
 	var err error
@@ -261,4 +277,42 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 	}
 	s.handoffReceipts[pending.ID] = handoffReceipt{reply.ID, result}
 	return &HandoffReplyResponse{Body: result}, nil
+}
+
+// reserveHandoffLocked records that the pending handoff is being answered.
+func (s *Server) reserveHandoffLocked(id string) {
+	if s.handoffReceipts == nil {
+		s.handoffReceipts = make(map[string]handoffReceipt)
+	}
+	if len(s.handoffReceipts) >= 256 {
+		clear(s.handoffReceipts)
+	}
+	s.handoffSuppressed = id
+}
+
+// replyNativeHandoffLocked answers the pending native request with a human
+// reply. Caller holds s.mu.
+func (s *Server) replyNativeHandoffLocked(pendingID, replyID, content string) *HandoffReplyResponse {
+	r, _, ok := s.pendingNativeHandoff()
+	if !ok {
+		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "superseded"}}
+	}
+	response, ok := nativeHandoffResponse(r, content)
+	if !ok {
+		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "invalid"}}
+	}
+	s.reserveHandoffLocked(pendingID)
+	result := handoff.Result{Outcome: "uncertain"}
+	s.handoffReceipts[pendingID] = handoffReceipt{replyID, result}
+	if _, err := s.respondRequestLocked(s.shutdownCtx, r.ID, response); err != nil {
+		s.logger.Error("Human reply to a request was not applied", "request_id", r.ID, "error", err)
+		var status huma.StatusError
+		if errors.As(err, &status) && status.GetStatus() == http.StatusConflict {
+			result.Outcome = "superseded"
+		}
+	} else {
+		result.Outcome = "applied"
+	}
+	s.handoffReceipts[pendingID] = handoffReceipt{replyID, result}
+	return &HandoffReplyResponse{Body: result}
 }

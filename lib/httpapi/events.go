@@ -15,6 +15,7 @@ import (
 	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	mf "github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/util"
 	"github.com/danielgtaylor/huma/v2"
@@ -30,6 +31,7 @@ const (
 	EventTypeRichMessageUpdate EventType = "rich_message_update"
 	EventTypeHeartbeat         EventType = "heartbeat"
 	EventTypeSessionSync       EventType = "session_sync"
+	EventTypeRequestUpdate     EventType = "request_update"
 )
 
 type AgentStatus string
@@ -102,6 +104,11 @@ type StatusChangeBody struct {
 	// sessions apart.
 	SessionName     string `json:"session_name,omitempty" doc:"Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it."`
 	TerminalColumns uint16 `json:"terminal_columns,omitempty" doc:"Width of the emulated terminal the agent runs in, in columns (PTY transport only)."`
+	// PendingRequests counts the structured requests (native transport)
+	// the agent is waiting on.
+	PendingRequests int `json:"pending_requests,omitempty" doc:"Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests."`
+	// Capabilities is set for the native transport.
+	Capabilities *native.Capabilities `json:"capabilities,omitempty" doc:"Optional operations the agent supports. Native transport only."`
 }
 
 type ScreenUpdateBody struct {
@@ -117,6 +124,13 @@ type ErrorBody struct {
 // RichMessageUpdateBody is the SSE payload for rich message updates.
 type RichMessageUpdateBody struct {
 	jsonlwatcher.RichMessage
+	Seq uint64 `json:"seq" doc:"Sequence number of this change; see message_update."`
+}
+
+// RequestUpdateBody is the SSE payload for a structured request that was
+// opened or changed state.
+type RequestUpdateBody struct {
+	native.RequestState
 	Seq uint64 `json:"seq" doc:"Sequence number of this change; see message_update."`
 }
 
@@ -144,6 +158,9 @@ type EventEmitter struct {
 	messageSeq          []uint64
 	richSeq             []uint64
 	richMessages        []jsonlwatcher.RichMessage
+	requests            []native.RequestState
+	requestSeq          []uint64
+	capabilities        *native.Capabilities
 	sessionEvents       []jsonlwatcher.SessionEvent
 	nextSessionEventID  int
 	status              AgentStatus
@@ -370,12 +387,83 @@ func (e *EventEmitter) StatusSnapshot() StatusChangeBody {
 }
 
 func (e *EventEmitter) statusChangeBody() StatusChangeBody {
+	pending := 0
+	for _, r := range e.requests {
+		if r.Status == native.RequestStatusPending {
+			pending++
+		}
+	}
 	return StatusChangeBody{
 		Status: e.status, Lifecycle: e.lifecycle, SessionID: e.sessionID,
 		RunID: e.runID, AgentType: e.agentType, Version: version.Version,
 		TerminalPrompt: e.terminalPrompt, TerminalColumns: e.terminalColumns,
-		SessionName: e.sessionName,
+		SessionName: e.sessionName, PendingRequests: pending, Capabilities: e.capabilities,
 	}
+}
+
+// SetCapabilities records the optional operations the agent supports.
+func (e *EventEmitter) SetCapabilities(caps native.Capabilities) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.capabilities != nil && *e.capabilities == caps {
+		return
+	}
+	e.capabilities = &caps
+	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+}
+
+// EmitRequest stores a structured request's latest state and broadcasts it.
+// A change in the number of pending requests is also a status change.
+func (e *EventEmitter) EmitRequest(state native.RequestState) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	before := e.statusChangeBody().PendingRequests
+	idx := slices.IndexFunc(e.requests, func(r native.RequestState) bool { return r.ID == state.ID })
+	if idx < 0 {
+		e.requests = append(e.requests, state)
+		e.requestSeq = append(e.requestSeq, 0)
+		idx = len(e.requests) - 1
+	} else {
+		e.requests[idx] = state
+	}
+	e.seq++
+	e.requestSeq[idx] = e.seq
+	e.trimRequestsLocked()
+	e.handoffRevision++
+	e.notifyChannels(EventTypeRequestUpdate, RequestUpdateBody{RequestState: state, Seq: e.seq})
+	if e.statusChangeBody().PendingRequests != before {
+		e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	}
+}
+
+// maxClosedRequests caps the answered or expired requests kept for replay.
+const maxClosedRequests = 50
+
+// trimRequestsLocked drops the oldest closed requests beyond
+// maxClosedRequests. Caller holds e.mu.
+func (e *EventEmitter) trimRequestsLocked() {
+	closed := 0
+	for _, r := range e.requests {
+		if r.Status != native.RequestStatusPending {
+			closed++
+		}
+	}
+	for i := 0; closed > maxClosedRequests && i < len(e.requests); {
+		if e.requests[i].Status == native.RequestStatusPending {
+			i++
+			continue
+		}
+		e.requests = slices.Delete(e.requests, i, i+1)
+		e.requestSeq = slices.Delete(e.requestSeq, i, i+1)
+		closed--
+	}
+}
+
+// Requests returns the stored structured requests, oldest first.
+func (e *EventEmitter) Requests() []native.RequestState {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.requests)
 }
 
 func (e *EventEmitter) EmitScreen(newScreen string) {
@@ -465,6 +553,18 @@ func (e *EventEmitter) EmitError(message string, level st.ErrorLevel) {
 // by (MessageID, Role) because parsers re-emit a message as its content
 // accumulates (e.g. Codex turn updates).
 func (e *EventEmitter) EmitRichMessage(msg jsonlwatcher.RichMessage) {
+	e.emitRichMessage(msg, false)
+}
+
+// EmitRichMessageSnapshot stores msg as the full current state of the
+// message, replacing an earlier state with the same (MessageID, Role)
+// instead of merging blocks into it. Native adapters send snapshots: their
+// text blocks grow, and merging would keep every intermediate version.
+func (e *EventEmitter) EmitRichMessageSnapshot(msg jsonlwatcher.RichMessage) {
+	e.emitRichMessage(msg, true)
+}
+
+func (e *EventEmitter) emitRichMessage(msg jsonlwatcher.RichMessage, replace bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -476,7 +576,9 @@ func (e *EventEmitter) EmitRichMessage(msg jsonlwatcher.RichMessage) {
 			break
 		}
 	}
-	if idx >= 0 {
+	if idx >= 0 && replace {
+		e.richMessages[idx] = msg
+	} else if idx >= 0 {
 		existing := e.richMessages[idx]
 		existing.Content = mergeRichContent(existing.Content, msg.Content)
 		existing.StopReason = msg.StopReason
@@ -558,6 +660,8 @@ func (e *EventEmitter) Reset() {
 	e.messageSeq = nil
 	e.richMessages = nil
 	e.richSeq = nil
+	e.requests = nil
+	e.requestSeq = nil
 	// A new epoch makes reconnecting clients drop their cache; connected
 	// clients are told now so they clear the old conversation.
 	e.epoch = newEpoch()
@@ -628,6 +732,17 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string) []Event 
 		events = append(events, Event{
 			Type:    EventTypeRichMessageUpdate,
 			Payload: RichMessageUpdateBody{RichMessage: msg, Seq: e.richSeq[i]},
+		})
+	}
+
+	for i, req := range e.requests {
+		if e.requestSeq[i] <= since {
+			continue
+		}
+		replaySeq = max(replaySeq, e.requestSeq[i])
+		events = append(events, Event{
+			Type:    EventTypeRequestUpdate,
+			Payload: RequestUpdateBody{RequestState: req, Seq: e.requestSeq[i]},
 		})
 	}
 

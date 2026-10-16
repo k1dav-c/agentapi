@@ -35,6 +35,34 @@
         ],
         "type": "object"
       },
+      "Capabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "images": {
+            "description": "Messages can carry images.",
+            "type": "boolean"
+          },
+          "interrupt": {
+            "description": "The turn the agent is working on can be stopped.",
+            "type": "boolean"
+          },
+          "resume": {
+            "description": "The agent's session can be resumed after AgentAPI restarts.",
+            "type": "boolean"
+          },
+          "steer": {
+            "description": "A message can be added to the turn the agent is working on.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "images",
+          "interrupt",
+          "resume",
+          "steer"
+        ],
+        "type": "object"
+      },
       "Config": {
         "additionalProperties": false,
         "properties": {
@@ -123,6 +151,16 @@
           "restarted"
         ],
         "type": "object"
+      },
+      "DispatchMode": {
+        "enum": [
+          "interrupt",
+          "queue",
+          "steer"
+        ],
+        "example": "queue",
+        "title": "DispatchMode",
+        "type": "string"
       },
       "Document": {
         "additionalProperties": false,
@@ -254,6 +292,25 @@
         },
         "required": [
           "time"
+        ],
+        "type": "object"
+      },
+      "InterruptResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/InterruptResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
         ],
         "type": "object"
       },
@@ -562,6 +619,10 @@
             "example": "Hello, agent!",
             "type": "string"
           },
+          "dispatch_mode": {
+            "$ref": "#/components/schemas/DispatchMode",
+            "description": "What to do with a user message while the agent is busy. 'queue' (default) sends it once the agent is idle. 'steer' adds it to the turn the agent is working on; 'interrupt' stops that turn and sends the message next. 'steer' and 'interrupt' need the native transport and an agent with the matching capability (see GET /status); otherwise they return 400."
+          },
           "type": {
             "$ref": "#/components/schemas/MessageType",
             "description": "A 'user' type message will be logged as a user message in the conversation history and submitted to the agent. AgentAPI will wait until the agent starts carrying out the task described in the message before responding. A 'raw' type message will be written directly to the agent's terminal session as keystrokes and will not be saved in the conversation history. 'raw' messages are useful for sending escape sequences to the terminal."
@@ -589,6 +650,10 @@
           },
           "queued": {
             "description": "Indicates whether a user message was queued because the agent was busy.",
+            "type": "boolean"
+          },
+          "steered": {
+            "description": "Indicates whether the message was added to the turn the agent was working on.",
             "type": "boolean"
           }
         },
@@ -667,6 +732,18 @@
         ],
         "type": "object"
       },
+      "OptionKind": {
+        "enum": [
+          "allow",
+          "allow_always",
+          "cancel",
+          "deny",
+          "other"
+        ],
+        "example": "allow",
+        "title": "OptionKind",
+        "type": "string"
+      },
       "Pending": {
         "additionalProperties": false,
         "properties": {
@@ -705,6 +782,65 @@
         },
         "required": [
           "profiles"
+        ],
+        "type": "object"
+      },
+      "Question": {
+        "additionalProperties": false,
+        "properties": {
+          "free_text": {
+            "description": "An answer other than the options is allowed.",
+            "type": "boolean"
+          },
+          "header": {
+            "description": "Short label for the question.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Identifier of the question; key of its answer in the response.",
+            "type": "string"
+          },
+          "multi_select": {
+            "description": "More than one option may be chosen.",
+            "type": "boolean"
+          },
+          "options": {
+            "description": "Suggested answers.",
+            "items": {
+              "$ref": "#/components/schemas/QuestionOption"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "question": {
+            "description": "The question.",
+            "type": "string"
+          },
+          "secret": {
+            "description": "The answer is a secret and should not be shown.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "question"
+        ],
+        "type": "object"
+      },
+      "QuestionOption": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "Explanation of the answer.",
+            "type": "string"
+          },
+          "label": {
+            "description": "The answer.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
         ],
         "type": "object"
       },
@@ -775,6 +911,30 @@
         ],
         "type": "object"
       },
+      "ReorderQueueRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/ReorderQueueRequestBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "ids": {
+            "description": "Identifiers of all queued messages in the new order.",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
       "Reply": {
         "additionalProperties": false,
         "properties": {
@@ -838,6 +998,299 @@
           "session_id"
         ],
         "type": "object"
+      },
+      "RequestKind": {
+        "enum": [
+          "approval",
+          "plan",
+          "question"
+        ],
+        "example": "approval",
+        "title": "RequestKind",
+        "type": "string"
+      },
+      "RequestOption": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "Longer explanation of the option.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Identifier to send back in the response.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OptionKind",
+            "description": "What choosing the option does: allow, allow_always, deny, cancel or other."
+          },
+          "label": {
+            "description": "Text to show for the option.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label"
+        ],
+        "type": "object"
+      },
+      "RequestState": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/RequestState.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "closed_at": {
+            "description": "When the request stopped being pending.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "When the agent asked.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "detail": {
+            "description": "More context: the plan, the diff, the reason given by the agent.",
+            "type": "string"
+          },
+          "feedback": {
+            "description": "A text explanation can accompany the answer.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Identifier of the request.",
+            "type": "string"
+          },
+          "input": {
+            "description": "The tool call's input."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RequestKind",
+            "description": "approval, question or plan."
+          },
+          "options": {
+            "description": "Ways to answer an approval or plan request.",
+            "items": {
+              "$ref": "#/components/schemas/RequestOption"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "questions": {
+            "description": "Questions of a question request.",
+            "items": {
+              "$ref": "#/components/schemas/Question"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "response": {
+            "$ref": "#/components/schemas/Response",
+            "description": "The answer, once resolved."
+          },
+          "response_capability": {
+            "$ref": "#/components/schemas/ResponseCapability",
+            "description": "live: the agent is waiting; message: answer with a new message; not_resumable: can no longer be answered."
+          },
+          "status": {
+            "$ref": "#/components/schemas/RequestStatus",
+            "description": "pending, resolved, withdrawn (the agent stopped waiting) or expired (the turn ended or the agent restarted)."
+          },
+          "title": {
+            "description": "One-line summary, e.g. the command to run.",
+            "type": "string"
+          },
+          "tool_name": {
+            "description": "Tool the request is about.",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "Tool call the request is about, matching tool_use_id in rich messages.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_at",
+          "id",
+          "kind",
+          "response_capability",
+          "status",
+          "title"
+        ],
+        "type": "object"
+      },
+      "RequestStatus": {
+        "enum": [
+          "expired",
+          "pending",
+          "resolved",
+          "withdrawn"
+        ],
+        "example": "pending",
+        "title": "RequestStatus",
+        "type": "string"
+      },
+      "RequestUpdateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "closed_at": {
+            "description": "When the request stopped being pending.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "When the agent asked.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "detail": {
+            "description": "More context: the plan, the diff, the reason given by the agent.",
+            "type": "string"
+          },
+          "feedback": {
+            "description": "A text explanation can accompany the answer.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Identifier of the request.",
+            "type": "string"
+          },
+          "input": {
+            "description": "The tool call's input."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RequestKind",
+            "description": "approval, question or plan."
+          },
+          "options": {
+            "description": "Ways to answer an approval or plan request.",
+            "items": {
+              "$ref": "#/components/schemas/RequestOption"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "questions": {
+            "description": "Questions of a question request.",
+            "items": {
+              "$ref": "#/components/schemas/Question"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "response": {
+            "$ref": "#/components/schemas/Response",
+            "description": "The answer, once resolved."
+          },
+          "response_capability": {
+            "$ref": "#/components/schemas/ResponseCapability",
+            "description": "live: the agent is waiting; message: answer with a new message; not_resumable: can no longer be answered."
+          },
+          "seq": {
+            "description": "Sequence number of this change; see message_update.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RequestStatus",
+            "description": "pending, resolved, withdrawn (the agent stopped waiting) or expired (the turn ended or the agent restarted)."
+          },
+          "title": {
+            "description": "One-line summary, e.g. the command to run.",
+            "type": "string"
+          },
+          "tool_name": {
+            "description": "Tool the request is about.",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "Tool call the request is about, matching tool_use_id in rich messages.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_at",
+          "id",
+          "kind",
+          "response_capability",
+          "seq",
+          "status",
+          "title"
+        ],
+        "type": "object"
+      },
+      "RequestsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/RequestsResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "requests": {
+            "description": "Pending requests and the most recently closed ones, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/RequestState"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "requests"
+        ],
+        "type": "object"
+      },
+      "Response": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/Response.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "answers": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "nullable": true,
+              "type": "array"
+            },
+            "description": "Answers of a question request, keyed by question id. Each answer lists the chosen option labels, or holds free text.",
+            "type": "object"
+          },
+          "option_id": {
+            "description": "Chosen option of an approval or plan request.",
+            "type": "string"
+          },
+          "text": {
+            "description": "Feedback for the agent, e.g. what to change in a plan.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ResponseCapability": {
+        "enum": [
+          "live",
+          "message",
+          "not_resumable"
+        ],
+        "example": "live",
+        "title": "ResponseCapability",
+        "type": "string"
       },
       "Result": {
         "additionalProperties": false,
@@ -1143,9 +1596,18 @@
             "description": "Version of the AgentAPI server.",
             "type": "string"
           },
+          "capabilities": {
+            "$ref": "#/components/schemas/Capabilities",
+            "description": "Optional operations the agent supports. Native transport only."
+          },
           "lifecycle": {
             "$ref": "#/components/schemas/LifecycleState",
             "description": "Detailed process lifecycle state."
+          },
+          "pending_requests": {
+            "description": "Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests.",
+            "format": "int64",
+            "type": "integer"
           },
           "run_id": {
             "description": "Monotonically increasing run identifier within the session.",
@@ -1205,9 +1667,18 @@
             "description": "Version of the AgentAPI server.",
             "type": "string"
           },
+          "capabilities": {
+            "$ref": "#/components/schemas/Capabilities",
+            "description": "Optional operations the agent supports. Native transport only."
+          },
           "lifecycle": {
             "$ref": "#/components/schemas/LifecycleState",
             "description": "Detailed process lifecycle state."
+          },
+          "pending_requests": {
+            "description": "Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests.",
+            "format": "int64",
+            "type": "integer"
           },
           "run_id": {
             "description": "Monotonically increasing run identifier within the session.",
@@ -1239,7 +1710,7 @@
           },
           "transport": {
             "$ref": "#/components/schemas/Transport",
-            "description": "Backend transport being used ('acp' or 'pty')."
+            "description": "Backend transport being used ('pty', 'acp' or 'native')."
           }
         },
         "required": [
@@ -1364,6 +1835,7 @@
       "Transport": {
         "enum": [
           "acp",
+          "native",
           "pty"
         ],
         "example": "pty",
@@ -1803,6 +2275,32 @@
                       {
                         "properties": {
                           "data": {
+                            "$ref": "#/components/schemas/RequestUpdateBody"
+                          },
+                          "event": {
+                            "const": "request_update",
+                            "description": "The event name.",
+                            "type": "string"
+                          },
+                          "id": {
+                            "description": "The event ID.",
+                            "type": "integer"
+                          },
+                          "retry": {
+                            "description": "The retry time in milliseconds.",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "data",
+                          "event"
+                        ],
+                        "title": "Event request_update",
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "data": {
                             "$ref": "#/components/schemas/RichMessageUpdateBody"
                           },
                           "event": {
@@ -1965,6 +2463,55 @@
           }
         },
         "summary": "Post handoff reply"
+      }
+    },
+    "/interrupt": {
+      "post": {
+        "description": "Stops the turn the agent is working on. Native transport only, for agents with the interrupt capability.",
+        "operationId": "post-interrupt",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterruptResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Interrupt the agent"
       }
     },
     "/mcp": {
@@ -2762,6 +3309,63 @@
           }
         },
         "summary": "Get queue"
+      },
+      "put": {
+        "description": "Reorders the queued messages. The body must list every queued message id exactly once; otherwise 409 is returned.",
+        "operationId": "put-queue",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderQueueRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueMutationResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Put queue"
       }
     },
     "/queue/{id}": {
@@ -2854,6 +3458,277 @@
           }
         },
         "summary": "Put queue by ID"
+      }
+    },
+    "/queue/{id}/steer": {
+      "post": {
+        "description": "Adds a queued message to the turn the agent is working on instead of waiting for it to end. Native transport only, for agents with the steer capability.",
+        "operationId": "post-queue-by-id-steer",
+        "parameters": [
+          {
+            "description": "Queued message identifier.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Queued message identifier.",
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueMutationResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Post queue by ID steer"
+      }
+    },
+    "/requests": {
+      "get": {
+        "description": "Returns the requests the agent is waiting on (tool approvals, questions, plans) and the most recently closed ones. Native transport only; other transports return an empty list. Changes are also sent as `request_update` events on /events.",
+        "operationId": "get-requests",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List requests",
+        "tags": [
+          "Requests"
+        ]
+      }
+    },
+    "/requests/{id}": {
+      "get": {
+        "operationId": "get-requests-by-id",
+        "parameters": [
+          {
+            "description": "Request identifier.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Request identifier.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestState"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Get a request",
+        "tags": [
+          "Requests"
+        ]
+      }
+    },
+    "/requests/{id}/respond": {
+      "post": {
+        "description": "Answers a pending request. Approvals and plans take `option_id` (one of the request's options, optionally with `text` as feedback); questions take `answers` keyed by question id. Returns 409 if the request is no longer pending (already answered, withdrawn or expired) and 400 if the answer doesn't fit the request. A request is answered at most once.",
+        "operationId": "post-requests-by-id-respond",
+        "parameters": [
+          {
+            "description": "Request identifier.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Request identifier.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Response"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestState"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Answer a request",
+        "tags": [
+          "Requests"
+        ]
       }
     },
     "/rich-messages": {
