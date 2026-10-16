@@ -195,9 +195,30 @@ agentapi server --api-token=my-secret -- claude
 AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
 ```
 
-When enabled, every API request must include `Authorization: Bearer <token>`.
-Static file routes (`/`, `/chat/*`) are exempt so browsers can open the chat
-UI without a token.
+When enabled, every API request must include `Authorization: Bearer <token>`
+or the chat UI's session cookie. Static file routes (`/`, `/chat/*`) are exempt
+so browsers can open the chat UI without a token. Tokens are compared in
+constant time.
+
+The chat UI signs in by trading the token for a cookie, since browsers can't add
+an `Authorization` header to the event stream or to images:
+
+- Open `http://localhost:3284/chat/embed#token=<token>`. With an auto-generated
+  token the server prints this link on startup. The token is in the URL
+  fragment, which the browser never sends to the server, a proxy or an access
+  log; the page exchanges it and removes it from the address bar.
+- Or just open the chat: when the server answers 401 it asks for the token.
+
+`POST /auth/session` with `Authorization: Bearer <token>` sets the cookie
+(`agentapi_session`, HttpOnly, SameSite=Strict, `Path=/`, and Secure over
+HTTPS or behind a proxy that sends `X-Forwarded-Proto: https`). It holds an
+HMAC of the token, not the token, so changing the token signs every browser
+out. `DELETE /auth/session` signs out, and `GET /auth/session` (no credentials
+needed) reports `auth_required` and `authenticated`. Because the cookie is
+SameSite=Strict, pages on other sites can't make requests with it. A chat UI
+served from another origin (e.g. `bun run dev` on port 3000) needs that origin
+in `--allowed-origins`; `--allowed-origins '*'` doesn't allow requests with
+cookies.
 
 ### Interactive prompt support
 
@@ -379,6 +400,7 @@ Endpoints:
 - GET `/mcp/profiles` - exports project-scoped MCP configuration profiles
 - PUT/DELETE `/mcp/profiles/{name}` - imports, replaces, or removes a profile
 - POST `/mcp/profiles/{name}/apply` - replaces the active MCP configuration with a saved profile
+- GET/POST/DELETE `/auth/session` - reports whether the API needs a token and whether the caller has one, signs a browser in with the token (session cookie), or signs it out; see [API token authentication](#api-token-authentication)
 
 #### API token authentication
 
@@ -391,7 +413,9 @@ agentapi server --api-token=my-secret -- claude    # use a specific token
 ```
 
 The equivalent environment variable is `AGENTAPI_API_TOKEN`. When set, clients
-must include `Authorization: Bearer <token>` on every API call. Without
+must include `Authorization: Bearer <token>` on every API call; browsers can use
+the session cookie from `POST /auth/session` instead (see
+[API token authentication](#api-token-authentication) above). Without
 `--api-token`, authentication is disabled (backward compatible).
 
 #### Bind address

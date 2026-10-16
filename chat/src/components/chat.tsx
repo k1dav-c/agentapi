@@ -7,6 +7,7 @@ import MessageInput from "./message-input";
 import MessageList from "./message-list";
 import dynamic from "next/dynamic";
 import {TtyView} from "./tty-view";
+import {requestCredentials} from "@/lib/auth";
 import {DecisionCard, StateStrip} from "./dock";
 import {BackgroundAlerts} from "./background-alerts";
 
@@ -51,7 +52,7 @@ export function Chat() {
   useEffect(() => {
     if (workspaceUrl) return;
     let active = true;
-    fetch(`${storageScope}/workspace`)
+    fetch(`${storageScope}/workspace`, {credentials: requestCredentials(storageScope)})
       .then((response) => response.ok ? response.json() as Promise<{url?: string}> : null)
       .then((value) => { if (active && value?.url) setCoderWorkspaceUrl(value.url); })
       .catch(() => undefined);

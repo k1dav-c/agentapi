@@ -9,6 +9,7 @@ import {Button} from "./ui/button";
 import {OrderedInput, fitTerminalFontSize, screenToTerminalOutput} from "@/lib/tty";
 import {IOS_FORM_BAR_HEIGHT, isIOS, keyboardInset, terminalShortcuts, type TerminalShortcut} from "@/lib/terminal-keys";
 import {useMediaQuery} from "@/lib/use-media-query";
+import {withCredentials} from "@/lib/auth";
 
 // The mirror uses the width of the agent's terminal (80 columns unless
 // AgentAPI was started with --term-width), so lines wrap exactly as the
@@ -187,7 +188,9 @@ export function TtyView({onExit}: {onExit: () => void}) {
         });
       };
 
-      eventSource = new EventSource(`${storageScope}/internal/screen`);
+      eventSource = new EventSource(`${storageScope}/internal/screen`, {
+        withCredentials: withCredentials(storageScope),
+      });
       eventSource.onopen = () => setConnected(true);
       eventSource.onerror = () => setConnected(false);
       eventSource.addEventListener("screen", (event) => {

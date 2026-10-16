@@ -1,4 +1,5 @@
 import type {TemporalConfig, TemporalConfigResponse, TemporalProfilesResponse} from "./temporal-config";
+import {authFetch, markAuthRequired, requestSignIn, withCredentials} from "./auth";
 import type {
   FileUploadResponse,
   QueuedMessage,
@@ -43,8 +44,8 @@ async function requireOK(response: Response, fallback: string) {
   return response;
 }
 
-async function temporalRequest<T>(url: string, method = "GET", body?: unknown): Promise<T> {
-  const response = await fetch(url, {
+async function temporalRequest<T>(baseURL: string, url: string, method = "GET", body?: unknown): Promise<T> {
+  const response = await authFetch(baseURL, url, {
     method,
     headers: body === undefined ? undefined : {"Content-Type": "application/json"},
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -57,6 +58,7 @@ async function temporalRequest<T>(url: string, method = "GET", body?: unknown): 
 }
 
 export function createChatAPI(baseURL: string) {
+  const fetch = (url: string, init?: RequestInit) => authFetch(baseURL, url, init);
   return {
     async deleteMessages(): Promise<void> {
       await requireOK(
@@ -66,31 +68,31 @@ export function createChatAPI(baseURL: string) {
     },
 
     async getTemporal(): Promise<TemporalConfigResponse> {
-      return temporalRequest(`${baseURL}/temporal`);
+      return temporalRequest(baseURL, `${baseURL}/temporal`);
     },
 
     async updateTemporal(config: TemporalConfig): Promise<TemporalConfigResponse> {
-      return temporalRequest(`${baseURL}/temporal`, "PUT", {config});
+      return temporalRequest(baseURL, `${baseURL}/temporal`, "PUT", {config});
     },
 
     async getTemporalProfiles(): Promise<TemporalProfilesResponse> {
-      return temporalRequest(`${baseURL}/temporal/profiles`);
+      return temporalRequest(baseURL, `${baseURL}/temporal/profiles`);
     },
 
     async saveTemporalProfile(name: string, config: TemporalConfig): Promise<TemporalProfilesResponse> {
-      return temporalRequest(`${baseURL}/temporal/profiles/${encodeURIComponent(name)}`, "PUT", {config});
+      return temporalRequest(baseURL, `${baseURL}/temporal/profiles/${encodeURIComponent(name)}`, "PUT", {config});
     },
 
     async importTemporalProfiles(profiles: Record<string, TemporalConfig>): Promise<TemporalProfilesResponse> {
-      return temporalRequest(`${baseURL}/temporal/profiles`, "PUT", {profiles});
+      return temporalRequest(baseURL, `${baseURL}/temporal/profiles`, "PUT", {profiles});
     },
 
     async deleteTemporalProfile(name: string): Promise<TemporalProfilesResponse> {
-      return temporalRequest(`${baseURL}/temporal/profiles/${encodeURIComponent(name)}`, "DELETE");
+      return temporalRequest(baseURL, `${baseURL}/temporal/profiles/${encodeURIComponent(name)}`, "DELETE");
     },
 
     async applyTemporalProfile(name: string): Promise<TemporalConfigResponse> {
-      return temporalRequest(`${baseURL}/temporal/profiles/${encodeURIComponent(name)}/apply`, "POST");
+      return temporalRequest(baseURL, `${baseURL}/temporal/profiles/${encodeURIComponent(name)}/apply`, "POST");
     },
 
     async getMCP(): Promise<MCPConfig> {
@@ -216,6 +218,9 @@ export function createChatAPI(baseURL: string) {
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({content, type}),
       });
+      if (response.status === 401) {
+        throw new Error("Not signed in: this server needs its API token.");
+      }
       if (!response.ok) {
         const error = (await response.json()) as APIErrorModel;
         const details = error.errors?.map((item) => item.message).join(", ");
@@ -232,9 +237,10 @@ export function createChatAPI(baseURL: string) {
       formData: FormData,
       options: UploadOptions = {},
     ): Promise<FileUploadResponse> {
-      return new Promise((resolve) => {
+      const send = (signInOn401: boolean) => new Promise<FileUploadResponse>((resolve) => {
         const request = new XMLHttpRequest();
         request.open("POST", `${baseURL}/upload`);
+        request.withCredentials = withCredentials(baseURL);
         request.upload.onprogress = (event) => {
           if (event.lengthComputable) {
             options.onProgress?.(
@@ -243,6 +249,14 @@ export function createChatAPI(baseURL: string) {
           }
         };
         request.onload = () => {
+          if (request.status === 401 && signInOn401 && !options.signal?.aborted) {
+            // Ask for the API token, then upload again.
+            markAuthRequired(baseURL);
+            void requestSignIn(baseURL).then((signedIn) => signedIn
+              ? send(false).then(resolve)
+              : resolve({ok: false, error: "Sign in to upload files."}));
+            return;
+          }
           try {
             const data = JSON.parse(request.responseText) as
               | FileUploadResponse
@@ -272,6 +286,7 @@ export function createChatAPI(baseURL: string) {
         });
         request.send(formData);
       });
+      return send(true);
     },
 
     async updateQueuedMessage(id: number, content: string) {

@@ -10,6 +10,31 @@
         "title": "AgentStatus",
         "type": "string"
       },
+      "AuthSessionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/AuthSessionBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "auth_required": {
+            "description": "Whether the server was started with --api-token.",
+            "type": "boolean"
+          },
+          "authenticated": {
+            "description": "Whether this request carried a valid Bearer token or session cookie. Always true when auth_required is false.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "auth_required",
+          "authenticated"
+        ],
+        "type": "object"
+      },
       "Config": {
         "additionalProperties": false,
         "properties": {
@@ -1525,6 +1550,132 @@
   },
   "openapi": "3.0.3",
   "paths": {
+    "/auth/session": {
+      "delete": {
+        "description": "Removes the session cookie. Reachable without credentials.",
+        "operationId": "delete-auth-session",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "description": "The session cookie (POST) or its removal (DELETE).",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Sign out a browser",
+        "tags": [
+          "Auth"
+        ]
+      },
+      "get": {
+        "description": "Reports whether the server requires an API token and whether this request is authenticated. Reachable without credentials.",
+        "operationId": "get-auth-session",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "description": "The session cookie (POST) or its removal (DELETE).",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get authentication state",
+        "tags": [
+          "Auth"
+        ]
+      },
+      "post": {
+        "description": "Requires `Authorization: Bearer <token>` and sets an HttpOnly, SameSite=Strict session cookie that authenticates later requests, including EventSource and image requests that can't send headers. The cookie holds a value derived from the token, not the token itself, so changing the token signs every browser out. Without --api-token it sets nothing.",
+        "operationId": "post-auth-session",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "description": "The session cookie (POST) or its removal (DELETE).",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Sign in a browser",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
     "/events": {
       "get": {
         "description": "The events are sent as Server-Sent Events (SSE). Initially, the endpoint returns a list of events needed to reconstruct the current state of the conversation and the agent's status. After that, it only returns events that have occurred since the last event was sent.\n\nNote: When an agent is running, the last message in the conversation history is updated frequently, and the endpoint sends a new message update event each time.",

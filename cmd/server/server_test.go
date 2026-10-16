@@ -852,3 +852,13 @@ func TestServerCmd_AllowedOrigins(t *testing.T) {
 		})
 	}
 }
+
+func TestChatSignInURL(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "http://localhost:3284/chat/embed#token=abc123", chatSignInURL("", 3284, "abc123"))
+	assert.Equal(t, "http://localhost:3284/chat/embed#token=abc123", chatSignInURL("0.0.0.0", 3284, "abc123"))
+	assert.Equal(t, "http://localhost:3284/chat/embed#token=abc123", chatSignInURL("::", 3284, "abc123"))
+	assert.Equal(t, "http://127.0.0.1:3999/chat/embed#token=abc123", chatSignInURL("127.0.0.1", 3999, "abc123"))
+	assert.Equal(t, "http://[::1]:3284/chat/embed#token=abc123", chatSignInURL("::1", 3284, "abc123"))
+	assert.Equal(t, "http://localhost:3284/chat/embed#token=a%26b", chatSignInURL("", 3284, "a&b"))
+}

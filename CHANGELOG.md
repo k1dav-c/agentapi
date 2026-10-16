@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Features
+- The chat works on a server started with `--api-token`. Open the `#token=<token>` link (an auto-generated token is printed with a ready-to-open `/chat/embed#token=...` link) or enter the token when the chat asks for it; the page trades it for a session cookie, so the event stream, TTY mode and images load too. The token stays in the URL fragment, which never reaches the server, a proxy or a log, and is removed from the address bar
+- `POST /auth/session` (with `Authorization: Bearer <token>`) sets an HttpOnly, SameSite=Strict session cookie that authenticates later requests, Secure over HTTPS or behind a proxy that sends `X-Forwarded-Proto: https`. It holds an HMAC of the token, not the token, so changing the token signs every browser out. `DELETE /auth/session` signs out, and `GET /auth/session` reports `auth_required` and `authenticated` without needing credentials
 - `--bind` (`AGENTAPI_BIND`) picks the address the server listens on, e.g. `--bind 127.0.0.1` or `--bind ::1` for loopback only. It takes an IP address or hostname without a port; the default still listens on all interfaces
 - Chat: an image the agent reads (Claude Code's Read or Codex's view_image on a PNG, a screenshot) shows as a thumbnail on the tool call, also while the card is closed; clicking it opens the image full size. It is the image the agent saw, kept from the session log, so it still shows after the file is gone
 - Rich messages: a `tool_result` block lists its images in `images` (`media_type`, `url`). The server saves them to its upload directory and serves them through `GET /uploads/{checksum}/{name}`, with the same checks as uploaded images; messages never carry the image data
@@ -36,6 +38,7 @@
 
 ### Fixes
 - API tokens are compared in constant time, so response timing no longer hints at how much of a guessed token was right
+- With `--api-token`, CORS preflight requests no longer get a 401 (they never carry credentials), and a 401 now carries the CORS headers, so a chat served from another allowed origin can tell it needs the token
 - Claude Code: a message that ends with an attachment (`@"<path>"`) is sent. Claude Code opened its file suggestions for the trailing mention and the Enter picked a suggestion instead, so the message stayed in its input box
 - Chat: the live screen of a running task is redrawn at most once a second and never shrinks, from the first screen on. Claude Code blinks the bullet of a running tool, which the server can't tell from ordinary text. Measured on the same task, the running task now changes on screen about 1.6–2 times a second (its clock included) instead of 3.7–6.8 for Claude Code, Codex and Pi
 - Claude Code: its spinner before the timer shows (`· Contemplating…`) and the elapsed time on a running tool (`· 2s`, `(3s)`) are left out of messages too

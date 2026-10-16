@@ -163,8 +163,26 @@ agentapi server --api-token=my-secret -- claude
 AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
 ```
 
-啟用後，每個 API 請求都必須帶上 `Authorization: Bearer <token>`。靜態檔案路由
-（`/`、`/chat/*`）不受限制，讓瀏覽器不需要 token 也能開啟聊天介面。
+啟用後，每個 API 請求都必須帶上 `Authorization: Bearer <token>` 或聊天介面的
+session cookie。靜態檔案路由（`/`、`/chat/*`）不受限制，讓瀏覽器不需要 token 也能
+開啟聊天介面。token 以固定時間（constant time）比對。
+
+瀏覽器無法替事件串流或圖片加上 `Authorization` 標頭，所以聊天介面會用 token 換一個
+cookie 來登入：
+
+- 開啟 `http://localhost:3284/chat/embed#token=<token>`。自動產生 token 時，伺服器
+  啟動時會印出這個連結。token 放在 URL 的 fragment 中，瀏覽器不會把它送到伺服器、
+  proxy 或存取紀錄；頁面換到 cookie 後就會把它從網址列移除。
+- 或直接開啟聊天介面：伺服器回應 401 時，介面會請你輸入 token。
+
+帶著 `Authorization: Bearer <token>` 呼叫 `POST /auth/session` 會設定 cookie
+（`agentapi_session`，HttpOnly、SameSite=Strict、`Path=/`，透過 HTTPS 或經由送出
+`X-Forwarded-Proto: https` 的 proxy 連線時加上 Secure）。cookie 裡存的是 token 的
+HMAC 而不是 token 本身，所以更換 token 會讓所有瀏覽器登出。`DELETE /auth/session`
+登出，`GET /auth/session`（不需要憑證）回報 `auth_required` 與 `authenticated`。
+cookie 是 SameSite=Strict，其他網站的頁面無法帶著它發出請求。從其他 origin 提供的
+聊天介面（例如在 3000 埠執行的 `bun run dev`）需要把該 origin 加進
+`--allowed-origins`；`--allowed-origins '*'` 不允許帶 cookie 的請求。
 
 ### 互動式提示支援
 
@@ -333,6 +351,7 @@ OpenAPI schema 可在 [openapi.json](openapi.json) 取得。
 - GET `/mcp/profiles` - 匯出專案範圍的 MCP 設定檔（profile）
 - PUT/DELETE `/mcp/profiles/{name}` - 匯入、取代或移除一個設定檔
 - POST `/mcp/profiles/{name}/apply` - 用已儲存的設定檔取代目前使用中的 MCP 設定
+- GET/POST/DELETE `/auth/session` - 回報 API 是否需要 token、呼叫端是否已驗證，用 token 讓瀏覽器登入（session cookie），或登出；見 [API token 驗證](#api-token-驗證)
 
 #### API token 驗證
 
@@ -344,7 +363,9 @@ agentapi server --api-token=my-secret -- claude    # use a specific token
 ```
 
 對應的環境變數是 `AGENTAPI_API_TOKEN`。設定之後，用戶端每次呼叫 API 都必須帶上
-`Authorization: Bearer <token>`。沒有設定 `--api-token` 時，驗證功能為停用（向下相容）。
+`Authorization: Bearer <token>`；瀏覽器也可以改用 `POST /auth/session` 取得的
+session cookie（見上方的 [API token 驗證](#api-token-驗證)）。沒有設定 `--api-token`
+時，驗證功能為停用（向下相容）。
 
 #### 監聽位址
 

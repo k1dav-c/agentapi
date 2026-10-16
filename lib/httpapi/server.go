@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -57,6 +56,7 @@ type Server struct {
 	api                huma.API
 	port               int
 	bind               string
+	auth               *tokenAuth // nil when no API token is configured
 	srv                *http.Server
 	mu                 sync.RWMutex
 	stopOnce           sync.Once
@@ -169,9 +169,10 @@ type ServerConfig struct {
 	RestartAgent func(context.Context) (int, error)
 	// Webhook sends an event whenever the agent status changes.
 	Webhook WebhookConfig
-	// APIToken, if non-empty, enables Bearer token authentication on all API
-	// endpoints. Static file routes (/chat/*, /) are exempt so browsers can
-	// load the chat UI without a token.
+	// APIToken, if non-empty, enables token authentication on all API
+	// endpoints: a Bearer header, or the session cookie POST /auth/session
+	// sets for browsers. Static file routes (/chat/*, /) and /auth/session
+	// are exempt so browsers can load the chat UI and sign in.
 	APIToken string
 	// Bind is the address the server listens on: an IP address or hostname
 	// without a port. Empty listens on all interfaces.
@@ -340,11 +341,6 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	})
 	router.Use(hostAuthorizationMiddleware(allowedHosts, badHostHandler))
 
-	if config.APIToken != "" {
-		logger.Info("API token authentication enabled")
-		router.Use(tokenAuthMiddleware(config.APIToken))
-	}
-
 	router.Use(requestLogMiddleware(logger))
 
 	corsMiddleware := cors.New(cors.Options{
@@ -356,6 +352,17 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		MaxAge:           300, // Maximum value not ignored by any of major browsers
 	})
 	router.Use(corsMiddleware.Handler)
+
+	// Token auth runs after CORS: preflight requests carry no credentials
+	// and are answered by the CORS middleware, and a 401 still gets the CORS
+	// headers, so a chat UI on another origin can read it and ask for the
+	// token.
+	var auth *tokenAuth
+	if config.APIToken != "" {
+		logger.Info("API token authentication enabled")
+		auth = newTokenAuth(config.APIToken)
+		router.Use(auth.middleware)
+	}
 
 	humaConfig := huma.DefaultConfig("AgentAPI", version.Version)
 	humaConfig.Info.Description = "HTTP API for Claude Code, Goose, and Aider.\n\nhttps://github.com/coder/agentapi"
@@ -439,6 +446,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		api:            api,
 		port:           config.Port,
 		bind:           bind,
+		auth:           auth,
 		conversation:   conversation,
 		logger:         logger,
 		agentio:        config.AgentIO,
@@ -532,37 +540,6 @@ func hostAuthorizationMiddleware(allowedHosts []string, badHostHandler http.Hand
 			badHostHandler.ServeHTTP(w, r)
 		})
 	}
-}
-
-// tokenAuthMiddleware enforces Bearer token authentication on all requests
-// except static file routes (/chat/* and /) so browsers can load the UI.
-func tokenAuthMiddleware(token string) func(next http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Exempt static file routes so browsers can open the chat UI.
-			path := r.URL.Path
-			if path == "/" || strings.HasPrefix(path, "/chat") {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			auth := r.Header.Get("Authorization")
-			const prefix = "Bearer "
-			if !strings.HasPrefix(auth, prefix) || !secretEqual(strings.TrimPrefix(auth, prefix), token) {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// secretEqual compares two secrets in constant time. Both sides are hashed
-// first so the comparison doesn't leak the expected length either.
-func secretEqual(given, expected string) bool {
-	g := sha256.Sum256([]byte(given))
-	e := sha256.Sum256([]byte(expected))
-	return subtle.ConstantTimeCompare(g[:], e[:]) == 1
 }
 
 // responseWriter wraps http.ResponseWriter to capture the status code.
@@ -715,6 +692,7 @@ func sseMiddleware(ctx huma.Context, next func(huma.Context)) {
 
 // registerRoutes sets up all API endpoints
 func (s *Server) registerRoutes() {
+	s.registerAuthRoutes()
 	s.registerTemporalRoutes()
 	huma.Get(s.api, "/handoff", s.getPendingHandoff)
 	huma.Post(s.api, "/handoff/reply", s.replyHandoff)

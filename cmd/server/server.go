@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -331,6 +333,9 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		}
 		apiToken = hex.EncodeToString(tokenBytes[:])
 		fmt.Fprintf(os.Stderr, "API token: %s\n", apiToken)
+		// The token goes in the URL fragment, which the browser never sends
+		// to a server or proxy; the chat UI trades it for a session cookie.
+		fmt.Fprintf(os.Stderr, "Chat UI: %s\n", chatSignInURL(bind, port, apiToken))
 	} else if apiToken != "" {
 		logger.Info("API token authentication enabled")
 	}
@@ -481,6 +486,16 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		}
 	}
 	return nil
+}
+
+// chatSignInURL returns the chat UI URL that signs the browser in with
+// token. A server listening on all interfaces is opened through localhost.
+func chatSignInURL(bind string, port int, token string) string {
+	host := bind
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		host = "localhost"
+	}
+	return fmt.Sprintf("http://%s/chat/embed#token=%s", net.JoinHostPort(host, strconv.Itoa(port)), url.QueryEscape(token))
 }
 
 var agentNames = (func() []string {

@@ -17,6 +17,8 @@ import {getDocumentTitle} from "@/lib/document-title";
 import {getReconnectDelay} from "@/lib/reconnect";
 import {parseFailedMessages} from "@/lib/failed-messages";
 import {clearSession, loadSession, mergeByKey, saveSession} from "@/lib/session-cache";
+import {bootstrapSession, ensureSession, withCredentials} from "@/lib/auth";
+import {AuthDialog} from "@/components/auth-dialog";
 import {
   createChatAPI,
   type MCPCheckResult,
@@ -544,6 +546,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         epoch
           ? `${agentAPIUrl}/events?sync=1&since=${seq}&epoch=${encodeURIComponent(epoch)}`
           : `${agentAPIUrl}/events?sync=1`,
+        {withCredentials: withCredentials(agentAPIUrl)},
       );
       eventSourceRef.current = eventSource;
       // Servers that predate session_sync replay everything on every
@@ -663,6 +666,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
         console.error("EventSource error:", error);
         setConnectionStatus(navigator.onLine ? "reconnecting" : "offline");
         eventSource.close();
+        // EventSource doesn't expose the status code; a 401 (no session
+        // cookie, or the token changed) shows up as an error like any other.
+        // Ask the server, and reconnect right away once signed in.
+        void ensureSession(agentAPIUrl, {background: true}).then((signedIn) => {
+          if (signedIn && !disposed) reconnectNow();
+        });
 
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current);
@@ -689,7 +698,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
     const start = () => {
       if (started || disposed) return;
       started = true;
-      setupEventSource();
+      // Sign in first (a `#token=` link, or the dialog when the server
+      // needs a token). Only the first connection waits for it.
+      void bootstrapSession(agentAPIUrl).finally(() => {
+        if (!disposed) setupEventSource();
+      });
     };
     if (cacheLoadedForRef.current !== agentAPIUrl) {
       cacheLoadedForRef.current = agentAPIUrl;
@@ -949,6 +962,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       }}
     >
       {children}
+      <AuthDialog />
     </ChatContext.Provider>
   );
 }
