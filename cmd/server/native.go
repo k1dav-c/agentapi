@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/demo"
 )
 
 // nativeAdapterConfig is what a native adapter needs to start its agent.
@@ -22,9 +23,13 @@ func nativeFactory(agentType AgentType, cfg nativeAdapterConfig) (native.Factory
 	switch agentType {
 	case AgentTypeClaude, AgentTypeCodex, AgentTypePi:
 		return nil, fmt.Errorf("the native transport for %s is not available yet", agentType)
+	case AgentTypeCustom:
+		// A simulated agent for developing clients; see lib/native/demo.
+		if cfg.Program == demo.Program {
+			return demo.Factory(demo.Options{}), nil
+		}
 	case AgentTypeGoose, AgentTypeAider, AgentTypeGemini, AgentTypeCopilot, AgentTypeAmp,
-		AgentTypeCursor, AgentTypeAuggie, AgentTypeAmazonQ, AgentTypeOpencode, AgentTypeKimi,
-		AgentTypeCustom:
+		AgentTypeCursor, AgentTypeAuggie, AgentTypeAmazonQ, AgentTypeOpencode, AgentTypeKimi:
 	}
 	return nil, fmt.Errorf("the native transport supports claude, codex and pi, not %s", agentType)
 }
