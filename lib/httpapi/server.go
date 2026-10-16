@@ -750,10 +750,11 @@ func (s *Server) registerRoutes() {
 
 	// GET /rich-messages endpoint
 	huma.Get(s.api, "/rich-messages", s.getRichMessages, func(o *huma.Operation) {
-		o.Description = "Returns a list of rich structured messages parsed from the agent's session log. " +
+		o.Description = "Returns a list of rich structured messages. " +
 			"Each message contains structured content blocks (text, thinking, tool_use, tool_result), " +
-			"model information, and token usage data. Only available for agent types with session log " +
-			"support (currently 'claude' and 'codex') running via PTY transport."
+			"model information, and token usage data. With the PTY transport they are parsed from the " +
+			"session log of agents that have one (claude, codex and pi); with the native transport they " +
+			"come from the agent's protocol."
 	})
 
 	huma.Get(s.api, "/timeline", s.getTimeline, func(o *huma.Operation) {
@@ -762,7 +763,7 @@ func (s *Server) registerRoutes() {
 
 	huma.Delete(s.api, "/messages", s.deleteMessages, func(o *huma.Operation) {
 		o.Summary = "Delete all messages and restart"
-		o.Description = "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent PTY process. Returns 400 if restart is not supported (e.g. ACP transport)."
+		o.Description = "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport)."
 		o.Errors = []int{400}
 	})
 

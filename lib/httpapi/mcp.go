@@ -237,7 +237,7 @@ func (s *Server) getMCP(
 func (s *Server) updateMCP(
 	ctx context.Context,
 	input *struct {
-		Restart bool `query:"restart" default:"false" doc:"Restart the agent after writing the config so changes apply immediately. The conversation context is reset; AgentAPI stays online. Supported only for supervised PTY sessions."`
+		Restart bool `query:"restart" default:"false" doc:"Restart the agent after writing the config so changes apply immediately. The conversation context is reset; AgentAPI stays online. Supported for supervised PTY sessions and the native transport."`
 		Body    MCPUpdateRequestBody
 	},
 ) (*MCPUpdateResponse, error) {
