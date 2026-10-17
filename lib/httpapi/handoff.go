@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,9 +18,11 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 )
 
-var terminalSelection = regexp.MustCompile(`(?m)^\s*[❯›>]\s*(\d+)\.\s+`)
-var terminalConfirmation = regexp.MustCompile(`(?i)(enter\s+to\s+confirm|enter\s+to\s+submit|press\s+enter|esc\s+to\s+cancel|enter\s+select|would\s+you\s+like\s+to\s+proceed|do\s+you\s+want\s+to\s+proceed)`)
-var terminalOption = regexp.MustCompile(`(?m)^\s*[❯›>]?\s*(\d+)\.\s+`)
+var (
+	terminalSelection    = regexp.MustCompile(`(?m)^\s*[❯›>]\s*(\d+)\.\s+`)
+	terminalConfirmation = regexp.MustCompile(`(?i)(enter\s+to\s+confirm|enter\s+to\s+submit|press\s+enter|esc\s+to\s+cancel|enter\s+select|would\s+you\s+like\s+to\s+proceed|do\s+you\s+want\s+to\s+proceed)`)
+	terminalOption       = regexp.MustCompile(`(?m)^\s*[❯›>]?\s*(\d+)\.\s+`)
+)
 
 // terminalQuestionKeywords must appear (case-insensitively) next to a
 // numbered list for it to count as a prompt.
@@ -139,15 +140,20 @@ type handoffReceipt struct {
 	result  handoff.Result
 }
 
-type PendingHandoffResponse struct{ Body handoff.Pending }
-type HandoffReplyRequest struct{ Body handoff.Reply }
-type HandoffReplyResponse struct{ Body handoff.Result }
+type (
+	PendingHandoffResponse struct{ Body handoff.Pending }
+	HandoffReplyRequest    struct{ Body handoff.Reply }
+	HandoffReplyResponse   struct{ Body handoff.Result }
+)
 
-// Caller holds s.mu. Read the emitter as one snapshot: its revision changes on
-// every lifecycle transition and reset, invalidating replies to previous PTYs.
-func (s *Server) pendingHandoffLocked() *handoff.Request {
+// pendingHandoffLocked returns what the human reply protocol offers now, or
+// nil. For kind "request" it also returns the native request offered, which
+// a reply must answer even if other requests opened since. Caller holds
+// s.mu. Read the emitter as one snapshot: its revision changes on every
+// lifecycle transition and reset, invalidating replies to previous PTYs.
+func (s *Server) pendingHandoffLocked() (*handoff.Request, native.RequestState) {
 	if s.emitter == nil || s.conversation == nil {
-		return nil
+		return nil, native.RequestState{}
 	}
 	s.emitter.mu.Lock()
 	status := s.emitter.statusChangeBody()
@@ -156,7 +162,7 @@ func (s *Server) pendingHandoffLocked() *handoff.Request {
 	messages := append([]st.ConversationMessage(nil), s.emitter.messages...)
 	s.emitter.mu.Unlock()
 	if status.Lifecycle != LifecycleReady || s.conversation.Status() != st.ConversationStatusStable {
-		return nil
+		return nil, native.RequestState{}
 	}
 	kind, content, question := "message", "", ""
 	for _, message := range messages {
@@ -164,15 +170,14 @@ func (s *Server) pendingHandoffLocked() *handoff.Request {
 			question = message.Message
 		}
 	}
-	if r, text, ok := s.pendingNativeHandoff(); ok {
-		// Include the request ID: two identical approvals are different
-		// requests.
-		kind, content = "request", r.ID+"\n"+text
+	request, text, ok := s.pendingNativeHandoff()
+	if ok {
+		kind, content = "request", text
 	} else if s.transport == TransportPTY && isTerminalQuestionScreen(s.agentType, screen) {
 		kind, content = "terminal", screen
 	} else {
 		if len(s.messageQueue) > 0 {
-			return nil
+			return nil, native.RequestState{}
 		}
 		hasUser := false
 		for _, message := range messages {
@@ -186,33 +191,26 @@ func (s *Server) pendingHandoffLocked() *handoff.Request {
 		}
 	}
 	if strings.TrimSpace(content) == "" {
-		return nil
+		return nil, native.RequestState{}
 	}
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%s:%s", status.SessionID, revision, status.RunID, kind, content)))
+	// The request ID is part of the hash: two identical approvals are
+	// different requests.
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%s:%q:%s", status.SessionID, revision, status.RunID, kind, request.ID, content)))
 	id := hex.EncodeToString(sum[:])
 	if id == s.handoffSuppressed {
-		return nil
+		return nil, native.RequestState{}
 	}
-	if kind == "request" {
-		// Clients show the request, not its ID.
-		_, content, _ = strings.Cut(content, "\n")
-	}
-	return &handoff.Request{ID: id, SessionID: status.SessionID, RunID: status.RunID,
-		AgentType: string(status.AgentType), Kind: kind, Question: question, Content: content}
-}
-
-// pendingNativeHandoff returns the oldest pending native request.
-func (s *Server) pendingNativeHandoff() (native.RequestState, string, bool) {
-	if s.native == nil {
-		return native.RequestState{}, "", false
-	}
-	return s.pendingNativeHandoffLocked()
+	return &handoff.Request{
+		ID: id, SessionID: status.SessionID, RunID: status.RunID,
+		AgentType: string(status.AgentType), Kind: kind, Question: question, Content: content,
+	}, request
 }
 
 func (s *Server) getPendingHandoff(_ context.Context, _ *struct{}) (*PendingHandoffResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return &PendingHandoffResponse{Body: handoff.Pending{Request: s.pendingHandoffLocked()}}, nil
+	pending, _ := s.pendingHandoffLocked()
+	return &PendingHandoffResponse{Body: handoff.Pending{Request: pending}}, nil
 }
 
 func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*HandoffReplyResponse, error) {
@@ -228,13 +226,13 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 		}
 		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "superseded"}}, nil
 	}
-	pending := s.pendingHandoffLocked()
+	pending, request := s.pendingHandoffLocked()
 	if pending == nil || pending.ID != reply.RequestID {
 		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "superseded"}}, nil
 	}
 	content := reply.Content
 	if pending.Kind == "request" {
-		return s.replyNativeHandoffLocked(pending.ID, reply.ID, content), nil
+		return s.replyNativeHandoffLocked(pending.ID, reply.ID, request, content), nil
 	}
 	// Free text answering a prompt with a text field (Claude's plan
 	// feedback, Codex's question notes) goes into that field.
@@ -286,29 +284,29 @@ func (s *Server) reserveHandoffLocked(id string) {
 	s.handoffSuppressed = id
 }
 
-// replyNativeHandoffLocked answers the pending native request with a human
-// reply. Caller holds s.mu.
-func (s *Server) replyNativeHandoffLocked(pendingID, replyID, content string) *HandoffReplyResponse {
-	r, _, ok := s.pendingNativeHandoff()
-	if !ok {
-		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "superseded"}}
-	}
+// replyNativeHandoffLocked answers r, the native request the pending handoff
+// offers, with a human reply. Caller holds s.mu, so no other reply is
+// delivered meanwhile.
+func (s *Server) replyNativeHandoffLocked(pendingID, replyID string, r native.RequestState, content string) *HandoffReplyResponse {
 	response, ok := nativeHandoffResponse(r, content)
 	if !ok {
 		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "invalid"}}
 	}
-	s.reserveHandoffLocked(pendingID)
-	result := handoff.Result{Outcome: "uncertain"}
-	s.handoffReceipts[pendingID] = handoffReceipt{replyID, result}
-	if _, err := s.respondRequestLocked(s.shutdownCtx, r.ID, response); err != nil {
-		s.logger.Error("Human reply to a request was not applied", "request_id", r.ID, "error", err)
-		var status huma.StatusError
-		if errors.As(err, &status) && status.GetStatus() == http.StatusConflict {
-			result.Outcome = "superseded"
-		}
-	} else {
-		result.Outcome = "applied"
+	ctx, cancel := context.WithTimeout(s.shutdownCtx, nativeCallTimeout)
+	defer cancel()
+	result := handoff.Result{Outcome: "applied"}
+	switch _, err := s.native.Respond(ctx, r.ID, response); {
+	case errors.Is(err, native.ErrInvalidResponse):
+		// Nothing was sent, so a corrected reply may follow.
+		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "invalid"}}
+	case errors.Is(err, native.ErrRequestNotFound), errors.Is(err, native.ErrNotStarted):
+		// Answered elsewhere, withdrawn or expired; nothing was sent.
+		result.Outcome = "superseded"
+	case err != nil:
+		s.logger.Error("Human reply delivery is uncertain; refusing automatic retry", "request_id", r.ID, "error", err)
+		result.Outcome = "uncertain"
 	}
+	s.reserveHandoffLocked(pendingID)
 	s.handoffReceipts[pendingID] = handoffReceipt{replyID, result}
 	return &HandoffReplyResponse{Body: result}
 }

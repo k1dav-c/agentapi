@@ -13,11 +13,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
-	_ "modernc.org/sqlite" // SQLite driver without cgo.
+	sqlite "modernc.org/sqlite" // SQLite driver without cgo.
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
@@ -29,6 +33,18 @@ const schemaVersion = 1
 
 // flushInterval is how long changes may wait before they are written.
 const flushInterval = 200 * time.Millisecond
+
+// maxPending is how many pending changes are written without waiting for
+// the next flush.
+const maxPending = 256
+
+// A batch of changes that fails to commit is tried writeAttempts times in
+// all, waiting retryDelay before the first retry and twice as long before
+// each next one, before its changes are given up.
+const (
+	writeAttempts = 4
+	retryDelay    = 50 * time.Millisecond
+)
 
 const schema = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -49,6 +65,14 @@ const (
 	MetaSessionRef  = "session_ref"
 	MetaSessionName = "session_name"
 	MetaNextQueueID = "next_queue_id"
+	// metaClean is set while the file is closed cleanly; see Snapshot.Clean.
+	metaClean = "clean"
+)
+
+// Keys of pending writes; see op.
+const (
+	metaKeyPrefix = "meta:"
+	queueKey      = "queue"
 )
 
 // Message is a stored conversation message with the seq of its last change.
@@ -84,6 +108,10 @@ type Snapshot struct {
 	Events       []jsonlwatcher.SessionEvent
 	Requests     []Request
 	Queue        []QueuedMessage
+	// Clean is set when the AgentAPI that wrote the file closed it. After a
+	// crash it is not, and the last changes before the crash may be
+	// missing.
+	Clean bool
 }
 
 // Empty reports whether nothing was stored yet.
@@ -120,28 +148,54 @@ type DB struct {
 	index  map[string]int
 	wake   chan struct{}
 	closed bool
-	done   chan struct{}
-	stop   context.CancelFunc
+	// lost is the error that made changes be given up. The file then
+	// misses changes, so Close doesn't mark it clean. failing is set while
+	// writes fail, so onWriteError is called once per outage.
+	lost         error
+	failing      bool
+	onWriteError func(error)
+	done         chan struct{}
+	stop         context.CancelFunc
 	// writeMu serializes writes, so batches commit in the order they were
 	// taken from pending.
 	writeMu sync.Mutex
 }
 
-// Open opens or creates the database at path.
+// Open opens or creates the database at path, and its directory. Both are
+// created accessible to their owner only: they hold the conversation. A
+// file can be open in one AgentAPI at a time.
 func Open(path string, logger *slog.Logger) (*DB, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	// busy_timeout lets a second process fail with "locked" after a while
-	// instead of immediately; WAL keeps reads from blocking the writer.
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"
-	sqlDB, err := sql.Open("sqlite", dsn)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("create state database directory: %w", err)
+	}
+	// SQLite creates the -wal file with the mode of the database file.
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open state database: %w", err)
 	}
-	// One connection: SQLite has one writer, and the pragmas above apply
-	// per connection.
+	if err := f.Close(); err != nil {
+		return nil, fmt.Errorf("open state database: %w", err)
+	}
+	sqlDB, err := sql.Open("sqlite", dataSourceName(path))
+	if err != nil {
+		return nil, fmt.Errorf("open state database: %w", err)
+	}
+	// One connection: SQLite has one writer, and the pragmas and the lock
+	// belong to the connection.
 	sqlDB.SetMaxOpenConns(1)
+	// In exclusive locking mode the lock of the first write is held until
+	// the database is closed. Take it now, so a second AgentAPI fails here
+	// instead of mixing its changes with this one's.
+	if _, err := sqlDB.Exec("BEGIN IMMEDIATE; COMMIT"); err != nil {
+		_ = sqlDB.Close()
+		if isBusy(err) {
+			return nil, fmt.Errorf("state database %s is in use by another AgentAPI", path)
+		}
+		return nil, fmt.Errorf("open state database: %w", err)
+	}
 	if err := migrate(sqlDB); err != nil {
 		_ = sqlDB.Close()
 		return nil, err
@@ -157,6 +211,26 @@ func Open(path string, logger *slog.Logger) (*DB, error) {
 	}
 	go d.writeLoop(ctx)
 	return d, nil
+}
+
+// dataSourceName returns the SQLite URI of the database at path.
+// busy_timeout lets an AgentAPI that is still closing the file finish
+// first. locking_mode(EXCLUSIVE) must come before journal_mode(WAL): the
+// WAL index is then kept in memory rather than in a -shm file other
+// processes could open.
+func dataSourceName(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	// ?, # and % have a meaning in a URI.
+	path = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23").Replace(path)
+	return "file:" + path + "?_pragma=busy_timeout(1000)&_pragma=locking_mode(EXCLUSIVE)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+}
+
+// isBusy reports whether err says that another connection holds the lock.
+func isBusy(err error) bool {
+	var sqliteErr *sqlite.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == sqlite3.SQLITE_BUSY
 }
 
 func migrate(db *sql.DB) error {
@@ -176,7 +250,8 @@ func migrate(db *sql.DB) error {
 	return nil
 }
 
-// Load reads everything stored. Call it before any writes.
+// Load reads everything stored. Call it before any writes. From then on
+// the file doesn't count as closed cleanly until Close.
 func (d *DB) Load() (Snapshot, error) {
 	snap := Snapshot{Meta: map[string]string{}}
 	rows, err := d.db.Query("SELECT key, value FROM meta")
@@ -194,6 +269,8 @@ func (d *DB) Load() (Snapshot, error) {
 	if err := closeRows(rows); err != nil {
 		return snap, err
 	}
+	_, snap.Clean = snap.Meta[metaClean]
+	delete(snap.Meta, metaClean)
 
 	if err := scanJSON(d.db, "SELECT seq, data FROM messages ORDER BY id", func(seq uint64, data []byte) error {
 		var m st.ConversationMessage
@@ -245,6 +322,9 @@ func (d *DB) Load() (Snapshot, error) {
 	}); err != nil {
 		return snap, fmt.Errorf("read queue: %w", err)
 	}
+	if _, err := d.db.Exec("DELETE FROM meta WHERE key = ?", metaClean); err != nil {
+		return snap, fmt.Errorf("mark the state database as open: %w", err)
+	}
 	return snap, nil
 }
 
@@ -276,12 +356,19 @@ func closeRows(rows *sql.Rows) error {
 	return rows.Close()
 }
 
-// enqueue adds a write. A pending write with the same key is replaced. A
-// write without a key (a delete) is a barrier: writes queued after it are
-// never moved before it.
+// enqueue adds a write; see enqueueLocked.
 func (d *DB) enqueue(key string, run func(*sql.Tx) error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.enqueueLocked(key, run)
+}
+
+// enqueueLocked adds a write. A pending write with the same key is
+// replaced: keyed writes store the latest state of what their key names. A
+// write without a key changes rows other keys name (a truncation, a reset),
+// so it is a barrier: writes queued after it are never moved before it.
+// Caller holds d.mu.
+func (d *DB) enqueueLocked(key string, run func(*sql.Tx) error) {
 	if d.closed {
 		return
 	}
@@ -301,13 +388,33 @@ func (d *DB) enqueue(key string, run func(*sql.Tx) error) {
 	}
 }
 
+// OnWriteError sets a function that is called when changes are given up
+// because they can't be written, once until writes succeed again. It is
+// called on the writing goroutine with no lock held.
+func (d *DB) OnWriteError(fn func(error)) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.onWriteError = fn
+}
+
 // SetMeta stores a meta value.
 func (d *DB) SetMeta(key, value string) {
-	d.enqueue("meta:"+key, func(tx *sql.Tx) error {
+	d.enqueue(metaKeyPrefix+key, metaWrite(key, value))
+}
+
+// metaWrite returns the write that stores a meta value.
+func metaWrite(key, value string) func(*sql.Tx) error {
+	return func(tx *sql.Tx) error {
 		_, err := tx.Exec("INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value)
 		return err
-	})
+	}
 }
+
+// SetSessionRef stores what resumes the agent's session.
+func (d *DB) SetSessionRef(ref string) { d.SetMeta(MetaSessionRef, ref) }
+
+// SetSessionName stores the name the agent gave the session.
+func (d *DB) SetSessionName(name string) { d.SetMeta(MetaSessionName, name) }
 
 // SetSeq stores the latest change sequence of epoch.
 func (d *DB) SetSeq(epoch string, seq uint64) {
@@ -401,7 +508,7 @@ func (d *DB) PutQueue(queue []QueuedMessage, nextID int) {
 		}
 		encoded = append(encoded, data)
 	}
-	d.enqueue("queue", func(tx *sql.Tx) error {
+	d.enqueue(queueKey, func(tx *sql.Tx) error {
 		if _, err := tx.Exec("DELETE FROM queue"); err != nil {
 			return err
 		}
@@ -420,18 +527,18 @@ func (d *DB) PutQueue(queue []QueuedMessage, nextID int) {
 // writes of the old conversation are dropped.
 func (d *DB) Reset(epoch string) {
 	d.mu.Lock()
+	defer d.mu.Unlock()
 	kept := d.pending[:0]
 	d.index = make(map[string]int)
 	for _, o := range d.pending {
 		// Keep meta and queue writes; the conversation rows are deleted.
-		if o.key == "queue" || len(o.key) > 5 && o.key[:5] == "meta:" {
+		if o.key == queueKey || strings.HasPrefix(o.key, metaKeyPrefix) {
 			d.index[o.key] = len(kept)
 			kept = append(kept, o)
 		}
 	}
 	d.pending = kept
-	d.mu.Unlock()
-	d.enqueue("", func(tx *sql.Tx) error {
+	d.enqueueLocked("", func(tx *sql.Tx) error {
 		for _, table := range []string{"messages", "rich_messages", "session_events", "requests"} {
 			if _, err := tx.Exec("DELETE FROM " + table); err != nil {
 				return err
@@ -440,7 +547,7 @@ func (d *DB) Reset(epoch string) {
 		_, err := tx.Exec("DELETE FROM meta WHERE key IN (?, ?)", MetaSessionRef, MetaSessionName)
 		return err
 	})
-	d.SetMeta(MetaEpoch, epoch)
+	d.enqueueLocked(metaKeyPrefix+MetaEpoch, metaWrite(MetaEpoch, epoch))
 }
 
 func (d *DB) writeLoop(ctx context.Context) {
@@ -459,27 +566,49 @@ func (d *DB) writeLoop(ctx context.Context) {
 			d.mu.Lock()
 			n := len(d.pending)
 			d.mu.Unlock()
-			if n >= 256 {
+			if n >= maxPending {
 				d.write()
 			}
 		}
 	}
 }
 
-// write applies the pending writes in one transaction.
+// write applies the pending writes in one transaction. A batch that fails
+// is tried again before newer writes are taken, and given up after
+// writeAttempts.
 func (d *DB) write() {
 	d.writeMu.Lock()
-	defer d.writeMu.Unlock()
 	d.mu.Lock()
 	ops := d.pending
 	d.pending = nil
 	d.index = make(map[string]int)
 	d.mu.Unlock()
 	if len(ops) == 0 {
+		d.writeMu.Unlock()
 		return
 	}
-	if err := d.apply(ops); err != nil {
-		d.logger.Error("Failed to write the state database", "error", err)
+	err := d.apply(ops)
+	for attempt, delay := 1, retryDelay; err != nil && attempt < writeAttempts; attempt, delay = attempt+1, delay*2 {
+		d.logger.Warn("Failed to write the state database; trying again", "attempt", attempt, "error", err)
+		time.Sleep(delay)
+		err = d.apply(ops)
+	}
+	var report func(error)
+	d.mu.Lock()
+	if err != nil {
+		d.lost = err
+		if !d.failing {
+			report = d.onWriteError
+		}
+	}
+	d.failing = err != nil
+	d.mu.Unlock()
+	d.writeMu.Unlock()
+	if err != nil {
+		d.logger.Error("Failed to write the state database; changes are lost", "changes", len(ops), "error", err)
+		if report != nil {
+			report(err)
+		}
 	}
 }
 
@@ -502,21 +631,31 @@ func (d *DB) Flush() {
 	d.write()
 }
 
-// Close writes what is pending and closes the database.
+// Close writes what is pending and closes the database. Unless changes
+// were lost, the file is marked as closed cleanly (see Snapshot.Clean).
+// Changes that couldn't be written are reported in the error.
 func (d *DB) Close() error {
 	d.mu.Lock()
 	if d.closed {
 		d.mu.Unlock()
 		return nil
 	}
+	// Later writes are ignored; the write loop writes the pending ones.
+	d.closed = true
 	d.mu.Unlock()
 	d.stop()
 	<-d.done
 	d.mu.Lock()
-	d.closed = true
+	lost := d.lost
 	d.mu.Unlock()
-	if err := d.db.Close(); err != nil {
-		return errors.Join(errors.New("close state database"), err)
+	var errs []error
+	if lost != nil {
+		errs = append(errs, fmt.Errorf("changes to the state database were lost: %w", lost))
+	} else if err := d.apply([]op{{run: metaWrite(metaClean, "1")}}); err != nil {
+		errs = append(errs, fmt.Errorf("mark the state database as closed: %w", err))
 	}
-	return nil
+	if err := d.db.Close(); err != nil {
+		errs = append(errs, fmt.Errorf("close state database: %w", err))
+	}
+	return errors.Join(errs...)
 }

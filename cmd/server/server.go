@@ -30,8 +30,8 @@ import (
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
-	"github.com/coder/agentapi/lib/statedb"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/lib/termexec"
 )
 
@@ -517,9 +517,34 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		}
 	}()
 
+	// stopServer stops the HTTP server and a native agent; closeProcess
+	// stops a PTY agent.
+	stopServer := func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Stop(shutdownCtx); err != nil {
+			logger.Error("Failed to stop HTTP server", "error", err)
+		}
+	}
+	closeProcess := func() {
+		if process == nil {
+			return
+		}
+		current := process
+		if supervisor != nil {
+			current = supervisor.currentSettled()
+		}
+		if err := current.Close(logger, 5*time.Second); err != nil {
+			logger.Error("Failed to close process cleanly", "error", err)
+		}
+	}
+
 	select {
 	case err := <-serverErrCh:
 		if err != nil {
+			// The agent started before the listener failed.
+			stopServer()
+			closeProcess()
 			return fmt.Errorf("failed to start server: %w", err)
 		}
 	case <-gracefulCtx.Done():
@@ -528,13 +553,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	if err := srv.SaveState("shutdown"); err != nil {
 		logger.Error("Failed to save state during shutdown", "error", err)
 	}
-
-	// Stop the HTTP server
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Stop(shutdownCtx); err != nil {
-		logger.Error("Failed to stop HTTP server", "error", err)
-	}
+	stopServer()
 
 	select {
 	case err := <-processExitCh:
@@ -542,16 +561,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			return fmt.Errorf("agent exited with error: %w", err)
 		}
 	default:
-		// Close the process
-		if process != nil {
-			current := process
-			if supervisor != nil {
-				current = supervisor.currentSettled()
-			}
-			if err := current.Close(logger, 5*time.Second); err != nil {
-				logger.Error("Failed to close process cleanly", "error", err)
-			}
-		}
+		closeProcess()
 	}
 	return nil
 }

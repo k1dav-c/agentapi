@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -30,6 +31,19 @@ type nativeServer struct {
 
 func newNativeServer(t *testing.T, configure func(*nativetest.Adapter)) *nativeServer {
 	t.Helper()
+	n := startNativeServer(t, configure)
+	require.Eventually(t, func() bool {
+		var status httpapi.StatusChangeBody
+		n.do(http.MethodGet, "/status", nil, &status)
+		return status.Capabilities != nil
+	}, 5*time.Second, 5*time.Millisecond)
+	return n
+}
+
+// startNativeServer is newNativeServer without waiting for the agent to
+// start.
+func startNativeServer(t *testing.T, configure func(*nativetest.Adapter)) *nativeServer {
+	t.Helper()
 	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
 	factory := &nativetest.Factory{Configure: configure}
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
@@ -47,13 +61,7 @@ func newNativeServer(t *testing.T, configure func(*nativetest.Adapter)) *nativeS
 		_ = srv.Stop(context.Background())
 		cancel()
 	})
-	n := &nativeServer{t: t, url: ts.URL, factory: factory}
-	require.Eventually(t, func() bool {
-		var status httpapi.StatusChangeBody
-		n.do(http.MethodGet, "/status", nil, &status)
-		return status.Capabilities != nil
-	}, 5*time.Second, 5*time.Millisecond)
-	return n
+	return &nativeServer{t: t, url: ts.URL, factory: factory}
 }
 
 // do sends a request and decodes the JSON response into out. It returns the
@@ -94,6 +102,46 @@ func (n *nativeServer) send(content string, mode httpapi.DispatchMode) (int, mes
 	}
 	code := n.do(http.MethodPost, "/message", body, &res)
 	return code, res
+}
+
+func (n *nativeServer) epoch() string {
+	var status struct {
+		Epoch string `json:"epoch"`
+	}
+	n.do(http.MethodGet, "/status", nil, &status)
+	return status.Epoch
+}
+
+func (n *nativeServer) requests() []native.RequestState {
+	var list struct {
+		Requests []native.RequestState `json:"requests"`
+	}
+	n.do(http.MethodGet, "/requests", nil, &list)
+	return list.Requests
+}
+
+// handoffID returns the ID of the pending handoff, or "".
+func (n *nativeServer) handoffID() string {
+	var pending struct {
+		Request *struct {
+			ID string `json:"id"`
+		} `json:"request"`
+	}
+	n.do(http.MethodGet, "/handoff", nil, &pending)
+	if pending.Request == nil {
+		return ""
+	}
+	return pending.Request.ID
+}
+
+func approval(id string) native.Request {
+	return native.Request{
+		ID: id, Kind: native.RequestKindApproval, Title: "Run: rm -rf build", Feedback: true,
+		Options: []native.RequestOption{
+			{ID: "allow", Label: "Allow", Kind: native.OptionKindAllow},
+			{ID: "deny", Label: "Deny", Kind: native.OptionKindDeny},
+		},
+	}
 }
 
 func (n *nativeServer) queue() []httpapi.QueuedMessage {
@@ -199,8 +247,13 @@ func TestNative_QueueSteerInterrupt(t *testing.T) {
 
 func TestNative_DispatchModesNeedCapabilities(t *testing.T) {
 	n := newNativeServer(t, func(a *nativetest.Adapter) { a.Caps = native.Capabilities{} })
-	n.send("first", "")
-	code, _ := n.send("x", httpapi.DispatchSteer)
+	// Without a running turn, the message is sent as usual.
+	code, res := n.send("first", httpapi.DispatchSteer)
+	require.Equal(t, http.StatusOK, code)
+	assert.False(t, res.Steered)
+	assert.Len(t, n.factory.Last().Turns(), 1)
+	// While a turn runs, steer and interrupt need the capability.
+	code, _ = n.send("x", httpapi.DispatchSteer)
 	assert.Equal(t, http.StatusBadRequest, code)
 	code, _ = n.send("x", httpapi.DispatchInterrupt)
 	assert.Equal(t, http.StatusBadRequest, code)
@@ -209,17 +262,35 @@ func TestNative_DispatchModesNeedCapabilities(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodPost, "/interrupt", nil, nil))
 }
 
+// No agent runs while the agent restarts or waits for a login. Interrupt
+// and steer have no turn to act on, and messages wait in the queue.
+func TestNative_NoAgentRunning(t *testing.T) {
+	n := startNativeServer(t, func(a *nativetest.Adapter) {
+		a.StartErr = &native.LoginRequiredError{Login: native.LoginRequired{Agent: "Claude Code", Message: "Claude Code is not logged in.", Command: "claude auth login"}}
+	})
+	require.Eventually(t, func() bool {
+		var status httpapi.StatusChangeBody
+		n.do(http.MethodGet, "/status", nil, &status)
+		return status.LoginRequired != nil
+	}, 5*time.Second, 5*time.Millisecond)
+
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/interrupt", nil, nil))
+	for _, mode := range []httpapi.DispatchMode{httpapi.DispatchQueue, httpapi.DispatchSteer, httpapi.DispatchInterrupt} {
+		code, res := n.send("sent with "+string(mode), mode)
+		require.Equal(t, http.StatusOK, code, mode)
+		assert.True(t, res.Queued, mode)
+	}
+	q := n.queue()
+	require.Len(t, q, 3)
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/queue/"+itoa(q[0].ID)+"/steer", nil, nil))
+	assert.Len(t, n.queue(), 3, "the message stays queued")
+}
+
 func TestNative_Requests(t *testing.T) {
 	n := newNativeServer(t, nil)
 	a := n.factory.Last()
 	n.send("do it", "")
-	a.Sink().RequestOpened(native.Request{
-		ID: "perm-1", Kind: native.RequestKindApproval, Title: "Run: rm -rf build", Feedback: true,
-		Options: []native.RequestOption{
-			{ID: "allow", Label: "Allow", Kind: native.OptionKindAllow},
-			{ID: "deny", Label: "Deny", Kind: native.OptionKindDeny},
-		},
-	})
+	a.Sink().RequestOpened(approval("perm-1"))
 
 	var status httpapi.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
@@ -252,6 +323,27 @@ func TestNative_Requests(t *testing.T) {
 	var after httpapi.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &after)
 	assert.Equal(t, 0, after.PendingRequests)
+}
+
+// A message that is queued or steered into the turn doesn't answer the
+// request the agent waits on, so the handoff keeps offering it.
+func TestNative_HandoffOffersRequestUntilAnswered(t *testing.T) {
+	n := newNativeServer(t, nil)
+	a := n.factory.Last()
+	n.send("do it", "")
+	a.Sink().RequestOpened(approval("perm-1"))
+	id := n.handoffID()
+	require.NotEmpty(t, id)
+
+	_, res := n.send("later", "")
+	require.True(t, res.Queued)
+	assert.Equal(t, id, n.handoffID())
+	_, res = n.send("also this", httpapi.DispatchSteer)
+	require.True(t, res.Steered)
+	assert.Equal(t, id, n.handoffID())
+
+	require.Equal(t, http.StatusOK, n.do(http.MethodPost, "/requests/perm-1/respond", map[string]any{"option_id": "allow"}, nil))
+	assert.Empty(t, n.handoffID())
 }
 
 func TestNative_HandoffAnswersRequest(t *testing.T) {
@@ -294,6 +386,7 @@ func TestNative_Restart(t *testing.T) {
 	n := newNativeServer(t, nil)
 	first := n.factory.Last()
 	n.send("hello", "")
+	first.Sink().RequestOpened(approval("perm-1"))
 	var res struct {
 		Restarted bool `json:"restarted"`
 	}
@@ -306,10 +399,28 @@ func TestNative_Restart(t *testing.T) {
 	}
 	n.do(http.MethodGet, "/messages", nil, &msgs)
 	assert.Empty(t, msgs.Messages)
+	// The old agent's request expired with it; it is not part of the new
+	// conversation.
+	assert.Empty(t, n.requests())
 	code, sent := n.send("again", "")
 	require.Equal(t, http.StatusOK, code)
 	assert.False(t, sent.Queued)
 	assert.Len(t, n.factory.Last().Turns(), 1)
+}
+
+// A message the agent refuses is taken back. Clients can't apply that as an
+// update, so they reload the conversation under a new epoch.
+func TestNative_RefusedMessageIsTakenBack(t *testing.T) {
+	n := newNativeServer(t, func(a *nativetest.Adapter) { a.TurnErr = errors.New("the agent refused the turn") })
+	epoch := n.epoch()
+	code, _ := n.send("hello", "")
+	assert.Equal(t, http.StatusInternalServerError, code)
+	var msgs struct {
+		Messages []httpapi.Message `json:"messages"`
+	}
+	n.do(http.MethodGet, "/messages", nil, &msgs)
+	assert.Empty(t, msgs.Messages)
+	assert.NotEqual(t, epoch, n.epoch())
 }
 
 func TestPTY_DispatchModesRejected(t *testing.T) {

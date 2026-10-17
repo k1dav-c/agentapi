@@ -3,10 +3,15 @@ package httpapi_test
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -139,6 +144,7 @@ func TestStateDB_RestoresConversation(t *testing.T) {
 	require.Len(t, reqs.Requests, 1)
 	assert.Equal(t, native.RequestStatusExpired, reqs.Requests[0].Status)
 	assert.Equal(t, native.ResponseNotResumable, reqs.Requests[0].Capability)
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/requests/perm/respond", map[string]any{"option_id": "allow"}, nil), "it is no longer pending")
 
 	// The queued message survived and is sent to the resumed agent.
 	require.Eventually(t, func() bool { return len(a.Turns()) == 1 }, 5*time.Second, 10*time.Millisecond)
@@ -153,6 +159,7 @@ func TestStateDB_RestartStartsFresh(t *testing.T) {
 	n, srv, db, err := persistentServer(t, path, "/work")
 	require.NoError(t, err)
 	n.send("hello", "")
+	n.factory.Last().Sink().RequestOpened(approval("perm"))
 	require.Equal(t, http.StatusOK, n.do(http.MethodDelete, "/messages", nil, nil))
 	stop(t, srv, db)
 
@@ -165,6 +172,196 @@ func TestStateDB_RestartStartsFresh(t *testing.T) {
 	}
 	n.do(http.MethodGet, "/messages", nil, &msgs)
 	assert.Empty(t, msgs.Messages)
+	assert.Empty(t, n.requests(), "the old session's request was not stored again")
+}
+
+// Restarting the agent to apply an MCP change starts a new session too, so
+// the conversation is cleared as with DELETE /messages.
+func TestStateDB_MCPRestartStartsFresh(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.db")
+	n, srv, db, err := persistentServer(t, path, dir)
+	require.NoError(t, err)
+	a := n.factory.Last()
+	n.send("hello", "")
+	a.Sink().RichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "text", Text: "Hi"}}})
+	a.Sink().SessionEvents([]jsonlwatcher.SessionEvent{{Kind: "text"}})
+	a.Sink().RequestOpened(approval("perm"))
+	_, queued := n.send("next task", "")
+	require.True(t, queued.Queued)
+	epoch := n.epoch()
+
+	var res struct {
+		Restarted bool `json:"restarted"`
+	}
+	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/mcp?restart=true", map[string]any{"servers": map[string]any{}}, &res))
+	require.True(t, res.Restarted)
+	assert.NotEqual(t, epoch, n.epoch(), "clients drop the old conversation")
+	assertEmptyConversation(t, n)
+	assert.Empty(t, n.queue())
+	stop(t, srv, db)
+
+	n, srv, db, err = persistentServer(t, path, dir)
+	require.NoError(t, err)
+	defer stop(t, srv, db)
+	assert.Equal(t, "session-2", n.factory.Last().ResumeRef, "the session started by the restart is resumed")
+	assertEmptyConversation(t, n)
+}
+
+func assertEmptyConversation(t *testing.T, n *nativeServer) {
+	t.Helper()
+	var msgs struct {
+		Messages []httpapi.Message `json:"messages"`
+	}
+	n.do(http.MethodGet, "/messages", nil, &msgs)
+	assert.Empty(t, msgs.Messages)
+	var rich struct {
+		Messages []jsonlwatcher.RichMessage `json:"messages"`
+	}
+	n.do(http.MethodGet, "/rich-messages", nil, &rich)
+	assert.Empty(t, rich.Messages)
+	var timeline struct {
+		Events []jsonlwatcher.SessionEvent `json:"events"`
+	}
+	n.do(http.MethodGet, "/timeline", nil, &timeline)
+	assert.Empty(t, timeline.Events)
+	assert.Empty(t, n.requests())
+}
+
+// After a crash the changes of the last moments may be missing from the
+// file. Clients that saw them must not resume their cache, so the restored
+// conversation has a new epoch.
+func TestStateDB_CrashStartsNewEpoch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.db")
+	n, srv, db, err := persistentServer(t, path, "/work")
+	require.NoError(t, err)
+	a := n.factory.Last()
+	n.send("hello", "")
+	db.Flush()
+	// Not written yet when the crash happens.
+	a.Sink().RichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "text", Text: "Hi"}}})
+	epoch := n.epoch()
+	crashed := filepath.Join(dir, "crashed.db")
+	copyFiles(t, path, crashed)
+	stop(t, srv, db)
+
+	n, srv, db, err = persistentServer(t, crashed, "/work")
+	require.NoError(t, err)
+	assert.NotEqual(t, epoch, n.epoch())
+	var msgs struct {
+		Messages []httpapi.Message `json:"messages"`
+	}
+	n.do(http.MethodGet, "/messages", nil, &msgs)
+	require.Len(t, msgs.Messages, 1, "what was written is restored")
+	epoch = n.epoch()
+	stop(t, srv, db)
+
+	// A clean stop keeps the epoch.
+	n, srv, db, err = persistentServer(t, crashed, "/work")
+	require.NoError(t, err)
+	defer stop(t, srv, db)
+	assert.Equal(t, epoch, n.epoch())
+}
+
+// copyFiles copies a state database as it is on disk, like a crash would
+// leave it.
+func copyFiles(t *testing.T, from, to string) {
+	t.Helper()
+	for _, suffix := range []string{"", "-wal"} {
+		data, err := os.ReadFile(from + suffix)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(to+suffix, data, 0o600))
+	}
+}
+
+// slowCloseAdapter holds Close until release is closed, like an agent that
+// takes a while to stop.
+type slowCloseAdapter struct {
+	*nativetest.Adapter
+	closing chan struct{}
+	release chan struct{}
+}
+
+func (a *slowCloseAdapter) Close() error {
+	close(a.closing)
+	<-a.release
+	return a.Adapter.Close()
+}
+
+// Stop stops the HTTP server before the agent, which can take seconds to
+// stop, and stores the queue last: a message accepted while the agent
+// stops would otherwise be answered as queued and never stored.
+func TestStateDB_StopStoresTheQueueLast(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db, err := statedb.Open(path, nil)
+	require.NoError(t, err)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	require.NoError(t, ln.Close())
+	closing, release := make(chan struct{}), make(chan struct{})
+	factory := &nativetest.Factory{}
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType: msgfmt.AgentTypeClaude,
+		Transport: httpapi.TransportNative,
+		NativeFactory: func(ref string) (native.Adapter, error) {
+			a, err := factory.New(ref)
+			if err != nil {
+				return nil, err
+			}
+			return &slowCloseAdapter{Adapter: a.(*nativetest.Adapter), closing: closing, release: release}, nil
+		},
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		CWD:            "/work",
+		StateDB:        db,
+		UploadDir:      path + ".uploads",
+		Port:           port,
+		Bind:           "127.0.0.1",
+	})
+	require.NoError(t, err)
+	go func() { _ = srv.Start() }()
+	n := &nativeServer{t: t, url: fmt.Sprintf("http://127.0.0.1:%d", port), factory: factory}
+	require.Eventually(t, func() bool {
+		resp, err := http.Get(n.url + "/status")
+		if err != nil {
+			return false
+		}
+		var status httpapi.StatusChangeBody
+		err = json.NewDecoder(resp.Body).Decode(&status)
+		_ = resp.Body.Close()
+		return err == nil && status.Capabilities != nil
+	}, 5*time.Second, 10*time.Millisecond)
+	n.send("first", "")
+	_, res := n.send("second", "")
+	require.True(t, res.Queued)
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- srv.Stop(context.Background()) }()
+	<-closing
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	resp, err := client.Post(n.url+"/message", "application/json", strings.NewReader(`{"content":"late","type":"user"}`))
+	if err == nil {
+		_ = resp.Body.Close()
+	}
+	require.Error(t, err, "no message is accepted while the agent stops")
+	close(release)
+	require.NoError(t, <-stopped)
+	require.NoError(t, db.Close())
+
+	db, err = statedb.Open(path, nil)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	snap, err := db.Load()
+	require.NoError(t, err)
+	require.Len(t, snap.Queue, 1)
+	assert.Equal(t, "second", snap.Queue[0].Content)
 }
 
 // readEvents reads SSE events from /events until n events with data were

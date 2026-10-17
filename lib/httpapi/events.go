@@ -17,7 +17,6 @@ import (
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
-	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/lib/util"
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -81,9 +80,12 @@ type MessageUpdateBody struct {
 
 // SessionSyncBody is the first event on /events. It tells the client whether
 // the replay that follows is the full state (discard anything cached) or
-// only the changes after the ?since= sequence it asked for.
+// only the changes after the ?since= sequence it asked for. It is sent
+// again, with a new epoch, when the conversation is reset or changes in a
+// way updates can't express (a message was removed); the full state
+// follows it then.
 type SessionSyncBody struct {
-	Epoch string `json:"epoch" doc:"Identifies this conversation state. It changes when the server restarts or the conversation is reset; a cache from another epoch must be discarded."`
+	Epoch string `json:"epoch" doc:"Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded."`
 	Full  bool   `json:"full" doc:"True when the replay that follows is the full state rather than the changes after ?since=."`
 	Seq   uint64 `json:"seq" doc:"Highest sequence number in the replay that follows (the ?since= value when it holds nothing new). The replay is complete once a change with this seq has arrived."`
 }
@@ -100,11 +102,11 @@ type StatusChangeBody struct {
 	// interactive prompt (selection list, confirmation) instead of its input
 	// box, and empty otherwise.
 	TerminalPrompt string `json:"terminal_prompt" doc:"Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise."`
-	// TerminalColumns lets a terminal mirror wrap lines where the agent's
-	// terminal does.
 	// SessionName is what the agent calls the session, for telling
 	// sessions apart.
-	SessionName     string `json:"session_name,omitempty" doc:"Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it."`
+	SessionName string `json:"session_name,omitempty" doc:"Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it."`
+	// TerminalColumns lets a terminal mirror wrap lines where the agent's
+	// terminal does.
 	TerminalColumns uint16 `json:"terminal_columns,omitempty" doc:"Width of the emulated terminal the agent runs in, in columns (PTY transport only)."`
 	// PendingRequests counts the structured requests (native transport)
 	// the agent is waiting on.
@@ -155,9 +157,9 @@ type EventEmitter struct {
 	mu       sync.Mutex
 	messages []st.ConversationMessage
 	// epoch identifies the current conversation state; seq numbers every
-	// message and rich message change so a reconnecting client can ask for
-	// only what it hasn't seen. messageSeq and richSeq hold the seq of each
-	// entry's latest change.
+	// message, rich message and request change so a reconnecting client can
+	// ask for only what it hasn't seen. messageSeq, richSeq and requestSeq
+	// hold the seq of each entry's latest change.
 	epoch               string
 	seq                 uint64
 	messageSeq          []uint64
@@ -206,7 +208,9 @@ type Persister interface {
 	PutRequest(state native.RequestState, seq uint64)
 	DeleteRequest(id string)
 	SetSeq(epoch string, seq uint64)
-	SetMeta(key, value string)
+	SetSessionName(name string)
+	// SetSessionRef stores what resumes the agent's session.
+	SetSessionRef(ref string)
 	// Reset removes the conversation; epoch is the new epoch.
 	Reset(epoch string)
 }
@@ -366,57 +370,78 @@ func (e *EventEmitter) notifyChannels(eventType EventType, payload any) {
 	}
 }
 
-// EmitMessages assumes that only the last message can change or new messages can be added.
-// If a new message is injected between existing messages (identified by Id), the behavior is undefined.
 func newEpoch() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
+// EmitMessages publishes the conversation's messages, which are ordered by
+// increasing ID. Changed and new messages are sent as updates. Messages can
+// also be removed (the native transport takes back a message the agent
+// refused), which updates can't express: clients then get the full state
+// under a new epoch. A message inserted between existing ones is not
+// supported.
 func (e *EventEmitter) EmitMessages(newMessages []st.ConversationMessage) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	// cut is where the IDs stop matching: the messages from there on were
+	// removed or replaced by others.
+	cut := min(len(e.messages), len(newMessages))
+	for i := range cut {
+		if e.messages[i].Id != newMessages[i].Id {
+			cut = i
+			break
+		}
+	}
+	removed := cut < len(e.messages)
+	if removed && e.persister != nil {
+		e.persister.TruncateMessages(e.messages[cut].Id)
+	}
 	seqs := make([]uint64, len(newMessages))
 	copy(seqs, e.messageSeq)
-	maxLength := max(len(e.messages), len(newMessages))
-	for i := range maxLength {
-		var oldMsg st.ConversationMessage
-		var newMsg st.ConversationMessage
-		if i < len(e.messages) {
-			oldMsg = e.messages[i]
+	for i, msg := range newMessages {
+		if i < len(e.messages) && e.messages[i] == msg {
+			continue
 		}
-		if i < len(newMessages) {
-			newMsg = newMessages[i]
+		e.seq++
+		seqs[i] = e.seq
+		if e.persister != nil {
+			e.persister.PutMessage(msg, e.seq)
 		}
-		if oldMsg != newMsg {
-			if i >= len(newMessages) {
-				continue
-			}
-			e.seq++
-			seqs[i] = e.seq
-			if e.persister != nil {
-				e.persister.PutMessage(newMessages[i], e.seq)
-			}
+		if !removed {
 			e.notifyChannels(EventTypeMessageUpdate, MessageUpdateBody{
-				Id:      newMessages[i].Id,
-				Role:    newMessages[i].Role,
-				Message: newMessages[i].Message,
-				Time:    newMessages[i].Time,
-				Seq:     e.seq,
+				Id: msg.Id, Role: msg.Role, Message: msg.Message, Time: msg.Time, Seq: e.seq,
 			})
 		}
 	}
-
-	if e.persister != nil {
-		if len(newMessages) < len(e.messages) {
-			e.persister.TruncateMessages(e.messages[len(newMessages)].Id)
-		}
-		e.persister.SetSeq(e.epoch, e.seq)
-	}
 	e.messages = newMessages
 	e.messageSeq = seqs
+	if removed {
+		e.resyncLocked()
+		return
+	}
+	if e.persister != nil {
+		e.persister.SetSeq(e.epoch, e.seq)
+	}
+}
+
+// resyncLocked starts a new epoch and sends connected clients the full
+// state, for a change they can't apply as an update. Clients that reconnect
+// with the old epoch get the full state too. Caller holds e.mu.
+func (e *EventEmitter) resyncLocked() {
+	e.epoch = newEpoch()
+	if e.persister != nil {
+		e.persister.SetSeq(e.epoch, e.seq)
+	}
+	for _, event := range e.currentStateAsEvents(0, "") {
+		// Status and screen didn't change, and errors would be shown again.
+		if event.Type == EventTypeStatusChange || event.Type == EventTypeScreenUpdate || event.Type == EventTypeError {
+			continue
+		}
+		e.notifyChannels(event.Type, event.Payload)
+	}
 }
 
 func (e *EventEmitter) EmitStatus(newStatus st.ConversationStatus) {
@@ -467,7 +492,7 @@ func (e *EventEmitter) SetSessionName(name string) {
 	}
 	e.sessionName = name
 	if e.persister != nil {
-		e.persister.SetMeta(statedb.MetaSessionName, name)
+		e.persister.SetSessionName(name)
 	}
 	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
 }
@@ -529,6 +554,12 @@ func (e *EventEmitter) EmitRequest(state native.RequestState) {
 	defer e.mu.Unlock()
 	before := e.statusChangeBody().PendingRequests
 	idx := slices.IndexFunc(e.requests, func(r native.RequestState) bool { return r.ID == state.ID })
+	if idx < 0 && state.Status != native.RequestStatusPending {
+		// A request closed after a reset belongs to the conversation that
+		// was cleared (the restarted agent's requests expire after
+		// DELETE /messages cleared them), not to this one.
+		return
+	}
 	if idx < 0 {
 		e.requests = append(e.requests, state)
 		e.requestSeq = append(e.requestSeq, 0)
@@ -550,11 +581,8 @@ func (e *EventEmitter) EmitRequest(state native.RequestState) {
 	}
 }
 
-// maxClosedRequests caps the answered or expired requests kept for replay.
-const maxClosedRequests = 50
-
-// trimRequestsLocked drops the oldest closed requests beyond
-// maxClosedRequests. Caller holds e.mu.
+// trimRequestsLocked drops the oldest closed requests beyond the
+// native.MaxClosedRequests the conversation keeps too. Caller holds e.mu.
 func (e *EventEmitter) trimRequestsLocked() {
 	closed := 0
 	for _, r := range e.requests {
@@ -562,7 +590,7 @@ func (e *EventEmitter) trimRequestsLocked() {
 			closed++
 		}
 	}
-	for i := 0; closed > maxClosedRequests && i < len(e.requests); {
+	for i := 0; closed > native.MaxClosedRequests && i < len(e.requests); {
 		if e.requests[i].Status == native.RequestStatusPending {
 			i++
 			continue
@@ -581,6 +609,16 @@ func (e *EventEmitter) Requests() []native.RequestState {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return slices.Clone(e.requests)
+}
+
+// Request returns the stored request with the given ID.
+func (e *EventEmitter) Request(id string) (native.RequestState, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if i := slices.IndexFunc(e.requests, func(r native.RequestState) bool { return r.ID == id }); i >= 0 {
+		return e.requests[i], true
+	}
+	return native.RequestState{}, false
 }
 
 func (e *EventEmitter) EmitScreen(newScreen string) {
@@ -774,8 +812,8 @@ func (e *EventEmitter) SessionEvents() []jsonlwatcher.SessionEvent {
 	return slices.Clone(e.sessionEvents)
 }
 
-// Reset clears all conversation state — messages, rich messages, timeline,
-// errors, and screen. Used when restarting with a clean slate.
+// Reset clears all conversation state — messages, rich messages, requests,
+// timeline, errors, and screen. Used when restarting with a clean slate.
 func (e *EventEmitter) Reset() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -806,10 +844,10 @@ func (e *EventEmitter) Reset() {
 	}
 }
 
-// Assumes the caller holds the lock.
 // currentStateAsEvents returns the events that rebuild the current state for
-// a new subscriber. With a matching epoch, only messages and rich messages
-// changed after since are included; otherwise everything is.
+// a new subscriber. With a matching epoch, only messages, rich messages and
+// requests changed after since are included; otherwise everything is.
+// Caller holds e.mu.
 func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string) []Event {
 	// since 0 asks for everything: the client must replace its state rather
 	// than merge into what it holds.

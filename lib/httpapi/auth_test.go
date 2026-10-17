@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"testing"
 
@@ -130,18 +131,23 @@ func withBearer(token string) func(*http.Request) {
 	return func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+token) }
 }
 
-func withCookie(value string) func(*http.Request) {
-	return func(r *http.Request) { r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: value}) }
+// withCookie adds the session cookie of a server whose token is token,
+// holding value.
+func withCookie(token, value string) func(*http.Request) {
+	name := sessionCookieName(sessionCookieValue(token))
+	return func(r *http.Request) { r.AddCookie(&http.Cookie{Name: name, Value: value}) }
 }
 
-func sessionCookieFrom(t *testing.T, resp *http.Response) *http.Cookie {
+// sessionCookieFrom returns the session cookie the server with token set.
+func sessionCookieFrom(t *testing.T, resp *http.Response, token string) *http.Cookie {
 	t.Helper()
+	name := sessionCookieName(sessionCookieValue(token))
 	for _, c := range resp.Cookies() {
-		if c.Name == sessionCookieName {
+		if c.Name == name {
 			return c
 		}
 	}
-	t.Fatalf("response has no %s cookie (Set-Cookie: %q)", sessionCookieName, resp.Header.Values("Set-Cookie"))
+	t.Fatalf("response has no %s cookie (Set-Cookie: %q)", name, resp.Header.Values("Set-Cookie"))
 	return nil
 }
 
@@ -160,6 +166,18 @@ func TestSessionCookieValue(t *testing.T) {
 	assert.Len(t, value, 64, "hex-encoded HMAC-SHA256")
 	assert.Equal(t, value, sessionCookieValue("secret-token"), "deterministic")
 	assert.NotEqual(t, value, sessionCookieValue("other-token"), "depends on the token")
+}
+
+func TestSessionCookieName(t *testing.T) {
+	t.Parallel()
+	value := sessionCookieValue("secret-token")
+	name := sessionCookieName(value)
+	assert.Regexp(t, `^agentapi_session_[0-9a-f]{8}$`, name)
+	assert.NotContains(t, name, value[:8], "named after a hash of the value, not the value")
+	assert.Equal(t, name, sessionCookieName(value), "deterministic")
+	// Servers with other tokens on the same host use other cookies, so
+	// signing in to one keeps the browser signed in to the others.
+	assert.NotEqual(t, name, sessionCookieName(sessionCookieValue("other-token")))
 }
 
 func TestSecretEqual(t *testing.T) {
@@ -185,10 +203,11 @@ func TestTokenAuthMiddleware_Cookie(t *testing.T) {
 		return rec.Code
 	}
 
-	assert.Equal(t, http.StatusOK, serve(withCookie(sessionCookieValue("secret-token"))), "derived cookie")
-	assert.Equal(t, http.StatusUnauthorized, serve(withCookie("secret-token")), "raw token is not a valid cookie")
-	assert.Equal(t, http.StatusUnauthorized, serve(withCookie(sessionCookieValue("old-token"))), "cookie of another token")
-	assert.Equal(t, http.StatusUnauthorized, serve(withCookie("")), "empty cookie")
+	assert.Equal(t, http.StatusOK, serve(withCookie("secret-token", sessionCookieValue("secret-token"))), "derived cookie")
+	assert.Equal(t, http.StatusUnauthorized, serve(withCookie("secret-token", "secret-token")), "raw token is not a valid cookie")
+	assert.Equal(t, http.StatusUnauthorized, serve(withCookie("secret-token", sessionCookieValue("old-token"))), "value of another token")
+	assert.Equal(t, http.StatusUnauthorized, serve(withCookie("old-token", sessionCookieValue("secret-token"))), "valid value under another server's name")
+	assert.Equal(t, http.StatusUnauthorized, serve(withCookie("secret-token", "")), "empty cookie")
 	assert.Equal(t, http.StatusOK, serve(func(r *http.Request) { r.Header.Set("Authorization", "bearer secret-token") }), "scheme is case-insensitive")
 	assert.Equal(t, http.StatusUnauthorized, serve(func(r *http.Request) { r.Header.Set("Authorization", "Basic secret-token") }), "wrong scheme")
 	assert.Equal(t, http.StatusUnauthorized, serve(func(r *http.Request) { r.Header.Set("Authorization", "Bearer ") }), "empty token")
@@ -238,7 +257,7 @@ func TestAuthSession(t *testing.T) {
 		assert.Empty(t, resp.Cookies())
 
 		// A session cookie can't be used to mint another one.
-		resp = doRequest(t, http.MethodPost, ts.URL+authSessionPath, withCookie(sessionCookieValue(token)))
+		resp = doRequest(t, http.MethodPost, ts.URL+authSessionPath, withCookie(token, sessionCookieValue(token)))
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	})
 
@@ -252,7 +271,7 @@ func TestAuthSession(t *testing.T) {
 		resp = doRequest(t, http.MethodPost, ts.URL+authSessionPath, withBearer(token))
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Equal(t, AuthSessionBody{AuthRequired: true, Authenticated: true}, decodeAuthSession(t, resp))
-		cookie := sessionCookieFrom(t, resp)
+		cookie := sessionCookieFrom(t, resp, token)
 		assert.NotEqual(t, token, cookie.Value, "the cookie must not hold the raw token")
 		assert.NotContains(t, cookie.Value, token)
 		assert.Equal(t, sessionCookieValue(token), cookie.Value)
@@ -262,19 +281,19 @@ func TestAuthSession(t *testing.T) {
 		assert.False(t, cookie.Secure, "plain HTTP")
 
 		for _, path := range []string{"/status", "/messages", "/queue"} {
-			resp = doRequest(t, http.MethodGet, ts.URL+path, withCookie(cookie.Value))
+			resp = doRequest(t, http.MethodGet, ts.URL+path, withCookie(token, cookie.Value))
 			assert.Equal(t, http.StatusOK, resp.StatusCode, "%s with the session cookie", path)
 		}
 		// Images: past auth, then 404 because nothing was uploaded.
-		resp = doRequest(t, http.MethodGet, ts.URL+"/uploads/0123456789abcdef/a.png", withCookie(cookie.Value))
+		resp = doRequest(t, http.MethodGet, ts.URL+"/uploads/0123456789abcdef/a.png", withCookie(token, cookie.Value))
 		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 		resp = doRequest(t, http.MethodGet, ts.URL+"/uploads/0123456789abcdef/a.png", nil)
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 
-		resp = doRequest(t, http.MethodGet, ts.URL+authSessionPath, withCookie(cookie.Value))
+		resp = doRequest(t, http.MethodGet, ts.URL+authSessionPath, withCookie(token, cookie.Value))
 		assert.Equal(t, AuthSessionBody{AuthRequired: true, Authenticated: true}, decodeAuthSession(t, resp))
 
-		resp = doRequest(t, http.MethodGet, ts.URL+"/status", withCookie(token))
+		resp = doRequest(t, http.MethodGet, ts.URL+"/status", withCookie(token, token))
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "raw token as cookie")
 	})
 
@@ -287,7 +306,7 @@ func TestAuthSession(t *testing.T) {
 				mutate func(*http.Request)
 				want   int
 			}{
-				{"cookie", withCookie(sessionCookieValue(token)), http.StatusOK},
+				{"cookie", withCookie(token, sessionCookieValue(token)), http.StatusOK},
 				{"none", func(*http.Request) {}, http.StatusUnauthorized},
 			} {
 				ctx, cancel := context.WithCancel(context.Background())
@@ -311,16 +330,16 @@ func TestAuthSession(t *testing.T) {
 			r.Header.Set("X-Forwarded-Proto", "https")
 		})
 		require.Equal(t, http.StatusOK, resp.StatusCode)
-		assert.True(t, sessionCookieFrom(t, resp).Secure)
+		assert.True(t, sessionCookieFrom(t, resp, token).Secure)
 	})
 
 	t.Run("logout clears the cookie", func(t *testing.T) {
 		t.Parallel()
 		ts := newAuthTestServer(t, token)
-		resp := doRequest(t, http.MethodDelete, ts.URL+authSessionPath, withCookie(sessionCookieValue(token)))
+		resp := doRequest(t, http.MethodDelete, ts.URL+authSessionPath, withCookie(token, sessionCookieValue(token)))
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Equal(t, AuthSessionBody{AuthRequired: true, Authenticated: false}, decodeAuthSession(t, resp))
-		cookie := sessionCookieFrom(t, resp)
+		cookie := sessionCookieFrom(t, resp, token)
 		assert.Empty(t, cookie.Value)
 		assert.Negative(t, cookie.MaxAge, "Max-Age=0 deletes the cookie")
 		assert.Equal(t, "/", cookie.Path)
@@ -330,8 +349,37 @@ func TestAuthSession(t *testing.T) {
 	t.Run("changing the token invalidates cookies", func(t *testing.T) {
 		t.Parallel()
 		ts := newAuthTestServer(t, "new-token")
-		resp := doRequest(t, http.MethodGet, ts.URL+"/status", withCookie(sessionCookieValue(token)))
+		resp := doRequest(t, http.MethodGet, ts.URL+"/status", withCookie(token, sessionCookieValue(token)))
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	})
+
+	t.Run("servers on one host keep their own sessions", func(t *testing.T) {
+		t.Parallel()
+		// Browsers send every cookie of the host to every port.
+		first := newAuthTestServer(t, token)
+		second := newAuthTestServer(t, "other-token")
+		jar, err := cookiejar.New(nil)
+		require.NoError(t, err)
+		client := &http.Client{Jar: jar}
+		signIn := func(url, token string) {
+			req, err := http.NewRequest(http.MethodPost, url+authSessionPath, nil)
+			require.NoError(t, err)
+			withBearer(token)(req)
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			_ = resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+		}
+		status := func(url string) int {
+			resp, err := client.Get(url + "/status")
+			require.NoError(t, err)
+			_ = resp.Body.Close()
+			return resp.StatusCode
+		}
+		signIn(first.URL, token)
+		signIn(second.URL, "other-token")
+		assert.Equal(t, http.StatusOK, status(first.URL), "still signed in to the first server")
+		assert.Equal(t, http.StatusOK, status(second.URL))
 	})
 
 	t.Run("401 carries CORS headers and preflight passes", func(t *testing.T) {

@@ -656,7 +656,7 @@
           },
           "dispatch_mode": {
             "$ref": "#/components/schemas/DispatchMode",
-            "description": "What to do with a user message while the agent is busy. 'queue' (default) sends it once the agent is idle. 'steer' adds it to the turn the agent is working on; 'interrupt' stops that turn and sends the message next. 'steer' and 'interrupt' need the native transport and an agent with the matching capability (see GET /status); otherwise they return 400."
+            "description": "What to do with a user message while the agent is busy. 'queue' (default) sends it once the agent is idle. 'steer' adds it to the turn the agent is working on; 'interrupt' stops that turn and sends the message next. Without a running turn, both send the message as usual. 'steer' and 'interrupt' need the native transport, and while a turn runs an agent with the matching capability (see GET /status); otherwise they return 400."
           },
           "type": {
             "$ref": "#/components/schemas/MessageType",
@@ -1599,7 +1599,7 @@
         "additionalProperties": false,
         "properties": {
           "epoch": {
-            "description": "Identifies this conversation state. It changes when the server restarts or the conversation is reset; a cache from another epoch must be discarded.",
+            "description": "Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded.",
             "type": "string"
           },
           "full": {

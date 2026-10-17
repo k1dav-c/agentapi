@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	// sessionCookieName is the cookie the chat UI signs in with. Browsers
-	// can't add an Authorization header to EventSource or <img> requests,
-	// so the UI trades the API token for this cookie once.
-	sessionCookieName = "agentapi_session"
+	// sessionCookiePrefix starts the name of the cookie the chat UI signs
+	// in with. Browsers can't add an Authorization header to EventSource or
+	// <img> requests, so the UI trades the API token for this cookie once.
+	sessionCookiePrefix = "agentapi_session_"
 	// sessionCookieContext is the HMAC message the cookie value is derived
 	// with. Bump the version to invalidate every cookie already issued.
 	sessionCookieContext = "agentapi-session-v1"
@@ -34,6 +34,15 @@ func sessionCookieValue(token string) string {
 	mac := hmac.New(sha256.New, []byte(token))
 	mac.Write([]byte(sessionCookieContext))
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// sessionCookieName names the session cookie with the given value after a
+// hash of the value. Browsers share cookies between the ports of a host,
+// so AgentAPI servers on one host with different tokens need cookies of
+// their own, or signing in to one would sign the browser out of the others.
+func sessionCookieName(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return sessionCookiePrefix + hex.EncodeToString(sum[:4])
 }
 
 // secretEqual compares two secrets in constant time. Both sides are hashed
@@ -60,12 +69,14 @@ func secretEqual(given, expected string) bool {
 // /auth/session itself needs the Bearer token, which a forged request
 // doesn't have, so it can't be used to plant a session either.
 type tokenAuth struct {
-	token  string
-	cookie string
+	token      string
+	cookie     string
+	cookieName string
 }
 
 func newTokenAuth(token string) *tokenAuth {
-	return &tokenAuth{token: token, cookie: sessionCookieValue(token)}
+	cookie := sessionCookieValue(token)
+	return &tokenAuth{token: token, cookie: cookie, cookieName: sessionCookieName(cookie)}
 }
 
 // bearerValid reports whether the Authorization header carries the token.
@@ -80,7 +91,7 @@ func (a *tokenAuth) bearerValid(header string) bool {
 
 // cookieValid reports whether the request carries a valid session cookie.
 func (a *tokenAuth) cookieValid(r *http.Request) bool {
-	c, err := r.Cookie(sessionCookieName)
+	c, err := r.Cookie(a.cookieName)
 	if err != nil {
 		return false
 	}
@@ -145,9 +156,9 @@ func requestIsHTTPS(r *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(proto), "https")
 }
 
-func sessionCookie(r *http.Request, value string, maxAge int) string {
+func sessionCookie(r *http.Request, name, value string, maxAge int) string {
 	c := http.Cookie{
-		Name:     sessionCookieName,
+		Name:     name,
 		Value:    value,
 		Path:     "/",
 		MaxAge:   maxAge,
@@ -179,7 +190,7 @@ func (s *Server) createAuthSession(_ context.Context, input *authSessionInput) (
 		return nil, huma.Error401Unauthorized("a valid Authorization: Bearer <token> header is required")
 	}
 	// A session cookie, no Max-Age: it lasts until the browser closes.
-	resp.SetCookie = sessionCookie(input.req, s.auth.cookie, 0)
+	resp.SetCookie = sessionCookie(input.req, s.auth.cookieName, s.auth.cookie, 0)
 	resp.Body = AuthSessionBody{AuthRequired: true, Authenticated: true}
 	return resp, nil
 }
@@ -187,7 +198,7 @@ func (s *Server) createAuthSession(_ context.Context, input *authSessionInput) (
 func (s *Server) deleteAuthSession(_ context.Context, input *authSessionInput) (*AuthSessionResponse, error) {
 	resp := &AuthSessionResponse{}
 	if s.auth != nil {
-		resp.SetCookie = sessionCookie(input.req, "", -1)
+		resp.SetCookie = sessionCookie(input.req, s.auth.cookieName, "", -1)
 	}
 	resp.Body = s.authSessionState(input.req)
 	// The cookie is being removed, so only a Bearer header still counts.

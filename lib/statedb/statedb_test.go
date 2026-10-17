@@ -1,7 +1,10 @@
 package statedb_test
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -125,4 +128,87 @@ func TestWritesAfterCloseAreIgnored(t *testing.T) {
 	db.PutMessage(msg(0, "late"), 1)
 	db.Flush()
 	require.NoError(t, db.Close())
+}
+
+func TestOpenCreatesPrivateFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file modes are a Unix concept")
+	}
+	// A missing directory is created, and characters with a meaning in a
+	// URI are taken literally.
+	dir := filepath.Join(t.TempDir(), "agentapi")
+	path := filepath.Join(dir, "a?b#c%20d.db")
+	db := open(t, path)
+	db.PutMessage(msg(0, "secret"), 1)
+	db.Flush()
+	for file, want := range map[string]os.FileMode{dir: 0o700, path: 0o600, path + "-wal": 0o600} {
+		info, err := os.Stat(file)
+		require.NoError(t, err)
+		assert.Equal(t, want, info.Mode().Perm(), file)
+	}
+	assert.NoFileExists(t, path+"-shm", "the WAL index stays in memory")
+	require.NoError(t, db.Close())
+
+	db = open(t, path)
+	defer func() { _ = db.Close() }()
+	snap, err := db.Load()
+	require.NoError(t, err)
+	require.Len(t, snap.Messages, 1)
+}
+
+func TestOpenRefusesAFileInUse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db := open(t, path)
+	_, err := statedb.Open(path, nil)
+	require.ErrorContains(t, err, "state database "+path+" is in use by another AgentAPI")
+	require.NoError(t, db.Close())
+
+	db = open(t, path)
+	require.NoError(t, db.Close())
+}
+
+// copyDB copies the database files as they are on disk, like a crash would
+// leave them.
+func copyDB(t *testing.T, from, to string) {
+	t.Helper()
+	for _, suffix := range []string{"", "-wal"} {
+		data, err := os.ReadFile(from + suffix)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(to+suffix, data, 0o600))
+	}
+}
+
+func TestCleanClose(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.db")
+	db := open(t, path)
+	snap, err := db.Load()
+	require.NoError(t, err)
+	assert.True(t, snap.Empty())
+	db.SetSeq("epoch-1", 1)
+	db.PutMessage(msg(0, "a"), 1)
+	require.NoError(t, db.Close())
+
+	db = open(t, path)
+	snap, err = db.Load()
+	require.NoError(t, err)
+	assert.True(t, snap.Clean)
+	assert.NotContains(t, snap.Meta, "clean", "the flag is not meta of the conversation")
+	db.PutMessage(msg(1, "b"), 2)
+	db.Flush()
+	// A crash while the file is open: what was written survives, but the
+	// file isn't clean.
+	crashed := filepath.Join(dir, "crashed.db")
+	copyDB(t, path, crashed)
+	require.NoError(t, db.Close())
+
+	db = open(t, crashed)
+	defer func() { _ = db.Close() }()
+	snap, err = db.Load()
+	require.NoError(t, err)
+	assert.False(t, snap.Clean)
+	assert.Len(t, snap.Messages, 2)
 }

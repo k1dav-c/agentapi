@@ -73,7 +73,7 @@ type Server struct {
 	agentType          mf.AgentType
 	emitter            *EventEmitter
 	chatBasePath       string
-	tempDir            string
+	uploadDir          string
 	cwd                string
 	clock              quartz.Clock
 	shutdownCtx        context.Context
@@ -178,8 +178,6 @@ type ServerConfig struct {
 	Webhook WebhookConfig
 	// NativeFactory creates the agent adapter for the native transport.
 	NativeFactory native.Factory
-	// NativeResumeRef resumes an earlier native session.
-	NativeResumeRef string
 	// StateDB, if set, stores the conversation and restores it on start
 	// (native transport only).
 	StateDB *statedb.DB
@@ -408,19 +406,6 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	if _, err := rand.Read(sessionBytes[:]); err != nil {
 		return nil, fmt.Errorf("generate session ID: %w", err)
 	}
-	var restored statedb.Snapshot
-	if config.StateDB != nil {
-		if config.Transport != TransportNative {
-			return nil, fmt.Errorf("a state database needs the native transport")
-		}
-		restored, err = config.StateDB.Load()
-		if err != nil {
-			return nil, fmt.Errorf("load state database: %w", err)
-		}
-		if err := checkRestoredIdentity(restored, config); err != nil {
-			return nil, err
-		}
-	}
 	emitterOptions := []EventEmitterOption{
 		WithAgentType(config.AgentType),
 		WithTransport(config.Transport),
@@ -433,23 +418,9 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		emitterOptions = append(emitterOptions, WithPersister(config.StateDB))
 	}
 	emitter := NewEventEmitter(emitterOptions...)
-	resumeRef := config.NativeResumeRef
-	var restoredMessages []st.ConversationMessage
-	if config.StateDB != nil {
-		if restored.Empty() {
-			config.StateDB.SetMeta(statedb.MetaAgentType, string(config.AgentType))
-			config.StateDB.SetMeta(statedb.MetaTransport, string(config.Transport))
-			config.StateDB.SetMeta(statedb.MetaCWD, config.CWD)
-			config.StateDB.SetSeq(emitter.Epoch(), 0)
-		} else {
-			state := emitterStateFromSnapshot(restored)
-			emitter.Restore(state)
-			restoredMessages = state.Messages
-			if resumeRef == "" {
-				resumeRef = restored.Meta[statedb.MetaSessionRef]
-			}
-			logger.Info("Restored conversation from the state database", "messages", len(state.Messages), "resume", resumeRef != "")
-		}
+	restored, err := restoreState(config, emitter, logger)
+	if err != nil {
+		return nil, err
 	}
 
 	// Format initial prompt into message parts if provided
@@ -460,18 +431,19 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 
 	var conversation st.Conversation
 	var nativeConversation *native.Conversation
-	observer := &nativeObserver{emitter: emitter}
-	if config.StateDB != nil {
-		observer.persister = config.StateDB
-	}
+	var observer *nativeObserver
 	if config.Transport == TransportNative {
 		if config.NativeFactory == nil {
 			return nil, fmt.Errorf("native transport requires an adapter factory")
 		}
+		observer = &nativeObserver{emitter: emitter}
+		if config.StateDB != nil {
+			observer.persister = config.StateDB
+		}
 		nativeConversation = native.NewConversation(native.Config{
 			Factory:         config.NativeFactory,
-			ResumeRef:       resumeRef,
-			InitialMessages: restoredMessages,
+			ResumeRef:       restored.resumeRef,
+			InitialMessages: restored.messages,
 			InitialPrompt:   config.InitialPrompt,
 			Emitter:         emitter,
 			Observer:        observer,
@@ -505,18 +477,18 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 
 	// Create the directory for uploads: a temporary one unless the
 	// conversation is kept, whose messages refer to uploads by path.
-	tempDir := config.UploadDir
-	if tempDir != "" {
-		if err := os.MkdirAll(tempDir, 0o700); err != nil {
+	uploadDir := config.UploadDir
+	if uploadDir != "" {
+		if err := os.MkdirAll(uploadDir, 0o700); err != nil {
 			return nil, fmt.Errorf("failed to create upload directory: %w", err)
 		}
 	} else {
-		tempDir, err = os.MkdirTemp("", "agentapi-uploads-")
+		uploadDir, err = os.MkdirTemp("", "agentapi-uploads-")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create temporary directory: %w", err)
 		}
 	}
-	logger.Info("Using upload directory", "tempDir", tempDir)
+	logger.Info("Using upload directory", "uploadDir", uploadDir)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	webhook.start(shutdownCtx)
@@ -534,7 +506,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		agentType:      config.AgentType,
 		emitter:        emitter,
 		chatBasePath:   strings.TrimSuffix(config.ChatBasePath, "/"),
-		tempDir:        tempDir,
+		uploadDir:      uploadDir,
 		cwd:            config.CWD,
 		clock:          config.Clock,
 		shutdownCtx:    shutdownCtx,
@@ -546,18 +518,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		stateDB:        config.StateDB,
 		keepUploads:    config.UploadDir != "",
 	}
-	if config.StateDB != nil && !restored.Empty() {
-		s.restoreQueue(restored)
-		// The agent that asked is gone; its requests can't be answered.
-		now := config.Clock.Now()
-		for _, r := range emitter.Requests() {
-			if r.Status == native.RequestStatusPending {
-				r.Status = native.RequestStatusExpired
-				r.Capability = native.ResponseNotResumable
-				r.ClosedAt = &now
-				emitter.EmitRequest(r)
-			}
-		}
+	if config.StateDB != nil {
+		s.restoreQueue(restored.snapshot)
 	}
 	if mcpconfig.SupportedAgent(config.AgentType) {
 		store, err := mcpconfig.NewStore(config.AgentType, config.CWD)
@@ -567,7 +529,9 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		s.mcpStore = store
 	}
 
-	observer.storeImages = s.storeRichImages
+	if observer != nil {
+		observer.storeImages = s.storeRichImages
+	}
 
 	// Register API routes
 	s.registerRoutes()
@@ -596,8 +560,6 @@ func (s *Server) Handler() http.Handler {
 	return s.router
 }
 
-// MarkAgentExited records the terminal lifecycle state before the HTTP server
-// shuts down. A nil error represents a clean process exit.
 // NativeExited delivers the agent's exit when it runs over the native
 // transport and exits on its own; it is nil for other transports.
 func (s *Server) NativeExited() <-chan error {
@@ -607,6 +569,8 @@ func (s *Server) NativeExited() <-chan error {
 	return s.native.Exited()
 }
 
+// MarkAgentExited records the terminal lifecycle state before the HTTP server
+// shuts down. A nil error represents a clean process exit.
 func (s *Server) MarkAgentExited(err error) {
 	if err != nil {
 		s.emitter.SetLifecycle(LifecycleFailed)
@@ -886,6 +850,10 @@ func (s *Server) registerRoutes() {
 	huma.Delete(s.api, "/queue/{id}", s.deleteQueuedMessage, func(o *huma.Operation) {
 		o.Description = "Deletes a queued user message."
 	})
+	huma.Put(s.api, "/queue", s.reorderQueue, func(o *huma.Operation) {
+		o.Description = "Reorders the queued messages. The body must list every queued message id exactly once; otherwise 409 is returned."
+		o.Errors = []int{409}
+	})
 
 	huma.Post(s.api, "/upload", s.uploadFiles, func(o *huma.Operation) {
 		o.Description = "Upload files to the specified upload path."
@@ -931,11 +899,10 @@ func (s *Server) registerRoutes() {
 	s.registerStaticFileRoutes()
 }
 
-// getStatus handles GET /status
+// getStatus handles GET /status. It only reads the emitter, which has its
+// own lock, so it answers while s.mu is held for a slow call into the agent
+// (a restart, a native turn).
 func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusResponse, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	snapshot := s.emitter.StatusSnapshot()
 
 	resp := &StatusResponse{}
@@ -966,13 +933,9 @@ func (s *Server) getTitle(ctx context.Context, input *struct{}) (*TitleResponse,
 	messages := s.conversation.Messages()
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == st.ConversationRoleUser {
-			task = strings.Join(strings.Fields(messages[i].Message), " ")
+			task = shortText(messages[i].Message, 60)
 			break
 		}
-	}
-	runes := []rune(task)
-	if len(runes) > 60 {
-		task = strings.TrimSpace(string(runes[:59])) + "…"
 	}
 	state := "Ready"
 	if status == AgentStatusRunning {
@@ -989,6 +952,16 @@ func (s *Server) getTitle(ctx context.Context, input *struct{}) (*TitleResponse,
 	resp.Body.Status = status
 	resp.Body.AgentType = s.agentType
 	return resp, nil
+}
+
+// shortText returns s on one line, cut to at most n runes.
+func shortText(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return strings.TrimSpace(string(runes[:n-1])) + "…"
 }
 
 func (s *Server) getWorkspace(_ context.Context, _ *struct{}) (*WorkspaceResponse, error) {
@@ -1046,15 +1019,12 @@ func (s *Server) getTimeline(ctx context.Context, input *struct{}) (*TimelineRes
 func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*MessageResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	pending := s.pendingHandoffLocked()
+	pending, _ := s.pendingHandoffLocked()
 
 	resp := &MessageResponse{}
 	mode := input.Body.DispatchMode
 	if mode == "" {
 		mode = DispatchQueue
-	}
-	if !slices.Contains(DispatchModeValues, mode) {
-		return nil, huma.Error400BadRequest(fmt.Sprintf("unknown dispatch_mode %q", mode))
 	}
 	if mode != DispatchQueue && (s.native == nil || input.Body.Type != MessageTypeUser) {
 		return nil, huma.Error400BadRequest("dispatch_mode steer and interrupt need the native transport and a user message")
@@ -1067,6 +1037,11 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 		if s.native != nil {
 			if err := s.createNativeMessageLocked(input.Body.Content, mode, resp); err != nil {
 				return nil, err
+			}
+			if resp.Body.Queued || resp.Body.Steered {
+				// The message doesn't answer a pending request, so the
+				// handoff keeps offering it.
+				return resp, nil
 			}
 			break
 		}
@@ -1165,6 +1140,33 @@ func (s *Server) deleteQueuedMessage(ctx context.Context, input *DeleteQueuedMes
 	return nil, huma.Error404NotFound("queued message not found")
 }
 
+// reorderQueue puts the queued messages in the given order.
+func (s *Server) reorderQueue(_ context.Context, input *ReorderQueueRequest) (*QueueMutationResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := input.Body.IDs
+	if len(ids) != len(s.messageQueue) {
+		return nil, huma.Error409Conflict("the queue changed; list every queued message once")
+	}
+	byID := make(map[int]QueuedMessage, len(s.messageQueue))
+	for _, m := range s.messageQueue {
+		byID[m.ID] = m
+	}
+	reordered := make([]QueuedMessage, 0, len(ids))
+	for _, id := range ids {
+		m, ok := byID[id]
+		if !ok {
+			return nil, huma.Error409Conflict("the queue changed; list every queued message once")
+		}
+		delete(byID, id)
+		reordered = append(reordered, m)
+	}
+	s.messageQueue = reordered
+	resp := &QueueMutationResponse{}
+	resp.Body.Ok = true
+	return resp, nil
+}
+
 // enqueueMessageLocked queues a message last, or first if front is set.
 func (s *Server) enqueueMessageLocked(content string, front bool) {
 	s.nextQueueID++
@@ -1226,19 +1228,15 @@ func (s *Server) dispatchNextQueuedMessage() {
 			// Agent became busy again; retry on a later tick.
 			return
 		}
-		if s.queueFailID != next.ID {
-			s.queueFailID = next.ID
-			s.queueFailCount = 0
-		}
-		s.queueFailCount++
-		s.logger.Error("Failed to send queued message", "queueId", next.ID, "attempt", s.queueFailCount, "error", err)
+		attempts, drop := s.queueSendFailedLocked(next, err)
 		// A message the agent didn't react to may still be in its input
 		// box; retrying would type it a second time.
-		if s.queueFailCount >= maxQueueDispatchAttempts || errors.Is(err, st.ErrMessageNotSubmitted) {
+		notSubmitted := errors.Is(err, st.ErrMessageNotSubmitted)
+		if drop || notSubmitted {
 			// Drop the poison message so it doesn't block the queue forever.
 			s.messageQueue = s.messageQueue[1:]
-			msg := fmt.Sprintf("Dropped queued message after %d failed attempts: %v", s.queueFailCount, err)
-			if errors.Is(err, st.ErrMessageNotSubmitted) {
+			msg := fmt.Sprintf("Dropped queued message %q after %d failed attempts: %v", shortText(next.Content, 40), attempts, err)
+			if notSubmitted {
 				msg = fmt.Sprintf("Queued message was typed but the agent did not submit it; check the agent's input box: %v", err)
 			}
 			s.emitter.EmitError(msg, st.ErrorLevelError)
@@ -1246,6 +1244,19 @@ func (s *Server) dispatchNextQueuedMessage() {
 		return
 	}
 	s.messageQueue = s.messageQueue[1:]
+}
+
+// queueSendFailedLocked counts a failed attempt to send next, the head of
+// the queue. It returns how often in a row sending it failed, and whether
+// that is often enough to drop it. Caller holds s.mu.
+func (s *Server) queueSendFailedLocked(next QueuedMessage, err error) (int, bool) {
+	if s.queueFailID != next.ID {
+		s.queueFailID = next.ID
+		s.queueFailCount = 0
+	}
+	s.queueFailCount++
+	s.logger.Error("Failed to send queued message", "queueId", next.ID, "attempt", s.queueFailCount, "error", err)
+	return s.queueFailCount, s.queueFailCount >= maxQueueDispatchAttempts
 }
 
 // uploadFiles handles POST /upload
@@ -1271,9 +1282,9 @@ func (s *Server) uploadFiles(ctx context.Context, input *struct {
 	hash := sha256.Sum256(buf)
 	checksum := hex.EncodeToString(hash[:8]) // Use first 8 bytes (16 hex chars)
 
-	// Create checksum-based subdirectory in tempDir
-	uploadDir := filepath.Join(s.tempDir, checksum)
-	err = os.MkdirAll(uploadDir, 0o755)
+	// Create checksum-based subdirectory in the upload directory
+	dir := filepath.Join(s.uploadDir, checksum)
+	err = os.MkdirAll(dir, 0o755)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create upload directory: %w", err)
 	}
@@ -1281,7 +1292,7 @@ func (s *Server) uploadFiles(ctx context.Context, input *struct {
 	// Save individual file with original filename (extract just the base filename for security)
 	filename := filepath.Base(formData.File.Filename)
 
-	outPath := filepath.Join(uploadDir, filename)
+	outPath := filepath.Join(dir, filename)
 	err = os.WriteFile(outPath, buf, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to write file: %w", err)
@@ -1306,7 +1317,6 @@ func eventSeq(event Event) uint64 {
 	return 0
 }
 
-// subscribeEvents is an SSE endpoint that sends events to the client
 // SubscribeEventsInput lets a client that cached the conversation resume
 // from where it left off.
 type SubscribeEventsInput struct {
@@ -1317,6 +1327,7 @@ type SubscribeEventsInput struct {
 	LastEventID uint64 `header:"Last-Event-ID" doc:"With sync: used as since when since is not given. With sync, events carry SSE ids: the last event of the replay has the replay's seq and each later message, rich message or request update has its own, so a reconnecting EventSource resumes where it left off (pass epoch in the URL, e.g. from GET /status)."`
 }
 
+// subscribeEvents is an SSE endpoint that sends events to the client.
 func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInput, send sse.Sender) {
 	// session_sync is opt-in: existing clients (e.g. agentapi-sdk-go) reject
 	// event types they don't know.
@@ -1445,39 +1456,42 @@ func (s *Server) Start() error {
 	return s.srv.ListenAndServe()
 }
 
-// Stop gracefully stops the HTTP server. It is safe to call multiple times.
+// Stop gracefully stops the HTTP server and the agent. It is safe to call
+// multiple times.
 func (s *Server) Stop(ctx context.Context) error {
 	var err error
 	s.stopOnce.Do(func() {
-		s.persistQueue()
+		// Ends the queue loop and the event streams, which the HTTP
+		// shutdown would otherwise wait for.
 		s.shutdown()
-		if s.native != nil {
-			if closeErr := s.native.Close(); closeErr != nil {
-				s.logger.Error("Failed to stop the agent", "error", closeErr)
-			}
-		}
-
-		// Clean up temporary directory
-		s.cleanupTempDir()
-
+		// No request can change the queue once the HTTP server and the
+		// agent have stopped, so the queue is stored after both.
 		if s.srv != nil {
 			if err = s.srv.Shutdown(ctx); errors.Is(err, http.ErrServerClosed) {
 				err = nil
 			}
 		}
+		if s.native != nil {
+			if closeErr := s.native.Close(); closeErr != nil {
+				s.logger.Error("Failed to stop the agent", "error", closeErr)
+			}
+		}
+		s.persistQueue()
+		s.cleanupUploadDir()
 	})
 	return err
 }
 
-// cleanupTempDir removes the temporary directory and all its contents
-func (s *Server) cleanupTempDir() {
+// cleanupUploadDir removes the upload directory and all its contents, unless
+// the conversation that refers to them is kept.
+func (s *Server) cleanupUploadDir() {
 	if s.keepUploads {
 		return
 	}
-	if err := os.RemoveAll(s.tempDir); err != nil {
-		s.logger.Error("Failed to clean up temporary directory", "tempDir", s.tempDir, "error", err)
+	if err := os.RemoveAll(s.uploadDir); err != nil {
+		s.logger.Error("Failed to clean up upload directory", "uploadDir", s.uploadDir, "error", err)
 	} else {
-		s.logger.Info("Cleaned up temporary directory", "tempDir", s.tempDir)
+		s.logger.Info("Cleaned up upload directory", "uploadDir", s.uploadDir)
 	}
 }
 

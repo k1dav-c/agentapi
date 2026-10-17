@@ -14,7 +14,6 @@ import (
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
-	"github.com/coder/agentapi/lib/statedb"
 )
 
 // nativeCallTimeout bounds a call into a native adapter made while the
@@ -57,7 +56,7 @@ func (o *nativeObserver) SessionName(name string) { o.emitter.SetSessionName(nam
 // AgentAPI's own. It is stored to resume the session after a restart.
 func (o *nativeObserver) SessionRef(ref string) {
 	if o.persister != nil {
-		o.persister.SetMeta(statedb.MetaSessionRef, ref)
+		o.persister.SetSessionRef(ref)
 	}
 }
 
@@ -72,49 +71,50 @@ func (s *Server) requireNative() error {
 }
 
 // createNativeMessageLocked delivers a user message over the native
-// transport according to mode. Caller holds s.mu.
+// transport according to mode. Steer and interrupt only apply to a running
+// turn; without one the message is sent as usual. Caller holds s.mu.
 func (s *Server) createNativeMessageLocked(content string, mode DispatchMode, resp *MessageResponse) error {
 	ctx, cancel := context.WithTimeout(s.shutdownCtx, nativeCallTimeout)
 	defer cancel()
 	input := native.InputFromText(content)
-	caps := s.native.Capabilities()
-	busy := !s.native.Idle()
 
 	switch mode {
 	case DispatchSteer:
-		if !caps.Steer {
-			return huma.Error400BadRequest("this agent can't add a message to a running turn")
+		if !s.native.TurnActive() {
+			break
 		}
-		if s.native.TurnActive() {
-			if err := s.native.Steer(ctx, input); err != nil {
-				if !errors.Is(err, native.ErrNoActiveTurn) {
-					return fmt.Errorf("failed to steer the agent: %w", err)
-				}
-				// The turn ended in the meantime; send a new turn below.
-			} else {
-				resp.Body.Ok = true
-				resp.Body.Steered = true
-				return nil
-			}
+		switch err := s.native.Steer(ctx, input); {
+		case err == nil:
+			resp.Body.Ok = true
+			resp.Body.Steered = true
+			return nil
+		case errors.Is(err, native.ErrUnsupported):
+			return huma.Error400BadRequest("this agent can't add a message to a running turn")
+		case errors.Is(err, native.ErrNoActiveTurn), errors.Is(err, native.ErrNotStarted):
+			// The turn, or its agent, ended in the meantime; send the
+			// message as usual.
+		default:
+			return fmt.Errorf("failed to steer the agent: %w", err)
 		}
 	case DispatchInterrupt:
-		if !caps.Interrupt {
+		if !s.native.TurnActive() {
+			break
+		}
+		switch err := s.native.Interrupt(ctx); {
+		case errors.Is(err, native.ErrUnsupported):
 			return huma.Error400BadRequest("this agent's turns can't be interrupted")
+		case err != nil && !errors.Is(err, native.ErrNoActiveTurn) && !errors.Is(err, native.ErrNotStarted):
+			return fmt.Errorf("failed to interrupt the agent: %w", err)
 		}
-		if s.native.TurnActive() {
-			if err := s.native.Interrupt(ctx); err != nil && !errors.Is(err, native.ErrNoActiveTurn) {
-				return fmt.Errorf("failed to interrupt the agent: %w", err)
-			}
-			// The message goes first once the interrupted turn has ended.
-			s.enqueueMessageLocked(content, true)
-			resp.Body.Ok = true
-			resp.Body.Queued = true
-			return nil
-		}
+		// The message goes first once the interrupted turn has ended.
+		s.enqueueMessageLocked(content, true)
+		resp.Body.Ok = true
+		resp.Body.Queued = true
+		return nil
 	case DispatchQueue:
 	}
 
-	if len(s.messageQueue) > 0 || busy {
+	if len(s.messageQueue) > 0 || !s.native.Idle() {
 		s.enqueueMessageLocked(content, false)
 		resp.Body.Ok = true
 		resp.Body.Queued = true
@@ -134,7 +134,9 @@ func (s *Server) createNativeMessageLocked(content string, mode DispatchMode, re
 }
 
 // dispatchNativeQueuedLocked sends the next queued message once the agent
-// is idle. Caller holds s.mu.
+// is idle. A message the agent refuses is tried again on later ticks, and
+// dropped after maxQueueDispatchAttempts, or at once when the agent didn't
+// answer in time. Caller holds s.mu.
 func (s *Server) dispatchNativeQueuedLocked() {
 	if len(s.messageQueue) == 0 || !s.native.Idle() {
 		return
@@ -146,13 +148,21 @@ func (s *Server) dispatchNativeQueuedLocked() {
 	if errors.Is(err, st.ErrMessageValidationChanging) {
 		return
 	}
-	s.messageQueue = s.messageQueue[1:]
 	if err != nil {
-		// The adapter refused the turn outright; resending would fail the
-		// same way.
-		s.logger.Error("Failed to send queued message", "queueId", next.ID, "error", err)
-		s.emitter.EmitError(fmt.Sprintf("Dropped queued message: %v", err), st.ErrorLevelError)
+		attempts, drop := s.queueSendFailedLocked(next, err)
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			// The agent didn't answer in time, so the message may have
+			// reached it; sending it again could run the task twice.
+			s.messageQueue = s.messageQueue[1:]
+			s.emitter.EmitError(fmt.Sprintf("Queued message %q may not have reached the agent, which didn't answer in time: %v", shortText(next.Content, 40), err), st.ErrorLevelError)
+		case drop:
+			s.messageQueue = s.messageQueue[1:]
+			s.emitter.EmitError(fmt.Sprintf("Dropped queued message %q after %d failed attempts: %v", shortText(next.Content, 40), attempts, err), st.ErrorLevelError)
+		}
+		return
 	}
+	s.messageQueue = s.messageQueue[1:]
 }
 
 func (s *Server) getRequests(_ context.Context, _ *struct{}) (*RequestsResponse, error) {
@@ -165,10 +175,8 @@ func (s *Server) getRequests(_ context.Context, _ *struct{}) (*RequestsResponse,
 }
 
 func (s *Server) getRequest(_ context.Context, input *RequestPath) (*RequestResponse, error) {
-	for _, r := range s.emitter.Requests() {
-		if r.ID == input.ID {
-			return &RequestResponse{Body: r}, nil
-		}
+	if r, ok := s.emitter.Request(input.ID); ok {
+		return &RequestResponse{Body: r}, nil
 	}
 	return nil, huma.Error404NotFound("request not found")
 }
@@ -192,7 +200,13 @@ func (s *Server) respondRequestLocked(ctx context.Context, id string, response n
 		return &RequestResponse{Body: state}, nil
 	case errors.Is(err, native.ErrRequestNotFound):
 		if state.ID == "" {
-			return nil, huma.Error404NotFound("request not found")
+			// Requests restored from the state database, and old ones the
+			// conversation no longer keeps, are only stored here.
+			stored, ok := s.emitter.Request(id)
+			if !ok {
+				return nil, huma.Error404NotFound("request not found")
+			}
+			state = stored
 		}
 		return nil, huma.Error409Conflict(fmt.Sprintf("request is %s, not pending", state.Status))
 	case errors.Is(err, native.ErrInvalidResponse):
@@ -226,7 +240,8 @@ func (s *Server) interrupt(ctx context.Context, _ *struct{}) (*InterruptResponse
 	switch err := s.native.Interrupt(ctx); {
 	case errors.Is(err, native.ErrUnsupported):
 		return nil, huma.Error400BadRequest("this agent's turns can't be interrupted")
-	case errors.Is(err, native.ErrNoActiveTurn):
+	case errors.Is(err, native.ErrNoActiveTurn), errors.Is(err, native.ErrNotStarted):
+		// No agent runs while it restarts or waits for a login.
 		return nil, huma.Error409Conflict("the agent is not working on a turn")
 	case err != nil:
 		return nil, fmt.Errorf("failed to interrupt the agent: %w", err)
@@ -253,7 +268,7 @@ func (s *Server) steerQueuedMessage(_ context.Context, input *SteerQueuedMessage
 	switch err := s.native.Steer(ctx, native.InputFromText(s.messageQueue[idx].Content)); {
 	case errors.Is(err, native.ErrUnsupported):
 		return nil, huma.Error400BadRequest("this agent can't add a message to a running turn")
-	case errors.Is(err, native.ErrNoActiveTurn):
+	case errors.Is(err, native.ErrNoActiveTurn), errors.Is(err, native.ErrNotStarted):
 		return nil, huma.Error409Conflict("the agent is not working on a turn; the message will be sent next")
 	case err != nil:
 		return nil, fmt.Errorf("failed to steer the agent: %w", err)
@@ -264,36 +279,12 @@ func (s *Server) steerQueuedMessage(_ context.Context, input *SteerQueuedMessage
 	return resp, nil
 }
 
-// reorderQueue puts the queued messages in the given order.
-func (s *Server) reorderQueue(_ context.Context, input *ReorderQueueRequest) (*QueueMutationResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	ids := input.Body.IDs
-	if len(ids) != len(s.messageQueue) {
-		return nil, huma.Error409Conflict("the queue changed; list every queued message once")
+// pendingNativeHandoff describes the oldest pending native request for the
+// human reply protocol. It reports false for other transports.
+func (s *Server) pendingNativeHandoff() (native.RequestState, string, bool) {
+	if s.native == nil {
+		return native.RequestState{}, "", false
 	}
-	byID := make(map[int]QueuedMessage, len(s.messageQueue))
-	for _, m := range s.messageQueue {
-		byID[m.ID] = m
-	}
-	reordered := make([]QueuedMessage, 0, len(ids))
-	for _, id := range ids {
-		m, ok := byID[id]
-		if !ok {
-			return nil, huma.Error409Conflict("the queue changed; list every queued message once")
-		}
-		delete(byID, id)
-		reordered = append(reordered, m)
-	}
-	s.messageQueue = reordered
-	resp := &QueueMutationResponse{}
-	resp.Body.Ok = true
-	return resp, nil
-}
-
-// pendingNativeHandoffLocked describes the oldest pending native request for
-// the human reply protocol. Caller holds s.mu.
-func (s *Server) pendingNativeHandoffLocked() (native.RequestState, string, bool) {
 	pending := s.native.PendingRequests()
 	if len(pending) == 0 {
 		return native.RequestState{}, "", false
@@ -374,9 +365,5 @@ func (s *Server) registerNativeRoutes() {
 	huma.Post(s.api, "/queue/{id}/steer", s.steerQueuedMessage, func(o *huma.Operation) {
 		o.Description = "Adds a queued message to the turn the agent is working on instead of waiting for it to end. Native transport only, for agents with the steer capability."
 		o.Errors = []int{400, 404, 409}
-	})
-	huma.Put(s.api, "/queue", s.reorderQueue, func(o *huma.Operation) {
-		o.Description = "Reorders the queued messages. The body must list every queued message id exactly once; otherwise 409 is returned."
-		o.Errors = []int{409}
 	})
 }

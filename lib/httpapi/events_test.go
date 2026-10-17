@@ -10,6 +10,7 @@ import (
 	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	mf "github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
@@ -383,4 +384,205 @@ func TestEventEmitterIncrementalReplay(t *testing.T) {
 	_, _, state = emitter.SubscribeSince(5, sync.Epoch)
 	require.True(t, state[0].Payload.(SessionSyncBody).Full)
 	require.Empty(t, kinds(state))
+}
+
+// recordingPersister records what an emitter stores.
+type recordingPersister struct {
+	messages  map[int]st.ConversationMessage
+	requests  map[string]native.RequestState
+	truncated []int
+	deleted   []string
+	epoch     string
+	seq       uint64
+}
+
+func newRecordingPersister() *recordingPersister {
+	return &recordingPersister{messages: map[int]st.ConversationMessage{}, requests: map[string]native.RequestState{}}
+}
+
+func (p *recordingPersister) PutMessage(msg st.ConversationMessage, _ uint64) {
+	p.messages[msg.Id] = msg
+}
+
+func (p *recordingPersister) TruncateMessages(fromID int) {
+	p.truncated = append(p.truncated, fromID)
+	for id := range p.messages {
+		if id >= fromID {
+			delete(p.messages, id)
+		}
+	}
+}
+
+func (p *recordingPersister) PutRichMessage(int, jsonlwatcher.RichMessage, uint64) {}
+func (p *recordingPersister) AppendSessionEvents([]jsonlwatcher.SessionEvent)      {}
+func (p *recordingPersister) PutRequest(state native.RequestState, _ uint64) {
+	p.requests[state.ID] = state
+}
+
+func (p *recordingPersister) DeleteRequest(id string) {
+	p.deleted = append(p.deleted, id)
+	delete(p.requests, id)
+}
+
+func (p *recordingPersister) SetSeq(epoch string, seq uint64) { p.epoch, p.seq = epoch, seq }
+func (p *recordingPersister) SetSessionName(string)           {}
+func (p *recordingPersister) SetSessionRef(string)            {}
+
+func (p *recordingPersister) Reset(epoch string) {
+	p.epoch = epoch
+	clear(p.messages)
+	clear(p.requests)
+}
+
+// drain returns the events waiting in ch.
+func drain(ch <-chan Event) []Event {
+	var events []Event
+	for {
+		select {
+		case event := <-ch:
+			events = append(events, event)
+		default:
+			return events
+		}
+	}
+}
+
+func TestEventEmitterRemovedMessageResyncs(t *testing.T) {
+	persister := newRecordingPersister()
+	emitter := NewEventEmitter(WithSubscriptionBufSize(20), WithPersister(persister))
+	now := time.Now()
+	msgs := []st.ConversationMessage{
+		{Id: 0, Role: st.ConversationRoleUser, Message: "one", Time: now},
+		{Id: 1, Role: st.ConversationRoleAgent, Message: "two", Time: now},
+		{Id: 2, Role: st.ConversationRoleUser, Message: "refused", Time: now},
+	}
+	emitter.EmitMessages(msgs)
+	emitter.EmitRichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant"})
+	emitter.EmitRequest(native.RequestState{Request: native.Request{ID: "r1"}, Status: native.RequestStatusPending})
+	_, _, state := emitter.Subscribe()
+	cached := state[0].Payload.(SessionSyncBody)
+	_, ch, _ := emitter.Subscribe()
+
+	// The agent refused the last message, and it was taken back. Updates
+	// can't say so: connected clients get the full state under a new epoch.
+	emitter.EmitMessages(msgs[:2])
+	events := drain(ch)
+	require.NotEmpty(t, events)
+	sync, ok := events[0].Payload.(SessionSyncBody)
+	require.True(t, ok, "the full state starts with a session_sync")
+	assert.True(t, sync.Full)
+	assert.NotEqual(t, cached.Epoch, sync.Epoch)
+	assert.Equal(t, uint64(5), sync.Seq, "the replay ends with the newest change")
+	var replayed []string
+	for _, event := range events[1:] {
+		switch p := event.Payload.(type) {
+		case MessageUpdateBody:
+			replayed = append(replayed, fmt.Sprintf("message %d", p.Id))
+		case RichMessageUpdateBody:
+			replayed = append(replayed, "rich "+p.MessageID)
+		case RequestUpdateBody:
+			replayed = append(replayed, "request "+p.ID)
+		default:
+			t.Errorf("unexpected %s event in the replay", event.Type)
+		}
+	}
+	assert.Equal(t, []string{"message 0", "message 1", "rich m1", "request r1"}, replayed)
+	assert.Equal(t, []int{2}, persister.truncated)
+	assert.Equal(t, sync.Epoch, persister.epoch, "the new epoch is stored")
+
+	// A client that cached the message and reconnects gets the full state.
+	_, _, state = emitter.SubscribeSince(cached.Seq, cached.Epoch)
+	assert.True(t, state[0].Payload.(SessionSyncBody).Full)
+
+	// A message removed from the middle is gone from the stored rows too,
+	// and the ones after it are stored again.
+	msgs = append(msgs[:2:2], st.ConversationMessage{Id: 3, Role: st.ConversationRoleAgent, Message: "three", Time: now})
+	emitter.EmitMessages(msgs)
+	require.Len(t, drain(ch), 1, "an added message is an update")
+	emitter.EmitMessages([]st.ConversationMessage{msgs[0], msgs[2]})
+	assert.Equal(t, []int{2, 1}, persister.truncated)
+	assert.Equal(t, map[int]st.ConversationMessage{0: msgs[0], 3: msgs[2]}, persister.messages)
+	events = drain(ch)
+	require.NotEmpty(t, events)
+	assert.True(t, events[0].Payload.(SessionSyncBody).Full)
+}
+
+func TestEventEmitterRequests(t *testing.T) {
+	persister := newRecordingPersister()
+	emitter := NewEventEmitter(WithPersister(persister))
+	request := func(id string, status native.RequestStatus) native.RequestState {
+		return native.RequestState{Request: native.Request{ID: id, Kind: native.RequestKindApproval}, Status: status}
+	}
+	emitter.EmitRequest(request("waiting", native.RequestStatusPending))
+	for i := range native.MaxClosedRequests + 2 {
+		id := fmt.Sprintf("r%d", i)
+		emitter.EmitRequest(request(id, native.RequestStatusPending))
+		emitter.EmitRequest(request(id, native.RequestStatusResolved))
+	}
+	assert.Equal(t, 1, emitter.StatusSnapshot().PendingRequests)
+
+	// The oldest closed requests are dropped; pending ones are kept.
+	requests := emitter.Requests()
+	require.Len(t, requests, native.MaxClosedRequests+1)
+	assert.Equal(t, "waiting", requests[0].ID)
+	assert.Equal(t, "r2", requests[1].ID)
+	assert.Equal(t, []string{"r0", "r1"}, persister.deleted)
+	assert.Len(t, persister.requests, native.MaxClosedRequests+1)
+	_, ok := emitter.Request("r1")
+	assert.False(t, ok)
+	got, ok := emitter.Request("r2")
+	require.True(t, ok)
+	assert.Equal(t, native.RequestStatusResolved, got.Status)
+
+	// A request closed after a reset belongs to the conversation that was
+	// cleared; it doesn't come back.
+	emitter.Reset()
+	seq := emitter.seq
+	emitter.EmitRequest(request("waiting", native.RequestStatusExpired))
+	assert.Empty(t, emitter.Requests())
+	assert.Equal(t, seq, emitter.seq)
+	assert.NotContains(t, persister.requests, "waiting")
+}
+
+func TestEventEmitterRestore(t *testing.T) {
+	emitter := NewEventEmitter()
+	now := time.Now()
+	emitter.Restore(EmitterState{
+		Epoch:         "restored",
+		Seq:           6,
+		Messages:      []st.ConversationMessage{{Id: 0, Role: st.ConversationRoleUser, Message: "one", Time: now}, {Id: 1, Role: st.ConversationRoleAgent, Message: "two", Time: now}},
+		MessageSeqs:   []uint64{1, 4},
+		RichMessages:  []jsonlwatcher.RichMessage{{MessageID: "m1", Role: "assistant"}},
+		RichSeqs:      []uint64{5},
+		SessionEvents: []jsonlwatcher.SessionEvent{{EventID: 1}, {EventID: 7}},
+		Requests:      []native.RequestState{{Request: native.Request{ID: "r1"}, Status: native.RequestStatusPending}},
+		RequestSeqs:   []uint64{6},
+		SessionName:   "Greeting",
+	})
+	assert.Equal(t, "restored", emitter.Epoch())
+	status := emitter.StatusSnapshot()
+	assert.Equal(t, "Greeting", status.SessionName)
+	assert.Equal(t, 1, status.PendingRequests)
+
+	// A client that has everything resumes without a replay; one that
+	// missed changes gets only those.
+	_, _, state := emitter.SubscribeSince(6, "restored")
+	assert.Equal(t, SessionSyncBody{Epoch: "restored", Seq: 6}, state[0].Payload)
+	_, _, state = emitter.SubscribeSince(3, "restored")
+	var replayed []uint64
+	for _, event := range state[1:] {
+		if seq := eventSeq(event); seq != 0 {
+			replayed = append(replayed, seq)
+		}
+	}
+	assert.Equal(t, []uint64{4, 5, 6}, replayed)
+
+	// New changes continue the restored numbering.
+	emitter.EmitSessionEvents([]jsonlwatcher.SessionEvent{{Kind: "text"}})
+	assert.Equal(t, 8, emitter.SessionEvents()[2].EventID)
+	_, ch, _ := emitter.Subscribe()
+	emitter.EmitMessages(append(emitter.messages, st.ConversationMessage{Id: 2, Role: st.ConversationRoleUser, Message: "three", Time: now}))
+	events := drain(ch)
+	require.Len(t, events, 1, "the restored messages are not sent again")
+	assert.Equal(t, MessageUpdateBody{Id: 2, Role: st.ConversationRoleUser, Message: "three", Time: now, Seq: 7}, events[0].Payload)
 }
