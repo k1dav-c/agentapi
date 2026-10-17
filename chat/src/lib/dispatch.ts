@@ -17,6 +17,9 @@ export interface Capabilities {
   interrupt: boolean;
   resume: boolean;
   images: boolean;
+  // The permission mode, model and effort can change (GET/PUT /settings).
+  // Missing from servers that predate it.
+  settings?: boolean;
 }
 
 export interface DispatchContext {

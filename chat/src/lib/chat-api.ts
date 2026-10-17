@@ -60,6 +60,38 @@ export interface FileDiff {
   truncated: boolean;
 }
 
+export type PermissionMode = "bypass" | "auto" | "ask" | "plan";
+
+// The agent's session settings (native transport). A setting the agent
+// doesn't report is missing; permission_mode is missing while the agent
+// runs in a mode of its own (e.g. Claude Code's acceptEdits).
+export interface AgentSettings {
+  permission_mode?: PermissionMode;
+  model?: string;
+  effort?: string;
+}
+
+export interface ModelOption {
+  id: string;
+  name: string;
+  description?: string;
+  // From the least effort to the most; missing when the model has no
+  // choice of effort.
+  efforts?: string[];
+  default_effort?: string;
+}
+
+export interface SettingOptions {
+  permission_modes: PermissionMode[];
+  models: ModelOption[];
+}
+
+// GET and PUT /settings.
+export interface SettingsResponse {
+  settings: AgentSettings;
+  options: SettingOptions;
+}
+
 interface APIErrorDetail {
   message: string;
 }
@@ -126,6 +158,15 @@ export function createChatAPI(baseURL: string) {
   return {
     async deleteMessages(): Promise<void> {
       await jsonRequest("/messages", {method: "DELETE", fallback: "Failed to delete messages and restart the agent"});
+    },
+
+    getSettings(): Promise<SettingsResponse> {
+      return jsonRequest("/settings", {fallback: "Failed to load the agent's settings"});
+    },
+
+    // Changes the settings set in change and leaves the others.
+    updateSettings(change: AgentSettings): Promise<SettingsResponse> {
+      return jsonRequest("/settings", {method: "PUT", body: change, fallback: "Failed to change the agent's settings"});
     },
 
     getMCP(): Promise<MCPConfig> {

@@ -22,6 +22,7 @@ import {AuthDialog} from "@/components/auth-dialog";
 import {
   createChatAPI,
   httpURL,
+  type AgentSettings,
   type FileContent,
   type FileDiff,
   type MCPCheckResult,
@@ -144,6 +145,8 @@ interface StatusChangeEvent {
   // from the requests it holds (pending_requests is ignored).
   capabilities?: Capabilities;
   login_required?: unknown;
+  // Native agents with the settings capability.
+  settings?: AgentSettings;
 }
 
 interface ErrorEventData {
@@ -223,6 +226,13 @@ interface ChatContextValue {
   pendingRequestCount: number;
   // Set while the agent waits for someone to log it in (native transport).
   loginRequired: LoginRequired | null;
+  // The permission mode, model and effort of a native agent that can change
+  // them (capabilities.settings); null otherwise.
+  agentSettings: AgentSettings | null;
+  // GET /settings: the settings and the values they can take.
+  getSettings: ReturnType<typeof createChatAPI>["getSettings"];
+  // PUT /settings: changes the settings set in change.
+  updateSettings: (change: AgentSettings) => ReturnType<ReturnType<typeof createChatAPI>["updateSettings"]>;
   // The agent is starting (lifecycle "starting"): there is no turn yet, and
   // while it finds no login AgentAPI starts it again by itself.
   agentStarting: boolean;
@@ -358,6 +368,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [sessionName, setSessionName] = useState("");
   const [transport, setTransport] = useState<Transport>("pty");
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [agentSettings, setAgentSettings] = useState<AgentSettings | null>(null);
   const [loginRequired, setLoginRequiredState] = useState<LoginRequired | null>(null);
   // The login as the event handlers see it, to skip errors the card shows.
   const loginRef = useRef<LoginRequired | null>(null);
@@ -757,6 +768,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         setSessionName(data.session_name ?? "");
         setTerminalPrompt(data.terminal_prompt ?? "");
         setCapabilities(data.capabilities ?? null);
+        setAgentSettings(data.settings ?? null);
         setLoginRequired(parseLoginRequired(data.login_required));
         setLifecycle(data.lifecycle ?? "");
         // The transport decides whether the terminal (TTY mode, raw keys)
@@ -1148,6 +1160,14 @@ export function ChatProvider({ children }: PropsWithChildren) {
         capabilities,
         pendingRequestCount,
         loginRequired,
+        agentSettings,
+        getSettings: api.getSettings,
+        updateSettings: async (change: AgentSettings) => {
+          const result = await api.updateSettings(change);
+          // Shown at once; the status_change event that follows says the same.
+          setAgentSettings(result.settings);
+          return result;
+        },
         agentStarting,
         agentState,
         dispatch,

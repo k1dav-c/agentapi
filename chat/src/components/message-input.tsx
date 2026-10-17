@@ -26,6 +26,7 @@ import {
 import type {SendResult, ServerStatus} from "./chat-provider";
 import TextareaAutosize from "react-textarea-autosize";
 import {useChat} from "./chat-provider";
+import {SessionSettings} from "./session-settings";
 import {DragDrop} from "./drag-drop";
 import {ImageThumb, useObjectURL} from "./image-preview";
 import {filesToUploadFromPaste, isImageFile, pastedFileName, uploadedImageURL} from "@/lib/uploads";
@@ -812,6 +813,8 @@ export default function MessageInput({
               )}
 
               <div className="flex items-center justify-end gap-3 border-t bg-muted/25 px-3 py-2">
+
+                <SessionSettings className="mr-auto" />
 
                 <div className="flex min-w-0 flex-row items-center gap-2">
                     <Tooltip>
