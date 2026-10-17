@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
-	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/procutil"
 )
 
 // loginHint tells the user how to log Claude Code in.
@@ -23,39 +23,12 @@ var loginHint = native.LoginRequired{
 // authStatusTimeout bounds `claude auth status`.
 const authStatusTimeout = 10 * time.Second
 
-// AuthStatus runs `claude auth status --json` and returns its stdout;
-// Config.AuthStatus overrides it.
-type AuthStatus func(ctx context.Context, cmd Command) ([]byte, error)
-
 // maxAuthStatusOutput bounds what is read from `auth status`.
 const maxAuthStatusOutput = 64 << 10
 
-func runAuthStatus(ctx context.Context, c Command) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, c.Program, c.Args...)
-	cmd.Env = c.Env
-	cmd.Dir = c.Dir
-	setProcessGroup(cmd)
-	cmd.Cancel = func() error { return signalGroup(cmd, true) }
-	cmd.WaitDelay = time.Second
-	var out bytes.Buffer
-	cmd.Stdout = &limitedWriter{w: &out, n: maxAuthStatusOutput}
-	err := cmd.Run()
-	return out.Bytes(), err
-}
-
-// limitedWriter keeps the first n bytes and drops the rest.
-type limitedWriter struct {
-	w io.Writer
-	n int
-}
-
-func (l *limitedWriter) Write(p []byte) (int, error) {
-	keep := min(len(p), l.n)
-	if keep > 0 {
-		_, _ = l.w.Write(p[:keep])
-		l.n -= keep
-	}
-	return len(p), nil
+// runAuthStatus runs `claude auth status --json` and returns its stdout.
+func runAuthStatus(ctx context.Context, c procutil.Command) ([]byte, error) {
+	return procutil.Output(ctx, c, maxAuthStatusOutput)
 }
 
 // parseAuthStatus reads loggedIn from `claude auth status --json`. ok is
@@ -91,7 +64,7 @@ func (a *Adapter) checkLogin(ctx context.Context, env []string) error {
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, authStatusTimeout)
 	defer cancel()
-	out, err := a.cfg.AuthStatus(checkCtx, Command{
+	out, err := a.cfg.AuthStatus(checkCtx, procutil.Command{
 		Program: a.cfg.Program,
 		Args:    []string{"auth", "status", "--json"},
 		Env:     env,
@@ -112,43 +85,14 @@ func (a *Adapter) checkLogin(ctx context.Context, env []string) error {
 	return &native.LoginRequiredError{Login: loginHint}
 }
 
-// authErrorTexts are (lower-case) parts of the errors Claude Code reports
-// when its login or API key doesn't work.
-var authErrorTexts = []string{
-	"not logged in",
-	"please run /login",
-	"invalid api key",
-	"oauth token has expired",
-	"oauth token revoked",
-	"login expired",
-	"failed to authenticate",
-	"authentication_error",
-	"authentication_failed",
-}
-
-func isAuthErrorText(text string) bool {
-	text = strings.ToLower(text)
-	for _, part := range authErrorTexts {
-		if strings.Contains(text, part) {
-			return true
-		}
-	}
-	return false
-}
-
 // authFailure reports whether a failed result is a login problem: an
 // HTTP 401 from the API, or one of the CLI's login errors.
 func authFailure(f *frame) bool {
 	if strings.TrimSpace(string(f.APIErrorStatus)) == "401" {
 		return true
 	}
-	if isAuthErrorText(stringField(f.Result)) {
+	if native.IsAuthError(stringField(f.Result)) {
 		return true
 	}
-	for _, e := range f.Errors {
-		if isAuthErrorText(e) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(f.Errors, native.IsAuthError)
 }

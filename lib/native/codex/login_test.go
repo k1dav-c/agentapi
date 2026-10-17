@@ -82,7 +82,6 @@ func TestLoginLostMidTurn(t *testing.T) {
 }
 
 func TestIsAuthError(t *testing.T) {
-	text := func(s string) *string { return &s }
 	for _, tc := range []struct {
 		name string
 		err  turnError
@@ -91,7 +90,7 @@ func TestIsAuthError(t *testing.T) {
 		{"unauthorized code", turnError{Message: "x", CodexErrorInfo: json.RawMessage(`"unauthorized"`)}, true},
 		{"401 on a stream", turnError{Message: "Reconnecting", CodexErrorInfo: json.RawMessage(`{"responseStreamConnectionFailed":{"httpStatusCode":401}}`)}, true},
 		{"expired refresh token", turnError{Message: "Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again."}, true},
-		{"401 in the details", turnError{Message: "request failed", AdditionalDetails: text("unexpected status 401 Unauthorized")}, true},
+		{"401 in the details", turnError{Message: "request failed", AdditionalDetails: "unexpected status 401 Unauthorized"}, true},
 		{"usage limit", turnError{Message: "You've hit your usage limit.", CodexErrorInfo: json.RawMessage(`"usageLimitExceeded"`)}, false},
 		{"server error", turnError{Message: "unexpected status 500", CodexErrorInfo: json.RawMessage(`{"httpConnectionFailed":{"httpStatusCode":500}}`)}, false},
 		{"no status", turnError{Message: "stream closed", CodexErrorInfo: json.RawMessage(`{"httpConnectionFailed":{"httpStatusCode":null}}`)}, false},

@@ -3,6 +3,7 @@ package codex
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,20 +12,23 @@ import (
 	st "github.com/coder/agentapi/lib/screentracker"
 )
 
+// endedTurns is how many ended turns the read loop remembers.
+const endedTurns = 16
+
 // loopState is the state of the read loop. Only the loop goroutine uses it.
 type loopState struct {
 	a        *Adapter
 	threadID string
 	model    string
 	turn     *turnState
-	// ended holds the turns that ended, so late notifications don't start
-	// them again.
-	ended map[string]bool
+	// ended lists the turns that ended last, so late notifications don't
+	// start them again.
+	ended []string
 	// dirty lists messages with changes not sent yet.
 	dirty []*msgState
 }
 
-func (s *loopState) now() time.Time { return s.a.cfg.Now() }
+func (s *loopState) now() time.Time { return s.a.cfg.Clock.Now() }
 
 func (s *loopState) sink() native.Sink { return s.a.sink }
 
@@ -39,6 +43,7 @@ func (s *loopState) threadOpened(resumed bool) func(json.RawMessage, *rpcError) 
 		}
 		var resp threadStartResponse
 		if err := json.Unmarshal(result, &resp); err != nil || resp.Thread.ID == "" {
+			// Without a thread, the start fails (see openThread).
 			s.a.log.Warn("Unexpected thread response from codex app-server", "error", err)
 			return
 		}
@@ -48,14 +53,10 @@ func (s *loopState) threadOpened(resumed bool) func(json.RawMessage, *rpcError) 
 		s.a.mu.Lock()
 		s.a.threadID = th.ID
 		s.a.mu.Unlock()
-		path := ""
-		if th.Path != nil {
-			path = *th.Path
-		}
-		s.a.log.Info("Codex thread ready", "thread", th.ID, "resumed", resumed, "model", resp.Model, "rollout", path)
+		s.a.log.Info("Codex thread ready", "thread", th.ID, "resumed", resumed, "model", resp.Model, "rollout", th.Path)
 		s.sink().SessionRef(th.ID)
-		if th.Name != nil && *th.Name != "" {
-			s.sink().SessionName(*th.Name)
+		if th.Name != "" {
+			s.sink().SessionName(th.Name)
 		}
 		cwd := th.CWD
 		if cwd == "" {
@@ -69,11 +70,7 @@ func (s *loopState) threadOpened(resumed bool) func(json.RawMessage, *rpcError) 
 		if resumed {
 			verb = "resumed"
 		}
-		content := fmt.Sprintf("session %s: %s (codex %s)", verb, cwd, th.CLIVersion)
-		s.sink().SessionEvents([]jsonlwatcher.SessionEvent{{
-			Kind: "system", Role: strPtr("system"), EventTime: eventTime, Content: &content,
-			SessionID: optString(th.ID), SourceID: optString(th.ID),
-		}})
+		s.systemEvent(fmt.Sprintf("session %s: %s (codex %s)", verb, cwd, th.CLIVersion), eventTime, th.ID)
 	}
 }
 
@@ -85,7 +82,7 @@ func (s *loopState) ours(threadID string) bool {
 
 // beginTurn makes turnID the active turn, if it isn't already.
 func (s *loopState) beginTurn(turnID string) *turnState {
-	if s.ended[turnID] {
+	if slices.Contains(s.ended, turnID) {
 		return nil
 	}
 	if s.turn != nil {
@@ -111,7 +108,7 @@ func (s *loopState) turnFor(turnID string) *turnState {
 	if s.turn != nil && (turnID == "" || s.turn.id == turnID) {
 		return s.turn
 	}
-	if turnID == "" || s.ended[turnID] {
+	if turnID == "" || slices.Contains(s.ended, turnID) {
 		return nil
 	}
 	return s.beginTurn(turnID)
@@ -181,6 +178,10 @@ func (s *loopState) flush(force bool) {
 func (s *loopState) nextWake() time.Time {
 	var next time.Time
 	for _, m := range s.dirty {
+		if !m.dirty {
+			// Sent since (urgently); flush drops it.
+			continue
+		}
 		if t := m.lastEmit.Add(s.a.cfg.SnapshotInterval); next.IsZero() || t.Before(next) {
 			next = t
 		}
@@ -203,157 +204,53 @@ func (s *loopState) wake() {
 
 // --- notifications ---
 
+// notification handles a notification from app-server.
 func (s *loopState) notification(msg rpcMessage) {
 	switch msg.Method {
 	case "turn/started":
-		var n turnNotification
-		if decode(msg, &n) && s.ours(n.ThreadID) && n.Turn.ID != "" {
-			s.beginTurn(n.Turn.ID)
-		}
+		handle(msg, s.turnStarted)
 	case "turn/completed":
-		var n turnNotification
-		if decode(msg, &n) && s.ours(n.ThreadID) && s.turn != nil && s.turn.id == n.Turn.ID {
-			s.completeTurn(n.Turn)
-		}
+		handle(msg, s.turnCompleted)
 	case "item/started", "item/completed":
-		var n itemNotification
-		if !decode(msg, &n) || !s.ours(n.ThreadID) {
-			return
-		}
-		t := s.turnFor(n.TurnID)
-		if t == nil {
-			return
-		}
-		at := msTime(n.StartedAtMs)
-		if msg.Method == "item/completed" {
-			at = msTime(n.CompletedAtMs)
-		}
-		if at.IsZero() {
-			at = msTime(msg.EmittedAtMs)
-		}
-		if msg.Method == "item/started" {
-			s.itemStarted(t, &n.Item, at)
-		} else {
-			s.itemCompleted(t, &n.Item, at)
-		}
+		handle(msg, func(n itemNotification) { s.itemNotified(msg, n) })
 	case "item/agentMessage/delta", "item/plan/delta":
-		if it, d := s.deltaItem(msg); it != nil && it.blk != nil {
-			it.blk.Text += d.Delta
-			s.touch(&it.seg.msgState, false)
-		}
+		handle(msg, s.textDelta)
 	case "item/reasoning/summaryPartAdded", "item/reasoning/summaryTextDelta":
-		if it, d := s.deltaItem(msg); it != nil && it.blk != nil {
-			for len(it.blk.summary) <= d.SummaryIndex {
-				it.blk.summary = append(it.blk.summary, "")
-			}
-			it.blk.summary[d.SummaryIndex] += d.Delta
-			it.blk.Thinking = joinReasoning(it.blk.summary, it.blk.content)
-			s.touch(&it.seg.msgState, false)
-		}
+		handle(msg, func(d deltaNotification) { s.reasoningDelta(d, true) })
 	case "item/reasoning/textDelta":
-		if it, d := s.deltaItem(msg); it != nil && it.blk != nil {
-			for len(it.blk.content) <= d.ContentIndex {
-				it.blk.content = append(it.blk.content, "")
-			}
-			it.blk.content[d.ContentIndex] += d.Delta
-			it.blk.Thinking = joinReasoning(it.blk.summary, it.blk.content)
-			s.touch(&it.seg.msgState, false)
-		}
+		handle(msg, func(d deltaNotification) { s.reasoningDelta(d, false) })
 	case "item/commandExecution/outputDelta":
-		// The deltas miss output (the start of a command, all of a short
-		// one), so they are only a live preview; the completed item has
-		// the whole output.
-		if it, d := s.deltaItem(msg); it != nil && it.blk != nil && !it.done {
-			it.output.WriteString(d.Delta)
-			isError := false
-			it.resultBlock = jsonlwatcher.RichContentBlock{
-				Type: "tool_result", ToolUseID: it.id, Text: it.output.String(), Status: "running", IsError: &isError,
-			}
-			s.touch(s.resultMsg(it), false)
-		}
+		handle(msg, s.outputDelta)
 	case "thread/tokenUsage/updated":
-		var n threadTokenUsageUpdatedNotification
-		if decode(msg, &n) && s.ours(n.ThreadID) && s.turn != nil && s.turn.id == n.TurnID {
-			seg := s.turn.current()
-			seg.usage = &jsonlwatcher.Usage{
-				InputTokens:          n.TokenUsage.Last.InputTokens,
-				OutputTokens:         n.TokenUsage.Last.OutputTokens,
-				CacheReadInputTokens: n.TokenUsage.Last.CachedInputTokens,
-			}
-			s.touch(&seg.msgState, false)
-		}
+		handle(msg, s.tokenUsageUpdated)
 	case "turn/plan/updated":
-		var n turnPlanUpdatedNotification
-		if decode(msg, &n) && s.ours(n.ThreadID) {
-			if t := s.turnFor(n.TurnID); t != nil {
-				s.planUpdated(t, n)
-			}
-		}
+		handle(msg, s.planUpdated)
 	case "error":
-		var n errorNotification
-		if !decode(msg, &n) || !s.ours(n.ThreadID) {
-			return
-		}
-		text := turnErrorText(&n.Error)
-		switch {
-		case n.WillRetry:
-			s.warn(text)
-		case s.turn != nil && (n.TurnID == "" || n.TurnID == s.turn.id):
-			s.turn.failure = text
-			if isAuthError(&n.Error) {
-				s.reportLogin(s.turn)
-			}
-		default:
-			if isAuthError(&n.Error) {
-				s.reportLogin(nil)
-			}
-			s.sink().Error(text, st.ErrorLevelError)
-		}
+		handle(msg, s.errorReported)
 	case "thread/name/updated":
-		var n threadNameUpdatedNotification
-		if decode(msg, &n) && s.ours(n.ThreadID) && n.ThreadName != nil {
-			s.sink().SessionName(*n.ThreadName)
-		}
+		handle(msg, s.threadNameUpdated)
 	case "thread/status/changed":
-		var n threadStatusChangedNotification
-		if decode(msg, &n) && s.ours(n.ThreadID) && n.Status.Type == "systemError" {
-			s.sink().Error("Codex reported a system error for the thread", st.ErrorLevelError)
-		}
+		handle(msg, s.threadStatusChanged)
 	case "serverRequest/resolved":
-		var n serverRequestResolvedNotification
-		if decode(msg, &n) {
-			s.requestResolved(string(n.RequestID))
-		}
+		handle(msg, func(n serverRequestResolvedNotification) { s.requestResolved(string(n.RequestID)) })
 	case "warning":
-		var n warningNotification
-		if decode(msg, &n) && (n.ThreadID == nil || s.ours(*n.ThreadID)) && n.Message != "" {
-			s.warn(n.Message)
-		}
+		handle(msg, s.warningReported)
 	case "configWarning":
-		var n configWarningNotification
-		if decode(msg, &n) && n.Summary != "" {
-			text := n.Summary
-			if n.Details != nil && *n.Details != "" {
-				text += "\n" + *n.Details
-			}
-			s.warn(text)
-		}
+		handle(msg, s.configWarningReported)
 	case "mcpServer/startupStatus/updated":
-		var n mcpServerStatusUpdatedNotification
-		if decode(msg, &n) && s.ours(n.ThreadID) && (n.Status == "failed" || (n.Error != nil && *n.Error != "")) {
-			reason := n.Status
-			if n.Error != nil && *n.Error != "" {
-				reason = *n.Error
-			}
-			s.warn(fmt.Sprintf("MCP server %s failed to start: %s", n.Name, reason))
-		}
+		handle(msg, s.mcpServerStatusUpdated)
 	case "model/rerouted":
-		var n modelReroutedNotification
-		if decode(msg, &n) && s.ours(n.ThreadID) && n.ToModel != "" {
-			s.model = n.ToModel
-		}
+		handle(msg, s.modelRerouted)
 	default:
 		s.a.log.Debug("Codex notification", "method", msg.Method)
+	}
+}
+
+// handle passes the params of msg to f, unless they don't decode.
+func handle[T any](msg rpcMessage, f func(T)) {
+	var params T
+	if decode(msg, &params) {
+		f(params)
 	}
 }
 
@@ -361,21 +258,183 @@ func decode(msg rpcMessage, v any) bool {
 	return len(msg.Params) > 0 && json.Unmarshal(msg.Params, v) == nil
 }
 
+func (s *loopState) turnStarted(n turnNotification) {
+	if s.ours(n.ThreadID) && n.Turn.ID != "" {
+		s.beginTurn(n.Turn.ID)
+	}
+}
+
+func (s *loopState) turnCompleted(n turnNotification) {
+	if s.ours(n.ThreadID) && s.turn != nil && s.turn.id == n.Turn.ID {
+		s.completeTurn(n.Turn)
+	}
+}
+
+// itemNotified handles item/started and item/completed.
+func (s *loopState) itemNotified(msg rpcMessage, n itemNotification) {
+	if !s.ours(n.ThreadID) {
+		return
+	}
+	t := s.turnFor(n.TurnID)
+	if t == nil {
+		return
+	}
+	at := msTime(n.StartedAtMs)
+	if msg.Method == "item/completed" {
+		at = msTime(n.CompletedAtMs)
+	}
+	if at.IsZero() {
+		at = msTime(msg.EmittedAtMs)
+	}
+	if msg.Method == "item/started" {
+		s.itemStarted(t, &n.Item, at)
+	} else {
+		s.itemCompleted(t, &n.Item, at)
+	}
+}
+
+// deltaItem returns the open item with a block a delta notification is
+// for.
+func (s *loopState) deltaItem(d deltaNotification) *itemState {
+	if !s.ours(d.ThreadID) || s.turn == nil || (d.TurnID != "" && d.TurnID != s.turn.id) {
+		return nil
+	}
+	if it := s.turn.items[d.ItemID]; it != nil && it.blk != nil {
+		return it
+	}
+	return nil
+}
+
+// textDelta streams the text of an agent message or a plan.
+func (s *loopState) textDelta(d deltaNotification) {
+	if it := s.deltaItem(d); it != nil {
+		it.blk.Text += d.Delta
+		s.touch(&it.seg.msgState, false)
+	}
+}
+
+// reasoningDelta streams a part of a reasoning item's summary or of its
+// raw content.
+func (s *loopState) reasoningDelta(d deltaNotification, summary bool) {
+	it := s.deltaItem(d)
+	if it == nil {
+		return
+	}
+	parts, i := &it.blk.content, d.ContentIndex
+	if summary {
+		parts, i = &it.blk.summary, d.SummaryIndex
+	}
+	if i < 0 {
+		return
+	}
+	for len(*parts) <= i {
+		*parts = append(*parts, "")
+	}
+	(*parts)[i] += d.Delta
+	it.blk.Thinking = joinReasoning(it.blk.summary, it.blk.content)
+	s.touch(&it.seg.msgState, false)
+}
+
+// outputDelta previews a command's output. The deltas miss output (the
+// start of a command, all of a short one), so they are only a live
+// preview; the completed item has the whole output.
+func (s *loopState) outputDelta(d deltaNotification) {
+	if it := s.deltaItem(d); it != nil && !it.done {
+		it.output.WriteString(d.Delta)
+		it.resultBlock = toolResultBlock(it.id, it.output.String(), "running")
+		s.touch(s.resultMsg(it), false)
+	}
+}
+
+func (s *loopState) tokenUsageUpdated(n threadTokenUsageUpdatedNotification) {
+	if !s.ours(n.ThreadID) || s.turn == nil || s.turn.id != n.TurnID {
+		return
+	}
+	seg := s.turn.current()
+	seg.usage = &jsonlwatcher.Usage{
+		InputTokens:          n.TokenUsage.Last.InputTokens,
+		OutputTokens:         n.TokenUsage.Last.OutputTokens,
+		CacheReadInputTokens: n.TokenUsage.Last.CachedInputTokens,
+	}
+	s.touch(&seg.msgState, false)
+}
+
+// errorReported handles an error: one app-server retries after is a
+// warning, one of the turn is reported when the turn ends (as the turn's
+// error if it fails).
+func (s *loopState) errorReported(n errorNotification) {
+	if !s.ours(n.ThreadID) {
+		return
+	}
+	text := turnErrorText(&n.Error)
+	switch {
+	case n.WillRetry:
+		s.warn(text)
+	case s.turn != nil && (n.TurnID == "" || n.TurnID == s.turn.id):
+		s.turn.lastError = text
+		if isAuthError(&n.Error) {
+			s.reportLogin(s.turn)
+		}
+	default:
+		if isAuthError(&n.Error) {
+			s.reportLogin(nil)
+		}
+		s.sink().Error(text, st.ErrorLevelError)
+	}
+}
+
 func turnErrorText(e *turnError) string {
 	text := e.Message
-	if e.AdditionalDetails != nil && *e.AdditionalDetails != "" {
-		text += "\n" + *e.AdditionalDetails
+	if e.AdditionalDetails != "" {
+		text += "\n" + e.AdditionalDetails
 	}
 	return text
 }
 
-// deltaItem returns the open item a delta notification is for.
-func (s *loopState) deltaItem(msg rpcMessage) (*itemState, deltaNotification) {
-	var d deltaNotification
-	if !decode(msg, &d) || !s.ours(d.ThreadID) || s.turn == nil || (d.TurnID != "" && d.TurnID != s.turn.id) {
-		return nil, d
+func (s *loopState) threadNameUpdated(n threadNameUpdatedNotification) {
+	if s.ours(n.ThreadID) && n.ThreadName != nil {
+		s.sink().SessionName(*n.ThreadName)
 	}
-	return s.turn.items[d.ItemID], d
+}
+
+func (s *loopState) threadStatusChanged(n threadStatusChangedNotification) {
+	if s.ours(n.ThreadID) && n.Status.Type == "systemError" {
+		s.sink().Error("Codex reported a system error for the thread", st.ErrorLevelError)
+	}
+}
+
+func (s *loopState) warningReported(n warningNotification) {
+	if s.ours(n.ThreadID) && n.Message != "" {
+		s.warn(n.Message)
+	}
+}
+
+func (s *loopState) configWarningReported(n configWarningNotification) {
+	if n.Summary == "" {
+		return
+	}
+	text := n.Summary
+	if n.Details != "" {
+		text += "\n" + n.Details
+	}
+	s.warn(text)
+}
+
+func (s *loopState) mcpServerStatusUpdated(n mcpServerStatusUpdatedNotification) {
+	if !s.ours(n.ThreadID) || (n.Status != "failed" && n.Error == "") {
+		return
+	}
+	reason := n.Status
+	if n.Error != "" {
+		reason = n.Error
+	}
+	s.warn(fmt.Sprintf("MCP server %s failed to start: %s", n.Name, reason))
+}
+
+func (s *loopState) modelRerouted(n modelReroutedNotification) {
+	if s.ours(n.ThreadID) && n.ToModel != "" {
+		s.model = n.ToModel
+	}
 }
 
 // --- items ---
@@ -392,13 +451,13 @@ func (s *loopState) itemStarted(t *turnState, it *threadItem, at time.Time) {
 			s.newSegment(t, fmt.Sprintf("%s-%d", t.id, len(t.segments)))
 		}
 		t.promptSeen = true
-		s.addItem(t, it, nil, at)
+		s.addItem(t, it, nil)
 	case "agentMessage", "plan":
-		s.addItem(t, it, &block{RichContentBlock: jsonlwatcher.RichContentBlock{Type: "text", Text: it.Text}}, at)
+		s.addItem(t, it, &block{RichContentBlock: jsonlwatcher.RichContentBlock{Type: "text", Text: it.Text}})
 	case "reasoning":
 		b := &block{RichContentBlock: jsonlwatcher.RichContentBlock{Type: "thinking"}, summary: it.Summary, content: it.reasoningContent()}
 		b.Thinking = joinReasoning(b.summary, b.content)
-		s.addItem(t, it, b, at)
+		s.addItem(t, it, b)
 	default:
 		name, input, ok := toolUse(it)
 		if !ok {
@@ -407,15 +466,15 @@ func (s *loopState) itemStarted(t *turnState, it *threadItem, at time.Time) {
 		}
 		state := s.addItem(t, it, &block{RichContentBlock: jsonlwatcher.RichContentBlock{
 			Type: "tool_use", ToolUseID: it.ID, ToolName: name, ToolInput: input, Status: "running",
-		}}, at)
+		}})
 		s.toolCallEvent(state.blk, at, it.ID)
 	}
 }
 
 // addItem records an item and adds its block to the current segment.
-func (s *loopState) addItem(t *turnState, it *threadItem, b *block, at time.Time) *itemState {
+func (s *loopState) addItem(t *turnState, it *threadItem, b *block) *itemState {
 	seg := t.current()
-	state := &itemState{id: it.ID, kind: it.Type, seg: seg, blk: b, startedAt: at, changes: it.Changes, server: it.Server}
+	state := &itemState{id: it.ID, kind: it.Type, seg: seg, blk: b, changes: it.Changes, server: it.Server}
 	t.items[it.ID] = state
 	t.order = append(t.order, state)
 	if b != nil {
@@ -471,8 +530,7 @@ func (s *loopState) itemCompleted(t *turnState, it *threadItem, at time.Time) {
 			state.blk.ToolName, state.blk.ToolInput = name, input
 			state.changes = it.Changes
 		}
-		result := toolResult(it)
-		s.finishTool(state, result, at)
+		s.finishTool(state, toolResult(it), at)
 	}
 }
 
@@ -509,28 +567,32 @@ func (s *loopState) resultMsg(state *itemState) *msgState {
 
 // planUpdated shows the todo list (update_plan) as one tool call per
 // turn, replaced on every update.
-func (s *loopState) planUpdated(t *turnState, n turnPlanUpdatedNotification) {
+func (s *loopState) planUpdated(n turnPlanUpdatedNotification) {
+	if !s.ours(n.ThreadID) {
+		return
+	}
+	t := s.turnFor(n.TurnID)
+	if t == nil {
+		return
+	}
 	id := "plan-" + t.id
 	in := map[string]any{"plan": n.Plan}
 	if n.Plan == nil {
 		in["plan"] = []turnPlanStep{}
 	}
-	if n.Explanation != nil && *n.Explanation != "" {
-		in["explanation"] = *n.Explanation
+	if n.Explanation != "" {
+		in["explanation"] = n.Explanation
 	}
 	input := mustJSON(in)
 	state := t.items[id]
 	if state == nil {
 		state = s.addItem(t, &threadItem{ID: id, Type: "plan/update"}, &block{RichContentBlock: jsonlwatcher.RichContentBlock{
 			Type: "tool_use", ToolUseID: id, ToolName: "update_plan", ToolInput: input,
-		}}, s.now())
+		}})
 	}
 	state.blk.ToolInput = input
 	s.toolCallEvent(state.blk, s.now(), id)
-	isError := false
-	s.finishTool(state, jsonlwatcher.RichContentBlock{
-		Type: "tool_result", ToolUseID: id, Text: "Plan updated", Status: "completed", IsError: &isError,
-	}, s.now())
+	s.finishTool(state, toolResultBlock(id, "Plan updated", "completed"), s.now())
 }
 
 // completeTurn ends the active turn: it closes the items app-server left
@@ -541,22 +603,27 @@ func (s *loopState) completeTurn(tr turn) {
 	if t == nil {
 		return
 	}
+	// From here on Steer and Interrupt see no turn; reading the interrupt
+	// mark in the same step means Interrupt can't add one after it.
 	s.a.mu.Lock()
 	interrupting := s.a.interrupting[t.id]
 	delete(s.a.interrupting, t.id)
+	if s.a.activeTurn == t.id {
+		s.a.activeTurn = ""
+	}
 	s.a.mu.Unlock()
 
 	status := tr.Status
 	if interrupting && status == "completed" {
 		status = "interrupted"
 	}
-	result := native.TurnResult{}
+	result := native.TurnResult{StopReason: native.StopReasonEndTurn}
 	switch status {
 	case "interrupted":
-		result.StopReason = "interrupted"
+		result.StopReason = native.StopReasonInterrupted
 	case "failed":
-		result.StopReason = "error"
-		result.Error = t.failure
+		result.StopReason = native.StopReasonError
+		result.Error = t.lastError
 		if tr.Error != nil {
 			result.Error = turnErrorText(tr.Error)
 			if isAuthError(tr.Error) {
@@ -566,13 +633,11 @@ func (s *loopState) completeTurn(tr turn) {
 		if result.Error == "" {
 			result.Error = "The Codex turn failed"
 		}
-	default:
-		result.StopReason = "end_turn"
 	}
 	s.closeOpenItems(t, status)
-	s.closeTurnRequests(t)
+	s.closeTurnRequests()
 
-	last := t.current()
+	last := t.lastVisible()
 	last.stop = result.StopReason
 	s.emit(&last.msgState)
 	s.flush(true)
@@ -582,17 +647,16 @@ func (s *loopState) completeTurn(tr turn) {
 	case "failed":
 		s.systemEvent("turn failed: "+result.Error, s.now(), t.id)
 	}
+	if t.lastError != "" && t.lastError != result.Error {
+		// The turn went on after the error, or failed with another one.
+		s.sink().Error(t.lastError, st.ErrorLevelError)
+	}
 
 	s.turn = nil
-	if s.ended == nil {
-		s.ended = map[string]bool{}
+	s.ended = append(s.ended, t.id)
+	if len(s.ended) > endedTurns {
+		s.ended = s.ended[1:]
 	}
-	s.ended[t.id] = true
-	s.a.mu.Lock()
-	if s.a.activeTurn == t.id {
-		s.a.activeTurn = ""
-	}
-	s.a.mu.Unlock()
 	s.sink().TurnCompleted(result)
 }
 
@@ -614,10 +678,7 @@ func (s *loopState) closeOpenItems(t *turnState, status string) {
 		if state.blk == nil || state.blk.Type != "tool_use" {
 			continue
 		}
-		isError := true
-		s.finishTool(state, jsonlwatcher.RichContentBlock{
-			Type: "tool_result", ToolUseID: state.id, Text: reason, Status: "failed", IsError: &isError,
-		}, s.now())
+		s.finishTool(state, toolResultBlock(state.id, reason, "failed"), s.now())
 	}
 }
 
@@ -627,13 +688,15 @@ func (s *loopState) closeOpenItems(t *turnState, status string) {
 func (s *loopState) exited() {
 	if t := s.turn; t != nil {
 		s.closeOpenItems(t, "failed")
-		t.current().stop = "error"
-		s.emit(&t.current().msgState)
+		last := t.lastVisible()
+		last.stop = native.StopReasonError
+		s.emit(&last.msgState)
 		s.turn = nil
 	}
 	s.flush(true)
 	s.a.mu.Lock()
 	s.a.activeTurn = ""
+	clear(s.a.interrupting)
 	clear(s.a.requests)
 	s.a.mu.Unlock()
 }
@@ -648,10 +711,7 @@ func (s *loopState) textEvent(kind, role, text string, at time.Time, sourceID st
 }
 
 func (s *loopState) systemEvent(text string, at time.Time, sourceID string) {
-	s.sink().SessionEvents([]jsonlwatcher.SessionEvent{{
-		Kind: "system", Role: strPtr("system"), EventTime: at, Content: &text,
-		SessionID: optString(s.threadID), SourceID: optString(sourceID),
-	}})
+	s.textEvent("system", "system", text, at, sourceID)
 }
 
 func (s *loopState) toolCallEvent(b *block, at time.Time, sourceID string) {

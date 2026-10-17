@@ -17,10 +17,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/procutil"
 	st "github.com/coder/agentapi/lib/screentracker"
 )
 
@@ -114,12 +116,15 @@ func newFakePi(t *testing.T) *fakePi {
 	return f
 }
 
-func (f *fakePi) spawn(_ string, args []string, _ string, env []string, _ *slog.Logger) (*transport, error) {
+func (f *fakePi) start(c procutil.Command) (procutil.Process, error) {
 	f.mu.Lock()
-	f.argv, f.env = args, env
+	f.argv, f.env = c.Args, c.Env
 	f.mu.Unlock()
-	return &transport{stdin: f.stdinW, stdout: f.stdoutR, proc: f}, nil
+	return f, nil
 }
+
+func (f *fakePi) Stdin() io.WriteCloser { return f.stdinW }
+func (f *fakePi) Stdout() io.Reader     { return f.stdoutR }
 
 func (f *fakePi) readCommands() {
 	reader := bufio.NewReader(f.stdinR)
@@ -196,8 +201,12 @@ func (f *fakePi) nextCmd() map[string]any {
 	}
 }
 
-// recSink records what the adapter reports.
+// recSink records what the adapter reports and fails on concurrent calls,
+// which the Sink contract forbids.
 type recSink struct {
+	t      *testing.T
+	active atomic.Int32
+
 	mu       sync.Mutex
 	log      []string
 	results  []native.TurnResult
@@ -212,9 +221,20 @@ type recSink struct {
 	logins   []native.LoginRequired
 }
 
+func newRecSink(t *testing.T) *recSink { return &recSink{t: t} }
+
+// enter checks that no other sink call is under way.
+func (s *recSink) enter() func() {
+	if s.active.Add(1) != 1 {
+		s.t.Error("sink called concurrently")
+	}
+	return func() { s.active.Add(-1) }
+}
+
 func (s *recSink) add(entry string) { s.log = append(s.log, entry) }
 
 func (s *recSink) TurnStarted() {
+	defer s.enter()()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.started++
@@ -222,6 +242,7 @@ func (s *recSink) TurnStarted() {
 }
 
 func (s *recSink) TurnCompleted(r native.TurnResult) {
+	defer s.enter()()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.results = append(s.results, r)
@@ -229,18 +250,21 @@ func (s *recSink) TurnCompleted(r native.TurnResult) {
 }
 
 func (s *recSink) RichMessage(m jsonlwatcher.RichMessage) {
+	defer s.enter()()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rich = append(s.rich, m)
 }
 
 func (s *recSink) SessionEvents(e []jsonlwatcher.SessionEvent) {
+	defer s.enter()()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.events = append(s.events, e...)
 }
 
 func (s *recSink) RequestOpened(r native.Request) {
+	defer s.enter()()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.requests = append(s.requests, r)
@@ -248,6 +272,7 @@ func (s *recSink) RequestOpened(r native.Request) {
 }
 
 func (s *recSink) RequestClosed(id string) {
+	defer s.enter()()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = append(s.closed, id)
@@ -255,18 +280,21 @@ func (s *recSink) RequestClosed(id string) {
 }
 
 func (s *recSink) SessionName(n string) {
+	defer s.enter()()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.names = append(s.names, n)
 }
 
 func (s *recSink) SessionRef(r string) {
+	defer s.enter()()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.refs = append(s.refs, r)
 }
 
 func (s *recSink) LoginRequired(l native.LoginRequired) {
+	defer s.enter()()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.logins = append(s.logins, l)
@@ -274,6 +302,7 @@ func (s *recSink) LoginRequired(l native.LoginRequired) {
 }
 
 func (s *recSink) Error(m string, _ st.ErrorLevel) {
+	defer s.enter()()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.errors = append(s.errors, m)
@@ -329,11 +358,12 @@ func (s *recSink) turnResults() []native.TurnResult {
 
 // harness replays a fixture against the adapter.
 type harness struct {
-	t    *testing.T
-	ctx  context.Context
-	pi   *fakePi
-	a    *Adapter
-	sink *recSink
+	t     *testing.T
+	ctx   context.Context
+	pi    *fakePi
+	a     *Adapter
+	sink  *recSink
+	clock *quartz.Mock
 
 	written atomic.Int64
 	handled atomic.Int64
@@ -354,7 +384,7 @@ type harness struct {
 func newHarness(t *testing.T, cfg Config, resumeRef string, opts ...func(*harness)) *harness {
 	t.Helper()
 	h := &harness{
-		t: t, ctx: context.Background(), pi: newFakePi(t), sink: &recSink{},
+		t: t, ctx: context.Background(), pi: newFakePi(t), sink: newRecSink(t), clock: quartz.NewMock(t),
 		startErr: make(chan error, 1),
 		drive:    map[string]func(map[string]any) bool{},
 		calls:    map[string]chan error{},
@@ -362,10 +392,10 @@ func newHarness(t *testing.T, cfg Config, resumeRef string, opts ...func(*harnes
 	if cfg.Logger == nil && !testing.Verbose() {
 		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	a, err := newAdapter(cfg, resumeRef, h.pi.spawn)
-	require.NoError(t, err)
+	a := newAdapter(cfg, cfg.Args, resumeRef, h.pi.start)
 	a.lineHandled = func() { h.handled.Add(1) }
 	a.abortGrace, a.stdinGrace, a.termGrace = time.Second, time.Second, time.Second
+	a.clock = h.clock
 	h.a = a
 	for _, opt := range opts {
 		opt(h)
@@ -400,8 +430,41 @@ func (h *harness) writeLine(m map[string]any) {
 	h.t.Helper()
 	b, err := json.Marshal(m)
 	require.NoError(h.t, err)
+	h.write(string(b))
+}
+
+// prompt calls StartTurn with text, recorded as call id, and returns the
+// prompt command Pi got.
+func (h *harness) prompt(id, text string) map[string]any {
+	h.t.Helper()
+	h.call(id, func() error { return h.a.StartTurn(h.ctx, native.Input{Text: text}) })
+	cmd := h.pi.nextCmd()
+	require.Equal(h.t, "prompt", cmd["type"])
+	return cmd
+}
+
+// answer writes Pi's response to cmd, with data as JSON unless it is
+// empty.
+func (h *harness) answer(cmd map[string]any, data string) {
+	h.t.Helper()
+	m := map[string]any{"id": cmd["id"], "type": "response", "command": cmd["type"], "success": true}
+	if data != "" {
+		m["data"] = json.RawMessage(data)
+	}
+	h.writeLine(m)
+}
+
+// refuse writes Pi's error response to cmd.
+func (h *harness) refuse(cmd map[string]any, message string) {
+	h.t.Helper()
+	h.writeLine(map[string]any{"id": cmd["id"], "type": "response", "command": cmd["type"], "success": false, "error": message})
+}
+
+// write writes a record given as JSON.
+func (h *harness) write(record string) {
+	h.t.Helper()
 	h.written.Add(1)
-	_, err = h.pi.stdoutW.Write(append(b, '\n'))
+	_, err := h.pi.stdoutW.Write([]byte(record + "\n"))
 	require.NoError(h.t, err)
 }
 
@@ -409,6 +472,16 @@ func (h *harness) writeLine(m map[string]any) {
 func (h *harness) settle() {
 	h.t.Helper()
 	require.Eventually(h.t, func() bool { return h.handled.Load() >= h.written.Load() }, 5*time.Second, time.Millisecond)
+}
+
+// advance moves the clock on by d and waits until the event loop ran what
+// the timers that fired posted to it.
+func (h *harness) advance(d time.Duration) {
+	h.t.Helper()
+	ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
+	defer cancel()
+	h.clock.Advance(d).MustWait(ctx)
+	require.True(h.t, h.a.runOnLoop(func() {}), "the event loop stopped")
 }
 
 // call runs an adapter call in the background and records its result.

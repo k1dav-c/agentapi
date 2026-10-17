@@ -21,6 +21,7 @@ import (
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/procutil"
 	st "github.com/coder/agentapi/lib/screentracker"
 )
 
@@ -56,6 +57,7 @@ func newFakeProc() *fakeProc {
 func (p *fakeProc) Stdin() io.WriteCloser { return p.stdinW }
 func (p *fakeProc) Stdout() io.Reader     { return p.stdoutR }
 func (p *fakeProc) Wait() error           { <-p.done; return p.err }
+func (p *fakeProc) StderrTail() string    { return "" }
 
 func (p *fakeProc) Terminate() error {
 	p.terminated.Add(1)
@@ -289,7 +291,7 @@ func newHarness(t *testing.T, resumeRef string, args []string, opts ...harnessOp
 		Args:    args,
 		CWD:     "/work/scratch",
 		Env:     []string{"PATH=/usr/bin", "CODEX_THREAD_ID=parent"},
-		Launch:  func(LaunchSpec) (Process, error) { return proc, nil },
+		Launch:  func(procutil.Command) (procutil.Process, error) { return proc, nil },
 		Logger:  slog.New(slog.DiscardHandler),
 	}
 	for _, o := range opts {
@@ -618,8 +620,11 @@ func (h *harness) replayOut(raw json.RawMessage, idMap map[string]json.RawMessag
 		h.a.mu.Unlock()
 		resp := responseFromResult(h.t, msg.Result)
 		if !live {
-			// A late reply: the turn ended and app-server dropped the
-			// request.
+			// A late reply: the turn ended, app-server dropped the request
+			// and the adapter declined it (see closeTurnRequests).
+			declined := h.expectSent("")
+			require.JSONEq(h.t, string(msg.ID), string(declined.ID))
+			require.JSONEq(h.t, `{"decision":"decline"}`, string(declined.Result))
 			require.ErrorIs(h.t, h.a.Respond(context.Background(), id, resp), native.ErrRequestNotFound)
 			h.expectNothingSent()
 			return
@@ -633,7 +638,7 @@ func (h *harness) replayOut(raw json.RawMessage, idMap map[string]json.RawMessag
 	}
 }
 
-// sentMethod returns the params of the first message the adapter wrote
+// sentParams returns the params of the first message the adapter wrote
 // with method.
 func (h *harness) sentParams(method string) json.RawMessage {
 	h.allMu.Lock()

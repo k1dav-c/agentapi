@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/procutil"
 )
 
 func blockTypes(msg jsonlwatcher.RichMessage) []string {
@@ -93,16 +94,15 @@ func TestSimpleTextWithReasoning(t *testing.T) {
 }
 
 func TestEnvironmentAndCommandLine(t *testing.T) {
-	closeGrace = 10 * time.Millisecond
-	t.Cleanup(func() { closeGrace = 3 * time.Second })
-	var spec LaunchSpec
+	var spec procutil.Command
 	proc := newFakeProc()
 	factory, err := NewFactory(Config{
-		Program: "/usr/bin/codex",
-		Args:    []string{"-m", "gpt-6-luna", "-c", `model_reasoning_effort="low"`, "--enable", "foo", "-a", "untrusted", "-s", "danger-full-access", "--no-alt-screen"},
-		CWD:     "/work",
-		Env:     []string{"PATH=/bin", "CODEX_THREAD_ID=x", "CODEX_SANDBOX=seatbelt", "CODEX_HOME=/h"},
-		Launch:  func(s LaunchSpec) (Process, error) { spec = s; return proc, nil },
+		Program:     "/usr/bin/codex",
+		Args:        []string{"-m", "gpt-6-luna", "-c", `model_reasoning_effort="low"`, "--enable", "foo", "-a", "untrusted", "-s", "danger-full-access", "--no-alt-screen"},
+		CWD:         "/work",
+		Env:         []string{"PATH=/bin", "CODEX_THREAD_ID=x", "CODEX_SANDBOX=seatbelt", "CODEX_HOME=/h", "CLAUDECODE=1"},
+		Launch:      func(c procutil.Command) (procutil.Process, error) { spec = c; return proc, nil },
+		StopTimeout: 10 * time.Millisecond,
 	})
 	require.NoError(t, err)
 	adapter, err := factory("")
@@ -200,7 +200,7 @@ func TestUnansweredApprovalThenInterrupt(t *testing.T) {
 	require.Len(t, s.opened, 1)
 	assert.Equal(t, []native.TurnResult{{StopReason: "interrupted"}}, s.completions)
 	// The conversation expires the request when the turn ends; the
-	// adapter refused the late reply (see replayOut).
+	// adapter declined it then and refused the late reply (see replayOut).
 	assert.Empty(t, h.a.requests)
 
 	msg, _ := h.rec.message("01a143b4-9c0b-7021-a76f-53bf2628f666", "assistant")
@@ -360,9 +360,8 @@ func TestImageInput(t *testing.T) {
 	msg, _ := h.rec.message("01a143b6-19a6-74c1-925e-0a3d76641000", "assistant")
 	assert.Equal(t, "Red", msg.Content[0].Text)
 
-	a := newAdapter(Config{CWD: "/work"}, launchOptions{}, "")
 	assert.Equal(t, []userInput{{Type: "text", Text: "see"}, {Type: "localImage", Path: "/work/shot.png"}},
-		a.inputItems(native.Input{Text: "see", Images: []native.Image{{Path: "shot.png"}}}))
+		inputItems(native.Input{Text: "see", Images: []native.Image{{Path: "/work/shot.png"}}}))
 }
 
 func TestMCPToolApproval(t *testing.T) {

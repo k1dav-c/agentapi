@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/quartz"
+
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 )
 
@@ -17,17 +19,20 @@ type streamMessage struct {
 	timestamp int64
 	model     string
 	blocks    map[int]*streamBlock
-	// emitted: a snapshot was sent.
-	emitted bool
 }
 
 type streamBlock struct {
 	kind     string // "text", "thinking" or "toolCall"
-	text     string
+	text     strings.Builder
 	toolID   string
 	toolName string
-	args     strings.Builder
 	input    json.RawMessage
+}
+
+// replace sets the text of a block to its final content.
+func (b *streamBlock) replace(text string) {
+	b.text.Reset()
+	b.text.WriteString(text)
 }
 
 // snapshot is the message as streamed so far, in the shape the Pi parser
@@ -48,24 +53,24 @@ func (s *streamMessage) snapshot() jsonlwatcher.RichMessage {
 		b := s.blocks[i]
 		switch b.kind {
 		case "text":
-			if strings.TrimSpace(b.text) != "" {
-				msg.Content = append(msg.Content, jsonlwatcher.RichContentBlock{Type: "text", Text: b.text})
+			if text := b.text.String(); strings.TrimSpace(text) != "" {
+				msg.Content = append(msg.Content, jsonlwatcher.RichContentBlock{Type: "text", Text: text})
 			}
 		case "thinking":
-			if strings.TrimSpace(b.text) != "" {
-				msg.Content = append(msg.Content, jsonlwatcher.RichContentBlock{Type: "thinking", Thinking: b.text})
+			if text := b.text.String(); strings.TrimSpace(text) != "" {
+				msg.Content = append(msg.Content, jsonlwatcher.RichContentBlock{Type: "thinking", Thinking: text})
 			}
 		case "toolCall":
-			block := jsonlwatcher.RichContentBlock{Type: "tool_use", ToolUseID: b.toolID, ToolName: b.toolName}
-			if len(b.input) > 0 {
-				block.ToolInput = b.input
-			} else if raw := b.args.String(); json.Valid([]byte(raw)) {
-				block.ToolInput = json.RawMessage(raw)
-			}
-			msg.Content = append(msg.Content, block)
+			msg.Content = append(msg.Content, jsonlwatcher.RichContentBlock{Type: "tool_use", ToolUseID: b.toolID, ToolName: b.toolName, ToolInput: b.input})
 		}
 	}
 	return msg
+}
+
+// build returns the snapshot to send, unless it has no content yet.
+func (s *streamMessage) build() (jsonlwatcher.RichMessage, bool) {
+	snap := s.snapshot()
+	return snap, len(snap.Content) > 0
 }
 
 func (s *streamMessage) block(i int, kind string) *streamBlock {
@@ -77,28 +82,29 @@ func (s *streamMessage) block(i int, kind string) *streamBlock {
 	return b
 }
 
-// apply adds a message_update event to the message.
+// apply adds a message_update event to the message. It reports whether
+// the snapshot changed.
 func (s *streamMessage) apply(ev *streamEvent) bool {
 	switch ev.Type {
 	case "text_start":
 		s.block(ev.ContentIndex, "text")
 	case "text_delta":
-		s.block(ev.ContentIndex, "text").text += ev.Delta
+		s.block(ev.ContentIndex, "text").text.WriteString(ev.Delta)
 	case "text_end":
-		s.block(ev.ContentIndex, "text").text = ev.Content
+		s.block(ev.ContentIndex, "text").replace(ev.Content)
 	case "thinking_start":
 		s.block(ev.ContentIndex, "thinking")
 	case "thinking_delta":
-		s.block(ev.ContentIndex, "thinking").text += ev.Delta
+		s.block(ev.ContentIndex, "thinking").text.WriteString(ev.Delta)
 	case "thinking_end":
 		// The summary deltas can differ from the final text.
-		s.block(ev.ContentIndex, "thinking").text = ev.Content
+		s.block(ev.ContentIndex, "thinking").replace(ev.Content)
 	case "toolcall_start":
 		b := s.block(ev.ContentIndex, "toolCall")
 		b.toolID, b.toolName = ev.ID, ev.ToolName
-	case "toolcall_delta":
-		s.block(ev.ContentIndex, "toolCall").args.WriteString(ev.Delta)
 	case "toolcall_end":
+		// The deltas before it are partial JSON; the input shows once it
+		// is complete.
 		b := s.block(ev.ContentIndex, "toolCall")
 		if ev.ToolCall != nil {
 			b.toolID, b.toolName, b.input = ev.ToolCall.ID, ev.ToolCall.Name, ev.ToolCall.Arguments
@@ -139,10 +145,7 @@ func (a *Adapter) handleMessageEvent(kind string, ev messageEvent) {
 		if s == nil || ev.AssistantMessageEvent == nil || !s.apply(ev.AssistantMessageEvent) {
 			return
 		}
-		if snap := s.snapshot(); len(snap.Content) > 0 {
-			s.emitted = true
-			a.emitThrottled(snap)
-		}
+		a.emitThrottled(s.id, s.build)
 	case "message_end":
 		a.handleMessageEnd(msg, ev.Message)
 	}
@@ -160,7 +163,7 @@ func (a *Adapter) handleMessageEnd(msg agentMessage, raw json.RawMessage) {
 	switch msg.Role {
 	case "assistant":
 		if s := a.loop.stream; s != nil && s.timestamp == msg.Timestamp {
-			id, streamed = s.id, s.emitted
+			id, streamed = s.id, a.sent(s.id)
 		} else {
 			id = a.loop.uniqueID(messageID(msg))
 		}
@@ -179,44 +182,45 @@ func (a *Adapter) handleMessageEnd(msg agentMessage, raw json.RawMessage) {
 		}
 	case "toolResult":
 		id = messageID(msg)
-		streamed = a.loop.throttles[id] != nil
+		streamed = a.sent(id)
 	default:
 		id = a.loop.uniqueID(messageID(msg))
 	}
 
+	rich, err := a.parsePiMessage(id, raw)
+	if err != nil {
+		a.logger.Warn("Failed to parse a Pi message", "error", err)
+		return
+	}
+	events := a.loop.events.MessageEvents(rich)
+	if msg.Role == "toolResult" {
+		setToolResultImages(rich, msg.Content)
+	}
+	if len(rich) == 0 && streamed {
+		// Replace what was streamed, e.g. whitespace-only text. Only an
+		// assistant message can be streamed and come out empty.
+		rich = []jsonlwatcher.RichMessage{{MessageID: id, Role: "assistant", Content: []jsonlwatcher.RichContentBlock{}, Timestamp: msTime(msg.Timestamp)}}
+	}
+	for _, m := range rich {
+		a.emitFinal(m)
+	}
+	if len(events) > 0 {
+		a.loop.sink.SessionEvents(events)
+	}
+}
+
+// parsePiMessage turns a Pi message into rich messages with jsonlwatcher's
+// Pi parser, as the line of Pi's session file that holds it.
+func (a *Adapter) parsePiMessage(id string, raw json.RawMessage) ([]jsonlwatcher.RichMessage, error) {
 	line, err := json.Marshal(struct {
 		Type    string          `json:"type"`
 		ID      string          `json:"id"`
 		Message json.RawMessage `json:"message"`
 	}{"message", id, raw})
 	if err != nil {
-		return
+		return nil, err
 	}
-	rich, err := a.loop.parser.ParseLine(line)
-	if err != nil {
-		a.logger.Warn("Failed to parse a Pi message", "error", err)
-		return
-	}
-	if msg.Role == "toolResult" {
-		a.addToolResultDetails(rich, msg)
-	}
-	if len(rich) == 0 && streamed {
-		// Replace what was streamed, e.g. whitespace-only text.
-		rich = []jsonlwatcher.RichMessage{{MessageID: id, Role: roleOf(msg), Content: []jsonlwatcher.RichContentBlock{}, Timestamp: msTime(msg.Timestamp)}}
-	}
-	for _, m := range rich {
-		a.emitFinal(m)
-	}
-	if events, err := a.loop.events.ParseSessionEvents(line); err == nil && len(events) > 0 {
-		a.loop.sink.SessionEvents(events)
-	}
-}
-
-func roleOf(msg agentMessage) string {
-	if msg.Role == "assistant" {
-		return "assistant"
-	}
-	return "user"
+	return a.loop.parser.ParseLine(line)
 }
 
 // withoutError drops errorMessage from a message.
@@ -234,22 +238,18 @@ func withoutError(raw json.RawMessage) json.RawMessage {
 	return out
 }
 
-// addToolResultDetails adds what the Pi parser leaves out of a tool
-// result: images (an image file the agent read) and a bash exit code.
-func (a *Adapter) addToolResultDetails(rich []jsonlwatcher.RichMessage, msg agentMessage) {
-	images := contentImages(msg.Content)
-	code, hasCode := a.loop.exitCodes[msg.ToolCallID]
-	delete(a.loop.exitCodes, msg.ToolCallID)
+// setToolResultImages adds the images of a tool result's content (an
+// image file the agent read), which the Pi parser leaves out, to its
+// tool_result blocks.
+func setToolResultImages(rich []jsonlwatcher.RichMessage, content json.RawMessage) {
+	images := contentImages(content)
+	if len(images) == 0 {
+		return
+	}
 	for i := range rich {
 		for j := range rich[i].Content {
-			block := &rich[i].Content[j]
-			if block.Type != "tool_result" {
-				continue
-			}
-			block.Images = images
-			if hasCode && code != 0 && block.Status != "failed" {
-				isError := true
-				block.Status, block.IsError = "failed", &isError
+			if block := &rich[i].Content[j]; block.Type == "tool_result" {
+				block.Images = images
 			}
 		}
 	}
@@ -284,7 +284,9 @@ func (a *Adapter) handleToolEvent(kind string, ev toolEvent) {
 			return
 		}
 		// Bash output so far; each update holds all of it.
-		a.emitThrottled(a.toolResultMessage(ev.ToolCallID, ev.ToolName, ev.PartialResult.Content, false, "running"))
+		a.emitThrottled(resultID(ev.ToolCallID), func() (jsonlwatcher.RichMessage, bool) {
+			return a.toolResultMessage(ev.ToolCallID, ev.ToolName, ev.PartialResult.Content, false, "running"), true
+		})
 	case "tool_execution_end":
 		for i, t := range a.loop.tools {
 			if t.id == ev.ToolCallID {
@@ -295,11 +297,10 @@ func (a *Adapter) handleToolEvent(kind string, ev toolEvent) {
 		if ev.Result == nil {
 			return
 		}
-		if sc := ev.Result.StructuredContent; sc != nil && sc.ExitCode != nil {
-			a.loop.exitCodes[ev.ToolCallID] = *sc.ExitCode
-		}
 		// The tool result message follows; show the result already.
-		a.emitThrottled(a.toolResultMessage(ev.ToolCallID, ev.ToolName, ev.Result.Content, ev.IsError || ev.Result.IsError, ""))
+		a.emitThrottled(resultID(ev.ToolCallID), func() (jsonlwatcher.RichMessage, bool) {
+			return a.toolResultMessage(ev.ToolCallID, ev.ToolName, ev.Result.Content, ev.IsError || ev.Result.IsError, ""), true
+		})
 	}
 }
 
@@ -311,28 +312,29 @@ func (a *Adapter) toolResultMessage(callID, toolName string, content json.RawMes
 	}
 	raw, _ := json.Marshal(map[string]any{
 		"role": "toolResult", "toolCallId": callID, "toolName": toolName,
-		"content": content, "isError": isError, "timestamp": time.Now().UnixMilli(),
+		"content": content, "isError": isError, "timestamp": a.clock.Now().UnixMilli(),
 	})
-	line, _ := json.Marshal(map[string]any{"type": "message", "id": "result-" + callID, "message": json.RawMessage(raw)})
-	rich, _ := a.loop.parser.ParseLine(line)
+	rich, _ := a.parsePiMessage(resultID(callID), raw)
 	if len(rich) == 0 {
-		return jsonlwatcher.RichMessage{MessageID: "result-" + callID, Role: "user"}
+		return jsonlwatcher.RichMessage{MessageID: resultID(callID), Role: "user"}
 	}
+	setToolResultImages(rich, content)
 	msg := rich[0]
-	for i := range msg.Content {
-		msg.Content[i].Images = contentImages(content)
-		if status != "" {
+	if status != "" {
+		for i := range msg.Content {
 			msg.Content[i].Status = status
 		}
 	}
 	return msg
 }
 
-// throttle limits how often one message is sent while it changes.
+// throttle limits how often one message is sent while it changes. A
+// message has one from its first snapshot to its final state.
 type throttle struct {
-	last    time.Time
-	pending *jsonlwatcher.RichMessage
-	timer   *time.Timer
+	last time.Time
+	// pending builds the latest state, not sent yet.
+	pending func() (jsonlwatcher.RichMessage, bool)
+	timer   *quartz.Timer
 }
 
 func (t *throttle) stop() {
@@ -342,30 +344,55 @@ func (t *throttle) stop() {
 	}
 }
 
-// emitThrottled sends a snapshot of a message that is still changing, at
-// most once per interval; the latest snapshot is sent when the interval
-// ends.
-func (a *Adapter) emitThrottled(msg jsonlwatcher.RichMessage) {
-	t := a.loop.throttles[msg.MessageID]
+// emitThrottled sends message id, which is still changing, at most once
+// per interval; its latest state is sent when the interval ends. build
+// makes the message when it is sent, so a fast stream isn't copied for
+// every change; it returns false while there is nothing to show.
+func (a *Adapter) emitThrottled(id string, build func() (jsonlwatcher.RichMessage, bool)) {
+	t := a.loop.throttles[id]
 	if t == nil {
+		// The first snapshot goes out at once.
 		t = &throttle{}
-		a.loop.throttles[msg.MessageID] = t
-	}
-	now := time.Now()
-	if t.timer == nil && now.Sub(t.last) >= a.interval {
-		t.last = now
-		a.loop.sink.RichMessage(msg)
+		if a.sendThrottled(t, build) {
+			a.loop.throttles[id] = t
+		}
 		return
 	}
-	t.pending = &msg
-	if t.timer == nil {
-		id := msg.MessageID
-		t.timer = time.AfterFunc(a.interval-now.Sub(t.last), func() {
-			a.post(func() { a.flushThrottle(id) })
-		})
+	if t.timer != nil {
+		t.pending = build
+		return
 	}
+	wait := a.interval - a.clock.Since(t.last)
+	if wait <= 0 {
+		a.sendThrottled(t, build)
+		return
+	}
+	t.pending = build
+	t.timer = a.clock.AfterFunc(wait, func() {
+		a.post(func() { a.flushThrottle(id) })
+	})
 }
 
+// sendThrottled sends what build makes, if anything, and reports whether
+// it did.
+func (a *Adapter) sendThrottled(t *throttle, build func() (jsonlwatcher.RichMessage, bool)) bool {
+	t.pending = nil
+	msg, ok := build()
+	if ok {
+		t.last = a.clock.Now()
+		a.loop.sink.RichMessage(msg)
+	}
+	return ok
+}
+
+// sent reports whether a snapshot of message id was sent and its final
+// state wasn't.
+func (a *Adapter) sent(id string) bool {
+	return a.loop.throttles[id] != nil
+}
+
+// flushThrottle sends the state of message id that waited for the end of
+// the interval.
 func (a *Adapter) flushThrottle(id string) {
 	t := a.loop.throttles[id]
 	if t == nil {
@@ -373,9 +400,7 @@ func (a *Adapter) flushThrottle(id string) {
 	}
 	t.timer = nil
 	if t.pending != nil {
-		t.last = time.Now()
-		a.loop.sink.RichMessage(*t.pending)
-		t.pending = nil
+		a.sendThrottled(t, t.pending)
 	}
 }
 
@@ -389,15 +414,15 @@ func (a *Adapter) emitFinal(msg jsonlwatcher.RichMessage) {
 	a.loop.sink.RichMessage(msg)
 }
 
-// flushStream sends the last snapshot of a message that was streaming
-// when its run ended without message_end.
+// flushStream sends the last state of a message that was streaming when
+// its run ended without message_end, or Pi exited.
 func (a *Adapter) flushStream() {
 	s := a.loop.stream
 	if s == nil {
 		return
 	}
 	a.loop.stream = nil
-	if s.emitted {
+	if a.sent(s.id) {
 		a.emitFinal(s.snapshot())
 	}
 }

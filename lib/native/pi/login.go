@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/coder/agentapi/lib/native"
@@ -22,26 +21,18 @@ var loginHint = native.LoginRequired{
 // unknownModel is what get_state reports as the model when Pi found none.
 const unknownModel = "unknown"
 
-// stateHasModel reports whether a get_state response names a model.
-func stateHasModel(data json.RawMessage) bool {
-	var state sessionState
-	if json.Unmarshal(data, &state) != nil {
-		// Not ours to judge; the handshake handles it.
-		return true
-	}
-	m := state.Model
+// hasModel reports whether the state names a model.
+func (s sessionState) hasModel() bool {
+	m := s.Model
 	return m != nil && m.ID != unknownModel && m.Provider != unknownModel
 }
 
-// checkLogin decides whether Pi can work, from its get_state response.
+// checkLogin decides whether Pi, whose state names no model, can work.
 // Without credentials Pi reports the model "unknown" and lists no
 // available models (it only lists models it has a key or login for); only
 // then does the start stop. A chosen model without credentials (--model)
 // shows when the first prompt is refused.
-func (a *Adapter) checkLogin(ctx context.Context, state json.RawMessage) error {
-	if stateHasModel(state) {
-		return nil
-	}
+func (a *Adapter) checkLogin(ctx context.Context) error {
 	res, err := a.request(ctx, cmdQuery, simpleCommand{Type: "get_available_models"})
 	if err != nil {
 		return fmt.Errorf("pi didn't list its models: %w", err)
@@ -63,14 +54,17 @@ func (a *Adapter) checkLogin(ctx context.Context, state json.RawMessage) error {
 	return &native.LoginRequiredError{Login: loginHint}
 }
 
-// authErrorPattern matches (lower-case) errors of a missing or rejected
-// provider login: Pi's own ("No API key found for …", "No model
-// selected", which point to /login) and providers' (HTTP 401, invalid
-// keys, expired tokens).
-var authErrorPattern = regexp.MustCompile(`no api key|no model selected|no models available|use /login|not authenticated|unauthorized|authentication_error|invalid api key|invalid x-api-key|incorrect api key|oauth token|refresh token|\b401\b`)
-
+// isAuthError reports whether an error of Pi or its provider says that the
+// provider login is missing or no longer works. native.IsAuthError covers
+// Pi's "No API key found for …", its "Authentication failed for …" of an
+// expired OAuth login and the providers' errors; without any provider Pi
+// says it has no model instead.
 func isAuthError(text string) bool {
-	return authErrorPattern.MatchString(strings.ToLower(text))
+	if native.IsAuthError(text) {
+		return true
+	}
+	l := strings.ToLower(text)
+	return strings.Contains(l, "no model selected") || strings.Contains(l, "no models available")
 }
 
 // reportLogin tells the sink the provider login is missing, once per turn.

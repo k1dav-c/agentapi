@@ -3,6 +3,7 @@ package claude
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/coder/agentapi/lib/native"
@@ -45,6 +46,8 @@ type pendingRequest struct {
 	// questions maps question IDs to the question text Claude Code keys
 	// answers by.
 	questions map[string]string
+	// answering: an answer is being written to the CLI.
+	answering bool
 }
 
 type askQuestion struct {
@@ -57,7 +60,6 @@ type askQuestion struct {
 	} `json:"options"`
 }
 
-// newPendingRequest maps a can_use_tool request to a native request.
 // newPendingRequest describes a can_use_tool request. bypass says the
 // session runs in bypassPermissions, so approving a plan can keep it.
 func newPendingRequest(id string, r canUseTool, bypass bool) *pendingRequest {
@@ -191,6 +193,13 @@ func (p *pendingRequest) response(resp native.Response) (map[string]any, error) 
 		return out
 	}
 	feedback := strings.TrimSpace(resp.Text)
+	unknownOption := fmt.Errorf("%w: unknown option %q", native.ErrInvalidResponse, resp.OptionID)
+	if p.req.Kind != native.RequestKindQuestion &&
+		!slices.ContainsFunc(p.req.Options, func(o native.RequestOption) bool { return o.ID == resp.OptionID }) {
+		// Only what was offered: e.g. no bypassPermissions for the plan of
+		// a session that didn't start in it.
+		return nil, unknownOption
+	}
 
 	switch p.req.Kind {
 	case native.RequestKindQuestion:
@@ -232,11 +241,10 @@ func (p *pendingRequest) response(resp native.Response) (map[string]any, error) 
 		case optionAllow:
 			return allow(r.Input, "user_temporary"), nil
 		case optionAllowAlways:
-			if len(r.PermissionSuggestions) > 0 {
-				out := allow(r.Input, "user_permanent")
-				out["updatedPermissions"] = p.sessionPermissions()
-				return out, nil
-			}
+			// Offered only with suggestions.
+			out := allow(r.Input, "user_permanent")
+			out["updatedPermissions"] = p.sessionPermissions()
+			return out, nil
 		case optionDeny:
 			if feedback == "" {
 				feedback = "The user denied this tool call."
@@ -244,7 +252,7 @@ func (p *pendingRequest) response(resp native.Response) (map[string]any, error) 
 			return deny(feedback), nil
 		}
 	}
-	return nil, fmt.Errorf("%w: unknown option %q", native.ErrInvalidResponse, resp.OptionID)
+	return nil, unknownOption
 }
 
 // sessionPermissions returns Claude Code's permission suggestions, limited
@@ -315,8 +323,8 @@ func inputSummary(raw json.RawMessage) string {
 	for _, key := range []string{"command", "file_path", "notebook_path", "path", "pattern", "url", "query"} {
 		if v, ok := input[key].(string); ok && v != "" {
 			line, _, _ := strings.Cut(strings.TrimSpace(v), "\n")
-			if len(line) > 120 {
-				line = line[:117] + "..."
+			if runes := []rune(line); len(runes) > 120 {
+				line = string(runes[:117]) + "..."
 			}
 			return line
 		}

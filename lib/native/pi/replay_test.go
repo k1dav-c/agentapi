@@ -249,7 +249,11 @@ func TestReplayExtensionDialogs(t *testing.T) {
 	// Two extension commands without a run and one run: three turns. The
 	// confirm came outside a turn.
 	assert.Equal(t, 3, h.sink.started)
-	assert.Equal(t, []native.TurnResult{{StopReason: "end_turn"}, {StopReason: "end_turn"}, {StopReason: "end_turn"}}, h.sink.turnResults())
+	assert.Equal(t, []native.TurnResult{
+		{StopReason: native.StopReasonHandled},
+		{StopReason: native.StopReasonEndTurn},
+		{StopReason: native.StopReasonHandled},
+	}, h.sink.turnResults())
 
 	results := toolResults(h.sink.final())
 	require.Len(t, results, 1)
@@ -519,7 +523,7 @@ func TestStartFailsWhenPiExits(t *testing.T) {
 	select {
 	case err := <-h.startErr:
 		require.Error(t, err)
-		assert.ErrorIs(t, err, errExited)
+		assert.Contains(t, err.Error(), "No models available", "Start says why Pi exited")
 	case <-time.After(5 * time.Second):
 		t.Fatal("Start didn't return")
 	}
@@ -534,11 +538,11 @@ func TestDialogTimeoutClosesRequest(t *testing.T) {
 	h.answerState(noState)
 	h.started()
 	h.writeLine(map[string]any{"type": "extension_ui_request", "id": "d1", "method": "select", "title": "Pick", "options": []string{"a", "b"}, "timeout": 30})
-	require.Eventually(t, func() bool {
-		h.sink.mu.Lock()
-		defer h.sink.mu.Unlock()
-		return slices.Contains(h.sink.closed, "d1")
-	}, 5*time.Second, time.Millisecond)
+	h.settle()
+	h.advance(29 * time.Millisecond)
+	assert.Empty(t, h.sink.closed)
+	h.advance(time.Millisecond)
+	assert.Equal(t, []string{"d1"}, h.sink.closed)
 	req, ok := h.sink.request("d1")
 	require.True(t, ok)
 	assert.Equal(t, native.RequestKindQuestion, req.Kind)
@@ -558,30 +562,31 @@ func TestNotifyErrorIsReported(t *testing.T) {
 
 func TestThrottle(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t, Config{}, "", func(h *harness) { h.a.interval = 50 * time.Millisecond })
+	h := newHarness(t, Config{}, "")
 	h.answerState(noState)
 	h.started()
-	write := func(m string) {
-		var v map[string]any
-		require.NoError(t, json.Unmarshal([]byte(m), &v))
-		h.writeLine(v)
-	}
-	write(`{"type":"message_start","message":{"role":"assistant","content":[],"model":"m","timestamp":5}}`)
-	write(`{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}`)
+	h.write(`{"type":"message_start","message":{"role":"assistant","content":[],"model":"m","timestamp":5}}`)
+	h.write(`{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}`)
 	for _, d := range []string{"a", "b", "c", "d"} {
-		write(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"` + d + `"}}`)
+		h.write(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"` + d + `"}}`)
 	}
 	h.settle()
 	snaps := h.sink.snapshots("assistant-5")
 	require.Len(t, snaps, 1, "one snapshot per interval")
 	assert.Equal(t, []string{"a"}, texts(snaps[0], "text"))
-	require.Eventually(t, func() bool { return len(h.sink.snapshots("assistant-5")) == 2 }, 5*time.Second, time.Millisecond)
-	assert.Equal(t, []string{"abcd"}, texts(h.sink.snapshots("assistant-5")[1], "text"), "the latest state is sent when the interval ends")
-	write(`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"abcd!"}],"model":"m","stopReason":"stop","timestamp":5}}`)
+	h.advance(snapshotInterval - time.Millisecond)
+	assert.Len(t, h.sink.snapshots("assistant-5"), 1)
+	h.advance(time.Millisecond)
+	snaps = h.sink.snapshots("assistant-5")
+	require.Len(t, snaps, 2)
+	assert.Equal(t, []string{"abcd"}, texts(snaps[1], "text"), "the latest state is sent when the interval ends")
+	h.write(`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"abcd!"}],"model":"m","stopReason":"stop","timestamp":5}}`)
 	h.settle()
 	snaps = h.sink.snapshots("assistant-5")
 	assert.Equal(t, []string{"abcd!"}, texts(snaps[len(snaps)-1], "text"))
 	assert.Equal(t, "end_turn", snaps[len(snaps)-1].StopReason)
+	_, pending := h.clock.Peek()
+	assert.False(t, pending, "no snapshot waits after the final message")
 }
 
 func TestToolResultImages(t *testing.T) {

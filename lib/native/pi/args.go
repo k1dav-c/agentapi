@@ -4,147 +4,174 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 )
 
-// reservedFlags pick the output mode or the session, which the adapter
-// does itself, or make Pi do something other than serve RPC and exit.
-var reservedFlags = map[string]string{
-	"--mode":        "the adapter runs Pi with --mode rpc",
-	"--print":       "the adapter runs Pi with --mode rpc",
-	"-p":            "the adapter runs Pi with --mode rpc",
-	"--session":     "the adapter picks the session with --session-id",
-	"--session-id":  "the adapter picks the session with --session-id",
-	"--continue":    "the adapter picks the session with --session-id",
-	"-c":            "the adapter picks the session with --session-id",
-	"--resume":      "the adapter picks the session with --session-id",
-	"-r":            "the adapter picks the session with --session-id",
-	"--fork":        "the adapter picks the session with --session-id",
-	"--no-session":  "the adapter needs a saved session to resume it",
-	"--export":      "it exports a session and exits",
-	"--list-models": "it lists models and exits",
-	"--help":        "it prints help and exits",
-	"-h":            "it prints help and exits",
-	"--version":     "it prints the version and exits",
-	"-v":            "it prints the version and exits",
+// flagKind is how filterArgs handles one of Pi's built-in options.
+type flagKind int
+
+const (
+	// valueFlag takes the next argument as its value. Pi reads the
+	// "--flag=value" form only for extension flags, so the adapter splits
+	// it.
+	valueFlag flagKind = iota + 1
+	// switchFlag takes no value; an argument after it is a message.
+	switchFlag
+	// tuiFlag only affects the terminal UI, which RPC mode doesn't draw. It
+	// is dropped with its value.
+	tuiFlag
+	// reservedFlag picks the output mode or the session, which the adapter
+	// does itself, or makes Pi do something other than serve RPC and exit.
+	// It is refused.
+	reservedFlag
+)
+
+type piFlag struct {
+	kind flagKind
+	// reason says why a reserved flag is refused.
+	reason string
 }
 
-// tuiFlags only affect the terminal UI, which RPC mode doesn't draw. They
-// are dropped with their value.
-var tuiFlags = []string{"--tui-mode", "--use-theme"}
+const (
+	reasonMode    = "the adapter runs Pi with --mode rpc"
+	reasonSession = "the adapter picks the session with --session-id"
+)
 
-// valueFlags are Pi's built-in options that take a value. Pi reads the
-// "--flag=value" form only for extension flags, so the adapter splits it
-// for these.
-var valueFlags = []string{
-	"--provider", "--model", "--api-key", "--system-prompt", "--append-system-prompt",
-	"--mode", "--session", "--session-id", "--fork", "--session-dir", "--name", "-n",
-	"--models", "--tools", "-t", "--exclude-tools", "-xt", "--thinking", "--extension", "-e",
-	"--skill", "--prompt-template", "--theme", "--use-theme", "--export", "--tui-mode",
+// piFlags are Pi's built-in options (cli/args.js of Pi 1.0).
+var piFlags = map[string]piFlag{
+	"--mode":        {reservedFlag, reasonMode},
+	"--print":       {reservedFlag, reasonMode},
+	"-p":            {reservedFlag, reasonMode},
+	"--session":     {reservedFlag, reasonSession},
+	"--session-id":  {reservedFlag, reasonSession},
+	"--continue":    {reservedFlag, reasonSession},
+	"-c":            {reservedFlag, reasonSession},
+	"--resume":      {reservedFlag, reasonSession},
+	"-r":            {reservedFlag, reasonSession},
+	"--fork":        {reservedFlag, reasonSession},
+	"--no-session":  {reservedFlag, "the adapter needs a saved session to resume it"},
+	"--export":      {reservedFlag, "it exports a session and exits"},
+	"--list-models": {reservedFlag, "it lists models and exits"},
+	"--help":        {reservedFlag, "it prints help and exits"},
+	"-h":            {reservedFlag, "it prints help and exits"},
+	"--version":     {reservedFlag, "it prints the version and exits"},
+	"-v":            {reservedFlag, "it prints the version and exits"},
+
+	"--tui-mode":  {kind: tuiFlag},
+	"--use-theme": {kind: tuiFlag},
+
+	"--provider":             {kind: valueFlag},
+	"--model":                {kind: valueFlag},
+	"--api-key":              {kind: valueFlag},
+	"--system-prompt":        {kind: valueFlag},
+	"--append-system-prompt": {kind: valueFlag},
+	"--session-dir":          {kind: valueFlag},
+	"--name":                 {kind: valueFlag},
+	"-n":                     {kind: valueFlag},
+	"--models":               {kind: valueFlag},
+	"--tools":                {kind: valueFlag},
+	"-t":                     {kind: valueFlag},
+	"--exclude-tools":        {kind: valueFlag},
+	"-xt":                    {kind: valueFlag},
+	"--thinking":             {kind: valueFlag},
+	"--extension":            {kind: valueFlag},
+	"-e":                     {kind: valueFlag},
+	"--skill":                {kind: valueFlag},
+	"--prompt-template":      {kind: valueFlag},
+	"--theme":                {kind: valueFlag},
+
+	"--no-tools":            {kind: switchFlag},
+	"-nt":                   {kind: switchFlag},
+	"--no-builtin-tools":    {kind: switchFlag},
+	"-nbt":                  {kind: switchFlag},
+	"--no-extensions":       {kind: switchFlag},
+	"-ne":                   {kind: switchFlag},
+	"--no-skills":           {kind: switchFlag},
+	"-ns":                   {kind: switchFlag},
+	"--no-prompt-templates": {kind: switchFlag},
+	"-np":                   {kind: switchFlag},
+	"--no-themes":           {kind: switchFlag},
+	"--no-context-files":    {kind: switchFlag},
+	"-nc":                   {kind: switchFlag},
+	"--verbose":             {kind: switchFlag},
+	"--approve":             {kind: switchFlag},
+	"-a":                    {kind: switchFlag},
+	"--no-approve":          {kind: switchFlag},
+	"-na":                   {kind: switchFlag},
+	"--offline":             {kind: switchFlag},
 }
 
 // subcommands are Pi's management commands, which don't start an agent.
 var subcommands = []string{"install", "remove", "uninstall", "update", "list", "config", "auth", "mcp"}
 
-// ValidateArgs checks the user's Pi arguments (without the program) for
-// options the native transport can't pass through.
-func ValidateArgs(args []string) error {
-	_, _, err := filterArgs(args)
-	return err
-}
-
 // filterArgs returns the user's arguments to pass to Pi and the TUI-only
 // ones it dropped, or an error for arguments that conflict with RPC mode.
+// It reads them the way Pi does, so it finds the messages, which RPC mode
+// would ignore.
 func filterArgs(args []string) (kept, dropped []string, err error) {
 	if len(args) > 0 && slices.Contains(subcommands, args[0]) {
 		return nil, nil, fmt.Errorf("pi %s is a management command, not an agent; the native transport needs the agent", args[0])
 	}
+	// takesNext reports whether there is an argument after args[i] that
+	// isn't an option.
+	takesNext := func(i int) bool { return i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") }
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		name, value, hasValue := strings.Cut(arg, "=")
-		if !strings.HasPrefix(arg, "-") {
-			if strings.HasPrefix(arg, "@") {
-				return nil, nil, fmt.Errorf("pi argument %q: Pi's RPC mode doesn't accept @file arguments; mention the file in a message instead", arg)
-			}
-			kept = append(kept, arg)
-			continue
-		}
-		if arg == "--" {
+		switch {
+		case arg == "--":
 			return nil, nil, fmt.Errorf("pi messages after \"--\" are not supported by the native transport; use --initial-prompt or POST /message")
+		case strings.HasPrefix(arg, "@"):
+			return nil, nil, fmt.Errorf("pi argument %q: Pi's RPC mode doesn't accept @file arguments; mention the file in a message instead", arg)
+		case !strings.HasPrefix(arg, "-"):
+			return nil, nil, fmt.Errorf("pi argument %q is a message, which Pi's RPC mode ignores; use --initial-prompt or POST /message", arg)
 		}
-		if reason, ok := reservedFlags[name]; ok {
-			return nil, nil, fmt.Errorf("pi option %s can't be used with the native transport: %s", name, reason)
-		}
-		if slices.Contains(tuiFlags, name) {
+		name, value, hasValue := strings.Cut(arg, "=")
+		flag, known := piFlags[name]
+		switch {
+		case flag.kind == reservedFlag:
+			return nil, nil, fmt.Errorf("pi option %s can't be used with the native transport: %s", name, flag.reason)
+		case flag.kind == tuiFlag:
 			dropped = append(dropped, arg)
-			if !hasValue && i+1 < len(args) {
+			if !hasValue && takesNext(i) {
 				i++
 				dropped = append(dropped, args[i])
 			}
-			continue
-		}
-		if !slices.Contains(valueFlags, name) {
-			// A flag without a value, or an extension flag, which Pi
-			// parses in either form.
-			kept = append(kept, arg)
-			continue
-		}
-		if hasValue {
+		case flag.kind == valueFlag && hasValue:
 			kept = append(kept, name, value)
-			continue
-		}
-		kept = append(kept, arg)
-		if i+1 < len(args) {
-			i++
-			kept = append(kept, args[i])
+		case flag.kind == valueFlag:
+			kept = append(kept, arg)
+			if i+1 < len(args) {
+				i++
+				kept = append(kept, args[i])
+			}
+		case !known && strings.HasPrefix(arg, "--") && !hasValue:
+			// An extension flag. Like Pi, it takes the next argument as its
+			// value unless that is an option or a file.
+			kept = append(kept, arg)
+			if takesNext(i) && !strings.HasPrefix(args[i+1], "@") {
+				i++
+				kept = append(kept, args[i])
+			}
+		default:
+			// A switch, an extension flag in the "--flag=value" form, or a
+			// short option Pi doesn't know (Pi refuses those itself).
+			kept = append(kept, arg)
 		}
 	}
 	return kept, dropped, nil
 }
 
-// buildArgs returns Pi's arguments: RPC mode, the session, then the
-// user's arguments.
-func buildArgs(userArgs []string, sessionID string) (args, dropped []string, err error) {
-	kept, dropped, err := filterArgs(userArgs)
-	if err != nil {
-		return nil, nil, err
-	}
-	args = append([]string{"--mode", "rpc", "--session-id", sessionID}, kept...)
-	return args, dropped, nil
+// rpcArgs returns Pi's arguments: RPC mode, the session, then the user's
+// arguments (filtered by filterArgs).
+func rpcArgs(args []string, sessionID string) []string {
+	return append([]string{"--mode", "rpc", "--session-id", sessionID}, args...)
 }
 
-// newSessionID returns a session ID in the format AgentAPI also uses for
-// Pi in the terminal transport.
-func newSessionID() string {
+// NewSessionID returns a new Pi session ID. AgentAPI uses the same format
+// for Pi in the terminal transport.
+func NewSessionID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return "agentapi-" + hex.EncodeToString(b[:])
-}
-
-// leakedEnv are variables that mark the environment as running inside an
-// agent session. They leak into Pi, and into the commands its tools run,
-// when AgentAPI itself is started from such a session.
-var leakedEnv = []string{
-	"PI_CODING_AGENT", "AI_AGENT",
-	"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
-	"CODEX_THREAD_ID",
-}
-
-// agentEnv returns env (the process environment if nil) without the
-// variables leaked from a parent agent session.
-func agentEnv(env []string) []string {
-	if env == nil {
-		env = os.Environ()
-	}
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		name, _, _ := strings.Cut(kv, "=")
-		if slices.Contains(leakedEnv, name) {
-			continue
-		}
-		out = append(out, kv)
-	}
-	return out
 }

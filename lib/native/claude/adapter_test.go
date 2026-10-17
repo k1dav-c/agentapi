@@ -14,27 +14,34 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/procutil"
 )
 
 // started returns an adapter on a fake process that completed the
 // handshake.
 func started(t *testing.T, cfg Config, proc *fakeProcess) (*Adapter, *recSink) {
 	t.Helper()
-	cfg.StartProcess = func(Command) (Process, error) { return proc, nil }
+	return resumed(t, cfg, "", proc)
+}
+
+// resumed is started for an adapter that resumes resumeRef.
+func resumed(t *testing.T, cfg Config, resumeRef string, proc *fakeProcess) (*Adapter, *recSink) {
+	t.Helper()
+	cfg.StartProcess = func(procutil.Command) (procutil.Process, error) { return proc, nil }
 	if cfg.AuthStatus == nil {
 		cfg.AuthStatus = loggedIn
 	}
 	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg.Env = []string{}
-	a, err := New(cfg, "")
-	require.NoError(t, err)
+	a := newTestAdapter(t, cfg, resumeRef)
 	sink := &recSink{t: t}
 	errCh := make(chan error, 1)
 	go func() { errCh <- a.Start(context.Background(), sink) }()
 	init := proc.waitWritten(t, 0)
 	require.Equal(t, "control_request:initialize", signature(init))
-	proc.send(t, []byte(fmt.Sprintf(`{"type":"control_response","response":{"subtype":"success","request_id":%q,"response":{"claude_code_version":"2.1.299"}}}`, init["request_id"])))
+	proc.answer(t, init, `{"claude_code_version":"2.1.299"}`)
 	require.NoError(t, <-errCh)
 	return a, sink
 }
@@ -45,17 +52,16 @@ func TestStartFailure(t *testing.T) {
 	t.Run("exit during startup", func(t *testing.T) {
 		t.Parallel()
 		proc := newFakeProcess("No conversation found with session ID: 6943de8c\n")
-		a, err := New(Config{
-			StartProcess: func(Command) (Process, error) { return proc, nil },
+		a := newTestAdapter(t, Config{
+			StartProcess: func(procutil.Command) (procutil.Process, error) { return proc, nil },
 			AuthStatus:   loggedIn,
 			Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		}, "6943de8c")
-		require.NoError(t, err)
 		go func() {
 			proc.waitWritten(t, 0)
 			proc.exit(errExit1)
 		}()
-		err = a.Start(context.Background(), &recSink{t: t})
+		err := a.Start(context.Background(), &recSink{t: t})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "No conversation found with session ID: 6943de8c")
 		assert.ErrorIs(t, a.Wait(), errExit1)
@@ -64,18 +70,17 @@ func TestStartFailure(t *testing.T) {
 	t.Run("clean exit during startup", func(t *testing.T) {
 		t.Parallel()
 		proc := newFakeProcess("No conversation found with session ID: 6943de8c\n")
-		a, err := New(Config{
-			StartProcess: func(Command) (Process, error) { return proc, nil },
+		a := newTestAdapter(t, Config{
+			StartProcess: func(procutil.Command) (procutil.Process, error) { return proc, nil },
 			AuthStatus:   loggedIn,
 			Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		}, "6943de8c")
-		require.NoError(t, err)
 		go func() {
 			proc.waitWritten(t, 0)
 			proc.send(t, []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0}`))
 			proc.exit(nil)
 		}()
-		err = a.Start(context.Background(), &recSink{t: t})
+		err := a.Start(context.Background(), &recSink{t: t})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "No conversation found with session ID: 6943de8c")
 	})
@@ -83,13 +88,12 @@ func TestStartFailure(t *testing.T) {
 	t.Run("no answer", func(t *testing.T) {
 		t.Parallel()
 		proc := newFakeProcess("")
-		a, err := New(Config{
-			StartProcess: func(Command) (Process, error) { return proc, nil },
+		a := newTestAdapter(t, Config{
+			StartProcess: func(procutil.Command) (procutil.Process, error) { return proc, nil },
 			AuthStatus:   loggedIn,
 			Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 			StopTimeout:  10 * time.Millisecond,
 		}, "")
-		require.NoError(t, err)
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 		require.Error(t, a.Start(ctx, &recSink{t: t}))
@@ -136,12 +140,39 @@ func TestClose(t *testing.T) {
 		assert.True(t, proc.terminated)
 		assert.True(t, proc.killed)
 	})
+
+	t.Run("a write is blocked", func(t *testing.T) {
+		t.Parallel()
+		// The CLI reads the initialize request, then hangs.
+		proc := newFakeProcess("")
+		proc.stallAfter = 1
+		a, _ := started(t, Config{StopTimeout: 10 * time.Millisecond}, proc)
+		turnErr := make(chan error, 1)
+		go func() { turnErr <- a.StartTurn(context.Background(), native.Input{Text: "hi"}) }()
+		require.Eventually(t, func() bool {
+			if a.writeMu.TryLock() {
+				a.writeMu.Unlock()
+				return false
+			}
+			return true
+		}, 5*time.Second, time.Millisecond, "the prompt is not being written")
+		closed := make(chan error, 1)
+		go func() { closed <- a.Close() }()
+		select {
+		case err := <-closed:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("Close waits for the blocked write")
+		}
+		// Closing stdin failed the write.
+		require.Error(t, <-turnErr)
+		assert.True(t, proc.terminated)
+	})
 }
 
 func TestTurnErrors(t *testing.T) {
 	t.Parallel()
-	a, err := New(Config{}, "")
-	require.NoError(t, err)
+	a := newTestAdapter(t, Config{}, "")
 	require.ErrorIs(t, a.StartTurn(context.Background(), native.Input{Text: "hi"}), native.ErrNotStarted)
 	require.ErrorIs(t, a.Wait(), native.ErrNotStarted)
 	require.NoError(t, a.Close())
@@ -229,4 +260,286 @@ func TestSnapshotsShareNothing(t *testing.T) {
 	require.Len(t, again[0].Content[0].Images, 1)
 	assert.NotEmpty(t, again[0].Content[0].Images[0].Data)
 	assert.True(t, strings.HasPrefix(string(again[0].Content[0].Images[0].Data), "\x89PNG"))
+}
+
+func TestTurnResult(t *testing.T) {
+	t.Parallel()
+	stop := func(s string) *string { return &s }
+	for _, tc := range []struct {
+		f           frame
+		interrupted bool
+		want        native.TurnResult
+	}{
+		{f: frame{Subtype: "success", StopReason: stop("end_turn")}, want: native.TurnResult{StopReason: native.StopReasonEndTurn}},
+		{f: frame{Subtype: "success", StopReason: stop("max_tokens")}, want: native.TurnResult{StopReason: native.StopReasonMaxTokens}},
+		// Other API stop reasons are not TurnResult stop reasons.
+		{f: frame{Subtype: "success", StopReason: stop("stop_sequence")}, want: native.TurnResult{StopReason: native.StopReasonEndTurn}},
+		{f: frame{Subtype: "error_during_execution", IsError: true, TerminalReason: "aborted_tools"}, want: native.TurnResult{StopReason: native.StopReasonInterrupted}},
+		{f: frame{Subtype: "error_during_execution", IsError: true}, interrupted: true, want: native.TurnResult{StopReason: native.StopReasonInterrupted}},
+		{
+			f:    frame{Subtype: "success", IsError: true, TerminalReason: "api_error", Result: json.RawMessage(`"Not logged in"`)},
+			want: native.TurnResult{StopReason: native.StopReasonError, Error: "Claude Code: the turn failed (api_error): Not logged in"},
+		},
+		{
+			f:    frame{Subtype: "success", IsError: true, Result: json.RawMessage(`"API Error"`)},
+			want: native.TurnResult{StopReason: native.StopReasonError, Error: "Claude Code: the turn failed: API Error"},
+		},
+		{
+			f:    frame{Subtype: "error_max_turns", IsError: true, Errors: []string{"", "[ede_diagnostic] x", "Reached the maximum number of turns"}},
+			want: native.TurnResult{StopReason: native.StopReasonError, Error: "Claude Code: the turn failed (error_max_turns): Reached the maximum number of turns"},
+		},
+	} {
+		assert.Equal(t, tc.want, turnResult(&tc.f, tc.interrupted), "%+v", tc.f)
+	}
+}
+
+func TestEarlierFailureIsShown(t *testing.T) {
+	t.Parallel()
+	proc := newFakeProcess("")
+	a, sink := started(t, Config{}, proc)
+	require.NoError(t, a.StartTurn(context.Background(), native.Input{Text: "hi"}))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
+	proc.send(t, []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"api_error_status":529,"errors":["Overloaded"]}`))
+	// A background task finished and woke Claude up; that part worked.
+	// Only the last result ends the turn.
+	proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1"}`))
+	proc.send(t, []byte(`{"type":"result","subtype":"success","is_error":false,"result":"done"}`))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
+	proc.barrier(t)
+	assert.Equal(t, []string{"Claude Code: the turn failed (error_during_execution), API status 529: Overloaded"}, sink.errs)
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, sink.results)
+	require.NoError(t, a.Close())
+}
+
+func TestNewSession(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	turn := func(t *testing.T, a *Adapter, proc *fakeProcess, prompt, sessionID string) {
+		t.Helper()
+		require.NoError(t, a.StartTurn(ctx, native.Input{Text: prompt}))
+		proc.send(t, []byte(fmt.Sprintf(`{"type":"system","subtype":"init","session_id":%q}`, sessionID)))
+		proc.send(t, []byte(fmt.Sprintf(`{"type":"result","subtype":"success","is_error":false,"result":"ok","session_id":%q}`, sessionID)))
+		proc.barrier(t)
+	}
+	// titles returns what the title requests describe, once there are n.
+	titles := func(t *testing.T, proc *fakeProcess, n int) []string {
+		t.Helper()
+		var out []string
+		require.Eventually(t, func() bool {
+			out = nil
+			for _, f := range proc.writtenFrames() {
+				if subtypeOf(f) == "generate_session_title" {
+					out = append(out, f["request"].(map[string]any)["description"].(string))
+				}
+			}
+			return len(out) >= n
+		}, 5*time.Second, time.Millisecond)
+		return out
+	}
+
+	t.Run("clear", func(t *testing.T) {
+		t.Parallel()
+		proc := newFakeProcess("")
+		a, sink := started(t, Config{}, proc)
+		turn(t, a, proc, "first", "s1")
+		turn(t, a, proc, "/clear", "s1")
+		turn(t, a, proc, "second", "s2")
+		// /clear started a new session: a restart resumes it, and it gets
+		// a title too.
+		assert.Equal(t, []string{"s1", "s2"}, sink.refs)
+		assert.ElementsMatch(t, []string{"first", "second"}, titles(t, proc, 2))
+		require.NoError(t, a.Close())
+	})
+
+	t.Run("resumed", func(t *testing.T) {
+		t.Parallel()
+		proc := newFakeProcess("")
+		a, sink := resumed(t, Config{}, "s1", proc)
+		// The resumed session has its id and title already.
+		turn(t, a, proc, "again", "s1")
+		assert.Empty(t, sink.refs)
+		turn(t, a, proc, "/clear", "s1")
+		turn(t, a, proc, "next", "s2")
+		assert.Equal(t, []string{"s2"}, sink.refs)
+		assert.Equal(t, []string{"next"}, titles(t, proc, 1))
+		require.NoError(t, a.Close())
+	})
+}
+
+func TestFieldsOfUnexpectedType(t *testing.T) {
+	t.Parallel()
+	proc := newFakeProcess("")
+	a, sink := started(t, Config{}, proc)
+	require.NoError(t, a.StartTurn(context.Background(), native.Input{Text: "hi"}))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
+	// A field of another shape doesn't lose the request.
+	proc.send(t, []byte(`{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"t1","title":{"text":"x"}}}`))
+	// A request without a tool can't be asked; it is refused, so the CLI
+	// doesn't wait for it.
+	proc.send(t, []byte(`{"type":"control_request","request_id":"r2","request":{"subtype":"can_use_tool","tool_name":{"name":"Bash"},"input":{}}}`))
+	proc.barrier(t)
+	req, ok := sink.request("r1")
+	require.True(t, ok)
+	assert.Equal(t, "Bash: ls", req.Title)
+	assert.Equal(t, "t1", req.ToolUseID)
+	_, ok = sink.request("r2")
+	assert.False(t, ok)
+	var reply map[string]any
+	for i := 0; reply == nil; i++ {
+		f := proc.waitWritten(t, i)
+		if response, _ := f["response"].(map[string]any); f["type"] == "control_response" && response["request_id"] == "r2" {
+			reply = response
+		}
+	}
+	assert.Equal(t, "error", reply["subtype"])
+
+	// A result whose errors aren't all strings still ends the turn.
+	proc.send(t, []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"errors":[{"code":529},"Overloaded"]}`))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
+	proc.barrier(t)
+	assert.Equal(t, []string{"turn_started", "turn_completed:error"}, sink.turnLog())
+	assert.Equal(t, "Claude Code: the turn failed (error_during_execution): Overloaded", sink.results[0].Error)
+	require.NoError(t, a.Close())
+}
+
+func TestRespondWriteFails(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	proc := newFakeProcess("")
+	a, _ := started(t, Config{}, proc)
+	require.NoError(t, a.StartTurn(ctx, native.Input{Text: "hi"}))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
+	proc.send(t, []byte(`{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"t1"}}`))
+	proc.barrier(t)
+	proc.mu.Lock()
+	proc.failWrites = 1
+	proc.mu.Unlock()
+	require.Error(t, a.Respond(ctx, "r1", native.Response{OptionID: optionAllow}))
+	// The CLI didn't get the answer: the request can still be answered.
+	require.NoError(t, a.Respond(ctx, "r1", native.Response{OptionID: optionAllow}))
+	answer := proc.waitWritten(t, 2)
+	assert.Equal(t, "control_response:allow", signature(answer))
+	require.ErrorIs(t, a.Respond(ctx, "r1", native.Response{OptionID: optionAllow}), native.ErrRequestNotFound)
+	require.NoError(t, a.Close())
+}
+
+func TestInterruptTimeout(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	interrupt := func(t *testing.T, a *Adapter, proc *fakeProcess) {
+		t.Helper()
+		require.NoError(t, a.StartTurn(ctx, native.Input{Text: "hi"}))
+		proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
+		errCh := make(chan error, 1)
+		go func() { errCh <- a.Interrupt(ctx) }()
+		request, _ := proc.waitRequest(t, 1, "interrupt")
+		proc.answer(t, request, `{}`)
+		require.NoError(t, <-errCh)
+		proc.barrier(t)
+	}
+
+	t.Run("not confirmed", func(t *testing.T) {
+		t.Parallel()
+		clock := quartz.NewMock(t)
+		proc := newFakeProcess("")
+		a, sink := started(t, Config{Clock: clock}, proc)
+		interrupt(t, a, proc)
+		// Claude Code never ends the turn: no result, no "idle". It ends
+		// here after InterruptTimeout (10s by default).
+		assert.Equal(t, []string{"turn_started"}, sink.turnLog())
+		clock.Advance(10 * time.Second).MustWait(ctx)
+		require.Eventually(t, func() bool { return len(sink.turnLog()) == 2 }, 5*time.Second, time.Millisecond)
+		assert.Equal(t, []string{"turn_started", "turn_completed:interrupted"}, sink.turnLog())
+		require.NoError(t, a.StartTurn(ctx, native.Input{Text: "again"}))
+		require.NoError(t, a.Close())
+	})
+
+	t.Run("confirmed", func(t *testing.T) {
+		t.Parallel()
+		clock := quartz.NewMock(t)
+		proc := newFakeProcess("")
+		a, sink := started(t, Config{Clock: clock, InterruptTimeout: time.Second}, proc)
+		interrupt(t, a, proc)
+		proc.send(t, []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"terminal_reason":"aborted_streaming"}`))
+		proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
+		proc.barrier(t)
+		require.NoError(t, a.StartTurn(ctx, native.Input{Text: "again"}))
+		proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
+		proc.barrier(t)
+		// No timer is left to end the next turn.
+		_, pending := clock.Peek()
+		assert.False(t, pending)
+		assert.Equal(t, []string{"turn_started", "turn_completed:interrupted", "turn_started"}, sink.turnLog())
+		require.NoError(t, a.Close())
+	})
+}
+
+func TestHeldBackSnapshotIsSent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	clock := quartz.NewMock(t)
+	proc := newFakeProcess("")
+	a, sink := started(t, Config{Clock: clock, SnapshotInterval: 100 * time.Millisecond}, proc)
+	event := func(event string) {
+		proc.send(t, []byte(`{"type":"stream_event","api_message_id":"msg_1","event":`+event+`}`))
+	}
+	event(`{"type":"message_start","message":{"id":"msg_1","model":"m"}}`)
+	event(`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`)
+	event(`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think"}}`)
+	proc.barrier(t)
+	require.Len(t, sink.snapshots("msg_1"), 1, "the delta came within the interval")
+	// The model pauses (summarized thinking comes in bursts): the delta
+	// is sent when the interval is over, not with the next event.
+	clock.Advance(100 * time.Millisecond).MustWait(ctx)
+	require.Eventually(t, func() bool { return len(sink.snapshots("msg_1")) == 2 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, "Let me think", sink.snapshots("msg_1")[1].Content[0].Thinking)
+	require.NoError(t, a.Close())
+}
+
+func TestStreamEventsWithoutMessageID(t *testing.T) {
+	t.Parallel()
+	p := newStreamParser(quartz.NewMock(t), 0)
+	var last []jsonlwatcher.RichMessage
+	for _, event := range []string{
+		`{"type":"message_start","message":{"id":"msg_1","model":"m"}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}`,
+	} {
+		if msgs := p.streamEvent(&frame{Type: "stream_event", Event: json.RawMessage(event)}); len(msgs) > 0 {
+			last = msgs
+		}
+	}
+	require.Len(t, last, 1)
+	assert.Equal(t, "msg_1", last[0].MessageID)
+	assert.Equal(t, "hello", last[0].Content[0].Text)
+}
+
+func TestUnstreamedMessage(t *testing.T) {
+	t.Parallel()
+	p := newStreamParser(quartz.NewMock(t), 0)
+	// The message Claude Code makes up for a turn without a login is not
+	// streamed; its frame has the stop reason and usage.
+	msgs, _ := p.assistant(&frame{Type: "assistant", Message: json.RawMessage(`{"id":"52c0c71b","model":"<synthetic>","role":"assistant","stop_reason":"stop_sequence","usage":{"input_tokens":0,"output_tokens":0},"content":[{"type":"text","text":"Not logged in · Please run /login"}]}`)})
+	require.Len(t, msgs, 1)
+	assert.Equal(t, "stop_sequence", msgs[0].StopReason)
+	require.NotNil(t, msgs[0].Usage)
+	assert.Equal(t, "<synthetic>", msgs[0].Model)
+}
+
+func TestUserMessageIDs(t *testing.T) {
+	t.Parallel()
+	// A user frame without a uuid gets an id of its own. A restarted
+	// adapter must not reuse one: the conversation keeps the messages of
+	// the earlier adapter.
+	marker := &frame{Type: "user", Message: json.RawMessage(`{"role":"user","content":"[Request interrupted by user]"}`)}
+	id := func(p *streamParser) string {
+		t.Helper()
+		msgs, _ := p.user(marker)
+		require.Len(t, msgs, 1)
+		return msgs[0].MessageID
+	}
+	p := newStreamParser(quartz.NewMock(t), 0)
+	first, second := id(p), id(p)
+	assert.NotEqual(t, first, second)
+	assert.NotEqual(t, first, id(newStreamParser(quartz.NewMock(t), 0)))
 }

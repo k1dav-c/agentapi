@@ -1,16 +1,17 @@
 package codex
 
 import (
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/native"
 )
 
 // The adapter shapes its rich messages like jsonlwatcher.CodexParser does
@@ -43,6 +44,17 @@ type block struct {
 	content []string
 }
 
+// visible reports whether b has anything to show yet.
+func (b *block) visible() bool {
+	switch b.Type {
+	case "text":
+		return strings.TrimSpace(b.Text) != ""
+	case "thinking":
+		return b.Thinking != ""
+	}
+	return true
+}
+
 // segment is one assistant message of a turn.
 type segment struct {
 	msgState
@@ -65,7 +77,6 @@ type itemState struct {
 	// resultBlock is the current tool result.
 	resultBlock jsonlwatcher.RichContentBlock
 	output      strings.Builder
-	startedAt   time.Time
 	// changes of a fileChange and server of an mcpToolCall, for their
 	// approval requests.
 	changes []fileUpdateChange
@@ -80,8 +91,9 @@ type turnState struct {
 	order       []*itemState
 	promptSeen  bool
 	interrupted time.Time
-	// failure is the error of a failed turn, from the error notification.
-	failure string
+	// lastError is the last error app-server reported for the turn without
+	// retrying: the turn's error if it fails, shown when it ends otherwise.
+	lastError string
 	// loginReported: the turn failed for want of a login, and the sink
 	// was told.
 	loginReported bool
@@ -89,20 +101,23 @@ type turnState struct {
 
 func (t *turnState) current() *segment { return t.segments[len(t.segments)-1] }
 
+// lastVisible returns the turn's last segment with something to show; a
+// segment without any (the turn ended right after a steer) is never sent.
+func (t *turnState) lastVisible() *segment {
+	for i := len(t.segments) - 1; i > 0; i-- {
+		if slices.ContainsFunc(t.segments[i].blocks, (*block).visible) {
+			return t.segments[i]
+		}
+	}
+	return t.segments[0]
+}
+
 func (s *segment) snapshot(model string) (jsonlwatcher.RichMessage, bool) {
 	var content []jsonlwatcher.RichContentBlock
 	for _, b := range s.blocks {
-		switch b.Type {
-		case "text":
-			if strings.TrimSpace(b.Text) == "" {
-				continue
-			}
-		case "thinking":
-			if b.Thinking == "" {
-				continue
-			}
+		if b.visible() {
+			content = append(content, b.RichContentBlock)
 		}
-		content = append(content, b.RichContentBlock)
 	}
 	if len(content) == 0 {
 		return jsonlwatcher.RichMessage{}, false
@@ -130,38 +145,110 @@ func joinReasoning(summary, content []string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// commandDisplay is the command to show for a commandExecution: the inner
-// command of Codex's `bash -lc` wrapper.
-func commandDisplay(command string, actions []commandAction) string {
-	var commands []string
-	for _, a := range actions {
-		if strings.TrimSpace(a.Command) != "" {
-			commands = append(commands, a.Command)
-		}
+// shells are the shells whose `-c`/`-lc` wrapper unwrapShell removes.
+var shells = []string{"sh", "bash", "zsh", "dash", "ksh", "ash"}
+
+// unwrapShell returns the script of a `<shell> -lc '<script>'` command line,
+// the wrapper Codex runs most commands in, so the chat shows the command
+// itself. Any other command line is returned as it is.
+func unwrapShell(command string) string {
+	argv, ok := shellWords(command)
+	if !ok || len(argv) != 3 || !slices.Contains(shells, filepath.Base(argv[0])) || (argv[1] != "-c" && argv[1] != "-lc") {
+		return command
 	}
-	if len(commands) > 0 {
-		return strings.Join(commands, "\n")
-	}
-	return unwrapShell(command)
+	return argv[2]
 }
 
-// unwrapShell returns the script of a `<shell> -lc '<script>'` command line.
-func unwrapShell(command string) string {
-	for _, flag := range []string{" -lc ", " -c "} {
-		_, script, ok := strings.Cut(command, flag)
-		if !ok {
+// shellWords splits a simple command line into its words like a POSIX
+// shell, removing quotes and backslashes. ok is false for a line it can't
+// split exactly that way: unbalanced quotes, line continuations, or
+// unquoted operators, expansions or globs.
+func shellWords(line string) (words []string, ok bool) {
+	var word strings.Builder
+	inWord := false
+	for i := 0; i < len(line); i++ {
+		switch c := line[i]; c {
+		case ' ', '\t':
+			if inWord {
+				words = append(words, word.String())
+				word.Reset()
+				inWord = false
+			}
 			continue
+		case '\'':
+			end := strings.IndexByte(line[i+1:], '\'')
+			if end < 0 {
+				return nil, false
+			}
+			word.WriteString(line[i+1 : i+1+end])
+			i += end + 1
+		case '"':
+			for i++; i < len(line) && line[i] != '"'; i++ {
+				switch line[i] {
+				case '$', '`':
+					return nil, false
+				case '\\':
+					// A backslash only escapes these in double quotes.
+					if i+1 < len(line) && strings.IndexByte("$`\"\\\n", line[i+1]) >= 0 {
+						if i++; line[i] == '\n' {
+							return nil, false
+						}
+					}
+				}
+				word.WriteByte(line[i])
+			}
+			if i == len(line) {
+				return nil, false
+			}
+		case '\\':
+			if i++; i == len(line) || line[i] == '\n' {
+				return nil, false
+			}
+			word.WriteByte(line[i])
+		default:
+			if strings.IndexByte("|&;<>(){}$`*?[#~\n", c) >= 0 {
+				return nil, false
+			}
+			word.WriteByte(c)
 		}
-		script = strings.TrimSpace(script)
-		if len(script) >= 2 && script[0] == '\'' && script[len(script)-1] == '\'' {
-			return strings.ReplaceAll(script[1:len(script)-1], `'\''`, `'`)
-		}
-		if len(script) >= 2 && script[0] == '"' && script[len(script)-1] == '"' {
-			return script[1 : len(script)-1]
-		}
-		return script
+		inWord = true
 	}
-	return command
+	if inWord {
+		words = append(words, word.String())
+	}
+	return words, true
+}
+
+// actionsDetail describes Codex's reading of a command, one line per part,
+// unless it says no more than the command itself.
+func actionsDetail(actions []commandAction, command string) []string {
+	if len(actions) == 1 && actions[0].Type == "unknown" && actions[0].Command == command {
+		return nil
+	}
+	var lines []string
+	for _, a := range actions {
+		in := ""
+		if a.Path != "" {
+			in = " in " + a.Path
+		}
+		switch a.Type {
+		case "read":
+			lines = append(lines, "Reads "+cmp.Or(a.Path, a.Command))
+		case "listFiles":
+			lines = append(lines, "Lists files"+in)
+		case "search":
+			if a.Query != "" {
+				lines = append(lines, fmt.Sprintf("Searches for %q%s", a.Query, in))
+			} else {
+				lines = append(lines, "Searches"+in)
+			}
+		default:
+			if a.Command != "" {
+				lines = append(lines, "Runs "+a.Command)
+			}
+		}
+	}
+	return lines
 }
 
 func mustJSON(v any) json.RawMessage {
@@ -172,24 +259,30 @@ func mustJSON(v any) json.RawMessage {
 	return data
 }
 
+// commandInput is the tool input of a command: the command without Codex's
+// shell wrapper, and its directory.
+func commandInput(command, cwd string) json.RawMessage {
+	in := map[string]string{"cmd": unwrapShell(command)}
+	if cwd != "" {
+		in["workdir"] = cwd
+	}
+	return mustJSON(in)
+}
+
 // toolUse returns the tool name and input the chat shows for a tool item,
 // or ok false for items that are not tool calls.
 func toolUse(it *threadItem) (name string, input json.RawMessage, ok bool) {
 	switch it.Type {
 	case "commandExecution":
-		in := map[string]string{"cmd": commandDisplay(it.Command, it.CommandActions)}
-		if it.CWD != "" {
-			in["workdir"] = it.CWD
-		}
-		return "exec_command", mustJSON(in), true
+		return "exec_command", commandInput(it.Command, it.CWD), true
 	case "fileChange":
 		return "apply_patch", fileChangeInput(it.Changes), true
 	case "mcpToolCall":
 		return "mcp__" + it.Server + "__" + it.Tool, rawOrEmpty(it.Arguments), true
 	case "dynamicToolCall":
 		name := it.Tool
-		if it.Namespace != nil && *it.Namespace != "" {
-			name = *it.Namespace + "__" + it.Tool
+		if it.Namespace != "" {
+			name = it.Namespace + "__" + it.Tool
 		}
 		return name, rawOrEmpty(it.Arguments), true
 	case "webSearch":
@@ -225,11 +318,7 @@ func fileChangeInput(changes []fileUpdateChange) json.RawMessage {
 		Changes  []change `json:"changes"`
 	}{Changes: []change{}}
 	for _, c := range changes {
-		ch := change{Path: c.Path, Kind: c.Kind.Type, Diff: c.Diff}
-		if c.Kind.MovePath != nil {
-			ch.MovePath = *c.Kind.MovePath
-		}
-		in.Changes = append(in.Changes, ch)
+		in.Changes = append(in.Changes, change{Path: c.Path, Kind: c.Kind.Type, MovePath: c.Kind.MovePath, Diff: c.Diff})
 	}
 	if len(changes) == 1 {
 		in.FilePath = changes[0].Path
@@ -248,8 +337,8 @@ func fileChangeDetail(changes []fileUpdateChange) string {
 		case "delete":
 			to = "/dev/null"
 		}
-		if c.Kind.MovePath != nil && *c.Kind.MovePath != "" {
-			to = *c.Kind.MovePath
+		if c.Kind.MovePath != "" {
+			to = c.Kind.MovePath
 		}
 		fmt.Fprintf(&sb, "--- %s\n+++ %s\n%s", from, to, c.Diff)
 		if !strings.HasSuffix(c.Diff, "\n") {
@@ -259,15 +348,19 @@ func fileChangeDetail(changes []fileUpdateChange) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
+// toolResultBlock is the result of tool call id; a failed one is an error.
+func toolResultBlock(id, text, status string) jsonlwatcher.RichContentBlock {
+	isError := status == "failed"
+	return jsonlwatcher.RichContentBlock{Type: "tool_result", ToolUseID: id, Text: text, Status: status, IsError: &isError}
+}
+
 // toolResult returns the result block of a completed tool item.
 func toolResult(it *threadItem) jsonlwatcher.RichContentBlock {
 	text, status := "", "completed"
 	var images []jsonlwatcher.RichImage
 	switch it.Type {
 	case "commandExecution":
-		if it.AggregatedOutput != nil {
-			text = strings.TrimRight(*it.AggregatedOutput, "\n")
-		}
+		text = strings.TrimRight(it.AggregatedOutput, "\n")
 		switch it.Status {
 		case "declined":
 			status = "failed"
@@ -316,15 +409,9 @@ func toolResult(it *threadItem) jsonlwatcher.RichContentBlock {
 			status, text = "failed", "Could not read "+it.Path
 		}
 	}
-	isError := status == "failed"
-	return jsonlwatcher.RichContentBlock{
-		Type:      "tool_result",
-		ToolUseID: it.ID,
-		Text:      text,
-		Status:    status,
-		IsError:   &isError,
-		Images:    images,
-	}
+	result := toolResultBlock(it.ID, text, status)
+	result.Images = images
+	return result
 }
 
 // patchSummary is apply_patch's own success output.
@@ -337,11 +424,7 @@ func patchSummary(changes []fileUpdateChange) string {
 		case "delete":
 			lines = append(lines, "D "+c.Path)
 		default:
-			path := c.Path
-			if c.Kind.MovePath != nil && *c.Kind.MovePath != "" {
-				path = *c.Kind.MovePath
-			}
-			lines = append(lines, "M "+path)
+			lines = append(lines, "M "+cmp.Or(c.Kind.MovePath, c.Path))
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -399,44 +482,21 @@ func mcpContent(blocks []json.RawMessage) (string, []jsonlwatcher.RichImage) {
 				images = append(images, jsonlwatcher.RichImage{MediaType: b.MimeType, Data: data})
 			}
 		case "inputImage":
-			header, data, ok := strings.Cut(strings.TrimPrefix(b.ImageURL, "data:"), ",")
-			mediaType, isBase64 := strings.CutSuffix(header, ";base64")
-			if !ok || !isBase64 {
-				continue
-			}
-			if decoded, err := base64.StdEncoding.DecodeString(data); err == nil && len(decoded) > 0 {
-				images = append(images, jsonlwatcher.RichImage{MediaType: mediaType, Data: decoded})
+			if img, ok := jsonlwatcher.ImageFromDataURL(b.ImageURL); ok {
+				images = append(images, img)
 			}
 		}
 	}
 	return strings.Join(texts, "\n"), images
 }
 
-// maxImageBytes bounds images read from disk for imageView items.
-const maxImageBytes = 10 << 20
-
+// readImage reads the image file an imageView item shows.
 func readImage(path string) (jsonlwatcher.RichImage, bool) {
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Size() > maxImageBytes {
-		return jsonlwatcher.RichImage{}, false
-	}
-	data, err := os.ReadFile(path)
-	if err != nil || len(data) == 0 {
-		return jsonlwatcher.RichImage{}, false
-	}
-	mediaType := http.DetectContentType(data)
-	if !strings.HasPrefix(mediaType, "image/") {
+	data, mediaType, err := native.ReadImage(path)
+	if err != nil {
 		return jsonlwatcher.RichImage{}, false
 	}
 	return jsonlwatcher.RichImage{MediaType: mediaType, Data: data}, true
-}
-
-// absPath resolves path against dir.
-func absPath(path, dir string) string {
-	if filepath.IsAbs(path) || dir == "" {
-		return path
-	}
-	return filepath.Join(dir, path)
 }
 
 func msTime(ms int64) time.Time {

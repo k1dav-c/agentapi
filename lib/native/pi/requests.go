@@ -5,6 +5,9 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
+
+	"github.com/coder/quartz"
 
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
@@ -33,7 +36,10 @@ type dialog struct {
 	// confirm while a tool runs, or any confirm).
 	approval bool
 	options  []string
-	timer    *time.Timer
+	timer    *quartz.Timer
+	// answering: Respond is writing the answer. The dialog stays open
+	// until the write succeeded, so a failed answer can be sent again.
+	answering bool
 }
 
 func (d *dialog) stopTimer() {
@@ -86,29 +92,38 @@ func (d *dialog) reply(r native.Response) (uiResponse, error) {
 
 func ptr[T any](v T) *T { return &v }
 
-// optionKind classifies a select option of an approval by its label.
+// The beginnings of the words that classify the select options of an
+// approval.
+var (
+	denyWords   = []string{"block", "deny", "reject", "decline", "skip", "disallow"}
+	cancelWords = []string{"cancel", "abort", "stop"}
+	allowWords  = []string{"allow", "yes", "approve", "accept", "run", "continue", "ok"}
+)
+
+// optionKind classifies a select option of an approval by the words of its
+// label; "no" counts only as a word of its own ("Normal mode" isn't a
+// denial). A denial or a cancel wins ("Always deny"); otherwise "always"
+// makes the option an allow_always, with or without an allow word.
 func optionKind(label string) native.OptionKind {
-	l := strings.ToLower(label)
+	words := strings.FieldsFunc(strings.ToLower(label), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	has := func(beginnings []string) bool {
+		return slices.ContainsFunc(words, func(w string) bool {
+			return slices.ContainsFunc(beginnings, func(b string) bool { return strings.HasPrefix(w, b) })
+		})
+	}
 	switch {
-	case strings.Contains(l, "always"):
-		return native.OptionKindAllowAlways
-	case hasAnyPrefix(l, "allow", "yes", "approve", "accept", "run", "continue", "ok"):
-		return native.OptionKindAllow
-	case hasAnyPrefix(l, "block", "deny", "no", "reject", "decline", "skip", "disallow"):
+	case slices.Contains(words, "no") || has(denyWords):
 		return native.OptionKindDeny
-	case hasAnyPrefix(l, "cancel", "abort", "stop"):
+	case has(cancelWords):
 		return native.OptionKindCancel
+	case slices.Contains(words, "always"):
+		return native.OptionKindAllowAlways
+	case has(allowWords):
+		return native.OptionKindAllow
 	}
 	return native.OptionKindOther
-}
-
-func hasAnyPrefix(s string, prefixes ...string) bool {
-	for _, p := range prefixes {
-		if strings.HasPrefix(s, p) {
-			return true
-		}
-	}
-	return false
 }
 
 func (a *Adapter) handleUIRequest(req uiRequest) {
@@ -138,12 +153,12 @@ func (a *Adapter) handleUIRequest(req uiRequest) {
 // tool runs is the extension's approval of that tool call (a tool_call
 // hook); other selects and text inputs are questions.
 func (a *Adapter) openDialog(req uiRequest) {
-	// The prompt that ran an extension command is under way.
-	a.acceptPrompt()
 	if a.isTurnActive() || a.hasPendingTurn() {
 		a.beginTurn()
 		a.loop.turnDialogs = append(a.loop.turnDialogs, req.ID)
 	}
+	// The prompt that ran an extension command is under way.
+	a.acceptPrompt()
 
 	d := &dialog{id: req.ID, method: req.Method, options: req.Options}
 	r := native.Request{ID: req.ID, Title: req.Title}
@@ -192,7 +207,7 @@ func (a *Adapter) openDialog(req uiRequest) {
 	if req.Timeout > 0 {
 		// Pi answers with the default itself once the timeout passes.
 		id := req.ID
-		d.timer = time.AfterFunc(time.Duration(req.Timeout)*time.Millisecond, func() {
+		d.timer = a.clock.AfterFunc(time.Duration(req.Timeout)*time.Millisecond, func() {
 			a.post(func() { a.expireDialog(id) })
 		})
 	}

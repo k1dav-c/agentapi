@@ -21,12 +21,17 @@ const (
 	methodPermissions        = "item/permissions/requestApproval"
 )
 
+// JSON-RPC error codes for the server requests AgentAPI declines.
+const (
+	errCodeMethodNotFound = -32601
+	errCodeInvalidParams  = -32602
+)
+
 // pendingRequest is a server request waiting for the user.
 type pendingRequest struct {
 	id     string
 	rpcID  json.RawMessage
 	method string
-	kind   native.RequestKind
 	turnID string
 	// toolUseID is the tool call the request is about.
 	toolUseID string
@@ -37,6 +42,9 @@ type pendingRequest struct {
 	questions []native.Question
 	form      map[string]formField
 	answered  bool
+	// answer is the result of the request_user_input tool call once it is
+	// answered, as the chat shows it.
+	answer string
 }
 
 // formField is a field of an MCP elicitation form.
@@ -63,18 +71,17 @@ func (s *loopState) serverRequest(msg rpcMessage) {
 		r, req, ok = s.elicitationRequest(msg)
 	case methodPermissions:
 		r, req, ok = s.permissionsRequest(msg)
+	default:
+		s.decline(msg, errCodeMethodNotFound, "AgentAPI does not handle "+msg.Method)
+		return
 	}
 	if !ok {
-		s.a.log.Warn("Declining a Codex request AgentAPI can't show", "method", msg.Method)
-		s.a.writeAsync(rpcResponse{JSONRPC: "2.0", ID: msg.ID, Error: &rpcError{
-			Code: -32601, Message: fmt.Sprintf("AgentAPI does not handle %s", msg.Method),
-		}})
+		s.decline(msg, errCodeInvalidParams, "AgentAPI can't read the params of "+msg.Method)
 		return
 	}
 	r.id = s.a.prefix + "-" + strings.Trim(string(msg.ID), `"`)
 	r.rpcID = msg.ID
 	r.method = msg.Method
-	r.kind = req.Kind
 	req.ID = r.id
 	req.CreatedAt = s.now()
 	req.Capability = native.ResponseLive
@@ -82,6 +89,22 @@ func (s *loopState) serverRequest(msg rpcMessage) {
 	s.a.requests[r.id] = r
 	s.a.mu.Unlock()
 	s.sink().RequestOpened(req)
+}
+
+// decline answers a request AgentAPI can't show with an error.
+func (s *loopState) decline(msg rpcMessage, code int, message string) {
+	s.a.log.Warn("Declining a Codex request AgentAPI can't show", "method", msg.Method)
+	s.a.writeAsync(rpcResponse{JSONRPC: "2.0", ID: msg.ID, Error: &rpcError{Code: code, Message: message}})
+}
+
+// addOption offers opt and records the result it sends. An option already
+// offered is skipped.
+func addOption(req *native.Request, r *pendingRequest, opt native.RequestOption, result any) {
+	if _, dup := r.results[opt.ID]; dup {
+		return
+	}
+	req.Options = append(req.Options, opt)
+	r.results[opt.ID] = result
 }
 
 // toolItem returns the open tool item itemID of the active turn.
@@ -100,34 +123,26 @@ func (s *loopState) commandApproval(msg rpcMessage) (*pendingRequest, native.Req
 	if !decode(msg, &p) {
 		return nil, native.Request{}, false
 	}
-	command, cwd := "", ""
-	if p.Command != nil {
-		command = *p.Command
-	}
-	if p.CWD != nil {
-		cwd = *p.CWD
-	}
-	display := commandDisplay(command, p.CommandActions)
-	in := map[string]string{"cmd": display}
-	if cwd != "" {
-		in["workdir"] = cwd
-	}
+	// The command that runs, not Codex's reading of it: that may leave out
+	// parts (pipes, the cd of `cd dir && ...`).
+	command := unwrapShell(p.Command)
 	req := native.Request{
-		Kind: native.RequestKindApproval, Title: display, ToolName: "exec_command",
-		ToolUseID: p.ItemID, Input: mustJSON(in),
+		Kind: native.RequestKindApproval, Title: command, ToolName: "exec_command",
+		ToolUseID: p.ItemID, Input: commandInput(p.Command, p.CWD),
 	}
 	var detail []string
-	if p.Reason != nil && *p.Reason != "" {
-		detail = append(detail, *p.Reason)
+	if p.Reason != "" {
+		detail = append(detail, p.Reason)
 	}
+	detail = append(detail, actionsDetail(p.CommandActions, command)...)
 	if p.NetworkApprovalContext != nil {
 		detail = append(detail, fmt.Sprintf("Network access to %s (%s)", p.NetworkApprovalContext.Host, p.NetworkApprovalContext.Protocol))
-		if display == "" {
+		if command == "" {
 			req.Title = "Allow network access to " + p.NetworkApprovalContext.Host
 		}
 	}
-	if cwd != "" {
-		detail = append(detail, "Working directory: "+cwd)
+	if p.CWD != "" {
+		detail = append(detail, "Working directory: "+p.CWD)
 	}
 	req.Detail = strings.Join(detail, "\n")
 	if req.Title == "" {
@@ -135,85 +150,89 @@ func (s *loopState) commandApproval(msg rpcMessage) (*pendingRequest, native.Req
 	}
 
 	r := &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, results: map[string]any{}}
-	add := func(id, label string, kind native.OptionKind, decision any) {
-		if _, dup := r.results[id]; dup {
-			return
-		}
-		req.Options = append(req.Options, native.RequestOption{ID: id, Label: label, Kind: kind})
-		r.results[id] = map[string]any{"decision": decision}
-	}
-	addDecision := func(raw json.RawMessage) {
-		var name string
-		if json.Unmarshal(raw, &name) == nil {
-			switch name {
-			case "accept":
-				add(name, "Allow", native.OptionKindAllow, name)
-			case "acceptForSession":
-				add(name, "Allow for this session", native.OptionKindAllowAlways, name)
-			case "decline":
-				add(name, "Deny", native.OptionKindDeny, name)
-			case "cancel":
-				add(name, "Deny and stop the turn", native.OptionKindCancel, name)
-			}
-			return
-		}
-		var obj map[string]json.RawMessage
-		if json.Unmarshal(raw, &obj) != nil {
-			return
-		}
-		if v, ok := obj["acceptWithExecpolicyAmendment"]; ok {
-			var amendment struct {
-				Prefix []string `json:"execpolicy_amendment"`
-			}
-			_ = json.Unmarshal(v, &amendment)
-			label := "Always allow this command"
-			if len(amendment.Prefix) > 0 {
-				label = fmt.Sprintf("Always allow commands starting with `%s`", strings.Join(amendment.Prefix, " "))
-			}
-			add("acceptWithExecpolicyAmendment", label, native.OptionKindAllowAlways, raw)
-		}
-		if v, ok := obj["applyNetworkPolicyAmendment"]; ok {
-			var amendment struct {
-				Rule struct {
-					Action string `json:"action"`
-					Host   string `json:"host"`
-				} `json:"network_policy_amendment"`
-			}
-			_ = json.Unmarshal(v, &amendment)
-			id := "applyNetworkPolicyAmendment"
-			if n := countPrefix(r.results, id); n > 0 {
-				id = fmt.Sprintf("%s:%d", id, n+1)
-			}
-			if amendment.Rule.Action == "deny" {
-				add(id, "Always block network access to "+amendment.Rule.Host, native.OptionKindDeny, raw)
-			} else {
-				add(id, "Always allow network access to "+amendment.Rule.Host, native.OptionKindAllowAlways, raw)
-			}
-		}
-	}
-	if len(p.AvailableDecisions) > 0 {
-		for _, raw := range p.AvailableDecisions {
-			addDecision(raw)
-		}
-	} else {
-		for _, name := range []string{`"accept"`, `"acceptForSession"`} {
-			addDecision(json.RawMessage(name))
-		}
-		if len(p.ProposedExecpolicyAmendment) > 0 {
-			addDecision(mustJSON(map[string]any{"acceptWithExecpolicyAmendment": map[string]any{"execpolicy_amendment": p.ProposedExecpolicyAmendment}}))
-		}
-		for _, amendment := range p.ProposedNetworkPolicyAmendments {
-			addDecision(mustJSON(map[string]json.RawMessage{"applyNetworkPolicyAmendment": mustJSON(map[string]json.RawMessage{"network_policy_amendment": amendment})}))
-		}
-		addDecision(json.RawMessage(`"cancel"`))
+	for _, decision := range commandDecisions(p) {
+		addCommandDecision(&req, r, decision)
 	}
 	// app-server accepts decline even when it doesn't offer it; denying
 	// must always be possible.
-	if _, ok := r.results["decline"]; !ok {
-		addDecision(json.RawMessage(`"decline"`))
-	}
+	addCommandDecision(&req, r, json.RawMessage(`"decline"`))
 	sortOptions(req.Options)
 	return r, req, true
+}
+
+// commandDecisions are the decisions to offer for a command: the ones
+// app-server lists, or else the ones its proposals allow.
+func commandDecisions(p commandExecutionRequestApprovalParams) []json.RawMessage {
+	if len(p.AvailableDecisions) > 0 {
+		return p.AvailableDecisions
+	}
+	decisions := []json.RawMessage{json.RawMessage(`"accept"`), json.RawMessage(`"acceptForSession"`)}
+	if len(p.ProposedExecpolicyAmendment) > 0 {
+		decisions = append(decisions, mustJSON(map[string]any{
+			"acceptWithExecpolicyAmendment": map[string]any{"execpolicy_amendment": p.ProposedExecpolicyAmendment},
+		}))
+	}
+	for _, amendment := range p.ProposedNetworkPolicyAmendments {
+		decisions = append(decisions, mustJSON(map[string]json.RawMessage{
+			"applyNetworkPolicyAmendment": mustJSON(map[string]json.RawMessage{"network_policy_amendment": amendment}),
+		}))
+	}
+	return append(decisions, json.RawMessage(`"cancel"`))
+}
+
+// addCommandDecision offers one decision of a command approval: a name
+// ("accept") or an amendment object.
+func addCommandDecision(req *native.Request, r *pendingRequest, raw json.RawMessage) {
+	add := func(id, label string, kind native.OptionKind, decision any) {
+		addOption(req, r, native.RequestOption{ID: id, Label: label, Kind: kind}, map[string]any{"decision": decision})
+	}
+	var name string
+	if json.Unmarshal(raw, &name) == nil {
+		switch name {
+		case "accept":
+			add(name, "Allow", native.OptionKindAllow, name)
+		case "acceptForSession":
+			add(name, "Allow for this session", native.OptionKindAllowAlways, name)
+		case "decline":
+			add(name, "Deny", native.OptionKindDeny, name)
+		case "cancel":
+			add(name, "Deny and stop the turn", native.OptionKindCancel, name)
+		}
+		return
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return
+	}
+	if v, ok := obj["acceptWithExecpolicyAmendment"]; ok {
+		var amendment struct {
+			Prefix []string `json:"execpolicy_amendment"`
+		}
+		_ = json.Unmarshal(v, &amendment)
+		label := "Always allow this command"
+		if len(amendment.Prefix) > 0 {
+			label = fmt.Sprintf("Always allow commands starting with `%s`", strings.Join(amendment.Prefix, " "))
+		}
+		add("acceptWithExecpolicyAmendment", label, native.OptionKindAllowAlways, raw)
+	}
+	if v, ok := obj["applyNetworkPolicyAmendment"]; ok {
+		var amendment struct {
+			Rule struct {
+				Action string `json:"action"`
+				Host   string `json:"host"`
+			} `json:"network_policy_amendment"`
+		}
+		_ = json.Unmarshal(v, &amendment)
+		id := "applyNetworkPolicyAmendment"
+		if n := countPrefix(r.results, id); n > 0 {
+			id = fmt.Sprintf("%s:%d", id, n+1)
+		}
+		if amendment.Rule.Action == "deny" {
+			add(id, "Always block network access to "+amendment.Rule.Host, native.OptionKindDeny, raw)
+		} else {
+			add(id, "Always allow network access to "+amendment.Rule.Host, native.OptionKindAllowAlways, raw)
+		}
+	}
 }
 
 func countPrefix(m map[string]any, prefix string) int {
@@ -254,8 +273,8 @@ func (s *loopState) fileChangeApproval(msg rpcMessage) (*pendingRequest, native.
 	}
 	req := native.Request{Kind: native.RequestKindApproval, Title: "Edit files", ToolName: "apply_patch", ToolUseID: p.ItemID}
 	var detail []string
-	if p.Reason != nil && *p.Reason != "" {
-		detail = append(detail, *p.Reason)
+	if p.Reason != "" {
+		detail = append(detail, p.Reason)
 	}
 	// The diff is not in the request; the fileChange item has it.
 	if state := s.toolItem(p.ItemID); state != nil {
@@ -271,8 +290,8 @@ func (s *loopState) fileChangeApproval(msg rpcMessage) (*pendingRequest, native.
 	}
 	req.Detail = strings.Join(detail, "\n\n")
 	sessionDesc := ""
-	if p.GrantRoot != nil && *p.GrantRoot != "" {
-		sessionDesc = "Also allows writes under " + *p.GrantRoot + " for the rest of the session."
+	if p.GrantRoot != "" {
+		sessionDesc = "Also allows writes under " + p.GrantRoot + " for the rest of the session."
 	}
 	r := &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, results: map[string]any{}}
 	for _, opt := range []native.RequestOption{
@@ -281,8 +300,7 @@ func (s *loopState) fileChangeApproval(msg rpcMessage) (*pendingRequest, native.
 		{ID: "decline", Label: "Deny", Kind: native.OptionKindDeny},
 		{ID: "cancel", Label: "Deny and stop the turn", Kind: native.OptionKindCancel},
 	} {
-		req.Options = append(req.Options, opt)
-		r.results[opt.ID] = map[string]any{"decision": opt.ID}
+		addOption(&req, r, opt, map[string]any{"decision": opt.ID})
 	}
 	return r, req, true
 }
@@ -337,14 +355,13 @@ func (s *loopState) userInputRequest(msg rpcMessage) (*pendingRequest, native.Re
 		req.Title = fmt.Sprintf("Codex asks %d questions", len(p.Questions))
 	}
 	// There is no item for the tool call; show it from the request.
-	if !s.ours(p.ThreadID) {
-		return &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, questions: req.Questions}, req, true
-	}
-	if t := s.turnFor(p.TurnID); t != nil && t.items[p.ItemID] == nil {
-		state := s.addItem(t, &threadItem{ID: p.ItemID, Type: "requestUserInput"}, &block{RichContentBlock: jsonlwatcher.RichContentBlock{
-			Type: "tool_use", ToolUseID: p.ItemID, ToolName: "request_user_input", ToolInput: input, Status: "running",
-		}}, s.now())
-		s.toolCallEvent(state.blk, s.now(), p.ItemID)
+	if s.ours(p.ThreadID) {
+		if t := s.turnFor(p.TurnID); t != nil && t.items[p.ItemID] == nil {
+			state := s.addItem(t, &threadItem{ID: p.ItemID, Type: "requestUserInput"}, &block{RichContentBlock: jsonlwatcher.RichContentBlock{
+				Type: "tool_use", ToolUseID: p.ItemID, ToolName: "request_user_input", ToolInput: input, Status: "running",
+			}})
+			s.toolCallEvent(state.blk, s.now(), p.ItemID)
+		}
 	}
 	return &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, questions: req.Questions}, req, true
 }
@@ -354,14 +371,7 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 	if !decode(msg, &p) {
 		return nil, native.Request{}, false
 	}
-	turnID := ""
-	if p.TurnID != nil {
-		turnID = *p.TurnID
-	}
-	r := &pendingRequest{turnID: turnID, results: map[string]any{
-		"decline": mcpServerElicitationResponse{Action: "decline"},
-		"cancel":  mcpServerElicitationResponse{Action: "cancel"},
-	}}
+	r := &pendingRequest{turnID: p.TurnID, results: map[string]any{}}
 	req := native.Request{Kind: native.RequestKindApproval, Title: p.Message}
 	if req.Title == "" {
 		req.Title = fmt.Sprintf("The %s MCP server asks for input", p.ServerName)
@@ -378,10 +388,6 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 			}
 		}
 	}
-	deny := []native.RequestOption{
-		{ID: "decline", Label: "Deny", Kind: native.OptionKindDeny},
-		{ID: "cancel", Label: "Cancel", Kind: native.OptionKindCancel},
-	}
 
 	var properties map[string]mcpElicitationProperty
 	if p.RequestedSchema != nil {
@@ -390,8 +396,8 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 	switch {
 	case p.Mode == "url":
 		req.Detail = "Open " + p.URL
-		r.results["accept"] = mcpServerElicitationResponse{Action: "accept"}
-		req.Options = append([]native.RequestOption{{ID: "accept", Label: "Continue", Description: "After completing the step at the link", Kind: native.OptionKindAllow}}, deny...)
+		addOption(&req, r, native.RequestOption{ID: "accept", Label: "Continue", Description: "After completing the step at the link", Kind: native.OptionKindAllow},
+			mcpServerElicitationResponse{Action: "accept"})
 	case len(properties) == 0 || (p.Meta != nil && p.Meta.ApprovalKind == "mcp_tool_call"):
 		if p.Meta != nil {
 			var detail []string
@@ -406,12 +412,11 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 			}
 			req.Detail = strings.Join(detail, "\n")
 		}
-		r.results["accept"] = mcpServerElicitationResponse{Action: "accept", Content: map[string]any{}}
-		req.Options = append([]native.RequestOption{{ID: "accept", Label: "Allow", Kind: native.OptionKindAllow}}, deny...)
+		addOption(&req, r, native.RequestOption{ID: "accept", Label: "Allow", Kind: native.OptionKindAllow},
+			mcpServerElicitationResponse{Action: "accept", Content: map[string]any{}})
 	default:
 		// A form: one question per field, answered with accept + content.
 		req.Kind = native.RequestKindQuestion
-		req.Options = deny
 		r.form = map[string]formField{}
 		names := make([]string, 0, len(properties))
 		for name := range properties {
@@ -419,13 +424,16 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 		}
 		slices.Sort(names)
 		for _, name := range names {
-			prop := properties[name]
-			q, field := formQuestion(name, prop)
+			q, field := formQuestion(name, properties[name])
 			req.Questions = append(req.Questions, q)
 			r.form[name] = field
 		}
 		r.questions = req.Questions
 	}
+	addOption(&req, r, native.RequestOption{ID: "decline", Label: "Deny", Kind: native.OptionKindDeny},
+		mcpServerElicitationResponse{Action: "decline"})
+	addOption(&req, r, native.RequestOption{ID: "cancel", Label: "Cancel", Kind: native.OptionKindCancel},
+		mcpServerElicitationResponse{Action: "cancel"})
 	return r, req, true
 }
 
@@ -486,22 +494,19 @@ func (s *loopState) permissionsRequest(msg rpcMessage) (*pendingRequest, native.
 		ToolUseID: p.ItemID, Input: p.Permissions,
 	}
 	var detail []string
-	if p.Reason != nil && *p.Reason != "" {
-		detail = append(detail, *p.Reason)
+	if p.Reason != "" {
+		detail = append(detail, p.Reason)
 	}
 	detail = append(detail, "Requested: "+string(p.Permissions))
 	req.Detail = strings.Join(detail, "\n")
 	granted := rawOrEmpty(p.Permissions)
-	r := &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, results: map[string]any{
-		"turn":    permissionsRequestApprovalResponse{Permissions: granted, Scope: "turn"},
-		"session": permissionsRequestApprovalResponse{Permissions: granted, Scope: "session"},
-		"decline": permissionsRequestApprovalResponse{Permissions: json.RawMessage("{}"), Scope: "turn"},
-	}}
-	req.Options = []native.RequestOption{
-		{ID: "turn", Label: "Allow for this turn", Kind: native.OptionKindAllow},
-		{ID: "session", Label: "Allow for this session", Kind: native.OptionKindAllowAlways},
-		{ID: "decline", Label: "Deny", Kind: native.OptionKindDeny},
-	}
+	r := &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, results: map[string]any{}}
+	addOption(&req, r, native.RequestOption{ID: "turn", Label: "Allow for this turn", Kind: native.OptionKindAllow},
+		permissionsRequestApprovalResponse{Permissions: granted, Scope: "turn"})
+	addOption(&req, r, native.RequestOption{ID: "session", Label: "Allow for this session", Kind: native.OptionKindAllowAlways},
+		permissionsRequestApprovalResponse{Permissions: granted, Scope: "session"})
+	addOption(&req, r, native.RequestOption{ID: "decline", Label: "Deny", Kind: native.OptionKindDeny},
+		permissionsRequestApprovalResponse{Permissions: json.RawMessage("{}"), Scope: "turn"})
 	return r, req, true
 }
 
@@ -523,11 +528,7 @@ func (r *pendingRequest) result(resp native.Response) (any, error) {
 		}
 	}
 	if r.form == nil {
-		out := toolRequestUserInputResponse{Answers: map[string]userInputAnswer{}}
-		for _, q := range r.questions {
-			out.Answers[q.ID] = userInputAnswer{Answers: resp.Answers[q.ID]}
-		}
-		return out, nil
+		return r.userInputResponse(resp.Answers, false), nil
 	}
 	content := map[string]any{}
 	for _, q := range r.questions {
@@ -538,6 +539,20 @@ func (r *pendingRequest) result(resp native.Response) (any, error) {
 		content[q.ID] = value
 	}
 	return mcpServerElicitationResponse{Action: "accept", Content: content}, nil
+}
+
+// userInputResponse is the answer to a request_user_input request; redact
+// replaces the answers to secret questions, for everyone but the agent.
+func (r *pendingRequest) userInputResponse(answers map[string][]string, redact bool) toolRequestUserInputResponse {
+	out := toolRequestUserInputResponse{Answers: map[string]userInputAnswer{}}
+	for _, q := range r.questions {
+		a := answers[q.ID]
+		if redact && q.Secret {
+			a = []string{native.RedactedAnswer}
+		}
+		out.Answers[q.ID] = userInputAnswer{Answers: a}
+	}
+	return out
 }
 
 // convert turns the answers to a form field into the field's value.
@@ -564,7 +579,7 @@ func (f formField) convert(answers []string) (any, error) {
 }
 
 // Respond implements native.Adapter.
-func (a *Adapter) Respond(ctx context.Context, requestID string, response native.Response) error {
+func (a *Adapter) Respond(_ context.Context, requestID string, response native.Response) error {
 	a.mu.Lock()
 	r := a.requests[requestID]
 	if r == nil || r.answered {
@@ -577,6 +592,10 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 		return err
 	}
 	r.answered = true
+	if r.method == methodRequestUserInput {
+		// The tool call shows it once app-server has it (requestResolved).
+		r.answer = string(mustJSON(r.userInputResponse(response.Answers, true)))
+	}
 	a.mu.Unlock()
 
 	if err := a.write(rpcResponse{JSONRPC: "2.0", ID: r.rpcID, Result: result}); err != nil {
@@ -585,31 +604,13 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 		a.mu.Unlock()
 		return err
 	}
-	if r.method == methodRequestUserInput {
-		_ = a.inLoop(ctx, func() { a.st.userInputAnswered(r, result) })
-	}
 	return nil
-}
-
-// userInputAnswered shows the answers as the result of the
-// request_user_input tool call, as the rollout records them.
-func (s *loopState) userInputAnswered(r *pendingRequest, result any) {
-	if s.turn == nil {
-		return
-	}
-	state := s.turn.items[r.toolUseID]
-	if state == nil || state.done {
-		return
-	}
-	isError := false
-	s.finishTool(state, jsonlwatcher.RichContentBlock{
-		Type: "tool_result", ToolUseID: r.toolUseID, Text: string(mustJSON(result)), Status: "completed", IsError: &isError,
-	}, s.now())
 }
 
 // requestResolved handles serverRequest/resolved: app-server no longer
 // waits for the request, because it was answered or it gave up (the turn
-// was interrupted).
+// was interrupted). It comes before what the answer leads to, so the
+// request_user_input tool call ends here.
 func (s *loopState) requestResolved(rpcID string) {
 	s.a.mu.Lock()
 	var r *pendingRequest
@@ -620,31 +621,55 @@ func (s *loopState) requestResolved(rpcID string) {
 			break
 		}
 	}
+	answered, answer := false, ""
+	if r != nil {
+		answered, answer = r.answered, r.answer
+	}
 	s.a.mu.Unlock()
-	if r == nil || r.answered {
+	if r == nil {
 		return
 	}
-	s.sink().RequestClosed(r.id)
-	if r.method == methodRequestUserInput && s.turn != nil {
-		if state := s.turn.items[r.toolUseID]; state != nil && !state.done {
-			isError := true
-			s.finishTool(state, jsonlwatcher.RichContentBlock{
-				Type: "tool_result", ToolUseID: r.toolUseID, Text: "Not answered", Status: "failed", IsError: &isError,
-			}, s.now())
+	if !answered {
+		s.sink().RequestClosed(r.id)
+	}
+	if r.method != methodRequestUserInput || s.turn == nil {
+		return
+	}
+	state := s.turn.items[r.toolUseID]
+	if state == nil || state.done {
+		return
+	}
+	result := toolResultBlock(r.toolUseID, "Not answered", "failed")
+	if answered {
+		result = toolResultBlock(r.toolUseID, answer, "completed")
+	}
+	s.finishTool(state, result, s.now())
+}
+
+// closeTurnRequests forgets the open requests when a turn ends, so a late
+// answer is refused: the conversation closes all of them then (see
+// native.Sink.TurnCompleted). app-server drops those of the turn itself,
+// but an MCP elicitation, say, outlives the turn, so each request not
+// answered is dismissed; app-server ignores the answer to a request it
+// dropped.
+func (s *loopState) closeTurnRequests() {
+	s.a.mu.Lock()
+	defer s.a.mu.Unlock()
+	for id, r := range s.a.requests {
+		delete(s.a.requests, id)
+		if result, ok := r.dismissal(); ok && !r.answered {
+			s.a.writeAsync(rpcResponse{JSONRPC: "2.0", ID: r.rpcID, Result: result})
 		}
 	}
 }
 
-// closeTurnRequests forgets the requests of a turn that ended, so a late
-// answer is refused (app-server would ignore it). The conversation expires
-// them when it learns the turn ended: approvals can't be answered any
-// more, questions can be answered with a new message.
-func (s *loopState) closeTurnRequests(t *turnState) {
-	s.a.mu.Lock()
-	defer s.a.mu.Unlock()
-	for id, r := range s.a.requests {
-		if r.turnID == "" || r.turnID == t.id {
-			delete(s.a.requests, id)
-		}
+// dismissal is the answer to r when nobody can answer it: an MCP
+// elicitation is cancelled, an approval declined.
+func (r *pendingRequest) dismissal() (any, bool) {
+	id := "decline"
+	if r.method == methodElicitation {
+		id = "cancel"
 	}
+	result, ok := r.results[id]
+	return result, ok
 }

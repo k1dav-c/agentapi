@@ -419,18 +419,28 @@ func parseCodexOutputImages(raw json.RawMessage) []RichImage {
 		if b.Type != "input_image" {
 			continue
 		}
-		header, data, ok := strings.Cut(strings.TrimPrefix(b.ImageURL, "data:"), ",")
-		mediaType, isBase64 := strings.CutSuffix(header, ";base64")
-		if !ok || !isBase64 || !strings.HasPrefix(b.ImageURL, "data:") {
-			continue
+		if img, ok := ImageFromDataURL(b.ImageURL); ok {
+			images = append(images, img)
 		}
-		decoded, err := base64.StdEncoding.DecodeString(data)
-		if err != nil || len(decoded) == 0 {
-			continue
-		}
-		images = append(images, RichImage{MediaType: mediaType, Data: decoded})
 	}
 	return images
+}
+
+// ImageFromDataURL decodes an image Codex passes as a base64 data: URL
+// ("data:image/png;base64,..."). ok is false for any other URL and for
+// data that doesn't decode.
+func ImageFromDataURL(url string) (img RichImage, ok bool) {
+	rest, isData := strings.CutPrefix(url, "data:")
+	header, data, hasData := strings.Cut(rest, ",")
+	mediaType, isBase64 := strings.CutSuffix(header, ";base64")
+	if !isData || !hasData || !isBase64 {
+		return RichImage{}, false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil || len(decoded) == 0 {
+		return RichImage{}, false
+	}
+	return RichImage{MediaType: mediaType, Data: decoded}, true
 }
 
 // parseCodexOutputBlocks parses a serialized array of {type, text}

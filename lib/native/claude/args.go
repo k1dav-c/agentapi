@@ -3,6 +3,8 @@ package claude
 import (
 	"fmt"
 	"strings"
+
+	"github.com/coder/agentapi/lib/native"
 )
 
 // protocolFlags are always added: headless mode, the stream-json protocol in
@@ -34,13 +36,18 @@ var conflictingFlags = map[string]string{
 	"--fork-session":           "AgentAPI picks the session to resume",
 	"--from-pr":                "AgentAPI picks the session to resume",
 	"--teleport":               "AgentAPI picks the session to resume",
+	"--resume-session-at":      "AgentAPI picks the session to resume",
+	"--resume-drops-turn":      "AgentAPI picks the session to resume",
 	"--permission-prompt-tool": "permission prompts are answered through AgentAPI's requests",
 	"--permission-prompts":     "permission prompts are answered through AgentAPI's requests",
+	"--sdk-url":                "the native transport speaks stream-json on stdin and stdout",
 	"--bg":                     "the native transport runs Claude Code in the foreground",
 	"--background":             "the native transport runs Claude Code in the foreground",
 	"--cloud":                  "the native transport runs Claude Code locally",
+	"--remote":                 "the native transport runs Claude Code locally",
 	"--desktop":                "the native transport runs Claude Code headless",
 	"--remote-control":         "the native transport runs Claude Code headless",
+	"--rc":                     "the native transport runs Claude Code headless",
 }
 
 // redundantFlags are protocol flags the adapter adds anyway; a user's copy is
@@ -56,15 +63,18 @@ var redundantFlags = map[string]bool{
 var valueFlags = map[string]bool{
 	"--agent": true, "--agents": true, "--append-system-prompt": true, "--autocompact": true,
 	"--debug-file": true, "--effort": true, "--environment": true, "--fallback-model": true,
-	"--input-format": true, "--json-schema": true, "--max-budget-usd": true, "--model": true,
-	"-n": true, "--name": true, "--output-format": true, "--permission-mode": true,
-	"--permission-prompts": true, "--permission-prompt-tool": true, "--plugin-dir": true,
-	"--plugin-url": true, "--remote-control-session-name-prefix": true, "--session-id": true,
+	"--json-schema": true, "--max-budget-usd": true, "--model": true,
+	"-n": true, "--name": true, "--permission-mode": true, "--plugin-dir": true,
+	"--plugin-url": true, "--remote-control-session-name-prefix": true,
 	"--setting-sources": true, "--settings": true, "--system-prompt": true,
 	"--system-prompt-file": true, "--append-system-prompt-file": true,
 	"--system-prompt-snapshot": true, "--thinking": true, "--thinking-display": true,
 	"--max-thinking-tokens": true, "--max-turns": true,
 }
+
+// shortValueFlags are the short flags that take a value: -d [filter],
+// -n <name>, -r [value] and -w [name].
+var shortValueFlags = map[string]bool{"-d": true, "-n": true, "-r": true, "-w": true}
 
 // variadicFlags take every following argument up to the next flag.
 var variadicFlags = map[string]bool{
@@ -77,11 +87,11 @@ var variadicFlags = map[string]bool{
 type parsedArgs struct {
 	// pass are the user's arguments to pass through.
 	pass []string
-	// permissionMode: the user chose a permission mode (or to skip
-	// permissions).
-	permissionMode bool
-	// bypass: the session runs in bypassPermissions, the default when the
-	// user chooses no mode.
+	// mode is the permission mode the adapter adds because the user chose
+	// none (bypassPermissions, see avoidRootBypass); empty when the user
+	// chose one or to skip permissions.
+	mode string
+	// bypass: the session runs in bypassPermissions.
 	bypass       bool
 	thinking     bool
 	thinkingOff  bool
@@ -92,18 +102,34 @@ type parsedArgs struct {
 	settings bool
 }
 
-// ValidateArgs checks the user's Claude Code arguments (after the program)
-// for flags that conflict with the native transport.
-func ValidateArgs(args []string) error {
-	_, err := parseArgs(args)
-	return err
+// Permission modes: bypassPermissions is used when the user chooses none;
+// in default Claude Code asks before it runs a tool.
+const (
+	modeBypass  = "bypassPermissions"
+	modeDefault = "default"
+)
+
+// flagNames returns the flags name stands for: name itself, or each flag
+// of a group of short flags, which Claude Code splits (-pc is -p -c). A
+// flag in a group that takes a value takes the rest of the group (-dapi is
+// -d api).
+func flagNames(name string) []string {
+	if len(name) <= 2 || name[1] == '-' {
+		return []string{name}
+	}
+	var flags []string
+	for _, c := range name[1:] {
+		flag := "-" + string(c)
+		flags = append(flags, flag)
+		if shortValueFlags[flag] {
+			break
+		}
+	}
+	return flags
 }
 
-// modeBypass is the permission mode used when the user chooses none.
-const modeBypass = "bypassPermissions"
-
 func parseArgs(args []string) (parsedArgs, error) {
-	p := parsedArgs{bypass: true}
+	p := parsedArgs{mode: modeBypass, bypass: true}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -115,8 +141,15 @@ func parseArgs(args []string) (parsedArgs, error) {
 			continue
 		}
 		name, value, hasValue := strings.Cut(arg, "=")
-		if reason, ok := conflictingFlags[name]; ok {
-			return parsedArgs{}, fmt.Errorf("%s can't be used with the native transport: %s", name, reason)
+		for _, flag := range flagNames(name) {
+			reason, ok := conflictingFlags[flag]
+			if !ok {
+				continue
+			}
+			if flag != name {
+				flag += " (in " + name + ")"
+			}
+			return parsedArgs{}, fmt.Errorf("%s can't be used with the native transport: %s", flag, reason)
 		}
 		if redundantFlags[name] {
 			continue
@@ -135,10 +168,10 @@ func parseArgs(args []string) (parsedArgs, error) {
 		}
 		switch name {
 		case "--permission-mode":
-			p.permissionMode = true
+			p.mode = ""
 			p.bypass = value == modeBypass
 		case "--dangerously-skip-permissions":
-			p.permissionMode = true
+			p.mode = ""
 			p.bypass = true
 		case "--thinking":
 			p.thinking = true
@@ -156,6 +189,43 @@ func parseArgs(args []string) (parsedArgs, error) {
 	return p, nil
 }
 
+// avoidRootBypass switches the mode the adapter adds to default where
+// Claude Code refuses bypassPermissions: run as root (uid 0) outside a
+// sandbox it knows of (IS_SANDBOX=1, CLAUDE_CODE_BUBBLEWRAP), it exits at
+// startup ("cannot be used with root/sudo privileges"). env is the
+// session's environment and uid the user it runs as. It reports whether
+// it switched.
+func (p *parsedArgs) avoidRootBypass(env []string, uid int) bool {
+	if p.mode != modeBypass || uid != 0 || envValue(env, "IS_SANDBOX") == "1" ||
+		envTrue(envValue(env, "CLAUDE_CODE_BUBBLEWRAP")) {
+		return false
+	}
+	p.mode = modeDefault
+	p.bypass = false
+	return true
+}
+
+// envValue returns the value of the variable name in env, the last one if
+// it is set more than once (as exec does).
+func envValue(env []string, name string) string {
+	value := ""
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == name {
+			value = v
+		}
+	}
+	return value
+}
+
+// envTrue reports whether Claude Code reads value as an enabled flag.
+func envTrue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
 // buildArgs returns the full argument list (without the program): the
 // protocol flags, the session flag, the defaults the user didn't override,
 // then the user's own arguments.
@@ -167,11 +237,11 @@ func buildArgs(p parsedArgs, sessionID, resumeRef string) []string {
 	} else if sessionID != "" {
 		args = append(args, "--session-id="+sessionID)
 	}
-	if !p.permissionMode {
+	if p.mode != "" {
 		// Tools run without asking unless the user picks a mode (e.g.
 		// --permission-mode default to approve them from the chat).
 		// Questions and plans still come as requests.
-		args = append(args, "--permission-mode", modeBypass)
+		args = append(args, "--permission-mode", p.mode)
 	}
 	if !p.thinking {
 		args = append(args, "--thinking", "adaptive")
@@ -183,41 +253,11 @@ func buildArgs(p parsedArgs, sessionID, resumeRef string) []string {
 	return append(args, p.pass...)
 }
 
-// leakedEnv are variables a running Claude Code session sets for the
-// processes it starts (its Bash tool, hooks, MCP servers). They describe
-// that parent session, not the one AgentAPI starts: its session id and pid,
-// its messaging socket and token, its IDE connection, its effort level, the
-// marker that the process runs inside Claude Code and the SDK entrypoint.
-// Configuration such as CLAUDE_CONFIG_DIR or ANTHROPIC_* is kept.
-var leakedEnv = map[string]bool{
-	"CLAUDECODE":                            true,
-	"CLAUDE_CODE_ENTRYPOINT":                true,
-	"CLAUDE_CODE_SESSION_ID":                true,
-	"CLAUDE_CODE_CHILD_SESSION":             true,
-	"CLAUDE_CODE_SESSION_ATTENDED":          true,
-	"CLAUDE_CODE_EXECPATH":                  true,
-	"CLAUDE_CODE_MESSAGING_SOCKET":          true,
-	"CLAUDE_CODE_MESSAGING_TOKEN":           true,
-	"CLAUDE_CODE_SSE_PORT":                  true,
-	"CLAUDE_PID":                            true,
-	"CLAUDE_EFFORT":                         true,
-	"CLAUDE_AGENT_SDK_VERSION":              true,
-	"AI_AGENT":                              true,
-	"CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS": true,
-	"CLAUDE_CODE_SDK_READS_SESSION_STATE":   true,
-}
-
-// buildEnv filters env and adds the variables the adapter relies on.
+// buildEnv returns env (the process environment if nil) without the
+// variables a parent agent session leaves behind, and adds the ones the
+// adapter relies on.
 func buildEnv(env []string) []string {
-	out := make([]string, 0, len(env)+2)
-	for _, kv := range env {
-		name, _, _ := strings.Cut(kv, "=")
-		if leakedEnv[name] {
-			continue
-		}
-		out = append(out, kv)
-	}
-	return append(out,
+	return native.AgentEnv(env,
 		// Reports session state changes; "idle" is the turn-over signal.
 		"CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1",
 		// The entrypoint for the CLI driven by another program.

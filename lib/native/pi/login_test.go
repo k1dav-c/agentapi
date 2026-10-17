@@ -67,12 +67,11 @@ func TestLoginCheckAtStart(t *testing.T) {
 			h.answerState(noCredentialsState)
 			h.answerModels(reply)
 			require.NoError(t, h.startResult())
-			h.settle()
-			require.Eventually(t, func() bool {
-				h.sink.mu.Lock()
-				defer h.sink.mu.Unlock()
-				return slices.Equal(h.sink.refs, []string{"01a1440e-b3a3-7317-b135-afa7fda22fac"})
-			}, 5*time.Second, time.Millisecond, "the session is reported once Pi may start")
+			// Before Start returns, so the conversation finds them.
+			h.sink.mu.Lock()
+			assert.Equal(t, []string{"01a1440e-b3a3-7317-b135-afa7fda22fac"}, h.sink.refs, "the session is reported once Pi may start")
+			h.sink.mu.Unlock()
+			assert.False(t, h.a.Capabilities().Images, "the unknown model takes no images")
 		})
 	}
 
@@ -80,6 +79,17 @@ func TestLoginCheckAtStart(t *testing.T) {
 		t.Parallel()
 		h := newHarness(t, Config{}, "")
 		h.answerState(noState)
+		require.NoError(t, h.startResult())
+		assert.Equal(t, []string{"cmd:get_state"}, h.pi.events())
+		h.sink.mu.Lock()
+		assert.Equal(t, []string{"test-session"}, h.sink.refs)
+		h.sink.mu.Unlock()
+	})
+
+	t.Run("a malformed state skips the check", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, Config{}, "")
+		h.answerState(`["not", "a", "state"]`)
 		require.NoError(t, h.startResult())
 		assert.Equal(t, []string{"cmd:get_state"}, h.pi.events())
 	})
@@ -140,18 +150,31 @@ func TestLoginLostMidSession(t *testing.T) {
 func TestIsAuthError(t *testing.T) {
 	t.Parallel()
 	for text, want := range map[string]bool{
-		"No API key found for the selected model.\n\nUse /login to log into a provider via OAuth or API key.":    true,
-		"No model selected.\n\nUse /login to log into a provider via OAuth or API key.":                          true,
-		`401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`:             true,
-		"401 Incorrect API key provided: sk-dummy.":                                                              true,
-		"Failed to refresh OAuth token for openai-codex":                                                         true,
-		"Codex error: The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.": false,
+		"No API key found for the selected model.\n\nUse /login to log into a provider via OAuth or API key.": true,
+		"No model selected.\n\nUse /login to log into a provider via OAuth or API key.":                       true,
+		"No model selected": true,
+		"No models available. Check your installation or add models to models.json.":                                                                      true,
+		`Authentication failed for "openai-codex". Credentials may have expired or network is unavailable. Run '/login openai-codex' to re-authenticate.`: true,
+		`401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`:                                                      true,
+		"401 Incorrect API key provided: sk-dummy.":                                                                                                       true,
+		"Failed to refresh OAuth token for openai-codex":                                                                                                  true,
+		"Codex error: The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.":                                          false,
 		"429 rate limit exceeded":     false,
 		"overloaded_error (HTTP 529)": false,
 	} {
 		assert.Equal(t, want, isAuthError(text), text)
 	}
-	assert.True(t, stateHasModel(json.RawMessage(noState)))
-	assert.False(t, stateHasModel(json.RawMessage(noCredentialsState)))
-	assert.False(t, stateHasModel(json.RawMessage(`{"sessionId":"s"}`)))
+}
+
+func TestStateHasModel(t *testing.T) {
+	t.Parallel()
+	for state, want := range map[string]bool{
+		noState:             true,
+		noCredentialsState:  false,
+		`{"sessionId":"s"}`: false,
+	} {
+		var s sessionState
+		require.NoError(t, json.Unmarshal([]byte(state), &s))
+		assert.Equal(t, want, s.hasModel(), state)
+	}
 }

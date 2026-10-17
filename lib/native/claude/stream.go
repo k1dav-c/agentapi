@@ -2,8 +2,8 @@ package claude
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -24,7 +24,6 @@ type frame struct {
 	// that runs it.
 	ParentToolUseID *string         `json:"parent_tool_use_id"`
 	Timestamp       string          `json:"timestamp"`
-	IsReplay        bool            `json:"isReplay"`
 	Message         json.RawMessage `json:"message"`
 
 	// stream_event
@@ -59,15 +58,6 @@ type frame struct {
 	Error json.RawMessage `json:"error"`
 }
 
-// assistantError returns the error kind of an assistant frame, or "".
-func (f *frame) assistantError() string {
-	var kind string
-	if json.Unmarshal(f.Error, &kind) != nil {
-		return ""
-	}
-	return kind
-}
-
 // subagent reports whether the frame belongs to a subagent.
 func (f *frame) subagent() bool { return f.ParentToolUseID != nil && *f.ParentToolUseID != "" }
 
@@ -80,12 +70,27 @@ func stringField(raw json.RawMessage) string {
 	return s
 }
 
+// decode is json.Unmarshal that keeps what it could read when a field has
+// an unexpected type: Unmarshal fills the other fields and reports only the
+// first mismatch. A frame isn't lost to one field that changed shape; a
+// lost result would never end the turn, a lost permission request never be
+// answered.
+func decode(data []byte, v any) error {
+	err := json.Unmarshal(data, v)
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		return nil
+	}
+	return err
+}
+
 // apiMessage is the message of an assistant frame or message_start event.
 type apiMessage struct {
-	ID      string              `json:"id"`
-	Model   string              `json:"model"`
-	Content json.RawMessage     `json:"content"`
-	Usage   *jsonlwatcher.Usage `json:"usage"`
+	ID         string              `json:"id"`
+	Model      string              `json:"model"`
+	Content    json.RawMessage     `json:"content"`
+	StopReason *string             `json:"stop_reason"`
+	Usage      *jsonlwatcher.Usage `json:"usage"`
 }
 
 // streamEvent is the Anthropic SSE event of a stream_event frame.
@@ -151,7 +156,8 @@ type resultRef struct {
 // null), a tool result between the blocks of one message doesn't split it,
 // text-only user frames (interrupt markers, replayed prompts) are not tool
 // results, and subagent frames are left out (the session log keeps them in
-// separate files too). Block conversion reuses the session-log parser.
+// separate files too). Blocks are converted with the session-log parser's
+// functions.
 //
 // It is used by the read loop only.
 type streamParser struct {
@@ -163,10 +169,16 @@ type streamParser struct {
 	messages  map[string]*assistantMessage
 	order     []string
 	results   map[string]resultRef
+	// current is the message the last message_start began.
+	current string
 	// background holds the tool calls of backgrounded tasks (subagents,
 	// background commands) that haven't finished; their results stay
 	// running until the task reports.
 	background map[string]bool
+	// userPrefix and userSeq make ids for user frames without one. The
+	// random prefix keeps them from repeating those of an earlier adapter,
+	// whose messages the conversation keeps.
+	userPrefix string
 	userSeq    int
 }
 
@@ -178,6 +190,7 @@ func newStreamParser(clock quartz.Clock, throttle time.Duration) *streamParser {
 		messages:   make(map[string]*assistantMessage),
 		results:    make(map[string]resultRef),
 		background: make(map[string]bool),
+		userPrefix: newUUID()[:8],
 	}
 }
 
@@ -219,6 +232,34 @@ func (p *streamParser) due(m *assistantMessage) bool {
 	return !m.sent || p.clock.Since(m.lastSent) >= p.throttle
 }
 
+// nextFlush returns when the first change the throttle held back may be
+// sent, or the zero time if there is none.
+func (p *streamParser) nextFlush() time.Time {
+	var next time.Time
+	for _, m := range p.messages {
+		if !m.dirty || len(m.blocks) == 0 {
+			continue
+		}
+		if at := m.lastSent.Add(p.throttle); next.IsZero() || at.Before(next) {
+			next = at
+		}
+	}
+	return next
+}
+
+// flush returns snapshots of the messages whose held-back changes may be
+// sent now, so a pause in the stream doesn't leave them unsent.
+func (p *streamParser) flush() []jsonlwatcher.RichMessage {
+	var out []jsonlwatcher.RichMessage
+	for _, id := range p.order {
+		m := p.messages[id]
+		if m.dirty && len(m.blocks) > 0 && p.due(m) {
+			out = append(out, p.snapshot(m))
+		}
+	}
+	return out
+}
+
 func cloneBlock(b jsonlwatcher.RichContentBlock) jsonlwatcher.RichContentBlock {
 	if b.Images != nil {
 		b.Images = append([]jsonlwatcher.RichImage(nil), b.Images...)
@@ -253,12 +294,17 @@ func (p *streamParser) streamEvent(f *frame) []jsonlwatcher.RichMessage {
 		if id == "" {
 			id = ev.Message.ID
 		}
+		p.current = id
 		m := p.message(id, ev.Message.Model)
 		m.streamed = true
 		if ev.Message.Usage != nil && m.msg.Usage == nil {
 			m.msg.Usage = ev.Message.Usage
 		}
 		return nil
+	}
+	if id == "" {
+		// The events of a message follow its message_start.
+		id = p.current
 	}
 	m, ok := p.messages[id]
 	if !ok {
@@ -326,11 +372,17 @@ func (p *streamParser) assistant(f *frame) ([]jsonlwatcher.RichMessage, []jsonlw
 		return nil, nil
 	}
 	m := p.message(msg.ID, msg.Model)
-	if !m.streamed && msg.Usage != nil {
-		// Without partial messages this is the only usage there is.
-		m.msg.Usage = msg.Usage
+	if !m.streamed {
+		// A message that wasn't streamed (a synthetic one such as "Not
+		// logged in") has its only stop reason and usage here.
+		if msg.StopReason != nil {
+			m.msg.StopReason = *msg.StopReason
+		}
+		if msg.Usage != nil {
+			m.msg.Usage = msg.Usage
+		}
 	}
-	for _, block := range convertAssistantBlocks(msg) {
+	for _, block := range jsonlwatcher.ClaudeContentBlocks(msg.Content) {
 		placed := false
 		// Blocks complete in index order, each just before its
 		// content_block_stop: the first one still streaming is this one.
@@ -348,27 +400,6 @@ func (p *streamParser) assistant(f *frame) ([]jsonlwatcher.RichMessage, []jsonlw
 	return []jsonlwatcher.RichMessage{p.snapshot(m)}, p.sessionEvents(f)
 }
 
-// convertAssistantBlocks converts an assistant frame's blocks with the
-// session-log parser.
-func convertAssistantBlocks(msg apiMessage) []jsonlwatcher.RichContentBlock {
-	line, err := json.Marshal(map[string]any{
-		"type":    "assistant",
-		"message": map[string]any{"id": msg.ID, "role": "assistant", "content": msg.Content},
-	})
-	if err != nil {
-		return nil
-	}
-	parser := jsonlwatcher.NewClaudeParser()
-	if _, err := parser.ParseLine(line); err != nil {
-		return nil
-	}
-	var blocks []jsonlwatcher.RichContentBlock
-	for _, m := range parser.Flush() {
-		blocks = append(blocks, m.Content...)
-	}
-	return blocks
-}
-
 // user applies a user frame of the main thread: tool results, a replayed
 // prompt or an interrupt marker.
 func (p *streamParser) user(f *frame) ([]jsonlwatcher.RichMessage, []jsonlwatcher.SessionEvent) {
@@ -384,7 +415,7 @@ func (p *streamParser) user(f *frame) ([]jsonlwatcher.RichMessage, []jsonlwatche
 	id := f.UUID
 	if id == "" {
 		p.userSeq++
-		id = fmt.Sprintf("user-%d", p.userSeq)
+		id = fmt.Sprintf("user-%s-%d", p.userPrefix, p.userSeq)
 	}
 	rich := &jsonlwatcher.RichMessage{MessageID: id, Role: "user", Timestamp: p.clock.Now()}
 	var text string
@@ -415,18 +446,18 @@ func (p *streamParser) user(f *frame) ([]jsonlwatcher.RichMessage, []jsonlwatche
 // userBlock converts one content block of a user frame.
 func (p *streamParser) userBlock(raw json.RawMessage) (jsonlwatcher.RichContentBlock, bool) {
 	var head struct {
-		Type      string                    `json:"type"`
-		Text      string                    `json:"text"`
-		ToolUseID string                    `json:"tool_use_id"`
-		IsError   *bool                     `json:"is_error"`
-		Source    *jsonlwatcher.ImageSource `json:"source"`
+		Type   string                    `json:"type"`
+		Text   string                    `json:"text"`
+		Source *jsonlwatcher.ImageSource `json:"source"`
 	}
 	if json.Unmarshal(raw, &head) != nil {
 		return jsonlwatcher.RichContentBlock{}, false
 	}
 	switch head.Type {
 	case "tool_result":
-		block := convertToolResult(raw)
+		var result jsonlwatcher.ToolResultBlock
+		_ = decode(raw, &result)
+		block := jsonlwatcher.ClaudeToolResult(result)
 		block.Status = "completed"
 		switch {
 		case p.background[block.ToolUseID]:
@@ -439,10 +470,8 @@ func (p *streamParser) userBlock(raw json.RawMessage) (jsonlwatcher.RichContentB
 		return jsonlwatcher.RichContentBlock{Type: "text", Text: head.Text}, true
 	case "image":
 		block := jsonlwatcher.RichContentBlock{Type: "image"}
-		if head.Source != nil && head.Source.Type == "base64" {
-			if data, err := base64.StdEncoding.DecodeString(head.Source.Data); err == nil && len(data) > 0 {
-				block.Images = []jsonlwatcher.RichImage{{MediaType: head.Source.MediaType, Data: data}}
-			}
+		if image, ok := jsonlwatcher.ClaudeImage(head.Source); ok {
+			block.Images = []jsonlwatcher.RichImage{image}
 		}
 		return block, true
 	default:
@@ -450,48 +479,20 @@ func (p *streamParser) userBlock(raw json.RawMessage) (jsonlwatcher.RichContentB
 	}
 }
 
-// convertToolResult converts a tool_result block with the session-log
-// parser (text and images).
-func convertToolResult(raw json.RawMessage) jsonlwatcher.RichContentBlock {
-	line, err := json.Marshal(map[string]any{
-		"type":    "user",
-		"message": map[string]any{"role": "user", "content": []json.RawMessage{raw}},
-	})
-	if err == nil {
-		if msgs, err := jsonlwatcher.NewClaudeParser().ParseLine(line); err == nil {
-			for _, m := range msgs {
-				if m.Role == "user" && len(m.Content) == 1 {
-					return m.Content[0]
-				}
-			}
-		}
-	}
-	return jsonlwatcher.RichContentBlock{Type: "tool_result"}
-}
-
 // sessionEvents converts a main-thread assistant or user frame to timeline
-// events with the session-log event parser, which reads the session log's
-// field names.
+// events with the session-log event parser.
 func (p *streamParser) sessionEvents(f *frame) []jsonlwatcher.SessionEvent {
+	var msg jsonlwatcher.JSONLMessage
+	if err := json.Unmarshal(f.Message, &msg); err != nil {
+		return nil
+	}
 	sessionID := f.SessionID
 	if sessionID == "" {
 		sessionID = p.sessionID
 	}
-	line, err := json.Marshal(map[string]any{
-		"type":      f.Type,
-		"uuid":      f.UUID,
-		"timestamp": f.Timestamp,
-		"sessionId": sessionID,
-		"message":   f.Message,
+	return p.events.Events(jsonlwatcher.JSONLLine{
+		Type: f.Type, UUID: f.UUID, Timestamp: f.Timestamp, SessionID: sessionID, Message: &msg,
 	})
-	if err != nil {
-		return nil
-	}
-	events, err := p.events.ParseSessionEvents(line)
-	if err != nil {
-		return nil
-	}
-	return events
 }
 
 // taskStarted notes a backgrounded task. Its tool result, which arrives
@@ -562,6 +563,7 @@ func (p *streamParser) endTurn() []jsonlwatcher.RichMessage {
 	}
 	p.messages = make(map[string]*assistantMessage)
 	p.order = nil
+	p.current = ""
 	for id := range p.results {
 		if !p.background[id] {
 			delete(p.results, id)

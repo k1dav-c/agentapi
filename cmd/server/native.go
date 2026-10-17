@@ -25,15 +25,12 @@ type nativeAdapterConfig struct {
 func nativeFactory(agentType AgentType, cfg nativeAdapterConfig) (native.Factory, error) {
 	switch agentType {
 	case AgentTypeClaude:
-		if err := claude.ValidateArgs(cfg.Args); err != nil {
-			return nil, err
-		}
 		return claude.NewFactory(claude.Config{
 			Program: cfg.Program,
 			Args:    cfg.Args,
 			CWD:     cfg.CWD,
 			Logger:  cfg.Logger,
-		}), nil
+		})
 	case AgentTypeCodex:
 		return codex.NewFactory(codex.Config{
 			Program: cfg.Program,
@@ -42,15 +39,12 @@ func nativeFactory(agentType AgentType, cfg nativeAdapterConfig) (native.Factory
 			Logger:  cfg.Logger,
 		})
 	case AgentTypePi:
-		if err := nativepi.ValidateArgs(cfg.Args); err != nil {
-			return nil, err
-		}
 		return nativepi.NewFactory(nativepi.Config{
 			Program: cfg.Program,
 			Args:    cfg.Args,
 			CWD:     cfg.CWD,
 			Logger:  cfg.Logger,
-		}), nil
+		})
 	case AgentTypeCustom:
 		// A simulated agent for developing clients; see lib/native/demo.
 		if cfg.Program == demo.Program {

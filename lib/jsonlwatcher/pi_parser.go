@@ -267,6 +267,12 @@ func (p *PiSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEvent, 
 	if err != nil {
 		return nil, err
 	}
+	return p.MessageEvents(messages), nil
+}
+
+// MessageEvents returns the timeline events of the messages PiParser made
+// from a line of the session, for callers that parse the line themselves.
+func (p *PiSessionEventParser) MessageEvents(messages []RichMessage) []SessionEvent {
 	sessionID := optionalString(p.sessionID)
 	var events []SessionEvent
 	for _, msg := range messages {
@@ -291,5 +297,5 @@ func (p *PiSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEvent, 
 			}
 		}
 	}
-	return events, nil
+	return events
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,7 +22,6 @@ type loopState struct {
 	sink native.Sink
 	cwd  string
 
-	sessionID   string
 	sessionName string
 	events      *jsonlwatcher.PiSessionEventParser
 	parser      *jsonlwatcher.PiParser
@@ -31,15 +31,15 @@ type loopState struct {
 	// usedIDs are the message IDs already given out.
 	usedIDs map[string]bool
 	// tools are the tool calls running, in start order.
-	tools []runningTool
-	// exitCodes holds bash exit codes from tool_execution_end until the
-	// tool result message arrives.
-	exitCodes map[string]int
+	tools     []runningTool
 	throttles map[string]*throttle
 
 	// The outcome of the turn so far.
 	stopReason string
 	errMessage string
+	// ran: a run started during the turn. A turn without one (an
+	// extension command and its dialogs) ends as handled.
+	ran bool
 	// loginReported: the sink was told the provider login is missing.
 	loginReported bool
 	// turnDialogs are the dialogs opened during the current turn.
@@ -59,13 +59,12 @@ func newLoopState(sink native.Sink, cwd string) loopState {
 		events:    jsonlwatcher.NewPiSessionEventParser(),
 		parser:    jsonlwatcher.NewPiParser(),
 		usedIDs:   make(map[string]bool),
-		exitCodes: make(map[string]int),
 		throttles: make(map[string]*throttle),
 	}
 }
 
-// eventLoop handles Pi's records and the adapter's timers. It is the only
-// goroutine that calls the sink.
+// eventLoop handles Pi's records and the functions posted to it (timers).
+// It is the only goroutine that calls the sink.
 func (a *Adapter) eventLoop(lines <-chan []byte) {
 	defer close(a.loopDone)
 	for {
@@ -79,7 +78,7 @@ func (a *Adapter) eventLoop(lines <-chan []byte) {
 			if a.lineHandled != nil {
 				a.lineHandled()
 			}
-		case fn := <-a.timers:
+		case fn := <-a.posted:
 			fn()
 		}
 	}
@@ -88,29 +87,67 @@ func (a *Adapter) eventLoop(lines <-chan []byte) {
 // post runs fn on the event loop, unless the loop has stopped.
 func (a *Adapter) post(fn func()) {
 	select {
-	case a.timers <- fn:
+	case a.posted <- fn:
 	case <-a.loopDone:
 	}
 }
 
-// handleExit fails what waits on Pi once its stdout closed.
+// runOnLoop runs fn on the event loop and waits for it. It returns false
+// if the loop stopped without running it.
+func (a *Adapter) runOnLoop(fn func()) bool {
+	done := make(chan struct{})
+	a.post(func() {
+		fn()
+		close(done)
+	})
+	select {
+	case <-done:
+		return true
+	case <-a.loopDone:
+		// If the loop took fn, it ran it before it stopped.
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}
+}
+
+// handleExit fails what waits on Pi once its stdout closed, and sends what
+// was waiting to be shown.
 func (a *Adapter) handleExit() {
 	a.mu.Lock()
 	a.exited = true
 	a.runActive = false
 	pending := a.pending
 	a.pending = make(map[string]*pendingCmd)
+	for _, d := range a.dialogs {
+		d.stopTimer()
+	}
 	a.dialogs = make(map[string]*dialog)
 	a.mu.Unlock()
 	for _, p := range pending {
-		if !p.detached {
-			deliverResult(p, cmdResult{err: errExited})
-		}
+		// A caller that stopped waiting doesn't read it.
+		deliverResult(p, cmdResult{err: errExited})
 	}
-	for _, t := range a.loop.throttles {
+	a.flushStream()
+	for id, t := range a.loop.throttles {
 		t.stop()
+		a.flushThrottle(id)
 	}
 	a.logger.Info("Pi closed its output")
+}
+
+// decodeRecord decodes a stdout record of type typ, or logs it as
+// malformed.
+func decodeRecord[T any](a *Adapter, line []byte, typ string) (T, bool) {
+	var v T
+	if err := json.Unmarshal(line, &v); err != nil {
+		a.logger.Warn("Malformed Pi record", "type", typ, "error", err)
+		return v, false
+	}
+	return v, true
 }
 
 func (a *Adapter) handleLine(line []byte) {
@@ -121,12 +158,9 @@ func (a *Adapter) handleLine(line []byte) {
 	}
 	switch env.Type {
 	case "response":
-		var r response
-		if err := json.Unmarshal(line, &r); err != nil {
-			a.logger.Warn("Malformed Pi response", "error", err)
-			return
+		if r, ok := decodeRecord[response](a, line, env.Type); ok {
+			a.handleResponse(r)
 		}
-		a.handleResponse(r)
 	case "agent_start":
 		a.handleAgentStart()
 	case "agent_settled":
@@ -136,47 +170,33 @@ func (a *Adapter) handleLine(line []byte) {
 		"summarization_retry_scheduled", "summarization_retry_attempt_start", "summarization_retry_finished":
 		a.logger.Debug("Pi event", "type", env.Type)
 	case "message_start", "message_update", "message_end":
-		var ev messageEvent
-		if err := json.Unmarshal(line, &ev); err != nil {
-			a.logger.Warn("Malformed Pi message event", "type", env.Type, "error", err)
-			return
+		if ev, ok := decodeRecord[messageEvent](a, line, env.Type); ok {
+			a.handleMessageEvent(env.Type, ev)
 		}
-		a.handleMessageEvent(env.Type, ev)
 	case "tool_execution_start", "tool_execution_update", "tool_execution_end":
-		var ev toolEvent
-		if err := json.Unmarshal(line, &ev); err != nil {
-			a.logger.Warn("Malformed Pi tool event", "type", env.Type, "error", err)
-			return
+		if ev, ok := decodeRecord[toolEvent](a, line, env.Type); ok {
+			a.handleToolEvent(env.Type, ev)
 		}
-		a.handleToolEvent(env.Type, ev)
 	case "extension_ui_request":
-		var req uiRequest
-		if err := json.Unmarshal(line, &req); err != nil {
-			a.logger.Warn("Malformed Pi extension request", "error", err)
-			return
+		if req, ok := decodeRecord[uiRequest](a, line, env.Type); ok {
+			a.handleUIRequest(req)
 		}
-		a.handleUIRequest(req)
 	case "session_info_changed":
-		var ev sessionInfoChanged
-		_ = json.Unmarshal(line, &ev)
-		a.setSessionName(ev.Name)
+		if ev, ok := decodeRecord[sessionInfoChanged](a, line, env.Type); ok {
+			a.setSessionName(ev.Name)
+		}
 	case "auto_retry_end":
-		var ev autoRetryEnd
-		_ = json.Unmarshal(line, &ev)
-		if !ev.Success && ev.FinalError != "" {
-			a.loop.stopReason = "error"
-			a.loop.errMessage = ev.FinalError
+		if ev, ok := decodeRecord[autoRetryEnd](a, line, env.Type); ok && !ev.Success && ev.FinalError != "" {
+			a.loop.stopReason, a.loop.errMessage = "error", ev.FinalError
 		}
 	case "compaction_end":
-		var ev compactionEnd
-		_ = json.Unmarshal(line, &ev)
-		if ev.ErrorMessage != "" && !ev.Aborted {
+		if ev, ok := decodeRecord[compactionEnd](a, line, env.Type); ok && ev.ErrorMessage != "" && !ev.Aborted {
 			a.loop.sink.Error(ev.ErrorMessage, st.ErrorLevelWarning)
 		}
 	case "extension_error":
-		var ev extensionError
-		_ = json.Unmarshal(line, &ev)
-		a.loop.sink.Error(fmt.Sprintf("Pi extension %s failed on %s: %s", ev.ExtensionPath, ev.Event, ev.Error), st.ErrorLevelWarning)
+		if ev, ok := decodeRecord[extensionError](a, line, env.Type); ok {
+			a.loop.sink.Error(fmt.Sprintf("Pi extension %s failed on %s: %s", ev.ExtensionPath, ev.Event, ev.Error), st.ErrorLevelWarning)
+		}
 	default:
 		a.logger.Debug("Unknown Pi record", "type", env.Type)
 	}
@@ -203,60 +223,77 @@ func (a *Adapter) handleResponse(r response) {
 		}
 		return
 	}
-	var res cmdResult
-	if r.Success {
-		var pr promptResult
-		_ = json.Unmarshal(r.Data, &pr)
-		res = cmdResult{disposition: pr.Disposition, data: r.Data}
-	} else {
+	res := cmdResult{data: r.Data}
+	if !r.Success {
 		res = cmdResult{err: errors.New(r.Error)}
 	}
-
 	switch p.kind {
-	case cmdInit:
-		// Without a model, Start checks the login first.
-		if res.err == nil && stateHasModel(r.Data) {
-			a.handleState(r.Data)
-		}
 	case cmdTurn, cmdSteer:
-		switch {
-		case res.err != nil && !deliver:
-			// The caller was already told the prompt started.
-			a.logger.Warn("Pi rejected a prompt", "error", res.err)
-			if a.isTurnActive() && !a.isRunActive() {
-				a.loop.stopReason = "error"
-				a.loop.errMessage = res.err.Error()
-				a.endTurn()
-			} else if isAuthError(res.err.Error()) {
-				a.reportLogin()
-			}
-		case res.err != nil:
-			// The caller gets the error ("No API key found for …").
-			if isAuthError(res.err.Error()) {
-				a.reportLogin()
-			}
-		case res.disposition == "handled":
-			// An extension command ran without starting a run. A prompt
-			// that started the turn ends it.
-			if p.kind == cmdTurn && !a.isRunActive() {
-				a.beginTurn()
-				a.endTurn()
-			}
-		default:
-			a.beginTurn()
-		}
-	case cmdQuery:
+		a.handlePromptResponse(p, deliver, r)
 	case cmdAbort:
-		if res.err != nil {
-			a.loop.sink.Error("Pi couldn't stop the turn: "+res.err.Error(), st.ErrorLevelWarning)
-		} else if a.isTurnActive() && !a.isRunActive() {
+		switch {
+		case !r.Success:
+			a.loop.sink.Error("Pi couldn't stop the turn: "+r.Error, st.ErrorLevelWarning)
+		case a.isTurnActive() && !a.isRunActive():
 			// An extension command waiting on a dialog: abort doesn't
 			// reach it, but cancelling its dialogs ends it.
-			a.cancelTurnDialogs()
+			a.cancelTurnDialogs(true)
 		}
+	case cmdQuery:
 	}
 	if deliver {
 		deliverResult(p, res)
+	}
+}
+
+// handlePromptResponse follows the turn from the response to a prompt.
+// deliver says whether its caller still waits for it.
+func (a *Adapter) handlePromptResponse(p *pendingCmd, deliver bool, r response) {
+	if !r.Success {
+		switch {
+		case deliver:
+			// The caller gets the error ("No API key found for …").
+		case p.turn == 0:
+			a.logger.Warn("Pi rejected a prompt after its caller stopped waiting", "error", r.Error)
+		case a.isCurrentTurn(p.turn) && !a.isRunActive():
+			// The caller was told the prompt started: an extension dialog
+			// began its turn, which ends with the error.
+			a.loop.stopReason, a.loop.errMessage = "error", r.Error
+			a.endTurn()
+			return
+		default:
+			// The caller was told the prompt started, but Pi went on
+			// without the message.
+			a.loop.sink.Error("Pi refused the message: "+r.Error, st.ErrorLevelError)
+		}
+		if isAuthError(r.Error) {
+			a.reportLogin()
+		}
+		return
+	}
+	var result promptResult
+	if err := json.Unmarshal(r.Data, &result); err != nil {
+		a.logger.Warn("Malformed Pi prompt result", "error", err)
+	}
+	if result.Disposition != "handled" {
+		// A run started, or the message went into the running one.
+		a.beginTurn()
+		return
+	}
+	if p.kind != cmdTurn {
+		return
+	}
+	// An extension command ran. Unless something reported its prompt
+	// started, it was a turn of its own.
+	if p.turn == 0 {
+		a.beginTurn()
+	} else if !a.isCurrentTurn(p.turn) {
+		// Its turn ended already (agent_settled of a run it waited for).
+		return
+	}
+	if !a.isRunActive() {
+		// Unless it started a run that goes on, the turn ends.
+		a.endTurn()
 	}
 }
 
@@ -269,24 +306,13 @@ func deliverResult(p *pendingCmd, res cmdResult) {
 }
 
 // handleState handles the get_state response of the handshake.
-func (a *Adapter) handleState(data json.RawMessage) {
-	var state sessionState
-	if err := json.Unmarshal(data, &state); err != nil {
-		a.logger.Warn("Malformed Pi session state", "error", err)
-	}
-	a.loop.sessionID = state.SessionID
+func (a *Adapter) handleState(state sessionState) {
 	if a.resumeRef != "" && state.SessionID != a.resumeRef {
 		a.logger.Warn("Pi opened a different session than the one to resume", "want", a.resumeRef, "got", state.SessionID)
 	}
-	if state.Model != nil && len(state.Model.Input) > 0 {
-		images := false
-		for _, in := range state.Model.Input {
-			if in == "image" {
-				images = true
-			}
-		}
+	if m := state.Model; m != nil && m.Input != nil {
 		a.mu.Lock()
-		a.caps.Images = images
+		a.caps.Images = slices.Contains(m.Input, "image")
 		a.mu.Unlock()
 	}
 	a.logger.Info("Pi session open", "session", state.SessionID, "file", state.SessionFile)
@@ -299,15 +325,15 @@ func (a *Adapter) handleState(data json.RawMessage) {
 	header, _ := json.Marshal(map[string]string{
 		"type":      "session",
 		"id":        state.SessionID,
-		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		"timestamp": a.clock.Now().UTC().Format(time.RFC3339Nano),
 		"cwd":       a.loop.cwd,
 	})
 	if events, err := a.loop.events.ParseSessionEvents(header); err == nil && len(events) > 0 {
 		a.loop.sink.SessionEvents(events)
 	}
 	if state.IsStreaming {
-		a.setRunActive(true)
-		a.beginTurn()
+		// A run an extension started.
+		a.handleAgentStart()
 	}
 }
 
@@ -325,6 +351,13 @@ func (a *Adapter) isTurnActive() bool {
 	return a.turnActive
 }
 
+// isCurrentTurn reports whether turn is the one running.
+func (a *Adapter) isCurrentTurn(turn int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.turnActive && a.turnSeq == turn
+}
+
 func (a *Adapter) isRunActive() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -339,19 +372,24 @@ func (a *Adapter) setRunActive(v bool) {
 
 // acceptPrompt tells a StartTurn still waiting for its prompt's response
 // that the prompt started (a run began or its extension command opened a
-// dialog), so it returns before an extension command finishes.
+// dialog), so it returns before an extension command finishes. The prompts
+// waiting for their response belong to the running turn.
 func (a *Adapter) acceptPrompt() {
 	a.mu.Lock()
 	var accepted []*pendingCmd
 	for _, p := range a.pending {
-		if p.kind == cmdTurn && !p.detached {
+		if p.kind != cmdTurn {
+			continue
+		}
+		p.turn = a.turnSeq
+		if !p.detached {
 			p.detached = true
 			accepted = append(accepted, p)
 		}
 	}
 	a.mu.Unlock()
 	for _, p := range accepted {
-		deliverResult(p, cmdResult{disposition: "started"})
+		deliverResult(p, cmdResult{})
 	}
 }
 
@@ -363,9 +401,11 @@ func (a *Adapter) beginTurn() {
 		return
 	}
 	a.turnActive = true
+	a.turnSeq++
 	a.mu.Unlock()
 	a.loop.stopReason = ""
 	a.loop.errMessage = ""
+	a.loop.ran = false
 	a.loop.turnDialogs = nil
 	a.loop.loginReported = false
 	a.loop.sink.TurnStarted()
@@ -384,19 +424,22 @@ func (a *Adapter) endTurn() {
 	a.mu.Unlock()
 
 	a.flushStream()
-	a.cancelTurnDialogs()
-	result := native.TurnResult{StopReason: "end_turn"}
+	// The conversation expires the requests of the turn.
+	a.cancelTurnDialogs(false)
+	result := native.TurnResult{StopReason: native.StopReasonEndTurn}
 	switch {
 	case interrupted || a.loop.stopReason == "aborted":
-		result.StopReason = "interrupted"
+		result.StopReason = native.StopReasonInterrupted
 	case a.loop.stopReason == "error":
-		result.StopReason = "error"
+		result.StopReason = native.StopReasonError
 		result.Error = a.loop.errMessage
 		if result.Error == "" {
 			result.Error = "Pi stopped with an error"
 		}
 	case a.loop.stopReason == "length":
-		result.StopReason = "max_tokens"
+		result.StopReason = native.StopReasonMaxTokens
+	case !a.loop.ran:
+		result.StopReason = native.StopReasonHandled
 	}
 	a.loop.stopReason = ""
 	a.loop.errMessage = ""
@@ -406,10 +449,22 @@ func (a *Adapter) endTurn() {
 	a.loop.sink.TurnCompleted(result)
 }
 
+// endInterruptedTurn ends turn if it is still running interruptTimeout
+// after Interrupt: Pi didn't confirm the abort (an extension command that
+// doesn't stop, or a Pi that hangs).
+func (a *Adapter) endInterruptedTurn(turn int) {
+	if !a.isCurrentTurn(turn) {
+		return
+	}
+	a.logger.Warn("Pi didn't end the interrupted turn; ending it here")
+	a.endTurn()
+}
+
 func (a *Adapter) handleAgentStart() {
 	a.setRunActive(true)
-	a.acceptPrompt()
 	a.beginTurn()
+	a.acceptPrompt()
+	a.loop.ran = true
 }
 
 // handleSettled ends the turn: agent_settled comes once per prompt, after
@@ -421,13 +476,17 @@ func (a *Adapter) handleSettled() {
 
 // cancelTurnDialogs cancels the dialogs of the turn that are still open,
 // so an extension doesn't wait for an answer that can't come any more.
-func (a *Adapter) cancelTurnDialogs() {
+// withdraw reports them closed; at the end of the turn the conversation
+// expires them instead.
+func (a *Adapter) cancelTurnDialogs(withdraw bool) {
 	ids := a.loop.turnDialogs
 	a.loop.turnDialogs = nil
 	var cancel []string
 	a.mu.Lock()
 	for _, id := range ids {
-		if d := a.dialogs[id]; d != nil {
+		// A dialog whose answer is being written gets that answer, not a
+		// cancel too; Respond removes it once it is written.
+		if d := a.dialogs[id]; d != nil && !d.answering {
 			d.stopTimer()
 			delete(a.dialogs, id)
 			cancel = append(cancel, id)
@@ -435,7 +494,9 @@ func (a *Adapter) cancelTurnDialogs() {
 	}
 	a.mu.Unlock()
 	for _, id := range cancel {
-		a.loop.sink.RequestClosed(id)
+		if withdraw {
+			a.loop.sink.RequestClosed(id)
+		}
 		go func(id string) {
 			if err := a.send(uiResponse{Type: "extension_ui_response", ID: id, Cancelled: true}); err != nil {
 				a.logger.Debug("Failed to cancel a Pi dialog", "id", id, "error", err)
@@ -459,7 +520,12 @@ func (l *loopState) uniqueID(base string) string {
 // output streams under before the result message exists.
 func messageID(msg agentMessage) string {
 	if msg.Role == "toolResult" && msg.ToolCallID != "" {
-		return "result-" + msg.ToolCallID
+		return resultID(msg.ToolCallID)
 	}
 	return fmt.Sprintf("%s-%d", strings.ToLower(msg.Role), msg.Timestamp)
+}
+
+// resultID is the message ID of the result of tool call callID.
+func resultID(callID string) string {
+	return "result-" + callID
 }

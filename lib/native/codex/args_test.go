@@ -26,6 +26,23 @@ func TestParseArgs(t *testing.T) {
 			want: launchOptions{appServerArgs: []string{"-c", `model_reasoning_summary="concise"`}, summaryFromUser: true},
 		},
 		{
+			name: "another setting named like the reasoning summary",
+			args: []string{"-c", "model_reasoning_summary_format=experimental"},
+			want: launchOptions{appServerArgs: []string{"-c", "model_reasoning_summary_format=experimental"}},
+		},
+		{
+			name: "attached short values",
+			args: []string{"-mgpt-6-luna", "-s=read-only", "-cmodel_reasoning_summary=none", "-C=sub"},
+			want: launchOptions{
+				model: "gpt-6-luna", sandbox: "read-only", cwd: "/work/sub",
+				appServerArgs: []string{"-c", "model_reasoning_summary=none"}, summaryFromUser: true,
+			},
+		},
+		{name: "attached value of a rejected flag", args: []string{"-pwork"}, err: "codex flag -p is not supported with --transport native: profiles"},
+		{name: "bypass takes no value", args: []string{"--dangerously-bypass-approvals-and-sandbox=false"}, err: "codex flag --dangerously-bypass-approvals-and-sandbox takes no value"},
+		{name: "a pass-through switch takes no value", args: []string{"--strict-config=false"}, err: "codex flag --strict-config takes no value"},
+		{name: "a dropped switch takes no value", args: []string{"--no-alt-screen=1"}, err: "codex flag --no-alt-screen takes no value"},
+		{
 			name: "top-level flags become thread settings",
 			args: []string{"-m", "gpt-6-luna", "--sandbox=read-only", "-a", "on-request", "--cd", "/repo"},
 			want: launchOptions{model: "gpt-6-luna", sandbox: "read-only", approvalPolicy: "on-request", cwd: "/repo"},
@@ -64,9 +81,4 @@ func TestParseArgs(t *testing.T) {
 func TestNewFactoryRejectsBadArgs(t *testing.T) {
 	_, err := NewFactory(Config{Program: "codex", Args: []string{"resume", "--last"}})
 	require.Error(t, err)
-}
-
-func TestCleanEnv(t *testing.T) {
-	assert.Equal(t, []string{"HOME=/h", "CODEX_HOME=/c", "CODEX_THREAD_IDX=1"},
-		cleanEnv([]string{"HOME=/h", "CODEX_THREAD_ID=t", "CODEX_HOME=/c", "CODEX_SANDBOX_NETWORK_DISABLED=1", "CODEX_SANDBOX=seatbelt", "CODEX_THREAD_IDX=1"}))
 }

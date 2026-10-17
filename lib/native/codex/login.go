@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
-	"strings"
 
 	"github.com/coder/agentapi/lib/native"
 )
@@ -16,12 +14,6 @@ var loginHint = native.LoginRequired{
 	Message: "Codex is not logged in.",
 	Command: "codex login",
 	Detail:  "Signs in with your ChatGPT plan; `printenv OPENAI_API_KEY | codex login --with-api-key` uses an API key instead.",
-}
-
-// getAccountResponse is the result of account/read.
-type getAccountResponse struct {
-	Account            json.RawMessage `json:"account"`
-	RequiresOpenaiAuth bool            `json:"requiresOpenaiAuth"`
 }
 
 // checkLogin asks app-server for its account. No account where the model
@@ -51,10 +43,6 @@ func (a *Adapter) checkLogin(ctx context.Context) error {
 	return nil
 }
 
-// authErrorPattern matches (lower-case) errors of a missing or expired
-// login: HTTP 401, a token that can't be refreshed, "sign in again".
-var authErrorPattern = regexp.MustCompile(`\b401\b|unauthorized|refresh token|access token could not be refreshed|not logged in|log ?in again|sign in again|codex login`)
-
 // isAuthError reports whether a turn error is a login problem: the
 // unauthorized error code, an HTTP 401 on any of the error kinds, or a
 // login message.
@@ -81,7 +69,7 @@ func isAuthError(e *turnError) bool {
 			}
 		}
 	}
-	return authErrorPattern.MatchString(strings.ToLower(turnErrorText(e)))
+	return native.IsAuthError(turnErrorText(e))
 }
 
 // reportLogin tells the sink the login is gone, once per turn.

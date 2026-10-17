@@ -80,8 +80,8 @@ func normalized(t *testing.T, msgs []jsonlwatcher.RichMessage) []jsonlwatcher.Ri
 	return out
 }
 
-// withoutContext drops the rollout's environment context message, which
-// app-server doesn't send as an item (the parser skips it too).
+// dropEmpty drops messages without content blocks, which neither path
+// shows.
 func dropEmpty(msgs []jsonlwatcher.RichMessage) []jsonlwatcher.RichMessage {
 	var out []jsonlwatcher.RichMessage
 	for _, m := range msgs {

@@ -8,7 +8,6 @@ import "encoding/json"
 // envelope is the part every stdout record has.
 type envelope struct {
 	Type string `json:"type"`
-	ID   string `json:"id"`
 }
 
 // response answers a command with the same id.
@@ -38,7 +37,6 @@ type sessionState struct {
 		ID       string   `json:"id"`
 		Input    []string `json:"input"`
 	} `json:"model"`
-	ThinkingLevel string `json:"thinkingLevel"`
 }
 
 // messageEvent is message_start, message_update and message_end.
@@ -72,14 +70,11 @@ type agentMessage struct {
 	ErrorMessage string          `json:"errorMessage"`
 	Timestamp    int64           `json:"timestamp"`
 	ToolCallID   string          `json:"toolCallId"`
-	ToolName     string          `json:"toolName"`
-	IsError      bool            `json:"isError"`
 }
 
 // contentBlock is a block of a message's or tool result's content.
 type contentBlock struct {
 	Type     string `json:"type"`
-	Text     string `json:"text"`
 	Data     string `json:"data"`
 	MimeType string `json:"mimeType"`
 }
@@ -96,11 +91,8 @@ type toolEvent struct {
 }
 
 type toolResult struct {
-	Content           json.RawMessage `json:"content"`
-	StructuredContent *struct {
-		ExitCode *int `json:"exit_code"`
-	} `json:"structuredContent"`
-	IsError bool `json:"isError"`
+	Content json.RawMessage `json:"content"`
+	IsError bool            `json:"isError"`
 }
 
 // uiRequest is an extension_ui_request.
@@ -120,7 +112,6 @@ type uiRequest struct {
 	StatusKey  string `json:"statusKey"`
 	StatusText string `json:"statusText"`
 	WidgetKey  string `json:"widgetKey"`
-	Text       string `json:"text"`
 }
 
 // uiResponse is an extension_ui_response.
@@ -139,6 +130,12 @@ type imageContent struct {
 	MimeType string `json:"mimeType"`
 }
 
+// command is a command that gets a response with the same id.
+type command interface {
+	// withID returns the command with its id set.
+	withID(id string) any
+}
+
 // promptCommand is prompt; StreamingBehavior "steer" adds the message to
 // the running run, or starts one when Pi is idle.
 type promptCommand struct {
@@ -149,10 +146,20 @@ type promptCommand struct {
 	StreamingBehavior string         `json:"streamingBehavior,omitempty"`
 }
 
+func (c promptCommand) withID(id string) any {
+	c.ID = id
+	return c
+}
+
 // simpleCommand is a command without arguments (get_state, abort).
 type simpleCommand struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`
+}
+
+func (c simpleCommand) withID(id string) any {
+	c.ID = id
+	return c
 }
 
 // sessionInfoChanged is session_info_changed.
@@ -163,13 +170,11 @@ type sessionInfoChanged struct {
 // autoRetryEnd is auto_retry_end.
 type autoRetryEnd struct {
 	Success    bool   `json:"success"`
-	Attempt    int    `json:"attempt"`
 	FinalError string `json:"finalError"`
 }
 
 // compactionEnd is compaction_end.
 type compactionEnd struct {
-	Reason       string `json:"reason"`
 	Aborted      bool   `json:"aborted"`
 	ErrorMessage string `json:"errorMessage"`
 }

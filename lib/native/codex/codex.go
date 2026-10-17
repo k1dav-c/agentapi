@@ -4,6 +4,7 @@ package codex
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -12,14 +13,16 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/coder/quartz"
+
 	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/procutil"
 )
 
 // Config configures the adapters a Factory creates.
@@ -31,21 +34,39 @@ type Config struct {
 	// CWD is the directory Codex works in, unless -C/--cd says otherwise.
 	CWD string
 	// Env is the environment of app-server; nil means os.Environ().
-	// Variables a parent Codex session sets are removed either way.
+	// Variables a parent agent session sets are removed either way.
 	Env    []string
 	Logger *slog.Logger
 
-	// Launch starts app-server; nil runs Program. Tests inject pipes.
-	Launch Launcher
+	// Launch starts app-server; nil runs Program with procutil.Start.
+	// Tests inject pipes.
+	Launch procutil.StartFunc
+	// StopTimeout is how long Close waits for app-server to exit after
+	// closing its stdin before it sends SIGTERM, and again before SIGKILL.
+	// Zero means 3s and 2s.
+	StopTimeout time.Duration
 	// SnapshotInterval is the least time between two snapshots of a
 	// streaming message. Zero means 100 ms.
 	SnapshotInterval time.Duration
 	// InterruptTimeout is how long to wait for app-server to end an
 	// interrupted turn before ending it here. Zero means 10 s.
 	InterruptTimeout time.Duration
-	// Now returns the current time; nil means time.Now.
-	Now func() time.Time
+	// Clock times snapshots, interrupted turns and Close; nil means the
+	// real clock.
+	Clock quartz.Clock
 }
+
+const (
+	// inboxSize is how many messages from app-server wait for the read
+	// loop.
+	inboxSize = 256
+	// readBufferSize is how much of app-server's output is read at once;
+	// longer lines take several reads.
+	readBufferSize = 64 << 10
+	// exitWait is how long a failed Start waits for app-server's exit
+	// status, which says why it failed.
+	exitWait = 3 * time.Second
+)
 
 // NewFactory checks the command line and returns a factory for adapters
 // that run it. An empty resumeRef starts a new thread; otherwise the
@@ -83,7 +104,7 @@ type Adapter struct {
 	// its requests from 0 in every process.
 	prefix string
 
-	proc    Process
+	proc    procutil.Process
 	sink    native.Sink
 	writeMu sync.Mutex
 
@@ -102,7 +123,9 @@ type Adapter struct {
 	calls    map[int64]*call
 	threadID string
 	// activeTurn is the turn app-server is working on, or "".
-	activeTurn   string
+	activeTurn string
+	// interrupting marks the active turn while Interrupt asks app-server
+	// to stop it.
 	interrupting map[string]bool
 	requests     map[string]*pendingRequest
 
@@ -110,14 +133,13 @@ type Adapter struct {
 	// handled counts the messages the read loop has handled.
 	handled atomic.Int64
 
-	// st is owned by the read loop.
-	st loopState
+	// loop is owned by the read loop.
+	loop loopState
 }
 
 var _ native.Adapter = (*Adapter)(nil)
 
 type call struct {
-	method string
 	// onResult runs in the read loop before the caller sees the response,
 	// so the loop's state is updated before later notifications.
 	onResult func(result json.RawMessage, err *rpcError)
@@ -127,6 +149,13 @@ type call struct {
 type callResult struct {
 	result json.RawMessage
 	err    *rpcError
+}
+
+func (r callResult) unpack() (json.RawMessage, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.result, nil
 }
 
 func newAdapter(cfg Config, opts launchOptions, resumeRef string) *Adapter {
@@ -140,26 +169,27 @@ func newAdapter(cfg Config, opts launchOptions, resumeRef string) *Adapter {
 	if cfg.InterruptTimeout == 0 {
 		cfg.InterruptTimeout = 10 * time.Second
 	}
-	if cfg.Now == nil {
-		cfg.Now = time.Now
+	if cfg.Clock == nil {
+		cfg.Clock = quartz.NewReal()
 	}
 	var nonce [4]byte
 	_, _ = rand.Read(nonce[:])
 	a := &Adapter{
-		cfg:          cfg,
-		opts:         opts,
-		resumeRef:    resumeRef,
-		log:          logger.With("agent", "codex"),
-		prefix:       hex.EncodeToString(nonce[:]),
-		inbox:        make(chan rpcMessage, 256),
-		tasks:        make(chan func(), 16),
+		cfg:       cfg,
+		opts:      opts,
+		resumeRef: resumeRef,
+		log:       logger.With("agent", "codex"),
+		prefix:    hex.EncodeToString(nonce[:]),
+		inbox:     make(chan rpcMessage, inboxSize),
+		// Unbuffered: a task handed over is one the loop runs.
+		tasks:        make(chan func()),
 		loopDone:     make(chan struct{}),
 		exited:       make(chan struct{}),
 		calls:        make(map[int64]*call),
 		interrupting: make(map[string]bool),
 		requests:     make(map[string]*pendingRequest),
 	}
-	a.st.a = a
+	a.loop.a = a
 	return a
 }
 
@@ -186,25 +216,24 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		a.mu.Unlock()
 		return errors.New("adapter already started")
 	}
-	env := a.cfg.Env
-	if env == nil {
-		env = os.Environ()
-	}
 	launch := a.cfg.Launch
 	if launch == nil {
-		launch = launchProcess
+		launch = procutil.Start
 	}
-	proc, err := launch(LaunchSpec{
+	proc, err := launch(procutil.Command{
 		Program: a.cfg.Program,
 		Args:    a.command(),
 		Dir:     a.cwd(),
-		Env:     cleanEnv(env),
+		Env:     native.AgentEnv(a.cfg.Env),
 		Logger:  a.log,
 	})
 	if err != nil {
-		a.mu.Unlock()
+		// The adapter is done: Close and another Start must not close the
+		// channels again.
+		a.closed = true
 		close(a.loopDone)
 		close(a.exited)
+		a.mu.Unlock()
 		return err
 	}
 	a.proc = proc
@@ -216,7 +245,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	go func() {
 		err := proc.Wait()
 		<-a.loopDone
-		a.exitErr = err
+		a.exitErr = procutil.WithStderr(err, proc.StderrTail())
 		close(a.exited)
 	}()
 
@@ -228,10 +257,10 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 				if a.exitErr != nil {
 					return fmt.Errorf("%w (%v)", err, a.exitErr)
 				}
-				if p, ok := a.proc.(interface{ StderrTail() string }); ok && p.StderrTail() != "" {
-					return fmt.Errorf("%w: %s", err, p.StderrTail())
+				if tail := proc.StderrTail(); tail != "" {
+					return fmt.Errorf("%w: %s", err, tail)
 				}
-			case <-time.After(3 * time.Second):
+			case <-time.After(exitWait):
 			}
 		}
 		return err
@@ -257,7 +286,7 @@ func (a *Adapter) handshake(ctx context.Context) error {
 			OptOutNotificationMethods: optOutNotifications,
 		},
 	}, nil)
-	if err != nil && !strings.Contains(err.Error(), "Already initialized") {
+	if err != nil {
 		return fmt.Errorf("initialize codex app-server: %w", err)
 	}
 	var info initializeResponse
@@ -272,14 +301,14 @@ func (a *Adapter) handshake(ctx context.Context) error {
 	}
 
 	if a.resumeRef != "" {
-		_, err := a.call(ctx, "thread/resume", threadResumeParams{
+		err := a.openThread(ctx, "thread/resume", threadResumeParams{
 			ThreadID:       a.resumeRef,
 			ExcludeTurns:   true,
 			CWD:            a.cwd(),
 			Model:          a.opts.model,
 			ApprovalPolicy: a.opts.approvalPolicy,
 			Sandbox:        a.opts.sandbox,
-		}, a.st.threadOpened(true))
+		}, true)
 		if err == nil {
 			return nil
 		}
@@ -288,16 +317,33 @@ func (a *Adapter) handshake(ctx context.Context) error {
 		}
 		msg := fmt.Sprintf("Could not resume Codex thread %s (%v); starting a new thread.", a.resumeRef, err)
 		a.log.Warn("Could not resume the Codex thread; starting a new one", "thread", a.resumeRef, "error", err)
-		_ = a.inLoop(ctx, func() { a.st.warn(msg) })
+		_ = a.inLoop(ctx, func() { a.loop.warn(msg) })
 	}
-	_, err = a.call(ctx, "thread/start", threadStartParams{
+	err = a.openThread(ctx, "thread/start", threadStartParams{
 		CWD:            a.cwd(),
 		Model:          a.opts.model,
 		ApprovalPolicy: a.opts.approvalPolicy,
 		Sandbox:        a.opts.sandbox,
-	}, a.st.threadOpened(false))
+	}, false)
 	if err != nil {
 		return fmt.Errorf("start codex thread: %w", err)
+	}
+	return nil
+}
+
+var errNoThread = errors.New("codex app-server returned no thread")
+
+// openThread starts or resumes the thread with method.
+func (a *Adapter) openThread(ctx context.Context, method string, params any, resumed bool) error {
+	if _, err := a.call(ctx, method, params, a.loop.threadOpened(resumed)); err != nil {
+		return err
+	}
+	// threadOpened has run: it sets the thread before the response
+	// returns.
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.threadID == "" {
+		return errNoThread
 	}
 	return nil
 }
@@ -311,36 +357,41 @@ func (a *Adapter) loopEnded() bool {
 	}
 }
 
+// session returns the thread and the turn app-server is working on.
+func (a *Adapter) session() (threadID, turnID string, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.started {
+		return "", "", native.ErrNotStarted
+	}
+	return a.threadID, a.activeTurn, nil
+}
+
 // StartTurn implements native.Adapter.
 func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
-	a.mu.Lock()
-	if !a.started {
-		a.mu.Unlock()
-		return native.ErrNotStarted
+	threadID, turnID, err := a.session()
+	if err != nil {
+		return err
 	}
-	if a.activeTurn != "" {
-		a.mu.Unlock()
+	if turnID != "" {
 		return native.ErrTurnActive
 	}
-	threadID := a.threadID
-	a.mu.Unlock()
-
-	params := turnStartParams{ThreadID: threadID, Input: a.inputItems(input)}
+	params := turnStartParams{ThreadID: threadID, Input: inputItems(input)}
 	if !a.opts.summaryFromUser {
 		params.Summary = "detailed"
 	}
-	_, err := a.call(ctx, "turn/start", params, func(result json.RawMessage, rpcErr *rpcError) {
+	_, err = a.call(ctx, "turn/start", params, func(result json.RawMessage, rpcErr *rpcError) {
 		if rpcErr != nil {
 			return
 		}
 		var resp turnResponse
 		if json.Unmarshal(result, &resp) == nil && resp.Turn.ID != "" {
-			a.st.beginTurn(resp.Turn.ID)
+			a.loop.beginTurn(resp.Turn.ID)
 		}
 	})
 	if err != nil {
 		var rpcErr *rpcError
-		if errors.As(err, &rpcErr) && isBusyError(rpcErr.Message) {
+		if errors.As(err, &rpcErr) && a.busy(rpcErr) {
 			return native.ErrTurnActive
 		}
 		return fmt.Errorf("start turn: %w", err)
@@ -348,78 +399,106 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 	return nil
 }
 
+// busy reports whether turn/start failed because app-server is working on
+// another turn: the error says so, or the turn started meanwhile (its
+// turn/started comes before the error).
+func (a *Adapter) busy(err *rpcError) bool {
+	if isBusyError(err.Message) {
+		return true
+	}
+	_, turnID, _ := a.session()
+	return turnID != ""
+}
+
 // isBusyError reports whether a turn/start error says another turn is
-// running.
+// running, such as "thread already has an active or pending turn".
 func isBusyError(message string) bool {
 	m := strings.ToLower(message)
-	return strings.Contains(m, "already") || strings.Contains(m, "busy") ||
-		(strings.Contains(m, "active turn") && !strings.Contains(m, "no active turn"))
+	if !strings.Contains(m, "turn") || strings.Contains(m, "no active turn") {
+		return false
+	}
+	for _, busy := range []string{"already", "active", "running", "in progress", "pending"} {
+		if strings.Contains(m, busy) {
+			return true
+		}
+	}
+	return false
 }
 
 // Steer implements native.Adapter with turn/steer. The message joins the
 // running turn at its next model request; the current output continues.
 func (a *Adapter) Steer(ctx context.Context, input native.Input) error {
-	a.mu.Lock()
-	if !a.started {
-		a.mu.Unlock()
-		return native.ErrNotStarted
+	threadID, turnID, err := a.session()
+	if err != nil {
+		return err
 	}
-	turnID, threadID := a.activeTurn, a.threadID
-	a.mu.Unlock()
 	if turnID == "" {
 		return native.ErrNoActiveTurn
 	}
-	_, err := a.call(ctx, "turn/steer", turnSteerParams{
-		ThreadID: threadID, ExpectedTurnID: turnID, Input: a.inputItems(input),
+	_, err = a.call(ctx, "turn/steer", turnSteerParams{
+		ThreadID: threadID, ExpectedTurnID: turnID, Input: inputItems(input),
 	}, nil)
-	if err != nil {
-		var rpcErr *rpcError
-		if errors.As(err, &rpcErr) && strings.Contains(strings.ToLower(rpcErr.Message), "no active turn") {
-			return native.ErrNoActiveTurn
-		}
-		return fmt.Errorf("steer turn: %w", err)
-	}
-	return nil
+	return turnCallError("steer turn", err)
 }
 
 // Interrupt implements native.Adapter with turn/interrupt. The turn ends
 // with turn/completed (status interrupted) a few milliseconds later.
 func (a *Adapter) Interrupt(ctx context.Context) error {
-	a.mu.Lock()
-	if !a.started {
-		a.mu.Unlock()
-		return native.ErrNotStarted
+	threadID, turnID, err := a.session()
+	if err != nil {
+		return err
 	}
-	turnID, threadID := a.activeTurn, a.threadID
-	if turnID != "" {
-		a.interrupting[turnID] = true
-	}
-	a.mu.Unlock()
-	if turnID == "" {
+	if turnID == "" || !a.markInterrupting(turnID) {
 		return native.ErrNoActiveTurn
 	}
-	_, err := a.call(ctx, "turn/interrupt", turnInterruptParams{ThreadID: threadID, TurnID: turnID},
+	_, err = a.call(ctx, "turn/interrupt", turnInterruptParams{ThreadID: threadID, TurnID: turnID},
 		func(_ json.RawMessage, rpcErr *rpcError) {
 			if rpcErr == nil {
-				a.st.interruptSent(turnID)
+				a.loop.interruptSent(turnID)
 			}
 		})
 	if err != nil {
-		var rpcErr *rpcError
-		if errors.As(err, &rpcErr) && strings.Contains(strings.ToLower(rpcErr.Message), "no active turn") {
-			return native.ErrNoActiveTurn
-		}
-		return fmt.Errorf("interrupt turn: %w", err)
+		// The turn may go on: if it completes, it was not interrupted.
+		a.mu.Lock()
+		delete(a.interrupting, turnID)
+		a.mu.Unlock()
 	}
-	return nil
+	return turnCallError("interrupt turn", err)
+}
+
+// markInterrupting marks turnID as being interrupted, unless it ended. A
+// turn that completes before app-server sees the interrupt still ends as
+// interrupted (see completeTurn).
+func (a *Adapter) markInterrupting(turnID string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.activeTurn != turnID {
+		return false
+	}
+	a.interrupting[turnID] = true
+	return true
+}
+
+// turnCallError maps the error of a call about the active turn: app-server
+// says there is no active turn when it ended meanwhile.
+func turnCallError(what string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var rpcErr *rpcError
+	if errors.As(err, &rpcErr) && strings.Contains(strings.ToLower(rpcErr.Message), "no active turn") {
+		return native.ErrNoActiveTurn
+	}
+	return fmt.Errorf("%s: %w", what, err)
 }
 
 // inputItems converts a user message to UserInput items: the text, then
-// each image as a local file.
-func (a *Adapter) inputItems(input native.Input) []userInput {
+// each image as a local file (native.InputFromText makes the paths
+// absolute).
+func inputItems(input native.Input) []userInput {
 	items := []userInput{{Type: "text", Text: input.Text}}
 	for _, img := range input.Images {
-		items = append(items, userInput{Type: "localImage", Path: absPath(img.Path, a.cwd())})
+		items = append(items, userInput{Type: "localImage", Path: img.Path})
 	}
 	return items
 }
@@ -431,39 +510,29 @@ func (a *Adapter) Wait() error {
 }
 
 // Close implements native.Adapter: it closes app-server's stdin (it exits
-// on EOF), then sends SIGTERM after 3 s and SIGKILL after 5 s.
+// on EOF), then sends SIGTERM and SIGKILL if it doesn't exit (see
+// Config.StopTimeout).
 func (a *Adapter) Close() error {
 	a.closeOnce.Do(func() {
 		a.mu.Lock()
-		a.closed = true
 		proc := a.proc
+		if proc == nil && !a.closed {
+			// Never started, so nothing else closes them.
+			close(a.loopDone)
+			close(a.exited)
+		}
+		a.closed = true
 		a.mu.Unlock()
 		if proc == nil {
-			select {
-			case <-a.exited:
-			default:
-				close(a.loopDone)
-				close(a.exited)
-			}
 			return
 		}
-		a.writeMu.Lock()
-		_ = proc.Stdin().Close()
-		a.writeMu.Unlock()
-		select {
-		case <-a.exited:
-			return
-		case <-time.After(closeGrace):
-		}
-		a.log.Debug("Codex app-server did not exit after stdin closed; sending SIGTERM")
-		_ = proc.Terminate()
-		select {
-		case <-a.exited:
-			return
-		case <-time.After(termGrace):
-		}
-		a.log.Warn("Codex app-server did not exit after SIGTERM; killing it")
-		_ = proc.Kill()
+		procutil.Stop(proc, a.exited, procutil.StopOptions{
+			StdinGrace: a.cfg.StopTimeout,
+			TermGrace:  a.cfg.StopTimeout,
+			Clock:      a.cfg.Clock,
+			Logger:     a.log,
+			Name:       "Codex app-server",
+		})
 	})
 	return nil
 }
@@ -472,14 +541,8 @@ func (a *Adapter) Close() error {
 
 var errExited = errors.New("codex app-server exited")
 
-// How long Close waits for app-server to exit after closing its stdin, and
-// after SIGTERM. Variables for tests.
-var (
-	closeGrace = 3 * time.Second
-	termGrace  = 2 * time.Second
-)
-
-// call sends a request and waits for its response, bounded by ctx.
+// call sends a request and waits for its response, bounded by ctx. Once
+// the loop has ended, waiting calls fail with errExited.
 func (a *Adapter) call(ctx context.Context, method string, params any, onResult func(json.RawMessage, *rpcError)) (json.RawMessage, error) {
 	a.mu.Lock()
 	if a.loopEnded() {
@@ -488,7 +551,7 @@ func (a *Adapter) call(ctx context.Context, method string, params any, onResult 
 	}
 	a.nextID++
 	id := a.nextID
-	c := &call{method: method, onResult: onResult, ch: make(chan callResult, 1)}
+	c := &call{onResult: onResult, ch: make(chan callResult, 1)}
 	a.calls[id] = c
 	a.mu.Unlock()
 
@@ -498,10 +561,7 @@ func (a *Adapter) call(ctx context.Context, method string, params any, onResult 
 	}
 	select {
 	case res := <-c.ch:
-		if res.err != nil {
-			return nil, res.err
-		}
-		return res.result, nil
+		return res.unpack()
 	case <-ctx.Done():
 		a.dropCall(id)
 		return nil, ctx.Err()
@@ -509,13 +569,10 @@ func (a *Adapter) call(ctx context.Context, method string, params any, onResult 
 		// The loop may have delivered the response just before it ended.
 		select {
 		case res := <-c.ch:
-			if res.err != nil {
-				return nil, res.err
-			}
-			return res.result, nil
+			return res.unpack()
 		default:
+			return nil, errExited
 		}
-		return nil, errExited
 	}
 }
 
@@ -553,7 +610,8 @@ func (a *Adapter) writeAsync(v any) {
 	}()
 }
 
-// inLoop runs f in the read loop, so it may call the sink.
+// inLoop runs f in the read loop, so it may call the sink. Unless it
+// returns an error, the loop runs f.
 func (a *Adapter) inLoop(ctx context.Context, f func()) error {
 	select {
 	case a.tasks <- f:
@@ -568,10 +626,10 @@ func (a *Adapter) inLoop(ctx context.Context, f func()) error {
 // read decodes app-server's stdout into the inbox until EOF.
 func (a *Adapter) read(r io.Reader) {
 	defer close(a.inbox)
-	br := bufio.NewReaderSize(r, 64<<10)
+	br := bufio.NewReaderSize(r, readBufferSize)
 	for {
 		line, err := br.ReadBytes('\n')
-		if len(strings.TrimSpace(string(line))) > 0 {
+		if len(bytes.TrimSpace(line)) > 0 {
 			var msg rpcMessage
 			if jerr := json.Unmarshal(line, &msg); jerr != nil {
 				a.log.Warn("Ignoring a line from codex app-server that is not JSON", "error", jerr, "line", truncate(string(line), 200))
@@ -580,7 +638,7 @@ func (a *Adapter) read(r io.Reader) {
 			}
 		}
 		if err != nil {
-			if !errors.Is(err, io.EOF) && !errors.Is(err, os.ErrClosed) {
+			if !errors.Is(err, io.EOF) {
 				a.log.Debug("Reading codex app-server output failed", "error", err)
 			}
 			return
@@ -599,15 +657,14 @@ func truncate(s string, n int) string {
 // is the only goroutine that calls the sink.
 func (a *Adapter) run() {
 	defer close(a.loopDone)
-	timer := time.NewTimer(time.Hour)
+	timer := a.cfg.Clock.NewTimer(time.Hour, "codex", "wake")
 	timer.Stop()
 	var wakeAt time.Time
 	for {
 		select {
 		case msg, ok := <-a.inbox:
 			if !ok {
-				a.st.exited()
-				a.failCalls()
+				a.loop.exited()
 				return
 			}
 			a.dispatch(msg)
@@ -616,24 +673,15 @@ func (a *Adapter) run() {
 			f()
 		case <-timer.C:
 			wakeAt = time.Time{}
-			a.st.wake()
+			a.loop.wake()
 		}
-		if next := a.st.nextWake(); !next.Equal(wakeAt) {
+		if next := a.loop.nextWake(); !next.Equal(wakeAt) {
 			timer.Stop()
 			wakeAt = next
 			if !next.IsZero() {
-				timer.Reset(max(time.Until(next), time.Millisecond))
+				timer.Reset(max(a.cfg.Clock.Until(next), time.Millisecond), "codex", "wake")
 			}
 		}
-	}
-}
-
-// failCalls ends the calls still waiting for a response.
-func (a *Adapter) failCalls() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for id := range a.calls {
-		delete(a.calls, id)
 	}
 }
 
@@ -643,9 +691,9 @@ func (a *Adapter) dispatch(msg rpcMessage) {
 	case msg.Method == "" && len(msg.ID) > 0:
 		a.handleResponse(msg)
 	case msg.Method != "" && len(msg.ID) > 0:
-		a.st.serverRequest(msg)
+		a.loop.serverRequest(msg)
 	case msg.Method != "":
-		a.st.notification(msg)
+		a.loop.notification(msg)
 	}
 }
 

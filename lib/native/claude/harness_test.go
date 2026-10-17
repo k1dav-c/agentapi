@@ -22,6 +22,7 @@ import (
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/procutil"
 	st "github.com/coder/agentapi/lib/screentracker"
 )
 
@@ -32,18 +33,23 @@ type fakeProcess struct {
 	stdinW  *io.PipeWriter
 	stdoutR *io.PipeReader
 	stdoutW *io.PipeWriter
-	stderr  *bytes.Reader
+	stderr  string
 
 	// exitOnStdinClose makes the process exit when its input closes;
 	// exitOnTerminate when it gets SIGTERM.
 	exitOnStdinClose bool
 	exitOnTerminate  bool
+	// stallAfter makes the process stop reading its input after that many
+	// frames, like a hung CLI; zero reads everything.
+	stallAfter int
 
 	mu         sync.Mutex
 	cond       *sync.Cond
 	written    []map[string]any
 	terminated bool
 	killed     bool
+	// failWrites is the number of writes to the process's input to fail.
+	failWrites int
 
 	once    sync.Once
 	exited  chan struct{}
@@ -51,13 +57,10 @@ type fakeProcess struct {
 }
 
 func newFakeProcess(stderr string) *fakeProcess {
-	p := &fakeProcess{exitOnStdinClose: true, exitOnTerminate: true, exited: make(chan struct{})}
+	p := &fakeProcess{exitOnStdinClose: true, exitOnTerminate: true, exited: make(chan struct{}), stderr: stderr}
 	p.cond = sync.NewCond(&p.mu)
 	p.stdinR, p.stdinW = io.Pipe()
 	p.stdoutR, p.stdoutW = io.Pipe()
-	if stderr != "" {
-		p.stderr = bytes.NewReader([]byte(stderr))
-	}
 	go p.readStdin()
 	return p
 }
@@ -72,7 +75,12 @@ func (p *fakeProcess) readStdin() {
 				p.mu.Lock()
 				p.written = append(p.written, msg)
 				p.cond.Broadcast()
+				stall := p.stallAfter > 0 && len(p.written) >= p.stallAfter
 				p.mu.Unlock()
+				if stall {
+					<-p.exited
+					return
+				}
 			}
 		}
 		if err != nil {
@@ -84,15 +92,29 @@ func (p *fakeProcess) readStdin() {
 	}
 }
 
-func (p *fakeProcess) Stdin() io.WriteCloser { return p.stdinW }
+func (p *fakeProcess) Stdin() io.WriteCloser { return fakeStdin{p} }
 func (p *fakeProcess) Stdout() io.Reader     { return p.stdoutR }
 
-func (p *fakeProcess) Stderr() io.Reader {
-	if p.stderr == nil {
-		return nil
+// fakeStdin is the process's input; it fails the writes failWrites asks
+// for.
+type fakeStdin struct{ p *fakeProcess }
+
+func (s fakeStdin) Write(data []byte) (int, error) {
+	s.p.mu.Lock()
+	fail := s.p.failWrites > 0
+	if fail {
+		s.p.failWrites--
 	}
-	return p.stderr
+	s.p.mu.Unlock()
+	if fail {
+		return 0, errors.New("broken pipe")
+	}
+	return s.p.stdinW.Write(data)
 }
+
+func (s fakeStdin) Close() error { return s.p.stdinW.Close() }
+
+func (p *fakeProcess) StderrTail() string { return strings.TrimSpace(p.stderr) }
 
 func (p *fakeProcess) Wait() error {
 	<-p.exited
@@ -137,10 +159,13 @@ func (p *fakeProcess) send(t *testing.T, line []byte) {
 	require.NoError(t, err)
 }
 
-// barrier returns once the adapter handled every line sent before: the
-// pipe's next write completes only when the read loop reads again.
+// barrier returns once the adapter handled every line sent before. The
+// adapter reads a line while its read loop handles the one before, and
+// hands it over once the loop is done with that: so the second write
+// completes only after the loop took the first, after every line before.
 func (p *fakeProcess) barrier(t *testing.T) {
 	t.Helper()
+	p.send(t, []byte(`{"type":"keep_alive"}`))
 	p.send(t, []byte(`{"type":"keep_alive"}`))
 }
 
@@ -148,21 +173,38 @@ func (p *fakeProcess) barrier(t *testing.T) {
 func (p *fakeProcess) waitWritten(t *testing.T, n int) map[string]any {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	go func() {
-		time.Sleep(5 * time.Second)
+	timer := time.AfterFunc(5*time.Second, func() {
 		p.mu.Lock()
 		p.cond.Broadcast()
 		p.mu.Unlock()
-	}()
+	})
+	defer timer.Stop()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for len(p.written) <= n {
-		if time.Now().After(deadline) {
+		if !time.Now().Before(deadline) {
 			t.Fatalf("adapter wrote %d frames, waiting for frame %d", len(p.written), n)
 		}
 		p.cond.Wait()
 	}
 	return p.written[n]
+}
+
+// waitRequest waits for the next control request of that subtype the
+// adapter wrote, from frame from on, and returns it with its index.
+func (p *fakeProcess) waitRequest(t *testing.T, from int, subtype string) (map[string]any, int) {
+	t.Helper()
+	for i := from; ; i++ {
+		if f := p.waitWritten(t, i); f["type"] == "control_request" && subtypeOf(f) == subtype {
+			return f, i
+		}
+	}
+}
+
+// answer sends the CLI's successful answer to a control request.
+func (p *fakeProcess) answer(t *testing.T, request map[string]any, response string) {
+	t.Helper()
+	p.send(t, []byte(fmt.Sprintf(`{"type":"control_response","response":{"subtype":"success","request_id":%q,"response":%s}}`, request["request_id"], response)))
 }
 
 func (p *fakeProcess) writtenFrames() []map[string]any {
@@ -265,7 +307,7 @@ func (s *recSink) LoginRequired(l native.LoginRequired) {
 }
 
 // loggedIn is an AuthStatus that reports a login.
-func loggedIn(context.Context, Command) ([]byte, error) {
+func loggedIn(context.Context, procutil.Command) ([]byte, error) {
 	return []byte(`{"loggedIn":true,"authMethod":"claude.ai"}`), nil
 }
 
@@ -373,7 +415,7 @@ type replay struct {
 	a     *Adapter
 	proc  *fakeProcess
 	sink  *recSink
-	cmd   Command
+	cmd   procutil.Command
 	ids   map[string]string
 	errCh []chan error
 	// expected lists the frames the capture wrote, as signatures.
@@ -384,7 +426,7 @@ type replay struct {
 func newReplay(t *testing.T, cfg Config, resumeRef string, stderr string) *replay {
 	t.Helper()
 	r := &replay{t: t, proc: newFakeProcess(stderr), sink: &recSink{t: t}, ids: map[string]string{}}
-	cfg.StartProcess = func(c Command) (Process, error) {
+	cfg.StartProcess = func(c procutil.Command) (procutil.Process, error) {
 		r.cmd = c
 		return r.proc, nil
 	}
@@ -410,10 +452,17 @@ func newReplay(t *testing.T, cfg Config, resumeRef string, stderr string) *repla
 			return fmt.Sprintf("00000000-0000-4000-8000-%012d", seq)
 		}
 	}
-	a, err := New(cfg, resumeRef)
-	require.NoError(t, err)
-	r.a = a
+	r.a = newTestAdapter(t, cfg, resumeRef)
 	return r
+}
+
+// newTestAdapter creates an adapter for cfg as the factory does, whoever
+// runs the test (the factory switches the default mode for root).
+func newTestAdapter(t *testing.T, cfg Config, resumeRef string) *Adapter {
+	t.Helper()
+	args, err := parseArgs(cfg.Args)
+	require.NoError(t, err)
+	return newAdapter(cfg, args, resumeRef)
 }
 
 // run replays the capture's records.
@@ -426,7 +475,7 @@ func (r *replay) run(recs []record, hooks replayHooks) {
 	written := 0
 	users := 0
 	// next returns the adapter's next frame, stepping over the title
-	// request it sends after the first prompt unless one is expected.
+	// request it sends when a new session starts unless one is expected.
 	next := func(wantTitle bool) map[string]any {
 		for {
 			f := r.proc.waitWritten(t, written)
@@ -526,6 +575,7 @@ func (r *replay) run(recs []record, hooks replayHooks) {
 						require.NoError(t, err)
 						started = false
 					case <-time.After(5 * time.Second):
+						t.Fatal("Start did not return after the initialize answer")
 					}
 				}
 				continue

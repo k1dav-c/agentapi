@@ -19,6 +19,10 @@ func TestReplaySimpleText(t *testing.T) {
 	runs := loadRuns(t, "simple_text")
 	r := newReplay(t, Config{SnapshotInterval: time.Nanosecond}, "", "")
 	r.run(runs[0], replayHooks{})
+	// The new session is titled after its first prompt.
+	title := r.proc.waitWritten(t, 2)
+	assert.Equal(t, "control_request:generate_session_title", signature(title))
+	assert.Equal(t, "Is 391 prime? Reason it out carefully first, then answer in one sentence.", title["request"].(map[string]any)["description"])
 	require.NoError(t, r.finish(nil))
 
 	// The session id is chosen up front and reported once the session
@@ -64,13 +68,6 @@ func TestReplaySimpleText(t *testing.T) {
 		assert.Equal(t, "14726d33-5f93-4e64-802f-90997412bc99", *e.SessionID)
 	}
 	assert.Equal(t, []string{"thinking", "text"}, kinds)
-
-	// The first prompt is followed by a request for the session's title.
-	var subtypes []string
-	for _, f := range r.proc.writtenFrames() {
-		subtypes = append(subtypes, signature(f)[:min(len(signature(f)), 40)])
-	}
-	assert.Equal(t, "control_request:generate_session_title", subtypes[2])
 }
 
 func TestReplayToolApproval(t *testing.T) {
@@ -328,7 +325,8 @@ func TestReplayResume(t *testing.T) {
 	for _, arg := range r.cmd.Args {
 		assert.False(t, strings.HasPrefix(arg, "--session-id"))
 	}
-	assert.Equal(t, []string{"6943de8c-744a-4b64-9bd3-1c16bfe01eb4"}, r.sink.refs)
+	// The session keeps its id, which the conversation resumed it with.
+	assert.Empty(t, r.sink.refs)
 	assert.Equal(t, "PELICAN-42", r.sink.final()[0].Content[0].Text)
 	// A resumed session already has its title.
 	for _, f := range r.proc.writtenFrames() {

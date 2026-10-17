@@ -125,12 +125,7 @@ func (p *ClaudeParser) handleAssistant(entry *JSONLLine) []RichMessage {
 	}
 
 	// Parse the content blocks (usually one per line)
-	var blocks []ContentBlock
-	if err := json.Unmarshal(entry.Message.Content, &blocks); err == nil {
-		for _, block := range blocks {
-			rich.Content = append(rich.Content, contentBlockToRich(block))
-		}
-	}
+	rich.Content = append(rich.Content, ClaudeContentBlocks(entry.Message.Content)...)
 
 	p.lastPendingID = msgID
 	return completed
@@ -164,14 +159,7 @@ func (p *ClaudeParser) handleUser(entry *JSONLLine) []RichMessage {
 		var toolResults []ToolResultBlock
 		if err := json.Unmarshal(content, &toolResults); err == nil {
 			for _, tr := range toolResults {
-				block := RichContentBlock{
-					Type:      "tool_result",
-					ToolUseID: tr.ToolUseID,
-					IsError:   tr.IsError,
-					Text:      parseToolResultContent(tr.Content),
-					Images:    parseToolResultImages(tr.Content),
-				}
-				rich.Content = append(rich.Content, block)
+				rich.Content = append(rich.Content, ClaudeToolResult(tr))
 			}
 		}
 	}
@@ -190,6 +178,46 @@ func (p *ClaudeParser) finalizePending() []RichMessage {
 	}
 	p.lastPendingID = ""
 	return result
+}
+
+// ClaudeContentBlocks converts the content of a Claude assistant message
+// (an array of content blocks) to rich content blocks. It returns nil for
+// content that is not such an array.
+func ClaudeContentBlocks(content json.RawMessage) []RichContentBlock {
+	var blocks []ContentBlock
+	if json.Unmarshal(content, &blocks) != nil {
+		return nil
+	}
+	rich := make([]RichContentBlock, 0, len(blocks))
+	for _, block := range blocks {
+		rich = append(rich, contentBlockToRich(block))
+	}
+	return rich
+}
+
+// ClaudeToolResult converts a tool_result block of a Claude user message to
+// a rich content block with its text and images.
+func ClaudeToolResult(tr ToolResultBlock) RichContentBlock {
+	return RichContentBlock{
+		Type:      "tool_result",
+		ToolUseID: tr.ToolUseID,
+		IsError:   tr.IsError,
+		Text:      parseToolResultContent(tr.Content),
+		Images:    parseToolResultImages(tr.Content),
+	}
+}
+
+// ClaudeImage decodes the image of an image content block. It returns false
+// for a source that isn't base64 data and for data that doesn't decode.
+func ClaudeImage(source *ImageSource) (RichImage, bool) {
+	if source == nil || source.Type != "base64" {
+		return RichImage{}, false
+	}
+	data, err := base64.StdEncoding.DecodeString(source.Data)
+	if err != nil || len(data) == 0 {
+		return RichImage{}, false
+	}
+	return RichImage{MediaType: source.MediaType, Data: data}, true
 }
 
 // contentBlockToRich converts a parsed ContentBlock to a RichContentBlock.
@@ -221,14 +249,12 @@ func parseToolResultImages(raw json.RawMessage) []RichImage {
 	}
 	var images []RichImage
 	for _, b := range blocks {
-		if b.Type != "image" || b.Source == nil || b.Source.Type != "base64" {
+		if b.Type != "image" {
 			continue
 		}
-		data, err := base64.StdEncoding.DecodeString(b.Source.Data)
-		if err != nil || len(data) == 0 {
-			continue
+		if image, ok := ClaudeImage(b.Source); ok {
+			images = append(images, image)
 		}
-		images = append(images, RichImage{MediaType: b.Source.MediaType, Data: data})
 	}
 	return images
 }

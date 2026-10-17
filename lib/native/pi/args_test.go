@@ -2,12 +2,13 @@ package pi
 
 import (
 	"errors"
-	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/native/procutil"
 )
 
 func TestBuildArgs(t *testing.T) {
@@ -36,7 +37,25 @@ func TestBuildArgs(t *testing.T) {
 			want:    []string{"--mode", "rpc", "--session-id", "s", "--model", "m"},
 			dropped: []string{"--tui-mode", "regular", "--use-theme=dark"},
 		},
+		{
+			name:    "TUI flag before an option",
+			in:      []string{"--tui-mode", "--model", "m"},
+			want:    []string{"--mode", "rpc", "--session-id", "s", "--model", "m"},
+			dropped: []string{"--tui-mode"},
+		},
 		{name: "value that looks like a file", in: []string{"--name", "@home"}, want: []string{"--mode", "rpc", "--session-id", "s", "--name", "@home"}},
+		{name: "value that looks like an option", in: []string{"--system-prompt", "-be brief"}, want: []string{"--mode", "rpc", "--session-id", "s", "--system-prompt", "-be brief"}},
+		{
+			name: "extension flag with a value",
+			in:   []string{"--plan", "strict", "--model", "m"},
+			want: []string{"--mode", "rpc", "--session-id", "s", "--plan", "strict", "--model", "m"},
+		},
+		{
+			name: "extension flag before an option",
+			in:   []string{"--plan", "--model", "m"},
+			want: []string{"--mode", "rpc", "--session-id", "s", "--plan", "--model", "m"},
+		},
+		{name: "short option", in: []string{"-x"}, want: []string{"--mode", "rpc", "--session-id", "s", "-x"}},
 		{name: "mode", in: []string{"--mode", "json"}, err: "--mode"},
 		{name: "mode equals", in: []string{"--mode=rpc"}, err: "--mode"},
 		{name: "print", in: []string{"-p"}, err: "-p"},
@@ -48,20 +67,25 @@ func TestBuildArgs(t *testing.T) {
 		{name: "fork", in: []string{"--fork", "x"}, err: "--fork"},
 		{name: "version", in: []string{"--version"}, err: "--version"},
 		{name: "file args", in: []string{"@prompt.md"}, err: "@file"},
+		{name: "file after an extension flag", in: []string{"--plan", "@prompt.md"}, err: "@file"},
 		{name: "messages", in: []string{"--", "hello"}, err: "--initial-prompt"},
+		{name: "message", in: []string{"fix the build"}, err: "--initial-prompt"},
+		{name: "message after a switch", in: []string{"--approve", "fix the build"}, err: "--initial-prompt"},
+		{name: "message after a value", in: []string{"--model", "m", "fix the build"}, err: "--initial-prompt"},
 		{name: "subcommand", in: []string{"install", "x"}, err: "management command"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, dropped, err := buildArgs(tc.in, "s")
+			kept, dropped, err := filterArgs(tc.in)
 			if tc.err != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tc.err)
-				assert.Error(t, ValidateArgs(tc.in))
+				_, err = NewFactory(Config{Args: tc.in})
+				assert.Error(t, err)
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, rpcArgs(kept, "s"))
 			assert.Equal(t, tc.dropped, dropped)
 		})
 	}
@@ -69,22 +93,18 @@ func TestBuildArgs(t *testing.T) {
 
 func TestNewSessionID(t *testing.T) {
 	t.Parallel()
-	id := newSessionID()
+	id := NewSessionID()
 	assert.Regexp(t, `^agentapi-[0-9a-f]{16}$`, id)
-	assert.NotEqual(t, id, newSessionID())
-}
-
-func TestAgentEnv(t *testing.T) {
-	t.Parallel()
-	env := agentEnv([]string{"PATH=/bin", "PI_CODING_AGENT=true", "AI_AGENT=pi", "CLAUDECODE=1", "CODEX_THREAD_ID=x", "PI_CODING_AGENT_DIR=/p", "HOME=/h"})
-	assert.Equal(t, []string{"PATH=/bin", "PI_CODING_AGENT_DIR=/p", "HOME=/h"}, env)
+	assert.NotEqual(t, id, NewSessionID())
 }
 
 func TestNewFactoryRejectsArgs(t *testing.T) {
 	t.Parallel()
-	_, err := NewFactory(Config{Program: "pi", Args: []string{"--mode", "json"}})("")
+	_, err := NewFactory(Config{Program: "pi", Args: []string{"--mode", "json"}})
 	require.Error(t, err)
-	a, err := NewFactory(Config{Program: "pi"})("ref")
+	factory, err := NewFactory(Config{Program: "pi"})
+	require.NoError(t, err)
+	a, err := factory("ref")
 	require.NoError(t, err)
 	assert.Equal(t, "ref", a.(*Adapter).resumeRef)
 	require.NoError(t, a.Close(), "closing an adapter that never started")
@@ -93,8 +113,7 @@ func TestNewFactoryRejectsArgs(t *testing.T) {
 
 func TestReadStdout(t *testing.T) {
 	t.Parallel()
-	a, err := newAdapter(Config{}, "", nil)
-	require.NoError(t, err)
+	a := newAdapter(Config{}, nil, "", nil)
 	a.maxLine = 64
 	long := strings.Repeat("x", 200)
 	in := "{\"a\":1}\r\n\n{\"u\":\" \"}\n" + long + "\n{\"b\":2}\n{\"c\":3}"
@@ -110,12 +129,11 @@ func TestReadStdout(t *testing.T) {
 func TestStartAfterClose(t *testing.T) {
 	t.Parallel()
 	spawned := false
-	a, err := newAdapter(Config{}, "", func(string, []string, string, []string, *slog.Logger) (*transport, error) {
+	a := newAdapter(Config{}, nil, "", func(procutil.Command) (procutil.Process, error) {
 		spawned = true
 		return nil, errors.New("unexpected")
 	})
-	require.NoError(t, err)
 	require.NoError(t, a.Close())
-	assert.ErrorIs(t, a.Start(t.Context(), &recSink{}), errClosed)
+	assert.ErrorIs(t, a.Start(t.Context(), newRecSink(t)), errClosed)
 	assert.False(t, spawned)
 }

@@ -1,6 +1,9 @@
 package claude
 
 import (
+	"bytes"
+	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
@@ -81,11 +84,22 @@ func TestArgs(t *testing.T) {
 			{"--permission-prompt-tool", "mcp__x"},
 			{"--permission-prompts", "none"},
 			{"--bg"},
+			{"--rc"},
+			{"--remote", "fix the bug"},
+			{"--sdk-url", "ws://localhost:1234"},
+			{"--resume-session-at", "msg_1"},
+			{"--resume-drops-turn=msg_1"},
+			// Claude Code splits groups of short flags.
+			{"-pc"},
+			{"-rabc"},
+			{"-cn", "name"},
 		} {
-			err := ValidateArgs(append([]string{"--model", "haiku"}, args...))
+			_, err := parseArgs(append([]string{"--model", "haiku"}, args...))
 			require.Error(t, err, args)
 			assert.Contains(t, err.Error(), "native transport", args)
 		}
+		_, err = parseArgs([]string{"-cn", "name"})
+		require.EqualError(t, err, "-c (in -cn) can't be used with the native transport: AgentAPI picks the session to resume")
 	})
 
 	t.Run("flag values are not flags", func(t *testing.T) {
@@ -93,16 +107,18 @@ func TestArgs(t *testing.T) {
 		p, err := parseArgs([]string{"--append-system-prompt", "-p", "--add-dir", "a", "b", "--model", "haiku"})
 		require.NoError(t, err)
 		assert.Equal(t, []string{"--append-system-prompt", "-p", "--add-dir", "a", "b", "--model", "haiku"}, p.pass)
+
+		// In a group, a flag that takes a value takes the rest: --debug
+		// with the filter "pc", a session named "pc".
+		p, err = parseArgs([]string{"-dpc", "-npc", "-d2e"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"-dpc", "-npc", "-d2e"}, p.pass)
 	})
 
 	t.Run("no session persistence", func(t *testing.T) {
 		t.Parallel()
-		a, err := New(Config{Args: []string{"--no-session-persistence"}}, "")
-		require.NoError(t, err)
-		assert.False(t, a.Capabilities().Resume)
-		a, err = New(Config{}, "")
-		require.NoError(t, err)
-		assert.True(t, a.Capabilities().Resume)
+		assert.False(t, newTestAdapter(t, Config{Args: []string{"--no-session-persistence"}}, "").Capabilities().Resume)
+		assert.True(t, newTestAdapter(t, Config{}, "").Capabilities().Resume)
 	})
 }
 
@@ -163,4 +179,59 @@ func TestPlanOptionsFollowBypass(t *testing.T) {
 	assert.Equal(t, []string{"bypassPermissions", "acceptEdits", "default", "deny"}, ids("--dangerously-skip-permissions"))
 	assert.Equal(t, []string{"acceptEdits", "default", "deny"}, ids("--permission-mode", "plan"))
 	assert.Equal(t, []string{"acceptEdits", "default", "deny"}, ids("--permission-mode", "default"))
+}
+
+func TestRootDefaultMode(t *testing.T) {
+	t.Parallel()
+	// Claude Code exits at startup with bypassPermissions as root outside
+	// a sandbox it knows of.
+	for _, tc := range []struct {
+		name string
+		uid  int
+		env  []string
+		args []string
+		// mode is the permission mode the adapter adds, if any.
+		mode   string
+		bypass bool
+		warns  bool
+	}{
+		{name: "user", uid: 1000, mode: "bypassPermissions", bypass: true},
+		{name: "root", uid: 0, mode: "default", warns: true},
+		{name: "root in a sandbox", uid: 0, env: []string{"IS_SANDBOX=1"}, mode: "bypassPermissions", bypass: true},
+		{name: "root in bubblewrap", uid: 0, env: []string{"CLAUDE_CODE_BUBBLEWRAP=true"}, mode: "bypassPermissions", bypass: true},
+		{name: "root with other values", uid: 0, env: []string{"IS_SANDBOX=true", "CLAUDE_CODE_BUBBLEWRAP=0"}, mode: "default", warns: true},
+		{name: "root chose a mode", uid: 0, args: []string{"--permission-mode", "acceptEdits"}},
+		{name: "root skips permissions", uid: 0, args: []string{"--dangerously-skip-permissions"}, bypass: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var logs bytes.Buffer
+			factory, err := newFactory(Config{
+				Args:   tc.args,
+				Env:    append([]string{"PATH=/bin"}, tc.env...),
+				Logger: slog.New(slog.NewTextHandler(&logs, nil)),
+			}, tc.uid)
+			require.NoError(t, err)
+			// Every adapter of the factory (every restart) starts the same.
+			for range 2 {
+				adapter, err := factory("")
+				require.NoError(t, err)
+				a := adapter.(*Adapter)
+				assert.Equal(t, tc.mode, a.args.mode)
+				args := buildArgs(a.args, "sid", "")
+				if tc.mode != "" {
+					i := slices.Index(args, "--permission-mode")
+					require.GreaterOrEqual(t, i, 0)
+					assert.Equal(t, tc.mode, args[i+1])
+				}
+				// Approving a plan offers bypassPermissions only in a session
+				// that runs in it.
+				plan := newPendingRequest("r", canUseTool{ToolName: toolExitPlanMode, Input: []byte(`{"plan":"x"}`)}, a.args.bypass)
+				assert.Equal(t, tc.bypass, plan.req.Options[0].ID == optionBypass)
+			}
+			// The warning says why and how to opt in, once.
+			assert.Equal(t, tc.warns, strings.Contains(logs.String(), "IS_SANDBOX=1"), logs.String())
+			assert.LessOrEqual(t, strings.Count(logs.String(), "level=WARN"), 1)
+		})
+	}
 }

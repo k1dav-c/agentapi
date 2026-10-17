@@ -5,7 +5,9 @@ import "encoding/json"
 // Hand-written types for the parts of the `codex app-server` protocol
 // (codex-cli 0.160) the adapter uses, following the JSON schema that
 // `codex app-server generate-json-schema` prints. Fields the adapter doesn't
-// read are left out; unknown fields are ignored when decoding.
+// use are left out; unknown fields are ignored when decoding. A nullable
+// string is a plain string (null decodes as "") unless null means something
+// else.
 
 // rpcMessage is any line on the wire. Server messages carry no "jsonrpc"
 // field; notifications carry an extra emittedAtMs.
@@ -51,7 +53,6 @@ type clientInfo struct {
 }
 
 type initializeCapabilities struct {
-	ExperimentalAPI           bool     `json:"experimentalApi"`
 	OptOutNotificationMethods []string `json:"optOutNotificationMethods,omitempty"`
 }
 
@@ -62,6 +63,12 @@ type initializeParams struct {
 
 type initializeResponse struct {
 	UserAgent string `json:"userAgent"`
+}
+
+// getAccountResponse is the result of account/read.
+type getAccountResponse struct {
+	Account            json.RawMessage `json:"account"`
+	RequiresOpenaiAuth bool            `json:"requiresOpenaiAuth"`
 }
 
 // --- threads ---
@@ -86,12 +93,12 @@ type threadResumeParams struct {
 }
 
 type thread struct {
-	ID         string  `json:"id"`
-	Path       *string `json:"path"`
-	CWD        string  `json:"cwd"`
-	CLIVersion string  `json:"cliVersion"`
-	Name       *string `json:"name"`
-	CreatedAt  int64   `json:"createdAt"`
+	ID         string `json:"id"`
+	Path       string `json:"path"`
+	CWD        string `json:"cwd"`
+	CLIVersion string `json:"cliVersion"`
+	Name       string `json:"name"`
+	CreatedAt  int64  `json:"createdAt"`
 }
 
 // threadStartResponse is ThreadStartResponse and ThreadResumeResponse
@@ -108,8 +115,7 @@ type threadNameUpdatedNotification struct {
 }
 
 type threadStatus struct {
-	Type        string   `json:"type"`
-	ActiveFlags []string `json:"activeFlags"`
+	Type string `json:"type"`
 }
 
 type threadStatusChangedNotification struct {
@@ -119,13 +125,12 @@ type threadStatusChangedNotification struct {
 
 // --- turns ---
 
-// userInput is one UserInput item: {type:"text",text,text_elements} or
+// userInput is one UserInput item: {type:"text",text} or
 // {type:"localImage",path}.
 type userInput struct {
-	Type         string `json:"type"`
-	Text         string `json:"text,omitempty"`
-	TextElements []any  `json:"text_elements,omitempty"`
-	Path         string `json:"path,omitempty"`
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+	Path string `json:"path,omitempty"`
 }
 
 type turnStartParams struct {
@@ -148,8 +153,8 @@ type turnInterruptParams struct {
 }
 
 type turnError struct {
-	Message           string  `json:"message"`
-	AdditionalDetails *string `json:"additionalDetails"`
+	Message           string `json:"message"`
+	AdditionalDetails string `json:"additionalDetails"`
 	// CodexErrorInfo is a code ("unauthorized") or an object keyed by the
 	// kind of failure, with the upstream httpStatusCode.
 	CodexErrorInfo json.RawMessage `json:"codexErrorInfo"`
@@ -199,7 +204,7 @@ type turnPlanStep struct {
 type turnPlanUpdatedNotification struct {
 	ThreadID    string         `json:"threadId"`
 	TurnID      string         `json:"turnId"`
-	Explanation *string        `json:"explanation"`
+	Explanation string         `json:"explanation"`
 	Plan        []turnPlanStep `json:"plan"`
 }
 
@@ -210,16 +215,19 @@ type modelReroutedNotification struct {
 
 // --- items ---
 
+// commandAction is Codex's reading of one part of a command.
 type commandAction struct {
-	Type    string `json:"type"`
+	Type    string `json:"type"` // read | listFiles | search | unknown
 	Command string `json:"command"`
+	Path    string `json:"path"`
+	Query   string `json:"query"`
 }
 
 type fileUpdateChange struct {
 	Path string `json:"path"`
 	Kind struct {
-		Type     string  `json:"type"` // add | delete | update
-		MovePath *string `json:"move_path,omitempty"`
+		Type     string `json:"type"` // add | delete | update
+		MovePath string `json:"move_path"`
 	} `json:"kind"`
 	Diff string `json:"diff"`
 }
@@ -237,19 +245,17 @@ type threadItem struct {
 	Content json.RawMessage `json:"content"` // UserInput[] (userMessage) or string[] (reasoning)
 
 	// agentMessage, plan
-	Text  string `json:"text"`
-	Phase string `json:"phase"`
+	Text string `json:"text"`
 
 	// reasoning
 	Summary []string `json:"summary"`
 
 	// commandExecution
-	Command          string          `json:"command"`
-	CommandActions   []commandAction `json:"commandActions"`
-	CWD              string          `json:"cwd"`
-	AggregatedOutput *string         `json:"aggregatedOutput"`
-	ExitCode         *int            `json:"exitCode"`
-	Status           string          `json:"status"`
+	Command          string `json:"command"`
+	CWD              string `json:"cwd"`
+	AggregatedOutput string `json:"aggregatedOutput"`
+	ExitCode         *int   `json:"exitCode"`
+	Status           string `json:"status"`
 
 	// fileChange
 	Changes []fileUpdateChange `json:"changes"`
@@ -257,7 +263,7 @@ type threadItem struct {
 	// mcpToolCall, dynamicToolCall
 	Server    string             `json:"server"`
 	Tool      string             `json:"tool"`
-	Namespace *string            `json:"namespace"`
+	Namespace string             `json:"namespace"`
 	Arguments json.RawMessage    `json:"arguments"`
 	Result    *mcpToolCallResult `json:"result"`
 	Error     *struct {
@@ -321,13 +327,12 @@ type deltaNotification struct {
 // --- server requests ---
 
 type commandExecutionRequestApprovalParams struct {
-	ThreadID               string          `json:"threadId"`
 	TurnID                 string          `json:"turnId"`
 	ItemID                 string          `json:"itemId"`
-	Command                *string         `json:"command"`
-	CWD                    *string         `json:"cwd"`
+	Command                string          `json:"command"`
+	CWD                    string          `json:"cwd"`
 	CommandActions         []commandAction `json:"commandActions"`
-	Reason                 *string         `json:"reason"`
+	Reason                 string          `json:"reason"`
 	NetworkApprovalContext *struct {
 		Host     string `json:"host"`
 		Protocol string `json:"protocol"`
@@ -339,11 +344,10 @@ type commandExecutionRequestApprovalParams struct {
 }
 
 type fileChangeRequestApprovalParams struct {
-	ThreadID  string  `json:"threadId"`
-	TurnID    string  `json:"turnId"`
-	ItemID    string  `json:"itemId"`
-	Reason    *string `json:"reason"`
-	GrantRoot *string `json:"grantRoot"`
+	TurnID    string `json:"turnId"`
+	ItemID    string `json:"itemId"`
+	Reason    string `json:"reason"`
+	GrantRoot string `json:"grantRoot"`
 }
 
 type userInputOption struct {
@@ -395,15 +399,14 @@ type mcpElicitationOpt struct {
 }
 
 type mcpServerElicitationRequestParams struct {
-	ThreadID        string  `json:"threadId"`
-	TurnID          *string `json:"turnId"`
-	ServerName      string  `json:"serverName"`
-	Mode            string  `json:"mode"` // form | openai/form | openaiForm | url
-	Message         string  `json:"message"`
-	URL             string  `json:"url"`
+	// TurnID is the turn app-server saw the elicitation in, if any.
+	TurnID          string `json:"turnId"`
+	ServerName      string `json:"serverName"`
+	Mode            string `json:"mode"` // form | openai/form | openaiForm | url
+	Message         string `json:"message"`
+	URL             string `json:"url"`
 	RequestedSchema *struct {
 		Properties map[string]mcpElicitationProperty `json:"properties"`
-		Required   []string                          `json:"required"`
 	} `json:"requestedSchema"`
 	Meta *struct {
 		ApprovalKind    string          `json:"codex_approval_kind"`
@@ -418,11 +421,9 @@ type mcpServerElicitationResponse struct {
 }
 
 type permissionsRequestApprovalParams struct {
-	ThreadID    string          `json:"threadId"`
 	TurnID      string          `json:"turnId"`
 	ItemID      string          `json:"itemId"`
-	CWD         string          `json:"cwd"`
-	Reason      *string         `json:"reason"`
+	Reason      string          `json:"reason"`
 	Permissions json.RawMessage `json:"permissions"`
 }
 
@@ -432,23 +433,22 @@ type permissionsRequestApprovalResponse struct {
 }
 
 type serverRequestResolvedNotification struct {
-	ThreadID  string          `json:"threadId"`
 	RequestID json.RawMessage `json:"requestId"`
 }
 
 type warningNotification struct {
-	ThreadID *string `json:"threadId"`
-	Message  string  `json:"message"`
+	ThreadID string `json:"threadId"`
+	Message  string `json:"message"`
 }
 
 type configWarningNotification struct {
-	Summary string  `json:"summary"`
-	Details *string `json:"details"`
+	Summary string `json:"summary"`
+	Details string `json:"details"`
 }
 
 type mcpServerStatusUpdatedNotification struct {
-	ThreadID string  `json:"threadId"`
-	Name     string  `json:"name"`
-	Status   string  `json:"status"`
-	Error    *string `json:"error"`
+	ThreadID string `json:"threadId"`
+	Name     string `json:"name"`
+	Status   string `json:"status"`
+	Error    string `json:"error"`
 }

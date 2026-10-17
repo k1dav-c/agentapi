@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // launchOptions is what the user's command line asks for, split into the
@@ -67,11 +68,15 @@ func parseArgs(args []string, cwd string) (launchOptions, error) {
 	}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		name, value, hasValue := strings.Cut(arg, "=")
-		if !strings.HasPrefix(arg, "--") {
-			// Short flags take their value in the next argument (-m o3) or
-			// attached (-mo3 is not supported by codex either).
-			name, value, hasValue = arg, "", false
+		name, value, hasValue := arg, "", false
+		switch {
+		case strings.HasPrefix(arg, "--"):
+			name, value, hasValue = strings.Cut(arg, "=")
+		case strings.HasPrefix(arg, "-") && len(arg) > 2:
+			// A short flag's value can be attached, as clap allows: -mo3
+			// or -m=o3.
+			_, size := utf8.DecodeRuneInString(arg[1:])
+			name, value, hasValue = arg[:1+size], strings.TrimPrefix(arg[1+size:], "="), true
 		}
 		takeValue := func() (string, error) {
 			if hasValue {
@@ -83,6 +88,11 @@ func parseArgs(args []string, cwd string) (launchOptions, error) {
 			i++
 			return args[i], nil
 		}
+		isSwitch := slices.Contains(passThroughSwitches, name) || slices.Contains(droppedSwitches, name) ||
+			name == "--dangerously-bypass-approvals-and-sandbox"
+		if isSwitch && hasValue {
+			return opts, fmt.Errorf("codex flag %s takes no value", name)
+		}
 
 		switch {
 		case slices.Contains(passThroughFlags, name):
@@ -90,7 +100,8 @@ func parseArgs(args []string, cwd string) (launchOptions, error) {
 			if err != nil {
 				return opts, err
 			}
-			if (name == "-c" || name == "--config") && strings.HasPrefix(strings.TrimSpace(v), "model_reasoning_summary") {
+			key, _, _ := strings.Cut(v, "=")
+			if (name == "-c" || name == "--config") && strings.TrimSpace(key) == "model_reasoning_summary" {
 				opts.summaryFromUser = true
 			}
 			opts.appServerArgs = append(opts.appServerArgs, name, v)
@@ -143,31 +154,4 @@ func parseArgs(args []string, cwd string) (launchOptions, error) {
 		}
 	}
 	return opts, nil
-}
-
-// leakedEnv are variables Codex sets for the commands it runs. When
-// AgentAPI is started from inside a Codex session they would make the new
-// app-server think it runs inside that session's sandbox or thread.
-var leakedEnv = []string{
-	"CODEX_THREAD_ID",
-	"CODEX_SANDBOX",
-	"CODEX_SANDBOX_NETWORK_DISABLED",
-	"CODEX_CI",
-	"CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
-	"CODEX_TUI_RECORD_SESSION",
-	"CODEX_TUI_SESSION_LOG_PATH",
-}
-
-// cleanEnv returns env without the variables that leak from a parent Codex
-// session.
-func cleanEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		name, _, _ := strings.Cut(kv, "=")
-		if slices.Contains(leakedEnv, name) {
-			continue
-		}
-		out = append(out, kv)
-	}
-	return out
 }

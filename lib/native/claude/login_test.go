@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/procutil"
 )
 
 func TestParseAuthStatus(t *testing.T) {
@@ -51,32 +52,34 @@ func TestParseAuthStatus(t *testing.T) {
 	}
 }
 
+// authStatus is the type of Config.AuthStatus.
+type authStatus = func(ctx context.Context, cmd procutil.Command) ([]byte, error)
+
 func TestStartChecksLogin(t *testing.T) {
 	t.Parallel()
-	start := func(t *testing.T, args []string, status AuthStatus) ([]Command, bool, error) {
+	start := func(t *testing.T, args []string, status authStatus) ([]procutil.Command, bool, error) {
 		t.Helper()
-		var checks []Command
+		var checks []procutil.Command
 		spawned := false
 		proc := newFakeProcess("")
-		a, err := New(Config{
+		a := newTestAdapter(t, Config{
 			Args: args,
 			Env:  []string{"PATH=/bin", "CLAUDECODE=1", "ANTHROPIC_API_KEY=k"},
 			CWD:  "/work",
-			AuthStatus: func(ctx context.Context, c Command) ([]byte, error) {
+			AuthStatus: func(ctx context.Context, c procutil.Command) ([]byte, error) {
 				checks = append(checks, c)
 				return status(ctx, c)
 			},
-			StartProcess: func(Command) (Process, error) {
+			StartProcess: func(procutil.Command) (procutil.Process, error) {
 				spawned = true
 				return proc, nil
 			},
 			Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 			StopTimeout: 10 * time.Millisecond,
 		}, "")
-		require.NoError(t, err)
 		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		defer cancel()
-		err = a.Start(ctx, &recSink{t: t})
+		err := a.Start(ctx, &recSink{t: t})
 		_ = a.Close()
 		return checks, spawned, err
 	}
@@ -84,7 +87,7 @@ func TestStartChecksLogin(t *testing.T) {
 	t.Run("not logged in", func(t *testing.T) {
 		t.Parallel()
 		// The CLI exits with 1 and still prints the status.
-		checks, spawned, err := start(t, nil, func(context.Context, Command) ([]byte, error) {
+		checks, spawned, err := start(t, nil, func(context.Context, procutil.Command) ([]byte, error) {
 			return []byte(`{"loggedIn":false,"authMethod":"none"}`), errExit1
 		})
 		var login *native.LoginRequiredError
@@ -112,14 +115,14 @@ func TestStartChecksLogin(t *testing.T) {
 		assert.True(t, spawned)
 	})
 
-	for name, status := range map[string]AuthStatus{
-		"command fails": func(context.Context, Command) ([]byte, error) {
+	for name, status := range map[string]authStatus{
+		"command fails": func(context.Context, procutil.Command) ([]byte, error) {
 			return nil, errors.New(`exec: "claude": executable file not found in $PATH`)
 		},
-		"unknown output": func(context.Context, Command) ([]byte, error) {
+		"unknown output": func(context.Context, procutil.Command) ([]byte, error) {
 			return []byte("Usage: wrapper [options]\n"), errExit1
 		},
-		"times out": func(ctx context.Context, _ Command) ([]byte, error) {
+		"times out": func(ctx context.Context, _ procutil.Command) ([]byte, error) {
 			return nil, context.DeadlineExceeded
 		},
 	} {
@@ -134,7 +137,7 @@ func TestStartChecksLogin(t *testing.T) {
 
 	t.Run("--settings skips the check", func(t *testing.T) {
 		t.Parallel()
-		checks, spawned, err := start(t, []string{"--settings", "s.json"}, func(context.Context, Command) ([]byte, error) {
+		checks, spawned, err := start(t, []string{"--settings", "s.json"}, func(context.Context, procutil.Command) ([]byte, error) {
 			return []byte(`{"loggedIn":false}`), errExit1
 		})
 		var login *native.LoginRequiredError
@@ -163,7 +166,7 @@ echo '{"loggedIn":false}'
 echo 'stderr is not read' >&2
 exit 1
 `)
-		out, err := runAuthStatus(context.Background(), Command{Program: program, Args: []string{"auth", "status", "--json"}})
+		out, err := runAuthStatus(context.Background(), procutil.Command{Program: program, Args: []string{"auth", "status", "--json"}})
 		require.Error(t, err)
 		loggedIn, ok := parseAuthStatus(out)
 		assert.True(t, ok)
@@ -176,7 +179,7 @@ exit 1
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 		began := time.Now()
-		_, err := runAuthStatus(ctx, Command{Program: program})
+		_, err := runAuthStatus(ctx, procutil.Command{Program: program})
 		require.Error(t, err)
 		assert.Less(t, time.Since(began), 5*time.Second)
 	})
@@ -202,7 +205,9 @@ func TestLoginLostMidSession(t *testing.T) {
 		require.Equal(t, []native.LoginRequired{loginHint}, sink.logins)
 		require.Len(t, sink.results, 1)
 		assert.Equal(t, "error", sink.results[0].StopReason)
-		assert.Contains(t, sink.results[0].Error, "Not logged in")
+		// The result says "success" with is_error; the terminal reason
+		// says what failed.
+		assert.Equal(t, "Claude Code: the turn failed (api_error): Not logged in · Please run /login", sink.results[0].Error)
 		// The login is reported before the turn ends.
 		login := slices.Index(sink.log, "login_required")
 		assert.Less(t, login, slices.Index(sink.log, "turn_completed:error"))
