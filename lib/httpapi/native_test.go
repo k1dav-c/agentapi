@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -568,8 +569,11 @@ func TestNative_RestartUpdatesTheAgentFirst(t *testing.T) {
 		AllowedOrigins: []string{"*"},
 		UpdateAgent: func(context.Context) {
 			mu.Lock()
-			steps = append(steps, "update")
-			mu.Unlock()
+			defer mu.Unlock()
+			// The old agent stopped before the update.
+			if a := factory.Adapters(); len(a) == 1 && a[0].Closed() {
+				steps = append(steps, "update")
+			}
 		},
 	})
 	require.NoError(t, err)
@@ -618,4 +622,49 @@ func TestNative_MCPRestartResumes(t *testing.T) {
 func TestNative_CompactUnsupported(t *testing.T) {
 	n := newNativeServer(t, nil)
 	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodPost, "/compact", nil, nil), "the fake adapter doesn't compact")
+}
+
+func TestNative_CompactRefused(t *testing.T) {
+	n := newNativeServer(t, func(a *nativetest.Adapter) {
+		a.Caps.Compact = true
+		a.OnCompact = func(context.Context) error {
+			return fmt.Errorf("compact the session: %w", &native.RefusedError{Reason: "Nothing to compact (session too small)"})
+		}
+	})
+	resp, err := http.Post(n.url+"/compact", "application/json", nil)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "the agent didn't compact: Nothing to compact (session too small)")
+}
+
+func TestNative_MessagesWaitForACompaction(t *testing.T) {
+	compacting, release := make(chan struct{}), make(chan struct{})
+	n := newNativeServer(t, func(a *nativetest.Adapter) {
+		a.Caps.Compact = true
+		a.OnCompact = func(context.Context) error {
+			close(compacting)
+			<-release
+			return nil
+		}
+	})
+	done := make(chan int, 1)
+	go func() { done <- n.do(http.MethodPost, "/compact", nil, nil) }()
+	<-compacting
+
+	// The server goes on answering, and a message waits in the queue.
+	var status httpapi.StatusChangeBody
+	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/status", nil, &status))
+	assert.Equal(t, httpapi.AgentStatusRunning, status.Status)
+	code, res := n.send("after the compaction", "")
+	require.Equal(t, http.StatusOK, code)
+	assert.True(t, res.Queued)
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/compact", nil, nil), "one at a time")
+
+	close(release)
+	assert.Equal(t, http.StatusOK, <-done)
+	require.Eventually(t, func() bool { return len(n.factory.Last().Turns()) == 1 }, 5*time.Second, 5*time.Millisecond)
+	assert.Equal(t, "after the compaction", n.factory.Last().Turns()[0].Text)
 }

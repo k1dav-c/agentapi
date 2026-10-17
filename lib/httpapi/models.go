@@ -224,6 +224,13 @@ type InterruptResponse struct {
 	}
 }
 
+// okResponse is an InterruptResponse that says the request succeeded.
+func okResponse() *InterruptResponse {
+	resp := &InterruptResponse{}
+	resp.Body.Ok = true
+	return resp
+}
+
 type QueueMutationResponse struct {
 	Body struct {
 		Ok bool `json:"ok"`

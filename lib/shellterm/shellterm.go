@@ -135,6 +135,7 @@ func (t *Terminal) startLocked() error {
 	if err != nil {
 		return fmt.Errorf("start %s: %w", shell, err)
 	}
+	ptmx = nonblocking(ptmx)
 	t.cfg.Logger.Info("Started the terminal's shell", "shell", shell, "pid", cmd.Process.Pid, "dir", t.cfg.Dir)
 	t.cmd, t.ptmx, t.done = cmd, ptmx, make(chan struct{})
 	go t.read(cmd, ptmx, t.done)
@@ -143,6 +144,13 @@ func (t *Terminal) startLocked() error {
 
 // read passes the shell's output on until it exits.
 func (t *Terminal) read(cmd *exec.Cmd, ptmx *os.File, done chan struct{}) {
+	exited := make(chan error, 1)
+	go func() {
+		exited <- cmd.Wait()
+		// A background job can hold the terminal open after the shell
+		// exited; the output ends with the shell.
+		_ = ptmx.Close()
+	}()
 	buf := make([]byte, 32<<10)
 	for {
 		n, err := ptmx.Read(buf)
@@ -157,8 +165,7 @@ func (t *Terminal) read(cmd *exec.Cmd, ptmx *os.File, done chan struct{}) {
 			break
 		}
 	}
-	err := cmd.Wait()
-	_ = ptmx.Close()
+	err := <-exited
 	status := 0
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
@@ -226,6 +233,14 @@ func (t *Terminal) Write(data []byte) error {
 
 // ErrNotRunning is returned by Write while no shell runs.
 var ErrNotRunning = errors.New("the terminal's shell is not running")
+
+// Running reports whether the shell runs. A watch whose output ended while
+// it does fell too far behind, and can watch again.
+func (t *Terminal) Running() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.cmd != nil && !t.closed
+}
 
 // Resize sets the terminal's size, for the shell that runs and the next.
 func (t *Terminal) Resize(cols, rows uint16) error {

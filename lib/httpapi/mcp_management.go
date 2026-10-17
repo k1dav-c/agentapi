@@ -80,14 +80,17 @@ func (s *Server) restartQuery(ctx context.Context, restart bool) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.native != nil {
-		// A native agent resumes its session: the conversation stays.
+		// A native agent resumes its session: the conversation stays. One
+		// whose session can't be resumed starts a new one, as on PTY.
 		switch err := s.native.Reload(ctx); {
 		case errors.Is(err, native.ErrTurnActive):
 			return false, huma.Error409Conflict("MCP config was written, but the agent is working on a turn; restart it once the turn ends")
+		case errors.Is(err, native.ErrUnsupported):
 		case err != nil:
 			return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", err)
+		default:
+			return true, nil
 		}
-		return true, nil
 	}
 	if err := s.restartLocked(ctx); err != nil {
 		return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", err)

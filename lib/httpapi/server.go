@@ -646,9 +646,10 @@ func requestLogMiddleware(logger *slog.Logger) func(next http.Handler) http.Hand
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
-			// Skip noisy routes: static files, SSE streams, and docs.
+			// Skip noisy routes: static files, SSE streams, the terminal
+			// (a request per keystroke), and docs.
 			if path == "/" || strings.HasPrefix(path, "/chat") ||
-				path == "/events" || path == "/internal/screen" || path == "/terminal" ||
+				path == "/events" || path == "/internal/screen" || strings.HasPrefix(path, "/terminal") ||
 				path == "/docs" || path == "/openapi.json" {
 				next.ServeHTTP(w, r)
 				return

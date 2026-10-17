@@ -238,9 +238,7 @@ func (s *Server) retryLogin(ctx context.Context, _ *struct{}) (*InterruptRespons
 		}
 		return nil, fmt.Errorf("failed to check the login: %w", err)
 	}
-	resp := &InterruptResponse{}
-	resp.Body.Ok = true
-	return resp, nil
+	return okResponse(), nil
 }
 
 func (s *Server) interrupt(ctx context.Context, _ *struct{}) (*InterruptResponse, error) {
@@ -258,9 +256,7 @@ func (s *Server) interrupt(ctx context.Context, _ *struct{}) (*InterruptResponse
 	case err != nil:
 		return nil, fmt.Errorf("failed to interrupt the agent: %w", err)
 	}
-	resp := &InterruptResponse{}
-	resp.Body.Ok = true
-	return resp, nil
+	return okResponse(), nil
 }
 
 func (s *Server) getSettings(ctx context.Context, _ *struct{}) (*SettingsResponse, error) {
@@ -324,29 +320,28 @@ func settingsError(err error) error {
 // session.
 const compactTimeout = 5 * time.Minute
 
-// compact has the agent compact its context. It holds s.mu, so the queue
-// doesn't start a turn meanwhile.
+// compact has the agent compact its context. Messages sent meanwhile wait
+// in the queue: the conversation starts no turn until it is done.
 func (s *Server) compact(ctx context.Context, _ *struct{}) (*InterruptResponse, error) {
 	if err := s.requireNative(); err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, compactTimeout)
 	defer cancel()
+	var refused *native.RefusedError
 	switch err := s.native.Compact(ctx); {
 	case errors.Is(err, native.ErrUnsupported):
 		return nil, huma.Error400BadRequest("this agent doesn't compact on request; Claude Code compacts with the /compact message")
 	case errors.Is(err, native.ErrTurnActive):
-		return nil, huma.Error409Conflict("the agent is working on a turn; compact once it ends")
+		return nil, huma.Error409Conflict("the agent is working on a turn or compacting; try again once it is done")
 	case errors.Is(err, native.ErrNotStarted):
 		return nil, huma.Error409Conflict("the agent isn't running")
+	case errors.As(err, &refused):
+		return nil, huma.Error409Conflict("the agent didn't compact: " + refused.Reason)
 	case err != nil:
 		return nil, fmt.Errorf("failed to compact: %w", err)
 	}
-	resp := &InterruptResponse{}
-	resp.Body.Ok = true
-	return resp, nil
+	return okResponse(), nil
 }
 
 // steerQueuedMessage adds a queued message to the running turn instead of
@@ -472,7 +467,7 @@ func (s *Server) registerNativeRoutes() {
 	})
 	huma.Post(s.api, "/compact", s.compact, func(o *huma.Operation) {
 		o.Summary = "Compact the agent's context"
-		o.Description = "Has the agent summarize the conversation so far to free its context window (Codex: in a turn of its own; Pi: answered once done). Native transport only, for agents with the compact capability; returns 409 while the agent works on a turn."
+		o.Description = "Has the agent summarize the conversation so far to free its context window (Codex: in a turn of its own; Pi: answered once done). Native transport only, for agents with the compact capability. Messages sent meanwhile wait in the queue. Returns 409 while the agent works on a turn or compacts, and when it refuses (Pi with nothing to compact yet)."
 		o.Errors = []int{400, 409}
 	})
 	huma.Post(s.api, "/queue/{id}/steer", s.steerQueuedMessage, func(o *huma.Operation) {

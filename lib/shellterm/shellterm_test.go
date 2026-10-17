@@ -107,9 +107,56 @@ func TestTerminalClose(t *testing.T) {
 	assert.ErrorIs(t, err, ErrClosed)
 }
 
+func TestSlowWatcherIsDropped(t *testing.T) {
+	t.Parallel()
+	term := newTerminal(t)
+	_, slow, stop, err := term.Watch()
+	require.NoError(t, err)
+	defer stop()
+	for range watcherBuffer + 1 {
+		term.broadcast([]byte("x"))
+	}
+	for range slow {
+		// What it got before it was dropped.
+	}
+	assert.True(t, term.Running(), "the shell goes on")
+	require.NoError(t, term.Close())
+	assert.False(t, term.Running())
+}
+
 func TestScrollbackStartsAtALine(t *testing.T) {
 	t.Parallel()
 	term := New(Config{Scrollback: 10})
 	term.appendLocked([]byte("first line\nsecond\n"))
 	assert.Equal(t, "second\n", string(term.history))
+}
+
+func TestTerminalWithABackgroundJob(t *testing.T) {
+	t.Parallel()
+	term := newTerminal(t)
+	_, output, stop, err := term.Watch()
+	require.NoError(t, err)
+	defer stop()
+	require.NoError(t, term.Write([]byte("sleep 20 & echo started\r")))
+	var got bytes.Buffer
+	readUntil(t, output, &got, "started")
+	// The shell exits while the job holds the terminal: the exit is
+	// noticed, and the next watch starts a new shell.
+	require.NoError(t, term.Write([]byte("exit\r")))
+	readUntil(t, output, &got, "exited with status")
+	_, again, stopAgain, err := term.Watch()
+	require.NoError(t, err)
+	defer stopAgain()
+	require.NoError(t, term.Write([]byte("echo new\r")))
+	got.Reset()
+	readUntil(t, again, &got, "new")
+
+	// Close doesn't wait for a job either, once the read loop is back in
+	// Read.
+	require.NoError(t, term.Write([]byte("sleep 20 & echo second\r")))
+	readUntil(t, again, &got, "second")
+	time.Sleep(200 * time.Millisecond)
+	start := time.Now()
+	require.NoError(t, term.Close())
+	assert.Less(t, time.Since(start), 4*time.Second)
 }

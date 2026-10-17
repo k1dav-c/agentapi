@@ -57,6 +57,11 @@ func (s *Server) resetConversationLocked() {
 func (s *Server) restartLocked(ctx context.Context) error {
 	s.emitter.SetLifecycle(LifecycleRestarting)
 	if s.native != nil {
+		if s.updateAgent != nil {
+			// The update can take minutes: the old agent stops first, so it
+			// doesn't go on working, and into the new conversation.
+			_ = s.native.Close()
+		}
 		// The new session starts with an empty conversation, so the old
 		// one goes, however the restart was asked for.
 		s.resetConversationLocked()

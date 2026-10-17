@@ -75,6 +75,11 @@ func (s *Server) subscribeTerminal(ctx context.Context, _ *struct{}, send sse.Se
 		select {
 		case data, ok := <-output:
 			if !ok {
+				if s.terminal.Running() {
+					// This connection fell too far behind: the client
+					// connects again, for the recent output.
+					return
+				}
 				_ = send.Data(TerminalExitBody{Reason: "The shell exited."})
 				return
 			}
@@ -99,9 +104,7 @@ func (s *Server) terminalInput(_ context.Context, input *TerminalInputRequest) (
 		}
 		return nil, err
 	}
-	resp := &InterruptResponse{}
-	resp.Body.Ok = true
-	return resp, nil
+	return okResponse(), nil
 }
 
 func (s *Server) terminalResize(_ context.Context, input *TerminalResizeRequest) (*InterruptResponse, error) {
@@ -111,9 +114,7 @@ func (s *Server) terminalResize(_ context.Context, input *TerminalResizeRequest)
 	if err := s.terminal.Resize(input.Body.Cols, input.Body.Rows); err != nil {
 		return nil, err
 	}
-	resp := &InterruptResponse{}
-	resp.Body.Ok = true
-	return resp, nil
+	return okResponse(), nil
 }
 
 func (s *Server) registerTerminalRoutes() {
@@ -123,7 +124,7 @@ func (s *Server) registerTerminalRoutes() {
 		Path:        "/terminal",
 		Tags:        []string{"Terminal"},
 		Summary:     "Watch the terminal",
-		Description: "Streams a shell in the agent's working directory, for a terminal emulator: `output` events carry what it writes (the first one the recent output), and an `exit` event ends the stream when the shell exits. Connecting starts the shell if it doesn't run; it keeps running while nobody watches, and every connection shares it. Native transport only (on by default; --terminal=false turns it off).",
+		Description: "Streams a shell in the agent's working directory, for a terminal emulator: `output` events carry what it writes (the first one the recent output), and an `exit` event ends the stream when the shell exits; a connection that falls too far behind ends without one, and connects again for the recent output. Connecting starts the shell if it doesn't run; it keeps running while nobody watches, and every connection shares it. Native transport only (on by default; --terminal=false turns it off).",
 	}, map[string]any{
 		"output": TerminalOutputBody{},
 		"exit":   TerminalExitBody{},
