@@ -192,6 +192,10 @@ export function createChatAPI(baseURL: string) {
       return jsonRequest("/settings", {method: "PUT", body: change, fallback: "Failed to change the agent's settings"});
     },
 
+    async compact(): Promise<void> {
+      await jsonRequest("/compact", {method: "POST", fallback: "Failed to compact the context"});
+    },
+
     // Types keys into the native transport's terminal.
     async terminalInput(data: string): Promise<void> {
       await jsonRequest("/terminal/input", {method: "POST", body: {data}, fallback: "Failed to type into the terminal"});

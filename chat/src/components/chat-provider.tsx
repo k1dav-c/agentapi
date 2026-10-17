@@ -244,6 +244,8 @@ interface ChatContextValue {
   // Whether the server offers a shell terminal (native transport, GET
   // /terminal), and typing into and resizing it.
   terminalAvailable: boolean;
+  // POST /compact (agents with the compact capability).
+  compact: () => Promise<void>;
   terminalInput: (data: string) => Promise<void>;
   terminalResize: (cols: number, rows: number) => Promise<void>;
   // The agent is starting (lifecycle "starting"): there is no turn yet, and
@@ -1180,6 +1182,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         agentSettings,
         agentUsage,
         terminalAvailable,
+        compact: api.compact,
         terminalInput: api.terminalInput,
         terminalResize: api.terminalResize,
         getSettings: api.getSettings,

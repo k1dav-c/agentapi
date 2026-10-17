@@ -199,3 +199,8 @@ func TestUsageOutlivesTheSessionButNotItsContext(t *testing.T) {
 	got := rec.get().usage
 	assert.Nil(t, got[len(got)-1].Context)
 }
+
+func TestCompactNeedsTheCapabilityAndNoTurn(t *testing.T) {
+	c, _, _ := start(t, nil, native.Config{})
+	assert.ErrorIs(t, c.Compact(context.Background()), native.ErrUnsupported, "the fake adapter compacts nothing")
+}

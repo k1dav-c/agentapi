@@ -156,6 +156,7 @@ type Adapter struct {
 var (
 	_ native.Adapter      = (*Adapter)(nil)
 	_ native.Configurable = (*Adapter)(nil)
+	_ native.Compacter    = (*Adapter)(nil)
 )
 
 type call struct {
@@ -214,7 +215,7 @@ func newAdapter(cfg Config, opts launchOptions, resumeRef string) *Adapter {
 
 // Capabilities implements native.Adapter.
 func (a *Adapter) Capabilities() native.Capabilities {
-	return native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true}
+	return native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true}
 }
 
 // command returns the app-server command line.
@@ -417,6 +418,22 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 			return native.ErrTurnActive
 		}
 		return fmt.Errorf("start turn: %w", err)
+	}
+	return nil
+}
+
+// Compact implements native.Compacter: app-server compacts the thread in
+// a turn of its own, whose contextCompaction item says it is done.
+func (a *Adapter) Compact(ctx context.Context) error {
+	threadID, turnID, err := a.session()
+	if err != nil {
+		return err
+	}
+	if turnID != "" {
+		return native.ErrTurnActive
+	}
+	if _, err := a.call(ctx, "thread/compact/start", threadCompactStartParams{ThreadID: threadID}, nil); err != nil {
+		return fmt.Errorf("compact the thread: %w", err)
 	}
 	return nil
 }

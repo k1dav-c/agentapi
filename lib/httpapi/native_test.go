@@ -614,3 +614,8 @@ func TestNative_MCPRestartResumes(t *testing.T) {
 	n.do(http.MethodGet, "/messages", nil, &msgs)
 	assert.Len(t, msgs.Messages, 1, "the conversation stays")
 }
+
+func TestNative_CompactUnsupported(t *testing.T) {
+	n := newNativeServer(t, nil)
+	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodPost, "/compact", nil, nil), "the fake adapter doesn't compact")
+}

@@ -221,6 +221,21 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 	return nil
 }
 
+// Compact implements native.Compacter: Pi summarizes the session, and
+// answers once it has (compaction_end reports a failure).
+func (a *Adapter) Compact(ctx context.Context) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	if a.isTurnActive() {
+		return native.ErrTurnActive
+	}
+	if err := a.command(ctx, simpleCommand{Type: "compact"}); err != nil {
+		return fmt.Errorf("compact the session: %w", err)
+	}
+	return nil
+}
+
 // command sends a command and waits for its success.
 func (a *Adapter) command(ctx context.Context, cmd command) error {
 	res, err := a.request(ctx, cmdQuery, cmd)

@@ -320,6 +320,35 @@ func settingsError(err error) error {
 	}
 }
 
+// compactTimeout bounds a compaction: Pi answers once it summarized the
+// session.
+const compactTimeout = 5 * time.Minute
+
+// compact has the agent compact its context. It holds s.mu, so the queue
+// doesn't start a turn meanwhile.
+func (s *Server) compact(ctx context.Context, _ *struct{}) (*InterruptResponse, error) {
+	if err := s.requireNative(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, compactTimeout)
+	defer cancel()
+	switch err := s.native.Compact(ctx); {
+	case errors.Is(err, native.ErrUnsupported):
+		return nil, huma.Error400BadRequest("this agent doesn't compact on request; Claude Code compacts with the /compact message")
+	case errors.Is(err, native.ErrTurnActive):
+		return nil, huma.Error409Conflict("the agent is working on a turn; compact once it ends")
+	case errors.Is(err, native.ErrNotStarted):
+		return nil, huma.Error409Conflict("the agent isn't running")
+	case err != nil:
+		return nil, fmt.Errorf("failed to compact: %w", err)
+	}
+	resp := &InterruptResponse{}
+	resp.Body.Ok = true
+	return resp, nil
+}
+
 // steerQueuedMessage adds a queued message to the running turn instead of
 // waiting for the turn to end.
 func (s *Server) steerQueuedMessage(_ context.Context, input *SteerQueuedMessageRequest) (*QueueMutationResponse, error) {
@@ -439,6 +468,11 @@ func (s *Server) registerNativeRoutes() {
 	huma.Put(s.api, "/settings", s.updateSettings, func(o *huma.Operation) {
 		o.Summary = "Change the agent's settings"
 		o.Description = "Changes the settings that are set in the body and leaves the others: `permission_mode` (bypass, auto, ask or plan, as the agent offers), `model` (one of the model ids GET /settings lists) and `effort` (one of the model's efforts). A change made during a turn may apply from the next one (Codex). The agent that replaces this one after a restart, a new login or an AgentAPI restart (with --state-db) gets the chosen settings too. Native transport only; returns 400 for a value a setting can't take and 409 while the agent restarts or waits for a login."
+		o.Errors = []int{400, 409}
+	})
+	huma.Post(s.api, "/compact", s.compact, func(o *huma.Operation) {
+		o.Summary = "Compact the agent's context"
+		o.Description = "Has the agent summarize the conversation so far to free its context window (Codex: in a turn of its own; Pi: answered once done). Native transport only, for agents with the compact capability; returns 409 while the agent works on a turn."
 		o.Errors = []int{400, 409}
 	})
 	huma.Post(s.api, "/queue/{id}/steer", s.steerQueuedMessage, func(o *huma.Operation) {

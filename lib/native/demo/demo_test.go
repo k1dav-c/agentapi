@@ -110,7 +110,7 @@ func start(t *testing.T, clock quartz.Clock) (*native.Conversation, *observer) {
 	})
 	c.Start(ctx)
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
-	assert.Equal(t, native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true}, c.Capabilities())
+	assert.Equal(t, native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true}, c.Capabilities())
 	return c, obs
 }
 
@@ -319,4 +319,19 @@ func TestUsage(t *testing.T) {
 	require.Len(t, obs.usage[1].RateLimits, 2)
 	assert.Equal(t, "5-hour limit", obs.usage[1].RateLimits[0].Label)
 	assert.Equal(t, c.Usage(), obs.usage[1])
+}
+
+func TestCompact(t *testing.T) {
+	c, obs := start(t, nil)
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "long"}))
+	assert.ErrorIs(t, c.Compact(context.Background()), native.ErrTurnActive)
+	require.NoError(t, c.Interrupt(context.Background()))
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	before := c.Usage().Context.Used
+
+	require.NoError(t, c.Compact(context.Background()))
+	assert.Less(t, c.Usage().Context.Used, before, "the context empties")
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+	assert.NotEmpty(t, obs.usage)
 }

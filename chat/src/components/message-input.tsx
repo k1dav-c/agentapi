@@ -27,6 +27,8 @@ import type {SendResult, ServerStatus} from "./chat-provider";
 import TextareaAutosize from "react-textarea-autosize";
 import {useChat} from "./chat-provider";
 import {SessionSettings} from "./session-settings";
+import {useSlashCommandRunner} from "./slash-command-runner";
+import {matchingCommands, parseSlashCommand} from "@/lib/slash-commands";
 import {UsageMeter} from "./usage-meter";
 import {DragDrop} from "./drag-drop";
 import {ImageThumb, useObjectURL} from "./image-preview";
@@ -394,8 +396,22 @@ export default function MessageInput({
     !message.trim() ||
     attachments.some((attachment) => attachment.status === "uploading");
 
+  const runSlashCommand = useSlashCommandRunner();
+  // The chat's own slash commands, offered while the command word is typed
+  // (native agents, which have no terminal UI for them).
+  const slashSuggestions = transport === "native" ? matchingCommands(message) : [];
+  const completeSlashCommand = (name: string, args?: string) => {
+    setMessage(`/${name}${args ? " " : ""}`);
+    textareaRef.current?.focus();
+  };
+
   const submit = async (mode: DispatchMode = "queue") => {
     if (sendBlocked || (serverStatus !== "running" && serverStatus !== "stable")) return;
+    const command = transport === "native" ? parseSlashCommand(message) : null;
+    if (command && (await runSlashCommand(command))) {
+      setMessage("");
+      return;
+    }
     const result = await onSendMessage(message, "user", mode);
     if (!result.ok) return;
     const notice = sendNotice(result, mode);
@@ -447,6 +463,11 @@ export default function MessageInput({
   }, [serverStatus, disabled]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Tab" && !e.shiftKey && slashSuggestions.length > 0) {
+      e.preventDefault();
+      completeSlashCommand(slashSuggestions[0].name, slashSuggestions[0].args);
+      return;
+    }
     const mode = dispatchModeForKey(e, modes);
     if (mode) {
       e.preventDefault();
@@ -553,6 +574,24 @@ export default function MessageInput({
             className="overflow-hidden rounded-2xl border bg-card shadow-lg shadow-black/5 transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"
           >
             <div className="flex flex-col">
+              {slashSuggestions.length > 0 && (
+                <div className="border-b bg-muted/30 px-2 py-1.5" aria-label="Chat commands" data-slash-suggestions>
+                  {slashSuggestions.map((command) => (
+                    <button
+                      key={command.name}
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => completeSlashCommand(command.name, command.args)}
+                      className="flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted"
+                    >
+                      <code className="shrink-0 font-mono text-foreground">/{command.name}</code>
+                      {command.args && <span className="shrink-0 font-mono text-muted-foreground max-sm:hidden">{command.args}</span>}
+                      <span className="min-w-0 truncate text-muted-foreground">{command.description}</span>
+                    </button>
+                  ))}
+                  <p className="px-2 pt-0.5 text-[11px] text-muted-foreground">Tab completes; other commands go to the agent.</p>
+                </div>
+              )}
               <div className="flex">
                   <TextareaAutosize
                     ref={textareaRef}

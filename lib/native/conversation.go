@@ -206,6 +206,24 @@ func (c *Conversation) Settings() Settings {
 	return c.settings
 }
 
+// Compact has the agent compact its context, while it isn't working on a
+// turn.
+func (c *Conversation) Compact(ctx context.Context) error {
+	c.mu.Lock()
+	adapter, started, busy, caps := c.adapter, c.started, c.turnActive, c.caps
+	c.mu.Unlock()
+	compacter, ok := adapter.(Compacter)
+	switch {
+	case !started || adapter == nil:
+		return ErrNotStarted
+	case !ok || !caps.Compact:
+		return ErrUnsupported
+	case busy:
+		return ErrTurnActive
+	}
+	return compacter.Compact(ctx)
+}
+
 // Usage reports the agent's usage of its limits, as it last reported it.
 func (c *Conversation) Usage() AgentUsage {
 	c.mu.Lock()

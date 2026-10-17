@@ -187,6 +187,10 @@ type turnStartParams struct {
 	CollaborationMode *collaborationMode `json:"collaborationMode,omitempty"`
 }
 
+type threadCompactStartParams struct {
+	ThreadID string `json:"threadId"`
+}
+
 type turnSteerParams struct {
 	ThreadID       string      `json:"threadId"`
 	ExpectedTurnID string      `json:"expectedTurnId"`

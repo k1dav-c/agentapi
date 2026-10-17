@@ -20,6 +20,8 @@ export interface Capabilities {
   // The permission mode, model and effort can change (GET/PUT /settings).
   // Missing from servers that predate it.
   settings?: boolean;
+  // The agent compacts its context on request (POST /compact).
+  compact?: boolean;
 }
 
 export interface DispatchContext {

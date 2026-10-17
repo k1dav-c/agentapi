@@ -188,6 +188,7 @@ type Adapter struct {
 var (
 	_ native.Adapter      = (*Adapter)(nil)
 	_ native.Configurable = (*Adapter)(nil)
+	_ native.Compacter    = (*Adapter)(nil)
 )
 
 // newAdapter creates an adapter that passes args (filtered by filterArgs)
@@ -211,7 +212,7 @@ func newAdapter(cfg Config, args []string, resumeRef string, start procutil.Star
 		clock:            quartz.NewReal(),
 		pending:          make(map[string]*pendingCmd),
 		dialogs:          make(map[string]*dialog),
-		caps:             native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true},
+		caps:             native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true},
 		posted:           make(chan func()),
 		loopDone:         make(chan struct{}),
 		procDone:         make(chan struct{}),

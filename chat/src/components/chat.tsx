@@ -8,6 +8,7 @@ import MessageList from "./message-list";
 import dynamic from "next/dynamic";
 import {TtyView} from "./tty-view";
 import {ShellView} from "./shell-view";
+import {OPEN_TERMINAL_EVENT} from "./slash-command-runner";
 import {DecisionCard, StateStrip} from "./dock";
 import {RequestCard} from "./request-card";
 import {LoginCard} from "./login-card";
@@ -65,6 +66,16 @@ export function Chat() {
     setShellCommand(command);
     setTtyMode(true);
   };
+  // The /terminal and /login commands.
+  useEffect(() => {
+    if (!hasShell) return;
+    const onOpen = (event: Event) => {
+      setShellCommand((event as CustomEvent<string | undefined>).detail);
+      setTtyMode(true);
+    };
+    window.addEventListener(OPEN_TERMINAL_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_TERMINAL_EVENT, onOpen);
+  }, [hasShell]);
   const [reconnectSeconds, setReconnectSeconds] = useState(0);
 
   useEffect(() => {

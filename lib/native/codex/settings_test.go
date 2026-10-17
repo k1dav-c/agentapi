@@ -315,3 +315,26 @@ func TestUsage(t *testing.T) {
 	assert.Equal(t, time.Unix(1792651785, 0).UTC(), *usage.RateLimits[1].ResetsAt)
 	assert.Equal(t, "5-hour limit", usage.RateLimits[2].Label)
 }
+
+func TestCompact(t *testing.T) {
+	h := newHarness(t, "", nil)
+	h.boot()
+	assert.True(t, h.a.Capabilities().Compact)
+	h.act("compact", func(ctx context.Context) error { return h.a.Compact(ctx) })
+	sent := h.expectSent("thread/compact/start")
+	assert.JSONEq(t, `{"threadId":"`+testThread+`"}`, string(sent.Params))
+	h.feedJSON(`{"id":` + string(sent.ID) + `,"result":{}}`)
+	h.settle()
+	require.NoError(t, h.err("compact"))
+	// app-server compacts in a turn of its own.
+	h.feedJSON(`{"method":"turn/started","params":{"threadId":"` + testThread + `","turn":{"id":"turn-c","items":[],"status":"inProgress"}}}`)
+	h.item("completed", "turn-c", `{"type":"contextCompaction","id":"c1"}`)
+	h.completeTurn("turn-c", "completed", "")
+	s := h.rec.snapshot()
+	assert.Equal(t, 1, s.started)
+	require.Len(t, s.completions, 1)
+	assert.NotEmpty(t, s.eventsOf("system"))
+
+	h.beginTurn("turn-1")
+	assert.ErrorIs(t, h.a.Compact(context.Background()), native.ErrTurnActive)
+}

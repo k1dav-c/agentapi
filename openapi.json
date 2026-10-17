@@ -56,6 +56,10 @@
       "Capabilities": {
         "additionalProperties": false,
         "properties": {
+          "compact": {
+            "description": "The agent compacts its context on request (POST /compact). Claude Code compacts with the /compact message instead.",
+            "type": "boolean"
+          },
           "images": {
             "description": "Messages can carry images.",
             "type": "boolean"
@@ -78,6 +82,7 @@
           }
         },
         "required": [
+          "compact",
           "images",
           "interrupt",
           "resume",
@@ -2444,6 +2449,55 @@
         "tags": [
           "Auth"
         ]
+      }
+    },
+    "/compact": {
+      "post": {
+        "description": "Has the agent summarize the conversation so far to free its context window (Codex: in a turn of its own; Pi: answered once done). Native transport only, for agents with the compact capability; returns 409 while the agent works on a turn.",
+        "operationId": "post-compact",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterruptResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Compact the agent's context"
       }
     },
     "/events": {

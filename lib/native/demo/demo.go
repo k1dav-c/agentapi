@@ -109,11 +109,14 @@ type Adapter struct {
 	settings native.Settings
 	done     chan struct{}
 	once     sync.Once
+	// compacted is the turn the simulated context was compacted after.
+	compacted int
 }
 
 var (
 	_ native.Adapter      = (*Adapter)(nil)
 	_ native.Configurable = (*Adapter)(nil)
+	_ native.Compacter    = (*Adapter)(nil)
 )
 
 // settingOptions are the demo's simulated models and modes.
@@ -250,7 +253,25 @@ func (a *Adapter) Respond(_ context.Context, requestID string, response native.R
 }
 
 func (a *Adapter) Capabilities() native.Capabilities {
-	return native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true}
+	return native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true}
+}
+
+// Compact implements native.Compacter: the simulated context empties.
+func (a *Adapter) Compact(context.Context) error {
+	a.mu.Lock()
+	if a.active != nil {
+		a.mu.Unlock()
+		return native.ErrTurnActive
+	}
+	sink := a.sink
+	a.compacted = a.turns
+	a.mu.Unlock()
+	if usage, ok := sink.(native.UsageSink); ok {
+		usage.UsageChanged(demoUsage(0, a.now()))
+	}
+	text := "context compacted"
+	sink.SessionEvents([]jsonlwatcher.SessionEvent{{Kind: "system", Content: &text, EventTime: a.now()}})
+	return nil
 }
 
 func (a *Adapter) Settings() native.Settings {
@@ -324,7 +345,7 @@ func (a *Adapter) finish(t *turn, result native.TurnResult) {
 		a.active = nil
 	}
 	sink := a.sink
-	turns := a.turns
+	turns := a.turns - a.compacted
 	a.mu.Unlock()
 	t.cancel()
 	if usage, ok := sink.(native.UsageSink); ok {

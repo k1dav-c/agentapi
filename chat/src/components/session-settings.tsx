@@ -18,6 +18,7 @@ import {
 import type { AgentSettings, PermissionMode, SettingOptions } from "@/lib/chat-api";
 import { getErrorMessage } from "@/lib/error-utils";
 import { modeMeta, modelLabel, effortsOf } from "@/lib/session-settings";
+import { OPEN_SETTINGS_EVENT, type SettingsMenu } from "./slash-command-runner";
 import { cn } from "@/lib/utils";
 
 const MODE_ICONS: Record<PermissionMode, ReactNode> = {
@@ -33,6 +34,8 @@ const MODE_ICONS: Record<PermissionMode, ReactNode> = {
 export function SessionSettings({ className }: { className?: string }) {
   const { transport, capabilities, agentSettings, getSettings, updateSettings } = useChat();
   const [options, setOptions] = useState<SettingOptions | null>(null);
+  // The menu that is open, also when a slash command opened it.
+  const [openMenu, setOpenMenu] = useState<SettingsMenu | null>(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -56,12 +59,23 @@ export function SessionSettings({ className }: { className?: string }) {
     if (enabled) void load();
   }, [enabled, load]);
 
+  // /model, /effort and /mode without a value open the menu.
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      setOpenMenu((event as CustomEvent<SettingsMenu>).detail);
+      void load();
+    };
+    window.addEventListener(OPEN_SETTINGS_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, onOpen);
+  }, [load]);
+
   if (!enabled || !agentSettings) return null;
 
   // The choices can change with the agent (a restart, a new login), so
   // they are asked for again whenever a menu opens; the last ones show
   // meanwhile.
-  const onOpenChange = (open: boolean) => {
+  const onOpenChange = (menu: SettingsMenu) => (open: boolean) => {
+    setOpenMenu(open ? menu : null);
     if (open) void load();
   };
 
@@ -95,7 +109,7 @@ export function SessionSettings({ className }: { className?: string }) {
   return (
     <div className={cn("flex min-w-0 items-center gap-1", className)} data-session-settings>
       {showMode && (
-        <DropdownMenu onOpenChange={onOpenChange}>
+        <DropdownMenu open={openMenu === "mode"} onOpenChange={onOpenChange("mode")}>
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
@@ -138,7 +152,7 @@ export function SessionSettings({ className }: { className?: string }) {
       )}
 
       {agentSettings.model && (
-        <DropdownMenu onOpenChange={onOpenChange}>
+        <DropdownMenu open={openMenu === "model"} onOpenChange={onOpenChange("model")}>
           <DropdownMenuTrigger asChild>
             <Button
               type="button"

@@ -73,6 +73,17 @@ type Capabilities struct {
 	// Settings: the session settings (permission mode, model, reasoning
 	// effort) can change while the agent runs; see Configurable.
 	Settings bool `json:"settings" doc:"The permission mode, model and reasoning effort can be changed while the agent runs (GET and PUT /settings)."`
+	// Compact: the agent compacts its context on request; see Compacter.
+	Compact bool `json:"compact" doc:"The agent compacts its context on request (POST /compact). Claude Code compacts with the /compact message instead."`
+}
+
+// Compacter is implemented by adapters whose agent compacts its context on
+// request: it summarizes the conversation so far to free the context
+// window. Capabilities.Compact reports it.
+type Compacter interface {
+	// Compact compacts the context. It returns once the agent took the
+	// request; an agent may report the compaction as a turn.
+	Compact(ctx context.Context) error
 }
 
 // Image is an image attached to a message, read from a local file.

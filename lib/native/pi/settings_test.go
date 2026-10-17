@@ -103,3 +103,16 @@ func TestSettingsWithoutAModel(t *testing.T) {
 	require.NoError(t, h.startResult())
 	assert.Equal(t, native.Settings{}, h.a.Settings())
 }
+
+func TestCompact(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, Config{}, "")
+	h.answerState(lunaState)
+	h.started()
+	assert.True(t, h.a.Capabilities().Compact)
+	h.call("compact", func() error { return h.a.Compact(context.Background()) })
+	cmd := h.pi.nextCmd()
+	require.Equal(t, "compact", cmd["type"])
+	h.answer(cmd, `{"summary":"...","firstKeptEntryId":"x","tokensBefore":5000}`)
+	require.NoError(t, h.result("compact"))
+}
