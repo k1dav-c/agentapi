@@ -5,40 +5,25 @@ describe("getDocumentTitle", () => {
   test("shows the running task", () => {
     expect(
       getDocumentTitle({
-        connectionStatus: "connected",
-        serverStatus: "running",
+        agentState: "working",
         task: "Implement dynamic browser titles",
       }),
     ).toBe("● Working · Implement dynamic browser titles — AgentAPI");
   });
 
-  test("an open prompt reads as needing the user, even while stable", () => {
+  test("leads with Needs you while the agent waits for the user", () => {
     expect(
       getDocumentTitle({
-        connectionStatus: "connected",
-        serverStatus: "stable",
-        terminalPrompt: "Do you want to proceed?\n❯ 1. Yes",
+        agentState: "needs-you",
         task: "Rebuild the chat UI",
       }),
     ).toBe("◆ Needs you · Rebuild the chat UI — AgentAPI");
   });
 
-  test("a request the agent waits on (native transport) reads as needing the user", () => {
+  test("shows the connection state", () => {
     expect(
       getDocumentTitle({
-        connectionStatus: "connected",
-        serverStatus: "stable",
-        pendingRequests: 1,
-        task: "Ship the release",
-      }),
-    ).toBe("◆ Needs you · Ship the release — AgentAPI");
-  });
-
-  test("prioritizes connection state over agent state", () => {
-    expect(
-      getDocumentTitle({
-        connectionStatus: "offline",
-        serverStatus: "running",
+        agentState: "offline",
         task: "Current task",
       }),
     ).toBe("○ Offline · Current task — AgentAPI");
@@ -46,8 +31,7 @@ describe("getDocumentTitle", () => {
 
   test("normalizes and truncates long tasks", () => {
     const title = getDocumentTitle({
-      connectionStatus: "connected",
-      serverStatus: "stable",
+      agentState: "ready",
       task: `  ${"task ".repeat(20)} `,
     });
 
@@ -58,20 +42,13 @@ describe("getDocumentTitle", () => {
   test("uses a default title before a task is available", () => {
     expect(
       getDocumentTitle({
-        connectionStatus: "reconnecting",
-        serverStatus: "unknown",
+        agentState: "reconnecting",
       }),
     ).toBe("↻ Reconnecting · AgentAPI — Live Agent Session");
   });
 
-  test("an agent waiting for a login (native transport) reads as needing the user", () => {
-    expect(
-      getDocumentTitle({
-        connectionStatus: "connected",
-        serverStatus: "running",
-        loginRequired: true,
-        task: "Fix the flaky test",
-      }),
-    ).toBe("◆ Needs you · Fix the flaky test — AgentAPI");
+  test("a custom title replaces the product name", () => {
+    expect(getDocumentTitle({agentState: "ready", customTitle: "Docs bot"})).toBe("✓ Ready · Docs bot");
+    expect(getDocumentTitle({agentState: "working", task: "Fix", customTitle: "Docs bot"})).toBe("● Working · Fix — Docs bot");
   });
 });

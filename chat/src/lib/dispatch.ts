@@ -1,8 +1,16 @@
 // How a message is delivered while the agent works (POST /message
 // dispatch_mode), and what the composer offers for it.
 
+import { isImeComposing, type ImeKeyEvent } from "./keys";
+
 export type DispatchMode = "queue" | "steer" | "interrupt";
 export type Transport = "pty" | "acp" | "native";
+
+// The transport a status_change event, GET /status or the cache reports, or
+// null for anything else (a server too old to report it).
+export function parseTransport(value: unknown): Transport | null {
+  return value === "pty" || value === "acp" || value === "native" ? value : null;
+}
 
 export interface Capabilities {
   steer: boolean;
@@ -13,21 +21,30 @@ export interface Capabilities {
 
 export interface DispatchContext {
   transport: Transport;
+  // Optional operations of a native agent; null for other transports and
+  // while the agent starts, when there is no turn to steer or stop.
   capabilities: Capabilities | null;
   serverStatus: string;
   // Requests the agent waits on; the turn is still open while it waits.
-  pendingRequests: number;
+  pendingRequestCount: number;
 }
 
 // Whether the agent is in the middle of a turn: working, or waiting on an
 // answer to a request it made during the turn.
 export function turnActive(context: DispatchContext): boolean {
-  return context.serverStatus === "running" || (context.transport === "native" && context.pendingRequests > 0);
+  return context.serverStatus === "running" || (context.transport === "native" && context.pendingRequestCount > 0);
 }
 
 // Whether the running turn can be stopped with POST /interrupt.
 export function canInterrupt(context: DispatchContext): boolean {
   return context.transport === "native" && Boolean(context.capabilities?.interrupt) && turnActive(context);
+}
+
+// Whether Stop can stop what the agent is doing: Esc on the terminal while
+// a PTY agent works, POST /interrupt on the native transport. ACP has
+// neither.
+export function canStop(context: DispatchContext): boolean {
+  return context.transport === "pty" ? context.serverStatus === "running" : canInterrupt(context);
 }
 
 // Whether a message can be added to the turn the agent is working on. Not
@@ -46,12 +63,13 @@ export function dispatchModes(context: DispatchContext): DispatchMode[] {
 
 // The mode an Enter key press sends with: Enter queues, ⌘/Ctrl+Enter
 // steers and ⌘/Ctrl+Shift+Enter interrupts and sends, when available.
-// null for keys that don't send (Shift+Enter is a new line).
+// null for keys that don't send (Shift+Enter is a new line, and an Enter
+// that picks an IME candidate only ends the composition).
 export function dispatchModeForKey(
-  event: {key: string; shiftKey: boolean; metaKey: boolean; ctrlKey: boolean; isComposing?: boolean},
+  event: {key: string; shiftKey: boolean; metaKey: boolean; ctrlKey: boolean} & ImeKeyEvent,
   modes: DispatchMode[],
 ): DispatchMode | null {
-  if (event.key !== "Enter" || event.isComposing) return null;
+  if (event.key !== "Enter" || isImeComposing(event)) return null;
   const mod = event.metaKey || event.ctrlKey;
   if (event.shiftKey && !mod) return null;
   if (mod && event.shiftKey) return modes.includes("interrupt") ? "interrupt" : "queue";

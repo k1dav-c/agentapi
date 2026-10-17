@@ -30,7 +30,9 @@ import {DragDrop} from "./drag-drop";
 import {ImageThumb, useObjectURL} from "./image-preview";
 import {filesToUploadFromPaste, isImageFile, pastedFileName, uploadedImageURL} from "@/lib/uploads";
 import {toast} from "sonner";
-import {getErrorMessage} from "@/lib/error-utils";
+import {ApiError, getErrorMessage} from "@/lib/error-utils";
+import {isImeComposing} from "@/lib/keys";
+import {Kbd} from "./ui/kbd";
 import {
   parsePersistedAttachments,
   removeAttachmentToken,
@@ -44,7 +46,6 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import {
-  canInterrupt,
   canSteer,
   dispatchModeForKey,
   dispatchModes,
@@ -131,24 +132,22 @@ export default function MessageInput({
     updateQueuedMessage,
     deleteQueuedMessage,
     storageScope,
-    terminalPrompt,
     transport,
     capabilities,
-    pendingRequests,
     loginRequired,
-    loginWaitsAtStart,
-    interrupt,
+    agentState,
+    dispatch,
+    canStop,
+    stop,
     steerQueuedMessage,
     reorderQueue,
   } = useChat();
-  // An agent waiting for a login at startup has no turn to steer or stop.
-  const dispatch = {transport, capabilities: loginWaitsAtStart ? null : capabilities, serverStatus, pendingRequests};
   const modes = dispatchModes(dispatch);
   const steerable = canSteer(dispatch);
-  const interruptible = canInterrupt(dispatch);
   const active = turnActive(dispatch);
-  const waitingForAnswer = Boolean(terminalPrompt) || pendingRequests > 0;
-  const waitingForLogin = loginRequired !== null;
+  // Nothing queued runs until the agent has its answer, or its login.
+  const waitingForLogin = agentState === "needs-you" && loginRequired !== null;
+  const waitingForAnswer = agentState === "needs-you" && loginRequired === null;
   // Shortcut labels: ⌘ on Apple devices, Ctrl elsewhere.
   const [modKey, setModKey] = useState("Ctrl");
   useEffect(() => {
@@ -386,18 +385,23 @@ export default function MessageInput({
     }
   };
 
+  // Not while an attachment uploads: its path joins the message once the
+  // upload is done.
+  const sendBlocked =
+    disabled ||
+    !message.trim() ||
+    attachments.some((attachment) => attachment.status === "uploading");
+
   const submit = async (mode: DispatchMode = "queue") => {
-    if (message.trim() && !disabled) {
-      if (serverStatus !== "running" && serverStatus !== "stable") return;
-      const result = await onSendMessage(message, "user", mode);
-      if (!result.ok) return;
-      const notice = sendNotice(result, mode);
-      if (notice) toast.success(notice);
-      setMessage("");
-      setAttachments((previous) =>
-        previous.filter((attachment) => attachment.status !== "completed"),
-      );
-    }
+    if (sendBlocked || (serverStatus !== "running" && serverStatus !== "stable")) return;
+    const result = await onSendMessage(message, "user", mode);
+    if (!result.ok) return;
+    const notice = sendNotice(result, mode);
+    if (notice) toast.success(notice);
+    setMessage("");
+    setAttachments((previous) =>
+      previous.filter((attachment) => attachment.status !== "completed"),
+    );
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -420,7 +424,11 @@ export default function MessageInput({
     try {
       await reorderQueue(ids);
     } catch (error) {
-      toast.error("Failed to reorder the queue", {description: getErrorMessage(error)});
+      toast.error("Failed to reorder the queue", {
+        description: error instanceof ApiError && error.status === 409
+          ? "The queue changed in the meantime; try again."
+          : getErrorMessage(error),
+      });
     }
   };
 
@@ -437,10 +445,7 @@ export default function MessageInput({
   }, [serverStatus, disabled]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    const mode = dispatchModeForKey(
-      {key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, isComposing: e.nativeEvent.isComposing},
-      modes,
-    );
+    const mode = dispatchModeForKey(e, modes);
     if (mode) {
       e.preventDefault();
       void submit(mode);
@@ -519,26 +524,10 @@ export default function MessageInput({
   const handleStop = () => {
     if (isStopping) return;
     setIsStopping(true);
-    if (transport === "native") {
-      interrupt().then(
-        () => toast.info("Stopping the agent"),
-        (error) => {
-          setIsStopping(false);
-          toast.error("Failed to stop the agent", {description: getErrorMessage(error)});
-        },
-      );
-      return;
-    }
-    onSendMessage("\x1b", "raw");
-    toast.info("Stop signal sent");
+    void stop().then((stopped) => {
+      if (!stopped) setIsStopping(false);
+    });
   };
-  // The native transport stops a turn with POST /interrupt when the agent
-  // supports it; the others send Esc to the terminal.
-  const showStop = transport === "native" ? interruptible : serverStatus === "running";
-  const sendBlocked =
-    disabled ||
-    !message.trim() ||
-    attachments.some((attachment) => attachment.status === "uploading");
 
   return (
     <div className="shrink-0 border-t bg-background/90 backdrop-blur-xl">
@@ -694,7 +683,11 @@ export default function MessageInput({
                     <span className="flex items-center gap-1.5">
                       <Clock3 className="size-3" />
                       Queued tasks · {queuedMessages.length}
-                      {waitingForAnswer && <span className="text-state-needs">· held until you answer the agent</span>}
+                      {(waitingForAnswer || waitingForLogin) && (
+                        <span className="text-state-needs">
+                          · held until {waitingForLogin ? "the agent is logged in" : "you answer the agent"}
+                        </span>
+                      )}
                     </span>
                     <span className="text-[10px] group-open:hidden">Show</span>
                     <span className="hidden text-[10px] group-open:inline">Hide</span>
@@ -713,6 +706,9 @@ export default function MessageInput({
                               setEditingQueuedMessage(event.target.value)
                             }
                             onKeyDown={(event) => {
+                              // Enter or Esc while picking an IME candidate
+                              // only ends the composition.
+                              if (isImeComposing(event)) return;
                               if (event.key === "Enter") {
                                 event.preventDefault();
                                 saveEditingQueuedMessage();
@@ -938,7 +934,7 @@ export default function MessageInput({
                    </div>
                   )}
 
-                  {showStop && (
+                  {canStop && (
                     <Button
                       size="icon"
                       type="button"
@@ -986,7 +982,7 @@ function ShortcutHint({keys}: {keys: string[]}) {
   return (
     <span className="ml-auto hidden shrink-0 items-center gap-0.5 pt-0.5 sm:flex" aria-hidden="true">
       {keys.map((key) => (
-        <kbd key={key} className="rounded border border-b-2 px-1 font-mono text-[10px] text-muted-foreground">{key}</kbd>
+        <Kbd key={key} small>{key}</Kbd>
       ))}
     </span>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import {useEffect, useRef, useState, type FormEvent} from "react";
-import {KeyRound} from "lucide-react";
+import {KeyRound, TriangleAlert} from "lucide-react";
 import {Button} from "@/components/ui/button";
 import {
   Dialog,
@@ -11,12 +11,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {exchangeToken, setSignInHandler} from "@/lib/auth";
+import {exchangeToken, isCrossOrigin, serverHost, setSignInHandler} from "@/lib/auth";
 
 interface Prompt {
   baseURL: string;
   resolve: (signedIn: boolean) => void;
 }
+
+const ERRORS = {
+  rejected: "The server did not accept this token.",
+  "cookie-blocked":
+    "The server accepted the token, but the browser didn't keep the session cookie, so the chat can't stay signed in. Allow cookies for this site and try again.",
+} as const;
 
 // Asks for the API token when the server answers 401, and trades it for a
 // session cookie. Requests waiting on the sign-in retry once it succeeds.
@@ -58,10 +64,11 @@ export function AuthDialog() {
     setSubmitting(true);
     setError("");
     try {
-      if (await exchangeToken(prompt.baseURL, token.trim())) {
+      const result = await exchangeToken(prompt.baseURL, token.trim());
+      if (result === "signed-in" || result === "not-required") {
         finish(true);
       } else {
-        setError("The server did not accept this token.");
+        setError(ERRORS[result]);
       }
     } catch {
       setError("Could not reach the server.");
@@ -69,6 +76,13 @@ export function AuthDialog() {
       setSubmitting(false);
     }
   };
+
+  // The token goes to the server the chat talks to, which a link with
+  // ?url= can point anywhere: say which server asks, and warn when it isn't
+  // the one that serves this page.
+  const host = prompt ? serverHost(prompt.baseURL) : "";
+  const elsewhere = prompt ? isCrossOrigin(prompt.baseURL) : false;
+  const describedBy = [elsewhere && "auth-dialog-elsewhere", error && "auth-dialog-error"].filter(Boolean).join(" ");
 
   return (
     <Dialog open={prompt !== null} onOpenChange={(open) => { if (!open) finish(false); }}>
@@ -80,10 +94,24 @@ export function AuthDialog() {
               Sign in to AgentAPI
             </DialogTitle>
             <DialogDescription>
-              This server was started with <code className="font-mono text-xs">--api-token</code>.
+              The AgentAPI server at <span className="font-mono text-xs font-medium text-foreground" data-auth-host>{host}</span> was
+              started with <code className="font-mono text-xs">--api-token</code>.
               Enter the token to continue. It is exchanged for a session cookie and not stored by the page.
             </DialogDescription>
           </DialogHeader>
+          {elsewhere && (
+            <p
+              id="auth-dialog-elsewhere"
+              className="flex gap-2 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-status-warning"
+              data-auth-elsewhere
+            >
+              <TriangleAlert className="mt-px size-3.5 shrink-0" />
+              <span>
+                This page comes from <span className="font-mono">{globalThis.location?.host}</span>, but the token goes to{" "}
+                <span className="font-mono font-medium">{host}</span>. Only sign in if you trust that server.
+              </span>
+            </p>
+          )}
           <label className="space-y-1.5">
             <span className="text-xs font-medium">API token</span>
             <input
@@ -93,7 +121,7 @@ export function AuthDialog() {
               value={token}
               onChange={(event) => setToken(event.target.value)}
               aria-invalid={error ? true : undefined}
-              aria-describedby={error ? "auth-dialog-error" : undefined}
+              aria-describedby={describedBy || undefined}
               className="h-9 w-full rounded-md border bg-background px-2 font-mono text-sm"
             />
           </label>

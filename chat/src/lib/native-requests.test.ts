@@ -1,15 +1,16 @@
 import {describe, expect, test} from "bun:test";
+import {ApiError} from "./error-utils";
 import {
   answerByMessageHint,
   buildQuestionResponse,
   emptyDrafts,
+  mergeListedRequests,
   mergeRequests,
   optionResponse,
   optionTone,
   pendingRequests,
   questionAnswer,
   questionError,
-  RespondError,
   respondErrorMessage,
   toggleOption,
   toolRequestBadge,
@@ -111,6 +112,28 @@ describe("mergeRequests", () => {
   });
 });
 
+describe("mergeListedRequests", () => {
+  test("applies the listed states like any REST state", () => {
+    const merged = mergeListedRequests([approval({seq: 5})], [approval({status: "resolved"}), question()], [approval({seq: 5})]);
+    expect(merged.map((request) => `${request.id}:${request.status}:${request.seq}`)).toEqual(["req-1:resolved:5", "req-2:pending:undefined"]);
+  });
+
+  test("withdraws a pending request the server no longer lists", () => {
+    const held = [approval({seq: 5}), question({seq: 6, status: "resolved"})];
+    const merged = mergeListedRequests(held, [], held);
+    expect(merged.map((request) => `${request.id}:${request.status}:${request.seq}`)).toEqual(["req-1:withdrawn:5", "req-2:resolved:6"]);
+    expect(pendingRequests(merged)).toEqual([]);
+  });
+
+  test("leaves a request that opened or changed after the client asked", () => {
+    const asked = [approval({seq: 5})];
+    // req-2 opened and req-1 was reopened (a later seq) while GET /requests
+    // was on its way; the list was read before either.
+    const now = [approval({seq: 9}), question({seq: 8})];
+    expect(pendingRequests(mergeListedRequests(now, [], asked)).map((request) => request.id)).toEqual(["req-1", "req-2"]);
+  });
+});
+
 describe("toolRequestBadge", () => {
   test("describes each state of the request linked to a tool call", () => {
     expect(toolRequestBadge(approval())).toEqual({label: "Waiting for approval", tone: "needs"});
@@ -189,13 +212,21 @@ describe("answerByMessageHint", () => {
     expect(answerByMessageHint([{...expired, response_capability: "not_resumable"}])).toBeNull();
     expect(answerByMessageHint([question()])).toBeNull();
   });
+
+  test("a question the agent withdrew can be answered by message too", () => {
+    const withdrawn = question({status: "withdrawn", response_capability: "message", closed_at: "2026-10-16T10:05:00Z"});
+    expect(answerByMessageHint([withdrawn])).toBe(withdrawn);
+    expect(answerByMessageHint([{...withdrawn, response_capability: "live"}])).toBeNull();
+  });
 });
 
 describe("respondErrorMessage", () => {
   test("explains conflicts", () => {
-    expect(respondErrorMessage(new RespondError("request is resolved, not pending", 409))).toBe(
+    expect(respondErrorMessage(new ApiError("request is resolved, not pending", 409))).toBe(
       "This was already answered or is no longer pending.",
     );
-    expect(respondErrorMessage(new RespondError("bad answer", 400))).toBe("bad answer");
+    expect(respondErrorMessage(new ApiError("request not found", 404))).toBe("The agent no longer has this request.");
+    expect(respondErrorMessage(new ApiError("bad answer", 400))).toBe("bad answer");
+    expect(respondErrorMessage(new Error("offline"))).toBe("offline");
   });
 });

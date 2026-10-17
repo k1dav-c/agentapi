@@ -25,6 +25,7 @@ import type {
   ServerStatus,
 } from "./chat-provider";
 import {taskMatchesQuery} from "@/lib/task-actions";
+import {isImeComposing} from "@/lib/keys";
 import {uiCopy} from "@/lib/ui-copy";
 import {contentFingerprint} from "@/lib/content-fingerprint";
 import {formatDateLabel} from "@/lib/format-time";
@@ -88,7 +89,7 @@ export default function MessageList({
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [currentSearchResult, setCurrentSearchResult] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
-  const {terminalPrompt, pendingRequests} = useChat();
+  const {agentState, loginRequired} = useChat();
   // The page's actions render into the header's slot (one top bar); the
   // embed page has no header, so they get their own row there.
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
@@ -399,7 +400,7 @@ export default function MessageList({
                   placeholder="Search tasks, output, and tools…"
                   className="min-w-0 flex-1 bg-transparent outline-none"
                   onKeyDown={(event) => {
-                    if (event.key === "Enter" && taskQuery) {
+                    if (event.key === "Enter" && taskQuery && !isImeComposing(event)) {
                       event.preventDefault();
                       navigateSearchResults(event.shiftKey ? -1 : 1);
                     }
@@ -520,7 +521,7 @@ export default function MessageList({
                   visibleIndex < visibleTasks.length - 1 &&
                   !renderedTaskKeys.has(task.key)
                 }
-                waitingForUser={isLatest && (Boolean(terminalPrompt) || pendingRequests > 0)}
+                waitingForUser={isLatest && agentState === "needs-you" && loginRequired === null}
               />
               </React.Fragment>
               );

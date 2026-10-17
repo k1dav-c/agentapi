@@ -2,9 +2,11 @@ import {describe, expect, test} from "bun:test";
 import {
   canInterrupt,
   canSteer,
+  canStop,
   dispatchModeForKey,
   dispatchModes,
   moveInQueue,
+  parseTransport,
   sendNotice,
   turnActive,
   type DispatchContext,
@@ -15,16 +17,34 @@ const native = (overrides: Partial<DispatchContext> = {}): DispatchContext => ({
   transport: "native",
   capabilities: caps,
   serverStatus: "running",
-  pendingRequests: 0,
+  pendingRequestCount: 0,
   ...overrides,
 });
 
-const key = (overrides: Partial<{shiftKey: boolean; metaKey: boolean; ctrlKey: boolean; isComposing: boolean}> = {}) => ({
+const key = (
+  overrides: Partial<{shiftKey: boolean; metaKey: boolean; ctrlKey: boolean; keyCode: number; nativeEvent: {isComposing: boolean}}> = {},
+) => ({
   key: "Enter",
+  keyCode: 13,
   shiftKey: false,
   metaKey: false,
   ctrlKey: false,
+  nativeEvent: {isComposing: false},
   ...overrides,
+});
+
+describe("parseTransport", () => {
+  test("known transports", () => {
+    expect(parseTransport("pty")).toBe("pty");
+    expect(parseTransport("acp")).toBe("acp");
+    expect(parseTransport("native")).toBe("native");
+  });
+
+  test("missing or unknown", () => {
+    expect(parseTransport(undefined)).toBeNull();
+    expect(parseTransport("")).toBeNull();
+    expect(parseTransport("ssh")).toBeNull();
+  });
 });
 
 describe("dispatchModes", () => {
@@ -37,7 +57,7 @@ describe("dispatchModes", () => {
   });
 
   test("while it waits on a request it can be stopped but not steered", () => {
-    const waiting = native({serverStatus: "stable", pendingRequests: 1});
+    const waiting = native({serverStatus: "stable", pendingRequestCount: 1});
     expect(turnActive(waiting)).toBe(true);
     expect(canSteer(waiting)).toBe(false);
     expect(canInterrupt(waiting)).toBe(true);
@@ -51,7 +71,27 @@ describe("dispatchModes", () => {
   test("other transports only queue", () => {
     expect(dispatchModes(native({transport: "pty"}))).toEqual(["queue"]);
     expect(dispatchModes(native({transport: "acp"}))).toEqual(["queue"]);
-    expect(turnActive(native({transport: "pty", serverStatus: "stable", pendingRequests: 1}))).toBe(false);
+    expect(turnActive(native({transport: "pty", serverStatus: "stable", pendingRequestCount: 1}))).toBe(false);
+  });
+});
+
+describe("canStop", () => {
+  test("a PTY agent stops with Esc while it works", () => {
+    expect(canStop(native({transport: "pty", capabilities: null}))).toBe(true);
+    expect(canStop(native({transport: "pty", capabilities: null, serverStatus: "stable"}))).toBe(false);
+  });
+
+  test("a native agent stops with POST /interrupt during a turn", () => {
+    expect(canStop(native())).toBe(true);
+    expect(canStop(native({serverStatus: "stable", pendingRequestCount: 1}))).toBe(true);
+    expect(canStop(native({serverStatus: "stable"}))).toBe(false);
+    expect(canStop(native({capabilities: {...caps, interrupt: false}}))).toBe(false);
+    // Starting (e.g. restarting after a lost login): no turn to stop.
+    expect(canStop(native({capabilities: null}))).toBe(false);
+  });
+
+  test("ACP has no terminal and no interrupt", () => {
+    expect(canStop(native({transport: "acp", capabilities: null}))).toBe(false);
   });
 });
 
@@ -69,10 +109,15 @@ describe("dispatchModeForKey", () => {
     expect(dispatchModeForKey(key({metaKey: true, shiftKey: true}), ["queue"])).toBe("queue");
   });
 
-  test("Shift+Enter, other keys and IME composition don't send", () => {
+  test("Shift+Enter and other keys don't send", () => {
     expect(dispatchModeForKey(key({shiftKey: true}), all)).toBeNull();
     expect(dispatchModeForKey({...key(), key: "a"}, all)).toBeNull();
-    expect(dispatchModeForKey(key({isComposing: true}), all)).toBeNull();
+  });
+
+  test("an Enter that picks an IME candidate doesn't send", () => {
+    expect(dispatchModeForKey(key({nativeEvent: {isComposing: true}}), all)).toBeNull();
+    // Safari: after compositionend, with keyCode 229.
+    expect(dispatchModeForKey(key({keyCode: 229}), all)).toBeNull();
   });
 });
 

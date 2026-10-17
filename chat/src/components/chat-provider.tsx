@@ -21,14 +21,29 @@ import {bootstrapSession, ensureSession, withCredentials} from "@/lib/auth";
 import {AuthDialog} from "@/components/auth-dialog";
 import {
   createChatAPI,
+  httpURL,
   type MCPCheckResult,
   type MCPConfig,
   type MCPProfiles,
   type UploadOptions,
 } from "@/lib/chat-api";
-import type {Capabilities, DispatchMode, Transport} from "@/lib/dispatch";
-import {mergeRequests, type NativeRequest, type RequestResponse} from "@/lib/native-requests";
+import {
+  canStop,
+  parseTransport,
+  type Capabilities,
+  type DispatchContext,
+  type DispatchMode,
+  type Transport,
+} from "@/lib/dispatch";
+import {
+  mergeListedRequests,
+  mergeRequests,
+  pendingRequests,
+  type NativeRequest,
+  type RequestResponse,
+} from "@/lib/native-requests";
 import {isLoginNotice, parseLoginRequired, type LoginRequired} from "@/lib/login";
+import {getAgentState, type AgentStateKind} from "@/lib/session-status";
 
 export interface Message {
   id: number;
@@ -115,16 +130,18 @@ export interface RichMessage {
 
 interface StatusChangeEvent {
   status: string;
+  lifecycle?: string;
   agent_type: string;
+  // Missing from servers that predate it; GET /status says then.
+  transport?: string;
   agentapi_version?: string;
   terminal_columns?: number;
   session_name?: string;
   terminal_prompt?: string;
-  // Native transport only.
-  pending_requests?: number;
+  // Native transport only. The chat counts the pending requests itself,
+  // from the requests it holds (pending_requests is ignored).
   capabilities?: Capabilities;
   login_required?: unknown;
-  lifecycle?: string;
 }
 
 interface ErrorEventData {
@@ -195,26 +212,34 @@ interface ChatContextValue {
   serverStatus: ServerStatus;
   connectionStatus: ConnectionStatus;
   queuedMessages: QueuedMessage[];
-  // How the server drives the agent; "pty" until /status says otherwise.
+  // How the server drives the agent; "pty" until the server says otherwise.
   transport: Transport;
   // Optional operations of a native agent; null for other transports.
   capabilities: Capabilities | null;
-  // Number of requests the agent waits on (native transport).
-  pendingRequests: number;
+  // Number of requests the agent waits on (native transport), counted from
+  // requests so that both always agree.
+  pendingRequestCount: number;
   // Set while the agent waits for someone to log it in (native transport).
   loginRequired: LoginRequired | null;
-  // The agent waits for the login at startup, so AgentAPI retries by
-  // itself; otherwise it lost the login while running.
-  loginWaitsAtStart: boolean;
+  // The agent is starting (lifecycle "starting"): there is no turn yet, and
+  // while it finds no login AgentAPI starts it again by itself.
+  agentStarting: boolean;
+  // What the agent is doing from the user's point of view ("Needs you",
+  // "Working", ...), for every view that shows it.
+  agentState: AgentStateKind;
+  // What the composer may offer: steer, interrupt (see lib/dispatch).
+  dispatch: DispatchContext;
   // Checks the login again now (POST /login/retry).
   retryLogin: () => Promise<void>;
   // Requests the agent made (native transport): pending ones and the most
   // recently closed, oldest first.
   requests: NativeRequest[];
   respondToRequest: (id: string, response: RequestResponse) => Promise<NativeRequest>;
-  refreshRequests: () => Promise<void>;
-  // Stops the turn the agent is working on (native transport).
-  interrupt: () => Promise<void>;
+  // Whether Stop can stop what the agent is doing now, and stopping it
+  // (Esc on a PTY agent's terminal, POST /interrupt on the native
+  // transport). stop reports a failure itself and resolves to false.
+  canStop: boolean;
+  stop: () => Promise<boolean>;
   steerQueuedMessage: (id: number) => Promise<void>;
   reorderQueue: (ids: number[]) => Promise<void>;
   sendMessage: (message: string, type?: MessageType, mode?: DispatchMode) => Promise<SendResult>;
@@ -230,6 +255,8 @@ interface ChatContextValue {
   ) => Promise<FileUploadResponse>;
   reconnectAttempt: number;
   nextReconnectAt: number | null;
+  // Reconnects right away, as the user asked: also asks for the API token
+  // again if the user closed the sign-in dialog.
   reconnectNow: () => void;
   downloadSession: () => Promise<void>;
   deleteMessages: () => Promise<void>;
@@ -264,6 +291,8 @@ interface ChatContextValue {
   // name, Pi's /name); empty until it names it.
   sessionName: string;
   customTitle?: string;
+  // The Coder workspace: the ?workspace= parameter, or what the server says
+  // (GET /workspace).
   workspaceUrl?: string;
 }
 
@@ -313,16 +342,9 @@ export const useAgentAPIUrl = (): string => {
 export function ChatProvider({ children }: PropsWithChildren) {
   const searchParams = useSearchParams();
   const customTitle = searchParams.get("title") ?? undefined;
-  const workspaceUrl = (() => {
-    const value = searchParams.get("workspace");
-    if (!value) return undefined;
-    try {
-      const url = new URL(value, window.location.origin);
-      return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined;
-    } catch {
-      return undefined;
-    }
-  })();
+  const workspaceValue = searchParams.get("workspace");
+  const workspaceParam = workspaceValue ? httpURL(workspaceValue, window.location.origin) : undefined;
+  const [serverWorkspaceUrl, setServerWorkspaceUrl] = useState<string>();
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
   const [terminalPrompt, setTerminalPrompt] = useState("");
@@ -337,7 +359,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [sessionName, setSessionName] = useState("");
   const [transport, setTransport] = useState<Transport>("pty");
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
-  const [pendingRequests, setPendingRequests] = useState(0);
   const [loginRequired, setLoginRequiredState] = useState<LoginRequired | null>(null);
   // The login as the event handlers see it, to skip errors the card shows.
   const loginRef = useRef<LoginRequired | null>(null);
@@ -347,6 +368,22 @@ export function ChatProvider({ children }: PropsWithChildren) {
   }, []);
   const [lifecycle, setLifecycle] = useState("");
   const [requests, setRequests] = useState<NativeRequest[]>([]);
+  const pendingRequestCount = useMemo(() => pendingRequests(requests).length, [requests]);
+  const agentStarting = lifecycle === "starting";
+  const agentState = getAgentState({
+    serverStatus,
+    connectionStatus,
+    terminalPrompt,
+    pendingRequestCount,
+    loginRequired: loginRequired !== null,
+  });
+  const dispatch = useMemo<DispatchContext>(
+    () => ({transport, capabilities: agentStarting ? null : capabilities, serverStatus, pendingRequestCount}),
+    [agentStarting, capabilities, pendingRequestCount, serverStatus, transport],
+  );
+  // Errors the server replays on every connection that this page showed
+  // already.
+  const shownErrorsRef = useRef(new Set<string>());
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastEventAtRef = useRef(Date.now());
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -419,7 +456,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     }
   }, []);
 
-  const scheduleFlush = useCallback((seq?: number) => {
+  const scheduleFlush = useCallback((seq?: number, immediate = false) => {
     if (seq !== undefined) receivedSeqRef.current = Math.max(receivedSeqRef.current, seq);
     const replayEnd = replayEndRef.current;
     if (replayEnd !== null && receivedSeqRef.current >= replayEnd) {
@@ -427,6 +464,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
       replayEndRef.current = null;
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
       flushTimerRef.current = setTimeout(flushEvents, 0);
+      return;
+    }
+    if (immediate && replayEnd === null) {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+      flushEvents();
       return;
     }
     if (flushTimerRef.current) return;
@@ -448,6 +490,15 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setConnectionStatus("reconnecting");
     setReconnectNonce((value) => value + 1);
   }, []);
+  // Reconnect now, as the user asked. Once the user closed the sign-in
+  // dialog, reconnects in the background stop asking for the token; this
+  // asks again, and reconnects once signed in.
+  const reconnectByUser = useCallback(() => {
+    reconnectNow();
+    void ensureSession(agentAPIUrl).then((signedIn) => {
+      if (signedIn) reconnectNow();
+    });
+  }, [agentAPIUrl, reconnectNow]);
   const lastQueueRefreshRef = useRef(0);
   const queuedCountRef = useRef(0);
   const refreshQueue = useCallback(async (force = false) => {
@@ -472,16 +523,24 @@ export function ChatProvider({ children }: PropsWithChildren) {
     ?.content;
 
   useEffect(() => {
-    document.title = getDocumentTitle({
-      connectionStatus,
-      serverStatus,
-      terminalPrompt,
-      pendingRequests,
-      loginRequired: loginRequired !== null,
-      task: currentTask,
-      customTitle,
-    });
-  }, [connectionStatus, currentTask, customTitle, loginRequired, pendingRequests, serverStatus, terminalPrompt]);
+    document.title = getDocumentTitle({agentState, task: currentTask, customTitle});
+  }, [agentState, currentTask, customTitle]);
+
+  // The Coder workspace link, when the URL doesn't give one: asked on every
+  // connection, so it also shows once the user signed in.
+  useEffect(() => {
+    if (workspaceParam || connectionStatus !== "connected") return;
+    let active = true;
+    api.getWorkspaceUrl().then(
+      (url) => {
+        if (active) setServerWorkspaceUrl(url);
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [api, connectionStatus, workspaceParam]);
 
   useEffect(() => {
     try {
@@ -603,6 +662,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
         {withCredentials: withCredentials(agentAPIUrl)},
       );
       eventSourceRef.current = eventSource;
+      // Servers whose status_change doesn't carry the transport report it in
+      // GET /status, asked once per connection.
+      let askedTransport = false;
       // Servers that predate session_sync replay everything on every
       // connection without saying so; treat that replay as the full state.
       let synced = false;
@@ -664,13 +726,15 @@ export function ChatProvider({ children }: PropsWithChildren) {
       });
 
       // A request the agent waits on (native transport) opened or changed.
-      // Requests are part of the replay, like messages.
+      // Requests are part of the replay, like messages. Outside a replay one
+      // applies at once: the status_change the server sends right after it
+      // (now "stable", waiting) must not show before the request does.
       eventSource.addEventListener("request_update", (event) => {
         lastEventAtRef.current = Date.now();
         assumeFullReplay();
         const data: NativeRequest = JSON.parse(event.data);
         pendingRef.current.requests.set(data.id, data);
-        scheduleFlush(data.seq);
+        scheduleFlush(data.seq, true);
       });
 
       // Handle status changes
@@ -692,14 +756,22 @@ export function ChatProvider({ children }: PropsWithChildren) {
         setTerminalColumns(data.terminal_columns ?? 0);
         setSessionName(data.session_name ?? "");
         setTerminalPrompt(data.terminal_prompt ?? "");
-        setPendingRequests(data.pending_requests ?? 0);
         setCapabilities(data.capabilities ?? null);
         setLoginRequired(parseLoginRequired(data.login_required));
         setLifecycle(data.lifecycle ?? "");
-        // Only the native transport reports capabilities; knowing it from
-        // the first event avoids showing terminal controls until /status
-        // answers.
-        if (data.capabilities) setTransport("native");
+        // The transport decides whether the terminal (TTY mode, raw keys)
+        // exists at all.
+        const reported = parseTransport(data.transport);
+        if (reported) {
+          setTransport(reported);
+        } else if (!askedTransport) {
+          askedTransport = true;
+          void api.getStatus().then((status) => {
+            if (!disposed) setTransport(status.transport);
+          }).catch(() => {
+            // Reported through the connection status.
+          });
+        }
         void refreshQueue();
       });
 
@@ -708,7 +780,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
         const messageEvent = event as MessageEvent;
         try {
           const data: ErrorEventData = JSON.parse(messageEvent.data);
-          // The login card says it already, and stays until it is fixed.
+          // The server sends its stored errors again on every connection.
+          const key = `${data.time}\u0000${data.message}`;
+          if (shownErrorsRef.current.has(key)) return;
+          shownErrorsRef.current.add(key);
+          // The login card says it while the login is needed; afterwards
+          // the notice is stale.
           if (isLoginNotice(data.message, loginRef.current)) return;
 
           // Display error as toast notification that persists until manually dismissed
@@ -732,16 +809,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
         setNextReconnectAt(null);
         setConnectionStatus("connected");
         void refreshQueue();
-        // The transport is only reported by /status. It decides whether
-        // the terminal (TTY mode, raw keys) exists at all.
-        void api.getStatus().then((status) => {
-          if (disposed) return;
-          setTransport(status.transport);
-          if (status.capabilities) setCapabilities(status.capabilities);
-          setLoginRequired(status.login_required);
-        }).catch(() => {
-          // Reported through the connection status.
-        });
         // Connection is established, but we'll wait for status_change event
         // for the actual server status
         console.log("EventSource connection established - messages reset");
@@ -754,7 +821,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         eventSource.close();
         // EventSource doesn't expose the status code; a 401 (no session
         // cookie, or the token changed) shows up as an error like any other.
-        // Ask the server, and reconnect right away once signed in.
+        // Ask the server, and reconnect right away once signed in. Nobody
+        // asked for this reconnect, so a closed dialog stays closed.
         void ensureSession(agentAPIUrl, {background: true}).then((signedIn) => {
           if (signedIn && !disposed) reconnectNow();
         });
@@ -797,10 +865,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
           syncRef.current = {epoch: cached.epoch, seq: cached.seq};
           setMessages((previous) => [...cached.messages, ...previous.filter(isDraftMessage)]);
           setRichMessages(cached.richMessages);
-          setRequests(cached.requests ?? []);
-          if (cached.transport === "pty" || cached.transport === "acp" || cached.transport === "native") {
-            setTransport(cached.transport);
-          }
+          setRequests(cached.requests);
+          const cachedTransport = parseTransport(cached.transport);
+          if (cachedTransport) setTransport(cachedTransport);
         }
         start();
       });
@@ -995,10 +1062,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
     }
   };
 
-  const refreshRequests = useCallback(async () => {
-    const latest = await api.getRequests();
-    setRequests((previous) => mergeRequests(previous, latest));
-  }, [api]);
+  // Reads the requests from the REST API; see mergeListedRequests.
+  const refreshRequests = async () => {
+    const heldWhenAsked = latestRef.current.requests;
+    const listed = await api.getRequests();
+    setRequests((previous) => mergeListedRequests(previous, listed, heldWhenAsked));
+  };
 
   const respondToRequest = async (id: string, response: RequestResponse) => {
     try {
@@ -1009,6 +1078,24 @@ export function ChatProvider({ children }: PropsWithChildren) {
       // Whatever went wrong, show the request as the server has it now.
       void refreshRequests().catch(() => undefined);
       throw error;
+    }
+  };
+
+  const stoppable = canStop(dispatch);
+  const stop = async () => {
+    if (!stoppable) return false;
+    try {
+      if (dispatch.transport === "native") {
+        await api.interrupt();
+        toast.info("Stopping the agent");
+      } else {
+        await api.sendMessage("\x1b", "raw");
+        toast.info("Stop signal sent");
+      }
+      return true;
+    } catch (error) {
+      toast.error("Failed to stop the agent", {description: getErrorMessage(error)});
+      return false;
     }
   };
 
@@ -1059,14 +1146,16 @@ export function ChatProvider({ children }: PropsWithChildren) {
         },
         transport,
         capabilities,
-        pendingRequests,
+        pendingRequestCount,
         loginRequired,
-        loginWaitsAtStart: lifecycle === "starting",
+        agentStarting,
+        agentState,
+        dispatch,
         retryLogin,
         requests,
         respondToRequest,
-        refreshRequests,
-        interrupt: api.interrupt,
+        canStop: stoppable,
+        stop,
         steerQueuedMessage,
         reorderQueue,
         retryFailedMessage,
@@ -1079,7 +1168,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         uploadFiles,
         reconnectAttempt,
         nextReconnectAt,
-        reconnectNow,
+        reconnectNow: reconnectByUser,
         downloadSession,
         deleteMessages: async () => {
           await api.deleteMessages();
@@ -1112,7 +1201,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         terminalColumns,
         sessionName,
         customTitle,
-        workspaceUrl,
+        workspaceUrl: workspaceParam ?? serverWorkspaceUrl,
       }}
     >
       {children}

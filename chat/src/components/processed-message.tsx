@@ -6,6 +6,7 @@ import rehypeHighlight from "rehype-highlight";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {common} from "@/lib/highlight-langs";
+import {copyText} from "@/lib/clipboard";
 
 type MarkdownNode = {
   type: string;
@@ -142,7 +143,7 @@ function CodeBlockCopy({ children }: { children: React.ReactNode }) {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(getCodeString(children));
+      await copyText(getCodeString(children));
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch {

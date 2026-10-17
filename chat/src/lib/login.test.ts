@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {isLoginNotice, loginNote, loginRetryOutcome, loginTitle, loginWhere, parseLoginRequired} from "./login";
+import {isLoginNotice, loginNote, loginTitle, loginWhere, parseLoginRequired} from "./login";
 
 const claude = {
   agent: "Claude Code",
@@ -54,20 +54,23 @@ describe("the login card's texts", () => {
   });
 });
 
-describe("loginRetryOutcome", () => {
-  test("maps the response status", () => {
-    expect(loginRetryOutcome(200)).toBe("checking");
-    expect(loginRetryOutcome(409)).toBe("not-waiting");
-    expect(loginRetryOutcome(400)).toBeNull();
-    expect(loginRetryOutcome(500)).toBeNull();
-  });
-});
-
 describe("isLoginNotice", () => {
+  const notice = "Claude Code is not logged in. Run `claude auth login` in a terminal on devbox as dave; AgentAPI picks up the login by itself.";
+
   test("the server's login error repeats the card", () => {
-    const notice = "Claude Code is not logged in. Run `claude auth login` in a terminal on devbox as dave; AgentAPI picks up the login by itself.";
     expect(isLoginNotice(notice, claude)).toBe(true);
-    expect(isLoginNotice(notice, null)).toBe(false);
     expect(isLoginNotice("Claude Code: the turn failed (success): Not logged in · Please run /login", claude)).toBe(false);
+  });
+
+  test("a login notice replayed once the login is fixed is stale", () => {
+    expect(isLoginNotice(notice, null)).toBe(true);
+    expect(isLoginNotice("Codex is not logged in. Run `codex login` in a terminal; AgentAPI picks up the login by itself.", null)).toBe(true);
+    // Another agent's login than the one the card shows.
+    expect(isLoginNotice("Pi has no provider. Run `pi` in a terminal on devbox as dave; AgentAPI picks up the login by itself.", claude)).toBe(true);
+  });
+
+  test("other errors still show", () => {
+    expect(isLoginNotice("Failed to start the agent: exec: \"claude\": executable file not found in $PATH", null)).toBe(false);
+    expect(isLoginNotice("Dropped queued message: the agent exited", claude)).toBe(false);
   });
 });

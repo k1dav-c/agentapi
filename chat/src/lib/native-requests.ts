@@ -2,6 +2,8 @@
 // questions, plans), as served by GET /requests and the request_update
 // event, and the logic to answer them.
 
+import {ApiError} from "./error-utils";
+
 export type RequestKind = "approval" | "question" | "plan";
 export type OptionKind = "allow" | "allow_always" | "deny" | "cancel" | "other";
 export type ResponseCapability = "live" | "message" | "not_resumable";
@@ -97,6 +99,31 @@ export function mergeRequests(previous: NativeRequest[], updates: Iterable<Nativ
   let closed = next.filter((request) => request.status !== "pending").length;
   if (closed <= MAX_CLOSED) return next;
   return next.filter((request) => request.status === "pending" || closed-- <= MAX_CLOSED);
+}
+
+// Merges the list GET /requests returned. A request the client held as
+// pending when it asked (heldWhenAsked) that the list leaves out is gone
+// from the server: its close happened while the client was away and was
+// trimmed since, or the server restarted without --state-db. No answer can
+// reach it any more, so it is closed as withdrawn. A request that opened or
+// changed after the client asked is left alone.
+export function mergeListedRequests(
+  previous: NativeRequest[],
+  listed: NativeRequest[],
+  heldWhenAsked: NativeRequest[],
+): NativeRequest[] {
+  const listedIds = new Set(listed.map((request) => request.id));
+  const current = new Map(previous.map((request) => [request.id, request]));
+  const gone = heldWhenAsked.filter((asked) => {
+    const now = current.get(asked.id);
+    return asked.status === "pending" && !listedIds.has(asked.id) && now?.status === "pending" && now.seq === asked.seq;
+  });
+  return mergeRequests(previous, [
+    ...listed,
+    // Without a seq, like any state read from the REST API: it may close the
+    // request but never reopen one.
+    ...gone.map((request): NativeRequest => ({...request, status: "withdrawn", seq: undefined})),
+  ]);
 }
 
 // The requests the agent is waiting on, oldest first.
@@ -224,29 +251,21 @@ export function buildQuestionResponse(
   return {response: {answers}};
 }
 
-// A question the agent stopped waiting for that can still be answered with
-// a normal message: the latest request, closed after the last message sent.
+// A question the agent stopped waiting for (when its turn ended, or it
+// withdrew the question) that a normal message can still answer: the latest
+// request, closed after the last message sent.
 export function answerByMessageHint(requests: NativeRequest[], lastUserMessageTime?: string): NativeRequest | null {
   const latest = requests.at(-1);
-  if (!latest || latest.status !== "expired" || latest.response_capability !== "message") return null;
+  if (!latest || latest.response_capability !== "message") return null;
   if (lastUserMessageTime && latest.closed_at && Date.parse(lastUserMessageTime) > Date.parse(latest.closed_at)) return null;
   return latest;
 }
 
-// Error from POST /requests/{id}/respond, with the HTTP status.
-export class RespondError extends Error {
-  constructor(message: string, readonly status: number) {
-    super(message);
-    this.name = "RespondError";
-  }
-}
-
-// What to tell the user about a failed answer.
+// What to tell the user about a failed answer (POST /requests/{id}/respond).
 export function respondErrorMessage(error: unknown): string {
-  if (error instanceof RespondError) {
+  if (error instanceof ApiError) {
     if (error.status === 409) return "This was already answered or is no longer pending.";
     if (error.status === 404) return "The agent no longer has this request.";
-    return error.message;
   }
   return error instanceof Error ? error.message : String(error);
 }

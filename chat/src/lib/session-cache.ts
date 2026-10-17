@@ -15,7 +15,7 @@ export interface CachedSession<M, R, Q = unknown> {
   // before requests existed.
   requests?: Q[];
   // How the server drives the agent ("pty", "acp", "native"), so the cached
-  // transcript renders for the right transport before /status answers.
+  // transcript renders for the right transport before the server says.
   transport?: string;
   savedAt: number;
 }
@@ -42,13 +42,14 @@ function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => 
 }
 
 // Loads the cached session for key, or null when there is none or storage is
-// unavailable (private mode, blocked site data). Never throws.
-export async function loadSession<M, R, Q = unknown>(key: string): Promise<CachedSession<M, R, Q> | null> {
+// unavailable (private mode, blocked site data). Never throws. A cache
+// written before requests existed loads with none.
+export async function loadSession<M, R, Q = unknown>(key: string): Promise<(CachedSession<M, R, Q> & {requests: Q[]}) | null> {
   try {
     if (typeof indexedDB === "undefined") return null;
     const value = await withStore<CachedSession<M, R, Q> | undefined>("readonly", (store) => store.get(key));
     if (!value || typeof value.epoch !== "string" || !Array.isArray(value.messages)) return null;
-    return Array.isArray(value.requests) ? value : {...value, requests: []};
+    return {...value, requests: Array.isArray(value.requests) ? value.requests : []};
   } catch {
     return null;
   }

@@ -1,8 +1,4 @@
-import type {
-  ConnectionStatus,
-  ServerStatus,
-} from "@/components/chat-provider";
-import { getAgentState } from "./session-status";
+import type { AgentStateKind } from "./session-status";
 
 const DEFAULT_TITLE = "AgentAPI — Live Agent Session";
 const MAX_TASK_LENGTH = 60;
@@ -14,19 +10,11 @@ function summarizeTask(content: string) {
 }
 
 export function getDocumentTitle({
-  connectionStatus,
-  serverStatus,
-  terminalPrompt,
-  pendingRequests = 0,
-  loginRequired = false,
+  agentState,
   task,
   customTitle,
 }: {
-  connectionStatus: ConnectionStatus;
-  serverStatus: ServerStatus;
-  terminalPrompt?: string;
-  pendingRequests?: number;
-  loginRequired?: boolean;
+  agentState: AgentStateKind;
   task?: string;
   customTitle?: string;
 }) {
@@ -39,7 +27,7 @@ export function getDocumentTitle({
     working: "● Working",
     ready: "✓ Ready",
     connecting: "○ Connecting",
-  }[getAgentState(serverStatus, connectionStatus, terminalPrompt, pendingRequests, loginRequired)];
+  }[agentState];
   const taskSummary = task ? summarizeTask(task) : "";
   const suffix = customTitle || "AgentAPI";
 

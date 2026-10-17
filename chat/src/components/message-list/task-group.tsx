@@ -16,6 +16,7 @@ import { getTaskActivity, hasStructuredTranscript, toSearchableTask } from "@/li
 import { splitThinking } from "@/lib/thinking";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useThrottledValue } from "@/lib/use-throttled";
+import { copyText } from "@/lib/clipboard";
 import {
   Dialog,
   DialogContent,
@@ -83,7 +84,7 @@ export function TaskGroup({
   const hasScreen = transport === "pty";
   const activity = useMemo(() => {
     if (deferred) return [];
-    const raw = getTaskActivity(task, {live: live && hasScreen, transcriptOnly: transport === "native"});
+    const raw = getTaskActivity(task, {live: live && transport === "pty", transcriptOnly: transport === "native"});
     // When rich activity provides real interleaving (text + tool entries),
     // tools are already positioned where they occurred in the conversation.
     // Only group consecutive tools in the fallback path (PTY-only), where
@@ -92,7 +93,7 @@ export function TaskGroup({
       task.richActivity.some(item => item.type === "message" || item.type === "thinking") &&
       task.richActivity.some(item => item.type === "tool");
     return hasRichInterleaving ? raw : groupConsecutiveTools(raw);
-  }, [task, deferred, live, hasScreen, transport]);
+  }, [task, deferred, live, transport]);
   const structured = hasStructuredTranscript(task);
   // A long task shows its latest steps; earlier ones load on request.
   // Rendering hundreds of steps (Markdown, highlighted code) at once froze
@@ -141,7 +142,7 @@ export function TaskGroup({
 
   const copyTask = async () => {
     try {
-      await navigator.clipboard.writeText(toMarkdown());
+      await copyText(toMarkdown());
       toast.success("Task copied");
     } catch {
       toast.error("Could not copy the task");

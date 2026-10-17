@@ -7,12 +7,9 @@ import MessageInput from "./message-input";
 import MessageList from "./message-list";
 import dynamic from "next/dynamic";
 import {TtyView} from "./tty-view";
-import {requestCredentials} from "@/lib/auth";
 import {DecisionCard, StateStrip} from "./dock";
 import {RequestCard} from "./request-card";
 import {LoginCard} from "./login-card";
-import {toast} from "sonner";
-import {getErrorMessage} from "@/lib/error-utils";
 import {BackgroundAlerts} from "./background-alerts";
 
 // The Explorer (task index, MCP and Temporal settings) isn't needed for the
@@ -47,11 +44,10 @@ export function Chat() {
     reconnectAttempt,
     nextReconnectAt,
     reconnectNow,
-    storageScope,
     workspaceUrl,
     transport,
-    capabilities,
-    interrupt,
+    canStop,
+    stop,
   } = useChat();
   // Only the PTY transport has a terminal: TTY mode, raw keys and the
   // terminal prompt card need it.
@@ -59,29 +55,7 @@ export function Chat() {
   useEffect(() => {
     if (!hasTerminal) setTtyMode(false);
   }, [hasTerminal]);
-  const stopTask =
-    transport === "native"
-      ? capabilities?.interrupt
-        ? () => {
-            interrupt().then(
-              () => toast.info("Stopping the agent"),
-              (error) => toast.error("Failed to stop the agent", {description: getErrorMessage(error)}),
-            );
-          }
-        : undefined
-      : () => void sendMessage("\x1b", "raw");
   const [reconnectSeconds, setReconnectSeconds] = useState(0);
-  const [coderWorkspaceUrl, setCoderWorkspaceUrl] = useState(workspaceUrl);
-
-  useEffect(() => {
-    if (workspaceUrl) return;
-    let active = true;
-    fetch(`${storageScope}/workspace`, {credentials: requestCredentials(storageScope)})
-      .then((response) => response.ok ? response.json() as Promise<{url?: string}> : null)
-      .then((value) => { if (active && value?.url) setCoderWorkspaceUrl(value.url); })
-      .catch(() => undefined);
-    return () => { active = false; };
-  }, [storageScope, workspaceUrl]);
 
   useEffect(() => {
     if (!nextReconnectAt) {
@@ -147,7 +121,7 @@ export function Chat() {
               setSuggestedPrompt(content);
             }}
             onDismissMessage={dismissFailedMessage}
-            onStopTask={stopTask}
+            onStopTask={canStop ? () => void stop() : undefined}
             onSendRaw={hasTerminal ? (data) => void sendMessage(data, "raw") : undefined}
             headerAction={
               <div className="flex items-center gap-0.5">
@@ -174,7 +148,7 @@ export function Chat() {
                     );
                   }}
                 />
-                {coderWorkspaceUrl && (
+                {workspaceUrl && (
                   <Button
                     type="button"
                     size="icon"
@@ -182,7 +156,7 @@ export function Chat() {
                     className="size-8 rounded-full text-muted-foreground"
                     title="Open Coder workspace"
                     aria-label="Open Coder workspace"
-                    onClick={() => window.open(coderWorkspaceUrl, "_blank", "noopener,noreferrer")}
+                    onClick={() => window.open(workspaceUrl, "_blank", "noopener,noreferrer")}
                   >
                     <ExternalLink className="size-4" />
                   </Button>

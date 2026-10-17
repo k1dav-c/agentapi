@@ -22,9 +22,7 @@ import {
 export function Header() {
   const {
     serverStatus,
-    connectionStatus,
-    terminalPrompt,
-    pendingRequests,
+    agentState,
     loginRequired,
     agentType,
     queuedMessages,
@@ -85,7 +83,7 @@ export function Header() {
   }, [messages, richMessages]);
 
   const tokenTotals = useMemo(() => computeTokenTotals(richMessages), [richMessages]);
-  const status = getStatusMeta(serverStatus, connectionStatus, terminalPrompt, pendingRequests, loginRequired !== null);
+  const status = getStatusMeta(agentState, loginRequired !== null);
   const StatusIcon = status.icon;
   const activityDetail =
     status.kind === "working"
