@@ -301,8 +301,9 @@ agent 的終端機介面不在，無法執行它的斜線指令，所以聊天�
 輸入指令名稱時，輸入框會提示可用的指令，按 Tab 會補完第一個。其他內容會原樣送給 agent，所以
 agent 自己的指令（Claude Code 的 `/code-review`、Pi 擴充功能的指令）仍然可以使用。
 `POST /compact` 會在 agent 沒有在執行回合時壓縮它的 context：Codex（`thread/compact/start`）
-會用一個獨立的 turn 壓縮，Pi（它的 `compact` 指令）會在完成後才回覆。Claude Code 則用
-`/compact` 訊息壓縮，聊天介面會把這則訊息送給它。
+會用一個獨立的 turn 壓縮，Pi（它的 `compact` 指令）會在完成後才回覆。壓縮期間送出的訊息會在
+佇列中等待；agent 拒絕壓縮時（例如 Pi 的「Nothing to compact」）會回傳 409 並附上原因。
+Claude Code 則用 `/compact` 訊息壓縮，聊天介面會把這則訊息送給它。
 
 #### 持久保存的工作階段
 
@@ -427,8 +428,10 @@ Codex 支援 `steer`、`interrupt`、`resume` 和 `images`。指令、檔案編�
 plan 模式提出這類問題；codex-cli 0.160 可以用 `--enable default_mode_request_user_input`
 讓 Codex 在預設模式也提出）。plan 模式就是 Codex 的 plan collaboration mode，這是
 app-server API 的實驗性功能，AgentAPI 會啟用它：Codex 會以一份計畫結束它的 turn，AgentAPI
-接著像 Codex TUI 一樣詢問「Implement this plan?」。選 Yes 會離開 plan 模式，讓 Codex 在同一個
-回合裡實作；選 No 並附上回饋，會把回饋送回給 Codex 繼續規劃；只選 No 則結束這個回合。選項 ID 就是 Codex
+接著像 Codex TUI 一樣詢問「Implement this plan?」。Yes 選項（`implement_bypass`、`implement_auto`
+和 `implement_ask`，進入 plan 前的模式排在最前面）會離開 plan 模式、切換到該權限模式，讓 Codex
+在同一個回合裡實作；選 No（`keep_planning`）並附上回饋，會把回饋送回給 Codex 繼續規劃；只選 No
+則結束這個回合。其他請求的選項 ID 就是 Codex
 自己的決定值（`accept`、`acceptForSession`、`acceptWithExecpolicyAmendment`、`decline`、
 `cancel` 等），不會自動核准任何東西，AgentAPI 無法顯示的請求則會被拒絕。指令核准會顯示實際
 執行的指令（不含 shell 包裝），Codex 對它的解讀（讀取的檔案、搜尋）放在詳細資訊中。回合

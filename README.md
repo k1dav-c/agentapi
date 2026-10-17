@@ -391,8 +391,9 @@ first. Anything else is sent to the agent as typed, so the agent's own
 commands (Claude Code's `/code-review`, Pi's extension commands) still work.
 `POST /compact` compacts the context while the agent isn't working on a turn:
 Codex (`thread/compact/start`) in a turn of its own, Pi (its `compact`
-command) before it answers. Claude Code compacts with the `/compact` message,
-which the chat sends it.
+command) before it answers. Messages sent meanwhile wait in the queue, and
+the agent's refusal (Pi's "Nothing to compact") is a 409 with its reason.
+Claude Code compacts with the `/compact` message, which the chat sends it.
 
 #### Persistent sessions
 
@@ -552,10 +553,12 @@ in the plan mode; with codex-cli 0.160,
 `--enable default_mode_request_user_input` lets Codex ask them in the default
 mode too). The plan mode is Codex's plan collaboration mode, an experimental
 part of app-server's API that AgentAPI opts into: Codex ends its turn with a
-plan, and AgentAPI asks "Implement this plan?" as the Codex TUI does. Yes
-leaves the plan mode and has Codex implement it in the same turn; No with
+plan, and AgentAPI asks "Implement this plan?" as the Codex TUI does. The
+Yes options (`implement_bypass`, `implement_auto` and `implement_ask`, the
+mode before the plan first) leave the plan mode for that permission mode and
+have Codex implement the plan in the same turn; No (`keep_planning`) with
 feedback sends the feedback back to Codex, still planning; No alone ends the
-turn. Their option IDs are Codex's own decisions (`accept`,
+turn. The other requests' option IDs are Codex's own decisions (`accept`,
 `acceptForSession`, `acceptWithExecpolicyAmendment`, `decline`, `cancel`, …),
 nothing is approved automatically, and requests AgentAPI can't show are
 declined. A command approval shows the command that runs, without the shell
