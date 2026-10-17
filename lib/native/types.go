@@ -199,9 +199,24 @@ type Response struct {
 	Text string `json:"text,omitempty" doc:"Feedback for the agent, e.g. what to change in a plan."`
 }
 
+// Stop reasons adapters report in TurnResult.StopReason.
+const (
+	StopReasonEndTurn     = "end_turn"
+	StopReasonInterrupted = "interrupted"
+	StopReasonError       = "error"
+	StopReasonMaxTokens   = "max_tokens"
+	// StopReasonHandled: the agent handled the message without a model
+	// turn, e.g. a Pi extension command.
+	StopReasonHandled = "handled"
+)
+
+// RedactedAnswer replaces the answers to secret questions everywhere but
+// in what the agent gets.
+const RedactedAnswer = "[redacted]"
+
 // TurnResult describes how a turn ended.
 type TurnResult struct {
-	// StopReason is the agent's reason: "end_turn", "interrupted", "error"…
+	// StopReason is the agent's reason, one of the StopReason constants.
 	StopReason string
 	// Error is set when the turn failed.
 	Error string
