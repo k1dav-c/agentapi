@@ -184,13 +184,3 @@ export function classifyDiffLines(diff: string): DiffLine[] {
   return result;
 }
 
-// How many lines a diff adds and removes.
-export function diffStats(lines: DiffLine[]): {added: number; removed: number} {
-  let added = 0;
-  let removed = 0;
-  for (const line of lines) {
-    if (line.kind === "add") added++;
-    else if (line.kind === "del") removed++;
-  }
-  return {added, removed};
-}

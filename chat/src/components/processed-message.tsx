@@ -8,7 +8,7 @@ import remarkGfm from "remark-gfm";
 import {common} from "@/lib/highlight-langs";
 import {copyText} from "@/lib/clipboard";
 import {parseFilePathRef} from "@/lib/file-refs";
-import {FilePathCode} from "./file-path";
+import {FilePathCode, inlineCodeClass} from "./file-path";
 
 type MarkdownNode = {
   type: string;
@@ -18,6 +18,11 @@ type MarkdownNode = {
 };
 
 const linkify = new LinkifyIt();
+
+// Set inside a link, where code that names a file stays plain: a click
+// would open the file and follow the link, and a control can't sit in a
+// link.
+const InsideLink = React.createContext(false);
 
 function remarkLinkify() {
   return (tree: MarkdownNode) => {
@@ -214,7 +219,7 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
                 rel="noopener noreferrer"
                 className="break-words underline decoration-current/30 underline-offset-4 transition [overflow-wrap:anywhere] hover:decoration-current focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2"
               >
-                {children}
+                <InsideLink.Provider value={true}>{children}</InsideLink.Provider>
               </a>
             );
           },
@@ -237,19 +242,11 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
           li: ({children}) => (
             <li className="pl-1 [&>p]:my-0">{children}</li>
           ),
-          code: ({children, className}) => {
-            // Only inline code: a fenced block has a language class or ends
-            // in a newline, which no path has.
-            const fileRef = linkFilePaths && !className && typeof children === "string" ? parseFilePathRef(children) : null;
-            if (fileRef) return <FilePathCode text={children as string} fileRef={fileRef} />;
-            return (
-              <code
-                className={`${className ?? ""} rounded-[5px] border border-border bg-muted px-1 py-px font-mono text-[0.86em] text-foreground`}
-              >
-                {children}
-              </code>
-            );
-          },
+          code: ({children, className}) => (
+            <InlineCode className={className} linkFilePaths={linkFilePaths}>
+              {children}
+            </InlineCode>
+          ),
           table: ({children}) => (
             <div className="my-3 max-w-full overflow-x-auto rounded-lg border">
               <table className="w-full border-collapse text-left text-sm">
@@ -304,4 +301,15 @@ function highlightTerminalText(content: string, query: string) {
       </React.Fragment>
     ),
   );
+}
+
+// Inline or fenced code. Inline code that names a file opens it, unless it
+// sits in a link.
+function InlineCode({children, className, linkFilePaths}: {children?: React.ReactNode; className?: string; linkFilePaths?: boolean}) {
+  const insideLink = React.useContext(InsideLink);
+  // Only inline code: a fenced block has a language class or ends in a
+  // newline, which no path has.
+  const fileRef = linkFilePaths && !insideLink && !className && typeof children === "string" ? parseFilePathRef(children) : null;
+  if (fileRef) return <FilePathCode text={children as string} fileRef={fileRef} />;
+  return <code className={`${className ?? ""} ${inlineCodeClass}`}>{children}</code>;
 }

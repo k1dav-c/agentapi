@@ -6,7 +6,7 @@ import {toast} from "sonner";
 import type {Terminal} from "@xterm/xterm";
 import {useChat} from "./chat-provider";
 import {Button} from "./ui/button";
-import {TerminalKeyBar, prepareTerminalInput, useTerminalKeyboard} from "./terminal-chrome";
+import {TERMINAL_FONT_SIZE as FONT_SIZE, TERMINAL_LINE_HEIGHT as LINE_HEIGHT, TERMINAL_OPTIONS, TerminalKeyBar, prepareTerminalInput, useTerminalKeyboard} from "./terminal-chrome";
 import {OrderedInput, fitTerminalFontSize, screenToTerminalOutput} from "@/lib/tty";
 import {withCredentials} from "@/lib/auth";
 
@@ -14,8 +14,6 @@ import {withCredentials} from "@/lib/auth";
 // AgentAPI was started with --term-width), so lines wrap exactly as the
 // agent drew them. The font scales to fill the window instead.
 const DEFAULT_COLUMNS = 80;
-const FONT_SIZE = 13;
-const LINE_HEIGHT = 1.2;
 // Horizontal padding of the terminal panel (p-2 on both sides).
 const PANEL_PADDING = 16;
 
@@ -55,16 +53,7 @@ export function TtyView({onExit}: {onExit: () => void}) {
       // Estimated until xterm has rendered a row we can measure.
       let rowHeight = FONT_SIZE * LINE_HEIGHT;
       const rowsFor = () => Math.max(10, Math.floor(container.clientHeight / rowHeight));
-      term = new Terminal({
-        cols: columnsRef.current,
-        rows: rowsFor(),
-        fontSize: FONT_SIZE,
-        lineHeight: LINE_HEIGHT,
-        fontFamily: 'Menlo, "DejaVu Sans Mono", Consolas, "Courier New", monospace',
-        scrollback: 5000,
-        cursorBlink: false,
-        theme: {background: "#0b0d10", foreground: "#e6e6e6"},
-      });
+      term = new Terminal({...TERMINAL_OPTIONS, cols: columnsRef.current, rows: rowsFor(), scrollback: 5000, cursorBlink: false});
       term.open(container);
       // Measures the rendered cells, then sizes the ruler and the rows.
       const measure = () => {

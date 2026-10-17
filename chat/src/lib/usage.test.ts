@@ -1,18 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { contextPercent, formatResetIn, formatTokens, fullestLimit, usageTone } from "./usage";
+import { contextPercent, formatResetIn, fullestLimit, usageTone } from "./usage";
 
 describe("usage", () => {
   test("context percent", () => {
     expect(contextPercent({ used: 41000, size: 200000 })).toBeCloseTo(20.5);
     expect(contextPercent({ used: 5, size: 0 })).toBe(0);
     expect(contextPercent({ used: 300, size: 200 })).toBe(100);
-  });
-
-  test("tokens", () => {
-    expect(formatTokens(950)).toBe("950");
-    expect(formatTokens(41_499)).toBe("41k");
-    expect(formatTokens(1_000_000)).toBe("1M");
-    expect(formatTokens(1_250_000)).toBe("1.3M");
   });
 
   test("tone", () => {

@@ -8,7 +8,7 @@ import MessageList from "./message-list";
 import dynamic from "next/dynamic";
 import {TtyView} from "./tty-view";
 import {ShellView} from "./shell-view";
-import {OPEN_TERMINAL_EVENT} from "./slash-command-runner";
+import {OPEN_TERMINAL_EVENT} from "@/lib/slash-commands";
 import {DecisionCard, StateStrip} from "./dock";
 import {RequestCard} from "./request-card";
 import {LoginCard} from "./login-card";
@@ -31,7 +31,7 @@ import {KeyboardShortcutsDialog, useKeyboardShortcutsKey} from "./keyboard-short
 export function Chat() {
   const [suggestedPrompt, setSuggestedPrompt] = useState("");
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [ttyMode, setTtyMode] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
   // What the native terminal types once it opens (the login command).
   const [shellCommand, setShellCommand] = useState<string | undefined>();
   useKeyboardShortcutsKey(() => setShortcutsOpen(true));
@@ -60,18 +60,18 @@ export function Chat() {
   const hasTerminal = transport === "pty";
   const hasShell = transport === "native" && terminalAvailable;
   useEffect(() => {
-    if (!hasTerminal && !hasShell) setTtyMode(false);
+    if (!hasTerminal && !hasShell) setTerminalOpen(false);
   }, [hasTerminal, hasShell]);
   const openShell = (command?: string) => {
     setShellCommand(command);
-    setTtyMode(true);
+    setTerminalOpen(true);
   };
   // The /terminal and /login commands.
   useEffect(() => {
     if (!hasShell) return;
     const onOpen = (event: Event) => {
       setShellCommand((event as CustomEvent<string | undefined>).detail);
-      setTtyMode(true);
+      setTerminalOpen(true);
     };
     window.addEventListener(OPEN_TERMINAL_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_TERMINAL_EVENT, onOpen);
@@ -127,10 +127,10 @@ export function Chat() {
           </Button>
         </div>
       )}
-      {ttyMode && hasTerminal ? (
-        <TtyView onExit={() => setTtyMode(false)} />
-      ) : ttyMode && hasShell ? (
-        <ShellView onExit={() => setTtyMode(false)} command={shellCommand} />
+      {terminalOpen && hasTerminal ? (
+        <TtyView onExit={() => setTerminalOpen(false)} />
+      ) : terminalOpen && hasShell ? (
+        <ShellView onExit={() => setTerminalOpen(false)} command={shellCommand} />
       ) : (
         <>
           <MessageList
@@ -156,7 +156,7 @@ export function Chat() {
                     className="size-8 rounded-full text-muted-foreground"
                     title="TTY mode: use the agent's terminal directly"
                     aria-label="Switch to TTY mode"
-                    onClick={() => setTtyMode(true)}
+                    onClick={() => setTerminalOpen(true)}
                   >
                     <TerminalSquare className="size-4" />
                   </Button>
@@ -204,7 +204,7 @@ export function Chat() {
             dock={
               <>
                 <StateStrip />
-                {hasTerminal && <DecisionCard onOpenTerminal={() => setTtyMode(true)} />}
+                {hasTerminal && <DecisionCard onOpenTerminal={() => setTerminalOpen(true)} />}
                 {transport === "native" && <LoginCard onRunInTerminal={hasShell ? openShell : undefined} />}
                 {transport === "native" && <RequestCard />}
               </>

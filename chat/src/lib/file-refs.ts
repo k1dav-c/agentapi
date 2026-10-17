@@ -343,5 +343,11 @@ export function toolFileTargets(toolName: string, toolInput: unknown): FileTarge
   }
   // Codex applies patches from code-mode scripts (exec) and, in older
   // versions, through the shell.
-  return /^(?:exec|shell|local_shell|container\.exec)/.test(name) ? patchTargets(scriptsOf(input)) : [];
+  return isPatchScriptTool(name) ? patchTargets(scriptsOf(input)) : [];
+}
+
+// Whether name is a tool whose script can apply patches: a Codex code-mode
+// script (exec), or the shell.
+export function isPatchScriptTool(name: string): boolean {
+  return /^(?:exec|shell|local_shell|container\.exec)/.test(name);
 }

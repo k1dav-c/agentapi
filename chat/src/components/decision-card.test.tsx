@@ -32,7 +32,7 @@ describe("DecisionCardShell", () => {
       </DecisionCardShell>,
     );
     expect(html).toContain("max-h-[60dvh]");
-    expect(html).toMatch(/<h2[^>]*class="line-clamp-2 /);
+    expect(html).toMatch(/<h2[^>]*class="[^"]*\bline-clamp-2\b/);
     // The body (header and children) scrolls; the footer follows it.
     expect(html).toMatch(/overflow-y-auto[^"]*"><header[\s\S]*<p>context<\/p><\/div><div class="[^"]*shrink-0[^"]*"><button type="button">Allow<\/button>/);
   });

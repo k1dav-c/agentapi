@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {classifyDiffLines, deleteDiff, diffHeader, diffLines, diffStats, editDiff, textLines, writeDiff} from "./diff";
+import {classifyDiffLines, deleteDiff, diffHeader, diffLines, editDiff, textLines, writeDiff} from "./diff";
 
 const kinds = (diff: string) => classifyDiffLines(diff).map((line) => line.kind);
 
@@ -104,9 +104,5 @@ describe("classifyDiffLines", () => {
 
   test("text around a diff is neither a header nor a change", () => {
     expect(kinds("Moved to: x.go\n--- a/x\n+++ b/x\n@@\n+y\nnot part of it")).toEqual(["meta", "header", "header", "hunk", "add", "meta"]);
-  });
-
-  test("diffStats counts added and removed lines", () => {
-    expect(diffStats(classifyDiffLines("--- a/x\n+++ b/x\n@@\n-a\n+b\n+c\n d"))).toEqual({added: 2, removed: 1});
   });
 });

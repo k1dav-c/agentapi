@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {getAgentState, getStatusMeta} from "./session-status";
+import {formatTokenCount, getAgentState, getStatusMeta} from "./session-status";
 
 const connected = {connectionStatus: "connected"} as const;
 
@@ -36,5 +36,16 @@ describe("getStatusMeta", () => {
     expect(getStatusMeta("needs-you", true).detail).toBe("Agent is waiting for you to log in");
     expect(getStatusMeta("needs-you").detail).toBe("Agent is waiting for your answer");
     expect(getStatusMeta("working", true)).toMatchObject({kind: "working", label: "Working", detail: "Agent is working"});
+  });
+});
+
+describe("formatTokenCount", () => {
+  test("rounds to the unit people read", () => {
+    expect(formatTokenCount(950)).toBe("950");
+    expect(formatTokenCount(4_210)).toBe("4.2k");
+    expect(formatTokenCount(9_960)).toBe("10k");
+    expect(formatTokenCount(41_499)).toBe("41k");
+    expect(formatTokenCount(999_600)).toBe("1.0M");
+    expect(formatTokenCount(1_250_000)).toBe("1.3M");
   });
 });

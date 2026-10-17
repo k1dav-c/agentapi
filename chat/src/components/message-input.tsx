@@ -28,7 +28,7 @@ import TextareaAutosize from "react-textarea-autosize";
 import {useChat} from "./chat-provider";
 import {SessionSettings} from "./session-settings";
 import {useSlashCommandRunner} from "./slash-command-runner";
-import {matchingCommands, parseSlashCommand} from "@/lib/slash-commands";
+import {completion, matchingCommands, parseSlashCommand} from "@/lib/slash-commands";
 import {UsageMeter} from "./usage-meter";
 import {DragDrop} from "./drag-drop";
 import {ImageThumb, useObjectURL} from "./image-preview";
@@ -396,20 +396,30 @@ export default function MessageInput({
     !message.trim() ||
     attachments.some((attachment) => attachment.status === "uploading");
 
-  const runSlashCommand = useSlashCommandRunner();
+  const slashCommands = useSlashCommandRunner();
+  // A slash command that runs: a second Enter doesn't run it again.
+  const commandRunning = useRef(false);
   // The chat's own slash commands, offered while the command word is typed
   // (native agents, which have no terminal UI for them).
   const slashSuggestions = transport === "native" ? matchingCommands(message) : [];
-  const completeSlashCommand = (name: string, args?: string) => {
-    setMessage(`/${name}${args ? " " : ""}`);
+  const completeSlashCommand = (text: string) => {
+    setMessage(text);
     textareaRef.current?.focus();
   };
 
   const submit = async (mode: DispatchMode = "queue") => {
     if (sendBlocked || (serverStatus !== "running" && serverStatus !== "stable")) return;
     const command = transport === "native" ? parseSlashCommand(message) : null;
-    if (command && (await runSlashCommand(command))) {
+    if (command && slashCommands.handles(command)) {
+      if (commandRunning.current) return;
+      commandRunning.current = true;
+      // Cleared at once: the next message can be typed while it runs.
       setMessage("");
+      try {
+        await slashCommands.run(command);
+      } finally {
+        commandRunning.current = false;
+      }
       return;
     }
     const result = await onSendMessage(message, "user", mode);
@@ -463,9 +473,12 @@ export default function MessageInput({
   }, [serverStatus, disabled]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Tab" && !e.shiftKey && slashSuggestions.length > 0) {
+    // Tab completes a command, unless it is complete: then Tab leaves the
+    // composer as usual.
+    const completed = slashSuggestions.length > 0 ? completion(slashSuggestions[0]) : "";
+    if (e.key === "Tab" && !e.shiftKey && completed && completed !== message) {
       e.preventDefault();
-      completeSlashCommand(slashSuggestions[0].name, slashSuggestions[0].args);
+      completeSlashCommand(completed);
       return;
     }
     const mode = dispatchModeForKey(e, modes);
@@ -575,13 +588,13 @@ export default function MessageInput({
           >
             <div className="flex flex-col">
               {slashSuggestions.length > 0 && (
-                <div className="border-b bg-muted/30 px-2 py-1.5" aria-label="Chat commands" data-slash-suggestions>
+                <div className="border-b bg-muted/30 px-2 py-1.5" role="group" aria-label="Chat commands" data-slash-suggestions>
                   {slashSuggestions.map((command) => (
                     <button
                       key={command.name}
                       type="button"
                       onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => completeSlashCommand(command.name, command.args)}
+                      onClick={() => completeSlashCommand(completion(command))}
                       className="flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted"
                     >
                       <code className="shrink-0 font-mono text-foreground">/{command.name}</code>

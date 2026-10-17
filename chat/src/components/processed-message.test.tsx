@@ -141,6 +141,12 @@ describe("ProcessedMessage file paths", () => {
     expect(html).toContain("lib/httpapi/files.go");
   });
 
+  test("a path in a link stays plain code", () => {
+    const html = renderLinked("Open [`src/app.ts`](https://example.com/app) or `src/app.ts`.");
+    expect(html.match(/role="button"/g)?.length).toBe(1);
+    expect(html).toContain('<a href="https://example.com/app"');
+  });
+
   test("only where asked for, with a viewer", () => {
     expect(renderLinked("`lib/a.go`", false)).not.toContain('role="button"');
     expect(renderLinked("`lib/a.go`", true, false)).not.toContain('role="button"');

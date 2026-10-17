@@ -10,7 +10,7 @@ import { currentPromptQuestion, parseInteractiveToolInput } from "@/lib/interact
 import { useChat } from "../chat-provider";
 import { ImageThumb } from "../image-preview";
 import { toolRequestBadge, type Tone } from "@/lib/native-requests";
-import { fileName, toolFileTargets, viewerTab, type FileTarget, type FileTargetKind } from "@/lib/file-refs";
+import { fileName, isPatchScriptTool, toolFileTargets, viewerTab, type FileTarget, type FileTargetKind } from "@/lib/file-refs";
 import { useFileViewer, type FileViewer, type FileViewerTab } from "../file-viewer-context";
 import { DiffView } from "../diff-view";
 import { PathLabel } from "../file-path";
@@ -143,7 +143,7 @@ function ToolFiles({targets, viewer}: {targets: FileTarget[]; viewer: FileViewer
               size="sm"
               variant="ghost"
               className="h-8 gap-1 px-2 text-xs sm:h-7"
-              aria-label={`Open ${target.path}`}
+              aria-label={`File: ${target.path}`}
               aria-haspopup="dialog"
               onClick={() => openTarget(viewer, target, "file")}
             >
@@ -155,7 +155,7 @@ function ToolFiles({targets, viewer}: {targets: FileTarget[]; viewer: FileViewer
               size="sm"
               variant="ghost"
               className="h-8 gap-1 px-2 text-xs sm:h-7"
-              aria-label={`Show the changes to ${target.path}`}
+              aria-label={`Diff: ${target.path}`}
               aria-haspopup="dialog"
               onClick={() => openTarget(viewer, target, "diff")}
             >
@@ -250,7 +250,7 @@ export function ToolCallCard({
   );
   // A Codex code-mode script that applies a patch reads as that patch,
   // not as its source.
-  const patchScript = targets.length > 0 && typeof toolCall.input === "string" && toolCall.name !== "apply_patch";
+  const patchScript = targets.length > 0 && isPatchScriptTool(toolCall.name);
   const toolLabel = patchScript ? "apply_patch" : toolCall.name;
   const command = patchScript ? undefined : getToolCommand(toolCall.name, toolCall.input);
   const exitCode = getExitCode(toolCall.result);

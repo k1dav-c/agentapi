@@ -74,6 +74,8 @@ export function DecisionCardShell({
   const titleRef = useRef<HTMLHeadingElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [clamped, setClamped] = useState(false);
+  // A cut title can be shown in full: a hover title doesn't reach a phone.
+  const [titleOpen, setTitleOpen] = useState(false);
   const [scrolls, setScrolls] = useState(false);
   const measure = useCallback(() => {
     const heading = titleRef.current;
@@ -113,12 +115,23 @@ export function DecisionCardShell({
                 ref={titleRef}
                 id={`${id}-title`}
                 title={clamped && typeof title === "string" ? title : undefined}
-                className="line-clamp-2 min-w-0 flex-1 text-sm font-semibold leading-5 [overflow-wrap:anywhere]"
+                className={cn("min-w-0 flex-1 text-sm font-semibold leading-5 [overflow-wrap:anywhere]", !titleOpen && "line-clamp-2")}
               >
                 {title}
               </h2>
               {aside}
             </div>
+            {(clamped || titleOpen) && (
+              <button
+                type="button"
+                onClick={() => setTitleOpen((open) => !open)}
+                aria-expanded={titleOpen}
+                aria-controls={`${id}-title`}
+                className="mt-0.5 rounded text-[11px] font-medium text-muted-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {titleOpen ? "Show less" : "Show all"}
+              </button>
+            )}
             {description && <p className="mt-0.5 text-[13px] text-muted-foreground">{description}</p>}
           </header>
           {children}
@@ -206,6 +219,20 @@ export function PrimaryButton({ className, ...props }: ComponentProps<"button">)
       {...props}
       className={cn(
         "rounded-lg bg-state-needs text-[13px] font-semibold text-background outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
+        className,
+      )}
+    />
+  );
+}
+
+// The cards' secondary action (Back, Check again next to a primary one).
+export function SecondaryButton({ className, ...props }: ComponentProps<"button">) {
+  return (
+    <button
+      type="button"
+      {...props}
+      className={cn(
+        "rounded-lg border text-[13px] outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
         className,
       )}
     />

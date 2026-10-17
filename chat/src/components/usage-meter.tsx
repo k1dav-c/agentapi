@@ -5,7 +5,8 @@ import { useChat } from "./chat-provider";
 import { Button } from "./ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import type { RateLimit } from "@/lib/chat-api";
-import { contextPercent, formatResetIn, formatTokens, fullestLimit, usageTone, type UsageTone } from "@/lib/usage";
+import { contextPercent, formatResetIn, fullestLimit, usageTone, type UsageTone } from "@/lib/usage";
+import { formatTokenCount as formatTokens } from "@/lib/session-status";
 import { cn } from "@/lib/utils";
 
 const TONE_STROKE: Record<UsageTone, string> = {
@@ -97,6 +98,12 @@ export function UsageMeter() {
   const summary = context
     ? `Context ${Math.round(percent)}% full (${formatTokens(context.used)} of ${formatTokens(context.size)} tokens)`
     : `${fullest?.label}: ${Math.round(percent)}% used`;
+  // The menu holds no items, which screen readers may skip: the button says
+  // the limits too.
+  const limitsSummary = limits
+    .filter((limit) => limit.used_percent !== undefined)
+    .map((limit) => `${limit.label} ${Math.round(limit.used_percent ?? 0)}% used`)
+    .join(", ");
 
   return (
     <DropdownMenu onOpenChange={setOpen}>
@@ -110,8 +117,8 @@ export function UsageMeter() {
           data-usage-meter
         >
           <Ring percent={percent} tone={tone} />
-          <span className="tabular-nums">{Math.round(percent)}%</span>
-          <span className="sr-only">{summary}</span>
+          <span className="tabular-nums" aria-hidden="true">{Math.round(percent)}%</span>
+          <span className="sr-only">{limitsSummary ? `${summary}. ${limitsSummary}` : summary}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="max-h-[70dvh] w-72 overflow-y-auto">

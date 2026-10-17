@@ -6,6 +6,16 @@ import type {Terminal} from "@xterm/xterm";
 import {IOS_FORM_BAR_HEIGHT, isIOS, keyboardInset, terminalShortcuts, type TerminalShortcut} from "@/lib/terminal-keys";
 import {useMediaQuery} from "@/lib/use-media-query";
 
+// The look both terminals share.
+export const TERMINAL_FONT_SIZE = 13;
+export const TERMINAL_LINE_HEIGHT = 1.2;
+export const TERMINAL_OPTIONS = {
+  fontSize: TERMINAL_FONT_SIZE,
+  lineHeight: TERMINAL_LINE_HEIGHT,
+  fontFamily: 'Menlo, "DejaVu Sans Mono", Consolas, "Courier New", monospace',
+  theme: {background: "#0b0d10", foreground: "#e6e6e6"},
+};
+
 // What the terminals (TTY mode, the native terminal) share about typing on
 // a phone: whether the on-screen keyboard is up, and how much of the page
 // it covers (iOS doesn't shrink the page for it), so the key bar can sit

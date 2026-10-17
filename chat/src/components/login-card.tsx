@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { KeyRound, RefreshCw, TerminalSquare } from "lucide-react";
 import { useChat } from "./chat-provider";
-import { Button } from "./ui/button";
-import { CardStatus, CommandBlock, DecisionCardShell, MarkdownDetail, PrimaryButton } from "./decision-card";
+import { CardStatus, CommandBlock, DecisionCardShell, MarkdownDetail, PrimaryButton, SecondaryButton } from "./decision-card";
 import { getErrorMessage } from "@/lib/error-utils";
 import { loginNote, loginTitle, loginWhere } from "@/lib/login";
 
@@ -63,9 +62,9 @@ export function LoginCard({ onRunInTerminal }: { onRunInTerminal?: (command: str
                 <TerminalSquare className="size-3.5" />
                 Run in terminal
               </PrimaryButton>
-              <Button type="button" variant="outline" size="sm" onClick={() => void check()} disabled={checking} className="min-h-9 gap-1.5 px-3 text-xs">
+              <SecondaryButton onClick={() => void check()} disabled={checking} className="flex min-h-9 items-center gap-1.5 px-3">
                 {checkAgain}
-              </Button>
+              </SecondaryButton>
             </>
           ) : (
             <PrimaryButton onClick={() => void check()} disabled={checking} className="flex min-h-9 items-center gap-1.5 px-3">

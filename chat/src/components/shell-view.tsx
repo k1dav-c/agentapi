@@ -6,14 +6,11 @@ import {toast} from "sonner";
 import type {Terminal} from "@xterm/xterm";
 import {useChat} from "./chat-provider";
 import {Button} from "./ui/button";
-import {TerminalKeyBar, prepareTerminalInput, useTerminalKeyboard} from "./terminal-chrome";
+import {TERMINAL_OPTIONS, TerminalKeyBar, prepareTerminalInput, useTerminalKeyboard} from "./terminal-chrome";
 import {OrderedInput} from "@/lib/tty";
 import {decodeBase64, terminalSize} from "@/lib/shell";
 import {withCredentials} from "@/lib/auth";
 import {getErrorMessage} from "@/lib/error-utils";
-
-const FONT_SIZE = 13;
-const LINE_HEIGHT = 1.2;
 
 type ShellState = "connecting" | "open" | "exited";
 
@@ -32,12 +29,8 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
   // Bumped to connect again, which starts a new shell after one exited.
   const [session, setSession] = useState(0);
   const commandRef = useRef(command);
-  // The provider recreates these functions on every render; read them
-  // through refs so the terminal isn't rebuilt each time.
-  const inputFnRef = useRef(terminalInput);
-  inputFnRef.current = terminalInput;
-  const resizeFnRef = useRef(terminalResize);
-  resizeFnRef.current = terminalResize;
+  // Whether the shell runs: keys typed after it exited go nowhere.
+  const runningRef = useRef(false);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -47,26 +40,22 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
     let eventSource: EventSource | undefined;
     let resizeObserver: ResizeObserver | undefined;
     let resizeTimer = 0;
+    let frame = 0;
 
     void import("@xterm/xterm").then(({Terminal}) => {
       if (disposed) return;
-      term = new Terminal({
-        fontSize: FONT_SIZE,
-        lineHeight: LINE_HEIGHT,
-        fontFamily: 'Menlo, "DejaVu Sans Mono", Consolas, "Courier New", monospace',
-        scrollback: 10000,
-        cursorBlink: true,
-        theme: {background: "#0b0d10", foreground: "#e6e6e6"},
-      });
+      term = new Terminal({...TERMINAL_OPTIONS, scrollback: 10000, cursorBlink: true});
       term.open(container);
       prepareTerminalInput(container, setKeyboardOpen);
       // On a touch screen the keyboard opens when asked for.
       if (!window.matchMedia("(pointer: coarse)").matches) term.focus();
 
-      const input = new OrderedInput((data) => inputFnRef.current(data), (error) => {
+      const input = new OrderedInput((data) => terminalInput(data), (error) => {
         toast.error("Could not type into the terminal", {description: getErrorMessage(error)});
       });
-      term.onData((data) => input.push(data));
+      term.onData((data) => {
+        if (runningRef.current) input.push(data);
+      });
       inputRef.current = input;
       termRef.current = term;
 
@@ -86,13 +75,13 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
         sent = key;
         window.clearTimeout(resizeTimer);
         resizeTimer = window.setTimeout(() => {
-          resizeFnRef.current(size.cols, size.rows).catch(() => {
+          terminalResize(size.cols, size.rows).catch(() => {
             // The next fit tries again; the shell keeps its last size.
             sent = "";
           });
         }, 150);
       };
-      window.requestAnimationFrame(fit);
+      frame = window.requestAnimationFrame(fit);
       resizeObserver = new ResizeObserver(() => fit());
       resizeObserver.observe(container);
 
@@ -103,6 +92,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
         // The stream starts with the recent output: replay it on a clean
         // terminal, also after a reconnect.
         term?.reset();
+        runningRef.current = true;
         setState("open");
         fit();
       };
@@ -129,6 +119,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
         }
         // Don't reconnect: that would start a new shell right away.
         eventSource?.close();
+        runningRef.current = false;
         setExitReason(reason);
         setState("exited");
       });
@@ -136,6 +127,8 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
 
     return () => {
       disposed = true;
+      runningRef.current = false;
+      window.cancelAnimationFrame(frame);
       window.clearTimeout(resizeTimer);
       resizeObserver?.disconnect();
       eventSource?.close();
@@ -143,7 +136,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
       termRef.current = null;
       inputRef.current = null;
     };
-  }, [storageScope, session, setKeyboardOpen]);
+  }, [storageScope, session, setKeyboardOpen, terminalInput, terminalResize]);
 
   // Keep the last lines in view when the keyboard opens or closes.
   useEffect(() => {
@@ -182,7 +175,14 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
           </div>
         )}
       </div>
-      <TerminalKeyBar termRef={termRef} touch={touch} keyboardOpen={keyboardOpen} onKeys={(data) => inputRef.current?.push(data)} />
+      <TerminalKeyBar
+        termRef={termRef}
+        touch={touch}
+        keyboardOpen={keyboardOpen}
+        onKeys={(data) => {
+          if (runningRef.current) inputRef.current?.push(data);
+        }}
+      />
     </div>
   );
 }

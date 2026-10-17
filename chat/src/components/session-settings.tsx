@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Brain, ChevronDown, ClipboardList, Hand, LoaderCircle, Shield, ShieldCheck, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { useChat } from "./chat-provider";
@@ -18,7 +18,7 @@ import {
 import type { AgentSettings, PermissionMode, SettingOptions } from "@/lib/chat-api";
 import { getErrorMessage } from "@/lib/error-utils";
 import { modeMeta, modelLabel, effortsOf } from "@/lib/session-settings";
-import { OPEN_SETTINGS_EVENT, type SettingsMenu } from "./slash-command-runner";
+import { OPEN_SETTINGS_EVENT, type SettingsMenu } from "@/lib/slash-commands";
 import { cn } from "@/lib/utils";
 
 const MODE_ICONS: Record<PermissionMode, ReactNode> = {
@@ -41,15 +41,19 @@ export function SessionSettings({ className }: { className?: string }) {
   const [saving, setSaving] = useState(false);
   const enabled = transport === "native" && Boolean(capabilities?.settings) && agentSettings !== null;
 
+  // Only the latest load counts: an older one that ends later is stale.
+  const loads = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loads.current;
     setLoading(true);
     setLoadError("");
     try {
-      setOptions((await getSettings()).options);
+      const { options } = await getSettings();
+      if (seq === loads.current) setOptions(options);
     } catch (error) {
-      setLoadError(getErrorMessage(error));
+      if (seq === loads.current) setLoadError(getErrorMessage(error));
     } finally {
-      setLoading(false);
+      if (seq === loads.current) setLoading(false);
     }
   }, [getSettings]);
 
@@ -61,13 +65,14 @@ export function SessionSettings({ className }: { className?: string }) {
 
   // /model, /effort and /mode without a value open the menu.
   useEffect(() => {
+    if (!enabled) return;
     const onOpen = (event: Event) => {
       setOpenMenu((event as CustomEvent<SettingsMenu>).detail);
       void load();
     };
     window.addEventListener(OPEN_SETTINGS_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_SETTINGS_EVENT, onOpen);
-  }, [load]);
+  }, [enabled, load]);
 
   if (!enabled || !agentSettings) return null;
 

@@ -36,7 +36,16 @@ export function QuestionSteps({
   const [step, setStep] = useState(0);
   const [stepError, setStepError] = useState("");
   const textRef = useRef<HTMLInputElement>(null);
+  const questionRef = useRef<HTMLParagraphElement>(null);
   const errorId = useId();
+  // The card's content keeps its scroll position: bring a new question into
+  // view, e.g. after a choice moved on to it (not the first one).
+  const shownStep = useRef(step);
+  useEffect(() => {
+    if (shownStep.current === step) return;
+    shownStep.current = step;
+    questionRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [step]);
   const question = questions[step];
   const draft = question ? drafts[question.id] ?? { selected: [], text: "" } : undefined;
   const last = step === questions.length - 1;
@@ -115,7 +124,7 @@ export function QuestionSteps({
           ))}
         </nav>
       )}
-      <p className="text-[13px] font-medium leading-5 [overflow-wrap:anywhere]">
+      <p ref={questionRef} className="text-[13px] font-medium leading-5 [overflow-wrap:anywhere]">
         {questions.length > 1 && <span className="mr-1.5 font-mono text-[11px] text-muted-foreground">{step + 1}/{questions.length}</span>}
         {question.question}
       </p>

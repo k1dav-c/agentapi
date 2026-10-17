@@ -45,11 +45,43 @@ export function parseSlashCommand(text: string): SlashCommand | null {
 }
 
 // The commands that complete what is typed so far ("/mo" offers /model and
-// /mode), while only the command word is typed.
+// /mode), while only the command word is typed: the one it names first,
+// then the ones it starts, by name before alias.
 export function matchingCommands(text: string): SlashCommandInfo[] {
   if (!text.startsWith("/") || /\s/.test(text)) return [];
   const prefix = text.slice(1).toLowerCase();
-  return SLASH_COMMANDS.filter((command) => command.name.startsWith(prefix) || command.aliases?.some((alias) => alias.startsWith(prefix)));
+  const rank = (command: SlashCommandInfo) => {
+    if (command.name === prefix) return 0;
+    if (command.aliases?.includes(prefix)) return 1;
+    if (command.name.startsWith(prefix)) return 2;
+    if (command.aliases?.some((alias) => alias.startsWith(prefix))) return 3;
+    return -1;
+  };
+  return SLASH_COMMANDS.map((command) => ({command, rank: rank(command)}))
+    .filter(({rank}) => rank >= 0)
+    .sort((a, b) => a.rank - b.rank)
+    .map(({command}) => command);
+}
+
+// What Tab puts in the composer for command: its name, and a space before
+// its argument.
+export function completion(command: SlashCommandInfo): string {
+  return `/${command.name}${command.args ? " " : ""}`;
+}
+
+// Events that open a part of the page that isn't the composer's: the
+// terminal (with a command to run in it), and a settings menu.
+export const OPEN_TERMINAL_EVENT = "agentapi:open-terminal";
+export const OPEN_SETTINGS_EVENT = "agentapi:open-settings";
+
+export type SettingsMenu = "mode" | "model";
+
+export function openTerminal(command?: string) {
+  window.dispatchEvent(new CustomEvent<string | undefined>(OPEN_TERMINAL_EVENT, {detail: command}));
+}
+
+export function openSettings(menu: SettingsMenu) {
+  window.dispatchEvent(new CustomEvent<SettingsMenu>(OPEN_SETTINGS_EVENT, {detail: menu}));
 }
 
 // The model or effort that arg picks from choices: its id or name, ignoring

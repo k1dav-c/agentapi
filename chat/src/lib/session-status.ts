@@ -10,10 +10,12 @@ export interface TokenTotals {
   total: number;
 }
 
+// A token count the way people read it: 950, 4.2k, 41k, 1.2M. The bounds
+// are where rounding would reach the next unit (9,950 is 10k, not 10.0k).
 export function formatTokenCount(count: number): string {
   if (count < 1000) return `${count}`;
-  if (count < 10_000) return `${(count / 1000).toFixed(1)}k`;
-  if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
+  if (count < 9_950) return `${(count / 1000).toFixed(1)}k`;
+  if (count < 999_500) return `${Math.round(count / 1000)}k`;
   return `${(count / 1_000_000).toFixed(1)}M`;
 }
 

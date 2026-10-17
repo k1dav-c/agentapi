@@ -1,6 +1,6 @@
 "use client";
 
-import {useMemo} from "react";
+import {memo, useMemo} from "react";
 import {classifyDiffLines, type DiffLineKind} from "@/lib/diff";
 import {cn} from "@/lib/utils";
 
@@ -16,7 +16,8 @@ const LINE_CLASS: Record<DiffLineKind, string> = {
 // A unified diff in the terminal's colors: added and removed lines colored,
 // hunk headers dimmed. Long lines scroll sideways rather than wrap, so the
 // columns stay aligned; the box is focusable so the keyboard can scroll it.
-export function DiffView({diff, label, className}: {diff: string; label: string; className?: string}) {
+// Memoized: the chat re-renders its parents while the agent streams.
+export const DiffView = memo(function DiffView({diff, label, className}: {diff: string; label: string; className?: string}) {
   const lines = useMemo(() => classifyDiffLines(diff), [diff]);
   return (
     <div
@@ -24,7 +25,7 @@ export function DiffView({diff, label, className}: {diff: string; label: string;
       aria-label={label}
       tabIndex={0}
       className={cn(
-        "overflow-auto overscroll-contain rounded-md bg-term font-mono text-xs leading-5 text-term-foreground outline-none [tab-size:4] focus-visible:ring-2 focus-visible:ring-ring",
+        "overflow-auto overscroll-x-contain rounded-md bg-term font-mono text-xs leading-5 text-term-foreground outline-none [tab-size:4] focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
     >
@@ -37,4 +38,4 @@ export function DiffView({diff, label, className}: {diff: string; label: string;
       </div>
     </div>
   );
-}
+});

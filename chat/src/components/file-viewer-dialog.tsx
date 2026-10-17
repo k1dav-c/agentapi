@@ -1,6 +1,6 @@
 "use client";
 
-import {Fragment, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode} from "react";
+import {Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode} from "react";
 import {FileDiff, FileQuestion, FileText, GitCompare, LoaderCircle, RefreshCw, ShieldAlert, TriangleAlert, X} from "lucide-react";
 import {Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle} from "./ui/dialog";
 import {Tabs, TabsContent, TabsList, TabsTrigger} from "./ui/tabs";
@@ -175,7 +175,8 @@ function FilePane({loaded, path, line, onRetry}: {loaded: Loaded<FileContent> | 
 
 // A file with line numbers, highlighted for its type; line is scrolled to
 // and marked. The numbers stay in view while long lines scroll sideways.
-function CodeView({code, path, line}: {code: string; path: string; line?: number}) {
+// Memoized: the chat re-renders the dialog while the agent streams.
+const CodeView = memo(function CodeView({code, path, line}: {code: string; path: string; line?: number}) {
   const lines = useMemo(() => highlightCode(code, languageForPath(path)), [code, path]);
   const target = line !== undefined && line >= 1 && line <= lines.length ? line : undefined;
   const targetRef = useRef<HTMLDivElement>(null);
@@ -207,7 +208,7 @@ function CodeView({code, path, line}: {code: string; path: string; line?: number
       })}
     </div>
   );
-}
+});
 
 function renderToken(token: CodeToken, index: number): ReactNode {
   const content = token.classes.reduceRight<ReactNode>(

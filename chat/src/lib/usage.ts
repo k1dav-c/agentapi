@@ -6,13 +6,6 @@ export function contextPercent(context: ContextUsage): number {
   return Math.min(100, Math.max(0, (context.used / context.size) * 100));
 }
 
-// A token count the way people read it: 950, 41k, 1.2M.
-export function formatTokens(tokens: number): string {
-  if (tokens < 1000) return String(tokens);
-  if (tokens < 1_000_000) return `${Math.round(tokens / 1000)}k`;
-  return `${(tokens / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-}
-
 export type UsageTone = "ok" | "warning" | "danger";
 
 // How worrying a share of a limit is: from 80% on a warning, at 95% or a

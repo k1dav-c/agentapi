@@ -27,7 +27,8 @@ export function PathLabel({path, className}: {path: string; className?: string})
   );
 }
 
-const inlineCodeClass = "rounded-[5px] border border-border bg-muted px-1 py-px font-mono text-[0.86em] text-foreground";
+// Inline code in a message, as the Markdown renderer draws it.
+export const inlineCodeClass = "rounded-[5px] border border-border bg-muted px-1 py-px font-mono text-[0.86em] text-foreground";
 
 // Inline code in an agent's message that names a file: opens the file
 // viewer at its line. Inline (not a <button>) so a long path wraps with the
