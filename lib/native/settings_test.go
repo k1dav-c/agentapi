@@ -1,0 +1,182 @@
+package native_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/nativetest"
+)
+
+var testOptions = native.SettingOptions{
+	PermissionModes: []native.PermissionMode{native.PermissionModeBypass, native.PermissionModeAsk},
+	Models: []native.ModelOption{
+		{ID: "fast", Name: "Fast", Efforts: []string{"low", "high"}, DefaultEffort: "low"},
+		{ID: "plain", Name: "Plain"},
+	},
+}
+
+// configurable makes the fake adapters configurable, starting with current.
+func configurable(current native.Settings) func(*nativetest.Adapter) {
+	return func(a *nativetest.Adapter) {
+		a.Caps.Settings = true
+		a.Options = testOptions
+		a.Current = current
+	}
+}
+
+func TestSettingOptionsCheck(t *testing.T) {
+	t.Parallel()
+	current := native.Settings{Model: "fast"}
+	for _, tc := range []struct {
+		name string
+		s    native.Settings
+		ok   bool
+	}{
+		{"nothing", native.Settings{}, true},
+		{"mode", native.Settings{PermissionMode: native.PermissionModeAsk}, true},
+		{"mode it lacks", native.Settings{PermissionMode: native.PermissionModeAuto}, false},
+		{"model", native.Settings{Model: "plain"}, true},
+		{"unknown model", native.Settings{Model: "huge"}, false},
+		{"effort of the current model", native.Settings{Effort: "high"}, true},
+		{"effort the current model lacks", native.Settings{Effort: "max"}, false},
+		{"effort of a model without efforts", native.Settings{Model: "plain", Effort: "low"}, false},
+		{"effort with a new model", native.Settings{Model: "fast", Effort: "low"}, true},
+	} {
+		err := testOptions.Check(tc.s, current)
+		if tc.ok {
+			assert.NoError(t, err, tc.name)
+		} else {
+			assert.ErrorIs(t, err, native.ErrInvalidSetting, tc.name)
+		}
+	}
+	// A model that isn't one of the options (one the command line chose)
+	// takes any effort; the agent decides.
+	assert.NoError(t, testOptions.Check(native.Settings{Effort: "turbo"}, native.Settings{Model: "custom"}))
+	assert.ErrorIs(t, native.SettingOptions{}.Check(native.Settings{PermissionMode: native.PermissionModeAsk}, current), native.ErrInvalidSetting)
+}
+
+func TestApplySettings(t *testing.T) {
+	c, factory, rec := start(t, configurable(native.Settings{PermissionMode: native.PermissionModeBypass, Model: "fast", Effort: "low"}), native.Config{})
+	a := factory.Last()
+	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeBypass, Model: "fast", Effort: "low"}, c.Settings())
+	options, err := c.SettingOptions(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, testOptions, options)
+
+	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeAsk, Effort: "high"}))
+	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "fast", Effort: "high"}, c.Settings())
+	assert.Equal(t, []native.Settings{{PermissionMode: native.PermissionModeAsk, Effort: "high"}}, a.Applied())
+	got := rec.get()
+	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "fast", Effort: "high"}, got.settings[len(got.settings)-1])
+	// Only what was chosen is kept for the next agent, not the agent's own
+	// defaults.
+	assert.Equal(t, []native.Settings{{PermissionMode: native.PermissionModeAsk, Effort: "high"}}, got.chosen)
+
+	err = c.ApplySettings(context.Background(), native.Settings{Model: "huge"})
+	assert.ErrorIs(t, err, native.ErrInvalidSetting)
+	assert.Len(t, rec.get().chosen, 1, "a refused setting isn't chosen")
+	assert.Equal(t, "fast", c.Settings().Model)
+}
+
+func TestSettingsNeedTheCapability(t *testing.T) {
+	c, _, _ := start(t, nil, native.Config{})
+	assert.ErrorIs(t, c.ApplySettings(context.Background(), native.Settings{Model: "fast"}), native.ErrUnsupported)
+	_, err := c.SettingOptions(context.Background())
+	assert.ErrorIs(t, err, native.ErrUnsupported)
+	assert.Equal(t, native.Settings{}, c.Settings())
+}
+
+func TestSettingsWhileNoAgentRuns(t *testing.T) {
+	factory := &nativetest.Factory{Configure: func(a *nativetest.Adapter) {
+		configurable(native.Settings{Model: "fast"})(a)
+		a.StartBlock = make(chan struct{})
+	}}
+	c, _ := run(t, factory, native.Config{})
+	require.Eventually(t, inStart(factory, ""), 5*time.Second, time.Millisecond)
+	assert.ErrorIs(t, c.ApplySettings(context.Background(), native.Settings{Model: "plain"}), native.ErrNotStarted)
+	_, err := c.SettingOptions(context.Background())
+	assert.ErrorIs(t, err, native.ErrNotStarted)
+}
+
+func TestChosenSettingsOutliveTheAgent(t *testing.T) {
+	c, factory, _ := start(t, configurable(native.Settings{PermissionMode: native.PermissionModeBypass, Model: "fast", Effort: "low"}), native.Config{})
+	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{Model: "fast", Effort: "high"}))
+	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeAsk}))
+
+	require.NoError(t, c.Restart(context.Background()))
+	a := factory.Last()
+	require.Len(t, factory.Adapters(), 2)
+	// The model was the new agent's already; the effort, then the mode, are
+	// applied one at a time.
+	assert.Equal(t, []native.Settings{{Effort: "high"}, {PermissionMode: native.PermissionModeAsk}}, a.Applied())
+	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "fast", Effort: "high"}, c.Settings())
+}
+
+func TestRestoredSettingsAreApplied(t *testing.T) {
+	c, factory, rec := start(t, configurable(native.Settings{PermissionMode: native.PermissionModeBypass, Model: "fast", Effort: "low"}),
+		native.Config{Settings: native.Settings{Model: "plain", PermissionMode: native.PermissionModeAsk}})
+	assert.Equal(t, []native.Settings{{Model: "plain"}, {PermissionMode: native.PermissionModeAsk}}, factory.Last().Applied())
+	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "plain", Effort: "low"}, c.Settings())
+	assert.Empty(t, rec.get().chosen, "restoring doesn't change the choice")
+}
+
+func TestRestoredSettingTheAgentRefuses(t *testing.T) {
+	c, factory, rec := start(t, configurable(native.Settings{PermissionMode: native.PermissionModeBypass, Model: "fast"}),
+		native.Config{Settings: native.Settings{Model: "gone", PermissionMode: native.PermissionModeAsk}})
+	// The model is gone; the mode is still applied.
+	assert.Equal(t, []native.Settings{{PermissionMode: native.PermissionModeAsk}}, factory.Last().Applied())
+	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "fast"}, c.Settings())
+	errs := rec.get().errors
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "model gone")
+}
+
+func TestAgentChangesItsSettings(t *testing.T) {
+	c, factory, rec := start(t, configurable(native.Settings{PermissionMode: native.PermissionModeBypass, Model: "fast", Effort: "low"}), native.Config{})
+	a := factory.Last()
+	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeAsk}))
+
+	// An approved plan switched the agent to a mode of its own; the next
+	// agent starts in its default instead of being put back.
+	a.ChangeSettings(native.Settings{Model: "fast", Effort: "low"})
+	assert.Equal(t, native.Settings{Model: "fast", Effort: "low"}, c.Settings())
+	got := rec.get()
+	assert.Equal(t, native.Settings{}, got.chosen[len(got.chosen)-1])
+
+	// A setting nobody chose isn't recorded as chosen when the agent
+	// changes it.
+	a.ChangeSettings(native.Settings{Model: "plain"})
+	assert.Equal(t, native.Settings{Model: "plain"}, c.Settings())
+	assert.Len(t, rec.get().chosen, 2)
+}
+
+func TestApplySettingsFailure(t *testing.T) {
+	boom := errors.New("boom")
+	c, _, rec := start(t, func(a *nativetest.Adapter) {
+		configurable(native.Settings{Model: "fast"})(a)
+		a.SettingsErr = boom
+	}, native.Config{})
+	assert.ErrorIs(t, c.ApplySettings(context.Background(), native.Settings{Model: "plain"}), boom)
+	assert.Empty(t, rec.get().chosen)
+	assert.Equal(t, "fast", c.Settings().Model)
+}
+
+func TestSettingsLearnedWithTheOptions(t *testing.T) {
+	c, _, rec := start(t, func(a *nativetest.Adapter) {
+		configurable(native.Settings{Model: "fast"})(a)
+		a.Learned = native.Settings{Effort: "low"}
+	}, native.Config{})
+	assert.Empty(t, c.Settings().Effort)
+	_, err := c.SettingOptions(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, native.Settings{Model: "fast", Effort: "low"}, c.Settings())
+	got := rec.get()
+	assert.Equal(t, native.Settings{Model: "fast", Effort: "low"}, got.settings[len(got.settings)-1])
+	assert.Empty(t, got.chosen, "nobody chose it")
+}

@@ -116,6 +116,9 @@ type StatusChangeBody struct {
 	// LoginRequired is set while the agent can't work until the user logs
 	// in (native transport).
 	LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only."`
+	// Settings is set for agents whose settings can change (native
+	// transport).
+	Settings *native.Settings `json:"settings,omitempty" doc:"The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only."`
 }
 
 type ScreenUpdateBody struct {
@@ -169,6 +172,7 @@ type EventEmitter struct {
 	requestSeq          []uint64
 	capabilities        *native.Capabilities
 	loginRequired       *native.LoginRequired
+	settings            *native.Settings
 	sessionEvents       []jsonlwatcher.SessionEvent
 	nextSessionEventID  int
 	status              AgentStatus
@@ -211,6 +215,8 @@ type Persister interface {
 	SetSessionName(name string)
 	// SetSessionRef stores what resumes the agent's session.
 	SetSessionRef(ref string)
+	// SetSettings stores the settings chosen for the session.
+	SetSettings(settings native.Settings)
 	// Reset removes the conversation; epoch is the new epoch.
 	Reset(epoch string)
 }
@@ -515,7 +521,7 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 		RunID: e.runID, AgentType: e.agentType, Transport: e.transport, Version: version.Version,
 		TerminalPrompt: e.terminalPrompt, TerminalColumns: e.terminalColumns,
 		SessionName: e.sessionName, PendingRequests: pending, Capabilities: e.capabilities,
-		LoginRequired: e.loginRequired,
+		LoginRequired: e.loginRequired, Settings: e.settings,
 	}
 }
 
@@ -527,6 +533,17 @@ func (e *EventEmitter) SetCapabilities(caps native.Capabilities) {
 		return
 	}
 	e.capabilities = &caps
+	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+}
+
+// SetSettings records the agent's settings.
+func (e *EventEmitter) SetSettings(settings native.Settings) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.settings != nil && *e.settings == settings {
+		return
+	}
+	e.settings = &settings
 	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
 }
 

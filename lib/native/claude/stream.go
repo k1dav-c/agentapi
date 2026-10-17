@@ -43,6 +43,9 @@ type frame struct {
 	// Status is a string on task frames and null or a string on status
 	// frames.
 	Status json.RawMessage `json:"status"`
+	// PermissionMode is on init and status frames, Model on init frames.
+	PermissionMode string `json:"permissionMode"`
+	Model          string `json:"model"`
 
 	// result
 	IsError        bool            `json:"is_error"`

@@ -143,9 +143,10 @@ func TestClose(t *testing.T) {
 
 	t.Run("a write is blocked", func(t *testing.T) {
 		t.Parallel()
-		// The CLI reads the initialize request, then hangs.
+		// The CLI reads the initialize and get_settings requests, then
+		// hangs.
 		proc := newFakeProcess("")
-		proc.stallAfter = 1
+		proc.stallAfter = 2
 		a, _ := started(t, Config{StopTimeout: 10 * time.Millisecond}, proc)
 		turnErr := make(chan error, 1)
 		go func() { turnErr <- a.StartTurn(context.Background(), native.Input{Text: "hi"}) }()

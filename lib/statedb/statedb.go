@@ -64,6 +64,9 @@ const (
 	MetaSeq         = "seq"
 	MetaSessionRef  = "session_ref"
 	MetaSessionName = "session_name"
+	// MetaSettings holds the settings chosen for the session (JSON). A
+	// reset keeps them.
+	MetaSettings    = "settings"
 	MetaNextQueueID = "next_queue_id"
 	// metaClean is set while the file is closed cleanly; see Snapshot.Clean.
 	metaClean = "clean"
@@ -415,6 +418,29 @@ func (d *DB) SetSessionRef(ref string) { d.SetMeta(MetaSessionRef, ref) }
 
 // SetSessionName stores the name the agent gave the session.
 func (d *DB) SetSessionName(name string) { d.SetMeta(MetaSessionName, name) }
+
+// SetSettings stores the settings chosen for the session.
+func (d *DB) SetSettings(settings native.Settings) {
+	data, err := json.Marshal(settings)
+	if err != nil {
+		d.logger.Error("Failed to encode the settings", "error", err)
+		return
+	}
+	d.SetMeta(MetaSettings, string(data))
+}
+
+// Settings returns the stored settings chosen for the session.
+func (s Snapshot) Settings() (native.Settings, error) {
+	var settings native.Settings
+	data, ok := s.Meta[MetaSettings]
+	if !ok || data == "" {
+		return settings, nil
+	}
+	if err := json.Unmarshal([]byte(data), &settings); err != nil {
+		return native.Settings{}, fmt.Errorf("decode the stored settings: %w", err)
+	}
+	return settings, nil
+}
 
 // SetSeq stores the latest change sequence of epoch.
 func (d *DB) SetSeq(epoch string, seq uint64) {

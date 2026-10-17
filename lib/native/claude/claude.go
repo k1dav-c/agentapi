@@ -170,6 +170,13 @@ type Adapter struct {
 	controls   map[string]*control
 	requests   map[string]*pendingRequest
 	closing    bool
+	// mode is Claude Code's permission mode, model the value of the model
+	// option it runs and effort its reasoning effort; models are the
+	// models it offers. See settings.go.
+	mode   string
+	model  string
+	effort string
+	models []claudeModel
 
 	exited   chan struct{}
 	exitErr  error
@@ -177,7 +184,10 @@ type Adapter struct {
 	stopOnce sync.Once
 }
 
-var _ native.Adapter = (*Adapter)(nil)
+var (
+	_ native.Adapter      = (*Adapter)(nil)
+	_ native.Configurable = (*Adapter)(nil)
+)
 
 // control is a control request the adapter sent and the CLI hasn't
 // answered yet. A successful answer is handed to onResponse in the read
@@ -202,7 +212,7 @@ func newUUID() string {
 
 // Capabilities implements native.Adapter.
 func (a *Adapter) Capabilities() native.Capabilities {
-	return native.Capabilities{Steer: true, Interrupt: true, Resume: !a.args.noPersistence, Images: true}
+	return native.Capabilities{Steer: true, Interrupt: true, Resume: !a.args.noPersistence, Images: true, Settings: true}
 }
 
 // Start implements native.Adapter: it checks the login, starts the CLI and
@@ -254,11 +264,9 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		}
 		return fmt.Errorf("claude exited during startup: %w", exitErr)
 	}
-	var info struct {
-		Version        string `json:"claude_code_version"`
-		PermissionMode string `json:"current_permission_mode"`
-	}
+	var info initializeInfo
 	_ = json.Unmarshal(response, &info)
+	a.readSettings(ctx, info)
 	a.cfg.Logger.Info("Claude Code is ready", "version", info.Version, "permission_mode", info.PermissionMode)
 
 	a.mu.Lock()
@@ -727,7 +735,7 @@ func (a *Adapter) handleControlRequest(f *frame) {
 		a.refuse(f.RequestID, "AgentAPI could not read the permission request")
 		return
 	}
-	p := newPendingRequest(f.RequestID, r, a.args.bypass)
+	p := newPendingRequest(f.RequestID, r, a.args.allowBypass)
 	p.req.CreatedAt = a.cfg.Clock.Now()
 	a.mu.Lock()
 	a.requests[f.RequestID] = p
@@ -758,6 +766,9 @@ func (a *Adapter) handleSystem(f *frame) {
 		if f.SessionID != "" {
 			a.parser.sessionID = f.SessionID
 		}
+		if modeChanged, modelChanged := a.modeChanged(f.PermissionMode), a.modelRan(f.Model); modeChanged || modelChanged {
+			a.reportSettings()
+		}
 		a.mu.Lock()
 		prompt := a.prompt
 		a.prompt = ""
@@ -784,6 +795,12 @@ func (a *Adapter) handleSystem(f *frame) {
 			a.turnActivity()
 		case "idle":
 			a.endTurn()
+		}
+	case "status":
+		// Also sent when the permission mode changed: by a switch, or by
+		// an approved plan.
+		if a.modeChanged(f.PermissionMode) {
+			a.reportSettings()
 		}
 	case "session_title_changed":
 		if f.Title != "" {

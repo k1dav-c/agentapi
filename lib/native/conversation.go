@@ -31,6 +31,11 @@ type Observer interface {
 	SessionName(string)
 	SessionRef(string)
 	RequestUpdated(RequestState)
+	// Settings reports the agent's session settings when they change.
+	Settings(Settings)
+	// SettingsChosen reports the settings chosen for the session when they
+	// change: what to pass as Config.Settings to continue the session.
+	SettingsChosen(Settings)
 }
 
 type nopObserver struct{}
@@ -42,6 +47,8 @@ func (nopObserver) SessionEvents([]jsonlwatcher.SessionEvent) {}
 func (nopObserver) SessionName(string)                        {}
 func (nopObserver) SessionRef(string)                         {}
 func (nopObserver) RequestUpdated(RequestState)               {}
+func (nopObserver) Settings(Settings)                         {}
+func (nopObserver) SettingsChosen(Settings)                   {}
 
 // Config configures a Conversation.
 type Config struct {
@@ -63,6 +70,9 @@ type Config struct {
 	// LoginRetryInterval is how often the agent is started again while it
 	// waits for a login. Zero means five seconds.
 	LoginRetryInterval time.Duration
+	// Settings were chosen for the session earlier (restored after AgentAPI
+	// restarted). Every agent that starts gets them.
+	Settings Settings
 }
 
 const (
@@ -128,6 +138,12 @@ type Conversation struct {
 	// last started, so that while it waits for a login, a start doesn't show
 	// again what an earlier one showed.
 	startErrors map[string]bool
+	// settings are the agent's session settings, kept while no agent runs.
+	settings Settings
+	// chosen are the settings chosen through ApplySettings (or restored
+	// with Config.Settings), which every agent that starts gets; a setting
+	// the agent changes by itself is changed here too.
+	chosen Settings
 }
 
 // NewConversation creates a conversation. Nothing runs until Start.
@@ -159,6 +175,7 @@ func NewConversation(cfg Config) *Conversation {
 		exited:     make(chan error, 1),
 		messages:   slices.Clone(cfg.InitialMessages),
 		promptSent: len(cfg.InitialMessages) > 0,
+		chosen:     cfg.Settings,
 	}
 	for _, m := range c.messages {
 		c.nextID = max(c.nextID, m.Id+1)
@@ -172,6 +189,106 @@ func (c *Conversation) Capabilities() Capabilities {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.caps
+}
+
+// Settings reports the agent's session settings. While no agent runs, it
+// reports the last ones.
+func (c *Conversation) Settings() Settings {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.settings
+}
+
+// configurable returns the running agent if its settings can change.
+func (c *Conversation) configurable() (Configurable, int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.started || c.adapter == nil {
+		return nil, 0, ErrNotStarted
+	}
+	configurable, ok := c.adapter.(Configurable)
+	if !ok || !c.caps.Settings {
+		return nil, 0, ErrUnsupported
+	}
+	return configurable, c.generation, nil
+}
+
+// SettingOptions reports the values the settings can take.
+func (c *Conversation) SettingOptions(ctx context.Context) (SettingOptions, error) {
+	configurable, gen, err := c.configurable()
+	if err != nil {
+		return SettingOptions{}, err
+	}
+	options, err := configurable.SettingOptions(ctx)
+	if err != nil {
+		return SettingOptions{}, err
+	}
+	// What the agent learned with them can complete its settings, e.g. the
+	// effort a model uses by default.
+	settings := configurable.Settings()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if gen == c.generation {
+		c.setSettingsLocked(settings)
+	}
+	return options, nil
+}
+
+// ApplySettings changes the settings that are set in s. The agents that
+// replace this one (a restart, a new login) get them too.
+func (c *Conversation) ApplySettings(ctx context.Context, s Settings) error {
+	configurable, gen, err := c.configurable()
+	if err != nil {
+		return err
+	}
+	if err := configurable.ApplySettings(ctx, s); err != nil {
+		return err
+	}
+	settings := configurable.Settings()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if gen != c.generation {
+		return ErrNotStarted
+	}
+	c.chooseLocked(c.chosen.Merge(s))
+	c.setSettingsLocked(settings)
+	return nil
+}
+
+func (c *Conversation) chooseLocked(chosen Settings) {
+	if c.chosen != chosen {
+		c.chosen = chosen
+		c.cfg.Observer.SettingsChosen(chosen)
+	}
+}
+
+// setSettingsLocked records the agent's settings.
+func (c *Conversation) setSettingsLocked(settings Settings) {
+	if c.settings != settings {
+		c.settings = settings
+		c.cfg.Observer.Settings(settings)
+	}
+}
+
+// agentSettingsLocked records settings the agent changed by itself. A
+// chosen setting follows the agent, so the next agent isn't put back.
+func (c *Conversation) agentSettingsLocked(settings Settings) {
+	if c.started {
+		// An empty mode is one of the agent's own, an empty model or
+		// effort one the agent didn't report.
+		chosen := c.chosen
+		if chosen.PermissionMode != "" {
+			chosen.PermissionMode = settings.PermissionMode
+		}
+		if chosen.Model != "" && settings.Model != "" {
+			chosen.Model = settings.Model
+		}
+		if chosen.Effort != "" && settings.Effort != "" {
+			chosen.Effort = settings.Effort
+		}
+		c.chooseLocked(chosen)
+	}
+	c.setSettingsLocked(settings)
 }
 
 // SessionRef is the identifier that resumes the agent's session.

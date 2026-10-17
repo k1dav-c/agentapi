@@ -33,6 +33,13 @@ import (
 // persistentServer runs a native server over the state database at path.
 func persistentServer(t *testing.T, path, cwd string) (*nativeServer, *httpapi.Server, *statedb.DB, error) {
 	t.Helper()
+	return persistentServerWith(t, path, cwd, nil)
+}
+
+// persistentServerWith is persistentServer with configure adjusting each
+// new adapter.
+func persistentServerWith(t *testing.T, path, cwd string, configure func(*nativetest.Adapter)) (*nativeServer, *httpapi.Server, *statedb.DB, error) {
+	t.Helper()
 	db, err := statedb.Open(path, nil)
 	require.NoError(t, err)
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -41,6 +48,9 @@ func persistentServer(t *testing.T, path, cwd string) (*nativeServer, *httpapi.S
 		if a.ResumeRef == "" {
 			sessions++
 			a.Ref = "session-" + strconv.Itoa(sessions)
+		}
+		if configure != nil {
+			configure(a)
 		}
 	}}
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
@@ -416,4 +426,24 @@ func TestEvents_LastEventID(t *testing.T) {
 	ids = readEvents(t, n.url+"/events?sync=1&epoch="+status.Epoch, header, 2)
 	require.Len(t, ids, 2)
 	assert.Equal(t, "3", ids[1], "the replay end repeats the client's position")
+}
+
+func TestStateDB_RestoresSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	n, srv, db, err := persistentServerWith(t, path, "/work", configurableAdapter)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/settings", map[string]any{"permission_mode": "ask", "model": "plain"}, nil))
+	// A new conversation keeps the settings.
+	require.Equal(t, http.StatusOK, n.do(http.MethodDelete, "/messages", nil, nil))
+	require.Eventually(t, func() bool { return len(n.factory.Adapters()) == 2 }, 5*time.Second, 5*time.Millisecond)
+	stop(t, srv, db)
+
+	n, srv, db, err = persistentServerWith(t, path, "/work", configurableAdapter)
+	require.NoError(t, err)
+	defer stop(t, srv, db)
+	assert.Equal(t, []native.Settings{{Model: "plain"}, {PermissionMode: native.PermissionModeAsk}}, n.factory.Last().Applied())
+	var status httpapi.StatusChangeBody
+	n.do(http.MethodGet, "/status", nil, &status)
+	require.NotNil(t, status.Settings)
+	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "plain", Effort: "low"}, *status.Settings)
 }

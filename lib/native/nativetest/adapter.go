@@ -48,6 +48,16 @@ type Adapter struct {
 	OnStartTurn func(ctx context.Context)
 	OnSteer     func(ctx context.Context)
 	OnRespond   func(ctx context.Context)
+	// Options are what SettingOptions reports, and what ApplySettings
+	// checks against. Set Caps.Settings for the conversation to use them.
+	Options native.SettingOptions
+	// Current are the settings the agent starts with.
+	Current native.Settings
+	// Learned is merged into Current by SettingOptions, as an agent that
+	// learns with its options (Codex: a model's default effort) does.
+	Learned native.Settings
+	// SettingsErr is returned by ApplySettings.
+	SettingsErr error
 
 	mu         sync.Mutex
 	sink       native.Sink
@@ -55,13 +65,17 @@ type Adapter struct {
 	steers     []native.Input
 	interrupts int
 	responses  []Response
+	applied    []native.Settings
 	done       chan error
 	once       sync.Once
 	closed     bool
 	closing    chan struct{}
 }
 
-var _ native.Adapter = (*Adapter)(nil)
+var (
+	_ native.Adapter      = (*Adapter)(nil)
+	_ native.Configurable = (*Adapter)(nil)
+)
 
 // New returns an adapter that supports everything.
 func New() *Adapter {
@@ -156,6 +170,49 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 }
 
 func (a *Adapter) Capabilities() native.Capabilities { return a.Caps }
+
+func (a *Adapter) Settings() native.Settings {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.Current
+}
+
+func (a *Adapter) SettingOptions(context.Context) (native.SettingOptions, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Current = a.Current.Merge(a.Learned)
+	return a.Options, nil
+}
+
+func (a *Adapter) ApplySettings(_ context.Context, s native.Settings) error {
+	if a.SettingsErr != nil {
+		return a.SettingsErr
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.Options.Check(s, a.Current); err != nil {
+		return err
+	}
+	a.applied = append(a.applied, s)
+	a.Current = a.Current.Merge(s)
+	return nil
+}
+
+// ChangeSettings plays the agent changing its settings by itself.
+func (a *Adapter) ChangeSettings(s native.Settings) {
+	a.mu.Lock()
+	a.Current = s
+	sink := a.sink
+	a.mu.Unlock()
+	sink.(native.SettingsSink).SettingsChanged(s)
+}
+
+// Applied returns the recorded ApplySettings calls that succeeded.
+func (a *Adapter) Applied() []native.Settings {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]native.Settings(nil), a.applied...)
+}
 
 func (a *Adapter) Wait() error { return <-a.done }
 

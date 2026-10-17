@@ -47,6 +47,9 @@ func (o *observer) RequestUpdated(s native.RequestState) {
 	o.requests[s.ID] = s
 }
 
+func (o *observer) Settings(native.Settings)       {}
+func (o *observer) SettingsChosen(native.Settings) {}
+
 // replies returns the replies to the nth turn of each agent; every agent
 // counts its turns from one.
 func (o *observer) replies(n int) []jsonlwatcher.RichMessage {
@@ -100,7 +103,7 @@ func start(t *testing.T, clock quartz.Clock) (*native.Conversation, *observer) {
 	})
 	c.Start(ctx)
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
-	assert.Equal(t, native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true}, c.Capabilities())
+	assert.Equal(t, native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true}, c.Capabilities())
 	return c, obs
 }
 
@@ -252,4 +255,45 @@ func TestLogin(t *testing.T) {
 	obs.mu.Lock()
 	assert.Equal(t, native.RequestStatusResolved, obs.requests[req.ID].Status)
 	obs.mu.Unlock()
+}
+
+func TestSettings(t *testing.T) {
+	c, _ := start(t, nil)
+	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeBypass, Model: "demo-swift", Effort: "medium"}, c.Settings())
+	options, err := c.SettingOptions(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, native.PermissionModeValues, options.PermissionModes)
+	require.Len(t, options.Models, 3)
+
+	// A model without the current effort gets its default one, a model
+	// without efforts none.
+	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{Model: "demo-deep", Effort: "max"}))
+	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{Model: "demo-swift"}))
+	assert.Equal(t, "medium", c.Settings().Effort)
+	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{Model: "demo-plain"}))
+	assert.Empty(t, c.Settings().Effort)
+	assert.ErrorIs(t, c.ApplySettings(context.Background(), native.Settings{Effort: "low"}), native.ErrInvalidSetting)
+}
+
+func TestAskModeAsksBeforeTheFirstCommand(t *testing.T) {
+	c, _ := start(t, nil)
+	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeAsk}))
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "hello"}))
+	r := pending(t, c)
+	assert.Equal(t, "Run ls", r.Title)
+	_, err := c.Respond(context.Background(), r.ID, native.Response{OptionID: "allow"})
+	require.NoError(t, err)
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+}
+
+func TestPlanModeEndsInBypassOnceApproved(t *testing.T) {
+	c, _ := start(t, nil)
+	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModePlan}))
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "add a feature"}))
+	r := pending(t, c)
+	assert.Equal(t, native.RequestKindPlan, r.Kind)
+	_, err := c.Respond(context.Background(), r.ID, native.Response{OptionID: "approve"})
+	require.NoError(t, err)
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	assert.Equal(t, native.PermissionModeBypass, c.Settings().PermissionMode)
 }

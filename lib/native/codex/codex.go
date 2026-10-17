@@ -128,6 +128,12 @@ type Adapter struct {
 	// to stop it.
 	interrupting map[string]bool
 	requests     map[string]*pendingRequest
+	// settings are the thread's settings, with the changes in pending,
+	// which the next turn/start carries; models are app-server's models,
+	// nil until listed. See settings.go.
+	settings native.Settings
+	pending  native.Settings
+	models   []native.ModelOption
 
 	closeOnce sync.Once
 	// handled counts the messages the read loop has handled.
@@ -137,7 +143,10 @@ type Adapter struct {
 	loop loopState
 }
 
-var _ native.Adapter = (*Adapter)(nil)
+var (
+	_ native.Adapter      = (*Adapter)(nil)
+	_ native.Configurable = (*Adapter)(nil)
+)
 
 type call struct {
 	// onResult runs in the read loop before the caller sees the response,
@@ -195,7 +204,7 @@ func newAdapter(cfg Config, opts launchOptions, resumeRef string) *Adapter {
 
 // Capabilities implements native.Adapter.
 func (a *Adapter) Capabilities() native.Capabilities {
-	return native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true}
+	return native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true}
 }
 
 // command returns the app-server command line.
@@ -380,6 +389,7 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 	if !a.opts.summaryFromUser {
 		params.Summary = "detailed"
 	}
+	pending := a.takePending(&params)
 	_, err = a.call(ctx, "turn/start", params, func(result json.RawMessage, rpcErr *rpcError) {
 		if rpcErr != nil {
 			return
@@ -390,6 +400,7 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 		}
 	})
 	if err != nil {
+		a.restorePending(pending)
 		var rpcErr *rpcError
 		if errors.As(err, &rpcErr) && a.busy(rpcErr) {
 			return native.ErrTurnActive

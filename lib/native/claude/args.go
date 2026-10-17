@@ -92,7 +92,16 @@ type parsedArgs struct {
 	// chose one or to skip permissions.
 	mode string
 	// bypass: the session runs in bypassPermissions.
-	bypass       bool
+	bypass bool
+	// allowBypass: the session can switch to bypassPermissions, so
+	// --allow-dangerously-skip-permissions is added unless the user's
+	// arguments already allow it (skipPermissions, allowFlag). Claude Code
+	// refuses it as root outside a sandbox; see avoidRootBypass.
+	allowBypass     bool
+	skipPermissions bool
+	allowFlag       bool
+	// model is the user's --model.
+	model        string
 	thinking     bool
 	thinkingOff  bool
 	thinkingShow bool
@@ -129,7 +138,7 @@ func flagNames(name string) []string {
 }
 
 func parseArgs(args []string) (parsedArgs, error) {
-	p := parsedArgs{mode: modeBypass, bypass: true}
+	p := parsedArgs{mode: modeBypass, bypass: true, allowBypass: true}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -173,6 +182,11 @@ func parseArgs(args []string) (parsedArgs, error) {
 		case "--dangerously-skip-permissions":
 			p.mode = ""
 			p.bypass = true
+			p.skipPermissions = true
+		case "--allow-dangerously-skip-permissions":
+			p.allowFlag = true
+		case "--model":
+			p.model = value
 		case "--thinking":
 			p.thinking = true
 			p.thinkingOff = value == "disabled"
@@ -189,15 +203,19 @@ func parseArgs(args []string) (parsedArgs, error) {
 	return p, nil
 }
 
-// avoidRootBypass switches the mode the adapter adds to default where
-// Claude Code refuses bypassPermissions: run as root (uid 0) outside a
-// sandbox it knows of (IS_SANDBOX=1, CLAUDE_CODE_BUBBLEWRAP), it exits at
-// startup ("cannot be used with root/sudo privileges"). env is the
+// avoidRootBypass keeps bypassPermissions out of the session where Claude
+// Code refuses it: run as root (uid 0) outside a sandbox it knows of
+// (IS_SANDBOX=1, CLAUDE_CODE_BUBBLEWRAP), it exits at startup ("cannot be
+// used with root/sudo privileges"). The mode the adapter adds becomes
+// default, and the session can't switch to bypassPermissions. env is the
 // session's environment and uid the user it runs as. It reports whether
-// it switched.
+// it changed the mode.
 func (p *parsedArgs) avoidRootBypass(env []string, uid int) bool {
-	if p.mode != modeBypass || uid != 0 || envValue(env, "IS_SANDBOX") == "1" ||
-		envTrue(envValue(env, "CLAUDE_CODE_BUBBLEWRAP")) {
+	if uid != 0 || envValue(env, "IS_SANDBOX") == "1" || envTrue(envValue(env, "CLAUDE_CODE_BUBBLEWRAP")) {
+		return false
+	}
+	p.allowBypass = false
+	if p.mode != modeBypass {
 		return false
 	}
 	p.mode = modeDefault
@@ -242,6 +260,10 @@ func buildArgs(p parsedArgs, sessionID, resumeRef string) []string {
 		// --permission-mode default to approve them from the chat).
 		// Questions and plans still come as requests.
 		args = append(args, "--permission-mode", p.mode)
+	}
+	if p.allowBypass && !p.skipPermissions && !p.allowFlag {
+		// Without it, a switch to bypassPermissions is ignored.
+		args = append(args, "--allow-dangerously-skip-permissions")
 	}
 	if !p.thinking {
 		args = append(args, "--thinking", "adaptive")

@@ -475,3 +475,59 @@ func TestNative_LoginRequired(t *testing.T) {
 		return after.LoginRequired == nil && len(n.factory.Adapters()) == 2
 	}, 5*time.Second, 10*time.Millisecond)
 }
+
+var settingOptions = native.SettingOptions{
+	PermissionModes: []native.PermissionMode{native.PermissionModeBypass, native.PermissionModeAsk},
+	Models:          []native.ModelOption{{ID: "fast", Name: "Fast", Efforts: []string{"low", "high"}}, {ID: "plain", Name: "Plain"}},
+}
+
+func configurableAdapter(a *nativetest.Adapter) {
+	a.Caps.Settings = true
+	a.Options = settingOptions
+	a.Current = native.Settings{PermissionMode: native.PermissionModeBypass, Model: "fast", Effort: "low"}
+}
+
+func TestNative_Settings(t *testing.T) {
+	n := newNativeServer(t, configurableAdapter)
+	var got httpapi.SettingsResponse
+	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/settings", nil, &got.Body))
+	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeBypass, Model: "fast", Effort: "low"}, got.Body.Settings)
+	assert.Equal(t, settingOptions, got.Body.Options)
+
+	var status httpapi.StatusChangeBody
+	n.do(http.MethodGet, "/status", nil, &status)
+	require.NotNil(t, status.Capabilities)
+	assert.True(t, status.Capabilities.Settings)
+	require.NotNil(t, status.Settings)
+	assert.Equal(t, "fast", status.Settings.Model)
+
+	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/settings", map[string]any{"permission_mode": "ask", "effort": "high"}, &got.Body))
+	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "fast", Effort: "high"}, got.Body.Settings)
+	n.do(http.MethodGet, "/status", nil, &status)
+	assert.Equal(t, native.PermissionModeAsk, status.Settings.PermissionMode)
+	assert.Equal(t, []native.Settings{{PermissionMode: native.PermissionModeAsk, Effort: "high"}}, n.factory.Last().Applied())
+
+	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodPut, "/settings", map[string]any{"model": "huge"}, nil), "a model the agent doesn't offer")
+	assert.Equal(t, http.StatusUnprocessableEntity, n.do(http.MethodPut, "/settings", map[string]any{"permission_mode": "yolo"}, nil), "not a permission mode")
+}
+
+func TestNative_SettingsUnsupported(t *testing.T) {
+	n := newNativeServer(t, nil)
+	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodGet, "/settings", nil, nil))
+	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodPut, "/settings", map[string]any{"model": "fast"}, nil))
+	var status httpapi.StatusChangeBody
+	n.do(http.MethodGet, "/status", nil, &status)
+	assert.Nil(t, status.Settings)
+}
+
+func TestNative_SettingsWhileStarting(t *testing.T) {
+	block := make(chan struct{})
+	t.Cleanup(func() { close(block) })
+	n := startNativeServer(t, func(a *nativetest.Adapter) {
+		configurableAdapter(a)
+		a.StartBlock = block
+	})
+	require.Eventually(t, func() bool { return n.factory.Last() != nil && n.factory.Last().Sink() != nil }, 5*time.Second, 5*time.Millisecond)
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodGet, "/settings", nil, nil))
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodPut, "/settings", map[string]any{"model": "plain"}, nil))
+}

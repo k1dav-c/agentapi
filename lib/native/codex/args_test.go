@@ -14,28 +14,30 @@ func TestParseArgs(t *testing.T) {
 		want launchOptions
 		err  string
 	}{
-		{name: "none", want: launchOptions{}},
+		// Without a choice of the user's, the thread bypasses approvals and
+		// the sandbox.
+		{name: "none", want: launchOptions{approvalPolicy: "never", sandbox: "danger-full-access"}},
 		{
 			name: "config passes through",
 			args: []string{"-c", `sandbox_mode="danger-full-access"`, "--config=approval_policy=\"untrusted\"", "--enable", "x", "--disable=y", "--strict-config"},
-			want: launchOptions{appServerArgs: []string{"-c", `sandbox_mode="danger-full-access"`, "--config", `approval_policy="untrusted"`, "--enable", "x", "--disable", "y", "--strict-config"}},
+			want: launchOptions{appServerArgs: []string{"-c", `sandbox_mode="danger-full-access"`, "--config", `approval_policy="untrusted"`, "--enable", "x", "--disable", "y", "--strict-config"}, policyFromUser: true},
 		},
 		{
 			name: "reasoning summary chosen by the user",
 			args: []string{"-c", `model_reasoning_summary="concise"`},
-			want: launchOptions{appServerArgs: []string{"-c", `model_reasoning_summary="concise"`}, summaryFromUser: true},
+			want: launchOptions{appServerArgs: []string{"-c", `model_reasoning_summary="concise"`}, summaryFromUser: true, approvalPolicy: "never", sandbox: "danger-full-access"},
 		},
 		{
 			name: "another setting named like the reasoning summary",
 			args: []string{"-c", "model_reasoning_summary_format=experimental"},
-			want: launchOptions{appServerArgs: []string{"-c", "model_reasoning_summary_format=experimental"}},
+			want: launchOptions{appServerArgs: []string{"-c", "model_reasoning_summary_format=experimental"}, approvalPolicy: "never", sandbox: "danger-full-access"},
 		},
 		{
 			name: "attached short values",
 			args: []string{"-mgpt-6-luna", "-s=read-only", "-cmodel_reasoning_summary=none", "-C=sub"},
 			want: launchOptions{
 				model: "gpt-6-luna", sandbox: "read-only", cwd: "/work/sub",
-				appServerArgs: []string{"-c", "model_reasoning_summary=none"}, summaryFromUser: true,
+				appServerArgs: []string{"-c", "model_reasoning_summary=none"}, summaryFromUser: true, policyFromUser: true,
 			},
 		},
 		{name: "attached value of a rejected flag", args: []string{"-pwork"}, err: "codex flag -p is not supported with --transport native: profiles"},
@@ -45,16 +47,21 @@ func TestParseArgs(t *testing.T) {
 		{
 			name: "top-level flags become thread settings",
 			args: []string{"-m", "gpt-6-luna", "--sandbox=read-only", "-a", "on-request", "--cd", "/repo"},
-			want: launchOptions{model: "gpt-6-luna", sandbox: "read-only", approvalPolicy: "on-request", cwd: "/repo"},
+			want: launchOptions{model: "gpt-6-luna", sandbox: "read-only", approvalPolicy: "on-request", cwd: "/repo", policyFromUser: true},
 		},
-		{name: "relative cd", args: []string{"-C", "sub/dir"}, want: launchOptions{cwd: "/work/sub/dir"}},
+		{name: "relative cd", args: []string{"-C", "sub/dir"}, want: launchOptions{cwd: "/work/sub/dir", approvalPolicy: "never", sandbox: "danger-full-access"}},
+		{
+			name: "the reviewer is a policy",
+			args: []string{"-c", "approvals_reviewer=auto_review"},
+			want: launchOptions{appServerArgs: []string{"-c", "approvals_reviewer=auto_review"}, policyFromUser: true},
+		},
 		{
 			name: "bypass",
 			args: []string{"--dangerously-bypass-approvals-and-sandbox"},
-			want: launchOptions{approvalPolicy: "never", sandbox: "danger-full-access"},
+			want: launchOptions{approvalPolicy: "never", sandbox: "danger-full-access", policyFromUser: true},
 		},
-		{name: "app-server subcommand is allowed", args: []string{"app-server", "-c", "a=1"}, want: launchOptions{appServerArgs: []string{"-c", "a=1"}}},
-		{name: "terminal-only flags are dropped", args: []string{"--no-alt-screen", "--no-daemon"}, want: launchOptions{}},
+		{name: "app-server subcommand is allowed", args: []string{"app-server", "-c", "a=1"}, want: launchOptions{appServerArgs: []string{"-c", "a=1"}, approvalPolicy: "never", sandbox: "danger-full-access"}},
+		{name: "terminal-only flags are dropped", args: []string{"--no-alt-screen", "--no-daemon"}, want: launchOptions{approvalPolicy: "never", sandbox: "danger-full-access"}},
 		{name: "bad sandbox", args: []string{"-s", "open"}, err: `unknown sandbox mode "open"`},
 		{name: "bad policy", args: []string{"-a", "sometimes"}, err: `unknown approval policy "sometimes"`},
 		{name: "missing value", args: []string{"-m"}, err: "-m needs a value"},

@@ -107,6 +107,39 @@ type threadStartResponse struct {
 	Thread thread `json:"thread"`
 	Model  string `json:"model"`
 	CWD    string `json:"cwd"`
+	// ApprovalPolicy is a string, or an object for a granular policy.
+	ApprovalPolicy    json.RawMessage `json:"approvalPolicy"`
+	ApprovalsReviewer string          `json:"approvalsReviewer"`
+	Sandbox           sandboxPolicy   `json:"sandbox"`
+	ReasoningEffort   *string         `json:"reasoningEffort"`
+}
+
+// sandboxPolicy is SandboxPolicy, by its type: dangerFullAccess,
+// workspaceWrite, readOnly or externalSandbox; the other fields keep their
+// defaults.
+type sandboxPolicy struct {
+	Type string `json:"type"`
+}
+
+// modelListParams is ModelListParams.
+type modelListParams struct {
+	Cursor *string `json:"cursor,omitempty"`
+}
+
+// modelListResponse is ModelListResponse.
+type modelListResponse struct {
+	Data []struct {
+		ID                        string `json:"id"`
+		Model                     string `json:"model"`
+		DisplayName               string `json:"displayName"`
+		Description               string `json:"description"`
+		Hidden                    bool   `json:"hidden"`
+		DefaultReasoningEffort    string `json:"defaultReasoningEffort"`
+		SupportedReasoningEfforts []struct {
+			ReasoningEffort string `json:"reasoningEffort"`
+		} `json:"supportedReasoningEfforts"`
+	} `json:"data"`
+	NextCursor *string `json:"nextCursor"`
 }
 
 type threadNameUpdatedNotification struct {
@@ -139,6 +172,12 @@ type turnStartParams struct {
 	// Summary is "detailed" so reasoning summaries stream; model catalogues
 	// may default it to "none", also for resumed threads.
 	Summary string `json:"summary,omitempty"`
+	// Settings changes, for this turn and the ones after it.
+	ApprovalPolicy    string         `json:"approvalPolicy,omitempty"`
+	SandboxPolicy     *sandboxPolicy `json:"sandboxPolicy,omitempty"`
+	ApprovalsReviewer string         `json:"approvalsReviewer,omitempty"`
+	Model             string         `json:"model,omitempty"`
+	Effort            string         `json:"effort,omitempty"`
 }
 
 type turnSteerParams struct {

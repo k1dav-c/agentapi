@@ -163,6 +163,10 @@ type Adapter struct {
 	// interrupted is set by Interrupt and cleared when the turn ends.
 	interrupted bool
 	caps        native.Capabilities
+	// settings are Pi's model and thinking level; models are its models,
+	// nil until listed. See settings.go.
+	settings native.Settings
+	models   []native.ModelOption
 
 	// posted carries functions to run on the event loop (see post).
 	posted chan func()
@@ -179,7 +183,10 @@ type Adapter struct {
 	loop loopState
 }
 
-var _ native.Adapter = (*Adapter)(nil)
+var (
+	_ native.Adapter      = (*Adapter)(nil)
+	_ native.Configurable = (*Adapter)(nil)
+)
 
 // newAdapter creates an adapter that passes args (filtered by filterArgs)
 // on to Pi.
@@ -202,7 +209,7 @@ func newAdapter(cfg Config, args []string, resumeRef string, start procutil.Star
 		clock:            quartz.NewReal(),
 		pending:          make(map[string]*pendingCmd),
 		dialogs:          make(map[string]*dialog),
-		caps:             native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true},
+		caps:             native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true},
 		posted:           make(chan func()),
 		loopDone:         make(chan struct{}),
 		procDone:         make(chan struct{}),

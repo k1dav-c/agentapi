@@ -443,6 +443,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		nativeConversation = native.NewConversation(native.Config{
 			Factory:         config.NativeFactory,
 			ResumeRef:       restored.resumeRef,
+			Settings:        restored.settings,
 			InitialMessages: restored.messages,
 			InitialPrompt:   config.InitialPrompt,
 			Emitter:         emitter,
@@ -920,6 +921,7 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 	resp.Body.PendingRequests = snapshot.PendingRequests
 	resp.Body.Capabilities = snapshot.Capabilities
 	resp.Body.LoginRequired = snapshot.LoginRequired
+	resp.Body.Settings = snapshot.Settings
 	resp.Body.Epoch = s.emitter.Epoch()
 
 	return resp, nil

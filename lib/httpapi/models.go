@@ -96,6 +96,8 @@ type StatusResponse struct {
 		Capabilities *native.Capabilities `json:"capabilities,omitempty" doc:"Optional operations the agent supports. Native transport only."`
 		// See StatusChangeBody.LoginRequired.
 		LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only."`
+		// See StatusChangeBody.Settings.
+		Settings *native.Settings `json:"settings,omitempty" doc:"The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only."`
 		// Epoch lets a client resume /events without a cache.
 		Epoch string `json:"epoch" doc:"Identifies the current conversation state; pass it as epoch to /events?sync=1 (see session_sync)."`
 	}
@@ -198,6 +200,18 @@ type RequestResponse struct {
 type RespondRequest struct {
 	ID   string `path:"id" doc:"Request identifier."`
 	Body native.Response
+}
+
+// SettingsResponse is the agent's settings and the values they can take.
+type SettingsResponse struct {
+	Body struct {
+		Settings native.Settings       `json:"settings" doc:"Current settings; a setting the agent doesn't report is missing."`
+		Options  native.SettingOptions `json:"options" doc:"Values the settings can take."`
+	}
+}
+
+type UpdateSettingsRequest struct {
+	Body native.Settings
 }
 
 type InterruptResponse struct {

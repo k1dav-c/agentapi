@@ -50,6 +50,10 @@
             "description": "The agent's session can be resumed after AgentAPI restarts.",
             "type": "boolean"
           },
+          "settings": {
+            "description": "The permission mode, model and reasoning effort can be changed while the agent runs (GET and PUT /settings).",
+            "type": "boolean"
+          },
           "steer": {
             "description": "A message can be added to the turn the agent is working on.",
             "type": "boolean"
@@ -59,6 +63,7 @@
           "images",
           "interrupt",
           "resume",
+          "settings",
           "steer"
         ],
         "type": "object"
@@ -866,6 +871,40 @@
         ],
         "type": "object"
       },
+      "ModelOption": {
+        "additionalProperties": false,
+        "properties": {
+          "default_effort": {
+            "description": "Effort the model uses unless one is chosen.",
+            "type": "string"
+          },
+          "description": {
+            "description": "What the model is good at.",
+            "type": "string"
+          },
+          "efforts": {
+            "description": "Reasoning efforts the model supports, from the least to the most; empty when it has no choice of effort.",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "id": {
+            "description": "Value of the model setting that picks the model.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name to show.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
       "OptionKind": {
         "enum": [
           "allow",
@@ -896,6 +935,17 @@
           "request"
         ],
         "type": "object"
+      },
+      "PermissionMode": {
+        "enum": [
+          "ask",
+          "auto",
+          "bypass",
+          "plan"
+        ],
+        "example": "bypass",
+        "title": "PermissionMode",
+        "type": "string"
       },
       "ProfilesDocument": {
         "additionalProperties": false,
@@ -1719,6 +1769,82 @@
         ],
         "type": "object"
       },
+      "SettingOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "models": {
+            "description": "Models the agent can switch to.",
+            "items": {
+              "$ref": "#/components/schemas/ModelOption"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "permission_modes": {
+            "description": "Permission modes the agent can switch to; empty when it has none (Pi).",
+            "items": {
+              "$ref": "#/components/schemas/PermissionMode"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "models",
+          "permission_modes"
+        ],
+        "type": "object"
+      },
+      "Settings": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/Settings.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "effort": {
+            "description": "Reasoning effort: one of the efforts GET /settings lists for the model, e.g. low, medium or high.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Model: the id of one of the models GET /settings lists.",
+            "type": "string"
+          },
+          "permission_mode": {
+            "$ref": "#/components/schemas/PermissionMode",
+            "description": "bypass: tools run without asking; auto: the agent's own review decides what may run; ask: tool calls that need approval come as requests; plan: the agent proposes a plan before it changes anything. Missing while the agent runs in a mode of its own, e.g. Claude Code's acceptEdits."
+          }
+        },
+        "type": "object"
+      },
+      "SettingsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/SettingsResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/SettingOptions",
+            "description": "Values the settings can take."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/Settings",
+            "description": "Current settings; a setting the agent doesn't report is missing."
+          }
+        },
+        "required": [
+          "options",
+          "settings"
+        ],
+        "type": "object"
+      },
       "StatusChangeBody": {
         "additionalProperties": false,
         "properties": {
@@ -1760,6 +1886,10 @@
           "session_name": {
             "description": "Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it.",
             "type": "string"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/Settings",
+            "description": "The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only."
           },
           "status": {
             "$ref": "#/components/schemas/AgentStatus",
@@ -1843,6 +1973,10 @@
           "session_name": {
             "description": "Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it.",
             "type": "string"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/Settings",
+            "description": "The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only."
           },
           "status": {
             "$ref": "#/components/schemas/AgentStatus",
@@ -4133,6 +4267,122 @@
           }
         },
         "summary": "Get rich messages"
+      }
+    },
+    "/settings": {
+      "get": {
+        "description": "Returns the agent's permission mode, model and reasoning effort, and the values they can take. The current settings are also part of GET /status and `status_change` events. Native transport only, for agents with the settings capability; returns 409 while the agent restarts or waits for a login.",
+        "operationId": "get-settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Get the agent's settings"
+      },
+      "put": {
+        "description": "Changes the settings that are set in the body and leaves the others: `permission_mode` (bypass, auto, ask or plan, as the agent offers), `model` (one of the model ids GET /settings lists) and `effort` (one of the model's efforts). A change made during a turn may apply from the next one (Codex). The agent that replaces this one after a restart, a new login or an AgentAPI restart (with --state-db) gets the chosen settings too. Native transport only; returns 400 for a value a setting can't take and 409 while the agent restarts or waits for a login.",
+        "operationId": "put-settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Settings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Change the agent's settings"
       }
     },
     "/status": {

@@ -219,6 +219,7 @@ type recSink struct {
 	errors   []string
 	started  int
 	logins   []native.LoginRequired
+	settings []native.Settings
 }
 
 func newRecSink(t *testing.T) *recSink { return &recSink{t: t} }
@@ -299,6 +300,13 @@ func (s *recSink) LoginRequired(l native.LoginRequired) {
 	defer s.mu.Unlock()
 	s.logins = append(s.logins, l)
 	s.add("login_required")
+}
+
+func (s *recSink) SettingsChanged(settings native.Settings) {
+	defer s.enter()()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings = append(s.settings, settings)
 }
 
 func (s *recSink) Error(m string, _ st.ErrorLevel) {

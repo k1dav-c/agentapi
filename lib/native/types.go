@@ -70,6 +70,9 @@ type Capabilities struct {
 	Interrupt bool `json:"interrupt" doc:"The turn the agent is working on can be stopped."`
 	Resume    bool `json:"resume" doc:"The agent's session can be resumed after AgentAPI restarts."`
 	Images    bool `json:"images" doc:"Messages can carry images."`
+	// Settings: the session settings (permission mode, model, reasoning
+	// effort) can change while the agent runs; see Configurable.
+	Settings bool `json:"settings" doc:"The permission mode, model and reasoning effort can be changed while the agent runs (GET and PUT /settings)."`
 }
 
 // Image is an image attached to a message, read from a local file.

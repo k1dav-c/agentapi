@@ -183,7 +183,7 @@ func TestReplayPlan(t *testing.T) {
 		for _, o := range plans[0].Options {
 			ids = append(ids, o.ID)
 		}
-		assert.Equal(t, []string{"acceptEdits", "default", "deny"}, ids)
+		assert.Equal(t, []string{"bypassPermissions", "acceptEdits", "default", "deny"}, ids)
 		assert.Contains(t, plans[1].Detail, "docstring")
 
 		// The approval switched the mode for the session, as captured.

@@ -28,15 +28,13 @@ type promptResult struct {
 
 // sessionState is the data of a get_state response.
 type sessionState struct {
-	SessionID   string `json:"sessionId"`
-	SessionFile string `json:"sessionFile"`
-	SessionName string `json:"sessionName"`
-	IsStreaming bool   `json:"isStreaming"`
-	Model       *struct {
-		Provider string   `json:"provider"`
-		ID       string   `json:"id"`
-		Input    []string `json:"input"`
-	} `json:"model"`
+	SessionID   string   `json:"sessionId"`
+	SessionFile string   `json:"sessionFile"`
+	SessionName string   `json:"sessionName"`
+	IsStreaming bool     `json:"isStreaming"`
+	Model       *piModel `json:"model"`
+	// ThinkingLevel is one of thinkingLevels.
+	ThinkingLevel string `json:"thinkingLevel"`
 }
 
 // messageEvent is message_start, message_update and message_end.

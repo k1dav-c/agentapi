@@ -17,6 +17,8 @@ type restoredState struct {
 	messages []st.ConversationMessage
 	// resumeRef resumes the agent's session.
 	resumeRef string
+	// settings were chosen for the session.
+	settings native.Settings
 }
 
 // restoreState connects the state database to emitter, which stores its
@@ -69,8 +71,13 @@ func restoreState(config ServerConfig, emitter *EventEmitter, logger *slog.Logge
 		}
 	}
 	resumeRef := snap.Meta[statedb.MetaSessionRef]
+	settings, err := snap.Settings()
+	if err != nil {
+		// The agent starts with its own settings.
+		logger.Warn("Ignoring the stored settings", "error", err)
+	}
 	logger.Info("Restored conversation from the state database", "messages", len(state.Messages), "resume", resumeRef != "")
-	return restoredState{snapshot: snap, messages: state.Messages, resumeRef: resumeRef}, nil
+	return restoredState{snapshot: snap, messages: state.Messages, resumeRef: resumeRef, settings: settings}, nil
 }
 
 // checkRestoredIdentity refuses a state database written for another agent

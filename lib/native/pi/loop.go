@@ -165,7 +165,11 @@ func (a *Adapter) handleLine(line []byte) {
 		a.handleAgentStart()
 	case "agent_settled":
 		a.handleSettled()
-	case "agent_end", "turn_start", "turn_end", "queue_update", "thinking_level_changed",
+	case "thinking_level_changed":
+		if ev, ok := decodeRecord[thinkingLevelChanged](a, line, env.Type); ok {
+			a.handleThinkingLevel(ev.Level)
+		}
+	case "agent_end", "turn_start", "turn_end", "queue_update",
 		"compaction_start", "auto_retry_start", "bash_execution_update", "entry_appended",
 		"summarization_retry_scheduled", "summarization_retry_attempt_start", "summarization_retry_finished":
 		a.logger.Debug("Pi event", "type", env.Type)
@@ -315,6 +319,7 @@ func (a *Adapter) handleState(state sessionState) {
 		a.caps.Images = slices.Contains(m.Input, "image")
 		a.mu.Unlock()
 	}
+	a.setSettings(stateSettings(state), false)
 	a.logger.Info("Pi session open", "session", state.SessionID, "file", state.SessionFile)
 	if state.SessionID != "" {
 		a.loop.sink.SessionRef(state.SessionID)

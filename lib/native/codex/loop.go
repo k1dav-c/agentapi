@@ -50,6 +50,7 @@ func (s *loopState) threadOpened(resumed bool) func(json.RawMessage, *rpcError) 
 		th := resp.Thread
 		s.threadID = th.ID
 		s.model = resp.Model
+		s.a.threadSettings(resp)
 		s.a.mu.Lock()
 		s.a.threadID = th.ID
 		s.a.mu.Unlock()

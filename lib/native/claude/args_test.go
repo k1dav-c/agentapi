@@ -22,9 +22,11 @@ func TestArgs(t *testing.T) {
 		assert.Equal(t, []string{
 			"-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose",
 			"--include-partial-messages", "--replay-user-messages", "--permission-prompt-tool", "stdio",
-			"--session-id=sid", "--permission-mode", "bypassPermissions", "--thinking", "adaptive", "--thinking-display", "summarized",
+			"--session-id=sid", "--permission-mode", "bypassPermissions", "--allow-dangerously-skip-permissions",
+			"--thinking", "adaptive", "--thinking-display", "summarized",
 			"--model", "haiku", "--allowedTools", "Read", "Edit", "--mcp-config", "a.json",
 		}, args)
+		assert.Equal(t, "haiku", p.model)
 	})
 
 	t.Run("resume", func(t *testing.T) {
@@ -44,9 +46,11 @@ func TestArgs(t *testing.T) {
 			{args: []string{"--permission-mode", "acceptEdits"}, absent: []string{"bypassPermissions"}},
 			{args: []string{"--permission-mode=plan"}, absent: []string{"bypassPermissions"}},
 			{args: []string{"--permission-mode", "default"}, absent: []string{"bypassPermissions"}},
-			{args: []string{"--dangerously-skip-permissions"}, absent: []string{"--permission-mode"}},
+			{args: []string{"--dangerously-skip-permissions"}, absent: []string{"--permission-mode", "--allow-dangerously-skip-permissions"}},
 			// Allowing bypass as an option doesn't choose a mode.
 			{args: []string{"--allow-dangerously-skip-permissions"}, contains: []string{"bypassPermissions"}},
+			// A mode the user chose can still be switched to bypass.
+			{args: []string{"--permission-mode", "default"}, contains: []string{"--allow-dangerously-skip-permissions"}},
 			{args: []string{"--thinking", "disabled"}, absent: []string{"adaptive", "summarized"}},
 			{args: []string{"--max-thinking-tokens", "1000"}, absent: []string{"adaptive"}, contains: []string{"summarized"}},
 			{args: []string{"--thinking-display", "omitted"}, absent: []string{"summarized"}, contains: []string{"adaptive"}},
@@ -60,6 +64,7 @@ func TestArgs(t *testing.T) {
 			for _, a := range tc.contains {
 				assert.Contains(t, args, a, tc.args)
 			}
+			assert.LessOrEqual(t, strings.Count(strings.Join(args, " "), "--allow-dangerously-skip-permissions"), 1, tc.args)
 		}
 	})
 
@@ -191,17 +196,20 @@ func TestRootDefaultMode(t *testing.T) {
 		env  []string
 		args []string
 		// mode is the permission mode the adapter adds, if any.
-		mode   string
+		mode string
+		// bypass: the session can switch to bypassPermissions.
 		bypass bool
 		warns  bool
 	}{
 		{name: "user", uid: 1000, mode: "bypassPermissions", bypass: true},
+		{name: "user chose a mode", uid: 1000, args: []string{"--permission-mode", "acceptEdits"}, bypass: true},
 		{name: "root", uid: 0, mode: "default", warns: true},
 		{name: "root in a sandbox", uid: 0, env: []string{"IS_SANDBOX=1"}, mode: "bypassPermissions", bypass: true},
 		{name: "root in bubblewrap", uid: 0, env: []string{"CLAUDE_CODE_BUBBLEWRAP=true"}, mode: "bypassPermissions", bypass: true},
 		{name: "root with other values", uid: 0, env: []string{"IS_SANDBOX=true", "CLAUDE_CODE_BUBBLEWRAP=0"}, mode: "default", warns: true},
 		{name: "root chose a mode", uid: 0, args: []string{"--permission-mode", "acceptEdits"}},
-		{name: "root skips permissions", uid: 0, args: []string{"--dangerously-skip-permissions"}, bypass: true},
+		// Claude Code refuses it; that is its error to show.
+		{name: "root skips permissions", uid: 0, args: []string{"--dangerously-skip-permissions"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -224,9 +232,11 @@ func TestRootDefaultMode(t *testing.T) {
 					require.GreaterOrEqual(t, i, 0)
 					assert.Equal(t, tc.mode, args[i+1])
 				}
+				assert.Equal(t, tc.bypass, a.args.allowBypass)
+				assert.Equal(t, tc.bypass && !a.args.skipPermissions, slices.Contains(args, "--allow-dangerously-skip-permissions"))
 				// Approving a plan offers bypassPermissions only in a session
-				// that runs in it.
-				plan := newPendingRequest("r", canUseTool{ToolName: toolExitPlanMode, Input: []byte(`{"plan":"x"}`)}, a.args.bypass)
+				// that can switch to it.
+				plan := newPendingRequest("r", canUseTool{ToolName: toolExitPlanMode, Input: []byte(`{"plan":"x"}`)}, a.args.allowBypass)
 				assert.Equal(t, tc.bypass, plan.req.Options[0].ID == optionBypass)
 			}
 			// The warning says why and how to opt in, once.

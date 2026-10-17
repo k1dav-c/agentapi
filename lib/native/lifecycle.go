@@ -71,6 +71,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resumeRef string) er
 	}
 	// Adapters know what they support once they started.
 	caps := adapter.Capabilities()
+	settings := c.applyChosen(ctx, adapter, caps)
 	go func() { c.signalExit(gen, adapter.Wait()) }()
 	var prompt Input
 	if c.cfg.InitialPrompt != "" {
@@ -84,6 +85,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resumeRef string) er
 	}
 	c.started = true
 	c.caps = caps
+	c.setSettingsLocked(settings)
 	c.loginWaiting = false
 	c.startErrors = nil
 	if c.login != nil {
@@ -113,6 +115,51 @@ func (c *Conversation) launch(ctx context.Context, gen int, resumeRef string) er
 		}
 	}
 	return nil
+}
+
+// applyChosen gives a new adapter the settings chosen for the session, and
+// returns its settings. A setting it can't take is reported and left to
+// the agent.
+func (c *Conversation) applyChosen(ctx context.Context, adapter Adapter, caps Capabilities) Settings {
+	configurable, ok := adapter.(Configurable)
+	if !ok || !caps.Settings {
+		return Settings{}
+	}
+	c.mu.Lock()
+	chosen := c.chosen
+	c.mu.Unlock()
+	current := configurable.Settings()
+	// One at a time, so that one failure doesn't stop the others; the
+	// model goes first, as the effort depends on it.
+	for _, change := range []Settings{
+		{Model: chosen.Model},
+		{Effort: chosen.Effort},
+		{PermissionMode: chosen.PermissionMode},
+	} {
+		if change.IsZero() || current.Merge(change) == current {
+			continue
+		}
+		applyCtx, cancel := context.WithTimeout(ctx, sendTimeout)
+		err := configurable.ApplySettings(applyCtx, change)
+		cancel()
+		if err != nil {
+			c.cfg.Logger.Warn("Failed to restore a setting of the session", "setting", change, "error", err)
+			c.cfg.Emitter.EmitError(fmt.Sprintf("The agent didn't take the session's %s: %v", settingName(change), err), st.ErrorLevelWarning)
+		}
+	}
+	return configurable.Settings()
+}
+
+// settingName names the setting that is set in s.
+func settingName(s Settings) string {
+	switch {
+	case s.PermissionMode != "":
+		return fmt.Sprintf("permission mode %s", s.PermissionMode)
+	case s.Model != "":
+		return fmt.Sprintf("model %s", s.Model)
+	default:
+		return fmt.Sprintf("reasoning effort %s", s.Effort)
+	}
 }
 
 // current reports whether gen is the current generation.

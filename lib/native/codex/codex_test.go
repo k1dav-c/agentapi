@@ -48,8 +48,8 @@ func TestSimpleTextWithReasoning(t *testing.T) {
 	require.NoError(t, json.Unmarshal(h.sentParams("initialize"), &init))
 	assert.Equal(t, "agentapi", init.ClientInfo.Name)
 	assert.Contains(t, init.Capabilities.OptOutNotificationMethods, "turn/moderationMetadata")
-	assert.JSONEq(t, `{"cwd":"/work/scratch"}`, string(h.sentParams("thread/start")),
-		"policies come from Codex's config unless the command line sets them")
+	assert.JSONEq(t, `{"cwd":"/work/scratch","approvalPolicy":"never","sandbox":"danger-full-access"}`, string(h.sentParams("thread/start")),
+		"the thread bypasses approvals and the sandbox unless the command line chooses")
 	assert.JSONEq(t, `{"threadId":"01a143b3-8e2d-70d3-92ab-ba72fcfd3a3a","summary":"detailed",
 		"input":[{"type":"text","text":"How many integers n with 1 <= n <= 60 make n^2 + n + 41 composite? Work it out carefully, then answer with one short sentence. Do not run any commands."}]}`,
 		string(h.sentParams("turn/start")))
@@ -324,7 +324,7 @@ func TestResume(t *testing.T) {
 
 	h := runFixture(t, "resume_second", ref[0], nil)
 	s := h.rec.snapshot()
-	assert.JSONEq(t, `{"threadId":"01a143b5-be16-7d02-ac40-7722c0e95c6e","excludeTurns":true,"cwd":"/work/scratch"}`,
+	assert.JSONEq(t, `{"threadId":"01a143b5-be16-7d02-ac40-7722c0e95c6e","excludeTurns":true,"cwd":"/work/scratch","approvalPolicy":"never","sandbox":"danger-full-access"}`,
 		string(h.sentParams("thread/resume")))
 	assert.Equal(t, ref, s.refs)
 	assert.Equal(t, 1, s.started, "usage of the old turn doesn't start a turn")

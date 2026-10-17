@@ -62,6 +62,16 @@ func (o *nativeObserver) SessionRef(ref string) {
 
 func (o *nativeObserver) RequestUpdated(state native.RequestState) { o.emitter.EmitRequest(state) }
 
+func (o *nativeObserver) Settings(settings native.Settings) { o.emitter.SetSettings(settings) }
+
+// SettingsChosen is stored so that the agent gets the settings again after
+// AgentAPI restarts.
+func (o *nativeObserver) SettingsChosen(settings native.Settings) {
+	if o.persister != nil {
+		o.persister.SetSettings(settings)
+	}
+}
+
 // requireNative returns an error for transports other than native.
 func (s *Server) requireNative() error {
 	if s.native == nil {
@@ -251,6 +261,63 @@ func (s *Server) interrupt(ctx context.Context, _ *struct{}) (*InterruptResponse
 	return resp, nil
 }
 
+func (s *Server) getSettings(ctx context.Context, _ *struct{}) (*SettingsResponse, error) {
+	if err := s.requireNative(); err != nil {
+		return nil, err
+	}
+	return s.settingsResponse(ctx)
+}
+
+// updateSettings doesn't take s.mu: a change doesn't touch the queue, and
+// the conversation sorts out a restart that happens meanwhile.
+func (s *Server) updateSettings(ctx context.Context, input *UpdateSettingsRequest) (*SettingsResponse, error) {
+	if err := s.requireNative(); err != nil {
+		return nil, err
+	}
+	applyCtx, cancel := context.WithTimeout(ctx, nativeCallTimeout)
+	defer cancel()
+	if err := settingsError(s.native.ApplySettings(applyCtx, input.Body)); err != nil {
+		return nil, err
+	}
+	return s.settingsResponse(ctx)
+}
+
+func (s *Server) settingsResponse(ctx context.Context) (*SettingsResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, nativeCallTimeout)
+	defer cancel()
+	options, err := s.native.SettingOptions(ctx)
+	if err := settingsError(err); err != nil {
+		return nil, err
+	}
+	resp := &SettingsResponse{}
+	resp.Body.Settings = s.native.Settings()
+	resp.Body.Options = options
+	if resp.Body.Options.PermissionModes == nil {
+		resp.Body.Options.PermissionModes = []native.PermissionMode{}
+	}
+	if resp.Body.Options.Models == nil {
+		resp.Body.Options.Models = []native.ModelOption{}
+	}
+	return resp, nil
+}
+
+// settingsError turns an error about the settings into an HTTP error.
+func settingsError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, native.ErrUnsupported):
+		return huma.Error400BadRequest("this agent's settings can't be changed")
+	case errors.Is(err, native.ErrInvalidSetting):
+		return huma.Error400BadRequest(err.Error())
+	case errors.Is(err, native.ErrNotStarted):
+		// It restarts, or waits for a login.
+		return huma.Error409Conflict("the agent isn't running")
+	default:
+		return fmt.Errorf("failed to change the agent's settings: %w", err)
+	}
+}
+
 // steerQueuedMessage adds a queued message to the running turn instead of
 // waiting for the turn to end.
 func (s *Server) steerQueuedMessage(_ context.Context, input *SteerQueuedMessageRequest) (*QueueMutationResponse, error) {
@@ -360,6 +427,16 @@ func (s *Server) registerNativeRoutes() {
 	huma.Post(s.api, "/interrupt", s.interrupt, func(o *huma.Operation) {
 		o.Summary = "Interrupt the agent"
 		o.Description = "Stops the turn the agent is working on. Native transport only, for agents with the interrupt capability."
+		o.Errors = []int{400, 409}
+	})
+	huma.Get(s.api, "/settings", s.getSettings, func(o *huma.Operation) {
+		o.Summary = "Get the agent's settings"
+		o.Description = "Returns the agent's permission mode, model and reasoning effort, and the values they can take. The current settings are also part of GET /status and `status_change` events. Native transport only, for agents with the settings capability; returns 409 while the agent restarts or waits for a login."
+		o.Errors = []int{400, 409}
+	})
+	huma.Put(s.api, "/settings", s.updateSettings, func(o *huma.Operation) {
+		o.Summary = "Change the agent's settings"
+		o.Description = "Changes the settings that are set in the body and leaves the others: `permission_mode` (bypass, auto, ask or plan, as the agent offers), `model` (one of the model ids GET /settings lists) and `effort` (one of the model's efforts). A change made during a turn may apply from the next one (Codex). The agent that replaces this one after a restart, a new login or an AgentAPI restart (with --state-db) gets the chosen settings too. Native transport only; returns 400 for a value a setting can't take and 409 while the agent restarts or waits for a login."
 		o.Errors = []int{400, 409}
 	})
 	huma.Post(s.api, "/queue/{id}/steer", s.steerQueuedMessage, func(o *huma.Operation) {

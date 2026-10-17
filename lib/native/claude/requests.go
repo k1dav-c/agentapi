@@ -61,7 +61,7 @@ type askQuestion struct {
 }
 
 // newPendingRequest describes a can_use_tool request. bypass says the
-// session runs in bypassPermissions, so approving a plan can keep it.
+// session can switch to bypassPermissions, so approving a plan can too.
 func newPendingRequest(id string, r canUseTool, bypass bool) *pendingRequest {
 	p := &pendingRequest{raw: r, req: native.Request{
 		ID:        id,
@@ -163,7 +163,7 @@ func (p *pendingRequest) plan(bypass bool) {
 	p.req.Feedback = true
 	p.req.Options = nil
 	if bypass {
-		p.req.Options = append(p.req.Options, native.RequestOption{ID: optionBypass, Label: "Yes, and don't ask again", Description: "Back to bypassing permissions, as the session started.", Kind: native.OptionKindAllow})
+		p.req.Options = append(p.req.Options, native.RequestOption{ID: optionBypass, Label: "Yes, and bypass permissions", Description: "Tools run without asking.", Kind: native.OptionKindAllow})
 	}
 	p.req.Options = append(p.req.Options, []native.RequestOption{
 		{ID: optionAcceptEdits, Label: "Yes, and auto-accept edits", Kind: native.OptionKindAllow},
@@ -197,7 +197,7 @@ func (p *pendingRequest) response(resp native.Response) (map[string]any, error) 
 	if p.req.Kind != native.RequestKindQuestion &&
 		!slices.ContainsFunc(p.req.Options, func(o native.RequestOption) bool { return o.ID == resp.OptionID }) {
 		// Only what was offered: e.g. no bypassPermissions for the plan of
-		// a session that didn't start in it.
+		// a session that can't switch to it.
 		return nil, unknownOption
 	}
 

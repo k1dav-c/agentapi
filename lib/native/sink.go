@@ -11,7 +11,10 @@ type sink struct {
 	gen int
 }
 
-var _ Sink = (*sink)(nil)
+var (
+	_ Sink         = (*sink)(nil)
+	_ SettingsSink = (*sink)(nil)
+)
 
 // update runs f with the conversation locked, unless the sink's adapter was
 // replaced.
@@ -108,6 +111,10 @@ func (s *sink) LoginRequired(login LoginRequired) {
 			c.cfg.Emitter.EmitError(loginErrorText(login), st.ErrorLevelError)
 		}
 	})
+}
+
+func (s *sink) SettingsChanged(settings Settings) {
+	s.update(func(c *Conversation) { c.agentSettingsLocked(settings) })
 }
 
 func (s *sink) SessionName(name string) {

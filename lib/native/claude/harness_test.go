@@ -40,8 +40,12 @@ type fakeProcess struct {
 	exitOnStdinClose bool
 	exitOnTerminate  bool
 	// stallAfter makes the process stop reading its input after that many
-	// frames, like a hung CLI; zero reads everything.
+	// frames (get_settings included), like a hung CLI; zero reads
+	// everything.
 	stallAfter int
+	// settings answers get_settings, which the process answers by itself
+	// and leaves out of written: the applied settings, or none if empty.
+	settings string
 
 	mu         sync.Mutex
 	cond       *sync.Cond
@@ -67,20 +71,23 @@ func newFakeProcess(stderr string) *fakeProcess {
 
 func (p *fakeProcess) readStdin() {
 	reader := bufio.NewReader(p.stdinR)
+	read := 0
 	for {
 		line, err := reader.ReadBytes('\n')
-		if len(bytes.TrimSpace(line)) > 0 {
-			var msg map[string]any
-			if json.Unmarshal(line, &msg) == nil {
+		var msg map[string]any
+		if len(bytes.TrimSpace(line)) > 0 && json.Unmarshal(line, &msg) == nil {
+			read++
+			if msg["type"] == "control_request" && subtypeOf(msg) == "get_settings" {
+				p.answerGetSettings(msg)
+			} else {
 				p.mu.Lock()
 				p.written = append(p.written, msg)
 				p.cond.Broadcast()
-				stall := p.stallAfter > 0 && len(p.written) >= p.stallAfter
 				p.mu.Unlock()
-				if stall {
-					<-p.exited
-					return
-				}
+			}
+			if p.stallAfter > 0 && read >= p.stallAfter {
+				<-p.exited
+				return
 			}
 		}
 		if err != nil {
@@ -90,6 +97,18 @@ func (p *fakeProcess) readStdin() {
 			return
 		}
 	}
+}
+
+// answerGetSettings answers a get_settings request in the background.
+func (p *fakeProcess) answerGetSettings(request map[string]any) {
+	p.mu.Lock()
+	applied := p.settings
+	p.mu.Unlock()
+	if applied == "" {
+		applied = "{}"
+	}
+	line := fmt.Sprintf(`{"type":"control_response","response":{"subtype":"success","request_id":%q,"response":{"effective":{},"applied":%s}}}`+"\n", request["request_id"], applied)
+	go func() { _, _ = p.stdoutW.Write([]byte(line)) }()
 }
 
 func (p *fakeProcess) Stdin() io.WriteCloser { return fakeStdin{p} }
@@ -229,6 +248,7 @@ type recSink struct {
 	errs     []string
 	results  []native.TurnResult
 	logins   []native.LoginRequired
+	settings []native.Settings
 }
 
 func (s *recSink) enter() func() {
@@ -304,6 +324,13 @@ func (s *recSink) LoginRequired(l native.LoginRequired) {
 	s.logins = append(s.logins, l)
 	s.mu.Unlock()
 	s.record("login_required")
+}
+
+func (s *recSink) SettingsChanged(settings native.Settings) {
+	defer s.enter()()
+	s.mu.Lock()
+	s.settings = append(s.settings, settings)
+	s.mu.Unlock()
 }
 
 // loggedIn is an AuthStatus that reports a login.

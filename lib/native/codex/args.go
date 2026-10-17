@@ -22,7 +22,15 @@ type launchOptions struct {
 	// summaryFromUser is set when the user chose model_reasoning_summary
 	// with -c; then turns don't override it.
 	summaryFromUser bool
+	// policyFromUser is set when the user chose the approval policy, the
+	// sandbox or the approvals reviewer. Otherwise the thread starts in the
+	// bypass mode, the native transport's default: no approvals and no
+	// sandbox.
+	policyFromUser bool
 }
+
+// policyKeys are the config keys of the policies.
+var policyKeys = []string{"approval_policy", "sandbox_mode", "approvals_reviewer"}
 
 // passThroughFlags take a value and are accepted by `codex app-server`.
 var passThroughFlags = []string{"-c", "--config", "--enable", "--disable", "--code-mode-host"}
@@ -101,8 +109,10 @@ func parseArgs(args []string, cwd string) (launchOptions, error) {
 				return opts, err
 			}
 			key, _, _ := strings.Cut(v, "=")
-			if (name == "-c" || name == "--config") && strings.TrimSpace(key) == "model_reasoning_summary" {
-				opts.summaryFromUser = true
+			if name == "-c" || name == "--config" {
+				key = strings.TrimSpace(key)
+				opts.summaryFromUser = opts.summaryFromUser || key == "model_reasoning_summary"
+				opts.policyFromUser = opts.policyFromUser || slices.Contains(policyKeys, key)
 			}
 			opts.appServerArgs = append(opts.appServerArgs, name, v)
 		case slices.Contains(passThroughSwitches, name):
@@ -123,6 +133,7 @@ func parseArgs(args []string, cwd string) (launchOptions, error) {
 				return opts, fmt.Errorf("codex flag %s: unknown sandbox mode %q (one of %s)", name, v, strings.Join(sandboxModes, ", "))
 			}
 			opts.sandbox = v
+			opts.policyFromUser = true
 		case name == "-a" || name == "--ask-for-approval":
 			v, err := takeValue()
 			if err != nil {
@@ -132,6 +143,7 @@ func parseArgs(args []string, cwd string) (launchOptions, error) {
 				return opts, fmt.Errorf("codex flag %s: unknown approval policy %q (one of %s)", name, v, strings.Join(approvalPolicies, ", "))
 			}
 			opts.approvalPolicy = v
+			opts.policyFromUser = true
 		case name == "-C" || name == "--cd":
 			v, err := takeValue()
 			if err != nil {
@@ -144,6 +156,7 @@ func parseArgs(args []string, cwd string) (launchOptions, error) {
 		case name == "--dangerously-bypass-approvals-and-sandbox":
 			opts.approvalPolicy = "never"
 			opts.sandbox = "danger-full-access"
+			opts.policyFromUser = true
 		case rejectedFlags[name] != "":
 			return opts, fmt.Errorf("codex flag %s is not supported with --transport native: %s", name, rejectedFlags[name])
 		case strings.HasPrefix(arg, "-"):
@@ -152,6 +165,10 @@ func parseArgs(args []string, cwd string) (launchOptions, error) {
 			return opts, fmt.Errorf("codex argument %q is not supported with --transport native: "+
 				"subcommands and prompts can't be combined with app-server (use --initial-prompt for a first message)", arg)
 		}
+	}
+	if !opts.policyFromUser {
+		opts.approvalPolicy = "never"
+		opts.sandbox = "danger-full-access"
 	}
 	return opts, nil
 }

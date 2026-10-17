@@ -17,6 +17,10 @@
 //     start (Check again, POST /login/retry) still finds no login, so the
 //     conversation waits and tries again by itself; the start after that
 //     works.
+//
+// Its settings can change (native.Configurable): in the ask permission
+// mode every turn's first command needs approval, and in the plan mode
+// every turn ends with a plan, whose approval switches to bypass.
 package demo
 
 import (
@@ -26,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -93,18 +98,35 @@ type Adapter struct {
 	// same conversation.
 	prefix string
 
-	mu      sync.Mutex
-	sink    native.Sink
-	started bool
-	closed  bool
-	turns   int
-	active  *turn
-	nextReq int
-	done    chan struct{}
-	once    sync.Once
+	mu       sync.Mutex
+	sink     native.Sink
+	started  bool
+	closed   bool
+	turns    int
+	active   *turn
+	nextReq  int
+	settings native.Settings
+	done     chan struct{}
+	once     sync.Once
 }
 
-var _ native.Adapter = (*Adapter)(nil)
+var (
+	_ native.Adapter      = (*Adapter)(nil)
+	_ native.Configurable = (*Adapter)(nil)
+)
+
+// settingOptions are the demo's simulated models and modes.
+var settingOptions = native.SettingOptions{
+	PermissionModes: native.PermissionModeValues,
+	Models: []native.ModelOption{
+		{ID: "demo-swift", Name: "Swift", Description: "Quick answers", Efforts: []string{"low", "medium", "high"}, DefaultEffort: "medium"},
+		{ID: "demo-deep", Name: "Deep", Description: "Thinks longer about hard problems", Efforts: []string{"low", "medium", "high", "max"}, DefaultEffort: "high"},
+		{ID: "demo-plain", Name: "Plain", Description: "No reasoning"},
+	},
+}
+
+// defaultSettings are the settings a demo agent starts with.
+var defaultSettings = native.Settings{PermissionMode: native.PermissionModeBypass, Model: "demo-swift", Effort: "medium"}
 
 // Factory returns a native.Factory creating demo adapters. Its adapters
 // share the simulated login.
@@ -131,6 +153,7 @@ func newAdapter(resumeRef string, opts Options, login *loginState) *Adapter {
 		resumeRef: resumeRef,
 		login:     login,
 		prefix:    "demo-" + hex.EncodeToString(nonce[:]),
+		settings:  defaultSettings,
 		done:      make(chan struct{}),
 	}
 }
@@ -226,7 +249,33 @@ func (a *Adapter) Respond(_ context.Context, requestID string, response native.R
 }
 
 func (a *Adapter) Capabilities() native.Capabilities {
-	return native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true}
+	return native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true}
+}
+
+func (a *Adapter) Settings() native.Settings {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.settings
+}
+
+func (a *Adapter) SettingOptions(context.Context) (native.SettingOptions, error) {
+	return settingOptions, nil
+}
+
+// ApplySettings changes the settings. A new model without the current
+// effort gets its default one.
+func (a *Adapter) ApplySettings(_ context.Context, change native.Settings) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := settingOptions.Check(change, a.settings); err != nil {
+		return err
+	}
+	settings := a.settings.Merge(change)
+	if model, ok := settingOptions.Model(settings.Model); ok && change.Effort == "" && !slices.Contains(model.Efforts, settings.Effort) {
+		settings.Effort = model.DefaultEffort
+	}
+	a.settings = settings
+	return nil
 }
 
 func (a *Adapter) Wait() error {
@@ -320,12 +369,17 @@ func (a *Adapter) run(t *turn, n int, input native.Input) {
 
 func (s *script) play() error {
 	words := keywords(s.text)
+	mode := s.a.Settings().PermissionMode
 	work := &message{id: s.id("work"), role: "assistant", at: s.a.now()}
 	thinking := fmt.Sprintf("**Reading the request**\n\nThe user wrote %q. I'll look around the workspace first, then answer.", excerpt(s.text, 80))
 	if err := s.streamThinking(work, thinking); err != nil {
 		return err
 	}
-	if err := s.tool(work, "Bash", map[string]any{"command": "ls", "description": "List the workspace"}, nil); err != nil {
+	var ask decide
+	if mode == native.PermissionModeAsk {
+		ask = s.askToRun("ls", "Lists the workspace.")
+	}
+	if err := s.tool(work, "Bash", map[string]any{"command": "ls", "description": "List the workspace"}, ask); err != nil {
 		return err
 	}
 	if words["login"] {
@@ -345,7 +399,7 @@ func (s *script) play() error {
 			return err
 		}
 	}
-	if words["plan"] {
+	if words["plan"] || mode == native.PermissionModePlan {
 		if err := s.tool(work, "ExitPlanMode", map[string]any{"plan": demoPlan}, s.plan); err != nil {
 			return err
 		}
@@ -382,7 +436,7 @@ func (s *script) send(m *message) {
 		MessageID:  m.id,
 		Role:       m.role,
 		Content:    append([]jsonlwatcher.RichContentBlock(nil), m.blocks...),
-		Model:      "native-demo",
+		Model:      s.a.Settings().Model,
 		StopReason: m.stop,
 		Usage:      m.usage,
 		Timestamp:  m.at,
@@ -579,7 +633,47 @@ func (s *script) plan(toolUseID string, input json.RawMessage) (string, bool, er
 		return "The user rejected the plan" + feedback(resp.Text), true, nil
 	}
 	s.outcomes = append(s.outcomes, "You approved the plan")
+	s.leavePlanMode()
 	return "The user approved the plan.", false, nil
+}
+
+// leavePlanMode switches from the plan mode to bypass once a plan is
+// approved, as Claude Code does.
+func (s *script) leavePlanMode() {
+	s.a.mu.Lock()
+	if s.a.settings.PermissionMode != native.PermissionModePlan {
+		s.a.mu.Unlock()
+		return
+	}
+	s.a.settings.PermissionMode = native.PermissionModeBypass
+	settings := s.a.settings
+	s.a.mu.Unlock()
+	if sink, ok := s.sink.(native.SettingsSink); ok {
+		sink.SettingsChanged(settings)
+	}
+}
+
+// askToRun returns a decide that asks to run command, for the ask mode.
+func (s *script) askToRun(command, detail string) decide {
+	return func(toolUseID string, input json.RawMessage) (string, bool, error) {
+		resp, err := s.wait(native.Request{
+			Kind: native.RequestKindApproval, Title: "Run " + command, Detail: detail,
+			ToolName: "Bash", ToolUseID: toolUseID, Input: input,
+			Options: []native.RequestOption{
+				{ID: "allow", Label: "Allow", Kind: native.OptionKindAllow},
+				{ID: "deny", Label: "Deny", Kind: native.OptionKindDeny},
+			},
+			Feedback: true,
+		})
+		if err != nil {
+			return "", false, err
+		}
+		if resp.OptionID == "deny" {
+			s.outcomes = append(s.outcomes, "You **denied** `"+command+"`"+feedback(resp.Text))
+			return "The user denied this command" + feedback(resp.Text), true, nil
+		}
+		return demoListing, false, nil
+	}
 }
 
 func (s *script) reply(long bool) error {

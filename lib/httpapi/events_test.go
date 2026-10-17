@@ -427,6 +427,7 @@ func (p *recordingPersister) DeleteRequest(id string) {
 func (p *recordingPersister) SetSeq(epoch string, seq uint64) { p.epoch, p.seq = epoch, seq }
 func (p *recordingPersister) SetSessionName(string)           {}
 func (p *recordingPersister) SetSessionRef(string)            {}
+func (p *recordingPersister) SetSettings(native.Settings)     {}
 
 func (p *recordingPersister) Reset(epoch string) {
 	p.epoch = epoch
