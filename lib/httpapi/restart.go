@@ -60,6 +60,11 @@ func (s *Server) restartLocked(ctx context.Context) error {
 		// The new session starts with an empty conversation, so the old
 		// one goes, however the restart was asked for.
 		s.resetConversationLocked()
+		if s.updateAgent != nil {
+			// The new agent is the latest release; a failed update (e.g.
+			// offline) still restarts the installed one.
+			s.updateAgent(ctx)
+		}
 		// The conversation reports the new agent's status itself.
 		if err := s.native.Restart(ctx); err != nil {
 			s.emitter.SetLifecycle(LifecycleFailed)

@@ -285,6 +285,8 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	var acpResult *httpapi.SetupACPResult
 	var agentStartedAt time.Time
 	var adapterFactory native.Factory
+	// updateNative updates the CLI of a native agent before a restart.
+	var updateNative func(context.Context)
 	cwd, _ := os.Getwd()
 
 	if printOpenAPI {
@@ -312,6 +314,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		if err != nil {
 			return err
 		}
+		updateNative = agentUpdater(agentType, agent, logger)
 		transport = "native"
 	} else {
 		agentStartedAt = time.Now()
@@ -418,6 +421,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		APIToken:      apiToken,
 		Bind:          bind,
 		NativeFactory: adapterFactory,
+		UpdateAgent:   updateNative,
 		StateDB:       stateDB,
 		UploadDir:     uploadDir,
 		Webhook: httpapi.WebhookConfig{

@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/coder/agentapi/lib/native"
 )
 
 type MCPServerMutationBody struct {
@@ -77,6 +79,16 @@ func (s *Server) restartQuery(ctx context.Context, restart bool) (bool, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.native != nil {
+		// A native agent resumes its session: the conversation stays.
+		switch err := s.native.Reload(ctx); {
+		case errors.Is(err, native.ErrTurnActive):
+			return false, huma.Error409Conflict("MCP config was written, but the agent is working on a turn; restart it once the turn ends")
+		case err != nil:
+			return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", err)
+		}
+		return true, nil
+	}
 	if err := s.restartLocked(ctx); err != nil {
 		return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", err)
 	}

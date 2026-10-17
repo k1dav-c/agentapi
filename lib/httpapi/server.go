@@ -86,6 +86,7 @@ type Server struct {
 	handoffSuppressed  string
 	handoffReceipts    map[string]handoffReceipt
 	restartAgent       func(context.Context) (int, error)
+	updateAgent        func(context.Context)
 	jsonlWatcherCancel context.CancelFunc
 	jsonlParentCtx     context.Context // parent context for spawning new JSONL watchers
 	nextQueueID        int
@@ -169,6 +170,9 @@ type ServerConfig struct {
 	// TerminalColumns is the width of the agent's emulated terminal, 0 when
 	// the transport has no terminal.
 	TerminalColumns uint16
+	// UpdateAgent, if set, updates the native agent's CLI before a restart
+	// starts a new one (Codex, Pi).
+	UpdateAgent func(context.Context)
 	// RestartAgent replaces the PTY agent process while keeping AgentAPI alive.
 	// It returns the new process PID so the JSONL watcher can be restarted.
 	// It is nil for transports or server modes that cannot restart.
@@ -514,6 +518,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		transport:      config.Transport,
 		webhook:        webhook,
 		restartAgent:   config.RestartAgent,
+		updateAgent:    config.UpdateAgent,
 		jsonlParentCtx: ctx,
 		stateDB:        config.StateDB,
 		keepUploads:    config.UploadDir != "",

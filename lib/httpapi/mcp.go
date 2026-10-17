@@ -55,7 +55,7 @@ Important behavior:
 - Servers omitted from ` + "`servers`" + ` are removed; send ` + "`{\"servers\": {}}`" + ` to clear all MCP servers.
 - Values use the target agent's native format and are not validated by AgentAPI.
 - Without ` + "`restart=true`" + `, the new configuration is loaded by the next agent session.
-- With ` + "`restart=true`" + `, AgentAPI replaces the PTY child process immediately. AgentAPI and its HTTP/SSE endpoints stay online, but the agent's conversation context is reset.
+- With ` + "`restart=true`" + `, AgentAPI replaces the agent process immediately. AgentAPI and its HTTP/SSE endpoints stay online. A PTY agent starts over with an empty conversation; a native agent resumes its session, so the conversation stays (409 while it works on a turn).
 - Restart is unavailable in ACP, schema-only, and other server modes without a process supervisor; those requests return ` + "`400`" + `.
 - A missing or structurally invalid request body returns ` + "`422`" + `.
 - Claude, Codex and Pi are supported; other agent types return ` + "`404`" + `.`
@@ -237,7 +237,7 @@ func (s *Server) getMCP(
 func (s *Server) updateMCP(
 	ctx context.Context,
 	input *struct {
-		Restart bool `query:"restart" default:"false" doc:"Restart the agent after writing the config so changes apply immediately. The conversation context is reset; AgentAPI stays online. Supported for supervised PTY sessions and the native transport."`
+		Restart bool `query:"restart" default:"false" doc:"Restart the agent after writing the config so changes apply immediately; AgentAPI stays online. A PTY agent's conversation is reset; a native agent resumes its session (409 while it works on a turn). Supported for supervised PTY sessions and the native transport."`
 		Body    MCPUpdateRequestBody
 	},
 ) (*MCPUpdateResponse, error) {

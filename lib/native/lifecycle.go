@@ -239,6 +239,32 @@ func (c *Conversation) Restart(ctx context.Context) error {
 	}
 }
 
+// Reload replaces the agent with a new one that resumes the session, so the
+// conversation goes on while what the agent reads when it starts (its MCP
+// servers, its settings files) is read again. It returns like Restart. It
+// returns ErrTurnActive while the agent works on a turn, which a reload
+// would stop.
+func (c *Conversation) Reload(ctx context.Context) error {
+	c.mu.Lock()
+	if c.turnActive {
+		c.mu.Unlock()
+		return ErrTurnActive
+	}
+	old := c.retireAdapterLocked()
+	gen, ref, runCtx := c.generation, c.sessionRef, c.ctx
+	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
+	c.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+	select {
+	case err := <-c.launchAsync(runCtx, gen, ref):
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // Close stops the agent. The exit is not reported on Exited.
 func (c *Conversation) Close() error {
 	c.mu.Lock()

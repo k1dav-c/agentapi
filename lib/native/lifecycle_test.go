@@ -210,3 +210,24 @@ func TestStartFailure(t *testing.T) {
 	}
 	assert.Equal(t, []string{"Failed to start the agent: no login"}, rec.get().errors)
 }
+
+func TestReloadResumesTheSession(t *testing.T) {
+	c, factory, _ := start(t, func(a *nativetest.Adapter) {
+		if a.ResumeRef == "" {
+			a.Ref = "session-1"
+		}
+	}, native.Config{})
+	first := factory.Last()
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
+	assert.ErrorIs(t, c.Reload(context.Background()), native.ErrTurnActive, "a reload would stop the turn")
+	first.Sink().RichMessage(text("m1", "reply"))
+	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+
+	require.NoError(t, c.Reload(context.Background()))
+	second := factory.Last()
+	assert.NotSame(t, first, second)
+	assert.True(t, first.Closed())
+	assert.Equal(t, "session-1", second.ResumeRef, "the new agent resumes the session")
+	assert.Len(t, c.Messages(), 2, "the conversation stays")
+	assert.True(t, c.Idle())
+}

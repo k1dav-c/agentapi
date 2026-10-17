@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -547,4 +548,69 @@ func TestNative_Usage(t *testing.T) {
 	require.NotNil(t, status.Usage)
 	assert.Equal(t, 41000, status.Usage.Context.Used)
 	assert.Equal(t, "Weekly limit", status.Usage.RateLimits[0].Label)
+}
+
+func TestNative_RestartUpdatesTheAgentFirst(t *testing.T) {
+	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
+	var mu sync.Mutex
+	var steps []string
+	factory := &nativetest.Factory{Configure: func(*nativetest.Adapter) {
+		mu.Lock()
+		steps = append(steps, "start")
+		mu.Unlock()
+	}}
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeCodex,
+		Transport:      httpapi.TransportNative,
+		NativeFactory:  factory.New,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		UpdateAgent: func(context.Context) {
+			mu.Lock()
+			steps = append(steps, "update")
+			mu.Unlock()
+		},
+	})
+	require.NoError(t, err)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(func() {
+		ts.Close()
+		_ = srv.Stop(context.Background())
+		cancel()
+	})
+	n := &nativeServer{t: t, url: ts.URL, factory: factory}
+	require.Eventually(t, func() bool { return len(factory.Adapters()) == 1 }, 5*time.Second, 5*time.Millisecond)
+	require.Equal(t, http.StatusOK, n.do(http.MethodDelete, "/messages", nil, nil))
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"start", "update", "start"}, steps, "only a restart updates, before the new agent starts")
+}
+
+func TestNative_MCPRestartResumes(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	n := newNativeServer(t, func(a *nativetest.Adapter) {
+		if a.ResumeRef == "" {
+			a.Ref = "session-1"
+		}
+	})
+	n.send("hello", "")
+	first := n.factory.Last()
+	// A turn runs: the agent can't restart now.
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodPut, "/mcp?restart=true", map[string]any{"servers": map[string]any{}}, nil))
+	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+
+	var resp struct {
+		Restarted bool `json:"restarted"`
+	}
+	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/mcp?restart=true", map[string]any{"servers": map[string]any{}}, &resp))
+	assert.True(t, resp.Restarted)
+	require.Len(t, n.factory.Adapters(), 2)
+	assert.Equal(t, "session-1", n.factory.Last().ResumeRef)
+	var msgs struct {
+		Messages []httpapi.Message `json:"messages"`
+	}
+	n.do(http.MethodGet, "/messages", nil, &msgs)
+	assert.Len(t, msgs.Messages, 1, "the conversation stays")
 }

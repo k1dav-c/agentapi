@@ -185,9 +185,9 @@ func TestStateDB_RestartStartsFresh(t *testing.T) {
 	assert.Empty(t, n.requests(), "the old session's request was not stored again")
 }
 
-// Restarting the agent to apply an MCP change starts a new session too, so
-// the conversation is cleared as with DELETE /messages.
-func TestStateDB_MCPRestartStartsFresh(t *testing.T) {
+// Restarting the agent to apply an MCP change resumes its session: the
+// conversation stays, also across an AgentAPI restart.
+func TestStateDB_MCPRestartResumes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.db")
 	n, srv, db, err := persistentServer(t, path, dir)
@@ -195,10 +195,7 @@ func TestStateDB_MCPRestartStartsFresh(t *testing.T) {
 	a := n.factory.Last()
 	n.send("hello", "")
 	a.Sink().RichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "text", Text: "Hi"}}})
-	a.Sink().SessionEvents([]jsonlwatcher.SessionEvent{{Kind: "text"}})
-	a.Sink().RequestOpened(approval("perm"))
-	_, queued := n.send("next task", "")
-	require.True(t, queued.Queued)
+	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
 	epoch := n.epoch()
 
 	var res struct {
@@ -206,36 +203,25 @@ func TestStateDB_MCPRestartStartsFresh(t *testing.T) {
 	}
 	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/mcp?restart=true", map[string]any{"servers": map[string]any{}}, &res))
 	require.True(t, res.Restarted)
-	assert.NotEqual(t, epoch, n.epoch(), "clients drop the old conversation")
-	assertEmptyConversation(t, n)
-	assert.Empty(t, n.queue())
+	assert.Equal(t, "session-1", n.factory.Last().ResumeRef)
+	assert.Equal(t, epoch, n.epoch(), "clients keep the conversation")
+	assertMessages(t, n, 2)
 	stop(t, srv, db)
 
 	n, srv, db, err = persistentServer(t, path, dir)
 	require.NoError(t, err)
 	defer stop(t, srv, db)
-	assert.Equal(t, "session-2", n.factory.Last().ResumeRef, "the session started by the restart is resumed")
-	assertEmptyConversation(t, n)
+	assert.Equal(t, "session-1", n.factory.Last().ResumeRef)
+	assertMessages(t, n, 2)
 }
 
-func assertEmptyConversation(t *testing.T, n *nativeServer) {
+func assertMessages(t *testing.T, n *nativeServer, count int) {
 	t.Helper()
 	var msgs struct {
 		Messages []httpapi.Message `json:"messages"`
 	}
 	n.do(http.MethodGet, "/messages", nil, &msgs)
-	assert.Empty(t, msgs.Messages)
-	var rich struct {
-		Messages []jsonlwatcher.RichMessage `json:"messages"`
-	}
-	n.do(http.MethodGet, "/rich-messages", nil, &rich)
-	assert.Empty(t, rich.Messages)
-	var timeline struct {
-		Events []jsonlwatcher.SessionEvent `json:"events"`
-	}
-	n.do(http.MethodGet, "/timeline", nil, &timeline)
-	assert.Empty(t, timeline.Events)
-	assert.Empty(t, n.requests())
+	assert.Len(t, msgs.Messages, count)
 }
 
 // After a crash the changes of the last moments may be missing from the

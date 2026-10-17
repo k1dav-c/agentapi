@@ -57,7 +57,10 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     saveMCPProfile,
     deleteMCPProfile,
     applyMCPProfile,
+    transport,
   } = useChat();
+  // A native agent resumes its session when it restarts for an MCP change.
+  const restartKeepsConversation = transport === "native";
   const fileViewer = useFileViewer();
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("index");
@@ -272,8 +275,8 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
           ? "The agent restarted and is loading the new configuration."
           : "Changes apply when the agent starts its next session.",
       });
-    } catch {
-      toast.error("Could not update MCP servers");
+    } catch (error) {
+      toast.error("Could not update MCP servers", {description: error instanceof Error ? error.message : undefined});
     } finally {
       setMCPSaving(false);
     }
@@ -524,8 +527,9 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                       Restart agent after saving
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                      Applies the MCP configuration immediately, but resets the
-                      agent&apos;s current conversation context.
+                      {restartKeepsConversation
+                        ? "Applies the MCP configuration immediately: the agent restarts and resumes its session, so the conversation stays. Not while it works on a turn."
+                        : "Applies the MCP configuration immediately, but resets the agent's current conversation context."}
                     </span>
                   </span>
                 </label>
