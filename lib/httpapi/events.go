@@ -122,6 +122,8 @@ type StatusChangeBody struct {
 	Settings *native.Settings `json:"settings,omitempty" doc:"The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only."`
 	// Usage is set once the agent reports it (native transport).
 	Usage *native.AgentUsage `json:"usage,omitempty" doc:"How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only."`
+	// Terminal says whether GET /terminal has a shell.
+	Terminal bool `json:"terminal,omitempty" doc:"A shell terminal in the agent's working directory is available at GET /terminal. Native transport only."`
 }
 
 type ScreenUpdateBody struct {
@@ -177,6 +179,7 @@ type EventEmitter struct {
 	loginRequired       *native.LoginRequired
 	settings            *native.Settings
 	usage               *native.AgentUsage
+	terminal            bool
 	sessionEvents       []jsonlwatcher.SessionEvent
 	nextSessionEventID  int
 	status              AgentStatus
@@ -278,6 +281,11 @@ func WithAgentType(agentType mf.AgentType) EventEmitterOption {
 // WithTransport sets the transport reported in status updates.
 func WithTransport(transport Transport) EventEmitterOption {
 	return func(e *EventEmitter) { e.transport = transport }
+}
+
+// WithTerminal reports in status updates that GET /terminal has a shell.
+func WithTerminal() EventEmitterOption {
+	return func(e *EventEmitter) { e.terminal = true }
 }
 
 // WithTerminalColumns sets the width of the agent's terminal reported in
@@ -526,6 +534,7 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 		TerminalPrompt: e.terminalPrompt, TerminalColumns: e.terminalColumns,
 		SessionName: e.sessionName, PendingRequests: pending, Capabilities: e.capabilities,
 		LoginRequired: e.loginRequired, Settings: e.settings, Usage: e.usage,
+		Terminal: e.terminal,
 	}
 }
 

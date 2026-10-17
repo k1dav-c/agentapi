@@ -150,6 +150,8 @@ interface StatusChangeEvent {
   settings?: AgentSettings;
   // Native agents, once they report it.
   usage?: AgentUsage;
+  // A shell terminal is available (native transport).
+  terminal?: boolean;
 }
 
 interface ErrorEventData {
@@ -239,6 +241,11 @@ interface ChatContextValue {
   // How full the context window is and the account's rate limits, as the
   // agent last reported them (native transport); null until it does.
   agentUsage: AgentUsage | null;
+  // Whether the server offers a shell terminal (native transport, GET
+  // /terminal), and typing into and resizing it.
+  terminalAvailable: boolean;
+  terminalInput: (data: string) => Promise<void>;
+  terminalResize: (cols: number, rows: number) => Promise<void>;
   // The agent is starting (lifecycle "starting"): there is no turn yet, and
   // while it finds no login AgentAPI starts it again by itself.
   agentStarting: boolean;
@@ -376,6 +383,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [agentSettings, setAgentSettings] = useState<AgentSettings | null>(null);
   const [agentUsage, setAgentUsage] = useState<AgentUsage | null>(null);
+  const [terminalAvailable, setTerminalAvailable] = useState(false);
   const [loginRequired, setLoginRequiredState] = useState<LoginRequired | null>(null);
   // The login as the event handlers see it, to skip errors the card shows.
   const loginRef = useRef<LoginRequired | null>(null);
@@ -777,6 +785,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         setCapabilities(data.capabilities ?? null);
         setAgentSettings(data.settings ?? null);
         setAgentUsage(data.usage ?? null);
+        setTerminalAvailable(data.terminal ?? false);
         setLoginRequired(parseLoginRequired(data.login_required));
         setLifecycle(data.lifecycle ?? "");
         // The transport decides whether the terminal (TTY mode, raw keys)
@@ -1170,6 +1179,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
         loginRequired,
         agentSettings,
         agentUsage,
+        terminalAvailable,
+        terminalInput: api.terminalInput,
+        terminalResize: api.terminalResize,
         getSettings: api.getSettings,
         updateSettings: async (change: AgentSettings) => {
           const result = await api.updateSettings(change);

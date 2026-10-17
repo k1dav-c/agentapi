@@ -192,6 +192,15 @@ export function createChatAPI(baseURL: string) {
       return jsonRequest("/settings", {method: "PUT", body: change, fallback: "Failed to change the agent's settings"});
     },
 
+    // Types keys into the native transport's terminal.
+    async terminalInput(data: string): Promise<void> {
+      await jsonRequest("/terminal/input", {method: "POST", body: {data}, fallback: "Failed to type into the terminal"});
+    },
+
+    async terminalResize(cols: number, rows: number): Promise<void> {
+      await jsonRequest("/terminal/resize", {method: "POST", body: {cols, rows}, fallback: "Failed to resize the terminal"});
+    },
+
     getMCP(): Promise<MCPConfig> {
       return jsonRequest("/mcp", {fallback: "MCP config management is unavailable"});
     },

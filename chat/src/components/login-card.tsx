@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { KeyRound, RefreshCw } from "lucide-react";
+import { KeyRound, RefreshCw, TerminalSquare } from "lucide-react";
 import { useChat } from "./chat-provider";
+import { Button } from "./ui/button";
 import { CardStatus, CommandBlock, DecisionCardShell, MarkdownDetail, PrimaryButton } from "./decision-card";
 import { getErrorMessage } from "@/lib/error-utils";
 import { loginNote, loginTitle, loginWhere } from "@/lib/login";
@@ -14,7 +15,8 @@ const CHECKING_MS = 5000;
 // The agent can't work until someone logs it in (native transport). The
 // login happens in a terminal on the machine AgentAPI runs on, so the card
 // says what to run and where, docked above the composer like a request.
-export function LoginCard() {
+// onRunInTerminal, if set, runs the command in the server's terminal.
+export function LoginCard({ onRunInTerminal }: { onRunInTerminal?: (command: string) => void }) {
   const { loginRequired: login, agentStarting, retryLogin } = useChat();
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
@@ -39,6 +41,13 @@ export function LoginCard() {
     }
   };
 
+  const checkAgain = (
+    <>
+      <RefreshCw className={`size-3.5 ${checking ? "animate-spin" : ""}`} />
+      {checking ? "Checking…" : "Check again"}
+    </>
+  );
+
   return (
     <DecisionCardShell
       data-login-required
@@ -48,11 +57,22 @@ export function LoginCard() {
       description={login.message}
       footer={
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3.5 pb-3 pt-2">
-          <PrimaryButton onClick={() => void check()} disabled={checking} className="flex min-h-9 items-center gap-1.5 px-3">
-            <RefreshCw className={`size-3.5 ${checking ? "animate-spin" : ""}`} />
-            {checking ? "Checking…" : "Check again"}
-          </PrimaryButton>
-          <CardStatus className="min-w-0 flex-1 text-[11.5px]" status={loginNote(agentStarting)} error={error} />
+          {onRunInTerminal ? (
+            <>
+              <PrimaryButton onClick={() => onRunInTerminal(login.command)} className="flex min-h-9 items-center gap-1.5 px-3" data-run-in-terminal>
+                <TerminalSquare className="size-3.5" />
+                Run in terminal
+              </PrimaryButton>
+              <Button type="button" variant="outline" size="sm" onClick={() => void check()} disabled={checking} className="min-h-9 gap-1.5 px-3 text-xs">
+                {checkAgain}
+              </Button>
+            </>
+          ) : (
+            <PrimaryButton onClick={() => void check()} disabled={checking} className="flex min-h-9 items-center gap-1.5 px-3">
+              {checkAgain}
+            </PrimaryButton>
+          )}
+          <CardStatus className="min-w-0 flex-1 basis-48 text-[11.5px]" status={loginNote(agentStarting)} error={error} />
         </div>
       }
     >

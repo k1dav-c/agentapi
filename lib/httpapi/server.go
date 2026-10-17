@@ -30,6 +30,7 @@ import (
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/shellterm"
 	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/x/acpio"
 	"github.com/coder/quartz"
@@ -87,6 +88,7 @@ type Server struct {
 	handoffReceipts    map[string]handoffReceipt
 	restartAgent       func(context.Context) (int, error)
 	updateAgent        func(context.Context)
+	terminal           *shellterm.Terminal // nil without a terminal
 	jsonlWatcherCancel context.CancelFunc
 	jsonlParentCtx     context.Context // parent context for spawning new JSONL watchers
 	nextQueueID        int
@@ -173,6 +175,9 @@ type ServerConfig struct {
 	// UpdateAgent, if set, updates the native agent's CLI before a restart
 	// starts a new one (Codex, Pi).
 	UpdateAgent func(context.Context)
+	// Terminal offers a shell in the agent's working directory (GET
+	// /terminal), with the native transport.
+	Terminal bool
 	// RestartAgent replaces the PTY agent process while keeping AgentAPI alive.
 	// It returns the new process PID so the JSONL watcher can be restarted.
 	// It is nil for transports or server modes that cannot restart.
@@ -420,6 +425,11 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	if config.StateDB != nil {
 		emitterOptions = append(emitterOptions, WithPersister(config.StateDB))
 	}
+	var terminal *shellterm.Terminal
+	if config.Terminal && config.Transport == TransportNative {
+		terminal = shellterm.New(shellterm.Config{Dir: config.CWD, Env: terminalEnv(), Logger: logger.With("component", "terminal")})
+		emitterOptions = append(emitterOptions, WithTerminal())
+	}
 	emitter := NewEventEmitter(emitterOptions...)
 	restored, err := restoreState(config, emitter, logger)
 	if err != nil {
@@ -519,6 +529,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		webhook:        webhook,
 		restartAgent:   config.RestartAgent,
 		updateAgent:    config.UpdateAgent,
+		terminal:       terminal,
 		jsonlParentCtx: ctx,
 		stateDB:        config.StateDB,
 		keepUploads:    config.UploadDir != "",
@@ -637,7 +648,7 @@ func requestLogMiddleware(logger *slog.Logger) func(next http.Handler) http.Hand
 			path := r.URL.Path
 			// Skip noisy routes: static files, SSE streams, and docs.
 			if path == "/" || strings.HasPrefix(path, "/chat") ||
-				path == "/events" || path == "/internal/screen" ||
+				path == "/events" || path == "/internal/screen" || path == "/terminal" ||
 				path == "/docs" || path == "/openapi.json" {
 				next.ServeHTTP(w, r)
 				return
@@ -771,6 +782,7 @@ func (s *Server) registerRoutes() {
 	s.registerAuthRoutes()
 	s.registerNativeRoutes()
 	s.registerFileRoutes()
+	s.registerTerminalRoutes()
 	huma.Get(s.api, "/handoff", s.getPendingHandoff)
 	huma.Post(s.api, "/handoff/reply", s.replyHandoff)
 	// GET /status endpoint
@@ -926,6 +938,7 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 	resp.Body.LoginRequired = snapshot.LoginRequired
 	resp.Body.Settings = snapshot.Settings
 	resp.Body.Usage = snapshot.Usage
+	resp.Body.Terminal = snapshot.Terminal
 	resp.Body.Epoch = s.emitter.Epoch()
 
 	return resp, nil
@@ -1482,6 +1495,9 @@ func (s *Server) Stop(ctx context.Context) error {
 			if closeErr := s.native.Close(); closeErr != nil {
 				s.logger.Error("Failed to stop the agent", "error", closeErr)
 			}
+		}
+		if s.terminal != nil {
+			_ = s.terminal.Close()
 		}
 		s.persistQueue()
 		s.cleanupUploadDir()

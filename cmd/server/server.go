@@ -422,6 +422,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		Bind:          bind,
 		NativeFactory: adapterFactory,
 		UpdateAgent:   updateNative,
+		Terminal:      viper.GetBool(FlagTerminal),
 		StateDB:       stateDB,
 		UploadDir:     uploadDir,
 		Webhook: httpapi.WebhookConfig{
@@ -693,6 +694,7 @@ const (
 	FlagExperimentalACP        = "experimental-acp"
 	FlagTransport              = "transport"
 	FlagStateDB                = "state-db"
+	FlagTerminal               = "terminal"
 	FlagWebhookURL             = "webhook-url"
 	FlagWebhookTimeout         = "webhook-timeout"
 	FlagWebhookMaxAttempts     = "webhook-max-attempts"
@@ -744,6 +746,7 @@ func CreateServerCmd() *cobra.Command {
 		{FlagExperimentalACP, "", false, "Use experimental ACP transport instead of PTY", "bool"},
 		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) and resumes the agent's session when AgentAPI restarts. Native transport only", "string"},
 		{FlagTransport, "", "pty", "How to drive the agent: pty (its terminal UI), acp (same as --experimental-acp) or native (its own structured protocol; claude, codex and pi)", "string"},
+		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal. Native transport only, where the agent has no terminal of its own", "bool"},
 		{FlagWebhookURL, "", "", "URL notified when the agent run status changes", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},
 		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},
