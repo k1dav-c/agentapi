@@ -3,11 +3,16 @@ package nativetest
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 )
+
+// ErrClosed is returned by a Start that StartBlock holds when the adapter is
+// closed.
+var ErrClosed = errors.New("nativetest: adapter closed")
 
 // Response is a recorded Respond call.
 type Response struct {
@@ -24,14 +29,25 @@ type Adapter struct {
 	// ResumeRef is the ref the factory created the adapter with.
 	ResumeRef string
 	StartErr  error
-	// StartWarning is reported with Sink.Error at the start, before
+	// StartWarnings are reported with Sink.Error at the start, before
 	// StartErr is returned.
-	StartWarning string
-	TurnErr      error
+	StartWarnings []string
+	// StartBlock, if set, holds Start until it is closed, the adapter is
+	// closed (Start then returns ErrClosed) or Start's ctx ends.
+	StartBlock chan struct{}
+	TurnErr    error
+	// SteerErr is returned by Steer.
+	SteerErr error
 	// RespondErr is returned by Respond.
 	RespondErr error
 	// AutoStartTurn reports TurnStarted when a turn is sent.
 	AutoStartTurn bool
+	// OnStartTurn, OnSteer and OnRespond, if set, run first thing in the
+	// method of the same name, so a test can play the agent's side while
+	// the call is on its way.
+	OnStartTurn func(ctx context.Context)
+	OnSteer     func(ctx context.Context)
+	OnRespond   func(ctx context.Context)
 
 	mu         sync.Mutex
 	sink       native.Sink
@@ -42,6 +58,7 @@ type Adapter struct {
 	done       chan error
 	once       sync.Once
 	closed     bool
+	closing    chan struct{}
 }
 
 var _ native.Adapter = (*Adapter)(nil)
@@ -52,15 +69,25 @@ func New() *Adapter {
 		Caps:          native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true},
 		AutoStartTurn: true,
 		done:          make(chan error, 1),
+		closing:       make(chan struct{}),
 	}
 }
 
-func (a *Adapter) Start(_ context.Context, sink native.Sink) error {
+func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	a.mu.Lock()
 	a.sink = sink
 	a.mu.Unlock()
-	if a.StartWarning != "" {
-		sink.Error(a.StartWarning, st.ErrorLevelWarning)
+	if a.StartBlock != nil {
+		select {
+		case <-a.StartBlock:
+		case <-a.closing:
+			return ErrClosed
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	for _, warning := range a.StartWarnings {
+		sink.Error(warning, st.ErrorLevelWarning)
 	}
 	if a.StartErr != nil {
 		return a.StartErr
@@ -78,7 +105,10 @@ func (a *Adapter) Sink() native.Sink {
 	return a.sink
 }
 
-func (a *Adapter) StartTurn(_ context.Context, input native.Input) error {
+func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
+	if a.OnStartTurn != nil {
+		a.OnStartTurn(ctx)
+	}
 	if a.TurnErr != nil {
 		return a.TurnErr
 	}
@@ -92,7 +122,13 @@ func (a *Adapter) StartTurn(_ context.Context, input native.Input) error {
 	return nil
 }
 
-func (a *Adapter) Steer(_ context.Context, input native.Input) error {
+func (a *Adapter) Steer(ctx context.Context, input native.Input) error {
+	if a.OnSteer != nil {
+		a.OnSteer(ctx)
+	}
+	if a.SteerErr != nil {
+		return a.SteerErr
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.steers = append(a.steers, input)
@@ -106,7 +142,10 @@ func (a *Adapter) Interrupt(context.Context) error {
 	return nil
 }
 
-func (a *Adapter) Respond(_ context.Context, requestID string, response native.Response) error {
+func (a *Adapter) Respond(ctx context.Context, requestID string, response native.Response) error {
+	if a.OnRespond != nil {
+		a.OnRespond(ctx)
+	}
 	if a.RespondErr != nil {
 		return a.RespondErr
 	}
@@ -122,7 +161,10 @@ func (a *Adapter) Wait() error { return <-a.done }
 
 func (a *Adapter) Close() error {
 	a.mu.Lock()
-	a.closed = true
+	if !a.closed {
+		a.closed = true
+		close(a.closing)
+	}
 	a.mu.Unlock()
 	a.Exit(nil)
 	return nil
@@ -168,8 +210,8 @@ func (a *Adapter) Responses() []Response {
 	return append([]Response(nil), a.responses...)
 }
 
-// Factory returns a native.Factory that creates adapters with newAdapter and
-// records them, newest last.
+// Factory creates adapters with New (its method New is a native.Factory)
+// and records them, newest last.
 type Factory struct {
 	mu       sync.Mutex
 	adapters []*Adapter

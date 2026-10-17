@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -46,10 +47,26 @@ func (o *observer) RequestUpdated(s native.RequestState) {
 	o.requests[s.ID] = s
 }
 
-func (o *observer) reply(n int) jsonlwatcher.RichMessage {
+// replies returns the replies to the nth turn of each agent; every agent
+// counts its turns from one.
+func (o *observer) replies(n int) []jsonlwatcher.RichMessage {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.rich[fmt.Sprintf("demo-%d-reply/assistant", n)]
+	var out []jsonlwatcher.RichMessage
+	for key, m := range o.rich {
+		if strings.HasSuffix(key, fmt.Sprintf("-%d-reply/assistant", n)) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// reply returns the reply to the nth turn of the only agent.
+func (o *observer) reply(n int) jsonlwatcher.RichMessage {
+	if replies := o.replies(n); len(replies) == 1 {
+		return replies[0]
+	}
+	return jsonlwatcher.RichMessage{}
 }
 
 func (o *observer) toolResults() []jsonlwatcher.RichContentBlock {
@@ -66,12 +83,15 @@ func (o *observer) toolResults() []jsonlwatcher.RichContentBlock {
 	return out
 }
 
-func start(t *testing.T) (*native.Conversation, *observer) {
+// start runs the demo under a conversation with clock (nil for the real
+// one) and waits until it accepts turns.
+func start(t *testing.T, clock quartz.Clock) (*native.Conversation, *observer) {
 	t.Helper()
 	obs := &observer{rich: map[string]jsonlwatcher.RichMessage{}, requests: map[string]native.RequestState{}}
 	c := native.NewConversation(native.Config{
 		Factory:  demo.Factory(demo.Options{Step: time.Millisecond}),
 		Observer: obs,
+		Clock:    clock,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() {
@@ -91,12 +111,12 @@ func pending(t *testing.T, c *native.Conversation) native.RequestState {
 }
 
 func TestTurn(t *testing.T) {
-	c, obs := start(t)
+	c, obs := start(t, nil)
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "hello"}))
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
 
 	reply := obs.reply(1)
-	assert.Equal(t, "end_turn", reply.StopReason)
+	assert.Equal(t, native.StopReasonEndTurn, reply.StopReason)
 	assert.Contains(t, reply.Content[0].Text, "Listed the workspace")
 	require.Len(t, obs.toolResults(), 1)
 	msgs := c.Messages()
@@ -106,7 +126,7 @@ func TestTurn(t *testing.T) {
 }
 
 func TestApprovalDenyWithFeedback(t *testing.T) {
-	c, obs := start(t)
+	c, obs := start(t, nil)
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "please approve this"}))
 	req := pending(t, c)
 	assert.Equal(t, native.RequestKindApproval, req.Kind)
@@ -129,7 +149,7 @@ func TestApprovalDenyWithFeedback(t *testing.T) {
 }
 
 func TestQuestionAndPlan(t *testing.T) {
-	c, obs := start(t)
+	c, obs := start(t, nil)
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "ask me, then plan"}))
 	q := pending(t, c)
 	require.Equal(t, native.RequestKindQuestion, q.Kind)
@@ -156,7 +176,7 @@ func TestQuestionAndPlan(t *testing.T) {
 }
 
 func TestSteerAndInterrupt(t *testing.T) {
-	c, obs := start(t)
+	c, obs := start(t, nil)
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "a long one"}))
 	require.Eventually(t, func() bool { return obs.reply(1).MessageID != "" }, 5*time.Second, time.Millisecond)
 	require.NoError(t, c.Steer(context.Background(), native.Input{Text: "use tabs"}))
@@ -166,12 +186,12 @@ func TestSteerAndInterrupt(t *testing.T) {
 
 	require.NoError(t, c.Interrupt(context.Background()))
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
-	assert.Equal(t, "interrupted", obs.reply(1).StopReason)
+	assert.Equal(t, native.StopReasonInterrupted, obs.reply(1).StopReason)
 	assert.ErrorIs(t, c.Interrupt(context.Background()), native.ErrNoActiveTurn)
 }
 
 func TestInterruptExpiresRequests(t *testing.T) {
-	c, obs := start(t)
+	c, obs := start(t, nil)
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "ask"}))
 	req := pending(t, c)
 	require.NoError(t, c.Interrupt(context.Background()))
@@ -186,31 +206,50 @@ func TestInterruptExpiresRequests(t *testing.T) {
 }
 
 func TestLogin(t *testing.T) {
-	obs := &observer{rich: map[string]jsonlwatcher.RichMessage{}, requests: map[string]native.RequestState{}}
-	c := native.NewConversation(native.Config{
-		Factory:            demo.Factory(demo.Options{Step: time.Millisecond}),
-		Observer:           obs,
-		LoginRetryInterval: 20 * time.Millisecond,
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(func() {
-		_ = c.Close()
-		cancel()
-	})
-	c.Start(ctx)
-	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	clock := quartz.NewMock(t)
+	retry := clock.Trap().NewTimer("Conversation", "loginRetry")
+	defer retry.Close()
+	c, obs := start(t, clock)
 
-	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "pretend you need a login"}))
+	require.NoError(t, c.StartTurn(ctx, native.Input{Text: "please approve this"}))
+	req := pending(t, c)
+	_, err := c.Respond(ctx, req.ID, native.Response{OptionID: "allow"})
+	require.NoError(t, err)
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	reply := c.Messages()[1].Message
+
+	require.NoError(t, c.StartTurn(ctx, native.Input{Text: "pretend you need a login"}))
 	require.Eventually(t, func() bool { return c.Idle() && c.LoginRequired() != nil }, 5*time.Second, time.Millisecond)
 	assert.Equal(t, demo.LoginHint.Command, c.LoginRequired().Command)
 
 	// Check again: the first start still has no login, the conversation
 	// tries again by itself, and that start works.
-	require.NoError(t, c.RetryLogin(context.Background()))
+	require.NoError(t, c.RetryLogin(ctx))
+	retry.MustWait(ctx).Release()
+	_, w := clock.AdvanceNext()
+	w.MustWait(ctx)
 	require.Eventually(t, func() bool { return c.Idle() && c.LoginRequired() == nil }, 5*time.Second, time.Millisecond)
 	obs.mu.Lock()
-	defer obs.mu.Unlock()
-	require.GreaterOrEqual(t, len(obs.logins), 3)
-	assert.Nil(t, obs.logins[len(obs.logins)-1])
-	assert.Equal(t, "pretend you need a login", c.Messages()[0].Message, "the conversation is kept")
+	require.Len(t, obs.logins, 2, "the login is reported once, then that it's fixed")
+	assert.Nil(t, obs.logins[1])
+	obs.mu.Unlock()
+	assert.Equal(t, "please approve this", c.Messages()[0].Message, "the conversation is kept")
+
+	// The new agent's messages and requests don't take the place of the
+	// first agent's.
+	require.NoError(t, c.StartTurn(ctx, native.Input{Text: "approve that too"}))
+	again := pending(t, c)
+	assert.NotEqual(t, req.ID, again.ID)
+	_, err = c.Respond(ctx, again.ID, native.Response{OptionID: "allow"})
+	require.NoError(t, err)
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	msgs := c.Messages()
+	require.Len(t, msgs, 5)
+	assert.Equal(t, reply, msgs[1].Message)
+	assert.Len(t, obs.replies(1), 2, "the first reply of each agent")
+	obs.mu.Lock()
+	assert.Equal(t, native.RequestStatusResolved, obs.requests[req.ID].Status)
+	obs.mu.Unlock()
 }

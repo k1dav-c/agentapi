@@ -195,19 +195,12 @@ type PTYConversation struct {
 
 var _ Conversation = &PTYConversation{}
 
-type noopEmitter struct{}
-
-func (noopEmitter) EmitMessages([]ConversationMessage) {}
-func (noopEmitter) EmitStatus(ConversationStatus)      {}
-func (noopEmitter) EmitScreen(string)                  {}
-func (noopEmitter) EmitError(_ string, _ ErrorLevel)   {}
-
 func NewPTY(ctx context.Context, cfg PTYConversationConfig, emitter Emitter) *PTYConversation {
 	if cfg.Clock == nil {
 		cfg.Clock = quartz.NewReal()
 	}
 	if emitter == nil {
-		emitter = noopEmitter{}
+		emitter = NopEmitter{}
 	}
 	threshold := cfg.getStableSnapshotsThreshold()
 	c := &PTYConversation{

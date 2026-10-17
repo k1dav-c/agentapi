@@ -42,14 +42,6 @@ type ACPConversation struct {
 	clock             quartz.Clock
 }
 
-// noopEmitter is a no-op implementation of Emitter for when no emitter is provided.
-type noopEmitter struct{}
-
-func (noopEmitter) EmitMessages([]st.ConversationMessage) {}
-func (noopEmitter) EmitStatus(st.ConversationStatus)      {}
-func (noopEmitter) EmitScreen(string)                     {}
-func (noopEmitter) EmitError(_ string, _ st.ErrorLevel)   {}
-
 // NewACPConversation creates a new ACPConversation.
 // If emitter is provided, it will receive events when messages/status/screen change.
 // If clock is nil, a real clock will be used.
@@ -61,7 +53,7 @@ func NewACPConversation(ctx context.Context, agentIO ChunkableAgentIO, logger *s
 		clock = quartz.NewReal()
 	}
 	if emitter == nil {
-		emitter = noopEmitter{}
+		emitter = st.NopEmitter{}
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	c := &ACPConversation{

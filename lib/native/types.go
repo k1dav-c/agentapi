@@ -132,8 +132,9 @@ const (
 	// ResponseMessage: the agent stopped waiting; answer it with a new
 	// message instead.
 	ResponseMessage ResponseCapability = "message"
-	// ResponseNotResumable: the agent that asked is gone (it exited or was
-	// restarted); the request can't be answered.
+	// ResponseNotResumable: the request can't be answered any more: the
+	// agent that asked is gone (it exited or was restarted), or it stopped
+	// waiting for an approval or a plan.
 	ResponseNotResumable ResponseCapability = "not_resumable"
 )
 
@@ -233,14 +234,20 @@ type Sink interface {
 	TurnCompleted(TurnResult)
 	// RichMessage reports the current full state of a message. Sending the
 	// same MessageID and Role again replaces the earlier state, so adapters
-	// send the whole message as it grows, not deltas.
+	// send the whole message as it grows, not deltas. A conversation
+	// outlives its adapters, so a MessageID must not repeat one that an
+	// earlier adapter of the same Factory used.
 	RichMessage(jsonlwatcher.RichMessage)
 	// SessionEvents reports timeline events.
 	SessionEvents([]jsonlwatcher.SessionEvent)
-	// RequestOpened reports a new request the agent waits on.
+	// RequestOpened reports a new request the agent waits on. Opening a
+	// request with a known ID replaces it, so like MessageIDs, request IDs
+	// must not repeat those of an earlier adapter of the same Factory.
 	RequestOpened(Request)
 	// RequestClosed reports that the agent no longer waits on a request it
-	// opened (it was answered elsewhere, timed out, or the turn ended).
+	// opened (it was answered elsewhere, timed out or was cancelled).
+	// Requests still open when the turn ends needn't be reported:
+	// TurnCompleted closes them.
 	RequestClosed(id string)
 	// SessionName reports the name the agent gave the session.
 	SessionName(string)
@@ -257,7 +264,9 @@ type Sink interface {
 type Adapter interface {
 	// Start launches the agent and opens its session (or resumes the one
 	// the adapter was created with). It returns once the agent accepts
-	// turns. Events are delivered to sink until the process exits.
+	// turns. ctx bounds only the startup: the agent keeps running after it
+	// ends, until Close. Events are delivered to sink until the process
+	// exits.
 	Start(ctx context.Context, sink Sink) error
 	// StartTurn sends a user message as a new turn.
 	StartTurn(ctx context.Context, input Input) error
@@ -269,6 +278,7 @@ type Adapter interface {
 	// Respond answers a request reported with Sink.RequestOpened.
 	Respond(ctx context.Context, requestID string, response Response) error
 	// Capabilities reports the optional operations the adapter supports.
+	// The conversation reads it once Start returned.
 	Capabilities() Capabilities
 	// Wait blocks until the agent process exits.
 	Wait() error

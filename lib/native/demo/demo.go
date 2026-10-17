@@ -21,6 +21,8 @@ package demo
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,13 +38,12 @@ import (
 // Program is the agent command line that selects the demo adapter.
 const Program = "native-demo"
 
-// DefaultStep is the pause between two streamed snapshots.
-const DefaultStep = 120 * time.Millisecond
+// defaultStep is the pause between two streamed snapshots.
+const defaultStep = 120 * time.Millisecond
 
 // Options configures an Adapter.
 type Options struct {
-	// Step is the pause between two streamed snapshots; zero means
-	// DefaultStep.
+	// Step is the pause between two streamed snapshots; zero means 120 ms.
 	Step time.Duration
 	// Now returns the current time; nil means time.Now.
 	Now func() time.Time
@@ -63,12 +64,34 @@ type loginState struct {
 	startsLeft int
 }
 
+// missing reports whether a start finds no login, and counts the start.
+func (l *loginState) missing() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.startsLeft == 0 {
+		return false
+	}
+	l.startsLeft--
+	return true
+}
+
+// lose makes the next start find no login.
+func (l *loginState) lose() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.startsLeft = 1
+}
+
 // Adapter is the simulated agent.
 type Adapter struct {
 	step      time.Duration
 	now       func() time.Time
 	resumeRef string
 	login     *loginState
+	// prefix starts the IDs of the adapter's messages, tool calls and
+	// requests, so they don't repeat those of an earlier adapter in the
+	// same conversation.
+	prefix string
 
 	mu      sync.Mutex
 	sink    native.Sink
@@ -83,25 +106,32 @@ type Adapter struct {
 
 var _ native.Adapter = (*Adapter)(nil)
 
-// New returns an adapter for a new session, or for resumeRef.
-func New(resumeRef string, opts Options) *Adapter {
+// Factory returns a native.Factory creating demo adapters. Its adapters
+// share the simulated login.
+func Factory(opts Options) native.Factory {
 	if opts.Step <= 0 {
-		opts.Step = DefaultStep
+		opts.Step = defaultStep
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Adapter{step: opts.Step, now: opts.Now, resumeRef: resumeRef, done: make(chan struct{})}
-}
-
-// Factory returns a native.Factory creating demo adapters. Its adapters
-// share the simulated login.
-func Factory(opts Options) native.Factory {
 	login := &loginState{}
 	return func(resumeRef string) (native.Adapter, error) {
-		a := New(resumeRef, opts)
-		a.login = login
-		return a, nil
+		return newAdapter(resumeRef, opts, login), nil
+	}
+}
+
+// newAdapter returns an adapter for a new session, or for resumeRef.
+func newAdapter(resumeRef string, opts Options, login *loginState) *Adapter {
+	var nonce [4]byte
+	_, _ = rand.Read(nonce[:])
+	return &Adapter{
+		step:      opts.Step,
+		now:       opts.Now,
+		resumeRef: resumeRef,
+		login:     login,
+		prefix:    "demo-" + hex.EncodeToString(nonce[:]),
+		done:      make(chan struct{}),
 	}
 }
 
@@ -119,23 +149,17 @@ type turn struct {
 
 func (a *Adapter) Start(_ context.Context, sink native.Sink) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.closed {
+		a.mu.Unlock()
 		return native.ErrNotStarted
 	}
-	if a.login != nil {
-		a.login.mu.Lock()
-		waiting := a.login.startsLeft > 0
-		if waiting {
-			a.login.startsLeft--
-		}
-		a.login.mu.Unlock()
-		if waiting {
-			return &native.LoginRequiredError{Login: LoginHint}
-		}
+	if a.login.missing() {
+		a.mu.Unlock()
+		return &native.LoginRequiredError{Login: LoginHint}
 	}
 	a.sink = sink
 	a.started = true
+	a.mu.Unlock()
 	ref := a.resumeRef
 	if ref == "" {
 		ref = fmt.Sprintf("demo-%d", a.now().UnixNano())
@@ -236,7 +260,7 @@ func (a *Adapter) open(t *turn) (string, chan native.Response) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.nextReq++
-	id := fmt.Sprintf("req-%d", a.nextReq)
+	id := fmt.Sprintf("%s-req-%d", a.prefix, a.nextReq)
 	ch := make(chan native.Response, 1)
 	t.waiting[id] = ch
 	return id, ch
@@ -272,9 +296,7 @@ type script struct {
 var errLoginLost = errors.New("login lost")
 
 // errInterrupted ends a turn that was interrupted.
-type errInterrupted struct{}
-
-func (errInterrupted) Error() string { return "interrupted" }
+var errInterrupted = errors.New("interrupted")
 
 func (a *Adapter) run(t *turn, n int, input native.Input) {
 	a.mu.Lock()
@@ -287,18 +309,18 @@ func (a *Adapter) run(t *turn, n int, input native.Input) {
 	}
 	if err := s.play(); err != nil {
 		if errors.Is(err, errLoginLost) {
-			a.finish(t, native.TurnResult{StopReason: "error", Error: "Native demo: the API answered 401 Unauthorized (simulated)"})
+			a.finish(t, native.TurnResult{StopReason: native.StopReasonError, Error: "Native demo: the API answered 401 Unauthorized (simulated)"})
 			return
 		}
-		a.finish(t, native.TurnResult{StopReason: "interrupted"})
+		a.finish(t, native.TurnResult{StopReason: native.StopReasonInterrupted})
 		return
 	}
-	a.finish(t, native.TurnResult{StopReason: "end_turn"})
+	a.finish(t, native.TurnResult{StopReason: native.StopReasonEndTurn})
 }
 
 func (s *script) play() error {
 	words := keywords(s.text)
-	work := &message{id: fmt.Sprintf("demo-%d-work", s.n), role: "assistant", at: s.a.now()}
+	work := &message{id: s.id("work"), role: "assistant", at: s.a.now()}
 	thinking := fmt.Sprintf("**Reading the request**\n\nThe user wrote %q. I'll look around the workspace first, then answer.", excerpt(s.text, 80))
 	if err := s.streamThinking(work, thinking); err != nil {
 		return err
@@ -315,7 +337,11 @@ func (s *script) play() error {
 		}
 	}
 	if words["ask"] {
-		if err := s.tool(work, "AskUserQuestion", s.questionInput(words["secret"]), s.question); err != nil {
+		questions := demoQuestions[:len(demoQuestions)-1]
+		if words["secret"] {
+			questions = demoQuestions
+		}
+		if err := s.tool(work, "AskUserQuestion", askInput(questions), s.question(questions)); err != nil {
 			return err
 		}
 	}
@@ -331,13 +357,14 @@ func (s *script) play() error {
 // first, then the failed turn. The next start of the factory's adapters
 // still finds no login.
 func (s *script) loseLogin() error {
-	if l := s.a.login; l != nil {
-		l.mu.Lock()
-		l.startsLeft = 1
-		l.mu.Unlock()
-	}
+	s.a.login.lose()
 	s.sink.LoginRequired(LoginHint)
 	return errLoginLost
+}
+
+// id returns the ID of a rich message or tool call of the turn.
+func (s *script) id(name string) string {
+	return fmt.Sprintf("%s-%d-%s", s.a.prefix, s.n, name)
 }
 
 // message is a rich message being built; send reports its current state.
@@ -362,13 +389,14 @@ func (s *script) send(m *message) {
 	})
 }
 
-// pause waits one step. It fails once the turn is interrupted.
+// pause waits the given number of steps. It fails once the turn is
+// interrupted.
 func (s *script) pause(steps int) error {
 	timer := time.NewTimer(time.Duration(steps) * s.a.step)
 	defer timer.Stop()
 	select {
 	case <-s.t.ctx.Done():
-		return errInterrupted{}
+		return errInterrupted
 	case <-timer.C:
 		return nil
 	}
@@ -394,7 +422,7 @@ type decide func(toolUseID string, input json.RawMessage) (result string, failed
 // result.
 func (s *script) tool(m *message, name string, input any, ask decide) error {
 	s.tools++
-	id := fmt.Sprintf("toolu_demo_%d_%d", s.n, s.tools)
+	id := "toolu_" + s.id(fmt.Sprint("tool-", s.tools))
 	raw, _ := json.Marshal(input)
 	m.blocks = append(m.blocks, jsonlwatcher.RichContentBlock{
 		Type: "tool_use", ToolUseID: id, ToolName: name, ToolInput: raw, Status: "running",
@@ -418,7 +446,7 @@ func (s *script) tool(m *message, name string, input any, ask decide) error {
 	s.send(m)
 	isErr := failed
 	s.send(&message{
-		id: fmt.Sprintf("demo-%d-result-%d", s.n, s.tools), role: "user", at: s.a.now(),
+		id: s.id(fmt.Sprint("result-", s.tools)), role: "user", at: s.a.now(),
 		blocks: []jsonlwatcher.RichContentBlock{{
 			Type: "tool_result", ToolUseID: id, ToolName: name, Text: result, IsError: &isErr, Status: m.blocks[idx].Status,
 		}},
@@ -439,7 +467,7 @@ func (s *script) wait(req native.Request) (native.Response, error) {
 	case resp := <-ch:
 		return resp, nil
 	case <-s.t.ctx.Done():
-		return native.Response{}, errInterrupted{}
+		return native.Response{}, errInterrupted
 	}
 }
 
@@ -473,56 +501,64 @@ func (s *script) approval(toolUseID string, input json.RawMessage) (string, bool
 	return "build/\n  agentapi-linux-amd64\n  agentapi-darwin-arm64\nRelease built.", false, nil
 }
 
-func (s *script) questionInput(secret bool) map[string]any {
-	questions := []map[string]any{
-		{"header": "Package manager", "question": "Which package manager should I use?", "multiSelect": false, "options": []map[string]string{
-			{"label": "bun", "description": "Fast, what the chat uses"},
-			{"label": "pnpm", "description": "Strict and disk-efficient"},
-			{"label": "npm", "description": "Comes with Node.js"},
-		}},
-		{"header": "Checks", "question": "Which checks should run before I commit?", "multiSelect": true, "options": []map[string]string{
-			{"label": "Lint"}, {"label": "Unit tests"}, {"label": "Type check"},
-		}},
-		{"header": "Notes", "question": "Anything else I should know?"},
-	}
-	if secret {
-		questions = append(questions, map[string]any{"header": "Token", "question": "Paste the deploy token"})
-	}
-	return map[string]any{"questions": questions}
+// demoQuestions are what "ask" asks; the last one, a secret, only with
+// "secret".
+var demoQuestions = []native.Question{
+	{ID: "pm", Header: "Package manager", Question: "Which package manager should I use?", Options: []native.QuestionOption{
+		{Label: "bun", Description: "Fast, what the chat uses"},
+		{Label: "pnpm", Description: "Strict and disk-efficient"},
+		{Label: "npm", Description: "Comes with Node.js"},
+	}},
+	{ID: "checks", Header: "Checks", Question: "Which checks should run before I commit?", MultiSelect: true, Options: []native.QuestionOption{
+		{Label: "Lint"}, {Label: "Unit tests"}, {Label: "Type check"},
+	}},
+	{ID: "notes", Header: "Notes", Question: "Anything else I should know?", FreeText: true},
+	{ID: "token", Header: "Token", Question: "Paste the deploy token", FreeText: true, Secret: true},
 }
 
-func (s *script) question(toolUseID string, input json.RawMessage) (string, bool, error) {
-	questions := []native.Question{
-		{ID: "pm", Header: "Package manager", Question: "Which package manager should I use?", Options: []native.QuestionOption{
-			{Label: "bun", Description: "Fast, what the chat uses"},
-			{Label: "pnpm", Description: "Strict and disk-efficient"},
-			{Label: "npm", Description: "Comes with Node.js"},
-		}},
-		{ID: "checks", Header: "Checks", Question: "Which checks should run before I commit?", MultiSelect: true, Options: []native.QuestionOption{
-			{Label: "Lint"}, {Label: "Unit tests"}, {Label: "Type check"},
-		}},
-		{ID: "notes", Header: "Notes", Question: "Anything else I should know?", FreeText: true},
-	}
-	if strings.Contains(string(input), "deploy token") {
-		questions = append(questions, native.Question{ID: "token", Header: "Token", Question: "Paste the deploy token", FreeText: true, Secret: true})
-	}
-	resp, err := s.wait(native.Request{
-		Kind: native.RequestKindQuestion, Title: "A few questions before I start",
-		ToolName: "AskUserQuestion", ToolUseID: toolUseID, Input: input, Questions: questions,
-	})
-	if err != nil {
-		return "", false, err
-	}
-	var parts []string
+// askInput is the AskUserQuestion input that asks questions.
+func askInput(questions []native.Question) map[string]any {
+	var entries []map[string]any
 	for _, q := range questions {
-		answer := strings.Join(resp.Answers[q.ID], ", ")
-		if q.Secret && answer != "" {
-			answer = "(" + fmt.Sprint(len(answer)) + " characters, hidden)"
+		entry := map[string]any{"header": q.Header, "question": q.Question}
+		if len(q.Options) > 0 {
+			var options []map[string]string
+			for _, o := range q.Options {
+				option := map[string]string{"label": o.Label}
+				if o.Description != "" {
+					option["description"] = o.Description
+				}
+				options = append(options, option)
+			}
+			entry["multiSelect"] = q.MultiSelect
+			entry["options"] = options
 		}
-		parts = append(parts, fmt.Sprintf("%s: %s", q.Header, answer))
+		entries = append(entries, entry)
 	}
-	s.outcomes = append(s.outcomes, "You answered: "+strings.Join(parts, "; "))
-	return "User answered.\n" + strings.Join(parts, "\n"), false, nil
+	return map[string]any{"questions": entries}
+}
+
+// question asks questions and reports the answers.
+func (s *script) question(questions []native.Question) decide {
+	return func(toolUseID string, input json.RawMessage) (string, bool, error) {
+		resp, err := s.wait(native.Request{
+			Kind: native.RequestKindQuestion, Title: "A few questions before I start",
+			ToolName: "AskUserQuestion", ToolUseID: toolUseID, Input: input, Questions: questions,
+		})
+		if err != nil {
+			return "", false, err
+		}
+		var parts []string
+		for _, q := range questions {
+			answer := strings.Join(resp.Answers[q.ID], ", ")
+			if q.Secret && answer != "" {
+				answer = "(" + fmt.Sprint(len(answer)) + " characters, hidden)"
+			}
+			parts = append(parts, fmt.Sprintf("%s: %s", q.Header, answer))
+		}
+		s.outcomes = append(s.outcomes, "You answered: "+strings.Join(parts, "; "))
+		return "User answered.\n" + strings.Join(parts, "\n"), false, nil
+	}
 }
 
 func (s *script) plan(toolUseID string, input json.RawMessage) (string, bool, error) {
@@ -547,7 +583,7 @@ func (s *script) plan(toolUseID string, input json.RawMessage) (string, bool, er
 }
 
 func (s *script) reply(long bool) error {
-	m := &message{id: fmt.Sprintf("demo-%d-reply", s.n), role: "assistant", at: s.a.now()}
+	m := &message{id: s.id("reply"), role: "assistant", at: s.a.now()}
 	m.blocks = []jsonlwatcher.RichContentBlock{{Type: "text"}}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Here is what I did for **%s**:\n\n- Listed the workspace\n", excerpt(s.text, 60))
@@ -572,28 +608,28 @@ func (s *script) reply(long bool) error {
 		s.send(m)
 	}
 	if err := stream(sb.String()); err != nil {
-		finish("interrupted")
+		finish(native.StopReasonInterrupted)
 		return err
 	}
 	if long {
 		for i := 1; i <= 25; i++ {
 			if err := stream(fmt.Sprintf("\nStep %d of 25: still working…", i)); err != nil {
-				finish("interrupted")
+				finish(native.StopReasonInterrupted)
 				return err
 			}
 			if err := s.pause(8); err != nil {
-				finish("interrupted")
+				finish(native.StopReasonInterrupted)
 				return err
 			}
 			s.steer(m)
 		}
 	}
 	if err := stream("\n\nThis is the native demo agent. Say *approve*, *ask*, *plan* or *long* to see more."); err != nil {
-		finish("interrupted")
+		finish(native.StopReasonInterrupted)
 		return err
 	}
 	s.steer(m)
-	finish("end_turn")
+	finish(native.StopReasonEndTurn)
 	return nil
 }
 
@@ -634,12 +670,12 @@ func chunks(text string, n int) []string {
 	var out []string
 	var cur strings.Builder
 	words := 0
-	for i, r := range text {
+	for _, r := range text {
 		cur.WriteRune(r)
-		if r == ' ' || r == '\n' {
-			words++
+		if r != ' ' && r != '\n' {
+			continue
 		}
-		if words >= n && (r == ' ' || r == '\n') || i == len(text)-1 {
+		if words++; words >= n {
 			out = append(out, cur.String())
 			cur.Reset()
 			words = 0

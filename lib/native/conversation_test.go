@@ -3,8 +3,10 @@ package native_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -18,22 +20,37 @@ import (
 	st "github.com/coder/agentapi/lib/screentracker"
 )
 
+// recorded is what a recorder received.
+type recorded struct {
+	messages     []st.ConversationMessage
+	messageEmits int
+	statuses     []st.ConversationStatus
+	errors       []string
+	rich         []jsonlwatcher.RichMessage
+	requests     []native.RequestState
+	refs         []string
+	names        []string
+	logins       []*native.LoginRequired
+}
+
+// recorder records what a conversation emits and reports.
 type recorder struct {
-	mu       sync.Mutex
-	messages []st.ConversationMessage
-	statuses []st.ConversationStatus
-	errors   []string
-	rich     []jsonlwatcher.RichMessage
-	requests []native.RequestState
-	refs     []string
-	names    []string
-	logins   []*native.LoginRequired
+	mu sync.Mutex
+	recorded
+}
+
+// get returns what was recorded so far.
+func (r *recorder) get() recorded {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.recorded
 }
 
 func (r *recorder) EmitMessages(m []st.ConversationMessage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.messages = m
+	r.messageEmits++
 }
 
 func (r *recorder) EmitStatus(s st.ConversationStatus) {
@@ -41,30 +58,76 @@ func (r *recorder) EmitStatus(s st.ConversationStatus) {
 	defer r.mu.Unlock()
 	r.statuses = append(r.statuses, s)
 }
+
 func (r *recorder) EmitScreen(string) {}
+
 func (r *recorder) EmitError(m string, _ st.ErrorLevel) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.errors = append(r.errors, m)
 }
 
-func (r *recorder) Started(native.Capabilities)               {}
-func (r *recorder) LoginRequired(l *native.LoginRequired)     { r.logins = append(r.logins, l) }
-func (r *recorder) RichMessage(m jsonlwatcher.RichMessage)    { r.rich = append(r.rich, m) }
-func (r *recorder) SessionEvents([]jsonlwatcher.SessionEvent) {}
-func (r *recorder) SessionName(n string)                      { r.names = append(r.names, n) }
-func (r *recorder) SessionRef(ref string)                     { r.refs = append(r.refs, ref) }
-func (r *recorder) RequestUpdated(s native.RequestState)      { r.requests = append(r.requests, s) }
+func (r *recorder) Started(native.Capabilities) {}
 
-func (r *recorder) emittedMessages() []st.ConversationMessage {
+func (r *recorder) LoginRequired(l *native.LoginRequired) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]st.ConversationMessage(nil), r.messages...)
+	r.logins = append(r.logins, l)
 }
 
-func start(t *testing.T, configure func(*nativetest.Adapter), cfg native.Config) (*native.Conversation, *nativetest.Factory, *recorder) {
+func (r *recorder) RichMessage(m jsonlwatcher.RichMessage) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rich = append(r.rich, m)
+}
+
+func (r *recorder) SessionEvents([]jsonlwatcher.SessionEvent) {}
+
+func (r *recorder) SessionName(n string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.names = append(r.names, n)
+}
+
+func (r *recorder) SessionRef(ref string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.refs = append(r.refs, ref)
+}
+
+func (r *recorder) RequestUpdated(s native.RequestState) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.requests = append(r.requests, s)
+}
+
+// logRecorder is a slog.Handler that keeps the messages logged.
+type logRecorder struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func (h *logRecorder) Enabled(context.Context, slog.Level) bool { return true }
+func (h *logRecorder) WithAttrs([]slog.Attr) slog.Handler       { return h }
+func (h *logRecorder) WithGroup(string) slog.Handler            { return h }
+
+func (h *logRecorder) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.messages = append(h.messages, r.Message)
+	return nil
+}
+
+func (h *logRecorder) logged(message string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Contains(h.messages, message)
+}
+
+// run creates a conversation with factory that reports to a recorder, and
+// starts it.
+func run(t *testing.T, factory *nativetest.Factory, cfg native.Config) (*native.Conversation, *recorder) {
 	t.Helper()
-	factory := &nativetest.Factory{Configure: configure}
 	rec := &recorder{}
 	cfg.Factory = factory.New
 	cfg.Emitter = rec
@@ -76,8 +139,25 @@ func start(t *testing.T, configure func(*nativetest.Adapter), cfg native.Config)
 		cancel()
 	})
 	c.Start(ctx)
+	return c, rec
+}
+
+// start runs a conversation and waits until its agent started.
+func start(t *testing.T, configure func(*nativetest.Adapter), cfg native.Config) (*native.Conversation, *nativetest.Factory, *recorder) {
+	t.Helper()
+	factory := &nativetest.Factory{Configure: configure}
+	c, rec := run(t, factory, cfg)
 	require.Eventually(t, func() bool { return c.Status() != st.ConversationStatusInitializing }, 5*time.Second, time.Millisecond)
 	return c, factory, rec
+}
+
+// inStart reports whether the newest adapter of factory with resumeRef is
+// in Start.
+func inStart(factory *nativetest.Factory, resumeRef string) func() bool {
+	return func() bool {
+		a := factory.Last()
+		return a != nil && a.ResumeRef == resumeRef && a.Sink() != nil
+	}
 }
 
 func text(id, s string) jsonlwatcher.RichMessage {
@@ -99,7 +179,7 @@ func TestTurnBuildsMessages(t *testing.T) {
 	sink.RichMessage(text("m1", "Hel"))
 	sink.RichMessage(text("m1", "Hello"))
 	sink.RichMessage(text("m2", "World"))
-	sink.TurnCompleted(native.TurnResult{StopReason: "end_turn"})
+	sink.TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
 
 	msgs := c.Messages()
 	require.Len(t, msgs, 2)
@@ -107,9 +187,9 @@ func TestTurnBuildsMessages(t *testing.T) {
 	assert.Equal(t, "hello", msgs[0].Message)
 	assert.Equal(t, st.ConversationRoleAgent, msgs[1].Role)
 	assert.Equal(t, "Hello\n\nWorld", msgs[1].Message)
-	assert.Equal(t, msgs, rec.emittedMessages())
+	assert.Equal(t, msgs, rec.get().messages)
 	assert.Equal(t, st.ConversationStatusStable, c.Status())
-	assert.Len(t, rec.rich, 4)
+	assert.Len(t, rec.get().rich, 4)
 	assert.Equal(t, []native.Input{{Text: "hello"}}, a.Turns())
 
 	// The next turn starts a new agent message.
@@ -119,6 +199,22 @@ func TestTurnBuildsMessages(t *testing.T) {
 	require.Len(t, msgs, 4)
 	assert.Equal(t, "Second", msgs[3].Message)
 	assert.Equal(t, 3, msgs[3].Id)
+}
+
+func TestUnchangedTextEmitsNoMessages(t *testing.T) {
+	c, factory, rec := start(t, nil, native.Config{})
+	sink := factory.Last().Sink()
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "hello"}))
+	sink.RichMessage(text("m1", "Hello"))
+	emits := rec.get().messageEmits
+
+	// A snapshot that only adds a tool call leaves the agent message as it
+	// was.
+	sink.RichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{
+		{Type: "text", Text: "Hello"}, {Type: "tool_use", ToolUseID: "t1"},
+	}})
+	assert.Equal(t, emits, rec.get().messageEmits)
+	assert.Len(t, rec.get().rich, 2, "observers get every snapshot")
 }
 
 func TestStartTurnWhileBusy(t *testing.T) {
@@ -162,11 +258,40 @@ func TestSteerAndInterrupt(t *testing.T) {
 	assert.Equal(t, 1, a.Interrupts())
 }
 
+func TestFailedSteerLeavesTheReplyWhole(t *testing.T) {
+	boom := errors.New("boom")
+	c, factory, _ := start(t, func(a *nativetest.Adapter) {
+		a.SteerErr = boom
+		// The agent goes on talking while the steer is on its way.
+		a.OnSteer = func(context.Context) { a.Sink().RichMessage(text("m2", "more")) }
+	}, native.Config{})
+	a := factory.Last()
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
+	a.Sink().RichMessage(text("m1", "first"))
+
+	assert.ErrorIs(t, c.Steer(context.Background(), native.Input{Text: "also this"}), boom)
+	a.Sink().RichMessage(text("m3", "last"))
+	msgs := c.Messages()
+	require.Len(t, msgs, 2, "the failed steer leaves no message: %+v", msgs)
+	assert.Equal(t, "first\n\nmore\n\nlast", msgs[1].Message)
+}
+
 func TestSteerUnsupported(t *testing.T) {
 	c, _, _ := start(t, func(a *nativetest.Adapter) { a.Caps = native.Capabilities{} }, native.Config{})
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
 	assert.ErrorIs(t, c.Steer(context.Background(), native.Input{Text: "x"}), native.ErrUnsupported)
 	assert.ErrorIs(t, c.Interrupt(context.Background()), native.ErrUnsupported)
+}
+
+func TestImagesNeedSupport(t *testing.T) {
+	c, factory, _ := start(t, func(a *nativetest.Adapter) { a.Caps.Images = false }, native.Config{})
+	a := factory.Last()
+	in := native.Input{Text: `look @"/tmp/shot.png"`, Images: []native.Image{{Path: "/tmp/shot.png", MediaType: "image/png"}}}
+	require.NoError(t, c.StartTurn(context.Background(), in))
+	require.NoError(t, c.Steer(context.Background(), in))
+	// The text still mentions the file.
+	assert.Equal(t, []native.Input{{Text: in.Text}}, a.Turns())
+	assert.Equal(t, []native.Input{{Text: in.Text}}, a.Steers())
 }
 
 func approval(id string) native.Request {
@@ -179,155 +304,8 @@ func approval(id string) native.Request {
 	}
 }
 
-func TestRequestLifecycle(t *testing.T) {
-	c, factory, rec := start(t, nil, native.Config{})
-	a := factory.Last()
-	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
-	a.Sink().RequestOpened(approval("r1"))
-
-	// Waiting on the user counts as stable, but no new turn can start.
-	assert.Equal(t, st.ConversationStatusStable, c.Status())
-	assert.False(t, c.Idle())
-	pending := c.PendingRequests()
-	require.Len(t, pending, 1)
-	assert.Equal(t, native.ResponseLive, pending[0].Capability)
-
-	_, err := c.Respond(context.Background(), "r1", native.Response{OptionID: "nope"})
-	assert.ErrorIs(t, err, native.ErrInvalidResponse)
-	_, err = c.Respond(context.Background(), "missing", native.Response{OptionID: "allow"})
-	assert.ErrorIs(t, err, native.ErrRequestNotFound)
-
-	state, err := c.Respond(context.Background(), "r1", native.Response{OptionID: "allow"})
-	require.NoError(t, err)
-	assert.Equal(t, native.RequestStatusResolved, state.Status)
-	assert.Equal(t, st.ConversationStatusChanging, c.Status())
-	assert.Equal(t, []nativetest.Response{{RequestID: "r1", Response: native.Response{OptionID: "allow"}}}, a.Responses())
-
-	// A second answer is refused.
-	_, err = c.Respond(context.Background(), "r1", native.Response{OptionID: "deny"})
-	assert.ErrorIs(t, err, native.ErrRequestNotFound)
-
-	// The agent withdraws a request; then a turn end expires the rest.
-	a.Sink().RequestOpened(approval("r2"))
-	a.Sink().RequestClosed("r2")
-	r2, ok := c.Request("r2")
-	require.True(t, ok)
-	assert.Equal(t, native.RequestStatusWithdrawn, r2.Status)
-
-	a.Sink().RequestOpened(approval("r3"))
-	a.Sink().RequestOpened(native.Request{ID: "q1", Kind: native.RequestKindQuestion, Questions: []native.Question{{ID: "a", Question: "?"}}})
-	a.Sink().TurnCompleted(native.TurnResult{})
-	r3, _ := c.Request("r3")
-	q1, _ := c.Request("q1")
-	assert.Equal(t, native.RequestStatusExpired, r3.Status)
-	assert.Equal(t, native.ResponseNotResumable, r3.Capability)
-	assert.Equal(t, native.RequestStatusExpired, q1.Status)
-	assert.Equal(t, native.ResponseMessage, q1.Capability)
-	assert.Empty(t, c.PendingRequests())
-	assert.NotEmpty(t, rec.requests)
-}
-
-func TestRespondFailureKeepsRequestPending(t *testing.T) {
-	boom := errors.New("boom")
-	c, factory, _ := start(t, func(a *nativetest.Adapter) { a.RespondErr = boom }, native.Config{})
-	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
-	factory.Last().Sink().RequestOpened(approval("r1"))
-	_, err := c.Respond(context.Background(), "r1", native.Response{OptionID: "allow"})
-	assert.ErrorIs(t, err, boom)
-	assert.Len(t, c.PendingRequests(), 1)
-}
-
-func TestQuestionValidation(t *testing.T) {
-	c, factory, _ := start(t, nil, native.Config{})
-	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
-	factory.Last().Sink().RequestOpened(native.Request{
-		ID: "q", Kind: native.RequestKindQuestion,
-		Questions: []native.Question{
-			{ID: "color", Question: "Color?", Options: []native.QuestionOption{{Label: "Red"}, {Label: "Blue"}}},
-			{ID: "tags", Question: "Tags?", MultiSelect: true, Options: []native.QuestionOption{{Label: "a"}, {Label: "b"}}},
-			{ID: "name", Question: "Name?", FreeText: true},
-		},
-	})
-	cases := []map[string][]string{
-		{"color": {"Red"}, "tags": {"a"}},
-		{"color": {"Green"}, "tags": {"a"}, "name": {"x"}},
-		{"color": {"Red", "Blue"}, "tags": {"a"}, "name": {"x"}},
-	}
-	for _, answers := range cases {
-		_, err := c.Respond(context.Background(), "q", native.Response{Answers: answers})
-		assert.ErrorIs(t, err, native.ErrInvalidResponse, answers)
-	}
-	_, err := c.Respond(context.Background(), "q", native.Response{Answers: map[string][]string{
-		"color": {"Red"}, "tags": {"a", "b"}, "name": {"anything"},
-	}})
-	assert.NoError(t, err)
-}
-
-func TestRestartReplacesAdapter(t *testing.T) {
-	c, factory, rec := start(t, func(a *nativetest.Adapter) { a.Ref = "session-1" }, native.Config{ResumeRef: "old"})
-	first := factory.Last()
-	assert.Equal(t, "old", first.ResumeRef)
-	assert.Equal(t, "session-1", c.SessionRef())
-	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
-	first.Sink().RequestOpened(approval("r1"))
-
-	require.NoError(t, c.Restart(context.Background()))
-	second := factory.Last()
-	assert.NotSame(t, first, second)
-	assert.True(t, first.Closed())
-	assert.Empty(t, second.ResumeRef, "a restart starts a new session")
-	assert.Empty(t, c.Messages())
-	r1, _ := c.Request("r1")
-	assert.Equal(t, native.ResponseNotResumable, r1.Capability)
-	assert.True(t, c.Idle())
-
-	// Events from the replaced adapter are ignored.
-	first.Sink().RichMessage(text("old", "stale"))
-	assert.Empty(t, c.Messages())
-	for _, m := range rec.rich {
-		assert.NotEqual(t, "old", m.MessageID)
-	}
-
-	// The replaced adapter's exit is not reported.
-	select {
-	case err := <-c.Exited():
-		t.Fatalf("unexpected exit: %v", err)
-	case <-time.After(20 * time.Millisecond):
-	}
-}
-
-func TestExitIsReported(t *testing.T) {
-	c, factory, _ := start(t, nil, native.Config{})
-	boom := errors.New("crashed")
-	factory.Last().Exit(boom)
-	select {
-	case err := <-c.Exited():
-		assert.ErrorIs(t, err, boom)
-	case <-time.After(5 * time.Second):
-		t.Fatal("exit not reported")
-	}
-	assert.Equal(t, st.ConversationStatusInitializing, c.Status())
-}
-
-func TestInitialPrompt(t *testing.T) {
-	c, factory, _ := start(t, nil, native.Config{InitialPrompt: "do it"})
-	require.Eventually(t, func() bool { return len(factory.Last().Turns()) == 1 }, 5*time.Second, time.Millisecond)
-	assert.Equal(t, "do it", factory.Last().Turns()[0].Text)
-	assert.Len(t, c.Messages(), 1)
-}
-
-func TestStartFailure(t *testing.T) {
-	factory := &nativetest.Factory{Configure: func(a *nativetest.Adapter) { a.StartErr = errors.New("no login") }}
-	rec := &recorder{}
-	c := native.NewConversation(native.Config{Factory: factory.New, Emitter: rec, Observer: rec})
-	c.Start(context.Background())
-	select {
-	case err := <-c.Exited():
-		assert.ErrorContains(t, err, "no login")
-	case <-time.After(5 * time.Second):
-		t.Fatal("start failure not reported")
-	}
-	assert.NotEmpty(t, rec.errors)
+func question(id string) native.Request {
+	return native.Request{ID: id, Kind: native.RequestKindQuestion, Questions: []native.Question{{ID: "a", Question: "?"}}}
 }
 
 func TestInputFromText(t *testing.T) {
@@ -341,159 +319,4 @@ func TestInputFromText(t *testing.T) {
 	in := native.InputFromText(`look @"` + png + `" and @"` + txt + `" and @"` + png + `" @"/does/not/exist.png"`)
 	assert.Equal(t, []native.Image{{Path: png, MediaType: "image/png"}}, in.Images)
 	assert.Contains(t, in.Text, png)
-}
-
-func TestSecretAnswersAreRedacted(t *testing.T) {
-	c, factory, rec := start(t, nil, native.Config{})
-	a := factory.Last()
-	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
-	a.Sink().RequestOpened(native.Request{
-		ID: "q", Kind: native.RequestKindQuestion,
-		Questions: []native.Question{{ID: "token", Question: "Token?", Secret: true}, {ID: "name", Question: "Name?"}},
-	})
-	answers := map[string][]string{"token": {"s3cret"}, "name": {"bob"}}
-	state, err := c.Respond(context.Background(), "q", native.Response{Answers: answers})
-	require.NoError(t, err)
-	assert.Equal(t, map[string][]string{"token": {"[redacted]"}, "name": {"bob"}}, state.Response.Answers)
-	assert.Equal(t, []string{"s3cret"}, a.Responses()[0].Response.Answers["token"], "the agent gets the answer")
-	assert.Equal(t, []string{"s3cret"}, answers["token"], "the caller's map is not changed")
-	for _, r := range rec.requests {
-		if r.Response != nil {
-			assert.NotContains(t, r.Response.Answers["token"], "s3cret")
-		}
-	}
-}
-
-func TestLoginRequiredAtStartWaitsAndRetries(t *testing.T) {
-	login := native.LoginRequired{Agent: "Claude Code", Message: "Claude Code is not logged in.", Command: "claude auth login"}
-	loggedIn := false
-	var mu sync.Mutex
-	factory := &nativetest.Factory{Configure: func(a *nativetest.Adapter) {
-		mu.Lock()
-		defer mu.Unlock()
-		if !loggedIn {
-			a.StartErr = &native.LoginRequiredError{Login: login}
-		}
-	}}
-	rec := &recorder{}
-	c := native.NewConversation(native.Config{
-		Factory: factory.New, Emitter: rec, Observer: rec,
-		// Long enough that only RetryLogin retries.
-		LoginRetryInterval: time.Hour,
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	defer func() { _ = c.Close() }()
-	c.Start(ctx)
-
-	require.Eventually(t, func() bool { return c.LoginRequired() != nil }, 5*time.Second, time.Millisecond)
-	got := c.LoginRequired()
-	assert.Equal(t, "claude auth login", got.Command)
-	assert.NotEmpty(t, got.Host)
-	assert.NotEmpty(t, got.User)
-	assert.Equal(t, st.ConversationStatusInitializing, c.Status())
-	select {
-	case err := <-c.Exited():
-		t.Fatalf("a missing login is not an exit: %v", err)
-	default:
-	}
-	// Messages wait in the caller's queue.
-	assert.ErrorIs(t, c.StartTurn(context.Background(), native.Input{Text: "hi"}), st.ErrMessageValidationChanging)
-	rec.mu.Lock()
-	assert.Len(t, rec.errors, 1)
-	assert.Contains(t, rec.errors[0], "claude auth login")
-	rec.mu.Unlock()
-
-	// Still not logged in: one more attempt, no second error.
-	require.NoError(t, c.RetryLogin(context.Background()))
-	require.Eventually(t, func() bool { return len(factory.Adapters()) == 2 }, 5*time.Second, time.Millisecond)
-	assert.NotNil(t, c.LoginRequired())
-
-	mu.Lock()
-	loggedIn = true
-	mu.Unlock()
-	require.NoError(t, c.RetryLogin(context.Background()))
-	require.Eventually(t, func() bool { return c.Idle() }, 5*time.Second, time.Millisecond)
-	assert.Nil(t, c.LoginRequired())
-	assert.Nil(t, rec.logins[len(rec.logins)-1], "observers learn the login is fixed")
-	rec.mu.Lock()
-	assert.Len(t, rec.errors, 1)
-	rec.mu.Unlock()
-	assert.ErrorIs(t, c.RetryLogin(context.Background()), native.ErrNoLoginRequired)
-}
-
-func TestLoginLostWhileRunningResumesOnRetry(t *testing.T) {
-	c, factory, _ := start(t, func(a *nativetest.Adapter) {
-		if a.ResumeRef == "" {
-			a.Ref = "session-1"
-		}
-	}, native.Config{})
-	first := factory.Last()
-	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
-	first.Sink().LoginRequired(native.LoginRequired{Agent: "Codex", Message: "Codex's login expired.", Command: "codex login"})
-	first.Sink().TurnCompleted(native.TurnResult{Error: "401 Unauthorized"})
-	require.NotNil(t, c.LoginRequired())
-
-	require.NoError(t, c.RetryLogin(context.Background()))
-	require.Eventually(t, func() bool { return len(factory.Adapters()) == 2 && c.Idle() }, 5*time.Second, time.Millisecond)
-	second := factory.Last()
-	assert.True(t, first.Closed())
-	assert.Equal(t, "session-1", second.ResumeRef, "the session is resumed")
-	assert.Len(t, c.Messages(), 1, "the conversation is kept")
-	assert.Nil(t, c.LoginRequired())
-}
-
-func TestLoginClearedByAWorkingTurn(t *testing.T) {
-	c, factory, _ := start(t, nil, native.Config{})
-	a := factory.Last()
-	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
-	a.Sink().LoginRequired(native.LoginRequired{Agent: "Pi", Message: "No API key.", Command: "pi"})
-	a.Sink().TurnCompleted(native.TurnResult{Error: "no api key"})
-	require.NotNil(t, c.LoginRequired())
-	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "two"}))
-	a.Sink().TurnCompleted(native.TurnResult{})
-	assert.Nil(t, c.LoginRequired())
-}
-
-func TestLoginRetriesDontRepeatStartWarnings(t *testing.T) {
-	login := native.LoginRequired{Agent: "Codex", Message: "Codex is not logged in.", Command: "codex login"}
-	factory := &nativetest.Factory{Configure: func(a *nativetest.Adapter) {
-		a.StartWarning = "Codex could not find bubblewrap on PATH."
-		a.StartErr = &native.LoginRequiredError{Login: login}
-	}}
-	rec := &recorder{}
-	c := native.NewConversation(native.Config{Factory: factory.New, Emitter: rec, Observer: rec, LoginRetryInterval: time.Hour})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	defer func() { _ = c.Close() }()
-	c.Start(ctx)
-	require.Eventually(t, func() bool { return c.LoginRequired() != nil }, 5*time.Second, time.Millisecond)
-	// The fourth adapter exists once the third attempt has returned.
-	for attempts := 2; attempts <= 4; attempts++ {
-		require.NoError(t, c.RetryLogin(context.Background()))
-		require.Eventually(t, func() bool { return len(factory.Adapters()) == attempts }, 5*time.Second, time.Millisecond)
-	}
-	rec.mu.Lock()
-	defer rec.mu.Unlock()
-	require.Len(t, rec.errors, 2, "the first attempt's warning and the login, once each: %q", rec.errors)
-	assert.Contains(t, rec.errors[0], "bubblewrap")
-	assert.Contains(t, rec.errors[1], "codex login")
-}
-
-func TestRestartAfterLostLoginShowsWarnings(t *testing.T) {
-	c, factory, rec := start(t, func(a *nativetest.Adapter) {
-		if a.ResumeRef != "" {
-			a.StartWarning = "Could not resume the thread; starting a new one."
-		}
-		a.Ref = "session-1"
-	}, native.Config{})
-	a := factory.Last()
-	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
-	a.Sink().LoginRequired(native.LoginRequired{Agent: "Codex", Message: "Codex is not logged in.", Command: "codex login"})
-	a.Sink().TurnCompleted(native.TurnResult{Error: "401 Unauthorized"})
-	require.NoError(t, c.RetryLogin(context.Background()))
-	require.Eventually(t, func() bool { return len(factory.Adapters()) == 2 && c.Idle() }, 5*time.Second, time.Millisecond)
-	rec.mu.Lock()
-	defer rec.mu.Unlock()
-	assert.Contains(t, rec.errors[len(rec.errors)-1], "Could not resume", "the restarted agent's warnings show")
 }

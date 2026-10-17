@@ -105,6 +105,15 @@ type Emitter interface {
 	EmitError(message string, level ErrorLevel)
 }
 
+// NopEmitter is an Emitter that discards every update, for conversations
+// created without one.
+type NopEmitter struct{}
+
+func (NopEmitter) EmitMessages([]ConversationMessage) {}
+func (NopEmitter) EmitStatus(ConversationStatus)      {}
+func (NopEmitter) EmitScreen(string)                  {}
+func (NopEmitter) EmitError(string, ErrorLevel)       {}
+
 type ConversationMessage struct {
 	Id      int              `json:"id"`
 	Message string           `json:"message"`
