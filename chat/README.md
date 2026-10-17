@@ -49,5 +49,13 @@ Words in your message make it ask for things:
   login: the card stays, now saying AgentAPI checks by itself, and the next
   start (about 5 seconds later, or Check again) works
 
+Its settings can change from the composer's menus or slash commands: models
+Swift, Deep and Plain (without efforts) and all four permission modes. In the
+ask mode every turn's first command needs approval; in the plan mode every
+turn ends with a plan, whose approval switches back to bypass. Every turn
+reports a growing simulated context and rate limit usage, and `/compact`
+empties the context. The terminal button opens a real shell in the working
+directory, as for any native agent.
+
 Steering appends to the reply, and Stop ends the turn as interrupted. The
 adapter lives in `lib/native/demo`.
