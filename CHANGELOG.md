@@ -53,6 +53,7 @@
 - The sub-agents (Agents) panel, together with the `GET /agents` endpoint and the `agents_update` SSE event
 
 ### Fixes
+- Chat: the tab title keeps showing the agent's state and task. Shortly after the page loaded, the page's static title replaced it until the state changed again
 - Chat: copy buttons work on pages served over plain HTTP, where the browser has no clipboard API
 - Chat: editing a queued task no longer saves it when Enter confirms an input method's candidate, and a message can't be sent while one of its attachments is still uploading
 - Chat: a question with no options (one that only takes typed text) in an AskUserQuestion or request_user_input call no longer breaks the page

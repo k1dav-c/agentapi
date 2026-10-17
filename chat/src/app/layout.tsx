@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// The tab title is rendered by ChatProvider: it follows the agent's state.
 export const metadata: Metadata = {
-  title: uiCopy.metadata.title,
   description: uiCopy.metadata.description,
 };
 

@@ -148,7 +148,9 @@ function OptionsBody({
               <span className="min-w-0 flex-1">
                 <span className="block font-medium">{withFeedback ? `${option.label} with feedback` : option.label}</span>
                 {option.description && (
-                  <span className={`block text-[11.5px] ${tone === "primary" ? "text-primary-foreground/75" : "text-muted-foreground"}`}>
+                  // Clamped: a permission rule can list long paths, which
+                  // stretched every button of the row. The title shows it all.
+                  <span className={`line-clamp-2 text-[11.5px] [overflow-wrap:anywhere] ${tone === "primary" ? "text-primary-foreground/75" : "text-muted-foreground"}`}>
                     {option.description}
                   </span>
                 )}

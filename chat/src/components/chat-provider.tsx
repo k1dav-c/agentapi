@@ -522,9 +522,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
     .find((message) => message.role === "user")
     ?.content;
 
-  useEffect(() => {
-    document.title = getDocumentTitle({agentState, task: currentTask, customTitle});
-  }, [agentState, currentTask, customTitle]);
+  // Rendered as <title> rather than set on document.title from an effect:
+  // Next re-applies the layout's static title after hydration, which
+  // overwrote the state until it changed again.
+  const documentTitle = getDocumentTitle({agentState, task: currentTask, customTitle});
 
   // The Coder workspace link, when the URL doesn't give one: asked on every
   // connection, so it also shows once the user signed in.
@@ -1204,6 +1205,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         workspaceUrl: workspaceParam ?? serverWorkspaceUrl,
       }}
     >
+      <title>{documentTitle}</title>
       {children}
       <AuthDialog />
     </ChatContext.Provider>

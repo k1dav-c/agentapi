@@ -1,6 +1,7 @@
 import type { AgentStateKind } from "./session-status";
+import { uiCopy } from "./ui-copy";
 
-const DEFAULT_TITLE = "AgentAPI — Live Agent Session";
+const DEFAULT_TITLE = uiCopy.metadata.title;
 const MAX_TASK_LENGTH = 60;
 
 function summarizeTask(content: string) {
