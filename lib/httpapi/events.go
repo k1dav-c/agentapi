@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -119,6 +120,8 @@ type StatusChangeBody struct {
 	// Settings is set for agents whose settings can change (native
 	// transport).
 	Settings *native.Settings `json:"settings,omitempty" doc:"The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only."`
+	// Usage is set once the agent reports it (native transport).
+	Usage *native.AgentUsage `json:"usage,omitempty" doc:"How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only."`
 }
 
 type ScreenUpdateBody struct {
@@ -173,6 +176,7 @@ type EventEmitter struct {
 	capabilities        *native.Capabilities
 	loginRequired       *native.LoginRequired
 	settings            *native.Settings
+	usage               *native.AgentUsage
 	sessionEvents       []jsonlwatcher.SessionEvent
 	nextSessionEventID  int
 	status              AgentStatus
@@ -521,7 +525,7 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 		RunID: e.runID, AgentType: e.agentType, Transport: e.transport, Version: version.Version,
 		TerminalPrompt: e.terminalPrompt, TerminalColumns: e.terminalColumns,
 		SessionName: e.sessionName, PendingRequests: pending, Capabilities: e.capabilities,
-		LoginRequired: e.loginRequired, Settings: e.settings,
+		LoginRequired: e.loginRequired, Settings: e.settings, Usage: e.usage,
 	}
 }
 
@@ -544,6 +548,17 @@ func (e *EventEmitter) SetSettings(settings native.Settings) {
 		return
 	}
 	e.settings = &settings
+	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+}
+
+// SetUsage records the agent's usage of its limits.
+func (e *EventEmitter) SetUsage(usage native.AgentUsage) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.usage != nil && reflect.DeepEqual(*e.usage, usage) {
+		return
+	}
+	e.usage = &usage
 	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
 }
 

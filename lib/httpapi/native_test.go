@@ -531,3 +531,20 @@ func TestNative_SettingsWhileStarting(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, n.do(http.MethodGet, "/settings", nil, nil))
 	assert.Equal(t, http.StatusConflict, n.do(http.MethodPut, "/settings", map[string]any{"model": "plain"}, nil))
 }
+
+func TestNative_Usage(t *testing.T) {
+	n := newNativeServer(t, nil)
+	var status httpapi.StatusChangeBody
+	n.do(http.MethodGet, "/status", nil, &status)
+	assert.Nil(t, status.Usage, "nothing reported yet")
+
+	percent := 27.0
+	n.factory.Last().Sink().(native.UsageSink).UsageChanged(native.AgentUsage{
+		Context:    &native.ContextUsage{Used: 41000, Size: 200000},
+		RateLimits: []native.RateLimit{{ID: "seven_day", Label: "Weekly limit", UsedPercent: &percent}},
+	})
+	n.do(http.MethodGet, "/status", nil, &status)
+	require.NotNil(t, status.Usage)
+	assert.Equal(t, 41000, status.Usage.Context.Used)
+	assert.Equal(t, "Weekly limit", status.Usage.RateLimits[0].Label)
+}

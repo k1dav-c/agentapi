@@ -68,6 +68,24 @@ type agentMessage struct {
 	ErrorMessage string          `json:"errorMessage"`
 	Timestamp    int64           `json:"timestamp"`
 	ToolCallID   string          `json:"toolCallId"`
+	Usage        *messageUsage   `json:"usage"`
+}
+
+// messageUsage is the usage of an assistant message's model call.
+type messageUsage struct {
+	Input       int64 `json:"input"`
+	Output      int64 `json:"output"`
+	CacheRead   int64 `json:"cacheRead"`
+	CacheWrite  int64 `json:"cacheWrite"`
+	TotalTokens int64 `json:"totalTokens"`
+}
+
+// contextTokens is how many tokens the context held after the call.
+func (u *messageUsage) contextTokens() int64 {
+	if u.TotalTokens > 0 {
+		return u.TotalTokens
+	}
+	return u.Input + u.Output + u.CacheRead + u.CacheWrite
 }
 
 // contentBlock is a block of a message's or tool result's content.

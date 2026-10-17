@@ -177,6 +177,9 @@ type Adapter struct {
 	model  string
 	effort string
 	models []claudeModel
+	// usage is the usage the CLI last reported (see usage.go). Read loop
+	// only.
+	usage native.AgentUsage
 
 	exited   chan struct{}
 	exitErr  error
@@ -674,6 +677,8 @@ func (a *Adapter) handleLine(line []byte) {
 		a.sendEvents(events)
 	case "result":
 		a.handleResult(&f)
+	case "rate_limit_event":
+		a.handleRateLimit(f.RateLimitInfo)
 	}
 }
 
@@ -930,5 +935,7 @@ func (a *Adapter) endTurn() {
 	a.mu.Unlock()
 	if active {
 		a.sink.TurnCompleted(result)
+		// Not in the read loop: a write can wait for the CLI.
+		go a.readContextUsage()
 	}
 }

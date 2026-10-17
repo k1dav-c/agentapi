@@ -180,3 +180,22 @@ func TestSettingsLearnedWithTheOptions(t *testing.T) {
 	assert.Equal(t, native.Settings{Model: "fast", Effort: "low"}, got.settings[len(got.settings)-1])
 	assert.Empty(t, got.chosen, "nobody chose it")
 }
+
+func TestUsageOutlivesTheSessionButNotItsContext(t *testing.T) {
+	c, factory, rec := start(t, nil, native.Config{})
+	percent := 12.0
+	usage := native.AgentUsage{
+		Context:    &native.ContextUsage{Used: 1000, Size: 200000},
+		RateLimits: []native.RateLimit{{ID: "five_hour", Label: "5-hour limit", UsedPercent: &percent}},
+	}
+	factory.Last().Sink().(native.UsageSink).UsageChanged(usage)
+	assert.Equal(t, usage, c.Usage())
+	assert.Equal(t, []native.AgentUsage{usage}, rec.get().usage)
+
+	// A new session has an empty context; the account's limits stay.
+	require.NoError(t, c.Restart(context.Background()))
+	assert.Nil(t, c.Usage().Context)
+	assert.Equal(t, usage.RateLimits, c.Usage().RateLimits)
+	got := rec.get().usage
+	assert.Nil(t, got[len(got)-1].Context)
+}

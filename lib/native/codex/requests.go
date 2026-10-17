@@ -594,8 +594,12 @@ func (f formField) convert(answers []string) (any, error) {
 }
 
 // Respond implements native.Adapter.
-func (a *Adapter) Respond(_ context.Context, requestID string, response native.Response) error {
+func (a *Adapter) Respond(ctx context.Context, requestID string, response native.Response) error {
 	a.mu.Lock()
+	if a.planWait != "" && a.planWait == requestID {
+		a.mu.Unlock()
+		return a.answerPlan(ctx, requestID, response)
+	}
 	r := a.requests[requestID]
 	if r == nil || r.answered {
 		a.mu.Unlock()

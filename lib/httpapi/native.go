@@ -64,6 +64,8 @@ func (o *nativeObserver) RequestUpdated(state native.RequestState) { o.emitter.E
 
 func (o *nativeObserver) Settings(settings native.Settings) { o.emitter.SetSettings(settings) }
 
+func (o *nativeObserver) Usage(usage native.AgentUsage) { o.emitter.SetUsage(usage) }
+
 // SettingsChosen is stored so that the agent gets the settings again after
 // AgentAPI restarts.
 func (o *nativeObserver) SettingsChosen(settings native.Settings) {

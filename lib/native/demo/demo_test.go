@@ -24,6 +24,13 @@ type observer struct {
 	rich     map[string]jsonlwatcher.RichMessage
 	requests map[string]native.RequestState
 	logins   []*native.LoginRequired
+	usage    []native.AgentUsage
+}
+
+func (o *observer) Usage(u native.AgentUsage) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.usage = append(o.usage, u)
 }
 
 func (o *observer) Started(native.Capabilities) {}
@@ -296,4 +303,20 @@ func TestPlanModeEndsInBypassOnceApproved(t *testing.T) {
 	require.NoError(t, err)
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
 	assert.Equal(t, native.PermissionModeBypass, c.Settings().PermissionMode)
+}
+
+func TestUsage(t *testing.T) {
+	c, obs := start(t, nil)
+	for i := range 2 {
+		require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: fmt.Sprint("turn ", i)}))
+		require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	}
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+	require.Len(t, obs.usage, 2)
+	assert.Less(t, obs.usage[0].Context.Used, obs.usage[1].Context.Used, "the context grows")
+	assert.Equal(t, 200000, obs.usage[1].Context.Size)
+	require.Len(t, obs.usage[1].RateLimits, 2)
+	assert.Equal(t, "5-hour limit", obs.usage[1].RateLimits[0].Label)
+	assert.Equal(t, c.Usage(), obs.usage[1])
 }

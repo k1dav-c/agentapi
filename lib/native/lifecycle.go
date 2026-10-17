@@ -218,6 +218,12 @@ func (c *Conversation) Restart(ctx context.Context) error {
 	c.sessionRef = ""
 	c.promptSent = false
 	c.resetMessagesLocked()
+	if c.usage.Context != nil {
+		// A new session starts with an empty context.
+		usage := c.usage
+		usage.Context = nil
+		c.setUsageLocked(usage)
+	}
 	gen, runCtx := c.generation, c.ctx
 	c.cfg.Emitter.EmitMessages(nil)
 	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)

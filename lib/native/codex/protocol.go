@@ -53,6 +53,9 @@ type clientInfo struct {
 }
 
 type initializeCapabilities struct {
+	// ExperimentalAPI opts into experimental methods and fields: the plan
+	// collaboration mode.
+	ExperimentalAPI           bool     `json:"experimentalApi,omitempty"`
 	OptOutNotificationMethods []string `json:"optOutNotificationMethods,omitempty"`
 }
 
@@ -112,6 +115,8 @@ type threadStartResponse struct {
 	ApprovalsReviewer string          `json:"approvalsReviewer"`
 	Sandbox           sandboxPolicy   `json:"sandbox"`
 	ReasoningEffort   *string         `json:"reasoningEffort"`
+	// CollaborationMode is the resumed thread's (experimental).
+	CollaborationMode *collaborationMode `json:"collaborationMode"`
 }
 
 // sandboxPolicy is SandboxPolicy, by its type: dangerFullAccess,
@@ -178,6 +183,8 @@ type turnStartParams struct {
 	ApprovalsReviewer string         `json:"approvalsReviewer,omitempty"`
 	Model             string         `json:"model,omitempty"`
 	Effort            string         `json:"effort,omitempty"`
+	// CollaborationMode switches to or from the plan mode (experimental).
+	CollaborationMode *collaborationMode `json:"collaborationMode,omitempty"`
 }
 
 type turnSteerParams struct {
@@ -222,16 +229,18 @@ type errorNotification struct {
 }
 
 type tokenUsageBreakdown struct {
-	InputTokens       int `json:"inputTokens"`
-	CachedInputTokens int `json:"cachedInputTokens"`
-	OutputTokens      int `json:"outputTokens"`
+	TotalTokens       int64 `json:"totalTokens"`
+	InputTokens       int   `json:"inputTokens"`
+	CachedInputTokens int   `json:"cachedInputTokens"`
+	OutputTokens      int   `json:"outputTokens"`
 }
 
 type threadTokenUsageUpdatedNotification struct {
 	ThreadID   string `json:"threadId"`
 	TurnID     string `json:"turnId"`
 	TokenUsage struct {
-		Last tokenUsageBreakdown `json:"last"`
+		Last               tokenUsageBreakdown `json:"last"`
+		ModelContextWindow int64               `json:"modelContextWindow"`
 	} `json:"tokenUsage"`
 }
 

@@ -97,6 +97,8 @@ type turnState struct {
 	// loginReported: the turn failed for want of a login, and the sink
 	// was told.
 	loginReported bool
+	// plan is the plan the turn proposed (in the plan mode).
+	plan string
 }
 
 func (t *turnState) current() *segment { return t.segments[len(t.segments)-1] }

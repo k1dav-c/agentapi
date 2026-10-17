@@ -27,6 +27,7 @@ import type {SendResult, ServerStatus} from "./chat-provider";
 import TextareaAutosize from "react-textarea-autosize";
 import {useChat} from "./chat-provider";
 import {SessionSettings} from "./session-settings";
+import {UsageMeter} from "./usage-meter";
 import {DragDrop} from "./drag-drop";
 import {ImageThumb, useObjectURL} from "./image-preview";
 import {filesToUploadFromPaste, isImageFile, pastedFileName, uploadedImageURL} from "@/lib/uploads";
@@ -812,9 +813,14 @@ export default function MessageInput({
                 </details>
               )}
 
-              <div className="flex items-center justify-end gap-3 border-t bg-muted/25 px-3 py-2">
+              <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 border-t bg-muted/25 px-3 py-2">
 
-                <SessionSettings className="mr-auto" />
+                {/* The agent's settings and usage: a row of their own on a
+                    phone, where they don't fit beside the buttons. */}
+                <div className="mr-auto flex min-w-0 items-center gap-1 empty:hidden max-sm:w-full">
+                  <SessionSettings />
+                  <UsageMeter />
+                </div>
 
                 <div className="flex min-w-0 flex-row items-center gap-2">
                     <Tooltip>

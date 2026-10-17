@@ -180,6 +180,9 @@ func (a *Adapter) handleMessageEnd(msg agentMessage, raw json.RawMessage) {
 			// A retry or a later message replaces an earlier failure.
 			a.loop.stopReason, a.loop.errMessage = msg.StopReason, ""
 		}
+		if msg.Usage != nil && msg.StopReason != "error" && msg.StopReason != "aborted" {
+			a.contextUsed(msg.Usage)
+		}
 	case "toolResult":
 		id = messageID(msg)
 		streamed = a.sent(id)

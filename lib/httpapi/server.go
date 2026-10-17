@@ -920,6 +920,7 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 	resp.Body.Capabilities = snapshot.Capabilities
 	resp.Body.LoginRequired = snapshot.LoginRequired
 	resp.Body.Settings = snapshot.Settings
+	resp.Body.Usage = snapshot.Usage
 	resp.Body.Epoch = s.emitter.Epoch()
 
 	return resp, nil

@@ -103,6 +103,12 @@ func TestReplaySimpleText(t *testing.T) {
 	assert.Equal(t, []string{"simple fixture", "renamed fixture"}, h.sink.names)
 	assert.Equal(t, 1, h.sink.started)
 	assert.Equal(t, []native.TurnResult{{StopReason: "end_turn"}}, h.sink.turnResults())
+	// The context after the reply, in the model's window.
+	require.NotEmpty(t, h.sink.usage)
+	usage := h.sink.usage[len(h.sink.usage)-1].Context
+	require.NotNil(t, usage)
+	assert.Equal(t, 272000, usage.Size)
+	assert.Positive(t, usage.Used)
 
 	final := h.sink.final()
 	require.Len(t, final, 2)

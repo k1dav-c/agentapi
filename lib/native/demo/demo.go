@@ -20,7 +20,8 @@
 //
 // Its settings can change (native.Configurable): in the ask permission
 // mode every turn's first command needs approval, and in the plan mode
-// every turn ends with a plan, whose approval switches to bypass.
+// every turn ends with a plan, whose approval switches to bypass. Every
+// turn reports a growing, simulated context and rate limit usage.
 package demo
 
 import (
@@ -323,9 +324,31 @@ func (a *Adapter) finish(t *turn, result native.TurnResult) {
 		a.active = nil
 	}
 	sink := a.sink
+	turns := a.turns
 	a.mu.Unlock()
 	t.cancel()
+	if usage, ok := sink.(native.UsageSink); ok {
+		usage.UsageChanged(demoUsage(turns, a.now()))
+	}
 	sink.TurnCompleted(result)
+}
+
+// demoUsage is the simulated usage after the nth turn: the context grows
+// with every turn, as do the rate limits.
+func demoUsage(n int, now time.Time) native.AgentUsage {
+	fiveHour, weekly := min(float64(n)*7, 100), min(20+float64(n)*2, 100)
+	fiveHourReset, weeklyReset := now.Add(3*time.Hour).Truncate(time.Minute), now.Add(4*24*time.Hour).Truncate(time.Hour)
+	status := "allowed"
+	if fiveHour >= 80 {
+		status = "allowed_warning"
+	}
+	return native.AgentUsage{
+		Context: &native.ContextUsage{Used: min(18000+n*9500, 200000), Size: 200000},
+		RateLimits: []native.RateLimit{
+			{ID: "five_hour", Label: "5-hour limit", UsedPercent: &fiveHour, ResetsAt: &fiveHourReset, Status: status},
+			{ID: "seven_day", Label: "Weekly limit", UsedPercent: &weekly, ResetsAt: &weeklyReset},
+		},
+	}
 }
 
 // script plays one turn. Sink calls only happen on this goroutine, one

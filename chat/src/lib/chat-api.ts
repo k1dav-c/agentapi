@@ -86,6 +86,29 @@ export interface SettingOptions {
   models: ModelOption[];
 }
 
+// How full the agent's context window is, after its last turn.
+export interface ContextUsage {
+  used: number;
+  size: number;
+}
+
+// One of the account's usage limits.
+export interface RateLimit {
+  id: string;
+  label: string;
+  // 0 to 100; missing when the agent doesn't say.
+  used_percent?: number;
+  resets_at?: string;
+  // Claude Code's: allowed, allowed_warning (close to it), rejected.
+  status?: string;
+}
+
+// What the agent reports of its limits (native transport).
+export interface AgentUsage {
+  context?: ContextUsage;
+  rate_limits?: RateLimit[];
+}
+
 // GET and PUT /settings.
 export interface SettingsResponse {
   settings: AgentSettings;

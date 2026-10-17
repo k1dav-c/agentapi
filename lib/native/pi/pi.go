@@ -167,6 +167,8 @@ type Adapter struct {
 	// nil until listed. See settings.go.
 	settings native.Settings
 	models   []native.ModelOption
+	// contextWindow is the context window of the session's model.
+	contextWindow int64
 
 	// posted carries functions to run on the event loop (see post).
 	posted chan func()

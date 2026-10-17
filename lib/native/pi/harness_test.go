@@ -220,6 +220,7 @@ type recSink struct {
 	started  int
 	logins   []native.LoginRequired
 	settings []native.Settings
+	usage    []native.AgentUsage
 }
 
 func newRecSink(t *testing.T) *recSink { return &recSink{t: t} }
@@ -300,6 +301,13 @@ func (s *recSink) LoginRequired(l native.LoginRequired) {
 	defer s.mu.Unlock()
 	s.logins = append(s.logins, l)
 	s.add("login_required")
+}
+
+func (s *recSink) UsageChanged(usage native.AgentUsage) {
+	defer s.enter()()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.usage = append(s.usage, usage)
 }
 
 func (s *recSink) SettingsChanged(settings native.Settings) {

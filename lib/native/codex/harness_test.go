@@ -104,9 +104,15 @@ type recorder struct {
 	errors      []string
 	events      []jsonlwatcher.SessionEvent
 	logins      []native.LoginRequired
+	settings    []native.Settings
+	usage       []native.AgentUsage
 }
 
-var _ native.Sink = (*recorder)(nil)
+var (
+	_ native.Sink         = (*recorder)(nil)
+	_ native.SettingsSink = (*recorder)(nil)
+	_ native.UsageSink    = (*recorder)(nil)
+)
 
 func newRecorder(t *testing.T) *recorder {
 	return &recorder{t: t, final: map[richKey]jsonlwatcher.RichMessage{}}
@@ -122,6 +128,17 @@ func (r *recorder) enter() func() {
 		r.mu.Unlock()
 		r.busy.Store(false)
 	}
+}
+
+func (r *recorder) UsageChanged(u native.AgentUsage) {
+	defer r.enter()()
+	r.usage = append(r.usage, u)
+}
+
+func (r *recorder) SettingsChanged(s native.Settings) {
+	defer r.enter()()
+	r.settings = append(r.settings, s)
+	r.log = append(r.log, "settings:"+string(s.PermissionMode))
 }
 
 func (r *recorder) TurnStarted() {
@@ -232,7 +249,7 @@ func (r *recorder) snapshot() recorderState {
 		log: slices.Clone(r.log), completions: slices.Clone(r.completions), started: r.started,
 		opened: slices.Clone(r.opened), closed: slices.Clone(r.closed), names: slices.Clone(r.names),
 		refs: slices.Clone(r.refs), errors: slices.Clone(r.errors), events: slices.Clone(r.events),
-		logins: slices.Clone(r.logins),
+		logins: slices.Clone(r.logins), settings: slices.Clone(r.settings),
 	}
 }
 
@@ -247,6 +264,7 @@ type recorderState struct {
 	errors      []string
 	events      []jsonlwatcher.SessionEvent
 	logins      []native.LoginRequired
+	settings    []native.Settings
 }
 
 func (s recorderState) eventsOf(kind string) []jsonlwatcher.SessionEvent {

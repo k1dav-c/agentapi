@@ -47,6 +47,9 @@ type frame struct {
 	PermissionMode string `json:"permissionMode"`
 	Model          string `json:"model"`
 
+	// rate_limit_event
+	RateLimitInfo json.RawMessage `json:"rate_limit_info"`
+
 	// result
 	IsError        bool            `json:"is_error"`
 	Result         json.RawMessage `json:"result"`

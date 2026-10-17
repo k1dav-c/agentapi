@@ -46,6 +46,9 @@ type fakeProcess struct {
 	// settings answers get_settings, which the process answers by itself
 	// and leaves out of written: the applied settings, or none if empty.
 	settings string
+	// contextUsage answers get_context_usage the same way; empty answers
+	// with an error.
+	contextUsage string
 
 	mu         sync.Mutex
 	cond       *sync.Cond
@@ -79,6 +82,8 @@ func (p *fakeProcess) readStdin() {
 			read++
 			if msg["type"] == "control_request" && subtypeOf(msg) == "get_settings" {
 				p.answerGetSettings(msg)
+			} else if msg["type"] == "control_request" && subtypeOf(msg) == "get_context_usage" {
+				p.answerContextUsage(msg)
 			} else {
 				p.mu.Lock()
 				p.written = append(p.written, msg)
@@ -97,6 +102,19 @@ func (p *fakeProcess) readStdin() {
 			return
 		}
 	}
+}
+
+// answerContextUsage answers a get_context_usage request in the
+// background, with contextUsage if set and an error otherwise.
+func (p *fakeProcess) answerContextUsage(request map[string]any) {
+	p.mu.Lock()
+	usage := p.contextUsage
+	p.mu.Unlock()
+	line := fmt.Sprintf(`{"type":"control_response","response":{"subtype":"error","request_id":%q,"error":"not offered"}}`+"\n", request["request_id"])
+	if usage != "" {
+		line = fmt.Sprintf(`{"type":"control_response","response":{"subtype":"success","request_id":%q,"response":%s}}`+"\n", request["request_id"], usage)
+	}
+	go func() { _, _ = p.stdoutW.Write([]byte(line)) }()
 }
 
 // answerGetSettings answers a get_settings request in the background.
@@ -249,6 +267,7 @@ type recSink struct {
 	results  []native.TurnResult
 	logins   []native.LoginRequired
 	settings []native.Settings
+	usage    []native.AgentUsage
 }
 
 func (s *recSink) enter() func() {
@@ -324,6 +343,13 @@ func (s *recSink) LoginRequired(l native.LoginRequired) {
 	s.logins = append(s.logins, l)
 	s.mu.Unlock()
 	s.record("login_required")
+}
+
+func (s *recSink) UsageChanged(usage native.AgentUsage) {
+	defer s.enter()()
+	s.mu.Lock()
+	s.usage = append(s.usage, usage)
+	s.mu.Unlock()
 }
 
 func (s *recSink) SettingsChanged(settings native.Settings) {

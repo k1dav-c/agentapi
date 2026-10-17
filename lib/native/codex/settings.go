@@ -68,6 +68,8 @@ func (a *Adapter) threadSettings(resp threadStartResponse) {
 		Model:          resp.Model,
 		Effort:         effort,
 	}
+	a.collabSet = resp.CollaborationMode != nil
+	a.plan = a.collabSet && resp.CollaborationMode.Mode == collabPlan
 }
 
 // loadModels asks app-server for its models, unless the adapter has them:
@@ -129,7 +131,17 @@ func (a *Adapter) loadModels(ctx context.Context) ([]native.ModelOption, error) 
 func (a *Adapter) Settings() native.Settings {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.settings
+	return a.settingsLocked()
+}
+
+// settingsLocked is a.settings, in the plan mode while the thread plans:
+// a.settings keeps the mode whose policies apply meanwhile.
+func (a *Adapter) settingsLocked() native.Settings {
+	s := a.settings
+	if a.plan {
+		s.PermissionMode = native.PermissionModePlan
+	}
+	return s
 }
 
 // SettingOptions implements native.Configurable.
@@ -139,7 +151,7 @@ func (a *Adapter) SettingOptions(ctx context.Context) (native.SettingOptions, er
 		return native.SettingOptions{}, err
 	}
 	return native.SettingOptions{
-		PermissionModes: []native.PermissionMode{native.PermissionModeBypass, native.PermissionModeAuto, native.PermissionModeAsk},
+		PermissionModes: native.PermissionModeValues,
 		Models:          slices.Clone(models),
 	}, nil
 }
@@ -154,7 +166,7 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if err := options.Check(s, a.settings); err != nil {
+	if err := options.Check(s, a.settingsLocked()); err != nil {
 		return err
 	}
 	if s.Model != "" && s.Effort == "" {
@@ -162,31 +174,64 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 			s.Effort = m.DefaultEffort
 		}
 	}
+	switch {
+	case s.PermissionMode == native.PermissionModePlan:
+		// The policies stay those of the mode before.
+		s.PermissionMode = ""
+		if !a.plan {
+			a.plan = true
+			a.pendingCollab = collabPlan
+		}
+	case s.PermissionMode != "" && a.plan:
+		a.plan = false
+		a.pendingCollab = collabDefault
+	}
 	a.settings = a.settings.Merge(s)
 	a.pending = a.pending.Merge(s)
+	if a.collabSet && a.pendingCollab == "" && (s.Model != "" || s.Effort != "") {
+		// A thread's collaboration mode has a model and effort of its own,
+		// which win over the turn's: it goes again with the new ones.
+		a.pendingCollab = collabDefault
+		if a.plan {
+			a.pendingCollab = collabPlan
+		}
+	}
 	return nil
 }
 
-// takePending returns the settings changes the next turn/start carries and
-// clears them; restorePending puts them back if the turn didn't start.
-func (a *Adapter) takePending(params *turnStartParams) native.Settings {
+// pendingChanges are the settings changes the next turn/start carries.
+type pendingChanges struct {
+	settings native.Settings
+	collab   string
+}
+
+// takePending puts the settings changes in params and clears them;
+// restorePending puts them back if the turn didn't start.
+func (a *Adapter) takePending(params *turnStartParams) pendingChanges {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	pending := a.pending
-	a.pending = native.Settings{}
-	if p, ok := modePolicies(pending.PermissionMode); ok {
+	pending := pendingChanges{settings: a.pending, collab: a.pendingCollab}
+	a.pending, a.pendingCollab = native.Settings{}, ""
+	if p, ok := modePolicies(pending.settings.PermissionMode); ok {
 		params.ApprovalPolicy = p.approval
 		params.SandboxPolicy = &sandboxPolicy{Type: p.sandbox}
 		params.ApprovalsReviewer = p.reviewer
 	}
-	params.Model = pending.Model
-	params.Effort = pending.Effort
+	params.Model = pending.settings.Model
+	params.Effort = pending.settings.Effort
+	if pending.collab != "" {
+		params.CollaborationMode = collaboration(pending.collab, a.settings)
+		a.collabSet = true
+	}
 	return pending
 }
 
-func (a *Adapter) restorePending(pending native.Settings) {
+func (a *Adapter) restorePending(pending pendingChanges) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	// A change made meanwhile wins.
-	a.pending = pending.Merge(a.pending)
+	a.pending = pending.settings.Merge(a.pending)
+	if a.pendingCollab == "" {
+		a.pendingCollab = pending.collab
+	}
 }

@@ -26,6 +26,8 @@ type loopState struct {
 	ended []string
 	// dirty lists messages with changes not sent yet.
 	dirty []*msgState
+	// usage is what app-server reported of the context and rate limits.
+	usage native.AgentUsage
 }
 
 func (s *loopState) now() time.Time { return s.a.cfg.Clock.Now() }
@@ -242,6 +244,8 @@ func (s *loopState) notification(msg rpcMessage) {
 		handle(msg, s.mcpServerStatusUpdated)
 	case "model/rerouted":
 		handle(msg, s.modelRerouted)
+	case "account/rateLimits/updated":
+		handle(msg, s.rateLimitsUpdated)
 	default:
 		s.a.log.Debug("Codex notification", "method", msg.Method)
 	}
@@ -348,7 +352,12 @@ func (s *loopState) outputDelta(d deltaNotification) {
 }
 
 func (s *loopState) tokenUsageUpdated(n threadTokenUsageUpdatedNotification) {
-	if !s.ours(n.ThreadID) || s.turn == nil || s.turn.id != n.TurnID {
+	if !s.ours(n.ThreadID) {
+		return
+	}
+	// The last model call's tokens are what the context holds.
+	s.contextUsed(n.TokenUsage.Last.TotalTokens, n.TokenUsage.ModelContextWindow)
+	if s.turn == nil || s.turn.id != n.TurnID {
 		return
 	}
 	seg := s.turn.current()
@@ -515,6 +524,9 @@ func (s *loopState) itemCompleted(t *turnState, it *threadItem, at time.Time) {
 	case "agentMessage", "plan":
 		state.blk.Text = it.Text
 		s.touch(&state.seg.msgState, true)
+		if it.Type == "plan" {
+			t.plan = it.Text
+		}
 		if strings.TrimSpace(it.Text) != "" {
 			s.textEvent("text", "assistant", it.Text, at, it.ID)
 		}
@@ -657,6 +669,11 @@ func (s *loopState) completeTurn(tr turn) {
 	s.ended = append(s.ended, t.id)
 	if len(s.ended) > endedTurns {
 		s.ended = s.ended[1:]
+	}
+	if status == "completed" && strings.TrimSpace(t.plan) != "" {
+		// The turn goes on once the user decides about the plan.
+		s.awaitPlanDecision(t)
+		return
 	}
 	s.sink().TurnCompleted(result)
 }

@@ -20,6 +20,8 @@ type piModel struct {
 	Name      string   `json:"name"`
 	Input     []string `json:"input"`
 	Reasoning bool     `json:"reasoning"`
+	// ContextWindow is how many tokens the model's context holds.
+	ContextWindow int64 `json:"contextWindow"`
 	// ThinkingLevelMap maps a level to the provider's value; null means
 	// the model doesn't have the level.
 	ThinkingLevelMap map[string]*string `json:"thinkingLevelMap"`
@@ -86,6 +88,32 @@ func stateSettings(state sessionState) native.Settings {
 		settings.Effort = state.ThinkingLevel
 	}
 	return settings
+}
+
+// setContextWindow records the context window of the session's model.
+func (a *Adapter) setContextWindow(state sessionState) {
+	if !state.hasModel() {
+		return
+	}
+	a.mu.Lock()
+	a.contextWindow = state.Model.ContextWindow
+	a.mu.Unlock()
+}
+
+// contextUsed records how full the context is after an assistant message's
+// model call. Event loop only.
+func (a *Adapter) contextUsed(usage *messageUsage) {
+	a.mu.Lock()
+	window := a.contextWindow
+	a.mu.Unlock()
+	tokens := usage.contextTokens()
+	if window <= 0 || tokens <= 0 {
+		return
+	}
+	a.loop.usage.Context = &native.ContextUsage{Used: int(tokens), Size: int(window)}
+	if sink, ok := a.loop.sink.(native.UsageSink); ok {
+		sink.UsageChanged(a.loop.usage)
+	}
 }
 
 // setSettings records the settings, and reports them if report is set and
@@ -189,6 +217,7 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 		return fmt.Errorf("read the settings: %w", err)
 	}
 	a.setSettings(stateSettings(state), false)
+	a.setContextWindow(state)
 	return nil
 }
 

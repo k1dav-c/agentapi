@@ -36,6 +36,8 @@ type Observer interface {
 	// SettingsChosen reports the settings chosen for the session when they
 	// change: what to pass as Config.Settings to continue the session.
 	SettingsChosen(Settings)
+	// Usage reports the agent's usage of its limits when it changes.
+	Usage(AgentUsage)
 }
 
 type nopObserver struct{}
@@ -49,6 +51,7 @@ func (nopObserver) SessionRef(string)                         {}
 func (nopObserver) RequestUpdated(RequestState)               {}
 func (nopObserver) Settings(Settings)                         {}
 func (nopObserver) SettingsChosen(Settings)                   {}
+func (nopObserver) Usage(AgentUsage)                          {}
 
 // Config configures a Conversation.
 type Config struct {
@@ -144,6 +147,10 @@ type Conversation struct {
 	// with Config.Settings), which every agent that starts gets; a setting
 	// the agent changes by itself is changed here too.
 	chosen Settings
+	// usage is what the agent last reported of its usage. The rate limits
+	// are the account's, so they stay for the next agent; the context
+	// belongs to the session.
+	usage AgentUsage
 }
 
 // NewConversation creates a conversation. Nothing runs until Start.
@@ -197,6 +204,18 @@ func (c *Conversation) Settings() Settings {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.settings
+}
+
+// Usage reports the agent's usage of its limits, as it last reported it.
+func (c *Conversation) Usage() AgentUsage {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.usage
+}
+
+func (c *Conversation) setUsageLocked(usage AgentUsage) {
+	c.usage = usage
+	c.cfg.Observer.Usage(usage)
 }
 
 // configurable returns the running agent if its settings can change.

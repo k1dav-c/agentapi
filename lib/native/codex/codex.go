@@ -82,15 +82,15 @@ func NewFactory(cfg Config) (native.Factory, error) {
 }
 
 // optOutNotifications are notifications the adapter doesn't use; some are
-// large (moderation metadata, rate limits).
+// large (moderation metadata).
 var optOutNotifications = []string{
 	"turn/moderationMetadata",
-	"account/rateLimits/updated",
 	"remoteControl/status/changed",
 	"turn/diff/updated",
 	"thread/started",
 	"app/list/updated",
 	"fs/changed",
+	"thread/settings/updated",
 }
 
 // Adapter is a native.Adapter for one `codex app-server` process and one
@@ -134,6 +134,16 @@ type Adapter struct {
 	settings native.Settings
 	pending  native.Settings
 	models   []native.ModelOption
+	// plan: the thread is in the plan collaboration mode, or will be from
+	// the next turn; pendingCollab is the mode the next turn/start
+	// switches to, if any; planWait is the plan request the current turn
+	// waits on. See plan.go.
+	plan          bool
+	pendingCollab string
+	planWait      string
+	// collabSet: the thread has a collaboration mode, which overrides the
+	// model and effort of its turns.
+	collabSet bool
 
 	closeOnce sync.Once
 	// handled counts the messages the read loop has handled.
@@ -292,6 +302,7 @@ func (a *Adapter) handshake(ctx context.Context) error {
 	result, err := a.call(ctx, "initialize", initializeParams{
 		ClientInfo: clientInfo{Name: "agentapi", Title: "AgentAPI", Version: version.Version},
 		Capabilities: initializeCapabilities{
+			ExperimentalAPI:           true,
 			OptOutNotificationMethods: optOutNotifications,
 		},
 	}, nil)
@@ -458,6 +469,11 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 	threadID, turnID, err := a.session()
 	if err != nil {
 		return err
+	}
+	if turnID == "" {
+		if waited, err := a.cancelPlanDecision(ctx); waited {
+			return err
+		}
 	}
 	if turnID == "" || !a.markInterrupting(turnID) {
 		return native.ErrNoActiveTurn

@@ -21,6 +21,8 @@ const abortedRunMessage = "This operation was aborted"
 type loopState struct {
 	sink native.Sink
 	cwd  string
+	// usage is the context usage reported last.
+	usage native.AgentUsage
 
 	sessionName string
 	events      *jsonlwatcher.PiSessionEventParser
@@ -320,6 +322,7 @@ func (a *Adapter) handleState(state sessionState) {
 		a.mu.Unlock()
 	}
 	a.setSettings(stateSettings(state), false)
+	a.setContextWindow(state)
 	a.logger.Info("Pi session open", "session", state.SessionID, "file", state.SessionFile)
 	if state.SessionID != "" {
 		a.loop.sink.SessionRef(state.SessionID)

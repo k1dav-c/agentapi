@@ -33,6 +33,7 @@ type recorded struct {
 	logins       []*native.LoginRequired
 	settings     []native.Settings
 	chosen       []native.Settings
+	usage        []native.AgentUsage
 }
 
 // recorder records what a conversation emits and reports.
@@ -113,6 +114,12 @@ func (r *recorder) SettingsChosen(s native.Settings) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.chosen = append(r.chosen, s)
+}
+
+func (r *recorder) Usage(u native.AgentUsage) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.usage = append(r.usage, u)
 }
 
 // logRecorder is a slog.Handler that keeps the messages logged.
