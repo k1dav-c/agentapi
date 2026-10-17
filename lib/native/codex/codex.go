@@ -632,7 +632,7 @@ func (a *Adapter) read(r io.Reader) {
 		if len(bytes.TrimSpace(line)) > 0 {
 			var msg rpcMessage
 			if jerr := json.Unmarshal(line, &msg); jerr != nil {
-				a.log.Warn("Ignoring a line from codex app-server that is not JSON", "error", jerr, "line", truncate(string(line), 200))
+				a.log.Warn("Ignoring a line from codex app-server that is not JSON", "error", jerr, "line", native.OneLine(string(line), 200))
 			} else {
 				a.inbox <- msg
 			}
@@ -644,13 +644,6 @@ func (a *Adapter) read(r io.Reader) {
 			return
 		}
 	}
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }
 
 // run is the read loop: it handles app-server's messages in order, and

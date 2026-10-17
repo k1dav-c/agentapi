@@ -40,8 +40,23 @@ export function LoginCard() {
   };
 
   return (
-    <DecisionCardShell data-login-required icon={KeyRound} label="Login" title={loginTitle(login)} description={login.message}>
-      <div className="grid gap-2 px-3.5 pb-3 pt-1">
+    <DecisionCardShell
+      data-login-required
+      icon={KeyRound}
+      label="Login"
+      title={loginTitle(login)}
+      description={login.message}
+      footer={
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3.5 pb-3 pt-2">
+          <PrimaryButton onClick={() => void check()} disabled={checking} className="flex min-h-9 items-center gap-1.5 px-3">
+            <RefreshCw className={`size-3.5 ${checking ? "animate-spin" : ""}`} />
+            {checking ? "Checking…" : "Check again"}
+          </PrimaryButton>
+          <CardStatus className="min-w-0 flex-1 text-[11.5px]" status={loginNote(agentStarting)} error={error} />
+        </div>
+      }
+    >
+      <div className="grid gap-2 px-3.5 pb-1 pt-1">
         <div>
           <p className="mb-1 text-[11.5px] text-muted-foreground">
             Run in a terminal{where ? <> <span className="font-medium text-foreground" data-login-where>{where}</span></> : null}:
@@ -49,13 +64,6 @@ export function LoginCard() {
           <CommandBlock command={login.command} copyable />
         </div>
         {login.detail && <MarkdownDetail content={login.detail} small data-login-detail />}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-0.5">
-          <PrimaryButton onClick={() => void check()} disabled={checking} className="flex min-h-9 items-center gap-1.5 px-3">
-            <RefreshCw className={`size-3.5 ${checking ? "animate-spin" : ""}`} />
-            {checking ? "Checking…" : "Check again"}
-          </PrimaryButton>
-          <CardStatus className="min-w-0 flex-1 text-[11.5px]" status={loginNote(agentStarting)} error={error} />
-        </div>
       </div>
     </DecisionCardShell>
   );

@@ -1,6 +1,18 @@
 "use client";
 
-import { useId, type ComponentProps, type ComponentType, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import { Check } from "lucide-react";
 import { ProcessedMessage } from "./processed-message";
 import { CopyButton } from "./message-list/message-item";
@@ -10,9 +22,11 @@ import { cn } from "@/lib/utils";
 // you: its requests (native transport), its terminal prompts (PTY) and the
 // login card.
 
-// An option row on a card, styled by what the option does.
+// An option row on a card, styled by what the option does. It may be
+// narrower than its text (min-w-0), so a long path in a label wraps instead
+// of widening the card past the screen.
 export const optionRowClass =
-  "flex min-h-10 w-full items-center gap-3 rounded-lg border px-2.5 py-1.5 text-left text-[13px] outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60";
+  "flex min-h-10 w-full min-w-0 items-center gap-3 rounded-lg border px-2.5 py-1.5 text-left text-[13px] outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60";
 
 export const TONE_CLASS = {
   primary: "border-primary bg-primary text-primary-foreground hover:bg-primary/90",
@@ -21,9 +35,21 @@ export const TONE_CLASS = {
   neutral: "hover:border-state-needs/60 hover:bg-state-needs/10",
 } as const;
 
+const TitleClamped = createContext(false);
+
+// Whether the card's title is cut at two lines, so what it says in full
+// (a long command) has to be shown below it.
+export function useTitleClamped(): boolean {
+  return useContext(TitleClamped);
+}
+
 // The card: the kind of question in small capitals (with more about it in
-// meta), the title, and aside it e.g. which keys pick an option. Screen
-// readers name the card by its kind and title.
+// meta), the title (two lines at most), and aside it e.g. which keys pick an
+// option. Screen readers name the card by its kind and title.
+//
+// The card never takes more than 60% of a phone's screen (70% on wider
+// ones): the header and children scroll inside it, while the footer (the
+// options and what answers them) stays in view at the bottom.
 export function DecisionCardShell({
   icon: Icon,
   label,
@@ -31,6 +57,7 @@ export function DecisionCardShell({
   title,
   description,
   aside,
+  footer,
   children,
   ...props
 }: {
@@ -40,32 +67,68 @@ export function DecisionCardShell({
   title: ReactNode;
   description?: ReactNode;
   aside?: ReactNode;
-  children: ReactNode;
+  footer?: ReactNode;
+  children?: ReactNode;
 } & Omit<ComponentProps<"section">, "title" | "className">) {
   const id = useId();
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [clamped, setClamped] = useState(false);
+  const [scrolls, setScrolls] = useState(false);
+  const measure = useCallback(() => {
+    const heading = titleRef.current;
+    const body = bodyRef.current;
+    if (heading) setClamped(heading.scrollHeight > heading.clientHeight + 1);
+    if (body) setScrolls(body.scrollHeight > body.clientHeight + 1);
+  }, []);
+  // After every render (the content may have changed), and when the card
+  // is resized.
+  useLayoutEffect(measure);
+  useEffect(() => {
+    const observer = new ResizeObserver(measure);
+    for (const element of [titleRef.current, bodyRef.current, ...Array.from(bodyRef.current?.children ?? [])]) {
+      if (element) observer.observe(element);
+    }
+    return () => observer.disconnect();
+  }, [measure]);
+
   return (
     <section
       {...props}
       aria-labelledby={label ? `${id}-label ${id}-title` : `${id}-title`}
-      className="decision-card overflow-hidden rounded-xl border border-state-needs/45 bg-card shadow-lg shadow-black/5"
+      className="decision-card flex max-h-[60dvh] flex-col overflow-hidden rounded-xl border border-state-needs/45 bg-card shadow-lg shadow-black/5 sm:max-h-[70dvh]"
     >
-      <header className="px-3.5 pb-1 pt-3">
-        {label && (
-          <div className="mb-1 flex items-center gap-1.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-state-needs">
-            {Icon && <Icon className="size-3.5" />}
-            <span id={`${id}-label`}>{label}</span>
-            {meta}
-          </div>
-        )}
-        <div className="flex items-start gap-3">
-          <h2 id={`${id}-title`} className="min-w-0 flex-1 text-sm font-semibold leading-5 [overflow-wrap:anywhere]">
-            {title}
-          </h2>
-          {aside}
+      <TitleClamped.Provider value={clamped}>
+        <div ref={bodyRef} className="min-h-0 overflow-y-auto overscroll-contain">
+          <header className="px-3.5 pb-1 pt-3">
+            {label && (
+              <div className="mb-1 flex items-center gap-1.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-state-needs">
+                {Icon && <Icon className="size-3.5" />}
+                <span id={`${id}-label`}>{label}</span>
+                {meta}
+              </div>
+            )}
+            <div className="flex items-start gap-3">
+              <h2
+                ref={titleRef}
+                id={`${id}-title`}
+                title={clamped && typeof title === "string" ? title : undefined}
+                className="line-clamp-2 min-w-0 flex-1 text-sm font-semibold leading-5 [overflow-wrap:anywhere]"
+              >
+                {title}
+              </h2>
+              {aside}
+            </div>
+            {description && <p className="mt-0.5 text-[13px] text-muted-foreground">{description}</p>}
+          </header>
+          {children}
         </div>
-        {description && <p className="mt-0.5 text-[13px] text-muted-foreground">{description}</p>}
-      </header>
-      {children}
+        {footer && (
+          // Its own limit, so a long list of options can't push the content
+          // out; a rule shows where the content scrolls.
+          <div className={cn("max-h-[35dvh] shrink-0 overflow-y-auto overscroll-contain", scrolls && "border-t")}>{footer}</div>
+        )}
+      </TitleClamped.Provider>
     </section>
   );
 }
@@ -95,7 +158,8 @@ const shellPrompt = (
 export function CommandBlock({ command, copyable = false }: { command: string; copyable?: boolean }) {
   if (!copyable) {
     return (
-      <TerminalBlock>
+      // About 12 lines, then it scrolls.
+      <TerminalBlock className="max-h-60">
         {shellPrompt}
         {command}
       </TerminalBlock>
@@ -113,7 +177,9 @@ export function CommandBlock({ command, copyable = false }: { command: string; c
 }
 
 // Markdown from the agent (a plan, help for a login) in a box that scrolls
-// once it is taller than max-h-32, or a plan's taller limit.
+// once it is taller than max-h-32, or a plan's taller limit. On phones it
+// has no limit of its own: the card scrolls instead, rather than a box
+// inside a box.
 export function MarkdownDetail({
   content,
   tall = false,
@@ -125,7 +191,7 @@ export function MarkdownDetail({
       {...props}
       className={`overflow-auto rounded-md border bg-background px-3 py-2 [&_.prose-transcript]:leading-[1.6] [&_h1]:my-2 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h2]:my-2 [&_h2]:text-[14.5px] [&_h2]:font-semibold [&_h3]:my-1.5 [&_h3]:font-semibold [&_:is(h1,h2,h3):first-child]:mt-0 ${
         small ? "[&_.prose-transcript]:text-[13px]" : "[&_.prose-transcript]:text-[13.5px]"
-      } ${tall ? "max-h-[min(22rem,42dvh)]" : "max-h-32"}`}
+      } ${tall ? "sm:max-h-[min(22rem,42dvh)]" : "sm:max-h-32"}`}
     >
       <ProcessedMessage messageContent={content} isUser={false} renderMode="markdown" />
     </div>

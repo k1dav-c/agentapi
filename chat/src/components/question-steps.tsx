@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check } from "lucide-react";
 import { ChoiceMark, PrimaryButton, TONE_CLASS, optionRowClass } from "./decision-card";
 import { Kbd } from "./ui/kbd";
@@ -18,14 +18,18 @@ import {
 } from "@/lib/native-requests";
 
 // A question request: one step per question, then all answers at once.
+// render lays out the step (it scrolls inside the card) and its buttons
+// (they stay in view).
 export function QuestionSteps({
   request,
   sending,
   onSubmit,
+  render,
 }: {
   request: NativeRequest;
   sending: boolean;
   onSubmit: (response: RequestResponse) => void;
+  render: (body: ReactNode, footer: ReactNode) => ReactNode;
 }) {
   const questions = request.questions ?? [];
   const [drafts, setDrafts] = useState<Record<string, QuestionDraft>>(() => emptyDrafts(request));
@@ -88,11 +92,11 @@ export function QuestionSteps({
     }
   }, [question, options.length]);
 
-  if (!question || !draft) return null;
+  if (!question || !draft) return render(null, null);
   const answered = (index: number) => questionError(questions[index], drafts[questions[index].id]) === null;
 
-  return (
-    <div className="grid gap-2 px-3.5 pb-2 pt-1">
+  const body = (
+    <div className="grid gap-2 px-3.5 pb-1 pt-1">
       {questions.length > 1 && (
         <nav aria-label="Questions" className="flex flex-wrap gap-1">
           {questions.map((item, index) => (
@@ -111,7 +115,7 @@ export function QuestionSteps({
           ))}
         </nav>
       )}
-      <p className="text-[13px] font-medium leading-5">
+      <p className="text-[13px] font-medium leading-5 [overflow-wrap:anywhere]">
         {questions.length > 1 && <span className="mr-1.5 font-mono text-[11px] text-muted-foreground">{step + 1}/{questions.length}</span>}
         {question.question}
       </p>
@@ -131,8 +135,8 @@ export function QuestionSteps({
               >
                 <Kbd>{index + 1}</Kbd>
                 <span className="min-w-0 flex-1">
-                  <span className="block">{option.label}</span>
-                  {option.description && <span className="block text-[11.5px] text-muted-foreground">{option.description}</span>}
+                  <span className="block [overflow-wrap:anywhere]">{option.label}</span>
+                  {option.description && <span className="block text-[11.5px] text-muted-foreground [overflow-wrap:anywhere]">{option.description}</span>}
                 </span>
                 <ChoiceMark checked={checked} round={!question.multi_select} />
               </button>
@@ -164,22 +168,24 @@ export function QuestionSteps({
           />
         </label>
       )}
-      <div className="flex items-center gap-2 pt-0.5">
-        <span id={errorId} className="min-w-0 flex-1 text-[11px] text-destructive" role="alert">{stepError}</span>
-        {step > 0 && (
-          <button
-            type="button"
-            onClick={() => goTo(step - 1)}
-            disabled={sending}
-            className="h-10 rounded-lg border px-3 text-[13px] outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-          >
-            Back
-          </button>
-        )}
-        <PrimaryButton onClick={next} disabled={sending} className="h-10 px-4">
-          {last ? (questions.length > 1 ? "Submit answers" : "Submit answer") : "Next"}
-        </PrimaryButton>
-      </div>
     </div>
   );
+  return render(body, (
+    <div className="flex items-center gap-2 px-3.5 pb-2 pt-2">
+      <span id={errorId} className="min-w-0 flex-1 text-[11px] text-destructive" role="alert">{stepError}</span>
+      {step > 0 && (
+        <button
+          type="button"
+          onClick={() => goTo(step - 1)}
+          disabled={sending}
+          className="h-10 rounded-lg border px-3 text-[13px] outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+        >
+          Back
+        </button>
+      )}
+      <PrimaryButton onClick={next} disabled={sending} className="h-10 px-4">
+        {last ? (questions.length > 1 ? "Submit answers" : "Submit answer") : "Next"}
+      </PrimaryButton>
+    </div>
+  ));
 }

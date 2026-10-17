@@ -1,19 +1,27 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import { ClipboardList, MessageCircleQuestion, ShieldQuestion, X } from "lucide-react";
 import { toast } from "sonner";
 import { useChat } from "./chat-provider";
-import { CardStatus, CommandBlock, DecisionCardShell, MarkdownDetail, TONE_CLASS, optionRowClass } from "./decision-card";
+import {
+  CardStatus,
+  CommandBlock,
+  DecisionCardShell,
+  MarkdownDetail,
+  TONE_CLASS,
+  optionRowClass,
+  useTitleClamped,
+} from "./decision-card";
 import { QuestionSteps } from "./question-steps";
 import { Kbd } from "./ui/kbd";
-import { getToolCommand } from "@/lib/tool-format";
 import { ApiError } from "@/lib/error-utils";
 import { isImeComposing } from "@/lib/keys";
 import { useNumberKeys } from "@/lib/use-number-keys";
 import {
   answerByMessageHint,
+  approvalCommand,
   optionResponse,
   optionTakesFeedback,
   optionTone,
@@ -84,7 +92,9 @@ function RequestCardBody({ request, total }: { request: NativeRequest; total: nu
     }
   };
 
-  return (
+  // The body scrolls inside the card; the footer (what answers the
+  // request, and how sending it went) stays in view.
+  const card = (body: ReactNode, footer: ReactNode) => (
     <DecisionCardShell
       data-request-kind={request.kind}
       icon={meta.icon}
@@ -96,15 +106,28 @@ function RequestCardBody({ request, total }: { request: NativeRequest; total: nu
         </>
       }
       title={request.title}
+      footer={
+        <>
+          {footer}
+          <CardStatus className="px-3.5 pb-3 text-[11px]" status={sending ? "Sending your answer…" : ""} error={error} />
+        </>
+      }
     >
-      {request.kind === "question" ? (
-        <QuestionSteps request={request} sending={sending} onSubmit={respond} />
-      ) : (
-        <OptionsBody request={request} sending={sending} onRespond={respond} />
-      )}
-      <CardStatus className="px-3.5 pb-3 text-[11px]" status={sending ? "Sending your answer…" : ""} error={error} />
+      {body}
     </DecisionCardShell>
   );
+
+  return request.kind === "question" ? (
+    <QuestionSteps request={request} sending={sending} onSubmit={respond} render={card} />
+  ) : (
+    <OptionsBody request={request} sending={sending} onRespond={respond} render={card} />
+  );
+}
+
+// The command an approval runs, unless the title shows all of it.
+function RequestCommand({ request }: { request: NativeRequest }) {
+  const command = approvalCommand(request, useTitleClamped());
+  return command ? <CommandBlock command={command} /> : null;
 }
 
 // An approval or a plan: the context, the options and optional feedback.
@@ -112,24 +135,28 @@ function OptionsBody({
   request,
   sending,
   onRespond,
+  render,
 }: {
   request: NativeRequest;
   sending: boolean;
   onRespond: (response: RequestResponse) => void;
+  render: (body: ReactNode, footer: ReactNode) => ReactNode;
 }) {
   const [feedback, setFeedback] = useState("");
   const options = request.options ?? [];
-  // The command, unless the title already is the command.
-  const toolCommand = request.kind === "approval" ? getToolCommand(request.tool_name ?? "", request.input) : undefined;
-  const command = toolCommand && !request.title.includes(toolCommand) ? toolCommand : undefined;
   const feedbackOption = options.find((option) => optionTakesFeedback(request, option));
   const choose = (option: RequestOption) => onRespond(optionResponse(request, option, feedback));
   useNumberKeys(options.length, (index) => choose(options[index]));
 
-  return (
-    <div className="grid gap-2 px-3.5 pb-2 pt-1">
-      {command && <CommandBlock command={command} />}
+  const body = (
+    // Hidden when there is nothing in it.
+    <div className="grid gap-2 px-3.5 pb-1 pt-1 empty:hidden">
+      {request.kind === "approval" && <RequestCommand request={request} />}
       {request.detail && <MarkdownDetail content={request.detail} tall={request.kind === "plan"} data-request-detail />}
+    </div>
+  );
+  return render(body, (
+    <div className="grid gap-2 px-3.5 pb-2 pt-2">
       <div className={`grid gap-1.5 ${options.length <= 3 ? "sm:grid-flow-col sm:auto-cols-fr" : ""}`}>
         {options.map((option, index) => {
           const tone = optionTone(option.kind);
@@ -146,7 +173,7 @@ function OptionsBody({
             >
               <Kbd inverted={tone === "primary"}>{index + 1}</Kbd>
               <span className="min-w-0 flex-1">
-                <span className="block font-medium">{withFeedback ? `${option.label} with feedback` : option.label}</span>
+                <span className="block font-medium [overflow-wrap:anywhere]">{withFeedback ? `${option.label} with feedback` : option.label}</span>
                 {option.description && (
                   // Clamped: a permission rule can list long paths, which
                   // stretched every button of the row. The title shows it all.
@@ -184,5 +211,5 @@ function OptionsBody({
         </label>
       )}
     </div>
-  );
+  ));
 }

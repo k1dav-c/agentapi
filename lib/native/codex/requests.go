@@ -21,6 +21,18 @@ const (
 	methodPermissions        = "item/permissions/requestApproval"
 )
 
+// joinDetail adds more to a request's detail.
+func joinDetail(detail, more string) string {
+	if detail == "" || more == "" {
+		return detail + more
+	}
+	return detail + "\n\n" + more
+}
+
+// maxTitleRunes bounds a request's title, which the chat shows as the
+// card's heading; the rest is in its input or detail.
+const maxTitleRunes = 120
+
 // JSON-RPC error codes for the server requests AgentAPI declines.
 const (
 	errCodeMethodNotFound = -32601
@@ -124,10 +136,11 @@ func (s *loopState) commandApproval(msg rpcMessage) (*pendingRequest, native.Req
 		return nil, native.Request{}, false
 	}
 	// The command that runs, not Codex's reading of it: that may leave out
-	// parts (pipes, the cd of `cd dir && ...`).
+	// parts (pipes, the cd of `cd dir && ...`). The title is its first line;
+	// the input has all of it.
 	command := unwrapShell(p.Command)
 	req := native.Request{
-		Kind: native.RequestKindApproval, Title: command, ToolName: "exec_command",
+		Kind: native.RequestKindApproval, Title: native.OneLine(command, maxTitleRunes), ToolName: "exec_command",
 		ToolUseID: p.ItemID, Input: commandInput(p.Command, p.CWD),
 	}
 	var detail []string
@@ -350,7 +363,7 @@ func (s *loopState) userInputRequest(msg rpcMessage) (*pendingRequest, native.Re
 		}
 		req.Questions = append(req.Questions, nq)
 	}
-	req.Title = p.Questions[0].Question
+	req.Title = native.OneLine(p.Questions[0].Question, maxTitleRunes)
 	if len(p.Questions) > 1 {
 		req.Title = fmt.Sprintf("Codex asks %d questions", len(p.Questions))
 	}
@@ -372,9 +385,11 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 		return nil, native.Request{}, false
 	}
 	r := &pendingRequest{turnID: p.TurnID, results: map[string]any{}}
-	req := native.Request{Kind: native.RequestKindApproval, Title: p.Message}
+	req := native.Request{Kind: native.RequestKindApproval, Title: native.OneLine(p.Message, maxTitleRunes)}
 	if req.Title == "" {
 		req.Title = fmt.Sprintf("The %s MCP server asks for input", p.ServerName)
+	} else if req.Title != strings.TrimSpace(p.Message) {
+		req.Detail = p.Message
 	}
 	// An MCP tool call waiting for approval: the latest open call of that
 	// server in the turn.
@@ -395,7 +410,7 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 	}
 	switch {
 	case p.Mode == "url":
-		req.Detail = "Open " + p.URL
+		req.Detail = joinDetail(req.Detail, "Open "+p.URL)
 		addOption(&req, r, native.RequestOption{ID: "accept", Label: "Continue", Description: "After completing the step at the link", Kind: native.OptionKindAllow},
 			mcpServerElicitationResponse{Action: "accept"})
 	case len(properties) == 0 || (p.Meta != nil && p.Meta.ApprovalKind == "mcp_tool_call"):
@@ -410,7 +425,7 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 				}
 				detail = append(detail, "Arguments: "+string(p.Meta.ToolParams))
 			}
-			req.Detail = strings.Join(detail, "\n")
+			req.Detail = joinDetail(req.Detail, strings.Join(detail, "\n"))
 		}
 		addOption(&req, r, native.RequestOption{ID: "accept", Label: "Allow", Kind: native.OptionKindAllow},
 			mcpServerElicitationResponse{Action: "accept", Content: map[string]any{}})

@@ -2,6 +2,7 @@ import {describe, expect, test} from "bun:test";
 import {ApiError} from "./error-utils";
 import {
   answerByMessageHint,
+  approvalCommand,
   buildQuestionResponse,
   emptyDrafts,
   mergeListedRequests,
@@ -228,5 +229,36 @@ describe("respondErrorMessage", () => {
     expect(respondErrorMessage(new ApiError("request not found", 404))).toBe("The agent no longer has this request.");
     expect(respondErrorMessage(new ApiError("bad answer", 400))).toBe("bad answer");
     expect(respondErrorMessage(new Error("offline"))).toBe("offline");
+  });
+});
+
+describe("approvalCommand", () => {
+  const approval = (title: string, input: unknown, tool_name = "exec_command") => ({kind: "approval" as const, title, tool_name, input});
+  const longScript = "node <<'JS'\n" + Array.from({length: 60}, (_, i) => `await run('task-${i}');`).join("\n") + "\nJS";
+
+  test("not when the title shows the whole command", () => {
+    expect(approvalCommand(approval("go test ./...", {cmd: "go test ./..."}), false)).toBeUndefined();
+    expect(approvalCommand(approval("Run go test ./... in lib", {command: "go test ./..."}, "Bash"), false)).toBeUndefined();
+  });
+
+  test("a title that is or contains a long command still shows it in full", () => {
+    const oneLine = "node -e '" + "x();".repeat(500) + "'";
+    expect(approvalCommand(approval(oneLine, {cmd: oneLine}), false)).toBe(oneLine);
+    expect(approvalCommand(approval(longScript, {command: longScript}), false)).toBe(longScript);
+  });
+
+  test("a title cut at two lines shows the command", () => {
+    expect(approvalCommand(approval("rm -rf build && make all", {cmd: "rm -rf build && make all"}), true)).toBe("rm -rf build && make all");
+  });
+
+  test("a title that summarizes the command (Codex), with the command in the input as cmd or command", () => {
+    const summary = "node <<'JS' await run('task-0'); … (62 lines)";
+    expect(approvalCommand(approval(summary, {cmd: longScript}), false)).toBe(longScript);
+    expect(approvalCommand(approval(summary, {command: longScript}), false)).toBe(longScript);
+  });
+
+  test("only approvals with a command", () => {
+    expect(approvalCommand({kind: "plan", title: "Approve the plan?", tool_name: "ExitPlanMode", input: {plan: "x"}}, true)).toBeUndefined();
+    expect(approvalCommand(approval("Edit calc.py", {file_path: "/w/calc.py"}, "Edit"), true)).toBeUndefined();
   });
 });

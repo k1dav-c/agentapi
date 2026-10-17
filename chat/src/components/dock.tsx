@@ -118,43 +118,45 @@ export function DecisionCard({ onOpenTerminal }: { onOpenTerminal?: () => void }
           )}
         </span>
       }
-    >
-      {context.length > 0 && <TerminalBlock className="mx-3.5 mb-2 mt-1.5">{context.slice(0, 8).join("\n")}</TerminalBlock>}
-      <div className="grid gap-1.5 px-3.5 pb-3">
-        {options.length > 0 ? (
-          options.map((option, index) => (
-            <button
-              key={`${option.key}-${index}`}
-              type="button"
-              disabled={sent}
-              role={option.checked === undefined ? undefined : "checkbox"}
-              aria-checked={option.checked}
-              onClick={() => choose(option.key)}
-              className={`${optionRowClass} ${TONE_CLASS.neutral}`}
-            >
-              <Kbd>{/^\d+$/.test(option.key) ? option.key : index + 1}</Kbd>
-              <span className="min-w-0 flex-1">{option.label}</span>
-              {option.checked !== undefined && <ChoiceMark checked={option.checked} />}
-            </button>
-          ))
-        ) : (
-          <p className="text-xs text-muted-foreground">This prompt needs typed input.</p>
-        )}
-        {multi && (
-          <PrimaryButton disabled={sent} onClick={continueMulti} className="min-h-10 px-3">
-            Continue
-          </PrimaryButton>
-        )}
-        <div className="flex items-center justify-between gap-3 pt-0.5 text-[11px] text-muted-foreground">
-          <span role="status">{sent ? "Answer sent. Waiting for the agent…" : ""}</span>
-          {onOpenTerminal && (
-            <button type="button" onClick={onOpenTerminal} className="flex items-center gap-1 rounded outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-              <TerminalSquare className="size-3.5" />
-              Answer in the terminal
-            </button>
+      footer={
+        <div className="grid gap-1.5 px-3.5 pb-3 pt-2">
+          {options.length > 0 ? (
+            options.map((option, index) => (
+              <button
+                key={`${option.key}-${index}`}
+                type="button"
+                disabled={sent}
+                role={option.checked === undefined ? undefined : "checkbox"}
+                aria-checked={option.checked}
+                onClick={() => choose(option.key)}
+                className={`${optionRowClass} ${TONE_CLASS.neutral}`}
+              >
+                <Kbd>{/^\d+$/.test(option.key) ? option.key : index + 1}</Kbd>
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{option.label}</span>
+                {option.checked !== undefined && <ChoiceMark checked={option.checked} />}
+              </button>
+            ))
+          ) : (
+            <p className="text-xs text-muted-foreground">This prompt needs typed input.</p>
           )}
+          {multi && (
+            <PrimaryButton disabled={sent} onClick={continueMulti} className="min-h-10 px-3">
+              Continue
+            </PrimaryButton>
+          )}
+          <div className="flex items-center justify-between gap-3 pt-0.5 text-[11px] text-muted-foreground">
+            <span role="status">{sent ? "Answer sent. Waiting for the agent…" : ""}</span>
+            {onOpenTerminal && (
+              <button type="button" onClick={onOpenTerminal} className="flex items-center gap-1 rounded outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+                <TerminalSquare className="size-3.5" />
+                Answer in the terminal
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      }
+    >
+      {context.length > 0 && <TerminalBlock className="mx-3.5 mb-1 mt-1.5">{context.slice(0, 8).join("\n")}</TerminalBlock>}
     </DecisionCardShell>
   );
 }

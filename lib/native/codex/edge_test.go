@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -411,6 +412,30 @@ func TestCommandApprovalShowsTheCommand(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "git -c core.pager=cat log", req.Title, "not a shell wrapper")
 	assert.Equal(t, "Working directory: /work", req.Detail)
+}
+
+// A long command (a script in a heredoc) would fill the chat's request
+// card; the title is its first line, the input has all of it.
+func TestLongCommandApprovalTitle(t *testing.T) {
+	h := newHarness(t, "", nil)
+	h.boot()
+	h.beginTurn("turn-1")
+	script := "node <<'JS'\n" + strings.Repeat("assert.equal(element('score').textContent, '010');", 40) + "\nJS"
+	params, err := json.Marshal(map[string]any{
+		"threadId": testThread, "turnId": "turn-1", "itemId": "exec-1", "command": script, "cwd": "/work",
+	})
+	require.NoError(t, err)
+	h.feedJSON(`{"id":0,"method":"item/commandExecution/requestApproval","params":` + string(params) + `}`)
+	h.sync()
+
+	req, ok := h.rec.request(h.requestID(json.RawMessage("0")))
+	require.True(t, ok)
+	assert.Equal(t, "node <<'JS' …", req.Title)
+	var input struct {
+		Cmd string `json:"cmd"`
+	}
+	require.NoError(t, json.Unmarshal(req.Input, &input))
+	assert.Equal(t, script, input.Cmd)
 }
 
 func TestPermissionsRequest(t *testing.T) {

@@ -3,6 +3,7 @@
 // event, and the logic to answer them.
 
 import {ApiError} from "./error-utils";
+import {getToolCommand} from "./tool-format";
 
 export type RequestKind = "approval" | "question" | "plan";
 export type OptionKind = "allow" | "allow_always" | "deny" | "cancel" | "other";
@@ -184,6 +185,25 @@ export function optionTone(kind: OptionKind): "primary" | "secondary" | "destruc
 // what to do instead, so it goes with a refusal.
 export function optionTakesFeedback(request: NativeRequest, option: RequestOption): boolean {
   return Boolean(request.feedback) && (option.kind === "deny" || option.kind === "cancel");
+}
+
+// Commands this long (or on several lines) are shown in full under an
+// approval's title even when the title has them: it shows two lines at most.
+const LONG_COMMAND = 120;
+
+// The command an approval runs, to show under its title: unless the title
+// shows all of it (it has the command, which is short, and isn't cut off at
+// two lines). A Codex approval's title may only summarize a long command,
+// which is in the input.
+export function approvalCommand(
+  request: Pick<NativeRequest, "kind" | "title" | "tool_name" | "input">,
+  titleClamped: boolean,
+): string | undefined {
+  if (request.kind !== "approval") return undefined;
+  const command = getToolCommand(request.tool_name ?? "", request.input);
+  if (!command) return undefined;
+  const long = command.length > LONG_COMMAND || command.includes("\n");
+  return request.title.includes(command) && !long && !titleClamped ? undefined : command;
 }
 
 // The response for picking an option of an approval or plan request.

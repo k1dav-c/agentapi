@@ -37,7 +37,7 @@ func TestResponseTakesOfferedOptions(t *testing.T) {
 
 func TestInputSummary(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "ls -la", inputSummary(json.RawMessage(`{"command":"ls -la\necho done","description":"List"}`)))
+	assert.Equal(t, "ls -la …", inputSummary(json.RawMessage(`{"command":"ls -la\necho done","description":"List"}`)))
 	assert.Equal(t, "/tmp/a.go", inputSummary(json.RawMessage(`{"file_path":"/tmp/a.go"}`)))
 	assert.Empty(t, inputSummary(json.RawMessage(`{"todos":[]}`)))
 
@@ -45,5 +45,5 @@ func TestInputSummary(t *testing.T) {
 	summary := inputSummary(json.RawMessage(fmt.Sprintf(`{"command":%q}`, "echo "+strings.Repeat("中文", 100))))
 	assert.True(t, utf8.ValidString(summary))
 	assert.Equal(t, 120, utf8.RuneCountInString(summary))
-	assert.True(t, strings.HasSuffix(summary, "中文..."))
+	assert.True(t, strings.HasSuffix(summary, "…"))
 }

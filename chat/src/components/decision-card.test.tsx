@@ -25,6 +25,18 @@ describe("DecisionCardShell", () => {
     expect(html).toContain("Run make release</h2>");
   });
 
+  test("the title is clamped to two lines, and the footer stays out of the scrolling body", () => {
+    const html = renderToStaticMarkup(
+      <DecisionCardShell title="Run make release" footer={<button type="button">Allow</button>}>
+        <p>context</p>
+      </DecisionCardShell>,
+    );
+    expect(html).toContain("max-h-[60dvh]");
+    expect(html).toMatch(/<h2[^>]*class="line-clamp-2 /);
+    // The body (header and children) scrolls; the footer follows it.
+    expect(html).toMatch(/overflow-y-auto[^"]*"><header[\s\S]*<p>context<\/p><\/div><div class="[^"]*shrink-0[^"]*"><button type="button">Allow<\/button>/);
+  });
+
   test("without a kind it is named by the title", () => {
     const html = renderToStaticMarkup(<DecisionCardShell title="Do you want to proceed?"><p /></DecisionCardShell>);
     const label = referenced(html, "aria-labelledby");
