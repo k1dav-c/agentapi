@@ -262,13 +262,6 @@ interface ChatContextValue {
   reconnectNow: () => void;
   downloadSession: () => Promise<void>;
   deleteMessages: () => Promise<void>;
-  getTemporal: ReturnType<typeof createChatAPI>["getTemporal"];
-  updateTemporal: ReturnType<typeof createChatAPI>["updateTemporal"];
-  getTemporalProfiles: ReturnType<typeof createChatAPI>["getTemporalProfiles"];
-  saveTemporalProfile: ReturnType<typeof createChatAPI>["saveTemporalProfile"];
-  importTemporalProfiles: ReturnType<typeof createChatAPI>["importTemporalProfiles"];
-  deleteTemporalProfile: ReturnType<typeof createChatAPI>["deleteTemporalProfile"];
-  applyTemporalProfile: ReturnType<typeof createChatAPI>["applyTemporalProfile"];
   getMCP: () => Promise<MCPConfig>;
   updateMCP: (
     servers: Record<string, unknown>,
@@ -1185,13 +1178,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
           setRichMessages([]);
           setRequests([]);
         },
-        getTemporal: api.getTemporal,
-        updateTemporal: api.updateTemporal,
-        getTemporalProfiles: api.getTemporalProfiles,
-        saveTemporalProfile: api.saveTemporalProfile,
-        importTemporalProfiles: api.importTemporalProfiles,
-        deleteTemporalProfile: api.deleteTemporalProfile,
-        applyTemporalProfile: api.applyTemporalProfile,
         getMCP: api.getMCP,
         updateMCP: api.updateMCP,
         checkMCP: api.checkMCP,

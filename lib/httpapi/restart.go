@@ -19,7 +19,7 @@ func (s *Server) deleteMessages(ctx context.Context, _ *struct{}) (*DeleteMessag
 	if !s.canRestart() {
 		return nil, huma.Error400BadRequest("agent restart is not supported in this server mode")
 	}
-	// Serialize process replacement with browser and Discord input delivery.
+	// Serialize process replacement with message and handoff reply delivery.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

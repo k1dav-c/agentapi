@@ -3,7 +3,6 @@
 import {useEffect, useMemo, useRef, useState} from "react";
 import {
   Activity,
-  BellRing,
   Download,
   ExternalLink,
   FileText,
@@ -23,7 +22,6 @@ import {toast} from "sonner";
 import {editableMCPServers} from "@/lib/mcp-sample";
 import {useChat} from "./chat-provider";
 import {useFileViewer} from "./file-viewer-context";
-import {TemporalSettings} from "./temporal-settings";
 import {Button} from "./ui/button";
 import {
   Dialog,
@@ -304,7 +302,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
         <DialogHeader className="border-b px-5 py-4 pr-12">
           <DialogTitle>Explorer</DialogTitle>
           <DialogDescription>
-            Jump to a task or link, or open a file. Agent settings are under MCP, Temporal and Session.
+            Jump to a task or link, or open a file. Agent settings are under MCP and Session.
           </DialogDescription>
         </DialogHeader>
         <Tabs
@@ -313,12 +311,11 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
           className="min-h-0 flex-1 gap-0"
         >
           <div className="border-b px-3 py-2">
-            <TabsList className="grid w-full grid-cols-6">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="index"><ListTree /><span className="max-sm:sr-only">Index</span></TabsTrigger>
               <TabsTrigger value="files"><FileText /><span className="max-sm:sr-only">Files</span></TabsTrigger>
               <TabsTrigger value="links"><LinkIcon /><span className="max-sm:sr-only">Links</span></TabsTrigger>
               <TabsTrigger value="mcp"><Server /><span className="max-sm:sr-only">MCP</span></TabsTrigger>
-              <TabsTrigger value="temporal"><BellRing /><span className="max-sm:sr-only">Temporal</span></TabsTrigger>
               <TabsTrigger value="session"><RotateCw /><span className="max-sm:sr-only">Session</span></TabsTrigger>
             </TabsList>
             {["index", "files", "links"].includes(activeTab) && (
@@ -561,9 +558,6 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                 </p>
               </div>
             )}
-          </TabsContent>
-          <TabsContent value="temporal" className="min-h-0 overflow-y-auto overscroll-contain p-4">
-            <TemporalSettings />
           </TabsContent>
           <TabsContent value="session" className="min-h-0 overflow-y-auto overscroll-contain p-4">
             <div className="space-y-3">

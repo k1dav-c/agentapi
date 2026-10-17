@@ -101,7 +101,7 @@ func isTerminalQuestionText(content, lower string) bool {
 	return containsAny(lower, terminalQuestionKeywords) && len(terminalOption.FindAllString(content, -1)) >= 2
 }
 
-// Only expose deliberate, bounded terminal actions. Discord text never becomes
+// Only expose deliberate, bounded terminal actions. Reply text never becomes
 // arbitrary terminal escape sequences. The browser's terminal remains available
 // for unsupported prompts.
 //

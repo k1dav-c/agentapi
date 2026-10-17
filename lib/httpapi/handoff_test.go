@@ -74,14 +74,14 @@ func TestHandoffReplyDeduplicatesAndInvalidates(t *testing.T) {
 	pending, err := s.getPendingHandoff(t.Context(), nil)
 	require.NoError(t, err)
 	require.NotNil(t, pending.Body.Request)
-	request := &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.Body.Request.ID, ID: "discord-1", Content: "continue"}}
+	request := &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.Body.Request.ID, ID: "reply-1", Content: "continue"}}
 	for range 2 {
 		result, err := s.replyHandoff(t.Context(), request)
 		require.NoError(t, err)
 		require.Equal(t, "applied", result.Body.Outcome)
 	}
 	require.Equal(t, 1, c.sends)
-	request.Body.ID = "discord-2"
+	request.Body.ID = "reply-2"
 	result, err := s.replyHandoff(t.Context(), request)
 	require.NoError(t, err)
 	require.Equal(t, "superseded", result.Body.Outcome)
@@ -96,7 +96,7 @@ func TestHandoffBrowserReplyWins(t *testing.T) {
 	require.NotNil(t, pending)
 	_, err := s.createMessage(t.Context(), &MessageRequest{Body: MessageRequestBody{Type: MessageTypeUser, Content: "from browser"}})
 	require.NoError(t, err)
-	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: "discord-1", Content: "stale"}})
+	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: "reply-1", Content: "stale"}})
 	require.NoError(t, err)
 	require.Equal(t, "superseded", result.Body.Outcome)
 	require.Equal(t, 1, c.sends)

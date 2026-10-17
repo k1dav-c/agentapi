@@ -41,7 +41,7 @@ The Session Explorer provides:
 - an index for jumping directly to earlier tasks;
 - Markdown preview and export for individual tasks;
 - access to the live terminal when the parsed conversation is not sufficient;
-- MCP server and Temporal/Discord configuration without leaving the chat UI;
+- MCP server configuration without leaving the chat UI;
 - a Session tab with a two-step Restart (open the Explorer with ⌘K / Ctrl+K).
 
 Each message has its own markdown/raw toggle so you can switch render
@@ -233,12 +233,12 @@ Tool approvals, questions (Claude's `AskUserQuestion`, Codex's
   way still counts if the agent takes it.
 - Answers to secret questions are stored and reported as `[redacted]`; only the
   agent gets them.
-- The Discord bridge's `/handoff` offers the oldest pending request with
-  numbered choices: a number picks an option, other text answers a single
-  question or goes with the deny option as feedback. A reply answers exactly
-  the request that was offered; if that one was answered or withdrawn
-  meanwhile, the reply is `superseded`, and one the request can't take is
-  `invalid`.
+- The [human-reply API](#human-reply-api) (`/handoff`) offers the oldest
+  pending request with numbered choices: a number picks an option, other text
+  answers a single question or goes with the deny option as feedback. A reply
+  answers exactly the request that was offered; if that one was answered or
+  withdrawn meanwhile, the reply is `superseded`, and one the request can't
+  take is `invalid`.
 
 In the chat, requests dock above the composer as a decision card. Approvals
 show the command and options styled by what they do (allow, always allow,
@@ -570,8 +570,7 @@ native-transport restart doesn't run these updates.
 
 AgentAPI can send an HTTP POST whenever a run changes between `running` and
 `stable`. Webhooks can be initialized with CLI flags or `AGENTAPI_WEBHOOK_*`
-environment variables, then inspected or changed through `GET/PUT /webhook` or
-the Session Explorer.
+environment variables, then inspected or changed through `GET/PUT /webhook`.
 
 Delivery runs asynchronously with a configurable timeout and retry count.
 An optional Go `text/template` payload template lets you reshape the POST body
@@ -585,19 +584,24 @@ agentapi server \
   -- claude
 ```
 
-### Discord replies through Temporal
+### Human-reply API
 
-The optional `agentapi discord` service lets you continue the same agent session
-from Discord after closing the web UI. It starts a Temporal workflow for a pending
-response, sends a bot notification, and waits for a `human_response` signal when
-an allowed Discord user replies to that notification. A worker Activity then
-submits the reply to AgentAPI. The web UI remains usable throughout.
+Another client, such as a chat bot, can answer the agent without the web UI.
+While the agent waits for you, `GET /handoff` returns what it waits on, with an
+`id` and a `kind`: its latest response (`message`), the terminal prompt it is
+showing (`terminal`) or, with the native transport, the oldest pending request
+(`request`). Otherwise it returns `{"request": null}`.
 
-This supports ordinary conversational follow-ups, recognized numbered PTY
-confirmation dialogs and, with the native transport, pending
-[requests](#requests-approvals-questions-and-plans). Notifications are independent of browser presence.
-AgentAPI and the bridge must remain running; Temporal preserves workflow state,
-not the agent's terminal process. See [setup, configuration and limitations](docs/discord-temporal.md).
+`POST /handoff/reply` with that `request_id`, a unique reply `id` and the
+`content` answers it. A reply to a response is sent as a normal user message,
+and a reply to a request answers it as described under
+[Requests](#requests-approvals-questions-and-plans). A terminal prompt takes a
+displayed option number, `enter` or `esc`, or free text where the prompt has a
+text field (such as Claude Code's plan feedback). The `outcome` is `applied`,
+`superseded` (no longer open, for example because it was answered in the web
+UI), `invalid` (the reply doesn't fit; it stays open) or `uncertain`, and
+nothing is answered twice. Combined with the run-status webhooks above, an
+integration can tell you when the agent stops and pass your answer back.
 
 ### Self-update
 
@@ -980,10 +984,8 @@ The equivalent environment variables are `AGENTAPI_WEBHOOK_URL`,
 `AGENTAPI_WEBHOOK_MAX_ATTEMPTS`. The timeout defaults to `10s`, and delivery is
 attempted up to 3 times.
 
-The initial webhook values can still be changed while AgentAPI is running with
-`GET/PUT /webhook`. Session Explorer now uses its Temporal tab for Temporal and
-Discord bridge settings. The legacy webhook API remains available for
-compatibility, but is no longer the Session Explorer integration.
+The initial webhook values can be changed while AgentAPI is running with
+`GET/PUT /webhook`.
 
 The request body has this format:
 

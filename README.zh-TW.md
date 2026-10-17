@@ -36,7 +36,7 @@ Codex 和 Pi 自己的結構化協定來驅動它們，同時把 AgentAPI 擴充
 - 可直接跳到先前任務的索引；
 - 單一任務的 Markdown 預覽與匯出；
 - 當解析出來的對話不夠用時，可以直接存取即時終端機；
-- 不必離開聊天介面就能設定 MCP 伺服器和 Temporal/Discord；
+- 不必離開聊天介面就能設定 MCP 伺服器；
 - 提供兩步驟重新啟動（Restart）的 Session 分頁（用 ⌘K / Ctrl+K 開啟 Explorer）。
 
 每則訊息都有自己的 markdown/raw 切換開關，可以個別切換顯示模式，不會影響對話的其他部分。
@@ -181,10 +181,10 @@ agent 並接續它的工作階段，對話內容會保留。之後有模型完�
   `message`，核准和計畫則變成 `not_resumable`。已經在送達途中的答案，只要 agent 收下仍然
   算數。
 - 祕密問題的答案在保存和回報時都會換成 `[redacted]`，只有 agent 會收到原本的答案。
-- Discord 橋接的 `/handoff` 會提供最早的待處理請求，並附上編號選項：輸入數字選擇選項，
-  其他文字則用來回答單一提問，或作為拒絕選項的回饋。回覆只會回答當初提供的那個請求；
-  如果它在這段期間已被回覆或撤回，回覆結果是 `superseded`，請求無法接受的回覆則是
-  `invalid`。
+- [人工回覆 API](#人工回覆-api)（`/handoff`）會提供最早的待處理請求，並附上編號選項：輸入
+  數字選擇選項，其他文字則用來回答單一提問，或作為拒絕選項的回饋。回覆只會回答當初
+  提供的那個請求；如果它在這段期間已被回覆或撤回，回覆結果是 `superseded`，請求無法
+  接受的回覆則是 `invalid`。
 
 在聊天介面中，請求會以決策卡片停靠在輸入框上方。核准請求會顯示指令，選項依作用（允許、
 一律允許、拒絕）套用不同樣式，拒絕時可以附上回饋；計畫以 Markdown 顯示，可以核准或附上
@@ -441,7 +441,7 @@ API 和 Session Explorer 支援：
 
 每當執行狀態在 `running` 和 `stable` 之間切換時，AgentAPI 可以送出 HTTP POST。
 Webhook 可以用 CLI 旗標或 `AGENTAPI_WEBHOOK_*` 環境變數初始化，之後再透過
-`GET/PUT /webhook` 或 Session Explorer 查看或修改。
+`GET/PUT /webhook` 查看或修改。
 
 傳送是非同步進行的，逾時時間和重試次數都可以設定。你也可以選擇提供 Go `text/template`
 payload 範本，依照接收端的需求調整 POST 內容 —— 可用的欄位有 `.ID`、`.Type`、`.CreatedAt`、
@@ -454,17 +454,20 @@ agentapi server \
   -- claude
 ```
 
-### 透過 Temporal 從 Discord 回覆
+### 人工回覆 API
 
-選用的 `agentapi discord` 服務讓你在關掉網頁介面後，還能從 Discord 繼續同一個 agent
-工作階段。它會為待處理的回應啟動一個 Temporal workflow、送出機器人通知，並在允許的
-Discord 使用者回覆該通知時，等待 `human_response` signal。接著由 worker Activity 把回覆
-送進 AgentAPI。過程中網頁介面仍然可以正常使用。
+其他用戶端（例如聊天機器人）不必透過網頁介面也能回覆 agent。agent 在等你時，
+`GET /handoff` 會回傳它在等的東西，並附上 `id` 和 `kind`：它最新的回應（`message`）、
+它正在顯示的終端機提示（`terminal`），或使用 native transport 時最早的待處理請求
+（`request`）；否則回傳 `{"request": null}`。
 
-這支援一般的對話追問、可辨識的 PTY 編號確認對話框，以及使用 native transport 時待處理的
-[請求](#請求核准提問與計畫)。通知和瀏覽器是否開著無關。
-AgentAPI 和橋接服務都必須持續執行；Temporal 保存的是 workflow 狀態，而不是 agent 的
-終端機行程。請參閱[安裝、設定與限制](docs/discord-temporal.md)。
+帶著該 `request_id`、一個唯一的回覆 `id` 和 `content` 呼叫 `POST /handoff/reply`，
+就能回覆它。對一般回應的回覆會當成一般的使用者訊息送出；對請求的回覆則依
+[請求](#請求核准提問與計畫)一節所述回答該請求。終端機提示接受畫面上顯示的選項編號、
+`enter` 或 `esc`；提示有文字欄位時（例如 Claude Code 的計畫回饋），也可以輸入自由
+文字。`outcome` 為 `applied`、`superseded`（已不再開啟，例如已在網頁介面回覆）、
+`invalid`（回覆不符合，仍保持開啟）或 `uncertain`，而且不會被回覆兩次。搭配上面的
+執行狀態 webhook，整合服務就能在 agent 停下來時通知你，並把你的回覆傳回來。
 
 ### 自我更新
 
@@ -816,9 +819,7 @@ agentapi server \
 `AGENTAPI_WEBHOOK_TIMEOUT` 和 `AGENTAPI_WEBHOOK_MAX_ATTEMPTS`。逾時時間預設為 `10s`，
 最多嘗試傳送 3 次。
 
-AgentAPI 執行期間，仍然可以透過 `GET/PUT /webhook` 修改初始的 webhook 設定值。
-Session Explorer 現在改用它的 Temporal 分頁來設定 Temporal 和 Discord 橋接。舊版的
-webhook API 為了相容性仍然可以使用，但已不再是 Session Explorer 的整合方式。
+AgentAPI 執行期間，可以透過 `GET/PUT /webhook` 修改初始的 webhook 設定值。
 
 請求內容的格式如下：
 

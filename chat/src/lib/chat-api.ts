@@ -1,4 +1,3 @@
-import type {TemporalConfig, TemporalConfigResponse, TemporalProfilesResponse} from "./temporal-config";
 import {authFetch, withAuthRetry} from "./auth";
 import type {
   FileUploadResponse,
@@ -104,8 +103,6 @@ interface RequestOptions {
   fallback: string;
 }
 
-const TEMPORAL_FAILED = "Temporal settings request failed";
-
 export function createChatAPI(baseURL: string) {
   // A request to the API: the JSON it answers with, or an ApiError with the
   // server's message and the status. A 401 that is left after authFetch
@@ -129,34 +126,6 @@ export function createChatAPI(baseURL: string) {
   return {
     async deleteMessages(): Promise<void> {
       await jsonRequest("/messages", {method: "DELETE", fallback: "Failed to delete messages and restart the agent"});
-    },
-
-    getTemporal(): Promise<TemporalConfigResponse> {
-      return jsonRequest("/temporal", {fallback: TEMPORAL_FAILED});
-    },
-
-    updateTemporal(config: TemporalConfig): Promise<TemporalConfigResponse> {
-      return jsonRequest("/temporal", {method: "PUT", body: {config}, fallback: TEMPORAL_FAILED});
-    },
-
-    getTemporalProfiles(): Promise<TemporalProfilesResponse> {
-      return jsonRequest("/temporal/profiles", {fallback: TEMPORAL_FAILED});
-    },
-
-    saveTemporalProfile(name: string, config: TemporalConfig): Promise<TemporalProfilesResponse> {
-      return jsonRequest(`/temporal/profiles/${encodeURIComponent(name)}`, {method: "PUT", body: {config}, fallback: TEMPORAL_FAILED});
-    },
-
-    importTemporalProfiles(profiles: Record<string, TemporalConfig>): Promise<TemporalProfilesResponse> {
-      return jsonRequest("/temporal/profiles", {method: "PUT", body: {profiles}, fallback: TEMPORAL_FAILED});
-    },
-
-    deleteTemporalProfile(name: string): Promise<TemporalProfilesResponse> {
-      return jsonRequest(`/temporal/profiles/${encodeURIComponent(name)}`, {method: "DELETE", fallback: TEMPORAL_FAILED});
-    },
-
-    applyTemporalProfile(name: string): Promise<TemporalConfigResponse> {
-      return jsonRequest(`/temporal/profiles/${encodeURIComponent(name)}/apply`, {method: "POST", fallback: TEMPORAL_FAILED});
     },
 
     getMCP(): Promise<MCPConfig> {

@@ -12,7 +12,7 @@ import {RequestCard} from "./request-card";
 import {LoginCard} from "./login-card";
 import {BackgroundAlerts} from "./background-alerts";
 
-// The Explorer (task index, MCP and Temporal settings) isn't needed for the
+// The Explorer (task index, MCP settings) isn't needed for the
 // first paint, so it loads right after, keeping the initial bundle small.
 // The placeholder matches its trigger button.
 const Explorer = dynamic(() => import("./explorer").then((module) => module.Explorer), {

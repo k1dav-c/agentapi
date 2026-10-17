@@ -82,7 +82,6 @@ type Server struct {
 	messageQueue       []QueuedMessage
 	mcpStore           mcpconfig.Store
 	mcpMu              sync.Mutex
-	temporalMu         sync.Mutex
 	webhook            *webhookDispatcher
 	handoffSuppressed  string
 	handoffReceipts    map[string]handoffReceipt
@@ -765,7 +764,6 @@ func sseMiddleware(ctx huma.Context, next func(huma.Context)) {
 // registerRoutes sets up all API endpoints
 func (s *Server) registerRoutes() {
 	s.registerAuthRoutes()
-	s.registerTemporalRoutes()
 	s.registerNativeRoutes()
 	s.registerFileRoutes()
 	huma.Get(s.api, "/handoff", s.getPendingHandoff)
