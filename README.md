@@ -104,7 +104,9 @@ Relevant APIs include:
 With `?sync=1`, events also carry SSE ids (the end of the replay has the
 replay's `seq`, later changes their own), so a plain `EventSource` that
 reconnects by itself resumes from its `Last-Event-ID`; put the `epoch` from
-`GET /status` in the URL.
+`GET /status` in the URL. When a message is taken back (a turn the agent
+refused to start), the conversation gets a new epoch and connected clients
+receive a `session_sync` with `full: true` followed by the whole state.
 
 ### Native transport
 
@@ -132,13 +134,33 @@ agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6
   `--transport native --type custom -- native-demo` runs a simulated one (see
   [chat/README.md](chat/README.md)).
 - Text and thinking grow live: a rich message is replaced as a whole as it
-  streams (at most ten snapshots a second per message). For Claude Code,
-  AgentAPI asks for summarized adaptive thinking; every Codex turn asks for
-  detailed reasoning summaries; Pi's thinking streams as Pi writes it.
+  streams (at most ten snapshots a second per message, and the latest state
+  within 100 ms when the stream pauses). For Claude Code, AgentAPI asks for
+  summarized adaptive thinking; every Codex turn asks for detailed reasoning
+  summaries; Pi's thinking streams as Pi writes it.
 - `GET /status` reports `transport` (`native`), the agent's `capabilities` and
   `pending_requests`, and `status_change` events carry the transport too.
   While the agent waits only on a request, `status` is `stable`, as it is for
   a terminal dialog.
+- The agent runs in its own process group, so the MCP servers and commands it
+  started stop with it. Stopping it (AgentAPI exits, or a restart) closes its
+  input so it can finish on its own, then sends SIGTERM after 3 s and SIGKILL
+  2 s later.
+- Started from inside another agent's session (for example by Claude Code's
+  Bash tool), the agent would inherit the variables that session sets for the
+  commands it runs, one of them a secret. AgentAPI removes them, whichever
+  agent it runs: Claude Code's (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`,
+  `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`,
+  `CLAUDE_CODE_SESSION_ATTENDED`, `CLAUDE_CODE_EXECPATH`,
+  `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
+  `CLAUDE_CODE_SSE_PORT`, `CLAUDE_PID`, `CLAUDE_EFFORT`,
+  `CLAUDE_AGENT_SDK_VERSION`, `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS`,
+  `CLAUDE_CODE_SDK_READS_SESSION_STATE`), Codex's (`CODEX_THREAD_ID`,
+  `CODEX_SANDBOX`, `CODEX_SANDBOX_NETWORK_DISABLED`, `CODEX_CI`,
+  `CODEX_INTERNAL_ORIGINATOR_OVERRIDE`, `CODEX_TUI_RECORD_SESSION`,
+  `CODEX_TUI_SESSION_LOG_PATH`), `PI_CODING_AGENT` and `AI_AGENT`.
+  Configuration such as `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+  `PI_CODING_AGENT_DIR` or `ANTHROPIC_*` is kept.
 
 #### Logging in
 
@@ -159,7 +181,9 @@ once in PTY mode).
 
 AgentAPI checks the login when it starts the agent: Claude Code with
 `claude auth status --json` (an API key, `CLAUDE_CODE_OAUTH_TOKEN`, an
-`apiKeyHelper`, Bedrock and Vertex count as logged in), Codex with
+`apiKeyHelper`, Bedrock and Vertex count as logged in; with `--settings` the
+check is skipped, because `auth status` can't see an `apiKeyHelper` given
+that way), Codex with
 app-server's `account/read`, and Pi from its state (no model and no available
 models). If the agent isn't logged in, AgentAPI keeps running instead of
 exiting: `GET /status` and `status_change` report `login_required` (the agent,
@@ -167,15 +191,20 @@ what is wrong, the command to run, more help, and the host and user to run it
 on and as), the chat docks a card with the command and a copy button above the
 composer, and messages sent meanwhile wait in the queue. AgentAPI starts the
 agent again every 5 seconds, so it notices the login by itself; **Check
-again** in the chat (`POST /login/retry`) checks right away. When the check
-itself fails (an older CLI, a wrapper program), the agent starts as before.
+again** in the chat (`POST /login/retry`) checks right away (a start that is
+under way is that check). Warnings the agent prints while it starts are shown
+once, not on every retry. When the check itself fails (an older CLI, a
+wrapper program), the agent starts as before.
 
 A login can also stop working while the agent runs (an expired token, a
 revoked key). A turn that fails with a login error (`Not logged in`, an HTTP
 401, `Invalid API key`, a refresh token that no longer works, Pi's
-`No API key found`) reports `login_required` the same way. Log in, then press
-Check again (`POST /login/retry`): AgentAPI restarts the agent, which resumes
-its session, and the conversation stays. A turn that works clears it too.
+`No API key found` or, for an expired subscription login,
+`Authentication failed for "<provider>"`) reports `login_required` the same
+way. Log in, then press Check again (`POST /login/retry`): AgentAPI restarts
+the agent, which resumes its session, and the conversation stays. A turn the
+model completes clears it too (not an interrupted turn, nor a message the
+agent handled itself).
 
 #### Requests: approvals, questions and plans
 
@@ -192,50 +221,67 @@ Tool approvals, questions (Claude's `AskUserQuestion`, Codex's
   plans (with optional `text` as feedback when the request has `feedback`),
   `answers` keyed by question ID for questions. A request is answered at most
   once: 409 when it is no longer pending (already answered, withdrawn or
-  expired), 400 when the answer doesn't fit the request.
+  expired, also for a request restored from `--state-db`), 400 when the
+  answer doesn't fit the request.
 - Each request has a `status` (`pending`, `resolved`, `withdrawn`, `expired`)
   and a `response_capability`: `live` (the agent is waiting), `message` (the
-  agent stopped waiting; answer with a new message) or `not_resumable` (the
-  agent that asked exited or was restarted). When a turn ends, its open
-  questions become `message` and its approvals and plans `not_resumable`.
+  agent stopped waiting; answer with a new message) or `not_resumable` (it
+  can't be answered any more: the agent that asked exited or was restarted,
+  or stopped waiting for an approval or plan). When the agent stops waiting
+  for a request (it withdraws it, or the turn ends), questions become
+  `message` and approvals and plans `not_resumable`. An answer already on its
+  way still counts if the agent takes it.
 - Answers to secret questions are stored and reported as `[redacted]`; only the
   agent gets them.
 - The Discord bridge's `/handoff` offers the oldest pending request with
   numbered choices: a number picks an option, other text answers a single
-  question or goes with the deny option as feedback.
+  question or goes with the deny option as feedback. A reply answers exactly
+  the request that was offered; if that one was answered or withdrawn
+  meanwhile, the reply is `superseded`, and one the request can't take is
+  `invalid`.
 
 In the chat, requests dock above the composer as a decision card. Approvals
 show the command and options styled by what they do (allow, always allow,
 deny), with optional feedback sent along with a denial; plans render as
 Markdown and can be approved or sent back with feedback; questions take one
 step each (single or multiple choice, typed or hidden answers) and are
-submitted together. Number keys pick options. The tool call's row says whether
-it waits for approval, was approved or was denied, and `AskUserQuestion`,
-`request_user_input` and `ExitPlanMode` calls are answered on the card only. A
-request answered elsewhere or no longer pending leaves the card, and a question
-the agent stopped waiting for points out that a normal message can still
-answer it. The header, tab title, tab icon and notifications say "Needs you"
-while a request is pending.
+submitted together. Number keys pick options, except while you type or while
+a dialog, a menu or the terminal has the focus, and a held key doesn't repeat.
+The tool call's row says whether it waits for approval, was approved or was
+denied, and `AskUserQuestion`, `request_user_input` and `ExitPlanMode` calls
+are answered on the card only. A request answered elsewhere or no longer
+pending leaves the card, and a question the agent stopped waiting for (it
+expired with the turn, or the agent withdrew it) points out that a normal
+message can still answer it. The header, tab title, tab icon, the embed status
+bar and notifications say "Needs you" while a request is pending.
 
 #### Steer, interrupt and the queue
 
 - `POST /message` takes `dispatch_mode`: `queue` (the default, as on every
   transport: send the message once the agent is idle), `steer` (add it to the
   turn the agent is working on; the reply says `steered`) or `interrupt` (stop
-  that turn and send the message next). When no turn is running, both send the
-  message as usual. They need the native transport and the matching
-  capability, otherwise the answer is 400.
-- `POST /interrupt` stops the running turn (409 if there is none).
+  that turn and send the message next). They need the native transport. While
+  a turn runs they also need the matching capability, otherwise the answer is
+  400; when no turn is running (also while the agent restarts or waits for a
+  login), both send or queue the message as usual.
+- `POST /interrupt` stops the running turn (409 if there is none, or while no
+  agent runs).
 - `POST /queue/{id}/steer` moves a queued message into the running turn (409
   if no turn is running; the message stays queued).
 - `PUT /queue` with `{"ids": [...]}` reorders the queue. It must list every
   queued message once (409 otherwise). This works on every transport.
+- A queued message the agent refuses is tried again, up to 5 times, then
+  dropped with an error that quotes it. One the agent didn't answer in time is
+  dropped at once: it may have reached the agent, and sending it again could
+  run the task twice.
 
 `GET /status` reports `capabilities`: `steer`, `interrupt`, `resume` (the
 session can be resumed when AgentAPI starts again, see
 [Persistent sessions](#persistent-sessions)) and `images` (image attachments,
 `@"<path>"` references to PNG, JPEG, GIF or WebP files up to 10 MB, are sent
-to the agent as images as well as paths).
+to the agent as images as well as paths; to an agent without it, only the
+paths are sent). While no agent runs (a restart, a wait for a login), it
+reports what the last one supported.
 
 In the chat, while the agent works, the send button's menu adds **Steer**
 (⌘/Ctrl+Enter) and **Interrupt & send** (⌘/Ctrl+Shift+Enter) next to queueing
@@ -248,9 +294,9 @@ steered in right away, and moved up and down on every transport.
 messages (tool calls, thinking), the timeline, requests and the queue, plus
 the agent's own session ID. When AgentAPI starts again with the same file, the
 chat shows the conversation as it was, queued messages are still queued, and
-the agent resumes its session, so it remembers the conversation too. Browser
-caches stay valid, because the conversation keeps its epoch. Without
-`--state-db`, every start of AgentAPI is a new agent session.
+the agent resumes its session, so it remembers the conversation too. After a
+clean shutdown browser caches stay valid, because the conversation keeps its
+epoch. Without `--state-db`, every start of AgentAPI is a new agent session.
 
 ```bash
 agentapi server --transport native --state-db ~/.agentapi/myproject.db -- claude
@@ -261,10 +307,17 @@ agentapi server --transport native --state-db ~/.agentapi/myproject.db -- claude
 - Uploads are kept next to the file (`<file>.uploads`), because messages refer
   to them by path.
 - A file belongs to one agent type, transport and working directory; AgentAPI
-  refuses to start with another one's file.
-- Restart (Explorer → Restart, `DELETE /messages`) clears the stored
-  conversation and starts a new session.
+  refuses to start with another one's file. It is locked while AgentAPI runs,
+  so a second AgentAPI (or `sqlite3`) can't open it.
+- A new file is created readable by its owner only (0600), and missing
+  directories are created (0700).
+- Restart (Explorer → Restart, `DELETE /messages`, or `?restart=true` on the
+  MCP endpoints) clears the stored conversation and the queue and starts a
+  new session.
 - Writes are batched every 200 ms, so streaming doesn't wait for the disk.
+  After a crash the last of them may be missing, so the conversation gets a
+  new epoch and clients load it again in full. Writes that keep failing are
+  reported as an error.
 - `--state-db` needs `--transport native`. With the PTY transport the agent
   can't resume its session; `--state-file` still saves the screen-derived
   messages there. The native transport doesn't take `--state-file`.
@@ -285,12 +338,14 @@ has its model, stop reason and token usage.
   Claude revise the plan and ask again.
 
 Claude Code supports `steer` (a steered message joins the running turn at
-Claude's next step), `interrupt`, `resume` and `images`. The session name is
-the title Claude Code generates after the first prompt. A turn ends when
-Claude Code reports it is idle, so a background subagent and the turn it wakes
-up when it finishes belong to the turn that started it; the subagent's own
-steps are left out of the conversation, as in the session log, and its tool
-call shows as running until it reports.
+Claude's next step), `interrupt` (if Claude Code doesn't end the interrupted
+turn within 10 s, AgentAPI ends it), `resume` and `images`. The session name
+is the title Claude Code generates after the first prompt; after `/clear` the
+new session is titled too, and it is the one `--state-db` resumes. A turn
+ends when Claude Code reports it is idle, so a background subagent and the
+turn it wakes up when it finishes belong to the turn that started it; the
+subagent's own steps are left out of the conversation, as in the session log,
+and its tool call shows as running until it reports.
 
 Command line and environment:
 
@@ -302,38 +357,37 @@ Command line and environment:
   so tools run without asking; questions (AskUserQuestion) and plans
   (ExitPlanMode) still come as requests, and approving a plan offers to keep
   bypassing. Pass `--permission-mode default` (or `acceptEdits`, `plan`, …) to
-  approve tool calls from the chat. It also adds `--thinking adaptive
-  --thinking-display summarized` (without it thinking is empty). Your
-  `--permission-mode`, `--dangerously-skip-permissions`, `--thinking`,
-  `--max-thinking-tokens` or `--thinking-display` wins.
+  approve tool calls from the chat. Claude Code refuses
+  `bypassPermissions` as root outside a sandbox, so when AgentAPI runs as
+  root it adds `--permission-mode default` instead and logs a warning; set
+  `IS_SANDBOX=1` in a sandbox, or choose a mode yourself
+  (`--allow-dangerously-skip-permissions` alone still makes Claude Code exit
+  as root). It also adds `--thinking adaptive --thinking-display summarized`
+  (without it thinking is empty). Your `--permission-mode`,
+  `--dangerously-skip-permissions`, `--thinking`, `--max-thinking-tokens` or
+  `--thinking-display` wins.
 - Flags that conflict with the protocol or the session AgentAPI manages are
   rejected at startup: `-p`/`--print`, `--output-format`, `--input-format`,
   `-r`/`--resume`, `-c`/`--continue`, `--session-id`, `--fork-session`,
   `--from-pr`, `--teleport`, `--permission-prompt-tool`,
-  `--permission-prompts`, `--bg`/`--background`, `--cloud`, `--desktop` and
-  `--remote-control`. Your own copies of `--verbose`,
+  `--permission-prompts`, `--bg`/`--background`, `--cloud`/`--remote`,
+  `--desktop`, `--remote-control`/`--rc`, `--sdk-url`, `--resume-session-at`
+  and `--resume-drops-turn`, also inside a group of short flags such as
+  `-pc`. Your own copies of `--verbose`,
   `--include-partial-messages` and `--replay-user-messages` are dropped.
   Everything else (`--model`, `--allowedTools`, `--mcp-config`,
   `--append-system-prompt`, ...) is passed through.
-- Started from inside a Claude Code session (for example by its Bash tool),
-  the child would inherit that session's variables. AgentAPI removes
-  `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`,
-  `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ATTENDED`,
-  `CLAUDE_CODE_EXECPATH`, `CLAUDE_CODE_MESSAGING_SOCKET`,
-  `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_PID`,
-  `CLAUDE_EFFORT`, `CLAUDE_AGENT_SDK_VERSION`, `AI_AGENT` and
-  `CLAUDE_CODE_SDK_READS_SESSION_STATE`, and sets
+- Besides removing a parent agent session's variables (see
+  [Native transport](#native-transport)), AgentAPI sets
   `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` and
-  `CLAUDE_CODE_ENTRYPOINT=sdk-cli`. Configuration such as `CLAUDE_CONFIG_DIR`
-  and `ANTHROPIC_*` is kept.
+  `CLAUDE_CODE_ENTRYPOINT=sdk-cli`.
 
 Resuming a session keeps Claude's context; Claude Code doesn't replay the
 earlier messages, so the chat shows them only from the `--state-db` file. A
 session can be resumed once it had a turn; with `--no-session-persistence` it
 can't, and `resume` is false. Requests still open when Claude Code exits or
-restarts can't be answered anymore. Stopping closes Claude Code's input so it
-finishes on its own, then sends SIGTERM after 3 s and SIGKILL 2 s later. Slash
-commands that need the interactive UI don't work.
+restarts can't be answered anymore. Slash commands that need the interactive
+UI don't work.
 
 #### Codex
 
@@ -357,6 +411,9 @@ Codex's command line after `codex` is handled like this:
   sandbox_mode=...`). Codex 0.160 refuses `approval_policy = "untrusted"` in
   its config, so use `-a untrusted` for that policy.
 - `--no-alt-screen`, `--no-daemon` and `--stdio` are ignored.
+- Short flags take attached values as Codex does (`-mo3`, `-m=o3`); a value
+  on a switch (`--dangerously-bypass-approvals-and-sandbox=false`) is
+  rejected.
 - A prompt, a subcommand (other than `app-server`), `-p`/`--profile`,
   `-i`/`--image`, `--oss`, `--local-provider`, `--search`, `--add-dir`,
   `--approve-for-me`, `--dangerously-bypass-hook-trust`, `--remote`,
@@ -367,10 +424,16 @@ Codex's command line after `codex` is handled like this:
 
 Codex supports `steer`, `interrupt`, `resume` and `images`. Command, file-edit
 and MCP tool approvals, permission requests, MCP form elicitations and
-`request_user_input` questions (plan mode) arrive as requests; their option
-IDs are Codex's own decisions (`accept`, `acceptForSession`,
-`acceptWithExecpolicyAmendment`, `decline`, `cancel`, …), nothing is approved
-automatically, and requests AgentAPI can't show are declined. A steered message
+`request_user_input` questions arrive as requests (Codex asks those questions
+in plan mode, which AgentAPI doesn't turn on; with codex-cli 0.160,
+`--enable default_mode_request_user_input` lets Codex ask them in the default
+mode). Their option IDs are Codex's own decisions (`accept`,
+`acceptForSession`, `acceptWithExecpolicyAmendment`, `decline`, `cancel`, …),
+nothing is approved automatically, and requests AgentAPI can't show are
+declined. A command approval shows the command that runs, without the shell
+wrapper; Codex's reading of it (files it reads, searches) is in the detail.
+Requests still open when a turn ends are declined (MCP elicitations
+cancelled), so neither Codex nor an MCP server keeps waiting. A steered message
 joins the running turn at Codex's next model request (the current output keeps
 streaming); the reply to it is filed under the steering message. An interrupt
 ends the turn within milliseconds, and tool calls it cut short show as failed.
@@ -387,9 +450,7 @@ starts, so restart the agent to apply changes.
 
 Slash commands (`/model`, `/review`, …) are not available. Command output
 streams as a preview that Codex may leave incomplete, and the full output
-replaces it when the command ends. Variables a parent Codex session sets
-(`CODEX_THREAD_ID`, `CODEX_SANDBOX`, …) are removed from app-server's
-environment.
+replaces it when the command ends.
 
 #### Pi
 
@@ -401,10 +462,11 @@ stdout).
   refuses options that pick the mode or the session or make Pi exit (`--mode`,
   `--print`/`-p`, `--session`, `--session-id`, `--continue`/`-c`,
   `--resume`/`-r`, `--fork`, `--no-session`, `--export`, `--list-models`,
-  `--help`/`-h`, `--version`/`-v`), `@file` arguments, messages after `--` and
-  subcommands (`pi install`, `remove`, `uninstall`, `update`, `list`,
-  `config`, `auth`, `mcp`), with an error that names the option. It drops the
-  TUI-only `--tui-mode` and `--use-theme`. Everything else is passed on
+  `--help`/`-h`, `--version`/`-v`), `@file` arguments, messages (after `--` or
+  as bare arguments, which RPC mode would ignore) and subcommands
+  (`pi install`, `remove`, `uninstall`, `update`, `list`, `config`, `auth`,
+  `mcp`), with an error that names the option. It drops the TUI-only
+  `--tui-mode` and `--use-theme` with their values. Everything else is passed on
   (`--provider`, `--model`, `--thinking`, `--session-dir`, `-e`, `--approve`,
   extension flags); `--flag=value` is split for Pi's built-in options, which
   Pi only reads in the two-token form. Set the thinking level with
@@ -412,8 +474,9 @@ stdout).
 - **Capabilities.** Steer (`dispatch_mode: "steer"` is sent as a prompt with
   `streamingBehavior: "steer"`), interrupt (`POST /interrupt` sends `abort`; the
   turn ends as interrupted, without the "This operation was aborted" error Pi
-  adds when it aborts during a tool), resume, and images (attached images go to
-  Pi as base64 `images`; reported only when the model accepts images).
+  adds when it aborts during a tool, and if Pi doesn't end the turn within 10
+  seconds AgentAPI ends it), resume, and images (attached images go to Pi as
+  base64 `images`; reported unless Pi says its model doesn't take images).
 - **Messages.** Text and thinking stream into the rich messages as they arrive,
   bash output streams into the tool result, and the final messages have the
   same shape as the ones parsed from Pi's session log. Images in tool results
@@ -423,7 +486,12 @@ stdout).
   `confirm` while a tool runs is an approval of that tool call (option IDs are
   the extension's labels), any `confirm` takes `yes`/`no`, and other dialogs
   are questions (`choice` or `value`; option `cancel` dismisses them). A dialog
-  Pi times out is withdrawn. An extension's `notify` with level error shows as
+  Pi times out is withdrawn. Dialogs still open when the turn ends expire with
+  it, like other agents' requests (a question can then be answered with a
+  message), and the extension gets a cancel; interrupting an extension command
+  that waits on a dialog withdraws the dialog. An extension command that runs
+  without a model turn ends with the stop reason `handled`. An extension's
+  `notify` with level error shows as
   an error, and its `setTitle` stands in for the session name until Pi has one;
   Pi's own name (`--name`, renames) is the session name.
 - **Resume.** Pi's session ID is the session reference. Resuming starts Pi with
@@ -431,25 +499,24 @@ stdout).
   keeps the context; Pi doesn't replay earlier messages, so the chat shows them
   only from the `--state-db` file.
 - **Shutdown.** Stopping AgentAPI (or a restart) aborts a running turn first,
-  so the session log doesn't end in a tool call without result, then closes
-  stdin, then sends SIGTERM and SIGKILL to Pi's process group if it doesn't
-  exit.
-- **Environment and commands.** Pi's TUI commands (`/settings`, `/login` and
-  the like) are unavailable; extension slash commands work. Variables that
-  mark a parent agent session (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`,
-  `CODEX_THREAD_ID`, `PI_CODING_AGENT`, `AI_AGENT`) are removed from Pi's
-  environment.
+  so the session log doesn't end in a tool call without result, then stops Pi
+  as described in [Native transport](#native-transport).
+- **Commands.** Pi's TUI commands (`/settings`, `/login` and the like) are
+  unavailable; extension slash commands work.
 
 #### Limitations
 
 - There is no terminal. The chat hides TTY mode, the terminal prompt card, the
-  live screen tail and "Terminal output" (for ACP too), `raw` messages (keys
+  live screen tail and "Terminal output" (for ACP too, where Stop and the
+  answer buttons on tool calls aren't offered either), `raw` messages (keys
   for the terminal) are refused with 400, and slash commands that need the
   agent's interactive UI don't work.
 - Restart (Explorer → Restart, `DELETE /messages`, or `?restart=true` on the
   MCP endpoints) replaces the agent with a new one in a new session and clears
-  the conversation; requests still open become `not_resumable`. Unlike a PTY
-  restart, it doesn't run `codex update` or `pi update --self` first.
+  the conversation and the queue; requests still open become `not_resumable`.
+  The `--initial-prompt` is sent to the new session again, as with PTY.
+  Unlike a PTY restart, it doesn't run `codex update` or `pi update --self`
+  first.
 - Without `--state-db`, the next start of AgentAPI is a new session; the
   agent's earlier session isn't resumed.
 - Images reach the agent only as `@"<path>"` attachments of a message, not as
@@ -573,19 +640,28 @@ an `Authorization` header to the event stream or to images:
 - Open `http://localhost:3284/chat/embed#token=<token>`. With an auto-generated
   token the server prints this link on startup. The token is in the URL
   fragment, which the browser never sends to the server, a proxy or an access
-  log; the page exchanges it and removes it from the address bar.
+  log; the page exchanges it and removes it from the address bar. A link to a
+  server without `--api-token` just opens the chat.
 - Or just open the chat: when the server answers 401 it asks for the token.
+  The dialog names the server that asks and warns when it isn't the page's
+  own origin, and says so when the browser didn't keep the session cookie.
+  After Cancel, **Reconnect now** asks again.
 
 `POST /auth/session` with `Authorization: Bearer <token>` sets the cookie
-(`agentapi_session`, HttpOnly, SameSite=Strict, `Path=/`, and Secure over
-HTTPS or behind a proxy that sends `X-Forwarded-Proto: https`). It holds an
-HMAC of the token, not the token, so changing the token signs every browser
-out. `DELETE /auth/session` signs out, and `GET /auth/session` (no credentials
-needed) reports `auth_required` and `authenticated`. Because the cookie is
-SameSite=Strict, pages on other sites can't make requests with it. A chat UI
-served from another origin (e.g. `bun run dev` on port 3000) needs that origin
-in `--allowed-origins`; `--allowed-origins '*'` doesn't allow requests with
-cookies.
+(`agentapi_session_<hash>`, HttpOnly, SameSite=Strict, `Path=/`, and Secure
+over HTTPS or behind a proxy that sends `X-Forwarded-Proto: https`). It holds
+an HMAC of the token, not the token, so changing the token signs every browser
+out, and the name comes from it, so servers with different tokens on one host
+keep their own sign-ins. `DELETE /auth/session` signs out, and
+`GET /auth/session` (no credentials needed) reports `auth_required` and
+`authenticated`. Because the cookie is SameSite=Strict, pages on other sites
+can't make requests with it. A chat UI served from another origin (e.g.
+`bun run dev` on port 3000) needs that origin in `--allowed-origins`;
+`--allowed-origins '*'` doesn't allow requests with cookies. Ports don't make
+another site, and the default allowed origins include
+`http://localhost:3000` and `http://localhost:3001` for chat development: on
+a shared machine, set `--allowed-origins` to the origins you use, so a signed-in
+browser's cookie only works for them.
 
 ### Interactive prompt support
 
@@ -765,7 +841,7 @@ Endpoints:
   `resume`, `images`), `pending_requests`, and `login_required` while the
   agent waits for someone to log it in (see [Logging in](#logging-in))
 - GET `/events` - an SSE stream of events from the agent: message and status updates, and `request_update` with the native transport. With `?sync=1` it replays incrementally on reconnect (`&since=<seq>&epoch=<epoch>`), and events carry SSE ids so a reconnecting `EventSource` resumes from its `Last-Event-ID`
-- DELETE `/messages` - clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent process (native transport: in a new session)
+- DELETE `/messages` - clears all conversation state (messages, rich messages, requests, timeline, errors, the queue) and restarts the agent process (native transport: in a new session)
 - GET `/queue` - returns the messages waiting to be sent to the agent
 - PUT `/queue` - reorders the queue; the body (`{"ids": [...]}`) lists every queued message once
 - PUT/DELETE `/queue/{id}` - edits or removes a queued message

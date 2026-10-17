@@ -46,6 +46,8 @@ This is a Go HTTP API server that controls coding agents (Claude Code, Aider, Go
 - `lib/screentracker/` - Terminal output parsing and message splitting
 - `lib/termexec/` - Terminal process execution and management
 - `lib/msgfmt/` - Message formatting for different agent types (claude, goose, aider, codex, gemini, amp, cursor-agent, cursor, auggie, custom)
+- `lib/native/` - Native transport (`--transport native`): one adapter per agent (`claude/`, `codex/`, `pi/`) driving its structured protocol, `procutil/` for the child process, `nativetest/` for tests
+- `lib/statedb/` - SQLite persistence of native sessions (`--state-db`)
 - `chat/` - Next.js web UI (embedded into Go binary)
 
 **Key Architecture:**
