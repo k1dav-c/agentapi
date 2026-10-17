@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -12,13 +13,16 @@ import (
 
 	"github.com/coder/agentapi/lib/handoff"
 	mf "github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/danielgtaylor/huma/v2"
 )
 
-var terminalSelection = regexp.MustCompile(`(?m)^\s*[❯›>]\s*(\d+)\.\s+`)
-var terminalConfirmation = regexp.MustCompile(`(?i)(enter\s+to\s+confirm|enter\s+to\s+submit|press\s+enter|esc\s+to\s+cancel|enter\s+select|would\s+you\s+like\s+to\s+proceed|do\s+you\s+want\s+to\s+proceed)`)
-var terminalOption = regexp.MustCompile(`(?m)^\s*[❯›>]?\s*(\d+)\.\s+`)
+var (
+	terminalSelection    = regexp.MustCompile(`(?m)^\s*[❯›>]\s*(\d+)\.\s+`)
+	terminalConfirmation = regexp.MustCompile(`(?i)(enter\s+to\s+confirm|enter\s+to\s+submit|press\s+enter|esc\s+to\s+cancel|enter\s+select|would\s+you\s+like\s+to\s+proceed|do\s+you\s+want\s+to\s+proceed)`)
+	terminalOption       = regexp.MustCompile(`(?m)^\s*[❯›>]?\s*(\d+)\.\s+`)
+)
 
 // terminalQuestionKeywords must appear (case-insensitively) next to a
 // numbered list for it to count as a prompt.
@@ -89,10 +93,6 @@ func screenTail(screen string, n int) string {
 	return screen[start+1:]
 }
 
-func isTerminalQuestion(content string) bool {
-	return isTerminalQuestionText(content, strings.ToLower(content))
-}
-
 func isTerminalQuestionText(content, lower string) bool {
 	if hasConfirmationHint(content, lower) && strings.ContainsAny(content, "❯›>") &&
 		terminalSelection.MatchString(content) {
@@ -101,7 +101,7 @@ func isTerminalQuestionText(content, lower string) bool {
 	return containsAny(lower, terminalQuestionKeywords) && len(terminalOption.FindAllString(content, -1)) >= 2
 }
 
-// Only expose deliberate, bounded terminal actions. Discord text never becomes
+// Only expose deliberate, bounded terminal actions. Reply text never becomes
 // arbitrary terminal escape sequences. The browser's terminal remains available
 // for unsupported prompts.
 //
@@ -140,15 +140,20 @@ type handoffReceipt struct {
 	result  handoff.Result
 }
 
-type PendingHandoffResponse struct{ Body handoff.Pending }
-type HandoffReplyRequest struct{ Body handoff.Reply }
-type HandoffReplyResponse struct{ Body handoff.Result }
+type (
+	PendingHandoffResponse struct{ Body handoff.Pending }
+	HandoffReplyRequest    struct{ Body handoff.Reply }
+	HandoffReplyResponse   struct{ Body handoff.Result }
+)
 
-// Caller holds s.mu. Read the emitter as one snapshot: its revision changes on
-// every lifecycle transition and reset, invalidating replies to previous PTYs.
-func (s *Server) pendingHandoffLocked() *handoff.Request {
+// pendingHandoffLocked returns what the human reply protocol offers now, or
+// nil. For kind "request" it also returns the native request offered, which
+// a reply must answer even if other requests opened since. Caller holds
+// s.mu. Read the emitter as one snapshot: its revision changes on every
+// lifecycle transition and reset, invalidating replies to previous PTYs.
+func (s *Server) pendingHandoffLocked() (*handoff.Request, native.RequestState) {
 	if s.emitter == nil || s.conversation == nil {
-		return nil
+		return nil, native.RequestState{}
 	}
 	s.emitter.mu.Lock()
 	status := s.emitter.statusChangeBody()
@@ -157,7 +162,7 @@ func (s *Server) pendingHandoffLocked() *handoff.Request {
 	messages := append([]st.ConversationMessage(nil), s.emitter.messages...)
 	s.emitter.mu.Unlock()
 	if status.Lifecycle != LifecycleReady || s.conversation.Status() != st.ConversationStatusStable {
-		return nil
+		return nil, native.RequestState{}
 	}
 	kind, content, question := "message", "", ""
 	for _, message := range messages {
@@ -165,11 +170,14 @@ func (s *Server) pendingHandoffLocked() *handoff.Request {
 			question = message.Message
 		}
 	}
-	if s.transport == TransportPTY && isTerminalQuestionScreen(s.agentType, screen) {
+	request, text, ok := s.pendingNativeHandoff()
+	if ok {
+		kind, content = "request", text
+	} else if s.transport == TransportPTY && isTerminalQuestionScreen(s.agentType, screen) {
 		kind, content = "terminal", screen
 	} else {
 		if len(s.messageQueue) > 0 {
-			return nil
+			return nil, native.RequestState{}
 		}
 		hasUser := false
 		for _, message := range messages {
@@ -183,21 +191,26 @@ func (s *Server) pendingHandoffLocked() *handoff.Request {
 		}
 	}
 	if strings.TrimSpace(content) == "" {
-		return nil
+		return nil, native.RequestState{}
 	}
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%s:%s", status.SessionID, revision, status.RunID, kind, content)))
+	// The request ID is part of the hash: two identical approvals are
+	// different requests.
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%s:%q:%s", status.SessionID, revision, status.RunID, kind, request.ID, content)))
 	id := hex.EncodeToString(sum[:])
 	if id == s.handoffSuppressed {
-		return nil
+		return nil, native.RequestState{}
 	}
-	return &handoff.Request{ID: id, SessionID: status.SessionID, RunID: status.RunID,
-		AgentType: string(status.AgentType), Kind: kind, Question: question, Content: content}
+	return &handoff.Request{
+		ID: id, SessionID: status.SessionID, RunID: status.RunID,
+		AgentType: string(status.AgentType), Kind: kind, Question: question, Content: content,
+	}, request
 }
 
 func (s *Server) getPendingHandoff(_ context.Context, _ *struct{}) (*PendingHandoffResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return &PendingHandoffResponse{Body: handoff.Pending{Request: s.pendingHandoffLocked()}}, nil
+	pending, _ := s.pendingHandoffLocked()
+	return &PendingHandoffResponse{Body: handoff.Pending{Request: pending}}, nil
 }
 
 func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*HandoffReplyResponse, error) {
@@ -213,11 +226,14 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 		}
 		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "superseded"}}, nil
 	}
-	pending := s.pendingHandoffLocked()
+	pending, request := s.pendingHandoffLocked()
 	if pending == nil || pending.ID != reply.RequestID {
 		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "superseded"}}, nil
 	}
 	content := reply.Content
+	if pending.Kind == "request" {
+		return s.replyNativeHandoffLocked(pending.ID, reply.ID, request, content), nil
+	}
 	// Free text answering a prompt with a text field (Claude's plan
 	// feedback, Codex's question notes) goes into that field.
 	freeTextKeys, freeText := "", false
@@ -233,13 +249,7 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 	}
 	// Reserve before touching the PTY. A failed/partial write must never be
 	// retried automatically; it may already have approved an operation.
-	if s.handoffReceipts == nil {
-		s.handoffReceipts = make(map[string]handoffReceipt)
-	}
-	if len(s.handoffReceipts) >= 256 {
-		clear(s.handoffReceipts)
-	}
-	s.handoffSuppressed = pending.ID
+	s.reserveHandoffLocked(pending.ID)
 	result := handoff.Result{Outcome: "uncertain"}
 	s.handoffReceipts[pending.ID] = handoffReceipt{reply.ID, result}
 	var err error
@@ -261,4 +271,42 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 	}
 	s.handoffReceipts[pending.ID] = handoffReceipt{reply.ID, result}
 	return &HandoffReplyResponse{Body: result}, nil
+}
+
+// reserveHandoffLocked records that the pending handoff is being answered.
+func (s *Server) reserveHandoffLocked(id string) {
+	if s.handoffReceipts == nil {
+		s.handoffReceipts = make(map[string]handoffReceipt)
+	}
+	if len(s.handoffReceipts) >= 256 {
+		clear(s.handoffReceipts)
+	}
+	s.handoffSuppressed = id
+}
+
+// replyNativeHandoffLocked answers r, the native request the pending handoff
+// offers, with a human reply. Caller holds s.mu, so no other reply is
+// delivered meanwhile.
+func (s *Server) replyNativeHandoffLocked(pendingID, replyID string, r native.RequestState, content string) *HandoffReplyResponse {
+	response, ok := nativeHandoffResponse(r, content)
+	if !ok {
+		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "invalid"}}
+	}
+	ctx, cancel := context.WithTimeout(s.shutdownCtx, nativeCallTimeout)
+	defer cancel()
+	result := handoff.Result{Outcome: "applied"}
+	switch _, err := s.native.Respond(ctx, r.ID, response); {
+	case errors.Is(err, native.ErrInvalidResponse):
+		// Nothing was sent, so a corrected reply may follow.
+		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "invalid"}}
+	case errors.Is(err, native.ErrRequestNotFound), errors.Is(err, native.ErrNotStarted):
+		// Answered elsewhere, withdrawn or expired; nothing was sent.
+		result.Outcome = "superseded"
+	case err != nil:
+		s.logger.Error("Human reply delivery is uncertain; refusing automatic retry", "request_id", r.ID, "error", err)
+		result.Outcome = "uncertain"
+	}
+	s.reserveHandoffLocked(pendingID)
+	s.handoffReceipts[pendingID] = handoffReceipt{replyID, result}
+	return &HandoffReplyResponse{Body: result}
 }

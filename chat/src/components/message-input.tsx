@@ -17,15 +17,26 @@ import {
   X,
   MoreHorizontal,
   RefreshCw,
+  ChevronUp,
+  ArrowUp,
+  ArrowDown,
+  CornerDownRight,
+  OctagonX,
 } from "lucide-react";
 import type {SendResult, ServerStatus} from "./chat-provider";
 import TextareaAutosize from "react-textarea-autosize";
 import {useChat} from "./chat-provider";
+import {SessionSettings} from "./session-settings";
+import {useSlashCommandRunner} from "./slash-command-runner";
+import {completion, matchingCommands, parseSlashCommand} from "@/lib/slash-commands";
+import {UsageMeter} from "./usage-meter";
 import {DragDrop} from "./drag-drop";
 import {ImageThumb, useObjectURL} from "./image-preview";
 import {filesToUploadFromPaste, isImageFile, pastedFileName, uploadedImageURL} from "@/lib/uploads";
 import {toast} from "sonner";
-import {getErrorMessage} from "@/lib/error-utils";
+import {ApiError, getErrorMessage} from "@/lib/error-utils";
+import {isImeComposing} from "@/lib/keys";
+import {Kbd} from "./ui/kbd";
 import {
   parsePersistedAttachments,
   removeAttachmentToken,
@@ -34,11 +45,22 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import {
+  canSteer,
+  dispatchModeForKey,
+  dispatchModes,
+  moveInQueue,
+  sendNotice,
+  turnActive,
+  type DispatchMode,
+} from "@/lib/dispatch";
 
 interface MessageInputProps {
-  onSendMessage: (message: string, type: "user" | "raw") => Promise<SendResult>;
+  onSendMessage: (message: string, type: "user" | "raw", mode?: DispatchMode) => Promise<SendResult>;
   disabled?: boolean;
   serverStatus: ServerStatus;
   suggestedPrompt?: string;
@@ -114,8 +136,27 @@ export default function MessageInput({
     updateQueuedMessage,
     deleteQueuedMessage,
     storageScope,
-    terminalPrompt,
+    transport,
+    capabilities,
+    loginRequired,
+    agentState,
+    dispatch,
+    canStop,
+    stop,
+    steerQueuedMessage,
+    reorderQueue,
   } = useChat();
+  const modes = dispatchModes(dispatch);
+  const steerable = canSteer(dispatch);
+  const active = turnActive(dispatch);
+  // Nothing queued runs until the agent has its answer, or its login.
+  const waitingForLogin = agentState === "needs-you" && loginRequired !== null;
+  const waitingForAnswer = agentState === "needs-you" && loginRequired === null;
+  // Shortcut labels: ⌘ on Apple devices, Ctrl elsewhere.
+  const [modKey, setModKey] = useState("Ctrl");
+  useEffect(() => {
+    if (/Mac|iPhone|iPad/.test(navigator.platform)) setModKey("⌘");
+  }, []);
   const draftStorageKey = `agentapi.chat.message-draft:${storageScope}`;
   const attachmentsStorageKey = `agentapi.chat.attachments:${storageScope}`;
 
@@ -203,8 +244,8 @@ export default function MessageInput({
   }, [attachments, attachmentsStorageKey, hydratedAttachmentsKey]);
 
   useEffect(() => {
-    if (serverStatus !== "running") setIsStopping(false);
-  }, [serverStatus]);
+    if (!active) setIsStopping(false);
+  }, [active]);
 
   useEffect(() => {
     if (!suggestedPrompt) return;
@@ -348,17 +389,74 @@ export default function MessageInput({
     }
   };
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (message.trim() && !disabled) {
-      if (serverStatus !== "running" && serverStatus !== "stable") return;
-      const result = await onSendMessage(message, "user");
-      if (!result.ok) return;
-      if (result.queued) toast.success("Task queued");
+  // Not while an attachment uploads: its path joins the message once the
+  // upload is done.
+  const sendBlocked =
+    disabled ||
+    !message.trim() ||
+    attachments.some((attachment) => attachment.status === "uploading");
+
+  const slashCommands = useSlashCommandRunner();
+  // A slash command that runs: a second Enter doesn't run it again.
+  const commandRunning = useRef(false);
+  // The chat's own slash commands, offered while the command word is typed
+  // (native agents, which have no terminal UI for them).
+  const slashSuggestions = transport === "native" ? matchingCommands(message) : [];
+  const completeSlashCommand = (text: string) => {
+    setMessage(text);
+    textareaRef.current?.focus();
+  };
+
+  const submit = async (mode: DispatchMode = "queue") => {
+    if (sendBlocked || (serverStatus !== "running" && serverStatus !== "stable")) return;
+    const command = transport === "native" ? parseSlashCommand(message) : null;
+    if (command && slashCommands.handles(command)) {
+      if (commandRunning.current) return;
+      commandRunning.current = true;
+      // Cleared at once: the next message can be typed while it runs.
       setMessage("");
-      setAttachments((previous) =>
-        previous.filter((attachment) => attachment.status !== "completed"),
-      );
+      try {
+        await slashCommands.run(command);
+      } finally {
+        commandRunning.current = false;
+      }
+      return;
+    }
+    const result = await onSendMessage(message, "user", mode);
+    if (!result.ok) return;
+    const notice = sendNotice(result, mode);
+    if (notice) toast.success(notice);
+    setMessage("");
+    setAttachments((previous) =>
+      previous.filter((attachment) => attachment.status !== "completed"),
+    );
+  };
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    void submit("queue");
+  };
+
+  const steerQueued = async (id: number) => {
+    try {
+      await steerQueuedMessage(id);
+      toast.success("Added to the current turn");
+    } catch (error) {
+      toast.error("Failed to steer the agent", {description: getErrorMessage(error)});
+    }
+  };
+
+  const moveQueued = async (id: number, delta: number) => {
+    const ids = moveInQueue(queuedMessages.map((queued) => queued.id), id, delta);
+    if (!ids) return;
+    try {
+      await reorderQueue(ids);
+    } catch (error) {
+      toast.error("Failed to reorder the queue", {
+        description: error instanceof ApiError && error.status === 409
+          ? "The queue changed in the meantime; try again."
+          : getErrorMessage(error),
+      });
     }
   };
 
@@ -375,9 +473,18 @@ export default function MessageInput({
   }, [serverStatus, disabled]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Tab completes a command, unless it is complete: then Tab leaves the
+    // composer as usual.
+    const completed = slashSuggestions.length > 0 ? completion(slashSuggestions[0]) : "";
+    if (e.key === "Tab" && !e.shiftKey && completed && completed !== message) {
       e.preventDefault();
-      handleSubmit(e);
+      completeSlashCommand(completed);
+      return;
+    }
+    const mode = dispatchModeForKey(e, modes);
+    if (mode) {
+      e.preventDefault();
+      void submit(mode);
     }
   };
 
@@ -453,8 +560,9 @@ export default function MessageInput({
   const handleStop = () => {
     if (isStopping) return;
     setIsStopping(true);
-    onSendMessage("\x1b", "raw");
-    toast.info("Stop signal sent");
+    void stop().then((stopped) => {
+      if (!stopped) setIsStopping(false);
+    });
   };
 
   return (
@@ -479,6 +587,24 @@ export default function MessageInput({
             className="overflow-hidden rounded-2xl border bg-card shadow-lg shadow-black/5 transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"
           >
             <div className="flex flex-col">
+              {slashSuggestions.length > 0 && (
+                <div className="border-b bg-muted/30 px-2 py-1.5" role="group" aria-label="Chat commands" data-slash-suggestions>
+                  {slashSuggestions.map((command) => (
+                    <button
+                      key={command.name}
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => completeSlashCommand(completion(command))}
+                      className="flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted"
+                    >
+                      <code className="shrink-0 font-mono text-foreground">/{command.name}</code>
+                      {command.args && <span className="shrink-0 font-mono text-muted-foreground max-sm:hidden">{command.args}</span>}
+                      <span className="min-w-0 truncate text-muted-foreground">{command.description}</span>
+                    </button>
+                  ))}
+                  <p className="px-2 pt-0.5 text-[11px] text-muted-foreground">Tab completes; other commands go to the agent.</p>
+                </div>
+              )}
               <div className="flex">
                   <TextareaAutosize
                     ref={textareaRef}
@@ -498,13 +624,15 @@ export default function MessageInput({
                     }}
                     aria-label="Task message"
                     placeholder={
-                      terminalPrompt
-                        ? "Queue a task (runs after you answer)…"
-                        : serverStatus === "running"
-                          ? "Queue a follow-up…"
-                          : serverStatus === "stable"
-                            ? "Describe a task…"
-                            : "Reconnecting… Your draft is saved."
+                      waitingForLogin
+                        ? "Queue a task (runs after the agent is logged in)…"
+                        : waitingForAnswer
+                          ? "Queue a task (runs after you answer)…"
+                          : serverStatus === "running"
+                            ? steerable ? "Queue a follow-up, or steer the agent…" : "Queue a follow-up…"
+                            : serverStatus === "stable"
+                              ? "Describe a task…"
+                              : "Reconnecting… Your draft is saved."
                     }
                     className="min-h-14 max-h-32 w-full resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-6 outline-none sm:min-h-16 sm:px-5"
                     disabled={
@@ -609,7 +737,11 @@ export default function MessageInput({
                     <span className="flex items-center gap-1.5">
                       <Clock3 className="size-3" />
                       Queued tasks · {queuedMessages.length}
-                      {terminalPrompt && <span className="text-state-needs">· held until you answer the agent</span>}
+                      {(waitingForAnswer || waitingForLogin) && (
+                        <span className="text-state-needs">
+                          · held until {waitingForLogin ? "the agent is logged in" : "you answer the agent"}
+                        </span>
+                      )}
                     </span>
                     <span className="text-[10px] group-open:hidden">Show</span>
                     <span className="hidden text-[10px] group-open:inline">Hide</span>
@@ -628,6 +760,9 @@ export default function MessageInput({
                               setEditingQueuedMessage(event.target.value)
                             }
                             onKeyDown={(event) => {
+                              // Enter or Esc while picking an IME candidate
+                              // only ends the composition.
+                              if (isImeComposing(event)) return;
                               if (event.key === "Enter") {
                                 event.preventDefault();
                                 saveEditingQueuedMessage();
@@ -641,6 +776,47 @@ export default function MessageInput({
                           />
                         ) : (
                           <span className="min-w-0 flex-1 truncate">{queuedMessage.content}</span>
+                        )}
+                        {steerable && editingQueuedID !== queuedMessage.id && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 shrink-0 gap-1 px-2 text-[11px] text-state-working sm:h-6"
+                            onClick={() => void steerQueued(queuedMessage.id)}
+                            title="Steer now: add this task to the turn the agent is working on"
+                          >
+                            <CornerDownRight className="size-3" />
+                            Steer<span className="hidden sm:inline"> now</span>
+                          </Button>
+                        )}
+                        {queuedMessages.length > 1 && editingQueuedID !== queuedMessage.id && (
+                          <>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="size-7 shrink-0 text-muted-foreground sm:size-6"
+                              disabled={index === 0}
+                              onClick={() => void moveQueued(queuedMessage.id, -1)}
+                              title="Move up: send earlier"
+                            >
+                              <ArrowUp className="size-3" />
+                              <span className="sr-only">Move queued task {index + 1} up</span>
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="size-7 shrink-0 text-muted-foreground sm:size-6"
+                              disabled={index === queuedMessages.length - 1}
+                              onClick={() => void moveQueued(queuedMessage.id, 1)}
+                              title="Move down: send later"
+                            >
+                              <ArrowDown className="size-3" />
+                              <span className="sr-only">Move queued task {index + 1} down</span>
+                            </Button>
+                          </>
                         )}
                         <Button
                           type="button"
@@ -689,7 +865,14 @@ export default function MessageInput({
                 </details>
               )}
 
-              <div className="flex items-center justify-end gap-3 border-t bg-muted/25 px-3 py-2">
+              <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 border-t bg-muted/25 px-3 py-2">
+
+                {/* The agent's settings and usage: a row of their own on a
+                    phone, where they don't fit beside the buttons. */}
+                <div className="mr-auto flex min-w-0 items-center gap-1 empty:hidden max-sm:w-full">
+                  <SessionSettings />
+                  <UsageMeter />
+                </div>
 
                 <div className="flex min-w-0 flex-row items-center gap-2">
                     <Tooltip>
@@ -734,17 +917,12 @@ export default function MessageInput({
                     </DropdownMenu>
 
                   {(serverStatus === "stable" || serverStatus === "running") && (
+                   <div className="flex items-center" data-send-group>
                     <Button
                       type="submit"
-                      disabled={
-                        disabled ||
-                        !message.trim() ||
-                        attachments.some(
-                          (attachment) => attachment.status === "uploading",
-                        )
-                      }
+                      disabled={sendBlocked}
                       size="icon"
-                      className="relative size-10 rounded-full shadow-sm"
+                      className={`relative size-10 shadow-sm ${modes.length > 1 ? "rounded-l-full rounded-r-none" : "rounded-full"}`}
                       title={
                         serverStatus === "running"
                           ? "Add task to queue"
@@ -764,9 +942,60 @@ export default function MessageInput({
                         {serverStatus === "running" ? "Queue task" : "Send task"}
                       </span>
                     </Button>
+                    {modes.length > 1 && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            size="icon"
+                            disabled={sendBlocked}
+                            className="h-10 w-8 rounded-l-none rounded-r-full border-l border-primary-foreground/20 shadow-sm"
+                            title="More ways to send"
+                          >
+                            <ChevronUp className="size-4" />
+                            <span className="sr-only">More ways to send</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" side="top" className="w-72">
+                          <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">While the agent works</DropdownMenuLabel>
+                          <DropdownMenuItem className="min-h-11 items-start" onSelect={() => void submit("queue")}>
+                            <ListPlus className="mt-0.5" />
+                            <span className="grid flex-1">
+                              <span>Queue</span>
+                              <span className="text-[11px] text-muted-foreground">Send once this turn ends</span>
+                            </span>
+                            <ShortcutHint keys={["Enter"]} />
+                          </DropdownMenuItem>
+                          {modes.includes("steer") && (
+                            <DropdownMenuItem className="min-h-11 items-start" onSelect={() => void submit("steer")}>
+                              <CornerDownRight className="mt-0.5" />
+                              <span className="grid flex-1">
+                                <span>Steer</span>
+                                <span className="text-[11px] text-muted-foreground">Add to the turn it is working on</span>
+                              </span>
+                              <ShortcutHint keys={[modKey, "Enter"]} />
+                            </DropdownMenuItem>
+                          )}
+                          {modes.includes("interrupt") && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem className="min-h-11 items-start" variant="destructive" onSelect={() => void submit("interrupt")}>
+                                <OctagonX className="mt-0.5" />
+                                <span className="grid flex-1">
+                                  <span>Interrupt &amp; send</span>
+                                  <span className="text-[11px] text-muted-foreground">Stop this turn, then send</span>
+                                </span>
+                                <ShortcutHint keys={[modKey, "⇧", "Enter"]} />
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                   </div>
                   )}
 
-                  {serverStatus === "running" && (
+                  {canStop && (
                     <Button
                       size="icon"
                       type="button"
@@ -793,7 +1022,14 @@ export default function MessageInput({
         </DragDrop>
 
         <p className="hidden text-center text-[11px] text-muted-foreground sm:block">
-          Enter to send · Shift+Enter for a new line · Keys for the terminal itself: TTY mode
+          {transport === "pty"
+            ? "Enter to send · Shift+Enter for a new line · Keys for the terminal itself: TTY mode"
+            : [
+                "Enter to send",
+                transport === "native" && capabilities?.steer ? `${modKey}+Enter to steer while it works` : "",
+                transport === "native" && capabilities?.interrupt ? `${modKey}+Shift+Enter to interrupt & send` : "",
+                "Shift+Enter for a new line",
+              ].filter(Boolean).join(" · ")}
         </p>
        </div>
       </div>
@@ -802,6 +1038,16 @@ export default function MessageInput({
   );
 }
 
+
+function ShortcutHint({keys}: {keys: string[]}) {
+  return (
+    <span className="ml-auto hidden shrink-0 items-center gap-0.5 pt-0.5 sm:flex" aria-hidden="true">
+      {keys.map((key) => (
+        <Kbd key={key} small>{key}</Kbd>
+      ))}
+    </span>
+  );
+}
 
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;

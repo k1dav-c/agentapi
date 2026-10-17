@@ -1,9 +1,13 @@
-import type {TemporalConfig, TemporalConfigResponse, TemporalProfilesResponse} from "./temporal-config";
+import {authFetch, withAuthRetry} from "./auth";
 import type {
   FileUploadResponse,
   QueuedMessage,
   SendResult,
 } from "@/components/chat-provider";
+import {parseTransport, type DispatchMode, type Transport} from "./dispatch";
+import type {NativeRequest, RequestResponse} from "./native-requests";
+import {parseLoginRequired, type LoginRequired, type LoginRetryOutcome} from "./login";
+import {ApiError} from "./error-utils";
 
 export interface UploadOptions {
   signal?: AbortSignal;
@@ -29,6 +33,88 @@ export interface MCPProfiles {
   path: string;
 }
 
+// A file in the agent's working directory (GET /files/content).
+export interface FileContent {
+  // As asked for.
+  path: string;
+  // Relative to the agent's working directory, for display.
+  relative: string;
+  // Bytes on disk.
+  size: number;
+  // UTF-8 text, cut at 1 MiB (truncated); empty for a binary file.
+  content: string;
+  truncated: boolean;
+  binary: boolean;
+}
+
+export type FileDiffStatus = "modified" | "added" | "deleted" | "untracked" | "unchanged" | "not_in_repo";
+
+// A file's uncommitted changes (GET /files/diff): git's unified diff of the
+// working tree against HEAD, where an untracked file shows as added.
+export interface FileDiff {
+  path: string;
+  relative: string;
+  status: FileDiffStatus;
+  // Empty when unchanged or not in a repository; cut at 1 MiB (truncated).
+  diff: string;
+  truncated: boolean;
+}
+
+export type PermissionMode = "bypass" | "auto" | "ask" | "plan";
+
+// The agent's session settings (native transport). A setting the agent
+// doesn't report is missing; permission_mode is missing while the agent
+// runs in a mode of its own (e.g. Claude Code's acceptEdits).
+export interface AgentSettings {
+  permission_mode?: PermissionMode;
+  model?: string;
+  effort?: string;
+}
+
+export interface ModelOption {
+  id: string;
+  name: string;
+  description?: string;
+  // From the least effort to the most; missing when the model has no
+  // choice of effort.
+  efforts?: string[];
+  default_effort?: string;
+}
+
+export interface SettingOptions {
+  permission_modes: PermissionMode[];
+  models: ModelOption[];
+}
+
+// How full the agent's context window is, after its last turn.
+export interface ContextUsage {
+  used: number;
+  size: number;
+}
+
+// One of the account's usage limits.
+export interface RateLimit {
+  id: string;
+  label: string;
+  // 0 to 100; missing when the agent doesn't say.
+  used_percent?: number;
+  resets_at?: string;
+  // Claude Code's: allowed, allowed_warning (close to it), rejected.
+  status?: string;
+}
+
+// What the agent reports of its limits (native transport).
+export interface AgentUsage {
+  context?: ContextUsage;
+  rate_limits?: RateLimit[];
+}
+
+// GET and PUT /settings.
+export interface SettingsResponse {
+  settings: AgentSettings;
+  options: SettingOptions;
+}
+
 interface APIErrorDetail {
   message: string;
 }
@@ -38,203 +124,250 @@ interface APIErrorModel {
   errors?: APIErrorDetail[];
 }
 
-async function requireOK(response: Response, fallback: string) {
-  if (!response.ok) throw new Error(fallback);
-  return response;
+// The server's error message (huma's detail plus field errors), or fallback.
+async function errorDetail(response: Response, fallback: string): Promise<string> {
+  const error = await response.json().catch(() => null) as APIErrorModel | null;
+  const details = error?.errors?.map((item) => item.message).filter(Boolean).join(", ");
+  if (!error?.detail) return details || fallback;
+  return details ? `${error.detail}: ${details}` : error.detail;
 }
 
-async function temporalRequest<T>(url: string, method = "GET", body?: unknown): Promise<T> {
-  const response = await fetch(url, {
-    method,
-    headers: body === undefined ? undefined : {"Content-Type": "application/json"},
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const error = await response.json().catch(() => null) as APIErrorModel | null;
-    throw new Error(error?.detail || error?.errors?.[0]?.message || "Temporal settings request failed");
+export interface ServerStatusInfo {
+  transport: Transport;
+  // Set while the agent waits for someone to log it in (native transport).
+  login_required: LoginRequired | null;
+}
+
+// value if it is an http(s) URL. The chat opens such links, so a
+// javascript: URL must not get through.
+export function httpURL(value: unknown, base?: string): string | undefined {
+  if (typeof value !== "string" || !value) return undefined;
+  try {
+    const url = new URL(value, base);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
   }
-  return response.json() as Promise<T>;
+}
+
+interface RequestOptions {
+  method?: string;
+  // Sent as JSON.
+  body?: unknown;
+  // The error message when the server doesn't give one.
+  fallback: string;
 }
 
 export function createChatAPI(baseURL: string) {
+  // A request to the API: the JSON it answers with, or an ApiError with the
+  // server's message and the status. A 401 that is left after authFetch
+  // asked for the token means the user didn't sign in.
+  const jsonRequest = async <T = unknown>(path: string, {method = "GET", body, fallback}: RequestOptions): Promise<T> => {
+    const response = await authFetch(baseURL, `${baseURL}${path}`, {
+      method,
+      headers: body === undefined ? undefined : {"Content-Type": "application/json"},
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const message = response.status === 401
+        ? "Not signed in: this server needs its API token."
+        : await errorDetail(response, fallback);
+      throw new ApiError(message, response.status);
+    }
+    const text = await response.text();
+    return (text ? JSON.parse(text) : undefined) as T;
+  };
+
   return {
     async deleteMessages(): Promise<void> {
-      await requireOK(
-        await fetch(`${baseURL}/messages`, {method: "DELETE"}),
-        "Failed to delete messages and restart the agent",
-      );
+      await jsonRequest("/messages", {method: "DELETE", fallback: "Failed to delete messages and restart the agent"});
     },
 
-    async getTemporal(): Promise<TemporalConfigResponse> {
-      return temporalRequest(`${baseURL}/temporal`);
+    getSettings(): Promise<SettingsResponse> {
+      return jsonRequest("/settings", {fallback: "Failed to load the agent's settings"});
     },
 
-    async updateTemporal(config: TemporalConfig): Promise<TemporalConfigResponse> {
-      return temporalRequest(`${baseURL}/temporal`, "PUT", {config});
+    // Changes the settings set in change and leaves the others.
+    updateSettings(change: AgentSettings): Promise<SettingsResponse> {
+      return jsonRequest("/settings", {method: "PUT", body: change, fallback: "Failed to change the agent's settings"});
     },
 
-    async getTemporalProfiles(): Promise<TemporalProfilesResponse> {
-      return temporalRequest(`${baseURL}/temporal/profiles`);
+    async compact(): Promise<void> {
+      await jsonRequest("/compact", {method: "POST", fallback: "Failed to compact the context"});
     },
 
-    async saveTemporalProfile(name: string, config: TemporalConfig): Promise<TemporalProfilesResponse> {
-      return temporalRequest(`${baseURL}/temporal/profiles/${encodeURIComponent(name)}`, "PUT", {config});
+    // Types keys into the native transport's terminal.
+    async terminalInput(data: string): Promise<void> {
+      await jsonRequest("/terminal/input", {method: "POST", body: {data}, fallback: "Failed to type into the terminal"});
     },
 
-    async importTemporalProfiles(profiles: Record<string, TemporalConfig>): Promise<TemporalProfilesResponse> {
-      return temporalRequest(`${baseURL}/temporal/profiles`, "PUT", {profiles});
+    async terminalResize(cols: number, rows: number): Promise<void> {
+      await jsonRequest("/terminal/resize", {method: "POST", body: {cols, rows}, fallback: "Failed to resize the terminal"});
     },
 
-    async deleteTemporalProfile(name: string): Promise<TemporalProfilesResponse> {
-      return temporalRequest(`${baseURL}/temporal/profiles/${encodeURIComponent(name)}`, "DELETE");
-    },
-
-    async applyTemporalProfile(name: string): Promise<TemporalConfigResponse> {
-      return temporalRequest(`${baseURL}/temporal/profiles/${encodeURIComponent(name)}/apply`, "POST");
-    },
-
-    async getMCP(): Promise<MCPConfig> {
-      const response = await requireOK(
-        await fetch(`${baseURL}/mcp`),
-        "MCP config management is unavailable",
-      );
-      return (await response.json()) as MCPConfig;
+    getMCP(): Promise<MCPConfig> {
+      return jsonRequest("/mcp", {fallback: "MCP config management is unavailable"});
     },
 
     async updateMCP(
       servers: Record<string, unknown>,
       restart = false,
     ): Promise<MCPConfig> {
-      const response = await requireOK(
-        await fetch(`${baseURL}/mcp${restart ? "?restart=true" : ""}`, {
-          method: "PUT",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({servers}),
-        }),
-        "Failed to update MCP servers",
-      );
-      const result = (await response.json()) as {
-        path: string;
-        restarted?: boolean;
-      };
+      const result = await jsonRequest<{path: string; restarted?: boolean}>(`/mcp${restart ? "?restart=true" : ""}`, {
+        method: "PUT",
+        body: {servers},
+        fallback: "Failed to update MCP servers",
+      });
       return {servers, path: result.path, restarted: result.restarted};
     },
 
     async checkMCP(servers?: Record<string, unknown>): Promise<MCPCheckResult[]> {
-      const response = await requireOK(
-        await fetch(`${baseURL}/mcp/check`, {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(servers ? {servers} : {}),
-        }),
-        "Failed to check MCP servers",
-      );
-      return ((await response.json()) as {results: MCPCheckResult[]}).results;
+      const result = await jsonRequest<{results: MCPCheckResult[]}>("/mcp/check", {
+        method: "POST",
+        body: servers ? {servers} : {},
+        fallback: "Failed to check MCP servers",
+      });
+      return result.results;
     },
 
     async createMCPServer(name: string, config: unknown, restart = false) {
-      await requireOK(
-        await fetch(`${baseURL}/mcp/servers${restart ? "?restart=true" : ""}`, {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({name, config}),
-        }),
-        "Failed to create MCP server",
-      );
+      await jsonRequest(`/mcp/servers${restart ? "?restart=true" : ""}`, {
+        method: "POST",
+        body: {name, config},
+        fallback: "Failed to create MCP server",
+      });
     },
 
     async updateMCPServer(name: string, config: unknown, restart = false) {
-      await requireOK(
-        await fetch(`${baseURL}/mcp/servers/${encodeURIComponent(name)}${restart ? "?restart=true" : ""}`, {
-          method: "PATCH",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({config}),
-        }),
-        "Failed to update MCP server",
-      );
+      await jsonRequest(`/mcp/servers/${encodeURIComponent(name)}${restart ? "?restart=true" : ""}`, {
+        method: "PATCH",
+        body: {config},
+        fallback: "Failed to update MCP server",
+      });
     },
 
     async deleteMCPServer(name: string, restart = false) {
-      await requireOK(
-        await fetch(`${baseURL}/mcp/servers/${encodeURIComponent(name)}${restart ? "?restart=true" : ""}`, {
-          method: "DELETE",
-        }),
-        "Failed to delete MCP server",
-      );
+      await jsonRequest(`/mcp/servers/${encodeURIComponent(name)}${restart ? "?restart=true" : ""}`, {
+        method: "DELETE",
+        fallback: "Failed to delete MCP server",
+      });
     },
 
-    async getMCPProfiles(): Promise<MCPProfiles> {
-      const response = await requireOK(
-        await fetch(`${baseURL}/mcp/profiles`),
-        "Failed to load MCP profiles",
-      );
-      return (await response.json()) as MCPProfiles;
+    getMCPProfiles(): Promise<MCPProfiles> {
+      return jsonRequest("/mcp/profiles", {fallback: "Failed to load MCP profiles"});
     },
 
-    async saveMCPProfile(name: string, servers: Record<string, unknown>): Promise<MCPProfiles> {
-      const response = await requireOK(
-        await fetch(`${baseURL}/mcp/profiles/${encodeURIComponent(name)}`, {
-          method: "PUT",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({servers}),
-        }),
-        "Failed to save MCP profile",
-      );
-      return (await response.json()) as MCPProfiles;
+    saveMCPProfile(name: string, servers: Record<string, unknown>): Promise<MCPProfiles> {
+      return jsonRequest(`/mcp/profiles/${encodeURIComponent(name)}`, {
+        method: "PUT",
+        body: {servers},
+        fallback: "Failed to save MCP profile",
+      });
     },
 
-    async deleteMCPProfile(name: string): Promise<MCPProfiles> {
-      const response = await requireOK(
-        await fetch(`${baseURL}/mcp/profiles/${encodeURIComponent(name)}`, {method: "DELETE"}),
-        "Failed to delete MCP profile",
-      );
-      return (await response.json()) as MCPProfiles;
+    deleteMCPProfile(name: string): Promise<MCPProfiles> {
+      return jsonRequest(`/mcp/profiles/${encodeURIComponent(name)}`, {method: "DELETE", fallback: "Failed to delete MCP profile"});
     },
 
     async applyMCPProfile(name: string, restart = false) {
-      await requireOK(
-        await fetch(`${baseURL}/mcp/profiles/${encodeURIComponent(name)}/apply${restart ? "?restart=true" : ""}`, {
-          method: "POST",
-        }),
-        "Failed to apply MCP profile",
-      );
+      await jsonRequest(`/mcp/profiles/${encodeURIComponent(name)}/apply${restart ? "?restart=true" : ""}`, {
+        method: "POST",
+        fallback: "Failed to apply MCP profile",
+      });
     },
 
+    // An empty queue when the server can't say.
     async getQueue(): Promise<QueuedMessage[]> {
-      const response = await fetch(`${baseURL}/queue`);
+      const response = await authFetch(baseURL, `${baseURL}/queue`);
       if (!response.ok) return [];
       const data = (await response.json()) as {messages?: QueuedMessage[]};
       return data.messages ?? [];
     },
 
+    async getStatus(): Promise<ServerStatusInfo> {
+      const data = await jsonRequest<{transport?: unknown; login_required?: unknown}>("/status", {
+        fallback: "Failed to read the agent status",
+      });
+      return {
+        transport: parseTransport(data.transport) ?? "pty",
+        login_required: parseLoginRequired(data.login_required),
+      };
+    },
+
+    // The Coder workspace the agent runs in, if any.
+    async getWorkspaceUrl(): Promise<string | undefined> {
+      const data = await jsonRequest<{url?: string} | undefined>("/workspace", {fallback: "Failed to read the workspace"});
+      return httpURL(data?.url);
+    },
+
+    // Asks AgentAPI to check the agent's login again now.
+    async retryLogin(): Promise<LoginRetryOutcome> {
+      try {
+        await jsonRequest("/login/retry", {method: "POST", fallback: "Failed to check the login"});
+        return "checking";
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 409) return "not-waiting";
+        throw error;
+      }
+    },
+
     async sendMessage(
       content: string,
       type: "user" | "raw",
+      mode: DispatchMode = "queue",
     ): Promise<SendResult> {
-      const response = await fetch(`${baseURL}/message`, {
+      const result = await jsonRequest<{ok?: boolean; queued?: boolean; steered?: boolean}>("/message", {
         method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({content, type}),
+        // Only send dispatch_mode when it isn't the default, so older
+        // servers that don't know the field keep accepting messages.
+        body: mode === "queue" ? {content, type} : {content, type, dispatch_mode: mode},
+        fallback: "Failed to send the message",
       });
-      if (!response.ok) {
-        const error = (await response.json()) as APIErrorModel;
-        const details = error.errors?.map((item) => item.message).join(", ");
-        throw new Error(details ? `${error.detail}: ${details}` : error.detail);
-      }
-      const result = (await response.json()) as {
-        ok?: boolean;
-        queued?: boolean;
-      };
-      return {ok: result.ok === true, queued: result.queued === true};
+      return {ok: result.ok === true, queued: result.queued === true, steered: result.steered === true};
+    },
+
+    async interrupt(): Promise<void> {
+      await jsonRequest("/interrupt", {method: "POST", fallback: "Failed to stop the agent"});
+    },
+
+    async getRequests(): Promise<NativeRequest[]> {
+      const data = await jsonRequest<{requests?: NativeRequest[]}>("/requests", {fallback: "Failed to load the agent's requests"});
+      return data.requests ?? [];
+    },
+
+    async respondRequest(id: string, body: RequestResponse): Promise<NativeRequest> {
+      const data = await jsonRequest<NativeRequest & {$schema?: string}>(`/requests/${encodeURIComponent(id)}/respond`, {
+        method: "POST",
+        body,
+        fallback: "Failed to answer the agent",
+      });
+      delete data.$schema;
+      return data;
+    },
+
+    async steerQueuedMessage(id: number): Promise<void> {
+      await jsonRequest(`/queue/${id}/steer`, {method: "POST", fallback: "Failed to add the task to the current turn"});
+    },
+
+    // 409: the queue changed in the meantime.
+    async reorderQueue(ids: number[]): Promise<void> {
+      await jsonRequest("/queue", {method: "PUT", body: {ids}, fallback: "Failed to reorder the queue"});
     },
 
     uploadFiles(
       formData: FormData,
       options: UploadOptions = {},
     ): Promise<FileUploadResponse> {
-      return new Promise((resolve) => {
+      const send = (credentials: RequestCredentials) => new Promise<{status: number; result: FileUploadResponse}>((resolve) => {
+        const done = (status: number, result: FileUploadResponse) => resolve({status, result});
+        if (options.signal?.aborted) {
+          done(0, {ok: false, error: "Upload cancelled."});
+          return;
+        }
         const request = new XMLHttpRequest();
         request.open("POST", `${baseURL}/upload`);
+        // Same-origin requests send the cookie either way.
+        request.withCredentials = credentials === "include";
         request.upload.onprogress = (event) => {
           if (event.lengthComputable) {
             options.onProgress?.(
@@ -243,62 +376,88 @@ export function createChatAPI(baseURL: string) {
           }
         };
         request.onload = () => {
+          if (request.status === 401) {
+            // withAuthRetry asks for the token and uploads again; this is
+            // the answer when nobody signs in.
+            done(401, {ok: false, error: "Sign in to upload files."});
+            return;
+          }
           try {
             const data = JSON.parse(request.responseText) as
               | FileUploadResponse
               | APIErrorModel;
             if (request.status >= 200 && request.status < 300) {
               options.onProgress?.(100);
-              resolve(data as FileUploadResponse);
+              done(request.status, data as FileUploadResponse);
               return;
             }
-            resolve({
+            done(request.status, {
               ok: false,
               error: "detail" in data ? data.detail : "The upload was rejected.",
             });
           } catch {
-            resolve({
+            done(request.status, {
               ok: false,
               error: "The server returned an invalid response.",
             });
           }
         };
         request.onerror = () =>
-          resolve({ok: false, error: "The upload connection failed."});
+          done(0, {ok: false, error: "The upload connection failed."});
         request.onabort = () =>
-          resolve({ok: false, error: "Upload cancelled."});
+          done(0, {ok: false, error: "Upload cancelled."});
         options.signal?.addEventListener("abort", () => request.abort(), {
           once: true,
         });
         request.send(formData);
       });
+      return withAuthRetry(baseURL, send).then(({result}) => result);
     },
 
     async updateQueuedMessage(id: number, content: string) {
-      await requireOK(
-        await fetch(`${baseURL}/queue/${id}`, {
-          method: "PUT",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({content}),
-        }),
-        "Failed to update queued message",
-      );
+      await jsonRequest(`/queue/${id}`, {method: "PUT", body: {content}, fallback: "Failed to update queued message"});
     },
 
     async deleteQueuedMessage(id: number) {
-      await requireOK(
-        await fetch(`${baseURL}/queue/${id}`, {method: "DELETE"}),
-        "Failed to delete queued message",
-      );
+      await jsonRequest(`/queue/${id}`, {method: "DELETE", fallback: "Failed to delete queued message"});
+    },
+
+    // A file in the agent's working directory, by its path as the chat shows
+    // it (absolute, or relative to that directory; without a :line suffix).
+    // ApiError 403: outside that directory, 404: no such file, 400: a
+    // directory.
+    async getFileContent(path: string): Promise<FileContent> {
+      const data = await jsonRequest<Partial<FileContent>>(`/files/content?path=${encodeURIComponent(path)}`, {
+        fallback: "Failed to read the file",
+      });
+      return {
+        path: data.path ?? path,
+        relative: data.relative || path,
+        size: data.size ?? 0,
+        content: data.content ?? "",
+        truncated: data.truncated === true,
+        binary: data.binary === true,
+      };
+    },
+
+    // The uncommitted changes of a file in the agent's working directory.
+    // ApiError 403: outside that directory.
+    async getFileDiff(path: string): Promise<FileDiff> {
+      const data = await jsonRequest<Partial<FileDiff>>(`/files/diff?path=${encodeURIComponent(path)}`, {
+        fallback: "Failed to read the file's changes",
+      });
+      return {
+        path: data.path ?? path,
+        relative: data.relative || path,
+        status: data.status ?? "unchanged",
+        diff: data.diff ?? "",
+        truncated: data.truncated === true,
+      };
     },
 
     async getTimelineEvents(): Promise<unknown[]> {
-      const response = await requireOK(
-        await fetch(`${baseURL}/timeline`),
-        "Failed to export the current session",
-      );
-      const data = (await response.json()) as {events?: unknown[]};
-      if (!Array.isArray(data.events)) {
+      const data = await jsonRequest<{events?: unknown[]} | undefined>("/timeline", {fallback: "Failed to export the current session"});
+      if (!Array.isArray(data?.events)) {
         throw new Error("The server returned an invalid timeline response");
       }
       return data.events;

@@ -25,6 +25,7 @@ import type {
   ServerStatus,
 } from "./chat-provider";
 import {taskMatchesQuery} from "@/lib/task-actions";
+import {isImeComposing} from "@/lib/keys";
 import {uiCopy} from "@/lib/ui-copy";
 import {contentFingerprint} from "@/lib/content-fingerprint";
 import {formatDateLabel} from "@/lib/format-time";
@@ -50,6 +51,9 @@ import {EmptyState, StartupScreen} from "./message-list/empty-state";
 // long sessions. Full virtualization (e.g. react-virtuoso) would be the
 // proper fix for very long conversations.
 const VISIBLE_TASKS_DEFAULT = 5;
+// Below this height the transcript hides its floating buttons (two rows
+// of them would cover what little of it shows).
+const FLOATING_BUTTONS_MIN_HEIGHT = 140;
 
 interface MessageListProps {
   messages: (Message | DraftMessage)[];
@@ -59,7 +63,8 @@ interface MessageListProps {
   onRetryMessage: (clientId: string) => Promise<boolean>;
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
-  onStopTask: () => void;
+  // Stops the running task; unset when it can't be stopped.
+  onStopTask?: () => void;
   onSendRaw?: (data: string) => void;
   headerAction?: React.ReactNode;
 }
@@ -78,6 +83,9 @@ export default function MessageList({
 }: MessageListProps) {
   const [scrollArea, setScrollArea] = useState<HTMLDivElement | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  // Whether the transcript is tall enough for its floating buttons: a tall
+  // card docked above the composer can leave it a sliver.
+  const [roomForButtons, setRoomForButtons] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
   const [canScrollToPreviousUser, setCanScrollToPreviousUser] =
     useState(false);
@@ -87,7 +95,7 @@ export default function MessageList({
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [currentSearchResult, setCurrentSearchResult] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
-  const {terminalPrompt} = useChat();
+  const {agentState, loginRequired} = useChat();
   // The page's actions render into the header's slot (one top bar); the
   // embed page has no header, so they get their own row there.
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
@@ -337,6 +345,13 @@ export default function MessageList({
     return () => observer.disconnect();
   }, [scrollArea, isEmpty, searchOpen, filtersActive]);
 
+  useEffect(() => {
+    if (!scrollArea) return;
+    const observer = new ResizeObserver(() => setRoomForButtons(scrollArea.clientHeight >= FLOATING_BUTTONS_MIN_HEIGHT));
+    observer.observe(scrollArea);
+    return () => observer.disconnect();
+  }, [scrollArea]);
+
   useLayoutEffect(() => {
     if (!scrollArea) return;
     const currentHeight = scrollArea.scrollHeight;
@@ -373,7 +388,8 @@ export default function MessageList({
   );
 
   return (
-    <div className="relative min-h-0 flex-1">
+    // Clipped, so the floating buttons can't spill over the header.
+    <div className="relative min-h-0 flex-1 overflow-hidden">
       {headerSlot ? (
         createPortal(actions, headerSlot)
       ) : (
@@ -398,7 +414,7 @@ export default function MessageList({
                   placeholder="Search tasks, output, and tools…"
                   className="min-w-0 flex-1 bg-transparent outline-none"
                   onKeyDown={(event) => {
-                    if (event.key === "Enter" && taskQuery) {
+                    if (event.key === "Enter" && taskQuery && !isImeComposing(event)) {
                       event.preventDefault();
                       navigateSearchResults(event.shiftKey ? -1 : 1);
                     }
@@ -519,7 +535,7 @@ export default function MessageList({
                   visibleIndex < visibleTasks.length - 1 &&
                   !renderedTaskKeys.has(task.key)
                 }
-                waitingForUser={isLatest && Boolean(terminalPrompt)}
+                waitingForUser={isLatest && agentState === "needs-you" && loginRequired === null}
               />
               </React.Fragment>
               );
@@ -528,7 +544,7 @@ export default function MessageList({
         )}
       </div>
 
-      {(canScrollToPreviousUser || canScrollToNextUser) && (
+      {roomForButtons && (canScrollToPreviousUser || canScrollToNextUser) && (
         <div className="absolute bottom-4 right-3 z-10 flex overflow-hidden rounded-full border bg-background/95 shadow-lg backdrop-blur sm:right-4">
           <Button
             type="button"
@@ -557,7 +573,7 @@ export default function MessageList({
         </div>
       )}
 
-      {showScrollButton && (
+      {roomForButtons && showScrollButton && (
         <Button
           type="button"
           size="sm"

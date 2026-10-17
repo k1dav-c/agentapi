@@ -9,6 +9,7 @@ import { MessageImages } from "../image-preview";
 import { withoutUploadedImages } from "@/lib/uploads";
 import { toast } from "sonner";
 import { formatMessageTime } from "@/lib/format-time";
+import { copyText } from "@/lib/clipboard";
 import type { DraftMessage, Message } from "../chat-provider";
 
 export function CopyButton({
@@ -17,7 +18,7 @@ export function CopyButton({
   onDark = false,
 }: {
   content: string;
-  label?: "task" | "response";
+  label?: "task" | "response" | "command" | "path" | "diff";
   // Sits on a terminal (always dark) surface.
   onDark?: boolean;
 }) {
@@ -25,11 +26,11 @@ export function CopyButton({
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(content);
+      await copyText(content);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch {
-      // Clipboard access can be blocked in embedded or non-secure contexts.
+      // Clipboard access can be blocked in embedded contexts.
       setCopied(false);
       toast.error(`Could not copy the ${label}`, {
         description: "Clipboard access may be blocked in this browser context.",
@@ -181,7 +182,7 @@ export function MessageItem({
         ) : (
           <div>
             {tools}
-            <ProcessedMessage messageContent={message.content} isUser={false} renderMode={renderMode} searchQuery={effectiveSearchQuery} />
+            <ProcessedMessage messageContent={message.content} isUser={false} renderMode={renderMode} searchQuery={effectiveSearchQuery} linkFilePaths />
           </div>
         )}
       </article>

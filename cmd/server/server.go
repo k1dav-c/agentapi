@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +29,9 @@ import (
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/lib/termexec"
 )
 
@@ -228,9 +232,34 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	}
 
 	experimentalACP := viper.GetBool(FlagExperimentalACP)
+	useNative := false
+	switch transportFlag := viper.GetString(FlagTransport); transportFlag {
+	case "", "pty":
+	case "acp":
+		experimentalACP = true
+	case "native":
+		useNative = true
+	default:
+		return fmt.Errorf("unknown --%s %q (one of: pty, acp, native)", FlagTransport, transportFlag)
+	}
+	if experimentalACP && useNative {
+		return fmt.Errorf("--%s and --%s=native are mutually exclusive", FlagExperimentalACP, FlagTransport)
+	}
 
 	if experimentalACP && (saveState || loadState) {
 		return fmt.Errorf("ACP mode doesn't support state persistence")
+	}
+	if useNative && (saveState || loadState) {
+		return fmt.Errorf("the native transport doesn't support --%s; use --%s", FlagStateFile, FlagStateDB)
+	}
+	stateDBPath := viper.GetString(FlagStateDB)
+	if stateDBPath != "" && !useNative {
+		return fmt.Errorf("--%s needs --%s native (with the PTY transport the agent can't resume its session; use --%s)", FlagStateDB, FlagTransport, FlagStateFile)
+	}
+
+	bind, err := httpapi.ParseBindAddress(viper.GetString(FlagBind))
+	if err != nil {
+		return fmt.Errorf("invalid --%s: %w", FlagBind, err)
 	}
 
 	pidFile := viper.GetString(FlagPidFile)
@@ -255,6 +284,10 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	var supervisor *agentSupervisor
 	var acpResult *httpapi.SetupACPResult
 	var agentStartedAt time.Time
+	var adapterFactory native.Factory
+	// updateNative updates the CLI of a native agent before a restart.
+	var updateNative func(context.Context)
+	cwd, _ := os.Getwd()
 
 	if printOpenAPI {
 		agentIO = nil
@@ -270,6 +303,19 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		acpIO := acpResult.AgentIO
 		agentIO = acpIO
 		transport = "acp"
+	} else if useNative {
+		var err error
+		adapterFactory, err = nativeFactory(agentType, nativeAdapterConfig{
+			Program: agent,
+			Args:    argsToPass[1:],
+			CWD:     cwd,
+			Logger:  logger,
+		})
+		if err != nil {
+			return err
+		}
+		updateNative = agentUpdater(agentType, agent, logger)
+		transport = "native"
 	} else {
 		agentStartedAt = time.Now()
 		programArgs := argsToPass[1:]
@@ -316,7 +362,22 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		agentPID = process.Pid()
 	}
 
-	cwd, _ := os.Getwd()
+	var stateDB *statedb.DB
+	uploadDir := ""
+	if stateDBPath != "" && !printOpenAPI {
+		var err error
+		stateDB, err = statedb.Open(stateDBPath, logger)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := stateDB.Close(); err != nil {
+				logger.Error("Failed to close the state database", "error", err)
+			}
+		}()
+		// Messages refer to uploads by path, so keep them with the state.
+		uploadDir = stateDBPath + ".uploads"
+	}
 
 	apiToken := viper.GetString(FlagAPIToken)
 	if apiToken == "generate" {
@@ -326,6 +387,9 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		}
 		apiToken = hex.EncodeToString(tokenBytes[:])
 		fmt.Fprintf(os.Stderr, "API token: %s\n", apiToken)
+		// The token goes in the URL fragment, which the browser never sends
+		// to a server or proxy; the chat UI trades it for a session cookie.
+		fmt.Fprintf(os.Stderr, "Chat UI: %s\n", chatSignInURL(bind, port, apiToken))
 	} else if apiToken != "" {
 		logger.Info("API token authentication enabled")
 	}
@@ -354,7 +418,13 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			}
 			return supervisor.Restart
 		}(),
-		APIToken: apiToken,
+		APIToken:      apiToken,
+		Bind:          bind,
+		NativeFactory: adapterFactory,
+		UpdateAgent:   updateNative,
+		Terminal:      viper.GetBool(FlagTerminal),
+		StateDB:       stateDB,
+		UploadDir:     uploadDir,
 		Webhook: httpapi.WebhookConfig{
 			URL:             viper.GetString(FlagWebhookURL),
 			Timeout:         viper.GetDuration(FlagWebhookTimeout),
@@ -382,7 +452,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	// Setup signal handlers (they will call gracefulCancel)
 	handleSignals(gracefulCtx, gracefulCancel, logger, srv)
 
-	logger.Info("Starting server on port", "port", port)
+	logger.Info("Starting server on port", "port", port, "address", srv.ListenAddr())
 
 	// Monitor process exit, following intentional supervisor swaps.
 	processExitCh := make(chan error, 1)
@@ -413,6 +483,20 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			}
 		}()
 	}
+	if exited := srv.NativeExited(); exited != nil {
+		go func() {
+			defer close(processExitCh)
+			defer gracefulCancel()
+			select {
+			case err := <-exited:
+				srv.MarkAgentExited(err)
+				if err != nil {
+					processExitCh <- fmt.Errorf("agent exited: %w", err)
+				}
+			case <-gracefulCtx.Done():
+			}
+		}()
+	}
 	if acpResult != nil {
 		go func() {
 			defer close(processExitCh)
@@ -438,9 +522,34 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		}
 	}()
 
+	// stopServer stops the HTTP server and a native agent; closeProcess
+	// stops a PTY agent.
+	stopServer := func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Stop(shutdownCtx); err != nil {
+			logger.Error("Failed to stop HTTP server", "error", err)
+		}
+	}
+	closeProcess := func() {
+		if process == nil {
+			return
+		}
+		current := process
+		if supervisor != nil {
+			current = supervisor.currentSettled()
+		}
+		if err := current.Close(logger, 5*time.Second); err != nil {
+			logger.Error("Failed to close process cleanly", "error", err)
+		}
+	}
+
 	select {
 	case err := <-serverErrCh:
 		if err != nil {
+			// The agent started before the listener failed.
+			stopServer()
+			closeProcess()
 			return fmt.Errorf("failed to start server: %w", err)
 		}
 	case <-gracefulCtx.Done():
@@ -449,13 +558,7 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	if err := srv.SaveState("shutdown"); err != nil {
 		logger.Error("Failed to save state during shutdown", "error", err)
 	}
-
-	// Stop the HTTP server
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Stop(shutdownCtx); err != nil {
-		logger.Error("Failed to stop HTTP server", "error", err)
-	}
+	stopServer()
 
 	select {
 	case err := <-processExitCh:
@@ -463,18 +566,19 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			return fmt.Errorf("agent exited with error: %w", err)
 		}
 	default:
-		// Close the process
-		if process != nil {
-			current := process
-			if supervisor != nil {
-				current = supervisor.currentSettled()
-			}
-			if err := current.Close(logger, 5*time.Second); err != nil {
-				logger.Error("Failed to close process cleanly", "error", err)
-			}
-		}
+		closeProcess()
 	}
 	return nil
+}
+
+// chatSignInURL returns the chat UI URL that signs the browser in with
+// token. A server listening on all interfaces is opened through localhost.
+func chatSignInURL(bind string, port int, token string) string {
+	host := bind
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		host = "localhost"
+	}
+	return fmt.Sprintf("http://%s/chat/embed#token=%s", net.JoinHostPort(host, strconv.Itoa(port)), url.QueryEscape(token))
 }
 
 var agentNames = (func() []string {
@@ -588,11 +692,15 @@ const (
 	FlagSaveState              = "save-state"
 	FlagPidFile                = "pid-file"
 	FlagExperimentalACP        = "experimental-acp"
+	FlagTransport              = "transport"
+	FlagStateDB                = "state-db"
+	FlagTerminal               = "terminal"
 	FlagWebhookURL             = "webhook-url"
 	FlagWebhookTimeout         = "webhook-timeout"
 	FlagWebhookMaxAttempts     = "webhook-max-attempts"
 	FlagWebhookPayloadTemplate = "webhook-payload-template"
 	FlagAPIToken               = "api-token"
+	FlagBind                   = "bind"
 )
 
 func CreateServerCmd() *cobra.Command {
@@ -636,11 +744,15 @@ func CreateServerCmd() *cobra.Command {
 		{FlagSaveState, "", false, "Save state to state-file on shutdown (defaults to true when state-file is set)", "bool"},
 		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts", "string"},
 		{FlagExperimentalACP, "", false, "Use experimental ACP transport instead of PTY", "bool"},
+		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) and resumes the agent's session when AgentAPI restarts. Native transport only", "string"},
+		{FlagTransport, "", "pty", "How to drive the agent: pty (its terminal UI), acp (same as --experimental-acp) or native (its own structured protocol; claude, codex and pi)", "string"},
+		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal. Native transport only, where the agent has no terminal of its own", "bool"},
 		{FlagWebhookURL, "", "", "URL notified when the agent run status changes", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},
 		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},
 		{FlagWebhookPayloadTemplate, "", "", "Go text/template for custom webhook POST body. Available fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport", "string"},
 		{FlagAPIToken, "", "", "API token for Bearer authentication. If set without a value, a random token is generated. Empty (default) disables authentication.", "string"},
+		{FlagBind, "", "", "Address to listen on: an IP address or hostname without a port (e.g. 127.0.0.1 or ::1). Empty (default) listens on all interfaces", "string"},
 	}
 
 	for _, spec := range flagSpecs {

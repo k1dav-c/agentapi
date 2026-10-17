@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AgentType, useChat } from "./chat-provider";
-import { getAgentState } from "@/lib/session-status";
 import { describeTerminalPrompt } from "@/lib/terminal-option";
+import { loginTitle } from "@/lib/login";
 import { alertForTransition, faviconDataUrl, notificationsEnabled, type FaviconBadge } from "@/lib/background-alerts";
 
 // Lets people who aren't looking at the tab know what the agent is doing:
@@ -11,8 +11,7 @@ import { alertForTransition, faviconDataUrl, notificationsEnabled, type FaviconB
 // notification when the agent needs them or finishes while the tab is in
 // the background.
 export function BackgroundAlerts() {
-  const { serverStatus, connectionStatus, terminalPrompt, agentType, messages } = useChat();
-  const kind = getAgentState(serverStatus, connectionStatus, terminalPrompt);
+  const { agentState: kind, terminalPrompt, loginRequired, requests, agentType, messages } = useChat();
   const previous = useRef(kind);
   // A task finished while the tab was hidden and hasn't been seen yet.
   const [unseenFinish, setUnseenFinish] = useState(false);
@@ -34,7 +33,13 @@ export function BackgroundAlerts() {
     if (alert === "finished") setUnseenFinish(true);
     if (!notificationsEnabled() || typeof Notification === "undefined" || Notification.permission !== "granted") return;
     const notification = new Notification(alert === "needs-you" ? `${name} needs you` : `${name} finished`, {
-      body: alert === "needs-you" ? describeTerminalPrompt(terminalPrompt).title : task.replace(/\s+/g, " ").slice(0, 120),
+      body: alert === "needs-you"
+        ? terminalPrompt
+          ? describeTerminalPrompt(terminalPrompt).title
+          : loginRequired
+            ? `${loginTitle(loginRequired)}: run ${loginRequired.command}`
+            : requests.find((request) => request.status === "pending")?.title ?? "The agent is waiting for your answer"
+        : task.replace(/\s+/g, " ").slice(0, 120),
       tag: `agentapi-${alert}`,
     });
     notification.onclick = () => {

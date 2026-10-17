@@ -41,6 +41,17 @@ describe("getTaskActivity", () => {
     const t = task({toolCalls: [tool("t2", "2026-10-04T08:00:05Z")]});
     expect(kinds(getTaskActivity(t))).toEqual(["tool:tool-t2", "message:response-1"]);
   });
+
+  test("the native transport shows only the transcript, never the joined agent text", () => {
+    const t = task({
+      toolCalls: [tool("t2", "2026-10-04T08:00:05Z")],
+      richActivity: [{type: "thinking", key: "th", content: "…", timestamp: "2026-10-04T08:00:01Z"}],
+    });
+    expect(kinds(getTaskActivity(t, {live: true, transcriptOnly: true}))).toEqual(["thinking:th", "tool:tool-t2"]);
+    // A steered message's task holds only the agent text of the reply,
+    // which belongs to the task before it.
+    expect(getTaskActivity(task({}), {transcriptOnly: true})).toEqual([]);
+  });
 });
 
 import {splitThinking} from "./thinking";

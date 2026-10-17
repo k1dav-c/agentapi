@@ -5,6 +5,7 @@ import (
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	mf "github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/util"
 	"github.com/danielgtaylor/huma/v2"
@@ -29,13 +30,36 @@ func (m MessageType) Schema(r huma.Registry) *huma.Schema {
 type Transport string
 
 const (
-	TransportPTY Transport = "pty"
-	TransportACP Transport = "acp"
+	TransportPTY    Transport = "pty"
+	TransportACP    Transport = "acp"
+	TransportNative Transport = "native"
 )
 
 var TransportValues = []Transport{
 	TransportPTY,
 	TransportACP,
+	TransportNative,
+}
+
+// DispatchMode says what to do with a user message while the agent is busy.
+type DispatchMode string
+
+const (
+	// DispatchQueue sends the message now if the agent is idle and queues
+	// it otherwise.
+	DispatchQueue DispatchMode = "queue"
+	// DispatchSteer adds the message to the turn the agent is working on,
+	// or sends it as a new turn if the agent is idle.
+	DispatchSteer DispatchMode = "steer"
+	// DispatchInterrupt stops the turn the agent is working on and sends the
+	// message next.
+	DispatchInterrupt DispatchMode = "interrupt"
+)
+
+var DispatchModeValues = []DispatchMode{DispatchQueue, DispatchSteer, DispatchInterrupt}
+
+func (d DispatchMode) Schema(r huma.Registry) *huma.Schema {
+	return util.OpenAPISchema(r, "DispatchMode", DispatchModeValues)
 }
 
 func (tr Transport) Schema(r huma.Registry) *huma.Schema {
@@ -58,7 +82,7 @@ type StatusResponse struct {
 		SessionID string         `json:"session_id" doc:"Identifier for this AgentAPI server session."`
 		RunID     uint64         `json:"run_id" doc:"Monotonically increasing run identifier within the session."`
 		AgentType mf.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
-		Transport Transport      `json:"transport" doc:"Backend transport being used ('acp' or 'pty')."`
+		Transport Transport      `json:"transport" doc:"Backend transport being used ('pty', 'acp' or 'native')."`
 		Version   string         `json:"agentapi_version" doc:"Version of the AgentAPI server."`
 		// See StatusChangeBody.TerminalPrompt.
 		TerminalPrompt string `json:"terminal_prompt" doc:"Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise."`
@@ -66,6 +90,20 @@ type StatusResponse struct {
 		SessionName string `json:"session_name,omitempty" doc:"Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it."`
 		// See StatusChangeBody.TerminalColumns.
 		TerminalColumns uint16 `json:"terminal_columns,omitempty" doc:"Width of the emulated terminal the agent runs in, in columns (PTY transport only)."`
+		// See StatusChangeBody.PendingRequests.
+		PendingRequests int `json:"pending_requests,omitempty" doc:"Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests."`
+		// See StatusChangeBody.Capabilities.
+		Capabilities *native.Capabilities `json:"capabilities,omitempty" doc:"Optional operations the agent supports. Native transport only."`
+		// See StatusChangeBody.LoginRequired.
+		LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only."`
+		// See StatusChangeBody.Settings.
+		Settings *native.Settings `json:"settings,omitempty" doc:"The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only."`
+		// See StatusChangeBody.Usage.
+		Usage *native.AgentUsage `json:"usage,omitempty" doc:"How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only."`
+		// See StatusChangeBody.Terminal.
+		Terminal bool `json:"terminal,omitempty" doc:"A shell terminal in the agent's working directory is available at GET /terminal. Native transport only."`
+		// Epoch lets a client resume /events without a cache.
+		Epoch string `json:"epoch" doc:"Identifies the current conversation state; pass it as epoch to /events?sync=1 (see session_sync)."`
 	}
 }
 
@@ -97,8 +135,9 @@ type MessagesResponse struct {
 }
 
 type MessageRequestBody struct {
-	Content string      `json:"content" example:"Hello, agent!" doc:"Message content"`
-	Type    MessageType `json:"type" doc:"A 'user' type message will be logged as a user message in the conversation history and submitted to the agent. AgentAPI will wait until the agent starts carrying out the task described in the message before responding. A 'raw' type message will be written directly to the agent's terminal session as keystrokes and will not be saved in the conversation history. 'raw' messages are useful for sending escape sequences to the terminal."`
+	Content      string       `json:"content" example:"Hello, agent!" doc:"Message content"`
+	DispatchMode DispatchMode `json:"dispatch_mode,omitempty" doc:"What to do with a user message while the agent is busy. 'queue' (default) sends it once the agent is idle. 'steer' adds it to the turn the agent is working on; 'interrupt' stops that turn and sends the message next. Without a running turn, both send the message as usual. 'steer' and 'interrupt' need the native transport, and while a turn runs an agent with the matching capability (see GET /status); otherwise they return 400."`
+	Type         MessageType  `json:"type" doc:"A 'user' type message will be logged as a user message in the conversation history and submitted to the agent. AgentAPI will wait until the agent starts carrying out the task described in the message before responding. A 'raw' type message will be written directly to the agent's terminal session as keystrokes and will not be saved in the conversation history. 'raw' messages are useful for sending escape sequences to the terminal."`
 }
 
 // MessageRequest represents a request to create a new message
@@ -109,8 +148,9 @@ type MessageRequest struct {
 // MessageResponse represents a newly created message
 type MessageResponse struct {
 	Body struct {
-		Ok     bool `json:"ok" doc:"Indicates whether the message was accepted."`
-		Queued bool `json:"queued" doc:"Indicates whether a user message was queued because the agent was busy."`
+		Ok      bool `json:"ok" doc:"Indicates whether the message was accepted."`
+		Queued  bool `json:"queued" doc:"Indicates whether a user message was queued because the agent was busy."`
+		Steered bool `json:"steered,omitempty" doc:"Indicates whether the message was added to the turn the agent was working on."`
 	}
 }
 
@@ -135,6 +175,60 @@ type UpdateQueuedMessageRequest struct {
 
 type DeleteQueuedMessageRequest struct {
 	ID int `path:"id" doc:"Queued message identifier."`
+}
+
+type SteerQueuedMessageRequest struct {
+	ID int `path:"id" doc:"Queued message identifier."`
+}
+
+type ReorderQueueRequest struct {
+	Body struct {
+		IDs []int `json:"ids" nullable:"false" doc:"Identifiers of all queued messages in the new order."`
+	}
+}
+
+type RequestsResponse struct {
+	Body struct {
+		Requests []native.RequestState `json:"requests" nullable:"false" doc:"Pending requests and the most recently closed ones, oldest first."`
+	}
+}
+
+type RequestPath struct {
+	ID string `path:"id" doc:"Request identifier."`
+}
+
+type RequestResponse struct {
+	Body native.RequestState
+}
+
+type RespondRequest struct {
+	ID   string `path:"id" doc:"Request identifier."`
+	Body native.Response
+}
+
+// SettingsResponse is the agent's settings and the values they can take.
+type SettingsResponse struct {
+	Body struct {
+		Settings native.Settings       `json:"settings" doc:"Current settings; a setting the agent doesn't report is missing."`
+		Options  native.SettingOptions `json:"options" doc:"Values the settings can take."`
+	}
+}
+
+type UpdateSettingsRequest struct {
+	Body native.Settings
+}
+
+type InterruptResponse struct {
+	Body struct {
+		Ok bool `json:"ok"`
+	}
+}
+
+// okResponse is an InterruptResponse that says the request succeeded.
+func okResponse() *InterruptResponse {
+	resp := &InterruptResponse{}
+	resp.Body.Ok = true
+	return resp
 }
 
 type QueueMutationResponse struct {

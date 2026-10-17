@@ -118,3 +118,9 @@ func TestStripWidePadding(t *testing.T) {
 	assert.Equal(t, "你好", stripWidePadding("你好"))
 	assert.Equal(t, "plain", stripWidePadding("plain"))
 }
+
+// stripWidePadding removes the injected padding runes from a screen
+// snapshot.
+func stripWidePadding(screen string) string {
+	return strings.ReplaceAll(screen, string(widePadRune), "")
+}

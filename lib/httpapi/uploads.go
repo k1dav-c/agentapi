@@ -46,11 +46,11 @@ func (s *Server) serveUpload(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if s.tempDir == "" {
+	if s.uploadDir == "" {
 		http.NotFound(w, r)
 		return
 	}
-	root, err := os.OpenRoot(s.tempDir)
+	root, err := os.OpenRoot(s.uploadDir)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -134,13 +134,13 @@ func (s *Server) storeImage(data []byte) (string, error) {
 	if !previewableImageTypes[contentType] {
 		return "", fmt.Errorf("not a previewable image: %s", contentType)
 	}
-	if s.tempDir == "" {
+	if s.uploadDir == "" {
 		return "", errors.New("no upload directory")
 	}
 	hash := sha256.Sum256(data)
 	checksum := hex.EncodeToString(hash[:8])
 	name := "image." + imageExtensions[contentType]
-	root, err := os.OpenRoot(s.tempDir)
+	root, err := os.OpenRoot(s.uploadDir)
 	if err != nil {
 		return "", err
 	}

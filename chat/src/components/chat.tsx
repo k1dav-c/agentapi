@@ -7,10 +7,14 @@ import MessageInput from "./message-input";
 import MessageList from "./message-list";
 import dynamic from "next/dynamic";
 import {TtyView} from "./tty-view";
+import {ShellView} from "./shell-view";
+import {OPEN_TERMINAL_EVENT} from "@/lib/slash-commands";
 import {DecisionCard, StateStrip} from "./dock";
+import {RequestCard} from "./request-card";
+import {LoginCard} from "./login-card";
 import {BackgroundAlerts} from "./background-alerts";
 
-// The Explorer (task index, MCP and Temporal settings) isn't needed for the
+// The Explorer (task index, MCP settings) isn't needed for the
 // first paint, so it loads right after, keeping the initial bundle small.
 // The placeholder matches its trigger button.
 const Explorer = dynamic(() => import("./explorer").then((module) => module.Explorer), {
@@ -27,7 +31,9 @@ import {KeyboardShortcutsDialog, useKeyboardShortcutsKey} from "./keyboard-short
 export function Chat() {
   const [suggestedPrompt, setSuggestedPrompt] = useState("");
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [ttyMode, setTtyMode] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  // What the native terminal types once it opens (the login command).
+  const [shellCommand, setShellCommand] = useState<string | undefined>();
   useKeyboardShortcutsKey(() => setShortcutsOpen(true));
   const {
     messages,
@@ -42,21 +48,35 @@ export function Chat() {
     reconnectAttempt,
     nextReconnectAt,
     reconnectNow,
-    storageScope,
     workspaceUrl,
+    transport,
+    canStop,
+    stop,
+    terminalAvailable,
   } = useChat();
-  const [reconnectSeconds, setReconnectSeconds] = useState(0);
-  const [coderWorkspaceUrl, setCoderWorkspaceUrl] = useState(workspaceUrl);
-
+  // Only the PTY transport has the agent's terminal: TTY mode, raw keys and
+  // the terminal prompt card need it. A native agent has none; the server
+  // offers a shell in its working directory instead.
+  const hasTerminal = transport === "pty";
+  const hasShell = transport === "native" && terminalAvailable;
   useEffect(() => {
-    if (workspaceUrl) return;
-    let active = true;
-    fetch(`${storageScope}/workspace`)
-      .then((response) => response.ok ? response.json() as Promise<{url?: string}> : null)
-      .then((value) => { if (active && value?.url) setCoderWorkspaceUrl(value.url); })
-      .catch(() => undefined);
-    return () => { active = false; };
-  }, [storageScope, workspaceUrl]);
+    if (!hasTerminal && !hasShell) setTerminalOpen(false);
+  }, [hasTerminal, hasShell]);
+  const openShell = (command?: string) => {
+    setShellCommand(command);
+    setTerminalOpen(true);
+  };
+  // The /terminal and /login commands.
+  useEffect(() => {
+    if (!hasShell) return;
+    const onOpen = (event: Event) => {
+      setShellCommand((event as CustomEvent<string | undefined>).detail);
+      setTerminalOpen(true);
+    };
+    window.addEventListener(OPEN_TERMINAL_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_TERMINAL_EVENT, onOpen);
+  }, [hasShell]);
+  const [reconnectSeconds, setReconnectSeconds] = useState(0);
 
   useEffect(() => {
     if (!nextReconnectAt) {
@@ -107,8 +127,10 @@ export function Chat() {
           </Button>
         </div>
       )}
-      {ttyMode ? (
-        <TtyView onExit={() => setTtyMode(false)} />
+      {terminalOpen && hasTerminal ? (
+        <TtyView onExit={() => setTerminalOpen(false)} />
+      ) : terminalOpen && hasShell ? (
+        <ShellView onExit={() => setTerminalOpen(false)} command={shellCommand} />
       ) : (
         <>
           <MessageList
@@ -122,21 +144,36 @@ export function Chat() {
               setSuggestedPrompt(content);
             }}
             onDismissMessage={dismissFailedMessage}
-            onStopTask={() => void sendMessage("\x1b", "raw")}
-            onSendRaw={(data) => void sendMessage(data, "raw")}
+            onStopTask={canStop ? () => void stop() : undefined}
+            onSendRaw={hasTerminal ? (data) => void sendMessage(data, "raw") : undefined}
             headerAction={
               <div className="flex items-center gap-0.5">
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="size-8 rounded-full text-muted-foreground"
-                  title="TTY mode: use the agent's terminal directly"
-                  aria-label="Switch to TTY mode"
-                  onClick={() => setTtyMode(true)}
-                >
-                  <TerminalSquare className="size-4" />
-                </Button>
+                {hasTerminal && (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-8 rounded-full text-muted-foreground"
+                    title="TTY mode: use the agent's terminal directly"
+                    aria-label="Switch to TTY mode"
+                    onClick={() => setTerminalOpen(true)}
+                  >
+                    <TerminalSquare className="size-4" />
+                  </Button>
+                )}
+                {hasShell && (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-8 rounded-full text-muted-foreground"
+                    title="Terminal: a shell in the agent's working directory"
+                    aria-label="Open the terminal"
+                    onClick={() => openShell()}
+                  >
+                    <TerminalSquare className="size-4" />
+                  </Button>
+                )}
                 <Explorer
                   onNavigateTask={(number) => {
                     window.requestAnimationFrame(() =>
@@ -147,7 +184,7 @@ export function Chat() {
                     );
                   }}
                 />
-                {coderWorkspaceUrl && (
+                {workspaceUrl && (
                   <Button
                     type="button"
                     size="icon"
@@ -155,7 +192,7 @@ export function Chat() {
                     className="size-8 rounded-full text-muted-foreground"
                     title="Open Coder workspace"
                     aria-label="Open Coder workspace"
-                    onClick={() => window.open(coderWorkspaceUrl, "_blank", "noopener,noreferrer")}
+                    onClick={() => window.open(workspaceUrl, "_blank", "noopener,noreferrer")}
                   >
                     <ExternalLink className="size-4" />
                   </Button>
@@ -167,7 +204,9 @@ export function Chat() {
             dock={
               <>
                 <StateStrip />
-                <DecisionCard onOpenTerminal={() => setTtyMode(true)} />
+                {hasTerminal && <DecisionCard onOpenTerminal={() => setTerminalOpen(true)} />}
+                {transport === "native" && <LoginCard onRunInTerminal={hasShell ? openShell : undefined} />}
+                {transport === "native" && <RequestCard />}
               </>
             }
             onSendMessage={sendMessage}

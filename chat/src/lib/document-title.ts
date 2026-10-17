@@ -1,10 +1,7 @@
-import type {
-  ConnectionStatus,
-  ServerStatus,
-} from "@/components/chat-provider";
-import { getAgentState } from "./session-status";
+import type { AgentStateKind } from "./session-status";
+import { uiCopy } from "./ui-copy";
 
-const DEFAULT_TITLE = "AgentAPI — Live Agent Session";
+const DEFAULT_TITLE = uiCopy.metadata.title;
 const MAX_TASK_LENGTH = 60;
 
 function summarizeTask(content: string) {
@@ -14,15 +11,11 @@ function summarizeTask(content: string) {
 }
 
 export function getDocumentTitle({
-  connectionStatus,
-  serverStatus,
-  terminalPrompt,
+  agentState,
   task,
   customTitle,
 }: {
-  connectionStatus: ConnectionStatus;
-  serverStatus: ServerStatus;
-  terminalPrompt?: string;
+  agentState: AgentStateKind;
   task?: string;
   customTitle?: string;
 }) {
@@ -35,7 +28,7 @@ export function getDocumentTitle({
     working: "● Working",
     ready: "✓ Ready",
     connecting: "○ Connecting",
-  }[getAgentState(serverStatus, connectionStatus, terminalPrompt)];
+  }[agentState];
   const taskSummary = task ? summarizeTask(task) : "";
   const suffix = customTitle || "AgentAPI";
 

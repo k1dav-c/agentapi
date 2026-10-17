@@ -195,19 +195,12 @@ type PTYConversation struct {
 
 var _ Conversation = &PTYConversation{}
 
-type noopEmitter struct{}
-
-func (noopEmitter) EmitMessages([]ConversationMessage) {}
-func (noopEmitter) EmitStatus(ConversationStatus)      {}
-func (noopEmitter) EmitScreen(string)                  {}
-func (noopEmitter) EmitError(_ string, _ ErrorLevel)   {}
-
 func NewPTY(ctx context.Context, cfg PTYConversationConfig, emitter Emitter) *PTYConversation {
 	if cfg.Clock == nil {
 		cfg.Clock = quartz.NewReal()
 	}
 	if emitter == nil {
-		emitter = noopEmitter{}
+		emitter = NopEmitter{}
 	}
 	threshold := cfg.getStableSnapshotsThreshold()
 	c := &PTYConversation{
@@ -903,8 +896,8 @@ func (c *PTYConversation) wakeSnapshot() {
 // it sleeps without a timer until PTY output, a queued send, or Reset wakes
 // it. Buffering notifications coalesces bursts and keeps rendering bounded.
 func (c *PTYConversation) watchScreen(ctx context.Context, source interface{ ScreenUpdates() <-chan struct{} }, snapshot func() error) {
-	settleInterval := c.cfg.SnapshotInterval           // 25ms — for stability detection
-	activeInterval := c.cfg.SnapshotInterval * 6        // 150ms — during streaming
+	settleInterval := c.cfg.SnapshotInterval     // 25ms — for stability detection
+	activeInterval := c.cfg.SnapshotInterval * 6 // 150ms — during streaming
 	interval := settleInterval
 	var prevScreen string
 

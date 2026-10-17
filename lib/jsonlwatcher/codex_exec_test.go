@@ -125,3 +125,21 @@ func TestCodexViewImageResult(t *testing.T) {
 	assert.Equal(t, "image/png", result.Images[0].MediaType)
 	assert.Equal(t, "\x89PNG\r\n\x1a\n", string(result.Images[0].Data))
 }
+
+func TestImageFromDataURL(t *testing.T) {
+	img, ok := ImageFromDataURL("data:image/png;base64,iVBORw0KGgo=")
+	require.True(t, ok)
+	assert.Equal(t, RichImage{MediaType: "image/png", Data: []byte("\x89PNG\r\n\x1a\n")}, img)
+
+	for _, url := range []string{
+		"https://example.com/shot.png",
+		"https://example.com/a;base64,iVBORw0KGgo=",
+		"data:image/png,iVBORw0KGgo=",
+		"data:image/png;base64,not base64",
+		"data:image/png;base64,",
+		"data:image/png;base64",
+	} {
+		_, ok := ImageFromDataURL(url)
+		assert.False(t, ok, url)
+	}
+}

@@ -125,11 +125,17 @@ func (p *ClaudeSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEve
 	if err := json.Unmarshal(line, &entry); err != nil {
 		return nil, err
 	}
+	return p.Events(entry), nil
+}
+
+// Events returns the timeline events of one session-log entry. The native
+// Claude adapter calls it with the entries of its stream.
+func (p *ClaudeSessionEventParser) Events(entry JSONLLine) []SessionEvent {
 	if entry.SessionID != "" {
 		p.sessionID = entry.SessionID
 	}
 	if entry.Message == nil {
-		return nil, nil
+		return nil
 	}
 	eventTime, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
 	sessionID := optionalString(p.sessionID)
@@ -137,7 +143,7 @@ func (p *ClaudeSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEve
 
 	var text string
 	if err := json.Unmarshal(entry.Message.Content, &text); err == nil {
-		return []SessionEvent{newSessionEvent("text", optionalString(entry.Message.Role), &text, eventTime, sessionID, nil)}, nil
+		return []SessionEvent{newSessionEvent("text", optionalString(entry.Message.Role), &text, eventTime, sessionID, nil)}
 	}
 
 	var blocks []ContentBlock
@@ -162,7 +168,7 @@ func (p *ClaudeSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEve
 			}
 		}
 		if len(events) > 0 {
-			return events, nil
+			return events
 		}
 	}
 
@@ -175,9 +181,9 @@ func (p *ClaudeSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEve
 			event.ToolUseID = optionalString(result.ToolUseID)
 			events = append(events, event)
 		}
-		return events, nil
+		return events
 	}
-	return nil, nil
+	return nil
 }
 
 func newSessionEvent(kind string, role, content *string, eventTime time.Time, sessionID, sourceID *string) SessionEvent {

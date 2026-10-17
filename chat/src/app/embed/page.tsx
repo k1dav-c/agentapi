@@ -1,5 +1,6 @@
 import { Chat } from "@/components/chat";
 import { ChatProvider } from "@/components/chat-provider";
+import { FileViewerProvider } from "@/components/file-viewer";
 import { EmbedStatusBar } from "@/components/embed-status-bar";
 import { Suspense } from "react";
 
@@ -11,10 +12,12 @@ export default function EmbedPage() {
       }
     >
       <ChatProvider>
-        <main className="flex h-svh flex-col overflow-hidden bg-background">
-          <EmbedStatusBar />
-          <Chat />
-        </main>
+        <FileViewerProvider>
+          <main className="flex h-svh flex-col overflow-hidden bg-background">
+            <EmbedStatusBar />
+            <Chat />
+          </main>
+        </FileViewerProvider>
       </ChatProvider>
     </Suspense>
   );

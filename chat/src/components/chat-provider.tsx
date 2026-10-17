@@ -17,13 +17,37 @@ import {getDocumentTitle} from "@/lib/document-title";
 import {getReconnectDelay} from "@/lib/reconnect";
 import {parseFailedMessages} from "@/lib/failed-messages";
 import {clearSession, loadSession, mergeByKey, saveSession} from "@/lib/session-cache";
+import {bootstrapSession, ensureSession, withCredentials} from "@/lib/auth";
+import {AuthDialog} from "@/components/auth-dialog";
 import {
   createChatAPI,
+  httpURL,
+  type AgentSettings,
+  type AgentUsage,
+  type FileContent,
+  type FileDiff,
   type MCPCheckResult,
   type MCPConfig,
   type MCPProfiles,
   type UploadOptions,
 } from "@/lib/chat-api";
+import {
+  canStop,
+  parseTransport,
+  type Capabilities,
+  type DispatchContext,
+  type DispatchMode,
+  type Transport,
+} from "@/lib/dispatch";
+import {
+  mergeListedRequests,
+  mergeRequests,
+  pendingRequests,
+  type NativeRequest,
+  type RequestResponse,
+} from "@/lib/native-requests";
+import {isLoginNotice, parseLoginRequired, type LoginRequired} from "@/lib/login";
+import {getAgentState, type AgentStateKind} from "@/lib/session-status";
 
 export interface Message {
   id: number;
@@ -110,11 +134,24 @@ export interface RichMessage {
 
 interface StatusChangeEvent {
   status: string;
+  lifecycle?: string;
   agent_type: string;
+  // Missing from servers that predate it; GET /status says then.
+  transport?: string;
   agentapi_version?: string;
   terminal_columns?: number;
   session_name?: string;
   terminal_prompt?: string;
+  // Native transport only. The chat counts the pending requests itself,
+  // from the requests it holds (pending_requests is ignored).
+  capabilities?: Capabilities;
+  login_required?: unknown;
+  // Native agents with the settings capability.
+  settings?: AgentSettings;
+  // Native agents, once they report it.
+  usage?: AgentUsage;
+  // A shell terminal is available (native transport).
+  terminal?: boolean;
 }
 
 interface ErrorEventData {
@@ -132,6 +169,8 @@ type MessageType = "user" | "raw";
 export interface SendResult {
   ok: boolean;
   queued: boolean;
+  // The message was added to the turn the agent is working on.
+  steered?: boolean;
 }
 
 export type ServerStatus = "stable" | "running" | "offline" | "unknown";
@@ -183,7 +222,54 @@ interface ChatContextValue {
   serverStatus: ServerStatus;
   connectionStatus: ConnectionStatus;
   queuedMessages: QueuedMessage[];
-  sendMessage: (message: string, type?: MessageType) => Promise<SendResult>;
+  // How the server drives the agent; "pty" until the server says otherwise.
+  transport: Transport;
+  // Optional operations of a native agent; null for other transports.
+  capabilities: Capabilities | null;
+  // Number of requests the agent waits on (native transport), counted from
+  // requests so that both always agree.
+  pendingRequestCount: number;
+  // Set while the agent waits for someone to log it in (native transport).
+  loginRequired: LoginRequired | null;
+  // The permission mode, model and effort of a native agent that can change
+  // them (capabilities.settings); null otherwise.
+  agentSettings: AgentSettings | null;
+  // GET /settings: the settings and the values they can take.
+  getSettings: ReturnType<typeof createChatAPI>["getSettings"];
+  // PUT /settings: changes the settings set in change.
+  updateSettings: (change: AgentSettings) => ReturnType<ReturnType<typeof createChatAPI>["updateSettings"]>;
+  // How full the context window is and the account's rate limits, as the
+  // agent last reported them (native transport); null until it does.
+  agentUsage: AgentUsage | null;
+  // Whether the server offers a shell terminal (native transport, GET
+  // /terminal), and typing into and resizing it.
+  terminalAvailable: boolean;
+  // POST /compact (agents with the compact capability).
+  compact: () => Promise<void>;
+  terminalInput: (data: string) => Promise<void>;
+  terminalResize: (cols: number, rows: number) => Promise<void>;
+  // The agent is starting (lifecycle "starting"): there is no turn yet, and
+  // while it finds no login AgentAPI starts it again by itself.
+  agentStarting: boolean;
+  // What the agent is doing from the user's point of view ("Needs you",
+  // "Working", ...), for every view that shows it.
+  agentState: AgentStateKind;
+  // What the composer may offer: steer, interrupt (see lib/dispatch).
+  dispatch: DispatchContext;
+  // Checks the login again now (POST /login/retry).
+  retryLogin: () => Promise<void>;
+  // Requests the agent made (native transport): pending ones and the most
+  // recently closed, oldest first.
+  requests: NativeRequest[];
+  respondToRequest: (id: string, response: RequestResponse) => Promise<NativeRequest>;
+  // Whether Stop can stop what the agent is doing now, and stopping it
+  // (Esc on a PTY agent's terminal, POST /interrupt on the native
+  // transport). stop reports a failure itself and resolves to false.
+  canStop: boolean;
+  stop: () => Promise<boolean>;
+  steerQueuedMessage: (id: number) => Promise<void>;
+  reorderQueue: (ids: number[]) => Promise<void>;
+  sendMessage: (message: string, type?: MessageType, mode?: DispatchMode) => Promise<SendResult>;
   // Sends keystrokes to the agent's terminal as-is (TTY mode).
   sendTerminalInput: (data: string) => Promise<void>;
   retryFailedMessage: (clientId: string) => Promise<boolean>;
@@ -196,16 +282,11 @@ interface ChatContextValue {
   ) => Promise<FileUploadResponse>;
   reconnectAttempt: number;
   nextReconnectAt: number | null;
+  // Reconnects right away, as the user asked: also asks for the API token
+  // again if the user closed the sign-in dialog.
   reconnectNow: () => void;
   downloadSession: () => Promise<void>;
   deleteMessages: () => Promise<void>;
-  getTemporal: ReturnType<typeof createChatAPI>["getTemporal"];
-  updateTemporal: ReturnType<typeof createChatAPI>["updateTemporal"];
-  getTemporalProfiles: ReturnType<typeof createChatAPI>["getTemporalProfiles"];
-  saveTemporalProfile: ReturnType<typeof createChatAPI>["saveTemporalProfile"];
-  importTemporalProfiles: ReturnType<typeof createChatAPI>["importTemporalProfiles"];
-  deleteTemporalProfile: ReturnType<typeof createChatAPI>["deleteTemporalProfile"];
-  applyTemporalProfile: ReturnType<typeof createChatAPI>["applyTemporalProfile"];
   getMCP: () => Promise<MCPConfig>;
   updateMCP: (
     servers: Record<string, unknown>,
@@ -219,6 +300,10 @@ interface ChatContextValue {
   saveMCPProfile: (name: string, servers: Record<string, unknown>) => Promise<MCPProfiles>;
   deleteMCPProfile: (name: string) => Promise<MCPProfiles>;
   applyMCPProfile: (name: string, restart?: boolean) => Promise<void>;
+  // A file in the agent's working directory and its uncommitted changes,
+  // for the file viewer (GET /files/content, GET /files/diff).
+  getFileContent: (path: string) => Promise<FileContent>;
+  getFileDiff: (path: string) => Promise<FileDiff>;
   storageScope: string;
   agentType: AgentType;
   // AgentAPI server version (e.g. "0.14.0"); empty until the first status
@@ -230,6 +315,8 @@ interface ChatContextValue {
   // name, Pi's /name); empty until it names it.
   sessionName: string;
   customTitle?: string;
+  // The Coder workspace: the ?workspace= parameter, or what the server says
+  // (GET /workspace).
   workspaceUrl?: string;
 }
 
@@ -279,16 +366,9 @@ export const useAgentAPIUrl = (): string => {
 export function ChatProvider({ children }: PropsWithChildren) {
   const searchParams = useSearchParams();
   const customTitle = searchParams.get("title") ?? undefined;
-  const workspaceUrl = (() => {
-    const value = searchParams.get("workspace");
-    if (!value) return undefined;
-    try {
-      const url = new URL(value, window.location.origin);
-      return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined;
-    } catch {
-      return undefined;
-    }
-  })();
+  const workspaceValue = searchParams.get("workspace");
+  const workspaceParam = workspaceValue ? httpURL(workspaceValue, window.location.origin) : undefined;
+  const [serverWorkspaceUrl, setServerWorkspaceUrl] = useState<string>();
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
   const [terminalPrompt, setTerminalPrompt] = useState("");
@@ -301,6 +381,36 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [agentapiVersion, setAgentapiVersion] = useState("");
   const [terminalColumns, setTerminalColumns] = useState(0);
   const [sessionName, setSessionName] = useState("");
+  const [transport, setTransport] = useState<Transport>("pty");
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [agentSettings, setAgentSettings] = useState<AgentSettings | null>(null);
+  const [agentUsage, setAgentUsage] = useState<AgentUsage | null>(null);
+  const [terminalAvailable, setTerminalAvailable] = useState(false);
+  const [loginRequired, setLoginRequiredState] = useState<LoginRequired | null>(null);
+  // The login as the event handlers see it, to skip errors the card shows.
+  const loginRef = useRef<LoginRequired | null>(null);
+  const setLoginRequired = useCallback((login: LoginRequired | null) => {
+    loginRef.current = login;
+    setLoginRequiredState(login);
+  }, []);
+  const [lifecycle, setLifecycle] = useState("");
+  const [requests, setRequests] = useState<NativeRequest[]>([]);
+  const pendingRequestCount = useMemo(() => pendingRequests(requests).length, [requests]);
+  const agentStarting = lifecycle === "starting";
+  const agentState = getAgentState({
+    serverStatus,
+    connectionStatus,
+    terminalPrompt,
+    pendingRequestCount,
+    loginRequired: loginRequired !== null,
+  });
+  const dispatch = useMemo<DispatchContext>(
+    () => ({transport, capabilities: agentStarting ? null : capabilities, serverStatus, pendingRequestCount}),
+    [agentStarting, capabilities, pendingRequestCount, serverStatus, transport],
+  );
+  // Errors the server replays on every connection that this page showed
+  // already.
+  const shownErrorsRef = useRef(new Set<string>());
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastEventAtRef = useRef(Date.now());
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -320,6 +430,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const pendingRef = useRef({
     messages: new Map<number, Message & {seq?: number}>(),
     rich: new Map<string, RichMessage & {seq?: number}>(),
+    requests: new Map<string, NativeRequest>(),
     replace: false,
   });
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -335,11 +446,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
     const {replace} = pending;
     const messageUpdates = [...pending.messages.values()];
     const richUpdates = [...pending.rich.values()];
+    const requestUpdates = [...pending.requests.values()];
     pending.messages = new Map();
     pending.rich = new Map();
+    pending.requests = new Map();
     pending.replace = false;
     let applied = syncRef.current.seq;
-    for (const update of [...messageUpdates, ...richUpdates]) applied = Math.max(applied, update.seq ?? 0);
+    for (const update of [...messageUpdates, ...richUpdates, ...requestUpdates]) applied = Math.max(applied, update.seq ?? 0);
     syncRef.current = {...syncRef.current, seq: applied};
 
     if (replace || messageUpdates.length > 0) {
@@ -363,9 +476,14 @@ export function ChatProvider({ children }: PropsWithChildren) {
         mergeByKey(replace ? [] : previous, richUpdates.map(withoutSeq), richMessageKey),
       );
     }
+    if (replace || requestUpdates.length > 0) {
+      // Requests keep their seq: it decides between an event and a state
+      // read from the REST API (see mergeRequests).
+      setRequests((previous) => mergeRequests(replace ? [] : previous, requestUpdates));
+    }
   }, []);
 
-  const scheduleFlush = useCallback((seq?: number) => {
+  const scheduleFlush = useCallback((seq?: number, immediate = false) => {
     if (seq !== undefined) receivedSeqRef.current = Math.max(receivedSeqRef.current, seq);
     const replayEnd = replayEndRef.current;
     if (replayEnd !== null && receivedSeqRef.current >= replayEnd) {
@@ -373,6 +491,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
       replayEndRef.current = null;
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
       flushTimerRef.current = setTimeout(flushEvents, 0);
+      return;
+    }
+    if (immediate && replayEnd === null) {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+      flushEvents();
       return;
     }
     if (flushTimerRef.current) return;
@@ -394,6 +517,15 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setConnectionStatus("reconnecting");
     setReconnectNonce((value) => value + 1);
   }, []);
+  // Reconnect now, as the user asked. Once the user closed the sign-in
+  // dialog, reconnects in the background stop asking for the token; this
+  // asks again, and reconnects once signed in.
+  const reconnectByUser = useCallback(() => {
+    reconnectNow();
+    void ensureSession(agentAPIUrl).then((signedIn) => {
+      if (signedIn) reconnectNow();
+    });
+  }, [agentAPIUrl, reconnectNow]);
   const lastQueueRefreshRef = useRef(0);
   const queuedCountRef = useRef(0);
   const refreshQueue = useCallback(async (force = false) => {
@@ -417,15 +549,26 @@ export function ChatProvider({ children }: PropsWithChildren) {
     .find((message) => message.role === "user")
     ?.content;
 
+  // Rendered as <title> rather than set on document.title from an effect:
+  // Next re-applies the layout's static title after hydration, which
+  // overwrote the state until it changed again.
+  const documentTitle = getDocumentTitle({agentState, task: currentTask, customTitle});
+
+  // The Coder workspace link, when the URL doesn't give one: asked on every
+  // connection, so it also shows once the user signed in.
   useEffect(() => {
-    document.title = getDocumentTitle({
-      connectionStatus,
-      serverStatus,
-      terminalPrompt,
-      task: currentTask,
-      customTitle,
-    });
-  }, [connectionStatus, currentTask, customTitle, serverStatus, terminalPrompt]);
+    if (workspaceParam || connectionStatus !== "connected") return;
+    let active = true;
+    api.getWorkspaceUrl().then(
+      (url) => {
+        if (active) setServerWorkspaceUrl(url);
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [api, connectionStatus, workspaceParam]);
 
   useEffect(() => {
     try {
@@ -544,8 +687,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
         epoch
           ? `${agentAPIUrl}/events?sync=1&since=${seq}&epoch=${encodeURIComponent(epoch)}`
           : `${agentAPIUrl}/events?sync=1`,
+        {withCredentials: withCredentials(agentAPIUrl)},
       );
       eventSourceRef.current = eventSource;
+      // Servers whose status_change doesn't carry the transport report it in
+      // GET /status, asked once per connection.
+      let askedTransport = false;
       // Servers that predate session_sync replay everything on every
       // connection without saying so; treat that replay as the full state.
       let synced = false;
@@ -555,6 +702,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         syncRef.current = {epoch: "", seq: 0};
         pendingRef.current.messages.clear();
         pendingRef.current.rich.clear();
+        pendingRef.current.requests.clear();
         pendingRef.current.replace = true;
       };
 
@@ -568,6 +716,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
           // cache or an earlier connection left.
           pendingRef.current.messages.clear();
           pendingRef.current.rich.clear();
+          pendingRef.current.requests.clear();
           pendingRef.current.replace = true;
           syncRef.current = {epoch: data.epoch, seq: 0};
         }
@@ -604,6 +753,18 @@ export function ChatProvider({ children }: PropsWithChildren) {
         scheduleFlush(data.seq);
       });
 
+      // A request the agent waits on (native transport) opened or changed.
+      // Requests are part of the replay, like messages. Outside a replay one
+      // applies at once: the status_change the server sends right after it
+      // (now "stable", waiting) must not show before the request does.
+      eventSource.addEventListener("request_update", (event) => {
+        lastEventAtRef.current = Date.now();
+        assumeFullReplay();
+        const data: NativeRequest = JSON.parse(event.data);
+        pendingRef.current.requests.set(data.id, data);
+        scheduleFlush(data.seq, true);
+      });
+
       // Handle status changes
       eventSource.addEventListener("status_change", (event) => {
         lastEventAtRef.current = Date.now();
@@ -623,6 +784,25 @@ export function ChatProvider({ children }: PropsWithChildren) {
         setTerminalColumns(data.terminal_columns ?? 0);
         setSessionName(data.session_name ?? "");
         setTerminalPrompt(data.terminal_prompt ?? "");
+        setCapabilities(data.capabilities ?? null);
+        setAgentSettings(data.settings ?? null);
+        setAgentUsage(data.usage ?? null);
+        setTerminalAvailable(data.terminal ?? false);
+        setLoginRequired(parseLoginRequired(data.login_required));
+        setLifecycle(data.lifecycle ?? "");
+        // The transport decides whether the terminal (TTY mode, raw keys)
+        // exists at all.
+        const reported = parseTransport(data.transport);
+        if (reported) {
+          setTransport(reported);
+        } else if (!askedTransport) {
+          askedTransport = true;
+          void api.getStatus().then((status) => {
+            if (!disposed) setTransport(status.transport);
+          }).catch(() => {
+            // Reported through the connection status.
+          });
+        }
         void refreshQueue();
       });
 
@@ -631,6 +811,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
         const messageEvent = event as MessageEvent;
         try {
           const data: ErrorEventData = JSON.parse(messageEvent.data);
+          // The server sends its stored errors again on every connection.
+          const key = `${data.time}\u0000${data.message}`;
+          if (shownErrorsRef.current.has(key)) return;
+          shownErrorsRef.current.add(key);
+          // The login card says it while the login is needed; afterwards
+          // the notice is stale.
+          if (isLoginNotice(data.message, loginRef.current)) return;
 
           // Display error as toast notification that persists until manually dismissed
           if (data.level === "error") {
@@ -663,6 +850,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
         console.error("EventSource error:", error);
         setConnectionStatus(navigator.onLine ? "reconnecting" : "offline");
         eventSource.close();
+        // EventSource doesn't expose the status code; a 401 (no session
+        // cookie, or the token changed) shows up as an error like any other.
+        // Ask the server, and reconnect right away once signed in. Nobody
+        // asked for this reconnect, so a closed dialog stays closed.
+        void ensureSession(agentAPIUrl, {background: true}).then((signedIn) => {
+          if (signedIn && !disposed) reconnectNow();
+        });
 
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current);
@@ -689,15 +883,22 @@ export function ChatProvider({ children }: PropsWithChildren) {
     const start = () => {
       if (started || disposed) return;
       started = true;
-      setupEventSource();
+      // Sign in first (a `#token=` link, or the dialog when the server
+      // needs a token). Only the first connection waits for it.
+      void bootstrapSession(agentAPIUrl).finally(() => {
+        if (!disposed) setupEventSource();
+      });
     };
     if (cacheLoadedForRef.current !== agentAPIUrl) {
       cacheLoadedForRef.current = agentAPIUrl;
-      void loadSession<Message, RichMessage>(agentAPIUrl).then((cached) => {
+      void loadSession<Message, RichMessage, NativeRequest>(agentAPIUrl).then((cached) => {
         if (cached && !started && !disposed) {
           syncRef.current = {epoch: cached.epoch, seq: cached.seq};
           setMessages((previous) => [...cached.messages, ...previous.filter(isDraftMessage)]);
           setRichMessages(cached.richMessages);
+          setRequests(cached.requests);
+          const cachedTransport = parseTransport(cached.transport);
+          if (cachedTransport) setTransport(cachedTransport);
         }
         start();
       });
@@ -720,13 +921,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
-  }, [agentAPIUrl, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush]);
+  }, [agentAPIUrl, api, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush, setLoginRequired]);
 
   // Keep the conversation cache current, at most every
   // CACHE_SAVE_INTERVAL_MS, and once more when the page is hidden.
   const saveRequestRef = useRef<() => void>(() => {});
-  const latestRef = useRef({messages, richMessages});
-  latestRef.current = {messages, richMessages};
+  const latestRef = useRef({messages, richMessages, requests, transport});
+  latestRef.current = {messages, richMessages, requests, transport};
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let lastSave = 0;
@@ -740,6 +941,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         seq,
         messages: latestRef.current.messages.filter((message) => !isDraftMessage(message)) as Message[],
         richMessages: latestRef.current.richMessages,
+        requests: latestRef.current.requests,
+        transport: latestRef.current.transport,
         savedAt: Date.now(),
       });
     };
@@ -761,12 +964,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
   }, [agentAPIUrl]);
   useEffect(() => {
     saveRequestRef.current();
-  }, [messages, richMessages]);
+  }, [messages, richMessages, requests]);
 
   // Send a new message
   const sendMessage = async (
     content: string,
-    type: "user" | "raw" = "user"
+    type: "user" | "raw" = "user",
+    mode: DispatchMode = "queue",
   ): Promise<SendResult> => {
     // For user messages, require non-empty content
     if (type === "user" && !content.trim()) return {ok: false, queued: false};
@@ -787,7 +991,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     }
 
     try {
-      const result = await api.sendMessage(content, type);
+      const result = await api.sendMessage(content, type, mode);
       await refreshQueue(true);
       if (type === "user") {
         setMessages((previous) =>
@@ -801,6 +1005,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       return {
         ok: result.ok,
         queued: result.queued,
+        steered: result.steered,
       };
     } catch (error) {
       console.error("Error sending message:", error);
@@ -867,6 +1072,73 @@ export function ChatProvider({ children }: PropsWithChildren) {
     await refreshQueue(true);
   };
 
+  const steerQueuedMessage = async (id: number) => {
+    try {
+      await api.steerQueuedMessage(id);
+    } finally {
+      await refreshQueue(true);
+    }
+  };
+
+  const reorderQueue = async (ids: number[]) => {
+    // Show the new order at once; the refresh corrects it if the server
+    // refused.
+    setQueuedMessages((previous) =>
+      ids.flatMap((id) => previous.filter((message) => message.id === id)),
+    );
+    try {
+      await api.reorderQueue(ids);
+    } finally {
+      await refreshQueue(true);
+    }
+  };
+
+  // Reads the requests from the REST API; see mergeListedRequests.
+  const refreshRequests = async () => {
+    const heldWhenAsked = latestRef.current.requests;
+    const listed = await api.getRequests();
+    setRequests((previous) => mergeListedRequests(previous, listed, heldWhenAsked));
+  };
+
+  const respondToRequest = async (id: string, response: RequestResponse) => {
+    try {
+      const state = await api.respondRequest(id, response);
+      setRequests((previous) => mergeRequests(previous, [state]));
+      return state;
+    } catch (error) {
+      // Whatever went wrong, show the request as the server has it now.
+      void refreshRequests().catch(() => undefined);
+      throw error;
+    }
+  };
+
+  const stoppable = canStop(dispatch);
+  const stop = async () => {
+    if (!stoppable) return false;
+    try {
+      if (dispatch.transport === "native") {
+        await api.interrupt();
+        toast.info("Stopping the agent");
+      } else {
+        await api.sendMessage("\x1b", "raw");
+        toast.info("Stop signal sent");
+      }
+      return true;
+    } catch (error) {
+      toast.error("Failed to stop the agent", {description: getErrorMessage(error)});
+      return false;
+    }
+  };
+
+  const retryLogin = async () => {
+    const outcome = await api.retryLogin();
+    if (outcome === "not-waiting") {
+      // The status is out of date: the agent doesn't wait any more.
+      const status = await api.getStatus();
+      setLoginRequired(status.login_required);
+    }
+  };
+
   const downloadSession = async () => {
     try {
       const events = await api.getTimelineEvents();
@@ -903,6 +1175,33 @@ export function ChatProvider({ children }: PropsWithChildren) {
         sendTerminalInput: async (data: string) => {
           await api.sendMessage(data, "raw");
         },
+        transport,
+        capabilities,
+        pendingRequestCount,
+        loginRequired,
+        agentSettings,
+        agentUsage,
+        terminalAvailable,
+        compact: api.compact,
+        terminalInput: api.terminalInput,
+        terminalResize: api.terminalResize,
+        getSettings: api.getSettings,
+        updateSettings: async (change: AgentSettings) => {
+          const result = await api.updateSettings(change);
+          // Shown at once; the status_change event that follows says the same.
+          setAgentSettings(result.settings);
+          return result;
+        },
+        agentStarting,
+        agentState,
+        dispatch,
+        retryLogin,
+        requests,
+        respondToRequest,
+        canStop: stoppable,
+        stop,
+        steerQueuedMessage,
+        reorderQueue,
         retryFailedMessage,
         dismissFailedMessage,
         serverStatus,
@@ -913,7 +1212,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         uploadFiles,
         reconnectAttempt,
         nextReconnectAt,
-        reconnectNow,
+        reconnectNow: reconnectByUser,
         downloadSession,
         deleteMessages: async () => {
           await api.deleteMessages();
@@ -921,14 +1220,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
           void clearSession(agentAPIUrl);
           setMessages([]);
           setRichMessages([]);
+          setRequests([]);
         },
-        getTemporal: api.getTemporal,
-        updateTemporal: api.updateTemporal,
-        getTemporalProfiles: api.getTemporalProfiles,
-        saveTemporalProfile: api.saveTemporalProfile,
-        importTemporalProfiles: api.importTemporalProfiles,
-        deleteTemporalProfile: api.deleteTemporalProfile,
-        applyTemporalProfile: api.applyTemporalProfile,
         getMCP: api.getMCP,
         updateMCP: api.updateMCP,
         checkMCP: api.checkMCP,
@@ -939,16 +1232,20 @@ export function ChatProvider({ children }: PropsWithChildren) {
         saveMCPProfile: api.saveMCPProfile,
         deleteMCPProfile: api.deleteMCPProfile,
         applyMCPProfile: api.applyMCPProfile,
+        getFileContent: api.getFileContent,
+        getFileDiff: api.getFileDiff,
         storageScope: agentAPIUrl,
         agentType,
         agentapiVersion,
         terminalColumns,
         sessionName,
         customTitle,
-        workspaceUrl,
+        workspaceUrl: workspaceParam ?? serverWorkspaceUrl,
       }}
     >
+      <title>{documentTitle}</title>
       {children}
+      <AuthDialog />
     </ChatContext.Provider>
   );
 }

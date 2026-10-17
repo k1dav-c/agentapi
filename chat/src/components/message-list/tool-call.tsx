@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { ArrowDown, Wrench } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { ArrowDown, ChevronRight, FileDiff, FileText, Wrench } from "lucide-react";
 import { Button } from "../ui/button";
 import { uiCopy } from "@/lib/ui-copy";
 import { formatToolInput, getExitCode, getToolCommand, getToolImagePath, getToolSummary } from "@/lib/tool-format";
@@ -9,6 +9,12 @@ import type { ToolCall } from "@/lib/task-timeline";
 import { currentPromptQuestion, parseInteractiveToolInput } from "@/lib/interactive-tool";
 import { useChat } from "../chat-provider";
 import { ImageThumb } from "../image-preview";
+import { toolRequestBadge, type Tone } from "@/lib/native-requests";
+import { fileName, isPatchScriptTool, toolFileTargets, viewerTab, type FileTarget, type FileTargetKind } from "@/lib/file-refs";
+import { useFileViewer, type FileViewer, type FileViewerTab } from "../file-viewer-context";
+import { DiffView } from "../diff-view";
+import { PathLabel } from "../file-path";
+import { CopyButton } from "./message-item";
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return "< 1s";
@@ -49,28 +55,144 @@ export function ToolDetail({
   label,
   content,
   searchQuery,
+  collapsible = false,
 }: {
   label: string;
   content: string;
   searchQuery: string;
+  // Closed until clicked (or a search matches), for details that are also
+  // shown another way.
+  collapsible?: boolean;
 }) {
+  const body = (
+    <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-term p-2.5 font-mono text-xs leading-[1.55] text-term-foreground">
+      <HighlightedText content={content} query={searchQuery} />
+    </pre>
+  );
+  if (collapsible) {
+    return <CollapsibleDetail label={label} searchQuery={searchQuery}>{body}</CollapsibleDetail>;
+  }
   return (
     <section>
       <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </h3>
-      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-term p-2.5 font-mono text-xs leading-[1.55] text-term-foreground">
-        <HighlightedText content={content} query={searchQuery} />
-      </pre>
+      {body}
     </section>
   );
 }
 
-function ToolChip({children, tone}: {children: React.ReactNode; tone?: "ok" | "fault"}) {
+function CollapsibleDetail({label, searchQuery, children}: {label: string; searchQuery: string; children: React.ReactNode}) {
+  const [open, setOpen] = useState(Boolean(searchQuery));
+  useEffect(() => {
+    if (searchQuery) setOpen(true);
+  }, [searchQuery]);
+  return (
+    <details
+      className="group/detail"
+      open={open}
+      onToggle={(event) => {
+        // React passes toggle events on to the card's own <details>.
+        event.stopPropagation();
+        setOpen(event.currentTarget.open);
+      }}
+    >
+      <summary className="flex w-fit cursor-pointer list-none items-center gap-1 rounded-sm text-[11px] font-semibold uppercase tracking-wider text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="size-3 transition-transform group-open/detail:rotate-90" />
+        {label}
+      </summary>
+      <div className="mt-1">{children}</div>
+    </details>
+  );
+}
+
+const KIND_LABEL: Record<FileTargetKind, string> = {
+  read: "Read",
+  write: "Write",
+  edit: "Edit",
+  delete: "Delete",
+  image: "Image",
+};
+
+function openTarget(viewer: FileViewer, target: FileTarget, tab: FileViewerTab = viewerTab(target.kind)) {
+  viewer.open({path: target.path, line: target.line, change: target.change, tab});
+}
+
+// The files a tool call reads or changes, each with buttons that open it in
+// the file viewer on its contents or its changes.
+function ToolFiles({targets, viewer}: {targets: FileTarget[]; viewer: FileViewer}) {
+  return (
+    <section>
+      <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {targets.length === 1 ? "File" : `Files · ${targets.length}`}
+      </h3>
+      <ul className="divide-y overflow-hidden rounded-md border bg-background">
+        {targets.map((target, index) => (
+          <li key={`${index}:${target.path}`} className="flex min-h-10 items-center gap-2 py-1 pl-2.5 pr-1 sm:min-h-9">
+            <span className="w-12 shrink-0 font-mono text-[10.5px] uppercase tracking-[0.06em] text-muted-foreground">
+              {target.movedFrom ? "Move" : KIND_LABEL[target.kind]}
+            </span>
+            <span
+              className="min-w-0 flex-1 text-xs"
+              title={target.movedFrom ? `${target.movedFrom} → ${target.path}` : target.path}
+            >
+              <PathLabel path={target.path} />
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1 px-2 text-xs sm:h-7"
+              aria-label={`File: ${target.path}`}
+              aria-haspopup="dialog"
+              onClick={() => openTarget(viewer, target, "file")}
+            >
+              <FileText className="size-3.5 max-sm:hidden" />
+              File
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1 px-2 text-xs sm:h-7"
+              aria-label={`Diff: ${target.path}`}
+              aria-haspopup="dialog"
+              onClick={() => openTarget(viewer, target, "diff")}
+            >
+              <FileDiff className="size-3.5 max-sm:hidden" />
+              Diff
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// What the tool call changes, as a diff.
+function ToolChange({change}: {change: string}) {
+  return (
+    <section>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Change</h3>
+        <CopyButton content={change} label="diff" />
+      </div>
+      <DiffView diff={change} label="Change" className="max-h-80" />
+    </section>
+  );
+}
+
+function ToolChip({children, tone}: {children: React.ReactNode; tone?: Tone}) {
   return (
     <span
       className={`shrink-0 rounded-[4px] border px-1.5 font-mono text-[11px] leading-[18px] tabular-nums ${
-        tone === "ok" ? "border-state-ready/40 text-state-ready" : tone === "fault" ? "border-state-fault/40 text-state-fault" : "text-muted-foreground"
+        tone === "ok"
+          ? "border-state-ready/40 text-state-ready"
+          : tone === "fault"
+            ? "border-state-fault/40 text-state-fault"
+            : tone === "needs"
+              ? "border-state-needs/50 text-state-needs"
+              : "text-muted-foreground"
       }`}
     >
       {children}
@@ -96,13 +218,19 @@ export function ToolCallCard({
     toolCall.status === "running" ||
     (toolCall.status === undefined && toolCall.result === undefined);
   const input = formatToolInput(toolCall.input);
-  const interactiveInput = isPending ? parseInteractiveToolInput(toolCall.name, toolCall.input) : null;
+  const { messages, storageScope, transport, requests } = useChat();
+  // A question in a tool call is answered here with keystrokes, so only
+  // where they reach the agent's terminal (PTY). On the native transport it
+  // is answered on its request card, and the tool call shows the request's
+  // state; ACP has neither.
+  const interactiveInput = isPending && onSendRaw ? parseInteractiveToolInput(toolCall.name, toolCall.input) : null;
+  const request = transport === "native" ? requests.findLast((candidate) => candidate.tool_use_id === toolCall.id) : undefined;
+  const requestBadge = request ? toolRequestBadge(request) : null;
   const [localIsOpen, setLocalIsOpen] = useState(Boolean(searchQuery) || Boolean(interactiveInput));
   // The agent's prompt shows one question at a time and moves on as each is
   // answered, so only the question it is asking accepts clicks. Codex prints
   // which one that is; otherwise count the answers given here.
   const [answeredCount, setAnsweredCount] = useState(0);
-  const { messages, storageScope } = useChat();
   const lastAgentOutput = messages.findLast((message) => message.role === "agent")?.content ?? "";
   const activeQuestion = currentPromptQuestion(lastAgentOutput) ?? answeredCount;
   const isOpen = open ?? localIsOpen;
@@ -113,7 +241,18 @@ export function ToolCallCard({
     }
   }, [open, searchQuery]);
 
-  const command = getToolCommand(toolCall.name, toolCall.input);
+  // The files the tool reads or changes, and its change to them.
+  const viewer = useFileViewer();
+  const targets = useMemo(() => toolFileTargets(toolCall.name, toolCall.input), [toolCall.name, toolCall.input]);
+  const change = useMemo(
+    () => targets.flatMap((target) => (target.change ? [target.change] : [])).join("\n"),
+    [targets],
+  );
+  // A Codex code-mode script that applies a patch reads as that patch,
+  // not as its source.
+  const patchScript = targets.length > 0 && isPatchScriptTool(toolCall.name);
+  const toolLabel = patchScript ? "apply_patch" : toolCall.name;
+  const command = patchScript ? undefined : getToolCommand(toolCall.name, toolCall.input);
   const exitCode = getExitCode(toolCall.result);
   const durationMs =
     toolCall.resultTimestamp && toolCall.timestamp
@@ -144,12 +283,40 @@ export function ToolCallCard({
       <summary className="block cursor-pointer list-none outline-none transition hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         <span className="flex min-h-8 items-center gap-2.5 px-2.5 py-1 font-mono text-[12.5px] leading-5">
           {isPending ? (
-            <span aria-label="Running" className="size-1.5 shrink-0 rounded-full bg-state-working motion-safe:animate-pulse" />
+            <span
+              aria-label={request?.status === "pending" ? "Waiting for you" : "Running"}
+              className={`size-1.5 shrink-0 rounded-full motion-safe:animate-pulse ${request?.status === "pending" ? "bg-state-needs" : "bg-state-working"}`}
+            />
           ) : null}
           {command ? (
             <span className="min-w-0 flex-1 truncate">
               <span className="mr-2 text-muted-foreground" aria-hidden="true">$</span>
               {command.split("\n")[0]}
+            </span>
+          ) : targets.length > 0 && viewer ? (
+            <span className="flex min-w-0 flex-1 items-baseline gap-2">
+              <span className="shrink-0 font-sans text-xs font-semibold">{toolLabel}</span>
+              <button
+                type="button"
+                className="min-w-0 truncate rounded-sm text-muted-foreground underline decoration-muted-foreground/40 decoration-dotted underline-offset-[3px] outline-none transition hover:text-foreground hover:decoration-solid focus-visible:ring-2 focus-visible:ring-ring"
+                title={targets[0].path}
+                aria-label={`Open ${targets[0].path}`}
+                aria-haspopup="dialog"
+                onClick={(event) => {
+                  // Opens the file, not the card.
+                  event.preventDefault();
+                  event.stopPropagation();
+                  openTarget(viewer, targets[0]);
+                }}
+              >
+                {fileName(targets[0].path)}
+              </button>
+              {targets.length > 1 && (
+                <span className="shrink-0 text-muted-foreground">
+                  <span aria-hidden="true">+{targets.length - 1}</span>
+                  <span className="sr-only">and {targets.length - 1} more {targets.length === 2 ? "file" : "files"}</span>
+                </span>
+              )}
             </span>
           ) : (
             <span className="min-w-0 flex-1 truncate">
@@ -159,6 +326,11 @@ export function ToolCallCard({
                 return summary ? <span className="ml-2 text-muted-foreground">{summary}</span> : null;
               })()}
             </span>
+          )}
+          {requestBadge && (
+            <ToolChip tone={requestBadge.tone}>
+              <span data-request-state={request?.status}>{requestBadge.label}</span>
+            </ToolChip>
           )}
           {exitCode !== undefined ? (
             <ToolChip tone={exitCode === 0 ? "ok" : "fault"}>exit {exitCode}</ToolChip>
@@ -194,7 +366,7 @@ export function ToolCallCard({
             <div key={qi} className={`space-y-2 ${qi === activeQuestion ? "" : "opacity-60"}`}>
               <p className="text-xs font-medium text-foreground">{q.question}</p>
               <div className="flex flex-wrap gap-1.5">
-                {q.options.map((opt, oi) => (
+                {(q.options ?? []).map((opt, oi) => (
                   <button
                     key={oi}
                     type="button"
@@ -219,7 +391,7 @@ export function ToolCallCard({
                   Or type your own answer in the message box.
                 </p>
               )}
-              {q.options.some(o => o.description) && (
+              {q.options?.some(o => o.description) && (
                 <div className="space-y-1 pt-1">
                   {q.options.map((opt, oi) => opt.description ? (
                     <p key={oi} className="text-[11px] text-muted-foreground">
@@ -232,8 +404,13 @@ export function ToolCallCard({
           ))
         ) : (
           <>
+            {/* Only while open: a closed card's body is in the page too,
+                and a big write's diff is a row per line. */}
+            {isOpen && targets.length > 0 && viewer && <ToolFiles targets={targets} viewer={viewer} />}
+            {isOpen && change && <ToolChange change={change} />}
             {input && (
-              <ToolDetail label="Input" content={input} searchQuery={searchQuery} />
+              // With the change shown, the raw input stays a click away.
+              <ToolDetail label="Input" content={input} searchQuery={searchQuery} collapsible={Boolean(change)} />
             )}
           </>
         )}

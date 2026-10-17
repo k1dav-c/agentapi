@@ -1,12 +1,11 @@
 package server
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"path/filepath"
 	"strings"
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
+	nativepi "github.com/coder/agentapi/lib/native/pi"
 )
 
 // isPiCLI reports whether program is the Pi coding agent CLI itself rather
@@ -38,13 +37,7 @@ func withPiSessionID(args []string) []string {
 			}
 		}
 	}
-	return append(append([]string{}, args...), "--session-id", newPiSessionID())
-}
-
-func newPiSessionID() string {
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	return "agentapi-" + hex.EncodeToString(b[:])
+	return append(append([]string{}, args...), "--session-id", nativepi.NewSessionID())
 }
 
 // piSessionOptions returns the session ID and directory Pi was started with.

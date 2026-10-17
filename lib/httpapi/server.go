@@ -10,12 +10,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,7 +28,10 @@ import (
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/mcpconfig"
 	mf "github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/shellterm"
+	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/x/acpio"
 	"github.com/coder/quartz"
 	"github.com/danielgtaylor/huma/v2"
@@ -53,16 +58,23 @@ type Server struct {
 	router             chi.Router
 	api                huma.API
 	port               int
+	bind               string
+	auth               *tokenAuth // nil when no API token is configured
 	srv                *http.Server
 	mu                 sync.RWMutex
 	stopOnce           sync.Once
 	logger             *slog.Logger
 	conversation       st.Conversation
+	native             *native.Conversation // nil unless the transport is native
+	stateDB            *statedb.DB          // nil unless the conversation is kept
+	keepUploads        bool
+	savedQueue         []QueuedMessage // the queue as last stored in stateDB
+	savedNextQueueID   int
 	agentio            st.AgentIO
 	agentType          mf.AgentType
 	emitter            *EventEmitter
 	chatBasePath       string
-	tempDir            string
+	uploadDir          string
 	cwd                string
 	clock              quartz.Clock
 	shutdownCtx        context.Context
@@ -71,11 +83,12 @@ type Server struct {
 	messageQueue       []QueuedMessage
 	mcpStore           mcpconfig.Store
 	mcpMu              sync.Mutex
-	temporalMu         sync.Mutex
 	webhook            *webhookDispatcher
 	handoffSuppressed  string
 	handoffReceipts    map[string]handoffReceipt
 	restartAgent       func(context.Context) (int, error)
+	updateAgent        func(context.Context)
+	terminal           *shellterm.Terminal // nil without a terminal
 	jsonlWatcherCancel context.CancelFunc
 	jsonlParentCtx     context.Context // parent context for spawning new JSONL watchers
 	nextQueueID        int
@@ -159,16 +172,34 @@ type ServerConfig struct {
 	// TerminalColumns is the width of the agent's emulated terminal, 0 when
 	// the transport has no terminal.
 	TerminalColumns uint16
+	// UpdateAgent, if set, updates the native agent's CLI before a restart
+	// starts a new one (Codex, Pi).
+	UpdateAgent func(context.Context)
+	// Terminal offers a shell in the agent's working directory (GET
+	// /terminal), with the native transport.
+	Terminal bool
 	// RestartAgent replaces the PTY agent process while keeping AgentAPI alive.
 	// It returns the new process PID so the JSONL watcher can be restarted.
 	// It is nil for transports or server modes that cannot restart.
 	RestartAgent func(context.Context) (int, error)
 	// Webhook sends an event whenever the agent status changes.
 	Webhook WebhookConfig
-	// APIToken, if non-empty, enables Bearer token authentication on all API
-	// endpoints. Static file routes (/chat/*, /) are exempt so browsers can
-	// load the chat UI without a token.
+	// NativeFactory creates the agent adapter for the native transport.
+	NativeFactory native.Factory
+	// StateDB, if set, stores the conversation and restores it on start
+	// (native transport only).
+	StateDB *statedb.DB
+	// UploadDir is where uploads and tool result images are kept. Empty
+	// means a temporary directory that is removed on stop.
+	UploadDir string
+	// APIToken, if non-empty, enables token authentication on all API
+	// endpoints: a Bearer header, or the session cookie POST /auth/session
+	// sets for browsers. Static file routes (/chat/*, /) and /auth/session
+	// are exempt so browsers can load the chat UI and sign in.
 	APIToken string
+	// Bind is the address the server listens on: an IP address or hostname
+	// without a port. Empty listens on all interfaces.
+	Bind string
 }
 
 // Validate allowed hosts don't contain whitespace, commas, schemes, or ports.
@@ -255,6 +286,52 @@ func parseAllowedOrigins(input []string) ([]string, error) {
 	return origins, nil
 }
 
+// ParseBindAddress validates the address to listen on: an IP address or a
+// hostname, without a port. IPv6 addresses may be bracketed ("[::1]"); the
+// brackets are removed. Empty means all interfaces.
+func ParseBindAddress(input string) (string, error) {
+	addr := strings.TrimSpace(input)
+	if addr == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(addr, "[") && strings.HasSuffix(addr, "]") {
+		addr = addr[1 : len(addr)-1]
+		if net.ParseIP(addr) == nil {
+			return "", fmt.Errorf("'%s' is not a valid IPv6 address", input)
+		}
+		return addr, nil
+	}
+	if net.ParseIP(addr) != nil {
+		return addr, nil
+	}
+	if _, _, err := net.SplitHostPort(addr); err == nil {
+		return "", fmt.Errorf("'%s' must not include a port; use --port", input)
+	}
+	if !isValidHostname(addr) {
+		return "", fmt.Errorf("'%s' is not a valid IP address or hostname", input)
+	}
+	return addr, nil
+}
+
+// isValidHostname reports whether name is a DNS hostname (RFC 1123 labels).
+func isValidHostname(name string) bool {
+	name = strings.TrimSuffix(name, ".")
+	if name == "" || len(name) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(name, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // NewServer creates a new server instance
 func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	router := chi.NewMux()
@@ -273,6 +350,10 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse allowed origins: %w", err)
 	}
+	bind, err := ParseBindAddress(config.Bind)
+	if err != nil {
+		return nil, fmt.Errorf("invalid bind address: %w", err)
+	}
 
 	logger.Info(fmt.Sprintf("Allowed hosts: %s", strings.Join(allowedHosts, ", ")))
 	logger.Info(fmt.Sprintf("Allowed origins: %s", strings.Join(allowedOrigins, ", ")))
@@ -282,11 +363,6 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		http.Error(w, "Invalid host header. Allowed hosts: "+strings.Join(allowedHosts, ", "), http.StatusBadRequest)
 	})
 	router.Use(hostAuthorizationMiddleware(allowedHosts, badHostHandler))
-
-	if config.APIToken != "" {
-		logger.Info("API token authentication enabled")
-		router.Use(tokenAuthMiddleware(config.APIToken))
-	}
 
 	router.Use(requestLogMiddleware(logger))
 
@@ -299,6 +375,17 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		MaxAge:           300, // Maximum value not ignored by any of major browsers
 	})
 	router.Use(corsMiddleware.Handler)
+
+	// Token auth runs after CORS: preflight requests carry no credentials
+	// and are answered by the CORS middleware, and a 401 still gets the CORS
+	// headers, so a chat UI on another origin can read it and ask for the
+	// token.
+	var auth *tokenAuth
+	if config.APIToken != "" {
+		logger.Info("API token authentication enabled")
+		auth = newTokenAuth(config.APIToken)
+		router.Use(auth.middleware)
+	}
 
 	humaConfig := huma.DefaultConfig("AgentAPI", version.Version)
 	humaConfig.Info.Description = "HTTP API for Claude Code, Goose, and Aider.\n\nhttps://github.com/coder/agentapi"
@@ -329,12 +416,25 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 	emitterOptions := []EventEmitterOption{
 		WithAgentType(config.AgentType),
+		WithTransport(config.Transport),
 		WithSessionID(hex.EncodeToString(sessionBytes[:])),
 		WithTerminalColumns(config.TerminalColumns),
 		WithClock(config.Clock),
 		WithStatusChangeHandler(webhook.statusChanged),
 	}
+	if config.StateDB != nil {
+		emitterOptions = append(emitterOptions, WithPersister(config.StateDB))
+	}
+	var terminal *shellterm.Terminal
+	if config.Terminal && config.Transport == TransportNative {
+		terminal = shellterm.New(shellterm.Config{Dir: config.CWD, Env: terminalEnv(), Logger: logger.With("component", "terminal")})
+		emitterOptions = append(emitterOptions, WithTerminal())
+	}
 	emitter := NewEventEmitter(emitterOptions...)
+	restored, err := restoreState(config, emitter, logger)
+	if err != nil {
+		return nil, err
+	}
 
 	// Format initial prompt into message parts if provided
 	var initialPrompt []st.MessagePart
@@ -343,7 +443,29 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 
 	var conversation st.Conversation
-	if config.Transport == TransportACP {
+	var nativeConversation *native.Conversation
+	var observer *nativeObserver
+	if config.Transport == TransportNative {
+		if config.NativeFactory == nil {
+			return nil, fmt.Errorf("native transport requires an adapter factory")
+		}
+		observer = &nativeObserver{emitter: emitter}
+		if config.StateDB != nil {
+			observer.persister = config.StateDB
+		}
+		nativeConversation = native.NewConversation(native.Config{
+			Factory:         config.NativeFactory,
+			ResumeRef:       restored.resumeRef,
+			Settings:        restored.settings,
+			InitialMessages: restored.messages,
+			InitialPrompt:   config.InitialPrompt,
+			Emitter:         emitter,
+			Observer:        observer,
+			Logger:          logger,
+			Clock:           config.Clock,
+		})
+		conversation = nativeConversation
+	} else if config.Transport == TransportACP {
 		// For ACP, cast AgentIO to *acpio.ACPAgentIO
 		acpIO, ok := config.AgentIO.(*acpio.ACPAgentIO)
 		if !ok {
@@ -367,12 +489,20 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		}, emitter)
 	}
 
-	// Create temporary directory for uploads
-	tempDir, err := os.MkdirTemp("", "agentapi-uploads-")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
+	// Create the directory for uploads: a temporary one unless the
+	// conversation is kept, whose messages refer to uploads by path.
+	uploadDir := config.UploadDir
+	if uploadDir != "" {
+		if err := os.MkdirAll(uploadDir, 0o700); err != nil {
+			return nil, fmt.Errorf("failed to create upload directory: %w", err)
+		}
+	} else {
+		uploadDir, err = os.MkdirTemp("", "agentapi-uploads-")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temporary directory: %w", err)
+		}
 	}
-	logger.Info("Created temporary directory for uploads", "tempDir", tempDir)
+	logger.Info("Using upload directory", "uploadDir", uploadDir)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	webhook.start(shutdownCtx)
@@ -381,13 +511,16 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		router:         router,
 		api:            api,
 		port:           config.Port,
+		bind:           bind,
+		auth:           auth,
 		conversation:   conversation,
+		native:         nativeConversation,
 		logger:         logger,
 		agentio:        config.AgentIO,
 		agentType:      config.AgentType,
 		emitter:        emitter,
 		chatBasePath:   strings.TrimSuffix(config.ChatBasePath, "/"),
-		tempDir:        tempDir,
+		uploadDir:      uploadDir,
 		cwd:            config.CWD,
 		clock:          config.Clock,
 		shutdownCtx:    shutdownCtx,
@@ -395,7 +528,14 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		transport:      config.Transport,
 		webhook:        webhook,
 		restartAgent:   config.RestartAgent,
+		updateAgent:    config.UpdateAgent,
+		terminal:       terminal,
 		jsonlParentCtx: ctx,
+		stateDB:        config.StateDB,
+		keepUploads:    config.UploadDir != "",
+	}
+	if config.StateDB != nil {
+		s.restoreQueue(restored.snapshot)
 	}
 	if mcpconfig.SupportedAgent(config.AgentType) {
 		store, err := mcpconfig.NewStore(config.AgentType, config.CWD)
@@ -403,6 +543,10 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			return nil, fmt.Errorf("create MCP config store: %w", err)
 		}
 		s.mcpStore = store
+	}
+
+	if observer != nil {
+		observer.storeImages = s.storeRichImages
 	}
 
 	// Register API routes
@@ -414,7 +558,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	// termexec.StartProcess() blocks until the PTY is created and the process
 	// is active. Agent readiness (waiting for the prompt) is handled
 	// asynchronously inside conversation.Start() via ReadyForInitialPrompt.
-	if config.AgentIO != nil {
+	if config.AgentIO != nil || s.native != nil {
 		s.conversation.Start(ctx)
 		s.startMessageQueue()
 	}
@@ -430,6 +574,15 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 // Handler returns the underlying chi.Router for testing purposes.
 func (s *Server) Handler() http.Handler {
 	return s.router
+}
+
+// NativeExited delivers the agent's exit when it runs over the native
+// transport and exits on its own; it is nil for other transports.
+func (s *Server) NativeExited() <-chan error {
+	if s.native == nil {
+		return nil
+	}
+	return s.native.Exited()
 }
 
 // MarkAgentExited records the terminal lifecycle state before the HTTP server
@@ -476,29 +629,6 @@ func hostAuthorizationMiddleware(allowedHosts []string, badHostHandler http.Hand
 	}
 }
 
-// tokenAuthMiddleware enforces Bearer token authentication on all requests
-// except static file routes (/chat/* and /) so browsers can load the UI.
-func tokenAuthMiddleware(token string) func(next http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Exempt static file routes so browsers can open the chat UI.
-			path := r.URL.Path
-			if path == "/" || strings.HasPrefix(path, "/chat") {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			auth := r.Header.Get("Authorization")
-			const prefix = "Bearer "
-			if !strings.HasPrefix(auth, prefix) || strings.TrimPrefix(auth, prefix) != token {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 // responseWriter wraps http.ResponseWriter to capture the status code.
 type responseWriter struct {
 	http.ResponseWriter
@@ -516,9 +646,10 @@ func requestLogMiddleware(logger *slog.Logger) func(next http.Handler) http.Hand
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
-			// Skip noisy routes: static files, SSE streams, and docs.
+			// Skip noisy routes: static files, SSE streams, the terminal
+			// (a request per keystroke), and docs.
 			if path == "/" || strings.HasPrefix(path, "/chat") ||
-				path == "/events" || path == "/internal/screen" ||
+				path == "/events" || path == "/internal/screen" || strings.HasPrefix(path, "/terminal") ||
 				path == "/docs" || path == "/openapi.json" {
 				next.ServeHTTP(w, r)
 				return
@@ -649,7 +780,10 @@ func sseMiddleware(ctx huma.Context, next func(huma.Context)) {
 
 // registerRoutes sets up all API endpoints
 func (s *Server) registerRoutes() {
-	s.registerTemporalRoutes()
+	s.registerAuthRoutes()
+	s.registerNativeRoutes()
+	s.registerFileRoutes()
+	s.registerTerminalRoutes()
 	huma.Get(s.api, "/handoff", s.getPendingHandoff)
 	huma.Post(s.api, "/handoff/reply", s.replyHandoff)
 	// GET /status endpoint
@@ -670,10 +804,11 @@ func (s *Server) registerRoutes() {
 
 	// GET /rich-messages endpoint
 	huma.Get(s.api, "/rich-messages", s.getRichMessages, func(o *huma.Operation) {
-		o.Description = "Returns a list of rich structured messages parsed from the agent's session log. " +
+		o.Description = "Returns a list of rich structured messages. " +
 			"Each message contains structured content blocks (text, thinking, tool_use, tool_result), " +
-			"model information, and token usage data. Only available for agent types with session log " +
-			"support (currently 'claude' and 'codex') running via PTY transport."
+			"model information, and token usage data. With the PTY transport they are parsed from the " +
+			"session log of agents that have one (claude, codex and pi); with the native transport they " +
+			"come from the agent's protocol."
 	})
 
 	huma.Get(s.api, "/timeline", s.getTimeline, func(o *huma.Operation) {
@@ -682,7 +817,7 @@ func (s *Server) registerRoutes() {
 
 	huma.Delete(s.api, "/messages", s.deleteMessages, func(o *huma.Operation) {
 		o.Summary = "Delete all messages and restart"
-		o.Description = "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent PTY process. Returns 400 if restart is not supported (e.g. ACP transport)."
+		o.Description = "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport)."
 		o.Errors = []int{400}
 	})
 
@@ -733,6 +868,10 @@ func (s *Server) registerRoutes() {
 	huma.Delete(s.api, "/queue/{id}", s.deleteQueuedMessage, func(o *huma.Operation) {
 		o.Description = "Deletes a queued user message."
 	})
+	huma.Put(s.api, "/queue", s.reorderQueue, func(o *huma.Operation) {
+		o.Description = "Reorders the queued messages. The body must list every queued message id exactly once; otherwise 409 is returned."
+		o.Errors = []int{409}
+	})
 
 	huma.Post(s.api, "/upload", s.uploadFiles, func(o *huma.Operation) {
 		o.Description = "Upload files to the specified upload path."
@@ -754,6 +893,7 @@ func (s *Server) registerRoutes() {
 		"rich_message_update": RichMessageUpdateBody{},
 		"heartbeat":           HeartbeatBody{},
 		"session_sync":        SessionSyncBody{},
+		"request_update":      RequestUpdateBody{},
 	}, s.subscribeEvents)
 
 	sse.Register(s.api, huma.Operation{
@@ -777,11 +917,10 @@ func (s *Server) registerRoutes() {
 	s.registerStaticFileRoutes()
 }
 
-// getStatus handles GET /status
+// getStatus handles GET /status. It only reads the emitter, which has its
+// own lock, so it answers while s.mu is held for a slow call into the agent
+// (a restart, a native turn).
 func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusResponse, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	snapshot := s.emitter.StatusSnapshot()
 
 	resp := &StatusResponse{}
@@ -795,6 +934,13 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 	resp.Body.TerminalPrompt = snapshot.TerminalPrompt
 	resp.Body.TerminalColumns = snapshot.TerminalColumns
 	resp.Body.SessionName = snapshot.SessionName
+	resp.Body.PendingRequests = snapshot.PendingRequests
+	resp.Body.Capabilities = snapshot.Capabilities
+	resp.Body.LoginRequired = snapshot.LoginRequired
+	resp.Body.Settings = snapshot.Settings
+	resp.Body.Usage = snapshot.Usage
+	resp.Body.Terminal = snapshot.Terminal
+	resp.Body.Epoch = s.emitter.Epoch()
 
 	return resp, nil
 }
@@ -808,13 +954,9 @@ func (s *Server) getTitle(ctx context.Context, input *struct{}) (*TitleResponse,
 	messages := s.conversation.Messages()
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == st.ConversationRoleUser {
-			task = strings.Join(strings.Fields(messages[i].Message), " ")
+			task = shortText(messages[i].Message, 60)
 			break
 		}
-	}
-	runes := []rune(task)
-	if len(runes) > 60 {
-		task = strings.TrimSpace(string(runes[:59])) + "…"
 	}
 	state := "Ready"
 	if status == AgentStatusRunning {
@@ -831,6 +973,16 @@ func (s *Server) getTitle(ctx context.Context, input *struct{}) (*TitleResponse,
 	resp.Body.Status = status
 	resp.Body.AgentType = s.agentType
 	return resp, nil
+}
+
+// shortText returns s on one line, cut to at most n runes.
+func shortText(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return strings.TrimSpace(string(runes[:n-1])) + "…"
 }
 
 func (s *Server) getWorkspace(_ context.Context, _ *struct{}) (*WorkspaceResponse, error) {
@@ -888,13 +1040,31 @@ func (s *Server) getTimeline(ctx context.Context, input *struct{}) (*TimelineRes
 func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*MessageResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	pending := s.pendingHandoffLocked()
+	pending, _ := s.pendingHandoffLocked()
 
 	resp := &MessageResponse{}
+	mode := input.Body.DispatchMode
+	if mode == "" {
+		mode = DispatchQueue
+	}
+	if mode != DispatchQueue && (s.native == nil || input.Body.Type != MessageTypeUser) {
+		return nil, huma.Error400BadRequest("dispatch_mode steer and interrupt need the native transport and a user message")
+	}
 	switch input.Body.Type {
 	case MessageTypeUser:
 		if strings.TrimSpace(input.Body.Content) == "" {
 			return nil, huma.Error400BadRequest("message must not be empty")
+		}
+		if s.native != nil {
+			if err := s.createNativeMessageLocked(input.Body.Content, mode, resp); err != nil {
+				return nil, err
+			}
+			if resp.Body.Queued || resp.Body.Steered {
+				// The message doesn't answer a pending request, so the
+				// handoff keeps offering it.
+				return resp, nil
+			}
+			break
 		}
 		var screen string
 		if s.transport == TransportPTY {
@@ -917,14 +1087,14 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 		// queue holds it until the prompt is answered.
 		if len(s.messageQueue) > 0 || s.conversation.Status() != st.ConversationStatusStable ||
 			(screen != "" && isTerminalQuestionScreen(s.agentType, screen)) {
-			s.enqueueMessageLocked(input.Body.Content)
+			s.enqueueMessageLocked(input.Body.Content, false)
 			resp.Body.Ok = true
 			resp.Body.Queued = true
 			return resp, nil
 		}
 		if err := s.conversation.Send(FormatMessage(s.agentType, input.Body.Content)...); err != nil {
 			if errors.Is(err, st.ErrMessageValidationChanging) {
-				s.enqueueMessageLocked(input.Body.Content)
+				s.enqueueMessageLocked(input.Body.Content, false)
 				resp.Body.Ok = true
 				resp.Body.Queued = true
 				return resp, nil
@@ -932,6 +1102,9 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 			return nil, fmt.Errorf("failed to send message: %w", err)
 		}
 	case MessageTypeRaw:
+		if s.agentio == nil {
+			return nil, huma.Error400BadRequest("raw messages need a terminal; the native transport has none")
+		}
 		if _, err := s.agentio.Write([]byte(input.Body.Content)); err != nil {
 			return nil, fmt.Errorf("failed to send message: %w", err)
 		}
@@ -950,7 +1123,7 @@ func (s *Server) getQueue(ctx context.Context, input *struct{}) (*QueueResponse,
 	defer s.mu.RUnlock()
 
 	resp := &QueueResponse{}
-	resp.Body.Messages = append([]QueuedMessage(nil), s.messageQueue...)
+	resp.Body.Messages = append([]QueuedMessage{}, s.messageQueue...)
 	return resp, nil
 }
 
@@ -988,13 +1161,46 @@ func (s *Server) deleteQueuedMessage(ctx context.Context, input *DeleteQueuedMes
 	return nil, huma.Error404NotFound("queued message not found")
 }
 
-func (s *Server) enqueueMessageLocked(content string) {
+// reorderQueue puts the queued messages in the given order.
+func (s *Server) reorderQueue(_ context.Context, input *ReorderQueueRequest) (*QueueMutationResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := input.Body.IDs
+	if len(ids) != len(s.messageQueue) {
+		return nil, huma.Error409Conflict("the queue changed; list every queued message once")
+	}
+	byID := make(map[int]QueuedMessage, len(s.messageQueue))
+	for _, m := range s.messageQueue {
+		byID[m.ID] = m
+	}
+	reordered := make([]QueuedMessage, 0, len(ids))
+	for _, id := range ids {
+		m, ok := byID[id]
+		if !ok {
+			return nil, huma.Error409Conflict("the queue changed; list every queued message once")
+		}
+		delete(byID, id)
+		reordered = append(reordered, m)
+	}
+	s.messageQueue = reordered
+	resp := &QueueMutationResponse{}
+	resp.Body.Ok = true
+	return resp, nil
+}
+
+// enqueueMessageLocked queues a message last, or first if front is set.
+func (s *Server) enqueueMessageLocked(content string, front bool) {
 	s.nextQueueID++
-	s.messageQueue = append(s.messageQueue, QueuedMessage{
+	msg := QueuedMessage{
 		ID:      s.nextQueueID,
 		Content: content,
 		Time:    s.clock.Now(),
-	})
+	}
+	if front {
+		s.messageQueue = slices.Insert(s.messageQueue, 0, msg)
+		return
+	}
+	s.messageQueue = append(s.messageQueue, msg)
 }
 
 // startMessageQueue starts the queue dispatch loop. Dispatch is driven by
@@ -1007,6 +1213,7 @@ func (s *Server) startMessageQueue() {
 	s.clock.TickerFunc(s.shutdownCtx, messageQueueDispatchInterval, func() error {
 		s.dismissCodexUpdatePrompt()
 		s.dispatchNextQueuedMessage()
+		s.persistQueue()
 		return nil
 	}, "messageQueueDispatch")
 }
@@ -1014,6 +1221,10 @@ func (s *Server) startMessageQueue() {
 func (s *Server) dispatchNextQueuedMessage() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.native != nil {
+		s.dispatchNativeQueuedLocked()
+		return
+	}
 	// Screen inspection is only needed when a message can be dispatched.
 	if len(s.messageQueue) == 0 || s.conversation.Status() != st.ConversationStatusStable {
 		return
@@ -1038,19 +1249,15 @@ func (s *Server) dispatchNextQueuedMessage() {
 			// Agent became busy again; retry on a later tick.
 			return
 		}
-		if s.queueFailID != next.ID {
-			s.queueFailID = next.ID
-			s.queueFailCount = 0
-		}
-		s.queueFailCount++
-		s.logger.Error("Failed to send queued message", "queueId", next.ID, "attempt", s.queueFailCount, "error", err)
+		attempts, drop := s.queueSendFailedLocked(next, err)
 		// A message the agent didn't react to may still be in its input
 		// box; retrying would type it a second time.
-		if s.queueFailCount >= maxQueueDispatchAttempts || errors.Is(err, st.ErrMessageNotSubmitted) {
+		notSubmitted := errors.Is(err, st.ErrMessageNotSubmitted)
+		if drop || notSubmitted {
 			// Drop the poison message so it doesn't block the queue forever.
 			s.messageQueue = s.messageQueue[1:]
-			msg := fmt.Sprintf("Dropped queued message after %d failed attempts: %v", s.queueFailCount, err)
-			if errors.Is(err, st.ErrMessageNotSubmitted) {
+			msg := fmt.Sprintf("Dropped queued message %q after %d failed attempts: %v", shortText(next.Content, 40), attempts, err)
+			if notSubmitted {
 				msg = fmt.Sprintf("Queued message was typed but the agent did not submit it; check the agent's input box: %v", err)
 			}
 			s.emitter.EmitError(msg, st.ErrorLevelError)
@@ -1058,6 +1265,19 @@ func (s *Server) dispatchNextQueuedMessage() {
 		return
 	}
 	s.messageQueue = s.messageQueue[1:]
+}
+
+// queueSendFailedLocked counts a failed attempt to send next, the head of
+// the queue. It returns how often in a row sending it failed, and whether
+// that is often enough to drop it. Caller holds s.mu.
+func (s *Server) queueSendFailedLocked(next QueuedMessage, err error) (int, bool) {
+	if s.queueFailID != next.ID {
+		s.queueFailID = next.ID
+		s.queueFailCount = 0
+	}
+	s.queueFailCount++
+	s.logger.Error("Failed to send queued message", "queueId", next.ID, "attempt", s.queueFailCount, "error", err)
+	return s.queueFailCount, s.queueFailCount >= maxQueueDispatchAttempts
 }
 
 // uploadFiles handles POST /upload
@@ -1083,9 +1303,9 @@ func (s *Server) uploadFiles(ctx context.Context, input *struct {
 	hash := sha256.Sum256(buf)
 	checksum := hex.EncodeToString(hash[:8]) // Use first 8 bytes (16 hex chars)
 
-	// Create checksum-based subdirectory in tempDir
-	uploadDir := filepath.Join(s.tempDir, checksum)
-	err = os.MkdirAll(uploadDir, 0o755)
+	// Create checksum-based subdirectory in the upload directory
+	dir := filepath.Join(s.uploadDir, checksum)
+	err = os.MkdirAll(dir, 0o755)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create upload directory: %w", err)
 	}
@@ -1093,7 +1313,7 @@ func (s *Server) uploadFiles(ctx context.Context, input *struct {
 	// Save individual file with original filename (extract just the base filename for security)
 	filename := filepath.Base(formData.File.Filename)
 
-	outPath := filepath.Join(uploadDir, filename)
+	outPath := filepath.Join(dir, filename)
 	err = os.WriteFile(outPath, buf, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to write file: %w", err)
@@ -1105,20 +1325,38 @@ func (s *Server) uploadFiles(ctx context.Context, input *struct {
 	return resp, nil
 }
 
-// subscribeEvents is an SSE endpoint that sends events to the client
+// eventSeq is the seq of a change event, 0 for other events.
+func eventSeq(event Event) uint64 {
+	switch body := event.Payload.(type) {
+	case MessageUpdateBody:
+		return body.Seq
+	case RichMessageUpdateBody:
+		return body.Seq
+	case RequestUpdateBody:
+		return body.Seq
+	}
+	return 0
+}
+
 // SubscribeEventsInput lets a client that cached the conversation resume
 // from where it left off.
 type SubscribeEventsInput struct {
 	Sync  bool   `query:"sync" doc:"Opt in to session_sync events and incremental replay. Clients that don't opt in get the full replay and no session_sync events, as before."`
 	Since uint64 `query:"since" doc:"With sync: highest seq the client has applied. With a matching epoch, the replay holds only later changes."`
 	Epoch string `query:"epoch" doc:"With sync: epoch from the client's last session_sync. If it doesn't match, the full state is replayed."`
+	// LastEventID is sent by EventSource when it reconnects by itself.
+	LastEventID uint64 `header:"Last-Event-ID" doc:"With sync: used as since when since is not given. With sync, events carry SSE ids: the last event of the replay has the replay's seq and each later message, rich message or request update has its own, so a reconnecting EventSource resumes where it left off (pass epoch in the URL, e.g. from GET /status)."`
 }
 
+// subscribeEvents is an SSE endpoint that sends events to the client.
 func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInput, send sse.Sender) {
 	// session_sync is opt-in: existing clients (e.g. agentapi-sdk-go) reject
 	// event types they don't know.
 	sync := input.Sync
 	since, epoch := input.Since, input.Epoch
+	if since == 0 {
+		since = input.LastEventID
+	}
 	if !sync {
 		since, epoch = 0, ""
 	}
@@ -1126,11 +1364,25 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 	defer s.emitter.Unsubscribe(subscriberId)
 
 	s.logger.Info("New subscriber", "subscriberId", subscriberId)
+	replay := make([]Event, 0, len(stateEvents))
+	var replaySeq uint64
 	for _, event := range stateEvents {
+		if body, ok := event.Payload.(SessionSyncBody); ok {
+			replaySeq = body.Seq
+		}
 		if event.Type == EventTypeScreenUpdate || (event.Type == EventTypeSessionSync && !sync) {
 			continue
 		}
-		if err := send.Data(event.Payload); err != nil {
+		replay = append(replay, event)
+	}
+	for i, event := range replay {
+		msg := sse.Message{Data: event.Payload}
+		// Replayed changes are not in seq order, so only the end of the
+		// replay says how far the client is.
+		if sync && i == len(replay)-1 {
+			msg.ID = int(replaySeq)
+		}
+		if err := send(msg); err != nil {
 			s.logger.Error("Failed to send event", "subscriberId", subscriberId, "error", err)
 			return
 		}
@@ -1149,7 +1401,11 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 			if event.Type == EventTypeScreenUpdate || (event.Type == EventTypeSessionSync && !sync) {
 				continue
 			}
-			if err := send.Data(event.Payload); err != nil {
+			msg := sse.Message{Data: event.Payload}
+			if sync {
+				msg.ID = int(eventSeq(event))
+			}
+			if err := send(msg); err != nil {
 				s.logger.Error("Failed to send event", "subscriberId", subscriberId, "error", err)
 				return
 			}
@@ -1205,41 +1461,61 @@ func (s *Server) subscribeScreen(ctx context.Context, input *struct{}, send sse.
 	}
 }
 
+// ListenAddr returns the address Start listens on, e.g. ":3284" (all
+// interfaces), "127.0.0.1:3284" or "[::1]:3284".
+func (s *Server) ListenAddr() string {
+	return net.JoinHostPort(s.bind, strconv.Itoa(s.port))
+}
+
 // Start starts the HTTP server
 func (s *Server) Start() error {
-	addr := fmt.Sprintf(":%d", s.port)
 	s.srv = &http.Server{
-		Addr:    addr,
+		Addr:    s.ListenAddr(),
 		Handler: s.router,
 	}
 
 	return s.srv.ListenAndServe()
 }
 
-// Stop gracefully stops the HTTP server. It is safe to call multiple times.
+// Stop gracefully stops the HTTP server and the agent. It is safe to call
+// multiple times.
 func (s *Server) Stop(ctx context.Context) error {
 	var err error
 	s.stopOnce.Do(func() {
+		// Ends the queue loop and the event streams, which the HTTP
+		// shutdown would otherwise wait for.
 		s.shutdown()
-
-		// Clean up temporary directory
-		s.cleanupTempDir()
-
+		// No request can change the queue once the HTTP server and the
+		// agent have stopped, so the queue is stored after both.
 		if s.srv != nil {
 			if err = s.srv.Shutdown(ctx); errors.Is(err, http.ErrServerClosed) {
 				err = nil
 			}
 		}
+		if s.native != nil {
+			if closeErr := s.native.Close(); closeErr != nil {
+				s.logger.Error("Failed to stop the agent", "error", closeErr)
+			}
+		}
+		if s.terminal != nil {
+			_ = s.terminal.Close()
+		}
+		s.persistQueue()
+		s.cleanupUploadDir()
 	})
 	return err
 }
 
-// cleanupTempDir removes the temporary directory and all its contents
-func (s *Server) cleanupTempDir() {
-	if err := os.RemoveAll(s.tempDir); err != nil {
-		s.logger.Error("Failed to clean up temporary directory", "tempDir", s.tempDir, "error", err)
+// cleanupUploadDir removes the upload directory and all its contents, unless
+// the conversation that refers to them is kept.
+func (s *Server) cleanupUploadDir() {
+	if s.keepUploads {
+		return
+	}
+	if err := os.RemoveAll(s.uploadDir); err != nil {
+		s.logger.Error("Failed to clean up upload directory", "uploadDir", s.uploadDir, "error", err)
 	} else {
-		s.logger.Info("Cleaned up temporary directory", "tempDir", s.tempDir)
+		s.logger.Info("Cleaned up upload directory", "uploadDir", s.uploadDir)
 	}
 }
 

@@ -38,8 +38,3 @@ export function formatDateLabel(value: string) {
     ...(date.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
   }).format(date);
 }
-
-export function formatElapsedTime(seconds: number) {
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-}

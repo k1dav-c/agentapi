@@ -257,14 +257,6 @@ func (d *webhookDispatcher) deliver(ctx context.Context, event WebhookEvent) {
 	}
 }
 
-func (d *webhookDispatcher) send(ctx context.Context, event WebhookEvent, body []byte) error {
-	d.mu.RLock()
-	config := d.config
-	client := d.client
-	d.mu.RUnlock()
-	return d.sendWithConfig(ctx, config, client, event, body)
-}
-
 func (d *webhookDispatcher) sendWithConfig(ctx context.Context, config WebhookConfig, client *http.Client, event WebhookEvent, body []byte) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, config.URL, bytes.NewReader(body))
 	if err != nil {
