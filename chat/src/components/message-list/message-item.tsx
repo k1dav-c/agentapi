@@ -18,7 +18,7 @@ export function CopyButton({
   onDark = false,
 }: {
   content: string;
-  label?: "task" | "response" | "command";
+  label?: "task" | "response" | "command" | "path" | "diff";
   // Sits on a terminal (always dark) surface.
   onDark?: boolean;
 }) {
@@ -182,7 +182,7 @@ export function MessageItem({
         ) : (
           <div>
             {tools}
-            <ProcessedMessage messageContent={message.content} isUser={false} renderMode={renderMode} searchQuery={effectiveSearchQuery} />
+            <ProcessedMessage messageContent={message.content} isUser={false} renderMode={renderMode} searchQuery={effectiveSearchQuery} linkFilePaths />
           </div>
         )}
       </article>

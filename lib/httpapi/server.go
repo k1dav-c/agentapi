@@ -766,6 +766,7 @@ func (s *Server) registerRoutes() {
 	s.registerAuthRoutes()
 	s.registerTemporalRoutes()
 	s.registerNativeRoutes()
+	s.registerFileRoutes()
 	huma.Get(s.api, "/handoff", s.getPendingHandoff)
 	huma.Post(s.api, "/handoff/reply", s.replyHandoff)
 	// GET /status endpoint

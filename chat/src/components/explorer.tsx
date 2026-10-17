@@ -22,6 +22,7 @@ import {
 import {toast} from "sonner";
 import {editableMCPServers} from "@/lib/mcp-sample";
 import {useChat} from "./chat-provider";
+import {useFileViewer} from "./file-viewer-context";
 import {TemporalSettings} from "./temporal-settings";
 import {Button} from "./ui/button";
 import {
@@ -43,7 +44,9 @@ interface DiscoveredLink {
   task: number;
 }
 
-const pathPattern = /(?:^|[\s"'(])((?:\/[\w.@+-]+)+\.[a-zA-Z0-9]{1,10})(?=$|[\s"'),:;])/g;
+// Absolute file paths in message text, also in Markdown code (`/a/b.go`) and
+// at the end of a sentence.
+export const pathPattern = /(?:^|[\s"'(`])((?:\/[\w.@+-]+)+\.[a-zA-Z0-9]{1,10})(?=$|[\s"'),:;`.])/g;
 
 export function Explorer({onNavigateTask}: ExplorerProps) {
   const {
@@ -57,6 +60,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     deleteMCPProfile,
     applyMCPProfile,
   } = useChat();
+  const fileViewer = useFileViewer();
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("index");
   const [filter, setFilter] = useState("");
@@ -300,7 +304,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
         <DialogHeader className="border-b px-5 py-4 pr-12">
           <DialogTitle>Explorer</DialogTitle>
           <DialogDescription>
-            Jump to a task, file or link. Agent settings are under MCP, Temporal and Session.
+            Jump to a task or link, or open a file. Agent settings are under MCP, Temporal and Session.
           </DialogDescription>
         </DialogHeader>
         <Tabs
@@ -359,17 +363,30 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
           <TabsContent value="files" className="min-h-0 overflow-y-auto overscroll-contain p-4">
             <div className="divide-y">
               {files.filter((file) => matches(file.path)).map((file) => (
-                <button
-                  key={file.path}
-                  type="button"
-                  className="block w-full rounded-sm px-1 py-2.5 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => file.sourceTask > 0 && navigate(file.sourceTask)}
-                >
-                  <span className="block break-all font-mono text-xs">{file.path}</span>
-                  <span className="mt-1 block text-[11px] text-muted-foreground">
-                    {`Task ${file.sourceTask}`}
-                  </span>
-                </button>
+                // The path opens the file (over the Explorer, which is
+                // still there after it closes); the task is a second button.
+                <div key={file.path} className="px-1 py-2.5">
+                  <button
+                    type="button"
+                    className="flex w-full items-start gap-2 rounded-sm text-left outline-none hover:underline hover:underline-offset-4 focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-haspopup={fileViewer ? "dialog" : undefined}
+                    onClick={() =>
+                      fileViewer ? fileViewer.open({path: file.path}) : file.sourceTask > 0 && navigate(file.sourceTask)
+                    }
+                  >
+                    <FileText className="mt-px size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 break-all font-mono text-xs leading-5">{file.path}</span>
+                  </button>
+                  {file.sourceTask > 0 && (
+                    <button
+                      type="button"
+                      className="mt-1.5 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => navigate(file.sourceTask)}
+                    >
+                      Go to Task {file.sourceTask}
+                    </button>
+                  )}
+                </div>
               ))}
               {files.length === 0 && <Empty text="No file paths found in this session." />}
             </div>

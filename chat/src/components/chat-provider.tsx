@@ -22,6 +22,8 @@ import {AuthDialog} from "@/components/auth-dialog";
 import {
   createChatAPI,
   httpURL,
+  type FileContent,
+  type FileDiff,
   type MCPCheckResult,
   type MCPConfig,
   type MCPProfiles,
@@ -280,6 +282,10 @@ interface ChatContextValue {
   saveMCPProfile: (name: string, servers: Record<string, unknown>) => Promise<MCPProfiles>;
   deleteMCPProfile: (name: string) => Promise<MCPProfiles>;
   applyMCPProfile: (name: string, restart?: boolean) => Promise<void>;
+  // A file in the agent's working directory and its uncommitted changes,
+  // for the file viewer (GET /files/content, GET /files/diff).
+  getFileContent: (path: string) => Promise<FileContent>;
+  getFileDiff: (path: string) => Promise<FileDiff>;
   storageScope: string;
   agentType: AgentType;
   // AgentAPI server version (e.g. "0.14.0"); empty until the first status
@@ -1196,6 +1202,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         saveMCPProfile: api.saveMCPProfile,
         deleteMCPProfile: api.deleteMCPProfile,
         applyMCPProfile: api.applyMCPProfile,
+        getFileContent: api.getFileContent,
+        getFileDiff: api.getFileDiff,
         storageScope: agentAPIUrl,
         agentType,
         agentapiVersion,

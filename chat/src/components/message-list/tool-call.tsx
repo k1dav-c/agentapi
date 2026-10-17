@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { ArrowDown, Wrench } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { ArrowDown, ChevronRight, FileDiff, FileText, Wrench } from "lucide-react";
 import { Button } from "../ui/button";
 import { uiCopy } from "@/lib/ui-copy";
 import { formatToolInput, getExitCode, getToolCommand, getToolImagePath, getToolSummary } from "@/lib/tool-format";
@@ -10,6 +10,11 @@ import { currentPromptQuestion, parseInteractiveToolInput } from "@/lib/interact
 import { useChat } from "../chat-provider";
 import { ImageThumb } from "../image-preview";
 import { toolRequestBadge, type Tone } from "@/lib/native-requests";
+import { fileName, toolFileTargets, viewerTab, type FileTarget, type FileTargetKind } from "@/lib/file-refs";
+import { useFileViewer, type FileViewer, type FileViewerTab } from "../file-viewer-context";
+import { DiffView } from "../diff-view";
+import { PathLabel } from "../file-path";
+import { CopyButton } from "./message-item";
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return "< 1s";
@@ -50,19 +55,129 @@ export function ToolDetail({
   label,
   content,
   searchQuery,
+  collapsible = false,
 }: {
   label: string;
   content: string;
   searchQuery: string;
+  // Closed until clicked (or a search matches), for details that are also
+  // shown another way.
+  collapsible?: boolean;
 }) {
+  const body = (
+    <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-term p-2.5 font-mono text-xs leading-[1.55] text-term-foreground">
+      <HighlightedText content={content} query={searchQuery} />
+    </pre>
+  );
+  if (collapsible) {
+    return <CollapsibleDetail label={label} searchQuery={searchQuery}>{body}</CollapsibleDetail>;
+  }
   return (
     <section>
       <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </h3>
-      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-term p-2.5 font-mono text-xs leading-[1.55] text-term-foreground">
-        <HighlightedText content={content} query={searchQuery} />
-      </pre>
+      {body}
+    </section>
+  );
+}
+
+function CollapsibleDetail({label, searchQuery, children}: {label: string; searchQuery: string; children: React.ReactNode}) {
+  const [open, setOpen] = useState(Boolean(searchQuery));
+  useEffect(() => {
+    if (searchQuery) setOpen(true);
+  }, [searchQuery]);
+  return (
+    <details
+      className="group/detail"
+      open={open}
+      onToggle={(event) => {
+        // React passes toggle events on to the card's own <details>.
+        event.stopPropagation();
+        setOpen(event.currentTarget.open);
+      }}
+    >
+      <summary className="flex w-fit cursor-pointer list-none items-center gap-1 rounded-sm text-[11px] font-semibold uppercase tracking-wider text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="size-3 transition-transform group-open/detail:rotate-90" />
+        {label}
+      </summary>
+      <div className="mt-1">{children}</div>
+    </details>
+  );
+}
+
+const KIND_LABEL: Record<FileTargetKind, string> = {
+  read: "Read",
+  write: "Write",
+  edit: "Edit",
+  delete: "Delete",
+  image: "Image",
+};
+
+function openTarget(viewer: FileViewer, target: FileTarget, tab: FileViewerTab = viewerTab(target.kind)) {
+  viewer.open({path: target.path, line: target.line, change: target.change, tab});
+}
+
+// The files a tool call reads or changes, each with buttons that open it in
+// the file viewer on its contents or its changes.
+function ToolFiles({targets, viewer}: {targets: FileTarget[]; viewer: FileViewer}) {
+  return (
+    <section>
+      <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {targets.length === 1 ? "File" : `Files · ${targets.length}`}
+      </h3>
+      <ul className="divide-y overflow-hidden rounded-md border bg-background">
+        {targets.map((target, index) => (
+          <li key={`${index}:${target.path}`} className="flex min-h-10 items-center gap-2 py-1 pl-2.5 pr-1 sm:min-h-9">
+            <span className="w-12 shrink-0 font-mono text-[10.5px] uppercase tracking-[0.06em] text-muted-foreground">
+              {target.movedFrom ? "Move" : KIND_LABEL[target.kind]}
+            </span>
+            <span
+              className="min-w-0 flex-1 text-xs"
+              title={target.movedFrom ? `${target.movedFrom} → ${target.path}` : target.path}
+            >
+              <PathLabel path={target.path} />
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1 px-2 text-xs sm:h-7"
+              aria-label={`Open ${target.path}`}
+              aria-haspopup="dialog"
+              onClick={() => openTarget(viewer, target, "file")}
+            >
+              <FileText className="size-3.5 max-sm:hidden" />
+              File
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1 px-2 text-xs sm:h-7"
+              aria-label={`Show the changes to ${target.path}`}
+              aria-haspopup="dialog"
+              onClick={() => openTarget(viewer, target, "diff")}
+            >
+              <FileDiff className="size-3.5 max-sm:hidden" />
+              Diff
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// What the tool call changes, as a diff.
+function ToolChange({change}: {change: string}) {
+  return (
+    <section>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Change</h3>
+        <CopyButton content={change} label="diff" />
+      </div>
+      <DiffView diff={change} label="Change" className="max-h-80" />
     </section>
   );
 }
@@ -126,7 +241,18 @@ export function ToolCallCard({
     }
   }, [open, searchQuery]);
 
-  const command = getToolCommand(toolCall.name, toolCall.input);
+  // The files the tool reads or changes, and its change to them.
+  const viewer = useFileViewer();
+  const targets = useMemo(() => toolFileTargets(toolCall.name, toolCall.input), [toolCall.name, toolCall.input]);
+  const change = useMemo(
+    () => targets.flatMap((target) => (target.change ? [target.change] : [])).join("\n"),
+    [targets],
+  );
+  // A Codex code-mode script that applies a patch reads as that patch,
+  // not as its source.
+  const patchScript = targets.length > 0 && typeof toolCall.input === "string" && toolCall.name !== "apply_patch";
+  const toolLabel = patchScript ? "apply_patch" : toolCall.name;
+  const command = patchScript ? undefined : getToolCommand(toolCall.name, toolCall.input);
   const exitCode = getExitCode(toolCall.result);
   const durationMs =
     toolCall.resultTimestamp && toolCall.timestamp
@@ -166,6 +292,31 @@ export function ToolCallCard({
             <span className="min-w-0 flex-1 truncate">
               <span className="mr-2 text-muted-foreground" aria-hidden="true">$</span>
               {command.split("\n")[0]}
+            </span>
+          ) : targets.length > 0 && viewer ? (
+            <span className="flex min-w-0 flex-1 items-baseline gap-2">
+              <span className="shrink-0 font-sans text-xs font-semibold">{toolLabel}</span>
+              <button
+                type="button"
+                className="min-w-0 truncate rounded-sm text-muted-foreground underline decoration-muted-foreground/40 decoration-dotted underline-offset-[3px] outline-none transition hover:text-foreground hover:decoration-solid focus-visible:ring-2 focus-visible:ring-ring"
+                title={targets[0].path}
+                aria-label={`Open ${targets[0].path}`}
+                aria-haspopup="dialog"
+                onClick={(event) => {
+                  // Opens the file, not the card.
+                  event.preventDefault();
+                  event.stopPropagation();
+                  openTarget(viewer, targets[0]);
+                }}
+              >
+                {fileName(targets[0].path)}
+              </button>
+              {targets.length > 1 && (
+                <span className="shrink-0 text-muted-foreground">
+                  <span aria-hidden="true">+{targets.length - 1}</span>
+                  <span className="sr-only">and {targets.length - 1} more {targets.length === 2 ? "file" : "files"}</span>
+                </span>
+              )}
             </span>
           ) : (
             <span className="min-w-0 flex-1 truncate">
@@ -253,8 +404,13 @@ export function ToolCallCard({
           ))
         ) : (
           <>
+            {/* Only while open: a closed card's body is in the page too,
+                and a big write's diff is a row per line. */}
+            {isOpen && targets.length > 0 && viewer && <ToolFiles targets={targets} viewer={viewer} />}
+            {isOpen && change && <ToolChange change={change} />}
             {input && (
-              <ToolDetail label="Input" content={input} searchQuery={searchQuery} />
+              // With the change shown, the raw input stays a click away.
+              <ToolDetail label="Input" content={input} searchQuery={searchQuery} collapsible={Boolean(change)} />
             )}
           </>
         )}

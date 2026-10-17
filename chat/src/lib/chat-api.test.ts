@@ -154,3 +154,46 @@ describe("httpURL", () => {
     expect(httpURL("not a url")).toBeUndefined();
   });
 });
+
+describe("files", () => {
+  test("getFileContent asks for the path and reads the file", async () => {
+    const calls = mockFetch(json({
+      $schema: "http://agentapi.test/schemas/FileContentResponseBody.json",
+      path: "/work/lib/a b.go",
+      relative: "lib/a b.go",
+      size: 12,
+      content: "package lib\n",
+      truncated: false,
+      binary: false,
+    }));
+    expect(await createChatAPI(BASE).getFileContent("/work/lib/a b.go")).toEqual({
+      path: "/work/lib/a b.go",
+      relative: "lib/a b.go",
+      size: 12,
+      content: "package lib\n",
+      truncated: false,
+      binary: false,
+    });
+    expect(calls[0].url).toBe(`${BASE}/files/content?path=%2Fwork%2Flib%2Fa%20b.go`);
+    expect(calls[0].init.method).toBe("GET");
+  });
+
+  test("getFileDiff reads the status and the diff", async () => {
+    const calls = mockFetch(json({path: "calc.py", relative: "calc.py", status: "modified", diff: "--- a/calc.py\n+++ b/calc.py\n", truncated: false}));
+    expect(await createChatAPI(BASE).getFileDiff("calc.py")).toEqual({
+      path: "calc.py",
+      relative: "calc.py",
+      status: "modified",
+      diff: "--- a/calc.py\n+++ b/calc.py\n",
+      truncated: false,
+    });
+    expect(calls[0].url).toBe(`${BASE}/files/diff?path=calc.py`);
+  });
+
+  test("a path outside the agent's working directory or a missing file is an ApiError with the status", async () => {
+    mockFetch(json({detail: "/etc/passwd is outside the agent's working directory"}, 403), json({detail: "no such file"}, 404));
+    const api = createChatAPI(BASE);
+    expect(await failure(api.getFileContent("/etc/passwd"))).toMatchObject({status: 403, message: "/etc/passwd is outside the agent's working directory"});
+    expect(await failure(api.getFileDiff("gone.txt"))).toMatchObject({status: 404, message: "no such file"});
+  });
+});

@@ -34,6 +34,33 @@ export interface MCPProfiles {
   path: string;
 }
 
+// A file in the agent's working directory (GET /files/content).
+export interface FileContent {
+  // As asked for.
+  path: string;
+  // Relative to the agent's working directory, for display.
+  relative: string;
+  // Bytes on disk.
+  size: number;
+  // UTF-8 text, cut at 1 MiB (truncated); empty for a binary file.
+  content: string;
+  truncated: boolean;
+  binary: boolean;
+}
+
+export type FileDiffStatus = "modified" | "added" | "deleted" | "untracked" | "unchanged" | "not_in_repo";
+
+// A file's uncommitted changes (GET /files/diff): git's unified diff of the
+// working tree against HEAD, where an untracked file shows as added.
+export interface FileDiff {
+  path: string;
+  relative: string;
+  status: FileDiffStatus;
+  // Empty when unchanged or not in a repository; cut at 1 MiB (truncated).
+  diff: string;
+  truncated: boolean;
+}
+
 interface APIErrorDetail {
   message: string;
 }
@@ -347,6 +374,39 @@ export function createChatAPI(baseURL: string) {
 
     async deleteQueuedMessage(id: number) {
       await jsonRequest(`/queue/${id}`, {method: "DELETE", fallback: "Failed to delete queued message"});
+    },
+
+    // A file in the agent's working directory, by its path as the chat shows
+    // it (absolute, or relative to that directory; without a :line suffix).
+    // ApiError 403: outside that directory, 404: no such file, 400: a
+    // directory.
+    async getFileContent(path: string): Promise<FileContent> {
+      const data = await jsonRequest<Partial<FileContent>>(`/files/content?path=${encodeURIComponent(path)}`, {
+        fallback: "Failed to read the file",
+      });
+      return {
+        path: data.path ?? path,
+        relative: data.relative || path,
+        size: data.size ?? 0,
+        content: data.content ?? "",
+        truncated: data.truncated === true,
+        binary: data.binary === true,
+      };
+    },
+
+    // The uncommitted changes of a file in the agent's working directory.
+    // ApiError 403: outside that directory.
+    async getFileDiff(path: string): Promise<FileDiff> {
+      const data = await jsonRequest<Partial<FileDiff>>(`/files/diff?path=${encodeURIComponent(path)}`, {
+        fallback: "Failed to read the file's changes",
+      });
+      return {
+        path: data.path ?? path,
+        relative: data.relative || path,
+        status: data.status ?? "unchanged",
+        diff: data.diff ?? "",
+        truncated: data.truncated === true,
+      };
     },
 
     async getTimelineEvents(): Promise<unknown[]> {

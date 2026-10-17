@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {reconstructWrappedURLs} from "./explorer";
+import {pathPattern, reconstructWrappedURLs} from "./explorer";
 
 describe("session explorer URL reconstruction", () => {
   test("joins terminal-wrapped URL segments", () => {
@@ -14,5 +14,18 @@ describe("session explorer URL reconstruction", () => {
     expect(
       reconstructWrappedURLs("See https://example.com/docs\nThis is another line"),
     ).toEqual(["https://example.com/docs"]);
+  });
+});
+
+describe("session explorer file paths", () => {
+  const paths = (text: string) => [...text.matchAll(pathPattern)].map((match) => match[1]);
+
+  test("finds absolute paths in text and Markdown code", () => {
+    expect(paths("Edited /work/lib/a.go:12 and `/work/docs/notes.md`.")).toEqual(["/work/lib/a.go", "/work/docs/notes.md"]);
+    expect(paths("See /tmp/x.tar.gz.")).toEqual(["/tmp/x.tar.gz"]);
+  });
+
+  test("skips URLs and relative paths", () => {
+    expect(paths("https://example.com/a.html and lib/a.go")).toEqual([]);
   });
 });

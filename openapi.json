@@ -281,6 +281,105 @@
         },
         "type": "object"
       },
+      "FileContentResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/FileContentResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "binary": {
+            "description": "The file isn't UTF-8 text, so it has no content here.",
+            "type": "boolean"
+          },
+          "content": {
+            "description": "The file's text, up to 1 MiB; empty for a binary file.",
+            "type": "string"
+          },
+          "path": {
+            "description": "The path as given.",
+            "type": "string"
+          },
+          "relative": {
+            "description": "The path relative to the agent's working directory.",
+            "type": "string"
+          },
+          "size": {
+            "description": "Size of the file in bytes.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "truncated": {
+            "description": "The content was cut at 1 MiB.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "binary",
+          "content",
+          "path",
+          "relative",
+          "size",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "FileDiffResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/FileDiffResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "diff": {
+            "description": "Unified diff of the working tree against HEAD (an untracked file shows as added), up to 1 MiB; empty when unchanged or not in a repository.",
+            "type": "string"
+          },
+          "path": {
+            "description": "The path as given.",
+            "type": "string"
+          },
+          "relative": {
+            "description": "The path relative to the agent's working directory.",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FileDiffStatus",
+            "description": "modified, added (staged but not committed), deleted, untracked, unchanged, or not_in_repo when the file isn't in a git repository."
+          },
+          "truncated": {
+            "description": "The diff was cut at 1 MiB.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "diff",
+          "path",
+          "relative",
+          "status",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "FileDiffStatus": {
+        "enum": [
+          "added",
+          "deleted",
+          "modified",
+          "not_in_repo",
+          "unchanged",
+          "untracked"
+        ],
+        "example": "modified",
+        "title": "FileDiffStatus",
+        "type": "string"
+      },
       "HeartbeatBody": {
         "additionalProperties": false,
         "properties": {
@@ -2460,6 +2559,170 @@
           }
         },
         "summary": "Subscribe to events"
+      }
+    },
+    "/files/content": {
+      "get": {
+        "description": "Returns a file the chat shows, for the file paths in tool calls and messages: its text, up to 1 MiB. Only files in the agent's working directory can be read; a binary file comes back without content.",
+        "operationId": "get-files-content",
+        "parameters": [
+          {
+            "description": "The file: an absolute path inside the agent's working directory, or a path relative to it.",
+            "explode": false,
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "description": "The file: an absolute path inside the agent's working directory, or a path relative to it.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileContentResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Get files content"
+      }
+    },
+    "/files/diff": {
+      "get": {
+        "description": "Returns the uncommitted changes of a file in the agent's working directory: git's unified diff of the working tree against HEAD, where an untracked file shows as added. Outside a git repository the status is not_in_repo.",
+        "operationId": "get-files-diff",
+        "parameters": [
+          {
+            "description": "The file: an absolute path inside the agent's working directory, or a path relative to it.",
+            "explode": false,
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "description": "The file: an absolute path inside the agent's working directory, or a path relative to it.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileDiffResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Get files diff"
       }
     },
     "/handoff": {

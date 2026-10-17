@@ -7,6 +7,8 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {common} from "@/lib/highlight-langs";
 import {copyText} from "@/lib/clipboard";
+import {parseFilePathRef} from "@/lib/file-refs";
+import {FilePathCode} from "./file-path";
 
 type MarkdownNode = {
   type: string;
@@ -96,6 +98,9 @@ interface ProcessedMessageProps {
   isUser: boolean;
   renderMode?: "raw" | "markdown";
   searchQuery?: string;
+  // Inline code that names a file opens it in the file viewer (Markdown
+  // mode; for the agent's own messages).
+  linkFilePaths?: boolean;
 }
 
 function linkifyTerminalText(content: string) {
@@ -173,6 +178,7 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
   isUser,
   renderMode = isUser ? "markdown" : "raw",
   searchQuery = "",
+  linkFilePaths = false,
 }: ProcessedMessageProps) {
   if (renderMode === "markdown" && searchQuery.trim()) {
     return (
@@ -231,13 +237,19 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
           li: ({children}) => (
             <li className="pl-1 [&>p]:my-0">{children}</li>
           ),
-          code: ({children, className}) => (
-            <code
-              className={`${className ?? ""} rounded-[5px] border border-border bg-muted px-1 py-px font-mono text-[0.86em] text-foreground`}
-            >
-              {children}
-            </code>
-          ),
+          code: ({children, className}) => {
+            // Only inline code: a fenced block has a language class or ends
+            // in a newline, which no path has.
+            const fileRef = linkFilePaths && !className && typeof children === "string" ? parseFilePathRef(children) : null;
+            if (fileRef) return <FilePathCode text={children as string} fileRef={fileRef} />;
+            return (
+              <code
+                className={`${className ?? ""} rounded-[5px] border border-border bg-muted px-1 py-px font-mono text-[0.86em] text-foreground`}
+              >
+                {children}
+              </code>
+            );
+          },
           table: ({children}) => (
             <div className="my-3 max-w-full overflow-x-auto rounded-lg border">
               <table className="w-full border-collapse text-left text-sm">
