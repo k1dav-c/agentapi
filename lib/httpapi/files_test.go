@@ -136,9 +136,9 @@ func TestFileDiff(t *testing.T) {
 	}{
 		{"changed.txt", FileDiffModified, []string{"--- a/app/changed.txt", "+++ b/app/changed.txt", "-one", "+two"}},
 		{"same.txt", FileDiffUnchanged, nil},
-		{"new file.txt", FileDiffUntracked, []string{"new file mode", "+fresh", "+++ b/app/new file.txt"}},
+		{"new file.txt", FileDiffUntracked, []string{"diff --git a/app/new file.txt b/app/new file.txt", "new file mode", "+fresh", "+++ b/app/new file.txt"}},
 		{"staged.txt", FileDiffAdded, []string{"new file mode", "+staged", "+++ b/app/staged.txt"}},
-		{"gone.txt", FileDiffDeleted, []string{"deleted file mode", "-bye"}},
+		{"gone.txt", FileDiffDeleted, []string{"diff --git a/app/gone.txt b/app/gone.txt", "deleted file mode", "--- a/app/gone.txt", "-bye"}},
 		{"dir/x.txt", FileDiffDeleted, []string{"-x"}},
 		{filepath.Join(repo, "app", "changed.txt"), FileDiffModified, []string{"+two"}},
 	} {
@@ -170,4 +170,54 @@ func TestFileDiff(t *testing.T) {
 	assert.Equal(t, 403, statusOf(t, err))
 	_, err = os.Stat(filepath.Join(repo, ".git", "index.lock"))
 	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestFileDiffStaysInTheWorkingDirectory(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("needs git")
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	// Another repository, reached through a symlink in the working
+	// directory.
+	other := t.TempDir()
+	git(t, other, "init", "-q")
+	writeFile(t, filepath.Join(other, "secret.env"), "TOKEN=abc123\n")
+	work := t.TempDir()
+	git(t, work, "init", "-q")
+	require.NoError(t, os.Symlink(other, filepath.Join(work, "link")))
+	s := &Server{cwd: work}
+
+	_, err := s.getFileDiff(t.Context(), &FilePathQuery{Path: "link/secret.env"})
+	require.Error(t, err)
+	assert.Equal(t, 403, statusOf(t, err))
+	_, err = s.getFileDiff(t.Context(), &FilePathQuery{Path: "."})
+	require.Error(t, err)
+	assert.Equal(t, 400, statusOf(t, err), "a directory isn't a file")
+}
+
+func TestFileDiffRunsNoRepositoryPrograms(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("needs git")
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	repo := t.TempDir()
+	git(t, repo, "init", "-q")
+	writeFile(t, filepath.Join(repo, "a.txt"), "one\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-q", "-m", "init")
+	// What an agent that can write files could set up: a clean filter
+	// that runs a command whenever git reads the working copy.
+	marker := filepath.Join(t.TempDir(), "ran")
+	writeFile(t, filepath.Join(repo, ".gitattributes"), "*.txt filter=evil\n")
+	git(t, repo, "config", "filter.evil.clean", "touch "+marker+"; cat")
+	writeFile(t, filepath.Join(repo, "a.txt"), "two\n")
+
+	resp, err := (&Server{cwd: repo}).getFileDiff(t.Context(), &FilePathQuery{Path: "a.txt"})
+	require.NoError(t, err)
+	assert.Equal(t, FileDiffModified, resp.Body.Status)
+	assert.Contains(t, resp.Body.Diff, "+two")
+	_, err = os.Stat(marker)
+	assert.ErrorIs(t, err, os.ErrNotExist, "the filter didn't run")
 }

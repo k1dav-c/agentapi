@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -132,21 +132,9 @@ func (s *Server) getFileContent(_ context.Context, input *FilePathQuery) (*FileC
 		return nil, fmt.Errorf("open the agent's working directory: %w", err)
 	}
 	defer func() { _ = root.Close() }()
-	f, err := root.Open(rel)
+	data, info, err := readRegular(root, rel, input.Path, maxViewedBytes)
 	if err != nil {
-		return nil, fileError(input.Path, err)
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, fileError(input.Path, err)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, huma.Error400BadRequest(fmt.Sprintf("%s is not a file", input.Path))
-	}
-	data, err := io.ReadAll(io.LimitReader(f, maxViewedBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", input.Path, err)
+		return nil, err
 	}
 
 	resp := &FileContentResponse{}
@@ -163,6 +151,38 @@ func (s *Server) getFileContent(_ context.Context, input *FilePathQuery) (*FileC
 	}
 	resp.Body.Content = string(data)
 	return resp, nil
+}
+
+// readRegular reads up to limit+1 bytes of a regular file in root: one more
+// than limit says the file is longer. It is checked before it is opened,
+// since opening a FIFO would wait for a writer.
+func readRegular(root *os.Root, rel, path string, limit int) ([]byte, fs.FileInfo, error) {
+	info, err := root.Stat(rel)
+	if err != nil {
+		return nil, nil, fileError(path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, huma.Error400BadRequest(fmt.Sprintf("%s is not a file", path))
+	}
+	f, err := root.Open(rel)
+	if err != nil {
+		return nil, nil, fileError(path, err)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
+	if err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return data, info, nil
+}
+
+// httpStatus is the status of an error made with huma, or 0.
+func httpStatus(err error) int {
+	var status huma.StatusError
+	if errors.As(err, &status) {
+		return status.GetStatus()
+	}
+	return 0
 }
 
 // fileError maps an error opening a file in the working directory to the
@@ -187,6 +207,13 @@ func trimPartialRune(data []byte) []byte {
 	return data
 }
 
+// getFileDiff serves a file's uncommitted changes against HEAD. In the
+// repository git only reads objects and the index (rev-parse, ls-files,
+// cat-file), which runs none of the programs a repository can configure,
+// such as clean filters (an agent that can write .git/config could run a
+// command when the user looks at a diff). The diff compares two copies in a
+// directory of its own; the working copy is read through the root, so a
+// symlink can't lead out.
 func (s *Server) getFileDiff(ctx context.Context, input *FilePathQuery) (*FileDiffResponse, error) {
 	rel, err := s.workspacePath(input.Path)
 	if err != nil {
@@ -195,50 +222,82 @@ func (s *Server) getFileDiff(ctx context.Context, input *FilePathQuery) (*FileDi
 	resp := &FileDiffResponse{}
 	resp.Body.Path = input.Path
 	resp.Body.Relative = filepath.ToSlash(rel)
+	root, err := os.OpenRoot(s.cwd)
+	if err != nil {
+		return nil, fmt.Errorf("open the agent's working directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	// The working copy, unless it is gone.
+	current, _, err := readRegular(root, rel, input.Path, maxDiffInput)
+	exists := err == nil
+	if err != nil && httpStatus(err) != http.StatusNotFound {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
-	abs := filepath.Join(s.cwd, rel)
-	// git runs in the closest directory that exists: a deleted file's
-	// directory may be gone too.
-	dir := filepath.Dir(abs)
-	for dir != s.cwd && !isDir(dir) {
-		dir = filepath.Dir(dir)
+	// git runs in the closest directory that exists (a deleted file's
+	// directory may be gone too), which must be inside the working
+	// directory itself, not reached through a symlink.
+	dirRel := filepath.Dir(rel)
+	for dirRel != "." {
+		if info, err := root.Stat(dirRel); err == nil && info.IsDir() {
+			break
+		}
+		dirRel = filepath.Dir(dirRel)
 	}
-	spec, err := filepath.Rel(dir, abs)
+	if info, err := root.Lstat(dirRel); err != nil || !info.IsDir() {
+		return nil, huma.Error403Forbidden(fmt.Sprintf("%s is outside the agent's working directory", input.Path))
+	}
+	dir := filepath.Join(s.cwd, dirRel)
+	spec, err := filepath.Rel(dir, filepath.Join(s.cwd, rel))
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s: %w", input.Path, err)
 	}
 	// The directory's path in the repository, e.g. "app/".
-	prefix, err := runGit(ctx, dir, "rev-parse", "--show-prefix")
+	prefix, err := runGit(ctx, dir, maxViewedBytes, "rev-parse", "--show-prefix")
 	if err != nil {
 		resp.Body.Status = FileDiffNotInRepo
 		return resp, nil
 	}
-	_, statErr := os.Lstat(abs)
-	exists := statErr == nil
-	_, headErr := runGit(ctx, dir, "rev-parse", "--verify", "--quiet", "HEAD")
-	_, trackedErr := runGit(ctx, dir, "ls-files", "--error-unmatch", "--", ":(literal)"+spec)
-	tracked := trackedErr == nil
+	repoPath := strings.TrimSpace(prefix.text) + filepath.ToSlash(spec)
+	head, headErr := runGit(ctx, dir, maxDiffInput, "cat-file", "blob", "HEAD:"+repoPath)
+	inHead := headErr == nil
+	_, trackedErr := runGit(ctx, dir, maxViewedBytes, "ls-files", "--error-unmatch", "--", ":(literal)"+spec)
 
-	var out gitOutput
+	var old *string
+	if inHead {
+		old = &head.text
+	}
+	var cur *string
+	if exists {
+		text := string(current)
+		cur = &text
+	}
 	switch {
-	case tracked && headErr == nil:
-		out, err = gitDiff(ctx, dir, "HEAD", "--", ":(literal)"+spec)
-		resp.Body.Status = diffStatus(out.text)
-	case exists:
-		// Untracked, or staged in a repository without commits: all of it
-		// is new. The prefixes name it by its path in the repository, as
-		// the diff of a tracked file does.
-		repoDir := strings.TrimSpace(prefix.text)
-		out, err = gitDiff(ctx, dir, "--no-index", "--src-prefix=a/"+repoDir, "--dst-prefix=b/"+repoDir, "--", os.DevNull, spec)
-		resp.Body.Status = FileDiffUntracked
-		if tracked {
-			resp.Body.Status = FileDiffAdded
+	case inHead && exists:
+		resp.Body.Status = FileDiffModified
+		if *old == *cur {
+			resp.Body.Status = FileDiffUnchanged
+			return resp, nil
 		}
+	case inHead:
+		resp.Body.Status = FileDiffDeleted
+	case exists && trackedErr == nil:
+		// Staged, in a repository without commits too.
+		resp.Body.Status = FileDiffAdded
+	case exists:
+		resp.Body.Status = FileDiffUntracked
 	default:
 		return nil, huma.Error404NotFound(fmt.Sprintf("%s doesn't exist", input.Path))
 	}
+	if head.truncated || len(current) > maxDiffInput {
+		// Too large to diff here.
+		resp.Body.Truncated = true
+		return resp, nil
+	}
+	out, err := diffCopies(ctx, repoPath, old, cur)
 	if err != nil {
 		return nil, fmt.Errorf("git diff %s: %w", input.Path, err)
 	}
@@ -247,37 +306,99 @@ func (s *Server) getFileDiff(ctx context.Context, input *FilePathQuery) (*FileDi
 	return resp, nil
 }
 
-// diffStatus reads how a file changed from its diff against HEAD.
-func diffStatus(diff string) FileDiffStatus {
-	switch {
-	case diff == "":
-		return FileDiffUnchanged
-	case strings.Contains(diff, "\nnew file mode "):
-		return FileDiffAdded
-	case strings.Contains(diff, "\ndeleted file mode "):
-		return FileDiffDeleted
+// maxDiffInput is how large a file GET /files/diff compares.
+const maxDiffInput = 4 << 20
+
+// diffCopies diffs old against cur (nil: the file doesn't exist on that
+// side) as git would for repoPath, outside any repository and without the
+// user's git configuration.
+func diffCopies(ctx context.Context, repoPath string, old, cur *string) (gitOutput, error) {
+	tmp, err := os.MkdirTemp("", "agentapi-diff-")
+	if err != nil {
+		return gitOutput{}, err
 	}
-	return FileDiffModified
+	defer func() { _ = os.RemoveAll(tmp) }()
+	side := func(name string, content *string) (string, error) {
+		if content == nil {
+			return os.DevNull, nil
+		}
+		path := filepath.Join(name, filepath.FromSlash(repoPath))
+		full := filepath.Join(tmp, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			return "", err
+		}
+		return path, os.WriteFile(full, []byte(*content), 0o600)
+	}
+	a, err := side("a", old)
+	if err != nil {
+		return gitOutput{}, err
+	}
+	b, err := side("b", cur)
+	if err != nil {
+		return gitOutput{}, err
+	}
+	args := []string{
+		"-c", "core.quotepath=off", "-c", "core.attributesFile=" + os.DevNull,
+		"diff", "--no-index", "--no-color", "--no-ext-diff", "--no-textconv",
+	}
+	dir, rel := tmp, filepath.FromSlash(repoPath)
+	switch {
+	case old == nil:
+		// From the copy's directory, git names both sides a/path and
+		// b/path, as git diff does, rather than after the copy.
+		dir, args = filepath.Join(tmp, "b"), append(args, "--", os.DevNull, rel)
+	case cur == nil:
+		dir, args = filepath.Join(tmp, "a"), append(args, "--", rel, os.DevNull)
+	default:
+		args = append(args, "--no-prefix", "--", a, b)
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(gitEnv(),
+		// Not the user's configuration, nor a repository the temporary
+		// directory may be in.
+		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_CEILING_DIRECTORIES="+filepath.Dir(tmp))
+	stdout := &cappedBuffer{max: maxViewedBytes}
+	var stderr bytes.Buffer
+	cmd.Stdout = stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	// Exit status 1 is how diff --no-index says the files differ.
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		err = nil
+	}
+	if msg := strings.TrimSpace(stderr.String()); err != nil && msg != "" {
+		err = fmt.Errorf("%w: %s", err, msg)
+	}
+	return gitOutput{text: stdout.String(), truncated: stdout.dropped}, err
 }
 
-func isDir(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
-}
-
-// gitOutput is what a git command printed, cut at maxViewedBytes.
+// gitOutput is what a git command printed, cut at its limit.
 type gitOutput struct {
 	text      string
 	truncated bool
 }
 
-// runGit runs git in dir without taking the index lock the agent may be
-// using.
-func runGit(ctx context.Context, dir string, args ...string) (gitOutput, error) {
+// gitEnv is git's environment: AgentAPI's, without its own variables (its
+// API token among them), and without taking the index lock the agent may
+// be using.
+func gitEnv() []string {
+	env := make([]string, 0, len(os.Environ())+2)
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "AGENTAPI_") {
+			env = append(env, kv)
+		}
+	}
+	return append(env, "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0")
+}
+
+// runGit runs git in dir and keeps up to limit bytes of what it prints.
+func runGit(ctx context.Context, dir string, limit int, args ...string) (gitOutput, error) {
 	args = append([]string{"-c", "core.quotepath=off", "-c", "core.fsmonitor=false", "-C", dir}, args...)
 	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0")
-	stdout := &cappedBuffer{max: maxViewedBytes}
+	cmd.Env = gitEnv()
+	stdout := &cappedBuffer{max: limit}
 	var stderr bytes.Buffer
 	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
@@ -286,18 +407,6 @@ func runGit(ctx context.Context, dir string, args ...string) (gitOutput, error) 
 		err = fmt.Errorf("%w: %s", err, msg)
 	}
 	return gitOutput{text: stdout.String(), truncated: stdout.dropped}, err
-}
-
-// gitDiff runs git diff in dir without the programs a repository can
-// configure for it (external diff drivers, textconv filters). Exit status 1
-// is how `diff --no-index` says the files differ, not an error.
-func gitDiff(ctx context.Context, dir string, args ...string) (gitOutput, error) {
-	out, err := runGit(ctx, dir, append([]string{"diff", "--no-color", "--no-ext-diff", "--no-textconv"}, args...)...)
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && slices.Contains(args, "--no-index") {
-		err = nil
-	}
-	return out, err
 }
 
 // cappedBuffer keeps the first max bytes written to it and drops the rest,
