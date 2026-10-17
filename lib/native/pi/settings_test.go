@@ -115,4 +115,11 @@ func TestCompact(t *testing.T) {
 	require.Equal(t, "compact", cmd["type"])
 	h.answer(cmd, `{"summary":"...","firstKeptEntryId":"x","tokensBefore":5000}`)
 	require.NoError(t, h.result("compact"))
+
+	// As Pi 0.71 answers for a short session.
+	h.call("again", func() error { return h.a.Compact(context.Background()) })
+	h.refuse(h.pi.nextCmd(), "Nothing to compact (session too small)")
+	var refused *native.RefusedError
+	require.ErrorAs(t, h.result("again"), &refused)
+	assert.Equal(t, "Nothing to compact (session too small)", refused.Reason)
 }

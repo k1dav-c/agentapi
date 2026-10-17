@@ -231,3 +231,8 @@ func TestReloadResumesTheSession(t *testing.T) {
 	assert.Len(t, c.Messages(), 2, "the conversation stays")
 	assert.True(t, c.Idle())
 }
+
+func TestReloadNeedsResume(t *testing.T) {
+	c, _, _ := start(t, func(a *nativetest.Adapter) { a.Caps.Resume = false }, native.Config{})
+	assert.ErrorIs(t, c.Reload(context.Background()), native.ErrUnsupported)
+}

@@ -71,9 +71,16 @@ func TestSettingsAtStart(t *testing.T) {
 	// A model that isn't one of the options is reported by its name.
 	a, _, _ = startedWith(t, Config{}, testInitialize, `{"model":"claude-opus-4-1","effort":"medium"}`)
 	assert.Equal(t, "claude-opus-4-1", a.Settings().Model)
-	// An older version without models or get_settings: only the mode.
-	a, _, _ = startedWith(t, Config{}, `{"current_permission_mode":"acceptEdits"}`, "")
+	// An older version without models or get_settings: the mode, and the
+	// model once a turn runs on it.
+	a, sink, proc := startedWith(t, Config{}, `{"current_permission_mode":"acceptEdits"}`, "")
 	assert.Equal(t, native.Settings{}, a.Settings())
+	proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1","model":"claude-opus-4-1"}`))
+	proc.barrier(t)
+	assert.Equal(t, native.Settings{Model: "claude-opus-4-1"}, a.Settings())
+	sink.mu.Lock()
+	assert.Len(t, sink.settings, 1)
+	sink.mu.Unlock()
 }
 
 func TestSettingOptionsWithoutBypass(t *testing.T) {

@@ -19,4 +19,8 @@ func TestOneLine(t *testing.T) {
 	assert.True(t, strings.HasSuffix(long, "…"))
 	assert.True(t, utf8.ValidString(long))
 	assert.Empty(t, native.OneLine("  \n ", 120))
+	// What follows the first line counts too.
+	assert.Equal(t, "abcd…", native.OneLine("abcde\nf", 5))
+	assert.Equal(t, "abcd…", native.OneLine("abcd\nf", 5))
+	assert.Equal(t, "abc …", native.OneLine("abc\nf", 5))
 }

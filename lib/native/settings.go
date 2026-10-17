@@ -140,3 +140,11 @@ type Configurable interface {
 type SettingsSink interface {
 	SettingsChanged(Settings)
 }
+
+// ReportSettings reports settings the agent changed by itself to sink, if
+// it is a SettingsSink.
+func ReportSettings(sink Sink, s Settings) {
+	if ss, ok := sink.(SettingsSink); ok {
+		ss.SettingsChanged(s)
+	}
+}

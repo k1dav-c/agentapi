@@ -431,5 +431,6 @@ func TestStateDB_RestoresSettings(t *testing.T) {
 	var status httpapi.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	require.NotNil(t, status.Settings)
-	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "plain", Effort: "low"}, *status.Settings)
+	// The model has no efforts.
+	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "plain"}, *status.Settings)
 }

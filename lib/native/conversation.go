@@ -104,6 +104,9 @@ type Conversation struct {
 	generation int
 	started    bool
 	turnActive bool
+	// compacting is set while the agent compacts its context on request,
+	// which no turn may interrupt.
+	compacting bool
 	// promptSent is set once the initial prompt was sent as a turn, or when
 	// the conversation continues an earlier one, which had it. Restart
 	// clears it, so the new session gets the prompt too.
@@ -207,21 +210,37 @@ func (c *Conversation) Settings() Settings {
 }
 
 // Compact has the agent compact its context, while it isn't working on a
-// turn.
+// turn, and returns ErrTurnActive while it is (or already compacts). No
+// turn starts until it is done: StartTurn returns
+// st.ErrMessageValidationChanging, so a message waits in the queue.
 func (c *Conversation) Compact(ctx context.Context) error {
 	c.mu.Lock()
-	adapter, started, busy, caps := c.adapter, c.started, c.turnActive, c.caps
-	c.mu.Unlock()
-	compacter, ok := adapter.(Compacter)
+	compacter, ok := c.adapter.(Compacter)
 	switch {
-	case !started || adapter == nil:
+	case !c.started || c.adapter == nil:
+		c.mu.Unlock()
 		return ErrNotStarted
-	case !ok || !caps.Compact:
+	case !ok || !c.caps.Compact:
+		c.mu.Unlock()
 		return ErrUnsupported
-	case busy:
+	case c.turnActive || c.compacting:
+		c.mu.Unlock()
 		return ErrTurnActive
 	}
-	return compacter.Compact(ctx)
+	// No turn starts meanwhile: it is held like one, without the lock.
+	c.compacting = true
+	gen := c.generation
+	c.cfg.Emitter.EmitStatus(c.statusLocked())
+	c.mu.Unlock()
+
+	err := compacter.Compact(ctx)
+	c.mu.Lock()
+	if gen == c.generation {
+		c.compacting = false
+		c.cfg.Emitter.EmitStatus(c.statusLocked())
+	}
+	c.mu.Unlock()
+	return err
 }
 
 // Usage reports the agent's usage of its limits, as it last reported it.
@@ -278,17 +297,28 @@ func (c *Conversation) ApplySettings(ctx context.Context, s Settings) error {
 	if err != nil {
 		return err
 	}
-	if err := configurable.ApplySettings(ctx, s); err != nil {
-		return err
-	}
+	applyErr := configurable.ApplySettings(ctx, s)
 	settings := configurable.Settings()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if gen != c.generation {
+		if applyErr != nil {
+			return applyErr
+		}
 		return ErrNotStarted
 	}
-	c.chooseLocked(c.chosen.Merge(s))
+	// Settings the agent took before one failed show too.
 	c.setSettingsLocked(settings)
+	if applyErr != nil {
+		return applyErr
+	}
+	chosen := c.chosen.Merge(s)
+	if s.Model != "" && s.Effort == "" && chosen.Effort != "" {
+		// A model without the effort chosen takes another one, which the
+		// next agent gets too.
+		chosen.Effort = settings.Effort
+	}
+	c.chooseLocked(chosen)
 	return nil
 }
 
@@ -311,10 +341,12 @@ func (c *Conversation) setSettingsLocked(settings Settings) {
 // chosen setting follows the agent, so the next agent isn't put back.
 func (c *Conversation) agentSettingsLocked(settings Settings) {
 	if c.started {
-		// An empty mode is one of the agent's own, an empty model or
-		// effort one the agent didn't report.
+		// An empty mode is one of the agent's own (Claude Code's
+		// acceptEdits): the next agent gets the mode chosen before rather
+		// than its default, which may let it do more. An empty model or
+		// effort is one the agent didn't report.
 		chosen := c.chosen
-		if chosen.PermissionMode != "" {
+		if chosen.PermissionMode != "" && settings.PermissionMode != "" {
 			chosen.PermissionMode = settings.PermissionMode
 		}
 		if chosen.Model != "" && settings.Model != "" {
@@ -339,7 +371,7 @@ func (c *Conversation) SessionRef() string {
 func (c *Conversation) Idle() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.started && !c.turnActive
+	return c.started && !c.turnActive && !c.compacting
 }
 
 // TurnActive reports whether the agent is working on a turn.
@@ -367,6 +399,9 @@ func (c *Conversation) Status() st.ConversationStatus {
 func (c *Conversation) statusLocked() st.ConversationStatus {
 	if !c.started {
 		return st.ConversationStatusInitializing
+	}
+	if c.compacting {
+		return st.ConversationStatusChanging
 	}
 	if !c.turnActive {
 		return st.ConversationStatusStable
@@ -409,8 +444,9 @@ func (c *Conversation) Send(parts ...st.MessagePart) error {
 }
 
 // StartTurn sends a message as a new turn. It returns
-// st.ErrMessageValidationChanging while a turn is running or the agent is
-// still starting, so callers can queue the message.
+// st.ErrMessageValidationChanging while a turn is running, the agent
+// compacts its context or is still starting, so callers can queue the
+// message.
 func (c *Conversation) StartTurn(ctx context.Context, input Input) error {
 	c.mu.Lock()
 	turn, err := c.beginTurnLocked(input)
@@ -437,7 +473,7 @@ func (c *Conversation) beginTurnLocked(input Input) (pendingTurn, error) {
 	if text == "" {
 		return pendingTurn{}, st.ErrMessageValidationEmpty
 	}
-	if !c.started || c.turnActive || c.adapter == nil {
+	if !c.started || c.turnActive || c.compacting || c.adapter == nil {
 		return pendingTurn{}, st.ErrMessageValidationChanging
 	}
 	c.turnActive = true

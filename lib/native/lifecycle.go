@@ -71,7 +71,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resumeRef string) er
 	}
 	// Adapters know what they support once they started.
 	caps := adapter.Capabilities()
-	settings := c.applyChosen(ctx, adapter, caps)
+	settings := c.applyChosen(ctx, gen, adapter, caps)
 	go func() { c.signalExit(gen, adapter.Wait()) }()
 	var prompt Input
 	if c.cfg.InitialPrompt != "" {
@@ -117,10 +117,10 @@ func (c *Conversation) launch(ctx context.Context, gen int, resumeRef string) er
 	return nil
 }
 
-// applyChosen gives a new adapter the settings chosen for the session, and
-// returns its settings. A setting it can't take is reported and left to
-// the agent.
-func (c *Conversation) applyChosen(ctx context.Context, adapter Adapter, caps Capabilities) Settings {
+// applyChosen gives the new adapter of generation gen the settings chosen
+// for the session, and returns its settings. A setting it can't take is
+// reported and left to the agent.
+func (c *Conversation) applyChosen(ctx context.Context, gen int, adapter Adapter, caps Capabilities) Settings {
 	configurable, ok := adapter.(Configurable)
 	if !ok || !caps.Settings {
 		return Settings{}
@@ -142,6 +142,10 @@ func (c *Conversation) applyChosen(ctx context.Context, adapter Adapter, caps Ca
 		applyCtx, cancel := context.WithTimeout(ctx, sendTimeout)
 		err := configurable.ApplySettings(applyCtx, change)
 		cancel()
+		if err != nil && !c.current(gen) {
+			// Restart or Close stopped the adapter meanwhile.
+			break
+		}
 		if err != nil {
 			c.cfg.Logger.Warn("Failed to restore a setting of the session", "setting", change, "error", err)
 			c.cfg.Emitter.EmitError(fmt.Sprintf("The agent didn't take the session's %s: %v", settingName(change), err), st.ErrorLevelWarning)
@@ -195,6 +199,7 @@ func (c *Conversation) signalExit(gen int, err error) {
 func (c *Conversation) exitLocked(err error) {
 	c.started = false
 	c.turnActive = false
+	c.compacting = false
 	c.expireRequestsLocked(true)
 	select {
 	case c.exited <- err:
@@ -243,12 +248,18 @@ func (c *Conversation) Restart(ctx context.Context) error {
 // conversation goes on while what the agent reads when it starts (its MCP
 // servers, its settings files) is read again. It returns like Restart. It
 // returns ErrTurnActive while the agent works on a turn, which a reload
-// would stop.
+// would stop (or compacts its context), and ErrUnsupported for an agent
+// whose session can't be resumed (Claude Code with
+// --no-session-persistence).
 func (c *Conversation) Reload(ctx context.Context) error {
 	c.mu.Lock()
-	if c.turnActive {
+	if c.turnActive || c.compacting {
 		c.mu.Unlock()
 		return ErrTurnActive
+	}
+	if c.started && !c.caps.Resume {
+		c.mu.Unlock()
+		return ErrUnsupported
 	}
 	old := c.retireAdapterLocked()
 	gen, ref, runCtx := c.generation, c.sessionRef, c.ctx
@@ -285,6 +296,7 @@ func (c *Conversation) retireAdapterLocked() Adapter {
 	c.adapter = nil
 	c.started = false
 	c.turnActive = false
+	c.compacting = false
 	c.loginWaiting = false
 	c.startErrors = nil
 	if c.loginWake != nil {

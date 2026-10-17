@@ -322,7 +322,7 @@ func inputSummary(raw json.RawMessage) string {
 	}
 	for _, key := range []string{"command", "file_path", "notebook_path", "path", "pattern", "url", "query"} {
 		if v, ok := input[key].(string); ok && v != "" {
-			return native.OneLine(v, 120)
+			return native.OneLine(v, native.MaxTitleRunes)
 		}
 	}
 	return ""

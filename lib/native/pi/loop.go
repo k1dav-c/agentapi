@@ -2,7 +2,6 @@ package pi
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -231,7 +230,7 @@ func (a *Adapter) handleResponse(r response) {
 	}
 	res := cmdResult{data: r.Data}
 	if !r.Success {
-		res = cmdResult{err: errors.New(r.Error)}
+		res = cmdResult{err: &native.RefusedError{Reason: r.Error}}
 	}
 	switch p.kind {
 	case cmdTurn, cmdSteer:

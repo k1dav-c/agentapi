@@ -2,7 +2,7 @@ package codex
 
 import (
 	"slices"
-	"time"
+	"strings"
 
 	"github.com/coder/agentapi/lib/native"
 )
@@ -48,21 +48,10 @@ func (s *loopState) rateLimitsUpdated(n rateLimitsUpdatedNotification) {
 		if r.LimitName != "" && prefix != "" {
 			limit.Label = r.LimitName + " " + limit.Label
 		}
-		if w.ResetsAt > 0 {
-			t := time.Unix(w.ResetsAt, 0).UTC()
-			limit.ResetsAt = &t
-		}
+		limit.ResetsAt = native.ResetTime(w.ResetsAt)
 		limits = append(limits, limit)
 	}
-	slices.SortFunc(limits, func(x, y native.RateLimit) int {
-		switch {
-		case x.ID < y.ID:
-			return -1
-		case x.ID > y.ID:
-			return 1
-		}
-		return 0
-	})
+	slices.SortFunc(limits, func(x, y native.RateLimit) int { return strings.Compare(x.ID, y.ID) })
 	s.usage.RateLimits = limits
 	s.reportUsage()
 }
@@ -83,9 +72,5 @@ func (s *loopState) contextUsed(used, size int64) {
 
 // reportUsage tells the conversation about the usage. Read loop only.
 func (s *loopState) reportUsage() {
-	if sink, ok := s.sink().(native.UsageSink); ok {
-		usage := s.usage
-		usage.RateLimits = slices.Clone(usage.RateLimits)
-		sink.UsageChanged(usage)
-	}
+	native.ReportUsage(s.sink(), s.usage)
 }

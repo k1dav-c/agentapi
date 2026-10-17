@@ -191,25 +191,29 @@ func TestPlanMode(t *testing.T) {
 	plan := s.opened[0]
 	assert.Equal(t, native.RequestKindPlan, plan.Kind)
 	assert.Contains(t, plan.Detail, "Create it with hi.")
-	assert.Equal(t, []string{optionImplement, optionKeepPlanning}, []string{plan.Options[0].ID, plan.Options[1].ID})
+	// The mode before the plan comes first.
+	assert.Equal(t, []string{"implement_bypass", "implement_auto", "implement_ask", optionKeepPlanning}, optionIDs(plan))
 
-	// Approved: Codex implements it in the default mode, and the mode is
-	// the one before the plan again.
+	// Approved: Codex implements it in the default collaboration mode and
+	// the permission mode picked.
 	h.act("respond", func(ctx context.Context) error {
-		return h.a.Respond(ctx, plan.ID, native.Response{OptionID: optionImplement})
+		return h.a.Respond(ctx, plan.ID, native.Response{OptionID: "implement_auto"})
 	})
 	sent = h.expectSent("turn/start")
 	params = nil
 	require.NoError(t, json.Unmarshal(sent.Params, &params))
 	assert.Equal(t, "default", params["collaborationMode"].(map[string]any)["mode"])
 	assert.Equal(t, implementPrompt, params["input"].([]any)[0].(map[string]any)["text"])
+	assert.Equal(t, "on-request", params["approvalPolicy"])
+	assert.Equal(t, map[string]any{"type": "workspaceWrite"}, params["sandboxPolicy"])
+	assert.Equal(t, "auto_review", params["approvalsReviewer"])
 	h.feedJSON(`{"id":` + string(sent.ID) + `,"result":{"turn":{"id":"turn-2","items":[],"status":"inProgress"}}}`)
 	h.settle()
 	require.NoError(t, h.err("respond"))
 	h.eventually(func() bool { return len(h.rec.snapshot().settings) > 0 }, "the settings to be reported")
 	s = h.rec.snapshot()
-	assert.Equal(t, native.PermissionModeBypass, s.settings[len(s.settings)-1].PermissionMode)
-	assert.Equal(t, native.PermissionModeBypass, h.a.Settings().PermissionMode)
+	assert.Equal(t, native.PermissionModeAuto, s.settings[len(s.settings)-1].PermissionMode)
+	assert.Equal(t, native.PermissionModeAuto, h.a.Settings().PermissionMode)
 	h.completeTurn("turn-2", "completed", "")
 	assert.Len(t, h.rec.snapshot().completions, 1, "the implementation ends the turn")
 }
@@ -233,7 +237,7 @@ func TestPlanFeedbackAndInterrupt(t *testing.T) {
 	h.feedJSON(`{"id":` + string(sent.ID) + `,"result":{"turn":{"id":"turn-2","items":[],"status":"inProgress"}}}`)
 	h.settle()
 	require.NoError(t, h.err("revise"))
-	assert.ErrorIs(t, h.a.Respond(context.Background(), plan.ID, native.Response{OptionID: optionImplement}), native.ErrRequestNotFound, "answered once")
+	assert.ErrorIs(t, h.a.Respond(context.Background(), plan.ID, native.Response{OptionID: "implement_bypass"}), native.ErrRequestNotFound, "answered once")
 	h.item("completed", "turn-2", `{"type":"plan","id":"turn-2-plan","text":"## Add hello.md"}`)
 	h.completeTurn("turn-2", "completed", "")
 	second := h.rec.snapshot().opened[1]
@@ -255,6 +259,10 @@ func TestPlanFeedbackAndInterrupt(t *testing.T) {
 	require.Len(t, s.completions, 2)
 	assert.Equal(t, native.StopReasonEndTurn, s.completions[1].StopReason)
 	assert.ErrorIs(t, h.a.Respond(context.Background(), third.ID, native.Response{OptionID: "maybe"}), native.ErrRequestNotFound)
+	fourth := h.planTurn("turn-4")
+	for _, id := range []string{"maybe", "implement_plan", "implement_"} {
+		assert.ErrorIs(t, h.a.Respond(context.Background(), fourth.ID, native.Response{OptionID: id}), native.ErrInvalidResponse, id)
+	}
 }
 
 func TestResumedThreadInPlanMode(t *testing.T) {
@@ -337,4 +345,39 @@ func TestCompact(t *testing.T) {
 
 	h.beginTurn("turn-1")
 	assert.ErrorIs(t, h.a.Compact(context.Background()), native.ErrTurnActive)
+}
+
+func TestFailedImplementationKeepsPlanning(t *testing.T) {
+	h := newHarness(t, "", nil)
+	h.bootWith(`"approvalPolicy":"untrusted","approvalsReviewer":"user","sandbox":{"type":"workspaceWrite"}`)
+	h.options(true)
+	require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModePlan}))
+	plan := h.planTurn("turn-1")
+	assert.Equal(t, []string{"implement_ask", "implement_bypass", "implement_auto", optionKeepPlanning}, optionIDs(plan))
+
+	h.act("implement", func(ctx context.Context) error {
+		return h.a.Respond(ctx, plan.ID, native.Response{OptionID: "implement_bypass"})
+	})
+	sent := h.expectSent("turn/start")
+	h.feedJSON(`{"id":` + string(sent.ID) + `,"error":{"code":-32603,"message":"boom"}}`)
+	h.settle()
+	require.Error(t, h.err("implement"))
+	assert.Equal(t, native.PermissionModePlan, h.a.Settings().PermissionMode, "the thread still plans")
+
+	// Feedback now revises the plan, still in the plan mode and the
+	// policies of before.
+	h.act("revise", func(ctx context.Context) error {
+		return h.a.Respond(ctx, plan.ID, native.Response{OptionID: optionKeepPlanning, Text: "smaller"})
+	})
+	sent = h.expectSent("turn/start")
+	var params map[string]any
+	require.NoError(t, json.Unmarshal(sent.Params, &params))
+	assert.NotContains(t, params, "collaborationMode")
+	assert.NotContains(t, params, "approvalPolicy")
+	h.feedJSON(`{"id":` + string(sent.ID) + `,"result":{"turn":{"id":"turn-2","items":[],"status":"inProgress"}}}`)
+	h.settle()
+	require.NoError(t, h.err("revise"))
+	h.item("completed", "turn-2", `{"type":"plan","id":"turn-2-plan","text":"## Smaller"}`)
+	h.completeTurn("turn-2", "completed", "")
+	assert.Equal(t, "implement_ask", optionIDs(h.rec.snapshot().opened[1])[0], "the mode of before")
 }

@@ -111,9 +111,7 @@ func (a *Adapter) contextUsed(usage *messageUsage) {
 		return
 	}
 	a.loop.usage.Context = &native.ContextUsage{Used: int(tokens), Size: int(window)}
-	if sink, ok := a.loop.sink.(native.UsageSink); ok {
-		sink.UsageChanged(a.loop.usage)
-	}
+	native.ReportUsage(a.loop.sink, a.loop.usage)
 }
 
 // setSettings records the settings, and reports them if report is set and
@@ -123,11 +121,8 @@ func (a *Adapter) setSettings(settings native.Settings, report bool) {
 	changed := a.settings != settings
 	a.settings = settings
 	a.mu.Unlock()
-	if !changed || !report {
-		return
-	}
-	if sink, ok := a.loop.sink.(native.SettingsSink); ok {
-		sink.SettingsChanged(settings)
+	if changed && report {
+		native.ReportSettings(a.loop.sink, settings)
 	}
 }
 

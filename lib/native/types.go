@@ -41,6 +41,14 @@ var (
 // waiting for a login.
 var ErrNoLoginRequired = errors.New("the agent is not waiting for a login")
 
+// RefusedError is an agent's refusal of a request, in its own words: the
+// request reached it, and it won't do it (Pi's "Nothing to compact").
+type RefusedError struct {
+	Reason string
+}
+
+func (e *RefusedError) Error() string { return e.Reason }
+
 // LoginRequired tells the user how to log the agent in. Native mode has no
 // terminal, so the login happens in one the user opens themselves.
 type LoginRequired struct {

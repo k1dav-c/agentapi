@@ -1,6 +1,7 @@
 package native
 
 import (
+	"slices"
 	"strconv"
 	"time"
 )
@@ -34,6 +35,24 @@ type RateLimit struct {
 // An adapter reports through it its whole usage whenever a part changes.
 type UsageSink interface {
 	UsageChanged(AgentUsage)
+}
+
+// ReportUsage reports usage to sink, if it is a UsageSink. The sink keeps
+// what it gets, so the rate limits are copied.
+func ReportUsage(sink Sink, usage AgentUsage) {
+	if s, ok := sink.(UsageSink); ok {
+		usage.RateLimits = slices.Clone(usage.RateLimits)
+		s.UsageChanged(usage)
+	}
+}
+
+// ResetTime is the time a limit resets, from Unix seconds; nil for none.
+func ResetTime(unix int64) *time.Time {
+	if unix <= 0 {
+		return nil
+	}
+	t := time.Unix(unix, 0).UTC()
+	return &t
 }
 
 // WindowLabel names a rate limit window by its length in minutes, for an

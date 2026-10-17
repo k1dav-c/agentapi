@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/coder/agentapi/lib/native"
@@ -12,14 +13,16 @@ import (
 // experimental part of app-server's API. Codex looks around, asks what it
 // needs to know and ends its turn with a plan item. AgentAPI then asks
 // whether to carry it out, as the Codex TUI does, and the turn goes on
-// with the answer: an approved plan is implemented in the default mode,
-// feedback goes back to Codex, still planning.
+// with the answer: an approved plan is implemented in the default
+// collaboration mode and the permission mode the answer picks, as Claude
+// Code's plan approval does; feedback goes back to Codex, still planning.
 
 const (
 	collabPlan    = "plan"
 	collabDefault = "default"
 
-	optionImplement    = "implement"
+	// Implementing options are optionImplement plus the permission mode.
+	optionImplement    = "implement_"
 	optionKeepPlanning = "keep_planning"
 
 	// implementPrompt starts the turn that carries out an approved plan,
@@ -52,18 +55,41 @@ func collaboration(mode string, s native.Settings) *collaborationMode {
 	return c
 }
 
-// planRequest is the request that asks whether to implement plan.
+// implementOptions are the ways to implement a plan: one per permission
+// mode, whose name follows optionImplement in the ID.
+var implementOptions = []native.RequestOption{
+	{ID: optionImplement + string(native.PermissionModeBypass), Label: "Yes, and bypass permissions", Description: "Codex carries out the plan without approvals or sandbox.", Kind: native.OptionKindAllow},
+	{ID: optionImplement + string(native.PermissionModeAuto), Label: "Yes, with auto review", Description: "Codex works in its sandbox, and its auto review decides on what needs more.", Kind: native.OptionKindAllow},
+	{ID: optionImplement + string(native.PermissionModeAsk), Label: "Yes, and ask before commands", Description: "Codex asks before it runs a command it doesn't trust.", Kind: native.OptionKindAllow},
+}
+
+// implementOption returns the index of the implementing option with id, or
+// -1.
+func implementOption(id string) int {
+	return slices.IndexFunc(implementOptions, func(o native.RequestOption) bool { return o.ID == id })
+}
+
+// planRequest is the request that asks whether, and in which permission
+// mode, to implement plan. The mode the thread had before the plan comes
+// first.
 func (a *Adapter) planRequest(turnID, plan string) native.Request {
+	a.mu.Lock()
+	before := a.settings.PermissionMode
+	a.mu.Unlock()
+	options := slices.Clone(implementOptions)
+	if i := implementOption(optionImplement + string(before)); i > 0 {
+		first := options[i]
+		options = slices.Insert(slices.Delete(options, i, i+1), 0, first)
+	}
 	return native.Request{
 		ID:       a.prefix + "-plan-" + turnID,
 		Kind:     native.RequestKindPlan,
 		Title:    "Implement this plan?",
 		Detail:   plan,
 		Feedback: true,
-		Options: []native.RequestOption{
-			{ID: optionImplement, Label: "Yes, implement it", Description: "Codex leaves the plan mode and carries out the plan.", Kind: native.OptionKindAllow},
-			{ID: optionKeepPlanning, Label: "No, keep planning", Description: "Say what to change, and Codex revises the plan.", Kind: native.OptionKindDeny},
-		},
+		Options: append(options, native.RequestOption{
+			ID: optionKeepPlanning, Label: "No, keep planning", Description: "Say what to change, and Codex revises the plan.", Kind: native.OptionKindDeny,
+		}),
 	}
 }
 
@@ -78,14 +104,13 @@ func (s *loopState) awaitPlanDecision(t *turnState) {
 	s.sink().RequestOpened(req)
 }
 
-// answerPlan answers the plan request: implement the plan, revise it with
-// the feedback, or end the turn when the user wants to go on planning
-// without saying how.
+// answerPlan answers the plan request: implement the plan in the mode the
+// answer picks, revise it with the feedback, or end the turn when the user
+// wants to go on planning without saying how.
 func (a *Adapter) answerPlan(ctx context.Context, requestID string, response native.Response) error {
 	feedback := strings.TrimSpace(response.Text)
-	switch response.OptionID {
-	case optionImplement, optionKeepPlanning:
-	default:
+	implement := implementOption(response.OptionID) >= 0
+	if !implement && response.OptionID != optionKeepPlanning {
 		return fmt.Errorf("%w: unknown option %q", native.ErrInvalidResponse, response.OptionID)
 	}
 	a.mu.Lock()
@@ -98,10 +123,12 @@ func (a *Adapter) answerPlan(ctx context.Context, requestID string, response nat
 
 	var err error
 	switch {
-	case response.OptionID == optionImplement:
-		a.leavePlanMode()
-		err = a.StartTurn(ctx, native.Input{Text: implementPrompt})
-		if err == nil {
+	case implement:
+		undo := a.leavePlanMode(native.PermissionMode(strings.TrimPrefix(response.OptionID, optionImplement)))
+		if err = a.StartTurn(ctx, native.Input{Text: implementPrompt}); err != nil {
+			// The thread still plans; so does the answer tried again.
+			undo()
+		} else {
 			err = a.inLoop(ctx, a.reportSettings)
 		}
 	case feedback != "":
@@ -134,21 +161,25 @@ func (a *Adapter) cancelPlanDecision(ctx context.Context) (bool, error) {
 	})
 }
 
-// leavePlanMode switches back to the default collaboration mode, with the
-// next turn.
-func (a *Adapter) leavePlanMode() {
+// leavePlanMode switches back to the default collaboration mode, in mode's
+// policies, with the next turn. undo puts back what it changed.
+func (a *Adapter) leavePlanMode(mode native.PermissionMode) (undo func()) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.plan {
-		a.plan = false
-		a.pendingCollab = collabDefault
+	plan, collab, current, pending := a.plan, a.pendingCollab, a.settings.PermissionMode, a.pending.PermissionMode
+	a.plan = false
+	a.pendingCollab = collabDefault
+	a.settings.PermissionMode = mode
+	a.pending.PermissionMode = mode
+	return func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		a.plan, a.pendingCollab, a.settings.PermissionMode, a.pending.PermissionMode = plan, collab, current, pending
 	}
 }
 
 // reportSettings tells the conversation about settings that changed
 // without ApplySettings. Read loop only.
 func (a *Adapter) reportSettings() {
-	if sink, ok := a.sink.(native.SettingsSink); ok {
-		sink.SettingsChanged(a.Settings())
-	}
+	native.ReportSettings(a.sink, a.Settings())
 }

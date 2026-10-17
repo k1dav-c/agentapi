@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -45,14 +46,6 @@ func windowLabel(id string) string {
 	return strings.ReplaceAll(id, "_", " ")
 }
 
-func unixTime(seconds int64) *time.Time {
-	if seconds <= 0 {
-		return nil
-	}
-	t := time.Unix(seconds, 0).UTC()
-	return &t
-}
-
 // handleRateLimit records a rate_limit_event. Read loop only.
 func (a *Adapter) handleRateLimit(raw json.RawMessage) {
 	var info rateLimitInfo
@@ -63,9 +56,10 @@ func (a *Adapter) handleRateLimit(raw json.RawMessage) {
 	if len(info.UnifiedWindows) > 0 {
 		limits = nil
 		for id, w := range info.UnifiedWindows {
-			limit := native.RateLimit{ID: id, Label: windowLabel(id), ResetsAt: unixTime(w.ResetsAt)}
+			limit := native.RateLimit{ID: id, Label: windowLabel(id), ResetsAt: native.ResetTime(w.ResetsAt)}
 			if w.Utilization != nil {
-				percent := *w.Utilization * 100
+				// Two decimals: 0.29 is 29%, not 28.999999999999996.
+				percent := math.Round(*w.Utilization*10000) / 100
 				limit.UsedPercent = &percent
 			}
 			limits = append(limits, limit)
@@ -78,8 +72,10 @@ func (a *Adapter) handleRateLimit(raw json.RawMessage) {
 			i = len(limits) - 1
 		}
 		limits[i].Status = info.Status
-		if limits[i].ResetsAt == nil {
-			limits[i].ResetsAt = unixTime(info.ResetsAt)
+		if resetsAt := native.ResetTime(info.ResetsAt); resetsAt != nil {
+			// Without unified windows (older CLIs), only the event says
+			// when the next window starts.
+			limits[i].ResetsAt = resetsAt
 		}
 	}
 	slices.SortFunc(limits, func(x, y native.RateLimit) int {
@@ -123,9 +119,5 @@ func (a *Adapter) contextUsage(response json.RawMessage) {
 
 // reportUsage tells the conversation about the usage. Read loop only.
 func (a *Adapter) reportUsage() {
-	if sink, ok := a.sink.(native.UsageSink); ok {
-		usage := a.usage
-		usage.RateLimits = slices.Clone(usage.RateLimits)
-		sink.UsageChanged(usage)
-	}
+	native.ReportUsage(a.sink, a.usage)
 }

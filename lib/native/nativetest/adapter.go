@@ -4,6 +4,7 @@ package nativetest
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 
 	"github.com/coder/agentapi/lib/native"
@@ -48,6 +49,9 @@ type Adapter struct {
 	OnStartTurn func(ctx context.Context)
 	OnSteer     func(ctx context.Context)
 	OnRespond   func(ctx context.Context)
+	// OnCompact, if set, runs for Compact and returns its error. Set
+	// Caps.Compact for the conversation to compact.
+	OnCompact func(ctx context.Context) error
 	// Options are what SettingOptions reports, and what ApplySettings
 	// checks against. Set Caps.Settings for the conversation to use them.
 	Options native.SettingOptions
@@ -171,6 +175,13 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 
 func (a *Adapter) Capabilities() native.Capabilities { return a.Caps }
 
+func (a *Adapter) Compact(ctx context.Context) error {
+	if a.OnCompact != nil {
+		return a.OnCompact(ctx)
+	}
+	return nil
+}
+
 func (a *Adapter) Settings() native.Settings {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -195,6 +206,11 @@ func (a *Adapter) ApplySettings(_ context.Context, s native.Settings) error {
 	}
 	a.applied = append(a.applied, s)
 	a.Current = a.Current.Merge(s)
+	if m, ok := a.Options.Model(s.Model); ok && s.Effort == "" && !slices.Contains(m.Efforts, a.Current.Effort) {
+		// As the agents do: a model without the current effort takes its
+		// default one.
+		a.Current.Effort = m.DefaultEffort
+	}
 	return nil
 }
 

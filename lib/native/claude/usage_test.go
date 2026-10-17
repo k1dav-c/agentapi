@@ -18,13 +18,15 @@ func TestRateLimits(t *testing.T) {
 	// As Claude Code 2.1.302 sends it.
 	proc.send(t, []byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1792258800,"rateLimitType":"five_hour",`+
 		`"overageStatus":"rejected","isUsingOverage":false,`+
-		`"unifiedWindows":{"seven_day":{"utilization":0.27,"resetsAt":1792598400},"five_hour":{"utilization":0.12,"resetsAt":1792258800}}}}`))
-	// An older version: only the limit that applies.
+		`"unifiedWindows":{"seven_day":{"utilization":0.29,"resetsAt":1792598400},"five_hour":{"utilization":0.12,"resetsAt":1792258800}}}}`))
+	// An older version: only the limit that applies, whose next window
+	// resets later.
 	proc.send(t, []byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1792600000,"rateLimitType":"seven_day_opus"}}`))
+	proc.send(t, []byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1793200000,"rateLimitType":"seven_day_opus"}}`))
 	proc.barrier(t)
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
-	require.Len(t, sink.usage, 2)
+	require.Len(t, sink.usage, 3)
 	limits := sink.usage[0].RateLimits
 	require.Len(t, limits, 2)
 	assert.Equal(t, "five_hour", limits[0].ID, "sorted")
@@ -37,10 +39,16 @@ func TestRateLimits(t *testing.T) {
 
 	limits = sink.usage[1].RateLimits
 	require.Len(t, limits, 3)
+	assert.Equal(t, 29.0, *limits[1].UsedPercent, "rounded")
 	assert.Equal(t, "Weekly Opus limit", limits[2].Label)
 	assert.Equal(t, "allowed_warning", limits[2].Status)
 	assert.Nil(t, limits[2].UsedPercent)
-	assert.InDelta(t, 27.0, *limits[1].UsedPercent, 0.001, "the others stay")
+	assert.InDelta(t, 29.0, *limits[1].UsedPercent, 0.001, "the others stay")
+
+	limits = sink.usage[2].RateLimits
+	assert.Equal(t, "allowed", limits[2].Status)
+	assert.Equal(t, time.Unix(1793200000, 0).UTC(), *limits[2].ResetsAt)
+	assert.Equal(t, time.Unix(1792600000, 0).UTC(), *sink.usage[1].RateLimits[2].ResetsAt, "what was reported stays")
 }
 
 func TestContextUsageAfterATurn(t *testing.T) {

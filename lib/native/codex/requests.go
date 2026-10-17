@@ -29,10 +29,6 @@ func joinDetail(detail, more string) string {
 	return detail + "\n\n" + more
 }
 
-// maxTitleRunes bounds a request's title, which the chat shows as the
-// card's heading; the rest is in its input or detail.
-const maxTitleRunes = 120
-
 // JSON-RPC error codes for the server requests AgentAPI declines.
 const (
 	errCodeMethodNotFound = -32601
@@ -140,7 +136,7 @@ func (s *loopState) commandApproval(msg rpcMessage) (*pendingRequest, native.Req
 	// the input has all of it.
 	command := unwrapShell(p.Command)
 	req := native.Request{
-		Kind: native.RequestKindApproval, Title: native.OneLine(command, maxTitleRunes), ToolName: "exec_command",
+		Kind: native.RequestKindApproval, Title: native.OneLine(command, native.MaxTitleRunes), ToolName: "exec_command",
 		ToolUseID: p.ItemID, Input: commandInput(p.Command, p.CWD),
 	}
 	var detail []string
@@ -363,7 +359,7 @@ func (s *loopState) userInputRequest(msg rpcMessage) (*pendingRequest, native.Re
 		}
 		req.Questions = append(req.Questions, nq)
 	}
-	req.Title = native.OneLine(p.Questions[0].Question, maxTitleRunes)
+	req.Title = native.OneLine(p.Questions[0].Question, native.MaxTitleRunes)
 	if len(p.Questions) > 1 {
 		req.Title = fmt.Sprintf("Codex asks %d questions", len(p.Questions))
 	}
@@ -385,7 +381,7 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 		return nil, native.Request{}, false
 	}
 	r := &pendingRequest{turnID: p.TurnID, results: map[string]any{}}
-	req := native.Request{Kind: native.RequestKindApproval, Title: native.OneLine(p.Message, maxTitleRunes)}
+	req := native.Request{Kind: native.RequestKindApproval, Title: native.OneLine(p.Message, native.MaxTitleRunes)}
 	if req.Title == "" {
 		req.Title = fmt.Sprintf("The %s MCP server asks for input", p.ServerName)
 	} else if req.Title != strings.TrimSpace(p.Message) {

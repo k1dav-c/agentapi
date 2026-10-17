@@ -266,9 +266,7 @@ func (a *Adapter) Compact(context.Context) error {
 	sink := a.sink
 	a.compacted = a.turns
 	a.mu.Unlock()
-	if usage, ok := sink.(native.UsageSink); ok {
-		usage.UsageChanged(demoUsage(0, a.now()))
-	}
+	native.ReportUsage(sink, demoUsage(0, a.now()))
 	text := "context compacted"
 	sink.SessionEvents([]jsonlwatcher.SessionEvent{{Kind: "system", Content: &text, EventTime: a.now()}})
 	return nil
@@ -348,9 +346,7 @@ func (a *Adapter) finish(t *turn, result native.TurnResult) {
 	turns := a.turns - a.compacted
 	a.mu.Unlock()
 	t.cancel()
-	if usage, ok := sink.(native.UsageSink); ok {
-		usage.UsageChanged(demoUsage(turns, a.now()))
-	}
+	native.ReportUsage(sink, demoUsage(turns, a.now()))
 	sink.TurnCompleted(result)
 }
 
@@ -692,9 +688,7 @@ func (s *script) leavePlanMode() {
 	s.a.settings.PermissionMode = native.PermissionModeBypass
 	settings := s.a.settings
 	s.a.mu.Unlock()
-	if sink, ok := s.sink.(native.SettingsSink); ok {
-		sink.SettingsChanged(settings)
-	}
+	native.ReportSettings(s.sink, settings)
 }
 
 // askToRun returns a decide that asks to run command, for the ask mode.

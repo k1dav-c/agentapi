@@ -113,19 +113,20 @@ func (a *Adapter) modelIDLocked(model, chosen string) string {
 	return model
 }
 
-// modelRan records the model a turn runs on (a system init frame), which
-// changes the model setting if Claude Code switched to another one (a
-// fallback). It reports whether the settings changed.
+// modelRan records the model a turn runs on (a system init frame): the
+// model setting of a CLI that didn't report one at the start, or another
+// model Claude Code switched to (a fallback). It reports whether the
+// settings changed.
 func (a *Adapter) modelRan(model string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if model == "" || a.model == "" || a.model == model {
+	if model == "" || a.model == model {
 		return false
 	}
 	if i := slices.IndexFunc(a.models, func(m claudeModel) bool { return m.Value == a.model }); i >= 0 && a.models[i].ResolvedModel == model {
 		return false
 	}
-	id := a.modelIDLocked(model, "")
+	id := a.modelIDLocked(model, a.args.model)
 	if id == a.model {
 		return false
 	}
@@ -148,9 +149,7 @@ func (a *Adapter) modeChanged(mode string) bool {
 // reportSettings tells the conversation about settings Claude Code changed
 // by itself.
 func (a *Adapter) reportSettings() {
-	if sink, ok := a.sink.(native.SettingsSink); ok {
-		sink.SettingsChanged(a.Settings())
-	}
+	native.ReportSettings(a.sink, a.Settings())
 }
 
 // Settings implements native.Configurable.
