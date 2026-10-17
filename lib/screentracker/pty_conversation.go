@@ -896,8 +896,8 @@ func (c *PTYConversation) wakeSnapshot() {
 // it sleeps without a timer until PTY output, a queued send, or Reset wakes
 // it. Buffering notifications coalesces bursts and keeps rendering bounded.
 func (c *PTYConversation) watchScreen(ctx context.Context, source interface{ ScreenUpdates() <-chan struct{} }, snapshot func() error) {
-	settleInterval := c.cfg.SnapshotInterval           // 25ms — for stability detection
-	activeInterval := c.cfg.SnapshotInterval * 6        // 150ms — during streaming
+	settleInterval := c.cfg.SnapshotInterval     // 25ms — for stability detection
+	activeInterval := c.cfg.SnapshotInterval * 6 // 150ms — during streaming
 	interval := settleInterval
 	var prevScreen string
 
