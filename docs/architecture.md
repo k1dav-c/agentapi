@@ -370,6 +370,9 @@ which is pure Go, so `CGO_ENABLED=0` builds work.
 - On startup the server restores the conversation, the queue and the session
   reference, which the native conversation passes to the factory so the agent
   resumes its own session. Requests that were open come back expired.
+- A row that can't be read is skipped, and logged, rather than keeping the
+  server from starting. The schema changes through numbered migrations,
+  whose version is the file's `PRAGMA user_version`.
 
 `--state-file` is the older PTY mechanism: it saves the screen-derived
 messages as JSON on shutdown and loads them on startup.
