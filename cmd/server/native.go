@@ -20,6 +20,20 @@ type nativeAdapterConfig struct {
 	Logger  *slog.Logger
 }
 
+// hasNativeAdapter reports whether the native transport can drive the agent:
+// Claude Code, Codex, Pi and the demo agent.
+func hasNativeAdapter(agentType AgentType, program string) bool {
+	switch agentType {
+	case AgentTypeClaude, AgentTypeCodex, AgentTypePi:
+		return true
+	case AgentTypeCustom:
+		return program == demo.Program
+	case AgentTypeGoose, AgentTypeAider, AgentTypeGemini, AgentTypeCopilot, AgentTypeAmp,
+		AgentTypeCursor, AgentTypeAuggie, AgentTypeAmazonQ, AgentTypeOpencode, AgentTypeKimi:
+	}
+	return false
+}
+
 // nativeFactory returns the adapter factory for agents that have a native
 // transport.
 func nativeFactory(agentType AgentType, cfg nativeAdapterConfig) (native.Factory, error) {

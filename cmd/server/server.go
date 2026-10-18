@@ -85,6 +85,9 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
 	if err != nil {
 		return err
 	}
+	if !opts.printOpenAPI {
+		logger.Info("Driving the agent", "transport", opts.transport, "agentType", opts.agentType)
+	}
 	if opts.initialPrompt == "" {
 		if opts.initialPrompt, err = readPipedPrompt(logger); err != nil {
 			return err
@@ -462,9 +465,9 @@ func CreateServerCmd() *cobra.Command {
 		{FlagLoadState, "", false, "Load state from state-file on startup (defaults to true when state-file is set)", "bool"},
 		{FlagSaveState, "", false, "Save state to state-file on shutdown (defaults to true when state-file is set)", "bool"},
 		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts", "string"},
-		{FlagExperimentalACP, "", false, "Use experimental ACP transport instead of PTY", "bool"},
+		{FlagExperimentalACP, "", false, "Use the experimental ACP transport (same as --transport acp)", "bool"},
 		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) and resumes the agent's session when AgentAPI restarts. Native transport only", "string"},
-		{FlagTransport, "", "pty", "How to drive the agent: pty (its terminal UI), acp (same as --experimental-acp) or native (its own structured protocol; claude, codex and pi)", "string"},
+		{FlagTransport, "", "native", "How to drive the agent: native (its own structured protocol; claude, codex and pi), pty (its terminal UI) or acp (same as --experimental-acp). Without it, claude, codex and pi use native, other agents and --state-file pty", "string"},
 		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal. Native transport only, where the agent has no terminal of its own", "bool"},
 		{FlagWebhookURL, "", "", "URL notified when the agent run status changes", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},
