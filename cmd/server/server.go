@@ -154,28 +154,38 @@ func resolveAPIToken(opts serverOptions, logger *slog.Logger) (string, error) {
 // serverConfig is the configuration of the server for opts and agent.
 func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, apiToken, cwd string) httpapi.ServerConfig {
 	config := httpapi.ServerConfig{
-		AgentType:              opts.agentType,
-		AgentIO:                agent.io,
-		Transport:              opts.transport,
-		Port:                   opts.port,
-		ChatBasePath:           opts.chatBasePath,
-		AllowedHosts:           opts.allowedHosts,
-		AllowedOrigins:         opts.allowedOrigins,
-		InitialPrompt:          opts.initialPrompt,
-		AgentPID:               agent.pid(),
-		CWD:                    cwd,
-		RestartAgent:           agent.restart(),
-		APIToken:               apiToken,
-		Bind:                   opts.bind,
-		NativeFactory:          agent.factory,
-		UpdateAgent:            agent.updateNative,
-		Terminal:               opts.terminal,
-		StateDB:                stateDB,
-		Webhook:                opts.webhook,
-		StatePersistenceConfig: opts.state,
+		AgentType:      opts.agentType,
+		Transport:      opts.transport,
+		Port:           opts.port,
+		ChatBasePath:   opts.chatBasePath,
+		AllowedHosts:   opts.allowedHosts,
+		AllowedOrigins: opts.allowedOrigins,
+		InitialPrompt:  opts.initialPrompt,
+		CWD:            cwd,
+		APIToken:       apiToken,
+		Bind:           opts.bind,
+		Webhook:        opts.webhook,
 	}
-	if opts.transport == httpapi.TransportPTY {
-		config.TerminalColumns = opts.termWidth
+	switch opts.transport {
+	case httpapi.TransportPTY:
+		config.PTY = httpapi.PTYConfig{
+			AgentIO:                agent.io,
+			TerminalColumns:        opts.termWidth,
+			StatePersistenceConfig: opts.state,
+			AgentPID:               agent.pid(),
+			RestartAgent:           agent.restart(),
+		}
+	case httpapi.TransportACP:
+		if agent.acp != nil {
+			config.ACP.AgentIO = agent.acp.AgentIO
+		}
+	case httpapi.TransportNative:
+		config.Native = httpapi.NativeConfig{
+			Factory:     agent.factory,
+			UpdateAgent: agent.updateNative,
+			Terminal:    opts.terminal,
+			StateDB:     stateDB,
+		}
 	}
 	if stateDB != nil {
 		// Messages refer to uploads by path, so they are kept with the

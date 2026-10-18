@@ -32,7 +32,6 @@ func TestOpenAPISchema(t *testing.T) {
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
-		AgentIO:        nil,
 		Port:           0,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -81,7 +80,6 @@ func TestServer_redirectToChat(t *testing.T) {
 			tCtx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 			s, err := httpapi.NewServer(tCtx, httpapi.ServerConfig{
 				AgentType:      msgfmt.AgentTypeClaude,
-				AgentIO:        nil,
 				Port:           0,
 				ChatBasePath:   tc.chatBasePath,
 				AllowedHosts:   []string{"*"},
@@ -112,7 +110,6 @@ func TestServer_MessageQueueAPI(t *testing.T) {
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
-		AgentIO:        nil,
 		Port:           0,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -306,7 +303,6 @@ func TestServer_AllowedHosts(t *testing.T) {
 			ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 			s, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 				AgentType:      msgfmt.AgentTypeClaude,
-				AgentIO:        nil,
 				Port:           0,
 				ChatBasePath:   "/chat",
 				AllowedHosts:   tc.allowedHosts,
@@ -389,7 +385,6 @@ func TestServer_CORSPreflightWithHosts(t *testing.T) {
 			ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 			s, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 				AgentType:      msgfmt.AgentTypeClaude,
-				AgentIO:        nil,
 				Port:           0,
 				ChatBasePath:   "/chat",
 				AllowedHosts:   tc.allowedHosts,
@@ -548,7 +543,6 @@ func TestServer_CORSOrigins(t *testing.T) {
 			ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 			s, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 				AgentType:      msgfmt.AgentTypeClaude,
-				AgentIO:        nil,
 				Port:           0,
 				ChatBasePath:   "/chat",
 				AllowedHosts:   []string{"*"}, // Set wildcard to isolate CORS testing
@@ -628,7 +622,6 @@ func TestServer_CORSPreflightOrigins(t *testing.T) {
 			ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 			s, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 				AgentType:      msgfmt.AgentTypeClaude,
-				AgentIO:        nil,
 				Port:           0,
 				ChatBasePath:   "/chat",
 				AllowedHosts:   []string{"*"}, // Set wildcard to isolate CORS testing
@@ -679,7 +672,6 @@ func TestServer_SSEMiddleware_Events(t *testing.T) {
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
-		AgentIO:        nil,
 		Port:           0,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -726,7 +718,6 @@ func TestServer_UploadFiles(t *testing.T) {
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
-		AgentIO:        nil,
 		Port:           0,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -881,7 +872,6 @@ func TestServer_UploadFiles_Errors(t *testing.T) {
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
-		AgentIO:        nil,
 		Port:           0,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -1027,7 +1017,6 @@ func TestServer_Stop_Idempotency(t *testing.T) {
 
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
-		AgentIO:        nil,
 		Port:           0,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},

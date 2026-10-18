@@ -87,38 +87,22 @@ type Server struct {
 const snapshotInterval = 25 * time.Millisecond
 
 type ServerConfig struct {
-	AgentType              mf.AgentType
-	AgentIO                st.AgentIO
-	Transport              Transport
-	Port                   int
-	ChatBasePath           string
-	AllowedHosts           []string
-	AllowedOrigins         []string
-	InitialPrompt          string
-	Clock                  quartz.Clock
-	StatePersistenceConfig st.StatePersistenceConfig
-	AgentPID               int    // PID of the agent process, 0 to disable JSONL watcher
-	CWD                    string // Working directory (used by Codex resolver)
-	// TerminalColumns is the width of the agent's emulated terminal, 0 when
-	// the transport has no terminal.
-	TerminalColumns uint16
-	// UpdateAgent, if set, updates the native agent's CLI before a restart
-	// starts a new one (Codex, Pi).
-	UpdateAgent func(context.Context)
-	// Terminal offers a shell in the agent's working directory (GET
-	// /terminal), with the native transport.
-	Terminal bool
-	// RestartAgent replaces the PTY agent process while keeping AgentAPI alive.
-	// It returns the new process PID so the JSONL watcher can be restarted.
-	// It is nil for transports or server modes that cannot restart.
-	RestartAgent func(context.Context) (int, error)
+	AgentType      mf.AgentType
+	Transport      Transport
+	Port           int
+	ChatBasePath   string
+	AllowedHosts   []string
+	AllowedOrigins []string
+	InitialPrompt  string
+	Clock          quartz.Clock
+	CWD            string // Working directory (used by Codex resolver)
 	// Webhook sends an event whenever the agent status changes.
 	Webhook WebhookConfig
-	// NativeFactory creates the agent adapter for the native transport.
-	NativeFactory native.Factory
-	// StateDB, if set, stores the conversation and restores it on start
-	// (native transport only).
-	StateDB *statedb.DB
+	// PTY, ACP and Native configure the transport of the same name; the
+	// others are ignored.
+	PTY    PTYConfig
+	ACP    ACPConfig
+	Native NativeConfig
 	// UploadDir is where uploads and tool result images are kept. Empty
 	// means a temporary directory that is removed on stop.
 	UploadDir string
@@ -130,6 +114,53 @@ type ServerConfig struct {
 	// Bind is the address the server listens on: an IP address or hostname
 	// without a port. Empty listens on all interfaces.
 	Bind string
+}
+
+// PTYConfig is what the PTY transport needs.
+type PTYConfig struct {
+	// AgentIO is the agent's terminal; nil runs no agent (--print-openapi).
+	AgentIO st.AgentIO
+	// TerminalColumns is the width of the agent's emulated terminal.
+	TerminalColumns        uint16
+	StatePersistenceConfig st.StatePersistenceConfig
+	// AgentPID is the agent's process, whose session log the JSONL watcher
+	// reads; 0 runs no watcher.
+	AgentPID int
+	// RestartAgent replaces the agent process while keeping AgentAPI
+	// alive. It returns the new process PID so the JSONL watcher can be
+	// restarted. It is nil when the agent can't be restarted.
+	RestartAgent func(context.Context) (int, error)
+}
+
+// ACPConfig is what the ACP transport needs.
+type ACPConfig struct {
+	AgentIO *acpio.ACPAgentIO
+}
+
+// NativeConfig is what the native transport needs.
+type NativeConfig struct {
+	// Factory creates the agent's adapter.
+	Factory native.Factory
+	// StateDB, if set, stores the conversation and restores it on start.
+	StateDB *statedb.DB
+	// Terminal offers a shell in the agent's working directory (GET
+	// /terminal).
+	Terminal bool
+	// UpdateAgent, if set, updates the agent's CLI before a restart starts
+	// a new one (Codex, Pi).
+	UpdateAgent func(context.Context)
+}
+
+// agentIO is the conversation's view of a PTY or ACP agent, nil for a
+// native one or when no agent runs.
+func (c ServerConfig) agentIO() st.AgentIO {
+	switch {
+	case c.Transport == TransportACP && c.ACP.AgentIO != nil:
+		return c.ACP.AgentIO
+	case c.Transport != TransportACP && c.Transport != TransportNative:
+		return c.PTY.AgentIO
+	}
+	return nil
 }
 
 // NewServer creates a new server instance
@@ -218,20 +249,21 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		WithAgentType(config.AgentType),
 		WithTransport(config.Transport),
 		WithSessionID(hex.EncodeToString(sessionBytes[:])),
-		WithTerminalColumns(config.TerminalColumns),
+		WithTerminalColumns(config.PTY.TerminalColumns),
 		WithClock(config.Clock),
 		WithStatusChangeHandler(webhook.statusChanged),
 	}
-	if config.StateDB != nil {
-		emitterOptions = append(emitterOptions, WithPersister(config.StateDB))
+	stateDB := config.Native.StateDB
+	if stateDB != nil {
+		emitterOptions = append(emitterOptions, WithPersister(stateDB))
 	}
 	var terminal *shellterm.Terminal
-	if config.Terminal && config.Transport == TransportNative {
+	if config.Native.Terminal && config.Transport == TransportNative {
 		terminal = shellterm.New(shellterm.Config{Dir: config.CWD, Env: terminalEnv(), Logger: logger.With("component", "terminal")})
 		emitterOptions = append(emitterOptions, WithTerminal())
 	}
 	emitter := NewEventEmitter(emitterOptions...)
-	restored, err := restoreState(config, emitter, logger)
+	restored, err := restoreState(config, stateDB, emitter, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -246,15 +278,15 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	var nativeConversation *native.Conversation
 	var observer *nativeObserver
 	if config.Transport == TransportNative {
-		if config.NativeFactory == nil {
+		if config.Native.Factory == nil {
 			return nil, fmt.Errorf("native transport requires an adapter factory")
 		}
 		observer = &nativeObserver{emitter: emitter}
-		if config.StateDB != nil {
-			observer.persister = config.StateDB
+		if stateDB != nil {
+			observer.persister = stateDB
 		}
 		nativeConversation = native.NewConversation(native.Config{
-			Factory:         config.NativeFactory,
+			Factory:         config.Native.Factory,
 			ResumeRef:       restored.resumeRef,
 			Settings:        restored.settings,
 			InitialMessages: restored.messages,
@@ -266,16 +298,14 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		})
 		conversation = nativeConversation
 	} else if config.Transport == TransportACP {
-		// For ACP, cast AgentIO to *acpio.ACPAgentIO
-		acpIO, ok := config.AgentIO.(*acpio.ACPAgentIO)
-		if !ok {
+		if config.ACP.AgentIO == nil {
 			return nil, fmt.Errorf("ACP transport requires ACPAgentIO")
 		}
-		conversation = acpio.NewACPConversation(ctx, acpIO, logger, initialPrompt, emitter, config.Clock)
+		conversation = acpio.NewACPConversation(ctx, config.ACP.AgentIO, logger, initialPrompt, emitter, config.Clock)
 	} else {
 		conversation = st.NewPTY(ctx, st.PTYConversationConfig{
 			AgentType:              config.AgentType,
-			AgentIO:                config.AgentIO,
+			AgentIO:                config.PTY.AgentIO,
 			Clock:                  config.Clock,
 			SnapshotInterval:       snapshotInterval,
 			ScreenStabilityLength:  2 * time.Second,
@@ -285,7 +315,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			FormatToolCall:         formatToolCall,
 			InitialPrompt:          initialPrompt,
 			Logger:                 logger,
-			StatePersistenceConfig: config.StatePersistenceConfig,
+			StatePersistenceConfig: config.PTY.StatePersistenceConfig,
 		}, emitter)
 	}
 
@@ -316,7 +346,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		conversation:   conversation,
 		native:         nativeConversation,
 		logger:         logger,
-		agentio:        config.AgentIO,
+		agentio:        config.agentIO(),
 		agentType:      config.AgentType,
 		emitter:        emitter,
 		chatBasePath:   strings.TrimSuffix(config.ChatBasePath, "/"),
@@ -327,14 +357,14 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		shutdown:       shutdownCancel,
 		transport:      config.Transport,
 		webhook:        webhook,
-		restartAgent:   config.RestartAgent,
-		updateAgent:    config.UpdateAgent,
+		restartAgent:   config.PTY.RestartAgent,
+		updateAgent:    config.Native.UpdateAgent,
 		terminal:       terminal,
 		jsonlParentCtx: ctx,
-		stateDB:        config.StateDB,
+		stateDB:        stateDB,
 		keepUploads:    config.UploadDir != "",
 	}
-	if config.StateDB != nil {
+	if stateDB != nil {
 		s.restoreQueue(restored.snapshot)
 	}
 	if mcpconfig.SupportedAgent(config.AgentType) {
@@ -361,7 +391,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	// termexec.StartProcess() blocks until the PTY is created and the process
 	// is active. Agent readiness (waiting for the prompt) is handled
 	// asynchronously inside conversation.Start() via ReadyForInitialPrompt.
-	if config.AgentIO != nil || s.native != nil {
+	if s.agentio != nil || s.native != nil {
 		s.conversation.Start(ctx)
 		s.startMessageQueue()
 	}
@@ -369,7 +399,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	// Start the JSONL watcher to capture rich structured messages.
 	// This runs alongside the PTY conversation as a sidecar, providing
 	// structured content blocks, tool calls, thinking, and usage data.
-	s.startJSONLWatcher(config.AgentPID)
+	s.startJSONLWatcher(config.PTY.AgentPID)
 
 	return s, nil
 }

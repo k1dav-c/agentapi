@@ -56,12 +56,11 @@ func persistentServerWith(t *testing.T, path, cwd string, configure func(*native
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
 		Transport:      httpapi.TransportNative,
-		NativeFactory:  factory.New,
+		Native:         httpapi.NativeConfig{Factory: factory.New, StateDB: db},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
 		CWD:            cwd,
-		StateDB:        db,
 		UploadDir:      path + ".uploads",
 	})
 	if err != nil {
@@ -305,18 +304,20 @@ func TestStateDB_StopStoresTheQueueLast(t *testing.T) {
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType: msgfmt.AgentTypeClaude,
 		Transport: httpapi.TransportNative,
-		NativeFactory: func(ref string) (native.Adapter, error) {
-			a, err := factory.New(ref)
-			if err != nil {
-				return nil, err
-			}
-			return &slowCloseAdapter{Adapter: a.(*nativetest.Adapter), closing: closing, release: release}, nil
+		Native: httpapi.NativeConfig{
+			Factory: func(ref string) (native.Adapter, error) {
+				a, err := factory.New(ref)
+				if err != nil {
+					return nil, err
+				}
+				return &slowCloseAdapter{Adapter: a.(*nativetest.Adapter), closing: closing, release: release}, nil
+			},
+			StateDB: db,
 		},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
 		CWD:            "/work",
-		StateDB:        db,
 		UploadDir:      path + ".uploads",
 		Port:           port,
 		Bind:           "127.0.0.1",

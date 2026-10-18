@@ -51,7 +51,7 @@ func startNativeServer(t *testing.T, configure func(*nativetest.Adapter)) *nativ
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
 		Transport:      httpapi.TransportNative,
-		NativeFactory:  factory.New,
+		Native:         httpapi.NativeConfig{Factory: factory.New},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
@@ -563,17 +563,19 @@ func TestNative_RestartUpdatesTheAgentFirst(t *testing.T) {
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeCodex,
 		Transport:      httpapi.TransportNative,
-		NativeFactory:  factory.New,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
-		UpdateAgent: func(context.Context) {
-			mu.Lock()
-			defer mu.Unlock()
-			// The old agent stopped before the update.
-			if a := factory.Adapters(); len(a) == 1 && a[0].Closed() {
-				steps = append(steps, "update")
-			}
+		Native: httpapi.NativeConfig{
+			Factory: factory.New,
+			UpdateAgent: func(context.Context) {
+				mu.Lock()
+				defer mu.Unlock()
+				// The old agent stopped before the update.
+				if a := factory.Adapters(); len(a) == 1 && a[0].Closed() {
+					steps = append(steps, "update")
+				}
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -599,18 +601,20 @@ func TestNative_RestartOutlivesTheRequest(t *testing.T) {
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeCodex,
 		Transport:      httpapi.TransportNative,
-		NativeFactory:  factory.New,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
-		UpdateAgent: func(updateCtx context.Context) {
-			close(updating)
-			select {
-			case <-updateCtx.Done():
-				cut <- true
-			case <-release:
-				cut <- false
-			}
+		Native: httpapi.NativeConfig{
+			Factory: factory.New,
+			UpdateAgent: func(updateCtx context.Context) {
+				close(updating)
+				select {
+				case <-updateCtx.Done():
+					cut <- true
+				case <-release:
+					cut <- false
+				}
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -727,7 +731,7 @@ func TestStopBeforeStart(t *testing.T) {
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeCodex,
 		Transport:      httpapi.TransportNative,
-		NativeFactory:  (&nativetest.Factory{}).New,
+		Native:         httpapi.NativeConfig{Factory: (&nativetest.Factory{}).New},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},

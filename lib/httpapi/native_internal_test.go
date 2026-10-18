@@ -27,7 +27,7 @@ func newQuietNativeServer(t *testing.T, configure func(*nativetest.Adapter)) (*S
 	srv, err := NewServer(ctx, ServerConfig{
 		AgentType:      mf.AgentTypeClaude,
 		Transport:      TransportNative,
-		NativeFactory:  factory.New,
+		Native:         NativeConfig{Factory: factory.New},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},

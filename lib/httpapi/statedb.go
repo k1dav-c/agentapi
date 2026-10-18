@@ -25,8 +25,7 @@ type restoredState struct {
 // changes there: it restores the stored conversation, or records the
 // identity of a new one, and reports writes that fail as agent errors. It
 // does nothing without a state database.
-func restoreState(config ServerConfig, emitter *EventEmitter, logger *slog.Logger) (restoredState, error) {
-	db := config.StateDB
+func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, logger *slog.Logger) (restoredState, error) {
 	if db == nil {
 		return restoredState{}, nil
 	}

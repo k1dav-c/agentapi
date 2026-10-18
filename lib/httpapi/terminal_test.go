@@ -34,12 +34,11 @@ func terminalServer(t *testing.T, terminal bool) *nativeServer {
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
 		Transport:      httpapi.TransportNative,
-		NativeFactory:  factory.New,
+		Native:         httpapi.NativeConfig{Factory: factory.New, Terminal: terminal},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
 		CWD:            t.TempDir(),
-		Terminal:       terminal,
 	})
 	require.NoError(t, err)
 	ts := httptest.NewServer(srv.Handler())
