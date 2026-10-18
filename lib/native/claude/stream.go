@@ -11,6 +11,7 @@ import (
 	"github.com/coder/quartz"
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // frame is one line of Claude Code's stream-json output. Only the fields
@@ -92,11 +93,11 @@ func decode(data []byte, v any) error {
 
 // apiMessage is the message of an assistant frame or message_start event.
 type apiMessage struct {
-	ID         string              `json:"id"`
-	Model      string              `json:"model"`
-	Content    json.RawMessage     `json:"content"`
-	StopReason *string             `json:"stop_reason"`
-	Usage      *jsonlwatcher.Usage `json:"usage"`
+	ID         string            `json:"id"`
+	Model      string            `json:"model"`
+	Content    json.RawMessage   `json:"content"`
+	StopReason *string           `json:"stop_reason"`
+	Usage      *transcript.Usage `json:"usage"`
 }
 
 // streamEvent is the Anthropic SSE event of a stream_event frame.
@@ -111,13 +112,13 @@ type streamEvent struct {
 		Thinking   string  `json:"thinking"`
 		StopReason *string `json:"stop_reason"`
 	} `json:"delta"`
-	Usage *jsonlwatcher.Usage `json:"usage"`
+	Usage *transcript.Usage `json:"usage"`
 }
 
 // liveBlock is one content block of an assistant message: the final block
 // once its assistant frame arrived, else what the deltas built so far.
 type liveBlock struct {
-	final    *jsonlwatcher.RichContentBlock
+	final    *transcript.RichContentBlock
 	kind     string
 	text     strings.Builder
 	thinking strings.Builder
@@ -125,23 +126,23 @@ type liveBlock struct {
 	toolName string
 }
 
-func (b *liveBlock) rich() jsonlwatcher.RichContentBlock {
+func (b *liveBlock) rich() transcript.RichContentBlock {
 	if b.final != nil {
 		return *b.final
 	}
 	switch b.kind {
 	case "thinking":
-		return jsonlwatcher.RichContentBlock{Type: "thinking", Thinking: b.thinking.String()}
+		return transcript.RichContentBlock{Type: "thinking", Thinking: b.thinking.String()}
 	case "tool_use":
-		return jsonlwatcher.RichContentBlock{Type: "tool_use", ToolUseID: b.toolID, ToolName: b.toolName}
+		return transcript.RichContentBlock{Type: "tool_use", ToolUseID: b.toolID, ToolName: b.toolName}
 	default:
-		return jsonlwatcher.RichContentBlock{Type: b.kind, Text: b.text.String()}
+		return transcript.RichContentBlock{Type: b.kind, Text: b.text.String()}
 	}
 }
 
 // assistantMessage is a main-thread assistant message being assembled.
 type assistantMessage struct {
-	msg      jsonlwatcher.RichMessage
+	msg      transcript.RichMessage
 	blocks   []*liveBlock
 	streamed bool
 	sent     bool
@@ -151,7 +152,7 @@ type assistantMessage struct {
 
 // resultRef locates the tool_result of a tool call.
 type resultRef struct {
-	msg   *jsonlwatcher.RichMessage
+	msg   *transcript.RichMessage
 	index int
 }
 
@@ -203,7 +204,7 @@ func newStreamParser(clock quartz.Clock, throttle time.Duration) *streamParser {
 func (p *streamParser) message(id, model string) *assistantMessage {
 	m, ok := p.messages[id]
 	if !ok {
-		m = &assistantMessage{msg: jsonlwatcher.RichMessage{
+		m = &assistantMessage{msg: transcript.RichMessage{
 			MessageID: id, Role: "assistant", Model: model, Timestamp: p.clock.Now(),
 		}}
 		p.messages[id] = m
@@ -217,12 +218,12 @@ func (p *streamParser) message(id, model string) *assistantMessage {
 
 // snapshot returns the message's current state. It shares the parser's
 // values: the Sink copies what it keeps.
-func (p *streamParser) snapshot(m *assistantMessage) jsonlwatcher.RichMessage {
+func (p *streamParser) snapshot(m *assistantMessage) transcript.RichMessage {
 	m.sent = true
 	m.dirty = false
 	m.lastSent = p.clock.Now()
 	out := m.msg
-	out.Content = make([]jsonlwatcher.RichContentBlock, 0, len(m.blocks))
+	out.Content = make([]transcript.RichContentBlock, 0, len(m.blocks))
 	for _, b := range m.blocks {
 		out.Content = append(out.Content, b.rich())
 	}
@@ -251,8 +252,8 @@ func (p *streamParser) nextFlush() time.Time {
 
 // flush returns snapshots of the messages whose held-back changes may be
 // sent now, so a pause in the stream doesn't leave them unsent.
-func (p *streamParser) flush() []jsonlwatcher.RichMessage {
-	var out []jsonlwatcher.RichMessage
+func (p *streamParser) flush() []transcript.RichMessage {
+	var out []transcript.RichMessage
 	for _, id := range p.order {
 		m := p.messages[id]
 		if m.dirty && len(m.blocks) > 0 && p.due(m) {
@@ -264,8 +265,8 @@ func (p *streamParser) flush() []jsonlwatcher.RichMessage {
 
 // flushAll returns snapshots of every message with changes the throttle
 // held back, due or not: the CLI's output ended.
-func (p *streamParser) flushAll() []jsonlwatcher.RichMessage {
-	var out []jsonlwatcher.RichMessage
+func (p *streamParser) flushAll() []transcript.RichMessage {
+	var out []transcript.RichMessage
 	for _, id := range p.order {
 		m := p.messages[id]
 		if m.dirty && len(m.blocks) > 0 {
@@ -276,7 +277,7 @@ func (p *streamParser) flushAll() []jsonlwatcher.RichMessage {
 }
 
 // streamEvent applies a partial-message event of the main thread.
-func (p *streamParser) streamEvent(f *frame) []jsonlwatcher.RichMessage {
+func (p *streamParser) streamEvent(f *frame) []transcript.RichMessage {
 	if f.subagent() {
 		return nil
 	}
@@ -347,18 +348,18 @@ func (p *streamParser) streamEvent(f *frame) []jsonlwatcher.RichMessage {
 		if !m.sent {
 			return nil
 		}
-		return []jsonlwatcher.RichMessage{p.snapshot(m)}
+		return []transcript.RichMessage{p.snapshot(m)}
 	default:
 		return nil
 	}
 	if len(m.blocks) == 0 || !m.dirty || !p.due(m) {
 		return nil
 	}
-	return []jsonlwatcher.RichMessage{p.snapshot(m)}
+	return []transcript.RichMessage{p.snapshot(m)}
 }
 
 // assistant applies a complete content block of the main thread.
-func (p *streamParser) assistant(f *frame) ([]jsonlwatcher.RichMessage, []jsonlwatcher.SessionEvent) {
+func (p *streamParser) assistant(f *frame) ([]transcript.RichMessage, []transcript.SessionEvent) {
 	if f.subagent() {
 		return nil, nil
 	}
@@ -392,12 +393,12 @@ func (p *streamParser) assistant(f *frame) ([]jsonlwatcher.RichMessage, []jsonlw
 			m.blocks = append(m.blocks, &liveBlock{final: &block})
 		}
 	}
-	return []jsonlwatcher.RichMessage{p.snapshot(m)}, p.sessionEvents(f)
+	return []transcript.RichMessage{p.snapshot(m)}, p.sessionEvents(f)
 }
 
 // user applies a user frame of the main thread: tool results, a replayed
 // prompt or an interrupt marker.
-func (p *streamParser) user(f *frame) ([]jsonlwatcher.RichMessage, []jsonlwatcher.SessionEvent) {
+func (p *streamParser) user(f *frame) ([]transcript.RichMessage, []transcript.SessionEvent) {
 	if f.subagent() {
 		return nil, nil
 	}
@@ -412,10 +413,10 @@ func (p *streamParser) user(f *frame) ([]jsonlwatcher.RichMessage, []jsonlwatche
 		p.userSeq++
 		id = fmt.Sprintf("user-%s-%d", p.userPrefix, p.userSeq)
 	}
-	rich := &jsonlwatcher.RichMessage{MessageID: id, Role: "user", Timestamp: p.clock.Now()}
+	rich := &transcript.RichMessage{MessageID: id, Role: "user", Timestamp: p.clock.Now()}
 	var text string
 	if json.Unmarshal(msg.Content, &text) == nil {
-		rich.Content = []jsonlwatcher.RichContentBlock{{Type: "text", Text: text}}
+		rich.Content = []transcript.RichContentBlock{{Type: "text", Text: text}}
 	} else {
 		var parts []json.RawMessage
 		if json.Unmarshal(msg.Content, &parts) != nil {
@@ -435,18 +436,18 @@ func (p *streamParser) user(f *frame) ([]jsonlwatcher.RichMessage, []jsonlwatche
 	if len(rich.Content) == 0 {
 		return nil, nil
 	}
-	return []jsonlwatcher.RichMessage{*rich}, p.sessionEvents(f)
+	return []transcript.RichMessage{*rich}, p.sessionEvents(f)
 }
 
 // userBlock converts one content block of a user frame.
-func (p *streamParser) userBlock(raw json.RawMessage) (jsonlwatcher.RichContentBlock, bool) {
+func (p *streamParser) userBlock(raw json.RawMessage) (transcript.RichContentBlock, bool) {
 	var head struct {
 		Type   string                    `json:"type"`
 		Text   string                    `json:"text"`
 		Source *jsonlwatcher.ImageSource `json:"source"`
 	}
 	if json.Unmarshal(raw, &head) != nil {
-		return jsonlwatcher.RichContentBlock{}, false
+		return transcript.RichContentBlock{}, false
 	}
 	switch head.Type {
 	case "tool_result":
@@ -462,21 +463,21 @@ func (p *streamParser) userBlock(raw json.RawMessage) (jsonlwatcher.RichContentB
 		}
 		return block, true
 	case "text":
-		return jsonlwatcher.RichContentBlock{Type: "text", Text: head.Text}, true
+		return transcript.RichContentBlock{Type: "text", Text: head.Text}, true
 	case "image":
-		block := jsonlwatcher.RichContentBlock{Type: "image"}
+		block := transcript.RichContentBlock{Type: "image"}
 		if image, ok := jsonlwatcher.ClaudeImage(head.Source); ok {
-			block.Images = []jsonlwatcher.RichImage{image}
+			block.Images = []transcript.RichImage{image}
 		}
 		return block, true
 	default:
-		return jsonlwatcher.RichContentBlock{Type: head.Type, Text: head.Text}, true
+		return transcript.RichContentBlock{Type: head.Type, Text: head.Text}, true
 	}
 }
 
 // sessionEvents converts a main-thread assistant or user frame to timeline
 // events with the session-log event parser.
-func (p *streamParser) sessionEvents(f *frame) []jsonlwatcher.SessionEvent {
+func (p *streamParser) sessionEvents(f *frame) []transcript.SessionEvent {
 	var msg jsonlwatcher.JSONLMessage
 	if err := json.Unmarshal(f.Message, &msg); err != nil {
 		return nil
@@ -492,7 +493,7 @@ func (p *streamParser) sessionEvents(f *frame) []jsonlwatcher.SessionEvent {
 
 // taskStarted notes a backgrounded task. Its tool result, which arrives
 // right away, stays running until the task finishes.
-func (p *streamParser) taskStarted(f *frame) []jsonlwatcher.RichMessage {
+func (p *streamParser) taskStarted(f *frame) []transcript.RichMessage {
 	if !f.IsBackgrounded || f.ToolUseID == "" {
 		return nil
 	}
@@ -501,7 +502,7 @@ func (p *streamParser) taskStarted(f *frame) []jsonlwatcher.RichMessage {
 }
 
 // taskNotification ends a backgrounded task.
-func (p *streamParser) taskNotification(f *frame) []jsonlwatcher.RichMessage {
+func (p *streamParser) taskNotification(f *frame) []transcript.RichMessage {
 	if !p.background[f.ToolUseID] {
 		return nil
 	}
@@ -515,18 +516,18 @@ func (p *streamParser) taskNotification(f *frame) []jsonlwatcher.RichMessage {
 	return msgs
 }
 
-func (p *streamParser) setResultStatus(toolUseID, status string) []jsonlwatcher.RichMessage {
+func (p *streamParser) setResultStatus(toolUseID, status string) []transcript.RichMessage {
 	ref, ok := p.results[toolUseID]
 	if !ok || ref.msg.Content[ref.index].Status == status {
 		return nil
 	}
 	ref.msg.Content[ref.index].Status = status
-	return []jsonlwatcher.RichMessage{*ref.msg}
+	return []transcript.RichMessage{*ref.msg}
 }
 
 // patchToolInput fills in the input of a tool call whose block came without
 // one (ExitPlanMode's plan is added when the CLI asks for permission).
-func (p *streamParser) patchToolInput(toolUseID string, input json.RawMessage) []jsonlwatcher.RichMessage {
+func (p *streamParser) patchToolInput(toolUseID string, input json.RawMessage) []transcript.RichMessage {
 	if toolUseID == "" || len(input) == 0 {
 		return nil
 	}
@@ -541,15 +542,15 @@ func (p *streamParser) patchToolInput(toolUseID string, input json.RawMessage) [
 				return nil
 			}
 			b.final.ToolInput = input
-			return []jsonlwatcher.RichMessage{p.snapshot(m)}
+			return []transcript.RichMessage{p.snapshot(m)}
 		}
 	}
 	return nil
 }
 
 // endTurn sends the final state of the turn's messages and forgets them.
-func (p *streamParser) endTurn() []jsonlwatcher.RichMessage {
-	var out []jsonlwatcher.RichMessage
+func (p *streamParser) endTurn() []transcript.RichMessage {
+	var out []transcript.RichMessage
 	for _, id := range p.order {
 		m := p.messages[id]
 		if len(m.blocks) > 0 && (m.dirty || !m.sent) {

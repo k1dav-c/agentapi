@@ -37,8 +37,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // Program is the agent command line that selects the demo adapter.
@@ -268,7 +268,7 @@ func (a *Adapter) Compact(context.Context) error {
 	a.mu.Unlock()
 	native.ReportUsage(sink, demoUsage(0, a.now()))
 	text := "context compacted"
-	sink.SessionEvents([]jsonlwatcher.SessionEvent{{Kind: "system", Content: &text, EventTime: a.now()}})
+	sink.SessionEvents([]transcript.SessionEvent{{Kind: "system", Content: &text, EventTime: a.now()}})
 	return nil
 }
 
@@ -466,16 +466,16 @@ type message struct {
 	id     string
 	role   string
 	at     time.Time
-	blocks []jsonlwatcher.RichContentBlock
+	blocks []transcript.RichContentBlock
 	stop   string
-	usage  *jsonlwatcher.Usage
+	usage  *transcript.Usage
 }
 
 func (s *script) send(m *message) {
-	s.sink.RichMessage(jsonlwatcher.RichMessage{
+	s.sink.RichMessage(transcript.RichMessage{
 		MessageID:  m.id,
 		Role:       m.role,
-		Content:    append([]jsonlwatcher.RichContentBlock(nil), m.blocks...),
+		Content:    append([]transcript.RichContentBlock(nil), m.blocks...),
 		Model:      s.a.Settings().Model,
 		StopReason: m.stop,
 		Usage:      m.usage,
@@ -497,7 +497,7 @@ func (s *script) pause(steps int) error {
 }
 
 func (s *script) streamThinking(m *message, thinking string) error {
-	m.blocks = append(m.blocks, jsonlwatcher.RichContentBlock{Type: "thinking"})
+	m.blocks = append(m.blocks, transcript.RichContentBlock{Type: "thinking"})
 	idx := len(m.blocks) - 1
 	for _, chunk := range chunks(thinking, 4) {
 		m.blocks[idx].Thinking += chunk
@@ -518,7 +518,7 @@ func (s *script) tool(m *message, name string, input any, ask decide) error {
 	s.tools++
 	id := "toolu_" + s.id(fmt.Sprint("tool-", s.tools))
 	raw, _ := json.Marshal(input)
-	m.blocks = append(m.blocks, jsonlwatcher.RichContentBlock{
+	m.blocks = append(m.blocks, transcript.RichContentBlock{
 		Type: "tool_use", ToolUseID: id, ToolName: name, ToolInput: raw, Status: "running",
 	})
 	idx := len(m.blocks) - 1
@@ -541,7 +541,7 @@ func (s *script) tool(m *message, name string, input any, ask decide) error {
 	isErr := failed
 	s.send(&message{
 		id: s.id(fmt.Sprint("result-", s.tools)), role: "user", at: s.a.now(),
-		blocks: []jsonlwatcher.RichContentBlock{{
+		blocks: []transcript.RichContentBlock{{
 			Type: "tool_result", ToolUseID: id, ToolName: name, Text: result, IsError: &isErr, Status: m.blocks[idx].Status,
 		}},
 	})
@@ -716,7 +716,7 @@ func (s *script) askToRun(command, detail string) decide {
 
 func (s *script) reply(long bool) error {
 	m := &message{id: s.id("reply"), role: "assistant", at: s.a.now()}
-	m.blocks = []jsonlwatcher.RichContentBlock{{Type: "text"}}
+	m.blocks = []transcript.RichContentBlock{{Type: "text"}}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Here is what I did for **%s**:\n\n- Listed the workspace\n", excerpt(s.text, 60))
 	for _, o := range s.outcomes {
@@ -736,7 +736,7 @@ func (s *script) reply(long bool) error {
 	}
 	finish := func(stop string) {
 		m.stop = stop
-		m.usage = &jsonlwatcher.Usage{InputTokens: 1200 + 40*len(s.text), OutputTokens: 4 * len(m.blocks[0].Text) / 3}
+		m.usage = &transcript.Usage{InputTokens: 1200 + 40*len(s.text), OutputTokens: 4 * len(m.blocks[0].Text) / 3}
 		s.send(m)
 	}
 	if err := stream(sb.String()); err != nil {

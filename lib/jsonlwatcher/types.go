@@ -1,10 +1,9 @@
 package jsonlwatcher
 
 import (
-	"bytes"
 	"encoding/json"
-	"slices"
-	"time"
+
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // --- JSONL line parsing types (input from Claude Code session files) ---
@@ -76,14 +75,6 @@ type ToolResultBlock struct {
 	Content   json.RawMessage `json:"content,omitempty"` // string or []ToolResultContent
 }
 
-// Usage captures token usage information.
-type Usage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-}
-
 // --- Interfaces ---
 
 // LineParser parses agent-specific JSONL lines into RichMessages.
@@ -105,64 +96,19 @@ type SessionResolver interface {
 	Resolve() (string, error)
 }
 
-// --- Rich message output types (exposed via API) ---
+// --- Rich message output types ---
 
-// RichContentBlock is a single content block in a rich message.
-type RichContentBlock struct {
-	Type      string          `json:"type" doc:"Content block type: text, thinking, tool_use, or tool_result"`
-	Text      string          `json:"text,omitempty" doc:"Text content (for text and tool_result blocks)"`
-	Thinking  string          `json:"thinking,omitempty" doc:"Thinking/reasoning content"`
-	ToolUseID string          `json:"tool_use_id,omitempty" doc:"Tool use identifier"`
-	ToolName  string          `json:"tool_name,omitempty" doc:"Name of the tool being called"`
-	ToolInput json.RawMessage `json:"tool_input,omitempty" doc:"Tool call input parameters"`
-	Status    string          `json:"status,omitempty" doc:"Tool lifecycle status: running, completed, or failed"`
-	IsError   *bool           `json:"is_error,omitempty" doc:"Whether the tool result is an error"`
-	Images    []RichImage     `json:"images,omitempty" doc:"Images in a tool result (for example an image file the agent read)"`
-}
-
-// RichImage is an image in a tool result. The parser fills Data; the
-// server stores it and replaces it with URL, so clients never get the
-// image inline.
-type RichImage struct {
-	MediaType string `json:"media_type" doc:"MIME type of the image"`
-	URL       string `json:"url,omitempty" doc:"Server path that serves the image, relative to the API root (e.g. /uploads/<checksum>/image.png)"`
-	Data      []byte `json:"-"`
-}
-
-// RichMessage is a fully assembled message with all its content blocks.
-type RichMessage struct {
-	MessageID  string             `json:"message_id" doc:"Agent's internal message ID"`
-	Role       string             `json:"role" doc:"Role of the message author (user or assistant)"`
-	Content    []RichContentBlock `json:"content" doc:"Structured content blocks"`
-	Model      string             `json:"model,omitempty" doc:"Model that generated this message"`
-	StopReason string             `json:"stop_reason,omitempty" doc:"Why the model stopped generating"`
-	Usage      *Usage             `json:"usage,omitempty" doc:"Token usage information"`
-	Timestamp  time.Time          `json:"timestamp" doc:"Timestamp of the message"`
-}
-
-// Clone returns a copy of m that shares nothing with it but the image
-// data, which nothing changes once it is in a message.
-func (m RichMessage) Clone() RichMessage {
-	if m.Content != nil {
-		content := make([]RichContentBlock, len(m.Content))
-		for i, block := range m.Content {
-			content[i] = block.clone()
-		}
-		m.Content = content
-	}
-	if m.Usage != nil {
-		usage := *m.Usage
-		m.Usage = &usage
-	}
-	return m
-}
-
-func (b RichContentBlock) clone() RichContentBlock {
-	b.ToolInput = bytes.Clone(b.ToolInput)
-	b.Images = slices.Clone(b.Images)
-	if b.IsError != nil {
-		isError := *b.IsError
-		b.IsError = &isError
-	}
-	return b
-}
+// The types of the structured transcript are in lib/transcript, which the
+// transports share; this package's parsers use them by these names.
+type (
+	// Deprecated: use transcript.RichMessage.
+	RichMessage = transcript.RichMessage
+	// Deprecated: use transcript.RichContentBlock.
+	RichContentBlock = transcript.RichContentBlock
+	// Deprecated: use transcript.RichImage.
+	RichImage = transcript.RichImage
+	// Deprecated: use transcript.Usage.
+	Usage = transcript.Usage
+	// Deprecated: use transcript.SessionEvent.
+	SessionEvent = transcript.SessionEvent
+)

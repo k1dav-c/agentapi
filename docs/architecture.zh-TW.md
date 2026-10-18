@@ -81,6 +81,7 @@ flowchart TB
 | `lib/screentracker/` | `Conversation` 與 `Emitter` 介面，以及 PTY 對話：畫面快照、訊息切分、穩定狀態偵測 |
 | `lib/termexec/` | 在虛擬終端機中執行 agent，搭配記憶體內的 VT100 模擬器（`xpty`、`vt10x`）；重新啟動時可以替換行程 |
 | `lib/msgfmt/` | 各 agent 專屬的畫面輸出整理：回顯的輸入、輸入框、狀態列、工具呼叫，以及判斷何時可以送出第一個提示 |
+| `lib/transcript/` | 各傳輸共用的結構化對話型別：結構化訊息與其內容區塊、時間軸事件 |
 | `lib/jsonlwatcher/` | 找到並追蹤 Claude Code、Codex 和 Pi 的工作階段紀錄檔，解析成結構化訊息與時間軸事件 |
 | `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入 |
 | `lib/native/claude`、`codex`、`pi` | 每種 agent 協定各一個 adapter |

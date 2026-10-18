@@ -19,10 +19,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // fakeProcess plays Claude Code: the test writes its stdout and reads what
@@ -590,7 +590,7 @@ func requireJSONEqual(t *testing.T, want, got any) {
 }
 
 // findBlock returns the final block of a tool call.
-func findBlock(msgs []jsonlwatcher.RichMessage, blockType, toolUseID string) (jsonlwatcher.RichMessage, jsonlwatcher.RichContentBlock, bool) {
+func findBlock(msgs []transcript.RichMessage, blockType, toolUseID string) (transcript.RichMessage, transcript.RichContentBlock, bool) {
 	for _, m := range msgs {
 		for _, b := range m.Content {
 			if b.Type == blockType && b.ToolUseID == toolUseID {
@@ -598,5 +598,5 @@ func findBlock(msgs []jsonlwatcher.RichMessage, blockType, toolUseID string) (js
 			}
 		}
 	}
-	return jsonlwatcher.RichMessage{}, jsonlwatcher.RichContentBlock{}, false
+	return transcript.RichMessage{}, transcript.RichContentBlock{}, false
 }

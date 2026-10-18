@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // EmitMessages publishes the conversation's messages, which are ordered by
@@ -80,7 +80,7 @@ func (e *EventEmitter) resyncLocked() {
 // It stores the message for late subscriber replay. Messages are upserted
 // by (MessageID, Role) because parsers re-emit a message as its content
 // accumulates (e.g. Codex turn updates).
-func (e *EventEmitter) EmitRichMessage(msg jsonlwatcher.RichMessage) {
+func (e *EventEmitter) EmitRichMessage(msg transcript.RichMessage) {
 	e.emitRichMessage(msg, false)
 }
 
@@ -88,11 +88,11 @@ func (e *EventEmitter) EmitRichMessage(msg jsonlwatcher.RichMessage) {
 // message, replacing an earlier state with the same (MessageID, Role)
 // instead of merging blocks into it. Native adapters send snapshots: their
 // text blocks grow, and merging would keep every intermediate version.
-func (e *EventEmitter) EmitRichMessageSnapshot(msg jsonlwatcher.RichMessage) {
+func (e *EventEmitter) EmitRichMessageSnapshot(msg transcript.RichMessage) {
 	e.emitRichMessage(msg, true)
 }
 
-func (e *EventEmitter) emitRichMessage(msg jsonlwatcher.RichMessage, replace bool) {
+func (e *EventEmitter) emitRichMessage(msg transcript.RichMessage, replace bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -130,7 +130,7 @@ func (e *EventEmitter) emitRichMessage(msg jsonlwatcher.RichMessage, replace boo
 	e.notifyChannels(EventTypeRichMessageUpdate, RichMessageUpdateBody{RichMessage: msg, Seq: e.seq})
 }
 
-func mergeRichContent(existing, incoming []jsonlwatcher.RichContentBlock) []jsonlwatcher.RichContentBlock {
+func mergeRichContent(existing, incoming []transcript.RichContentBlock) []transcript.RichContentBlock {
 	merged := slices.Clone(existing)
 	seen := make(map[string]struct{}, len(existing))
 	for _, block := range existing {
@@ -147,7 +147,7 @@ func mergeRichContent(existing, incoming []jsonlwatcher.RichContentBlock) []json
 	return merged
 }
 
-func richContentBlockKey(block jsonlwatcher.RichContentBlock) string {
+func richContentBlockKey(block transcript.RichContentBlock) string {
 	if block.ToolUseID != "" {
 		return block.Type + ":" + block.ToolUseID
 	}
@@ -158,7 +158,7 @@ func richContentBlockKey(block jsonlwatcher.RichContentBlock) string {
 // RichMessages returns a snapshot of all rich messages received so far.
 // The emitter is the single store for rich messages: the JSONL watcher
 // parses and emits, the emitter deduplicates, replays, and serves reads.
-func (e *EventEmitter) RichMessages() []jsonlwatcher.RichMessage {
+func (e *EventEmitter) RichMessages() []transcript.RichMessage {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return slices.Clone(e.richMessages)
@@ -166,7 +166,7 @@ func (e *EventEmitter) RichMessages() []jsonlwatcher.RichMessage {
 
 // EmitSessionEvents stores normalized events in the same order as the source
 // JSONL records and assigns stable identifiers for the lifetime of this run.
-func (e *EventEmitter) EmitSessionEvents(events []jsonlwatcher.SessionEvent) {
+func (e *EventEmitter) EmitSessionEvents(events []transcript.SessionEvent) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for _, event := range events {
@@ -179,7 +179,7 @@ func (e *EventEmitter) EmitSessionEvents(events []jsonlwatcher.SessionEvent) {
 	}
 }
 
-func (e *EventEmitter) SessionEvents() []jsonlwatcher.SessionEvent {
+func (e *EventEmitter) SessionEvents() []transcript.SessionEvent {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return slices.Clone(e.sessionEvents)

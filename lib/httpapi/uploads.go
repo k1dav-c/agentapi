@@ -10,7 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // maxUploadSize is the largest file POST /upload takes.
@@ -27,20 +27,20 @@ func (s *Server) serveUpload(w http.ResponseWriter, r *http.Request) {
 // chat can show them through GET /uploads without carrying the image in
 // every message. Images whose content isn't a previewable raster image, or
 // that can't be saved, are dropped.
-func (s *Server) storeRichImages(msg *jsonlwatcher.RichMessage) {
+func (s *Server) storeRichImages(msg *transcript.RichMessage) {
 	for i := range msg.Content {
 		block := &msg.Content[i]
 		if len(block.Images) == 0 {
 			continue
 		}
-		var stored []jsonlwatcher.RichImage
+		var stored []transcript.RichImage
 		for _, image := range block.Images {
 			url, err := s.uploads.saveImage(image.Data)
 			if err != nil {
 				s.logger.Debug("Failed to store tool result image", "tool_use_id", block.ToolUseID, "error", err)
 				continue
 			}
-			stored = append(stored, jsonlwatcher.RichImage{MediaType: image.MediaType, URL: url})
+			stored = append(stored, transcript.RichImage{MediaType: image.MediaType, URL: url})
 		}
 		block.Images = stored
 	}

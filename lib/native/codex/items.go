@@ -12,6 +12,7 @@ import (
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // The adapter shapes its rich messages like jsonlwatcher.CodexParser does
@@ -30,14 +31,14 @@ import (
 // msgState is a rich message being built, sent at most once per snapshot
 // interval while it streams.
 type msgState struct {
-	build    func() (jsonlwatcher.RichMessage, bool)
+	build    func() (transcript.RichMessage, bool)
 	dirty    bool
 	lastEmit time.Time
 }
 
 // block is one content block of an assistant message.
 type block struct {
-	jsonlwatcher.RichContentBlock
+	transcript.RichContentBlock
 	// parts hold reasoning summary and content texts, joined into
 	// Thinking.
 	summary []string
@@ -61,7 +62,7 @@ type segment struct {
 	id        string
 	timestamp time.Time
 	blocks    []*block
-	usage     *jsonlwatcher.Usage
+	usage     *transcript.Usage
 	stop      string
 }
 
@@ -75,7 +76,7 @@ type itemState struct {
 	// result is the tool result message, once there is output.
 	result *msgState
 	// resultBlock is the current tool result.
-	resultBlock jsonlwatcher.RichContentBlock
+	resultBlock transcript.RichContentBlock
 	output      strings.Builder
 	// changes of a fileChange and server of an mcpToolCall, for their
 	// approval requests.
@@ -114,17 +115,17 @@ func (t *turnState) lastVisible() *segment {
 	return t.segments[0]
 }
 
-func (s *segment) snapshot(model string) (jsonlwatcher.RichMessage, bool) {
-	var content []jsonlwatcher.RichContentBlock
+func (s *segment) snapshot(model string) (transcript.RichMessage, bool) {
+	var content []transcript.RichContentBlock
 	for _, b := range s.blocks {
 		if b.visible() {
 			content = append(content, b.RichContentBlock)
 		}
 	}
 	if len(content) == 0 {
-		return jsonlwatcher.RichMessage{}, false
+		return transcript.RichMessage{}, false
 	}
-	return jsonlwatcher.RichMessage{
+	return transcript.RichMessage{
 		MessageID:  s.id,
 		Role:       "assistant",
 		Content:    content,
@@ -351,15 +352,15 @@ func fileChangeDetail(changes []fileUpdateChange) string {
 }
 
 // toolResultBlock is the result of tool call id; a failed one is an error.
-func toolResultBlock(id, text, status string) jsonlwatcher.RichContentBlock {
+func toolResultBlock(id, text, status string) transcript.RichContentBlock {
 	isError := status == "failed"
-	return jsonlwatcher.RichContentBlock{Type: "tool_result", ToolUseID: id, Text: text, Status: status, IsError: &isError}
+	return transcript.RichContentBlock{Type: "tool_result", ToolUseID: id, Text: text, Status: status, IsError: &isError}
 }
 
 // toolResult returns the result block of a completed tool item.
-func toolResult(it *threadItem) jsonlwatcher.RichContentBlock {
+func toolResult(it *threadItem) transcript.RichContentBlock {
 	text, status := "", "completed"
-	var images []jsonlwatcher.RichImage
+	var images []transcript.RichImage
 	switch it.Type {
 	case "commandExecution":
 		text = strings.TrimRight(it.AggregatedOutput, "\n")
@@ -459,9 +460,9 @@ func webSearchSummary(it *threadItem) string {
 
 // mcpContent joins the text of MCP content blocks and decodes their
 // images.
-func mcpContent(blocks []json.RawMessage) (string, []jsonlwatcher.RichImage) {
+func mcpContent(blocks []json.RawMessage) (string, []transcript.RichImage) {
 	var texts []string
-	var images []jsonlwatcher.RichImage
+	var images []transcript.RichImage
 	for _, raw := range blocks {
 		var b struct {
 			Type     string `json:"type"`
@@ -481,7 +482,7 @@ func mcpContent(blocks []json.RawMessage) (string, []jsonlwatcher.RichImage) {
 			}
 		case "image":
 			if data, err := base64.StdEncoding.DecodeString(b.Data); err == nil && len(data) > 0 {
-				images = append(images, jsonlwatcher.RichImage{MediaType: b.MimeType, Data: data})
+				images = append(images, transcript.RichImage{MediaType: b.MimeType, Data: data})
 			}
 		case "inputImage":
 			if img, ok := jsonlwatcher.ImageFromDataURL(b.ImageURL); ok {
@@ -493,12 +494,12 @@ func mcpContent(blocks []json.RawMessage) (string, []jsonlwatcher.RichImage) {
 }
 
 // readImage reads the image file an imageView item shows.
-func readImage(path string) (jsonlwatcher.RichImage, bool) {
+func readImage(path string) (transcript.RichImage, bool) {
 	data, mediaType, err := native.ReadImage(path)
 	if err != nil {
-		return jsonlwatcher.RichImage{}, false
+		return transcript.RichImage{}, false
 	}
-	return jsonlwatcher.RichImage{MediaType: mediaType, Data: data}, true
+	return transcript.RichImage{MediaType: mediaType, Data: data}, true
 }
 
 func msTime(ms int64) time.Time {

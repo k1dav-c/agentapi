@@ -11,12 +11,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/procutil"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
-func blockTypes(msg jsonlwatcher.RichMessage) []string {
+func blockTypes(msg transcript.RichMessage) []string {
 	var types []string
 	for _, b := range msg.Content {
 		types = append(types, b.Type)
@@ -24,7 +24,7 @@ func blockTypes(msg jsonlwatcher.RichMessage) []string {
 	return types
 }
 
-func toolInput(t *testing.T, b jsonlwatcher.RichContentBlock) map[string]any {
+func toolInput(t *testing.T, b transcript.RichContentBlock) map[string]any {
 	t.Helper()
 	var in map[string]any
 	require.NoError(t, json.Unmarshal(b.ToolInput, &in))
@@ -63,7 +63,7 @@ func TestSimpleTextWithReasoning(t *testing.T) {
 
 	user, ok := h.rec.Message("01a143b3-952b-7762-873d-7c75dce093a1", "user")
 	require.True(t, ok)
-	assert.Equal(t, []jsonlwatcher.RichContentBlock{{Type: "text", Text: "How many integers n with 1 <= n <= 60 make n^2 + n + 41 composite? Work it out carefully, then answer with one short sentence. Do not run any commands."}}, user.Content)
+	assert.Equal(t, []transcript.RichContentBlock{{Type: "text", Text: "How many integers n with 1 <= n <= 60 make n^2 + n + 41 composite? Work it out carefully, then answer with one short sentence. Do not run any commands."}}, user.Content)
 
 	msg, ok := h.rec.Message("01a143b3-906e-7190-8322-7884ae84fa90", "assistant")
 	require.True(t, ok)
@@ -72,7 +72,7 @@ func TestSimpleTextWithReasoning(t *testing.T) {
 	assert.Equal(t, `Exactly 5 integers: \(n=40,41,44,49,\) and \(56\) make \(n^2+n+41\) composite.`, msg.Content[7].Text)
 	assert.Equal(t, "gpt-6-luna", msg.Model)
 	assert.Equal(t, "end_turn", msg.StopReason)
-	assert.Equal(t, &jsonlwatcher.Usage{InputTokens: 13689, OutputTokens: 3509, CacheReadInputTokens: 11008}, msg.Usage)
+	assert.Equal(t, &transcript.Usage{InputTokens: 13689, OutputTokens: 3509, CacheReadInputTokens: 11008}, msg.Usage)
 
 	// Thinking streamed: a snapshot showed the first summary part alone.
 	sawPartial := false

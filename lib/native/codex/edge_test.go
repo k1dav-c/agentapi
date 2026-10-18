@@ -19,9 +19,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/procutil"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 const testThread = "01a143b5-0000-7000-8000-000000000001"
@@ -716,16 +716,16 @@ func TestOtherToolItems(t *testing.T) {
 	msg, ok := h.rec.Message("turn-1", "assistant")
 	require.True(t, ok)
 	require.Len(t, msg.Content, 5)
-	img := jsonlwatcher.RichImage{MediaType: "image/png", Data: png}
+	img := transcript.RichImage{MediaType: "image/png", Data: png}
 	for i, want := range []struct {
 		name, input string
-		result      jsonlwatcher.RichContentBlock
+		result      transcript.RichContentBlock
 	}{
-		{"browser__screenshot", `{"url":"https://go.dev"}`, jsonlwatcher.RichContentBlock{Text: "Took a screenshot", Status: "completed", Images: []jsonlwatcher.RichImage{img}}},
-		{"lookup", `{}`, jsonlwatcher.RichContentBlock{Text: "not found", Status: "failed"}},
-		{"web_search", `{"query":"quartz clock","action":{"type":"search","query":"quartz clock"}}`, jsonlwatcher.RichContentBlock{Text: "Searched the web: quartz clock", Status: "completed"}},
-		{"view_image", `{"path":` + string(mustJSON(shot)) + `}`, jsonlwatcher.RichContentBlock{Status: "completed", Images: []jsonlwatcher.RichImage{img}}},
-		{"view_image", `{"path":` + string(mustJSON(missing)) + `}`, jsonlwatcher.RichContentBlock{Text: "Could not read " + missing, Status: "failed"}},
+		{"browser__screenshot", `{"url":"https://go.dev"}`, transcript.RichContentBlock{Text: "Took a screenshot", Status: "completed", Images: []transcript.RichImage{img}}},
+		{"lookup", `{}`, transcript.RichContentBlock{Text: "not found", Status: "failed"}},
+		{"web_search", `{"query":"quartz clock","action":{"type":"search","query":"quartz clock"}}`, transcript.RichContentBlock{Text: "Searched the web: quartz clock", Status: "completed"}},
+		{"view_image", `{"path":` + string(mustJSON(shot)) + `}`, transcript.RichContentBlock{Status: "completed", Images: []transcript.RichImage{img}}},
+		{"view_image", `{"path":` + string(mustJSON(missing)) + `}`, transcript.RichContentBlock{Text: "Could not read " + missing, Status: "failed"}},
 	} {
 		tool := msg.Content[i]
 		assert.Equal(t, want.name, tool.ToolName)

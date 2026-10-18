@@ -10,9 +10,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // nativeCallTimeout bounds a call into a native adapter made while the
@@ -27,7 +27,7 @@ type nativeObserver struct {
 	persister Persister
 	// storeImages saves tool result images and replaces their data with
 	// URLs. Set once the server exists.
-	storeImages func(*jsonlwatcher.RichMessage)
+	storeImages func(*transcript.RichMessage)
 }
 
 var _ native.Observer = (*nativeObserver)(nil)
@@ -38,14 +38,14 @@ func (o *nativeObserver) LoginRequired(login *native.LoginRequired) {
 	o.emitter.SetLoginRequired(login)
 }
 
-func (o *nativeObserver) RichMessage(msg jsonlwatcher.RichMessage) {
+func (o *nativeObserver) RichMessage(msg transcript.RichMessage) {
 	if o.storeImages != nil {
 		o.storeImages(&msg)
 	}
 	o.emitter.EmitRichMessageSnapshot(msg)
 }
 
-func (o *nativeObserver) SessionEvents(events []jsonlwatcher.SessionEvent) {
+func (o *nativeObserver) SessionEvents(events []transcript.SessionEvent) {
 	o.emitter.EmitSessionEvents(events)
 }
 

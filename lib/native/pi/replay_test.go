@@ -15,12 +15,13 @@ import (
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // noState answers the handshake of fixtures captured without get_state.
 const noState = `{"sessionId":"test-session","sessionFile":"/tmp/test-session.jsonl","model":{"provider":"openai-codex","id":"gpt-5.6-luna","input":["text","image"]}}`
 
-func texts(msg jsonlwatcher.RichMessage, typ string) []string {
+func texts(msg transcript.RichMessage, typ string) []string {
 	var out []string
 	for _, b := range msg.Content {
 		if b.Type != typ {
@@ -36,8 +37,8 @@ func texts(msg jsonlwatcher.RichMessage, typ string) []string {
 	return out
 }
 
-func findRich(msgs []jsonlwatcher.RichMessage, fn func(jsonlwatcher.RichMessage) bool) []jsonlwatcher.RichMessage {
-	var out []jsonlwatcher.RichMessage
+func findRich(msgs []transcript.RichMessage, fn func(transcript.RichMessage) bool) []transcript.RichMessage {
+	var out []transcript.RichMessage
 	for _, m := range msgs {
 		if fn(m) {
 			out = append(out, m)
@@ -46,8 +47,8 @@ func findRich(msgs []jsonlwatcher.RichMessage, fn func(jsonlwatcher.RichMessage)
 	return out
 }
 
-func toolResults(msgs []jsonlwatcher.RichMessage) []jsonlwatcher.RichContentBlock {
-	var out []jsonlwatcher.RichContentBlock
+func toolResults(msgs []transcript.RichMessage) []transcript.RichContentBlock {
+	var out []transcript.RichContentBlock
 	for _, m := range msgs {
 		for _, b := range m.Content {
 			if b.Type == "tool_result" {
@@ -58,8 +59,8 @@ func toolResults(msgs []jsonlwatcher.RichMessage) []jsonlwatcher.RichContentBloc
 	return out
 }
 
-func toolUses(msgs []jsonlwatcher.RichMessage) []jsonlwatcher.RichContentBlock {
-	var out []jsonlwatcher.RichContentBlock
+func toolUses(msgs []transcript.RichMessage) []transcript.RichContentBlock {
+	var out []transcript.RichContentBlock
 	for _, m := range msgs {
 		for _, b := range m.Content {
 			if b.Type == "tool_use" {
@@ -122,7 +123,7 @@ func TestReplaySimpleText(t *testing.T) {
 	assert.Equal(t, "gpt-5.6-luna", assistant.Model)
 	assert.Equal(t, "end_turn", assistant.StopReason)
 	require.NotNil(t, assistant.Usage)
-	assert.Equal(t, jsonlwatcher.Usage{InputTokens: 1151, OutputTokens: 20}, *assistant.Usage)
+	assert.Equal(t, transcript.Usage{InputTokens: 1151, OutputTokens: 20}, *assistant.Usage)
 	assert.Equal(t, "assistant-1792137197230", assistant.MessageID)
 
 	// The deltas were streamed as snapshots of the same message.
@@ -174,7 +175,7 @@ func TestReplayToolCall(t *testing.T) {
 	assert.Equal(t, "hello from pi\n M hello.txt\n", results[2].Text)
 
 	// Tool results are user messages, like the Pi parser makes them.
-	for _, m := range findRich(final, func(m jsonlwatcher.RichMessage) bool { return strings.HasPrefix(m.MessageID, "result-") }) {
+	for _, m := range findRich(final, func(m transcript.RichMessage) bool { return strings.HasPrefix(m.MessageID, "result-") }) {
 		assert.Equal(t, "user", m.Role)
 	}
 	// Bash output was shown while the command ran.
@@ -373,7 +374,7 @@ func TestReplaySteer(t *testing.T) {
 	assert.Equal(t, 2, steers)
 
 	final := h.sink.Final()
-	users := findRich(final, func(m jsonlwatcher.RichMessage) bool {
+	users := findRich(final, func(m transcript.RichMessage) bool {
 		return m.Role == "user" && !strings.HasPrefix(m.MessageID, "result-")
 	})
 	require.Len(t, users, 3)
@@ -633,7 +634,7 @@ func TestParity(t *testing.T) {
 			data, err := os.ReadFile("testdata/" + tc.session)
 			require.NoError(t, err)
 			parser := jsonlwatcher.NewPiParser()
-			var want []jsonlwatcher.RichMessage
+			var want []transcript.RichMessage
 			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 				if strings.Contains(line, `"role":"bashExecution"`) {
 					// The RPC bash command, which AgentAPI doesn't send.

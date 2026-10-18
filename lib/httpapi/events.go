@@ -13,10 +13,10 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 	"github.com/coder/agentapi/lib/util"
 )
 
@@ -136,7 +136,7 @@ type ErrorBody struct {
 
 // RichMessageUpdateBody is the SSE payload for rich message updates.
 type RichMessageUpdateBody struct {
-	jsonlwatcher.RichMessage
+	transcript.RichMessage
 	Seq uint64 `json:"seq" doc:"Sequence number of this change; see message_update."`
 }
 
@@ -170,7 +170,7 @@ type EventEmitter struct {
 	seq                 uint64
 	messageSeq          []uint64
 	richSeq             []uint64
-	richMessages        []jsonlwatcher.RichMessage
+	richMessages        []transcript.RichMessage
 	requests            []native.RequestState
 	requestSeq          []uint64
 	capabilities        *native.Capabilities
@@ -178,7 +178,7 @@ type EventEmitter struct {
 	settings            *native.Settings
 	usage               *native.AgentUsage
 	terminal            bool
-	sessionEvents       []jsonlwatcher.SessionEvent
+	sessionEvents       []transcript.SessionEvent
 	nextSessionEventID  int
 	status              AgentStatus
 	lifecycle           LifecycleState
@@ -216,8 +216,8 @@ type Persister interface {
 	PutMessage(msg st.ConversationMessage, seq uint64)
 	// TruncateMessages removes the messages with an ID of at least fromID.
 	TruncateMessages(fromID int)
-	PutRichMessage(pos int, msg jsonlwatcher.RichMessage, seq uint64)
-	AppendSessionEvents(events []jsonlwatcher.SessionEvent)
+	PutRichMessage(pos int, msg transcript.RichMessage, seq uint64)
+	AppendSessionEvents(events []transcript.SessionEvent)
 	PutRequest(state native.RequestState, seq uint64)
 	DeleteRequest(id string)
 	SetSeq(epoch string, seq uint64)
@@ -236,9 +236,9 @@ type EmitterState struct {
 	Seq           uint64
 	Messages      []st.ConversationMessage
 	MessageSeqs   []uint64
-	RichMessages  []jsonlwatcher.RichMessage
+	RichMessages  []transcript.RichMessage
 	RichSeqs      []uint64
-	SessionEvents []jsonlwatcher.SessionEvent
+	SessionEvents []transcript.SessionEvent
 	Requests      []native.RequestState
 	RequestSeqs   []uint64
 	SessionName   string
@@ -350,7 +350,7 @@ func WithStatusChangeHandler(handler func(previous, current AgentStatus)) EventE
 func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 	e := &EventEmitter{
 		messages:            make([]st.ConversationMessage, 0),
-		sessionEvents:       make([]jsonlwatcher.SessionEvent, 0),
+		sessionEvents:       make([]transcript.SessionEvent, 0),
 		nextSessionEventID:  1,
 		status:              AgentStatusRunning,
 		lifecycle:           LifecycleStarting,

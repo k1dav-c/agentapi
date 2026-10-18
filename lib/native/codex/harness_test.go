@@ -18,10 +18,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 const waitTimeout = 5 * time.Second
@@ -99,7 +99,7 @@ type recorderState struct {
 	names       []string
 	refs        []string
 	errors      []string
-	events      []jsonlwatcher.SessionEvent
+	events      []transcript.SessionEvent
 	logins      []native.LoginRequired
 	settings    []native.Settings
 }
@@ -112,7 +112,7 @@ func snapshot(r *recorder) recorderState {
 	}
 }
 
-func (s recorderState) eventsOf(kind string) []jsonlwatcher.SessionEvent {
+func (s recorderState) eventsOf(kind string) []transcript.SessionEvent {
 	return nativetest.SinkState{Events: s.events}.EventsOf(kind)
 }
 

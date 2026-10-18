@@ -12,19 +12,20 @@ import (
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native/nativetest"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // parseRollout runs the existing rollout parser (the PTY transport's
 // sidecar) over a rollout file and returns the final state of each message
 // in first-seen order, as the event emitter stores them.
-func parseRollout(t *testing.T, name string) []jsonlwatcher.RichMessage {
+func parseRollout(t *testing.T, name string) []transcript.RichMessage {
 	t.Helper()
 	f, err := os.Open(filepath.Join("testdata", name))
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 	p := jsonlwatcher.NewCodexParser()
-	var all []jsonlwatcher.RichMessage
-	add := func(msgs []jsonlwatcher.RichMessage) { all = append(all, msgs...) }
+	var all []transcript.RichMessage
+	add := func(msgs []transcript.RichMessage) { all = append(all, msgs...) }
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 8<<20)
 	for sc.Scan() {
@@ -46,11 +47,11 @@ func parseRollout(t *testing.T, name string) []jsonlwatcher.RichMessage {
 // result). The command tool is "exec" with the code-mode script in the
 // rollout and "exec_command" with the command's directory here; both carry
 // the command as cmd.
-func normalized(t *testing.T, msgs []jsonlwatcher.RichMessage) []jsonlwatcher.RichMessage {
+func normalized(t *testing.T, msgs []transcript.RichMessage) []transcript.RichMessage {
 	t.Helper()
-	out := make([]jsonlwatcher.RichMessage, 0, len(msgs))
+	out := make([]transcript.RichMessage, 0, len(msgs))
 	for _, m := range msgs {
-		n := jsonlwatcher.RichMessage{Role: m.Role, Usage: m.Usage}
+		n := transcript.RichMessage{Role: m.Role, Usage: m.Usage}
 		for _, b := range m.Content {
 			b.ToolUseID = ""
 			if b.Type == "tool_use" {
@@ -72,8 +73,8 @@ func normalized(t *testing.T, msgs []jsonlwatcher.RichMessage) []jsonlwatcher.Ri
 
 // dropEmpty drops messages without content blocks, which neither path
 // shows.
-func dropEmpty(msgs []jsonlwatcher.RichMessage) []jsonlwatcher.RichMessage {
-	var out []jsonlwatcher.RichMessage
+func dropEmpty(msgs []transcript.RichMessage) []transcript.RichMessage {
+	var out []transcript.RichMessage
 	for _, m := range msgs {
 		if len(m.Content) > 0 {
 			out = append(out, m)

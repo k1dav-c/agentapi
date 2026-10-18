@@ -222,7 +222,7 @@ func (c *Conversation) Restart(ctx context.Context) error {
 	old := c.retireAdapterLocked()
 	c.sessionRef = ""
 	c.promptSent = false
-	c.transcript.reset()
+	c.messages.reset()
 	if c.usage.Context != nil {
 		// A new session starts with an empty context.
 		usage := c.usage
@@ -304,6 +304,6 @@ func (c *Conversation) retireAdapterLocked() Adapter {
 		c.loginWake = nil
 	}
 	c.expireRequestsLocked(true)
-	c.transcript.forgetRich()
+	c.messages.forgetRich()
 	return old
 }

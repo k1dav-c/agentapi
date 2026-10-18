@@ -23,9 +23,9 @@ import (
 	sqlite "modernc.org/sqlite" // SQLite driver without cgo.
 	sqlite3 "modernc.org/sqlite/lib"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // flushInterval is how long changes may wait before they are written.
@@ -86,7 +86,7 @@ type Message struct {
 
 // RichMessage is a stored rich message with the seq of its last change.
 type RichMessage struct {
-	Message jsonlwatcher.RichMessage
+	Message transcript.RichMessage
 	Seq     uint64
 }
 
@@ -108,7 +108,7 @@ type Snapshot struct {
 	Meta         map[string]string
 	Messages     []Message
 	RichMessages []RichMessage
-	Events       []jsonlwatcher.SessionEvent
+	Events       []transcript.SessionEvent
 	Requests     []Request
 	Queue        []QueuedMessage
 	// Clean is set when the AgentAPI that wrote the file closed it. After a
@@ -304,7 +304,7 @@ func (d *DB) Load() (Snapshot, error) {
 		return snap, fmt.Errorf("read messages: %w", err)
 	}
 	if err := d.scanJSON("rich_messages", "SELECT seq, data FROM rich_messages ORDER BY pos", func(seq uint64, data []byte) error {
-		var m jsonlwatcher.RichMessage
+		var m transcript.RichMessage
 		if err := json.Unmarshal(data, &m); err != nil {
 			return err
 		}
@@ -314,7 +314,7 @@ func (d *DB) Load() (Snapshot, error) {
 		return snap, fmt.Errorf("read rich messages: %w", err)
 	}
 	if err := d.scanJSON("session_events", "SELECT 0, data FROM session_events ORDER BY id", func(_ uint64, data []byte) error {
-		var e jsonlwatcher.SessionEvent
+		var e transcript.SessionEvent
 		if err := json.Unmarshal(data, &e); err != nil {
 			return err
 		}
@@ -497,7 +497,7 @@ func (d *DB) TruncateMessages(fromID int) {
 }
 
 // PutRichMessage stores the rich message at position pos.
-func (d *DB) PutRichMessage(pos int, m jsonlwatcher.RichMessage, seq uint64) {
+func (d *DB) PutRichMessage(pos int, m transcript.RichMessage, seq uint64) {
 	data, err := json.Marshal(m)
 	if err != nil {
 		d.logger.Error("Failed to encode rich message for the state database", "error", err)
@@ -510,7 +510,7 @@ func (d *DB) PutRichMessage(pos int, m jsonlwatcher.RichMessage, seq uint64) {
 }
 
 // AppendSessionEvents stores timeline events.
-func (d *DB) AppendSessionEvents(events []jsonlwatcher.SessionEvent) {
+func (d *DB) AppendSessionEvents(events []transcript.SessionEvent) {
 	for _, e := range events {
 		data, err := json.Marshal(e)
 		if err != nil {

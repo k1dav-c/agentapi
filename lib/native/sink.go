@@ -1,8 +1,8 @@
 package native
 
 import (
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // sink is the Sink handed to the adapter of one generation.
@@ -37,7 +37,7 @@ func (s *sink) TurnStarted() {
 func (s *sink) TurnCompleted(result TurnResult) {
 	s.update(func(c *Conversation) {
 		c.turnActive = false
-		c.transcript.endAgentMessage()
+		c.messages.endAgentMessage()
 		c.expireRequestsLocked(false)
 		if result.Error != "" {
 			c.cfg.Emitter.EmitError(result.Error, st.ErrorLevelError)
@@ -64,19 +64,19 @@ func provesLogin(result TurnResult) bool {
 	return false
 }
 
-func (s *sink) RichMessage(msg jsonlwatcher.RichMessage) {
+func (s *sink) RichMessage(msg transcript.RichMessage) {
 	// The adapter may change its message once the call returns; the
 	// observer keeps (and changes) this copy.
 	msg = msg.Clone()
 	s.update(func(c *Conversation) {
 		c.cfg.Observer.RichMessage(msg)
-		if msg.Role == "assistant" && c.transcript.addRich(msg) {
-			c.cfg.Emitter.EmitMessages(c.transcript.snapshot())
+		if msg.Role == "assistant" && c.messages.addRich(msg) {
+			c.cfg.Emitter.EmitMessages(c.messages.snapshot())
 		}
 	})
 }
 
-func (s *sink) SessionEvents(events []jsonlwatcher.SessionEvent) {
+func (s *sink) SessionEvents(events []transcript.SessionEvent) {
 	s.update(func(c *Conversation) { c.cfg.Observer.SessionEvents(events) })
 }
 

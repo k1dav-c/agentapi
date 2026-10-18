@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // TestThrottleBuildsWhatItSends: a message that changes faster than the
@@ -19,9 +19,9 @@ func TestThrottleBuildsWhatItSends(t *testing.T) {
 	t.Parallel()
 	h := startedHarness(t)
 	builds := 0
-	build := func() (jsonlwatcher.RichMessage, bool) {
+	build := func() (transcript.RichMessage, bool) {
 		builds++
-		return jsonlwatcher.RichMessage{MessageID: "m", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "text", Text: strconv.Itoa(builds)}}}, true
+		return transcript.RichMessage{MessageID: "m", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: strconv.Itoa(builds)}}}, true
 	}
 	require.True(t, h.a.runOnLoop(func() {
 		for range 1000 {

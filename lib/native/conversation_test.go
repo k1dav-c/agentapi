@@ -14,10 +14,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // recorded is what a recorder received.
@@ -26,7 +26,7 @@ type recorded struct {
 	messageEmits int
 	statuses     []st.ConversationStatus
 	errors       []string
-	rich         []jsonlwatcher.RichMessage
+	rich         []transcript.RichMessage
 	requests     []native.RequestState
 	refs         []string
 	names        []string
@@ -78,13 +78,13 @@ func (r *recorder) LoginRequired(l *native.LoginRequired) {
 	r.logins = append(r.logins, l)
 }
 
-func (r *recorder) RichMessage(m jsonlwatcher.RichMessage) {
+func (r *recorder) RichMessage(m transcript.RichMessage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.rich = append(r.rich, m)
 }
 
-func (r *recorder) SessionEvents([]jsonlwatcher.SessionEvent) {}
+func (r *recorder) SessionEvents([]transcript.SessionEvent) {}
 
 func (r *recorder) SessionName(n string) {
 	r.mu.Lock()
@@ -181,8 +181,8 @@ func inStart(factory *nativetest.Factory, resumeRef string) func() bool {
 	}
 }
 
-func text(id, s string) jsonlwatcher.RichMessage {
-	return jsonlwatcher.RichMessage{MessageID: id, Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "text", Text: s}}}
+func text(id, s string) transcript.RichMessage {
+	return transcript.RichMessage{MessageID: id, Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: s}}}
 }
 
 func TestTurnBuildsMessages(t *testing.T) {
@@ -195,7 +195,7 @@ func TestTurnBuildsMessages(t *testing.T) {
 
 	sink := a.Sink()
 	// A message of only tool calls doesn't start an agent message.
-	sink.RichMessage(jsonlwatcher.RichMessage{MessageID: "m0", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "tool_use", ToolUseID: "t1"}}})
+	sink.RichMessage(transcript.RichMessage{MessageID: "m0", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "tool_use", ToolUseID: "t1"}}})
 	require.Len(t, c.Messages(), 1)
 	sink.RichMessage(text("m1", "Hel"))
 	sink.RichMessage(text("m1", "Hello"))
@@ -231,7 +231,7 @@ func TestUnchangedTextEmitsNoMessages(t *testing.T) {
 
 	// A snapshot that only adds a tool call leaves the agent message as it
 	// was.
-	sink.RichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{
+	sink.RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{
 		{Type: "text", Text: "Hello"}, {Type: "tool_use", ToolUseID: "t1"},
 	}})
 	assert.Equal(t, emits, rec.get().messageEmits)
@@ -347,12 +347,12 @@ func TestInputFromText(t *testing.T) {
 func TestRichMessageIsCopied(t *testing.T) {
 	_, factory, rec := start(t, nil, native.Config{})
 	isError := false
-	msg := jsonlwatcher.RichMessage{MessageID: "u1", Role: "user", Content: []jsonlwatcher.RichContentBlock{
-		{Type: "tool_result", ToolUseID: "t1", IsError: &isError, Images: []jsonlwatcher.RichImage{{MediaType: "image/png", Data: []byte("png")}}},
+	msg := transcript.RichMessage{MessageID: "u1", Role: "user", Content: []transcript.RichContentBlock{
+		{Type: "tool_result", ToolUseID: "t1", IsError: &isError, Images: []transcript.RichImage{{MediaType: "image/png", Data: []byte("png")}}},
 	}}
 	factory.Last().Sink().RichMessage(msg)
 	got := rec.get().rich[0]
-	got.Content[0].Images[0] = jsonlwatcher.RichImage{MediaType: "image/png", URL: "/uploads/x/image.png"}
+	got.Content[0].Images[0] = transcript.RichImage{MediaType: "image/png", URL: "/uploads/x/image.png"}
 	assert.Equal(t, []byte("png"), msg.Content[0].Images[0].Data, "the observer's change doesn't reach the adapter")
 
 	msg.Content[0].Status = "completed"

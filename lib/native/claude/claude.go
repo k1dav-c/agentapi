@@ -19,11 +19,11 @@ import (
 
 	"github.com/coder/quartz"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/procutil"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // Config configures the adapter.
@@ -684,13 +684,13 @@ func (a *Adapter) handleLine(line []byte) {
 	}
 }
 
-func (a *Adapter) sendRich(msgs []jsonlwatcher.RichMessage) {
+func (a *Adapter) sendRich(msgs []transcript.RichMessage) {
 	for _, m := range msgs {
 		a.sink.RichMessage(m)
 	}
 }
 
-func (a *Adapter) sendEvents(events []jsonlwatcher.SessionEvent) {
+func (a *Adapter) sendEvents(events []transcript.SessionEvent) {
 	if len(events) > 0 {
 		a.sink.SessionEvents(events)
 	}

@@ -9,7 +9,7 @@ import (
 
 	"github.com/coder/quartz"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // streamMessage is an assistant message between message_start and
@@ -37,8 +37,8 @@ func (b *streamBlock) replace(text string) {
 
 // snapshot is the message as streamed so far, in the shape the Pi parser
 // gives the finished message.
-func (s *streamMessage) snapshot() jsonlwatcher.RichMessage {
-	msg := jsonlwatcher.RichMessage{
+func (s *streamMessage) snapshot() transcript.RichMessage {
+	msg := transcript.RichMessage{
 		MessageID: s.id,
 		Role:      "assistant",
 		Model:     s.model,
@@ -54,21 +54,21 @@ func (s *streamMessage) snapshot() jsonlwatcher.RichMessage {
 		switch b.kind {
 		case "text":
 			if text := b.text.String(); strings.TrimSpace(text) != "" {
-				msg.Content = append(msg.Content, jsonlwatcher.RichContentBlock{Type: "text", Text: text})
+				msg.Content = append(msg.Content, transcript.RichContentBlock{Type: "text", Text: text})
 			}
 		case "thinking":
 			if text := b.text.String(); strings.TrimSpace(text) != "" {
-				msg.Content = append(msg.Content, jsonlwatcher.RichContentBlock{Type: "thinking", Thinking: text})
+				msg.Content = append(msg.Content, transcript.RichContentBlock{Type: "thinking", Thinking: text})
 			}
 		case "toolCall":
-			msg.Content = append(msg.Content, jsonlwatcher.RichContentBlock{Type: "tool_use", ToolUseID: b.toolID, ToolName: b.toolName, ToolInput: b.input})
+			msg.Content = append(msg.Content, transcript.RichContentBlock{Type: "tool_use", ToolUseID: b.toolID, ToolName: b.toolName, ToolInput: b.input})
 		}
 	}
 	return msg
 }
 
 // build returns the snapshot to send, unless it has no content yet.
-func (s *streamMessage) build() (jsonlwatcher.RichMessage, bool) {
+func (s *streamMessage) build() (transcript.RichMessage, bool) {
 	snap := s.snapshot()
 	return snap, len(snap.Content) > 0
 }
@@ -202,7 +202,7 @@ func (a *Adapter) handleMessageEnd(msg agentMessage, raw json.RawMessage) {
 	if len(rich) == 0 && streamed {
 		// Replace what was streamed, e.g. whitespace-only text. Only an
 		// assistant message can be streamed and come out empty.
-		rich = []jsonlwatcher.RichMessage{{MessageID: id, Role: "assistant", Content: []jsonlwatcher.RichContentBlock{}, Timestamp: msTime(msg.Timestamp)}}
+		rich = []transcript.RichMessage{{MessageID: id, Role: "assistant", Content: []transcript.RichContentBlock{}, Timestamp: msTime(msg.Timestamp)}}
 	}
 	for _, m := range rich {
 		a.emitFinal(m)
@@ -214,7 +214,7 @@ func (a *Adapter) handleMessageEnd(msg agentMessage, raw json.RawMessage) {
 
 // parsePiMessage turns a Pi message into rich messages with jsonlwatcher's
 // Pi parser, as the line of Pi's session file that holds it.
-func (a *Adapter) parsePiMessage(id string, raw json.RawMessage) ([]jsonlwatcher.RichMessage, error) {
+func (a *Adapter) parsePiMessage(id string, raw json.RawMessage) ([]transcript.RichMessage, error) {
 	line, err := json.Marshal(struct {
 		Type    string          `json:"type"`
 		ID      string          `json:"id"`
@@ -244,7 +244,7 @@ func withoutError(raw json.RawMessage) json.RawMessage {
 // setToolResultImages adds the images of a tool result's content (an
 // image file the agent read), which the Pi parser leaves out, to its
 // tool_result blocks.
-func setToolResultImages(rich []jsonlwatcher.RichMessage, content json.RawMessage) {
+func setToolResultImages(rich []transcript.RichMessage, content json.RawMessage) {
 	images := contentImages(content)
 	if len(images) == 0 {
 		return
@@ -259,12 +259,12 @@ func setToolResultImages(rich []jsonlwatcher.RichMessage, content json.RawMessag
 }
 
 // contentImages decodes the images of a Pi content array.
-func contentImages(raw json.RawMessage) []jsonlwatcher.RichImage {
+func contentImages(raw json.RawMessage) []transcript.RichImage {
 	var blocks []contentBlock
 	if err := json.Unmarshal(raw, &blocks); err != nil {
 		return nil
 	}
-	var images []jsonlwatcher.RichImage
+	var images []transcript.RichImage
 	for _, b := range blocks {
 		if b.Type != "image" || b.Data == "" {
 			continue
@@ -273,7 +273,7 @@ func contentImages(raw json.RawMessage) []jsonlwatcher.RichImage {
 		if err != nil {
 			continue
 		}
-		images = append(images, jsonlwatcher.RichImage{MediaType: b.MimeType, Data: data})
+		images = append(images, transcript.RichImage{MediaType: b.MimeType, Data: data})
 	}
 	return images
 }
@@ -287,7 +287,7 @@ func (a *Adapter) handleToolEvent(kind string, ev toolEvent) {
 			return
 		}
 		// Bash output so far; each update holds all of it.
-		a.emitThrottled(resultID(ev.ToolCallID), func() (jsonlwatcher.RichMessage, bool) {
+		a.emitThrottled(resultID(ev.ToolCallID), func() (transcript.RichMessage, bool) {
 			return a.toolResultMessage(ev.ToolCallID, ev.ToolName, ev.PartialResult.Content, false, "running"), true
 		})
 	case "tool_execution_end":
@@ -301,7 +301,7 @@ func (a *Adapter) handleToolEvent(kind string, ev toolEvent) {
 			return
 		}
 		// The tool result message follows; show the result already.
-		a.emitThrottled(resultID(ev.ToolCallID), func() (jsonlwatcher.RichMessage, bool) {
+		a.emitThrottled(resultID(ev.ToolCallID), func() (transcript.RichMessage, bool) {
 			return a.toolResultMessage(ev.ToolCallID, ev.ToolName, ev.Result.Content, ev.IsError || ev.Result.IsError, ""), true
 		})
 	}
@@ -309,7 +309,7 @@ func (a *Adapter) handleToolEvent(kind string, ev toolEvent) {
 
 // toolResultMessage builds a tool result like the Pi parser does for the
 // toolResult message, with status overridden while the tool runs.
-func (a *Adapter) toolResultMessage(callID, toolName string, content json.RawMessage, isError bool, status string) jsonlwatcher.RichMessage {
+func (a *Adapter) toolResultMessage(callID, toolName string, content json.RawMessage, isError bool, status string) transcript.RichMessage {
 	if len(content) == 0 {
 		content = json.RawMessage(`[]`)
 	}
@@ -319,7 +319,7 @@ func (a *Adapter) toolResultMessage(callID, toolName string, content json.RawMes
 	})
 	rich, _ := a.parsePiMessage(resultID(callID), raw)
 	if len(rich) == 0 {
-		return jsonlwatcher.RichMessage{MessageID: resultID(callID), Role: "user"}
+		return transcript.RichMessage{MessageID: resultID(callID), Role: "user"}
 	}
 	setToolResultImages(rich, content)
 	msg := rich[0]
@@ -336,7 +336,7 @@ func (a *Adapter) toolResultMessage(callID, toolName string, content json.RawMes
 type throttle struct {
 	last time.Time
 	// pending builds the latest state, not sent yet.
-	pending func() (jsonlwatcher.RichMessage, bool)
+	pending func() (transcript.RichMessage, bool)
 	timer   *quartz.Timer
 }
 
@@ -351,7 +351,7 @@ func (t *throttle) stop() {
 // per interval; its latest state is sent when the interval ends. build
 // makes the message when it is sent, so a fast stream isn't copied for
 // every change; it returns false while there is nothing to show.
-func (a *Adapter) emitThrottled(id string, build func() (jsonlwatcher.RichMessage, bool)) {
+func (a *Adapter) emitThrottled(id string, build func() (transcript.RichMessage, bool)) {
 	t := a.loop.throttles[id]
 	if t == nil {
 		// The first snapshot goes out at once.
@@ -378,7 +378,7 @@ func (a *Adapter) emitThrottled(id string, build func() (jsonlwatcher.RichMessag
 
 // sendThrottled sends what build makes, if anything, and reports whether
 // it did.
-func (a *Adapter) sendThrottled(t *throttle, build func() (jsonlwatcher.RichMessage, bool)) bool {
+func (a *Adapter) sendThrottled(t *throttle, build func() (transcript.RichMessage, bool)) bool {
 	t.pending = nil
 	msg, ok := build()
 	if ok {
@@ -409,7 +409,7 @@ func (a *Adapter) flushThrottle(id string) {
 
 // emitFinal sends the final state of a message, dropping any snapshot
 // still waiting.
-func (a *Adapter) emitFinal(msg jsonlwatcher.RichMessage) {
+func (a *Adapter) emitFinal(msg transcript.RichMessage) {
 	if t := a.loop.throttles[msg.MessageID]; t != nil {
 		t.stop()
 		delete(a.loop.throttles, msg.MessageID)

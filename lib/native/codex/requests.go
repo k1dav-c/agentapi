@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 const (
@@ -366,7 +366,7 @@ func (s *loopState) userInputRequest(msg rpcMessage) (*pendingRequest, native.Re
 	// There is no item for the tool call; show it from the request.
 	if s.ours(p.ThreadID) {
 		if t := s.turnFor(p.TurnID); t != nil && t.items[p.ItemID] == nil {
-			state := s.addItem(t, &threadItem{ID: p.ItemID, Type: "requestUserInput"}, &block{RichContentBlock: jsonlwatcher.RichContentBlock{
+			state := s.addItem(t, &threadItem{ID: p.ItemID, Type: "requestUserInput"}, &block{RichContentBlock: transcript.RichContentBlock{
 				Type: "tool_use", ToolUseID: p.ItemID, ToolName: "request_user_input", ToolInput: input, Status: "running",
 			}})
 			s.toolCallEvent(state.blk, s.now(), p.ItemID)

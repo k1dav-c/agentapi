@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/statedb"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 func open(t *testing.T, path string) *statedb.DB {
@@ -40,8 +40,8 @@ func TestRoundTrip(t *testing.T) {
 	db.PutMessage(msg(0, "a"), 1)
 	db.PutMessage(msg(1, "b"), 2)
 	db.PutMessage(msg(1, "b2"), 3) // replaces the pending write
-	db.PutRichMessage(0, jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant"}, 4)
-	db.AppendSessionEvents([]jsonlwatcher.SessionEvent{{EventID: 1, Kind: "text"}, {EventID: 2, Kind: "tool_call"}})
+	db.PutRichMessage(0, transcript.RichMessage{MessageID: "m1", Role: "assistant"}, 4)
+	db.AppendSessionEvents([]transcript.SessionEvent{{EventID: 1, Kind: "text"}, {EventID: 2, Kind: "tool_call"}})
 	db.PutRequest(native.RequestState{Request: native.Request{ID: "r2", Kind: native.RequestKindApproval}, Status: native.RequestStatusPending}, 5)
 	db.PutRequest(native.RequestState{Request: native.Request{ID: "r1", Kind: native.RequestKindQuestion}, Status: native.RequestStatusPending}, 6)
 	db.PutRequest(native.RequestState{Request: native.Request{ID: "r2", Kind: native.RequestKindApproval}, Status: native.RequestStatusResolved}, 7)

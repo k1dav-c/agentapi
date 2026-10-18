@@ -7,19 +7,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/agentapi/internal/version"
-	"github.com/coder/agentapi/lib/jsonlwatcher"
-	mf "github.com/coder/agentapi/lib/msgfmt"
-	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/internal/version"
+	mf "github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/native"
+	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 func TestEventEmitterSessionEvents(t *testing.T) {
 	emitter := NewEventEmitter()
-	emitter.EmitSessionEvents([]jsonlwatcher.SessionEvent{
+	emitter.EmitSessionEvents([]transcript.SessionEvent{
 		{Kind: "text"},
 		{Kind: "tool_call", ToolInput: json.RawMessage(`{"cmd":"ls"}`)},
 	})
@@ -37,10 +38,10 @@ func TestEventEmitterMergesClaudeRichMessageDeltas(t *testing.T) {
 	emitter := NewEventEmitter(WithSubscriptionBufSize(10))
 	_, ch, _ := emitter.Subscribe()
 
-	emitter.EmitRichMessage(jsonlwatcher.RichMessage{
+	emitter.EmitRichMessage(transcript.RichMessage{
 		MessageID: "msg_1",
 		Role:      "assistant",
-		Content: []jsonlwatcher.RichContentBlock{
+		Content: []transcript.RichContentBlock{
 			{Type: "thinking", Thinking: "checking files"},
 			{Type: "text", Text: "1. Read files"},
 			{Type: "tool_use", ToolUseID: "tool_1", ToolName: "Read"},
@@ -48,10 +49,10 @@ func TestEventEmitterMergesClaudeRichMessageDeltas(t *testing.T) {
 	})
 	<-ch
 
-	emitter.EmitRichMessage(jsonlwatcher.RichMessage{
+	emitter.EmitRichMessage(transcript.RichMessage{
 		MessageID: "msg_1",
 		Role:      "assistant",
-		Content: []jsonlwatcher.RichContentBlock{
+		Content: []transcript.RichContentBlock{
 			{Type: "tool_use", ToolUseID: "tool_2", ToolName: "Read"},
 		},
 	})
@@ -320,8 +321,8 @@ func TestEventEmitterTerminalPrompt(t *testing.T) {
 func TestEventEmitterIncrementalReplay(t *testing.T) {
 	emitter := NewEventEmitter(WithSubscriptionBufSize(10))
 	now := time.Now()
-	rich := func(id, text string) jsonlwatcher.RichMessage {
-		return jsonlwatcher.RichMessage{MessageID: id, Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "text", Text: text}}}
+	rich := func(id, text string) transcript.RichMessage {
+		return transcript.RichMessage{MessageID: id, Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: text}}}
 	}
 	emitter.EmitMessages([]st.ConversationMessage{{Id: 0, Role: st.ConversationRoleUser, Message: "one", Time: now}})
 	emitter.EmitRichMessage(rich("m1", "first"))
@@ -337,7 +338,7 @@ func TestEventEmitterIncrementalReplay(t *testing.T) {
 		{Id: 0, Role: st.ConversationRoleUser, Message: "one", Time: now},
 		{Id: 1, Role: st.ConversationRoleAgent, Message: "two", Time: now},
 	})
-	emitter.EmitRichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "tool_use", ToolUseID: "t1"}}})
+	emitter.EmitRichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "tool_use", ToolUseID: "t1"}}})
 
 	kinds := func(events []Event) []string {
 		var out []string
@@ -413,8 +414,8 @@ func (p *recordingPersister) TruncateMessages(fromID int) {
 	}
 }
 
-func (p *recordingPersister) PutRichMessage(int, jsonlwatcher.RichMessage, uint64) {}
-func (p *recordingPersister) AppendSessionEvents([]jsonlwatcher.SessionEvent)      {}
+func (p *recordingPersister) PutRichMessage(int, transcript.RichMessage, uint64) {}
+func (p *recordingPersister) AppendSessionEvents([]transcript.SessionEvent)      {}
 func (p *recordingPersister) PutRequest(state native.RequestState, _ uint64) {
 	p.requests[state.ID] = state
 }
@@ -458,7 +459,7 @@ func TestEventEmitterRemovedMessageResyncs(t *testing.T) {
 		{Id: 2, Role: st.ConversationRoleUser, Message: "refused", Time: now},
 	}
 	emitter.EmitMessages(msgs)
-	emitter.EmitRichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant"})
+	emitter.EmitRichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant"})
 	emitter.EmitRequest(native.RequestState{Request: native.Request{ID: "r1"}, Status: native.RequestStatusPending})
 	_, _, state := emitter.Subscribe()
 	cached := state[0].Payload.(SessionSyncBody)
@@ -553,9 +554,9 @@ func TestEventEmitterRestore(t *testing.T) {
 		Seq:           6,
 		Messages:      []st.ConversationMessage{{Id: 0, Role: st.ConversationRoleUser, Message: "one", Time: now}, {Id: 1, Role: st.ConversationRoleAgent, Message: "two", Time: now}},
 		MessageSeqs:   []uint64{1, 4},
-		RichMessages:  []jsonlwatcher.RichMessage{{MessageID: "m1", Role: "assistant"}},
+		RichMessages:  []transcript.RichMessage{{MessageID: "m1", Role: "assistant"}},
 		RichSeqs:      []uint64{5},
-		SessionEvents: []jsonlwatcher.SessionEvent{{EventID: 1}, {EventID: 7}},
+		SessionEvents: []transcript.SessionEvent{{EventID: 1}, {EventID: 7}},
 		Requests:      []native.RequestState{{Request: native.Request{ID: "r1"}, Status: native.RequestStatusPending}},
 		RequestSeqs:   []uint64{6},
 		SessionName:   "Greeting",
@@ -579,7 +580,7 @@ func TestEventEmitterRestore(t *testing.T) {
 	assert.Equal(t, []uint64{4, 5, 6}, replayed)
 
 	// New changes continue the restored numbering.
-	emitter.EmitSessionEvents([]jsonlwatcher.SessionEvent{{Kind: "text"}})
+	emitter.EmitSessionEvents([]transcript.SessionEvent{{Kind: "text"}})
 	assert.Equal(t, 8, emitter.SessionEvents()[2].EventID)
 	_, ch, _ := emitter.Subscribe()
 	emitter.EmitMessages(append(emitter.messages, st.ConversationMessage{Id: 2, Role: st.ConversationRoleUser, Message: "three", Time: now}))

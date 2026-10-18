@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // endedTurns is how many ended turns the read loop remembers.
@@ -119,7 +119,7 @@ func (s *loopState) turnFor(turnID string) *turnState {
 
 func (s *loopState) newSegment(t *turnState, id string) *segment {
 	seg := &segment{id: id, timestamp: s.now()}
-	seg.build = func() (jsonlwatcher.RichMessage, bool) { return seg.snapshot(s.model) }
+	seg.build = func() (transcript.RichMessage, bool) { return seg.snapshot(s.model) }
 	if n := len(t.segments); n > 0 {
 		seg.usage = t.segments[n-1].usage
 	}
@@ -361,7 +361,7 @@ func (s *loopState) tokenUsageUpdated(n threadTokenUsageUpdatedNotification) {
 		return
 	}
 	seg := s.turn.current()
-	seg.usage = &jsonlwatcher.Usage{
+	seg.usage = &transcript.Usage{
 		InputTokens:          n.TokenUsage.Last.InputTokens,
 		OutputTokens:         n.TokenUsage.Last.OutputTokens,
 		CacheReadInputTokens: n.TokenUsage.Last.CachedInputTokens,
@@ -463,9 +463,9 @@ func (s *loopState) itemStarted(t *turnState, it *threadItem, at time.Time) {
 		t.promptSeen = true
 		s.addItem(t, it, nil)
 	case "agentMessage", "plan":
-		s.addItem(t, it, &block{RichContentBlock: jsonlwatcher.RichContentBlock{Type: "text", Text: it.Text}})
+		s.addItem(t, it, &block{RichContentBlock: transcript.RichContentBlock{Type: "text", Text: it.Text}})
 	case "reasoning":
-		b := &block{RichContentBlock: jsonlwatcher.RichContentBlock{Type: "thinking"}, summary: it.Summary, content: it.reasoningContent()}
+		b := &block{RichContentBlock: transcript.RichContentBlock{Type: "thinking"}, summary: it.Summary, content: it.reasoningContent()}
 		b.Thinking = joinReasoning(b.summary, b.content)
 		s.addItem(t, it, b)
 	default:
@@ -474,7 +474,7 @@ func (s *loopState) itemStarted(t *turnState, it *threadItem, at time.Time) {
 			s.a.log.Debug("Ignoring Codex item", "type", it.Type)
 			return
 		}
-		state := s.addItem(t, it, &block{RichContentBlock: jsonlwatcher.RichContentBlock{
+		state := s.addItem(t, it, &block{RichContentBlock: transcript.RichContentBlock{
 			Type: "tool_use", ToolUseID: it.ID, ToolName: name, ToolInput: input, Status: "running",
 		}})
 		s.toolCallEvent(state.blk, at, it.ID)
@@ -516,9 +516,9 @@ func (s *loopState) itemCompleted(t *turnState, it *threadItem, at time.Time) {
 		if text == "" {
 			return
 		}
-		s.sink().RichMessage(jsonlwatcher.RichMessage{
+		s.sink().RichMessage(transcript.RichMessage{
 			MessageID: it.ID, Role: "user", Timestamp: s.now(),
-			Content: []jsonlwatcher.RichContentBlock{{Type: "text", Text: text}},
+			Content: []transcript.RichContentBlock{{Type: "text", Text: text}},
 		})
 		s.textEvent("text", "user", text, at, it.ID)
 	case "agentMessage", "plan":
@@ -548,14 +548,14 @@ func (s *loopState) itemCompleted(t *turnState, it *threadItem, at time.Time) {
 }
 
 // finishTool sets a tool call's final status and sends its result.
-func (s *loopState) finishTool(state *itemState, result jsonlwatcher.RichContentBlock, at time.Time) {
+func (s *loopState) finishTool(state *itemState, result transcript.RichContentBlock, at time.Time) {
 	state.done = true
 	state.blk.Status = result.Status
 	s.touch(&state.seg.msgState, true)
 	state.resultBlock = result
 	s.touch(s.resultMsg(state), true)
 	content := result.Text
-	s.sink().SessionEvents([]jsonlwatcher.SessionEvent{{
+	s.sink().SessionEvents([]transcript.SessionEvent{{
 		Kind: "tool_result", EventTime: at, Content: &content,
 		SessionID: optString(s.threadID), ToolUseID: optString(state.id),
 	}})
@@ -566,12 +566,12 @@ func (s *loopState) resultMsg(state *itemState) *msgState {
 	if state.result == nil {
 		ts := s.now()
 		state.result = &msgState{}
-		state.result.build = func() (jsonlwatcher.RichMessage, bool) {
-			return jsonlwatcher.RichMessage{
+		state.result.build = func() (transcript.RichMessage, bool) {
+			return transcript.RichMessage{
 				MessageID: "result-" + state.id,
 				Role:      "user",
 				Timestamp: ts,
-				Content:   []jsonlwatcher.RichContentBlock{state.resultBlock},
+				Content:   []transcript.RichContentBlock{state.resultBlock},
 			}, true
 		}
 	}
@@ -599,7 +599,7 @@ func (s *loopState) planUpdated(n turnPlanUpdatedNotification) {
 	input := mustJSON(in)
 	state := t.items[id]
 	if state == nil {
-		state = s.addItem(t, &threadItem{ID: id, Type: "plan/update"}, &block{RichContentBlock: jsonlwatcher.RichContentBlock{
+		state = s.addItem(t, &threadItem{ID: id, Type: "plan/update"}, &block{RichContentBlock: transcript.RichContentBlock{
 			Type: "tool_use", ToolUseID: id, ToolName: "update_plan", ToolInput: input,
 		}})
 	}
@@ -722,7 +722,7 @@ func (s *loopState) exited() {
 // --- session events ---
 
 func (s *loopState) textEvent(kind, role, text string, at time.Time, sourceID string) {
-	s.sink().SessionEvents([]jsonlwatcher.SessionEvent{{
+	s.sink().SessionEvents([]transcript.SessionEvent{{
 		Kind: kind, Role: strPtr(role), EventTime: at, Content: &text,
 		SessionID: optString(s.threadID), SourceID: optString(sourceID),
 	}})
@@ -733,7 +733,7 @@ func (s *loopState) systemEvent(text string, at time.Time, sourceID string) {
 }
 
 func (s *loopState) toolCallEvent(b *block, at time.Time, sourceID string) {
-	s.sink().SessionEvents([]jsonlwatcher.SessionEvent{{
+	s.sink().SessionEvents([]transcript.SessionEvent{{
 		Kind: "tool_call", Role: strPtr("assistant"), EventTime: at,
 		SessionID: optString(s.threadID), SourceID: optString(sourceID),
 		ToolName: optString(b.ToolName), ToolInput: b.ToolInput, ToolUseID: optString(b.ToolUseID),

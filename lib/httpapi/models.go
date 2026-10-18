@@ -3,12 +3,13 @@ package httpapi
 import (
 	"time"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/danielgtaylor/huma/v2"
+
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 	"github.com/coder/agentapi/lib/util"
-	"github.com/danielgtaylor/huma/v2"
 )
 
 type MessageType string
@@ -217,13 +218,13 @@ type QueueMutationResponse struct {
 // RichMessagesResponse represents the list of rich structured messages
 type RichMessagesResponse struct {
 	Body struct {
-		Messages []jsonlwatcher.RichMessage `json:"messages" nullable:"false" doc:"List of rich messages with structured content blocks, model info, and usage"`
+		Messages []transcript.RichMessage `json:"messages" nullable:"false" doc:"List of rich messages with structured content blocks, model info, and usage"`
 	}
 }
 
 type TimelineResponse struct {
 	Body struct {
-		Events []jsonlwatcher.SessionEvent `json:"events" nullable:"false" doc:"Timeline events including text, thinking, tool calls, tool results, and system lifecycle events."`
+		Events []transcript.SessionEvent `json:"events" nullable:"false" doc:"Timeline events including text, thinking, tool calls, tool results, and system lifecycle events."`
 	}
 }
 

@@ -51,6 +51,7 @@ Tests use `CGO_ENABLED=0`. The project uses `testify` (assert/require) and `code
 - **`lib/screentracker/`** — Core conversation engine. `Conversation` interface with `PTYConversation` implementation. Manages terminal snapshots, screen diffing, message splitting, and status detection (stable vs. changing).
 - **`lib/termexec/`** — Terminal process execution. Wraps PTY creation and process lifecycle.
 - **`lib/msgfmt/`** — Agent-specific message formatting. Strips echoed user input and TUI elements (input boxes, borders) from terminal output. Each agent type has different formatting quirks.
+- **`lib/transcript/`** — The types of the structured transcript the transports share: rich messages (content blocks, images, usage) and timeline events.
 - **`lib/jsonlwatcher/`** — Watches agent JSONL session logs (Claude, Codex, Pi) for rich structured messages (tool calls, thinking, usage data). Runs as a sidecar alongside PTY.
 - **`x/acpio/`** — Experimental ACP (Agent Client Protocol) transport, alternative to PTY.
 - **`lib/native/`** — Native transport. `Conversation` (an `st.Conversation`) turns the events of an `Adapter` (one per agent: `claude/`, `codex/`, `pi/`, plus the simulated `demo/`) into conversation state, requests (approvals, questions, plans) and login state. Shared pieces: `procutil/` (child process lifecycle), `IsAuthError`, `ReadImage`; `nativetest/` has a fake adapter. The environment every agent process gets (on all transports) is `lib/procenv`.

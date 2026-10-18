@@ -12,16 +12,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/demo"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // observer records what the conversation reports.
 type observer struct {
 	mu       sync.Mutex
-	rich     map[string]jsonlwatcher.RichMessage
+	rich     map[string]transcript.RichMessage
 	requests map[string]native.RequestState
 	logins   []*native.LoginRequired
 	usage    []native.AgentUsage
@@ -34,14 +34,14 @@ func (o *observer) Usage(u native.AgentUsage) {
 }
 
 func (o *observer) Started(native.Capabilities) {}
-func (o *observer) RichMessage(m jsonlwatcher.RichMessage) {
+func (o *observer) RichMessage(m transcript.RichMessage) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.rich[m.MessageID+"/"+m.Role] = m
 }
-func (o *observer) SessionEvents([]jsonlwatcher.SessionEvent) {}
-func (o *observer) SessionName(string)                        {}
-func (o *observer) SessionRef(string)                         {}
+func (o *observer) SessionEvents([]transcript.SessionEvent) {}
+func (o *observer) SessionName(string)                      {}
+func (o *observer) SessionRef(string)                       {}
 func (o *observer) LoginRequired(l *native.LoginRequired) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -59,10 +59,10 @@ func (o *observer) SettingsChosen(native.Settings) {}
 
 // replies returns the replies to the nth turn of each agent; every agent
 // counts its turns from one.
-func (o *observer) replies(n int) []jsonlwatcher.RichMessage {
+func (o *observer) replies(n int) []transcript.RichMessage {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	var out []jsonlwatcher.RichMessage
+	var out []transcript.RichMessage
 	for key, m := range o.rich {
 		if strings.HasSuffix(key, fmt.Sprintf("-%d-reply/assistant", n)) {
 			out = append(out, m)
@@ -72,17 +72,17 @@ func (o *observer) replies(n int) []jsonlwatcher.RichMessage {
 }
 
 // reply returns the reply to the nth turn of the only agent.
-func (o *observer) reply(n int) jsonlwatcher.RichMessage {
+func (o *observer) reply(n int) transcript.RichMessage {
 	if replies := o.replies(n); len(replies) == 1 {
 		return replies[0]
 	}
-	return jsonlwatcher.RichMessage{}
+	return transcript.RichMessage{}
 }
 
-func (o *observer) toolResults() []jsonlwatcher.RichContentBlock {
+func (o *observer) toolResults() []transcript.RichContentBlock {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	var out []jsonlwatcher.RichContentBlock
+	var out []transcript.RichContentBlock
 	for _, m := range o.rich {
 		for _, b := range m.Content {
 			if b.Type == "tool_result" {
@@ -97,7 +97,7 @@ func (o *observer) toolResults() []jsonlwatcher.RichContentBlock {
 // one) and waits until it accepts turns.
 func start(t *testing.T, clock quartz.Clock) (*native.Conversation, *observer) {
 	t.Helper()
-	obs := &observer{rich: map[string]jsonlwatcher.RichMessage{}, requests: map[string]native.RequestState{}}
+	obs := &observer{rich: map[string]transcript.RichMessage{}, requests: map[string]native.RequestState{}}
 	c := native.NewConversation(native.Config{
 		Factory:  demo.Factory(demo.Options{Step: time.Millisecond}),
 		Observer: obs,

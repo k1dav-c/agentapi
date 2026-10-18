@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 func TestUnwrapShell(t *testing.T) {
@@ -77,6 +77,6 @@ func TestMCPContent(t *testing.T) {
 		json.RawMessage(`"junk"`),
 	})
 	assert.Equal(t, "one\ntwo", text)
-	img := jsonlwatcher.RichImage{MediaType: "image/png", Data: []byte("\x89PNG\r\n\x1a\n")}
-	assert.Equal(t, []jsonlwatcher.RichImage{img, img}, images)
+	img := transcript.RichImage{MediaType: "image/png", Data: []byte("\x89PNG\r\n\x1a\n")}
+	assert.Equal(t, []transcript.RichImage{img, img}, images)
 }

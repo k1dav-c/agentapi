@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // Sink records what an adapter reports, for adapter tests. It fails the
@@ -35,8 +35,8 @@ type SinkState struct {
 	// "request_closed:<id>", "login_required" and "settings:<mode>".
 	Log []string
 	// Rich has every snapshot of every rich message, in order.
-	Rich     []jsonlwatcher.RichMessage
-	Events   []jsonlwatcher.SessionEvent
+	Rich     []transcript.RichMessage
+	Events   []transcript.SessionEvent
 	Started  int
 	Results  []native.TurnResult
 	Requests []native.Request
@@ -119,12 +119,12 @@ func (s *Sink) TurnCompleted(r native.TurnResult) {
 	s.state.Log = append(s.state.Log, "turn_completed:"+r.StopReason)
 }
 
-func (s *Sink) RichMessage(m jsonlwatcher.RichMessage) {
+func (s *Sink) RichMessage(m transcript.RichMessage) {
 	defer s.enter()()
 	s.state.Rich = append(s.state.Rich, m.Clone())
 }
 
-func (s *Sink) SessionEvents(events []jsonlwatcher.SessionEvent) {
+func (s *Sink) SessionEvents(events []transcript.SessionEvent) {
 	defer s.enter()()
 	s.state.Events = append(s.state.Events, events...)
 }
@@ -196,14 +196,14 @@ func (s *Sink) State() SinkState {
 
 // Final returns the last snapshot of every rich message (by role and
 // ID), in the order they first appeared.
-func (s *Sink) Final() []jsonlwatcher.RichMessage {
+func (s *Sink) Final() []transcript.RichMessage {
 	return Final(s.State().Rich)
 }
 
 // Final returns the last snapshot of every rich message in rich (by role
 // and ID), in the order they first appeared.
-func Final(rich []jsonlwatcher.RichMessage) []jsonlwatcher.RichMessage {
-	var out []jsonlwatcher.RichMessage
+func Final(rich []transcript.RichMessage) []transcript.RichMessage {
+	var out []transcript.RichMessage
 	index := map[[2]string]int{}
 	for _, m := range rich {
 		key := [2]string{m.Role, m.MessageID}
@@ -218,19 +218,19 @@ func Final(rich []jsonlwatcher.RichMessage) []jsonlwatcher.RichMessage {
 }
 
 // Message returns the last snapshot of the rich message with id and role.
-func (s *Sink) Message(id, role string) (jsonlwatcher.RichMessage, bool) {
+func (s *Sink) Message(id, role string) (transcript.RichMessage, bool) {
 	for _, m := range slices.Backward(s.State().Rich) {
 		if m.MessageID == id && m.Role == role {
 			return m, true
 		}
 	}
-	return jsonlwatcher.RichMessage{}, false
+	return transcript.RichMessage{}, false
 }
 
 // Snapshots returns every snapshot of the rich messages with id, of any
 // role.
-func (s *Sink) Snapshots(id string) []jsonlwatcher.RichMessage {
-	var out []jsonlwatcher.RichMessage
+func (s *Sink) Snapshots(id string) []transcript.RichMessage {
+	var out []transcript.RichMessage
 	for _, m := range s.State().Rich {
 		if m.MessageID == id {
 			out = append(out, m)
@@ -261,8 +261,8 @@ func (s *Sink) TurnLog() []string {
 }
 
 // EventsOf returns the session events of kind.
-func (state SinkState) EventsOf(kind string) []jsonlwatcher.SessionEvent {
-	var out []jsonlwatcher.SessionEvent
+func (state SinkState) EventsOf(kind string) []transcript.SessionEvent {
+	var out []transcript.SessionEvent
 	for _, e := range state.Events {
 		if e.Kind == kind {
 			out = append(out, e)

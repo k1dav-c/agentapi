@@ -22,12 +22,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/httpapi"
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/statedb"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // persistentServer runs a native server over the state database at path.
@@ -92,9 +92,9 @@ func TestStateDB_RestoresConversation(t *testing.T) {
 	assert.Empty(t, a.ResumeRef)
 
 	n.send("hello", "")
-	a.Sink().RichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "thinking", Thinking: "hmm"}, {Type: "text", Text: "Hi there"}}})
+	a.Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "thinking", Thinking: "hmm"}, {Type: "text", Text: "Hi there"}}})
 	a.Sink().SessionName("Greeting")
-	a.Sink().SessionEvents([]jsonlwatcher.SessionEvent{{Kind: "text"}})
+	a.Sink().SessionEvents([]transcript.SessionEvent{{Kind: "text"}})
 	a.Sink().RequestOpened(native.Request{ID: "perm", Kind: native.RequestKindApproval, Title: "Run ls", Options: []native.RequestOption{{ID: "allow", Label: "Allow", Kind: native.OptionKindAllow}}})
 	_, queued := n.send("next task", "")
 	require.True(t, queued.Queued)
@@ -133,14 +133,14 @@ func TestStateDB_RestoresConversation(t *testing.T) {
 	assert.Equal(t, "Hi there", msgs.Messages[1].Content)
 
 	var rich struct {
-		Messages []jsonlwatcher.RichMessage `json:"messages"`
+		Messages []transcript.RichMessage `json:"messages"`
 	}
 	n.do(http.MethodGet, "/rich-messages", nil, &rich)
 	require.Len(t, rich.Messages, 1)
 	assert.Equal(t, "hmm", rich.Messages[0].Content[0].Thinking)
 
 	var timeline struct {
-		Events []jsonlwatcher.SessionEvent `json:"events"`
+		Events []transcript.SessionEvent `json:"events"`
 	}
 	n.do(http.MethodGet, "/timeline", nil, &timeline)
 	assert.Len(t, timeline.Events, 1)
@@ -193,7 +193,7 @@ func TestStateDB_MCPRestartResumes(t *testing.T) {
 	require.NoError(t, err)
 	a := n.factory.Last()
 	n.send("hello", "")
-	a.Sink().RichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "text", Text: "Hi"}}})
+	a.Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "Hi"}}})
 	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
 	epoch := n.epoch()
 
@@ -235,7 +235,7 @@ func TestStateDB_CrashStartsNewEpoch(t *testing.T) {
 	n.send("hello", "")
 	db.Flush()
 	// Not written yet when the crash happens.
-	a.Sink().RichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "text", Text: "Hi"}}})
+	a.Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "Hi"}}})
 	epoch := n.epoch()
 	crashed := filepath.Join(dir, "crashed.db")
 	copyFiles(t, path, crashed)
@@ -396,7 +396,7 @@ func TestEvents_LastEventID(t *testing.T) {
 	n := newNativeServer(t, nil)
 	a := n.factory.Last()
 	n.send("one", "")
-	a.Sink().RichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "text", Text: "reply"}}})
+	a.Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "reply"}}})
 	var status struct {
 		Epoch string `json:"epoch"`
 	}

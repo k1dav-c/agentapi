@@ -10,8 +10,8 @@ import (
 
 	"github.com/coder/quartz"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 var _ st.Conversation = (*Conversation)(nil)
@@ -27,8 +27,8 @@ type Observer interface {
 	// LoginRequired reports that the agent waits for the user to log in,
 	// or with nil that it no longer does. It is called when that changes.
 	LoginRequired(*LoginRequired)
-	RichMessage(jsonlwatcher.RichMessage)
-	SessionEvents([]jsonlwatcher.SessionEvent)
+	RichMessage(transcript.RichMessage)
+	SessionEvents([]transcript.SessionEvent)
 	SessionName(string)
 	SessionRef(string)
 	RequestUpdated(RequestState)
@@ -43,16 +43,16 @@ type Observer interface {
 
 type nopObserver struct{}
 
-func (nopObserver) Started(Capabilities)                      {}
-func (nopObserver) LoginRequired(*LoginRequired)              {}
-func (nopObserver) RichMessage(jsonlwatcher.RichMessage)      {}
-func (nopObserver) SessionEvents([]jsonlwatcher.SessionEvent) {}
-func (nopObserver) SessionName(string)                        {}
-func (nopObserver) SessionRef(string)                         {}
-func (nopObserver) RequestUpdated(RequestState)               {}
-func (nopObserver) Settings(Settings)                         {}
-func (nopObserver) SettingsChosen(Settings)                   {}
-func (nopObserver) Usage(AgentUsage)                          {}
+func (nopObserver) Started(Capabilities)                    {}
+func (nopObserver) LoginRequired(*LoginRequired)            {}
+func (nopObserver) RichMessage(transcript.RichMessage)      {}
+func (nopObserver) SessionEvents([]transcript.SessionEvent) {}
+func (nopObserver) SessionName(string)                      {}
+func (nopObserver) SessionRef(string)                       {}
+func (nopObserver) RequestUpdated(RequestState)             {}
+func (nopObserver) Settings(Settings)                       {}
+func (nopObserver) SettingsChosen(Settings)                 {}
+func (nopObserver) Usage(AgentUsage)                        {}
 
 // Config configures a Conversation.
 type Config struct {
@@ -116,8 +116,8 @@ type Conversation struct {
 	promptSent bool
 	sessionRef string
 
-	transcript transcript
-	requests   requestBook
+	messages messageLog
+	requests requestBook
 
 	exited chan error
 	// login is set while the agent waits for the user to log in.
@@ -168,7 +168,7 @@ func NewConversation(cfg Config) *Conversation {
 	return &Conversation{
 		cfg:        cfg,
 		ctx:        context.Background(),
-		transcript: newTranscript(cfg.Clock, cfg.InitialMessages),
+		messages:   newMessageLog(cfg.Clock, cfg.InitialMessages),
 		requests:   newRequestBook(cfg.Clock),
 		sessionRef: cfg.ResumeRef,
 		exited:     make(chan error, 1),
@@ -378,7 +378,7 @@ func (c *Conversation) TurnActive() bool {
 func (c *Conversation) Messages() []st.ConversationMessage {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.transcript.snapshot()
+	return c.messages.snapshot()
 }
 
 // Status implements st.Conversation. A turn waiting only on the user's
@@ -410,7 +410,7 @@ func (c *Conversation) SaveState() error { return nil }
 // also replace the agent.
 func (c *Conversation) Reset() {
 	c.mu.Lock()
-	c.transcript.reset()
+	c.messages.reset()
 	c.mu.Unlock()
 }
 
@@ -466,9 +466,9 @@ func (c *Conversation) beginTurnLocked(input Input) (pendingTurn, error) {
 		adapter: c.adapter,
 		gen:     c.generation,
 		input:   c.inputForAgentLocked(input),
-		msg:     c.transcript.appendUser(text),
+		msg:     c.messages.appendUser(text),
 	}
-	c.cfg.Emitter.EmitMessages(c.transcript.snapshot())
+	c.cfg.Emitter.EmitMessages(c.messages.snapshot())
 	c.cfg.Emitter.EmitStatus(st.ConversationStatusChanging)
 	return turn, nil
 }
@@ -483,8 +483,8 @@ func (c *Conversation) deliverTurn(ctx context.Context, turn pendingTurn) error 
 	c.mu.Lock()
 	if turn.gen == c.generation {
 		c.turnActive = false
-		c.transcript.remove(turn.msg)
-		c.cfg.Emitter.EmitMessages(c.transcript.snapshot())
+		c.messages.remove(turn.msg)
+		c.cfg.Emitter.EmitMessages(c.messages.snapshot())
 		c.cfg.Emitter.EmitStatus(c.statusLocked())
 	}
 	c.mu.Unlock()
@@ -535,8 +535,8 @@ func (c *Conversation) Steer(ctx context.Context, input Input) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if gen == c.generation {
-		c.transcript.appendUser(text)
-		c.cfg.Emitter.EmitMessages(c.transcript.snapshot())
+		c.messages.appendUser(text)
+		c.cfg.Emitter.EmitMessages(c.messages.snapshot())
 	}
 	return nil
 }

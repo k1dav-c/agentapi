@@ -84,6 +84,7 @@ directly: they go through the conversation, and read state from the emitter.
 | `lib/screentracker/` | The `Conversation` and `Emitter` interfaces, and the PTY conversation: screen snapshots, message splitting, stability detection |
 | `lib/termexec/` | Runs the agent in a pseudo-terminal with an in-memory VT100 emulator (`xpty`, `vt10x`); the process can be swapped for a restart |
 | `lib/msgfmt/` | Per-agent formatting of screen output: echoed input, input boxes, status lines, tool calls, readiness for the first prompt |
+| `lib/transcript/` | The structured transcript's types, which the transports share: rich messages with their content blocks, and timeline events |
 | `lib/jsonlwatcher/` | Finds and tails the Claude Code, Codex and Pi session logs and parses them into rich messages and timeline events |
 | `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |

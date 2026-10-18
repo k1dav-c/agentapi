@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 func TestReplaySimpleText(t *testing.T) {
@@ -40,7 +40,7 @@ func TestReplaySimpleText(t *testing.T) {
 	assert.Equal(t, "claude-haiku-5-5", msg.Model)
 	assert.Equal(t, "end_turn", msg.StopReason)
 	require.NotNil(t, msg.Usage)
-	assert.Equal(t, jsonlwatcher.Usage{InputTokens: 2, OutputTokens: 330, CacheCreationInputTokens: 3908, CacheReadInputTokens: 14174}, *msg.Usage)
+	assert.Equal(t, transcript.Usage{InputTokens: 2, OutputTokens: 330, CacheCreationInputTokens: 3908, CacheReadInputTokens: 14174}, *msg.Usage)
 	require.Len(t, msg.Content, 2)
 	assert.Equal(t, "thinking", msg.Content[0].Type)
 	assert.True(t, strings.HasPrefix(msg.Content[0].Thinking, "Checking 391 for prime factors"))
@@ -258,7 +258,7 @@ func TestReplayInterrupt(t *testing.T) {
 	// The interrupt marker is a text block, not a tool result.
 	marker := final[1]
 	assert.Equal(t, "user", marker.Role)
-	assert.Equal(t, []jsonlwatcher.RichContentBlock{{Type: "text", Text: "[Request interrupted by user]"}}, marker.Content)
+	assert.Equal(t, []transcript.RichContentBlock{{Type: "text", Text: "[Request interrupted by user]"}}, marker.Content)
 	assert.Equal(t, "OK", final[2].Content[0].Text)
 
 	// Without a turn there is nothing to stop or steer.

@@ -14,10 +14,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // started returns an adapter on a fake process that completed the
@@ -478,7 +478,7 @@ func TestHeldBackSnapshotIsSent(t *testing.T) {
 func TestStreamEventsWithoutMessageID(t *testing.T) {
 	t.Parallel()
 	p := newStreamParser(quartz.NewMock(t), 0)
-	var last []jsonlwatcher.RichMessage
+	var last []transcript.RichMessage
 	for _, event := range []string{
 		`{"type":"message_start","message":{"id":"msg_1","model":"m"}}`,
 		`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,

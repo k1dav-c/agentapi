@@ -13,8 +13,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 	"github.com/coder/agentapi/lib/util"
 )
 
@@ -270,9 +270,9 @@ type Sink interface {
 	// send the whole message as it grows, not deltas. A conversation
 	// outlives its adapters, so a MessageID must not repeat one that an
 	// earlier adapter of the same Factory used.
-	RichMessage(jsonlwatcher.RichMessage)
+	RichMessage(transcript.RichMessage)
 	// SessionEvents reports timeline events.
-	SessionEvents([]jsonlwatcher.SessionEvent)
+	SessionEvents([]transcript.SessionEvent)
 	// RequestOpened reports a new request the agent waits on. Opening a
 	// request with a known ID replaces it, so like MessageIDs, request IDs
 	// must not repeat those of an earlier adapter of the same Factory.

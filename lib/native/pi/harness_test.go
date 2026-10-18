@@ -20,10 +20,10 @@ import (
 	"github.com/coder/quartz"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // The fixtures in testdata are captures of `pi --mode rpc` (Pi 1.0.2):
@@ -540,8 +540,8 @@ func (h *harness) sentTypes() []string {
 
 // stripVolatile clears what legitimately differs between the adapter's
 // messages and the session file's: IDs and timestamps.
-func stripVolatile(msgs []jsonlwatcher.RichMessage) []jsonlwatcher.RichMessage {
-	out := make([]jsonlwatcher.RichMessage, len(msgs))
+func stripVolatile(msgs []transcript.RichMessage) []transcript.RichMessage {
+	out := make([]transcript.RichMessage, len(msgs))
 	for i, m := range msgs {
 		m.MessageID = ""
 		m.Timestamp = time.Time{}

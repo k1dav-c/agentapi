@@ -6,14 +6,14 @@ import (
 
 	"github.com/coder/quartz"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
-// transcript is a conversation as st.Conversation messages: the user's
+// messageLog is a conversation as st.Conversation messages: the user's
 // messages, and agent messages made of the text of the agent's rich
 // messages.
-type transcript struct {
+type messageLog struct {
 	clock    quartz.Clock
 	messages []st.ConversationMessage
 	nextID   int
@@ -52,9 +52,9 @@ func (a *agentText) text() string {
 	return strings.Join(texts, "\n\n")
 }
 
-// newTranscript returns a transcript that continues messages.
-func newTranscript(clock quartz.Clock, messages []st.ConversationMessage) transcript {
-	t := transcript{clock: clock, messages: slices.Clone(messages), rich: make(map[string]*richPart)}
+// newMessageLog returns a messageLog that continues messages.
+func newMessageLog(clock quartz.Clock, messages []st.ConversationMessage) messageLog {
+	t := messageLog{clock: clock, messages: slices.Clone(messages), rich: make(map[string]*richPart)}
 	for _, m := range t.messages {
 		t.nextID = max(t.nextID, m.Id+1)
 	}
@@ -62,12 +62,12 @@ func newTranscript(clock quartz.Clock, messages []st.ConversationMessage) transc
 }
 
 // snapshot returns a copy of the messages.
-func (t *transcript) snapshot() []st.ConversationMessage {
+func (t *messageLog) snapshot() []st.ConversationMessage {
 	return slices.Clone(t.messages)
 }
 
 // reset clears the messages.
-func (t *transcript) reset() {
+func (t *messageLog) reset() {
 	t.messages = nil
 	t.nextID = 0
 	t.forgetRich()
@@ -75,19 +75,19 @@ func (t *transcript) reset() {
 
 // forgetRich forgets the rich messages, whose IDs the next adapter may use
 // again; the agent's next text starts a new agent message.
-func (t *transcript) forgetRich() {
+func (t *messageLog) forgetRich() {
 	t.agent = nil
 	clear(t.rich)
 }
 
 // endAgentMessage ends the agent message being built: the agent's next
 // text starts a new one.
-func (t *transcript) endAgentMessage() {
+func (t *messageLog) endAgentMessage() {
 	t.agent = nil
 }
 
 // appendUser appends a user message and returns its Id.
-func (t *transcript) appendUser(text string) int {
+func (t *messageLog) appendUser(text string) int {
 	id := t.nextID
 	t.messages = append(t.messages, st.ConversationMessage{
 		Id: id, Message: text, Role: st.ConversationRoleUser, Time: t.clock.Now(),
@@ -99,7 +99,7 @@ func (t *transcript) appendUser(text string) int {
 
 // remove removes the user message with Id id, whose turn failed to start.
 // Its Id is given out again if no message came after it.
-func (t *transcript) remove(id int) {
+func (t *messageLog) remove(id int) {
 	if i := t.index(id); i >= 0 {
 		t.messages = slices.Delete(t.messages, i, i+1)
 		if id == t.nextID-1 {
@@ -109,7 +109,7 @@ func (t *transcript) remove(id int) {
 }
 
 // index returns the index of the message with Id id, or -1.
-func (t *transcript) index(id int) int {
+func (t *messageLog) index(id int) int {
 	for i := len(t.messages) - 1; i >= 0; i-- {
 		if t.messages[i].Id == id {
 			return i
@@ -120,7 +120,7 @@ func (t *transcript) index(id int) int {
 
 // addRich puts the text of an assistant rich message into the agent
 // message it belongs to, and reports whether the messages changed.
-func (t *transcript) addRich(msg jsonlwatcher.RichMessage) bool {
+func (t *messageLog) addRich(msg transcript.RichMessage) bool {
 	text := assistantText(msg)
 	part := t.rich[msg.MessageID]
 	if part == nil {
@@ -150,7 +150,7 @@ func (t *transcript) addRich(msg jsonlwatcher.RichMessage) bool {
 }
 
 // assistantText joins the text blocks of a rich message.
-func assistantText(msg jsonlwatcher.RichMessage) string {
+func assistantText(msg transcript.RichMessage) string {
 	var parts []string
 	for _, block := range msg.Content {
 		if block.Type == "text" && strings.TrimSpace(block.Text) != "" {

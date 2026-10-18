@@ -14,10 +14,11 @@ import (
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native/nativetest"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // sessionLogMessages parses a session log the way the JSONL watcher does.
-func sessionLogMessages(t *testing.T, name string) []jsonlwatcher.RichMessage {
+func sessionLogMessages(t *testing.T, name string) []transcript.RichMessage {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testdata", name+".session.jsonl"))
 	require.NoError(t, err)
@@ -42,7 +43,7 @@ func sessionLogMessages(t *testing.T, name string) []jsonlwatcher.RichMessage {
 // comparable drops what legitimately differs: timestamps (the adapter
 // stamps arrival time) and tool status (the session-log parser sets none),
 // and normalizes tool input JSON.
-func comparable(t *testing.T, m jsonlwatcher.RichMessage) jsonlwatcher.RichMessage {
+func comparable(t *testing.T, m transcript.RichMessage) transcript.RichMessage {
 	t.Helper()
 	m.Timestamp = time.Time{}
 	m = m.Clone()
@@ -84,7 +85,7 @@ func TestParityWithSessionLog(t *testing.T) {
 			r.run(loadRuns(t, tc.name)[tc.run], tc.hooks)
 			require.NoError(t, r.finish(nil))
 
-			ours := map[string]jsonlwatcher.RichMessage{}
+			ours := map[string]transcript.RichMessage{}
 			for _, m := range r.sink.Final() {
 				ours[m.Role+"/"+m.MessageID] = comparable(t, m)
 			}

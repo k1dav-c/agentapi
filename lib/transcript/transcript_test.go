@@ -1,4 +1,4 @@
-package jsonlwatcher
+package transcript
 
 import (
 	"encoding/json"

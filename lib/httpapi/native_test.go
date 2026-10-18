@@ -18,11 +18,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/httpapi"
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 type nativeServer struct {
@@ -173,8 +173,8 @@ func TestNative_StatusAndMessages(t *testing.T) {
 	a := n.factory.Last()
 	require.Len(t, a.Turns(), 1)
 
-	a.Sink().RichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "text", Text: "Hi"}}})
-	a.Sink().RichMessage(jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{{Type: "text", Text: "Hi there"}}})
+	a.Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "Hi"}}})
+	a.Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "Hi there"}}})
 
 	var msgs struct {
 		Messages []httpapi.Message `json:"messages"`
@@ -185,7 +185,7 @@ func TestNative_StatusAndMessages(t *testing.T) {
 
 	// Snapshots replace the rich message instead of piling up text blocks.
 	var rich struct {
-		Messages []jsonlwatcher.RichMessage `json:"messages"`
+		Messages []transcript.RichMessage `json:"messages"`
 	}
 	n.do(http.MethodGet, "/rich-messages", nil, &rich)
 	require.Len(t, rich.Messages, 1)

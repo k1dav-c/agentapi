@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // startJSONLWatcher stops any existing JSONL watcher and starts a new one
@@ -56,7 +57,7 @@ func (s *Server) startJSONLWatcher(pid int) {
 		Parser:   agent.Parser,
 		Logger:   s.logger,
 		Clock:    s.clock,
-		OnMessage: func(msg jsonlwatcher.RichMessage) {
+		OnMessage: func(msg transcript.RichMessage) {
 			s.storeRichImages(&msg)
 			s.emitter.EmitRichMessage(msg)
 		},

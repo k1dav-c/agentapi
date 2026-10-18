@@ -9,8 +9,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // getStatus handles GET /status. It only reads the emitter, which has its
@@ -96,7 +96,7 @@ func (s *Server) getRichMessages(ctx context.Context, input *struct{}) (*RichMes
 	resp := &RichMessagesResponse{}
 	resp.Body.Messages = s.emitter.RichMessages()
 	if resp.Body.Messages == nil {
-		resp.Body.Messages = []jsonlwatcher.RichMessage{}
+		resp.Body.Messages = []transcript.RichMessage{}
 	}
 	return resp, nil
 }
@@ -104,7 +104,7 @@ func (s *Server) getRichMessages(ctx context.Context, input *struct{}) (*RichMes
 func (s *Server) getTimeline(ctx context.Context, input *struct{}) (*TimelineResponse, error) {
 	events := s.emitter.SessionEvents()
 	if events == nil {
-		events = []jsonlwatcher.SessionEvent{}
+		events = []transcript.SessionEvent{}
 	}
 	resp := &TimelineResponse{}
 	resp.Body.Events = events

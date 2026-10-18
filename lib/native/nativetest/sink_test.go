@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // errorRecorder records the errors a test reports.
@@ -55,8 +55,8 @@ func TestSinkKeepsACopy(t *testing.T) {
 	t.Parallel()
 	sink := NewSink(t)
 	isError := false
-	msg := jsonlwatcher.RichMessage{MessageID: "m1", Role: "assistant", Content: []jsonlwatcher.RichContentBlock{
-		{Type: "tool_result", ToolUseID: "t1", IsError: &isError, Images: []jsonlwatcher.RichImage{{MediaType: "image/png"}}},
+	msg := transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{
+		{Type: "tool_result", ToolUseID: "t1", IsError: &isError, Images: []transcript.RichImage{{MediaType: "image/png"}}},
 	}}
 	sink.RichMessage(msg)
 	msg.Content[0].Images[0].URL = "/changed"

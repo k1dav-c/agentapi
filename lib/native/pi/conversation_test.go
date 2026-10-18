@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // convFixture runs adapters under native.Conversation against a fake Pi.
@@ -155,14 +155,14 @@ func (o *settingsObserver) Settings(s native.Settings) {
 	defer o.mu.Unlock()
 	o.settings = append(o.settings, s)
 }
-func (*settingsObserver) LoginRequired(*native.LoginRequired)       {}
-func (*settingsObserver) RichMessage(jsonlwatcher.RichMessage)      {}
-func (*settingsObserver) SessionEvents([]jsonlwatcher.SessionEvent) {}
-func (*settingsObserver) SessionName(string)                        {}
-func (*settingsObserver) SessionRef(string)                         {}
-func (*settingsObserver) RequestUpdated(native.RequestState)        {}
-func (*settingsObserver) SettingsChosen(native.Settings)            {}
-func (*settingsObserver) Usage(native.AgentUsage)                   {}
+func (*settingsObserver) LoginRequired(*native.LoginRequired)     {}
+func (*settingsObserver) RichMessage(transcript.RichMessage)      {}
+func (*settingsObserver) SessionEvents([]transcript.SessionEvent) {}
+func (*settingsObserver) SessionName(string)                      {}
+func (*settingsObserver) SessionRef(string)                       {}
+func (*settingsObserver) RequestUpdated(native.RequestState)      {}
+func (*settingsObserver) SettingsChosen(native.Settings)          {}
+func (*settingsObserver) Usage(native.AgentUsage)                 {}
 
 func TestModelSwitchReportsNoMixedSettings(t *testing.T) {
 	t.Parallel()

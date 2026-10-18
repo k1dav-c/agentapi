@@ -12,11 +12,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
-	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/logctx"
+	"github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 func TestStoreRichImages(t *testing.T) {
@@ -35,10 +36,10 @@ func TestStoreRichImages(t *testing.T) {
 	var pngBytes bytes.Buffer
 	require.NoError(t, png.Encode(&pngBytes, image.NewRGBA(image.Rect(0, 0, 2, 2))))
 
-	msg := jsonlwatcher.RichMessage{Content: []jsonlwatcher.RichContentBlock{{
+	msg := transcript.RichMessage{Content: []transcript.RichContentBlock{{
 		Type:      "tool_result",
 		ToolUseID: "toolu_img",
-		Images: []jsonlwatcher.RichImage{
+		Images: []transcript.RichImage{
 			{MediaType: "image/png", Data: pngBytes.Bytes()},
 			// An "image" whose content is markup is never stored.
 			{MediaType: "image/png", Data: []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)},
@@ -46,9 +47,9 @@ func TestStoreRichImages(t *testing.T) {
 	}}}
 	srv.storeRichImages(&msg)
 	// The same image again (the log is re-read on restart) gets the same URL.
-	again := jsonlwatcher.RichMessage{Content: []jsonlwatcher.RichContentBlock{{
+	again := transcript.RichMessage{Content: []transcript.RichContentBlock{{
 		Type:   "tool_result",
-		Images: []jsonlwatcher.RichImage{{MediaType: "image/png", Data: pngBytes.Bytes()}},
+		Images: []transcript.RichImage{{MediaType: "image/png", Data: pngBytes.Bytes()}},
 	}}}
 	srv.storeRichImages(&again)
 
