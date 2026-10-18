@@ -2,7 +2,9 @@
 
 import {createContext, useContext} from "react";
 
-export type FileViewerTab = "file" | "diff";
+// The file viewer's tabs. Preview is there for HTML, Markdown and SVG
+// files.
+export type FileViewerTab = "file" | "preview" | "diff";
 
 // What to show in the file viewer.
 export interface FileViewerRequest {
@@ -14,7 +16,8 @@ export interface FileViewerRequest {
   // A tool call's own change to the file as a unified diff, shown first on
   // the Diff tab.
   change?: string;
-  // The tab to open on: by default Diff when there is a change, else File.
+  // The tab to open on: by default Diff when there is a change, else
+  // Preview for Markdown and File for the rest.
   tab?: FileViewerTab;
 }
 

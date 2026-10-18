@@ -147,7 +147,7 @@ The handlers are grouped by file:
 | --- | --- |
 | `server.go` | Messages, status, events, the queue, uploads; the server's setup and routes |
 | `native.go` | Requests, settings, interrupt, compaction, login retry; the native observer |
-| `terminal.go`, `files.go` | The shell terminal and the file viewer |
+| `terminal.go`, `files.go`, `file_preview.go` | The shell terminal and the file viewer |
 | `mcp.go`, `mcp_management.go` | MCP servers and profiles |
 | `webhook.go`, `handoff.go`, `dialog_reply.go` | Run-status webhooks, the human-reply API, answers to terminal dialogs |
 | `auth.go` | Token auth and the chat's sign-in |
@@ -402,6 +402,19 @@ read-only in the repository (`rev-parse`, `ls-files`, `cat-file`, with
 fsmonitor off) and compares copies of the committed and current file with
 `git diff --no-index` in a temporary directory, without the user's or the
 system's git configuration, so no program the repository configures runs.
+
+The previews read through the same root. `GET /files/preview` (`lib/htmlpreview`)
+returns an HTML file with the stylesheets, scripts, images, fonts and media it
+refers to by relative path turned into data: URLs: only files whose extension
+fits their use (a stylesheet must be `.css`, a script `.js`), none in a hidden
+directory or above the working directory, up to 4 MiB each and 16 MiB in all.
+The chat shows the page in an iframe sandboxed with `allow-scripts` but without
+`allow-same-origin`: the page has no origin, so its scripts can't read the
+chat, send its session cookie or call the API with it, and nothing it refers to
+is loaded from AgentAPI (which a proxy's cookie wouldn't reach either).
+`GET /files/image` serves image files as `GET /uploads` serves uploads: raster
+images judged by content, SVG by extension, with `nosniff` and a sandboxing
+Content-Security-Policy.
 
 ## MCP management
 

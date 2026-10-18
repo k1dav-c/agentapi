@@ -1,7 +1,7 @@
 "use client";
 
 import {Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode} from "react";
-import {FileDiff, FileQuestion, FileText, GitCompare, LoaderCircle, RefreshCw, ShieldAlert, TriangleAlert, X} from "lucide-react";
+import {Eye, FileDiff, FileQuestion, FileText, GitCompare, ImageOff, LoaderCircle, RefreshCw, ShieldAlert, TriangleAlert, X} from "lucide-react";
 import {Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle} from "./ui/dialog";
 import {Tabs, TabsContent, TabsList, TabsTrigger} from "./ui/tabs";
 import {Button} from "./ui/button";
@@ -9,15 +9,18 @@ import {useChat} from "./chat-provider";
 import {CopyButton} from "./message-list/message-item";
 import {DiffView} from "./diff-view";
 import {PathLabel} from "./file-path";
-import type {FileViewerRequest, FileViewerTab} from "./file-viewer-context";
-import type {FileContent, FileDiff as FileChanges, FileDiffStatus} from "@/lib/chat-api";
+import {MarkdownDocument} from "./processed-message";
+import {useFileViewer, type FileViewerRequest, type FileViewerTab} from "./file-viewer-context";
+import type {FileContent, FileDiff as FileChanges, FileDiffStatus, FilePreview} from "@/lib/chat-api";
+import {isRelativeRef, previewKind, resolveRelativeRef, type PreviewKind} from "@/lib/file-preview";
 import {highlightCode, languageForPath, type CodeToken} from "@/lib/code-highlight";
 import {ApiError, getErrorMessage} from "@/lib/error-utils";
 import {cn} from "@/lib/utils";
 
-// The file viewer: a file the agent works on, with its contents (File) and
-// its changes (Diff): the change of the tool call it was opened from, and
-// the uncommitted changes git sees. Wide on desktops, full screen on phones.
+// The file viewer: a file the agent works on, with its contents (File), a
+// preview of an HTML, Markdown or SVG file (Preview), and its changes
+// (Diff): the change of the tool call it was opened from, and the
+// uncommitted changes git sees. Wide on desktops, full screen on phones.
 export function FileViewerDialog({
   request,
   open,
@@ -80,27 +83,54 @@ function useLoaded<T>(read: () => Promise<T>) {
 // The dialog's content for one request. A new request remounts it, so every
 // open reads the file again.
 function FileViewerBody({request}: {request: FileViewerRequest}) {
-  const {getFileContent, getFileDiff} = useChat();
+  const {getFileContent, getFileDiff, getFilePreview} = useChat();
   const {path, line, change} = request;
-  const [tab, setTab] = useState<FileViewerTab>(request.tab ?? (change ? "diff" : "file"));
+  const kind = previewKind(path);
+  // A raster image shows on the File tab; SVG is text, so its image is the
+  // preview.
+  const hasPreview = kind === "html" || kind === "markdown" || (kind === "image" && /\.svg$/i.test(path));
+  const [tab, setTab] = useState<FileViewerTab>(() => {
+    if (request.tab && (request.tab !== "preview" || hasPreview)) return request.tab;
+    if (change) return "diff";
+    return kind === "markdown" ? "preview" : "file";
+  });
   const [file, loadFile] = useLoaded(useCallback(() => getFileContent(path), [getFileContent, path]));
   const [changes, loadChanges] = useLoaded(useCallback(() => getFileDiff(path), [getFileDiff, path]));
+  const [page, loadPage] = useLoaded(useCallback(() => getFilePreview(path), [getFilePreview, path]));
+  // Bumped to show an image again (Reload): its URL changes.
+  const [imageVersion, setImageVersion] = useState(0);
 
-  // Each tab reads its part when it is first shown.
+  // Each tab reads its part when it is first shown. A Markdown preview
+  // renders the file's text.
+  const needsFile = tab === "file" || (tab === "preview" && kind === "markdown");
   useEffect(() => {
-    if (tab === "file" && file === null) loadFile();
-  }, [tab, file, loadFile]);
+    if (needsFile && file === null) loadFile();
+  }, [needsFile, file, loadFile]);
   useEffect(() => {
     if (tab === "diff" && changes === null) loadChanges();
   }, [tab, changes, loadChanges]);
+  useEffect(() => {
+    if (tab === "preview" && kind === "html" && page === null) loadPage();
+  }, [tab, kind, page, loadPage]);
 
   // The server's path relative to the agent's working directory, once it
   // answered.
   const shownPath =
-    (file?.state === "ready" && file.data.relative) || (changes?.state === "ready" && changes.data.relative) || path;
-  const current = tab === "file" ? file : changes;
-  const reload = tab === "file" ? loadFile : loadChanges;
+    (file?.state === "ready" && file.data.relative) ||
+    (page?.state === "ready" && page.data.relative) ||
+    (changes?.state === "ready" && changes.data.relative) ||
+    path;
+  // What the shown tab loads: an SVG preview is an <img>, which loads by
+  // itself.
+  const current = tab === "diff" ? changes : tab !== "preview" || kind === "markdown" ? file : kind === "html" ? page : null;
   const loading = current?.state === "loading";
+  const reload = () => {
+    setImageVersion((version) => version + 1);
+    if (tab === "diff") loadChanges();
+    else if (tab === "preview" && kind === "html") loadPage();
+    else if (tab === "file" || kind === "markdown") loadFile();
+  };
+  const reloadLabel = tab === "diff" ? "Reload the changes" : tab === "preview" ? "Reload the preview" : "Reload the file";
 
   return (
     <>
@@ -120,7 +150,7 @@ function FileViewerBody({request}: {request: FileViewerRequest}) {
           className="size-9 text-muted-foreground sm:size-8"
           onClick={reload}
           disabled={loading}
-          aria-label={tab === "file" ? "Reload the file" : "Reload the changes"}
+          aria-label={reloadLabel}
           title="Reload"
         >
           <RefreshCw className={cn("size-4", loading && "motion-safe:animate-spin")} />
@@ -133,11 +163,17 @@ function FileViewerBody({request}: {request: FileViewerRequest}) {
       </header>
       <Tabs value={tab} onValueChange={(value) => setTab(value as FileViewerTab)} className="min-h-0 flex-1 gap-0">
         <div className="shrink-0 border-b px-3 py-2 sm:px-4">
-          <TabsList className="grid w-full grid-cols-2 sm:inline-flex sm:w-auto">
+          <TabsList className={cn("grid w-full sm:inline-flex sm:w-auto", hasPreview ? "grid-cols-3" : "grid-cols-2")}>
             <TabsTrigger value="file" className="sm:px-4">
               <FileText />
               File
             </TabsTrigger>
+            {hasPreview && (
+              <TabsTrigger value="preview" className="sm:px-4">
+                <Eye />
+                Preview
+              </TabsTrigger>
+            )}
             <TabsTrigger value="diff" className="sm:px-4">
               <FileDiff />
               Diff
@@ -145,8 +181,13 @@ function FileViewerBody({request}: {request: FileViewerRequest}) {
           </TabsList>
         </div>
         <TabsContent value="file" className={panelClass}>
-          <FilePane loaded={file} path={path} line={line} onRetry={loadFile} />
+          <FilePane loaded={file} path={path} line={line} kind={kind} imageVersion={imageVersion} onRetry={loadFile} />
         </TabsContent>
+        {hasPreview && kind && (
+          <TabsContent value="preview" className={cn(panelClass, kind === "html" && "flex flex-col overflow-hidden pb-0")}>
+            <PreviewPane kind={kind} path={path} file={file} page={page} imageVersion={imageVersion} onRetry={kind === "html" ? loadPage : loadFile} />
+          </TabsContent>
+        )}
         <TabsContent value="diff" className={panelClass}>
           <DiffPane loaded={changes} change={change} onRetry={loadChanges} />
         </TabsContent>
@@ -155,10 +196,25 @@ function FileViewerBody({request}: {request: FileViewerRequest}) {
   );
 }
 
-function FilePane({loaded, path, line, onRetry}: {loaded: Loaded<FileContent> | null; path: string; line?: number; onRetry: () => void}) {
+function FilePane({
+  loaded,
+  path,
+  line,
+  kind,
+  imageVersion,
+  onRetry,
+}: {
+  loaded: Loaded<FileContent> | null;
+  path: string;
+  line?: number;
+  kind?: PreviewKind;
+  imageVersion: number;
+  onRetry: () => void;
+}) {
   if (!loaded || loaded.state === "loading") return <Loading>Loading the file…</Loading>;
   if (loaded.state === "error") return <LoadError error={loaded.error} subject="file" onRetry={onRetry} />;
   const file = loaded.data;
+  if (file.binary && kind === "image") return <ImageView path={file.relative} size={file.size} version={imageVersion} />;
   if (file.binary) return <Notice icon={FileQuestion} title={`Binary file, ${formatBytes(file.size)}`} text="It isn't text, so it can't be shown here." />;
   if (!file.content) return <Notice icon={FileText} title={file.size === 0 ? "Empty file" : "No text to show"} />;
   return (
@@ -216,6 +272,118 @@ function renderToken(token: CodeToken, index: number): ReactNode {
     token.text,
   );
   return <Fragment key={index}>{content}</Fragment>;
+}
+
+// The Preview tab: an HTML page in a sandboxed iframe, a Markdown document,
+// or an SVG image.
+function PreviewPane({
+  kind,
+  path,
+  file,
+  page,
+  imageVersion,
+  onRetry,
+}: {
+  kind: PreviewKind;
+  path: string;
+  file: Loaded<FileContent> | null;
+  page: Loaded<FilePreview> | null;
+  imageVersion: number;
+  onRetry: () => void;
+}) {
+  if (kind === "image") return <ImageView path={path} version={imageVersion} />;
+  if (kind === "html") {
+    if (!page || page.state === "loading") return <Loading>Loading the preview…</Loading>;
+    if (page.state === "error") return <LoadError error={page.error} subject="preview" onRetry={onRetry} />;
+    return <HTMLPreview page={page.data} />;
+  }
+  if (!file || file.state === "loading") return <Loading>Loading the file…</Loading>;
+  if (file.state === "error") return <LoadError error={file.error} subject="file" onRetry={onRetry} />;
+  if (file.data.binary) return <Notice icon={FileQuestion} title="Not a text file" text="It can't be shown as Markdown." />;
+  return <MarkdownPreview file={file.data} />;
+}
+
+// An HTML page with what it refers to inlined, in an iframe sandboxed
+// without allow-same-origin: its scripts run without an origin, so they
+// can't reach the chat, its cookie or the API with them.
+const HTMLPreview = memo(function HTMLPreview({page}: {page: FilePreview}) {
+  return (
+    <>
+      {page.missing.length > 0 && (
+        <p
+          className="shrink-0 border-b border-status-warning/30 bg-status-warning/10 px-4 py-1.5 text-xs text-status-warning"
+          role="note"
+          title={page.missing.map((item) => `${item.ref}: ${item.reason}`).join("\n")}
+        >
+          Not included: {page.missing.slice(0, 3).map((item) => `${item.ref} (${item.reason})`).join(", ")}
+          {page.missing.length > 3 && `, and ${page.missing.length - 3} more`}
+        </p>
+      )}
+      <iframe
+        title={`Preview of ${page.relative}`}
+        srcDoc={page.html}
+        sandbox="allow-scripts allow-forms allow-modals"
+        referrerPolicy="no-referrer"
+        className="min-h-0 w-full flex-1 border-0 bg-white"
+      />
+    </>
+  );
+});
+
+// A Markdown file as a document. Relative images load from the working
+// directory, and relative links open in the file viewer.
+const MarkdownPreview = memo(function MarkdownPreview({file}: {file: FileContent}) {
+  const {fileImageURL} = useChat();
+  const viewer = useFileViewer();
+  const imageURL = useCallback(
+    (ref: string) => {
+      const target = resolveRelativeRef(file.relative, ref);
+      return target ? fileImageURL(target.path) : undefined;
+    },
+    [file.relative, fileImageURL],
+  );
+  const openLink = useCallback(
+    (ref: string) => {
+      // A heading anchor: headings have no ids here.
+      if (ref.startsWith("#")) return true;
+      if (!isRelativeRef(ref)) return false;
+      const target = resolveRelativeRef(file.relative, ref);
+      if (target) viewer?.open({path: target.path, line: target.line});
+      return true;
+    },
+    [file.relative, viewer],
+  );
+  return (
+    <div className="mx-auto max-w-[52rem] px-4 py-5 sm:px-8 sm:py-6">
+      {file.truncated && (
+        <p className="mb-4 rounded-md border border-status-warning/30 bg-status-warning/10 px-3 py-1.5 text-xs text-status-warning" role="note">
+          Showing the first 1 MiB of {formatBytes(file.size)}.
+        </p>
+      )}
+      <MarkdownDocument content={file.content} imageURL={imageURL} openLink={openLink} />
+    </div>
+  );
+});
+
+// An image file from the working directory, fitted to the panel.
+function ImageView({path, size, version}: {path: string; size?: number; version: number}) {
+  const {fileImageURL} = useChat();
+  const [failed, setFailed] = useState<number | null>(null);
+  if (failed === version) {
+    return <Notice alert icon={ImageOff} title="Couldn't show the image" text="It may have been deleted, or it isn't an image the browser can show." />;
+  }
+  return (
+    <div className="flex min-h-full flex-col items-center justify-center gap-2 bg-muted/30 p-4">
+      {/* eslint-disable-next-line @next/next/no-img-element -- served by AgentAPI, not optimizable */}
+      <img
+        src={fileImageURL(path, version)}
+        alt={path}
+        onError={() => setFailed(version)}
+        className="max-h-[calc(100dvh-12rem)] max-w-full rounded-sm bg-[repeating-conic-gradient(var(--muted)_0_25%,transparent_0_50%)] bg-[length:16px_16px] object-contain sm:max-h-[min(70dvh,52rem)]"
+      />
+      {size !== undefined && <p className="text-xs text-muted-foreground">{formatBytes(size)}</p>}
+    </div>
+  );
 }
 
 const STATUS_LABEL: Partial<Record<FileDiffStatus, {label: string; title: string}>> = {
@@ -335,7 +503,7 @@ function Notice({
   );
 }
 
-function LoadError({error, subject, onRetry, compact}: {error: unknown; subject: "file" | "changes"; onRetry: () => void; compact?: boolean}) {
+function LoadError({error, subject, onRetry, compact}: {error: unknown; subject: "file" | "changes" | "preview"; onRetry: () => void; compact?: boolean}) {
   const status = error instanceof ApiError ? error.status : undefined;
   const detail = getErrorMessage(error);
   if (status === 403) {
@@ -350,7 +518,7 @@ function LoadError({error, subject, onRetry, compact}: {error: unknown; subject:
       />
     );
   }
-  if (status === 404 && subject === "file") {
+  if (status === 404 && subject !== "changes") {
     return <Notice alert compact={compact} icon={FileQuestion} title="File not found" text="It may have been deleted, moved or renamed." detail={detail} onRetry={onRetry} />;
   }
   return (
@@ -358,7 +526,7 @@ function LoadError({error, subject, onRetry, compact}: {error: unknown; subject:
       alert
       compact={compact}
       icon={TriangleAlert}
-      title={subject === "file" ? "Couldn't show the file" : "Couldn't show the changes"}
+      title={subject === "file" ? "Couldn't show the file" : subject === "preview" ? "Couldn't preview the file" : "Couldn't show the changes"}
       detail={detail}
       // A bad request (a directory, an empty path) stays bad.
       onRetry={status === 400 ? undefined : onRetry}

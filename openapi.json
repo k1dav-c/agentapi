@@ -349,6 +349,45 @@
         "title": "FileDiffStatus",
         "type": "string"
       },
+      "FilePreviewResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/FilePreviewResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "html": {
+            "description": "The page, with the stylesheets, scripts, images, fonts and media it refers to by relative path inlined as data: URLs (up to 4 MiB each, 16 MiB in all), and in-memory localStorage, sessionStorage and document.cookie where the page can't use them: for an iframe's srcdoc, sandboxed without allow-same-origin.",
+            "type": "string"
+          },
+          "missing": {
+            "description": "References that weren't inlined: not found, outside the working directory, hidden, of a type that doesn't fit their use, or too large.",
+            "items": {
+              "$ref": "#/components/schemas/Missing"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "path": {
+            "description": "The path as given.",
+            "type": "string"
+          },
+          "relative": {
+            "description": "The path relative to the agent's working directory.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "html",
+          "missing",
+          "path",
+          "relative"
+        ],
+        "type": "object"
+      },
       "HeartbeatBody": {
         "additionalProperties": false,
         "properties": {
@@ -832,6 +871,24 @@
         },
         "required": [
           "messages"
+        ],
+        "type": "object"
+      },
+      "Missing": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "description": "Why it wasn't inlined, e.g. not found, or not an image.",
+            "type": "string"
+          },
+          "ref": {
+            "description": "The reference as the page has it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "ref"
         ],
         "type": "object"
       },
@@ -2924,6 +2981,88 @@
           }
         },
         "summary": "Get files diff"
+      }
+    },
+    "/files/preview": {
+      "get": {
+        "description": "Returns an HTML file in the agent's working directory as a page that shows by itself, for the chat's preview: the stylesheets, scripts, images, fonts and media it refers to by relative path are inlined. Show it in an iframe sandboxed without allow-same-origin, so its scripts get no access to the chat or the API.",
+        "operationId": "get-files-preview",
+        "parameters": [
+          {
+            "description": "The file: an absolute path inside the agent's working directory, or a path relative to it.",
+            "explode": false,
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "description": "The file: an absolute path inside the agent's working directory, or a path relative to it.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilePreviewResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Get files preview"
       }
     },
     "/handoff": {

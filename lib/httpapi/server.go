@@ -802,6 +802,7 @@ func (s *Server) registerRoutes() {
 	s.registerAuthRoutes()
 	s.registerNativeRoutes()
 	s.registerFileRoutes()
+	s.registerFilePreviewRoutes()
 	s.registerTerminalRoutes()
 	huma.Get(s.api, "/handoff", s.getPendingHandoff)
 	huma.Post(s.api, "/handoff/reply", s.replyHandoff)

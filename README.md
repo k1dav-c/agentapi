@@ -83,8 +83,9 @@ has the complete commit history.
   has links, files, a task index, export, MCP servers and Restart.
 - [Decision cards](#decision-cards) for terminal dialogs and native requests,
   menus for the agent's settings, a ring for its context, and slash commands.
-- A [file viewer](#file-viewer) with the file and its git diff,
-  [TTY mode](#tty-mode) and the native terminal, also on phones.
+- A [file viewer](#file-viewer) with the file, its git diff and a preview of
+  HTML, Markdown and images, [TTY mode](#tty-mode) and the native terminal,
+  also on phones.
 - [Background alerts](#alerts-connection-recovery-and-caching), browser
   notifications, a transcript cache, and recovery from dropped connections.
 
@@ -286,6 +287,23 @@ uncommitted changes against HEAD (`GET /files/content`, `GET /files/diff`, cut
 at 1 MiB). Only files inside the agent's working directory can be opened. An
 expanded tool call lists its files and shows its change as a diff, with the
 raw input a click away. On a phone the viewer is full screen.
+
+HTML, Markdown and SVG files have a third tab, Preview, and an image file shows
+as the image:
+
+- An HTML page renders in an iframe, with the stylesheets, scripts, images,
+  fonts and media it refers to by relative path inlined (`GET /files/preview`;
+  up to 4 MiB each, 16 MiB in all; a note lists what was left out). The
+  iframe is sandboxed without an origin of its own, so the page's scripts run
+  but can't reach the chat, its session or the API; localStorage,
+  sessionStorage and cookies are kept in memory while the preview is open.
+  Script modules that import other files, and requests the page makes for
+  relative URLs, don't load.
+- A Markdown file opens on its preview: relative images load from the working
+  directory, and relative links open their file in the viewer (`#L12` at its
+  line).
+- PNG, JPEG, GIF, WebP, BMP, ICO and SVG images show as images
+  (`GET /files/image`).
 
 ### TTY mode
 
@@ -1272,7 +1290,8 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
   `--terminal=false` turns it off).
 - Read files in the agent's working directory with the file viewer endpoints;
   paths outside it, also through symlinks, are refused, and the diff only
-  reads the git repository.
+  reads the git repository. An HTML preview's scripts run in a sandbox
+  without access to the chat or the API.
 - Upload files of up to 10 MB; only images are served back.
 - Change the MCP servers and the webhook, and restart the agent.
 
@@ -1419,6 +1438,8 @@ need the native transport.
 | `POST /terminal/input`, `POST /terminal/resize` | Type into the shell; set its size |
 | `GET /files/content` | A file in the agent's working directory, cut at 1 MiB |
 | `GET /files/diff` | The file's uncommitted changes against HEAD |
+| `GET /files/preview` | An HTML file with the files it refers to inlined, for a sandboxed iframe |
+| `GET /files/image` | An image file in the agent's working directory (raster images judged by content, and SVG) |
 
 ### Uploads
 

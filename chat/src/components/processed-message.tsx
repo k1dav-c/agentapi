@@ -1,7 +1,7 @@
 import React from "react";
 import {LinkifyIt} from "linkify-it";
 import {Check, Clipboard} from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, {type Components} from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -208,72 +208,142 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
       <ReactMarkdown
         remarkPlugins={[remarkLinkify, remarkGfm, remarkBreaks]}
         rehypePlugins={[[rehypeHighlight, {languages: common}]]}
-        components={{
-          a: (properties) => {
-            const {children, ...anchorProps} = properties;
-            delete anchorProps.node;
-            return (
-              <a
-                {...anchorProps}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="break-words underline decoration-current/30 underline-offset-4 transition [overflow-wrap:anywhere] hover:decoration-current focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2"
-              >
-                <InsideLink.Provider value={true}>{children}</InsideLink.Provider>
-              </a>
-            );
-          },
-          p: ({children}) => <p className="my-2.5 first:mt-0 last:mb-0">{children}</p>,
-          blockquote: ({children}) => (
-            <blockquote className="my-3 border-l-2 border-border pl-4 text-muted-foreground [&>p]:my-1">
-              {children}
-            </blockquote>
-          ),
-          ul: ({children}) => (
-            <ul className="my-3 list-outside list-disc space-y-1 pl-6 marker:text-muted-foreground">
-              {children}
-            </ul>
-          ),
-          ol: ({children}) => (
-            <ol className="my-3 list-outside list-decimal space-y-1 pl-6 marker:font-mono marker:text-[0.8em] marker:text-muted-foreground">
-              {children}
-            </ol>
-          ),
-          li: ({children}) => (
-            <li className="pl-1 [&>p]:my-0">{children}</li>
-          ),
-          code: ({children, className}) => (
-            <InlineCode className={className} linkFilePaths={linkFilePaths}>
-              {children}
-            </InlineCode>
-          ),
-          table: ({children}) => (
-            <div className="my-3 max-w-full overflow-x-auto rounded-lg border">
-              <table className="w-full border-collapse text-left text-sm">
-                {children}
-              </table>
-            </div>
-          ),
-          thead: ({children}) => (
-            <thead className="bg-muted/70">{children}</thead>
-          ),
-          th: ({children}) => (
-            <th className="border-b border-r px-3 py-2 font-semibold last:border-r-0">
-              {children}
-            </th>
-          ),
-          td: ({children}) => (
-            <td className="border-b border-r px-3 py-2 align-top last:border-r-0">
-              {children}
-            </td>
-          ),
-          tr: ({children}) => (
-            <tr className="last:[&>td]:border-b-0">{children}</tr>
-          ),
-          pre: ({children}) => <CodeBlockCopy>{children}</CodeBlockCopy>,
-        }}
+        components={linkFilePaths ? linkingComponents : plainComponents}
       >
         {messageContent}
+      </ReactMarkdown>
+    </div>
+  );
+});
+
+// How Markdown elements render in the chat. With linkFilePaths, inline code
+// that names a file opens it in the file viewer.
+function markdownComponents(linkFilePaths: boolean): Components {
+  return {
+    a: (properties) => {
+      const {children, ...anchorProps} = properties;
+      delete anchorProps.node;
+      return (
+        <a
+          {...anchorProps}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="break-words underline decoration-current/30 underline-offset-4 transition [overflow-wrap:anywhere] hover:decoration-current focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
+          <InsideLink.Provider value={true}>{children}</InsideLink.Provider>
+        </a>
+      );
+    },
+    p: ({children}) => <p className="my-2.5 first:mt-0 last:mb-0">{children}</p>,
+    blockquote: ({children}) => (
+      <blockquote className="my-3 border-l-2 border-border pl-4 text-muted-foreground [&>p]:my-1">
+        {children}
+      </blockquote>
+    ),
+    ul: ({children}) => (
+      <ul className="my-3 list-outside list-disc space-y-1 pl-6 marker:text-muted-foreground">
+        {children}
+      </ul>
+    ),
+    ol: ({children}) => (
+      <ol className="my-3 list-outside list-decimal space-y-1 pl-6 marker:font-mono marker:text-[0.8em] marker:text-muted-foreground">
+        {children}
+      </ol>
+    ),
+    li: ({children}) => (
+      <li className="pl-1 [&>p]:my-0">{children}</li>
+    ),
+    code: ({children, className}) => (
+      <InlineCode className={className} linkFilePaths={linkFilePaths}>
+        {children}
+      </InlineCode>
+    ),
+    table: ({children}) => (
+      <div className="my-3 max-w-full overflow-x-auto rounded-lg border">
+        <table className="w-full border-collapse text-left text-sm">
+          {children}
+        </table>
+      </div>
+    ),
+    thead: ({children}) => (
+      <thead className="bg-muted/70">{children}</thead>
+    ),
+    th: ({children}) => (
+      <th className="border-b border-r px-3 py-2 font-semibold last:border-r-0">
+        {children}
+      </th>
+    ),
+    td: ({children}) => (
+      <td className="border-b border-r px-3 py-2 align-top last:border-r-0">
+        {children}
+      </td>
+    ),
+    tr: ({children}) => (
+      <tr className="last:[&>td]:border-b-0">{children}</tr>
+    ),
+    pre: ({children}) => <CodeBlockCopy>{children}</CodeBlockCopy>,
+  };
+}
+
+const plainComponents = markdownComponents(false);
+const linkingComponents = markdownComponents(true);
+
+const headingClass = "font-semibold leading-tight first:mt-0";
+
+// A Markdown file, as a document: lines that wrap in the source aren't
+// broken, headings stand out, and relative images and links are resolved
+// from the file. imageURL returns where a relative image loads from;
+// openLink opens a relative link (in the file viewer), or returns false to
+// leave it to the browser.
+export const MarkdownDocument = React.memo(function MarkdownDocument({
+  content,
+  imageURL,
+  openLink,
+}: {
+  content: string;
+  imageURL: (ref: string) => string | undefined;
+  openLink: (ref: string) => boolean;
+}) {
+  const components = React.useMemo<Components>(
+    () => ({
+      ...linkingComponents,
+      h1: ({children}) => <h1 className={`mb-3 mt-7 border-b pb-2 text-2xl ${headingClass}`}>{children}</h1>,
+      h2: ({children}) => <h2 className={`mb-3 mt-7 border-b pb-1.5 text-xl ${headingClass}`}>{children}</h2>,
+      h3: ({children}) => <h3 className={`mb-2 mt-6 text-lg ${headingClass}`}>{children}</h3>,
+      h4: ({children}) => <h4 className={`mb-2 mt-5 text-base ${headingClass}`}>{children}</h4>,
+      h5: ({children}) => <h5 className={`mb-2 mt-5 text-sm ${headingClass}`}>{children}</h5>,
+      h6: ({children}) => <h6 className={`mb-2 mt-5 text-sm text-muted-foreground ${headingClass}`}>{children}</h6>,
+      hr: () => <hr className="my-6 border-border" />,
+      img: ({src, alt, title}) => {
+        const url = typeof src === "string" ? (imageURL(src) ?? src) : undefined;
+        // eslint-disable-next-line @next/next/no-img-element -- served by AgentAPI, not optimizable
+        return <img src={url} alt={alt ?? ""} title={title} loading="lazy" className="inline-block max-w-full rounded-sm align-middle" />;
+      },
+      a: ({children, href, title}) => (
+        <a
+          href={href}
+          title={title}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(event) => {
+            if (href && openLink(href)) event.preventDefault();
+          }}
+          className="break-words text-primary underline decoration-current/30 underline-offset-4 transition [overflow-wrap:anywhere] hover:decoration-current focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
+          <InsideLink.Provider value={true}>{children}</InsideLink.Provider>
+        </a>
+      ),
+    }),
+    [imageURL, openLink],
+  );
+  return (
+    <div className="prose-transcript min-w-0 text-left text-[15px] leading-[1.7]">
+      <ReactMarkdown
+        remarkPlugins={[remarkLinkify, remarkGfm]}
+        rehypePlugins={[[rehypeHighlight, {languages: common}]]}
+        components={components}
+      >
+        {content}
       </ReactMarkdown>
     </div>
   );

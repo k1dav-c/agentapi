@@ -73,8 +73,8 @@ Codex 和 Pi 自己的結構化協定來驅動它們，同時把 AgentAPI 擴充
   [工作階段瀏覽器](#工作階段瀏覽器)提供連結、檔案、任務索引、匯出、MCP 伺服器和重新啟動。
 - 終端機對話框和 native 請求的[決策卡片](#決策卡片)、agent 設定的選單、顯示 context 的圓環，
   以及斜線指令。
-- 可以查看檔案和 git diff 的[檔案檢視器](#檔案檢視器)、[TTY mode](#tty-mode) 和 native
-  終端機，在手機上也能使用。
+- 可以查看檔案、git diff，並預覽 HTML、Markdown 和圖片的[檔案檢視器](#檔案檢視器)、
+  [TTY mode](#tty-mode) 和 native 終端機，在手機上也能使用。
 - [背景提醒](#提醒連線復原與快取)、瀏覽器通知、對話紀錄快取，以及斷線後的復原。
 
 **維運與整合**
@@ -250,6 +250,17 @@ view_image；Pi 的 read、write 和 edit）、agent 回覆中 inline code 裡�
 （`GET /files/content`、`GET /files/diff`，超過 1 MiB 會截斷）。只能開啟 agent 工作目錄裡
 的檔案。展開的工具呼叫會列出它碰到的檔案，並以 diff 顯示它的變更，原始輸入點一下就能看到。
 在手機上檢視器是全螢幕。
+
+HTML、Markdown 和 SVG 檔案還有第三個分頁 Preview，圖片檔則直接顯示圖片：
+
+- HTML 頁面會在 iframe 中呈現，它以相對路徑引用的樣式表、腳本、圖片、字型和影音都會內嵌進頁面
+  （`GET /files/preview`；每個檔案最多 4 MiB，合計 16 MiB；沒有內嵌的項目會列在提示中）。
+  iframe 有 sandbox 且沒有自己的 origin，所以頁面的腳本可以執行，但碰不到聊天介面、它的登入
+  狀態或 API；預覽開著的期間，localStorage、sessionStorage 和 cookie 會保存在記憶體中。
+  會 import 其他檔案的腳本模組，以及頁面對相對網址發出的請求，都不會載入。
+- Markdown 檔案會直接開在預覽：相對路徑的圖片會從工作目錄載入，相對連結會在檢視器中開啟該檔案
+  （`#L12` 會開在那一行）。
+- PNG、JPEG、GIF、WebP、BMP、ICO 和 SVG 圖片會以圖片顯示（`GET /files/image`）。
 
 ### TTY mode
 
@@ -1046,7 +1057,8 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
   `~/.codex/config.toml` 裡的政策；ACP transport 則會核准所有權限請求。
 - 在[終端機](#終端機)裡執行指令（native transport，預設開啟；`--terminal=false` 可以關閉）。
 - 透過檔案檢視器的端點讀取 agent 工作目錄中的檔案；工作目錄以外的路徑（包括透過 symlink）
-  會被拒絕，diff 也只會讀取 git 儲存庫。
+  會被拒絕，diff 也只會讀取 git 儲存庫。HTML 預覽的腳本在 sandbox 中執行，碰不到聊天介面或
+  API。
 - 上傳最大 10 MB 的檔案；只有圖片會被回傳。
 - 修改 MCP 伺服器和 webhook，以及重新啟動 agent。
 
@@ -1189,6 +1201,8 @@ agentapi attach --url localhost:3284
 | `POST /terminal/input`、`POST /terminal/resize` | 在 shell 中輸入按鍵；設定它的大小 |
 | `GET /files/content` | agent 工作目錄中的檔案，超過 1 MiB 會截斷 |
 | `GET /files/diff` | 檔案相對於 HEAD 尚未 commit 的變更 |
+| `GET /files/preview` | 內嵌了引用檔案的 HTML 檔，供有 sandbox 的 iframe 顯示 |
+| `GET /files/image` | agent 工作目錄中的圖片檔（點陣圖依內容判斷，以及 SVG） |
 
 ### 上傳
 

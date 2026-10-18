@@ -36,7 +36,9 @@ export const inlineCodeClass = "rounded-[5px] border border-border bg-muted px-1
 export function FilePathCode({text, fileRef}: {text: string; fileRef: FilePathRef}) {
   const viewer = useFileViewer();
   if (!viewer) return <code className={inlineCodeClass}>{text}</code>;
-  const open = () => viewer.open({path: fileRef.path, line: fileRef.line, tab: "file"});
+  // A line is on the File tab; without one the viewer picks the tab (a
+  // Markdown file opens on its preview).
+  const open = () => viewer.open(fileRef.line ? {path: fileRef.path, line: fileRef.line, tab: "file"} : {path: fileRef.path});
   const label = fileRef.line ? `Open file at line ${fileRef.line}` : "Open file";
   return (
     <Tooltip>

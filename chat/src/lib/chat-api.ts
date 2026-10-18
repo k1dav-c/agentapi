@@ -49,6 +49,16 @@ export interface FileContent {
 
 export type FileDiffStatus = "modified" | "added" | "deleted" | "untracked" | "unchanged" | "not_in_repo";
 
+// An HTML file as a page that shows by itself (GET /files/preview): what it
+// refers to by relative path is inlined, for a sandboxed iframe's srcdoc.
+export interface FilePreview {
+  path: string;
+  relative: string;
+  html: string;
+  // References that weren't inlined, and why.
+  missing: {ref: string; reason: string}[];
+}
+
 // A file's uncommitted changes (GET /files/diff): git's unified diff of the
 // working tree against HEAD, where an untracked file shows as added.
 export interface FileDiff {
@@ -453,6 +463,28 @@ export function createChatAPI(baseURL: string) {
         diff: data.diff ?? "",
         truncated: data.truncated === true,
       };
+    },
+
+    // An HTML file in the agent's working directory with what it refers to
+    // inlined, for the file viewer's preview. ApiError 400: not an HTML
+    // file, or too large.
+    async getFilePreview(path: string): Promise<FilePreview> {
+      const data = await jsonRequest<Partial<FilePreview>>(`/files/preview?path=${encodeURIComponent(path)}`, {
+        fallback: "Failed to preview the file",
+      });
+      return {
+        path: data.path ?? path,
+        relative: data.relative || path,
+        html: data.html ?? "",
+        missing: Array.isArray(data.missing) ? data.missing : [],
+      };
+    },
+
+    // The URL of an image file in the agent's working directory (GET
+    // /files/image), which the session cookie authenticates. version makes
+    // a new URL, to show the file again after it changed.
+    fileImageURL(path: string, version = 0): string {
+      return `${baseURL}/files/image?path=${encodeURIComponent(path)}${version ? `&v=${version}` : ""}`;
     },
 
     async getTimelineEvents(): Promise<unknown[]> {

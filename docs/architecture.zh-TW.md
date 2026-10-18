@@ -134,7 +134,7 @@ flowchart TB
 | --- | --- |
 | `server.go` | 訊息、狀態、事件、佇列、上傳；伺服器的設定與路由 |
 | `native.go` | 請求、設定、中斷、壓縮、重試登入；native observer |
-| `terminal.go`、`files.go` | Shell 終端機與檔案檢視器 |
+| `terminal.go`、`files.go`、`file_preview.go` | Shell 終端機與檔案檢視器 |
 | `mcp.go`、`mcp_management.go` | MCP 伺服器與設定檔 |
 | `webhook.go`、`handoff.go`、`dialog_reply.go` | 執行狀態 webhook、人工回覆 API、終端機對話框的回答 |
 | `auth.go` | Token 驗證與聊天介面登入 |
@@ -343,6 +343,15 @@ agent 忙碌時送出的訊息會在伺服器的佇列中等待（`s.messageQueu
 git（`rev-parse`、`ls-files`、`cat-file`，並關閉 fsmonitor），再在暫存目錄中以
 `git diff --no-index` 比對已 commit 和目前檔案的副本，不使用使用者或系統的 git 設定，所以
 儲存庫設定的任何程式都不會被執行。
+
+預覽透過同一個 root 讀取檔案。`GET /files/preview`（`lib/htmlpreview`）回傳的 HTML 檔中，
+以相對路徑引用的樣式表、腳本、圖片、字型和影音都會轉成 data: URL：只收副檔名符合用途的檔案
+（樣式表必須是 `.css`，腳本必須是 `.js`），不收隱藏目錄裡或工作目錄以外的檔案，每個最多
+4 MiB，合計 16 MiB。聊天介面把頁面放在設了 `allow-scripts`、但沒有 `allow-same-origin` 的
+sandbox iframe 中：頁面沒有 origin，所以它的腳本讀不到聊天介面，也無法帶著 session cookie
+呼叫 API，而且頁面引用的東西都不會從 AgentAPI 載入（前面若有代理，代理的 cookie 也帶不過
+去）。`GET /files/image` 用 `GET /uploads` 提供上傳檔案的方式提供圖片檔：點陣圖依內容判斷，
+SVG 依副檔名判斷，並加上 `nosniff` 和會開啟 sandbox 的 Content-Security-Policy。
 
 ## MCP 管理
 

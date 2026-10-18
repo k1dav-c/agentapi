@@ -26,6 +26,7 @@ import {
   type AgentUsage,
   type FileContent,
   type FileDiff,
+  type FilePreview,
   type MCPCheckResult,
   type MCPConfig,
   type MCPProfiles,
@@ -318,6 +319,8 @@ interface ChatContextValue {
   // for the file viewer (GET /files/content, GET /files/diff).
   getFileContent: (path: string) => Promise<FileContent>;
   getFileDiff: (path: string) => Promise<FileDiff>;
+  getFilePreview: (path: string) => Promise<FilePreview>;
+  fileImageURL: (path: string, version?: number) => string;
   storageScope: string;
   agentType: AgentType;
   // AgentAPI server version (e.g. "0.14.0"); empty until the first status
@@ -1249,6 +1252,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         applyMCPProfile: api.applyMCPProfile,
         getFileContent: api.getFileContent,
         getFileDiff: api.getFileDiff,
+        getFilePreview: api.getFilePreview,
+        fileImageURL: api.fileImageURL,
         storageScope: agentAPIUrl,
         agentType,
         agentapiVersion,
