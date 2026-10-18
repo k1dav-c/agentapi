@@ -213,6 +213,19 @@ export const AgentType: Record<Exclude<AgentType, "unknown">, AgentColorDisplayN
   custom: { displayName: "Custom"}
 }
 
+// parseAgentType is the agent type a server reports: "unknown" for none,
+// and "custom" for one this build of the chat doesn't know (a newer
+// server), so looking up its name can't fail.
+export function parseAgentType(value: string | undefined): AgentType {
+  if (!value) return "unknown";
+  return Object.hasOwn(AgentType, value) ? (value as AgentType) : "custom";
+}
+
+// agentDisplayName names an agent type, or says fallback for "unknown".
+export function agentDisplayName(type: AgentType, fallback: string): string {
+  return type === "unknown" ? fallback : (AgentType[type]?.displayName ?? fallback);
+}
+
 interface ChatContextValue {
   messages: (Message | DraftMessage)[];
   richMessages: RichMessage[];
@@ -772,7 +785,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         }
 
         // Set agent type
-        setAgentType(data.agent_type === "" ? "unknown" : data.agent_type as AgentType);
+        setAgentType(parseAgentType(data.agent_type));
         setAgentapiVersion(data.agentapi_version ?? "");
         setTerminalColumns(data.terminal_columns ?? 0);
         setSessionName(data.session_name ?? "");

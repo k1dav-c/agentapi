@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AgentType, useChat } from "./chat-provider";
+import { agentDisplayName, useChat } from "./chat-provider";
 import { describeTerminalPrompt } from "@/lib/terminal-option";
 import { loginTitle } from "@/lib/login";
 import { alertForTransition, faviconDataUrl, notificationsEnabled, type FaviconBadge } from "@/lib/background-alerts";
@@ -15,7 +15,7 @@ export function BackgroundAlerts() {
   const previous = useRef(kind);
   // A task finished while the tab was hidden and hasn't been seen yet.
   const [unseenFinish, setUnseenFinish] = useState(false);
-  const name = agentType === "unknown" ? "The agent" : AgentType[agentType].displayName;
+  const name = agentDisplayName(agentType, "The agent");
   const task = messages.findLast((message) => message.role === "user")?.content ?? "";
 
   useEffect(() => {

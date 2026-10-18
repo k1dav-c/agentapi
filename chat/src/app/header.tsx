@@ -3,7 +3,7 @@
 import { type ComponentType, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { notificationsEnabled, onNotificationsPreferenceChange, setNotificationsEnabled } from "@/lib/background-alerts";
-import { AgentType, useChat } from "@/components/chat-provider";
+import { agentDisplayName, useChat } from "@/components/chat-provider";
 import { ModeToggle } from "@/components/mode-toggle";
 import { AgentMark } from "@/components/agent-mark";
 import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Tag } from "lucide-react";
@@ -89,7 +89,7 @@ export function Header() {
     status.kind === "working"
       ? [latestTool ? `Using ${latestTool}` : "Processing task", elapsed].filter(Boolean).join(" · ")
       : status.detail;
-  const agentName = agentType === "unknown" ? "Remote coding agent" : AgentType[agentType].displayName;
+  const agentName = agentDisplayName(agentType, "Remote coding agent");
   const held = status.kind === "needs-you" && queuedMessages.length > 0;
 
   return (
@@ -148,7 +148,7 @@ export function Header() {
             <DropdownMenuSeparator />
             <div className="space-y-3 px-2 py-2 text-xs">
               <SessionDetail icon={StatusIcon} label="Status" value={status.label} valueClassName={status.className} />
-              <SessionDetail icon={Bot} label="Agent" value={agentType === "unknown" ? "Unknown" : AgentType[agentType].displayName} />
+              <SessionDetail icon={Bot} label="Agent" value={agentDisplayName(agentType, "Unknown")} />
               {sessionName && <SessionDetail icon={MessageSquareText} label="Session" value={sessionName} />}
               {agentapiVersion && <SessionDetail icon={Tag} label="Version" value={`AgentAPI v${agentapiVersion}`} />}
               <SessionDetail icon={Activity} label="Activity" value={activityDetail} />
