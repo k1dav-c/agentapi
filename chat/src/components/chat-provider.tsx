@@ -48,6 +48,7 @@ import {
 } from "@/lib/native-requests";
 import {isLoginNotice, parseLoginRequired, type LoginRequired} from "@/lib/login";
 import {getAgentState, type AgentStateKind} from "@/lib/session-status";
+import {SyncTracker} from "@/lib/session-sync";
 
 export interface Message {
   id: number;
@@ -425,7 +426,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   // Server conversation state the client holds: its epoch and the highest
   // change sequence applied. Sent as /events?since=&epoch= so a reconnect
   // only receives what changed.
-  const syncRef = useRef({epoch: "", seq: 0});
+  const syncRef = useRef(new SyncTracker());
   // Events received but not applied yet; see EVENT_FLUSH_MS.
   const pendingRef = useRef({
     messages: new Map<number, Message & {seq?: number}>(),
@@ -437,8 +438,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const cacheLoadedForRef = useRef("");
   // Highest seq received on this connection, and the seq the current replay
   // ends at (session_sync.seq) while it is still arriving.
-  const receivedSeqRef = useRef(0);
-  const replayEndRef = useRef<number | null>(null);
 
   const flushEvents = useCallback(() => {
     flushTimerRef.current = null;
@@ -451,9 +450,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     pending.rich = new Map();
     pending.requests = new Map();
     pending.replace = false;
-    let applied = syncRef.current.seq;
-    for (const update of [...messageUpdates, ...richUpdates, ...requestUpdates]) applied = Math.max(applied, update.seq ?? 0);
-    syncRef.current = {...syncRef.current, seq: applied};
+    for (const update of [...messageUpdates, ...richUpdates, ...requestUpdates]) syncRef.current.applied(update.seq ?? 0);
 
     if (replace || messageUpdates.length > 0) {
       setMessages((previous) => {
@@ -483,26 +480,22 @@ export function ChatProvider({ children }: PropsWithChildren) {
     }
   }, []);
 
-  const scheduleFlush = useCallback((seq?: number, immediate = false) => {
-    if (seq !== undefined) receivedSeqRef.current = Math.max(receivedSeqRef.current, seq);
-    const replayEnd = replayEndRef.current;
-    if (replayEnd !== null && receivedSeqRef.current >= replayEnd) {
-      // The replay is complete: apply it now in one render.
-      replayEndRef.current = null;
+  // Schedules applying the events received so far. An event that completes
+  // the replay (see SyncTracker) applies the replay now, in one render.
+  const scheduleFlush = useCallback((event?: MessageEvent, immediate = false) => {
+    if (event && syncRef.current.noteEvent(event.lastEventId)) {
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
       flushTimerRef.current = setTimeout(flushEvents, 0);
       return;
     }
-    if (immediate && replayEnd === null) {
+    const replaying = syncRef.current.replaying;
+    if (immediate && !replaying) {
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
       flushEvents();
       return;
     }
     if (flushTimerRef.current) return;
-    flushTimerRef.current = setTimeout(
-      flushEvents,
-      replayEndRef.current !== null ? REPLAY_FLUSH_MAX_MS : EVENT_FLUSH_MS,
-    );
+    flushTimerRef.current = setTimeout(flushEvents, replaying ? REPLAY_FLUSH_MAX_MS : EVENT_FLUSH_MS);
   }, [flushEvents]);
 
   const reconnectNow = useCallback(() => {
@@ -682,10 +675,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
         return null; // Don't try to connect if URL is empty
       }
 
-      const {epoch, seq} = syncRef.current;
+      const {epoch, watermark} = syncRef.current;
       const eventSource = new EventSource(
         epoch
-          ? `${agentAPIUrl}/events?sync=1&since=${seq}&epoch=${encodeURIComponent(epoch)}`
+          ? `${agentAPIUrl}/events?sync=1&since=${watermark}&epoch=${encodeURIComponent(epoch)}`
           : `${agentAPIUrl}/events?sync=1`,
         {withCredentials: withCredentials(agentAPIUrl)},
       );
@@ -699,7 +692,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       const assumeFullReplay = () => {
         if (synced) return;
         synced = true;
-        syncRef.current = {epoch: "", seq: 0};
+        syncRef.current.reset();
         pendingRef.current.messages.clear();
         pendingRef.current.rich.clear();
         pendingRef.current.requests.clear();
@@ -710,7 +703,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         lastEventAtRef.current = Date.now();
         synced = true;
         const data: SessionSyncEvent = JSON.parse(event.data);
-        const full = data.full || data.epoch !== syncRef.current.epoch;
+        const full = syncRef.current.begin(data, event.lastEventId);
         if (full) {
           // Everything that follows is the full state: replace what the
           // cache or an earlier connection left.
@@ -718,16 +711,14 @@ export function ChatProvider({ children }: PropsWithChildren) {
           pendingRef.current.rich.clear();
           pendingRef.current.requests.clear();
           pendingRef.current.replace = true;
-          syncRef.current = {epoch: data.epoch, seq: 0};
         }
-        receivedSeqRef.current = syncRef.current.seq;
-        replayEndRef.current = data.seq > receivedSeqRef.current ? data.seq : null;
-        if (full || replayEndRef.current === null) scheduleFlush();
+        if (full || !syncRef.current.replaying) scheduleFlush();
       });
 
       // Server-sent keep-alive; only used to detect dead connections.
-      eventSource.addEventListener("heartbeat", () => {
+      eventSource.addEventListener("heartbeat", (event) => {
         lastEventAtRef.current = Date.now();
+        if (syncRef.current.replaying) scheduleFlush(event);
       });
 
       // Handle message updates
@@ -742,7 +733,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
           time: data.time,
           seq: data.seq,
         } as Message & {seq?: number});
-        scheduleFlush(data.seq);
+        scheduleFlush(event);
       });
 
       eventSource.addEventListener("rich_message_update", (event) => {
@@ -750,7 +741,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         assumeFullReplay();
         const data: RichMessage & {seq?: number} = JSON.parse(event.data);
         pendingRef.current.rich.set(richMessageKey(data), data);
-        scheduleFlush(data.seq);
+        scheduleFlush(event);
       });
 
       // A request the agent waits on (native transport) opened or changed.
@@ -762,7 +753,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         assumeFullReplay();
         const data: NativeRequest = JSON.parse(event.data);
         pendingRef.current.requests.set(data.id, data);
-        scheduleFlush(data.seq, true);
+        scheduleFlush(event, true);
       });
 
       // Handle status changes
@@ -770,6 +761,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         lastEventAtRef.current = Date.now();
         assumeFullReplay();
         const data: StatusChangeEvent = JSON.parse(event.data);
+        // The replay's last event may be its status.
+        if (syncRef.current.replaying) scheduleFlush(event);
         if (data.status === "stable") {
           setServerStatus("stable");
         } else if (data.status === "running") {
@@ -809,6 +802,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       // Handle agent error events
       eventSource.addEventListener("agent_error", (event) => {
         const messageEvent = event as MessageEvent;
+        if (syncRef.current.replaying) scheduleFlush(messageEvent);
         try {
           const data: ErrorEventData = JSON.parse(messageEvent.data);
           // The server sends its stored errors again on every connection.
@@ -893,7 +887,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       cacheLoadedForRef.current = agentAPIUrl;
       void loadSession<Message, RichMessage, NativeRequest>(agentAPIUrl).then((cached) => {
         if (cached && !started && !disposed) {
-          syncRef.current = {epoch: cached.epoch, seq: cached.seq};
+          syncRef.current.restore(cached.epoch, cached.seq);
           setMessages((previous) => [...cached.messages, ...previous.filter(isDraftMessage)]);
           setRichMessages(cached.richMessages);
           setRequests(cached.requests);
@@ -934,7 +928,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
     const save = () => {
       timer = null;
       lastSave = Date.now();
-      const {epoch, seq} = syncRef.current;
+      // The watermark doesn't pass a replay still on its way, so a reload
+      // gets the rest of it again.
+      const {epoch, watermark: seq} = syncRef.current;
       if (!epoch) return;
       void saveSession(agentAPIUrl, {
         epoch,
@@ -1216,7 +1212,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         downloadSession,
         deleteMessages: async () => {
           await api.deleteMessages();
-          syncRef.current = {epoch: "", seq: 0};
+          syncRef.current.reset();
           void clearSession(agentAPIUrl);
           setMessages([]);
           setRichMessages([]);
