@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // staticResolver is a test helper that returns a fixed path.
@@ -517,4 +519,43 @@ func TestClaudeParser_ToolResultImage(t *testing.T) {
 	if block.Images[0].MediaType != "image/png" || string(block.Images[0].Data) != "\x89PNG\r\n\x1a\n" {
 		t.Errorf("image = %q %q", block.Images[0].MediaType, block.Images[0].Data)
 	}
+}
+
+func TestStoppedWatcherDropsWhatItHolds(t *testing.T) {
+	jsonlPath := filepath.Join(t.TempDir(), "session.jsonl")
+	// An assistant message without a stop reason stays pending.
+	require.NoError(t, os.WriteFile(jsonlPath, []byte(
+		`{"type":"user","uuid":"u1","timestamp":"2026-07-24T09:35:19.000Z","message":{"role":"user","content":"hello"}}`+"\n"+
+			`{"type":"assistant","uuid":"a1","timestamp":"2026-07-24T09:35:26.000Z","message":{"id":"msg_001","role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"half"}]}}`+"\n"),
+		0o644))
+	var mu sync.Mutex
+	var roles []string
+	w := New(Config{
+		Resolver: &staticResolver{path: jsonlPath},
+		Parser:   NewClaudeParser(),
+		OnMessage: func(msg RichMessage) {
+			mu.Lock()
+			defer mu.Unlock()
+			roles = append(roles, msg.Role)
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.Start(ctx)
+	}()
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(roles) == 1
+	}, 5*time.Second, 10*time.Millisecond)
+
+	// A restart stops the watcher: its pending message would land in the
+	// next conversation.
+	cancel()
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"user"}, roles)
 }

@@ -91,6 +91,7 @@ type Server struct {
 	updateAgent        func(context.Context)
 	terminal           *shellterm.Terminal // nil without a terminal
 	jsonlWatcherCancel context.CancelFunc
+	jsonlWatcherDone   *sync.WaitGroup
 	jsonlParentCtx     context.Context // parent context for spawning new JSONL watchers
 	nextQueueID        int
 	// Consecutive non-validation dispatch failures for the queued message
@@ -672,12 +673,7 @@ func requestLogMiddleware(logger *slog.Logger) func(next http.Handler) http.Hand
 // again after each agent restart so that tool calls, thinking, and usage
 // data from the new session are captured.
 func (s *Server) startJSONLWatcher(pid int) {
-	// Stop the previous watcher, if any.
-	if s.jsonlWatcherCancel != nil {
-		s.jsonlWatcherCancel()
-		s.jsonlWatcherCancel = nil
-	}
-
+	s.stopJSONLWatcher()
 	if pid <= 0 {
 		return
 	}
@@ -718,14 +714,17 @@ func (s *Server) startJSONLWatcher(pid int) {
 	}
 
 	watchCtx, cancel := context.WithCancel(s.jsonlParentCtx)
-	s.jsonlWatcherCancel = cancel
+	done := &sync.WaitGroup{}
+	s.jsonlWatcherCancel, s.jsonlWatcherDone = cancel, done
 
 	// A new agent process starts a new session, unnamed until the agent
 	// names it.
 	s.emitter.SetSessionName("")
 	namer := jsonlwatcher.NewSessionNamer(string(s.agentType))
 	if polled, ok := namer.(jsonlwatcher.PolledSessionNamer); ok {
+		done.Add(1)
 		go func() {
+			defer done.Done()
 			ticker := time.NewTicker(3 * time.Second)
 			defer ticker.Stop()
 			for {
@@ -763,7 +762,23 @@ func (s *Server) startJSONLWatcher(pid int) {
 			s.emitter.EmitSessionEvents(events)
 		},
 	})
-	go w.Start(watchCtx)
+	done.Add(1)
+	go func() {
+		defer done.Done()
+		w.Start(watchCtx)
+	}()
+}
+
+// stopJSONLWatcher stops the session-log watcher, if one runs, and waits
+// until it did: a dying agent's session must not reach the conversation
+// that replaces it.
+func (s *Server) stopJSONLWatcher() {
+	if s.jsonlWatcherCancel == nil {
+		return
+	}
+	s.jsonlWatcherCancel()
+	s.jsonlWatcherDone.Wait()
+	s.jsonlWatcherCancel, s.jsonlWatcherDone = nil, nil
 }
 
 // sseMiddleware creates middleware that prevents proxy buffering for SSE endpoints

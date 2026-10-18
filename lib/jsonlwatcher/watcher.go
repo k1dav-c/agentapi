@@ -172,8 +172,9 @@ func (w *Watcher) tailFile(ctx context.Context, path string) string {
 
 		select {
 		case <-ctx.Done():
-			// Flush all pending messages on shutdown, even incomplete ones.
-			w.emit(w.parser.Flush())
+			// Stopped: the session is over (a restart, or AgentAPI exits),
+			// and what the parser still holds would land in whatever
+			// conversation follows it.
 			return ""
 		case <-pollTicker.C:
 			// continue reading

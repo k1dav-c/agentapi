@@ -42,6 +42,7 @@ func (s *Server) deleteMessages(_ context.Context, _ *struct{}) (*DeleteMessages
 
 	// restartLocked clears a native conversation itself.
 	if s.native == nil && !s.stopping {
+		s.stopJSONLWatcher()
 		s.resetConversationLocked()
 	}
 	ctx, cancel := s.agentCtx(restartTimeout)
@@ -100,6 +101,7 @@ func (s *Server) restartLocked(ctx context.Context) error {
 		}
 		return nil
 	}
+	s.stopJSONLWatcher()
 	newPID, err := s.restartAgent(ctx)
 	if err != nil {
 		s.emitter.SetLifecycle(LifecycleFailed)
