@@ -56,6 +56,7 @@ import {getAgentState, type AgentStateKind} from "@/lib/session-status";
 import {SyncTracker} from "@/lib/session-sync";
 import {Store, useStoreSelector} from "@/lib/store";
 import {useStableCallback} from "@/lib/use-stable-callback";
+import {usePersisted} from "@/lib/use-persisted";
 
 export interface Message {
   id: number;
@@ -392,7 +393,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [nextReconnectAt, setNextReconnectAt] = useState<number | null>(null);
   const [reconnectNonce, setReconnectNonce] = useState(0);
-  const [failedMessagesHydrated, setFailedMessagesHydrated] = useState(false);
   const agentAPIUrl = useAgentAPIUrl();
   const api = useMemo(() => createChatAPI(agentAPIUrl), [agentAPIUrl]);
   const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
@@ -536,52 +536,25 @@ export function ChatProvider({ children }: PropsWithChildren) {
     };
   }, [api, connectionStatus, workspaceParam]);
 
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(failedMessagesStorageKey);
-      if (!saved) {
-        setFailedMessagesHydrated(true);
-        return;
-      }
-      const failed = parseFailedMessages(saved) as DraftMessage[];
+  // Messages that failed to send survive a reload, to be retried.
+  usePersisted(
+    failedMessagesStorageKey,
+    messages,
+    (current) => {
+      const failed = current.filter(
+        (message): message is DraftMessage => isDraftMessage(message) && (message as DraftMessage).deliveryStatus === "failed",
+      );
+      return failed.length > 0 ? JSON.stringify(failed) : null;
+    },
+    (stored) => {
+      if (!stored) return;
+      const failed = parseFailedMessages(stored) as DraftMessage[];
       setMessages((previous) => {
-        const existing = new Set(
-          previous
-            .filter(isDraftMessage)
-            .map((message) => (message as DraftMessage).clientId),
-        );
-        return [
-          ...previous,
-          ...failed.filter((message) => !existing.has(message.clientId)),
-        ];
+        const existing = new Set(previous.filter(isDraftMessage).map((message) => (message as DraftMessage).clientId));
+        return [...previous, ...failed.filter((message) => !existing.has(message.clientId))];
       });
-    } catch {
-      window.localStorage.removeItem(failedMessagesStorageKey);
-    } finally {
-      setFailedMessagesHydrated(true);
-    }
-  }, [failedMessagesStorageKey]);
-
-  useEffect(() => {
-    if (!failedMessagesHydrated) return;
-    const failed = messages.filter(
-      (message): message is DraftMessage =>
-        isDraftMessage(message) &&
-        (message as DraftMessage).deliveryStatus === "failed",
-    );
-    try {
-      if (failed.length > 0) {
-        window.localStorage.setItem(
-          failedMessagesStorageKey,
-          JSON.stringify(failed),
-        );
-      } else {
-        window.localStorage.removeItem(failedMessagesStorageKey);
-      }
-    } catch {
-      // Keep failed messages in memory when storage is unavailable.
-    }
-  }, [failedMessagesHydrated, failedMessagesStorageKey, messages]);
+    },
+  );
 
   // Set up SSE connection to the events endpoint
   useEffect(() => {
