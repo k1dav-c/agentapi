@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.24.0
+
 ### Features
 
 - Without `--api-token`, a server that listens on an address other machines can reach (the default
