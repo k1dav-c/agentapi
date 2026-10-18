@@ -168,8 +168,7 @@ type ServerConfig struct {
 	InitialPrompt          string
 	Clock                  quartz.Clock
 	StatePersistenceConfig st.StatePersistenceConfig
-	AgentPID               int // PID of the agent process, 0 to disable JSONL watcher
-	AgentStartedAt         time.Time
+	AgentPID               int    // PID of the agent process, 0 to disable JSONL watcher
 	CWD                    string // Working directory (used by Codex resolver)
 	// TerminalColumns is the width of the agent's emulated terminal, 0 when
 	// the transport has no terminal.

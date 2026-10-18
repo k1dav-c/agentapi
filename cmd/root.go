@@ -16,12 +16,14 @@ var rootCmd = &cobra.Command{
 	Short:   "AgentAPI CLI",
 	Long:    `AgentAPI - HTTP API for Claude Code, Goose, Aider, Gemini and Codex`,
 	Version: version.Version,
+	// Execute prints the error, once.
+	SilenceErrors: true,
 }
 
 func Execute() {
 	err := rootCmd.Execute()
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
