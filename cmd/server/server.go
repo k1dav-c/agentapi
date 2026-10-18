@@ -125,6 +125,9 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
 		fmt.Println(srv.GetOpenAPI())
 		return nil
 	}
+	if warning := exposureWarning(opts.bind, apiToken, opts.transport == httpapi.TransportNative && opts.terminal); warning != "" {
+		logger.Warn(warning)
+	}
 	return serve(ctx, logger, srv, agent)
 }
 
@@ -269,6 +272,32 @@ func chatSignInURL(bind string, port int, token string) string {
 		host = "localhost"
 	}
 	return fmt.Sprintf("http://%s/chat/embed#token=%s", net.JoinHostPort(host, strconv.Itoa(port)), url.QueryEscape(token))
+}
+
+// exposureWarning returns the warning for a server that anyone who can
+// connect to it may use: it asks for no API token and listens on an address
+// other machines can reach. It returns "" otherwise. terminal says whether
+// the server offers its shell terminal.
+func exposureWarning(bind, apiToken string, terminal bool) string {
+	if apiToken != "" || isLoopbackHost(bind) {
+		return ""
+	}
+	what := "the agent"
+	if terminal {
+		what = "the agent and the shell terminal"
+	}
+	return "No API token is set and the server listens on an address other machines can reach, " +
+		"so anyone who can connect to it can use " + what +
+		"; set --api-token, or --bind 127.0.0.1 to accept only local connections"
+}
+
+// isLoopbackHost reports whether listening on host (an IP address, a
+// hostname, or "" for every interface) accepts only local connections.
+func isLoopbackHost(host string) bool {
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return strings.EqualFold(strings.TrimSuffix(host, "."), "localhost")
 }
 
 var agentNames = (func() []string {

@@ -860,3 +860,17 @@ func TestChatSignInURL(t *testing.T) {
 	assert.Equal(t, "http://[::1]:3284/chat/embed#token=abc123", chatSignInURL("::1", 3284, "abc123"))
 	assert.Equal(t, "http://localhost:3284/chat/embed#token=a%26b", chatSignInURL("", 3284, "a&b"))
 }
+
+func TestExposureWarning(t *testing.T) {
+	t.Parallel()
+	for _, bind := range []string{"", "0.0.0.0", "::", "192.168.1.5", "example.com"} {
+		warning := exposureWarning(bind, "", false)
+		assert.Contains(t, warning, "--api-token", bind)
+		assert.NotContains(t, warning, "terminal", bind)
+	}
+	assert.Contains(t, exposureWarning("", "", true), "the shell terminal")
+	for _, bind := range []string{"127.0.0.1", "127.0.1.1", "::1", "localhost", "LOCALHOST."} {
+		assert.Empty(t, exposureWarning(bind, "", true), bind)
+	}
+	assert.Empty(t, exposureWarning("", "secret", true), "with a token")
+}
