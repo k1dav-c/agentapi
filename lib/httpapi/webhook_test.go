@@ -6,13 +6,16 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	mf "github.com/coder/agentapi/lib/msgfmt"
-	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	mf "github.com/coder/agentapi/lib/msgfmt"
+	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 func TestWebhookConfigValidation(t *testing.T) {
@@ -54,6 +57,7 @@ func TestWebhookStatusChangesOnly(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeCodex,
 		TransportPTY,
+		quartz.NewReal(),
 	)
 	require.NoError(t, err)
 
@@ -95,6 +99,7 @@ func TestWebhookSend(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeClaude,
 		TransportACP,
+		quartz.NewReal(),
 	)
 	require.NoError(t, err)
 	event := WebhookEvent{
@@ -111,7 +116,7 @@ func TestWebhookSend(t *testing.T) {
 	}
 	body, err := json.Marshal(event)
 	require.NoError(t, err)
-	require.NoError(t, dispatcher.sendWithConfig(t.Context(), dispatcher.config, dispatcher.client, event, body))
+	require.NoError(t, dispatcher.sendWithConfig(t.Context(), dispatcher.config, &http.Client{}, event, body))
 
 	assert.JSONEq(t, string(body), string(receivedBody))
 	assert.Equal(t, "application/json", receivedHeader.Get("Content-Type"))
@@ -134,10 +139,11 @@ func TestWebhookSendRejectsNonSuccessfulResponse(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeClaude,
 		TransportPTY,
+		quartz.NewReal(),
 	)
 	require.NoError(t, err)
 	event := WebhookEvent{ID: "delivery-1", CreatedAt: time.Now()}
-	err = dispatcher.sendWithConfig(t.Context(), dispatcher.config, dispatcher.client, event, []byte(`{}`))
+	err = dispatcher.sendWithConfig(t.Context(), dispatcher.config, &http.Client{}, event, []byte(`{}`))
 	require.ErrorContains(t, err, "503 Service Unavailable")
 }
 
@@ -159,6 +165,7 @@ func TestWebhookCustomPayloadTemplate(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeClaude,
 		TransportPTY,
+		quartz.NewReal(),
 	)
 	require.NoError(t, err)
 
@@ -176,7 +183,7 @@ func TestWebhookCustomPayloadTemplate(t *testing.T) {
 	}
 	body, err := dispatcher.renderBody(event)
 	require.NoError(t, err)
-	require.NoError(t, dispatcher.sendWithConfig(t.Context(), dispatcher.config, dispatcher.client, event, body))
+	require.NoError(t, dispatcher.sendWithConfig(t.Context(), dispatcher.config, &http.Client{}, event, body))
 
 	assert.JSONEq(t, `{"event":"run.status_changed","status":"stable","prev":"running","agent":"claude"}`, string(receivedBody))
 }
@@ -189,6 +196,7 @@ func TestWebhookInvalidPayloadTemplate(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeClaude,
 		TransportPTY,
+		quartz.NewReal(),
 	)
 	require.ErrorContains(t, err, "invalid webhook payload template")
 }
@@ -205,6 +213,7 @@ func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeClaude,
 		TransportPTY,
+		quartz.NewReal(),
 	)
 	require.NoError(t, err)
 	server := &Server{webhook: dispatcher}
@@ -249,4 +258,44 @@ func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
 
 	dispatcher.statusChanged(AgentStatusRunning, AgentStatusStable)
 	assert.Empty(t, dispatcher.queue)
+}
+
+// A delivery that fails is tried again after a second, then after two, on
+// the server's clock.
+func TestWebhookRetries(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	clock := quartz.NewMock(t)
+	dispatcher, err := newWebhookDispatcher(
+		WebhookConfig{URL: server.URL, MaxAttempts: 3},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		mf.AgentTypeClaude,
+		TransportPTY,
+		clock,
+	)
+	require.NoError(t, err)
+	trap := clock.Trap().NewTimer("webhook", "retry")
+	defer trap.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		dispatcher.deliver(t.Context(), WebhookEvent{ID: "e1", Type: webhookEventRunStatusChanged, CreatedAt: clock.Now()})
+	}()
+	for _, wait := range []time.Duration{time.Second, 2 * time.Second} {
+		call := trap.MustWait(t.Context())
+		assert.Equal(t, wait, call.Duration)
+		call.Release()
+		clock.Advance(wait).MustWait(t.Context())
+	}
+	<-done
+	assert.EqualValues(t, 3, calls.Load())
 }

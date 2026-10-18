@@ -210,15 +210,17 @@ func isolateViper(t *testing.T) {
 	// Reset viper
 	viper.Reset()
 
-	// Clear AGENTAPI_ env vars
-	var agentapiEnvs []string
+	// Clear the AGENTAPI_ variables, and set them back afterwards: AgentAPI
+	// reads them as its flags.
+	saved := map[string]string{}
 	for _, env := range os.Environ() {
-		if strings.HasPrefix(env, "AGENTAPI_") {
-			parts := strings.SplitN(env, "=", 2)
-			agentapiEnvs = append(agentapiEnvs, parts[0])
-			if err := os.Unsetenv(parts[0]); err != nil {
-				t.Fatalf("Failed to unset env var %s: %v", parts[0], err)
-			}
+		key, value, _ := strings.Cut(env, "=")
+		if !strings.HasPrefix(key, "AGENTAPI_") {
+			continue
+		}
+		saved[key] = value
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("Failed to unset env var %s: %v", key, err)
 		}
 	}
 
@@ -228,13 +230,9 @@ func isolateViper(t *testing.T) {
 		for key, value := range oldConfig {
 			viper.Set(key, value)
 		}
-
-		// Restore env vars
-		for _, key := range agentapiEnvs {
-			if val := os.Getenv(key); val != "" {
-				if err := os.Setenv(key, val); err != nil {
-					t.Fatalf("Failed to set env var %s: %v", key, err)
-				}
+		for key, value := range saved {
+			if err := os.Setenv(key, value); err != nil {
+				t.Errorf("Failed to set env var %s: %v", key, err)
 			}
 		}
 	})

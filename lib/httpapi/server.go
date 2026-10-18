@@ -235,7 +235,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		return mf.FormatToolCall(config.AgentType, message)
 	}
 
-	webhook, err := newWebhookDispatcher(config.Webhook, logger, config.AgentType, config.Transport)
+	webhook, err := newWebhookDispatcher(config.Webhook, logger, config.AgentType, config.Transport, config.Clock)
 	if err != nil {
 		return nil, fmt.Errorf("configure webhook: %w", err)
 	}

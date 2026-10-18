@@ -17,6 +17,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/coder/quartz"
+
 	mf "github.com/coder/agentapi/lib/msgfmt"
 )
 
@@ -87,8 +89,8 @@ type webhookDispatcher struct {
 	mu        sync.RWMutex
 	config    WebhookConfig
 	tmpl      *template.Template // nil when using the default JSON payload
-	client    *http.Client
 	logger    *slog.Logger
+	clock     quartz.Clock
 	runID     string
 	agentType mf.AgentType
 	transport Transport
@@ -106,7 +108,7 @@ func parseWebhookTemplate(templateStr string) (*template.Template, error) {
 	return tmpl, nil
 }
 
-func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType mf.AgentType, transport Transport) (*webhookDispatcher, error) {
+func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType mf.AgentType, transport Transport, clock quartz.Clock) (*webhookDispatcher, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
@@ -118,8 +120,8 @@ func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType m
 	return &webhookDispatcher{
 		config:    config,
 		tmpl:      tmpl,
-		client:    &http.Client{Timeout: config.Timeout},
 		logger:    logger,
+		clock:     clock,
 		runID:     randomWebhookID(),
 		agentType: agentType,
 		transport: transport,
@@ -156,7 +158,6 @@ func (d *webhookDispatcher) updateConfig(config WebhookConfig) error {
 	defer d.mu.Unlock()
 	d.config = config
 	d.tmpl = tmpl
-	d.client = &http.Client{Timeout: config.Timeout}
 	return nil
 }
 
@@ -175,7 +176,7 @@ func (d *webhookDispatcher) statusChanged(previous, current AgentStatus) {
 	event := WebhookEvent{
 		ID:        randomWebhookID(),
 		Type:      webhookEventRunStatusChanged,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: d.clock.Now().UTC(),
 		Data: WebhookEventData{
 			RunID:          d.runID,
 			Status:         current,
@@ -247,7 +248,7 @@ func (d *webhookDispatcher) deliver(ctx context.Context, event WebhookEvent) {
 			d.logger.Warn("Webhook delivery failed; retrying", "event_id", event.ID, "attempt", attempt, "error", err)
 		}
 		if attempt < config.MaxAttempts {
-			timer := time.NewTimer(time.Duration(attempt) * time.Second)
+			timer := d.clock.NewTimer(time.Duration(attempt)*time.Second, "webhook", "retry")
 			select {
 			case <-ctx.Done():
 				timer.Stop()
