@@ -17,6 +17,7 @@ import { splitThinking } from "@/lib/thinking";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useThrottledValue } from "@/lib/use-throttled";
 import { copyText } from "@/lib/clipboard";
+import { useDialogFromMenu } from "@/lib/menu-dialog";
 import {
   Dialog,
   DialogContent,
@@ -115,6 +116,7 @@ export function TaskGroup({
   // needed for copy, export and preview, so do it on demand.
   const toMarkdown = () => taskToMarkdown(toSearchableTask(task), number);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const previewFromMenu = useDialogFromMenu(() => setPreviewOpen(true));
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   useEffect(() => {
@@ -204,8 +206,8 @@ export function TaskGroup({
                   <span className="sr-only">Task {number} actions</span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setPreviewOpen(true)}>
+              <DropdownMenuContent align="end" onCloseAutoFocus={previewFromMenu.onCloseAutoFocus}>
+                <DropdownMenuItem onSelect={previewFromMenu.onSelect}>
                   <Eye />
                   Preview Markdown
                 </DropdownMenuItem>

@@ -10,6 +10,7 @@ import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Downl
 import { computeTokenTotals, formatTokenCount, getStatusMeta } from "@/lib/session-status";
 import { useWorkingElapsed } from "@/lib/use-elapsed";
 import { openShortcuts } from "@/components/keyboard-shortcuts";
+import { useDialogFromMenu } from "@/lib/menu-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,6 +35,7 @@ export function Header() {
     sessionName,
   } = useChat();
   const [downloading, setDownloading] = useState(false);
+  const shortcutsFromMenu = useDialogFromMenu(openShortcuts);
   const elapsed = useWorkingElapsed(serverStatus);
   const [notify, setNotify] = useState(false);
   useEffect(() => {
@@ -141,7 +143,7 @@ export function Header() {
               )}
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-72 p-2">
+          <DropdownMenuContent align="end" className="w-72 p-2" onCloseAutoFocus={shortcutsFromMenu.onCloseAutoFocus}>
             <DropdownMenuLabel>Session details</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <div className="space-y-3 px-2 py-2 text-xs">
@@ -183,7 +185,7 @@ export function Header() {
               {notify ? <BellRing /> : <BellOff />}
               {notify ? "Background notifications on" : "Notify me in the background"}
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={openShortcuts}>
+            <DropdownMenuItem onSelect={shortcutsFromMenu.onSelect}>
               <Keyboard />
               Keyboard shortcuts
             </DropdownMenuItem>
