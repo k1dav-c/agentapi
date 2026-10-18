@@ -55,6 +55,7 @@ func (s *Server) startJSONLWatcher(pid int) {
 		Resolver: agent.Resolver,
 		Parser:   agent.Parser,
 		Logger:   s.logger,
+		Clock:    s.clock,
 		OnMessage: func(msg jsonlwatcher.RichMessage) {
 			s.storeRichImages(&msg)
 			s.emitter.EmitRichMessage(msg)

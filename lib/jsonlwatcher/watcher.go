@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"time"
+
+	"github.com/coder/quartz"
 )
 
 const (
@@ -24,6 +26,8 @@ type Config struct {
 	Logger    *slog.Logger
 	OnMessage func(RichMessage) // called when a message is completed or updated
 	OnLine    func([]byte)      // called for each complete raw JSONL record
+	// Clock paces the polling; the real clock when nil.
+	Clock quartz.Clock
 }
 
 // Watcher tails a JSONL session file and assembles structured messages
@@ -36,6 +40,7 @@ type Watcher struct {
 	logger    *slog.Logger
 	onMessage func(RichMessage)
 	onLine    func([]byte)
+	clock     quartz.Clock
 }
 
 // New creates a Watcher but does not start it.
@@ -44,12 +49,17 @@ func New(cfg Config) *Watcher {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	clock := cfg.Clock
+	if clock == nil {
+		clock = quartz.NewReal()
+	}
 	return &Watcher{
 		resolver:  cfg.Resolver,
 		parser:    cfg.Parser,
 		logger:    logger,
 		onMessage: cfg.OnMessage,
 		onLine:    cfg.OnLine,
+		clock:     clock,
 	}
 }
 
@@ -80,7 +90,7 @@ func (w *Watcher) Start(ctx context.Context) {
 // only be created when the user sends their first message, which can be
 // arbitrarily long after the agent starts.
 func (w *Watcher) waitForSessionFile(ctx context.Context) (string, error) {
-	ticker := time.NewTicker(sessionPollInterval)
+	ticker := w.clock.NewTicker(sessionPollInterval, "Watcher", "resolve")
 	defer ticker.Stop()
 
 	for {
@@ -102,7 +112,7 @@ func (w *Watcher) waitForSessionFile(ctx context.Context) (string, error) {
 func (w *Watcher) tailFile(ctx context.Context, path string) string {
 	// Wait for the file to exist
 	var f *os.File
-	ticker := time.NewTicker(sessionPollInterval)
+	ticker := w.clock.NewTicker(sessionPollInterval, "Watcher", "open")
 	defer ticker.Stop()
 
 	for {
@@ -136,9 +146,9 @@ func (w *Watcher) tailFile(ctx context.Context, path string) string {
 	w.logger.Info("Opened JSONL file for tailing", "path", path)
 
 	reader := bufio.NewReader(f)
-	pollTicker := time.NewTicker(pollInterval)
+	pollTicker := w.clock.NewTicker(pollInterval, "Watcher", "poll")
 	defer pollTicker.Stop()
-	resolveTicker := time.NewTicker(sessionPollInterval)
+	resolveTicker := w.clock.NewTicker(sessionPollInterval, "Watcher", "resolve")
 	defer resolveTicker.Stop()
 
 	for {

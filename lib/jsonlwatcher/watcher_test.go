@@ -9,8 +9,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/require"
 )
+
+// pump advances clock one event at a time until cond holds: the watcher
+// reads and resolves only when its clock ticks, and handles a tick on its
+// own goroutine.
+func pump(t *testing.T, clock *quartz.Mock, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the watcher")
+		}
+		if _, ok := clock.Peek(); ok {
+			_, w := clock.AdvanceNext()
+			w.MustWait(context.Background())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
 
 // staticResolver is a test helper that returns a fixed path.
 type staticResolver struct {
@@ -55,9 +74,11 @@ func TestWatcherSwitchesSessionFiles(t *testing.T) {
 	var mu sync.Mutex
 	var messages []RichMessage
 	lineCount := 0
+	clock := quartz.NewMock(t)
 	w := New(Config{
 		Resolver: resolver,
 		Parser:   NewClaudeParser(),
+		Clock:    clock,
 		OnMessage: func(message RichMessage) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -75,17 +96,11 @@ func TestWatcherSwitchesSessionFiles(t *testing.T) {
 
 	waitFor := func(condition func() bool) {
 		t.Helper()
-		deadline := time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) {
+		pump(t, clock, func() bool {
 			mu.Lock()
-			done := condition()
-			mu.Unlock()
-			if done {
-				return
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		t.Fatal("timed out waiting for watcher")
+			defer mu.Unlock()
+			return condition()
+		})
 	}
 
 	waitFor(func() bool { return lineCount == 1 && len(messages) >= 1 })
@@ -112,9 +127,12 @@ func TestWatcherFollowsSessionThatIsNeverCreated(t *testing.T) {
 	resolver := &switchingResolver{path: missingPath}
 	var mu sync.Mutex
 	var messages []RichMessage
+	clock := quartz.NewMock(t)
+	opening := clock.Trap().NewTicker("Watcher", "open")
 	w := New(Config{
 		Resolver: resolver,
 		Parser:   NewClaudeParser(),
+		Clock:    clock,
 		OnMessage: func(message RichMessage) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -125,20 +143,16 @@ func TestWatcherFollowsSessionThatIsNeverCreated(t *testing.T) {
 	defer cancel()
 	go w.Start(ctx)
 
-	time.Sleep(2 * sessionPollInterval)
+	// It waits for the file to appear; the session moves on meanwhile.
+	opening.MustWait(ctx).Release()
+	opening.Close()
+	clock.Advance(sessionPollInterval).MustWait(ctx)
 	resolver.setPath(activePath)
-
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
+	pump(t, clock, func() bool {
 		mu.Lock()
-		n := len(messages)
-		mu.Unlock()
-		if n > 0 {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("watcher never switched away from the session file that was never created")
+		defer mu.Unlock()
+		return len(messages) > 0
+	})
 }
 
 func TestClaudeParser_ContentBlocks(t *testing.T) {
@@ -361,10 +375,12 @@ func TestTailFile(t *testing.T) {
 		return append([]RichMessage(nil), emitted...)
 	}
 
+	clock := quartz.NewMock(t)
 	w := New(Config{
 		Resolver:  &staticResolver{path: jsonlPath},
 		Parser:    NewClaudeParser(),
 		OnMessage: collect,
+		Clock:     clock,
 	})
 
 	// Write initial content
@@ -386,12 +402,7 @@ func TestTailFile(t *testing.T) {
 	defer cancel()
 
 	go w.tailFile(ctx, jsonlPath)
-	time.Sleep(500 * time.Millisecond)
-
-	msgs := messages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message after initial read, got %d", len(msgs))
-	}
+	pump(t, clock, func() bool { return len(messages()) == 1 })
 
 	// Append more data
 	f, err = os.OpenFile(jsonlPath, os.O_APPEND|os.O_WRONLY, 0o644)
@@ -407,7 +418,7 @@ func TestTailFile(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(500 * time.Millisecond)
+	pump(t, clock, func() bool { return len(messages()) == 2 })
 
 	// Trigger finalization with another user message
 	f, err = os.OpenFile(jsonlPath, os.O_APPEND|os.O_WRONLY, 0o644)
@@ -423,12 +434,7 @@ func TestTailFile(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(500 * time.Millisecond)
-
-	msgs = messages()
-	if len(msgs) != 3 {
-		t.Fatalf("expected 3 messages after append, got %d", len(msgs))
-	}
+	pump(t, clock, func() bool { return len(messages()) == 3 })
 
 	cancel()
 }
