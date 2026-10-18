@@ -3,6 +3,7 @@
 import {useEffect, useRef, useState, type RefObject} from "react";
 import type {ITerminalOptions, Terminal} from "@xterm/xterm";
 import {OrderedInput} from "@/lib/tty";
+import {withModifier, type StickyModifier} from "@/lib/terminal-keys";
 import {useStableCallback} from "@/lib/use-stable-callback";
 import {TERMINAL_OPTIONS, prepareTerminalInput, useTerminalKeyboard} from "./terminal-chrome";
 import {latestLink, linkProvider} from "./terminal-links";
@@ -31,6 +32,13 @@ export function useXterm({
 }) {
   const termRef = useRef<Terminal | null>(null);
   const [link, setLink] = useState<string | null>(null);
+  // Ctrl or Alt held from the key bar for the next key typed.
+  const [modifier, setModifierState] = useState<StickyModifier | null>(null);
+  const modifierRef = useRef<StickyModifier | null>(null);
+  const setModifier = useStableCallback((value: StickyModifier | null) => {
+    modifierRef.current = value;
+    setModifierState(value);
+  });
   const inputRef = useRef<OrderedInput | null>(null);
   const keyboard = useTerminalKeyboard();
   const {setKeyboardOpen, inset, keyboardOpen} = keyboard;
@@ -66,7 +74,11 @@ export function useXterm({
       // button, or a tap on the terminal), not as soon as the view opens.
       if (!window.matchMedia("(pointer: coarse)").matches) term.focus();
       const input = new OrderedInput((data) => Promise.resolve(sendData(data)), reportError);
-      term.onData((data) => input.push(data));
+      term.onData((data) => {
+        const held = modifierRef.current;
+        if (held) setModifier(null);
+        input.push(held ? withModifier(data, held) : data);
+      });
       termRef.current = term;
       inputRef.current = input;
       disconnect = connectTo(term, container);
@@ -79,12 +91,12 @@ export function useXterm({
       termRef.current = null;
       inputRef.current = null;
     };
-  }, [containerRef, key, optionsFor, sendData, reportError, connectTo, setKeyboardOpen]);
+  }, [containerRef, key, optionsFor, sendData, reportError, connectTo, setKeyboardOpen, setModifier]);
 
   // Keep the last lines in view when the keyboard opens or closes.
   useEffect(() => {
     termRef.current?.scrollToBottom();
   }, [inset, keyboardOpen]);
 
-  return {termRef, inputRef, link, ...keyboard};
+  return {termRef, inputRef, link, modifier, setModifier, ...keyboard};
 }

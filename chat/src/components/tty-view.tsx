@@ -35,7 +35,7 @@ export function TtyView({onExit}: {onExit: () => void}) {
   // Estimated until xterm has rendered a row we can measure.
   const rowsFor = (container: HTMLElement, rowHeight = FONT_SIZE * LINE_HEIGHT) => Math.max(10, Math.floor(container.clientHeight / rowHeight));
 
-  const {termRef, inputRef, link, touch, keyboardOpen, inset} = useXterm({
+  const {termRef, inputRef, link, modifier, setModifier, touch, keyboardOpen, inset} = useXterm({
     containerRef,
     key: storageScope,
     options: (container) => ({cols: columnsRef.current, rows: rowsFor(container), scrollback: 5000, cursorBlink: false}),
@@ -162,7 +162,14 @@ export function TtyView({onExit}: {onExit: () => void}) {
           <div ref={containerRef} className="min-h-0 flex-1" aria-label="Agent terminal" />
         </div>
       </div>
-      <TerminalKeyBar termRef={termRef} touch={touch} keyboardOpen={keyboardOpen} onKeys={(data) => inputRef.current?.push(data)} />
+      <TerminalKeyBar
+        termRef={termRef}
+        touch={touch}
+        keyboardOpen={keyboardOpen}
+        modifier={modifier}
+        onModifier={setModifier}
+        onKeys={(data) => inputRef.current?.push(data)}
+      />
     </div>
   );
 }

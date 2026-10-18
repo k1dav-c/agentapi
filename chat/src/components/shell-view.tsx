@@ -29,7 +29,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
   // Whether the shell runs: keys typed after it exited go nowhere.
   const runningRef = useRef(false);
 
-  const {termRef, inputRef, link, touch, keyboardOpen, inset} = useXterm({
+  const {termRef, inputRef, link, modifier, setModifier, touch, keyboardOpen, inset} = useXterm({
     containerRef,
     key: `${storageScope}#${session}`,
     options: () => ({scrollback: 10000, cursorBlink: true}),
@@ -147,6 +147,8 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
         termRef={termRef}
         touch={touch}
         keyboardOpen={keyboardOpen}
+        modifier={modifier}
+        onModifier={setModifier}
         onKeys={(data) => {
           if (runningRef.current) inputRef.current?.push(data);
         }}
