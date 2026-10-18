@@ -5,10 +5,10 @@ repository.
 
 ## Project overview
 
-AgentAPI is a Go HTTP server for coding agents. PTY mode, the default, translates API calls into
-terminal keystrokes and parses screen output. Native mode uses Claude Code, Codex, and Pi's
-structured protocols; experimental ACP mode uses the Agent Client Protocol. The binary embeds a
-Next.js chat UI.
+AgentAPI is a Go HTTP server for coding agents. Native mode, the default for Claude Code, Codex and
+Pi, uses their structured protocols. PTY mode, the default for every other agent, translates API
+calls into terminal keystrokes and parses screen output; experimental ACP mode uses the Agent Client
+Protocol. The binary embeds a Next.js chat UI.
 
 ## Build & Run
 
@@ -77,9 +77,9 @@ response messages over stdio. All three transports update the shared event emitt
 
 ### Three transport modes
 
-- **PTY (default)**: Runs the agent in a terminal emulator, parses screen output.
+- **PTY**: Runs the agent in a terminal emulator, parses screen output. The default for agents without a native adapter, and with `--state-file`.
 - **ACP (experimental)**: Uses the Agent Client Protocol for structured communication (`--experimental-acp`).
-- **Native** (`--transport native`): Speaks Claude Code's stream-json, `codex app-server` JSON-RPC or `pi --mode rpc` directly. Adapters must follow the `Sink` contract in `lib/native/types.go` (no concurrent Sink calls; message IDs unique across adapters of one factory).
+- **Native** (the default for Claude Code, Codex and Pi; `--transport native`): Speaks Claude Code's stream-json, `codex app-server` JSON-RPC or `pi --mode rpc` directly. Adapters must follow the `Sink` contract in `lib/native/types.go` (no concurrent Sink calls; message IDs unique across adapters of one factory).
 
 ### Adding a new agent type
 

@@ -17,8 +17,8 @@ AgentAPI 可以用來：
 
 ## 關於這個 fork
 
-此 fork 以上游 v0.12.2 為基礎，保留預設的終端機模擬方式，並新增可自行啟用的
-[native transport](#native-transport)，透過 Claude Code、Codex 和 Pi 的結構化協定驅動 agent。
+此 fork 以上游 v0.12.2 為基礎，預設以 [native transport](#native-transport) 透過 Claude Code、
+Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬方式（[PTY transport](#pty-transport)）。
 工作階段管理與聊天功能則支援不同的 transport，方便處理長時間執行的任務。[CHANGELOG.md](CHANGELOG.md) 列出有哪些變更，
 [docs/architecture.zh-TW.md](docs/architecture.zh-TW.md) 說明它的架構，完整的 commit 歷史
 請參閱[與上游的完整比較](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)。
@@ -48,7 +48,8 @@ AgentAPI 可以用來：
 - 用 [PTY transport](#pty-transport) 透過終端機介面控制 13 種 coding agent，把畫面轉成
   一則一則的訊息。
 - 用 [native transport](#native-transport) 透過 Claude Code、Codex 和 Pi 自己的協定驅動
-  它們；提供 ACP 伺服器的 agent 可以使用實驗性的 ACP transport（見 [Transport](#transport)）。
+  它們，這也是它們的預設值；提供 ACP 伺服器的 agent 可以使用實驗性的 ACP transport
+  （見 [Transport](#transport)）。
 - 從 `GET /rich-messages` 和 `GET /timeline` 讀取結構化的活動：思考內容、工具呼叫與結果、
   token 用量。
 - agent 工作中時送出的訊息會在可以編輯、重新排序的[佇列](#訊息佇列)中等待；使用 native
@@ -117,11 +118,12 @@ AgentAPI 可以用來：
 
    > 如果出現 `claude` 不在 `PATH` 中的錯誤，但你在 shell 裡可以執行它，請用 `which claude` 取得完整路徑，改用完整路徑執行。
 
-   若要透過 Claude Code 自己的協定、而不是它的終端機介面來驅動它（核准會以結構化的請求
-   送來、設定可以切換、聊天介面裡有終端機），請使用 [native transport](#native-transport)：
+   這會透過 Claude Code 自己的協定驅動它，也就是 [native transport](#native-transport)：
+   核准會以結構化的請求送來、設定可以切換、聊天介面裡有終端機。若要改為驅動它的終端機介面
+   （[PTY transport](#pty-transport)，聊天介面中有 TTY mode），請加上 `--transport pty`：
 
    ```bash
-   agentapi server --transport native -- claude
+   agentapi server --transport pty -- claude
    ```
 
 1. 傳送訊息給 agent：
@@ -176,11 +178,14 @@ agent 類型決定 AgentAPI 怎麼整理 agent 的畫面，以及提供哪些功
 
 ### Transport
 
-`--transport` 決定 AgentAPI 如何驅動 agent：
+`--transport` 決定 AgentAPI 如何驅動 agent。沒有指定時，Claude Code、Codex 和 Pi 使用 native
+transport，其他 agent 使用 PTY transport；以 `--state-file`（PTY transport 的保存方式）啟動的
+伺服器也使用 PTY transport：
 
-| | PTY（預設） | Native | ACP（實驗性） |
+| | PTY | Native | ACP（實驗性） |
 | --- | --- | --- | --- |
 | 旗標 | `--transport pty` | `--transport native` | `--transport acp` 或 `--experimental-acp` |
+| 預設用於 | 其他所有 agent，以及使用 `--state-file` 時 | Claude Code、Codex、Pi | |
 | Agent | 上表所有 agent | Claude Code、Codex、Pi | 提供 ACP 伺服器的 agent |
 | 方式 | 在終端機模擬器中執行 agent 的終端機介面，並讀取它的畫面 | 使用 agent 自己的協定：`claude -p` 的 stream-json、`codex app-server`、`pi --mode rpc` | 透過 agent 的 stdio 使用 Agent Client Protocol |
 | 工具呼叫與思考 | 來自工作階段紀錄檔（Claude Code、Codex、Pi） | 從協定即時串流 | 工具呼叫以回覆中的 `[Tool: …]` 文字行呈現；不顯示思考內容 |
@@ -191,8 +196,10 @@ agent 類型決定 AgentAPI 怎麼整理 agent 的畫面，以及提供哪些功
 | 聊天介面中的終端機 | TTY mode：agent 自己的終端機 | 工作目錄中的 shell | |
 
 ```bash
-agentapi server -- claude
-agentapi server --transport native --state-db ~/.agentapi/myproject.db -- codex
+agentapi server -- claude                    # native
+agentapi server --transport pty -- claude    # Claude Code 的終端機介面
+agentapi server --state-db ~/.agentapi/myproject.db -- codex
+agentapi server -- aider                     # PTY
 agentapi server --type=kimi --experimental-acp -- kimi acp
 ```
 
@@ -288,7 +295,7 @@ Enter 和 Ctrl 鍵。字型大小會隨視窗縮放（11–20px）；鏡像畫�
 
 ### 使用 native transport 時
 
-使用 `--transport native` 時，agent 提出的請求（工具核准、它的提問、
+使用 native transport 時，agent 提出的請求（工具核准、它的提問、
 待核准的計畫）會以卡片停靠在輸入框上方（在手機上最多佔螢幕的 60%）；agent 工作中時，送出
 按鈕也可以把訊息 steer 進正在進行的回合，或中斷它。輸入框的工具列可以切換 agent 的權限模式、
 模型和推理強度，並顯示 context 用了多少和用量限制；輸入框可以使用 `/model`、`/compact` 等
@@ -311,19 +318,21 @@ agent 狀態和連線狀態。
 Native transport 讓 AgentAPI 直接使用 agent 的結構化協定，取得回覆、工具呼叫與用量，
 並在聊天介面中處理核准、提問和計畫。
 
-**啟用方式**
+**選擇 native transport**
 
-AgentAPI 預設使用 PTY。啟動時加上 `--transport native` 即可改用 native 模式：
+Claude Code、Codex 和 Pi 預設使用 native transport。`--transport native` 會明確指定它，
+`--transport pty` 則改為驅動它們的終端機介面：
 
 ```bash
-agentapi server --transport native -- claude --model sonnet
-agentapi server --transport native -- codex -a on-request
-agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6-luna --thinking low
+agentapi server -- claude --model sonnet
+agentapi server -- codex -a on-request
+agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking low
 ```
 
-- 支援 Claude Code、Codex 和 Pi。AgentAPI 依指令名稱選擇對應的 adapter；使用完整路徑或包裝腳本時，請用 `--type` 指定類型。
+- 支援 Claude Code、Codex 和 Pi。AgentAPI 依指令名稱選擇對應的 adapter；使用完整路徑或包裝腳本時，請用 `--type` 指定類型（沒有指定時，它們會被當成 `custom` agent，使用 PTY transport）。
+- 以 `--state-file`（PTY transport 的保存方式）啟動、又沒有指定 `--transport` 的伺服器會維持使用 PTY transport，所以為它寫的命令列仍能啟動；要保存 native 工作階段請用 `--state-db`。
 - ACP 是另一種 transport。`--transport acp` 等同 `--experimental-acp`，不能與 native 模式一起啟用。
-- 開發聊天介面時，可用 `--transport native --type custom -- native-demo` 執行模擬 agent，詳見[開發指南](chat/README.md)。其餘類型不支援 native 模式，會在啟動時被拒絕。
+- 開發聊天介面時，可用 `--type custom -- native-demo` 以 native transport 執行模擬 agent，詳見[開發指南](chat/README.md)。以 `--transport native` 指定其他 agent 類型時，會在啟動時被拒絕。
 
 **使用時會看到什麼**
 
@@ -565,7 +574,7 @@ Claude Code 則用 `/compact` 訊息壓縮，聊天介面會把這則訊息送�
 `--state-db` 時，AgentAPI 每次啟動都是新的 agent 工作階段。
 
 ```bash
-agentapi server --transport native --state-db ~/.agentapi/myproject.db -- claude
+agentapi server --state-db ~/.agentapi/myproject.db -- claude
 ```
 
 - AgentAPI 停止時尚未回覆的請求會標示為已過期：提出請求的 agent 已經不在了。
@@ -580,7 +589,8 @@ agentapi server --transport native --state-db ~/.agentapi/myproject.db -- claude
   不論哪一種，為工作階段選擇的設定都會保留。
 - 寫入會每 200 毫秒批次處理一次，所以串流不必等待磁碟。當機後最後一批寫入可能遺失，所以對話會
   換成新的 epoch，用戶端會重新載入完整的對話。持續失敗的寫入會以錯誤回報。
-- `--state-db` 需要 `--transport native`。使用 PTY transport 時 agent 無法接續工作階段；
+- `--state-db` 需要 native transport（Claude Code、Codex 和 Pi 的預設值）。使用 PTY transport
+  時 agent 無法接續工作階段；
   `--state-file` 仍會在那裡保存從畫面解析出的訊息。Native transport 不接受 `--state-file`。
 
 ### Claude Code
@@ -762,8 +772,9 @@ AgentAPI 會以 Pi 的 RPC 模式執行它（`pi --mode rpc`，經由 stdin 與 
 
 ## PTY transport
 
-預設的 transport 適用於所有有終端機介面的 agent。對 Claude Code、Codex 和 Pi，它也會追蹤
-它們的工作階段紀錄檔來取得結構化活動，聊天介面也能回答它們的終端機對話框。
+PTY transport 適用於所有有終端機介面的 agent，也是 Claude Code、Codex 和 Pi 以外所有 agent 的
+預設值；這三種 agent 要加上 `--transport pty` 才會使用它。對這三種 agent，它也會追蹤它們的
+工作階段紀錄檔來取得結構化活動，聊天介面也能回答它們的終端機對話框。
 
 ### 運作原理
 
@@ -847,11 +858,12 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 
 ### Pi coding agent
 
-`pi` agent 類型會在互動式終端機介面中執行 [Pi coding agent](https://pi.dev/)
-（`npm install -g @earendil-works/pi-coding-agent`）。當執行檔名稱為 `pi` 時會自動偵測：
+使用 `--transport pty` 時，`pi` agent 類型會在互動式終端機介面中執行
+[Pi coding agent](https://pi.dev/)（`npm install -g @earendil-works/pi-coding-agent`）。當執行檔
+名稱為 `pi` 時會自動偵測：
 
 ```bash
-agentapi server -- pi
+agentapi server --transport pty -- pi
 ```
 
 在 Pi 中用 `/login` 登入一次即可（可以用聊天介面的 TTY mode），或是設定供應商金鑰，
@@ -868,8 +880,7 @@ AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新�
 `--session`、`--continue`、`--resume` 或 `--session-id`，AgentAPI 就會採用你指定的工作階段
 設定；使用 `--continue`/`--resume` 時，聊天介面會退回使用終端機輸出。
 
-若要透過 Pi 的 RPC 模式、而不是它的終端機介面來驅動 Pi，請參閱
-[Native transport](#native-transport)。
+沒有加上 `--transport pty` 時，Pi 會以它的 RPC 模式執行；請參閱 [Native transport](#native-transport)。
 
 ## 對話 API
 
@@ -1144,10 +1155,12 @@ agentapi server -- aider --model sonnet --api-key anthropic=sk-ant-apio3-XXX
 agentapi server -- goose
 ```
 
-Pi 透過它的互動式終端機介面執行（請參閱 [Pi coding agent](#pi-coding-agent)）：
+Claude Code、Codex 和 Pi 使用 [native transport](#native-transport) 執行，除非加上
+`--transport pty` 改用它們的終端機介面（請參閱 [Pi coding agent](#pi-coding-agent)）：
 
 ```bash
 agentapi server -- pi
+agentapi server --transport pty -- pi
 ```
 
 Kimi Code 可以透過它的互動式終端機介面執行：
@@ -1173,7 +1186,7 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 | `-t`, `--type` | 由 agent 指令判斷 | agent 類型；見[支援的 agent](#支援的-agent) |
 | `-p`, `--port` | `3284` | 監聽的連接埠 |
 | `--bind` | 所有網路介面 | 監聽的位址；見[監聽位址](#監聽位址) |
-| `--transport` | `pty` | `pty`、`native` 或 `acp`；見 [Transport](#transport) |
+| `--transport` | Claude Code、Codex 和 Pi 為 `native`，其他為 `pty` | `native`、`pty` 或 `acp`；見 [Transport](#transport) |
 | `--experimental-acp` | `false` | 等同 `--transport acp` |
 | `--state-db` | | 保存對話、並接續 agent 工作階段的 SQLite 檔案（native）；見[持久保存的工作階段](#持久保存的工作階段) |
 | `--terminal` | `true` | 給聊天介面使用、位於 agent 工作目錄的 shell（native）；見[終端機](#終端機) |
@@ -1319,8 +1332,8 @@ go test ./...   # 執行 Go 測試，包含端對端冒煙測試
 測試以 `CGO_ENABLED=0` 執行。每次修改 API 都要一併 commit `openapi.json`，而且只能用
 `make gen` 重新產生（見 [AGENTS.md](AGENTS.md)）。聊天介面在 [chat/](chat/README.md)：
 `bun run dev` 會連到執行中的 AgentAPI 提供介面，
-`agentapi server --transport native --type custom -- native-demo` 則會執行一個模擬的
-native agent，不需要真正的 agent 就能開發介面。
+`agentapi server --type custom -- native-demo` 則會執行一個模擬的 native agent，不需要真正的
+agent 就能開發介面。
 
 ## 執行穩定性
 

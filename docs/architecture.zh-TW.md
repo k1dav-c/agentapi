@@ -110,7 +110,9 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 `agentapi server [旗標] -- <agent 指令>`（`cmd/server/server.go`）：
 
 1. 旗標來自命令列或 `AGENTAPI_*` 環境變數（viper）。agent 類型取自 `--type`；沒有指定時，
-   若 agent 指令符合已知類型別名，就採用該類型；否則使用 `custom`。
+   若 agent 指令符合已知類型別名，就採用該類型；否則使用 `custom`。transport 取自
+   `--transport`；沒有指定時，`hasNativeAdapter` 涵蓋的 agent（Claude Code、Codex、Pi 和
+   `native-demo`）使用 native（除非設定了 `--state-file`），其他 agent 使用 PTY。
 2. Transport 啟動 agent：
    - PTY：`termexec` 在 `--term-width` × `--term-height` 格的虛擬終端機中執行指令。
    - ACP：`httpapi.SetupACP` 啟動指令，再由 `acpio` 透過它的 stdio 開啟 ACP 工作階段。
@@ -484,7 +486,8 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 
 ## 設計原則
 
-- PTY transport 仍是預設值，適用於任何終端機 agent；native transport 需要自行啟用。
+- Claude Code、Codex 和 Pi 預設使用 native transport；PTY transport 適用於任何終端機 agent，
+  也仍是其他 agent 的預設值。
 - 用戶端依能力（capabilities）決定要提供什麼，從不依 agent 類型。
 - Adapter 回報完整的快照；由對話和 emitter 把它們轉成更新。
 - 世代和不重複的 ID 確保被替換掉的 agent 無法改變對話。

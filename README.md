@@ -26,9 +26,10 @@ Use AgentAPI to:
 
 ## About this fork
 
-This fork builds on upstream v0.12.2. It preserves terminal emulation as the default and adds an
-opt-in [native transport](#native-transport) for Claude Code, Codex, and Pi. Session management and
-chat features support long-running tasks across transports. [CHANGELOG.md](CHANGELOG.md) lists what
+This fork builds on upstream v0.12.2. It drives Claude Code, Codex and Pi through their own
+protocols with the [native transport](#native-transport) by default, and keeps terminal emulation
+(the [PTY transport](#pty-transport)) for every other agent. Session management and chat features
+support long-running tasks across transports. [CHANGELOG.md](CHANGELOG.md) lists what
 changed, [docs/architecture.md](docs/architecture.md) describes how it is built, and the
 [full comparison with upstream](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)
 has the complete commit history.
@@ -58,8 +59,9 @@ has the complete commit history.
 - Control 13 coding agents through their terminal UI with the
   [PTY transport](#pty-transport), which turns the screen into messages.
 - Drive Claude Code, Codex and Pi through their own protocols with the
-  [native transport](#native-transport); agents with an ACP server can use the
-  experimental ACP transport (see [Transports](#transports)).
+  [native transport](#native-transport), which they use by default; agents with
+  an ACP server can use the experimental ACP transport (see
+  [Transports](#transports)).
 - Read structured activity (thinking, tool calls and their results, token
   usage) from `GET /rich-messages` and `GET /timeline`.
 - Messages sent while the agent works wait in a [queue](#message-queue) that
@@ -139,12 +141,14 @@ has the complete commit history.
 
    > If you're getting an error that `claude` is not in the `PATH` but you can run it from your shell, try `which claude` to get the full path and use that instead.
 
-   To drive Claude Code through its own protocol instead of its terminal UI,
-   with approvals as structured requests, settings you can switch and a
-   terminal in the chat, use the [native transport](#native-transport):
+   This drives Claude Code through its own protocol, the
+   [native transport](#native-transport): approvals arrive as structured
+   requests, its settings can be switched and the chat has a terminal. To drive
+   its terminal UI instead (the [PTY transport](#pty-transport), with TTY mode
+   in the chat), add `--transport pty`:
 
    ```bash
-   agentapi server --transport native -- claude
+   agentapi server --transport pty -- claude
    ```
 
 1. Send a message to the agent:
@@ -202,11 +206,14 @@ server -- claude`, but not `-- /usr/local/bin/claude`); anything else runs as `c
 
 ### Transports
 
-`--transport` chooses how AgentAPI drives the agent:
+`--transport` chooses how AgentAPI drives the agent. Without it, Claude Code, Codex and Pi use the
+native transport, and every other agent the PTY transport, as does a server started with
+`--state-file` (the PTY transport's persistence):
 
-| | PTY (default) | Native | ACP (experimental) |
+| | PTY | Native | ACP (experimental) |
 | --- | --- | --- | --- |
 | Flag | `--transport pty` | `--transport native` | `--transport acp` or `--experimental-acp` |
+| Default for | every other agent, and with `--state-file` | Claude Code, Codex, Pi | |
 | Agents | all of the above | Claude Code, Codex, Pi | agents with an ACP server |
 | How | runs the agent's terminal UI in a terminal emulator and reads its screen | speaks the agent's own protocol: `claude -p` stream-json, `codex app-server`, `pi --mode rpc` | speaks the Agent Client Protocol over the agent's stdio |
 | Tool calls and thinking | from the session log (Claude Code, Codex, Pi) | streamed from the protocol | tool calls as `[Tool: …]` lines in the reply; no thinking |
@@ -217,8 +224,10 @@ server -- claude`, but not `-- /usr/local/bin/claude`); anything else runs as `c
 | Terminal in the chat | TTY mode: the agent's own terminal | a shell in the working directory | |
 
 ```bash
-agentapi server -- claude
-agentapi server --transport native --state-db ~/.agentapi/myproject.db -- codex
+agentapi server -- claude                    # native
+agentapi server --transport pty -- claude    # Claude Code's terminal UI
+agentapi server --state-db ~/.agentapi/myproject.db -- codex
+agentapi server -- aider                     # PTY
 agentapi server --type=kimi --experimental-acp -- kimi acp
 ```
 
@@ -328,7 +337,7 @@ agent's real terminal width, so start AgentAPI with `--term-width 120` if you wa
 
 ### With the native transport
 
-With `--transport native`, what the agent asks for (a tool approval, its questions, a plan to
+With the native transport, what the agent asks for (a tool approval, its questions, a plan to
 approve) docks above the composer as a card, at most 60% of a phone's screen, and while the agent
 works the send button can also steer the message into the running turn or interrupt it. The
 composer's toolbar switches the agent's permission mode, model and reasoning effort and shows how
@@ -355,23 +364,28 @@ shows it immediately, and then asks the server only for changes since the last s
 Native transport uses the agent's structured protocol to receive replies, tool
 calls, and usage, and to handle approvals, questions, and plans in the chat UI.
 
-**Enable native mode**
+**Choosing the native transport**
 
-AgentAPI uses PTY by default. Add `--transport native` when starting the server:
+Claude Code, Codex and Pi use the native transport by default. `--transport native` asks for it
+explicitly, and `--transport pty` drives their terminal UI instead:
 
 ```bash
-agentapi server --transport native -- claude --model sonnet
-agentapi server --transport native -- codex -a on-request
-agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6-luna --thinking low
+agentapi server -- claude --model sonnet
+agentapi server -- codex -a on-request
+agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking low
 ```
 
 - Claude Code, Codex, and Pi are supported. AgentAPI selects their adapter from
-  the command name; specify `--type` for full executable paths or wrapper scripts.
+  the command name; specify `--type` for full executable paths or wrapper
+  scripts (without it they run as `custom` agents, with the PTY transport).
+- A server started with `--state-file`, the PTY transport's persistence, and no
+  `--transport` keeps the PTY transport, so command lines written for it still
+  start; `--state-db` keeps a native session.
 - ACP is a separate transport. `--transport acp` is equivalent to
   `--experimental-acp` and cannot be enabled together with native mode.
-- For UI development, `--transport native --type custom -- native-demo` runs a
-  simulated agent; see the [development guide](chat/README.md). Other agent
-  types are rejected at startup in native mode.
+- For UI development, `--type custom -- native-demo` runs a simulated agent with
+  the native transport; see the [development guide](chat/README.md).
+  `--transport native` with any other agent type is rejected at startup.
 
 **What to expect**
 
@@ -666,7 +680,7 @@ shutdown browser caches stay valid, because the conversation keeps its epoch. Wi
 every start of AgentAPI is a new agent session.
 
 ```bash
-agentapi server --transport native --state-db ~/.agentapi/myproject.db -- claude
+agentapi server --state-db ~/.agentapi/myproject.db -- claude
 ```
 
 - Requests that were open when AgentAPI stopped are marked expired: the agent
@@ -688,9 +702,10 @@ agentapi server --transport native --state-db ~/.agentapi/myproject.db -- claude
   After a crash the last of them may be missing, so the conversation gets a
   new epoch and clients load it again in full. Writes that keep failing are
   reported as an error.
-- `--state-db` needs `--transport native`. With the PTY transport the agent
-  can't resume its session; `--state-file` still saves the screen-derived
-  messages there. The native transport doesn't take `--state-file`.
+- `--state-db` needs the native transport, the default for Claude Code, Codex
+  and Pi. With the PTY transport the agent can't resume its session;
+  `--state-file` still saves the screen-derived messages there. The native
+  transport doesn't take `--state-file`.
 
 ### Claude Code
 
@@ -908,9 +923,9 @@ AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
 
 ## PTY transport
 
-The default transport works with every agent that has a terminal UI. For Claude Code, Codex and Pi
-it also follows their session logs for structured activity, and the chat answers their terminal
-dialogs.
+The PTY transport works with every agent that has a terminal UI, and is the default for every agent
+but Claude Code, Codex and Pi, which use it with `--transport pty`. For those three it also follows
+their session logs for structured activity, and the chat answers their terminal dialogs.
 
 ### How it works
 
@@ -1003,12 +1018,12 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 
 ### Pi coding agent
 
-The `pi` agent type runs the [Pi coding agent](https://pi.dev/) (`npm install -g
-@earendil-works/pi-coding-agent`) in its interactive terminal UI. It is auto-detected when the
-executable name is `pi`:
+With `--transport pty`, the `pi` agent type runs the [Pi coding agent](https://pi.dev/) (`npm
+install -g @earendil-works/pi-coding-agent`) in its interactive terminal UI. It is auto-detected
+when the executable name is `pi`:
 
 ```bash
-agentapi server -- pi
+agentapi server --transport pty -- pi
 ```
 
 Log in once with `/login` in Pi (TTY mode in the chat UI works), or set a provider key such as
@@ -1025,8 +1040,7 @@ the right session log even when several Pi processes share a directory. If you p
 `--continue`, `--resume` or `--session-id` yourself, AgentAPI uses your session settings; with
 `--continue`/`--resume` the chat falls back to the terminal output.
 
-To drive Pi through its RPC mode instead of its terminal UI, see
-[Native transport](#native-transport).
+Without `--transport pty`, Pi runs in its RPC mode; see [Native transport](#native-transport).
 
 ## Conversation API
 
@@ -1341,10 +1355,12 @@ agentapi server -- aider --model sonnet --api-key anthropic=sk-ant-apio3-XXX
 agentapi server -- goose
 ```
 
-Pi runs through its interactive terminal UI (see [Pi coding agent](#pi-coding-agent)):
+Claude Code, Codex and Pi run with the [native transport](#native-transport) unless you pass
+`--transport pty` for their terminal UI (see [Pi coding agent](#pi-coding-agent)):
 
 ```bash
 agentapi server -- pi
+agentapi server --transport pty -- pi
 ```
 
 Kimi Code can run through its interactive terminal UI:
@@ -1371,7 +1387,7 @@ variable.
 | `-t`, `--type` | from the agent command | Agent type; see [Supported agents](#supported-agents) |
 | `-p`, `--port` | `3284` | Port to listen on |
 | `--bind` | all interfaces | Address to listen on; see [Bind address](#bind-address) |
-| `--transport` | `pty` | `pty`, `native` or `acp`; see [Transports](#transports) |
+| `--transport` | `native` for Claude Code, Codex and Pi, else `pty` | `native`, `pty` or `acp`; see [Transports](#transports) |
 | `--experimental-acp` | `false` | The same as `--transport acp` |
 | `--state-db` | | SQLite file that keeps the conversation and resumes the agent's session (native); see [Persistent sessions](#persistent-sessions) |
 | `--terminal` | `true` | Shell in the agent's working directory for the chat (native); see [Terminal](#terminal) |
@@ -1519,8 +1535,8 @@ go test ./...   # Go tests, including the e2e smoke test
 Tests run with `CGO_ENABLED=0`. Commit `openapi.json` with every API change, and regenerate it only
 with `make gen` (see [AGENTS.md](AGENTS.md)). The chat UI lives in [chat/](chat/README.md):
 `bun run dev` serves it against a running AgentAPI, and
-`agentapi server --transport native --type custom -- native-demo` runs a simulated native agent for
-working on it without a real one.
+`agentapi server --type custom -- native-demo` runs a simulated native agent for working on it
+without a real one.
 
 ## Runtime reliability
 

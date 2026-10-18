@@ -113,7 +113,9 @@ terminal dialog are written to the agent's terminal directly.
 
 1. Flags come from the command line or from `AGENTAPI_*` environment
    variables (viper). The agent type is `--type`, else the agent command when
-   it is a type name, else `custom`.
+   it is a type name, else `custom`. The transport is `--transport`, else
+   native for an agent `hasNativeAdapter` covers (Claude Code, Codex, Pi and
+   `native-demo`) unless `--state-file` is set, else PTY.
 2. The transport starts the agent:
    - PTY: `termexec` runs the command in a pseudo-terminal of `--term-width`
      by `--term-height` cells.
@@ -557,8 +559,8 @@ a variant for embedding in other pages.
 
 ## Design principles
 
-- The PTY transport stays the default and works with any terminal agent; the
-  native transport is opt-in.
+- Claude Code, Codex and Pi use the native transport by default; the PTY
+  transport works with any terminal agent and stays the default for the others.
 - Clients decide what to offer from capabilities, never from the agent type.
 - Adapters report full snapshots; the conversation and the emitter turn them
   into updates.
