@@ -1,16 +1,16 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ChevronRight, FileDiff, FileText, Wrench } from "lucide-react";
 import { Button } from "../ui/button";
 import { uiCopy } from "@/lib/ui-copy";
-import { formatToolInput, getExitCode, getToolCommand, getToolImagePath, getToolSummary } from "@/lib/tool-format";
+import { describeToolCall } from "@/lib/tool-call-view";
 import type { ToolCall } from "@/lib/task-timeline";
 import { currentPromptQuestion, parseInteractiveToolInput } from "@/lib/interactive-tool";
 import {useChatSelector} from "../chat-provider";
 import { ImageThumb } from "../image-preview";
 import { toolRequestBadge, type Tone } from "@/lib/native-requests";
-import { fileName, isPatchScriptTool, toolFileTargets, viewerTab, type FileTarget, type FileTargetKind } from "@/lib/file-refs";
+import { fileName, viewerTab, type FileTarget, type FileTargetKind } from "@/lib/file-refs";
 import { useFileViewer, type FileViewer, type FileViewerTab } from "../file-viewer-context";
 import { DiffView } from "../diff-view";
 import { PathLabel } from "../file-path";
@@ -200,7 +200,11 @@ function ToolChip({children, tone}: {children: React.ReactNode; tone?: Tone}) {
   );
 }
 
-export function ToolCallCard({
+// A tool call: its header (a command, a file, or the tool and a summary,
+// with its state), and its details when open. Memoized: a tool call that
+// didn't change keeps its object (shareToolCalls), and the card renders
+// again only when it, the search or its request changes.
+export const ToolCallCard = React.memo(function ToolCallCard({
   toolCall,
   searchQuery = "",
   open,
@@ -210,14 +214,14 @@ export function ToolCallCard({
   toolCall: ToolCall;
   searchQuery?: string;
   open?: boolean;
-  onOpenChange?: (open: boolean) => void;
+  // The group's open state; the card is controlled when open is set.
+  onOpenChange?: (id: string, open: boolean) => void;
   onSendRaw?: (data: string) => void;
 }) {
-  const isFailed = toolCall.status === "failed" || Boolean(toolCall.isError);
-  const isPending =
-    toolCall.status === "running" ||
-    (toolCall.status === undefined && toolCall.result === undefined);
-  const input = formatToolInput(toolCall.input);
+  const view = useMemo(() => describeToolCall(toolCall), [toolCall]);
+  const {targets, change, command, exitCode, durationMs, images, imageName, input} = view;
+  const isFailed = view.failed;
+  const isPending = view.pending;
   const storageScope = useChatSelector((chat) => chat.storageScope);
   const features = useChatSelector((chat) => chat.features);
   const requests = useChatSelector((chat) => chat.requests);
@@ -247,32 +251,9 @@ export function ToolCallCard({
     }
   }, [open, searchQuery]);
 
-  // The files the tool reads or changes, and its change to them.
   const viewer = useFileViewer();
-  const targets = useMemo(() => toolFileTargets(toolCall.name, toolCall.input), [toolCall.name, toolCall.input]);
-  const change = useMemo(
-    () => targets.flatMap((target) => (target.change ? [target.change] : [])).join("\n"),
-    [targets],
-  );
-  // A Codex code-mode script that applies a patch reads as that patch,
-  // not as its source.
-  const patchScript = targets.length > 0 && isPatchScriptTool(toolCall.name);
-  const toolLabel = patchScript ? "apply_patch" : toolCall.name;
-  const command = patchScript ? undefined : getToolCommand(toolCall.name, toolCall.input);
-  const exitCode = getExitCode(toolCall.result);
-  const durationMs =
-    toolCall.resultTimestamp && toolCall.timestamp
-      ? Date.parse(toolCall.resultTimestamp) - Date.parse(toolCall.timestamp)
-      : 0;
-  const preview =
-    command && !isOpen && toolCall.result
-      ? toolCall.result.replace(/\s+$/, "").split("\n").slice(0, 4).join("\n")
-      : "";
-
-  // Images in the result (an image file the agent read), named after the
-  // file when the tool says which.
-  const imageName = getToolImagePath(toolCall.input)?.split("/").pop() || "image";
-  const images = toolCall.images ?? [];
+  // A command's first lines of output show while the card is closed.
+  const preview = isOpen ? "" : view.resultPreview;
 
   return (
     <details
@@ -282,7 +263,7 @@ export function ToolCallCard({
         if (open === undefined) {
           setLocalIsOpen(event.currentTarget.open);
         } else {
-          onOpenChange?.(event.currentTarget.open);
+          onOpenChange?.(toolCall.id, event.currentTarget.open);
         }
       }}
     >
@@ -301,7 +282,7 @@ export function ToolCallCard({
             </span>
           ) : targets.length > 0 && viewer ? (
             <span className="flex min-w-0 flex-1 items-baseline gap-2">
-              <span className="shrink-0 font-sans text-xs font-semibold">{toolLabel}</span>
+              <span className="shrink-0 font-sans text-xs font-semibold">{view.label}</span>
               <button
                 type="button"
                 className="min-w-0 truncate rounded-sm text-muted-foreground underline decoration-muted-foreground/40 decoration-dotted underline-offset-[3px] outline-none transition hover:text-foreground hover:decoration-solid focus-visible:ring-2 focus-visible:ring-ring"
@@ -327,10 +308,7 @@ export function ToolCallCard({
           ) : (
             <span className="min-w-0 flex-1 truncate">
               <span className="font-sans text-xs font-semibold">{toolCall.name}</span>
-              {(() => {
-                const summary = getToolSummary(toolCall.name, toolCall.input);
-                return summary ? <span className="ml-2 text-muted-foreground">{summary}</span> : null;
-              })()}
+              {view.summary && <span className="ml-2 text-muted-foreground">{view.summary}</span>}
             </span>
           )}
           {requestBadge && (
@@ -435,7 +413,7 @@ export function ToolCallCard({
       </div>
     </details>
   );
-}
+});
 
 export function ToolCallGroup({
   toolCalls,
@@ -457,6 +435,15 @@ export function ToolCallGroup({
       setOpenToolIDs(new Set(toolCalls.map((tool) => tool.id)));
     }
   }, [searchQuery, toolCalls]);
+  // One handler for every card, so the memoized cards don't render again.
+  const setToolOpen = useCallback((id: string, open: boolean) => {
+    setOpenToolIDs((current) => {
+      const next = new Set(current);
+      if (open) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
 
   return (
     <section className="space-y-1.5">
@@ -488,14 +475,7 @@ export function ToolCallGroup({
             searchQuery={searchQuery}
             onSendRaw={onSendRaw}
             open={openToolIDs.has(toolCall.id)}
-            onOpenChange={(open) =>
-              setOpenToolIDs((current) => {
-                const next = new Set(current);
-                if (open) next.add(toolCall.id);
-                else next.delete(toolCall.id);
-                return next;
-              })
-            }
+            onOpenChange={setToolOpen}
           />
         ))}
       </div>
