@@ -192,6 +192,9 @@ var (
 	_ native.Configurable = (*Adapter)(nil)
 )
 
+// errClosed is returned by Start after Close.
+var errClosed = errors.New("the adapter was closed")
+
 // control is a control request the adapter sent and the CLI hasn't
 // answered yet. A successful answer is handed to onResponse in the read
 // loop; then answers are delivered on ch.
@@ -232,6 +235,14 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	if err := a.checkLogin(ctx, cmd.Env); err != nil {
 		return err
 	}
+	// A restart may have closed the adapter while the login was checked
+	// (up to 10 s): starting the CLI now would run it next to the new one.
+	a.mu.Lock()
+	closing := a.closing
+	a.mu.Unlock()
+	if closing {
+		return errClosed
+	}
 	// The arguments can hold secrets (inline --settings or --mcp-config).
 	a.cfg.Logger.Info("Starting Claude Code", "program", cmd.Program, "resume", a.resumeRef != "")
 	a.cfg.Logger.Debug("Claude Code command line", "args", cmd.Args)
@@ -240,9 +251,18 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		return err
 	}
 	a.mu.Lock()
-	a.proc = proc
-	a.sink = sink
+	closing = a.closing
+	if !closing {
+		a.proc = proc
+		a.sink = sink
+	}
 	a.mu.Unlock()
+	if closing {
+		// Close ran while the CLI was starting and found no process to stop.
+		_ = proc.Stdin().Close()
+		_ = proc.Kill()
+		return errClosed
+	}
 
 	go a.readLoop(proc.Stdout())
 	go func() {
@@ -453,6 +473,12 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 		return native.ErrNoActiveTurn
 	}
 	_, err := a.request(ctx, "interrupt", nil, a.interruptAccepted)
+	if err != nil {
+		// Not interrupted: the turn ends as it ends, its error included.
+		a.mu.Lock()
+		a.interrupted = false
+		a.mu.Unlock()
+	}
 	return err
 }
 

@@ -544,3 +544,54 @@ func TestUserMessageIDs(t *testing.T) {
 	assert.NotEqual(t, first, second)
 	assert.NotEqual(t, first, id(newStreamParser(quartz.NewMock(t), 0)))
 }
+
+func TestCloseDuringTheLoginCheck(t *testing.T) {
+	t.Parallel()
+	checking, release := make(chan struct{}), make(chan struct{})
+	spawned := make(chan struct{}, 1)
+	a := newTestAdapter(t, Config{
+		StartProcess: func(procutil.Command) (procutil.Process, error) {
+			spawned <- struct{}{}
+			return newFakeProcess(""), nil
+		},
+		AuthStatus: func(ctx context.Context, cmd procutil.Command) ([]byte, error) {
+			close(checking)
+			<-release
+			return loggedIn(ctx, cmd)
+		},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}, "")
+	started := make(chan error, 1)
+	go func() { started <- a.Start(context.Background(), &recSink{t: t}) }()
+	<-checking
+	// A restart closes the adapter while its login is checked.
+	require.NoError(t, a.Close())
+	close(release)
+	require.ErrorIs(t, <-started, errClosed)
+	select {
+	case <-spawned:
+		t.Fatal("the CLI was started after Close")
+	default:
+	}
+}
+
+func TestFailedInterruptLeavesTheTurnAlone(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	proc := newFakeProcess("")
+	a, sink := started(t, Config{}, proc)
+	require.NoError(t, a.StartTurn(ctx, native.Input{Text: "hi"}))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
+	errCh := make(chan error, 1)
+	go func() { errCh <- a.Interrupt(ctx) }()
+	request, _ := proc.waitRequest(t, 1, "interrupt")
+	proc.send(t, []byte(fmt.Sprintf(`{"type":"control_response","response":{"subtype":"error","request_id":%q,"error":"busy"}}`, request["request_id"])))
+	require.Error(t, <-errCh)
+	// The turn then fails: it ends with its error, not as interrupted.
+	proc.send(t, []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["boom"]}`))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
+	proc.barrier(t)
+	require.Eventually(t, func() bool { return len(sink.turnLog()) == 2 }, 5*time.Second, time.Millisecond)
+	assert.NotEqual(t, "turn_completed:interrupted", sink.turnLog()[1])
+	require.NoError(t, a.Close())
+}
