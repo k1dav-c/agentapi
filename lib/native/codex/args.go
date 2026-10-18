@@ -32,14 +32,97 @@ type launchOptions struct {
 // policyKeys are the config keys of the policies.
 var policyKeys = []string{"approval_policy", "sandbox_mode", "approvals_reviewer"}
 
-// passThroughFlags take a value and are accepted by `codex app-server`.
-var passThroughFlags = []string{"-c", "--config", "--enable", "--disable", "--code-mode-host"}
+// flagFunc applies the value of the flag name to opts; cwd resolves a
+// relative path.
+type flagFunc func(opts *launchOptions, name, value, cwd string) error
 
-// passThroughSwitches are app-server flags without a value.
-var passThroughSwitches = []string{"--strict-config", "--analytics-default-enabled"}
+// valueFlags are the flags with a value that AgentAPI accepts: what each
+// does with it.
+var valueFlags = map[string]flagFunc{
+	// app-server takes these itself.
+	"-c":               passConfig,
+	"--config":         passConfig,
+	"--enable":         passThrough,
+	"--disable":        passThrough,
+	"--code-mode-host": passThrough,
+	// The top-level codex flags become thread settings.
+	"-m":                 setModel,
+	"--model":            setModel,
+	"-s":                 setSandbox,
+	"--sandbox":          setSandbox,
+	"-a":                 setApprovalPolicy,
+	"--ask-for-approval": setApprovalPolicy,
+	"-C":                 setCD,
+	"--cd":               setCD,
+}
 
-// droppedSwitches only affect the terminal UI and are ignored.
-var droppedSwitches = []string{"--no-alt-screen", "--no-daemon", "--stdio"}
+// switchFlags are the flags without a value that AgentAPI accepts: what
+// each does.
+var switchFlags = map[string]func(opts *launchOptions, name string){
+	// app-server takes these itself.
+	"--strict-config":             passSwitch,
+	"--analytics-default-enabled": passSwitch,
+	// These only affect the terminal UI.
+	"--no-alt-screen": dropSwitch,
+	"--no-daemon":     dropSwitch,
+	"--stdio":         dropSwitch,
+	"--dangerously-bypass-approvals-and-sandbox": func(opts *launchOptions, _ string) {
+		opts.approvalPolicy = "never"
+		opts.sandbox = "danger-full-access"
+		opts.policyFromUser = true
+	},
+}
+
+func passConfig(opts *launchOptions, name, value, _ string) error {
+	key, _, _ := strings.Cut(value, "=")
+	key = strings.TrimSpace(key)
+	opts.summaryFromUser = opts.summaryFromUser || key == "model_reasoning_summary"
+	opts.policyFromUser = opts.policyFromUser || slices.Contains(policyKeys, key)
+	opts.appServerArgs = append(opts.appServerArgs, name, value)
+	return nil
+}
+
+func passThrough(opts *launchOptions, name, value, _ string) error {
+	opts.appServerArgs = append(opts.appServerArgs, name, value)
+	return nil
+}
+
+func passSwitch(opts *launchOptions, name string) {
+	opts.appServerArgs = append(opts.appServerArgs, name)
+}
+
+func dropSwitch(*launchOptions, string) {}
+
+func setModel(opts *launchOptions, _, value, _ string) error {
+	opts.model = value
+	return nil
+}
+
+func setSandbox(opts *launchOptions, name, value, _ string) error {
+	if !slices.Contains(sandboxModes, value) {
+		return fmt.Errorf("codex flag %s: unknown sandbox mode %q (one of %s)", name, value, strings.Join(sandboxModes, ", "))
+	}
+	opts.sandbox = value
+	opts.policyFromUser = true
+	return nil
+}
+
+func setApprovalPolicy(opts *launchOptions, name, value, _ string) error {
+	if !slices.Contains(approvalPolicies, value) {
+		return fmt.Errorf("codex flag %s: unknown approval policy %q (one of %s)", name, value, strings.Join(approvalPolicies, ", "))
+	}
+	opts.approvalPolicy = value
+	opts.policyFromUser = true
+	return nil
+}
+
+func setCD(opts *launchOptions, _, value, cwd string) error {
+	if !filepath.IsAbs(value) && cwd != "" {
+		value = filepath.Join(cwd, value)
+	}
+	opts.cwd = filepath.Clean(value)
+	return nil
+}
 
 // rejectedFlags can't be honored with app-server; the value is why.
 var rejectedFlags = map[string]string{
@@ -76,87 +159,28 @@ func parseArgs(args []string, cwd string) (launchOptions, error) {
 	}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		name, value, hasValue := arg, "", false
-		switch {
-		case strings.HasPrefix(arg, "--"):
-			name, value, hasValue = strings.Cut(arg, "=")
-		case strings.HasPrefix(arg, "-") && len(arg) > 2:
-			// A short flag's value can be attached, as clap allows: -mo3
-			// or -m=o3.
-			_, size := utf8.DecodeRuneInString(arg[1:])
-			name, value, hasValue = arg[:1+size], strings.TrimPrefix(arg[1+size:], "="), true
-		}
-		takeValue := func() (string, error) {
+		name, value, hasValue := splitFlag(arg)
+		if apply, ok := switchFlags[name]; ok {
 			if hasValue {
-				return value, nil
+				return opts, fmt.Errorf("codex flag %s takes no value", name)
 			}
-			if i+1 >= len(args) {
-				return "", fmt.Errorf("codex flag %s needs a value", name)
+			apply(&opts, name)
+			continue
+		}
+		if apply, ok := valueFlags[name]; ok {
+			if !hasValue {
+				if i+1 >= len(args) {
+					return opts, fmt.Errorf("codex flag %s needs a value", name)
+				}
+				i++
+				value = args[i]
 			}
-			i++
-			return args[i], nil
+			if err := apply(&opts, name, value, cwd); err != nil {
+				return opts, err
+			}
+			continue
 		}
-		isSwitch := slices.Contains(passThroughSwitches, name) || slices.Contains(droppedSwitches, name) ||
-			name == "--dangerously-bypass-approvals-and-sandbox"
-		if isSwitch && hasValue {
-			return opts, fmt.Errorf("codex flag %s takes no value", name)
-		}
-
 		switch {
-		case slices.Contains(passThroughFlags, name):
-			v, err := takeValue()
-			if err != nil {
-				return opts, err
-			}
-			key, _, _ := strings.Cut(v, "=")
-			if name == "-c" || name == "--config" {
-				key = strings.TrimSpace(key)
-				opts.summaryFromUser = opts.summaryFromUser || key == "model_reasoning_summary"
-				opts.policyFromUser = opts.policyFromUser || slices.Contains(policyKeys, key)
-			}
-			opts.appServerArgs = append(opts.appServerArgs, name, v)
-		case slices.Contains(passThroughSwitches, name):
-			opts.appServerArgs = append(opts.appServerArgs, name)
-		case slices.Contains(droppedSwitches, name):
-		case name == "-m" || name == "--model":
-			v, err := takeValue()
-			if err != nil {
-				return opts, err
-			}
-			opts.model = v
-		case name == "-s" || name == "--sandbox":
-			v, err := takeValue()
-			if err != nil {
-				return opts, err
-			}
-			if !slices.Contains(sandboxModes, v) {
-				return opts, fmt.Errorf("codex flag %s: unknown sandbox mode %q (one of %s)", name, v, strings.Join(sandboxModes, ", "))
-			}
-			opts.sandbox = v
-			opts.policyFromUser = true
-		case name == "-a" || name == "--ask-for-approval":
-			v, err := takeValue()
-			if err != nil {
-				return opts, err
-			}
-			if !slices.Contains(approvalPolicies, v) {
-				return opts, fmt.Errorf("codex flag %s: unknown approval policy %q (one of %s)", name, v, strings.Join(approvalPolicies, ", "))
-			}
-			opts.approvalPolicy = v
-			opts.policyFromUser = true
-		case name == "-C" || name == "--cd":
-			v, err := takeValue()
-			if err != nil {
-				return opts, err
-			}
-			if !filepath.IsAbs(v) && cwd != "" {
-				v = filepath.Join(cwd, v)
-			}
-			opts.cwd = filepath.Clean(v)
-		case name == "--dangerously-bypass-approvals-and-sandbox":
-			opts.approvalPolicy = "never"
-			opts.sandbox = "danger-full-access"
-			opts.policyFromUser = true
 		case rejectedFlags[name] != "":
 			return opts, fmt.Errorf("codex flag %s is not supported with --transport native: %s", name, rejectedFlags[name])
 		case strings.HasPrefix(arg, "-"):
@@ -171,4 +195,17 @@ func parseArgs(args []string, cwd string) (launchOptions, error) {
 		opts.sandbox = "danger-full-access"
 	}
 	return opts, nil
+}
+
+// splitFlag splits a value attached to a flag from it: --name=value, or a
+// short flag's -mo3 or -m=o3, as clap allows.
+func splitFlag(arg string) (name, value string, hasValue bool) {
+	switch {
+	case strings.HasPrefix(arg, "--"):
+		return strings.Cut(arg, "=")
+	case strings.HasPrefix(arg, "-") && len(arg) > 2:
+		_, size := utf8.DecodeRuneInString(arg[1:])
+		return arg[:1+size], strings.TrimPrefix(arg[1+size:], "="), true
+	}
+	return arg, "", false
 }
