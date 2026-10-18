@@ -132,7 +132,8 @@ flowchart TB
 
 | 檔案 | 處理 |
 | --- | --- |
-| `server.go` | 訊息、狀態、事件、佇列、上傳；伺服器的設定與路由 |
+| `server.go`、`queue.go` | 訊息、狀態、事件、佇列、上傳；伺服器的設定與路由 |
+| `backend.go`、`backend_pty.go`、`backend_native.go` | 依 transport 而不同的部分：派送佇列、送出訊息、重新啟動、人工回覆協定的待處理請求 |
 | `native.go` | 請求、設定、中斷、壓縮、重試登入；native observer |
 | `terminal.go`、`files.go`、`file_preview.go` | Shell 終端機與檔案檢視器 |
 | `mcp.go`、`mcp_management.go` | MCP 伺服器與設定檔 |
@@ -144,7 +145,9 @@ flowchart TB
 
 一般的 chi 路由提供聊天介面（`/chat/*`）、上傳的圖片（`/uploads/{checksum}/{name}`）以及
 TTY mode 的畫面串流（`/internal/screen`）。`Server` 持有對話、emitter、佇列與它的鎖
-（`s.mu`）、webhook 傳送器、MCP 儲存、shell 終端機和狀態資料庫。
+（`s.mu`）、webhook 傳送器、MCP 儲存、shell 終端機和狀態資料庫。各 transport 不同的地方，
+處理常式會呼叫該 transport 的 `agentBackend`：`ptyBackend` 驅動終端機或 ACP 對話，
+`nativeBackend` 驅動 native 對話。
 
 ## 對話與 transport
 

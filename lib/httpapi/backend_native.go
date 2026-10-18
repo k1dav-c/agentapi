@@ -69,3 +69,21 @@ func (b nativeBackend) reload(ctx context.Context) (bool, error) {
 func (b nativeBackend) close() error {
 	return b.s.native.Close()
 }
+
+func (b nativeBackend) dispatchModes() bool {
+	return true
+}
+
+func (b nativeBackend) deliver(content string, mode DispatchMode, resp *MessageResponse) error {
+	return b.s.createNativeMessageLocked(content, mode, resp)
+}
+
+func (b nativeBackend) pendingRequest() (native.RequestState, string, bool) {
+	return b.s.pendingNativeHandoff()
+}
+
+// terminalQuestion: a native agent has no terminal; its questions are
+// requests.
+func (b nativeBackend) terminalQuestion(string) bool {
+	return false
+}

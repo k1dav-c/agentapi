@@ -334,11 +334,8 @@ func (s *Server) steerQueuedMessage(_ context.Context, input *SteerQueuedMessage
 }
 
 // pendingNativeHandoff describes the oldest pending native request for the
-// human reply protocol. It reports false for other transports.
+// human reply protocol, or reports false when none is pending.
 func (s *Server) pendingNativeHandoff() (native.RequestState, string, bool) {
-	if s.native == nil {
-		return native.RequestState{}, "", false
-	}
 	pending := s.native.PendingRequests()
 	if len(pending) == 0 {
 		return native.RequestState{}, "", false

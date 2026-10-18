@@ -170,10 +170,11 @@ func (s *Server) pendingHandoffLocked() (*handoff.Request, native.RequestState) 
 			question = message.Message
 		}
 	}
-	request, text, ok := s.pendingNativeHandoff()
+	backend := s.backend()
+	request, text, ok := backend.pendingRequest()
 	if ok {
 		kind, content = "request", text
-	} else if s.transport == TransportPTY && isTerminalQuestionScreen(s.agentType, screen) {
+	} else if backend.terminalQuestion(screen) {
 		kind, content = "terminal", screen
 	} else {
 		if s.queue.Len() > 0 {

@@ -145,7 +145,8 @@ The handlers are grouped by file:
 
 | File | Handles |
 | --- | --- |
-| `server.go` | Messages, status, events, the queue, uploads; the server's setup and routes |
+| `server.go`, `queue.go` | Messages, status, events, the queue, uploads; the server's setup and routes |
+| `backend.go`, `backend_pty.go`, `backend_native.go` | What depends on the transport: dispatching the queue, delivering a message, restarts, the human-reply protocol's pending request |
 | `native.go` | Requests, settings, interrupt, compaction, login retry; the native observer |
 | `terminal.go`, `files.go`, `file_preview.go` | The shell terminal and the file viewer |
 | `mcp.go`, `mcp_management.go` | MCP servers and profiles |
@@ -159,7 +160,9 @@ Plain chi routes serve the chat (`/chat/*`), uploaded images
 (`/uploads/{checksum}/{name}`) and the screen stream of TTY mode
 (`/internal/screen`). The `Server` holds the conversation, the emitter, the
 queue and its lock (`s.mu`), the webhook dispatcher, the MCP store, the shell
-terminal and the state DB.
+terminal and the state DB. Where the transports differ, handlers call the
+`agentBackend` of the server's transport: `ptyBackend` drives a terminal or ACP
+conversation, `nativeBackend` a native one.
 
 ## Conversations and transports
 

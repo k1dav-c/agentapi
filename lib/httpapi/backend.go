@@ -1,6 +1,10 @@
 package httpapi
 
-import "context"
+import (
+	"context"
+
+	"github.com/coder/agentapi/lib/native"
+)
 
 // agentBackend is the part of the server's work that depends on the
 // transport: a terminal or ACP conversation (ptyBackend) or a native one
@@ -28,6 +32,19 @@ type agentBackend interface {
 	reload(ctx context.Context) (bool, error)
 	// close stops the agent for good, when AgentAPI stops.
 	close() error
+
+	// dispatchModes reports whether a user message can steer or interrupt
+	// the agent's turn rather than wait for it to end.
+	dispatchModes() bool
+	// deliver sends a user message to the agent according to mode, or
+	// queues it, and says which in resp.
+	deliver(content string, mode DispatchMode, resp *MessageResponse) error
+	// pendingRequest returns the request the agent waits on that the
+	// human reply protocol offers, as text, or false.
+	pendingRequest() (native.RequestState, string, bool)
+	// terminalQuestion reports whether screen shows a dialog of the
+	// agent's terminal, which the human reply protocol offers.
+	terminalQuestion(screen string) bool
 }
 
 // backend returns the server's agentBackend.

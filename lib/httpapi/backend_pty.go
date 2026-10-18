@@ -3,7 +3,11 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 
+	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 )
 
@@ -75,4 +79,51 @@ func (b ptyBackend) reload(context.Context) (bool, error) {
 // close: the terminal agent's process is stopped by whoever started it.
 func (b ptyBackend) close() error {
 	return nil
+}
+
+func (b ptyBackend) dispatchModes() bool {
+	return false
+}
+
+// deliver answers a dialog that has a text field with the message, or
+// types the message. It waits in the queue behind earlier messages, while
+// the agent works, and while the terminal shows a dialog: the dialog would
+// ignore the text, and its Enter would pick the highlighted option (e.g.
+// approve a permission request).
+func (b ptyBackend) deliver(content string, _ DispatchMode, resp *MessageResponse) error {
+	s := b.s
+	var screen string
+	if s.transport == TransportPTY {
+		screen = s.currentScreenLocked()
+	}
+	if keys, ok := freeTextReplyKeys(s.agentType, screen); ok {
+		if err := s.conversation.Send(formatFreeTextReply(s.agentType, keys, content)...); err != nil {
+			if errors.Is(err, st.ErrMessageValidationChanging) {
+				return huma.Error409Conflict("the agent's prompt is still updating; try again in a moment")
+			}
+			return fmt.Errorf("failed to send reply to the agent's prompt: %w", err)
+		}
+		return nil
+	}
+	if s.queue.Len() > 0 || s.conversation.Status() != st.ConversationStatusStable ||
+		(screen != "" && isTerminalQuestionScreen(s.agentType, screen)) {
+		s.queueMessageLocked(resp, content, false)
+		return nil
+	}
+	if err := s.conversation.Send(FormatMessage(s.agentType, content)...); err != nil {
+		if errors.Is(err, st.ErrMessageValidationChanging) {
+			s.queueMessageLocked(resp, content, false)
+			return nil
+		}
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+	return nil
+}
+
+func (b ptyBackend) pendingRequest() (native.RequestState, string, bool) {
+	return native.RequestState{}, "", false
+}
+
+func (b ptyBackend) terminalQuestion(screen string) bool {
+	return b.s.transport == TransportPTY && isTerminalQuestionScreen(b.s.agentType, screen)
 }

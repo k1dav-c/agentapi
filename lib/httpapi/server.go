@@ -1062,7 +1062,8 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 	if mode == "" {
 		mode = DispatchQueue
 	}
-	if mode != DispatchQueue && (s.native == nil || input.Body.Type != MessageTypeUser) {
+	backend := s.backend()
+	if mode != DispatchQueue && (!backend.dispatchModes() || input.Body.Type != MessageTypeUser) {
 		return nil, huma.Error400BadRequest("dispatch_mode steer and interrupt need the native transport and a user message")
 	}
 	switch input.Body.Type {
@@ -1070,47 +1071,13 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 		if strings.TrimSpace(input.Body.Content) == "" {
 			return nil, huma.Error400BadRequest("message must not be empty")
 		}
-		if s.native != nil {
-			if err := s.createNativeMessageLocked(input.Body.Content, mode, resp); err != nil {
-				return nil, err
-			}
-			if resp.Body.Queued || resp.Body.Steered {
-				// The message doesn't answer a pending request, so the
-				// handoff keeps offering it.
-				return resp, nil
-			}
-			break
+		if err := backend.deliver(input.Body.Content, mode, resp); err != nil {
+			return nil, err
 		}
-		var screen string
-		if s.transport == TransportPTY {
-			screen = s.currentScreenLocked()
-		}
-		if keys, ok := freeTextReplyKeys(s.agentType, screen); ok {
-			if err := s.conversation.Send(formatFreeTextReply(s.agentType, keys, input.Body.Content)...); err != nil {
-				if errors.Is(err, st.ErrMessageValidationChanging) {
-					return nil, huma.Error409Conflict("the agent's prompt is still updating; try again in a moment")
-				}
-				return nil, fmt.Errorf("failed to send reply to the agent's prompt: %w", err)
-			}
-			break
-		}
-		// Enqueue when earlier messages are still waiting, even if the
-		// agent is stable, so messages are delivered in FIFO order. Never
-		// type a message into an interactive prompt either: the prompt
-		// ignores the text and the carriage return would pick the
-		// highlighted option (e.g. approve a permission request). The
-		// queue holds it until the prompt is answered.
-		if s.queue.Len() > 0 || s.conversation.Status() != st.ConversationStatusStable ||
-			(screen != "" && isTerminalQuestionScreen(s.agentType, screen)) {
-			s.queueMessageLocked(resp, input.Body.Content, false)
+		if resp.Body.Queued || resp.Body.Steered {
+			// The message doesn't answer what the handoff offers, so it
+			// goes on offering it.
 			return resp, nil
-		}
-		if err := s.conversation.Send(FormatMessage(s.agentType, input.Body.Content)...); err != nil {
-			if errors.Is(err, st.ErrMessageValidationChanging) {
-				s.queueMessageLocked(resp, input.Body.Content, false)
-				return resp, nil
-			}
-			return nil, fmt.Errorf("failed to send message: %w", err)
 		}
 	case MessageTypeRaw:
 		if s.agentio == nil {
