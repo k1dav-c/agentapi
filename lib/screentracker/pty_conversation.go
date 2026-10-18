@@ -419,9 +419,11 @@ func (c *PTYConversation) updateLastAgentMessageLocked(screen string, timestamp 
 	c.fmtCacheValid = true
 	c.fmtCacheScreen = screen
 
+	// A new turn always gets its message, even one like the previous
+	// turn's (two empty replies in a row): until it has one, the user's
+	// message is the last one and the status stays changing.
 	shouldCreateNewMessage := len(c.messages) == 0 || c.messages[len(c.messages)-1].Role == ConversationRoleUser
-	lastAgentMessage := c.lastMessage(ConversationRoleAgent)
-	if lastAgentMessage.Message == agentMessage {
+	if !shouldCreateNewMessage && c.messages[len(c.messages)-1].Message == agentMessage {
 		return
 	}
 	conversationMessage := ConversationMessage{
@@ -513,6 +515,7 @@ func (c *PTYConversation) sendMessage(ctx context.Context, messageParts ...Messa
 	})
 	c.userSentMessageAfterLoadState = true
 	c.writingMessage = false
+	c.dirty = true
 	// screenBeforeLastUserMessage and messages changed; the next
 	// updateLastAgentMessageLocked pass must recompute the diff.
 	c.fmtCacheValid = false

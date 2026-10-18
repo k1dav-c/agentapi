@@ -1875,3 +1875,49 @@ func TestStabilityScreen(t *testing.T) {
 		assert.ErrorIs(t, sendErr, st.ErrMessageNotSubmitted)
 	})
 }
+
+// roles lists each message as "role:text", for asserting the conversation's
+// shape.
+func roles(c *st.PTYConversation) []string {
+	var out []string
+	for _, m := range c.Messages() {
+		out = append(out, string(m.Role)+":"+m.Message)
+	}
+	return out
+}
+
+func TestRepeatedRepliesEndTheirTurns(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	t.Cleanup(cancel)
+
+	// Every write drops the last line: the screen changes, so the message is
+	// taken as submitted, but it only ever shows lines already on screen, so
+	// every reply is empty.
+	agent := &testAgent{screen: "L1\nL2\nL3\nL4\nL5\nL6\nL7\nL8"}
+	agent.onWrite = func([]byte) {
+		if lines := strings.Split(agent.screen, "\n"); len(lines) > 1 {
+			agent.screen = strings.Join(lines[:len(lines)-1], "\n")
+		}
+	}
+	mClock := quartz.NewMock(t)
+	c := st.NewPTY(ctx, st.PTYConversationConfig{
+		Clock:                 mClock,
+		AgentIO:               agent,
+		SnapshotInterval:      100 * time.Millisecond,
+		ScreenStabilityLength: 200 * time.Millisecond,
+		Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}, &testEmitter{})
+	c.Start(ctx)
+	advanceFor(ctx, t, mClock, 300*time.Millisecond)
+	require.Equal(t, st.ConversationStatusStable, c.Status())
+
+	// The second reply is the same as the first one (empty): it still ends
+	// its turn, rather than leaving the user's message last and the status
+	// changing for good.
+	for _, q := range []string{"q1", "q2"} {
+		sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: q})
+		advanceFor(ctx, t, mClock, time.Second)
+		require.Equal(t, st.ConversationStatusStable, c.Status(), "after %s: %q", q, roles(c))
+	}
+	require.Equal(t, []string{"agent:" + strings.Join(strings.Split("L1 L2 L3 L4 L5 L6 L7 L8", " "), "\n"), "user:q1", "agent:", "user:q2", "agent:"}, roles(c))
+}
