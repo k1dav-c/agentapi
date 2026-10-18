@@ -4,7 +4,6 @@
 package claude
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -22,6 +21,7 @@ import (
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/procutil"
 	st "github.com/coder/agentapi/lib/screentracker"
 )
@@ -117,7 +117,7 @@ func newAdapter(cfg Config, args parsedArgs, resumeRef string) *Adapter {
 		resumeRef:   resumeRef,
 		parser:      newStreamParser(cfg.Clock, cfg.SnapshotInterval),
 		reportedRef: resumeRef,
-		controls:    make(map[string]*control),
+		writer:      agentio.NewWriter("claude"),
 		requests:    make(map[string]*pendingRequest),
 		exited:      make(chan struct{}),
 		readDone:    make(chan struct{}),
@@ -146,7 +146,10 @@ type Adapter struct {
 	// turn, or zero. Read loop only.
 	interruptAt time.Time
 
-	writeMu sync.Mutex
+	// writer writes frames to the CLI's stdin, once it started.
+	writer *agentio.Writer
+	// calls are the control requests waiting for the CLI's answer.
+	calls agentio.Calls[string, controlResult]
 
 	mu      sync.Mutex
 	started bool
@@ -167,7 +170,6 @@ type Adapter struct {
 	// turn: a new session is titled after it.
 	prompt     string
 	controlSeq int
-	controls   map[string]*control
 	requests   map[string]*pendingRequest
 	closing    bool
 	// mode is Claude Code's permission mode, model the value of the model
@@ -192,16 +194,13 @@ var (
 	_ native.Configurable = (*Adapter)(nil)
 )
 
-// errClosed is returned by Start after Close.
-var errClosed = errors.New("the adapter was closed")
-
-// control is a control request the adapter sent and the CLI hasn't
-// answered yet. A successful answer is handed to onResponse in the read
-// loop; then answers are delivered on ch.
-type control struct {
-	ch         chan controlResult
-	onResponse func(json.RawMessage)
-}
+var (
+	// errClosed is returned by Start after Close.
+	errClosed = errors.New("the adapter was closed")
+	// errExited fails the control requests the CLI didn't answer before
+	// its output ended.
+	errExited = errors.New("claude exited")
+)
 
 type controlResult struct {
 	response json.RawMessage
@@ -263,6 +262,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		_ = proc.Kill()
 		return errClosed
 	}
+	a.writer.Attach(proc.Stdin())
 
 	go a.readLoop(proc.Stdout())
 	go func() {
@@ -276,7 +276,8 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	response, err := a.request(ctx, "initialize", map[string]any{"hooks": nil}, nil)
 	if err != nil {
 		_ = a.Close()
-		if ctx.Err() != nil {
+		if !errors.Is(err, errExited) {
+			// Timed out, or the CLI answered with an error.
 			return fmt.Errorf("initialize claude: %w", err)
 		}
 		exitErr := a.waitErr()
@@ -300,68 +301,57 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 
 // write sends one frame to the CLI.
 func (a *Adapter) write(v any) error {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	a.mu.Lock()
-	proc := a.proc
-	a.mu.Unlock()
-	if proc == nil {
-		return native.ErrNotStarted
-	}
-	a.writeMu.Lock()
-	defer a.writeMu.Unlock()
-	if _, err := proc.Stdin().Write(data); err != nil {
-		return fmt.Errorf("write to claude: %w", err)
-	}
-	return nil
+	return a.writer.Write(v)
 }
 
-// sendControl writes a control request and registers c for its answer.
-func (a *Adapter) sendControl(subtype string, fields map[string]any, c *control) (string, error) {
+// sendControl writes a control request. onResponse, if set, gets a
+// successful answer in the read loop; the answer comes on the returned
+// call.
+func (a *Adapter) sendControl(subtype string, fields map[string]any, onResponse func(json.RawMessage)) (string, *agentio.Call[controlResult], error) {
 	a.mu.Lock()
 	if a.closing {
 		a.mu.Unlock()
-		return "", errors.New("claude is shutting down")
+		return "", nil, errors.New("claude is shutting down")
 	}
 	a.controlSeq++
 	id := fmt.Sprintf("agentapi_%d", a.controlSeq)
-	a.controls[id] = c
 	a.mu.Unlock()
+	var then func(controlResult, error)
+	if onResponse != nil {
+		then = func(r controlResult, _ error) {
+			if r.err == nil {
+				onResponse(r.response)
+			}
+		}
+	}
+	call, err := a.calls.Add(id, then)
+	if err != nil {
+		return "", nil, err
+	}
 	request := map[string]any{"subtype": subtype}
 	for k, v := range fields {
 		request[k] = v
 	}
 	if err := a.write(map[string]any{"type": "control_request", "request_id": id, "request": request}); err != nil {
-		a.mu.Lock()
-		delete(a.controls, id)
-		a.mu.Unlock()
-		return "", err
+		a.calls.Drop(id)
+		return "", nil, err
 	}
-	return id, nil
+	return id, call, nil
 }
 
 // request sends a control request and waits for its answer. onResponse, if
 // set, gets a successful answer in the read loop first.
 func (a *Adapter) request(ctx context.Context, subtype string, fields map[string]any, onResponse func(json.RawMessage)) (json.RawMessage, error) {
-	c := &control{ch: make(chan controlResult, 1), onResponse: onResponse}
-	id, err := a.sendControl(subtype, fields, c)
+	id, call, err := a.sendControl(subtype, fields, onResponse)
 	if err != nil {
 		return nil, err
 	}
-	select {
-	case res := <-c.ch:
-		return res.response, res.err
-	case <-ctx.Done():
-		a.mu.Lock()
-		delete(a.controls, id)
-		a.mu.Unlock()
-		return nil, ctx.Err()
-	case <-a.readDone:
-		return nil, errors.New("claude closed its output")
+	res, err := call.Wait(ctx)
+	if err != nil {
+		a.calls.Drop(id)
+		return nil, err
 	}
+	return res.response, res.err
 }
 
 // userMessage builds a user frame. Images go before the text, as Claude
@@ -430,15 +420,15 @@ func (a *Adapter) requestTitle(prompt string) {
 	if runes := []rune(prompt); len(runes) > 2000 {
 		prompt = string(runes[:2000])
 	}
-	c := &control{onResponse: func(response json.RawMessage) {
+	onResponse := func(response json.RawMessage) {
 		var r struct {
 			Title string `json:"title"`
 		}
 		if json.Unmarshal(response, &r) == nil && r.Title != "" {
 			a.sink.SessionName(r.Title)
 		}
-	}}
-	if _, err := a.sendControl("generate_session_title", map[string]any{"description": prompt, "persist": true}, c); err != nil {
+	}
+	if _, _, err := a.sendControl("generate_session_title", map[string]any{"description": prompt, "persist": true}, onResponse); err != nil {
 		a.cfg.Logger.Debug("Failed to ask Claude Code for a session title", "error", err)
 	}
 }
@@ -604,34 +594,18 @@ func (a *Adapter) readLoop(stdout io.Reader) {
 // closes.
 func (a *Adapter) readLines(stdout io.Reader, lines chan<- []byte) {
 	defer close(lines)
-	reader := bufio.NewReaderSize(stdout, 64<<10)
-	for {
-		line, err := reader.ReadBytes('\n')
-		if line = bytes.TrimSpace(line); len(line) > 0 {
-			lines <- line
-		}
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				a.cfg.Logger.Debug("Reading Claude Code output failed", "error", err)
-			}
-			return
-		}
-	}
+	agentio.ReadLines(stdout, "claude", 0, a.cfg.Logger, func(line []byte) { lines <- line })
 }
 
-// outputClosed fails the control requests still waiting for an answer and
-// forgets the permission requests: the CLI is gone.
+// outputClosed sends the snapshots the throttle held back, fails the
+// control requests still waiting for an answer and forgets the permission
+// requests: the CLI is gone.
 func (a *Adapter) outputClosed() {
+	a.sendRich(a.parser.flushAll())
 	a.mu.Lock()
-	controls := a.controls
-	a.controls = make(map[string]*control)
 	a.requests = make(map[string]*pendingRequest)
 	a.mu.Unlock()
-	for _, c := range controls {
-		if c.ch != nil {
-			c.ch <- controlResult{err: errors.New("claude exited")}
-		}
-	}
+	a.calls.Close(errExited)
 }
 
 // nextWake returns when the read loop has to act without output from the
@@ -660,14 +634,16 @@ func (a *Adapter) wake() {
 }
 
 func (a *Adapter) handleLine(line []byte) {
-	if line[0] != '{' {
+	line = bytes.TrimSpace(line)
+	if len(line) == 0 || line[0] != '{' {
 		// Some builds print diagnostics on stdout.
 		a.cfg.Logger.Debug("Ignoring non-JSON output from Claude Code", "line", string(line[:min(len(line), 200)]))
 		return
 	}
 	var f frame
 	if err := decode(line, &f); err != nil {
-		a.cfg.Logger.Warn("Failed to parse Claude Code output", "error", err, "line", string(line[:min(len(line), 200)]))
+		// The line isn't logged: it can hold the user's prompt.
+		a.cfg.Logger.Warn("Failed to parse Claude Code output", "error", err)
 		return
 	}
 	switch f.Type {
@@ -730,23 +706,11 @@ func (a *Adapter) handleControlResponse(f *frame) {
 	if decode(f.Response, &r) != nil {
 		return
 	}
-	a.mu.Lock()
-	c, ok := a.controls[r.RequestID]
-	delete(a.controls, r.RequestID)
-	a.mu.Unlock()
-	if !ok {
-		return
-	}
 	var err error
 	if r.Subtype == "error" {
 		err = fmt.Errorf("claude: %s", r.Error)
 	}
-	if c.onResponse != nil && err == nil {
-		c.onResponse(r.Response)
-	}
-	if c.ch != nil {
-		c.ch <- controlResult{response: r.Response, err: err}
-	}
+	a.calls.Resolve(r.RequestID, controlResult{response: r.Response, err: err}, nil)
 }
 
 func (a *Adapter) handleControlRequest(f *frame) {

@@ -266,6 +266,19 @@ func (p *streamParser) flush() []jsonlwatcher.RichMessage {
 	return out
 }
 
+// flushAll returns snapshots of every message with changes the throttle
+// held back, due or not: the CLI's output ended.
+func (p *streamParser) flushAll() []jsonlwatcher.RichMessage {
+	var out []jsonlwatcher.RichMessage
+	for _, id := range p.order {
+		m := p.messages[id]
+		if m.dirty && len(m.blocks) > 0 {
+			out = append(out, p.snapshot(m))
+		}
+	}
+	return out
+}
+
 func cloneBlock(b jsonlwatcher.RichContentBlock) jsonlwatcher.RichContentBlock {
 	if b.Images != nil {
 		b.Images = append([]jsonlwatcher.RichImage(nil), b.Images...)

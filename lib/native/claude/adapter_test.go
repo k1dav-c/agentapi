@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -151,13 +152,7 @@ func TestClose(t *testing.T) {
 		a, _ := started(t, Config{StopTimeout: 10 * time.Millisecond}, proc)
 		turnErr := make(chan error, 1)
 		go func() { turnErr <- a.StartTurn(context.Background(), native.Input{Text: "hi"}) }()
-		require.Eventually(t, func() bool {
-			if a.writeMu.TryLock() {
-				a.writeMu.Unlock()
-				return false
-			}
-			return true
-		}, 5*time.Second, time.Millisecond, "the prompt is not being written")
+		require.Eventually(t, a.writer.Writing, 5*time.Second, time.Millisecond, "the prompt is not being written")
 		closed := make(chan error, 1)
 		go func() { closed <- a.Close() }()
 		select {
@@ -595,4 +590,67 @@ func TestFailedInterruptLeavesTheTurnAlone(t *testing.T) {
 	require.Eventually(t, func() bool { return len(sink.TurnLog()) == 2 }, 5*time.Second, time.Millisecond)
 	assert.NotEqual(t, "turn_completed:interrupted", sink.TurnLog()[1])
 	require.NoError(t, a.Close())
+}
+
+// A snapshot the throttle held back is sent when the CLI's output ends,
+// so the last text it streamed before it exited isn't lost.
+func TestHeldBackSnapshotIsSentAtExit(t *testing.T) {
+	t.Parallel()
+	proc := newFakeProcess("")
+	_, sink := started(t, Config{Clock: quartz.NewMock(t), SnapshotInterval: time.Hour}, proc)
+	event := func(event string) {
+		proc.send(t, []byte(`{"type":"stream_event","api_message_id":"msg_1","event":`+event+`}`))
+	}
+	event(`{"type":"message_start","message":{"id":"msg_1","model":"m"}}`)
+	event(`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
+	event(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Half"}}`)
+	event(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" a sentence"}}`)
+	proc.barrier(t)
+	require.Len(t, sink.Snapshots("msg_1"), 1, "the second delta is held back")
+	proc.exit(errors.New("signal: killed"))
+	require.Eventually(t, func() bool { return len(sink.Snapshots("msg_1")) == 2 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, "Half a sentence", sink.Snapshots("msg_1")[1].Content[0].Text)
+}
+
+// The answer to a control request that comes right before the CLI's
+// output ends is the request's answer, not "claude exited".
+func TestAnswerJustBeforeExit(t *testing.T) {
+	t.Parallel()
+	for range 20 {
+		proc := newFakeProcess("")
+		a, _ := started(t, Config{}, proc)
+		got := make(chan error, 1)
+		go func() {
+			_, err := a.request(context.Background(), "mcp_status", nil, nil)
+			got <- err
+		}()
+		request, _ := proc.waitRequest(t, 0, "mcp_status")
+		_, err := proc.stdoutW.Write([]byte(fmt.Sprintf(`{"type":"control_response","response":{"subtype":"success","request_id":%q,"response":{}}}`+"\n", request["request_id"])))
+		require.NoError(t, err)
+		proc.exit(nil)
+		require.NoError(t, <-got)
+		<-a.readDone
+		_, err = a.request(context.Background(), "mcp_status", nil, nil)
+		assert.ErrorIs(t, err, errExited, "the CLI is gone")
+	}
+}
+
+// A CLI that answers initialize with an error is still running: the start
+// fails with its answer, not "exited during startup".
+func TestInitializeRefused(t *testing.T) {
+	t.Parallel()
+	proc := newFakeProcess("")
+	a := newTestAdapter(t, Config{
+		StartProcess: func(procutil.Command) (procutil.Process, error) { return proc, nil },
+		AuthStatus:   loggedIn,
+		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		StopTimeout:  10 * time.Millisecond,
+	}, "")
+	errCh := make(chan error, 1)
+	go func() { errCh <- a.Start(context.Background(), nativetest.NewSink(t)) }()
+	init := proc.waitWritten(t, 0)
+	proc.send(t, []byte(fmt.Sprintf(`{"type":"control_response","response":{"subtype":"error","request_id":%q,"error":"unsupported option"}}`, init["request_id"])))
+	err := <-errCh
+	require.Error(t, err)
+	assert.Equal(t, "initialize claude: claude: unsupported option", err.Error())
 }
