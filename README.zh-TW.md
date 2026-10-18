@@ -35,6 +35,7 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 - [對話 API](#對話-api)
 - [整合](#整合)
 - [安全性](#安全性)
+- [資源用量](#資源用量)
 - [CLI 參考](#cli-參考)
 - [HTTP API 參考](#http-api-參考)
 - [架構](#架構)
@@ -1163,6 +1164,43 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
 - 修改 MCP 伺服器和 webhook，以及重新啟動 agent。
 
 只要有其他人連得到伺服器，就請使用 `--api-token`，並搭配 `--bind` 或反向代理。
+
+## 資源用量
+
+AgentAPI 本身很輕量：一個大約 30 MiB 的 Go 行程，agent 閒置時只用掉約 0.1% 的單一 CPU 核心。
+大部分的成本來自它執行的 agent CLI，約 100–350 MiB。
+
+以下數字是 2026-10-18 量測的：AgentAPI v0.24.0（執行檔 29.5 MiB）、Claude Code 2.1.302、
+codex-cli 0.163.0 和 Pi 1.3.0，在 Linux、4 核心的 Intel Xeon Silver 4210（2.2 GHz）上執行，
+並連著一個聊天介面（一個 SSE 用戶端）。每個情境跑一個簡短的回合：回覆約 200 字、不使用工具。
+記憶體是常駐記憶體（RSS）；CPU 在閒置時是單一核心的使用比例，回合則是整個回合用掉的 CPU 秒數。
+
+| Transport | Agent | AgentAPI 記憶體 | AgentAPI CPU（閒置） | AgentAPI 每回合 CPU | Agent 記憶體 | Agent 每回合 CPU |
+| --- | --- | --- | --- | --- | --- | --- |
+| Native | Claude Code | 27–30 MiB | 0.1% | 0.08 秒 | 230–290 MiB | 1.1 秒 |
+| Native | Codex | 27–28 MiB | 0.1% | 0.11 秒 | 205–265 MiB | 0.43 秒 |
+| Native | Pi | 27–28 MiB | 0.1% | 0.12 秒 | 100–120 MiB | 0.37 秒 |
+| PTY | Claude Code | 29–34 MiB | 0.15% | 0.29 秒 | 265–300 MiB | 1.4 秒 |
+| PTY | Codex | 34 MiB | 0.2–0.7% | 0.66 秒 | 245–345 MiB | 6.3 秒 |
+| PTY | Pi | 28–35 MiB | 0.1% | 0.59 秒 | 120–130 MiB | 1.2 秒 |
+| Native | `native-demo`（沒有 agent 行程） | 27 MiB | 0.03% | 0.07 秒 | | |
+
+- agent 閒置時，兩種 transport 幾乎都不會讓 AgentAPI 耗用資源：輪詢畫面（PTY）和等待協定
+  （native）一樣便宜。例外是使用 PTY transport 的 Codex：為了找到這個工作階段的紀錄檔，
+  AgentAPI 每 500 毫秒會讀取 Codex 近期的工作階段檔案，第一則訊息之前讀得更多，所以成本會隨
+  近期 Codex 工作階段的數量增加。
+- 使用 PTY transport 時，一個回合讓 AgentAPI 多用 3–6 倍的 CPU（輸入訊息、讀取畫面、追蹤
+  工作階段紀錄檔），agent 本身也是：Codex 的終端機介面用了 6.3 CPU 秒的回合，它的 app-server
+  只用了 0.4 秒。
+- agent 自己的記憶體會在工作階段中變動：Claude Code 在啟動約一分半後成長到 314 MiB（它自己的
+  背景工作，其餘時間閒置只用 0.1% CPU），Codex 在第一個回合後釋放了約 55 MiB。
+- AgentAPI 的程式碼（記憶體中約 17 MiB）由同一個執行檔啟動的實例共用：同時執行四個時，
+  每個約佔 13–24 MiB（PSS）。
+- 沒有計入：agent 啟動的 MCP 伺服器、它執行的指令、shell 終端機（開啟時有一個 shell）以及
+  瀏覽器分頁。
+
+規劃機器時，每個工作階段請預留約 30 MiB 給 AgentAPI，再加上 agent 本身（Claude Code 或 Codex
+約 350 MiB，Pi 約 150 MiB），以及它的 MCP 伺服器和指令所需的資源。
 
 ## CLI 參考
 

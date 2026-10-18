@@ -46,6 +46,7 @@ has the complete commit history.
 - [Conversation API](#conversation-api)
 - [Integrations](#integrations)
 - [Security](#security)
+- [Resource usage](#resource-usage)
 - [CLI reference](#cli-reference)
 - [HTTP API reference](#http-api-reference)
 - [Architecture](#architecture)
@@ -1362,6 +1363,46 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
 
 Use `--api-token` together with `--bind` or a reverse proxy whenever someone else can reach the
 server.
+
+## Resource usage
+
+AgentAPI itself is small: one Go process of about 30 MiB that uses about 0.1% of a CPU core while
+the agent is idle. Most of the cost is the agent CLI it runs, at 100–350 MiB.
+
+These numbers were measured on 2026-10-18 with AgentAPI v0.24.0 (a 29.5 MiB binary), Claude Code
+2.1.302, codex-cli 0.163.0 and Pi 1.3.0, on Linux with a 4-core Intel Xeon Silver 4210 (2.2 GHz)
+and one chat (an SSE client) connected. Each case had one short turn: a reply of about 200 words,
+without tools. Memory is resident memory (RSS); CPU is a share of one core while idle, and CPU
+seconds for a whole turn.
+
+| Transport | Agent | AgentAPI memory | AgentAPI CPU, idle | AgentAPI CPU per turn | Agent memory | Agent CPU per turn |
+| --- | --- | --- | --- | --- | --- | --- |
+| Native | Claude Code | 27–30 MiB | 0.1% | 0.08 s | 230–290 MiB | 1.1 s |
+| Native | Codex | 27–28 MiB | 0.1% | 0.11 s | 205–265 MiB | 0.43 s |
+| Native | Pi | 27–28 MiB | 0.1% | 0.12 s | 100–120 MiB | 0.37 s |
+| PTY | Claude Code | 29–34 MiB | 0.15% | 0.29 s | 265–300 MiB | 1.4 s |
+| PTY | Codex | 34 MiB | 0.2–0.7% | 0.66 s | 245–345 MiB | 6.3 s |
+| PTY | Pi | 28–35 MiB | 0.1% | 0.59 s | 120–130 MiB | 1.2 s |
+| Native | `native-demo` (no agent process) | 27 MiB | 0.03% | 0.07 s | | |
+
+- While the agent is idle, both transports cost AgentAPI next to nothing: polling the screen
+  (PTY) costs about as little as waiting for the protocol (native). The exception is Codex with
+  the PTY transport: to find the session's log, AgentAPI reads Codex's recent session files every
+  500 ms, more of them before the first message, so this grows with the number of recent Codex
+  sessions.
+- A turn costs AgentAPI 3–6 times more CPU with the PTY transport (typing the message, reading the
+  screen, following the session log), and the agent too: Codex's terminal UI took 6.3 CPU seconds
+  for a turn its app-server answered in 0.4.
+- An agent's own memory moves during a session: Claude Code grew to 314 MiB about a minute and a
+  half after it started (its own background work, 0.1% CPU idle otherwise), and Codex gave back
+  about 55 MiB after its first turn.
+- AgentAPI's code (about 17 MiB of its memory) is shared by instances started from the same binary:
+  with four running, each costs about 13–24 MiB (PSS).
+- Not counted: MCP servers the agent starts, the commands it runs, the shell terminal (one shell
+  while it is open) and the browser tab.
+
+To size a machine, plan per session about 30 MiB for AgentAPI plus the agent (about 350 MiB for
+Claude Code or Codex, 150 MiB for Pi) and whatever its MCP servers and commands need.
 
 ## CLI reference
 
