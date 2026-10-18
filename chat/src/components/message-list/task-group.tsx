@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { formatDuration, formatTimeOfDay, secondsBetween } from "@/lib/clock";
+import { useNow } from "@/lib/use-elapsed";
 import { ChevronRight, Clipboard, Download, Eye, MoreHorizontal, TerminalSquare } from "lucide-react";
 import { Button } from "../ui/button";
 import { ProcessedMessage } from "../processed-message";
@@ -120,30 +122,8 @@ export const TaskGroup = React.memo(function TaskGroup({
   const toMarkdown = () => taskToMarkdown(toSearchableTask(task), number);
   const [previewOpen, setPreviewOpen] = useState(false);
   const previewFromMenu = useDialogFromMenu(() => setPreviewOpen(true));
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-
-  useEffect(() => {
-    if (status !== "running") {
-      setElapsedSeconds(0);
-      return;
-    }
-    const startedAt = task.prompt.time
-      ? Date.parse(task.prompt.time)
-      : Date.now();
-    const update = () =>
-      setElapsedSeconds(
-        Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
-      );
-    update();
-    const timer = window.setInterval(update, 1000);
-    return () => window.clearInterval(timer);
-  }, [status, task.prompt.time]);
-
-  const duration = status === "running"
-    ? formatClock(elapsedSeconds)
-    : startedAt && finishedAt
-      ? formatClock(Math.max(0, Math.round((Date.parse(finishedAt) - Date.parse(startedAt)) / 1000)))
-      : "";
+  const hasDuration = live || Boolean(startedAt && finishedAt);
+  const duration = hasDuration && <TaskDuration running={live} startedAt={startedAt} finishedAt={finishedAt} />;
 
   const copyTask = async () => {
     try {
@@ -168,7 +148,7 @@ export const TaskGroup = React.memo(function TaskGroup({
     toast.success(`Task ${number} Markdown downloaded`);
   };
 
-  const startTime = startedAt ? formatClockTime(startedAt) : "";
+  const startTime = startedAt ? formatTimeOfDay(startedAt) : "";
   return (
     <section
       id={`task-${number}`}
@@ -182,14 +162,16 @@ export const TaskGroup = React.memo(function TaskGroup({
           so the text column itself stays centered. */}
       <div className="absolute right-full top-7 mr-6 hidden w-[3.25rem] pt-px text-right font-mono text-[11px] leading-5 tabular-nums text-muted-foreground lg:block">
         {startTime && <time dateTime={startedAt}>{startTime}</time>}
-        {duration && <div className={status === "running" ? "text-state-working" : ""}>{duration}</div>}
+        {duration && <div className={live ? "text-state-working" : ""}>{duration}</div>}
       </div>
       <div className="min-w-0 min-[84rem]:flow-root">
         <header className="mb-2 flex min-h-7 items-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.06em] text-muted-foreground">
           <span>Task {number}</span>
           {(startTime || duration) && (
             <span className="normal-case tracking-normal tabular-nums lg:hidden">
-              {[startTime, duration].filter(Boolean).join(" · ")}
+              {startTime}
+              {startTime && duration && " · "}
+              {duration}
             </span>
           )}
           <span className={`flex items-center gap-1.5 font-sans text-xs normal-case tracking-normal ${statusMeta.className}`} role="status">
@@ -417,18 +399,15 @@ function withLastLines<T extends {content: string}>(message: T, count: number): 
   return lines.length <= count ? message : {...message, content: lines.slice(-count).join("\n")};
 }
 
-function formatClock(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
-    : `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function formatClockTime(iso: string) {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime())
-    ? ""
-    : date.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", hour12: false});
+// How long a task took, or has taken so far while it runs. A component of
+// its own, so that the clock of the running task renders every second
+// rather than the whole task.
+function TaskDuration({running, startedAt, finishedAt}: {running: boolean; startedAt?: string; finishedAt?: string}) {
+  const now = useNow(running ? 1000 : null);
+  // A task whose prompt has no time counts from when it showed.
+  const [shownAt] = useState(() => Date.now());
+  const start = startedAt ? Date.parse(startedAt) : shownAt;
+  if (running) return formatDuration(secondsBetween(start, now));
+  if (!startedAt || !finishedAt) return null;
+  return formatDuration(Math.max(0, Math.round((Date.parse(finishedAt) - start) / 1000)));
 }
