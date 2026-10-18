@@ -273,6 +273,8 @@ type Factory func(resumeRef string) (Adapter, error)
   所以它不能再呼叫回對話。
 - **行程。** `procutil` 會在 agent 自己的 process group 中啟動它，並移除上層 agent 工作階段的
   環境變數。停止時會先關閉它的輸入，3 秒後對整個 group 送出 SIGTERM，再過 2 秒送出 SIGKILL。
+  在那之前，adapter 會先中斷進行中的回合，最多等 3 秒讓它結束，agent 的工作階段紀錄才不會
+  停在沒有結果的工具呼叫。
 
 各個 adapter：
 

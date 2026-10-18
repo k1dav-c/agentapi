@@ -310,7 +310,9 @@ type Factory func(resumeRef string) (Adapter, error)
   conversation.
 - **Processes.** `procutil` starts the agent in its own process group, without
   the variables of a parent agent session. Stopping it closes its input, then
-  sends the group SIGTERM after 3 seconds and SIGKILL 2 seconds later.
+  sends the group SIGTERM after 3 seconds and SIGKILL 2 seconds later. Before
+  that, the adapters interrupt a running turn and wait up to 3 seconds for it
+  to end, so the agent's session log doesn't end in a tool call without result.
 
 The adapters:
 

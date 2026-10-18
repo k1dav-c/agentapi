@@ -315,7 +315,9 @@ type Adapter interface {
 	Capabilities() Capabilities
 	// Wait blocks until the agent process exits.
 	Wait() error
-	// Close stops the agent process.
+	// Close stops the agent process. An agent that keeps a session log is
+	// interrupted first if it works on a turn, and given a bounded time to
+	// end it, so the log doesn't end in a tool call without result.
 	Close() error
 }
 

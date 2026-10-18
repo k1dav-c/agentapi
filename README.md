@@ -378,9 +378,11 @@ agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6
   `status_change` events carry them too. While the agent waits only on a
   request, `status` is `stable`, as it is for a terminal dialog.
 - The agent runs in its own process group, so the MCP servers and commands it
-  started stop with it. Stopping it (AgentAPI exits, or a restart) closes its
-  input so it can finish on its own, then sends SIGTERM after 3 s and SIGKILL
-  2 s later.
+  started stop with it. Stopping it (AgentAPI exits, or a restart) first
+  interrupts a running turn and waits up to 3 s for it to end, so the session
+  log doesn't end in a tool call without result. Then it closes the agent's
+  input so it can finish on its own, sends SIGTERM after 3 s and SIGKILL 2 s
+  later.
 - Started from inside another agent's session (for example by Claude Code's
   Bash tool), the agent would inherit the variables that session sets for the
   commands it runs, one of them a secret. AgentAPI removes them, whichever

@@ -321,7 +321,8 @@ agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6
   會帶有這些資訊。agent 只是在等某個請求的回覆時，`status` 為 `stable`，和終端機對話框的
   情況一樣。
 - agent 在自己的 process group 中執行，所以它啟動的 MCP 伺服器和指令會跟著它一起停止。
-  停止 agent 時（AgentAPI 結束或重新啟動），會先關閉它的輸入讓它自行結束，3 秒後送出
+  停止 agent 時（AgentAPI 結束或重新啟動），會先中斷進行中的回合，最多等 3 秒讓它結束，
+  工作階段紀錄才不會停在沒有結果的工具呼叫；接著關閉它的輸入讓它自行結束，3 秒後送出
   SIGTERM，再過 2 秒送出 SIGKILL。
 - 從另一個 agent 的工作階段中啟動時（例如由 Claude Code 的 Bash 工具啟動），agent 會繼承
   那個工作階段為它所執行的指令設定的環境變數，其中一個是祕密。不論執行哪個 agent、使用哪種
