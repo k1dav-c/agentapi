@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,14 +51,13 @@ type Server struct {
 	conversation       st.Conversation
 	native             *native.Conversation // nil unless the transport is native
 	stateDB            *statedb.DB          // nil unless the conversation is kept
-	keepUploads        bool
-	savedQueue         []QueuedMessage // the queue as last stored in stateDB
+	savedQueue         []QueuedMessage      // the queue as last stored in stateDB
 	savedNextQueueID   int
 	agentio            st.AgentIO
 	agentType          mf.AgentType
 	emitter            *EventEmitter
 	chatBasePath       string
-	uploadDir          string
+	uploads            *uploadStore
 	cwd                string
 	clock              quartz.Clock
 	shutdownCtx        context.Context
@@ -319,20 +317,13 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		}, emitter)
 	}
 
-	// Create the directory for uploads: a temporary one unless the
-	// conversation is kept, whose messages refer to uploads by path.
-	uploadDir := config.UploadDir
-	if uploadDir != "" {
-		if err := os.MkdirAll(uploadDir, 0o700); err != nil {
-			return nil, fmt.Errorf("failed to create upload directory: %w", err)
-		}
-	} else {
-		uploadDir, err = os.MkdirTemp("", "agentapi-uploads-")
-		if err != nil {
-			return nil, fmt.Errorf("failed to create temporary directory: %w", err)
-		}
+	// The directory for uploads: a temporary one unless the conversation
+	// is kept, whose messages refer to uploads by path.
+	uploads, err := newUploadStore(config.UploadDir)
+	if err != nil {
+		return nil, err
 	}
-	logger.Info("Using upload directory", "uploadDir", uploadDir)
+	logger.Info("Using upload directory", "uploadDir", uploads.dir)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	webhook.start(shutdownCtx)
@@ -350,7 +341,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		agentType:      config.AgentType,
 		emitter:        emitter,
 		chatBasePath:   strings.TrimSuffix(config.ChatBasePath, "/"),
-		uploadDir:      uploadDir,
+		uploads:        uploads,
 		cwd:            config.CWD,
 		clock:          config.Clock,
 		shutdownCtx:    shutdownCtx,
@@ -362,7 +353,6 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		terminal:       terminal,
 		jsonlParentCtx: ctx,
 		stateDB:        stateDB,
-		keepUploads:    config.UploadDir != "",
 	}
 	if stateDB != nil {
 		s.restoreQueue(restored.snapshot)
