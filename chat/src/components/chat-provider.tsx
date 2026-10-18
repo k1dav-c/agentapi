@@ -10,6 +10,7 @@ import {
   createContext,
   PropsWithChildren,
   useContext,
+  useLayoutEffect,
 } from "react";
 import {toast} from "sonner";
 import {getErrorMessage} from "@/lib/error-utils";
@@ -53,6 +54,8 @@ import {
 import {isLoginNotice, type LoginRequired} from "@/lib/login";
 import {getAgentState, type AgentStateKind} from "@/lib/session-status";
 import {SyncTracker} from "@/lib/session-sync";
+import {Store, useStoreSelector} from "@/lib/store";
+import {useStableCallback} from "@/lib/use-stable-callback";
 
 export interface Message {
   id: number;
@@ -289,6 +292,7 @@ interface ChatContextValue {
 const STALE_CONNECTION_MS = 45_000;
 
 const ChatContext = createContext<ChatContextValue | undefined>(undefined);
+const ChatStoreContext = createContext<Store<ChatContextValue> | undefined>(undefined);
 
 export const useAgentAPIUrl = (): string => {
   const searchParams = useSearchParams();
@@ -1110,105 +1114,135 @@ export function ChatProvider({ children }: PropsWithChildren) {
     }
   };
 
+  // Actions keep their identity from render to render, so the components
+  // that take them don't render again when the state changes.
+  const actions = {
+    sendMessage: useStableCallback(sendMessage),
+    sendTerminalInput: useStableCallback(async (data: string) => {
+      await api.sendMessage(data, "raw");
+    }),
+    updateSettings: useStableCallback(async (change: AgentSettings) => {
+      const result = await api.updateSettings(change);
+      // Shown at once; the status_change event that follows says the same.
+      updateAgentStatus((status) => update(status, {settings: result.settings}));
+      return result;
+    }),
+    retryLogin: useStableCallback(retryLogin),
+    respondToRequest: useStableCallback(respondToRequest),
+    stop: useStableCallback(stop),
+    steerQueuedMessage: useStableCallback(steerQueuedMessage),
+    reorderQueue: useStableCallback(reorderQueue),
+    retryFailedMessage: useStableCallback(retryFailedMessage),
+    dismissFailedMessage: useStableCallback(dismissFailedMessage),
+    updateQueuedMessage: useStableCallback(updateQueuedMessage),
+    deleteQueuedMessage: useStableCallback(deleteQueuedMessage),
+    uploadFiles: useStableCallback(uploadFiles),
+    reconnectNow: useStableCallback(reconnectByUser),
+    downloadSession: useStableCallback(downloadSession),
+    deleteMessages: useStableCallback(async () => {
+      const epoch = syncRef.current.epoch;
+      await api.deleteMessages();
+      // The server's reset arrived as a session_sync of a new epoch,
+      // with what the new session sent since (a restart can take
+      // minutes): clearing now would drop both. Only a server that
+      // doesn't send it needs clearing here.
+      if (syncRef.current.epoch !== epoch) return;
+      syncRef.current.reset();
+      void clearSession(agentAPIUrl);
+      setMessages([]);
+      setRichMessages([]);
+      setRequests([]);
+    }),
+  };
+  const value: ChatContextValue = {
+    ...actions,
+    messages,
+    richMessages,
+    terminalPrompt,
+    loading,
+    transport,
+    capabilities,
+    features: chatFeatures,
+    pendingRequestCount,
+    loginRequired,
+    agentSettings,
+    agentUsage,
+    terminalAvailable,
+    compact: api.compact,
+    terminalInput: api.terminalInput,
+    terminalResize: api.terminalResize,
+    getSettings: api.getSettings,
+    agentStarting,
+    agentState,
+    dispatch,
+    requests,
+    canStop: stoppable,
+    serverStatus,
+    connectionStatus,
+    queuedMessages,
+    reconnectAttempt,
+    nextReconnectAt,
+    getMCP: api.getMCP,
+    updateMCP: api.updateMCP,
+    checkMCP: api.checkMCP,
+    createMCPServer: api.createMCPServer,
+    updateMCPServer: api.updateMCPServer,
+    deleteMCPServer: api.deleteMCPServer,
+    getMCPProfiles: api.getMCPProfiles,
+    saveMCPProfile: api.saveMCPProfile,
+    deleteMCPProfile: api.deleteMCPProfile,
+    applyMCPProfile: api.applyMCPProfile,
+    getFileContent: api.getFileContent,
+    getFileDiff: api.getFileDiff,
+    getFilePreview: api.getFilePreview,
+    fileImageURL: api.fileImageURL,
+    storageScope: agentAPIUrl,
+    agentType,
+    agentapiVersion,
+    terminalColumns,
+    sessionName,
+    customTitle,
+    workspaceUrl: workspaceParam ?? serverWorkspaceUrl,
+  };
+  // Components that read a part of the value with useChatSelector render
+  // again only when that part changes; the value is handed over once this
+  // render is committed.
+  const storeRef = useRef<Store<ChatContextValue> | null>(null);
+  storeRef.current ??= new Store(value);
+  const store = storeRef.current;
+  useLayoutEffect(() => store.set(value));
+
   return (
-    <ChatContext.Provider
-      value={{
-        messages,
-        richMessages,
-        terminalPrompt,
-        loading,
-        sendMessage,
-        sendTerminalInput: async (data: string) => {
-          await api.sendMessage(data, "raw");
-        },
-        transport,
-        capabilities,
-        features: chatFeatures,
-        pendingRequestCount,
-        loginRequired,
-        agentSettings,
-        agentUsage,
-        terminalAvailable,
-        compact: api.compact,
-        terminalInput: api.terminalInput,
-        terminalResize: api.terminalResize,
-        getSettings: api.getSettings,
-        updateSettings: async (change: AgentSettings) => {
-          const result = await api.updateSettings(change);
-          // Shown at once; the status_change event that follows says the same.
-          updateAgentStatus((status) => update(status, {settings: result.settings}));
-          return result;
-        },
-        agentStarting,
-        agentState,
-        dispatch,
-        retryLogin,
-        requests,
-        respondToRequest,
-        canStop: stoppable,
-        stop,
-        steerQueuedMessage,
-        reorderQueue,
-        retryFailedMessage,
-        dismissFailedMessage,
-        serverStatus,
-        connectionStatus,
-        queuedMessages,
-        updateQueuedMessage,
-        deleteQueuedMessage,
-        uploadFiles,
-        reconnectAttempt,
-        nextReconnectAt,
-        reconnectNow: reconnectByUser,
-        downloadSession,
-        deleteMessages: async () => {
-          const epoch = syncRef.current.epoch;
-          await api.deleteMessages();
-          // The server's reset arrived as a session_sync of a new epoch,
-          // with what the new session sent since (a restart can take
-          // minutes): clearing now would drop both. Only a server that
-          // doesn't send it needs clearing here.
-          if (syncRef.current.epoch !== epoch) return;
-          syncRef.current.reset();
-          void clearSession(agentAPIUrl);
-          setMessages([]);
-          setRichMessages([]);
-          setRequests([]);
-        },
-        getMCP: api.getMCP,
-        updateMCP: api.updateMCP,
-        checkMCP: api.checkMCP,
-        createMCPServer: api.createMCPServer,
-        updateMCPServer: api.updateMCPServer,
-        deleteMCPServer: api.deleteMCPServer,
-        getMCPProfiles: api.getMCPProfiles,
-        saveMCPProfile: api.saveMCPProfile,
-        deleteMCPProfile: api.deleteMCPProfile,
-        applyMCPProfile: api.applyMCPProfile,
-        getFileContent: api.getFileContent,
-        getFileDiff: api.getFileDiff,
-        getFilePreview: api.getFilePreview,
-        fileImageURL: api.fileImageURL,
-        storageScope: agentAPIUrl,
-        agentType,
-        agentapiVersion,
-        terminalColumns,
-        sessionName,
-        customTitle,
-        workspaceUrl: workspaceParam ?? serverWorkspaceUrl,
-      }}
-    >
-      <title>{documentTitle}</title>
-      {children}
-      <AuthDialog />
-    </ChatContext.Provider>
+    <ChatStoreContext.Provider value={store}>
+      <ChatContext.Provider value={value}>
+        <title>{documentTitle}</title>
+        {children}
+        <AuthDialog />
+      </ChatContext.Provider>
+    </ChatStoreContext.Provider>
   );
 }
 
+// useChat returns all of the chat's state and actions; the component
+// renders again whenever any of it changes. A component that needs a part
+// of it, or that is rendered many times (a task, a tool call), reads it
+// with useChatSelector instead.
 export function useChat() {
   const context = useContext(ChatContext);
   if (!context) {
     throw new Error("useChat must be used within a ChatProvider");
   }
   return context;
+}
+
+// useChatSelector returns selector's part of the chat's state; the
+// component renders again only when that part changes (isEqual, by default
+// the same object or value). Actions keep their identity, so selecting them
+// doesn't render again.
+export function useChatSelector<S>(selector: (chat: ChatContextValue) => S, isEqual?: (a: S, b: S) => boolean): S {
+  const store = useContext(ChatStoreContext);
+  if (!store) {
+    throw new Error("useChatSelector must be used within a ChatProvider");
+  }
+  return useStoreSelector(store, selector, isEqual);
 }

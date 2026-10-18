@@ -7,7 +7,7 @@ import { uiCopy } from "@/lib/ui-copy";
 import { formatToolInput, getExitCode, getToolCommand, getToolImagePath, getToolSummary } from "@/lib/tool-format";
 import type { ToolCall } from "@/lib/task-timeline";
 import { currentPromptQuestion, parseInteractiveToolInput } from "@/lib/interactive-tool";
-import {useChat} from "../chat-provider";
+import {useChatSelector} from "../chat-provider";
 import { ImageThumb } from "../image-preview";
 import { toolRequestBadge, type Tone } from "@/lib/native-requests";
 import { fileName, isPatchScriptTool, toolFileTargets, viewerTab, type FileTarget, type FileTargetKind } from "@/lib/file-refs";
@@ -218,7 +218,9 @@ export function ToolCallCard({
     toolCall.status === "running" ||
     (toolCall.status === undefined && toolCall.result === undefined);
   const input = formatToolInput(toolCall.input);
-  const { messages, storageScope, features, requests } = useChat();
+  const storageScope = useChatSelector((chat) => chat.storageScope);
+  const features = useChatSelector((chat) => chat.features);
+  const requests = useChatSelector((chat) => chat.requests);
   // A question in a tool call is answered here with keystrokes, so only
   // where they reach the agent's terminal (PTY). On the native transport it
   // is answered on its request card, and the tool call shows the request's
@@ -231,7 +233,11 @@ export function ToolCallCard({
   // answered, so only the question it is asking accepts clicks. Codex prints
   // which one that is; otherwise count the answers given here.
   const [answeredCount, setAnsweredCount] = useState(0);
-  const lastAgentOutput = messages.findLast((message) => message.role === "agent")?.content ?? "";
+  // Only a card with questions reads the messages, so the others don't
+  // render again as they stream.
+  const lastAgentOutput = useChatSelector((chat) =>
+    interactiveInput ? (chat.messages.findLast((message) => message.role === "agent")?.content ?? "") : "",
+  );
   const activeQuestion = currentPromptQuestion(lastAgentOutput) ?? answeredCount;
   const isOpen = open ?? localIsOpen;
 

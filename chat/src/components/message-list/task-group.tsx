@@ -10,7 +10,7 @@ import { groupConsecutiveTools } from "@/lib/activity-groups";
 import { ToolCallCard, ToolCallGroup } from "./tool-call";
 import { MessageItem } from "./message-item";
 import { AgentMark } from "../agent-mark";
-import {useChat} from "../chat-provider";
+import {useChatSelector} from "../chat-provider";
 import {AgentType} from "@/lib/agents";
 import type { TaskSection, TaskStatus } from "@/lib/task-timeline";
 import { getTaskActivity, hasStructuredTranscript, toSearchableTask } from "@/lib/task-timeline";
@@ -34,7 +34,9 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 
-export function TaskGroup({
+// A task: memoized, so that while the agent streams into the latest task
+// the others don't render again.
+export const TaskGroup = React.memo(function TaskGroup({
   task,
   number,
   status,
@@ -82,7 +84,7 @@ export function TaskGroup({
   // Only a terminal has a live screen to show at the end of a running task
   // and screen text to offer as "Terminal output"; the native transport
   // streams its transcript instead.
-  const { features } = useChat();
+  const features = useChatSelector((chat) => chat.features);
   const hasScreen = features.agentTerminal;
   const activity = useMemo(() => {
     if (deferred) return [];
@@ -331,7 +333,7 @@ export function TaskGroup({
       </Dialog>
     </section>
   );
-}
+});
 
 // Thinking as a sidenote: on wide screens it sits in the right margin next to
 // the step it explains; narrower screens show a one-line row that expands.

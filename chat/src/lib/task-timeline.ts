@@ -105,6 +105,151 @@ export function collectToolCalls(richMessages: RichMessage[]): ToolCall[] {
   return [...calls.values()];
 }
 
+// A conversation as the transcript shows it: the messages before the first
+// task, and the tasks.
+export interface Timeline {
+  prelude: (Message | DraftMessage)[];
+  tasks: TaskSection[];
+}
+
+// buildTimeline groups the messages into tasks, each a user's message and
+// what followed it, with the tool calls and the agent's structured messages
+// (text, thinking, tool use) put into the task they happened in.
+export function buildTimeline(messages: (Message | DraftMessage)[], richMessages: RichMessage[], toolCalls: ToolCall[]): Timeline {
+  const tasks: TaskSection[] = [];
+  const prelude: (Message | DraftMessage)[] = [];
+
+  for (const message of messages) {
+    if (message.role === "user") {
+      tasks.push({
+        key: `task-${message.id ?? `draft-${tasks.length}`}`,
+        prompt: message,
+        responses: [],
+        toolCalls: [],
+        richActivity: [],
+      });
+    } else if (tasks.length > 0) {
+      tasks.at(-1)!.responses.push(message);
+    } else {
+      prelude.push(message);
+    }
+  }
+
+  for (const toolCall of toolCalls) {
+    const target = findTaskAtTime(tasks, toolCall.timestamp);
+    target?.toolCalls.push(toolCall);
+  }
+
+  const callsByID = new Map<string, ToolCall>(toolCalls.map((tc) => [tc.id, tc]));
+  for (const message of richMessages) {
+    if (message.role !== "assistant") continue;
+    const target = findTaskAtTime(tasks, message.timestamp);
+    if (!target) continue;
+
+    message.content.forEach((block, index) => {
+      if (block.type === "text" && block.text) {
+        target.richActivity.push({
+          type: "message",
+          key: `rich-message-${message.message_id}-${index}`,
+          message: {
+            id: -1,
+            role: "assistant",
+            content: block.text,
+            time: message.timestamp,
+          },
+        });
+      }
+      if (block.type === "thinking" && block.thinking) {
+        target.richActivity.push({
+          type: "thinking",
+          key: `rich-thinking-${message.message_id}-${index}`,
+          content: block.thinking,
+          timestamp: message.timestamp,
+        });
+      }
+      if (block.type === "tool_use" && block.tool_use_id) {
+        const tc = callsByID.get(block.tool_use_id);
+        if (tc) {
+          target.richActivity.push({
+            type: "tool",
+            key: `rich-tool-${block.tool_use_id}`,
+            toolCall: tc,
+          });
+        }
+      }
+    });
+  }
+
+  return {prelude, tasks};
+}
+
+// The transcript rebuilds the timeline whenever a message streams, but most
+// of it didn't change. These put back what the previous build had where the
+// new one has the same, so unchanged tasks and tool calls keep their objects
+// and their components (memoized) don't render again.
+
+// shareToolCalls returns next with the calls of previous that are the same.
+export function shareToolCalls(previous: ToolCall[], next: ToolCall[]): ToolCall[] {
+  const byID = new Map(previous.map((call) => [call.id, call]));
+  return next.map((call) => {
+    const old = byID.get(call.id);
+    return old && sameFields(old, call) ? old : call;
+  });
+}
+
+// shareTimeline returns next with the tasks of previous that are the same.
+export function shareTimeline(previous: Timeline | null, next: Timeline): Timeline {
+  if (!previous) return next;
+  const byKey = new Map(previous.tasks.map((task) => [task.key, task]));
+  const tasks = next.tasks.map((task) => {
+    const old = byKey.get(task.key);
+    return old && sameTask(old, task) ? old : task;
+  });
+  const prelude = sameItems(previous.prelude, next.prelude) ? previous.prelude : next.prelude;
+  if (prelude === previous.prelude && sameItems(previous.tasks, tasks)) return previous;
+  return {prelude, tasks};
+}
+
+function sameTask(a: TaskSection, b: TaskSection): boolean {
+  return (
+    a.prompt === b.prompt &&
+    sameItems(a.responses, b.responses) &&
+    sameItems(a.toolCalls, b.toolCalls) &&
+    a.richActivity.length === b.richActivity.length &&
+    a.richActivity.every((item, i) => sameActivity(item, b.richActivity[i]))
+  );
+}
+
+function sameActivity(a: TaskActivity, b: TaskActivity): boolean {
+  if (a.key !== b.key) return false;
+  switch (a.type) {
+    case "message":
+      return b.type === "message" && a.message.content === b.message.content && a.message.time === b.message.time;
+    case "thinking":
+      return b.type === "thinking" && a.content === b.content && a.timestamp === b.timestamp;
+    case "tool":
+      return b.type === "tool" && a.toolCall === b.toolCall;
+  }
+}
+
+function sameItems<T>(a: T[], b: T[]): boolean {
+  return a.length === b.length && a.every((item, i) => item === b[i]);
+}
+
+// sameFields reports whether a and b have the same fields, each the same
+// value or object.
+function sameFields(a: object, b: object): boolean {
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every((key) => sameValueOrItems(left[key], right[key]));
+}
+
+function sameValueOrItems(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  return Array.isArray(a) && Array.isArray(b) && sameItems(a, b);
+}
+
 export function findTaskAtTime(tasks: TaskSection[], timestamp: string) {
   const targetTime = Date.parse(timestamp);
   if (Number.isNaN(targetTime)) return undefined;

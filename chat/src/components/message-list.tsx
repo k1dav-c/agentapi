@@ -27,12 +27,14 @@ import {contentFingerprint} from "@/lib/content-fingerprint";
 import {formatDateLabel} from "@/lib/format-time";
 import {getPreviousUserMessageTop, getNextUserMessageTop} from "@/lib/scroll-anchors";
 import {
-  type TaskSection,
   type TaskFilter,
+  type Timeline,
   type ToolCall,
+  buildTimeline,
   collectToolCalls,
-  findTaskAtTime,
   getTaskStatus,
+  shareTimeline,
+  shareToolCalls,
   toSearchableTask,
   countTaskMatches,
 } from "@/lib/task-timeline";
@@ -102,74 +104,19 @@ export default function MessageList({
   const userMessageCount = messages.filter(
     (message) => message.role === "user",
   ).length;
-  const toolCalls = useMemo(() => collectToolCalls(richMessages), [richMessages]);
-  const timeline = useMemo(() => {
-    const tasks: TaskSection[] = [];
-    const prelude: (Message | DraftMessage)[] = [];
-
-    for (const message of messages) {
-      if (message.role === "user") {
-        tasks.push({
-          key: `task-${message.id ?? `draft-${tasks.length}`}`,
-          prompt: message,
-          responses: [],
-          toolCalls: [],
-          richActivity: [],
-        });
-      } else if (tasks.length > 0) {
-        tasks.at(-1)!.responses.push(message);
-      } else {
-        prelude.push(message);
-      }
-    }
-
-    for (const toolCall of toolCalls) {
-      const target = findTaskAtTime(tasks, toolCall.timestamp);
-      target?.toolCalls.push(toolCall);
-    }
-
-    const callsByID = new Map<string, ToolCall>(toolCalls.map((tc) => [tc.id, tc]));
-    for (const message of richMessages) {
-      if (message.role !== "assistant") continue;
-      const target = findTaskAtTime(tasks, message.timestamp);
-      if (!target) continue;
-
-      message.content.forEach((block, index) => {
-        if (block.type === "text" && block.text) {
-          target.richActivity.push({
-            type: "message",
-            key: `rich-message-${message.message_id}-${index}`,
-            message: {
-              id: -1,
-              role: "assistant",
-              content: block.text,
-              time: message.timestamp,
-            },
-          });
-        }
-        if (block.type === "thinking" && block.thinking) {
-          target.richActivity.push({
-            type: "thinking",
-            key: `rich-thinking-${message.message_id}-${index}`,
-            content: block.thinking,
-            timestamp: message.timestamp,
-          });
-        }
-        if (block.type === "tool_use" && block.tool_use_id) {
-          const tc = callsByID.get(block.tool_use_id);
-          if (tc) {
-            target.richActivity.push({
-              type: "tool",
-              key: `rich-tool-${block.tool_use_id}`,
-              toolCall: tc,
-            });
-          }
-        }
-      });
-    }
-
-    return {prelude, tasks};
-  }, [messages, richMessages, toolCalls]);
+  // Rebuilt as messages stream; unchanged tasks and tool calls keep their
+  // objects (shareTimeline), so their memoized components don't render
+  // again.
+  const sharedCalls = useRef<ToolCall[]>([]);
+  const toolCalls = useMemo(
+    () => (sharedCalls.current = shareToolCalls(sharedCalls.current, collectToolCalls(richMessages))),
+    [richMessages],
+  );
+  const sharedTimeline = useRef<Timeline | null>(null);
+  const timeline = useMemo(
+    () => (sharedTimeline.current = shareTimeline(sharedTimeline.current, buildTimeline(messages, richMessages, toolCalls))),
+    [messages, richMessages, toolCalls],
+  );
   const filteredTasks = useMemo(
     () =>
       timeline.tasks

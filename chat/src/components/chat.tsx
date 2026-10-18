@@ -3,6 +3,7 @@
 import {useCallback, useEffect, useState} from "react";
 import {ExternalLink, FolderSearch, RefreshCw, TerminalSquare} from "lucide-react";
 import {useChat} from "./chat-provider";
+import {useStableCallback} from "@/lib/use-stable-callback";
 import MessageInput from "./message-input";
 import MessageList from "./message-list";
 import dynamic from "next/dynamic";
@@ -63,6 +64,13 @@ export function Chat() {
   // offers a shell in its working directory instead.
   const hasTerminal = features.agentTerminal;
   const hasShell = features.shell;
+  // The transcript's tasks are memoized: their handlers keep their identity.
+  const editFailedMessage = useStableCallback((clientId: string, content: string) => {
+    dismissFailedMessage(clientId);
+    setSuggestedPrompt(content);
+  });
+  const stopTask = useStableCallback(() => void stop());
+  const sendRaw = useStableCallback((data: string) => void sendMessage(data, "raw"));
   useEffect(() => {
     if (!hasTerminal && !hasShell) setTerminalOpen(false);
   }, [hasTerminal, hasShell]);
@@ -143,13 +151,10 @@ export function Chat() {
             serverStatus={serverStatus}
             agentType={agentType}
             onRetryMessage={retryFailedMessage}
-            onEditMessage={(clientId, content) => {
-              dismissFailedMessage(clientId);
-              setSuggestedPrompt(content);
-            }}
+            onEditMessage={editFailedMessage}
             onDismissMessage={dismissFailedMessage}
-            onStopTask={canStop ? () => void stop() : undefined}
-            onSendRaw={hasTerminal ? (data) => void sendMessage(data, "raw") : undefined}
+            onStopTask={canStop ? stopTask : undefined}
+            onSendRaw={hasTerminal ? sendRaw : undefined}
             headerAction={
               <div className="flex items-center gap-0.5">
                 {hasTerminal && (
