@@ -1,29 +1,37 @@
 # End-to-End Testing Framework
 
-This directory contains the end-to-end (E2E) testing framework for the AgentAPI project. The framework simulates realistic agent interactions using a script-based approach with JSON configuration files.
+This directory contains AgentAPI's end-to-end (E2E) tests. The tests use JSON conversation scripts
+and a fake agent to simulate agent interactions.
 
-## TL;DR
+## Run the tests
+
+Run this command from the repository root:
 
 ```shell
 go test ./e2e
 ```
 
-## How it Works
+## How it works
 
-The testing framework (`echo_test.go`) does the following:
-- Reads a file in `testdata/`.
-- Starts the AgentAPI server with a fake agent (`echo.go`). This fake agent reads the scripted conversation from the specified JSON file.
-- The testing framework then sends messages to the fake agent.
-- The fake agent validates the expected messages and sends predefined responses.
-- The testing framework validates the actual responses against expected outcomes.
+For each test, `echo_test.go`:
+
+1. Selects a JSON conversation script from `testdata/`.
+2. Starts AgentAPI with the fake agent (`echo.go`, or `acp_echo.go` for the ACP test), which
+   reads that script.
+3. Sends messages through AgentAPI.
+4. Lets the fake agent check the messages and send predefined responses.
+5. Checks the responses against the expected results.
 
 ## Adding a new test
 
 1. Create a new JSON file in `testdata/` with a unique name.
-2. Define the scripted conversation in the JSON file. Each message must have the following fields:
+2. Define the scripted conversation in the JSON file. Each message has the following fields:
    - `expectMessage`: The message from the user that the fake agent expects.
-   - `thinkDurationMS`: How long the fake agent should 'think' before responding.
-   - `responseMessage`: The message the fake agent should respond with.
-3. Add a new test case in `echo_test.go` that references the newly created JSON file.
-  > Be sure that the name of the test case exactly matches the name of the JSON file.
+   - `thinkDurationMS` (optional): The simulated thinking time in milliseconds before the agent
+     responds.
+   - `responseMessage`: The response the fake agent sends.
+3. Add a test case in `echo_test.go` that references the new JSON file.
+   By default, the framework loads `testdata/<test-case-name>.json`; the test
+   case name must match the filename without the `.json` extension. Tests that
+   set `scriptFilePath` explicitly can use another filename.
 4. Run the E2E tests to verify the new test case.
