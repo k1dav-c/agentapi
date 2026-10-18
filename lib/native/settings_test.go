@@ -265,3 +265,27 @@ func TestCompactHoldsTurns(t *testing.T) {
 	assert.Len(t, factory.Last().Turns(), 1)
 	assert.ErrorIs(t, c.Compact(context.Background()), native.ErrTurnActive, "not during a turn")
 }
+
+func TestNewModelEffort(t *testing.T) {
+	t.Parallel()
+	current := native.Settings{Model: "fast", Effort: "high"}
+	for _, tc := range []struct {
+		name   string
+		change native.Settings
+		effort string
+		ok     bool
+	}{
+		{"a model without the effort takes its default", native.Settings{Model: "plain"}, "", true},
+		{"the change chooses an effort", native.Settings{Model: "plain", Effort: "low"}, "", false},
+		{"no change of model", native.Settings{PermissionMode: native.PermissionModeAsk}, "", false},
+		{"a model the options don't have", native.Settings{Model: "custom"}, "", false},
+		{"a model with the effort keeps it", native.Settings{Model: "fast"}, "", false},
+	} {
+		effort, ok := testOptions.NewModelEffort(tc.change, current)
+		assert.Equal(t, tc.ok, ok, tc.name)
+		assert.Equal(t, tc.effort, effort, tc.name)
+	}
+	effort, ok := testOptions.NewModelEffort(native.Settings{Model: "fast"}, native.Settings{Model: "plain", Effort: "max"})
+	assert.True(t, ok)
+	assert.Equal(t, "low", effort, "the new model's default")
+}

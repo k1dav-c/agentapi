@@ -4,7 +4,6 @@ package nativetest
 import (
 	"context"
 	"errors"
-	"slices"
 	"sync"
 
 	"github.com/coder/agentapi/lib/native"
@@ -227,11 +226,10 @@ func (a *Adapter) ApplySettings(_ context.Context, s native.Settings) error {
 		return err
 	}
 	a.applied = append(a.applied, s)
+	effort, newEffort := a.Options.NewModelEffort(s, a.Current)
 	a.Current = a.Current.Merge(s)
-	if m, ok := a.Options.Model(s.Model); ok && s.Effort == "" && !slices.Contains(m.Efforts, a.Current.Effort) {
-		// As the agents do: a model without the current effort takes its
-		// default one.
-		a.Current.Effort = m.DefaultEffort
+	if newEffort {
+		a.Current.Effort = effort
 	}
 	return nil
 }

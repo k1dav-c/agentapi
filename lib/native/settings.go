@@ -91,6 +91,22 @@ func (o SettingOptions) Model(id string) (ModelOption, bool) {
 	return o.Models[i], true
 }
 
+// NewModelEffort returns the effort a change of model brings, the way the
+// agents do: a model that doesn't have the effort in effect (current's)
+// takes its default one ("" for a model without a choice of effort). ok
+// is false when the effort stays: the change chooses one, or switches to
+// no model it knows, or to one that has current's effort.
+func (o SettingOptions) NewModelEffort(change, current Settings) (effort string, ok bool) {
+	if change.Model == "" || change.Effort != "" {
+		return "", false
+	}
+	m, known := o.Model(change.Model)
+	if !known || slices.Contains(m.Efforts, current.Effort) {
+		return "", false
+	}
+	return m.DefaultEffort, true
+}
+
 // Check returns an ErrInvalidSetting for a value in s that its setting
 // can't take. The effort must be one of those of the model s switches to,
 // or else of current's model; with a model that isn't one of the options,

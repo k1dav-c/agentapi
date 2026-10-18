@@ -172,10 +172,11 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 	if err := options.Check(s, a.settingsLocked()); err != nil {
 		return err
 	}
-	if s.Model != "" && s.Effort == "" {
-		if m, ok := options.Model(s.Model); ok && a.settings.Effort != "" && !slices.Contains(m.Efforts, a.settings.Effort) {
-			s.Effort = m.DefaultEffort
-		}
+	// A thread on its model's default effort stays on the new model's.
+	effort, newEffort := options.NewModelEffort(s, a.settings)
+	newEffort = newEffort && a.settings.Effort != ""
+	if newEffort {
+		s.Effort = effort
 	}
 	switch {
 	case s.PermissionMode == native.PermissionModePlan:
@@ -186,6 +187,10 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 		a.plan = false
 	}
 	a.settings = a.settings.Merge(s)
+	if newEffort {
+		// A model without a choice of effort has none.
+		a.settings.Effort = effort
+	}
 	a.pending = a.pending.Merge(s)
 	if s.Model != "" || s.Effort != "" {
 		a.collabStale = true

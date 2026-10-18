@@ -31,7 +31,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -290,11 +289,11 @@ func (a *Adapter) ApplySettings(_ context.Context, change native.Settings) error
 	if err := settingOptions.Check(change, a.settings); err != nil {
 		return err
 	}
-	settings := a.settings.Merge(change)
-	if model, ok := settingOptions.Model(settings.Model); ok && change.Effort == "" && !slices.Contains(model.Efforts, settings.Effort) {
-		settings.Effort = model.DefaultEffort
+	effort, newEffort := settingOptions.NewModelEffort(change, a.settings)
+	a.settings = a.settings.Merge(change)
+	if newEffort {
+		a.settings.Effort = effort
 	}
-	a.settings = settings
 	return nil
 }
 
