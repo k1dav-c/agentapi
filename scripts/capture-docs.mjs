@@ -1,7 +1,8 @@
 /**
  * Captures the documentation screenshots in docs/screenshots/. The script starts its own AgentAPI
  * servers on a small sample project (the native demo agent, and bash as a PTY agent for TTY mode),
- * walks the chat UI with Chromium and stops the servers again. See docs/screenshots/README.md.
+ * walks the chat UI with Chromium, taking screenshots and recording GIFs of the main flows, and stops
+ * the servers again. See docs/screenshots/README.md.
  */
 import path from 'node:path';
 import os from 'node:os';
@@ -9,6 +10,7 @@ import net from 'node:net';
 import {spawn, execFileSync} from 'node:child_process';
 import {mkdtemp, mkdir, writeFile, rm} from 'node:fs/promises';
 import {fileURLToPath, pathToFileURL} from 'node:url';
+import {createRequire} from 'node:module';
 
 const moduleName = process.env.AGENTAPI_PLAYWRIGHT_MODULE;
 if (!moduleName) {
@@ -16,6 +18,16 @@ if (!moduleName) {
   process.exit(1);
 }
 const {chromium} = await import(path.isAbsolute(moduleName) ? pathToFileURL(moduleName).href : moduleName);
+// gifenc and pngjs, installed next to playwright-core, write the GIFs.
+const requireBeside = createRequire(path.isAbsolute(moduleName) ? moduleName : fileURLToPath(import.meta.url));
+let gifenc, pngjs;
+try {
+  gifenc = requireBeside('gifenc');
+  pngjs = requireBeside('pngjs');
+} catch {
+  console.error('Install gifenc and pngjs next to playwright-core; see docs/screenshots/README.md.');
+  process.exit(1);
+}
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const binary = path.resolve(process.env.AGENTAPI_BINARY || path.join(repo, 'out', 'agentapi'));
 const port = Number(process.env.AGENTAPI_SCREENSHOT_PORT || 3311);
@@ -216,6 +228,109 @@ const topShot = async (page, locator, name, height) => {
   await settle(page);
   const box = await locator.boundingBox();
   await save(page, name, {clip: {x: box.x, y: box.y, width: box.width, height: Math.min(box.height, height)}});
+};
+
+// GIFs. Headless Chromium draws no mouse pointer, so the pages recorded get one that follows the
+// mouse and shows clicks.
+const pointerScript = () => {
+  const install = () => {
+    if (document.getElementById('docs-pointer')) return;
+    const style = document.createElement('style');
+    style.textContent = `#docs-pointer{position:fixed;left:0;top:0;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;
+      background:rgba(37,99,235,.25);border:2px solid rgba(37,99,235,.9);pointer-events:none;z-index:2147483647;
+      transition:transform .12s ease-out,background .12s}#docs-pointer.down{transform:scale(.7);background:rgba(37,99,235,.55)}`;
+    document.head.appendChild(style);
+    const dot = document.createElement('div');
+    dot.id = 'docs-pointer';
+    dot.style.display = 'none';
+    document.body.appendChild(dot);
+    addEventListener('mousemove', (event) => { dot.style.display = 'block'; dot.style.left = `${event.clientX}px`; dot.style.top = `${event.clientY}px`; }, true);
+    addEventListener('mousedown', () => dot.classList.add('down'), true);
+    addEventListener('mouseup', () => dot.classList.remove('down'), true);
+  };
+  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', install);
+  else install();
+};
+// Moves the pointer to the middle of locator in steps, so a GIF shows where it goes, and clicks.
+const tap = async (page, locator) => {
+  // A key far along the terminal's key bar is scrolled to first, as on a phone.
+  await locator.scrollIntoViewIfNeeded();
+  const box = await locator.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {steps: 14});
+  await page.waitForTimeout(160);
+  await page.mouse.down();
+  await page.waitForTimeout(90);
+  await page.mouse.up();
+  await page.waitForTimeout(160);
+};
+const typeSlowly = (page, text) => page.keyboard.type(text, {delay: 28});
+
+// writeGif encodes frames (PNG screenshots taken at a time in ms) as an endless GIF: frames that
+// show nothing new are dropped, all frames share one palette, and each frame after the first keeps
+// only the pixels that changed (the rest is transparent over the frame before).
+const writeGif = async (file, frames, hold) => {
+  const {GIFEncoder, quantize, applyPalette} = gifenc;
+  const decoded = frames.map((frame) => ({at: frame.at, ...pngjs.PNG.sync.read(frame.png)}));
+  const shown = decoded.filter((frame, i) => i === 0 || Buffer.compare(frame.data, decoded[i - 1].data) !== 0);
+  const {width, height} = shown[0];
+  const step = Math.max(1, Math.floor(shown.length / 12));
+  const picked = shown.filter((_, i) => i % step === 0);
+  const sample = new Uint8Array(picked.length * Math.ceil(width * height / 4) * 4);
+  let n = 0;
+  for (const frame of picked) {
+    for (let p = 0; p < frame.data.length; p += 16) {
+      sample.set(frame.data.subarray(p, p + 4), n);
+      n += 4;
+    }
+  }
+  const palette = quantize(sample.subarray(0, n), 255);
+  const transparentIndex = palette.length;
+  const gif = GIFEncoder();
+  shown.forEach((frame, k) => {
+    const index = applyPalette(frame.data, palette);
+    if (k > 0) {
+      const before = shown[k - 1].data;
+      for (let i = 0, p = 0; i < index.length; i += 1, p += 4) {
+        if (frame.data[p] === before[p] && frame.data[p + 1] === before[p + 1] && frame.data[p + 2] === before[p + 2]) index[i] = transparentIndex;
+      }
+    }
+    const next = shown[k + 1];
+    gif.writeFrame(index, width, height, {
+      palette: k === 0 ? [...palette, [255, 0, 255]] : undefined,
+      delay: next ? Math.max(20, next.at - frame.at) : hold,
+      transparent: k > 0,
+      transparentIndex,
+      dispose: 1,
+    });
+  });
+  gif.finish();
+  await writeFile(file, gif.bytes());
+  return shown.length;
+};
+// recordGif records what action does on page as name, a frame about every interval ms.
+const recordGif = async (page, name, action, {interval = 110, hold = 2000} = {}) => {
+  const frames = [];
+  let recording = true;
+  const start = Date.now();
+  const loop = (async () => {
+    while (recording) {
+      const taken = Date.now();
+      frames.push({at: taken - start, png: await page.screenshot({style: screenshotStyle})});
+      const rest = interval - (Date.now() - taken);
+      if (rest > 0) await new Promise((resolve) => setTimeout(resolve, rest));
+    }
+  })();
+  try {
+    await page.waitForTimeout(500);
+    await action();
+    await page.waitForTimeout(700);
+  } finally {
+    recording = false;
+    await loop;
+  }
+  const count = await writeGif(path.join(output, name), frames, hold);
+  images.push(name);
+  console.log(`Recorded ${name} (${count} frames)`);
 };
 
 const contextOptions = {deviceScaleFactor: 1, colorScheme: 'light', locale: 'en-US', timezoneId: 'UTC', reducedMotion: 'reduce'};
@@ -424,6 +539,170 @@ try {
   await shot(page, 'queue-steer.png');
   await page.keyboard.press('Escape');
   await box.fill('');
+  await demo.request('/messages', 'DELETE');
+  await demo.idle();
+
+  // GIFs of the main flows, on a smaller window with a visible pointer.
+  const openGifPage = async (options = {viewport: {width: 1100, height: 720}}) => {
+    const context = await browser.newContext({...contextOptions, ...options});
+    context.on('weberror', event => errors.push(event.error().message));
+    await context.addInitScript(() => { try { localStorage.setItem('theme', 'light'); } catch {} });
+    await context.addInitScript(pointerScript);
+    const gifPage = await context.newPage();
+    gifPage.setDefaultTimeout(20_000);
+    const url = new URL(`${demo.base}/chat/`);
+    url.searchParams.set('url', demo.base);
+    await gifPage.goto(url.href);
+    await gifPage.getByRole('textbox', {name: 'Task message'}).waitFor();
+    await gifPage.evaluate(() => document.fonts.ready);
+    await gifPage.waitForTimeout(600);
+    return gifPage;
+  };
+  await demo.request('/messages', 'DELETE');
+  await demo.idle();
+  const gif = await openGifPage();
+  const gifBox = gif.getByRole('textbox', {name: 'Task message'});
+  const sendTask = async (text) => {
+    await tap(gif, gifBox);
+    await typeSlowly(gif, text);
+    await gif.waitForTimeout(250);
+    await gif.keyboard.press('Enter');
+  };
+
+  // A task: the agent thinks, runs a tool and replies.
+  await recordGif(gif, 'demo-task.gif', async () => {
+    await sendTask('Review `README.md` and the page in `index.html`.');
+    await demo.idle();
+    await gif.getByText('Here is what I did for', {exact: false}).last().waitFor();
+  });
+
+  // An approval: the command waits for Allow.
+  await recordGif(gif, 'demo-approval.gif', async () => {
+    await sendTask('Rebuild the release artifacts; I will approve the command.');
+    const card = gif.locator('[data-request-kind="approval"]');
+    await card.waitFor();
+    await gif.waitForTimeout(900);
+    await tap(gif, card.getByRole('button', {name: /^1?\s*Allow$/}));
+    await demo.idle();
+  });
+
+  // Questions: one step at a time, sent together.
+  await recordGif(gif, 'demo-question.gif', async () => {
+    await sendTask('Ask me which checks to run before the release.');
+    const card = gif.locator('[data-request-kind="question"]');
+    await card.waitFor();
+    await gif.waitForTimeout(700);
+    await tap(gif, card.getByRole('radio').first());
+    await tap(gif, card.getByRole('checkbox').nth(0));
+    await tap(gif, card.getByRole('checkbox').nth(2));
+    await tap(gif, card.getByRole('button', {name: 'Next'}));
+    await card.locator('textarea, input[type=text]').first().waitFor();
+    await tap(gif, card.locator('textarea, input[type=text]').first());
+    await typeSlowly(gif, 'Run the docs build too.');
+    await tap(gif, card.getByRole('button').last());
+    await demo.idle();
+  });
+
+  // The queue and steering while a long turn works, then Stop.
+  await recordGif(gif, 'demo-queue.gif', async () => {
+    await sendTask('Take the long route: refactor the layout step by step.');
+    await gif.getByText('still working', {exact: false}).first().waitFor();
+    // Sending moves the focus away from the message box.
+    await sendTask('Then add a dark theme to `styles.css`.');
+    await gif.waitForTimeout(700);
+    await tap(gif, gifBox);
+    await typeSlowly(gif, 'Keep the header sticky.');
+    await tap(gif, gif.getByRole('button', {name: 'More ways to send'}));
+    await tap(gif, gif.getByRole('menuitem', {name: /^Steer/}));
+    await gif.waitForTimeout(2500);
+    const stop = gif.getByRole('button', {name: 'Stop agent'});
+    if (await stop.isVisible()) await tap(gif, stop);
+    await gif.waitForTimeout(1500);
+  });
+  await demo.request('/messages', 'DELETE');
+  await demo.idle();
+  await demo.send('Review `README.md` and the page in `index.html`.');
+  await demo.idle();
+  await gif.reload();
+  await gifBox.waitFor();
+  await gif.getByText('Here is what I did for', {exact: false}).last().waitFor();
+
+  // Settings: the permission mode, the model and effort, and the context.
+  await recordGif(gif, 'demo-settings.gif', async () => {
+    await tap(gif, gif.locator('button[title^="Permission mode"]'));
+    await gif.waitForTimeout(500);
+    await tap(gif, gif.getByRole('menuitemradio', {name: /^Ask/}));
+    await gif.waitForTimeout(500);
+    await tap(gif, gif.locator('button[title="Model and reasoning effort"]'));
+    await gif.waitForTimeout(500);
+    await tap(gif, gif.getByRole('menuitemradio', {name: /^Deep/}));
+    await gif.waitForTimeout(500);
+    await tap(gif, gif.locator('button[title="Model and reasoning effort"]'));
+    await gif.waitForTimeout(500);
+    await tap(gif, gif.getByRole('menuitemradio', {name: /^max/}));
+    await gif.waitForTimeout(500);
+    await tap(gif, gif.locator('button[title^="Context"]'));
+    await gif.waitForTimeout(1600);
+    await gif.keyboard.press('Escape');
+  });
+  // Back to the defaults for the views after.
+  await demo.request('/settings', 'PUT', {permission_mode: 'bypass', model: 'demo-swift', effort: 'medium'});
+
+  // Files: the file, its preview, and a diff.
+  await recordGif(gif, 'demo-files.gif', async () => {
+    await tap(gif, gif.getByRole('button', {name: 'Open file: index.html', exact: true}).first());
+    await gif.getByRole('tab', {name: 'Preview', exact: true}).waitFor();
+    await gif.waitForTimeout(900);
+    await tap(gif, gif.getByRole('tab', {name: 'Preview', exact: true}));
+    await gif.waitForTimeout(1400);
+    await gif.keyboard.press('Escape');
+    await gif.waitForTimeout(400);
+    await tap(gif, gif.getByRole('button', {name: 'Open file: README.md', exact: true}).first());
+    await gif.getByRole('tab', {name: 'Diff', exact: true}).waitFor();
+    await tap(gif, gif.getByRole('tab', {name: 'Diff', exact: true}));
+    await gif.waitForTimeout(1600);
+    await gif.keyboard.press('Escape');
+  });
+
+  // The shell terminal: commands, a link to open, and a held Ctrl.
+  await recordGif(gif, 'demo-terminal.gif', async () => {
+    await tap(gif, gif.getByRole('button', {name: 'Open the terminal'}));
+    const rows = gif.locator('.xterm-rows');
+    await rows.waitFor();
+    await poll(async () => (await rows.innerText()).includes('my-app $'), 'the shell prompt');
+    await typeSlowly(gif, 'git status --short\n');
+    await gif.waitForTimeout(500);
+    await typeSlowly(gif, 'echo https://auth.openai.com/codex/device\n');
+    await gif.locator('[data-terminal-link]').waitFor();
+    await gif.waitForTimeout(900);
+    await tap(gif, gif.getByRole('button', {name: 'Ctrl', exact: true}));
+    await gif.keyboard.type('l');
+    await gif.waitForTimeout(900);
+    await tap(gif, gif.getByRole('button', {name: 'Back to chat'}));
+  });
+  await gif.context().close();
+
+  // A phone: the terminal's key bar and its link.
+  const phoneGif = await openGifPage(phoneOptions);
+  await recordGif(phoneGif, 'demo-phone.gif', async () => {
+    await tap(phoneGif, phoneGif.getByRole('button', {name: 'Open the terminal'}));
+    const rows = phoneGif.locator('.xterm-rows');
+    await rows.waitFor();
+    await poll(async () => (await rows.innerText()).includes('my-app $'), 'the shell prompt');
+    // On a touch screen the keyboard, and with it typing, starts from the Keyboard button.
+    await tap(phoneGif, phoneGif.getByRole('button', {name: 'Show keyboard'}));
+    await typeSlowly(phoneGif, 'ls docs');
+    await tap(phoneGif, phoneGif.getByRole('button', {name: 'Send Enter'}));
+    await phoneGif.waitForTimeout(500);
+    await tap(phoneGif, phoneGif.getByRole('button', {name: 'Send Arrow up'}));
+    await phoneGif.waitForTimeout(500);
+    await tap(phoneGif, phoneGif.getByRole('button', {name: 'Send Ctrl+U'}));
+    await typeSlowly(phoneGif, 'echo https://auth.openai.com/codex/device');
+    await tap(phoneGif, phoneGif.getByRole('button', {name: 'Send Enter'}));
+    await phoneGif.locator('[data-terminal-link]').waitFor();
+    await phoneGif.waitForTimeout(1200);
+  }, {interval: 130});
+  await phoneGif.context().close();
   await demo.request('/messages', 'DELETE');
   await demo.idle();
 

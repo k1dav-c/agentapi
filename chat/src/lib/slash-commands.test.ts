@@ -39,7 +39,7 @@ describe("slash commands", () => {
 
   test("login commands", () => {
     expect(loginCommand("claude")).toBe("claude auth login");
-    expect(loginCommand("codex")).toBe("codex login");
+    expect(loginCommand("codex")).toBe("codex login --device-auth");
     expect(loginCommand("aider")).toBeUndefined();
   });
 });

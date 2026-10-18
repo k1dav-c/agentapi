@@ -6,10 +6,10 @@ AgentAPI 在 `/chat` 提供聊天介面。它內建在 `agentapi` 執行檔裡�
 桌面和手機都可以，而且只透過 [HTTP API](../README.zh-TW.md#http-api-參考) 和伺服器溝通。
 本導覽會逐一介紹它的每個部分。
 
-截圖是 AgentAPI v0.24.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；demo 的
-回覆、工具結果、模型和用量都是模擬的，TTY mode 則是以 PTY agent 執行的 bash。
-[scripts/capture-docs.mjs](../scripts/capture-docs.mjs) 可以重新擷取所有截圖（見
-[截圖說明](screenshots/README.md)）。標示 *native* 的部分需要
+截圖和動畫是 AgentAPI v0.26.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
+demo 的回覆、工具結果、模型和用量都是模擬的，TTY mode 則是以 PTY agent 執行的 bash。動畫會
+在滑鼠指標所在及點擊的位置畫上藍點。[scripts/capture-docs.mjs](../scripts/capture-docs.mjs)
+可以重新擷取所有截圖和動畫（見[截圖說明](screenshots/README.md)）。標示 *native* 的部分需要
 [native transport](../README.zh-TW.md#native-transport)，Claude Code、Codex 和 Pi 預設就使用它。
 
 ## 目錄
@@ -39,6 +39,8 @@ AgentAPI 在 `/chat` 提供聊天介面。它內建在 `agentapi` 執行檔裡�
   接著是附件按鈕、更多輸入選項和送出按鈕。下方那一行列出可用的按鍵。
 - 右下角的 ↑ 和 ↓ 按鈕會跳到上一個和下一個任務。
 
+![送出任務：agent 思考、執行工具，然後回覆](screenshots/demo-task.gif)
+
 ## 任務與對話紀錄
 
 你送出的每則訊息都會開始一個任務。任務會先在標示「You」的色塊中顯示你的提示詞，接著依序呈現
@@ -58,8 +60,9 @@ agent 做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列�
 
 ### 思考內容
 
-在寬螢幕上，agent 的思考內容會以旁註顯示在右側，緊鄰它所屬的步驟；較長的旁註只顯示六行，
-點一下才會完整顯示。在窄螢幕上，它會收合成任務中的一行「Thinking · *標題*」。
+在寬螢幕上，agent 的思考內容會以旁註顯示在右側，緊鄰它所屬的步驟；比所屬步驟還高的旁註會在
+步驟旁撐出空間，而不會把後面的旁註推離它們的步驟；較長的旁註只顯示六行，點一下才會完整顯示。
+在窄螢幕上，它會收合成任務中的一行「Thinking · *標題*」。
 
 ### 訊息與較長的任務
 
@@ -118,6 +121,8 @@ agent 工作中時送出的訊息會在佇列中等待（顯示在輸入框裡�
 旁邊的紅色按鈕和任務的 Stop 按鈕都會中斷回合。agent 在等待某個請求的回覆時，新的訊息會
 排在該請求之後。
 
+![較長的回合：一個任務排進佇列，另一個 steer 進回合，最後按下 Stop](screenshots/demo-queue.gif)
+
 ### 斜線指令
 
 ![輸入斜線後列出的斜線指令](screenshots/slash-commands.png)
@@ -152,6 +157,8 @@ agent 工作中時送出的訊息會在佇列中等待（顯示在輸入框裡�
 *native* 輸入框的工具列可以在 agent 執行時變更它的設定（`PUT /settings`）。這些設定在整個
 工作階段中都有效：重新啟動、重新登入之後，以及使用 `--state-db` 時 AgentAPI 重新啟動之後，
 AgentAPI 都會再把它們套用到 agent。
+
+![切換到 ask 模式和 Deep 模型（推理強度 max），接著查看 context](screenshots/demo-settings.gif)
 
 ### 權限模式
 
@@ -194,12 +201,16 @@ agent 向你提出的事項會以卡片顯示在輸入框上方，agent 則等�
 將要執行什麼，以及原因。**Allow** 只執行這一次，**Always allow** 在這個工作階段剩下的時間裡
 都允許這個工具，**Deny** 則拒絕它；可選的附註會告訴 agent 改做什麼。
 
+![核准指令：卡片出現，按下 Allow，回合繼續進行](screenshots/demo-approval.gif)
+
 ### 提問
 
 ![提問卡片停在三個步驟中的第一步：Package manager、Checks 和 Notes](screenshots/native-question.png)
 
 *native* agent 的提問一次一個步驟：單選、複選或自由輸入文字。**Next** 會前往下一個步驟，
 最後一個步驟會一起送出所有答案。祕密答案在輸入時會被遮蔽，並以 `[redacted]` 保存。
+
+![回答三個問題：選一個選項、勾選兩個檢查項目，再寫一則備註](screenshots/demo-question.gif)
 
 ### 計畫
 
@@ -220,7 +231,9 @@ agent 向你提出的事項會以卡片顯示在輸入框上方，agent 則等�
 ![登入卡片：要執行的指令、執行它的主機與使用者、Run in terminal 和 Check again](screenshots/login-card.png)
 
 agent 尚未登入，或在工作階段中登入失效時，登入卡片會列出要執行的指令（`claude auth login`、
-`codex login` 或 Pi 的 `/login`），以及要在哪台主機上、以哪個使用者執行。
+`codex login --device-auth` 或 Pi 的 `/login`），以及要在哪台主機上、以哪個使用者執行。
+Codex 以裝置代碼登入：在任何裝置上開啟它印出的連結，再輸入它的一次性代碼，所以執行 AgentAPI
+的地方不需要瀏覽器。
 **Run in terminal** 會在 [shell 終端機](#shell-終端機)中執行它；**Check again** 會立刻檢查。
 AgentAPI 也會每 5 秒重試一次，期間的訊息會在佇列中等待。（截圖以 `dev-machine` 和 `dev`
 代替真實的主機和使用者。）
@@ -230,6 +243,8 @@ AgentAPI 也會每 5 秒重試一次，期間的訊息會在佇列中等待。�
 聊天裡的檔名會開啟檢視器，顯示 agent 正在處理的檔案：工具呼叫列上的檔名、agent 回覆中
 inline code 裡的路徑（`lib/foo.go:12` 會開在第 12 行），以及 Explorer 的 Files 分頁。只能
 開啟 agent 工作目錄裡的檔案。檢視器的標頭可以重新載入檔案；在手機上，檢視器會占滿整個螢幕。
+
+![開啟 index.html 和它的預覽，接著查看 README.md 的 diff](screenshots/demo-files.gif)
 
 ### 檔案內容
 
@@ -298,6 +313,8 @@ API 請參閱 [MCP 管理](../README.zh-TW.md#mcp-管理)。
 
 **Restart agent** 會停止 agent、清除對話，並在新的工作階段中重新啟動它；它會要求你再點一次。
 AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的發行版。
+**Download conversation JSONL** 會儲存這個工作階段的每則訊息、工具呼叫和結果，每行一個事件；
+工作階段詳細資訊的選單裡也有。
 
 ## 終端機
 
@@ -307,8 +324,15 @@ AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的�
 
 *native* 終端機按鈕（或 `/terminal`）會在 agent 的工作目錄中開啟一個 shell，方便登入和執行
 簡單的指令。它是真正的終端機，大小會配合視窗。所有開啟它的人共用同一個 shell，沒有人在看時
-它也會繼續執行。按鍵列可以送出手機鍵盤沒有的 Esc、Tab、方向鍵、Enter 和 Ctrl 鍵。以
+它也會繼續執行。按鍵列可以送出手機鍵盤沒有的按鍵：方向鍵、Enter、Esc、Tab、Shift+Tab、
+Ctrl+C，shell 的 Ctrl+R、Ctrl+A、Ctrl+E、Ctrl+U 和 Ctrl+W，Home、End、Page up 和 Page down、
+/ - | ~、Alt+↑ 和 Ctrl+L。
+它的 **Ctrl** 和 **Alt** 按鈕會按住修飾鍵，套用到你輸入的下一個按鍵，任何其他組合鍵都能這樣
+輸入。Ctrl+D 和 Ctrl+Z 會要求你再按一次。終端機裡的網頁連結點一下就會開啟，被折成多行的連結
+也一樣；指令最後印出的連結（例如登入連結）會縮短後顯示在終端機上方，點一下就能開啟或複製。以
 `--terminal=false` 啟動 AgentAPI 可以關閉它。
+
+![終端機：git status、顯示在終端機上方的連結，以及按住 Ctrl 清除畫面](screenshots/demo-terminal.gif)
 
 ### TTY mode
 
@@ -317,15 +341,17 @@ AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的�
 使用 PTY transport 時，終端機按鈕會把對話換成 agent 自己的終端機畫面，供聊天畫面顯示
 不正常時使用。每個按鍵都會直接送給 agent：方向鍵、Ctrl 和 Alt 組合鍵、貼上的內容和
 輸入法輸入。尺規顯示 agent 實際的終端機寬度（這裡是 `--term-width 100`）；字型大小會隨
-視窗縮放（11–20px）。**Back to chat** 會回到聊天畫面。
+視窗縮放（11–20px）。連結點一下就會開啟，最後一個連結會顯示在畫面上方，和 shell 終端機一樣。
+**Back to chat** 會回到聊天畫面。
 
 ## 工作階段詳細資訊與提醒
 
 ![工作階段詳細資訊選單：狀態、agent、工作階段、版本、活動、佇列和 token](screenshots/session-details.png)
 
 點選標頭中的狀態會開啟工作階段詳細資訊：狀態、agent、工作階段名稱、AgentAPI 版本、agent
-正在做什麼、佇列，以及輸入和輸出的 token 數。它的選單可以把對話下載成 JSONL、
-開啟瀏覽器通知，以及顯示鍵盤快捷鍵。
+正在做什麼、佇列，以及輸入和輸出的 token 數。它的選單可以把對話下載成 JSONL（和 Explorer 的
+Session 分頁一樣）、開啟瀏覽器通知，以及顯示鍵盤快捷鍵。（context 用了多少和用量限制在輸入框
+的工具列上，見 [Context 與用量限制](#context-與用量限制)。）
 
 分頁在背景時，圖示會以圓點顯示狀態：琥珀色表示 agent 需要你回應，藍色表示工作中，綠色表示
 任務完成。開啟通知時，瀏覽器也會顯示「*agent 名稱* needs you」或「*agent 名稱* finished」。
@@ -339,6 +365,8 @@ AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的�
 則有按鍵列。
 
 ![手機上的提問卡片](screenshots/mobile-question.png)
+
+![手機上的終端機：鍵盤按鈕、一個指令，以及按鍵列上的按鍵](screenshots/demo-phone.gif)
 
 ## 連線與快取
 

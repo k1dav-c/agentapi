@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import {toast} from "sonner";
 import {editableMCPServers} from "@/lib/mcp-sample";
+import {agentDisplayName, updatesOnRestart} from "@/lib/agents";
 import {useChat} from "./chat-provider";
 import {useFileViewer} from "./file-viewer-context";
 import {Button} from "./ui/button";
@@ -52,7 +53,10 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     deleteMCPProfile,
     applyMCPProfile,
     features,
+    agentType,
+    downloadSession,
   } = useChat();
+  const [downloading, setDownloading] = useState(false);
   const {restartKeepsConversation} = features;
   const fileViewer = useFileViewer();
   const [open, setOpen] = useState(false);
@@ -403,7 +407,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                 Loading MCP servers…
               </div>
             ) : !mcpSupported ? (
-              <Empty text="MCP config management is available only for Claude and Codex." />
+              <Empty text="MCP config management is available only for Claude Code, Codex and Pi." />
             ) : (
               <div className="space-y-4">
                 <div className="flex items-start justify-between gap-2">
@@ -555,7 +559,8 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
             <div className="space-y-3">
               <h3 className="text-sm font-semibold">Restart the agent</h3>
               <p className="text-sm text-muted-foreground">
-                Stops the agent process, clears this conversation and starts the agent again. Codex is updated to its latest release first.
+                Stops the agent process, clears this conversation and starts the agent again.
+                {updatesOnRestart(agentType) && ` ${agentDisplayName(agentType, "The agent")} is updated to its latest release first.`}
               </p>
               <Button
                 type="button"
@@ -565,6 +570,23 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
               >
                 {restartingAgent ? <LoaderCircle className="animate-spin" /> : <RotateCw />}
                 {restartingAgent ? "Restarting…" : confirmRestart ? "Click again to restart" : "Restart agent"}
+              </Button>
+              <h3 className="pt-3 text-sm font-semibold">Download the conversation</h3>
+              <p className="text-sm text-muted-foreground">
+                Every message, tool call and result of this session as JSONL, one event per line.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={downloading}
+                onClick={() => {
+                  setDownloading(true);
+                  // The provider reports a failure with a toast.
+                  void downloadSession().catch(() => undefined).finally(() => setDownloading(false));
+                }}
+              >
+                {downloading ? <LoaderCircle className="animate-spin" /> : <Download />}
+                Download conversation JSONL
               </Button>
             </div>
           </TabsContent>

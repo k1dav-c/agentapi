@@ -1,8 +1,8 @@
 # Documentation screenshots
 
-These screenshots of the chat UI illustrate the [chat UI guide](../chat-ui.md) and the
-[README](../../README.md). They were taken with Chromium from the AgentAPI v0.24.0 release binary,
-which serves the production chat UI and the API.
+These screenshots and animated GIFs of the chat UI illustrate the [chat UI guide](../chat-ui.md) and
+the [README](../../README.md). They were taken with Chromium from an AgentAPI v0.26.0 binary, which
+serves the production chat UI and the API.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
 project, `my-app` (a page with a stylesheet, a script and release notes, two commits and
@@ -50,6 +50,21 @@ device scale factor of 1.
 | [login-card.png](login-card.png) | A login card |
 | [tty-mode.png](tty-mode.png) | TTY mode on a PTY agent |
 
+The GIFs record the main flows on a 1100 × 720 window (the phone one on 390 × 844), with a blue dot
+where the pointer is and where it clicks, since headless Chromium draws no pointer. Each frame keeps
+only what changed, so they stay small.
+
+| GIF | What it shows |
+| --- | --- |
+| [demo-task.gif](demo-task.gif) | Sending a task: the agent thinks, runs a tool and replies |
+| [demo-approval.gif](demo-approval.gif) | An approval card, answered with Allow |
+| [demo-question.gif](demo-question.gif) | Three questions answered step by step |
+| [demo-queue.gif](demo-queue.gif) | A task queued and another steered into a long turn, then Stop |
+| [demo-settings.gif](demo-settings.gif) | The permission mode, the model and effort, and the context |
+| [demo-files.gif](demo-files.gif) | A file, its preview, and a diff |
+| [demo-terminal.gif](demo-terminal.gif) | The shell terminal: a command, a link above it, and a held Ctrl |
+| [demo-phone.gif](demo-phone.gif) | The terminal on a phone, typed with the key bar |
+
 The login card names the host and user to log in as; the script shows `dev-machine` and `dev` in
 their place. The servers get a clean environment (no tokens or workspace links of the shell that
 runs the script) and a neutral shell prompt.
@@ -64,10 +79,12 @@ runs the script) and a neutral shell prompt.
    make build
    ```
 
-2. Install the automation package outside the repository:
+2. Install the automation packages outside the repository: Playwright, and gifenc and pngjs to
+   write the GIFs:
 
    ```bash
-   npm install --prefix /tmp/agentapi-docs-browser --no-package-lock --no-audit --no-fund playwright-core@1.63.0
+   npm install --prefix /tmp/agentapi-docs-browser --no-package-lock --no-audit --no-fund \
+     playwright-core@1.63.0 gifenc@1.0.3 pngjs@7.0.0
    ```
 
    Version 1.63.0 supports the Playwright APIs the script uses; its Chromium build is the browser
@@ -84,9 +101,13 @@ runs the script) and a neutral shell prompt.
    ```
 
 The script creates the sample project and a home directory in a temporary directory, starts the two
-servers bound to 127.0.0.1, takes every view, writes [capture.json](capture.json) (the binary's
-version, the browser, the capture time, the viewports and the images) and stops the servers and
-removes the temporary directory again, also when a step fails. It fails if the chat reports an error.
+servers bound to 127.0.0.1, takes every view and records every GIF, writes
+[capture.json](capture.json) (the binary's version, the browser, the capture time, the viewports and
+the images) and stops the servers and removes the temporary directory again, also when a step fails.
+It fails if the chat reports an error. A run takes about five minutes.
+
+The binary's version shows in the chat's header. To show the version a merge will release, build
+with it: `make build VERSION=0.26.0`.
 
 Review the new images before updating the [chat UI guide](../chat-ui.md), its
 [Traditional Chinese translation](../chat-ui.zh-TW.md) and the READMEs.

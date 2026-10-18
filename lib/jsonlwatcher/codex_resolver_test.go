@@ -138,3 +138,48 @@ func writeCodexSession(
 	}
 	return path
 }
+
+func TestCodexResolver_ReadsEachFileOnce(t *testing.T) {
+	sessionsDir := t.TempDir()
+	now := time.Now().UTC()
+	dateDir := filepath.Join(sessionsDir, now.Format("2006"), now.Format("01"), now.Format("02"))
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	other := writeCodexSession(t, dateDir, "other.jsonl", "/home/user/other", now)
+	// A session Codex is still creating: its first line isn't complete yet.
+	partial := filepath.Join(dateDir, "partial.jsonl")
+	if err := os.WriteFile(partial, []byte(`{"timestamp":"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver := &CodexResolver{CWD: "/home/user/project", NotBefore: now.Add(-time.Minute), SessionsDir: sessionsDir}
+	if path, err := resolver.Resolve(); err == nil {
+		t.Fatalf("Resolve() = %q, want no session yet", path)
+	}
+
+	// A file's first line is read once: a session file never changes it, so
+	// rewriting the other directory's file isn't noticed.
+	writeCodexSession(t, dateDir, "other.jsonl", "/home/user/project", now)
+	if path, err := resolver.Resolve(); err == nil {
+		t.Fatalf("Resolve() = %q after rewriting %s, want the first line read before", path, other)
+	}
+	// A first line that didn't decode is read again, once Codex finished it.
+	writeCodexSession(t, dateDir, "partial.jsonl", "/home/user/project", now)
+	path, err := resolver.Resolve()
+	if err != nil || path != partial {
+		t.Fatalf("Resolve() = %q, %v; want %s", path, err, partial)
+	}
+
+	// Files that are gone are forgotten.
+	if err := os.Remove(other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolver.Resolve(); err != nil {
+		t.Fatal(err)
+	}
+	resolver.mu.Lock()
+	defer resolver.mu.Unlock()
+	if _, ok := resolver.metas[other]; ok {
+		t.Errorf("the removed file %s is still remembered", other)
+	}
+}

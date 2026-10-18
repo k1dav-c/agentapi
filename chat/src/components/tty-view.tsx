@@ -6,6 +6,7 @@ import {toast} from "sonner";
 import {useChat} from "./chat-provider";
 import {Button} from "./ui/button";
 import {TERMINAL_FONT_SIZE as FONT_SIZE, TERMINAL_LINE_HEIGHT as LINE_HEIGHT, TerminalKeyBar} from "./terminal-chrome";
+import {LatestLinkChip} from "./terminal-links";
 import {useXterm} from "./use-xterm";
 import {fitTerminalFontSize, screenToTerminalOutput} from "@/lib/tty";
 import {withCredentials} from "@/lib/auth";
@@ -34,7 +35,7 @@ export function TtyView({onExit}: {onExit: () => void}) {
   // Estimated until xterm has rendered a row we can measure.
   const rowsFor = (container: HTMLElement, rowHeight = FONT_SIZE * LINE_HEIGHT) => Math.max(10, Math.floor(container.clientHeight / rowHeight));
 
-  const {termRef, inputRef, touch, keyboardOpen, inset} = useXterm({
+  const {termRef, inputRef, link, modifier, setModifier, touch, keyboardOpen, inset} = useXterm({
     containerRef,
     key: storageScope,
     options: (container) => ({cols: columnsRef.current, rows: rowsFor(container), scrollback: 5000, cursorBlink: false}),
@@ -137,6 +138,7 @@ export function TtyView({onExit}: {onExit: () => void}) {
         <span className="hidden font-mono text-[11px] text-muted-foreground md:inline">
           {columns} columns · full-width characters take 2
         </span>
+        <LatestLinkChip url={link} />
         <Button type="button" size="sm" variant="outline" className="ml-auto h-8" onClick={onExit}>
           <ArrowLeft />
           Back to chat
@@ -160,7 +162,14 @@ export function TtyView({onExit}: {onExit: () => void}) {
           <div ref={containerRef} className="min-h-0 flex-1" aria-label="Agent terminal" />
         </div>
       </div>
-      <TerminalKeyBar termRef={termRef} touch={touch} keyboardOpen={keyboardOpen} onKeys={(data) => inputRef.current?.push(data)} />
+      <TerminalKeyBar
+        termRef={termRef}
+        touch={touch}
+        keyboardOpen={keyboardOpen}
+        modifier={modifier}
+        onModifier={setModifier}
+        onKeys={(data) => inputRef.current?.push(data)}
+      />
     </div>
   );
 }

@@ -14,10 +14,10 @@ with an HTTP API.
 
 ![The AgentAPI chat with two tasks: prompts, tool calls, thinking notes and the composer](docs/screenshots/chat-desktop.png)
 
-The screenshots show AgentAPI v0.24.0 with the built-in `native-demo` agent, whose replies, tool
+The screenshots show AgentAPI v0.26.0 with the built-in `native-demo` agent, whose replies, tool
 results, models and usage are simulated. The [chat UI guide](docs/chat-ui.md) goes through every
-feature of the chat with screenshots, and the [screenshot guide](docs/screenshots/README.md) explains
-how they are taken.
+feature of the chat with screenshots and animations, and the
+[screenshot guide](docs/screenshots/README.md) explains how they are taken.
 
 Use AgentAPI to:
 
@@ -246,7 +246,9 @@ The chat UI at `/chat` is embedded in the binary and works with every transport,
 a phone. It has layouts for phones, searchable tool activity, connection-state indicators and
 compact tool-call cards, and its header shows the agent's mark (Claude's orange square, Pi's logo)
 and the AgentAPI version. The [chat UI guide](docs/chat-ui.md) shows every part of it with
-screenshots.
+screenshots and animations.
+
+![Sending a task in the chat: the agent thinks, runs a tool and replies](docs/screenshots/demo-task.gif)
 
 ### Tasks and the transcript
 
@@ -336,10 +338,10 @@ The [chat UI guide](docs/chat-ui.md#files) also shows the File tab and a Markdow
 
 With the PTY transport, TTY mode is an escape hatch for when the chat view looks wrong: the terminal
 button in the header swaps the conversation for the agent's terminal screen (xterm.js) and sends
-every key straight to the agent, including arrows, Ctrl/Alt keys, pastes and IME input. A key bar
-provides Esc, Tab, arrows, Enter and Ctrl keys on phones. The font grows with the window (11–20px);
-the mirror uses the agent's real terminal width, so start AgentAPI with `--term-width 120` if you
-want longer lines.
+every key straight to the agent, including arrows, Ctrl/Alt keys, pastes and IME input. The same key
+bar as the [terminal](#terminal)'s gives a phone the keys its keyboard lacks. The font grows with
+the window (11–20px); the mirror uses the agent's real terminal width, so start AgentAPI with
+`--term-width 120` if you want longer lines.
 
 ![TTY mode on bash run as a PTY agent, with the column ruler and the key bar](docs/screenshots/tty-mode.png)
 
@@ -358,7 +360,8 @@ mode, which needs the agent's own terminal (the screen views stay hidden, also f
 
 While the tab is in the background, its icon shows an amber dot when the agent needs you, a blue dot
 while it works, and a green dot when a task finishes. Browser notifications can be turned on from
-the status menu.
+the status menu, which also downloads the conversation as JSONL (so does the Explorer's Session
+tab).
 
 ![The session details menu opened from the status in the header](docs/screenshots/session-details.png)
 
@@ -466,9 +469,13 @@ command in the chat terminal.
   `--console` selects Anthropic Console API billing. On a machine without a
   browser, `claude setup-token` creates a token for `CLAUDE_CODE_OAUTH_TOKEN`.
   Check the login with `claude auth status`.
-- Codex: use `codex login` for a ChatGPT plan, or
-  `printenv OPENAI_API_KEY | codex login --with-api-key` for an API key.
-  Check the login with `codex login status`.
+- Codex: `codex login --device-auth` signs in with a ChatGPT plan from any
+  device: open the link it shows and enter its one-time code. The login card
+  and `/login` run it, since AgentAPI usually runs on a server without a
+  browser: `codex login`'s browser sign-in redirects the browser to
+  `localhost:1455` on the machine that runs Codex, which a browser elsewhere
+  can't reach. `codex login` still works with a browser on the same machine, and `printenv OPENAI_API_KEY | codex login --with-api-key`
+  uses an API key. Check the login with `codex login status`.
 - Pi: run `/login` inside `pi`, or set a provider key such as
   `ANTHROPIC_API_KEY` in AgentAPI's environment.
 
@@ -660,7 +667,12 @@ for the chat's terminal button: for a login, a git command or anything else. It 
 (colors, the cursor, full screen programs), sized to the window, also on a phone, where a key bar
 adds the keys an on-screen keyboard lacks. Everyone who opens it shares it, like a tmux window, and
 it keeps running when nobody watches; once its shell exits, the next open starts a new one. Its
-environment is the agent's, without AgentAPI's own variables.
+environment is the agent's, without AgentAPI's own variables. Web links in it open on a click, also
+when they run over several lines, and the last link a command printed (a login URL) shows above the
+terminal to open or copy with one tap; TTY mode does the same. The key bar has arrows, Enter, Esc,
+Tab, Shift+Tab, Ctrl+C, a shell's Ctrl+R, Ctrl+A, Ctrl+E, Ctrl+U and Ctrl+W, Home, End, Page up and
+Page down, / - | ~, Alt+↑, Ctrl+L, and Ctrl+D and Ctrl+Z, which ask for a second press; its Ctrl and
+Alt buttons hold the modifier for the next key typed.
 
 - `GET /terminal` streams its output as server-sent events (`output` events
   with base64 data, the first one the recent output to replay; `exit` when the
@@ -1386,10 +1398,10 @@ seconds for a whole turn.
 | Native | `native-demo` (no agent process) | 27 MiB | 0.03% | 0.07 s | | |
 
 - While the agent is idle, both transports cost AgentAPI next to nothing: polling the screen
-  (PTY) costs about as little as waiting for the protocol (native). The exception is Codex with
-  the PTY transport: to find the session's log, AgentAPI reads Codex's recent session files every
-  500 ms, more of them before the first message, so this grows with the number of recent Codex
-  sessions.
+  (PTY) costs about as little as waiting for the protocol (native). The exception was Codex with
+  the PTY transport (0.2–0.7% in the table): to find the session's log, AgentAPI read Codex's
+  recent session files every 500 ms, more of them before the first message. It now reads each file
+  once, and AgentAPI idles at 0.1% with PTY Codex too (measured after the fix).
 - A turn costs AgentAPI 3–6 times more CPU with the PTY transport (typing the message, reading the
   screen, following the session log), and the agent too: Codex's terminal UI took 6.3 CPU seconds
   for a turn its app-server answered in 0.4.

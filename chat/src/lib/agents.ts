@@ -32,6 +32,13 @@ export function parseAgentType(value: string | undefined): AgentType {
   return Object.hasOwn(AgentType, value) ? (value as AgentType) : "custom";
 }
 
+// updatesOnRestart reports whether restarting the agent updates it to its
+// latest release first, as AgentAPI does for the Codex and Pi CLIs (`codex
+// update`, `pi update --self`); Claude Code updates itself.
+export function updatesOnRestart(type: AgentType): boolean {
+  return type === "codex" || type === "pi";
+}
+
 // agentDisplayName names an agent type, or says fallback for "unknown".
 export function agentDisplayName(type: AgentType, fallback: string): string {
   return type === "unknown" ? fallback : (AgentType[type]?.displayName ?? fallback);

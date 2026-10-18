@@ -309,6 +309,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			ScreenStabilityLength:  2 * time.Second,
 			FormatMessage:          formatMessage,
 			ReadyForInitialPrompt:  isAgentReadyForInitialPrompt,
+			ReadyWhenStable:        mf.ReadyWhenStable(config.AgentType),
 			StabilityScreen:        stabilityScreen,
 			FormatToolCall:         formatToolCall,
 			InitialPrompt:          initialPrompt,

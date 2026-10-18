@@ -6,11 +6,12 @@ AgentAPI serves a chat UI at `/chat`. It is embedded in the `agentapi` binary, w
 transport, on a desktop and on a phone, and talks to the server only through the
 [HTTP API](../README.md#http-api-reference). This guide goes through every part of it.
 
-The screenshots show AgentAPI v0.24.0 with the built-in `native-demo` agent working on a small
-sample site; the demo's replies, tool results, models and usage are simulated, and TTY mode shows
-bash run as a PTY agent. [scripts/capture-docs.mjs](../scripts/capture-docs.mjs) takes all of them
-again (see the [screenshot guide](screenshots/README.md)). Parts marked *native* need the
-[native transport](../README.md#native-transport), which Claude Code, Codex and Pi use by default.
+The screenshots and the animations show AgentAPI v0.26.0 with the built-in `native-demo` agent
+working on a small sample site; the demo's replies, tool results, models and usage are simulated,
+and TTY mode shows bash run as a PTY agent. The animations draw a blue dot where the pointer is and
+where it clicks. [scripts/capture-docs.mjs](../scripts/capture-docs.mjs) takes all of them again
+(see the [screenshot guide](screenshots/README.md)). Parts marked *native* need the [native
+transport](../README.md#native-transport), which Claude Code, Codex and Pi use by default.
 
 ## Contents
 
@@ -42,6 +43,8 @@ again (see the [screenshot guide](screenshots/README.md)). Parts marked *native*
   and the send button. The line under it lists the keys.
 - The ↑ and ↓ buttons at the bottom right jump to the previous and the next task.
 
+![Sending a task: the agent thinks, runs a tool and replies](screenshots/demo-task.gif)
+
 ## Tasks and the transcript
 
 Every message you send starts a task. A task shows your prompt in a tinted block labelled "You",
@@ -63,8 +66,9 @@ the raw input a click away. Tool results that are images (Claude Code reading a 
 ### Thinking
 
 On a wide screen the agent's thinking appears as notes in the right margin, next to the step it
-belongs to; a long note shows six lines until you click it. On a narrow screen it folds into a
-"Thinking · *title*" line inside the task.
+belongs to; a note taller than its step makes room beside it rather than pushing the notes after it
+away from their steps, and a long note shows six lines until you click it. On a narrow screen it
+folds into a "Thinking · *title*" line inside the task.
 
 ### Messages and long tasks
 
@@ -116,9 +120,9 @@ chat marked as not sent, with buttons to retry or dismiss it, also after a reloa
 ![A long turn with two queued tasks and the send menu open: Queue, Steer, and Interrupt & send](screenshots/queue-steer.png)
 
 Messages you send while the agent works wait in a queue, shown in the composer under the message
-box, and run one after the other when the turn ends; the queue is kept on the server, so every open chat sees it. Each queued
-task can be edited, moved up or down, removed, or *native* steered into the turn right away (the ↳
-button). *native* The send button's menu offers three ways to send:
+box, and run one after the other when the turn ends; the queue is kept on the server, so every open
+chat sees it. Each queued task can be edited, moved up or down, removed, or *native* steered into
+the turn right away (the ↳ button). *native* The send button's menu offers three ways to send:
 
 - **Queue** (Enter): send it once this turn ends.
 - **Steer** (⌘/Ctrl+Enter): add it to the turn the agent is working on.
@@ -126,6 +130,8 @@ button). *native* The send button's menu offers three ways to send:
 
 The red button next to it, and the task's Stop button, interrupt the turn. While the agent waits for
 an answer to a request, a new message queues behind it.
+
+![A long turn: a task queued, another steered into the turn, then Stop](screenshots/demo-queue.gif)
 
 ### Slash commands
 
@@ -161,6 +167,8 @@ when the shell terminal is on.
 *native* The composer's toolbar changes the agent's settings while it runs (`PUT /settings`). They
 stay for the session: AgentAPI gives them to the agent again after a restart, a new login and, with
 `--state-db`, an AgentAPI restart.
+
+![Switching to the ask mode and the Deep model at max effort, then the context](screenshots/demo-settings.gif)
 
 ### Permission mode
 
@@ -205,6 +213,8 @@ own policy asks) shows what would run and why. **Allow** runs it once, **Always 
 tool for the rest of the session, and **Deny** refuses it; the optional note tells the agent what to
 do instead.
 
+![Approving a command: the card comes up, Allow, and the turn goes on](screenshots/demo-approval.gif)
+
 ### Questions
 
 ![A question card on the first of three steps: Package manager, Checks and Notes](screenshots/native-question.png)
@@ -212,6 +222,8 @@ do instead.
 *native* The agent's questions come one step at a time: single choice, several choices or free
 text. **Next** moves to the next step and the last one sends every answer together. Secret answers
 are masked while you type and stored as `[redacted]`.
+
+![Answering three questions: a choice, two checks and a note](screenshots/demo-question.gif)
 
 ### Plans
 
@@ -233,7 +245,9 @@ expects. A dialog with a free-text field can also be answered with a normal mess
 ![A login card: the command to run, the host and user to run it as, Run in terminal and Check again](screenshots/login-card.png)
 
 When the agent isn't logged in, or loses its login during a session, a login card names the command
-to run (`claude auth login`, `codex login`, or Pi's `/login`) and the host and user to run it as.
+to run (`claude auth login`, `codex login --device-auth`, or Pi's `/login`) and the host and user to
+run it as. Codex signs in with a device code: open the link it prints, on any device, and enter its
+one-time code, so no browser has to run where AgentAPI runs.
 **Run in terminal** runs it in the [shell terminal](#shell-terminal); **Check again** checks right
 away. AgentAPI also tries again every 5 seconds, and messages wait in the queue meanwhile. (The
 screenshot shows `dev-machine` and `dev` in place of the real host and user.)
@@ -244,6 +258,8 @@ File names in the chat open a viewer on the file the agent works on: a file name
 row, a path in inline code in the agent's reply (`lib/foo.go:12` opens at line 12) and the
 Explorer's Files tab. Only files inside the agent's working directory open. The viewer's header
 reloads the file; on a phone the viewer takes the whole screen.
+
+![Opening index.html and its preview, then the diff of README.md](screenshots/demo-files.gif)
 
 ### The file
 
@@ -315,7 +331,8 @@ See [MCP management](../README.md#mcp-management) for the API.
 
 **Restart agent** stops the agent, clears the conversation and starts it again in a new session; it
 asks for a second click. Codex and Pi, when AgentAPI starts their CLI directly, update to their
-latest release first.
+latest release first. **Download conversation JSONL** saves every message, tool call and result of
+the session, one event per line; the session details menu has it too.
 
 ## Terminals
 
@@ -325,8 +342,15 @@ latest release first.
 
 *native* The terminal button (or `/terminal`) opens a shell in the agent's working directory, for
 logins and quick commands. It is a real terminal sized to the window. Everyone who opens it shares
-the same shell, which keeps running while nobody watches. The key bar sends Esc, Tab, arrows, Enter
-and Ctrl keys, which a phone keyboard lacks. Start AgentAPI with `--terminal=false` to turn it off.
+the same shell, which keeps running while nobody watches. The key bar sends the keys a phone
+keyboard lacks: arrows, Enter, Esc, Tab, Shift+Tab, Ctrl+C, a shell's Ctrl+R, Ctrl+A, Ctrl+E, Ctrl+U
+and Ctrl+W, Home, End, Page up and Page down, / - | ~, Alt+↑ and Ctrl+L. Its **Ctrl** and **Alt**
+buttons hold the modifier for the next key you type, for any other combination. Ctrl+D and Ctrl+Z
+ask for a second press. Web links in the terminal open on a click, also when they run over several
+lines, and the last link a command printed (such as a login link) shows above the terminal,
+shortened, to open or copy with one tap. Start AgentAPI with `--terminal=false` to turn it off.
+
+![The terminal: git status, a link that shows above the terminal, and a held Ctrl clearing the screen](screenshots/demo-terminal.gif)
 
 ### TTY mode
 
@@ -335,7 +359,8 @@ and Ctrl keys, which a phone keyboard lacks. Start AgentAPI with `--terminal=fal
 With the PTY transport, the terminal button switches the conversation for the agent's own terminal
 screen, for when the chat view looks wrong. Every key goes straight to the agent: arrows, Ctrl and
 Alt keys, pastes and IME input. The ruler shows the agent's real terminal width (here
-`--term-width 100`); the font grows with the window (11–20px). **Back to chat** returns.
+`--term-width 100`); the font grows with the window (11–20px). Links open on a click and the last
+one shows above the screen, as in the shell terminal. **Back to chat** returns.
 
 ## Session details and alerts
 
@@ -343,7 +368,9 @@ Alt keys, pastes and IME input. The ruler shows the agent's real terminal width 
 
 Clicking the status in the header opens the session details: the status, agent, session name,
 AgentAPI version, what the agent is doing, the queue and the tokens in and out. Its menu downloads
-the conversation as JSONL, turns on browser notifications, and shows the keyboard shortcuts.
+the conversation as JSONL (as the Explorer's Session tab does), turns on browser notifications, and
+shows the keyboard shortcuts. (How full the context is and the usage limits are in the composer's
+toolbar; see [Context and usage limits](#context-and-usage-limits).)
 
 While the tab is in the background, its icon shows an amber dot when the agent needs you, a blue dot
 while it works and a green dot when a task finishes. With notifications on, the browser also shows
@@ -358,6 +385,8 @@ under the message box. A request card takes at most 60% of the screen and a titl
 can be shown in full. The file viewer takes the whole screen, and the terminals have the key bar.
 
 ![A question card on a phone](screenshots/mobile-question.png)
+
+![The terminal on a phone: the keyboard button, a command, and keys from the key bar](screenshots/demo-phone.gif)
 
 ## Connection and caching
 

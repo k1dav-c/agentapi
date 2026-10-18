@@ -3,7 +3,7 @@
 import {useEffect, useState, type RefObject} from "react";
 import {Keyboard, KeyboardOff} from "lucide-react";
 import type {Terminal} from "@xterm/xterm";
-import {IOS_FORM_BAR_HEIGHT, isIOS, keyboardInset, terminalShortcuts, type TerminalShortcut} from "@/lib/terminal-keys";
+import {IOS_FORM_BAR_HEIGHT, isIOS, keyboardInset, terminalShortcuts, type StickyModifier, type TerminalShortcut} from "@/lib/terminal-keys";
 import {useMediaQuery} from "@/lib/use-media-query";
 
 // The look both terminals share.
@@ -64,11 +64,16 @@ export function TerminalKeyBar({
   touch,
   keyboardOpen,
   onKeys,
+  modifier,
+  onModifier,
 }: {
   termRef: RefObject<Terminal | null>;
   touch: boolean;
   keyboardOpen: boolean;
   onKeys: (data: string) => void;
+  // Ctrl or Alt held for the next key typed on the keyboard.
+  modifier: StickyModifier | null;
+  onModifier: (modifier: StickyModifier | null) => void;
 }) {
   const [armed, setArmed] = useState<string | null>(null);
   useEffect(() => {
@@ -82,6 +87,7 @@ export function TerminalKeyBar({
       return;
     }
     setArmed(null);
+    onModifier(null);
     onKeys(shortcut.value);
     // On a touch screen, don't bring back a keyboard the user put away.
     if (!touch || keyboardOpen) termRef.current?.focus();
@@ -118,6 +124,24 @@ export function TerminalKeyBar({
           {keyboardOpen ? "Hide" : "Keyboard"}
         </button>
       )}
+      {(["ctrl", "alt"] as const).map((held) => (
+        <button
+          key={held}
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            onModifier(modifier === held ? null : held);
+            if (!touch || keyboardOpen) termRef.current?.focus();
+          }}
+          aria-pressed={modifier === held}
+          title={`${held === "ctrl" ? "Ctrl" : "Alt"} for the next key you type`}
+          className={`h-8 shrink-0 rounded-md border px-2.5 font-mono text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring ${
+            modifier === held ? "border-foreground bg-foreground text-background" : "bg-card hover:bg-muted"
+          }`}
+        >
+          {held === "ctrl" ? "Ctrl" : "Alt"}
+        </button>
+      ))}
       <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto" role="group" aria-label="Terminal keys">
         {terminalShortcuts.map((shortcut) => (
           <button

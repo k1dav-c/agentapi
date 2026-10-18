@@ -225,7 +225,8 @@ sequenceDiagram
   changes. The screen counts as stable once it hasn't changed for 2 seconds.
 - `msgfmt` removes what isn't part of the reply (the echoed input, the input
   box, status lines), and knows when each agent is ready for the first
-  prompt.
+  prompt: when its input box shows, or, for a `custom` agent that may draw
+  none (a shell, a REPL), also once its screen is stable.
 - `jsonlwatcher` finds the Claude Code, Codex or Pi session log that belongs
   to the agent's process (by its process ID and working directory) and tails
   it. Agent-specific parsers turn its lines into rich messages (thinking, tool

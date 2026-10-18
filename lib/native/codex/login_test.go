@@ -33,7 +33,7 @@ func TestLoginCheckAtStart(t *testing.T) {
 		var login *native.LoginRequiredError
 		require.ErrorAs(t, h.err("start"), &login)
 		assert.Equal(t, loginHint, login.Login)
-		assert.Equal(t, "codex login", login.Login.Command)
+		assert.Equal(t, "codex login --device-auth", login.Login.Command)
 		h.expectNothingSent()
 	})
 
