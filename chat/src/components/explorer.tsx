@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import {toast} from "sonner";
 import {editableMCPServers} from "@/lib/mcp-sample";
+import {agentDisplayName, updatesOnRestart} from "@/lib/agents";
 import {useChat} from "./chat-provider";
 import {useFileViewer} from "./file-viewer-context";
 import {Button} from "./ui/button";
@@ -52,6 +53,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     deleteMCPProfile,
     applyMCPProfile,
     features,
+    agentType,
   } = useChat();
   const {restartKeepsConversation} = features;
   const fileViewer = useFileViewer();
@@ -403,7 +405,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                 Loading MCP servers…
               </div>
             ) : !mcpSupported ? (
-              <Empty text="MCP config management is available only for Claude and Codex." />
+              <Empty text="MCP config management is available only for Claude Code, Codex and Pi." />
             ) : (
               <div className="space-y-4">
                 <div className="flex items-start justify-between gap-2">
@@ -555,7 +557,8 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
             <div className="space-y-3">
               <h3 className="text-sm font-semibold">Restart the agent</h3>
               <p className="text-sm text-muted-foreground">
-                Stops the agent process, clears this conversation and starts the agent again. Codex is updated to its latest release first.
+                Stops the agent process, clears this conversation and starts the agent again.
+                {updatesOnRestart(agentType) && ` ${agentDisplayName(agentType, "The agent")} is updated to its latest release first.`}
               </p>
               <Button
                 type="button"
