@@ -174,85 +174,108 @@ func (p *pendingRequest) plan(bypass bool) {
 
 // response builds the can_use_tool answer for resp.
 func (p *pendingRequest) response(resp native.Response) (map[string]any, error) {
-	r := p.raw
-	allow := func(input json.RawMessage, classification string) map[string]any {
-		if len(input) == 0 {
-			input = json.RawMessage("{}")
-		}
-		out := map[string]any{"behavior": "allow", "updatedInput": input, "decisionClassification": classification}
-		if r.ToolUseID != "" {
-			out["toolUseID"] = r.ToolUseID
-		}
-		return out
-	}
-	deny := func(message string) map[string]any {
-		out := map[string]any{"behavior": "deny", "message": message, "decisionClassification": "user_reject"}
-		if r.ToolUseID != "" {
-			out["toolUseID"] = r.ToolUseID
-		}
-		return out
-	}
-	feedback := strings.TrimSpace(resp.Text)
-	unknownOption := fmt.Errorf("%w: unknown option %q", native.ErrInvalidResponse, resp.OptionID)
-	if p.req.Kind != native.RequestKindQuestion &&
-		!slices.ContainsFunc(p.req.Options, func(o native.RequestOption) bool { return o.ID == resp.OptionID }) {
-		// Only what was offered: e.g. no bypassPermissions for the plan of
-		// a session that can't switch to it.
-		return nil, unknownOption
-	}
-
+	var decide func(option, feedback string) map[string]any
 	switch p.req.Kind {
 	case native.RequestKindQuestion:
-		if resp.OptionID != "" {
-			return nil, fmt.Errorf("%w: questions take answers, not an option", native.ErrInvalidResponse)
-		}
-		answers := make(map[string]string, len(p.questions))
-		for id, text := range p.questions {
-			chosen := resp.Answers[id]
-			if len(chosen) == 0 {
-				return nil, fmt.Errorf("%w: question %q has no answer", native.ErrInvalidResponse, id)
-			}
-			answers[text] = strings.Join(chosen, ", ")
-		}
-		var input map[string]any
-		if json.Unmarshal(r.Input, &input) != nil || input == nil {
-			input = map[string]any{}
-		}
-		input["answers"] = answers
-		encoded, err := json.Marshal(input)
-		if err != nil {
-			return nil, err
-		}
-		return allow(encoded, "user_temporary"), nil
+		return p.answers(resp)
 	case native.RequestKindPlan:
-		switch resp.OptionID {
-		case optionBypass, optionAcceptEdits, optionDefault:
-			out := allow(r.Input, "user_temporary")
-			out["updatedPermissions"] = []map[string]any{{"type": "setMode", "mode": resp.OptionID, "destination": "session"}}
-			return out, nil
-		case optionDeny:
-			if feedback == "" {
-				feedback = "The user rejected the plan. Revise it and ask again."
-			}
-			return deny(feedback), nil
-		}
+		decide = p.planDecision
 	case native.RequestKindApproval:
-		switch resp.OptionID {
-		case optionAllow:
-			return allow(r.Input, "user_temporary"), nil
-		case optionAllowAlways:
-			// Offered only with suggestions.
-			out := allow(r.Input, "user_permanent")
-			out["updatedPermissions"] = p.sessionPermissions()
+		decide = p.approvalDecision
+	}
+	// Only what was offered: e.g. no bypassPermissions for the plan of a
+	// session that can't switch to it.
+	if decide != nil && slices.ContainsFunc(p.req.Options, func(o native.RequestOption) bool { return o.ID == resp.OptionID }) {
+		if out := decide(resp.OptionID, strings.TrimSpace(resp.Text)); out != nil {
 			return out, nil
-		case optionDeny:
-			if feedback == "" {
-				feedback = "The user denied this tool call."
-			}
-			return deny(feedback), nil
 		}
 	}
-	return nil, unknownOption
+	return nil, fmt.Errorf("%w: unknown option %q", native.ErrInvalidResponse, resp.OptionID)
+}
+
+// answers is the response to a question: the tool's input with the
+// answers, by question.
+func (p *pendingRequest) answers(resp native.Response) (map[string]any, error) {
+	if resp.OptionID != "" {
+		return nil, fmt.Errorf("%w: questions take answers, not an option", native.ErrInvalidResponse)
+	}
+	answers := make(map[string]string, len(p.questions))
+	for id, text := range p.questions {
+		chosen := resp.Answers[id]
+		if len(chosen) == 0 {
+			return nil, fmt.Errorf("%w: question %q has no answer", native.ErrInvalidResponse, id)
+		}
+		answers[text] = strings.Join(chosen, ", ")
+	}
+	var input map[string]any
+	if json.Unmarshal(p.raw.Input, &input) != nil || input == nil {
+		input = map[string]any{}
+	}
+	input["answers"] = answers
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	return p.allow(encoded, "user_temporary"), nil
+}
+
+// planDecision is the response to a plan for option: carry it out in a
+// permission mode, or revise it with feedback. nil for another option.
+func (p *pendingRequest) planDecision(option, feedback string) map[string]any {
+	switch option {
+	case optionBypass, optionAcceptEdits, optionDefault:
+		out := p.allow(p.raw.Input, "user_temporary")
+		out["updatedPermissions"] = []map[string]any{{"type": "setMode", "mode": option, "destination": "session"}}
+		return out
+	case optionDeny:
+		if feedback == "" {
+			feedback = "The user rejected the plan. Revise it and ask again."
+		}
+		return p.deny(feedback)
+	}
+	return nil
+}
+
+// approvalDecision is the response to a tool call's approval for option.
+// nil for another option.
+func (p *pendingRequest) approvalDecision(option, feedback string) map[string]any {
+	switch option {
+	case optionAllow:
+		return p.allow(p.raw.Input, "user_temporary")
+	case optionAllowAlways:
+		// Offered only with suggestions.
+		out := p.allow(p.raw.Input, "user_permanent")
+		out["updatedPermissions"] = p.sessionPermissions()
+		return out
+	case optionDeny:
+		if feedback == "" {
+			feedback = "The user denied this tool call."
+		}
+		return p.deny(feedback)
+	}
+	return nil
+}
+
+// allow lets the tool call go ahead with input (classified for Claude
+// Code's permission log).
+func (p *pendingRequest) allow(input json.RawMessage, classification string) map[string]any {
+	if len(input) == 0 {
+		input = json.RawMessage("{}")
+	}
+	out := map[string]any{"behavior": "allow", "updatedInput": input, "decisionClassification": classification}
+	if p.raw.ToolUseID != "" {
+		out["toolUseID"] = p.raw.ToolUseID
+	}
+	return out
+}
+
+// deny refuses the tool call, telling the agent message.
+func (p *pendingRequest) deny(message string) map[string]any {
+	out := map[string]any{"behavior": "deny", "message": message, "decisionClassification": "user_reject"}
+	if p.raw.ToolUseID != "" {
+		out["toolUseID"] = p.raw.ToolUseID
+	}
+	return out
 }
 
 // sessionPermissions returns Claude Code's permission suggestions, limited

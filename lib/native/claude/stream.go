@@ -230,6 +230,60 @@ func (p *streamParser) snapshot(m *assistantMessage) transcript.RichMessage {
 	return out
 }
 
+// startMessage begins the message a message_start event announces; id is
+// the frame's message ID, if it has one.
+func (p *streamParser) startMessage(id string, msg *apiMessage) {
+	if id == "" {
+		id = msg.ID
+	}
+	p.current = id
+	m := p.message(id, msg.Model)
+	m.streamed = true
+	if msg.Usage != nil && m.msg.Usage == nil {
+		m.msg.Usage = msg.Usage
+	}
+}
+
+// startBlock begins block index from a content_block_start event, unless
+// its final state arrived already, and reports whether it did.
+func (m *assistantMessage) startBlock(index int, raw json.RawMessage) bool {
+	var block jsonlwatcher.ContentBlock
+	if json.Unmarshal(raw, &block) != nil {
+		return false
+	}
+	for len(m.blocks) <= index {
+		m.blocks = append(m.blocks, &liveBlock{})
+	}
+	b := m.blocks[index]
+	if b.final == nil {
+		b.kind, b.toolID, b.toolName = block.Type, block.ID, block.Name
+		b.text.WriteString(block.Text)
+		b.thinking.WriteString(block.Thinking)
+	}
+	m.dirty = true
+	return true
+}
+
+// addDelta adds the text or thinking of a content_block_delta to block
+// index, and reports whether it changed it: input_json_delta is parsed
+// only once the block is complete, and signatures aren't shown.
+func (m *assistantMessage) addDelta(index int, kind, text, thinking string) bool {
+	if index >= len(m.blocks) || m.blocks[index].final != nil {
+		return false
+	}
+	b := m.blocks[index]
+	switch kind {
+	case "text_delta":
+		b.text.WriteString(text)
+	case "thinking_delta":
+		b.thinking.WriteString(thinking)
+	default:
+		return false
+	}
+	m.dirty = true
+	return true
+}
+
 // due reports whether a throttled snapshot of m may be sent now.
 func (p *streamParser) due(m *assistantMessage) bool {
 	return !m.sent || p.clock.Since(m.lastSent) >= p.throttle
@@ -287,15 +341,7 @@ func (p *streamParser) streamEvent(f *frame) []transcript.RichMessage {
 	}
 	id := f.APIMessageID
 	if ev.Type == "message_start" && ev.Message != nil {
-		if id == "" {
-			id = ev.Message.ID
-		}
-		p.current = id
-		m := p.message(id, ev.Message.Model)
-		m.streamed = true
-		if ev.Message.Usage != nil && m.msg.Usage == nil {
-			m.msg.Usage = ev.Message.Usage
-		}
+		p.startMessage(id, ev.Message)
 		return nil
 	}
 	if id == "" {
@@ -308,36 +354,13 @@ func (p *streamParser) streamEvent(f *frame) []transcript.RichMessage {
 	}
 	switch ev.Type {
 	case "content_block_start":
-		var block jsonlwatcher.ContentBlock
-		if json.Unmarshal(ev.ContentBlock, &block) != nil {
+		if !m.startBlock(ev.Index, ev.ContentBlock) {
 			return nil
 		}
-		for len(m.blocks) <= ev.Index {
-			m.blocks = append(m.blocks, &liveBlock{})
-		}
-		b := m.blocks[ev.Index]
-		if b.final == nil {
-			b.kind, b.toolID, b.toolName = block.Type, block.ID, block.Name
-			b.text.WriteString(block.Text)
-			b.thinking.WriteString(block.Thinking)
-		}
-		m.dirty = true
 	case "content_block_delta":
-		if ev.Index >= len(m.blocks) || m.blocks[ev.Index].final != nil {
+		if !m.addDelta(ev.Index, ev.Delta.Type, ev.Delta.Text, ev.Delta.Thinking) {
 			return nil
 		}
-		b := m.blocks[ev.Index]
-		switch ev.Delta.Type {
-		case "text_delta":
-			b.text.WriteString(ev.Delta.Text)
-		case "thinking_delta":
-			b.thinking.WriteString(ev.Delta.Thinking)
-		default:
-			// input_json_delta is parsed only once complete; signatures
-			// aren't shown.
-			return nil
-		}
-		m.dirty = true
 	case "message_delta":
 		if ev.Delta.StopReason != nil {
 			m.msg.StopReason = *ev.Delta.StopReason
