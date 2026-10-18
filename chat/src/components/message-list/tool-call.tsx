@@ -218,13 +218,13 @@ export function ToolCallCard({
     toolCall.status === "running" ||
     (toolCall.status === undefined && toolCall.result === undefined);
   const input = formatToolInput(toolCall.input);
-  const { messages, storageScope, transport, requests } = useChat();
+  const { messages, storageScope, features, requests } = useChat();
   // A question in a tool call is answered here with keystrokes, so only
   // where they reach the agent's terminal (PTY). On the native transport it
   // is answered on its request card, and the tool call shows the request's
   // state; ACP has neither.
   const interactiveInput = isPending && onSendRaw ? parseInteractiveToolInput(toolCall.name, toolCall.input) : null;
-  const request = transport === "native" ? requests.findLast((candidate) => candidate.tool_use_id === toolCall.id) : undefined;
+  const request = features.requests ? requests.findLast((candidate) => candidate.tool_use_id === toolCall.id) : undefined;
   const requestBadge = request ? toolRequestBadge(request) : null;
   const [localIsOpen, setLocalIsOpen] = useState(Boolean(searchQuery) || Boolean(interactiveInput));
   // The agent's prompt shows one question at a time and moves on as each is

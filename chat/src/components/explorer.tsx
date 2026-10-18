@@ -57,10 +57,9 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     saveMCPProfile,
     deleteMCPProfile,
     applyMCPProfile,
-    transport,
+    features,
   } = useChat();
-  // A native agent resumes its session when it restarts for an MCP change.
-  const restartKeepsConversation = transport === "native";
+  const {restartKeepsConversation} = features;
   const fileViewer = useFileViewer();
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("index");

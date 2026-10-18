@@ -32,14 +32,14 @@ const MODE_ICONS: Record<PermissionMode, ReactNode> = {
 // toolbar (native agents with the settings capability). Each opens a menu
 // that switches it; the values come from GET /settings when it opens.
 export function SessionSettings({ className }: { className?: string }) {
-  const { transport, capabilities, agentSettings, getSettings, updateSettings } = useChat();
+  const { features, agentSettings, getSettings, updateSettings } = useChat();
   const [options, setOptions] = useState<SettingOptions | null>(null);
   // The menu that is open, also when a slash command opened it.
   const [openMenu, setOpenMenu] = useState<SettingsMenu | null>(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const enabled = transport === "native" && Boolean(capabilities?.settings) && agentSettings !== null;
+  const enabled = features.settings && agentSettings !== null;
 
   // Only the latest load counts: an older one that ends later is stale.
   const loads = useRef(0);

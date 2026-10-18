@@ -80,12 +80,12 @@ export function useKeyboardShortcutsKey(onOpen: () => void) {
 }
 
 export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcutsDialogProps) {
-  const { transport, capabilities } = useChat();
+  const { features } = useChat();
   const shown = shortcuts
-    .filter((group) => !group.terminal || transport === "pty")
+    .filter((group) => !group.terminal || features.agentTerminal)
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => !item.needs || (transport === "native" && capabilities?.[item.needs])),
+      items: group.items.filter((item) => !item.needs || features[item.needs]),
     }));
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

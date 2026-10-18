@@ -28,7 +28,7 @@ import TextareaAutosize from "react-textarea-autosize";
 import {useChat} from "./chat-provider";
 import {SessionSettings} from "./session-settings";
 import {useSlashCommandRunner} from "./slash-command-runner";
-import {completion, matchingCommands, parseSlashCommand} from "@/lib/slash-commands";
+import {completion, matchingCommands, parseSlashCommand, runsHere} from "@/lib/slash-commands";
 import {UsageMeter} from "./usage-meter";
 import {DragDrop} from "./drag-drop";
 import {ImageThumb, useObjectURL} from "./image-preview";
@@ -136,8 +136,7 @@ export default function MessageInput({
     updateQueuedMessage,
     deleteQueuedMessage,
     storageScope,
-    transport,
-    capabilities,
+    features,
     loginRequired,
     agentState,
     dispatch,
@@ -401,7 +400,7 @@ export default function MessageInput({
   const commandRunning = useRef(false);
   // The chat's own slash commands, offered while the command word is typed
   // (native agents, which have no terminal UI for them).
-  const slashSuggestions = transport === "native" ? matchingCommands(message) : [];
+  const slashSuggestions = features.slashCommands ? matchingCommands(message).filter((command) => runsHere(command, features)) : [];
   const completeSlashCommand = (text: string) => {
     setMessage(text);
     textareaRef.current?.focus();
@@ -409,7 +408,7 @@ export default function MessageInput({
 
   const submit = async (mode: DispatchMode = "queue") => {
     if (sendBlocked || (serverStatus !== "running" && serverStatus !== "stable")) return;
-    const command = transport === "native" ? parseSlashCommand(message) : null;
+    const command = features.slashCommands ? parseSlashCommand(message) : null;
     if (command && slashCommands.handles(command)) {
       if (commandRunning.current) return;
       commandRunning.current = true;
@@ -1022,12 +1021,12 @@ export default function MessageInput({
         </DragDrop>
 
         <p className="hidden text-center text-[11px] text-muted-foreground sm:block">
-          {transport === "pty"
+          {features.agentTerminal
             ? "Enter to send · Shift+Enter for a new line · Keys for the terminal itself: TTY mode"
             : [
                 "Enter to send",
-                transport === "native" && capabilities?.steer ? `${modKey}+Enter to steer while it works` : "",
-                transport === "native" && capabilities?.interrupt ? `${modKey}+Shift+Enter to interrupt & send` : "",
+                features.steer ? `${modKey}+Enter to steer while it works` : "",
+                features.interrupt ? `${modKey}+Shift+Enter to interrupt & send` : "",
                 "Shift+Enter for a new line",
               ].filter(Boolean).join(" · ")}
         </p>

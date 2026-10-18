@@ -32,6 +32,7 @@ import {
   type MCPProfiles,
   type UploadOptions,
 } from "@/lib/chat-api";
+import {features, type Features} from "@/lib/features";
 import {
   canStop,
   parseTransport,
@@ -241,6 +242,8 @@ interface ChatContextValue {
   transport: Transport;
   // Optional operations of a native agent; null for other transports.
   capabilities: Capabilities | null;
+  // What the chat offers for the transport and the agent (lib/features).
+  features: Features;
   // Number of requests the agent waits on (native transport), counted from
   // requests so that both always agree.
   pendingRequestCount: number;
@@ -425,6 +428,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     () => ({transport, capabilities: agentStarting ? null : capabilities, serverStatus, pendingRequestCount}),
     [agentStarting, capabilities, pendingRequestCount, serverStatus, transport],
   );
+  const chatFeatures = useMemo(() => features(transport, capabilities, terminalAvailable), [capabilities, terminalAvailable, transport]);
   // Errors the server replays on every connection that this page showed
   // already.
   const shownErrorsRef = useRef(new Set<string>());
@@ -1189,6 +1193,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         },
         transport,
         capabilities,
+        features: chatFeatures,
         pendingRequestCount,
         loginRequired,
         agentSettings,

@@ -4,6 +4,7 @@
 // own commands, e.g. Claude Code's /code-review, still work).
 
 import type {AgentType} from "@/components/chat-provider";
+import type {Features} from "./features";
 
 export type SlashCommandKind = "model" | "effort" | "mode" | "plan" | "compact" | "clear" | "terminal" | "login" | "help";
 
@@ -61,6 +62,26 @@ export function matchingCommands(text: string): SlashCommandInfo[] {
     .filter(({rank}) => rank >= 0)
     .sort((a, b) => a.rank - b.rank)
     .map(({command}) => command);
+}
+
+// Whether the chat can run command for an agent with features, which the
+// suggestions only offer then: the terminal and the login need the shell,
+// the settings' commands need the settings.
+export function runsHere(command: SlashCommandInfo, features: Pick<Features, "shell" | "settings">): boolean {
+  switch (command.kind) {
+    case "terminal":
+    case "login":
+      return features.shell;
+    case "model":
+    case "effort":
+    case "mode":
+    case "plan":
+      return features.settings;
+    case "compact":
+    case "clear":
+    case "help":
+      return true;
+  }
 }
 
 // What Tab puts in the composer for command: its name, and a space before

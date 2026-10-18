@@ -12,7 +12,7 @@ import {SLASH_COMMANDS, loginCommand, openSettings, openTerminal, pickChoice, ty
 // compacts with the message itself, so /compact goes to it); run runs it,
 // saying how it went in a toast.
 export function useSlashCommandRunner() {
-  const {capabilities, agentSettings, getSettings, updateSettings, compact, deleteMessages, terminalAvailable, loginRequired, agentType} = useChat();
+  const {capabilities, features, agentSettings, getSettings, updateSettings, compact, deleteMessages, loginRequired, agentType} = useChat();
 
   const handles = ({info}: SlashCommand) => info.kind !== "compact" || Boolean(capabilities?.compact);
 
@@ -29,7 +29,7 @@ export function useSlashCommandRunner() {
 
   // Whether the agent's settings can change; says so if not.
   const configurable = () => {
-    if (capabilities?.settings && agentSettings) return true;
+    if (features.settings && agentSettings) return true;
     toast.error("This agent's settings can't be changed");
     return false;
   };
@@ -107,7 +107,7 @@ export function useSlashCommandRunner() {
         return;
       case "terminal":
       case "login":
-        if (!terminalAvailable) {
+        if (!features.shell) {
           toast.error("There is no terminal", {description: "It needs the native transport, and --terminal."});
           return;
         }

@@ -77,7 +77,7 @@ function LimitRow({ limit, now }: { limit: RateLimit; now: number }) {
 // toolbar; its menu adds the account's rate limits (native agents that
 // report them).
 export function UsageMeter() {
-  const { transport, agentUsage } = useChat();
+  const { features, agentUsage } = useChat();
   // Reset times count down while the menu is open.
   const [now, setNow] = useState(() => Date.now());
   const [open, setOpen] = useState(false);
@@ -90,7 +90,7 @@ export function UsageMeter() {
 
   const context = agentUsage?.context;
   const limits = agentUsage?.rate_limits ?? [];
-  if (transport !== "native" || (!context && limits.length === 0)) return null;
+  if (!features.usage || (!context && limits.length === 0)) return null;
 
   const fullest = fullestLimit(limits);
   const percent = context ? contextPercent(context) : fullest?.used_percent ?? 0;

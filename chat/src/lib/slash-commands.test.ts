@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { loginCommand, matchingCommands, parseSlashCommand, pickChoice } from "./slash-commands";
+import { SLASH_COMMANDS, loginCommand, matchingCommands, parseSlashCommand, pickChoice, runsHere } from "./slash-commands";
 
 describe("slash commands", () => {
   test("parses the chat's commands", () => {
@@ -41,5 +41,24 @@ describe("slash commands", () => {
     expect(loginCommand("claude")).toBe("claude auth login");
     expect(loginCommand("codex")).toBe("codex login");
     expect(loginCommand("aider")).toBeUndefined();
+  });
+});
+
+describe("runsHere", () => {
+  const named = (name: string) => SLASH_COMMANDS.find((command) => command.name === name)!;
+  test("the terminal and login need the shell", () => {
+    expect(runsHere(named("terminal"), {shell: false, settings: true})).toBe(false);
+    expect(runsHere(named("login"), {shell: true, settings: false})).toBe(true);
+  });
+  test("the settings' commands need the settings", () => {
+    for (const name of ["model", "effort", "mode", "plan"]) {
+      expect(runsHere(named(name), {shell: true, settings: false})).toBe(false);
+      expect(runsHere(named(name), {shell: false, settings: true})).toBe(true);
+    }
+  });
+  test("the rest always run", () => {
+    for (const name of ["compact", "clear", "help"]) {
+      expect(runsHere(named(name), {shell: false, settings: false})).toBe(true);
+    }
   });
 });

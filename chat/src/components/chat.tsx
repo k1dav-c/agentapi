@@ -54,16 +54,15 @@ export function Chat() {
     nextReconnectAt,
     reconnectNow,
     workspaceUrl,
-    transport,
+    features,
     canStop,
     stop,
-    terminalAvailable,
   } = useChat();
   // Only the PTY transport has the agent's terminal: TTY mode, raw keys and
   // the terminal prompt card need it. A native agent has none; the server
   // offers a shell in its working directory instead.
-  const hasTerminal = transport === "pty";
-  const hasShell = transport === "native" && terminalAvailable;
+  const hasTerminal = features.agentTerminal;
+  const hasShell = features.shell;
   useEffect(() => {
     if (!hasTerminal && !hasShell) setTerminalOpen(false);
   }, [hasTerminal, hasShell]);
@@ -210,8 +209,8 @@ export function Chat() {
               <>
                 <StateStrip />
                 {hasTerminal && <DecisionCard onOpenTerminal={() => setTerminalOpen(true)} />}
-                {transport === "native" && <LoginCard onRunInTerminal={hasShell ? openShell : undefined} />}
-                {transport === "native" && <RequestCard />}
+                {features.requests && <LoginCard onRunInTerminal={hasShell ? openShell : undefined} />}
+                {features.requests && <RequestCard />}
               </>
             }
             onSendMessage={sendMessage}

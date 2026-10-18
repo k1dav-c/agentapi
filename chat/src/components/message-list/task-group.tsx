@@ -81,11 +81,11 @@ export function TaskGroup({
   // Only a terminal has a live screen to show at the end of a running task
   // and screen text to offer as "Terminal output"; the native transport
   // streams its transcript instead.
-  const { transport } = useChat();
-  const hasScreen = transport === "pty";
+  const { features } = useChat();
+  const hasScreen = features.agentTerminal;
   const activity = useMemo(() => {
     if (deferred) return [];
-    const raw = getTaskActivity(task, {live: live && transport === "pty", transcriptOnly: transport === "native"});
+    const raw = getTaskActivity(task, {live: live && hasScreen, transcriptOnly: features.structuredTranscript});
     // When rich activity provides real interleaving (text + tool entries),
     // tools are already positioned where they occurred in the conversation.
     // Only group consecutive tools in the fallback path (PTY-only), where
@@ -94,7 +94,7 @@ export function TaskGroup({
       task.richActivity.some(item => item.type === "message" || item.type === "thinking") &&
       task.richActivity.some(item => item.type === "tool");
     return hasRichInterleaving ? raw : groupConsecutiveTools(raw);
-  }, [task, deferred, live, transport]);
+  }, [task, deferred, live, hasScreen, features.structuredTranscript]);
   const structured = hasStructuredTranscript(task);
   // A long task shows its latest steps; earlier ones load on request.
   // Rendering hundreds of steps (Markdown, highlighted code) at once froze
