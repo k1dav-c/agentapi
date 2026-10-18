@@ -125,37 +125,9 @@ func removeCodexReportTaskToolCall(msg string) (string, []string) {
 	return strings.TrimRight(strings.Join(lines, "\n"), "\n"), toolCallMessages
 }
 
+// FormatToolCall removes the coder MCP server's report_task tool calls
+// from the agent's message, and returns them.
 func FormatToolCall(agentType AgentType, message string) (string, []string) {
-	switch agentType {
-	case AgentTypeClaude:
-		return removeClaudeReportTaskToolCall(message)
-	case AgentTypeGoose:
-		return message, []string{}
-	case AgentTypeAider:
-		return message, []string{}
-	case AgentTypeCodex:
-		return removeCodexReportTaskToolCall(message)
-	case AgentTypeGemini:
-		return message, []string{}
-	case AgentTypeCopilot:
-		return message, []string{}
-	case AgentTypeAmp:
-		return message, []string{}
-	case AgentTypeCursor:
-		return message, []string{}
-	case AgentTypeAuggie:
-		return message, []string{}
-	case AgentTypeAmazonQ:
-		return message, []string{}
-	case AgentTypeOpencode:
-		return message, []string{}
-	case AgentTypeKimi:
-		return message, []string{}
-	case AgentTypePi:
-		return message, []string{}
-	case AgentTypeCustom:
-		return message, []string{}
-	default:
-		return message, []string{}
-	}
+	p, _ := profileOf(agentType)
+	return p.reportTaskCalls(message)
 }

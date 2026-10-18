@@ -187,22 +187,9 @@ func RemoveUserInput(msgRaw string, userInputRaw string, agentType AgentType) st
 	// that doesn't contain the echoed user input.
 	lastUserInputLineIdx := msgRuneLineLocations[userInputEndIdx]
 
-	// Skip Gemini/Cursor trailing input box line
-	if agentType == AgentTypeGemini || agentType == AgentTypeCopilot {
-		if idx, found := skipTrailingInputBoxLine(msgLines, lastUserInputLineIdx, "╯", "╰"); found {
-			lastUserInputLineIdx = idx
-		}
-	} else if agentType == AgentTypeCursor {
-		if idx, found := skipTrailingInputBoxLine(msgLines, lastUserInputLineIdx, "┘", "└"); found {
-			lastUserInputLineIdx = idx
-		}
-	} else if agentType == AgentTypeOpencode {
-		// skip +2 lines after the input
-		//   ┃  jkmr (08:46 PM)                                                     ┃
-		//   ┃                                                                      ┃
-		if lastUserInputLineIdx+2 < len(msgLines) {
-			lastUserInputLineIdx += 2
-		}
+	// What the agent shows right after the echoed input belongs to it.
+	if afterInput := profiles[agentType].afterInput; afterInput != nil {
+		lastUserInputLineIdx = afterInput(msgLines, lastUserInputLineIdx)
 	}
 
 	return strings.Join(msgLines[lastUserInputLineIdx+1:], "\n")
@@ -254,7 +241,8 @@ func collapseBlankLines(message string, maxConsecutive int) string {
 
 type AgentType string
 
-// Remember to add the display name to the agentapi/chat/src/components/chat-provider.tsx
+// A new agent type needs a profile (profiles.go) and a display name in
+// chat/src/lib/agents.ts.
 const (
 	AgentTypeClaude   AgentType = "claude"
 	AgentTypeGoose    AgentType = "goose"
@@ -272,85 +260,20 @@ const (
 	AgentTypeCustom   AgentType = "custom"
 )
 
-func formatGenericMessage(message string, userInput string, agentType AgentType) string {
-	message = RemoveUserInput(message, userInput, agentType)
-	message = removeMessageBox(message)
-	message = trimEmptyLines(message)
-	return message
-}
-
-func formatClaudeMessage(message string, userInput string) string {
-	message = RemoveUserInput(message, userInput, AgentTypeClaude)
-	message = removeClaudeMessageBox(message)
-	message = trimEmptyLines(message)
-	return message
-}
-
-func formatCodexMessage(message string, userInput string) string {
-	message = RemoveUserInput(message, userInput, AgentTypeCodex)
-	message = removeCodexMessageBox(message)
-	message = trimEmptyLines(message)
-	return message
-}
-
-func formatOpencodeMessage(message string, userInput string) string {
-	message = RemoveUserInput(message, userInput, AgentTypeOpencode)
-	message = removeOpencodeMessageBox(message)
-	message = trimEmptyLines(message)
-	return message
-}
-
 // piMarkdownMarkers are the inline Markdown markers Pi drops when it renders
 // the user's message in the transcript.
 var piMarkdownMarkers = strings.NewReplacer("`", "", "**", "")
 
-func formatPiMessage(message string, userInput string) string {
-	message = RemoveUserInput(message, piMarkdownMarkers.Replace(userInput), AgentTypePi)
-	message = removePiMessageBox(message)
-	message = trimEmptyLines(message)
-	return message
-}
-
-func formatAmpMessage(message string, userInput string) string {
-	message = RemoveUserInput(message, userInput, AgentTypeAmp)
-	message = removeAmpMessageBox(message)
-	message = trimEmptyLines(message)
-	return message
-}
-
+// FormatAgentMessage turns the part of the screen with the agent's reply
+// into the reply: without the user's message the agent echoes, its input
+// box, the status lines it redraws while it works, and runs of blank
+// lines.
 func FormatAgentMessage(agentType AgentType, message string, userInput string) string {
-	var formatted string
-	switch agentType {
-	case AgentTypeClaude:
-		formatted = formatClaudeMessage(message, userInput)
-	case AgentTypeGoose:
-		formatted = formatGenericMessage(message, userInput, agentType)
-	case AgentTypeAider:
-		formatted = formatGenericMessage(message, userInput, agentType)
-	case AgentTypeCodex:
-		formatted = formatCodexMessage(message, userInput)
-	case AgentTypeGemini:
-		formatted = formatGenericMessage(message, userInput, agentType)
-	case AgentTypeCopilot:
-		formatted = formatGenericMessage(message, userInput, agentType)
-	case AgentTypeAmp:
-		formatted = formatAmpMessage(message, userInput)
-	case AgentTypeCursor:
-		formatted = formatGenericMessage(message, userInput, agentType)
-	case AgentTypeAuggie:
-		formatted = formatGenericMessage(message, userInput, agentType)
-	case AgentTypeAmazonQ:
-		formatted = formatGenericMessage(message, userInput, agentType)
-	case AgentTypeOpencode:
-		formatted = formatOpencodeMessage(message, userInput)
-	case AgentTypeKimi:
-		formatted = formatGenericMessage(message, userInput, agentType)
-	case AgentTypePi:
-		formatted = formatPiMessage(message, userInput)
-	case AgentTypeCustom:
-		formatted = formatGenericMessage(message, userInput, agentType)
-	default:
-		formatted = message
+	formatted := message
+	if p, known := profileOf(agentType); known {
+		formatted = RemoveUserInput(formatted, p.shownInput(userInput), agentType)
+		formatted = p.removeInputBox(formatted)
+		formatted = trimEmptyLines(formatted)
 	}
 	if stripped := removeAgentStatusLines(agentType, formatted); stripped != formatted {
 		formatted = trimEmptyLines(stripped)

@@ -65,10 +65,9 @@ Tests use `CGO_ENABLED=0`. The project uses `testify` (assert/require) and `code
 
 ### Adding a New Agent Type
 1. Add the `AgentType` constant in `lib/msgfmt/msgfmt.go`
-2. Add formatting logic in `lib/msgfmt/` (message box removal, user input stripping)
-3. Add readiness detection in `lib/msgfmt/agent_readiness.go`
-4. Add alias mapping in `cmd/server/server.go` (`agentTypeAliases`)
-5. Add display name in `chat/src/components/chat-provider.tsx`
+2. Add its profile in `lib/msgfmt/profiles.go`: how to remove its input box, what it shows around the echoed message, when it is ready, its status lines (a field left zero takes the generic behavior)
+3. Add alias mapping in `cmd/server/server.go` (`agentTypeAliases`)
+4. Add display name in `chat/src/lib/agents.ts`
 
 ### Exhaustive Switch/Map Enforcement
 The `exhaustive` golangci-lint checker is enabled for both switches and maps. When adding a new `AgentType` or enum value, all switch statements and map literals over that type must be updated or the linter will fail.
