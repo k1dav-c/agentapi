@@ -153,19 +153,11 @@ type Adapter struct {
 
 	mu      sync.Mutex
 	started bool
-	// busy: a turn was sent or the agent is working on one, until the
-	// agent is idle again.
-	busy bool
-	// turnReported: TurnStarted was sent for the current turn.
-	turnReported bool
+	// turn is the current turn, if any.
+	turn turnState
 	// sessionStates: the CLI reports session_state_changed, so "idle" ends
 	// a turn (otherwise every result does).
 	sessionStates bool
-	// result is the latest result of the current turn.
-	result      *native.TurnResult
-	interrupted bool
-	// authFailed: the CLI reported a login failure in the current turn.
-	authFailed bool
 	// prompt is the text of the turn sent last, until the CLI starts a
 	// turn: a new session is titled after it.
 	prompt     string
@@ -201,6 +193,31 @@ var (
 	// its output ended.
 	errExited = errors.New("claude exited")
 )
+
+// turnPhase is where the current turn is.
+type turnPhase int
+
+const (
+	// turnIdle: there is no turn.
+	turnIdle turnPhase = iota
+	// turnSent: a turn was sent, which the CLI hasn't started on yet.
+	turnSent
+	// turnRunning: the CLI works on a turn, reported with TurnStarted.
+	// It can start one by itself (after a background task finished).
+	turnRunning
+)
+
+// turnState is what the adapter knows of the current turn. endTurn
+// clears it.
+type turnState struct {
+	phase turnPhase
+	// interrupted: the user interrupted it.
+	interrupted bool
+	// authFailed: the CLI reported a login failure in it.
+	authFailed bool
+	// result is its latest result.
+	result *native.TurnResult
+}
 
 type controlResult struct {
 	response json.RawMessage
@@ -396,17 +413,17 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 		a.mu.Unlock()
 		return native.ErrNotStarted
 	}
-	if a.busy {
+	if a.turn.phase != turnIdle {
 		a.mu.Unlock()
 		return native.ErrTurnActive
 	}
-	a.busy = true
-	a.interrupted = false
+	a.turn.phase = turnSent
+	a.turn.interrupted = false
 	a.prompt = input.Text
 	a.mu.Unlock()
 	if err := a.write(msg); err != nil {
 		a.mu.Lock()
-		a.busy = false
+		a.turn.phase = turnIdle
 		a.prompt = ""
 		a.mu.Unlock()
 		return err
@@ -441,7 +458,7 @@ func (a *Adapter) Steer(ctx context.Context, input native.Input) error {
 		return err
 	}
 	a.mu.Lock()
-	busy := a.busy
+	busy := a.turn.phase != turnIdle
 	a.mu.Unlock()
 	if !busy {
 		return native.ErrNoActiveTurn
@@ -454,9 +471,9 @@ func (a *Adapter) Steer(ctx context.Context, input native.Input) error {
 // Config.InterruptTimeout.
 func (a *Adapter) Interrupt(ctx context.Context) error {
 	a.mu.Lock()
-	busy := a.busy
+	busy := a.turn.phase != turnIdle
 	if busy {
-		a.interrupted = true
+		a.turn.interrupted = true
 	}
 	a.mu.Unlock()
 	if !busy {
@@ -466,7 +483,7 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 	if err != nil {
 		// Not interrupted: the turn ends as it ends, its error included.
 		a.mu.Lock()
-		a.interrupted = false
+		a.turn.interrupted = false
 		a.mu.Unlock()
 	}
 	return err
@@ -477,7 +494,7 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 func (a *Adapter) interruptAccepted(json.RawMessage) {
 	a.mu.Lock()
 	// The turn may have ended before the answer came.
-	interrupted := a.interrupted
+	interrupted := a.turn.interrupted
 	a.mu.Unlock()
 	if interrupted && a.interruptAt.IsZero() {
 		a.interruptAt = a.cfg.Clock.Now()
@@ -667,7 +684,7 @@ func (a *Adapter) handleLine(line []byte) {
 		a.turnActivity()
 		if stringField(f.Error) == "authentication_failed" {
 			a.mu.Lock()
-			a.authFailed = true
+			a.turn.authFailed = true
 			a.mu.Unlock()
 		}
 		msgs, events := a.parser.assistant(&f)
@@ -815,9 +832,8 @@ func (a *Adapter) handleSystem(f *frame) {
 // finished).
 func (a *Adapter) turnActivity() {
 	a.mu.Lock()
-	start := !a.turnReported
-	a.turnReported = true
-	a.busy = true
+	start := a.turn.phase != turnRunning
+	a.turn.phase = turnRunning
 	a.mu.Unlock()
 	if start {
 		a.sink.TurnStarted()
@@ -827,14 +843,14 @@ func (a *Adapter) turnActivity() {
 func (a *Adapter) handleResult(f *frame) {
 	a.sendRich(a.parser.endTurn())
 	a.mu.Lock()
-	result := turnResult(f, a.interrupted)
-	inTurn := a.busy || a.turnReported
+	result := turnResult(f, a.turn.interrupted)
+	inTurn := a.turn.phase != turnIdle
 	started := a.started
 	byResult := !a.sessionStates
-	authFailed := a.authFailed
+	authFailed := a.turn.authFailed
 	var replaced *native.TurnResult
 	if inTurn {
-		replaced, a.result = a.result, &result
+		replaced, a.turn.result = a.turn.result, &result
 	}
 	a.mu.Unlock()
 	if result.Error != "" && (authFailed || authFailure(f)) {
@@ -907,19 +923,15 @@ func turnResult(f *frame, interrupted bool) native.TurnResult {
 func (a *Adapter) endTurn() {
 	a.interruptAt = time.Time{}
 	a.mu.Lock()
-	active := a.busy || a.turnReported
+	active := a.turn.phase != turnIdle
 	result := native.TurnResult{StopReason: native.StopReasonEndTurn}
-	if a.interrupted {
+	if a.turn.interrupted {
 		result.StopReason = native.StopReasonInterrupted
 	}
-	if a.result != nil {
-		result = *a.result
+	if a.turn.result != nil {
+		result = *a.turn.result
 	}
-	a.busy = false
-	a.turnReported = false
-	a.result = nil
-	a.interrupted = false
-	a.authFailed = false
+	a.turn = turnState{}
 	// The CLI withdraws its requests when a turn ends.
 	a.requests = make(map[string]*pendingRequest)
 	a.mu.Unlock()

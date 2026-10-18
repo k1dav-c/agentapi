@@ -407,7 +407,7 @@ func (r *replay) run(recs []record, hooks replayHooks) {
 				r.proc.barrier(t)
 				input := inputFromCapture(t, msg)
 				r.a.mu.Lock()
-				busy := r.a.busy
+				busy := r.a.turn.phase != turnIdle
 				r.a.mu.Unlock()
 				if hooks.steer != nil && hooks.steer(users, busy) {
 					require.NoError(t, r.a.Steer(ctx, input))
