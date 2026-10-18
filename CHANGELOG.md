@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.25.0
+
 ### Features
 
 - **Breaking:** Claude Code, Codex and Pi use the native transport by default: without
