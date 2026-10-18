@@ -12,11 +12,12 @@ Use AgentAPI to control [Claude Code](https://github.com/anthropics/claude-code)
 [Auggie](https://docs.augmentcode.com/cli/overview), and [Cursor CLI](https://cursor.com/en/cli)
 with an HTTP API.
 
-![AgentAPI native chat with a task, tool output, thinking, and session controls](docs/screenshots/chat-desktop.png)
+![The AgentAPI chat with two tasks: prompts, tool calls, thinking notes and the composer](docs/screenshots/chat-desktop.png)
 
-Screenshots show the production chat UI built with `make build` and the built-in `native-demo` agent. Its replies, tool
-results, models, and usage are simulated. See the [screenshot guide](docs/screenshots/README.md) for
-the gallery and capture instructions.
+The screenshots show AgentAPI v0.24.0 with the built-in `native-demo` agent, whose replies, tool
+results, models and usage are simulated. The [chat UI guide](docs/chat-ui.md) goes through every
+feature of the chat with screenshots, and the [screenshot guide](docs/screenshots/README.md) explains
+how they are taken.
 
 Use AgentAPI to:
 
@@ -243,7 +244,8 @@ offers a shell in the agent's working directory; see [Terminal](#terminal). `--s
 The chat UI at `/chat` is embedded in the binary and works with every transport, on a desktop and on
 a phone. It has layouts for phones, searchable tool activity, connection-state indicators and
 compact tool-call cards, and its header shows the agent's mark (Claude's orange square, Pi's logo)
-and the AgentAPI version.
+and the AgentAPI version. The [chat UI guide](docs/chat-ui.md) shows every part of it with
+screenshots.
 
 ### Tasks and the transcript
 
@@ -272,6 +274,8 @@ The Session Explorer provides:
 - MCP server configuration without leaving the chat UI;
 - a Session tab with a two-step restart confirmation (open the Explorer with ⌘K / Ctrl+K).
 
+![The Session Explorer's Index tab listing the session's tasks](docs/screenshots/explorer-index.png)
+
 Each task's ⋯ menu previews, copies or exports the task as Markdown.
 
 ### Attachments and images
@@ -288,11 +292,11 @@ the PTY transport (see [Interactive prompt support](#interactive-prompt-support)
 [login card](#logging-in) while it waits for a login. Number keys pick options. On a phone a card
 takes at most 60% of the screen, and a title cut to two lines can be shown in full.
 
-![A native question card with multiple steps and selectable answers](docs/screenshots/native-question.png)
+![A question card on the first of its three steps, above the composer](docs/screenshots/native-question.png)
 
-Native questions appear above the composer. In this demo, select the package manager, continue to
-the checks and notes, then submit the answers together. The header and tool row show that the agent
-is waiting for you.
+The agent's questions come one step at a time (here the package manager, then the checks and notes)
+and are sent together. The header, the status line and the tool row show that the agent is waiting
+for you.
 
 ### File viewer
 
@@ -321,19 +325,22 @@ HTML, Markdown and SVG files have a third tab, Preview, and an image file shows 
 - PNG, JPEG, GIF, WebP, BMP, ICO and SVG images show as images
   (`GET /files/image`).
 
-![The file viewer showing README source with File, Preview, and Diff tabs](docs/screenshots/file-viewer.png)
+![The file viewer previewing index.html: the page rendered with its stylesheet and logo](docs/screenshots/file-preview.png)
 
-Click a file path in the conversation to open the viewer. **File** shows source with line numbers;
-**Preview** renders supported formats, and **Diff** shows changes. This capture shows the README
-source in the working directory.
+![The Diff tab with the uncommitted changes to README.md](docs/screenshots/file-diff.png)
+
+The [chat UI guide](docs/chat-ui.md#files) also shows the File tab and a Markdown preview.
 
 ### TTY mode
 
-TTY mode is an escape hatch for when the chat view looks wrong: the terminal button in the header
-swaps the conversation for the agent's terminal screen (xterm.js) and sends every key straight to
-the agent, including arrows, Ctrl/Alt keys, pastes and IME input. A key bar provides Esc, Tab,
-arrows, Enter and Ctrl keys on phones. The font grows with the window (11–20px); the mirror uses the
-agent's real terminal width, so start AgentAPI with `--term-width 120` if you want longer lines.
+With the PTY transport, TTY mode is an escape hatch for when the chat view looks wrong: the terminal
+button in the header swaps the conversation for the agent's terminal screen (xterm.js) and sends
+every key straight to the agent, including arrows, Ctrl/Alt keys, pastes and IME input. A key bar
+provides Esc, Tab, arrows, Enter and Ctrl keys on phones. The font grows with the window (11–20px);
+the mirror uses the agent's real terminal width, so start AgentAPI with `--term-width 120` if you
+want longer lines.
+
+![TTY mode on bash run as a PTY agent, with the column ruler and the key bar](docs/screenshots/tty-mode.png)
 
 ### With the native transport
 
@@ -351,6 +358,8 @@ mode, which needs the agent's own terminal (the screen views stay hidden, also f
 While the tab is in the background, its icon shows an amber dot when the agent needs you, a blue dot
 while it works, and a green dot when a task finishes. Browser notifications can be turned on from
 the status menu.
+
+![The session details menu opened from the status in the header](docs/screenshots/session-details.png)
 
 Long-running browser sessions are protected by SSE heartbeats, automatic reconnection,
 stale-connection detection, and local recovery of messages that failed before reaching the server.
@@ -450,6 +459,8 @@ AgentAPI. You can use the chat's [terminal](#terminal), any terminal on the same
 session. The login card's **Run in terminal** button and the `/login` command both run the login
 command in the chat terminal.
 
+![A login card: the command to run, where to run it, Run in terminal and Check again](docs/screenshots/login-card.png)
+
 - Claude Code: `claude auth login` uses a Claude subscription by default;
   `--console` selects Anthropic Console API billing. On a machine without a
   browser, `claude setup-token` creates a token for `CLAUDE_CODE_OAUTH_TOKEN`.
@@ -544,7 +555,12 @@ icon shows an amber dot, the embed status bar's icon turns amber, and a
 background tab with notifications turned on shows a notification that the agent
 needs you.
 
-![A native plan card with a Markdown plan, approval options, and a feedback field](docs/screenshots/native-plan.png)
+![An approval card for a command: Allow, Always allow Bash in this session, and Deny with a note](docs/screenshots/native-approval.png)
+
+An approval shows what would run and why. **Allow** runs it once, **Always allow** stops asking for
+the rest of the session, and **Deny** refuses it, with an optional note on what to do instead.
+
+![A plan card with the plan in Markdown, Approve the plan, Keep planning and a feedback field](docs/screenshots/native-plan.png)
 
 Plans stay above the composer while the agent waits. Read the plan, approve it, or enter feedback
 and select **Keep planning** to ask for changes. The plan shown here is generated by `native-demo`;
@@ -583,6 +599,8 @@ In the chat, while the agent works, the send button's menu adds **Steer** (⌘/C
 (`POST /interrupt`). Queued tasks can be steered in right away, and moved up and down on every
 transport.
 
+![A long turn with two queued tasks and the send menu open: Queue, Steer, and Interrupt & send](docs/screenshots/queue-steer.png)
+
 ### Settings: permission mode, model and effort
 
 You can change the agent's permission mode, model, and reasoning effort while it runs.
@@ -614,11 +632,13 @@ the agent changes by itself, such as the mode an approved plan switches to, is f
 In the chat, the composer's toolbar has a menu for the mode and one for the model and effort (on a
 phone in a row of their own above the buttons).
 
-![The native session model menu with model choices and reasoning effort levels](docs/screenshots/model-settings.png)
+![The permission mode menu: Bypass, Auto, Ask and Plan](docs/screenshots/permission-mode.png)
 
-Open the model control in the composer's toolbar to choose a model and reasoning effort. The
-adjacent permission control changes how the agent handles approvals. Swift, Deep, and Plain are
-demonstration models supplied by `native-demo`.
+![The model menu with three models and the reasoning efforts of the chosen one](docs/screenshots/model-settings.png)
+
+The permission control in the composer's toolbar changes how the agent handles approvals, and the
+model control chooses a model and its reasoning effort. Swift, Deep, and Plain are demonstration
+models supplied by `native-demo`.
 
 ### Context and rate limits
 
@@ -629,6 +649,8 @@ limit). Claude Code reports its 5-hour and weekly limits and its context after e
 context and its usage windows, and Pi its context. A new session starts with an empty context; the
 rate limits, which are the account's, stay. In the chat, a ring in the composer's toolbar shows how
 full the context is, and its menu the limits with the time to each reset.
+
+![The context popover: the tokens in the context window, and the 5-hour and weekly usage limits](docs/screenshots/context-usage.png)
 
 ### Terminal
 
@@ -647,6 +669,8 @@ environment is the agent's, without AgentAPI's own variables.
 - It is on by default with the native transport; `--terminal=false` turns it
   off. It is as protected as the rest of the API, so use `--api-token` when
   the server is reachable by others.
+
+![The shell terminal: git status and git log in the agent's working directory, and the key bar](docs/screenshots/terminal.png)
 
 ### Slash commands and compaction
 
@@ -669,6 +693,8 @@ on a turn: Codex (`thread/compact/start`) in a turn of its own, Pi (its `compact
 answers. Messages sent meanwhile wait in the queue, and the agent's refusal (Pi's "Nothing to
 compact") is a 409 with its reason. Claude Code compacts with the `/compact` message, which the chat
 sends it.
+
+![The slash commands listed after typing a slash in the composer](docs/screenshots/slash-commands.png)
 
 ### Persistent sessions
 

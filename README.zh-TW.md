@@ -4,10 +4,11 @@
 
 AgentAPI 提供統一的 HTTP API，讓你控制 [Claude Code](https://github.com/anthropics/claude-code)、[AmazonQ](https://aws.amazon.com/developer/learning/q-developer-cli/)、[Opencode](https://opencode.ai/)、[Goose](https://github.com/block/goose)、[Aider](https://github.com/Aider-AI/aider)、[Gemini](https://github.com/google-gemini/gemini-cli)、[GitHub Copilot](https://github.com/github/copilot-cli)、[Sourcegraph Amp](https://ampcode.com/)、[Codex](https://github.com/openai/codex)、[Kimi Code](https://www.kimi.com/zh-tw/help/kimi-code/cli-getting-started)、[Pi](https://pi.dev/)、[Auggie](https://docs.augmentcode.com/cli/overview) 和 [Cursor CLI](https://cursor.com/en/cli)。
 
-![AgentAPI 的 native 聊天介面，顯示任務、工具輸出、思考內容與工作階段控制](docs/screenshots/chat-desktop.png)
+![AgentAPI 聊天介面中的兩個任務：提示詞、工具呼叫、思考旁註和輸入框](docs/screenshots/chat-desktop.png)
 
-截圖使用 `make build` 建置出的聊天介面與內建 `native-demo` agent；回覆、工具結果、模型和用量均為模擬資料。
-完整圖集與重新擷取方式請參閱[截圖說明](docs/screenshots/README.md)。
+截圖是 AgentAPI v0.24.0 搭配內建 `native-demo` agent 的畫面，它的回覆、工具結果、模型和用量
+都是模擬的。[聊天介面導覽](docs/chat-ui.zh-TW.md)以截圖逐一介紹聊天介面的每項功能，
+[截圖說明](docs/screenshots/README.md)則說明這些截圖是怎麼擷取的。
 
 AgentAPI 可以用來：
 
@@ -213,7 +214,8 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 
 `/chat` 的聊天介面內建在執行檔裡，所有 transport 都能使用，桌面和手機都可以。它有適合手機的
 版面、可搜尋的工具活動、連線狀態指示和精簡的工具呼叫卡片，標頭會顯示 agent 的標誌（Claude
-的橘色方塊、Pi 的 logo）和 AgentAPI 版本。
+的橘色方塊、Pi 的 logo）和 AgentAPI 版本。[聊天介面導覽](docs/chat-ui.zh-TW.md)以截圖呈現
+它的每個部分。
 
 ### 任務與對話紀錄
 
@@ -239,6 +241,8 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 - 不必離開聊天介面就能設定 MCP 伺服器；
 - 提供兩步驟重新啟動（Restart）的 Session 分頁（用 ⌘K / Ctrl+K 開啟 Explorer）。
 
+![工作階段瀏覽器的 Index 分頁，列出這個工作階段的任務](docs/screenshots/explorer-index.png)
+
 每個任務的 ⋯ 選單可以把該任務預覽、複製或匯出成 Markdown。
 
 ### 附件與圖片
@@ -253,10 +257,10 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 等待登入時則是[登入卡片](#登入)。數字鍵可以選擇選項。在手機上卡片最多佔螢幕的 60%，被截成
 兩行的標題可以展開來看完整內容。
 
-![Native 模式的提問卡片，包含分步問題與可選擇的答案](docs/screenshots/native-question.png)
+![輸入框上方的提問卡片，停在三個步驟中的第一步](docs/screenshots/native-question.png)
 
-Native 模式的提問會顯示在輸入框上方。圖中先選擇套件管理工具，再依序填寫檢查項目與備註，
-最後一起送出答案；標頭與工具呼叫列也會標示 agent 正在等待你回應。
+agent 的提問一次一個步驟（圖中先是套件管理工具，接著是檢查項目和備註），最後一起送出。
+標頭、狀態列和工具呼叫列都會標示 agent 正在等待你回應。
 
 ### 檔案檢視器
 
@@ -280,18 +284,21 @@ HTML、Markdown 和 SVG 檔案還有第三個分頁 Preview，圖片檔則直接
   （`#L12` 會開在那一行）。
 - PNG、JPEG、GIF、WebP、BMP、ICO 和 SVG 圖片會以圖片顯示（`GET /files/image`）。
 
-![檔案檢視器顯示 README 原始內容，並提供 File、Preview 與 Diff 分頁](docs/screenshots/file-viewer.png)
+![檔案檢視器預覽 index.html：套用樣式表並顯示 logo 的頁面](docs/screenshots/file-preview.png)
 
-點選對話中的檔案路徑即可開啟檢視器。**File** 顯示含行號的原始內容，**Preview** 預覽支援的
-格式，**Diff** 顯示變更。圖中開啟的是工作目錄裡的 README 原始檔。
+![Diff 分頁顯示 README.md 尚未 commit 的變更](docs/screenshots/file-diff.png)
+
+[聊天介面導覽](docs/chat-ui.zh-TW.md#檔案)也展示了 File 分頁和 Markdown 預覽。
 
 ### TTY mode
 
-TTY mode（TTY 模式）是聊天畫面顯示不正常時的備用方案：按下標頭的終端機按鈕，
-就會把對話換成 agent 的終端機畫面（xterm.js），並把每個按鍵直接送給 agent，包含方向鍵、
-Ctrl/Alt 組合鍵、貼上的內容和輸入法輸入。在手機上會有一排按鍵列，提供 Esc、Tab、方向鍵、
-Enter 和 Ctrl 鍵。字型大小會隨視窗縮放（11–20px）；鏡像畫面使用的是 agent 實際的終端機
-寬度，所以如果想要每行更長，請用 `--term-width 120` 啟動 AgentAPI。
+使用 PTY transport 時，TTY mode（TTY 模式）是聊天畫面顯示不正常時的備用方案：按下標頭的
+終端機按鈕，就會把對話換成 agent 的終端機畫面（xterm.js），並把每個按鍵直接送給 agent，
+包含方向鍵、Ctrl/Alt 組合鍵、貼上的內容和輸入法輸入。在手機上會有一排按鍵列，提供 Esc、
+Tab、方向鍵、Enter 和 Ctrl 鍵。字型大小會隨視窗縮放（11–20px）；鏡像畫面使用的是 agent
+實際的終端機寬度，所以如果想要每行更長，請用 `--term-width 120` 啟動 AgentAPI。
+
+![TTY mode 中以 PTY agent 執行的 bash，附有欄數尺規和按鍵列](docs/screenshots/tty-mode.png)
 
 ### 使用 native transport 時
 
@@ -305,6 +312,8 @@ Enter 和 Ctrl 鍵。字型大小會隨視窗縮放（11–20px）；鏡像畫�
 ### 提醒、連線復原與快取
 
 分頁在背景時，圖示會以圓點顯示狀態：琥珀色表示 agent 需要你回應，藍色表示工作中，綠色表示任務完成。瀏覽器通知可以從狀態選單開啟。
+
+![從標頭的狀態開啟的工作階段詳細資訊選單](docs/screenshots/session-details.png)
 
 為了維持長時間連線，聊天介面提供 SSE 心跳（heartbeat）、自動重新連線和失效連線偵測，
 並能在本機復原傳送失敗、尚未送達伺服器的訊息。網頁標題和工作階段標頭會顯示目前的任務、
@@ -387,6 +396,8 @@ Native 模式使用 agent CLI 儲存的登入資訊。請以執行 AgentAPI 的�
 可以使用聊天介面的[終端機](#終端機)、同一台機器上的其他終端機，或 PTY 工作階段。
 登入卡片的 **Run in terminal** 按鈕與 `/login` 指令，都會在聊天介面的終端機執行登入指令。
 
+![登入卡片：要執行的指令、在哪裡執行、Run in terminal 和 Check again](docs/screenshots/login-card.png)
+
 - Claude Code：`claude auth login` 預設使用 Claude 訂閱；加上 `--console` 則使用
   Anthropic Console 的 API 計費。在沒有瀏覽器的機器上，可用 `claude setup-token` 建立
   `CLAUDE_CODE_OAUTH_TOKEN` 所需的 token。用 `claude auth status` 檢查登入狀態。
@@ -457,7 +468,12 @@ Pi 的 `No API key found`，以及訂閱登入過期後的 `Authentication faile
 有待處理請求時，標頭和分頁標題會顯示「Needs you」，分頁圖示會出現琥珀色圓點，embed 狀態列
 的圖示也會變成琥珀色；開啟通知時，背景分頁也會跳出 agent 需要你回應的通知。
 
-![Native 計畫卡片，顯示 Markdown 計畫、核准選項與回饋欄](docs/screenshots/native-plan.png)
+![指令的核准卡片：Allow、Always allow Bash in this session，以及可附註的 Deny](docs/screenshots/native-approval.png)
+
+核准卡片會顯示將要執行什麼，以及原因。**Allow** 只執行這一次，**Always allow** 在這個
+工作階段剩下的時間裡不再詢問，**Deny** 則拒絕它，並可附註要改做什麼。
+
+![計畫卡片，包含以 Markdown 顯示的計畫、Approve the plan、Keep planning 和回饋欄](docs/screenshots/native-plan.png)
 
 等待核准的計畫會固定在輸入框上方。閱讀後可以核准，或填寫回饋並選擇 **Keep planning**，
 請 agent 調整計畫。圖中是 `native-demo` 的模擬計畫，核准後不會實際修改檔案。
@@ -490,6 +506,8 @@ Pi 的 `No API key found`，以及訂閱登入過期後的 `Authentication faile
 （`POST /interrupt`）。佇列中的任務可以立即 steer 進去，也可以上下移動（所有 transport
 都可以）。
 
+![較長的回合中有兩個排隊中的任務，送出選單已開啟：Queue、Steer 和 Interrupt & send](docs/screenshots/queue-steer.png)
+
 ### 工作階段設定
 
 agent 執行期間，可以切換權限模式、模型和推理強度。`GET /settings` 回傳目前的設定與
@@ -519,10 +537,12 @@ app-server 只在那時接受設定。選擇的設定會再套用到取代目前
 在聊天介面中，輸入框的工具列有一個模式選單，以及一個模型與推理強度的選單（手機上會放在按鈕
 上方的獨立一列）。
 
-![Native 工作階段的模型選單，包含模型選項與推理強度](docs/screenshots/model-settings.png)
+![權限模式選單：Bypass、Auto、Ask 和 Plan](docs/screenshots/permission-mode.png)
 
-點選輸入框工具列的模型控制項，可選擇模型與推理強度；旁邊的權限控制項則用來調整核准模式。
-圖中的 Swift、Deep 和 Plain 都是 `native-demo` 提供的示範模型。
+![模型選單，列出三個模型和所選模型的推理強度](docs/screenshots/model-settings.png)
+
+輸入框工具列的權限控制項用來調整 agent 處理核准的方式，模型控制項則用來選擇模型和它的
+推理強度。圖中的 Swift、Deep 和 Plain 都是 `native-demo` 提供的示範模型。
 
 ### Context 與用量限制
 
@@ -531,6 +551,8 @@ app-server 只在那時接受設定。選擇的設定會再套用到取代目前
 Claude Code 會在每個回合之後回報它的 5 小時與每週限制和 context，Codex 回報它的 context
 和用量窗口，Pi 回報它的 context。新工作階段的 context 會歸零；帳號的用量限制則維持原狀。
 在聊天介面中，輸入框工具列上的圓環顯示 context 用了多少，它的選單則列出各項限制和重置倒數。
+
+![context 彈出視窗：context window 中的 token 數，以及 5 小時與每週的用量限制](docs/screenshots/context-usage.png)
 
 ### 終端機
 
@@ -546,6 +568,8 @@ Native agent 沒有自己的終端機，所以 AgentAPI 會在 agent 的工作�
   （`{"cols": 120, "rows": 40}`）調整大小。
 - 使用 native transport 時預設開啟，`--terminal=false` 可以關閉。它和 API 的其他部分受到相同
   的保護，所以伺服器可以被別人連到時，請使用 `--api-token`。
+
+![shell 終端機：在 agent 工作目錄中執行的 git status 和 git log，以及按鍵列](docs/screenshots/terminal.png)
 
 ### 斜線指令與壓縮
 
@@ -564,6 +588,8 @@ agent 自己的指令（Claude Code 的 `/code-review`、Pi 擴充功能的指�
 會用一個獨立回合進行壓縮，Pi（它的 `compact` 指令）會在完成後才回覆。壓縮期間送出的訊息會在
 佇列中等待；agent 拒絕壓縮時（例如 Pi 的「Nothing to compact」）會回傳 409 並附上原因。
 Claude Code 則用 `/compact` 訊息壓縮，聊天介面會把這則訊息送給它。
+
+![在輸入框輸入斜線後列出的斜線指令](docs/screenshots/slash-commands.png)
 
 ### 持久保存的工作階段
 
