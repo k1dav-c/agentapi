@@ -22,8 +22,8 @@ import (
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // The fixtures in testdata are captures of `pi --mode rpc` (Pi 1.0.2):
@@ -201,184 +201,13 @@ func (f *fakePi) nextCmd() map[string]any {
 	}
 }
 
-// recSink records what the adapter reports and fails on concurrent calls,
-// which the Sink contract forbids.
-type recSink struct {
-	t      *testing.T
-	active atomic.Int32
-
-	mu       sync.Mutex
-	log      []string
-	results  []native.TurnResult
-	rich     []jsonlwatcher.RichMessage
-	events   []jsonlwatcher.SessionEvent
-	requests []native.Request
-	closed   []string
-	names    []string
-	refs     []string
-	errors   []string
-	started  int
-	logins   []native.LoginRequired
-	settings []native.Settings
-	usage    []native.AgentUsage
-}
-
-func newRecSink(t *testing.T) *recSink { return &recSink{t: t} }
-
-// enter checks that no other sink call is under way.
-func (s *recSink) enter() func() {
-	if s.active.Add(1) != 1 {
-		s.t.Error("sink called concurrently")
-	}
-	return func() { s.active.Add(-1) }
-}
-
-func (s *recSink) add(entry string) { s.log = append(s.log, entry) }
-
-func (s *recSink) TurnStarted() {
-	defer s.enter()()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.started++
-	s.add("turn_started")
-}
-
-func (s *recSink) TurnCompleted(r native.TurnResult) {
-	defer s.enter()()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.results = append(s.results, r)
-	s.add("turn_completed")
-}
-
-func (s *recSink) RichMessage(m jsonlwatcher.RichMessage) {
-	defer s.enter()()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.rich = append(s.rich, m)
-}
-
-func (s *recSink) SessionEvents(e []jsonlwatcher.SessionEvent) {
-	defer s.enter()()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.events = append(s.events, e...)
-}
-
-func (s *recSink) RequestOpened(r native.Request) {
-	defer s.enter()()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.requests = append(s.requests, r)
-	s.add("request_opened:" + r.ID)
-}
-
-func (s *recSink) RequestClosed(id string) {
-	defer s.enter()()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.closed = append(s.closed, id)
-	s.add("request_closed:" + id)
-}
-
-func (s *recSink) SessionName(n string) {
-	defer s.enter()()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.names = append(s.names, n)
-}
-
-func (s *recSink) SessionRef(r string) {
-	defer s.enter()()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.refs = append(s.refs, r)
-}
-
-func (s *recSink) LoginRequired(l native.LoginRequired) {
-	defer s.enter()()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.logins = append(s.logins, l)
-	s.add("login_required")
-}
-
-func (s *recSink) UsageChanged(usage native.AgentUsage) {
-	defer s.enter()()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.usage = append(s.usage, usage)
-}
-
-func (s *recSink) SettingsChanged(settings native.Settings) {
-	defer s.enter()()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.settings = append(s.settings, settings)
-}
-
-func (s *recSink) Error(m string, _ st.ErrorLevel) {
-	defer s.enter()()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.errors = append(s.errors, m)
-}
-
-// final returns the last state of each rich message, in order of first
-// appearance.
-func (s *recSink) final() []jsonlwatcher.RichMessage {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []jsonlwatcher.RichMessage
-	idx := map[string]int{}
-	for _, m := range s.rich {
-		key := m.Role + "\x00" + m.MessageID
-		if i, ok := idx[key]; ok {
-			out[i] = m
-			continue
-		}
-		idx[key] = len(out)
-		out = append(out, m)
-	}
-	return out
-}
-
-func (s *recSink) snapshots(id string) []jsonlwatcher.RichMessage {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []jsonlwatcher.RichMessage
-	for _, m := range s.rich {
-		if m.MessageID == id {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
-func (s *recSink) request(id string) (native.Request, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, r := range s.requests {
-		if r.ID == id {
-			return r, true
-		}
-	}
-	return native.Request{}, false
-}
-
-func (s *recSink) turnResults() []native.TurnResult {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]native.TurnResult(nil), s.results...)
-}
-
 // harness replays a fixture against the adapter.
 type harness struct {
 	t     *testing.T
 	ctx   context.Context
 	pi    *fakePi
 	a     *Adapter
-	sink  *recSink
+	sink  *nativetest.Sink
 	clock *quartz.Mock
 
 	written atomic.Int64
@@ -400,7 +229,7 @@ type harness struct {
 func newHarness(t *testing.T, cfg Config, resumeRef string, opts ...func(*harness)) *harness {
 	t.Helper()
 	h := &harness{
-		t: t, ctx: context.Background(), pi: newFakePi(t), sink: newRecSink(t), clock: quartz.NewMock(t),
+		t: t, ctx: context.Background(), pi: newFakePi(t), sink: nativetest.NewSink(t), clock: quartz.NewMock(t),
 		startErr: make(chan error, 1),
 		drive:    map[string]func(map[string]any) bool{},
 		calls:    map[string]chan error{},
@@ -679,7 +508,7 @@ func (h *harness) respond(m map[string]any) {
 	var req native.Request
 	require.Eventually(h.t, func() bool {
 		var ok bool
-		req, ok = h.sink.request(id)
+		req, ok = h.sink.Request(id)
 		return ok
 	}, 5*time.Second, time.Millisecond)
 	var resp native.Response

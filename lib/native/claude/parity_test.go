@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/native/nativetest"
 )
 
 // sessionLogMessages parses a session log the way the JSONL watcher does.
@@ -21,7 +22,7 @@ func sessionLogMessages(t *testing.T, name string) []jsonlwatcher.RichMessage {
 	data, err := os.ReadFile(filepath.Join("testdata", name+".session.jsonl"))
 	require.NoError(t, err)
 	parser := jsonlwatcher.NewClaudeParser()
-	sink := &recSink{t: t}
+	sink := nativetest.NewSink(t)
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 0, 1<<20), 16<<20)
 	for scanner.Scan() {
@@ -35,7 +36,7 @@ func sessionLogMessages(t *testing.T, name string) []jsonlwatcher.RichMessage {
 	for _, m := range parser.Flush() {
 		sink.RichMessage(m)
 	}
-	return sink.final()
+	return sink.Final()
 }
 
 // comparable drops what legitimately differs: timestamps (the adapter
@@ -84,7 +85,7 @@ func TestParityWithSessionLog(t *testing.T) {
 			require.NoError(t, r.finish(nil))
 
 			ours := map[string]jsonlwatcher.RichMessage{}
-			for _, m := range r.sink.final() {
+			for _, m := range r.sink.Final() {
 				ours[m.Role+"/"+m.MessageID] = comparable(t, m)
 			}
 			logged := sessionLogMessages(t, tc.name)

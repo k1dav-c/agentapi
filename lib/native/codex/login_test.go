@@ -65,10 +65,10 @@ func TestLoginLostMidTurn(t *testing.T) {
 	final := `{"message":"unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses","codexErrorInfo":{"httpConnectionFailed":{"httpStatusCode":401}},"additionalDetails":null}`
 	h.feedJSON(retry)
 	h.sync()
-	assert.Empty(t, h.rec.snapshot().logins, "a retried error is not reported yet")
+	assert.Empty(t, snapshot(h.rec).logins, "a retried error is not reported yet")
 	h.feedJSON(`{"method":"error","params":{"error":` + final + `,"willRetry":false,"threadId":"` + testThread + `","turnId":"turn-1"}}`)
 	h.completeTurn("turn-1", "failed", `,"error":`+final)
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	assert.Equal(t, []native.LoginRequired{loginHint}, s.logins, "reported once")
 	require.Len(t, s.completions, 1)
 	assert.Contains(t, s.completions[0].Error, "401 Unauthorized")
@@ -77,7 +77,7 @@ func TestLoginLostMidTurn(t *testing.T) {
 	// A turn that fails for another reason is not a login problem.
 	h.beginTurn("turn-2")
 	h.completeTurn("turn-2", "failed", `,"error":{"message":"stream disconnected before completion","codexErrorInfo":{"responseStreamDisconnected":{"httpStatusCode":500}}}`)
-	assert.Len(t, h.rec.snapshot().logins, 1)
+	assert.Len(t, snapshot(h.rec).logins, 1)
 	h.finish()
 }
 

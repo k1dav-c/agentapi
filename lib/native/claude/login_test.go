@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
 )
 
@@ -79,7 +80,7 @@ func TestStartChecksLogin(t *testing.T) {
 		}, "")
 		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		defer cancel()
-		err := a.Start(ctx, &recSink{t: t})
+		err := a.Start(ctx, nativetest.NewSink(t))
 		_ = a.Close()
 		return checks, spawned, err
 	}
@@ -200,17 +201,15 @@ func TestLoginLostMidSession(t *testing.T) {
 		proc.send(t, []byte(`{"type":"result","subtype":"success","is_error":true,"api_error_status":null,"duration_api_ms":0,"num_turns":1,"result":"Not logged in · Please run /login","stop_reason":"stop_sequence","session_id":"s1","terminal_reason":"api_error","total_cost_usd":0}`))
 		proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
 		proc.barrier(t)
-		sink.mu.Lock()
-		defer sink.mu.Unlock()
-		require.Equal(t, []native.LoginRequired{loginHint}, sink.logins)
-		require.Len(t, sink.results, 1)
-		assert.Equal(t, "error", sink.results[0].StopReason)
+		require.Equal(t, []native.LoginRequired{loginHint}, sink.State().Logins)
+		require.Len(t, sink.State().Results, 1)
+		assert.Equal(t, "error", sink.State().Results[0].StopReason)
 		// The result says "success" with is_error; the terminal reason
 		// says what failed.
-		assert.Equal(t, "Claude Code: the turn failed (api_error): Not logged in · Please run /login", sink.results[0].Error)
+		assert.Equal(t, "Claude Code: the turn failed (api_error): Not logged in · Please run /login", sink.State().Results[0].Error)
 		// The login is reported before the turn ends.
-		login := slices.Index(sink.log, "login_required")
-		assert.Less(t, login, slices.Index(sink.log, "turn_completed:error"))
+		login := slices.Index(sink.State().Log, "login_required")
+		assert.Less(t, login, slices.Index(sink.State().Log, "turn_completed:error"))
 	})
 
 	for name, result := range map[string]string{
@@ -227,9 +226,7 @@ func TestLoginLostMidSession(t *testing.T) {
 			proc.send(t, []byte(result))
 			proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
 			proc.barrier(t)
-			sink.mu.Lock()
-			defer sink.mu.Unlock()
-			assert.Len(t, sink.logins, 1)
+			assert.Len(t, sink.State().Logins, 1)
 		})
 	}
 
@@ -248,9 +245,7 @@ func TestLoginLostMidSession(t *testing.T) {
 			proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
 			proc.barrier(t)
 		}
-		sink.mu.Lock()
-		defer sink.mu.Unlock()
-		assert.Empty(t, sink.logins)
-		assert.Len(t, sink.results, 2)
+		assert.Empty(t, sink.State().Logins)
+		assert.Len(t, sink.State().Results, 2)
 	})
 }

@@ -157,8 +157,8 @@ func TestTurnEndLeavesDialogsToTheConversation(t *testing.T) {
 	h.answer(abort, "")
 	h.settle()
 
-	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonInterrupted}}, h.sink.turnResults())
-	assert.Empty(t, h.sink.closed)
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonInterrupted}}, h.sink.State().Results)
+	assert.Empty(t, h.sink.State().Closed)
 	assert.Equal(t, map[string]any{"type": "extension_ui_response", "id": "d1", "cancelled": true}, h.pi.nextCmd())
 	assert.ErrorIs(t, h.a.Respond(h.ctx, "d1", native.Response{OptionID: "Allow"}), native.ErrRequestNotFound)
 }
@@ -179,10 +179,10 @@ func TestInterruptCancelsCommandDialogs(t *testing.T) {
 	h.answer(abort, "")
 	h.settle()
 	assert.Equal(t, map[string]any{"type": "extension_ui_response", "id": "d1", "cancelled": true}, h.pi.nextCmd())
-	assert.Equal(t, []string{"d1"}, h.sink.closed, "the turn goes on until the command returns")
-	assert.Empty(t, h.sink.turnResults())
+	assert.Equal(t, []string{"d1"}, h.sink.State().Closed, "the turn goes on until the command returns")
+	assert.Empty(t, h.sink.State().Results)
 
 	h.answer(cmd, `{"disposition":"handled"}`)
 	h.settle()
-	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonInterrupted}}, h.sink.turnResults())
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonInterrupted}}, h.sink.State().Results)
 }

@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,8 +20,8 @@ import (
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 const waitTimeout = 5 * time.Second
@@ -84,175 +83,13 @@ func (p *fakeProc) exit(err error) {
 
 // --- recording sink ---
 
-type richKey struct{ id, role string }
+// recorder is the shared recording sink.
+type recorder = nativetest.Sink
 
-type recorder struct {
-	t    *testing.T
-	busy atomic.Bool
+func newRecorder(t *testing.T) *recorder { return nativetest.NewSink(t) }
 
-	mu          sync.Mutex
-	log         []string
-	snapshots   []jsonlwatcher.RichMessage
-	final       map[richKey]jsonlwatcher.RichMessage
-	order       []richKey
-	completions []native.TurnResult
-	started     int
-	opened      []native.Request
-	closed      []string
-	names       []string
-	refs        []string
-	errors      []string
-	events      []jsonlwatcher.SessionEvent
-	logins      []native.LoginRequired
-	settings    []native.Settings
-	usage       []native.AgentUsage
-}
-
-var (
-	_ native.Sink         = (*recorder)(nil)
-	_ native.SettingsSink = (*recorder)(nil)
-	_ native.UsageSink    = (*recorder)(nil)
-)
-
-func newRecorder(t *testing.T) *recorder {
-	return &recorder{t: t, final: map[richKey]jsonlwatcher.RichMessage{}}
-}
-
-// enter checks that sink calls never overlap.
-func (r *recorder) enter() func() {
-	if !r.busy.CompareAndSwap(false, true) {
-		r.t.Error("concurrent sink calls")
-	}
-	r.mu.Lock()
-	return func() {
-		r.mu.Unlock()
-		r.busy.Store(false)
-	}
-}
-
-func (r *recorder) UsageChanged(u native.AgentUsage) {
-	defer r.enter()()
-	r.usage = append(r.usage, u)
-}
-
-func (r *recorder) SettingsChanged(s native.Settings) {
-	defer r.enter()()
-	r.settings = append(r.settings, s)
-	r.log = append(r.log, "settings:"+string(s.PermissionMode))
-}
-
-func (r *recorder) TurnStarted() {
-	defer r.enter()()
-	r.started++
-	r.log = append(r.log, "turn_started")
-}
-
-func (r *recorder) TurnCompleted(res native.TurnResult) {
-	defer r.enter()()
-	r.completions = append(r.completions, res)
-	r.log = append(r.log, "turn_completed:"+res.StopReason)
-}
-
-func (r *recorder) RichMessage(msg jsonlwatcher.RichMessage) {
-	defer r.enter()()
-	r.snapshots = append(r.snapshots, msg)
-	k := richKey{msg.MessageID, msg.Role}
-	if _, ok := r.final[k]; !ok {
-		r.order = append(r.order, k)
-	}
-	r.final[k] = msg
-}
-
-func (r *recorder) SessionEvents(events []jsonlwatcher.SessionEvent) {
-	defer r.enter()()
-	r.events = append(r.events, events...)
-}
-
-func (r *recorder) RequestOpened(req native.Request) {
-	defer r.enter()()
-	r.opened = append(r.opened, req)
-	r.log = append(r.log, "request_opened:"+req.ID)
-}
-
-func (r *recorder) RequestClosed(id string) {
-	defer r.enter()()
-	r.closed = append(r.closed, id)
-	r.log = append(r.log, "request_closed:"+id)
-}
-
-func (r *recorder) SessionName(name string) {
-	defer r.enter()()
-	r.names = append(r.names, name)
-}
-
-func (r *recorder) SessionRef(ref string) {
-	defer r.enter()()
-	r.refs = append(r.refs, ref)
-}
-
-func (r *recorder) LoginRequired(l native.LoginRequired) {
-	defer r.enter()()
-	r.logins = append(r.logins, l)
-	r.log = append(r.log, "login_required")
-}
-
-func (r *recorder) Error(message string, level st.ErrorLevel) {
-	defer r.enter()()
-	r.errors = append(r.errors, string(level)+": "+message)
-}
-
-// messages returns the final state of every message in first-seen order.
-func (r *recorder) messages() []jsonlwatcher.RichMessage {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]jsonlwatcher.RichMessage, 0, len(r.order))
-	for _, k := range r.order {
-		out = append(out, r.final[k])
-	}
-	return out
-}
-
-func (r *recorder) message(id, role string) (jsonlwatcher.RichMessage, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	m, ok := r.final[richKey{id, role}]
-	return m, ok
-}
-
-func (r *recorder) snapshotCount(id string) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	n := 0
-	for _, m := range r.snapshots {
-		if m.MessageID == id {
-			n++
-		}
-	}
-	return n
-}
-
-func (r *recorder) request(id string) (native.Request, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, req := range r.opened {
-		if req.ID == id {
-			return req, true
-		}
-	}
-	return native.Request{}, false
-}
-
-func (r *recorder) snapshot() recorderState {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return recorderState{
-		log: slices.Clone(r.log), completions: slices.Clone(r.completions), started: r.started,
-		opened: slices.Clone(r.opened), closed: slices.Clone(r.closed), names: slices.Clone(r.names),
-		refs: slices.Clone(r.refs), errors: slices.Clone(r.errors), events: slices.Clone(r.events),
-		logins: slices.Clone(r.logins), settings: slices.Clone(r.settings),
-	}
-}
-
+// recorderState is what a recorder recorded, under the names these tests
+// use.
 type recorderState struct {
 	log         []string
 	completions []native.TurnResult
@@ -267,14 +104,16 @@ type recorderState struct {
 	settings    []native.Settings
 }
 
-func (s recorderState) eventsOf(kind string) []jsonlwatcher.SessionEvent {
-	var out []jsonlwatcher.SessionEvent
-	for _, e := range s.events {
-		if e.Kind == kind {
-			out = append(out, e)
-		}
+func snapshot(r *recorder) recorderState {
+	s := r.State()
+	return recorderState{
+		log: s.Log, completions: s.Results, started: s.Started, opened: s.Requests, closed: s.Closed,
+		names: s.Names, refs: s.Refs, errors: s.Errors, events: s.Events, logins: s.Logins, settings: s.Settings,
 	}
-	return out
+}
+
+func (s recorderState) eventsOf(kind string) []jsonlwatcher.SessionEvent {
+	return nativetest.SinkState{Events: s.events}.EventsOf(kind)
 }
 
 // --- harness ---
@@ -631,7 +470,7 @@ func (h *harness) replayOut(raw json.RawMessage, idMap map[string]json.RawMessag
 		// An answer to a server request.
 		h.sync()
 		id := h.requestID(msg.ID)
-		h.eventually(func() bool { _, ok := h.rec.request(id); return ok }, "request "+id)
+		h.eventually(func() bool { _, ok := h.rec.Request(id); return ok }, "request "+id)
 		h.settle()
 		h.a.mu.Lock()
 		_, live := h.a.requests[id]

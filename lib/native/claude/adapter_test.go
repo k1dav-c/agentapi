@@ -16,18 +16,19 @@ import (
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
 )
 
 // started returns an adapter on a fake process that completed the
 // handshake.
-func started(t *testing.T, cfg Config, proc *fakeProcess) (*Adapter, *recSink) {
+func started(t *testing.T, cfg Config, proc *fakeProcess) (*Adapter, *nativetest.Sink) {
 	t.Helper()
 	return resumed(t, cfg, "", proc)
 }
 
 // resumed is started for an adapter that resumes resumeRef.
-func resumed(t *testing.T, cfg Config, resumeRef string, proc *fakeProcess) (*Adapter, *recSink) {
+func resumed(t *testing.T, cfg Config, resumeRef string, proc *fakeProcess) (*Adapter, *nativetest.Sink) {
 	t.Helper()
 	cfg.StartProcess = func(procutil.Command) (procutil.Process, error) { return proc, nil }
 	if cfg.AuthStatus == nil {
@@ -36,7 +37,7 @@ func resumed(t *testing.T, cfg Config, resumeRef string, proc *fakeProcess) (*Ad
 	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg.Env = []string{}
 	a := newTestAdapter(t, cfg, resumeRef)
-	sink := &recSink{t: t}
+	sink := nativetest.NewSink(t)
 	errCh := make(chan error, 1)
 	go func() { errCh <- a.Start(context.Background(), sink) }()
 	init := proc.waitWritten(t, 0)
@@ -61,7 +62,7 @@ func TestStartFailure(t *testing.T) {
 			proc.waitWritten(t, 0)
 			proc.exit(errExit1)
 		}()
-		err := a.Start(context.Background(), &recSink{t: t})
+		err := a.Start(context.Background(), nativetest.NewSink(t))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "No conversation found with session ID: 6943de8c")
 		assert.ErrorIs(t, a.Wait(), errExit1)
@@ -80,7 +81,7 @@ func TestStartFailure(t *testing.T) {
 			proc.send(t, []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0}`))
 			proc.exit(nil)
 		}()
-		err := a.Start(context.Background(), &recSink{t: t})
+		err := a.Start(context.Background(), nativetest.NewSink(t))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "No conversation found with session ID: 6943de8c")
 	})
@@ -96,7 +97,7 @@ func TestStartFailure(t *testing.T) {
 		}, "")
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
-		require.Error(t, a.Start(ctx, &recSink{t: t}))
+		require.Error(t, a.Start(ctx, nativetest.NewSink(t)))
 		// The process is stopped.
 		select {
 		case <-proc.exited:
@@ -194,9 +195,9 @@ func TestTurnErrors(t *testing.T) {
 	proc.send(t, []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"result":null,"terminal_reason":"completed","api_error_status":529,"errors":["[ede_diagnostic] x","Overloaded"]}`))
 	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
 	proc.barrier(t)
-	require.Len(t, sink.results, 1)
-	assert.Equal(t, "error", sink.results[0].StopReason)
-	assert.Equal(t, "Claude Code: the turn failed (error_during_execution), API status 529: Overloaded", sink.results[0].Error)
+	require.Len(t, sink.State().Results, 1)
+	assert.Equal(t, "error", sink.State().Results[0].StopReason)
+	assert.Equal(t, "Claude Code: the turn failed (error_during_execution), API status 529: Overloaded", sink.State().Results[0].Error)
 
 	// Requests the adapter doesn't offer are refused, not left waiting.
 	proc.send(t, []byte(`{"type":"control_request","request_id":"hook-1","request":{"subtype":"hook_callback","callback_id":"x"}}`))
@@ -307,8 +308,8 @@ func TestEarlierFailureIsShown(t *testing.T) {
 	proc.send(t, []byte(`{"type":"result","subtype":"success","is_error":false,"result":"done"}`))
 	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
 	proc.barrier(t)
-	assert.Equal(t, []string{"Claude Code: the turn failed (error_during_execution), API status 529: Overloaded"}, sink.errs)
-	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, sink.results)
+	assert.Equal(t, []string{"error: Claude Code: the turn failed (error_during_execution), API status 529: Overloaded"}, sink.State().Errors)
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, sink.State().Results)
 	require.NoError(t, a.Close())
 }
 
@@ -347,7 +348,7 @@ func TestNewSession(t *testing.T) {
 		turn(t, a, proc, "second", "s2")
 		// /clear started a new session: a restart resumes it, and it gets
 		// a title too.
-		assert.Equal(t, []string{"s1", "s2"}, sink.refs)
+		assert.Equal(t, []string{"s1", "s2"}, sink.State().Refs)
 		assert.ElementsMatch(t, []string{"first", "second"}, titles(t, proc, 2))
 		require.NoError(t, a.Close())
 	})
@@ -358,10 +359,10 @@ func TestNewSession(t *testing.T) {
 		a, sink := resumed(t, Config{}, "s1", proc)
 		// The resumed session has its id and title already.
 		turn(t, a, proc, "again", "s1")
-		assert.Empty(t, sink.refs)
+		assert.Empty(t, sink.State().Refs)
 		turn(t, a, proc, "/clear", "s1")
 		turn(t, a, proc, "next", "s2")
-		assert.Equal(t, []string{"s2"}, sink.refs)
+		assert.Equal(t, []string{"s2"}, sink.State().Refs)
 		assert.Equal(t, []string{"next"}, titles(t, proc, 1))
 		require.NoError(t, a.Close())
 	})
@@ -379,11 +380,11 @@ func TestFieldsOfUnexpectedType(t *testing.T) {
 	// doesn't wait for it.
 	proc.send(t, []byte(`{"type":"control_request","request_id":"r2","request":{"subtype":"can_use_tool","tool_name":{"name":"Bash"},"input":{}}}`))
 	proc.barrier(t)
-	req, ok := sink.request("r1")
+	req, ok := sink.Request("r1")
 	require.True(t, ok)
 	assert.Equal(t, "Bash: ls", req.Title)
 	assert.Equal(t, "t1", req.ToolUseID)
-	_, ok = sink.request("r2")
+	_, ok = sink.Request("r2")
 	assert.False(t, ok)
 	var reply map[string]any
 	for i := 0; reply == nil; i++ {
@@ -398,8 +399,8 @@ func TestFieldsOfUnexpectedType(t *testing.T) {
 	proc.send(t, []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"errors":[{"code":529},"Overloaded"]}`))
 	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
 	proc.barrier(t)
-	assert.Equal(t, []string{"turn_started", "turn_completed:error"}, sink.turnLog())
-	assert.Equal(t, "Claude Code: the turn failed (error_during_execution): Overloaded", sink.results[0].Error)
+	assert.Equal(t, []string{"turn_started", "turn_completed:error"}, sink.TurnLog())
+	assert.Equal(t, "Claude Code: the turn failed (error_during_execution): Overloaded", sink.State().Results[0].Error)
 	require.NoError(t, a.Close())
 }
 
@@ -447,10 +448,10 @@ func TestInterruptTimeout(t *testing.T) {
 		interrupt(t, a, proc)
 		// Claude Code never ends the turn: no result, no "idle". It ends
 		// here after InterruptTimeout (10s by default).
-		assert.Equal(t, []string{"turn_started"}, sink.turnLog())
+		assert.Equal(t, []string{"turn_started"}, sink.TurnLog())
 		clock.Advance(10 * time.Second).MustWait(ctx)
-		require.Eventually(t, func() bool { return len(sink.turnLog()) == 2 }, 5*time.Second, time.Millisecond)
-		assert.Equal(t, []string{"turn_started", "turn_completed:interrupted"}, sink.turnLog())
+		require.Eventually(t, func() bool { return len(sink.TurnLog()) == 2 }, 5*time.Second, time.Millisecond)
+		assert.Equal(t, []string{"turn_started", "turn_completed:interrupted"}, sink.TurnLog())
 		require.NoError(t, a.StartTurn(ctx, native.Input{Text: "again"}))
 		require.NoError(t, a.Close())
 	})
@@ -470,7 +471,7 @@ func TestInterruptTimeout(t *testing.T) {
 		// No timer is left to end the next turn.
 		_, pending := clock.Peek()
 		assert.False(t, pending)
-		assert.Equal(t, []string{"turn_started", "turn_completed:interrupted", "turn_started"}, sink.turnLog())
+		assert.Equal(t, []string{"turn_started", "turn_completed:interrupted", "turn_started"}, sink.TurnLog())
 		require.NoError(t, a.Close())
 	})
 }
@@ -488,12 +489,12 @@ func TestHeldBackSnapshotIsSent(t *testing.T) {
 	event(`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`)
 	event(`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think"}}`)
 	proc.barrier(t)
-	require.Len(t, sink.snapshots("msg_1"), 1, "the delta came within the interval")
+	require.Len(t, sink.Snapshots("msg_1"), 1, "the delta came within the interval")
 	// The model pauses (summarized thinking comes in bursts): the delta
 	// is sent when the interval is over, not with the next event.
 	clock.Advance(100 * time.Millisecond).MustWait(ctx)
-	require.Eventually(t, func() bool { return len(sink.snapshots("msg_1")) == 2 }, 5*time.Second, time.Millisecond)
-	assert.Equal(t, "Let me think", sink.snapshots("msg_1")[1].Content[0].Thinking)
+	require.Eventually(t, func() bool { return len(sink.Snapshots("msg_1")) == 2 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, "Let me think", sink.Snapshots("msg_1")[1].Content[0].Thinking)
 	require.NoError(t, a.Close())
 }
 
@@ -562,7 +563,7 @@ func TestCloseDuringTheLoginCheck(t *testing.T) {
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, "")
 	started := make(chan error, 1)
-	go func() { started <- a.Start(context.Background(), &recSink{t: t}) }()
+	go func() { started <- a.Start(context.Background(), nativetest.NewSink(t)) }()
 	<-checking
 	// A restart closes the adapter while its login is checked.
 	require.NoError(t, a.Close())
@@ -591,7 +592,7 @@ func TestFailedInterruptLeavesTheTurnAlone(t *testing.T) {
 	proc.send(t, []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["boom"]}`))
 	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
 	proc.barrier(t)
-	require.Eventually(t, func() bool { return len(sink.turnLog()) == 2 }, 5*time.Second, time.Millisecond)
-	assert.NotEqual(t, "turn_completed:interrupted", sink.turnLog()[1])
+	require.Eventually(t, func() bool { return len(sink.TurnLog()) == 2 }, 5*time.Second, time.Millisecond)
+	assert.NotEqual(t, "turn_completed:interrupted", sink.TurnLog()[1])
 	require.NoError(t, a.Close())
 }

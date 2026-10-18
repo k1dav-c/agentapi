@@ -24,10 +24,8 @@ func TestRateLimits(t *testing.T) {
 	proc.send(t, []byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1792600000,"rateLimitType":"seven_day_opus"}}`))
 	proc.send(t, []byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1793200000,"rateLimitType":"seven_day_opus"}}`))
 	proc.barrier(t)
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
-	require.Len(t, sink.usage, 3)
-	limits := sink.usage[0].RateLimits
+	require.Len(t, sink.State().Usage, 3)
+	limits := sink.State().Usage[0].RateLimits
 	require.Len(t, limits, 2)
 	assert.Equal(t, "five_hour", limits[0].ID, "sorted")
 	assert.Equal(t, "5-hour limit", limits[0].Label)
@@ -37,7 +35,7 @@ func TestRateLimits(t *testing.T) {
 	assert.Equal(t, "Weekly limit", limits[1].Label)
 	assert.Empty(t, limits[1].Status)
 
-	limits = sink.usage[1].RateLimits
+	limits = sink.State().Usage[1].RateLimits
 	require.Len(t, limits, 3)
 	assert.Equal(t, 29.0, *limits[1].UsedPercent, "rounded")
 	assert.Equal(t, "Weekly Opus limit", limits[2].Label)
@@ -45,10 +43,10 @@ func TestRateLimits(t *testing.T) {
 	assert.Nil(t, limits[2].UsedPercent)
 	assert.InDelta(t, 29.0, *limits[1].UsedPercent, 0.001, "the others stay")
 
-	limits = sink.usage[2].RateLimits
+	limits = sink.State().Usage[2].RateLimits
 	assert.Equal(t, "allowed", limits[2].Status)
 	assert.Equal(t, time.Unix(1793200000, 0).UTC(), *limits[2].ResetsAt)
-	assert.Equal(t, time.Unix(1792600000, 0).UTC(), *sink.usage[1].RateLimits[2].ResetsAt, "what was reported stays")
+	assert.Equal(t, time.Unix(1792600000, 0).UTC(), *sink.State().Usage[1].RateLimits[2].ResetsAt, "what was reported stays")
 }
 
 func TestContextUsageAfterATurn(t *testing.T) {
@@ -60,11 +58,7 @@ func TestContextUsageAfterATurn(t *testing.T) {
 	proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1"}`))
 	proc.send(t, []byte(`{"type":"result","subtype":"success","is_error":false,"result":"done"}`))
 	require.Eventually(t, func() bool {
-		sink.mu.Lock()
-		defer sink.mu.Unlock()
-		return len(sink.usage) == 1
+		return len(sink.State().Usage) == 1
 	}, 5*time.Second, time.Millisecond)
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
-	assert.Equal(t, &native.ContextUsage{Used: 41000, Size: 200000}, sink.usage[0].Context)
+	assert.Equal(t, &native.ContextUsage{Used: 41000, Size: 200000}, sink.State().Usage[0].Context)
 }

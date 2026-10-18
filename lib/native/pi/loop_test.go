@@ -32,7 +32,7 @@ func TestExtensionCommandTurns(t *testing.T) {
 		h.answer(cmd, `{"disposition":"handled"}`)
 		require.NoError(t, h.result("p"))
 		h.settle()
-		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonHandled}}, h.sink.turnResults(),
+		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonHandled}}, h.sink.State().Results,
 			"no model turn, so it doesn't show the login works")
 	})
 
@@ -47,8 +47,8 @@ func TestExtensionCommandTurns(t *testing.T) {
 		h.write(`{"type":"agent_settled"}`)
 		h.answer(cmd, `{"disposition":"handled"}`)
 		h.settle()
-		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.turnResults())
-		assert.Equal(t, 1, h.sink.started, "no second, empty turn")
+		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.State().Results)
+		assert.Equal(t, 1, h.sink.State().Started, "no second, empty turn")
 	})
 
 	t.Run("returns while its run goes on", func(t *testing.T) {
@@ -58,10 +58,10 @@ func TestExtensionCommandTurns(t *testing.T) {
 		h.write(`{"type":"agent_start"}`)
 		h.answer(cmd, `{"disposition":"handled"}`)
 		h.settle()
-		assert.Empty(t, h.sink.turnResults())
+		assert.Empty(t, h.sink.State().Results)
 		h.write(`{"type":"agent_settled"}`)
 		h.settle()
-		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.turnResults())
+		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.State().Results)
 	})
 
 	t.Run("asks after its run", func(t *testing.T) {
@@ -77,7 +77,7 @@ func TestExtensionCommandTurns(t *testing.T) {
 		assert.Equal(t, true, h.pi.nextCmd()["confirmed"])
 		h.answer(cmd, `{"disposition":"handled"}`)
 		h.settle()
-		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}, {StopReason: native.StopReasonHandled}}, h.sink.turnResults(),
+		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}, {StopReason: native.StopReasonHandled}}, h.sink.State().Results,
 			"the dialog's turn ends with the command")
 	})
 
@@ -92,11 +92,11 @@ func TestExtensionCommandTurns(t *testing.T) {
 		h.answer(next, `{"disposition":"started"}`)
 		h.answer(cmd, `{"disposition":"handled"}`)
 		h.settle()
-		assert.Len(t, h.sink.turnResults(), 1, "the late answer doesn't end the next turn")
+		assert.Len(t, h.sink.State().Results, 1, "the late answer doesn't end the next turn")
 		h.write(`{"type":"agent_start"}`)
 		h.write(`{"type":"agent_settled"}`)
 		h.settle()
-		assert.Len(t, h.sink.turnResults(), 2)
+		assert.Len(t, h.sink.State().Results, 2)
 	})
 }
 
@@ -114,11 +114,11 @@ func TestPromptRefusedAfterAcceptance(t *testing.T) {
 		require.NoError(t, h.result("p"))
 		h.refuse(cmd, "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.")
 		h.settle()
-		assert.Equal(t, []string{"Pi refused the message: Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."}, h.sink.errors)
-		assert.Empty(t, h.sink.turnResults(), "the run goes on")
+		assert.Equal(t, []string{"error: Pi refused the message: Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."}, h.sink.State().Errors)
+		assert.Empty(t, h.sink.State().Results, "the run goes on")
 		h.write(`{"type":"agent_settled"}`)
 		h.settle()
-		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.turnResults())
+		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.State().Results)
 	})
 
 	t.Run("after its dialog", func(t *testing.T) {
@@ -132,14 +132,12 @@ func TestPromptRefusedAfterAcceptance(t *testing.T) {
 		assert.Equal(t, "extension_ui_response", h.pi.nextCmd()["type"])
 		h.refuse(cmd, "No API key found for anthropic.\n\nUse /login to log into a provider via OAuth or API key.")
 		h.settle()
-		results := h.sink.turnResults()
+		results := h.sink.State().Results
 		require.Len(t, results, 1)
 		assert.Equal(t, native.StopReasonError, results[0].StopReason)
 		assert.Contains(t, results[0].Error, "No API key found")
-		h.sink.mu.Lock()
-		defer h.sink.mu.Unlock()
-		assert.Equal(t, []string{"turn_started", "request_opened:d1", "login_required", "turn_completed"}, h.sink.log)
-		assert.Empty(t, h.sink.errors)
+		assert.Equal(t, []string{"turn_started", "request_opened:d1", "login_required", "turn_completed:error"}, h.sink.State().Log)
+		assert.Empty(t, h.sink.State().Errors)
 	})
 }
 
@@ -162,25 +160,25 @@ func TestInterruptTimeout(t *testing.T) {
 	h.write(`{"type":"agent_settled"}`)
 	h.answer(abort, "")
 	h.settle()
-	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonInterrupted}}, h.sink.turnResults())
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonInterrupted}}, h.sink.State().Results)
 
 	// The second turn outlives the first one's timer, and Pi never
 	// confirms its abort.
 	runTurn("p2")
 	h.advance(time.Second)
-	assert.Len(t, h.sink.turnResults(), 1, "the first interrupt's timer doesn't end the next turn")
+	assert.Len(t, h.sink.State().Results, 1, "the first interrupt's timer doesn't end the next turn")
 	require.NoError(t, h.a.Interrupt(h.ctx))
 	assert.Equal(t, "abort", h.pi.nextCmd()["type"])
 	h.advance(time.Second - time.Millisecond)
-	assert.Len(t, h.sink.turnResults(), 1)
+	assert.Len(t, h.sink.State().Results, 1)
 	h.advance(time.Millisecond)
-	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonInterrupted}, {StopReason: native.StopReasonInterrupted}}, h.sink.turnResults(),
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonInterrupted}, {StopReason: native.StopReasonInterrupted}}, h.sink.State().Results,
 		"the adapter ends the turn")
 
 	// A late end doesn't end it again.
 	h.write(`{"type":"agent_settled"}`)
 	h.settle()
-	assert.Len(t, h.sink.turnResults(), 2)
+	assert.Len(t, h.sink.State().Results, 2)
 }
 
 func TestInterruptWriteFails(t *testing.T) {
@@ -206,7 +204,7 @@ func TestInterruptWriteFails(t *testing.T) {
 
 	h.write(`{"type":"agent_settled"}`)
 	h.settle()
-	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.turnResults(), "the turn wasn't interrupted")
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.State().Results, "the turn wasn't interrupted")
 }
 
 func TestRecords(t *testing.T) {
@@ -224,7 +222,7 @@ func TestRecords(t *testing.T) {
 		h.write(`{"type":"auto_retry_end","success":false,"attempt":3,"finalError":"529 overloaded after 3 attempts"}`)
 		h.write(`{"type":"agent_settled"}`)
 		h.settle()
-		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonError, Error: "529 overloaded after 3 attempts"}}, h.sink.turnResults())
+		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonError, Error: "529 overloaded after 3 attempts"}}, h.sink.State().Results)
 	})
 
 	t.Run("a retry that works", func(t *testing.T) {
@@ -239,7 +237,7 @@ func TestRecords(t *testing.T) {
 		h.write(`{"type":"auto_retry_end","success":true,"attempt":1}`)
 		h.write(`{"type":"agent_settled"}`)
 		h.settle()
-		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.turnResults())
+		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.State().Results)
 	})
 
 	t.Run("compaction and extension errors", func(t *testing.T) {
@@ -253,8 +251,8 @@ func TestRecords(t *testing.T) {
 		h.write(`{"type":"extension_error","extensionPath":7}`)
 		h.settle()
 		assert.Equal(t, []string{
-			"Compaction failed: context too small",
-			"Pi extension /home/me/.pi/agent/extensions/guard.ts failed on tool_call: boom",
-		}, h.sink.errors)
+			"warning: Compaction failed: context too small",
+			"warning: Pi extension /home/me/.pi/agent/extensions/guard.ts failed on tool_call: boom",
+		}, h.sink.State().Errors)
 	})
 }

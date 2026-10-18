@@ -98,7 +98,7 @@ func TestFailedTurn(t *testing.T) {
 	h.feedJSON(`{"method":"error","params":{"threadId":"` + testThread + `","turnId":"turn-1","willRetry":true,"error":{"message":"Reconnecting... 1/5"}}}`)
 	h.feedJSON(`{"method":"error","params":{"threadId":"` + testThread + `","turnId":"turn-1","willRetry":false,"error":{"message":"stream disconnected","additionalDetails":"HTTP 502"}}}`)
 	h.completeTurn("turn-1", "failed", `,"error":null`)
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	assert.Equal(t, []string{"warning: Reconnecting... 1/5"}, s.errors)
 	assert.Equal(t, []native.TurnResult{{StopReason: "error", Error: "stream disconnected\nHTTP 502"}}, s.completions)
 	sys := s.eventsOf("system")
@@ -114,11 +114,11 @@ func TestInterruptWithoutCompletion(t *testing.T) {
 	h.feedJSON(`{"id":` + string(sent.ID) + `,"result":{}}`)
 	h.settle()
 	require.NoError(t, h.err("interrupt"))
-	h.eventually(func() bool { return len(h.rec.snapshot().completions) == 1 }, "the turn to end")
-	assert.Equal(t, "interrupted", h.rec.snapshot().completions[0].StopReason)
+	h.eventually(func() bool { return len(snapshot(h.rec).completions) == 1 }, "the turn to end")
+	assert.Equal(t, "interrupted", snapshot(h.rec).completions[0].StopReason)
 	// A turn/completed arriving late is ignored.
 	h.completeTurn("turn-1", "interrupted", "")
-	assert.Len(t, h.rec.snapshot().completions, 1)
+	assert.Len(t, snapshot(h.rec).completions, 1)
 }
 
 func TestUnknownServerRequestIsRefused(t *testing.T) {
@@ -129,7 +129,7 @@ func TestUnknownServerRequestIsRefused(t *testing.T) {
 	assert.JSONEq(t, `5`, string(sent.ID))
 	require.NotNil(t, sent.Error)
 	assert.Equal(t, -32601, sent.Error.Code)
-	assert.Empty(t, h.rec.snapshot().opened)
+	assert.Empty(t, snapshot(h.rec).opened)
 }
 
 func TestCommandApprovalOptions(t *testing.T) {
@@ -144,7 +144,7 @@ func TestCommandApprovalOptions(t *testing.T) {
 		"proposedNetworkPolicyAmendments":[{"action":"allow","host":"example.com"}]}}`)
 	h.sync()
 	id := h.requestID(json.RawMessage("0"))
-	req, ok := h.rec.request(id)
+	req, ok := h.rec.Request(id)
 	require.True(t, ok)
 	assert.Equal(t, "curl https://example.com", req.Title, "the bash -lc wrapper is unwrapped")
 	assert.Equal(t, "needs network\nNetwork access to example.com (https)\nWorking directory: /work", req.Detail)
@@ -171,15 +171,15 @@ func TestRequestWithdrawnByCodex(t *testing.T) {
 		"questions":[{"id":"q","header":"Q","question":"Secret?","isOther":false,"isSecret":true,"options":null}]}}`)
 	h.sync()
 	id := h.requestID(json.RawMessage("3"))
-	req, ok := h.rec.request(id)
+	req, ok := h.rec.Request(id)
 	require.True(t, ok)
 	assert.Equal(t, []native.Question{{ID: "q", Header: "Q", Question: "Secret?", FreeText: true, Secret: true}}, req.Questions)
 	require.ErrorIs(t, h.a.Respond(context.Background(), id, native.Response{}), native.ErrInvalidResponse)
 
 	h.feedJSON(`{"method":"serverRequest/resolved","params":{"threadId":"` + testThread + `","requestId":3}}`)
 	h.sync()
-	assert.Equal(t, []string{id}, h.rec.snapshot().closed)
-	result, ok := h.rec.message("result-call_1", "user")
+	assert.Equal(t, []string{id}, snapshot(h.rec).closed)
+	result, ok := h.rec.Message("result-call_1", "user")
 	require.True(t, ok)
 	assert.Equal(t, "failed", result.Content[0].Status)
 	require.ErrorIs(t, h.a.Respond(context.Background(), id, native.Response{Answers: map[string][]string{"q": {"x"}}}), native.ErrRequestNotFound)
@@ -197,7 +197,7 @@ func TestElicitationForm(t *testing.T) {
 			"tags":{"type":"array","items":{"type":"string","enum":["a","b"]}}}}}}`)
 	h.sync()
 	id := h.requestID(json.RawMessage("1"))
-	req, ok := h.rec.request(id)
+	req, ok := h.rec.Request(id)
 	require.True(t, ok)
 	assert.Equal(t, native.RequestKindQuestion, req.Kind)
 	assert.Equal(t, []string{"decline", "cancel"}, optionIDs(req))
@@ -226,12 +226,12 @@ func TestPlanUpdates(t *testing.T) {
 	h.feedJSON(`{"method":"turn/plan/updated","params":{"threadId":"` + testThread + `","turnId":"turn-1","explanation":"Start","plan":[{"step":"a","status":"inProgress"}]}}`)
 	h.feedJSON(`{"method":"turn/plan/updated","params":{"threadId":"` + testThread + `","turnId":"turn-1","plan":[{"step":"a","status":"completed"}]}}`)
 	h.completeTurn("turn-1", "completed", "")
-	msg, ok := h.rec.message("turn-1", "assistant")
+	msg, ok := h.rec.Message("turn-1", "assistant")
 	require.True(t, ok)
 	require.Len(t, msg.Content, 1)
 	assert.Equal(t, "update_plan", msg.Content[0].ToolName)
 	assert.JSONEq(t, `{"plan":[{"step":"a","status":"completed"}]}`, string(msg.Content[0].ToolInput))
-	result, _ := h.rec.message("result-plan-turn-1", "user")
+	result, _ := h.rec.Message("result-plan-turn-1", "user")
 	assert.Equal(t, "Plan updated", result.Content[0].Text)
 }
 
@@ -242,12 +242,12 @@ func TestTurnStartedByCodex(t *testing.T) {
 	h.feedJSON(`{"method":"item/started","params":{"threadId":"` + testThread + `","turnId":"auto","item":{"type":"agentMessage","id":"m","text":"","phase":"final_answer"}}}`)
 	h.feedJSON(`{"method":"item/completed","params":{"threadId":"` + testThread + `","turnId":"auto","item":{"type":"agentMessage","id":"m","text":"hi","phase":"final_answer"}}}`)
 	h.completeTurn("auto", "completed", "")
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	assert.Equal(t, []string{"turn_started", "turn_completed:end_turn"}, s.log)
 	// Items of another thread are not ours.
 	h.feedJSON(`{"method":"item/started","params":{"threadId":"other","turnId":"t2","item":{"type":"agentMessage","id":"m2","text":"x"}}}`)
 	h.sync()
-	assert.Equal(t, 1, h.rec.snapshot().started)
+	assert.Equal(t, 1, snapshot(h.rec).started)
 }
 
 func TestCloseEscalates(t *testing.T) {
@@ -367,7 +367,7 @@ func TestFailedInterrupt(t *testing.T) {
 	h.settle()
 	require.ErrorContains(t, h.err("interrupt"), "failed to interrupt turn")
 	h.completeTurn("turn-1", "completed", "")
-	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.rec.snapshot().completions)
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, snapshot(h.rec).completions)
 	h.a.mu.Lock()
 	defer h.a.mu.Unlock()
 	assert.Empty(t, h.a.interrupting)
@@ -386,7 +386,7 @@ func TestServerRequestWithBadParams(t *testing.T) {
 	assert.JSONEq(t, `6`, string(sent.ID))
 	require.NotNil(t, sent.Error)
 	assert.Equal(t, -32602, sent.Error.Code)
-	assert.Empty(t, h.rec.snapshot().opened)
+	assert.Empty(t, snapshot(h.rec).opened)
 }
 
 // An approval shows the command that runs; Codex's reading of it, which
@@ -402,13 +402,13 @@ func TestCommandApprovalShowsTheCommand(t *testing.T) {
 		"command":"git -c core.pager=cat log","cwd":"/work","commandActions":[{"type":"unknown","command":"git -c core.pager=cat log"}]}}`)
 	h.sync()
 
-	req, ok := h.rec.request(h.requestID(json.RawMessage("0")))
+	req, ok := h.rec.Request(h.requestID(json.RawMessage("0")))
 	require.True(t, ok)
 	assert.Equal(t, "cd src && rg -n TODO | head -5", req.Title)
 	assert.JSONEq(t, `{"cmd":"cd src && rg -n TODO | head -5","workdir":"/work"}`, string(req.Input))
 	assert.Equal(t, "Searches for \"TODO\" in src\nWorking directory: /work", req.Detail)
 
-	req, ok = h.rec.request(h.requestID(json.RawMessage("1")))
+	req, ok = h.rec.Request(h.requestID(json.RawMessage("1")))
 	require.True(t, ok)
 	assert.Equal(t, "git -c core.pager=cat log", req.Title, "not a shell wrapper")
 	assert.Equal(t, "Working directory: /work", req.Detail)
@@ -428,7 +428,7 @@ func TestLongCommandApprovalTitle(t *testing.T) {
 	h.feedJSON(`{"id":0,"method":"item/commandExecution/requestApproval","params":` + string(params) + `}`)
 	h.sync()
 
-	req, ok := h.rec.request(h.requestID(json.RawMessage("0")))
+	req, ok := h.rec.Request(h.requestID(json.RawMessage("0")))
 	require.True(t, ok)
 	assert.Equal(t, "node <<'JS' …", req.Title)
 	var input struct {
@@ -446,7 +446,7 @@ func TestPermissionsRequest(t *testing.T) {
 		"reason":"needs the network","permissions":{"network":{"enabled":true}}}}`)
 	h.sync()
 	id := h.requestID(json.RawMessage("2"))
-	req, ok := h.rec.request(id)
+	req, ok := h.rec.Request(id)
 	require.True(t, ok)
 	assert.Equal(t, native.RequestKindApproval, req.Kind)
 	assert.Equal(t, "Grant Codex additional permissions", req.Title)
@@ -469,7 +469,7 @@ func TestURLElicitation(t *testing.T) {
 		"elicitationId":"e1","message":"Authorize GitHub","url":"https://github.com/login/device"}}`)
 	h.sync()
 	id := h.requestID(json.RawMessage("1"))
-	req, ok := h.rec.request(id)
+	req, ok := h.rec.Request(id)
 	require.True(t, ok)
 	assert.Equal(t, native.RequestKindApproval, req.Kind)
 	assert.Equal(t, "Authorize GitHub", req.Title)
@@ -503,7 +503,7 @@ func TestOfferedOptionsAnswerTheRequest(t *testing.T) {
 	} {
 		a.loop.serverRequest(rpcMessage{ID: json.RawMessage(strconv.Itoa(i)), Method: tc.method, Params: json.RawMessage(tc.params)})
 	}
-	opened := a.sink.(*recorder).snapshot().opened
+	opened := snapshot(a.sink.(*recorder)).opened
 	require.Len(t, opened, 7)
 	for _, req := range opened {
 		r := a.requests[req.ID]
@@ -538,13 +538,11 @@ func TestSecretAnswerIsRedacted(t *testing.T) {
 	h.feedJSON(`{"method":"serverRequest/resolved","params":{"threadId":"` + testThread + `","requestId":3}}`)
 	h.sync()
 
-	result, ok := h.rec.message("result-call_1", "user")
+	result, ok := h.rec.Message("result-call_1", "user")
 	require.True(t, ok)
 	assert.Equal(t, "completed", result.Content[0].Status)
 	assert.JSONEq(t, `{"answers":{"user":{"answers":["ada"]},"token":{"answers":["[redacted]"]}}}`, result.Content[0].Text)
-	h.rec.mu.Lock()
-	shown, err := json.Marshal([]any{h.rec.snapshots, h.rec.events})
-	h.rec.mu.Unlock()
+	shown, err := json.Marshal([]any{h.rec.State().Rich, h.rec.State().Events})
 	require.NoError(t, err)
 	assert.NotContains(t, string(shown), "hunter2")
 }
@@ -565,13 +563,13 @@ func TestAnsweredQuestionThenTurnEnd(t *testing.T) {
 	h.feedJSON(`{"method":"serverRequest/resolved","params":{"threadId":"` + testThread + `","requestId":4}}`)
 	h.completeTurn("turn-1", "completed", "")
 
-	result, ok := h.rec.message("result-call_1", "user")
+	result, ok := h.rec.Message("result-call_1", "user")
 	require.True(t, ok)
 	assert.Equal(t, "completed", result.Content[0].Status)
 	assert.JSONEq(t, `{"answers":{"q":{"answers":["yes"]}}}`, result.Content[0].Text)
-	msg, _ := h.rec.message("turn-1", "assistant")
+	msg, _ := h.rec.Message("turn-1", "assistant")
 	assert.Equal(t, "completed", msg.Content[0].Status)
-	assert.Empty(t, h.rec.snapshot().closed, "an answered request is not withdrawn")
+	assert.Empty(t, snapshot(h.rec).closed, "an answered request is not withdrawn")
 }
 
 // Once the loop ended, inLoop fails instead of queueing a task nobody runs.
@@ -632,7 +630,7 @@ func TestNoWakeUpForASentSnapshot(t *testing.T) {
 	h.item("completed", "turn-1", `{"type":"agentMessage","id":"m","text":"Hello"}`)
 	h.sync()
 	h.eventually(func() bool { _, ok := clock.Peek(); return !ok }, "the wake-up to be dropped")
-	msg, _ := h.rec.message("turn-1", "assistant")
+	msg, _ := h.rec.Message("turn-1", "assistant")
 	assert.Equal(t, "Hello", msg.Content[0].Text)
 }
 
@@ -647,10 +645,10 @@ func TestStopReasonAfterSteer(t *testing.T) {
 	h.item("started", "turn-1", `{"type":"userMessage","id":"u2","content":[{"type":"text","text":"stop"}]}`)
 	h.completeTurn("turn-1", "interrupted", "")
 
-	msg, ok := h.rec.message("turn-1", "assistant")
+	msg, ok := h.rec.Message("turn-1", "assistant")
 	require.True(t, ok)
 	assert.Equal(t, native.StopReasonInterrupted, msg.StopReason)
-	_, ok = h.rec.message("turn-1-1", "assistant")
+	_, ok = h.rec.Message("turn-1-1", "assistant")
 	assert.False(t, ok, "the steer's message has no content")
 }
 
@@ -667,7 +665,7 @@ func TestEndedTurnsAreForgotten(t *testing.T) {
 	// A late item of the last turn doesn't start it again.
 	h.item("completed", fmt.Sprintf("turn-%d", turns-1), `{"type":"agentMessage","id":"late","text":"late"}`)
 	h.sync()
-	assert.Equal(t, turns, h.rec.snapshot().started)
+	assert.Equal(t, turns, snapshot(h.rec).started)
 }
 
 // An error app-server doesn't retry after is shown even when the turn goes
@@ -678,16 +676,16 @@ func TestErrorsOfATurn(t *testing.T) {
 	h.beginTurn("turn-1")
 	h.feedJSON(`{"method":"error","params":{"threadId":"` + testThread + `","turnId":"turn-1","willRetry":false,"error":{"message":"MCP server db timed out"}}}`)
 	h.sync()
-	assert.Empty(t, h.rec.snapshot().errors, "shown when the turn ends")
+	assert.Empty(t, snapshot(h.rec).errors, "shown when the turn ends")
 	h.completeTurn("turn-1", "completed", "")
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	assert.Equal(t, []string{"error: MCP server db timed out"}, s.errors)
 	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, s.completions)
 
 	h.beginTurn("turn-2")
 	h.feedJSON(`{"method":"error","params":{"threadId":"` + testThread + `","turnId":"turn-2","willRetry":false,"error":{"message":"tool output too large"}}}`)
 	h.completeTurn("turn-2", "failed", `,"error":{"message":"stream disconnected"}`)
-	s = h.rec.snapshot()
+	s = snapshot(h.rec)
 	assert.Equal(t, []string{"error: MCP server db timed out", "error: tool output too large"}, s.errors)
 	assert.Equal(t, "stream disconnected", s.completions[1].Error)
 }
@@ -715,7 +713,7 @@ func TestOtherToolItems(t *testing.T) {
 	}
 	h.completeTurn("turn-1", "completed", "")
 
-	msg, ok := h.rec.message("turn-1", "assistant")
+	msg, ok := h.rec.Message("turn-1", "assistant")
 	require.True(t, ok)
 	require.Len(t, msg.Content, 5)
 	img := jsonlwatcher.RichImage{MediaType: "image/png", Data: png}
@@ -733,7 +731,7 @@ func TestOtherToolItems(t *testing.T) {
 		assert.Equal(t, want.name, tool.ToolName)
 		assert.JSONEq(t, want.input, string(tool.ToolInput), want.name)
 		assert.Equal(t, want.result.Status, tool.Status, want.name)
-		result, ok := h.rec.message("result-"+tool.ToolUseID, "user")
+		result, ok := h.rec.Message("result-"+tool.ToolUseID, "user")
 		require.True(t, ok, want.name)
 		got := result.Content[0]
 		assert.Equal(t, want.result.Text, got.Text, want.name)

@@ -90,9 +90,7 @@ func TestSettings(t *testing.T) {
 	// it) is reported.
 	h.write(`{"type":"thinking_level_changed","level":"max"}`)
 	h.settle()
-	h.sink.mu.Lock()
-	assert.Equal(t, []native.Settings{{Model: "openai-codex/gpt-6.1-sol", Effort: "max"}}, h.sink.settings)
-	h.sink.mu.Unlock()
+	assert.Equal(t, []native.Settings{{Model: "openai-codex/gpt-6.1-sol", Effort: "max"}}, h.sink.State().Settings)
 }
 
 func TestSettingsWithoutAModel(t *testing.T) {

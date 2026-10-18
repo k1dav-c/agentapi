@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
 )
 
@@ -27,7 +28,7 @@ const testInitialize = `{"claude_code_version":"2.1.302","current_permission_mod
 
 // startedWith is started with initialize answered by init and get_settings
 // by applied.
-func startedWith(t *testing.T, cfg Config, init, applied string) (*Adapter, *recSink, *fakeProcess) {
+func startedWith(t *testing.T, cfg Config, init, applied string) (*Adapter, *nativetest.Sink, *fakeProcess) {
 	t.Helper()
 	proc := newFakeProcess("")
 	proc.settings = applied
@@ -36,7 +37,7 @@ func startedWith(t *testing.T, cfg Config, init, applied string) (*Adapter, *rec
 	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg.Env = []string{}
 	a := newTestAdapter(t, cfg, "")
-	sink := &recSink{t: t}
+	sink := nativetest.NewSink(t)
 	errCh := make(chan error, 1)
 	go func() { errCh <- a.Start(context.Background(), sink) }()
 	request := proc.waitWritten(t, 0)
@@ -78,9 +79,7 @@ func TestSettingsAtStart(t *testing.T) {
 	proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1","model":"claude-opus-4-1"}`))
 	proc.barrier(t)
 	assert.Equal(t, native.Settings{Model: "claude-opus-4-1"}, a.Settings())
-	sink.mu.Lock()
-	assert.Len(t, sink.settings, 1)
-	sink.mu.Unlock()
+	assert.Len(t, sink.State().Settings, 1)
 }
 
 func TestSettingOptionsWithoutBypass(t *testing.T) {
@@ -130,7 +129,7 @@ func TestApplySettings(t *testing.T) {
 	assert.Equal(t, native.PermissionModeAsk, a.Settings().PermissionMode)
 
 	assert.ErrorIs(t, a.ApplySettings(ctx, native.Settings{Model: "gpt"}), native.ErrInvalidSetting)
-	assert.Empty(t, sink.settings, "changes made through ApplySettings aren't reported back")
+	assert.Empty(t, sink.State().Settings, "changes made through ApplySettings aren't reported back")
 }
 
 // indexOf returns the index of frame among those proc read.
@@ -157,6 +156,6 @@ func TestClaudeChangesItsSettings(t *testing.T) {
 	assert.Equal(t, []native.Settings{
 		{Model: "default", Effort: "high"},
 		{Model: "sonnet", Effort: "high"},
-	}, sink.settings)
+	}, sink.State().Settings)
 	assert.Equal(t, native.Settings{Model: "sonnet", Effort: "high"}, a.Settings())
 }

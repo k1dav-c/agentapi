@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,8 +21,8 @@ import (
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // fakeProcess plays Claude Code: the test writes its stdout and reads what
@@ -250,178 +249,9 @@ func (p *fakeProcess) writtenFrames() []map[string]any {
 	return append([]map[string]any(nil), p.written...)
 }
 
-// recSink records the adapter's events and fails on concurrent calls.
-type recSink struct {
-	t      *testing.T
-	active atomic.Int32
-
-	mu       sync.Mutex
-	log      []string
-	rich     []jsonlwatcher.RichMessage
-	events   []jsonlwatcher.SessionEvent
-	requests []native.Request
-	closed   []string
-	refs     []string
-	names    []string
-	errs     []string
-	results  []native.TurnResult
-	logins   []native.LoginRequired
-	settings []native.Settings
-	usage    []native.AgentUsage
-}
-
-func (s *recSink) enter() func() {
-	if s.active.Add(1) != 1 {
-		s.t.Errorf("sink called concurrently")
-	}
-	return func() { s.active.Add(-1) }
-}
-
-func (s *recSink) record(entry string) {
-	s.mu.Lock()
-	s.log = append(s.log, entry)
-	s.mu.Unlock()
-}
-
-func (s *recSink) TurnStarted() { defer s.enter()(); s.record("turn_started") }
-
-func (s *recSink) TurnCompleted(r native.TurnResult) {
-	defer s.enter()()
-	s.mu.Lock()
-	s.results = append(s.results, r)
-	s.mu.Unlock()
-	s.record("turn_completed:" + r.StopReason)
-}
-
-func (s *recSink) RichMessage(m jsonlwatcher.RichMessage) {
-	defer s.enter()()
-	s.mu.Lock()
-	s.rich = append(s.rich, m)
-	s.mu.Unlock()
-}
-
-func (s *recSink) SessionEvents(e []jsonlwatcher.SessionEvent) {
-	defer s.enter()()
-	s.mu.Lock()
-	s.events = append(s.events, e...)
-	s.mu.Unlock()
-}
-
-func (s *recSink) RequestOpened(r native.Request) {
-	defer s.enter()()
-	s.mu.Lock()
-	s.requests = append(s.requests, r)
-	s.mu.Unlock()
-	s.record("request_opened:" + r.ID)
-}
-
-func (s *recSink) RequestClosed(id string) {
-	defer s.enter()()
-	s.mu.Lock()
-	s.closed = append(s.closed, id)
-	s.mu.Unlock()
-	s.record("request_closed:" + id)
-}
-
-func (s *recSink) SessionName(n string) {
-	defer s.enter()()
-	s.mu.Lock()
-	s.names = append(s.names, n)
-	s.mu.Unlock()
-}
-
-func (s *recSink) SessionRef(r string) {
-	defer s.enter()()
-	s.mu.Lock()
-	s.refs = append(s.refs, r)
-	s.mu.Unlock()
-}
-
-func (s *recSink) LoginRequired(l native.LoginRequired) {
-	defer s.enter()()
-	s.mu.Lock()
-	s.logins = append(s.logins, l)
-	s.mu.Unlock()
-	s.record("login_required")
-}
-
-func (s *recSink) UsageChanged(usage native.AgentUsage) {
-	defer s.enter()()
-	s.mu.Lock()
-	s.usage = append(s.usage, usage)
-	s.mu.Unlock()
-}
-
-func (s *recSink) SettingsChanged(settings native.Settings) {
-	defer s.enter()()
-	s.mu.Lock()
-	s.settings = append(s.settings, settings)
-	s.mu.Unlock()
-}
-
 // loggedIn is an AuthStatus that reports a login.
 func loggedIn(context.Context, procutil.Command) ([]byte, error) {
 	return []byte(`{"loggedIn":true,"authMethod":"claude.ai"}`), nil
-}
-
-func (s *recSink) Error(m string, _ st.ErrorLevel) {
-	defer s.enter()()
-	s.mu.Lock()
-	s.errs = append(s.errs, m)
-	s.mu.Unlock()
-}
-
-func (s *recSink) turnLog() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []string
-	for _, e := range s.log {
-		if strings.HasPrefix(e, "turn_") {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-func (s *recSink) request(id string) (native.Request, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, r := range s.requests {
-		if r.ID == id {
-			return r, true
-		}
-	}
-	return native.Request{}, false
-}
-
-// final returns the last state of every rich message, in first-seen order.
-func (s *recSink) final() []jsonlwatcher.RichMessage {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []jsonlwatcher.RichMessage
-	index := map[string]int{}
-	for _, m := range s.rich {
-		key := m.Role + "/" + m.MessageID
-		if i, ok := index[key]; ok {
-			out[i] = m
-			continue
-		}
-		index[key] = len(out)
-		out = append(out, m)
-	}
-	return out
-}
-
-func (s *recSink) snapshots(id string) []jsonlwatcher.RichMessage {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []jsonlwatcher.RichMessage
-	for _, m := range s.rich {
-		if m.MessageID == id {
-			out = append(out, m)
-		}
-	}
-	return out
 }
 
 // record is one line of a capture: "in" was written to the CLI's stdin,
@@ -467,7 +297,7 @@ type replay struct {
 	t     *testing.T
 	a     *Adapter
 	proc  *fakeProcess
-	sink  *recSink
+	sink  *nativetest.Sink
 	cmd   procutil.Command
 	ids   map[string]string
 	errCh []chan error
@@ -478,7 +308,7 @@ type replay struct {
 // newReplay creates an adapter on a fake process.
 func newReplay(t *testing.T, cfg Config, resumeRef string, stderr string) *replay {
 	t.Helper()
-	r := &replay{t: t, proc: newFakeProcess(stderr), sink: &recSink{t: t}, ids: map[string]string{}}
+	r := &replay{t: t, proc: newFakeProcess(stderr), sink: nativetest.NewSink(t), ids: map[string]string{}}
 	cfg.StartProcess = func(c procutil.Command) (procutil.Process, error) {
 		r.cmd = c
 		return r.proc, nil
@@ -592,7 +422,7 @@ func (r *replay) run(recs []record, hooks replayHooks) {
 				response, _ := msg["response"].(map[string]any)
 				id, _ := response["request_id"].(string)
 				captured, _ := response["response"].(map[string]any)
-				req, ok := r.sink.request(id)
+				req, ok := r.sink.Request(id)
 				require.True(t, ok, "request %s was not opened", id)
 				var answer native.Response
 				if hooks.respond != nil {

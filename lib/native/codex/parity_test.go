@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/native/nativetest"
 )
 
 // parseRollout runs the existing rollout parser (the PTY transport's
@@ -22,17 +23,8 @@ func parseRollout(t *testing.T, name string) []jsonlwatcher.RichMessage {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 	p := jsonlwatcher.NewCodexParser()
-	final := map[richKey]jsonlwatcher.RichMessage{}
-	var order []richKey
-	add := func(msgs []jsonlwatcher.RichMessage) {
-		for _, m := range msgs {
-			k := richKey{m.MessageID, m.Role}
-			if _, ok := final[k]; !ok {
-				order = append(order, k)
-			}
-			final[k] = m
-		}
-	}
+	var all []jsonlwatcher.RichMessage
+	add := func(msgs []jsonlwatcher.RichMessage) { all = append(all, msgs...) }
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 8<<20)
 	for sc.Scan() {
@@ -43,11 +35,7 @@ func parseRollout(t *testing.T, name string) []jsonlwatcher.RichMessage {
 		add(p.FlushCompleted())
 	}
 	add(p.Flush())
-	out := make([]jsonlwatcher.RichMessage, 0, len(order))
-	for _, k := range order {
-		out = append(out, final[k])
-	}
-	return out
+	return nativetest.Final(all)
 }
 
 // normalized drops what legitimately differs between the two paths:
@@ -102,7 +90,7 @@ func TestParityWithRolloutParser(t *testing.T) {
 		t.Run(tt.fixture, func(t *testing.T) {
 			h := runFixture(t, tt.fixture, "", nil)
 			want := normalized(t, dropEmpty(parseRollout(t, tt.rollout)))
-			got := normalized(t, dropEmpty(h.rec.messages()))
+			got := normalized(t, dropEmpty(h.rec.Final()))
 			assert.Equal(t, want, got)
 		})
 	}

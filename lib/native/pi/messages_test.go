@@ -31,7 +31,7 @@ func TestThrottleBuildsWhatItSends(t *testing.T) {
 	assert.Equal(t, 1, builds, "the first change is sent at once")
 	h.advance(snapshotInterval)
 	assert.Equal(t, 2, builds, "the latest state is built when the interval ends")
-	assert.Len(t, h.sink.snapshots("m"), 2)
+	assert.Len(t, h.sink.Snapshots("m"), 2)
 }
 
 // TestStreamedToolCall: the arguments of a tool call show once they are
@@ -46,7 +46,7 @@ func TestStreamedToolCall(t *testing.T) {
 		h.write(`{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":` + strconv.Quote(delta) + `}}`)
 	}
 	h.settle()
-	snaps := h.sink.snapshots("assistant-6")
+	snaps := h.sink.Snapshots("assistant-6")
 	require.Len(t, snaps, 1)
 	require.Len(t, snaps[0].Content, 1)
 	assert.Equal(t, "write", snaps[0].Content[0].ToolName)
@@ -57,7 +57,7 @@ func TestStreamedToolCall(t *testing.T) {
 	h.write(`{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","contentIndex":0,"toolCall":{"type":"toolCall","id":"c1","name":"write","arguments":{"path":"a.txt","content":"` + content + `"}}}}`)
 	h.settle()
 	h.advance(snapshotInterval)
-	snaps = h.sink.snapshots("assistant-6")
+	snaps = h.sink.Snapshots("assistant-6")
 	require.Len(t, snaps, 2)
 	assert.JSONEq(t, `{"path":"a.txt","content":"`+content+`"}`, string(snaps[1].Content[0].ToolInput))
 }
@@ -76,10 +76,10 @@ func TestTurnEndSendsTheStream(t *testing.T) {
 	}
 	h.write(`{"type":"agent_settled"}`)
 	h.settle()
-	snaps := h.sink.snapshots("assistant-7")
+	snaps := h.sink.Snapshots("assistant-7")
 	require.Len(t, snaps, 2)
 	assert.Equal(t, []string{"ab"}, texts(snaps[1], "text"))
-	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.turnResults())
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.State().Results)
 	_, timer := h.clock.Peek()
 	assert.False(t, timer)
 }
@@ -97,14 +97,14 @@ func TestExitSendsWhatWaits(t *testing.T) {
 	h.write(`{"type":"tool_execution_update","toolCallId":"c1","toolName":"bash","partialResult":{"content":[{"type":"text","text":"1"}]}}`)
 	h.write(`{"type":"tool_execution_update","toolCallId":"c1","toolName":"bash","partialResult":{"content":[{"type":"text","text":"1\n2"}]}}`)
 	h.settle()
-	require.Len(t, h.sink.snapshots("assistant-5"), 1)
-	require.Len(t, h.sink.snapshots("result-c1"), 1)
+	require.Len(t, h.sink.Snapshots("assistant-5"), 1)
+	require.Len(t, h.sink.Snapshots("result-c1"), 1)
 
 	h.pi.exit(nil)
 	<-h.a.loopDone
-	snaps := h.sink.snapshots("assistant-5")
+	snaps := h.sink.Snapshots("assistant-5")
 	assert.Equal(t, []string{"abc"}, texts(snaps[len(snaps)-1], "text"))
-	results := h.sink.snapshots("result-c1")
+	results := h.sink.Snapshots("result-c1")
 	require.Len(t, results, 2)
 	assert.Equal(t, "1\n2", results[1].Content[0].Text)
 	assert.Equal(t, "running", results[1].Content[0].Status)

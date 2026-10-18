@@ -99,18 +99,18 @@ func TestReplaySimpleText(t *testing.T) {
 	assert.Equal(t, []string{"--model", "openai-codex/gpt-5.6-luna", "--thinking", "medium"}, argv[4:])
 	assert.Equal(t, []string{"get_state", "prompt"}, h.sentTypes())
 
-	assert.Equal(t, []string{"agentapi-fixture-simple2"}, h.sink.refs)
-	assert.Equal(t, []string{"simple fixture", "renamed fixture"}, h.sink.names)
-	assert.Equal(t, 1, h.sink.started)
-	assert.Equal(t, []native.TurnResult{{StopReason: "end_turn"}}, h.sink.turnResults())
+	assert.Equal(t, []string{"agentapi-fixture-simple2"}, h.sink.State().Refs)
+	assert.Equal(t, []string{"simple fixture", "renamed fixture"}, h.sink.State().Names)
+	assert.Equal(t, 1, h.sink.State().Started)
+	assert.Equal(t, []native.TurnResult{{StopReason: "end_turn"}}, h.sink.State().Results)
 	// The context after the reply, in the model's window.
-	require.NotEmpty(t, h.sink.usage)
-	usage := h.sink.usage[len(h.sink.usage)-1].Context
+	require.NotEmpty(t, h.sink.State().Usage)
+	usage := h.sink.State().Usage[len(h.sink.State().Usage)-1].Context
 	require.NotNil(t, usage)
 	assert.Equal(t, 272000, usage.Size)
 	assert.Positive(t, usage.Used)
 
-	final := h.sink.final()
+	final := h.sink.Final()
 	require.Len(t, final, 2)
 	user, assistant := final[0], final[1]
 	assert.Equal(t, "user", user.Role)
@@ -126,22 +126,22 @@ func TestReplaySimpleText(t *testing.T) {
 	assert.Equal(t, "assistant-1792137197230", assistant.MessageID)
 
 	// The deltas were streamed as snapshots of the same message.
-	snaps := h.sink.snapshots(assistant.MessageID)
+	snaps := h.sink.Snapshots(assistant.MessageID)
 	require.GreaterOrEqual(t, len(snaps), 2)
 	assert.Empty(t, snaps[0].StopReason, "a snapshot is not final")
 	assert.NotEmpty(t, snaps[0].Content)
 
-	require.NotEmpty(t, h.sink.events)
-	first := h.sink.events[0]
+	require.NotEmpty(t, h.sink.State().Events)
+	first := h.sink.State().Events[0]
 	assert.Equal(t, "system", first.Kind)
 	assert.Equal(t, "session started: "+cwd+" (pi)", *first.Content)
 	assert.Equal(t, "agentapi-fixture-simple2", *first.SessionID)
 	var kinds []string
-	for _, e := range h.sink.events[1:] {
+	for _, e := range h.sink.State().Events[1:] {
 		kinds = append(kinds, e.Kind+"/"+*e.Role)
 	}
 	assert.Equal(t, []string{"text/user", "thinking/assistant", "text/assistant"}, kinds)
-	assert.Empty(t, h.sink.errors)
+	assert.Empty(t, h.sink.State().Errors)
 
 	closeAdapter(t, h)
 	assert.NoError(t, h.a.Wait())
@@ -156,7 +156,7 @@ func TestReplayToolCall(t *testing.T) {
 	h.started()
 	require.NoError(t, h.result("p1"))
 
-	final := h.sink.final()
+	final := h.sink.Final()
 	uses := toolUses(final)
 	results := toolResults(final)
 	require.Len(t, uses, 3)
@@ -179,14 +179,14 @@ func TestReplayToolCall(t *testing.T) {
 	}
 	// Bash output was shown while the command ran.
 	bashID := "result-" + uses[2].ToolUseID
-	snaps := h.sink.snapshots(bashID)
+	snaps := h.sink.Snapshots(bashID)
 	require.NotEmpty(t, snaps)
 	assert.Equal(t, "running", snaps[0].Content[0].Status)
 
 	last := final[len(final)-1]
 	assert.Equal(t, []string{"done"}, texts(last, "text"))
-	assert.Equal(t, []native.TurnResult{{StopReason: "end_turn"}}, h.sink.turnResults())
-	assert.Equal(t, 1, h.sink.started)
+	assert.Equal(t, []native.TurnResult{{StopReason: "end_turn"}}, h.sink.State().Results)
+	assert.Equal(t, 1, h.sink.State().Started)
 }
 
 func TestReplayExtensionDialogs(t *testing.T) {
@@ -206,17 +206,17 @@ func TestReplayExtensionDialogs(t *testing.T) {
 		require.NoError(t, h.result(id), id)
 	}
 
-	assert.Equal(t, []string{"pi RPC Demo"}, h.sink.names, "setTitle stands in for the session name")
-	require.Len(t, h.sink.requests, 4)
+	assert.Equal(t, []string{"pi RPC Demo"}, h.sink.State().Names, "setTitle stands in for the session name")
+	require.Len(t, h.sink.State().Requests, 4)
 
-	input := h.sink.requests[0]
+	input := h.sink.State().Requests[0]
 	assert.Equal(t, native.RequestKindQuestion, input.Kind)
 	assert.Equal(t, "Enter a value", input.Title)
 	assert.Equal(t, "type something...", input.Detail)
 	assert.Equal(t, []native.Question{{ID: valueQuestion, Question: "Enter a value", FreeText: true}}, input.Questions)
 	assert.Equal(t, []native.RequestOption{{ID: optionCancel, Label: "Cancel", Kind: native.OptionKindCancel}}, input.Options)
 
-	approval := h.sink.requests[1]
+	approval := h.sink.State().Requests[1]
 	assert.Equal(t, native.RequestKindApproval, approval.Kind)
 	assert.Equal(t, "Dangerous command: rm -rf junkdir", approval.Title)
 	assert.Equal(t, "bash", approval.ToolName)
@@ -227,14 +227,14 @@ func TestReplayExtensionDialogs(t *testing.T) {
 		{ID: "Block", Label: "Block", Kind: native.OptionKindDeny},
 	}, approval.Options)
 
-	confirm := h.sink.requests[2]
+	confirm := h.sink.State().Requests[2]
 	assert.Equal(t, native.RequestKindApproval, confirm.Kind)
 	assert.Equal(t, "Clear session?", confirm.Title)
 	assert.Equal(t, "All messages will be lost.", confirm.Detail)
 	assert.Empty(t, confirm.ToolUseID)
 	assert.Equal(t, []string{optionYes, optionNo}, []string{confirm.Options[0].ID, confirm.Options[1].ID})
 
-	assert.Equal(t, native.RequestKindQuestion, h.sink.requests[3].Kind)
+	assert.Equal(t, native.RequestKindQuestion, h.sink.State().Requests[3].Kind)
 
 	// The commands matched the capture: value, Block, confirmed false,
 	// cancelled.
@@ -254,18 +254,18 @@ func TestReplayExtensionDialogs(t *testing.T) {
 
 	// Two extension commands without a run and one run: three turns. The
 	// confirm came outside a turn.
-	assert.Equal(t, 3, h.sink.started)
+	assert.Equal(t, 3, h.sink.State().Started)
 	assert.Equal(t, []native.TurnResult{
 		{StopReason: native.StopReasonHandled},
 		{StopReason: native.StopReasonEndTurn},
 		{StopReason: native.StopReasonHandled},
-	}, h.sink.turnResults())
+	}, h.sink.State().Results)
 
-	results := toolResults(h.sink.final())
+	results := toolResults(h.sink.Final())
 	require.Len(t, results, 1)
 	assert.Equal(t, "Blocked by user", results[0].Text)
 	assert.Equal(t, "failed", results[0].Status)
-	assert.Empty(t, h.sink.closed)
+	assert.Empty(t, h.sink.State().Closed)
 
 	// Answered requests are gone.
 	assert.ErrorIs(t, h.a.Respond(h.ctx, approval.ID, native.Response{OptionID: "Allow"}), native.ErrRequestNotFound)
@@ -280,15 +280,15 @@ func TestReplayApprovalAllow(t *testing.T) {
 	require.NoError(t, h.result("p2"))
 	require.NoError(t, h.result("7a0091f5-b02a-4261-b1aa-d6bb410f95b6"))
 
-	require.Len(t, h.sink.requests, 1)
-	assert.Equal(t, native.RequestKindApproval, h.sink.requests[0].Kind)
+	require.Len(t, h.sink.State().Requests, 1)
+	assert.Equal(t, native.RequestKindApproval, h.sink.State().Requests[0].Kind)
 	allow := h.sent[len(h.sent)-1]
 	assert.Equal(t, "Allow", allow["value"])
-	results := toolResults(h.sink.final())
+	results := toolResults(h.sink.Final())
 	require.Len(t, results, 1)
 	assert.Equal(t, "completed", results[0].Status)
-	assert.Equal(t, []native.TurnResult{{StopReason: "end_turn"}}, h.sink.turnResults())
-	final := h.sink.final()
+	assert.Equal(t, []native.TurnResult{{StopReason: "end_turn"}}, h.sink.State().Results)
+	final := h.sink.Final()
 	assert.Equal(t, []string{"Removed"}, texts(final[len(final)-1], "text"))
 }
 
@@ -320,8 +320,8 @@ func TestReplayAbortDuringTool(t *testing.T) {
 	require.NoError(t, h.result("a1"))
 
 	assert.Equal(t, []string{"get_state", "prompt", "abort"}, h.sentTypes(), "the second abort, while idle, isn't sent")
-	assert.Equal(t, []native.TurnResult{{StopReason: "interrupted"}}, h.sink.turnResults())
-	final := h.sink.final()
+	assert.Equal(t, []native.TurnResult{{StopReason: "interrupted"}}, h.sink.State().Results)
+	final := h.sink.Final()
 	for _, m := range final {
 		for _, text := range texts(m, "text") {
 			assert.NotContains(t, text, "Error:", "the aborted run's extra message is no error")
@@ -331,7 +331,7 @@ func TestReplayAbortDuringTool(t *testing.T) {
 	require.Len(t, results, 1)
 	assert.Equal(t, "Command aborted", results[0].Text)
 	assert.Equal(t, "failed", results[0].Status)
-	assert.Empty(t, h.sink.errors)
+	assert.Empty(t, h.sink.State().Errors)
 }
 
 func TestReplayAbortDuringStream(t *testing.T) {
@@ -342,14 +342,14 @@ func TestReplayAbortDuringStream(t *testing.T) {
 	h.started()
 	require.NoError(t, h.result("a1"))
 
-	assert.Equal(t, []native.TurnResult{{StopReason: "interrupted"}}, h.sink.turnResults())
-	final := h.sink.final()
+	assert.Equal(t, []native.TurnResult{{StopReason: "interrupted"}}, h.sink.State().Results)
+	final := h.sink.Final()
 	last := final[len(final)-1]
 	assert.Equal(t, "aborted", last.StopReason)
 	require.Len(t, texts(last, "text"), 1)
 	assert.True(t, strings.HasPrefix(texts(last, "text")[0], "Every evening, Elias climbed"))
 	// The partial text streamed before the abort.
-	assert.Greater(t, len(h.sink.snapshots(last.MessageID)), 1)
+	assert.Greater(t, len(h.sink.Snapshots(last.MessageID)), 1)
 }
 
 func TestReplaySteer(t *testing.T) {
@@ -372,7 +372,7 @@ func TestReplaySteer(t *testing.T) {
 	}
 	assert.Equal(t, 2, steers)
 
-	final := h.sink.final()
+	final := h.sink.Final()
 	users := findRich(final, func(m jsonlwatcher.RichMessage) bool {
 		return m.Role == "user" && !strings.HasPrefix(m.MessageID, "result-")
 	})
@@ -380,8 +380,8 @@ func TestReplaySteer(t *testing.T) {
 	assert.Equal(t, []string{"Also: end your final reply with the word BANANA."}, texts(users[1], "text"))
 	assert.Equal(t, []string{"And mention the word KIWI too."}, texts(users[2], "text"))
 	assert.NotEqual(t, users[1].MessageID, users[2].MessageID)
-	assert.Equal(t, 1, h.sink.started)
-	assert.Equal(t, []native.TurnResult{{StopReason: "end_turn"}}, h.sink.turnResults())
+	assert.Equal(t, 1, h.sink.State().Started)
+	assert.Equal(t, []native.TurnResult{{StopReason: "end_turn"}}, h.sink.State().Results)
 	assert.Equal(t, []string{"The command output was `step1`; KIWI. BANANA"}, texts(final[len(final)-1], "text"))
 }
 
@@ -391,8 +391,8 @@ func TestReplayFollowUpsStayInOneTurn(t *testing.T) {
 	h.answerState(noState)
 	h.replay(loadFixture(t, "follow_up.ndjson")[0])
 	h.started()
-	assert.Equal(t, 1, h.sink.started)
-	assert.Len(t, h.sink.turnResults(), 1)
+	assert.Equal(t, 1, h.sink.State().Started)
+	assert.Len(t, h.sink.State().Results, 1)
 }
 
 func TestReplayResume(t *testing.T) {
@@ -405,8 +405,8 @@ func TestReplayResume(t *testing.T) {
 	require.NoError(t, h.result("p2"))
 
 	assert.Equal(t, []string{"--mode", "rpc", "--session-id", "agentapi-fixture-resume", "--session-dir", "/tmp/sessions"}, h.pi.argv)
-	assert.Equal(t, []string{"agentapi-fixture-resume"}, h.sink.refs)
-	final := h.sink.final()
+	assert.Equal(t, []string{"agentapi-fixture-resume"}, h.sink.State().Refs)
+	final := h.sink.Final()
 	last := final[len(final)-1]
 	assert.Equal(t, []string{"PINEAPPLE-42"}, texts(last, "text"))
 	assert.Empty(t, texts(last, "thinking"), "encrypted thinking without text is dropped")
@@ -425,7 +425,7 @@ func TestReplayImageInput(t *testing.T) {
 	images := prompt["images"].([]any)
 	require.Len(t, images, 1)
 	assert.Equal(t, "image/png", images[0].(map[string]any)["mimeType"])
-	final := h.sink.final()
+	final := h.sink.Final()
 	assert.Equal(t, []string{"What single colour is this image? Reply with one word."}, texts(final[0], "text"))
 	assert.Equal(t, []string{"Red"}, texts(final[len(final)-1], "text"))
 }
@@ -437,18 +437,16 @@ func TestReplayModelError(t *testing.T) {
 	h.started()
 	require.NoError(t, h.result("p1"))
 
-	results := h.sink.turnResults()
+	results := h.sink.State().Results
 	require.Len(t, results, 1)
 	assert.Equal(t, "error", results[0].StopReason)
 	assert.Contains(t, results[0].Error, "Codex error: The 'gpt-5.3-codex-spark' model is not supported")
-	final := h.sink.final()
+	final := h.sink.Final()
 	last := final[len(final)-1]
 	assert.Equal(t, "error", last.StopReason)
 	require.Len(t, texts(last, "text"), 1)
 	assert.True(t, strings.HasPrefix(texts(last, "text")[0], "Error: Codex error"))
-	h.sink.mu.Lock()
-	assert.Empty(t, h.sink.logins, "a model the account can't use is not a login problem")
-	h.sink.mu.Unlock()
+	assert.Empty(t, h.sink.State().Logins, "a model the account can't use is not a login problem")
 }
 
 func TestExitWhileRequestPending(t *testing.T) {
@@ -459,7 +457,7 @@ func TestExitWhileRequestPending(t *testing.T) {
 	cut := slices.IndexFunc(records, func(r record) bool { return strings.Contains(string(r.Msg), `"method":"select"`) })
 	h.replay(records[:cut+1])
 	h.started()
-	require.Len(t, h.sink.requests, 2)
+	require.Len(t, h.sink.State().Requests, 2)
 
 	h.pi.stderr = "Error: out of memory"
 	h.pi.exit(errors.New("exit status 1"))
@@ -501,7 +499,7 @@ func TestCloseAbortsRunningTurn(t *testing.T) {
 	}
 	events := h.pi.events()
 	assert.Equal(t, []string{"cmd:get_state", "cmd:prompt", "cmd:abort", "stdin closed"}, events)
-	assert.Equal(t, []native.TurnResult{{StopReason: "interrupted"}}, h.sink.turnResults())
+	assert.Equal(t, []native.TurnResult{{StopReason: "interrupted"}}, h.sink.State().Results)
 	assert.NoError(t, h.a.Wait())
 }
 
@@ -546,10 +544,10 @@ func TestDialogTimeoutClosesRequest(t *testing.T) {
 	h.writeLine(map[string]any{"type": "extension_ui_request", "id": "d1", "method": "select", "title": "Pick", "options": []string{"a", "b"}, "timeout": 30})
 	h.settle()
 	h.advance(29 * time.Millisecond)
-	assert.Empty(t, h.sink.closed)
+	assert.Empty(t, h.sink.State().Closed)
 	h.advance(time.Millisecond)
-	assert.Equal(t, []string{"d1"}, h.sink.closed)
-	req, ok := h.sink.request("d1")
+	assert.Equal(t, []string{"d1"}, h.sink.State().Closed)
+	req, ok := h.sink.Request("d1")
 	require.True(t, ok)
 	assert.Equal(t, native.RequestKindQuestion, req.Kind)
 	assert.ErrorIs(t, h.a.Respond(h.ctx, "d1", native.Response{Answers: map[string][]string{choiceQuestion: {"a"}}}), native.ErrRequestNotFound)
@@ -563,7 +561,7 @@ func TestNotifyErrorIsReported(t *testing.T) {
 	h.writeLine(map[string]any{"type": "extension_ui_request", "id": "n1", "method": "notify", "message": "MCP server failed", "notifyType": "error"})
 	h.writeLine(map[string]any{"type": "extension_ui_request", "id": "n2", "method": "notify", "message": "fine", "notifyType": "info"})
 	h.settle()
-	assert.Equal(t, []string{"MCP server failed"}, h.sink.errors)
+	assert.Equal(t, []string{"error: MCP server failed"}, h.sink.State().Errors)
 }
 
 func TestThrottle(t *testing.T) {
@@ -577,18 +575,18 @@ func TestThrottle(t *testing.T) {
 		h.write(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"` + d + `"}}`)
 	}
 	h.settle()
-	snaps := h.sink.snapshots("assistant-5")
+	snaps := h.sink.Snapshots("assistant-5")
 	require.Len(t, snaps, 1, "one snapshot per interval")
 	assert.Equal(t, []string{"a"}, texts(snaps[0], "text"))
 	h.advance(snapshotInterval - time.Millisecond)
-	assert.Len(t, h.sink.snapshots("assistant-5"), 1)
+	assert.Len(t, h.sink.Snapshots("assistant-5"), 1)
 	h.advance(time.Millisecond)
-	snaps = h.sink.snapshots("assistant-5")
+	snaps = h.sink.Snapshots("assistant-5")
 	require.Len(t, snaps, 2)
 	assert.Equal(t, []string{"abcd"}, texts(snaps[1], "text"), "the latest state is sent when the interval ends")
 	h.write(`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"abcd!"}],"model":"m","stopReason":"stop","timestamp":5}}`)
 	h.settle()
-	snaps = h.sink.snapshots("assistant-5")
+	snaps = h.sink.Snapshots("assistant-5")
 	assert.Equal(t, []string{"abcd!"}, texts(snaps[len(snaps)-1], "text"))
 	assert.Equal(t, "end_turn", snaps[len(snaps)-1].StopReason)
 	_, pending := h.clock.Peek()
@@ -605,7 +603,7 @@ func TestToolResultImages(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(`{"type":"message_end","message":{"role":"toolResult","toolCallId":"c1","toolName":"read","content":[{"type":"text","text":"Read image file [image/png]"},{"type":"image","data":"`+png+`","mimeType":"image/png"}],"isError":false,"timestamp":7}}`), &v))
 	h.writeLine(v)
 	h.settle()
-	results := toolResults(h.sink.final())
+	results := toolResults(h.sink.Final())
 	require.Len(t, results, 1)
 	require.Len(t, results[0].Images, 1)
 	assert.Equal(t, "image/png", results[0].Images[0].MediaType)
@@ -646,7 +644,7 @@ func TestParity(t *testing.T) {
 				want = append(want, msgs...)
 			}
 			require.NotEmpty(t, want)
-			got := stripVolatile(h.sink.final())
+			got := stripVolatile(h.sink.Final())
 			assert.True(t, equalJSON(stripVolatile(want), got), "want %s\n got %s", mustJSON(stripVolatile(want)), mustJSON(got))
 		})
 	}

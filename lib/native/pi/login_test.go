@@ -50,10 +50,8 @@ func TestLoginCheckAtStart(t *testing.T) {
 		require.ErrorAs(t, h.startResult(), &login)
 		assert.Equal(t, loginHint, login.Login)
 		assert.Equal(t, "pi", login.Login.Command)
-		h.sink.mu.Lock()
-		defer h.sink.mu.Unlock()
-		assert.Empty(t, h.sink.refs, "a session that waits for a login isn't reported")
-		assert.Empty(t, h.sink.events)
+		assert.Empty(t, h.sink.State().Refs, "a session that waits for a login isn't reported")
+		assert.Empty(t, h.sink.State().Events)
 	})
 
 	for name, reply := range map[string]map[string]any{
@@ -68,9 +66,7 @@ func TestLoginCheckAtStart(t *testing.T) {
 			h.answerModels(reply)
 			require.NoError(t, h.startResult())
 			// Before Start returns, so the conversation finds them.
-			h.sink.mu.Lock()
-			assert.Equal(t, []string{"01a1440e-b3a3-7317-b135-afa7fda22fac"}, h.sink.refs, "the session is reported once Pi may start")
-			h.sink.mu.Unlock()
+			assert.Equal(t, []string{"01a1440e-b3a3-7317-b135-afa7fda22fac"}, h.sink.State().Refs, "the session is reported once Pi may start")
 			assert.False(t, h.a.Capabilities().Images, "the unknown model takes no images")
 		})
 	}
@@ -81,9 +77,7 @@ func TestLoginCheckAtStart(t *testing.T) {
 		h.answerState(noState)
 		require.NoError(t, h.startResult())
 		assert.Equal(t, []string{"cmd:get_state"}, h.pi.events())
-		h.sink.mu.Lock()
-		assert.Equal(t, []string{"test-session"}, h.sink.refs)
-		h.sink.mu.Unlock()
+		assert.Equal(t, []string{"test-session"}, h.sink.State().Refs)
 	})
 
 	t.Run("a malformed state skips the check", func(t *testing.T) {
@@ -113,10 +107,8 @@ func TestLoginLostMidSession(t *testing.T) {
 		err := h.result("p")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "No API key found")
-		h.sink.mu.Lock()
-		defer h.sink.mu.Unlock()
-		assert.Equal(t, []native.LoginRequired{loginHint}, h.sink.logins)
-		assert.Zero(t, h.sink.started, "no turn started")
+		assert.Equal(t, []native.LoginRequired{loginHint}, h.sink.State().Logins)
+		assert.Zero(t, h.sink.State().Started, "no turn started")
 	})
 
 	t.Run("provider rejects the key", func(t *testing.T) {
@@ -138,12 +130,10 @@ func TestLoginLostMidSession(t *testing.T) {
 		h.writeLine(map[string]any{"type": "agent_settled"})
 		require.NoError(t, h.result("p"))
 		h.settle()
-		h.sink.mu.Lock()
-		defer h.sink.mu.Unlock()
-		assert.Equal(t, []native.LoginRequired{loginHint}, h.sink.logins)
-		require.Len(t, h.sink.results, 1)
-		assert.Equal(t, "error", h.sink.results[0].StopReason)
-		assert.Less(t, slices.Index(h.sink.log, "login_required"), slices.Index(h.sink.log, "turn_completed"))
+		assert.Equal(t, []native.LoginRequired{loginHint}, h.sink.State().Logins)
+		require.Len(t, h.sink.State().Results, 1)
+		assert.Equal(t, "error", h.sink.State().Results[0].StopReason)
+		assert.Less(t, slices.Index(h.sink.State().Log, "login_required"), slices.Index(h.sink.State().Log, "turn_completed:error"))
 	})
 }
 

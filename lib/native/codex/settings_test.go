@@ -159,7 +159,7 @@ func (h *harness) planTurn(turnID string) native.Request {
 	h.item("started", turnID, `{"type":"plan","id":"`+turnID+`-plan","text":""}`)
 	h.item("completed", turnID, `{"type":"plan","id":"`+turnID+`-plan","text":"## Add hello.txt\n\nCreate it with hi."}`)
 	h.completeTurn(turnID, "completed", "")
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	require.NotEmpty(h.t, s.opened)
 	return s.opened[len(s.opened)-1]
 }
@@ -185,7 +185,7 @@ func TestPlanMode(t *testing.T) {
 	// The turn ends with a plan: it waits for the user instead of ending.
 	h.item("completed", "turn-1", `{"type":"plan","id":"turn-1-plan","text":"## Add hello.txt\n\nCreate it with hi."}`)
 	h.completeTurn("turn-1", "completed", "")
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	assert.Empty(t, s.completions, "the turn goes on")
 	require.Len(t, s.opened, 1)
 	plan := s.opened[0]
@@ -210,12 +210,12 @@ func TestPlanMode(t *testing.T) {
 	h.feedJSON(`{"id":` + string(sent.ID) + `,"result":{"turn":{"id":"turn-2","items":[],"status":"inProgress"}}}`)
 	h.settle()
 	require.NoError(t, h.err("respond"))
-	h.eventually(func() bool { return len(h.rec.snapshot().settings) > 0 }, "the settings to be reported")
-	s = h.rec.snapshot()
+	h.eventually(func() bool { return len(snapshot(h.rec).settings) > 0 }, "the settings to be reported")
+	s = snapshot(h.rec)
 	assert.Equal(t, native.PermissionModeAuto, s.settings[len(s.settings)-1].PermissionMode)
 	assert.Equal(t, native.PermissionModeAuto, h.a.Settings().PermissionMode)
 	h.completeTurn("turn-2", "completed", "")
-	assert.Len(t, h.rec.snapshot().completions, 1, "the implementation ends the turn")
+	assert.Len(t, snapshot(h.rec).completions, 1, "the implementation ends the turn")
 }
 
 func TestPlanFeedbackAndInterrupt(t *testing.T) {
@@ -240,12 +240,12 @@ func TestPlanFeedbackAndInterrupt(t *testing.T) {
 	assert.ErrorIs(t, h.a.Respond(context.Background(), plan.ID, native.Response{OptionID: "implement_bypass"}), native.ErrRequestNotFound, "answered once")
 	h.item("completed", "turn-2", `{"type":"plan","id":"turn-2-plan","text":"## Add hello.md"}`)
 	h.completeTurn("turn-2", "completed", "")
-	second := h.rec.snapshot().opened[1]
+	second := snapshot(h.rec).opened[1]
 
 	// Interrupted while it waits: the request closes and the turn ends.
 	require.NoError(t, h.a.Interrupt(context.Background()))
-	h.eventually(func() bool { return len(h.rec.snapshot().completions) == 1 }, "the interrupted turn to end")
-	s := h.rec.snapshot()
+	h.eventually(func() bool { return len(snapshot(h.rec).completions) == 1 }, "the interrupted turn to end")
+	s := snapshot(h.rec)
 	assert.Contains(t, s.closed, second.ID)
 	require.Len(t, s.completions, 1)
 	assert.Equal(t, native.StopReasonInterrupted, s.completions[0].StopReason)
@@ -254,8 +254,8 @@ func TestPlanFeedbackAndInterrupt(t *testing.T) {
 	// No feedback: the turn ends, still in the plan mode.
 	third := h.planTurn("turn-3")
 	require.NoError(t, h.a.Respond(context.Background(), third.ID, native.Response{OptionID: optionKeepPlanning}))
-	h.eventually(func() bool { return len(h.rec.snapshot().completions) == 2 }, "the turn to end")
-	s = h.rec.snapshot()
+	h.eventually(func() bool { return len(snapshot(h.rec).completions) == 2 }, "the turn to end")
+	s = snapshot(h.rec)
 	require.Len(t, s.completions, 2)
 	assert.Equal(t, native.StopReasonEndTurn, s.completions[1].StopReason)
 	assert.ErrorIs(t, h.a.Respond(context.Background(), third.ID, native.Response{OptionID: "maybe"}), native.ErrRequestNotFound)
@@ -309,10 +309,8 @@ func TestUsage(t *testing.T) {
 	h.feedJSON(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"limitId":"gpt-6-astra","limitName":"Astra",
 		"primary":{"usedPercent":50,"windowDurationMins":300,"resetsAt":null},"secondary":null}}}`)
 	h.sync()
-	h.rec.mu.Lock()
-	defer h.rec.mu.Unlock()
-	require.Len(t, h.rec.usage, 3)
-	usage := h.rec.usage[2]
+	require.Len(t, h.rec.State().Usage, 3)
+	usage := h.rec.State().Usage[2]
 	assert.Equal(t, &native.ContextUsage{Used: 17721, Size: 258400}, usage.Context)
 	require.Len(t, usage.RateLimits, 3)
 	assert.Equal(t, "gpt-6-astra-primary", usage.RateLimits[0].ID)
@@ -338,7 +336,7 @@ func TestCompact(t *testing.T) {
 	h.feedJSON(`{"method":"turn/started","params":{"threadId":"` + testThread + `","turn":{"id":"turn-c","items":[],"status":"inProgress"}}}`)
 	h.item("completed", "turn-c", `{"type":"contextCompaction","id":"c1"}`)
 	h.completeTurn("turn-c", "completed", "")
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	assert.Equal(t, 1, s.started)
 	require.Len(t, s.completions, 1)
 	assert.NotEmpty(t, s.eventsOf("system"))
@@ -379,5 +377,5 @@ func TestFailedImplementationKeepsPlanning(t *testing.T) {
 	require.NoError(t, h.err("revise"))
 	h.item("completed", "turn-2", `{"type":"plan","id":"turn-2-plan","text":"## Smaller"}`)
 	h.completeTurn("turn-2", "completed", "")
-	assert.Equal(t, "implement_ask", optionIDs(h.rec.snapshot().opened[1])[0], "the mode of before")
+	assert.Equal(t, "implement_ask", optionIDs(snapshot(h.rec).opened[1])[0], "the mode of before")
 }

@@ -41,7 +41,7 @@ func optionIDs(req native.Request) []string {
 
 func TestSimpleTextWithReasoning(t *testing.T) {
 	h := runFixture(t, "simple_text", "", nil)
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 
 	// Handshake.
 	var init initializeParams
@@ -61,11 +61,11 @@ func TestSimpleTextWithReasoning(t *testing.T) {
 	assert.Equal(t, native.TurnResult{StopReason: "end_turn"}, s.completions[0])
 	assert.Contains(t, s.errors[0], "warning: Codex is ignoring 1 unrecognized configuration setting")
 
-	user, ok := h.rec.message("01a143b3-952b-7762-873d-7c75dce093a1", "user")
+	user, ok := h.rec.Message("01a143b3-952b-7762-873d-7c75dce093a1", "user")
 	require.True(t, ok)
 	assert.Equal(t, []jsonlwatcher.RichContentBlock{{Type: "text", Text: "How many integers n with 1 <= n <= 60 make n^2 + n + 41 composite? Work it out carefully, then answer with one short sentence. Do not run any commands."}}, user.Content)
 
-	msg, ok := h.rec.message("01a143b3-906e-7190-8322-7884ae84fa90", "assistant")
+	msg, ok := h.rec.Message("01a143b3-906e-7190-8322-7884ae84fa90", "assistant")
 	require.True(t, ok)
 	assert.Equal(t, []string{"thinking", "thinking", "thinking", "thinking", "thinking", "thinking", "thinking", "text"}, blockTypes(msg))
 	assert.Equal(t, "**Checking values through 60**\n\n**Factoring values above 44**", msg.Content[0].Thinking)
@@ -76,7 +76,7 @@ func TestSimpleTextWithReasoning(t *testing.T) {
 
 	// Thinking streamed: a snapshot showed the first summary part alone.
 	sawPartial := false
-	for _, snap := range h.rec.snapshots {
+	for _, snap := range h.rec.State().Rich {
 		if snap.MessageID == msg.MessageID && len(snap.Content) > 0 && snap.Content[0].Thinking == "**Checking values through 60**" {
 			sawPartial = true
 		}
@@ -135,7 +135,7 @@ func TestThreadSettingsFromFlags(t *testing.T) {
 
 func TestCommandApprovalAccept(t *testing.T) {
 	h := runFixture(t, "command_approval_accept", "", nil)
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 
 	require.Len(t, s.opened, 1)
 	req := s.opened[0]
@@ -152,14 +152,14 @@ func TestCommandApprovalAccept(t *testing.T) {
 	assert.Empty(t, s.closed, "an answered request is not withdrawn")
 	assert.Empty(t, h.a.requests)
 
-	msg, ok := h.rec.message("01a143b4-473d-7b12-a2e9-39a5c82015ea", "assistant")
+	msg, ok := h.rec.Message("01a143b4-473d-7b12-a2e9-39a5c82015ea", "assistant")
 	require.True(t, ok)
 	assert.Equal(t, []string{"tool_use", "text"}, blockTypes(msg))
 	assert.Equal(t, "completed", msg.Content[0].Status)
 	assert.Equal(t, "exec_command", msg.Content[0].ToolName)
 	assert.Equal(t, "42", msg.Content[1].Text)
 
-	result, ok := h.rec.message("result-exec-7ce2bd20-5834-4962-96d7-142110034025", "user")
+	result, ok := h.rec.Message("result-exec-7ce2bd20-5834-4962-96d7-142110034025", "user")
 	require.True(t, ok)
 	require.Len(t, result.Content, 1)
 	assert.Equal(t, "tool_result", result.Content[0].Type)
@@ -177,16 +177,16 @@ func TestCommandApprovalAccept(t *testing.T) {
 
 func TestCommandApprovalDecline(t *testing.T) {
 	h := runFixture(t, "command_approval_decline", "", nil)
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	require.Len(t, s.opened, 1)
 
-	result, ok := h.rec.message("result-exec-50a6c648-c22d-48e9-9cf1-e11d1a959803", "user")
+	result, ok := h.rec.Message("result-exec-50a6c648-c22d-48e9-9cf1-e11d1a959803", "user")
 	require.True(t, ok)
 	assert.Equal(t, "Command declined by the user", result.Content[0].Text)
 	assert.Equal(t, "failed", result.Content[0].Status)
 	assert.True(t, *result.Content[0].IsError)
 
-	msg, _ := h.rec.message("01a143b4-5c46-70e3-b3d4-31e6c318044d", "assistant")
+	msg, _ := h.rec.Message("01a143b4-5c46-70e3-b3d4-31e6c318044d", "assistant")
 	assert.Equal(t, "failed", msg.Content[0].Status)
 	assert.Equal(t, "The command was not allowed; it was rejected.", msg.Content[1].Text)
 	assert.Equal(t, []native.TurnResult{{StopReason: "end_turn"}}, s.completions)
@@ -194,7 +194,7 @@ func TestCommandApprovalDecline(t *testing.T) {
 
 func TestUnansweredApprovalThenInterrupt(t *testing.T) {
 	h := runFixture(t, "command_approval_unanswered", "", nil)
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 
 	require.NoError(t, h.err("turn/interrupt"))
 	require.Len(t, s.opened, 1)
@@ -203,11 +203,11 @@ func TestUnansweredApprovalThenInterrupt(t *testing.T) {
 	// adapter declined it then and refused the late reply (see replayOut).
 	assert.Empty(t, h.a.requests)
 
-	msg, _ := h.rec.message("01a143b4-9c0b-7021-a76f-53bf2628f666", "assistant")
+	msg, _ := h.rec.Message("01a143b4-9c0b-7021-a76f-53bf2628f666", "assistant")
 	assert.Equal(t, "interrupted", msg.StopReason)
 	require.Equal(t, []string{"tool_use"}, blockTypes(msg))
 	assert.Equal(t, "failed", msg.Content[0].Status, "the open command is closed when the turn ends")
-	result, ok := h.rec.message("result-exec-03689302-ad96-4a3c-93c2-e4719fae9881", "user")
+	result, ok := h.rec.Message("result-exec-03689302-ad96-4a3c-93c2-e4719fae9881", "user")
 	require.True(t, ok)
 	assert.Equal(t, "Interrupted", result.Content[0].Text)
 
@@ -217,7 +217,7 @@ func TestUnansweredApprovalThenInterrupt(t *testing.T) {
 
 func TestFileChangeApproval(t *testing.T) {
 	h := runFixture(t, "file_change_approval", "", nil)
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 
 	require.Len(t, s.opened, 1)
 	req := s.opened[0]
@@ -226,19 +226,19 @@ func TestFileChangeApproval(t *testing.T) {
 	assert.Contains(t, req.Detail, "--- /work/scratch/calc.py\n+++ /work/scratch/calc.py\n@@ -2 +2,5 @@")
 	assert.Equal(t, []string{"accept", "acceptForSession", "decline", "cancel"}, optionIDs(req))
 
-	msg, _ := h.rec.message("01a143b4-cbda-7d31-b424-9c0a9fcb3517", "assistant")
+	msg, _ := h.rec.Message("01a143b4-cbda-7d31-b424-9c0a9fcb3517", "assistant")
 	require.Equal(t, "tool_use", msg.Content[0].Type)
 	in := toolInput(t, msg.Content[0])
 	assert.Equal(t, "/work/scratch/calc.py", in["file_path"])
 	assert.Len(t, in["changes"], 1)
-	result, _ := h.rec.message("result-exec-7e3cdad8-a515-418e-b885-052d442aa0ff", "user")
+	result, _ := h.rec.Message("result-exec-7e3cdad8-a515-418e-b885-052d442aa0ff", "user")
 	assert.Equal(t, "Success. Updated the following files:\nM /work/scratch/calc.py", result.Content[0].Text)
 	assert.Equal(t, "completed", result.Content[0].Status)
 }
 
 func TestRequestUserInput(t *testing.T) {
 	h := runFixture(t, "request_user_input", "", nil)
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 
 	require.Len(t, s.opened, 1)
 	req := s.opened[0]
@@ -256,7 +256,7 @@ func TestRequestUserInput(t *testing.T) {
 		{Label: "Go", Description: "A compiled single-binary CLI."},
 	}, q.Options)
 
-	msg, _ := h.rec.message("01a143b5-063a-7d72-bcc5-4ce3bf922343", "assistant")
+	msg, _ := h.rec.Message("01a143b5-063a-7d72-bcc5-4ce3bf922343", "assistant")
 	assert.Equal(t, []string{"text", "thinking", "tool_use", "text"}, blockTypes(msg))
 	tool := msg.Content[2]
 	assert.Equal(t, "request_user_input", tool.ToolName)
@@ -264,17 +264,17 @@ func TestRequestUserInput(t *testing.T) {
 	assert.Equal(t, "completed", tool.Status)
 	assert.JSONEq(t, `{"questions":[{"header":"Language","id":"language","question":"Which language should the tiny greeting CLI use?","options":[{"label":"Python (Recommended)","description":"A small script with minimal setup."},{"label":"Node.js","description":"A lightweight JavaScript command-line program."},{"label":"Go","description":"A compiled single-binary CLI."}]}]}`,
 		string(tool.ToolInput))
-	result, _ := h.rec.message("result-call_9b32be42d0894afb80f88514aa3ab908", "user")
+	result, _ := h.rec.Message("result-call_9b32be42d0894afb80f88514aa3ab908", "user")
 	assert.JSONEq(t, `{"answers":{"language":{"answers":["Python (Recommended)"]}}}`, result.Content[0].Text)
 }
 
 func TestInterrupt(t *testing.T) {
 	h := runFixture(t, "interrupt", "", nil)
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	require.NoError(t, h.err("turn/interrupt"))
 	assert.Equal(t, []native.TurnResult{{StopReason: "interrupted"}}, s.completions)
 
-	msg, _ := h.rec.message("01a143b5-3da9-7610-b832-6e7ea0ff8616", "assistant")
+	msg, _ := h.rec.Message("01a143b5-3da9-7610-b832-6e7ea0ff8616", "assistant")
 	assert.Equal(t, "interrupted", msg.StopReason)
 	require.Equal(t, []string{"text"}, blockTypes(msg))
 	assert.NotEmpty(t, msg.Content[0].Text, "text streamed before the interrupt is kept")
@@ -286,7 +286,7 @@ func TestInterrupt(t *testing.T) {
 
 func TestSteer(t *testing.T) {
 	h := runFixture(t, "steer", "", nil, func(c *Config) { c.SnapshotInterval = time.Hour })
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	require.NoError(t, h.err("turn/steer"))
 	assert.ErrorIs(t, h.err("turn/steer-idle"), native.ErrNoActiveTurn)
 	assert.JSONEq(t, `{"threadId":"01a143b5-599f-76b1-9545-d3965ad4119d","expectedTurnId":"01a143b5-5a1e-7e53-bdc6-8093d2690a68",
@@ -296,40 +296,40 @@ func TestSteer(t *testing.T) {
 	assert.Equal(t, 1, s.started)
 	assert.Equal(t, []native.TurnResult{{StopReason: "end_turn"}}, s.completions)
 
-	first, ok := h.rec.message("01a143b5-5a1e-7e53-bdc6-8093d2690a68", "assistant")
+	first, ok := h.rec.Message("01a143b5-5a1e-7e53-bdc6-8093d2690a68", "assistant")
 	require.True(t, ok)
 	assert.True(t, strings.HasPrefix(first.Content[0].Text, "one\ntwo\nthree"))
 	assert.True(t, strings.HasSuffix(first.Content[0].Text, "one hundred twenty"))
 	assert.Empty(t, first.StopReason)
 	// The answer to the steer is a message of its own, after the steering
 	// message.
-	second, ok := h.rec.message("01a143b5-5a1e-7e53-bdc6-8093d2690a68-1", "assistant")
+	second, ok := h.rec.Message("01a143b5-5a1e-7e53-bdc6-8093d2690a68-1", "assistant")
 	require.True(t, ok)
 	assert.Equal(t, "STEERED", second.Content[0].Text)
 	assert.Equal(t, "end_turn", second.StopReason)
 	assert.False(t, second.Timestamp.Before(first.Timestamp))
-	steered, ok := h.rec.message("01a143b5-8045-7d02-8a68-0e3cddd49a60", "user")
+	steered, ok := h.rec.Message("01a143b5-8045-7d02-8a68-0e3cddd49a60", "user")
 	require.True(t, ok)
 	assert.Equal(t, "Change of plan: stop now and reply only with the word STEERED.", steered.Content[0].Text)
 
 	// With an hour between snapshots, 445 deltas send the message twice:
 	// when it started streaming and when it completed.
-	assert.LessOrEqual(t, h.rec.snapshotCount(first.MessageID), 3)
+	assert.LessOrEqual(t, len(h.rec.Snapshots(first.MessageID)), 3)
 }
 
 func TestResume(t *testing.T) {
 	first := runFixture(t, "resume_first", "", nil)
-	ref := first.rec.snapshot().refs
+	ref := snapshot(first.rec).refs
 	require.Equal(t, []string{"01a143b5-be16-7d02-ac40-7722c0e95c6e"}, ref)
 
 	h := runFixture(t, "resume_second", ref[0], nil)
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	assert.JSONEq(t, `{"threadId":"01a143b5-be16-7d02-ac40-7722c0e95c6e","excludeTurns":true,"cwd":"/work/scratch","approvalPolicy":"never","sandbox":"danger-full-access"}`,
 		string(h.sentParams("thread/resume")))
 	assert.Equal(t, ref, s.refs)
 	assert.Equal(t, 1, s.started, "usage of the old turn doesn't start a turn")
 	assert.Equal(t, "session resumed: /work/scratch (codex 0.160.0)", *s.eventsOf("system")[0].Content)
-	msg, _ := h.rec.message("01a143b5-d620-7a02-9e77-5110cc64e42e", "assistant")
+	msg, _ := h.rec.Message("01a143b5-d620-7a02-9e77-5110cc64e42e", "assistant")
 	assert.Equal(t, "PELICAN-42", msg.Content[0].Text)
 }
 
@@ -346,7 +346,7 @@ func TestResumeMissingThreadStartsNewOne(t *testing.T) {
 	h.feedJSON(`{"id":` + string(start.ID) + `,"result":{"thread":{"id":"01a143b5-be16-7d02-ac40-7722c0e95c6e","cwd":"/work/scratch","cliVersion":"0.160.0","createdAt":1792137346},"model":"gpt-6-luna","cwd":"/work/scratch"}}`)
 	h.settle()
 	require.NoError(t, h.err("start"))
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	assert.Equal(t, []string{"01a143b5-be16-7d02-ac40-7722c0e95c6e"}, s.refs)
 	require.Len(t, s.errors, 1)
 	assert.Contains(t, s.errors[0], "warning: Could not resume Codex thread 00000000-0000-0000-0000-000000000000")
@@ -357,7 +357,7 @@ func TestImageInput(t *testing.T) {
 	assert.JSONEq(t, `{"threadId":"01a143b6-1880-7bc2-95e4-d5d823576483","summary":"detailed","input":[
 		{"type":"text","text":"What single color fills this image? Answer in one word."},
 		{"type":"localImage","path":"/work/red16.png"}]}`, string(h.sentParams("turn/start")))
-	msg, _ := h.rec.message("01a143b6-19a6-74c1-925e-0a3d76641000", "assistant")
+	msg, _ := h.rec.Message("01a143b6-19a6-74c1-925e-0a3d76641000", "assistant")
 	assert.Equal(t, "Red", msg.Content[0].Text)
 
 	assert.Equal(t, []userInput{{Type: "text", Text: "see"}, {Type: "localImage", Path: "/work/shot.png"}},
@@ -366,7 +366,7 @@ func TestImageInput(t *testing.T) {
 
 func TestMCPToolApproval(t *testing.T) {
 	h := runFixture(t, "mcp_tool_on_request", "", nil)
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	require.Len(t, s.opened, 1)
 	req := s.opened[0]
 	assert.Equal(t, native.RequestKindApproval, req.Kind)
@@ -376,9 +376,9 @@ func TestMCPToolApproval(t *testing.T) {
 	assert.JSONEq(t, `{"text":"hello mcp"}`, string(req.Input))
 	assert.Equal(t, []string{"accept", "decline", "cancel"}, optionIDs(req))
 
-	msg, _ := h.rec.message("01a143b7-17b9-7580-aca3-804c2e4ada05", "assistant")
+	msg, _ := h.rec.Message("01a143b7-17b9-7580-aca3-804c2e4ada05", "assistant")
 	assert.Equal(t, []string{"tool_use", "text"}, blockTypes(msg))
-	result, _ := h.rec.message("result-exec-957169c5-e7a0-4f5f-a702-9ea0f167f8da", "user")
+	result, _ := h.rec.Message("result-exec-957169c5-e7a0-4f5f-a702-9ea0f167f8da", "user")
 	assert.Equal(t, "HELLO MCP", result.Content[0].Text)
 }
 
@@ -399,18 +399,18 @@ func TestProcessExitWithPendingRequest(t *testing.T) {
 	h := newHarness(t, "", nil)
 	h.replay(fixtureUntil(t, "command_approval_unanswered", "item/commandExecution/requestApproval"))
 	id := h.requestID(json.RawMessage("0"))
-	h.eventually(func() bool { _, ok := h.rec.request(id); return ok }, "the approval request")
+	h.eventually(func() bool { _, ok := h.rec.Request(id); return ok }, "the approval request")
 	h.settle()
 
 	h.proc.exit(errors.New("signal: killed"))
 	require.EqualError(t, h.a.Wait(), "signal: killed")
-	s := h.rec.snapshot()
+	s := snapshot(h.rec)
 	assert.Empty(t, s.completions, "the conversation ends the turn when Wait returns")
 	assert.Empty(t, s.closed, "the conversation expires the request when Wait returns")
 	require.ErrorIs(t, h.a.Respond(context.Background(), id, native.Response{OptionID: "accept"}), native.ErrRequestNotFound)
 	require.Error(t, h.a.StartTurn(context.Background(), native.Input{Text: "hi"}))
 
-	msg, _ := h.rec.message("01a143b4-9c0b-7021-a76f-53bf2628f666", "assistant")
+	msg, _ := h.rec.Message("01a143b4-9c0b-7021-a76f-53bf2628f666", "assistant")
 	assert.Equal(t, "error", msg.StopReason)
 	assert.Equal(t, "failed", msg.Content[0].Status)
 }
@@ -421,14 +421,14 @@ func TestCrashMidCommand(t *testing.T) {
 	h.settle()
 	// The live output preview of the command.
 	h.eventually(func() bool {
-		r, ok := h.rec.message("result-exec-2800aae4-7b1f-4893-a222-3547d8499613", "user")
+		r, ok := h.rec.Message("result-exec-2800aae4-7b1f-4893-a222-3547d8499613", "user")
 		return ok && r.Content[0].Status == "running" && strings.HasPrefix(r.Content[0].Text, "tick 2\n")
 	}, "the output preview")
 	h.proc.exit(errors.New("signal: killed"))
 	require.Error(t, h.a.Wait())
-	r, _ := h.rec.message("result-exec-2800aae4-7b1f-4893-a222-3547d8499613", "user")
+	r, _ := h.rec.Message("result-exec-2800aae4-7b1f-4893-a222-3547d8499613", "user")
 	assert.Equal(t, "failed", r.Content[0].Status)
 	assert.Equal(t, "The turn failed before the tool finished", r.Content[0].Text)
-	msg, _ := h.rec.message("01a143b9-d9b9-78d0-a3fd-2a1ed19aebe1", "assistant")
+	msg, _ := h.rec.Message("01a143b9-d9b9-78d0-a3fd-2a1ed19aebe1", "assistant")
 	assert.JSONEq(t, `{"cmd":"for i in 1 2 3 4 5 6; do echo tick $i; sleep 1; done","workdir":"/work/scratch"}`, string(msg.Content[0].ToolInput))
 }
