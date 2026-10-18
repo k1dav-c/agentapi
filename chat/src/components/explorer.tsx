@@ -1,6 +1,7 @@
 "use client";
 
 import {useEffect, useMemo, useRef, useState} from "react";
+import {discoverFiles, discoverLinks} from "@/lib/explorer-index";
 import {
   Activity,
   Download,
@@ -37,14 +38,6 @@ interface ExplorerProps {
   onNavigateTask: (number: number) => void;
 }
 
-interface DiscoveredLink {
-  url: string;
-  task: number;
-}
-
-// Absolute file paths in message text, also in Markdown code (`/a/b.go`) and
-// at the end of a sentence.
-export const pathPattern = /(?:^|[\s"'(`])((?:\/[\w.@+-]+)+\.[a-zA-Z0-9]{1,10})(?=$|[\s"'),:;`.])/g;
 
 export function Explorer({onNavigateTask}: ExplorerProps) {
   const {
@@ -100,27 +93,22 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
   const [restartingAgent, setRestartingAgent] = useState(false);
   const mcpImportRef = useRef<HTMLInputElement>(null);
   const profileImportRef = useRef<HTMLInputElement>(null);
-  // Every list is newest first; items keep their task number.
+  // Every list is newest first; items keep their task number. Only the
+  // tab that shows is listed, while the Explorer is open: the messages
+  // change many times a second while the agent works.
+  const shown = open ? activeTab : null;
   const tasks = useMemo(
     () =>
-      messages
-        .filter((message) => message.role === "user")
-        .map((message, index) => ({message, number: index + 1}))
-        .reverse(),
-    [messages],
+      shown === "index"
+        ? messages
+            .filter((message) => message.role === "user")
+            .map((message, index) => ({message, number: index + 1}))
+            .reverse()
+        : [],
+    [messages, shown],
   );
-  const links = useMemo(() => discoverLinks(messages).reverse(), [messages]);
-  const files = useMemo(() => {
-    const found = new Map<string, number>();
-    let task = 0;
-    for (const message of messages) {
-      if (message.role === "user") task += 1;
-      for (const match of message.content.matchAll(pathPattern)) {
-        if (!found.has(match[1])) found.set(match[1], task);
-      }
-    }
-    return [...found].map(([path, sourceTask]) => ({path, sourceTask})).reverse();
-  }, [messages]);
+  const links = useMemo(() => (shown === "links" ? discoverLinks(messages).reverse() : []), [messages, shown]);
+  const files = useMemo(() => (shown === "files" ? discoverFiles(messages).reverse() : []), [messages, shown]);
 
   const navigate = (number: number) => {
     setOpen(false);
@@ -609,52 +597,4 @@ function downloadJSON(filename: string, value: unknown) {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(link.href);
-}
-
-function discoverLinks(messages: Array<{role: string; content: string}>) {
-  const found = new Map<string, DiscoveredLink>();
-  let task = 0;
-  for (const message of messages) {
-    if (message.role === "user") task += 1;
-    for (const url of reconstructWrappedURLs(message.content)) {
-      if (!found.has(url)) found.set(url, {url, task});
-    }
-  }
-  return [...found.values()];
-}
-
-export function reconstructWrappedURLs(content: string) {
-  const lines = content.split("\n");
-  const urls: string[] = [];
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    const line = lines[lineIndex];
-    const starts = [...line.matchAll(/https?:\/\//g)].map((match) => match.index ?? 0);
-    for (const start of starts) {
-      let candidate = line.slice(start).match(/^\S+/)?.[0] ?? "";
-      const reachesLineEnd = start + candidate.length === line.trimEnd().length;
-      let next = lineIndex + 1;
-      while (
-        reachesLineEnd &&
-        next < lines.length &&
-        (lines[next - 1].trimEnd().length >= 72 ||
-          /[/?#&=._~%+-]$/.test(candidate)) &&
-        candidate.length > 0 &&
-        /^[A-Za-z0-9/?#&=._~%+:@!,;()[\]-]+$/.test(lines[next].trim()) &&
-        !/\s/.test(lines[next].trim())
-      ) {
-        candidate += lines[next].trim();
-        next += 1;
-      }
-      candidate = candidate.replace(/[),.;:!?]+$/u, "");
-      try {
-        const parsed = new URL(candidate);
-        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-          urls.push(parsed.toString());
-        }
-      } catch {
-        // Ignore text that only looked like a URL.
-      }
-    }
-  }
-  return [...new Set(urls)];
 }
