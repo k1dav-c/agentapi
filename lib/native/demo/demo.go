@@ -179,6 +179,9 @@ func (a *Adapter) Start(_ context.Context, sink native.Sink) error {
 		a.mu.Unlock()
 		return &native.LoginRequiredError{Login: LoginHint}
 	}
+	// The turns play on goroutines of their own, while Compact reports on
+	// its caller's.
+	sink = native.SerialSink(sink)
 	a.sink = sink
 	a.started = true
 	a.mu.Unlock()
