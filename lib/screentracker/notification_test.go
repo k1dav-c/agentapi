@@ -89,3 +89,44 @@ func TestNotificationSnapshots(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	require.Equal(t, n, a.reads.Load())
 }
+
+// statusEmitter records the last status a conversation emitted.
+type statusEmitter struct {
+	st.NopEmitter
+	status atomic.Value
+}
+
+func (e *statusEmitter) EmitStatus(status st.ConversationStatus) { e.status.Store(status) }
+
+func (e *statusEmitter) last() st.ConversationStatus {
+	s, _ := e.status.Load().(st.ConversationStatus)
+	return s
+}
+
+func TestReadyWhenStable(t *testing.T) {
+	// A shell never shows an input box. Without ReadyWhenStable it never
+	// counts as ready; with it, it is ready once its screen settles, and the
+	// conversation says so although the settled snapshot loop sleeps.
+	for _, readyWhenStable := range []bool{false, true} {
+		ctx, cancel := context.WithCancel(context.Background())
+		a := &notifyingAgent{updates: make(chan struct{}, 1)}
+		a.screen = "my-app $"
+		emitter := &statusEmitter{}
+		c := st.NewPTY(ctx, st.PTYConversationConfig{
+			AgentIO: a, SnapshotInterval: 10 * time.Millisecond, ScreenStabilityLength: 30 * time.Millisecond,
+			ReadyForInitialPrompt: func(string) bool { return false },
+			ReadyWhenStable:       readyWhenStable,
+			Logger:                slog.Default(),
+		}, emitter)
+		c.Start(ctx)
+		if readyWhenStable {
+			require.Eventually(t, func() bool { return emitter.last() == st.ConversationStatusStable }, 3*time.Second, 5*time.Millisecond)
+			require.Equal(t, st.ConversationStatusStable, c.Status())
+		} else {
+			time.Sleep(200 * time.Millisecond)
+			require.Equal(t, st.ConversationStatusChanging, c.Status())
+			require.Equal(t, st.ConversationStatusChanging, emitter.last())
+		}
+		cancel()
+	}
+}

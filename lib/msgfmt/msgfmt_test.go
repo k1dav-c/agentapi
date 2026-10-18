@@ -312,3 +312,10 @@ func TestFormatAgentMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestReadyWhenStable(t *testing.T) {
+	assert.True(t, ReadyWhenStable(AgentTypeCustom), "a custom agent can be any terminal program")
+	for _, agentType := range []AgentType{AgentTypeClaude, AgentTypeCodex, AgentTypePi, AgentTypeAider, AgentTypeGoose} {
+		assert.False(t, ReadyWhenStable(agentType), agentType)
+	}
+}

@@ -10,6 +10,14 @@ func IsAgentReadyForInitialPrompt(agentType AgentType, message string) bool {
 	return !known || p.ready(message)
 }
 
+// ReadyWhenStable reports whether an agent of agentType may never show an
+// input box, so that a screen that stopped changing counts as ready for the
+// initial prompt too: a custom agent can be any terminal program.
+func ReadyWhenStable(agentType AgentType) bool {
+	p, _ := profileOf(agentType)
+	return p.readyWhenStable
+}
+
 func isGenericAgentReadyForInitialPrompt(message string) bool {
 	message = trimEmptyLines(message)
 	messageWithoutInputBox := removeMessageBox(message)

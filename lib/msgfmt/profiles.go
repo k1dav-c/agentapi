@@ -21,6 +21,9 @@ type profile struct {
 	// ready reports whether a screen shows the agent ready for the initial
 	// prompt; by default, when removeInputBox finds an input box.
 	ready func(screen string) bool
+	// readyWhenStable makes a screen that stopped changing count as ready
+	// too, for an agent that may never show an input box.
+	readyWhenStable bool
 	// inputEnd returns the index one past the agent's input box and what
 	// belongs to it (a draft that spans lines), or -1 without one. Nil
 	// for agents whose box isn't looked for (HasInputBox says so).
@@ -101,7 +104,8 @@ var profiles = map[AgentType]profile{
 	AgentTypeAuggie:  {},
 	AgentTypeAmazonQ: {},
 	AgentTypeKimi:    {},
-	AgentTypeCustom:  {},
+	// A custom agent can be any terminal program, such as a shell or a REPL.
+	AgentTypeCustom: {readyWhenStable: true},
 }
 
 // profileOf returns agentType's profile with the generic behavior filled

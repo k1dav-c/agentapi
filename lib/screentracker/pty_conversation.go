@@ -47,6 +47,11 @@ type PTYConversationConfig struct {
 	FormatMessage func(message string, userInput string) string
 	// ReadyForInitialPrompt detects whether the agent has initialized and is ready to accept the initial prompt
 	ReadyForInitialPrompt func(message string) bool
+	// ReadyWhenStable makes a screen that has been stable for
+	// ScreenStabilityLength count as ready too, for an agent that may never
+	// show what ReadyForInitialPrompt looks for (a terminal program without
+	// an input box).
+	ReadyWhenStable bool
 	// StabilityScreen returns the part of the screen used to decide whether
 	// the agent is still working. It lets agents exclude regions that keep
 	// changing while idle (e.g. a background agents panel with ticking
@@ -223,7 +228,17 @@ func (c *PTYConversation) snapshot() error {
 // prompt. It is checked apart from the status, which is "changing" while a
 // message waits. Caller holds c.lock.
 func (c *PTYConversation) checkReadyLocked(screen string) {
-	if c.initialPromptReady || (c.readinessChecked && screen == c.readinessCheckScreen) {
+	if c.initialPromptReady {
+		return
+	}
+	if c.cfg.ReadyWhenStable && c.isScreenStableLocked() {
+		c.initialPromptReady = true
+		// This snapshot's status predates readiness, and a stable screen
+		// puts the snapshot loop to sleep: one more snapshot emits it.
+		c.wakeSnapshot()
+		return
+	}
+	if c.readinessChecked && screen == c.readinessCheckScreen {
 		return
 	}
 	c.readinessChecked = true
