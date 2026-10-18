@@ -83,7 +83,7 @@ function redactSecrets(request: NativeRequest): NativeRequest {
 }
 
 // Merges request updates into the list, keeping first-seen order and
-// dropping the oldest closed requests beyond MAX_CLOSED.
+// dropping the closed requests beyond MAX_CLOSED that closed first.
 export function mergeRequests(previous: NativeRequest[], updates: Iterable<NativeRequest>): NativeRequest[] {
   const next = previous.slice();
   const index = new Map(next.map((request, i) => [request.id, i]));
@@ -97,9 +97,11 @@ export function mergeRequests(previous: NativeRequest[], updates: Iterable<Nativ
       next[at] = applyUpdate(next[at], update);
     }
   }
-  let closed = next.filter((request) => request.status !== "pending").length;
-  if (closed <= MAX_CLOSED) return next;
-  return next.filter((request) => request.status === "pending" || closed-- <= MAX_CLOSED);
+  const closed = next.filter((request) => request.status !== "pending");
+  if (closed.length <= MAX_CLOSED) return next;
+  const closedAt = (request: NativeRequest) => Date.parse(request.closed_at ?? "") || 0;
+  const dropped = new Set(closed.sort((a, b) => closedAt(a) - closedAt(b)).slice(0, closed.length - MAX_CLOSED));
+  return next.filter((request) => !dropped.has(request));
 }
 
 // Merges the list GET /requests returned. A request the client held as

@@ -622,26 +622,19 @@ func (e *EventEmitter) EmitRequest(state native.RequestState) {
 	}
 }
 
-// trimRequestsLocked drops the oldest closed requests beyond the
-// native.MaxClosedRequests the conversation keeps too. Caller holds e.mu.
+// trimRequestsLocked drops the closed requests beyond the
+// native.MaxClosedRequests the conversation keeps too: those that closed
+// first. Caller holds e.mu.
 func (e *EventEmitter) trimRequestsLocked() {
-	closed := 0
-	for _, r := range e.requests {
-		if r.Status != native.RequestStatusPending {
-			closed++
-		}
-	}
-	for i := 0; closed > native.MaxClosedRequests && i < len(e.requests); {
-		if e.requests[i].Status == native.RequestStatusPending {
-			i++
-			continue
-		}
+	drop := native.ExcessClosed(len(e.requests), func(i int) *native.RequestState { return &e.requests[i] })
+	for n, i := range drop {
+		// The n dropped before were in front of it.
+		i -= n
 		if e.persister != nil {
 			e.persister.DeleteRequest(e.requests[i].ID)
 		}
 		e.requests = slices.Delete(e.requests, i, i+1)
 		e.requestSeq = slices.Delete(e.requestSeq, i, i+1)
-		closed--
 	}
 }
 

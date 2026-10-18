@@ -42,8 +42,35 @@ type RequestState struct {
 }
 
 // MaxClosedRequests is how many answered or expired requests are kept for
-// clients that reconnect after a request was closed.
+// clients that reconnect after a request was closed: the most recently
+// closed ones.
 const MaxClosedRequests = 50
+
+// ExcessClosed returns the indexes, ascending, of the closed requests to
+// drop so that MaxClosedRequests remain: those that closed first. state
+// returns request i of n.
+func ExcessClosed(n int, state func(i int) *RequestState) []int {
+	var closed []int
+	for i := range n {
+		if state(i).Status != RequestStatusPending {
+			closed = append(closed, i)
+		}
+	}
+	excess := len(closed) - MaxClosedRequests
+	if excess <= 0 {
+		return nil
+	}
+	closedAt := func(i int) time.Time {
+		if at := state(i).ClosedAt; at != nil {
+			return *at
+		}
+		return time.Time{}
+	}
+	slices.SortStableFunc(closed, func(a, b int) int { return closedAt(a).Compare(closedAt(b)) })
+	drop := closed[:excess]
+	slices.Sort(drop)
+	return drop
+}
 
 // requestBook holds a conversation's requests: the pending ones and the
 // most recently closed, in the order they opened.
@@ -194,27 +221,14 @@ func (b *requestBook) endAnswer(r *RequestState, response *Response) bool {
 	return false
 }
 
-// trim drops the oldest closed requests beyond MaxClosedRequests.
+// trim drops the closed requests beyond MaxClosedRequests that closed
+// first.
 func (b *requestBook) trim() {
-	closed := 0
-	for _, r := range b.requests {
-		if r.Status != RequestStatusPending {
-			closed++
-		}
+	drop := ExcessClosed(len(b.requests), func(i int) *RequestState { return b.requests[i] })
+	for n, i := range drop {
+		// The n dropped before were in front of it.
+		b.requests = slices.Delete(b.requests, i-n, i-n+1)
 	}
-	if closed <= MaxClosedRequests {
-		return
-	}
-	drop := closed - MaxClosedRequests
-	kept := b.requests[:0]
-	for _, r := range b.requests {
-		if drop > 0 && r.Status != RequestStatusPending {
-			drop--
-			continue
-		}
-		kept = append(kept, r)
-	}
-	b.requests = kept
 }
 
 // Requests returns the pending requests and the most recently closed ones,

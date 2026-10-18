@@ -587,3 +587,29 @@ func TestEventEmitterRestore(t *testing.T) {
 	require.Len(t, events, 1, "the restored messages are not sent again")
 	assert.Equal(t, MessageUpdateBody{Id: 2, Role: st.ConversationRoleUser, Message: "three", Time: now, Seq: 7}, events[0].Payload)
 }
+
+// The emitter keeps the most recently closed requests, as the conversation
+// does: a request that waited long isn't dropped as it closes.
+func TestEventEmitterKeepsTheMostRecentlyClosedRequests(t *testing.T) {
+	emitter := NewEventEmitter()
+	at := func(second int) *time.Time {
+		v := time.Date(2026, 10, 18, 9, 0, second, 0, time.UTC)
+		return &v
+	}
+	state := func(id string, status native.RequestStatus, closedAt *time.Time) native.RequestState {
+		return native.RequestState{Request: native.Request{ID: id, Kind: native.RequestKindApproval}, Status: status, ClosedAt: closedAt}
+	}
+	emitter.EmitRequest(state("long", native.RequestStatusPending, nil))
+	for i := range native.MaxClosedRequests {
+		id := fmt.Sprintf("r%d", i)
+		emitter.EmitRequest(state(id, native.RequestStatusPending, nil))
+		emitter.EmitRequest(state(id, native.RequestStatusResolved, at(i)))
+	}
+	emitter.EmitRequest(state("long", native.RequestStatusExpired, at(59)))
+
+	requests := emitter.Requests()
+	require.Len(t, requests, native.MaxClosedRequests)
+	assert.Equal(t, "long", requests[0].ID)
+	_, ok := emitter.Request("r0")
+	assert.False(t, ok, "the first to close is dropped")
+}

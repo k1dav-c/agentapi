@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -193,4 +195,49 @@ func TestSecretAnswersAreRedacted(t *testing.T) {
 			assert.NotContains(t, r.Response.Answers["token"], "s3cret")
 		}
 	}
+}
+
+// The closed requests kept are the most recently closed, whenever they
+// opened: a request that waited long isn't dropped as it closes.
+func TestTheMostRecentlyClosedRequestsAreKept(t *testing.T) {
+	clock := quartz.NewMock(t)
+	c, factory, _ := start(t, nil, native.Config{Clock: clock})
+	sink := factory.Last().Sink()
+	sink.RequestOpened(approval("long"))
+	for i := range native.MaxClosedRequests {
+		id := fmt.Sprint("r", i)
+		sink.RequestOpened(approval(id))
+		clock.Advance(time.Second)
+		sink.RequestClosed(id)
+	}
+	clock.Advance(time.Second)
+	sink.RequestClosed("long")
+
+	requests := c.Requests()
+	require.Len(t, requests, native.MaxClosedRequests)
+	assert.Equal(t, "long", requests[0].ID, "kept, in the order it opened")
+	assert.Equal(t, native.RequestStatusWithdrawn, requests[0].Status)
+	_, kept := c.Request("r0")
+	assert.False(t, kept, "the first to close is dropped")
+}
+
+func TestExcessClosed(t *testing.T) {
+	t.Parallel()
+	at := func(second int) *time.Time {
+		v := time.Date(2026, 10, 18, 9, 0, second, 0, time.UTC)
+		return &v
+	}
+	requests := []native.RequestState{{Status: native.RequestStatusPending}}
+	for i := range native.MaxClosedRequests {
+		requests = append(requests, native.RequestState{Status: native.RequestStatusResolved, ClosedAt: at(i + 1)})
+	}
+	state := func(i int) *native.RequestState { return &requests[i] }
+	assert.Empty(t, native.ExcessClosed(len(requests), state), "pending requests don't count")
+
+	requests = append(requests,
+		native.RequestState{Status: native.RequestStatusExpired, ClosedAt: at(0)},
+		native.RequestState{Status: native.RequestStatusWithdrawn},
+		native.RequestState{Status: native.RequestStatusResolved, ClosedAt: at(1)})
+	assert.Equal(t, []int{1, len(requests) - 3, len(requests) - 2}, native.ExcessClosed(len(requests), state),
+		"the first to close go, a close without a time first of all; a tie keeps the order")
 }

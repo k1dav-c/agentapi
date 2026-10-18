@@ -100,6 +100,16 @@ describe("mergeRequests", () => {
     expect(merged.at(-1)?.id).toBe("req-2");
   });
 
+  test("keeps the most recently closed requests, whenever they opened", () => {
+    const at = (second: number) => new Date(Date.UTC(2026, 9, 18, 9, 0, second)).toISOString();
+    const late = approval({id: "late", status: "resolved", closed_at: at(59), seq: 1});
+    const closed = Array.from({length: 100}, (_, i) => approval({id: `c${i}`, status: "resolved", closed_at: at(i % 50), seq: i + 2}));
+    const merged = mergeRequests([], [late, ...closed]);
+    expect(merged).toHaveLength(100);
+    expect(merged[0].id).toBe("late");
+    expect(merged.map((request) => request.id)).not.toContain("c0");
+  });
+
   test("does not keep the answers to secret questions", () => {
     const secret = question({
       questions: [{id: "token", question: "Token?", free_text: true, secret: true}, questions[0]],
