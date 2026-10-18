@@ -402,9 +402,6 @@ func (c *Conversation) statusLocked() st.ConversationStatus {
 	return st.ConversationStatusChanging
 }
 
-// Text implements st.Conversation. There is no terminal screen.
-func (c *Conversation) Text() string { return "" }
-
 // SaveState implements st.Conversation. State persistence for native
 // sessions is handled outside the conversation.
 func (c *Conversation) SaveState() error { return nil }

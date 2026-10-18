@@ -162,11 +162,7 @@ func (c *PTYConversation) loadStateLocked() (error, bool) {
 		}
 		// If same prompt, keep agentState.InitialPromptSent
 	} else if agentState.InitialPrompt != "" {
-		c.cfg.InitialPrompt = []MessagePart{MessagePartText{
-			Content: agentState.InitialPrompt,
-			Alias:   "",
-			Hidden:  false,
-		}}
+		c.cfg.InitialPrompt = []MessagePart{MessagePartText{Content: agentState.InitialPrompt}}
 	}
 
 	c.messages = agentState.Messages

@@ -27,16 +27,30 @@ func (a *notifyingAgent) update(s string) {
 	}
 }
 
+// screenEmitter records the last screen a conversation emitted.
+type screenEmitter struct {
+	st.NopEmitter
+	screen atomic.Value
+}
+
+func (e *screenEmitter) EmitScreen(screen string) { e.screen.Store(screen) }
+
+func (e *screenEmitter) last() string {
+	s, _ := e.screen.Load().(string)
+	return s
+}
+
 func TestNotificationSnapshots(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	a := &notifyingAgent{updates: make(chan struct{}, 1)}
 	a.screen = "ready"
 	a.onWrite = func(data []byte) { a.screen += string(data) + "reply" }
+	emitter := &screenEmitter{}
 	c := st.NewPTY(ctx, st.PTYConversationConfig{
 		AgentIO: a, SnapshotInterval: 10 * time.Millisecond,
 		ScreenStabilityLength: 30 * time.Millisecond, Logger: slog.Default(),
-	}, nil)
+	}, emitter)
 	c.Start(ctx)
 	stable := func() {
 		require.Eventually(t, func() bool { return c.Status() == st.ConversationStatusStable }, 3*time.Second, 5*time.Millisecond)
@@ -51,7 +65,7 @@ func TestNotificationSnapshots(t *testing.T) {
 	stable()
 	idle()
 	a.update("new output")
-	require.Eventually(t, func() bool { return c.Text() == "new output" }, time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return emitter.last() == "new output" }, time.Second, 5*time.Millisecond)
 	stable()
 	idle()
 	// Send must wake a sleeping snapshot loop even when Write emits no event.

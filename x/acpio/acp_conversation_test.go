@@ -440,17 +440,23 @@ func Test_Status_ChangesWhileProcessing(t *testing.T) {
 	emitter.WaitForStatus(ctx, t, screentracker.ConversationStatusStable)
 }
 
-func Test_Text_ReturnsStreamingContent(t *testing.T) {
+func Test_Screen_ShowsStreamingContent(t *testing.T) {
 	mClock := quartz.NewMock(t)
 	mock := newMockAgentIO()
 	// Block the write so we can simulate streaming during processing
 	started, done := mock.BlockWrite()
 
-	conv := acpio.NewACPConversation(context.Background(), mock, nil, nil, nil, mClock)
+	emitter := newMockEmitter()
+	conv := acpio.NewACPConversation(context.Background(), mock, nil, nil, emitter, mClock)
 	conv.Start(context.Background())
+	screen := func() string {
+		emitter.mu.Lock()
+		defer emitter.mu.Unlock()
+		return emitter.lastScreen
+	}
 
 	// Initially empty
-	assert.Equal(t, "", conv.Text())
+	assert.Equal(t, "", screen())
 
 	require.NoError(t, conv.Send(screentracker.MessagePartText{Content: "question"}))
 
@@ -460,8 +466,8 @@ func Test_Text_ReturnsStreamingContent(t *testing.T) {
 	// Simulate streaming chunks from agent
 	mock.SimulateChunks("Hello", " ", "world!")
 
-	// Text should contain the streamed content
-	assert.Equal(t, "Hello world!", conv.Text())
+	// The screen shows the streamed content
+	assert.Equal(t, "Hello world!", screen())
 
 	// The last message should also be updated
 	messages := conv.Messages()

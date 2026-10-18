@@ -87,14 +87,14 @@ func buildStringFromMessageParts(parts []MessagePart) string {
 //   - Fetching all messages between the user and agent,
 //   - Sending a message to the agent,
 //   - Starting a background loop to update the conversation state, if required,
-//   - Fetching the status of the conversation,
-//   - Returning a textual representation of the conversation "screen" (used for notifying subscribers of updates to the conversation).
+//   - Fetching the status of the conversation.
+//
+// What the agent's screen shows goes to the Emitter (EmitScreen).
 type Conversation interface {
 	Messages() []ConversationMessage
 	Send(...MessagePart) error
 	Start(context.Context)
 	Status() ConversationStatus
-	Text() string
 	SaveState() error
 	// Reset clears all conversation state back to the initial empty state.
 	Reset()

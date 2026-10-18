@@ -172,13 +172,6 @@ func (c *ACPConversation) Stop() {
 	c.cancel()
 }
 
-// Text returns the current streaming response text.
-func (c *ACPConversation) Text() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.streamingResponse.String()
-}
-
 // handleChunk is called for each streaming chunk from the agent.
 func (c *ACPConversation) handleChunk(chunk string) {
 	c.mu.Lock()

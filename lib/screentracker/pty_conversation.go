@@ -11,9 +11,10 @@ import (
 	"github.com/coder/quartz"
 )
 
+// MessagePartText is text typed into the agent's terminal. A hidden part
+// (a bracketed paste marker, say) isn't part of the message's text.
 type MessagePartText struct {
 	Content string
-	Alias   string
 	Hidden  bool
 }
 
@@ -27,9 +28,6 @@ func (p MessagePartText) Do(writer AgentIO) error {
 func (p MessagePartText) String() string {
 	if p.Hidden {
 		return ""
-	}
-	if p.Alias != "" {
-		return p.Alias
 	}
 	return p.Content
 }
@@ -81,9 +79,7 @@ type PTYConversation struct {
 	stableSnapshotsThreshold int
 	// snapshots counts the snapshots taken since the start or the last
 	// reset, up to stableSnapshotsThreshold: fewer means initializing.
-	snapshots int
-	// lastScreen is the screen of the latest snapshot.
-	lastScreen                  string
+	snapshots                   int
 	messages                    []ConversationMessage
 	screenBeforeLastUserMessage string
 	lock                        sync.Mutex
@@ -345,13 +341,6 @@ func (c *PTYConversation) messagesLocked() []ConversationMessage {
 	return result
 }
 
-func (c *PTYConversation) Text() string {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	return c.lastScreen
-}
-
 // Reset clears all conversation state back to the initial empty state.
 func (c *PTYConversation) Reset() {
 	defer c.wakeSnapshot()
@@ -376,7 +365,6 @@ func (c *PTYConversation) Reset() {
 	}
 	c.screenBeforeLastUserMessage = ""
 	c.snapshots = 0
-	c.lastScreen = ""
 	c.stableCount = 0
 	c.lastSnapshotScreen = ""
 	c.fmtCacheValid = false

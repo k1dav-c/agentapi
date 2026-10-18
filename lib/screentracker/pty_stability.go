@@ -13,7 +13,6 @@ func (c *PTYConversation) snapshotLocked(screen string) {
 		c.stableCount = 1
 	}
 	c.lastSnapshotScreen = region
-	c.lastScreen = screen
 	if c.snapshots < c.stableSnapshotsThreshold {
 		c.snapshots++
 	}
