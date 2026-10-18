@@ -1381,13 +1381,15 @@ the manifest is missing, malformed, or does not match the download.
 
 ### `agentapi attach`
 
-Attach to a running agent's terminal session.
+Attach to a running agent's terminal session (PTY transport; ACP and native
+agents have no terminal to attach to).
 
 ```bash
 agentapi attach --url localhost:3284
 ```
 
-Press `ctrl+c` to detach from the session.
+A server started with `--api-token` needs the token: pass `--api-token` or
+set `AGENTAPI_API_TOKEN`. Press `ctrl+c` to detach from the session.
 
 ## HTTP API reference
 

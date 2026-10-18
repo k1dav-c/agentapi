@@ -74,13 +74,42 @@ func (m model) View() string {
 	return m.screen
 }
 
-func ReadScreenOverHTTP(ctx context.Context, url string, ch chan<- httpapi.ScreenUpdateBody) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	req.Header.Set("Content-Type", "application/json")
+// client sends requests to the server, with the API token if there is one.
+type client struct {
+	url   string
+	token string
+}
 
+var (
+	errTokenNeeded  = errors.New("the server needs an API token: pass --api-token or set AGENTAPI_API_TOKEN")
+	errTokenRefused = errors.New("the server refused the API token")
+)
+
+// do sends req, with the token. A 401 is errTokenNeeded or errTokenRefused.
+func (c *client) do(req *http.Request) (*http.Response, error) {
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to do request: %w", err)
+		return nil, fmt.Errorf("failed to do request: %w", err)
+	}
+	if res.StatusCode == http.StatusUnauthorized {
+		_ = res.Body.Close()
+		if c.token == "" {
+			return nil, errTokenNeeded
+		}
+		return nil, errTokenRefused
+	}
+	return res, nil
+}
+
+func (c *client) readScreen(ctx context.Context, ch chan<- httpapi.ScreenUpdateBody) error {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.url+"/internal/screen", nil)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := c.do(req)
+	if err != nil {
+		return err
 	}
 	defer func() {
 		_ = res.Body.Close()
@@ -103,7 +132,7 @@ func ReadScreenOverHTTP(ctx context.Context, url string, ch chan<- httpapi.Scree
 	return nil
 }
 
-func WriteRawInputOverHTTP(ctx context.Context, url string, msg string) error {
+func (c *client) writeRawInput(ctx context.Context, msg string) error {
 	messageRequest := httpapi.MessageRequestBody{
 		Type:    httpapi.MessageTypeRaw,
 		Content: msg,
@@ -112,12 +141,12 @@ func WriteRawInputOverHTTP(ctx context.Context, url string, msg string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal message request: %w", err)
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(messageRequestBytes))
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.url+"/message", bytes.NewReader(messageRequestBytes))
 	req.Header.Set("Content-Type", "application/json")
 
-	res, err := http.DefaultClient.Do(req)
+	res, err := c.do(req)
 	if err != nil {
-		return fmt.Errorf("failed to do request: %w", err)
+		return err
 	}
 	defer func() {
 		_ = res.Body.Close()
@@ -129,35 +158,54 @@ func WriteRawInputOverHTTP(ctx context.Context, url string, msg string) error {
 	return nil
 }
 
-func checkACPMode(remoteURL string) (bool, error) {
-	resp, err := http.Get(remoteURL + "/status")
+// transport returns the server's transport.
+func (c *client) transport(ctx context.Context) (httpapi.Transport, error) {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.url+"/status", nil)
+	resp, err := c.do(req)
 	if err != nil {
-		return false, fmt.Errorf("failed to check server status: %w", err)
+		return "", fmt.Errorf("failed to check server status: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("unexpected %d response from server: %s", resp.StatusCode, resp.Status)
+		return "", fmt.Errorf("unexpected %d response from server: %s", resp.StatusCode, resp.Status)
 	}
 
 	var status httpapi.StatusResponse
 	if err := json.NewDecoder(resp.Body).Decode(&status.Body); err != nil {
-		return false, fmt.Errorf("failed to decode server status: %w", err)
+		return "", fmt.Errorf("failed to decode server status: %w", err)
 	}
-
-	return status.Body.Transport == httpapi.TransportACP, nil
+	return status.Body.Transport, nil
 }
 
-func runAttach(remoteURL string) error {
-	// Check if server is running in ACP mode (attach not supported)
-	if isACP, err := checkACPMode(remoteURL); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "WARN: Unable to check server: %s", err.Error())
-	} else if isACP {
+// errNoTerminal says why a transport has no terminal to attach to, or is
+// nil.
+func errNoTerminal(transport httpapi.Transport) error {
+	switch transport {
+	case httpapi.TransportACP:
 		return errors.New("attach is not yet supported in ACP mode")
+	case httpapi.TransportNative:
+		return errors.New("the native transport runs the agent without a terminal, so there is none to attach to; use the chat, whose Terminal button opens a shell")
+	case httpapi.TransportPTY:
 	}
+	return nil
+}
 
+func runAttach(c *client) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	transport, err := c.transport(ctx)
+	switch {
+	case errors.Is(err, errTokenNeeded), errors.Is(err, errTokenRefused):
+		return err
+	case err != nil:
+		_, _ = fmt.Fprintf(os.Stderr, "WARN: Unable to check server: %s\n", err.Error())
+	default:
+		if err := errNoTerminal(transport); err != nil {
+			return err
+		}
+	}
+
 	stdin := int(os.Stdin.Fd())
 
 	oldState, err := term.MakeRaw(stdin)
@@ -178,7 +226,7 @@ func runAttach(remoteURL string) error {
 	readScreenErrCh := make(chan error, 1)
 	go func() {
 		defer close(readScreenErrCh)
-		if err := ReadScreenOverHTTP(ctx, remoteURL+"/internal/screen", screenCh); err != nil {
+		if err := c.readScreen(ctx, screenCh); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return
 			}
@@ -201,7 +249,7 @@ func runAttach(remoteURL string) error {
 				if input == "\x03" {
 					continue
 				}
-				if err := WriteRawInputOverHTTP(ctx, remoteURL+"/message", input); err != nil {
+				if err := c.writeRawInput(ctx, input); err != nil {
 					writeRawInputErrCh <- fmt.Errorf("failed to write raw input: %w", err)
 					return
 				}
@@ -249,29 +297,36 @@ func runAttach(remoteURL string) error {
 	return err
 }
 
-var remoteUrlArg string
+var (
+	remoteURLArg string
+	apiTokenArg  string
+)
 
 var AttachCmd = &cobra.Command{
 	Use:   "attach",
 	Short: "Attach to a running agent",
-	Long:  `Attach to a running agent`,
-	Run: func(cmd *cobra.Command, args []string) {
-		remoteUrl := remoteUrlArg
-		if remoteUrl == "" {
-			fmt.Fprintln(os.Stderr, "URL is required")
-			os.Exit(1)
+	Long:  `Attach to the terminal of an agent that a server runs with the PTY transport`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		remoteURL := remoteURLArg
+		if remoteURL == "" {
+			return errors.New("URL is required")
 		}
-		if !strings.HasPrefix(remoteUrl, "http") {
-			remoteUrl = "http://" + remoteUrl
+		cmd.SilenceUsage = true
+		if !strings.HasPrefix(remoteURL, "http") {
+			remoteURL = "http://" + remoteURL
 		}
-		remoteUrl = strings.TrimRight(remoteUrl, "/")
-		if err := runAttach(remoteUrl); err != nil {
-			fmt.Fprintf(os.Stderr, "Attach failed: %+v\n", err)
-			os.Exit(1)
+		token := apiTokenArg
+		if token == "" {
+			token = os.Getenv("AGENTAPI_API_TOKEN")
 		}
+		if err := runAttach(&client{url: strings.TrimRight(remoteURL, "/"), token: token}); err != nil {
+			return fmt.Errorf("attach failed: %w", err)
+		}
+		return nil
 	},
 }
 
 func init() {
-	AttachCmd.Flags().StringVarP(&remoteUrlArg, "url", "u", "localhost:3284", "URL of the agentapi server to attach to. May optionally include a protocol and a path.")
+	AttachCmd.Flags().StringVarP(&remoteURLArg, "url", "u", "localhost:3284", "URL of the agentapi server to attach to. May optionally include a protocol and a path.")
+	AttachCmd.Flags().StringVar(&apiTokenArg, "api-token", "", "The server's API token, if it has one (default $AGENTAPI_API_TOKEN)")
 }

@@ -1145,12 +1145,14 @@ agentapi update --force  # update even if already at the latest version
 
 ### `agentapi attach`
 
-連接到執行中 agent 的終端機工作階段。
+連接到執行中 agent 的終端機工作階段（PTY transport；ACP 和 native 的 agent 沒有可連接的
+終端機）。
 
 ```bash
 agentapi attach --url localhost:3284
 ```
 
+以 `--api-token` 啟動的伺服器需要 token：傳入 `--api-token` 或設定 `AGENTAPI_API_TOKEN`。
 按下 `ctrl+c` 即可中斷與工作階段的連接。
 
 ## HTTP API 參考
