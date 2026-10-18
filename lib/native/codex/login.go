@@ -8,12 +8,14 @@ import (
 	"github.com/coder/agentapi/lib/native"
 )
 
-// loginHint tells the user how to log Codex in.
+// loginHint tells the user how to log Codex in. AgentAPI usually runs on a
+// server without a browser, where the browser sign-in's redirect to
+// localhost can't come back, so the hint signs in with a device code.
 var loginHint = native.LoginRequired{
 	Agent:   "Codex",
 	Message: "Codex is not logged in.",
-	Command: "codex login",
-	Detail:  "Signs in with your ChatGPT plan; `printenv OPENAI_API_KEY | codex login --with-api-key` uses an API key instead.",
+	Command: "codex login --device-auth",
+	Detail:  "Signs in with your ChatGPT plan: open the link it shows, on any device, and enter its one-time code. `codex login` signs in with a browser on this machine instead, and `printenv OPENAI_API_KEY | codex login --with-api-key` uses an API key.",
 }
 
 // checkLogin asks app-server for its account. No account where the model

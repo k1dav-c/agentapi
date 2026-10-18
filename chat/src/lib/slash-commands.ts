@@ -123,7 +123,8 @@ export function loginCommand(agentType: AgentType): string | undefined {
     case "claude":
       return "claude auth login";
     case "codex":
-      return "codex login";
+      // A device code: AgentAPI usually runs without a browser of its own.
+      return "codex login --device-auth";
     case "pi":
       // Pi logs in from its own UI: /login once it runs.
       return "pi";
