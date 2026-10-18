@@ -224,10 +224,12 @@ sequenceDiagram
 
 ### ACP
 
-`x/acpio` speaks the Agent Client Protocol over the agent's stdio. Message
-chunks become the agent's reply, tool calls are appended to it as lines of
-text, and permission requests are approved automatically. The transport is
-experimental.
+`x/acpio` speaks the Agent Client Protocol over the agent's stdio. A message
+is one prompt with the message's text. `POST /message` returns once the turn
+has started; messages sent during the turn wait in the queue, and a failed
+prompt is reported as an `agent_error`. Message chunks become the agent's
+reply, tool calls are appended to it as lines of text, and permission requests
+are approved automatically. The transport is experimental.
 
 ### Native
 

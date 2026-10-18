@@ -202,8 +202,10 @@ sequenceDiagram
 
 ### ACP
 
-`x/acpio` 透過 agent 的 stdio 使用 Agent Client Protocol。訊息片段會成為 agent 的回覆，工具
-呼叫會以文字行附加在回覆中，權限請求則會自動核准。這個 transport 仍是實驗性的。
+`x/acpio` 透過 agent 的 stdio 使用 Agent Client Protocol。一則訊息就是一個 prompt，內容是訊
+息的文字。`POST /message` 在 turn 開始後就會回傳；turn 進行中送出的訊息會在佇列中等待，prompt
+失敗則以 `agent_error` 回報。訊息片段會成為 agent 的回覆，工具呼叫會以文字行附加在回覆中，權限
+請求則會自動核准。這個 transport 仍是實驗性的。
 
 ### Native
 
