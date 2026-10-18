@@ -39,6 +39,8 @@ func parseRollout(t *testing.T, name string) []jsonlwatcher.RichMessage {
 		msgs, err := p.ParseLine(sc.Bytes())
 		require.NoError(t, err)
 		add(msgs)
+		// As the watcher does, after a read that may end at any line.
+		add(p.FlushCompleted())
 	}
 	add(p.Flush())
 	out := make([]jsonlwatcher.RichMessage, 0, len(order))
