@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
-	mf "github.com/coder/agentapi/lib/msgfmt"
 )
 
 // startJSONLWatcher stops any existing JSONL watcher and starts a new one
@@ -19,38 +18,9 @@ func (s *Server) startJSONLWatcher(pid int) {
 		return
 	}
 
-	var resolver jsonlwatcher.SessionResolver
-	var parser jsonlwatcher.LineParser
-	var sessionEventParser jsonlwatcher.SessionEventParser
-
-	switch s.agentType {
-	case mf.AgentTypeClaude:
-		resolver = &jsonlwatcher.ClaudeResolver{PID: pid}
-		parser = jsonlwatcher.NewClaudeParser()
-		sessionEventParser = jsonlwatcher.NewClaudeSessionEventParser()
-	case mf.AgentTypeCodex:
-		resolver = &jsonlwatcher.CodexResolver{
-			PID:       pid,
-			CWD:       s.cwd,
-			NotBefore: time.Now(),
-		}
-		parser = jsonlwatcher.NewCodexParser()
-		sessionEventParser = jsonlwatcher.NewCodexSessionEventParser()
-	case mf.AgentTypePi:
-		resolver = &jsonlwatcher.PiResolver{
-			PID:       pid,
-			CWD:       s.cwd,
-			NotBefore: time.Now(),
-		}
-		parser = jsonlwatcher.NewPiParser()
-		sessionEventParser = jsonlwatcher.NewPiSessionEventParser()
-	case mf.AgentTypeGoose, mf.AgentTypeAider, mf.AgentTypeGemini, mf.AgentTypeCopilot, mf.AgentTypeAmp,
-		mf.AgentTypeCursor, mf.AgentTypeAuggie, mf.AgentTypeAmazonQ, mf.AgentTypeOpencode, mf.AgentTypeKimi,
-		mf.AgentTypeCustom:
+	agent, ok := jsonlwatcher.ForAgent(string(s.agentType), pid, s.cwd, s.clock.Now())
+	if !ok {
 		// No session log to follow; the chat uses the terminal output.
-	}
-
-	if resolver == nil || parser == nil {
 		return
 	}
 
@@ -61,7 +31,7 @@ func (s *Server) startJSONLWatcher(pid int) {
 	// A new agent process starts a new session, unnamed until the agent
 	// names it.
 	s.emitter.SetSessionName("")
-	namer := jsonlwatcher.NewSessionNamer(string(s.agentType))
+	namer := agent.Namer
 	if polled, ok := namer.(jsonlwatcher.PolledSessionNamer); ok {
 		done.Add(1)
 		go func() {
@@ -82,8 +52,8 @@ func (s *Server) startJSONLWatcher(pid int) {
 	}
 
 	w := jsonlwatcher.New(jsonlwatcher.Config{
-		Resolver: resolver,
-		Parser:   parser,
+		Resolver: agent.Resolver,
+		Parser:   agent.Parser,
 		Logger:   s.logger,
 		OnMessage: func(msg jsonlwatcher.RichMessage) {
 			s.storeRichImages(&msg)
@@ -95,7 +65,7 @@ func (s *Server) startJSONLWatcher(pid int) {
 					s.emitter.SetSessionName(name)
 				}
 			}
-			events, err := sessionEventParser.ParseSessionEvents(line)
+			events, err := agent.Events.ParseSessionEvents(line)
 			if err != nil {
 				s.logger.Debug("Failed to normalize session event", "error", err)
 				return
