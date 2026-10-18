@@ -84,10 +84,24 @@ func (p MessagePartText) String() string {
 	return p.Content
 }
 
-// outboundMessage wraps a message to be sent with its error channel
+// outboundMessage is a message waiting to be sent to the agent.
 type outboundMessage struct {
 	parts []MessagePart
+	// errCh receives the outcome for the Send waiting on it; nil for the
+	// initial prompt.
 	errCh chan error
+	// initial marks the initial prompt, whose failure is reported here.
+	initial bool
+	// gen is the reset generation it was queued in.
+	gen uint64
+}
+
+// finish reports the outcome to the Send waiting for it, if any.
+func (m *outboundMessage) finish(err error) {
+	if m != nil && m.errCh != nil {
+		m.errCh <- err
+		close(m.errCh)
+	}
 }
 
 // PTYConversationConfig is the configuration for a PTYConversation.
@@ -162,11 +176,18 @@ type PTYConversation struct {
 	readinessChecked     bool
 	readinessCheckScreen string
 
-	// outboundQueue holds messages waiting to be sent to the agent.
-	// Buffer size is 1. Callers are expected to be serialized (the HTTP
-	// layer holds s.mu, and Send blocks until the message is processed),
-	// so ordering is preserved.
-	outboundQueue chan outboundMessage
+	// pending is the message waiting to be sent: at most one, since Send
+	// refuses another while one waits (the status is changing) and the
+	// initial prompt is queued before Send accepts any. Queueing never
+	// blocks, so it can happen under c.lock.
+	pending *outboundMessage
+	// sendGen counts resets: a message queued, or on its way, before a
+	// reset doesn't reach the new conversation.
+	sendGen uint64
+	// cancelSend stops the message on its way, for Reset.
+	cancelSend context.CancelFunc
+	// sendErr is set once the send loop has stopped; Send fails with it.
+	sendErr error
 	// sendingMessage is true while the send loop is processing a message.
 	// Set under lock in the snapshot loop when signaling, cleared under
 	// lock in the send loop after sendMessage returns.
@@ -175,7 +196,7 @@ type PTYConversation struct {
 	// When true, updateLastAgentMessageLocked skips updates to avoid capturing terminal echo.
 	writingMessage bool
 	// stableSignal is used by the snapshot loop to signal the send loop
-	// when the agent is stable and there are items in the outbound queue.
+	// when the agent is stable and a message is pending.
 	stableSignal chan struct{}
 	snapshotWake chan struct{}
 	// toolCallMessageSet keeps track of the tool calls that have been detected & logged in the current agent message
@@ -189,7 +210,7 @@ type PTYConversation struct {
 	// initialPromptReady is set to true when ReadyForInitialPrompt returns true.
 	// Checked inline in the snapshot loop on each tick.
 	initialPromptReady bool
-	// initialPromptSent is set to true when the initial prompt has been enqueued to the outbound queue.
+	// initialPromptSent is set to true when the initial prompt has been queued.
 	initialPromptSent bool
 }
 
@@ -215,7 +236,6 @@ func NewPTY(ctx context.Context, cfg PTYConversationConfig, emitter Emitter) *PT
 				Time:    cfg.Clock.Now(),
 			},
 		},
-		outboundQueue:                 make(chan outboundMessage, 1),
 		stableSignal:                  make(chan struct{}, 1),
 		snapshotWake:                  make(chan struct{}, 1),
 		toolCallMessageSet:            make(map[string]bool),
@@ -268,16 +288,13 @@ func (c *PTYConversation) Start(ctx context.Context) {
 			c.fmtCacheValid = false
 		}
 
-		if c.initialPromptReady && len(c.cfg.InitialPrompt) > 0 && !c.initialPromptSent {
-			// Safe to send under lock: the queue is guaranteed empty here because
-			// statusLocked blocks Send until the snapshot buffer fills, which
-			// cannot happen before this first enqueue completes.
-			c.outboundQueue <- outboundMessage{parts: c.cfg.InitialPrompt, errCh: nil}
+		if c.initialPromptReady && len(c.cfg.InitialPrompt) > 0 && !c.initialPromptSent && c.pending == nil {
+			c.pending = &outboundMessage{parts: c.cfg.InitialPrompt, initial: true, gen: c.sendGen}
 			c.initialPromptSent = true
 			c.dirty = true
 		}
 
-		if c.initialPromptReady && len(c.outboundQueue) > 0 && c.isScreenStableLocked() {
+		if c.initialPromptReady && c.pending != nil && !c.sendingMessage && c.isScreenStableLocked() {
 			select {
 			case c.stableSignal <- struct{}{}:
 				c.sendingMessage = true
@@ -302,48 +319,58 @@ func (c *PTYConversation) Start(ctx context.Context) {
 		c.cfg.Clock.TickerFunc(ctx, c.cfg.SnapshotInterval, snapshot, "snapshot")
 	}
 
-	// Send loop - primary call site for sendLocked() in production
-	go func() {
-		defer func() {
-			// Drain outbound queue so Send() callers don't block forever.
-			for {
-				select {
-				case msg := <-c.outboundQueue:
-					if msg.errCh != nil {
-						msg.errCh <- ctx.Err()
-						close(msg.errCh)
-					}
-				default:
-					return
-				}
-			}
-		}()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-c.stableSignal:
-				select {
-				case <-ctx.Done():
-					return
-				case msg := <-c.outboundQueue:
-					err := c.sendMessage(ctx, msg.parts...)
-					c.lock.Lock()
-					c.sendingMessage = false
-					c.lock.Unlock()
-					c.wakeSnapshot()
-					if msg.errCh != nil {
-						msg.errCh <- err
-						// Close so the Send() caller's <-errCh never blocks
-						// if it has already consumed the error value.
-						close(msg.errCh)
-					}
-				default:
-					c.cfg.Logger.Error("received stable signal but outbound queue is empty")
-				}
-			}
-		}
+	go c.sendLoop(ctx)
+}
+
+// sendLoop sends the pending message whenever the snapshot loop signals
+// that the agent is ready for it.
+func (c *PTYConversation) sendLoop(ctx context.Context) {
+	defer func() {
+		// Fail the message that waits, and the ones Send queues from now
+		// on, so no caller blocks forever.
+		c.lock.Lock()
+		c.sendErr = ctx.Err()
+		msg := c.pending
+		c.pending = nil
+		c.lock.Unlock()
+		msg.finish(ctx.Err())
 	}()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.stableSignal:
+		}
+		c.lock.Lock()
+		msg := c.pending
+		c.pending = nil
+		var sendCtx context.Context
+		if msg != nil {
+			sendCtx, c.cancelSend = context.WithCancel(ctx)
+		}
+		c.lock.Unlock()
+		var err error
+		if msg != nil {
+			err = c.sendMessage(sendCtx, msg.gen, msg.parts...)
+		}
+		c.lock.Lock()
+		c.sendingMessage = false
+		if c.cancelSend != nil {
+			c.cancelSend()
+			c.cancelSend = nil
+		}
+		c.lock.Unlock()
+		c.wakeSnapshot()
+		if msg == nil {
+			// Reset dropped it after the signal.
+			continue
+		}
+		if msg.initial && err != nil && !errors.Is(err, ErrConversationReset) {
+			c.cfg.Logger.Error("Failed to send the initial prompt", "error", err)
+			c.emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), ErrorLevelError)
+		}
+		msg.finish(err)
+	}
 }
 
 func (c *PTYConversation) lastMessage(role ConversationRole) ConversationMessage {
@@ -472,40 +499,55 @@ func (c *PTYConversation) Send(messageParts ...MessagePart) error {
 		return ErrMessageValidationEmpty
 	}
 
+	// Checking the status and queueing the message happen under one lock,
+	// so no second message can slip in.
 	c.lock.Lock()
+	if c.sendErr != nil {
+		err := c.sendErr
+		c.lock.Unlock()
+		return err
+	}
 	if c.statusLocked() != ConversationStatusStable {
 		c.lock.Unlock()
 		return ErrMessageValidationChanging
 	}
-	c.lock.Unlock()
-
 	errCh := make(chan error, 1)
-	c.outboundQueue <- outboundMessage{parts: messageParts, errCh: errCh}
+	c.pending = &outboundMessage{parts: messageParts, errCh: errCh, gen: c.sendGen}
+	c.lock.Unlock()
 	c.wakeSnapshot()
 	return <-errCh
 }
 
-// sendMessage sends a message to the agent. It acquires and releases c.lock
-// around the parts that access shared state, but releases it during
-// writeStabilize to avoid blocking the snapshot loop.
-func (c *PTYConversation) sendMessage(ctx context.Context, messageParts ...MessagePart) error {
+// sendMessage sends a message, queued in reset generation gen, to the
+// agent. It acquires and releases c.lock around the parts that access
+// shared state, but releases it during writeStabilize to avoid blocking the
+// snapshot loop.
+func (c *PTYConversation) sendMessage(ctx context.Context, gen uint64, messageParts ...MessagePart) error {
 	message := buildStringFromMessageParts(messageParts)
 
 	c.lock.Lock()
+	if gen != c.sendGen {
+		c.lock.Unlock()
+		return ErrConversationReset
+	}
 	screenBeforeMessage := c.cfg.AgentIO.ReadScreen()
 	now := c.cfg.Clock.Now()
 	c.updateLastAgentMessageLocked(screenBeforeMessage, now)
 	c.writingMessage = true
 	c.lock.Unlock()
 
-	if err := c.writeStabilize(ctx, messageParts...); err != nil {
-		c.lock.Lock()
-		defer c.lock.Unlock()
-		c.writingMessage = false
+	err := c.writeStabilize(ctx, messageParts...)
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.writingMessage = false
+	if gen != c.sendGen {
+		// Reset while it was on its way: the message belongs to the
+		// conversation that was cleared.
+		return ErrConversationReset
+	}
+	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
-
-	c.lock.Lock()
 	c.screenBeforeLastUserMessage = screenBeforeMessage
 	c.messages = append(c.messages, ConversationMessage{
 		Id:      len(c.messages),
@@ -514,12 +556,10 @@ func (c *PTYConversation) sendMessage(ctx context.Context, messageParts ...Messa
 		Time:    now,
 	})
 	c.userSentMessageAfterLoadState = true
-	c.writingMessage = false
 	c.dirty = true
 	// screenBeforeLastUserMessage and messages changed; the next
 	// updateLastAgentMessageLocked pass must recompute the diff.
 	c.fmtCacheValid = false
-	c.lock.Unlock()
 	return nil
 }
 
@@ -676,7 +716,7 @@ func (c *PTYConversation) statusLocked() ConversationStatus {
 
 	// Handle initial prompt readiness: report "changing" until the queue is drained
 	// to avoid the status flipping "changing" -> "stable" -> "changing"
-	if len(c.outboundQueue) > 0 || c.sendingMessage {
+	if c.pending != nil || c.sendingMessage {
 		return ConversationStatusChanging
 	}
 
@@ -865,6 +905,15 @@ func (c *PTYConversation) Reset() {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
+	// The message waiting, or on its way, belonged to the old conversation.
+	c.sendGen++
+	if c.cancelSend != nil {
+		c.cancelSend()
+	}
+	if msg := c.pending; msg != nil {
+		c.pending = nil
+		msg.finish(ErrConversationReset)
+	}
 	c.messages = []ConversationMessage{
 		{
 			Message: "",
@@ -927,7 +976,7 @@ func (c *PTYConversation) watchScreen(ctx context.Context, source interface{ Scr
 		}
 		c.lock.Lock()
 		curScreen := c.lastSnapshotScreen
-		settled := c.isScreenStableLocked() && !c.sendingMessage && !c.writingMessage && len(c.outboundQueue) == 0
+		settled := c.isScreenStableLocked() && !c.sendingMessage && !c.writingMessage && c.pending == nil
 		c.lock.Unlock()
 
 		if settled {

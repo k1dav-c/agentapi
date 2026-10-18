@@ -58,6 +58,9 @@ var (
 	// the agent never reacted to the carriage return. The text may still be
 	// sitting in the agent's input box, so resending it would duplicate it.
 	ErrMessageNotSubmitted = errors.New("agent did not react to the submitted message")
+	// ErrConversationReset means the conversation was reset before the
+	// message reached the agent; it isn't part of the new conversation.
+	ErrConversationReset = errors.New("the conversation was reset before the message was sent")
 )
 
 type AgentIO interface {
