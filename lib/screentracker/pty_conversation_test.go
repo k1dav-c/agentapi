@@ -1962,15 +1962,26 @@ func TestResetWhileTheInitialPromptWaits(t *testing.T) {
 
 	// The initial prompt goes to the new agent once, then messages work.
 	var written []string
+	agent.mu.Lock()
 	agent.onWrite = func(data []byte) {
 		if s := string(data); s != "\r" {
 			written = append(written, s)
 		}
 		agent.screen += "."
 	}
-	advanceFor(ctx, t, mClock, 5*time.Second)
+	agent.mu.Unlock()
+	writes := func() []string {
+		agent.mu.Lock()
+		defer agent.mu.Unlock()
+		return slices.Clone(written)
+	}
+	// The send loop delivers the prompt in its own time: wait for it, and
+	// for the screen to settle after it.
+	advanceUntil(ctx, t, mClock, func() bool {
+		return len(writes()) == 1 && c.Status() == st.ConversationStatusStable
+	})
 	sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: "hello"})
-	require.Equal(t, []string{"initial", "hello"}, written)
+	require.Equal(t, []string{"initial", "hello"}, writes())
 }
 
 // errorEmitter records the errors a conversation reports.
