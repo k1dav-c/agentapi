@@ -10,6 +10,19 @@ describe("session explorer URL reconstruction", () => {
     ).toEqual(["https://example.com/a/very/long/path?query=one&value=two"]);
   });
 
+  test("leaves out the Markdown around a link, and links cut short", () => {
+    expect(reconstructWrappedURLs("See **https://example.com/docs**, `https://example.com/a` and <https://example.com/b>.")).toEqual([
+      "https://example.com/docs",
+      "https://example.com/a",
+      "https://example.com/b",
+    ]);
+    expect(reconstructWrappedURLs("Here is what I did for **Compare it with https://github.com/coder/agent…**:")).toEqual([]);
+    expect(reconstructWrappedURLs("Read https://example.com/a_b and https://example.com/~user/x.")).toEqual([
+      "https://example.com/a_b",
+      "https://example.com/~user/x",
+    ]);
+  });
+
   test("does not join ordinary following prose", () => {
     expect(
       reconstructWrappedURLs("See https://example.com/docs\nThis is another line"),

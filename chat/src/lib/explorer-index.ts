@@ -86,7 +86,11 @@ export function reconstructWrappedURLs(content: string) {
         candidate += lines[next].trim();
         next += 1;
       }
-      candidate = candidate.replace(/[),.;:!?]+$/u, "");
+      // Punctuation after the link and the Markdown around it (emphasis, code,
+      // quotes, an autolink's brackets) aren't part of it, as in GFM.
+      candidate = candidate.replace(/[),.;:!?*_~`'"\]>]+$/u, "");
+      // An ellipsis means the text cut the link short: it leads nowhere.
+      if (candidate.includes("…")) continue;
       try {
         const parsed = new URL(candidate);
         if (parsed.protocol === "http:" || parsed.protocol === "https:") {
