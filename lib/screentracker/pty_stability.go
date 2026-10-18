@@ -2,30 +2,22 @@ package screentracker
 
 import (
 	"context"
-	"time"
 )
-
-// A screenSnapshot represents a snapshot of the PTY at a specific time.
-type screenSnapshot struct {
-	timestamp time.Time
-	screen    string
-}
 
 // caller MUST hold c.lock
 func (c *PTYConversation) snapshotLocked(screen string) {
-	snapshot := screenSnapshot{
-		timestamp: c.cfg.Clock.Now(),
-		screen:    screen,
-	}
 	region := c.cfg.StabilityScreen(screen)
-	if c.snapshotBuffer.Len() > 0 && region == c.lastSnapshotScreen {
+	if c.snapshots > 0 && region == c.lastSnapshotScreen {
 		c.stableCount++
 	} else {
 		c.stableCount = 1
 	}
 	c.lastSnapshotScreen = region
-	c.snapshotBuffer.Add(snapshot)
-	c.updateLastAgentMessageLocked(screen, snapshot.timestamp)
+	c.lastScreen = screen
+	if c.snapshots < c.stableSnapshotsThreshold {
+		c.snapshots++
+	}
+	c.updateLastAgentMessageLocked(screen, c.cfg.Clock.Now())
 }
 
 // isScreenStableLocked returns true if the screen content has been stable
@@ -33,7 +25,7 @@ func (c *PTYConversation) snapshotLocked(screen string) {
 // Equivalent to "buffer is full and all snapshots are identical", computed
 // incrementally via stableCount instead of comparing every snapshot.
 func (c *PTYConversation) isScreenStableLocked() bool {
-	return c.snapshotBuffer.Len() >= c.stableSnapshotsThreshold &&
+	return c.snapshots >= c.stableSnapshotsThreshold &&
 		c.stableCount >= c.stableSnapshotsThreshold
 }
 

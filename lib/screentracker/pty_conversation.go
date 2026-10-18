@@ -78,8 +78,12 @@ type PTYConversation struct {
 	cfg     PTYConversationConfig
 	emitter Emitter
 	// How many stable snapshots are required to consider the screen stable
-	stableSnapshotsThreshold    int
-	snapshotBuffer              *RingBuffer[screenSnapshot]
+	stableSnapshotsThreshold int
+	// snapshots counts the snapshots taken since the start or the last
+	// reset, up to stableSnapshotsThreshold: fewer means initializing.
+	snapshots int
+	// lastScreen is the screen of the latest snapshot.
+	lastScreen                  string
 	messages                    []ConversationMessage
 	screenBeforeLastUserMessage string
 	lock                        sync.Mutex
@@ -158,7 +162,6 @@ func NewPTY(ctx context.Context, cfg PTYConversationConfig, emitter Emitter) *PT
 		cfg:                      cfg,
 		emitter:                  emitter,
 		stableSnapshotsThreshold: threshold,
-		snapshotBuffer:           NewRingBuffer[screenSnapshot](threshold),
 		messages: []ConversationMessage{
 			{
 				Message: "",
@@ -183,73 +186,103 @@ func NewPTY(ctx context.Context, cfg PTYConversationConfig, emitter Emitter) *PT
 	return c
 }
 
+// Start takes snapshots of the screen as it changes (or every
+// SnapshotInterval) and starts the loop that sends messages.
 func (c *PTYConversation) Start(ctx context.Context) {
-	snapshot := func() error {
-		c.lock.Lock()
-		screen := c.cfg.AgentIO.ReadScreen()
-		c.snapshotLocked(screen)
-		status := c.statusLocked()
-		messages := c.messagesLocked()
-
-		// Signal send loop if agent is ready and queue has items.
-		// We check readiness independently of statusLocked() because
-		// statusLocked() returns "changing" when queue has items.
-		if !c.initialPromptReady && (!c.readinessChecked || screen != c.readinessCheckScreen) {
-			c.readinessChecked = true
-			c.readinessCheckScreen = screen
-			if c.cfg.ReadyForInitialPrompt(screen) {
-				c.initialPromptReady = true
-			}
-		}
-
-		var loadErr string
-		if c.initialPromptReady && c.loadStateStatus == LoadStatePending && c.cfg.StatePersistenceConfig.LoadState {
-			if err, shouldEmit := c.loadStateLocked(); err != nil {
-				c.loadStateStatus = LoadStateFailed
-				if shouldEmit {
-					c.cfg.Logger.Error("Failed to load state", "error", err)
-					loadErr = fmt.Sprintf("Failed to restore previous session: %v", err)
-				}
-			} else {
-				c.loadStateStatus = LoadStateSucceeded
-			}
-			// Load-state status and restored messages feed into
-			// updateLastAgentMessageLocked; force a fresh pass.
-			c.fmtCacheValid = false
-		}
-
-		if c.initialPromptReady && len(c.cfg.InitialPrompt) > 0 && !c.initialPromptSent && c.pending == nil {
-			c.pending = &outboundMessage{parts: c.cfg.InitialPrompt, initial: true, gen: c.sendGen}
-			c.initialPromptSent = true
-			c.dirty = true
-		}
-
-		if c.initialPromptReady && c.pending != nil && !c.sendingMessage && c.isScreenStableLocked() {
-			select {
-			case c.stableSignal <- struct{}{}:
-				c.sendingMessage = true
-			default:
-				// Signal already pending
-			}
-		}
-		c.lock.Unlock()
-
-		if loadErr != "" {
-			c.emitter.EmitError(loadErr, ErrorLevelWarning)
-		}
-		c.emitter.EmitStatus(status)
-		c.emitter.EmitMessages(messages)
-		c.emitter.EmitScreen(screen)
-		return nil
-	}
 	if source, ok := c.cfg.AgentIO.(interface{ ScreenUpdates() <-chan struct{} }); ok {
-		go c.watchScreen(ctx, source, snapshot)
+		go c.watchScreen(ctx, source, c.snapshot)
 	} else {
 		// Keep compatibility with AgentIO implementations without notifications.
-		c.cfg.Clock.TickerFunc(ctx, c.cfg.SnapshotInterval, snapshot, "snapshot")
+		c.cfg.Clock.TickerFunc(ctx, c.cfg.SnapshotInterval, c.snapshot, "snapshot")
 	}
 
 	go c.sendLoop(ctx)
+}
+
+// snapshot takes a snapshot of the screen, acts on what it shows (the
+// agent is ready, the saved conversation can be loaded, the initial prompt
+// or a message can go out) and emits the conversation's state.
+func (c *PTYConversation) snapshot() error {
+	c.lock.Lock()
+	screen := c.cfg.AgentIO.ReadScreen()
+	c.snapshotLocked(screen)
+	status := c.statusLocked()
+	messages := c.messagesLocked()
+	c.checkReadyLocked(screen)
+	loadErr := c.loadStateWhenReadyLocked()
+	c.queueInitialPromptLocked()
+	c.signalSendLocked()
+	c.lock.Unlock()
+
+	if loadErr != "" {
+		c.emitter.EmitError(loadErr, ErrorLevelWarning)
+	}
+	c.emitter.EmitStatus(status)
+	c.emitter.EmitMessages(messages)
+	c.emitter.EmitScreen(screen)
+	return nil
+}
+
+// checkReadyLocked notes when screen shows the agent ready for the initial
+// prompt. It is checked apart from the status, which is "changing" while a
+// message waits. Caller holds c.lock.
+func (c *PTYConversation) checkReadyLocked(screen string) {
+	if c.initialPromptReady || (c.readinessChecked && screen == c.readinessCheckScreen) {
+		return
+	}
+	c.readinessChecked = true
+	c.readinessCheckScreen = screen
+	if c.cfg.ReadyForInitialPrompt(screen) {
+		c.initialPromptReady = true
+	}
+}
+
+// loadStateWhenReadyLocked loads the saved conversation once the agent is
+// ready, and returns the error to show if that failed. Caller holds
+// c.lock.
+func (c *PTYConversation) loadStateWhenReadyLocked() string {
+	if !c.initialPromptReady || c.loadStateStatus != LoadStatePending || !c.cfg.StatePersistenceConfig.LoadState {
+		return ""
+	}
+	// Load-state status and restored messages feed into
+	// updateLastAgentMessageLocked; force a fresh pass.
+	c.fmtCacheValid = false
+	err, shouldEmit := c.loadStateLocked()
+	if err == nil {
+		c.loadStateStatus = LoadStateSucceeded
+		return ""
+	}
+	c.loadStateStatus = LoadStateFailed
+	if !shouldEmit {
+		return ""
+	}
+	c.cfg.Logger.Error("Failed to load state", "error", err)
+	return fmt.Sprintf("Failed to restore previous session: %v", err)
+}
+
+// queueInitialPromptLocked queues the initial prompt once the agent is
+// ready. Caller holds c.lock.
+func (c *PTYConversation) queueInitialPromptLocked() {
+	if !c.initialPromptReady || len(c.cfg.InitialPrompt) == 0 || c.initialPromptSent || c.pending != nil {
+		return
+	}
+	c.pending = &outboundMessage{parts: c.cfg.InitialPrompt, initial: true, gen: c.sendGen}
+	c.initialPromptSent = true
+	c.dirty = true
+}
+
+// signalSendLocked tells the send loop to send the message that waits,
+// once the agent is ready and its screen stable. Caller holds c.lock.
+func (c *PTYConversation) signalSendLocked() {
+	if !c.initialPromptReady || c.pending == nil || c.sendingMessage || !c.isScreenStableLocked() {
+		return
+	}
+	select {
+	case c.stableSignal <- struct{}{}:
+		c.sendingMessage = true
+	default:
+		// Signal already pending
+	}
 }
 
 func (c *PTYConversation) Status() ConversationStatus {
@@ -262,9 +295,6 @@ func (c *PTYConversation) Status() ConversationStatus {
 // caller MUST hold c.lock
 func (c *PTYConversation) statusLocked() ConversationStatus {
 	// sanity checks
-	if c.snapshotBuffer.Capacity() != c.stableSnapshotsThreshold {
-		panic(fmt.Sprintf("snapshot buffer capacity %d is not equal to snapshot threshold %d. can't check stability", c.snapshotBuffer.Capacity(), c.stableSnapshotsThreshold))
-	}
 	if c.stableSnapshotsThreshold == 0 {
 		panic("stable snapshots threshold is 0. can't check stability")
 	}
@@ -276,7 +306,7 @@ func (c *PTYConversation) statusLocked() ConversationStatus {
 		return ConversationStatusChanging
 	}
 
-	if c.snapshotBuffer.Len() != c.stableSnapshotsThreshold {
+	if c.snapshots < c.stableSnapshotsThreshold {
 		return ConversationStatusInitializing
 	}
 
@@ -319,11 +349,7 @@ func (c *PTYConversation) Text() string {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	snapshots := c.snapshotBuffer.GetAll()
-	if len(snapshots) == 0 {
-		return ""
-	}
-	return snapshots[len(snapshots)-1].screen
+	return c.lastScreen
 }
 
 // Reset clears all conversation state back to the initial empty state.
@@ -349,7 +375,8 @@ func (c *PTYConversation) Reset() {
 		},
 	}
 	c.screenBeforeLastUserMessage = ""
-	c.snapshotBuffer = NewRingBuffer[screenSnapshot](c.stableSnapshotsThreshold)
+	c.snapshots = 0
+	c.lastScreen = ""
 	c.stableCount = 0
 	c.lastSnapshotScreen = ""
 	c.fmtCacheValid = false
