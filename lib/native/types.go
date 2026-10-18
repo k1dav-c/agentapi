@@ -186,7 +186,7 @@ type Question struct {
 	ID          string           `json:"id" doc:"Identifier of the question; key of its answer in the response."`
 	Header      string           `json:"header,omitempty" doc:"Short label for the question."`
 	Question    string           `json:"question" doc:"The question."`
-	Options     []QuestionOption `json:"options,omitempty" doc:"Suggested answers."`
+	Options     []QuestionOption `json:"options,omitempty" nullable:"false" doc:"Suggested answers."`
 	MultiSelect bool             `json:"multi_select,omitempty" doc:"More than one option may be chosen."`
 	// FreeText allows an answer that is not one of the options.
 	FreeText bool `json:"free_text,omitempty" doc:"An answer other than the options is allowed."`
@@ -202,8 +202,8 @@ type Request struct {
 	ToolName  string          `json:"tool_name,omitempty" doc:"Tool the request is about."`
 	ToolUseID string          `json:"tool_use_id,omitempty" doc:"Tool call the request is about, matching tool_use_id in rich messages."`
 	Input     json.RawMessage `json:"input,omitempty" doc:"The tool call's input."`
-	Options   []RequestOption `json:"options,omitempty" doc:"Ways to answer an approval or plan request."`
-	Questions []Question      `json:"questions,omitempty" doc:"Questions of a question request."`
+	Options   []RequestOption `json:"options,omitempty" nullable:"false" doc:"Ways to answer an approval or plan request."`
+	Questions []Question      `json:"questions,omitempty" nullable:"false" doc:"Questions of a question request."`
 	// Feedback means a deny/reject answer can carry text for the agent
 	// (e.g. what to change in a plan).
 	Feedback   bool               `json:"feedback,omitempty" doc:"A text explanation can accompany the answer."`

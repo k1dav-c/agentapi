@@ -11,7 +11,7 @@ import (
 // limits.
 type AgentUsage struct {
 	Context    *ContextUsage `json:"context,omitempty" doc:"How full the model's context window is, after the last turn."`
-	RateLimits []RateLimit   `json:"rate_limits,omitempty" doc:"The account's usage limits (Claude Code's 5-hour and weekly limits, Codex's primary and secondary windows)."`
+	RateLimits []RateLimit   `json:"rate_limits,omitempty" nullable:"false" doc:"The account's usage limits (Claude Code's 5-hour and weekly limits, Codex's primary and secondary windows)."`
 }
 
 // ContextUsage is how full the model's context window is.

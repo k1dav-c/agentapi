@@ -24,7 +24,7 @@ type FilePreviewResponse struct {
 		Path     string                `json:"path" doc:"The path as given."`
 		Relative string                `json:"relative" doc:"The path relative to the agent's working directory."`
 		HTML     string                `json:"html" doc:"The page, with the stylesheets, scripts, images, fonts and media it refers to by relative path inlined as data: URLs (up to 4 MiB each, 16 MiB in all), and in-memory localStorage, sessionStorage and document.cookie where the page can't use them: for an iframe's srcdoc, sandboxed without allow-same-origin."`
-		Missing  []htmlpreview.Missing `json:"missing" doc:"References that weren't inlined: not found, outside the working directory, hidden, of a type that doesn't fit their use, or too large."`
+		Missing  []htmlpreview.Missing `json:"missing" nullable:"false" doc:"References that weren't inlined: not found, outside the working directory, hidden, of a type that doesn't fit their use, or too large."`
 	}
 }
 

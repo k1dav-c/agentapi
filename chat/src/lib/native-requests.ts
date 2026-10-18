@@ -4,55 +4,31 @@
 
 import {ApiError} from "./error-utils";
 import {getToolCommand} from "./tool-format";
+import type {components} from "./api-schema";
 
-export type RequestKind = "approval" | "question" | "plan";
-export type OptionKind = "allow" | "allow_always" | "deny" | "cancel" | "other";
-export type ResponseCapability = "live" | "message" | "not_resumable";
-export type RequestStatus = "pending" | "resolved" | "withdrawn" | "expired";
+// The API's types, generated from openapi.json (lib/api-schema.ts).
+type Schemas = components["schemas"];
 
-export interface RequestOption {
-  id: string;
-  label: string;
-  description?: string;
-  kind: OptionKind;
-}
-
-export interface RequestQuestion {
-  id: string;
-  header?: string;
-  question: string;
-  options?: {label: string; description?: string}[];
-  multi_select?: boolean;
-  free_text?: boolean;
-  secret?: boolean;
-}
-
+export type RequestKind = Schemas["RequestKind"];
+export type OptionKind = Schemas["OptionKind"];
+export type ResponseCapability = Schemas["ResponseCapability"];
+export type RequestStatus = Schemas["RequestStatus"];
+export type RequestOption = Schemas["RequestOption"];
+export type RequestQuestion = Schemas["Question"];
+// An answer to a request (POST /requests/{id}/respond).
 export interface RequestResponse {
   option_id?: string;
   answers?: Record<string, string[]>;
   text?: string;
 }
 
-export interface NativeRequest {
-  id: string;
-  kind: RequestKind;
-  title: string;
-  detail?: string;
-  tool_name?: string;
-  tool_use_id?: string;
-  input?: unknown;
-  options?: RequestOption[];
-  questions?: RequestQuestion[];
-  feedback?: boolean;
-  response_capability: ResponseCapability;
-  status: RequestStatus;
+// A request and what became of it, as the server keeps it.
+export type NativeRequest = Omit<Schemas["RequestState"], "$schema" | "response"> & {
   response?: RequestResponse;
-  created_at: string;
-  closed_at?: string;
   // Change sequence of the request_update this state came from; absent for
   // states read from the REST API.
   seq?: number;
-}
+};
 
 // How many closed requests the client keeps; the server keeps 50.
 const MAX_CLOSED = 100;

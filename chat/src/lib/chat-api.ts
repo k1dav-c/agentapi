@@ -4,122 +4,47 @@ import {parseTransport, type DispatchMode, type Transport} from "./dispatch";
 import type {NativeRequest, RequestResponse} from "./native-requests";
 import {parseLoginRequired, type LoginRequired, type LoginRetryOutcome} from "./login";
 import {ApiError} from "./error-utils";
+import type {components} from "./api-schema";
 
 export interface UploadOptions {
   signal?: AbortSignal;
   onProgress?: (progress: number) => void;
 }
 
-export interface MCPConfig {
-  servers: Record<string, unknown>;
-  path: string;
-  restarted?: boolean;
-}
+// The API's types, generated from openapi.json (lib/api-schema.ts).
+type Schemas = components["schemas"];
+// A response body without huma's link to its JSON schema.
+type Body<T> = Omit<T, "$schema">;
 
-export interface MCPCheckResult {
-  name: string;
-  status: "ready" | "unreachable" | "invalid";
-  kind: "stdio" | "http" | "unknown";
-  detail: string;
-  latency_ms?: number;
-}
-
-export interface MCPProfiles {
-  profiles: Record<string, Record<string, unknown>>;
-  path: string;
-}
+// GET and PUT /mcp. restarted is set by a change that restarted the agent.
+export type MCPConfig = Body<Schemas["MCPGetResponseBody"]> & {restarted?: boolean};
+export type MCPCheckResult = Schemas["MCPCheckResult"];
+export type MCPProfiles = Body<Schemas["MCPProfilesResponseBody"]>;
 
 // A file in the agent's working directory (GET /files/content).
-export interface FileContent {
-  // As asked for.
-  path: string;
-  // Relative to the agent's working directory, for display.
-  relative: string;
-  // Bytes on disk.
-  size: number;
-  // UTF-8 text, cut at 1 MiB (truncated); empty for a binary file.
-  content: string;
-  truncated: boolean;
-  binary: boolean;
-}
-
-export type FileDiffStatus = "modified" | "added" | "deleted" | "untracked" | "unchanged" | "not_in_repo";
-
+export type FileContent = Body<Schemas["FileContentResponseBody"]>;
+export type FileDiffStatus = Schemas["FileDiffStatus"];
 // An HTML file as a page that shows by itself (GET /files/preview): what it
 // refers to by relative path is inlined, for a sandboxed iframe's srcdoc.
-export interface FilePreview {
-  path: string;
-  relative: string;
-  html: string;
-  // References that weren't inlined, and why.
-  missing: {ref: string; reason: string}[];
-}
+export type FilePreview = Body<Schemas["FilePreviewResponseBody"]>;
+// A file's uncommitted changes (GET /files/diff).
+export type FileDiff = Body<Schemas["FileDiffResponseBody"]>;
 
-// A file's uncommitted changes (GET /files/diff): git's unified diff of the
-// working tree against HEAD, where an untracked file shows as added.
-export interface FileDiff {
-  path: string;
-  relative: string;
-  status: FileDiffStatus;
-  // Empty when unchanged or not in a repository; cut at 1 MiB (truncated).
-  diff: string;
-  truncated: boolean;
-}
-
-export type PermissionMode = "bypass" | "auto" | "ask" | "plan";
-
+export type PermissionMode = Schemas["PermissionMode"];
 // The agent's session settings (native transport). A setting the agent
 // doesn't report is missing; permission_mode is missing while the agent
 // runs in a mode of its own (e.g. Claude Code's acceptEdits).
-export interface AgentSettings {
-  permission_mode?: PermissionMode;
-  model?: string;
-  effort?: string;
-}
-
-export interface ModelOption {
-  id: string;
-  name: string;
-  description?: string;
-  // From the least effort to the most; missing when the model has no
-  // choice of effort.
-  efforts?: string[];
-  default_effort?: string;
-}
-
-export interface SettingOptions {
-  permission_modes: PermissionMode[];
-  models: ModelOption[];
-}
-
-// How full the agent's context window is, after its last turn.
-export interface ContextUsage {
-  used: number;
-  size: number;
-}
-
-// One of the account's usage limits.
-export interface RateLimit {
-  id: string;
-  label: string;
-  // 0 to 100; missing when the agent doesn't say.
-  used_percent?: number;
-  resets_at?: string;
-  // Claude Code's: allowed, allowed_warning (close to it), rejected.
-  status?: string;
-}
-
-// What the agent reports of its limits (native transport).
-export interface AgentUsage {
-  context?: ContextUsage;
-  rate_limits?: RateLimit[];
-}
-
+export type AgentSettings = Body<Schemas["Settings"]>;
+export type ModelOption = Schemas["ModelOption"];
+export type SettingOptions = Schemas["SettingOptions"];
 // GET and PUT /settings.
-export interface SettingsResponse {
-  settings: AgentSettings;
-  options: SettingOptions;
-}
+export type SettingsResponse = Body<Schemas["SettingsResponseBody"]>;
+
+// What the agent reports of its limits (native transport): how full its
+// context window is, and the account's usage limits.
+export type ContextUsage = Schemas["ContextUsage"];
+export type RateLimit = Schemas["RateLimit"];
+export type AgentUsage = Schemas["AgentUsage"];
 
 interface APIErrorDetail {
   message: string;

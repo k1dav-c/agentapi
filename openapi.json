@@ -22,7 +22,6 @@
             "items": {
               "$ref": "#/components/schemas/RateLimit"
             },
-            "nullable": true,
             "type": "array"
           }
         },
@@ -368,7 +367,6 @@
             "items": {
               "$ref": "#/components/schemas/Missing"
             },
-            "nullable": true,
             "type": "array"
           },
           "path": {
@@ -908,7 +906,6 @@
             "items": {
               "type": "string"
             },
-            "nullable": true,
             "type": "array"
           },
           "id": {
@@ -992,7 +989,6 @@
             "items": {
               "$ref": "#/components/schemas/QuestionOption"
             },
-            "nullable": true,
             "type": "array"
           },
           "question": {
@@ -1295,7 +1291,6 @@
             "items": {
               "$ref": "#/components/schemas/RequestOption"
             },
-            "nullable": true,
             "type": "array"
           },
           "questions": {
@@ -1303,7 +1298,6 @@
             "items": {
               "$ref": "#/components/schemas/Question"
             },
-            "nullable": true,
             "type": "array"
           },
           "response": {
@@ -1389,7 +1383,6 @@
             "items": {
               "$ref": "#/components/schemas/RequestOption"
             },
-            "nullable": true,
             "type": "array"
           },
           "questions": {
@@ -1397,7 +1390,6 @@
             "items": {
               "$ref": "#/components/schemas/Question"
             },
-            "nullable": true,
             "type": "array"
           },
           "response": {
@@ -1808,7 +1800,6 @@
             "items": {
               "$ref": "#/components/schemas/ModelOption"
             },
-            "nullable": true,
             "type": "array"
           },
           "permission_modes": {
@@ -1816,7 +1807,6 @@
             "items": {
               "$ref": "#/components/schemas/PermissionMode"
             },
-            "nullable": true,
             "type": "array"
           }
         },

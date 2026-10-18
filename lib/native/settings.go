@@ -68,8 +68,8 @@ func (s Settings) Merge(o Settings) Settings {
 
 // SettingOptions are the values the settings can take.
 type SettingOptions struct {
-	PermissionModes []PermissionMode `json:"permission_modes" doc:"Permission modes the agent can switch to; empty when it has none (Pi)."`
-	Models          []ModelOption    `json:"models" doc:"Models the agent can switch to."`
+	PermissionModes []PermissionMode `json:"permission_modes" nullable:"false" doc:"Permission modes the agent can switch to; empty when it has none (Pi)."`
+	Models          []ModelOption    `json:"models" nullable:"false" doc:"Models the agent can switch to."`
 }
 
 // ModelOption is a model the agent can switch to.
@@ -78,7 +78,7 @@ type ModelOption struct {
 	Name        string `json:"name" doc:"Name to show."`
 	Description string `json:"description,omitempty" doc:"What the model is good at."`
 	// Efforts are ordered from the least effort to the most.
-	Efforts       []string `json:"efforts,omitempty" doc:"Reasoning efforts the model supports, from the least to the most; empty when it has no choice of effort."`
+	Efforts       []string `json:"efforts,omitempty" nullable:"false" doc:"Reasoning efforts the model supports, from the least to the most; empty when it has no choice of effort."`
 	DefaultEffort string   `json:"default_effort,omitempty" doc:"Effort the model uses unless one is chosen."`
 }
 
