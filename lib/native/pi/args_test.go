@@ -2,7 +2,6 @@ package pi
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -110,21 +109,6 @@ func TestNewFactoryRejectsArgs(t *testing.T) {
 	assert.Equal(t, "ref", a.(*Adapter).resumeRef)
 	require.NoError(t, a.Close(), "closing an adapter that never started")
 	require.NoError(t, a.Wait())
-}
-
-func TestReadStdout(t *testing.T) {
-	t.Parallel()
-	a := newAdapter(Config{}, nil, "", nil)
-	a.maxLine = 64
-	long := strings.Repeat("x", 200)
-	in := "{\"a\":1}\r\n\n{\"u\":\" \"}\n" + long + "\n{\"b\":2}\n{\"c\":3}"
-	lines := make(chan []byte, 10)
-	a.readStdout(strings.NewReader(in), lines)
-	var got []string
-	for l := range lines {
-		got = append(got, string(l))
-	}
-	assert.Equal(t, []string{`{"a":1}`, "{\"u\":\" \"}", `{"b":2}`, `{"c":3}`}, got)
 }
 
 func TestStartAfterClose(t *testing.T) {

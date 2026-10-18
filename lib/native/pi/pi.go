@@ -4,15 +4,11 @@
 package pi
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +16,7 @@ import (
 	"github.com/coder/quartz"
 
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/procutil"
 	"github.com/coder/agentapi/lib/procenv"
 )
@@ -84,8 +81,6 @@ const (
 	// snapshotInterval is the shortest time between two snapshots of a
 	// message that is streaming.
 	snapshotInterval = 100 * time.Millisecond
-	// maxLineBytes bounds one stdout record (images make them large).
-	maxLineBytes = 64 << 20
 )
 
 var (
@@ -145,9 +140,9 @@ type Adapter struct {
 	// lineHandled, if set, is called after each stdout record is handled.
 	lineHandled func()
 
-	writeMu sync.Mutex
-	stdin   io.WriteCloser
-	proc    procutil.Process
+	// writer writes Pi's commands, once Start gave it the stdin.
+	writer *agentio.Writer
+	proc   procutil.Process
 
 	mu         sync.Mutex
 	started    bool
@@ -213,7 +208,8 @@ func newAdapter(cfg Config, args []string, resumeRef string, start procutil.Star
 		termGrace:        termGrace,
 		interruptTimeout: interruptTimeout,
 		interval:         snapshotInterval,
-		maxLine:          maxLineBytes,
+		maxLine:          agentio.MaxLine,
+		writer:           agentio.NewWriter("pi"),
 		clock:            quartz.NewReal(),
 		pending:          make(map[string]*pendingCmd),
 		dialogs:          make(map[string]*dialog),
@@ -253,9 +249,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		a.markDone(err)
 		return err
 	}
-	a.writeMu.Lock()
-	a.stdin = proc.Stdin()
-	a.writeMu.Unlock()
+	a.writer.Attach(proc.Stdin())
 	a.mu.Lock()
 	closing = a.closing
 	if !closing {
@@ -271,7 +265,10 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	a.loop = newLoopState(sink, a.cfg.CWD)
 
 	lines := make(chan []byte, 16)
-	go a.readStdout(proc.Stdout(), lines)
+	go func() {
+		defer close(lines)
+		agentio.ReadLines(proc.Stdout(), "pi", a.maxLine, a.logger, func(line []byte) { lines <- line })
+	}()
 	go a.eventLoop(lines)
 	go func() {
 		err := proc.Wait()
@@ -339,54 +336,9 @@ func (a *Adapter) markDone(err error) {
 	})
 }
 
-// readStdout splits stdout on "\n" only: Pi's JSON can contain U+2028.
-func (a *Adapter) readStdout(r io.Reader, lines chan<- []byte) {
-	defer close(lines)
-	reader := bufio.NewReaderSize(r, 64<<10)
-	var buf []byte
-	dropping := false
-	for {
-		chunk, err := reader.ReadSlice('\n')
-		switch {
-		case dropping:
-		case len(buf)+len(chunk) > a.maxLine:
-			dropping = true
-			buf = nil
-			a.logger.Warn("Dropped an oversized Pi record")
-		default:
-			buf = append(buf, chunk...)
-		}
-		if errors.Is(err, bufio.ErrBufferFull) {
-			continue
-		}
-		if line := bytes.TrimRight(buf, "\r\n"); !dropping && len(bytes.TrimSpace(line)) > 0 {
-			lines <- line
-		}
-		buf, dropping = nil, false
-		if err != nil {
-			if !errors.Is(err, io.EOF) && !errors.Is(err, os.ErrClosed) {
-				a.logger.Debug("Pi stdout closed", "error", err)
-			}
-			return
-		}
-	}
-}
-
 // send writes one command line.
 func (a *Adapter) send(cmd any) error {
-	b, err := json.Marshal(cmd)
-	if err != nil {
-		return err
-	}
-	a.writeMu.Lock()
-	defer a.writeMu.Unlock()
-	if a.stdin == nil {
-		return native.ErrNotStarted
-	}
-	if _, err := a.stdin.Write(append(b, '\n')); err != nil {
-		return fmt.Errorf("write to pi: %w", err)
-	}
-	return nil
+	return a.writer.Write(cmd)
 }
 
 // addPendingLocked registers a command that waits for its response under

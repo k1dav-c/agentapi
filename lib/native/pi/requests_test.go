@@ -52,17 +52,12 @@ func TestRespondAfterFailedWrite(t *testing.T) {
 	h.write(`{"type":"extension_ui_request","id":"d1","method":"confirm","title":"Clear session?","message":"All messages will be lost."}`)
 	h.settle()
 
-	h.a.writeMu.Lock()
-	stdin := h.a.stdin
-	h.a.stdin = failingStdin{}
-	h.a.writeMu.Unlock()
+	h.a.writer.Attach(failingStdin{})
 	err := h.a.Respond(h.ctx, "d1", native.Response{OptionID: optionNo})
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, native.ErrRequestNotFound)
 
-	h.a.writeMu.Lock()
-	h.a.stdin = stdin
-	h.a.writeMu.Unlock()
+	h.a.writer.Attach(h.pi.Stdin())
 	require.NoError(t, h.a.Respond(h.ctx, "d1", native.Response{OptionID: optionNo}), "the dialog is still open")
 	assert.Equal(t, false, h.pi.nextCmd()["confirmed"])
 	assert.ErrorIs(t, h.a.Respond(h.ctx, "d1", native.Response{OptionID: optionNo}), native.ErrRequestNotFound)
@@ -93,10 +88,8 @@ func TestTurnEndWhileAnswering(t *testing.T) {
 	h.write(`{"type":"extension_ui_request","id":"d1","method":"input","title":"Enter a value"}`)
 	h.settle()
 
-	h.a.writeMu.Lock()
-	stdin := &heldStdin{WriteCloser: h.a.stdin, writing: make(chan struct{}), release: make(chan struct{})}
-	h.a.stdin = stdin
-	h.a.writeMu.Unlock()
+	stdin := &heldStdin{WriteCloser: h.pi.Stdin(), writing: make(chan struct{}), release: make(chan struct{})}
+	h.a.writer.Attach(stdin)
 	h.call("r", func() error {
 		return h.a.Respond(h.ctx, "d1", native.Response{Answers: map[string][]string{valueQuestion: {"typed"}}})
 	})
