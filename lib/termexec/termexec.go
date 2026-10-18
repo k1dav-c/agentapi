@@ -187,10 +187,6 @@ func (p *Process) Pid() int {
 	return p.execCmd.Process.Pid
 }
 
-func (p *Process) Signal(sig os.Signal) error {
-	return p.execCmd.Process.Signal(sig)
-}
-
 // ReadScreen returns the contents of the terminal window.
 // It waits for the terminal to be stable for 16ms before
 // returning, or 48 ms since it's called, whichever is sooner.

@@ -28,7 +28,7 @@ func ForAgent(agentType string, pid int, cwd string, started time.Time) (Agent, 
 		}, true
 	case "codex":
 		return Agent{
-			Resolver: &CodexResolver{PID: pid, CWD: cwd, NotBefore: started},
+			Resolver: &CodexResolver{CWD: cwd, NotBefore: started},
 			Parser:   NewCodexParser(),
 			Events:   NewCodexSessionEventParser(),
 			Namer:    NewSessionNamer(agentType),

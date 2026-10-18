@@ -61,13 +61,13 @@ const (
 	MetaTransport   = "transport"
 	MetaCWD         = "cwd"
 	MetaEpoch       = "epoch"
-	MetaSeq         = "seq"
+	metaSeq         = "seq"
 	MetaSessionRef  = "session_ref"
 	MetaSessionName = "session_name"
-	// MetaSettings holds the settings chosen for the session (JSON). A
+	// metaSettings holds the settings chosen for the session (JSON). A
 	// reset keeps them.
-	MetaSettings    = "settings"
-	MetaNextQueueID = "next_queue_id"
+	metaSettings    = "settings"
+	metaNextQueueID = "next_queue_id"
 	// metaClean is set while the file is closed cleanly; see Snapshot.Clean.
 	metaClean = "clean"
 )
@@ -122,13 +122,13 @@ func (s Snapshot) Empty() bool { return len(s.Meta) == 0 }
 
 // Seq returns the stored seq.
 func (s Snapshot) Seq() uint64 {
-	n, _ := strconv.ParseUint(s.Meta[MetaSeq], 10, 64)
+	n, _ := strconv.ParseUint(s.Meta[metaSeq], 10, 64)
 	return n
 }
 
 // NextQueueID returns the stored next queue ID.
 func (s Snapshot) NextQueueID() int {
-	n, _ := strconv.Atoi(s.Meta[MetaNextQueueID])
+	n, _ := strconv.Atoi(s.Meta[metaNextQueueID])
 	return n
 }
 
@@ -453,13 +453,13 @@ func (d *DB) SetSettings(settings native.Settings) {
 		d.logger.Error("Failed to encode the settings", "error", err)
 		return
 	}
-	d.SetMeta(MetaSettings, string(data))
+	d.SetMeta(metaSettings, string(data))
 }
 
 // Settings returns the stored settings chosen for the session.
 func (s Snapshot) Settings() (native.Settings, error) {
 	var settings native.Settings
-	data, ok := s.Meta[MetaSettings]
+	data, ok := s.Meta[metaSettings]
 	if !ok || data == "" {
 		return settings, nil
 	}
@@ -472,7 +472,7 @@ func (s Snapshot) Settings() (native.Settings, error) {
 // SetSeq stores the latest change sequence of epoch.
 func (d *DB) SetSeq(epoch string, seq uint64) {
 	d.SetMeta(MetaEpoch, epoch)
-	d.SetMeta(MetaSeq, strconv.FormatUint(seq, 10))
+	d.SetMeta(metaSeq, strconv.FormatUint(seq, 10))
 }
 
 // PutMessage stores a conversation message.
@@ -572,7 +572,7 @@ func (d *DB) PutQueue(queue []QueuedMessage, nextID int) {
 		}
 		return nil
 	})
-	d.SetMeta(MetaNextQueueID, strconv.Itoa(nextID))
+	d.SetMeta(metaNextQueueID, strconv.Itoa(nextID))
 }
 
 // Reset removes the conversation (messages, rich messages, timeline,

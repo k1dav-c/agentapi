@@ -10,25 +10,11 @@ import (
 
 // JSONLLine is the raw envelope parsed from each line of the JSONL file.
 type JSONLLine struct {
-	Type       string        `json:"type"`
-	UUID       string        `json:"uuid,omitempty"`
-	ParentUUID *string       `json:"parentUuid,omitempty"`
-	Timestamp  string        `json:"timestamp,omitempty"`
-	SessionID  string        `json:"sessionId,omitempty"`
-	Message    *JSONLMessage `json:"message,omitempty"`
-
-	// For user messages with tool results
-	ToolUseResult           json.RawMessage `json:"toolUseResult,omitempty"`
-	SourceToolAssistantUUID string          `json:"sourceToolAssistantUUID,omitempty"`
-
-	// For user messages from humans
-	PromptSource string       `json:"promptSource,omitempty"`
-	Origin       *JSONLOrigin `json:"origin,omitempty"`
-}
-
-// JSONLOrigin indicates the source of a user message.
-type JSONLOrigin struct {
-	Kind string `json:"kind"` // "human" for typed prompts
+	Type      string        `json:"type"`
+	UUID      string        `json:"uuid,omitempty"`
+	Timestamp string        `json:"timestamp,omitempty"`
+	SessionID string        `json:"sessionId,omitempty"`
+	Message   *JSONLMessage `json:"message,omitempty"`
 }
 
 // JSONLMessage represents the message field within a JSONL line.

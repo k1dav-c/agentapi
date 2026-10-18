@@ -10,12 +10,12 @@ func TrimWhitespace(msg string) string {
 	return strings.Trim(msg, WhiteSpaceChars)
 }
 
-// IndexSubslice returns the index of the first instance of sub in s,
+// indexSubslice returns the index of the first instance of sub in s,
 // or -1 if sub is not present in s.
 // It's not the optimal algorithm - KMP would be better - but I don't
 // want to implement anything more complex. If I can find a library
 // that implements a faster algorithm, I'll use it.
-func IndexSubslice[T comparable](s, sub []T) int {
+func indexSubslice[T comparable](s, sub []T) int {
 	if len(sub) == 0 {
 		return 0
 	}
@@ -98,7 +98,7 @@ func findUserInputStartIdx(msg []rune, msgRuneLineLocations []int, userInput []r
 	}
 	msgPrefix := msg[:msgPrefixLen]
 
-	return IndexSubslice(msgPrefix, userInputPrefix)
+	return indexSubslice(msgPrefix, userInputPrefix)
 }
 
 // Find the next match between the message and the user input.

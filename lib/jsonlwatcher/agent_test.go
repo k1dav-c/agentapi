@@ -20,7 +20,7 @@ func TestForAgent(t *testing.T) {
 		assert.NotNil(t, agent.Namer, agentType)
 	}
 	codex, _ := ForAgent("codex", 42, "/work", started)
-	assert.Equal(t, &CodexResolver{PID: 42, CWD: "/work", NotBefore: started}, codex.Resolver)
+	assert.Equal(t, &CodexResolver{CWD: "/work", NotBefore: started}, codex.Resolver)
 	for _, agentType := range []string{"aider", "custom", ""} {
 		_, ok := ForAgent(agentType, 42, "/work", started)
 		assert.False(t, ok, agentType)

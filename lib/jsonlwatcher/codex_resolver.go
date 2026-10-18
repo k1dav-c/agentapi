@@ -18,7 +18,6 @@ import (
 // There is no PID mapping file, so we scan for the most recent session
 // matching the working directory.
 type CodexResolver struct {
-	PID         int
 	CWD         string
 	NotBefore   time.Time
 	SessionsDir string
