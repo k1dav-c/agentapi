@@ -91,8 +91,6 @@ type parsedArgs struct {
 	// none (bypassPermissions, see avoidRootBypass); empty when the user
 	// chose one or to skip permissions.
 	mode string
-	// bypass: the session runs in bypassPermissions.
-	bypass bool
 	// allowBypass: the session can switch to bypassPermissions, so
 	// --allow-dangerously-skip-permissions is added unless the user's
 	// arguments already allow it (skipPermissions, allowFlag). Claude Code
@@ -138,7 +136,7 @@ func flagNames(name string) []string {
 }
 
 func parseArgs(args []string) (parsedArgs, error) {
-	p := parsedArgs{mode: modeBypass, bypass: true, allowBypass: true}
+	p := parsedArgs{mode: modeBypass, allowBypass: true}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -178,10 +176,8 @@ func parseArgs(args []string) (parsedArgs, error) {
 		switch name {
 		case "--permission-mode":
 			p.mode = ""
-			p.bypass = value == modeBypass
 		case "--dangerously-skip-permissions":
 			p.mode = ""
-			p.bypass = true
 			p.skipPermissions = true
 		case "--allow-dangerously-skip-permissions":
 			p.allowFlag = true
@@ -219,7 +215,6 @@ func (p *parsedArgs) avoidRootBypass(env []string, uid int) bool {
 		return false
 	}
 	p.mode = modeDefault
-	p.bypass = false
 	return true
 }
 

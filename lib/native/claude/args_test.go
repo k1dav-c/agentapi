@@ -167,23 +167,30 @@ func TestEnv(t *testing.T) {
 	}, env)
 }
 
-func TestPlanOptionsFollowBypass(t *testing.T) {
+// Approving a plan offers bypassPermissions whenever the session can switch
+// to it, whatever mode it started in; TestRootDefaultMode covers the
+// sessions that can't.
+func TestPlanOptionsOfferBypass(t *testing.T) {
 	t.Parallel()
 	ids := func(args ...string) []string {
 		p, err := parseArgs(args)
 		require.NoError(t, err)
-		req := newPendingRequest("r", canUseTool{ToolName: toolExitPlanMode, Input: []byte(`{"plan":"x"}`)}, p.bypass)
+		req := newPendingRequest("r", canUseTool{ToolName: toolExitPlanMode, Input: []byte(`{"plan":"x"}`)}, p.allowBypass)
 		var out []string
 		for _, o := range req.req.Options {
 			out = append(out, o.ID)
 		}
 		return out
 	}
-	assert.Equal(t, []string{"bypassPermissions", "acceptEdits", "default", "deny"}, ids())
-	assert.Equal(t, []string{"bypassPermissions", "acceptEdits", "default", "deny"}, ids("--permission-mode=bypassPermissions"))
-	assert.Equal(t, []string{"bypassPermissions", "acceptEdits", "default", "deny"}, ids("--dangerously-skip-permissions"))
-	assert.Equal(t, []string{"acceptEdits", "default", "deny"}, ids("--permission-mode", "plan"))
-	assert.Equal(t, []string{"acceptEdits", "default", "deny"}, ids("--permission-mode", "default"))
+	for _, args := range [][]string{
+		nil,
+		{"--permission-mode=bypassPermissions"},
+		{"--dangerously-skip-permissions"},
+		{"--permission-mode", "plan"},
+		{"--permission-mode", "default"},
+	} {
+		assert.Equal(t, []string{"bypassPermissions", "acceptEdits", "default", "deny"}, ids(args...), args)
+	}
 }
 
 func TestRootDefaultMode(t *testing.T) {
