@@ -9,6 +9,7 @@ import (
 
 	"github.com/coder/quartz"
 
+	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -42,7 +43,7 @@ func (s *streamMessage) snapshot() transcript.RichMessage {
 		MessageID: s.id,
 		Role:      "assistant",
 		Model:     s.model,
-		Timestamp: msTime(s.timestamp),
+		Timestamp: native.UnixMilli(s.timestamp),
 	}
 	indexes := make([]int, 0, len(s.blocks))
 	for i := range s.blocks {
@@ -113,13 +114,6 @@ func (s *streamMessage) apply(ev *streamEvent) bool {
 		return false
 	}
 	return true
-}
-
-func msTime(ms int64) time.Time {
-	if ms <= 0 {
-		return time.Time{}
-	}
-	return time.UnixMilli(ms).UTC()
 }
 
 func (a *Adapter) handleMessageEvent(kind string, ev messageEvent) {
@@ -202,7 +196,7 @@ func (a *Adapter) handleMessageEnd(msg agentMessage, raw json.RawMessage) {
 	if len(rich) == 0 && streamed {
 		// Replace what was streamed, e.g. whitespace-only text. Only an
 		// assistant message can be streamed and come out empty.
-		rich = []transcript.RichMessage{{MessageID: id, Role: "assistant", Content: []transcript.RichContentBlock{}, Timestamp: msTime(msg.Timestamp)}}
+		rich = []transcript.RichMessage{{MessageID: id, Role: "assistant", Content: []transcript.RichContentBlock{}, Timestamp: native.UnixMilli(msg.Timestamp)}}
 	}
 	for _, m := range rich {
 		a.emitFinal(m)

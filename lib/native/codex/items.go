@@ -502,13 +502,6 @@ func readImage(path string) (transcript.RichImage, bool) {
 	return transcript.RichImage{MediaType: mediaType, Data: data}, true
 }
 
-func msTime(ms int64) time.Time {
-	if ms <= 0 {
-		return time.Time{}
-	}
-	return time.UnixMilli(ms).UTC()
-}
-
 func strPtr(s string) *string { return &s }
 
 func optString(s string) *string {

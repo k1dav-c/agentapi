@@ -26,8 +26,6 @@ package demo
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -148,14 +146,12 @@ func Factory(opts Options) native.Factory {
 
 // newAdapter returns an adapter for a new session, or for resumeRef.
 func newAdapter(resumeRef string, opts Options, login *loginState) *Adapter {
-	var nonce [4]byte
-	_, _ = rand.Read(nonce[:])
 	return &Adapter{
 		step:      opts.Step,
 		now:       opts.Now,
 		resumeRef: resumeRef,
 		login:     login,
-		prefix:    "demo-" + hex.EncodeToString(nonce[:]),
+		prefix:    "demo-" + native.RequestPrefix(),
 		settings:  defaultSettings,
 		done:      make(chan struct{}),
 	}

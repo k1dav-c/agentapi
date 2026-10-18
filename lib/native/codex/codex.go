@@ -4,8 +4,6 @@ package codex
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -182,14 +180,12 @@ func newAdapter(cfg Config, opts launchOptions, resumeRef string) *Adapter {
 	if cfg.Clock == nil {
 		cfg.Clock = quartz.NewReal()
 	}
-	var nonce [4]byte
-	_, _ = rand.Read(nonce[:])
 	a := &Adapter{
 		cfg:       cfg,
 		opts:      opts,
 		resumeRef: resumeRef,
 		log:       logger.With("agent", "codex"),
-		prefix:    hex.EncodeToString(nonce[:]),
+		prefix:    native.RequestPrefix(),
 		inbox:     make(chan rpcMessage, inboxSize),
 		// Unbuffered: a task handed over is one the loop runs.
 		tasks:        make(chan func()),

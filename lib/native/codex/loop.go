@@ -284,12 +284,12 @@ func (s *loopState) itemNotified(msg rpcMessage, n itemNotification) {
 	if t == nil {
 		return
 	}
-	at := msTime(n.StartedAtMs)
+	at := native.UnixMilli(n.StartedAtMs)
 	if msg.Method == "item/completed" {
-		at = msTime(n.CompletedAtMs)
+		at = native.UnixMilli(n.CompletedAtMs)
 	}
 	if at.IsZero() {
-		at = msTime(msg.EmittedAtMs)
+		at = native.UnixMilli(msg.EmittedAtMs)
 	}
 	if msg.Method == "item/started" {
 		s.itemStarted(t, &n.Item, at)
