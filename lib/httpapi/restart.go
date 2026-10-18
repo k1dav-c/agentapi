@@ -33,32 +33,22 @@ var errStopping = errors.New("AgentAPI is stopping")
 // deleteMessages clears all conversation state (messages, rich messages,
 // requests, timeline, errors, the queue) and restarts the agent process.
 func (s *Server) deleteMessages(_ context.Context, _ *struct{}) (*DeleteMessagesResponse, error) {
-	if !s.canRestart() {
+	if !s.backend().canRestart() {
 		return nil, huma.Error400BadRequest("agent restart is not supported in this server mode")
 	}
 	// Serialize process replacement with message and handoff reply delivery.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// restartLocked clears a native conversation itself.
-	if s.native == nil && !s.stopping {
-		s.stopJSONLWatcher()
-		s.resetConversationLocked()
-	}
 	ctx, cancel := s.agentCtx(restartTimeout)
 	defer cancel()
-	if err := s.restartLocked(ctx); err != nil {
+	if err := s.restartLocked(ctx, true); err != nil {
 		return nil, huma.Error500InternalServerError(fmt.Sprintf("agent restart failed: %v", err))
 	}
 
 	response := &DeleteMessagesResponse{}
 	response.Body.Restarted = true
 	return response, nil
-}
-
-// canRestart reports whether the agent can be replaced while AgentAPI runs.
-func (s *Server) canRestart() bool {
-	return s.restartAgent != nil || s.native != nil
 }
 
 // resetConversationLocked clears all conversation state: messages, rich
@@ -70,42 +60,17 @@ func (s *Server) resetConversationLocked() {
 	s.queue.Clear()
 }
 
-// restartLocked replaces the agent process with a new one in a new session.
-// Caller holds s.mu.
-func (s *Server) restartLocked(ctx context.Context) error {
+// restartLocked replaces the agent with a new one. With clear the
+// conversation starts over; a native agent's always does. Caller holds s.mu.
+func (s *Server) restartLocked(ctx context.Context, clear bool) error {
 	if s.stopping {
 		// Stop closed the agent: don't start another one.
 		return errStopping
 	}
 	s.emitter.SetLifecycle(LifecycleRestarting)
-	if s.native != nil {
-		if s.updateAgent != nil {
-			// The update can take minutes: the old agent stops first, so it
-			// doesn't go on working, and into the new conversation.
-			_ = s.native.Close()
-		}
-		// The new session starts with an empty conversation, so the old
-		// one goes, however the restart was asked for.
-		s.resetConversationLocked()
-		if s.updateAgent != nil {
-			// The new agent is the latest release; a failed update (e.g.
-			// offline) still restarts the installed one.
-			s.updateAgent(ctx)
-		}
-		// The conversation reports the new agent's status itself.
-		if err := s.native.Restart(ctx); err != nil {
-			s.emitter.SetLifecycle(LifecycleFailed)
-			return err
-		}
-		return nil
-	}
-	s.stopJSONLWatcher()
-	newPID, err := s.restartAgent(ctx)
-	if err != nil {
+	if err := s.backend().restart(ctx, clear); err != nil {
 		s.emitter.SetLifecycle(LifecycleFailed)
 		return err
 	}
-	s.startJSONLWatcher(newPID)
-	s.emitter.SetLifecycle(LifecycleStarting)
 	return nil
 }

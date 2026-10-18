@@ -1209,10 +1209,11 @@ func (s *Server) dispatchNextQueuedMessage() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next, ok := s.queue.Head()
-	if !ok || !s.readyForQueuedLocked() {
+	backend := s.backend()
+	if !ok || !backend.readyForQueued() {
 		return
 	}
-	err := s.sendQueuedLocked(next.Content)
+	err := backend.sendQueued(next.Content)
 	switch {
 	case err == nil:
 		s.queue.Remove(next.ID)
@@ -1223,7 +1224,7 @@ func (s *Server) dispatchNextQueuedMessage() {
 	}
 	attempts := s.queue.Failed(next.ID)
 	s.logger.Error("Failed to send queued message", "queueId", next.ID, "attempt", attempts, "error", err)
-	if reason := s.notResentLocked(err); reason != "" {
+	if reason := backend.notResent(err); reason != "" {
 		s.queue.Remove(next.ID)
 		s.emitter.EmitError(fmt.Sprintf("Queued message %q %s: %v", shortText(next.Content, 40), reason, err), st.ErrorLevelError)
 		return
@@ -1233,57 +1234,6 @@ func (s *Server) dispatchNextQueuedMessage() {
 		s.queue.Remove(next.ID)
 		s.emitter.EmitError(fmt.Sprintf("Dropped queued message %q after %d failed attempts: %v", shortText(next.Content, 40), attempts, err), st.ErrorLevelError)
 	}
-}
-
-// readyForQueuedLocked reports whether the agent can take the next queued
-// message: a native agent when it is idle; a terminal or ACP agent when its
-// conversation is stable, and for a terminal agent not while its screen
-// shows a dialog, which the message's Enter would answer. Caller holds
-// s.mu.
-func (s *Server) readyForQueuedLocked() bool {
-	if s.native != nil {
-		return s.native.Idle()
-	}
-	if s.conversation.Status() != st.ConversationStatusStable {
-		return false
-	}
-	if s.emitter == nil || s.transport != TransportPTY {
-		return true
-	}
-	s.emitter.mu.Lock()
-	screen := s.emitter.screen
-	s.emitter.mu.Unlock()
-	if !s.terminalQuestionValid || screen != s.terminalQuestionScreen {
-		s.terminalQuestionResult = isTerminalQuestionScreen(s.agentType, screen)
-		s.terminalQuestionScreen = screen
-		s.terminalQuestionValid = true
-	}
-	return !s.terminalQuestionResult
-}
-
-// sendQueuedLocked sends a queued message to the agent. Caller holds s.mu.
-func (s *Server) sendQueuedLocked(content string) error {
-	if s.native != nil {
-		ctx, cancel := s.agentCtx(nativeCallTimeout)
-		defer cancel()
-		return s.native.StartTurn(ctx, native.InputFromText(content))
-	}
-	return s.conversation.Send(FormatMessage(s.agentType, content)...)
-}
-
-// notResentLocked says why a queued message whose send failed with err must
-// not be sent again, or "" when it can be: it may have reached the agent.
-// Caller holds s.mu.
-func (s *Server) notResentLocked(err error) string {
-	switch {
-	case s.native != nil && errors.Is(err, context.DeadlineExceeded):
-		return "may not have reached the agent, which didn't answer in time"
-	case errors.Is(err, st.ErrMessageNotSubmitted):
-		// Still in the agent's input box: sent again it would be typed a
-		// second time.
-		return "was typed but the agent didn't submit it; check the agent's input box"
-	}
-	return ""
 }
 
 // uploadFiles handles POST /upload
@@ -1500,10 +1450,8 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.mu.Lock()
 		s.stopping = true
 		s.mu.Unlock()
-		if s.native != nil {
-			if closeErr := s.native.Close(); closeErr != nil {
-				s.logger.Error("Failed to stop the agent", "error", closeErr)
-			}
+		if closeErr := s.backend().close(); closeErr != nil {
+			s.logger.Error("Failed to stop the agent", "error", closeErr)
 		}
 		if s.terminal != nil {
 			_ = s.terminal.Close()

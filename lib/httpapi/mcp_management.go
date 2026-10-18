@@ -74,7 +74,7 @@ func (s *Server) restartQuery(restart bool) (bool, error) {
 	if !restart {
 		return false, nil
 	}
-	if !s.canRestart() {
+	if !s.backend().canRestart() {
 		return false, huma.Error400BadRequest("agent restart is not supported in this server mode")
 	}
 	s.mu.Lock()
@@ -84,20 +84,17 @@ func (s *Server) restartQuery(restart bool) (bool, error) {
 	if s.stopping {
 		return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", errStopping)
 	}
-	if s.native != nil {
-		// A native agent resumes its session: the conversation stays. One
-		// whose session can't be resumed starts a new one, as on PTY.
-		switch err := s.native.Reload(ctx); {
-		case errors.Is(err, native.ErrTurnActive):
-			return false, huma.Error409Conflict("MCP config was written, but the agent is working on a turn; restart it once the turn ends")
-		case errors.Is(err, native.ErrUnsupported):
-		case err != nil:
-			return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", err)
-		default:
-			return true, nil
-		}
+	// The agent restarts on its session if it can, and the conversation
+	// stays; otherwise it is replaced.
+	switch reloaded, err := s.backend().reload(ctx); {
+	case errors.Is(err, native.ErrTurnActive):
+		return false, huma.Error409Conflict("MCP config was written, but the agent is working on a turn; restart it once the turn ends")
+	case err != nil:
+		return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", err)
+	case reloaded:
+		return true, nil
 	}
-	if err := s.restartLocked(ctx); err != nil {
+	if err := s.restartLocked(ctx, false); err != nil {
 		return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", err)
 	}
 	return true, nil
@@ -110,7 +107,7 @@ func (s *Server) mutateMCP(restart bool, mutate func(MCPServers) error) (*MCPUpd
 		return nil, err
 	}
 	// Refused before anything is written.
-	if restart && !s.canRestart() {
+	if restart && !s.backend().canRestart() {
 		return nil, huma.Error400BadRequest("agent restart is not supported in this server mode")
 	}
 	if err := s.writeMCPServers(mutate); err != nil {
