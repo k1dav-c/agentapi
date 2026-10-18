@@ -9,7 +9,7 @@ import { ProcessedMessage } from "../processed-message";
 import { toast } from "sonner";
 import { taskToMarkdown } from "@/lib/task-actions";
 import { downloadFile } from "@/lib/download";
-import { groupConsecutiveTools } from "@/lib/activity-groups";
+import { groupConsecutiveTools, splitAtThinking } from "@/lib/activity-groups";
 import { ToolCallCard, ToolCallGroup } from "./tool-call";
 import { MessageItem } from "./message-item";
 import { AgentMark } from "../agent-mark";
@@ -230,28 +230,52 @@ export const TaskGroup = React.memo(function TaskGroup({
               Show {hiddenSteps} earlier {hiddenSteps === 1 ? "step" : "steps"}
             </button>
           )}
-          {visibleActivity.map((item, index) =>
-            item.type === "message" ? (
-              live && hasScreen && index === visibleActivity.length - 1 ? (
-                // While a task runs, the last item is the live terminal
-                // screen. With a transcript, only its tail is shown (the
-                // rest is in the transcript). Either way it is redrawn at
-                // most once a second and doesn't shrink, from the first
-                // screen on, so the switch to a transcript doesn't remount it.
-                <GrowOnly key={item.key} resetKey={structured ? "tail" : "screen"}>
-                  <LiveTail message={structured ? withLastLines(item.message, 10) : item.message} searchQuery={searchQuery} />
-                </GrowOnly>
-              ) : (
-                <MessageItem key={item.key} message={item.message} searchQuery={searchQuery} />
-              )
-            ) : item.type === "thinking" ? (
-              <ThinkingNote key={item.key} content={item.content} />
-            ) : item.type === "tool-group" ? (
-              <ToolCallGroup key={item.key} toolCalls={item.toolCalls} searchQuery={searchQuery} onSendRaw={onSendRaw} />
-            ) : (
-              <ToolCallCard key={item.key} toolCall={item.toolCall} searchQuery={searchQuery} onSendRaw={onSendRaw} />
-            ),
-          )}
+          {splitAtThinking(visibleActivity).map((part) => {
+            const notes = part.filter(({item}) => item.type === "thinking");
+            const steps = part.filter(({item}) => item.type !== "thinking");
+            return (
+              // On a wide screen thinking sits beside the steps it explains, in a
+              // second column reaching into the right margin: a long note makes
+              // room there instead of pushing the notes after it down, and the
+              // steps keep their width. Narrower screens show it inline.
+              <div
+                key={part[0].item.key}
+                className="space-y-4 min-[84rem]:-mr-[17rem] min-[84rem]:grid min-[84rem]:grid-cols-[minmax(0,1fr)_15rem] min-[84rem]:gap-x-8 min-[84rem]:space-y-0"
+              >
+                {notes.length > 0 && (
+                  <div className="space-y-3 min-[84rem]:col-start-2 min-[84rem]:row-start-1">
+                    {notes.map(({item}) => item.type === "thinking" && <ThinkingNote key={item.key} content={item.content} />)}
+                  </div>
+                )}
+                {steps.length > 0 && (
+                  <div className="min-w-0 space-y-4 min-[84rem]:col-start-1 min-[84rem]:row-start-1">
+                    {steps.map(({item, index}) =>
+                      item.type === "message" ? (
+                        live && hasScreen && index === visibleActivity.length - 1 ? (
+                          // While a task runs, the last item is the live terminal
+                          // screen. With a transcript, only its tail is shown (the
+                          // rest is in the transcript). Either way it is redrawn at
+                          // most once a second and doesn't shrink, from the first
+                          // screen on, so the switch to a transcript doesn't remount it.
+                          <GrowOnly key={item.key} resetKey={structured ? "tail" : "screen"}>
+                            <LiveTail message={structured ? withLastLines(item.message, 10) : item.message} searchQuery={searchQuery} />
+                          </GrowOnly>
+                        ) : (
+                          <MessageItem key={item.key} message={item.message} searchQuery={searchQuery} />
+                        )
+                      ) : item.type === "thinking" ? (
+                        <ThinkingNote key={item.key} content={item.content} />
+                      ) : item.type === "tool-group" ? (
+                        <ToolCallGroup key={item.key} toolCalls={item.toolCalls} searchQuery={searchQuery} onSendRaw={onSendRaw} />
+                      ) : (
+                        <ToolCallCard key={item.key} toolCall={item.toolCall} searchQuery={searchQuery} onSendRaw={onSendRaw} />
+                      )
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
           {!deferred && hasScreen && structured && !live && task.responses.length > 0 && (
             <div>
               <button
@@ -318,7 +342,7 @@ function ThinkingNote({content}: {content: string}) {
   const {title, body} = splitThinking(content);
   if (wide) {
     return (
-      <aside className="float-right clear-right -mr-[17rem] mb-3 w-60 border-l pl-3.5 text-[12.5px] leading-[1.55] text-muted-foreground">
+      <aside className="border-l pl-3.5 text-[12.5px] leading-[1.55] text-muted-foreground">
         <span className="mb-0.5 block font-mono text-[10.5px] uppercase tracking-[0.06em]">Thinking</span>
         <b className="block font-semibold text-foreground">{title}</b>
         {body && body !== title && (

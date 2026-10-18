@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {groupConsecutiveTools} from "./activity-groups";
+import {groupConsecutiveTools, splitAtThinking} from "./activity-groups";
 
 describe("groupConsecutiveTools", () => {
   test("groups only adjacent tool calls", () => {
@@ -18,5 +18,17 @@ describe("groupConsecutiveTools", () => {
     });
     expect(grouped[1].type).toBe("message");
     expect(grouped[2].type).toBe("tool");
+  });
+});
+
+describe("thinking with the steps it explains", () => {
+  test("a part starts where thinking starts", () => {
+    const steps = ["message", "thinking", "thinking", "tool", "message", "thinking", "tool"].map((type, i) => ({type, key: `${i}`}));
+    expect(splitAtThinking(steps).map((part) => part.map(({item, index}) => `${item.type}@${index}`))).toEqual([
+      ["message@0"],
+      ["thinking@1", "thinking@2", "tool@3", "message@4"],
+      ["thinking@5", "tool@6"],
+    ]);
+    expect(splitAtThinking([])).toEqual([]);
   });
 });
