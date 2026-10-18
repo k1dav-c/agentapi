@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/coder/agentapi/lib/agenthome"
 )
 
 // ClaudeSessionMeta represents the session metadata from ~/.claude/sessions/<pid>.json.
@@ -35,12 +37,13 @@ type ClaudeResolver struct {
 // the active JSONL is under the background process's sessionId. This
 // resolver follows the parkedJobId to find the correct session.
 func (r *ClaudeResolver) Resolve() (string, error) {
-	home, err := os.UserHomeDir()
+	configDir, err := agenthome.ClaudeConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
+		return "", err
 	}
+	projectsDir := filepath.Join(configDir, "projects")
 
-	sessionFile := filepath.Join(home, ".claude", "sessions", fmt.Sprintf("%d.json", r.PID))
+	sessionFile := filepath.Join(configDir, "sessions", fmt.Sprintf("%d.json", r.PID))
 	data, err := os.ReadFile(sessionFile)
 	if err != nil {
 		return "", fmt.Errorf("failed to read session file %s: %w", sessionFile, err)
@@ -63,7 +66,7 @@ func (r *ClaudeResolver) Resolve() (string, error) {
 	// exist after parking, so checking it first would permanently select a
 	// stale session.
 	if meta.ParkedJobID != "" {
-		sessionsDir := filepath.Join(home, ".claude", "sessions")
+		sessionsDir := filepath.Join(configDir, "sessions")
 		entries, err := os.ReadDir(sessionsDir)
 		if err == nil {
 			for _, entry := range entries {
@@ -79,7 +82,7 @@ func (r *ClaudeResolver) Resolve() (string, error) {
 					continue
 				}
 				if candidate.JobID == meta.ParkedJobID && candidate.SessionID != "" {
-					jsonlPath := filepath.Join(home, ".claude", "projects", encodedCWD, candidate.SessionID+".jsonl")
+					jsonlPath := filepath.Join(projectsDir, encodedCWD, candidate.SessionID+".jsonl")
 					if _, err := os.Stat(jsonlPath); err == nil {
 						return jsonlPath, nil
 					}
@@ -91,14 +94,14 @@ func (r *ClaudeResolver) Resolve() (string, error) {
 	// Use the direct session when it has not been parked (or while the parked
 	// session metadata/file has not appeared yet).
 	if meta.SessionID != "" {
-		jsonlPath := filepath.Join(home, ".claude", "projects", encodedCWD, meta.SessionID+".jsonl")
+		jsonlPath := filepath.Join(projectsDir, encodedCWD, meta.SessionID+".jsonl")
 		if _, err := os.Stat(jsonlPath); err == nil {
 			return jsonlPath, nil
 		}
 		// Session ids are unique, so if the project directory name doesn't
 		// match our encoding (e.g. Claude Code shortens very long paths),
 		// find the file by id instead.
-		if matches, _ := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", meta.SessionID+".jsonl")); len(matches) > 0 {
+		if matches, _ := filepath.Glob(filepath.Join(projectsDir, "*", meta.SessionID+".jsonl")); len(matches) > 0 {
 			return matches[0], nil
 		}
 	}
@@ -107,7 +110,7 @@ func (r *ClaudeResolver) Resolve() (string, error) {
 	if meta.SessionID == "" {
 		return "", fmt.Errorf("session file %s has empty sessionId", sessionFile)
 	}
-	return filepath.Join(home, ".claude", "projects", encodedCWD, meta.SessionID+".jsonl"), nil
+	return filepath.Join(projectsDir, encodedCWD, meta.SessionID+".jsonl"), nil
 }
 
 // nonAlphanumericRe matches the characters Claude Code replaces with a dash

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/coder/agentapi/lib/agenthome"
 )
 
 // CodexResolver finds the JSONL session file for a Codex process.
@@ -42,16 +44,16 @@ func (m *codexSessionMeta) isSubAgent() bool {
 		(m.Payload.ID != "" && m.Payload.SessionID != "" && m.Payload.ID != m.Payload.SessionID)
 }
 
-// codexSessionsRoot returns sessionsDir, defaulting to ~/.codex/sessions.
+// codexSessionsRoot returns sessionsDir, defaulting to $CODEX_HOME/sessions.
 func codexSessionsRoot(sessionsDir string) (string, error) {
 	if sessionsDir != "" {
 		return sessionsDir, nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := agenthome.CodexHome()
 	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
+		return "", err
 	}
-	return filepath.Join(home, ".codex", "sessions"), nil
+	return filepath.Join(home, "sessions"), nil
 }
 
 // codexSessionDirs returns the date directories that may hold current

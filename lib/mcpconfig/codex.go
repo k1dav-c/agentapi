@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/coder/agentapi/lib/agenthome"
 )
 
 type codexStore struct {
@@ -19,13 +21,9 @@ type codexStore struct {
 }
 
 func newCodexStore() (*codexStore, error) {
-	root := os.Getenv("CODEX_HOME")
-	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("resolve home dir: %w", err)
-		}
-		root = filepath.Join(home, ".codex")
+	root, err := agenthome.CodexHome()
+	if err != nil {
+		return nil, err
 	}
 	return &codexStore{path: filepath.Join(root, "config.toml")}, nil
 }

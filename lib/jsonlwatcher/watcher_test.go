@@ -559,3 +559,22 @@ func TestStoppedWatcherDropsWhatItHolds(t *testing.T) {
 	defer mu.Unlock()
 	require.Equal(t, []string{"user"}, roles)
 }
+
+func TestResolversHonorTheAgentsHome(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	root, err := codexSessionsRoot("")
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(codexHome, "sessions"), root)
+
+	configDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "sessions"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "sessions", "4242.json"), []byte(`{"cwd":"/work/app","sessionId":"s-1"}`), 0o644))
+	project := filepath.Join(configDir, "projects", encodeCWD("/work/app"))
+	require.NoError(t, os.MkdirAll(project, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(project, "s-1.jsonl"), nil, 0o644))
+	path, err := (&ClaudeResolver{PID: 4242}).Resolve()
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(project, "s-1.jsonl"), path)
+}

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/coder/agentapi/lib/agenthome"
 )
 
 // jsonStore manages the "mcpServers" object of a JSON config file, the
@@ -81,13 +83,9 @@ func (s *jsonStore) Replace(servers Servers) error {
 // after the project is trusted, so the user-level file is the one that
 // always applies.
 func newPiStore() (*jsonStore, error) {
-	agentDir := os.Getenv("PI_CODING_AGENT_DIR")
-	if agentDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("resolve home dir: %w", err)
-		}
-		agentDir = filepath.Join(home, ".pi", "agent")
+	agentDir, err := agenthome.PiAgentDir()
+	if err != nil {
+		return nil, err
 	}
 	return &jsonStore{path: filepath.Join(agentDir, "mcp.json")}, nil
 }

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/coder/agentapi/lib/agenthome"
 )
 
 // SessionNamer follows the name an agent gives its session: Claude Code's
@@ -130,7 +132,7 @@ func (n *codexSessionNamer) Poll() (string, bool) {
 	}
 	path := n.indexPath
 	if path == "" {
-		root, err := codexHome()
+		root, err := agenthome.CodexHome()
 		if err != nil {
 			return n.name, false
 		}
@@ -147,17 +149,6 @@ func (n *codexSessionNamer) Poll() (string, bool) {
 	}
 	n.name = name
 	return name, true
-}
-
-func codexHome() (string, error) {
-	if home := os.Getenv("CODEX_HOME"); home != "" {
-		return home, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".codex"), nil
 }
 
 // codexThreadName returns the latest name the index records for thread id.
