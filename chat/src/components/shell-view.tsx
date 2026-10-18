@@ -1,13 +1,12 @@
 "use client";
 
-import {useEffect, useRef, useState} from "react";
+import {useRef, useState} from "react";
 import {ArrowLeft, RotateCw, TerminalSquare} from "lucide-react";
 import {toast} from "sonner";
-import type {Terminal} from "@xterm/xterm";
 import {useChat} from "./chat-provider";
 import {Button} from "./ui/button";
-import {TERMINAL_OPTIONS, TerminalKeyBar, prepareTerminalInput, useTerminalKeyboard} from "./terminal-chrome";
-import {OrderedInput} from "@/lib/tty";
+import {TerminalKeyBar} from "./terminal-chrome";
+import {useXterm} from "./use-xterm";
 import {decodeBase64, terminalSize} from "@/lib/shell";
 import {withCredentials} from "@/lib/auth";
 import {getErrorMessage} from "@/lib/error-utils";
@@ -21,9 +20,6 @@ type ShellState = "connecting" | "open" | "exited";
 export function ShellView({onExit, command}: {onExit: () => void; command?: string}) {
   const {storageScope, terminalInput, terminalResize} = useChat();
   const containerRef = useRef<HTMLDivElement>(null);
-  const termRef = useRef<Terminal | null>(null);
-  const inputRef = useRef<OrderedInput | null>(null);
-  const {touch, keyboardOpen, setKeyboardOpen, inset} = useTerminalKeyboard();
   const [state, setState] = useState<ShellState>("connecting");
   const [exitReason, setExitReason] = useState("");
   // Bumped to connect again, which starts a new shell after one exited.
@@ -32,37 +28,17 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
   // Whether the shell runs: keys typed after it exited go nowhere.
   const runningRef = useRef(false);
 
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    let disposed = false;
-    let term: Terminal | undefined;
-    let eventSource: EventSource | undefined;
-    let resizeObserver: ResizeObserver | undefined;
-    let resizeTimer = 0;
-    let frame = 0;
-
-    void import("@xterm/xterm").then(({Terminal}) => {
-      if (disposed) return;
-      term = new Terminal({...TERMINAL_OPTIONS, scrollback: 10000, cursorBlink: true});
-      term.open(container);
-      prepareTerminalInput(container, setKeyboardOpen);
-      // On a touch screen the keyboard opens when asked for.
-      if (!window.matchMedia("(pointer: coarse)").matches) term.focus();
-
-      const input = new OrderedInput((data) => terminalInput(data), (error) => {
-        toast.error("Could not type into the terminal", {description: getErrorMessage(error)});
-      });
-      term.onData((data) => {
-        if (runningRef.current) input.push(data);
-      });
-      inputRef.current = input;
-      termRef.current = term;
-
+  const {termRef, inputRef, touch, keyboardOpen, inset} = useXterm({
+    containerRef,
+    key: `${storageScope}#${session}`,
+    options: () => ({scrollback: 10000, cursorBlink: true}),
+    send: (data) => (runningRef.current ? terminalInput(data) : undefined),
+    onSendError: (error) => toast.error("Could not type into the terminal", {description: getErrorMessage(error)}),
+    connect: (term, container) => {
+      let resizeTimer = 0;
       // Fits the terminal to the panel, and tells the shell its size.
       let sent = "";
       const fit = () => {
-        if (!term) return;
         const screen = container.querySelector(".xterm-screen");
         const row = container.querySelector(".xterm-rows > div");
         const cellWidth = screen ? screen.getBoundingClientRect().width / term.cols : 0;
@@ -81,17 +57,17 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
           });
         }, 150);
       };
-      frame = window.requestAnimationFrame(fit);
-      resizeObserver = new ResizeObserver(() => fit());
+      const frame = window.requestAnimationFrame(fit);
+      const resizeObserver = new ResizeObserver(() => fit());
       resizeObserver.observe(container);
 
-      eventSource = new EventSource(`${storageScope}/terminal`, {
+      const eventSource = new EventSource(`${storageScope}/terminal`, {
         withCredentials: withCredentials(storageScope),
       });
       eventSource.onopen = () => {
         // The stream starts with the recent output: replay it on a clean
         // terminal, also after a reconnect.
-        term?.reset();
+        term.reset();
         runningRef.current = true;
         setState("open");
         fit();
@@ -99,7 +75,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
       eventSource.onerror = () => setState((current) => (current === "exited" ? current : "connecting"));
       eventSource.addEventListener("output", (event) => {
         try {
-          term?.write(decodeBase64((JSON.parse(event.data) as {data: string}).data));
+          term.write(decodeBase64((JSON.parse(event.data) as {data: string}).data));
         } catch {
           return;
         }
@@ -107,7 +83,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
         const pending = commandRef.current;
         if (pending) {
           commandRef.current = undefined;
-          input.push(`${pending}\r`);
+          inputRef.current?.push(`${pending}\r`);
         }
       });
       eventSource.addEventListener("exit", (event) => {
@@ -118,30 +94,20 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
           // The reason is only shown.
         }
         // Don't reconnect: that would start a new shell right away.
-        eventSource?.close();
+        eventSource.close();
         runningRef.current = false;
         setExitReason(reason);
         setState("exited");
       });
-    });
-
-    return () => {
-      disposed = true;
-      runningRef.current = false;
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(resizeTimer);
-      resizeObserver?.disconnect();
-      eventSource?.close();
-      term?.dispose();
-      termRef.current = null;
-      inputRef.current = null;
-    };
-  }, [storageScope, session, setKeyboardOpen, terminalInput, terminalResize]);
-
-  // Keep the last lines in view when the keyboard opens or closes.
-  useEffect(() => {
-    termRef.current?.scrollToBottom();
-  }, [inset, keyboardOpen]);
+      return () => {
+        runningRef.current = false;
+        window.cancelAnimationFrame(frame);
+        window.clearTimeout(resizeTimer);
+        resizeObserver.disconnect();
+        eventSource.close();
+      };
+    },
+  });
 
   const restart = () => {
     setExitReason("");

@@ -3,11 +3,11 @@
 import {useEffect, useRef, useState} from "react";
 import {ArrowLeft, TerminalSquare} from "lucide-react";
 import {toast} from "sonner";
-import type {Terminal} from "@xterm/xterm";
 import {useChat} from "./chat-provider";
 import {Button} from "./ui/button";
-import {TERMINAL_FONT_SIZE as FONT_SIZE, TERMINAL_LINE_HEIGHT as LINE_HEIGHT, TERMINAL_OPTIONS, TerminalKeyBar, prepareTerminalInput, useTerminalKeyboard} from "./terminal-chrome";
-import {OrderedInput, fitTerminalFontSize, screenToTerminalOutput} from "@/lib/tty";
+import {TERMINAL_FONT_SIZE as FONT_SIZE, TERMINAL_LINE_HEIGHT as LINE_HEIGHT, TerminalKeyBar} from "./terminal-chrome";
+import {useXterm} from "./use-xterm";
+import {fitTerminalFontSize, screenToTerminalOutput} from "@/lib/tty";
 import {withCredentials} from "@/lib/auth";
 
 // The mirror uses the width of the agent's terminal (80 columns unless
@@ -31,40 +31,31 @@ export function TtyView({onExit}: {onExit: () => void}) {
   const [connected, setConnected] = useState(false);
   // Width of one terminal cell, for the column ruler.
   const [cellWidth, setCellWidth] = useState(0);
-  const inputRef = useRef<OrderedInput | null>(null);
-  const termRef = useRef<Terminal | null>(null);
-  const {touch, keyboardOpen, setKeyboardOpen, inset} = useTerminalKeyboard();
-  // The provider recreates this function on every render; read it through
-  // a ref so the terminal isn't rebuilt each time.
-  const sendRef = useRef(sendTerminalInput);
-  sendRef.current = sendTerminalInput;
+  // Estimated until xterm has rendered a row we can measure.
+  const rowsFor = (container: HTMLElement, rowHeight = FONT_SIZE * LINE_HEIGHT) => Math.max(10, Math.floor(container.clientHeight / rowHeight));
 
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    let disposed = false;
-    let term: Terminal | undefined;
-    let eventSource: EventSource | undefined;
-    let resizeObserver: ResizeObserver | undefined;
-    let frame = 0;
-
-    void import("@xterm/xterm").then(({Terminal}) => {
-      if (disposed) return;
-      // Estimated until xterm has rendered a row we can measure.
+  const {termRef, inputRef, touch, keyboardOpen, inset} = useXterm({
+    containerRef,
+    key: storageScope,
+    options: (container) => ({cols: columnsRef.current, rows: rowsFor(container), scrollback: 5000, cursorBlink: false}),
+    send: sendTerminalInput,
+    onSendError: (error) => {
+      toast.error("Could not send keys to the agent", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    },
+    connect: (term, container) => {
       let rowHeight = FONT_SIZE * LINE_HEIGHT;
-      const rowsFor = () => Math.max(10, Math.floor(container.clientHeight / rowHeight));
-      term = new Terminal({...TERMINAL_OPTIONS, cols: columnsRef.current, rows: rowsFor(), scrollback: 5000, cursorBlink: false});
-      term.open(container);
+      let frame = 0;
       // Measures the rendered cells, then sizes the ruler and the rows.
       const measure = () => {
-        if (!term) return;
         const screen = container.querySelector(".xterm-screen");
         if (screen) setCellWidth(screen.getBoundingClientRect().width / term.cols);
         const firstRow = container.querySelector(".xterm-rows > div");
         if (firstRow && firstRow.getBoundingClientRect().height > 0) {
           rowHeight = firstRow.getBoundingClientRect().height;
         }
-        if (term.rows !== rowsFor()) term.resize(term.cols, rowsFor());
+        if (term.rows !== rowsFor(container, rowHeight)) term.resize(term.cols, rowsFor(container, rowHeight));
       };
       measure();
       // Cell width per pixel of font size, from the first render.
@@ -72,7 +63,7 @@ export function TtyView({onExit}: {onExit: () => void}) {
       const cellWidthPerPx = firstScreen ? firstScreen.getBoundingClientRect().width / term.cols / FONT_SIZE : 0.6;
       fitRef.current = () => {
         const panel = panelRef.current;
-        if (!term || !panel) return;
+        if (!panel) return;
         if (term.cols !== columnsRef.current) term.resize(columnsRef.current, term.rows);
         const size = fitTerminalFontSize(panel.clientWidth - PANEL_PADDING, term.cols, cellWidthPerPx);
         if (term.options.fontSize !== size) term.options.fontSize = size;
@@ -84,38 +75,25 @@ export function TtyView({onExit}: {onExit: () => void}) {
       // have xterm wrap pastes so a multi-line paste isn't submitted line
       // by line.
       term.write("\x1b[?25l\x1b[?2004h");
-      prepareTerminalInput(container, setKeyboardOpen);
-      // On a touch screen the keyboard opens when asked for (the keyboard
-      // button, or a tap on the terminal), not as soon as TTY mode opens.
-      if (!window.matchMedia("(pointer: coarse)").matches) term.focus();
-
-      const input = new OrderedInput((data) => sendRef.current(data), (error) => {
-        toast.error("Could not send keys to the agent", {
-          description: error instanceof Error ? error.message : String(error),
-        });
-      });
-      term.onData((data) => input.push(data));
-      inputRef.current = input;
-      termRef.current = term;
 
       // Redraw the latest snapshot at most once per frame, keeping the
       // reader's place if they scrolled up.
       let latest: string | undefined;
       const render = () => {
         frame = 0;
-        if (!term || latest === undefined) return;
+        if (latest === undefined) return;
         const buffer = term.buffer.active;
         const fromBottom = buffer.baseY - buffer.viewportY;
         const screen = latest;
         latest = undefined;
         term.write(screenToTerminalOutput(screen), () => {
-          if (term && fromBottom > 0) {
+          if (fromBottom > 0) {
             term.scrollToLine(Math.max(0, term.buffer.active.baseY - fromBottom));
           }
         });
       };
 
-      eventSource = new EventSource(`${storageScope}/internal/screen`, {
+      const eventSource = new EventSource(`${storageScope}/internal/screen`, {
         withCredentials: withCredentials(storageScope),
       });
       eventSource.onopen = () => setConnected(true);
@@ -129,31 +107,23 @@ export function TtyView({onExit}: {onExit: () => void}) {
         if (!frame) frame = window.requestAnimationFrame(render);
       });
 
-      resizeObserver = new ResizeObserver(() => fitRef.current());
+      const resizeObserver = new ResizeObserver(() => fitRef.current());
       resizeObserver.observe(container);
       if (panelRef.current) resizeObserver.observe(panelRef.current);
-    });
-
-    return () => {
-      disposed = true;
-      if (frame) window.cancelAnimationFrame(frame);
-      resizeObserver?.disconnect();
-      eventSource?.close();
-      term?.dispose();
-      fitRef.current = () => {};
-    };
-  }, [storageScope, setKeyboardOpen]);
+      return () => {
+        if (frame) window.cancelAnimationFrame(frame);
+        resizeObserver.disconnect();
+        eventSource.close();
+        fitRef.current = () => {};
+      };
+    },
+  });
 
   // The server reports its terminal width after connecting.
   useEffect(() => {
     columnsRef.current = columns;
     fitRef.current();
   }, [columns]);
-
-  // Keep the last lines in view when the keyboard opens or closes.
-  useEffect(() => {
-    termRef.current?.scrollToBottom();
-  }, [inset, keyboardOpen]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" style={inset ? {paddingBottom: inset} : undefined}>
