@@ -130,8 +130,7 @@ func (s *Server) restoreQueue(snap statedb.Snapshot) {
 		queued[i] = QueuedMessage{ID: q.ID, Content: q.Content, Time: q.Time}
 	}
 	s.queue.Restore(queued, snap.NextQueueID())
-	s.savedQueue = s.queue.Messages()
-	s.savedNextQueueID = s.queue.LastID()
+	s.savedQueue, s.savedNextQueueID = s.queue.Snapshot()
 }
 
 // persistQueue stores the queue if it changed since it was last stored. The
@@ -144,15 +143,15 @@ func (s *Server) persistQueue() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	queued := s.queue.Messages()
-	if s.queue.LastID() == s.savedNextQueueID && slices.Equal(queued, s.savedQueue) {
+	queued, lastID := s.queue.Snapshot()
+	if lastID == s.savedNextQueueID && slices.Equal(queued, s.savedQueue) {
 		return
 	}
 	stored := make([]statedb.QueuedMessage, len(queued))
 	for i, q := range queued {
 		stored[i] = statedb.QueuedMessage{ID: q.ID, Content: q.Content, Time: q.Time}
 	}
-	s.stateDB.PutQueue(stored, s.queue.LastID())
+	s.stateDB.PutQueue(stored, lastID)
 	s.savedQueue = queued
-	s.savedNextQueueID = s.queue.LastID()
+	s.savedNextQueueID = lastID
 }

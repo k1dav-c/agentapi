@@ -55,13 +55,18 @@ const (
 
 // Server represents the HTTP server
 type Server struct {
-	router             chi.Router
-	api                huma.API
-	port               int
-	bind               string
-	auth               *tokenAuth // nil when no API token is configured
-	srv                *http.Server
-	mu                 sync.RWMutex
+	router chi.Router
+	api    huma.API
+	port   int
+	bind   string
+	auth   *tokenAuth // nil when no API token is configured
+	srv    *http.Server
+	// mu serializes what changes the agent or acts on its state: messages
+	// and their queue, answers, settings, restarts. Reads that only need a
+	// snapshot don't take it. Locks are taken in this order, never the
+	// other way round: mu, the conversation's, the emitter's, then the
+	// webhook dispatcher's and the state DB's.
+	mu                 sync.Mutex
 	stopOnce           sync.Once
 	stopping           bool // set under mu once Stop closed the agent: no more restarts
 	logger             *slog.Logger
@@ -960,10 +965,10 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 	return resp, nil
 }
 
+// getTitle handles GET /title. Like the other reads it doesn't take s.mu:
+// the conversation has a lock of its own, and the read answers while s.mu
+// is held for a slow call into the agent (a restart can take minutes).
 func (s *Server) getTitle(ctx context.Context, input *struct{}) (*TitleResponse, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	status := convertStatus(s.conversation.Status())
 	task := ""
 	messages := s.conversation.Messages()
@@ -1011,11 +1016,8 @@ func (s *Server) getWorkspace(_ context.Context, _ *struct{}) (*WorkspaceRespons
 	return &response, nil
 }
 
-// getMessages handles GET /messages
+// getMessages handles GET /messages, without s.mu (see getTitle).
 func (s *Server) getMessages(ctx context.Context, input *struct{}) (*MessagesResponse, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	resp := &MessagesResponse{}
 	msgs := s.conversation.Messages()
 	resp.Body.Messages = make([]Message, len(msgs))
@@ -1096,10 +1098,9 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 	return resp, nil
 }
 
+// getQueue handles GET /queue, without s.mu (see getTitle): the queue has a
+// lock of its own.
 func (s *Server) getQueue(ctx context.Context, input *struct{}) (*QueueResponse, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	resp := &QueueResponse{}
 	resp.Body.Messages = s.queue.Messages()
 	return resp, nil

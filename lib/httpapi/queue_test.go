@@ -76,3 +76,31 @@ func ids(messages []QueuedMessage) []int {
 	}
 	return out
 }
+
+// Reads answer while s.mu is held for a slow call into the agent, such as
+// a restart that updates the agent CLI.
+func TestReadsDontWaitForTheServerLock(t *testing.T) {
+	t.Parallel()
+	s, _, _ := handoffServer()
+	s.queue.Push("queued", s.clock.Now(), false)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		queue, err := s.getQueue(t.Context(), nil)
+		assert.NoError(t, err)
+		assert.Len(t, queue.Body.Messages, 1)
+		_, err = s.getMessages(t.Context(), nil)
+		assert.NoError(t, err)
+		_, err = s.getTitle(t.Context(), nil)
+		assert.NoError(t, err)
+		_, err = s.getStatus(t.Context(), nil)
+		assert.NoError(t, err)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a read waited for s.mu")
+	}
+}
