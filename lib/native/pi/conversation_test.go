@@ -6,12 +6,14 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 )
@@ -132,4 +134,83 @@ func TestConversationExpiresDialogsWithTheTurn(t *testing.T) {
 	assert.Equal(t, native.ResponseMessage, state.Capability)
 	assert.Equal(t, map[string]any{"type": "extension_ui_response", "id": "q1", "cancelled": true}, f.pi.nextCmd(),
 		"the extension stops waiting too")
+}
+
+// settingsObserver records what the conversation reports of the settings
+// and capabilities.
+type settingsObserver struct {
+	mu       sync.Mutex
+	settings []native.Settings
+	caps     []native.Capabilities
+}
+
+func (o *settingsObserver) Started(caps native.Capabilities) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.caps = append(o.caps, caps)
+}
+
+func (o *settingsObserver) Settings(s native.Settings) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.settings = append(o.settings, s)
+}
+func (*settingsObserver) LoginRequired(*native.LoginRequired)       {}
+func (*settingsObserver) RichMessage(jsonlwatcher.RichMessage)      {}
+func (*settingsObserver) SessionEvents([]jsonlwatcher.SessionEvent) {}
+func (*settingsObserver) SessionName(string)                        {}
+func (*settingsObserver) SessionRef(string)                         {}
+func (*settingsObserver) RequestUpdated(native.RequestState)        {}
+func (*settingsObserver) SettingsChosen(native.Settings)            {}
+func (*settingsObserver) Usage(native.AgentUsage)                   {}
+
+func TestModelSwitchReportsNoMixedSettings(t *testing.T) {
+	t.Parallel()
+	pi := newFakePi(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	obs := &settingsObserver{}
+	conv := native.NewConversation(native.Config{
+		Factory: func(ref string) (native.Adapter, error) {
+			return newAdapter(Config{Logger: logger}, nil, ref, pi.start), nil
+		},
+		Logger:   logger,
+		Observer: obs,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		_ = conv.Close()
+		cancel()
+	})
+	conv.Start(ctx)
+	f := &convFixture{t: t, ctx: ctx, pi: pi, conv: conv}
+	const modelA = `{"provider":"p","id":"a","reasoning":true,"input":["text"],"contextWindow":1000,"thinkingLevelMap":{}}`
+	const modelB = `{"provider":"p","id":"b","reasoning":true,"input":["text","image"],"contextWindow":2000,"thinkingLevelMap":{}}`
+	f.reply(pi.nextCmd(), `{"sessionId":"s1","thinkingLevel":"low","model":`+modelA+`}`)
+	require.Eventually(t, func() bool { return conv.Status() == st.ConversationStatusStable }, 5*time.Second, time.Millisecond)
+	assert.False(t, conv.Capabilities().Images)
+
+	applied := make(chan error, 1)
+	go func() { applied <- conv.ApplySettings(ctx, native.Settings{Model: "p/b", Effort: "high"}) }()
+	f.reply(pi.nextCmd(), `{"models":[`+modelA+`,`+modelB+`]}`)
+	// As Pi does: the level changes, then the command is answered.
+	setModel := pi.nextCmd()
+	require.Equal(t, "set_model", setModel["type"])
+	f.write(`{"type":"thinking_level_changed","level":"medium"}`)
+	f.reply(setModel, modelB)
+	setLevel := pi.nextCmd()
+	require.Equal(t, "set_thinking_level", setLevel["type"])
+	f.write(`{"type":"thinking_level_changed","level":"high"}`)
+	f.reply(setLevel, `null`)
+	f.reply(pi.nextCmd(), `{"sessionId":"s1","thinkingLevel":"high","model":`+modelB+`}`)
+	require.NoError(t, <-applied)
+
+	assert.Equal(t, native.Settings{Model: "p/b", Effort: "high"}, conv.Settings())
+	assert.True(t, conv.Capabilities().Images, "the new model takes images")
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+	for _, s := range obs.settings {
+		assert.False(t, s.Model == "p/a" && s.Effort != "low", "reported the old model with a new level: %+v", s)
+	}
+	require.NotEmpty(t, obs.caps)
+	assert.True(t, obs.caps[len(obs.caps)-1].Images)
 }

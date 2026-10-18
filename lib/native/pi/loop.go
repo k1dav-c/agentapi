@@ -3,7 +3,6 @@ package pi
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -315,13 +314,8 @@ func (a *Adapter) handleState(state sessionState) {
 	if a.resumeRef != "" && state.SessionID != a.resumeRef {
 		a.logger.Warn("Pi opened a different session than the one to resume", "want", a.resumeRef, "got", state.SessionID)
 	}
-	if m := state.Model; m != nil && m.Input != nil {
-		a.mu.Lock()
-		a.caps.Images = slices.Contains(m.Input, "image")
-		a.mu.Unlock()
-	}
-	a.setSettings(stateSettings(state), false)
-	a.setContextWindow(state)
+	a.setSettings(stateSettings(state))
+	a.setModelInfo(state.Model)
 	a.logger.Info("Pi session open", "session", state.SessionID, "file", state.SessionFile)
 	if state.SessionID != "" {
 		a.loop.sink.SessionRef(state.SessionID)

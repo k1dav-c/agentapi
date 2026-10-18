@@ -90,14 +90,20 @@ func stateSettings(state sessionState) native.Settings {
 	return settings
 }
 
-// setContextWindow records the context window of the session's model.
-func (a *Adapter) setContextWindow(state sessionState) {
-	if !state.hasModel() {
+// setModelInfo records what the session's model m says beyond the
+// settings: its context window, and whether it takes images.
+func (a *Adapter) setModelInfo(m *piModel) {
+	if m == nil {
 		return
 	}
 	a.mu.Lock()
-	a.contextWindow = state.Model.ContextWindow
-	a.mu.Unlock()
+	defer a.mu.Unlock()
+	if m.ID != "" {
+		a.contextWindow = m.ContextWindow
+	}
+	if m.Input != nil {
+		a.caps.Images = slices.Contains(m.Input, "image")
+	}
 }
 
 // contextUsed records how full the context is after an assistant message's
@@ -114,27 +120,35 @@ func (a *Adapter) contextUsed(usage *messageUsage) {
 	native.ReportUsage(a.loop.sink, a.loop.usage)
 }
 
-// setSettings records the settings, and reports them if report is set and
-// they changed. Event loop only when it reports.
-func (a *Adapter) setSettings(settings native.Settings, report bool) {
+// setSettings records the settings.
+func (a *Adapter) setSettings(settings native.Settings) {
+	a.updateSettings(func(s *native.Settings) { *s = settings })
+}
+
+// updateSettings changes the settings with f in one locked step, so the
+// event loop and ApplySettings can't undo each other's change. It returns
+// the settings, whether they changed, and whether an ApplySettings is
+// under way.
+func (a *Adapter) updateSettings(f func(*native.Settings)) (settings native.Settings, changed, applying bool) {
 	a.mu.Lock()
-	changed := a.settings != settings
-	a.settings = settings
-	a.mu.Unlock()
-	if changed && report {
-		native.ReportSettings(a.loop.sink, settings)
-	}
+	defer a.mu.Unlock()
+	before := a.settings
+	f(&a.settings)
+	return a.settings, a.settings != before, a.applying > 0
 }
 
 // handleThinkingLevel follows a thinking level Pi changed, by a switch or
-// because a new model clamped it.
+// because a new model clamped it. Event loop only.
 func (a *Adapter) handleThinkingLevel(level string) {
-	settings := a.Settings()
-	if settings.Effort == "" || settings.Effort == level {
-		return
+	settings, changed, applying := a.updateSettings(func(s *native.Settings) {
+		// A model that doesn't reason has no effort to follow.
+		if s.Effort != "" {
+			s.Effort = level
+		}
+	})
+	if changed && !applying {
+		native.ReportSettings(a.loop.sink, settings)
 	}
-	settings.Effort = level
-	a.setSettings(settings, true)
 }
 
 // Settings implements native.Configurable. Pi has no permission modes: it
@@ -189,10 +203,34 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 	if err := options.Check(s, a.Settings()); err != nil {
 		return err
 	}
+	a.mu.Lock()
+	a.applying++
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.applying--
+		a.mu.Unlock()
+	}()
 	if s.Model != "" {
 		provider, id, _ := strings.Cut(s.Model, "/")
-		if err := a.command(ctx, setModelCommand{Type: "set_model", Provider: provider, ModelID: id}); err != nil {
+		res, err := a.request(ctx, cmdQuery, setModelCommand{Type: "set_model", Provider: provider, ModelID: id})
+		if err == nil {
+			err = res.err
+		}
+		if err != nil {
 			return fmt.Errorf("switch the model: %w", err)
+		}
+		// The answer is the new model: the settings say so from now on,
+		// also if what follows fails.
+		var model piModel
+		if json.Unmarshal(res.data, &model) == nil && model.ID != "" {
+			a.updateSettings(func(settings *native.Settings) {
+				settings.Model = model.modelID()
+				if !model.Reasoning {
+					settings.Effort = ""
+				}
+			})
+			a.setModelInfo(&model)
 		}
 	}
 	if s.Effort != "" {
@@ -211,8 +249,8 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 	if err := json.Unmarshal(res.data, &state); err != nil {
 		return fmt.Errorf("read the settings: %w", err)
 	}
-	a.setSettings(stateSettings(state), false)
-	a.setContextWindow(state)
+	a.setSettings(stateSettings(state))
+	a.setModelInfo(state.Model)
 	return nil
 }
 

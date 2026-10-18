@@ -21,7 +21,8 @@ var _ st.Conversation = (*Conversation)(nil)
 // what st.Emitter carries. Its methods are called with the conversation's
 // lock held and must not call back into the conversation.
 type Observer interface {
-	// Started reports that an agent accepts turns, and what it supports.
+	// Started reports that an agent accepts turns, and what it supports;
+	// again when that changes (a new model takes images or doesn't).
 	Started(Capabilities)
 	// LoginRequired reports that the agent waits for the user to log in,
 	// or with nil that it no longer does. It is called when that changes.
@@ -299,6 +300,11 @@ func (c *Conversation) ApplySettings(ctx context.Context, s Settings) error {
 	}
 	applyErr := configurable.ApplySettings(ctx, s)
 	settings := configurable.Settings()
+	// A new model can change what the agent supports (images).
+	caps, hasCaps := Capabilities{}, false
+	if adapter, ok := configurable.(Adapter); ok {
+		caps, hasCaps = adapter.Capabilities(), true
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if gen != c.generation {
@@ -306,6 +312,10 @@ func (c *Conversation) ApplySettings(ctx context.Context, s Settings) error {
 			return applyErr
 		}
 		return ErrNotStarted
+	}
+	if hasCaps && caps != c.caps {
+		c.caps = caps
+		c.cfg.Observer.Started(caps)
 	}
 	// Settings the agent took before one failed show too.
 	c.setSettingsLocked(settings)

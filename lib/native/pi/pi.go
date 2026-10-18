@@ -167,6 +167,10 @@ type Adapter struct {
 	// nil until listed. See settings.go.
 	settings native.Settings
 	models   []native.ModelOption
+	// applying counts the ApplySettings calls under way; the conversation
+	// reads the settings when they return, so the loop doesn't report the
+	// half-applied ones meanwhile.
+	applying int
 	// contextWindow is the context window of the session's model.
 	contextWindow int64
 
