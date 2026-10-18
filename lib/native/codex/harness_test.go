@@ -144,12 +144,12 @@ func newHarness(t *testing.T, resumeRef string, args []string, opts ...harnessOp
 	t.Helper()
 	proc := newFakeProc()
 	cfg := Config{
-		Program: "codex",
-		Args:    args,
-		CWD:     "/work/scratch",
-		Env:     []string{"PATH=/usr/bin", "CODEX_THREAD_ID=parent"},
-		StartProcess:  func(procutil.Command) (procutil.Process, error) { return proc, nil },
-		Logger:  slog.New(slog.DiscardHandler),
+		Program:      "codex",
+		Args:         args,
+		CWD:          "/work/scratch",
+		Env:          []string{"PATH=/usr/bin", "CODEX_THREAD_ID=parent"},
+		StartProcess: func(procutil.Command) (procutil.Process, error) { return proc, nil },
+		Logger:       slog.New(slog.DiscardHandler),
 	}
 	for _, o := range opts {
 		o(&cfg)

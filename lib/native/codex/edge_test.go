@@ -275,8 +275,8 @@ func TestCloseBeforeStart(t *testing.T) {
 // A Close racing a failed Start used to close the adapter's channels twice.
 func TestCloseDuringFailedStart(t *testing.T) {
 	factory, err := NewFactory(Config{
-		Program: "codex",
-		StartProcess:  func(procutil.Command) (procutil.Process, error) { return nil, errors.New("no such program") },
+		Program:      "codex",
+		StartProcess: func(procutil.Command) (procutil.Process, error) { return nil, errors.New("no such program") },
 	})
 	require.NoError(t, err)
 	for range 200 {
@@ -747,10 +747,10 @@ func TestCloseWithBlockedWrite(t *testing.T) {
 	proc := newFakeProc() // nothing reads its stdin
 	proc.ignoreTerm = true
 	factory, err := NewFactory(Config{
-		Program:     "codex",
-		Logger:      slog.New(slog.DiscardHandler),
-		StopTimeout: 20 * time.Millisecond,
-		StartProcess:      func(procutil.Command) (procutil.Process, error) { return proc, nil },
+		Program:      "codex",
+		Logger:       slog.New(slog.DiscardHandler),
+		StopTimeout:  20 * time.Millisecond,
+		StartProcess: func(procutil.Command) (procutil.Process, error) { return proc, nil },
 	})
 	require.NoError(t, err)
 	adapter, err := factory("")
