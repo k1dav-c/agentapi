@@ -13,15 +13,223 @@ You can use AgentAPI:
 - to create a tool that submits pull request reviews to an agent
 - and much more!
 
-## Changes in this fork
+## About this fork
 
 This fork started from the upstream v0.12.2 codebase. It keeps the original
 terminal-emulation and HTTP API model as the default, adds an opt-in
 [native transport](#native-transport) that drives Claude Code, Codex and Pi
 through their own structured protocols, and extends AgentAPI into a more
 complete workspace for operating long-running coding agents.
+[CHANGELOG.md](CHANGELOG.md) lists what changed,
+[docs/architecture.md](docs/architecture.md) describes how it is built, and
+the [full comparison with upstream](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)
+has the complete commit history.
 
-### Session workspace and chat UI
+## Contents
+
+- [Features at a glance](#features-at-a-glance)
+- [Quickstart](#quickstart)
+- [Agents and transports](#agents-and-transports)
+- [Chat UI](#chat-ui)
+- [Native transport](#native-transport)
+- [PTY transport](#pty-transport)
+- [Conversation API](#conversation-api)
+- [Integrations](#integrations)
+- [Security](#security)
+- [CLI reference](#cli-reference)
+- [HTTP API reference](#http-api-reference)
+- [Architecture](#architecture)
+- [Development](#development)
+- [Runtime reliability](#runtime-reliability)
+- [Roadmap](#roadmap) and [long-term vision](#long-term-vision)
+
+## Features at a glance
+
+**Drive coding agents over HTTP**
+
+- Control 13 coding agents through their terminal UI with the
+  [PTY transport](#pty-transport), which turns the screen into messages.
+- Drive Claude Code, Codex and Pi through their own protocols with the
+  [native transport](#native-transport); agents with an ACP server can use the
+  experimental ACP transport (see [Transports](#transports)).
+- Read structured activity (thinking, tool calls and their results, token
+  usage) from `GET /rich-messages` and `GET /timeline`.
+- Messages sent while the agent works wait in a [queue](#message-queue) that
+  you can edit and reorder; with the native transport they can also
+  [steer or interrupt](#steer-interrupt-and-the-queue) the running turn.
+- Follow everything live over [server-sent events](#events-and-incremental-sync),
+  with heartbeats and an incremental replay after a reconnect.
+
+**Native agents**
+
+- What the agent asks for (tool approvals, questions, plans) arrives as
+  [requests](#requests-approvals-questions-and-plans), answered over HTTP or
+  in the chat.
+- Switch the [permission mode, model and reasoning effort](#settings-permission-mode-model-and-effort)
+  while the agent runs: bypass (the default), auto, ask or plan.
+- See how full the [context and the rate limits](#context-and-rate-limits)
+  are, and [compact](#slash-commands-and-compaction) the context.
+- A missing or expired [login](#logging-in) is reported with the command to
+  run, and the agent starts by itself once it is logged in.
+- A shared [terminal](#terminal) in the agent's working directory, for logins
+  and quick commands.
+- [Persistent sessions](#persistent-sessions): with `--state-db`, the
+  conversation and the agent's own session survive an AgentAPI restart.
+
+**Chat UI** (`/chat`)
+
+- [Tasks](#tasks-and-the-transcript) read as a transcript, with tool calls as
+  rows and thinking as margin notes; the [Session Explorer](#session-explorer)
+  has links, files, a task index, export, MCP servers and Restart.
+- [Decision cards](#decision-cards) for terminal dialogs and native requests,
+  menus for the agent's settings, a ring for its context, and slash commands.
+- A [file viewer](#file-viewer) with the file and its git diff,
+  [TTY mode](#tty-mode) and the native terminal, also on phones.
+- [Background alerts](#alerts-connection-recovery-and-caching), browser
+  notifications, a transcript cache, and recovery from dropped connections.
+
+**Operations and integrations**
+
+- [MCP management](#mcp-management) for Claude Code, Codex and Pi, with
+  reusable profiles; restarting the agent updates Codex and Pi first.
+- [Run-status webhooks](#run-status-webhooks) and a
+  [human-reply API](#human-reply-api) let a bot tell you when the agent stops
+  and pass your answer back.
+- [Self-update](#agentapi-update), verified against the release's checksums.
+- [Security](#security): an API token (the chat signs in with a cookie), the
+  listen address, and the allowed hosts and origins.
+
+## Quickstart
+
+1. Install `agentapi`:
+
+   ```bash
+   OS=$(uname -s | tr "[:upper:]" "[:lower:]");
+   ARCH=$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/");
+   curl -fsSL "https://github.com/k1dav-c/agentapi/releases/latest/download/agentapi-${OS}-${ARCH}" -o agentapi && chmod +x agentapi
+   ```
+
+   Alternatively, you can download this fork's latest binary from the
+   [releases page](https://github.com/k1dav-c/agentapi/releases). Upstream
+   `coder/agentapi` release binaries do not include this fork's features.
+
+1. Verify the installation:
+
+   ```bash
+   agentapi --help
+   ```
+
+   > On macOS, if you're prompted that the system was unable to verify the binary, go to `System Settings -> Privacy & Security`, click "Open Anyway", and run the command again.
+
+1. Run a Claude Code server (assumes `claude` is installed on your system and in the `PATH`):
+
+   ```bash
+   agentapi server -- claude
+   ```
+
+   > If you're getting an error that `claude` is not in the `PATH` but you can run it from your shell, try `which claude` to get the full path and use that instead.
+
+   To drive Claude Code through its own protocol instead of its terminal UI,
+   with approvals as structured requests, settings you can switch and a
+   terminal in the chat, use the [native transport](#native-transport):
+
+   ```bash
+   agentapi server --transport native -- claude
+   ```
+
+1. Send a message to the agent:
+
+   ```bash
+   curl -X POST localhost:3284/message \
+     -H "Content-Type: application/json" \
+     -d '{"content": "Hello, agent!", "type": "user"}'
+   ```
+
+1. Get the conversation history:
+
+   ```bash
+   curl localhost:3284/messages
+   ```
+
+1. Try the chat web interface at http://localhost:3284/chat.
+
+## Agents and transports
+
+### Supported agents
+
+The agent type decides how AgentAPI formats the agent's screen and which
+features it offers. It comes from `--type`, or else from the agent command
+when that is one of the type names (`agentapi server -- claude`, but not
+`-- /usr/local/bin/claude`); anything else runs as `custom`.
+
+| Agent | Type | PTY | Native | Structured activity | MCP management |
+| --- | --- | :-: | :-: | :-: | :-: |
+| [Claude Code](https://github.com/anthropics/claude-code) | `claude` | ✓ | ✓ | ✓ | ✓ |
+| [Codex](https://github.com/openai/codex) | `codex` | ✓ | ✓ | ✓ | ✓ |
+| [Pi](https://pi.dev/) | `pi` | ✓ | ✓ | ✓ | ✓ |
+| [Kimi Code](https://www.kimi.com/zh-tw/help/kimi-code/cli-getting-started) | `kimi` | ✓ | | | |
+| [Goose](https://github.com/block/goose) | `goose` | ✓ | | | |
+| [Aider](https://github.com/Aider-AI/aider) | `aider` | ✓ | | | |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | ✓ | | | |
+| [GitHub Copilot](https://github.com/github/copilot-cli) | `copilot` | ✓ | | | |
+| [Sourcegraph Amp](https://ampcode.com/) | `amp` | ✓ | | | |
+| [Auggie](https://docs.augmentcode.com/cli/overview) | `auggie` | ✓ | | | |
+| [Cursor CLI](https://cursor.com/en/cli) | `cursor` (`cursor-agent`) | ✓ | | | |
+| [Amazon Q](https://aws.amazon.com/developer/learning/q-developer-cli/) | `q` (`amazonq`) | ✓ | | | |
+| [Opencode](https://opencode.ai/) | `opencode` | ✓ | | | |
+| Any other terminal program | `custom` | ✓ | | | |
+
+- **Structured activity**: thinking, tool calls and token usage, read from
+  the agent's session log on the PTY transport (see
+  [Structured Claude, Codex and Pi activity](#structured-claude-codex-and-pi-activity))
+  and from its protocol on the native transport.
+- **MCP management**: the Explorer's MCP tab and the `/mcp` endpoints (see
+  [MCP management](#mcp-management)).
+- Agents with an ACP server, such as Kimi Code (`kimi acp`), can also use the
+  experimental ACP transport.
+
+> [!NOTE]
+> When using Claude, Codex, Opencode, Copilot, Gemini, Amp or CursorCLI, always specify the agent type explicitly (eg: `agentapi server --type=codex -- codex`), or message formatting may break. Kimi and Pi are auto-detected when the executable name is `kimi` or `pi`; use `--type=kimi` / `--type=pi` for wrappers or ACP mode.
+
+### Transports
+
+`--transport` chooses how AgentAPI drives the agent:
+
+| | PTY (default) | Native | ACP (experimental) |
+| --- | --- | --- | --- |
+| Flag | `--transport pty` | `--transport native` | `--transport acp` or `--experimental-acp` |
+| Agents | all of the above | Claude Code, Codex, Pi | agents with an ACP server |
+| How | runs the agent's terminal UI in a terminal emulator and reads its screen | speaks the agent's own protocol: `claude -p` stream-json, `codex app-server`, `pi --mode rpc` | speaks the Agent Client Protocol over the agent's stdio |
+| Tool calls and thinking | from the session log (Claude Code, Codex, Pi) | streamed from the protocol | lines of text in the reply |
+| Approvals, questions, plans | terminal dialogs, answered from decision cards or TTY mode | structured [requests](#requests-approvals-questions-and-plans) | approved automatically |
+| Steer and interrupt a turn | | ✓ | |
+| Settings, usage, compaction | | ✓ | |
+| Survives an AgentAPI restart | `--state-file`: the messages | `--state-db`: the conversation and the agent's session | |
+| Terminal in the chat | TTY mode: the agent's own terminal | a shell in the working directory | |
+
+```bash
+agentapi server -- claude
+agentapi server --transport native --state-db ~/.agentapi/myproject.db -- codex
+agentapi server --type=kimi --experimental-acp -- kimi acp
+```
+
+`--state-db <file>` (native transport only) keeps the conversation in a SQLite
+file and resumes the agent's session when AgentAPI starts again with the same
+file; see [Persistent sessions](#persistent-sessions). `--terminal` (default
+true, native transport only) offers a shell in the agent's working directory;
+see [Terminal](#terminal). `--state-file <file>` (PTY transport only) saves the
+screen-derived messages on shutdown and loads them on startup (`--save-state`
+and `--load-state` default to true when it is set).
+
+## Chat UI
+
+The chat UI at `/chat` is embedded in the binary and works with every
+transport, on a desktop and on a phone. It has layouts for phones, searchable
+tool activity, connection-state indicators and compact tool-call cards, and
+its header shows the agent's mark (Claude's orange square, Pi's logo) and the
+AgentAPI version.
+
+### Tasks and the transcript
 
 The embedded chat UI is organized around tasks instead of a single flat
 transcript. Each user request becomes a navigable task with its associated
@@ -35,6 +243,11 @@ screens. A status strip above the composer shows what the agent is doing
 right now, and the header, tab title and queue say "Needs you" while the
 agent waits for an answer. Long tasks show their latest 40 steps first.
 
+Each message has its own markdown/raw toggle so you can switch render
+modes without affecting the rest of the conversation.
+
+### Session Explorer
+
 The Session Explorer provides:
 
 - links and file paths discovered in the current conversation;
@@ -44,60 +257,64 @@ The Session Explorer provides:
 - MCP server configuration without leaving the chat UI;
 - a Session tab with a two-step Restart (open the Explorer with ⌘K / Ctrl+K).
 
-Each message has its own markdown/raw toggle so you can switch render
-modes without affecting the rest of the conversation.
+### Attachments and images
 
 Images can be pasted straight into the composer (a pasted screenshot is
 uploaded like an attachment; pasted text still pastes as text). Image
 attachments and the images in sent messages show as thumbnails that open full
 size; the agent gets the file path.
 
-**File viewer**: file paths in the chat open the file the agent works on. The
-file name on a tool call's row (Claude Code's Read, Write, Edit, MultiEdit and
-NotebookEdit; Codex's apply_patch and view_image; Pi's read, write and edit),
-a path in inline code in the agent's reply (`lib/foo.go:12` opens at line 12)
-and the Explorer's Files tab open a viewer with two tabs: File, with line
-numbers and syntax highlighting, and Diff, with the tool call's own change and
-the file's uncommitted changes against HEAD (`GET /files/content`,
-`GET /files/diff`, cut at 1 MiB). Only files inside the agent's working
-directory can be opened. An expanded tool call lists its files and shows its
-change as a diff, with the raw input a click away. On a phone the viewer is
-full screen.
+### Decision cards
 
-The UI also includes improved mobile layouts, attachment handling, searchable
-tool activity, connection-state indicators, and more compact tool-call cards.
-The header shows the agent's mark (Claude's orange square, Pi's logo) and the
-AgentAPI version.
+What the agent waits for docks above the composer as a decision card: its
+terminal dialogs on the PTY transport (see
+[Interactive prompt support](#interactive-prompt-support)), its
+[requests](#requests-approvals-questions-and-plans) on the native transport,
+and the [login card](#logging-in) while it waits for a login. Number keys pick
+options. On a phone a card takes at most 60% of the screen, and a title cut to
+two lines can be shown in full.
 
-**TTY mode** is an escape hatch for when the chat view looks wrong: the
-terminal button in the header swaps the conversation for the agent's terminal
-screen (xterm.js) and sends every key straight to the agent, including arrows,
+### File viewer
+
+File paths in the chat open the file the agent works on. The file name on a
+tool call's row (Claude Code's Read, Write, Edit, MultiEdit and NotebookEdit;
+Codex's apply_patch and view_image; Pi's read, write and edit), a path in
+inline code in the agent's reply (`lib/foo.go:12` opens at line 12) and the
+Explorer's Files tab open a viewer with two tabs: File, with line numbers and
+syntax highlighting, and Diff, with the tool call's own change and the file's
+uncommitted changes against HEAD (`GET /files/content`, `GET /files/diff`, cut
+at 1 MiB). Only files inside the agent's working directory can be opened. An
+expanded tool call lists its files and shows its change as a diff, with the
+raw input a click away. On a phone the viewer is full screen.
+
+### TTY mode
+
+TTY mode is an escape hatch for when the chat view looks wrong: the terminal
+button in the header swaps the conversation for the agent's terminal screen
+(xterm.js) and sends every key straight to the agent, including arrows,
 Ctrl/Alt keys, pastes and IME input. A key bar provides Esc, Tab, arrows,
 Enter and Ctrl keys on phones. The font grows with the window (11–20px); the
 mirror uses the agent's real terminal width, so start AgentAPI with
 `--term-width 120` if you want longer lines.
 
-**Background alerts**: while the tab is in the background, its icon shows an
-amber dot when the agent needs you, a blue dot while it works, and a green dot
-when a task finished. Browser notifications can be turned on from the status
-menu.
+### With the native transport
 
-**Native transport** (`--transport native`): what the agent asks for (a tool
-approval, its questions, a plan to approve) docks above the composer as a
-card, at most 60% of a phone's screen, and while the agent works the send
-button can also steer the message into the running turn or interrupt it. The
-composer's toolbar switches the agent's permission mode, model and reasoning
-effort and shows how full its context is and its rate limits; slash commands
-such as `/model` and `/compact` work from the composer; and the terminal
-button opens a shell in the agent's working directory instead of TTY mode,
-which needs the agent's own terminal (the screen views stay hidden, also for
-ACP). See [Native transport](#native-transport).
+With `--transport native`, what the agent asks for (a tool approval, its
+questions, a plan to approve) docks above the composer as a card, at most 60%
+of a phone's screen, and while the agent works the send button can also steer
+the message into the running turn or interrupt it. The composer's toolbar
+switches the agent's permission mode, model and reasoning effort and shows how
+full its context is and its rate limits; slash commands such as `/model` and
+`/compact` work from the composer; and the terminal button opens a shell in
+the agent's working directory instead of TTY mode, which needs the agent's own
+terminal (the screen views stay hidden, also for ACP). See [Native
+transport](#native-transport).
 
-### Message queue and connection recovery
+### Alerts, connection recovery and caching
 
-Messages submitted while an agent is busy are placed in a FIFO queue instead
-of being rejected. Queued messages can be inspected, edited, or deleted before
-delivery through both the API and chat UI.
+While the tab is in the background, its icon shows an amber dot when the agent
+needs you, a blue dot while it works, and a green dot when a task finished.
+Browser notifications can be turned on from the status menu.
 
 Long-running browser sessions are protected by SSE heartbeats, automatic
 reconnection, stale-connection detection, and local recovery of messages that
@@ -108,23 +325,7 @@ Reopening a long conversation is fast: the chat caches the transcript in the
 browser (IndexedDB), shows it immediately, and then asks the server only for
 what changed since.
 
-Relevant APIs include:
-
-- `GET /queue` and `PUT/DELETE /queue/{id}` for queue management;
-- `GET /events` for live messages, status, errors, rich activity, and heartbeat
-  events. With `?sync=1` the stream starts with a `session_sync` event and
-  every update carries a `seq`; reconnecting with `&since=<seq>&epoch=<epoch>`
-  replays only what changed;
-- `GET /title` for the current human-readable session title.
-
-With `?sync=1`, events also carry SSE ids (the end of the replay has the
-replay's `seq`, later changes their own), so a plain `EventSource` that
-reconnects by itself resumes from its `Last-Event-ID`; put the `epoch` from
-`GET /status` in the URL. When a message is taken back (a turn the agent
-refused to start), the conversation gets a new epoch and connected clients
-receive a `session_sync` with `full: true` followed by the whole state.
-
-### Native transport
+## Native transport
 
 By default AgentAPI runs the agent in a terminal emulator and reads its screen
 (the PTY transport). With `--transport native` it drives Claude Code, Codex
@@ -178,7 +379,7 @@ agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6
   Configuration such as `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
   `PI_CODING_AGENT_DIR` or `ANTHROPIC_*` is kept.
 
-#### Logging in
+### Logging in
 
 Native mode uses the agent CLI's own stored login. Log in with the CLI itself,
 as the user account that runs AgentAPI: in the chat's
@@ -223,7 +424,7 @@ the agent, which resumes its session, and the conversation stays. A turn the
 model completes clears it too (not an interrupted turn, nor a message the
 agent handled itself).
 
-#### Requests: approvals, questions and plans
+### Requests: approvals, questions and plans
 
 Tool approvals, questions (Claude's `AskUserQuestion`, Codex's
 `request_user_input`, dialogs from Pi extensions) and plan approvals (Claude's
@@ -272,7 +473,7 @@ expired with the turn, or the agent withdrew it) points out that a normal
 message can still answer it. The header, tab title, tab icon, the embed status
 bar and notifications say "Needs you" while a request is pending.
 
-#### Steer, interrupt and the queue
+### Steer, interrupt and the queue
 
 - `POST /message` takes `dispatch_mode`: `queue` (the default, as on every
   transport: send the message once the agent is idle), `steer` (add it to the
@@ -307,7 +508,7 @@ In the chat, while the agent works, the send button's menu adds **Steer**
 (Enter), and Stop interrupts the turn (`POST /interrupt`). Queued tasks can be
 steered in right away, and moved up and down on every transport.
 
-#### Settings: permission mode, model and effort
+### Settings: permission mode, model and effort
 
 The agent's permission mode, model and reasoning effort can change while it
 runs. `GET /settings` returns them with the values they can take (the
@@ -340,7 +541,7 @@ itself, such as the mode an approved plan switches to, is followed.
 In the chat, the composer's toolbar has a menu for the mode and one for the
 model and effort (on a phone in a row of their own above the buttons).
 
-#### Context and rate limits
+### Context and rate limits
 
 `GET /status` and `status_change` report the agent's `usage`: how full its
 context window is after the last turn (`context`: `used` and `size` in tokens)
@@ -352,7 +553,7 @@ session starts with an empty context; the rate limits, which are the
 account's, stay. In the chat, a ring in the composer's toolbar shows how full
 the context is, and its menu the limits with the time to each reset.
 
-#### Terminal
+### Terminal
 
 A native agent has no terminal of its own, so AgentAPI runs a shell in the
 agent's working directory for the chat's terminal button: for a login, a git
@@ -372,7 +573,7 @@ AgentAPI's own variables.
   off. It is as protected as the rest of the API, so use `--api-token` when
   the server is reachable by others.
 
-#### Slash commands and compaction
+### Slash commands and compaction
 
 The agent's terminal UI isn't there to run its slash commands, so the chat
 runs these itself for a native agent:
@@ -395,7 +596,7 @@ command) before it answers. Messages sent meanwhile wait in the queue, and
 the agent's refusal (Pi's "Nothing to compact") is a 409 with its reason.
 Claude Code compacts with the `/compact` message, which the chat sends it.
 
-#### Persistent sessions
+### Persistent sessions
 
 `--state-db <file>` keeps the conversation in a SQLite file: messages, rich
 messages (tool calls, thinking), the timeline, requests and the queue, plus
@@ -430,7 +631,7 @@ agentapi server --transport native --state-db ~/.agentapi/myproject.db -- claude
   can't resume its session; `--state-file` still saves the screen-derived
   messages there. The native transport doesn't take `--state-file`.
 
-#### Claude Code
+### Claude Code
 
 AgentAPI runs `claude -p` headless with stream-json on stdin and stdout. Tool
 calls carry their input, result, status and images, and each assistant message
@@ -510,7 +711,7 @@ can't, and `resume` is false. Requests still open when Claude Code exits or
 restarts can't be answered anymore. Slash commands that need the interactive
 UI don't work.
 
-#### Codex
+### Codex
 
 AgentAPI starts `codex app-server` and starts or resumes a thread. Messages,
 rich messages and the timeline have the same shape the session-log parser
@@ -585,7 +786,7 @@ itself, and `/review` isn't available. Command output streams as a preview
 that Codex may leave incomplete, and the full output replaces it when the
 command ends.
 
-#### Pi
+### Pi
 
 AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and
 stdout).
@@ -643,7 +844,7 @@ stdout).
   [Slash commands](#slash-commands-and-compaction), and extension slash
   commands work. Log in from the chat's terminal (`pi`, then `/login`).
 
-#### Limitations
+### Limitations
 
 - The agent has no terminal of its own. The chat hides TTY mode, the terminal
   prompt card, the live screen tail and "Terminal output" (for ACP too, where
@@ -659,6 +860,48 @@ stdout).
   agent's earlier session isn't resumed.
 - Images reach the agent only as `@"<path>"` attachments of a message, not as
   command-line flags (`codex -i` and Pi's `@file` are refused).
+
+## PTY transport
+
+The default transport works with every agent that has a terminal UI. For
+Claude Code, Codex and Pi it also follows their session logs for structured
+activity, and the chat answers their terminal dialogs.
+
+### How it works
+
+AgentAPI runs an in-memory terminal emulator. It translates API calls into appropriate terminal keystrokes and parses the agent's outputs into individual messages.
+
+#### Splitting terminal output into messages
+
+There are 2 types of messages:
+
+- User messages: sent by the user to the agent
+- Agent messages: sent by the agent to the user
+
+To parse individual messages from the terminal output, we take the following steps:
+
+1. The initial terminal output, before any user messages are sent, is treated as the agent's first message.
+2. When the user sends a message through the API, a snapshot of the terminal is taken before any keystrokes are sent.
+3. The user message is then submitted to the agent. From this point on, any time the terminal output changes, a new snapshot is taken. It's diffed against the initial snapshot, and any new text that appears below the initial content is treated as the agent's next message.
+4. If the terminal output changes again before a new user message is sent, the agent message is updated.
+
+This lets us split the terminal output into a sequence of messages.
+
+#### Removing TUI elements from agent messages
+
+Each agent message contains some extra bits that aren't useful to the end user:
+
+- The user's input at the beginning of the message. Coding agents often echo the input back to the user to make it visible in the terminal.
+- An input box at the end of the message. This is where the user usually types their input.
+
+AgentAPI automatically removes these.
+
+- For user input, we strip the lines that contain the text from the user's last message.
+- For the input box, we look for lines at the end of the message that contain common TUI elements, like `>` or `------`.
+
+#### What will happen when Claude Code, Goose, Aider, or Codex update their TUI?
+
+Splitting the terminal output into a sequence of messages should still work, since it doesn't depend on the TUI structure. The logic for removing extra bits may need to be updated to account for new elements. AgentAPI will still be usable, but some extra TUI elements may become visible in the agent messages.
 
 ### Structured Claude, Codex and Pi activity
 
@@ -682,130 +925,6 @@ Terminal parsing remains the fallback for other agents and for environments
 where a session log is unavailable. With the
 [native transport](#native-transport), the same endpoints are filled from the
 agent's protocol instead of its session log.
-
-### MCP management
-
-Claude, Codex and Pi MCP servers can be managed while AgentAPI is running. The
-implementation preserves unrelated settings in `.mcp.json` (Claude),
-`$CODEX_HOME/config.toml` (Codex) or `~/.pi/agent/mcp.json` (Pi).
-
-The API and Session Explorer support:
-
-- reading or replacing the complete MCP server map;
-- creating, updating, and deleting individual servers;
-- checking remote HTTP connectivity and resolving local stdio executables;
-- saving, importing, exporting, and applying reusable MCP profiles;
-- optionally restarting the agent to apply changes immediately.
-
-When an agent is restarted, AgentAPI itself and its HTTP/SSE clients remain
-online. A PTY agent receives a new process and session-log watcher, although
-its previous in-memory conversation context is not retained. A native agent
-restarts on its session, so the conversation stays (a 409 while it works on a
-turn, which a restart would stop). Before a restart from the Explorer or
-`DELETE /messages`, AgentAPI updates Codex (`codex update`) and Pi
-(`pi update --self`), so the restarted agent is the latest release; Claude
-Code updates itself.
-
-### Run-status webhooks
-
-AgentAPI can send an HTTP POST whenever a run changes between `running` and
-`stable`. Webhooks can be initialized with CLI flags or `AGENTAPI_WEBHOOK_*`
-environment variables, then inspected or changed through `GET/PUT /webhook`.
-
-Delivery runs asynchronously with a configurable timeout and retry count.
-An optional Go `text/template` payload template lets you reshape the POST body
-for any receiver — available fields are `.ID`, `.Type`, `.CreatedAt`, `.RunID`,
-`.Status`, `.PreviousStatus`, `.AgentType`, and `.Transport`. When no template
-is set, the default JSON payload is sent unchanged.
-
-```bash
-agentapi server \
-  --webhook-url https://example.com/agentapi/events \
-  -- claude
-```
-
-### Human-reply API
-
-Another client, such as a chat bot, can answer the agent without the web UI.
-While the agent waits for you, `GET /handoff` returns what it waits on, with an
-`id` and a `kind`: its latest response (`message`), the terminal prompt it is
-showing (`terminal`) or, with the native transport, the oldest pending request
-(`request`). Otherwise it returns `{"request": null}`.
-
-`POST /handoff/reply` with that `request_id`, a unique reply `id` and the
-`content` answers it. A reply to a response is sent as a normal user message,
-and a reply to a request answers it as described under
-[Requests](#requests-approvals-questions-and-plans). A terminal prompt takes a
-displayed option number, `enter` or `esc`, or free text where the prompt has a
-text field (such as Claude Code's plan feedback). The `outcome` is `applied`,
-`superseded` (no longer open, for example because it was answered in the web
-UI), `invalid` (the reply doesn't fit; it stays open) or `uncertain`, and
-nothing is answered twice. Combined with the run-status webhooks above, an
-integration can tell you when the agent stops and pass your answer back.
-
-### Self-update
-
-AgentAPI can update itself from the command line:
-
-```bash
-agentapi update          # download and install the latest release
-agentapi update --check  # check without downloading
-agentapi update --force  # skip version comparison
-```
-
-Release binaries are verified against the release's `checksums.txt` SHA-256
-manifest before the running executable is replaced. An update is rejected if
-the manifest is missing, malformed, or does not match the download.
-
-### API token authentication
-
-All API endpoints can be protected with a Bearer token. Authentication is
-**disabled by default** for backward compatibility.
-
-```bash
-# Auto-generate a random token (printed to stderr on startup)
-agentapi server --api-token -- claude
-
-# Use a specific token
-agentapi server --api-token=my-secret -- claude
-
-# Via environment variable
-AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
-```
-
-When enabled, every API request must include `Authorization: Bearer <token>`
-or the chat UI's session cookie. Static file routes (`/`, `/chat/*`) are exempt
-so browsers can open the chat UI without a token. Tokens are compared in
-constant time.
-
-The chat UI signs in by trading the token for a cookie, since browsers can't add
-an `Authorization` header to the event stream or to images:
-
-- Open `http://localhost:3284/chat/embed#token=<token>`. With an auto-generated
-  token the server prints this link on startup. The token is in the URL
-  fragment, which the browser never sends to the server, a proxy or an access
-  log; the page exchanges it and removes it from the address bar. A link to a
-  server without `--api-token` just opens the chat.
-- Or just open the chat: when the server answers 401 it asks for the token.
-  The dialog names the server that asks and warns when it isn't the page's
-  own origin, and says so when the browser didn't keep the session cookie.
-  After Cancel, **Reconnect now** asks again.
-
-`POST /auth/session` with `Authorization: Bearer <token>` sets the cookie
-(`agentapi_session_<hash>`, HttpOnly, SameSite=Strict, `Path=/`, and Secure
-over HTTPS or behind a proxy that sends `X-Forwarded-Proto: https`). It holds
-an HMAC of the token, not the token, so changing the token signs every browser
-out, and the name comes from it, so servers with different tokens on one host
-keep their own sign-ins. `DELETE /auth/session` signs out, and
-`GET /auth/session` (no credentials needed) reports `auth_required` and
-`authenticated`. Because the cookie is SameSite=Strict, pages on other sites
-can't make requests with it. A chat UI served from another origin (e.g.
-`bun run dev` on port 3000) needs that origin in `--allowed-origins`;
-`--allowed-origins '*'` doesn't allow requests with cookies. Ports don't make
-another site, and the default allowed origins include
-`http://localhost:3000` and `http://localhost:3001` for chat development: on
-a shared machine, set `--allowed-origins` to the origins you use, so a signed-in
-browser's cookie only works for them.
 
 ### Interactive prompt support
 
@@ -868,67 +987,298 @@ share a directory. If you pass `--session`, `--continue`, `--resume` or
 To drive Pi through its RPC mode instead of its terminal UI, see
 [Native transport](#native-transport).
 
-### Runtime reliability
+## Conversation API
 
-The fork also includes fixes for wide-character terminal cursor tracking,
-PTY lifecycle leaks, concurrent event delivery, message tracking races, ACP
-shutdown, TUI re-render artifacts, JSONL watcher flushing, rich message
-content-block merging during Claude delta streaming, and runtime session-file
-switching when Claude Code parks a session to a new JSONL. These changes are
-intended to keep AgentAPI stable across long sessions, process replacement, and
-temporary browser or network interruptions.
+These endpoints work with every transport; the
+[HTTP API reference](#http-api-reference) lists them all.
 
-See the [full comparison with upstream](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)
-for the complete commit history.
+### Messages and status
 
-## Quickstart
+- `POST /message` sends a message: `{"content": "Hello, agent!", "type": "user"}`.
+  A 200 means AgentAPI saw the agent start on it, or queued it (`queued`)
+  while the agent is busy; `dispatch_mode` chooses what happens while it is
+  busy (see [Steer, interrupt and the queue](#steer-interrupt-and-the-queue)).
+  `"type": "raw"` types keys into the agent's terminal instead (PTY
+  transport).
+- `GET /messages` returns the conversation; `GET /rich-messages` and
+  `GET /timeline` return its structured form (see
+  [Structured Claude, Codex and Pi activity](#structured-claude-codex-and-pi-activity)).
+- `DELETE /messages` clears the conversation (messages, rich messages,
+  requests, timeline, errors and the queue) and restarts the agent (with the
+  native transport, in a new session).
+- `GET /status` returns the backward-compatible `stable`/`running` status,
+  the detailed lifecycle (`starting`, `ready`, `running`, `restarting`,
+  `exited` or `failed`), the transport, a session ID, a monotonically
+  increasing run ID, the conversation's `epoch`, the session name, the
+  AgentAPI version, the agent's open dialog (`terminal_prompt`) and the
+  terminal width (`terminal_columns`). With the native transport it also
+  reports `capabilities`, `pending_requests`, `settings`, `usage`, `terminal`
+  and `login_required`.
+- `GET /title` returns the session's human-readable title.
+- `POST /upload` stores a file (up to 10 MB) and returns its path, which a
+  message references as `@"<path>"`.
 
-1. Install `agentapi`:
+### Message queue
 
-   ```bash
-   OS=$(uname -s | tr "[:upper:]" "[:lower:]");
-   ARCH=$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/");
-   curl -fsSL "https://github.com/k1dav-c/agentapi/releases/latest/download/agentapi-${OS}-${ARCH}" -o agentapi && chmod +x agentapi
-   ```
+Messages submitted while an agent is busy are placed in a FIFO queue instead
+of being rejected. Queued messages can be inspected, edited, or deleted before
+delivery through both the API and chat UI.
 
-   Alternatively, you can download this fork's latest binary from the
-   [releases page](https://github.com/k1dav-c/agentapi/releases). Upstream
-   `coder/agentapi` release binaries do not include the features documented in
-   the **Changes in this fork** section.
+- `GET /queue` lists the queued messages.
+- `PUT /queue/{id}` edits a queued message and `DELETE /queue/{id}` removes
+  it.
+- `PUT /queue` with `{"ids": [...]}` reorders the queue; it must list every
+  queued message once.
+- `POST /queue/{id}/steer` moves a queued message into the turn the agent is
+  working on (native transport).
 
-1. Verify the installation:
+### Events and incremental sync
 
-   ```bash
-   agentapi --help
-   ```
+`GET /events` streams server-sent events: `message_update`, `status_change`,
+`rich_message_update`, `agent_error`, `request_update` (native transport) and
+a `heartbeat` every 15 seconds, so a client can tell a dead connection. With
+`?sync=1` the stream starts with a `session_sync` event and every update
+carries a `seq`; reconnecting with `&since=<seq>&epoch=<epoch>` replays only
+what changed.
 
-   > On macOS, if you're prompted that the system was unable to verify the binary, go to `System Settings -> Privacy & Security`, click "Open Anyway", and run the command again.
+With `?sync=1`, events also carry SSE ids (the end of the replay has the
+replay's `seq`, later changes their own), so a plain `EventSource` that
+reconnects by itself resumes from its `Last-Event-ID`; put the `epoch` from
+`GET /status` in the URL. When a message is taken back (a turn the agent
+refused to start), the conversation gets a new epoch and connected clients
+receive a `session_sync` with `full: true` followed by the whole state.
 
-1. Run a Claude Code server (assumes `claude` is installed on your system and in the `PATH`):
+## Integrations
 
-   ```bash
-   agentapi server -- claude
-   ```
+### Run-status webhooks
 
-   > If you're getting an error that `claude` is not in the `PATH` but you can run it from your shell, try `which claude` to get the full path and use that instead.
+AgentAPI can send an HTTP POST whenever a run changes between `running` and
+`stable`. Webhooks can be initialized with CLI flags or `AGENTAPI_WEBHOOK_*`
+environment variables, then inspected or changed through `GET/PUT /webhook`.
 
-1. Send a message to the agent:
+Delivery runs asynchronously with a configurable timeout and retry count.
+An optional Go `text/template` payload template lets you reshape the POST body
+for any receiver — available fields are `.ID`, `.Type`, `.CreatedAt`, `.RunID`,
+`.Status`, `.PreviousStatus`, `.AgentType`, and `.Transport`. When no template
+is set, the default JSON payload is sent unchanged.
 
-   ```bash
-   curl -X POST localhost:3284/message \
-     -H "Content-Type: application/json" \
-     -d '{"content": "Hello, agent!", "type": "user"}'
-   ```
+```bash
+agentapi server \
+  --webhook-url https://example.com/agentapi/events \
+  -- claude
+```
 
-1. Get the conversation history:
+The equivalent environment variables are `AGENTAPI_WEBHOOK_URL`,
+`AGENTAPI_WEBHOOK_PAYLOAD_TEMPLATE`, `AGENTAPI_WEBHOOK_TIMEOUT`, and
+`AGENTAPI_WEBHOOK_MAX_ATTEMPTS`. The timeout defaults to `10s`, and delivery is
+attempted up to 3 times.
 
-   ```bash
-   curl localhost:3284/messages
-   ```
+The request body has this format:
 
-1. Try the chat web interface at http://localhost:3284/chat.
+```json
+{
+  "id": "unique-delivery-id",
+  "type": "run.status_changed",
+  "created_at": "2026-07-26T12:00:00Z",
+  "data": {
+    "run_id": "agentapi-process-run-id",
+    "status": "stable",
+    "previous_status": "running",
+    "agent_type": "claude",
+    "transport": "pty"
+  }
+}
+```
 
-## CLI Commands
+Each request includes `X-AgentAPI-Delivery`, `X-AgentAPI-Event`, and
+`X-AgentAPI-Timestamp` headers.
+
+### Human-reply API
+
+Another client, such as a chat bot, can answer the agent without the web UI.
+While the agent waits for you, `GET /handoff` returns what it waits on, with an
+`id` and a `kind`: its latest response (`message`), the terminal prompt it is
+showing (`terminal`) or, with the native transport, the oldest pending request
+(`request`). Otherwise it returns `{"request": null}`.
+
+`POST /handoff/reply` with that `request_id`, a unique reply `id` and the
+`content` answers it. A reply to a response is sent as a normal user message,
+and a reply to a request answers it as described under
+[Requests](#requests-approvals-questions-and-plans). A terminal prompt takes a
+displayed option number, `enter` or `esc`, or free text where the prompt has a
+text field (such as Claude Code's plan feedback). The `outcome` is `applied`,
+`superseded` (no longer open, for example because it was answered in the web
+UI), `invalid` (the reply doesn't fit; it stays open) or `uncertain`, and
+nothing is answered twice. Combined with the run-status webhooks above, an
+integration can tell you when the agent stops and pass your answer back.
+
+### MCP management
+
+Claude, Codex and Pi MCP servers can be managed while AgentAPI is running. The
+implementation preserves unrelated settings in `.mcp.json` (Claude),
+`$CODEX_HOME/config.toml` (Codex) or `~/.pi/agent/mcp.json` (Pi).
+
+The API and Session Explorer support:
+
+- reading or replacing the complete MCP server map;
+- creating, updating, and deleting individual servers;
+- checking remote HTTP connectivity and resolving local stdio executables;
+- saving, importing, exporting, and applying reusable MCP profiles;
+- optionally restarting the agent to apply changes immediately.
+
+When an agent is restarted, AgentAPI itself and its HTTP/SSE clients remain
+online. A PTY agent receives a new process and session-log watcher, although
+its previous in-memory conversation context is not retained. A native agent
+restarts on its session, so the conversation stays (a 409 while it works on a
+turn, which a restart would stop). Before a restart from the Explorer or
+`DELETE /messages`, AgentAPI updates Codex (`codex update`) and Pi
+(`pi update --self`), so the restarted agent is the latest release; Claude
+Code updates itself.
+
+## Security
+
+AgentAPI has no users or roles: whoever can reach the API can do what the
+agent can. Out of the box it takes no token and accepts any connection whose
+`Host` header names the machine itself (`localhost`, `127.0.0.1`, `[::1]`),
+on every network interface. The host check keeps web pages from calling it
+through DNS rebinding; it doesn't stop a program on the network, which can
+send any `Host` header. Protect the server before anyone else can reach the
+port.
+
+### API token authentication
+
+All API endpoints can be protected with a Bearer token. Authentication is
+**disabled by default** for backward compatibility.
+
+```bash
+# Auto-generate a random token (printed to stderr on startup)
+agentapi server --api-token -- claude
+
+# Use a specific token
+agentapi server --api-token=my-secret -- claude
+
+# Via environment variable
+AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
+```
+
+When enabled, every API request must include `Authorization: Bearer <token>`
+or the chat UI's session cookie. Static file routes (`/`, `/chat/*`) are exempt
+so browsers can open the chat UI without a token. Tokens are compared in
+constant time.
+
+The chat UI signs in by trading the token for a cookie, since browsers can't add
+an `Authorization` header to the event stream or to images:
+
+- Open `http://localhost:3284/chat/embed#token=<token>`. With an auto-generated
+  token the server prints this link on startup. The token is in the URL
+  fragment, which the browser never sends to the server, a proxy or an access
+  log; the page exchanges it and removes it from the address bar. A link to a
+  server without `--api-token` just opens the chat.
+- Or just open the chat: when the server answers 401 it asks for the token.
+  The dialog names the server that asks and warns when it isn't the page's
+  own origin, and says so when the browser didn't keep the session cookie.
+  After Cancel, **Reconnect now** asks again.
+
+`POST /auth/session` with `Authorization: Bearer <token>` sets the cookie
+(`agentapi_session_<hash>`, HttpOnly, SameSite=Strict, `Path=/`, and Secure
+over HTTPS or behind a proxy that sends `X-Forwarded-Proto: https`). It holds
+an HMAC of the token, not the token, so changing the token signs every browser
+out, and the name comes from it, so servers with different tokens on one host
+keep their own sign-ins. `DELETE /auth/session` signs out, and
+`GET /auth/session` (no credentials needed) reports `auth_required` and
+`authenticated`. Because the cookie is SameSite=Strict, pages on other sites
+can't make requests with it. A chat UI served from another origin (e.g.
+`bun run dev` on port 3000) needs that origin in `--allowed-origins`;
+`--allowed-origins '*'` doesn't allow requests with cookies. Ports don't make
+another site, and the default allowed origins include
+`http://localhost:3000` and `http://localhost:3001` for chat development: on
+a shared machine, set `--allowed-origins` to the origins you use, so a signed-in
+browser's cookie only works for them.
+
+### Bind address
+
+By default, the server listens on all network interfaces. Use `--bind` (or
+`AGENTAPI_BIND`) to listen on one address only, e.g. loopback so nothing else
+on the network can connect. It takes an IP address or hostname without a port;
+the port stays `--port`.
+
+```bash
+agentapi server --bind 127.0.0.1 -- claude
+agentapi server --bind ::1 -- claude          # IPv6 loopback
+AGENTAPI_BIND=127.0.0.1 agentapi server -- claude
+```
+
+`--bind` decides who can connect; `--allowed-hosts` below decides which `Host`
+headers are accepted from those who can.
+
+### Allowed hosts
+
+By default, the server only allows requests with the host header set to `localhost`, `127.0.0.1` or `[::1]`. If you'd like to host AgentAPI elsewhere, you can change this by using the `AGENTAPI_ALLOWED_HOSTS` environment variable or the `--allowed-hosts` flag. Hosts must be hostnames only (no ports); the server ignores the port portion of incoming requests when authorizing. This checks the `Host` header only; to keep the server off the network altogether, also listen on loopback with `--bind 127.0.0.1` (see [Bind address](#bind-address)).
+
+To allow requests from any host, use `*` as the allowed host.
+
+```bash
+agentapi server --allowed-hosts '*' -- claude
+```
+
+To allow a specific host, use:
+
+```bash
+agentapi server --allowed-hosts 'example.com' -- claude
+```
+
+To specify multiple hosts, use a comma-separated list when using the `--allowed-hosts` flag, or a space-separated list when using the `AGENTAPI_ALLOWED_HOSTS` environment variable.
+
+```bash
+agentapi server --allowed-hosts 'example.com,example.org' -- claude
+# or
+AGENTAPI_ALLOWED_HOSTS='example.com example.org' agentapi server -- claude
+```
+
+### Allowed origins
+
+By default, the server allows CORS requests from `http://localhost:3284`, `http://localhost:3000`, and `http://localhost:3001`. If you'd like to change which origins can make cross-origin requests to AgentAPI, you can change this by using the `AGENTAPI_ALLOWED_ORIGINS` environment variable or the `--allowed-origins` flag.
+
+To allow requests from any origin, use `*` as the allowed origin:
+
+```bash
+agentapi server --allowed-origins '*' -- claude
+```
+
+To allow a specific origin, use:
+
+```bash
+agentapi server --allowed-origins 'https://example.com' -- claude
+```
+
+To specify multiple origins, use a comma-separated list when using the `--allowed-origins` flag, or a space-separated list when using the `AGENTAPI_ALLOWED_ORIGINS` environment variable. Origins must include the protocol (`http://` or `https://`) and support wildcards (e.g., `https://*.example.com`):
+
+```bash
+agentapi server --allowed-origins 'https://example.com,http://localhost:3000' -- claude
+# or
+AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi server -- claude
+```
+
+### What an API client can do
+
+- Have the agent run anything it can. Native agents start in the bypass
+  permission mode, where tools run without asking; Claude Code gets
+  `--allow-dangerously-skip-permissions` (except as root), so a client can
+  switch any session to bypass; Codex's default overrides the policies in
+  `~/.codex/config.toml` unless the command line picks one; and the ACP
+  transport approves every permission request.
+- Run commands in the [terminal](#terminal) (native transport, on by default;
+  `--terminal=false` turns it off).
+- Read files in the agent's working directory with the file viewer endpoints;
+  paths outside it, also through symlinks, are refused, and the diff only
+  reads the git repository.
+- Upload files of up to 10 MB; only images are served back.
+- Change the MCP servers and the webhook, and restart the agent.
+
+Use `--api-token` together with `--bind` or a reverse proxy whenever someone
+else can reach the server.
+
+## CLI reference
 
 ### `agentapi server`
 
@@ -964,195 +1314,36 @@ Kimi Code also provides a native ACP server. After logging in once with
 agentapi server --type=kimi --experimental-acp -- kimi acp
 ```
 
-> [!NOTE]
-> When using Claude, Codex, Opencode, Copilot, Gemini, Amp or CursorCLI, always specify the agent type explicitly (eg: `agentapi server --type=codex -- codex`), or message formatting may break. Kimi and Pi are auto-detected when the executable name is `kimi` or `pi`; use `--type=kimi` / `--type=pi` for wrappers or ACP mode.
+#### Flags
 
-An OpenAPI schema is available in [openapi.json](openapi.json).
+Every flag can also be set with an environment variable: `AGENTAPI_` and the
+flag's name in capitals, with `_` for `-` (`AGENTAPI_ALLOWED_HOSTS`). Lists
+are comma-separated in a flag and space-separated in a variable.
 
-By default, the server runs on port 3284. Additionally, the server exposes the same OpenAPI schema at http://localhost:3284/openapi.json and the available endpoints in a documentation UI at http://localhost:3284/docs.
-
-Endpoints:
-
-- GET `/messages` - returns a list of all messages in the conversation with the agent
-- POST `/message` - sends a message to the agent. When a 200 response is returned, AgentAPI has detected that the agent started processing the message, or queued it (`queued`) while the agent is busy. `dispatch_mode` chooses what happens while the agent is busy: `queue` (default), `steer` (add it to the running turn; `steered` in the reply) or `interrupt` (stop the turn and send it next); `steer` and `interrupt` need the native transport
-- GET `/status` - returns the backward-compatible `stable`/`running` status,
-  detailed lifecycle (`starting`, `ready`, `running`, `restarting`, `exited`, or
-  `failed`), the transport (`pty`, `acp` or `native`), a session ID, a
-  monotonically increasing run ID, the conversation's `epoch` (for
-  `/events?sync=1`), the session name, the AgentAPI version, the agent's open
-  dialog (`terminal_prompt`) and the terminal width (`terminal_columns`). With
-  the native transport it also reports `capabilities` (`steer`, `interrupt`,
-  `resume`, `images`, `settings`, `compact`), `pending_requests`, `settings`,
-  `usage`, `terminal`, and `login_required` while the agent waits for someone
-  to log it in (see [Logging in](#logging-in))
-- GET `/events` - an SSE stream of events from the agent: message and status updates, and `request_update` with the native transport. With `?sync=1` it replays incrementally on reconnect (`&since=<seq>&epoch=<epoch>`), and events carry SSE ids so a reconnecting `EventSource` resumes from its `Last-Event-ID`
-- DELETE `/messages` - clears all conversation state (messages, rich messages, requests, timeline, errors, the queue) and restarts the agent process (native transport: in a new session)
-- GET `/queue` - returns the messages waiting to be sent to the agent
-- PUT `/queue` - reorders the queue; the body (`{"ids": [...]}`) lists every queued message once
-- PUT/DELETE `/queue/{id}` - edits or removes a queued message
-- POST `/queue/{id}/steer` - moves a queued message into the turn the agent is working on (native transport)
-- POST `/interrupt` - stops the turn the agent is working on (native transport)
-- POST `/login/retry` - checks the agent's login again now while `login_required` is reported, restarting an agent that lost its login on its session (native transport; 409 if no login is needed); see [Logging in](#logging-in)
-- GET `/requests`, GET `/requests/{id}` - the requests (tool approvals, questions, plans) the agent is waiting on and the recently closed ones (native transport; empty otherwise)
-- POST `/requests/{id}/respond` - answers a pending request (`option_id`, or `answers` keyed by question ID, with optional `text`); see [Requests](#requests-approvals-questions-and-plans)
-- GET/PUT `/settings` - the agent's permission mode, model and reasoning effort, and the values they can take; PUT changes the ones in its body (native transport); see [Settings](#settings-permission-mode-model-and-effort)
-- POST `/compact` - has the agent compact its context (native transport, agents with the compact capability)
-- GET `/terminal`, POST `/terminal/input`, POST `/terminal/resize` - a shell in the agent's working directory: its output as SSE, typing into it, its size (native transport, unless `--terminal=false`); see [Terminal](#terminal)
-- GET `/files/content`, GET `/files/diff` - a file in the agent's working directory (cut at 1 MiB) and its uncommitted changes against HEAD, for the chat's file viewer; files outside the working directory are refused
-- POST `/upload` - stores a file (up to 10 MB) in the server's temporary upload directory and returns its path, which a message references as `@"<path>"`
-- GET `/uploads/{checksum}/{name}` - returns an uploaded image (PNG, JPEG, GIF, WebP or BMP, judged by content) for the chat to show; other files are refused
-- GET/PUT `/webhook` - reads or updates run-status webhook delivery without restarting the agent
-- GET `/mcp` - returns configured MCP servers and the managed config path for Claude, Codex or Pi
-- PUT `/mcp` - replaces the complete MCP server set; pass `?restart=true` to restart the agent and apply immediately (a native agent keeps its session)
-- POST `/mcp/check` - checks remote HTTP connectivity and resolves stdio executables
-- POST `/mcp/servers`, PATCH/DELETE `/mcp/servers/{name}` - creates, updates, or removes one MCP server
-- GET `/mcp/profiles` - exports project-scoped MCP configuration profiles
-- PUT/DELETE `/mcp/profiles/{name}` - imports, replaces, or removes a profile
-- POST `/mcp/profiles/{name}/apply` - replaces the active MCP configuration with a saved profile
-- GET/POST/DELETE `/auth/session` - reports whether the API needs a token and whether the caller has one, signs a browser in with the token (session cookie), or signs it out; see [API token authentication](#api-token-authentication)
-
-#### Transport and session state
-
-`--transport` chooses how AgentAPI drives the agent:
-
-- `pty` (default): runs the agent's terminal UI in a terminal emulator and
-  parses its screen.
-- `acp`: the experimental ACP transport, the same as `--experimental-acp`.
-- `native`: the agent's own structured protocol, for Claude Code, Codex and
-  Pi; see [Native transport](#native-transport).
-
-```bash
-agentapi server --transport native -- claude
-agentapi server --transport native --state-db ~/.agentapi/myproject.db -- codex
-```
-
-`--state-db <file>` (native transport only) keeps the conversation in a SQLite
-file and resumes the agent's session when AgentAPI starts again with the same
-file; see [Persistent sessions](#persistent-sessions). `--terminal` (default
-true, native transport only) offers a shell in the agent's working directory;
-see [Terminal](#terminal). `--state-file <file>`
-(PTY transport only) saves the screen-derived messages on shutdown and loads
-them on startup (`--save-state` and `--load-state` default to true when it is
-set).
-
-#### API token authentication
-
-Set `--api-token` to require a Bearer token on all API requests (static chat
-UI routes are exempt):
-
-```bash
-agentapi server --api-token -- claude             # auto-generate and print to stderr
-agentapi server --api-token=my-secret -- claude    # use a specific token
-```
-
-The equivalent environment variable is `AGENTAPI_API_TOKEN`. When set, clients
-must include `Authorization: Bearer <token>` on every API call; browsers can use
-the session cookie from `POST /auth/session` instead (see
-[API token authentication](#api-token-authentication) above). Without
-`--api-token`, authentication is disabled (backward compatible).
-
-#### Bind address
-
-By default, the server listens on all network interfaces. Use `--bind` (or
-`AGENTAPI_BIND`) to listen on one address only, e.g. loopback so nothing else
-on the network can connect. It takes an IP address or hostname without a port;
-the port stays `--port`.
-
-```bash
-agentapi server --bind 127.0.0.1 -- claude
-agentapi server --bind ::1 -- claude          # IPv6 loopback
-AGENTAPI_BIND=127.0.0.1 agentapi server -- claude
-```
-
-`--bind` decides who can connect; `--allowed-hosts` below decides which `Host`
-headers are accepted from those who can.
-
-#### Allowed hosts
-
-By default, the server only allows requests with the host header set to `localhost`. If you'd like to host AgentAPI elsewhere, you can change this by using the `AGENTAPI_ALLOWED_HOSTS` environment variable or the `--allowed-hosts` flag. Hosts must be hostnames only (no ports); the server ignores the port portion of incoming requests when authorizing. This checks the `Host` header only; to keep the server off the network altogether, also listen on loopback with `--bind 127.0.0.1` (see [Bind address](#bind-address)).
-
-To allow requests from any host, use `*` as the allowed host.
-
-```bash
-agentapi server --allowed-hosts '*' -- claude
-```
-
-To allow a specific host, use:
-
-```bash
-agentapi server --allowed-hosts 'example.com' -- claude
-```
-
-To specify multiple hosts, use a comma-separated list when using the `--allowed-hosts` flag, or a space-separated list when using the `AGENTAPI_ALLOWED_HOSTS` environment variable.
-
-```bash
-agentapi server --allowed-hosts 'example.com,example.org' -- claude
-# or
-AGENTAPI_ALLOWED_HOSTS='example.com example.org' agentapi server -- claude
-```
-
-#### Allowed origins
-
-By default, the server allows CORS requests from `http://localhost:3284`, `http://localhost:3000`, and `http://localhost:3001`. If you'd like to change which origins can make cross-origin requests to AgentAPI, you can change this by using the `AGENTAPI_ALLOWED_ORIGINS` environment variable or the `--allowed-origins` flag.
-
-To allow requests from any origin, use `*` as the allowed origin:
-
-```bash
-agentapi server --allowed-origins '*' -- claude
-```
-
-To allow a specific origin, use:
-
-```bash
-agentapi server --allowed-origins 'https://example.com' -- claude
-```
-
-To specify multiple origins, use a comma-separated list when using the `--allowed-origins` flag, or a space-separated list when using the `AGENTAPI_ALLOWED_ORIGINS` environment variable. Origins must include the protocol (`http://` or `https://`) and support wildcards (e.g., `https://*.example.com`):
-
-```bash
-agentapi server --allowed-origins 'https://example.com,http://localhost:3000' -- claude
-# or
-AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi server -- claude
-```
-
-#### Run status webhooks
-
-Set `--webhook-url` to send an HTTP POST whenever the run status changes between
-`running` and `stable`:
-
-```bash
-agentapi server \
-  --webhook-url 'https://example.com/agentapi/events' \
-  -- claude
-```
-
-The equivalent environment variables are `AGENTAPI_WEBHOOK_URL`,
-`AGENTAPI_WEBHOOK_PAYLOAD_TEMPLATE`, `AGENTAPI_WEBHOOK_TIMEOUT`, and
-`AGENTAPI_WEBHOOK_MAX_ATTEMPTS`. The timeout defaults to `10s`, and delivery is
-attempted up to 3 times.
-
-The initial webhook values can be changed while AgentAPI is running with
-`GET/PUT /webhook`.
-
-The request body has this format:
-
-```json
-{
-  "id": "unique-delivery-id",
-  "type": "run.status_changed",
-  "created_at": "2026-07-26T12:00:00Z",
-  "data": {
-    "run_id": "agentapi-process-run-id",
-    "status": "stable",
-    "previous_status": "running",
-    "agent_type": "claude",
-    "transport": "pty"
-  }
-}
-```
-
-Each request includes `X-AgentAPI-Delivery`, `X-AgentAPI-Event`, and
-`X-AgentAPI-Timestamp` headers.
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-t`, `--type` | from the agent command | Agent type; see [Supported agents](#supported-agents) |
+| `-p`, `--port` | `3284` | Port to listen on |
+| `--bind` | all interfaces | Address to listen on; see [Bind address](#bind-address) |
+| `--transport` | `pty` | `pty`, `native` or `acp`; see [Transports](#transports) |
+| `--experimental-acp` | `false` | The same as `--transport acp` |
+| `--state-db` | | SQLite file that keeps the conversation and resumes the agent's session (native); see [Persistent sessions](#persistent-sessions) |
+| `--terminal` | `true` | Shell in the agent's working directory for the chat (native); see [Terminal](#terminal) |
+| `-s`, `--state-file` | | File that keeps the screen-derived messages (PTY) |
+| `--load-state`, `--save-state` | `true` with `--state-file` | Load the state file on startup, save it on shutdown |
+| `-I`, `--initial-prompt` | | First message for the agent; read from stdin when piped |
+| `-W`, `--term-width` | `80` | Width of the emulated terminal, and of TTY mode's lines (PTY) |
+| `-H`, `--term-height` | `1000` | Height of the emulated terminal (PTY) |
+| `--api-token` | off | Require a Bearer token; without a value, a random token is generated and printed; see [API token authentication](#api-token-authentication) |
+| `-a`, `--allowed-hosts` | `localhost`, `127.0.0.1`, `[::1]` | Accepted `Host` headers, `*` for any; see [Allowed hosts](#allowed-hosts) |
+| `-o`, `--allowed-origins` | `http://localhost:3284`, `http://localhost:3000`, `http://localhost:3001` | Origins allowed to call the API from a browser, `*` for any; see [Allowed origins](#allowed-origins) |
+| `--webhook-url` | | URL notified when the run status changes; see [Run-status webhooks](#run-status-webhooks) |
+| `--webhook-timeout` | `10s` | Timeout of each delivery attempt |
+| `--webhook-max-attempts` | `3` | Delivery attempts |
+| `--webhook-payload-template` | | Go `text/template` for the POST body |
+| `-c`, `--chat-base-path` | `/chat` | Base path of the chat UI |
+| `--pid-file` | | File to write the server's process ID to, for shutdown scripts |
+| `-P`, `--print-openapi` | | Print the OpenAPI schema and exit |
 
 ### `agentapi update`
 
@@ -1164,6 +1355,10 @@ agentapi update --check  # only check if an update is available
 agentapi update --force  # update even if already at the latest version
 ```
 
+Release binaries are verified against the release's `checksums.txt` SHA-256
+manifest before the running executable is replaced. An update is rejected if
+the manifest is missing, malformed, or does not match the download.
+
 ### `agentapi attach`
 
 Attach to a running agent's terminal session.
@@ -1174,41 +1369,121 @@ agentapi attach --url localhost:3284
 
 Press `ctrl+c` to detach from the session.
 
-## How it works
+## HTTP API reference
 
-AgentAPI runs an in-memory terminal emulator. It translates API calls into appropriate terminal keystrokes and parses the agent's outputs into individual messages.
+The server describes its API with OpenAPI: [openapi.json](openapi.json) in
+this repository, `/openapi.json` on a running server, and a documentation UI
+at `/docs`. It listens on port 3284 by default. Endpoints marked *native*
+need the native transport.
 
-### Splitting terminal output into messages
+### Conversation
 
-There are 2 types of messages:
+| Endpoint | Description |
+| --- | --- |
+| `GET /messages` | All messages of the conversation |
+| `POST /message` | Send a message, or queue it while the agent is busy; `dispatch_mode` is `queue` (default), `steer` or `interrupt` (*native*) |
+| `DELETE /messages` | Clear the conversation and the queue, and restart the agent (*native*: in a new session) |
+| `GET /rich-messages` | The structured conversation: thinking, tool calls with results, usage |
+| `GET /timeline` | Normalized session events, for export or another UI |
+| `GET /status` | Status, lifecycle, run and session IDs, epoch, session name, version, open dialog; *native*: capabilities, pending requests, settings, usage, terminal, login |
+| `GET /title` | The session's human-readable title |
+| `GET /events` | Server-sent events; `?sync=1` for incremental replay on reconnect |
+| `GET /workspace` | The Coder workspace URL, when AgentAPI runs in one |
 
-- User messages: sent by the user to the agent
-- Agent messages: sent by the agent to the user
+### Queue
 
-To parse individual messages from the terminal output, we take the following steps:
+| Endpoint | Description |
+| --- | --- |
+| `GET /queue` | The messages waiting for the agent |
+| `PUT /queue` | Reorder the queue (`{"ids": [...]}`, every queued message once) |
+| `PUT /queue/{id}`, `DELETE /queue/{id}` | Edit or remove a queued message |
+| `POST /queue/{id}/steer` | Move a queued message into the running turn (*native*) |
 
-1. The initial terminal output, before any user messages are sent, is treated as the agent's first message.
-2. When the user sends a message through the API, a snapshot of the terminal is taken before any keystrokes are sent.
-3. The user message is then submitted to the agent. From this point on, any time the terminal output changes, a new snapshot is taken. It's diffed against the initial snapshot, and any new text that appears below the initial content is treated as the agent's next message.
-4. If the terminal output changes again before a new user message is sent, the agent message is updated.
+### Native agent control
 
-This lets us split the terminal output into a sequence of messages.
+| Endpoint | Description |
+| --- | --- |
+| `POST /interrupt` | Stop the running turn |
+| `GET /requests`, `GET /requests/{id}` | The requests the agent waits on (approvals, questions, plans) and the recently closed ones |
+| `POST /requests/{id}/respond` | Answer a request: `option_id`, or `answers` keyed by question, with optional `text` |
+| `GET /settings`, `PUT /settings` | The permission mode, model and reasoning effort, with the values they can take; PUT changes the ones in its body |
+| `POST /compact` | Compact the agent's context (Codex, Pi) |
+| `POST /login/retry` | Check the agent's login again now, while `login_required` is reported (409 when no login is needed) |
 
-### Removing TUI elements from agent messages
+### Terminal and files
 
-Each agent message contains some extra bits that aren't useful to the end user:
+| Endpoint | Description |
+| --- | --- |
+| `GET /terminal` | The shell's output as server-sent events (*native*, unless `--terminal=false`) |
+| `POST /terminal/input`, `POST /terminal/resize` | Type into the shell; set its size |
+| `GET /files/content` | A file in the agent's working directory, cut at 1 MiB |
+| `GET /files/diff` | The file's uncommitted changes against HEAD |
 
-- The user's input at the beginning of the message. Coding agents often echo the input back to the user to make it visible in the terminal.
-- An input box at the end of the message. This is where the user usually types their input.
+### Uploads
 
-AgentAPI automatically removes these.
+| Endpoint | Description |
+| --- | --- |
+| `POST /upload` | Store a file (up to 10 MB) and return its path, for `@"<path>"` in a message |
+| `GET /uploads/{checksum}/{name}` | An uploaded image (PNG, JPEG, GIF, WebP or BMP, judged by content), for the chat |
 
-- For user input, we strip the lines that contain the text from the user's last message.
-- For the input box, we look for lines at the end of the message that contain common TUI elements, like `>` or `------`.
+### Integration endpoints
 
-### What will happen when Claude Code, Goose, Aider, or Codex update their TUI?
+| Endpoint | Description |
+| --- | --- |
+| `GET /handoff`, `POST /handoff/reply` | The [human-reply API](#human-reply-api): what the agent waits on, and an answer to it |
+| `GET /webhook`, `PUT /webhook` | Read or change the [run-status webhook](#run-status-webhooks) |
+| `GET /mcp`, `PUT /mcp` | The MCP servers and the managed config file; PUT replaces them, `?restart=true` restarts the agent (*native*: on its session) |
+| `POST /mcp/check` | Check remote HTTP servers and resolve stdio executables |
+| `POST /mcp/servers`, `PATCH /mcp/servers/{name}`, `DELETE /mcp/servers/{name}` | Create, update or remove one MCP server |
+| `GET /mcp/profiles` | Export the saved MCP profiles |
+| `PUT /mcp/profiles/{name}`, `DELETE /mcp/profiles/{name}` | Import, replace or remove a profile |
+| `POST /mcp/profiles/{name}/apply` | Replace the MCP configuration with a profile |
 
-Splitting the terminal output into a sequence of messages should still work, since it doesn't depend on the TUI structure. The logic for removing extra bits may need to be updated to account for new elements. AgentAPI will still be usable, but some extra TUI elements may become visible in the agent messages.
+### Authentication
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /auth/session` | Whether the API needs a token, and whether the caller has one (no credentials needed) |
+| `POST /auth/session`, `DELETE /auth/session` | Sign a browser in with the token (session cookie), or sign it out |
+
+The chat itself is served at `/chat/` (and `/chat/embed`), and TTY mode reads
+the agent's screen from `/internal/screen`, which isn't part of the public
+API.
+
+## Architecture
+
+AgentAPI is a single Go binary: an HTTP server (chi, with huma generating the
+OpenAPI schema) that runs one agent process and serves the chat UI, a Next.js
+app embedded in the binary. Every transport implements the same conversation
+interface and reports to the same event emitter, so the HTTP API, the event
+stream, the queue and the chat work the same over all three. See
+[docs/architecture.md](docs/architecture.md) for the packages, the data flow
+of each transport, the event stream, persistence and the security model.
+
+## Development
+
+```bash
+make build      # out/agentapi, with the chat UI embedded
+make gen        # regenerate openapi.json and the version
+make lint       # Go, TypeScript, shellcheck and actionlint
+go test ./...   # Go tests, including the e2e smoke test
+```
+
+Tests run with `CGO_ENABLED=0`. Commit `openapi.json` with every API change,
+and regenerate it only with `make gen` (see [AGENTS.md](AGENTS.md)). The chat
+UI lives in [chat/](chat/README.md): `bun run dev` serves it against a running
+AgentAPI, and `agentapi server --transport native --type custom -- native-demo`
+runs a simulated native agent for working on it without a real one.
+
+## Runtime reliability
+
+The fork also includes fixes for wide-character terminal cursor tracking,
+PTY lifecycle leaks, concurrent event delivery, message tracking races, ACP
+shutdown, TUI re-render artifacts, JSONL watcher flushing, rich message
+content-block merging during Claude delta streaming, and runtime session-file
+switching when Claude Code parks a session to a new JSONL. These changes are
+intended to keep AgentAPI stable across long sessions, process replacement, and
+temporary browser or network interruptions.
 
 ## Roadmap
 

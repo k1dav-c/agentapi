@@ -13,14 +13,200 @@ AgentAPI 可以用來：
 - 建立把 pull request 審查交給 agent 處理的工具
 - 還有更多用途！
 
-## 此 fork 的變更
+## 關於這個 fork
 
 這個 fork 以上游 v0.12.2 的程式碼為基礎。它保留了原本的終端機模擬與 HTTP API
 模型作為預設，新增可自行啟用的 [native transport](#native-transport)，透過 Claude Code、
 Codex 和 Pi 自己的結構化協定來驅動它們，同時把 AgentAPI 擴充成一個更完整的工作環境，
-方便操作長時間執行的 coding agent。
+方便操作長時間執行的 coding agent。[CHANGELOG.md](CHANGELOG.md) 列出有哪些變更，
+[docs/architecture.zh-TW.md](docs/architecture.zh-TW.md) 說明它的架構，完整的 commit 歷史
+請參閱[與上游的完整比較](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)。
 
-### 工作階段工作區與聊天介面
+## 目錄
+
+- [功能總覽](#功能總覽)
+- [快速開始](#快速開始)
+- [Agent 與 transport](#agent-與-transport)
+- [聊天介面](#聊天介面)
+- [Native transport](#native-transport)
+- [PTY transport](#pty-transport)
+- [對話 API](#對話-api)
+- [整合](#整合)
+- [安全性](#安全性)
+- [CLI 參考](#cli-參考)
+- [HTTP API 參考](#http-api-參考)
+- [架構](#架構)
+- [開發](#開發)
+- [執行穩定性](#執行穩定性)
+- [開發藍圖](#開發藍圖)與[長期願景](#長期願景)
+
+## 功能總覽
+
+**透過 HTTP 驅動 coding agent**
+
+- 用 [PTY transport](#pty-transport) 透過終端機介面控制 13 種 coding agent，把畫面轉成
+  一則一則的訊息。
+- 用 [native transport](#native-transport) 透過 Claude Code、Codex 和 Pi 自己的協定驅動
+  它們；提供 ACP 伺服器的 agent 可以使用實驗性的 ACP transport（見 [Transport](#transport)）。
+- 從 `GET /rich-messages` 和 `GET /timeline` 讀取結構化的活動：思考內容、工具呼叫與結果、
+  token 用量。
+- agent 工作中時送出的訊息會在可以編輯、重新排序的[佇列](#訊息佇列)中等待；使用 native
+  transport 時，也可以把訊息 [steer 進執行中的回合或中斷它](#steerinterrupt-與佇列)。
+- 透過 [server-sent events](#事件與增量同步) 即時追蹤一切，有 heartbeat，重新連線後只重播
+  有變動的部分。
+
+**Native agent**
+
+- agent 提出的需求（工具核准、提問、計畫）會以[請求](#請求核准提問與計畫)送達，可以透過
+  HTTP 或在聊天介面中回覆。
+- 在 agent 執行中切換[權限模式、模型和推理強度](#工作階段設定)：bypass（預設）、auto、ask
+  或 plan。
+- 查看 [context 與用量限制](#context-與用量限制)用了多少，並[壓縮](#斜線指令與壓縮) context。
+- 缺少或過期的[登入](#登入)會附上要執行的指令回報，登入之後 agent 會自己啟動。
+- agent 工作目錄中共用的[終端機](#終端機)，方便登入和執行簡單的指令。
+- [持久保存的工作階段](#持久保存的工作階段)：使用 `--state-db` 時，對話和 agent 自己的工作
+  階段在 AgentAPI 重新啟動後都會保留。
+
+**聊天介面**（`/chat`）
+
+- [任務](#任務與對話紀錄)以對話紀錄的形式呈現，工具呼叫一行一列，思考內容以旁註顯示；
+  [工作階段瀏覽器](#工作階段瀏覽器)提供連結、檔案、任務索引、匯出、MCP 伺服器和重新啟動。
+- 終端機對話框和 native 請求的[決策卡片](#決策卡片)、agent 設定的選單、顯示 context 的圓環，
+  以及斜線指令。
+- 可以查看檔案和 git diff 的[檔案檢視器](#檔案檢視器)、[TTY mode](#tty-mode) 和 native
+  終端機，在手機上也能使用。
+- [背景提醒](#提醒連線復原與快取)、瀏覽器通知、對話紀錄快取，以及斷線後的復原。
+
+**維運與整合**
+
+- Claude Code、Codex 和 Pi 的 [MCP 管理](#mcp-管理)，可以使用可重複套用的設定檔；重新啟動
+  agent 前會先更新 Codex 和 Pi。
+- [執行狀態 webhook](#執行狀態-webhook) 和[人工回覆 API](#人工回覆-api)，讓機器人在 agent
+  停下來時通知你，並把你的回覆傳回去。
+- AgentAPI 的[自我更新](#agentapi-update)，會比對發行版的 checksum。
+- [安全性](#安全性)：API token（聊天介面以 cookie 登入）、監聽位址，以及允許的主機與來源。
+
+## 快速開始
+
+1. 安裝 `agentapi`：
+
+   ```bash
+   OS=$(uname -s | tr "[:upper:]" "[:lower:]");
+   ARCH=$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/");
+   curl -fsSL "https://github.com/k1dav-c/agentapi/releases/latest/download/agentapi-${OS}-${ARCH}" -o agentapi && chmod +x agentapi
+   ```
+
+   你也可以從[發行頁面](https://github.com/k1dav-c/agentapi/releases)下載這個 fork
+   最新的二進位檔。上游 `coder/agentapi` 的發行版二進位檔不包含這個 fork 的功能。
+
+1. 確認安裝成功：
+
+   ```bash
+   agentapi --help
+   ```
+
+   > 在 macOS 上，如果系統提示無法驗證此二進位檔，請前往 `System Settings -> Privacy & Security`，點選「Open Anyway」（強制打開），然後再執行一次指令。
+
+1. 執行 Claude Code 伺服器（假設系統已安裝 `claude`，且位於 `PATH` 中）：
+
+   ```bash
+   agentapi server -- claude
+   ```
+
+   > 如果出現 `claude` 不在 `PATH` 中的錯誤，但你在 shell 裡可以執行它，請用 `which claude` 取得完整路徑，改用完整路徑執行。
+
+   若要透過 Claude Code 自己的協定、而不是它的終端機介面來驅動它（核准會以結構化的請求
+   送來、設定可以切換、聊天介面裡有終端機），請使用 [native transport](#native-transport)：
+
+   ```bash
+   agentapi server --transport native -- claude
+   ```
+
+1. 傳送訊息給 agent：
+
+   ```bash
+   curl -X POST localhost:3284/message \
+     -H "Content-Type: application/json" \
+     -d '{"content": "Hello, agent!", "type": "user"}'
+   ```
+
+1. 取得對話紀錄：
+
+   ```bash
+   curl localhost:3284/messages
+   ```
+
+1. 開啟 http://localhost:3284/chat 試試聊天網頁介面。
+
+## Agent 與 transport
+
+### 支援的 agent
+
+agent 類型決定 AgentAPI 怎麼整理 agent 的畫面，以及提供哪些功能。它來自 `--type`；沒有指定
+時，若 agent 指令剛好是類型名稱之一，就用指令判斷（`agentapi server -- claude` 可以，
+`-- /usr/local/bin/claude` 不行）；其他情況都以 `custom` 執行。
+
+| Agent | 類型 | PTY | Native | 結構化活動 | MCP 管理 |
+| --- | --- | :-: | :-: | :-: | :-: |
+| [Claude Code](https://github.com/anthropics/claude-code) | `claude` | ✓ | ✓ | ✓ | ✓ |
+| [Codex](https://github.com/openai/codex) | `codex` | ✓ | ✓ | ✓ | ✓ |
+| [Pi](https://pi.dev/) | `pi` | ✓ | ✓ | ✓ | ✓ |
+| [Kimi Code](https://www.kimi.com/zh-tw/help/kimi-code/cli-getting-started) | `kimi` | ✓ | | | |
+| [Goose](https://github.com/block/goose) | `goose` | ✓ | | | |
+| [Aider](https://github.com/Aider-AI/aider) | `aider` | ✓ | | | |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | ✓ | | | |
+| [GitHub Copilot](https://github.com/github/copilot-cli) | `copilot` | ✓ | | | |
+| [Sourcegraph Amp](https://ampcode.com/) | `amp` | ✓ | | | |
+| [Auggie](https://docs.augmentcode.com/cli/overview) | `auggie` | ✓ | | | |
+| [Cursor CLI](https://cursor.com/en/cli) | `cursor`（`cursor-agent`） | ✓ | | | |
+| [Amazon Q](https://aws.amazon.com/developer/learning/q-developer-cli/) | `q`（`amazonq`） | ✓ | | | |
+| [Opencode](https://opencode.ai/) | `opencode` | ✓ | | | |
+| 其他終端機程式 | `custom` | ✓ | | | |
+
+- **結構化活動**：思考內容、工具呼叫和 token 用量。使用 PTY transport 時從 agent 的工作階段
+  紀錄檔讀取（見 [Claude、Codex 與 Pi 的結構化活動](#claudecodex-與-pi-的結構化活動)），
+  使用 native transport 時直接來自它的協定。
+- **MCP 管理**：Explorer 的 MCP 分頁和 `/mcp` 端點（見 [MCP 管理](#mcp-管理)）。
+- 提供 ACP 伺服器的 agent（例如 Kimi Code 的 `kimi acp`）也可以使用實驗性的 ACP transport。
+
+> [!NOTE]
+> 使用 Claude、Codex、Opencode、Copilot、Gemini、Amp 或 CursorCLI 時，請務必明確指定 agent 類型（例如：`agentapi server --type=codex -- codex`），否則訊息格式可能會出錯。當執行檔名稱為 `kimi` 或 `pi` 時，Kimi 和 Pi 會自動偵測；若使用包裝腳本或 ACP 模式，請加上 `--type=kimi` / `--type=pi`。
+
+### Transport
+
+`--transport` 決定 AgentAPI 如何驅動 agent：
+
+| | PTY（預設） | Native | ACP（實驗性） |
+| --- | --- | --- | --- |
+| 旗標 | `--transport pty` | `--transport native` | `--transport acp` 或 `--experimental-acp` |
+| Agent | 上表所有 agent | Claude Code、Codex、Pi | 提供 ACP 伺服器的 agent |
+| 方式 | 在終端機模擬器中執行 agent 的終端機介面，並讀取它的畫面 | 使用 agent 自己的協定：`claude -p` 的 stream-json、`codex app-server`、`pi --mode rpc` | 透過 agent 的 stdio 使用 Agent Client Protocol |
+| 工具呼叫與思考 | 來自工作階段紀錄檔（Claude Code、Codex、Pi） | 從協定即時串流 | 回覆中的文字行 |
+| 核准、提問、計畫 | 終端機對話框，從決策卡片或 TTY mode 回答 | 結構化的[請求](#請求核准提問與計畫) | 自動核准 |
+| 對回合 steer 和 interrupt | | ✓ | |
+| 設定、用量、壓縮 | | ✓ | |
+| AgentAPI 重新啟動後保留 | `--state-file`：訊息 | `--state-db`：對話和 agent 的工作階段 | |
+| 聊天介面中的終端機 | TTY mode：agent 自己的終端機 | 工作目錄中的 shell | |
+
+```bash
+agentapi server -- claude
+agentapi server --transport native --state-db ~/.agentapi/myproject.db -- codex
+agentapi server --type=kimi --experimental-acp -- kimi acp
+```
+
+`--state-db <檔案>`（僅限 native transport）會把對話保存在 SQLite 檔案裡，AgentAPI 用同一個
+檔案再次啟動時會接續 agent 的工作階段；見[持久保存的工作階段](#持久保存的工作階段)。
+`--terminal`（預設為 true，僅限 native transport）會提供 agent 工作目錄中的 shell；見
+[終端機](#終端機)。`--state-file <檔案>`（僅限 PTY transport）會在關閉時保存從畫面解析出的
+訊息，並在啟動時載入（設定它時，`--save-state` 和 `--load-state` 預設為 true）。
+
+## 聊天介面
+
+`/chat` 的聊天介面內建在執行檔裡，所有 transport 都能使用，桌面和手機都可以。它有適合手機的
+版面、可搜尋的工具活動、連線狀態指示和精簡的工具呼叫卡片，標頭會顯示 agent 的標誌（Claude
+的橘色方塊、Pi 的 logo）和 AgentAPI 版本。
+
+### 任務與對話紀錄
 
 內建的聊天介面以任務為單位來組織，而不是一整串平鋪的對話紀錄。每一則使用者請求都會成為
 一個可以瀏覽的任務，並附上對應的回應、思考區塊、工具呼叫和背景活動。
@@ -29,6 +215,10 @@ Codex 和 Pi 自己的結構化協定來驅動它們，同時把 AgentAPI 擴充
 的回合則以它的標誌和名稱開頭（例如 Pi），回覆以 Markdown 顯示，工具呼叫則是一行一列（`$ command`、結束代碼、耗時、輸出預覽），在寬螢幕上思考
 內容會以旁註顯示。輸入框上方的狀態列會顯示 agent 目前正在做什麼；當 agent 在等你回答時，
 標頭、分頁標題和佇列都會顯示「Needs you」。較長的任務會先顯示最近的 40 個步驟。
+
+每則訊息都有自己的 markdown/raw 切換開關，可以個別切換顯示模式，不會影響對話的其他部分。
+
+### 工作階段瀏覽器
 
 工作階段瀏覽器（Session Explorer）提供：
 
@@ -39,11 +229,20 @@ Codex 和 Pi 自己的結構化協定來驅動它們，同時把 AgentAPI 擴充
 - 不必離開聊天介面就能設定 MCP 伺服器；
 - 提供兩步驟重新啟動（Restart）的 Session 分頁（用 ⌘K / Ctrl+K 開啟 Explorer）。
 
-每則訊息都有自己的 markdown/raw 切換開關，可以個別切換顯示模式，不會影響對話的其他部分。
+### 附件與圖片
 
 可以直接在輸入框貼上圖片：貼上的截圖會像附件一樣上傳，貼上文字則照常貼上。附件中的圖片和已送出訊息裡的圖片會顯示成縮圖，點開可看原圖；agent 收到的是檔案路徑。
 
-**檔案檢視器**：聊天裡的檔案路徑可以點開 agent 正在處理的檔案。工具呼叫列上的檔名
+### 決策卡片
+
+agent 在等待的東西會以決策卡片停靠在輸入框上方：使用 PTY transport 時是它的終端機對話框（見
+[互動式提示支援](#互動式提示支援)），使用 native transport 時是它的[請求](#請求核准提問與計畫)，
+等待登入時則是[登入卡片](#登入)。數字鍵可以選擇選項。在手機上卡片最多佔螢幕的 60%，被截成
+兩行的標題可以展開來看完整內容。
+
+### 檔案檢視器
+
+聊天裡的檔案路徑可以點開 agent 正在處理的檔案。工具呼叫列上的檔名
 （Claude Code 的 Read、Write、Edit、MultiEdit 和 NotebookEdit；Codex 的 apply_patch 和
 view_image；Pi 的 read、write 和 edit）、agent 回覆中 inline code 裡的路徑（`lib/foo.go:12`
 會開在第 12 行），以及 Explorer 的 Files 分頁，都會開啟有兩個分頁的檢視器：File 顯示行號和
@@ -52,29 +251,27 @@ view_image；Pi 的 read、write 和 edit）、agent 回覆中 inline code 裡�
 的檔案。展開的工具呼叫會列出它碰到的檔案，並以 diff 顯示它的變更，原始輸入點一下就能看到。
 在手機上檢視器是全螢幕。
 
-介面也改善了行動裝置版面、附件處理、可搜尋的工具活動、連線狀態指示，以及更精簡的
-工具呼叫卡片。標頭會顯示 agent 的標誌（Claude 的橘色方塊、Pi 的 logo）和 AgentAPI 版本。
+### TTY mode
 
-**TTY mode**（TTY 模式）是聊天畫面顯示不正常時的備用方案：按下標頭的終端機按鈕，
+TTY mode（TTY 模式）是聊天畫面顯示不正常時的備用方案：按下標頭的終端機按鈕，
 就會把對話換成 agent 的終端機畫面（xterm.js），並把每個按鍵直接送給 agent，包含方向鍵、
 Ctrl/Alt 組合鍵、貼上的內容和輸入法輸入。在手機上會有一排按鍵列，提供 Esc、Tab、方向鍵、
 Enter 和 Ctrl 鍵。字型大小會隨視窗縮放（11–20px）；鏡像畫面使用的是 agent 實際的終端機
 寬度，所以如果想要每行更長，請用 `--term-width 120` 啟動 AgentAPI。
 
-**背景提醒**：分頁在背景時，當 agent 需要你處理，圖示會出現琥珀色圓點；agent 工作中時
-是藍色圓點；任務完成時則是綠色圓點。瀏覽器通知可以從狀態選單開啟。
+### 使用 native transport 時
 
-**Native transport**（`--transport native`）：agent 提出的請求（工具核准、它的提問、
+使用 `--transport native` 時，agent 提出的請求（工具核准、它的提問、
 待核准的計畫）會以卡片停靠在輸入框上方（在手機上最多佔螢幕的 60%）；agent 工作中時，送出
 按鈕也可以把訊息 steer 進正在進行的回合，或中斷它。輸入框的工具列可以切換 agent 的權限模式、
 模型和推理強度，並顯示 context 用了多少和用量限制；輸入框可以使用 `/model`、`/compact` 等
 斜線指令；終端機按鈕會開啟 agent 工作目錄中的 shell，取代需要 agent 自己終端機的 TTY mode
 （畫面相關的檢視仍會隱藏，ACP 也是）。請參閱 [Native transport](#native-transport)。
 
-### 訊息佇列與連線復原
+### 提醒、連線復原與快取
 
-在 agent 忙碌時送出的訊息會放進 FIFO 佇列，而不是直接被拒絕。排隊中的訊息在送出前，
-可以透過 API 或聊天介面查看、編輯或刪除。
+分頁在背景時，當 agent 需要你處理，圖示會出現琥珀色圓點；agent 工作中時
+是藍色圓點；任務完成時則是綠色圓點。瀏覽器通知可以從狀態選單開啟。
 
 長時間開著的瀏覽器工作階段有多重保護：SSE heartbeat、自動重新連線、失效連線偵測，
 以及在本機復原那些還沒送達伺服器就失敗的訊息。網頁標題和工作階段標頭會顯示目前的任務、
@@ -83,20 +280,7 @@ agent 狀態和連線狀態。
 重新開啟很長的對話也很快：聊天介面會把對話紀錄快取在瀏覽器中（IndexedDB），先立即顯示，
 再向伺服器只要求之後有變動的部分。
 
-相關 API 包括：
-
-- `GET /queue` 和 `PUT/DELETE /queue/{id}`：管理佇列；
-- `GET /events`：即時訊息、狀態、錯誤、結構化活動（rich activity）和 heartbeat 事件。
-  加上 `?sync=1` 時，串流會以 `session_sync` 事件開頭，每次更新都會帶有 `seq`；
-  用 `&since=<seq>&epoch=<epoch>` 重新連線時，只會重播有變動的部分；
-- `GET /title`：取得目前工作階段的可讀標題。
-
-加上 `?sync=1` 時，事件也會帶有 SSE id（重播的最後一個事件是重播的 `seq`，之後的變更
-各自帶自己的 `seq`），所以一般的 `EventSource` 自動重新連線時，會從它的 `Last-Event-ID`
-接續；請把 `GET /status` 回傳的 `epoch` 放進網址。有訊息被收回時（agent 拒絕開始的回合），
-對話會換成新的 epoch，已連線的用戶端會收到 `full: true` 的 `session_sync`，接著是完整的狀態。
-
-### Native transport
+## Native transport
 
 AgentAPI 預設會在終端機模擬器中執行 agent，並讀取它的畫面（PTY transport）。使用
 `--transport native` 時，則改用 Claude Code、Codex 和 Pi 自己的結構化協定來驅動它們：
@@ -140,7 +324,7 @@ agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6
   `CODEX_TUI_SESSION_LOG_PATH`），以及 `PI_CODING_AGENT` 和 `AI_AGENT`。`CLAUDE_CONFIG_DIR`、
   `CODEX_HOME`、`PI_CODING_AGENT_DIR` 或 `ANTHROPIC_*` 這類設定會保留。
 
-#### 登入
+### 登入
 
 Native 模式使用 agent CLI 自己保存的登入資訊。請以執行 AgentAPI 的同一個使用者帳號，用
 CLI 本身登入：可以在聊天介面的[終端機](#終端機)裡登入（登入卡片的 **Run in terminal** 和
@@ -175,7 +359,7 @@ agent 執行期間登入也可能失效（token 過期、金鑰被撤銷）。�
 agent 並接續它的工作階段，對話內容會保留。之後有模型完成的回合時也會清除這個狀態（被中斷
 的回合，或 agent 自己處理掉的訊息不算）。
 
-#### 請求：核准、提問與計畫
+### 請求：核准、提問與計畫
 
 工具核准、提問（Claude 的 `AskUserQuestion`、Codex 的 `request_user_input`、Pi 擴充功能
 開啟的對話框）和計畫核准（Claude 的 `ExitPlanMode`）都會以 requests 的形式送達：
@@ -208,7 +392,7 @@ agent 並接續它的工作階段，對話內容會保留。之後有模型完�
 已不再等待的提問（隨回合過期，或被 agent 撤回）會提示你仍可以用一般訊息回答。有待處理的
 請求時，標頭、分頁標題、分頁圖示、embed 狀態列和通知都會顯示「Needs you」。
 
-#### Steer、interrupt 與佇列
+### Steer、interrupt 與佇列
 
 - `POST /message` 接受 `dispatch_mode`：`queue`（預設值，所有 transport 都一樣：等 agent
   閒置時再送出）、`steer`（把訊息加進 agent 正在進行的回合；回應會標示 `steered`）或
@@ -236,7 +420,7 @@ agent 並接續它的工作階段，對話內容會保留。之後有模型完�
 （`POST /interrupt`）。佇列中的任務可以立即 steer 進去，也可以上下移動（所有 transport
 都可以）。
 
-#### 工作階段設定
+### 工作階段設定
 
 agent 的權限模式、模型和推理強度可以在它執行中切換。`GET /settings` 會回傳目前的設定和可選
 的值（agent 提供的權限模式、它的模型以及各模型的推理強度），`PUT /settings` 則會修改 body 裡
@@ -263,7 +447,7 @@ app-server 只在那時接受設定。選擇的設定會再套用到取代目前
 在聊天介面中，輸入框的工具列有一個模式選單，以及一個模型與推理強度的選單（手機上會放在按鈕
 上方的獨立一列）。
 
-#### Context 與用量限制
+### Context 與用量限制
 
 `GET /status` 和 `status_change` 會回報 agent 的 `usage`：上一個 turn 之後它的 context
 window 用了多少（`context`：以 token 計的 `used` 和 `size`），以及帳號的用量限制
@@ -272,7 +456,7 @@ Claude Code 會在每個 turn 之後回報它的 5 小時與每週限制和 cont
 和用量窗口，Pi 回報它的 context。新的工作階段 context 會歸零；用量限制屬於帳號，會保留。
 在聊天介面中，輸入框工具列上的圓環顯示 context 用了多少，它的選單則列出各項限制和重置倒數。
 
-#### 終端機
+### 終端機
 
 Native agent 沒有自己的終端機，所以 AgentAPI 會在 agent 的工作目錄執行一個 shell，給聊天
 介面的終端機按鈕使用：登入、git 指令或其他任何事情都可以。它是真正的終端機（顏色、游標、
@@ -287,7 +471,7 @@ Native agent 沒有自己的終端機，所以 AgentAPI 會在 agent 的工作�
 - 使用 native transport 時預設開啟，`--terminal=false` 可以關閉。它和 API 的其他部分受到相同
   的保護，所以伺服器可以被別人連到時，請使用 `--api-token`。
 
-#### 斜線指令與壓縮
+### 斜線指令與壓縮
 
 agent 的終端機介面不在，無法執行它的斜線指令，所以聊天介面會替 native agent 自己處理這些指令：
 
@@ -305,7 +489,7 @@ agent 自己的指令（Claude Code 的 `/code-review`、Pi 擴充功能的指�
 佇列中等待；agent 拒絕壓縮時（例如 Pi 的「Nothing to compact」）會回傳 409 並附上原因。
 Claude Code 則用 `/compact` 訊息壓縮，聊天介面會把這則訊息送給它。
 
-#### 持久保存的工作階段
+### 持久保存的工作階段
 
 `--state-db <檔案>` 會把對話保存在一個 SQLite 檔案裡：訊息、結構化訊息（工具呼叫、
 思考）、時間軸、請求和佇列，以及 agent 自己的工作階段 ID。AgentAPI 用同一個檔案再次啟動
@@ -330,7 +514,7 @@ agentapi server --transport native --state-db ~/.agentapi/myproject.db -- claude
 - `--state-db` 需要 `--transport native`。使用 PTY transport 時 agent 無法接續工作階段；
   `--state-file` 仍會在那裡保存從畫面解析出的訊息。Native transport 不接受 `--state-file`。
 
-#### Claude Code
+### Claude Code
 
 AgentAPI 會以 headless 模式執行 `claude -p`，stdin 和 stdout 都使用 stream-json。工具
 呼叫會帶有輸入、結果、狀態和圖片，每則 assistant 訊息都有模型、停止原因和 token 用量。
@@ -395,7 +579,7 @@ Claude Code 支援 `steer`（steer 的訊息會在 Claude 的下一步加入正�
 `--no-session-persistence` 時則無法恢復，`resume` 為 false。Claude Code 結束或重新啟動時
 仍未處理的 requests 就無法再回答。需要互動式介面的斜線指令無法運作。
 
-#### Codex
+### Codex
 
 AgentAPI 會啟動 `codex app-server`，並開始或恢復一個 thread。訊息、結構化訊息和時間軸的
 形狀和工作階段紀錄檔解析器產生的相同，因此聊天介面會即時串流顯示 Codex 的回覆、推理摘要、
@@ -451,7 +635,7 @@ Codex 自己的斜線指令是 TUI 功能；`/model`、`/compact` 以及[斜線�
 中的其他指令由聊天介面自己處理，`/review` 則無法使用。指令輸出串流時只是預覽，Codex 可能
 漏掉部分內容，指令結束後會換成完整輸出。
 
-#### Pi
+### Pi
 
 AgentAPI 會以 Pi 的 RPC 模式執行它（`pi --mode rpc`，經由 stdin 與 stdout 傳送 JSON）。
 
@@ -494,7 +678,7 @@ AgentAPI 會以 Pi 的 RPC 模式執行它（`pi --mode rpc`，經由 stdin 與 
   [斜線指令與壓縮](#斜線指令與壓縮)中的其他指令由聊天介面處理，擴充功能的斜線命令可以使用。
   可以在聊天介面的終端機裡登入（執行 `pi`，再輸入 `/login`）。
 
-#### 限制
+### 限制
 
 - agent 沒有自己的終端機。聊天介面會隱藏 TTY mode、終端機提示卡片、即時畫面尾端和
   「Terminal output」（ACP 也是，而且 ACP 也不提供 Stop 和工具呼叫上的回答按鈕），`raw`
@@ -506,6 +690,47 @@ AgentAPI 會以 Pi 的 RPC 模式執行它（`pi --mode rpc`，經由 stdin 與 
 - 沒有 `--state-db` 時，AgentAPI 下次啟動就是新的工作階段，不會接續 agent 先前的工作階段。
 - 圖片只能以訊息附件（`@"<路徑>"`）的形式交給 agent，不能用命令列旗標（`codex -i` 和 Pi
   的 `@file` 都會被拒絕）。
+
+## PTY transport
+
+預設的 transport 適用於所有有終端機介面的 agent。對 Claude Code、Codex 和 Pi，它也會追蹤
+它們的工作階段紀錄檔來取得結構化活動，聊天介面也能回答它們的終端機對話框。
+
+### 運作原理
+
+AgentAPI 會執行一個記憶體內的終端機模擬器。它把 API 呼叫轉換成對應的終端機按鍵輸入，並把 agent 的輸出解析成一則一則的訊息。
+
+#### 把終端機輸出切分成訊息
+
+訊息分成 2 種：
+
+- 使用者訊息：由使用者傳給 agent
+- Agent 訊息：由 agent 傳給使用者
+
+為了從終端機輸出中解析出個別的訊息，我們採取以下步驟：
+
+1. 在使用者送出任何訊息之前，初始的終端機輸出會被視為 agent 的第一則訊息。
+2. 當使用者透過 API 送出訊息時，會在送出任何按鍵之前，先擷取一次終端機快照。
+3. 接著把使用者訊息送給 agent。從這時開始，每當終端機輸出有變化，就會擷取新的快照，並和初始快照比對差異，出現在初始內容下方的新文字就會被視為 agent 的下一則訊息。
+4. 如果在使用者送出新訊息之前，終端機輸出又有變化，就會更新這則 agent 訊息。
+
+這樣就能把終端機輸出切分成一連串的訊息。
+
+#### 從 agent 訊息中移除 TUI 元素
+
+每則 agent 訊息都包含一些對終端使用者沒有用處的多餘內容：
+
+- 訊息開頭的使用者輸入。Coding agent 常常會把輸入內容回顯給使用者，讓它顯示在終端機上。
+- 訊息結尾的輸入框。這是使用者平常輸入內容的地方。
+
+AgentAPI 會自動移除這些內容。
+
+- 對於使用者輸入，我們會移除包含使用者上一則訊息文字的那幾行。
+- 對於輸入框，我們會在訊息結尾尋找包含常見 TUI 元素（例如 `>` 或 `------`）的行。
+
+#### 如果 Claude Code、Goose、Aider 或 Codex 更新了它們的 TUI，會怎麼樣？
+
+把終端機輸出切分成一連串訊息的部分應該仍然可以運作，因為它不依賴 TUI 的結構。移除多餘內容的邏輯可能需要更新，以處理新的元素。AgentAPI 仍然可以使用，但 agent 訊息中可能會出現一些多餘的 TUI 元素。
 
 ### Claude、Codex 與 Pi 的結構化活動
 
@@ -523,113 +748,6 @@ AgentAPI 會以 Pi 的 RPC 模式執行它（`pi --mode rpc`，經由 stdin 與 
 對於其他 agent，或是拿不到工作階段紀錄檔的環境，仍然會退回使用終端機解析。使用
 [native transport](#native-transport) 時，這些端點的內容改由 agent 的協定提供，而不是它的
 工作階段紀錄檔。
-
-### MCP 管理
-
-AgentAPI 執行期間可以管理 Claude、Codex 和 Pi 的 MCP 伺服器。實作上會保留
-`.mcp.json`（Claude）、`$CODEX_HOME/config.toml`（Codex）或 `~/.pi/agent/mcp.json`（Pi）
-中不相關的設定。
-
-API 和 Session Explorer 支援：
-
-- 讀取或整個取代 MCP 伺服器對照表；
-- 新增、更新和刪除個別伺服器；
-- 檢查遠端 HTTP 連線狀況，並解析本機 stdio 執行檔；
-- 儲存、匯入、匯出和套用可重複使用的 MCP 設定檔（profile）；
-- 可選擇重新啟動 agent，讓變更立即生效。
-
-重新啟動 agent 時，AgentAPI 本身和它的 HTTP/SSE 用戶端都會保持連線。PTY agent 會取得
-新的行程和工作階段紀錄監看器，但先前記憶體中的對話脈絡不會保留。Native agent 則會接續它的
-工作階段重新啟動，對話會保留（agent 正在執行回合時回傳 409，因為重新啟動會中斷它）。從
-Explorer 或 `DELETE /messages` 重新啟動前，AgentAPI 會先更新 Codex（`codex update`）和 Pi
-（`pi update --self`），讓重新啟動後的 agent 是最新版本；Claude Code 則會自行更新。
-
-### 執行狀態 webhook
-
-每當執行狀態在 `running` 和 `stable` 之間切換時，AgentAPI 可以送出 HTTP POST。
-Webhook 可以用 CLI 旗標或 `AGENTAPI_WEBHOOK_*` 環境變數初始化，之後再透過
-`GET/PUT /webhook` 查看或修改。
-
-傳送是非同步進行的，逾時時間和重試次數都可以設定。你也可以選擇提供 Go `text/template`
-payload 範本，依照接收端的需求調整 POST 內容 —— 可用的欄位有 `.ID`、`.Type`、`.CreatedAt`、
-`.RunID`、`.Status`、`.PreviousStatus`、`.AgentType` 和 `.Transport`。沒有設定範本時，
-會原封不動地送出預設的 JSON payload。
-
-```bash
-agentapi server \
-  --webhook-url https://example.com/agentapi/events \
-  -- claude
-```
-
-### 人工回覆 API
-
-其他用戶端（例如聊天機器人）不必透過網頁介面也能回覆 agent。agent 在等你時，
-`GET /handoff` 會回傳它在等的東西，並附上 `id` 和 `kind`：它最新的回應（`message`）、
-它正在顯示的終端機提示（`terminal`），或使用 native transport 時最早的待處理請求
-（`request`）；否則回傳 `{"request": null}`。
-
-帶著該 `request_id`、一個唯一的回覆 `id` 和 `content` 呼叫 `POST /handoff/reply`，
-就能回覆它。對一般回應的回覆會當成一般的使用者訊息送出；對請求的回覆則依
-[請求](#請求核准提問與計畫)一節所述回答該請求。終端機提示接受畫面上顯示的選項編號、
-`enter` 或 `esc`；提示有文字欄位時（例如 Claude Code 的計畫回饋），也可以輸入自由
-文字。`outcome` 為 `applied`、`superseded`（已不再開啟，例如已在網頁介面回覆）、
-`invalid`（回覆不符合，仍保持開啟）或 `uncertain`，而且不會被回覆兩次。搭配上面的
-執行狀態 webhook，整合服務就能在 agent 停下來時通知你，並把你的回覆傳回來。
-
-### 自我更新
-
-AgentAPI 可以從命令列自我更新：
-
-```bash
-agentapi update          # download and install the latest release
-agentapi update --check  # check without downloading
-agentapi update --force  # skip version comparison
-```
-
-在取代正在執行的執行檔之前，會先用該版本的 `checksums.txt` SHA-256 清單驗證發行版的
-二進位檔。如果清單不存在、格式錯誤，或和下載的檔案不符，就會拒絕更新。
-
-### API token 驗證
-
-所有 API 端點都可以用 Bearer token 保護。為了向下相容，驗證功能**預設為停用**。
-
-```bash
-# Auto-generate a random token (printed to stderr on startup)
-agentapi server --api-token -- claude
-
-# Use a specific token
-agentapi server --api-token=my-secret -- claude
-
-# Via environment variable
-AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
-```
-
-啟用後，每個 API 請求都必須帶上 `Authorization: Bearer <token>` 或聊天介面的
-session cookie。靜態檔案路由（`/`、`/chat/*`）不受限制，讓瀏覽器不需要 token 也能
-開啟聊天介面。token 以固定時間（constant time）比對。
-
-瀏覽器無法替事件串流或圖片加上 `Authorization` 標頭，所以聊天介面會用 token 換一個
-cookie 來登入：
-
-- 開啟 `http://localhost:3284/chat/embed#token=<token>`。自動產生 token 時，伺服器
-  啟動時會印出這個連結。token 放在 URL 的 fragment 中，瀏覽器不會把它送到伺服器、
-  proxy 或存取紀錄；頁面換到 cookie 後就會把它從網址列移除。連結指向沒有設定
-  `--api-token` 的伺服器時，會直接開啟聊天介面。
-- 或直接開啟聊天介面：伺服器回應 401 時，介面會請你輸入 token。對話框會顯示是哪一台
-  伺服器在要求、在它不是頁面本身的 origin 時提出警告，瀏覽器沒有保留 session cookie 時
-  也會說明。按下 Cancel 之後，**Reconnect now** 會再詢問一次。
-
-帶著 `Authorization: Bearer <token>` 呼叫 `POST /auth/session` 會設定 cookie
-（`agentapi_session_<hash>`，HttpOnly、SameSite=Strict、`Path=/`，透過 HTTPS 或經由送出
-`X-Forwarded-Proto: https` 的 proxy 連線時加上 Secure）。cookie 裡存的是 token 的
-HMAC 而不是 token 本身，所以更換 token 會讓所有瀏覽器登出；cookie 名稱也由它而來，所以
-同一台主機上 token 不同的伺服器各自保有自己的登入。`DELETE /auth/session` 登出，
-`GET /auth/session`（不需要憑證）回報 `auth_required` 與 `authenticated`。cookie 是
-SameSite=Strict，其他網站的頁面無法帶著它發出請求。從其他 origin 提供的聊天介面（例如在
-3000 埠執行的 `bun run dev`）需要把該 origin 加進 `--allowed-origins`；
-`--allowed-origins '*'` 不允許帶 cookie 的請求。不同的埠不算不同的網站，而預設允許的來源
-包含給聊天介面開發用的 `http://localhost:3000` 和 `http://localhost:3001`：在共用的機器上，
-請把 `--allowed-origins` 設成你實際使用的來源，讓已登入瀏覽器的 cookie 只對它們有效。
 
 ### 互動式提示支援
 
@@ -684,63 +802,256 @@ AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新�
 若要透過 Pi 的 RPC 模式、而不是它的終端機介面來驅動 Pi，請參閱
 [Native transport](#native-transport)。
 
-### 執行穩定性
+## 對話 API
 
-這個 fork 也修正了許多問題，包括：寬字元的終端機游標追蹤、PTY 生命週期洩漏、並行事件
-傳送、訊息追蹤的競爭條件、ACP 關閉流程、TUI 重新繪製造成的殘影、JSONL 監看器的 flush、
-Claude delta 串流期間結構化訊息內容區塊的合併，以及 Claude Code 把工作階段轉存到新的 JSONL
-時，執行期的工作階段檔案切換。這些變更的目的是讓 AgentAPI 在長時間工作階段、行程替換，
-以及瀏覽器或網路暫時中斷時，都能保持穩定。
+這些端點所有 transport 都能使用；[HTTP API 參考](#http-api-參考)列出了全部的端點。
 
-完整的 commit 歷史請參閱[與上游的完整比較](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)。
+### 訊息與狀態
 
-## 快速開始
+- `POST /message` 傳送訊息：`{"content": "Hello, agent!", "type": "user"}`。回傳 200 表示
+  AgentAPI 已偵測到 agent 開始處理，或是在 agent 忙碌時把它排入佇列（`queued`）；
+  `dispatch_mode` 決定 agent 忙碌時怎麼處理（見 [Steer、interrupt 與佇列](#steerinterrupt-與佇列)）。
+  `"type": "raw"` 則是把按鍵輸入 agent 的終端機（PTY transport）。
+- `GET /messages` 回傳對話；`GET /rich-messages` 和 `GET /timeline` 回傳結構化的形式（見
+  [Claude、Codex 與 Pi 的結構化活動](#claudecodex-與-pi-的結構化活動)）。
+- `DELETE /messages` 清除對話（訊息、結構化訊息、請求、時間軸、錯誤和佇列），並重新啟動
+  agent（native transport 會開始新的工作階段）。
+- `GET /status` 回傳向下相容的 `stable`/`running` 狀態、詳細的生命週期（`starting`、
+  `ready`、`running`、`restarting`、`exited` 或 `failed`）、transport、工作階段 ID、單調遞增
+  的執行 ID、對話的 `epoch`、工作階段名稱、AgentAPI 版本、agent 目前開啟的對話框
+  （`terminal_prompt`）以及終端機寬度（`terminal_columns`）。使用 native transport 時還會
+  回報 `capabilities`、`pending_requests`、`settings`、`usage`、`terminal` 和
+  `login_required`。
+- `GET /title` 回傳工作階段的可讀標題。
+- `POST /upload` 儲存檔案（最大 10 MB）並回傳路徑，訊息以 `@"<路徑>"` 引用它。
 
-1. 安裝 `agentapi`：
+### 訊息佇列
 
-   ```bash
-   OS=$(uname -s | tr "[:upper:]" "[:lower:]");
-   ARCH=$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/");
-   curl -fsSL "https://github.com/k1dav-c/agentapi/releases/latest/download/agentapi-${OS}-${ARCH}" -o agentapi && chmod +x agentapi
-   ```
+在 agent 忙碌時送出的訊息會放進 FIFO 佇列，而不是直接被拒絕。排隊中的訊息在送出前，
+可以透過 API 或聊天介面查看、編輯或刪除。
 
-   你也可以從[發行頁面](https://github.com/k1dav-c/agentapi/releases)下載這個 fork
-   最新的二進位檔。上游 `coder/agentapi` 的發行版二進位檔不包含 **此 fork 的變更**
-   一節中說明的功能。
+- `GET /queue` 列出排隊中的訊息。
+- `PUT /queue/{id}` 編輯、`DELETE /queue/{id}` 移除一則排隊中的訊息。
+- `PUT /queue` 以 `{"ids": [...]}` 重新排列佇列，必須把每則排隊中的訊息各列出一次。
+- `POST /queue/{id}/steer` 把排隊中的訊息移進 agent 正在進行的回合（native transport）。
 
-1. 確認安裝成功：
+### 事件與增量同步
 
-   ```bash
-   agentapi --help
-   ```
+`GET /events` 以 server-sent events 串流事件：`message_update`、`status_change`、
+`rich_message_update`、`agent_error`、`request_update`（native transport），以及每 15 秒
+一次的 `heartbeat`，讓用戶端能察覺連線已經失效。加上 `?sync=1` 時，串流會以 `session_sync`
+事件開頭，每次更新都會帶有 `seq`；用 `&since=<seq>&epoch=<epoch>` 重新連線時，只會重播有
+變動的部分。
 
-   > 在 macOS 上，如果系統提示無法驗證此二進位檔，請前往 `System Settings -> Privacy & Security`，點選「Open Anyway」（強制打開），然後再執行一次指令。
+加上 `?sync=1` 時，事件也會帶有 SSE id（重播的最後一個事件是重播的 `seq`，之後的變更
+各自帶自己的 `seq`），所以一般的 `EventSource` 自動重新連線時，會從它的 `Last-Event-ID`
+接續；請把 `GET /status` 回傳的 `epoch` 放進網址。有訊息被收回時（agent 拒絕開始的回合），
+對話會換成新的 epoch，已連線的用戶端會收到 `full: true` 的 `session_sync`，接著是完整的狀態。
 
-1. 執行 Claude Code 伺服器（假設系統已安裝 `claude`，且位於 `PATH` 中）：
+## 整合
 
-   ```bash
-   agentapi server -- claude
-   ```
+### 執行狀態 webhook
 
-   > 如果出現 `claude` 不在 `PATH` 中的錯誤，但你在 shell 裡可以執行它，請用 `which claude` 取得完整路徑，改用完整路徑執行。
+每當執行狀態在 `running` 和 `stable` 之間切換時，AgentAPI 可以送出 HTTP POST。
+Webhook 可以用 CLI 旗標或 `AGENTAPI_WEBHOOK_*` 環境變數初始化，之後再透過
+`GET/PUT /webhook` 查看或修改。
 
-1. 傳送訊息給 agent：
+傳送是非同步進行的，逾時時間和重試次數都可以設定。你也可以選擇提供 Go `text/template`
+payload 範本，依照接收端的需求調整 POST 內容 —— 可用的欄位有 `.ID`、`.Type`、`.CreatedAt`、
+`.RunID`、`.Status`、`.PreviousStatus`、`.AgentType` 和 `.Transport`。沒有設定範本時，
+會原封不動地送出預設的 JSON payload。
 
-   ```bash
-   curl -X POST localhost:3284/message \
-     -H "Content-Type: application/json" \
-     -d '{"content": "Hello, agent!", "type": "user"}'
-   ```
+```bash
+agentapi server \
+  --webhook-url https://example.com/agentapi/events \
+  -- claude
+```
 
-1. 取得對話紀錄：
+對應的環境變數有 `AGENTAPI_WEBHOOK_URL`、`AGENTAPI_WEBHOOK_PAYLOAD_TEMPLATE`、
+`AGENTAPI_WEBHOOK_TIMEOUT` 和 `AGENTAPI_WEBHOOK_MAX_ATTEMPTS`。逾時時間預設為 `10s`，
+最多嘗試傳送 3 次。
 
-   ```bash
-   curl localhost:3284/messages
-   ```
+請求內容的格式如下：
 
-1. 開啟 http://localhost:3284/chat 試試聊天網頁介面。
+```json
+{
+  "id": "unique-delivery-id",
+  "type": "run.status_changed",
+  "created_at": "2026-07-26T12:00:00Z",
+  "data": {
+    "run_id": "agentapi-process-run-id",
+    "status": "stable",
+    "previous_status": "running",
+    "agent_type": "claude",
+    "transport": "pty"
+  }
+}
+```
 
-## CLI 指令
+每個請求都會帶有 `X-AgentAPI-Delivery`、`X-AgentAPI-Event` 和 `X-AgentAPI-Timestamp` 標頭。
+
+### 人工回覆 API
+
+其他用戶端（例如聊天機器人）不必透過網頁介面也能回覆 agent。agent 在等你時，
+`GET /handoff` 會回傳它在等的東西，並附上 `id` 和 `kind`：它最新的回應（`message`）、
+它正在顯示的終端機提示（`terminal`），或使用 native transport 時最早的待處理請求
+（`request`）；否則回傳 `{"request": null}`。
+
+帶著該 `request_id`、一個唯一的回覆 `id` 和 `content` 呼叫 `POST /handoff/reply`，
+就能回覆它。對一般回應的回覆會當成一般的使用者訊息送出；對請求的回覆則依
+[請求](#請求核准提問與計畫)一節所述回答該請求。終端機提示接受畫面上顯示的選項編號、
+`enter` 或 `esc`；提示有文字欄位時（例如 Claude Code 的計畫回饋），也可以輸入自由
+文字。`outcome` 為 `applied`、`superseded`（已不再開啟，例如已在網頁介面回覆）、
+`invalid`（回覆不符合，仍保持開啟）或 `uncertain`，而且不會被回覆兩次。搭配上面的
+執行狀態 webhook，整合服務就能在 agent 停下來時通知你，並把你的回覆傳回來。
+
+### MCP 管理
+
+AgentAPI 執行期間可以管理 Claude、Codex 和 Pi 的 MCP 伺服器。實作上會保留
+`.mcp.json`（Claude）、`$CODEX_HOME/config.toml`（Codex）或 `~/.pi/agent/mcp.json`（Pi）
+中不相關的設定。
+
+API 和 Session Explorer 支援：
+
+- 讀取或整個取代 MCP 伺服器對照表；
+- 新增、更新和刪除個別伺服器；
+- 檢查遠端 HTTP 連線狀況，並解析本機 stdio 執行檔；
+- 儲存、匯入、匯出和套用可重複使用的 MCP 設定檔（profile）；
+- 可選擇重新啟動 agent，讓變更立即生效。
+
+重新啟動 agent 時，AgentAPI 本身和它的 HTTP/SSE 用戶端都會保持連線。PTY agent 會取得
+新的行程和工作階段紀錄監看器，但先前記憶體中的對話脈絡不會保留。Native agent 則會接續它的
+工作階段重新啟動，對話會保留（agent 正在執行回合時回傳 409，因為重新啟動會中斷它）。從
+Explorer 或 `DELETE /messages` 重新啟動前，AgentAPI 會先更新 Codex（`codex update`）和 Pi
+（`pi update --self`），讓重新啟動後的 agent 是最新版本；Claude Code 則會自行更新。
+
+## 安全性
+
+AgentAPI 沒有使用者或角色的概念：連得到 API 的人，就能做 agent 能做的任何事。預設不需要
+token，在所有網路介面上監聽，只要 `Host` 標頭指向本機（`localhost`、`127.0.0.1`、
+`[::1]`）就接受連線。主機檢查能防止網頁透過 DNS rebinding 呼叫它，但擋不住網路上的程式，
+因為它們可以送出任何 `Host` 標頭。在其他人連得到這個埠之前，請先把伺服器保護好。
+
+### API token 驗證
+
+所有 API 端點都可以用 Bearer token 保護。為了向下相容，驗證功能**預設為停用**。
+
+```bash
+# Auto-generate a random token (printed to stderr on startup)
+agentapi server --api-token -- claude
+
+# Use a specific token
+agentapi server --api-token=my-secret -- claude
+
+# Via environment variable
+AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
+```
+
+啟用後，每個 API 請求都必須帶上 `Authorization: Bearer <token>` 或聊天介面的
+session cookie。靜態檔案路由（`/`、`/chat/*`）不受限制，讓瀏覽器不需要 token 也能
+開啟聊天介面。token 以固定時間（constant time）比對。
+
+瀏覽器無法替事件串流或圖片加上 `Authorization` 標頭，所以聊天介面會用 token 換一個
+cookie 來登入：
+
+- 開啟 `http://localhost:3284/chat/embed#token=<token>`。自動產生 token 時，伺服器
+  啟動時會印出這個連結。token 放在 URL 的 fragment 中，瀏覽器不會把它送到伺服器、
+  proxy 或存取紀錄；頁面換到 cookie 後就會把它從網址列移除。連結指向沒有設定
+  `--api-token` 的伺服器時，會直接開啟聊天介面。
+- 或直接開啟聊天介面：伺服器回應 401 時，介面會請你輸入 token。對話框會顯示是哪一台
+  伺服器在要求、在它不是頁面本身的 origin 時提出警告，瀏覽器沒有保留 session cookie 時
+  也會說明。按下 Cancel 之後，**Reconnect now** 會再詢問一次。
+
+帶著 `Authorization: Bearer <token>` 呼叫 `POST /auth/session` 會設定 cookie
+（`agentapi_session_<hash>`，HttpOnly、SameSite=Strict、`Path=/`，透過 HTTPS 或經由送出
+`X-Forwarded-Proto: https` 的 proxy 連線時加上 Secure）。cookie 裡存的是 token 的
+HMAC 而不是 token 本身，所以更換 token 會讓所有瀏覽器登出；cookie 名稱也由它而來，所以
+同一台主機上 token 不同的伺服器各自保有自己的登入。`DELETE /auth/session` 登出，
+`GET /auth/session`（不需要憑證）回報 `auth_required` 與 `authenticated`。cookie 是
+SameSite=Strict，其他網站的頁面無法帶著它發出請求。從其他 origin 提供的聊天介面（例如在
+3000 埠執行的 `bun run dev`）需要把該 origin 加進 `--allowed-origins`；
+`--allowed-origins '*'` 不允許帶 cookie 的請求。不同的埠不算不同的網站，而預設允許的來源
+包含給聊天介面開發用的 `http://localhost:3000` 和 `http://localhost:3001`：在共用的機器上，
+請把 `--allowed-origins` 設成你實際使用的來源，讓已登入瀏覽器的 cookie 只對它們有效。
+
+### 監聽位址
+
+伺服器預設監聽所有網路介面。用 `--bind`（或 `AGENTAPI_BIND`）可以只監聽一個位址，
+例如只監聽 loopback，讓網路上的其他機器無法連線。它接受不含連接埠的 IP 位址或主機
+名稱；連接埠仍由 `--port` 指定。
+
+```bash
+agentapi server --bind 127.0.0.1 -- claude
+agentapi server --bind ::1 -- claude          # IPv6 loopback
+AGENTAPI_BIND=127.0.0.1 agentapi server -- claude
+```
+
+`--bind` 決定誰能連線；下方的 `--allowed-hosts` 決定連得上的請求可以使用哪些
+`Host` 標頭。
+
+### 允許的主機
+
+伺服器預設只接受 host 標頭為 `localhost`、`127.0.0.1` 或 `[::1]` 的請求。如果想在其他地方架設 AgentAPI，可以透過 `AGENTAPI_ALLOWED_HOSTS` 環境變數或 `--allowed-hosts` 旗標修改。主機只能填主機名稱（不含連接埠）；伺服器在授權時會忽略傳入請求中的連接埠部分。這只檢查 `Host` 標頭；若要讓伺服器完全不對網路開放，請再用 `--bind 127.0.0.1` 只監聽 loopback（見[監聽位址](#監聽位址)）。
+
+要允許來自任何主機的請求，請用 `*` 作為允許的主機。
+
+```bash
+agentapi server --allowed-hosts '*' -- claude
+```
+
+要允許特定主機，請使用：
+
+```bash
+agentapi server --allowed-hosts 'example.com' -- claude
+```
+
+要指定多個主機時，使用 `--allowed-hosts` 旗標請以逗號分隔，使用 `AGENTAPI_ALLOWED_HOSTS` 環境變數則以空白分隔。
+
+```bash
+agentapi server --allowed-hosts 'example.com,example.org' -- claude
+# or
+AGENTAPI_ALLOWED_HOSTS='example.com example.org' agentapi server -- claude
+```
+
+### 允許的來源
+
+伺服器預設允許來自 `http://localhost:3284`、`http://localhost:3000` 和 `http://localhost:3001` 的 CORS 請求。如果想更改哪些來源可以對 AgentAPI 發出跨來源請求，可以透過 `AGENTAPI_ALLOWED_ORIGINS` 環境變數或 `--allowed-origins` 旗標修改。
+
+要允許來自任何來源的請求，請用 `*` 作為允許的來源：
+
+```bash
+agentapi server --allowed-origins '*' -- claude
+```
+
+要允許特定來源，請使用：
+
+```bash
+agentapi server --allowed-origins 'https://example.com' -- claude
+```
+
+要指定多個來源時，使用 `--allowed-origins` 旗標請以逗號分隔，使用 `AGENTAPI_ALLOWED_ORIGINS` 環境變數則以空白分隔。來源必須包含通訊協定（`http://` 或 `https://`），並支援萬用字元（例如 `https://*.example.com`）：
+
+```bash
+agentapi server --allowed-origins 'https://example.com,http://localhost:3000' -- claude
+# or
+AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi server -- claude
+```
+
+### API 用戶端能做什麼
+
+- 讓 agent 執行它能執行的任何事。Native agent 預設以 bypass 權限模式啟動，工具會直接執行、
+  不會詢問；Claude Code 會加上 `--allow-dangerously-skip-permissions`（以 root 執行時除外），
+  所以用戶端隨時可以把工作階段切換到 bypass；除非命令列指定了政策，Codex 的預設值會覆蓋
+  `~/.codex/config.toml` 裡的政策；ACP transport 則會核准所有權限請求。
+- 在[終端機](#終端機)裡執行指令（native transport，預設開啟；`--terminal=false` 可以關閉）。
+- 透過檔案檢視器的端點讀取 agent 工作目錄中的檔案；工作目錄以外的路徑（包括透過 symlink）
+  會被拒絕，diff 也只會讀取 git 儲存庫。
+- 上傳最大 10 MB 的檔案；只有圖片會被回傳。
+- 修改 MCP 伺服器和 webhook，以及重新啟動 agent。
+
+只要有其他人連得到伺服器，請同時使用 `--api-token` 和 `--bind`，或放在反向代理之後。
+
+## CLI 參考
 
 ### `agentapi server`
 
@@ -776,183 +1087,35 @@ AgentAPI 的 ACP 傳輸方式：
 agentapi server --type=kimi --experimental-acp -- kimi acp
 ```
 
-> [!NOTE]
-> 使用 Claude、Codex、Opencode、Copilot、Gemini、Amp 或 CursorCLI 時，請務必明確指定 agent 類型（例如：`agentapi server --type=codex -- codex`），否則訊息格式可能會出錯。當執行檔名稱為 `kimi` 或 `pi` 時，Kimi 和 Pi 會自動偵測；若使用包裝腳本或 ACP 模式，請加上 `--type=kimi` / `--type=pi`。
+#### 旗標
 
-OpenAPI schema 可在 [openapi.json](openapi.json) 取得。
+每個旗標都可以改用環境變數設定：`AGENTAPI_` 加上大寫的旗標名稱，並把 `-` 換成 `_`
+（例如 `AGENTAPI_ALLOWED_HOSTS`）。清單在旗標中以逗號分隔，在環境變數中以空白分隔。
 
-伺服器預設在 3284 埠執行。此外，伺服器也會在 http://localhost:3284/openapi.json 提供同一份 OpenAPI schema，並在 http://localhost:3284/docs 以文件介面列出可用的端點。
-
-端點：
-
-- GET `/messages` - 回傳與 agent 對話中的所有訊息清單
-- POST `/message` - 傳送訊息給 agent。回傳 200 時，表示 AgentAPI 已偵測到 agent 開始處理這則訊息，或是在 agent 忙碌時把它排入佇列（`queued`）。`dispatch_mode` 決定 agent 忙碌時怎麼處理：`queue`（預設）、`steer`（加進執行中的回合；回應會標示 `steered`）或 `interrupt`（停止回合，接著送出這則訊息）；`steer` 和 `interrupt` 需要 native transport
-- GET `/status` - 回傳向下相容的 `stable`/`running` 狀態、詳細的生命週期狀態
-  （`starting`、`ready`、`running`、`restarting`、`exited` 或 `failed`）、transport
-  （`pty`、`acp` 或 `native`）、工作階段 ID、單調遞增的執行 ID、對話的 `epoch`（給
-  `/events?sync=1` 使用）、工作階段名稱、AgentAPI 版本、agent 目前開啟的對話框
-  （`terminal_prompt`）以及終端機寬度（`terminal_columns`）。使用 native transport 時
-  還會回報 `capabilities`（`steer`、`interrupt`、`resume`、`images`、`settings`、
-  `compact`）、`pending_requests`、`settings`、`usage`、`terminal`，以及 agent 等待登入期間的
-  `login_required`（見[登入](#登入)）
-- GET `/events` - agent 事件的 SSE 串流：訊息與狀態更新，使用 native transport 時還有 `request_update`。加上 `?sync=1` 可在重新連線時增量重播（`&since=<seq>&epoch=<epoch>`），事件也會帶有 SSE id，所以重新連線的 `EventSource` 會從它的 `Last-Event-ID` 接續
-- DELETE `/messages` - 清除所有對話狀態（訊息、結構化訊息、請求、時間軸、錯誤、佇列），並重新啟動 agent 行程（native transport：開始新的工作階段）
-- GET `/queue` - 回傳等待送給 agent 的訊息
-- PUT `/queue` - 重新排列佇列；內容（`{"ids": [...]}`）必須把每則排隊中的訊息各列出一次
-- PUT/DELETE `/queue/{id}` - 編輯或移除一則排隊中的訊息
-- POST `/queue/{id}/steer` - 把排隊中的訊息移進 agent 正在進行的回合（native transport）
-- POST `/interrupt` - 停止 agent 正在進行的回合（native transport）
-- POST `/login/retry` - 在回報 `login_required` 期間立刻再檢查一次 agent 的登入；執行中失去登入的 agent 會重新啟動並接續原本的工作階段（native transport；不需要登入時回傳 409）；見[登入](#登入)
-- GET `/requests`、GET `/requests/{id}` - agent 正在等待的請求（工具核准、提問、計畫）以及最近關閉的請求（native transport；其他 transport 為空）
-- POST `/requests/{id}/respond` - 回覆一個待處理的請求（`option_id`，或以問題 ID 為鍵的 `answers`，可另附 `text`）；見[請求](#請求核准提問與計畫)
-- GET/PUT `/settings` - agent 的權限模式、模型和推理強度，以及可選的值；PUT 會修改 body 裡有的設定（native transport）；見[工作階段設定](#工作階段設定)
-- POST `/compact` - 讓 agent 壓縮它的 context（native transport，具有 compact 能力的 agent）
-- GET `/terminal`、POST `/terminal/input`、POST `/terminal/resize` - agent 工作目錄中的 shell：以 SSE 送出它的輸出、輸入按鍵、調整大小（native transport，除非 `--terminal=false`）；見[終端機](#終端機)
-- GET `/files/content`、GET `/files/diff` - agent 工作目錄中的檔案（超過 1 MiB 會截斷）和它相對於 HEAD 尚未 commit 的變更，供聊天介面的檔案檢視器使用；工作目錄以外的檔案會被拒絕
-- POST `/upload`：把檔案（最大 10 MB）存到伺服器的暫存上傳目錄並回傳路徑，訊息以 `@"<路徑>"` 引用
-- GET `/uploads/{checksum}/{name}`：回傳上傳的圖片（依內容判斷 PNG、JPEG、GIF、WebP 或 BMP）供聊天介面顯示，其他檔案一律拒絕
-- GET/PUT `/webhook` - 讀取或更新執行狀態 webhook 的傳送設定，不需要重新啟動 agent
-- GET `/mcp` - 回傳 Claude、Codex 或 Pi 已設定的 MCP 伺服器，以及受管理的設定檔路徑
-- PUT `/mcp` - 取代整組 MCP 伺服器；傳入 `?restart=true` 可重新啟動 agent 並立即套用（native agent 會保留工作階段）
-- POST `/mcp/check` - 檢查遠端 HTTP 連線狀況，並解析 stdio 執行檔
-- POST `/mcp/servers`、PATCH/DELETE `/mcp/servers/{name}` - 新增、更新或移除單一 MCP 伺服器
-- GET `/mcp/profiles` - 匯出專案範圍的 MCP 設定檔（profile）
-- PUT/DELETE `/mcp/profiles/{name}` - 匯入、取代或移除一個設定檔
-- POST `/mcp/profiles/{name}/apply` - 用已儲存的設定檔取代目前使用中的 MCP 設定
-- GET/POST/DELETE `/auth/session` - 回報 API 是否需要 token、呼叫端是否已驗證，用 token 讓瀏覽器登入（session cookie），或登出；見 [API token 驗證](#api-token-驗證)
-
-#### Transport 與工作階段狀態
-
-`--transport` 決定 AgentAPI 如何驅動 agent：
-
-- `pty`（預設）：在終端機模擬器中執行 agent 的終端機介面，並解析它的畫面。
-- `acp`：實驗性的 ACP transport，等同 `--experimental-acp`。
-- `native`：agent 自己的結構化協定，適用於 Claude Code、Codex 和 Pi；見
-  [Native transport](#native-transport)。
-
-```bash
-agentapi server --transport native -- claude
-agentapi server --transport native --state-db ~/.agentapi/myproject.db -- codex
-```
-
-`--state-db <檔案>`（僅限 native transport）會把對話保存在 SQLite 檔案裡，AgentAPI 用同一個
-檔案再次啟動時會接續 agent 的工作階段；見[持久保存的工作階段](#持久保存的工作階段)。
-`--terminal`（預設為 true，僅限 native transport）會提供 agent 工作目錄中的 shell；見
-[終端機](#終端機)。
-`--state-file <檔案>`（僅限 PTY transport）會在關閉時保存從畫面解析出的訊息，並在啟動時
-載入（設定它時，`--save-state` 和 `--load-state` 預設為 true）。
-
-#### API token 驗證
-
-設定 `--api-token` 後，所有 API 請求都必須帶有 Bearer token（靜態聊天介面路由除外）：
-
-```bash
-agentapi server --api-token -- claude             # auto-generate and print to stderr
-agentapi server --api-token=my-secret -- claude    # use a specific token
-```
-
-對應的環境變數是 `AGENTAPI_API_TOKEN`。設定之後，用戶端每次呼叫 API 都必須帶上
-`Authorization: Bearer <token>`；瀏覽器也可以改用 `POST /auth/session` 取得的
-session cookie（見上方的 [API token 驗證](#api-token-驗證)）。沒有設定 `--api-token`
-時，驗證功能為停用（向下相容）。
-
-#### 監聽位址
-
-伺服器預設監聽所有網路介面。用 `--bind`（或 `AGENTAPI_BIND`）可以只監聽一個位址，
-例如只監聽 loopback，讓網路上的其他機器無法連線。它接受不含連接埠的 IP 位址或主機
-名稱；連接埠仍由 `--port` 指定。
-
-```bash
-agentapi server --bind 127.0.0.1 -- claude
-agentapi server --bind ::1 -- claude          # IPv6 loopback
-AGENTAPI_BIND=127.0.0.1 agentapi server -- claude
-```
-
-`--bind` 決定誰能連線；下方的 `--allowed-hosts` 決定連得上的請求可以使用哪些
-`Host` 標頭。
-
-#### 允許的主機
-
-伺服器預設只接受 host 標頭為 `localhost` 的請求。如果想在其他地方架設 AgentAPI，可以透過 `AGENTAPI_ALLOWED_HOSTS` 環境變數或 `--allowed-hosts` 旗標修改。主機只能填主機名稱（不含連接埠）；伺服器在授權時會忽略傳入請求中的連接埠部分。這只檢查 `Host` 標頭；若要讓伺服器完全不對網路開放，請再用 `--bind 127.0.0.1` 只監聽 loopback（見[監聽位址](#監聽位址)）。
-
-要允許來自任何主機的請求，請用 `*` 作為允許的主機。
-
-```bash
-agentapi server --allowed-hosts '*' -- claude
-```
-
-要允許特定主機，請使用：
-
-```bash
-agentapi server --allowed-hosts 'example.com' -- claude
-```
-
-要指定多個主機時，使用 `--allowed-hosts` 旗標請以逗號分隔，使用 `AGENTAPI_ALLOWED_HOSTS` 環境變數則以空白分隔。
-
-```bash
-agentapi server --allowed-hosts 'example.com,example.org' -- claude
-# or
-AGENTAPI_ALLOWED_HOSTS='example.com example.org' agentapi server -- claude
-```
-
-#### 允許的來源
-
-伺服器預設允許來自 `http://localhost:3284`、`http://localhost:3000` 和 `http://localhost:3001` 的 CORS 請求。如果想更改哪些來源可以對 AgentAPI 發出跨來源請求，可以透過 `AGENTAPI_ALLOWED_ORIGINS` 環境變數或 `--allowed-origins` 旗標修改。
-
-要允許來自任何來源的請求，請用 `*` 作為允許的來源：
-
-```bash
-agentapi server --allowed-origins '*' -- claude
-```
-
-要允許特定來源，請使用：
-
-```bash
-agentapi server --allowed-origins 'https://example.com' -- claude
-```
-
-要指定多個來源時，使用 `--allowed-origins` 旗標請以逗號分隔，使用 `AGENTAPI_ALLOWED_ORIGINS` 環境變數則以空白分隔。來源必須包含通訊協定（`http://` 或 `https://`），並支援萬用字元（例如 `https://*.example.com`）：
-
-```bash
-agentapi server --allowed-origins 'https://example.com,http://localhost:3000' -- claude
-# or
-AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi server -- claude
-```
-
-#### 執行狀態 webhook
-
-設定 `--webhook-url` 後，每當執行狀態在 `running` 和 `stable` 之間切換時，就會送出 HTTP POST：
-
-```bash
-agentapi server \
-  --webhook-url 'https://example.com/agentapi/events' \
-  -- claude
-```
-
-對應的環境變數有 `AGENTAPI_WEBHOOK_URL`、`AGENTAPI_WEBHOOK_PAYLOAD_TEMPLATE`、
-`AGENTAPI_WEBHOOK_TIMEOUT` 和 `AGENTAPI_WEBHOOK_MAX_ATTEMPTS`。逾時時間預設為 `10s`，
-最多嘗試傳送 3 次。
-
-AgentAPI 執行期間，可以透過 `GET/PUT /webhook` 修改初始的 webhook 設定值。
-
-請求內容的格式如下：
-
-```json
-{
-  "id": "unique-delivery-id",
-  "type": "run.status_changed",
-  "created_at": "2026-07-26T12:00:00Z",
-  "data": {
-    "run_id": "agentapi-process-run-id",
-    "status": "stable",
-    "previous_status": "running",
-    "agent_type": "claude",
-    "transport": "pty"
-  }
-}
-```
-
-每個請求都會帶有 `X-AgentAPI-Delivery`、`X-AgentAPI-Event` 和 `X-AgentAPI-Timestamp` 標頭。
+| 旗標 | 預設值 | 說明 |
+| --- | --- | --- |
+| `-t`, `--type` | 由 agent 指令判斷 | agent 類型；見[支援的 agent](#支援的-agent) |
+| `-p`, `--port` | `3284` | 監聽的連接埠 |
+| `--bind` | 所有網路介面 | 監聽的位址；見[監聽位址](#監聽位址) |
+| `--transport` | `pty` | `pty`、`native` 或 `acp`；見 [Transport](#transport) |
+| `--experimental-acp` | `false` | 等同 `--transport acp` |
+| `--state-db` | | 保存對話、並接續 agent 工作階段的 SQLite 檔案（native）；見[持久保存的工作階段](#持久保存的工作階段) |
+| `--terminal` | `true` | 給聊天介面使用、位於 agent 工作目錄的 shell（native）；見[終端機](#終端機) |
+| `-s`, `--state-file` | | 保存從畫面解析出的訊息的檔案（PTY） |
+| `--load-state`, `--save-state` | 設定 `--state-file` 時為 `true` | 啟動時載入、關閉時保存狀態檔 |
+| `-I`, `--initial-prompt` | | 給 agent 的第一則訊息；以管線輸入時從 stdin 讀取 |
+| `-W`, `--term-width` | `80` | 模擬終端機的寬度，也是 TTY mode 每行的長度（PTY） |
+| `-H`, `--term-height` | `1000` | 模擬終端機的高度（PTY） |
+| `--api-token` | 關閉 | 要求 Bearer token；不帶值時會產生隨機 token 並印出；見 [API token 驗證](#api-token-驗證) |
+| `-a`, `--allowed-hosts` | `localhost`、`127.0.0.1`、`[::1]` | 接受的 `Host` 標頭，`*` 表示全部；見[允許的主機](#允許的主機) |
+| `-o`, `--allowed-origins` | `http://localhost:3284`、`http://localhost:3000`、`http://localhost:3001` | 允許從瀏覽器呼叫 API 的來源，`*` 表示全部；見[允許的來源](#允許的來源) |
+| `--webhook-url` | | 執行狀態改變時通知的網址；見[執行狀態 webhook](#執行狀態-webhook) |
+| `--webhook-timeout` | `10s` | 每次傳送的逾時時間 |
+| `--webhook-max-attempts` | `3` | 傳送的嘗試次數 |
+| `--webhook-payload-template` | | POST 內容的 Go `text/template` 範本 |
+| `-c`, `--chat-base-path` | `/chat` | 聊天介面的基礎路徑 |
+| `--pid-file` | | 寫入伺服器行程 ID 的檔案，給關閉腳本使用 |
+| `-P`, `--print-openapi` | | 印出 OpenAPI schema 後結束 |
 
 ### `agentapi update`
 
@@ -964,6 +1127,9 @@ agentapi update --check  # only check if an update is available
 agentapi update --force  # update even if already at the latest version
 ```
 
+在取代正在執行的執行檔之前，會先用該版本的 `checksums.txt` SHA-256 清單驗證發行版的
+二進位檔。如果清單不存在、格式錯誤，或和下載的檔案不符，就會拒絕更新。
+
 ### `agentapi attach`
 
 連接到執行中 agent 的終端機工作階段。
@@ -974,41 +1140,115 @@ agentapi attach --url localhost:3284
 
 按下 `ctrl+c` 即可中斷與工作階段的連接。
 
-## 運作原理
+## HTTP API 參考
 
-AgentAPI 會執行一個記憶體內的終端機模擬器。它把 API 呼叫轉換成對應的終端機按鍵輸入，並把 agent 的輸出解析成一則一則的訊息。
+伺服器以 OpenAPI 描述它的 API：儲存庫中的 [openapi.json](openapi.json)、執行中伺服器的
+`/openapi.json`，以及 `/docs` 的文件介面。伺服器預設在 3284 埠執行。標示 *native* 的端點
+需要 native transport。
 
-### 把終端機輸出切分成訊息
+### 對話
 
-訊息分成 2 種：
+| 端點 | 說明 |
+| --- | --- |
+| `GET /messages` | 對話中的所有訊息 |
+| `POST /message` | 傳送訊息，agent 忙碌時排入佇列；`dispatch_mode` 為 `queue`（預設）、`steer` 或 `interrupt`（*native*） |
+| `DELETE /messages` | 清除對話和佇列，並重新啟動 agent（*native*：開始新的工作階段） |
+| `GET /rich-messages` | 結構化的對話：思考內容、工具呼叫與結果、用量 |
+| `GET /timeline` | 正規化的工作階段事件，可用於匯出或其他介面 |
+| `GET /status` | 狀態、生命週期、執行與工作階段 ID、epoch、工作階段名稱、版本、開啟的對話框；*native*：能力、待處理請求、設定、用量、終端機、登入 |
+| `GET /title` | 工作階段的可讀標題 |
+| `GET /events` | Server-sent events；`?sync=1` 會在重新連線時增量重播 |
+| `GET /workspace` | AgentAPI 在 Coder workspace 中執行時，該 workspace 的網址 |
 
-- 使用者訊息：由使用者傳給 agent
-- Agent 訊息：由 agent 傳給使用者
+### 佇列
 
-為了從終端機輸出中解析出個別的訊息，我們採取以下步驟：
+| 端點 | 說明 |
+| --- | --- |
+| `GET /queue` | 等待送給 agent 的訊息 |
+| `PUT /queue` | 重新排列佇列（`{"ids": [...]}`，每則排隊中的訊息各列一次） |
+| `PUT /queue/{id}`、`DELETE /queue/{id}` | 編輯或移除一則排隊中的訊息 |
+| `POST /queue/{id}/steer` | 把排隊中的訊息移進執行中的回合（*native*） |
 
-1. 在使用者送出任何訊息之前，初始的終端機輸出會被視為 agent 的第一則訊息。
-2. 當使用者透過 API 送出訊息時，會在送出任何按鍵之前，先擷取一次終端機快照。
-3. 接著把使用者訊息送給 agent。從這時開始，每當終端機輸出有變化，就會擷取新的快照，並和初始快照比對差異，出現在初始內容下方的新文字就會被視為 agent 的下一則訊息。
-4. 如果在使用者送出新訊息之前，終端機輸出又有變化，就會更新這則 agent 訊息。
+### 控制 native agent
 
-這樣就能把終端機輸出切分成一連串的訊息。
+| 端點 | 說明 |
+| --- | --- |
+| `POST /interrupt` | 停止執行中的回合 |
+| `GET /requests`、`GET /requests/{id}` | agent 正在等待的請求（核准、提問、計畫），以及最近關閉的請求 |
+| `POST /requests/{id}/respond` | 回覆請求：`option_id`，或以問題為鍵的 `answers`，可另附 `text` |
+| `GET /settings`、`PUT /settings` | 權限模式、模型和推理強度，以及可選的值；PUT 會修改 body 裡有的設定 |
+| `POST /compact` | 壓縮 agent 的 context（Codex、Pi） |
+| `POST /login/retry` | 回報 `login_required` 期間，立刻再檢查一次 agent 的登入（不需要登入時回傳 409） |
 
-### 從 agent 訊息中移除 TUI 元素
+### 終端機與檔案
 
-每則 agent 訊息都包含一些對終端使用者沒有用處的多餘內容：
+| 端點 | 說明 |
+| --- | --- |
+| `GET /terminal` | 以 server-sent events 送出 shell 的輸出（*native*，除非 `--terminal=false`） |
+| `POST /terminal/input`、`POST /terminal/resize` | 在 shell 中輸入按鍵；設定它的大小 |
+| `GET /files/content` | agent 工作目錄中的檔案，超過 1 MiB 會截斷 |
+| `GET /files/diff` | 檔案相對於 HEAD 尚未 commit 的變更 |
 
-- 訊息開頭的使用者輸入。Coding agent 常常會把輸入內容回顯給使用者，讓它顯示在終端機上。
-- 訊息結尾的輸入框。這是使用者平常輸入內容的地方。
+### 上傳
 
-AgentAPI 會自動移除這些內容。
+| 端點 | 說明 |
+| --- | --- |
+| `POST /upload` | 儲存檔案（最大 10 MB）並回傳路徑，供訊息以 `@"<路徑>"` 引用 |
+| `GET /uploads/{checksum}/{name}` | 上傳的圖片（依內容判斷 PNG、JPEG、GIF、WebP 或 BMP），供聊天介面顯示 |
 
-- 對於使用者輸入，我們會移除包含使用者上一則訊息文字的那幾行。
-- 對於輸入框，我們會在訊息結尾尋找包含常見 TUI 元素（例如 `>` 或 `------`）的行。
+### 整合端點
 
-### 如果 Claude Code、Goose、Aider 或 Codex 更新了它們的 TUI，會怎麼樣？
+| 端點 | 說明 |
+| --- | --- |
+| `GET /handoff`、`POST /handoff/reply` | [人工回覆 API](#人工回覆-api)：agent 在等什麼，以及對它的回覆 |
+| `GET /webhook`、`PUT /webhook` | 讀取或修改[執行狀態 webhook](#執行狀態-webhook) |
+| `GET /mcp`、`PUT /mcp` | MCP 伺服器與受管理的設定檔；PUT 會整組取代，`?restart=true` 會重新啟動 agent（*native*：接續原本的工作階段） |
+| `POST /mcp/check` | 檢查遠端 HTTP 伺服器，並解析 stdio 執行檔 |
+| `POST /mcp/servers`、`PATCH /mcp/servers/{name}`、`DELETE /mcp/servers/{name}` | 新增、更新或移除單一 MCP 伺服器 |
+| `GET /mcp/profiles` | 匯出已儲存的 MCP 設定檔 |
+| `PUT /mcp/profiles/{name}`、`DELETE /mcp/profiles/{name}` | 匯入、取代或移除設定檔 |
+| `POST /mcp/profiles/{name}/apply` | 用設定檔取代目前的 MCP 設定 |
 
-把終端機輸出切分成一連串訊息的部分應該仍然可以運作，因為它不依賴 TUI 的結構。移除多餘內容的邏輯可能需要更新，以處理新的元素。AgentAPI 仍然可以使用，但 agent 訊息中可能會出現一些多餘的 TUI 元素。
+### 驗證
+
+| 端點 | 說明 |
+| --- | --- |
+| `GET /auth/session` | API 是否需要 token，以及呼叫端是否已驗證（不需要憑證） |
+| `POST /auth/session`、`DELETE /auth/session` | 用 token 讓瀏覽器登入（session cookie），或登出 |
+
+聊天介面本身位於 `/chat/`（以及 `/chat/embed`），TTY mode 則從 `/internal/screen` 讀取 agent
+的畫面，這個端點不屬於公開的 API。
+
+## 架構
+
+AgentAPI 是單一的 Go 執行檔：一個 HTTP 伺服器（chi，並由 huma 產生 OpenAPI schema），
+負責執行一個 agent 行程，並提供嵌入在執行檔裡的聊天介面（Next.js）。每種 transport 都實作
+同一個對話介面，並回報給同一個事件發送器，所以 HTTP API、事件串流、佇列和聊天介面在三種
+transport 下的行為都一樣。套件、各 transport 的資料流、事件串流、持久保存與安全模型，請參閱
+[docs/architecture.zh-TW.md](docs/architecture.zh-TW.md)。
+
+## 開發
+
+```bash
+make build      # out/agentapi, with the chat UI embedded
+make gen        # regenerate openapi.json and the version
+make lint       # Go, TypeScript, shellcheck and actionlint
+go test ./...   # Go tests, including the e2e smoke test
+```
+
+測試以 `CGO_ENABLED=0` 執行。每次修改 API 都要一併 commit `openapi.json`，而且只能用
+`make gen` 重新產生（見 [AGENTS.md](AGENTS.md)）。聊天介面在 [chat/](chat/README.md)：
+`bun run dev` 會連到執行中的 AgentAPI 提供介面，
+`agentapi server --transport native --type custom -- native-demo` 則會執行一個模擬的
+native agent，不需要真正的 agent 就能開發介面。
+
+## 執行穩定性
+
+這個 fork 也修正了許多問題，包括：寬字元的終端機游標追蹤、PTY 生命週期洩漏、並行事件
+傳送、訊息追蹤的競爭條件、ACP 關閉流程、TUI 重新繪製造成的殘影、JSONL 監看器的 flush、
+Claude delta 串流期間結構化訊息內容區塊的合併，以及 Claude Code 把工作階段轉存到新的 JSONL
+時，執行期的工作階段檔案切換。這些變更的目的是讓 AgentAPI 在長時間工作階段、行程替換，
+以及瀏覽器或網路暫時中斷時，都能保持穩定。
 
 ## 開發藍圖
 

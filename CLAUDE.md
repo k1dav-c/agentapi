@@ -37,6 +37,8 @@ Tests use `CGO_ENABLED=0`. The project uses `testify` (assert/require) and `code
 
 ## Architecture
 
+[docs/architecture.md](docs/architecture.md) describes the packages, the data flow of each transport, events, persistence and the security model in full.
+
 ### Message Flow
 1. User sends message via `POST /message`
 2. Server takes a terminal snapshot, sends keystrokes to the agent process
@@ -50,14 +52,15 @@ Tests use `CGO_ENABLED=0`. The project uses `testify` (assert/require) and `code
 - **`lib/termexec/`** — Terminal process execution. Wraps PTY creation and process lifecycle.
 - **`lib/msgfmt/`** — Agent-specific message formatting. Strips echoed user input and TUI elements (input boxes, borders) from terminal output. Each agent type has different formatting quirks.
 - **`lib/jsonlwatcher/`** — Watches agent JSONL session logs (Claude, Codex, Pi) for rich structured messages (tool calls, thinking, usage data). Runs as a sidecar alongside PTY.
-- **`x/acpio/`** — Experimental ACP (Agent Communication Protocol) transport, alternative to PTY.
+- **`x/acpio/`** — Experimental ACP (Agent Client Protocol) transport, alternative to PTY.
 - **`lib/native/`** — Native transport. `Conversation` (an `st.Conversation`) turns the events of an `Adapter` (one per agent: `claude/`, `codex/`, `pi/`, plus the simulated `demo/`) into conversation state, requests (approvals, questions, plans) and login state. Shared pieces: `procutil/` (child process lifecycle), `AgentEnv`, `IsAuthError`, `ReadImage`; `nativetest/` has a fake adapter.
 - **`lib/statedb/`** — SQLite persistence of native sessions (`--state-db`).
+- **`lib/shellterm/`** — The shared shell terminal of native sessions (`GET /terminal`).
 - **`cmd/`** — CLI commands via cobra/viper. `server` and `attach` subcommands.
 
 ### Three Transport Modes
 - **PTY (default)**: Runs the agent in a terminal emulator, parses screen output.
-- **ACP (experimental)**: Uses the Agent Communication Protocol for structured communication (`--experimental-acp`).
+- **ACP (experimental)**: Uses the Agent Client Protocol for structured communication (`--experimental-acp`).
 - **Native** (`--transport native`): Speaks Claude Code's stream-json, `codex app-server` JSON-RPC or `pi --mode rpc` directly. Adapters must follow the `Sink` contract in `lib/native/types.go` (no concurrent Sink calls; message IDs unique across adapters of one factory).
 
 ### Adding a New Agent Type
