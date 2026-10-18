@@ -25,7 +25,9 @@ type ChannelWriter struct {
 }
 
 func (c *ChannelWriter) Write(p []byte) (n int, err error) {
-	c.ch <- p
+	// A Writer must not keep p: the reader reuses its buffer for the next
+	// keys, while these may still wait to be sent.
+	c.ch <- bytes.Clone(p)
 	return len(p), nil
 }
 
