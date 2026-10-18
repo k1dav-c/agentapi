@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -117,22 +116,8 @@ type Conversation struct {
 	promptSent bool
 	sessionRef string
 
-	messages []st.ConversationMessage
-	nextID   int
-	// agent is the agent message being built, or nil until the agent says
-	// something after the last user message.
-	agent *agentText
-	// rich maps the assistant rich messages to their part of an agent
-	// message. A rich message keeps its agent message even if it is still
-	// updated after a later user message (a steer), so its text isn't
-	// repeated in the next agent message.
-	rich map[string]*richPart
-
-	requests []*RequestState
-	// responding holds the requests whose answer is being delivered, so a
-	// second answer can't be sent at the same time. A close that comes
-	// meanwhile is kept there and applies if the delivery fails.
-	responding map[string]requestClose
+	transcript transcript
+	requests   requestBook
 
 	exited chan error
 	// login is set while the agent waits for the user to log in.
@@ -180,21 +165,16 @@ func NewConversation(cfg Config) *Conversation {
 	if cfg.LoginRetryInterval == 0 {
 		cfg.LoginRetryInterval = defaultLoginRetryInterval
 	}
-	c := &Conversation{
+	return &Conversation{
 		cfg:        cfg,
 		ctx:        context.Background(),
-		rich:       make(map[string]*richPart),
-		responding: make(map[string]requestClose),
+		transcript: newTranscript(cfg.Clock, cfg.InitialMessages),
+		requests:   newRequestBook(cfg.Clock),
 		sessionRef: cfg.ResumeRef,
 		exited:     make(chan error, 1),
-		messages:   slices.Clone(cfg.InitialMessages),
 		promptSent: len(cfg.InitialMessages) > 0,
 		chosen:     cfg.Settings,
 	}
-	for _, m := range c.messages {
-		c.nextID = max(c.nextID, m.Id+1)
-	}
-	return c
 }
 
 // Capabilities reports what the agent supports. While no agent runs, it
@@ -398,7 +378,7 @@ func (c *Conversation) TurnActive() bool {
 func (c *Conversation) Messages() []st.ConversationMessage {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return slices.Clone(c.messages)
+	return c.transcript.snapshot()
 }
 
 // Status implements st.Conversation. A turn waiting only on the user's
@@ -416,13 +396,8 @@ func (c *Conversation) statusLocked() st.ConversationStatus {
 	if c.compacting {
 		return st.ConversationStatusChanging
 	}
-	if !c.turnActive {
+	if !c.turnActive || c.requests.waitingOnUser() {
 		return st.ConversationStatusStable
-	}
-	for _, r := range c.requests {
-		if _, answering := c.responding[r.ID]; r.Status == RequestStatusPending && !answering {
-			return st.ConversationStatusStable
-		}
 	}
 	return st.ConversationStatusChanging
 }
@@ -438,7 +413,7 @@ func (c *Conversation) SaveState() error { return nil }
 // also replace the agent.
 func (c *Conversation) Reset() {
 	c.mu.Lock()
-	c.resetMessagesLocked()
+	c.transcript.reset()
 	c.mu.Unlock()
 }
 
@@ -494,9 +469,9 @@ func (c *Conversation) beginTurnLocked(input Input) (pendingTurn, error) {
 		adapter: c.adapter,
 		gen:     c.generation,
 		input:   c.inputForAgentLocked(input),
-		msg:     c.appendUserMessageLocked(text),
+		msg:     c.transcript.appendUser(text),
 	}
-	c.cfg.Emitter.EmitMessages(slices.Clone(c.messages))
+	c.cfg.Emitter.EmitMessages(c.transcript.snapshot())
 	c.cfg.Emitter.EmitStatus(st.ConversationStatusChanging)
 	return turn, nil
 }
@@ -511,8 +486,8 @@ func (c *Conversation) deliverTurn(ctx context.Context, turn pendingTurn) error 
 	c.mu.Lock()
 	if turn.gen == c.generation {
 		c.turnActive = false
-		c.removeMessageLocked(turn.msg)
-		c.cfg.Emitter.EmitMessages(slices.Clone(c.messages))
+		c.transcript.remove(turn.msg)
+		c.cfg.Emitter.EmitMessages(c.transcript.snapshot())
 		c.cfg.Emitter.EmitStatus(c.statusLocked())
 	}
 	c.mu.Unlock()
@@ -563,8 +538,8 @@ func (c *Conversation) Steer(ctx context.Context, input Input) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if gen == c.generation {
-		c.appendUserMessageLocked(text)
-		c.cfg.Emitter.EmitMessages(slices.Clone(c.messages))
+		c.transcript.appendUser(text)
+		c.cfg.Emitter.EmitMessages(c.transcript.snapshot())
 	}
 	return nil
 }

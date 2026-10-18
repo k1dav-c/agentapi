@@ -37,7 +37,7 @@ func (s *sink) TurnStarted() {
 func (s *sink) TurnCompleted(result TurnResult) {
 	s.update(func(c *Conversation) {
 		c.turnActive = false
-		c.agent = nil
+		c.transcript.endAgentMessage()
 		c.expireRequestsLocked(false)
 		if result.Error != "" {
 			c.cfg.Emitter.EmitError(result.Error, st.ErrorLevelError)
@@ -70,8 +70,8 @@ func (s *sink) RichMessage(msg jsonlwatcher.RichMessage) {
 	msg = msg.Clone()
 	s.update(func(c *Conversation) {
 		c.cfg.Observer.RichMessage(msg)
-		if msg.Role == "assistant" {
-			c.addRichMessageLocked(msg)
+		if msg.Role == "assistant" && c.transcript.addRich(msg) {
+			c.cfg.Emitter.EmitMessages(c.transcript.snapshot())
 		}
 	})
 }
@@ -82,26 +82,14 @@ func (s *sink) SessionEvents(events []jsonlwatcher.SessionEvent) {
 
 func (s *sink) RequestOpened(req Request) {
 	s.update(func(c *Conversation) {
-		if req.CreatedAt.IsZero() {
-			req.CreatedAt = c.cfg.Clock.Now()
-		}
-		if req.Capability == "" {
-			req.Capability = ResponseLive
-		}
-		state := &RequestState{Request: req, Status: RequestStatusPending}
-		if existing := c.findRequestLocked(req.ID); existing != nil {
-			*existing = *state
-		} else {
-			c.requests = append(c.requests, state)
-		}
-		c.cfg.Observer.RequestUpdated(*state)
+		c.cfg.Observer.RequestUpdated(c.requests.open(req))
 		c.cfg.Emitter.EmitStatus(c.statusLocked())
 	})
 }
 
 func (s *sink) RequestClosed(id string) {
 	s.update(func(c *Conversation) {
-		if r := c.findRequestLocked(id); r != nil {
+		if r := c.requests.find(id); r != nil {
 			c.closeRequestLocked(r, RequestStatusWithdrawn, closedCapability(r.Kind))
 			c.cfg.Emitter.EmitStatus(c.statusLocked())
 		}
