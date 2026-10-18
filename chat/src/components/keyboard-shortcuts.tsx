@@ -52,6 +52,14 @@ const shortcuts: {
   },
 ];
 
+// The chat owns the shortcuts dialog (it is on every page); others open it
+// with openShortcuts.
+export const OPEN_SHORTCUTS_EVENT = "agentapi:open-shortcuts";
+
+export function openShortcuts() {
+  window.dispatchEvent(new Event(OPEN_SHORTCUTS_EVENT));
+}
+
 export function useKeyboardShortcutsKey(onOpen: () => void) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

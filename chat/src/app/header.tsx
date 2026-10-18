@@ -9,7 +9,7 @@ import { AgentMark } from "@/components/agent-mark";
 import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Tag } from "lucide-react";
 import { computeTokenTotals, formatTokenCount, getStatusMeta } from "@/lib/session-status";
 import { useWorkingElapsed } from "@/lib/use-elapsed";
-import { KeyboardShortcutsDialog, useKeyboardShortcutsKey } from "@/components/keyboard-shortcuts";
+import { openShortcuts } from "@/components/keyboard-shortcuts";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,8 +34,6 @@ export function Header() {
     sessionName,
   } = useChat();
   const [downloading, setDownloading] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  useKeyboardShortcutsKey(() => setShortcutsOpen(true));
   const elapsed = useWorkingElapsed(serverStatus);
   const [notify, setNotify] = useState(false);
   useEffect(() => {
@@ -185,7 +183,7 @@ export function Header() {
               {notify ? <BellRing /> : <BellOff />}
               {notify ? "Background notifications on" : "Notify me in the background"}
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setShortcutsOpen(true)}>
+            <DropdownMenuItem onSelect={openShortcuts}>
               <Keyboard />
               Keyboard shortcuts
             </DropdownMenuItem>
@@ -210,7 +208,6 @@ export function Header() {
         <div id={HEADER_ACTIONS_ID} className="flex items-center gap-0.5" />
         <ModeToggle />
       </div>
-      <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </header>
   );
 }

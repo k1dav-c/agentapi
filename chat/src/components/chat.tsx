@@ -1,6 +1,6 @@
 "use client";
 
-import {useEffect, useState} from "react";
+import {useCallback, useEffect, useState} from "react";
 import {ExternalLink, FolderSearch, RefreshCw, TerminalSquare} from "lucide-react";
 import {useChat} from "./chat-provider";
 import MessageInput from "./message-input";
@@ -26,15 +26,20 @@ const Explorer = dynamic(() => import("./explorer").then((module) => module.Expl
   ),
 });
 import {Button} from "./ui/button";
-import {KeyboardShortcutsDialog, useKeyboardShortcutsKey} from "./keyboard-shortcuts";
+import {KeyboardShortcutsDialog, OPEN_SHORTCUTS_EVENT, useKeyboardShortcutsKey} from "./keyboard-shortcuts";
 
 export function Chat() {
   const [suggestedPrompt, setSuggestedPrompt] = useState("");
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const openShortcutsDialog = useCallback(() => setShortcutsOpen(true), []);
   const [terminalOpen, setTerminalOpen] = useState(false);
   // What the native terminal types once it opens (the login command).
   const [shellCommand, setShellCommand] = useState<string | undefined>();
-  useKeyboardShortcutsKey(() => setShortcutsOpen(true));
+  useKeyboardShortcutsKey(openShortcutsDialog);
+  useEffect(() => {
+    window.addEventListener(OPEN_SHORTCUTS_EVENT, openShortcutsDialog);
+    return () => window.removeEventListener(OPEN_SHORTCUTS_EVENT, openShortcutsDialog);
+  }, [openShortcutsDialog]);
   const {
     messages,
     richMessages,
