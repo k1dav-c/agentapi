@@ -15,6 +15,7 @@ import {
 import {toast} from "sonner";
 import {getErrorMessage} from "@/lib/error-utils";
 import {getDocumentTitle} from "@/lib/document-title";
+import {downloadFile} from "@/lib/download";
 import {parseFailedMessages} from "@/lib/failed-messages";
 import {clearSession} from "@/lib/session-cache";
 import {AuthDialog} from "@/components/auth-dialog";
@@ -501,18 +502,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     try {
       const events = await api.getTimelineEvents();
       const jsonl = events.map((event) => JSON.stringify(event)).join("\n");
-      const blob = new Blob([jsonl === "" ? "" : `${jsonl}\n`], {
-        type: "application/x-ndjson",
-      });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
       const timestamp = new Date().toISOString().replaceAll(":", "-");
-      link.href = url;
-      link.download = `agentapi-session-${timestamp}.jsonl`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      downloadFile(`agentapi-session-${timestamp}.jsonl`, jsonl === "" ? "" : `${jsonl}\n`, "application/x-ndjson");
       toast.success("Session JSONL downloaded");
     } catch (error) {
       toast.error("Session download failed", {

@@ -8,6 +8,7 @@ import { Button } from "../ui/button";
 import { ProcessedMessage } from "../processed-message";
 import { toast } from "sonner";
 import { taskToMarkdown } from "@/lib/task-actions";
+import { downloadFile } from "@/lib/download";
 import { groupConsecutiveTools } from "@/lib/activity-groups";
 import { ToolCallCard, ToolCallGroup } from "./tool-call";
 import { MessageItem } from "./message-item";
@@ -135,16 +136,7 @@ export const TaskGroup = React.memo(function TaskGroup({
   };
 
   const exportTask = () => {
-    const url = URL.createObjectURL(
-      new Blob([toMarkdown()], {type: "text/markdown;charset=utf-8"}),
-    );
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `agentapi-task-${number}.md`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadFile(`agentapi-task-${number}.md`, toMarkdown(), "text/markdown;charset=utf-8");
     toast.success(`Task ${number} Markdown downloaded`);
   };
 

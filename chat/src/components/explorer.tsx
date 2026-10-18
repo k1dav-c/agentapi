@@ -1,6 +1,7 @@
 "use client";
 
 import {useEffect, useMemo, useRef, useState} from "react";
+import {downloadFile} from "@/lib/download";
 import {discoverFiles, discoverLinks} from "@/lib/explorer-index";
 import {
   Activity,
@@ -590,11 +591,5 @@ function Empty({text}: {text: string}) {
 }
 
 function downloadJSON(filename: string, value: unknown) {
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(
-    new Blob([JSON.stringify(value, null, 2)], {type: "application/json"}),
-  );
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(link.href);
+  downloadFile(filename, JSON.stringify(value, null, 2), "application/json");
 }

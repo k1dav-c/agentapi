@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {HighlightedText} from "../highlighted-text";
 import { ArrowDown, ChevronRight, FileDiff, FileText, Wrench } from "lucide-react";
 import { Button } from "../ui/button";
 import { uiCopy } from "@/lib/ui-copy";
@@ -22,33 +23,6 @@ function formatDuration(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
   return `${minutes}m ${seconds}s`;
-}
-
-export function HighlightedText({
-  content,
-  query,
-}: {
-  content: string;
-  query: string;
-}) {
-  const normalized = query.trim();
-  if (!normalized) return content;
-  const expression = new RegExp(
-    `(${normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
-    "giu",
-  );
-  return content.split(expression).map((part, index) =>
-    part.toLocaleLowerCase() === normalized.toLocaleLowerCase() ? (
-      <mark
-        key={`${index}-${part}`}
-        className="rounded-sm bg-search-highlight px-0.5 text-search-highlight-text"
-      >
-        {part}
-      </mark>
-    ) : (
-      <React.Fragment key={`${index}-${part}`}>{part}</React.Fragment>
-    ),
-  );
 }
 
 export function ToolDetail({

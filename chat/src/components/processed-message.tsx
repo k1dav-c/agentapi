@@ -1,4 +1,5 @@
 import React from "react";
+import {HighlightedText} from "./highlighted-text";
 import {LinkifyIt} from "linkify-it";
 import {Check, Clipboard} from "lucide-react";
 import ReactMarkdown, {type Components} from "react-markdown";
@@ -350,27 +351,7 @@ export const MarkdownDocument = React.memo(function MarkdownDocument({
 });
 
 function highlightTerminalText(content: string, query: string) {
-  const normalizedQuery = query.trim();
-  if (!normalizedQuery) return linkifyTerminalText(content);
-
-  const expression = new RegExp(
-    `(${normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
-    "giu",
-  );
-  return content.split(expression).map((part, index) =>
-    part.toLocaleLowerCase() === normalizedQuery.toLocaleLowerCase() ? (
-      <mark
-        key={`${index}-${part}`}
-        className="rounded-sm bg-search-highlight px-0.5 text-search-highlight-text"
-      >
-        {part}
-      </mark>
-    ) : (
-      <React.Fragment key={`${index}-${part}`}>
-        {linkifyTerminalText(part)}
-      </React.Fragment>
-    ),
-  );
+  return <HighlightedText content={content} query={query} renderText={linkifyTerminalText} />;
 }
 
 // Inline or fenced code. Inline code that names a file opens it, unless it
