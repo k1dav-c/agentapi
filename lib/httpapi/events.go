@@ -88,7 +88,7 @@ type MessageUpdateBody struct {
 type SessionSyncBody struct {
 	Epoch string `json:"epoch" doc:"Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded."`
 	Full  bool   `json:"full" doc:"True when the replay that follows is the full state rather than the changes after ?since=."`
-	Seq   uint64 `json:"seq" doc:"Highest sequence number in the replay that follows (the ?since= value when it holds nothing new). The replay is complete once a change with this seq has arrived."`
+	Seq   uint64 `json:"seq" doc:"Highest sequence number in the replay that follows (the ?since= value when it holds nothing new). The replay is grouped by kind, not in seq order: it is complete at its last event, the first to carry an SSE id, and only then can a client resume from this seq."`
 }
 
 type StatusChangeBody struct {

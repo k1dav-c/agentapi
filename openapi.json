@@ -1730,7 +1730,7 @@
             "type": "boolean"
           },
           "seq": {
-            "description": "Highest sequence number in the replay that follows (the ?since= value when it holds nothing new). The replay is complete once a change with this seq has arrived.",
+            "description": "Highest sequence number in the replay that follows (the ?since= value when it holds nothing new). The replay is grouped by kind, not in seq order: it is complete at its last event, the first to carry an SSE id, and only then can a client resume from this seq.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
