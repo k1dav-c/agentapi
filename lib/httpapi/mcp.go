@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	"github.com/coder/agentapi/lib/mcpconfig"
 	"github.com/danielgtaylor/huma/v2"
@@ -235,36 +236,15 @@ func (s *Server) getMCP(
 }
 
 func (s *Server) updateMCP(
-	ctx context.Context,
+	_ context.Context,
 	input *struct {
 		Restart bool `query:"restart" default:"false" doc:"Restart the agent after writing the config so changes apply immediately; AgentAPI stays online. A PTY agent's conversation is reset; a native agent resumes its session (409 while it works on a turn). Supported for supervised PTY sessions and the native transport."`
 		Body    MCPUpdateRequestBody
 	},
 ) (*MCPUpdateResponse, error) {
-	if s.mcpStore == nil {
-		return nil, huma.Error404NotFound(
-			"MCP config management is not supported for this agent type",
-		)
-	}
-	if input.Restart && !s.canRestart() {
-		return nil, huma.Error400BadRequest(
-			"agent restart is not supported in this server mode",
-		)
-	}
-	servers, err := toConfigServers(input.Body.Servers)
-	if err != nil {
-		return nil, huma.Error400BadRequest(err.Error())
-	}
-	if err := s.mcpStore.Replace(servers); err != nil {
-		return nil, fmt.Errorf("failed to write MCP config: %w", err)
-	}
-	response := &MCPUpdateResponse{}
-	response.Body.OK = true
-	response.Body.Path = s.mcpStore.Path()
-	restarted, err := s.restartQuery(input.Restart)
-	if err != nil {
-		return nil, err
-	}
-	response.Body.Restarted = restarted
-	return response, nil
+	return s.mutateMCP(input.Restart, func(servers MCPServers) error {
+		clear(servers)
+		maps.Copy(servers, input.Body.Servers)
+		return nil
+	})
 }

@@ -73,13 +73,7 @@ func (s *jsonStore) Replace(servers Servers) error {
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", s.path, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return fmt.Errorf("create %s: %w", filepath.Dir(s.path), err)
-	}
-	if err := os.WriteFile(s.path, append(data, '\n'), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", s.path, err)
-	}
-	return nil
+	return writeFile(s.path, append(data, '\n'))
 }
 
 // newPiStore manages Pi's user-level MCP config, $PI_CODING_AGENT_DIR/mcp.json

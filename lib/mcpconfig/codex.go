@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -57,11 +58,44 @@ func (s *codexStore) Read() (Servers, error) {
 }
 
 var (
-	mcpHeaderRE     = regexp.MustCompile(`^\s*\[{1,2}\s*(?:"mcp_servers"|mcp_servers)\s*[\].]`)
-	anyHeaderRE     = regexp.MustCompile(`^\s*\[`)
-	rootMCPAssignRE = regexp.MustCompile(`^\s*(?:"mcp_servers"|mcp_servers)\s*=`)
+	mcpHeaderRE = regexp.MustCompile(`^\s*\[{1,2}\s*(?:"mcp_servers"|mcp_servers)\s*[\].]`)
+	anyHeaderRE = regexp.MustCompile(`^\s*\[`)
+	// rootMCPAssignRE matches mcp_servers set in the root table: as a whole
+	// (mcp_servers = {...}) or by dotted keys (mcp_servers.docs.command = ...).
+	rootMCPAssignRE = regexp.MustCompile(`^\s*(?:"mcp_servers"|mcp_servers)\s*[=.]`)
 	managedMarkerRE = regexp.MustCompile(`^\s*# (?:>>>|<<<) managed by agentapi`)
 )
+
+// openBrackets returns how many more brackets and braces line opens than
+// it closes, outside strings and comments: a value that goes on on the
+// next lines (a multi-line array) leaves some open.
+func openBrackets(line string) int {
+	depth := 0
+	var quote rune
+	escaped := false
+	for _, r := range line {
+		switch {
+		case quote != 0:
+			switch {
+			case escaped:
+				escaped = false
+			case r == '\\' && quote == '"':
+				escaped = true
+			case r == quote:
+				quote = 0
+			}
+		case r == '"' || r == '\'':
+			quote = r
+		case r == '#':
+			return depth
+		case r == '[' || r == '{':
+			depth++
+		case r == ']' || r == '}':
+			depth--
+		}
+	}
+	return depth
+}
 
 func (s *codexStore) Replace(servers Servers) error {
 	data, err := os.ReadFile(s.path)
@@ -72,7 +106,14 @@ func (s *codexStore) Replace(servers Servers) error {
 	var kept []string
 	inMCPSection := false
 	inRootTable := true
+	// skipping is how many brackets the root mcp_servers value being
+	// dropped still has open.
+	skipping := 0
 	for _, line := range strings.Split(string(data), "\n") {
+		if skipping > 0 {
+			skipping += openBrackets(line)
+			continue
+		}
 		if managedMarkerRE.MatchString(line) {
 			continue
 		}
@@ -80,6 +121,7 @@ func (s *codexStore) Replace(servers Servers) error {
 			inRootTable = false
 			inMCPSection = mcpHeaderRE.MatchString(line)
 		} else if inRootTable && rootMCPAssignRE.MatchString(line) {
+			skipping = max(openBrackets(line), 0)
 			continue
 		}
 		if !inMCPSection {
@@ -99,13 +141,55 @@ func (s *codexStore) Replace(servers Servers) error {
 			encoded + "# <<< managed by agentapi <<<"
 	}
 	content += "\n"
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return fmt.Errorf("create %s: %w", filepath.Dir(s.path), err)
+	// Rewriting by lines can't follow every way TOML can spell a table;
+	// writing a file Codex can't read would break it, so check first.
+	if err := checkCodexServers(content, servers); err != nil {
+		return fmt.Errorf("can't rewrite the MCP servers in %s (edit it by hand): %w", s.path, err)
 	}
-	if err := os.WriteFile(s.path, []byte(content), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", s.path, err)
+	return writeFile(s.path, []byte(content))
+}
+
+// checkCodexServers checks that content parses and that its mcp_servers
+// are servers.
+func checkCodexServers(content string, servers Servers) error {
+	var document struct {
+		MCPServers map[string]any `toml:"mcp_servers"`
+	}
+	if err := toml.Unmarshal([]byte(content), &document); err != nil {
+		return err
+	}
+	got, err := json.Marshal(document.MCPServers)
+	if err != nil {
+		return err
+	}
+	want := map[string]any{}
+	for name, raw := range servers {
+		var config any
+		if err := json.Unmarshal(raw, &config); err != nil {
+			return err
+		}
+		want[name] = config
+	}
+	wantJSON, err := json.Marshal(want)
+	if err != nil {
+		return err
+	}
+	if len(want) == 0 && len(document.MCPServers) == 0 {
+		return nil
+	}
+	if !jsonEqual(got, wantJSON) {
+		return errors.New("the servers written don't read back the same")
 	}
 	return nil
+}
+
+// jsonEqual reports whether two JSON documents hold the same values.
+func jsonEqual(a, b []byte) bool {
+	var x, y any
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
 }
 
 func encodeCodexServers(servers Servers) (string, error) {

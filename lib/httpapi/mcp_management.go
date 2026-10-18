@@ -103,35 +103,19 @@ func (s *Server) restartQuery(restart bool) (bool, error) {
 	return true, nil
 }
 
-func (s *Server) mutateMCP(ctx context.Context, restart bool, mutate func(MCPServers) error) (*MCPUpdateResponse, error) {
+// mutateMCP changes the MCP servers with mutate, then restarts the agent
+// when asked. Every change goes through it, so none overwrites another.
+func (s *Server) mutateMCP(restart bool, mutate func(MCPServers) error) (*MCPUpdateResponse, error) {
 	if err := s.requireMCP(); err != nil {
 		return nil, err
 	}
-	s.mcpMu.Lock()
-	stored, err := s.mcpStore.Read()
-	if err != nil {
-		s.mcpMu.Unlock()
-		return nil, fmt.Errorf("failed to read MCP config: %w", err)
+	// Refused before anything is written.
+	if restart && !s.canRestart() {
+		return nil, huma.Error400BadRequest("agent restart is not supported in this server mode")
 	}
-	servers, err := fromConfigServers(stored)
-	if err != nil {
-		s.mcpMu.Unlock()
+	if err := s.writeMCPServers(mutate); err != nil {
 		return nil, err
 	}
-	if err := mutate(servers); err != nil {
-		s.mcpMu.Unlock()
-		return nil, err
-	}
-	encoded, err := toConfigServers(servers)
-	if err != nil {
-		s.mcpMu.Unlock()
-		return nil, huma.Error400BadRequest(err.Error())
-	}
-	if err := s.mcpStore.Replace(encoded); err != nil {
-		s.mcpMu.Unlock()
-		return nil, fmt.Errorf("failed to write MCP config: %w", err)
-	}
-	s.mcpMu.Unlock()
 	restarted, err := s.restartQuery(restart)
 	if err != nil {
 		return nil, err
@@ -143,12 +127,38 @@ func (s *Server) mutateMCP(ctx context.Context, restart bool, mutate func(MCPSer
 	return response, nil
 }
 
-func (s *Server) createMCPServer(ctx context.Context, input *struct {
+// writeMCPServers reads the MCP servers, changes them with mutate and
+// writes them back, holding mcpMu throughout.
+func (s *Server) writeMCPServers(mutate func(MCPServers) error) error {
+	s.mcpMu.Lock()
+	defer s.mcpMu.Unlock()
+	stored, err := s.mcpStore.Read()
+	if err != nil {
+		return fmt.Errorf("failed to read MCP config: %w", err)
+	}
+	servers, err := fromConfigServers(stored)
+	if err != nil {
+		return err
+	}
+	if err := mutate(servers); err != nil {
+		return err
+	}
+	encoded, err := toConfigServers(servers)
+	if err != nil {
+		return huma.Error400BadRequest(err.Error())
+	}
+	if err := s.mcpStore.Replace(encoded); err != nil {
+		return fmt.Errorf("failed to write MCP config: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) createMCPServer(_ context.Context, input *struct {
 	Restart bool `query:"restart" default:"false"`
 	Body    MCPServerMutationBody
 },
 ) (*MCPUpdateResponse, error) {
-	return s.mutateMCP(ctx, input.Restart, func(servers MCPServers) error {
+	return s.mutateMCP(input.Restart, func(servers MCPServers) error {
 		if _, exists := servers[input.Body.Name]; exists {
 			return huma.Error409Conflict("an MCP server with this name already exists")
 		}
@@ -157,13 +167,13 @@ func (s *Server) createMCPServer(ctx context.Context, input *struct {
 	})
 }
 
-func (s *Server) patchMCPServer(ctx context.Context, input *struct {
+func (s *Server) patchMCPServer(_ context.Context, input *struct {
 	Name    string `path:"name"`
 	Restart bool   `query:"restart" default:"false"`
 	Body    MCPServerConfigBody
 },
 ) (*MCPUpdateResponse, error) {
-	return s.mutateMCP(ctx, input.Restart, func(servers MCPServers) error {
+	return s.mutateMCP(input.Restart, func(servers MCPServers) error {
 		if _, exists := servers[input.Name]; !exists {
 			return huma.Error404NotFound("MCP server was not found")
 		}
@@ -172,12 +182,12 @@ func (s *Server) patchMCPServer(ctx context.Context, input *struct {
 	})
 }
 
-func (s *Server) deleteMCPServer(ctx context.Context, input *struct {
+func (s *Server) deleteMCPServer(_ context.Context, input *struct {
 	Name    string `path:"name"`
 	Restart bool   `query:"restart" default:"false"`
 },
 ) (*MCPUpdateResponse, error) {
-	return s.mutateMCP(ctx, input.Restart, func(servers MCPServers) error {
+	return s.mutateMCP(input.Restart, func(servers MCPServers) error {
 		if _, exists := servers[input.Name]; !exists {
 			return huma.Error404NotFound("MCP server was not found")
 		}
@@ -384,7 +394,7 @@ func (s *Server) deleteMCPProfile(_ context.Context, input *struct {
 	return response, nil
 }
 
-func (s *Server) applyMCPProfile(ctx context.Context, input *struct {
+func (s *Server) applyMCPProfile(_ context.Context, input *struct {
 	Name    string `path:"name"`
 	Restart bool   `query:"restart" default:"false"`
 },
@@ -400,7 +410,7 @@ func (s *Server) applyMCPProfile(ctx context.Context, input *struct {
 	if !exists {
 		return nil, huma.Error404NotFound("MCP profile was not found")
 	}
-	return s.mutateMCP(ctx, input.Restart, func(current MCPServers) error {
+	return s.mutateMCP(input.Restart, func(current MCPServers) error {
 		for name := range current {
 			delete(current, name)
 		}
