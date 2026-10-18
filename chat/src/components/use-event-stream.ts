@@ -13,6 +13,7 @@ import type {SyncTracker} from "@/lib/session-sync";
 import {applyStatusChange, update, type AgentStatus, type StatusChangeEvent} from "@/lib/agent-status";
 import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
 import type {ConnectionStatus} from "./chat-provider";
+import {agentErrorKey} from "@/lib/agent-errors";
 
 interface MessageUpdateEvent {
   id: number;
@@ -356,8 +357,7 @@ export function useEventStream({
         if (syncRef.current.replaying) scheduleFlush(messageEvent);
         try {
           const data: ErrorEventData = JSON.parse(messageEvent.data);
-          // The server sends its stored errors again on every connection.
-          const key = `${data.time}\u0000${data.message}`;
+          const key = agentErrorKey(data);
           if (shownErrorsRef.current.has(key)) return;
           shownErrorsRef.current.add(key);
           // The login card says it while the login is needed; afterwards
