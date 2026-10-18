@@ -28,9 +28,6 @@ import (
 	st "github.com/coder/agentapi/lib/screentracker"
 )
 
-// schemaVersion is stored in PRAGMA user_version.
-const schemaVersion = 1
-
 // flushInterval is how long changes may wait before they are written.
 const flushInterval = 200 * time.Millisecond
 
@@ -46,14 +43,17 @@ const (
 	retryDelay    = 50 * time.Millisecond
 )
 
-const schema = `
-CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+// migrations take the schema from version i to i+1, so migrations[0]
+// creates it; PRAGMA user_version holds the version. A change to the
+// schema is a new migration at the end: one that ran never changes.
+var migrations = []string{
+	`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, seq INTEGER NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS rich_messages (pos INTEGER PRIMARY KEY, seq INTEGER NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS session_events (id INTEGER PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, pos INTEGER NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS queue (pos INTEGER PRIMARY KEY, data TEXT NOT NULL);
-`
+CREATE TABLE IF NOT EXISTS queue (pos INTEGER PRIMARY KEY, data TEXT NOT NULL);`,
+}
 
 // Meta keys.
 const (
@@ -236,21 +236,39 @@ func isBusy(err error) bool {
 	return errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == sqlite3.SQLITE_BUSY
 }
 
+// migrate runs the migrations the database hasn't had.
 func migrate(db *sql.DB) error {
 	var version int
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read state database version: %w", err)
 	}
-	if version > schemaVersion {
-		return fmt.Errorf("state database was written by a newer AgentAPI (schema %d, this one knows %d)", version, schemaVersion)
+	if version > len(migrations) {
+		return fmt.Errorf("state database was written by a newer AgentAPI (schema %d, this one knows %d)", version, len(migrations))
 	}
-	if _, err := db.Exec(schema); err != nil {
-		return fmt.Errorf("create state database tables: %w", err)
-	}
-	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
-		return fmt.Errorf("set state database version: %w", err)
+	for ; version < len(migrations); version++ {
+		if err := migrateTo(db, version+1); err != nil {
+			return fmt.Errorf("migrate the state database to schema %d: %w", version+1, err)
+		}
 	}
 	return nil
+}
+
+// migrateTo runs the migration to version, and records the version, in one
+// transaction.
+func migrateTo(db *sql.DB, version int) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(migrations[version-1]); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
 }
 
 // Load reads everything stored. Call it before any writes. From then on
@@ -275,7 +293,7 @@ func (d *DB) Load() (Snapshot, error) {
 	_, snap.Clean = snap.Meta[metaClean]
 	delete(snap.Meta, metaClean)
 
-	if err := scanJSON(d.db, "SELECT seq, data FROM messages ORDER BY id", func(seq uint64, data []byte) error {
+	if err := d.scanJSON("messages", "SELECT seq, data FROM messages ORDER BY id", func(seq uint64, data []byte) error {
 		var m st.ConversationMessage
 		if err := json.Unmarshal(data, &m); err != nil {
 			return err
@@ -285,7 +303,7 @@ func (d *DB) Load() (Snapshot, error) {
 	}); err != nil {
 		return snap, fmt.Errorf("read messages: %w", err)
 	}
-	if err := scanJSON(d.db, "SELECT seq, data FROM rich_messages ORDER BY pos", func(seq uint64, data []byte) error {
+	if err := d.scanJSON("rich_messages", "SELECT seq, data FROM rich_messages ORDER BY pos", func(seq uint64, data []byte) error {
 		var m jsonlwatcher.RichMessage
 		if err := json.Unmarshal(data, &m); err != nil {
 			return err
@@ -295,7 +313,7 @@ func (d *DB) Load() (Snapshot, error) {
 	}); err != nil {
 		return snap, fmt.Errorf("read rich messages: %w", err)
 	}
-	if err := scanJSON(d.db, "SELECT 0, data FROM session_events ORDER BY id", func(_ uint64, data []byte) error {
+	if err := d.scanJSON("session_events", "SELECT 0, data FROM session_events ORDER BY id", func(_ uint64, data []byte) error {
 		var e jsonlwatcher.SessionEvent
 		if err := json.Unmarshal(data, &e); err != nil {
 			return err
@@ -305,7 +323,7 @@ func (d *DB) Load() (Snapshot, error) {
 	}); err != nil {
 		return snap, fmt.Errorf("read timeline: %w", err)
 	}
-	if err := scanJSON(d.db, "SELECT seq, data FROM requests ORDER BY pos", func(seq uint64, data []byte) error {
+	if err := d.scanJSON("requests", "SELECT seq, data FROM requests ORDER BY pos", func(seq uint64, data []byte) error {
 		var r native.RequestState
 		if err := json.Unmarshal(data, &r); err != nil {
 			return err
@@ -315,7 +333,7 @@ func (d *DB) Load() (Snapshot, error) {
 	}); err != nil {
 		return snap, fmt.Errorf("read requests: %w", err)
 	}
-	if err := scanJSON(d.db, "SELECT 0, data FROM queue ORDER BY pos", func(_ uint64, data []byte) error {
+	if err := d.scanJSON("queue", "SELECT 0, data FROM queue ORDER BY pos", func(_ uint64, data []byte) error {
 		var q QueuedMessage
 		if err := json.Unmarshal(data, &q); err != nil {
 			return err
@@ -331,11 +349,17 @@ func (d *DB) Load() (Snapshot, error) {
 	return snap, nil
 }
 
-func scanJSON(db *sql.DB, query string, fn func(seq uint64, data []byte) error) error {
-	rows, err := db.Query(query)
+// scanJSON calls decode with every row query returns from table. A row
+// decode fails on is skipped with a warning: the rest of the conversation
+// is worth more than one broken row, and a server that doesn't start
+// shows none of it.
+func (d *DB) scanJSON(table, query string, decode func(seq uint64, data []byte) error) error {
+	rows, err := d.db.Query(query)
 	if err != nil {
 		return err
 	}
+	skipped := 0
+	var skipErr error
 	for rows.Next() {
 		var seq uint64
 		var data []byte
@@ -343,10 +367,13 @@ func scanJSON(db *sql.DB, query string, fn func(seq uint64, data []byte) error) 
 			_ = rows.Close()
 			return err
 		}
-		if err := fn(seq, data); err != nil {
-			_ = rows.Close()
-			return err
+		if err := decode(seq, data); err != nil {
+			skipped++
+			skipErr = err
 		}
+	}
+	if skipped > 0 {
+		d.logger.Warn("Skipped rows of the state database that can't be read", "table", table, "rows", skipped, "error", skipErr)
 	}
 	return closeRows(rows)
 }
