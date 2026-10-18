@@ -51,8 +51,9 @@ type Config struct {
 	// interrupted turn before ending it here. Zero means 10s.
 	InterruptTimeout time.Duration
 	// StopTimeout is how long Close waits for the process to exit after
-	// closing its stdin before it sends SIGTERM, and again before SIGKILL.
-	// Zero means 3s and 2s.
+	// closing its stdin before it sends SIGTERM, and again before SIGKILL,
+	// and before that for a turn it interrupted to end. Zero means 3s, 2s,
+	// and 3s for the turn.
 	StopTimeout time.Duration
 	// NewID generates session and message ids; nil uses random UUIDs.
 	NewID func() string
@@ -122,6 +123,10 @@ func newAdapter(cfg Config, args parsedArgs, resumeRef string) *Adapter {
 		requests:    make(map[string]*pendingRequest),
 		exited:      make(chan struct{}),
 		readDone:    make(chan struct{}),
+		closeGrace:  closeInterruptGrace,
+	}
+	if cfg.StopTimeout > 0 {
+		a.closeGrace = cfg.StopTimeout
 	}
 	if resumeRef == "" {
 		a.sessionID = cfg.NewID()
@@ -141,6 +146,8 @@ type Adapter struct {
 	sink   native.Sink
 	parser *streamParser
 	log    *slog.Logger
+	// closeGrace is how long Close waits for a turn it interrupted to end.
+	closeGrace time.Duration
 	// reportedRef is the session id last reported with SessionRef, at
 	// first the session to resume. Read loop only.
 	reportedRef string
@@ -213,6 +220,8 @@ const (
 // clears it.
 type turnState struct {
 	phase turnPhase
+	// ended is closed when the turn ends.
+	ended chan struct{}
 	// interrupted: the user interrupted it.
 	interrupted bool
 	// authFailed: the CLI reported a login failure in it.
@@ -328,10 +337,17 @@ func (a *Adapter) write(v any) error {
 // call.
 func (a *Adapter) sendControl(subtype string, fields map[string]any, onResponse func(json.RawMessage)) (string, *agentio.Call[controlResult], error) {
 	a.mu.Lock()
-	if a.closing {
-		a.mu.Unlock()
+	closing := a.closing
+	a.mu.Unlock()
+	if closing {
 		return "", nil, errors.New("claude is shutting down")
 	}
+	return a.issueControl(subtype, fields, onResponse)
+}
+
+// issueControl is sendControl also while the adapter closes.
+func (a *Adapter) issueControl(subtype string, fields map[string]any, onResponse func(json.RawMessage)) (string, *agentio.Call[controlResult], error) {
+	a.mu.Lock()
 	a.controlSeq++
 	id := fmt.Sprintf("agentapi_%d", a.controlSeq)
 	a.mu.Unlock()
@@ -419,13 +435,13 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 		a.mu.Unlock()
 		return native.ErrTurnActive
 	}
-	a.turn.phase = turnSent
+	a.beginTurnLocked(turnSent)
 	a.turn.interrupted = false
 	a.prompt = input.Text
 	a.mu.Unlock()
 	if err := a.write(msg); err != nil {
 		a.mu.Lock()
-		a.turn.phase = turnIdle
+		a.endTurnLocked()
 		a.prompt = ""
 		a.mu.Unlock()
 		return err
@@ -553,17 +569,23 @@ func (a *Adapter) waitErr() error {
 	return a.exitErr
 }
 
-// Close implements native.Adapter: closing stdin lets the CLI finish and
-// exit on its own; SIGTERM and SIGKILL follow if it doesn't.
+// Close implements native.Adapter: a turn that runs is interrupted first
+// (closing stdin mid-turn leaves the session with a tool call that has no
+// result, which a resumed session goes on from); closing stdin lets the CLI
+// finish and exit on its own; SIGTERM and SIGKILL follow if it doesn't.
 func (a *Adapter) Close() error {
 	a.mu.Lock()
 	proc := a.proc
+	ended := a.turn.ended
 	a.closing = true
 	a.mu.Unlock()
 	if proc == nil {
 		return nil
 	}
 	a.stopOnce.Do(func() {
+		if ended != nil {
+			a.interruptForClose(ended)
+		}
 		procutil.Stop(proc, a.exited, procutil.StopOptions{
 			StdinGrace: a.cfg.StopTimeout,
 			TermGrace:  a.cfg.StopTimeout,
@@ -574,6 +596,36 @@ func (a *Adapter) Close() error {
 	})
 	<-a.exited
 	return nil
+}
+
+// closeInterruptGrace is how long Close waits for a turn it interrupted to
+// end, unless Config.StopTimeout says otherwise (Adapter.closeGrace).
+const closeInterruptGrace = 3 * time.Second
+
+// interruptForClose interrupts the running turn, whose end closes ended,
+// and waits for it to end, for the CLI to exit, or for the grace to pass.
+func (a *Adapter) interruptForClose(ended <-chan struct{}) {
+	a.mu.Lock()
+	a.turn.interrupted = true
+	a.mu.Unlock()
+	// Not waited for: a write the CLI doesn't read must not hold Close,
+	// whose closing stdin makes it fail. Sent although Close set closing,
+	// which refuses other requests.
+	go func() {
+		if _, _, err := a.issueControl("interrupt", nil, a.interruptAccepted); err != nil {
+			a.log.Debug("Failed to interrupt the turn before closing", "error", err)
+		}
+	}()
+	// Real time, as the Clock could be one nobody advances once the
+	// adapter is retired.
+	timer := time.NewTimer(a.closeGrace)
+	defer timer.Stop()
+	select {
+	case <-ended:
+	case <-a.exited:
+	case <-timer.C:
+		a.log.Warn("Claude Code didn't end its turn in time; closing it anyway")
+	}
 }
 
 // readLoop handles the CLI's output until it closes, and wakes up when a
@@ -835,11 +887,31 @@ func (a *Adapter) handleSystem(f *frame) {
 func (a *Adapter) turnActivity() {
 	a.mu.Lock()
 	start := a.turn.phase != turnRunning
-	a.turn.phase = turnRunning
+	a.beginTurnLocked(turnRunning)
 	a.mu.Unlock()
 	if start {
 		a.sink.TurnStarted()
 	}
+}
+
+// beginTurnLocked moves the turn to phase; a turn that begins gets the
+// channel endTurnLocked closes. Caller holds a.mu.
+func (a *Adapter) beginTurnLocked(phase turnPhase) {
+	if a.turn.phase == turnIdle {
+		a.turn.ended = make(chan struct{})
+	}
+	a.turn.phase = phase
+}
+
+// endTurnLocked clears the turn and returns what it was. Caller holds
+// a.mu.
+func (a *Adapter) endTurnLocked() turnState {
+	turn := a.turn
+	if turn.ended != nil {
+		close(turn.ended)
+	}
+	a.turn = turnState{}
+	return turn
 }
 
 func (a *Adapter) handleResult(f *frame) {
@@ -925,15 +997,15 @@ func turnResult(f *frame, interrupted bool) native.TurnResult {
 func (a *Adapter) endTurn() {
 	a.interruptAt = time.Time{}
 	a.mu.Lock()
-	active := a.turn.phase != turnIdle
+	turn := a.endTurnLocked()
+	active := turn.phase != turnIdle
 	result := native.TurnResult{StopReason: native.StopReasonEndTurn}
-	if a.turn.interrupted {
+	if turn.interrupted {
 		result.StopReason = native.StopReasonInterrupted
 	}
-	if a.turn.result != nil {
-		result = *a.turn.result
+	if turn.result != nil {
+		result = *turn.result
 	}
-	a.turn = turnState{}
 	// The CLI withdraws its requests when a turn ends.
 	a.requests = make(map[string]*pendingRequest)
 	a.mu.Unlock()

@@ -636,3 +636,70 @@ func TestInitializeRefused(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "initialize claude: claude: unsupported option", err.Error())
 }
+
+// Close interrupts the running turn and waits for it to end before it
+// closes stdin: closing it mid-turn leaves the session with a tool call
+// that has no result.
+func TestCloseInterruptsTheTurn(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	proc := newFakeProcess("")
+	a, sink := started(t, Config{}, proc)
+	a.closeGrace = 5 * time.Second
+	require.NoError(t, a.StartTurn(ctx, native.Input{Text: "hi"}))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
+	proc.barrier(t)
+
+	closed := make(chan error, 1)
+	go func() { closed <- a.Close() }()
+	request, _ := proc.waitRequest(t, 1, "interrupt")
+	select {
+	case <-proc.exited:
+		t.Fatal("stdin closed before the turn ended")
+	case <-closed:
+		t.Fatal("Close returned before the turn ended")
+	case <-time.After(50 * time.Millisecond):
+	}
+	proc.answer(t, request, `{}`)
+	proc.send(t, []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"terminal_reason":"aborted_tools"}`))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close didn't go on once the turn ended")
+	}
+	assert.Equal(t, []string{"turn_started", "turn_completed:interrupted"}, sink.TurnLog())
+}
+
+// A CLI that doesn't end its turn is closed after the grace; without a
+// turn, Close interrupts nothing.
+func TestCloseWithoutTheTurnEnding(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	t.Run("the turn doesn't end", func(t *testing.T) {
+		t.Parallel()
+		proc := newFakeProcess("")
+		a, _ := started(t, Config{}, proc)
+		a.closeGrace = 30 * time.Millisecond
+		require.NoError(t, a.StartTurn(ctx, native.Input{Text: "hi"}))
+		proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1"}`))
+		proc.barrier(t)
+		start := time.Now()
+		require.NoError(t, a.Close())
+		assert.GreaterOrEqual(t, time.Since(start), 30*time.Millisecond)
+		proc.waitRequest(t, 1, "interrupt")
+	})
+	t.Run("no turn", func(t *testing.T) {
+		t.Parallel()
+		proc := newFakeProcess("")
+		a, _ := started(t, Config{}, proc)
+		a.closeGrace = 5 * time.Second
+		start := time.Now()
+		require.NoError(t, a.Close())
+		assert.Less(t, time.Since(start), time.Second)
+		for _, f := range proc.writtenFrames() {
+			assert.NotEqual(t, "interrupt", subtypeOf(f))
+		}
+	})
+}

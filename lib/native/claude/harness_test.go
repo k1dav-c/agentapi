@@ -346,7 +346,11 @@ func newTestAdapter(t *testing.T, cfg Config, resumeRef string) *Adapter {
 	t.Helper()
 	args, err := parseArgs(cfg.Args)
 	require.NoError(t, err)
-	return newAdapter(cfg, args, resumeRef)
+	a := newAdapter(cfg, args, resumeRef)
+	// A turn a test leaves running is interrupted when the adapter closes;
+	// nobody answers for the fake CLI.
+	a.closeGrace = 10 * time.Millisecond
+	return a
 }
 
 // run replays the capture's records.
