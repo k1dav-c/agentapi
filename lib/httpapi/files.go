@@ -3,8 +3,12 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 	"net/http"
@@ -278,7 +282,12 @@ func (s *Server) getFileDiff(ctx context.Context, input *FilePathQuery) (*FileDi
 	switch {
 	case inHead && exists:
 		resp.Body.Status = FileDiffModified
-		if *old == *cur {
+		same := *old == *cur
+		if head.truncated || len(current) > maxDiffInput {
+			// Too large to compare here: compare git's object ids.
+			same, _ = sameAsHead(ctx, dir, root, rel, repoPath)
+		}
+		if same {
 			resp.Body.Status = FileDiffUnchanged
 			return resp, nil
 		}
@@ -308,6 +317,40 @@ func (s *Server) getFileDiff(ctx context.Context, input *FilePathQuery) (*FileDi
 
 // maxDiffInput is how large a file GET /files/diff compares.
 const maxDiffInput = 4 << 20
+
+// sameAsHead reports whether the working file rel is, byte for byte, the
+// blob HEAD has at repoPath. It compares git's object ids, computed here,
+// for files too large to compare by content; git only reads the id.
+func sameAsHead(ctx context.Context, dir string, root *os.Root, rel, repoPath string) (bool, error) {
+	out, err := runGit(ctx, dir, maxViewedBytes, "rev-parse", "--verify", "--quiet", "HEAD:"+repoPath)
+	if err != nil {
+		return false, err
+	}
+	want := strings.TrimSpace(out.text)
+	var h hash.Hash
+	switch len(want) {
+	case 2 * sha1.Size:
+		h = sha1.New()
+	case 2 * sha256.Size:
+		h = sha256.New()
+	default:
+		return false, fmt.Errorf("unexpected object id %q", want)
+	}
+	f, err := root.Open(rel)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	_, _ = fmt.Fprintf(h, "blob %d\x00", info.Size())
+	if _, err := io.Copy(h, f); err != nil {
+		return false, err
+	}
+	return hex.EncodeToString(h.Sum(nil)) == want, nil
+}
 
 // diffCopies diffs old against cur (nil: the file doesn't exist on that
 // side) as git would for repoPath, outside any repository and without the

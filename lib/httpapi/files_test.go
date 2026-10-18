@@ -221,3 +221,24 @@ func TestFileDiffRunsNoRepositoryPrograms(t *testing.T) {
 	_, err = os.Stat(marker)
 	assert.ErrorIs(t, err, os.ErrNotExist, "the filter didn't run")
 }
+
+func TestFileDiffOfALargeFile(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init", "-q")
+	large := strings.Repeat("0123456789abcdef\n", 300_000) // 5.1 MB, more than maxDiffInput
+	writeFile(t, filepath.Join(repo, "big.txt"), large)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-q", "-m", "init")
+	s := &Server{cwd: repo}
+
+	// Too large to compare by content, yet unchanged.
+	resp, err := s.getFileDiff(t.Context(), &FilePathQuery{Path: "big.txt"})
+	require.NoError(t, err)
+	assert.Equal(t, FileDiffUnchanged, resp.Body.Status)
+
+	writeFile(t, filepath.Join(repo, "big.txt"), large+"one more line\n")
+	resp, err = s.getFileDiff(t.Context(), &FilePathQuery{Path: "big.txt"})
+	require.NoError(t, err)
+	assert.Equal(t, FileDiffModified, resp.Body.Status)
+	assert.True(t, resp.Body.Truncated)
+}
