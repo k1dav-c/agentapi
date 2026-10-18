@@ -6,6 +6,7 @@ import {toast} from "sonner";
 import {useChat} from "./chat-provider";
 import {Button} from "./ui/button";
 import {TerminalKeyBar} from "./terminal-chrome";
+import {LatestLinkChip} from "./terminal-links";
 import {useXterm} from "./use-xterm";
 import {decodeBase64, terminalSize} from "@/lib/shell";
 import {withCredentials} from "@/lib/auth";
@@ -28,7 +29,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
   // Whether the shell runs: keys typed after it exited go nowhere.
   const runningRef = useRef(false);
 
-  const {termRef, inputRef, touch, keyboardOpen, inset} = useXterm({
+  const {termRef, inputRef, link, touch, keyboardOpen, inset} = useXterm({
     containerRef,
     key: `${storageScope}#${session}`,
     options: () => ({scrollback: 10000, cursorBlink: true}),
@@ -124,6 +125,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
           {state === "open" ? "A shell in the agent's working directory" : state === "connecting" ? "Connecting…" : "The shell exited"}
         </span>
         {state !== "open" && <span className="text-muted-foreground sm:hidden">{state === "connecting" ? "Connecting…" : "Exited"}</span>}
+        <LatestLinkChip url={link} />
         <Button type="button" size="sm" variant="outline" className="ml-auto h-8" onClick={onExit}>
           <ArrowLeft />
           Back to chat
