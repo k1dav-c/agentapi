@@ -760,11 +760,7 @@ func TestCloseWithBlockedWrite(t *testing.T) {
 	go func() { started <- a.Start(context.Background(), newRecorder(t)) }()
 	// Start blocks writing initialize.
 	require.Eventually(t, func() bool {
-		if a.writeMu.TryLock() {
-			a.writeMu.Unlock()
-			return false
-		}
-		return true
+		return a.writer.Writing()
 	}, waitTimeout, time.Millisecond)
 
 	closed := make(chan struct{})
@@ -781,4 +777,39 @@ func TestCloseWithBlockedWrite(t *testing.T) {
 	assert.Equal(t, int32(1), proc.terminated.Load())
 	assert.Equal(t, int32(1), proc.killed.Load())
 	require.EqualError(t, a.Wait(), "signal: killed")
+}
+
+// slowExit is app-server taking a while to exit after SIGKILL.
+type slowExit struct{ *fakeProc }
+
+func (p slowExit) Kill() error {
+	p.killed.Add(1)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		p.exit(errors.New("signal: killed"))
+	}()
+	return nil
+}
+
+// Close returns once app-server has exited, not when SIGKILL is sent: a
+// Reload resumes the thread at once, which the old process must not hold.
+func TestCloseWaitsForTheExit(t *testing.T) {
+	h := newHarness(t, "", nil, func(c *Config) {
+		c.StopTimeout = 10 * time.Millisecond
+		launch := c.Launch
+		c.Launch = func(cmd procutil.Command) (procutil.Process, error) {
+			p, err := launch(cmd)
+			return slowExit{p.(*fakeProc)}, err
+		}
+	})
+	h.boot()
+	h.proc.ignoreStdinClose = true
+	h.proc.ignoreTerm = true
+	require.NoError(t, h.a.Close())
+	select {
+	case <-h.proc.done:
+	default:
+		t.Fatal("Close returned before app-server exited")
+	}
+	assert.Equal(t, int32(1), h.proc.killed.Load())
 }

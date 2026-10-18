@@ -3,8 +3,6 @@
 package codex
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -22,6 +20,7 @@ import (
 
 	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/procutil"
 	"github.com/coder/agentapi/lib/procenv"
 )
@@ -61,9 +60,6 @@ const (
 	// inboxSize is how many messages from app-server wait for the read
 	// loop.
 	inboxSize = 256
-	// readBufferSize is how much of app-server's output is read at once;
-	// longer lines take several reads.
-	readBufferSize = 64 << 10
 	// exitWait is how long a failed Start waits for app-server's exit
 	// status, which says why it failed.
 	exitWait = 3 * time.Second
@@ -105,9 +101,12 @@ type Adapter struct {
 	// its requests from 0 in every process.
 	prefix string
 
-	proc    procutil.Process
-	sink    native.Sink
-	writeMu sync.Mutex
+	proc   procutil.Process
+	sink   native.Sink
+	writer *agentio.Writer
+	// calls are the requests waiting for app-server's response.
+	calls  agentio.Calls[int64, callResult]
+	nextID atomic.Int64
 
 	inbox chan rpcMessage
 	tasks chan func()
@@ -120,8 +119,6 @@ type Adapter struct {
 	mu       sync.Mutex
 	started  bool
 	closed   bool
-	nextID   int64
-	calls    map[int64]*call
 	threadID string
 	// activeTurn is the turn app-server is working on, or "".
 	activeTurn string
@@ -159,13 +156,6 @@ var (
 	_ native.Configurable = (*Adapter)(nil)
 	_ native.Compacter    = (*Adapter)(nil)
 )
-
-type call struct {
-	// onResult runs in the read loop before the caller sees the response,
-	// so the loop's state is updated before later notifications.
-	onResult func(result json.RawMessage, err *rpcError)
-	ch       chan callResult
-}
 
 type callResult struct {
 	result json.RawMessage
@@ -206,7 +196,7 @@ func newAdapter(cfg Config, opts launchOptions, resumeRef string) *Adapter {
 		tasks:        make(chan func()),
 		loopDone:     make(chan struct{}),
 		exited:       make(chan struct{}),
-		calls:        make(map[int64]*call),
+		writer:       agentio.NewWriter("codex app-server"),
 		interrupting: make(map[string]bool),
 		requests:     make(map[string]*pendingRequest),
 	}
@@ -252,6 +242,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		// The adapter is done: Close and another Start must not close the
 		// channels again.
 		a.closed = true
+		a.calls.Close(errExited)
 		close(a.loopDone)
 		close(a.exited)
 		a.mu.Unlock()
@@ -259,6 +250,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	}
 	a.proc = proc
 	a.sink = sink
+	a.writer.Attach(proc.Stdin())
 	a.mu.Unlock()
 
 	go a.read(proc.Stdout())
@@ -563,6 +555,7 @@ func (a *Adapter) Close() error {
 		proc := a.proc
 		if proc == nil && !a.closed {
 			// Never started, so nothing else closes them.
+			a.calls.Close(errExited)
 			close(a.loopDone)
 			close(a.exited)
 		}
@@ -579,6 +572,10 @@ func (a *Adapter) Close() error {
 			Name:       "Codex app-server",
 		})
 	})
+	// Stop returns after the kill without waiting for the exit; a Reload
+	// resumes the same thread at once, which the old process must not
+	// still hold.
+	<-a.exited
 	return nil
 }
 
@@ -588,43 +585,28 @@ var errExited = errors.New("codex app-server exited")
 
 // call sends a request and waits for its response, bounded by ctx. Once
 // the loop has ended, waiting calls fail with errExited.
+// onResult runs in the read loop before the caller sees the response, so
+// the loop's state is updated before later notifications.
 func (a *Adapter) call(ctx context.Context, method string, params any, onResult func(json.RawMessage, *rpcError)) (json.RawMessage, error) {
-	a.mu.Lock()
-	if a.loopEnded() {
-		a.mu.Unlock()
-		return nil, errExited
+	id := a.nextID.Add(1)
+	var then func(callResult, error)
+	if onResult != nil {
+		then = func(res callResult, _ error) { onResult(res.result, res.err) }
 	}
-	a.nextID++
-	id := a.nextID
-	c := &call{onResult: onResult, ch: make(chan callResult, 1)}
-	a.calls[id] = c
-	a.mu.Unlock()
-
-	if err := a.write(rpcRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params}); err != nil {
-		a.dropCall(id)
+	c, err := a.calls.Add(id, then)
+	if err != nil {
 		return nil, err
 	}
-	select {
-	case res := <-c.ch:
-		return res.unpack()
-	case <-ctx.Done():
-		a.dropCall(id)
-		return nil, ctx.Err()
-	case <-a.loopDone:
-		// The loop may have delivered the response just before it ended.
-		select {
-		case res := <-c.ch:
-			return res.unpack()
-		default:
-			return nil, errExited
-		}
+	if err := a.write(rpcRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params}); err != nil {
+		a.calls.Drop(id)
+		return nil, err
 	}
-}
-
-func (a *Adapter) dropCall(id int64) {
-	a.mu.Lock()
-	delete(a.calls, id)
-	a.mu.Unlock()
+	res, err := c.Wait(ctx)
+	if err != nil {
+		a.calls.Drop(id)
+		return nil, err
+	}
+	return res.unpack()
 }
 
 func (a *Adapter) notify(method string, params any) error {
@@ -633,26 +615,12 @@ func (a *Adapter) notify(method string, params any) error {
 
 // write sends one message on app-server's stdin.
 func (a *Adapter) write(v any) error {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	a.writeMu.Lock()
-	defer a.writeMu.Unlock()
-	if _, err := a.proc.Stdin().Write(data); err != nil {
-		return fmt.Errorf("write to codex app-server: %w", err)
-	}
-	return nil
+	return a.writer.Write(v)
 }
 
 // writeAsync sends a message without blocking the read loop.
 func (a *Adapter) writeAsync(v any) {
-	go func() {
-		if err := a.write(v); err != nil {
-			a.log.Debug("Failed to write to codex app-server", "error", err)
-		}
-	}()
+	a.writer.WriteAsync(v, a.log)
 }
 
 // inLoop runs f in the read loop, so it may call the sink. Unless it
@@ -671,24 +639,15 @@ func (a *Adapter) inLoop(ctx context.Context, f func()) error {
 // read decodes app-server's stdout into the inbox until EOF.
 func (a *Adapter) read(r io.Reader) {
 	defer close(a.inbox)
-	br := bufio.NewReaderSize(r, readBufferSize)
-	for {
-		line, err := br.ReadBytes('\n')
-		if len(bytes.TrimSpace(line)) > 0 {
-			var msg rpcMessage
-			if jerr := json.Unmarshal(line, &msg); jerr != nil {
-				a.log.Warn("Ignoring a line from codex app-server that is not JSON", "error", jerr, "line", native.OneLine(string(line), 200))
-			} else {
-				a.inbox <- msg
-			}
-		}
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				a.log.Debug("Reading codex app-server output failed", "error", err)
-			}
+	agentio.ReadLines(r, "codex app-server", 0, a.log, func(line []byte) {
+		var msg rpcMessage
+		if err := json.Unmarshal(line, &msg); err != nil {
+			// The line isn't logged: it can hold the user's prompt.
+			a.log.Warn("Ignoring a line from codex app-server that is not JSON", "error", err)
 			return
 		}
-	}
+		a.inbox <- msg
+	})
 }
 
 // run is the read loop: it handles app-server's messages in order, and
@@ -703,6 +662,7 @@ func (a *Adapter) run() {
 		case msg, ok := <-a.inbox:
 			if !ok {
 				a.loop.exited()
+				a.calls.Close(errExited)
 				return
 			}
 			a.dispatch(msg)
@@ -740,15 +700,5 @@ func (a *Adapter) handleResponse(msg rpcMessage) {
 	if json.Unmarshal(msg.ID, &id) != nil {
 		return
 	}
-	a.mu.Lock()
-	c := a.calls[id]
-	delete(a.calls, id)
-	a.mu.Unlock()
-	if c == nil {
-		return
-	}
-	if c.onResult != nil {
-		c.onResult(msg.Result, msg.Error)
-	}
-	c.ch <- callResult{result: msg.Result, err: msg.Error}
+	a.calls.Resolve(id, callResult{result: msg.Result, err: msg.Error}, nil)
 }

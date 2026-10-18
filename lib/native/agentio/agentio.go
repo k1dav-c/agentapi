@@ -103,6 +103,16 @@ func (w *Writer) Write(v any) error {
 	return nil
 }
 
+// Writing reports whether a write is under way, waiting for the agent to
+// read: tests catch an adapter blocked on a write with it.
+func (w *Writer) Writing() bool {
+	if w.mu.TryLock() {
+		w.mu.Unlock()
+		return false
+	}
+	return true
+}
+
 // WriteAsync writes v from a goroutine of its own, for the adapter's loop,
 // which must not wait for an agent that doesn't read. A failure is logged.
 func (w *Writer) WriteAsync(v any, logger *slog.Logger) {
