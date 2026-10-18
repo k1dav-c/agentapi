@@ -36,8 +36,35 @@ func TestLoadServerOptions(t *testing.T) {
 				assert.Equal(t, AgentTypeClaude, opts.agentType)
 				assert.Equal(t, "claude", opts.agent)
 				assert.Equal(t, []string{"--model", "opus"}, opts.agentArgs)
-				assert.Equal(t, httpapi.TransportPTY, opts.transport)
+				assert.Equal(t, httpapi.TransportNative, opts.transport)
 				assert.Equal(t, st.StatePersistenceConfig{}, opts.state)
+			},
+		},
+		"codex, pi and the demo agent default to native": {
+			args:   []string{"native-demo"},
+			values: map[string]any{FlagType: "custom"},
+			check: func(t *testing.T, opts serverOptions) {
+				assert.Equal(t, httpapi.TransportNative, opts.transport)
+				for _, agent := range []string{"codex", "pi"} {
+					other, err := loadServerOptions(flagsWith(nil), []string{agent})
+					require.NoError(t, err)
+					assert.Equal(t, httpapi.TransportNative, other.transport, agent)
+				}
+			},
+		},
+		"an agent without a native adapter defaults to PTY": {
+			args: []string{"aider"},
+			check: func(t *testing.T, opts serverOptions) {
+				assert.Equal(t, httpapi.TransportPTY, opts.transport)
+				custom, err := loadServerOptions(flagsWith(nil), []string{"bash"})
+				require.NoError(t, err)
+				assert.Equal(t, httpapi.TransportPTY, custom.transport, "a custom agent")
+			},
+		},
+		"--transport pty keeps a native agent on PTY": {
+			values: map[string]any{FlagTransport: "pty"},
+			check: func(t *testing.T, opts serverOptions) {
+				assert.Equal(t, httpapi.TransportPTY, opts.transport)
 			},
 		},
 		"--type names a wrapper's agent": {
@@ -51,6 +78,8 @@ func TestLoadServerOptions(t *testing.T) {
 			values: map[string]any{FlagStateFile: "/tmp/state.json", FlagLoadState: false},
 			check: func(t *testing.T, opts serverOptions) {
 				assert.Equal(t, st.StatePersistenceConfig{StateFile: "/tmp/state.json", SaveState: true}, opts.state)
+				// The state file is the PTY transport's persistence.
+				assert.Equal(t, httpapi.TransportPTY, opts.transport)
 			},
 		},
 		"--experimental-acp is --transport acp": {
@@ -60,7 +89,7 @@ func TestLoadServerOptions(t *testing.T) {
 			},
 		},
 		"native with a state DB": {
-			values: map[string]any{FlagTransport: "native", FlagStateDB: "/tmp/agent.db"},
+			values: map[string]any{FlagStateDB: "/tmp/agent.db"},
 			check: func(t *testing.T, opts serverOptions) {
 				assert.Equal(t, httpapi.TransportNative, opts.transport)
 				assert.Equal(t, "/tmp/agent.db", opts.stateDB)
@@ -101,7 +130,7 @@ func TestLoadServerOptionsRefuses(t *testing.T) {
 		"ACP and native":                {map[string]any{FlagExperimentalACP: true, FlagTransport: "native"}, "--experimental-acp and --transport=native are mutually exclusive"},
 		"a state file with ACP":         {map[string]any{FlagTransport: "acp", FlagStateFile: "/tmp/s.json"}, "ACP mode doesn't support state persistence"},
 		"a state file with native":      {map[string]any{FlagTransport: "native", FlagStateFile: "/tmp/s.json"}, "the native transport doesn't support --state-file; use --state-db"},
-		"a state DB with PTY":           {map[string]any{FlagStateDB: "/tmp/agent.db"}, "--state-db needs --transport native"},
+		"a state DB with PTY":           {map[string]any{FlagTransport: "pty", FlagStateDB: "/tmp/agent.db"}, "--state-db needs --transport native"},
 		"the OpenAPI schema with ACP":   {map[string]any{FlagPrintOpenAPI: true, FlagExperimentalACP: true}, "flags --print-openapi and --experimental-acp are mutually exclusive"},
 		"a bind address with a port":    {map[string]any{FlagBind: "127.0.0.1:3284"}, "invalid --bind: '127.0.0.1:3284' must not include a port; use --port"},
 		"a bind address that isn't one": {map[string]any{FlagBind: "not a host"}, "invalid --bind"},

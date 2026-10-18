@@ -99,10 +99,10 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 	if opts.state, err = stateFileOptions(flags); err != nil {
 		return serverOptions{}, err
 	}
-	if opts.transport, err = transportOption(flags); err != nil {
+	persists := opts.state.LoadState || opts.state.SaveState
+	if opts.transport, err = transportOption(flags, opts.agentType, opts.agent, persists); err != nil {
 		return serverOptions{}, err
 	}
-	persists := opts.state.LoadState || opts.state.SaveState
 	switch {
 	case opts.transport == httpapi.TransportACP && persists:
 		return serverOptions{}, fmt.Errorf("ACP mode doesn't support state persistence")
@@ -140,9 +140,21 @@ func stateFileOptions(flags flagSource) (st.StatePersistenceConfig, error) {
 }
 
 // transportOption reads --transport, and --experimental-acp, the older
-// name of --transport acp.
-func transportOption(flags flagSource) (httpapi.Transport, error) {
+// name of --transport acp. Without either, an agent the native transport can
+// drive uses it, unless a state file asks for the PTY transport's
+// persistence, and every other agent uses the PTY transport.
+func transportOption(flags flagSource, agentType AgentType, program string, stateFile bool) (httpapi.Transport, error) {
 	acp := flags.GetBool(FlagExperimentalACP)
+	if !flags.IsSet(FlagTransport) {
+		switch {
+		case acp:
+			return httpapi.TransportACP, nil
+		case hasNativeAdapter(agentType, program) && !stateFile:
+			return httpapi.TransportNative, nil
+		default:
+			return httpapi.TransportPTY, nil
+		}
+	}
 	switch value := flags.GetString(FlagTransport); value {
 	case "", "pty":
 		if acp {

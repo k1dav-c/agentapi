@@ -1,0 +1,348 @@
+# 聊天介面導覽
+
+[English](chat-ui.md) | 繁體中文
+
+AgentAPI 在 `/chat` 提供聊天介面。它內建在 `agentapi` 執行檔裡，所有 transport 都能使用，
+桌面和手機都可以，而且只透過 [HTTP API](../README.zh-TW.md#http-api-參考) 和伺服器溝通。
+本導覽會逐一介紹它的每個部分。
+
+截圖是 AgentAPI v0.24.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；demo 的
+回覆、工具結果、模型和用量都是模擬的，TTY mode 則是以 PTY agent 執行的 bash。
+[scripts/capture-docs.mjs](../scripts/capture-docs.mjs) 可以重新擷取所有截圖（見
+[截圖說明](screenshots/README.md)）。標示 *native* 的部分需要
+[native transport](../README.zh-TW.md#native-transport)，Claude Code、Codex 和 Pi 預設就使用它。
+
+## 目錄
+
+- [視窗](#視窗)
+- [任務與對話紀錄](#任務與對話紀錄)
+- [送出任務](#送出任務)
+- [Agent 設定](#agent-設定)
+- [請求與決策卡片](#請求與決策卡片)
+- [檔案](#檔案)
+- [工作階段瀏覽器](#工作階段瀏覽器)
+- [終端機](#終端機)
+- [工作階段詳細資訊與提醒](#工作階段詳細資訊與提醒)
+- [手機](#手機)
+- [連線與快取](#連線與快取)
+
+## 視窗
+
+![聊天介面中的兩個已完成任務：提示詞、工具呼叫、思考旁註和輸入框](screenshots/chat-desktop.png)
+
+- **標頭。** agent 的標誌和類型、工作階段名稱和 AgentAPI 版本。右側是狀態（Ready、附計時器的
+  Working 或 Needs you；點一下會開啟[工作階段詳細資訊](#工作階段詳細資訊與提醒)）、到目前為止
+  用掉的 token 數，以及[搜尋](#搜尋)、[終端機](#終端機)（native transport 是 shell 終端機，
+  PTY 則是 TTY mode）、[工作階段瀏覽器](#工作階段瀏覽器)和淺色或深色主題的按鈕。
+- **對話紀錄。** 每個任務一個區塊，由舊到新排列。左欄顯示每個任務的開始時間和花了多久。
+- **輸入框。** 訊息欄和它的工具列：*native* 權限模式、模型與推理強度，以及 context 用了多少；
+  接著是附件按鈕、更多輸入選項和送出按鈕。下方那一行列出可用的按鍵。
+- 右下角的 ↑ 和 ↓ 按鈕會跳到上一個和下一個任務。
+
+## 任務與對話紀錄
+
+你送出的每則訊息都會開始一個任務。任務會先在標示「You」的色塊中顯示你的提示詞，接著依序呈現
+agent 做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列，以及它的思考內容。任務的標頭會
+顯示它的編號和狀態（Queued、Working、Waiting for you、Done 或 Failed）、工作中時的 Stop
+按鈕，以及它的 ⋯ 選單。
+
+### 工具呼叫
+
+![展開的工具呼叫，包含它的輸入和結果](screenshots/tool-call.png)
+
+每個工具呼叫占一列：它的指令（`$ ls`）或工具名稱、狀態（等待核准、錯誤、失敗指令的結束代碼）
+和耗時。點一下這一列就能看到工具的輸入和完整結果。讀取、寫入或編輯檔案的工具，列上的檔名會
+開啟[檔案檢視器](#檔案)；展開修改過檔案的呼叫，會以 diff 顯示它的變更，原始輸入點一下就能
+看到。圖片形式的工具結果（Claude Code 讀取截圖、Codex 的 `view_image`）會顯示為縮圖，點開
+就能看原尺寸的圖片。
+
+### 思考內容
+
+在寬螢幕上，agent 的思考內容會以旁註顯示在右側，緊鄰它所屬的步驟；較長的旁註只顯示六行，
+點一下才會完整顯示。在窄螢幕上，它會收合成任務中的一行「Thinking · *標題*」。
+
+### 訊息與較長的任務
+
+每則 agent 訊息都有按鈕，可以改以原始文字而非 Markdown 顯示（每則訊息分開切換）、在訊息中
+搜尋，以及複製它；你的提示詞則有複製按鈕。步驟很多的任務只會顯示最近的 40 個步驟，
+**Show *n* earlier steps** 會顯示其餘的步驟。
+
+### 任務選單
+
+![任務選單，包含 Preview Markdown、Copy task and output 和 Export Markdown](screenshots/task-menu.png)
+
+任務標頭的 ⋯ 按鈕會把任務轉成 Markdown：提示詞、agent 的輸出，以及每個工具呼叫和它的輸入與
+結果。**Copy task and output** 會把它複製到剪貼簿，**Export Markdown** 會把它下載成檔案，
+**Preview Markdown** 則會先顯示它，並提供 Copy 和 Download 按鈕。
+
+![任務的 Markdown 預覽，附有 Copy 和 Download](screenshots/task-preview.png)
+
+### 搜尋
+
+![在對話紀錄中搜尋「notes」：符合的結果會醒目標示並計數](screenshots/search.png)
+
+搜尋按鈕（⌘F / Ctrl+F）會在對話紀錄上方開啟搜尋列。它會計算符合的任務數和符合處數，
+醒目標示它們，並可用箭頭逐一切換。旁邊的選單可以只列出執行中、排隊中、失敗、已完成，
+或有工具錯誤的任務。搜尋期間，符合的訊息會以純文字顯示，較長任務的每個步驟都會顯示出來，
+含有符合內容的工具呼叫也會展開。
+
+## 送出任務
+
+### 輸入框
+
+按 Enter 送出，Shift+Enter 換行。迴紋針按鈕可以附加檔案，每個最大 10 MB；貼上圖片也會把它
+加為附件（貼上的文字仍然是文字）。附件會顯示在輸入框中，圖片以縮圖呈現、點開就能看原尺寸，
+送出前也可以移除。
+
+![附加了一張圖片的輸入框](screenshots/attachments.png)
+
+agent 收到的是每個附件的路徑。*native* 接受圖片的 agent（Claude Code、Codex 和 Pi）也會以
+圖片的形式收到 PNG、JPEG、GIF 和 WebP 附件。瀏覽器支援語音辨識時，
+**More input options**（⋯）提供語音輸入：以瀏覽器的語言把你說的話聽寫進輸入框。
+
+草稿和它的附件在重新載入頁面後仍會保留。沒有送達伺服器的訊息會留在聊天中並標示為未送出，
+附有重試或捨棄的按鈕，重新載入後也一樣。
+
+### Agent 工作中時
+
+![較長的回合中有兩個排隊中的任務，送出選單已開啟：Queue、Steer 和 Interrupt & send](screenshots/queue-steer.png)
+
+agent 工作中時送出的訊息會在佇列中等待（顯示在輸入框裡、訊息欄下方），回合結束後依序執行；
+佇列保存在伺服器上，所以每個開著的聊天畫面都看得到。每個排隊中的任務都可以編輯、上下移動、
+移除，或 *native* 立即 steer 進正在進行的回合（↳ 按鈕）。*native* 送出按鈕的選單提供三種送出方式：
+
+- **Queue**（Enter）：等這個回合結束再送出。
+- **Steer**（⌘/Ctrl+Enter）：加進 agent 正在進行的回合。
+- **Interrupt & send**（⌘/Ctrl+Shift+Enter）：停止這個回合，然後送出。
+
+旁邊的紅色按鈕和任務的 Stop 按鈕都會中斷回合。agent 在等待某個請求的回覆時，新的訊息會
+排在該請求之後。
+
+### 斜線指令
+
+![輸入斜線後列出的斜線指令](screenshots/slash-commands.png)
+
+*native* 輸入 `/` 會列出由聊天介面自己執行的指令，用來做 agent 的終端機介面原本會做的事；
+按 Tab 可以補完指令。其他以 `/` 開頭的內容都會原樣送給 agent，所以它自己的指令（例如 Claude Code
+的 `/code-review`）仍然可以使用。
+
+| 指令 | 作用 |
+| --- | --- |
+| `/model [model]` | 切換模型，或列出模型 |
+| `/effort [effort]` | 變更推理強度 |
+| `/mode [bypass\|auto\|ask\|plan]` | 變更權限模式 |
+| `/plan` | 切換到 plan 模式 |
+| `/compact` | 摘要對話以騰出 context（Claude Code 由聊天介面送出它自己的 `/compact` 來壓縮） |
+| `/clear` | 開始新的對話：在新的工作階段中重新啟動 agent |
+| `/terminal` | 開啟 shell 終端機 |
+| `/login` | 在 shell 終端機中執行 agent 的登入指令 |
+| `/help` | 列出這些指令 |
+
+`/model`、`/effort`、`/mode` 和 `/plan` 只在 agent 有設定可以切換時出現，`/terminal` 和
+`/login` 則在 shell 終端機啟用時出現。
+
+### 鍵盤快捷鍵
+
+![鍵盤快捷鍵](screenshots/keyboard-shortcuts.png)
+
+按 ? 會顯示快捷鍵；工作階段詳細資訊的選單裡也有。
+
+## Agent 設定
+
+*native* 輸入框的工具列可以在 agent 執行時變更它的設定（`PUT /settings`）。這些設定在整個
+工作階段中都有效：重新啟動、重新登入之後，以及使用 `--state-db` 時 AgentAPI 重新啟動之後，
+AgentAPI 都會再把它們套用到 agent。
+
+### 權限模式
+
+![權限模式選單：Bypass、Auto、Ask 和 Plan](screenshots/permission-mode.png)
+
+- **Bypass**（預設）：工具直接執行，不會詢問。
+- **Auto**：由 agent 自己的審查決定什麼可以執行。
+- **Ask**：需要核准的工具呼叫會先以[核准](#核准)的形式送到聊天介面。
+- **Plan**：agent 會先提出[計畫](#計畫)，然後才修改任何東西。
+
+Pi 沒有權限模式，所以它的工具列沒有模式選單。
+
+### 模型與推理強度
+
+![模型選單，列出三個模型和所選模型的推理強度](screenshots/model-settings.png)
+
+選單會列出 agent 的模型和它們的說明，以及所選模型支援的推理強度。Codex 會在下一個回合才採用
+新的模型或推理強度。
+
+### Context 與用量限制
+
+![context 彈出視窗：context window 中的 token 數，以及 5 小時與每週的用量限制](screenshots/context-usage.png)
+
+圓環顯示 context window 用了多少。它的彈出視窗列出上一個回合後 context 中的 token 數，以及
+帳號的用量限制、各用了多少和何時重置：Claude Code 的 5 小時與每週限制、Codex 的用量窗口。
+context 滿了時，agent 會壓縮它；`/compact` 則會立刻壓縮。
+
+## 請求與決策卡片
+
+agent 向你提出的事項會以卡片顯示在輸入框上方，agent 則等待你回應。卡片上方的狀態列、
+標頭和分頁標題會顯示「Needs you」，任務會顯示「Waiting for you」，它的工具呼叫列則會
+標示它在等什麼。數字鍵可以選擇選項。每個請求只會被回覆一次，任何開著的聊天畫面都能回覆；
+已經無法回覆的請求會註明這一點。
+
+### 核准
+
+![指令的核准卡片：Allow、Always allow Bash in this session，以及可附註的 Deny](screenshots/native-approval.png)
+
+*native* 需要你核准的指令或檔案變更（在 ask 模式下，或 agent 自己的政策要求詢問時）會顯示
+將要執行什麼，以及原因。**Allow** 只執行這一次，**Always allow** 在這個工作階段剩下的時間裡
+都允許這個工具，**Deny** 則拒絕它；可選的附註會告訴 agent 改做什麼。
+
+### 提問
+
+![提問卡片停在三個步驟中的第一步：Package manager、Checks 和 Notes](screenshots/native-question.png)
+
+*native* agent 的提問一次一個步驟：單選、複選或自由輸入文字。**Next** 會前往下一個步驟，
+最後一個步驟會一起送出所有答案。祕密答案在輸入時會被遮蔽，並以 `[redacted]` 保存。
+
+### 計畫
+
+![計畫卡片，包含以 Markdown 顯示的計畫、Approve the plan、Keep planning 和回饋欄](screenshots/native-plan.png)
+
+*native* 計畫以 Markdown 顯示。你可以核准它，或繼續規劃並告訴 agent 要改什麼。Claude Code
+和 Codex 還會讓你選擇 agent 接下來如何實作計畫：Claude Code 可以略過權限、自動接受編輯，或由你
+核准編輯；Codex 則是 bypass、auto review 或 ask 模式。
+
+### 終端機對話框
+
+使用 PTY transport 時，agent 自己的終端機對話框（例如 Claude Code 的
+「Do you want to proceed?」）也會變成同樣的卡片，聊天介面會用對話框預期的按鍵回答它們。
+有自由文字欄位的對話框也可以用一般訊息回答。
+
+### 登入
+
+![登入卡片：要執行的指令、執行它的主機與使用者、Run in terminal 和 Check again](screenshots/login-card.png)
+
+agent 尚未登入，或在工作階段中登入失效時，登入卡片會列出要執行的指令（`claude auth login`、
+`codex login` 或 Pi 的 `/login`），以及要在哪台主機上、以哪個使用者執行。
+**Run in terminal** 會在 [shell 終端機](#shell-終端機)中執行它；**Check again** 會立刻檢查。
+AgentAPI 也會每 5 秒重試一次，期間的訊息會在佇列中等待。（截圖以 `dev-machine` 和 `dev`
+代替真實的主機和使用者。）
+
+## 檔案
+
+聊天裡的檔名會開啟檢視器，顯示 agent 正在處理的檔案：工具呼叫列上的檔名、agent 回覆中
+inline code 裡的路徑（`lib/foo.go:12` 會開在第 12 行），以及 Explorer 的 Files 分頁。只能
+開啟 agent 工作目錄裡的檔案。檢視器的標頭可以重新載入檔案；在手機上，檢視器會占滿整個螢幕。
+
+### 檔案內容
+
+![檔案檢視器開啟 index.html，顯示行號與語法高亮](screenshots/file-viewer.png)
+
+**File** 以行號和語法高亮顯示檔案，最多 1 MiB。
+
+### 預覽
+
+HTML、Markdown 和 SVG 檔案有 **Preview** 分頁，圖片檔則直接顯示圖片。
+
+![index.html 的預覽：套用樣式表並顯示 logo 的頁面](screenshots/file-preview.png)
+
+HTML 頁面呈現時，它以相對路徑引用的樣式表、腳本、圖片、字型和影音都會內嵌進頁面（每個檔案
+最多 4 MiB，合計 16 MiB；沒有內嵌的項目會列在提示中）。頁面在有 sandbox、沒有自己 origin
+的 frame 中執行：它的腳本可以執行，但無法存取聊天介面、它的登入狀態或 API，儲存空間和
+cookie 也只在預覽開著的期間保留。
+
+![Markdown 檔案的預覽，包含標題、圖片、清單、表格和程式碼](screenshots/file-markdown.png)
+
+Markdown 檔案會直接開在預覽。相對路徑的圖片會從工作目錄載入，相對連結會在檢視器中
+開啟該檔案（`#L12` 會開在那一行）。PNG、JPEG、GIF、WebP、BMP、ICO 和 SVG 檔案會以圖片顯示。
+
+### 差異
+
+![Diff 分頁：README.md 尚未 commit 的變更](screenshots/file-diff.png)
+
+**Diff** 顯示工具呼叫造成的變更（**This change**），以及檔案相對於 `HEAD` 尚未 commit 的
+變更（**Uncommitted changes**）。diff 只讀取 git 儲存庫：不會執行儲存庫或使用者設定的
+diff driver、textconv 或 fsmonitor。
+
+## 工作階段瀏覽器
+
+Explorer（⌘K / Ctrl+K，或資料夾按鈕）有五個分頁。Index、Files 和 Links 清單有篩選框。
+
+### Index 分頁
+
+![Explorer 的 Index 分頁列出兩個任務](screenshots/explorer-index.png)
+
+工作階段中的任務，最新的在最上面；點一下就會跳到該任務。
+
+### Files 與 Links 分頁
+
+![Explorer 的 Links 分頁，顯示一個連結和它出自的任務](screenshots/explorer-links.png)
+
+**Files** 列出工作階段中提到的絕對檔案路徑，可以在檔案檢視器中開啟。
+**Links** 列出網頁連結，每個都附上它出自的任務，被終端機折到下一行的連結也包括在內。
+
+### MCP 分頁
+
+使用 Claude Code、Codex 和 Pi 時，MCP 分頁會在 AgentAPI 管理的設定檔中編輯 agent 的 MCP
+伺服器（Claude Code 是工作目錄中的 `.mcp.json`，Codex 是 `$CODEX_HOME/config.toml`，Pi 是
+`$PI_CODING_AGENT_DIR/mcp.json`）：
+
+- **MCP servers**：以 agent 自己格式的 JSON 呈現伺服器，可以匯入和匯出。儲存時會以原子方式
+  寫入檔案，除非你關閉這個選項，否則會重新啟動 agent 來載入它。使用 native transport 時，
+  能接續工作階段的 agent 會接續原本的工作階段，所以對話會保留。
+- **Connectivity**：檢查每個伺服器能否啟動或回應。
+- **Profiles**：儲存、套用、匯入和匯出整組伺服器。
+
+API 請參閱 [MCP 管理](../README.zh-TW.md#mcp-管理)。
+
+### Session 分頁
+
+![Explorer 的 Session 分頁要求再點一次才會重新啟動 agent](screenshots/explorer-session.png)
+
+**Restart agent** 會停止 agent、清除對話，並在新的工作階段中重新啟動它；它會要求你再點一次。
+AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的發行版。
+
+## 終端機
+
+### Shell 終端機
+
+![shell 終端機：在 agent 工作目錄中執行的 git status 和 git log，以及按鍵列](screenshots/terminal.png)
+
+*native* 終端機按鈕（或 `/terminal`）會在 agent 的工作目錄中開啟一個 shell，方便登入和執行
+簡單的指令。它是真正的終端機，大小會配合視窗。所有開啟它的人共用同一個 shell，沒有人在看時
+它也會繼續執行。按鍵列可以送出手機鍵盤沒有的 Esc、Tab、方向鍵、Enter 和 Ctrl 鍵。以
+`--terminal=false` 啟動 AgentAPI 可以關閉它。
+
+### TTY mode
+
+![TTY mode：bash 的畫面和欄數尺規，寬度為 100 欄](screenshots/tty-mode.png)
+
+使用 PTY transport 時，終端機按鈕會把對話換成 agent 自己的終端機畫面，供聊天畫面顯示
+不正常時使用。每個按鍵都會直接送給 agent：方向鍵、Ctrl 和 Alt 組合鍵、貼上的內容和
+輸入法輸入。尺規顯示 agent 實際的終端機寬度（這裡是 `--term-width 100`）；字型大小會隨
+視窗縮放（11–20px）。**Back to chat** 會回到聊天畫面。
+
+## 工作階段詳細資訊與提醒
+
+![工作階段詳細資訊選單：狀態、agent、工作階段、版本、活動、佇列和 token](screenshots/session-details.png)
+
+點選標頭中的狀態會開啟工作階段詳細資訊：狀態、agent、工作階段名稱、AgentAPI 版本、agent
+正在做什麼、佇列，以及輸入和輸出的 token 數。它的選單可以把對話下載成 JSONL、
+開啟瀏覽器通知，以及顯示鍵盤快捷鍵。
+
+分頁在背景時，圖示會以圓點顯示狀態：琥珀色表示 agent 需要你回應，藍色表示工作中，綠色表示
+任務完成。開啟通知時，瀏覽器也會顯示「*agent 名稱* needs you」或「*agent 名稱* finished」。
+
+## 手機
+
+![手機上的聊天介面](screenshots/chat-mobile.png)
+
+在手機上，對話紀錄會占滿整個寬度，思考內容收合在任務中，工具列則在訊息欄下方換行。請求卡片
+最多占螢幕的 60%，被截成兩行的標題可以展開來看完整內容。檔案檢視器會占滿整個螢幕，終端機
+則有按鍵列。
+
+![手機上的提問卡片](screenshots/mobile-question.png)
+
+## 連線與快取
+
+聊天介面透過 server-sent events 追蹤伺服器的狀態。心跳（heartbeat）能察覺連線中斷；它會
+自己重新連線，並只重播離線期間有變動的部分。狀態和網頁標題會顯示連線狀態。重新開啟很長的
+對話也很快：聊天介面會把對話紀錄快取在瀏覽器中（IndexedDB），先立即顯示，再只向伺服器取得
+之後的變更。

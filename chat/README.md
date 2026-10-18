@@ -33,7 +33,7 @@ controls without installing or paying for a real agent. Select it with this exac
 `--type custom`:
 
 ```bash
-go run main.go server --transport native --type custom -- native-demo
+go run main.go server --type custom -- native-demo
 ```
 
 Each turn streams thinking, a simulated tool call, and a reply. Include these keywords in a message

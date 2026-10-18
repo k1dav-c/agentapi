@@ -43,8 +43,9 @@ This file provides guidance to AI agents working with code in this repository.
 
 ## Architecture
 
-AgentAPI is a Go HTTP server that controls coding agents through three transports. PTY, the default,
-parses terminal output. Native mode uses Claude Code, Codex, and Pi's structured protocols.
+AgentAPI is a Go HTTP server that controls coding agents through three transports. Native mode, the
+default for Claude Code, Codex and Pi, uses their structured protocols. PTY, the default for every
+other agent, parses terminal output.
 Experimental ACP mode uses the Agent Client Protocol.
 
 ### Core components
@@ -55,7 +56,7 @@ Experimental ACP mode uses the Agent Client Protocol.
 - `lib/screentracker/` - Terminal output parsing and message splitting
 - `lib/termexec/` - Terminal process execution and management
 - `lib/msgfmt/` - Message formatting for different agent types (claude, goose, aider, codex, gemini, copilot, amp, cursor, auggie, amazonq, opencode, kimi, pi, custom)
-- `lib/native/` - Native transport (`--transport native`): one adapter per agent (`claude/`, `codex/`, `pi/`) driving its structured protocol, `procutil/` for the child process, `nativetest/` for tests
+- `lib/native/` - Native transport (the default for Claude Code, Codex and Pi): one adapter per agent (`claude/`, `codex/`, `pi/`) driving its structured protocol, `procutil/` for the child process, `nativetest/` for tests
 - `lib/statedb/` - SQLite persistence of native sessions (`--state-db`)
 - `chat/` - Next.js web UI (embedded into Go binary)
 

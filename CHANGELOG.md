@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Features
+
+- **Breaking:** Claude Code, Codex and Pi use the native transport by default: without
+  `--transport`, `agentapi server -- claude` speaks Claude Code's own protocol instead of driving its
+  terminal UI. Every other agent keeps the PTY transport, and so does a server started with
+  `--state-file`, the PTY transport's persistence. `--transport pty` (or `AGENTAPI_TRANSPORT=pty`)
+  keeps the old behavior, and `--state-db` no longer needs `--transport native`.
+
 ## v0.24.0
 
 ### Features

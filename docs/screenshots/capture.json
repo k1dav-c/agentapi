@@ -1,9 +1,10 @@
 {
-  "captured_at": "2026-10-18T12:43:50.839Z",
-  "agentapi_version": "0.23.0-123-gcf4c5f7-dirty",
-  "ui": "http://127.0.0.1:3311/chat/",
-  "api": "http://127.0.0.1:3311",
-  "agent": "native-demo",
+  "captured_at": "2026-10-18T15:30:18.712Z",
+  "agentapi_version": "0.24.0",
+  "agents": [
+    "native-demo",
+    "bash (PTY)"
+  ],
   "browser": "153.0.8010.12",
   "desktop_viewport": {
     "width": 1440,
@@ -16,11 +17,31 @@
   "images": [
     "chat-desktop.png",
     "tool-call.png",
+    "task-menu.png",
+    "task-preview.png",
+    "session-details.png",
+    "keyboard-shortcuts.png",
+    "permission-mode.png",
     "model-settings.png",
+    "context-usage.png",
+    "slash-commands.png",
+    "attachments.png",
     "explorer-index.png",
+    "explorer-links.png",
+    "explorer-session.png",
     "file-viewer.png",
+    "file-preview.png",
+    "file-markdown.png",
+    "file-diff.png",
+    "search.png",
+    "terminal.png",
     "chat-mobile.png",
+    "native-approval.png",
     "native-question.png",
-    "native-plan.png"
+    "mobile-question.png",
+    "native-plan.png",
+    "queue-steer.png",
+    "login-card.png",
+    "tty-mode.png"
   ]
 }
