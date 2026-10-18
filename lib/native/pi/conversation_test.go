@@ -32,7 +32,7 @@ func newConvFixture(t *testing.T) *convFixture {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conv := native.NewConversation(native.Config{
 		Factory: func(ref string) (native.Adapter, error) {
-			return newAdapter(Config{Logger: logger}, nil, ref, pi.start), nil
+			return newAdapter(Config{Logger: logger, StartProcess: pi.start}, nil, ref), nil
 		},
 		Logger: logger,
 	})
@@ -171,7 +171,7 @@ func TestModelSwitchReportsNoMixedSettings(t *testing.T) {
 	obs := &settingsObserver{}
 	conv := native.NewConversation(native.Config{
 		Factory: func(ref string) (native.Adapter, error) {
-			return newAdapter(Config{Logger: logger}, nil, ref, pi.start), nil
+			return newAdapter(Config{Logger: logger, StartProcess: pi.start}, nil, ref), nil
 		},
 		Logger:   logger,
 		Observer: obs,

@@ -136,7 +136,7 @@ func (a *Adapter) handleExit() {
 		t.stop()
 		a.flushThrottle(id)
 	}
-	a.logger.Info("Pi closed its output")
+	a.log.Info("Pi closed its output")
 }
 
 // decodeRecord decodes a stdout record of type typ, or logs it as
@@ -144,7 +144,7 @@ func (a *Adapter) handleExit() {
 func decodeRecord[T any](a *Adapter, line []byte, typ string) (T, bool) {
 	var v T
 	if err := json.Unmarshal(line, &v); err != nil {
-		a.logger.Warn("Malformed Pi record", "type", typ, "error", err)
+		a.log.Warn("Malformed Pi record", "type", typ, "error", err)
 		return v, false
 	}
 	return v, true
@@ -153,7 +153,7 @@ func decodeRecord[T any](a *Adapter, line []byte, typ string) (T, bool) {
 func (a *Adapter) handleLine(line []byte) {
 	var env envelope
 	if err := json.Unmarshal(line, &env); err != nil {
-		a.logger.Warn("Pi wrote a line that is not JSON", "error", err)
+		a.log.Warn("Pi wrote a line that is not JSON", "error", err)
 		return
 	}
 	switch env.Type {
@@ -172,7 +172,7 @@ func (a *Adapter) handleLine(line []byte) {
 	case "agent_end", "turn_start", "turn_end", "queue_update",
 		"compaction_start", "auto_retry_start", "bash_execution_update", "entry_appended",
 		"summarization_retry_scheduled", "summarization_retry_attempt_start", "summarization_retry_finished":
-		a.logger.Debug("Pi event", "type", env.Type)
+		a.log.Debug("Pi event", "type", env.Type)
 	case "message_start", "message_update", "message_end":
 		if ev, ok := decodeRecord[messageEvent](a, line, env.Type); ok {
 			a.handleMessageEvent(env.Type, ev)
@@ -202,7 +202,7 @@ func (a *Adapter) handleLine(line []byte) {
 			a.loop.sink.Error(fmt.Sprintf("Pi extension %s failed on %s: %s", ev.ExtensionPath, ev.Event, ev.Error), st.ErrorLevelWarning)
 		}
 	default:
-		a.logger.Debug("Unknown Pi record", "type", env.Type)
+		a.log.Debug("Unknown Pi record", "type", env.Type)
 	}
 }
 
@@ -223,7 +223,7 @@ func (a *Adapter) handleResponse(r response) {
 	p, deliver := a.takePending(r.ID)
 	if p == nil {
 		if !r.Success {
-			a.logger.Warn("Pi rejected a command", "command", r.Command, "error", r.Error)
+			a.log.Warn("Pi rejected a command", "command", r.Command, "error", r.Error)
 		}
 		return
 	}
@@ -258,7 +258,7 @@ func (a *Adapter) handlePromptResponse(p *pendingCmd, deliver bool, r response) 
 		case deliver:
 			// The caller gets the error ("No API key found for …").
 		case p.turn == 0:
-			a.logger.Warn("Pi rejected a prompt after its caller stopped waiting", "error", r.Error)
+			a.log.Warn("Pi rejected a prompt after its caller stopped waiting", "error", r.Error)
 		case a.isCurrentTurn(p.turn) && !a.isRunActive():
 			// The caller was told the prompt started: an extension dialog
 			// began its turn, which ends with the error.
@@ -277,7 +277,7 @@ func (a *Adapter) handlePromptResponse(p *pendingCmd, deliver bool, r response) 
 	}
 	var result promptResult
 	if err := json.Unmarshal(r.Data, &result); err != nil {
-		a.logger.Warn("Malformed Pi prompt result", "error", err)
+		a.log.Warn("Malformed Pi prompt result", "error", err)
 	}
 	if result.Disposition != "handled" {
 		// A run started, or the message went into the running one.
@@ -312,11 +312,11 @@ func deliverResult(p *pendingCmd, res cmdResult) {
 // handleState handles the get_state response of the handshake.
 func (a *Adapter) handleState(state sessionState) {
 	if a.resumeRef != "" && state.SessionID != a.resumeRef {
-		a.logger.Warn("Pi opened a different session than the one to resume", "want", a.resumeRef, "got", state.SessionID)
+		a.log.Warn("Pi opened a different session than the one to resume", "want", a.resumeRef, "got", state.SessionID)
 	}
 	a.setSettings(stateSettings(state))
 	a.setModelInfo(state.Model)
-	a.logger.Info("Pi session open", "session", state.SessionID, "file", state.SessionFile)
+	a.log.Info("Pi session open", "session", state.SessionID, "file", state.SessionFile)
 	if state.SessionID != "" {
 		a.loop.sink.SessionRef(state.SessionID)
 	}
@@ -457,7 +457,7 @@ func (a *Adapter) endInterruptedTurn(turn int) {
 	if !a.isCurrentTurn(turn) {
 		return
 	}
-	a.logger.Warn("Pi didn't end the interrupted turn; ending it here")
+	a.log.Warn("Pi didn't end the interrupted turn; ending it here")
 	a.endTurn()
 }
 
@@ -500,7 +500,7 @@ func (a *Adapter) cancelTurnDialogs(withdraw bool) {
 		}
 		go func(id string) {
 			if err := a.send(uiResponse{Type: "extension_ui_response", ID: id, Cancelled: true}); err != nil {
-				a.logger.Debug("Failed to cancel a Pi dialog", "id", id, "error", err)
+				a.log.Debug("Failed to cancel a Pi dialog", "id", id, "error", err)
 			}
 		}(id)
 	}

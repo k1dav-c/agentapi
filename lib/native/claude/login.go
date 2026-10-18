@@ -75,10 +75,10 @@ func (a *Adapter) checkLogin(ctx context.Context, env []string) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		a.cfg.Logger.Debug("Could not read Claude Code's login status; starting it anyway", "error", err)
+		a.log.Debug("Could not read Claude Code's login status; starting it anyway", "error", err)
 		return nil
 	}
-	a.cfg.Logger.Debug("Claude Code login status", "logged_in", loggedIn)
+	a.log.Debug("Claude Code login status", "logged_in", loggedIn)
 	if loggedIn {
 		return nil
 	}

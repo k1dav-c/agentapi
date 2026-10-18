@@ -114,10 +114,10 @@ func TestNewFactoryRejectsArgs(t *testing.T) {
 func TestStartAfterClose(t *testing.T) {
 	t.Parallel()
 	spawned := false
-	a := newAdapter(Config{}, nil, "", func(procutil.Command) (procutil.Process, error) {
+	a := newAdapter(Config{StartProcess: func(procutil.Command) (procutil.Process, error) {
 		spawned = true
 		return nil, errors.New("unexpected")
-	})
+	}}, nil, "")
 	require.NoError(t, a.Close())
 	assert.ErrorIs(t, a.Start(t.Context(), nativetest.NewSink(t)), errClosed)
 	assert.False(t, spawned)

@@ -113,6 +113,7 @@ func newAdapter(cfg Config, args parsedArgs, resumeRef string) *Adapter {
 	}
 	a := &Adapter{
 		cfg:         cfg,
+		log:         cfg.Logger.With("agent", "claude"),
 		args:        args,
 		resumeRef:   resumeRef,
 		parser:      newStreamParser(cfg.Clock, cfg.SnapshotInterval),
@@ -139,6 +140,7 @@ type Adapter struct {
 	proc   procutil.Process
 	sink   native.Sink
 	parser *streamParser
+	log    *slog.Logger
 	// reportedRef is the session id last reported with SessionRef, at
 	// first the session to resume. Read loop only.
 	reportedRef string
@@ -246,7 +248,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		Args:    buildArgs(a.args, a.sessionID, a.resumeRef),
 		Env:     buildEnv(a.cfg.Env),
 		Dir:     a.cfg.CWD,
-		Logger:  a.cfg.Logger,
+		Logger:  a.log,
 	}
 	if err := a.checkLogin(ctx, cmd.Env); err != nil {
 		return err
@@ -260,8 +262,8 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		return errClosed
 	}
 	// The arguments can hold secrets (inline --settings or --mcp-config).
-	a.cfg.Logger.Info("Starting Claude Code", "program", cmd.Program, "resume", a.resumeRef != "")
-	a.cfg.Logger.Debug("Claude Code command line", "args", cmd.Args)
+	a.log.Info("Starting Claude Code", "program", cmd.Program, "resume", a.resumeRef != "")
+	a.log.Debug("Claude Code command line", "args", cmd.Args)
 	proc, err := a.cfg.StartProcess(cmd)
 	if err != nil {
 		return err
@@ -308,7 +310,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	var info initializeInfo
 	_ = json.Unmarshal(response, &info)
 	a.readSettings(ctx, info)
-	a.cfg.Logger.Info("Claude Code is ready", "version", info.Version, "permission_mode", info.PermissionMode)
+	a.log.Info("Claude Code is ready", "version", info.Version, "permission_mode", info.PermissionMode)
 
 	a.mu.Lock()
 	a.started = true
@@ -446,7 +448,7 @@ func (a *Adapter) requestTitle(prompt string) {
 		}
 	}
 	if _, _, err := a.sendControl("generate_session_title", map[string]any{"description": prompt, "persist": true}, onResponse); err != nil {
-		a.cfg.Logger.Debug("Failed to ask Claude Code for a session title", "error", err)
+		a.log.Debug("Failed to ask Claude Code for a session title", "error", err)
 	}
 }
 
@@ -566,7 +568,7 @@ func (a *Adapter) Close() error {
 			StdinGrace: a.cfg.StopTimeout,
 			TermGrace:  a.cfg.StopTimeout,
 			Clock:      a.cfg.Clock,
-			Logger:     a.cfg.Logger,
+			Logger:     a.log,
 			Name:       "Claude Code",
 		})
 	})
@@ -611,7 +613,7 @@ func (a *Adapter) readLoop(stdout io.Reader) {
 // closes.
 func (a *Adapter) readLines(stdout io.Reader, lines chan<- []byte) {
 	defer close(lines)
-	agentio.ReadLines(stdout, "claude", 0, a.cfg.Logger, func(line []byte) { lines <- line })
+	agentio.ReadLines(stdout, "claude", 0, a.log, func(line []byte) { lines <- line })
 }
 
 // outputClosed sends the snapshots the throttle held back, fails the
@@ -645,7 +647,7 @@ func (a *Adapter) wake() {
 	if a.interruptAt.IsZero() || a.cfg.Clock.Since(a.interruptAt) < a.cfg.InterruptTimeout {
 		return
 	}
-	a.cfg.Logger.Warn("Claude Code did not end the interrupted turn; ending it here")
+	a.log.Warn("Claude Code did not end the interrupted turn; ending it here")
 	a.sendRich(a.parser.endTurn())
 	a.endTurn()
 }
@@ -654,13 +656,13 @@ func (a *Adapter) handleLine(line []byte) {
 	line = bytes.TrimSpace(line)
 	if len(line) == 0 || line[0] != '{' {
 		// Some builds print diagnostics on stdout.
-		a.cfg.Logger.Debug("Ignoring non-JSON output from Claude Code", "line", string(line[:min(len(line), 200)]))
+		a.log.Debug("Ignoring non-JSON output from Claude Code", "line", string(line[:min(len(line), 200)]))
 		return
 	}
 	var f frame
 	if err := decode(line, &f); err != nil {
 		// The line isn't logged: it can hold the user's prompt.
-		a.cfg.Logger.Warn("Failed to parse Claude Code output", "error", err)
+		a.log.Warn("Failed to parse Claude Code output", "error", err)
 		return
 	}
 	switch f.Type {
@@ -743,7 +745,7 @@ func (a *Adapter) handleControlRequest(f *frame) {
 	}
 	var r canUseTool
 	if err := decode(f.Request, &r); err != nil || r.ToolName == "" {
-		a.cfg.Logger.Warn("Refusing a permission request from Claude Code that AgentAPI can't read", "request_id", f.RequestID)
+		a.log.Warn("Refusing a permission request from Claude Code that AgentAPI can't read", "request_id", f.RequestID)
 		a.refuse(f.RequestID, "AgentAPI could not read the permission request")
 		return
 	}

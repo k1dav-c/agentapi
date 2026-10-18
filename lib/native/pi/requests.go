@@ -135,17 +135,17 @@ func (a *Adapter) handleUIRequest(req uiRequest) {
 			a.loop.sink.Error(req.Message, st.ErrorLevelError)
 			return
 		}
-		a.logger.Info("Pi extension notification", "type", req.NotifyType, "message", req.Message)
+		a.log.Info("Pi extension notification", "type", req.NotifyType, "message", req.Message)
 	case "setTitle":
-		a.logger.Debug("Pi extension set the title", "title", req.Title)
+		a.log.Debug("Pi extension set the title", "title", req.Title)
 		// The title stands in for a session name until Pi has one.
 		if a.loop.sessionName == "" && strings.TrimSpace(req.Title) != "" {
 			a.loop.sink.SessionName(req.Title)
 		}
 	case "setStatus", "setWidget", "set_editor_text":
-		a.logger.Debug("Pi extension UI update", "method", req.Method, "key", req.StatusKey+req.WidgetKey, "status", req.StatusText)
+		a.log.Debug("Pi extension UI update", "method", req.Method, "key", req.StatusKey+req.WidgetKey, "status", req.StatusText)
 	default:
-		a.logger.Debug("Unknown Pi extension UI request", "method", req.Method)
+		a.log.Debug("Unknown Pi extension UI request", "method", req.Method)
 	}
 }
 

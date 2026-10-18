@@ -276,7 +276,7 @@ func TestCloseBeforeStart(t *testing.T) {
 func TestCloseDuringFailedStart(t *testing.T) {
 	factory, err := NewFactory(Config{
 		Program: "codex",
-		Launch:  func(procutil.Command) (procutil.Process, error) { return nil, errors.New("no such program") },
+		StartProcess:  func(procutil.Command) (procutil.Process, error) { return nil, errors.New("no such program") },
 	})
 	require.NoError(t, err)
 	for range 200 {
@@ -750,7 +750,7 @@ func TestCloseWithBlockedWrite(t *testing.T) {
 		Program:     "codex",
 		Logger:      slog.New(slog.DiscardHandler),
 		StopTimeout: 20 * time.Millisecond,
-		Launch:      func(procutil.Command) (procutil.Process, error) { return proc, nil },
+		StartProcess:      func(procutil.Command) (procutil.Process, error) { return proc, nil },
 	})
 	require.NoError(t, err)
 	adapter, err := factory("")
@@ -796,8 +796,8 @@ func (p slowExit) Kill() error {
 func TestCloseWaitsForTheExit(t *testing.T) {
 	h := newHarness(t, "", nil, func(c *Config) {
 		c.StopTimeout = 10 * time.Millisecond
-		launch := c.Launch
-		c.Launch = func(cmd procutil.Command) (procutil.Process, error) {
+		launch := c.StartProcess
+		c.StartProcess = func(cmd procutil.Command) (procutil.Process, error) {
 			p, err := launch(cmd)
 			return slowExit{p.(*fakeProc)}, err
 		}

@@ -34,6 +34,10 @@ type Config struct {
 	// leaked from a parent agent session are removed either way.
 	Env    []string
 	Logger *slog.Logger
+	// StartProcess starts Pi; nil runs Program with procutil.Start.
+	StartProcess procutil.StartFunc
+	// Clock is the real clock when nil.
+	Clock quartz.Clock
 }
 
 // NewFactory returns a factory for Pi adapters, or an error for options
@@ -49,7 +53,7 @@ func NewFactory(cfg Config) (native.Factory, error) {
 		cfg.logger().Warn("Dropped Pi options that only affect its terminal UI", "args", dropped)
 	}
 	return func(resumeRef string) (native.Adapter, error) {
-		return newAdapter(cfg, args, resumeRef, procutil.Start), nil
+		return newAdapter(cfg, args, resumeRef), nil
 	}, nil
 }
 
@@ -126,7 +130,7 @@ type Adapter struct {
 	cfg Config
 	// args are the user's arguments passed on to Pi.
 	args      []string
-	logger    *slog.Logger
+	log       *slog.Logger
 	resumeRef string
 	start     procutil.StartFunc
 
@@ -193,16 +197,22 @@ var (
 
 // newAdapter creates an adapter that passes args (filtered by filterArgs)
 // on to Pi.
-func newAdapter(cfg Config, args []string, resumeRef string, start procutil.StartFunc) *Adapter {
+func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 	if cfg.Program == "" {
 		cfg.Program = "pi"
+	}
+	if cfg.StartProcess == nil {
+		cfg.StartProcess = procutil.Start
+	}
+	if cfg.Clock == nil {
+		cfg.Clock = quartz.NewReal()
 	}
 	return &Adapter{
 		cfg:              cfg,
 		args:             args,
-		logger:           cfg.logger().With("agent", "pi"),
+		log:              cfg.logger().With("agent", "pi"),
 		resumeRef:        resumeRef,
-		start:            start,
+		start:            cfg.StartProcess,
 		abortGrace:       abortGrace,
 		stdinGrace:       stdinGrace,
 		termGrace:        termGrace,
@@ -210,7 +220,7 @@ func newAdapter(cfg Config, args []string, resumeRef string, start procutil.Star
 		interval:         snapshotInterval,
 		maxLine:          agentio.MaxLine,
 		writer:           agentio.NewWriter("pi"),
-		clock:            quartz.NewReal(),
+		clock:            cfg.Clock,
 		pending:          make(map[string]*pendingCmd),
 		dialogs:          make(map[string]*dialog),
 		caps:             native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true},
@@ -230,8 +240,8 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	}
 	args := rpcArgs(a.args, sessionID)
 	// The arguments can hold secrets (--api-key).
-	a.logger.Info("Starting Pi in RPC mode", "program", a.cfg.Program, "resume", a.resumeRef != "")
-	a.logger.Debug("Pi command line", "args", args)
+	a.log.Info("Starting Pi in RPC mode", "program", a.cfg.Program, "resume", a.resumeRef != "")
+	a.log.Debug("Pi command line", "args", args)
 	a.mu.Lock()
 	closing := a.closing
 	a.mu.Unlock()
@@ -243,7 +253,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		Args:    args,
 		Dir:     a.cfg.CWD,
 		Env:     procenv.ForAgent(a.cfg.Env),
-		Logger:  a.logger,
+		Logger:  a.log,
 	})
 	if err != nil {
 		a.markDone(err)
@@ -267,7 +277,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	lines := make(chan []byte, 16)
 	go func() {
 		defer close(lines)
-		agentio.ReadLines(proc.Stdout(), "pi", a.maxLine, a.logger, func(line []byte) { lines <- line })
+		agentio.ReadLines(proc.Stdout(), "pi", a.maxLine, a.log, func(line []byte) { lines <- line })
 	}()
 	go a.eventLoop(lines)
 	go func() {
@@ -290,7 +300,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	var state sessionState
 	if err := json.Unmarshal(res.data, &state); err != nil {
 		// Not ours to judge: the session opens without what it says.
-		a.logger.Warn("Malformed Pi session state", "error", err)
+		a.log.Warn("Malformed Pi session state", "error", err)
 	} else if !state.hasModel() {
 		// The session is reported once Pi may start, so a start that
 		// waits for a login doesn't report one each time it is tried
@@ -537,13 +547,13 @@ func (a *Adapter) shutdown() {
 		case <-abort.done:
 		case <-a.procDone:
 		case <-time.After(a.abortGrace):
-			a.logger.Warn("Pi didn't stop its turn in time; closing it anyway")
+			a.log.Warn("Pi didn't stop its turn in time; closing it anyway")
 		}
 	}
 	procutil.Stop(proc, a.procDone, procutil.StopOptions{
 		StdinGrace: a.stdinGrace,
 		TermGrace:  a.termGrace,
-		Logger:     a.logger,
+		Logger:     a.log,
 		Name:       "Pi",
 	})
 }

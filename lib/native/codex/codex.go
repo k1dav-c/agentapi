@@ -36,9 +36,9 @@ type Config struct {
 	Env    []string
 	Logger *slog.Logger
 
-	// Launch starts app-server; nil runs Program with procutil.Start.
+	// StartProcess starts app-server; nil runs Program with procutil.Start.
 	// Tests inject pipes.
-	Launch procutil.StartFunc
+	StartProcess procutil.StartFunc
 	// StopTimeout is how long Close waits for app-server to exit after
 	// closing its stdin before it sends SIGTERM, and again before SIGKILL.
 	// Zero means 3s and 2s.
@@ -222,7 +222,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		a.mu.Unlock()
 		return errors.New("adapter already started")
 	}
-	launch := a.cfg.Launch
+	launch := a.cfg.StartProcess
 	if launch == nil {
 		launch = procutil.Start
 	}

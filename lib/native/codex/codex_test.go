@@ -101,7 +101,7 @@ func TestEnvironmentAndCommandLine(t *testing.T) {
 		Args:        []string{"-m", "gpt-6-luna", "-c", `model_reasoning_effort="low"`, "--enable", "foo", "-a", "untrusted", "-s", "danger-full-access", "--no-alt-screen"},
 		CWD:         "/work",
 		Env:         []string{"PATH=/bin", "CODEX_THREAD_ID=x", "CODEX_SANDBOX=seatbelt", "CODEX_HOME=/h", "CLAUDECODE=1"},
-		Launch:      func(c procutil.Command) (procutil.Process, error) { spec = c; return proc, nil },
+		StartProcess:      func(c procutil.Command) (procutil.Process, error) { spec = c; return proc, nil },
 		StopTimeout: 10 * time.Millisecond,
 	})
 	require.NoError(t, err)

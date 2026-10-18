@@ -38,7 +38,7 @@ func (a *Adapter) checkLogin(ctx context.Context) error {
 		return fmt.Errorf("pi didn't list its models: %w", err)
 	}
 	if res.err != nil {
-		a.logger.Debug("Pi didn't list its models; starting anyway", "error", res.err)
+		a.log.Debug("Pi didn't list its models; starting anyway", "error", res.err)
 		return nil
 	}
 	var list struct {
@@ -47,7 +47,7 @@ func (a *Adapter) checkLogin(ctx context.Context) error {
 	if json.Unmarshal(res.data, &list) != nil || list.Models == nil {
 		return nil
 	}
-	a.logger.Debug("Pi has no model", "available_models", len(*list.Models))
+	a.log.Debug("Pi has no model", "available_models", len(*list.Models))
 	if len(*list.Models) > 0 {
 		return nil
 	}

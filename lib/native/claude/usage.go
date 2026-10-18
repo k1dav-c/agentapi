@@ -100,7 +100,7 @@ func (a *Adapter) readContextUsage() {
 	ctx, cancel := context.WithTimeout(context.Background(), contextUsageTimeout)
 	defer cancel()
 	if _, err := a.request(ctx, "get_context_usage", nil, a.contextUsage); err != nil {
-		a.cfg.Logger.Debug("Claude Code didn't report its context usage", "error", err)
+		a.log.Debug("Claude Code didn't report its context usage", "error", err)
 	}
 }
 

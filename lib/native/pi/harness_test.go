@@ -237,10 +237,10 @@ func newHarness(t *testing.T, cfg Config, resumeRef string, opts ...func(*harnes
 	if cfg.Logger == nil && !testing.Verbose() {
 		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	a := newAdapter(cfg, cfg.Args, resumeRef, h.pi.start)
+	cfg.StartProcess, cfg.Clock = h.pi.start, h.clock
+	a := newAdapter(cfg, cfg.Args, resumeRef)
 	a.lineHandled = func() { h.handled.Add(1) }
 	a.abortGrace, a.stdinGrace, a.termGrace = time.Second, time.Second, time.Second
-	a.clock = h.clock
 	h.a = a
 	h.sink.CheckUnlocked(func() { a.Settings() })
 	for _, opt := range opts {

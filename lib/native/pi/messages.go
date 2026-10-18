@@ -120,7 +120,7 @@ func (a *Adapter) handleMessageEvent(kind string, ev messageEvent) {
 	var msg agentMessage
 	if len(ev.Message) > 0 {
 		if err := json.Unmarshal(ev.Message, &msg); err != nil {
-			a.logger.Warn("Malformed Pi message", "error", err)
+			a.log.Warn("Malformed Pi message", "error", err)
 			return
 		}
 	}
@@ -186,7 +186,7 @@ func (a *Adapter) handleMessageEnd(msg agentMessage, raw json.RawMessage) {
 
 	rich, err := a.parsePiMessage(id, raw)
 	if err != nil {
-		a.logger.Warn("Failed to parse a Pi message", "error", err)
+		a.log.Warn("Failed to parse a Pi message", "error", err)
 		return
 	}
 	events := a.loop.events.MessageEvents(rich)

@@ -84,7 +84,7 @@ func (a *Adapter) readSettings(ctx context.Context, info initializeInfo) {
 	}
 	if err != nil {
 		// Older versions don't have it; the model and effort stay unknown.
-		a.cfg.Logger.Debug("Claude Code didn't report its settings", "error", err)
+		a.log.Debug("Claude Code didn't report its settings", "error", err)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()

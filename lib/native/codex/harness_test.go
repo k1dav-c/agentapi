@@ -148,7 +148,7 @@ func newHarness(t *testing.T, resumeRef string, args []string, opts ...harnessOp
 		Args:    args,
 		CWD:     "/work/scratch",
 		Env:     []string{"PATH=/usr/bin", "CODEX_THREAD_ID=parent"},
-		Launch:  func(procutil.Command) (procutil.Process, error) { return proc, nil },
+		StartProcess:  func(procutil.Command) (procutil.Process, error) { return proc, nil },
 		Logger:  slog.New(slog.DiscardHandler),
 	}
 	for _, o := range opts {
