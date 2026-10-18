@@ -591,6 +591,58 @@ func TestNative_RestartUpdatesTheAgentFirst(t *testing.T) {
 	assert.Equal(t, []string{"start", "update", "start"}, steps, "only a restart updates, before the new agent starts")
 }
 
+func TestNative_RestartOutlivesTheRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
+	factory := &nativetest.Factory{}
+	updating, release := make(chan struct{}), make(chan struct{})
+	cut := make(chan bool, 1)
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeCodex,
+		Transport:      httpapi.TransportNative,
+		NativeFactory:  factory.New,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		UpdateAgent: func(updateCtx context.Context) {
+			close(updating)
+			select {
+			case <-updateCtx.Done():
+				cut <- true
+			case <-release:
+				cut <- false
+			}
+		},
+	})
+	require.NoError(t, err)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(func() {
+		ts.Close()
+		_ = srv.Stop(context.Background())
+		cancel()
+	})
+	require.Eventually(t, func() bool { return len(factory.Adapters()) == 1 }, 5*time.Second, 5*time.Millisecond)
+
+	// The client goes away (a reloaded tab) while the CLI updates.
+	reqCtx, reqCancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodDelete, ts.URL+"/messages", nil)
+	require.NoError(t, err)
+	go func() {
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	<-updating
+	reqCancel()
+	// Long enough for the server to notice the closed connection.
+	time.Sleep(300 * time.Millisecond)
+	close(release)
+	assert.False(t, <-cut, "the update was cut short with the request")
+	require.Eventually(t, func() bool {
+		a := factory.Adapters()
+		return len(a) == 2 && !a[1].Closed()
+	}, 5*time.Second, 5*time.Millisecond, "the restart went on")
+}
+
 func TestNative_MCPRestartResumes(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

@@ -292,7 +292,7 @@ func (s *Server) replyNativeHandoffLocked(pendingID, replyID string, r native.Re
 	if !ok {
 		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "invalid"}}
 	}
-	ctx, cancel := context.WithTimeout(s.shutdownCtx, nativeCallTimeout)
+	ctx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
 	result := handoff.Result{Outcome: "applied"}
 	switch _, err := s.native.Respond(ctx, r.ID, response); {

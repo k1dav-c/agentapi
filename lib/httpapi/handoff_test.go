@@ -60,6 +60,7 @@ func handoffServer() (*Server, *handoffConversation, *handoffIO) {
 	return &Server{
 		conversation: c, agentio: i, emitter: e, agentType: mf.AgentTypeClaude,
 		transport: TransportPTY, clock: quartz.NewReal(), logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		shutdownCtx: context.Background(),
 	}, c, i
 }
 
@@ -167,7 +168,7 @@ func TestHandoffMCPRestartInvalidatesRequest(t *testing.T) {
 	s, c, _ := handoffServer()
 	pending := pendingHandoff(s)
 	s.restartAgent = func(context.Context) (int, error) { return 0, nil }
-	restarted, err := s.restartQuery(t.Context(), true)
+	restarted, err := s.restartQuery(true)
 	require.NoError(t, err)
 	require.True(t, restarted)
 	s.emitter.EmitStatus(st.ConversationStatusStable)

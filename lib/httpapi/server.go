@@ -63,6 +63,7 @@ type Server struct {
 	srv                *http.Server
 	mu                 sync.RWMutex
 	stopOnce           sync.Once
+	stopping           bool // set under mu once Stop closed the agent: no more restarts
 	logger             *slog.Logger
 	conversation       st.Conversation
 	native             *native.Conversation // nil unless the transport is native
@@ -1492,6 +1493,11 @@ func (s *Server) Stop(ctx context.Context) error {
 				err = nil
 			}
 		}
+		// A restart under way has been cancelled with shutdownCtx; once it
+		// let go of mu, none can start another agent.
+		s.mu.Lock()
+		s.stopping = true
+		s.mu.Unlock()
 		if s.native != nil {
 			if closeErr := s.native.Close(); closeErr != nil {
 				s.logger.Error("Failed to stop the agent", "error", closeErr)

@@ -322,6 +322,8 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		if agentType == AgentTypeCodex && isCodexCLI(agent) {
 			programArgs = withCodexReasoningSummary(programArgs, codexConfigPath())
 		}
+		// The agent runs as long as AgentAPI: its process gets runServer's
+		// ctx, not that of the restart that starts it.
 		setupAgentProcess := func(context.Context) (*termexec.Process, error) {
 			args := programArgs
 			if agentType == AgentTypePi && isPiCLI(agent) {

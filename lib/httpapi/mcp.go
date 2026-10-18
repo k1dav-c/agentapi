@@ -261,7 +261,7 @@ func (s *Server) updateMCP(
 	response := &MCPUpdateResponse{}
 	response.Body.OK = true
 	response.Body.Path = s.mcpStore.Path()
-	restarted, err := s.restartQuery(ctx, input.Restart)
+	restarted, err := s.restartQuery(input.Restart)
 	if err != nil {
 		return nil, err
 	}

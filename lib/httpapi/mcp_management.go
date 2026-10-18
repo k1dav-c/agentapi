@@ -70,7 +70,7 @@ func (s *Server) requireMCP() error {
 	return nil
 }
 
-func (s *Server) restartQuery(ctx context.Context, restart bool) (bool, error) {
+func (s *Server) restartQuery(restart bool) (bool, error) {
 	if !restart {
 		return false, nil
 	}
@@ -79,6 +79,11 @@ func (s *Server) restartQuery(ctx context.Context, restart bool) (bool, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	ctx, cancel := s.agentCtx(restartTimeout)
+	defer cancel()
+	if s.stopping {
+		return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", errStopping)
+	}
 	if s.native != nil {
 		// A native agent resumes its session: the conversation stays. One
 		// whose session can't be resumed starts a new one, as on PTY.
@@ -127,7 +132,7 @@ func (s *Server) mutateMCP(ctx context.Context, restart bool, mutate func(MCPSer
 		return nil, fmt.Errorf("failed to write MCP config: %w", err)
 	}
 	s.mcpMu.Unlock()
-	restarted, err := s.restartQuery(ctx, restart)
+	restarted, err := s.restartQuery(restart)
 	if err != nil {
 		return nil, err
 	}

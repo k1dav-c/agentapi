@@ -86,7 +86,7 @@ func (s *Server) requireNative() error {
 // transport according to mode. Steer and interrupt only apply to a running
 // turn; without one the message is sent as usual. Caller holds s.mu.
 func (s *Server) createNativeMessageLocked(content string, mode DispatchMode, resp *MessageResponse) error {
-	ctx, cancel := context.WithTimeout(s.shutdownCtx, nativeCallTimeout)
+	ctx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
 	input := native.InputFromText(content)
 
@@ -154,7 +154,7 @@ func (s *Server) dispatchNativeQueuedLocked() {
 		return
 	}
 	next := s.messageQueue[0]
-	ctx, cancel := context.WithTimeout(s.shutdownCtx, nativeCallTimeout)
+	ctx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
 	err := s.native.StartTurn(ctx, native.InputFromText(next.Content))
 	if errors.Is(err, st.ErrMessageValidationChanging) {
@@ -200,11 +200,11 @@ func (s *Server) respondRequest(ctx context.Context, input *RespondRequest) (*Re
 	// Serialize with message delivery, restarts and handoff replies.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.respondRequestLocked(ctx, input.ID, input.Body)
+	return s.respondRequestLocked(input.ID, input.Body)
 }
 
-func (s *Server) respondRequestLocked(ctx context.Context, id string, response native.Response) (*RequestResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, nativeCallTimeout)
+func (s *Server) respondRequestLocked(id string, response native.Response) (*RequestResponse, error) {
+	ctx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
 	state, err := s.native.Respond(ctx, id, response)
 	switch {
@@ -232,6 +232,8 @@ func (s *Server) retryLogin(ctx context.Context, _ *struct{}) (*InterruptRespons
 	if err := s.requireNative(); err != nil {
 		return nil, err
 	}
+	ctx, cancel := s.agentCtx(restartTimeout)
+	defer cancel()
 	if err := s.native.RetryLogin(ctx); err != nil {
 		if errors.Is(err, native.ErrNoLoginRequired) {
 			return nil, huma.Error409Conflict("the agent is not waiting for a login")
@@ -245,7 +247,7 @@ func (s *Server) interrupt(ctx context.Context, _ *struct{}) (*InterruptResponse
 	if err := s.requireNative(); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, nativeCallTimeout)
+	ctx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
 	switch err := s.native.Interrupt(ctx); {
 	case errors.Is(err, native.ErrUnsupported):
@@ -272,7 +274,7 @@ func (s *Server) updateSettings(ctx context.Context, input *UpdateSettingsReques
 	if err := s.requireNative(); err != nil {
 		return nil, err
 	}
-	applyCtx, cancel := context.WithTimeout(ctx, nativeCallTimeout)
+	applyCtx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
 	if err := settingsError(s.native.ApplySettings(applyCtx, input.Body)); err != nil {
 		return nil, err
@@ -326,7 +328,7 @@ func (s *Server) compact(ctx context.Context, _ *struct{}) (*InterruptResponse, 
 	if err := s.requireNative(); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, compactTimeout)
+	ctx, cancel := s.agentCtx(compactTimeout)
 	defer cancel()
 	var refused *native.RefusedError
 	switch err := s.native.Compact(ctx); {
@@ -356,7 +358,7 @@ func (s *Server) steerQueuedMessage(_ context.Context, input *SteerQueuedMessage
 	if idx < 0 {
 		return nil, huma.Error404NotFound("queued message not found")
 	}
-	ctx, cancel := context.WithTimeout(s.shutdownCtx, nativeCallTimeout)
+	ctx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
 	switch err := s.native.Steer(ctx, native.InputFromText(s.messageQueue[idx].Content)); {
 	case errors.Is(err, native.ErrUnsupported):
