@@ -2,7 +2,9 @@
 
 import React, { useState } from "react";
 import { ChevronRight } from "lucide-react";
-import { AgentType, type DraftMessage, type Message, type ServerStatus } from "../chat-provider";
+import {type DraftMessage, type Message} from "../chat-provider";
+import {AgentType} from "@/lib/agents";
+import {type ServerStatus} from "@/lib/agent-status";
 import { MessageItem } from "./message-item";
 
 // Terminal output from before the first task. Usually that is just the

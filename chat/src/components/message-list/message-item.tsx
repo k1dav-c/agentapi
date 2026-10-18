@@ -10,7 +10,7 @@ import { withoutUploadedImages } from "@/lib/uploads";
 import { toast } from "sonner";
 import { formatMessageTime } from "@/lib/format-time";
 import { copyText } from "@/lib/clipboard";
-import type { DraftMessage, Message } from "../chat-provider";
+import type {DraftMessage, Message} from "../chat-provider";
 
 export function CopyButton({
   content,

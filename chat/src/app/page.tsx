@@ -1,5 +1,5 @@
 import { Chat } from "@/components/chat";
-import { ChatProvider } from "@/components/chat-provider";
+import {ChatProvider} from "@/components/chat-provider";
 import { FileViewerProvider } from "@/components/file-viewer";
 import { Header } from "./header";
 import { Suspense } from "react";

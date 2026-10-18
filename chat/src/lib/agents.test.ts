@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {agentDisplayName, parseAgentType} from "./chat-provider";
+import {agentDisplayName, parseAgentType} from "./agents";
 
 describe("agent types", () => {
   test("a type this build doesn't know shows as custom", () => {

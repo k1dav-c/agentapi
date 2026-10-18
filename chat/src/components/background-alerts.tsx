@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { agentDisplayName, useChat } from "./chat-provider";
+import {useChat} from "./chat-provider";
+import {agentDisplayName} from "@/lib/agents";
 import { describeTerminalPrompt } from "@/lib/terminal-option";
 import { loginTitle } from "@/lib/login";
 import { alertForTransition, faviconDataUrl, notificationsEnabled, type FaviconBadge } from "@/lib/background-alerts";

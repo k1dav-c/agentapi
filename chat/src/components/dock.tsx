@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { TerminalSquare } from "lucide-react";
-import { useChat } from "./chat-provider";
+import {useChat} from "./chat-provider";
 import { ChoiceMark, DecisionCardShell, PrimaryButton, TONE_CLASS, TerminalBlock, optionRowClass } from "./decision-card";
 import { Kbd } from "./ui/kbd";
 import { computeTokenTotals, formatTokenCount } from "@/lib/session-status";

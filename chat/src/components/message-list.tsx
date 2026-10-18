@@ -17,13 +17,9 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "./ui/button";
-import {AgentType} from "./chat-provider";
-import type {
-  DraftMessage,
-  Message,
-  RichMessage,
-  ServerStatus,
-} from "./chat-provider";
+import {AgentType} from "@/lib/agents";
+import type {DraftMessage, Message, RichMessage} from "./chat-provider";
+import type {ServerStatus} from "@/lib/agent-status";
 import {taskMatchesQuery} from "@/lib/task-actions";
 import {isImeComposing} from "@/lib/keys";
 import {uiCopy} from "@/lib/ui-copy";

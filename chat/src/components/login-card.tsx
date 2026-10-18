@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { KeyRound, RefreshCw, TerminalSquare } from "lucide-react";
-import { useChat } from "./chat-provider";
+import {useChat} from "./chat-provider";
 import { CardStatus, CommandBlock, DecisionCardShell, MarkdownDetail, PrimaryButton, SecondaryButton } from "./decision-card";
 import { getErrorMessage } from "@/lib/error-utils";
 import { loginNote, loginTitle, loginWhere } from "@/lib/login";

@@ -1,9 +1,5 @@
-import type {
-  DraftMessage,
-  Message,
-  RichMessage,
-  ServerStatus,
-} from "@/components/chat-provider";
+import type {DraftMessage, Message, RichMessage} from "@/components/chat-provider";
+import type {ServerStatus} from "@/lib/agent-status";
 import { formatToolInput } from "./tool-format";
 
 export interface ToolCall {

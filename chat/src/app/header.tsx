@@ -3,7 +3,8 @@
 import { type ComponentType, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { notificationsEnabled, onNotificationsPreferenceChange, setNotificationsEnabled } from "@/lib/background-alerts";
-import { agentDisplayName, useChat } from "@/components/chat-provider";
+import {useChat} from "@/components/chat-provider";
+import {agentDisplayName} from "@/lib/agents";
 import { ModeToggle } from "@/components/mode-toggle";
 import { AgentMark } from "@/components/agent-mark";
 import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Tag } from "lucide-react";

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Brain, ChevronDown, ClipboardList, Hand, LoaderCircle, Shield, ShieldCheck, Zap } from "lucide-react";
 import { toast } from "sonner";
-import { useChat } from "./chat-provider";
+import {useChat} from "./chat-provider";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,

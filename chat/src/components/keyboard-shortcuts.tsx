@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useChat } from "./chat-provider";
+import {useChat} from "./chat-provider";
 import {
   Dialog,
   DialogContent,

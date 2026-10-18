@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import { ClipboardList, MessageCircleQuestion, ShieldQuestion, X } from "lucide-react";
 import { toast } from "sonner";
-import { useChat } from "./chat-provider";
+import {useChat} from "./chat-provider";
 import {
   CardStatus,
   CommandBlock,

@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
-import type { RichMessage, ServerStatus } from "@/components/chat-provider";
+import type {RichMessage} from "@/components/chat-provider";
+import type {ServerStatus} from "@/lib/agent-status";
 import { CircleAlert, CircleCheck, CircleDot, LoaderCircle, WifiOff } from "lucide-react";
 
 export interface TokenTotals {

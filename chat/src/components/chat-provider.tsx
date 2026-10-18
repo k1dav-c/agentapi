@@ -33,6 +33,8 @@ import {
   type UploadOptions,
 } from "@/lib/chat-api";
 import {features, type Features} from "@/lib/features";
+import type {AgentType} from "@/lib/agents";
+import {applyStatusChange, initialAgentStatus, update, type AgentStatus, type ServerStatus, type StatusChangeEvent} from "@/lib/agent-status";
 import {
   canStop,
   parseTransport,
@@ -48,7 +50,7 @@ import {
   type NativeRequest,
   type RequestResponse,
 } from "@/lib/native-requests";
-import {isLoginNotice, parseLoginRequired, type LoginRequired} from "@/lib/login";
+import {isLoginNotice, type LoginRequired} from "@/lib/login";
 import {getAgentState, type AgentStateKind} from "@/lib/session-status";
 import {SyncTracker} from "@/lib/session-sync";
 
@@ -135,28 +137,6 @@ export interface RichMessage {
   stop_reason?: string;
 }
 
-interface StatusChangeEvent {
-  status: string;
-  lifecycle?: string;
-  agent_type: string;
-  // Missing from servers that predate it; GET /status says then.
-  transport?: string;
-  agentapi_version?: string;
-  terminal_columns?: number;
-  session_name?: string;
-  terminal_prompt?: string;
-  // Native transport only. The chat counts the pending requests itself,
-  // from the requests it holds (pending_requests is ignored).
-  capabilities?: Capabilities;
-  login_required?: unknown;
-  // Native agents with the settings capability.
-  settings?: AgentSettings;
-  // Native agents, once they report it.
-  usage?: AgentUsage;
-  // A shell terminal is available (native transport).
-  terminal?: boolean;
-}
-
 interface ErrorEventData {
   message: string;
   level: string;
@@ -176,7 +156,6 @@ export interface SendResult {
   steered?: boolean;
 }
 
-export type ServerStatus = "stable" | "running" | "offline" | "unknown";
 export type ConnectionStatus = "connected" | "reconnecting" | "offline";
 
 export interface FileUploadResponse {
@@ -189,43 +168,6 @@ export interface QueuedMessage {
   id: number;
   content: string;
   time: string;
-}
-
-export type AgentType = "claude" | "goose" | "aider" | "gemini" | "amp" | "codex" | "cursor" | "cursor-agent" | "copilot" | "auggie" | "amazonq" | "opencode" | "kimi" | "pi" | "custom" | "unknown";
-
-export type AgentColorDisplayNamePair = {
-  displayName: string;
-}
-
-export const AgentType: Record<Exclude<AgentType, "unknown">, AgentColorDisplayNamePair> = {
-  claude: {displayName: "Claude Code"},
-  goose: {displayName: "Goose"},
-  aider: {displayName: "Aider"},
-  gemini: { displayName: "Gemini"},
-  amp: {displayName: "Amp"},
-  codex: {displayName: "Codex"},
-  cursor: { displayName: "Cursor Agent"},
-  "cursor-agent": { displayName: "Cursor Agent"},
-  copilot: {displayName: "Copilot"},
-  auggie: {displayName: "Auggie"},
-  amazonq: {displayName: "Amazon Q"},
-  opencode: {displayName: "Opencode"},
-  kimi: {displayName: "Kimi Code"},
-  pi: {displayName: "Pi"},
-  custom: { displayName: "Custom"}
-}
-
-// parseAgentType is the agent type a server reports: "unknown" for none,
-// and "custom" for one this build of the chat doesn't know (a newer
-// server), so looking up its name can't fail.
-export function parseAgentType(value: string | undefined): AgentType {
-  if (!value) return "unknown";
-  return Object.hasOwn(AgentType, value) ? (value as AgentType) : "custom";
-}
-
-// agentDisplayName names an agent type, or says fallback for "unknown".
-export function agentDisplayName(type: AgentType, fallback: string): string {
-  return type === "unknown" ? fallback : (AgentType[type]?.displayName ?? fallback);
 }
 
 interface ChatContextValue {
@@ -391,29 +333,36 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [serverWorkspaceUrl, setServerWorkspaceUrl] = useState<string>();
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
-  const [terminalPrompt, setTerminalPrompt] = useState("");
   const [loading, setLoading] = useState<boolean>(false);
-  const [serverStatus, setServerStatus] = useState<ServerStatus>("unknown");
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("reconnecting");
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
-  const [agentType, setAgentType] = useState<AgentType>("custom");
-  const [agentapiVersion, setAgentapiVersion] = useState("");
-  const [terminalColumns, setTerminalColumns] = useState(0);
-  const [sessionName, setSessionName] = useState("");
   const [transport, setTransport] = useState<Transport>("pty");
-  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
-  const [agentSettings, setAgentSettings] = useState<AgentSettings | null>(null);
-  const [agentUsage, setAgentUsage] = useState<AgentUsage | null>(null);
-  const [terminalAvailable, setTerminalAvailable] = useState(false);
-  const [loginRequired, setLoginRequiredState] = useState<LoginRequired | null>(null);
-  // The login as the event handlers see it, to skip errors the card shows.
-  const loginRef = useRef<LoginRequired | null>(null);
-  const setLoginRequired = useCallback((login: LoginRequired | null) => {
-    loginRef.current = login;
-    setLoginRequiredState(login);
+  // The agent's status, from status_change events (lib/agent-status). An
+  // event that changes nothing leaves it as it is; the ref has the latest,
+  // for the event handlers.
+  const [agentStatus, setAgentStatus] = useState<AgentStatus>(initialAgentStatus);
+  const agentStatusRef = useRef(agentStatus);
+  const updateAgentStatus = useCallback((change: (status: AgentStatus) => AgentStatus) => {
+    const next = change(agentStatusRef.current);
+    if (next === agentStatusRef.current) return;
+    agentStatusRef.current = next;
+    setAgentStatus(next);
   }, []);
-  const [lifecycle, setLifecycle] = useState("");
+  const {
+    serverStatus,
+    agentType,
+    agentapiVersion,
+    terminalColumns,
+    sessionName,
+    terminalPrompt,
+    capabilities,
+    settings: agentSettings,
+    usage: agentUsage,
+    terminalAvailable,
+    loginRequired,
+    lifecycle,
+  } = agentStatus;
   const [requests, setRequests] = useState<NativeRequest[]>([]);
   const pendingRequestCount = useMemo(() => pendingRequests(requests).length, [requests]);
   const agentStarting = lifecycle === "starting";
@@ -691,7 +640,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         console.warn(
           "agentAPIUrl is not set, SSE connection cannot be established."
         );
-        setServerStatus("offline"); // Or some other appropriate status
+        updateAgentStatus((status) => update(status, {serverStatus: "offline"}));
         return null; // Don't try to connect if URL is empty
       }
 
@@ -783,26 +732,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         const data: StatusChangeEvent = JSON.parse(event.data);
         // The replay's last event may be its status.
         if (syncRef.current.replaying) scheduleFlush(event);
-        if (data.status === "stable") {
-          setServerStatus("stable");
-        } else if (data.status === "running") {
-          setServerStatus("running");
-        } else {
-          setServerStatus("unknown");
-        }
-
-        // Set agent type
-        setAgentType(parseAgentType(data.agent_type));
-        setAgentapiVersion(data.agentapi_version ?? "");
-        setTerminalColumns(data.terminal_columns ?? 0);
-        setSessionName(data.session_name ?? "");
-        setTerminalPrompt(data.terminal_prompt ?? "");
-        setCapabilities(data.capabilities ?? null);
-        setAgentSettings(data.settings ?? null);
-        setAgentUsage(data.usage ?? null);
-        setTerminalAvailable(data.terminal ?? false);
-        setLoginRequired(parseLoginRequired(data.login_required));
-        setLifecycle(data.lifecycle ?? "");
+        updateAgentStatus((status) => applyStatusChange(status, data));
         // The transport decides whether the terminal (TTY mode, raw keys)
         // exists at all.
         const reported = parseTransport(data.transport);
@@ -831,7 +761,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
           shownErrorsRef.current.add(key);
           // The login card says it while the login is needed; afterwards
           // the notice is stale.
-          if (isLoginNotice(data.message, loginRef.current)) return;
+          if (isLoginNotice(data.message, agentStatusRef.current.loginRequired)) return;
 
           // Display error as toast notification that persists until manually dismissed
           if (data.level === "error") {
@@ -935,7 +865,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
-  }, [agentAPIUrl, api, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush, setLoginRequired]);
+  }, [agentAPIUrl, api, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush, updateAgentStatus]);
 
   // Keep the conversation cache current, at most every
   // CACHE_SAVE_INTERVAL_MS, and once more when the page is hidden.
@@ -1151,7 +1081,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     if (outcome === "not-waiting") {
       // The status is out of date: the agent doesn't wait any more.
       const status = await api.getStatus();
-      setLoginRequired(status.login_required);
+      updateAgentStatus((current) => update(current, {loginRequired: status.login_required}));
     }
   };
 
@@ -1206,7 +1136,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         updateSettings: async (change: AgentSettings) => {
           const result = await api.updateSettings(change);
           // Shown at once; the status_change event that follows says the same.
-          setAgentSettings(result.settings);
+          updateAgentStatus((status) => update(status, {settings: result.settings}));
           return result;
         },
         agentStarting,

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { ImageOff } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "./ui/dialog";
-import { useChat } from "./chat-provider";
+import {useChat} from "./chat-provider";
 import { attachedPaths, uploadedImageURL } from "@/lib/uploads";
 
 // A thumbnail of an uploaded image that opens it full size. Uploads live in

@@ -23,7 +23,8 @@ import {
   CornerDownRight,
   OctagonX,
 } from "lucide-react";
-import type {SendResult, ServerStatus} from "./chat-provider";
+import type {SendResult} from "./chat-provider";
+import type {ServerStatus} from "@/lib/agent-status";
 import TextareaAutosize from "react-textarea-autosize";
 import {useChat} from "./chat-provider";
 import {SessionSettings} from "./session-settings";

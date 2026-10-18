@@ -2,7 +2,8 @@
 
 import { useMemo } from "react";
 import { Hash } from "lucide-react";
-import { AgentType, useChat } from "./chat-provider";
+import {useChat} from "./chat-provider";
+import {AgentType} from "@/lib/agents";
 import { computeTokenTotals, formatTokenCount, getStatusMeta } from "@/lib/session-status";
 
 export function EmbedStatusBar() {

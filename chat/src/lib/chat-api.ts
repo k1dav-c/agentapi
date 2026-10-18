@@ -1,9 +1,5 @@
 import {authFetch, withAuthRetry} from "./auth";
-import type {
-  FileUploadResponse,
-  QueuedMessage,
-  SendResult,
-} from "@/components/chat-provider";
+import type {FileUploadResponse, QueuedMessage, SendResult} from "@/components/chat-provider";
 import {parseTransport, type DispatchMode, type Transport} from "./dispatch";
 import type {NativeRequest, RequestResponse} from "./native-requests";
 import {parseLoginRequired, type LoginRequired, type LoginRetryOutcome} from "./login";

@@ -3,7 +3,7 @@
 // terminal and the login. Anything else is sent to the agent as typed (its
 // own commands, e.g. Claude Code's /code-review, still work).
 
-import type {AgentType} from "@/components/chat-provider";
+import type {AgentType} from "@/lib/agents";
 import type {Features} from "./features";
 
 export type SlashCommandKind = "model" | "effort" | "mode" | "plan" | "compact" | "clear" | "terminal" | "login" | "help";

@@ -7,7 +7,7 @@ import { uiCopy } from "@/lib/ui-copy";
 import { formatToolInput, getExitCode, getToolCommand, getToolImagePath, getToolSummary } from "@/lib/tool-format";
 import type { ToolCall } from "@/lib/task-timeline";
 import { currentPromptQuestion, parseInteractiveToolInput } from "@/lib/interactive-tool";
-import { useChat } from "../chat-provider";
+import {useChat} from "../chat-provider";
 import { ImageThumb } from "../image-preview";
 import { toolRequestBadge, type Tone } from "@/lib/native-requests";
 import { fileName, isPatchScriptTool, toolFileTargets, viewerTab, type FileTarget, type FileTargetKind } from "@/lib/file-refs";
