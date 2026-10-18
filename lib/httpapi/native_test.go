@@ -720,3 +720,30 @@ func TestNative_MessagesWaitForACompaction(t *testing.T) {
 	require.Eventually(t, func() bool { return len(n.factory.Last().Turns()) == 1 }, 5*time.Second, 5*time.Millisecond)
 	assert.Equal(t, "after the compaction", n.factory.Last().Turns()[0].Text)
 }
+
+func TestStopBeforeStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(cancel)
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeCodex,
+		Transport:      httpapi.TransportNative,
+		NativeFactory:  (&nativetest.Factory{}).New,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		Bind:           "127.0.0.1",
+		Port:           0,
+	})
+	require.NoError(t, err)
+	// An agent that exits right away stops the server before it listens:
+	// Start must return instead of serving for good.
+	require.NoError(t, srv.Stop(context.Background()))
+	done := make(chan error, 1)
+	go func() { done <- srv.Start() }()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, http.ErrServerClosed)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start served after Stop")
+	}
+}

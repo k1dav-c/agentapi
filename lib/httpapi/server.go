@@ -553,6 +553,9 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 
 	// Register API routes
 	s.registerRoutes()
+	// Created here rather than in Start, so Stop can shut it down whichever
+	// runs first.
+	s.srv = &http.Server{Addr: s.ListenAddr(), Handler: s.router}
 
 	// Start the conversation polling loop if we have an agent IO.
 	// AgentIO is nil only when --print-openapi is used (no agent runs).
@@ -1484,12 +1487,9 @@ func (s *Server) ListenAddr() string {
 }
 
 // Start starts the HTTP server
+// Start serves HTTP until Stop. After Stop it returns http.ErrServerClosed
+// at once, even when Stop came first.
 func (s *Server) Start() error {
-	s.srv = &http.Server{
-		Addr:    s.ListenAddr(),
-		Handler: s.router,
-	}
-
 	return s.srv.ListenAndServe()
 }
 

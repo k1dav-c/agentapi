@@ -509,9 +509,8 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 			} else {
 				srv.MarkAgentExited(nil)
 			}
-			if err := srv.Stop(ctx); err != nil {
-				logger.Error("Failed to stop server", "error", err)
-			}
+			// Shut down as for the other transports.
+			gracefulCancel()
 		}()
 	}
 
