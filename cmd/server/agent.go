@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -14,6 +13,7 @@ import (
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/procenv"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/termexec"
 )
@@ -258,7 +258,7 @@ func agentUpdater(agentType AgentType, program string, logger *slog.Logger) func
 		ctx, cancel := context.WithTimeout(ctx, agentUpdateTimeout)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, program, args...)
-		cmd.Env = append(os.Environ(), env...)
+		cmd.Env = procenv.ForAgent(nil, env...)
 		start := time.Now()
 		output, err := cmd.CombinedOutput()
 		if err != nil {

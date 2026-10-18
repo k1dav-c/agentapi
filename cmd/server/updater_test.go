@@ -24,13 +24,17 @@ func TestAgentUpdater(t *testing.T) {
 	dir := t.TempDir()
 	record := filepath.Join(dir, "record")
 	program := filepath.Join(dir, "codex")
-	script := "#!/bin/sh\necho \"$* $CODEX_NON_INTERACTIVE\" > " + record + "\n"
+	script := "#!/bin/sh\necho \"$* $CODEX_NON_INTERACTIVE [$AGENTAPI_API_TOKEN] [$CLAUDECODE]\" > " + record + "\n"
 	require.NoError(t, os.WriteFile(program, []byte(script), 0o755))
 
+	// The update gets the agent's environment: not AgentAPI's token, not
+	// the variables of an agent session AgentAPI runs in.
+	t.Setenv("AGENTAPI_API_TOKEN", "secret")
+	t.Setenv("CLAUDECODE", "1")
 	agentUpdater(AgentTypeCodex, program, logger)(context.Background())
 	got, err := os.ReadFile(record)
 	require.NoError(t, err)
-	require.Equal(t, "update 1\n", string(got))
+	require.Equal(t, "update 1 [] []\n", string(got))
 
 	// A failing update must not panic or block the restart.
 	require.NoError(t, os.WriteFile(program, []byte("#!/bin/sh\nexit 3\n"), 0o755))
