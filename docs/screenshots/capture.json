@@ -1,6 +1,6 @@
 {
-  "captured_at": "2026-10-18T15:30:18.712Z",
-  "agentapi_version": "0.24.0",
+  "captured_at": "2026-10-18T16:47:58.973Z",
+  "agentapi_version": "0.26.0",
   "agents": [
     "native-demo",
     "bash (PTY)"
@@ -41,6 +41,14 @@
     "mobile-question.png",
     "native-plan.png",
     "queue-steer.png",
+    "demo-task.gif",
+    "demo-approval.gif",
+    "demo-question.gif",
+    "demo-queue.gif",
+    "demo-settings.gif",
+    "demo-files.gif",
+    "demo-terminal.gif",
+    "demo-phone.gif",
     "login-card.png",
     "tty-mode.png"
   ]

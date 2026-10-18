@@ -6,9 +6,9 @@ AgentAPI 提供統一的 HTTP API，讓你控制 [Claude Code](https://github.co
 
 ![AgentAPI 聊天介面中的兩個任務：提示詞、工具呼叫、思考旁註和輸入框](docs/screenshots/chat-desktop.png)
 
-截圖是 AgentAPI v0.24.0 搭配內建 `native-demo` agent 的畫面，它的回覆、工具結果、模型和用量
-都是模擬的。[聊天介面導覽](docs/chat-ui.zh-TW.md)以截圖逐一介紹聊天介面的每項功能，
-[截圖說明](docs/screenshots/README.md)則說明這些截圖是怎麼擷取的。
+截圖是 AgentAPI v0.26.0 搭配內建 `native-demo` agent 的畫面，它的回覆、工具結果、模型和用量
+都是模擬的。[聊天介面導覽](docs/chat-ui.zh-TW.md)以截圖和動畫逐一介紹聊天介面的每項功能，
+[截圖說明](docs/screenshots/README.md)則說明它們是怎麼擷取的。
 
 AgentAPI 可以用來：
 
@@ -215,8 +215,10 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 
 `/chat` 的聊天介面內建在執行檔裡，所有 transport 都能使用，桌面和手機都可以。它有適合手機的
 版面、可搜尋的工具活動、連線狀態指示和精簡的工具呼叫卡片，標頭會顯示 agent 的標誌（Claude
-的橘色方塊、Pi 的 logo）和 AgentAPI 版本。[聊天介面導覽](docs/chat-ui.zh-TW.md)以截圖呈現
-它的每個部分。
+的橘色方塊、Pi 的 logo）和 AgentAPI 版本。[聊天介面導覽](docs/chat-ui.zh-TW.md)以截圖和動畫
+呈現它的每個部分。
+
+![在聊天介面中送出任務：agent 思考、執行工具，然後回覆](docs/screenshots/demo-task.gif)
 
 ### 任務與對話紀錄
 
@@ -295,8 +297,8 @@ HTML、Markdown 和 SVG 檔案還有第三個分頁 Preview，圖片檔則直接
 
 使用 PTY transport 時，TTY mode（TTY 模式）是聊天畫面顯示不正常時的備用方案：按下標頭的
 終端機按鈕，就會把對話換成 agent 的終端機畫面（xterm.js），並把每個按鍵直接送給 agent，
-包含方向鍵、Ctrl/Alt 組合鍵、貼上的內容和輸入法輸入。在手機上會有一排按鍵列，提供 Esc、
-Tab、方向鍵、Enter 和 Ctrl 鍵。字型大小會隨視窗縮放（11–20px）；鏡像畫面使用的是 agent
+包含方向鍵、Ctrl/Alt 組合鍵、貼上的內容和輸入法輸入。手機上有和[終端機](#終端機)相同的按鍵列，
+補上手機鍵盤沒有的按鍵。字型大小會隨視窗縮放（11–20px）；鏡像畫面使用的是 agent
 實際的終端機寬度，所以如果想要每行更長，請用 `--term-width 120` 啟動 AgentAPI。
 
 ![TTY mode 中以 PTY agent 執行的 bash，附有欄數尺規和按鍵列](docs/screenshots/tty-mode.png)
@@ -312,7 +314,9 @@ Tab、方向鍵、Enter 和 Ctrl 鍵。字型大小會隨視窗縮放（11–20p
 
 ### 提醒、連線復原與快取
 
-分頁在背景時，圖示會以圓點顯示狀態：琥珀色表示 agent 需要你回應，藍色表示工作中，綠色表示任務完成。瀏覽器通知可以從狀態選單開啟。
+分頁在背景時，圖示會以圓點顯示狀態：琥珀色表示 agent 需要你回應，藍色表示工作中，綠色表示
+任務完成。瀏覽器通知可以從狀態選單開啟，這個選單也能把對話下載成 JSONL（Explorer 的 Session
+分頁也可以）。
 
 ![從標頭的狀態開啟的工作階段詳細資訊選單](docs/screenshots/session-details.png)
 
@@ -402,7 +406,10 @@ Native 模式使用 agent CLI 儲存的登入資訊。請以執行 AgentAPI 的�
 - Claude Code：`claude auth login` 預設使用 Claude 訂閱；加上 `--console` 則使用
   Anthropic Console 的 API 計費。在沒有瀏覽器的機器上，可用 `claude setup-token` 建立
   `CLAUDE_CODE_OAUTH_TOKEN` 所需的 token。用 `claude auth status` 檢查登入狀態。
-- Codex：使用 ChatGPT 方案時執行 `codex login`；使用 API 金鑰時執行
+- Codex：`codex login --device-auth` 讓你從任何裝置以 ChatGPT 方案登入：開啟它顯示的連結，
+  再輸入它提供的一次性代碼。登入卡片和 `/login` 執行的就是這個指令，因為 AgentAPI 通常在沒有
+  瀏覽器的伺服器上執行：`codex login` 的瀏覽器登入會把瀏覽器導向執行 Codex 那台機器的
+  `localhost:1455`，其他機器上的瀏覽器連不到。在同一台機器上有瀏覽器時，`codex login` 仍然可以使用；使用 API 金鑰時執行
   `printenv OPENAI_API_KEY | codex login --with-api-key`。用 `codex login status` 檢查登入狀態。
 - Pi：在 `pi` 中執行 `/login`，或在 AgentAPI 的環境中設定供應商金鑰，例如 `ANTHROPIC_API_KEY`。
 
@@ -561,7 +568,12 @@ Native agent 沒有自己的終端機，所以 AgentAPI 會在 agent 的工作�
 介面的終端機按鈕使用：登入、git 指令或其他任何事情都可以。它是真正的終端機（顏色、游標、
 全螢幕程式都可以用），會配合視窗大小，在手機上也一樣，並有一排按鍵列補上螢幕鍵盤沒有的按鍵。
 所有開啟它的人共用同一個 shell，就像 tmux 視窗，沒有人在看時也會繼續執行；shell 結束後，
-下次開啟會啟動新的 shell。它的環境變數和 agent 相同，但不含 AgentAPI 自己的變數。
+下次開啟會啟動新的 shell。它的環境變數和 agent 相同，但不含 AgentAPI 自己的變數。終端機裡的
+網頁連結點一下就會開啟，被折成多行的連結也一樣；指令最後印出的連結（例如登入網址）會顯示在
+終端機上方，點一下就能開啟或複製；TTY mode 也是如此。按鍵列有方向鍵、Enter、Esc、Tab、
+Shift+Tab、Ctrl+C，shell 的 Ctrl+R、Ctrl+A、Ctrl+E、Ctrl+U 和 Ctrl+W，Home、End、Page up 和
+Page down、/ - | ~、Alt+↑、Ctrl+L，以及要按兩次的 Ctrl+D 和 Ctrl+Z；它的 Ctrl 和 Alt 按鈕會
+按住修飾鍵，套用到下一個輸入的按鍵。
 
 - `GET /terminal` 以 server-sent events 串流它的輸出（`output` 事件帶 base64 資料，第一個
   事件是最近的輸出，供重播；shell 結束時送出 `exit`），shell 沒有在執行時會啟動它。
@@ -1186,9 +1198,10 @@ codex-cli 0.163.0 和 Pi 1.3.0，在 Linux、4 核心的 Intel Xeon Silver 4210�
 | Native | `native-demo`（沒有 agent 行程） | 27 MiB | 0.03% | 0.07 秒 | | |
 
 - agent 閒置時，兩種 transport 幾乎都不會讓 AgentAPI 耗用資源：輪詢畫面（PTY）和等待協定
-  （native）一樣便宜。例外是使用 PTY transport 的 Codex：為了找到這個工作階段的紀錄檔，
-  AgentAPI 每 500 毫秒會讀取 Codex 近期的工作階段檔案，第一則訊息之前讀得更多，所以成本會隨
-  近期 Codex 工作階段的數量增加。
+  （native）一樣便宜。原本的例外是使用 PTY transport 的 Codex（表中的 0.2–0.7%）：為了找到
+  這個工作階段的紀錄檔，AgentAPI 當時每 500 毫秒會讀取 Codex 近期的工作階段檔案，第一則訊息
+  之前讀得更多。現在每個檔案只讀一次，AgentAPI 搭配使用 PTY transport 的 Codex 時，閒置 CPU
+  也只有 0.1%（修正後量測）。
 - 使用 PTY transport 時，一個回合讓 AgentAPI 多用 3–6 倍的 CPU（輸入訊息、讀取畫面、追蹤
   工作階段紀錄檔），agent 本身也是：Codex 的終端機介面用了 6.3 CPU 秒的回合，它的 app-server
   只用了 0.4 秒。

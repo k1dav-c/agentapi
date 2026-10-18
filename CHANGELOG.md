@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Features
+
+- Chat: the terminals' key bar adds the keys a phone keyboard lacks: Ctrl+R, Ctrl+A, Ctrl+E,
+  Ctrl+U and Ctrl+W, Home, End, Page up and Page down, and / - | ~. Its Ctrl and Alt buttons hold the
+  modifier for the next key typed, for any other combination.
+- Chat: the Explorer's Session tab downloads the conversation as JSONL, next to Restart; the menu
+  behind the status in the header still does too.
+- Docs: the chat UI guide has animated GIFs of the main flows, and `scripts/capture-docs.mjs`
+  records them with the screenshots.
+
+### Fixes
+
+- Chat: links in the terminal and TTY mode open on a click, also when they run over several lines,
+  and the last link a command printed (a login URL) shows above the terminal to open or copy.
+- Codex logs in with a device code by default: the login card and `/login` run `codex login
+  --device-auth`, which works on a server without a browser, where the browser sign-in's redirect
+  to localhost can't come back.
+- Chat: thinking stays beside the steps it explains on a wide screen; a note taller than its step
+  no longer pushes the notes after it below their steps, or past the end of the task.
+- A custom PTY agent that draws no input box (a shell, a REPL) counts as ready once its screen
+  settles, instead of keeping every message in the queue.
+- With the PTY transport, finding Codex's session log reads each session file's first line once,
+  instead of every recent file every 500 ms (0.7% of a core while idle, growing with the sessions).
+- Chat: a warning the agent repeats on every start (Codex's note about a config setting it ignores)
+  shows once per page instead of stacking up.
+- Chat: the Explorer's MCP tab names Pi among the agents it manages, and the Session tab says a
+  restart updates the agent first only for Codex and Pi.
+- Chat: the Links tab leaves out a link the agent's text cut short with an ellipsis.
+
 ## v0.25.0
 
 ### Features
