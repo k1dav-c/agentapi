@@ -68,8 +68,11 @@ func (a *Adapter) threadSettings(resp threadStartResponse) {
 		Model:          resp.Model,
 		Effort:         effort,
 	}
-	a.collabSet = resp.CollaborationMode != nil
-	a.plan = a.collabSet && resp.CollaborationMode.Mode == collabPlan
+	a.collab, a.collabStale = "", false
+	if resp.CollaborationMode != nil {
+		a.collab = resp.CollaborationMode.Mode
+	}
+	a.plan = a.collab == collabPlan
 }
 
 // loadModels asks app-server for its models, unless the adapter has them:
@@ -178,60 +181,98 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 	case s.PermissionMode == native.PermissionModePlan:
 		// The policies stay those of the mode before.
 		s.PermissionMode = ""
-		if !a.plan {
-			a.plan = true
-			a.pendingCollab = collabPlan
-		}
-	case s.PermissionMode != "" && a.plan:
+		a.plan = true
+	case s.PermissionMode != "":
 		a.plan = false
-		a.pendingCollab = collabDefault
 	}
 	a.settings = a.settings.Merge(s)
 	a.pending = a.pending.Merge(s)
-	if a.collabSet && a.pendingCollab == "" && (s.Model != "" || s.Effort != "") {
-		// A thread's collaboration mode has a model and effort of its own,
-		// which win over the turn's: it goes again with the new ones.
-		a.pendingCollab = collabDefault
-		if a.plan {
-			a.pendingCollab = collabPlan
-		}
+	if s.Model != "" || s.Effort != "" {
+		a.collabStale = true
 	}
 	return nil
 }
 
-// pendingChanges are the settings changes the next turn/start carries.
-type pendingChanges struct {
+// turnChanges are the changes a turn/start carries.
+type turnChanges struct {
+	// settings changed since the last turn/start; stale is collabStale.
 	settings native.Settings
-	collab   string
+	stale    bool
+	// collab is the collaboration mode the turn switches to, or "".
+	collab string
+	// implement is the permission mode a turn that carries out the plan
+	// switches to; plan and mode are what the thread had before.
+	implement native.PermissionMode
+	plan      bool
+	mode      native.PermissionMode
 }
 
-// takePending puts the settings changes in params and clears them;
-// restorePending puts them back if the turn didn't start.
-func (a *Adapter) takePending(params *turnStartParams) pendingChanges {
+// takeChanges puts the changes the next turn/start carries in params and
+// clears them. With implement set, the turn leaves the plan mode, in the
+// policies of implement. turnStarted applies what the turn changed once it
+// started; restoreChanges puts the changes back if it didn't.
+func (a *Adapter) takeChanges(params *turnStartParams, implement native.PermissionMode) turnChanges {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	pending := pendingChanges{settings: a.pending, collab: a.pendingCollab}
-	a.pending, a.pendingCollab = native.Settings{}, ""
-	if p, ok := modePolicies(pending.settings.PermissionMode); ok {
+	c := turnChanges{settings: a.pending, stale: a.collabStale, implement: implement, plan: a.plan, mode: a.settings.PermissionMode}
+	a.pending, a.collabStale = native.Settings{}, false
+	mode, plan := c.settings.PermissionMode, a.plan
+	if implement != "" {
+		mode, plan = implement, false
+	}
+	if p, ok := modePolicies(mode); ok {
 		params.ApprovalPolicy = p.approval
 		params.SandboxPolicy = &sandboxPolicy{Type: p.sandbox}
 		params.ApprovalsReviewer = p.reviewer
 	}
-	params.Model = pending.settings.Model
-	params.Effort = pending.settings.Effort
-	if pending.collab != "" {
-		params.CollaborationMode = collaboration(pending.collab, a.settings)
-		a.collabSet = true
+	params.Model = c.settings.Model
+	params.Effort = c.settings.Effort
+	if c.collab = a.nextCollabLocked(plan, c.stale); c.collab != "" {
+		params.CollaborationMode = collaboration(c.collab, a.settings)
 	}
-	return pending
+	return c
 }
 
-func (a *Adapter) restorePending(pending pendingChanges) {
+// nextCollabLocked returns the collaboration mode a turn switches to, ""
+// to keep the thread's: into the plan mode or out of it, or the thread's
+// again when stale, since its model and effort win over the turn's.
+func (a *Adapter) nextCollabLocked(plan, stale bool) string {
+	want := collabDefault
+	if plan {
+		want = collabPlan
+	}
+	if a.collab == "" && !plan {
+		return ""
+	}
+	if a.collab != want || stale {
+		return want
+	}
+	return ""
+}
+
+// turnStarted applies what a turn that started changed. A change made
+// meanwhile wins.
+func (a *Adapter) turnStarted(c turnChanges) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	// A change made meanwhile wins.
-	a.pending = pending.settings.Merge(a.pending)
-	if a.pendingCollab == "" {
-		a.pendingCollab = pending.collab
+	if c.collab != "" {
+		a.collab = c.collab
 	}
+	if c.implement != "" {
+		if a.plan == c.plan {
+			a.plan = false
+		}
+		if a.settings.PermissionMode == c.mode {
+			a.settings.PermissionMode = c.implement
+		}
+	}
+}
+
+// restoreChanges puts back the changes of a turn that didn't start. A
+// change made meanwhile wins.
+func (a *Adapter) restoreChanges(c turnChanges) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pending = c.settings.Merge(a.pending)
+	a.collabStale = a.collabStale || c.stale
 }

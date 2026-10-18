@@ -124,11 +124,10 @@ func (a *Adapter) answerPlan(ctx context.Context, requestID string, response nat
 	var err error
 	switch {
 	case implement:
-		undo := a.leavePlanMode(native.PermissionMode(strings.TrimPrefix(response.OptionID, optionImplement)))
-		if err = a.StartTurn(ctx, native.Input{Text: implementPrompt}); err != nil {
-			// The thread still plans; so does the answer tried again.
-			undo()
-		} else {
+		// If the turn doesn't start, the thread still plans, and the
+		// answer can be tried again.
+		mode := native.PermissionMode(strings.TrimPrefix(response.OptionID, optionImplement))
+		if err = a.startTurn(ctx, native.Input{Text: implementPrompt}, mode); err == nil {
 			err = a.inLoop(ctx, a.reportSettings)
 		}
 	case feedback != "":
@@ -159,23 +158,6 @@ func (a *Adapter) cancelPlanDecision(ctx context.Context) (bool, error) {
 		a.sink.RequestClosed(id)
 		a.sink.TurnCompleted(native.TurnResult{StopReason: native.StopReasonInterrupted})
 	})
-}
-
-// leavePlanMode switches back to the default collaboration mode, in mode's
-// policies, with the next turn. undo puts back what it changed.
-func (a *Adapter) leavePlanMode(mode native.PermissionMode) (undo func()) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	plan, collab, current, pending := a.plan, a.pendingCollab, a.settings.PermissionMode, a.pending.PermissionMode
-	a.plan = false
-	a.pendingCollab = collabDefault
-	a.settings.PermissionMode = mode
-	a.pending.PermissionMode = mode
-	return func() {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		a.plan, a.pendingCollab, a.settings.PermissionMode, a.pending.PermissionMode = plan, collab, current, pending
-	}
 }
 
 // reportSettings tells the conversation about settings that changed

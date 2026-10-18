@@ -379,3 +379,68 @@ func TestFailedImplementationKeepsPlanning(t *testing.T) {
 	h.completeTurn("turn-2", "completed", "")
 	assert.Equal(t, "implement_ask", optionIDs(snapshot(h.rec).opened[1])[0], "the mode of before")
 }
+
+// A setting changed while the turn that carries out the plan is on its way
+// stays, whether the turn starts or not.
+func TestImplementationKeepsSettingsChangedMeanwhile(t *testing.T) {
+	implementing := func(t *testing.T) (*harness, native.Request, rpcMessage) {
+		h := newHarness(t, "", nil)
+		h.bootWith(`"approvalPolicy":"untrusted","approvalsReviewer":"user","sandbox":{"type":"workspaceWrite"},"reasoningEffort":"low"`)
+		h.options(true)
+		require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModePlan}))
+		plan := h.planTurn("turn-1")
+		h.act("implement", func(ctx context.Context) error {
+			return h.a.Respond(ctx, plan.ID, native.Response{OptionID: "implement_bypass"})
+		})
+		return h, plan, h.expectSent("turn/start")
+	}
+	turnParams := func(t *testing.T, sent rpcMessage) map[string]any {
+		var params map[string]any
+		require.NoError(t, json.Unmarshal(sent.Params, &params))
+		return params
+	}
+
+	t.Run("a new model, and the turn fails", func(t *testing.T) {
+		h, plan, sent := implementing(t)
+		require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{Model: "gpt-6-astra"}))
+		h.feedJSON(`{"id":` + string(sent.ID) + `,"error":{"code":-32603,"message":"boom"}}`)
+		h.settle()
+		require.Error(t, h.err("implement"))
+		assert.Equal(t, native.Settings{PermissionMode: native.PermissionModePlan, Model: "gpt-6-astra", Effort: "medium"}, h.a.Settings())
+
+		// The thread goes on planning, on the new model.
+		h.act("revise", func(ctx context.Context) error {
+			return h.a.Respond(ctx, plan.ID, native.Response{OptionID: optionKeepPlanning, Text: "smaller"})
+		})
+		params := turnParams(t, h.expectSent("turn/start"))
+		assert.Equal(t, map[string]any{"mode": "plan", "settings": map[string]any{"model": "gpt-6-astra", "reasoning_effort": "medium", "developer_instructions": nil}}, params["collaborationMode"])
+		assert.NotContains(t, params, "approvalPolicy", "the policies of before")
+	})
+
+	t.Run("another mode, and the turn fails", func(t *testing.T) {
+		h, _, sent := implementing(t)
+		require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeAuto}))
+		h.feedJSON(`{"id":` + string(sent.ID) + `,"error":{"code":-32603,"message":"boom"}}`)
+		h.settle()
+		require.Error(t, h.err("implement"))
+		assert.Equal(t, native.PermissionModeAuto, h.a.Settings().PermissionMode)
+	})
+
+	t.Run("another mode, and the turn starts", func(t *testing.T) {
+		h, _, sent := implementing(t)
+		params := turnParams(t, sent)
+		assert.Equal(t, "default", params["collaborationMode"].(map[string]any)["mode"])
+		assert.Equal(t, "never", params["approvalPolicy"], "the mode the answer picked")
+		require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeAuto}))
+		h.feedJSON(`{"id":` + string(sent.ID) + `,"result":{"turn":{"id":"turn-2","items":[],"status":"inProgress"}}}`)
+		h.settle()
+		require.NoError(t, h.err("implement"))
+		assert.Equal(t, native.PermissionModeAuto, h.a.Settings().PermissionMode, "the later choice wins")
+		h.completeTurn("turn-2", "completed", "")
+
+		h.act("turn", func(ctx context.Context) error { return h.a.StartTurn(ctx, native.Input{Text: "next"}) })
+		params = turnParams(t, h.expectSent("turn/start"))
+		assert.Equal(t, "on-request", params["approvalPolicy"])
+		assert.NotContains(t, params, "collaborationMode", "the thread left the plan mode")
+	})
+}

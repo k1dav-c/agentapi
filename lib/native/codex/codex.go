@@ -132,16 +132,15 @@ type Adapter struct {
 	settings native.Settings
 	pending  native.Settings
 	models   []native.ModelOption
-	// plan: the thread is in the plan collaboration mode, or will be from
-	// the next turn; pendingCollab is the mode the next turn/start
-	// switches to, if any; planWait is the plan request the current turn
-	// waits on. See plan.go.
-	plan          bool
-	pendingCollab string
-	planWait      string
-	// collabSet: the thread has a collaboration mode, which overrides the
-	// model and effort of its turns.
-	collabSet bool
+	// plan: the thread plans (the plan collaboration mode), or will from
+	// the next turn. collab is the collaboration mode the thread has, ""
+	// for none; it overrides the model and effort of its turns, so
+	// collabStale says a change to them needs it sent again. planWait is
+	// the plan request the current turn waits on. See plan.go.
+	plan        bool
+	collab      string
+	collabStale bool
+	planWait    string
 
 	closeOnce sync.Once
 	// handled counts the messages the read loop has handled.
@@ -383,6 +382,12 @@ func (a *Adapter) session() (threadID, turnID string, err error) {
 
 // StartTurn implements native.Adapter.
 func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
+	return a.startTurn(ctx, input, "")
+}
+
+// startTurn sends input as a new turn. A turn with implement set carries
+// out the plan the thread made, in that permission mode (see answerPlan).
+func (a *Adapter) startTurn(ctx context.Context, input native.Input, implement native.PermissionMode) error {
 	threadID, turnID, err := a.session()
 	if err != nil {
 		return err
@@ -394,7 +399,7 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 	if !a.opts.summaryFromUser {
 		params.Summary = "detailed"
 	}
-	pending := a.takePending(&params)
+	changes := a.takeChanges(&params, implement)
 	_, err = a.call(ctx, "turn/start", params, func(result json.RawMessage, rpcErr *rpcError) {
 		if rpcErr != nil {
 			return
@@ -405,13 +410,14 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 		}
 	})
 	if err != nil {
-		a.restorePending(pending)
+		a.restoreChanges(changes)
 		var rpcErr *rpcError
 		if errors.As(err, &rpcErr) && a.busy(rpcErr) {
 			return native.ErrTurnActive
 		}
 		return fmt.Errorf("start turn: %w", err)
 	}
+	a.turnStarted(changes)
 	return nil
 }
 
