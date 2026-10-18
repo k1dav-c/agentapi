@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/coder/agentapi/lib/mcpconfig"
 	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/coder/agentapi/lib/mcpconfig"
 )
 
 type MCPServers map[string]any
@@ -247,4 +248,27 @@ func (s *Server) updateMCP(
 		maps.Copy(servers, input.Body.Servers)
 		return nil
 	})
+}
+
+func (s *Server) registerMCPRoutes() {
+	huma.Get(s.api, "/mcp", s.getMCP, func(o *huma.Operation) {
+		configureMCPGetOperation(o)
+	})
+	huma.Put(s.api, "/mcp", s.updateMCP, func(o *huma.Operation) {
+		configureMCPUpdateOperation(o)
+	})
+	huma.Post(s.api, "/mcp/check", s.checkMCP, configureMCPChildOperation("Check MCP server connectivity"))
+	huma.Post(s.api, "/mcp/servers", s.createMCPServer, configureMCPChildOperation("Create an MCP server"))
+	huma.Patch(s.api, "/mcp/servers/{name}", s.patchMCPServer, configureMCPChildOperation("Update an MCP server"))
+	huma.Delete(s.api, "/mcp/servers/{name}", s.deleteMCPServer, configureMCPChildOperation("Delete an MCP server"))
+	huma.Get(s.api, "/mcp/profiles", s.getMCPProfiles, configureMCPChildOperation("List MCP profiles"))
+	huma.Put(s.api, "/mcp/profiles/{name}", s.putMCPProfile, configureMCPChildOperation("Import or replace an MCP profile"))
+	huma.Delete(s.api, "/mcp/profiles/{name}", s.deleteMCPProfile, configureMCPChildOperation("Delete an MCP profile"))
+	huma.Post(s.api, "/mcp/profiles/{name}/apply", s.applyMCPProfile, configureMCPChildOperation("Apply an MCP profile"))
+	// Huma populates inferred request/response media types after the operation
+	// configuration callback, so attach named payload examples once both
+	// operations have been registered.
+	mcpPath := s.api.OpenAPI().Paths["/mcp"]
+	addMCPExamples(mcpPath.Get, false)
+	addMCPExamples(mcpPath.Put, true)
 }

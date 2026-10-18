@@ -132,7 +132,8 @@ flowchart TB
 
 | 檔案 | 處理 |
 | --- | --- |
-| `server.go`、`queue.go` | 訊息、狀態、事件、佇列、上傳；伺服器的設定與路由 |
+| `server.go`、`routes.go`、`hosts.go`、`middleware.go` | 伺服器的設定、啟動與停止；各功能自行註冊的路由；允許的主機與來源；請求記錄 |
+| `conversation_api.go`、`queue.go`、`sse.go`、`jsonl_watcher.go` | 訊息、狀態與時間軸；佇列與派送；`GET /events` 與畫面串流；PTY 傳輸的工作階段紀錄監看 |
 | `backend.go`、`backend_pty.go`、`backend_native.go` | 依 transport 而不同的部分：派送佇列、送出訊息、重新啟動、人工回覆協定的待處理請求 |
 | `native.go` | 請求、設定、中斷、壓縮、重試登入；native observer |
 | `terminal.go`、`files.go`、`file_preview.go` | Shell 終端機與檔案檢視器 |
@@ -140,7 +141,7 @@ flowchart TB
 | `webhook.go`、`handoff.go`、`dialog_reply.go` | 執行狀態 webhook、人工回覆 API、終端機對話框的回答 |
 | `auth.go` | Token 驗證與聊天介面登入 |
 | `restart.go`、`statedb.go` | 重新啟動；還原與保存狀態 |
-| `events.go`、`models.go` | Emitter 與 API 的型別 |
+| `events.go`、`events_*.go`、`models.go` | Emitter（訂閱與重播；它保存的狀態、畫面、請求與訊息）與 API 的型別 |
 | `embed.go`、`uploads.go` | 嵌入的聊天介面；上傳的檔案 |
 
 一般的 chi 路由提供聊天介面（`/chat/*`）、上傳的圖片（`/uploads/{checksum}/{name}`）以及

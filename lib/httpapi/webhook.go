@@ -15,8 +15,9 @@ import (
 	"text/template"
 	"time"
 
-	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/danielgtaylor/huma/v2"
+
+	mf "github.com/coder/agentapi/lib/msgfmt"
 )
 
 const (
@@ -324,4 +325,18 @@ func (s *Server) updateWebhookConfig(_ context.Context, request *WebhookConfigRe
 		return nil, huma.Error400BadRequest(err.Error())
 	}
 	return s.getWebhookConfig(context.Background(), nil)
+}
+
+func (s *Server) registerWebhookRoutes() {
+	huma.Get(s.api, "/webhook", s.getWebhookConfig, func(o *huma.Operation) {
+		o.Tags = []string{"Webhook"}
+		o.Summary = "Get webhook configuration"
+		o.Description = "Returns the mutable run-status webhook configuration."
+	})
+	huma.Put(s.api, "/webhook", s.updateWebhookConfig, func(o *huma.Operation) {
+		o.Tags = []string{"Webhook"}
+		o.Summary = "Update webhook configuration"
+		o.Description = "Updates run-status webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent."
+		o.Errors = []int{400}
+	})
 }

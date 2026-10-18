@@ -145,7 +145,8 @@ The handlers are grouped by file:
 
 | File | Handles |
 | --- | --- |
-| `server.go`, `queue.go` | Messages, status, events, the queue, uploads; the server's setup and routes |
+| `server.go`, `routes.go`, `hosts.go`, `middleware.go` | The server's setup, start and stop; the routes, which each feature registers; allowed hosts and origins; request logging |
+| `conversation_api.go`, `queue.go`, `sse.go`, `jsonl_watcher.go` | Messages, status and timeline; the queue and its dispatch; `GET /events` and the screen stream; the PTY transport's session log watcher |
 | `backend.go`, `backend_pty.go`, `backend_native.go` | What depends on the transport: dispatching the queue, delivering a message, restarts, the human-reply protocol's pending request |
 | `native.go` | Requests, settings, interrupt, compaction, login retry; the native observer |
 | `terminal.go`, `files.go`, `file_preview.go` | The shell terminal and the file viewer |
@@ -153,7 +154,7 @@ The handlers are grouped by file:
 | `webhook.go`, `handoff.go`, `dialog_reply.go` | Run-status webhooks, the human-reply API, answers to terminal dialogs |
 | `auth.go` | Token auth and the chat's sign-in |
 | `restart.go`, `statedb.go` | Restarts; restoring and persisting the state |
-| `events.go`, `models.go` | The emitter and the API's types |
+| `events.go`, `events_*.go`, `models.go` | The emitter (subscriptions and replay; the status, screen, requests and messages it keeps) and the API's types |
 | `embed.go`, `uploads.go` | The embedded chat UI; uploaded files |
 
 Plain chi routes serve the chat (`/chat/*`), uploaded images

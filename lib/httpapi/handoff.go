@@ -11,11 +11,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/coder/agentapi/lib/handoff"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
-	"github.com/danielgtaylor/huma/v2"
 )
 
 var (
@@ -310,4 +311,9 @@ func (s *Server) replyNativeHandoffLocked(pendingID, replyID string, r native.Re
 	s.reserveHandoffLocked(pendingID)
 	s.handoffReceipts[pendingID] = handoffReceipt{replyID, result}
 	return &HandoffReplyResponse{Body: result}
+}
+
+func (s *Server) registerHandoffRoutes() {
+	huma.Get(s.api, "/handoff", s.getPendingHandoff)
+	huma.Post(s.api, "/handoff/reply", s.replyHandoff)
 }

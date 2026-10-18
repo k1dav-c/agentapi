@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -10,10 +11,13 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/coder/agentapi/lib/jsonlwatcher"
 )
 
 // uploadChecksumRe matches the directory POST /upload stores a file in:
@@ -165,4 +169,72 @@ func (s *Server) storeImage(data []byte) (string, error) {
 		return "", err
 	}
 	return "/uploads/" + checksum + "/" + name, nil
+}
+
+// uploadFiles handles POST /upload
+func (s *Server) uploadFiles(ctx context.Context, input *struct {
+	RawBody huma.MultipartFormFiles[UploadRequest]
+},
+) (*UploadResponse, error) {
+	formData := input.RawBody.Data()
+
+	file := formData.File.File
+
+	// Limit file size to 10MB
+	const maxFileSize = 10 << 20 // 10MB
+	buf, err := io.ReadAll(io.LimitReader(file, maxFileSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload file: %w", err)
+	}
+	if len(buf) > maxFileSize {
+		return nil, huma.Error400BadRequest("file size exceeds 10MB limit")
+	}
+
+	// Calculate checksum of the uploaded file to create unique subdirectory
+	hash := sha256.Sum256(buf)
+	checksum := hex.EncodeToString(hash[:8]) // Use first 8 bytes (16 hex chars)
+
+	// Create checksum-based subdirectory in the upload directory
+	dir := filepath.Join(s.uploadDir, checksum)
+	err = os.MkdirAll(dir, 0o755)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create upload directory: %w", err)
+	}
+
+	// Save individual file with original filename (extract just the base filename for security)
+	filename := filepath.Base(formData.File.Filename)
+
+	outPath := filepath.Join(dir, filename)
+	err = os.WriteFile(outPath, buf, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to write file: %w", err)
+	}
+
+	resp := &UploadResponse{}
+	resp.Body.Ok = true
+	resp.Body.FilePath = outPath
+	return resp, nil
+}
+
+// cleanupUploadDir removes the upload directory and all its contents, unless
+// the conversation that refers to them is kept.
+func (s *Server) cleanupUploadDir() {
+	if s.keepUploads {
+		return
+	}
+	if err := os.RemoveAll(s.uploadDir); err != nil {
+		s.logger.Error("Failed to clean up upload directory", "uploadDir", s.uploadDir, "error", err)
+	} else {
+		s.logger.Info("Cleaned up upload directory", "uploadDir", s.uploadDir)
+	}
+}
+
+func (s *Server) registerUploadRoutes() {
+	huma.Post(s.api, "/upload", s.uploadFiles, func(o *huma.Operation) {
+		o.Description = "Upload files to the specified upload path."
+	})
+
+	// Uploaded images, for the chat to show (not part of the OpenAPI
+	// schema: the response is the image itself).
+	s.router.Get("/uploads/{checksum}/{name}", s.serveUpload)
 }

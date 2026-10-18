@@ -1,9 +1,17 @@
 package httpapi
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/danielgtaylor/huma/v2"
+
+	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // messageQueue holds the messages waiting for the agent, in the order they
@@ -174,4 +182,135 @@ func (q *messageQueue) Restore(messages []QueuedMessage, lastID int) {
 // index returns the position of the message id, or -1. Caller holds q.mu.
 func (q *messageQueue) index(id int) int {
 	return slices.IndexFunc(q.messages, func(m QueuedMessage) bool { return m.ID == id })
+}
+
+const (
+	// messageQueueDispatchInterval is how often the queue dispatch loop
+	// checks whether the head of the queue can be sent to the agent.
+	messageQueueDispatchInterval = 500 * time.Millisecond
+	// maxQueueDispatchAttempts is how many consecutive non-transient send
+	// failures are tolerated before a queued message is dropped.
+	maxQueueDispatchAttempts = 5
+)
+
+// getQueue handles GET /queue, without s.mu (see getTitle): the queue has a
+// lock of its own.
+func (s *Server) getQueue(ctx context.Context, input *struct{}) (*QueueResponse, error) {
+	resp := &QueueResponse{}
+	resp.Body.Messages = s.queue.Messages()
+	return resp, nil
+}
+
+func (s *Server) updateQueuedMessage(ctx context.Context, input *UpdateQueuedMessageRequest) (*QueueMutationResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	content := strings.TrimSpace(input.Body.Content)
+	if content == "" {
+		return nil, huma.Error400BadRequest("message must not be empty")
+	}
+	if !s.queue.Update(input.ID, content) {
+		return nil, huma.Error404NotFound("queued message not found")
+	}
+	return queueMutated(), nil
+}
+
+func (s *Server) deleteQueuedMessage(ctx context.Context, input *DeleteQueuedMessageRequest) (*QueueMutationResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.queue.Remove(input.ID) {
+		return nil, huma.Error404NotFound("queued message not found")
+	}
+	return queueMutated(), nil
+}
+
+// reorderQueue puts the queued messages in the given order.
+func (s *Server) reorderQueue(_ context.Context, input *ReorderQueueRequest) (*QueueMutationResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.queue.Reorder(input.Body.IDs) {
+		return nil, huma.Error409Conflict("the queue changed; list every queued message once")
+	}
+	return queueMutated(), nil
+}
+
+func queueMutated() *QueueMutationResponse {
+	resp := &QueueMutationResponse{}
+	resp.Body.Ok = true
+	return resp
+}
+
+// queueMessageLocked queues content, first with front, and says so in resp.
+// Caller holds s.mu.
+func (s *Server) queueMessageLocked(resp *MessageResponse, content string, front bool) {
+	s.queue.Push(content, s.clock.Now(), front)
+	resp.Body.Ok = true
+	resp.Body.Queued = true
+}
+
+// startMessageQueue starts the queue dispatch loop. Dispatch is driven by
+// polling rather than by subscribing to status events: an event subscriber
+// channel is closed by the emitter when it fills up (which a slow
+// conversation.Send call could cause), and status events don't fire again
+// when a message fails transient validation while the agent stays stable.
+// Polling is immune to both.
+func (s *Server) startMessageQueue() {
+	s.clock.TickerFunc(s.shutdownCtx, messageQueueDispatchInterval, func() error {
+		s.dismissCodexUpdatePrompt()
+		s.dispatchNextQueuedMessage()
+		s.persistQueue()
+		return nil
+	}, "messageQueueDispatch")
+}
+
+// dispatchNextQueuedMessage sends the head of the queue once the agent can
+// take it. A message the agent refuses is tried again on later ticks and
+// dropped after maxQueueDispatchAttempts, or at once when sending it again
+// could deliver it twice.
+func (s *Server) dispatchNextQueuedMessage() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next, ok := s.queue.Head()
+	backend := s.backend()
+	if !ok || !backend.readyForQueued() {
+		return
+	}
+	err := backend.sendQueued(next.Content)
+	switch {
+	case err == nil:
+		s.queue.Remove(next.ID)
+		return
+	case errors.Is(err, st.ErrMessageValidationChanging):
+		// The agent got busy again: on a later tick.
+		return
+	}
+	attempts := s.queue.Failed(next.ID)
+	s.logger.Error("Failed to send queued message", "queueId", next.ID, "attempt", attempts, "error", err)
+	if reason := backend.notResent(err); reason != "" {
+		s.queue.Remove(next.ID)
+		s.emitter.EmitError(fmt.Sprintf("Queued message %q %s: %v", shortText(next.Content, 40), reason, err), st.ErrorLevelError)
+		return
+	}
+	if attempts >= maxQueueDispatchAttempts {
+		// It would block the queue forever.
+		s.queue.Remove(next.ID)
+		s.emitter.EmitError(fmt.Sprintf("Dropped queued message %q after %d failed attempts: %v", shortText(next.Content, 40), attempts, err), st.ErrorLevelError)
+	}
+}
+
+func (s *Server) registerQueueRoutes() {
+	huma.Get(s.api, "/queue", s.getQueue, func(o *huma.Operation) {
+		o.Description = "Returns user messages waiting to be sent to the agent."
+	})
+	huma.Put(s.api, "/queue/{id}", s.updateQueuedMessage, func(o *huma.Operation) {
+		o.Description = "Updates a queued user message."
+	})
+	huma.Delete(s.api, "/queue/{id}", s.deleteQueuedMessage, func(o *huma.Operation) {
+		o.Description = "Deletes a queued user message."
+	})
+	huma.Put(s.api, "/queue", s.reorderQueue, func(o *huma.Operation) {
+		o.Description = "Reorders the queued messages. The body must list every queued message id exactly once; otherwise 409 is returned."
+		o.Errors = []int{409}
+	})
 }
