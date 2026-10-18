@@ -15,10 +15,8 @@ import {
 import {toast} from "sonner";
 import {getErrorMessage} from "@/lib/error-utils";
 import {getDocumentTitle} from "@/lib/document-title";
-import {getReconnectDelay} from "@/lib/reconnect";
 import {parseFailedMessages} from "@/lib/failed-messages";
-import {clearSession, loadSession, mergeByKey, saveSession} from "@/lib/session-cache";
-import {bootstrapSession, ensureSession, withCredentials} from "@/lib/auth";
+import {clearSession} from "@/lib/session-cache";
 import {AuthDialog} from "@/components/auth-dialog";
 import {
   createChatAPI,
@@ -35,10 +33,9 @@ import {
 } from "@/lib/chat-api";
 import {features, type Features} from "@/lib/features";
 import type {AgentType} from "@/lib/agents";
-import {applyStatusChange, initialAgentStatus, update, type AgentStatus, type ServerStatus, type StatusChangeEvent} from "@/lib/agent-status";
+import {initialAgentStatus, update, type AgentStatus, type ServerStatus} from "@/lib/agent-status";
 import {
   canStop,
-  parseTransport,
   type Capabilities,
   type DispatchContext,
   type DispatchMode,
@@ -51,105 +48,18 @@ import {
   type NativeRequest,
   type RequestResponse,
 } from "@/lib/native-requests";
-import {isLoginNotice, type LoginRequired} from "@/lib/login";
+import type {LoginRequired} from "@/lib/login";
 import {getAgentState, type AgentStateKind} from "@/lib/session-status";
 import {SyncTracker} from "@/lib/session-sync";
+import {isDraftMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
+import {useEventStream} from "./use-event-stream";
+import {useQueue} from "./use-queue";
+import {useSessionCache} from "./use-session-cache";
 import {Store, useStoreSelector} from "@/lib/store";
 import {useStableCallback} from "@/lib/use-stable-callback";
 import {usePersisted} from "@/lib/use-persisted";
 
-export interface Message {
-  id: number;
-  role: string;
-  content: string;
-  time?: string;
-}
-
-// Draft messages are used to optmistically update the UI
-// before the server responds.
-export interface DraftMessage extends Omit<Message, "id"> {
-  id?: number;
-  clientId: string;
-  deliveryStatus: "sending" | "failed";
-  error?: string;
-}
-
-interface MessageUpdateEvent {
-  id: number;
-  role: string;
-  message: string;
-  time: string;
-  seq?: number;
-}
-
-interface SessionSyncEvent {
-  epoch: string;
-  full: boolean;
-  seq: number;
-}
-
-// How long incoming conversation events are collected before they are
-// applied together. A reload replays the whole session as one event per
-// message; applying them one by one re-rendered the transcript each time.
-const EVENT_FLUSH_MS = 32;
-// Minimum time between writes of the conversation cache.
-const CACHE_SAVE_INTERVAL_MS = 2000;
-// How long to wait for the cache before connecting without it.
-const CACHE_LOAD_TIMEOUT_MS = 400;
-// While a reconnect replays state, updates are held until the replay is
-// complete and applied at once; a very long replay still shows progress
-// this often.
-const REPLAY_FLUSH_MAX_MS = 1500;
-
-const richMessageKey = (message: RichMessage) => `${message.message_id}\u0000${message.role}`;
-
-// Drops the transport-only change sequence before an update is stored.
-function withoutSeq<T extends {seq?: number}>(item: T): Omit<T, "seq"> {
-  const copy = {...item};
-  delete copy.seq;
-  return copy;
-}
-
-export interface RichContentBlock {
-  type: "text" | "thinking" | "tool_use" | "tool_result";
-  text?: string;
-  thinking?: string;
-  tool_use_id?: string;
-  tool_name?: string;
-  tool_input?: unknown;
-  status?: "running" | "completed" | "failed";
-  is_error?: boolean;
-  // Images in a tool result (an image file the agent read), served by
-  // AgentAPI at url.
-  images?: {media_type: string; url?: string}[];
-}
-
-export interface Usage {
-  input_tokens: number;
-  output_tokens: number;
-  cache_creation_input_tokens: number;
-  cache_read_input_tokens: number;
-}
-
-export interface RichMessage {
-  message_id: string;
-  role: string;
-  content: RichContentBlock[];
-  timestamp: string;
-  usage?: Usage;
-  model?: string;
-  stop_reason?: string;
-}
-
-interface ErrorEventData {
-  message: string;
-  level: string;
-  time: string;
-}
-
-function isDraftMessage(message: Message | DraftMessage): boolean {
-  return message.id === undefined;
-}
+export type {DraftMessage, Message, RichContentBlock, RichMessage, Usage} from "@/lib/conversation";
 
 type MessageType = "user" | "raw";
 
@@ -286,12 +196,6 @@ interface ChatContextValue {
   workspaceUrl?: string;
 }
 
-// The server sends a heartbeat event every 15s. If nothing (heartbeat or
-// otherwise) arrives for this long, the connection is considered dead even
-// when the EventSource still reports itself as open — which happens when
-// the TCP connection dies without a FIN, e.g. after system sleep.
-const STALE_CONNECTION_MS = 45_000;
-
 const ChatContext = createContext<ChatContextValue | undefined>(undefined);
 const ChatStoreContext = createContext<Store<ChatContextValue> | undefined>(undefined);
 
@@ -339,9 +243,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
-  const [connectionStatus, setConnectionStatus] =
-    useState<ConnectionStatus>("reconnecting");
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [transport, setTransport] = useState<Transport>("pty");
   // The agent's status, from status_change events (lib/agent-status). An
   // event that changes nothing leaves it as it is; the ref has the latest,
@@ -369,6 +270,29 @@ export function ChatProvider({ children }: PropsWithChildren) {
     lifecycle,
   } = agentStatus;
   const [requests, setRequests] = useState<NativeRequest[]>([]);
+  const agentAPIUrl = useAgentAPIUrl();
+  const api = useMemo(() => createChatAPI(agentAPIUrl), [agentAPIUrl]);
+  // Server conversation state the client holds: its epoch and the highest
+  // change sequence applied. Sent as /events?since=&epoch= so a reconnect
+  // only receives what changed.
+  const syncRef = useRef(new SyncTracker());
+  // The requests as last rendered, for refreshRequests.
+  const requestsRef = useRef(requests);
+  requestsRef.current = requests;
+  const {queuedMessages, refreshQueue, updateQueuedMessage, deleteQueuedMessage, steerQueuedMessage, reorderQueue} = useQueue(api);
+  const {connectionStatus, reconnectAttempt, nextReconnectAt, reconnectByUser} = useEventStream({
+    agentAPIUrl,
+    api,
+    syncRef,
+    setMessages,
+    setRichMessages,
+    setRequests,
+    setTransport,
+    updateAgentStatus,
+    agentStatusRef,
+    refreshQueue,
+  });
+  useSessionCache({agentAPIUrl, syncRef, messages, richMessages, requests, transport});
   const pendingRequestCount = useMemo(() => pendingRequests(requests).length, [requests]);
   const agentStarting = lifecycle === "starting";
   const agentState = getAgentState({
@@ -383,133 +307,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     [agentStarting, capabilities, pendingRequestCount, serverStatus, transport],
   );
   const chatFeatures = useMemo(() => features(transport, capabilities, terminalAvailable), [capabilities, terminalAvailable, transport]);
-  // Errors the server replays on every connection that this page showed
-  // already.
-  const shownErrorsRef = useRef(new Set<string>());
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const lastEventAtRef = useRef(Date.now());
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reconnectAttemptRef = useRef(0);
-  const [reconnectAttempt, setReconnectAttempt] = useState(0);
-  const [nextReconnectAt, setNextReconnectAt] = useState<number | null>(null);
-  const [reconnectNonce, setReconnectNonce] = useState(0);
-  const agentAPIUrl = useAgentAPIUrl();
-  const api = useMemo(() => createChatAPI(agentAPIUrl), [agentAPIUrl]);
   const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
-  // Server conversation state the client holds: its epoch and the highest
-  // change sequence applied. Sent as /events?since=&epoch= so a reconnect
-  // only receives what changed.
-  const syncRef = useRef(new SyncTracker());
-  // Events received but not applied yet; see EVENT_FLUSH_MS.
-  const pendingRef = useRef({
-    messages: new Map<number, Message & {seq?: number}>(),
-    rich: new Map<string, RichMessage & {seq?: number}>(),
-    requests: new Map<string, NativeRequest>(),
-    replace: false,
-  });
-  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cacheLoadedForRef = useRef("");
-  // Highest seq received on this connection, and the seq the current replay
-  // ends at (session_sync.seq) while it is still arriving.
-
-  const flushEvents = useCallback(() => {
-    flushTimerRef.current = null;
-    const pending = pendingRef.current;
-    const {replace} = pending;
-    const messageUpdates = [...pending.messages.values()];
-    const richUpdates = [...pending.rich.values()];
-    const requestUpdates = [...pending.requests.values()];
-    pending.messages = new Map();
-    pending.rich = new Map();
-    pending.requests = new Map();
-    pending.replace = false;
-    for (const update of [...messageUpdates, ...richUpdates, ...requestUpdates]) syncRef.current.applied(update.seq ?? 0);
-
-    if (replace || messageUpdates.length > 0) {
-      setMessages((previous) => {
-        // A server message supersedes drafts that are still being sent;
-        // failed drafts stay until they are retried or dismissed.
-        const kept = previous.filter(
-          (message) =>
-            (replace ? isDraftMessage(message) : true) &&
-            (!isDraftMessage(message) || (message as DraftMessage).deliveryStatus === "failed"),
-        );
-        return mergeByKey(
-          kept,
-          messageUpdates.map(withoutSeq),
-          (message) => (isDraftMessage(message) ? undefined : String((message as Message).id)),
-        );
-      });
-    }
-    if (replace || richUpdates.length > 0) {
-      setRichMessages((previous) =>
-        mergeByKey(replace ? [] : previous, richUpdates.map(withoutSeq), richMessageKey),
-      );
-    }
-    if (replace || requestUpdates.length > 0) {
-      // Requests keep their seq: it decides between an event and a state
-      // read from the REST API (see mergeRequests).
-      setRequests((previous) => mergeRequests(replace ? [] : previous, requestUpdates));
-    }
-  }, []);
-
-  // Schedules applying the events received so far. An event that completes
-  // the replay (see SyncTracker) applies the replay now, in one render.
-  const scheduleFlush = useCallback((event?: MessageEvent, immediate = false) => {
-    if (event && syncRef.current.noteEvent(event.lastEventId)) {
-      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = setTimeout(flushEvents, 0);
-      return;
-    }
-    const replaying = syncRef.current.replaying;
-    if (immediate && !replaying) {
-      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
-      flushEvents();
-      return;
-    }
-    if (flushTimerRef.current) return;
-    flushTimerRef.current = setTimeout(flushEvents, replaying ? REPLAY_FLUSH_MAX_MS : EVENT_FLUSH_MS);
-  }, [flushEvents]);
-
-  const reconnectNow = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    eventSourceRef.current?.close();
-    reconnectAttemptRef.current = 0;
-    setReconnectAttempt(0);
-    setNextReconnectAt(null);
-    setConnectionStatus("reconnecting");
-    setReconnectNonce((value) => value + 1);
-  }, []);
-  // Reconnect now, as the user asked. Once the user closed the sign-in
-  // dialog, reconnects in the background stop asking for the token; this
-  // asks again, and reconnects once signed in.
-  const reconnectByUser = useCallback(() => {
-    reconnectNow();
-    void ensureSession(agentAPIUrl).then((signedIn) => {
-      if (signedIn) reconnectNow();
-    });
-  }, [agentAPIUrl, reconnectNow]);
-  const lastQueueRefreshRef = useRef(0);
-  const queuedCountRef = useRef(0);
-  const refreshQueue = useCallback(async (force = false) => {
-    const now = Date.now();
-    // Throttle: skip if last refresh was less than 30s ago, unless forced.
-    // A non-empty queue is never throttled: the server sends a queued task
-    // as soon as the agent is free, and a stale entry looks like a message
-    // that failed to send.
-    if (!force && queuedCountRef.current === 0 && now - lastQueueRefreshRef.current < 30_000) return;
-    lastQueueRefreshRef.current = now;
-    try {
-      const queue = await api.getQueue();
-      queuedCountRef.current = queue.length;
-      setQueuedMessages(queue);
-    } catch {
-      // The connection status handler reports connectivity failures.
-    }
-  }, [api]);
   const currentTask = [...messages]
     .reverse()
     .find((message) => message.role === "user")
@@ -542,7 +340,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     messages,
     (current) => {
       const failed = current.filter(
-        (message): message is DraftMessage => isDraftMessage(message) && (message as DraftMessage).deliveryStatus === "failed",
+        (message): message is DraftMessage => isDraftMessage(message) && message.deliveryStatus === "failed",
       );
       return failed.length > 0 ? JSON.stringify(failed) : null;
     },
@@ -550,344 +348,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
       if (!stored) return;
       const failed = parseFailedMessages(stored) as DraftMessage[];
       setMessages((previous) => {
-        const existing = new Set(previous.filter(isDraftMessage).map((message) => (message as DraftMessage).clientId));
+        const existing = new Set(previous.filter(isDraftMessage).map((message) => message.clientId));
         return [...previous, ...failed.filter((message) => !existing.has(message.clientId))];
       });
     },
   );
-
-  // Set up SSE connection to the events endpoint
-  useEffect(() => {
-    let disposed = false;
-
-    const handleOffline = () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
-      eventSourceRef.current?.close();
-      setNextReconnectAt(null);
-      setConnectionStatus("offline");
-    };
-    const handleOnline = () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
-      reconnectAttemptRef.current = 0;
-      setReconnectAttempt(0);
-      setNextReconnectAt(null);
-      setConnectionStatus("reconnecting");
-      setupEventSource();
-    };
-    window.addEventListener("offline", handleOffline);
-    window.addEventListener("online", handleOnline);
-
-    // Reconnect promptly when the tab becomes visible again. Browsers
-    // throttle timers in background tabs, so a scheduled reconnect may not
-    // have fired yet, and a connection that died without a FIN (e.g. after
-    // system sleep) never fires onerror at all. Server heartbeats let us
-    // detect the silent case: no event for STALE_CONNECTION_MS means the
-    // connection is dead even if the EventSource still reports itself open.
-    const handleVisible = () => {
-      if (document.visibilityState !== "visible") return;
-      const eventSource = eventSourceRef.current;
-      const stale =
-        Date.now() - lastEventAtRef.current > STALE_CONNECTION_MS;
-      if (
-        !eventSource ||
-        eventSource.readyState === EventSource.CLOSED ||
-        stale
-      ) {
-        reconnectNow();
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisible);
-    window.addEventListener("focus", handleVisible);
-
-    // Function to create and set up EventSource
-    const setupEventSource = () => {
-      if (disposed) return null;
-
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-
-      if (!agentAPIUrl) {
-        console.warn(
-          "agentAPIUrl is not set, SSE connection cannot be established."
-        );
-        updateAgentStatus((status) => update(status, {serverStatus: "offline"}));
-        return null; // Don't try to connect if URL is empty
-      }
-
-      const {epoch, watermark} = syncRef.current;
-      const eventSource = new EventSource(
-        epoch
-          ? `${agentAPIUrl}/events?sync=1&since=${watermark}&epoch=${encodeURIComponent(epoch)}`
-          : `${agentAPIUrl}/events?sync=1`,
-        {withCredentials: withCredentials(agentAPIUrl)},
-      );
-      eventSourceRef.current = eventSource;
-      // Servers whose status_change doesn't carry the transport report it in
-      // GET /status, asked once per connection.
-      let askedTransport = false;
-      // Servers that predate session_sync replay everything on every
-      // connection without saying so; treat that replay as the full state.
-      let synced = false;
-      const assumeFullReplay = () => {
-        if (synced) return;
-        synced = true;
-        syncRef.current.reset();
-        pendingRef.current.messages.clear();
-        pendingRef.current.rich.clear();
-        pendingRef.current.requests.clear();
-        pendingRef.current.replace = true;
-      };
-
-      eventSource.addEventListener("session_sync", (event) => {
-        lastEventAtRef.current = Date.now();
-        synced = true;
-        const data: SessionSyncEvent = JSON.parse(event.data);
-        const full = syncRef.current.begin(data, event.lastEventId);
-        if (full) {
-          // Everything that follows is the full state: replace what the
-          // cache or an earlier connection left.
-          pendingRef.current.messages.clear();
-          pendingRef.current.rich.clear();
-          pendingRef.current.requests.clear();
-          pendingRef.current.replace = true;
-        }
-        if (full || !syncRef.current.replaying) scheduleFlush();
-      });
-
-      // Server-sent keep-alive; only used to detect dead connections.
-      eventSource.addEventListener("heartbeat", (event) => {
-        lastEventAtRef.current = Date.now();
-        if (syncRef.current.replaying) scheduleFlush(event);
-      });
-
-      // Handle message updates
-      eventSource.addEventListener("message_update", (event) => {
-        lastEventAtRef.current = Date.now();
-        assumeFullReplay();
-        const data: MessageUpdateEvent = JSON.parse(event.data);
-        pendingRef.current.messages.set(data.id, {
-          role: data.role,
-          content: data.message,
-          id: data.id,
-          time: data.time,
-          seq: data.seq,
-        } as Message & {seq?: number});
-        scheduleFlush(event);
-      });
-
-      eventSource.addEventListener("rich_message_update", (event) => {
-        lastEventAtRef.current = Date.now();
-        assumeFullReplay();
-        const data: RichMessage & {seq?: number} = JSON.parse(event.data);
-        pendingRef.current.rich.set(richMessageKey(data), data);
-        scheduleFlush(event);
-      });
-
-      // A request the agent waits on (native transport) opened or changed.
-      // Requests are part of the replay, like messages. Outside a replay one
-      // applies at once: the status_change the server sends right after it
-      // (now "stable", waiting) must not show before the request does.
-      eventSource.addEventListener("request_update", (event) => {
-        lastEventAtRef.current = Date.now();
-        assumeFullReplay();
-        const data: NativeRequest = JSON.parse(event.data);
-        pendingRef.current.requests.set(data.id, data);
-        scheduleFlush(event, true);
-      });
-
-      // Handle status changes
-      eventSource.addEventListener("status_change", (event) => {
-        lastEventAtRef.current = Date.now();
-        assumeFullReplay();
-        const data: StatusChangeEvent = JSON.parse(event.data);
-        // The replay's last event may be its status.
-        if (syncRef.current.replaying) scheduleFlush(event);
-        updateAgentStatus((status) => applyStatusChange(status, data));
-        // The transport decides whether the terminal (TTY mode, raw keys)
-        // exists at all.
-        const reported = parseTransport(data.transport);
-        if (reported) {
-          setTransport(reported);
-        } else if (!askedTransport) {
-          askedTransport = true;
-          void api.getStatus().then((status) => {
-            if (!disposed) setTransport(status.transport);
-          }).catch(() => {
-            // Reported through the connection status.
-          });
-        }
-        void refreshQueue();
-      });
-
-      // Handle agent error events
-      eventSource.addEventListener("agent_error", (event) => {
-        const messageEvent = event as MessageEvent;
-        if (syncRef.current.replaying) scheduleFlush(messageEvent);
-        try {
-          const data: ErrorEventData = JSON.parse(messageEvent.data);
-          // The server sends its stored errors again on every connection.
-          const key = `${data.time}\u0000${data.message}`;
-          if (shownErrorsRef.current.has(key)) return;
-          shownErrorsRef.current.add(key);
-          // The login card says it while the login is needed; afterwards
-          // the notice is stale.
-          if (isLoginNotice(data.message, agentStatusRef.current.loginRequired)) return;
-
-          // Display error as toast notification that persists until manually dismissed
-          if (data.level === "error") {
-            toast.error(data.message, { duration: Infinity });
-          } else if (data.level === "warning") {
-            toast.warning(data.message, { duration: Infinity });
-          } else {
-            toast.info(data.message, { duration: Infinity });
-          }
-        } catch (e) {
-          console.error("Failed to parse agent_error event data:", e);
-        }
-      });
-
-      // Handle connection open (server is online)
-      eventSource.onopen = () => {
-        lastEventAtRef.current = Date.now();
-        reconnectAttemptRef.current = 0;
-        setReconnectAttempt(0);
-        setNextReconnectAt(null);
-        setConnectionStatus("connected");
-        void refreshQueue();
-        // Connection is established, but we'll wait for status_change event
-        // for the actual server status
-        console.log("EventSource connection established - messages reset");
-      };
-
-      // Handle connection errors
-      eventSource.onerror = (error) => {
-        console.error("EventSource error:", error);
-        setConnectionStatus(navigator.onLine ? "reconnecting" : "offline");
-        eventSource.close();
-        // EventSource doesn't expose the status code; a 401 (no session
-        // cookie, or the token changed) shows up as an error like any other.
-        // Ask the server, and reconnect right away once signed in. Nobody
-        // asked for this reconnect, so a closed dialog stays closed.
-        void ensureSession(agentAPIUrl, {background: true}).then((signedIn) => {
-          if (signedIn && !disposed) reconnectNow();
-        });
-
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        const attempt = reconnectAttemptRef.current + 1;
-        reconnectAttemptRef.current = attempt;
-        setReconnectAttempt(attempt);
-        const delay = getReconnectDelay(attempt);
-        setNextReconnectAt(Date.now() + delay);
-        reconnectTimeoutRef.current = setTimeout(() => {
-          if (!disposed) {
-            setNextReconnectAt(null);
-            setupEventSource();
-          }
-        }, delay);
-      };
-
-      return eventSource;
-    };
-
-    // Show the cached transcript right away and connect from where it
-    // left off. Without a cache (or if it is slow to read) connect anyway.
-    let started = false;
-    const start = () => {
-      if (started || disposed) return;
-      started = true;
-      // Sign in first (a `#token=` link, or the dialog when the server
-      // needs a token). Only the first connection waits for it.
-      void bootstrapSession(agentAPIUrl).finally(() => {
-        if (!disposed) setupEventSource();
-      });
-    };
-    if (cacheLoadedForRef.current !== agentAPIUrl) {
-      cacheLoadedForRef.current = agentAPIUrl;
-      void loadSession<Message, RichMessage, NativeRequest>(agentAPIUrl).then((cached) => {
-        if (cached && !started && !disposed) {
-          syncRef.current.restore(cached.epoch, cached.seq);
-          setMessages((previous) => [...cached.messages, ...previous.filter(isDraftMessage)]);
-          setRichMessages(cached.richMessages);
-          setRequests(cached.requests);
-          const cachedTransport = parseTransport(cached.transport);
-          if (cachedTransport) setTransport(cachedTransport);
-        }
-        start();
-      });
-      setTimeout(start, CACHE_LOAD_TIMEOUT_MS);
-    } else {
-      start();
-    }
-
-    // Clean up on component unmount
-    return () => {
-      disposed = true;
-      window.removeEventListener("offline", handleOffline);
-      window.removeEventListener("online", handleOnline);
-      document.removeEventListener("visibilitychange", handleVisible);
-      window.removeEventListener("focus", handleVisible);
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
-      eventSourceRef.current?.close();
-      eventSourceRef.current = null;
-    };
-  }, [agentAPIUrl, api, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush, updateAgentStatus]);
-
-  // Keep the conversation cache current, at most every
-  // CACHE_SAVE_INTERVAL_MS, and once more when the page is hidden.
-  const saveRequestRef = useRef<() => void>(() => {});
-  const latestRef = useRef({messages, richMessages, requests, transport});
-  latestRef.current = {messages, richMessages, requests, transport};
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let lastSave = 0;
-    const save = () => {
-      timer = null;
-      lastSave = Date.now();
-      // The watermark doesn't pass a replay still on its way, so a reload
-      // gets the rest of it again.
-      const {epoch, watermark: seq} = syncRef.current;
-      if (!epoch) return;
-      void saveSession(agentAPIUrl, {
-        epoch,
-        seq,
-        messages: latestRef.current.messages.filter((message) => !isDraftMessage(message)) as Message[],
-        richMessages: latestRef.current.richMessages,
-        requests: latestRef.current.requests,
-        transport: latestRef.current.transport,
-        savedAt: Date.now(),
-      });
-    };
-    const onHide = () => {
-      if (document.visibilityState === "hidden") save();
-    };
-    document.addEventListener("visibilitychange", onHide);
-    window.addEventListener("pagehide", save);
-    saveRequestRef.current = () => {
-      if (timer) return;
-      timer = setTimeout(save, Math.max(0, lastSave + CACHE_SAVE_INTERVAL_MS - Date.now()));
-    };
-    return () => {
-      document.removeEventListener("visibilitychange", onHide);
-      window.removeEventListener("pagehide", save);
-      if (timer) clearTimeout(timer);
-      saveRequestRef.current = () => {};
-    };
-  }, [agentAPIUrl]);
-  useEffect(() => {
-    saveRequestRef.current();
-  }, [messages, richMessages, requests]);
 
   // Send a new message
   const sendMessage = async (
@@ -921,7 +386,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
           previous.filter(
             (message) =>
               !isDraftMessage(message) ||
-              (message as DraftMessage).clientId !== clientId,
+              message.clientId !== clientId,
           ),
         );
       }
@@ -940,10 +405,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
       if (type === "user") {
         setMessages((previous) =>
           previous.map((item) =>
-            isDraftMessage(item) &&
-            (item as DraftMessage).clientId === clientId
+            isDraftMessage(item) && item.clientId === clientId
               ? {
-                  ...(item as DraftMessage),
+                  ...item,
                   deliveryStatus: "failed",
                   error: message,
                 }
@@ -964,7 +428,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       previous.filter(
         (message) =>
           !isDraftMessage(message) ||
-          (message as DraftMessage).clientId !== clientId,
+          message.clientId !== clientId,
       ),
     );
   };
@@ -973,7 +437,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     const failedMessage = messages.find(
       (message) =>
         isDraftMessage(message) &&
-        (message as DraftMessage).clientId === clientId,
+        message.clientId === clientId,
     );
     if (!failedMessage) return false;
     dismissFailedMessage(clientId);
@@ -985,40 +449,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const uploadFiles = (formData: FormData, options: UploadOptions = {}) =>
     api.uploadFiles(formData, options);
 
-  const updateQueuedMessage = async (id: number, content: string) => {
-    await api.updateQueuedMessage(id, content);
-    await refreshQueue(true);
-  };
-
-  const deleteQueuedMessage = async (id: number) => {
-    await api.deleteQueuedMessage(id);
-    await refreshQueue(true);
-  };
-
-  const steerQueuedMessage = async (id: number) => {
-    try {
-      await api.steerQueuedMessage(id);
-    } finally {
-      await refreshQueue(true);
-    }
-  };
-
-  const reorderQueue = async (ids: number[]) => {
-    // Show the new order at once; the refresh corrects it if the server
-    // refused.
-    setQueuedMessages((previous) =>
-      ids.flatMap((id) => previous.filter((message) => message.id === id)),
-    );
-    try {
-      await api.reorderQueue(ids);
-    } finally {
-      await refreshQueue(true);
-    }
-  };
-
   // Reads the requests from the REST API; see mergeListedRequests.
   const refreshRequests = async () => {
-    const heldWhenAsked = latestRef.current.requests;
+    const heldWhenAsked = requestsRef.current;
     const listed = await api.getRequests();
     setRequests((previous) => mergeListedRequests(previous, listed, heldWhenAsked));
   };
