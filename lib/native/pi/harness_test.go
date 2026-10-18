@@ -242,6 +242,7 @@ func newHarness(t *testing.T, cfg Config, resumeRef string, opts ...func(*harnes
 	a.abortGrace, a.stdinGrace, a.termGrace = time.Second, time.Second, time.Second
 	a.clock = h.clock
 	h.a = a
+	h.sink.CheckUnlocked(func() { a.Settings() })
 	for _, opt := range opts {
 		opt(h)
 	}

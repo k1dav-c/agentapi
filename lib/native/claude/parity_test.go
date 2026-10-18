@@ -45,7 +45,7 @@ func sessionLogMessages(t *testing.T, name string) []jsonlwatcher.RichMessage {
 func comparable(t *testing.T, m jsonlwatcher.RichMessage) jsonlwatcher.RichMessage {
 	t.Helper()
 	m.Timestamp = time.Time{}
-	m = cloneMessage(m)
+	m = m.Clone()
 	for i := range m.Content {
 		m.Content[i].Status = ""
 		if len(m.Content[i].ToolInput) > 0 {

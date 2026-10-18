@@ -62,6 +62,9 @@ type Adapter struct {
 	Learned native.Settings
 	// SettingsErr is returned by ApplySettings.
 	SettingsErr error
+	// OnCall, if set, runs first thing in every method of the adapter's
+	// interfaces, with the method's name.
+	OnCall func(method string)
 
 	mu         sync.Mutex
 	sink       native.Sink
@@ -92,6 +95,7 @@ func New() *Adapter {
 }
 
 func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
+	a.called("Start")
 	a.mu.Lock()
 	a.sink = sink
 	a.mu.Unlock()
@@ -116,6 +120,13 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	return nil
 }
 
+// called runs OnCall for method.
+func (a *Adapter) called(method string) {
+	if a.OnCall != nil {
+		a.OnCall(method)
+	}
+}
+
 // Sink returns the sink the conversation passed to Start.
 func (a *Adapter) Sink() native.Sink {
 	a.mu.Lock()
@@ -124,6 +135,7 @@ func (a *Adapter) Sink() native.Sink {
 }
 
 func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
+	a.called("StartTurn")
 	if a.OnStartTurn != nil {
 		a.OnStartTurn(ctx)
 	}
@@ -141,6 +153,7 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 }
 
 func (a *Adapter) Steer(ctx context.Context, input native.Input) error {
+	a.called("Steer")
 	if a.OnSteer != nil {
 		a.OnSteer(ctx)
 	}
@@ -154,6 +167,7 @@ func (a *Adapter) Steer(ctx context.Context, input native.Input) error {
 }
 
 func (a *Adapter) Interrupt(context.Context) error {
+	a.called("Interrupt")
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.interrupts++
@@ -161,6 +175,7 @@ func (a *Adapter) Interrupt(context.Context) error {
 }
 
 func (a *Adapter) Respond(ctx context.Context, requestID string, response native.Response) error {
+	a.called("Respond")
 	if a.OnRespond != nil {
 		a.OnRespond(ctx)
 	}
@@ -173,9 +188,13 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 	return nil
 }
 
-func (a *Adapter) Capabilities() native.Capabilities { return a.Caps }
+func (a *Adapter) Capabilities() native.Capabilities {
+	a.called("Capabilities")
+	return a.Caps
+}
 
 func (a *Adapter) Compact(ctx context.Context) error {
+	a.called("Compact")
 	if a.OnCompact != nil {
 		return a.OnCompact(ctx)
 	}
@@ -183,12 +202,14 @@ func (a *Adapter) Compact(ctx context.Context) error {
 }
 
 func (a *Adapter) Settings() native.Settings {
+	a.called("Settings")
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.Current
 }
 
 func (a *Adapter) SettingOptions(context.Context) (native.SettingOptions, error) {
+	a.called("SettingOptions")
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.Current = a.Current.Merge(a.Learned)
@@ -196,6 +217,7 @@ func (a *Adapter) SettingOptions(context.Context) (native.SettingOptions, error)
 }
 
 func (a *Adapter) ApplySettings(_ context.Context, s native.Settings) error {
+	a.called("ApplySettings")
 	if a.SettingsErr != nil {
 		return a.SettingsErr
 	}
@@ -230,9 +252,13 @@ func (a *Adapter) Applied() []native.Settings {
 	return append([]native.Settings(nil), a.applied...)
 }
 
-func (a *Adapter) Wait() error { return <-a.done }
+func (a *Adapter) Wait() error {
+	a.called("Wait")
+	return <-a.done
+}
 
 func (a *Adapter) Close() error {
+	a.called("Close")
 	a.mu.Lock()
 	if !a.closed {
 		a.closed = true

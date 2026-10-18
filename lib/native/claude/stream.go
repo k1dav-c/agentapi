@@ -215,8 +215,8 @@ func (p *streamParser) message(id, model string) *assistantMessage {
 	return m
 }
 
-// snapshot returns the message's current state, sharing nothing with the
-// parser (the server rewrites images in place).
+// snapshot returns the message's current state. It shares the parser's
+// values: the Sink copies what it keeps.
 func (p *streamParser) snapshot(m *assistantMessage) jsonlwatcher.RichMessage {
 	m.sent = true
 	m.dirty = false
@@ -224,11 +224,7 @@ func (p *streamParser) snapshot(m *assistantMessage) jsonlwatcher.RichMessage {
 	out := m.msg
 	out.Content = make([]jsonlwatcher.RichContentBlock, 0, len(m.blocks))
 	for _, b := range m.blocks {
-		out.Content = append(out.Content, cloneBlock(b.rich()))
-	}
-	if m.msg.Usage != nil {
-		usage := *m.msg.Usage
-		out.Usage = &usage
+		out.Content = append(out.Content, b.rich())
 	}
 	return out
 }
@@ -277,26 +273,6 @@ func (p *streamParser) flushAll() []jsonlwatcher.RichMessage {
 		}
 	}
 	return out
-}
-
-func cloneBlock(b jsonlwatcher.RichContentBlock) jsonlwatcher.RichContentBlock {
-	if b.Images != nil {
-		b.Images = append([]jsonlwatcher.RichImage(nil), b.Images...)
-	}
-	if b.IsError != nil {
-		v := *b.IsError
-		b.IsError = &v
-	}
-	return b
-}
-
-func cloneMessage(m jsonlwatcher.RichMessage) jsonlwatcher.RichMessage {
-	content := make([]jsonlwatcher.RichContentBlock, len(m.Content))
-	for i, b := range m.Content {
-		content[i] = cloneBlock(b)
-	}
-	m.Content = content
-	return m
 }
 
 // streamEvent applies a partial-message event of the main thread.
@@ -459,7 +435,7 @@ func (p *streamParser) user(f *frame) ([]jsonlwatcher.RichMessage, []jsonlwatche
 	if len(rich.Content) == 0 {
 		return nil, nil
 	}
-	return []jsonlwatcher.RichMessage{cloneMessage(*rich)}, p.sessionEvents(f)
+	return []jsonlwatcher.RichMessage{*rich}, p.sessionEvents(f)
 }
 
 // userBlock converts one content block of a user frame.
@@ -545,7 +521,7 @@ func (p *streamParser) setResultStatus(toolUseID, status string) []jsonlwatcher.
 		return nil
 	}
 	ref.msg.Content[ref.index].Status = status
-	return []jsonlwatcher.RichMessage{cloneMessage(*ref.msg)}
+	return []jsonlwatcher.RichMessage{*ref.msg}
 }
 
 // patchToolInput fills in the input of a tool call whose block came without

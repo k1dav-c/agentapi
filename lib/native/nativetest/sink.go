@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
@@ -13,10 +14,15 @@ import (
 )
 
 // Sink records what an adapter reports, for adapter tests. It fails the
-// test when two calls overlap, which the Sink contract forbids.
+// test when two calls overlap, which the Sink contract forbids, and with
+// CheckUnlocked when the adapter holds its lock while it calls the Sink.
 type Sink struct {
-	t    testing.TB
-	busy atomic.Bool
+	t     testing.TB
+	busy  atomic.Bool
+	probe func()
+	// probeTimeout is how long probe may take; LockTimeout but in tests of
+	// the Sink itself.
+	probeTimeout time.Duration
 
 	mu    sync.Mutex
 	state SinkState
@@ -52,14 +58,47 @@ var (
 
 // NewSink returns a Sink that reports overlapping calls to t.
 func NewSink(t testing.TB) *Sink {
-	return &Sink{t: t}
+	return &Sink{t: t, probeTimeout: LockTimeout}
+}
+
+// CheckUnlocked makes every call check that the adapter calls the Sink
+// with its locks released (see native.Sink): probe, which takes the
+// adapter's lock (its Settings, say), must return. Call it before the
+// adapter starts.
+func (s *Sink) CheckUnlocked(probe func()) {
+	s.probe = probe
+}
+
+// LockTimeout is how long a check that a lock is free waits for it.
+const LockTimeout = 5 * time.Second
+
+// Returns reports whether f returns within LockTimeout.
+func Returns(f func()) bool {
+	return returnsWithin(f, LockTimeout)
+}
+
+func returnsWithin(f func(), timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		f()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }
 
 // enter takes the sink for one call, failing the test if another is under
-// way.
+// way or the adapter holds its lock.
 func (s *Sink) enter() func() {
 	if !s.busy.CompareAndSwap(false, true) {
 		s.t.Error("sink called concurrently")
+	}
+	if s.probe != nil && !returnsWithin(s.probe, s.probeTimeout) {
+		s.t.Error("the adapter holds its lock while it calls the Sink")
 	}
 	s.mu.Lock()
 	return func() {
@@ -82,7 +121,7 @@ func (s *Sink) TurnCompleted(r native.TurnResult) {
 
 func (s *Sink) RichMessage(m jsonlwatcher.RichMessage) {
 	defer s.enter()()
-	s.state.Rich = append(s.state.Rich, m)
+	s.state.Rich = append(s.state.Rich, m.Clone())
 }
 
 func (s *Sink) SessionEvents(events []jsonlwatcher.SessionEvent) {

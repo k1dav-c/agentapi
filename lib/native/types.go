@@ -248,6 +248,17 @@ type TurnResult struct {
 // Sink receives an adapter's events. Its methods may be called from any
 // goroutine but must not be called concurrently for one adapter; adapters
 // call them from their read loop.
+//
+// Neither side holds a lock while it calls the other: an adapter calls the
+// Sink with its own locks released, and the conversation calls its adapter
+// with the conversation's lock released (a Sink method takes it). Either
+// rule alone rules out a deadlock between the two; with both, each side can
+// be changed without looking at the other, and an adapter's methods don't
+// wait while the conversation handles an event. nativetest.Sink's
+// CheckUnlocked tests an adapter's side.
+//
+// A Sink copies what it keeps: once a call returned, the adapter may
+// change what it passed (the Content of a RichMessage, say).
 type Sink interface {
 	// TurnStarted reports that the agent began working on a turn.
 	TurnStarted()

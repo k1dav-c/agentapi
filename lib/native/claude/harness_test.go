@@ -336,6 +336,7 @@ func newReplay(t *testing.T, cfg Config, resumeRef string, stderr string) *repla
 		}
 	}
 	r.a = newTestAdapter(t, cfg, resumeRef)
+	r.sink.CheckUnlocked(func() { r.a.Settings() })
 	return r
 }
 

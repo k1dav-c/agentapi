@@ -19,7 +19,8 @@ var _ st.Conversation = (*Conversation)(nil)
 
 // Observer receives the structured state a Conversation produces beyond
 // what st.Emitter carries. Its methods are called with the conversation's
-// lock held and must not call back into the conversation.
+// lock held and must not call back into the conversation. A RichMessage
+// is the observer's own copy, to keep and change.
 type Observer interface {
 	// Started reports that an agent accepts turns, and what it supports;
 	// again when that changes (a new model takes images or doesn't).
@@ -92,6 +93,8 @@ const (
 type Conversation struct {
 	cfg Config
 
+	// mu guards the fields below. It is never held while the adapter is
+	// called (see Sink).
 	mu sync.Mutex
 	// ctx is the context Start got; the agent runs in it.
 	ctx     context.Context

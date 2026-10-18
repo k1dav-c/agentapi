@@ -341,3 +341,23 @@ func TestInputFromText(t *testing.T) {
 	assert.Equal(t, []native.Image{{Path: png, MediaType: "image/png"}}, in.Images)
 	assert.Contains(t, in.Text, png)
 }
+
+// The sink copies a rich message: the observer may change the copy it got
+// (the server replaces image data with URLs), and the adapter its own.
+func TestRichMessageIsCopied(t *testing.T) {
+	_, factory, rec := start(t, nil, native.Config{})
+	isError := false
+	msg := jsonlwatcher.RichMessage{MessageID: "u1", Role: "user", Content: []jsonlwatcher.RichContentBlock{
+		{Type: "tool_result", ToolUseID: "t1", IsError: &isError, Images: []jsonlwatcher.RichImage{{MediaType: "image/png", Data: []byte("png")}}},
+	}}
+	factory.Last().Sink().RichMessage(msg)
+	got := rec.get().rich[0]
+	got.Content[0].Images[0] = jsonlwatcher.RichImage{MediaType: "image/png", URL: "/uploads/x/image.png"}
+	assert.Equal(t, []byte("png"), msg.Content[0].Images[0].Data, "the observer's change doesn't reach the adapter")
+
+	msg.Content[0].Status = "completed"
+	isError = true
+	kept := rec.get().rich[0]
+	assert.Empty(t, kept.Content[0].Status, "the adapter's change doesn't reach the observer")
+	assert.False(t, *kept.Content[0].IsError)
+}

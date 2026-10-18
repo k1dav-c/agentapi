@@ -162,6 +162,7 @@ func newHarness(t *testing.T, resumeRef string, args []string, opts ...harnessOp
 		t: t, a: adapter.(*Adapter), proc: proc, rec: newRecorder(t),
 		sent: make(chan rpcMessage, 1024), errs: map[string]error{},
 	}
+	h.rec.CheckUnlocked(func() { h.a.Settings() })
 	go func() {
 		br := bufio.NewReader(proc.stdinR)
 		for {

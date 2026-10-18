@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strings"
 	"testing"
 	"time"
 
@@ -240,23 +239,6 @@ func TestSnapshotThrottle(t *testing.T) {
 	assert.Equal(t, "end_turn", msgs[0].StopReason)
 	assert.Equal(t, 9, msgs[0].Usage.OutputTokens)
 	assert.Empty(t, p.endTurn(), "nothing is left unsent")
-}
-
-func TestSnapshotsShareNothing(t *testing.T) {
-	t.Parallel()
-	p := newStreamParser(quartz.NewMock(t), time.Millisecond)
-	msgs, _ := p.user(&frame{Type: "user", UUID: "u1", Message: json.RawMessage(
-		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}]}`)})
-	require.Len(t, msgs, 1)
-	require.Len(t, msgs[0].Content[0].Images, 1)
-	// The server replaces image data with URLs in the message it got.
-	msgs[0].Content[0].Images[0].Data = nil
-	msgs[0].Content[0].Images = nil
-	again := p.setResultStatus("t1", "running")
-	require.Len(t, again, 1)
-	require.Len(t, again[0].Content[0].Images, 1)
-	assert.NotEmpty(t, again[0].Content[0].Images[0].Data)
-	assert.True(t, strings.HasPrefix(string(again[0].Content[0].Images[0].Data), "\x89PNG"))
 }
 
 func TestTurnResult(t *testing.T) {

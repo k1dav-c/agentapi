@@ -1,7 +1,9 @@
 package jsonlwatcher
 
 import (
+	"bytes"
 	"encoding/json"
+	"slices"
 	"time"
 )
 
@@ -136,4 +138,31 @@ type RichMessage struct {
 	StopReason string             `json:"stop_reason,omitempty" doc:"Why the model stopped generating"`
 	Usage      *Usage             `json:"usage,omitempty" doc:"Token usage information"`
 	Timestamp  time.Time          `json:"timestamp" doc:"Timestamp of the message"`
+}
+
+// Clone returns a copy of m that shares nothing with it but the image
+// data, which nothing changes once it is in a message.
+func (m RichMessage) Clone() RichMessage {
+	if m.Content != nil {
+		content := make([]RichContentBlock, len(m.Content))
+		for i, block := range m.Content {
+			content[i] = block.clone()
+		}
+		m.Content = content
+	}
+	if m.Usage != nil {
+		usage := *m.Usage
+		m.Usage = &usage
+	}
+	return m
+}
+
+func (b RichContentBlock) clone() RichContentBlock {
+	b.ToolInput = bytes.Clone(b.ToolInput)
+	b.Images = slices.Clone(b.Images)
+	if b.IsError != nil {
+		isError := *b.IsError
+		b.IsError = &isError
+	}
+	return b
 }
