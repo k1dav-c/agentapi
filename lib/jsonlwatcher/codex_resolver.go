@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/coder/agentapi/lib/agenthome"
@@ -21,6 +22,12 @@ type CodexResolver struct {
 	CWD         string
 	NotBefore   time.Time
 	SessionsDir string
+
+	// metas holds the first line of each session file read so far. Codex
+	// writes it when it creates the file and never changes it, and Resolve
+	// runs on every poll, so each file is read once instead of every time.
+	mu    sync.Mutex
+	metas map[string]*codexSessionMeta
 }
 
 // codexSessionMeta is the first-line metadata in a Codex session file.
@@ -108,10 +115,15 @@ func (r *CodexResolver) Resolve() (string, error) {
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].modTime.After(files[j].modTime)
 	})
+	listed := make(map[string]bool, len(files))
+	for _, fi := range files {
+		listed[fi.path] = true
+	}
+	r.forgetUnlisted(listed)
 
 	// Find the newest file that matches our CWD
 	for _, fi := range files {
-		meta, err := readCodexSessionMeta(fi.path)
+		meta, err := r.sessionMeta(fi.path)
 		if err != nil {
 			continue
 		}
@@ -132,6 +144,41 @@ func (r *CodexResolver) Resolve() (string, error) {
 	}
 
 	return "", fmt.Errorf("no Codex session file found for cwd %q", r.CWD)
+}
+
+// sessionMeta returns the first line of a session file, read from the file
+// the first time only. A first line that doesn't decode yet (Codex is still
+// writing it) is read again the next time.
+func (r *CodexResolver) sessionMeta(path string) (*codexSessionMeta, error) {
+	r.mu.Lock()
+	meta, ok := r.metas[path]
+	r.mu.Unlock()
+	if ok {
+		return meta, nil
+	}
+	meta, err := readCodexSessionMeta(path)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	if r.metas == nil {
+		r.metas = make(map[string]*codexSessionMeta)
+	}
+	r.metas[path] = meta
+	r.mu.Unlock()
+	return meta, nil
+}
+
+// forgetUnlisted drops what was read from files that are no longer listed,
+// such as yesterday's once the date moves on.
+func (r *CodexResolver) forgetUnlisted(listed map[string]bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for path := range r.metas {
+		if !listed[path] {
+			delete(r.metas, path)
+		}
+	}
 }
 
 // readCodexSessionMeta reads the first line of a Codex session file.
