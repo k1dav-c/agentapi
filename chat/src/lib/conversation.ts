@@ -54,6 +54,12 @@ export function isDraftMessage(message: Message | DraftMessage): message is Draf
   return message.id === undefined;
 }
 
+// The last message of the user's: the task the agent works on, or worked
+// on last.
+export function lastUserMessage<T extends {role: string}>(messages: readonly T[]): T | undefined {
+  return messages.findLast((message) => message.role === "user");
+}
+
 // The key of a rich message: its ID and role.
 export const richMessageKey = (message: RichMessage) => `${message.message_id}\u0000${message.role}`;
 

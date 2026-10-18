@@ -50,8 +50,7 @@ export default function MessageInput({
     queuedMessages,
     storageScope,
     features,
-    loginRequired,
-    agentState,
+    waitingFor,
     dispatch,
     canStop,
     stop,
@@ -60,8 +59,8 @@ export default function MessageInput({
   const steerable = canSteer(dispatch);
   const active = turnActive(dispatch);
   // Nothing queued runs until the agent has its answer, or its login.
-  const waitingForLogin = agentState === "needs-you" && loginRequired !== null;
-  const waitingForAnswer = agentState === "needs-you" && loginRequired === null;
+  const waitingForLogin = waitingFor === "login";
+  const waitingForAnswer = waitingFor === "answer";
   // Shortcut labels: ⌘ on Apple devices, Ctrl elsewhere.
   const [modKey, setModKey] = useState("Ctrl");
   useEffect(() => {

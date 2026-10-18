@@ -17,11 +17,11 @@ import { loginTitle } from "@/lib/login";
 // shows while the agent works or waits for you; a ready agent needs no
 // chrome.
 export function StateStrip() {
-  const { agentState: kind, serverStatus, pendingRequestCount, loginRequired, messages, richMessages, queuedMessages } = useChat();
+  const { agentState: kind, serverStatus, pendingRequestCount, loginRequired, currentTask, richMessages, queuedMessages } = useChat();
   const elapsed = useWorkingElapsed(serverStatus);
 
   const { activity, tokens } = useMemo(() => {
-    const taskStart = messages.findLast((message) => message.role === "user")?.time;
+    const taskStart = currentTask?.time;
     const startMs = taskStart ? Date.parse(taskStart) : 0;
     const current = richMessages.filter((message) => !startMs || Date.parse(message.timestamp) >= startMs);
     const finished = new Set<string>();
@@ -44,7 +44,7 @@ export function StateStrip() {
       if (activity) break;
     }
     return { activity, tokens: computeTokenTotals(current) };
-  }, [messages, richMessages]);
+  }, [currentTask, richMessages]);
 
   if (kind !== "working" && kind !== "needs-you") return null;
   const needs = kind === "needs-you";

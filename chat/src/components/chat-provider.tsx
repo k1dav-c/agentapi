@@ -49,9 +49,9 @@ import {
   type RequestResponse,
 } from "@/lib/native-requests";
 import type {LoginRequired} from "@/lib/login";
-import {getAgentState, type AgentStateKind} from "@/lib/session-status";
+import {getAgentState, waitingFor, type AgentStateKind, type WaitingFor} from "@/lib/session-status";
 import {SyncTracker} from "@/lib/session-sync";
-import {isDraftMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
+import {isDraftMessage, lastUserMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
 import {useEventStream} from "./use-event-stream";
 import {useQueue} from "./use-queue";
 import {useSessionCache} from "./use-session-cache";
@@ -126,8 +126,13 @@ interface ChatContextValue {
   // while it finds no login AgentAPI starts it again by itself.
   agentStarting: boolean;
   // What the agent is doing from the user's point of view ("Needs you",
-  // "Working", ...), for every view that shows it.
+  // "Working", ...), for every view that shows it, and while it needs you,
+  // what for.
   agentState: AgentStateKind;
+  waitingFor: WaitingFor;
+  // The user's last message: the task the agent works on, or worked on
+  // last.
+  currentTask?: Message | DraftMessage;
   // What the composer may offer: steer, interrupt (see lib/dispatch).
   dispatch: DispatchContext;
   // Checks the login again now (POST /login/retry).
@@ -308,15 +313,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
   );
   const chatFeatures = useMemo(() => features(transport, capabilities, terminalAvailable), [capabilities, terminalAvailable, transport]);
   const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
-  const currentTask = [...messages]
-    .reverse()
-    .find((message) => message.role === "user")
-    ?.content;
+  const currentTask = useMemo(() => lastUserMessage(messages), [messages]);
 
   // Rendered as <title> rather than set on document.title from an effect:
   // Next re-applies the layout's static title after hydration, which
   // overwrote the state until it changed again.
-  const documentTitle = getDocumentTitle({agentState, task: currentTask, customTitle});
+  const documentTitle = getDocumentTitle({agentState, task: currentTask?.content, customTitle});
 
   // The Coder workspace link, when the URL doesn't give one: asked on every
   // connection, so it also shows once the user signed in.
@@ -580,6 +582,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     getSettings: api.getSettings,
     agentStarting,
     agentState,
+    waitingFor: waitingFor(agentState, loginRequired !== null),
+    currentTask,
     dispatch,
     requests,
     canStop: stoppable,

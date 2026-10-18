@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message} from "./conversation";
+import {isDraftMessage, lastUserMessage, richMessageKey, withoutSeq, type DraftMessage, type Message} from "./conversation";
 
 describe("conversation", () => {
   test("a message without a server ID is a draft", () => {
@@ -20,5 +20,18 @@ describe("conversation", () => {
     const update = {id: 1, role: "agent", content: "a", seq: 9};
     expect(withoutSeq(update)).toEqual({id: 1, role: "agent", content: "a"});
     expect(update.seq).toBe(9);
+  });
+});
+
+describe("the current task", () => {
+  test("is the user's last message", () => {
+    const messages: (Message | DraftMessage)[] = [
+      {id: 0, role: "user", content: "first"},
+      {id: 1, role: "agent", content: "done"},
+      {role: "user", content: "second", clientId: "c1", deliveryStatus: "sending"},
+      {id: 2, role: "agent", content: "working"},
+    ];
+    expect(lastUserMessage(messages)?.content).toBe("second");
+    expect(lastUserMessage([{id: 0, role: "agent", content: "hello"}])).toBeUndefined();
   });
 });

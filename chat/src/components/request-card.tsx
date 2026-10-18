@@ -42,14 +42,13 @@ const KIND_META = {
 // composer like the terminal prompt card. One request shows at a time,
 // oldest first.
 export function RequestCard() {
-  const { requests, messages } = useChat();
+  const { requests, currentTask } = useChat();
   const pending = useMemo(() => pendingRequests(requests), [requests]);
   const [dismissedHint, setDismissedHint] = useState("");
   const request = pending[0];
   if (request) return <RequestCardBody key={request.id} request={request} total={pending.length} />;
 
-  const lastUserTime = messages.findLast((message) => message.role === "user")?.time;
-  const hint = answerByMessageHint(requests, lastUserTime);
+  const hint = answerByMessageHint(requests, currentTask?.time);
   if (!hint || hint.id === dismissedHint) return null;
   return (
     <div className="flex items-start gap-2 rounded-xl border border-dashed px-3 py-2 text-xs text-muted-foreground" role="status">

@@ -56,7 +56,7 @@ export default function MessageList({
   const [showAllTasks, setShowAllTasks] = useState(false);
   const search = useTaskSearch();
   const {taskQuery, taskFilter, filtersActive, currentSearchResult, setCurrentSearchResult, searchOpen} = search;
-  const {agentState, loginRequired} = useChat();
+  const {waitingFor} = useChat();
   // The page's actions render into the header's slot (one top bar); the
   // embed page has no header, so they get their own row there.
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
@@ -209,7 +209,7 @@ export default function MessageList({
                   visibleIndex < visibleTasks.length - 1 &&
                   !renderedTaskKeys.has(task.key)
                 }
-                waitingForUser={isLatest && agentState === "needs-you" && loginRequired === null}
+                waitingForUser={isLatest && waitingFor === "answer"}
               />
               </React.Fragment>
               );

@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {formatTokenCount, getAgentState, getStatusMeta} from "./session-status";
+import {formatTokenCount, getAgentState, getStatusMeta, waitingFor} from "./session-status";
 
 const connected = {connectionStatus: "connected"} as const;
 
@@ -47,5 +47,13 @@ describe("formatTokenCount", () => {
     expect(formatTokenCount(41_499)).toBe("41k");
     expect(formatTokenCount(999_600)).toBe("1.0M");
     expect(formatTokenCount(1_250_000)).toBe("1.3M");
+  });
+});
+
+describe("what the agent waits for", () => {
+  test("a login comes before an answer, and only while it needs you", () => {
+    expect(waitingFor("needs-you", true)).toBe("login");
+    expect(waitingFor("needs-you", false)).toBe("answer");
+    expect(waitingFor("working", true)).toBeNull();
   });
 });

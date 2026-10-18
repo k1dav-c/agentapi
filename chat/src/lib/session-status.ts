@@ -87,6 +87,15 @@ export function getAgentState({
   return "connecting";
 }
 
+// What the agent waits for while it needs you: a login comes before any
+// answer, since the agent can't run without it. null when it doesn't wait.
+export type WaitingFor = "login" | "answer" | null;
+
+export function waitingFor(kind: AgentStateKind, loginRequired: boolean): WaitingFor {
+  if (kind !== "needs-you") return null;
+  return loginRequired ? "login" : "answer";
+}
+
 // How the header and the embed bar show a state.
 export function getStatusMeta(kind: AgentStateKind, loginRequired = false): StatusMeta {
   const meta = { kind, ...STATE_META[kind] };

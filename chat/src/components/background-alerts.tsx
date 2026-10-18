@@ -12,12 +12,12 @@ import { alertForTransition, faviconDataUrl, notificationsEnabled, type FaviconB
 // notification when the agent needs them or finishes while the tab is in
 // the background.
 export function BackgroundAlerts() {
-  const { agentState: kind, terminalPrompt, loginRequired, requests, agentType, messages } = useChat();
+  const { agentState: kind, terminalPrompt, loginRequired, requests, agentType, currentTask } = useChat();
   const previous = useRef(kind);
   // A task finished while the tab was hidden and hasn't been seen yet.
   const [unseenFinish, setUnseenFinish] = useState(false);
   const name = agentDisplayName(agentType, "The agent");
-  const task = messages.findLast((message) => message.role === "user")?.content ?? "";
+  const task = currentTask?.content ?? "";
 
   useEffect(() => {
     const onVisible = () => {
