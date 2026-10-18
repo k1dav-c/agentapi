@@ -17,27 +17,9 @@ import (
 // own lock, so it answers while s.mu is held for a slow call into the agent
 // (a restart, a native turn).
 func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusResponse, error) {
-	snapshot := s.emitter.StatusSnapshot()
-
 	resp := &StatusResponse{}
-	resp.Body.Status = snapshot.Status
-	resp.Body.Lifecycle = snapshot.Lifecycle
-	resp.Body.SessionID = snapshot.SessionID
-	resp.Body.RunID = snapshot.RunID
-	resp.Body.AgentType = s.agentType
-	resp.Body.Transport = s.transport
-	resp.Body.Version = snapshot.Version
-	resp.Body.TerminalPrompt = snapshot.TerminalPrompt
-	resp.Body.TerminalColumns = snapshot.TerminalColumns
-	resp.Body.SessionName = snapshot.SessionName
-	resp.Body.PendingRequests = snapshot.PendingRequests
-	resp.Body.Capabilities = snapshot.Capabilities
-	resp.Body.LoginRequired = snapshot.LoginRequired
-	resp.Body.Settings = snapshot.Settings
-	resp.Body.Usage = snapshot.Usage
-	resp.Body.Terminal = snapshot.Terminal
+	resp.Body.StatusChangeBody = s.emitter.StatusSnapshot()
 	resp.Body.Epoch = s.emitter.Epoch()
-
 	return resp, nil
 }
 

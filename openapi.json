@@ -1956,7 +1956,8 @@
           "run_id",
           "session_id",
           "status",
-          "terminal_prompt"
+          "terminal_prompt",
+          "transport"
         ],
         "type": "object"
       },
@@ -2019,7 +2020,7 @@
           },
           "status": {
             "$ref": "#/components/schemas/AgentStatus",
-            "description": "Current backward-compatible activity status."
+            "description": "Backward-compatible agent activity status."
           },
           "terminal": {
             "description": "A shell terminal in the agent's working directory is available at GET /terminal. Native transport only.",

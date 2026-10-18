@@ -95,7 +95,7 @@ type StatusChangeBody struct {
 	SessionID string         `json:"session_id" doc:"Identifier for this AgentAPI server session."`
 	RunID     uint64         `json:"run_id" doc:"Monotonically increasing run identifier within the session."`
 	AgentType mf.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
-	Transport Transport      `json:"transport,omitempty" doc:"Backend transport being used ('pty', 'acp' or 'native')."`
+	Transport Transport      `json:"transport" doc:"Backend transport being used ('pty', 'acp' or 'native')."`
 	Version   string         `json:"agentapi_version" doc:"Version of the AgentAPI server."`
 	// TerminalPrompt is the bottom of the screen while the agent shows an
 	// interactive prompt (selection list, confirmation) instead of its input

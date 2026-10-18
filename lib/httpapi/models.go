@@ -74,34 +74,11 @@ type Message struct {
 	Time    time.Time           `json:"time" doc:"Timestamp of the message"`
 }
 
-// StatusResponse represents the server status
+// StatusResponse represents the server status: what status_change events
+// carry, and the epoch.
 type StatusResponse struct {
 	Body struct {
-		Status    AgentStatus    `json:"status" doc:"Current backward-compatible activity status."`
-		Lifecycle LifecycleState `json:"lifecycle" doc:"Detailed process lifecycle state."`
-		SessionID string         `json:"session_id" doc:"Identifier for this AgentAPI server session."`
-		RunID     uint64         `json:"run_id" doc:"Monotonically increasing run identifier within the session."`
-		AgentType mf.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
-		Transport Transport      `json:"transport" doc:"Backend transport being used ('pty', 'acp' or 'native')."`
-		Version   string         `json:"agentapi_version" doc:"Version of the AgentAPI server."`
-		// See StatusChangeBody.TerminalPrompt.
-		TerminalPrompt string `json:"terminal_prompt" doc:"Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise."`
-		// See StatusChangeBody.SessionName.
-		SessionName string `json:"session_name,omitempty" doc:"Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it."`
-		// See StatusChangeBody.TerminalColumns.
-		TerminalColumns uint16 `json:"terminal_columns,omitempty" doc:"Width of the emulated terminal the agent runs in, in columns (PTY transport only)."`
-		// See StatusChangeBody.PendingRequests.
-		PendingRequests int `json:"pending_requests,omitempty" doc:"Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests."`
-		// See StatusChangeBody.Capabilities.
-		Capabilities *native.Capabilities `json:"capabilities,omitempty" doc:"Optional operations the agent supports. Native transport only."`
-		// See StatusChangeBody.LoginRequired.
-		LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only."`
-		// See StatusChangeBody.Settings.
-		Settings *native.Settings `json:"settings,omitempty" doc:"The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only."`
-		// See StatusChangeBody.Usage.
-		Usage *native.AgentUsage `json:"usage,omitempty" doc:"How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only."`
-		// See StatusChangeBody.Terminal.
-		Terminal bool `json:"terminal,omitempty" doc:"A shell terminal in the agent's working directory is available at GET /terminal. Native transport only."`
+		StatusChangeBody
 		// Epoch lets a client resume /events without a cache.
 		Epoch string `json:"epoch" doc:"Identifies the current conversation state; pass it as epoch to /events?sync=1 (see session_sync)."`
 	}
