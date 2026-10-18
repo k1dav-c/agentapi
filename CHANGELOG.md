@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.26.0
+
 ### Features
 
 - Chat: the terminals' key bar adds the keys a phone keyboard lacks: Ctrl+R, Ctrl+A, Ctrl+E,
