@@ -1,4 +1,7 @@
-package native
+// Package procenv is the environment AgentAPI gives the processes it
+// starts: the agent, whichever transport drives it, and the terminal's
+// shell.
+package procenv
 
 import (
 	"os"
@@ -43,19 +46,35 @@ var parentSessionEnv = map[string]bool{
 	"AI_AGENT":        true,
 }
 
-// AgentEnv returns env (the process environment if nil) without the
-// variables a parent agent session leaves behind, followed by set: the
-// "NAME=value" entries the adapter relies on.
-func AgentEnv(env []string, set ...string) []string {
+// apiToken is AgentAPI's own secret, which an agent and the commands it
+// runs have no use for.
+const apiToken = "AGENTAPI_API_TOKEN"
+
+// ForAgent returns env (the process environment if nil) without the
+// variables a parent agent session leaves behind and AgentAPI's API token,
+// followed by set: the "NAME=value" entries the caller relies on.
+func ForAgent(env []string, set ...string) []string {
 	if env == nil {
 		env = os.Environ()
 	}
 	out := make([]string, 0, len(env)+len(set))
 	for _, kv := range env {
 		name, _, _ := strings.Cut(kv, "=")
-		if !parentSessionEnv[name] {
+		if !parentSessionEnv[name] && name != apiToken {
 			out = append(out, kv)
 		}
 	}
 	return append(out, set...)
+}
+
+// WithoutAgentAPI returns env without AgentAPI's own variables, which would
+// configure an agentapi started from it (the terminal's shell).
+func WithoutAgentAPI(env []string) []string {
+	var out []string
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "AGENTAPI_") {
+			out = append(out, kv)
+		}
+	}
+	return out
 }

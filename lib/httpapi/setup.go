@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/agentapi/lib/logctx"
 	mf "github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/procenv"
 	"github.com/coder/agentapi/lib/termexec"
 	"github.com/coder/agentapi/x/acpio"
 	"github.com/coder/quartz"
@@ -34,6 +35,7 @@ func SetupProcess(ctx context.Context, config SetupProcessConfig) (*termexec.Pro
 		Args:           config.ProgramArgs,
 		TerminalWidth:  config.TerminalWidth,
 		TerminalHeight: config.TerminalHeight,
+		Env:            procenv.ForAgent(nil),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to start process: %w", err)
@@ -73,6 +75,7 @@ func SetupACP(ctx context.Context, config SetupACPConfig) (*SetupACPResult, erro
 	logger.Info(fmt.Sprintf("Running (ACP): %s %s", config.Program, strings.Join(args, " ")))
 
 	cmd := exec.CommandContext(ctx, config.Program, args...)
+	cmd.Env = procenv.ForAgent(nil)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)

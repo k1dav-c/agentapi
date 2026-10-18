@@ -366,7 +366,7 @@ agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6
 - Started from inside another agent's session (for example by Claude Code's
   Bash tool), the agent would inherit the variables that session sets for the
   commands it runs, one of them a secret. AgentAPI removes them, whichever
-  agent it runs: Claude Code's (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`,
+  agent it runs and on every transport: Claude Code's (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`,
   `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`,
   `CLAUDE_CODE_SESSION_ATTENDED`, `CLAUDE_CODE_EXECPATH`,
   `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
@@ -375,9 +375,10 @@ agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6
   `CLAUDE_CODE_SDK_READS_SESSION_STATE`), Codex's (`CODEX_THREAD_ID`,
   `CODEX_SANDBOX`, `CODEX_SANDBOX_NETWORK_DISABLED`, `CODEX_CI`,
   `CODEX_INTERNAL_ORIGINATOR_OVERRIDE`, `CODEX_TUI_RECORD_SESSION`,
-  `CODEX_TUI_SESSION_LOG_PATH`), `PI_CODING_AGENT` and `AI_AGENT`.
-  Configuration such as `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
-  `PI_CODING_AGENT_DIR` or `ANTHROPIC_*` is kept.
+  `CODEX_TUI_SESSION_LOG_PATH`), `PI_CODING_AGENT` and `AI_AGENT`, along
+  with AgentAPI's own `AGENTAPI_API_TOKEN`. Configuration such as
+  `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR` or `ANTHROPIC_*` is
+  kept.
 
 ### Logging in
 

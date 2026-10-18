@@ -90,6 +90,8 @@ flowchart TB
 | `lib/statedb/` | `--state-db` 的 SQLite 持久保存 |
 | `lib/shellterm/` | Native 工作階段共用的 shell 終端機 |
 | `lib/mcpconfig/` | 讀寫各 agent 的 MCP 設定檔 |
+| `lib/procenv/` | AgentAPI 啟動的行程的環境變數：各種 transport 的 agent，以及終端機的 shell |
+| `lib/agenthome/` | 各 agent 保存狀態的目錄（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`PI_CODING_AGENT_DIR`） |
 | `lib/handoff/` | 人工回覆 API 的型別 |
 | `lib/logctx/`、`lib/util/` | 放在 context 裡的 logger；小工具 |
 | `x/acpio/` | 實驗性的 ACP transport |
@@ -360,7 +362,8 @@ git（`rev-parse`、`ls-files`、`cat-file`，並關閉 fsmonitor），再在暫
   `127.0.0.1` 和 `[::1]`，用來防範 DNS rebinding），`--allowed-origins` 決定哪些來源可以從
   瀏覽器呼叫 API。
 - 上傳的檔案存放在私有目錄，只有圖片會被回傳。工作目錄以外的檔案無法開啟。
-- Native agent 不會繼承上層 agent 工作階段為它所執行的指令設定的環境變數（其中一個是祕密）。
+- 不論使用哪種 transport，agent 都不會繼承上層 agent 工作階段為它所執行的指令設定的環境變數
+  （其中一個是祕密），也不會拿到 AgentAPI 的 API token（`lib/procenv`）。
 
 ## 聊天介面
 

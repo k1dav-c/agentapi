@@ -56,6 +56,8 @@ type StartProcessConfig struct {
 	TerminalWidth  uint16
 	TerminalHeight uint16
 	Clock          quartz.Clock
+	// Env is the process environment; nil means os.Environ(). TERM is set.
+	Env []string
 }
 
 func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error) {
@@ -72,7 +74,11 @@ func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error
 	// vt100 is the terminal type that the vt10x library emulates.
 	// Setting this signals to the process that it should only use compatible
 	// escape sequences.
-	execCmd.Env = append(os.Environ(), "TERM=vt100")
+	env := args.Env
+	if env == nil {
+		env = os.Environ()
+	}
+	execCmd.Env = append(append([]string(nil), env...), "TERM=vt100")
 	if err := xp.StartProcessInTerminal(execCmd); err != nil {
 		_ = xp.Close()
 		return nil, err

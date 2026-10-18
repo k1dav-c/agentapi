@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/procenv"
 )
 
 // protocolFlags are always added: headless mode, the stream-json protocol in
@@ -279,7 +279,7 @@ func buildArgs(p parsedArgs, sessionID, resumeRef string) []string {
 // variables a parent agent session leaves behind, and adds the ones the
 // adapter relies on.
 func buildEnv(env []string) []string {
-	return native.AgentEnv(env,
+	return procenv.ForAgent(env,
 		// Reports session state changes; "idle" is the turn-over signal.
 		"CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1",
 		// The entrypoint for the CLI driven by another program.

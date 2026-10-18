@@ -313,16 +313,17 @@ agentapi server --transport native -- pi --provider openai-codex --model gpt-5.6
   停止 agent 時（AgentAPI 結束或重新啟動），會先關閉它的輸入讓它自行結束，3 秒後送出
   SIGTERM，再過 2 秒送出 SIGKILL。
 - 從另一個 agent 的工作階段中啟動時（例如由 Claude Code 的 Bash 工具啟動），agent 會繼承
-  那個工作階段為它所執行的指令設定的環境變數，其中一個是祕密。不論執行哪個 agent，AgentAPI
-  都會移除它們：Claude Code 的（`CLAUDECODE`、`CLAUDE_CODE_ENTRYPOINT`、
+  那個工作階段為它所執行的指令設定的環境變數，其中一個是祕密。不論執行哪個 agent、使用哪種
+  transport，AgentAPI 都會移除它們：Claude Code 的（`CLAUDECODE`、`CLAUDE_CODE_ENTRYPOINT`、
   `CLAUDE_CODE_SESSION_ID`、`CLAUDE_CODE_CHILD_SESSION`、`CLAUDE_CODE_SESSION_ATTENDED`、
   `CLAUDE_CODE_EXECPATH`、`CLAUDE_CODE_MESSAGING_SOCKET`、`CLAUDE_CODE_MESSAGING_TOKEN`、
   `CLAUDE_CODE_SSE_PORT`、`CLAUDE_PID`、`CLAUDE_EFFORT`、`CLAUDE_AGENT_SDK_VERSION`、
   `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS`、`CLAUDE_CODE_SDK_READS_SESSION_STATE`）、
   Codex 的（`CODEX_THREAD_ID`、`CODEX_SANDBOX`、`CODEX_SANDBOX_NETWORK_DISABLED`、
   `CODEX_CI`、`CODEX_INTERNAL_ORIGINATOR_OVERRIDE`、`CODEX_TUI_RECORD_SESSION`、
-  `CODEX_TUI_SESSION_LOG_PATH`），以及 `PI_CODING_AGENT` 和 `AI_AGENT`。`CLAUDE_CONFIG_DIR`、
-  `CODEX_HOME`、`PI_CODING_AGENT_DIR` 或 `ANTHROPIC_*` 這類設定會保留。
+  `CODEX_TUI_SESSION_LOG_PATH`）、`PI_CODING_AGENT` 和 `AI_AGENT`，以及 AgentAPI 自己的
+  `AGENTAPI_API_TOKEN`。`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`PI_CODING_AGENT_DIR` 或
+  `ANTHROPIC_*` 這類設定會保留。
 
 ### 登入
 

@@ -5,13 +5,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
-	"os"
-	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/sse"
 
-	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/procenv"
 	"github.com/coder/agentapi/lib/shellterm"
 )
 
@@ -42,13 +40,7 @@ type TerminalResizeRequest struct {
 // without AgentAPI's own variables, which would configure an agentapi run
 // in it.
 func terminalEnv() []string {
-	var env []string
-	for _, kv := range native.AgentEnv(os.Environ()) {
-		if !strings.HasPrefix(kv, "AGENTAPI_") {
-			env = append(env, kv)
-		}
-	}
-	return env
+	return procenv.WithoutAgentAPI(procenv.ForAgent(nil))
 }
 
 const noTerminal = "There is no terminal: it needs the native transport, and --terminal."

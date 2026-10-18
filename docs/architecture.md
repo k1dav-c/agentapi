@@ -93,6 +93,8 @@ directly: they go through the conversation, and read state from the emitter.
 | `lib/statedb/` | SQLite persistence for `--state-db` |
 | `lib/shellterm/` | The shared shell terminal of native sessions |
 | `lib/mcpconfig/` | Reads and writes the agents' MCP configuration files |
+| `lib/procenv/` | The environment of the processes AgentAPI starts: agents on every transport, the terminal's shell |
+| `lib/agenthome/` | Where the agents keep their state (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`) |
 | `lib/handoff/` | Types of the human-reply API |
 | `lib/logctx/`, `lib/util/` | A logger carried in the context; small helpers |
 | `x/acpio/` | The experimental ACP transport |
@@ -425,8 +427,9 @@ same session).
   browser.
 - Uploads go to a private directory, and only images are served back. Files
   outside the working directory can't be opened.
-- Native agents don't inherit the variables (one of them a secret) that a
-  parent agent session sets for the commands it runs.
+- Agents, on every transport, don't inherit the variables (one of them a
+  secret) that a parent agent session sets for the commands it runs, nor
+  AgentAPI's API token (`lib/procenv`).
 
 ## The chat UI
 

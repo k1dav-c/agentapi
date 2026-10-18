@@ -21,6 +21,7 @@ import (
 
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/procutil"
+	"github.com/coder/agentapi/lib/procenv"
 )
 
 // Config configures the Pi adapter.
@@ -245,7 +246,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		Program: a.cfg.Program,
 		Args:    args,
 		Dir:     a.cfg.CWD,
-		Env:     native.AgentEnv(a.cfg.Env),
+		Env:     procenv.ForAgent(a.cfg.Env),
 		Logger:  a.logger,
 	})
 	if err != nil {

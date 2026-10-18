@@ -53,7 +53,7 @@ Tests use `CGO_ENABLED=0`. The project uses `testify` (assert/require) and `code
 - **`lib/msgfmt/`** — Agent-specific message formatting. Strips echoed user input and TUI elements (input boxes, borders) from terminal output. Each agent type has different formatting quirks.
 - **`lib/jsonlwatcher/`** — Watches agent JSONL session logs (Claude, Codex, Pi) for rich structured messages (tool calls, thinking, usage data). Runs as a sidecar alongside PTY.
 - **`x/acpio/`** — Experimental ACP (Agent Client Protocol) transport, alternative to PTY.
-- **`lib/native/`** — Native transport. `Conversation` (an `st.Conversation`) turns the events of an `Adapter` (one per agent: `claude/`, `codex/`, `pi/`, plus the simulated `demo/`) into conversation state, requests (approvals, questions, plans) and login state. Shared pieces: `procutil/` (child process lifecycle), `AgentEnv`, `IsAuthError`, `ReadImage`; `nativetest/` has a fake adapter.
+- **`lib/native/`** — Native transport. `Conversation` (an `st.Conversation`) turns the events of an `Adapter` (one per agent: `claude/`, `codex/`, `pi/`, plus the simulated `demo/`) into conversation state, requests (approvals, questions, plans) and login state. Shared pieces: `procutil/` (child process lifecycle), `IsAuthError`, `ReadImage`; `nativetest/` has a fake adapter. The environment every agent process gets (on all transports) is `lib/procenv`.
 - **`lib/statedb/`** — SQLite persistence of native sessions (`--state-db`).
 - **`lib/shellterm/`** — The shared shell terminal of native sessions (`GET /terminal`).
 - **`cmd/`** — CLI commands via cobra/viper. `server` and `attach` subcommands.

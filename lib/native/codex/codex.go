@@ -23,6 +23,7 @@ import (
 	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/procutil"
+	"github.com/coder/agentapi/lib/procenv"
 )
 
 // Config configures the adapters a Factory creates.
@@ -244,7 +245,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		Program: a.cfg.Program,
 		Args:    a.command(),
 		Dir:     a.cwd(),
-		Env:     native.AgentEnv(a.cfg.Env),
+		Env:     procenv.ForAgent(a.cfg.Env),
 		Logger:  a.log,
 	})
 	if err != nil {
