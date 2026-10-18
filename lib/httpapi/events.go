@@ -191,11 +191,15 @@ type EventEmitter struct {
 	transport           Transport
 	terminalColumns     uint16
 	sessionName         string
-	chans               map[int]chan Event
+	chans               map[int]subscriber
 	chanIdx             int
 	subscriptionBufSize uint
 	screen              string
-	terminalPrompt      string
+	// screenQuestion: the screen shows a dialog of the agent's terminal
+	// that waits for an answer (isTerminalQuestionScreen), worked out once
+	// per screen.
+	screenQuestion bool
+	terminalPrompt string
 	// pendingPrompt is a prompt seen on screen that hasn't been shown long
 	// enough to be published; promptTimer publishes it.
 	pendingPrompt  string
@@ -352,7 +356,7 @@ func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 		nextSessionEventID:  1,
 		status:              AgentStatusRunning,
 		lifecycle:           LifecycleStarting,
-		chans:               make(map[int]chan Event),
+		chans:               make(map[int]subscriber),
 		subscriptionBufSize: defaultSubscriptionBufSize,
 		epoch:               newEpoch(),
 	}
@@ -365,21 +369,28 @@ func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 	return e
 }
 
+// subscriber is a subscription's channel and the events it gets.
+type subscriber struct {
+	ch    chan Event
+	wants func(EventType) bool
+}
+
+// AllEvents, ConversationEvents and ScreenEvents pick the events a
+// subscription gets: all, all but the screen (GET /events), or only the
+// screen (GET /internal/screen).
+func AllEvents(EventType) bool            { return true }
+func ConversationEvents(t EventType) bool { return t != EventTypeScreenUpdate }
+func ScreenEvents(t EventType) bool       { return t == EventTypeScreenUpdate }
+
 // Assumes the caller holds the lock.
 func (e *EventEmitter) notifyChannels(eventType EventType, payload any) {
-	chanIds := make([]int, 0, len(e.chans))
-	for chanId := range e.chans {
-		chanIds = append(chanIds, chanId)
-	}
-	for _, chanId := range chanIds {
-		ch := e.chans[chanId]
-		event := Event{
-			Type:    eventType,
-			Payload: payload,
+	event := Event{Type: eventType, Payload: payload}
+	for chanId, sub := range e.chans {
+		if !sub.wants(eventType) {
+			continue
 		}
-
 		select {
-		case ch <- event:
+		case sub.ch <- event:
 		default:
 			// If the channel is full, close it.
 			// Listeners must actively drain the channel.
@@ -665,15 +676,25 @@ func (e *EventEmitter) EmitScreen(newScreen string) {
 
 	e.notifyChannels(EventTypeScreenUpdate, ScreenUpdateBody{Screen: strings.TrimRight(newScreen, mf.WhiteSpaceChars)})
 	e.screen = newScreen
+	// What an ACP agent streams is no terminal.
+	e.screenQuestion = e.transport != TransportACP && isTerminalQuestionScreen(e.agentType, newScreen)
 
 	// Clients decide whether to offer prompt options from this rather than
 	// guessing from message text, where a numbered list in an answer looks
 	// just like a selection menu.
 	prompt := ""
-	if isTerminalQuestionScreen(e.agentType, newScreen) {
+	if e.screenQuestion {
 		prompt = screenTail(newScreen, terminalQuestionTailLines)
 	}
 	e.updateTerminalPromptLocked(prompt)
+}
+
+// Screen returns the agent's terminal screen as last emitted, and whether
+// it shows a dialog that waits for an answer.
+func (e *EventEmitter) Screen() (screen string, question bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.screen, e.screenQuestion
 }
 
 // terminalPromptSettle is how long a prompt must stay on screen before it is
@@ -954,31 +975,37 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string) []Event 
 // - a channel for receiving events.
 // - a list of events that allow to recreate the state of the conversation right before the subscription was created.
 func (e *EventEmitter) Subscribe() (int, <-chan Event, []Event) {
-	return e.SubscribeSince(0, "")
+	return e.SubscribeTo(AllEvents, 0, "")
 }
 
 // SubscribeSince is Subscribe for a client that already has the state up to
 // sequence since in epoch: the returned events start with a session_sync and
 // hold only later changes, or the full state if the epoch doesn't match.
 func (e *EventEmitter) SubscribeSince(since uint64, epoch string) (int, <-chan Event, []Event) {
+	return e.SubscribeTo(AllEvents, since, epoch)
+}
+
+// SubscribeTo is SubscribeSince for the events wants accepts: neither the
+// channel nor the replay holds others.
+func (e *EventEmitter) SubscribeTo(wants func(EventType) bool, since uint64, epoch string) (int, <-chan Event, []Event) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	stateEvents := e.currentStateAsEvents(since, epoch)
+	stateEvents := slices.DeleteFunc(e.currentStateAsEvents(since, epoch), func(event Event) bool { return !wants(event.Type) })
 
 	// Once a channel becomes full, it will be closed.
 	ch := make(chan Event, e.subscriptionBufSize)
-	e.chans[e.chanIdx] = ch
+	e.chans[e.chanIdx] = subscriber{ch: ch, wants: wants}
 	e.chanIdx++
 	return e.chanIdx - 1, ch, stateEvents
 }
 
 // Assumes the caller holds the lock.
 func (e *EventEmitter) unsubscribeInner(chanId int) {
-	ch, ok := e.chans[chanId]
+	sub, ok := e.chans[chanId]
 	if !ok {
 		return
 	}
-	close(ch)
+	close(sub.ch)
 	delete(e.chans, chanId)
 }
 

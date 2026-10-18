@@ -42,9 +42,6 @@ type agentBackend interface {
 	// pendingRequest returns the request the agent waits on that the
 	// human reply protocol offers, as text, or false.
 	pendingRequest() (native.RequestState, string, bool)
-	// terminalQuestion reports whether screen shows a dialog of the
-	// agent's terminal, which the human reply protocol offers.
-	terminalQuestion(screen string) bool
 }
 
 // backend returns the server's agentBackend.

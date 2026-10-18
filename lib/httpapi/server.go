@@ -99,14 +99,6 @@ type Server struct {
 	jsonlWatcherDone   *sync.WaitGroup
 	jsonlParentCtx     context.Context // parent context for spawning new JSONL watchers
 
-	// Memoized isTerminalQuestionScreen result for the dispatch loop. The screen
-	// string is pointer-stable while unchanged (termexec render cache), so
-	// the equality check below is cheap and the multi-regexp scan only runs
-	// when the screen actually changes. Guarded by s.mu.
-	terminalQuestionScreen string
-	terminalQuestionResult bool
-	terminalQuestionValid  bool
-
 	// When the Codex update dialog was last dismissed. Guarded by s.mu.
 	codexUpdateDismissedAt time.Time
 }
@@ -1283,20 +1275,16 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 	if !sync {
 		since, epoch = 0, ""
 	}
-	subscriberId, ch, stateEvents := s.emitter.SubscribeSince(since, epoch)
+	wants := func(t EventType) bool { return ConversationEvents(t) && (sync || t != EventTypeSessionSync) }
+	subscriberId, ch, replay := s.emitter.SubscribeTo(wants, since, epoch)
 	defer s.emitter.Unsubscribe(subscriberId)
 
 	s.logger.Info("New subscriber", "subscriberId", subscriberId)
-	replay := make([]Event, 0, len(stateEvents))
 	var replaySeq uint64
-	for _, event := range stateEvents {
-		if body, ok := event.Payload.(SessionSyncBody); ok {
+	if len(replay) > 0 {
+		if body, ok := replay[0].Payload.(SessionSyncBody); ok {
 			replaySeq = body.Seq
 		}
-		if event.Type == EventTypeScreenUpdate || (event.Type == EventTypeSessionSync && !sync) {
-			continue
-		}
-		replay = append(replay, event)
 	}
 	for i, event := range replay {
 		msg := sse.Message{Data: event.Payload}
@@ -1320,9 +1308,6 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 			if !ok {
 				s.logger.Info("Channel closed", "subscriberId", subscriberId)
 				return
-			}
-			if event.Type == EventTypeScreenUpdate || (event.Type == EventTypeSessionSync && !sync) {
-				continue
 			}
 			msg := sse.Message{Data: event.Payload}
 			if sync {
@@ -1348,13 +1333,10 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 }
 
 func (s *Server) subscribeScreen(ctx context.Context, input *struct{}, send sse.Sender) {
-	subscriberId, ch, stateEvents := s.emitter.Subscribe()
+	subscriberId, ch, stateEvents := s.emitter.SubscribeTo(ScreenEvents, 0, "")
 	defer s.emitter.Unsubscribe(subscriberId)
 	s.logger.Info("New screen subscriber", "subscriberId", subscriberId)
 	for _, event := range stateEvents {
-		if event.Type != EventTypeScreenUpdate {
-			continue
-		}
 		if err := send.Data(event.Payload); err != nil {
 			s.logger.Error("Failed to send screen event", "subscriberId", subscriberId, "error", err)
 			return
@@ -1366,9 +1348,6 @@ func (s *Server) subscribeScreen(ctx context.Context, input *struct{}, send sse.
 			if !ok {
 				s.logger.Info("Screen channel closed", "subscriberId", subscriberId)
 				return
-			}
-			if event.Type != EventTypeScreenUpdate {
-				continue
 			}
 			if err := send.Data(event.Payload); err != nil {
 				s.logger.Error("Failed to send screen event", "subscriberId", subscriberId, "error", err)

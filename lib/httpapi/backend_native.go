@@ -81,9 +81,3 @@ func (b nativeBackend) deliver(content string, mode DispatchMode, resp *MessageR
 func (b nativeBackend) pendingRequest() (native.RequestState, string, bool) {
 	return b.s.pendingNativeHandoff()
 }
-
-// terminalQuestion: a native agent has no terminal; its questions are
-// requests.
-func (b nativeBackend) terminalQuestion(string) bool {
-	return false
-}

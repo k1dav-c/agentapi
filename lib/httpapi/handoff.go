@@ -158,7 +158,7 @@ func (s *Server) pendingHandoffLocked() (*handoff.Request, native.RequestState) 
 	s.emitter.mu.Lock()
 	status := s.emitter.statusChangeBody()
 	revision := s.emitter.handoffRevision
-	screen := s.emitter.screen
+	screen, dialog := s.emitter.screen, s.emitter.screenQuestion
 	messages := append([]st.ConversationMessage(nil), s.emitter.messages...)
 	s.emitter.mu.Unlock()
 	if status.Lifecycle != LifecycleReady || s.conversation.Status() != st.ConversationStatusStable {
@@ -174,7 +174,7 @@ func (s *Server) pendingHandoffLocked() (*handoff.Request, native.RequestState) 
 	request, text, ok := backend.pendingRequest()
 	if ok {
 		kind, content = "request", text
-	} else if backend.terminalQuestion(screen) {
+	} else if dialog && s.transport == TransportPTY {
 		kind, content = "terminal", screen
 	} else {
 		if s.queue.Len() > 0 {

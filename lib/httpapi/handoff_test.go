@@ -121,7 +121,6 @@ func TestHandoffTerminalReplyAndQueueGate(t *testing.T) {
 	s, c, terminal := handoffServer()
 	s.emitter.EmitScreen("Do you want to proceed?\n❯ 1. Yes\n  2. No\nEnter to confirm")
 	s.dispatchNextQueuedMessage()
-	require.False(t, s.terminalQuestionValid, "empty queues should not scan the terminal")
 	s.queue.Restore([]QueuedMessage{{ID: 1, Content: "later"}}, 0)
 	pending := pendingHandoff(s)
 	require.Equal(t, "terminal", pending.Kind)

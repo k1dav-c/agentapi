@@ -613,3 +613,49 @@ func TestEventEmitterKeepsTheMostRecentlyClosedRequests(t *testing.T) {
 	_, ok := emitter.Request("r0")
 	assert.False(t, ok, "the first to close is dropped")
 }
+
+// A subscription gets only the events it picked: GET /events no screen
+// updates, which a busy terminal sends many times a second, and GET
+// /internal/screen only those.
+func TestEventEmitterSubscribeTo(t *testing.T) {
+	emitter := NewEventEmitter(WithSubscriptionBufSize(2))
+	emitter.EmitScreen("before")
+	_, conversation, replay := emitter.SubscribeTo(ConversationEvents, 0, "")
+	for _, event := range replay {
+		assert.NotEqual(t, EventTypeScreenUpdate, event.Type)
+	}
+	_, screen, replay := emitter.SubscribeTo(ScreenEvents, 0, "")
+	require.Len(t, replay, 1)
+	assert.Equal(t, ScreenUpdateBody{Screen: "before"}, replay[0].Payload)
+
+	for i := range 10 {
+		emitter.EmitScreen(fmt.Sprintf("screen %d", i))
+		<-screen
+	}
+	emitter.EmitStatus(st.ConversationStatusChanging)
+	event, open := <-conversation
+	require.True(t, open, "screen updates didn't fill the channel of /events")
+	assert.Equal(t, EventTypeStatusChange, event.Type)
+}
+
+// The screen's dialog is worked out once per screen, for PTY agents: what
+// an ACP agent streams looks like a screen but isn't a terminal.
+func TestEventEmitterScreenQuestion(t *testing.T) {
+	dialog := readScreenFixture(t, "claude_permission_dialog.txt")
+	pty := NewEventEmitter(WithAgentType(mf.AgentTypeClaude), WithTransport(TransportPTY))
+	pty.EmitScreen(dialog)
+	screen, question := pty.Screen()
+	assert.Equal(t, dialog, screen)
+	assert.True(t, question)
+	pty.EmitScreen(readScreenFixture(t, "claude_numbered_answer.txt"))
+	_, question = pty.Screen()
+	assert.False(t, question)
+
+	clock := quartz.NewMock(t)
+	acp := NewEventEmitter(WithAgentType(mf.AgentTypeClaude), WithTransport(TransportACP), WithClock(clock))
+	acp.EmitScreen(dialog)
+	_, question = acp.Screen()
+	assert.False(t, question)
+	clock.Advance(terminalPromptSettle).MustWait(context.Background())
+	assert.Empty(t, acp.StatusSnapshot().TerminalPrompt)
+}

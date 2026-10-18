@@ -25,15 +25,8 @@ func (b ptyBackend) readyForQueued() bool {
 	if s.emitter == nil || s.transport != TransportPTY {
 		return true
 	}
-	s.emitter.mu.Lock()
-	screen := s.emitter.screen
-	s.emitter.mu.Unlock()
-	if !s.terminalQuestionValid || screen != s.terminalQuestionScreen {
-		s.terminalQuestionResult = isTerminalQuestionScreen(s.agentType, screen)
-		s.terminalQuestionScreen = screen
-		s.terminalQuestionValid = true
-	}
-	return !s.terminalQuestionResult
+	_, question := s.emitter.Screen()
+	return !question
 }
 
 func (b ptyBackend) sendQueued(content string) error {
@@ -93,10 +86,11 @@ func (b ptyBackend) dispatchModes() bool {
 func (b ptyBackend) deliver(content string, _ DispatchMode, resp *MessageResponse) error {
 	s := b.s
 	var screen string
-	if s.transport == TransportPTY {
-		screen = s.currentScreenLocked()
+	var question bool
+	if s.transport == TransportPTY && s.emitter != nil {
+		screen, question = s.emitter.Screen()
 	}
-	if keys, ok := freeTextReplyKeys(s.agentType, screen); ok {
+	if keys, ok := freeTextReplyKeys(s.agentType, screen); question && ok {
 		if err := s.conversation.Send(formatFreeTextReply(s.agentType, keys, content)...); err != nil {
 			if errors.Is(err, st.ErrMessageValidationChanging) {
 				return huma.Error409Conflict("the agent's prompt is still updating; try again in a moment")
@@ -105,8 +99,7 @@ func (b ptyBackend) deliver(content string, _ DispatchMode, resp *MessageRespons
 		}
 		return nil
 	}
-	if s.queue.Len() > 0 || s.conversation.Status() != st.ConversationStatusStable ||
-		(screen != "" && isTerminalQuestionScreen(s.agentType, screen)) {
+	if s.queue.Len() > 0 || s.conversation.Status() != st.ConversationStatusStable || question {
 		s.queueMessageLocked(resp, content, false)
 		return nil
 	}
@@ -122,8 +115,4 @@ func (b ptyBackend) deliver(content string, _ DispatchMode, resp *MessageRespons
 
 func (b ptyBackend) pendingRequest() (native.RequestState, string, bool) {
 	return native.RequestState{}, "", false
-}
-
-func (b ptyBackend) terminalQuestion(screen string) bool {
-	return b.s.transport == TransportPTY && isTerminalQuestionScreen(b.s.agentType, screen)
 }
