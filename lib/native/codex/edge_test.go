@@ -813,3 +813,56 @@ func TestCloseWaitsForTheExit(t *testing.T) {
 	}
 	assert.Equal(t, int32(1), h.proc.killed.Load())
 }
+
+// Close interrupts the turn app-server works on and waits for it to end
+// before it closes stdin: closing it mid-turn leaves the thread with a
+// turn that never finished.
+func TestCloseInterruptsTheTurn(t *testing.T) {
+	h := newHarness(t, "", nil)
+	h.boot()
+	h.beginTurn("turn-1")
+	h.a.closeGrace = waitTimeout
+	closed := make(chan error, 1)
+	go func() { closed <- h.a.Close() }()
+
+	sent := h.expectSent("turn/interrupt")
+	assert.JSONEq(t, `{"threadId":"`+testThread+`","turnId":"turn-1"}`, string(sent.Params))
+	select {
+	case <-h.proc.done:
+		t.Fatal("stdin closed before the turn ended")
+	case <-closed:
+		t.Fatal("Close returned before the turn ended")
+	case <-time.After(50 * time.Millisecond):
+	}
+	h.feedJSON(`{"id":` + string(sent.ID) + `,"result":{}}`)
+	h.completeTurn("turn-1", "interrupted", "")
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(waitTimeout):
+		t.Fatal("Close didn't go on once the turn ended")
+	}
+	assert.Equal(t, "turn_completed:interrupted", snapshot(h.rec).log[len(snapshot(h.rec).log)-1])
+}
+
+// An app-server that doesn't end its turn is closed after the grace.
+func TestCloseGivesUpOnTheTurn(t *testing.T) {
+	h := newHarness(t, "", nil)
+	h.boot()
+	h.beginTurn("turn-1")
+	h.a.closeGrace = 30 * time.Millisecond
+	start := time.Now()
+	require.NoError(t, h.a.Close())
+	h.expectSent("turn/interrupt")
+	assert.GreaterOrEqual(t, time.Since(start), 30*time.Millisecond)
+	require.NoError(t, h.a.Wait())
+}
+
+// Without a turn, Close interrupts nothing.
+func TestCloseWithoutATurn(t *testing.T) {
+	h := newHarness(t, "", nil)
+	h.boot()
+	h.a.closeGrace = waitTimeout
+	require.NoError(t, h.a.Close())
+	h.expectNothingSent()
+}

@@ -100,6 +100,7 @@ func (s *loopState) beginTurn(turnID string) *turnState {
 	s.turn = t
 	s.a.mu.Lock()
 	s.a.activeTurn = turnID
+	s.a.turnDone = make(chan struct{})
 	s.a.mu.Unlock()
 	s.sink().TurnStarted()
 	return t
@@ -608,6 +609,16 @@ func (s *loopState) planUpdated(n turnPlanUpdatedNotification) {
 	s.finishTool(state, toolResultBlock(id, "Plan updated", "completed"), s.now())
 }
 
+// endActiveTurnLocked records that app-server no longer works on a turn.
+// Caller holds a.mu.
+func (a *Adapter) endActiveTurnLocked() {
+	a.activeTurn = ""
+	if a.turnDone != nil {
+		close(a.turnDone)
+		a.turnDone = nil
+	}
+}
+
 // completeTurn ends the active turn: it closes the items app-server left
 // open (an interrupt leaves them so), sends the final snapshots and
 // reports the end.
@@ -622,7 +633,7 @@ func (s *loopState) completeTurn(tr turn) {
 	interrupting := s.a.interrupting[t.id]
 	delete(s.a.interrupting, t.id)
 	if s.a.activeTurn == t.id {
-		s.a.activeTurn = ""
+		s.a.endActiveTurnLocked()
 	}
 	s.a.mu.Unlock()
 
@@ -713,7 +724,7 @@ func (s *loopState) exited() {
 	}
 	s.flush(true)
 	s.a.mu.Lock()
-	s.a.activeTurn = ""
+	s.a.endActiveTurnLocked()
 	clear(s.a.interrupting)
 	clear(s.a.requests)
 	s.a.mu.Unlock()

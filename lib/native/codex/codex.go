@@ -40,8 +40,9 @@ type Config struct {
 	// Tests inject pipes.
 	StartProcess procutil.StartFunc
 	// StopTimeout is how long Close waits for app-server to exit after
-	// closing its stdin before it sends SIGTERM, and again before SIGKILL.
-	// Zero means 3s and 2s.
+	// closing its stdin before it sends SIGTERM, and again before SIGKILL,
+	// and before that for a turn it interrupted to end. Zero means 3s, 2s,
+	// and 3s for the turn.
 	StopTimeout time.Duration
 	// SnapshotInterval is the least time between two snapshots of a
 	// streaming message. Zero means 100 ms.
@@ -118,8 +119,12 @@ type Adapter struct {
 	started  bool
 	closed   bool
 	threadID string
-	// activeTurn is the turn app-server is working on, or "".
+	// activeTurn is the turn app-server is working on, or ""; turnDone is
+	// closed when it ends.
 	activeTurn string
+	turnDone   chan struct{}
+	// closeGrace is how long Close waits for a turn it interrupted to end.
+	closeGrace time.Duration
 	// interrupting marks the active turn while Interrupt asks app-server
 	// to stop it.
 	interrupting map[string]bool
@@ -194,6 +199,10 @@ func newAdapter(cfg Config, opts launchOptions, resumeRef string) *Adapter {
 		writer:       agentio.NewWriter("codex app-server"),
 		interrupting: make(map[string]bool),
 		requests:     make(map[string]*pendingRequest),
+		closeGrace:   closeInterruptGrace,
+	}
+	if cfg.StopTimeout > 0 {
+		a.closeGrace = cfg.StopTimeout
 	}
 	a.loop.a = a
 	return a
@@ -505,6 +514,40 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 	return turnCallError("interrupt turn", err)
 }
 
+// closeInterruptGrace is how long Close waits for a turn it interrupted to
+// end, unless Config.StopTimeout says otherwise (Adapter.closeGrace).
+const closeInterruptGrace = 3 * time.Second
+
+// interruptForClose interrupts the turn app-server works on, if any, and
+// waits for it to end, for app-server to exit, or for the grace to pass.
+func (a *Adapter) interruptForClose() {
+	a.mu.Lock()
+	done := a.turnDone
+	a.mu.Unlock()
+	if done == nil {
+		return
+	}
+	// Not waited for: a write app-server doesn't read must not hold Close,
+	// whose closing stdin makes it fail.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		if err := a.Interrupt(ctx); err != nil && !errors.Is(err, native.ErrNoActiveTurn) && ctx.Err() == nil {
+			a.log.Debug("Failed to interrupt the turn before closing", "error", err)
+		}
+	}()
+	// Real time, as procutil.Stop's graces could be on a clock nobody
+	// advances once the adapter is retired.
+	timer := time.NewTimer(a.closeGrace)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-a.exited:
+	case <-timer.C:
+		a.log.Warn("Codex app-server didn't end its turn in time; closing it anyway")
+	}
+}
+
 // markInterrupting marks turnID as being interrupted, unless it ended. A
 // turn that completes before app-server sees the interrupt still ends as
 // interrupted (see completeTurn).
@@ -548,9 +591,11 @@ func (a *Adapter) Wait() error {
 	return a.exitErr
 }
 
-// Close implements native.Adapter: it closes app-server's stdin (it exits
-// on EOF), then sends SIGTERM and SIGKILL if it doesn't exit (see
-// Config.StopTimeout).
+// Close implements native.Adapter: it interrupts the turn app-server works
+// on (closing stdin mid-turn leaves the thread with a turn that never
+// finished, which a resumed session goes on from), closes app-server's
+// stdin (it exits on EOF), then sends SIGTERM and SIGKILL if it doesn't
+// exit (see Config.StopTimeout).
 func (a *Adapter) Close() error {
 	a.closeOnce.Do(func() {
 		a.mu.Lock()
@@ -566,6 +611,7 @@ func (a *Adapter) Close() error {
 		if proc == nil {
 			return
 		}
+		a.interruptForClose()
 		procutil.Stop(proc, a.exited, procutil.StopOptions{
 			StdinGrace: a.cfg.StopTimeout,
 			TermGrace:  a.cfg.StopTimeout,
