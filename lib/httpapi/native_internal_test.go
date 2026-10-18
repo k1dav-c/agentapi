@@ -66,11 +66,11 @@ func TestNativeQueueRetriesARefusedMessage(t *testing.T) {
 	for range maxQueueDispatchAttempts - 1 {
 		srv.dispatchNextQueuedMessage()
 	}
-	require.Len(t, srv.messageQueue, 1, "a refused message waits for the next try")
+	require.Len(t, srv.queue.Messages(), 1, "a refused message waits for the next try")
 	assert.Empty(t, errorMessages(srv.emitter))
 	a.TurnErr = nil
 	srv.dispatchNextQueuedMessage()
-	assert.Empty(t, srv.messageQueue)
+	assert.Empty(t, srv.queue.Messages())
 	require.Len(t, a.Turns(), 1)
 	assert.Equal(t, "fix the build", a.Turns()[0].Text)
 }
@@ -86,8 +86,8 @@ func TestNativeQueueDropsAMessageRefusedTooOften(t *testing.T) {
 	for range maxQueueDispatchAttempts {
 		srv.dispatchNextQueuedMessage()
 	}
-	require.Len(t, srv.messageQueue, 1)
-	assert.Equal(t, "then deploy", srv.messageQueue[0].Content)
+	require.Len(t, srv.queue.Messages(), 1)
+	assert.Equal(t, "then deploy", srv.queue.Messages()[0].Content)
 	assert.Equal(t, []string{`Dropped queued message "fix the build and run the tests" after 5 failed attempts: connection reset`}, errorMessages(srv.emitter))
 }
 
@@ -101,7 +101,7 @@ func TestNativeQueueDropsAMessageThatTimedOut(t *testing.T) {
 	a.Sink().TurnCompleted(native.TurnResult{})
 
 	srv.dispatchNextQueuedMessage()
-	assert.Empty(t, srv.messageQueue)
+	assert.Empty(t, srv.queue.Messages())
 	assert.Equal(t, []string{`Queued message "fix the build" may not have reached the agent, which didn't answer in time: context deadline exceeded`}, errorMessages(srv.emitter))
 }
 

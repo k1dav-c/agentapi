@@ -125,13 +125,13 @@ func emitterStateFromSnapshot(snap statedb.Snapshot) EmitterState {
 
 // restoreQueue puts the stored queue back. Called before the server runs.
 func (s *Server) restoreQueue(snap statedb.Snapshot) {
-	for _, q := range snap.Queue {
-		s.messageQueue = append(s.messageQueue, QueuedMessage{ID: q.ID, Content: q.Content, Time: q.Time})
-		s.nextQueueID = max(s.nextQueueID, q.ID)
+	queued := make([]QueuedMessage, len(snap.Queue))
+	for i, q := range snap.Queue {
+		queued[i] = QueuedMessage{ID: q.ID, Content: q.Content, Time: q.Time}
 	}
-	s.nextQueueID = max(s.nextQueueID, snap.NextQueueID())
-	s.savedQueue = slices.Clone(s.messageQueue)
-	s.savedNextQueueID = s.nextQueueID
+	s.queue.Restore(queued, snap.NextQueueID())
+	s.savedQueue = s.queue.Messages()
+	s.savedNextQueueID = s.queue.LastID()
 }
 
 // persistQueue stores the queue if it changed since it was last stored. The
@@ -144,14 +144,15 @@ func (s *Server) persistQueue() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.nextQueueID == s.savedNextQueueID && slices.Equal(s.messageQueue, s.savedQueue) {
+	queued := s.queue.Messages()
+	if s.queue.LastID() == s.savedNextQueueID && slices.Equal(queued, s.savedQueue) {
 		return
 	}
-	stored := make([]statedb.QueuedMessage, len(s.messageQueue))
-	for i, q := range s.messageQueue {
+	stored := make([]statedb.QueuedMessage, len(queued))
+	for i, q := range queued {
 		stored[i] = statedb.QueuedMessage{ID: q.ID, Content: q.Content, Time: q.Time}
 	}
-	s.stateDB.PutQueue(stored, s.nextQueueID)
-	s.savedQueue = slices.Clone(s.messageQueue)
-	s.savedNextQueueID = s.nextQueueID
+	s.stateDB.PutQueue(stored, s.queue.LastID())
+	s.savedQueue = queued
+	s.savedNextQueueID = s.queue.LastID()
 }

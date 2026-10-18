@@ -81,7 +81,7 @@ type Server struct {
 	shutdownCtx        context.Context
 	shutdown           context.CancelFunc
 	transport          Transport
-	messageQueue       []QueuedMessage
+	queue              messageQueue // guarded by mu
 	mcpStore           mcpconfig.Store
 	mcpMu              sync.Mutex
 	webhook            *webhookDispatcher
@@ -93,11 +93,6 @@ type Server struct {
 	jsonlWatcherCancel context.CancelFunc
 	jsonlWatcherDone   *sync.WaitGroup
 	jsonlParentCtx     context.Context // parent context for spawning new JSONL watchers
-	nextQueueID        int
-	// Consecutive non-validation dispatch failures for the queued message
-	// identified by queueFailID. Used to drop poison messages.
-	queueFailID    int
-	queueFailCount int
 
 	// Memoized isTerminalQuestionScreen result for the dispatch loop. The screen
 	// string is pointer-stable while unchanged (termexec render cache), so
@@ -1105,18 +1100,14 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 		// ignores the text and the carriage return would pick the
 		// highlighted option (e.g. approve a permission request). The
 		// queue holds it until the prompt is answered.
-		if len(s.messageQueue) > 0 || s.conversation.Status() != st.ConversationStatusStable ||
+		if s.queue.Len() > 0 || s.conversation.Status() != st.ConversationStatusStable ||
 			(screen != "" && isTerminalQuestionScreen(s.agentType, screen)) {
-			s.enqueueMessageLocked(input.Body.Content, false)
-			resp.Body.Ok = true
-			resp.Body.Queued = true
+			s.queueMessageLocked(resp, input.Body.Content, false)
 			return resp, nil
 		}
 		if err := s.conversation.Send(FormatMessage(s.agentType, input.Body.Content)...); err != nil {
 			if errors.Is(err, st.ErrMessageValidationChanging) {
-				s.enqueueMessageLocked(input.Body.Content, false)
-				resp.Body.Ok = true
-				resp.Body.Queued = true
+				s.queueMessageLocked(resp, input.Body.Content, false)
 				return resp, nil
 			}
 			return nil, fmt.Errorf("failed to send message: %w", err)
@@ -1143,7 +1134,7 @@ func (s *Server) getQueue(ctx context.Context, input *struct{}) (*QueueResponse,
 	defer s.mu.RUnlock()
 
 	resp := &QueueResponse{}
-	resp.Body.Messages = append([]QueuedMessage{}, s.messageQueue...)
+	resp.Body.Messages = s.queue.Messages()
 	return resp, nil
 }
 
@@ -1155,72 +1146,44 @@ func (s *Server) updateQueuedMessage(ctx context.Context, input *UpdateQueuedMes
 	if content == "" {
 		return nil, huma.Error400BadRequest("message must not be empty")
 	}
-	for i := range s.messageQueue {
-		if s.messageQueue[i].ID == input.ID {
-			s.messageQueue[i].Content = content
-			resp := &QueueMutationResponse{}
-			resp.Body.Ok = true
-			return resp, nil
-		}
+	if !s.queue.Update(input.ID, content) {
+		return nil, huma.Error404NotFound("queued message not found")
 	}
-	return nil, huma.Error404NotFound("queued message not found")
+	return queueMutated(), nil
 }
 
 func (s *Server) deleteQueuedMessage(ctx context.Context, input *DeleteQueuedMessageRequest) (*QueueMutationResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for i := range s.messageQueue {
-		if s.messageQueue[i].ID == input.ID {
-			s.messageQueue = append(s.messageQueue[:i], s.messageQueue[i+1:]...)
-			resp := &QueueMutationResponse{}
-			resp.Body.Ok = true
-			return resp, nil
-		}
+	if !s.queue.Remove(input.ID) {
+		return nil, huma.Error404NotFound("queued message not found")
 	}
-	return nil, huma.Error404NotFound("queued message not found")
+	return queueMutated(), nil
 }
 
 // reorderQueue puts the queued messages in the given order.
 func (s *Server) reorderQueue(_ context.Context, input *ReorderQueueRequest) (*QueueMutationResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ids := input.Body.IDs
-	if len(ids) != len(s.messageQueue) {
+	if !s.queue.Reorder(input.Body.IDs) {
 		return nil, huma.Error409Conflict("the queue changed; list every queued message once")
 	}
-	byID := make(map[int]QueuedMessage, len(s.messageQueue))
-	for _, m := range s.messageQueue {
-		byID[m.ID] = m
-	}
-	reordered := make([]QueuedMessage, 0, len(ids))
-	for _, id := range ids {
-		m, ok := byID[id]
-		if !ok {
-			return nil, huma.Error409Conflict("the queue changed; list every queued message once")
-		}
-		delete(byID, id)
-		reordered = append(reordered, m)
-	}
-	s.messageQueue = reordered
-	resp := &QueueMutationResponse{}
-	resp.Body.Ok = true
-	return resp, nil
+	return queueMutated(), nil
 }
 
-// enqueueMessageLocked queues a message last, or first if front is set.
-func (s *Server) enqueueMessageLocked(content string, front bool) {
-	s.nextQueueID++
-	msg := QueuedMessage{
-		ID:      s.nextQueueID,
-		Content: content,
-		Time:    s.clock.Now(),
-	}
-	if front {
-		s.messageQueue = slices.Insert(s.messageQueue, 0, msg)
-		return
-	}
-	s.messageQueue = append(s.messageQueue, msg)
+func queueMutated() *QueueMutationResponse {
+	resp := &QueueMutationResponse{}
+	resp.Body.Ok = true
+	return resp
+}
+
+// queueMessageLocked queues content, first with front, and says so in resp.
+// Caller holds s.mu.
+func (s *Server) queueMessageLocked(resp *MessageResponse, content string, front bool) {
+	s.queue.Push(content, s.clock.Now(), front)
+	resp.Body.Ok = true
+	resp.Body.Queued = true
 }
 
 // startMessageQueue starts the queue dispatch loop. Dispatch is driven by
@@ -1238,66 +1201,89 @@ func (s *Server) startMessageQueue() {
 	}, "messageQueueDispatch")
 }
 
+// dispatchNextQueuedMessage sends the head of the queue once the agent can
+// take it. A message the agent refuses is tried again on later ticks and
+// dropped after maxQueueDispatchAttempts, or at once when sending it again
+// could deliver it twice.
 func (s *Server) dispatchNextQueuedMessage() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.native != nil {
-		s.dispatchNativeQueuedLocked()
+	next, ok := s.queue.Head()
+	if !ok || !s.readyForQueuedLocked() {
 		return
 	}
-	// Screen inspection is only needed when a message can be dispatched.
-	if len(s.messageQueue) == 0 || s.conversation.Status() != st.ConversationStatusStable {
+	err := s.sendQueuedLocked(next.Content)
+	switch {
+	case err == nil:
+		s.queue.Remove(next.ID)
+		return
+	case errors.Is(err, st.ErrMessageValidationChanging):
+		// The agent got busy again: on a later tick.
 		return
 	}
-	if s.emitter != nil && s.transport == TransportPTY {
-		s.emitter.mu.Lock()
-		screen := s.emitter.screen
-		s.emitter.mu.Unlock()
-		if !s.terminalQuestionValid || screen != s.terminalQuestionScreen {
-			s.terminalQuestionResult = isTerminalQuestionScreen(s.agentType, screen)
-			s.terminalQuestionScreen = screen
-			s.terminalQuestionValid = true
-		}
-		if s.terminalQuestionResult {
-			return
-		}
-	}
-
-	next := s.messageQueue[0]
-	if err := s.conversation.Send(FormatMessage(s.agentType, next.Content)...); err != nil {
-		if errors.Is(err, st.ErrMessageValidationChanging) {
-			// Agent became busy again; retry on a later tick.
-			return
-		}
-		attempts, drop := s.queueSendFailedLocked(next, err)
-		// A message the agent didn't react to may still be in its input
-		// box; retrying would type it a second time.
-		notSubmitted := errors.Is(err, st.ErrMessageNotSubmitted)
-		if drop || notSubmitted {
-			// Drop the poison message so it doesn't block the queue forever.
-			s.messageQueue = s.messageQueue[1:]
-			msg := fmt.Sprintf("Dropped queued message %q after %d failed attempts: %v", shortText(next.Content, 40), attempts, err)
-			if notSubmitted {
-				msg = fmt.Sprintf("Queued message was typed but the agent did not submit it; check the agent's input box: %v", err)
-			}
-			s.emitter.EmitError(msg, st.ErrorLevelError)
-		}
+	attempts := s.queue.Failed(next.ID)
+	s.logger.Error("Failed to send queued message", "queueId", next.ID, "attempt", attempts, "error", err)
+	if reason := s.notResentLocked(err); reason != "" {
+		s.queue.Remove(next.ID)
+		s.emitter.EmitError(fmt.Sprintf("Queued message %q %s: %v", shortText(next.Content, 40), reason, err), st.ErrorLevelError)
 		return
 	}
-	s.messageQueue = s.messageQueue[1:]
+	if attempts >= maxQueueDispatchAttempts {
+		// It would block the queue forever.
+		s.queue.Remove(next.ID)
+		s.emitter.EmitError(fmt.Sprintf("Dropped queued message %q after %d failed attempts: %v", shortText(next.Content, 40), attempts, err), st.ErrorLevelError)
+	}
 }
 
-// queueSendFailedLocked counts a failed attempt to send next, the head of
-// the queue. It returns how often in a row sending it failed, and whether
-// that is often enough to drop it. Caller holds s.mu.
-func (s *Server) queueSendFailedLocked(next QueuedMessage, err error) (int, bool) {
-	if s.queueFailID != next.ID {
-		s.queueFailID = next.ID
-		s.queueFailCount = 0
+// readyForQueuedLocked reports whether the agent can take the next queued
+// message: a native agent when it is idle; a terminal or ACP agent when its
+// conversation is stable, and for a terminal agent not while its screen
+// shows a dialog, which the message's Enter would answer. Caller holds
+// s.mu.
+func (s *Server) readyForQueuedLocked() bool {
+	if s.native != nil {
+		return s.native.Idle()
 	}
-	s.queueFailCount++
-	s.logger.Error("Failed to send queued message", "queueId", next.ID, "attempt", s.queueFailCount, "error", err)
-	return s.queueFailCount, s.queueFailCount >= maxQueueDispatchAttempts
+	if s.conversation.Status() != st.ConversationStatusStable {
+		return false
+	}
+	if s.emitter == nil || s.transport != TransportPTY {
+		return true
+	}
+	s.emitter.mu.Lock()
+	screen := s.emitter.screen
+	s.emitter.mu.Unlock()
+	if !s.terminalQuestionValid || screen != s.terminalQuestionScreen {
+		s.terminalQuestionResult = isTerminalQuestionScreen(s.agentType, screen)
+		s.terminalQuestionScreen = screen
+		s.terminalQuestionValid = true
+	}
+	return !s.terminalQuestionResult
+}
+
+// sendQueuedLocked sends a queued message to the agent. Caller holds s.mu.
+func (s *Server) sendQueuedLocked(content string) error {
+	if s.native != nil {
+		ctx, cancel := s.agentCtx(nativeCallTimeout)
+		defer cancel()
+		return s.native.StartTurn(ctx, native.InputFromText(content))
+	}
+	return s.conversation.Send(FormatMessage(s.agentType, content)...)
+}
+
+// notResentLocked says why a queued message whose send failed with err must
+// not be sent again, or "" when it can be: it may have reached the agent.
+// Caller holds s.mu.
+func (s *Server) notResentLocked(err error) string {
+	switch {
+	case s.native != nil && errors.Is(err, context.DeadlineExceeded):
+		return "may not have reached the agent, which didn't answer in time"
+	case errors.Is(err, st.ErrMessageNotSubmitted):
+		// Still in the agent's input box: sent again it would be typed a
+		// second time.
+		return "was typed but the agent didn't submit it; check the agent's input box"
+	}
+	return ""
 }
 
 // uploadFiles handles POST /upload

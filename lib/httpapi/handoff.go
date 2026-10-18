@@ -176,7 +176,7 @@ func (s *Server) pendingHandoffLocked() (*handoff.Request, native.RequestState) 
 	} else if s.transport == TransportPTY && isTerminalQuestionScreen(s.agentType, screen) {
 		kind, content = "terminal", screen
 	} else {
-		if len(s.messageQueue) > 0 {
+		if s.queue.Len() > 0 {
 			return nil, native.RequestState{}
 		}
 		hasUser := false

@@ -62,14 +62,12 @@ func (s *Server) canRestart() bool {
 }
 
 // resetConversationLocked clears all conversation state: messages, rich
-// messages, requests, timeline, errors and the queue. Caller holds s.mu.
+// messages, requests, timeline, errors and the queue, whose IDs go on
+// counting. Caller holds s.mu.
 func (s *Server) resetConversationLocked() {
 	s.emitter.Reset()
 	s.conversation.Reset()
-	s.messageQueue = nil
-	s.nextQueueID = 0
-	s.queueFailID = 0
-	s.queueFailCount = 0
+	s.queue.Clear()
 }
 
 // restartLocked replaces the agent process with a new one in a new session.

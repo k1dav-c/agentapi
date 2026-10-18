@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -119,62 +118,24 @@ func (s *Server) createNativeMessageLocked(content string, mode DispatchMode, re
 			return fmt.Errorf("failed to interrupt the agent: %w", err)
 		}
 		// The message goes first once the interrupted turn has ended.
-		s.enqueueMessageLocked(content, true)
-		resp.Body.Ok = true
-		resp.Body.Queued = true
+		s.queueMessageLocked(resp, content, true)
 		return nil
 	case DispatchQueue:
 	}
 
-	if len(s.messageQueue) > 0 || !s.native.Idle() {
-		s.enqueueMessageLocked(content, false)
-		resp.Body.Ok = true
-		resp.Body.Queued = true
+	if s.queue.Len() > 0 || !s.native.Idle() {
+		s.queueMessageLocked(resp, content, false)
 		return nil
 	}
 	if err := s.native.StartTurn(ctx, input); err != nil {
 		if errors.Is(err, st.ErrMessageValidationChanging) {
-			s.enqueueMessageLocked(content, false)
-			resp.Body.Ok = true
-			resp.Body.Queued = true
+			s.queueMessageLocked(resp, content, false)
 			return nil
 		}
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 	resp.Body.Ok = true
 	return nil
-}
-
-// dispatchNativeQueuedLocked sends the next queued message once the agent
-// is idle. A message the agent refuses is tried again on later ticks, and
-// dropped after maxQueueDispatchAttempts, or at once when the agent didn't
-// answer in time. Caller holds s.mu.
-func (s *Server) dispatchNativeQueuedLocked() {
-	if len(s.messageQueue) == 0 || !s.native.Idle() {
-		return
-	}
-	next := s.messageQueue[0]
-	ctx, cancel := s.agentCtx(nativeCallTimeout)
-	defer cancel()
-	err := s.native.StartTurn(ctx, native.InputFromText(next.Content))
-	if errors.Is(err, st.ErrMessageValidationChanging) {
-		return
-	}
-	if err != nil {
-		attempts, drop := s.queueSendFailedLocked(next, err)
-		switch {
-		case errors.Is(err, context.DeadlineExceeded):
-			// The agent didn't answer in time, so the message may have
-			// reached it; sending it again could run the task twice.
-			s.messageQueue = s.messageQueue[1:]
-			s.emitter.EmitError(fmt.Sprintf("Queued message %q may not have reached the agent, which didn't answer in time: %v", shortText(next.Content, 40), err), st.ErrorLevelError)
-		case drop:
-			s.messageQueue = s.messageQueue[1:]
-			s.emitter.EmitError(fmt.Sprintf("Dropped queued message %q after %d failed attempts: %v", shortText(next.Content, 40), attempts, err), st.ErrorLevelError)
-		}
-		return
-	}
-	s.messageQueue = s.messageQueue[1:]
 }
 
 func (s *Server) getRequests(_ context.Context, _ *struct{}) (*RequestsResponse, error) {
@@ -354,13 +315,13 @@ func (s *Server) steerQueuedMessage(_ context.Context, input *SteerQueuedMessage
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	idx := slices.IndexFunc(s.messageQueue, func(m QueuedMessage) bool { return m.ID == input.ID })
-	if idx < 0 {
+	queued, ok := s.queue.Get(input.ID)
+	if !ok {
 		return nil, huma.Error404NotFound("queued message not found")
 	}
 	ctx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
-	switch err := s.native.Steer(ctx, native.InputFromText(s.messageQueue[idx].Content)); {
+	switch err := s.native.Steer(ctx, native.InputFromText(queued.Content)); {
 	case errors.Is(err, native.ErrUnsupported):
 		return nil, huma.Error400BadRequest("this agent can't add a message to a running turn")
 	case errors.Is(err, native.ErrNoActiveTurn), errors.Is(err, native.ErrNotStarted):
@@ -368,10 +329,8 @@ func (s *Server) steerQueuedMessage(_ context.Context, input *SteerQueuedMessage
 	case err != nil:
 		return nil, fmt.Errorf("failed to steer the agent: %w", err)
 	}
-	s.messageQueue = slices.Delete(s.messageQueue, idx, idx+1)
-	resp := &QueueMutationResponse{}
-	resp.Body.Ok = true
-	return resp, nil
+	s.queue.Remove(input.ID)
+	return queueMutated(), nil
 }
 
 // pendingNativeHandoff describes the oldest pending native request for the
