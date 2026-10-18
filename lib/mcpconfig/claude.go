@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/coder/agentapi/lib/agenthome"
 )
 
 // jsonStore manages the "mcpServers" object of a JSON config file, the
@@ -73,13 +75,7 @@ func (s *jsonStore) Replace(servers Servers) error {
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", s.path, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return fmt.Errorf("create %s: %w", filepath.Dir(s.path), err)
-	}
-	if err := os.WriteFile(s.path, append(data, '\n'), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", s.path, err)
-	}
-	return nil
+	return writeFile(s.path, append(data, '\n'))
 }
 
 // newPiStore manages Pi's user-level MCP config, $PI_CODING_AGENT_DIR/mcp.json
@@ -87,13 +83,9 @@ func (s *jsonStore) Replace(servers Servers) error {
 // after the project is trusted, so the user-level file is the one that
 // always applies.
 func newPiStore() (*jsonStore, error) {
-	agentDir := os.Getenv("PI_CODING_AGENT_DIR")
-	if agentDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("resolve home dir: %w", err)
-		}
-		agentDir = filepath.Join(home, ".pi", "agent")
+	agentDir, err := agenthome.PiAgentDir()
+	if err != nil {
+		return nil, err
 	}
 	return &jsonStore{path: filepath.Join(agentDir, "mcp.json")}, nil
 }

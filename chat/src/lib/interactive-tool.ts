@@ -1,7 +1,8 @@
 export interface InteractiveQuestion {
   question: string;
   header?: string;
-  options: {label: string; description?: string}[];
+  // Missing for a question that only takes typed text.
+  options?: {label: string; description?: string}[];
   multiSelect?: boolean;
 }
 

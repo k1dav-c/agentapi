@@ -1,16 +1,18 @@
 # AgentAPI Chat Interface
 
-A simple ChatGPT-like interface for AgentAPI. It's a demo showcasing how to use AgentAPI. 95% of the code was generated with Claude Code.
+The AgentAPI web chat interface provides task-based conversations, tool activity, attachments, and
+direct terminal access. It also serves as an example of how to build a client with the AgentAPI HTTP
+API. Claude Code generated 95% of the code.
 
 ## Development Setup
 
-1. Ensure the AgentAPI backend server is running on `localhost:3284`. You can run it from the root of the repository with e.g.
+1. Start the AgentAPI backend on `localhost:3284`. From the repository root, run:
 
    ```bash
    go run main.go server -- claude
    ```
 
-2. Install dependencies:
+2. In the `chat/` directory, install dependencies:
 
    ```bash
    bun install
@@ -22,4 +24,69 @@ A simple ChatGPT-like interface for AgentAPI. It's a demo showcasing how to use 
    bun run dev
    ```
 
-4. Open <http://localhost:3000/chat/?url=http://localhost:3284> in your browser
+4. Open <http://localhost:3000/chat/?url=http://localhost:3284> in your browser.
+
+### Developing against the native transport without an agent
+
+`native-demo` simulates an agent for developing request cards, steering, interrupts, and queue
+controls without installing or paying for a real agent. Select it with this exact program name and
+`--type custom`:
+
+```bash
+go run main.go server --transport native --type custom -- native-demo
+```
+
+Each turn streams thinking, a simulated tool call, and a reply. Include these keywords in a message
+to try specific interactions:
+
+- `approve`: a command that needs approval (allow, always allow, or deny with
+  feedback)
+- `ask`: a question request with a single-choice, a multiple-choice and a
+  free-text question; add `secret` for a hidden answer
+- `plan`: a Markdown plan to approve or send back with feedback
+- `long`: a turn that keeps working for about half a minute, to try steering,
+  Stop, Interrupt & send and reordering the queue
+- `login`: the agent loses its login, so the login card docks above the
+  composer. Check again restarts the demo, whose first start still finds no
+  login: the card stays, now saying AgentAPI checks by itself, and the next
+  start (about 5 seconds later, or Check again) works
+
+Its settings can change from the composer's menus or slash commands: models Swift, Deep, and Plain
+(which has no effort setting) and all four permission modes. In ask mode every turn's first command
+needs approval; in the plan mode every turn ends with a plan, whose approval switches back to
+bypass. Every turn reports simulated context and rate-limit usage that grows with each turn, and
+`/compact` empties the context. The terminal button opens a real shell in the working directory, as
+for any native agent.
+
+Steering appends to the reply, and Stop ends the turn as interrupted. The adapter lives in
+`lib/native/demo`.
+
+## Interface screenshots
+
+These Chromium captures use the production chat UI built with `make build` and served by a
+dedicated AgentAPI server running the built-in `native-demo` adapter. The backend delivers real native events and requests; the agent's
+replies and tool results are simulated.
+
+![Native desktop chat with structured tool activity and session controls](../docs/screenshots/chat-desktop.png)
+
+The task groups the prompt, tool activity, and reply. Native session controls appear in the
+composer, and wide screens show thinking alongside the transcript.
+
+![Expanded tool call with its command input and full result](../docs/screenshots/tool-call.png)
+
+Expand a tool row to inspect its input and full output. This demo lists a simulated workspace; it
+does not run the displayed command.
+
+![Explorer Index tab with task navigation and settings tabs](../docs/screenshots/explorer-index.png)
+
+Open Explorer with ⌘K / Ctrl+K to jump to a task, open a discovered file, or reach MCP and Session
+settings.
+
+![Mobile native chat with the prompt, tool output, reply, and session controls](../docs/screenshots/chat-mobile.png)
+
+On phones, thinking collapses into the conversation and the composer stays at the bottom with the
+permission mode, model, and context controls.
+
+The [screenshot guide](../docs/screenshots/README.md) includes native question and plan cards, the
+file viewer, the model menu, and instructions for regenerating all eight images with
+[scripts/capture-docs.mjs](../scripts/capture-docs.mjs).

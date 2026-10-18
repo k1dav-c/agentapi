@@ -3,7 +3,6 @@ package httpapi
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,12 +11,13 @@ import (
 
 	"github.com/coder/quartz"
 
-	"github.com/coder/agentapi/internal/version"
-	"github.com/coder/agentapi/lib/jsonlwatcher"
-	mf "github.com/coder/agentapi/lib/msgfmt"
-	st "github.com/coder/agentapi/lib/screentracker"
-	"github.com/coder/agentapi/lib/util"
 	"github.com/danielgtaylor/huma/v2"
+
+	mf "github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/native"
+	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/transcript"
+	"github.com/coder/agentapi/lib/util"
 )
 
 type EventType string
@@ -30,6 +30,7 @@ const (
 	EventTypeRichMessageUpdate EventType = "rich_message_update"
 	EventTypeHeartbeat         EventType = "heartbeat"
 	EventTypeSessionSync       EventType = "session_sync"
+	EventTypeRequestUpdate     EventType = "request_update"
 )
 
 type AgentStatus string
@@ -78,11 +79,14 @@ type MessageUpdateBody struct {
 
 // SessionSyncBody is the first event on /events. It tells the client whether
 // the replay that follows is the full state (discard anything cached) or
-// only the changes after the ?since= sequence it asked for.
+// only the changes after the ?since= sequence it asked for. It is sent
+// again, with a new epoch, when the conversation is reset or changes in a
+// way updates can't express (a message was removed); the full state
+// follows it then.
 type SessionSyncBody struct {
-	Epoch string `json:"epoch" doc:"Identifies this conversation state. It changes when the server restarts or the conversation is reset; a cache from another epoch must be discarded."`
+	Epoch string `json:"epoch" doc:"Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded."`
 	Full  bool   `json:"full" doc:"True when the replay that follows is the full state rather than the changes after ?since=."`
-	Seq   uint64 `json:"seq" doc:"Highest sequence number in the replay that follows (the ?since= value when it holds nothing new). The replay is complete once a change with this seq has arrived."`
+	Seq   uint64 `json:"seq" doc:"Highest sequence number in the replay that follows (the ?since= value when it holds nothing new). The replay is grouped by kind, not in seq order: it is complete at its last event, the first to carry an SSE id, and only then can a client resume from this seq."`
 }
 
 type StatusChangeBody struct {
@@ -91,17 +95,33 @@ type StatusChangeBody struct {
 	SessionID string         `json:"session_id" doc:"Identifier for this AgentAPI server session."`
 	RunID     uint64         `json:"run_id" doc:"Monotonically increasing run identifier within the session."`
 	AgentType mf.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
+	Transport Transport      `json:"transport" doc:"Backend transport being used ('pty', 'acp' or 'native')."`
 	Version   string         `json:"agentapi_version" doc:"Version of the AgentAPI server."`
 	// TerminalPrompt is the bottom of the screen while the agent shows an
 	// interactive prompt (selection list, confirmation) instead of its input
 	// box, and empty otherwise.
 	TerminalPrompt string `json:"terminal_prompt" doc:"Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise."`
-	// TerminalColumns lets a terminal mirror wrap lines where the agent's
-	// terminal does.
 	// SessionName is what the agent calls the session, for telling
 	// sessions apart.
-	SessionName     string `json:"session_name,omitempty" doc:"Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it."`
+	SessionName string `json:"session_name,omitempty" doc:"Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it."`
+	// TerminalColumns lets a terminal mirror wrap lines where the agent's
+	// terminal does.
 	TerminalColumns uint16 `json:"terminal_columns,omitempty" doc:"Width of the emulated terminal the agent runs in, in columns (PTY transport only)."`
+	// PendingRequests counts the structured requests (native transport)
+	// the agent is waiting on.
+	PendingRequests int `json:"pending_requests,omitempty" doc:"Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests."`
+	// Capabilities is set for the native transport.
+	Capabilities *native.Capabilities `json:"capabilities,omitempty" doc:"Optional operations the agent supports. Native transport only."`
+	// LoginRequired is set while the agent can't work until the user logs
+	// in (native transport).
+	LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only."`
+	// Settings is set for agents whose settings can change (native
+	// transport).
+	Settings *native.Settings `json:"settings,omitempty" doc:"The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only."`
+	// Usage is set once the agent reports it (native transport).
+	Usage *native.AgentUsage `json:"usage,omitempty" doc:"How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only."`
+	// Terminal says whether GET /terminal has a shell.
+	Terminal bool `json:"terminal,omitempty" doc:"A shell terminal in the agent's working directory is available at GET /terminal. Native transport only."`
 }
 
 type ScreenUpdateBody struct {
@@ -116,7 +136,14 @@ type ErrorBody struct {
 
 // RichMessageUpdateBody is the SSE payload for rich message updates.
 type RichMessageUpdateBody struct {
-	jsonlwatcher.RichMessage
+	transcript.RichMessage
+	Seq uint64 `json:"seq" doc:"Sequence number of this change; see message_update."`
+}
+
+// RequestUpdateBody is the SSE payload for a structured request that was
+// opened or changed state.
+type RequestUpdateBody struct {
+	native.RequestState
 	Seq uint64 `json:"seq" doc:"Sequence number of this change; see message_update."`
 }
 
@@ -136,15 +163,22 @@ type EventEmitter struct {
 	mu       sync.Mutex
 	messages []st.ConversationMessage
 	// epoch identifies the current conversation state; seq numbers every
-	// message and rich message change so a reconnecting client can ask for
-	// only what it hasn't seen. messageSeq and richSeq hold the seq of each
-	// entry's latest change.
+	// message, rich message and request change so a reconnecting client can
+	// ask for only what it hasn't seen. messageSeq, richSeq and requestSeq
+	// hold the seq of each entry's latest change.
 	epoch               string
 	seq                 uint64
 	messageSeq          []uint64
 	richSeq             []uint64
-	richMessages        []jsonlwatcher.RichMessage
-	sessionEvents       []jsonlwatcher.SessionEvent
+	richMessages        []transcript.RichMessage
+	requests            []native.RequestState
+	requestSeq          []uint64
+	capabilities        *native.Capabilities
+	loginRequired       *native.LoginRequired
+	settings            *native.Settings
+	usage               *native.AgentUsage
+	terminal            bool
+	sessionEvents       []transcript.SessionEvent
 	nextSessionEventID  int
 	status              AgentStatus
 	lifecycle           LifecycleState
@@ -152,13 +186,18 @@ type EventEmitter struct {
 	runID               uint64
 	handoffRevision     uint64
 	agentType           mf.AgentType
+	transport           Transport
 	terminalColumns     uint16
 	sessionName         string
-	chans               map[int]chan Event
+	chans               map[int]subscriber
 	chanIdx             int
 	subscriptionBufSize uint
 	screen              string
-	terminalPrompt      string
+	// screenQuestion: the screen shows a dialog of the agent's terminal
+	// that waits for an answer (isTerminalQuestionScreen), worked out once
+	// per screen.
+	screenQuestion bool
+	terminalPrompt string
 	// pendingPrompt is a prompt seen on screen that hasn't been shown long
 	// enough to be published; promptTimer publishes it.
 	pendingPrompt  string
@@ -166,6 +205,43 @@ type EventEmitter struct {
 	errors         []ErrorBody
 	clock          quartz.Clock
 	onStatusChange func(previous, current AgentStatus)
+	// persister, if set, stores every change of the conversation state.
+	persister Persister
+}
+
+// Persister stores conversation state changes so they survive a restart.
+// The emitter calls it with its lock held, so its methods must not block
+// (statedb.DB queues the writes).
+type Persister interface {
+	PutMessage(msg st.ConversationMessage, seq uint64)
+	// TruncateMessages removes the messages with an ID of at least fromID.
+	TruncateMessages(fromID int)
+	PutRichMessage(pos int, msg transcript.RichMessage, seq uint64)
+	AppendSessionEvents(events []transcript.SessionEvent)
+	PutRequest(state native.RequestState, seq uint64)
+	DeleteRequest(id string)
+	SetSeq(epoch string, seq uint64)
+	SetSessionName(name string)
+	// SetSessionRef stores what resumes the agent's session.
+	SetSessionRef(ref string)
+	// SetSettings stores the settings chosen for the session.
+	SetSettings(settings native.Settings)
+	// Reset removes the conversation; epoch is the new epoch.
+	Reset(epoch string)
+}
+
+// EmitterState is conversation state restored from a Persister.
+type EmitterState struct {
+	Epoch         string
+	Seq           uint64
+	Messages      []st.ConversationMessage
+	MessageSeqs   []uint64
+	RichMessages  []transcript.RichMessage
+	RichSeqs      []uint64
+	SessionEvents []transcript.SessionEvent
+	Requests      []native.RequestState
+	RequestSeqs   []uint64
+	SessionName   string
 }
 
 func convertStatus(status st.ConversationStatus) AgentStatus {
@@ -204,6 +280,16 @@ func WithAgentType(agentType mf.AgentType) EventEmitterOption {
 	}
 }
 
+// WithTransport sets the transport reported in status updates.
+func WithTransport(transport Transport) EventEmitterOption {
+	return func(e *EventEmitter) { e.transport = transport }
+}
+
+// WithTerminal reports in status updates that GET /terminal has a shell.
+func WithTerminal() EventEmitterOption {
+	return func(e *EventEmitter) { e.terminal = true }
+}
+
 // WithTerminalColumns sets the width of the agent's terminal reported in
 // status updates.
 func WithTerminalColumns(columns uint16) EventEmitterOption {
@@ -220,6 +306,41 @@ func WithClock(clock quartz.Clock) EventEmitterOption {
 	}
 }
 
+// WithPersister stores every change of the conversation state with p.
+func WithPersister(p Persister) EventEmitterOption {
+	return func(e *EventEmitter) { e.persister = p }
+}
+
+// Restore replaces the conversation state with state, without storing it
+// again. Call it before anyone subscribes.
+func (e *EventEmitter) Restore(state EmitterState) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if state.Epoch != "" {
+		e.epoch = state.Epoch
+	}
+	e.seq = state.Seq
+	e.messages = slices.Clone(state.Messages)
+	e.messageSeq = slices.Clone(state.MessageSeqs)
+	e.richMessages = slices.Clone(state.RichMessages)
+	e.richSeq = slices.Clone(state.RichSeqs)
+	e.sessionEvents = slices.Clone(state.SessionEvents)
+	e.nextSessionEventID = 1
+	for _, ev := range e.sessionEvents {
+		e.nextSessionEventID = max(e.nextSessionEventID, ev.EventID+1)
+	}
+	e.requests = slices.Clone(state.Requests)
+	e.requestSeq = slices.Clone(state.RequestSeqs)
+	e.sessionName = state.SessionName
+}
+
+// Epoch identifies the current conversation state; see SessionSyncBody.
+func (e *EventEmitter) Epoch() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.epoch
+}
+
 func WithStatusChangeHandler(handler func(previous, current AgentStatus)) EventEmitterOption {
 	return func(e *EventEmitter) {
 		e.onStatusChange = handler
@@ -229,11 +350,11 @@ func WithStatusChangeHandler(handler func(previous, current AgentStatus)) EventE
 func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 	e := &EventEmitter{
 		messages:            make([]st.ConversationMessage, 0),
-		sessionEvents:       make([]jsonlwatcher.SessionEvent, 0),
+		sessionEvents:       make([]transcript.SessionEvent, 0),
 		nextSessionEventID:  1,
 		status:              AgentStatusRunning,
 		lifecycle:           LifecycleStarting,
-		chans:               make(map[int]chan Event),
+		chans:               make(map[int]subscriber),
 		subscriptionBufSize: defaultSubscriptionBufSize,
 		epoch:               newEpoch(),
 	}
@@ -246,21 +367,28 @@ func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 	return e
 }
 
+// subscriber is a subscription's channel and the events it gets.
+type subscriber struct {
+	ch    chan Event
+	wants func(EventType) bool
+}
+
+// AllEvents, ConversationEvents and ScreenEvents pick the events a
+// subscription gets: all, all but the screen (GET /events), or only the
+// screen (GET /internal/screen).
+func AllEvents(EventType) bool            { return true }
+func ConversationEvents(t EventType) bool { return t != EventTypeScreenUpdate }
+func ScreenEvents(t EventType) bool       { return t == EventTypeScreenUpdate }
+
 // Assumes the caller holds the lock.
 func (e *EventEmitter) notifyChannels(eventType EventType, payload any) {
-	chanIds := make([]int, 0, len(e.chans))
-	for chanId := range e.chans {
-		chanIds = append(chanIds, chanId)
-	}
-	for _, chanId := range chanIds {
-		ch := e.chans[chanId]
-		event := Event{
-			Type:    eventType,
-			Payload: payload,
+	event := Event{Type: eventType, Payload: payload}
+	for chanId, sub := range e.chans {
+		if !sub.wants(eventType) {
+			continue
 		}
-
 		select {
-		case ch <- event:
+		case sub.ch <- event:
 		default:
 			// If the channel is full, close it.
 			// Listeners must actively drain the channel.
@@ -269,287 +397,14 @@ func (e *EventEmitter) notifyChannels(eventType EventType, payload any) {
 	}
 }
 
-// EmitMessages assumes that only the last message can change or new messages can be added.
-// If a new message is injected between existing messages (identified by Id), the behavior is undefined.
 func newEpoch() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
-func (e *EventEmitter) EmitMessages(newMessages []st.ConversationMessage) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	seqs := make([]uint64, len(newMessages))
-	copy(seqs, e.messageSeq)
-	maxLength := max(len(e.messages), len(newMessages))
-	for i := range maxLength {
-		var oldMsg st.ConversationMessage
-		var newMsg st.ConversationMessage
-		if i < len(e.messages) {
-			oldMsg = e.messages[i]
-		}
-		if i < len(newMessages) {
-			newMsg = newMessages[i]
-		}
-		if oldMsg != newMsg {
-			if i >= len(newMessages) {
-				continue
-			}
-			e.seq++
-			seqs[i] = e.seq
-			e.notifyChannels(EventTypeMessageUpdate, MessageUpdateBody{
-				Id:      newMessages[i].Id,
-				Role:    newMessages[i].Role,
-				Message: newMessages[i].Message,
-				Time:    newMessages[i].Time,
-				Seq:     e.seq,
-			})
-		}
-	}
-
-	e.messages = newMessages
-	e.messageSeq = seqs
-}
-
-func (e *EventEmitter) EmitStatus(newStatus st.ConversationStatus) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	newAgentStatus := convertStatus(newStatus)
-	newLifecycle := LifecycleRunning
-	if newStatus == st.ConversationStatusInitializing {
-		newLifecycle = LifecycleStarting
-	} else if newStatus == st.ConversationStatusStable {
-		newLifecycle = LifecycleReady
-	}
-	if e.status == newAgentStatus && e.lifecycle == newLifecycle {
-		return
-	}
-
-	previousStatus := e.status
-	e.handoffRevision++
-	if newLifecycle == LifecycleRunning && e.lifecycle == LifecycleReady {
-		e.runID++
-	}
-	e.status = newAgentStatus
-	e.lifecycle = newLifecycle
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
-	if e.onStatusChange != nil && previousStatus != newAgentStatus {
-		e.onStatusChange(previousStatus, newAgentStatus)
-	}
-}
-
-func (e *EventEmitter) SetLifecycle(lifecycle LifecycleState) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.lifecycle == lifecycle {
-		return
-	}
-	e.lifecycle = lifecycle
-	e.handoffRevision++
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
-}
-
-// SetSessionName records the name the agent gave its session.
-func (e *EventEmitter) SetSessionName(name string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.sessionName == name {
-		return
-	}
-	e.sessionName = name
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
-}
-
-func (e *EventEmitter) StatusSnapshot() StatusChangeBody {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.statusChangeBody()
-}
-
-func (e *EventEmitter) statusChangeBody() StatusChangeBody {
-	return StatusChangeBody{
-		Status: e.status, Lifecycle: e.lifecycle, SessionID: e.sessionID,
-		RunID: e.runID, AgentType: e.agentType, Version: version.Version,
-		TerminalPrompt: e.terminalPrompt, TerminalColumns: e.terminalColumns,
-		SessionName: e.sessionName,
-	}
-}
-
-func (e *EventEmitter) EmitScreen(newScreen string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if e.screen == newScreen {
-		return
-	}
-
-	e.notifyChannels(EventTypeScreenUpdate, ScreenUpdateBody{Screen: strings.TrimRight(newScreen, mf.WhiteSpaceChars)})
-	e.screen = newScreen
-
-	// Clients decide whether to offer prompt options from this rather than
-	// guessing from message text, where a numbered list in an answer looks
-	// just like a selection menu.
-	prompt := ""
-	if isTerminalQuestionScreen(e.agentType, newScreen) {
-		prompt = screenTail(newScreen, terminalQuestionTailLines)
-	}
-	e.updateTerminalPromptLocked(prompt)
-}
-
-// terminalPromptSettle is how long a prompt must stay on screen before it is
-// published. Claude Code draws its dialogs before it accepts keys, so an
-// option picked the moment the prompt appeared could be ignored.
-const terminalPromptSettle = time.Second
-
-// updateTerminalPromptLocked publishes a new prompt once it has settled, and
-// clears a prompt that went away or changed immediately. Caller holds e.mu.
-func (e *EventEmitter) updateTerminalPromptLocked(prompt string) {
-	if prompt == e.pendingPrompt && e.promptTimer != nil {
-		return
-	}
-	if e.promptTimer != nil {
-		e.promptTimer.Stop()
-		e.promptTimer = nil
-	}
-	e.pendingPrompt = ""
-	if prompt == e.terminalPrompt {
-		return
-	}
-	// Clear a published prompt as soon as it changes: its options would
-	// answer a dialog that is no longer showing.
-	if e.terminalPrompt != "" {
-		e.terminalPrompt = ""
-		e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
-	}
-	if prompt == "" {
-		return
-	}
-	e.pendingPrompt = prompt
-	e.promptTimer = e.clock.AfterFunc(terminalPromptSettle, func() {
-		e.mu.Lock()
-		defer e.mu.Unlock()
-		if e.pendingPrompt != prompt {
-			return
-		}
-		e.pendingPrompt = ""
-		e.promptTimer = nil
-		e.terminalPrompt = prompt
-		e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
-	}, "EventEmitter", "terminalPrompt")
-}
-
-func (e *EventEmitter) EmitError(message string, level st.ErrorLevel) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	errorBody := ErrorBody{
-		Message: message,
-		Level:   level,
-		Time:    e.clock.Now(),
-	}
-
-	// Store the error so new subscribers can receive recent errors.
-	e.errors = append(e.errors, errorBody)
-	if len(e.errors) > maxStoredErrors {
-		e.errors = e.errors[len(e.errors)-maxStoredErrors:]
-	}
-
-	e.notifyChannels(EventTypeError, errorBody)
-}
-
-// EmitRichMessage emits a rich structured message from the JSONL watcher.
-// It stores the message for late subscriber replay. Messages are upserted
-// by (MessageID, Role) because parsers re-emit a message as its content
-// accumulates (e.g. Codex turn updates).
-func (e *EventEmitter) EmitRichMessage(msg jsonlwatcher.RichMessage) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	idx := -1
-	// Search from the end: updates target recent messages.
-	for i := len(e.richMessages) - 1; i >= 0; i-- {
-		if e.richMessages[i].MessageID == msg.MessageID && e.richMessages[i].Role == msg.Role {
-			idx = i
-			break
-		}
-	}
-	if idx >= 0 {
-		existing := e.richMessages[idx]
-		existing.Content = mergeRichContent(existing.Content, msg.Content)
-		existing.StopReason = msg.StopReason
-		existing.Model = msg.Model
-		existing.Usage = msg.Usage
-		e.richMessages[idx] = existing
-		msg = existing
-	} else {
-		e.richMessages = append(e.richMessages, msg)
-		e.richSeq = append(e.richSeq, 0)
-		idx = len(e.richMessages) - 1
-	}
-	e.seq++
-	e.richSeq[idx] = e.seq
-	// Always broadcast the merged snapshot. Broadcasting the incoming Claude
-	// delta would make clients replace a complete message with its last block.
-	e.notifyChannels(EventTypeRichMessageUpdate, RichMessageUpdateBody{RichMessage: msg, Seq: e.seq})
-}
-
-func mergeRichContent(existing, incoming []jsonlwatcher.RichContentBlock) []jsonlwatcher.RichContentBlock {
-	merged := slices.Clone(existing)
-	seen := make(map[string]struct{}, len(existing))
-	for _, block := range existing {
-		seen[richContentBlockKey(block)] = struct{}{}
-	}
-	for _, block := range incoming {
-		key := richContentBlockKey(block)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		merged = append(merged, block)
-	}
-	return merged
-}
-
-func richContentBlockKey(block jsonlwatcher.RichContentBlock) string {
-	if block.ToolUseID != "" {
-		return block.Type + ":" + block.ToolUseID
-	}
-	encoded, _ := json.Marshal(block)
-	return string(encoded)
-}
-
-// RichMessages returns a snapshot of all rich messages received so far.
-// The emitter is the single store for rich messages: the JSONL watcher
-// parses and emits, the emitter deduplicates, replays, and serves reads.
-func (e *EventEmitter) RichMessages() []jsonlwatcher.RichMessage {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return slices.Clone(e.richMessages)
-}
-
-// EmitSessionEvents stores normalized events in the same order as the source
-// JSONL records and assigns stable identifiers for the lifetime of this run.
-func (e *EventEmitter) EmitSessionEvents(events []jsonlwatcher.SessionEvent) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	for _, event := range events {
-		event.EventID = e.nextSessionEventID
-		e.nextSessionEventID++
-		e.sessionEvents = append(e.sessionEvents, event)
-	}
-}
-
-func (e *EventEmitter) SessionEvents() []jsonlwatcher.SessionEvent {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return slices.Clone(e.sessionEvents)
-}
-
-// Reset clears all conversation state — messages, rich messages, timeline,
-// errors, and screen. Used when restarting with a clean slate.
+// Reset clears all conversation state — messages, rich messages, requests,
+// timeline, errors, and screen. Used when restarting with a clean slate.
 func (e *EventEmitter) Reset() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -558,9 +413,14 @@ func (e *EventEmitter) Reset() {
 	e.messageSeq = nil
 	e.richMessages = nil
 	e.richSeq = nil
+	e.requests = nil
+	e.requestSeq = nil
 	// A new epoch makes reconnecting clients drop their cache; connected
 	// clients are told now so they clear the old conversation.
 	e.epoch = newEpoch()
+	if e.persister != nil {
+		e.persister.Reset(e.epoch)
+	}
 	e.notifyChannels(EventTypeSessionSync, SessionSyncBody{Epoch: e.epoch, Full: true})
 	e.sessionEvents = nil
 	e.nextSessionEventID = 1
@@ -575,10 +435,10 @@ func (e *EventEmitter) Reset() {
 	}
 }
 
-// Assumes the caller holds the lock.
 // currentStateAsEvents returns the events that rebuild the current state for
-// a new subscriber. With a matching epoch, only messages and rich messages
-// changed after since are included; otherwise everything is.
+// a new subscriber. With a matching epoch, only messages, rich messages and
+// requests changed after since are included; otherwise everything is.
+// Caller holds e.mu.
 func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string) []Event {
 	// since 0 asks for everything: the client must replace its state rather
 	// than merge into what it holds.
@@ -631,6 +491,17 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string) []Event 
 		})
 	}
 
+	for i, req := range e.requests {
+		if e.requestSeq[i] <= since {
+			continue
+		}
+		replaySeq = max(replaySeq, e.requestSeq[i])
+		events = append(events, Event{
+			Type:    EventTypeRequestUpdate,
+			Payload: RequestUpdateBody{RequestState: req, Seq: e.requestSeq[i]},
+		})
+	}
+
 	events[0].Payload = SessionSyncBody{Epoch: e.epoch, Full: full, Seq: replaySeq}
 	return events
 }
@@ -640,31 +511,37 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string) []Event 
 // - a channel for receiving events.
 // - a list of events that allow to recreate the state of the conversation right before the subscription was created.
 func (e *EventEmitter) Subscribe() (int, <-chan Event, []Event) {
-	return e.SubscribeSince(0, "")
+	return e.SubscribeTo(AllEvents, 0, "")
 }
 
 // SubscribeSince is Subscribe for a client that already has the state up to
 // sequence since in epoch: the returned events start with a session_sync and
 // hold only later changes, or the full state if the epoch doesn't match.
 func (e *EventEmitter) SubscribeSince(since uint64, epoch string) (int, <-chan Event, []Event) {
+	return e.SubscribeTo(AllEvents, since, epoch)
+}
+
+// SubscribeTo is SubscribeSince for the events wants accepts: neither the
+// channel nor the replay holds others.
+func (e *EventEmitter) SubscribeTo(wants func(EventType) bool, since uint64, epoch string) (int, <-chan Event, []Event) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	stateEvents := e.currentStateAsEvents(since, epoch)
+	stateEvents := slices.DeleteFunc(e.currentStateAsEvents(since, epoch), func(event Event) bool { return !wants(event.Type) })
 
 	// Once a channel becomes full, it will be closed.
 	ch := make(chan Event, e.subscriptionBufSize)
-	e.chans[e.chanIdx] = ch
+	e.chans[e.chanIdx] = subscriber{ch: ch, wants: wants}
 	e.chanIdx++
 	return e.chanIdx - 1, ch, stateEvents
 }
 
 // Assumes the caller holds the lock.
 func (e *EventEmitter) unsubscribeInner(chanId int) {
-	ch, ok := e.chans[chanId]
+	sub, ok := e.chans[chanId]
 	if !ok {
 		return
 	}
-	close(ch)
+	close(sub.ch)
 	delete(e.chans, chanId)
 }
 

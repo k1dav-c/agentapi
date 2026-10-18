@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,11 +17,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // Ensure the OpenAPI schema on disk is up to date.
@@ -31,7 +33,6 @@ func TestOpenAPISchema(t *testing.T) {
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
-		AgentIO:        nil,
 		Port:           0,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -80,7 +81,6 @@ func TestServer_redirectToChat(t *testing.T) {
 			tCtx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 			s, err := httpapi.NewServer(tCtx, httpapi.ServerConfig{
 				AgentType:      msgfmt.AgentTypeClaude,
-				AgentIO:        nil,
 				Port:           0,
 				ChatBasePath:   tc.chatBasePath,
 				AllowedHosts:   []string{"*"},
@@ -111,7 +111,6 @@ func TestServer_MessageQueueAPI(t *testing.T) {
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
-		AgentIO:        nil,
 		Port:           0,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -305,7 +304,6 @@ func TestServer_AllowedHosts(t *testing.T) {
 			ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 			s, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 				AgentType:      msgfmt.AgentTypeClaude,
-				AgentIO:        nil,
 				Port:           0,
 				ChatBasePath:   "/chat",
 				AllowedHosts:   tc.allowedHosts,
@@ -388,7 +386,6 @@ func TestServer_CORSPreflightWithHosts(t *testing.T) {
 			ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 			s, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 				AgentType:      msgfmt.AgentTypeClaude,
-				AgentIO:        nil,
 				Port:           0,
 				ChatBasePath:   "/chat",
 				AllowedHosts:   tc.allowedHosts,
@@ -547,7 +544,6 @@ func TestServer_CORSOrigins(t *testing.T) {
 			ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 			s, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 				AgentType:      msgfmt.AgentTypeClaude,
-				AgentIO:        nil,
 				Port:           0,
 				ChatBasePath:   "/chat",
 				AllowedHosts:   []string{"*"}, // Set wildcard to isolate CORS testing
@@ -627,7 +623,6 @@ func TestServer_CORSPreflightOrigins(t *testing.T) {
 			ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 			s, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 				AgentType:      msgfmt.AgentTypeClaude,
-				AgentIO:        nil,
 				Port:           0,
 				ChatBasePath:   "/chat",
 				AllowedHosts:   []string{"*"}, // Set wildcard to isolate CORS testing
@@ -678,7 +673,6 @@ func TestServer_SSEMiddleware_Events(t *testing.T) {
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
-		AgentIO:        nil,
 		Port:           0,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -725,7 +719,6 @@ func TestServer_UploadFiles(t *testing.T) {
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
-		AgentIO:        nil,
 		Port:           0,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -880,7 +873,6 @@ func TestServer_UploadFiles_Errors(t *testing.T) {
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
-		AgentIO:        nil,
 		Port:           0,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -1026,7 +1018,6 @@ func TestServer_Stop_Idempotency(t *testing.T) {
 
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
-		AgentIO:        nil,
 		Port:           0,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -1051,4 +1042,149 @@ func TestServer_Stop_Idempotency(t *testing.T) {
 	defer cancel3()
 	err = srv.Stop(stopCtx3)
 	require.NoError(t, err)
+}
+
+func TestParseBindAddress(t *testing.T) {
+	t.Parallel()
+	valid := map[string]string{
+		"":            "",
+		"127.0.0.1":   "127.0.0.1",
+		"0.0.0.0":     "0.0.0.0",
+		"::1":         "::1",
+		"[::1]":       "::1",
+		"::":          "::",
+		"fe80::1":     "fe80::1",
+		"localhost":   "localhost",
+		"my-host.lan": "my-host.lan",
+		" 10.0.0.2 ":  "10.0.0.2",
+	}
+	for input, want := range valid {
+		got, err := httpapi.ParseBindAddress(input)
+		require.NoError(t, err, "input %q", input)
+		assert.Equal(t, want, got, "input %q", input)
+	}
+	for _, input := range []string{
+		"127.0.0.1:3284",
+		"localhost:80",
+		"[::1]:3284",
+		"[localhost]",
+		"http://localhost",
+		"local host",
+		"a,b",
+		"-bad.example",
+		"under_score",
+	} {
+		_, err := httpapi.ParseBindAddress(input)
+		assert.Error(t, err, "input %q", input)
+	}
+}
+
+func TestServer_ListenAddr(t *testing.T) {
+	t.Parallel()
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for bind, want := range map[string]string{
+		"":          ":3284",
+		"127.0.0.1": "127.0.0.1:3284",
+		"::1":       "[::1]:3284",
+		"[::1]":     "[::1]:3284",
+		"localhost": "localhost:3284",
+	} {
+		srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+			AgentType:      msgfmt.AgentTypeClaude,
+			Port:           3284,
+			ChatBasePath:   "/chat",
+			AllowedHosts:   []string{"*"},
+			AllowedOrigins: []string{"*"},
+			Bind:           bind,
+		})
+		require.NoError(t, err, "bind %q", bind)
+		assert.Equal(t, want, srv.ListenAddr(), "bind %q", bind)
+		require.NoError(t, srv.Stop(context.Background()))
+	}
+
+	_, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeClaude,
+		Port:           3284,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		Bind:           "127.0.0.1:3284",
+	})
+	require.ErrorContains(t, err, "must not include a port")
+}
+
+func TestServer_StartBindsLoopback(t *testing.T) {
+	t.Parallel()
+	// Find a free port, then let the server listen on it.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	require.NoError(t, ln.Close())
+
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeClaude,
+		Port:           port,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		Bind:           "127.0.0.1",
+	})
+	require.NoError(t, err)
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Start() }()
+	t.Cleanup(func() {
+		_ = srv.Stop(context.Background())
+		<-errCh
+	})
+
+	url := fmt.Sprintf("http://127.0.0.1:%d/status", port)
+	require.Eventually(t, func() bool {
+		resp, err := http.Get(url)
+		if err != nil {
+			return false
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, 5*time.Second, 20*time.Millisecond)
+}
+
+// The endpoints of the native transport answer 400 on another transport,
+// and those of the MCP configuration 404 for an agent whose configuration
+// AgentAPI doesn't manage.
+func TestGuardedEndpoints(t *testing.T) {
+	t.Parallel()
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeCustom,
+		Transport:      httpapi.TransportPTY,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+	})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		method, path, body string
+		status             int
+	}{
+		{http.MethodPost, "/interrupt", "", http.StatusBadRequest},
+		{http.MethodPost, "/compact", "", http.StatusBadRequest},
+		{http.MethodGet, "/settings", "", http.StatusBadRequest},
+		{http.MethodPut, "/settings", `{"model":"x"}`, http.StatusBadRequest},
+		{http.MethodPost, "/login/retry", "", http.StatusBadRequest},
+		{http.MethodPost, "/requests/r1/respond", `{"option_id":"allow"}`, http.StatusBadRequest},
+		{http.MethodPost, "/queue/1/steer", "", http.StatusBadRequest},
+		{http.MethodGet, "/mcp", "", http.StatusNotFound},
+		{http.MethodPut, "/mcp", `{"servers":{}}`, http.StatusNotFound},
+		{http.MethodGet, "/mcp/profiles", "", http.StatusNotFound},
+		{http.MethodDelete, "/mcp/servers/x", "", http.StatusNotFound},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		if tc.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		assert.Equal(t, tc.status, rec.Code, "%s %s: %s", tc.method, tc.path, rec.Body.String())
+	}
 }

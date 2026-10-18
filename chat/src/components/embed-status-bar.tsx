@@ -2,16 +2,14 @@
 
 import { useMemo } from "react";
 import { Hash } from "lucide-react";
-import { AgentType, useChat } from "./chat-provider";
+import {useChat} from "./chat-provider";
+import {AgentType} from "@/lib/agents";
 import { computeTokenTotals, formatTokenCount, getStatusMeta } from "@/lib/session-status";
 
 export function EmbedStatusBar() {
-  const { serverStatus, connectionStatus, agentType, agentapiVersion, richMessages, customTitle } = useChat();
+  const { agentState, loginRequired, agentType, agentapiVersion, richMessages, customTitle } = useChat();
 
-  const status = useMemo(
-    () => getStatusMeta(serverStatus, connectionStatus),
-    [serverStatus, connectionStatus],
-  );
+  const status = getStatusMeta(agentState, loginRequired !== null);
   const tokenTotals = useMemo(
     () => computeTokenTotals(richMessages),
     [richMessages],
@@ -27,7 +25,7 @@ export function EmbedStatusBar() {
       <div className="flex min-w-0 items-center gap-2">
         <StatusIcon
           className={`size-3 shrink-0 ${status.className} ${
-            serverStatus === "running" || connectionStatus === "reconnecting"
+            status.kind === "working" || status.kind === "reconnecting"
               ? "motion-safe:animate-spin"
               : ""
           }`}

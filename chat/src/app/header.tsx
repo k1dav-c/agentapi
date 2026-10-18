@@ -3,13 +3,15 @@
 import { type ComponentType, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { notificationsEnabled, onNotificationsPreferenceChange, setNotificationsEnabled } from "@/lib/background-alerts";
-import { AgentType, useChat } from "@/components/chat-provider";
+import {useChat} from "@/components/chat-provider";
+import {agentDisplayName} from "@/lib/agents";
 import { ModeToggle } from "@/components/mode-toggle";
 import { AgentMark } from "@/components/agent-mark";
 import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Tag } from "lucide-react";
 import { computeTokenTotals, formatTokenCount, getStatusMeta } from "@/lib/session-status";
 import { useWorkingElapsed } from "@/lib/use-elapsed";
-import { KeyboardShortcutsDialog, useKeyboardShortcutsKey } from "@/components/keyboard-shortcuts";
+import { openShortcuts } from "@/components/keyboard-shortcuts";
+import { useDialogFromMenu } from "@/lib/menu-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,8 +24,8 @@ import {
 export function Header() {
   const {
     serverStatus,
-    connectionStatus,
-    terminalPrompt,
+    agentState,
+    loginRequired,
     agentType,
     queuedMessages,
     richMessages,
@@ -34,8 +36,7 @@ export function Header() {
     sessionName,
   } = useChat();
   const [downloading, setDownloading] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  useKeyboardShortcutsKey(() => setShortcutsOpen(true));
+  const shortcutsFromMenu = useDialogFromMenu(openShortcuts);
   const elapsed = useWorkingElapsed(serverStatus);
   const [notify, setNotify] = useState(false);
   useEffect(() => {
@@ -83,13 +84,13 @@ export function Header() {
   }, [messages, richMessages]);
 
   const tokenTotals = useMemo(() => computeTokenTotals(richMessages), [richMessages]);
-  const status = getStatusMeta(serverStatus, connectionStatus, terminalPrompt);
+  const status = getStatusMeta(agentState, loginRequired !== null);
   const StatusIcon = status.icon;
   const activityDetail =
     status.kind === "working"
       ? [latestTool ? `Using ${latestTool}` : "Processing task", elapsed].filter(Boolean).join(" · ")
       : status.detail;
-  const agentName = agentType === "unknown" ? "Remote coding agent" : AgentType[agentType].displayName;
+  const agentName = agentDisplayName(agentType, "Remote coding agent");
   const held = status.kind === "needs-you" && queuedMessages.length > 0;
 
   return (
@@ -143,12 +144,12 @@ export function Header() {
               )}
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-72 p-2">
+          <DropdownMenuContent align="end" className="w-72 p-2" onCloseAutoFocus={shortcutsFromMenu.onCloseAutoFocus}>
             <DropdownMenuLabel>Session details</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <div className="space-y-3 px-2 py-2 text-xs">
               <SessionDetail icon={StatusIcon} label="Status" value={status.label} valueClassName={status.className} />
-              <SessionDetail icon={Bot} label="Agent" value={agentType === "unknown" ? "Unknown" : AgentType[agentType].displayName} />
+              <SessionDetail icon={Bot} label="Agent" value={agentDisplayName(agentType, "Unknown")} />
               {sessionName && <SessionDetail icon={MessageSquareText} label="Session" value={sessionName} />}
               {agentapiVersion && <SessionDetail icon={Tag} label="Version" value={`AgentAPI v${agentapiVersion}`} />}
               <SessionDetail icon={Activity} label="Activity" value={activityDetail} />
@@ -185,7 +186,7 @@ export function Header() {
               {notify ? <BellRing /> : <BellOff />}
               {notify ? "Background notifications on" : "Notify me in the background"}
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setShortcutsOpen(true)}>
+            <DropdownMenuItem onSelect={shortcutsFromMenu.onSelect}>
               <Keyboard />
               Keyboard shortcuts
             </DropdownMenuItem>
@@ -210,7 +211,6 @@ export function Header() {
         <div id={HEADER_ACTIONS_ID} className="flex items-center gap-0.5" />
         <ModeToggle />
       </div>
-      <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </header>
   );
 }

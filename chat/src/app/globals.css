@@ -26,6 +26,8 @@
   --color-code-block-bg: var(--code-block-bg);
   --color-code-block-border: var(--code-block-border);
   --color-code-block-text: var(--code-block-text);
+  --color-diff-add: var(--diff-add);
+  --color-diff-del: var(--diff-del);
   --color-search-highlight: var(--search-highlight);
   --color-search-highlight-text: var(--search-highlight-text);
   --color-input: var(--input);
@@ -101,6 +103,10 @@
   --hl-operator: oklch(0.74 0.1 350);
   --hl-type: oklch(0.76 0.11 195);
   --hl-variable: oklch(0.82 0.05 258);
+  /* Added and removed lines of a diff, on the terminal surface (dark in
+     both themes, like --hl-*). */
+  --diff-add: var(--hl-string);
+  --diff-del: oklch(0.73 0.16 25);
   color-scheme: light;
 }
 

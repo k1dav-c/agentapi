@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
-import type { RichMessage, ServerStatus } from "@/components/chat-provider";
+import type {RichMessage} from "@/components/chat-provider";
+import type {ServerStatus} from "@/lib/agent-status";
 import { CircleAlert, CircleCheck, CircleDot, LoaderCircle, WifiOff } from "lucide-react";
 
 export interface TokenTotals {
@@ -10,10 +11,12 @@ export interface TokenTotals {
   total: number;
 }
 
+// A token count the way people read it: 950, 4.2k, 41k, 1.2M. The bounds
+// are where rounding would reach the next unit (9,950 is 10k, not 10.0k).
 export function formatTokenCount(count: number): string {
   if (count < 1000) return `${count}`;
-  if (count < 10_000) return `${(count / 1000).toFixed(1)}k`;
-  if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
+  if (count < 9_950) return `${(count / 1000).toFixed(1)}k`;
+  if (count < 999_500) return `${Math.round(count / 1000)}k`;
   return `${(count / 1_000_000).toFixed(1)}M`;
 }
 
@@ -55,24 +58,48 @@ const STATE_META: Record<AgentStateKind, Omit<StatusMeta, "kind">> = {
   connecting: { label: "Connecting", detail: "Waiting for agent status", icon: CircleAlert, className: "text-muted-foreground" },
 };
 
-export function getAgentState(
-  serverStatus: ServerStatus,
-  connectionStatus: string,
+export interface AgentStateInput {
+  serverStatus: ServerStatus;
+  connectionStatus: string;
+  // Bottom of the terminal while it shows a prompt to answer (PTY).
+  terminalPrompt?: string;
+  // Requests the agent waits on (native transport: approvals, questions,
+  // plans).
+  pendingRequestCount?: number;
+  // The agent waits for someone to log it in (native transport).
+  loginRequired?: boolean;
+}
+
+// The agent needs you while its terminal shows a prompt, while it waits on
+// requests or while it waits for someone to log it in.
+export function getAgentState({
+  serverStatus,
+  connectionStatus,
   terminalPrompt = "",
-): AgentStateKind {
+  pendingRequestCount = 0,
+  loginRequired = false,
+}: AgentStateInput): AgentStateKind {
   if (connectionStatus === "offline" || serverStatus === "offline") return "offline";
   if (connectionStatus === "reconnecting") return "reconnecting";
-  if (terminalPrompt) return "needs-you";
+  if (terminalPrompt || pendingRequestCount > 0 || loginRequired) return "needs-you";
   if (serverStatus === "running") return "working";
   if (serverStatus === "stable") return "ready";
   return "connecting";
 }
 
-export function getStatusMeta(
-  serverStatus: ServerStatus,
-  connectionStatus: string,
-  terminalPrompt = "",
-): StatusMeta {
-  const kind = getAgentState(serverStatus, connectionStatus, terminalPrompt);
-  return { kind, ...STATE_META[kind] };
+// What the agent waits for while it needs you: a login comes before any
+// answer, since the agent can't run without it. null when it doesn't wait.
+export type WaitingFor = "login" | "answer" | null;
+
+export function waitingFor(kind: AgentStateKind, loginRequired: boolean): WaitingFor {
+  if (kind !== "needs-you") return null;
+  return loginRequired ? "login" : "answer";
+}
+
+// How the header and the embed bar show a state.
+export function getStatusMeta(kind: AgentStateKind, loginRequired = false): StatusMeta {
+  const meta = { kind, ...STATE_META[kind] };
+  // A login comes before any answer: the agent can't run without it.
+  if (kind === "needs-you" && loginRequired) meta.detail = "Agent is waiting for you to log in";
+  return meta;
 }

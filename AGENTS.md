@@ -1,35 +1,41 @@
-# AGENTS.md
+# Repository guidance for AI agents
 
 This file provides guidance to AI agents working with code in this repository.
 
-## Build Commands
+## Build commands
 
 - `make build` - Build the binary to `out/agentapi` (includes chat UI build)
 - `make embed` - Build the chat UI and embed it into Go
-- `go build -o out/agentapi main.go` - Direct Go build without chat UI
+- `go build -o out/agentapi main.go` - Build the Go binary with existing embedded assets, without rebuilding the chat UI
 - `make gen` (`go generate ./...`) - Generate OpenAPI schema and version info
+- `make fmt` - Format Go code with gofumpt
+- `make lint` - Run all linters (Go, TypeScript, shellcheck, actionlint)
 
 ## Generated files
 
 - Regenerate `openapi.json` only with `make gen`, and commit its output after
-  changing any API model or huma doc string.
+  changing an API model or huma documentation string.
+- After `make gen`, run `bun run gen:api` in `chat/` and commit
+  `chat/src/lib/api-schema.ts`, the chat's types of the API. A chat test fails
+  until they match `openapi.json`.
 - Don't write it with `go run main.go server --print-openapi dummy > openapi.json`:
   that escapes `<` and `>` in descriptions as `\u003c` / `\u003e`, while
   `make gen` doesn't. The Release workflow runs `make gen` and fails with
-  "Unstaged changes" on any difference, so a push to `main` doesn't release.
+  "Unstaged changes" on any difference, which prevents the release.
 
 ## Testing
 
-- `go test ./...` - Run all Go tests
+- `CGO_ENABLED=0 go test ./...` - Run all Go tests (CI runs them with `CGO_ENABLED=0`)
+- `cd chat && bun test` - Run the chat UI tests
 - Tests are located alongside source files (e.g., `lib/httpapi/server_test.go`)
 
-## Development Commands
+## Development commands
 
 - `agentapi server -- claude` - Start server with Claude Code agent
 - `agentapi server -- aider --model sonnet` - Start server with Aider agent
 - `agentapi server -- goose` - Start server with Goose agent
-- `agentapi server --type=codex -- codex` - Start server with Codex (requires explicit type)
-- `agentapi server --type=gemini -- gemini` - Start server with Gemini (requires explicit type)
+- `agentapi server --type=codex -- codex` - Start server with Codex (explicit type shown)
+- `agentapi server --type=gemini -- gemini` - Start server with Gemini (explicit type shown)
 - `agentapi attach --url localhost:3284` - Attach to running agent terminal
 - Server runs on port 3284 by default
 - Chat UI available at http://localhost:3284/chat
@@ -37,25 +43,31 @@ This file provides guidance to AI agents working with code in this repository.
 
 ## Architecture
 
-This is a Go HTTP API server that controls coding agents (Claude Code, Aider, Goose, etc.) through terminal emulation.
+AgentAPI is a Go HTTP server that controls coding agents through three transports. PTY, the default,
+parses terminal output. Native mode uses Claude Code, Codex, and Pi's structured protocols.
+Experimental ACP mode uses the Agent Client Protocol.
 
-**Core Components:**
-- `main.go` - Entry point using cobra CLI framework
-- `cmd/` - CLI command definitions (server, attach)
+### Core components
+
+- `main.go` - Entry point using the Cobra CLI framework
+- `cmd/` - CLI command definitions, including server, attach, and update
 - `lib/httpapi/` - HTTP server, routes, and OpenAPI schema
 - `lib/screentracker/` - Terminal output parsing and message splitting
 - `lib/termexec/` - Terminal process execution and management
-- `lib/msgfmt/` - Message formatting for different agent types (claude, goose, aider, codex, gemini, amp, cursor-agent, cursor, auggie, custom)
+- `lib/msgfmt/` - Message formatting for different agent types (claude, goose, aider, codex, gemini, copilot, amp, cursor, auggie, amazonq, opencode, kimi, pi, custom)
+- `lib/native/` - Native transport (`--transport native`): one adapter per agent (`claude/`, `codex/`, `pi/`) driving its structured protocol, `procutil/` for the child process, `nativetest/` for tests
+- `lib/statedb/` - SQLite persistence of native sessions (`--state-db`)
 - `chat/` - Next.js web UI (embedded into Go binary)
 
-**Key Architecture:**
-- Runs agents in an in-memory terminal emulator
-- Translates API calls to terminal keystrokes
-- Parses terminal output into structured messages
-- Supports multiple agent types with different message formats
-- Embeds Next.js chat UI as static assets in Go binary
+### Shared architecture
 
-**Message Flow:**
+- All transports implement the same conversation interface and report to the event emitter.
+- PTY mode translates API calls into keystrokes and parses the terminal screen.
+- Native mode reports structured messages, requests, settings, and usage directly.
+- The Go binary embeds the Next.js chat UI as static assets.
+
+### PTY message flow
+
 1. User sends message via HTTP API
 2. Server takes terminal snapshot
 3. Message sent to agent as terminal input
@@ -63,34 +75,31 @@ This is a Go HTTP API server that controls coding agents (Claude Code, Aider, Go
 5. New content becomes agent response message
 6. SSE events stream updates to clients
 
-## API Endpoints
+Native mode delivers messages through an adapter and receives structured events through its Sink.
+See [the architecture guide](docs/architecture.md) for all three transport flows.
+
+## Main API endpoints
 
 - GET `/messages` - Get all messages in conversation
 - POST `/message` - Send message to agent (content, type fields)
-- GET `/status` - Get agent status ("stable" or "running")
+- GET `/status` - Get status, lifecycle details, and transport-specific session metadata
 - GET `/events` - SSE stream of agent events
 - GET `/openapi.json` - OpenAPI schema
 - GET `/docs` - API documentation UI
 - GET `/chat` - Web chat interface
 
-## Supported Agents
+## Supported agents
 
-Agents with explicit type requirement (use `--type=<agent>`):
-- `codex` - OpenAI Codex
-- `gemini` - Google Gemini CLI
-- `amp` - Sourcegraph Amp CLI
-- `cursor` - Cursor CLI
+Use `--type=<agent>` to select a type explicitly. AgentAPI can detect the type when the command
+exactly matches a known alias. Use an explicit type for full executable paths or wrapper scripts;
+unrecognized commands use `custom`.
 
-Agents with auto-detection:
-- `claude` - Claude Code (default)
-- `goose` - Goose
-- `aider` - Aider
-- `kimi` - Kimi Code
-- `pi` - Pi coding agent
+See the [agent and transport table](README.md#supported-agents) for the full list. Native mode
+supports Claude Code, Codex, and Pi, plus `native-demo` with `--type custom` for development.
 
-## Project Structure
+## Project structure
 
 - Go module with standard layout
 - Chat UI in `chat/` directory (Next.js + TypeScript)
 - OpenAPI schema auto-generated to `openapi.json`
-- Version managed via `version.sh` script
+- Release versions determined by `next-version.sh`; builds stamp the binary version, and `version.sh` synchronizes generated metadata

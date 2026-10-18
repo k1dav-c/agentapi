@@ -9,7 +9,8 @@ import { MessageImages } from "../image-preview";
 import { withoutUploadedImages } from "@/lib/uploads";
 import { toast } from "sonner";
 import { formatMessageTime } from "@/lib/format-time";
-import type { DraftMessage, Message } from "../chat-provider";
+import { copyText } from "@/lib/clipboard";
+import {isDraftMessage, type DraftMessage, type Message} from "@/lib/conversation";
 
 export function CopyButton({
   content,
@@ -17,7 +18,7 @@ export function CopyButton({
   onDark = false,
 }: {
   content: string;
-  label?: "task" | "response";
+  label?: "task" | "response" | "command" | "path" | "diff";
   // Sits on a terminal (always dark) surface.
   onDark?: boolean;
 }) {
@@ -25,11 +26,11 @@ export function CopyButton({
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(content);
+      await copyText(content);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch {
-      // Clipboard access can be blocked in embedded or non-secure contexts.
+      // Clipboard access can be blocked in embedded contexts.
       setCopied(false);
       toast.error(`Could not copy the ${label}`, {
         description: "Clipboard access may be blocked in this browser context.",
@@ -76,7 +77,7 @@ export function MessageItem({
   onRetryMessage,
   onEditMessage,
   onDismissMessage,
-  searchQuery: globalSearchQuery = "",
+  searchQuery = "",
 }: {
   message: Message | DraftMessage;
   onRetryMessage?: (clientId: string) => Promise<boolean>;
@@ -84,18 +85,35 @@ export function MessageItem({
   onDismissMessage?: (clientId: string) => void;
   searchQuery?: string;
 }) {
-  const isUser = message.role === "user";
-  // "assistant" messages come from the agent's session log and are prose;
-  // "agent" messages are text parsed from the terminal screen.
-  const isTerminal = message.role !== "assistant" && !isUser;
+  if (message.role !== "user") return <AgentMessage message={message} searchQuery={searchQuery} />;
+  return (
+    <UserMessage
+      message={message}
+      onRetryMessage={onRetryMessage}
+      onEditMessage={onEditMessage}
+      onDismissMessage={onDismissMessage}
+      searchQuery={searchQuery}
+    />
+  );
+}
+
+// The look of the small buttons on a block of the agent's output.
+function blockButtonClass(onDark: boolean) {
+  return `grid size-7 place-items-center rounded-md outline-none transition focus-visible:ring-2 focus-visible:ring-ring ${
+    onDark ? "text-term-dim hover:bg-white/10 hover:text-term-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+  }`;
+}
+
+// A message of the agent's: prose from its session log ("assistant"), or
+// text parsed from its terminal screen ("agent"), with buttons to show it
+// raw or as Markdown, search it and copy it.
+function AgentMessage({message, searchQuery}: {message: Message | DraftMessage; searchQuery: string}) {
+  const isTerminal = message.role !== "assistant";
   const isDraft = message.id === undefined;
-  const draft = isDraft ? (message as DraftMessage) : undefined;
-  const isFailed = draft?.deliveryStatus === "failed";
   const [searchOpen, setSearchOpen] = useState(false);
   const [outputSearchQuery, setOutputSearchQuery] = useState("");
   const [renderMode, setRenderMode] = useState<"raw" | "markdown">(isTerminal ? "raw" : "markdown");
-  const effectiveSearchQuery = outputSearchQuery || globalSearchQuery;
-
+  const effectiveSearchQuery = outputSearchQuery || searchQuery;
   const matchCount =
     outputSearchQuery.trim() === ""
       ? 0
@@ -103,91 +121,107 @@ export function MessageItem({
           .toLocaleLowerCase()
           .split(outputSearchQuery.trim().toLocaleLowerCase()).length - 1;
 
-  if (!isUser) {
-    const tools = message.content && (
-      <div className="float-right ml-3 flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={() => setRenderMode((mode) => mode === "raw" ? "markdown" : "raw")}
-              className={`grid size-7 place-items-center rounded-md outline-none transition focus-visible:ring-2 focus-visible:ring-ring ${isTerminal ? "text-term-dim hover:bg-white/10 hover:text-term-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
-              aria-label={renderMode === "markdown" ? "Show this block as raw text" : "Show this block as Markdown"}
-              aria-pressed={renderMode === "markdown"}
-            >
-              {renderMode === "markdown" ? <Code2 className="size-3.5" /> : <FileText className="size-3.5" />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{renderMode === "markdown" ? "Show raw" : "Show Markdown"}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={() => {
-                setSearchOpen((open) => !open);
-                if (searchOpen) setOutputSearchQuery("");
-              }}
-              className={`grid size-7 place-items-center rounded-md outline-none transition focus-visible:ring-2 focus-visible:ring-ring ${isTerminal ? "text-term-dim hover:bg-white/10 hover:text-term-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
-              aria-label="Search this block"
-              aria-expanded={searchOpen}
-            >
-              <Search className="size-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Search this block</TooltipContent>
-        </Tooltip>
-        <CopyButton content={message.content} onDark={isTerminal} />
-      </div>
-    );
-    return (
-      <article className="group min-w-0">
-        {searchOpen && (
-          <label className="mb-2 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs">
-            <Search className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="sr-only">Search this block</span>
-            <input
-              autoFocus
-              type="search"
-              value={outputSearchQuery}
-              onChange={(event) => setOutputSearchQuery(event.target.value)}
-              placeholder="Search this block…"
-              className="min-w-0 flex-1 bg-transparent outline-none"
-            />
-            {outputSearchQuery && (
-              <span className="shrink-0 text-muted-foreground" role="status">
-                {matchCount} {matchCount === 1 ? "match" : "matches"}
-              </span>
+  const tools = message.content && (
+    <div className="float-right ml-3 flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => setRenderMode((mode) => mode === "raw" ? "markdown" : "raw")}
+            className={blockButtonClass(isTerminal)}
+            aria-label={renderMode === "markdown" ? "Show this block as raw text" : "Show this block as Markdown"}
+            aria-pressed={renderMode === "markdown"}
+          >
+            {renderMode === "markdown" ? <Code2 className="size-3.5" /> : <FileText className="size-3.5" />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{renderMode === "markdown" ? "Show raw" : "Show Markdown"}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => {
+              setSearchOpen((open) => !open);
+              if (searchOpen) setOutputSearchQuery("");
+            }}
+            className={blockButtonClass(isTerminal)}
+            aria-label="Search this block"
+            aria-expanded={searchOpen}
+          >
+            <Search className="size-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Search this block</TooltipContent>
+      </Tooltip>
+      <CopyButton content={message.content} onDark={isTerminal} />
+    </div>
+  );
+  return (
+    <article className="group min-w-0">
+      {searchOpen && (
+        <label className="mb-2 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs">
+          <Search className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="sr-only">Search this block</span>
+          <input
+            autoFocus
+            type="search"
+            value={outputSearchQuery}
+            onChange={(event) => setOutputSearchQuery(event.target.value)}
+            placeholder="Search this block…"
+            className="min-w-0 flex-1 bg-transparent outline-none"
+          />
+          {outputSearchQuery && (
+            <span className="shrink-0 text-muted-foreground" role="status">
+              {matchCount} {matchCount === 1 ? "match" : "matches"}
+            </span>
+          )}
+        </label>
+      )}
+      {message.content === "" ? (
+        <LoadingDots />
+      ) : isTerminal ? (
+        <div className="rounded-md bg-term px-3.5 py-2.5 text-term-foreground">
+          {tools}
+          <div className="mb-1 flex items-center gap-1.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-term-dim">
+            <TerminalSquare className="size-3" />
+            Terminal
+            {message.time && (
+              <time dateTime={message.time} className="normal-case tracking-normal" title={new Date(message.time).toLocaleString()}>
+                · {formatMessageTime(message.time)}
+              </time>
             )}
-          </label>
-        )}
-        {message.content === "" ? (
-          <LoadingDots />
-        ) : isTerminal ? (
-          <div className="rounded-md bg-term px-3.5 py-2.5 text-term-foreground">
-            {tools}
-            <div className="mb-1 flex items-center gap-1.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-term-dim">
-              <TerminalSquare className="size-3" />
-              Terminal
-              {message.time && (
-                <time dateTime={message.time} className="normal-case tracking-normal" title={new Date(message.time).toLocaleString()}>
-                  · {formatMessageTime(message.time)}
-                </time>
-              )}
-              {isDraft && <span className="normal-case tracking-normal">· updating…</span>}
-            </div>
-            <ProcessedMessage messageContent={message.content} isUser={false} renderMode={renderMode} searchQuery={effectiveSearchQuery} />
+            {isDraft && <span className="normal-case tracking-normal">· updating…</span>}
           </div>
-        ) : (
-          <div>
-            {tools}
-            <ProcessedMessage messageContent={message.content} isUser={false} renderMode={renderMode} searchQuery={effectiveSearchQuery} />
-          </div>
-        )}
-      </article>
-    );
-  }
+          <ProcessedMessage messageContent={message.content} isUser={false} renderMode={renderMode} searchQuery={effectiveSearchQuery} />
+        </div>
+      ) : (
+        <div>
+          {tools}
+          <ProcessedMessage messageContent={message.content} isUser={false} renderMode={renderMode} searchQuery={effectiveSearchQuery} linkFilePaths />
+        </div>
+      )}
+    </article>
+  );
+}
 
+// A message of yours: the task, its images, and while it is a draft that
+// failed to send, what to do about it.
+function UserMessage({
+  message,
+  onRetryMessage,
+  onEditMessage,
+  onDismissMessage,
+  searchQuery,
+}: {
+  message: Message | DraftMessage;
+  onRetryMessage?: (clientId: string) => Promise<boolean>;
+  onEditMessage?: (clientId: string, content: string) => void;
+  onDismissMessage?: (clientId: string) => void;
+  searchQuery: string;
+}) {
+  const draft = isDraftMessage(message) ? message : undefined;
+  const isFailed = draft?.deliveryStatus === "failed";
   return (
     <article className="group scroll-mt-16" data-user-message aria-label="Your message">
       <div className="rounded-xl border border-prompt-border bg-prompt px-4 pb-3 pt-2.5">
@@ -208,14 +242,14 @@ export function MessageItem({
           ) : (
             // Uploaded images show as thumbnails below, not as their paths.
             withoutUploadedImages(message.content) && (
-              <ProcessedMessage messageContent={withoutUploadedImages(message.content)} isUser={isUser} searchQuery={globalSearchQuery} />
+              <ProcessedMessage messageContent={withoutUploadedImages(message.content)} isUser searchQuery={searchQuery} />
             )
           )}
           {message.content && <MessageImages content={message.content} />}
         </div>
       </div>
-      {isDraft && !isFailed && <p className="mt-1 text-xs text-muted-foreground">Sending…</p>}
-      {isFailed && draft && (
+      {draft && !isFailed && <p className="mt-1 text-xs text-muted-foreground">Sending…</p>}
+      {draft && isFailed && (
         <div
           className="mt-2 flex flex-wrap items-center gap-1"
           role="alert"

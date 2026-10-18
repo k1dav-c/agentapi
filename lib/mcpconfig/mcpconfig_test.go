@@ -109,3 +109,48 @@ func TestPiStore(t *testing.T) {
 	require.Len(t, servers, 1)
 	assert.JSONEq(t, `{"url":"https://example.com/mcp","headers":{"Authorization":"Bearer ${DOCS_TOKEN}"}}`, string(servers["docs"]))
 }
+
+func TestCodexStoreDottedKeys(t *testing.T) {
+	for name, existing := range map[string]string{
+		"dotted keys":      "mcp_servers.docs.command = \"old\"\nmcp_servers.docs.env.TOKEN = \"x\"\n",
+		"multi-line array": "mcp_servers.docs.args = [\n  \"a\", # [comment]\n  \"b]\",\n]\n",
+		"inline table":     "mcp_servers = { docs = { command = \"old\" } }\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("CODEX_HOME", root)
+			configPath := filepath.Join(root, "config.toml")
+			require.NoError(t, os.WriteFile(configPath, []byte("model = \"gpt-5\"\n"+existing+"\n[projects.\"/w\"]\ntrust_level = \"trusted\"\n"), 0o600))
+			store, err := NewStore(mf.AgentTypeCodex, "")
+			require.NoError(t, err)
+			require.NoError(t, store.Replace(Servers{"docs": json.RawMessage(`{"command":"npx","args":["x"]}`)}))
+
+			servers, err := store.Read()
+			require.NoError(t, err, "config.toml no longer parses")
+			require.Len(t, servers, 1)
+			assert.JSONEq(t, `{"command":"npx","args":["x"]}`, string(servers["docs"]))
+			data, err := os.ReadFile(configPath)
+			require.NoError(t, err)
+			assert.Contains(t, string(data), `trust_level = "trusted"`)
+			info, err := os.Stat(configPath)
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "the file keeps its mode")
+		})
+	}
+}
+
+func TestCodexStoreRefusesWhatItCantRewrite(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", root)
+	configPath := filepath.Join(root, "config.toml")
+	// A multi-line string holding a bracket: the rewrite by lines loses
+	// track of the value, so it must not write.
+	original := "model = \"gpt-5\"\nmcp_servers.docs.command = \"\"\"\n[x\n\"\"\"\n"
+	require.NoError(t, os.WriteFile(configPath, []byte(original), 0o644))
+	store, err := NewStore(mf.AgentTypeCodex, "")
+	require.NoError(t, err)
+	assert.Error(t, store.Replace(Servers{"docs": json.RawMessage(`{"command":"npx"}`)}))
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, original, string(data), "the file is left as it was")
+}

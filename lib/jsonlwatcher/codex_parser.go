@@ -28,8 +28,6 @@ import (
 // upsert by ID), and tool results are emitted as soon as their output
 // line appears.
 type CodexParser struct {
-	// inTurn tracks whether we're inside a task_started..task_complete boundary.
-	inTurn bool
 	// currentTurn accumulates content blocks for the current assistant turn.
 	currentTurn *RichMessage
 	// lastUsage holds the most recent token usage from token_count events.
@@ -106,11 +104,12 @@ func (p *CodexParser) ParseLine(line []byte) ([]RichMessage, error) {
 	}
 }
 
-// FlushCompleted finalizes only completed pending turns.
-// Codex turns are always complete when in pending state (each event
-// is self-contained), so this behaves the same as Flush.
+// FlushCompleted has nothing to emit: a turn is emitted as it grows, and
+// ends at task_started, task_complete or the next user message, never at
+// a read boundary (which would split it into messages depending on when
+// the file was read).
 func (p *CodexParser) FlushCompleted() []RichMessage {
-	return p.finalizeTurn()
+	return nil
 }
 
 // Flush finalizes any pending turn.
@@ -120,17 +119,8 @@ func (p *CodexParser) Flush() []RichMessage {
 
 func (p *CodexParser) handleEventMsg(payload *codexPayload, timestamp string) []RichMessage {
 	switch payload.Type {
-	case "task_started":
-		// Finalize any previous turn, start a new one
-		completed := p.finalizeTurn()
-		p.inTurn = true
-		return completed
-
-	case "task_complete":
-		// Finalize the current turn
-		completed := p.finalizeTurn()
-		p.inTurn = false
-		return completed
+	case "task_started", "task_complete":
+		return p.finalizeTurn()
 
 	case "token_count":
 		if payload.Info != nil && payload.Info.LastTokenUsage != nil {
@@ -240,7 +230,9 @@ func (p *CodexParser) handleMessage(payload *codexPayload, timestamp string) []R
 				{Type: "text", Text: userText},
 			},
 		}
-		return []RichMessage{msg}
+		// A prompt ends the turn before it, also in logs without task
+		// events.
+		return append(p.finalizeTurn(), msg)
 
 	default:
 		// Skip developer (system prompt) and other roles
@@ -419,18 +411,28 @@ func parseCodexOutputImages(raw json.RawMessage) []RichImage {
 		if b.Type != "input_image" {
 			continue
 		}
-		header, data, ok := strings.Cut(strings.TrimPrefix(b.ImageURL, "data:"), ",")
-		mediaType, isBase64 := strings.CutSuffix(header, ";base64")
-		if !ok || !isBase64 || !strings.HasPrefix(b.ImageURL, "data:") {
-			continue
+		if img, ok := ImageFromDataURL(b.ImageURL); ok {
+			images = append(images, img)
 		}
-		decoded, err := base64.StdEncoding.DecodeString(data)
-		if err != nil || len(decoded) == 0 {
-			continue
-		}
-		images = append(images, RichImage{MediaType: mediaType, Data: decoded})
 	}
 	return images
+}
+
+// ImageFromDataURL decodes an image Codex passes as a base64 data: URL
+// ("data:image/png;base64,..."). ok is false for any other URL and for
+// data that doesn't decode.
+func ImageFromDataURL(url string) (img RichImage, ok bool) {
+	rest, isData := strings.CutPrefix(url, "data:")
+	header, data, hasData := strings.Cut(rest, ",")
+	mediaType, isBase64 := strings.CutSuffix(header, ";base64")
+	if !isData || !hasData || !isBase64 {
+		return RichImage{}, false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil || len(decoded) == 0 {
+		return RichImage{}, false
+	}
+	return RichImage{MediaType: mediaType, Data: decoded}, true
 }
 
 // parseCodexOutputBlocks parses a serialized array of {type, text}

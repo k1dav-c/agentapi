@@ -1,5 +1,6 @@
 import { Chat } from "@/components/chat";
-import { ChatProvider } from "@/components/chat-provider";
+import {ChatProvider} from "@/components/chat-provider";
+import { FileViewerProvider } from "@/components/file-viewer";
 import { Header } from "./header";
 import { Suspense } from "react";
 
@@ -36,10 +37,12 @@ export default function Home() {
       }
     >
       <ChatProvider>
-        <main className="flex h-svh flex-col overflow-hidden bg-background">
-          <Header />
-          <Chat />
-        </main>
+        <FileViewerProvider>
+          <main className="flex h-svh flex-col overflow-hidden bg-background">
+            <Header />
+            <Chat />
+          </main>
+        </FileViewerProvider>
       </ChatProvider>
     </Suspense>
   );

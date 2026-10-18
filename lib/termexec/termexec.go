@@ -1,6 +1,7 @@
 package termexec
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -8,10 +9,12 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ActiveState/termtest/xpty"
 	"github.com/ActiveState/vt10x"
@@ -56,6 +59,8 @@ type StartProcessConfig struct {
 	TerminalWidth  uint16
 	TerminalHeight uint16
 	Clock          quartz.Clock
+	// Env is the process environment; nil means os.Environ(). TERM is set.
+	Env []string
 }
 
 func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error) {
@@ -72,7 +77,11 @@ func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error
 	// vt100 is the terminal type that the vt10x library emulates.
 	// Setting this signals to the process that it should only use compatible
 	// escape sequences.
-	execCmd.Env = append(os.Environ(), "TERM=vt100")
+	env := args.Env
+	if env == nil {
+		env = os.Environ()
+	}
+	execCmd.Env = append(append([]string(nil), env...), "TERM=vt100")
 	if err := xp.StartProcessInTerminal(execCmd); err != nil {
 		_ = xp.Close()
 		return nil, err
@@ -85,54 +94,79 @@ func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error
 		// when the PTY output stream ends.
 		defer close(process.readerDone)
 
-		// Working around xpty concurrency limitations:
+		// Working around xpty: it updates the terminal only through
+		// xp.ReadRune, which blocks until the process writes and panics
+		// with a read deadline, and starts a goroutine, two channels and a
+		// timer for every rune (an 80 KB burst of output took 212 ms of CPU
+		// and 40 MB of allocations). The reader reads the output from the
+		// bufio.Reader xpty reads it from, in chunks, and writes each chunk
+		// to the terminal under one lock, which ReadScreen callers don't
+		// wait for while the reader waits for output.
 		//
-		// We need to track when the terminal screen was last updated (for ReadScreen),
-		// but xpty only updates terminal state through xp.ReadRune(), which blocks
-		// indefinitely until the process outputs data and panics when SetReadDeadline
-		// is used.
-		//
-		// If we wrapped ReadRune + lastScreenUpdate in a mutex, this goroutine would
-		// hold the lock while waiting for process output, starving ReadScreen callers.
-		//
-		// Instead, we directly use xpty's internal components:
-		// - pp.ReadRune() — handles the blocking read from the process (lock-free)
-		// - xp.Term.WriteRune() — updates the terminal state (under mutex)
-		//
-		// Warning: This depends on xpty internals (the unexported "pp" field) and
-		// may break if xpty changes. The xpty version is pinned to v0.6.0.
-		// A proper fix would require forking xpty or getting upstream changes.
+		// Warning: this depends on xpty internals (the unexported "pp" and
+		// "rdr" fields), pinned to v0.6.0.
 		pp := util.GetUnexportedField(xp, "pp").(*xpty.PassthroughPipe)
-		injector := &wideCharInjector{}
-		for {
-			r, _, err := pp.ReadRune()
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					// Normal shutdown: PTY closed or process exited.
-					logger.Debug("PTY reader stopped: EOF")
-				} else {
-					logger.Error("PTY reader stopped: unexpected error reading from pseudo terminal", "error", err)
-				}
-				process.readerErr = err
-				return
-			}
-			process.screenUpdateLock.Lock()
-			// writing to the terminal updates its state. without it,
-			// xp.State will always return an empty string
-			xp.Term.WriteRune(r)
-			if injector.shouldPad(r) {
-				// Keep the emulator's cursor in sync with the two-column
-				// layout the application assumes for wide runes. The
-				// padding is stripped in ReadScreen. See widechar.go.
-				xp.Term.WriteRune(widePadRune)
-			}
-			process.lastScreenUpdate = clock.Now()
-			process.screenUpdateLock.Unlock()
-			process.notifyScreenUpdate()
+		output := util.GetUnexportedField(pp, "rdr").(*bufio.Reader)
+		err := process.readOutput(output)
+		if errors.Is(err, io.EOF) || errors.Is(err, os.ErrClosed) || errors.Is(err, syscall.EIO) {
+			// Normal shutdown: PTY closed or process exited.
+			logger.Debug("PTY reader stopped", "error", err)
+		} else {
+			logger.Error("PTY reader stopped: unexpected error reading from pseudo terminal", "error", err)
 		}
+		process.readerErr = err
 	}()
 
 	return process, nil
+}
+
+// readOutput writes the process's output to the terminal emulator until
+// it ends: a chunk at a time, under one lock. An incomplete UTF-8 sequence
+// at a chunk's end waits for the next chunk.
+func (p *Process) readOutput(output io.Reader) error {
+	injector := &wideCharInjector{}
+	buf := make([]byte, 32<<10)
+	var partial []byte
+	for {
+		n, err := output.Read(buf)
+		if n > 0 {
+			data := buf[:n]
+			if len(partial) > 0 {
+				data = append(partial, data...)
+			}
+			p.screenUpdateLock.Lock()
+			used := writeOutput(p.xp.Term, injector, data, err != nil)
+			p.lastScreenUpdate = p.clock.Now()
+			p.screenUpdateLock.Unlock()
+			partial = slices.Clone(data[used:])
+			p.notifyScreenUpdate()
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+// writeOutput writes the runes of data to term and returns how many bytes
+// it used: all of them, unless data ends inside a UTF-8 sequence and more
+// output may follow (not last). A byte that isn't UTF-8 is written as
+// U+FFFD. After a double-width rune it writes a padding rune, which keeps
+// the emulator's cursor in step with the two columns the application
+// assumes; ReadScreen strips it (see widechar.go).
+func writeOutput(term interface{ WriteRune(rune) }, injector *wideCharInjector, data []byte, last bool) int {
+	i := 0
+	for i < len(data) {
+		r, size := utf8.DecodeRune(data[i:])
+		if r == utf8.RuneError && size <= 1 && !last && !utf8.FullRune(data[i:]) {
+			break
+		}
+		term.WriteRune(r)
+		if injector.shouldPad(r) {
+			term.WriteRune(widePadRune)
+		}
+		i += size
+	}
+	return i
 }
 
 // ReaderDone returns a channel that is closed when the PTY reader goroutine exits.
@@ -151,10 +185,6 @@ func (p *Process) ReaderErr() error {
 // Pid returns the OS process ID of the child process.
 func (p *Process) Pid() int {
 	return p.execCmd.Process.Pid
-}
-
-func (p *Process) Signal(sig os.Signal) error {
-	return p.execCmd.Process.Signal(sig)
 }
 
 // ReadScreen returns the contents of the terminal window.

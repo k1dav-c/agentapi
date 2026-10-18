@@ -7,6 +7,7 @@ describe("getToolCommand", () => {
   });
   test("Codex exec_command with a string or argv", () => {
     expect(getToolCommand("exec_command", {cmd: "rg --files"})).toBe("rg --files");
+    expect(getToolCommand("exec_command", {command: "node <<'JS'\nrun();\nJS"})).toBe("node <<'JS'\nrun();\nJS");
     expect(getToolCommand("shell", {command: ["bash", "-lc", "pwd"]})).toBe("pwd");
   });
   test("Codex freeform exec", () => {

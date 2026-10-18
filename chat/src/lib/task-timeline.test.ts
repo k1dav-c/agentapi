@@ -1,5 +1,6 @@
 import {describe, expect, test} from "bun:test";
-import {collectToolCalls, getTaskActivity, getTaskStatus, type TaskSection, type ToolCall} from "./task-timeline";
+import {buildTimeline, collectToolCalls, getTaskActivity, getTaskStatus, shareTimeline, shareToolCalls, type TaskSection, type ToolCall} from "./task-timeline";
+import type {RichMessage} from "@/components/chat-provider";
 
 const tool = (id: string, timestamp: string): ToolCall => ({id, name: "Bash", input: {command: "ls"}, timestamp});
 
@@ -40,6 +41,17 @@ describe("getTaskActivity", () => {
   test("without a session log, screen text and tools are in time order", () => {
     const t = task({toolCalls: [tool("t2", "2026-10-04T08:00:05Z")]});
     expect(kinds(getTaskActivity(t))).toEqual(["tool:tool-t2", "message:response-1"]);
+  });
+
+  test("the native transport shows only the transcript, never the joined agent text", () => {
+    const t = task({
+      toolCalls: [tool("t2", "2026-10-04T08:00:05Z")],
+      richActivity: [{type: "thinking", key: "th", content: "…", timestamp: "2026-10-04T08:00:01Z"}],
+    });
+    expect(kinds(getTaskActivity(t, {live: true, transcriptOnly: true}))).toEqual(["thinking:th", "tool:tool-t2"]);
+    // A steered message's task holds only the agent text of the reply,
+    // which belongs to the task before it.
+    expect(getTaskActivity(task({}), {transcriptOnly: true})).toEqual([]);
   });
 });
 
@@ -88,5 +100,42 @@ describe("collectToolCalls", () => {
     ]);
     expect(call.images).toEqual(["/uploads/0123456789abcdef/image.png"]);
     expect(call.result).toBe("");
+  });
+});
+
+describe("sharing what didn't change", () => {
+  const user = (id: number, time: string) => ({id, role: "user" as const, content: `task ${id}`, time});
+  const agent = (id: number, content: string, time: string) => ({id, role: "agent" as const, content, time});
+  const rich = (id: string, time: string, blocks: RichMessage["content"]) =>
+    ({message_id: id, role: "assistant", timestamp: time, content: blocks}) as unknown as RichMessage;
+
+  test("a rebuild with nothing new is the previous timeline", () => {
+    const messages = [user(1, "2026-01-01T00:00:00Z"), agent(2, "done", "2026-01-01T00:00:01Z")];
+    const richMessages = [rich("m1", "2026-01-01T00:00:01Z", [{type: "tool_use", tool_use_id: "t1", tool_name: "Read", tool_input: {path: "/a"}} as never])];
+    const calls = collectToolCalls(richMessages);
+    const first = buildTimeline(messages, richMessages, calls);
+    const again = shareTimeline(first, buildTimeline(messages, richMessages, shareToolCalls(calls, collectToolCalls(richMessages))));
+    expect(again).toBe(first);
+  });
+
+  test("only the task that changed is new", () => {
+    const messages = [user(1, "2026-01-01T00:00:00Z"), agent(2, "done", "2026-01-01T00:00:01Z"), user(3, "2026-01-01T00:01:00Z")];
+    const first = buildTimeline(messages, [], []);
+    const streamed = [...messages, agent(4, "working", "2026-01-01T00:01:01Z")];
+    const next = shareTimeline(first, buildTimeline(streamed, [], []));
+    expect(next).not.toBe(first);
+    expect(next.tasks[0]).toBe(first.tasks[0]);
+    expect(next.tasks[1]).not.toBe(first.tasks[1]);
+    expect(next.tasks[1].responses.map((m) => m.content)).toEqual(["working"]);
+  });
+
+  test("a tool call keeps its object until its result changes", () => {
+    const use = rich("m1", "2026-01-01T00:00:01Z", [{type: "tool_use", tool_use_id: "t1", tool_name: "Bash", tool_input: {command: "ls"}} as never]);
+    const before = collectToolCalls([use]);
+    expect(shareToolCalls(before, collectToolCalls([use]))[0]).toBe(before[0]);
+    const result = rich("m2", "2026-01-01T00:00:02Z", [{type: "tool_result", tool_use_id: "t1", text: "a.go"} as never]);
+    const after = shareToolCalls(before, collectToolCalls([use, result]));
+    expect(after[0]).not.toBe(before[0]);
+    expect(after[0].result).toBe("a.go");
   });
 });

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/coder/agentapi/lib/agenthome"
 )
 
 // codexReasoningSummaryKey is the Codex setting that makes it log a readable
@@ -58,13 +60,9 @@ func isCodexCLI(program string) bool {
 // codexConfigPath returns $CODEX_HOME/config.toml, defaulting to
 // ~/.codex/config.toml.
 func codexConfigPath() string {
-	root := os.Getenv("CODEX_HOME")
-	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		root = filepath.Join(home, ".codex")
+	root, err := agenthome.CodexHome()
+	if err != nil {
+		return ""
 	}
 	return filepath.Join(root, "config.toml")
 }

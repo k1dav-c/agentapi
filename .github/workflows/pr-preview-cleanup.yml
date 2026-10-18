@@ -10,6 +10,7 @@ permissions:
 jobs:
   cleanup:
     name: Delete PR Release
+    if: github.repository == 'coder/agentapi'
     runs-on: ubuntu-latest
 
     steps:

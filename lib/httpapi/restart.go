@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -13,35 +15,62 @@ type DeleteMessagesResponse struct {
 	}
 }
 
+// restartTimeout bounds a restart: updating the agent CLI (up to 3
+// minutes) and starting the new agent.
+const restartTimeout = 5 * time.Minute
+
+// agentCtx bounds a call that changes the agent's state (a message, an
+// answer, a setting, a restart). It ends with the server, not with the
+// request: a client that goes away mid-call, such as a reloaded tab, must
+// not cut an answer, a restart or a CLI update short.
+func (s *Server) agentCtx(timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(s.shutdownCtx, timeout)
+}
+
+// errStopping is returned for a restart asked for while AgentAPI stops.
+var errStopping = errors.New("AgentAPI is stopping")
+
 // deleteMessages clears all conversation state (messages, rich messages,
-// timeline, errors) and restarts the agent process.
-func (s *Server) deleteMessages(ctx context.Context, _ *struct{}) (*DeleteMessagesResponse, error) {
-	if s.restartAgent == nil {
+// requests, timeline, errors, the queue) and restarts the agent process.
+func (s *Server) deleteMessages(_ context.Context, _ *struct{}) (*DeleteMessagesResponse, error) {
+	if !s.backend().canRestart() {
 		return nil, huma.Error400BadRequest("agent restart is not supported in this server mode")
 	}
-	// Serialize process replacement with browser and Discord input delivery.
+	// Serialize process replacement with message and handoff reply delivery.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Clear all conversation state.
-	s.emitter.Reset()
-	s.conversation.Reset()
-	s.messageQueue = nil
-	s.nextQueueID = 0
-	s.queueFailID = 0
-	s.queueFailCount = 0
-
-	// Restart the agent process.
-	s.emitter.SetLifecycle(LifecycleRestarting)
-	newPID, err := s.restartAgent(ctx)
-	if err != nil {
-		s.emitter.SetLifecycle(LifecycleFailed)
+	ctx, cancel := s.agentCtx(restartTimeout)
+	defer cancel()
+	if err := s.restartLocked(ctx, true); err != nil {
 		return nil, huma.Error500InternalServerError(fmt.Sprintf("agent restart failed: %v", err))
 	}
-	s.startJSONLWatcher(newPID)
-	s.emitter.SetLifecycle(LifecycleStarting)
 
 	response := &DeleteMessagesResponse{}
 	response.Body.Restarted = true
 	return response, nil
+}
+
+// resetConversationLocked clears all conversation state: messages, rich
+// messages, requests, timeline, errors and the queue, whose IDs go on
+// counting. Caller holds s.mu.
+func (s *Server) resetConversationLocked() {
+	s.emitter.Reset()
+	s.conversation.Reset()
+	s.queue.Clear()
+}
+
+// restartLocked replaces the agent with a new one. With clear the
+// conversation starts over; a native agent's always does. Caller holds s.mu.
+func (s *Server) restartLocked(ctx context.Context, clear bool) error {
+	if s.stopping {
+		// Stop closed the agent: don't start another one.
+		return errStopping
+	}
+	s.emitter.SetLifecycle(LifecycleRestarting)
+	if err := s.backend().restart(ctx, clear); err != nil {
+		s.emitter.SetLifecycle(LifecycleFailed)
+		return err
+	}
+	return nil
 }

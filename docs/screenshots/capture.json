@@ -1,0 +1,26 @@
+{
+  "captured_at": "2026-10-18T12:43:50.839Z",
+  "agentapi_version": "0.23.0-123-gcf4c5f7-dirty",
+  "ui": "http://127.0.0.1:3311/chat/",
+  "api": "http://127.0.0.1:3311",
+  "agent": "native-demo",
+  "browser": "153.0.8010.12",
+  "desktop_viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "mobile_viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "images": [
+    "chat-desktop.png",
+    "tool-call.png",
+    "model-settings.png",
+    "explorer-index.png",
+    "file-viewer.png",
+    "chat-mobile.png",
+    "native-question.png",
+    "native-plan.png"
+  ]
+}

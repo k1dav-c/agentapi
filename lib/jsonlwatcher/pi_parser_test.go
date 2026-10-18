@@ -102,6 +102,20 @@ func TestPiSessionEvents(t *testing.T) {
 	assert.Equal(t, "s1", *events[1].SessionID)
 }
 
+func TestPiMessageEvents(t *testing.T) {
+	p := NewPiSessionEventParser()
+	_, err := p.ParseSessionEvents([]byte(`{"type":"session","version":3,"id":"s1","timestamp":"2026-10-04T15:00:00.000Z","cwd":"/home/me/proj"}`))
+	require.NoError(t, err)
+	line := []byte(`{"type":"message","id":"r1","parentId":"a1","timestamp":"2026-10-04T15:00:04.000Z","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","content":[{"type":"text","text":"a.go"}],"isError":false}}`)
+	want, err := p.ParseSessionEvents(line)
+	require.NoError(t, err)
+	require.Len(t, want, 1)
+	msgs, err := NewPiParser().ParseLine(line)
+	require.NoError(t, err)
+	assert.Equal(t, want, p.MessageEvents(msgs), "the events of a line parsed elsewhere")
+	assert.Equal(t, "s1", *want[0].SessionID)
+}
+
 func TestPiSessionDirName(t *testing.T) {
 	assert.Equal(t, "--home-k1dave6412--", piSessionDirName("/home/k1dave6412"))
 	assert.Equal(t, "--home-me-my.proj--", piSessionDirName("/home/me/my.proj"))

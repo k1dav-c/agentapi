@@ -210,15 +210,17 @@ func isolateViper(t *testing.T) {
 	// Reset viper
 	viper.Reset()
 
-	// Clear AGENTAPI_ env vars
-	var agentapiEnvs []string
+	// Clear the AGENTAPI_ variables, and set them back afterwards: AgentAPI
+	// reads them as its flags.
+	saved := map[string]string{}
 	for _, env := range os.Environ() {
-		if strings.HasPrefix(env, "AGENTAPI_") {
-			parts := strings.SplitN(env, "=", 2)
-			agentapiEnvs = append(agentapiEnvs, parts[0])
-			if err := os.Unsetenv(parts[0]); err != nil {
-				t.Fatalf("Failed to unset env var %s: %v", parts[0], err)
-			}
+		key, value, _ := strings.Cut(env, "=")
+		if !strings.HasPrefix(key, "AGENTAPI_") {
+			continue
+		}
+		saved[key] = value
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("Failed to unset env var %s: %v", key, err)
 		}
 	}
 
@@ -228,13 +230,9 @@ func isolateViper(t *testing.T) {
 		for key, value := range oldConfig {
 			viper.Set(key, value)
 		}
-
-		// Restore env vars
-		for _, key := range agentapiEnvs {
-			if val := os.Getenv(key); val != "" {
-				if err := os.Setenv(key, val); err != nil {
-					t.Fatalf("Failed to set env var %s: %v", key, err)
-				}
+		for key, value := range saved {
+			if err := os.Setenv(key, value); err != nil {
+				t.Errorf("Failed to set env var %s: %v", key, err)
 			}
 		}
 	})
@@ -256,6 +254,7 @@ func TestServerCmd_AllArgs_Defaults(t *testing.T) {
 		{"term-height default", FlagTermHeight, uint16(1000), func() any { return viper.GetUint16(FlagTermHeight) }},
 		{"allowed-hosts default", FlagAllowedHosts, []string{"localhost", "127.0.0.1", "[::1]"}, func() any { return viper.GetStringSlice(FlagAllowedHosts) }},
 		{"allowed-origins default", FlagAllowedOrigins, []string{"http://localhost:3284", "http://localhost:3000", "http://localhost:3001"}, func() any { return viper.GetStringSlice(FlagAllowedOrigins) }},
+		{"bind default", FlagBind, "", func() any { return viper.GetString(FlagBind) }},
 	}
 
 	for _, tt := range tests {
@@ -290,6 +289,7 @@ func TestServerCmd_AllEnvVars(t *testing.T) {
 		{"AGENTAPI_TERM_HEIGHT", "AGENTAPI_TERM_HEIGHT", "500", uint16(500), func() any { return viper.GetUint16(FlagTermHeight) }},
 		{"AGENTAPI_ALLOWED_HOSTS", "AGENTAPI_ALLOWED_HOSTS", "localhost example.com", []string{"localhost", "example.com"}, func() any { return viper.GetStringSlice(FlagAllowedHosts) }},
 		{"AGENTAPI_ALLOWED_ORIGINS", "AGENTAPI_ALLOWED_ORIGINS", "https://example.com http://localhost:3000", []string{"https://example.com", "http://localhost:3000"}, func() any { return viper.GetStringSlice(FlagAllowedOrigins) }},
+		{"AGENTAPI_BIND", "AGENTAPI_BIND", "127.0.0.1", "127.0.0.1", func() any { return viper.GetString(FlagBind) }},
 	}
 
 	for _, tt := range tests {
@@ -359,6 +359,13 @@ func TestServerCmd_ArgsPrecedenceOverEnv(t *testing.T) {
 			[]string{"--term-height", "600"},
 			uint16(600),
 			func() any { return viper.GetUint16(FlagTermHeight) },
+		},
+		{
+			"bind: CLI overrides env",
+			"AGENTAPI_BIND", "0.0.0.0",
+			[]string{"--bind", "::1"},
+			"::1",
+			func() any { return viper.GetString(FlagBind) },
 		},
 		{
 			"allowed-origins: CLI overrides env",
@@ -842,4 +849,28 @@ func TestServerCmd_AllowedOrigins(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestChatSignInURL(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "http://localhost:3284/chat/embed#token=abc123", chatSignInURL("", 3284, "abc123"))
+	assert.Equal(t, "http://localhost:3284/chat/embed#token=abc123", chatSignInURL("0.0.0.0", 3284, "abc123"))
+	assert.Equal(t, "http://localhost:3284/chat/embed#token=abc123", chatSignInURL("::", 3284, "abc123"))
+	assert.Equal(t, "http://127.0.0.1:3999/chat/embed#token=abc123", chatSignInURL("127.0.0.1", 3999, "abc123"))
+	assert.Equal(t, "http://[::1]:3284/chat/embed#token=abc123", chatSignInURL("::1", 3284, "abc123"))
+	assert.Equal(t, "http://localhost:3284/chat/embed#token=a%26b", chatSignInURL("", 3284, "a&b"))
+}
+
+func TestExposureWarning(t *testing.T) {
+	t.Parallel()
+	for _, bind := range []string{"", "0.0.0.0", "::", "192.168.1.5", "example.com"} {
+		warning := exposureWarning(bind, "", false)
+		assert.Contains(t, warning, "--api-token", bind)
+		assert.NotContains(t, warning, "terminal", bind)
+	}
+	assert.Contains(t, exposureWarning("", "", true), "the shell terminal")
+	for _, bind := range []string{"127.0.0.1", "127.0.1.1", "::1", "localhost", "LOCALHOST."} {
+		assert.Empty(t, exposureWarning(bind, "", true), bind)
+	}
+	assert.Empty(t, exposureWarning("", "secret", true), "with a token")
 }

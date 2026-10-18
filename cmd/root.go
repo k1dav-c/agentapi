@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/coder/agentapi/cmd/attach"
-	"github.com/coder/agentapi/cmd/discord"
 	"github.com/coder/agentapi/cmd/server"
 	"github.com/coder/agentapi/cmd/update"
 	"github.com/coder/agentapi/internal/version"
@@ -17,18 +16,19 @@ var rootCmd = &cobra.Command{
 	Short:   "AgentAPI CLI",
 	Long:    `AgentAPI - HTTP API for Claude Code, Goose, Aider, Gemini and Codex`,
 	Version: version.Version,
+	// Execute prints the error, once.
+	SilenceErrors: true,
 }
 
 func Execute() {
 	err := rootCmd.Execute()
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
 func init() {
-	rootCmd.AddCommand(discord.CreateCommand())
 	rootCmd.AddCommand(server.CreateServerCmd())
 	rootCmd.AddCommand(attach.AttachCmd)
 	rootCmd.AddCommand(update.UpdateCmd)

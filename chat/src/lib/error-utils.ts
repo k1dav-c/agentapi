@@ -26,3 +26,13 @@ function toErrorWithMessage(maybeError: unknown): ErrorWithMessage {
 export function getErrorMessage(error: unknown) {
   return toErrorWithMessage(error).message
 }
+
+// A request to AgentAPI that failed: the server's message, and the HTTP
+// status for callers that treat some specially (409: the state changed in
+// the meantime, 404: it is gone).
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}

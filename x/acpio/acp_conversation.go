@@ -25,7 +25,8 @@ type ChunkableAgentIO interface {
 
 // ACPConversation tracks conversations with ACP-based agents.
 // Unlike PTY-based Conversation, ACP has blocking writes where the
-// response is complete when Write() returns.
+// response is complete when Write() returns. Send runs the write in the
+// background, so a turn doesn't hold up its caller.
 type ACPConversation struct {
 	mu                sync.Mutex
 	ctx               context.Context
@@ -42,14 +43,6 @@ type ACPConversation struct {
 	clock             quartz.Clock
 }
 
-// noopEmitter is a no-op implementation of Emitter for when no emitter is provided.
-type noopEmitter struct{}
-
-func (noopEmitter) EmitMessages([]st.ConversationMessage) {}
-func (noopEmitter) EmitStatus(st.ConversationStatus)      {}
-func (noopEmitter) EmitScreen(string)                     {}
-func (noopEmitter) EmitError(_ string, _ st.ErrorLevel)   {}
-
 // NewACPConversation creates a new ACPConversation.
 // If emitter is provided, it will receive events when messages/status/screen change.
 // If clock is nil, a real clock will be used.
@@ -61,7 +54,7 @@ func NewACPConversation(ctx context.Context, agentIO ChunkableAgentIO, logger *s
 		clock = quartz.NewReal()
 	}
 	if emitter == nil {
-		emitter = noopEmitter{}
+		emitter = st.NopEmitter{}
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	c := &ACPConversation{
@@ -84,10 +77,10 @@ func (c *ACPConversation) Messages() []st.ConversationMessage {
 	return slices.Clone(c.messages)
 }
 
-// Send sends a message to the agent synchronously.
-// It blocks until the agent has finished processing and returns any error
-// from the underlying write. Returns a validation error immediately if
-// the message is invalid or another message is already being processed.
+// Send starts a turn with the message and returns without waiting for the
+// reply, like a native turn: the reply streams into the conversation, and a
+// failed prompt is reported with EmitError. It returns a validation error
+// if the message is invalid or another message is already being processed.
 func (c *ACPConversation) Send(messageParts ...st.MessagePart) error {
 	message := ""
 	for _, part := range messageParts {
@@ -126,15 +119,19 @@ func (c *ACPConversation) Send(messageParts ...st.MessagePart) error {
 	c.nextID++
 	c.streamingResponse.Reset()
 	c.prompting = true
+	messages := slices.Clone(c.messages)
 	status := c.statusLocked()
 	c.mu.Unlock()
 
-	// Emit status change to "running" before starting the prompt
+	// The user's message shows, and the status turns to "running", before
+	// the reply's first chunk.
+	c.emitter.EmitMessages(messages)
 	c.emitter.EmitStatus(status)
 
 	c.logger.Debug("ACPConversation sending message", "message", message)
 
-	return c.executePrompt(messageParts)
+	go c.executePrompt(message)
+	return nil
 }
 
 // Start sets up chunk handling and sends the initial prompt if provided.
@@ -144,18 +141,15 @@ func (c *ACPConversation) Start(ctx context.Context) {
 
 	// Send initial prompt if provided
 	if len(c.initialPrompt) > 0 {
-		// Run in a goroutine because Send blocks until the prompt completes,
-		// and Start must return immediately per the Conversation interface.
-		go func() {
-			err := c.Send(c.initialPrompt...)
-			if err != nil {
-				c.logger.Error("ACPConversation failed to send initial prompt", "error", err)
-			}
-		}()
-	} else {
-		// No initial prompt means we start in stable state
-		c.emitter.EmitStatus(c.Status())
+		err := c.Send(c.initialPrompt...)
+		if err == nil {
+			return
+		}
+		c.logger.Error("ACPConversation failed to send initial prompt", "error", err)
+		c.emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), st.ErrorLevelError)
 	}
+	// No prompt under way means we start in stable state
+	c.emitter.EmitStatus(c.Status())
 }
 
 // Status returns the current conversation status.
@@ -176,13 +170,6 @@ func (c *ACPConversation) statusLocked() st.ConversationStatus {
 // Stop cancels any in-progress operations.
 func (c *ACPConversation) Stop() {
 	c.cancel()
-}
-
-// Text returns the current streaming response text.
-func (c *ACPConversation) Text() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.streamingResponse.String()
 }
 
 // handleChunk is called for each streaming chunk from the agent.
@@ -218,24 +205,22 @@ func (c *ACPConversation) handleChunk(chunk string) {
 	c.emitter.EmitScreen(screen)
 }
 
-// executePrompt runs the actual agent request and returns any error.
-func (c *ACPConversation) executePrompt(messageParts []st.MessagePart) error {
+// executePrompt sends message to the agent as one prompt, waits for the
+// turn to end and finalizes the reply. A failed prompt drops the partial
+// reply and is reported with EmitError.
+func (c *ACPConversation) executePrompt(message string) {
 	// Drain any stale signal before sending the prompt.
 	select {
 	case <-c.chunkReceived:
 	default:
 	}
 
-	var promptErr error
-	for _, part := range messageParts {
-		if c.ctx.Err() != nil {
-			promptErr = c.ctx.Err()
-			break
-		}
-		if partErr := part.Do(c.agentIO); partErr != nil {
-			promptErr = partErr
-			break
-		}
+	// One prompt per message, with its visible text: the hidden parts are
+	// keystrokes for a terminal (bracketed paste, Codex's composer
+	// clearing), not text for the agent.
+	promptErr := c.ctx.Err()
+	if promptErr == nil {
+		_, promptErr = c.agentIO.Write([]byte(message))
 	}
 
 	// The ACP SDK dispatches SessionUpdate notifications as goroutines, so
@@ -276,7 +261,9 @@ func (c *ACPConversation) executePrompt(messageParts []st.MessagePart) error {
 	c.emitter.EmitStatus(status)
 	c.emitter.EmitScreen(screen)
 
-	return promptErr
+	if promptErr != nil && c.ctx.Err() == nil {
+		c.emitter.EmitError(fmt.Sprintf("The agent failed to answer: %v", promptErr), st.ErrorLevelError)
+	}
 }
 
 func (c *ACPConversation) SaveState() error {

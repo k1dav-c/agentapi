@@ -3,6 +3,7 @@ package jsonlwatcher
 import (
 	"encoding/base64"
 	"encoding/json"
+	"slices"
 	"time"
 )
 
@@ -13,23 +14,18 @@ import (
 // This parser groups them by message.id and finalizes when a new
 // message.id or user line appears.
 type ClaudeParser struct {
-	pending       map[string]*RichMessage
-	lastPendingID string
-	// flushed keeps track of messages that were emitted by FlushCompleted
-	// but may still receive additional content blocks. Claude stamps
-	// stop_reason on every JSONL line of a turn, so FlushCompleted can
-	// fire between blocks of the same message.id. When a new block
-	// arrives for a flushed message, we re-attach it to pending with
-	// its accumulated content intact.
-	flushed map[string]*RichMessage
+	// current is the assistant message being put together.
+	current *RichMessage
+	// emitted says FlushCompleted emitted current and it hasn't changed
+	// since. Claude stamps stop_reason on every line of a turn, so a flush
+	// can come between two blocks of the same message: the message stays
+	// current, and is emitted again only once it changed.
+	emitted bool
 }
 
 // NewClaudeParser creates a new ClaudeParser.
 func NewClaudeParser() *ClaudeParser {
-	return &ClaudeParser{
-		pending: make(map[string]*RichMessage),
-		flushed: make(map[string]*RichMessage),
-	}
+	return &ClaudeParser{}
 }
 
 // ParseLine processes a single Claude JSONL line.
@@ -49,30 +45,27 @@ func (p *ClaudeParser) ParseLine(line []byte) ([]RichMessage, error) {
 	}
 }
 
-// FlushCompleted finalizes only pending messages that have a terminal stop_reason.
-// Flushed messages are kept in p.flushed so that additional content blocks
-// arriving for the same message.id can be appended (see handleAssistant).
+// FlushCompleted emits the current message once it has a stop_reason. It
+// stays current, so blocks that follow are added to it.
 func (p *ClaudeParser) FlushCompleted() []RichMessage {
-	var result []RichMessage
-	for id, msg := range p.pending {
-		if msg.StopReason != "" {
-			result = append(result, *msg)
-			p.flushed[id] = msg
-			delete(p.pending, id)
-			if p.lastPendingID == id {
-				p.lastPendingID = ""
-			}
-		}
+	if p.current == nil || p.current.StopReason == "" || p.emitted {
+		return nil
 	}
-	return result
+	p.emitted = true
+	return []RichMessage{p.snapshot()}
 }
 
-// Flush finalizes all pending assistant messages regardless of state.
+// Flush finalizes the current message regardless of state.
 func (p *ClaudeParser) Flush() []RichMessage {
-	result := p.finalizePending()
-	// Clear flushed map — on shutdown everything is done.
-	clear(p.flushed)
-	return result
+	return p.finalizePending()
+}
+
+// snapshot is a copy of the current message whose content the parser
+// doesn't share (consumers rewrite it, e.g. to store images).
+func (p *ClaudeParser) snapshot() RichMessage {
+	msg := *p.current
+	msg.Content = slices.Clone(msg.Content)
+	return msg
 }
 
 func (p *ClaudeParser) handleAssistant(entry *JSONLLine) []RichMessage {
@@ -86,35 +79,21 @@ func (p *ClaudeParser) handleAssistant(entry *JSONLLine) []RichMessage {
 
 	var completed []RichMessage
 
-	// If we see a new message.id, finalize the previous pending message
-	// and clear any flushed entries for the old ID (they are fully done).
-	if p.lastPendingID != "" && p.lastPendingID != msgID {
+	// A new message.id means the previous message is complete.
+	if p.current != nil && p.current.MessageID != msgID {
 		completed = p.finalizePending()
-		// A new message.id means the previous turn is truly complete.
-		// Clear its flushed entry so it won't be re-attached.
-		delete(p.flushed, p.lastPendingID)
 	}
-
-	// Get or create the pending message for this message.id.
-	// Check flushed first: if this message was already emitted by
-	// FlushCompleted, re-attach it so new blocks are appended to
-	// the existing content rather than starting from empty.
-	rich, exists := p.pending[msgID]
-	if !exists {
-		if prev, wasFlushed := p.flushed[msgID]; wasFlushed {
-			rich = prev
-			delete(p.flushed, msgID)
-		} else {
-			ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
-			rich = &RichMessage{
-				MessageID: msgID,
-				Role:      "assistant",
-				Model:     entry.Message.Model,
-				Timestamp: ts,
-			}
+	if p.current == nil {
+		ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
+		p.current = &RichMessage{
+			MessageID: msgID,
+			Role:      "assistant",
+			Model:     entry.Message.Model,
+			Timestamp: ts,
 		}
-		p.pending[msgID] = rich
 	}
+	rich := p.current
+	p.emitted = false
 
 	// Update stop_reason and usage from the latest line
 	if entry.Message.StopReason != nil {
@@ -125,14 +104,7 @@ func (p *ClaudeParser) handleAssistant(entry *JSONLLine) []RichMessage {
 	}
 
 	// Parse the content blocks (usually one per line)
-	var blocks []ContentBlock
-	if err := json.Unmarshal(entry.Message.Content, &blocks); err == nil {
-		for _, block := range blocks {
-			rich.Content = append(rich.Content, contentBlockToRich(block))
-		}
-	}
-
-	p.lastPendingID = msgID
+	rich.Content = append(rich.Content, ClaudeContentBlocks(entry.Message.Content)...)
 	return completed
 }
 
@@ -164,14 +136,7 @@ func (p *ClaudeParser) handleUser(entry *JSONLLine) []RichMessage {
 		var toolResults []ToolResultBlock
 		if err := json.Unmarshal(content, &toolResults); err == nil {
 			for _, tr := range toolResults {
-				block := RichContentBlock{
-					Type:      "tool_result",
-					ToolUseID: tr.ToolUseID,
-					IsError:   tr.IsError,
-					Text:      parseToolResultContent(tr.Content),
-					Images:    parseToolResultImages(tr.Content),
-				}
-				rich.Content = append(rich.Content, block)
+				rich.Content = append(rich.Content, ClaudeToolResult(tr))
 			}
 		}
 	}
@@ -179,17 +144,58 @@ func (p *ClaudeParser) handleUser(entry *JSONLLine) []RichMessage {
 	return append(completed, rich)
 }
 
+// finalizePending emits the current message, unless FlushCompleted did and
+// it didn't change since, and starts a new one.
 func (p *ClaudeParser) finalizePending() []RichMessage {
-	if len(p.pending) == 0 {
+	if p.current == nil {
 		return nil
 	}
 	var result []RichMessage
-	for id, msg := range p.pending {
-		result = append(result, *msg)
-		delete(p.pending, id)
+	if !p.emitted {
+		result = []RichMessage{p.snapshot()}
 	}
-	p.lastPendingID = ""
+	p.current, p.emitted = nil, false
 	return result
+}
+
+// ClaudeContentBlocks converts the content of a Claude assistant message
+// (an array of content blocks) to rich content blocks. It returns nil for
+// content that is not such an array.
+func ClaudeContentBlocks(content json.RawMessage) []RichContentBlock {
+	var blocks []ContentBlock
+	if json.Unmarshal(content, &blocks) != nil {
+		return nil
+	}
+	rich := make([]RichContentBlock, 0, len(blocks))
+	for _, block := range blocks {
+		rich = append(rich, contentBlockToRich(block))
+	}
+	return rich
+}
+
+// ClaudeToolResult converts a tool_result block of a Claude user message to
+// a rich content block with its text and images.
+func ClaudeToolResult(tr ToolResultBlock) RichContentBlock {
+	return RichContentBlock{
+		Type:      "tool_result",
+		ToolUseID: tr.ToolUseID,
+		IsError:   tr.IsError,
+		Text:      parseToolResultContent(tr.Content),
+		Images:    parseToolResultImages(tr.Content),
+	}
+}
+
+// ClaudeImage decodes the image of an image content block. It returns false
+// for a source that isn't base64 data and for data that doesn't decode.
+func ClaudeImage(source *ImageSource) (RichImage, bool) {
+	if source == nil || source.Type != "base64" {
+		return RichImage{}, false
+	}
+	data, err := base64.StdEncoding.DecodeString(source.Data)
+	if err != nil || len(data) == 0 {
+		return RichImage{}, false
+	}
+	return RichImage{MediaType: source.MediaType, Data: data}, true
 }
 
 // contentBlockToRich converts a parsed ContentBlock to a RichContentBlock.
@@ -221,14 +227,12 @@ func parseToolResultImages(raw json.RawMessage) []RichImage {
 	}
 	var images []RichImage
 	for _, b := range blocks {
-		if b.Type != "image" || b.Source == nil || b.Source.Type != "base64" {
+		if b.Type != "image" {
 			continue
 		}
-		data, err := base64.StdEncoding.DecodeString(b.Source.Data)
-		if err != nil || len(data) == 0 {
-			continue
+		if image, ok := ClaudeImage(b.Source); ok {
+			images = append(images, image)
 		}
-		images = append(images, RichImage{MediaType: b.Source.MediaType, Data: data})
 	}
 	return images
 }

@@ -13,6 +13,7 @@ import (
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/quartz"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,8 +58,17 @@ func handoffServer() (*Server, *handoffConversation, *handoffIO) {
 		{Id: 1, Role: st.ConversationRoleUser, Message: "work"},
 		{Id: 2, Role: st.ConversationRoleAgent, Message: "What next?"},
 	})
-	return &Server{conversation: c, agentio: i, emitter: e, agentType: mf.AgentTypeClaude,
-		transport: TransportPTY, clock: quartz.NewReal(), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}, c, i
+	return &Server{
+		conversation: c, agentio: i, emitter: e, agentType: mf.AgentTypeClaude,
+		transport: TransportPTY, clock: quartz.NewReal(), logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		shutdownCtx: context.Background(),
+	}, c, i
+}
+
+// pendingHandoff returns what the human reply protocol of s offers.
+func pendingHandoff(s *Server) *handoff.Request {
+	pending, _ := s.pendingHandoffLocked()
+	return pending
 }
 
 func TestHandoffReplyDeduplicatesAndInvalidates(t *testing.T) {
@@ -66,14 +76,14 @@ func TestHandoffReplyDeduplicatesAndInvalidates(t *testing.T) {
 	pending, err := s.getPendingHandoff(t.Context(), nil)
 	require.NoError(t, err)
 	require.NotNil(t, pending.Body.Request)
-	request := &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.Body.Request.ID, ID: "discord-1", Content: "continue"}}
+	request := &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.Body.Request.ID, ID: "reply-1", Content: "continue"}}
 	for range 2 {
 		result, err := s.replyHandoff(t.Context(), request)
 		require.NoError(t, err)
 		require.Equal(t, "applied", result.Body.Outcome)
 	}
 	require.Equal(t, 1, c.sends)
-	request.Body.ID = "discord-2"
+	request.Body.ID = "reply-2"
 	result, err := s.replyHandoff(t.Context(), request)
 	require.NoError(t, err)
 	require.Equal(t, "superseded", result.Body.Outcome)
@@ -84,11 +94,11 @@ func TestHandoffReplyDeduplicatesAndInvalidates(t *testing.T) {
 
 func TestHandoffBrowserReplyWins(t *testing.T) {
 	s, c, _ := handoffServer()
-	pending := s.pendingHandoffLocked()
+	pending := pendingHandoff(s)
 	require.NotNil(t, pending)
 	_, err := s.createMessage(t.Context(), &MessageRequest{Body: MessageRequestBody{Type: MessageTypeUser, Content: "from browser"}})
 	require.NoError(t, err)
-	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: "discord-1", Content: "stale"}})
+	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: "reply-1", Content: "stale"}})
 	require.NoError(t, err)
 	require.Equal(t, "superseded", result.Body.Outcome)
 	require.Equal(t, 1, c.sends)
@@ -96,11 +106,11 @@ func TestHandoffBrowserReplyWins(t *testing.T) {
 
 func TestHandoffRestartInvalidatesEvenIdenticalPrompt(t *testing.T) {
 	s, c, _ := handoffServer()
-	pending := s.pendingHandoffLocked()
+	pending := pendingHandoff(s)
 	s.emitter.SetLifecycle(LifecycleRestarting)
-	require.Nil(t, s.pendingHandoffLocked())
+	require.Nil(t, pendingHandoff(s))
 	s.emitter.EmitStatus(st.ConversationStatusStable)
-	require.NotEqual(t, pending.ID, s.pendingHandoffLocked().ID)
+	require.NotEqual(t, pending.ID, pendingHandoff(s).ID)
 	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: "late", Content: "continue"}})
 	require.NoError(t, err)
 	require.Equal(t, "superseded", result.Body.Outcome)
@@ -111,13 +121,12 @@ func TestHandoffTerminalReplyAndQueueGate(t *testing.T) {
 	s, c, terminal := handoffServer()
 	s.emitter.EmitScreen("Do you want to proceed?\n❯ 1. Yes\n  2. No\nEnter to confirm")
 	s.dispatchNextQueuedMessage()
-	require.False(t, s.terminalQuestionValid, "empty queues should not scan the terminal")
-	s.messageQueue = []QueuedMessage{{ID: 1, Content: "later"}}
-	pending := s.pendingHandoffLocked()
+	s.queue.Restore([]QueuedMessage{{ID: 1, Content: "later"}}, 0)
+	pending := pendingHandoff(s)
 	require.Equal(t, "terminal", pending.Kind)
 	s.dispatchNextQueuedMessage()
 	require.Zero(t, c.sends)
-	require.Len(t, s.messageQueue, 1)
+	require.Len(t, s.queue.Messages(), 1)
 	reply := &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: "reply", Content: "approve everything"}}
 	result, err := s.replyHandoff(t.Context(), reply)
 	require.NoError(t, err)
@@ -134,7 +143,7 @@ func TestHandoffUncertainTerminalWriteIsNotRetried(t *testing.T) {
 	s, _, terminal := handoffServer()
 	s.emitter.EmitScreen("Do you want to proceed?\n❯ 1. Yes\nEnter to confirm")
 	terminal.short = true
-	reply := &HandoffReplyRequest{Body: handoff.Reply{RequestID: s.pendingHandoffLocked().ID, ID: "reply", Content: "1"}}
+	reply := &HandoffReplyRequest{Body: handoff.Reply{RequestID: pendingHandoff(s).ID, ID: "reply", Content: "1"}}
 	for range 2 {
 		result, err := s.replyHandoff(t.Context(), reply)
 		require.NoError(t, err)
@@ -146,20 +155,20 @@ func TestHandoffUncertainTerminalWriteIsNotRetried(t *testing.T) {
 func TestHandoffIgnoresStartupRunningAndQueuedMessages(t *testing.T) {
 	s, _, _ := handoffServer()
 	s.emitter.Reset()
-	require.Nil(t, s.pendingHandoffLocked())
+	require.Nil(t, pendingHandoff(s))
 	s, c, _ := handoffServer()
 	c.status = st.ConversationStatusChanging
-	require.Nil(t, s.pendingHandoffLocked())
+	require.Nil(t, pendingHandoff(s))
 	c.status = st.ConversationStatusStable
-	s.messageQueue = []QueuedMessage{{ID: 1, Content: "queued"}}
-	require.Nil(t, s.pendingHandoffLocked())
+	s.queue.Restore([]QueuedMessage{{ID: 1, Content: "queued"}}, 0)
+	require.Nil(t, pendingHandoff(s))
 }
 
 func TestHandoffMCPRestartInvalidatesRequest(t *testing.T) {
 	s, c, _ := handoffServer()
-	pending := s.pendingHandoffLocked()
+	pending := pendingHandoff(s)
 	s.restartAgent = func(context.Context) (int, error) { return 0, nil }
-	restarted, err := s.restartQuery(t.Context(), true)
+	restarted, err := s.restartQuery(true)
 	require.NoError(t, err)
 	require.True(t, restarted)
 	s.emitter.EmitStatus(st.ConversationStatusStable)
@@ -184,10 +193,10 @@ func TestQueueNotBlockedByNumberedListInScrollback(t *testing.T) {
 		border,
 		"  ⏵⏵ bypass permissions on (shift+tab to cycle)",
 	}, "\n"))
-	s.messageQueue = []QueuedMessage{{ID: 1, Content: "next"}}
+	s.queue.Restore([]QueuedMessage{{ID: 1, Content: "next"}}, 0)
 	s.dispatchNextQueuedMessage()
 	require.Equal(t, 1, c.sends)
-	require.Empty(t, s.messageQueue)
+	require.Empty(t, s.queue.Messages())
 }
 
 func TestQueueNotBlockedByQuestionFarUpInScrollback(t *testing.T) {
@@ -198,7 +207,7 @@ func TestQueueNotBlockedByQuestionFarUpInScrollback(t *testing.T) {
 		lines = append(lines, "later output")
 	}
 	s.emitter.EmitScreen(strings.Join(lines, "\n"))
-	s.messageQueue = []QueuedMessage{{ID: 1, Content: "next"}}
+	s.queue.Restore([]QueuedMessage{{ID: 1, Content: "next"}}, 0)
 	s.dispatchNextQueuedMessage()
 	require.Equal(t, 1, c.sends)
 }
@@ -214,10 +223,11 @@ func TestQueueDoesNotRetryUnsubmittedMessage(t *testing.T) {
 	s, _, _ := handoffServer()
 	c := &notSubmittedConversation{handoffConversation{status: st.ConversationStatusStable}}
 	s.conversation = c
-	s.messageQueue = []QueuedMessage{{ID: 1, Content: "next"}, {ID: 2, Content: "after"}}
+	s.queue.Restore([]QueuedMessage{{ID: 1, Content: "next"}, {ID: 2, Content: "after"}}, 0)
 	s.dispatchNextQueuedMessage()
 	require.Equal(t, 1, c.sends)
-	require.Equal(t, []QueuedMessage{{ID: 2, Content: "after"}}, s.messageQueue)
+	require.Equal(t, []QueuedMessage{{ID: 2, Content: "after"}}, s.queue.Messages())
+	assert.Equal(t, []string{`Queued message "next" was typed but the agent didn't submit it; check the agent's input box: failed to send message: ` + st.ErrMessageNotSubmitted.Error()}, errorMessages(s.emitter))
 }
 
 func readScreenFixture(t *testing.T, name string) string {
@@ -260,13 +270,13 @@ func TestCreateMessageDuringPermissionPromptIsQueued(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.Body.Queued)
 	require.Zero(t, c.sends, "typing into the prompt would approve the highlighted option")
-	require.Len(t, s.messageQueue, 1)
+	require.Len(t, s.queue.Messages(), 1)
 }
 
 func TestHandoffFreeTextOnPlanDialogIsFeedback(t *testing.T) {
 	s, c, terminal := handoffServer()
 	s.emitter.EmitScreen(readScreenFixture(t, "claude_plan_dialog.txt"))
-	pending := s.pendingHandoffLocked()
+	pending := pendingHandoff(s)
 	require.Equal(t, "terminal", pending.Kind)
 	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: "reply", Content: "use CCC instead"}})
 	require.NoError(t, err)
@@ -416,4 +426,8 @@ func TestFormatMessageClosesClaudeFileSuggestions(t *testing.T) {
 		typed, _ := split(FormatMessage(tc.agent, tc.message))
 		require.Equal(t, "\x1b[200~"+tc.message+"\x1b[201~", typed, tc.message)
 	}
+}
+
+func isTerminalQuestion(content string) bool {
+	return isTerminalQuestionText(content, strings.ToLower(content))
 }

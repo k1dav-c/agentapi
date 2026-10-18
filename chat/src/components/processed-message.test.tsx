@@ -1,6 +1,8 @@
 import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
 import {ProcessedMessage} from "./processed-message";
+import {FileViewerContext} from "./file-viewer-context";
+import {TooltipProvider} from "./ui/tooltip";
 
 function render(content: string, isUser = false) {
   return renderToStaticMarkup(
@@ -111,5 +113,43 @@ describe("ProcessedMessage links", () => {
     );
     expect(html.match(/<mark/g)?.length).toBe(2);
     expect(html).toContain(">Build</mark>");
+  });
+});
+
+describe("ProcessedMessage file paths", () => {
+  const viewer = {open: () => undefined};
+  const renderLinked = (content: string, linkFilePaths = true, withViewer = true) =>
+    renderToStaticMarkup(
+      <TooltipProvider>
+        <FileViewerContext.Provider value={withViewer ? viewer : null}>
+          <ProcessedMessage messageContent={content} isUser={false} renderMode="markdown" linkFilePaths={linkFilePaths} />
+        </FileViewerContext.Provider>
+      </TooltipProvider>,
+    );
+
+  test("inline code that names a file opens it", () => {
+    const html = renderLinked("See `lib/httpapi/files.go:42` and `snake.html`.");
+    expect(html).toContain('role="button"');
+    expect(html).toContain('aria-label="Open file at line 42: lib/httpapi/files.go:42"');
+    expect(html).toContain('aria-label="Open file: snake.html"');
+    expect(html).toContain('aria-haspopup="dialog"');
+  });
+
+  test("other inline code and fenced code stay plain", () => {
+    const html = renderLinked("Run `go test ./...` with `-v`.\n\n```\nlib/httpapi/files.go\n```\n\n```go\n// main.go\n```");
+    expect(html).not.toContain('role="button"');
+    expect(html).toContain("lib/httpapi/files.go");
+  });
+
+  test("a path in a link stays plain code", () => {
+    const html = renderLinked("Open [`src/app.ts`](https://example.com/app) or `src/app.ts`.");
+    expect(html.match(/role="button"/g)?.length).toBe(1);
+    expect(html).toContain('<a href="https://example.com/app"');
+  });
+
+  test("only where asked for, with a viewer", () => {
+    expect(renderLinked("`lib/a.go`", false)).not.toContain('role="button"');
+    expect(renderLinked("`lib/a.go`", true, false)).not.toContain('role="button"');
+    expect(render("`lib/a.go`", true)).not.toContain('role="button"');
   });
 });

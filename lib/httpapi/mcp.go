@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/coder/agentapi/lib/mcpconfig"
-	"github.com/danielgtaylor/huma/v2"
 )
 
 type MCPServers map[string]any
@@ -55,7 +57,7 @@ Important behavior:
 - Servers omitted from ` + "`servers`" + ` are removed; send ` + "`{\"servers\": {}}`" + ` to clear all MCP servers.
 - Values use the target agent's native format and are not validated by AgentAPI.
 - Without ` + "`restart=true`" + `, the new configuration is loaded by the next agent session.
-- With ` + "`restart=true`" + `, AgentAPI replaces the PTY child process immediately. AgentAPI and its HTTP/SSE endpoints stay online, but the agent's conversation context is reset.
+- With ` + "`restart=true`" + `, AgentAPI replaces the agent process immediately. AgentAPI and its HTTP/SSE endpoints stay online. A PTY agent starts over with an empty conversation; a native agent resumes its session, so the conversation stays (409 while it works on a turn).
 - Restart is unavailable in ACP, schema-only, and other server modes without a process supervisor; those requests return ` + "`400`" + `.
 - A missing or structurally invalid request body returns ` + "`422`" + `.
 - Claude, Codex and Pi are supported; other agent types return ` + "`404`" + `.`
@@ -215,11 +217,6 @@ func (s *Server) getMCP(
 	_ context.Context,
 	_ *struct{},
 ) (*MCPGetResponse, error) {
-	if s.mcpStore == nil {
-		return nil, huma.Error404NotFound(
-			"MCP config management is not supported for this agent type",
-		)
-	}
 	servers, err := s.mcpStore.Read()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read MCP config: %w", err)
@@ -235,36 +232,38 @@ func (s *Server) getMCP(
 }
 
 func (s *Server) updateMCP(
-	ctx context.Context,
+	_ context.Context,
 	input *struct {
-		Restart bool `query:"restart" default:"false" doc:"Restart the agent after writing the config so changes apply immediately. The conversation context is reset; AgentAPI stays online. Supported only for supervised PTY sessions."`
+		Restart bool `query:"restart" default:"false" doc:"Restart the agent after writing the config so changes apply immediately; AgentAPI stays online. A PTY agent's conversation is reset; a native agent resumes its session (409 while it works on a turn). Supported for supervised PTY sessions and the native transport."`
 		Body    MCPUpdateRequestBody
 	},
 ) (*MCPUpdateResponse, error) {
-	if s.mcpStore == nil {
-		return nil, huma.Error404NotFound(
-			"MCP config management is not supported for this agent type",
-		)
-	}
-	if input.Restart && s.restartAgent == nil {
-		return nil, huma.Error400BadRequest(
-			"agent restart is not supported in this server mode",
-		)
-	}
-	servers, err := toConfigServers(input.Body.Servers)
-	if err != nil {
-		return nil, huma.Error400BadRequest(err.Error())
-	}
-	if err := s.mcpStore.Replace(servers); err != nil {
-		return nil, fmt.Errorf("failed to write MCP config: %w", err)
-	}
-	response := &MCPUpdateResponse{}
-	response.Body.OK = true
-	response.Body.Path = s.mcpStore.Path()
-	restarted, err := s.restartQuery(ctx, input.Restart)
-	if err != nil {
-		return nil, err
-	}
-	response.Body.Restarted = restarted
-	return response, nil
+	return s.mutateMCP(input.Restart, func(servers MCPServers) error {
+		clear(servers)
+		maps.Copy(servers, input.Body.Servers)
+		return nil
+	})
+}
+
+func (s *Server) registerMCPRoutes() {
+	huma.Get(s.api, "/mcp", guard(s.requireMCP, s.getMCP), func(o *huma.Operation) {
+		configureMCPGetOperation(o)
+	})
+	huma.Put(s.api, "/mcp", guard(s.requireMCP, s.updateMCP), func(o *huma.Operation) {
+		configureMCPUpdateOperation(o)
+	})
+	huma.Post(s.api, "/mcp/check", guard(s.requireMCP, s.checkMCP), configureMCPChildOperation("Check MCP server connectivity"))
+	huma.Post(s.api, "/mcp/servers", guard(s.requireMCP, s.createMCPServer), configureMCPChildOperation("Create an MCP server"))
+	huma.Patch(s.api, "/mcp/servers/{name}", guard(s.requireMCP, s.patchMCPServer), configureMCPChildOperation("Update an MCP server"))
+	huma.Delete(s.api, "/mcp/servers/{name}", guard(s.requireMCP, s.deleteMCPServer), configureMCPChildOperation("Delete an MCP server"))
+	huma.Get(s.api, "/mcp/profiles", guard(s.requireMCP, s.getMCPProfiles), configureMCPChildOperation("List MCP profiles"))
+	huma.Put(s.api, "/mcp/profiles/{name}", guard(s.requireMCP, s.putMCPProfile), configureMCPChildOperation("Import or replace an MCP profile"))
+	huma.Delete(s.api, "/mcp/profiles/{name}", guard(s.requireMCP, s.deleteMCPProfile), configureMCPChildOperation("Delete an MCP profile"))
+	huma.Post(s.api, "/mcp/profiles/{name}/apply", guard(s.requireMCP, s.applyMCPProfile), configureMCPChildOperation("Apply an MCP profile"))
+	// Huma populates inferred request/response media types after the operation
+	// configuration callback, so attach named payload examples once both
+	// operations have been registered.
+	mcpPath := s.api.OpenAPI().Paths["/mcp"]
+	addMCPExamples(mcpPath.Get, false)
+	addMCPExamples(mcpPath.Put, true)
 }

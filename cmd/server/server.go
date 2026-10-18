@@ -6,114 +6,25 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/coder/agentapi/lib/screentracker"
-	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"github.com/coder/agentapi/lib/httpapi"
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
-	st "github.com/coder/agentapi/lib/screentracker"
-	"github.com/coder/agentapi/lib/termexec"
+	"github.com/coder/agentapi/lib/statedb"
 )
-
-type agentSupervisor struct {
-	mu     sync.Mutex
-	logger *slog.Logger
-	swap   *termexec.SwappableProcess
-	setup  func(context.Context) (*termexec.Process, error)
-	// update, when set, runs between stopping the old process and starting
-	// the new one so a restart picks up the latest agent CLI.
-	update func(context.Context)
-}
-
-func (s *agentSupervisor) Restart(ctx context.Context) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	old := s.swap.Current()
-	if old == nil {
-		return 0, errors.New("agent process is not running")
-	}
-	s.logger.Info("Restarting agent process")
-	if err := old.Close(s.logger, 10*time.Second); err != nil {
-		s.logger.Warn("Error closing agent process during restart", "error", err)
-	}
-	if s.update != nil {
-		s.update(ctx)
-	}
-	next, err := s.setup(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("failed to start new agent process: %w", err)
-	}
-	s.swap.Set(next)
-	s.logger.Info("Agent process restarted", "pid", next.Pid())
-	return next.Pid(), nil
-}
-
-// agentUpdateTimeout bounds how long a restart waits for the agent CLI to
-// update itself before starting the installed version anyway.
-const agentUpdateTimeout = 3 * time.Minute
-
-// agentUpdater returns a function that updates the agent CLI, or nil when
-// AgentAPI doesn't update this agent. Codex and Pi only update when asked
-// (they just announce a new version at startup), so a restart runs `codex
-// update` or `pi update --self` to start the latest release. Claude Code
-// updates itself in the background, so restarting already starts its
-// latest version.
-func agentUpdater(agentType AgentType, program string, logger *slog.Logger) func(context.Context) {
-	var args, env []string
-	switch {
-	case agentType == AgentTypeCodex && isCodexCLI(program):
-		args, env = []string{"update"}, []string{"CODEX_NON_INTERACTIVE=1"}
-	case agentType == AgentTypePi && isPiCLI(program):
-		args = []string{"update", "--self"}
-	default:
-		return nil
-	}
-	return func(ctx context.Context) {
-		ctx, cancel := context.WithTimeout(ctx, agentUpdateTimeout)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, program, args...)
-		cmd.Env = append(os.Environ(), env...)
-		start := time.Now()
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			logger.Warn("Failed to update the agent CLI before restarting; starting the installed version",
-				"program", program, "error", err, "output", tailLines(string(output), 10))
-			return
-		}
-		logger.Info("Updated the agent CLI before restarting", "program", program,
-			"duration", time.Since(start).Round(time.Millisecond), "output", tailLines(string(output), 3))
-	}
-}
-
-func tailLines(s string, n int) string {
-	lines := strings.Split(strings.TrimSpace(s), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (s *agentSupervisor) currentSettled() *termexec.Process {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.swap.Current()
-}
 
 type AgentType = msgfmt.AgentType
 
@@ -169,267 +80,148 @@ func parseAgentType(firstArg string, agentTypeVar string) (AgentType, error) {
 	return AgentTypeCustom, nil
 }
 
-func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) error {
-	agent := argsToPass[0]
-	agentTypeValue := viper.GetString(FlagType)
-	agentType, err := parseAgentType(agent, agentTypeValue)
+func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
+	opts, err := loadServerOptions(viper.GetViper(), args)
 	if err != nil {
-		return fmt.Errorf("failed to parse agent type: %w", err)
+		return err
 	}
-
-	termWidth := viper.GetUint16(FlagTermWidth)
-	termHeight := viper.GetUint16(FlagTermHeight)
-
-	if termWidth < 10 {
-		return fmt.Errorf("term width must be at least 10")
-	}
-	if termHeight < 10 {
-		return fmt.Errorf("term height must be at least 10")
-	}
-
-	// Read stdin if it's piped, to be used as initial prompt
-	initialPrompt := viper.GetString(FlagInitialPrompt)
-	if initialPrompt == "" {
-		if !isatty.IsTerminal(os.Stdin.Fd()) {
-			if stdinData, err := io.ReadAll(os.Stdin); err != nil {
-				return fmt.Errorf("failed to read stdin: %w", err)
-			} else if len(stdinData) > 0 {
-				initialPrompt = string(stdinData)
-				logger.Info("Read initial prompt from stdin", "bytes", len(stdinData))
-			}
+	if opts.initialPrompt == "" {
+		if opts.initialPrompt, err = readPipedPrompt(logger); err != nil {
+			return err
 		}
 	}
-
-	// Get the variables related to state management
-	stateFile := viper.GetString(FlagStateFile)
-	loadState := false
-	saveState := false
-
-	// Validate state file configuration
-	if stateFile != "" {
-		if !viper.IsSet(FlagLoadState) {
-			loadState = true
-		} else {
-			loadState = viper.GetBool(FlagLoadState)
-		}
-
-		if !viper.IsSet(FlagSaveState) {
-			saveState = true
-		} else {
-			saveState = viper.GetBool(FlagSaveState)
-		}
-	} else {
-		if viper.IsSet(FlagLoadState) && viper.GetBool(FlagLoadState) {
-			return fmt.Errorf("--load-state requires --state-file to be set")
-		}
-		if viper.IsSet(FlagSaveState) && viper.GetBool(FlagSaveState) {
-			return fmt.Errorf("--save-state requires --state-file to be set")
-		}
-	}
-
-	experimentalACP := viper.GetBool(FlagExperimentalACP)
-
-	if experimentalACP && (saveState || loadState) {
-		return fmt.Errorf("ACP mode doesn't support state persistence")
-	}
-
-	pidFile := viper.GetString(FlagPidFile)
-
-	// Write PID file if configured
-	if pidFile != "" {
-		if err := writePIDFile(pidFile, logger); err != nil {
+	if opts.pidFile != "" {
+		if err := writePIDFile(opts.pidFile, logger); err != nil {
 			return fmt.Errorf("failed to write PID file: %w", err)
 		}
-		defer cleanupPIDFile(pidFile, logger)
-	}
-
-	printOpenAPI := viper.GetBool(FlagPrintOpenAPI)
-
-	if printOpenAPI && experimentalACP {
-		return fmt.Errorf("flags --%s and --%s are mutually exclusive", FlagPrintOpenAPI, FlagExperimentalACP)
-	}
-
-	var agentIO st.AgentIO
-	transport := "pty"
-	var process *termexec.Process
-	var supervisor *agentSupervisor
-	var acpResult *httpapi.SetupACPResult
-	var agentStartedAt time.Time
-
-	if printOpenAPI {
-		agentIO = nil
-	} else if experimentalACP {
-		var err error
-		acpResult, err = httpapi.SetupACP(ctx, httpapi.SetupACPConfig{
-			Program:     agent,
-			ProgramArgs: argsToPass[1:],
-		})
-		if err != nil {
-			return fmt.Errorf("failed to setup ACP: %w", err)
-		}
-		acpIO := acpResult.AgentIO
-		agentIO = acpIO
-		transport = "acp"
-	} else {
-		agentStartedAt = time.Now()
-		programArgs := argsToPass[1:]
-		if agentType == AgentTypeCodex && isCodexCLI(agent) {
-			programArgs = withCodexReasoningSummary(programArgs, codexConfigPath())
-		}
-		setupAgentProcess := func(context.Context) (*termexec.Process, error) {
-			args := programArgs
-			if agentType == AgentTypePi && isPiCLI(agent) {
-				args = withPiSessionID(args)
-			}
-			proc, err := httpapi.SetupProcess(ctx, httpapi.SetupProcessConfig{
-				Program:        agent,
-				ProgramArgs:    args,
-				TerminalWidth:  termWidth,
-				TerminalHeight: termHeight,
-				AgentType:      agentType,
-			})
-			if err == nil && agentType == AgentTypePi {
-				jsonlwatcher.RegisterPiSession(proc.Pid(), piSessionOptions(args))
-			}
-			return proc, err
-		}
-		proc, err := setupAgentProcess(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to setup process: %w", err)
-		}
-		process = proc
-		swappable := termexec.NewSwappableProcess(proc)
-		supervisor = &agentSupervisor{
-			logger: logger,
-			swap:   swappable,
-			setup:  setupAgentProcess,
-			update: agentUpdater(agentType, agent, logger),
-		}
-		agentIO = swappable
-	}
-	port := viper.GetInt(FlagPort)
-
-	// Extract the agent process PID for the JSONL watcher.
-	// The watcher uses this to find the agent's session JSONL file.
-	var agentPID int
-	if process != nil {
-		agentPID = process.Pid()
+		defer cleanupPIDFile(opts.pidFile, logger)
 	}
 
 	cwd, _ := os.Getwd()
-
-	apiToken := viper.GetString(FlagAPIToken)
-	if apiToken == "generate" {
-		var tokenBytes [32]byte
-		if _, err := rand.Read(tokenBytes[:]); err != nil {
-			return fmt.Errorf("generate API token: %w", err)
-		}
-		apiToken = hex.EncodeToString(tokenBytes[:])
-		fmt.Fprintf(os.Stderr, "API token: %s\n", apiToken)
-	} else if apiToken != "" {
-		logger.Info("API token authentication enabled")
+	agent, err := startAgent(ctx, opts, cwd, logger)
+	if err != nil {
+		return err
 	}
-
-	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType:      agentType,
-		AgentIO:        agentIO,
-		Transport:      httpapi.Transport(transport),
-		Port:           port,
-		ChatBasePath:   viper.GetString(FlagChatBasePath),
-		AllowedHosts:   viper.GetStringSlice(FlagAllowedHosts),
-		AllowedOrigins: viper.GetStringSlice(FlagAllowedOrigins),
-		InitialPrompt:  initialPrompt,
-		AgentPID:       agentPID,
-		AgentStartedAt: agentStartedAt,
-		CWD:            cwd,
-		TerminalColumns: func() uint16 {
-			if transport == "pty" {
-				return termWidth
+	var stateDB *statedb.DB
+	if opts.stateDB != "" && !opts.printOpenAPI {
+		if stateDB, err = statedb.Open(opts.stateDB, logger); err != nil {
+			return err
+		}
+		defer func() {
+			if err := stateDB.Close(); err != nil {
+				logger.Error("Failed to close the state database", "error", err)
 			}
-			return 0
-		}(),
-		RestartAgent: func() func(context.Context) (int, error) {
-			if supervisor == nil {
-				return nil
-			}
-			return supervisor.Restart
-		}(),
-		APIToken: apiToken,
-		Webhook: httpapi.WebhookConfig{
-			URL:             viper.GetString(FlagWebhookURL),
-			Timeout:         viper.GetDuration(FlagWebhookTimeout),
-			MaxAttempts:     viper.GetInt(FlagWebhookMaxAttempts),
-			PayloadTemplate: viper.GetString(FlagWebhookPayloadTemplate),
-		},
-		StatePersistenceConfig: screentracker.StatePersistenceConfig{
-			StateFile: stateFile,
-			LoadState: loadState,
-			SaveState: saveState,
-		},
-	})
+		}()
+	}
+	apiToken, err := resolveAPIToken(opts, logger)
+	if err != nil {
+		return err
+	}
+	srv, err := httpapi.NewServer(ctx, serverConfig(opts, agent, stateDB, apiToken, cwd))
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}
-	if printOpenAPI {
+	if opts.printOpenAPI {
 		fmt.Println(srv.GetOpenAPI())
 		return nil
 	}
+	if warning := exposureWarning(opts.bind, apiToken, opts.transport == httpapi.TransportNative && opts.terminal); warning != "" {
+		logger.Warn(warning)
+	}
+	return serve(ctx, logger, srv, agent)
+}
 
-	// Create a context for graceful shutdown
+// resolveAPIToken returns the token the API asks for: none, the given one,
+// or a random one, which it prints with the chat's sign-in URL.
+func resolveAPIToken(opts serverOptions, logger *slog.Logger) (string, error) {
+	switch opts.apiToken {
+	case "":
+		return "", nil
+	case "generate":
+		var tokenBytes [32]byte
+		if _, err := rand.Read(tokenBytes[:]); err != nil {
+			return "", fmt.Errorf("generate API token: %w", err)
+		}
+		token := hex.EncodeToString(tokenBytes[:])
+		fmt.Fprintf(os.Stderr, "API token: %s\n", token)
+		// The token goes in the URL fragment, which the browser never sends
+		// to a server or proxy; the chat UI trades it for a session cookie.
+		fmt.Fprintf(os.Stderr, "Chat UI: %s\n", chatSignInURL(opts.bind, opts.port, token))
+		return token, nil
+	default:
+		logger.Info("API token authentication enabled")
+		return opts.apiToken, nil
+	}
+}
+
+// serverConfig is the configuration of the server for opts and agent.
+func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, apiToken, cwd string) httpapi.ServerConfig {
+	config := httpapi.ServerConfig{
+		AgentType:      opts.agentType,
+		Transport:      opts.transport,
+		Port:           opts.port,
+		ChatBasePath:   opts.chatBasePath,
+		AllowedHosts:   opts.allowedHosts,
+		AllowedOrigins: opts.allowedOrigins,
+		InitialPrompt:  opts.initialPrompt,
+		CWD:            cwd,
+		APIToken:       apiToken,
+		Bind:           opts.bind,
+		Webhook:        opts.webhook,
+	}
+	switch opts.transport {
+	case httpapi.TransportPTY:
+		config.PTY = httpapi.PTYConfig{
+			AgentIO:                agent.io,
+			TerminalColumns:        opts.termWidth,
+			StatePersistenceConfig: opts.state,
+			AgentPID:               agent.pid(),
+			RestartAgent:           agent.restart(),
+		}
+	case httpapi.TransportACP:
+		if agent.acp != nil {
+			config.ACP.AgentIO = agent.acp.AgentIO
+		}
+	case httpapi.TransportNative:
+		config.Native = httpapi.NativeConfig{
+			Factory:     agent.factory,
+			UpdateAgent: agent.updateNative,
+			Terminal:    opts.terminal,
+			StateDB:     stateDB,
+		}
+	}
+	if stateDB != nil {
+		// Messages refer to uploads by path, so they are kept with the
+		// state.
+		config.UploadDir = opts.stateDB + ".uploads"
+	}
+	return config
+}
+
+// serve runs the server until a signal, the agent's exit or a failed
+// listener stops it, then stops the server and the agent.
+func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, agent *runningAgent) error {
 	gracefulCtx, gracefulCancel := context.WithCancel(ctx)
 	defer gracefulCancel()
-
-	// Setup signal handlers (they will call gracefulCancel)
+	// Signals end gracefulCtx.
 	handleSignals(gracefulCtx, gracefulCancel, logger, srv)
+	logger.Info("Starting server", "address", srv.ListenAddr())
 
-	logger.Info("Starting server on port", "port", port)
+	// One monitor waits for the agent: its exit stops the server.
+	exitCh := make(chan error, 1)
+	go func() {
+		defer close(exitCh)
+		exited, err := agent.waitForExit(gracefulCtx, srv)
+		if !exited {
+			return
+		}
+		srv.MarkAgentExited(err)
+		if err != nil {
+			exitCh <- err
+		}
+		gracefulCancel()
+	}()
 
-	// Monitor process exit, following intentional supervisor swaps.
-	processExitCh := make(chan error, 1)
-	if process != nil {
-		go func() {
-			defer close(processExitCh)
-			defer gracefulCancel()
-			current := process
-			for {
-				err := current.Wait()
-				if supervisor != nil {
-					if settled := supervisor.currentSettled(); settled != nil && settled != current {
-						current = settled
-						continue
-					}
-				}
-				if err != nil {
-					srv.MarkAgentExited(err)
-					if errors.Is(err, termexec.ErrNonZeroExitCode) {
-						processExitCh <- fmt.Errorf("========\n%s\n========\n: %w", strings.TrimSpace(current.ReadScreen()), err)
-					} else {
-						processExitCh <- fmt.Errorf("failed to wait for process: %w", err)
-					}
-				} else {
-					srv.MarkAgentExited(nil)
-				}
-				return
-			}
-		}()
-	}
-	if acpResult != nil {
-		go func() {
-			defer close(processExitCh)
-			defer close(acpResult.Done) // Signal cleanup goroutine to exit
-			if err := acpResult.Wait(); err != nil {
-				srv.MarkAgentExited(err)
-				processExitCh <- fmt.Errorf("ACP process exited: %w", err)
-			} else {
-				srv.MarkAgentExited(nil)
-			}
-			if err := srv.Stop(ctx); err != nil {
-				logger.Error("Failed to stop server", "error", err)
-			}
-		}()
-	}
-
-	// Start the server
 	serverErrCh := make(chan error, 1)
 	go func() {
 		defer close(serverErrCh)
@@ -438,9 +230,20 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 		}
 	}()
 
+	// stopServer stops the HTTP server and a native agent.
+	stopServer := func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Stop(shutdownCtx); err != nil {
+			logger.Error("Failed to stop HTTP server", "error", err)
+		}
+	}
 	select {
 	case err := <-serverErrCh:
 		if err != nil {
+			// The agent started before the listener failed.
+			stopServer()
+			agent.close(logger)
 			return fmt.Errorf("failed to start server: %w", err)
 		}
 	case <-gracefulCtx.Done():
@@ -449,32 +252,52 @@ func runServer(ctx context.Context, logger *slog.Logger, argsToPass []string) er
 	if err := srv.SaveState("shutdown"); err != nil {
 		logger.Error("Failed to save state during shutdown", "error", err)
 	}
-
-	// Stop the HTTP server
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Stop(shutdownCtx); err != nil {
-		logger.Error("Failed to stop HTTP server", "error", err)
-	}
-
+	stopServer()
 	select {
-	case err := <-processExitCh:
+	case err := <-exitCh:
 		if err != nil {
 			return fmt.Errorf("agent exited with error: %w", err)
 		}
 	default:
-		// Close the process
-		if process != nil {
-			current := process
-			if supervisor != nil {
-				current = supervisor.currentSettled()
-			}
-			if err := current.Close(logger, 5*time.Second); err != nil {
-				logger.Error("Failed to close process cleanly", "error", err)
-			}
-		}
+		agent.close(logger)
 	}
 	return nil
+}
+
+// chatSignInURL returns the chat UI URL that signs the browser in with
+// token. A server listening on all interfaces is opened through localhost.
+func chatSignInURL(bind string, port int, token string) string {
+	host := bind
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		host = "localhost"
+	}
+	return fmt.Sprintf("http://%s/chat/embed#token=%s", net.JoinHostPort(host, strconv.Itoa(port)), url.QueryEscape(token))
+}
+
+// exposureWarning returns the warning for a server that anyone who can
+// connect to it may use: it asks for no API token and listens on an address
+// other machines can reach. It returns "" otherwise. terminal says whether
+// the server offers its shell terminal.
+func exposureWarning(bind, apiToken string, terminal bool) string {
+	if apiToken != "" || isLoopbackHost(bind) {
+		return ""
+	}
+	what := "the agent"
+	if terminal {
+		what = "the agent and the shell terminal"
+	}
+	return "No API token is set and the server listens on an address other machines can reach, " +
+		"so anyone who can connect to it can use " + what +
+		"; set --api-token, or --bind 127.0.0.1 to accept only local connections"
+}
+
+// isLoopbackHost reports whether listening on host (an IP address, a
+// hostname, or "" for every interface) accepts only local connections.
+func isLoopbackHost(host string) bool {
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return strings.EqualFold(strings.TrimSuffix(host, "."), "localhost")
 }
 
 var agentNames = (func() []string {
@@ -588,11 +411,15 @@ const (
 	FlagSaveState              = "save-state"
 	FlagPidFile                = "pid-file"
 	FlagExperimentalACP        = "experimental-acp"
+	FlagTransport              = "transport"
+	FlagStateDB                = "state-db"
+	FlagTerminal               = "terminal"
 	FlagWebhookURL             = "webhook-url"
 	FlagWebhookTimeout         = "webhook-timeout"
 	FlagWebhookMaxAttempts     = "webhook-max-attempts"
 	FlagWebhookPayloadTemplate = "webhook-payload-template"
 	FlagAPIToken               = "api-token"
+	FlagBind                   = "bind"
 )
 
 func CreateServerCmd() *cobra.Command {
@@ -601,10 +428,13 @@ func CreateServerCmd() *cobra.Command {
 		Short: "Run the server",
 		Long:  fmt.Sprintf("Run the server with the specified agent (one of: %s)", strings.Join(agentNames, ", ")),
 		Args:  cobra.MinimumNArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// The arguments are fine: an error from here on isn't a usage
+			// error.
+			cmd.SilenceUsage = true
 			// The --exit flag is used for testing validation of flags in the test suite
 			if viper.GetBool(FlagExit) {
-				return
+				return nil
 			}
 			logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 			if viper.GetBool(FlagPrintOpenAPI) {
@@ -612,10 +442,7 @@ func CreateServerCmd() *cobra.Command {
 				logger = slog.New(logctx.DiscardHandler)
 			}
 			ctx := logctx.WithLogger(context.Background(), logger)
-			if err := runServer(ctx, logger, cmd.Flags().Args()); err != nil {
-				fmt.Fprintf(os.Stderr, "%+v\n", err)
-				os.Exit(1)
-			}
+			return runServer(ctx, logger, cmd.Flags().Args())
 		},
 	}
 
@@ -636,11 +463,15 @@ func CreateServerCmd() *cobra.Command {
 		{FlagSaveState, "", false, "Save state to state-file on shutdown (defaults to true when state-file is set)", "bool"},
 		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts", "string"},
 		{FlagExperimentalACP, "", false, "Use experimental ACP transport instead of PTY", "bool"},
+		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) and resumes the agent's session when AgentAPI restarts. Native transport only", "string"},
+		{FlagTransport, "", "pty", "How to drive the agent: pty (its terminal UI), acp (same as --experimental-acp) or native (its own structured protocol; claude, codex and pi)", "string"},
+		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal. Native transport only, where the agent has no terminal of its own", "bool"},
 		{FlagWebhookURL, "", "", "URL notified when the agent run status changes", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},
 		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},
 		{FlagWebhookPayloadTemplate, "", "", "Go text/template for custom webhook POST body. Available fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport", "string"},
 		{FlagAPIToken, "", "", "API token for Bearer authentication. If set without a value, a random token is generated. Empty (default) disables authentication.", "string"},
+		{FlagBind, "", "", "Address to listen on: an IP address or hostname without a port (e.g. 127.0.0.1 or ::1). Empty (default) listens on all interfaces", "string"},
 	}
 
 	for _, spec := range flagSpecs {

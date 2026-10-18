@@ -151,18 +151,11 @@ func codexComposerEnd(lines []string, inputIdx int) int {
 // meaning the agent is waiting for user input rather than showing a dialog.
 // ok is false for agent types without input box detection.
 func HasInputBox(agentType AgentType, screen string) (visible bool, ok bool) {
-	if agentType == AgentTypeClaude {
-		top, _ := findClaudeInputBox(strings.Split(screen, "\n"))
-		return top != -1, true
+	inputEnd := profiles[agentType].inputEnd
+	if inputEnd == nil {
+		return false, false
 	}
-	if agentType == AgentTypeCodex {
-		return findCodexInputLine(strings.Split(screen, "\n")) != -1, true
-	}
-	if agentType == AgentTypePi {
-		top, _ := findPiInputBox(strings.Split(screen, "\n"))
-		return top != -1, true
-	}
-	return false, false
+	return inputEnd(strings.Split(screen, "\n")) != -1, true
 }
 
 // StabilityRegion returns the part of the screen that should be used to
@@ -171,23 +164,13 @@ func HasInputBox(agentType AgentType, screen string) (visible bool, ok bool) {
 // changing while the agent is idle and ready for input, so it is excluded.
 // The screen is returned unchanged when no input box is found.
 func StabilityRegion(agentType AgentType, screen string) string {
-	if agentType == AgentTypeClaude {
-		lines := strings.Split(screen, "\n")
-		if _, bottom := findClaudeInputBox(lines); bottom != -1 {
-			return strings.Join(lines[:bottom+1], "\n")
-		}
+	inputEnd := profiles[agentType].inputEnd
+	if inputEnd == nil {
+		return screen
 	}
-	if agentType == AgentTypePi {
-		lines := strings.Split(screen, "\n")
-		if _, bottom := findPiInputBox(lines); bottom != -1 {
-			return strings.Join(lines[:bottom+1], "\n")
-		}
-	}
-	if agentType == AgentTypeCodex {
-		lines := strings.Split(screen, "\n")
-		if idx := findCodexInputLine(lines); idx != -1 {
-			return strings.Join(lines[:codexComposerEnd(lines, idx)], "\n")
-		}
+	lines := strings.Split(screen, "\n")
+	if end := inputEnd(lines); end != -1 {
+		return strings.Join(lines[:end], "\n")
 	}
 	return screen
 }

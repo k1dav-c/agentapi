@@ -15,8 +15,11 @@ import (
 	"text/template"
 	"time"
 
-	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/coder/quartz"
+
+	mf "github.com/coder/agentapi/lib/msgfmt"
 )
 
 const (
@@ -86,8 +89,8 @@ type webhookDispatcher struct {
 	mu        sync.RWMutex
 	config    WebhookConfig
 	tmpl      *template.Template // nil when using the default JSON payload
-	client    *http.Client
 	logger    *slog.Logger
+	clock     quartz.Clock
 	runID     string
 	agentType mf.AgentType
 	transport Transport
@@ -105,7 +108,7 @@ func parseWebhookTemplate(templateStr string) (*template.Template, error) {
 	return tmpl, nil
 }
 
-func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType mf.AgentType, transport Transport) (*webhookDispatcher, error) {
+func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType mf.AgentType, transport Transport, clock quartz.Clock) (*webhookDispatcher, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
@@ -117,8 +120,8 @@ func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType m
 	return &webhookDispatcher{
 		config:    config,
 		tmpl:      tmpl,
-		client:    &http.Client{Timeout: config.Timeout},
 		logger:    logger,
+		clock:     clock,
 		runID:     randomWebhookID(),
 		agentType: agentType,
 		transport: transport,
@@ -155,7 +158,6 @@ func (d *webhookDispatcher) updateConfig(config WebhookConfig) error {
 	defer d.mu.Unlock()
 	d.config = config
 	d.tmpl = tmpl
-	d.client = &http.Client{Timeout: config.Timeout}
 	return nil
 }
 
@@ -174,7 +176,7 @@ func (d *webhookDispatcher) statusChanged(previous, current AgentStatus) {
 	event := WebhookEvent{
 		ID:        randomWebhookID(),
 		Type:      webhookEventRunStatusChanged,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: d.clock.Now().UTC(),
 		Data: WebhookEventData{
 			RunID:          d.runID,
 			Status:         current,
@@ -246,7 +248,7 @@ func (d *webhookDispatcher) deliver(ctx context.Context, event WebhookEvent) {
 			d.logger.Warn("Webhook delivery failed; retrying", "event_id", event.ID, "attempt", attempt, "error", err)
 		}
 		if attempt < config.MaxAttempts {
-			timer := time.NewTimer(time.Duration(attempt) * time.Second)
+			timer := d.clock.NewTimer(time.Duration(attempt)*time.Second, "webhook", "retry")
 			select {
 			case <-ctx.Done():
 				timer.Stop()
@@ -255,14 +257,6 @@ func (d *webhookDispatcher) deliver(ctx context.Context, event WebhookEvent) {
 			}
 		}
 	}
-}
-
-func (d *webhookDispatcher) send(ctx context.Context, event WebhookEvent, body []byte) error {
-	d.mu.RLock()
-	config := d.config
-	client := d.client
-	d.mu.RUnlock()
-	return d.sendWithConfig(ctx, config, client, event, body)
 }
 
 func (d *webhookDispatcher) sendWithConfig(ctx context.Context, config WebhookConfig, client *http.Client, event WebhookEvent, body []byte) error {
@@ -332,4 +326,18 @@ func (s *Server) updateWebhookConfig(_ context.Context, request *WebhookConfigRe
 		return nil, huma.Error400BadRequest(err.Error())
 	}
 	return s.getWebhookConfig(context.Background(), nil)
+}
+
+func (s *Server) registerWebhookRoutes() {
+	huma.Get(s.api, "/webhook", s.getWebhookConfig, func(o *huma.Operation) {
+		o.Tags = []string{"Webhook"}
+		o.Summary = "Get webhook configuration"
+		o.Description = "Returns the mutable run-status webhook configuration."
+	})
+	huma.Put(s.api, "/webhook", s.updateWebhookConfig, func(o *huma.Operation) {
+		o.Tags = []string{"Webhook"}
+		o.Summary = "Update webhook configuration"
+		o.Description = "Updates run-status webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent."
+		o.Errors = []int{400}
+	})
 }

@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 
@@ -29,9 +31,11 @@ func TestServer_MCPAPI(t *testing.T) {
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
-		RestartAgent: func(context.Context) (int, error) {
-			restartCount.Add(1)
-			return 12345, nil
+		PTY: httpapi.PTYConfig{
+			RestartAgent: func(context.Context) (int, error) {
+				restartCount.Add(1)
+				return 12345, nil
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -101,9 +105,10 @@ func TestServer_MCPRestartUnavailable(t *testing.T) {
 		context.Background(),
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
+	cwd := t.TempDir()
 	server, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
-		CWD:            t.TempDir(),
+		CWD:            cwd,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
@@ -123,6 +128,16 @@ func TestServer_MCPRestartUnavailable(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	require.Equal(t, http.StatusBadRequest, response.StatusCode)
+
+	// Adding one server is refused the same way, before anything is
+	// written.
+	add, err := http.Post(testServer.URL+"/mcp/servers?restart=true", "application/json",
+		bytes.NewBufferString(`{"name":"local","config":{"command":"npx"}}`))
+	require.NoError(t, err)
+	defer func() { _ = add.Body.Close() }()
+	require.Equal(t, http.StatusBadRequest, add.StatusCode)
+	_, err = os.Stat(filepath.Join(cwd, ".mcp.json"))
+	require.ErrorIs(t, err, os.ErrNotExist, "the config was written")
 }
 
 func TestServer_MCPManagement(t *testing.T) {

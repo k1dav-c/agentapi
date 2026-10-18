@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/coder/agentapi/lib/agenthome"
 )
 
 // PiResolver finds the JSONL session file of a Pi coding agent process.
@@ -91,13 +93,9 @@ func (r *PiResolver) sessionsDir(session PiSession) (string, error) {
 	if dir := os.Getenv("PI_CODING_AGENT_SESSION_DIR"); dir != "" {
 		return dir, nil
 	}
-	agentDir := os.Getenv("PI_CODING_AGENT_DIR")
-	if agentDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("failed to get home directory: %w", err)
-		}
-		agentDir = filepath.Join(home, ".pi", "agent")
+	agentDir, err := agenthome.PiAgentDir()
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(agentDir, "sessions", piSessionDirName(r.CWD)), nil
 }

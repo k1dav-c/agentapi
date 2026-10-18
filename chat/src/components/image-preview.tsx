@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { ImageOff } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "./ui/dialog";
-import { useChat } from "./chat-provider";
+import {useChatSelector} from "./chat-provider";
 import { attachedPaths, uploadedImageURL } from "@/lib/uploads";
 
 // A thumbnail of an uploaded image that opens it full size. Uploads live in
@@ -66,7 +66,7 @@ export function useObjectURL(file: File | undefined): string | undefined {
 
 // Thumbnails of the uploaded images a message refers to (@"<path>").
 export function MessageImages({ content }: { content: string }) {
-  const { storageScope } = useChat();
+  const storageScope = useChatSelector((chat) => chat.storageScope);
   const images = attachedPaths(content)
     .map((path) => ({ path, src: uploadedImageURL(storageScope, path) }))
     .filter((image): image is { path: string; src: string } => image.src !== undefined);

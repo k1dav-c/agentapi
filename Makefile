@@ -51,7 +51,7 @@ lint/shellcheck: $(SHELL_SRC_FILES)
 .PHONY: lint/shellcheck
 
 lint/ts:
-	cd ./chat && bun lint
+	cd ./chat && bun lint && bun run typecheck
 .PHONY: lint/ts
 
 lint/actions/actionlint:

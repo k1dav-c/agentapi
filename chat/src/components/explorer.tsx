@@ -1,9 +1,10 @@
 "use client";
 
 import {useEffect, useMemo, useRef, useState} from "react";
+import {downloadFile} from "@/lib/download";
+import {discoverFiles, discoverLinks} from "@/lib/explorer-index";
 import {
   Activity,
-  BellRing,
   Download,
   ExternalLink,
   FileText,
@@ -22,7 +23,7 @@ import {
 import {toast} from "sonner";
 import {editableMCPServers} from "@/lib/mcp-sample";
 import {useChat} from "./chat-provider";
-import {TemporalSettings} from "./temporal-settings";
+import {useFileViewer} from "./file-viewer-context";
 import {Button} from "./ui/button";
 import {
   Dialog,
@@ -38,12 +39,6 @@ interface ExplorerProps {
   onNavigateTask: (number: number) => void;
 }
 
-interface DiscoveredLink {
-  url: string;
-  task: number;
-}
-
-const pathPattern = /(?:^|[\s"'(])((?:\/[\w.@+-]+)+\.[a-zA-Z0-9]{1,10})(?=$|[\s"'),:;])/g;
 
 export function Explorer({onNavigateTask}: ExplorerProps) {
   const {
@@ -56,7 +51,10 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     saveMCPProfile,
     deleteMCPProfile,
     applyMCPProfile,
+    features,
   } = useChat();
+  const {restartKeepsConversation} = features;
+  const fileViewer = useFileViewer();
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("index");
   const [filter, setFilter] = useState("");
@@ -96,27 +94,22 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
   const [restartingAgent, setRestartingAgent] = useState(false);
   const mcpImportRef = useRef<HTMLInputElement>(null);
   const profileImportRef = useRef<HTMLInputElement>(null);
-  // Every list is newest first; items keep their task number.
+  // Every list is newest first; items keep their task number. Only the
+  // tab that shows is listed, while the Explorer is open: the messages
+  // change many times a second while the agent works.
+  const shown = open ? activeTab : null;
   const tasks = useMemo(
     () =>
-      messages
-        .filter((message) => message.role === "user")
-        .map((message, index) => ({message, number: index + 1}))
-        .reverse(),
-    [messages],
+      shown === "index"
+        ? messages
+            .filter((message) => message.role === "user")
+            .map((message, index) => ({message, number: index + 1}))
+            .reverse()
+        : [],
+    [messages, shown],
   );
-  const links = useMemo(() => discoverLinks(messages).reverse(), [messages]);
-  const files = useMemo(() => {
-    const found = new Map<string, number>();
-    let task = 0;
-    for (const message of messages) {
-      if (message.role === "user") task += 1;
-      for (const match of message.content.matchAll(pathPattern)) {
-        if (!found.has(match[1])) found.set(match[1], task);
-      }
-    }
-    return [...found].map(([path, sourceTask]) => ({path, sourceTask})).reverse();
-  }, [messages]);
+  const links = useMemo(() => (shown === "links" ? discoverLinks(messages).reverse() : []), [messages, shown]);
+  const files = useMemo(() => (shown === "files" ? discoverFiles(messages).reverse() : []), [messages, shown]);
 
   const navigate = (number: number) => {
     setOpen(false);
@@ -270,8 +263,8 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
           ? "The agent restarted and is loading the new configuration."
           : "Changes apply when the agent starts its next session.",
       });
-    } catch {
-      toast.error("Could not update MCP servers");
+    } catch (error) {
+      toast.error("Could not update MCP servers", {description: error instanceof Error ? error.message : undefined});
     } finally {
       setMCPSaving(false);
     }
@@ -300,7 +293,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
         <DialogHeader className="border-b px-5 py-4 pr-12">
           <DialogTitle>Explorer</DialogTitle>
           <DialogDescription>
-            Jump to a task, file or link. Agent settings are under MCP, Temporal and Session.
+            Jump to a task or link, or open a file. Agent settings are under MCP and Session.
           </DialogDescription>
         </DialogHeader>
         <Tabs
@@ -309,12 +302,11 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
           className="min-h-0 flex-1 gap-0"
         >
           <div className="border-b px-3 py-2">
-            <TabsList className="grid w-full grid-cols-6">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="index"><ListTree /><span className="max-sm:sr-only">Index</span></TabsTrigger>
               <TabsTrigger value="files"><FileText /><span className="max-sm:sr-only">Files</span></TabsTrigger>
               <TabsTrigger value="links"><LinkIcon /><span className="max-sm:sr-only">Links</span></TabsTrigger>
               <TabsTrigger value="mcp"><Server /><span className="max-sm:sr-only">MCP</span></TabsTrigger>
-              <TabsTrigger value="temporal"><BellRing /><span className="max-sm:sr-only">Temporal</span></TabsTrigger>
               <TabsTrigger value="session"><RotateCw /><span className="max-sm:sr-only">Session</span></TabsTrigger>
             </TabsList>
             {["index", "files", "links"].includes(activeTab) && (
@@ -359,17 +351,30 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
           <TabsContent value="files" className="min-h-0 overflow-y-auto overscroll-contain p-4">
             <div className="divide-y">
               {files.filter((file) => matches(file.path)).map((file) => (
-                <button
-                  key={file.path}
-                  type="button"
-                  className="block w-full rounded-sm px-1 py-2.5 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => file.sourceTask > 0 && navigate(file.sourceTask)}
-                >
-                  <span className="block break-all font-mono text-xs">{file.path}</span>
-                  <span className="mt-1 block text-[11px] text-muted-foreground">
-                    {`Task ${file.sourceTask}`}
-                  </span>
-                </button>
+                // The path opens the file (over the Explorer, which is
+                // still there after it closes); the task is a second button.
+                <div key={file.path} className="px-1 py-2.5">
+                  <button
+                    type="button"
+                    className="flex w-full items-start gap-2 rounded-sm text-left outline-none hover:underline hover:underline-offset-4 focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-haspopup={fileViewer ? "dialog" : undefined}
+                    onClick={() =>
+                      fileViewer ? fileViewer.open({path: file.path}) : file.sourceTask > 0 && navigate(file.sourceTask)
+                    }
+                  >
+                    <FileText className="mt-px size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 break-all font-mono text-xs leading-5">{file.path}</span>
+                  </button>
+                  {file.sourceTask > 0 && (
+                    <button
+                      type="button"
+                      className="mt-1.5 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => navigate(file.sourceTask)}
+                    >
+                      Go to Task {file.sourceTask}
+                    </button>
+                  )}
+                </div>
               ))}
               {files.length === 0 && <Empty text="No file paths found in this session." />}
             </div>
@@ -510,8 +515,9 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                       Restart agent after saving
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                      Applies the MCP configuration immediately, but resets the
-                      agent&apos;s current conversation context.
+                      {restartKeepsConversation
+                        ? "Applies the MCP configuration immediately: the agent restarts and resumes its session, so the conversation stays. Not while it works on a turn."
+                        : "Applies the MCP configuration immediately, but resets the agent's current conversation context."}
                     </span>
                   </span>
                 </label>
@@ -544,9 +550,6 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                 </p>
               </div>
             )}
-          </TabsContent>
-          <TabsContent value="temporal" className="min-h-0 overflow-y-auto overscroll-contain p-4">
-            <TemporalSettings />
           </TabsContent>
           <TabsContent value="session" className="min-h-0 overflow-y-auto overscroll-contain p-4">
             <div className="space-y-3">
@@ -588,59 +591,5 @@ function Empty({text}: {text: string}) {
 }
 
 function downloadJSON(filename: string, value: unknown) {
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(
-    new Blob([JSON.stringify(value, null, 2)], {type: "application/json"}),
-  );
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(link.href);
-}
-
-function discoverLinks(messages: Array<{role: string; content: string}>) {
-  const found = new Map<string, DiscoveredLink>();
-  let task = 0;
-  for (const message of messages) {
-    if (message.role === "user") task += 1;
-    for (const url of reconstructWrappedURLs(message.content)) {
-      if (!found.has(url)) found.set(url, {url, task});
-    }
-  }
-  return [...found.values()];
-}
-
-export function reconstructWrappedURLs(content: string) {
-  const lines = content.split("\n");
-  const urls: string[] = [];
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    const line = lines[lineIndex];
-    const starts = [...line.matchAll(/https?:\/\//g)].map((match) => match.index ?? 0);
-    for (const start of starts) {
-      let candidate = line.slice(start).match(/^\S+/)?.[0] ?? "";
-      const reachesLineEnd = start + candidate.length === line.trimEnd().length;
-      let next = lineIndex + 1;
-      while (
-        reachesLineEnd &&
-        next < lines.length &&
-        (lines[next - 1].trimEnd().length >= 72 ||
-          /[/?#&=._~%+-]$/.test(candidate)) &&
-        candidate.length > 0 &&
-        /^[A-Za-z0-9/?#&=._~%+:@!,;()[\]-]+$/.test(lines[next].trim()) &&
-        !/\s/.test(lines[next].trim())
-      ) {
-        candidate += lines[next].trim();
-        next += 1;
-      }
-      candidate = candidate.replace(/[),.;:!?]+$/u, "");
-      try {
-        const parsed = new URL(candidate);
-        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-          urls.push(parsed.toString());
-        }
-      } catch {
-        // Ignore text that only looked like a URL.
-      }
-    }
-  }
-  return [...new Set(urls)];
+  downloadFile(filename, JSON.stringify(value, null, 2), "application/json");
 }

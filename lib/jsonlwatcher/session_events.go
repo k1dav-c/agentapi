@@ -7,21 +7,6 @@ import (
 	"time"
 )
 
-// SessionEvent is a normalized event suitable for one-record-per-line JSONL
-// export. Optional fields are omitted to match the timeline interchange format.
-type SessionEvent struct {
-	EventID   int             `json:"id" doc:"Monotonic event identifier within this AgentAPI run"`
-	Kind      string          `json:"kind" doc:"Event kind: system, text, thinking, tool_call, or tool_result"`
-	Role      *string         `json:"role,omitempty" doc:"Message role when applicable"`
-	EventTime time.Time       `json:"time" doc:"Timestamp recorded by the agent session"`
-	Content   *string         `json:"content,omitempty" doc:"Text or tool result content"`
-	SessionID *string         `json:"session_id,omitempty" doc:"Agent session identifier"`
-	SourceID  *string         `json:"source_id,omitempty" doc:"Original agent event or message identifier"`
-	ToolName  *string         `json:"tool_name,omitempty" doc:"Tool name for tool_call events"`
-	ToolInput json.RawMessage `json:"tool_input,omitempty" doc:"Tool input for tool_call events"`
-	ToolUseID *string         `json:"tool_use_id,omitempty" doc:"Identifier pairing a tool call with its result"`
-}
-
 // SessionEventParser converts agent-specific JSONL records to SessionEvents.
 type SessionEventParser interface {
 	ParseSessionEvents(line []byte) ([]SessionEvent, error)
@@ -125,11 +110,17 @@ func (p *ClaudeSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEve
 	if err := json.Unmarshal(line, &entry); err != nil {
 		return nil, err
 	}
+	return p.Events(entry), nil
+}
+
+// Events returns the timeline events of one session-log entry. The native
+// Claude adapter calls it with the entries of its stream.
+func (p *ClaudeSessionEventParser) Events(entry JSONLLine) []SessionEvent {
 	if entry.SessionID != "" {
 		p.sessionID = entry.SessionID
 	}
 	if entry.Message == nil {
-		return nil, nil
+		return nil
 	}
 	eventTime, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
 	sessionID := optionalString(p.sessionID)
@@ -137,7 +128,7 @@ func (p *ClaudeSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEve
 
 	var text string
 	if err := json.Unmarshal(entry.Message.Content, &text); err == nil {
-		return []SessionEvent{newSessionEvent("text", optionalString(entry.Message.Role), &text, eventTime, sessionID, nil)}, nil
+		return []SessionEvent{newSessionEvent("text", optionalString(entry.Message.Role), &text, eventTime, sessionID, nil)}
 	}
 
 	var blocks []ContentBlock
@@ -162,7 +153,7 @@ func (p *ClaudeSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEve
 			}
 		}
 		if len(events) > 0 {
-			return events, nil
+			return events
 		}
 	}
 
@@ -175,9 +166,9 @@ func (p *ClaudeSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEve
 			event.ToolUseID = optionalString(result.ToolUseID)
 			events = append(events, event)
 		}
-		return events, nil
+		return events
 	}
-	return nil, nil
+	return nil
 }
 
 func newSessionEvent(kind string, role, content *string, eventTime time.Time, sessionID, sourceID *string) SessionEvent {

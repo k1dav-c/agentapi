@@ -1,21 +1,27 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { formatDuration, formatTimeOfDay, secondsBetween } from "@/lib/clock";
+import { useNow } from "@/lib/use-elapsed";
 import { ChevronRight, Clipboard, Download, Eye, MoreHorizontal, TerminalSquare } from "lucide-react";
 import { Button } from "../ui/button";
 import { ProcessedMessage } from "../processed-message";
 import { toast } from "sonner";
 import { taskToMarkdown } from "@/lib/task-actions";
+import { downloadFile } from "@/lib/download";
 import { groupConsecutiveTools } from "@/lib/activity-groups";
 import { ToolCallCard, ToolCallGroup } from "./tool-call";
 import { MessageItem } from "./message-item";
 import { AgentMark } from "../agent-mark";
-import { AgentType } from "../chat-provider";
+import {useChatSelector} from "../chat-provider";
+import {AgentType} from "@/lib/agents";
 import type { TaskSection, TaskStatus } from "@/lib/task-timeline";
 import { getTaskActivity, hasStructuredTranscript, toSearchableTask } from "@/lib/task-timeline";
 import { splitThinking } from "@/lib/thinking";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useThrottledValue } from "@/lib/use-throttled";
+import { copyText } from "@/lib/clipboard";
+import { useDialogFromMenu } from "@/lib/menu-dialog";
 import {
   Dialog,
   DialogContent,
@@ -31,7 +37,9 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 
-export function TaskGroup({
+// A task: memoized, so that while the agent streams into the latest task
+// the others don't render again.
+export const TaskGroup = React.memo(function TaskGroup({
   task,
   number,
   status,
@@ -53,7 +61,7 @@ export function TaskGroup({
   onRetryMessage: (clientId: string) => Promise<boolean>;
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
-  onStopTask: () => void;
+  onStopTask?: () => void;
   onSendRaw?: (data: string) => void;
   searchQuery: string;
   searchResultIndex: number;
@@ -76,9 +84,14 @@ export function TaskGroup({
         failed: {label: "Failed", className: "text-state-fault"},
       }[status];
   const live = status === "running";
+  // Only a terminal has a live screen to show at the end of a running task
+  // and screen text to offer as "Terminal output"; the native transport
+  // streams its transcript instead.
+  const features = useChatSelector((chat) => chat.features);
+  const hasScreen = features.agentTerminal;
   const activity = useMemo(() => {
     if (deferred) return [];
-    const raw = getTaskActivity(task, {live});
+    const raw = getTaskActivity(task, {live: live && hasScreen, transcriptOnly: features.structuredTranscript});
     // When rich activity provides real interleaving (text + tool entries),
     // tools are already positioned where they occurred in the conversation.
     // Only group consecutive tools in the fallback path (PTY-only), where
@@ -87,7 +100,7 @@ export function TaskGroup({
       task.richActivity.some(item => item.type === "message" || item.type === "thinking") &&
       task.richActivity.some(item => item.type === "tool");
     return hasRichInterleaving ? raw : groupConsecutiveTools(raw);
-  }, [task, deferred, live]);
+  }, [task, deferred, live, hasScreen, features.structuredTranscript]);
   const structured = hasStructuredTranscript(task);
   // A long task shows its latest steps; earlier ones load on request.
   // Rendering hundreds of steps (Markdown, highlighted code) at once froze
@@ -109,34 +122,13 @@ export function TaskGroup({
   // needed for copy, export and preview, so do it on demand.
   const toMarkdown = () => taskToMarkdown(toSearchableTask(task), number);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-
-  useEffect(() => {
-    if (status !== "running") {
-      setElapsedSeconds(0);
-      return;
-    }
-    const startedAt = task.prompt.time
-      ? Date.parse(task.prompt.time)
-      : Date.now();
-    const update = () =>
-      setElapsedSeconds(
-        Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
-      );
-    update();
-    const timer = window.setInterval(update, 1000);
-    return () => window.clearInterval(timer);
-  }, [status, task.prompt.time]);
-
-  const duration = status === "running"
-    ? formatClock(elapsedSeconds)
-    : startedAt && finishedAt
-      ? formatClock(Math.max(0, Math.round((Date.parse(finishedAt) - Date.parse(startedAt)) / 1000)))
-      : "";
+  const previewFromMenu = useDialogFromMenu(() => setPreviewOpen(true));
+  const hasDuration = live || Boolean(startedAt && finishedAt);
+  const duration = hasDuration && <TaskDuration running={live} startedAt={startedAt} finishedAt={finishedAt} />;
 
   const copyTask = async () => {
     try {
-      await navigator.clipboard.writeText(toMarkdown());
+      await copyText(toMarkdown());
       toast.success("Task copied");
     } catch {
       toast.error("Could not copy the task");
@@ -144,20 +136,11 @@ export function TaskGroup({
   };
 
   const exportTask = () => {
-    const url = URL.createObjectURL(
-      new Blob([toMarkdown()], {type: "text/markdown;charset=utf-8"}),
-    );
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `agentapi-task-${number}.md`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadFile(`agentapi-task-${number}.md`, toMarkdown(), "text/markdown;charset=utf-8");
     toast.success(`Task ${number} Markdown downloaded`);
   };
 
-  const startTime = startedAt ? formatClockTime(startedAt) : "";
+  const startTime = startedAt ? formatTimeOfDay(startedAt) : "";
   return (
     <section
       id={`task-${number}`}
@@ -171,14 +154,16 @@ export function TaskGroup({
           so the text column itself stays centered. */}
       <div className="absolute right-full top-7 mr-6 hidden w-[3.25rem] pt-px text-right font-mono text-[11px] leading-5 tabular-nums text-muted-foreground lg:block">
         {startTime && <time dateTime={startedAt}>{startTime}</time>}
-        {duration && <div className={status === "running" ? "text-state-working" : ""}>{duration}</div>}
+        {duration && <div className={live ? "text-state-working" : ""}>{duration}</div>}
       </div>
       <div className="min-w-0 min-[84rem]:flow-root">
         <header className="mb-2 flex min-h-7 items-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.06em] text-muted-foreground">
           <span>Task {number}</span>
           {(startTime || duration) && (
             <span className="normal-case tracking-normal tabular-nums lg:hidden">
-              {[startTime, duration].filter(Boolean).join(" · ")}
+              {startTime}
+              {startTime && duration && " · "}
+              {duration}
             </span>
           )}
           <span className={`flex items-center gap-1.5 font-sans text-xs normal-case tracking-normal ${statusMeta.className}`} role="status">
@@ -186,7 +171,7 @@ export function TaskGroup({
             {statusMeta.label}
           </span>
           <div className="ml-auto flex items-center gap-1 font-sans normal-case tracking-normal">
-            {status === "running" && (
+            {status === "running" && onStopTask && (
               <Button type="button" size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={onStopTask}>
                 Stop
               </Button>
@@ -198,8 +183,8 @@ export function TaskGroup({
                   <span className="sr-only">Task {number} actions</span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setPreviewOpen(true)}>
+              <DropdownMenuContent align="end" onCloseAutoFocus={previewFromMenu.onCloseAutoFocus}>
+                <DropdownMenuItem onSelect={previewFromMenu.onSelect}>
                   <Eye />
                   Preview Markdown
                 </DropdownMenuItem>
@@ -247,7 +232,7 @@ export function TaskGroup({
           )}
           {visibleActivity.map((item, index) =>
             item.type === "message" ? (
-              live && index === visibleActivity.length - 1 ? (
+              live && hasScreen && index === visibleActivity.length - 1 ? (
                 // While a task runs, the last item is the live terminal
                 // screen. With a transcript, only its tail is shown (the
                 // rest is in the transcript). Either way it is redrawn at
@@ -267,7 +252,7 @@ export function TaskGroup({
               <ToolCallCard key={item.key} toolCall={item.toolCall} searchQuery={searchQuery} onSendRaw={onSendRaw} />
             ),
           )}
-          {!deferred && structured && !live && task.responses.length > 0 && (
+          {!deferred && hasScreen && structured && !live && task.responses.length > 0 && (
             <div>
               <button
                 type="button"
@@ -322,7 +307,7 @@ export function TaskGroup({
       </Dialog>
     </section>
   );
-}
+});
 
 // Thinking as a sidenote: on wide screens it sits in the right margin next to
 // the step it explains; narrower screens show a one-line row that expands.
@@ -406,18 +391,15 @@ function withLastLines<T extends {content: string}>(message: T, count: number): 
   return lines.length <= count ? message : {...message, content: lines.slice(-count).join("\n")};
 }
 
-function formatClock(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
-    : `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function formatClockTime(iso: string) {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime())
-    ? ""
-    : date.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", hour12: false});
+// How long a task took, or has taken so far while it runs. A component of
+// its own, so that the clock of the running task renders every second
+// rather than the whole task.
+function TaskDuration({running, startedAt, finishedAt}: {running: boolean; startedAt?: string; finishedAt?: string}) {
+  const now = useNow(running ? 1000 : null);
+  // A task whose prompt has no time counts from when it showed.
+  const [shownAt] = useState(() => Date.now());
+  const start = startedAt ? Date.parse(startedAt) : shownAt;
+  if (running) return formatDuration(secondsBetween(start, now));
+  if (!startedAt || !finishedAt) return null;
+  return formatDuration(Math.max(0, Math.round((Date.parse(finishedAt) - start) / 1000)));
 }

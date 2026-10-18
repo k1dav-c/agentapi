@@ -3,6 +3,7 @@ package screentracker_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -1874,4 +1875,170 @@ func TestStabilityScreen(t *testing.T) {
 		advanceUntil(ctx, t, mClock, func() bool { return sendDone.Load() })
 		assert.ErrorIs(t, sendErr, st.ErrMessageNotSubmitted)
 	})
+}
+
+// roles lists each message as "role:text", for asserting the conversation's
+// shape.
+func roles(c *st.PTYConversation) []string {
+	var out []string
+	for _, m := range c.Messages() {
+		out = append(out, string(m.Role)+":"+m.Message)
+	}
+	return out
+}
+
+func TestRepeatedRepliesEndTheirTurns(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	t.Cleanup(cancel)
+
+	// Every write drops the last line: the screen changes, so the message is
+	// taken as submitted, but it only ever shows lines already on screen, so
+	// every reply is empty.
+	agent := &testAgent{screen: "L1\nL2\nL3\nL4\nL5\nL6\nL7\nL8"}
+	agent.onWrite = func([]byte) {
+		if lines := strings.Split(agent.screen, "\n"); len(lines) > 1 {
+			agent.screen = strings.Join(lines[:len(lines)-1], "\n")
+		}
+	}
+	mClock := quartz.NewMock(t)
+	c := st.NewPTY(ctx, st.PTYConversationConfig{
+		Clock:                 mClock,
+		AgentIO:               agent,
+		SnapshotInterval:      100 * time.Millisecond,
+		ScreenStabilityLength: 200 * time.Millisecond,
+		Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}, &testEmitter{})
+	c.Start(ctx)
+	advanceFor(ctx, t, mClock, 300*time.Millisecond)
+	require.Equal(t, st.ConversationStatusStable, c.Status())
+
+	// The second reply is the same as the first one (empty): it still ends
+	// its turn, rather than leaving the user's message last and the status
+	// changing for good.
+	for _, q := range []string{"q1", "q2"} {
+		sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: q})
+		advanceFor(ctx, t, mClock, time.Second)
+		require.Equal(t, st.ConversationStatusStable, c.Status(), "after %s: %q", q, roles(c))
+	}
+	require.Equal(t, []string{"agent:" + strings.Join(strings.Split("L1 L2 L3 L4 L5 L6 L7 L8", " "), "\n"), "user:q1", "agent:", "user:q2", "agent:"}, roles(c))
+}
+
+func TestResetWhileTheInitialPromptWaits(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	t.Cleanup(cancel)
+
+	agent := &testAgent{screen: "ready-0"}
+	mClock := quartz.NewMock(t)
+	c := st.NewPTY(ctx, st.PTYConversationConfig{
+		Clock:                 mClock,
+		AgentIO:               agent,
+		SnapshotInterval:      100 * time.Millisecond,
+		ScreenStabilityLength: 200 * time.Millisecond,
+		ReadyForInitialPrompt: func(s string) bool { return strings.HasPrefix(s, "ready") },
+		InitialPrompt:         []st.MessagePart{st.MessagePartText{Content: "initial"}},
+		Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}, &testEmitter{})
+	c.Start(ctx)
+
+	// The agent is ready, so the initial prompt waits for a stable screen.
+	_, w := mClock.AdvanceNext()
+	w.MustWait(ctx)
+	// A restart now (DELETE /messages) drops it; the next snapshot queues
+	// it again for the new agent, without blocking.
+	c.Reset()
+	agent.setScreen("ready-1")
+	_, w = mClock.AdvanceNext()
+	tickCtx, tickCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer tickCancel()
+	require.NoError(t, w.Wait(tickCtx), "the snapshot blocked")
+
+	status := make(chan st.ConversationStatus, 1)
+	go func() { status <- c.Status() }()
+	select {
+	case <-status:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Status blocked: a snapshot holds the lock")
+	}
+
+	// The initial prompt goes to the new agent once, then messages work.
+	var written []string
+	agent.mu.Lock()
+	agent.onWrite = func(data []byte) {
+		if s := string(data); s != "\r" {
+			written = append(written, s)
+		}
+		agent.screen += "."
+	}
+	agent.mu.Unlock()
+	writes := func() []string {
+		agent.mu.Lock()
+		defer agent.mu.Unlock()
+		return slices.Clone(written)
+	}
+	// The send loop delivers the prompt in its own time: wait for it, and
+	// for the screen to settle after it.
+	advanceUntil(ctx, t, mClock, func() bool {
+		return len(writes()) == 1 && c.Status() == st.ConversationStatusStable
+	})
+	sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: "hello"})
+	require.Equal(t, []string{"initial", "hello"}, writes())
+}
+
+// errorEmitter records the errors a conversation reports.
+type errorEmitter struct {
+	testEmitter
+	mu     sync.Mutex
+	errors []string
+}
+
+func (e *errorEmitter) EmitError(message string, _ st.ErrorLevel) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.errors = append(e.errors, message)
+}
+
+func (e *errorEmitter) get() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]string(nil), e.errors...)
+}
+
+func TestFailedInitialPromptIsReported(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	t.Cleanup(cancel)
+
+	// The agent never reacts to the carriage return.
+	agent := &testAgent{screen: "ready"}
+	emitter := &errorEmitter{}
+	mClock := quartz.NewMock(t)
+	c := st.NewPTY(ctx, st.PTYConversationConfig{
+		Clock:                 mClock,
+		AgentIO:               agent,
+		SnapshotInterval:      100 * time.Millisecond,
+		ScreenStabilityLength: 200 * time.Millisecond,
+		InitialPrompt:         []st.MessagePart{st.MessagePartText{Content: "initial"}},
+		Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}, emitter)
+	c.Start(ctx)
+	advanceUntil(ctx, t, mClock, func() bool { return len(emitter.get()) > 0 })
+	require.Contains(t, emitter.get()[0], "Failed to send the initial prompt")
+}
+
+func TestSendAfterStopFails(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	mClock := quartz.NewMock(t)
+	c := st.NewPTY(ctx, st.PTYConversationConfig{
+		Clock:                 mClock,
+		AgentIO:               &testAgent{screen: "ready"},
+		SnapshotInterval:      100 * time.Millisecond,
+		ScreenStabilityLength: 200 * time.Millisecond,
+		Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}, &testEmitter{})
+	c.Start(ctx)
+	advanceFor(ctx, t, mClock, 300*time.Millisecond)
+	require.Equal(t, st.ConversationStatusStable, c.Status())
+	cancel()
+	require.Eventually(t, func() bool {
+		return errors.Is(c.Send(st.MessagePartText{Content: "late"}), context.Canceled)
+	}, testTimeout, 10*time.Millisecond, "Send blocks or succeeds after the conversation stopped")
 }
