@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -48,6 +49,19 @@ func (s *Server) GetOpenAPI() string {
 		return ""
 	}
 	return string(prettyJSON)
+}
+
+// guard wraps an endpoint's handler so that check, when it fails, answers
+// instead: endpoints of one transport (requireNative), or of agents whose
+// MCP configuration AgentAPI manages (requireMCP), say so in the route
+// table.
+func guard[I, O any](check func() error, handler func(context.Context, *I) (*O, error)) func(context.Context, *I) (*O, error) {
+	return func(ctx context.Context, input *I) (*O, error) {
+		if err := check(); err != nil {
+			return nil, err
+		}
+		return handler(ctx, input)
+	}
 }
 
 // registerRoutes sets up all API endpoints

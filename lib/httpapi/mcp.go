@@ -217,11 +217,6 @@ func (s *Server) getMCP(
 	_ context.Context,
 	_ *struct{},
 ) (*MCPGetResponse, error) {
-	if s.mcpStore == nil {
-		return nil, huma.Error404NotFound(
-			"MCP config management is not supported for this agent type",
-		)
-	}
 	servers, err := s.mcpStore.Read()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read MCP config: %w", err)
@@ -251,20 +246,20 @@ func (s *Server) updateMCP(
 }
 
 func (s *Server) registerMCPRoutes() {
-	huma.Get(s.api, "/mcp", s.getMCP, func(o *huma.Operation) {
+	huma.Get(s.api, "/mcp", guard(s.requireMCP, s.getMCP), func(o *huma.Operation) {
 		configureMCPGetOperation(o)
 	})
-	huma.Put(s.api, "/mcp", s.updateMCP, func(o *huma.Operation) {
+	huma.Put(s.api, "/mcp", guard(s.requireMCP, s.updateMCP), func(o *huma.Operation) {
 		configureMCPUpdateOperation(o)
 	})
-	huma.Post(s.api, "/mcp/check", s.checkMCP, configureMCPChildOperation("Check MCP server connectivity"))
-	huma.Post(s.api, "/mcp/servers", s.createMCPServer, configureMCPChildOperation("Create an MCP server"))
-	huma.Patch(s.api, "/mcp/servers/{name}", s.patchMCPServer, configureMCPChildOperation("Update an MCP server"))
-	huma.Delete(s.api, "/mcp/servers/{name}", s.deleteMCPServer, configureMCPChildOperation("Delete an MCP server"))
-	huma.Get(s.api, "/mcp/profiles", s.getMCPProfiles, configureMCPChildOperation("List MCP profiles"))
-	huma.Put(s.api, "/mcp/profiles/{name}", s.putMCPProfile, configureMCPChildOperation("Import or replace an MCP profile"))
-	huma.Delete(s.api, "/mcp/profiles/{name}", s.deleteMCPProfile, configureMCPChildOperation("Delete an MCP profile"))
-	huma.Post(s.api, "/mcp/profiles/{name}/apply", s.applyMCPProfile, configureMCPChildOperation("Apply an MCP profile"))
+	huma.Post(s.api, "/mcp/check", guard(s.requireMCP, s.checkMCP), configureMCPChildOperation("Check MCP server connectivity"))
+	huma.Post(s.api, "/mcp/servers", guard(s.requireMCP, s.createMCPServer), configureMCPChildOperation("Create an MCP server"))
+	huma.Patch(s.api, "/mcp/servers/{name}", guard(s.requireMCP, s.patchMCPServer), configureMCPChildOperation("Update an MCP server"))
+	huma.Delete(s.api, "/mcp/servers/{name}", guard(s.requireMCP, s.deleteMCPServer), configureMCPChildOperation("Delete an MCP server"))
+	huma.Get(s.api, "/mcp/profiles", guard(s.requireMCP, s.getMCPProfiles), configureMCPChildOperation("List MCP profiles"))
+	huma.Put(s.api, "/mcp/profiles/{name}", guard(s.requireMCP, s.putMCPProfile), configureMCPChildOperation("Import or replace an MCP profile"))
+	huma.Delete(s.api, "/mcp/profiles/{name}", guard(s.requireMCP, s.deleteMCPProfile), configureMCPChildOperation("Delete an MCP profile"))
+	huma.Post(s.api, "/mcp/profiles/{name}/apply", guard(s.requireMCP, s.applyMCPProfile), configureMCPChildOperation("Apply an MCP profile"))
 	// Huma populates inferred request/response media types after the operation
 	// configuration callback, so attach named payload examples once both
 	// operations have been registered.

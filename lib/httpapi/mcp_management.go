@@ -103,9 +103,6 @@ func (s *Server) restartQuery(restart bool) (bool, error) {
 // mutateMCP changes the MCP servers with mutate, then restarts the agent
 // when asked. Every change goes through it, so none overwrites another.
 func (s *Server) mutateMCP(restart bool, mutate func(MCPServers) error) (*MCPUpdateResponse, error) {
-	if err := s.requireMCP(); err != nil {
-		return nil, err
-	}
 	// Refused before anything is written.
 	if restart && !s.backend().canRestart() {
 		return nil, huma.Error400BadRequest("agent restart is not supported in this server mode")
@@ -194,9 +191,6 @@ func (s *Server) deleteMCPServer(_ context.Context, input *struct {
 }
 
 func (s *Server) checkMCP(ctx context.Context, input *struct{ Body MCPCheckBody }) (*MCPCheckResponse, error) {
-	if err := s.requireMCP(); err != nil {
-		return nil, err
-	}
 	servers := input.Body.Servers
 	if servers == nil {
 		stored, err := s.mcpStore.Read()
@@ -325,9 +319,6 @@ func validProfileName(name string) bool {
 }
 
 func (s *Server) getMCPProfiles(_ context.Context, _ *struct{}) (*MCPProfilesResponse, error) {
-	if err := s.requireMCP(); err != nil {
-		return nil, err
-	}
 	profiles, err := s.readMCPProfiles()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read MCP profiles: %w", err)
@@ -343,9 +334,6 @@ func (s *Server) putMCPProfile(_ context.Context, input *struct {
 	Body MCPProfileBody
 },
 ) (*MCPProfilesResponse, error) {
-	if err := s.requireMCP(); err != nil {
-		return nil, err
-	}
 	if !validProfileName(input.Name) {
 		return nil, huma.Error400BadRequest("invalid MCP profile name")
 	}
@@ -369,9 +357,6 @@ func (s *Server) deleteMCPProfile(_ context.Context, input *struct {
 	Name string `path:"name"`
 },
 ) (*MCPProfilesResponse, error) {
-	if err := s.requireMCP(); err != nil {
-		return nil, err
-	}
 	s.mcpMu.Lock()
 	defer s.mcpMu.Unlock()
 	profiles, err := s.readMCPProfiles()
@@ -396,9 +381,6 @@ func (s *Server) applyMCPProfile(_ context.Context, input *struct {
 	Restart bool   `query:"restart" default:"false"`
 },
 ) (*MCPUpdateResponse, error) {
-	if err := s.requireMCP(); err != nil {
-		return nil, err
-	}
 	profiles, err := s.readMCPProfiles()
 	if err != nil {
 		return nil, err

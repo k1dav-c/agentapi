@@ -17,11 +17,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // Ensure the OpenAPI schema on disk is up to date.
@@ -1146,4 +1147,44 @@ func TestServer_StartBindsLoopback(t *testing.T) {
 		_ = resp.Body.Close()
 		return resp.StatusCode == http.StatusOK
 	}, 5*time.Second, 20*time.Millisecond)
+}
+
+// The endpoints of the native transport answer 400 on another transport,
+// and those of the MCP configuration 404 for an agent whose configuration
+// AgentAPI doesn't manage.
+func TestGuardedEndpoints(t *testing.T) {
+	t.Parallel()
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeCustom,
+		Transport:      httpapi.TransportPTY,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+	})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		method, path, body string
+		status             int
+	}{
+		{http.MethodPost, "/interrupt", "", http.StatusBadRequest},
+		{http.MethodPost, "/compact", "", http.StatusBadRequest},
+		{http.MethodGet, "/settings", "", http.StatusBadRequest},
+		{http.MethodPut, "/settings", `{"model":"x"}`, http.StatusBadRequest},
+		{http.MethodPost, "/login/retry", "", http.StatusBadRequest},
+		{http.MethodPost, "/requests/r1/respond", `{"option_id":"allow"}`, http.StatusBadRequest},
+		{http.MethodPost, "/queue/1/steer", "", http.StatusBadRequest},
+		{http.MethodGet, "/mcp", "", http.StatusNotFound},
+		{http.MethodPut, "/mcp", `{"servers":{}}`, http.StatusNotFound},
+		{http.MethodGet, "/mcp/profiles", "", http.StatusNotFound},
+		{http.MethodDelete, "/mcp/servers/x", "", http.StatusNotFound},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		if tc.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		assert.Equal(t, tc.status, rec.Code, "%s %s: %s", tc.method, tc.path, rec.Body.String())
+	}
 }
