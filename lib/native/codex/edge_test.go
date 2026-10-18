@@ -269,7 +269,7 @@ func TestCloseBeforeStart(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, a.Close())
 	require.NoError(t, a.Wait())
-	require.Error(t, a.Start(context.Background(), newRecorder(t)))
+	require.ErrorIs(t, a.Start(context.Background(), newRecorder(t)), errClosed)
 }
 
 // A Close racing a failed Start used to close the adapter's channels twice.

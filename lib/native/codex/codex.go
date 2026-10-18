@@ -216,7 +216,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
-		return errors.New("adapter is closed")
+		return errClosed
 	}
 	if a.proc != nil {
 		a.mu.Unlock()
@@ -583,7 +583,11 @@ func (a *Adapter) Close() error {
 
 // --- JSON-RPC plumbing ---
 
-var errExited = errors.New("codex app-server exited")
+var (
+	errExited = errors.New("codex app-server exited")
+	// errClosed is returned by Start after Close.
+	errClosed = errors.New("the adapter was closed")
+)
 
 // call sends a request and waits for its response, bounded by ctx. Once
 // the loop has ended, waiting calls fail with errExited.
