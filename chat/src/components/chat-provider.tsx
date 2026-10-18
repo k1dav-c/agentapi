@@ -1211,7 +1211,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
         reconnectNow: reconnectByUser,
         downloadSession,
         deleteMessages: async () => {
+          const epoch = syncRef.current.epoch;
           await api.deleteMessages();
+          // The server's reset arrived as a session_sync of a new epoch,
+          // with what the new session sent since (a restart can take
+          // minutes): clearing now would drop both. Only a server that
+          // doesn't send it needs clearing here.
+          if (syncRef.current.epoch !== epoch) return;
           syncRef.current.reset();
           void clearSession(agentAPIUrl);
           setMessages([]);
