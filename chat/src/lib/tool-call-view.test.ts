@@ -25,7 +25,8 @@ describe("describeToolCall", () => {
     const failed = describeToolCall({id: "t3", name: "Read", input: {}, result: "no such file", isError: true, timestamp: "2026-01-01T00:00:00Z"});
     expect(failed.failed).toBe(true);
     expect(failed.pending).toBe(false);
-    expect(failed.resultPreview).toBe("", "only a command previews its output");
+    // Only a command previews its output.
+    expect(failed.resultPreview).toBe("");
   });
 
   test("a file tool lists its file", () => {

@@ -1,9 +1,9 @@
 import {describe, expect, test} from "bun:test";
-import {parseFailedMessages} from "./failed-messages";
+import {parseFailedMessages, type PersistedFailedMessage} from "./failed-messages";
 
 describe("failed message persistence", () => {
   test("restores retryable user messages", () => {
-    const failed = {
+    const failed: PersistedFailedMessage = {
       clientId: "request-1",
       role: "user",
       content: "Run the tests",

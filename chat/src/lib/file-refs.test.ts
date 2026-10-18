@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {fileName, parseFilePathRef, toolFileTargets, viewerTab} from "./file-refs";
+import {fileName, parseFilePathRef, toolFileTargets, viewerTab, type FileTarget} from "./file-refs";
 
 describe("parseFilePathRef", () => {
   test("paths with a directory or a file name", () => {
@@ -196,7 +196,7 @@ describe("toolFileTargets: Codex patches", () => {
     "*** End of File",
     "*** End Patch",
   ].join("\n");
-  const expected = [
+  const expected: FileTarget[] = [
     {path: "calc.py", kind: "edit", change: "--- a/calc.py\n+++ b/calc.py\n@@\n def add(a, b):\n     return a + b\n+\n+def sub(a, b):\n+    return a - b"},
     {path: "docs/notes.md", kind: "write", change: "--- /dev/null\n+++ b/docs/notes.md\n@@ -0,0 +1,2 @@\n+# Notes\n+"},
     {path: "old.txt", kind: "delete", change: "--- a/old.txt\n+++ /dev/null"},

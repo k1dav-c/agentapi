@@ -8,7 +8,7 @@ const event: StatusChangeEvent = {
   agentapi_version: "1.2.3",
   capabilities: {steer: true, interrupt: true, resume: true, images: false, settings: true},
   settings: {permission_mode: "bypass", model: "gpt-5"},
-  usage: {context: {used: 10, window: 100}},
+  usage: {context: {used: 10, size: 100}},
   terminal: true,
 };
 
@@ -32,7 +32,7 @@ describe("applyStatusChange", () => {
 
   test("what an event doesn't change keeps its object", () => {
     const status = applyStatusChange(initialAgentStatus, event);
-    const next = applyStatusChange(status, {...structuredClone(event), status: "stable", usage: {context: {used: 20, window: 100}}});
+    const next = applyStatusChange(status, {...structuredClone(event), status: "stable", usage: {context: {used: 20, size: 100}}});
     expect(next).not.toBe(status);
     expect(next.serverStatus).toBe("stable");
     expect(next.usage?.context?.used).toBe(20);

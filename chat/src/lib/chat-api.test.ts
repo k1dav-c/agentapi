@@ -97,7 +97,9 @@ describe("requests", () => {
 
   test("an answered request comes back without huma's $schema", async () => {
     mockFetch(json({$schema: "http://agentapi.test/schemas/Request.json", id: "req-1", status: "resolved"}));
-    expect(await createChatAPI(BASE).respondRequest("req-1", {option_id: "allow"})).toEqual({id: "req-1", status: "resolved"});
+    const state = await createChatAPI(BASE).respondRequest("req-1", {option_id: "allow"});
+    expect(state).toMatchObject({id: "req-1", status: "resolved"});
+    expect(state).not.toHaveProperty("$schema");
   });
 });
 

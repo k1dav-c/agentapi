@@ -38,6 +38,9 @@ jobs:
             - name: run linters
               run: make lint
 
+            - name: Test the chat
+              run: cd chat && bun test
+
             - name: Check for unstaged changes
               run: |
                   make gen
