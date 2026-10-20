@@ -276,7 +276,9 @@ type Adapter interface {
 	Close() error
 }
 
-type Factory func(resumeRef string) (Adapter, error)
+// Resume says which session an adapter opens: Ref, or a copy of it with
+// Fork, or a new one when Ref is empty.
+type Factory func(resume Resume) (Adapter, error)
 ```
 
 - **Sink.** An adapter reports what its agent does through a `Sink`: turns
@@ -303,7 +305,22 @@ type Factory func(resumeRef string) (Adapter, error)
   the agent runs, the conversation gives it the settings chosen for the
   session, reports its capabilities and sends the initial prompt. `Restart`
   replaces it with a new session; `Reload` resumes the same session, so a
-  changed MCP configuration is read again and the conversation stays.
+  changed MCP configuration is read again and the conversation stays;
+  `Switch` opens another session, or a copy of it, with that session's
+  messages, which the server reads from the agent's session log
+  (`jsonlwatcher.ReadSessionHistory`; `GET /sessions` lists them). The
+  subagents the agent ran in the session are read the same way, from their
+  own logs (`jsonlwatcher.Subagents`), for `GET /subagents` and the chat's
+  Lineage panel; their state comes from the Agent tool call that started
+  them.
+- **Usage limits.** An adapter ends a turn the account's usage limit stopped
+  with the `limited` stop reason (Claude Code's limit messages and a
+  `rejected` rate limit event, Codex's `usageLimitExceeded`, a quota error of
+  Pi's provider). The conversation keeps it as a `LimitStop` with the reset
+  time until a turn starts: the server's queue waits while it holds
+  (`HoldsQueue`), and a continuation scheduled for the reset
+  (`ScheduleContinue`, `--auto-continue`) goes out on the queue's tick before
+  the queued messages.
 - **Turns.** A message starts a turn only while the agent is idle; otherwise
   `StartTurn` returns `ErrMessageValidationChanging` and the server queues the
   message. Turns wait the same way while the agent compacts its context.
@@ -329,8 +346,8 @@ The adapters:
 | Adapter | Process | Protocol |
 | --- | --- | --- |
 | `claude` | `claude -p --input-format stream-json --output-format stream-json ...` | Stream-json messages on stdin and stdout, plus Claude Code's control protocol: `initialize`, `can_use_tool` (approvals, questions, plans), `set_permission_mode`, `set_model`, `apply_flag_settings`, `get_settings`, `get_context_usage`, `interrupt` |
-| `codex` | `codex app-server` | JSON-RPC: `thread/start` or `thread/resume`, `turn/start` (carrying the settings), `turn/steer`, `turn/interrupt`, `thread/compact/start`, `model/list`; approvals, questions and MCP elicitations arrive as server requests; the plan mode is a collaboration mode |
-| `pi` | `pi --mode rpc --session-id <id>` | JSON lines: `prompt` (also for steering), `abort`, `get_state`, `get_available_models`, `set_model`, `set_thinking_level`, `compact`; extension dialogs arrive as UI requests and are answered with `extension_ui_response` |
+| `codex` | `codex app-server` | JSON-RPC: `thread/start`, `thread/resume` or `thread/fork`, `turn/start` (carrying the settings), `turn/steer`, `turn/interrupt`, `thread/compact/start`, `model/list`; approvals, questions and MCP elicitations arrive as server requests; the plan mode is a collaboration mode |
+| `pi` | `pi --mode rpc --session-id <id>` (`--fork <id>` for a copy) | JSON lines: `prompt` (also for steering), `abort`, `get_state`, `get_available_models`, `set_model`, `set_thinking_level`, `compact`; extension dialogs arrive as UI requests and are answered with `extension_ui_response` |
 | `demo` | none | A simulated agent that streams thinking, a tool call and a reply, and opens every kind of request |
 
 ## Events and the conversation state
@@ -359,7 +376,8 @@ settings, usage, login, terminal prompt) and the latest screen.
 
 A message sent while the agent is busy waits in the server's queue (`s.queue`; whatever changes it
 holds `s.mu`). A loop checks every 500 ms whether the first message can be delivered: for a native
-agent when the conversation is idle, for a PTY agent when the screen is stable and shows no dialog.
+agent when the conversation is idle and no usage limit stop holds the queue, for a PTY agent when
+the screen is stable and shows no dialog.
 A rejected message is tried up to 5 times in all, but one that could arrive twice is dropped at
 once: a native send that timed out, which may already have reached the agent, and a PTY message that
 was typed but not submitted, which would be typed again. With the native transport a message can
@@ -372,8 +390,8 @@ also steer the running turn or interrupt it. The queue is part of the persisted 
 
 - The tables are `messages`, `rich_messages`, `session_events`, `requests`,
   `queue`, and `meta`, which holds the agent type, transport and working
-  directory, the epoch and seq, the session reference and name, and the
-  settings chosen for the session.
+  directory, the epoch and seq, the session reference and name, the
+  settings chosen for the session, and a usage limit stop.
 - Writes are queued and flushed every 200 ms in a transaction, so streaming
   never waits for the disk. A clean shutdown marks the file clean; after a
   crash the conversation gets a new epoch and clients load it again in full.
