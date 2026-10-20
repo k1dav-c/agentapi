@@ -68,7 +68,7 @@ response messages over stdio. All three transports update the shared event emitt
 - **`lib/termexec/`** — Terminal process execution. Wraps PTY creation and process lifecycle.
 - **`lib/msgfmt/`** — Agent-specific message formatting. Strips echoed user input and TUI elements (input boxes, borders) from terminal output. Each agent type has different formatting quirks.
 - **`lib/transcript/`** — The types of the structured transcript the transports share: rich messages (content blocks, images, usage) and timeline events.
-- **`lib/jsonlwatcher/`** — Watches agent JSONL session logs (Claude, Codex, Pi) for rich structured messages (tool calls, thinking, usage data). Runs alongside the PTY transport.
+- **`lib/jsonlwatcher/`** — Watches agent JSONL session logs (Claude, Codex, Pi) for rich structured messages (tool calls, thinking, usage data). Runs alongside the PTY transport. For the native transport it also lists the agent's earlier sessions and reads their conversations (`GET /sessions`), and reads the logs of the subagents a session ran (`GET /subagents`, `GET /timeline?subagents=true`).
 - **`x/acpio/`** — Experimental ACP (Agent Client Protocol) transport, alternative to PTY.
 - **`lib/native/`** — Native transport. `Conversation` (an `st.Conversation`) turns the events of an `Adapter` (one per agent: `claude/`, `codex/`, `pi/`, plus the simulated `demo/`) into conversation state, requests (approvals, questions, plans) and login state. Shared pieces: `procutil/` (child process lifecycle), `IsAuthError`, `ReadImage`; `nativetest/` has a fake adapter. `lib/procenv` prepares the environment for agent processes on all transports.
 - **`lib/statedb/`** — SQLite persistence of native sessions (`--state-db`).
