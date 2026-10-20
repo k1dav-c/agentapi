@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.27.0
+
 ### Features
 
 - Native agents: open one of the agent's earlier sessions in its working directory, or start a copy
