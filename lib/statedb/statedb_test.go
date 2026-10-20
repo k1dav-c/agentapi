@@ -212,3 +212,31 @@ func TestCleanClose(t *testing.T) {
 	assert.False(t, snap.Clean)
 	assert.Len(t, snap.Messages, 2)
 }
+
+func TestLimitStopRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db := open(t, path)
+	resets := time.Unix(1800000000, 0).UTC()
+	db.SetMeta(statedb.MetaAgentType, "claude")
+	db.SetLimitStop(&native.LimitStop{Message: "You've hit your limit", StoppedAt: time.Unix(1700000000, 0).UTC(), ResetsAt: &resets})
+	require.NoError(t, db.Close())
+
+	db = open(t, path)
+	snap, err := db.Load()
+	require.NoError(t, err)
+	ls, err := snap.LimitStop()
+	require.NoError(t, err)
+	require.NotNil(t, ls)
+	assert.Equal(t, "You've hit your limit", ls.Message)
+	assert.Equal(t, resets, *ls.ResetsAt)
+
+	db.SetLimitStop(nil)
+	require.NoError(t, db.Close())
+	db = open(t, path)
+	defer func() { _ = db.Close() }()
+	snap, err = db.Load()
+	require.NoError(t, err)
+	ls, err = snap.LimitStop()
+	require.NoError(t, err)
+	assert.Nil(t, ls)
+}

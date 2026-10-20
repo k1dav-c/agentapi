@@ -916,8 +916,17 @@ func (a *Adapter) endTurnLocked() turnState {
 
 func (a *Adapter) handleResult(f *frame) {
 	a.sendRich(a.parser.endTurn())
+	limited := a.limitReached()
 	a.mu.Lock()
 	result := turnResult(f, a.turn.interrupted)
+	if result.StopReason == native.StopReasonError && (limited || native.IsLimitError(result.Error)) {
+		result.StopReason = native.StopReasonLimited
+		if text := stringField(f.Result); text != "" {
+			// Claude Code's own words, e.g. You've hit your limit ·
+			// resets 3pm.
+			result.Error = text
+		}
+	}
 	inTurn := a.turn.phase != turnIdle
 	started := a.started
 	byResult := !a.sessionStates

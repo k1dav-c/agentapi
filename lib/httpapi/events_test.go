@@ -429,6 +429,7 @@ func (p *recordingPersister) SetSeq(epoch string, seq uint64) { p.epoch, p.seq =
 func (p *recordingPersister) SetSessionName(string)           {}
 func (p *recordingPersister) SetSessionRef(string)            {}
 func (p *recordingPersister) SetSettings(native.Settings)     {}
+func (p *recordingPersister) SetLimitStop(*native.LimitStop)  {}
 
 func (p *recordingPersister) Reset(epoch string) {
 	p.epoch = epoch

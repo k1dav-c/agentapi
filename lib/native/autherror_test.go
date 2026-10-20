@@ -40,3 +40,31 @@ func TestIsAuthError(t *testing.T) {
 		assert.False(t, native.IsAuthError(text), text)
 	}
 }
+
+func TestIsLimitError(t *testing.T) {
+	t.Parallel()
+	for _, text := range []string{
+		// Claude Code
+		"You've hit your limit · resets 3pm (UTC)",
+		"You've hit your session limit · resets 3:40pm",
+		"You've reached your Fable limit.",
+		"You're out of extra usage · resets Oct 20",
+		"Claude AI usage limit reached|1760000000",
+		// Codex
+		"You've hit your usage limit. Upgrade to Pro, or try again at 3:05 PM.",
+		// Providers
+		"429 You exceeded your current quota, please check your plan and billing details.",
+		`{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded for metric"}}`,
+	} {
+		assert.True(t, native.IsLimitError(text), text)
+	}
+	for _, text := range []string{
+		"",
+		"rate limit exceeded (429)",
+		`API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Number of requests has exceeded your rate limit"}}`,
+		"API Error: 529 overloaded_error",
+		"Not logged in · Please run /login",
+	} {
+		assert.False(t, native.IsLimitError(text), text)
+	}
+}

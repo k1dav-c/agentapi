@@ -110,6 +110,35 @@
         ],
         "type": "object"
       },
+      "ContinueAt": {
+        "enum": [
+          "now",
+          "reset"
+        ],
+        "example": "now",
+        "title": "ContinueAt",
+        "type": "string"
+      },
+      "ContinueRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/ContinueRequestBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "at": {
+            "$ref": "#/components/schemas/ContinueAt",
+            "description": "now: send the continuation now; reset: send it once the limit resets (409 if the agent didn't say when)."
+          }
+        },
+        "required": [
+          "at"
+        ],
+        "type": "object"
+      },
       "ConversationRole": {
         "enum": [
           "agent",
@@ -431,6 +460,35 @@
         "example": "starting",
         "title": "LifecycleState",
         "type": "string"
+      },
+      "LimitStop": {
+        "additionalProperties": false,
+        "properties": {
+          "continue_at": {
+            "description": "When AgentAPI sends a message that continues the turn, if one is scheduled (POST /limit/continue). Queued messages go out after it.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "message": {
+            "description": "What the agent said, e.g. You've hit your limit · resets 3pm.",
+            "type": "string"
+          },
+          "resets_at": {
+            "description": "When the limit resets, if the agent says. Queued messages wait until then.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "stopped_at": {
+            "description": "When the turn stopped.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "stopped_at"
+        ],
+        "type": "object"
       },
       "LoginRequired": {
         "additionalProperties": false,
@@ -1885,6 +1943,10 @@
             "$ref": "#/components/schemas/LifecycleState",
             "description": "Detailed process lifecycle state."
           },
+          "limit_stop": {
+            "$ref": "#/components/schemas/LimitStop",
+            "description": "Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). Native transport only."
+          },
           "login_required": {
             "$ref": "#/components/schemas/LoginRequired",
             "description": "Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only."
@@ -1980,6 +2042,10 @@
           "lifecycle": {
             "$ref": "#/components/schemas/LifecycleState",
             "description": "Detailed process lifecycle state."
+          },
+          "limit_stop": {
+            "$ref": "#/components/schemas/LimitStop",
+            "description": "Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). Native transport only."
           },
           "login_required": {
             "$ref": "#/components/schemas/LoginRequired",
@@ -3169,6 +3235,171 @@
           }
         },
         "summary": "Interrupt the agent"
+      }
+    },
+    "/limit": {
+      "delete": {
+        "description": "Forgets the turn a usage limit stopped, with its scheduled continuation, so the queued messages go out as soon as the agent can take them. Native transport only; returns 409 when no turn stopped on a limit.",
+        "operationId": "delete-limit",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterruptResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Dismiss a usage limit stop"
+      }
+    },
+    "/limit/continue": {
+      "delete": {
+        "description": "Cancels the continuation POST /limit/continue or --auto-continue scheduled. The queued messages still wait until the limit resets. Native transport only; returns 409 when no turn stopped on a limit.",
+        "operationId": "delete-limit-continue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterruptResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Cancel a scheduled continuation"
+      },
+      "post": {
+        "description": "Continues the turn a usage limit stopped (`limit_stop` in GET /status) with a message asking the agent to go on: now, or once the limit resets (`at: reset`, which needs the reset time). While a continuation is scheduled the queued messages wait for it; sending a message yourself cancels it. Native transport only; returns 409 when no turn stopped on a limit.",
+        "operationId": "post-limit-continue",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContinueRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterruptResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Continue after a usage limit"
       }
     },
     "/login/retry": {

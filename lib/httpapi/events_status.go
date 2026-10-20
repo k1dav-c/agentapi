@@ -80,7 +80,8 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 		TerminalPrompt: e.terminalPrompt, TerminalColumns: e.terminalColumns,
 		SessionName: e.sessionName, PendingRequests: pending, Capabilities: e.capabilities,
 		LoginRequired: e.loginRequired, Settings: e.settings, Usage: e.usage,
-		Terminal: e.terminal,
+		LimitStop: e.limitStop,
+		Terminal:  e.terminal,
 	}
 }
 
@@ -114,6 +115,17 @@ func (e *EventEmitter) SetUsage(usage native.AgentUsage) {
 		return
 	}
 	e.usage = &usage
+	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+}
+
+// SetLimitStop records the turn a usage limit stopped (nil: none).
+func (e *EventEmitter) SetLimitStop(ls *native.LimitStop) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if reflect.DeepEqual(e.limitStop, ls) {
+		return
+	}
+	e.limitStop = ls
 	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
 }
 

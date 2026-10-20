@@ -21,3 +21,19 @@ var authErrorPattern = regexp.MustCompile(`\b401\b|unauthorized|not authenticate
 func IsAuthError(text string) bool {
 	return authErrorPattern.MatchString(strings.ToLower(text))
 }
+
+// limitErrorPattern matches (lower-case) errors of an account that reached
+// a usage limit or ran out of credits, as agents and model providers word
+// them: Claude Code's "You've hit your limit" family, Codex's "usage limit",
+// and providers' quota errors. A transient rate limit (too many requests)
+// is not one: the agent retries those.
+var limitErrorPattern = regexp.MustCompile(`you've (?:hit|reached) your|you're out of (?:extra )?usage|` +
+	`out of usage|usage limit|usage allocation|usage credits|` +
+	`exceeded your current quota|insufficient_quota|quota exceeded|resource_exhausted`)
+
+// IsLimitError reports whether an agent's error text says that the account
+// reached a usage limit. Adapters check their protocol's structured signals
+// (error codes, rate limit events) as well.
+func IsLimitError(text string) bool {
+	return limitErrorPattern.MatchString(strings.ToLower(text))
+}

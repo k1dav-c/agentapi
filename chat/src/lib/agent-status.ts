@@ -1,7 +1,7 @@
 // The agent's status as status_change events report it, kept as one value
 // so that an event that changes nothing renders nothing.
 
-import type {AgentSettings, AgentUsage} from "./chat-api";
+import type {AgentSettings, AgentUsage, LimitStop} from "./chat-api";
 import type {Capabilities} from "./dispatch";
 import {parseAgentType, type AgentType} from "./agents";
 import {parseLoginRequired, type LoginRequired} from "./login";
@@ -27,6 +27,8 @@ export interface StatusChangeEvent {
   settings?: AgentSettings;
   // Native agents, once they report it.
   usage?: AgentUsage;
+  // Set while a turn a usage limit stopped holds the queue.
+  limit_stop?: LimitStop;
   // A shell terminal is available (native transport).
   terminal?: boolean;
 }
@@ -42,6 +44,7 @@ export interface AgentStatus {
   capabilities: Capabilities | null;
   settings: AgentSettings | null;
   usage: AgentUsage | null;
+  limitStop: LimitStop | null;
   terminalAvailable: boolean;
   loginRequired: LoginRequired | null;
   lifecycle: string;
@@ -57,6 +60,7 @@ export const initialAgentStatus: AgentStatus = {
   capabilities: null,
   settings: null,
   usage: null,
+  limitStop: null,
   terminalAvailable: false,
   loginRequired: null,
   lifecycle: "",
@@ -76,6 +80,7 @@ export function applyStatusChange(status: AgentStatus, event: StatusChangeEvent)
     capabilities: event.capabilities ?? null,
     settings: event.settings ?? null,
     usage: event.usage ?? null,
+    limitStop: event.limit_stop ?? null,
     terminalAvailable: event.terminal ?? false,
     loginRequired: parseLoginRequired(event.login_required),
     lifecycle: event.lifecycle ?? "",

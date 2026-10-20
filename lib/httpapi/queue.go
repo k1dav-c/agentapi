@@ -258,6 +258,7 @@ func (s *Server) queueMessageLocked(resp *MessageResponse, content string, front
 func (s *Server) startMessageQueue() {
 	s.clock.TickerFunc(s.shutdownCtx, messageQueueDispatchInterval, func() error {
 		s.dismissCodexUpdatePrompt()
+		s.continueIfDue()
 		s.dispatchNextQueuedMessage()
 		s.persistQueue()
 		return nil

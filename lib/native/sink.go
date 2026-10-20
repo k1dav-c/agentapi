@@ -39,9 +39,14 @@ func (s *sink) TurnCompleted(result TurnResult) {
 		c.turnActive = false
 		c.messages.endAgentMessage()
 		c.expireRequestsLocked(false)
-		if result.Error != "" {
+		switch {
+		case result.StopReason == StopReasonLimited:
+			// The limit stop shows what the agent said.
+			c.limitStoppedLocked(result)
+		case result.Error != "":
 			c.cfg.Emitter.EmitError(result.Error, st.ErrorLevelError)
 		}
+		c.continueAgain = false
 		if c.login != nil && provesLogin(result) {
 			c.login = nil
 			c.cfg.Observer.LoginRequired(nil)

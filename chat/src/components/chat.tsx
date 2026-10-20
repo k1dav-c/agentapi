@@ -13,6 +13,7 @@ import {OPEN_TERMINAL_EVENT} from "@/lib/slash-commands";
 import {DecisionCard, StateStrip} from "./dock";
 import {RequestCard} from "./request-card";
 import {LoginCard} from "./login-card";
+import {LimitCard} from "./limit-card";
 import {BackgroundAlerts} from "./background-alerts";
 
 // The Explorer (task index, MCP settings) isn't needed for the
@@ -216,6 +217,7 @@ export function Chat() {
                 {hasTerminal && <DecisionCard onOpenTerminal={() => setTerminalOpen(true)} />}
                 {features.requests && <LoginCard onRunInTerminal={hasShell ? openShell : undefined} />}
                 {features.requests && <RequestCard />}
+                {features.requests && <LimitCard />}
               </>
             }
             onSendMessage={sendMessage}

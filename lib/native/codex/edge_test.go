@@ -105,6 +105,15 @@ func TestFailedTurn(t *testing.T) {
 	assert.Equal(t, "turn failed: stream disconnected\nHTTP 502", *sys[len(sys)-1].Content)
 }
 
+func TestTurnStoppedByAUsageLimit(t *testing.T) {
+	h := newHarness(t, "", nil)
+	h.boot()
+	h.beginTurn("turn-1")
+	h.completeTurn("turn-1", "failed", `,"error":{"message":"You've hit your usage limit. Try again at 3:05 PM.","codexErrorInfo":"usageLimitExceeded"}`)
+	s := snapshot(h.rec)
+	assert.Equal(t, []native.TurnResult{{StopReason: "limited", Error: "You've hit your usage limit. Try again at 3:05 PM."}}, s.completions)
+}
+
 func TestInterruptWithoutCompletion(t *testing.T) {
 	h := newHarness(t, "", nil, func(c *Config) { c.InterruptTimeout = 50 * time.Millisecond })
 	h.boot()

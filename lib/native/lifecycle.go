@@ -223,6 +223,7 @@ func (c *Conversation) Restart(ctx context.Context) error {
 	c.sessionRef = ""
 	c.promptSent = false
 	c.messages.reset()
+	c.setLimitStopLocked(nil)
 	if c.usage.Context != nil {
 		// A new session starts with an empty context.
 		usage := c.usage

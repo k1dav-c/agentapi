@@ -19,6 +19,8 @@ type restoredState struct {
 	resumeRef string
 	// settings were chosen for the session.
 	settings native.Settings
+	// limitStop is the turn a usage limit stopped.
+	limitStop *native.LimitStop
 }
 
 // restoreState connects the state database to emitter, which stores its
@@ -75,8 +77,13 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 		// The agent starts with its own settings.
 		logger.Warn("Ignoring the stored settings", "error", err)
 	}
+	limitStop, err := snap.LimitStop()
+	if err != nil {
+		logger.Warn("Ignoring the stored limit stop", "error", err)
+	}
+	emitter.SetLimitStop(limitStop)
 	logger.Info("Restored conversation from the state database", "messages", len(state.Messages), "resume", resumeRef != "")
-	return restoredState{snapshot: snap, messages: state.Messages, resumeRef: resumeRef, settings: settings}, nil
+	return restoredState{snapshot: snap, messages: state.Messages, resumeRef: resumeRef, settings: settings, limitStop: limitStop}, nil
 }
 
 // checkRestoredIdentity refuses a state database written for another agent

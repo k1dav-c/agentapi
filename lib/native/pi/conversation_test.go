@@ -163,6 +163,7 @@ func (*settingsObserver) SessionRef(string)                       {}
 func (*settingsObserver) RequestUpdated(native.RequestState)      {}
 func (*settingsObserver) SettingsChosen(native.Settings)          {}
 func (*settingsObserver) Usage(native.AgentUsage)                 {}
+func (*settingsObserver) LimitStop(*native.LimitStop)             {}
 
 func TestModelSwitchReportsNoMixedSettings(t *testing.T) {
 	t.Parallel()

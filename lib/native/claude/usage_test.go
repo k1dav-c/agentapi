@@ -62,3 +62,35 @@ func TestContextUsageAfterATurn(t *testing.T) {
 	}, 5*time.Second, time.Millisecond)
 	assert.Equal(t, &native.ContextUsage{Used: 41000, Size: 200000}, sink.State().Usage[0].Context)
 }
+
+func TestTurnStoppedByALimit(t *testing.T) {
+	t.Parallel()
+	proc := newFakeProcess("")
+	a, sink := started(t, Config{}, proc)
+	require.NoError(t, a.StartTurn(context.Background(), native.Input{Text: "hi"}))
+	proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1"}`))
+	// As Claude Code 2.1.302 ends a turn on a reached limit: the event
+	// first, then a result in its own words.
+	proc.send(t, []byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":4102444800,"rateLimitType":"five_hour"}}`))
+	proc.send(t, []byte(`{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"result":"You've hit your limit · resets 3pm (UTC)"}`))
+	require.Eventually(t, func() bool { return len(sink.State().Results) == 1 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your limit · resets 3pm (UTC)"}, sink.State().Results[0])
+}
+
+func TestTurnStoppedByALimitMessage(t *testing.T) {
+	t.Parallel()
+	proc := newFakeProcess("")
+	a, sink := started(t, Config{}, proc)
+	require.NoError(t, a.StartTurn(context.Background(), native.Input{Text: "hi"}))
+	proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1"}`))
+	proc.send(t, []byte(`{"type":"result","subtype":"success","is_error":true,"result":"You're out of extra usage · resets Oct 20"}`))
+	require.Eventually(t, func() bool { return len(sink.State().Results) == 1 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, native.StopReasonLimited, sink.State().Results[0].StopReason)
+
+	// Another failure is not a limit.
+	require.NoError(t, a.StartTurn(context.Background(), native.Input{Text: "again"}))
+	proc.send(t, []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["API Error: 529 overloaded_error"]}`))
+	require.Eventually(t, func() bool { return len(sink.State().Results) == 2 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, native.StopReasonError, sink.State().Results[1].StopReason)
+}
+

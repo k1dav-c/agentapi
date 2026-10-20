@@ -231,6 +231,9 @@ const (
 	// StopReasonHandled: the agent handled the message without a model
 	// turn, e.g. a Pi extension command.
 	StopReasonHandled = "handled"
+	// StopReasonLimited: the account reached a usage limit; TurnResult.Error
+	// is what the agent said.
+	StopReasonLimited = "limited"
 )
 
 // RedactedAnswer replaces the answers to secret questions everywhere but
@@ -243,6 +246,10 @@ type TurnResult struct {
 	StopReason string
 	// Error is set when the turn failed.
 	Error string
+	// ResetsAt is when the limit that stopped a limited turn resets, if
+	// the agent says. Without it the conversation takes the reset of the
+	// limits the agent reported as reached.
+	ResetsAt *time.Time
 }
 
 // Sink receives an adapter's events. Its methods may be called from any

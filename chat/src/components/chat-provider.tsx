@@ -24,9 +24,11 @@ import {
   httpURL,
   type AgentSettings,
   type AgentUsage,
+  type ContinueAt,
   type FileContent,
   type FileDiff,
   type FilePreview,
+  type LimitStop,
   type MCPCheckResult,
   type MCPConfig,
   type MCPProfiles,
@@ -121,6 +123,14 @@ interface ChatContextValue {
   terminalAvailable: boolean;
   // POST /compact (agents with the compact capability).
   compact: () => Promise<void>;
+  // The turn a usage limit stopped, while it holds the queue (native
+  // transport); null otherwise. Continuing it now or once the limit resets,
+  // cancelling a scheduled continuation, and dismissing the stop, which
+  // lets the queued tasks go.
+  limitStop: LimitStop | null;
+  continueAfterLimit: (at: ContinueAt) => Promise<void>;
+  cancelContinue: () => Promise<void>;
+  dismissLimitStop: () => Promise<void>;
   terminalInput: (data: string) => Promise<void>;
   terminalResize: (cols: number, rows: number) => Promise<void>;
   // The agent is starting (lifecycle "starting"): there is no turn yet, and
@@ -271,6 +281,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     capabilities,
     settings: agentSettings,
     usage: agentUsage,
+    limitStop,
     terminalAvailable,
     loginRequired,
     lifecycle,
@@ -568,6 +579,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
     agentUsage,
     terminalAvailable,
     compact: api.compact,
+    limitStop,
+    continueAfterLimit: api.continueAfterLimit,
+    cancelContinue: api.cancelContinue,
+    dismissLimitStop: api.dismissLimitStop,
     terminalInput: api.terminalInput,
     terminalResize: api.terminalResize,
     getSettings: api.getSettings,

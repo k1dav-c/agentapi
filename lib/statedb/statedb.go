@@ -64,6 +64,8 @@ const (
 	metaSeq         = "seq"
 	MetaSessionRef  = "session_ref"
 	MetaSessionName = "session_name"
+	// MetaLimitStop holds the turn a usage limit stopped, as JSON.
+	MetaLimitStop = "limit_stop"
 	// metaSettings holds the settings chosen for the session (JSON). A
 	// reset keeps them.
 	metaSettings    = "settings"
@@ -467,6 +469,33 @@ func (s Snapshot) Settings() (native.Settings, error) {
 		return native.Settings{}, fmt.Errorf("decode the stored settings: %w", err)
 	}
 	return settings, nil
+}
+
+// SetLimitStop stores the turn a usage limit stopped; nil removes it.
+func (d *DB) SetLimitStop(ls *native.LimitStop) {
+	value := ""
+	if ls != nil {
+		data, err := json.Marshal(ls)
+		if err != nil {
+			d.logger.Error("Failed to encode the limit stop", "error", err)
+			return
+		}
+		value = string(data)
+	}
+	d.SetMeta(MetaLimitStop, value)
+}
+
+// LimitStop returns the stored turn a usage limit stopped, or nil.
+func (s Snapshot) LimitStop() (*native.LimitStop, error) {
+	data := s.Meta[MetaLimitStop]
+	if data == "" {
+		return nil, nil
+	}
+	var ls native.LimitStop
+	if err := json.Unmarshal([]byte(data), &ls); err != nil {
+		return nil, fmt.Errorf("decode the stored limit stop: %w", err)
+	}
+	return &ls, nil
 }
 
 // SetSeq stores the latest change sequence of epoch.

@@ -45,6 +45,10 @@ export type SettingsResponse = Body<Schemas["SettingsResponseBody"]>;
 export type ContextUsage = Schemas["ContextUsage"];
 export type RateLimit = Schemas["RateLimit"];
 export type AgentUsage = Schemas["AgentUsage"];
+// A turn that stopped because the account reached a usage limit (native
+// transport): the queue waits until the limit resets.
+export type LimitStop = Schemas["LimitStop"];
+export type ContinueAt = Schemas["ContinueAt"];
 
 interface APIErrorDetail {
   message: string;
@@ -125,6 +129,20 @@ export function createChatAPI(baseURL: string) {
 
     async compact(): Promise<void> {
       await jsonRequest("/compact", {method: "POST", fallback: "Failed to compact the context"});
+    },
+
+    // Continues the turn a usage limit stopped: now, or once it resets.
+    async continueAfterLimit(at: ContinueAt): Promise<void> {
+      await jsonRequest("/limit/continue", {method: "POST", body: {at}, fallback: "Failed to continue the task"});
+    },
+
+    async cancelContinue(): Promise<void> {
+      await jsonRequest("/limit/continue", {method: "DELETE", fallback: "Failed to cancel the continuation"});
+    },
+
+    // Forgets the limit stop, so the queued tasks go out.
+    async dismissLimitStop(): Promise<void> {
+      await jsonRequest("/limit", {method: "DELETE", fallback: "Failed to dismiss the usage limit"});
     },
 
     // Types keys into the native transport's terminal.

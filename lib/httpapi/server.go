@@ -147,6 +147,9 @@ type NativeConfig struct {
 	// UpdateAgent, if set, updates the agent's CLI before a restart starts
 	// a new one (Codex, Pi).
 	UpdateAgent func(context.Context)
+	// AutoContinue continues a turn a usage limit stopped once the limit
+	// resets.
+	AutoContinue bool
 }
 
 // agentIO is the conversation's view of a PTY or ACP agent, nil for a
@@ -287,6 +290,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			Factory:         config.Native.Factory,
 			ResumeRef:       restored.resumeRef,
 			Settings:        restored.settings,
+			LimitStop:       restored.limitStop,
+			AutoContinue:    config.Native.AutoContinue,
 			InitialMessages: restored.messages,
 			InitialPrompt:   config.InitialPrompt,
 			Emitter:         emitter,

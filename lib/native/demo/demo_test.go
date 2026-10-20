@@ -34,6 +34,7 @@ func (o *observer) Usage(u native.AgentUsage) {
 }
 
 func (o *observer) Started(native.Capabilities) {}
+func (o *observer) LimitStop(*native.LimitStop) {}
 func (o *observer) RichMessage(m transcript.RichMessage) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -335,3 +336,15 @@ func TestCompact(t *testing.T) {
 	defer obs.mu.Unlock()
 	assert.NotEmpty(t, obs.usage)
 }
+
+func TestLimitStopsTheTurn(t *testing.T) {
+	c, _ := start(t, nil)
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "hit the limit"}))
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	ls := c.LimitStop()
+	require.NotNil(t, ls)
+	assert.Contains(t, ls.Message, "5-hour limit")
+	require.NotNil(t, ls.ResetsAt, "taken from the reached limit")
+	assert.Equal(t, "rejected", c.Usage().RateLimits[0].Status)
+}
+

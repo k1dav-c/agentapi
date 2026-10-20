@@ -447,6 +447,9 @@ func (a *Adapter) endTurn() {
 	if result.Error != "" && isAuthError(result.Error) {
 		a.reportLogin()
 	}
+	if result.StopReason == native.StopReasonError && native.IsLimitError(result.Error) {
+		result.StopReason = native.StopReasonLimited
+	}
 	a.loop.sink.TurnCompleted(result)
 }
 

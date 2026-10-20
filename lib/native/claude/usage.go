@@ -94,6 +94,18 @@ func (a *Adapter) handleRateLimit(raw json.RawMessage) {
 	a.reportUsage()
 }
 
+// limitReached reports whether Claude Code said that a limit was reached
+// and has yet to reset. Read loop only.
+func (a *Adapter) limitReached() bool {
+	now := a.cfg.Clock.Now()
+	for _, l := range a.usage.RateLimits {
+		if l.Status == "rejected" && (l.ResetsAt == nil || l.ResetsAt.After(now)) {
+			return true
+		}
+	}
+	return false
+}
+
 // readContextUsage asks how full the context window is, after a turn. The
 // answer is handled in the read loop.
 func (a *Adapter) readContextUsage() {

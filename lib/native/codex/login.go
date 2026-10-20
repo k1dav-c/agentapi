@@ -45,6 +45,19 @@ func (a *Adapter) checkLogin(ctx context.Context) error {
 	return nil
 }
 
+// isLimitError reports whether a turn error says that the account reached
+// a usage limit: the usageLimitExceeded error code, or a limit message.
+func isLimitError(e *turnError) bool {
+	if e == nil {
+		return false
+	}
+	var code string
+	if json.Unmarshal(e.CodexErrorInfo, &code) == nil && code == "usageLimitExceeded" {
+		return true
+	}
+	return native.IsLimitError(turnErrorText(e))
+}
+
 // isAuthError reports whether a turn error is a login problem: the
 // unauthorized error code, an HTTP 401 on any of the error kinds, or a
 // login message.

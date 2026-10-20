@@ -187,10 +187,11 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 		}
 	case httpapi.TransportNative:
 		config.Native = httpapi.NativeConfig{
-			Factory:     agent.factory,
-			UpdateAgent: agent.updateNative,
-			Terminal:    opts.terminal,
-			StateDB:     stateDB,
+			Factory:      agent.factory,
+			UpdateAgent:  agent.updateNative,
+			Terminal:     opts.terminal,
+			StateDB:      stateDB,
+			AutoContinue: opts.autoContinue,
 		}
 	}
 	if stateDB != nil {
@@ -417,6 +418,7 @@ const (
 	FlagTransport              = "transport"
 	FlagStateDB                = "state-db"
 	FlagTerminal               = "terminal"
+	FlagAutoContinue           = "auto-continue"
 	FlagWebhookURL             = "webhook-url"
 	FlagWebhookTimeout         = "webhook-timeout"
 	FlagWebhookMaxAttempts     = "webhook-max-attempts"
@@ -469,6 +471,7 @@ func CreateServerCmd() *cobra.Command {
 		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) and resumes the agent's session when AgentAPI restarts. Native transport only", "string"},
 		{FlagTransport, "", "native", "How to drive the agent: native (its own structured protocol; claude, codex and pi), pty (its terminal UI) or acp (same as --experimental-acp). Without it, claude, codex and pi use native, other agents and --state-file pty", "string"},
 		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal. Native transport only, where the agent has no terminal of its own", "bool"},
+		{FlagAutoContinue, "", false, "When a usage limit stops the agent's turn, continue it once the limit resets, if the agent says when. Native transport only", "bool"},
 		{FlagWebhookURL, "", "", "URL notified when the agent run status changes", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},
 		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},

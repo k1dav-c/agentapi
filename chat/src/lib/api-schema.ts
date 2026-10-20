@@ -188,6 +188,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/limit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Dismiss a usage limit stop
+         * @description Forgets the turn a usage limit stopped, with its scheduled continuation, so the queued messages go out as soon as the agent can take them. Native transport only; returns 409 when no turn stopped on a limit.
+         */
+        delete: operations["delete-limit"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/limit/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Continue after a usage limit
+         * @description Continues the turn a usage limit stopped (`limit_stop` in GET /status) with a message asking the agent to go on: now, or once the limit resets (`at: reset`, which needs the reset time). While a continuation is scheduled the queued messages wait for it; sending a message yourself cancels it. Native transport only; returns 409 when no turn stopped on a limit.
+         */
+        post: operations["post-limit-continue"];
+        /**
+         * Cancel a scheduled continuation
+         * @description Cancels the continuation POST /limit/continue or --auto-continue scheduled. The queued messages still wait until the limit resets. Native transport only; returns 409 when no turn stopped on a limit.
+         */
+        delete: operations["delete-limit-continue"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/login/retry": {
         parameters: {
             query?: never;
@@ -803,6 +847,22 @@ export interface components {
             used: number;
         };
         /**
+         * ContinueAt
+         * @example now
+         * @enum {string}
+         */
+        ContinueAt: "now" | "reset";
+        ContinueRequestBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ContinueRequestBody.json
+             */
+            readonly $schema?: string;
+            /** @description now: send the continuation now; reset: send it once the limit resets (409 if the agent didn't say when). */
+            at: components["schemas"]["ContinueAt"];
+        };
+        /**
          * ConversationRole
          * @example user
          * @enum {string}
@@ -973,6 +1033,25 @@ export interface components {
          * @enum {string}
          */
         LifecycleState: "exited" | "failed" | "ready" | "restarting" | "running" | "starting";
+        LimitStop: {
+            /**
+             * Format: date-time
+             * @description When AgentAPI sends a message that continues the turn, if one is scheduled (POST /limit/continue). Queued messages go out after it.
+             */
+            continue_at?: string;
+            /** @description What the agent said, e.g. You've hit your limit · resets 3pm. */
+            message: string;
+            /**
+             * Format: date-time
+             * @description When the limit resets, if the agent says. Queued messages wait until then.
+             */
+            resets_at?: string;
+            /**
+             * Format: date-time
+             * @description When the turn stopped.
+             */
+            stopped_at: string;
+        };
         LoginRequired: {
             /** @description Agent that needs a login, e.g. Claude Code. */
             agent: string;
@@ -1647,6 +1726,8 @@ export interface components {
             capabilities?: components["schemas"]["Capabilities"];
             /** @description Detailed process lifecycle state. */
             lifecycle: components["schemas"]["LifecycleState"];
+            /** @description Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). Native transport only. */
+            limit_stop?: components["schemas"]["LimitStop"];
             /** @description Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only. */
             login_required?: components["schemas"]["LoginRequired"];
             /**
@@ -1698,6 +1779,8 @@ export interface components {
             epoch: string;
             /** @description Detailed process lifecycle state. */
             lifecycle: components["schemas"]["LifecycleState"];
+            /** @description Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). Native transport only. */
+            limit_stop?: components["schemas"]["LimitStop"];
             /** @description Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only. */
             login_required?: components["schemas"]["LoginRequired"];
             /**
@@ -2424,6 +2507,160 @@ export interface operations {
         };
     };
     "post-interrupt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterruptResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-limit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterruptResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "post-limit-continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContinueRequestBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterruptResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-limit-continue": {
         parameters: {
             query?: never;
             header?: never;

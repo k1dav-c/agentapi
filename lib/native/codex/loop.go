@@ -657,6 +657,9 @@ func (s *loopState) completeTurn(tr turn) {
 		if result.Error == "" {
 			result.Error = "The Codex turn failed"
 		}
+		if isLimitError(tr.Error) || (tr.Error == nil && native.IsLimitError(result.Error)) {
+			result.StopReason = native.StopReasonLimited
+		}
 	}
 	s.closeOpenItems(t, status)
 	s.closeTurnRequests()
