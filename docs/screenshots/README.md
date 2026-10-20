@@ -1,7 +1,7 @@
 # Documentation screenshots
 
 These screenshots and animated GIFs of the chat UI illustrate the [chat UI guide](../chat-ui.md) and
-the [README](../../README.md). They were taken with Chromium from an AgentAPI v0.26.0 binary, which
+the [README](../../README.md). They were taken with Chromium from an AgentAPI v0.27.0 binary, which
 serves the production chat UI and the API.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
@@ -12,6 +12,10 @@ uncommitted changes):
   server is real: it streams the events, keeps the queue, opens and answers the requests, applies
   the settings, serves the files and diffs, and runs the shell terminal. The demo's replies, tool
   results, models, context and usage limits are simulated, so no paid agent runs;
+- the same demo posing as Claude Code (`--type claude -- native-demo`), one directory above
+  `my-app`, for the earlier sessions, a subagent and a file found below the working directory.
+  AgentAPI reads Claude Code's logs for it, which the script writes into its home directory: three
+  earlier sessions, and the log of the subagent the demo's Agent tool call starts;
 - bash as a PTY agent (`--term-width 100`), for TTY mode.
 
 ## Gallery
@@ -47,6 +51,11 @@ device scale factor of 1.
 | [mobile-question.png](mobile-question.png) | A question card on a phone |
 | [native-plan.png](native-plan.png) | A plan card |
 | [queue-steer.png](queue-steer.png) | Queued tasks during a long turn, and the send menu |
+| [limit-card.png](limit-card.png) | A turn stopped on a usage limit, with a task held in the queue |
+| [cold-cache.png](cold-cache.png) | The note that the prompt cache expired, with Compact |
+| [explorer-sessions.png](explorer-sessions.png) | The Explorer's Session tab with Claude Code's earlier sessions |
+| [lineage.png](lineage.png) | The Lineage panel on a subagent |
+| [file-find.png](file-find.png) | The file viewer on a file found below the working directory |
 | [login-card.png](login-card.png) | A login card |
 | [tty-mode.png](tty-mode.png) | TTY mode on a PTY agent |
 
@@ -90,8 +99,8 @@ runs the script) and a neutral shell prompt.
    Version 1.63.0 supports the Playwright APIs the script uses; its Chromium build is the browser
    recorded in [capture.json](capture.json).
 
-3. Run the script from the repository root. It needs Node.js 18 or later, git and bash, and two free
-   ports (3311 and 3312 unless you set `AGENTAPI_SCREENSHOT_PORT` to the first of another pair):
+3. Run the script from the repository root. It needs Node.js 18 or later, git and bash, and three
+   free ports (3311 to 3313 unless you set `AGENTAPI_SCREENSHOT_PORT` to the first of three others):
 
    ```bash
    export AGENTAPI_PLAYWRIGHT_MODULE=/tmp/agentapi-docs-browser/node_modules/playwright-core/index.mjs
@@ -100,14 +109,14 @@ runs the script) and a neutral shell prompt.
    node scripts/capture-docs.mjs
    ```
 
-The script creates the sample project and a home directory in a temporary directory, starts the two
+The script creates the sample project and a home directory in a temporary directory, starts the three
 servers bound to 127.0.0.1, takes every view and records every GIF, writes
 [capture.json](capture.json) (the binary's version, the browser, the capture time, the viewports and
 the images) and stops the servers and removes the temporary directory again, also when a step fails.
 It fails if the chat reports an error. A run takes about five minutes.
 
 The binary's version shows in the chat's header. To show the version a merge will release, build
-with it: `make build VERSION=0.26.0`.
+with it: `make build VERSION=0.27.0`.
 
 Review the new images before updating the [chat UI guide](../chat-ui.md), its
 [Traditional Chinese translation](../chat-ui.zh-TW.md) and the READMEs.

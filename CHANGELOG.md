@@ -24,8 +24,13 @@
   subagents a native Claude Code or Codex ran, read from their own logs, each event tagged with its
   subagent and, for Claude Code, the Agent tool call that started it. Before, only the subagent's
   prompt and final answer were in it.
-- The native demo agent stops on a usage limit when a message says "limit", and leaves an expired
-  prompt cache when it says "cold".
+- The native demo agent stops on a usage limit when a message says "limit", leaves an expired
+  prompt cache when it says "cold", and hands a task to a subagent when it says "delegate". With
+  `--type claude`, `codex` or `pi` it poses as that agent, so AgentAPI reads that agent's logs for
+  its earlier sessions and subagents.
+- Docs: screenshots of the usage limit card, the cold cache note, the earlier sessions, Lineage and
+  a file found below the working directory, in the READMEs and the chat UI guide; all screenshots
+  retaken from v0.27.0.
 
 ### Fixes
 

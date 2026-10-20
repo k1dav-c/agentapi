@@ -6,7 +6,7 @@ AgentAPI serves a chat UI at `/chat`. It is embedded in the `agentapi` binary, w
 transport, on a desktop and on a phone, and talks to the server only through the
 [HTTP API](../README.md#http-api-reference). This guide goes through every part of it.
 
-The screenshots and the animations show AgentAPI v0.26.0 with the built-in `native-demo` agent
+The screenshots and the animations show AgentAPI v0.27.0 with the built-in `native-demo` agent
 working on a small sample site; the demo's replies, tool results, models and usage are simulated,
 and TTY mode shows bash run as a PTY agent. The animations draw a blue dot where the pointer is and
 where it clicks. [scripts/capture-docs.mjs](../scripts/capture-docs.mjs) takes all of them again
@@ -22,6 +22,7 @@ transport](../README.md#native-transport), which Claude Code, Codex and Pi use b
 - [Requests and decision cards](#requests-and-decision-cards)
 - [Files](#files)
 - [Session Explorer](#session-explorer)
+- [Lineage](#lineage)
 - [Terminals](#terminals)
 - [Session details and alerts](#session-details-and-alerts)
 - [Phones](#phones)
@@ -197,6 +198,24 @@ last turn, and the account's usage limits with how much is used and when each re
 5-hour and weekly limits, Codex's windows. When the context fills up, the agent compacts it;
 `/compact` does it now.
 
+![A note above the composer: the prompt cache expired and the next message reads 120k tokens again, with Compact](screenshots/cold-cache.png)
+
+*native* Claude Code keeps the conversation in the model provider's prompt cache for an hour after
+its last use on a subscription, five minutes with an API key. Once the cache expired, the next
+message has the model read the whole context again, at the full price and against the usage
+limits. While the agent is idle with an expired cache and at least 50k tokens of context, a note
+above the composer says so, with **Compact**. Closed, it stays away until the next turn.
+
+### A usage limit
+
+![A turn stopped on the 5-hour limit: a card with the reset time and Continue at reset, Continue now and Send queued tasks, and a task held in the queue](screenshots/limit-card.png)
+
+*native* When the account reaches a usage limit, the agent stops its turn, and a card above the
+composer says when the limit resets. The queued tasks wait until then, marked *held until the usage
+limit resets*, instead of failing one by one. **Continue at reset** sends a message that has the
+agent go on with the task a minute after the reset, **Continue now** sends it now, and **Send queued
+tasks** lets the queue go at once. A task you send yourself goes out right away.
+
 ## Requests and decision cards
 
 What the agent asks you appears above the composer as a card, and the agent waits. The status line
@@ -258,6 +277,13 @@ File names in the chat open a viewer on the file the agent works on: a file name
 row, a path in inline code in the agent's reply (`lib/foo.go:12` opens at line 12) and the
 Explorer's Files tab. Only files inside the agent's working directory open. The viewer's header
 reloads the file; on a phone the viewer takes the whole screen.
+
+![The viewer on my-app/docs/notes.md, with a note that docs/notes.md isn't in the working directory and this is the file found for it](screenshots/file-find.png)
+
+An agent started in a home directory works in a repository below it and names files relative to the
+repository, sometimes in the wrong case. When a path isn't in the working directory, the viewer
+looks for it below: one match opens, with a note naming the path the agent wrote, and several are
+listed to choose from.
 
 ![Opening index.html and its preview, then the diff of README.md](screenshots/demo-files.gif)
 
@@ -327,12 +353,32 @@ See [MCP management](../README.md#mcp-management) for the API.
 
 ### Session
 
+![The Explorer's Session tab: Claude Code's sessions in the directory with Open and Start a copy, one asking for a second click](screenshots/explorer-sessions.png)
+
+*native* For Claude Code, Codex and Pi the tab starts with the agent's sessions in its working
+directory, read from the agent's own logs: each with its name, first message, number of messages
+and when it last changed. **Open** restarts the agent on that session and shows its conversation;
+**Start a copy** opens a copy under a new id and leaves the session as it was. Both replace this
+conversation and its queue, and ask for a second click.
+
 ![The Explorer's Session tab asking for a second click to restart the agent](screenshots/explorer-session.png)
 
 **Restart agent** stops the agent, clears the conversation and starts it again in a new session; it
 asks for a second click. Codex and Pi, when AgentAPI starts their CLI directly, update to their
 latest release first. **Download conversation JSONL** saves every message, tool call and result of
-the session, one event per line; the session details menu has it too.
+the session, one event per line, followed by those of the subagents the agent ran; the session
+details menu has it too.
+
+## Lineage
+
+![The Lineage panel on a subagent: the task Claude Code gave it, a file it read, a command it ran and its answer](screenshots/lineage.png)
+
+*native* When Claude Code or Codex hands work to subagents, a button in the header counts them, with
+how many still work. It opens the Lineage panel, which lists each subagent with its task, kind,
+state and time. Choosing one shows what it did the way the transcript shows a task: its thinking,
+tool calls and answer, updated while it works. The **Steps** button on the Agent (or spawn_agent)
+tool call that started a subagent opens it directly. The steps come from the subagents' own logs,
+so a session opened from the Session tab shows its subagents too.
 
 ## Terminals
 

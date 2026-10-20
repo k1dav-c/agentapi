@@ -1,8 +1,9 @@
 {
-  "captured_at": "2026-10-18T16:47:58.973Z",
-  "agentapi_version": "0.26.0",
+  "captured_at": "2026-10-20T17:54:41.676Z",
+  "agentapi_version": "0.27.0",
   "agents": [
     "native-demo",
+    "native-demo posing as Claude Code",
     "bash (PTY)"
   ],
   "browser": "153.0.8010.12",
@@ -41,6 +42,8 @@
     "mobile-question.png",
     "native-plan.png",
     "queue-steer.png",
+    "limit-card.png",
+    "cold-cache.png",
     "demo-task.gif",
     "demo-approval.gif",
     "demo-question.gif",
@@ -49,6 +52,9 @@
     "demo-files.gif",
     "demo-terminal.gif",
     "demo-phone.gif",
+    "explorer-sessions.png",
+    "lineage.png",
+    "file-find.png",
     "login-card.png",
     "tty-mode.png"
   ]

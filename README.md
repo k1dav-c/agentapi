@@ -14,7 +14,7 @@ with an HTTP API.
 
 ![The AgentAPI chat with two tasks: prompts, tool calls, thinking notes and the composer](docs/screenshots/chat-desktop.png)
 
-The screenshots show AgentAPI v0.26.0 with the built-in `native-demo` agent, whose replies, tool
+The screenshots show AgentAPI v0.27.0 with the built-in `native-demo` agent, whose replies, tool
 results, models and usage are simulated. The [chat UI guide](docs/chat-ui.md) goes through every
 feature of the chat with screenshots and animations, and the
 [screenshot guide](docs/screenshots/README.md) explains how they are taken.
@@ -299,6 +299,8 @@ step, the way the transcript shows a task: its thinking, tool calls with their r
 answer, which follow it while it works. The **Steps** button on an Agent or spawn_agent tool call
 opens the panel on its subagent.
 
+![The Lineage panel on a subagent: its task, a file it read, a command it ran and its answer](docs/screenshots/lineage.png)
+
 The steps are read from the subagents' own logs (Claude Code keeps one per subagent next to the
 session's), so the panel shows those of the session the agent has open, also one opened from
 [earlier sessions](#earlier-sessions); a copy of a session starts without the subagents of the
@@ -343,6 +345,8 @@ case: an agent working in a repository below its working directory (a home direc
 relative to the repository. One match opens, with a note naming the path the agent wrote; several
 are listed to choose from. The search leaves out hidden directories, dependencies and Go's module
 cache unless the path goes into them, and stops after 50,000 entries or 2 seconds.
+
+![The viewer on my-app/docs/notes.md, with a note that docs/notes.md isn't in the working directory](docs/screenshots/file-find.png)
 
 HTML, Markdown and SVG files have a third tab, Preview, and an image file shows as the image:
 
@@ -429,7 +433,10 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 - ACP is a separate transport. `--transport acp` is equivalent to
   `--experimental-acp` and cannot be enabled together with native mode.
 - For UI development, `--type custom -- native-demo` runs a simulated agent with
-  the native transport; see the [development guide](chat/README.md).
+  the native transport; see the [development guide](chat/README.md). With
+  `--type claude`, `codex` or `pi` instead, the demo poses as that agent:
+  AgentAPI reads that agent's logs for it, for its earlier sessions and
+  subagents.
   `--transport native` with any other agent type is rejected at startup.
 
 **What to expect**
@@ -697,6 +704,8 @@ model read the whole context again, at the full price and against the usage limi
 is idle with an expired cache and at least 50k tokens of context, the chat says so above the
 composer and offers to compact first; dismissed, the note stays away until the next turn.
 
+![A note above the composer: the prompt cache expired and the next message reads 120k tokens again, with Compact](docs/screenshots/cold-cache.png)
+
 ![The context popover: the tokens in the context window, and the 5-hour and weekly usage limits](docs/screenshots/context-usage.png)
 
 ### Usage limits
@@ -721,6 +730,8 @@ yourself goes out at once, past them, and ends the stop.
 The stop is kept with `--state-db`, so a scheduled continuation still goes out after AgentAPI
 restarts. In the chat, the stop is a card above the composer with the reset time, **Continue at
 reset**, **Continue now**, and **Send queued tasks**, and the queue says it waits for the limit.
+
+![A turn stopped on the 5-hour limit: the card with the reset time, and a task held in the queue](docs/screenshots/limit-card.png)
 
 ### Terminal
 
@@ -830,6 +841,8 @@ agent had in its working directory and to open one, without `--state-db`:
 
 In the chat, the Explorer's Session tab lists the sessions with **Open** and **Start a copy**, which
 ask for a second click.
+
+![The Explorer's Session tab: Claude Code's sessions in the directory with Open and Start a copy](docs/screenshots/explorer-sessions.png)
 
 ### Claude Code
 

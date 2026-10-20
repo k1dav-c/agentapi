@@ -6,7 +6,7 @@ AgentAPI 在 `/chat` 提供聊天介面。它內建在 `agentapi` 執行檔裡�
 桌面和手機都可以，而且只透過 [HTTP API](../README.zh-TW.md#http-api-參考) 和伺服器溝通。
 本導覽會逐一介紹它的每個部分。
 
-截圖和動畫是 AgentAPI v0.26.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
+截圖和動畫是 AgentAPI v0.27.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
 demo 的回覆、工具結果、模型和用量都是模擬的，TTY mode 則是以 PTY agent 執行的 bash。動畫會
 在滑鼠指標所在及點擊的位置畫上藍點。[scripts/capture-docs.mjs](../scripts/capture-docs.mjs)
 可以重新擷取所有截圖和動畫（見[截圖說明](screenshots/README.md)）。標示 *native* 的部分需要
@@ -21,6 +21,7 @@ demo 的回覆、工具結果、模型和用量都是模擬的，TTY mode 則是
 - [請求與決策卡片](#請求與決策卡片)
 - [檔案](#檔案)
 - [工作階段瀏覽器](#工作階段瀏覽器)
+- [Lineage](#lineage)
 - [終端機](#終端機)
 - [工作階段詳細資訊與提醒](#工作階段詳細資訊與提醒)
 - [手機](#手機)
@@ -186,6 +187,22 @@ Pi 沒有權限模式，所以它的工具列沒有模式選單。
 帳號的用量限制、各用了多少和何時重置：Claude Code 的 5 小時與每週限制、Codex 的用量窗口。
 context 滿了時，agent 會壓縮它；`/compact` 則會立刻壓縮。
 
+![輸入框上方的提醒：prompt cache 已過期，下一則訊息會重新讀取 120k token，旁邊是 Compact](screenshots/cold-cache.png)
+
+*native* 使用訂閱帳號時，Claude Code 會把對話保留在模型供應商的 prompt cache 裡，最後一次使用
+後保留一小時；使用 API key 時則是五分鐘。快取過期後，下一則訊息會讓模型重新讀取整個 context，
+以全額計價，也會算進用量限制。agent 閒置、快取已過期且 context 至少有 50k token 時，輸入框
+上方會出現提醒和 **Compact** 按鈕。關掉後，要到下一個回合結束才會再出現。
+
+### 達到用量限制
+
+![因 5 小時限制而停下的回合：卡片顯示重置時間，以及 Continue at reset、Continue now 和 Send queued tasks，佇列中有一個被暫停的任務](screenshots/limit-card.png)
+
+*native* 帳號達到用量限制時，agent 會停下它的回合，輸入框上方的卡片會說明限制何時重置。排隊
+中的任務會等到那時，並標示 *held until the usage limit resets*，而不是一個接一個失敗。
+**Continue at reset** 會在重置一分鐘後送出一則請 agent 繼續任務的訊息，**Continue now** 則
+立刻送出，**Send queued tasks** 會讓佇列馬上送出。你自己送出的任務會立刻送出。
+
 ## 請求與決策卡片
 
 agent 向你提出的事項會以卡片顯示在輸入框上方，agent 則等待你回應。卡片上方的狀態列、
@@ -243,6 +260,12 @@ AgentAPI 也會每 5 秒重試一次，期間的訊息會在佇列中等待。�
 聊天裡的檔名會開啟檢視器，顯示 agent 正在處理的檔案：工具呼叫列上的檔名、agent 回覆中
 inline code 裡的路徑（`lib/foo.go:12` 會開在第 12 行），以及 Explorer 的 Files 分頁。只能
 開啟 agent 工作目錄裡的檔案。檢視器的標頭可以重新載入檔案；在手機上，檢視器會占滿整個螢幕。
+
+![檢視器開啟 my-app/docs/notes.md，並註明 docs/notes.md 不在工作目錄裡，這是找到的對應檔案](screenshots/file-find.png)
+
+在 home 目錄啟動的 agent，會在底下的某個 repo 裡工作，提到檔案時用的是相對於 repo 的路徑，
+有時大小寫也不對。路徑不在工作目錄裡時，檢視器會在工作目錄底下搜尋：只找到一個就直接開啟，
+並註明 agent 原本寫的路徑；找到多個則列出來讓你選。
 
 ![開啟 index.html 和它的預覽，接著查看 README.md 的 diff](screenshots/demo-files.gif)
 
@@ -309,12 +332,30 @@ API 請參閱 [MCP 管理](../README.zh-TW.md#mcp-管理)。
 
 ### Session 分頁
 
+![Explorer 的 Session 分頁：這個目錄中 Claude Code 的工作階段，各有 Open 和 Start a copy，其中一個要求再點一次](screenshots/explorer-sessions.png)
+
+*native* 對 Claude Code、Codex 和 Pi，這個分頁最上方會列出 agent 在工作目錄中的工作階段，資料
+來自 agent 自己的紀錄：每一個都有名稱、第一則訊息、訊息數和最後變動的時間。**Open** 會讓
+agent 在那個工作階段上重新啟動，並顯示它的對話；**Start a copy** 會以新的 id 開啟它的副本，
+原本的工作階段維持不變。兩者都會取代目前的對話和佇列，並要求你再點一次。
+
 ![Explorer 的 Session 分頁要求再點一次才會重新啟動 agent](screenshots/explorer-session.png)
 
 **Restart agent** 會停止 agent、清除對話，並在新的工作階段中重新啟動它；它會要求你再點一次。
 AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的發行版。
-**Download conversation JSONL** 會儲存這個工作階段的每則訊息、工具呼叫和結果，每行一個事件；
-工作階段詳細資訊的選單裡也有。
+**Download conversation JSONL** 會儲存這個工作階段的每則訊息、工具呼叫和結果，每行一個事件，
+後面接著 agent 執行過的 sub agent 的事件；工作階段詳細資訊的選單裡也有。
+
+## Lineage
+
+![Lineage 面板顯示一個 sub agent：Claude Code 交給它的任務、它讀的檔案、跑的指令和它的回答](screenshots/lineage.png)
+
+*native* Claude Code 或 Codex 把工作交給 sub agent 時，header 上會出現一個按鈕，顯示 sub agent
+的數量和還在執行的數量。點下去會打開 Lineage 面板，列出每個 sub agent 的任務、類型、狀態和
+執行時間。選一個就能看到它做了什麼，呈現方式和對話紀錄裡的任務一樣：思考內容、工具呼叫和
+它的回答，執行中會持續更新。啟動 sub agent 的 Agent（或 spawn_agent）工具呼叫上的 **Steps**
+按鈕可以直接打開它。這些步驟來自 sub agent 自己的紀錄，所以從 Session 分頁開啟的工作階段，
+也能看到它的 sub agent。
 
 ## 終端機
 

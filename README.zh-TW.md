@@ -6,7 +6,7 @@ AgentAPI 提供統一的 HTTP API，讓你控制 [Claude Code](https://github.co
 
 ![AgentAPI 聊天介面中的兩個任務：提示詞、工具呼叫、思考旁註和輸入框](docs/screenshots/chat-desktop.png)
 
-截圖是 AgentAPI v0.26.0 搭配內建 `native-demo` agent 的畫面，它的回覆、工具結果、模型和用量
+截圖是 AgentAPI v0.27.0 搭配內建 `native-demo` agent 的畫面，它的回覆、工具結果、模型和用量
 都是模擬的。[聊天介面導覽](docs/chat-ui.zh-TW.md)以截圖和動畫逐一介紹聊天介面的每項功能，
 [截圖說明](docs/screenshots/README.md)則說明它們是怎麼擷取的。
 
@@ -262,6 +262,8 @@ native 的 Claude Code 或 Codex 執行 sub agent（Claude Code 的 Agent 工具
 呈現一個任務那樣：思考內容、工具呼叫與結果，以及它的回答；執行中的會持續更新。Agent 或
 spawn_agent 工具呼叫上的 **Steps** 按鈕可以直接打開它對應的 sub agent。
 
+![Lineage 面板顯示一個 sub agent：它的任務、讀的檔案、跑的指令和它的回答](docs/screenshots/lineage.png)
+
 這些步驟是從 sub agent 自己的紀錄讀出來的（Claude Code 會在工作階段旁為每個 sub agent 留一份紀錄），
 所以面板顯示的是 agent 目前開啟的工作階段的 sub agent，從[先前的工作階段](#先前的工作階段)開啟的
 也一樣；工作階段的副本則不會帶著原本的 sub agent。`GET /subagents` 會列出它們，
@@ -301,6 +303,8 @@ view_image；Pi 的 read、write 和 edit）、agent 回覆中 inline code 裡�
 （例如 home 目錄）底下的某個 repo 裡工作時，提到檔案用的是相對於 repo 的路徑。只找到一個就直接
 開啟，並註明 agent 原本寫的路徑；找到多個則列出來讓你選。搜尋會略過隱藏目錄、相依套件和 Go 的
 module cache（除非路徑本身就在裡面），並在走過 50,000 筆或 2 秒後停止。
+
+![檢視器開啟 my-app/docs/notes.md，並註明 docs/notes.md 不在工作目錄裡](docs/screenshots/file-find.png)
 
 HTML、Markdown 和 SVG 檔案還有第三個分頁 Preview，圖片檔則直接顯示圖片：
 
@@ -372,7 +376,7 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 - 支援 Claude Code、Codex 和 Pi。AgentAPI 依指令名稱選擇對應的 adapter；使用完整路徑或包裝腳本時，請用 `--type` 指定類型（沒有指定時，它們會被當成 `custom` agent，使用 PTY transport）。
 - 以 `--state-file`（PTY transport 的保存方式）啟動、又沒有指定 `--transport` 的伺服器會維持使用 PTY transport，所以為它寫的命令列仍能啟動；要保存 native 工作階段請用 `--state-db`。
 - ACP 是另一種 transport。`--transport acp` 等同 `--experimental-acp`，不能與 native 模式一起啟用。
-- 開發聊天介面時，可用 `--type custom -- native-demo` 以 native transport 執行模擬 agent，詳見[開發指南](chat/README.md)。以 `--transport native` 指定其他 agent 類型時，會在啟動時被拒絕。
+- 開發聊天介面時，可用 `--type custom -- native-demo` 以 native transport 執行模擬 agent，詳見[開發指南](chat/README.md)。改用 `--type claude`、`codex` 或 `pi` 時，demo 會扮演那個 agent：AgentAPI 會替它讀取那個 agent 的紀錄，用於先前的工作階段和 sub agent。以 `--transport native` 指定其他 agent 類型時，會在啟動時被拒絕。
 
 **使用時會看到什麼**
 
@@ -592,6 +596,8 @@ Claude Code 也會回報它的 `prompt_cache`：模型供應商在最後一次�
 用量限制。agent 閒置、快取已過期且 context 至少有 50k token 時，聊天介面會在輸入框上方提醒，
 並提供先壓縮的按鈕；關掉提醒後，要到下一個回合結束才會再出現。
 
+![輸入框上方的提醒：prompt cache 已過期，下一則訊息會重新讀取 120k token，旁邊是 Compact](docs/screenshots/cold-cache.png)
+
 ![context 彈出視窗：context window 中的 token 數，以及 5 小時與每週的用量限制](docs/screenshots/context-usage.png)
 
 ### 達到用量限制時
@@ -613,6 +619,8 @@ Claude Code 也會回報它的 `prompt_cache`：模型供應商在最後一次�
 使用 `--state-db` 時停止狀態會保留，所以 AgentAPI 重新啟動後，排定的繼續仍會送出。在聊天介面中，
 停止狀態是輸入框上方的一張卡片，顯示重置時間，以及 **Continue at reset**、**Continue now** 和
 **Send queued tasks**，佇列也會標示它在等用量限制。
+
+![因 5 小時限制而停下的回合：卡片顯示重置時間，佇列中有一個被暫停的任務](docs/screenshots/limit-card.png)
 
 ### 終端機
 
@@ -701,6 +709,8 @@ Claude Code、Codex 和 Pi 會為每個工作階段留下紀錄，AgentAPI 讀�
 
 在聊天介面中，Explorer 的 Session 分頁會列出這些工作階段，並提供 **Open** 和
 **Start a copy**，兩者都要點第二次確認。
+
+![Explorer 的 Session 分頁：這個目錄中 Claude Code 的工作階段，各有 Open 和 Start a copy](docs/screenshots/explorer-sessions.png)
 
 ### Claude Code
 
