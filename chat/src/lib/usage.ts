@@ -1,4 +1,4 @@
-import type { ContextUsage, RateLimit } from "./chat-api";
+import type { AgentUsage, ContextUsage, RateLimit } from "./chat-api";
 
 // How much of the context window is used, 0 to 100.
 export function contextPercent(context: ContextUsage): number {
@@ -37,4 +37,38 @@ export function fullestLimit(limits: RateLimit[] | undefined): RateLimit | undef
     if (!fullest || (limit.used_percent ?? -1) > (fullest.used_percent ?? -1)) fullest = limit;
   }
   return fullest;
+}
+
+// How much context makes a cold prompt cache worth compacting for: below
+// it, reading the context again costs little.
+export const COLD_CACHE_MIN_TOKENS = 50_000;
+
+// A prompt cache that expired with a context worth compacting: the next
+// message has the model provider read all of it again, at the full price
+// and against the usage limits. expiredAt is when it expired.
+export interface ColdCache {
+  expiredAt: number;
+  tokens: number;
+}
+
+// coldCache returns the agent's prompt cache if it expired by now and the
+// context is large; null otherwise, or when the agent says nothing of its
+// cache (Claude Code only does).
+export function coldCache(usage: AgentUsage | null | undefined, now: number): ColdCache | null {
+  const cache = usage?.prompt_cache;
+  const context = usage?.context;
+  if (!cache || !context) return null;
+  const expiredAt = Date.parse(cache.expires_at);
+  if (!Number.isFinite(expiredAt) || now < expiredAt || context.used < COLD_CACHE_MIN_TOKENS) return null;
+  return {expiredAt, tokens: context.used};
+}
+
+// How long ago a time was: "just now", "12 min ago", "3 h ago".
+export function formatAgo(at: number, now: number): string {
+  const minutes = Math.floor((now - at) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.floor(hours / 24)} d ago`;
 }

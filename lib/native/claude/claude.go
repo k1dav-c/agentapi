@@ -916,6 +916,7 @@ func (a *Adapter) endTurnLocked() turnState {
 
 func (a *Adapter) handleResult(f *frame) {
 	a.sendRich(a.parser.endTurn())
+	a.cacheUsed(f.Usage)
 	limited := a.limitReached()
 	a.mu.Lock()
 	result := turnResult(f, a.turn.interrupted)

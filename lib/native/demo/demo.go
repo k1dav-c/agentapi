@@ -19,6 +19,8 @@
 //     works.
 //   - "limit": the account reaches its 5-hour limit, which stops the turn
 //     (native.StopReasonLimited) until it resets in three hours
+//   - "cold": the turn leaves a large context whose prompt cache already
+//     expired, as after an hour away
 //
 // Its settings can change (native.Configurable): in the ask permission
 // mode every turn's first command needs approval, and in the plan mode
@@ -98,8 +100,9 @@ type Adapter struct {
 	// requests, so they don't repeat those of an earlier adapter in the
 	// same conversation.
 	prefix string
-	// limited is set by a turn whose usage reports a reached limit.
-	limited atomic.Bool
+	// limited and cold are set by a turn whose usage reports a reached
+	// limit or an expired prompt cache.
+	limited, cold atomic.Bool
 
 	mu       sync.Mutex
 	sink     native.Sink
@@ -355,6 +358,10 @@ func (a *Adapter) finish(t *turn, result native.TurnResult) {
 		full := 100.0
 		usage.RateLimits[0].UsedPercent, usage.RateLimits[0].Status = &full, "rejected"
 	}
+	if a.cold.Swap(false) {
+		usage.Context.Used = max(usage.Context.Used, 120000)
+		usage.PromptCache.ExpiresAt = a.now().Add(-time.Minute)
+	}
 	native.ReportUsage(sink, usage)
 	sink.TurnCompleted(result)
 }
@@ -369,7 +376,8 @@ func demoUsage(n int, now time.Time) native.AgentUsage {
 		status = "allowed_warning"
 	}
 	return native.AgentUsage{
-		Context: &native.ContextUsage{Used: min(18000+n*9500, 200000), Size: 200000},
+		Context:     &native.ContextUsage{Used: min(18000+n*9500, 200000), Size: 200000},
+		PromptCache: &native.PromptCache{TTLSeconds: 3600, ExpiresAt: now.Add(time.Hour)},
 		RateLimits: []native.RateLimit{
 			{ID: "five_hour", Label: "5-hour limit", UsedPercent: &fiveHour, ResetsAt: &fiveHourReset, Status: status},
 			{ID: "seven_day", Label: "Weekly limit", UsedPercent: &weekly, ResetsAt: &weeklyReset},
@@ -444,6 +452,9 @@ func (s *script) play() error {
 	if words["limit"] {
 		s.a.limited.Store(true)
 		return errLimited
+	}
+	if words["cold"] {
+		s.a.cold.Store(true)
 	}
 	if words["approve"] {
 		if err := s.tool(work, "Bash", map[string]any{"command": "rm -rf ./build && make release", "description": "Rebuild the release"}, s.approval); err != nil {

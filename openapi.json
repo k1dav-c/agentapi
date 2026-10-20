@@ -17,6 +17,10 @@
             "$ref": "#/components/schemas/ContextUsage",
             "description": "How full the model's context window is, after the last turn."
           },
+          "prompt_cache": {
+            "$ref": "#/components/schemas/PromptCache",
+            "description": "How long the model provider keeps the conversation's prompt cache, after the last turn. Claude Code only."
+          },
           "rate_limits": {
             "description": "The account's usage limits (Claude Code's 5-hour and weekly limits, Codex's primary and secondary windows).",
             "items": {
@@ -1022,6 +1026,26 @@
         "example": "bypass",
         "title": "PermissionMode",
         "type": "string"
+      },
+      "PromptCache": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "description": "When the cache expires unless the agent uses it again.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "description": "How long the cache is kept after its last use: 300 (5 minutes) or 3600 (an hour).",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expires_at",
+          "ttl_seconds"
+        ],
+        "type": "object"
       },
       "Question": {
         "additionalProperties": false,

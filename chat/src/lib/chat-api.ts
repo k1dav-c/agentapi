@@ -45,6 +45,7 @@ export type SettingsResponse = Body<Schemas["SettingsResponseBody"]>;
 export type ContextUsage = Schemas["ContextUsage"];
 export type RateLimit = Schemas["RateLimit"];
 export type AgentUsage = Schemas["AgentUsage"];
+export type PromptCache = Schemas["PromptCache"];
 // A turn that stopped because the account reached a usage limit (native
 // transport): the queue waits until the limit resets.
 export type LimitStop = Schemas["LimitStop"];

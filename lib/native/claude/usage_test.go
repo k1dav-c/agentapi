@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -94,3 +95,38 @@ func TestTurnStoppedByALimitMessage(t *testing.T) {
 	assert.Equal(t, native.StopReasonError, sink.State().Results[1].StopReason)
 }
 
+func TestPromptCacheAfterATurn(t *testing.T) {
+	t.Parallel()
+	clock := quartz.NewMock(t)
+	proc := newFakeProcess("")
+	a, sink := started(t, Config{Clock: clock}, proc)
+	turn := func(usage string) {
+		t.Helper()
+		require.NoError(t, a.StartTurn(context.Background(), native.Input{Text: "hi"}))
+		proc.send(t, []byte(`{"type":"result","subtype":"success","is_error":false,"result":"done","usage":`+usage+`}`))
+		proc.barrier(t)
+	}
+	cache := func() *native.PromptCache {
+		usage := sink.State().Usage
+		require.NotEmpty(t, usage)
+		return usage[len(usage)-1].PromptCache
+	}
+
+	// As Claude Code 2.1.302 reports it on a subscription.
+	turn(`{"input_tokens":4,"cache_creation_input_tokens":4144,"cache_read_input_tokens":32278,"cache_creation":{"ephemeral_1h_input_tokens":4144,"ephemeral_5m_input_tokens":0}}`)
+	assert.Equal(t, &native.PromptCache{TTLSeconds: 3600, ExpiresAt: clock.Now().Add(time.Hour).UTC()}, cache())
+
+	// A turn that only read the cache keeps its time to live.
+	clock.Advance(10 * time.Minute)
+	turn(`{"input_tokens":3,"cache_read_input_tokens":36422,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":0}}`)
+	assert.Equal(t, &native.PromptCache{TTLSeconds: 3600, ExpiresAt: clock.Now().Add(time.Hour).UTC()}, cache())
+
+	// With an API key the cache is kept five minutes.
+	turn(`{"input_tokens":3,"cache_read_input_tokens":36422,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":120}}`)
+	assert.Equal(t, 300, cache().TTLSeconds)
+
+	// A turn that didn't call the model changes nothing.
+	reports := len(sink.State().Usage)
+	turn(`{"input_tokens":0,"output_tokens":0}`)
+	assert.Len(t, sink.State().Usage, reports)
+}

@@ -348,3 +348,15 @@ func TestLimitStopsTheTurn(t *testing.T) {
 	assert.Equal(t, "rejected", c.Usage().RateLimits[0].Status)
 }
 
+func TestColdCache(t *testing.T) {
+	c, _ := start(t, nil)
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "hello"}))
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	assert.True(t, c.Usage().PromptCache.ExpiresAt.After(time.Now()), "warm after a turn")
+
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "cold"}))
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	usage := c.Usage()
+	assert.True(t, usage.PromptCache.ExpiresAt.Before(time.Now()))
+	assert.GreaterOrEqual(t, usage.Context.Used, 120000)
+}

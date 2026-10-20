@@ -224,10 +224,11 @@ func (c *Conversation) Restart(ctx context.Context) error {
 	c.promptSent = false
 	c.messages.reset()
 	c.setLimitStopLocked(nil)
-	if c.usage.Context != nil {
-		// A new session starts with an empty context.
+	if c.usage.Context != nil || c.usage.PromptCache != nil {
+		// A new session starts with an empty context, and nothing cached.
 		usage := c.usage
 		usage.Context = nil
+		usage.PromptCache = nil
 		c.setUsageLocked(usage)
 	}
 	gen, runCtx := c.generation, c.ctx

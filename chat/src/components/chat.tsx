@@ -14,6 +14,7 @@ import {DecisionCard, StateStrip} from "./dock";
 import {RequestCard} from "./request-card";
 import {LoginCard} from "./login-card";
 import {LimitCard} from "./limit-card";
+import {CacheNotice} from "./cache-notice";
 import {BackgroundAlerts} from "./background-alerts";
 
 // The Explorer (task index, MCP settings) isn't needed for the
@@ -218,6 +219,7 @@ export function Chat() {
                 {features.requests && <LoginCard onRunInTerminal={hasShell ? openShell : undefined} />}
                 {features.requests && <RequestCard />}
                 {features.requests && <LimitCard />}
+                {features.usage && <CacheNotice />}
               </>
             }
             onSendMessage={sendMessage}

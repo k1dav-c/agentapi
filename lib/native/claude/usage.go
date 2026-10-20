@@ -106,6 +106,48 @@ func (a *Adapter) limitReached() bool {
 	return false
 }
 
+// resultUsage is the usage of a result frame: the turn's model calls.
+type resultUsage struct {
+	InputTokens          int `json:"input_tokens"`
+	CacheReadInputTokens int `json:"cache_read_input_tokens"`
+	CacheCreation        struct {
+		OneHour  int `json:"ephemeral_1h_input_tokens"`
+		FiveMins int `json:"ephemeral_5m_input_tokens"`
+	} `json:"cache_creation"`
+}
+
+// cacheTTL is how long the prompt cache a turn wrote is kept, or 0 when it
+// wrote none. Claude Code writes 1-hour entries on a subscription, 5-minute
+// ones with an API key, on Bedrock or Vertex, and past a subscription's
+// limits.
+func (u *resultUsage) cacheTTL() time.Duration {
+	switch {
+	case u.CacheCreation.OneHour > 0:
+		return time.Hour
+	case u.CacheCreation.FiveMins > 0:
+		return 5 * time.Minute
+	}
+	return 0
+}
+
+// cacheUsed records when the prompt cache expires after a turn that called
+// the model: its last use was just now. A turn that only read the cache
+// keeps the time to live of the one before. Read loop only.
+func (a *Adapter) cacheUsed(u *resultUsage) {
+	if u == nil || u.InputTokens+u.CacheReadInputTokens+u.CacheCreation.OneHour+u.CacheCreation.FiveMins == 0 {
+		return
+	}
+	ttl := u.cacheTTL()
+	if ttl == 0 && a.usage.PromptCache != nil {
+		ttl = time.Duration(a.usage.PromptCache.TTLSeconds) * time.Second
+	}
+	if ttl == 0 {
+		return
+	}
+	a.usage.PromptCache = &native.PromptCache{TTLSeconds: int(ttl / time.Second), ExpiresAt: a.cfg.Clock.Now().Add(ttl).UTC()}
+	a.reportUsage()
+}
+
 // readContextUsage asks how full the context window is, after a turn. The
 // answer is handled in the read loop.
 func (a *Adapter) readContextUsage() {

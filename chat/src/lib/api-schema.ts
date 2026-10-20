@@ -805,6 +805,8 @@ export interface components {
         AgentUsage: {
             /** @description How full the model's context window is, after the last turn. */
             context?: components["schemas"]["ContextUsage"];
+            /** @description How long the model provider keeps the conversation's prompt cache, after the last turn. Claude Code only. */
+            prompt_cache?: components["schemas"]["PromptCache"];
             /** @description The account's usage limits (Claude Code's 5-hour and weekly limits, Codex's primary and secondary windows). */
             rate_limits?: components["schemas"]["RateLimit"][];
         };
@@ -1310,6 +1312,18 @@ export interface components {
          * @enum {string}
          */
         PermissionMode: "ask" | "auto" | "bypass" | "plan";
+        PromptCache: {
+            /**
+             * Format: date-time
+             * @description When the cache expires unless the agent uses it again.
+             */
+            expires_at: string;
+            /**
+             * Format: int64
+             * @description How long the cache is kept after its last use: 300 (5 minutes) or 3600 (an hour).
+             */
+            ttl_seconds: number;
+        };
         Question: {
             /** @description An answer other than the options is allowed. */
             free_text?: boolean;
