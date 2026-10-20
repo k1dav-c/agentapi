@@ -360,3 +360,28 @@ func TestColdCache(t *testing.T) {
 	assert.True(t, usage.PromptCache.ExpiresAt.Before(time.Now()))
 	assert.GreaterOrEqual(t, usage.Context.Used, 120000)
 }
+
+func TestDelegate(t *testing.T) {
+	c, obs := start(t, nil)
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "delegate the review"}))
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	var agent *transcript.RichContentBlock
+	obs.mu.Lock()
+	for _, m := range obs.rich {
+		for i, b := range m.Content {
+			if b.Type == "tool_use" && b.ToolName == "Agent" {
+				agent = &m.Content[i]
+			}
+		}
+	}
+	obs.mu.Unlock()
+	require.NotNil(t, agent)
+	assert.JSONEq(t, `{"description":"Check the release notes","subagent_type":"general-purpose","prompt":"Read docs/notes.md and list what the 1.1.0 notes are missing."}`, string(agent.ToolInput))
+	var result string
+	for _, b := range obs.toolResults() {
+		if b.ToolUseID == agent.ToolUseID {
+			result = b.Text
+		}
+	}
+	assert.Equal(t, "The 1.1.0 notes miss the release date and the download links.", result)
+}

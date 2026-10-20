@@ -18,9 +18,17 @@
 //     conversation waits and tries again by itself; the start after that
 //     works.
 //   - "limit": the account reaches its 5-hour limit, which stops the turn
-//     (native.StopReasonLimited) until it resets in three hours
+//     (native.StopReasonLimited) until it resets in three hours, after the
+//     requests the message opens
 //   - "cold": the turn leaves a large context whose prompt cache already
 //     expired, as after an hour away
+//   - "delegate": the agent hands a task to a subagent with Claude Code's
+//     Agent tool
+//
+// With --type claude, codex or pi the demo poses as that agent, so
+// AgentAPI reads that agent's session logs for it: its earlier sessions
+// and its subagents show what logs are in the agent's directories (the
+// screenshot script writes some).
 //
 // Its settings can change (native.Configurable): in the ask permission
 // mode every turn's first command needs approval, and in the plan mode
@@ -450,12 +458,21 @@ func (s *script) play() error {
 	if words["login"] {
 		return s.loseLogin()
 	}
-	if words["limit"] {
-		s.a.limited.Store(true)
-		return errLimited
-	}
 	if words["cold"] {
 		s.a.cold.Store(true)
+	}
+	if words["delegate"] {
+		agent := map[string]any{
+			"description":   "Check the release notes",
+			"subagent_type": "general-purpose",
+			"prompt":        "Read docs/notes.md and list what the 1.1.0 notes are missing.",
+		}
+		answer := func(string, json.RawMessage) (string, bool, error) {
+			return "The 1.1.0 notes miss the release date and the download links.", false, nil
+		}
+		if err := s.tool(work, "Agent", agent, answer); err != nil {
+			return err
+		}
 	}
 	if words["approve"] {
 		if err := s.tool(work, "Bash", map[string]any{"command": "rm -rf ./build && make release", "description": "Rebuild the release"}, s.approval); err != nil {
@@ -475,6 +492,12 @@ func (s *script) play() error {
 		if err := s.tool(work, "ExitPlanMode", map[string]any{"plan": demoPlan}, s.plan); err != nil {
 			return err
 		}
+	}
+	// After the requests, so a message can wait in the queue while one is
+	// open.
+	if words["limit"] {
+		s.a.limited.Store(true)
+		return errLimited
 	}
 	return s.reply(words["long"])
 }

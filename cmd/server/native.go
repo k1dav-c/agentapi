@@ -37,6 +37,11 @@ func hasNativeAdapter(agentType AgentType, program string) bool {
 // nativeFactory returns the adapter factory for agents that have a native
 // transport.
 func nativeFactory(agentType AgentType, cfg nativeAdapterConfig) (native.Factory, error) {
+	if cfg.Program == demo.Program && (agentType == AgentTypeClaude || agentType == AgentTypeCodex || agentType == AgentTypePi) {
+		// The demo poses as the agent: AgentAPI reads that agent's session
+		// logs for it (its earlier sessions and subagents).
+		return demo.Factory(demo.Options{}), nil
+	}
 	switch agentType {
 	case AgentTypeClaude:
 		return claude.NewFactory(claude.Config{
