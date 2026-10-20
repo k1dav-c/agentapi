@@ -917,6 +917,12 @@ func TestSubagentActivity(t *testing.T) {
 	// As codex app-server 0.163.0 reports a worker spawned with multi-agent
 	// v2: a start, under the spawn call's id, and a completion.
 	h.item("completed", "turn-1", `{"type":"subAgentActivity","id":"call-spawn","kind":"started","agentThreadId":"sub-1","agentPath":"/root/list_files","model":"gpt-6.1-sol"}`)
+	// The turn goes on, so its messages are sent on the snapshot timer.
+	h.eventually(func() bool {
+		_, call := h.rec.Message("turn-1", "assistant")
+		_, result := h.rec.Message("result-call-spawn", "user")
+		return call && result
+	}, "the spawn call and its result")
 	msg, ok := h.rec.Message("turn-1", "assistant")
 	require.True(t, ok)
 	require.Len(t, msg.Content, 1)
