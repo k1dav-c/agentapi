@@ -27,6 +27,7 @@ import {
   type ContinueAt,
   type FileContent,
   type FileDiff,
+  type FileMatches,
   type FilePreview,
   type LimitStop,
   type MCPCheckResult,
@@ -206,6 +207,9 @@ interface ChatContextValue {
   getFileContent: (path: string) => Promise<FileContent>;
   getFileDiff: (path: string) => Promise<FileDiff>;
   getFilePreview: (path: string) => Promise<FilePreview>;
+  // The files under the working directory whose path ends with path, for
+  // one the agent named that isn't there (GET /files/find).
+  findFile: (path: string) => Promise<FileMatches>;
   fileImageURL: (path: string, version?: number) => string;
   storageScope: string;
   agentType: AgentType;
@@ -640,6 +644,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     getFileContent: api.getFileContent,
     getFileDiff: api.getFileDiff,
     getFilePreview: api.getFilePreview,
+    findFile: api.findFile,
     fileImageURL: api.fileImageURL,
     storageScope: agentAPIUrl,
     agentType,

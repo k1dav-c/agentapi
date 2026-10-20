@@ -114,6 +114,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/files/find": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get files find
+         * @description Finds the files under the agent's working directory whose path ends with the one given, ignoring case: for a path the agent wrote relative to a repository below the working directory, or in the wrong case. Hidden directories and dependencies (node_modules, vendor, build output) are searched only when the path goes into them, and the search stops after 50,000 entries or 2 seconds. Returns up to 10 matches, those with the same case first, then the latest changed.
+         */
+        get: operations["get-files-find"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/files/preview": {
         parameters: {
             query?: never;
@@ -1077,6 +1097,29 @@ export interface components {
          * @enum {string}
          */
         FileDiffStatus: "added" | "deleted" | "modified" | "not_in_repo" | "unchanged" | "untracked";
+        FileFindResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/FileFindResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description The whole working directory was searched; false when the search stopped at its bounds (50,000 entries or 2 seconds). */
+            complete: boolean;
+            /** @description Files whose path ends with the one asked for, the likeliest first. */
+            matches: components["schemas"]["FileMatch"][];
+        };
+        FileMatch: {
+            /** @description The path matches with the same case. */
+            exact_case: boolean;
+            /**
+             * Format: date-time
+             * @description When the file last changed.
+             */
+            modified: string;
+            /** @description The file's path relative to the agent's working directory. */
+            relative: string;
+        };
         FilePreviewResponseBody: {
             /**
              * Format: uri
@@ -2535,6 +2578,65 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-files-find": {
+        parameters: {
+            query: {
+                /** @description The file: an absolute path inside the agent's working directory, or a path relative to it. */
+                path: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileFindResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

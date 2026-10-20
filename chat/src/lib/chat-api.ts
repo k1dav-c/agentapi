@@ -29,6 +29,8 @@ export type FileDiffStatus = Schemas["FileDiffStatus"];
 export type FilePreview = Body<Schemas["FilePreviewResponseBody"]>;
 // A file's uncommitted changes (GET /files/diff).
 export type FileDiff = Body<Schemas["FileDiffResponseBody"]>;
+// The files whose path ends with one that isn't there (GET /files/find).
+export type FileMatches = Body<Schemas["FileFindResponseBody"]>;
 
 export type PermissionMode = Schemas["PermissionMode"];
 // The agent's session settings (native transport). A setting the agent
@@ -439,6 +441,11 @@ export function createChatAPI(baseURL: string) {
     // An HTML file in the agent's working directory with what it refers to
     // inlined, for the file viewer's preview. ApiError 400: not an HTML
     // file, or too large.
+    async findFile(path: string): Promise<FileMatches> {
+      const data = await jsonRequest<Partial<FileMatches>>(`/files/find?path=${encodeURIComponent(path)}`, {fallback: "Failed to search for the file"});
+      return {matches: data.matches ?? [], complete: data.complete ?? true};
+    },
+
     async getFilePreview(path: string): Promise<FilePreview> {
       const data = await jsonRequest<Partial<FilePreview>>(`/files/preview?path=${encodeURIComponent(path)}`, {
         fallback: "Failed to preview the file",

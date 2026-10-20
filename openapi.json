@@ -381,6 +381,58 @@
         "title": "FileDiffStatus",
         "type": "string"
       },
+      "FileFindResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/FileFindResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "complete": {
+            "description": "The whole working directory was searched; false when the search stopped at its bounds (50,000 entries or 2 seconds).",
+            "type": "boolean"
+          },
+          "matches": {
+            "description": "Files whose path ends with the one asked for, the likeliest first.",
+            "items": {
+              "$ref": "#/components/schemas/FileMatch"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "complete",
+          "matches"
+        ],
+        "type": "object"
+      },
+      "FileMatch": {
+        "additionalProperties": false,
+        "properties": {
+          "exact_case": {
+            "description": "The path matches with the same case.",
+            "type": "boolean"
+          },
+          "modified": {
+            "description": "When the file last changed.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "relative": {
+            "description": "The file's path relative to the agent's working directory.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "exact_case",
+          "modified",
+          "relative"
+        ],
+        "type": "object"
+      },
       "FilePreviewResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -3263,6 +3315,78 @@
           }
         },
         "summary": "Get files diff"
+      }
+    },
+    "/files/find": {
+      "get": {
+        "description": "Finds the files under the agent's working directory whose path ends with the one given, ignoring case: for a path the agent wrote relative to a repository below the working directory, or in the wrong case. Hidden directories and dependencies (node_modules, vendor, build output) are searched only when the path goes into them, and the search stops after 50,000 entries or 2 seconds. Returns up to 10 matches, those with the same case first, then the latest changed.",
+        "operationId": "get-files-find",
+        "parameters": [
+          {
+            "description": "The file: an absolute path inside the agent's working directory, or a path relative to it.",
+            "explode": false,
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "description": "The file: an absolute path inside the agent's working directory, or a path relative to it.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileFindResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Get files find"
       }
     },
     "/files/preview": {
