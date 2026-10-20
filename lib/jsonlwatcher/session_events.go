@@ -110,6 +110,12 @@ func (p *ClaudeSessionEventParser) ParseSessionEvents(line []byte) ([]SessionEve
 	if err := json.Unmarshal(line, &entry); err != nil {
 		return nil, err
 	}
+	if entry.Type != "user" && entry.Type != "assistant" {
+		// Claude Code also logs the API requests it makes
+		// (api-request-blob), whose message is what it sent the model:
+		// system reminders and tool lists, not the conversation.
+		return nil, nil
+	}
 	return p.Events(entry), nil
 }
 
