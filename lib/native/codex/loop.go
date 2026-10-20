@@ -28,6 +28,9 @@ type loopState struct {
 	dirty []*msgState
 	// usage is what app-server reported of the context and rate limits.
 	usage native.AgentUsage
+	// spawns holds the spawn_agent tool calls of the subagents still
+	// running, by their thread, to end once they are done.
+	spawns map[string]*itemState
 }
 
 func (s *loopState) now() time.Time { return s.a.cfg.Clock.Now() }
@@ -496,6 +499,10 @@ func (s *loopState) addItem(t *turnState, it *threadItem, b *block) *itemState {
 }
 
 func (s *loopState) itemCompleted(t *turnState, it *threadItem, at time.Time) {
+	if it.Type == "subAgentActivity" && it.Kind != "started" {
+		s.subagentActivity(it, at)
+		return
+	}
 	state := t.items[it.ID]
 	if state == nil {
 		// Completed without a start: add it now.
@@ -545,7 +552,31 @@ func (s *loopState) itemCompleted(t *turnState, it *threadItem, at time.Time) {
 			state.changes = it.Changes
 		}
 		s.finishTool(state, toolResult(it), at)
+		if it.Type == "subAgentActivity" && it.AgentThreadID != "" {
+			if s.spawns == nil {
+				s.spawns = make(map[string]*itemState)
+			}
+			s.spawns[it.AgentThreadID] = state
+		}
 	}
+}
+
+// subagentActivity ends the spawn_agent call of a subagent once Codex says
+// it completed or was interrupted.
+func (s *loopState) subagentActivity(it *threadItem, at time.Time) {
+	state := s.spawns[it.AgentThreadID]
+	if state == nil {
+		return
+	}
+	switch it.Kind {
+	case "completed":
+		s.finishTool(state, toolResultBlock(state.id, "Finished "+it.AgentPath, "completed"), at)
+	case "interrupted":
+		s.finishTool(state, toolResultBlock(state.id, "Interrupted "+it.AgentPath, "failed"), at)
+	default:
+		return
+	}
+	delete(s.spawns, it.AgentThreadID)
 }
 
 // finishTool sets a tool call's final status and sends its result.

@@ -289,6 +289,12 @@ type mcpToolCallResult struct {
 }
 
 // threadItem is a ThreadItem; Type says which fields are set.
+// collabAgentState is CollabAgentState: how far an agent got.
+type collabAgentState struct {
+	Status  string  `json:"status"`
+	Message *string `json:"message"`
+}
+
 type threadItem struct {
 	Type string `json:"type"`
 	ID   string `json:"id"`
@@ -330,6 +336,20 @@ type threadItem struct {
 
 	// imageView
 	Path string `json:"path"`
+
+	// collabAgentToolCall: a call of a multi-agent tool (spawnAgent, wait,
+	// sendInput, ...), in Tool; the threads of the agents it addressed,
+	// and their states.
+	ReceiverThreadIDs []string                    `json:"receiverThreadIds"`
+	Prompt            *string                     `json:"prompt"`
+	Model             *string                     `json:"model"`
+	AgentsStates      map[string]collabAgentState `json:"agentsStates"`
+
+	// subAgentActivity: a subagent started (Kind started, its spawn call),
+	// was talked to, interrupted or completed.
+	Kind          string `json:"kind"`
+	AgentThreadID string `json:"agentThreadId"`
+	AgentPath     string `json:"agentPath"`
 }
 
 // reasoningContent returns a reasoning item's raw reasoning texts. Content

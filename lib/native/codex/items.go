@@ -5,10 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
@@ -296,8 +298,65 @@ func toolUse(it *threadItem) (name string, input json.RawMessage, ok bool) {
 		return "web_search", mustJSON(in), true
 	case "imageView":
 		return "view_image", mustJSON(map[string]string{"path": it.Path}), true
+	case "subAgentActivity":
+		// Only a start is a tool call: Codex 0.163's spawn_agent.
+		if it.Kind != "started" {
+			return "", nil, false
+		}
+		in := map[string]any{"receiver_thread_ids": []string{it.AgentThreadID}, "agent_path": it.AgentPath}
+		if it.Model != nil && *it.Model != "" {
+			in["model"] = *it.Model
+		}
+		return "spawn_agent", mustJSON(in), true
+	case "collabAgentToolCall":
+		in := map[string]any{"receiver_thread_ids": it.ReceiverThreadIDs}
+		if it.Prompt != nil && *it.Prompt != "" {
+			in["prompt"] = *it.Prompt
+		}
+		if it.Model != nil && *it.Model != "" {
+			in["model"] = *it.Model
+		}
+		return collabToolName(it.Tool), mustJSON(in), true
 	}
 	return "", nil, false
+}
+
+// collabToolName names a multi-agent tool as the model calls it:
+// spawnAgent is spawn_agent, wait is wait_agent.
+func collabToolName(tool string) string {
+	switch tool {
+	case "wait":
+		return "wait_agent"
+	case "":
+		return "agent"
+	}
+	var sb strings.Builder
+	for i, r := range tool {
+		if unicode.IsUpper(r) {
+			if i > 0 {
+				sb.WriteByte('_')
+			}
+			r = unicode.ToLower(r)
+		}
+		sb.WriteRune(r)
+	}
+	return sb.String()
+}
+
+// collabSummary says how far each agent a multi-agent tool call addressed
+// got, one per line, in the order of the thread IDs.
+func collabSummary(it *threadItem) string {
+	ids := slices.Sorted(maps.Keys(it.AgentsStates))
+	lines := make([]string, 0, len(ids))
+	for _, id := range ids {
+		state := it.AgentsStates[id]
+		line := id + ": " + state.Status
+		if state.Message != nil && *state.Message != "" {
+			line += ": " + *state.Message
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func rawOrEmpty(raw json.RawMessage) json.RawMessage {
@@ -405,6 +464,14 @@ func toolResult(it *threadItem) transcript.RichContentBlock {
 		}
 	case "webSearch":
 		text = webSearchSummary(it)
+	case "subAgentActivity":
+		// The subagent goes on: running until Codex says it is done.
+		status, text = "running", "Started "+it.AgentPath
+	case "collabAgentToolCall":
+		text = collabSummary(it)
+		if it.Status == "failed" || it.Status == "interrupted" {
+			status = "failed"
+		}
 	case "imageView":
 		if img, ok := readImage(it.Path); ok {
 			images = append(images, img)
