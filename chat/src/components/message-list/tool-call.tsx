@@ -16,6 +16,7 @@ import { useFileViewer, type FileViewer, type FileViewerTab } from "../file-view
 import { DiffView } from "../diff-view";
 import { PathLabel } from "../file-path";
 import { CopyButton } from "./message-item";
+import {isSubagentTool, openLineage} from "@/lib/subagents";
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return "< 1s";
@@ -284,6 +285,23 @@ export const ToolCallCard = React.memo(function ToolCallCard({
               <span className="font-sans text-xs font-semibold">{toolCall.name}</span>
               {view.summary && <span className="ml-2 text-muted-foreground">{view.summary}</span>}
             </span>
+          )}
+          {features.subagents && isSubagentTool(toolCall.name) && (
+            <button
+              type="button"
+              className="shrink-0 rounded-full border bg-background px-2 py-0.5 font-sans text-[11px] font-medium text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              title="Open what the subagent did"
+              aria-haspopup="dialog"
+              onClick={(event) => {
+                // Opens the subagent, not the card.
+                event.preventDefault();
+                event.stopPropagation();
+                openLineage(toolCall.id);
+              }}
+              data-open-subagent
+            >
+              Steps
+            </button>
           )}
           {requestBadge && (
             <ToolChip tone={requestBadge.tone}>

@@ -15,6 +15,7 @@ import {RequestCard} from "./request-card";
 import {LoginCard} from "./login-card";
 import {LimitCard} from "./limit-card";
 import {CacheNotice} from "./cache-notice";
+import {Lineage} from "./lineage";
 import {BackgroundAlerts} from "./background-alerts";
 
 // The Explorer (task index, MCP settings) isn't needed for the
@@ -185,6 +186,7 @@ export function Chat() {
                     <TerminalSquare className="size-4" />
                   </Button>
                 )}
+                <Lineage />
                 <Explorer
                   onNavigateTask={(number) => {
                     window.requestAnimationFrame(() =>

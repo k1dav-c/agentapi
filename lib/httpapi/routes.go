@@ -70,6 +70,7 @@ func (s *Server) registerRoutes() {
 	s.registerNativeRoutes()
 	s.registerLimitRoutes()
 	s.registerSessionRoutes()
+	s.registerSubagentRoutes()
 	s.registerFileRoutes()
 	s.registerFilePreviewRoutes()
 	s.registerTerminalRoutes()

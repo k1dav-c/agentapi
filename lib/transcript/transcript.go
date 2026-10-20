@@ -92,4 +92,8 @@ type SessionEvent struct {
 	ToolName  *string         `json:"tool_name,omitempty" doc:"Tool name for tool_call events"`
 	ToolInput json.RawMessage `json:"tool_input,omitempty" doc:"Tool input for tool_call events"`
 	ToolUseID *string         `json:"tool_use_id,omitempty" doc:"Identifier pairing a tool call with its result"`
+	// SubagentID and ParentToolUseID are set on the events of a subagent
+	// the agent ran (GET /timeline?subagents=true).
+	SubagentID      *string `json:"subagent_id,omitempty" doc:"The subagent the event belongs to; missing for the agent's own events"`
+	ParentToolUseID *string `json:"parent_tool_use_id,omitempty" doc:"The agent's tool call that started the subagent (Claude Code's Agent tool), when known"`
 }

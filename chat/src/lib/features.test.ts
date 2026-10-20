@@ -28,5 +28,7 @@ describe("features", () => {
     expect(features("native", null, false, "pi").sessionHistory).toBe(true);
     expect(features("native", null, false, "custom").sessionHistory).toBe(false);
     expect(features("pty", null, false, "claude").sessionHistory).toBe(false);
+    expect(features("native", null, false, "claude").subagents).toBe(true);
+    expect(features("native", null, false, "pi").subagents).toBe(false);
   });
 });

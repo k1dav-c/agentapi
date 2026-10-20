@@ -579,7 +579,8 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
               </Button>
               <h3 className="pt-3 text-sm font-semibold">Download the conversation</h3>
               <p className="text-sm text-muted-foreground">
-                Every message, tool call and result of this session as JSONL, one event per line.
+                Every message, tool call and result of this session as JSONL, one event per line, followed by those
+                of the subagents the agent ran (each event says its subagent).
               </p>
               <Button
                 type="button"

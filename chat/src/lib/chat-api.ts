@@ -53,6 +53,10 @@ export type ContinueAt = Schemas["ContinueAt"];
 // One of the agent's sessions in the working directory (GET /sessions).
 export type SessionSummary = Schemas["SessionSummary"];
 export type SessionList = Body<Schemas["SessionsResponseBody"]>;
+// A subagent the agent ran in its session, and what it did (GET
+// /subagents, GET /subagents/{id}).
+export type Subagent = Schemas["SubagentState"];
+export type SubagentRun = Body<Schemas["SubagentResponseBody"]>;
 
 interface APIErrorDetail {
   message: string;
@@ -147,6 +151,15 @@ export function createChatAPI(baseURL: string) {
     // Forgets the limit stop, so the queued tasks go out.
     async dismissLimitStop(): Promise<void> {
       await jsonRequest("/limit", {method: "DELETE", fallback: "Failed to dismiss the usage limit"});
+    },
+
+    async listSubagents(): Promise<Subagent[]> {
+      const list = await jsonRequest<{subagents?: Subagent[]}>("/subagents", {fallback: "Failed to list the subagents"});
+      return list.subagents ?? [];
+    },
+
+    getSubagent(id: string): Promise<SubagentRun> {
+      return jsonRequest(`/subagents/${encodeURIComponent(id)}`, {fallback: "Failed to read the subagent"});
     },
 
     async listSessions(): Promise<SessionList> {
@@ -446,7 +459,8 @@ export function createChatAPI(baseURL: string) {
     },
 
     async getTimelineEvents(): Promise<unknown[]> {
-      const data = await jsonRequest<{events?: unknown[]} | undefined>("/timeline", {fallback: "Failed to export the current session"});
+      // With the subagents' events, after the agent's own.
+      const data = await jsonRequest<{events?: unknown[]} | undefined>("/timeline?subagents=true", {fallback: "Failed to export the current session"});
       if (!Array.isArray(data?.events)) {
         throw new Error("The server returned an invalid timeline response");
       }

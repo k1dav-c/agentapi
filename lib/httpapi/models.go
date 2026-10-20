@@ -222,6 +222,11 @@ type RichMessagesResponse struct {
 	}
 }
 
+// TimelineRequest is GET /timeline's query.
+type TimelineRequest struct {
+	Subagents bool `query:"subagents" doc:"Also return the events of the subagents the agent ran in the session (native Claude Code and Codex)."`
+}
+
 type TimelineResponse struct {
 	Body struct {
 		Events []transcript.SessionEvent `json:"events" nullable:"false" doc:"Timeline events including text, thinking, tool calls, tool results, and system lifecycle events."`

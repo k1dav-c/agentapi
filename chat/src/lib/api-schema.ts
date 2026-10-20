@@ -671,6 +671,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/subagents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the agent's subagents
+         * @description Lists the subagents the agent ran in the session it has open, read from their own logs, in the order they started: each with what it was asked to do, the tool call that started it and whether it still runs (Claude Code). Native transport of Claude Code and Codex; Pi runs no subagents, and returns an empty list.
+         */
+        get: operations["get-subagents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subagents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get what a subagent did
+         * @description Returns a subagent's task and what it did so far, as rich messages, read from its log; ask again for a running one. Native transport of Claude Code and Codex; returns 404 for a subagent the session has no log of.
+         */
+        get: operations["get-subagents-by-id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/terminal": {
         parameters: {
             query?: never;
@@ -737,7 +777,7 @@ export interface paths {
         };
         /**
          * Get timeline
-         * @description Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events.
+         * @description Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events. With `subagents=true`, the events of the subagents the agent ran in the session follow, read from their own logs (native Claude Code and Codex): each subagent's in turn, starting with a system event, and each event with its `subagent_id` and, for Claude Code, the `parent_tool_use_id` of the Agent tool call that started it.
          */
         get: operations["get-timeline"];
         put?: never;
@@ -1720,12 +1760,16 @@ export interface components {
             id: number;
             /** @description Event kind: system, text, thinking, tool_call, or tool_result */
             kind: string;
+            /** @description The agent's tool call that started the subagent (Claude Code's Agent tool), when known */
+            parent_tool_use_id?: string;
             /** @description Message role when applicable */
             role?: string;
             /** @description Agent session identifier */
             session_id?: string;
             /** @description Original agent event or message identifier */
             source_id?: string;
+            /** @description The subagent the event belongs to; missing for the agent's own events */
+            subagent_id?: string;
             /**
              * Format: date-time
              * @description Timestamp recorded by the agent session
@@ -1913,6 +1957,58 @@ export interface components {
             transport: components["schemas"]["Transport"];
             /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only. */
             usage?: components["schemas"]["AgentUsage"];
+        };
+        SubagentResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/SubagentResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description What the subagent did, as rich messages: its thinking, tool calls with their results, and text. */
+            messages: components["schemas"]["RichMessage"][];
+            /** @description The task the agent gave the subagent. */
+            prompt: string;
+            /** @description The subagent. */
+            subagent: components["schemas"]["SubagentState"];
+        };
+        SubagentState: {
+            /** @description The kind of subagent, e.g. general-purpose (Claude Code). */
+            agent_type?: string;
+            /** @description What the agent asked the subagent to do, in a few words (Claude Code). */
+            description?: string;
+            /** @description The subagent's identifier. */
+            id: string;
+            /** @description The agent's tool call that started the subagent (Claude Code's Agent tool). */
+            parent_tool_use_id?: string;
+            /**
+             * Format: date-time
+             * @description When the subagent started.
+             */
+            started_at: string;
+            /** @description running, completed or failed: for Claude Code from the Agent tool call that started it, for Codex from the subagent's own log; unknown when neither says. */
+            status: components["schemas"]["SubagentStatus"];
+            /**
+             * Format: date-time
+             * @description When its log last changed.
+             */
+            updated_at: string;
+        };
+        /**
+         * SubagentStatus
+         * @example running
+         * @enum {string}
+         */
+        SubagentStatus: "completed" | "failed" | "running" | "unknown";
+        SubagentsResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/SubagentsResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description The subagents the agent ran in its session, in the order they started. */
+            subagents: components["schemas"]["SubagentState"][];
         };
         TerminalExitBody: {
             /** @description Why the stream ended: the shell exited (connect again for a new one), or there is no terminal. */
@@ -3962,6 +4058,103 @@ export interface operations {
             };
         };
     };
+    "get-subagents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubagentsResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-subagents-by-id": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The subagent's id, from GET /subagents. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubagentResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     subscribeTerminal: {
         parameters: {
             query?: never;
@@ -4126,7 +4319,10 @@ export interface operations {
     };
     "get-timeline": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Also return the events of the subagents the agent ran in the session (native Claude Code and Codex). */
+                subagents?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;

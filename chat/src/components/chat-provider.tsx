@@ -33,6 +33,8 @@ import {
   type MCPConfig,
   type MCPProfiles,
   type SessionList,
+  type Subagent,
+  type SubagentRun,
   type UploadOptions,
 } from "@/lib/chat-api";
 import {features, type Features} from "@/lib/features";
@@ -135,6 +137,10 @@ interface ChatContextValue {
   // The agent's sessions in the working directory, and opening one (or a
   // copy of it) in place of this conversation (features.sessionHistory).
   listSessions: () => Promise<SessionList>;
+  // The subagents the agent ran in its session, and what one did
+  // (features.subagents).
+  listSubagents: () => Promise<Subagent[]>;
+  getSubagent: (id: string) => Promise<SubagentRun>;
   resumeSession: (id: string, fork: boolean) => Promise<void>;
   terminalInput: (data: string) => Promise<void>;
   terminalResize: (cols: number, rows: number) => Promise<void>;
@@ -604,6 +610,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     cancelContinue: api.cancelContinue,
     dismissLimitStop: api.dismissLimitStop,
     listSessions: api.listSessions,
+    listSubagents: api.listSubagents,
+    getSubagent: api.getSubagent,
     terminalInput: api.terminalInput,
     terminalResize: api.terminalResize,
     getSettings: api.getSettings,

@@ -5,8 +5,10 @@
 import type {Capabilities, Transport} from "./dispatch";
 import type {AgentType} from "./agents";
 
-// The agents whose earlier sessions AgentAPI reads from their session logs.
+// The agents whose earlier sessions AgentAPI reads from their session logs,
+// and those of them that run subagents.
 const SESSION_HISTORY_AGENTS: readonly AgentType[] = ["claude", "codex", "pi"];
+const SUBAGENT_AGENTS: readonly AgentType[] = ["claude", "codex"];
 
 export interface Features {
   // The agent's own terminal: TTY mode, terminal keys and the live screen
@@ -37,6 +39,9 @@ export interface Features {
   // The agent's earlier sessions, to open one or a copy of it (native
   // Claude Code, Codex and Pi).
   sessionHistory: boolean;
+  // The subagents the agent ran, and what each did (native Claude Code and
+  // Codex).
+  subagents: boolean;
 }
 
 export function features(transport: Transport, capabilities: Capabilities | null, shellAvailable: boolean, agentType?: AgentType): Features {
@@ -53,5 +58,6 @@ export function features(transport: Transport, capabilities: Capabilities | null
     usage: native,
     restartKeepsConversation: native,
     sessionHistory: native && agentType !== undefined && SESSION_HISTORY_AGENTS.includes(agentType),
+    subagents: native && agentType !== undefined && SUBAGENT_AGENTS.includes(agentType),
   };
 }
