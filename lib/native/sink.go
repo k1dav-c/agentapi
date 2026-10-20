@@ -125,6 +125,7 @@ func (s *sink) SessionName(name string) {
 func (s *sink) SessionRef(ref string) {
 	s.update(func(c *Conversation) {
 		c.sessionRef = ref
+		c.forking = false
 		c.cfg.Observer.SessionRef(ref)
 	})
 }

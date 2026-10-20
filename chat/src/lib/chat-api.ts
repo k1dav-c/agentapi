@@ -50,6 +50,9 @@ export type PromptCache = Schemas["PromptCache"];
 // transport): the queue waits until the limit resets.
 export type LimitStop = Schemas["LimitStop"];
 export type ContinueAt = Schemas["ContinueAt"];
+// One of the agent's sessions in the working directory (GET /sessions).
+export type SessionSummary = Schemas["SessionSummary"];
+export type SessionList = Body<Schemas["SessionsResponseBody"]>;
 
 interface APIErrorDetail {
   message: string;
@@ -144,6 +147,21 @@ export function createChatAPI(baseURL: string) {
     // Forgets the limit stop, so the queued tasks go out.
     async dismissLimitStop(): Promise<void> {
       await jsonRequest("/limit", {method: "DELETE", fallback: "Failed to dismiss the usage limit"});
+    },
+
+    async listSessions(): Promise<SessionList> {
+      const list = await jsonRequest<SessionList>("/sessions", {fallback: "Failed to list the agent's sessions"});
+      return {sessions: list.sessions ?? [], current: list.current};
+    },
+
+    // Opens one of the agent's sessions, or a copy of it, in place of this
+    // conversation.
+    async resumeSession(id: string, fork: boolean): Promise<void> {
+      await jsonRequest(`/sessions/${encodeURIComponent(id)}/resume`, {
+        method: "POST",
+        body: fork ? {fork} : {},
+        fallback: "Failed to open the session",
+      });
     },
 
     // Types keys into the native transport's terminal.

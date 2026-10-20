@@ -124,6 +124,9 @@ type Conversation struct {
 	// clears it, so the new session gets the prompt too.
 	promptSent bool
 	sessionRef string
+	// forking: sessionRef is the session to fork, until the agent reports
+	// the copy's.
+	forking bool
 
 	messages messageLog
 	requests requestBook
@@ -366,6 +369,11 @@ func (c *Conversation) agentSettingsLocked(settings Settings) {
 		c.chooseLocked(chosen)
 	}
 	c.setSettingsLocked(settings)
+}
+
+// resumeLocked says which session the next agent opens.
+func (c *Conversation) resumeLocked() Resume {
+	return Resume{Ref: c.sessionRef, Fork: c.forking}
 }
 
 // SessionRef is the identifier that resumes the agent's session.

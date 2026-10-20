@@ -587,6 +587,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the agent's sessions
+         * @description Lists the sessions the agent had in the working directory, read from its session logs (Claude Code's projects directory, Codex's sessions, Pi's session directory), the latest first, with the one it has open. Sessions in which the user sent nothing are left out. Native transport of Claude Code, Codex and Pi only.
+         */
+        get: operations["get-sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open another session
+         * @description Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Native transport of Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here and 409 while the agent works on a turn.
+         */
+        post: operations["post-sessions-by-id-resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings": {
         parameters: {
             query?: never;
@@ -1578,6 +1618,16 @@ export interface components {
             readonly $schema?: string;
             outcome: string;
         };
+        ResumeSessionRequestBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ResumeSessionRequestBody.json
+             */
+            readonly $schema?: string;
+            /** @description Open a copy of the session, under a new id, and leave the session itself as it is. */
+            fork?: boolean;
+        };
         RichContentBlock: {
             /** @description Images in a tool result (for example an image file the agent read) */
             images?: components["schemas"]["RichImage"][] | null;
@@ -1688,6 +1738,29 @@ export interface components {
             /** @description Identifier pairing a tool call with its result */
             tool_use_id?: string;
         };
+        SessionSummary: {
+            /**
+             * Format: date-time
+             * @description When the session started.
+             */
+            created_at: string;
+            /** @description The user's first message, shortened. */
+            first_prompt: string;
+            /** @description The agent's identifier of the session. */
+            id: string;
+            /**
+             * Format: int64
+             * @description How many messages the user sent.
+             */
+            prompts: number;
+            /** @description Name the agent or the user gave the session, if any. */
+            title?: string;
+            /**
+             * Format: date-time
+             * @description When the session's log last changed.
+             */
+            updated_at: string;
+        };
         SessionSyncBody: {
             /** @description Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded. */
             epoch: string;
@@ -1698,6 +1771,18 @@ export interface components {
              * @description Highest sequence number in the replay that follows (the ?since= value when it holds nothing new). The replay is grouped by kind, not in seq order: it is complete at its last event, the first to carry an SSE id, and only then can a client resume from this seq.
              */
             seq: number;
+        };
+        SessionsResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/SessionsResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description The id of the session the agent has open, if it opened one. */
+            current?: string;
+            /** @description The agent's sessions in the working directory, the latest first. */
+            sessions: components["schemas"]["SessionSummary"][];
         };
         SettingOptions: {
             /** @description Models the agent can switch to. */
@@ -3622,6 +3707,116 @@ export interface operations {
             };
             /** @description Error */
             default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionsResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "post-sessions-by-id-resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The session's id, from GET /sessions. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResumeSessionRequestBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterruptResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -41,9 +42,9 @@ type Config struct {
 }
 
 // NewFactory returns a factory for Pi adapters, or an error for options
-// the native transport can't pass on. A non-empty resumeRef is a Pi session
-// ID reported earlier with Sink.SessionRef; the new process continues that
-// session.
+// the native transport can't pass on. A resume ref is a Pi session ID
+// reported earlier with Sink.SessionRef; the new process continues that
+// session, or with Fork, a copy of it under a new ID.
 func NewFactory(cfg Config) (native.Factory, error) {
 	args, dropped, err := filterArgs(cfg.Args)
 	if err != nil {
@@ -52,8 +53,10 @@ func NewFactory(cfg Config) (native.Factory, error) {
 	if len(dropped) > 0 {
 		cfg.logger().Warn("Dropped Pi options that only affect its terminal UI", "args", dropped)
 	}
-	return func(resumeRef string) (native.Adapter, error) {
-		return newAdapter(cfg, args, resumeRef), nil
+	return func(resume native.Resume) (native.Adapter, error) {
+		a := newAdapter(cfg, args, resume.Ref)
+		a.fork = resume.Fork && resume.Ref != ""
+		return a, nil
 	}, nil
 }
 
@@ -132,7 +135,9 @@ type Adapter struct {
 	args      []string
 	log       *slog.Logger
 	resumeRef string
-	start     procutil.StartFunc
+	// fork opens a copy of resumeRef's session under a new ID.
+	fork  bool
+	start procutil.StartFunc
 
 	// The timeouts and limits of the constants above, and the clock of
 	// the snapshot, dialog and interrupt timers; tests change them.
@@ -235,10 +240,13 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 // provider it returns a native.LoginRequiredError.
 func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	sessionID := a.resumeRef
-	if sessionID == "" {
+	if sessionID == "" || a.fork {
 		sessionID = NewSessionID()
 	}
 	args := rpcArgs(a.args, sessionID)
+	if a.fork {
+		args = slices.Insert(args, 4, "--fork", a.resumeRef)
+	}
 	// The arguments can hold secrets (--api-key).
 	a.log.Info("Starting Pi in RPC mode", "program", a.cfg.Program, "resume", a.resumeRef != "")
 	a.log.Debug("Pi command line", "args", args)

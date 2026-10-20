@@ -105,7 +105,7 @@ func TestEnvironmentAndCommandLine(t *testing.T) {
 		StopTimeout:  10 * time.Millisecond,
 	})
 	require.NoError(t, err)
-	adapter, err := factory("")
+	adapter, err := factory(native.Resume{})
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()

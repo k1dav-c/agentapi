@@ -328,6 +328,15 @@ type Adapter interface {
 	Close() error
 }
 
-// Factory creates an adapter. resumeRef is a value an earlier adapter
-// reported with Sink.SessionRef, or empty for a new session.
-type Factory func(resumeRef string) (Adapter, error)
+// Resume says which session an adapter opens.
+type Resume struct {
+	// Ref is a value an earlier adapter reported with Sink.SessionRef, or
+	// empty for a new session.
+	Ref string
+	// Fork opens a new session that starts as a copy of Ref's, which goes
+	// on unchanged. The adapter reports the new session's ref.
+	Fork bool
+}
+
+// Factory creates an adapter that opens the session resume says.
+type Factory func(resume Resume) (Adapter, error)

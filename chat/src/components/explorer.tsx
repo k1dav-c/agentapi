@@ -35,6 +35,7 @@ import {
   DialogTrigger,
 } from "./ui/dialog";
 import {Tabs, TabsContent, TabsList, TabsTrigger} from "./ui/tabs";
+import {SessionHistory} from "./session-history";
 
 interface ExplorerProps {
   onNavigateTask: (number: number) => void;
@@ -556,6 +557,11 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
             )}
           </TabsContent>
           <TabsContent value="session" className="min-h-0 overflow-y-auto overscroll-contain p-4">
+            {features.sessionHistory && (
+              <div className="mb-6">
+                <SessionHistory active={shown === "session"} onOpened={() => setOpen(false)} />
+              </div>
+            )}
             <div className="space-y-3">
               <h3 className="text-sm font-semibold">Restart the agent</h3>
               <p className="text-sm text-muted-foreground">

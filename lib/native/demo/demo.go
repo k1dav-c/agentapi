@@ -147,8 +147,9 @@ func Factory(opts Options) native.Factory {
 		opts.Now = time.Now
 	}
 	login := &loginState{}
-	return func(resumeRef string) (native.Adapter, error) {
-		return newAdapter(resumeRef, opts, login), nil
+	return func(resume native.Resume) (native.Adapter, error) {
+		// A fork of the simulated session is a session like it.
+		return newAdapter(resume.Ref, opts, login), nil
 	}
 }
 

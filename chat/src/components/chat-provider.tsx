@@ -32,6 +32,7 @@ import {
   type MCPCheckResult,
   type MCPConfig,
   type MCPProfiles,
+  type SessionList,
   type UploadOptions,
 } from "@/lib/chat-api";
 import {features, type Features} from "@/lib/features";
@@ -131,6 +132,10 @@ interface ChatContextValue {
   continueAfterLimit: (at: ContinueAt) => Promise<void>;
   cancelContinue: () => Promise<void>;
   dismissLimitStop: () => Promise<void>;
+  // The agent's sessions in the working directory, and opening one (or a
+  // copy of it) in place of this conversation (features.sessionHistory).
+  listSessions: () => Promise<SessionList>;
+  resumeSession: (id: string, fork: boolean) => Promise<void>;
   terminalInput: (data: string) => Promise<void>;
   terminalResize: (cols: number, rows: number) => Promise<void>;
   // The agent is starting (lifecycle "starting"): there is no turn yet, and
@@ -323,7 +328,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
     () => ({transport, capabilities: agentStarting ? null : capabilities, serverStatus, pendingRequestCount}),
     [agentStarting, capabilities, pendingRequestCount, serverStatus, transport],
   );
-  const chatFeatures = useMemo(() => features(transport, capabilities, terminalAvailable), [capabilities, terminalAvailable, transport]);
+  const chatFeatures = useMemo(
+    () => features(transport, capabilities, terminalAvailable, agentType),
+    [agentType, capabilities, terminalAvailable, transport],
+  );
   const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
   const currentTask = useMemo(() => lastUserMessage(messages), [messages]);
 
@@ -563,6 +571,18 @@ export function ChatProvider({ children }: PropsWithChildren) {
       setRichMessages([]);
       setRequests([]);
     }),
+    resumeSession: useStableCallback(async (id: string, fork: boolean) => {
+      const epoch = syncRef.current.epoch;
+      await api.resumeSession(id, fork);
+      // As for deleteMessages: the server sent the session's conversation
+      // under a new epoch.
+      if (syncRef.current.epoch !== epoch) return;
+      syncRef.current.reset();
+      void clearSession(agentAPIUrl);
+      setMessages([]);
+      setRichMessages([]);
+      setRequests([]);
+    }),
   };
   const value: ChatContextValue = {
     ...actions,
@@ -583,6 +603,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     continueAfterLimit: api.continueAfterLimit,
     cancelContinue: api.cancelContinue,
     dismissLimitStop: api.dismissLimitStop,
+    listSessions: api.listSessions,
     terminalInput: api.terminalInput,
     terminalResize: api.terminalResize,
     getSettings: api.getSettings,

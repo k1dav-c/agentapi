@@ -236,3 +236,56 @@ func TestReloadNeedsResume(t *testing.T) {
 	c, _, _ := start(t, func(a *nativetest.Adapter) { a.Caps.Resume = false }, native.Config{})
 	assert.ErrorIs(t, c.Reload(context.Background()), native.ErrUnsupported)
 }
+
+func TestSwitchOpensAnotherSession(t *testing.T) {
+	c, factory, rec := start(t, nil, native.Config{InitialPrompt: "hi"})
+	first := factory.Last()
+	require.Eventually(t, func() bool { return len(first.Turns()) == 1 }, 5*time.Second, time.Millisecond)
+	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+
+	history := []st.ConversationMessage{
+		{Id: 0, Role: st.ConversationRoleUser, Message: "earlier"},
+		{Id: 1, Role: st.ConversationRoleAgent, Message: "done"},
+	}
+	require.NoError(t, c.Switch(context.Background(), native.Resume{Ref: "earlier-session"}, history))
+	second := factory.Last()
+	assert.NotSame(t, first, second)
+	assert.True(t, first.Closed())
+	assert.Equal(t, "earlier-session", second.ResumeRef)
+	assert.False(t, second.Fork)
+	assert.Equal(t, "earlier-session", c.SessionRef())
+	assert.Equal(t, history, c.Messages())
+	assert.Empty(t, second.Turns(), "the initial prompt is not sent again")
+	assert.Contains(t, rec.get().refs, "earlier-session", "stored to resume it after a restart")
+
+	// The conversation goes on after the session's messages.
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "more"}))
+	msgs := c.Messages()
+	require.Len(t, msgs, 3)
+	assert.Equal(t, 2, msgs[2].Id)
+}
+
+func TestSwitchToAFork(t *testing.T) {
+	c, factory, _ := start(t, nil, native.Config{})
+	require.NoError(t, c.Switch(context.Background(), native.Resume{Ref: "original", Fork: true}, nil))
+	fork := factory.Last()
+	assert.Equal(t, "original", fork.ResumeRef)
+	assert.True(t, fork.Fork)
+
+	// A reload before the agent reported the copy forks again, rather than
+	// go on in the original.
+	require.NoError(t, c.Reload(context.Background()))
+	assert.True(t, factory.Last().Fork)
+
+	// Once the agent reports the copy, it is the session to resume.
+	factory.Last().Sink().SessionRef("copy")
+	require.NoError(t, c.Reload(context.Background()))
+	assert.Equal(t, "copy", factory.Last().ResumeRef)
+	assert.False(t, factory.Last().Fork)
+}
+
+func TestSwitchWhileATurnRuns(t *testing.T) {
+	c, _, _ := start(t, nil, native.Config{})
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "work"}))
+	assert.ErrorIs(t, c.Switch(context.Background(), native.Resume{Ref: "other"}, nil), native.ErrTurnActive)
+}

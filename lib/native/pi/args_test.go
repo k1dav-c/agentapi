@@ -9,6 +9,8 @@ import (
 
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
+
+	"github.com/coder/agentapi/lib/native"
 )
 
 func TestBuildArgs(t *testing.T) {
@@ -104,7 +106,7 @@ func TestNewFactoryRejectsArgs(t *testing.T) {
 	require.Error(t, err)
 	factory, err := NewFactory(Config{Program: "pi"})
 	require.NoError(t, err)
-	a, err := factory("ref")
+	a, err := factory(native.Resume{Ref: "ref"})
 	require.NoError(t, err)
 	assert.Equal(t, "ref", a.(*Adapter).resumeRef)
 	require.NoError(t, a.Close(), "closing an adapter that never started")

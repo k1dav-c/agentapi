@@ -3,6 +3,10 @@
 // the transport themselves.
 
 import type {Capabilities, Transport} from "./dispatch";
+import type {AgentType} from "./agents";
+
+// The agents whose earlier sessions AgentAPI reads from their session logs.
+const SESSION_HISTORY_AGENTS: readonly AgentType[] = ["claude", "codex", "pi"];
 
 export interface Features {
   // The agent's own terminal: TTY mode, terminal keys and the live screen
@@ -30,9 +34,12 @@ export interface Features {
   // A restart for an MCP change keeps the conversation: the agent resumes
   // its session (native).
   restartKeepsConversation: boolean;
+  // The agent's earlier sessions, to open one or a copy of it (native
+  // Claude Code, Codex and Pi).
+  sessionHistory: boolean;
 }
 
-export function features(transport: Transport, capabilities: Capabilities | null, shellAvailable: boolean): Features {
+export function features(transport: Transport, capabilities: Capabilities | null, shellAvailable: boolean, agentType?: AgentType): Features {
   const native = transport === "native";
   return {
     agentTerminal: transport === "pty",
@@ -45,5 +52,6 @@ export function features(transport: Transport, capabilities: Capabilities | null
     interrupt: native && Boolean(capabilities?.interrupt),
     usage: native,
     restartKeepsConversation: native,
+    sessionHistory: native && agentType !== undefined && SESSION_HISTORY_AGENTS.includes(agentType),
   };
 }

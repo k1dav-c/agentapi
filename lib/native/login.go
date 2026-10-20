@@ -12,7 +12,7 @@ import (
 
 // awaitLogin records that the agent of generation gen needs a login and
 // starts it again after LoginRetryInterval, or sooner on RetryLogin.
-func (c *Conversation) awaitLogin(ctx context.Context, gen int, resumeRef string, login LoginRequired) {
+func (c *Conversation) awaitLogin(ctx context.Context, gen int, resume Resume, login LoginRequired) {
 	login = withLocalAccount(login)
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -30,13 +30,13 @@ func (c *Conversation) awaitLogin(ctx context.Context, gen int, resumeRef string
 	}
 	wake := make(chan struct{})
 	c.loginWake = wake
-	go c.relaunchAfterWait(ctx, wake, c.generation, resumeRef)
+	go c.relaunchAfterWait(ctx, wake, c.generation, resume)
 }
 
 // relaunchAfterWait starts the agent again as generation gen once it waited
 // for a login (closing wake cuts the wait short), unless the agent was
 // replaced or closed meanwhile.
-func (c *Conversation) relaunchAfterWait(ctx context.Context, wake <-chan struct{}, gen int, resumeRef string) {
+func (c *Conversation) relaunchAfterWait(ctx context.Context, wake <-chan struct{}, gen int, resume Resume) {
 	if !c.waitForLogin(ctx, wake) {
 		return
 	}
@@ -49,7 +49,7 @@ func (c *Conversation) relaunchAfterWait(ctx context.Context, wake <-chan struct
 	if !current {
 		return
 	}
-	if err := c.launch(ctx, gen, resumeRef); err != nil {
+	if err := c.launch(ctx, gen, resume); err != nil {
 		c.failStart(gen, err)
 	}
 }
@@ -139,12 +139,12 @@ func (c *Conversation) RetryLogin(context.Context) error {
 		return nil
 	}
 	old := c.retireAdapterLocked()
-	gen, ref, runCtx := c.generation, c.sessionRef, c.ctx
+	gen, resume, runCtx := c.generation, c.resumeLocked(), c.ctx
 	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
 	c.mu.Unlock()
 	if old != nil {
 		_ = old.Close()
 	}
-	c.launchAsync(runCtx, gen, ref)
+	c.launchAsync(runCtx, gen, resume)
 	return nil
 }

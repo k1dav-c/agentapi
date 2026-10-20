@@ -50,6 +50,7 @@ type Server struct {
 	logger             *slog.Logger
 	conversation       st.Conversation
 	native             *native.Conversation // nil unless the transport is native
+	observer           *nativeObserver      // the native conversation's
 	stateDB            *statedb.DB          // nil unless the conversation is kept
 	savedQueue         []QueuedMessage      // the queue as last stored in stateDB
 	savedNextQueueID   int
@@ -371,6 +372,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		s.mcpStore = store
 	}
 
+	s.observer = observer
 	if observer != nil {
 		observer.storeImages = s.storeRichImages
 	}

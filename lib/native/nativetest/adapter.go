@@ -28,7 +28,9 @@ type Adapter struct {
 	Ref string
 	// ResumeRef is the ref the factory created the adapter with.
 	ResumeRef string
-	StartErr  error
+	// Fork is set for an adapter that forks ResumeRef's session.
+	Fork     bool
+	StartErr error
 	// StartWarnings are reported with Sink.Error at the start, before
 	// StartErr is returned.
 	StartWarnings []string
@@ -317,9 +319,10 @@ type Factory struct {
 }
 
 // New implements native.Factory.
-func (f *Factory) New(resumeRef string) (native.Adapter, error) {
+func (f *Factory) New(resume native.Resume) (native.Adapter, error) {
 	a := New()
-	a.ResumeRef = resumeRef
+	a.ResumeRef = resume.Ref
+	a.Fork = resume.Fork
 	if f.Configure != nil {
 		f.Configure(a)
 	}

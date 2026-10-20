@@ -311,7 +311,7 @@ func deliverResult(p *pendingCmd, res cmdResult) {
 
 // handleState handles the get_state response of the handshake.
 func (a *Adapter) handleState(state sessionState) {
-	if a.resumeRef != "" && state.SessionID != a.resumeRef {
+	if a.resumeRef != "" && !a.fork && state.SessionID != a.resumeRef {
 		a.log.Warn("Pi opened a different session than the one to resume", "want", a.resumeRef, "got", state.SessionID)
 	}
 	a.setSettings(stateSettings(state))

@@ -274,7 +274,7 @@ func TestCloseEscalates(t *testing.T) {
 func TestCloseBeforeStart(t *testing.T) {
 	factory, err := NewFactory(Config{Program: "codex"})
 	require.NoError(t, err)
-	a, err := factory("")
+	a, err := factory(native.Resume{})
 	require.NoError(t, err)
 	require.NoError(t, a.Close())
 	require.NoError(t, a.Wait())
@@ -289,7 +289,7 @@ func TestCloseDuringFailedStart(t *testing.T) {
 	})
 	require.NoError(t, err)
 	for range 200 {
-		adapter, err := factory("")
+		adapter, err := factory(native.Resume{})
 		require.NoError(t, err)
 		closed := make(chan struct{})
 		go func() {
@@ -762,7 +762,7 @@ func TestCloseWithBlockedWrite(t *testing.T) {
 		StartProcess: func(procutil.Command) (procutil.Process, error) { return proc, nil },
 	})
 	require.NoError(t, err)
-	adapter, err := factory("")
+	adapter, err := factory(native.Resume{})
 	require.NoError(t, err)
 	a := adapter.(*Adapter)
 	started := make(chan error, 1)

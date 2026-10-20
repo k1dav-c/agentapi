@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/native"
 )
 
 func TestArgs(t *testing.T) {
@@ -18,7 +20,7 @@ func TestArgs(t *testing.T) {
 		t.Parallel()
 		p, err := parseArgs([]string{"--model", "haiku", "--allowedTools", "Read", "Edit", "--mcp-config", "a.json"})
 		require.NoError(t, err)
-		args := buildArgs(p, "sid", "")
+		args := buildArgs(p, "sid", "", false)
 		assert.Equal(t, []string{
 			"-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose",
 			"--include-partial-messages", "--replay-user-messages", "--permission-prompt-tool", "stdio",
@@ -31,7 +33,7 @@ func TestArgs(t *testing.T) {
 
 	t.Run("resume", func(t *testing.T) {
 		t.Parallel()
-		args := buildArgs(parsedArgs{}, "", "-abc")
+		args := buildArgs(parsedArgs{}, "", "-abc", false)
 		assert.Contains(t, args, "--resume=-abc")
 		assert.NotContains(t, strings.Join(args, " "), "--session-id")
 	})
@@ -57,7 +59,7 @@ func TestArgs(t *testing.T) {
 		} {
 			p, err := parseArgs(tc.args)
 			require.NoError(t, err)
-			args := buildArgs(p, "sid", "")
+			args := buildArgs(p, "sid", "", false)
 			for _, a := range tc.absent {
 				assert.NotContains(t, args, a, tc.args)
 			}
@@ -229,11 +231,11 @@ func TestRootDefaultMode(t *testing.T) {
 			require.NoError(t, err)
 			// Every adapter of the factory (every restart) starts the same.
 			for range 2 {
-				adapter, err := factory("")
+				adapter, err := factory(native.Resume{})
 				require.NoError(t, err)
 				a := adapter.(*Adapter)
 				assert.Equal(t, tc.mode, a.args.mode)
-				args := buildArgs(a.args, "sid", "")
+				args := buildArgs(a.args, "sid", "", false)
 				if tc.mode != "" {
 					i := slices.Index(args, "--permission-mode")
 					require.GreaterOrEqual(t, i, 0)
