@@ -254,7 +254,9 @@ type Adapter interface {
 	Close() error
 }
 
-type Factory func(resumeRef string) (Adapter, error)
+// Resume 說明 adapter 要開啟哪個工作階段：Ref、帶 Fork 時是它的副本，
+// Ref 為空時則是新的工作階段。
+type Factory func(resume Resume) (Adapter, error)
 ```
 
 - **Sink。** Adapter 透過 `Sink` 回報 agent 的動作：回合開始與結束、結構化訊息、時間軸事件、
@@ -272,7 +274,16 @@ type Factory func(resumeRef string) (Adapter, error)
   有效登入資訊的 adapter 會回傳 `LoginRequiredError`：對話會回報 `login_required`，每 5 秒重新啟動它
   一次，或在 `POST /login/retry` 要求時立刻啟動。agent 執行之後，對話會套用為這個工作階段
   選擇的設定、回報它的能力，並送出初始提示。`Restart` 會換成新的工作階段；`Reload` 則接續
-  同一個工作階段，重新讀取 MCP 設定並保留對話。
+  同一個工作階段，重新讀取 MCP 設定並保留對話；`Switch` 會開啟另一個工作階段或它的副本，並
+  帶入該工作階段的訊息，這些訊息由伺服器從 agent 的工作階段紀錄讀出
+  （`jsonlwatcher.ReadSessionHistory`；`GET /sessions` 會列出它們）。agent 在工作階段中執行過的
+  sub agent 也以同樣方式從它們自己的紀錄讀出（`jsonlwatcher.Subagents`），提供給
+  `GET /subagents` 和聊天介面的 Lineage 面板；它們的狀態取自啟動它們的 Agent 工具呼叫。
+- **用量限制。** 帳號的用量限制讓回合停下時，adapter 會以 `limited` 停止原因結束回合（Claude Code
+  的限制訊息與 `rejected` 的 rate limit 事件、Codex 的 `usageLimitExceeded`、Pi 模型供應商的
+  額度錯誤）。對話會把它記成帶有重置時間的 `LimitStop`，直到下一個回合開始：期間伺服器的佇列
+  會等待（`HoldsQueue`），而排定在重置時的繼續（`ScheduleContinue`、`--auto-continue`）會在佇列
+  的派送迴圈中、排隊的訊息之前送出。
 - **回合。** 只有 agent 閒置時訊息才會開始新的回合；否則 `StartTurn` 會回傳
   `ErrMessageValidationChanging`，由伺服器把訊息排入佇列。agent 壓縮 context 期間，回合也會
   以同樣的方式等待。
@@ -293,8 +304,8 @@ type Factory func(resumeRef string) (Adapter, error)
 | Adapter | 行程 | 協定 |
 | --- | --- | --- |
 | `claude` | `claude -p --input-format stream-json --output-format stream-json ...` | stdin 與 stdout 上的 stream-json 訊息，加上 Claude Code 的 control protocol：`initialize`、`can_use_tool`（核准、提問、計畫）、`set_permission_mode`、`set_model`、`apply_flag_settings`、`get_settings`、`get_context_usage`、`interrupt` |
-| `codex` | `codex app-server` | JSON-RPC：`thread/start` 或 `thread/resume`、`turn/start`（帶著設定）、`turn/steer`、`turn/interrupt`、`thread/compact/start`、`model/list`；核准、提問和 MCP elicitation 以伺服器請求送來；plan 模式是一種 collaboration mode |
-| `pi` | `pi --mode rpc --session-id <id>` | JSON lines：`prompt`（steer 也用它）、`abort`、`get_state`、`get_available_models`、`set_model`、`set_thinking_level`、`compact`；擴充功能的對話框以 UI 請求送來，用 `extension_ui_response` 回答 |
+| `codex` | `codex app-server` | JSON-RPC：`thread/start`、`thread/resume` 或 `thread/fork`、`turn/start`（帶著設定）、`turn/steer`、`turn/interrupt`、`thread/compact/start`、`model/list`；核准、提問和 MCP elicitation 以伺服器請求送來；plan 模式是一種 collaboration mode |
+| `pi` | `pi --mode rpc --session-id <id>`（副本加上 `--fork <id>`） | JSON lines：`prompt`（steer 也用它）、`abort`、`get_state`、`get_available_models`、`set_model`、`set_thinking_level`、`compact`；擴充功能的對話框以 UI 請求送來，用 `extension_ui_response` 回答 |
 | `demo` | 無 | 模擬的 agent，會串流思考、一個工具呼叫和回覆，並能開啟每一種請求 |
 
 ## 事件與對話狀態
@@ -316,8 +327,8 @@ type Factory func(resumeRef string) (Adapter, error)
 ## 訊息佇列
 
 agent 忙碌時送出的訊息會在伺服器的佇列中等待（`s.queue`；變更佇列時都會持有 `s.mu`）。派送
-迴圈每 500 毫秒檢查第一則訊息是否能送出：native agent 的對話必須閒置，PTY agent 的畫面則必須
-穩定且未顯示對話框。被拒絕的訊息總共最多嘗試 5 次，但可能重複送達的訊息會立刻丟棄：native agent
+迴圈每 500 毫秒檢查第一則訊息是否能送出：native agent 的對話必須閒置，且沒有因用量限制而暫停
+佇列；PTY agent 的畫面則必須穩定且未顯示對話框。被拒絕的訊息總共最多嘗試 5 次，但可能重複送達的訊息會立刻丟棄：native agent
 逾時的送出（agent 可能已經收到），以及 PTY agent 已輸入但沒有送出的訊息（再送一次會重複輸入）。
 使用 native transport 時，訊息也可以 steer 進執行中的回合，或中斷它。佇列也是持久保存狀態的
 一部分。
@@ -328,8 +339,8 @@ agent 忙碌時送出的訊息會在伺服器的佇列中等待（`s.queue`；�
 所以 `CGO_ENABLED=0` 的建置也能使用。
 
 - 資料表有 `messages`、`rich_messages`、`session_events`、`requests`、`queue`，以及
-  `meta`：保存 agent 類型、transport 和工作目錄、epoch 與 seq、工作階段參照與名稱，以及為
-  工作階段選擇的設定。
+  `meta`：保存 agent 類型、transport 和工作目錄、epoch 與 seq、工作階段參照與名稱、為
+  工作階段選擇的設定，以及用量限制造成的停止。
 - 寫入會先排隊，每 200 毫秒在一個交易中寫入，所以串流不必等待磁碟。正常關閉時會將檔案標示為
   已正常關閉；當機之後，對話會換成新的 epoch，用戶端會重新載入完整的對話。
 - 檔案以獨占鎖定模式搭配 WAL 開啟，所以第二個 AgentAPI 無法使用它；新建立的檔案權限為 0600。

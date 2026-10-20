@@ -68,6 +68,9 @@ func guard[I, O any](check func() error, handler func(context.Context, *I) (*O, 
 func (s *Server) registerRoutes() {
 	s.registerAuthRoutes()
 	s.registerNativeRoutes()
+	s.registerLimitRoutes()
+	s.registerSessionRoutes()
+	s.registerSubagentRoutes()
 	s.registerFileRoutes()
 	s.registerFilePreviewRoutes()
 	s.registerTerminalRoutes()

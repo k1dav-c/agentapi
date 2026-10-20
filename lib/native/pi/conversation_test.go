@@ -31,8 +31,8 @@ func newConvFixture(t *testing.T) *convFixture {
 	pi := newFakePi(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conv := native.NewConversation(native.Config{
-		Factory: func(ref string) (native.Adapter, error) {
-			return newAdapter(Config{Logger: logger, StartProcess: pi.start}, nil, ref), nil
+		Factory: func(ref native.Resume) (native.Adapter, error) {
+			return newAdapter(Config{Logger: logger, StartProcess: pi.start}, nil, ref.Ref), nil
 		},
 		Logger: logger,
 	})
@@ -163,6 +163,7 @@ func (*settingsObserver) SessionRef(string)                       {}
 func (*settingsObserver) RequestUpdated(native.RequestState)      {}
 func (*settingsObserver) SettingsChosen(native.Settings)          {}
 func (*settingsObserver) Usage(native.AgentUsage)                 {}
+func (*settingsObserver) LimitStop(*native.LimitStop)             {}
 
 func TestModelSwitchReportsNoMixedSettings(t *testing.T) {
 	t.Parallel()
@@ -170,8 +171,8 @@ func TestModelSwitchReportsNoMixedSettings(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	obs := &settingsObserver{}
 	conv := native.NewConversation(native.Config{
-		Factory: func(ref string) (native.Adapter, error) {
-			return newAdapter(Config{Logger: logger, StartProcess: pi.start}, nil, ref), nil
+		Factory: func(ref native.Resume) (native.Adapter, error) {
+			return newAdapter(Config{Logger: logger, StartProcess: pi.start}, nil, ref.Ref), nil
 		},
 		Logger:   logger,
 		Observer: obs,

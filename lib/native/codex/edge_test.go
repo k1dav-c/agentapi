@@ -105,6 +105,15 @@ func TestFailedTurn(t *testing.T) {
 	assert.Equal(t, "turn failed: stream disconnected\nHTTP 502", *sys[len(sys)-1].Content)
 }
 
+func TestTurnStoppedByAUsageLimit(t *testing.T) {
+	h := newHarness(t, "", nil)
+	h.boot()
+	h.beginTurn("turn-1")
+	h.completeTurn("turn-1", "failed", `,"error":{"message":"You've hit your usage limit. Try again at 3:05 PM.","codexErrorInfo":"usageLimitExceeded"}`)
+	s := snapshot(h.rec)
+	assert.Equal(t, []native.TurnResult{{StopReason: "limited", Error: "You've hit your usage limit. Try again at 3:05 PM."}}, s.completions)
+}
+
 func TestInterruptWithoutCompletion(t *testing.T) {
 	h := newHarness(t, "", nil, func(c *Config) { c.InterruptTimeout = 50 * time.Millisecond })
 	h.boot()
@@ -265,7 +274,7 @@ func TestCloseEscalates(t *testing.T) {
 func TestCloseBeforeStart(t *testing.T) {
 	factory, err := NewFactory(Config{Program: "codex"})
 	require.NoError(t, err)
-	a, err := factory("")
+	a, err := factory(native.Resume{})
 	require.NoError(t, err)
 	require.NoError(t, a.Close())
 	require.NoError(t, a.Wait())
@@ -280,7 +289,7 @@ func TestCloseDuringFailedStart(t *testing.T) {
 	})
 	require.NoError(t, err)
 	for range 200 {
-		adapter, err := factory("")
+		adapter, err := factory(native.Resume{})
 		require.NoError(t, err)
 		closed := make(chan struct{})
 		go func() {
@@ -753,7 +762,7 @@ func TestCloseWithBlockedWrite(t *testing.T) {
 		StartProcess: func(procutil.Command) (procutil.Process, error) { return proc, nil },
 	})
 	require.NoError(t, err)
-	adapter, err := factory("")
+	adapter, err := factory(native.Resume{})
 	require.NoError(t, err)
 	a := adapter.(*Adapter)
 	started := make(chan error, 1)
@@ -865,4 +874,70 @@ func TestCloseWithoutATurn(t *testing.T) {
 	h.a.closeGrace = waitTimeout
 	require.NoError(t, h.a.Close())
 	h.expectNothingSent()
+}
+
+func TestCollabAgentToolCalls(t *testing.T) {
+	h := newHarness(t, "", nil)
+	h.boot()
+	h.beginTurn("turn-1")
+	// As codex app-server 0.163.0 reports a spawned worker and the wait.
+	for _, item := range []string{
+		`{"type":"collabAgentToolCall","id":"call-spawn","tool":"spawnAgent","status":"completed","senderThreadId":"` + testThread + `",
+			"receiverThreadIds":["sub-1"],"prompt":null,"model":"gpt-6.1-sol","agentsStates":{"sub-1":{"status":"pendingInit","message":null}}}`,
+		`{"type":"collabAgentToolCall","id":"call-wait","tool":"wait","status":"completed","senderThreadId":"` + testThread + `",
+			"receiverThreadIds":["sub-1"],"agentsStates":{"sub-1":{"status":"completed","message":"README.md"}}}`,
+	} {
+		h.item("completed", "turn-1", item)
+	}
+	h.completeTurn("turn-1", "completed", "")
+
+	msg, ok := h.rec.Message("turn-1", "assistant")
+	require.True(t, ok)
+	require.Len(t, msg.Content, 2)
+	assert.Equal(t, "spawn_agent", msg.Content[0].ToolName)
+	assert.JSONEq(t, `{"receiver_thread_ids":["sub-1"],"model":"gpt-6.1-sol"}`, string(msg.Content[0].ToolInput))
+	assert.Equal(t, "wait_agent", msg.Content[1].ToolName)
+	result, ok := h.rec.Message("result-call-wait", "user")
+	require.True(t, ok)
+	assert.Equal(t, "sub-1: completed: README.md", result.Content[0].Text)
+	assert.Equal(t, "completed", result.Content[0].Status)
+}
+
+func TestCollabToolName(t *testing.T) {
+	t.Parallel()
+	for tool, want := range map[string]string{"spawnAgent": "spawn_agent", "wait": "wait_agent", "sendInput": "send_input", "closeAgent": "close_agent", "": "agent"} {
+		assert.Equal(t, want, collabToolName(tool), tool)
+	}
+}
+
+func TestSubagentActivity(t *testing.T) {
+	h := newHarness(t, "", nil)
+	h.boot()
+	h.beginTurn("turn-1")
+	// As codex app-server 0.163.0 reports a worker spawned with multi-agent
+	// v2: a start, under the spawn call's id, and a completion.
+	h.item("completed", "turn-1", `{"type":"subAgentActivity","id":"call-spawn","kind":"started","agentThreadId":"sub-1","agentPath":"/root/list_files","model":"gpt-6.1-sol"}`)
+	// The turn goes on, so its messages are sent on the snapshot timer.
+	h.eventually(func() bool {
+		_, call := h.rec.Message("turn-1", "assistant")
+		_, result := h.rec.Message("result-call-spawn", "user")
+		return call && result
+	}, "the spawn call and its result")
+	msg, ok := h.rec.Message("turn-1", "assistant")
+	require.True(t, ok)
+	require.Len(t, msg.Content, 1)
+	assert.Equal(t, "spawn_agent", msg.Content[0].ToolName)
+	assert.JSONEq(t, `{"receiver_thread_ids":["sub-1"],"agent_path":"/root/list_files","model":"gpt-6.1-sol"}`, string(msg.Content[0].ToolInput))
+	result, ok := h.rec.Message("result-call-spawn", "user")
+	require.True(t, ok)
+	assert.Equal(t, "running", result.Content[0].Status, "the subagent goes on")
+
+	h.item("completed", "turn-1", `{"type":"subAgentActivity","id":"subagent-completed-x","kind":"completed","agentThreadId":"sub-1","agentPath":"/root/list_files"}`)
+	h.completeTurn("turn-1", "completed", "")
+	result, ok = h.rec.Message("result-call-spawn", "user")
+	require.True(t, ok)
+	assert.Equal(t, "completed", result.Content[0].Status)
+	assert.Equal(t, "Finished /root/list_files", result.Content[0].Text)
+	msg, _ = h.rec.Message("turn-1", "assistant")
+	assert.Len(t, msg.Content, 1, "the completion is not a tool call of its own")
 }

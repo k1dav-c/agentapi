@@ -86,7 +86,7 @@ func TestSettingOptionsWithoutBypass(t *testing.T) {
 	t.Parallel()
 	factory, err := newFactory(Config{Env: []string{"PATH=/bin"}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}, 0)
 	require.NoError(t, err)
-	adapter, err := factory("")
+	adapter, err := factory(native.Resume{})
 	require.NoError(t, err)
 	a := adapter.(*Adapter)
 	a.models = []claudeModel{{Value: "haiku", ResolvedModel: "claude-haiku-5-5", SupportsAutoMode: new(bool)}}

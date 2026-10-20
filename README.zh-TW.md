@@ -6,7 +6,7 @@ AgentAPI 提供統一的 HTTP API，讓你控制 [Claude Code](https://github.co
 
 ![AgentAPI 聊天介面中的兩個任務：提示詞、工具呼叫、思考旁註和輸入框](docs/screenshots/chat-desktop.png)
 
-截圖是 AgentAPI v0.26.0 搭配內建 `native-demo` agent 的畫面，它的回覆、工具結果、模型和用量
+截圖是 AgentAPI v0.27.0 搭配內建 `native-demo` agent 的畫面，它的回覆、工具結果、模型和用量
 都是模擬的。[聊天介面導覽](docs/chat-ui.zh-TW.md)以截圖和動畫逐一介紹聊天介面的每項功能，
 [截圖說明](docs/screenshots/README.md)則說明它們是怎麼擷取的。
 
@@ -65,17 +65,22 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
   HTTP 或在聊天介面中回覆。
 - 在 agent 執行中切換[權限模式、模型和推理強度](#工作階段設定)：bypass（預設）、auto、ask
   或 plan。
-- 查看 [context 與用量限制](#context-與用量限制)用了多少，並[壓縮](#斜線指令與壓縮) context。
+- 查看 [context 與用量限制](#context-與用量限制)用了多少，並[壓縮](#斜線指令與壓縮) context；
+  Claude Code 的 prompt cache 過期後，聊天介面會建議先壓縮。
+- 回合因為[達到用量限制](#達到用量限制時)而停下時，佇列會等到限制重置，也可以在重置後自動
+  繼續。
 - 缺少或過期的[登入](#登入)會附上要執行的指令回報，登入之後 agent 會自己啟動。
 - agent 工作目錄中共用的[終端機](#終端機)，方便登入和執行簡單的指令。
 - [持久保存的工作階段](#持久保存的工作階段)：使用 `--state-db` 時，對話和 agent 自己的工作
   階段在 AgentAPI 重新啟動後都會保留。
+- 開啟 agent 在工作目錄中的[先前的工作階段](#先前的工作階段)，或從其中一個開始一份副本。
 
 **聊天介面**（`/chat`）
 
 - [任務](#任務與對話紀錄)以對話紀錄的形式呈現，工具呼叫一行一列，思考內容以旁註顯示，
   也可以匯出成 Markdown；[工作階段瀏覽器](#工作階段瀏覽器)提供連結、檔案、任務索引、
   MCP 伺服器和重新啟動。
+- [Lineage](#lineage)：agent 執行過的 sub agent，以及每一個做了什麼，一步一步呈現，執行中也能看。
 - 終端機對話框和 native 請求的[決策卡片](#決策卡片)、agent 設定的選單、顯示 context 的圓環，
   以及斜線指令。
 - 可以查看檔案、git diff，並預覽 HTML、Markdown 和圖片的[檔案檢視器](#檔案檢視器)、
@@ -242,11 +247,29 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 - 目前對話中出現的連結與檔案路徑；
 - 可直接跳到先前任務的索引；
 - 不必離開聊天介面就能設定 MCP 伺服器；
-- 提供兩步驟重新啟動（Restart）的 Session 分頁（用 ⌘K / Ctrl+K 開啟 Explorer）。
+- Session 分頁：可以開啟或複製 agent [先前的工作階段](#先前的工作階段)，並提供兩步驟重新
+  啟動（Restart）（用 ⌘K / Ctrl+K 開啟 Explorer）。
 
 ![工作階段瀏覽器的 Index 分頁，列出這個工作階段的任務](docs/screenshots/explorer-index.png)
 
 每個任務的 ⋯ 選單可以把該任務預覽、複製或匯出成 Markdown。
+
+### Lineage
+
+native 的 Claude Code 或 Codex 執行 sub agent（Claude Code 的 Agent 工具、Codex 的 spawn_agent）時，header 上會出現一個按鈕，顯示 sub agent
+的數量和還在執行的數量，點下去會打開 Lineage 面板：列出每個 sub agent 被交付的任務、類型、
+狀態（執行中、完成或失敗）和執行時間。選一個就能看到它做了什麼，一步一步呈現，就像對話紀錄
+呈現一個任務那樣：思考內容、工具呼叫與結果，以及它的回答；執行中的會持續更新。Agent 或
+spawn_agent 工具呼叫上的 **Steps** 按鈕可以直接打開它對應的 sub agent。
+
+![Lineage 面板顯示一個 sub agent：它的任務、讀的檔案、跑的指令和它的回答](docs/screenshots/lineage.png)
+
+這些步驟是從 sub agent 自己的紀錄讀出來的（Claude Code 會在工作階段旁為每個 sub agent 留一份紀錄），
+所以面板顯示的是 agent 目前開啟的工作階段的 sub agent，從[先前的工作階段](#先前的工作階段)開啟的
+也一樣；工作階段的副本則不會帶著原本的 sub agent。`GET /subagents` 會列出它們，
+`GET /subagents/{id}` 回傳其中一個的任務和訊息。Claude Code sub agent 的狀態取自它的 Agent 工具
+呼叫；Codex 的 spawn 呼叫會立刻結束、sub agent 則繼續執行，所以它的狀態取自 sub agent 自己的紀錄。
+Codex 交給 sub agent 的任務是加密的，所以面板改用它的任務名稱和暱稱來命名。
 
 ### 附件與圖片
 
@@ -275,6 +298,13 @@ view_image；Pi 的 read、write 和 edit）、agent 回覆中 inline code 裡�
 （`GET /files/content`、`GET /files/diff`，超過 1 MiB 會截斷）。只能開啟 agent 工作目錄裡
 的檔案。展開的工具呼叫會列出它碰到的檔案，並以 diff 顯示它的變更，原始輸入點一下就能看到。
 在手機上檢視器是全螢幕。
+
+不在工作目錄裡的路徑，會在工作目錄底下搜尋（`GET /files/find`，不分大小寫）：agent 在工作目錄
+（例如 home 目錄）底下的某個 repo 裡工作時，提到檔案用的是相對於 repo 的路徑。只找到一個就直接
+開啟，並註明 agent 原本寫的路徑；找到多個則列出來讓你選。搜尋會略過隱藏目錄、相依套件和 Go 的
+module cache（除非路徑本身就在裡面），並在走過 50,000 筆或 2 秒後停止。
+
+![檢視器開啟 my-app/docs/notes.md，並註明 docs/notes.md 不在工作目錄裡](docs/screenshots/file-find.png)
 
 HTML、Markdown 和 SVG 檔案還有第三個分頁 Preview，圖片檔則直接顯示圖片：
 
@@ -316,7 +346,7 @@ HTML、Markdown 和 SVG 檔案還有第三個分頁 Preview，圖片檔則直接
 
 分頁在背景時，圖示會以圓點顯示狀態：琥珀色表示 agent 需要你回應，藍色表示工作中，綠色表示
 任務完成。瀏覽器通知可以從狀態選單開啟，這個選單也能把對話下載成 JSONL（Explorer 的 Session
-分頁也可以）。
+分頁也可以）；native 的 Claude Code 或 Codex 執行過的 sub agent，其步驟會接在 agent 自己的事件之後。
 
 ![從標頭的狀態開啟的工作階段詳細資訊選單](docs/screenshots/session-details.png)
 
@@ -346,7 +376,7 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 - 支援 Claude Code、Codex 和 Pi。AgentAPI 依指令名稱選擇對應的 adapter；使用完整路徑或包裝腳本時，請用 `--type` 指定類型（沒有指定時，它們會被當成 `custom` agent，使用 PTY transport）。
 - 以 `--state-file`（PTY transport 的保存方式）啟動、又沒有指定 `--transport` 的伺服器會維持使用 PTY transport，所以為它寫的命令列仍能啟動；要保存 native 工作階段請用 `--state-db`。
 - ACP 是另一種 transport。`--transport acp` 等同 `--experimental-acp`，不能與 native 模式一起啟用。
-- 開發聊天介面時，可用 `--type custom -- native-demo` 以 native transport 執行模擬 agent，詳見[開發指南](chat/README.md)。以 `--transport native` 指定其他 agent 類型時，會在啟動時被拒絕。
+- 開發聊天介面時，可用 `--type custom -- native-demo` 以 native transport 執行模擬 agent，詳見[開發指南](chat/README.md)。改用 `--type claude`、`codex` 或 `pi` 時，demo 會扮演那個 agent：AgentAPI 會替它讀取那個 agent 的紀錄，用於先前的工作階段和 sub agent。以 `--transport native` 指定其他 agent 類型時，會在啟動時被拒絕。
 
 **使用時會看到什麼**
 
@@ -560,7 +590,37 @@ Claude Code 會在每個回合之後回報它的 5 小時與每週限制和 cont
 和用量窗口，Pi 回報它的 context。新工作階段的 context 會歸零；帳號的用量限制則維持原狀。
 在聊天介面中，輸入框工具列上的圓環顯示 context 用了多少，它的選單則列出各項限制和重置倒數。
 
+Claude Code 也會回報它的 `prompt_cache`：模型供應商在最後一次使用後會保留對話的快取多久
+（`ttl_seconds`：訂閱帳號為一小時，使用 API key、Bedrock 或 Vertex 時為五分鐘），以及快取何時
+過期（`expires_at`）。過期之後，下一則訊息會讓模型重新讀取整個 context，以全額計價，也會算進
+用量限制。agent 閒置、快取已過期且 context 至少有 50k token 時，聊天介面會在輸入框上方提醒，
+並提供先壓縮的按鈕；關掉提醒後，要到下一個回合結束才會再出現。
+
+![輸入框上方的提醒：prompt cache 已過期，下一則訊息會重新讀取 120k token，旁邊是 Compact](docs/screenshots/cold-cache.png)
+
 ![context 彈出視窗：context window 中的 token 數，以及 5 小時與每週的用量限制](docs/screenshots/context-usage.png)
+
+### 達到用量限制時
+
+帳號達到用量限制時，agent 會停下它的回合：Claude Code 會說「You've hit your limit」，Codex 回報
+`usageLimitExceeded`，Pi 則是模型供應商的額度錯誤。這時 `GET /status` 和 `status_change` 會回報
+`limit_stop`：agent 的 `message`、停下的時間，以及 agent 有說明時限制何時重置（`resets_at`；
+沒有的話，就用 `rate_limits` 中已達上限那一項的重置時間）。排隊中的訊息會等到那時再送出，
+而不是一則接一則失敗；你自己送出的訊息會立刻送出，排在它們前面，並結束這個停止狀態。
+
+- `POST /limit/continue` 帶 `{"at": "now"}` 會送出一則請 agent 繼續任務的訊息；帶
+  `{"at": "reset"}` 則排定在重置一分鐘後送出（沒有重置時間時回傳 409）。排隊中的訊息會在它
+  之後送出。
+- `DELETE /limit/continue` 取消排定的繼續；佇列仍會等到重置。
+- `DELETE /limit` 忽略這次停止，讓排隊中的訊息在 agent 能接收時就送出。
+- `--auto-continue` 會為每次有重置時間的停止排定繼續。繼續的回合又被限制停下時，會再排定
+  一次。
+
+使用 `--state-db` 時停止狀態會保留，所以 AgentAPI 重新啟動後，排定的繼續仍會送出。在聊天介面中，
+停止狀態是輸入框上方的一張卡片，顯示重置時間，以及 **Continue at reset**、**Continue now** 和
+**Send queued tasks**，佇列也會標示它在等用量限制。
+
+![因 5 小時限制而停下的回合：卡片顯示重置時間，佇列中有一個被暫停的任務](docs/screenshots/limit-card.png)
 
 ### 終端機
 
@@ -631,6 +691,26 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
 - `--state-db` 需要 native transport（Claude Code、Codex 和 Pi 的預設值）。使用 PTY transport
   時 agent 無法接續工作階段；
   `--state-file` 仍會在那裡保存從畫面解析出的訊息。Native transport 不接受 `--state-file`。
+
+### 先前的工作階段
+
+Claude Code、Codex 和 Pi 會為每個工作階段留下紀錄，AgentAPI 讀取這些紀錄，列出 agent 在工作
+目錄中的工作階段，並開啟其中一個，不需要 `--state-db`：
+
+- `GET /sessions` 由新到舊列出它們，以及 agent 目前開啟的那一個（`current`）：每一個都有
+  `id`、`title`（agent 或使用者為它取的名字）、`first_prompt`、`prompts`（訊息數），以及開始和
+  最後變動的時間。使用者沒送過訊息的工作階段不會列出。資料來自 Claude Code 的 projects 目錄、
+  Codex 的 sessions 和 Pi 的工作階段目錄（會參考 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、
+  `PI_CODING_AGENT_DIR` 和 `PI_CODING_AGENT_SESSION_DIR`，但不會參考傳給 Pi 的 `--session-dir`）。
+- `POST /sessions/{id}/resume` 讓 agent 在那個工作階段上重新啟動，並把對話換成從紀錄讀出的
+  內容。帶 `{"fork": true}` 時，agent 會以新的 id 開啟它的副本（Claude Code 的
+  `--fork-session`、Codex 的 `thread/fork`、Pi 的 `--fork`），原本的工作階段維持不變。佇列和尚未
+  回覆的請求會像重新啟動時一樣清除；agent 正在執行回合時回傳 409。
+
+在聊天介面中，Explorer 的 Session 分頁會列出這些工作階段，並提供 **Open** 和
+**Start a copy**，兩者都要點第二次確認。
+
+![Explorer 的 Session 分頁：這個目錄中 Claude Code 的工作階段，各有 Open 和 Start a copy](docs/screenshots/explorer-sessions.png)
 
 ### Claude Code
 
@@ -858,7 +938,11 @@ AgentAPI 會自動移除這些內容。
 單靠終端機輸出，未必能可靠地還原這些資訊。
 
 - `GET /rich-messages` 回傳結構化的對話。
-- `GET /timeline` 回傳正規化後的工作階段事件，適合用來匯出、稽核或打造其他介面。
+- `GET /timeline` 回傳正規化後的工作階段事件，適合用來匯出、稽核或打造其他介面。加上
+  `?subagents=true`（native 的 Claude Code 和 Codex）時，agent 執行過的 sub agent 的事件會接在
+  後面，從它們各自的紀錄讀出：一個 sub agent 接一個，各自以一筆 system 事件開頭，每筆事件都帶有
+  `subagent_id`，Claude Code 另有啟動它的 Agent 工具呼叫的 `parent_tool_use_id`。agent 自己的
+  事件裡只有交給 sub agent 的任務和它最後的回答。
 - 背景任務和委派出去的任務會持續顯示，並標示執行中、已完成或失敗的狀態與輸出細節。
 - Claude 的思考區塊會以可收合的區段，直接顯示在任務時間軸中。
 - Codex 啟動時會加上 `-c model_reasoning_summary="auto"`（除非你已自行設定），
@@ -1267,6 +1351,7 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 | `--experimental-acp` | `false` | 等同 `--transport acp` |
 | `--state-db` | | 保存對話、並接續 agent 工作階段的 SQLite 檔案（native）；見[持久保存的工作階段](#持久保存的工作階段) |
 | `--terminal` | `true` | 給聊天介面使用、位於 agent 工作目錄的 shell（native）；見[終端機](#終端機) |
+| `--auto-continue` | `false` | 回合因用量限制停下時，在限制重置後繼續（native）；見[達到用量限制時](#達到用量限制時) |
 | `-s`, `--state-file` | | 保存從畫面解析出的訊息的檔案（PTY） |
 | `--load-state`, `--save-state` | 設定 `--state-file` 時為 `true` | 啟動時載入、關閉時保存狀態檔 |
 | `-I`, `--initial-prompt` | | 給 agent 的第一則訊息；以管線輸入時從 stdin 讀取 |
@@ -1322,8 +1407,8 @@ agentapi attach --url localhost:3284
 | `POST /message` | 傳送訊息，agent 忙碌時排入佇列；`dispatch_mode` 為 `queue`（預設）、`steer` 或 `interrupt`（*native*） |
 | `DELETE /messages` | 清除對話和佇列，並重新啟動 agent（*native*：開始新的工作階段；ACP 會回傳 400） |
 | `GET /rich-messages` | 結構化的對話：思考內容、工具呼叫與結果、用量 |
-| `GET /timeline` | 正規化的工作階段事件，可用於匯出或其他介面 |
-| `GET /status` | 狀態、生命週期、執行與工作階段 ID、epoch、工作階段名稱、版本、開啟的對話框；*native*：能力、待處理請求、設定、用量、終端機、登入 |
+| `GET /timeline` | 正規化的工作階段事件，可用於匯出或其他介面；`?subagents=true` 會加上 sub agent 的事件（*native*） |
+| `GET /status` | 狀態、生命週期、執行與工作階段 ID、epoch、工作階段名稱、版本、開啟的對話框；*native*：能力、待處理請求、設定、用量、用量限制停止、終端機、登入 |
 | `GET /title` | 工作階段的可讀標題 |
 | `GET /events` | Server-sent events；`?sync=1` 會在重新連線時增量重播 |
 | `GET /workspace` | AgentAPI 在 Coder workspace 中執行時，該 workspace 的網址 |
@@ -1347,6 +1432,11 @@ agentapi attach --url localhost:3284
 | `GET /settings`、`PUT /settings` | 權限模式、模型和推理強度，以及可選的值；PUT 會修改請求內容中列出的欄位 |
 | `POST /compact` | 壓縮 agent 的 context（Codex、Pi） |
 | `POST /login/retry` | 回報 `login_required` 期間，立刻再檢查一次 agent 的登入（不需要登入時回傳 409） |
+| `POST /limit/continue`、`DELETE /limit/continue` | 現在或在重置時繼續因用量限制停下的回合；取消排定的繼續 |
+| `DELETE /limit` | 忽略用量限制造成的停止，讓排隊中的訊息送出 |
+| `GET /sessions` | agent 在工作目錄中的工作階段（Claude Code、Codex、Pi） |
+| `GET /subagents`、`GET /subagents/{id}` | agent 在工作階段中執行過的 sub agent，以及其中一個的任務和訊息（Claude Code、Codex） |
+| `POST /sessions/{id}/resume` | 開啟其中一個，或它的副本（`{"fork": true}`），取代目前的對話 |
 
 ### 終端機與檔案
 

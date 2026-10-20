@@ -114,6 +114,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/files/find": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get files find
+         * @description Finds the files under the agent's working directory whose path ends with the one given, ignoring case: for a path the agent wrote relative to a repository below the working directory, or in the wrong case. Hidden directories and dependencies (node_modules, vendor, build output) are searched only when the path goes into them, and the search stops after 50,000 entries or 2 seconds. Returns up to 10 matches, those with the same case first, then the latest changed.
+         */
+        get: operations["get-files-find"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/files/preview": {
         parameters: {
             query?: never;
@@ -183,6 +203,50 @@ export interface paths {
          */
         post: operations["post-interrupt"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/limit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Dismiss a usage limit stop
+         * @description Forgets the turn a usage limit stopped, with its scheduled continuation, so the queued messages go out as soon as the agent can take them. Native transport only; returns 409 when no turn stopped on a limit.
+         */
+        delete: operations["delete-limit"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/limit/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Continue after a usage limit
+         * @description Continues the turn a usage limit stopped (`limit_stop` in GET /status) with a message asking the agent to go on: now, or once the limit resets (`at: reset`, which needs the reset time). While a continuation is scheduled the queued messages wait for it; sending a message yourself cancels it. Native transport only; returns 409 when no turn stopped on a limit.
+         */
+        post: operations["post-limit-continue"];
+        /**
+         * Cancel a scheduled continuation
+         * @description Cancels the continuation POST /limit/continue or --auto-continue scheduled. The queued messages still wait until the limit resets. Native transport only; returns 409 when no turn stopped on a limit.
+         */
+        delete: operations["delete-limit-continue"];
         options?: never;
         head?: never;
         patch?: never;
@@ -543,6 +607,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the agent's sessions
+         * @description Lists the sessions the agent had in the working directory, read from its session logs (Claude Code's projects directory, Codex's sessions, Pi's session directory), the latest first, with the one it has open. Sessions in which the user sent nothing are left out. Native transport of Claude Code, Codex and Pi only.
+         */
+        get: operations["get-sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open another session
+         * @description Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Native transport of Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here and 409 while the agent works on a turn.
+         */
+        post: operations["post-sessions-by-id-resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings": {
         parameters: {
             query?: never;
@@ -579,6 +683,46 @@ export interface paths {
          * @description Returns the current status of the agent.
          */
         get: operations["get-status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subagents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the agent's subagents
+         * @description Lists the subagents the agent ran in the session it has open, read from their own logs, in the order they started: each with what it was asked to do, the tool call that started it and whether it still runs (Claude Code). Native transport of Claude Code and Codex; Pi runs no subagents, and returns an empty list.
+         */
+        get: operations["get-subagents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subagents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get what a subagent did
+         * @description Returns a subagent's task and what it did so far, as rich messages, read from its log; ask again for a running one. Native transport of Claude Code and Codex; returns 404 for a subagent the session has no log of.
+         */
+        get: operations["get-subagents-by-id"];
         put?: never;
         post?: never;
         delete?: never;
@@ -653,7 +797,7 @@ export interface paths {
         };
         /**
          * Get timeline
-         * @description Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events.
+         * @description Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events. With `subagents=true`, the events of the subagents the agent ran in the session follow, read from their own logs (native Claude Code and Codex): each subagent's in turn, starting with a system event, and each event with its `subagent_id` and, for Claude Code, the `parent_tool_use_id` of the Agent tool call that started it.
          */
         get: operations["get-timeline"];
         put?: never;
@@ -761,6 +905,8 @@ export interface components {
         AgentUsage: {
             /** @description How full the model's context window is, after the last turn. */
             context?: components["schemas"]["ContextUsage"];
+            /** @description How long the model provider keeps the conversation's prompt cache, after the last turn. Claude Code only. */
+            prompt_cache?: components["schemas"]["PromptCache"];
             /** @description The account's usage limits (Claude Code's 5-hour and weekly limits, Codex's primary and secondary windows). */
             rate_limits?: components["schemas"]["RateLimit"][];
         };
@@ -801,6 +947,22 @@ export interface components {
              * @description Tokens in the context window.
              */
             used: number;
+        };
+        /**
+         * ContinueAt
+         * @example now
+         * @enum {string}
+         */
+        ContinueAt: "now" | "reset";
+        ContinueRequestBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ContinueRequestBody.json
+             */
+            readonly $schema?: string;
+            /** @description now: send the continuation now; reset: send it once the limit resets (409 if the agent didn't say when). */
+            at: components["schemas"]["ContinueAt"];
         };
         /**
          * ConversationRole
@@ -935,6 +1097,29 @@ export interface components {
          * @enum {string}
          */
         FileDiffStatus: "added" | "deleted" | "modified" | "not_in_repo" | "unchanged" | "untracked";
+        FileFindResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/FileFindResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description The whole working directory was searched; false when the search stopped at its bounds (50,000 entries or 2 seconds). */
+            complete: boolean;
+            /** @description Files whose path ends with the one asked for, the likeliest first. */
+            matches: components["schemas"]["FileMatch"][];
+        };
+        FileMatch: {
+            /** @description The path matches with the same case. */
+            exact_case: boolean;
+            /**
+             * Format: date-time
+             * @description When the file last changed.
+             */
+            modified: string;
+            /** @description The file's path relative to the agent's working directory. */
+            relative: string;
+        };
         FilePreviewResponseBody: {
             /**
              * Format: uri
@@ -973,6 +1158,25 @@ export interface components {
          * @enum {string}
          */
         LifecycleState: "exited" | "failed" | "ready" | "restarting" | "running" | "starting";
+        LimitStop: {
+            /**
+             * Format: date-time
+             * @description When AgentAPI sends a message that continues the turn, if one is scheduled (POST /limit/continue). Queued messages go out after it.
+             */
+            continue_at?: string;
+            /** @description What the agent said, e.g. You've hit your limit · resets 3pm. */
+            message: string;
+            /**
+             * Format: date-time
+             * @description When the limit resets, if the agent says. Queued messages wait until then.
+             */
+            resets_at?: string;
+            /**
+             * Format: date-time
+             * @description When the turn stopped.
+             */
+            stopped_at: string;
+        };
         LoginRequired: {
             /** @description Agent that needs a login, e.g. Claude Code. */
             agent: string;
@@ -1231,6 +1435,18 @@ export interface components {
          * @enum {string}
          */
         PermissionMode: "ask" | "auto" | "bypass" | "plan";
+        PromptCache: {
+            /**
+             * Format: date-time
+             * @description When the cache expires unless the agent uses it again.
+             */
+            expires_at: string;
+            /**
+             * Format: int64
+             * @description How long the cache is kept after its last use: 300 (5 minutes) or 3600 (an hour).
+             */
+            ttl_seconds: number;
+        };
         Question: {
             /** @description An answer other than the options is allowed. */
             free_text?: boolean;
@@ -1485,6 +1701,16 @@ export interface components {
             readonly $schema?: string;
             outcome: string;
         };
+        ResumeSessionRequestBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ResumeSessionRequestBody.json
+             */
+            readonly $schema?: string;
+            /** @description Open a copy of the session, under a new id, and leave the session itself as it is. */
+            fork?: boolean;
+        };
         RichContentBlock: {
             /** @description Images in a tool result (for example an image file the agent read) */
             images?: components["schemas"]["RichImage"][] | null;
@@ -1577,12 +1803,16 @@ export interface components {
             id: number;
             /** @description Event kind: system, text, thinking, tool_call, or tool_result */
             kind: string;
+            /** @description The agent's tool call that started the subagent (Claude Code's Agent tool), when known */
+            parent_tool_use_id?: string;
             /** @description Message role when applicable */
             role?: string;
             /** @description Agent session identifier */
             session_id?: string;
             /** @description Original agent event or message identifier */
             source_id?: string;
+            /** @description The subagent the event belongs to; missing for the agent's own events */
+            subagent_id?: string;
             /**
              * Format: date-time
              * @description Timestamp recorded by the agent session
@@ -1595,6 +1825,29 @@ export interface components {
             /** @description Identifier pairing a tool call with its result */
             tool_use_id?: string;
         };
+        SessionSummary: {
+            /**
+             * Format: date-time
+             * @description When the session started.
+             */
+            created_at: string;
+            /** @description The user's first message, shortened. */
+            first_prompt: string;
+            /** @description The agent's identifier of the session. */
+            id: string;
+            /**
+             * Format: int64
+             * @description How many messages the user sent.
+             */
+            prompts: number;
+            /** @description Name the agent or the user gave the session, if any. */
+            title?: string;
+            /**
+             * Format: date-time
+             * @description When the session's log last changed.
+             */
+            updated_at: string;
+        };
         SessionSyncBody: {
             /** @description Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded. */
             epoch: string;
@@ -1605,6 +1858,18 @@ export interface components {
              * @description Highest sequence number in the replay that follows (the ?since= value when it holds nothing new). The replay is grouped by kind, not in seq order: it is complete at its last event, the first to carry an SSE id, and only then can a client resume from this seq.
              */
             seq: number;
+        };
+        SessionsResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/SessionsResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description The id of the session the agent has open, if it opened one. */
+            current?: string;
+            /** @description The agent's sessions in the working directory, the latest first. */
+            sessions: components["schemas"]["SessionSummary"][];
         };
         SettingOptions: {
             /** @description Models the agent can switch to. */
@@ -1647,6 +1912,8 @@ export interface components {
             capabilities?: components["schemas"]["Capabilities"];
             /** @description Detailed process lifecycle state. */
             lifecycle: components["schemas"]["LifecycleState"];
+            /** @description Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). Native transport only. */
+            limit_stop?: components["schemas"]["LimitStop"];
             /** @description Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only. */
             login_required?: components["schemas"]["LoginRequired"];
             /**
@@ -1698,6 +1965,8 @@ export interface components {
             epoch: string;
             /** @description Detailed process lifecycle state. */
             lifecycle: components["schemas"]["LifecycleState"];
+            /** @description Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). Native transport only. */
+            limit_stop?: components["schemas"]["LimitStop"];
             /** @description Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only. */
             login_required?: components["schemas"]["LoginRequired"];
             /**
@@ -1731,6 +2000,58 @@ export interface components {
             transport: components["schemas"]["Transport"];
             /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only. */
             usage?: components["schemas"]["AgentUsage"];
+        };
+        SubagentResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/SubagentResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description What the subagent did, as rich messages: its thinking, tool calls with their results, and text. */
+            messages: components["schemas"]["RichMessage"][];
+            /** @description The task the agent gave the subagent. */
+            prompt: string;
+            /** @description The subagent. */
+            subagent: components["schemas"]["SubagentState"];
+        };
+        SubagentState: {
+            /** @description The kind of subagent, e.g. general-purpose (Claude Code). */
+            agent_type?: string;
+            /** @description What the agent asked the subagent to do, in a few words (Claude Code). */
+            description?: string;
+            /** @description The subagent's identifier. */
+            id: string;
+            /** @description The agent's tool call that started the subagent (Claude Code's Agent tool). */
+            parent_tool_use_id?: string;
+            /**
+             * Format: date-time
+             * @description When the subagent started.
+             */
+            started_at: string;
+            /** @description running, completed or failed: for Claude Code from the Agent tool call that started it, for Codex from the subagent's own log; unknown when neither says. */
+            status: components["schemas"]["SubagentStatus"];
+            /**
+             * Format: date-time
+             * @description When its log last changed.
+             */
+            updated_at: string;
+        };
+        /**
+         * SubagentStatus
+         * @example running
+         * @enum {string}
+         */
+        SubagentStatus: "completed" | "failed" | "running" | "unknown";
+        SubagentsResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/SubagentsResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description The subagents the agent ran in its session, in the order they started. */
+            subagents: components["schemas"]["SubagentState"][];
         };
         TerminalExitBody: {
             /** @description Why the stream ended: the shell exited (connect again for a new one), or there is no terminal. */
@@ -2293,6 +2614,65 @@ export interface operations {
             };
         };
     };
+    "get-files-find": {
+        parameters: {
+            query: {
+                /** @description The file: an absolute path inside the agent's working directory, or a path relative to it. */
+                path: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileFindResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-files-preview": {
         parameters: {
             query: {
@@ -2424,6 +2804,160 @@ export interface operations {
         };
     };
     "post-interrupt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterruptResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-limit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterruptResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "post-limit-continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContinueRequestBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterruptResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-limit-continue": {
         parameters: {
             query?: never;
             header?: never;
@@ -3380,6 +3914,116 @@ export interface operations {
             };
         };
     };
+    "get-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionsResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "post-sessions-by-id-resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The session's id, from GET /sessions. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResumeSessionRequestBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterruptResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-settings": {
         parameters: {
             query?: never;
@@ -3507,6 +4151,103 @@ export interface operations {
             };
             /** @description Error */
             default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-subagents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubagentsResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-subagents-by-id": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The subagent's id, from GET /subagents. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubagentResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3680,7 +4421,10 @@ export interface operations {
     };
     "get-timeline": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Also return the events of the subagents the agent ran in the session (native Claude Code and Codex). */
+                subagents?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;

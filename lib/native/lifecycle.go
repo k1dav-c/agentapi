@@ -13,19 +13,19 @@ import (
 func (c *Conversation) Start(ctx context.Context) {
 	c.mu.Lock()
 	c.ctx = ctx
-	gen, ref := c.generation, c.sessionRef
+	gen, resume := c.generation, c.resumeLocked()
 	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
 	c.mu.Unlock()
-	c.launchAsync(ctx, gen, ref)
+	c.launchAsync(ctx, gen, resume)
 }
 
 // launchAsync launches the adapter of generation gen in the background and
 // reports a failure to start. The returned channel receives launch's
 // result.
-func (c *Conversation) launchAsync(ctx context.Context, gen int, resumeRef string) <-chan error {
+func (c *Conversation) launchAsync(ctx context.Context, gen int, resume Resume) <-chan error {
 	done := make(chan error, 1)
 	go func() {
-		err := c.launch(ctx, gen, resumeRef)
+		err := c.launch(ctx, gen, resume)
 		if err != nil {
 			c.failStart(gen, err)
 		}
@@ -37,8 +37,8 @@ func (c *Conversation) launchAsync(ctx context.Context, gen int, resumeRef strin
 // launch creates and starts the adapter of generation gen. It returns nil
 // once the adapter accepts turns, when it waits for a login, and when it was
 // stopped while it started.
-func (c *Conversation) launch(ctx context.Context, gen int, resumeRef string) error {
-	adapter, err := c.cfg.Factory(resumeRef)
+func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error {
+	adapter, err := c.cfg.Factory(resume)
 	if err != nil {
 		return fmt.Errorf("create adapter: %w", err)
 	}
@@ -63,7 +63,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resumeRef string) er
 			c.cfg.Logger.Debug("The agent stopped while it started", "error", err)
 			return nil
 		case errors.As(err, &login):
-			c.awaitLogin(ctx, gen, resumeRef, login.Login)
+			c.awaitLogin(ctx, gen, resume, login.Login)
 			return nil
 		default:
 			return err
@@ -221,12 +221,15 @@ func (c *Conversation) Restart(ctx context.Context) error {
 	c.mu.Lock()
 	old := c.retireAdapterLocked()
 	c.sessionRef = ""
+	c.forking = false
 	c.promptSent = false
 	c.messages.reset()
-	if c.usage.Context != nil {
-		// A new session starts with an empty context.
+	c.setLimitStopLocked(nil)
+	if c.usage.Context != nil || c.usage.PromptCache != nil {
+		// A new session starts with an empty context, and nothing cached.
 		usage := c.usage
 		usage.Context = nil
+		usage.PromptCache = nil
 		c.setUsageLocked(usage)
 	}
 	gen, runCtx := c.generation, c.ctx
@@ -237,7 +240,48 @@ func (c *Conversation) Restart(ctx context.Context) error {
 		_ = old.Close()
 	}
 	select {
-	case err := <-c.launchAsync(runCtx, gen, ""):
+	case err := <-c.launchAsync(runCtx, gen, Resume{}):
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Switch replaces the agent with a new one that opens the session resume
+// says (an earlier one, or a copy of it), and the conversation with
+// messages, that session's so far; the initial prompt is not sent. It
+// returns like Restart, and ErrTurnActive while the agent works on a turn
+// or compacts its context, which a switch would cut short.
+func (c *Conversation) Switch(ctx context.Context, resume Resume, messages []st.ConversationMessage) error {
+	c.mu.Lock()
+	if c.turnActive || c.compacting {
+		c.mu.Unlock()
+		return ErrTurnActive
+	}
+	old := c.retireAdapterLocked()
+	c.sessionRef, c.forking = resume.Ref, resume.Fork
+	c.promptSent = true
+	c.messages = newMessageLog(c.cfg.Clock, messages)
+	c.setLimitStopLocked(nil)
+	if c.usage.Context != nil || c.usage.PromptCache != nil {
+		// The agent reports the session's once it ran a turn.
+		usage := c.usage
+		usage.Context = nil
+		usage.PromptCache = nil
+		c.setUsageLocked(usage)
+	}
+	// Until the agent reports a fork's own ref, AgentAPI would resume the
+	// session it forked after a restart.
+	c.cfg.Observer.SessionRef(resume.Ref)
+	gen, runCtx := c.generation, c.ctx
+	c.cfg.Emitter.EmitMessages(c.messages.snapshot())
+	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
+	c.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+	select {
+	case err := <-c.launchAsync(runCtx, gen, resume):
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
@@ -262,14 +306,14 @@ func (c *Conversation) Reload(ctx context.Context) error {
 		return ErrUnsupported
 	}
 	old := c.retireAdapterLocked()
-	gen, ref, runCtx := c.generation, c.sessionRef, c.ctx
+	gen, resume, runCtx := c.generation, c.resumeLocked(), c.ctx
 	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
 	c.mu.Unlock()
 	if old != nil {
 		_ = old.Close()
 	}
 	select {
-	case err := <-c.launchAsync(runCtx, gen, ref):
+	case err := <-c.launchAsync(runCtx, gen, resume):
 		return err
 	case <-ctx.Done():
 		return ctx.Err()

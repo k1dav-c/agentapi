@@ -34,6 +34,7 @@ func (o *observer) Usage(u native.AgentUsage) {
 }
 
 func (o *observer) Started(native.Capabilities) {}
+func (o *observer) LimitStop(*native.LimitStop) {}
 func (o *observer) RichMessage(m transcript.RichMessage) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -334,4 +335,53 @@ func TestCompact(t *testing.T) {
 	obs.mu.Lock()
 	defer obs.mu.Unlock()
 	assert.NotEmpty(t, obs.usage)
+}
+
+func TestLimitStopsTheTurn(t *testing.T) {
+	c, _ := start(t, nil)
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "hit the limit"}))
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	ls := c.LimitStop()
+	require.NotNil(t, ls)
+	assert.Contains(t, ls.Message, "5-hour limit")
+	require.NotNil(t, ls.ResetsAt, "taken from the reached limit")
+	assert.Equal(t, "rejected", c.Usage().RateLimits[0].Status)
+}
+
+func TestColdCache(t *testing.T) {
+	c, _ := start(t, nil)
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "hello"}))
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	assert.True(t, c.Usage().PromptCache.ExpiresAt.After(time.Now()), "warm after a turn")
+
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "cold"}))
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	usage := c.Usage()
+	assert.True(t, usage.PromptCache.ExpiresAt.Before(time.Now()))
+	assert.GreaterOrEqual(t, usage.Context.Used, 120000)
+}
+
+func TestDelegate(t *testing.T) {
+	c, obs := start(t, nil)
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "delegate the review"}))
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	var agent *transcript.RichContentBlock
+	obs.mu.Lock()
+	for _, m := range obs.rich {
+		for i, b := range m.Content {
+			if b.Type == "tool_use" && b.ToolName == "Agent" {
+				agent = &m.Content[i]
+			}
+		}
+	}
+	obs.mu.Unlock()
+	require.NotNil(t, agent)
+	assert.JSONEq(t, `{"description":"Check the release notes","subagent_type":"general-purpose","prompt":"Read docs/notes.md and list what the 1.1.0 notes are missing."}`, string(agent.ToolInput))
+	var result string
+	for _, b := range obs.toolResults() {
+		if b.ToolUseID == agent.ToolUseID {
+			result = b.Text
+		}
+	}
+	assert.Equal(t, "The 1.1.0 notes miss the release date and the download links.", result)
 }

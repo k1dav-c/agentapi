@@ -78,12 +78,15 @@ export function MessageItem({
   onEditMessage,
   onDismissMessage,
   searchQuery = "",
+  author,
 }: {
   message: Message | DraftMessage;
   onRetryMessage?: (clientId: string) => Promise<boolean>;
   onEditMessage?: (clientId: string, content: string) => void;
   onDismissMessage?: (clientId: string) => void;
   searchQuery?: string;
+  // Who wrote a user message when it isn't you: the agent, for a subagent.
+  author?: string;
 }) {
   if (message.role !== "user") return <AgentMessage message={message} searchQuery={searchQuery} />;
   return (
@@ -93,6 +96,7 @@ export function MessageItem({
       onEditMessage={onEditMessage}
       onDismissMessage={onDismissMessage}
       searchQuery={searchQuery}
+      author={author}
     />
   );
 }
@@ -213,22 +217,24 @@ function UserMessage({
   onEditMessage,
   onDismissMessage,
   searchQuery,
+  author,
 }: {
   message: Message | DraftMessage;
   onRetryMessage?: (clientId: string) => Promise<boolean>;
   onEditMessage?: (clientId: string, content: string) => void;
   onDismissMessage?: (clientId: string) => void;
   searchQuery: string;
+  author?: string;
 }) {
   const draft = isDraftMessage(message) ? message : undefined;
   const isFailed = draft?.deliveryStatus === "failed";
   return (
-    <article className="group scroll-mt-16" data-user-message aria-label="Your message">
+    <article className="group scroll-mt-16" data-user-message aria-label={author ? `Message from ${author}` : "Your message"}>
       <div className="rounded-xl border border-prompt-border bg-prompt px-4 pb-3 pt-2.5">
         <div className="mb-1 flex min-h-7 items-center gap-2">
           <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
             <UserRound aria-hidden="true" className="size-3.5 text-muted-foreground" />
-            You
+            {author ?? "You"}
           </span>
           {message.content && (
             <div className="ml-auto opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">

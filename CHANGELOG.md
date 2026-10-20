@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+### Features
+
+- Native agents: open one of the agent's earlier sessions in its working directory, or start a copy
+  of one. `GET /sessions` lists Claude Code's, Codex's and Pi's sessions from their session logs;
+  `POST /sessions/{id}/resume` restarts the agent on one (with `{"fork": true}`, on a copy under a
+  new id) and loads its conversation. The chat lists them in the Explorer's Session tab.
+- Native agents: a turn a usage limit stops is reported as `limit_stop` in the status, with the
+  reset time. Queued messages wait for the reset instead of failing; `POST /limit/continue`
+  continues the task now or at the reset, `DELETE /limit` lets the queue go, and `--auto-continue`
+  continues every stopped turn once its limit resets. The chat shows it as a card above the
+  composer.
+- Claude Code reports how long its prompt cache lives (`usage.prompt_cache`). While the agent is
+  idle with an expired cache and a large context, the chat suggests compacting before the next
+  message, which would otherwise read the whole context again at the full price.
+- Chat: a Lineage panel shows the subagents a native Claude Code or Codex ran in the session, with their
+  state and time, and what each did step by step, live while it works; the header counts them and
+  an Agent or spawn_agent tool call's **Steps** opens its subagent. `GET /subagents` and `GET /subagents/{id}`
+  serve them from the subagents' logs.
+- The conversation download (and `GET /timeline?subagents=true`) includes the steps of the
+  subagents a native Claude Code or Codex ran, read from their own logs, each event tagged with its
+  subagent and, for Claude Code, the Agent tool call that started it. Before, only the subagent's
+  prompt and final answer were in it.
+- The native demo agent stops on a usage limit when a message says "limit", leaves an expired
+  prompt cache when it says "cold", and hands a task to a subagent when it says "delegate". With
+  `--type claude`, `codex` or `pi` it poses as that agent, so AgentAPI reads that agent's logs for
+  its earlier sessions and subagents.
+- Docs: screenshots of the usage limit card, the cold cache note, the earlier sessions, Lineage and
+  a file found below the working directory, in the READMEs and the chat UI guide; all screenshots
+  retaken from v0.27.0.
+
+### Fixes
+
+- Chat: a notification you closed (an agent's warning or error) stays closed after a reload; the
+  server sends its recent errors again on every connection, so it came back. So does the cold
+  prompt cache notice.
+- Chat: a file path the agent names relative to a repository below its working directory (as an
+  agent started in a home directory does), or in the wrong case, no longer ends at "File not
+  found": the viewer looks for it below the working directory (`GET /files/find`), opens the one
+  match with a note, or lists several to choose from.
+- Codex: its subagents (multi-agent v2) show in the transcript as spawn_agent and wait_agent tool
+  calls, which were left out; the spawn's result runs until the subagent is done.
+- Codex: an earlier session that is a fork reads with the conversation it continues, which Codex
+  keeps in the forked session's log rather than copying it.
+- With the PTY transport, Claude Code's timeline no longer includes the API requests Claude Code
+  2.1.302 logs (`api-request-blob`: system reminders and tool lists sent to the model) as if they
+  were the conversation.
+
 ## v0.26.0
 
 ### Features

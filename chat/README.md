@@ -50,6 +50,15 @@ to try specific interactions:
   composer. Check again restarts the demo, whose first start still finds no
   login: the card stays, now saying AgentAPI checks by itself, and the next
   start (about 5 seconds later, or Check again) works
+- `limit`: the account reaches its 5-hour limit after the message's requests,
+  so the usage limit card docks above the composer and queued tasks wait
+- `cold`: the turn leaves a large context whose prompt cache already expired,
+  for the note that suggests compacting
+- `delegate`: the agent hands a task to a subagent with an Agent tool call
+
+To try the Explorer's earlier sessions and the Lineage panel, run the demo as Claude Code (or Codex,
+or Pi) with `--type claude -- native-demo`: AgentAPI then reads that agent's session logs for it, in
+the agent's own directories, so it shows whatever sessions and subagent logs are there.
 
 Its settings can change from the composer's menus or slash commands: models Swift, Deep, and Plain
 (which has no effort setting) and all four permission modes. In ask mode every turn's first command

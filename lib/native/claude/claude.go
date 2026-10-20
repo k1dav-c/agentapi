@@ -80,8 +80,11 @@ func newFactory(cfg Config, uid int) (native.Factory, error) {
 			"so it starts in the default permission mode and asks before it runs tools. " +
 			"Set IS_SANDBOX=1 if AgentAPI runs in a sandbox, or choose a mode with --permission-mode.")
 	}
-	return func(resumeRef string) (native.Adapter, error) {
-		return newAdapter(cfg, args, resumeRef), nil
+	return func(resume native.Resume) (native.Adapter, error) {
+		if resume.Fork && resume.Ref != "" {
+			return newForkAdapter(cfg, args, resume.Ref), nil
+		}
+		return newAdapter(cfg, args, resume.Ref), nil
 	}, nil
 }
 
@@ -134,11 +137,22 @@ func newAdapter(cfg Config, args parsedArgs, resumeRef string) *Adapter {
 	return a
 }
 
+// newForkAdapter creates an adapter that opens a copy of the session
+// resumeRef under a new session ID.
+func newForkAdapter(cfg Config, args parsedArgs, resumeRef string) *Adapter {
+	a := newAdapter(cfg, args, resumeRef)
+	a.fork = true
+	a.sessionID = a.cfg.NewID()
+	return a
+}
+
 // Adapter is a native.Adapter for Claude Code.
 type Adapter struct {
 	cfg       Config
 	args      parsedArgs
 	resumeRef string
+	// fork opens a copy of resumeRef's session under sessionID.
+	fork bool
 	// sessionID is the id passed with --session-id for a new session.
 	sessionID string
 
@@ -254,7 +268,7 @@ func (a *Adapter) Capabilities() native.Capabilities {
 func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	cmd := procutil.Command{
 		Program: a.cfg.Program,
-		Args:    buildArgs(a.args, a.sessionID, a.resumeRef),
+		Args:    buildArgs(a.args, a.sessionID, a.resumeRef, a.fork),
 		Env:     buildEnv(a.cfg.Env),
 		Dir:     a.cfg.CWD,
 		Logger:  a.log,
@@ -916,8 +930,18 @@ func (a *Adapter) endTurnLocked() turnState {
 
 func (a *Adapter) handleResult(f *frame) {
 	a.sendRich(a.parser.endTurn())
+	a.cacheUsed(f.Usage)
+	limited := a.limitReached()
 	a.mu.Lock()
 	result := turnResult(f, a.turn.interrupted)
+	if result.StopReason == native.StopReasonError && (limited || native.IsLimitError(result.Error)) {
+		result.StopReason = native.StopReasonLimited
+		if text := stringField(f.Result); text != "" {
+			// Claude Code's own words, e.g. You've hit your limit ·
+			// resets 3pm.
+			result.Error = text
+		}
+	}
 	inTurn := a.turn.phase != turnIdle
 	started := a.started
 	byResult := !a.sessionStates

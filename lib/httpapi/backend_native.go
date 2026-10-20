@@ -10,8 +10,10 @@ import (
 // nativeBackend drives an agent over the native transport.
 type nativeBackend struct{ s *Server }
 
+// readyForQueued: queued messages also wait while a usage limit holds
+// them (see native.Conversation.HoldsQueue).
 func (b nativeBackend) readyForQueued() bool {
-	return b.s.native.Idle()
+	return b.s.native.Idle() && !b.s.native.HoldsQueue(b.s.clock.Now())
 }
 
 func (b nativeBackend) sendQueued(content string) error {

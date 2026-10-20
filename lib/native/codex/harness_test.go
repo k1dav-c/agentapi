@@ -156,7 +156,7 @@ func newHarness(t *testing.T, resumeRef string, args []string, opts ...harnessOp
 	}
 	factory, err := NewFactory(cfg)
 	require.NoError(t, err)
-	adapter, err := factory(resumeRef)
+	adapter, err := factory(native.Resume{Ref: resumeRef})
 	require.NoError(t, err)
 	h := &harness{
 		t: t, a: adapter.(*Adapter), proc: proc, rec: newRecorder(t),

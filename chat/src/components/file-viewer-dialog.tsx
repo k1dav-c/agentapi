@@ -11,7 +11,7 @@ import {DiffView} from "./diff-view";
 import {PathLabel} from "./file-path";
 import {MarkdownDocument} from "./processed-message";
 import {useFileViewer, type FileViewerRequest, type FileViewerTab} from "./file-viewer-context";
-import type {FileContent, FileDiff as FileChanges, FileDiffStatus, FilePreview} from "@/lib/chat-api";
+import type {FileContent, FileDiff as FileChanges, FileDiffStatus, FileMatches, FilePreview} from "@/lib/chat-api";
 import {isRelativeRef, previewKind, resolveRelativeRef, type PreviewKind} from "@/lib/file-preview";
 import {highlightCode, languageForPath, type CodeToken} from "@/lib/code-highlight";
 import {ApiError, getErrorMessage} from "@/lib/error-utils";
@@ -161,6 +161,12 @@ function FileViewerBody({request}: {request: FileViewerRequest}) {
           </Button>
         </DialogClose>
       </header>
+      {request.requestedPath && (
+        <p className="shrink-0 border-b bg-muted/40 px-4 py-1.5 text-xs text-muted-foreground" role="note">
+          <span className="font-mono">{request.requestedPath}</span> isn&apos;t in the agent&apos;s working directory; this is the file
+          found for it.
+        </p>
+      )}
       <Tabs value={tab} onValueChange={(value) => setTab(value as FileViewerTab)} className="min-h-0 flex-1 gap-0">
         <div className="shrink-0 border-b px-3 py-2 sm:px-4">
           <TabsList className={cn("grid w-full sm:inline-flex sm:w-auto", hasPreview ? "grid-cols-3" : "grid-cols-2")}>
@@ -181,11 +187,11 @@ function FileViewerBody({request}: {request: FileViewerRequest}) {
           </TabsList>
         </div>
         <TabsContent value="file" className={panelClass}>
-          <FilePane loaded={file} path={path} line={line} kind={kind} imageVersion={imageVersion} onRetry={loadFile} />
+          <FilePane loaded={file} path={path} line={line} kind={kind} imageVersion={imageVersion} onRetry={loadFile} request={request} />
         </TabsContent>
         {hasPreview && kind && (
           <TabsContent value="preview" className={cn(panelClass, kind === "html" && "flex flex-col overflow-hidden pb-0")}>
-            <PreviewPane kind={kind} path={path} file={file} page={page} imageVersion={imageVersion} onRetry={kind === "html" ? loadPage : loadFile} />
+            <PreviewPane kind={kind} path={path} file={file} page={page} imageVersion={imageVersion} onRetry={kind === "html" ? loadPage : loadFile} request={request} />
           </TabsContent>
         )}
         <TabsContent value="diff" className={panelClass}>
@@ -203,6 +209,7 @@ function FilePane({
   kind,
   imageVersion,
   onRetry,
+  request,
 }: {
   loaded: Loaded<FileContent> | null;
   path: string;
@@ -210,9 +217,10 @@ function FilePane({
   kind?: PreviewKind;
   imageVersion: number;
   onRetry: () => void;
+  request: FileViewerRequest;
 }) {
   if (!loaded || loaded.state === "loading") return <Loading>Loading the file…</Loading>;
-  if (loaded.state === "error") return <LoadError error={loaded.error} subject="file" onRetry={onRetry} />;
+  if (loaded.state === "error") return <FileLoadError error={loaded.error} subject="file" request={request} onRetry={onRetry} />;
   const file = loaded.data;
   if (file.binary && kind === "image") return <ImageView path={file.relative} size={file.size} version={imageVersion} />;
   if (file.binary) return <Notice icon={FileQuestion} title={`Binary file, ${formatBytes(file.size)}`} text="It isn't text, so it can't be shown here." />;
@@ -283,6 +291,7 @@ function PreviewPane({
   page,
   imageVersion,
   onRetry,
+  request,
 }: {
   kind: PreviewKind;
   path: string;
@@ -290,15 +299,16 @@ function PreviewPane({
   page: Loaded<FilePreview> | null;
   imageVersion: number;
   onRetry: () => void;
+  request: FileViewerRequest;
 }) {
   if (kind === "image") return <ImageView path={path} version={imageVersion} />;
   if (kind === "html") {
     if (!page || page.state === "loading") return <Loading>Loading the preview…</Loading>;
-    if (page.state === "error") return <LoadError error={page.error} subject="preview" onRetry={onRetry} />;
+    if (page.state === "error") return <FileLoadError error={page.error} subject="preview" request={request} onRetry={onRetry} />;
     return <HTMLPreview page={page.data} />;
   }
   if (!file || file.state === "loading") return <Loading>Loading the file…</Loading>;
-  if (file.state === "error") return <LoadError error={file.error} subject="file" onRetry={onRetry} />;
+  if (file.state === "error") return <FileLoadError error={file.error} subject="file" request={request} onRetry={onRetry} />;
   if (file.data.binary) return <Notice icon={FileQuestion} title="Not a text file" text="It can't be shown as Markdown." />;
   return <MarkdownPreview file={file.data} />;
 }
@@ -499,6 +509,85 @@ function Notice({
           Try again
         </Button>
       )}
+    </div>
+  );
+}
+
+// The error of reading the file or its preview. A file that isn't there is
+// looked for, once: the agent may have named it relative to a repository
+// below the working directory, or in the wrong case.
+function FileLoadError({error, subject, request, onRetry}: {error: unknown; subject: "file" | "preview"; request: FileViewerRequest; onRetry: () => void}) {
+  const notFound = error instanceof ApiError && error.status === 404;
+  if (notFound && !request.requestedPath) return <FindFile request={request} error={error} onRetry={onRetry} />;
+  return <LoadError error={error} subject={subject} onRetry={onRetry} />;
+}
+
+// Looks for a file that wasn't where the agent said: one match opens, more
+// are offered, none says so.
+function FindFile({request, error, onRetry}: {request: FileViewerRequest; error: unknown; onRetry: () => void}) {
+  const {findFile} = useChat();
+  const viewer = useFileViewer();
+  const [found, setFound] = useState<FileMatches | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    findFile(request.path).then(
+      (result) => {
+        if (!active) return;
+        if (result.matches.length === 1 && viewer) {
+          viewer.open({...request, path: result.matches[0].relative, requestedPath: request.path, change: undefined});
+          return;
+        }
+        setFound(result);
+      },
+      () => active && setFailed(true),
+    );
+    return () => {
+      active = false;
+    };
+  }, [findFile, request, viewer]);
+
+  if (failed || (found && found.matches.length === 0)) {
+    return (
+      <Notice
+        alert
+        icon={FileQuestion}
+        title="File not found"
+        text={
+          failed
+            ? "It may have been deleted, moved or renamed."
+            : found?.complete
+              ? "No file in the agent's working directory has this path. It may have been deleted, moved or renamed."
+              : "It may have been deleted, moved or renamed. The search for it covered only part of the working directory."
+        }
+        detail={getErrorMessage(error)}
+        onRetry={onRetry}
+      />
+    );
+  }
+  if (!found) return <Loading>Looking for the file…</Loading>;
+  return (
+    <div className="flex flex-col items-center gap-3 px-6 py-12 text-center" role="alert">
+      <p className="flex items-center gap-2 text-sm font-medium">
+        <FileQuestion className="size-4 shrink-0 text-muted-foreground" />
+        <span>
+          <span className="font-mono">{request.path}</span> isn&apos;t in the agent&apos;s working directory
+        </span>
+      </p>
+      <p className="text-[13px] text-muted-foreground">These files have the same path below it:</p>
+      <ul className="flex w-full max-w-lg flex-col gap-1.5">
+        {found.matches.map((match) => (
+          <li key={match.relative}>
+            <button
+              type="button"
+              onClick={() => viewer?.open({...request, path: match.relative, requestedPath: request.path, change: undefined})}
+              className="w-full rounded-md border px-3 py-2 text-left font-mono text-xs outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring [overflow-wrap:anywhere]"
+            >
+              {match.relative}
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

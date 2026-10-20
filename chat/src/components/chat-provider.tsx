@@ -24,12 +24,18 @@ import {
   httpURL,
   type AgentSettings,
   type AgentUsage,
+  type ContinueAt,
   type FileContent,
   type FileDiff,
+  type FileMatches,
   type FilePreview,
+  type LimitStop,
   type MCPCheckResult,
   type MCPConfig,
   type MCPProfiles,
+  type SessionList,
+  type Subagent,
+  type SubagentRun,
   type UploadOptions,
 } from "@/lib/chat-api";
 import {features, type Features} from "@/lib/features";
@@ -121,6 +127,22 @@ interface ChatContextValue {
   terminalAvailable: boolean;
   // POST /compact (agents with the compact capability).
   compact: () => Promise<void>;
+  // The turn a usage limit stopped, while it holds the queue (native
+  // transport); null otherwise. Continuing it now or once the limit resets,
+  // cancelling a scheduled continuation, and dismissing the stop, which
+  // lets the queued tasks go.
+  limitStop: LimitStop | null;
+  continueAfterLimit: (at: ContinueAt) => Promise<void>;
+  cancelContinue: () => Promise<void>;
+  dismissLimitStop: () => Promise<void>;
+  // The agent's sessions in the working directory, and opening one (or a
+  // copy of it) in place of this conversation (features.sessionHistory).
+  listSessions: () => Promise<SessionList>;
+  // The subagents the agent ran in its session, and what one did
+  // (features.subagents).
+  listSubagents: () => Promise<Subagent[]>;
+  getSubagent: (id: string) => Promise<SubagentRun>;
+  resumeSession: (id: string, fork: boolean) => Promise<void>;
   terminalInput: (data: string) => Promise<void>;
   terminalResize: (cols: number, rows: number) => Promise<void>;
   // The agent is starting (lifecycle "starting"): there is no turn yet, and
@@ -185,6 +207,9 @@ interface ChatContextValue {
   getFileContent: (path: string) => Promise<FileContent>;
   getFileDiff: (path: string) => Promise<FileDiff>;
   getFilePreview: (path: string) => Promise<FilePreview>;
+  // The files under the working directory whose path ends with path, for
+  // one the agent named that isn't there (GET /files/find).
+  findFile: (path: string) => Promise<FileMatches>;
   fileImageURL: (path: string, version?: number) => string;
   storageScope: string;
   agentType: AgentType;
@@ -271,6 +296,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     capabilities,
     settings: agentSettings,
     usage: agentUsage,
+    limitStop,
     terminalAvailable,
     loginRequired,
     lifecycle,
@@ -312,7 +338,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
     () => ({transport, capabilities: agentStarting ? null : capabilities, serverStatus, pendingRequestCount}),
     [agentStarting, capabilities, pendingRequestCount, serverStatus, transport],
   );
-  const chatFeatures = useMemo(() => features(transport, capabilities, terminalAvailable), [capabilities, terminalAvailable, transport]);
+  const chatFeatures = useMemo(
+    () => features(transport, capabilities, terminalAvailable, agentType),
+    [agentType, capabilities, terminalAvailable, transport],
+  );
   const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
   const currentTask = useMemo(() => lastUserMessage(messages), [messages]);
 
@@ -552,6 +581,18 @@ export function ChatProvider({ children }: PropsWithChildren) {
       setRichMessages([]);
       setRequests([]);
     }),
+    resumeSession: useStableCallback(async (id: string, fork: boolean) => {
+      const epoch = syncRef.current.epoch;
+      await api.resumeSession(id, fork);
+      // As for deleteMessages: the server sent the session's conversation
+      // under a new epoch.
+      if (syncRef.current.epoch !== epoch) return;
+      syncRef.current.reset();
+      void clearSession(agentAPIUrl);
+      setMessages([]);
+      setRichMessages([]);
+      setRequests([]);
+    }),
   };
   const value: ChatContextValue = {
     ...actions,
@@ -568,6 +609,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
     agentUsage,
     terminalAvailable,
     compact: api.compact,
+    limitStop,
+    continueAfterLimit: api.continueAfterLimit,
+    cancelContinue: api.cancelContinue,
+    dismissLimitStop: api.dismissLimitStop,
+    listSessions: api.listSessions,
+    listSubagents: api.listSubagents,
+    getSubagent: api.getSubagent,
     terminalInput: api.terminalInput,
     terminalResize: api.terminalResize,
     getSettings: api.getSettings,
@@ -596,6 +644,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     getFileContent: api.getFileContent,
     getFileDiff: api.getFileDiff,
     getFilePreview: api.getFilePreview,
+    findFile: api.findFile,
     fileImageURL: api.fileImageURL,
     storageScope: agentAPIUrl,
     agentType,

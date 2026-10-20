@@ -29,6 +29,8 @@ export type FileDiffStatus = Schemas["FileDiffStatus"];
 export type FilePreview = Body<Schemas["FilePreviewResponseBody"]>;
 // A file's uncommitted changes (GET /files/diff).
 export type FileDiff = Body<Schemas["FileDiffResponseBody"]>;
+// The files whose path ends with one that isn't there (GET /files/find).
+export type FileMatches = Body<Schemas["FileFindResponseBody"]>;
 
 export type PermissionMode = Schemas["PermissionMode"];
 // The agent's session settings (native transport). A setting the agent
@@ -45,6 +47,18 @@ export type SettingsResponse = Body<Schemas["SettingsResponseBody"]>;
 export type ContextUsage = Schemas["ContextUsage"];
 export type RateLimit = Schemas["RateLimit"];
 export type AgentUsage = Schemas["AgentUsage"];
+export type PromptCache = Schemas["PromptCache"];
+// A turn that stopped because the account reached a usage limit (native
+// transport): the queue waits until the limit resets.
+export type LimitStop = Schemas["LimitStop"];
+export type ContinueAt = Schemas["ContinueAt"];
+// One of the agent's sessions in the working directory (GET /sessions).
+export type SessionSummary = Schemas["SessionSummary"];
+export type SessionList = Body<Schemas["SessionsResponseBody"]>;
+// A subagent the agent ran in its session, and what it did (GET
+// /subagents, GET /subagents/{id}).
+export type Subagent = Schemas["SubagentState"];
+export type SubagentRun = Body<Schemas["SubagentResponseBody"]>;
 
 interface APIErrorDetail {
   message: string;
@@ -125,6 +139,44 @@ export function createChatAPI(baseURL: string) {
 
     async compact(): Promise<void> {
       await jsonRequest("/compact", {method: "POST", fallback: "Failed to compact the context"});
+    },
+
+    // Continues the turn a usage limit stopped: now, or once it resets.
+    async continueAfterLimit(at: ContinueAt): Promise<void> {
+      await jsonRequest("/limit/continue", {method: "POST", body: {at}, fallback: "Failed to continue the task"});
+    },
+
+    async cancelContinue(): Promise<void> {
+      await jsonRequest("/limit/continue", {method: "DELETE", fallback: "Failed to cancel the continuation"});
+    },
+
+    // Forgets the limit stop, so the queued tasks go out.
+    async dismissLimitStop(): Promise<void> {
+      await jsonRequest("/limit", {method: "DELETE", fallback: "Failed to dismiss the usage limit"});
+    },
+
+    async listSubagents(): Promise<Subagent[]> {
+      const list = await jsonRequest<{subagents?: Subagent[]}>("/subagents", {fallback: "Failed to list the subagents"});
+      return list.subagents ?? [];
+    },
+
+    getSubagent(id: string): Promise<SubagentRun> {
+      return jsonRequest(`/subagents/${encodeURIComponent(id)}`, {fallback: "Failed to read the subagent"});
+    },
+
+    async listSessions(): Promise<SessionList> {
+      const list = await jsonRequest<SessionList>("/sessions", {fallback: "Failed to list the agent's sessions"});
+      return {sessions: list.sessions ?? [], current: list.current};
+    },
+
+    // Opens one of the agent's sessions, or a copy of it, in place of this
+    // conversation.
+    async resumeSession(id: string, fork: boolean): Promise<void> {
+      await jsonRequest(`/sessions/${encodeURIComponent(id)}/resume`, {
+        method: "POST",
+        body: fork ? {fork} : {},
+        fallback: "Failed to open the session",
+      });
     },
 
     // Types keys into the native transport's terminal.
@@ -389,6 +441,11 @@ export function createChatAPI(baseURL: string) {
     // An HTML file in the agent's working directory with what it refers to
     // inlined, for the file viewer's preview. ApiError 400: not an HTML
     // file, or too large.
+    async findFile(path: string): Promise<FileMatches> {
+      const data = await jsonRequest<Partial<FileMatches>>(`/files/find?path=${encodeURIComponent(path)}`, {fallback: "Failed to search for the file"});
+      return {matches: data.matches ?? [], complete: data.complete ?? true};
+    },
+
     async getFilePreview(path: string): Promise<FilePreview> {
       const data = await jsonRequest<Partial<FilePreview>>(`/files/preview?path=${encodeURIComponent(path)}`, {
         fallback: "Failed to preview the file",
@@ -409,7 +466,8 @@ export function createChatAPI(baseURL: string) {
     },
 
     async getTimelineEvents(): Promise<unknown[]> {
-      const data = await jsonRequest<{events?: unknown[]} | undefined>("/timeline", {fallback: "Failed to export the current session"});
+      // With the subagents' events, after the agent's own.
+      const data = await jsonRequest<{events?: unknown[]} | undefined>("/timeline?subagents=true", {fallback: "Failed to export the current session"});
       if (!Array.isArray(data?.events)) {
         throw new Error("The server returned an invalid timeline response");
       }

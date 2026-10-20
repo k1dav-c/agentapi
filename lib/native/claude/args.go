@@ -242,11 +242,15 @@ func envTrue(value string) bool {
 // buildArgs returns the full argument list (without the program): the
 // protocol flags, the session flag, the defaults the user didn't override,
 // then the user's own arguments.
-func buildArgs(p parsedArgs, sessionID, resumeRef string) []string {
+func buildArgs(p parsedArgs, sessionID, resumeRef string, fork bool) []string {
 	args := append([]string(nil), protocolFlags...)
 	if resumeRef != "" {
 		// The = form keeps a value starting with "-" from being read as a flag.
 		args = append(args, "--resume="+resumeRef)
+		if fork {
+			// The copy gets the ID chosen for it.
+			args = append(args, "--fork-session", "--session-id="+sessionID)
+		}
 	} else if sessionID != "" {
 		args = append(args, "--session-id="+sessionID)
 	}

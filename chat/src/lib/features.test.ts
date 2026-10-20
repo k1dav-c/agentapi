@@ -22,4 +22,13 @@ describe("features", () => {
     // While the agent starts there are no capabilities yet.
     expect(features("native", null, true).steer).toBe(false);
   });
+
+  test("session history for the agents with session logs", () => {
+    expect(features("native", null, false, "claude").sessionHistory).toBe(true);
+    expect(features("native", null, false, "pi").sessionHistory).toBe(true);
+    expect(features("native", null, false, "custom").sessionHistory).toBe(false);
+    expect(features("pty", null, false, "claude").sessionHistory).toBe(false);
+    expect(features("native", null, false, "claude").subagents).toBe(true);
+    expect(features("native", null, false, "pi").subagents).toBe(false);
+  });
 });

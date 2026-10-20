@@ -43,7 +43,9 @@ type serverOptions struct {
 	// stateDB keeps a native conversation in SQLite (--state-db).
 	stateDB  string
 	terminal bool
-	webhook  httpapi.WebhookConfig
+	// autoContinue continues a turn a usage limit stopped once it resets.
+	autoContinue bool
+	webhook      httpapi.WebhookConfig
 }
 
 // flagSource is where the options are read from: the viper the flags are
@@ -78,6 +80,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 		initialPrompt:  flags.GetString(FlagInitialPrompt),
 		stateDB:        flags.GetString(FlagStateDB),
 		terminal:       flags.GetBool(FlagTerminal),
+		autoContinue:   flags.GetBool(FlagAutoContinue),
 		webhook: httpapi.WebhookConfig{
 			URL:             flags.GetString(FlagWebhookURL),
 			Timeout:         flags.GetDuration(FlagWebhookTimeout),

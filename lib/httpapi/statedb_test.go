@@ -305,7 +305,7 @@ func TestStateDB_StopStoresTheQueueLast(t *testing.T) {
 		AgentType: msgfmt.AgentTypeClaude,
 		Transport: httpapi.TransportNative,
 		Native: httpapi.NativeConfig{
-			Factory: func(ref string) (native.Adapter, error) {
+			Factory: func(ref native.Resume) (native.Adapter, error) {
 				a, err := factory.New(ref)
 				if err != nil {
 					return nil, err

@@ -65,6 +65,15 @@ func (o *nativeObserver) Settings(settings native.Settings) { o.emitter.SetSetti
 
 func (o *nativeObserver) Usage(usage native.AgentUsage) { o.emitter.SetUsage(usage) }
 
+// LimitStop is stored so that the queue still waits for the limit, and a
+// scheduled continuation still goes out, after AgentAPI restarts.
+func (o *nativeObserver) LimitStop(ls *native.LimitStop) {
+	o.emitter.SetLimitStop(ls)
+	if o.persister != nil {
+		o.persister.SetLimitStop(ls)
+	}
+}
+
 // SettingsChosen is stored so that the agent gets the settings again after
 // AgentAPI restarts.
 func (o *nativeObserver) SettingsChosen(settings native.Settings) {
@@ -123,7 +132,10 @@ func (s *Server) createNativeMessageLocked(content string, mode DispatchMode, re
 	case DispatchQueue:
 	}
 
-	if s.queue.Len() > 0 || !s.native.Idle() {
+	// Queued messages that a usage limit holds don't hold up one the user
+	// sends now: it may be what continues the work.
+	held := s.native.HoldsQueue(s.clock.Now())
+	if (s.queue.Len() > 0 && !held) || !s.native.Idle() {
 		s.queueMessageLocked(resp, content, false)
 		return nil
 	}

@@ -13,7 +13,7 @@ import type {SyncTracker} from "@/lib/session-sync";
 import {applyStatusChange, update, type AgentStatus, type StatusChangeEvent} from "@/lib/agent-status";
 import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
 import type {ConnectionStatus} from "./chat-provider";
-import {agentErrorKey} from "@/lib/agent-errors";
+import {agentErrorKey, dismissedErrors, rememberDismissed} from "@/lib/agent-errors";
 
 interface MessageUpdateEvent {
   id: number;
@@ -358,19 +358,22 @@ export function useEventStream({
         try {
           const data: ErrorEventData = JSON.parse(messageEvent.data);
           const key = agentErrorKey(data);
-          if (shownErrorsRef.current.has(key)) return;
+          // Shown on this page already, or closed before a reload.
+          if (shownErrorsRef.current.has(key) || dismissedErrors(agentAPIUrl).has(key)) return;
           shownErrorsRef.current.add(key);
           // The login card says it while the login is needed; afterwards
           // the notice is stale.
           if (isLoginNotice(data.message, agentStatusRef.current.loginRequired)) return;
 
-          // Display error as toast notification that persists until manually dismissed
+          // A toast that stays until it is closed; closed, it stays closed
+          // after a reload.
+          const options = {duration: Infinity, onDismiss: () => rememberDismissed(agentAPIUrl, key)};
           if (data.level === "error") {
-            toast.error(data.message, { duration: Infinity });
+            toast.error(data.message, options);
           } else if (data.level === "warning") {
-            toast.warning(data.message, { duration: Infinity });
+            toast.warning(data.message, options);
           } else {
-            toast.info(data.message, { duration: Infinity });
+            toast.info(data.message, options);
           }
         } catch (e) {
           console.error("Failed to parse agent_error event data:", e);

@@ -65,15 +65,17 @@ const (
 )
 
 // NewFactory checks the command line and returns a factory for adapters
-// that run it. An empty resumeRef starts a new thread; otherwise the
-// adapter resumes that thread.
+// that run it. An empty resume ref starts a new thread; otherwise the
+// adapter resumes that thread, or with Fork, a copy of it.
 func NewFactory(cfg Config) (native.Factory, error) {
 	opts, err := parseArgs(cfg.Args, cfg.CWD)
 	if err != nil {
 		return nil, err
 	}
-	return func(resumeRef string) (native.Adapter, error) {
-		return newAdapter(cfg, opts, resumeRef), nil
+	return func(resume native.Resume) (native.Adapter, error) {
+		a := newAdapter(cfg, opts, resume.Ref)
+		a.fork = resume.Fork && resume.Ref != ""
+		return a, nil
 	}, nil
 }
 
@@ -95,7 +97,9 @@ type Adapter struct {
 	cfg       Config
 	opts      launchOptions
 	resumeRef string
-	log       *slog.Logger
+	// fork opens a copy of the thread resumeRef.
+	fork bool
+	log  *slog.Logger
 	// prefix makes request IDs unique across processes: app-server numbers
 	// its requests from 0 in every process.
 	prefix string
@@ -318,6 +322,20 @@ func (a *Adapter) handshake(ctx context.Context) error {
 		return err
 	}
 
+	if a.fork {
+		err := a.openThread(ctx, "thread/fork", threadResumeParams{
+			ThreadID:       a.resumeRef,
+			ExcludeTurns:   true,
+			CWD:            a.cwd(),
+			Model:          a.opts.model,
+			ApprovalPolicy: a.opts.approvalPolicy,
+			Sandbox:        a.opts.sandbox,
+		}, false)
+		if err != nil {
+			return fmt.Errorf("fork codex thread %s: %w", a.resumeRef, err)
+		}
+		return nil
+	}
 	if a.resumeRef != "" {
 		err := a.openThread(ctx, "thread/resume", threadResumeParams{
 			ThreadID:       a.resumeRef,

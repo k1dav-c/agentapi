@@ -120,6 +120,8 @@ type StatusChangeBody struct {
 	Settings *native.Settings `json:"settings,omitempty" doc:"The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only."`
 	// Usage is set once the agent reports it (native transport).
 	Usage *native.AgentUsage `json:"usage,omitempty" doc:"How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only."`
+	// LimitStop is set while a turn a usage limit stopped holds the queue.
+	LimitStop *native.LimitStop `json:"limit_stop,omitempty" doc:"Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). Native transport only."`
 	// Terminal says whether GET /terminal has a shell.
 	Terminal bool `json:"terminal,omitempty" doc:"A shell terminal in the agent's working directory is available at GET /terminal. Native transport only."`
 }
@@ -177,6 +179,7 @@ type EventEmitter struct {
 	loginRequired       *native.LoginRequired
 	settings            *native.Settings
 	usage               *native.AgentUsage
+	limitStop           *native.LimitStop
 	terminal            bool
 	sessionEvents       []transcript.SessionEvent
 	nextSessionEventID  int
@@ -226,6 +229,8 @@ type Persister interface {
 	SetSessionRef(ref string)
 	// SetSettings stores the settings chosen for the session.
 	SetSettings(settings native.Settings)
+	// SetLimitStop stores the turn a usage limit stopped; nil removes it.
+	SetLimitStop(ls *native.LimitStop)
 	// Reset removes the conversation; epoch is the new epoch.
 	Reset(epoch string)
 }

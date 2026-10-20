@@ -84,6 +84,10 @@ func (s *Server) registerFileRoutes() {
 		o.Description = "Returns a file the chat shows, for the file paths in tool calls and messages: its text, up to 1 MiB. Only files in the agent's working directory can be read; a binary file comes back without content."
 		o.Errors = []int{400, 403, 404}
 	})
+	huma.Get(s.api, "/files/find", s.findFile, func(o *huma.Operation) {
+		o.Description = "Finds the files under the agent's working directory whose path ends with the one given, ignoring case: for a path the agent wrote relative to a repository below the working directory, or in the wrong case. Hidden directories and dependencies (node_modules, vendor, build output) are searched only when the path goes into them, and the search stops after 50,000 entries or 2 seconds. Returns up to 10 matches, those with the same case first, then the latest changed."
+		o.Errors = []int{400, 404}
+	})
 	huma.Get(s.api, "/files/diff", s.getFileDiff, func(o *huma.Operation) {
 		o.Description = "Returns the uncommitted changes of a file in the agent's working directory: git's unified diff of the working tree against HEAD, where an untracked file shows as added. Outside a git repository the status is not_in_repo."
 		o.Errors = []int{400, 403, 404}

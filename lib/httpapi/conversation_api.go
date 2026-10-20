@@ -9,6 +9,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/coder/agentapi/lib/jsonlwatcher"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -101,14 +102,43 @@ func (s *Server) getRichMessages(ctx context.Context, input *struct{}) (*RichMes
 	return resp, nil
 }
 
-func (s *Server) getTimeline(ctx context.Context, input *struct{}) (*TimelineResponse, error) {
+func (s *Server) getTimeline(ctx context.Context, input *TimelineRequest) (*TimelineResponse, error) {
 	events := s.emitter.SessionEvents()
 	if events == nil {
 		events = []transcript.SessionEvent{}
 	}
+	if input.Subagents && s.native != nil {
+		events = append(events, s.subagentEvents(events)...)
+	}
 	resp := &TimelineResponse{}
 	resp.Body.Events = events
 	return resp, nil
+}
+
+// subagentEvents returns the events of the subagents the native agent ran in
+// its session, numbered after events. A log that can't be read leaves them
+// out rather than failing the timeline.
+func (s *Server) subagentEvents(events []transcript.SessionEvent) []transcript.SessionEvent {
+	sub, err := jsonlwatcher.SubagentEvents(string(s.agentType), s.cwd, s.native.SessionRef())
+	if err != nil {
+		s.logger.Warn("Failed to read the subagents' logs", "error", err)
+		return nil
+	}
+	next := 1
+	for _, e := range events {
+		next = max(next, e.EventID+1)
+	}
+	spawns := s.subagentCalls().spawns
+	for i := range sub {
+		sub[i].EventID = next + i
+		if sub[i].ParentToolUseID == nil && sub[i].SubagentID != nil {
+			// A Codex subagent: the spawn_agent call that names its thread.
+			if call, ok := spawns[*sub[i].SubagentID]; ok {
+				sub[i].ParentToolUseID = &call
+			}
+		}
+	}
+	return sub
 }
 
 // createMessage handles POST /message
@@ -183,7 +213,7 @@ func (s *Server) registerConversationRoutes() {
 	})
 
 	huma.Get(s.api, "/timeline", s.getTimeline, func(o *huma.Operation) {
-		o.Description = "Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events."
+		o.Description = "Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events. With `subagents=true`, the events of the subagents the agent ran in the session follow, read from their own logs (native Claude Code and Codex): each subagent's in turn, starting with a system event, and each event with its `subagent_id` and, for Claude Code, the `parent_tool_use_id` of the Agent tool call that started it."
 	})
 
 	huma.Delete(s.api, "/messages", s.deleteMessages, func(o *huma.Operation) {

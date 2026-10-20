@@ -54,6 +54,7 @@ export const TaskGroup = React.memo(function TaskGroup({
   deferred = false,
   waitingForUser = false,
   agentType = "unknown",
+  promptAuthor,
 }: {
   task: TaskSection;
   number: number;
@@ -73,6 +74,8 @@ export const TaskGroup = React.memo(function TaskGroup({
   waitingForUser?: boolean;
   // Names the agent's side of the task.
   agentType?: string;
+  // Who gave the task when it isn't you (a subagent's, the agent).
+  promptAuthor?: string;
 }) {
   const agentName = AgentType[agentType as keyof typeof AgentType]?.displayName ?? "Agent";
   const statusMeta = waitingForUser
@@ -206,6 +209,7 @@ export const TaskGroup = React.memo(function TaskGroup({
           onEditMessage={onEditMessage}
           onDismissMessage={onDismissMessage}
           searchQuery={searchQuery}
+          author={promptAuthor}
         />
         <div className="mt-5 space-y-4">
           {(deferred || activity.length > 0) && (

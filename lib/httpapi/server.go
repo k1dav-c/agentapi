@@ -50,6 +50,7 @@ type Server struct {
 	logger             *slog.Logger
 	conversation       st.Conversation
 	native             *native.Conversation // nil unless the transport is native
+	observer           *nativeObserver      // the native conversation's
 	stateDB            *statedb.DB          // nil unless the conversation is kept
 	savedQueue         []QueuedMessage      // the queue as last stored in stateDB
 	savedNextQueueID   int
@@ -147,6 +148,9 @@ type NativeConfig struct {
 	// UpdateAgent, if set, updates the agent's CLI before a restart starts
 	// a new one (Codex, Pi).
 	UpdateAgent func(context.Context)
+	// AutoContinue continues a turn a usage limit stopped once the limit
+	// resets.
+	AutoContinue bool
 }
 
 // agentIO is the conversation's view of a PTY or ACP agent, nil for a
@@ -287,6 +291,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			Factory:         config.Native.Factory,
 			ResumeRef:       restored.resumeRef,
 			Settings:        restored.settings,
+			LimitStop:       restored.limitStop,
+			AutoContinue:    config.Native.AutoContinue,
 			InitialMessages: restored.messages,
 			InitialPrompt:   config.InitialPrompt,
 			Emitter:         emitter,
@@ -366,6 +372,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		s.mcpStore = store
 	}
 
+	s.observer = observer
 	if observer != nil {
 		observer.storeImages = s.storeRichImages
 	}

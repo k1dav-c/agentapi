@@ -14,7 +14,7 @@ with an HTTP API.
 
 ![The AgentAPI chat with two tasks: prompts, tool calls, thinking notes and the composer](docs/screenshots/chat-desktop.png)
 
-The screenshots show AgentAPI v0.26.0 with the built-in `native-demo` agent, whose replies, tool
+The screenshots show AgentAPI v0.27.0 with the built-in `native-demo` agent, whose replies, tool
 results, models and usage are simulated. The [chat UI guide](docs/chat-ui.md) goes through every
 feature of the chat with screenshots and animations, and the
 [screenshot guide](docs/screenshots/README.md) explains how they are taken.
@@ -80,13 +80,18 @@ has the complete commit history.
 - Switch the [permission mode, model and reasoning effort](#settings-permission-mode-model-and-effort)
   while the agent runs: bypass (the default), auto, ask or plan.
 - See how full the [context and the rate limits](#context-and-rate-limits)
-  are, and [compact](#slash-commands-and-compaction) the context.
+  are, and [compact](#slash-commands-and-compaction) the context; the chat
+  suggests it once Claude Code's prompt cache expired.
+- A turn a [usage limit](#usage-limits) stops holds the queue until the limit
+  resets, and can go on by itself then.
 - A missing or expired [login](#logging-in) is reported with the command to
   run, and the agent starts by itself once it is logged in.
 - A shared [terminal](#terminal) in the agent's working directory, for logins
   and quick commands.
 - [Persistent sessions](#persistent-sessions): with `--state-db`, the
   conversation and the agent's own session survive an AgentAPI restart.
+- Open one of the agent's [earlier sessions](#earlier-sessions) in its working
+  directory, or start a copy of one.
 
 **Chat UI** (`/chat`)
 
@@ -94,6 +99,8 @@ has the complete commit history.
   rows and thinking as margin notes, and can be exported as Markdown; the
   [Session Explorer](#session-explorer) has links, files, a task index, MCP
   servers and Restart.
+- [Lineage](#lineage): the subagents the agent ran, and what each did, step by
+  step, also while it works.
 - [Decision cards](#decision-cards) for terminal dialogs and native requests,
   menus for the agent's settings, a ring for its context, and slash commands.
 - A [file viewer](#file-viewer) with the file, its git diff and a preview of
@@ -275,11 +282,32 @@ The Session Explorer provides:
 - links and file paths discovered in the current conversation;
 - an index for jumping directly to earlier tasks;
 - MCP server configuration without leaving the chat UI;
-- a Session tab with a two-step restart confirmation (open the Explorer with ⌘K / Ctrl+K).
+- a Session tab with the agent's [earlier sessions](#earlier-sessions) to open or copy, and a
+  two-step restart confirmation (open the Explorer with ⌘K / Ctrl+K).
 
 ![The Session Explorer's Index tab listing the session's tasks](docs/screenshots/explorer-index.png)
 
 Each task's ⋯ menu previews, copies or exports the task as Markdown.
+
+### Lineage
+
+When a native Claude Code or Codex runs subagents (Claude Code's Agent tool, Codex's spawn_agent), a
+button in the header counts them, with
+how many still work, and opens the Lineage panel: each subagent with what it was asked to do, its
+kind, whether it works, is done or failed, and for how long. Choosing one shows what it did, step by
+step, the way the transcript shows a task: its thinking, tool calls with their results, and its
+answer, which follow it while it works. The **Steps** button on an Agent or spawn_agent tool call
+opens the panel on its subagent.
+
+![The Lineage panel on a subagent: its task, a file it read, a command it ran and its answer](docs/screenshots/lineage.png)
+
+The steps are read from the subagents' own logs (Claude Code keeps one per subagent next to the
+session's), so the panel shows those of the session the agent has open, also one opened from
+[earlier sessions](#earlier-sessions); a copy of a session starts without the subagents of the
+original. `GET /subagents` lists them and `GET /subagents/{id}` returns one's task and messages. A Claude Code
+subagent's state comes from its Agent tool call; a Codex subagent's from its own log, as Codex's
+spawn call ends at once while the subagent works on. Codex sends the subagent its task encrypted,
+so the panel names a Codex subagent after its task name and nickname instead.
 
 ### Attachments and images
 
@@ -311,6 +339,14 @@ highlighting, and Diff, with the tool call's own change and the file's uncommitt
 HEAD (`GET /files/content`, `GET /files/diff`, cut at 1 MiB). Only files inside the agent's working
 directory can be opened. An expanded tool call lists its files and shows its change as a diff, with
 the raw input a click away. On a phone the viewer is full screen.
+
+A path that isn't in the working directory is looked for below it (`GET /files/find`), ignoring
+case: an agent working in a repository below its working directory (a home directory) names files
+relative to the repository. One match opens, with a note naming the path the agent wrote; several
+are listed to choose from. The search leaves out hidden directories, dependencies and Go's module
+cache unless the path goes into them, and stops after 50,000 entries or 2 seconds.
+
+![The viewer on my-app/docs/notes.md, with a note that docs/notes.md isn't in the working directory](docs/screenshots/file-find.png)
 
 HTML, Markdown and SVG files have a third tab, Preview, and an image file shows as the image:
 
@@ -361,7 +397,7 @@ mode, which needs the agent's own terminal (the screen views stay hidden, also f
 While the tab is in the background, its icon shows an amber dot when the agent needs you, a blue dot
 while it works, and a green dot when a task finishes. Browser notifications can be turned on from
 the status menu, which also downloads the conversation as JSONL (so does the Explorer's Session
-tab).
+tab), with the steps of the subagents a native Claude Code or Codex ran after the agent's own.
 
 ![The session details menu opened from the status in the header](docs/screenshots/session-details.png)
 
@@ -397,7 +433,10 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 - ACP is a separate transport. `--transport acp` is equivalent to
   `--experimental-acp` and cannot be enabled together with native mode.
 - For UI development, `--type custom -- native-demo` runs a simulated agent with
-  the native transport; see the [development guide](chat/README.md).
+  the native transport; see the [development guide](chat/README.md). With
+  `--type claude`, `codex` or `pi` instead, the demo poses as that agent:
+  AgentAPI reads that agent's logs for it, for its earlier sessions and
+  subagents.
   `--transport native` with any other agent type is rejected at startup.
 
 **What to expect**
@@ -658,7 +697,41 @@ context and its usage windows, and Pi its context. A new session starts with an 
 rate limits, which are the account's, stay. In the chat, a ring in the composer's toolbar shows how
 full the context is, and its menu the limits with the time to each reset.
 
+Claude Code also reports its `prompt_cache`: how long the model provider keeps the conversation's
+cache after its last use (`ttl_seconds`: an hour on a subscription, five minutes with an API key, on
+Bedrock or Vertex) and when it expires (`expires_at`). Once it expired, the next message has the
+model read the whole context again, at the full price and against the usage limits. While the agent
+is idle with an expired cache and at least 50k tokens of context, the chat says so above the
+composer and offers to compact first; dismissed, the note stays away until the next turn.
+
+![A note above the composer: the prompt cache expired and the next message reads 120k tokens again, with Compact](docs/screenshots/cold-cache.png)
+
 ![The context popover: the tokens in the context window, and the 5-hour and weekly usage limits](docs/screenshots/context-usage.png)
+
+### Usage limits
+
+When the account reaches a usage limit, the agent stops its turn: Claude Code says "You've hit your
+limit", Codex reports `usageLimitExceeded`, Pi the provider's quota error. `GET /status` and
+`status_change` then report `limit_stop`: the agent's `message`, when it stopped and, if the agent
+says, when the limit resets (`resets_at`, else the reset of the limit `rate_limits` reports as
+reached). Queued messages wait until then instead of failing one after another; a message you send
+yourself goes out at once, past them, and ends the stop.
+
+- `POST /limit/continue` with `{"at": "now"}` sends a message that asks the
+  agent to go on with the task; `{"at": "reset"}` schedules it for a minute
+  after the reset (409 without a reset time). The queued messages go after it.
+- `DELETE /limit/continue` cancels a scheduled continuation; the queue still
+  waits for the reset.
+- `DELETE /limit` forgets the stop, so the queued messages go out as soon as
+  the agent can take them.
+- `--auto-continue` schedules the continuation for every stop with a reset
+  time. A continuation the limit stops again is scheduled again.
+
+The stop is kept with `--state-db`, so a scheduled continuation still goes out after AgentAPI
+restarts. In the chat, the stop is a card above the composer with the reset time, **Continue at
+reset**, **Continue now**, and **Send queued tasks**, and the queue says it waits for the limit.
+
+![A turn stopped on the 5-hour limit: the card with the reset time, and a task held in the queue](docs/screenshots/limit-card.png)
 
 ### Terminal
 
@@ -745,6 +818,31 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
   and Pi. With the PTY transport the agent can't resume its session;
   `--state-file` still saves the screen-derived messages there. The native
   transport doesn't take `--state-file`.
+
+### Earlier sessions
+
+Claude Code, Codex and Pi keep a log of every session, which AgentAPI reads to list the sessions the
+agent had in its working directory and to open one, without `--state-db`:
+
+- `GET /sessions` lists them, the latest first, with the one the agent has
+  open (`current`): each with its `id`, `title` (the agent's or the user's
+  name for it), `first_prompt`, number of `prompts`, and when it started and
+  last changed. Sessions in which the user sent nothing are left out. They
+  are read from Claude Code's projects directory, Codex's sessions and Pi's
+  session directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+  `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` are honored, a
+  `--session-dir` passed to Pi is not).
+- `POST /sessions/{id}/resume` restarts the agent on that session, and
+  replaces the conversation with the session's, read from its log. With
+  `{"fork": true}` the agent opens a copy of it under a new id (Claude Code's
+  `--fork-session`, Codex's `thread/fork`, Pi's `--fork`), and the session
+  itself stays as it was. The queue and open requests are cleared, as on a
+  restart; it returns 409 while the agent works on a turn.
+
+In the chat, the Explorer's Session tab lists the sessions with **Open** and **Start a copy**, which
+ask for a second click.
+
+![The Explorer's Session tab: Claude Code's sessions in the directory with Open and Start a copy](docs/screenshots/explorer-sessions.png)
 
 ### Claude Code
 
@@ -1014,7 +1112,12 @@ stable message identifiers that cannot always be reconstructed reliably from ter
 
 - `GET /rich-messages` returns the structured conversation.
 - `GET /timeline` returns normalized session events suitable for export,
-  auditing, or building another UI.
+  auditing, or building another UI. With `?subagents=true` (native Claude
+  Code and Codex), the events of the subagents the agent ran follow, read
+  from their own logs: each subagent's in turn, starting with a system event,
+  and each event with its `subagent_id` and, for Claude Code, the
+  `parent_tool_use_id` of the Agent tool call that started it. The agent's
+  own events only have the subagent's prompt and final answer.
 - Background and delegated tasks remain visible with their running, completed,
   or failed state and output details.
 - Claude thinking blocks are rendered inline as collapsible sections in the
@@ -1470,6 +1573,7 @@ variable.
 | `--experimental-acp` | `false` | The same as `--transport acp` |
 | `--state-db` | | SQLite file that keeps the conversation and resumes the agent's session (native); see [Persistent sessions](#persistent-sessions) |
 | `--terminal` | `true` | Shell in the agent's working directory for the chat (native); see [Terminal](#terminal) |
+| `--auto-continue` | `false` | Continue a turn a usage limit stopped once the limit resets (native); see [Usage limits](#usage-limits) |
 | `-s`, `--state-file` | | File that keeps the screen-derived messages (PTY) |
 | `--load-state`, `--save-state` | `true` with `--state-file` | Load the state file on startup, save it on shutdown |
 | `-I`, `--initial-prompt` | | First message for the agent; read from stdin when piped |
@@ -1526,8 +1630,8 @@ default. Endpoints marked *native* need the native transport.
 | `POST /message` | Send a message, or queue it while the agent is busy; `dispatch_mode` is `queue` (default), `steer` or `interrupt` (*native*) |
 | `DELETE /messages` | Clear the conversation and the queue, and restart the agent (*native*: in a new session; 400 with ACP) |
 | `GET /rich-messages` | The structured conversation: thinking, tool calls with results, usage |
-| `GET /timeline` | Normalized session events, for export or another UI |
-| `GET /status` | Status, lifecycle, run and session IDs, epoch, session name, version, open dialog; *native*: capabilities, pending requests, settings, usage, terminal, login |
+| `GET /timeline` | Normalized session events, for export or another UI; `?subagents=true` adds the subagents' (*native*) |
+| `GET /status` | Status, lifecycle, run and session IDs, epoch, session name, version, open dialog; *native*: capabilities, pending requests, settings, usage, usage limit stop, terminal, login |
 | `GET /title` | The session's human-readable title |
 | `GET /events` | Server-sent events; `?sync=1` for incremental replay on reconnect |
 | `GET /workspace` | The Coder workspace URL, when AgentAPI runs in one |
@@ -1551,6 +1655,11 @@ default. Endpoints marked *native* need the native transport.
 | `GET /settings`, `PUT /settings` | The permission mode, model and reasoning effort, with the values they can take; PUT changes the ones in its body |
 | `POST /compact` | Compact the agent's context (Codex, Pi) |
 | `POST /login/retry` | Check the agent's login again now, while `login_required` is reported (409 when no login is needed) |
+| `POST /limit/continue`, `DELETE /limit/continue` | Continue a turn a usage limit stopped, now or at the reset; cancel a scheduled continuation |
+| `DELETE /limit` | Forget a usage limit stop, so the queued messages go out |
+| `GET /sessions` | The agent's sessions in its working directory (Claude Code, Codex, Pi) |
+| `GET /subagents`, `GET /subagents/{id}` | The subagents the agent ran in its session, and one's task and messages (Claude Code, Codex) |
+| `POST /sessions/{id}/resume` | Open one of them, or a copy of it (`{"fork": true}`), in place of the conversation |
 
 ### Terminal and files
 

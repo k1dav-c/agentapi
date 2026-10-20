@@ -1,6 +1,7 @@
 /**
  * Captures the documentation screenshots in docs/screenshots/. The script starts its own AgentAPI
- * servers on a small sample project (the native demo agent, and bash as a PTY agent for TTY mode),
+ * servers on a small sample project (the native demo agent, the demo posing as Claude Code for its
+ * earlier sessions and subagents, and bash as a PTY agent for TTY mode),
  * walks the chat UI with Chromium, taking screenshots and recording GIFs of the main flows, and stops
  * the servers again. See docs/screenshots/README.md.
  */
@@ -8,7 +9,7 @@ import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
 import {spawn, execFileSync} from 'node:child_process';
-import {mkdtemp, mkdir, writeFile, rm} from 'node:fs/promises';
+import {mkdtemp, mkdir, writeFile, rm, utimes} from 'node:fs/promises';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {createRequire} from 'node:module';
 
@@ -150,6 +151,65 @@ const createProject = async (dir, home) => {
     .replace('A one-page site that the agent works on in the AgentAPI screenshots.', 'A one-page site with a light and a dark theme.')
     + '\n## Deploy\n\nCopy the folder to any static host; there is nothing to build.\n');
   await write('styles.css', projectFiles['styles.css'] + '@media (max-width: 640px) { .cards { grid-template-columns: 1fr; } }\n');
+};
+
+// Claude Code's logs for the demo that poses as it: earlier sessions in the directory, and a
+// subagent's log next to a session's. Claude Code names a project's directory after its path, with
+// every character but letters and digits a dash.
+const claudeProject = (home, cwd) => path.join(home, '.claude', 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'));
+const jsonl = lines => lines.map(line => JSON.stringify(line)).join('\n') + '\n';
+const claudeTurn = (session, at, prompt, reply, id) => [
+  {type: 'user', timestamp: at, sessionId: session, uuid: `${id}-u`, message: {role: 'user', content: prompt}},
+  {type: 'assistant', timestamp: new Date(Date.parse(at) + 20_000).toISOString(), sessionId: session, uuid: `${id}-a`,
+    message: {id: `msg_${id}`, role: 'assistant', model: 'claude-opus-5-5', content: [{type: 'text', text: reply}], stop_reason: 'end_turn'}},
+];
+const writeClaudeSessions = async (home, cwd) => {
+  const dir = claudeProject(home, cwd);
+  await mkdir(dir, {recursive: true});
+  const sessions = [
+    {id: '4f0c2a51-1d6e-4a3b-9c1e-7a2b5d8e9f10', title: 'Dark theme for my-app', at: '2026-10-19T15:20:00Z', turns: [
+      ['Add a dark theme to `my-app/styles.css`, switched from the header.', 'Added a dark theme: the colors are variables, and `body.dark` swaps them.'],
+      ['Remember the choice per visitor.', 'The switch now stores the theme in localStorage and applies it on load.'],
+      ['Check the contrast of the cards in the dark theme.', 'The card text passes WCAG AA in both themes.'],
+    ]},
+    {id: '9b3e7d24-6a81-4c5f-8e2d-1f4a6b9c0d37', title: 'Release notes for 1.1.0', at: '2026-10-18T10:05:00Z', turns: [
+      ['Write the release notes for 1.1.0 in `my-app/docs/notes.md`.', 'Wrote the notes: the dark theme, the stacked cards, and a size table.'],
+      ['Add the logo at the top.', 'The notes start with the logo now.'],
+    ]},
+    {id: 'c27a9e13-5b40-4d8f-a6c1-3e9f2b7d5a84', title: '', at: '2026-10-16T08:40:00Z', turns: [
+      ['Why do the cards overflow on a phone?', 'The grid has three fixed columns; below 640px they now stack.'],
+    ]},
+  ];
+  for (const s of sessions) {
+    const lines = s.turns.flatMap(([prompt, reply], i) => claudeTurn(s.id, new Date(Date.parse(s.at) + i * 300_000).toISOString(), prompt, reply, `${s.id.slice(0, 8)}${i}`));
+    if (s.title) lines.push({type: 'ai-title', aiTitle: s.title, sessionId: s.id});
+    const file = path.join(dir, `${s.id}.jsonl`);
+    await writeFile(file, jsonl(lines));
+    const at = new Date(Date.parse(s.at) + s.turns.length * 300_000);
+    await utimes(file, at, at);
+  }
+};
+// The log of a subagent the demo's Agent tool call started, as Claude Code writes it.
+const writeClaudeSubagent = async (home, cwd, session, toolUseId, startedAt) => {
+  const dir = path.join(claudeProject(home, cwd), session, 'subagents');
+  await mkdir(dir, {recursive: true});
+  const at = seconds => new Date(Date.parse(startedAt) + seconds * 1000).toISOString();
+  const base = {isSidechain: true, agentId: 'a7d2c91e', sessionId: session};
+  const read = 'toolu_sub_read';
+  const grep = 'toolu_sub_grep';
+  await writeFile(path.join(dir, 'agent-a7d2c91e.jsonl'), jsonl([
+    {...base, type: 'user', timestamp: at(0), uuid: 's0', message: {role: 'user', content: 'Read docs/notes.md and list what the 1.1.0 notes are missing.'}},
+    {...base, type: 'assistant', timestamp: at(2), uuid: 's1', message: {id: 'msg_sub1', role: 'assistant', content: [
+      {type: 'thinking', thinking: '**Reading the notes**\n\nRelease notes usually give a date and where to get the release; I will check for both.'},
+      {type: 'tool_use', id: read, name: 'Read', input: {file_path: path.join(cwd, 'my-app', 'docs', 'notes.md')}}], stop_reason: 'tool_use'}},
+    {...base, type: 'user', timestamp: at(3), uuid: 's2', message: {role: 'user', content: [{type: 'tool_result', tool_use_id: read, content: notes}]}},
+    {...base, type: 'assistant', timestamp: at(5), uuid: 's3', message: {id: 'msg_sub2', role: 'assistant', content: [
+      {type: 'tool_use', id: grep, name: 'Bash', input: {command: 'git -C my-app tag --list', description: 'List the release tags'}}], stop_reason: 'tool_use'}},
+    {...base, type: 'user', timestamp: at(6), uuid: 's4', message: {role: 'user', content: [{type: 'tool_result', tool_use_id: grep, content: ''}]}},
+    {...base, type: 'assistant', timestamp: at(8), uuid: 's5', message: {id: 'msg_sub3', role: 'assistant', content: [
+      {type: 'text', text: 'The 1.1.0 notes miss two things:\n\n- **The release date.** Nothing says when 1.1.0 shipped, and there is no `v1.1.0` tag yet.\n- **Where to get it.** There is no download link or a line on how to update.'}], stop_reason: 'end_turn'}},
+  ]));
+  await writeFile(path.join(dir, 'agent-a7d2c91e.meta.json'), JSON.stringify({agentType: 'general-purpose', description: 'Check the release notes', toolUseId}));
 };
 
 const portFree = p => new Promise(resolve => {
@@ -356,8 +416,8 @@ const home = path.join(root, 'home');
 const project = path.join(root, 'my-app');
 let browser;
 try {
-  for (const p of [port, port + 1]) {
-    if (!await portFree(p)) throw new Error(`Port ${p} is in use; set AGENTAPI_SCREENSHOT_PORT to a free pair of ports.`);
+  for (const p of [port, port + 1, port + 2]) {
+    if (!await portFree(p)) throw new Error(`Port ${p} is in use; set AGENTAPI_SCREENSHOT_PORT to the first of three free ports.`);
   }
   // A clean environment: no tokens or workspace links of the shell the script runs in, and a
   // neutral prompt in the terminal.
@@ -368,10 +428,16 @@ try {
   const env = {HOME: home, PATH: '/usr/local/bin:/usr/bin:/bin', SHELL: '/bin/bash', LANG: 'C.UTF-8', TERM: 'xterm-256color'};
   startServer('native demo', project, env, ['--port', String(port), '--transport', 'native', '--type', 'custom', '--', 'native-demo']);
   startServer('PTY bash', project, {...env, PS1: 'my-app $ '}, ['--port', String(port + 1), '--type', 'custom', '--term-width', '100', '--', 'bash', '--norc', '--noprofile']);
+  // The demo posing as Claude Code, one directory above the project: its earlier sessions and
+  // subagents come from the Claude Code logs written into the script's home.
+  await writeClaudeSessions(home, root);
+  startServer('demo as Claude Code', root, env, ['--port', String(port + 2), '--transport', 'native', '--type', 'claude', '--', 'native-demo']);
   const demo = client(`http://127.0.0.1:${port}`);
   const pty = client(`http://127.0.0.1:${port + 1}`);
+  const posing = client(`http://127.0.0.1:${port + 2}`);
   await poll(async () => (await demo.status()).lifecycle === 'ready', 'the native demo server');
   await poll(async () => !!(await pty.status()), 'the PTY server');
+  await poll(async () => (await posing.status()).lifecycle === 'ready', 'the demo posing as Claude Code');
   const {agentapi_version: version} = await demo.status();
 
   browser = await chromium.launch({headless: true, executablePath: process.env.CHROMIUM_PATH || undefined,
@@ -542,6 +608,33 @@ try {
   await demo.request('/messages', 'DELETE');
   await demo.idle();
 
+  // A turn a usage limit stopped, with a task held in the queue until the limit resets. The demo
+  // reaches the limit after the approval it asks for, while the task waits in the queue.
+  await demo.send('Review `README.md` and the page in `index.html`.');
+  await demo.idle();
+  await demo.send('Rebuild the release artifacts; I will approve the command. Stop if you hit the limit.');
+  await demo.pending('approval');
+  await box.fill('Then update the screenshots in `README.md`.');
+  await box.press('Enter');
+  await page.getByText('Queued tasks', {exact: false}).waitFor();
+  const approval = (await demo.request('/requests')).requests.find(r => r.status === 'pending');
+  await demo.request(`/requests/${approval.id}/respond`, 'POST', {option_id: approval.options.find(o => o.kind === 'allow').id});
+  await page.locator('[data-limit-stop]').waitFor();
+  await page.getByText('held until the usage limit resets', {exact: false}).waitFor();
+  await shot(page, 'limit-card.png');
+  await demo.request('/messages', 'DELETE');
+  await demo.idle();
+
+  // An expired prompt cache over a large context, while the agent is idle.
+  await demo.send('Review `README.md` and the page in `index.html`.');
+  await demo.idle();
+  await demo.send('Summarize the work so far; the cache has gone cold.');
+  await demo.idle();
+  await page.locator('[data-cold-cache]').waitFor();
+  await regionShot(page, 'cold-cache.png', [page.locator('[data-cold-cache]'), composer]);
+  await demo.request('/messages', 'DELETE');
+  await demo.idle();
+
   // GIFs of the main flows, on a smaller window with a visible pointer.
   const openGifPage = async (options = {viewport: {width: 1100, height: 720}}) => {
     const context = await browser.newContext({...contextOptions, ...options});
@@ -706,6 +799,37 @@ try {
   await demo.request('/messages', 'DELETE');
   await demo.idle();
 
+  // The demo posing as Claude Code: its earlier sessions, a subagent, and a file found below its
+  // working directory.
+  await posing.idle();
+  await posing.send('Delegate checking the release notes in `docs/notes.md` to a subagent.');
+  await posing.idle();
+  const {current: session} = await posing.request('/sessions');
+  const {messages: rich} = await posing.request('/rich-messages');
+  const agentCall = rich.flatMap(m => m.content).find(b => b.type === 'tool_use' && b.tool_name === 'Agent');
+  await writeClaudeSubagent(home, root, session, agentCall.tool_use_id, rich.find(m => m.content.includes(agentCall))?.timestamp ?? new Date().toISOString());
+  const claude = await openPage(browser, posing.base);
+  await claude.getByText('Here is what I did for', {exact: false}).last().waitFor();
+  await claude.getByRole('button', {name: 'Open explorer'}).click();
+  await claude.getByRole('tab', {name: 'Session', exact: true}).click();
+  await claude.locator('[data-session]').first().waitFor();
+  await claude.locator('[data-session]').nth(1).getByRole('button', {name: 'Open'}).click();
+  await claude.getByRole('button', {name: 'Click again to open'}).waitFor();
+  await topShot(claude, claude.getByRole('dialog'), 'explorer-sessions.png', 700);
+  await claude.keyboard.press('Escape');
+  await claude.locator('[data-open-subagent]').first().click();
+  await claude.locator('[data-lineage] details').first().waitFor();
+  await claude.waitForTimeout(600);
+  await topShot(claude, claude.getByRole('dialog'), 'lineage.png', 520);
+  await claude.keyboard.press('Escape');
+  // docs/notes.md is my-app's, one directory below where this agent works.
+  await claude.getByRole('button', {name: 'Open file: docs/notes.md', exact: true}).first().click();
+  await claude.getByText('this is the file found for it', {exact: false}).waitFor();
+  await claude.waitForTimeout(1200);
+  await topShot(claude, claude.getByRole('dialog').last(), 'file-find.png', 520);
+  await claude.keyboard.press('Escape');
+  await claude.context().close();
+
   // A lost login. The card names the host and user to log in as; the screenshot shows placeholders.
   await demo.send('Review `README.md` and the page in `index.html`.');
   await demo.idle();
@@ -734,7 +858,7 @@ try {
   await writeFile(path.join(output, 'capture.json'), JSON.stringify({
     captured_at: new Date().toISOString(),
     agentapi_version: version,
-    agents: ['native-demo', 'bash (PTY)'],
+    agents: ['native-demo', 'native-demo posing as Claude Code', 'bash (PTY)'],
     browser: browser.version(),
     desktop_viewport: {width: 1440, height: 1000},
     mobile_viewport: {width: 390, height: 844},

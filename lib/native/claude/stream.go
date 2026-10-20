@@ -58,6 +58,8 @@ type frame struct {
 	TerminalReason string          `json:"terminal_reason"`
 	Errors         []string        `json:"errors"`
 	APIErrorStatus json.RawMessage `json:"api_error_status"`
+	// Usage is the turn's token usage; only the cache is read from it.
+	Usage *resultUsage `json:"usage"`
 
 	// assistant: the kind of API error a synthetic message reports, e.g.
 	// "authentication_failed". Raw, so a frame with another shape still

@@ -19,6 +19,9 @@ export interface FileViewerRequest {
   // The tab to open on: by default Diff when there is a change, else
   // Preview for Markdown and File for the rest.
   tab?: FileViewerTab;
+  // The path the agent named, when it wasn't there and path is the file
+  // found for it.
+  requestedPath?: string;
 }
 
 export interface FileViewer {

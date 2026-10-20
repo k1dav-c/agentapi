@@ -39,6 +39,9 @@ type Observer interface {
 	SettingsChosen(Settings)
 	// Usage reports the agent's usage of its limits when it changes.
 	Usage(AgentUsage)
+	// LimitStop reports the turn a usage limit stopped when that changes,
+	// or with nil that a turn started since or the stop was dismissed.
+	LimitStop(*LimitStop)
 }
 
 type nopObserver struct{}
@@ -53,6 +56,7 @@ func (nopObserver) RequestUpdated(RequestState)             {}
 func (nopObserver) Settings(Settings)                       {}
 func (nopObserver) SettingsChosen(Settings)                 {}
 func (nopObserver) Usage(AgentUsage)                        {}
+func (nopObserver) LimitStop(*LimitStop)                    {}
 
 // Config configures a Conversation.
 type Config struct {
@@ -77,6 +81,11 @@ type Config struct {
 	// Settings were chosen for the session earlier (restored after AgentAPI
 	// restarted). Every agent that starts gets them.
 	Settings Settings
+	// AutoContinue schedules a message that continues a turn a usage limit
+	// stopped for when the limit resets, if the agent says when.
+	AutoContinue bool
+	// LimitStop is a turn a usage limit stopped before AgentAPI restarted.
+	LimitStop *LimitStop
 }
 
 const (
@@ -115,6 +124,9 @@ type Conversation struct {
 	// clears it, so the new session gets the prompt too.
 	promptSent bool
 	sessionRef string
+	// forking: sessionRef is the session to fork, until the agent reports
+	// the copy's.
+	forking bool
 
 	messages messageLog
 	requests requestBook
@@ -143,6 +155,11 @@ type Conversation struct {
 	// are the account's, so they stay for the next agent; the context
 	// belongs to the session.
 	usage AgentUsage
+	// limitStop is the turn a usage limit stopped, until a turn starts.
+	limitStop *LimitStop
+	// continueAgain: the turn running is a scheduled continuation, so if
+	// the limit stops it again, it is scheduled again.
+	continueAgain bool
 }
 
 // NewConversation creates a conversation. Nothing runs until Start.
@@ -174,6 +191,7 @@ func NewConversation(cfg Config) *Conversation {
 		exited:     make(chan error, 1),
 		promptSent: len(cfg.InitialMessages) > 0,
 		chosen:     cfg.Settings,
+		limitStop:  cfg.LimitStop.clone(),
 	}
 }
 
@@ -353,6 +371,11 @@ func (c *Conversation) agentSettingsLocked(settings Settings) {
 	c.setSettingsLocked(settings)
 }
 
+// resumeLocked says which session the next agent opens.
+func (c *Conversation) resumeLocked() Resume {
+	return Resume{Ref: c.sessionRef, Fork: c.forking}
+}
+
 // SessionRef is the identifier that resumes the agent's session.
 func (c *Conversation) SessionRef() string {
 	c.mu.Lock()
@@ -462,6 +485,7 @@ func (c *Conversation) beginTurnLocked(input Input) (pendingTurn, error) {
 		return pendingTurn{}, st.ErrMessageValidationChanging
 	}
 	c.turnActive = true
+	c.setLimitStopLocked(nil)
 	turn := pendingTurn{
 		adapter: c.adapter,
 		gen:     c.generation,

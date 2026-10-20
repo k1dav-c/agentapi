@@ -54,6 +54,7 @@ export default function MessageInput({
     dispatch,
     canStop,
     stop,
+    limitStop,
   } = useChat();
   const modes = dispatchModes(dispatch);
   const steerable = canSteer(dispatch);
@@ -274,7 +275,7 @@ export default function MessageInput({
                 <QueuedTasks
                   queuedMessages={queuedMessages}
                   steerable={steerable}
-                  held={waitingForLogin ? "login" : waitingForAnswer ? "answer" : null}
+                  held={waitingForLogin ? "login" : waitingForAnswer ? "answer" : limitStop ? "limit" : null}
                 />
               )}
 

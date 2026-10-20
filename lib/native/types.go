@@ -231,6 +231,9 @@ const (
 	// StopReasonHandled: the agent handled the message without a model
 	// turn, e.g. a Pi extension command.
 	StopReasonHandled = "handled"
+	// StopReasonLimited: the account reached a usage limit; TurnResult.Error
+	// is what the agent said.
+	StopReasonLimited = "limited"
 )
 
 // RedactedAnswer replaces the answers to secret questions everywhere but
@@ -243,6 +246,10 @@ type TurnResult struct {
 	StopReason string
 	// Error is set when the turn failed.
 	Error string
+	// ResetsAt is when the limit that stopped a limited turn resets, if
+	// the agent says. Without it the conversation takes the reset of the
+	// limits the agent reported as reached.
+	ResetsAt *time.Time
 }
 
 // Sink receives an adapter's events. Its methods may be called from any
@@ -321,6 +328,15 @@ type Adapter interface {
 	Close() error
 }
 
-// Factory creates an adapter. resumeRef is a value an earlier adapter
-// reported with Sink.SessionRef, or empty for a new session.
-type Factory func(resumeRef string) (Adapter, error)
+// Resume says which session an adapter opens.
+type Resume struct {
+	// Ref is a value an earlier adapter reported with Sink.SessionRef, or
+	// empty for a new session.
+	Ref string
+	// Fork opens a new session that starts as a copy of Ref's, which goes
+	// on unchanged. The adapter reports the new session's ref.
+	Fork bool
+}
+
+// Factory creates an adapter that opens the session resume says.
+type Factory func(resume Resume) (Adapter, error)

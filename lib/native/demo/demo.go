@@ -17,6 +17,18 @@
 //     start (Check again, POST /login/retry) still finds no login, so the
 //     conversation waits and tries again by itself; the start after that
 //     works.
+//   - "limit": the account reaches its 5-hour limit, which stops the turn
+//     (native.StopReasonLimited) until it resets in three hours, after the
+//     requests the message opens
+//   - "cold": the turn leaves a large context whose prompt cache already
+//     expired, as after an hour away
+//   - "delegate": the agent hands a task to a subagent with Claude Code's
+//     Agent tool
+//
+// With --type claude, codex or pi the demo poses as that agent, so
+// AgentAPI reads that agent's session logs for it: its earlier sessions
+// and its subagents show what logs are in the agent's directories (the
+// screenshot script writes some).
 //
 // Its settings can change (native.Configurable): in the ask permission
 // mode every turn's first command needs approval, and in the plan mode
@@ -31,6 +43,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -95,6 +108,9 @@ type Adapter struct {
 	// requests, so they don't repeat those of an earlier adapter in the
 	// same conversation.
 	prefix string
+	// limited and cold are set by a turn whose usage reports a reached
+	// limit or an expired prompt cache.
+	limited, cold atomic.Bool
 
 	mu       sync.Mutex
 	sink     native.Sink
@@ -139,8 +155,9 @@ func Factory(opts Options) native.Factory {
 		opts.Now = time.Now
 	}
 	login := &loginState{}
-	return func(resumeRef string) (native.Adapter, error) {
-		return newAdapter(resumeRef, opts, login), nil
+	return func(resume native.Resume) (native.Adapter, error) {
+		// A fork of the simulated session is a session like it.
+		return newAdapter(resume.Ref, opts, login), nil
 	}
 }
 
@@ -344,7 +361,17 @@ func (a *Adapter) finish(t *turn, result native.TurnResult) {
 	turns := a.turns - a.compacted
 	a.mu.Unlock()
 	t.cancel()
-	native.ReportUsage(sink, demoUsage(turns, a.now()))
+	usage := demoUsage(turns, a.now())
+	if a.limited.Swap(false) {
+		// The limit that stopped the turn, as Claude Code reports it.
+		full := 100.0
+		usage.RateLimits[0].UsedPercent, usage.RateLimits[0].Status = &full, "rejected"
+	}
+	if a.cold.Swap(false) {
+		usage.Context.Used = max(usage.Context.Used, 120000)
+		usage.PromptCache.ExpiresAt = a.now().Add(-time.Minute)
+	}
+	native.ReportUsage(sink, usage)
 	sink.TurnCompleted(result)
 }
 
@@ -358,7 +385,8 @@ func demoUsage(n int, now time.Time) native.AgentUsage {
 		status = "allowed_warning"
 	}
 	return native.AgentUsage{
-		Context: &native.ContextUsage{Used: min(18000+n*9500, 200000), Size: 200000},
+		Context:     &native.ContextUsage{Used: min(18000+n*9500, 200000), Size: 200000},
+		PromptCache: &native.PromptCache{TTLSeconds: 3600, ExpiresAt: now.Add(time.Hour)},
 		RateLimits: []native.RateLimit{
 			{ID: "five_hour", Label: "5-hour limit", UsedPercent: &fiveHour, ResetsAt: &fiveHourReset, Status: status},
 			{ID: "seven_day", Label: "Weekly limit", UsedPercent: &weekly, ResetsAt: &weeklyReset},
@@ -385,6 +413,9 @@ var errLoginLost = errors.New("login lost")
 // errInterrupted ends a turn that was interrupted.
 var errInterrupted = errors.New("interrupted")
 
+// errLimited ends a turn the 5-hour limit stopped.
+var errLimited = errors.New("usage limit reached")
+
 func (a *Adapter) run(t *turn, n int, input native.Input) {
 	a.mu.Lock()
 	sink := a.sink
@@ -397,6 +428,10 @@ func (a *Adapter) run(t *turn, n int, input native.Input) {
 	if err := s.play(); err != nil {
 		if errors.Is(err, errLoginLost) {
 			a.finish(t, native.TurnResult{StopReason: native.StopReasonError, Error: "Native demo: the API answered 401 Unauthorized (simulated)"})
+			return
+		}
+		if errors.Is(err, errLimited) {
+			a.finish(t, native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your 5-hour limit · resets in 3 hours (simulated)"})
 			return
 		}
 		a.finish(t, native.TurnResult{StopReason: native.StopReasonInterrupted})
@@ -423,6 +458,22 @@ func (s *script) play() error {
 	if words["login"] {
 		return s.loseLogin()
 	}
+	if words["cold"] {
+		s.a.cold.Store(true)
+	}
+	if words["delegate"] {
+		agent := map[string]any{
+			"description":   "Check the release notes",
+			"subagent_type": "general-purpose",
+			"prompt":        "Read docs/notes.md and list what the 1.1.0 notes are missing.",
+		}
+		answer := func(string, json.RawMessage) (string, bool, error) {
+			return "The 1.1.0 notes miss the release date and the download links.", false, nil
+		}
+		if err := s.tool(work, "Agent", agent, answer); err != nil {
+			return err
+		}
+	}
 	if words["approve"] {
 		if err := s.tool(work, "Bash", map[string]any{"command": "rm -rf ./build && make release", "description": "Rebuild the release"}, s.approval); err != nil {
 			return err
@@ -441,6 +492,12 @@ func (s *script) play() error {
 		if err := s.tool(work, "ExitPlanMode", map[string]any{"plan": demoPlan}, s.plan); err != nil {
 			return err
 		}
+	}
+	// After the requests, so a message can wait in the queue while one is
+	// open.
+	if words["limit"] {
+		s.a.limited.Store(true)
+		return errLimited
 	}
 	return s.reply(words["long"])
 }
