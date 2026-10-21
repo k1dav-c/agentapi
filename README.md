@@ -98,14 +98,15 @@ has the complete commit history.
 - [Tasks](#tasks-and-the-transcript) read as a transcript, with tool calls as
   rows and thinking as margin notes, and can be exported as Markdown; the
   [Session Explorer](#session-explorer) has links, files, a task index, MCP
-  servers and Restart.
+  servers, the agent's [earlier sessions](#earlier-sessions) and Restart.
 - [Lineage](#lineage): the subagents the agent ran, and what each did, step by
   step, also while it works.
 - [Decision cards](#decision-cards) for terminal dialogs and native requests,
   menus for the agent's settings, a ring for its context, and slash commands.
 - A [file viewer](#file-viewer) with the file, its git diff and a preview of
-  HTML, Markdown and images, [TTY mode](#tty-mode) and the native terminal,
-  also on phones.
+  HTML, Markdown and images, which finds a file the agent named relative to a
+  repository below its working directory; [TTY mode](#tty-mode) and the native
+  terminal, also on phones.
 - [Background alerts](#alerts-connection-recovery-and-caching), browser
   notifications, a transcript cache, and recovery from dropped connections.
 
@@ -400,6 +401,10 @@ the status menu, which also downloads the conversation as JSONL (so does the Exp
 tab), with the steps of the subagents a native Claude Code or Codex ran after the agent's own.
 
 ![The session details menu opened from the status in the header](docs/screenshots/session-details.png)
+
+The agent's warnings and errors show as notifications that stay until you close them. The server
+sends its recent ones again on every connection, so the chat remembers the ones you closed, per
+server: a reload doesn't bring them back.
 
 Long-running browser sessions are protected by SSE heartbeats, automatic reconnection,
 stale-connection detection, and local recovery of messages that failed before reaching the server.
@@ -1472,7 +1477,11 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
 - Read files in the agent's working directory with the file viewer endpoints;
   paths outside it, also through symlinks, are refused, and the diff only
   reads the git repository. An HTML preview's scripts run in a sandbox
-  without access to the chat or the API.
+  without access to the chat or the API. `GET /files/find` lists the paths of
+  files below the working directory whose path ends with the one asked for.
+- Read the conversations of the agent's earlier sessions in its working
+  directory, and the steps of the subagents it ran, from the agent's own logs
+  (`~/.claude`, `~/.codex`, `~/.pi`), and open any of those sessions.
 - Upload files of up to 10 MB; only images are served back.
 - Change the MCP servers and the webhook, and restart the agent.
 
@@ -1671,6 +1680,7 @@ default. Endpoints marked *native* need the native transport.
 | `GET /files/diff` | The file's uncommitted changes against HEAD |
 | `GET /files/preview` | An HTML file with the files it refers to inlined, for a sandboxed iframe |
 | `GET /files/image` | An image file in the agent's working directory (raster images judged by content, and SVG) |
+| `GET /files/find` | The files below the working directory whose path ends with the one given, ignoring case |
 
 ### Uploads
 

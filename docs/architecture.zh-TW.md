@@ -85,7 +85,7 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 | `lib/termexec/` | 在虛擬終端機中執行 agent，搭配記憶體內的 VT100 模擬器（`xpty`、`vt10x`）；重新啟動時可以替換行程 |
 | `lib/msgfmt/` | 各 agent 專屬的畫面輸出整理：回顯的輸入、輸入框、狀態列、工具呼叫，以及判斷何時可以送出第一個提示 |
 | `lib/transcript/` | 各傳輸共用的結構化對話型別：結構化訊息與其內容區塊、時間軸事件 |
-| `lib/jsonlwatcher/` | 找到並追蹤 Claude Code、Codex 和 Pi 的工作階段紀錄檔，解析成結構化訊息與時間軸事件 |
+| `lib/jsonlwatcher/` | 找到並追蹤 Claude Code、Codex 和 Pi 的工作階段紀錄檔，解析成結構化訊息與時間軸事件；列出 agent 在某個目錄中先前的工作階段並讀取其對話（`history.go`），以及讀取工作階段執行過的 sub agent 的紀錄（`subagents.go`） |
 | `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入 |
 | `lib/native/claude`、`codex`、`pi` | 每種 agent 協定各一個 adapter |
 | `lib/native/agentio` | 這些 adapter 共用的 JSON lines 通訊：逐行讀取 agent 的輸出、寫入它的 stdin，並把它的回應對應到等待中的請求 |
@@ -146,7 +146,8 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 | `backend.go`、`backend_pty.go`、`backend_native.go` | 依 transport 而不同的部分：派送佇列、送出訊息、重新啟動、人工回覆協定的待處理請求 |
 | `setup.go` | 啟動 PTY 或 ACP agent 的行程 |
 | `native.go` | 請求、設定、中斷、壓縮、重試登入；native observer |
-| `terminal.go`、`files.go`、`file_preview.go` | Shell 終端機與檔案檢視器 |
+| `limit.go`、`sessions.go`、`subagents.go` | 因用量限制停下的回合（`/limit`）；agent 先前的工作階段（`/sessions`）；它的 sub agent（`/subagents`） |
+| `terminal.go`、`files.go`、`file_preview.go`、`files_find.go` | Shell 終端機與檔案檢視器，以及搜尋 agent 用 repo 相對路徑提到的檔案 |
 | `mcp.go`、`mcp_management.go` | MCP 伺服器與設定檔 |
 | `webhook.go`、`handoff.go`、`dialog_reply.go` | 執行狀態 webhook、人工回覆 API、終端機對話框的回答 |
 | `auth.go` | Token 驗證與聊天介面登入 |
@@ -311,7 +312,8 @@ type Factory func(resume Resume) (Adapter, error)
 ## 事件與對話狀態
 
 `EventEmitter`（`lib/httpapi/events.go`）保存用戶端讀取的內容：訊息、結構化訊息、時間軸、
-請求、狀態快照（狀態、生命週期、執行 ID、能力、設定、用量、登入、終端機提示）以及最新的畫面。
+請求、狀態快照（狀態、生命週期、執行 ID、能力、設定、含 prompt cache 的用量、用量限制造成的停止、
+登入、終端機提示）以及最新的畫面。
 
 - 訊息、結構化訊息或請求的每次變更都會取得下一個序號（`seq`）；狀態、錯誤和畫面則整份重播，
   時間軸由 `GET /timeline` 讀取。對話以 `epoch` 識別，歷史被改寫時（收回訊息、重設、當機後
@@ -374,7 +376,9 @@ agent 忙碌時送出的訊息會在伺服器的佇列中等待（`s.queue`；�
 
 ## 檔案
 
-`GET /files/content` 和 `GET /files/diff` 提供聊天介面的檔案檢視器。路徑會在 agent 的工作目錄
+`GET /files/content` 和 `GET /files/diff` 提供聊天介面的檔案檢視器。路徑不存在時，檢視器會向
+`GET /files/find` 查詢工作目錄底下路徑結尾相符的檔案（不分大小寫）：以廣度優先走訪，略過隱藏目錄、
+相依套件和 Go 的 module cache（除非路徑本身就在裡面），並在走過 50,000 筆或 2 秒後停止。路徑會在 agent 的工作目錄
 內解析，symlink 會被追蹤並檢查；只讀取一般檔案，最多 1 MiB。diff 在儲存庫中只以唯讀方式執行
 git（`rev-parse`、`ls-files`、`cat-file`，並關閉 fsmonitor），再在暫存目錄中以
 `git diff --no-index` 比對已 commit 和目前檔案的副本，不使用使用者或系統的 git 設定，所以
@@ -479,8 +483,10 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   IndexedDB 則保存對話供下次開啟時載入。`lib/chat-api.ts` 是型別化的 HTTP 用戶端，
   `lib/api-schema.ts` 保存由 OpenAPI schema 產生的型別。
 - `components/chat.tsx` 負責頁面版面：訊息清單（任務、工具呼叫列、思考）、輸入框上方的停靠區
-  （狀態列、終端機對話框的決策卡片、登入卡片、請求卡片）、輸入框（`message-input.tsx`，含
-  斜線指令、工作階段設定和用量指示）、Explorer、檔案檢視器、TTY mode（`tty-view.tsx`，來自
+  （狀態列、終端機對話框的決策卡片、登入卡片、請求卡片、用量限制卡片、prompt cache 過期提醒）、
+  輸入框（`message-input.tsx`，含斜線指令、工作階段設定和用量指示）、Explorer（含先前的工作階段，
+  `session-history.tsx`）、sub agent 的 Lineage 面板（`lineage.tsx`）、檔案檢視器、TTY mode
+  （`tty-view.tsx`，來自
   `/internal/screen`）以及 native 終端機（`shell-view.tsx`，來自 `/terminal`）。
 - `lib/` 將邏輯封裝為獨立模組，並附有 Bun 測試：任務分組、工具格式化、檔案參照、diff、斜線
   指令、設定、用量、終端機按鍵、驗證。

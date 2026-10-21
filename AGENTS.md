@@ -57,6 +57,7 @@ Experimental ACP mode uses the Agent Client Protocol.
 - `lib/termexec/` - Terminal process execution and management
 - `lib/msgfmt/` - Message formatting for different agent types (claude, goose, aider, codex, gemini, copilot, amp, cursor, auggie, amazonq, opencode, kimi, pi, custom)
 - `lib/native/` - Native transport (the default for Claude Code, Codex and Pi): one adapter per agent (`claude/`, `codex/`, `pi/`) driving its structured protocol, `procutil/` for the child process, `nativetest/` for tests
+- `lib/jsonlwatcher/` - Reads the agents' own session logs: rich messages for the PTY transport, earlier sessions and subagents for the native one
 - `lib/statedb/` - SQLite persistence of native sessions (`--state-db`)
 - `chat/` - Next.js web UI (embedded into Go binary)
 

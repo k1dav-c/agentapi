@@ -87,7 +87,7 @@ terminal dialog are written to the agent's terminal directly.
 | `lib/termexec/` | Runs the agent in a pseudo-terminal with an in-memory VT100 emulator (`xpty`, `vt10x`); the process can be swapped for a restart |
 | `lib/msgfmt/` | Per-agent formatting of screen output: echoed input, input boxes, status lines, tool calls, readiness for the first prompt |
 | `lib/transcript/` | The structured transcript's types, which the transports share: rich messages with their content blocks, and timeline events |
-| `lib/jsonlwatcher/` | Finds and tails the Claude Code, Codex and Pi session logs and parses them into rich messages and timeline events |
+| `lib/jsonlwatcher/` | Finds and tails the Claude Code, Codex and Pi session logs and parses them into rich messages and timeline events; lists the agent's earlier sessions in a directory and reads one's conversation (`history.go`), and reads the logs of the subagents a session ran (`subagents.go`) |
 | `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |
 | `lib/native/agentio` | The JSON-lines plumbing those adapters share: reading the agent's output line by line, writing to its stdin, matching its responses to the requests waiting for them |
@@ -161,7 +161,8 @@ The handlers are grouped by file:
 | `backend.go`, `backend_pty.go`, `backend_native.go` | What depends on the transport: dispatching the queue, delivering a message, restarts, the human-reply protocol's pending request |
 | `setup.go` | Starting the process of a PTY or ACP agent |
 | `native.go` | Requests, settings, interrupt, compaction, login retry; the native observer |
-| `terminal.go`, `files.go`, `file_preview.go` | The shell terminal and the file viewer |
+| `limit.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); the agent's earlier sessions (`/sessions`); its subagents (`/subagents`) |
+| `terminal.go`, `files.go`, `file_preview.go`, `files_find.go` | The shell terminal and the file viewer, and the search for a file the agent named relative to a repository |
 | `mcp.go`, `mcp_management.go` | MCP servers and profiles |
 | `webhook.go`, `handoff.go`, `dialog_reply.go` | Run-status webhooks, the human-reply API, answers to terminal dialogs |
 | `auth.go` | Token auth and the chat's sign-in |
@@ -354,7 +355,8 @@ The adapters:
 
 The `EventEmitter` (`lib/httpapi/events.go`) stores the state clients read: the messages, rich
 messages, the timeline, requests, the status snapshot (status, lifecycle, run ID, capabilities,
-settings, usage, login, terminal prompt) and the latest screen.
+settings, usage with the prompt cache, a usage limit stop, login, terminal prompt) and the latest
+screen.
 
 - Every change to a message, a rich message or a request gets the next
   sequence number (`seq`); the status, errors and the screen are replayed
@@ -435,7 +437,10 @@ process group after 2 seconds.
 
 ## Files
 
-`GET /files/content` and `GET /files/diff` serve the chat's file viewer. Paths resolve inside the
+`GET /files/content` and `GET /files/diff` serve the chat's file viewer. When a path isn't there,
+the viewer asks `GET /files/find` for the files below the working directory whose path ends with it,
+ignoring case: a breadth-first walk that leaves out hidden directories, dependencies and Go's module
+cache unless the path goes into them, and stops after 50,000 entries or 2 seconds. Paths resolve inside the
 agent's working directory, with symlinks followed and checked; only regular files are read, up to 1
 MiB. The diff runs git read-only in the repository (`rev-parse`, `ls-files`, `cat-file`, with
 fsmonitor off) and compares copies of the committed and current file with `git diff --no-index` in a
@@ -553,9 +558,11 @@ a variant for embedding in other pages.
   generated from the OpenAPI schema.
 - `components/chat.tsx` lays out the page: the message list (tasks, tool rows,
   thinking), the dock above the composer (the status strip, decision cards
-  for terminal dialogs, the login card, request cards), the composer
-  (`message-input.tsx`, with slash commands, the session settings and the
-  usage meter), the Explorer, the file viewer, TTY mode (`tty-view.tsx`, from
+  for terminal dialogs, the login card, request cards, the usage limit card,
+  the cold prompt cache note), the composer (`message-input.tsx`, with slash
+  commands, the session settings and the usage meter), the Explorer (with the
+  earlier sessions, `session-history.tsx`), the Lineage panel of the
+  subagents (`lineage.tsx`), the file viewer, TTY mode (`tty-view.tsx`, from
   `/internal/screen`) and the native terminal (`shell-view.tsx`, from
   `/terminal`).
 - `lib/` holds the logic in plain modules with bun tests: task grouping, tool
