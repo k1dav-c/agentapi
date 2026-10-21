@@ -158,10 +158,16 @@ const createProject = async (dir, home) => {
 // every character but letters and digits a dash.
 const claudeProject = (home, cwd) => path.join(home, '.claude', 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'));
 const jsonl = lines => lines.map(line => JSON.stringify(line)).join('\n') + '\n';
-const claudeTurn = (session, at, prompt, reply, id) => [
+// The tokens of a model call, for what the chat says it cost: the longer the conversation, the more
+// it reads from the cache.
+const claudeUsage = (turn, output = 900) => ({input_tokens: 6, cache_read_input_tokens: 24_000 + turn * 9_000,
+  cache_creation_input_tokens: 3_200, output_tokens: output});
+const claudeCallLine = (session, at, id, turn, content, output) => ({type: 'assistant', timestamp: at, sessionId: session,
+  uuid: `${id}-a`, message: {id: `msg_${id}`, role: 'assistant', model: 'claude-opus-5-5', content,
+    stop_reason: 'end_turn', usage: claudeUsage(turn, output)}});
+const claudeTurn = (session, at, prompt, reply, id, turn) => [
   {type: 'user', timestamp: at, sessionId: session, uuid: `${id}-u`, message: {role: 'user', content: prompt}},
-  {type: 'assistant', timestamp: new Date(Date.parse(at) + 20_000).toISOString(), sessionId: session, uuid: `${id}-a`,
-    message: {id: `msg_${id}`, role: 'assistant', model: 'claude-opus-5-5', content: [{type: 'text', text: reply}], stop_reason: 'end_turn'}},
+  claudeCallLine(session, new Date(Date.parse(at) + 20_000).toISOString(), id, turn, [{type: 'text', text: reply}]),
 ];
 const writeClaudeSessions = async (home, cwd) => {
   const dir = claudeProject(home, cwd);
@@ -181,13 +187,21 @@ const writeClaudeSessions = async (home, cwd) => {
     ]},
   ];
   for (const s of sessions) {
-    const lines = s.turns.flatMap(([prompt, reply], i) => claudeTurn(s.id, new Date(Date.parse(s.at) + i * 300_000).toISOString(), prompt, reply, `${s.id.slice(0, 8)}${i}`));
+    const lines = s.turns.flatMap(([prompt, reply], i) => claudeTurn(s.id, new Date(Date.parse(s.at) + i * 300_000).toISOString(), prompt, reply, `${s.id.slice(0, 8)}${i}`, i));
     if (s.title) lines.push({type: 'ai-title', aiTitle: s.title, sessionId: s.id});
     const file = path.join(dir, `${s.id}.jsonl`);
     await writeFile(file, jsonl(lines));
     const at = new Date(Date.parse(s.at) + s.turns.length * 300_000);
     await utimes(file, at, at);
   }
+};
+// The log of the session the demo posing as Claude Code has open, which the demo doesn't write: a
+// model call for each of its replies, for what the task cost.
+const writeClaudeCurrent = async (home, cwd, session, prompt, rich) => {
+  const lines = [{type: 'user', timestamp: prompt.time, sessionId: session, uuid: 'cur-u', message: {role: 'user', content: prompt.content}}];
+  rich.filter(m => m.role === 'assistant').forEach((m, i) =>
+    lines.push(claudeCallLine(session, m.timestamp, `cur${i}`, i, [{type: 'text', text: '…'}], 400 + i * 150)));
+  await writeFile(path.join(claudeProject(home, cwd), `${session}.jsonl`), jsonl(lines));
 };
 // The log of a subagent the demo's Agent tool call started, as Claude Code writes it.
 const writeClaudeSubagent = async (home, cwd, session, toolUseId, startedAt) => {
@@ -199,14 +213,14 @@ const writeClaudeSubagent = async (home, cwd, session, toolUseId, startedAt) => 
   const grep = 'toolu_sub_grep';
   await writeFile(path.join(dir, 'agent-a7d2c91e.jsonl'), jsonl([
     {...base, type: 'user', timestamp: at(0), uuid: 's0', message: {role: 'user', content: 'Read docs/notes.md and list what the 1.1.0 notes are missing.'}},
-    {...base, type: 'assistant', timestamp: at(2), uuid: 's1', message: {id: 'msg_sub1', role: 'assistant', content: [
+    {...base, type: 'assistant', timestamp: at(2), uuid: 's1', message: {id: 'msg_sub1', role: 'assistant', model: 'claude-sonnet-5-5', usage: claudeUsage(0, 300), content: [
       {type: 'thinking', thinking: '**Reading the notes**\n\nRelease notes usually give a date and where to get the release; I will check for both.'},
       {type: 'tool_use', id: read, name: 'Read', input: {file_path: path.join(cwd, 'my-app', 'docs', 'notes.md')}}], stop_reason: 'tool_use'}},
     {...base, type: 'user', timestamp: at(3), uuid: 's2', message: {role: 'user', content: [{type: 'tool_result', tool_use_id: read, content: notes}]}},
-    {...base, type: 'assistant', timestamp: at(5), uuid: 's3', message: {id: 'msg_sub2', role: 'assistant', content: [
+    {...base, type: 'assistant', timestamp: at(5), uuid: 's3', message: {id: 'msg_sub2', role: 'assistant', model: 'claude-sonnet-5-5', usage: claudeUsage(1, 120), content: [
       {type: 'tool_use', id: grep, name: 'Bash', input: {command: 'git -C my-app tag --list', description: 'List the release tags'}}], stop_reason: 'tool_use'}},
     {...base, type: 'user', timestamp: at(6), uuid: 's4', message: {role: 'user', content: [{type: 'tool_result', tool_use_id: grep, content: ''}]}},
-    {...base, type: 'assistant', timestamp: at(8), uuid: 's5', message: {id: 'msg_sub3', role: 'assistant', content: [
+    {...base, type: 'assistant', timestamp: at(8), uuid: 's5', message: {id: 'msg_sub3', role: 'assistant', model: 'claude-sonnet-5-5', usage: claudeUsage(2, 600), content: [
       {type: 'text', text: 'The 1.1.0 notes miss two things:\n\n- **The release date.** Nothing says when 1.1.0 shipped, and there is no `v1.1.0` tag yet.\n- **Where to get it.** There is no download link or a line on how to update.'}], stop_reason: 'end_turn'}},
   ]));
   await writeFile(path.join(dir, 'agent-a7d2c91e.meta.json'), JSON.stringify({agentType: 'general-purpose', description: 'Check the release notes', toolUseId}));
@@ -808,11 +822,17 @@ try {
   const {messages: rich} = await posing.request('/rich-messages');
   const agentCall = rich.flatMap(m => m.content).find(b => b.type === 'tool_use' && b.tool_name === 'Agent');
   await writeClaudeSubagent(home, root, session, agentCall.tool_use_id, rich.find(m => m.content.includes(agentCall))?.timestamp ?? new Date().toISOString());
+  const {messages: plain} = await posing.request('/messages');
+  await writeClaudeCurrent(home, root, session, plain.findLast(m => m.role === 'user'), rich);
   const claude = await openPage(browser, posing.base);
   await claude.getByText('Here is what I did for', {exact: false}).last().waitFor();
+  // What the task cost, beside its start and duration.
+  await claude.locator('[data-task-cost]').first().waitFor();
+  await regionShot(claude, 'task-cost.png', [claude.locator('section[id^="task-"] header').last(), claude.locator('[data-task-cost]').last()], 20);
   await claude.getByRole('button', {name: 'Open explorer'}).click();
   await claude.getByRole('tab', {name: 'Session', exact: true}).click();
   await claude.locator('[data-session]').first().waitFor();
+  await claude.locator('[data-spend-card]').waitFor();
   await claude.locator('[data-session]').nth(1).getByRole('button', {name: 'Open'}).click();
   await claude.getByRole('button', {name: 'Click again to open'}).waitFor();
   await topShot(claude, claude.getByRole('dialog'), 'explorer-sessions.png', 700);

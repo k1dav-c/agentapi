@@ -56,9 +56,10 @@ to try specific interactions:
   for the note that suggests compacting
 - `delegate`: the agent hands a task to a subagent with an Agent tool call
 
-To try the Explorer's earlier sessions and the Lineage panel, run the demo as Claude Code (or Codex,
-or Pi) with `--type claude -- native-demo`: AgentAPI then reads that agent's session logs for it, in
-the agent's own directories, so it shows whatever sessions and subagent logs are there.
+To try the Explorer's earlier sessions, the costs and the Lineage panel, run the demo as Claude Code
+(or Codex, or Pi) with `--type claude -- native-demo`: AgentAPI then reads that agent's session logs
+for it, in the agent's own directories, so it shows whatever sessions, subagent logs and model calls
+are there. The demo writes no log of its own, so its tasks show no cost.
 
 Its settings can change from the composer's menus or slash commands: models Swift, Deep, and Plain
 (which has no effort setting) and all four permission modes. In ask mode every turn's first command

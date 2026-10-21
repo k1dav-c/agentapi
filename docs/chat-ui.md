@@ -53,6 +53,16 @@ then what the agent did, in order: its reply in Markdown, a row for each tool ca
 thinking. The task's header shows its number and state (Queued, Working, Waiting for you, Done or
 Failed), a Stop button while it works, and its ⋯ menu.
 
+On a wide screen the task's start time and duration hang in the left margin; on a narrower one they
+follow its number in the header. *native* For Claude Code, Codex and Pi they come with what the task
+cost: the tokens of the model calls made from its message until the next task's, its subagents'
+included, at the model providers' list prices. It is the API-equivalent cost, which a subscription
+doesn't charge; hover over it for the calls and tokens. The cost is read again when a turn ends, and
+every 15 seconds while one runs. See [Session costs](../README.md#session-costs) for how it is
+counted and how to set prices.
+
+![A task's time rail: its start time, duration and cost](screenshots/task-cost.png)
+
 ### Tool calls
 
 ![An expanded tool call with its input and its result](screenshots/tool-call.png)
@@ -353,11 +363,13 @@ See [MCP management](../README.md#mcp-management) for the API.
 
 ### Session
 
-![The Explorer's Session tab: Claude Code's sessions in the directory with Open and Start a copy, one asking for a second click](screenshots/explorer-sessions.png)
+![The Explorer's Session tab: what the sessions cost today, in 7 and 30 days and in all, and Claude Code's sessions in the directory with Open and Start a copy, one asking for a second click](screenshots/explorer-sessions.png)
 
 *native* For Claude Code, Codex and Pi the tab starts with the agent's sessions in its working
-directory, read from the agent's own logs: each with its name, first message, number of messages
-and when it last changed. **Open** restarts the agent on that session and shows its conversation;
+directory, read from the agent's own logs: each with its name, first message, number of messages,
+when it last changed and what it cost. Above them, a card adds up what all of them and their
+subagents cost today, in the last 7 and 30 days (counting today, in your time zone) and in all, as
+the API-equivalent cost at list prices; hover over a cost for its tokens. **Open** restarts the agent on that session and shows its conversation;
 **Start a copy** opens a copy under a new id and leaves the session as it was. Both replace this
 conversation and its queue, and ask for a second click.
 

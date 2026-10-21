@@ -87,7 +87,8 @@ terminal dialog are written to the agent's terminal directly.
 | `lib/termexec/` | Runs the agent in a pseudo-terminal with an in-memory VT100 emulator (`xpty`, `vt10x`); the process can be swapped for a restart |
 | `lib/msgfmt/` | Per-agent formatting of screen output: echoed input, input boxes, status lines, tool calls, readiness for the first prompt |
 | `lib/transcript/` | The structured transcript's types, which the transports share: rich messages with their content blocks, and timeline events |
-| `lib/jsonlwatcher/` | Finds and tails the Claude Code, Codex and Pi session logs and parses them into rich messages and timeline events; lists the agent's earlier sessions in a directory and reads one's conversation (`history.go`), and reads the logs of the subagents a session ran (`subagents.go`) |
+| `lib/jsonlwatcher/` | Finds and tails the Claude Code, Codex and Pi session logs and parses them into rich messages and timeline events; lists the agent's earlier sessions in a directory and reads one's conversation (`history.go`), reads the logs of the subagents a session ran (`subagents.go`), and reads what the sessions in a directory cost from their model calls (`cost.go`) |
+| `lib/pricing/` | Model prices per million tokens (the built-in `prices.json`, and a `--prices` file), and what a call's tokens cost at them |
 | `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |
 | `lib/native/agentio` | The JSON-lines plumbing those adapters share: reading the agent's output line by line, writing to its stdin, matching its responses to the requests waiting for them |
@@ -161,7 +162,7 @@ The handlers are grouped by file:
 | `backend.go`, `backend_pty.go`, `backend_native.go` | What depends on the transport: dispatching the queue, delivering a message, restarts, the human-reply protocol's pending request |
 | `setup.go` | Starting the process of a PTY or ACP agent |
 | `native.go` | Requests, settings, interrupt, compaction, login retry; the native observer |
-| `limit.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); the agent's earlier sessions (`/sessions`); its subagents (`/subagents`) |
+| `limit.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); the agent's earlier sessions and what they cost (`/sessions`, `/cost`); its subagents (`/subagents`) |
 | `terminal.go`, `files.go`, `file_preview.go`, `files_find.go` | The shell terminal and the file viewer, and the search for a file the agent named relative to a repository |
 | `mcp.go`, `mcp_management.go` | MCP servers and profiles |
 | `webhook.go`, `handoff.go`, `dialog_reply.go` | Run-status webhooks, the human-reply API, answers to terminal dialogs |
@@ -314,6 +315,14 @@ type Factory func(resume Resume) (Adapter, error)
   own logs (`jsonlwatcher.Subagents`), for `GET /subagents` and the chat's
   Lineage panel; their state comes from the Agent tool call that started
   them.
+- **Costs.** `jsonlwatcher.DirectoryCosts` reads the model calls of every
+  session in the directory, its subagents' included, from the same logs
+  (`GET /sessions`, `GET /cost`): Claude Code's assistant messages (one per
+  message id), Codex's token counts, Pi's reported costs. `lib/pricing`
+  prices each call; Claude Code's `cost-state` records add what its log
+  doesn't list (compaction) as unitemized calls. A call a fork copied counts
+  once, in the session born first. The calls of a log are cached by path and
+  modification time, so only the logs that changed are read again.
 - **Usage limits.** An adapter ends a turn the account's usage limit stopped
   with the `limited` stop reason (Claude Code's limit messages and a
   `rejected` rate limit event, Codex's `usageLimitExceeded`, a quota error of
@@ -561,13 +570,15 @@ a variant for embedding in other pages.
   for terminal dialogs, the login card, request cards, the usage limit card,
   the cold prompt cache note), the composer (`message-input.tsx`, with slash
   commands, the session settings and the usage meter), the Explorer (with the
-  earlier sessions, `session-history.tsx`), the Lineage panel of the
+  earlier sessions and what they cost, `session-history.tsx`), the Lineage panel of the
   subagents (`lineage.tsx`), the file viewer, TTY mode (`tty-view.tsx`, from
   `/internal/screen`) and the native terminal (`shell-view.tsx`, from
   `/terminal`).
 - `lib/` holds the logic in plain modules with bun tests: task grouping, tool
-  formatting, file references, diffs, slash commands, settings, usage,
-  terminal keys, auth.
+  formatting, file references, diffs, slash commands, settings, usage, costs
+  (`cost.ts`: a task's share of the session's calls, totals by period),
+  terminal keys, auth. `use-session-cost.ts` reads `GET /cost` when a turn
+  ends and while one runs.
 
 ## Testing
 

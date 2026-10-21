@@ -49,6 +49,14 @@ agent 做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列�
 顯示它的編號和狀態（Queued、Working、Waiting for you、Done 或 Failed）、工作中時的 Stop
 按鈕，以及它的 ⋯ 選單。
 
+寬螢幕上，任務的開始時間和耗時顯示在左側空白處；較窄的螢幕上則接在標頭的任務編號後面。
+*native* 對 Claude Code、Codex 和 Pi，還會一併顯示任務的花費：從它的訊息到下一個任務之間的
+模型呼叫所用的 tokens（含 sub agent），以模型供應商的牌價計算。這是 API 等價金額，訂閱方案
+不會收取；滑鼠移上去可以看到呼叫次數和 tokens。回合結束時會重新讀取，回合執行中則每 15 秒
+讀取一次。計算方式和如何設定價格見[工作階段花費](../README.zh-TW.md#工作階段花費)。
+
+![任務的時間軸：開始時間、耗時和花費](screenshots/task-cost.png)
+
 ### 工具呼叫
 
 ![展開的工具呼叫，包含它的輸入和結果](screenshots/tool-call.png)
@@ -332,10 +340,12 @@ API 請參閱 [MCP 管理](../README.zh-TW.md#mcp-管理)。
 
 ### Session 分頁
 
-![Explorer 的 Session 分頁：這個目錄中 Claude Code 的工作階段，各有 Open 和 Start a copy，其中一個要求再點一次](screenshots/explorer-sessions.png)
+![Explorer 的 Session 分頁：今天、7 天、30 天和全部的花費，以及這個目錄中 Claude Code 的工作階段，各有 Open 和 Start a copy，其中一個要求再點一次](screenshots/explorer-sessions.png)
 
 *native* 對 Claude Code、Codex 和 Pi，這個分頁最上方會列出 agent 在工作目錄中的工作階段，資料
-來自 agent 自己的紀錄：每一個都有名稱、第一則訊息、訊息數和最後變動的時間。**Open** 會讓
+來自 agent 自己的紀錄：每一個都有名稱、第一則訊息、訊息數、最後變動的時間和花費。列表上方的
+卡片會加總全部工作階段及其 sub agent 今天、最近 7 天和 30 天（含今天，依你的時區）以及全部的
+花費，皆為以牌價計算的 API 等價金額；滑鼠移到金額上可以看到 tokens。**Open** 會讓
 agent 在那個工作階段上重新啟動，並顯示它的對話；**Start a copy** 會以新的 id 開啟它的副本，
 原本的工作階段維持不變。兩者都會取代目前的對話和佇列，並要求你再點一次。
 

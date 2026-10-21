@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Features
+
+- Native agents: what each session and task cost, in USD at the model providers' list prices (the
+  API-equivalent cost, which a subscription doesn't charge), from the tokens of the model calls in
+  Claude Code's, Codex's and Pi's session logs, subagents included. `GET /sessions` gives each
+  session's cost and the total with hourly buckets; `GET /cost` gives the open session's cost and its
+  model calls. Built-in prices cover Anthropic's and OpenAI's models, and `--prices <file>` adds
+  models or replaces their prices. The chat shows each task's cost beside its time, and in the
+  Explorer's Session tab what each session cost and what they all cost today, in the last 7 and 30
+  days and in all.
+- Docs: a screenshot of a task's cost; the earlier sessions screenshot shows the costs; all
+  screenshots retaken.
+
 ## v0.27.0
 
 ### Features

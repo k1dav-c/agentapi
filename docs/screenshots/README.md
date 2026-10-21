@@ -53,7 +53,8 @@ device scale factor of 1.
 | [queue-steer.png](queue-steer.png) | Queued tasks during a long turn, and the send menu |
 | [limit-card.png](limit-card.png) | A turn stopped on a usage limit, with a task held in the queue |
 | [cold-cache.png](cold-cache.png) | The note that the prompt cache expired, with Compact |
-| [explorer-sessions.png](explorer-sessions.png) | The Explorer's Session tab with Claude Code's earlier sessions |
+| [explorer-sessions.png](explorer-sessions.png) | The Explorer's Session tab with what the sessions cost and Claude Code's earlier sessions |
+| [task-cost.png](task-cost.png) | A task's time rail: its start time, duration and cost |
 | [lineage.png](lineage.png) | The Lineage panel on a subagent |
 | [file-find.png](file-find.png) | The file viewer on a file found below the working directory |
 | [login-card.png](login-card.png) | A login card |
