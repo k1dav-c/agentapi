@@ -23,6 +23,7 @@ import (
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/pricing"
 	"github.com/coder/agentapi/lib/statedb"
 )
 
@@ -100,6 +101,12 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
 		defer cleanupPIDFile(opts.pidFile, logger)
 	}
 
+	prices := pricing.Builtin()
+	if opts.prices != "" {
+		if prices, err = prices.WithFile(opts.prices); err != nil {
+			return fmt.Errorf("--prices: %w", err)
+		}
+	}
 	cwd, _ := os.Getwd()
 	agent, err := startAgent(ctx, opts, cwd, logger)
 	if err != nil {
@@ -120,7 +127,7 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
 	if err != nil {
 		return err
 	}
-	srv, err := httpapi.NewServer(ctx, serverConfig(opts, agent, stateDB, apiToken, cwd))
+	srv, err := httpapi.NewServer(ctx, serverConfig(opts, agent, stateDB, apiToken, cwd, prices))
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}
@@ -158,7 +165,7 @@ func resolveAPIToken(opts serverOptions, logger *slog.Logger) (string, error) {
 }
 
 // serverConfig is the configuration of the server for opts and agent.
-func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, apiToken, cwd string) httpapi.ServerConfig {
+func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, apiToken, cwd string, prices *pricing.Table) httpapi.ServerConfig {
 	config := httpapi.ServerConfig{
 		AgentType:      opts.agentType,
 		Transport:      opts.transport,
@@ -192,6 +199,7 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 			Terminal:     opts.terminal,
 			StateDB:      stateDB,
 			AutoContinue: opts.autoContinue,
+			Prices:       prices,
 		}
 	}
 	if stateDB != nil {
@@ -419,6 +427,7 @@ const (
 	FlagStateDB                = "state-db"
 	FlagTerminal               = "terminal"
 	FlagAutoContinue           = "auto-continue"
+	FlagPrices                 = "prices"
 	FlagWebhookURL             = "webhook-url"
 	FlagWebhookTimeout         = "webhook-timeout"
 	FlagWebhookMaxAttempts     = "webhook-max-attempts"
@@ -472,6 +481,7 @@ func CreateServerCmd() *cobra.Command {
 		{FlagTransport, "", "native", "How to drive the agent: native (its own structured protocol; claude, codex and pi), pty (its terminal UI) or acp (same as --experimental-acp). Without it, claude, codex and pi use native, other agents and --state-file pty", "string"},
 		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal. Native transport only, where the agent has no terminal of its own", "bool"},
 		{FlagAutoContinue, "", false, "When a usage limit stops the agent's turn, continue it once the limit resets, if the agent says when. Native transport only", "bool"},
+		{FlagPrices, "", "", "JSON file of model prices per million tokens, which add to or replace the built-in ones for the sessions' API-equivalent cost (GET /sessions, GET /cost)", "string"},
 		{FlagWebhookURL, "", "", "URL notified when the agent run status changes", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},
 		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},

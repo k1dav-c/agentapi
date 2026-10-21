@@ -45,7 +45,9 @@ type serverOptions struct {
 	terminal bool
 	// autoContinue continues a turn a usage limit stopped once it resets.
 	autoContinue bool
-	webhook      httpapi.WebhookConfig
+	// prices is a JSON file of model prices that adds to the built-in ones.
+	prices  string
+	webhook httpapi.WebhookConfig
 }
 
 // flagSource is where the options are read from: the viper the flags are
@@ -81,6 +83,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 		stateDB:        flags.GetString(FlagStateDB),
 		terminal:       flags.GetBool(FlagTerminal),
 		autoContinue:   flags.GetBool(FlagAutoContinue),
+		prices:         flags.GetString(FlagPrices),
 		webhook: httpapi.WebhookConfig{
 			URL:             flags.GetString(FlagWebhookURL),
 			Timeout:         flags.GetDuration(FlagWebhookTimeout),

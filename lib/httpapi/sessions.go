@@ -14,12 +14,31 @@ import (
 // sessionListLimit is how many sessions GET /sessions lists.
 const sessionListLimit = 100
 
+// SessionInfo is one of the agent's sessions and what it spent.
+type SessionInfo struct {
+	jsonlwatcher.SessionSummary
+	Cost jsonlwatcher.SessionCost `json:"cost" doc:"What the session spent, its subagents included, at the model providers' list prices (API-equivalent cost). A call a fork copied counts in the session it copied it from."`
+}
+
 // SessionsResponse lists the agent's sessions in the working directory.
 type SessionsResponse struct {
 	Body struct {
-		Sessions []jsonlwatcher.SessionSummary `json:"sessions" nullable:"false" doc:"The agent's sessions in the working directory, the latest first."`
+		Sessions []SessionInfo `json:"sessions" nullable:"false" doc:"The agent's sessions in the working directory, the latest first."`
 		// Current is empty before the agent opened a session.
 		Current string `json:"current,omitempty" doc:"The id of the session the agent has open, if it opened one."`
+		// TotalCost covers every session of the directory, also those past
+		// the list's limit.
+		TotalCost jsonlwatcher.SessionCost `json:"total_cost" doc:"What all the agent's sessions in the working directory spent, each call counted once, with its hours for totals by day, week or month."`
+	}
+}
+
+// CostResponse is what the session the agent has open spent.
+type CostResponse struct {
+	Body struct {
+		// SessionID is empty before the agent opened a session.
+		SessionID string                   `json:"session_id,omitempty" doc:"The session the agent has open."`
+		Cost      jsonlwatcher.SessionCost `json:"cost" doc:"What the session spent, its subagents included (API-equivalent cost)."`
+		Calls     []jsonlwatcher.ModelCall `json:"calls" nullable:"false" doc:"Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on."`
 	}
 }
 
@@ -50,12 +69,36 @@ func (s *Server) listSessions(_ context.Context, _ *struct{}) (*SessionsResponse
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the sessions: %w", err)
 	}
+	costs, err := jsonlwatcher.DirectoryCosts(string(s.agentType), s.cwd, s.prices)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read what the sessions spent: %w", err)
+	}
 	resp := &SessionsResponse{}
-	resp.Body.Sessions = sessions
-	if resp.Body.Sessions == nil {
-		resp.Body.Sessions = []jsonlwatcher.SessionSummary{}
+	resp.Body.Sessions = make([]SessionInfo, 0, len(sessions))
+	for _, session := range sessions {
+		resp.Body.Sessions = append(resp.Body.Sessions, SessionInfo{SessionSummary: session, Cost: costs.Cost(session.ID)})
 	}
 	resp.Body.Current = s.native.SessionRef()
+	resp.Body.TotalCost = costs.Total
+	return resp, nil
+}
+
+// getCost handles GET /cost: what the session the agent has open spent,
+// call by call. Without s.mu: it only reads the agent's session logs.
+func (s *Server) getCost(_ context.Context, _ *struct{}) (*CostResponse, error) {
+	resp := &CostResponse{}
+	resp.Body.SessionID = s.native.SessionRef()
+	resp.Body.Calls = []jsonlwatcher.ModelCall{}
+	if resp.Body.SessionID != "" {
+		costs, err := jsonlwatcher.DirectoryCosts(string(s.agentType), s.cwd, s.prices)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read what the session spent: %w", err)
+		}
+		if calls := costs.Sessions[resp.Body.SessionID]; calls != nil {
+			resp.Body.Calls = calls
+		}
+	}
+	resp.Body.Cost = jsonlwatcher.CostOf(resp.Body.Calls)
 	return resp, nil
 }
 
@@ -108,6 +151,12 @@ func (s *Server) registerSessionRoutes() {
 		o.Tags = []string{"Sessions"}
 		o.Summary = "List the agent's sessions"
 		o.Description = "Lists the sessions the agent had in the working directory, read from its session logs (Claude Code's projects directory, Codex's sessions, Pi's session directory), the latest first, with the one it has open. Sessions in which the user sent nothing are left out. Native transport of Claude Code, Codex and Pi only."
+		o.Errors = []int{400}
+	})
+	huma.Get(s.api, "/cost", guard(s.requireSessionHistory, s.getCost), func(o *huma.Operation) {
+		o.Tags = []string{"Sessions"}
+		o.Summary = "What the session spent"
+		o.Description = "Returns what the session the agent has open spent, its subagents included, and its model calls one by one, read from the agent's logs: the tokens of each call priced at the model providers' list prices (the API-equivalent cost, which a subscription doesn't charge), or at Pi's own prices for Pi. A model without a known price counts its tokens and no cost; --prices adds prices. For Claude Code, what it counted but didn't log call by call (compacting the context) comes as unitemized calls. Native transport of Claude Code, Codex and Pi only."
 		o.Errors = []int{400}
 	})
 	huma.Post(s.api, "/sessions/{id}/resume", guard(s.requireSessionHistory, s.resumeSession), func(o *huma.Operation) {

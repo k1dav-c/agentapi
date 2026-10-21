@@ -52,6 +52,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/cost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the session spent
+         * @description Returns what the session the agent has open spent, its subagents included, and its model calls one by one, read from the agent's logs: the tokens of each call priced at the model providers' list prices (the API-equivalent cost, which a subscription doesn't charge), or at Pi's own prices for Pi. A model without a known price counts its tokens and no cost; --prices adds prices. For Claude Code, what it counted but didn't log call by call (compacting the context) comes as unitemized calls. Native transport of Claude Code, Codex and Pi only.
+         */
+        get: operations["get-cost"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/events": {
         parameters: {
             query?: never;
@@ -970,6 +990,20 @@ export interface components {
          * @enum {string}
          */
         ConversationRole: "agent" | "user";
+        CostResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/CostResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on. */
+            calls: components["schemas"]["ModelCall"][];
+            /** @description What the session spent, its subagents included (API-equivalent cost). */
+            cost: components["schemas"]["SessionCost"];
+            /** @description The session the agent has open. */
+            session_id?: string;
+        };
         DeleteMessagesResponseBody: {
             /**
              * Format: uri
@@ -1142,6 +1176,18 @@ export interface components {
              * @description Server time when the heartbeat was sent
              */
             time: string;
+        };
+        HourCost: {
+            /**
+             * Format: date-time
+             * @description The start of the hour, in UTC.
+             */
+            hour: string;
+            /**
+             * Format: double
+             * @description API-equivalent cost in USD.
+             */
+            usd: number;
         };
         InterruptResponseBody: {
             /**
@@ -1401,6 +1447,46 @@ export interface components {
             reason: string;
             /** @description The reference as the page has it. */
             ref: string;
+        };
+        ModelCall: {
+            /** @description The model called. */
+            model: string;
+            /** @description The model's price is known. */
+            priced: boolean;
+            /** @description The subagent that made the call; missing for the agent's own. */
+            subagent_id?: string;
+            /**
+             * Format: date-time
+             * @description When the call was made.
+             */
+            time: string;
+            /** @description The tokens it used. */
+            tokens: components["schemas"]["Tokens"];
+            /** @description Calls Claude Code counted in its own total but didn't log one by one, such as compacting the context: the difference up to this point. */
+            unitemized?: boolean;
+            /**
+             * Format: double
+             * @description What the call costs at the model provider's list prices, in USD: the API-equivalent cost, which a subscription doesn't charge. 0 when the model's price isn't known.
+             */
+            usd: number;
+        };
+        ModelCost: {
+            /**
+             * Format: int64
+             * @description How many calls were made.
+             */
+            calls: number;
+            /** @description The model. */
+            model: string;
+            /** @description The model's price is known; when it isn't, its calls count no cost. */
+            priced: boolean;
+            /** @description The tokens used. */
+            tokens: components["schemas"]["Tokens"];
+            /**
+             * Format: double
+             * @description API-equivalent cost in USD.
+             */
+            usd: number;
         };
         ModelOption: {
             /** @description Effort the model uses unless one is chosen. */
@@ -1793,6 +1879,24 @@ export interface components {
         ScreenUpdateBody: {
             screen: string;
         };
+        SessionCost: {
+            /**
+             * Format: int64
+             * @description How many model calls were made.
+             */
+            calls: number;
+            /** @description What was spent in each hour (UTC) with calls, the earliest first, for totals over days, weeks or months in the reader's time zone. */
+            hourly: components["schemas"]["HourCost"][];
+            /** @description What was spent on each model, the most expensive first. */
+            models: components["schemas"]["ModelCost"][];
+            /** @description The tokens used. */
+            tokens: components["schemas"]["Tokens"];
+            /**
+             * Format: double
+             * @description API-equivalent cost in USD: what the tokens cost at the model providers' list prices, which a subscription doesn't charge.
+             */
+            usd: number;
+        };
         SessionEvent: {
             /** @description Text or tool result content */
             content?: string;
@@ -1825,7 +1929,9 @@ export interface components {
             /** @description Identifier pairing a tool call with its result */
             tool_use_id?: string;
         };
-        SessionSummary: {
+        SessionInfo: {
+            /** @description What the session spent, its subagents included, at the model providers' list prices (API-equivalent cost). A call a fork copied counts in the session it copied it from. */
+            cost: components["schemas"]["SessionCost"];
             /**
              * Format: date-time
              * @description When the session started.
@@ -1869,7 +1975,9 @@ export interface components {
             /** @description The id of the session the agent has open, if it opened one. */
             current?: string;
             /** @description The agent's sessions in the working directory, the latest first. */
-            sessions: components["schemas"]["SessionSummary"][];
+            sessions: components["schemas"]["SessionInfo"][];
+            /** @description What all the agent's sessions in the working directory spent, each call counted once, with its hours for totals by day, week or month. */
+            total_cost: components["schemas"]["SessionCost"];
         };
         SettingOptions: {
             /** @description Models the agent can switch to. */
@@ -2115,6 +2223,33 @@ export interface components {
             /** @description Current human-readable session title derived from the latest user task and agent status. */
             title: string;
         };
+        Tokens: {
+            /**
+             * Format: int64
+             * @description Input tokens read from the prompt cache.
+             */
+            cache_read: number;
+            /**
+             * Format: int64
+             * @description Input tokens written to the prompt cache.
+             */
+            cache_write: number;
+            /**
+             * Format: int64
+             * @description Input tokens written to Anthropic's one-hour prompt cache.
+             */
+            cache_write_1h?: number;
+            /**
+             * Format: int64
+             * @description Uncached input tokens.
+             */
+            input: number;
+            /**
+             * Format: int64
+             * @description Output tokens, thinking included.
+             */
+            output: number;
+        };
         /**
          * Transport
          * @example pty
@@ -2344,6 +2479,44 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-cost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CostResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

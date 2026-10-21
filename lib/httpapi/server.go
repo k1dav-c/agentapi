@@ -25,6 +25,7 @@ import (
 	"github.com/coder/agentapi/lib/mcpconfig"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/pricing"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/shellterm"
 	"github.com/coder/agentapi/lib/statedb"
@@ -51,6 +52,7 @@ type Server struct {
 	conversation       st.Conversation
 	native             *native.Conversation // nil unless the transport is native
 	observer           *nativeObserver      // the native conversation's
+	prices             *pricing.Table       // what model calls cost
 	stateDB            *statedb.DB          // nil unless the conversation is kept
 	savedQueue         []QueuedMessage      // the queue as last stored in stateDB
 	savedNextQueueID   int
@@ -151,6 +153,9 @@ type NativeConfig struct {
 	// AutoContinue continues a turn a usage limit stopped once the limit
 	// resets.
 	AutoContinue bool
+	// Prices price the model calls of the agent's sessions; nil is the
+	// built-in prices.
+	Prices *pricing.Table
 }
 
 // agentIO is the conversation's view of a PTY or ACP agent, nil for a
@@ -373,6 +378,10 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 
 	s.observer = observer
+	s.prices = config.Native.Prices
+	if s.prices == nil {
+		s.prices = pricing.Builtin()
+	}
 	if observer != nil {
 		observer.storeImages = s.storeRichImages
 	}
