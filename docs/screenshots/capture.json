@@ -1,6 +1,6 @@
 {
-  "captured_at": "2026-10-20T17:54:41.676Z",
-  "agentapi_version": "0.27.0",
+  "captured_at": "2026-10-21T16:30:13.490Z",
+  "agentapi_version": "0.0.0-dev",
   "agents": [
     "native-demo",
     "native-demo posing as Claude Code",
@@ -52,6 +52,7 @@
     "demo-files.gif",
     "demo-terminal.gif",
     "demo-phone.gif",
+    "task-cost.png",
     "explorer-sessions.png",
     "lineage.png",
     "file-find.png",

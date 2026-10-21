@@ -55,6 +55,8 @@ export const TaskGroup = React.memo(function TaskGroup({
   waitingForUser = false,
   agentType = "unknown",
   promptAuthor,
+  cost,
+  costDetails,
 }: {
   task: TaskSection;
   number: number;
@@ -76,6 +78,10 @@ export const TaskGroup = React.memo(function TaskGroup({
   agentType?: string;
   // Who gave the task when it isn't you (a subagent's, the agent).
   promptAuthor?: string;
+  // What the task's model calls cost at list prices ("$1.23"), and the
+  // tokens behind it, when known.
+  cost?: string;
+  costDetails?: string;
 }) {
   const agentName = AgentType[agentType as keyof typeof AgentType]?.displayName ?? "Agent";
   const statusMeta = waitingForUser
@@ -158,15 +164,25 @@ export const TaskGroup = React.memo(function TaskGroup({
       <div className="absolute right-full top-7 mr-6 hidden w-[3.25rem] pt-px text-right font-mono text-[11px] leading-5 tabular-nums text-muted-foreground lg:block">
         {startTime && <time dateTime={startedAt}>{startTime}</time>}
         {duration && <div className={live ? "text-state-working" : ""}>{duration}</div>}
+        {cost && (
+          <div title={costDetails} data-task-cost>
+            {cost}
+          </div>
+        )}
       </div>
       <div className="min-w-0 min-[84rem]:flow-root">
         <header className="mb-2 flex min-h-7 items-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.06em] text-muted-foreground">
           <span>Task {number}</span>
-          {(startTime || duration) && (
+          {(startTime || duration || cost) && (
             <span className="normal-case tracking-normal tabular-nums lg:hidden">
-              {startTime}
-              {startTime && duration && " · "}
-              {duration}
+              {[startTime, duration, cost && <span key="cost" title={costDetails}>{cost}</span>]
+                .filter(Boolean)
+                .map((part, index) => (
+                  <React.Fragment key={index}>
+                    {index > 0 && " · "}
+                    {part}
+                  </React.Fragment>
+                ))}
             </span>
           )}
           <span className={`flex items-center gap-1.5 font-sans text-xs normal-case tracking-normal ${statusMeta.className}`} role="status">

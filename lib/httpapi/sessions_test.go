@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
+	"github.com/coder/agentapi/lib/pricing"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -212,4 +214,55 @@ func TestNative_Subagents(t *testing.T) {
 		return one.Subagent.Status == "completed"
 	}, 5*time.Second, 10*time.Millisecond)
 	assert.Equal(t, http.StatusNotFound, n.do(http.MethodGet, "/subagents/nope", nil, nil))
+}
+
+func TestNative_SessionCosts(t *testing.T) {
+	n := newSessionServer(t)
+	dir := filepath.Join(os.Getenv("CLAUDE_CONFIG_DIR"), "projects", "-work-app")
+	call := func(session, at, id string, cacheRead, output int) string {
+		return `{"type":"assistant","timestamp":"` + at + `","sessionId":"` + session + `","message":{"id":"` + id + `","role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}],` +
+			`"usage":{"input_tokens":10,"cache_read_input_tokens":` + strconv.Itoa(cacheRead) + `,"cache_creation_input_tokens":0,"output_tokens":` + strconv.Itoa(output) + `}}}`
+	}
+	// The session the agent has open ("current"), with two tasks.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "current.jsonl"), []byte(
+		`{"type":"user","timestamp":"2026-10-20T10:00:00.000Z","sessionId":"current","message":{"role":"user","content":"First"}}`+"\n"+
+			call("current", "2026-10-20T10:00:05.000Z", "msg_a", 100000, 1000)+"\n"+
+			`{"type":"user","timestamp":"2026-10-20T11:00:00.000Z","sessionId":"current","message":{"role":"user","content":"Second"}}`+"\n"+
+			call("current", "2026-10-20T11:00:05.000Z", "msg_b", 200000, 2000)+"\n"), 0o600))
+
+	opus, _ := pricing.Builtin().Lookup("claude-opus-5-5")
+	first := opus.Cost(pricing.Tokens{Input: 10, CacheRead: 100000, Output: 1000})
+	second := opus.Cost(pricing.Tokens{Input: 10, CacheRead: 200000, Output: 2000})
+
+	var list struct {
+		Sessions []struct {
+			ID   string                   `json:"id"`
+			Cost jsonlwatcher.SessionCost `json:"cost"`
+		} `json:"sessions"`
+		TotalCost jsonlwatcher.SessionCost `json:"total_cost"`
+	}
+	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/sessions", nil, &list))
+	require.Len(t, list.Sessions, 2)
+	for _, s := range list.Sessions {
+		if s.ID == "current" {
+			assert.InDelta(t, first+second, s.Cost.USD, 1e-9)
+			assert.Equal(t, 2, s.Cost.Calls)
+		} else {
+			assert.Zero(t, s.Cost.USD, "a session without usage")
+		}
+	}
+	assert.InDelta(t, first+second, list.TotalCost.USD, 1e-9)
+	require.Len(t, list.TotalCost.Hourly, 2)
+
+	var cost struct {
+		SessionID string                   `json:"session_id"`
+		Cost      jsonlwatcher.SessionCost `json:"cost"`
+		Calls     []jsonlwatcher.ModelCall `json:"calls"`
+	}
+	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/cost", nil, &cost))
+	assert.Equal(t, "current", cost.SessionID)
+	require.Len(t, cost.Calls, 2)
+	assert.InDelta(t, first, cost.Calls[0].USD, 1e-9)
+	assert.True(t, cost.Calls[0].Priced)
+	assert.InDelta(t, first+second, cost.Cost.USD, 1e-9)
 }

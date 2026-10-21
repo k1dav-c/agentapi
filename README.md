@@ -92,11 +92,15 @@ has the complete commit history.
   conversation and the agent's own session survive an AgentAPI restart.
 - Open one of the agent's [earlier sessions](#earlier-sessions) in its working
   directory, or start a copy of one.
+- See what each [session and task cost](#session-costs) at the model
+  providers' list prices (the API-equivalent cost), subagents included, with
+  totals for today and the last 7 and 30 days.
 
 **Chat UI** (`/chat`)
 
 - [Tasks](#tasks-and-the-transcript) read as a transcript, with tool calls as
-  rows and thinking as margin notes, and can be exported as Markdown; the
+  rows, thinking as margin notes and what each task cost, and can be exported
+  as Markdown; the
   [Session Explorer](#session-explorer) has links, files, a task index, MCP
   servers, the agent's [earlier sessions](#earlier-sessions) and Restart.
 - [Lineage](#lineage): the subagents the agent ran, and what each did, step by
@@ -264,7 +268,8 @@ The embedded chat UI is organized around tasks instead of a single flat transcri
 request becomes a navigable task with its associated response, thinking blocks, tool calls, and
 background activity.
 
-Each task has a timeline on the left. Your prompt appears in a tinted block labelled "You", followed
+Each task has a timeline on the left: when it started, how long it took and, for Claude Code, Codex
+and Pi, what it [cost](#session-costs). Your prompt appears in a tinted block labelled "You", followed
 by the agent's logo, name, and reply in Markdown. Each tool call occupies one row with its command
 (`$ command`), exit code, duration, and output preview. On wide screens, thinking appears as margin
 notes.
@@ -283,8 +288,8 @@ The Session Explorer provides:
 - links and file paths discovered in the current conversation;
 - an index for jumping directly to earlier tasks;
 - MCP server configuration without leaving the chat UI;
-- a Session tab with the agent's [earlier sessions](#earlier-sessions) to open or copy, and a
-  two-step restart confirmation (open the Explorer with ⌘K / Ctrl+K).
+- a Session tab with the agent's [earlier sessions](#earlier-sessions) to open or copy, what they
+  [cost](#session-costs), and a two-step restart confirmation (open the Explorer with ⌘K / Ctrl+K).
 
 ![The Session Explorer's Index tab listing the session's tasks](docs/screenshots/explorer-index.png)
 
@@ -847,7 +852,50 @@ agent had in its working directory and to open one, without `--state-db`:
 In the chat, the Explorer's Session tab lists the sessions with **Open** and **Start a copy**, which
 ask for a second click.
 
-![The Explorer's Session tab: Claude Code's sessions in the directory with Open and Start a copy](docs/screenshots/explorer-sessions.png)
+![The Explorer's Session tab: what the sessions cost today, in 7 and 30 days and in all, and Claude Code's sessions in the directory with Open and Start a copy](docs/screenshots/explorer-sessions.png)
+
+### Session costs
+
+AgentAPI turns the tokens of each model call, read from the agent's session logs, into what they
+cost at the model providers' list prices, in USD. It is the API-equivalent cost: a Claude or ChatGPT
+subscription doesn't charge per token, so it says what the work would have cost with an API key.
+
+- Claude Code: every call in the session's log and in its subagents' logs, with the cache writes
+  priced as Anthropic's 5-minute or one-hour cache. Calls Claude Code counts in its own total but
+  doesn't log one by one, such as compacting the context, are added from its cost records as
+  unitemized calls.
+- Codex: each turn's token counts, its subagents' included; cached input is priced as a cache read.
+- Pi: the cost Pi reports for each call.
+
+A call a fork copied from another session counts in the session it came from, so totals don't count
+it twice. The built-in prices cover Anthropic's and OpenAI's models; `--prices <file>` adds models or
+replaces their prices, in USD per million tokens:
+
+```json
+{
+  "my-model": {"input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75},
+  "gpt-6.1-sol": {"input": 2, "output": 10, "cache_read": 0.1, "cache_write": 2.5,
+    "tiers": [{"input_tokens_above": 272000, "input": 4, "output": 15, "cache_read": 0.2, "cache_write": 5}]}
+}
+```
+
+A tier applies to a call whose input (uncached, read from and written to the cache) is above
+`input_tokens_above`. Model IDs are matched ignoring case, a provider prefix (`anthropic/`), a
+context suffix (`[1m]`) and a release date, else by the longest known prefix
+(`claude-opus-5-5-x` is priced as `claude-opus-5-5`). A call to a model without a price counts its
+tokens but no cost (`priced: false`).
+
+- `GET /sessions` gives each session's `cost`: `usd`, `tokens`, `calls`, the cost per model
+  (`models`) and per hour (`hourly`, in UTC), and `total_cost`, the sum of all of them.
+- `GET /cost` gives the open session's cost and its model `calls` (`time`, `model`, `tokens`, `usd`,
+  `subagent_id`), from which a task's cost is the calls made from its message until the next.
+
+In the chat, each task shows what it cost under its start time and duration (in its header on narrow
+screens), with the tokens in the tooltip; the cost is read again when a turn ends, and every 15
+seconds while one runs. The Explorer's Session tab shows what each session cost, and what all of
+them cost today, in the last 7 and 30 days and in all, by your time zone.
+
+![A task's time rail: its start time, duration and cost](docs/screenshots/task-cost.png)
 
 ### Claude Code
 
@@ -1481,7 +1529,7 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
   files below the working directory whose path ends with the one asked for.
 - Read the conversations of the agent's earlier sessions in its working
   directory, and the steps of the subagents it ran, from the agent's own logs
-  (`~/.claude`, `~/.codex`, `~/.pi`), and open any of those sessions.
+  (`~/.claude`, `~/.codex`, `~/.pi`), and what they cost, and open any of those sessions.
 - Upload files of up to 10 MB; only images are served back.
 - Change the MCP servers and the webhook, and restart the agent.
 
@@ -1583,6 +1631,7 @@ variable.
 | `--state-db` | | SQLite file that keeps the conversation and resumes the agent's session (native); see [Persistent sessions](#persistent-sessions) |
 | `--terminal` | `true` | Shell in the agent's working directory for the chat (native); see [Terminal](#terminal) |
 | `--auto-continue` | `false` | Continue a turn a usage limit stopped once the limit resets (native); see [Usage limits](#usage-limits) |
+| `--prices` | | JSON file of model prices per million tokens, which add to or replace the built-in ones; see [Session costs](#session-costs) |
 | `-s`, `--state-file` | | File that keeps the screen-derived messages (PTY) |
 | `--load-state`, `--save-state` | `true` with `--state-file` | Load the state file on startup, save it on shutdown |
 | `-I`, `--initial-prompt` | | First message for the agent; read from stdin when piped |
@@ -1666,7 +1715,8 @@ default. Endpoints marked *native* need the native transport.
 | `POST /login/retry` | Check the agent's login again now, while `login_required` is reported (409 when no login is needed) |
 | `POST /limit/continue`, `DELETE /limit/continue` | Continue a turn a usage limit stopped, now or at the reset; cancel a scheduled continuation |
 | `DELETE /limit` | Forget a usage limit stop, so the queued messages go out |
-| `GET /sessions` | The agent's sessions in its working directory (Claude Code, Codex, Pi) |
+| `GET /sessions` | The agent's sessions in its working directory (Claude Code, Codex, Pi), with what each cost and the total |
+| `GET /cost` | What the open session cost, and its model calls (Claude Code, Codex, Pi) |
 | `GET /subagents`, `GET /subagents/{id}` | The subagents the agent ran in its session, and one's task and messages (Claude Code, Codex) |
 | `POST /sessions/{id}/resume` | Open one of them, or a copy of it (`{"fork": true}`), in place of the conversation |
 

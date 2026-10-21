@@ -85,7 +85,8 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 | `lib/termexec/` | 在虛擬終端機中執行 agent，搭配記憶體內的 VT100 模擬器（`xpty`、`vt10x`）；重新啟動時可以替換行程 |
 | `lib/msgfmt/` | 各 agent 專屬的畫面輸出整理：回顯的輸入、輸入框、狀態列、工具呼叫，以及判斷何時可以送出第一個提示 |
 | `lib/transcript/` | 各傳輸共用的結構化對話型別：結構化訊息與其內容區塊、時間軸事件 |
-| `lib/jsonlwatcher/` | 找到並追蹤 Claude Code、Codex 和 Pi 的工作階段紀錄檔，解析成結構化訊息與時間軸事件；列出 agent 在某個目錄中先前的工作階段並讀取其對話（`history.go`），以及讀取工作階段執行過的 sub agent 的紀錄（`subagents.go`） |
+| `lib/jsonlwatcher/` | 找到並追蹤 Claude Code、Codex 和 Pi 的工作階段紀錄檔，解析成結構化訊息與時間軸事件；列出 agent 在某個目錄中先前的工作階段並讀取其對話（`history.go`），讀取工作階段執行過的 sub agent 的紀錄（`subagents.go`），以及從模型呼叫算出目錄中各工作階段的花費（`cost.go`） |
+| `lib/pricing/` | 每百萬 tokens 的模型價格（內建的 `prices.json` 和 `--prices` 檔案），以及一次呼叫的 tokens 依此價格的金額 |
 | `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入 |
 | `lib/native/claude`、`codex`、`pi` | 每種 agent 協定各一個 adapter |
 | `lib/native/agentio` | 這些 adapter 共用的 JSON lines 通訊：逐行讀取 agent 的輸出、寫入它的 stdin，並把它的回應對應到等待中的請求 |
@@ -146,7 +147,7 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 | `backend.go`、`backend_pty.go`、`backend_native.go` | 依 transport 而不同的部分：派送佇列、送出訊息、重新啟動、人工回覆協定的待處理請求 |
 | `setup.go` | 啟動 PTY 或 ACP agent 的行程 |
 | `native.go` | 請求、設定、中斷、壓縮、重試登入；native observer |
-| `limit.go`、`sessions.go`、`subagents.go` | 因用量限制停下的回合（`/limit`）；agent 先前的工作階段（`/sessions`）；它的 sub agent（`/subagents`） |
+| `limit.go`、`sessions.go`、`subagents.go` | 因用量限制停下的回合（`/limit`）；agent 先前的工作階段和它們的花費（`/sessions`、`/cost`）；它的 sub agent（`/subagents`） |
 | `terminal.go`、`files.go`、`file_preview.go`、`files_find.go` | Shell 終端機與檔案檢視器，以及搜尋 agent 用 repo 相對路徑提到的檔案 |
 | `mcp.go`、`mcp_management.go` | MCP 伺服器與設定檔 |
 | `webhook.go`、`handoff.go`、`dialog_reply.go` | 執行狀態 webhook、人工回覆 API、終端機對話框的回答 |
@@ -280,6 +281,11 @@ type Factory func(resume Resume) (Adapter, error)
   （`jsonlwatcher.ReadSessionHistory`；`GET /sessions` 會列出它們）。agent 在工作階段中執行過的
   sub agent 也以同樣方式從它們自己的紀錄讀出（`jsonlwatcher.Subagents`），提供給
   `GET /subagents` 和聊天介面的 Lineage 面板；它們的狀態取自啟動它們的 Agent 工具呼叫。
+- **花費。** `jsonlwatcher.DirectoryCosts` 從同樣的紀錄讀出目錄中每個工作階段（含 sub agent）的
+  模型呼叫（`GET /sessions`、`GET /cost`）：Claude Code 的 assistant 訊息（每個 message id 一次）、
+  Codex 的 token 計數、Pi 回報的金額。`lib/pricing` 為每次呼叫計價；Claude Code 的 `cost-state`
+  紀錄會把紀錄檔沒有列出的部分（壓縮）補成未逐筆列出的呼叫。分支複製的呼叫只算一次，算在
+  最先建立的工作階段。每個紀錄檔的呼叫依路徑和修改時間快取，只有變動過的紀錄檔會重新讀取。
 - **用量限制。** 帳號的用量限制讓回合停下時，adapter 會以 `limited` 停止原因結束回合（Claude Code
   的限制訊息與 `rejected` 的 rate limit 事件、Codex 的 `usageLimitExceeded`、Pi 模型供應商的
   額度錯誤）。對話會把它記成帶有重置時間的 `LimitStop`，直到下一個回合開始：期間伺服器的佇列
@@ -484,12 +490,13 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   `lib/api-schema.ts` 保存由 OpenAPI schema 產生的型別。
 - `components/chat.tsx` 負責頁面版面：訊息清單（任務、工具呼叫列、思考）、輸入框上方的停靠區
   （狀態列、終端機對話框的決策卡片、登入卡片、請求卡片、用量限制卡片、prompt cache 過期提醒）、
-  輸入框（`message-input.tsx`，含斜線指令、工作階段設定和用量指示）、Explorer（含先前的工作階段，
-  `session-history.tsx`）、sub agent 的 Lineage 面板（`lineage.tsx`）、檔案檢視器、TTY mode
+  輸入框（`message-input.tsx`，含斜線指令、工作階段設定和用量指示）、Explorer（含先前的工作階段和它們的
+  花費，`session-history.tsx`）、sub agent 的 Lineage 面板（`lineage.tsx`）、檔案檢視器、TTY mode
   （`tty-view.tsx`，來自
   `/internal/screen`）以及 native 終端機（`shell-view.tsx`，來自 `/terminal`）。
 - `lib/` 將邏輯封裝為獨立模組，並附有 Bun 測試：任務分組、工具格式化、檔案參照、diff、斜線
-  指令、設定、用量、終端機按鍵、驗證。
+  指令、設定、用量、花費（`cost.ts`：任務在工作階段呼叫中的份額、各期間的加總）、終端機按鍵、
+  驗證。`use-session-cost.ts` 會在回合結束時和回合執行中讀取 `GET /cost`。
 
 ## 測試
 

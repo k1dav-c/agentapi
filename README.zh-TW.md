@@ -74,11 +74,13 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 - [持久保存的工作階段](#持久保存的工作階段)：使用 `--state-db` 時，對話和 agent 自己的工作
   階段在 AgentAPI 重新啟動後都會保留。
 - 開啟 agent 在工作目錄中的[先前的工作階段](#先前的工作階段)，或從其中一個開始一份副本。
+- 以模型供應商的牌價查看每個[工作階段與任務的花費](#工作階段花費)（API 等價金額），含 sub agent，
+  並加總今天、最近 7 天和 30 天的花費。
 
 **聊天介面**（`/chat`）
 
 - [任務](#任務與對話紀錄)以對話紀錄的形式呈現，工具呼叫一行一列，思考內容以旁註顯示，
-  也可以匯出成 Markdown；[工作階段瀏覽器](#工作階段瀏覽器)提供連結、檔案、任務索引、
+  並標出每個任務的花費，也可以匯出成 Markdown；[工作階段瀏覽器](#工作階段瀏覽器)提供連結、檔案、任務索引、
   MCP 伺服器、agent [先前的工作階段](#先前的工作階段)和重新啟動。
 - [Lineage](#lineage)：agent 執行過的 sub agent，以及每一個做了什麼，一步一步呈現，執行中也能看。
 - 終端機對話框和 native 請求的[決策卡片](#決策卡片)、agent 設定的選單、顯示 context 的圓環，
@@ -231,7 +233,8 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 內建聊天介面以任務為單位整理對話。每則使用者請求都會成為可單獨瀏覽的任務，
 包含對應的回覆、思考區塊、工具呼叫和背景活動。
 
-每個任務左側都有時間軸。你的提示詞放在標示「You」的色塊中；agent 的回覆則以
+每個任務左側都有時間軸：開始時間、耗時，以及 Claude Code、Codex 和 Pi 的任務[花費](#工作階段花費)。
+你的提示詞放在標示「You」的色塊中；agent 的回覆則以
 標誌和名稱（例如 Pi）開頭，內容以 Markdown 顯示。每次工具呼叫各占一列，
 列出指令（`$ command`）、結束代碼、耗時和輸出預覽；寬螢幕上另以旁註顯示思考內容。
 
@@ -248,8 +251,8 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 - 目前對話中出現的連結與檔案路徑；
 - 可直接跳到先前任務的索引；
 - 不必離開聊天介面就能設定 MCP 伺服器；
-- Session 分頁：可以開啟或複製 agent [先前的工作階段](#先前的工作階段)，並提供兩步驟重新
-  啟動（Restart）（用 ⌘K / Ctrl+K 開啟 Explorer）。
+- Session 分頁：可以開啟或複製 agent [先前的工作階段](#先前的工作階段)、查看它們的
+  [花費](#工作階段花費)，並提供兩步驟重新啟動（Restart）（用 ⌘K / Ctrl+K 開啟 Explorer）。
 
 ![工作階段瀏覽器的 Index 分頁，列出這個工作階段的任務](docs/screenshots/explorer-index.png)
 
@@ -714,7 +717,47 @@ Claude Code、Codex 和 Pi 會為每個工作階段留下紀錄，AgentAPI 讀�
 在聊天介面中，Explorer 的 Session 分頁會列出這些工作階段，並提供 **Open** 和
 **Start a copy**，兩者都要點第二次確認。
 
-![Explorer 的 Session 分頁：這個目錄中 Claude Code 的工作階段，各有 Open 和 Start a copy](docs/screenshots/explorer-sessions.png)
+![Explorer 的 Session 分頁：今天、7 天、30 天和全部的花費，以及這個目錄中 Claude Code 的工作階段，各有 Open 和 Start a copy](docs/screenshots/explorer-sessions.png)
+
+### 工作階段花費
+
+AgentAPI 從 agent 的工作階段紀錄讀出每次模型呼叫用掉的 tokens，以模型供應商的牌價換算成
+美元金額。這是 API 等價金額：Claude 或 ChatGPT 訂閱不按 token 計費，所以它代表的是改用 API
+key 做同樣的工作要花多少錢。
+
+- Claude Code：工作階段紀錄和它的 sub agent 紀錄中的每次呼叫，cache 寫入分別以 Anthropic 的
+  5 分鐘或一小時 cache 計價。Claude Code 計入自己的總額、卻沒有逐筆記錄的呼叫（例如壓縮
+  context），會從它的花費紀錄補上，列為未逐筆列出（unitemized）的呼叫。
+- Codex：每個回合的 token 計數，含它的 sub agent；cache 中的輸入以 cache 讀取計價。
+- Pi：Pi 為每次呼叫回報的金額。
+
+分支（fork）從另一個工作階段複製來的呼叫，算在原本的工作階段，所以加總時不會重複計算。內建
+價格涵蓋 Anthropic 和 OpenAI 的模型；`--prices <檔案>` 可以新增模型或取代它們的價格，單位是
+每百萬 tokens 的美元：
+
+```json
+{
+  "my-model": {"input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75},
+  "gpt-6.1-sol": {"input": 2, "output": 10, "cache_read": 0.1, "cache_write": 2.5,
+    "tiers": [{"input_tokens_above": 272000, "input": 4, "output": 15, "cache_read": 0.2, "cache_write": 5}]}
+}
+```
+
+當一次呼叫的輸入（未快取的、從 cache 讀取的和寫入 cache 的）超過 `input_tokens_above` 時，
+套用該級距（tier）的價格。比對模型 ID 時不分大小寫，並忽略供應商前綴（`anthropic/`）、
+context 後綴（`[1m]`）和發布日期；找不到時取最長的已知前綴（`claude-opus-5-5-x` 以
+`claude-opus-5-5` 計價）。沒有價格的模型只計 tokens、不計金額（`priced: false`）。
+
+- `GET /sessions` 為每個工作階段提供 `cost`：`usd`、`tokens`、`calls`、每個模型的花費
+  （`models`）和每小時的花費（`hourly`，UTC），以及全部加總的 `total_cost`。
+- `GET /cost` 提供目前開啟的工作階段的花費和它的模型呼叫 `calls`（`time`、`model`、`tokens`、
+  `usd`、`subagent_id`）；一個任務的花費，就是從它的訊息到下一個任務之間的呼叫。
+
+在聊天介面中，每個任務的開始時間和耗時下方會顯示它的花費（窄螢幕上在任務標頭），滑鼠移上去
+可以看到 tokens；回合結束時會重新讀取，回合執行中則每 15 秒讀取一次。Explorer 的 Session 分頁
+會顯示每個工作階段的花費，以及全部工作階段今天、最近 7 天、30 天和全部的花費（依你的時區）。
+
+![任務的時間軸：開始時間、耗時和花費](docs/screenshots/task-cost.png)
 
 ### Claude Code
 
@@ -1261,7 +1304,7 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
   會被拒絕，diff 也只會讀取 git 儲存庫。HTML 預覽的腳本在 sandbox 中執行，無法存取聊天介面或
   API。`GET /files/find` 會列出工作目錄底下路徑結尾相符的檔案路徑。
 - 從 agent 自己的紀錄（`~/.claude`、`~/.codex`、`~/.pi`）讀取它在工作目錄中先前工作階段的對話，
-  以及它執行過的 sub agent 的步驟，並開啟其中任何一個工作階段。
+  它執行過的 sub agent 的步驟，以及它們的花費，並開啟其中任何一個工作階段。
 - 上傳最大 10 MB 的檔案；只有圖片會被回傳。
 - 修改 MCP 伺服器和 webhook，以及重新啟動 agent。
 
@@ -1358,6 +1401,7 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 | `--state-db` | | 保存對話、並接續 agent 工作階段的 SQLite 檔案（native）；見[持久保存的工作階段](#持久保存的工作階段) |
 | `--terminal` | `true` | 給聊天介面使用、位於 agent 工作目錄的 shell（native）；見[終端機](#終端機) |
 | `--auto-continue` | `false` | 回合因用量限制停下時，在限制重置後繼續（native）；見[達到用量限制時](#達到用量限制時) |
+| `--prices` | | 每百萬 tokens 模型價格的 JSON 檔，新增或取代內建價格；見[工作階段花費](#工作階段花費) |
 | `-s`, `--state-file` | | 保存從畫面解析出的訊息的檔案（PTY） |
 | `--load-state`, `--save-state` | 設定 `--state-file` 時為 `true` | 啟動時載入、關閉時保存狀態檔 |
 | `-I`, `--initial-prompt` | | 給 agent 的第一則訊息；以管線輸入時從 stdin 讀取 |
@@ -1440,7 +1484,8 @@ agentapi attach --url localhost:3284
 | `POST /login/retry` | 回報 `login_required` 期間，立刻再檢查一次 agent 的登入（不需要登入時回傳 409） |
 | `POST /limit/continue`、`DELETE /limit/continue` | 現在或在重置時繼續因用量限制停下的回合；取消排定的繼續 |
 | `DELETE /limit` | 忽略用量限制造成的停止，讓排隊中的訊息送出 |
-| `GET /sessions` | agent 在工作目錄中的工作階段（Claude Code、Codex、Pi） |
+| `GET /sessions` | agent 在工作目錄中的工作階段（Claude Code、Codex、Pi），以及各自的花費和總額 |
+| `GET /cost` | 目前開啟的工作階段的花費和它的模型呼叫（Claude Code、Codex、Pi） |
 | `GET /subagents`、`GET /subagents/{id}` | agent 在工作階段中執行過的 sub agent，以及其中一個的任務和訊息（Claude Code、Codex） |
 | `POST /sessions/{id}/resume` | 開啟其中一個，或它的副本（`{"fork": true}`），取代目前的對話 |
 

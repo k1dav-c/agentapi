@@ -5,7 +5,8 @@ import {GitFork, History, LoaderCircle, RefreshCw} from "lucide-react";
 import {toast} from "sonner";
 import {useChat} from "./chat-provider";
 import {Button} from "./ui/button";
-import type {SessionSummary} from "@/lib/chat-api";
+import type {SessionCost, SessionSummary} from "@/lib/chat-api";
+import {costDetails, formatUSD, periodTotals} from "@/lib/cost";
 import {agentDisplayName} from "@/lib/agents";
 import {getErrorMessage} from "@/lib/error-utils";
 import {formatMessageTime} from "@/lib/format-time";
@@ -25,6 +26,7 @@ export function SessionHistory({active, onOpened}: {active: boolean; onOpened: (
   const {listSessions, resumeSession, serverStatus, agentType} = useChat();
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [current, setCurrent] = useState<string | undefined>();
+  const [total, setTotal] = useState<SessionCost | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState<Pending | null>(null);
@@ -38,6 +40,7 @@ export function SessionHistory({active, onOpened}: {active: boolean; onOpened: (
       const list = await listSessions();
       setSessions(list.sessions);
       setCurrent(list.current);
+      setTotal(list.total_cost ?? null);
     } catch (failure) {
       setError(getErrorMessage(failure));
     } finally {
@@ -87,6 +90,7 @@ export function SessionHistory({active, onOpened}: {active: boolean; onOpened: (
         {agentDisplayName(agentType, "The agent")}&apos;s sessions in this directory. Open one to go on with it here, or start a
         copy to try something else and leave the session as it is. Either replaces this conversation and its queue.
       </p>
+      {total && total.calls > 0 && <SpendCard total={total} sessions={sessions?.length ?? 0} />}
       {working && <p className="text-xs text-state-needs">The agent is working: stop it or wait until it is done to switch sessions.</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {sessions === null && loading && (
@@ -115,6 +119,14 @@ export function SessionHistory({active, onOpened}: {active: boolean; onOpened: (
                   <p className="mt-0.5 text-[11px] text-muted-foreground">
                     {session.prompts} {session.prompts === 1 ? "message" : "messages"} · {formatMessageTime(session.updated_at)} ·{" "}
                     <span className="font-mono" title={session.id}>{session.id.slice(0, 8)}</span>
+                    {session.cost && session.cost.calls > 0 && (
+                      <>
+                        {" · "}
+                        <span className="tabular-nums" title={costDetails(session.cost, unpriced(session.cost))} data-session-cost>
+                          {formatUSD(session.cost.usd)}
+                        </span>
+                      </>
+                    )}
                     {isCurrent && <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 font-medium text-foreground">Open now</span>}
                   </p>
                 </div>
@@ -150,6 +162,40 @@ export function SessionHistory({active, onOpened}: {active: boolean; onOpened: (
       </ul>
     </div>
   );
+}
+
+// What the sessions in the directory spent over time, subagents included,
+// in the viewer's days.
+function SpendCard({total, sessions}: {total: SessionCost; sessions: number}) {
+  const periods = periodTotals(total.hourly);
+  const cells: [string, number][] = [
+    ["Today", periods.today],
+    ["7 days", periods.week],
+    ["30 days", periods.month],
+    ["All", periods.all],
+  ];
+  return (
+    <section className="rounded-xl border p-3" aria-label="Spending" data-spend-card>
+      <div className="grid grid-cols-4 gap-2">
+        {cells.map(([label, usd]) => (
+          <div key={label} className="min-w-0">
+            <p className="text-[11px] text-muted-foreground">{label}</p>
+            <p className="truncate text-sm font-semibold tabular-nums">{formatUSD(usd)}</p>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground" title={costDetails(total, unpriced(total))}>
+        API-equivalent cost of {sessions} {sessions === 1 ? "session" : "sessions"} and their subagents at list prices; a
+        subscription doesn&apos;t charge it.
+        {unpriced(total) && " Models without a known price count tokens only."}
+      </p>
+    </section>
+  );
+}
+
+// Some calls were to a model without a known price.
+function unpriced(cost: SessionCost): boolean {
+  return cost.models.some((model) => !model.priced);
 }
 
 // What a session is called: its title, else its first message.
