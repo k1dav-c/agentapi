@@ -53,8 +53,15 @@ export type PromptCache = Schemas["PromptCache"];
 export type LimitStop = Schemas["LimitStop"];
 export type ContinueAt = Schemas["ContinueAt"];
 // One of the agent's sessions in the working directory (GET /sessions).
-export type SessionSummary = Schemas["SessionSummary"];
+export type SessionSummary = Schemas["SessionInfo"];
 export type SessionList = Body<Schemas["SessionsResponseBody"]>;
+// What a session spent at the model providers' list prices (API-equivalent).
+export type SessionCost = Schemas["SessionCost"];
+export type HourCost = Schemas["HourCost"];
+export type ModelCall = Schemas["ModelCall"];
+export type Tokens = Schemas["Tokens"];
+// What the open session spent, and its model calls (GET /cost).
+export type CostReport = Body<Schemas["CostResponseBody"]>;
 // A subagent the agent ran in its session, and what it did (GET
 // /subagents, GET /subagents/{id}).
 export type Subagent = Schemas["SubagentState"];
@@ -166,7 +173,12 @@ export function createChatAPI(baseURL: string) {
 
     async listSessions(): Promise<SessionList> {
       const list = await jsonRequest<SessionList>("/sessions", {fallback: "Failed to list the agent's sessions"});
-      return {sessions: list.sessions ?? [], current: list.current};
+      return {sessions: list.sessions ?? [], current: list.current, total_cost: list.total_cost};
+    },
+
+    async getCost(): Promise<CostReport> {
+      const report = await jsonRequest<CostReport>("/cost", {fallback: "Failed to read what the session spent"});
+      return {...report, calls: report.calls ?? []};
     },
 
     // Opens one of the agent's sessions, or a copy of it, in place of this

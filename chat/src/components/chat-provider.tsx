@@ -25,6 +25,7 @@ import {
   type AgentSettings,
   type AgentUsage,
   type ContinueAt,
+  type CostReport,
   type FileContent,
   type FileDiff,
   type FileMatches,
@@ -62,6 +63,7 @@ import {isDraftMessage, lastUserMessage, type DraftMessage, type Message, type R
 import {useEventStream} from "./use-event-stream";
 import {useQueue} from "./use-queue";
 import {useSessionCache} from "./use-session-cache";
+import {useSessionCost} from "./use-session-cost";
 import {Store, useStoreSelector} from "@/lib/store";
 import {useStableCallback} from "@/lib/use-stable-callback";
 import {usePersisted} from "@/lib/use-persisted";
@@ -122,6 +124,9 @@ interface ChatContextValue {
   // How full the context window is and the account's rate limits, as the
   // agent last reported them (native transport); null until it does.
   agentUsage: AgentUsage | null;
+  // What the open session spent and its model calls, at list prices
+  // (features.cost); null until read.
+  sessionCost: CostReport | null;
   // Whether the server offers a shell terminal (native transport, GET
   // /terminal), and typing into and resizing it.
   terminalAvailable: boolean;
@@ -342,6 +347,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     () => features(transport, capabilities, terminalAvailable, agentType),
     [agentType, capabilities, terminalAvailable, transport],
   );
+  const sessionCost = useSessionCost(api, chatFeatures.cost, serverStatus, lifecycle !== "starting" && lifecycle !== "restarting");
   const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
   const currentTask = useMemo(() => lastUserMessage(messages), [messages]);
 
@@ -607,6 +613,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     loginRequired,
     agentSettings,
     agentUsage,
+    sessionCost,
     terminalAvailable,
     compact: api.compact,
     limitStop,

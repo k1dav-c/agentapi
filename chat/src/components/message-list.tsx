@@ -8,6 +8,7 @@ import {AgentType} from "@/lib/agents";
 import type {DraftMessage, Message, RichMessage} from "@/lib/conversation";
 import type {ServerStatus} from "@/lib/agent-status";
 import {formatDateLabel} from "@/lib/format-time";
+import {costDetails, formatUSD, taskCosts} from "@/lib/cost";
 import {filterTasks, timelineSignature} from "@/lib/task-filter";
 import {type Timeline, type ToolCall, buildTimeline, collectToolCalls, shareTimeline, shareToolCalls} from "@/lib/task-timeline";
 import {HEADER_ACTIONS_ID} from "@/app/header";
@@ -56,7 +57,7 @@ export default function MessageList({
   const [showAllTasks, setShowAllTasks] = useState(false);
   const search = useTaskSearch();
   const {taskQuery, taskFilter, filtersActive, currentSearchResult, setCurrentSearchResult, searchOpen} = search;
-  const {waitingFor} = useChat();
+  const {waitingFor, sessionCost} = useChat();
   // The page's actions render into the header's slot (one top bar); the
   // embed page has no header, so they get their own row there.
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
@@ -74,6 +75,15 @@ export default function MessageList({
     () => (sharedTimeline.current = shareTimeline(sharedTimeline.current, buildTimeline(messages, richMessages, toolCalls))),
     [messages, richMessages, toolCalls],
   );
+  // What each task spent, as text, so a task whose cost didn't change
+  // doesn't render again. A task not sent yet has none.
+  const costs = useMemo(() => {
+    if (!sessionCost) return [];
+    const starts = timeline.tasks.map((task) => (task.prompt.id === undefined ? undefined : task.prompt.time));
+    return taskCosts(starts, sessionCost.calls).map((cost) =>
+      cost && {label: formatUSD(cost.usd), details: costDetails(cost, cost.unpriced)},
+    );
+  }, [sessionCost, timeline.tasks]);
   const filteredTasks = useMemo(
     () => filterTasks(timeline.tasks, serverStatus, taskFilter, taskQuery),
     [serverStatus, taskFilter, taskQuery, timeline.tasks],
@@ -192,6 +202,8 @@ export default function MessageList({
                 task={task}
                 agentType={agentType}
                 number={index + 1}
+                cost={costs[index]?.label}
+                costDetails={costs[index]?.details}
                 status={status}
                 onRetryMessage={onRetryMessage}
                 onEditMessage={onEditMessage}

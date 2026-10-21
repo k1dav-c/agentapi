@@ -42,6 +42,9 @@ export interface Features {
   // The subagents the agent ran, and what each did (native Claude Code and
   // Codex).
   subagents: boolean;
+  // What sessions and tasks spent, from the session logs (native Claude
+  // Code, Codex and Pi).
+  cost: boolean;
 }
 
 export function features(transport: Transport, capabilities: Capabilities | null, shellAvailable: boolean, agentType?: AgentType): Features {
@@ -59,5 +62,6 @@ export function features(transport: Transport, capabilities: Capabilities | null
     restartKeepsConversation: native,
     sessionHistory: native && agentType !== undefined && SESSION_HISTORY_AGENTS.includes(agentType),
     subagents: native && agentType !== undefined && SUBAGENT_AGENTS.includes(agentType),
+    cost: native && agentType !== undefined && SESSION_HISTORY_AGENTS.includes(agentType),
   };
 }
