@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.28.0
+
 ### Features
 
 - Native agents: what each session and task cost, in USD at the model providers' list prices (the
