@@ -56,11 +56,16 @@ type piMessage struct {
 	ExitCode *int   `json:"exitCode"`
 }
 
+// piUsage is a call's usage as Pi logs it, with what it cost at Pi's
+// prices.
 type piUsage struct {
 	Input      int `json:"input"`
 	Output     int `json:"output"`
 	CacheRead  int `json:"cacheRead"`
 	CacheWrite int `json:"cacheWrite"`
+	Cost       *struct {
+		Total *float64 `json:"total"`
+	} `json:"cost"`
 }
 
 type piContentBlock struct {

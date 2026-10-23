@@ -189,3 +189,22 @@ func TestCostsOfSessionsWithoutPrompts(t *testing.T) {
 	assert.Equal(t, 2, d.Total.Calls)
 	assert.Equal(t, 1, d.Cost("s2").Calls)
 }
+
+// Pi keeps the prompt cache warm between turns with calls of its own,
+// which it logs as usage entries.
+func TestPiCacheWarmingCosts(t *testing.T) {
+	agentDir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	writeLog(t, filepath.Join(agentDir, "sessions", "--w--", "2026-10-20T10-00-00-000Z_p1.jsonl"), time.Now(),
+		`{"type":"session","version":3,"id":"p1","timestamp":"2026-10-20T10:00:00.000Z","cwd":"/w"}`,
+		`{"type":"message","id":"u1","timestamp":"2026-10-20T10:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"Hi"}]}}`,
+		`{"type":"message","id":"a1","timestamp":"2026-10-20T10:00:02.000Z","message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"Hello"}],"usage":{"input":10,"output":10,"cacheRead":0,"cacheWrite":20000,"cost":{"total":0.13}}}}`,
+		`{"type":"usage","id":"w1","parentId":"a1","timestamp":"2026-10-20T10:04:30.000Z","kind":"cache_warm","provider":"anthropic","model":"claude-opus-5-5","usage":{"input":1,"output":1,"cacheRead":20000,"cacheWrite":0,"totalTokens":20002,"cost":{"total":0.01}}}`,
+	)
+	d, err := newStore(t, "pi", "/w").Costs()
+	require.NoError(t, err)
+	c := d.Cost("p1")
+	assert.Equal(t, 2, c.Calls)
+	assert.InDelta(t, 0.14, c.USD, 1e-12)
+}
