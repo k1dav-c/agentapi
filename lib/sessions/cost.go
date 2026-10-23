@@ -173,7 +173,7 @@ func (s *Store) readCosts() (DirectoryCost, error) {
 	for _, path := range files {
 		read[path] = true
 		snap, err := s.readLog(path, true)
-		if err != nil || !snap.session || snap.summary.Prompts == 0 {
+		if err != nil || !snap.session {
 			continue
 		}
 		calls := modelCalls(snap.calls, "")

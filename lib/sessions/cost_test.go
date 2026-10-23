@@ -166,3 +166,26 @@ func TestPiCostsAndUnknownPrices(t *testing.T) {
 	assert.False(t, c.Models[1].Priced)
 	assert.Equal(t, 500, c.Models[1].Tokens.Input)
 }
+
+// What a session spent counts in the directory's total whether or not
+// its log holds a prompt the session list shows.
+func TestCostsOfSessionsWithoutPrompts(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	dir := filepath.Join(config, "projects", "-w")
+	writeLog(t, filepath.Join(dir, "s1.jsonl"), time.Now(),
+		claudePromptLine("s1", "2026-10-20T10:00:00.000Z", "Fix the bug"),
+		claudeCall("s1", "2026-10-20T10:00:05.000Z", "msg_1", 10, 20000, 0, 0, 200))
+	// Only a slash command, which Claude Code ran a model call for.
+	writeLog(t, filepath.Join(dir, "s2.jsonl"), time.Now(),
+		claudePromptLine("s2", "2026-10-20T11:00:00.000Z", "<command-name>/compact</command-name>"),
+		claudeCall("s2", "2026-10-20T11:00:05.000Z", "msg_2", 10, 20000, 0, 0, 300))
+	store := newStore(t, "claude", "/w")
+	list, err := store.List(10)
+	require.NoError(t, err)
+	require.Len(t, list, 1, "a session the user sent nothing in isn't listed")
+	d, err := store.Costs()
+	require.NoError(t, err)
+	assert.Equal(t, 2, d.Total.Calls)
+	assert.Equal(t, 1, d.Cost("s2").Calls)
+}
