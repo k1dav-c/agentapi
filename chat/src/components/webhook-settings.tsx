@@ -135,7 +135,8 @@ export function WebhookSettings({active}: {active: boolean}) {
         <h3 className="text-sm font-semibold">Webhook</h3>
         <p className="mt-1 text-sm text-muted-foreground">
           Push what happens here to a receiver, such as a dashboard that watches many agents: AgentAPI POSTs a JSON event for
-          each change. Saved settings apply at once and last until AgentAPI restarts.
+          each change. Saved settings apply at once and last until AgentAPI restarts, or with --state-db
+          after it too, unless it starts with other webhook flags.
         </p>
       </div>
 
