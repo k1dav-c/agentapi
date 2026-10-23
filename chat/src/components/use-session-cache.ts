@@ -13,7 +13,7 @@ const CACHE_SAVE_INTERVAL_MS = 2000;
 // useSessionCache keeps the conversation cache current (lib/session-cache),
 // at most every CACHE_SAVE_INTERVAL_MS, and once more when the page is
 // hidden: a reload shows the transcript at once and connects from where
-// it left off.
+// it left off. A save writes only the messages that changed.
 export function useSessionCache({
   agentAPIUrl,
   syncRef,
@@ -49,7 +49,6 @@ export function useSessionCache({
         richMessages: latestRef.current.richMessages,
         requests: latestRef.current.requests,
         transport: latestRef.current.transport,
-        savedAt: Date.now(),
       });
     };
     const onHide = () => {
