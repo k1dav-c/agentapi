@@ -20,6 +20,10 @@ type Body<T> = Omit<T, "$schema">;
 export type MCPConfig = Body<Schemas["MCPGetResponseBody"]> & {restarted?: boolean};
 export type MCPCheckResult = Schemas["MCPCheckResult"];
 export type MCPProfiles = Body<Schemas["MCPProfilesResponseBody"]>;
+// GET and PUT /webhook: where the events go, which, and how they're signed.
+export type WebhookConfig = Body<Schemas["WebhookConfigResponseBody"]>;
+export type WebhookChange = Body<Schemas["WebhookConfigRequestBody"]>;
+export type WebhookTest = Body<Schemas["WebhookTestResponseBody"]>;
 
 // A file in the agent's working directory (GET /files/content).
 export type FileContent = Body<Schemas["FileContentResponseBody"]>;
@@ -198,6 +202,19 @@ export function createChatAPI(baseURL: string) {
 
     async terminalResize(cols: number, rows: number): Promise<void> {
       await jsonRequest("/terminal/resize", {method: "POST", body: {cols, rows}, fallback: "Failed to resize the terminal"});
+    },
+
+    getWebhook(): Promise<WebhookConfig> {
+      return jsonRequest("/webhook", {fallback: "Failed to read the webhook settings"});
+    },
+
+    updateWebhook(change: WebhookChange): Promise<WebhookConfig> {
+      return jsonRequest("/webhook", {method: "PUT", body: change, fallback: "Failed to save the webhook settings"});
+    },
+
+    // Sends a webhook.test event now and says how the receiver answered.
+    testWebhook(): Promise<WebhookTest> {
+      return jsonRequest("/webhook/test", {method: "POST", fallback: "Failed to send the test event"});
     },
 
     getMCP(): Promise<MCPConfig> {

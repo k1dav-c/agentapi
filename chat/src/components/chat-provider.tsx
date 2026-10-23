@@ -194,6 +194,10 @@ interface ChatContextValue {
   reconnectNow: () => void;
   downloadSession: () => Promise<void>;
   deleteMessages: () => Promise<void>;
+  // GET, PUT /webhook and POST /webhook/test: pushing events to a receiver.
+  getWebhook: ReturnType<typeof createChatAPI>["getWebhook"];
+  updateWebhook: ReturnType<typeof createChatAPI>["updateWebhook"];
+  testWebhook: ReturnType<typeof createChatAPI>["testWebhook"];
   getMCP: () => Promise<MCPConfig>;
   updateMCP: (
     servers: Record<string, unknown>,
@@ -638,6 +642,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
     queuedMessages,
     reconnectAttempt,
     nextReconnectAt,
+    getWebhook: api.getWebhook,
+    updateWebhook: api.updateWebhook,
+    testWebhook: api.testWebhook,
     getMCP: api.getMCP,
     updateMCP: api.updateMCP,
     checkMCP: api.checkMCP,
