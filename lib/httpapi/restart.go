@@ -109,12 +109,12 @@ func (s *Server) restartLocked(clear bool) error {
 // that fails leaves the lifecycle failed.
 func (s *Server) runRestartLocked(r agentRestart) error {
 	s.restarting = true
-	s.mu.Unlock()
-	ctx, cancel := s.agentCtx(restartTimeout)
-	err := r.run(ctx)
-	cancel()
-	s.mu.Lock()
-	s.restarting = false
+	defer func() { s.restarting = false }()
+	err := s.unlocked(func() error {
+		ctx, cancel := s.agentCtx(restartTimeout)
+		defer cancel()
+		return r.run(ctx)
+	})
 	switch {
 	case err != nil:
 		s.emitter.SetLifecycle(LifecycleFailed)
@@ -127,4 +127,13 @@ func (s *Server) runRestartLocked(r agentRestart) error {
 		r.done()
 	}
 	return nil
+}
+
+// unlocked runs f without s.mu, which the caller holds, and has the caller
+// hold it again when f returns, or panics: its deferred Unlock must find
+// s.mu locked.
+func (s *Server) unlocked(f func() error) error {
+	s.mu.Unlock()
+	defer s.mu.Lock()
+	return f()
 }

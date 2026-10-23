@@ -51,3 +51,17 @@ func TestPTYRestartQueuesMessages(t *testing.T) {
 	assert.Equal(t, 1, c.sends)
 	assert.Zero(t, s.queue.Len())
 }
+
+// A restart whose slow part panics leaves the server as a failed restart
+// does: s.mu held again for the caller, and no restart under way.
+func TestRestartPanicKeepsTheLock(t *testing.T) {
+	s, _, _ := handoffServer()
+	s.restartAgent = func(context.Context) (int, error) { panic("boom") }
+	func() {
+		defer func() { assert.Equal(t, "boom", recover()) }()
+		_, _ = s.deleteMessages(t.Context(), nil)
+	}()
+	assert.True(t, s.mu.TryLock(), "s.mu was let go")
+	assert.False(t, s.restarting)
+	s.mu.Unlock()
+}
