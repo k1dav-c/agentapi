@@ -247,13 +247,19 @@ func (r *Replacement) CloseOld() {
 	})
 }
 
-// Start closes the retired agent and starts the new one. It returns once
-// the new agent accepts turns or waits for a login, or with the error it
-// failed to start with, which Exited delivers too. If ctx ends first, Start
-// returns ctx.Err() and the agent goes on starting in the background. A
+// Start closes the retired agent and starts the new one, whose status is
+// initializing until it accepts turns. It returns once the new agent
+// accepts turns or waits for a login, or with the error it failed to start
+// with, which Exited delivers too. If ctx ends first, Start returns
+// ctx.Err() and the agent goes on starting in the background. A
 // conversation that was closed or replaced again meanwhile starts nothing.
 func (r *Replacement) Start(ctx context.Context) error {
 	r.CloseOld()
+	r.c.mu.Lock()
+	if r.gen == r.c.generation {
+		r.c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
+	}
+	r.c.mu.Unlock()
 	select {
 	case err := <-r.c.launchAsync(r.runCtx, r.gen, r.resume):
 		return err
@@ -270,7 +276,8 @@ func (c *Conversation) Restart(ctx context.Context) error {
 }
 
 // BeginRestart is the first step of Restart: it retires the agent and
-// clears the conversation, and returns what starts the new agent. reset, if
+// clears the conversation, and returns what starts the new agent. The
+// status stays as it was until Start reports the new agent's. reset, if
 // set, runs once the agent is retired, before the cleared conversation is
 // reported, with the conversation's lock held: like an Observer, it must
 // not call back into the conversation.
@@ -288,7 +295,6 @@ func (c *Conversation) BeginRestart(reset func()) *Replacement {
 	c.setLimitStopLocked(nil)
 	c.clearSessionUsageLocked()
 	c.cfg.Emitter.EmitMessages(nil)
-	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
 	return r
 }
 
@@ -329,7 +335,6 @@ func (c *Conversation) BeginSwitch(resume Resume, messages []st.ConversationMess
 	// session it forked after a restart.
 	c.cfg.Observer.SessionRef(resume.Ref)
 	c.cfg.Emitter.EmitMessages(c.messages.snapshot())
-	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
 	return r, nil
 }
 
@@ -371,9 +376,7 @@ func (c *Conversation) BeginReload() (*Replacement, error) {
 	if c.started && !c.caps.Resume {
 		return nil, ErrUnsupported
 	}
-	r := c.replaceLocked(c.resumeLocked())
-	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
-	return r, nil
+	return c.replaceLocked(c.resumeLocked()), nil
 }
 
 // Close stops the agent. The exit is not reported on Exited.

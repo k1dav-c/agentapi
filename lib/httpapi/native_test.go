@@ -776,7 +776,7 @@ func TestNative_RestartDoesntHoldTheServer(t *testing.T) {
 	assert.Equal(t, http.StatusOK, n.do(http.MethodGet, "/handoff", nil, nil))
 	var status httpapi.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
-	assert.Equal(t, httpapi.LifecycleStarting, status.Lifecycle)
+	assert.Equal(t, httpapi.LifecycleRestarting, status.Lifecycle)
 	assert.Equal(t, http.StatusConflict, n.do(http.MethodDelete, "/messages", nil, nil), "one restart at a time")
 	assert.Equal(t, http.StatusConflict, n.do(http.MethodPut, "/mcp?restart=true", map[string]any{"servers": map[string]any{}}, nil))
 	assert.Len(t, n.factory.Adapters(), 1, "the new agent waits for the update")

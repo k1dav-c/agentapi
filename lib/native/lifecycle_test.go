@@ -340,6 +340,7 @@ func TestBeginRestartRetiresFirst(t *testing.T) {
 		retired = len(requests) > 0 && requests[len(requests)-1].Status == native.RequestStatusExpired
 	})
 	assert.True(t, retired, "the agent's requests expired before the reset")
+	statuses := len(rec.get().statuses)
 	first.Sink().RichMessage(text("late", "stale"))
 	assert.Empty(t, c.Messages(), "the retired agent's events are ignored")
 	assert.False(t, c.Idle(), "no turn starts until the new agent did")
@@ -349,4 +350,6 @@ func TestBeginRestartRetiresFirst(t *testing.T) {
 	assert.True(t, first.Closed())
 	assert.Len(t, factory.Adapters(), 2)
 	assert.True(t, c.Idle())
+	assert.Equal(t, []st.ConversationStatus{st.ConversationStatusInitializing, st.ConversationStatusStable}, rec.get().statuses[statuses:],
+		"Start reports the new agent's status, from the start")
 }
