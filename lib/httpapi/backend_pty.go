@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/coder/agentapi/lib/handoff"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 )
@@ -119,6 +122,56 @@ func (b ptyBackend) deliver(content string, _ DispatchMode, resp *MessageRespons
 	return nil
 }
 
-func (b ptyBackend) pendingRequest() (native.RequestState, string, bool) {
-	return native.RequestState{}, "", false
+// beforeQueue dismisses the update dialog Codex shows at startup, which
+// would hold the queue.
+func (b ptyBackend) beforeQueue() {
+	b.s.dismissCodexUpdatePromptLocked()
+}
+
+// handoffOffer offers a dialog of the agent's terminal.
+func (b ptyBackend) handoffOffer(view handoffView) (string, string, native.RequestState, bool) {
+	if view.dialog && b.s.transport == TransportPTY {
+		return "terminal", view.screen, native.RequestState{}, true
+	}
+	return "", "", native.RequestState{}, false
+}
+
+// answerHandoff answers a dialog of the agent's terminal. Free text
+// answering a prompt with a text field (Claude's plan feedback, Codex's
+// question notes) goes into that field; other answers become the keys
+// that pick an option.
+func (b ptyBackend) answerHandoff(pending *handoff.Request, _ native.RequestState, replyID, content string) handoff.Result {
+	s := b.s
+	freeTextKeys, freeText := "", false
+	if !isTerminalKeyAnswer(content) {
+		freeTextKeys, freeText = freeTextReplyKeys(s.agentType, pending.Content)
+	}
+	if !freeText {
+		var ok bool
+		content, ok = terminalReply(s.agentType, pending.Content, content)
+		if !ok {
+			return handoff.Result{Outcome: "invalid"}
+		}
+	}
+	// Reserve before touching the PTY. A failed/partial write must never be
+	// retried automatically; it may already have approved an operation.
+	result := handoff.Result{Outcome: "uncertain"}
+	s.handoff.record(pending.ID, replyID, result)
+	var err error
+	if freeText {
+		err = s.conversation.Send(formatFreeTextReply(s.agentType, freeTextKeys, strings.TrimSpace(content))...)
+	} else {
+		var n int
+		n, err = s.agentio.Write([]byte(content))
+		if err == nil && n != len(content) {
+			err = io.ErrShortWrite
+		}
+	}
+	if err == nil {
+		result.Outcome = "applied"
+	} else {
+		s.logger.Error("Human reply delivery is uncertain; refusing automatic retry", "request_id", pending.ID, "error", err)
+	}
+	s.handoff.record(pending.ID, replyID, result)
+	return result
 }

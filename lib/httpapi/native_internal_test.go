@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/handoff"
 	"github.com/coder/agentapi/lib/logctx"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
@@ -145,6 +146,29 @@ func TestNativeBackendTreatsCancelledCallsAsUncertain(t *testing.T) {
 	assert.Empty(t, b.notResent(errors.New("connection reset")))
 }
 
+// The queue's tick sends a continuation scheduled for a usage limit's
+// reset once it is due, before the queued messages, and not while the
+// agent restarts.
+func TestNativeTickContinuesWhenDue(t *testing.T) {
+	srv, factory := newQuietNativeServer(t, nil)
+	a := factory.Last()
+	sendUserMessage(t, srv, "first")
+	sendUserMessage(t, srv, "second")
+	resets := srv.clock.Now()
+	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your limit", ResetsAt: &resets})
+	require.NoError(t, srv.native.ScheduleContinue(&resets))
+
+	srv.restarting = true
+	srv.beforeQueue()
+	require.Len(t, a.Turns(), 1, "not while the agent restarts")
+	srv.restarting = false
+	srv.beforeQueue()
+	srv.dispatchNextQueuedMessage()
+	require.Len(t, a.Turns(), 2)
+	assert.Equal(t, native.ContinuePrompt, a.Turns()[1].Text)
+	assert.Len(t, srv.queue.Messages(), 1, "the queued message goes after it")
+}
+
 func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	srv, factory := newQuietNativeServer(t, nil)
 	a := factory.Last()
@@ -168,8 +192,8 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	// arrives. The reply must not approve the next request instead, and
 	// nothing was sent.
 	sink.RequestClosed("r1")
-	result := srv.replyNativeHandoffLocked(pending.ID, "reply-1", offered, "1")
-	assert.Equal(t, "superseded", result.Body.Outcome)
+	result := nativeBackend{srv}.answerHandoff(pending, offered, "reply-1", "1")
+	assert.Equal(t, "superseded", result.Outcome)
 	assert.Empty(t, a.Responses())
 
 	// A reply the request doesn't take is invalid, and as nothing was sent
@@ -181,8 +205,8 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	})
 	r3, ok := srv.native.Request("r3")
 	require.True(t, ok)
-	result = srv.replyNativeHandoffLocked("handoff-r3", "reply-2", r3, "1")
-	assert.Equal(t, "invalid", result.Body.Outcome)
+	result = nativeBackend{srv}.answerHandoff(&handoff.Request{ID: "handoff-r3"}, r3, "reply-2", "1")
+	assert.Equal(t, "invalid", result.Outcome)
 	_, recorded := srv.handoff.receipt("handoff-r3")
 	assert.False(t, recorded)
 	assert.Empty(t, a.Responses())

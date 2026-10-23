@@ -92,18 +92,10 @@ func (s *Server) dismissLimitStop(_ context.Context, _ *struct{}) (*InterruptRes
 	return okResponse(), limitStopError(s.native.DismissLimitStop())
 }
 
-// continueIfDue sends a scheduled continuation once it is due. Called on the
-// queue's tick, before the queue: the queued messages go after it.
-func (s *Server) continueIfDue() {
-	if s.native == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.restarting {
-		// It goes out once the new agent runs.
-		return
-	}
+// continueIfDueLocked sends a scheduled continuation once it is due. Called
+// on the queue's tick, before the queue: the queued messages go after it.
+// Caller holds s.mu.
+func (s *Server) continueIfDueLocked() {
 	ctx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
 	if _, err := s.native.ContinueIfDue(ctx, s.clock.Now()); err != nil && !errors.Is(err, st.ErrMessageValidationChanging) {

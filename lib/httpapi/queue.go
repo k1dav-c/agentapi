@@ -257,12 +257,22 @@ func (s *Server) queueMessageLocked(resp *MessageResponse, content string, front
 // the agent stays stable. Polling is immune to both.
 func (s *Server) startMessageQueue() {
 	s.queueLoop = s.clock.TickerFunc(s.shutdownCtx, messageQueueDispatchInterval, func() error {
-		s.dismissCodexUpdatePrompt()
-		s.continueIfDue()
+		s.beforeQueue()
 		s.dispatchNextQueuedMessage()
 		s.persistQueue()
 		return nil
 	}, "messageQueueDispatch")
+}
+
+// beforeQueue gives the transport's backend its turn on the queue's tick,
+// before the queue (see agentBackend.beforeQueue).
+func (s *Server) beforeQueue() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.restarting {
+		return
+	}
+	s.backend().beforeQueue()
 }
 
 // dispatchNextQueuedMessage sends the head of the queue once the agent can

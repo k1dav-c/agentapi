@@ -4,9 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -245,15 +243,13 @@ func (s *Server) pendingHandoff() (*handoff.Request, native.RequestState) {
 	if view.status.Lifecycle != LifecycleReady || s.conversation.Status() != st.ConversationStatusStable {
 		return nil, native.RequestState{}
 	}
-	kind, content := "message", view.reply
-	request, text, ok := s.backend().pendingRequest()
-	switch {
-	case ok:
-		kind, content = "request", text
-	case view.dialog && s.transport == TransportPTY:
-		kind, content = "terminal", view.screen
-	case s.queue.Len() > 0:
-		return nil, native.RequestState{}
+	kind, content, request, ok := s.backend().handoffOffer(view)
+	if !ok {
+		if s.queue.Len() > 0 {
+			// The agent's last message isn't its last word.
+			return nil, native.RequestState{}
+		}
+		kind, content = "message", view.reply
 	}
 	if strings.TrimSpace(content) == "" {
 		return nil, native.RequestState{}
@@ -296,72 +292,19 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 	if pending == nil || pending.ID != reply.RequestID {
 		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "superseded"}}, nil
 	}
-	content := reply.Content
-	if pending.Kind == "request" {
-		return s.replyNativeHandoffLocked(pending.ID, reply.ID, request, content), nil
+	if pending.Kind != "message" {
+		return &HandoffReplyResponse{Body: s.backend().answerHandoff(pending, request, reply.ID, reply.Content)}, nil
 	}
-	// Free text answering a prompt with a text field (Claude's plan
-	// feedback, Codex's question notes) goes into that field.
-	freeTextKeys, freeText := "", false
-	if pending.Kind == "terminal" && !isTerminalKeyAnswer(content) {
-		freeTextKeys, freeText = freeTextReplyKeys(s.agentType, pending.Content)
-	}
-	if pending.Kind == "terminal" && !freeText {
-		var ok bool
-		content, ok = terminalReply(s.agentType, pending.Content, content)
-		if !ok {
-			return &HandoffReplyResponse{Body: handoff.Result{Outcome: "invalid"}}, nil
-		}
-	}
-	// Reserve before touching the PTY. A failed/partial write must never be
-	// retried automatically; it may already have approved an operation.
+	// The reply to the agent's last message is the next message.
 	result := handoff.Result{Outcome: "uncertain"}
 	s.handoff.record(pending.ID, reply.ID, result)
-	var err error
-	if freeText {
-		err = s.conversation.Send(formatFreeTextReply(s.agentType, freeTextKeys, strings.TrimSpace(content))...)
-	} else if pending.Kind == "terminal" {
-		var n int
-		n, err = s.agentio.Write([]byte(content))
-		if err == nil && n != len(content) {
-			err = io.ErrShortWrite
-		}
-	} else {
-		err = s.conversation.Send(FormatMessage(s.agentType, content)...)
-	}
-	if err == nil {
-		result.Outcome = "applied"
-	} else {
+	if err := s.conversation.Send(FormatMessage(s.agentType, reply.Content)...); err != nil {
 		s.logger.Error("Human reply delivery is uncertain; refusing automatic retry", "request_id", pending.ID, "error", err)
+	} else {
+		result.Outcome = "applied"
 	}
 	s.handoff.record(pending.ID, reply.ID, result)
 	return &HandoffReplyResponse{Body: result}, nil
-}
-
-// replyNativeHandoffLocked answers r, the native request the pending handoff
-// offers, with a human reply. Caller holds s.mu, so no other reply is
-// delivered meanwhile.
-func (s *Server) replyNativeHandoffLocked(pendingID, replyID string, r native.RequestState, content string) *HandoffReplyResponse {
-	response, ok := nativeHandoffResponse(r, content)
-	if !ok {
-		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "invalid"}}
-	}
-	ctx, cancel := s.agentCtx(nativeCallTimeout)
-	defer cancel()
-	result := handoff.Result{Outcome: "applied"}
-	switch _, err := s.native.Respond(ctx, r.ID, response); {
-	case errors.Is(err, native.ErrInvalidResponse):
-		// Nothing was sent, so a corrected reply may follow.
-		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "invalid"}}
-	case errors.Is(err, native.ErrRequestNotFound), errors.Is(err, native.ErrNotStarted):
-		// Answered elsewhere, withdrawn or expired; nothing was sent.
-		result.Outcome = "superseded"
-	case err != nil:
-		s.logger.Error("Human reply delivery is uncertain; refusing automatic retry", "request_id", r.ID, "error", err)
-		result.Outcome = "uncertain"
-	}
-	s.handoff.record(pendingID, replyID, result)
-	return &HandoffReplyResponse{Body: result}
 }
 
 func (s *Server) registerHandoffRoutes() {

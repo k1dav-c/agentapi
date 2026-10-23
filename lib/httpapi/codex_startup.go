@@ -43,19 +43,16 @@ func isCodexUpdatePrompt(screen string) bool {
 	return codexUpdatePromptTitle.MatchString(tail) && codexUpdatePromptHint.MatchString(tail)
 }
 
-// dismissCodexUpdatePrompt skips the Codex update dialog with Esc ("esc
-// skip"), which only skips this launch and doesn't persist anything. An
-// unattended server has nobody to answer the dialog, and updating the CLI
-// is the workspace's job, not the agent session's.
-func (s *Server) dismissCodexUpdatePrompt() {
+// dismissCodexUpdatePromptLocked skips the Codex update dialog with Esc
+// ("esc skip"), which only skips this launch and doesn't persist anything.
+// An unattended server has nobody to answer the dialog, and updating the
+// CLI is the workspace's job, not the agent session's. Caller holds s.mu.
+func (s *Server) dismissCodexUpdatePromptLocked() {
 	if s.agentType != mf.AgentTypeCodex || s.transport != TransportPTY || s.emitter == nil {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Wait for the dialog to finish rendering before answering it, and for
-	// a restart to start the new process.
-	if s.restarting || s.conversation.Status() != st.ConversationStatusStable {
+	// Wait for the dialog to finish rendering before answering it.
+	if s.conversation.Status() != st.ConversationStatusStable {
 		return
 	}
 	now := s.clock.Now()

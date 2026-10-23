@@ -29,28 +29,28 @@ func TestDismissCodexUpdatePrompt(t *testing.T) {
 
 	// The dialog is still rendering.
 	c.status = st.ConversationStatusChanging
-	s.dismissCodexUpdatePrompt()
+	s.beforeQueue()
 	require.Empty(t, terminal.writes)
 
 	c.status = st.ConversationStatusStable
-	s.dismissCodexUpdatePrompt()
+	s.beforeQueue()
 	require.Equal(t, []string{"\x1b"}, terminal.writes)
 
 	// Give Codex time to close the dialog before pressing Esc again.
-	s.dismissCodexUpdatePrompt()
+	s.beforeQueue()
 	require.Len(t, terminal.writes, 1)
 	clock.Advance(codexUpdatePromptRetryInterval + time.Second)
-	s.dismissCodexUpdatePrompt()
+	s.beforeQueue()
 	require.Len(t, terminal.writes, 2)
 
 	clock.Advance(codexUpdatePromptRetryInterval + time.Second)
 	s.emitter.EmitScreen(readScreenFixture(t, "codex_composer_after_update.txt"))
-	s.dismissCodexUpdatePrompt()
+	s.beforeQueue()
 	require.Len(t, terminal.writes, 2)
 
 	// Other agents' screens are never touched.
 	s.agentType = mf.AgentTypeClaude
 	s.emitter.EmitScreen(readScreenFixture(t, "codex_update_prompt.txt"))
-	s.dismissCodexUpdatePrompt()
+	s.beforeQueue()
 	require.Len(t, terminal.writes, 2)
 }

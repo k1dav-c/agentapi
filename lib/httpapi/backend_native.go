@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/coder/agentapi/lib/handoff"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -90,6 +91,40 @@ func (b nativeBackend) deliver(content string, mode DispatchMode, resp *MessageR
 	return b.s.createNativeMessageLocked(content, mode, resp)
 }
 
-func (b nativeBackend) pendingRequest() (native.RequestState, string, bool) {
-	return b.s.pendingNativeHandoff()
+// beforeQueue sends the continuation of a turn a usage limit stopped once
+// it is due: the queued messages go after it.
+func (b nativeBackend) beforeQueue() {
+	b.s.continueIfDueLocked()
+}
+
+// handoffOffer offers the oldest pending request.
+func (b nativeBackend) handoffOffer(handoffView) (string, string, native.RequestState, bool) {
+	request, text, ok := b.s.pendingNativeHandoff()
+	return "request", text, request, ok
+}
+
+// answerHandoff answers the request the handoff offered. The server's lock
+// is held, so no other reply is delivered meanwhile.
+func (b nativeBackend) answerHandoff(pending *handoff.Request, r native.RequestState, replyID, content string) handoff.Result {
+	s := b.s
+	response, ok := nativeHandoffResponse(r, content)
+	if !ok {
+		return handoff.Result{Outcome: "invalid"}
+	}
+	ctx, cancel := s.agentCtx(nativeCallTimeout)
+	defer cancel()
+	result := handoff.Result{Outcome: "applied"}
+	switch _, err := s.native.Respond(ctx, r.ID, response); {
+	case errors.Is(err, native.ErrInvalidResponse):
+		// Nothing was sent, so a corrected reply may follow.
+		return handoff.Result{Outcome: "invalid"}
+	case errors.Is(err, native.ErrRequestNotFound), errors.Is(err, native.ErrNotStarted):
+		// Answered elsewhere, withdrawn or expired; nothing was sent.
+		result.Outcome = "superseded"
+	case err != nil:
+		s.logger.Error("Human reply delivery is uncertain; refusing automatic retry", "request_id", r.ID, "error", err)
+		result.Outcome = "uncertain"
+	}
+	s.handoff.record(pending.ID, replyID, result)
+	return result
 }
