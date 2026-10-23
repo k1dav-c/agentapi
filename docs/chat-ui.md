@@ -6,7 +6,7 @@ AgentAPI serves a chat UI at `/chat`. It is embedded in the `agentapi` binary, w
 transport, on a desktop and on a phone, and talks to the server only through the
 [HTTP API](../README.md#http-api-reference). This guide goes through every part of it.
 
-The screenshots and the animations show AgentAPI v0.27.0 with the built-in `native-demo` agent
+The screenshots and the animations show AgentAPI v0.28.0 with the built-in `native-demo` agent
 working on a small sample site; the demo's replies, tool results, models and usage are simulated,
 and TTY mode shows bash run as a PTY agent. The animations draw a blue dot where the pointer is and
 where it clicks. [scripts/capture-docs.mjs](../scripts/capture-docs.mjs) takes all of them again
@@ -330,7 +330,7 @@ textconv or fsmonitor of the repository or the user runs.
 
 ## Session Explorer
 
-The Explorer (⌘K / Ctrl+K, or the folder button) has five tabs. The Index, Files and Links lists
+The Explorer (⌘K / Ctrl+K, or the folder button) has six tabs. The Index, Files and Links lists
 have a filter box.
 
 ### Index
@@ -380,6 +380,20 @@ asks for a second click. Codex and Pi, when AgentAPI starts their CLI directly, 
 latest release first. **Download conversation JSONL** saves every message, tool call and result of
 the session, one event per line, followed by those of the subagents the agent ran; the session
 details menu has it too.
+### Webhook
+
+![The Explorer's Webhook tab: the receiver URL, event groups, signing secret, instance ID, heartbeat and public URL](screenshots/explorer-webhook.png)
+
+Sets up the webhook that pushes what happens to a receiver, such as a dashboard that watches many
+agents, also when AgentAPI started without one: the receiver's URL; the kinds of events to send
+(**Tasks**, **Needs you** for approvals, questions, plans, terminal dialogs, logins and usage limits,
+**Heartbeats**, **Run status**, **Agent errors**, **Messages**, **Tool calls**); a signing secret,
+which can be replaced or removed but not read back; the instance ID and public URL every event
+carries; and the heartbeat interval. **Delivery and payload** has the timeout, the attempts and a
+payload template. **Save** applies the settings at once, until AgentAPI restarts; **Send test event**
+sends a `webhook.test` event to the saved URL and says how the receiver answered; **Turn off** clears
+the URL. Events set with `--webhook-events` that no kind covers whole, such as `task.completed`
+alone, are listed and kept. See [Webhooks](../README.md#webhooks) for the events and their format.
 
 ## Lineage
 

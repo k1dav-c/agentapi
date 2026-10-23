@@ -63,7 +63,7 @@ response messages over stdio. All three transports update the shared event emitt
 
 ### Key packages
 
-- **`lib/httpapi/`** — HTTP server (chi router + huma for OpenAPI). Routes: `/messages`, `/message`, `/status`, `/events` (SSE), `/queue`, `/upload`, `/rich-messages`. The chat UI is embedded via `//go:embed` from `lib/httpapi/chat/`.
+- **`lib/httpapi/`** — HTTP server (chi router + huma for OpenAPI). Routes: `/messages`, `/message`, `/status`, `/events` (SSE), `/queue`, `/upload`, `/rich-messages`. The chat UI is embedded via `//go:embed` from `lib/httpapi/chat/`. Webhooks push events to a receiver: `webhook.go` delivers them (queue, retries, HMAC signatures, heartbeats), `webhook_events.go` subscribes to the emitter and turns its events into task, request, message and tool events.
 - **`lib/screentracker/`** — Core conversation engine. `Conversation` interface with `PTYConversation` implementation. Manages terminal snapshots, screen diffing, message splitting, and status detection (stable vs. changing).
 - **`lib/termexec/`** — Terminal process execution. Wraps PTY creation and process lifecycle.
 - **`lib/msgfmt/`** — Agent-specific message formatting. Strips echoed user input and TUI elements (input boxes, borders) from terminal output. Each agent type has different formatting quirks.

@@ -6,7 +6,7 @@ AgentAPI 在 `/chat` 提供聊天介面。它內建在 `agentapi` 執行檔裡�
 桌面和手機都可以，而且只透過 [HTTP API](../README.zh-TW.md#http-api-參考) 和伺服器溝通。
 本導覽會逐一介紹它的每個部分。
 
-截圖和動畫是 AgentAPI v0.27.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
+截圖和動畫是 AgentAPI v0.28.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
 demo 的回覆、工具結果、模型和用量都是模擬的，TTY mode 則是以 PTY agent 執行的 bash。動畫會
 在滑鼠指標所在及點擊的位置畫上藍點。[scripts/capture-docs.mjs](../scripts/capture-docs.mjs)
 可以重新擷取所有截圖和動畫（見[截圖說明](screenshots/README.md)）。標示 *native* 的部分需要
@@ -309,7 +309,7 @@ diff driver、textconv 或 fsmonitor。
 
 ## 工作階段瀏覽器
 
-Explorer（⌘K / Ctrl+K，或資料夾按鈕）有五個分頁。Index、Files 和 Links 清單有篩選框。
+Explorer（⌘K / Ctrl+K，或資料夾按鈕）有六個分頁。Index、Files 和 Links 清單有篩選框。
 
 ### Index 分頁
 
@@ -355,6 +355,19 @@ agent 在那個工作階段上重新啟動，並顯示它的對話；**Start a c
 AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的發行版。
 **Download conversation JSONL** 會儲存這個工作階段的每則訊息、工具呼叫和結果，每行一個事件，
 後面接著 agent 執行過的 sub agent 的事件；工作階段詳細資訊的選單裡也有。
+### Webhook 分頁
+
+![Explorer 的 Webhook 分頁：接收端網址、事件群組、簽章 secret、instance ID、心跳和公開網址](screenshots/explorer-webhook.png)
+
+設定把發生的事主動推送給接收端（例如監看多個 agent 的中控平台）的 webhook，AgentAPI 啟動時
+沒有設定也可以在這裡設定：接收端網址；要送的事件種類（**Tasks**、涵蓋核准、提問、計畫、終端機
+對話框、登入和用量限制的 **Needs you**、**Heartbeats**、**Run status**、**Agent errors**、
+**Messages**、**Tool calls**）；簽章 secret，可以替換或移除，但無法讀回；每個事件都會帶的
+instance ID 和公開網址；以及心跳間隔。**Delivery and payload** 底下有逾時、嘗試次數和 payload
+範本。**Save** 會立即套用設定，維持到 AgentAPI 重新啟動為止；**Send test event** 會對已儲存的
+網址送出 `webhook.test` 事件，並顯示接收端的回應；**Turn off** 會清除網址。以 `--webhook-events`
+設定、但沒有完整涵蓋任一種類的事件（例如只有 `task.completed`）會列出並保留。事件與格式見
+[Webhook](../README.zh-TW.md#webhook)。
 
 ## Lineage
 

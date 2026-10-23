@@ -1,7 +1,7 @@
 # Documentation screenshots
 
 These screenshots and animated GIFs of the chat UI illustrate the [chat UI guide](../chat-ui.md) and
-the [README](../../README.md). They were taken with Chromium from an AgentAPI v0.27.0 binary, which
+the [README](../../README.md). They were taken with Chromium from an AgentAPI v0.28.0 binary, which
 serves the production chat UI and the API.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
@@ -53,6 +53,7 @@ device scale factor of 1.
 | [queue-steer.png](queue-steer.png) | Queued tasks during a long turn, and the send menu |
 | [limit-card.png](limit-card.png) | A turn stopped on a usage limit, with a task held in the queue |
 | [cold-cache.png](cold-cache.png) | The note that the prompt cache expired, with Compact |
+| [explorer-webhook.png](explorer-webhook.png) | The Explorer's Webhook tab, filled in: the receiver URL, event groups, signing secret, instance ID, heartbeat and public URL |
 | [explorer-sessions.png](explorer-sessions.png) | The Explorer's Session tab with what the sessions cost and Claude Code's earlier sessions |
 | [task-cost.png](task-cost.png) | A task's time rail: its start time, duration and cost |
 | [lineage.png](lineage.png) | The Lineage panel on a subagent |

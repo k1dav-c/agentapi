@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Features
+
+- Webhooks push what happens to a receiver, such as a dashboard that watches many agents, besides
+  the API AgentAPI serves. `--webhook-events` picks them by type, group (`task.*`) or all (`*`):
+  `instance.started`, `instance.heartbeat` and `instance.stopped`; `task.started`, and
+  `task.completed` or `task.failed` with the prompt, reply, duration, outcome and API-equivalent
+  cost; `request.opened` and `request.closed` for approvals, questions, plans and terminal dialogs;
+  `login.*`, `limit.*`, `agent.error`; `message.created` and `tool.completed`. The default is
+  `run.status_changed` alone, as before. Every event names its instance (`--webhook-instance-id`,
+  `--public-url`, the Coder workspace), `--webhook-secret` signs every delivery with HMAC-SHA256
+  (`X-AgentAPI-Signature-256`), and `--webhook-heartbeat` sets the heartbeat. `GET/PUT /webhook`
+  read and change the new settings; the secret is never returned. Payload templates get `.Instance`
+  and `.Data`.
+- Chat: the Explorer's Webhook tab sets up the webhook, also on an AgentAPI started without one:
+  the URL, the kinds of events, the signing secret, the instance ID, the heartbeat, the public URL
+  and the delivery settings. **Send test event** (`POST /webhook/test`) sends a signed
+  `webhook.test` event and shows the receiver's answer.
+- Docs: a screenshot of the Webhook tab; all screenshots retaken.
+- Webhook retries wait twice as long each time, up to 30 seconds; a 4xx response other than 408
+  and 429 isn't tried again. The queue holds 1,024 events.
+
 ## v0.28.0
 
 ### Features

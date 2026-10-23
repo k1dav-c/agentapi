@@ -165,7 +165,7 @@ The handlers are grouped by file:
 | `limit.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); the agent's earlier sessions and what they cost (`/sessions`, `/cost`); its subagents (`/subagents`) |
 | `terminal.go`, `files.go`, `file_preview.go`, `files_find.go` | The shell terminal and the file viewer, and the search for a file the agent named relative to a repository |
 | `mcp.go`, `mcp_management.go` | MCP servers and profiles |
-| `webhook.go`, `handoff.go`, `dialog_reply.go` | Run-status webhooks, the human-reply API, answers to terminal dialogs |
+| `webhook.go`, `webhook_events.go`, `handoff.go`, `dialog_reply.go` | Webhook delivery (queue, retries, signatures, heartbeats) and the observer that turns the conversation's events into webhook events; the human-reply API; answers to terminal dialogs |
 | `auth.go` | Token auth and the chat's sign-in |
 | `restart.go`, `statedb.go` | Restarts; restoring and persisting the state |
 | `events.go`, `events_*.go`, `models.go` | The emitter (subscriptions and replay; the status, screen, requests and messages it keeps) and the API's types |
@@ -379,8 +379,15 @@ screen.
   epoch matches, and gives events SSE IDs, so a reconnecting `EventSource`
   resumes from `Last-Event-ID`.
 - `/internal/screen` streams the screen as `screen` events for TTY mode.
-- A status change between `running` and `stable` triggers the run-status
-  webhook.
+- A status change between `running` and `stable` triggers the
+  `run.status_changed` webhook event. The webhook observer subscribes to the
+  emitter like an `/events` client and turns its events into the other
+  webhook events: a user message starts a task, and the agent being stable
+  again with no request or terminal dialog open ends it; an agent message is
+  sent once the next one starts or the turn ends; what the emitter held when
+  the observer subscribed, and messages older than AgentAPI's start (a
+  resumed session's), are not sent. The dispatcher delivers the events one at
+  a time from a queue, with retries, and signs them with `--webhook-secret`.
 - With a state DB, the emitter hands every change to its `Persister`.
 
 ## The message queue
@@ -492,6 +499,8 @@ configurations. Agents read these files when they start, so a change takes effec
   browser.
 - Uploads go to a private directory, and only images are served back. Files
   outside the working directory can't be opened.
+- The webhook sends what it is configured to, the conversation included, to
+  its URL, which `PUT /webhook` can change; its HMAC secret is write-only.
 - Agents, on every transport, don't inherit the variables (one of them a
   secret) that a parent agent session sets for the commands it runs, nor
   AgentAPI's API token (`lib/procenv`).
@@ -570,7 +579,8 @@ a variant for embedding in other pages.
   for terminal dialogs, the login card, request cards, the usage limit card,
   the cold prompt cache note), the composer (`message-input.tsx`, with slash
   commands, the session settings and the usage meter), the Explorer (with the
-  earlier sessions and what they cost, `session-history.tsx`), the Lineage panel of the
+  earlier sessions and what they cost, `session-history.tsx`, and the webhook,
+  `webhook-settings.tsx`), the Lineage panel of the
   subagents (`lineage.tsx`), the file viewer, TTY mode (`tty-view.tsx`, from
   `/internal/screen`) and the native terminal (`shell-view.tsx`, from
   `/terminal`).

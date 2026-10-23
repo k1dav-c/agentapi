@@ -6,7 +6,7 @@ AgentAPI 提供統一的 HTTP API，讓你控制 [Claude Code](https://github.co
 
 ![AgentAPI 聊天介面中的兩個任務：提示詞、工具呼叫、思考旁註和輸入框](docs/screenshots/chat-desktop.png)
 
-截圖是 AgentAPI v0.27.0 搭配內建 `native-demo` agent 的畫面，它的回覆、工具結果、模型和用量
+截圖是 AgentAPI v0.28.0 搭配內建 `native-demo` agent 的畫面，它的回覆、工具結果、模型和用量
 都是模擬的。[聊天介面導覽](docs/chat-ui.zh-TW.md)以截圖和動畫逐一介紹聊天介面的每項功能，
 [截圖說明](docs/screenshots/README.md)則說明它們是怎麼擷取的。
 
@@ -15,12 +15,15 @@ AgentAPI 可以用來：
 - 為各種程式開發代理（coding agent）打造統一的聊天介面
 - 作為 MCP 伺服器的後端，讓一個 agent 控制另一個 coding agent
 - 建立把 pull request 審查交給 agent 處理的工具
+- 從一個中控平台監看多個 agent：每個 AgentAPI 都用 [webhook](#webhook) 把任務、需要你處理的
+  請求、訊息和心跳主動推送過去
 
 ## 關於這個 fork
 
 此 fork 以上游 v0.12.2 為基礎，預設以 [native transport](#native-transport) 透過 Claude Code、
 Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬方式（[PTY transport](#pty-transport)）。
-工作階段管理與聊天功能則支援不同的 transport，方便處理長時間執行的任務。[CHANGELOG.md](CHANGELOG.md) 列出有哪些變更，
+工作階段管理與聊天功能則支援不同的 transport，方便處理長時間執行的任務，[webhook](#webhook)
+則把它們回報給中控平台。[CHANGELOG.md](CHANGELOG.md) 列出有哪些變更，
 [docs/architecture.zh-TW.md](docs/architecture.zh-TW.md) 說明它的架構，完整的 commit 歷史
 請參閱[與上游的完整比較](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)。
 
@@ -81,7 +84,7 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 
 - [任務](#任務與對話紀錄)以對話紀錄的形式呈現，工具呼叫一行一列，思考內容以旁註顯示，
   並標出每個任務的花費，也可以匯出成 Markdown；[工作階段瀏覽器](#工作階段瀏覽器)提供連結、檔案、任務索引、
-  MCP 伺服器、agent [先前的工作階段](#先前的工作階段)和重新啟動。
+  MCP 伺服器、agent [先前的工作階段](#先前的工作階段)、重新啟動和 [webhook](#webhook)。
 - [Lineage](#lineage)：agent 執行過的 sub agent，以及每一個做了什麼，一步一步呈現，執行中也能看。
 - 終端機對話框和 native 請求的[決策卡片](#決策卡片)、agent 設定的選單、顯示 context 的圓環，
   以及斜線指令。
@@ -94,8 +97,9 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 
 - Claude Code、Codex 和 Pi 的 [MCP 管理](#mcp-管理)，可以使用可重複套用的設定檔；重新啟動
   agent 前會先更新 Codex 和 Pi。
-- [執行狀態 webhook](#執行狀態-webhook) 和[人工回覆 API](#人工回覆-api)，讓機器人在 agent
-  停下來時通知你，並把你的回覆傳回去。
+- [Webhook](#webhook) 會把任務、請求、訊息和心跳主動推送到監看多個 agent 的中控平台，並以
+  HMAC 簽章；搭配[人工回覆 API](#人工回覆-api)，機器人可以在 agent 停下來時通知你，並把你的
+  回覆傳回去。
 - AgentAPI 的[自我更新](#agentapi-update)，會比對發行版的 checksum。
 - [安全性](#安全性)：API token（聊天介面以 cookie 登入）、監聽位址，以及允許的主機與來源。
 
@@ -252,7 +256,8 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 - 可直接跳到先前任務的索引；
 - 不必離開聊天介面就能設定 MCP 伺服器；
 - Session 分頁：可以開啟或複製 agent [先前的工作階段](#先前的工作階段)、查看它們的
-  [花費](#工作階段花費)，並提供兩步驟重新啟動（Restart）（用 ⌘K / Ctrl+K 開啟 Explorer）。
+  [花費](#工作階段花費)，並提供兩步驟重新啟動（Restart）；
+- Webhook 分頁：設定 [webhook](#webhook)（用 ⌘K / Ctrl+K 開啟 Explorer）。
 
 ![工作階段瀏覽器的 Index 分頁，列出這個工作階段的任務](docs/screenshots/explorer-index.png)
 
@@ -1102,34 +1107,120 @@ agent 忙碌時收到的訊息不會被拒絕，而是依先進先出（FIFO）�
 
 ## 整合
 
-### 執行狀態 webhook
+AgentAPI 除了被動提供 API 給呼叫它的人，也會把發生的事主動推送給你指定的接收端：
+[webhook](#webhook) 即時送出任務、請求、訊息和心跳，[人工回覆 API](#人工回覆-api) 讓機器人
+回覆 agent 正在等待的問題，[MCP 管理](#mcp-管理) 則可以修改 agent 的工具。
 
-每當執行狀態在 `running` 和 `stable` 之間切換時，AgentAPI 可以送出 HTTP POST。
-Webhook 可以用 CLI 旗標或 `AGENTAPI_WEBHOOK_*` 環境變數初始化，之後再透過
-`GET/PUT /webhook` 查看或修改。
+### Webhook
 
-Webhook 以非同步方式傳送，逾時時間和重試次數皆可設定。你也可以選擇提供 Go `text/template`
-payload 範本，依照接收端的需求調整 POST 內容。可用的欄位有 `.ID`、`.Type`、`.CreatedAt`、
-`.RunID`、`.Status`、`.PreviousStatus`、`.AgentType` 和 `.Transport`。沒有設定範本時，
-會原封不動地送出預設的 JSON payload。
+除了被動提供 API 之外，AgentAPI 也能主動把發生的事推送給接收端，例如同時監看多個 agent 的中控
+平台：每次有變化，它就把一個 JSON 事件 POST 到 `--webhook-url`。預設只送 `run.status_changed`；
+`--webhook-events` 可以挑選更多事件，依類型（`task.completed`）、群組（`task.*`）或全部（`*`）：
+
+| 事件 | 何時送出 | `data` |
+| --- | --- | --- |
+| `run.status_changed` | agent 在 `running` 與 `stable` 之間切換 | `status`、`previous_status`、`run_id`、`agent_type`、`transport` |
+| `instance.started`、`instance.heartbeat`、`instance.stopped` | AgentAPI 啟動時、每隔 `--webhook-heartbeat`（60 秒），以及關閉時 | agent 的狀況：`status`、`lifecycle`、`session_id`、`session_name`、`pending_requests`、`queued_messages`，以及有值時的 `terminal_prompt`、`login_required`、`limit_stop`、`usage`、`settings` |
+| `task.started` | 你的一則訊息送到 agent | 任務：`id`（那則訊息的 ID）、`prompt`、`started_at` |
+| `task.completed`、`task.failed` | agent 完成它：回到 stable，且沒有開著的請求或終端機對話框 | 任務加上 `ended_at`、`duration_seconds`、`outcome`（`completed`；agent 回報錯誤或結束時為 `failed`；用量限制時為 `limited`）、agent 最後一則訊息（`reply`）、`errors`、`limit`、`session_name`，以及 native Claude Code、Codex 和 Pi 的 API 等價花費 `cost`（見[工作階段花費](#工作階段花費)） |
+| `request.opened`、`request.closed` | 核准、提問或計畫（native；請求內容同 `GET /requests`），或終端機對話框（PTY；`kind` 為 `terminal_prompt`，附 `prompt`）開啟或關閉 | 請求 |
+| `login.required`、`login.completed` | native agent 需要登入，或不再需要 | `agent`、`message`、要執行的 `command` |
+| `limit.stopped`、`limit.cleared` | 用量限制讓回合停下，或停止狀態結束 | `message`、`stopped_at`、`resets_at` |
+| `agent.error` | agent 回報錯誤或警告 | `message`、`level`、`time` |
+| `message.created` | 你的訊息，或 agent 的最終訊息 | `id`、`role`、`content`（超過 64 KiB 會截斷並標示 `truncated`）、`time` |
+| `tool.completed` | 工具呼叫回傳結果 | `tool_use_id`、`name`、`input`、`result` 和 `is_error`，各截斷至 4 KiB |
+
+每個事件都會註明它來自哪一個 AgentAPI，讓一個接收端可以分辨多個 instance：
+
+```json
+{
+  "id": "unique-delivery-id",
+  "type": "task.completed",
+  "created_at": "2026-10-22T12:00:00Z",
+  "instance": {
+    "id": "my-host:3284",
+    "run_id": "agentapi-process-run-id",
+    "hostname": "my-host",
+    "port": 3284,
+    "pid": 4242,
+    "cwd": "/home/me/project",
+    "agent_type": "claude",
+    "transport": "native",
+    "agentapi_version": "0.29.0",
+    "url": "https://agent.example.com",
+    "workspace_url": "https://coder.example.com/@me/dev"
+  },
+  "data": {
+    "id": 4,
+    "prompt": "Fix the failing test",
+    "started_at": "2026-10-22T11:58:30Z",
+    "ended_at": "2026-10-22T12:00:00Z",
+    "duration_seconds": 90,
+    "outcome": "completed",
+    "reply": "Fixed: the test compared times in two time zones.",
+    "cost": {"usd": 0.42, "tokens": {"input": 12, "cache_read": 81000, "cache_write": 4200, "output": 1900}, "calls": 6},
+    "session_name": "Fix the failing test"
+  }
+}
+```
+
+instance 的 `id` 是 `--webhook-instance-id`，預設為 `<hostname>:<port>`；`url` 是 `--public-url`，
+接收端可以從這個網址開啟這個 AgentAPI 的聊天介面或呼叫它的 API；`workspace_url` 則是它所在的
+Coder workspace（如果有）。AgentAPI 啟動之前的訊息和工具呼叫，以及從 agent 歷史紀錄開啟的工作
+階段中的訊息，都不會再送一次。
 
 ```bash
 agentapi server \
-  --webhook-url https://example.com/agentapi/events \
+  --webhook-url https://dashboard.example.com/agentapi/events \
+  --webhook-events 'task.*,request.*,login.*,limit.*,instance.*' \
+  --webhook-secret "$WEBHOOK_SECRET" \
+  --public-url https://agent.example.com \
   -- claude
 ```
 
-對應的環境變數有 `AGENTAPI_WEBHOOK_URL`、`AGENTAPI_WEBHOOK_PAYLOAD_TEMPLATE`、
-`AGENTAPI_WEBHOOK_TIMEOUT` 和 `AGENTAPI_WEBHOOK_MAX_ATTEMPTS`。逾時時間預設為 `10s`，
-最多嘗試傳送 3 次。
+每個請求都帶有 `X-AgentAPI-Delivery`、`X-AgentAPI-Event`、`X-AgentAPI-Timestamp` 和
+`X-AgentAPI-Instance` 標頭。設定 `--webhook-secret` 時，`X-AgentAPI-Signature-256` 會為請求簽章：
+`sha256=` 加上以 secret 為金鑰、對「時間戳記、`.`、body」計算的 HMAC-SHA256（hex）。接收端在
+信任事件之前，應先驗證簽章並確認時間戳記夠新：
 
-請求內容的格式如下：
+```python
+expected = "sha256=" + hmac.new(secret, f"{timestamp}.".encode() + body, hashlib.sha256).hexdigest()
+valid = hmac.compare_digest(expected, signature) and abs(time.time() - int(timestamp)) < 300
+```
+
+事件一次送一個，依發生順序。傳送失敗（網路錯誤、逾時、5xx、408 或 429 回應）時，會在 1、2、
+4…秒（最多 30 秒）後重試，共 `--webhook-max-attempts`（3）次、每次逾時 `--webhook-timeout`
+（10 秒），之後放棄並記錄在 log；4xx 回應不會重試。接收端無法連線時，事件會在最多 1,024 個的
+佇列中等待，佇列滿了之後較新的事件會被丟棄，所以漏收事件的接收端應從 API（或下一次心跳）讀取
+目前狀態。關閉時，AgentAPI 最多會等 5 秒讓 `instance.stopped` 送達。
+
+可以用 Go `text/template`（`--webhook-payload-template`）改寫 body 的格式以符合接收端，例如聊天
+服務的 incoming webhook。可用欄位有 `.ID`、`.Type`、`.CreatedAt`、`.Instance` 和 `.Data`（事件的
+data，欄位名稱同 JSON，例如 `{{.Data.prompt}}`），`run.status_changed` 另有 `.RunID`、`.Status`、
+`.PreviousStatus`、`.AgentType` 和 `.Transport`。
+
+每個參數都有對應的 `AGENTAPI_` 環境變數（`AGENTAPI_WEBHOOK_URL`、以空白分隔事件的
+`AGENTAPI_WEBHOOK_EVENTS`、`AGENTAPI_WEBHOOK_SECRET` 等）。`GET /webhook` 顯示目前設定（只顯示
+是否設定了 secret，不會回傳 secret 本身），`PUT /webhook` 不需重新啟動就能修改；省略的
+`events`、`secret`、`heartbeat_seconds`、`instance_id` 和 `public_url` 會維持原值。
+
+聊天介面中，Explorer 的 Webhook 分頁也能做同樣的設定：接收端網址、事件種類（任務、需要你處理
+的事、心跳、執行狀態、agent 錯誤、訊息、工具呼叫）、簽章 secret、instance ID、心跳間隔、公開
+網址，以及 **Delivery and payload** 底下的逾時、嘗試次數和範本，所以啟動時沒有設定 webhook 的
+AgentAPI 也能在這裡設定。在這裡或用 `PUT /webhook` 修改的設定會維持到 AgentAPI 重新啟動為止；
+啟動參數則決定啟動時的設定。**Send test event**（`POST /webhook/test`）會對已儲存的網址送一次
+`webhook.test` 事件（和其他事件一樣簽章，不受所選事件影響），並顯示接收端的回應。
+
+![Explorer 的 Webhook 分頁：接收端網址、事件群組、簽章 secret、instance ID、心跳和公開網址](docs/screenshots/explorer-webhook.png)
+
+原本的執行狀態事件格式不變：
 
 ```json
 {
   "id": "unique-delivery-id",
   "type": "run.status_changed",
   "created_at": "2026-07-26T12:00:00Z",
+  "instance": {"id": "my-host:3284", "run_id": "agentapi-process-run-id", "agent_type": "claude", "transport": "pty"},
   "data": {
     "run_id": "agentapi-process-run-id",
     "status": "stable",
@@ -1139,8 +1230,6 @@ agentapi server \
   }
 }
 ```
-
-每個請求都會帶有 `X-AgentAPI-Delivery`、`X-AgentAPI-Event` 和 `X-AgentAPI-Timestamp` 標頭。
 
 ### 人工回覆 API
 
@@ -1155,7 +1244,7 @@ agentapi server \
 `enter` 或 `esc`；提示有文字欄位時（例如 Claude Code 的計畫回饋），也可以輸入自由
 文字。`outcome` 為 `applied`、`superseded`（已不再開啟，例如已在網頁介面回覆）、
 `invalid`（回覆不符合，仍保持開啟）或 `uncertain`，而且不會被回覆兩次。搭配上面的
-執行狀態 webhook，整合服務就能在 agent 停下來時通知你，並把你的回覆傳回來。
+webhook，整合服務就能在 agent 停下來時通知你，並把你的回覆傳回來。
 
 ### MCP 管理
 
@@ -1306,7 +1395,8 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
 - 從 agent 自己的紀錄（`~/.claude`、`~/.codex`、`~/.pi`）讀取它在工作目錄中先前工作階段的對話，
   它執行過的 sub agent 的步驟，以及它們的花費，並開啟其中任何一個工作階段。
 - 上傳最大 10 MB 的檔案；只有圖片會被回傳。
-- 修改 MCP 伺服器和 webhook，以及重新啟動 agent。
+- 修改 MCP 伺服器和 webhook，以及重新啟動 agent。webhook 可以把對話（`message.created`、
+  `tool.completed`）送到任何網址；`GET /webhook` 不會回傳它的 secret。
 
 只要有其他人連得到伺服器，就請使用 `--api-token`，並搭配 `--bind` 或反向代理。
 
@@ -1410,7 +1500,12 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 | `--api-token` | 關閉 | 要求 Bearer token；不帶值時會產生隨機 token 並印出；見 [API token 驗證](#api-token-驗證) |
 | `-a`, `--allowed-hosts` | `localhost`、`127.0.0.1`、`[::1]` | 接受的 `Host` 標頭，`*` 表示全部；見[允許的主機](#允許的主機) |
 | `-o`, `--allowed-origins` | `http://localhost:3284`、`http://localhost:3000`、`http://localhost:3001` | 允許從瀏覽器呼叫 API 的來源，`*` 表示全部；見[允許的來源](#允許的來源) |
-| `--webhook-url` | | 執行狀態改變時通知的網址；見[執行狀態 webhook](#執行狀態-webhook) |
+| `--webhook-url` | | webhook 事件 POST 的目的網址；見 [Webhook](#webhook) |
+| `--webhook-events` | `run.status_changed` | 要送的事件：類型、群組（`task.*`）或 `*` |
+| `--webhook-secret` | | 為每次傳送簽章的 secret（`X-AgentAPI-Signature-256`） |
+| `--webhook-heartbeat` | `60s` | `instance.heartbeat` 的間隔；`0` 為關閉 |
+| `--webhook-instance-id` | `<hostname>:<port>` | 每個事件中代表這個 AgentAPI 的 ID |
+| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在每個事件中 |
 | `--webhook-timeout` | `10s` | 每次傳送的逾時時間 |
 | `--webhook-max-attempts` | `3` | 傳送的嘗試次數 |
 | `--webhook-payload-template` | | POST 內容的 Go `text/template` 範本 |
@@ -1513,7 +1608,8 @@ agentapi attach --url localhost:3284
 | 端點 | 說明 |
 | --- | --- |
 | `GET /handoff`、`POST /handoff/reply` | [人工回覆 API](#人工回覆-api)：agent 在等什麼，以及對它的回覆 |
-| `GET /webhook`、`PUT /webhook` | 讀取或修改[執行狀態 webhook](#執行狀態-webhook) |
+| `GET /webhook`、`PUT /webhook` | 讀取或修改 [webhook](#webhook)：網址、事件、secret、心跳和 instance |
+| `POST /webhook/test` | 對 webhook 網址送一次 `webhook.test` 事件，並回傳接收端的回應 |
 | `GET /mcp`、`PUT /mcp` | MCP 伺服器與受管理的設定檔；PUT 會整組取代，`?restart=true` 會重新啟動 agent（*native*：可以接續時接續原本的工作階段；ACP 會回傳 400） |
 | `POST /mcp/check` | 檢查遠端 HTTP 伺服器，並解析 stdio 執行檔 |
 | `POST /mcp/servers`、`PATCH /mcp/servers/{name}`、`DELETE /mcp/servers/{name}` | 新增、更新或移除單一 MCP 伺服器 |

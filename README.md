@@ -14,7 +14,7 @@ with an HTTP API.
 
 ![The AgentAPI chat with two tasks: prompts, tool calls, thinking notes and the composer](docs/screenshots/chat-desktop.png)
 
-The screenshots show AgentAPI v0.27.0 with the built-in `native-demo` agent, whose replies, tool
+The screenshots show AgentAPI v0.28.0 with the built-in `native-demo` agent, whose replies, tool
 results, models and usage are simulated. The [chat UI guide](docs/chat-ui.md) goes through every
 feature of the chat with screenshots and animations, and the
 [screenshot guide](docs/screenshots/README.md) explains how they are taken.
@@ -24,13 +24,16 @@ Use AgentAPI to:
 - Build a unified chat interface for coding agents.
 - Provide an MCP server backend that lets one agent control another coding agent.
 - Create tools that delegate pull request reviews to an agent.
+- Watch many agents from one dashboard: each AgentAPI pushes its tasks, the requests that need
+  you, its messages and heartbeats there with [webhooks](#webhooks).
 
 ## About this fork
 
 This fork builds on upstream v0.12.2. It drives Claude Code, Codex and Pi through their own
 protocols with the [native transport](#native-transport) by default, and keeps terminal emulation
 (the [PTY transport](#pty-transport)) for every other agent. Session management and chat features
-support long-running tasks across transports. [CHANGELOG.md](CHANGELOG.md) lists what
+support long-running tasks across transports, and [webhooks](#webhooks) report them to a central
+platform. [CHANGELOG.md](CHANGELOG.md) lists what
 changed, [docs/architecture.md](docs/architecture.md) describes how it is built, and the
 [full comparison with upstream](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)
 has the complete commit history.
@@ -102,7 +105,8 @@ has the complete commit history.
   rows, thinking as margin notes and what each task cost, and can be exported
   as Markdown; the
   [Session Explorer](#session-explorer) has links, files, a task index, MCP
-  servers, the agent's [earlier sessions](#earlier-sessions) and Restart.
+  servers, the agent's [earlier sessions](#earlier-sessions), Restart and the
+  [webhook](#webhooks).
 - [Lineage](#lineage): the subagents the agent ran, and what each did, step by
   step, also while it works.
 - [Decision cards](#decision-cards) for terminal dialogs and native requests,
@@ -118,7 +122,8 @@ has the complete commit history.
 
 - [MCP management](#mcp-management) for Claude Code, Codex and Pi, with
   reusable profiles; restarting the agent updates Codex and Pi first.
-- [Run-status webhooks](#run-status-webhooks) and a
+- [Webhooks](#webhooks) push tasks, requests, messages and heartbeats to a
+  dashboard that watches many agents, signed with HMAC; with a
   [human-reply API](#human-reply-api) let a bot tell you when the agent stops
   and pass your answer back.
 - [Self-update](#agentapi-update), verified against the release's checksums.
@@ -289,7 +294,8 @@ The Session Explorer provides:
 - an index for jumping directly to earlier tasks;
 - MCP server configuration without leaving the chat UI;
 - a Session tab with the agent's [earlier sessions](#earlier-sessions) to open or copy, what they
-  [cost](#session-costs), and a two-step restart confirmation (open the Explorer with ⌘K / Ctrl+K).
+  [cost](#session-costs), and a two-step restart confirmation;
+- a Webhook tab that sets up the [webhook](#webhooks) (open the Explorer with ⌘K / Ctrl+K).
 
 ![The Session Explorer's Index tab listing the session's tasks](docs/screenshots/explorer-index.png)
 
@@ -1299,35 +1305,125 @@ turn the agent refused to start), the conversation gets a new epoch and connecte
 
 ## Integrations
 
-### Run-status webhooks
+AgentAPI serves its API to whoever calls it, and pushes what happens to a receiver of your choice:
+[webhooks](#webhooks) send tasks, requests, messages and heartbeats as they happen, the
+[human-reply API](#human-reply-api) lets a bot answer what the agent waits on, and
+[MCP management](#mcp-management) changes the agent's tools.
 
-AgentAPI can send an HTTP POST whenever a run changes between `running` and `stable`. Webhooks can
-be initialized with CLI flags or `AGENTAPI_WEBHOOK_*` environment variables, then inspected or
-changed through `GET/PUT /webhook`.
+### Webhooks
 
-Delivery runs asynchronously with a configurable timeout and retry count. An optional Go
-`text/template` payload template lets you reshape the POST body for the receiver. Available fields
-are `.ID`, `.Type`, `.CreatedAt`, `.RunID`, `.Status`, `.PreviousStatus`, `.AgentType`, and
-`.Transport`. When no template is set, the default JSON payload is sent unchanged.
+Besides the API it serves, AgentAPI can push what happens to a receiver, such as a dashboard that
+watches many agents: it POSTs a JSON event to `--webhook-url` for each change. By default it sends
+only `run.status_changed`; `--webhook-events` picks more, by type (`task.completed`), by group
+(`task.*`) or all of them (`*`):
+
+| Event | Sent when | `data` |
+| --- | --- | --- |
+| `run.status_changed` | The agent changes between `running` and `stable` | `status`, `previous_status`, `run_id`, `agent_type`, `transport` |
+| `instance.started`, `instance.heartbeat`, `instance.stopped` | AgentAPI starts, every `--webhook-heartbeat` (60s), and shuts down | What the agent does: `status`, `lifecycle`, `session_id`, `session_name`, `pending_requests`, `queued_messages`, and `terminal_prompt`, `login_required`, `limit_stop`, `usage`, `settings` when set |
+| `task.started` | A message of yours reaches the agent | The task: `id` (the message's), `prompt`, `started_at` |
+| `task.completed`, `task.failed` | The agent is done with it: stable, with no request or terminal dialog open | The task with `ended_at`, `duration_seconds`, `outcome` (`completed`, or `failed` after an agent error or exit, `limited` after a usage limit), the agent's last message (`reply`), `errors`, `limit`, `session_name`, and for native Claude Code, Codex and Pi its API-equivalent `cost` (see [Session costs](#session-costs)) |
+| `request.opened`, `request.closed` | An approval, question or plan (native; the request as `GET /requests` has it), or a terminal dialog (PTY; `kind` `terminal_prompt` with the `prompt`), opens or closes | The request |
+| `login.required`, `login.completed` | The native agent needs a login, or no longer does | `agent`, `message`, `command` to run |
+| `limit.stopped`, `limit.cleared` | A usage limit stopped a turn, or the stop is over | `message`, `stopped_at`, `resets_at` |
+| `agent.error` | The agent reported an error or a warning | `message`, `level`, `time` |
+| `message.created` | A message of yours or a final message of the agent's | `id`, `role`, `content` (cut at 64 KiB, with `truncated`), `time` |
+| `tool.completed` | A tool call returned | `tool_use_id`, `name`, `input`, `result` and `is_error`, each cut at 4 KiB |
+
+Every event names the AgentAPI it comes from, so one receiver can tell many apart:
+
+```json
+{
+  "id": "unique-delivery-id",
+  "type": "task.completed",
+  "created_at": "2026-10-22T12:00:00Z",
+  "instance": {
+    "id": "my-host:3284",
+    "run_id": "agentapi-process-run-id",
+    "hostname": "my-host",
+    "port": 3284,
+    "pid": 4242,
+    "cwd": "/home/me/project",
+    "agent_type": "claude",
+    "transport": "native",
+    "agentapi_version": "0.29.0",
+    "url": "https://agent.example.com",
+    "workspace_url": "https://coder.example.com/@me/dev"
+  },
+  "data": {
+    "id": 4,
+    "prompt": "Fix the failing test",
+    "started_at": "2026-10-22T11:58:30Z",
+    "ended_at": "2026-10-22T12:00:00Z",
+    "duration_seconds": 90,
+    "outcome": "completed",
+    "reply": "Fixed: the test compared times in two time zones.",
+    "cost": {"usd": 0.42, "tokens": {"input": 12, "cache_read": 81000, "cache_write": 4200, "output": 1900}, "calls": 6},
+    "session_name": "Fix the failing test"
+  }
+}
+```
+
+The instance `id` is `--webhook-instance-id`, by default `<hostname>:<port>`; `url` is
+`--public-url`, where the receiver can reach this AgentAPI to open its chat or call its API, and
+`workspace_url` the Coder workspace it runs in, if any. Messages and tool calls from before AgentAPI
+started, or of a session it opened from the agent's history, are not sent again.
 
 ```bash
 agentapi server \
-  --webhook-url https://example.com/agentapi/events \
+  --webhook-url https://dashboard.example.com/agentapi/events \
+  --webhook-events 'task.*,request.*,login.*,limit.*,instance.*' \
+  --webhook-secret "$WEBHOOK_SECRET" \
+  --public-url https://agent.example.com \
   -- claude
 ```
 
-The equivalent environment variables are `AGENTAPI_WEBHOOK_URL`,
-`AGENTAPI_WEBHOOK_PAYLOAD_TEMPLATE`, `AGENTAPI_WEBHOOK_TIMEOUT`, and
-`AGENTAPI_WEBHOOK_MAX_ATTEMPTS`. The timeout defaults to `10s`, and delivery is attempted up to 3
-times.
+Each request includes `X-AgentAPI-Delivery`, `X-AgentAPI-Event`, `X-AgentAPI-Timestamp` and
+`X-AgentAPI-Instance` headers. With `--webhook-secret`, `X-AgentAPI-Signature-256` signs it:
+`sha256=` and the hex HMAC-SHA256, keyed with the secret, of the timestamp, a `.` and the body. A
+receiver checks it, and that the timestamp is recent, before trusting the event:
 
-The request body has this format:
+```python
+expected = "sha256=" + hmac.new(secret, f"{timestamp}.".encode() + body, hashlib.sha256).hexdigest()
+valid = hmac.compare_digest(expected, signature) and abs(time.time() - int(timestamp)) < 300
+```
+
+Events are sent one at a time, in order. A delivery that fails (a network error, a timeout, a 5xx,
+408 or 429 response) is tried again after 1, 2, 4… seconds, up to 30, for `--webhook-max-attempts`
+(3) attempts with `--webhook-timeout` (10s) each, and then given up and logged; a 4xx response is
+not tried again. While the receiver is down, events wait in a queue of 1,024 and newer ones are
+dropped once it is full, so a receiver that missed some reads the current state from the API (or the
+next heartbeat). On shutdown AgentAPI waits up to 5 seconds for `instance.stopped` to be delivered.
+
+An optional Go `text/template` (`--webhook-payload-template`) reshapes the body for the receiver,
+such as a chat service's incoming webhook. Available fields are `.ID`, `.Type`, `.CreatedAt`,
+`.Instance` and `.Data` (the event's data with its JSON field names, such as `{{.Data.prompt}}`), and
+for `run.status_changed` `.RunID`, `.Status`, `.PreviousStatus`, `.AgentType` and `.Transport`.
+
+All flags have `AGENTAPI_` environment variables (`AGENTAPI_WEBHOOK_URL`, `AGENTAPI_WEBHOOK_EVENTS`
+with the events separated by spaces, `AGENTAPI_WEBHOOK_SECRET`, and so on). `GET /webhook` shows the
+configuration (whether a secret is set, never the secret) and `PUT /webhook` changes it without a
+restart; its `events`, `secret`, `heartbeat_seconds`, `instance_id` and `public_url` are kept when
+left out.
+
+In the chat, the Explorer's Webhook tab does the same: the receiver's URL, the kinds of events
+(tasks, what needs you, heartbeats, run status, agent errors, messages, tool calls), the signing
+secret, the instance ID, the heartbeat, the public URL and, under **Delivery and payload**, the
+timeout, attempts and template, so a webhook can be set up on an AgentAPI that started without one.
+Settings changed there or with `PUT /webhook` last until AgentAPI restarts; the flags set them at
+start. **Send test event** (`POST /webhook/test`) sends a `webhook.test` event to the saved URL once,
+signed like the others and whatever the events chosen, and shows the receiver's answer.
+
+![The Explorer's Webhook tab: the receiver URL, event groups, signing secret, instance ID, heartbeat and public URL](docs/screenshots/explorer-webhook.png)
+
+The original run-status event keeps its format:
 
 ```json
 {
   "id": "unique-delivery-id",
   "type": "run.status_changed",
   "created_at": "2026-07-26T12:00:00Z",
+  "instance": {"id": "my-host:3284", "run_id": "agentapi-process-run-id", "agent_type": "claude", "transport": "pty"},
   "data": {
     "run_id": "agentapi-process-run-id",
     "status": "stable",
@@ -1337,9 +1433,6 @@ The request body has this format:
   }
 }
 ```
-
-Each request includes `X-AgentAPI-Delivery`, `X-AgentAPI-Event`, and `X-AgentAPI-Timestamp`
-headers.
 
 ### Human-reply API
 
@@ -1354,7 +1447,7 @@ described under [Requests](#requests-approvals-questions-and-plans). A terminal 
 displayed option number, `enter` or `esc`, or free text where the prompt has a text field (such as
 Claude Code's plan feedback). The `outcome` is `applied`, `superseded` (no longer open, for example
 because it was answered in the web UI), `invalid` (the reply doesn't fit; it stays open) or
-`uncertain`, and nothing is answered twice. Combined with the run-status webhooks above, an
+`uncertain`, and nothing is answered twice. Combined with the webhooks above, an
 integration can tell you when the agent stops and pass your answer back.
 
 ### MCP management
@@ -1531,7 +1624,9 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
   directory, and the steps of the subagents it ran, from the agent's own logs
   (`~/.claude`, `~/.codex`, `~/.pi`), and what they cost, and open any of those sessions.
 - Upload files of up to 10 MB; only images are served back.
-- Change the MCP servers and the webhook, and restart the agent.
+- Change the MCP servers and the webhook, and restart the agent. The webhook can send the
+  conversation (`message.created`, `tool.completed`) to any URL; `GET /webhook` never returns its
+  secret.
 
 Use `--api-token` together with `--bind` or a reverse proxy whenever someone else can reach the
 server.
@@ -1640,7 +1735,12 @@ variable.
 | `--api-token` | off | Require a Bearer token; without a value, a random token is generated and printed; see [API token authentication](#api-token-authentication) |
 | `-a`, `--allowed-hosts` | `localhost`, `127.0.0.1`, `[::1]` | Accepted `Host` headers, `*` for any; see [Allowed hosts](#allowed-hosts) |
 | `-o`, `--allowed-origins` | `http://localhost:3284`, `http://localhost:3000`, `http://localhost:3001` | Origins allowed to call the API from a browser, `*` for any; see [Allowed origins](#allowed-origins) |
-| `--webhook-url` | | URL notified when the run status changes; see [Run-status webhooks](#run-status-webhooks) |
+| `--webhook-url` | | URL the webhook events are POSTed to; see [Webhooks](#webhooks) |
+| `--webhook-events` | `run.status_changed` | Events to send: types, groups (`task.*`) or `*` |
+| `--webhook-secret` | | Secret that signs every delivery (`X-AgentAPI-Signature-256`) |
+| `--webhook-heartbeat` | `60s` | How often `instance.heartbeat` is sent; `0` turns it off |
+| `--webhook-instance-id` | `<hostname>:<port>` | Identifies this AgentAPI in every event |
+| `--public-url` | | URL this AgentAPI is reached at, sent in every event |
 | `--webhook-timeout` | `10s` | Timeout of each delivery attempt |
 | `--webhook-max-attempts` | `3` | Delivery attempts |
 | `--webhook-payload-template` | | Go `text/template` for the POST body |
@@ -1744,7 +1844,8 @@ default. Endpoints marked *native* need the native transport.
 | Endpoint | Description |
 | --- | --- |
 | `GET /handoff`, `POST /handoff/reply` | The [human-reply API](#human-reply-api): what the agent waits on, and an answer to it |
-| `GET /webhook`, `PUT /webhook` | Read or change the [run-status webhook](#run-status-webhooks) |
+| `GET /webhook`, `PUT /webhook` | Read or change the [webhook](#webhooks): its URL, events, secret, heartbeat and instance |
+| `POST /webhook/test` | Send a `webhook.test` event to the webhook URL once, and return the receiver's answer |
 | `GET /mcp`, `PUT /mcp` | The MCP servers and the managed config file; PUT replaces them, `?restart=true` restarts the agent (*native*: on its session if it can resume it; 400 with ACP) |
 | `POST /mcp/check` | Check remote HTTP servers and resolve stdio executables |
 | `POST /mcp/servers`, `PATCH /mcp/servers/{name}`, `DELETE /mcp/servers/{name}` | Create, update or remove one MCP server |

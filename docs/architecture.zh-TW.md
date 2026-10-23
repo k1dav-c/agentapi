@@ -150,7 +150,7 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 | `limit.go`、`sessions.go`、`subagents.go` | 因用量限制停下的回合（`/limit`）；agent 先前的工作階段和它們的花費（`/sessions`、`/cost`）；它的 sub agent（`/subagents`） |
 | `terminal.go`、`files.go`、`file_preview.go`、`files_find.go` | Shell 終端機與檔案檢視器，以及搜尋 agent 用 repo 相對路徑提到的檔案 |
 | `mcp.go`、`mcp_management.go` | MCP 伺服器與設定檔 |
-| `webhook.go`、`handoff.go`、`dialog_reply.go` | 執行狀態 webhook、人工回覆 API、終端機對話框的回答 |
+| `webhook.go`、`webhook_events.go`、`handoff.go`、`dialog_reply.go` | Webhook 傳送（佇列、重試、簽章、心跳），以及把對話事件轉成 webhook 事件的 observer；人工回覆 API；終端機對話框的回答 |
 | `auth.go` | Token 驗證與聊天介面登入 |
 | `restart.go`、`statedb.go` | 重新啟動；還原與保存狀態 |
 | `events.go`、`events_*.go`、`models.go` | Emitter（訂閱與重播；它保存的狀態、畫面、請求與訊息）與 API 的型別 |
@@ -329,7 +329,12 @@ type Factory func(resume Resume) (Adapter, error)
   加上 `?sync=1` 時，串流會以 `session_sync` 事件開頭；epoch 相符時只重播 `since=<seq>`
   之後的變更，事件也會帶有 SSE id，讓重新連線的 `EventSource` 從 `Last-Event-ID` 接續。
 - `/internal/screen` 以 `screen` 事件為 TTY mode 串流畫面。
-- 狀態在 `running` 與 `stable` 之間切換時，會觸發執行狀態 webhook。
+- 狀態在 `running` 與 `stable` 之間切換時，會觸發 `run.status_changed` webhook 事件。webhook
+  observer 像 `/events` 用戶端一樣訂閱 emitter，把它的事件轉成其他 webhook 事件：使用者訊息開始
+  一個任務，agent 回到 stable 且沒有開著的請求或終端機對話框時任務結束；agent 的訊息在下一則開始
+  或回合結束時才送出；observer 訂閱時 emitter 已有的內容，以及比 AgentAPI 啟動時間更早的訊息
+  （接續的工作階段的訊息）都不會送出。傳送器從佇列依序一次送一個事件，失敗會重試，並以
+  `--webhook-secret` 簽章。
 - 有狀態資料庫時，emitter 會把每次變更交給它的 `Persister`。
 
 ## 訊息佇列
@@ -422,6 +427,8 @@ Content-Security-Policy。
   `127.0.0.1` 和 `[::1]`，用來防範 DNS rebinding），`--allowed-origins` 決定哪些來源可以從
   瀏覽器呼叫 API。
 - 上傳的檔案存放在私有目錄，只有圖片會被回傳。工作目錄以外的檔案無法開啟。
+- webhook 會把設定要送的內容（包括對話）送到它的網址，而 `PUT /webhook` 可以修改網址；它的
+  HMAC secret 只能寫入、無法讀回。
 - 不論使用哪種 transport，agent 都不會繼承上層 agent 工作階段為它所執行的指令設定的環境變數
   （包含機密資訊），也不會拿到 AgentAPI 的 API token（`lib/procenv`）。
 
@@ -491,7 +498,7 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 - `components/chat.tsx` 負責頁面版面：訊息清單（任務、工具呼叫列、思考）、輸入框上方的停靠區
   （狀態列、終端機對話框的決策卡片、登入卡片、請求卡片、用量限制卡片、prompt cache 過期提醒）、
   輸入框（`message-input.tsx`，含斜線指令、工作階段設定和用量指示）、Explorer（含先前的工作階段和它們的
-  花費，`session-history.tsx`）、sub agent 的 Lineage 面板（`lineage.tsx`）、檔案檢視器、TTY mode
+  花費，`session-history.tsx`，以及 webhook 設定，`webhook-settings.tsx`）、sub agent 的 Lineage 面板（`lineage.tsx`）、檔案檢視器、TTY mode
   （`tty-view.tsx`，來自
   `/internal/screen`）以及 native 終端機（`shell-view.tsx`，來自 `/terminal`）。
 - `lib/` 將邏輯封裝為獨立模組，並附有 Bun 測試：任務分組、工具格式化、檔案參照、diff、斜線
