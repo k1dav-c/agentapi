@@ -249,6 +249,9 @@ export interface ChatState {
   // What the agent calls the session (Claude Code's title, Codex's thread
   // name, Pi's /name); empty until it names it.
   sessionName: string;
+  // The agent's own session ID (native transport): as the status says, or
+  // GET /cost; empty until either does.
+  agentSessionId: string;
   customTitle?: string;
   // The Coder workspace: the ?workspace= parameter, or what the server says
   // (GET /workspace).
@@ -306,6 +309,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     agentapiVersion,
     terminalColumns,
     sessionName,
+    agentSessionId,
     terminalPrompt,
     capabilities,
     settings: agentSettings,
@@ -662,6 +666,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     agentapiVersion,
     terminalColumns,
     sessionName,
+    agentSessionId: agentSessionId || sessionCost?.agent_session_id || "",
     customTitle,
     workspaceUrl: workspaceParam ?? serverWorkspaceUrl,
   };

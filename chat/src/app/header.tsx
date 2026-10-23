@@ -8,7 +8,9 @@ import {sameValue} from "@/lib/agent-status";
 import {agentDisplayName} from "@/lib/agents";
 import { ModeToggle } from "@/components/mode-toggle";
 import { AgentMark } from "@/components/agent-mark";
-import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Tag } from "lucide-react";
+import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Copy, Download, Fingerprint, Hash, Keyboard, LoaderCircle, Tag } from "lucide-react";
+import { copyText } from "@/lib/clipboard";
+import { getErrorMessage } from "@/lib/error-utils";
 import { formatTokenCount, getStatusMeta } from "@/lib/session-status";
 import { useWorkingElapsed } from "@/lib/use-elapsed";
 import { openShortcuts } from "@/components/keyboard-shortcuts";
@@ -31,6 +33,7 @@ export function Header() {
   const customTitle = useChatSelector((chat) => chat.customTitle);
   const agentapiVersion = useChatSelector((chat) => chat.agentapiVersion);
   const sessionName = useChatSelector((chat) => chat.sessionName);
+  const agentSessionId = useChatSelector((chat) => chat.agentSessionId);
   // The tool the agent used last in its task, and the session's tokens:
   // worked out as messages stream (useTranscript), so the header renders
   // again only when one of them changes.
@@ -133,6 +136,7 @@ export function Header() {
               <SessionDetail icon={StatusIcon} label="Status" value={status.label} valueClassName={status.className} />
               <SessionDetail icon={Bot} label="Agent" value={agentDisplayName(agentType, "Unknown")} />
               {sessionName && <SessionDetail icon={MessageSquareText} label="Session" value={sessionName} />}
+              {agentSessionId && <AgentSessionDetail id={agentSessionId} />}
               {agentapiVersion && <SessionDetail icon={Tag} label="Version" value={`AgentAPI v${agentapiVersion}`} />}
               <SessionDetail icon={Activity} label="Activity" value={activityDetail} />
               <SessionDetail
@@ -200,6 +204,37 @@ export function Header() {
 // The page's own actions (search, TTY, Explorer) render into this slot so
 // the app has a single top bar; see MessageList.
 export const HEADER_ACTIONS_ID = "header-actions";
+
+// The agent's own session ID, which GET /sessions lists and resuming
+// opens: its first characters, and a button that copies all of it.
+function AgentSessionDetail({id}: {id: string}) {
+  const copy = async () => {
+    try {
+      await copyText(id);
+      toast.success("Session ID copied");
+    } catch (error) {
+      toast.error("Could not copy the session ID", {description: getErrorMessage(error)});
+    }
+  };
+  return (
+    <div className="grid grid-cols-[1rem_4rem_1fr] items-start gap-2" data-agent-session>
+      <Fingerprint className="mt-0.5 size-3.5 text-muted-foreground" />
+      <span className="text-muted-foreground">Session ID</span>
+      <span className="flex min-w-0 items-center justify-end gap-1.5 font-medium">
+        <span className="font-mono" title={id}>{id.slice(0, 8)}</span>
+        <button
+          type="button"
+          onClick={() => void copy()}
+          className="rounded p-0.5 text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          title="Copy the agent's session ID"
+          aria-label="Copy the agent's session ID"
+        >
+          <Copy className="size-3.5" />
+        </button>
+      </span>
+    </div>
+  );
+}
 
 function SessionDetail({
   icon: Icon,

@@ -17,7 +17,8 @@ const event: StatusChangeEvent = {
 
 describe("applyStatusChange", () => {
   test("reads the event", () => {
-    const status = applyStatusChange(initialAgentStatus, event);
+    const status = applyStatusChange(initialAgentStatus, {...event, agent_session_id: "0199c3f1-77aa-7000-8000-000000000001"});
+    expect(status.agentSessionId).toBe("0199c3f1-77aa-7000-8000-000000000001");
     expect(status.serverStatus).toBe("running");
     expect(status.agentType).toBe("codex");
     expect(status.agentapiVersion).toBe("1.2.3");
