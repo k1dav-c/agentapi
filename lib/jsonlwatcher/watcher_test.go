@@ -2,13 +2,16 @@ package jsonlwatcher
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/coder/quartz"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/agentlog/claudelog"
@@ -284,3 +287,46 @@ func TestStoppedWatcherDropsWhatItHolds(t *testing.T) {
 	defer mu.Unlock()
 	require.Equal(t, []string{"user"}, roles)
 }
+
+func TestWatcherReportsFormatDrift(t *testing.T) {
+	jsonlPath := filepath.Join(t.TempDir(), "session.jsonl")
+	require.NoError(t, os.WriteFile(jsonlPath, []byte(
+		`{"type":"user","uuid":"u1","timestamp":"2026-07-24T09:35:19.000Z","version":"2.9.0","message":{"role":"user","content":"hello"}}`+"\n"+
+			`{"type":"brand-new"}`+"\n"), 0o600))
+	var out strings.Builder
+	var mu sync.Mutex
+	logged := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return out.String()
+	}
+	clock := quartz.NewMock(t)
+	w := New(Config{
+		Resolver: &staticResolver{path: jsonlPath},
+		Parser:   claudelog.NewParser(),
+		Format:   claudelog.Format,
+		Clock:    clock,
+		Logger:   slog.New(slog.NewTextHandler(writerFunc(func(p []byte) (int, error) { mu.Lock(); defer mu.Unlock(); return out.Write(p) }), nil)),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Start(ctx)
+	pump(t, clock, func() bool { return strings.Contains(logged(), "level=WARN") })
+	assert.Contains(t, logged(), `agent=claude version=2.9.0`)
+
+	f, err := os.OpenFile(jsonlPath, os.O_APPEND|os.O_WRONLY, 0)
+	require.NoError(t, err)
+	_, err = f.WriteString(`{"type":"brand-new"}` + "\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	for range 5 {
+		_, w := clock.AdvanceNext()
+		w.MustWait(ctx)
+	}
+	assert.Equal(t, 1, strings.Count(logged(), "level=WARN"), "once per log")
+}
+
+// writerFunc is an io.Writer of a function.
+type writerFunc func(p []byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }

@@ -1,8 +1,10 @@
 package sessions
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -140,4 +142,31 @@ func TestConcurrentCostsShareAReading(t *testing.T) {
 	close(start)
 	wg.Wait()
 	assert.LessOrEqual(t, store.costPasses.Load(), int64(2), "the calls share a reading")
+}
+
+// A log holding records its format doesn't know is reported once, with
+// the agent's version: the agent may have changed its format.
+func TestStoreReportsFormatDrift(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	path := filepath.Join(config, "projects", "-w", "s1.jsonl")
+	writeLog(t, path, time.Now(),
+		`{"type":"user","timestamp":"2026-10-20T10:00:00.000Z","sessionId":"s1","version":"2.9.0","message":{"role":"user","content":"Hi"}}`,
+		`{"type":"brand-new","sessionId":"s1"}`,
+		`{"type":"assistant","timestamp":"2026-10-20T10:00:01.000Z","sessionId":"s1","message":{"id":"m1","content":[{"type":"text","text":"cut`)
+	var out strings.Builder
+	store, err := New("claude", "/w", Config{Logger: slog.New(slog.NewTextHandler(&out, nil))})
+	require.NoError(t, err)
+	_, err = store.Costs()
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(out.String(), "level=WARN"))
+	assert.Contains(t, out.String(), `agent=claude version=2.9.0`)
+	assert.Contains(t, out.String(), `unknown_record_types="\"brand-new\": 1" undecodable_lines=1`)
+
+	appendLines(t, path, `{"type":"brand-new","sessionId":"s1"}`+"\n")
+	_, err = store.Costs()
+	require.NoError(t, err)
+	_, err = store.List(10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(out.String(), "level=WARN"), "once per log")
 }

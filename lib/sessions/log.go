@@ -37,6 +37,8 @@ type sessionLog struct {
 	firstAt time.Time
 
 	calls agentlog.CallReader
+	// drift counts what the log holds that its format doesn't know.
+	drift *agentlog.Drift
 
 	// from is the first line of a Codex subagent's log that is its own:
 	// Codex starts a subagent's log with a copy of its parent's.
@@ -47,9 +49,12 @@ type sessionLog struct {
 }
 
 func (s *Store) newSessionLog(subagent bool) *sessionLog {
-	l := &sessionLog{store: s, src: &s.src, subagent: subagent, codex: s.agent == "codex", calls: s.src.calls()}
-	if s.src.namer != nil {
-		l.namer = s.src.namer()
+	l := &sessionLog{
+		store: s, src: &s.src, subagent: subagent, codex: s.agent == "codex",
+		calls: s.src.format.NewCalls(), drift: agentlog.NewDrift(s.src.format),
+	}
+	if s.src.namesInLog {
+		l.namer = s.src.format.NewNamer()
 	}
 	return l
 }
@@ -58,6 +63,7 @@ func (s *Store) newSessionLog(subagent bool) *sessionLog {
 func (l *sessionLog) Line(line []byte) bool {
 	first := l.lines == 0
 	l.lines++
+	l.drift.Line(line)
 	if first && !l.head(line) {
 		// Not a session of the directory: nothing of it counts.
 		return false
@@ -201,6 +207,14 @@ type logSnapshot struct {
 	status  string
 	calls   []agentlog.Call
 	info    agentlog.FileInfo
+}
+
+// reportDrift logs once what the log holds that its format doesn't know,
+// for a log that is the directory's.
+func (l *sessionLog) reportDrift(path string) {
+	if l.session || l.subagent {
+		l.drift.Report(l.store.logger, path)
+	}
 }
 
 // snapshot returns what l read, with its calls if withCalls.

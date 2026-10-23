@@ -87,10 +87,10 @@ func (s *Store) ReadHistory(id string) (SessionHistory, error) {
 // prompts; an agent message joins the text of the rich messages that
 // followed one.
 func (s *Store) read(path string) SessionHistory {
-	parser := s.src.parser()
+	parser := s.src.format.NewParser()
 	var namer agentlog.SessionNamer
-	if s.src.namer != nil {
-		namer = s.src.namer()
+	if s.src.namesInLog {
+		namer = s.src.format.NewNamer()
 	}
 	var (
 		history SessionHistory

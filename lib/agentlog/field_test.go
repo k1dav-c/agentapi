@@ -99,3 +99,26 @@ func TestUnquote(t *testing.T) {
 		}
 	}
 }
+
+func TestMembers(t *testing.T) {
+	t.Parallel()
+	var keys []string
+	whole := Members([]byte(`{"type":"user","message":{"content":"a } \" {"},"n":1}`+"\n"), func(key, value []byte) bool {
+		keys = append(keys, string(key)+"="+string(value))
+		return true
+	})
+	assert.True(t, whole)
+	assert.Equal(t, []string{`type="user"`, `message={"content":"a } \" {"}`, `n=1`}, keys)
+	assert.True(t, Members([]byte(` {} `), nil))
+	for _, bad := range []string{
+		`{"type":"user","message":{"content":"cut off`,
+		`{"type":"user","message":{"cont{"type":"assistant","message":{}}`,
+		`{"type":"user"}{"type":"user"}`,
+		`{"type":"user",}`,
+		`[1]`,
+		`not json`,
+		``,
+	} {
+		assert.False(t, Members([]byte(bad), nil), bad)
+	}
+}

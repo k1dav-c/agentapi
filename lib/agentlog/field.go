@@ -49,6 +49,53 @@ func Field(line []byte, key string) (value []byte, ok bool) {
 	}
 }
 
+// Members calls fn with the key and raw value of each top-level member of
+// the object a log line holds, until it returns false, and reports whether
+// the line is one whole JSON object (as far as its structure goes: it
+// doesn't validate literals). A line cut off or run into another one
+// isn't.
+func Members(line []byte, fn func(key, value []byte) bool) bool {
+	i := skipSpace(line, 0)
+	if i >= len(line) || line[i] != '{' {
+		return false
+	}
+	i = skipSpace(line, i+1)
+	if i < len(line) && line[i] == '}' {
+		return skipSpace(line, i+1) == len(line)
+	}
+	for {
+		if i >= len(line) || line[i] != '"' {
+			return false
+		}
+		end := skipString(line, i)
+		if end < 0 {
+			return false
+		}
+		key := line[i+1 : end-1]
+		i = skipSpace(line, end)
+		if i >= len(line) || line[i] != ':' {
+			return false
+		}
+		i = skipSpace(line, i+1)
+		valueEnd := skipValue(line, i)
+		if valueEnd < 0 {
+			return false
+		}
+		if fn != nil && !fn(key, line[i:valueEnd]) {
+			fn = nil
+		}
+		i = skipSpace(line, valueEnd)
+		switch {
+		case i < len(line) && line[i] == ',':
+			i = skipSpace(line, i+1)
+		case i < len(line) && line[i] == '}':
+			return skipSpace(line, i+1) == len(line)
+		default:
+			return false
+		}
+	}
+}
+
 // Elements calls fn with each element of a JSON array, as Field finds
 // values, until it returns false. It reports whether value is an array.
 func Elements(value []byte, fn func(elem []byte) bool) bool {

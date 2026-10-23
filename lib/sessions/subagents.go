@@ -118,9 +118,9 @@ func (s *Store) ReadSubagent(sessionID, id string) (Subagent, SubagentRun, error
 // parser returns the line parsers of the subagent's log.
 func (s Subagent) parser() (agentlog.LineParser, agentlog.SessionEventParser, func(line []byte) (string, time.Time, bool)) {
 	if s.kind == "codex" {
-		return codexlog.NewParser(), codexlog.NewEventParser(), codexlog.Prompt
+		return codexlog.Format.NewParser(), codexlog.Format.NewEventParser(), codexlog.Prompt
 	}
-	return claudelog.NewParser(), claudelog.NewEventParser(), func(line []byte) (string, time.Time, bool) { return claudelog.UserText(line, true) }
+	return claudelog.Format.NewParser(), claudelog.Format.NewEventParser(), func(line []byte) (string, time.Time, bool) { return claudelog.UserText(line, true) }
 }
 
 // run reads the subagent's task and messages. The messages' IDs start with

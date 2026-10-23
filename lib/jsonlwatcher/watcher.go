@@ -24,8 +24,11 @@ const (
 
 // Config for creating a new Watcher.
 type Config struct {
-	Resolver  agentlog.SessionResolver
-	Parser    agentlog.LineParser
+	Resolver agentlog.SessionResolver
+	Parser   agentlog.LineParser
+	// Format, if set, is the log's: the watcher logs once per log what it
+	// holds that the format doesn't know.
+	Format    agentlog.Format
 	Logger    *slog.Logger
 	OnMessage func(transcript.RichMessage) // called when a message is completed or updated
 	OnLine    func([]byte)                 // called for each complete raw JSONL record
@@ -40,6 +43,7 @@ type Config struct {
 type Watcher struct {
 	resolver  agentlog.SessionResolver
 	parser    agentlog.LineParser
+	format    agentlog.Format
 	logger    *slog.Logger
 	onMessage func(transcript.RichMessage)
 	onLine    func([]byte)
@@ -59,6 +63,7 @@ func New(cfg Config) *Watcher {
 	return &Watcher{
 		resolver:  cfg.Resolver,
 		parser:    cfg.Parser,
+		format:    cfg.Format,
 		logger:    logger,
 		onMessage: cfg.OnMessage,
 		onLine:    cfg.OnLine,
@@ -149,6 +154,10 @@ func (w *Watcher) tailFile(ctx context.Context, path string) string {
 	w.logger.Info("Opened JSONL file for tailing", "path", path)
 
 	reader := bufio.NewReader(f)
+	var drift *agentlog.Drift
+	if w.format != nil {
+		drift = agentlog.NewDrift(w.format)
+	}
 	pollTicker := w.clock.NewTicker(pollInterval, "Watcher", "poll")
 	defer pollTicker.Stop()
 	resolveTicker := w.clock.NewTicker(sessionPollInterval, "Watcher", "resolve")
@@ -172,7 +181,13 @@ func (w *Watcher) tailFile(ctx context.Context, path string) string {
 				w.logger.Error("Error reading JSONL file", "error", err)
 				return ""
 			}
+			if drift != nil {
+				drift.Line(line)
+			}
 			w.processLine(line)
+		}
+		if drift != nil {
+			drift.Report(w.logger, path)
 		}
 
 		// Flush only completed messages (those with a terminal stop_reason).

@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"slices"
 	"sync"
@@ -26,6 +27,7 @@ type Store struct {
 	dir    *agentlog.Dir
 	prices *pricing.Table
 	config Config
+	logger *slog.Logger
 	src    source
 
 	// logs holds what was read of the sessions' logs, subs of their
@@ -57,6 +59,9 @@ type Config struct {
 	// PiSessionDir is the --session-dir Pi runs with, which holds its
 	// session logs; empty when it runs without one.
 	PiSessionDir string
+	// Logger reports logs whose format the Store doesn't know all of; nil
+	// is slog's default.
+	Logger *slog.Logger
 }
 
 // The bounds of what a Store keeps of the logs it read: past them, it
@@ -84,11 +89,16 @@ func New(agentType, cwd string, config Config) (*Store, error) {
 	if prices == nil {
 		prices = pricing.Builtin()
 	}
+	logger := config.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	s := &Store{
 		agent:  agentType,
 		dir:    agentlog.NewDir(cwd),
 		prices: prices,
 		config: config,
+		logger: logger,
 		src:    src,
 		names:  agentlog.NewIndex(codexlog.NewThreadNames, 1, maxLogBytes),
 		paths:  make(map[string]string),
@@ -103,6 +113,7 @@ func New(agentType, cwd string, config Config) (*Store, error) {
 func (s *Store) readLog(path string, withCalls bool) (logSnapshot, error) {
 	var snap logSnapshot
 	err := s.logs.Read(path, func(l *sessionLog, info agentlog.FileInfo) {
+		l.reportDrift(path)
 		snap = l.snapshot(path, info, withCalls)
 	})
 	if err != nil {
@@ -130,6 +141,7 @@ func (s *Store) readLog(path string, withCalls bool) (logSnapshot, error) {
 func (s *Store) readSubagentLog(path string, withCalls bool) (logSnapshot, error) {
 	var snap logSnapshot
 	err := s.subs.Read(path, func(l *sessionLog, info agentlog.FileInfo) {
+		l.reportDrift(path)
 		snap = l.snapshot(path, info, withCalls)
 	})
 	return snap, err

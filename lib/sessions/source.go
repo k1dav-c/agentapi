@@ -17,6 +17,10 @@ import (
 
 // source is how one agent keeps its session logs, and how to read them.
 type source struct {
+	format agentlog.Format
+	// namesInLog says the log holds the session's name; Codex keeps it in
+	// its session index.
+	namesInLog bool
 	// files lists the logs that may be the directory's sessions.
 	files func(s *Store) ([]string, error)
 	// byID lists the logs that may be session id's, by their names: in the
@@ -34,11 +38,6 @@ type source struct {
 	header func(line []byte) (id string, started time.Time, cwd string, ok bool)
 	// prompt returns the user's message a line holds, if it holds one.
 	prompt func(line []byte) (string, time.Time, bool)
-	parser func() agentlog.LineParser
-	// namer follows the session's name in its log; nil when the agent
-	// keeps the name elsewhere (Codex).
-	namer func() agentlog.SessionNamer
-	calls func() agentlog.CallReader
 	// scan reads a session's lines, as agentlog.ScanFile does; nil is
 	// agentlog.ScanFile. It differs for a log that refers to another one's
 	// lines (a Codex fork).
@@ -49,34 +48,31 @@ func sourceFor(agentType string) (source, bool) {
 	switch agentType {
 	case "claude":
 		return source{
+			format:         claudelog.Format,
+			namesInLog:     true,
 			files:          claudeFiles,
 			byID:           claudeLogsByID,
 			linesRecordCWD: true,
 			header:         claudeHeader,
 			prompt:         claudelog.Prompt,
-			parser:         func() agentlog.LineParser { return claudelog.NewParser() },
-			namer:          func() agentlog.SessionNamer { return claudelog.NewNamer() },
-			calls:          func() agentlog.CallReader { return claudelog.NewCalls() },
 		}, true
 	case "codex":
 		return source{
+			format: codexlog.Format,
 			files:  codexFiles,
 			byID:   codexLogsByID,
 			header: codexlog.Header,
 			prompt: codexlog.Prompt,
-			parser: func() agentlog.LineParser { return codexlog.NewParser() },
-			calls:  func() agentlog.CallReader { return codexlog.NewCalls() },
 			scan:   codexlog.ScanLog,
 		}, true
 	case "pi":
 		return source{
-			files:  piFiles,
-			byID:   piLogsByID,
-			header: pilog.Header,
-			prompt: pilog.Prompt,
-			parser: func() agentlog.LineParser { return pilog.NewParser() },
-			namer:  func() agentlog.SessionNamer { return pilog.NewNamer() },
-			calls:  func() agentlog.CallReader { return pilog.NewCalls() },
+			format:     pilog.Format,
+			namesInLog: true,
+			files:      piFiles,
+			byID:       piLogsByID,
+			header:     pilog.Header,
+			prompt:     pilog.Prompt,
 		}, true
 	}
 	return source{}, false

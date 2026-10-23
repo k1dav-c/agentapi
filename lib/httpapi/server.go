@@ -395,6 +395,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		s.sessions, err = sessions.New(string(config.AgentType), config.CWD, sessions.Config{
 			Prices:       config.Native.Prices,
 			PiSessionDir: config.Native.PiSessionDir,
+			Logger:       logger,
 		})
 		if err != nil {
 			return nil, err

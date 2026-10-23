@@ -56,6 +56,7 @@ func (s *Server) startJSONLWatcher(pid int) {
 	w := jsonlwatcher.New(jsonlwatcher.Config{
 		Resolver: agent.Resolver,
 		Parser:   agent.Parser,
+		Format:   agent.Format,
 		Logger:   s.logger,
 		Clock:    s.clock,
 		OnMessage: func(msg transcript.RichMessage) {

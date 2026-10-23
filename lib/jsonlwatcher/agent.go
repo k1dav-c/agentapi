@@ -14,6 +14,8 @@ import (
 
 // Agent is what following one agent's session log takes.
 type Agent struct {
+	// Format is the log's.
+	Format agentlog.Format
 	// Resolver finds the session log.
 	Resolver agentlog.SessionResolver
 	// Parser turns its lines into rich messages, and Events into timeline
@@ -31,6 +33,7 @@ func ForAgent(agentType string, pid int, cwd string, started time.Time) (Agent, 
 	switch agentType {
 	case "claude":
 		return Agent{
+			Format:   claudelog.Format,
 			Resolver: &claudelog.Resolver{PID: pid},
 			Parser:   claudelog.NewParser(),
 			Events:   claudelog.NewEventParser(),
@@ -38,6 +41,7 @@ func ForAgent(agentType string, pid int, cwd string, started time.Time) (Agent, 
 		}, true
 	case "codex":
 		return Agent{
+			Format:   codexlog.Format,
 			Resolver: &codexlog.Resolver{CWD: cwd, NotBefore: started},
 			Parser:   codexlog.NewParser(),
 			Events:   codexlog.NewEventParser(),
@@ -45,6 +49,7 @@ func ForAgent(agentType string, pid int, cwd string, started time.Time) (Agent, 
 		}, true
 	case "pi":
 		return Agent{
+			Format:   pilog.Format,
 			Resolver: &pilog.Resolver{PID: pid, CWD: cwd, NotBefore: started},
 			Parser:   pilog.NewParser(),
 			Events:   pilog.NewEventParser(),
