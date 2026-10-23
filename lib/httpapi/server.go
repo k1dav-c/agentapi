@@ -157,6 +157,9 @@ type NativeConfig struct {
 	// Prices price the model calls of the agent's sessions; nil is the
 	// built-in prices.
 	Prices *pricing.Table
+	// PiSessionDir is the --session-dir Pi runs with, where its session
+	// logs are; empty without one.
+	PiSessionDir string
 }
 
 // agentIO is the conversation's view of a PTY or ACP agent, nil for a
@@ -389,7 +392,10 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 
 	s.observer = observer
 	if config.Transport == TransportNative && sessions.Supported(string(config.AgentType)) {
-		s.sessions, err = sessions.New(string(config.AgentType), config.CWD, sessions.Config{Prices: config.Native.Prices})
+		s.sessions, err = sessions.New(string(config.AgentType), config.CWD, sessions.Config{
+			Prices:       config.Native.Prices,
+			PiSessionDir: config.Native.PiSessionDir,
+		})
 		if err != nil {
 			return nil, err
 		}

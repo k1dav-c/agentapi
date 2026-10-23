@@ -203,6 +203,9 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 			AutoContinue: opts.autoContinue,
 			Prices:       prices,
 		}
+		if opts.agentType == AgentTypePi {
+			config.Native.PiSessionDir = piSessionOptions(opts.agentArgs).Dir
+		}
 	}
 	if stateDB != nil {
 		// Messages refer to uploads by path, so they are kept with the

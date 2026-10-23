@@ -405,3 +405,36 @@ func TestCodexSessionsAmongManyRollouts(t *testing.T) {
 	assert.Equal(t, 1, d.Total.Calls)
 	assert.True(t, store.metas.Has(old), "the first lines are kept for the next request")
 }
+
+// Pi started with --session-dir keeps the sessions there, every
+// directory's in one place.
+func TestPiSessionDir(t *testing.T) {
+	agentDir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	sessionDir := t.TempDir()
+	for _, s := range []struct{ id, cwd string }{{"p1", "/w"}, {"p2", "/elsewhere"}} {
+		writeLog(t, filepath.Join(sessionDir, "2026-10-20T10-00-00-000Z_"+s.id+".jsonl"), time.Now(),
+			`{"type":"session","version":3,"id":"`+s.id+`","timestamp":"2026-10-20T10:00:00.000Z","cwd":"`+s.cwd+`"}`,
+			`{"type":"message","id":"u1","timestamp":"2026-10-20T10:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"Hi"}]}}`,
+			`{"type":"message","id":"a1","timestamp":"2026-10-20T10:00:02.000Z","message":{"role":"assistant","model":"gpt-6.1-sol","content":[{"type":"text","text":"Hello"}],"usage":{"input":1000,"output":10,"cacheRead":0,"cacheWrite":0,"cost":{"total":0.01}}}}`)
+	}
+	store, err := New("pi", "/w", Config{PiSessionDir: sessionDir})
+	require.NoError(t, err)
+	list, err := store.List(10)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, "p1", list[0].ID)
+	d, err := store.Costs()
+	require.NoError(t, err)
+	assert.InDelta(t, 0.01, d.Total.USD, 1e-12)
+	h, err := store.ReadHistory("p1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"user: Hi", "agent: Hello"}, roles(h.Messages))
+	_, err = store.ReadHistory("p2")
+	assert.ErrorIs(t, err, ErrSessionNotFound)
+
+	none, err := newStore(t, "pi", "/w").List(10)
+	require.NoError(t, err)
+	assert.Empty(t, none, "without it, Pi's default directory")
+}

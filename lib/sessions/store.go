@@ -25,6 +25,7 @@ type Store struct {
 	// its real path.
 	dir    *agentlog.Dir
 	prices *pricing.Table
+	config Config
 	src    source
 
 	// logs holds what was read of the sessions' logs, subs of their
@@ -53,6 +54,9 @@ type Store struct {
 type Config struct {
 	// Prices price the model calls; nil is the built-in prices.
 	Prices *pricing.Table
+	// PiSessionDir is the --session-dir Pi runs with, which holds its
+	// session logs; empty when it runs without one.
+	PiSessionDir string
 }
 
 // The bounds of what a Store keeps of the logs it read: past them, it
@@ -84,6 +88,7 @@ func New(agentType, cwd string, config Config) (*Store, error) {
 		agent:  agentType,
 		dir:    agentlog.NewDir(cwd),
 		prices: prices,
+		config: config,
 		src:    src,
 		names:  agentlog.NewIndex(codexlog.NewThreadNames, 1, maxLogBytes),
 		paths:  make(map[string]string),

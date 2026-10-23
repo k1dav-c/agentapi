@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/coder/agentapi/lib/agentlog/pilog"
+	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -43,4 +44,14 @@ func TestIsPiCLI(t *testing.T) {
 func TestPiSessionOptions(t *testing.T) {
 	assert.Equal(t, pilog.Session{ID: "abc", Dir: "/tmp/s"}, piSessionOptions([]string{"--session-dir=/tmp/s", "--model", "x", "--session-id", "abc"}))
 	assert.Equal(t, pilog.Session{}, piSessionOptions([]string{"--continue"}))
+}
+
+func TestServerConfigPiSessionDir(t *testing.T) {
+	agent := &runningAgent{}
+	opts := serverOptions{agentType: AgentTypePi, transport: httpapi.TransportNative, agentArgs: []string{"--model", "x", "--session-dir=/data/pi"}}
+	assert.Equal(t, "/data/pi", serverConfig(opts, agent, nil, "", "/work", nil).Native.PiSessionDir, "where history and costs read Pi's sessions")
+	opts.agentArgs = []string{"--session-dir", "/data/pi"}
+	assert.Equal(t, "/data/pi", serverConfig(opts, agent, nil, "", "/work", nil).Native.PiSessionDir)
+	opts.agentType, opts.agentArgs = AgentTypeClaude, []string{"--session-dir", "/data/pi"}
+	assert.Empty(t, serverConfig(opts, agent, nil, "", "/work", nil).Native.PiSessionDir)
 }

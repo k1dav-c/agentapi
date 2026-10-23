@@ -183,3 +183,31 @@ func TestPiSessionName(t *testing.T) {
 	_, changed = n.Name([]byte(`{"type":"message","id":"m1","message":{"role":"user","content":"session_info"}}`))
 	assert.False(t, changed)
 }
+
+func TestSessionsDir(t *testing.T) {
+	agentDir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	cwd := t.TempDir()
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	dir := func(flag string) string {
+		t.Helper()
+		got, err := SessionsDir(cwd, flag)
+		require.NoError(t, err)
+		return got
+	}
+	assert.Equal(t, filepath.Join(agentDir, "sessions", SessionDirName(cwd)), dir(""))
+
+	// The agent dir's settings, then the project's over them.
+	require.NoError(t, os.WriteFile(filepath.Join(agentDir, "settings.json"), []byte(`{"sessionDir":"~/pi-sessions","theme":"dark"}`), 0o600))
+	assert.Equal(t, filepath.Join(home, "pi-sessions"), dir(""))
+	require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".pi"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(cwd, ".pi", "settings.json"), []byte(`{"sessionDir":"sessions"}`), 0o600))
+	assert.Equal(t, filepath.Join(cwd, "sessions"), dir(""), "relative to the working directory")
+
+	// Then the environment, then --session-dir.
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "/env/sessions")
+	assert.Equal(t, "/env/sessions", dir(""))
+	assert.Equal(t, "/flag/sessions", dir("/flag/sessions/"))
+}

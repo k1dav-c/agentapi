@@ -94,18 +94,53 @@ func (r *Resolver) sessionsDir(session Session) (string, error) {
 
 // SessionsDir is the directory that holds the session files of a Pi
 // process in cwd that was started with --session-dir dir (empty without).
+// Pi takes it from --session-dir, else $PI_CODING_AGENT_SESSION_DIR, else
+// the sessionDir setting (the project's .pi/settings.json over the agent
+// dir's settings.json), else it is <agent dir>/sessions/--<cwd>--. Only
+// the last holds one directory's sessions alone.
 func SessionsDir(cwd, dir string) (string, error) {
 	if dir != "" {
-		return dir, nil
+		return normalizeDir(dir, cwd), nil
 	}
 	if dir := os.Getenv("PI_CODING_AGENT_SESSION_DIR"); dir != "" {
-		return dir, nil
+		return normalizeDir(dir, cwd), nil
 	}
 	agentDir, err := agenthome.PiAgentDir()
 	if err != nil {
 		return "", err
 	}
+	if dir := settingsSessionDir(agentDir, cwd); dir != "" {
+		return normalizeDir(dir, cwd), nil
+	}
 	return filepath.Join(agentDir, "sessions", SessionDirName(cwd)), nil
+}
+
+// settingsSessionDir is the sessionDir Pi's settings set: the project's
+// over the agent dir's.
+func settingsSessionDir(agentDir, cwd string) string {
+	for _, path := range []string{filepath.Join(cwd, ".pi", "settings.json"), filepath.Join(agentDir, "settings.json")} {
+		var settings struct {
+			SessionDir string `json:"sessionDir"`
+		}
+		if data, err := os.ReadFile(path); err == nil && json.Unmarshal(data, &settings) == nil && settings.SessionDir != "" {
+			return settings.SessionDir
+		}
+	}
+	return ""
+}
+
+// normalizeDir resolves a directory as Pi does: "~" is the home
+// directory, and a relative path is relative to Pi's working directory.
+func normalizeDir(dir, cwd string) string {
+	if dir == "~" || strings.HasPrefix(dir, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			dir = filepath.Join(home, strings.TrimPrefix(dir, "~"))
+		}
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(cwd, dir)
+	}
+	return filepath.Clean(dir)
 }
 
 // Resolve returns the session file named after the process's --session-id,

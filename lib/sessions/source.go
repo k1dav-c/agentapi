@@ -234,7 +234,7 @@ func piFiles(s *Store) ([]string, error) {
 	var files []string
 	var dirs []string
 	for _, path := range s.dir.Paths() {
-		dir, err := pilog.SessionsDir(path, "")
+		dir, err := pilog.SessionsDir(path, s.config.PiSessionDir)
 		if err != nil {
 			return nil, err
 		}
