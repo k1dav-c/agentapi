@@ -76,6 +76,7 @@ func (s *Server) registerRoutes() {
 	s.registerTerminalRoutes()
 	s.registerHandoffRoutes()
 	s.registerConversationRoutes()
+	s.registerTaskRoutes()
 	s.registerWebhookRoutes()
 	s.registerMCPRoutes()
 	s.registerQueueRoutes()

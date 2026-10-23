@@ -19,11 +19,16 @@ import {
   Server,
   Trash2,
   Upload,
+  Webhook as WebhookIcon,
 } from "lucide-react";
 import {toast} from "sonner";
 import {editableMCPServers} from "@/lib/mcp-sample";
 import {agentDisplayName, updatesOnRestart} from "@/lib/agents";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
+import type {DraftMessage, Message} from "@/lib/conversation";
+import type {ServerTask} from "@/lib/server-tasks";
+import {filterTasks} from "@/lib/task-filter";
+import {TASK_STATUS_META, type Timeline} from "@/lib/task-timeline";
 import {useFileViewer} from "./file-viewer-context";
 import {Button} from "./ui/button";
 import {
@@ -35,6 +40,7 @@ import {
   DialogTrigger,
 } from "./ui/dialog";
 import {Tabs, TabsContent, TabsList, TabsTrigger} from "./ui/tabs";
+import {WebhookSettings} from "./webhook-settings";
 import {SessionHistory} from "./session-history";
 
 interface ExplorerProps {
@@ -42,9 +48,16 @@ interface ExplorerProps {
 }
 
 
+// What the Explorer lists while it lists no messages: selecting the
+// messages only then, it doesn't render again as they stream.
+const NO_MESSAGES: (Message | DraftMessage)[] = [];
+const NO_TIMELINE: Timeline = {prelude: [], tasks: []};
+const NO_TASKS: ReadonlyMap<number, ServerTask> = new Map();
+
 export function Explorer({onNavigateTask}: ExplorerProps) {
+  const features = useChatSelector((chat) => chat.features);
+  const agentType = useChatSelector((chat) => chat.agentType);
   const {
-    messages,
     deleteMessages,
     getMCP,
     updateMCP,
@@ -53,10 +66,8 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     saveMCPProfile,
     deleteMCPProfile,
     applyMCPProfile,
-    features,
-    agentType,
     downloadSession,
-  } = useChat();
+  } = useChatActions();
   const [downloading, setDownloading] = useState(false);
   const {restartKeepsConversation} = features;
   const fileViewer = useFileViewer();
@@ -103,15 +114,19 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
   // tab that shows is listed, while the Explorer is open: the messages
   // change many times a second while the agent works.
   const shown = open ? activeTab : null;
+  const listed = shown === "links" || shown === "files";
+  const indexed = shown === "index";
+  const messages = useChatSelector((chat) => (listed ? chat.messages : NO_MESSAGES));
+  // The index lists the tasks with their status, as the transcript has it.
+  const timeline = useChatSelector((chat) => (indexed ? chat.timeline : NO_TIMELINE));
+  const serverStatus = useChatSelector((chat) => (indexed ? chat.serverStatus : "unknown"));
+  const taskByMessage = useChatSelector((chat) => (indexed ? chat.taskByMessage : NO_TASKS));
   const tasks = useMemo(
     () =>
-      shown === "index"
-        ? messages
-            .filter((message) => message.role === "user")
-            .map((message, index) => ({message, number: index + 1}))
-            .reverse()
-        : [],
-    [messages, shown],
+      filterTasks(timeline.tasks, serverStatus, "all", "", taskByMessage)
+        .map(({task, index, status}) => ({message: task.prompt, number: index + 1, status}))
+        .reverse(),
+    [serverStatus, taskByMessage, timeline],
   );
   const links = useMemo(() => (shown === "links" ? discoverLinks(messages).reverse() : []), [messages, shown]);
   const files = useMemo(() => (shown === "files" ? discoverFiles(messages).reverse() : []), [messages, shown]);
@@ -298,7 +313,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
         <DialogHeader className="border-b px-5 py-4 pr-12">
           <DialogTitle>Explorer</DialogTitle>
           <DialogDescription>
-            Jump to a task or link, or open a file. Agent settings are under MCP and Session.
+            Jump to a task or link, or open a file. Agent settings are under MCP, Session and Webhook.
           </DialogDescription>
         </DialogHeader>
         <Tabs
@@ -307,12 +322,13 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
           className="min-h-0 flex-1 gap-0"
         >
           <div className="border-b px-3 py-2">
-            <TabsList className="grid w-full grid-cols-5">
+            <TabsList className="grid w-full grid-cols-6">
               <TabsTrigger value="index"><ListTree /><span className="max-sm:sr-only">Index</span></TabsTrigger>
               <TabsTrigger value="files"><FileText /><span className="max-sm:sr-only">Files</span></TabsTrigger>
               <TabsTrigger value="links"><LinkIcon /><span className="max-sm:sr-only">Links</span></TabsTrigger>
               <TabsTrigger value="mcp"><Server /><span className="max-sm:sr-only">MCP</span></TabsTrigger>
               <TabsTrigger value="session"><RotateCw /><span className="max-sm:sr-only">Session</span></TabsTrigger>
+              <TabsTrigger value="webhook"><WebhookIcon /><span className="max-sm:sr-only">Webhook</span></TabsTrigger>
             </TabsList>
             {["index", "files", "links"].includes(activeTab) && (
               <input
@@ -386,15 +402,19 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
           </TabsContent>
           <TabsContent value="index" className="min-h-0 overflow-y-auto overscroll-contain p-4">
             <div className="divide-y">
-              {tasks.filter(({message, number}) => matches(`${number} ${message.content}`)).map(({message, number}) => (
+              {tasks.filter(({message, number}) => matches(`${number} ${message.content}`)).map(({message, number, status}) => (
                 <button
                   key={message.id ?? `task-${number}`}
                   type="button"
                   className="block w-full rounded-sm px-1 py-2.5 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => navigate(number)}
                 >
-                  <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                  <span className="flex items-center gap-2.5 text-[11px] font-semibold uppercase text-muted-foreground">
                     Task {number}
+                    <span className={`flex items-center gap-1.5 font-medium normal-case ${TASK_STATUS_META[status].className}`} data-task-status={status}>
+                      <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
+                      {TASK_STATUS_META[status].label}
+                    </span>
                   </span>
                   <span className="mt-1 block line-clamp-2 text-sm">{message.content}</span>
                 </button>
@@ -596,6 +616,9 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                 Download conversation JSONL
               </Button>
             </div>
+          </TabsContent>
+          <TabsContent value="webhook" className="min-h-0 overflow-y-auto overscroll-contain p-4">
+            <WebhookSettings active={shown === "webhook"} />
           </TabsContent>
         </Tabs>
       </DialogContent>

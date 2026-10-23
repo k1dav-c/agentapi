@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/util"
 )
@@ -32,7 +33,7 @@ const (
 
 // outboundMessage is a message waiting to be sent to the agent.
 type outboundMessage struct {
-	parts []MessagePart
+	parts []conv.MessagePart
 	// errCh receives the outcome for the Send waiting on it; nil for the
 	// initial prompt.
 	errCh chan error
@@ -93,22 +94,22 @@ func (c *PTYConversation) sendLoop(ctx context.Context) {
 			// Reset dropped it after the signal.
 			continue
 		}
-		if msg.initial && err != nil && !errors.Is(err, ErrConversationReset) {
+		if msg.initial && err != nil && !errors.Is(err, conv.ErrConversationReset) {
 			c.cfg.Logger.Error("Failed to send the initial prompt", "error", err)
-			c.emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), ErrorLevelError)
+			c.emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), conv.ErrorLevelError)
 		}
 		msg.finish(err)
 	}
 }
 
-func (c *PTYConversation) Send(messageParts ...MessagePart) error {
+func (c *PTYConversation) Send(messageParts ...conv.MessagePart) error {
 	// Validate message content before enqueueing
 	message := buildStringFromMessageParts(messageParts)
 	if message != msgfmt.TrimWhitespace(message) {
-		return ErrMessageValidationWhitespace
+		return conv.ErrMessageValidationWhitespace
 	}
 	if message == "" {
-		return ErrMessageValidationEmpty
+		return conv.ErrMessageValidationEmpty
 	}
 
 	// Checking the status and queueing the message happen under one lock,
@@ -119,9 +120,9 @@ func (c *PTYConversation) Send(messageParts ...MessagePart) error {
 		c.lock.Unlock()
 		return err
 	}
-	if c.statusLocked() != ConversationStatusStable {
+	if c.statusLocked() != conv.StatusStable {
 		c.lock.Unlock()
-		return ErrMessageValidationChanging
+		return conv.ErrMessageValidationChanging
 	}
 	errCh := make(chan error, 1)
 	c.pending = &outboundMessage{parts: messageParts, errCh: errCh, gen: c.sendGen}
@@ -134,13 +135,13 @@ func (c *PTYConversation) Send(messageParts ...MessagePart) error {
 // agent. It acquires and releases c.lock around the parts that access
 // shared state, but releases it during writeStabilize to avoid blocking the
 // snapshot loop.
-func (c *PTYConversation) sendMessage(ctx context.Context, gen uint64, messageParts ...MessagePart) error {
+func (c *PTYConversation) sendMessage(ctx context.Context, gen uint64, messageParts ...conv.MessagePart) error {
 	message := buildStringFromMessageParts(messageParts)
 
 	c.lock.Lock()
 	if gen != c.sendGen {
 		c.lock.Unlock()
-		return ErrConversationReset
+		return conv.ErrConversationReset
 	}
 	screenBeforeMessage := c.cfg.AgentIO.ReadScreen()
 	now := c.cfg.Clock.Now()
@@ -155,20 +156,19 @@ func (c *PTYConversation) sendMessage(ctx context.Context, gen uint64, messagePa
 	if gen != c.sendGen {
 		// Reset while it was on its way: the message belongs to the
 		// conversation that was cleared.
-		return ErrConversationReset
+		return conv.ErrConversationReset
 	}
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 	c.screenBeforeLastUserMessage = screenBeforeMessage
-	c.messages = append(c.messages, ConversationMessage{
+	c.messages = append(c.messages, conv.Message{
 		Id:      len(c.messages),
 		Message: message,
-		Role:    ConversationRoleUser,
+		Role:    conv.RoleUser,
 		Time:    now,
 	})
-	c.userSentMessageAfterLoadState = true
-	c.dirty = true
+	c.restored = false
 	// screenBeforeLastUserMessage and messages changed; the next
 	// updateLastAgentMessageLocked pass must recompute the diff.
 	c.fmtCacheValid = false
@@ -188,7 +188,7 @@ func (c *PTYConversation) sendMessage(ctx context.Context, gen uint64, messagePa
 // and waits for the screen to change, indicating the agent
 // started processing. This phase is fatal on timeout: if the
 // agent doesn't react to Enter, it's unresponsive.
-func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...MessagePart) error {
+func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...conv.MessagePart) error {
 	// Compare stability regions rather than whole screens so output that
 	// changes on its own (e.g. timers below the input box) is not mistaken
 	// for the agent echoing input or reacting to the carriage return.
@@ -197,7 +197,7 @@ func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...Me
 	}
 	screenBeforeMessage := readRegion()
 	for _, part := range messageParts {
-		if err := part.Do(c.cfg.AgentIO); err != nil {
+		if err := typePart(c.cfg.AgentIO, part); err != nil {
 			return fmt.Errorf("failed to write message part: %w", err)
 		}
 	}
@@ -269,7 +269,7 @@ func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...Me
 		return screen != screenBeforeCarriageReturn, nil
 	}); err != nil {
 		if errors.Is(err, util.WaitTimedOut) {
-			return fmt.Errorf("failed to wait for processing to start: %w", ErrMessageNotSubmitted)
+			return fmt.Errorf("failed to wait for processing to start: %w", conv.ErrMessageNotSubmitted)
 		}
 		return fmt.Errorf("failed to wait for processing to start: %w", err)
 	}

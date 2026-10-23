@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 func TestRequestLifecycle(t *testing.T) {
@@ -23,7 +23,7 @@ func TestRequestLifecycle(t *testing.T) {
 	a.Sink().RequestOpened(approval("r1"))
 
 	// Waiting on the user counts as stable, but no new turn can start.
-	assert.Equal(t, st.ConversationStatusStable, c.Status())
+	assert.Equal(t, conv.StatusStable, c.Status())
 	assert.False(t, c.Idle())
 	pending := c.PendingRequests()
 	require.Len(t, pending, 1)
@@ -37,7 +37,7 @@ func TestRequestLifecycle(t *testing.T) {
 	state, err := c.Respond(context.Background(), "r1", native.Response{OptionID: "allow"})
 	require.NoError(t, err)
 	assert.Equal(t, native.RequestStatusResolved, state.Status)
-	assert.Equal(t, st.ConversationStatusChanging, c.Status())
+	assert.Equal(t, conv.StatusChanging, c.Status())
 	assert.Equal(t, []nativetest.Response{{RequestID: "r1", Response: native.Response{OptionID: "allow"}}}, a.Responses())
 
 	// A second answer is refused.
@@ -109,7 +109,7 @@ func TestWithdrawnWhileRespondingFails(t *testing.T) {
 	assert.Equal(t, native.RequestStatusWithdrawn, state.Status)
 	assert.Equal(t, native.ResponseNotResumable, state.Capability)
 	assert.Empty(t, c.PendingRequests())
-	assert.Equal(t, st.ConversationStatusChanging, c.Status(), "nothing waits on the user any more")
+	assert.Equal(t, conv.StatusChanging, c.Status(), "nothing waits on the user any more")
 }
 
 func TestTurnEndWhileRespondingResolves(t *testing.T) {

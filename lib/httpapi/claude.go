@@ -4,8 +4,8 @@ import (
 	"regexp"
 	"strings"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	mf "github.com/coder/agentapi/lib/msgfmt"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // formatPaste wraps message in bracketed paste escape sequences.
@@ -13,18 +13,18 @@ import (
 // widgets (e.g. Claude Code's numbered-choice prompt) interpret
 // as "cancel". For selection prompts, callers should use
 // MessageTypeRaw to send raw keystrokes directly instead.
-func formatPaste(message string) []st.MessagePart {
-	return []st.MessagePart{
+func formatPaste(message string) []conv.MessagePart {
+	return []conv.MessagePart{
 		// Bracketed paste mode start sequence
-		st.MessagePartText{Content: "\x1b[200~", Hidden: true},
-		st.MessagePartText{Content: message},
+		conv.MessagePartText{Content: "\x1b[200~", Hidden: true},
+		conv.MessagePartText{Content: message},
 		// Bracketed paste mode end sequence
-		st.MessagePartText{Content: "\x1b[201~", Hidden: true},
+		conv.MessagePartText{Content: "\x1b[201~", Hidden: true},
 	}
 }
 
-func formatClaudeCodeMessage(message string) []st.MessagePart {
-	parts := make([]st.MessagePart, 0)
+func formatClaudeCodeMessage(message string) []conv.MessagePart {
+	parts := make([]conv.MessagePart, 0)
 	parts = append(parts, formatPaste(message)...)
 
 	return parts
@@ -45,7 +45,7 @@ var clearCodexComposer = strings.Repeat("\x05\x15\x7f", codexClearComposerLines)
 // a file (@"path with spaces" or @path).
 var claudeTrailingMentionRe = regexp.MustCompile(`(?:^|\s)@(?:"[^"]*"|\S+)$`)
 
-func FormatMessage(agentType mf.AgentType, message string) []st.MessagePart {
+func FormatMessage(agentType mf.AgentType, message string) []conv.MessagePart {
 	message = mf.TrimWhitespace(message)
 	// Claude Code opens its file suggestions for an @-mention at the end of
 	// the input, and the Enter that should submit the message picks a
@@ -54,15 +54,15 @@ func FormatMessage(agentType mf.AgentType, message string) []st.MessagePart {
 	// suggestions. It is typed as a hidden part: the message itself stays
 	// trimmed (Send rejects surrounding whitespace).
 	if agentType == mf.AgentTypeClaude && claudeTrailingMentionRe.MatchString(message) {
-		return []st.MessagePart{
-			st.MessagePartText{Content: "\x1b[200~", Hidden: true},
-			st.MessagePartText{Content: message},
-			st.MessagePartText{Content: " ", Hidden: true},
-			st.MessagePartText{Content: "\x1b[201~", Hidden: true},
+		return []conv.MessagePart{
+			conv.MessagePartText{Content: "\x1b[200~", Hidden: true},
+			conv.MessagePartText{Content: message},
+			conv.MessagePartText{Content: " ", Hidden: true},
+			conv.MessagePartText{Content: "\x1b[201~", Hidden: true},
 		}
 	}
 	if agentType == mf.AgentTypeCodex {
-		return append([]st.MessagePart{st.MessagePartText{Content: clearCodexComposer, Hidden: true}}, formatPaste(message)...)
+		return append([]conv.MessagePart{conv.MessagePartText{Content: clearCodexComposer, Hidden: true}}, formatPaste(message)...)
 	}
 	// for now Claude Code formatting seems to also work for Goose and Aider
 	// so we can use the same function for all three

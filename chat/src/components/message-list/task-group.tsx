@@ -16,7 +16,7 @@ import { AgentMark } from "../agent-mark";
 import {useChatSelector} from "../chat-provider";
 import {AgentType} from "@/lib/agents";
 import type { TaskSection, TaskStatus } from "@/lib/task-timeline";
-import { getTaskActivity, hasStructuredTranscript, toSearchableTask } from "@/lib/task-timeline";
+import { TASK_STATUS_META, getTaskActivity, hasStructuredTranscript, toSearchableTask } from "@/lib/task-timeline";
 import { splitThinking } from "@/lib/thinking";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useThrottledValue } from "@/lib/use-throttled";
@@ -57,6 +57,7 @@ export const TaskGroup = React.memo(function TaskGroup({
   promptAuthor,
   cost,
   costDetails,
+  statusDetail,
 }: {
   task: TaskSection;
   number: number;
@@ -82,16 +83,12 @@ export const TaskGroup = React.memo(function TaskGroup({
   // tokens behind it, when known.
   cost?: string;
   costDetails?: string;
+  // How the task ended, beside its status: a failed task's first error, a
+  // limited one's limit.
+  statusDetail?: string;
 }) {
   const agentName = AgentType[agentType as keyof typeof AgentType]?.displayName ?? "Agent";
-  const statusMeta = waitingForUser
-    ? {label: "Waiting for you", className: "text-state-needs"}
-    : {
-        queued: {label: "Queued", className: "text-muted-foreground"},
-        running: {label: "Working", className: "text-state-working"},
-        completed: {label: "Done", className: "text-state-ready"},
-        failed: {label: "Failed", className: "text-state-fault"},
-      }[status];
+  const statusMeta = waitingForUser ? {label: "Waiting for you", className: "text-state-needs"} : TASK_STATUS_META[status];
   const live = status === "running";
   // Only a terminal has a live screen to show at the end of a running task
   // and screen text to offer as "Terminal output"; the native transport
@@ -185,7 +182,7 @@ export const TaskGroup = React.memo(function TaskGroup({
                 ))}
             </span>
           )}
-          <span className={`flex items-center gap-1.5 font-sans text-xs normal-case tracking-normal ${statusMeta.className}`} role="status">
+          <span className={`flex items-center gap-1.5 font-sans text-xs normal-case tracking-normal ${statusMeta.className}`} role="status" title={statusDetail}>
             <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
             {statusMeta.label}
           </span>

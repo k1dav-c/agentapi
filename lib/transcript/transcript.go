@@ -37,11 +37,14 @@ type RichImage struct {
 type RichMessage struct {
 	MessageID  string             `json:"message_id" doc:"Agent's internal message ID"`
 	Role       string             `json:"role" doc:"Role of the message author (user or assistant)"`
-	Content    []RichContentBlock `json:"content" doc:"Structured content blocks"`
+	Content    []RichContentBlock `json:"content" nullable:"false" doc:"Structured content blocks"`
 	Model      string             `json:"model,omitempty" doc:"Model that generated this message"`
 	StopReason string             `json:"stop_reason,omitempty" doc:"Why the model stopped generating"`
 	Usage      *Usage             `json:"usage,omitempty" doc:"Token usage information"`
 	Timestamp  time.Time          `json:"timestamp" doc:"Timestamp of the message"`
+	// TaskID is the task the message belongs to: the ID of the user's
+	// message that started it.
+	TaskID *int `json:"task_id,omitempty" doc:"The task the message belongs to: the ID of the user's message that started it (GET /tasks). Missing for a message from before the first task, and for a resumed session's messages, which belong to the task that started last before them."`
 }
 
 // Clone returns a copy of m that shares nothing with it but the image
@@ -71,12 +74,21 @@ func (b RichContentBlock) clone() RichContentBlock {
 	return b
 }
 
-// Usage captures token usage information.
+// Usage is the tokens of a model call. Whichever agent made the call, the
+// fields count as Anthropic's API does: the input read from or written to
+// the prompt cache is in the cache fields and not in InputTokens, so the
+// four add up to the call's tokens. Codex counts the cached input in its
+// input too; its usage is converted.
 type Usage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	// InputTokens is the input neither read from nor written to the
+	// prompt cache.
+	InputTokens int `json:"input_tokens" doc:"Input tokens neither read from nor written to the prompt cache."`
+	// OutputTokens is the output, reasoning included.
+	OutputTokens int `json:"output_tokens" doc:"Output tokens, reasoning included."`
+	// CacheCreationInputTokens is the input written to the prompt cache.
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens" doc:"Input tokens written to the prompt cache."`
+	// CacheReadInputTokens is the input read from the prompt cache.
+	CacheReadInputTokens int `json:"cache_read_input_tokens" doc:"Input tokens read from the prompt cache."`
 }
 
 // SessionEvent is a normalized event suitable for one-record-per-line JSONL
@@ -87,7 +99,7 @@ type SessionEvent struct {
 	Role      *string         `json:"role,omitempty" doc:"Message role when applicable"`
 	EventTime time.Time       `json:"time" doc:"Timestamp recorded by the agent session"`
 	Content   *string         `json:"content,omitempty" doc:"Text or tool result content"`
-	SessionID *string         `json:"session_id,omitempty" doc:"Agent session identifier"`
+	SessionID *string         `json:"agent_session_id,omitempty" doc:"The agent's own session the event belongs to."`
 	SourceID  *string         `json:"source_id,omitempty" doc:"Original agent event or message identifier"`
 	ToolName  *string         `json:"tool_name,omitempty" doc:"Tool name for tool_call events"`
 	ToolInput json.RawMessage `json:"tool_input,omitempty" doc:"Tool input for tool_call events"`

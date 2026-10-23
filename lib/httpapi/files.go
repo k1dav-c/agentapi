@@ -79,16 +79,24 @@ type FileDiffResponse struct {
 	}
 }
 
+// fileAPI serves the files of the agent's working directory to the chat's
+// file viewer: their text, their diff, a preview of an HTML file, an image,
+// and the search for a path the agent named.
+type fileAPI struct {
+	cwd string
+}
+
 func (s *Server) registerFileRoutes() {
-	huma.Get(s.api, "/files/content", s.getFileContent, func(o *huma.Operation) {
+	f := &fileAPI{cwd: s.cwd}
+	huma.Get(s.api, "/files/content", f.getFileContent, func(o *huma.Operation) {
 		o.Description = "Returns a file the chat shows, for the file paths in tool calls and messages: its text, up to 1 MiB. Only files in the agent's working directory can be read; a binary file comes back without content."
 		o.Errors = []int{400, 403, 404}
 	})
-	huma.Get(s.api, "/files/find", s.findFile, func(o *huma.Operation) {
+	huma.Get(s.api, "/files/find", f.findFile, func(o *huma.Operation) {
 		o.Description = "Finds the files under the agent's working directory whose path ends with the one given, ignoring case: for a path the agent wrote relative to a repository below the working directory, or in the wrong case. Hidden directories and dependencies (node_modules, vendor, build output) are searched only when the path goes into them, and the search stops after 50,000 entries or 2 seconds. Returns up to 10 matches, those with the same case first, then the latest changed."
 		o.Errors = []int{400, 404}
 	})
-	huma.Get(s.api, "/files/diff", s.getFileDiff, func(o *huma.Operation) {
+	huma.Get(s.api, "/files/diff", f.getFileDiff, func(o *huma.Operation) {
 		o.Description = "Returns the uncommitted changes of a file in the agent's working directory: git's unified diff of the working tree against HEAD, where an untracked file shows as added. Outside a git repository the status is not_in_repo."
 		o.Errors = []int{400, 403, 404}
 	})
@@ -97,19 +105,19 @@ func (s *Server) registerFileRoutes() {
 // workspacePath resolves path, absolute or relative to the agent's working
 // directory, to a path relative to that directory. Paths outside it are
 // refused: these endpoints show the agent's work, not the machine.
-func (s *Server) workspacePath(path string) (string, error) {
+func (f *fileAPI) workspacePath(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", huma.Error400BadRequest("path is empty")
 	}
-	if s.cwd == "" {
+	if f.cwd == "" {
 		return "", huma.Error404NotFound("the agent's working directory is unknown")
 	}
 	rel := filepath.Clean(path)
 	if filepath.IsAbs(rel) {
-		rel = relativeTo(s.cwd, rel)
+		rel = relativeTo(f.cwd, rel)
 		if rel == "" {
 			// The agent may report the path with symlinks resolved.
-			if real, err := filepath.EvalSymlinks(s.cwd); err == nil {
+			if real, err := filepath.EvalSymlinks(f.cwd); err == nil {
 				rel = relativeTo(real, filepath.Clean(path))
 			}
 		}
@@ -129,13 +137,13 @@ func relativeTo(base, path string) string {
 	return rel
 }
 
-func (s *Server) getFileContent(_ context.Context, input *FilePathQuery) (*FileContentResponse, error) {
-	rel, err := s.workspacePath(input.Path)
+func (f *fileAPI) getFileContent(_ context.Context, input *FilePathQuery) (*FileContentResponse, error) {
+	rel, err := f.workspacePath(input.Path)
 	if err != nil {
 		return nil, err
 	}
 	// The root keeps symlinks inside the working directory from leading out.
-	root, err := os.OpenRoot(s.cwd)
+	root, err := os.OpenRoot(f.cwd)
 	if err != nil {
 		return nil, fmt.Errorf("open the agent's working directory: %w", err)
 	}
@@ -222,15 +230,15 @@ func trimPartialRune(data []byte) []byte {
 // command when the user looks at a diff). The diff compares two copies in a
 // directory of its own; the working copy is read through the root, so a
 // symlink can't lead out.
-func (s *Server) getFileDiff(ctx context.Context, input *FilePathQuery) (*FileDiffResponse, error) {
-	rel, err := s.workspacePath(input.Path)
+func (f *fileAPI) getFileDiff(ctx context.Context, input *FilePathQuery) (*FileDiffResponse, error) {
+	rel, err := f.workspacePath(input.Path)
 	if err != nil {
 		return nil, err
 	}
 	resp := &FileDiffResponse{}
 	resp.Body.Path = input.Path
 	resp.Body.Relative = filepath.ToSlash(rel)
-	root, err := os.OpenRoot(s.cwd)
+	root, err := os.OpenRoot(f.cwd)
 	if err != nil {
 		return nil, fmt.Errorf("open the agent's working directory: %w", err)
 	}
@@ -258,8 +266,8 @@ func (s *Server) getFileDiff(ctx context.Context, input *FilePathQuery) (*FileDi
 	if info, err := root.Lstat(dirRel); err != nil || !info.IsDir() {
 		return nil, huma.Error403Forbidden(fmt.Sprintf("%s is outside the agent's working directory", input.Path))
 	}
-	dir := filepath.Join(s.cwd, dirRel)
-	spec, err := filepath.Rel(dir, filepath.Join(s.cwd, rel))
+	dir := filepath.Join(f.cwd, dirRel)
+	spec, err := filepath.Rel(dir, filepath.Join(f.cwd, rel))
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s: %w", input.Path, err)
 	}

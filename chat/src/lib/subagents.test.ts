@@ -1,6 +1,7 @@
 import {describe, expect, test} from "bun:test";
 import {isSubagentTool, subagentCounts, subagentTask} from "./subagents";
 import type {RichMessage} from "./conversation";
+import {buildTranscript} from "./task-timeline";
 
 const use = (id: string, name = "Agent"): RichMessage => ({
   message_id: `m-${id}`, role: "assistant", timestamp: "2026-10-18T10:00:00Z",
@@ -22,7 +23,7 @@ describe("subagents", () => {
 
   test("counts the subagents and the running ones", () => {
     const messages = [use("a"), use("b"), use("c"), use("x", "Bash"), result("a"), result("b", "running")];
-    expect(subagentCounts(messages)).toEqual({total: 3, running: 2});
+    expect(subagentCounts(buildTranscript([], messages).toolCalls)).toEqual({total: 3, running: 2});
     expect(subagentCounts([])).toEqual({total: 0, running: 0});
   });
 

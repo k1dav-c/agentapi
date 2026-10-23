@@ -47,8 +47,9 @@ func TestReadLinesKeepsLines(t *testing.T) {
 
 func TestWriter(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
 	w := agentio.NewWriter("test")
-	assert.ErrorIs(t, w.Write(map[string]int{"a": 1}), native.ErrNotStarted)
+	assert.ErrorIs(t, w.Write(ctx, map[string]int{"a": 1}), native.ErrNotStarted)
 
 	var buf bytes.Buffer
 	var mu sync.Mutex
@@ -62,7 +63,7 @@ func TestWriter(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			assert.NoError(t, w.Write(map[string]int{"n": i}))
+			assert.NoError(t, w.Write(ctx, map[string]int{"n": i}))
 		}()
 	}
 	wg.Wait()
@@ -73,7 +74,51 @@ func TestWriter(t *testing.T) {
 	}
 
 	w.Attach(writerFunc(func([]byte) (int, error) { return 0, io.ErrClosedPipe }))
-	assert.EqualError(t, w.Write(1), "write to test: io: read/write on closed pipe")
+	assert.EqualError(t, w.Write(ctx, 1), "write to test: io: read/write on closed pipe")
+}
+
+// An agent that stops reading its input can't hold a write past its
+// context. A record whose write began may still reach the agent; one that
+// waited behind it never goes out.
+func TestWriterGivesUpWithTheContext(t *testing.T) {
+	t.Parallel()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var mu sync.Mutex
+	var written []string
+	w := agentio.NewWriter("test")
+	w.Attach(writerFunc(func(p []byte) (int, error) {
+		if string(p) == "\"first\"\n" {
+			// The agent stops reading.
+			close(entered)
+			<-release
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		written = append(written, string(p))
+		return len(p), nil
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	go func() { first <- w.Write(ctx, "first") }()
+	<-entered
+	second := make(chan error, 1)
+	go func() { second <- w.Write(ctx, "second") }()
+	cancel()
+	err := <-first
+	require.ErrorIs(t, err, native.ErrUnconfirmed, "the agent may yet read it")
+	assert.ErrorIs(t, err, context.Canceled)
+	err = <-second
+	require.ErrorIs(t, err, context.Canceled)
+	assert.NotErrorIs(t, err, native.ErrUnconfirmed, "it never went out")
+
+	// The agent reads again: it gets the record whose write began, whole,
+	// and nothing of the other.
+	close(release)
+	require.NoError(t, w.Write(context.Background(), "third"))
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"\"first\"\n", "\"third\"\n"}, written)
 }
 
 type writerFunc func([]byte) (int, error)

@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // The conversation calls its adapter with its lock released (see
@@ -40,7 +40,7 @@ func TestConversationCallsTheAdapterUnlocked(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c.Start(ctx)
-	require.Eventually(t, func() bool { return c.Status() != st.ConversationStatusInitializing }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return c.Status() != conversation.StatusInitializing }, 5*time.Second, time.Millisecond)
 
 	require.NoError(t, c.StartTurn(ctx, native.Input{Text: "one"}))
 	require.NoError(t, c.Steer(ctx, native.Input{Text: "two"}))

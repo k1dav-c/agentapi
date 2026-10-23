@@ -5,13 +5,14 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/viper"
 
 	"github.com/coder/agentapi/lib/httpapi"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // serverOptions are the settings of `agentapi server`, from its flags and
@@ -38,9 +39,14 @@ type serverOptions struct {
 	termWidth     uint16
 	termHeight    uint16
 	initialPrompt string
-	// state keeps a PTY conversation in a file (--state-file).
-	state st.StatePersistenceConfig
-	// stateDB keeps a native conversation in SQLite (--state-db).
+	// stateFile is the deprecated --state-file: its conversation is
+	// imported into the state database, which keeps it from then on.
+	stateFile string
+	// importState: import stateFile when the state database holds no
+	// conversation yet (--load-state isn't turned off).
+	importState bool
+	// stateDB keeps the conversation in SQLite (--state-db, or next to
+	// the --state-file).
 	stateDB  string
 	terminal bool
 	// autoContinue continues a turn a usage limit stopped once it resets.
@@ -89,6 +95,11 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 			Timeout:         flags.GetDuration(FlagWebhookTimeout),
 			MaxAttempts:     flags.GetInt(FlagWebhookMaxAttempts),
 			PayloadTemplate: flags.GetString(FlagWebhookPayloadTemplate),
+			Events:          flags.GetStringSlice(FlagWebhookEvents),
+			Secret:          flags.GetString(FlagWebhookSecret),
+			Heartbeat:       heartbeatOption(flags.GetDuration(FlagWebhookHeartbeat)),
+			InstanceID:      flags.GetString(FlagWebhookInstanceID),
+			PublicURL:       flags.GetString(FlagPublicURL),
 		},
 	}
 	var err error
@@ -102,20 +113,18 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 	if opts.termHeight < 10 {
 		return serverOptions{}, fmt.Errorf("term height must be at least 10")
 	}
-	if opts.state, err = stateFileOptions(flags); err != nil {
+	if opts.stateFile, opts.importState, err = stateFileOptions(flags); err != nil {
 		return serverOptions{}, err
 	}
-	persists := opts.state.LoadState || opts.state.SaveState
-	if opts.transport, err = transportOption(flags, opts.agentType, opts.agent, persists); err != nil {
+	if opts.stateFile != "" && opts.stateDB == "" {
+		opts.stateDB = stateDBForFile(opts.stateFile)
+	}
+	if opts.transport, err = transportOption(flags, opts.agentType, opts.agent, opts.stateFile != ""); err != nil {
 		return serverOptions{}, err
 	}
 	switch {
-	case opts.transport == httpapi.TransportACP && persists:
+	case opts.transport == httpapi.TransportACP && opts.stateDB != "":
 		return serverOptions{}, fmt.Errorf("ACP mode doesn't support state persistence")
-	case opts.transport == httpapi.TransportNative && persists:
-		return serverOptions{}, fmt.Errorf("the native transport doesn't support --%s; use --%s", FlagStateFile, FlagStateDB)
-	case opts.stateDB != "" && opts.transport != httpapi.TransportNative:
-		return serverOptions{}, fmt.Errorf("--%s needs --%s native (with the PTY transport the agent can't resume its session; use --%s)", FlagStateDB, FlagTransport, FlagStateFile)
 	case opts.printOpenAPI && opts.transport == httpapi.TransportACP:
 		return serverOptions{}, fmt.Errorf("flags --%s and --%s are mutually exclusive", FlagPrintOpenAPI, FlagExperimentalACP)
 	}
@@ -125,30 +134,39 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 	return opts, nil
 }
 
-// stateFileOptions reads --state-file, with --load-state and --save-state
-// on unless they are turned off; they need a state file.
-func stateFileOptions(flags flagSource) (st.StatePersistenceConfig, error) {
-	file := flags.GetString(FlagStateFile)
+// stateFileOptions reads the deprecated --state-file, and whether to import
+// it: unless --load-state is turned off. --load-state and --save-state need
+// a state file; --save-state has no effect anymore, since the state
+// database keeps every change.
+func stateFileOptions(flags flagSource) (file string, importState bool, err error) {
+	file = flags.GetString(FlagStateFile)
 	if file == "" {
 		if flags.IsSet(FlagLoadState) && flags.GetBool(FlagLoadState) {
-			return st.StatePersistenceConfig{}, fmt.Errorf("--load-state requires --state-file to be set")
+			return "", false, fmt.Errorf("--load-state requires --state-file to be set")
 		}
 		if flags.IsSet(FlagSaveState) && flags.GetBool(FlagSaveState) {
-			return st.StatePersistenceConfig{}, fmt.Errorf("--save-state requires --state-file to be set")
+			return "", false, fmt.Errorf("--save-state requires --state-file to be set")
 		}
-		return st.StatePersistenceConfig{}, nil
+		return "", false, nil
 	}
-	return st.StatePersistenceConfig{
-		StateFile: file,
-		LoadState: !flags.IsSet(FlagLoadState) || flags.GetBool(FlagLoadState),
-		SaveState: !flags.IsSet(FlagSaveState) || flags.GetBool(FlagSaveState),
-	}, nil
+	return file, !flags.IsSet(FlagLoadState) || flags.GetBool(FlagLoadState), nil
+}
+
+// stateDBForFile is the state database that takes over from the state
+// file at path when --state-db isn't given: the same name with .db.
+func stateDBForFile(path string) string {
+	db := strings.TrimSuffix(path, filepath.Ext(path)) + ".db"
+	if db == path {
+		db = path + ".sqlite"
+	}
+	return db
 }
 
 // transportOption reads --transport, and --experimental-acp, the older
 // name of --transport acp. Without either, an agent the native transport can
-// drive uses it, unless a state file asks for the PTY transport's
-// persistence, and every other agent uses the PTY transport.
+// drive uses it, unless a state file (written by the PTY transport, whose
+// command lines keep working) is given, and every other agent uses the PTY
+// transport.
 func transportOption(flags flagSource, agentType AgentType, program string, stateFile bool) (httpapi.Transport, error) {
 	acp := flags.GetBool(FlagExperimentalACP)
 	if !flags.IsSet(FlagTransport) {
@@ -193,4 +211,13 @@ func readPipedPrompt(logger *slog.Logger) (string, error) {
 		logger.Info("Read initial prompt from stdin", "bytes", len(data))
 	}
 	return string(data), nil
+}
+
+// heartbeatOption is the webhook heartbeat interval of
+// --webhook-heartbeat, where 0 turns it off.
+func heartbeatOption(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return -1
+	}
+	return interval
 }

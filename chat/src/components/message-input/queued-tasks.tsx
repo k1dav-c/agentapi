@@ -4,7 +4,7 @@ import {useEffect, useState} from "react";
 import {ArrowDown, ArrowUp, Check, Clock3, CornerDownRight, Pencil, X} from "lucide-react";
 import {toast} from "sonner";
 import {Button} from "../ui/button";
-import {useChat, type QueuedMessage} from "../chat-provider";
+import {useChatActions, type QueuedMessage} from "../chat-provider";
 import {ApiError, getErrorMessage} from "@/lib/error-utils";
 import {isImeComposing} from "@/lib/keys";
 import {moveInQueue} from "@/lib/dispatch";
@@ -21,7 +21,7 @@ export function QueuedTasks({
   steerable: boolean;
   held: "answer" | "login" | "limit" | null;
 }) {
-  const {updateQueuedMessage, deleteQueuedMessage, steerQueuedMessage, reorderQueue} = useChat();
+  const {updateQueuedMessage, deleteQueuedMessage, steerQueuedMessage, reorderQueue} = useChatActions();
   const [editingQueuedID, setEditingQueuedID] = useState<number | null>(null);
   const [editingQueuedMessage, setEditingQueuedMessage] = useState("");
   const waitingForAnswer = held === "answer";

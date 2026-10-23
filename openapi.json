@@ -162,6 +162,10 @@
             "readOnly": true,
             "type": "string"
           },
+          "agent_session_id": {
+            "description": "The agent's own session it has open.",
+            "type": "string"
+          },
           "calls": {
             "description": "Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on.",
             "items": {
@@ -172,10 +176,6 @@
           "cost": {
             "$ref": "#/components/schemas/SessionCost",
             "description": "What the session spent, its subagents included (API-equivalent cost)."
-          },
-          "session_id": {
-            "description": "The session the agent has open.",
-            "type": "string"
           }
         },
         "required": [
@@ -1329,6 +1329,29 @@
         ],
         "type": "object"
       },
+      "QueueUpdateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "queue": {
+            "description": "The messages waiting for the agent, in the order they go out.",
+            "items": {
+              "$ref": "#/components/schemas/QueuedMessage"
+            },
+            "type": "array"
+          },
+          "seq": {
+            "description": "Sequence number of this change; see message_update.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queue",
+          "seq"
+        ],
+        "type": "object"
+      },
       "QueuedMessage": {
         "additionalProperties": false,
         "properties": {
@@ -1455,13 +1478,13 @@
           "question": {
             "type": "string"
           },
-          "run_id": {
+          "server_id": {
+            "type": "string"
+          },
+          "turn": {
             "format": "int64",
             "minimum": 0,
             "type": "integer"
-          },
-          "session_id": {
-            "type": "string"
           }
         },
         "required": [
@@ -1469,8 +1492,8 @@
           "content",
           "id",
           "kind",
-          "run_id",
-          "session_id"
+          "server_id",
+          "turn"
         ],
         "type": "object"
       },
@@ -1872,7 +1895,6 @@
             "items": {
               "$ref": "#/components/schemas/RichContentBlock"
             },
-            "nullable": true,
             "type": "array"
           },
           "message_id": {
@@ -1890,6 +1912,11 @@
           "stop_reason": {
             "description": "Why the model stopped generating",
             "type": "string"
+          },
+          "task_id": {
+            "description": "The task the message belongs to: the ID of the user's message that started it (GET /tasks). Missing for a message from before the first task, and for a resumed session's messages, which belong to the task that started last before them.",
+            "format": "int64",
+            "type": "integer"
           },
           "timestamp": {
             "description": "Timestamp of the message",
@@ -1917,7 +1944,6 @@
             "items": {
               "$ref": "#/components/schemas/RichContentBlock"
             },
-            "nullable": true,
             "type": "array"
           },
           "message_id": {
@@ -1941,6 +1967,11 @@
           "stop_reason": {
             "description": "Why the model stopped generating",
             "type": "string"
+          },
+          "task_id": {
+            "description": "The task the message belongs to: the ID of the user's message that started it (GET /tasks). Missing for a message from before the first task, and for a resumed session's messages, which belong to the task that started last before them.",
+            "format": "int64",
+            "type": "integer"
           },
           "timestamp": {
             "description": "Timestamp of the message",
@@ -2040,6 +2071,10 @@
       "SessionEvent": {
         "additionalProperties": false,
         "properties": {
+          "agent_session_id": {
+            "description": "The agent's own session the event belongs to.",
+            "type": "string"
+          },
           "content": {
             "description": "Text or tool result content",
             "type": "string"
@@ -2059,10 +2094,6 @@
           },
           "role": {
             "description": "Message role when applicable",
-            "type": "string"
-          },
-          "session_id": {
-            "description": "Agent session identifier",
             "type": "string"
           },
           "source_id": {
@@ -2146,7 +2177,7 @@
         "additionalProperties": false,
         "properties": {
           "epoch": {
-            "description": "Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded.",
+            "description": "Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded. A rebuild (a message was taken back) ends the stream: reconnect with the old epoch to get the full state.",
             "type": "string"
           },
           "full": {
@@ -2276,6 +2307,10 @@
       "StatusChangeBody": {
         "additionalProperties": false,
         "properties": {
+          "agent_session_id": {
+            "description": "The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it.",
+            "type": "string"
+          },
           "agent_type": {
             "description": "Type of the agent being used by the server.",
             "type": "string"
@@ -2305,14 +2340,8 @@
             "format": "int64",
             "type": "integer"
           },
-          "run_id": {
-            "description": "Monotonically increasing run identifier within the session.",
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "session_id": {
-            "description": "Identifier for this AgentAPI server session.",
+          "server_id": {
+            "description": "Random identifier of this AgentAPI run: it changes every time AgentAPI starts.",
             "type": "string"
           },
           "session_name": {
@@ -2345,6 +2374,12 @@
             "$ref": "#/components/schemas/Transport",
             "description": "Backend transport being used ('pty', 'acp' or 'native')."
           },
+          "turn": {
+            "description": "How many times the agent started working since AgentAPI started.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "usage": {
             "$ref": "#/components/schemas/AgentUsage",
             "description": "How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only."
@@ -2354,11 +2389,11 @@
           "agent_type",
           "agentapi_version",
           "lifecycle",
-          "run_id",
-          "session_id",
+          "server_id",
           "status",
           "terminal_prompt",
-          "transport"
+          "transport",
+          "turn"
         ],
         "type": "object"
       },
@@ -2370,6 +2405,10 @@
             "example": "https://example.com/schemas/StatusResponseBody.json",
             "format": "uri",
             "readOnly": true,
+            "type": "string"
+          },
+          "agent_session_id": {
+            "description": "The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it.",
             "type": "string"
           },
           "agent_type": {
@@ -2405,14 +2444,8 @@
             "format": "int64",
             "type": "integer"
           },
-          "run_id": {
-            "description": "Monotonically increasing run identifier within the session.",
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "session_id": {
-            "description": "Identifier for this AgentAPI server session.",
+          "server_id": {
+            "description": "Random identifier of this AgentAPI run: it changes every time AgentAPI starts.",
             "type": "string"
           },
           "session_name": {
@@ -2445,6 +2478,12 @@
             "$ref": "#/components/schemas/Transport",
             "description": "Backend transport being used ('pty', 'acp' or 'native')."
           },
+          "turn": {
+            "description": "How many times the agent started working since AgentAPI started.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "usage": {
             "$ref": "#/components/schemas/AgentUsage",
             "description": "How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only."
@@ -2455,11 +2494,11 @@
           "agentapi_version",
           "epoch",
           "lifecycle",
-          "run_id",
-          "session_id",
+          "server_id",
           "status",
           "terminal_prompt",
-          "transport"
+          "transport",
+          "turn"
         ],
         "type": "object"
       },
@@ -2569,6 +2608,169 @@
         },
         "required": [
           "subagents"
+        ],
+        "type": "object"
+      },
+      "Task": {
+        "additionalProperties": false,
+        "properties": {
+          "ended_at": {
+            "description": "When the agent was done; missing while it runs.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "errors": {
+            "description": "Errors the agent reported during the task.",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "id": {
+            "description": "The ID of the user's message that started the task, as in GET /messages.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "limit": {
+            "$ref": "#/components/schemas/LimitStop",
+            "description": "The usage limit stop of a limited task."
+          },
+          "prompt": {
+            "description": "The start of the user's message (up to 1 KiB); GET /messages has all of it.",
+            "type": "string"
+          },
+          "reply_id": {
+            "description": "The ID of the agent's last message of the task, as in GET /messages.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "started_at": {
+            "description": "When the user's message was sent.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus",
+            "description": "running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it)."
+          },
+          "steered": {
+            "description": "The IDs of the user's messages added to the task while it ran (steering).",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "prompt",
+          "started_at",
+          "status"
+        ],
+        "type": "object"
+      },
+      "TaskStatus": {
+        "enum": [
+          "completed",
+          "failed",
+          "limited",
+          "running"
+        ],
+        "example": "running",
+        "title": "TaskStatus",
+        "type": "string"
+      },
+      "TaskUpdateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ended_at": {
+            "description": "When the agent was done; missing while it runs.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "errors": {
+            "description": "Errors the agent reported during the task.",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "id": {
+            "description": "The ID of the user's message that started the task, as in GET /messages.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "limit": {
+            "$ref": "#/components/schemas/LimitStop",
+            "description": "The usage limit stop of a limited task."
+          },
+          "prompt": {
+            "description": "The start of the user's message (up to 1 KiB); GET /messages has all of it.",
+            "type": "string"
+          },
+          "reply_id": {
+            "description": "The ID of the agent's last message of the task, as in GET /messages.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "seq": {
+            "description": "Sequence number of this change; see message_update.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "started_at": {
+            "description": "When the user's message was sent.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus",
+            "description": "running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it)."
+          },
+          "steered": {
+            "description": "The IDs of the user's messages added to the task while it ran (steering).",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "prompt",
+          "seq",
+          "started_at",
+          "status"
+        ],
+        "type": "object"
+      },
+      "TasksResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/TasksResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "tasks": {
+            "description": "The conversation's tasks, the earliest first.",
+            "items": {
+              "$ref": "#/components/schemas/Task"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tasks"
         ],
         "type": "object"
       },
@@ -2804,18 +3006,22 @@
         "additionalProperties": false,
         "properties": {
           "cache_creation_input_tokens": {
+            "description": "Input tokens written to the prompt cache.",
             "format": "int64",
             "type": "integer"
           },
           "cache_read_input_tokens": {
+            "description": "Input tokens read from the prompt cache.",
             "format": "int64",
             "type": "integer"
           },
           "input_tokens": {
+            "description": "Input tokens neither read from nor written to the prompt cache.",
             "format": "int64",
             "type": "integer"
           },
           "output_tokens": {
+            "description": "Output tokens, reasoning included.",
             "format": "int64",
             "type": "integer"
           }
@@ -2838,6 +3044,24 @@
             "readOnly": true,
             "type": "string"
           },
+          "events": {
+            "description": "The event types to send, or patterns of them (task.*, *). Omit to preserve; an empty list sends run.status_changed alone.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "heartbeat_seconds": {
+            "description": "How often instance.heartbeat is sent, in seconds; 0 turns it off. Omit to preserve.",
+            "format": "int64",
+            "maximum": 86400,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "instance_id": {
+            "description": "The instance ID in every event. Omit to preserve; set to empty string for <hostname>:<port>.",
+            "type": "string"
+          },
           "max_attempts": {
             "description": "Maximum number of delivery attempts.",
             "format": "int64",
@@ -2846,7 +3070,15 @@
             "type": "integer"
           },
           "payload_template": {
-            "description": "Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport.",
+            "description": "Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .ServerID, .Status, .PreviousStatus, .AgentType, .Transport.",
+            "type": "string"
+          },
+          "public_url": {
+            "description": "Where this AgentAPI can be reached, in every event. Omit to preserve; set to empty string to clear.",
+            "type": "string"
+          },
+          "secret": {
+            "description": "Secret that signs every delivery with HMAC-SHA256. Omit to preserve; set to empty string to stop signing.",
             "type": "string"
           },
           "timeout_seconds": {
@@ -2878,6 +3110,23 @@
             "readOnly": true,
             "type": "string"
           },
+          "events": {
+            "description": "The event types sent, or patterns of them (task.*, *).",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "heartbeat_seconds": {
+            "description": "How often instance.heartbeat is sent, in seconds; 0 when it is off.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "instance_id": {
+            "description": "The instance ID in every event.",
+            "type": "string"
+          },
           "max_attempts": {
             "description": "Maximum number of delivery attempts.",
             "format": "int64",
@@ -2886,6 +3135,14 @@
           "payload_template": {
             "description": "Go text/template for the webhook POST body. Empty means the default JSON payload is used.",
             "type": "string"
+          },
+          "public_url": {
+            "description": "Where this AgentAPI can be reached, in every event; empty when not set.",
+            "type": "string"
+          },
+          "secret_set": {
+            "description": "Deliveries are signed (X-AgentAPI-Signature-256). The secret itself is never returned.",
+            "type": "boolean"
           },
           "timeout_seconds": {
             "description": "Timeout for each delivery attempt, in seconds.",
@@ -2898,10 +3155,43 @@
           }
         },
         "required": [
+          "events",
+          "heartbeat_seconds",
+          "instance_id",
           "max_attempts",
           "payload_template",
+          "public_url",
+          "secret_set",
           "timeout_seconds",
           "url"
+        ],
+        "type": "object"
+      },
+      "WebhookTestResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/WebhookTestResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "error": {
+            "description": "Why the delivery failed.",
+            "type": "string"
+          },
+          "ok": {
+            "description": "The receiver answered with a 2xx status.",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "The receiver's HTTP status, such as 204 No Content.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok"
         ],
         "type": "object"
       },
@@ -3153,16 +3443,16 @@
     },
     "/events": {
       "get": {
-        "description": "The events are sent as Server-Sent Events (SSE). Initially, the endpoint returns a list of events needed to reconstruct the current state of the conversation and the agent's status. After that, it only returns events that have occurred since the last event was sent.\n\nNote: When an agent is running, the last message in the conversation history is updated frequently, and the endpoint sends a new message update event each time.",
+        "description": "The events are sent as Server-Sent Events (SSE). Initially, the endpoint returns a list of events needed to reconstruct the current state of the conversation and the agent's status. After that, it only returns events that have occurred since the last event was sent.\n\nThe server ends the stream when the client falls too far behind, when the conversation changes in a way updates can't express (a message was taken back), which gives it a new epoch, and when a long session is opened (POST /sessions/{id}/resume). Reconnect to get the state again: with sync, the old epoch gets the full state.\n\nNote: When an agent is running, the last message in the conversation history is updated frequently, and the endpoint sends a new message update event each time.",
         "operationId": "subscribeEvents",
         "parameters": [
           {
-            "description": "Opt in to session_sync events and incremental replay. Clients that don't opt in get the full replay and no session_sync events, as before.",
+            "description": "Opt in to session_sync, task_update and queue_update events and incremental replay. Clients that don't opt in get the full replay and none of those events, as before.",
             "explode": false,
             "in": "query",
             "name": "sync",
             "schema": {
-              "description": "Opt in to session_sync events and incremental replay. Clients that don't opt in get the full replay and no session_sync events, as before.",
+              "description": "Opt in to session_sync, task_update and queue_update events and incremental replay. Clients that don't opt in get the full replay and none of those events, as before.",
               "type": "boolean"
             }
           },
@@ -3289,6 +3579,32 @@
                       {
                         "properties": {
                           "data": {
+                            "$ref": "#/components/schemas/QueueUpdateBody"
+                          },
+                          "event": {
+                            "const": "queue_update",
+                            "description": "The event name.",
+                            "type": "string"
+                          },
+                          "id": {
+                            "description": "The event ID.",
+                            "type": "integer"
+                          },
+                          "retry": {
+                            "description": "The retry time in milliseconds.",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "data",
+                          "event"
+                        ],
+                        "title": "Event queue_update",
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "data": {
                             "$ref": "#/components/schemas/RequestUpdateBody"
                           },
                           "event": {
@@ -3388,6 +3704,32 @@
                           "event"
                         ],
                         "title": "Event status_change",
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "data": {
+                            "$ref": "#/components/schemas/TaskUpdateBody"
+                          },
+                          "event": {
+                            "const": "task_update",
+                            "description": "The event name.",
+                            "type": "string"
+                          },
+                          "id": {
+                            "description": "The event ID.",
+                            "type": "integer"
+                          },
+                          "retry": {
+                            "description": "The retry time in milliseconds.",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "data",
+                          "event"
+                        ],
+                        "title": "Event task_update",
                         "type": "object"
                       }
                     ]
@@ -4764,7 +5106,7 @@
     },
     "/messages": {
       "delete": {
-        "description": "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport).",
+        "description": "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue.",
         "operationId": "delete-messages",
         "responses": {
           "200": {
@@ -4786,6 +5128,16 @@
               }
             },
             "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "500": {
             "content": {
@@ -5350,7 +5702,7 @@
     },
     "/sessions/{id}/resume": {
       "post": {
-        "description": "Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Native transport of Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here and 409 while the agent works on a turn.",
+        "description": "Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Native transport of Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here, and 409 while the agent works on a turn or compacts its context (nothing changes then) or another restart is under way.",
         "operationId": "post-sessions-by-id-resume",
         "parameters": [
           {
@@ -5703,6 +6055,35 @@
         ]
       }
     },
+    "/tasks": {
+      "get": {
+        "description": "Returns the conversation's tasks: each message of the user's and the agent's turn on it, until the agent is done (stable again, with no request or terminal dialog open). Messages the user adds while a task runs belong to it (steered). A task is running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). /events sends task_update when one starts or changes.",
+        "operationId": "get-tasks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TasksResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get the conversation's tasks"
+      }
+    },
     "/terminal": {
       "get": {
         "description": "Streams a shell in the agent's working directory, for a terminal emulator: `output` events carry what it writes (the first one the recent output), and an `exit` event ends the stream when the shell exits; a connection that falls too far behind ends without one, and connects again for the recent output. Connecting starts the shell if it doesn't run; it keeps running while nobody watches, and every connection shares it. Native transport only (on by default; --terminal=false turns it off).",
@@ -6053,7 +6434,7 @@
     },
     "/webhook": {
       "get": {
-        "description": "Returns the mutable run-status webhook configuration.",
+        "description": "Returns the mutable webhook configuration. The secret is never returned, only whether one is set.",
         "operationId": "get-webhook",
         "responses": {
           "200": {
@@ -6083,7 +6464,7 @@
         ]
       },
       "put": {
-        "description": "Updates run-status webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent.",
+        "description": "Updates webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent.",
         "operationId": "put-webhook",
         "requestBody": {
           "content": {
@@ -6138,6 +6519,38 @@
           }
         },
         "summary": "Update webhook configuration",
+        "tags": [
+          "Webhook"
+        ]
+      }
+    },
+    "/webhook/test": {
+      "post": {
+        "description": "Sends a webhook.test event to the webhook URL once, signed like every event, and reports the receiver's answer.",
+        "operationId": "post-webhook-test",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookTestResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Send a test webhook event",
         "tags": [
           "Webhook"
         ]

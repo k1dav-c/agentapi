@@ -23,8 +23,8 @@ import (
 	sqlite "modernc.org/sqlite" // SQLite driver without cgo.
 	sqlite3 "modernc.org/sqlite/lib"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS rich_messages (pos INTEGER PRIMARY KEY, seq INTEGER N
 CREATE TABLE IF NOT EXISTS session_events (id INTEGER PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, pos INTEGER NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS queue (pos INTEGER PRIMARY KEY, data TEXT NOT NULL);`,
+	// The tasks: a user's message, by its ID, and the agent's turn on it.
+	`CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, seq INTEGER NOT NULL, data TEXT NOT NULL);`,
 }
 
 // Meta keys.
@@ -66,6 +68,12 @@ const (
 	MetaSessionName = "session_name"
 	// MetaLimitStop holds the turn a usage limit stopped, as JSON.
 	MetaLimitStop = "limit_stop"
+	// MetaWebhook holds the webhook settings changed through the API, as
+	// JSON. A reset keeps them.
+	MetaWebhook = "webhook"
+	// MetaInitialPrompt is the initial prompt the conversation got (PTY):
+	// after a restart it goes out again only if it changed.
+	MetaInitialPrompt = "initial_prompt"
 	// metaSettings holds the settings chosen for the session (JSON). A
 	// reset keeps them.
 	metaSettings    = "settings"
@@ -80,9 +88,16 @@ const (
 	queueKey      = "queue"
 )
 
+// Task is a stored task, as the server encoded it, with the seq of its last
+// change.
+type Task struct {
+	Data json.RawMessage
+	Seq  uint64
+}
+
 // Message is a stored conversation message with the seq of its last change.
 type Message struct {
-	Message st.ConversationMessage
+	Message conv.Message
 	Seq     uint64
 }
 
@@ -113,6 +128,9 @@ type Snapshot struct {
 	Events       []transcript.SessionEvent
 	Requests     []Request
 	Queue        []QueuedMessage
+	// Tasks are stored as the server encoded them, in the order of their
+	// IDs.
+	Tasks []Task
 	// Clean is set when the AgentAPI that wrote the file closed it. After a
 	// crash it is not, and the last changes before the crash may be
 	// missing.
@@ -296,7 +314,7 @@ func (d *DB) Load() (Snapshot, error) {
 	delete(snap.Meta, metaClean)
 
 	if err := d.scanJSON("messages", "SELECT seq, data FROM messages ORDER BY id", func(seq uint64, data []byte) error {
-		var m st.ConversationMessage
+		var m conv.Message
 		if err := json.Unmarshal(data, &m); err != nil {
 			return err
 		}
@@ -334,6 +352,12 @@ func (d *DB) Load() (Snapshot, error) {
 		return nil
 	}); err != nil {
 		return snap, fmt.Errorf("read requests: %w", err)
+	}
+	if err := d.scanJSON("tasks", "SELECT seq, data FROM tasks ORDER BY id", func(seq uint64, data []byte) error {
+		snap.Tasks = append(snap.Tasks, Task{Data: append(json.RawMessage(nil), data...), Seq: seq})
+		return nil
+	}); err != nil {
+		return snap, fmt.Errorf("read tasks: %w", err)
 	}
 	if err := d.scanJSON("queue", "SELECT 0, data FROM queue ORDER BY pos", func(_ uint64, data []byte) error {
 		var q QueuedMessage
@@ -504,35 +528,64 @@ func (d *DB) SetSeq(epoch string, seq uint64) {
 	d.SetMeta(metaSeq, strconv.FormatUint(seq, 10))
 }
 
-// PutMessage stores a conversation message.
-func (d *DB) PutMessage(m st.ConversationMessage, seq uint64) {
-	data, err := json.Marshal(m)
-	if err != nil {
-		d.logger.Error("Failed to encode message for the state database", "error", err)
-		return
-	}
+// PutMessage stores a conversation message. It is encoded when it is
+// written, on the writing goroutine: the emitter calls PutMessage with its
+// lock held, on every update of a message that streams in, and of a
+// message updated again before it was written only the latest is encoded.
+func (d *DB) PutMessage(m conv.Message, seq uint64) {
 	d.enqueue("message:"+strconv.Itoa(m.Id), func(tx *sql.Tx) error {
+		data, ok := d.encode("message", m)
+		if !ok {
+			return nil
+		}
 		_, err := tx.Exec("INSERT INTO messages(id, seq, data) VALUES(?, ?, ?) ON CONFLICT(id) DO UPDATE SET seq = excluded.seq, data = excluded.data", m.Id, seq, data)
 		return err
 	})
 }
 
+// encode encodes v, a what, as JSON, or logs why it can't; a row that
+// can't be encoded is left out rather than failing the others.
+func (d *DB) encode(what string, v any) ([]byte, bool) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		d.logger.Error("Failed to encode a "+what+" for the state database", "error", err)
+		return nil, false
+	}
+	return data, true
+}
+
 // TruncateMessages removes the messages with an ID of at least fromID.
 func (d *DB) TruncateMessages(fromID int) {
 	d.enqueue("", func(tx *sql.Tx) error {
-		_, err := tx.Exec("DELETE FROM messages WHERE id >= ?", fromID)
+		if _, err := tx.Exec("DELETE FROM messages WHERE id >= ?", fromID); err != nil {
+			return err
+		}
+		// A task goes with the message that started it.
+		_, err := tx.Exec("DELETE FROM tasks WHERE id >= ?", fromID)
 		return err
 	})
 }
 
-// PutRichMessage stores the rich message at position pos.
+// PutTask stores the task the user's message id started, as data (JSON).
+func (d *DB) PutTask(id int, data []byte, seq uint64) {
+	d.enqueue("task:"+strconv.Itoa(id), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO tasks(id, seq, data) VALUES(?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET seq = excluded.seq, data = excluded.data`, id, seq, data)
+		return err
+	})
+}
+
+// PutRichMessage stores the rich message at position pos. Like a message,
+// it is encoded when it is written, from a copy, so the caller may change
+// m once PutRichMessage returned: a rich message that streams in is sent
+// whole on every change, and encoding it each time held up the emitter.
 func (d *DB) PutRichMessage(pos int, m transcript.RichMessage, seq uint64) {
-	data, err := json.Marshal(m)
-	if err != nil {
-		d.logger.Error("Failed to encode rich message for the state database", "error", err)
-		return
-	}
+	m = m.Clone()
 	d.enqueue("rich:"+strconv.Itoa(pos), func(tx *sql.Tx) error {
+		data, ok := d.encode("rich message", m)
+		if !ok {
+			return nil
+		}
 		_, err := tx.Exec("INSERT INTO rich_messages(pos, seq, data) VALUES(?, ?, ?) ON CONFLICT(pos) DO UPDATE SET seq = excluded.seq, data = excluded.data", pos, seq, data)
 		return err
 	})
@@ -621,7 +674,7 @@ func (d *DB) Reset(epoch string) {
 	}
 	d.pending = kept
 	d.enqueueLocked("", func(tx *sql.Tx) error {
-		for _, table := range []string{"messages", "rich_messages", "session_events", "requests"} {
+		for _, table := range []string{"messages", "rich_messages", "session_events", "requests", "tasks"} {
 			if _, err := tx.Exec("DELETE FROM " + table); err != nil {
 				return err
 			}

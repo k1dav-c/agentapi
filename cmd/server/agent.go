@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/agentapi/lib/agentlog/pilog"
 	"github.com/coder/agentapi/lib/httpapi"
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/procenv"
 	st "github.com/coder/agentapi/lib/screentracker"
@@ -95,7 +95,7 @@ func startPTYAgent(ctx context.Context, opts serverOptions, logger *slog.Logger)
 			AgentType:      opts.agentType,
 		})
 		if err == nil && opts.agentType == AgentTypePi {
-			jsonlwatcher.RegisterPiSession(proc.Pid(), piSessionOptions(args))
+			pilog.RegisterSession(proc.Pid(), piSessionOptions(args))
 		}
 		return proc, err
 	}

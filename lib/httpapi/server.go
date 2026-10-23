@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/quartz"
@@ -21,14 +22,17 @@ import (
 	"github.com/go-chi/cors"
 
 	"github.com/coder/agentapi/internal/version"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/mcpconfig"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/pricing"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/sessions"
 	"github.com/coder/agentapi/lib/shellterm"
 	"github.com/coder/agentapi/lib/statedb"
+	"github.com/coder/agentapi/lib/transcript"
 	"github.com/coder/agentapi/x/acpio"
 )
 
@@ -47,12 +51,12 @@ type Server struct {
 	// webhook dispatcher's and the state DB's.
 	mu                 sync.Mutex
 	stopOnce           sync.Once
-	stopping           bool // set under mu once Stop closed the agent: no more restarts
+	stopping           bool        // set under mu once Stop closed the agent: no more restarts
+	restarting         atomic.Bool // set under mu while a restart runs without it (runRestartLocked)
 	logger             *slog.Logger
-	conversation       st.Conversation
+	conversation       conv.Conversation
 	native             *native.Conversation // nil unless the transport is native
-	observer           *nativeObserver      // the native conversation's
-	prices             *pricing.Table       // what model calls cost
+	sessions           *sessions.Store      // the agent's sessions; nil unless native and it keeps logs
 	stateDB            *statedb.DB          // nil unless the conversation is kept
 	savedQueue         []QueuedMessage      // the queue as last stored in stateDB
 	savedNextQueueID   int
@@ -66,12 +70,12 @@ type Server struct {
 	shutdownCtx        context.Context
 	shutdown           context.CancelFunc
 	transport          Transport
-	queue              messageQueue // guarded by mu
+	queue              messageQueue  // guarded by mu
+	queueLoop          quartz.Waiter // the queue's loop, nil until it starts
 	mcpStore           mcpconfig.Store
 	mcpMu              sync.Mutex
 	webhook            *webhookDispatcher
-	handoffSuppressed  string
-	handoffReceipts    map[string]handoffReceipt
+	handoff            handoffState
 	restartAgent       func(context.Context) (int, error)
 	updateAgent        func(context.Context)
 	terminal           *shellterm.Terminal // nil without a terminal
@@ -104,6 +108,9 @@ type ServerConfig struct {
 	PTY    PTYConfig
 	ACP    ACPConfig
 	Native NativeConfig
+	// StateDB, if set, stores the conversation and restores it on start
+	// (the native and PTY transports).
+	StateDB *statedb.DB
 	// UploadDir is where uploads and tool result images are kept. Empty
 	// means a temporary directory that is removed on stop.
 	UploadDir string
@@ -122,8 +129,7 @@ type PTYConfig struct {
 	// AgentIO is the agent's terminal; nil runs no agent (--print-openapi).
 	AgentIO st.AgentIO
 	// TerminalColumns is the width of the agent's emulated terminal.
-	TerminalColumns        uint16
-	StatePersistenceConfig st.StatePersistenceConfig
+	TerminalColumns uint16
 	// AgentPID is the agent's process, whose session log the JSONL watcher
 	// reads; 0 runs no watcher.
 	AgentPID int
@@ -142,8 +148,6 @@ type ACPConfig struct {
 type NativeConfig struct {
 	// Factory creates the agent's adapter.
 	Factory native.Factory
-	// StateDB, if set, stores the conversation and restores it on start.
-	StateDB *statedb.DB
 	// Terminal offers a shell in the agent's working directory (GET
 	// /terminal).
 	Terminal bool
@@ -156,6 +160,9 @@ type NativeConfig struct {
 	// Prices price the model calls of the agent's sessions; nil is the
 	// built-in prices.
 	Prices *pricing.Table
+	// PiSessionDir is the --session-dir Pi runs with, where its session
+	// logs are; empty without one.
+	PiSessionDir string
 }
 
 // agentIO is the conversation's view of a PTY or ACP agent, nil for a
@@ -248,19 +255,22 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("configure webhook: %w", err)
 	}
-	var sessionBytes [16]byte
-	if _, err := rand.Read(sessionBytes[:]); err != nil {
-		return nil, fmt.Errorf("generate session ID: %w", err)
+	var serverBytes [16]byte
+	if _, err := rand.Read(serverBytes[:]); err != nil {
+		return nil, fmt.Errorf("generate server ID: %w", err)
 	}
+	// The status and the webhook name this run the same.
+	serverID := hex.EncodeToString(serverBytes[:])
+	webhook.serverID = serverID
 	emitterOptions := []EventEmitterOption{
 		WithAgentType(config.AgentType),
 		WithTransport(config.Transport),
-		WithSessionID(hex.EncodeToString(sessionBytes[:])),
+		WithServerID(serverID),
 		WithTerminalColumns(config.PTY.TerminalColumns),
 		WithClock(config.Clock),
 		WithStatusChangeHandler(webhook.statusChanged),
 	}
-	stateDB := config.Native.StateDB
+	stateDB := config.StateDB
 	if stateDB != nil {
 		emitterOptions = append(emitterOptions, WithPersister(stateDB))
 	}
@@ -276,12 +286,20 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 
 	// Format initial prompt into message parts if provided
-	var initialPrompt []st.MessagePart
+	var initialPrompt []conv.MessagePart
 	if config.InitialPrompt != "" {
 		initialPrompt = FormatMessage(config.AgentType, config.InitialPrompt)
 	}
 
-	var conversation st.Conversation
+	// The directory for uploads: a temporary one unless the conversation
+	// is kept, whose messages refer to uploads by path.
+	uploads, err := newUploadStore(config.UploadDir)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("Using upload directory", "uploadDir", uploads.dir)
+
+	var conversation conv.Conversation
 	var nativeConversation *native.Conversation
 	var observer *nativeObserver
 	if config.Transport == TransportNative {
@@ -304,6 +322,9 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			Observer:        observer,
 			Logger:          logger,
 			Clock:           config.Clock,
+			PrepareRichMessage: func(msg *transcript.RichMessage) {
+				uploads.storeRichImages(msg, logger)
+			},
 		})
 		conversation = nativeConversation
 	} else if config.Transport == TransportACP {
@@ -313,32 +334,23 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		conversation = acpio.NewACPConversation(ctx, config.ACP.AgentIO, logger, initialPrompt, emitter, config.Clock)
 	} else {
 		conversation = st.NewPTY(ctx, st.PTYConversationConfig{
-			AgentType:              config.AgentType,
-			AgentIO:                config.PTY.AgentIO,
-			Clock:                  config.Clock,
-			SnapshotInterval:       snapshotInterval,
-			ScreenStabilityLength:  2 * time.Second,
-			FormatMessage:          formatMessage,
-			ReadyForInitialPrompt:  isAgentReadyForInitialPrompt,
-			ReadyWhenStable:        mf.ReadyWhenStable(config.AgentType),
-			StabilityScreen:        stabilityScreen,
-			FormatToolCall:         formatToolCall,
-			InitialPrompt:          initialPrompt,
-			Logger:                 logger,
-			StatePersistenceConfig: config.PTY.StatePersistenceConfig,
+			AgentType:             config.AgentType,
+			AgentIO:               config.PTY.AgentIO,
+			Clock:                 config.Clock,
+			SnapshotInterval:      snapshotInterval,
+			ScreenStabilityLength: 2 * time.Second,
+			FormatMessage:         formatMessage,
+			ReadyForInitialPrompt: isAgentReadyForInitialPrompt,
+			ReadyWhenStable:       mf.ReadyWhenStable(config.AgentType),
+			StabilityScreen:       stabilityScreen,
+			FormatToolCall:        formatToolCall,
+			InitialPrompt:         ptyInitialPrompt(initialPrompt, config, stateDB, restored),
+			Logger:                logger,
+			InitialMessages:       restored.messages,
 		}, emitter)
 	}
 
-	// The directory for uploads: a temporary one unless the conversation
-	// is kept, whose messages refer to uploads by path.
-	uploads, err := newUploadStore(config.UploadDir)
-	if err != nil {
-		return nil, err
-	}
-	logger.Info("Using upload directory", "uploadDir", uploads.dir)
-
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	webhook.start(shutdownCtx)
 
 	s := &Server{
 		router:         router,
@@ -366,8 +378,20 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		jsonlParentCtx: ctx,
 		stateDB:        stateDB,
 	}
+	// Clients follow the queue through queue_update events.
+	s.queue.onChange = emitter.SetQueue
 	if stateDB != nil {
 		s.restoreQueue(restored.snapshot)
+		if stored := restored.snapshot.Meta[statedb.MetaWebhook]; stored != "" {
+			switch ok, err := webhook.restore(stored); {
+			case err != nil:
+				logger.Warn("Ignoring the stored webhook settings", "error", err)
+			case ok:
+				logger.Info("Restored the webhook settings changed through the API")
+			default:
+				logger.Info("The webhook flags changed since its settings were changed through the API; using the flags")
+			}
+		}
 	}
 	if mcpconfig.SupportedAgent(config.AgentType) {
 		store, err := mcpconfig.NewStore(config.AgentType, config.CWD)
@@ -377,14 +401,17 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		s.mcpStore = store
 	}
 
-	s.observer = observer
-	s.prices = config.Native.Prices
-	if s.prices == nil {
-		s.prices = pricing.Builtin()
+	if config.Transport == TransportNative && sessions.Supported(string(config.AgentType)) {
+		s.sessions, err = sessions.New(string(config.AgentType), config.CWD, sessions.Config{
+			Prices:       config.Native.Prices,
+			PiSessionDir: config.Native.PiSessionDir,
+			Logger:       logger,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
-	if observer != nil {
-		observer.storeImages = s.storeRichImages
-	}
+	s.startWebhook(config)
 
 	// Register API routes
 	s.registerRoutes()
@@ -458,20 +485,29 @@ func (s *Server) Start() error {
 func (s *Server) Stop(ctx context.Context) error {
 	var err error
 	s.stopOnce.Do(func() {
+		// Tells the webhook's receiver, while it can still be sent.
+		s.webhook.stop(ctx)
 		// Ends the queue loop and the event streams, which the HTTP
 		// shutdown would otherwise wait for.
 		s.shutdown()
-		// No request can change the queue once the HTTP server and the
-		// agent have stopped, so the queue is stored after both.
+		// No request can change the queue once the HTTP server, the queue
+		// loop and the agent have stopped, so the queue is stored after
+		// them.
 		if s.srv != nil {
 			if err = s.srv.Shutdown(ctx); errors.Is(err, http.ErrServerClosed) {
 				err = nil
 			}
 		}
-		// A restart under way has been cancelled with shutdownCtx; once it
-		// let go of mu, none can start another agent.
+		if s.queueLoop != nil {
+			// A tick under way may still send a message.
+			_ = s.queueLoop.Wait("messageQueueDispatch")
+		}
+		// A restart under way was cancelled with shutdownCtx, and lets go
+		// of mu while it waits for its agent; from now on none can start
+		// another one, or another session-log watcher.
 		s.mu.Lock()
 		s.stopping = true
+		s.stopJSONLWatcher()
 		s.mu.Unlock()
 		if closeErr := s.backend().close(); closeErr != nil {
 			s.logger.Error("Failed to stop the agent", "error", closeErr)
@@ -485,10 +521,16 @@ func (s *Server) Stop(ctx context.Context) error {
 	return err
 }
 
+// SaveState writes what the state database hasn't written yet, the queue
+// included. It keeps every change as it happens, so this only narrows what
+// a crash could lose; source says who asked (SIGUSR1). Without a state
+// database there is nothing to save.
 func (s *Server) SaveState(source string) error {
-	if err := s.conversation.SaveState(); err != nil {
-		s.logger.Error("Failed to save conversation state", "source", source, "error", err)
-		return err
+	if s.stateDB == nil {
+		return nil
 	}
+	s.persistQueue()
+	s.stateDB.Flush()
+	s.logger.Info("Saved the state database", "source", source)
 	return nil
 }

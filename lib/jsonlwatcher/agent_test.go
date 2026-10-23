@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/agentlog/codexlog"
 )
 
 func TestForAgent(t *testing.T) {
@@ -20,7 +22,7 @@ func TestForAgent(t *testing.T) {
 		assert.NotNil(t, agent.Namer, agentType)
 	}
 	codex, _ := ForAgent("codex", 42, "/work", started)
-	assert.Equal(t, &CodexResolver{CWD: "/work", NotBefore: started}, codex.Resolver)
+	assert.Equal(t, &codexlog.Resolver{CWD: "/work", NotBefore: started}, codex.Resolver)
 	for _, agentType := range []string{"aider", "custom", ""} {
 		_, ok := ForAgent(agentType, 42, "/work", started)
 		assert.False(t, ok, agentType)

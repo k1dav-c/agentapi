@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import { ClipboardList, MessageCircleQuestion, ShieldQuestion, X } from "lucide-react";
 import { toast } from "sonner";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import {
   CardStatus,
   CommandBlock,
@@ -42,13 +42,14 @@ const KIND_META = {
 // composer like the terminal prompt card. One request shows at a time,
 // oldest first.
 export function RequestCard() {
-  const { requests, currentTask } = useChat();
+  const requests = useChatSelector((chat) => chat.requests);
+  const lastMessageTime = useChatSelector((chat) => chat.currentTask?.time);
   const pending = useMemo(() => pendingRequests(requests), [requests]);
   const [dismissedHint, setDismissedHint] = useState("");
   const request = pending[0];
   if (request) return <RequestCardBody key={request.id} request={request} total={pending.length} />;
 
-  const hint = answerByMessageHint(requests, currentTask?.time);
+  const hint = answerByMessageHint(requests, lastMessageTime);
   if (!hint || hint.id === dismissedHint) return null;
   return (
     <div className="flex items-start gap-2 rounded-xl border border-dashed px-3 py-2 text-xs text-muted-foreground" role="status">
@@ -70,7 +71,7 @@ export function RequestCard() {
 }
 
 function RequestCardBody({ request, total }: { request: NativeRequest; total: number }) {
-  const { respondToRequest } = useChat();
+  const { respondToRequest } = useChatActions();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const meta = KIND_META[request.kind] ?? KIND_META.approval;

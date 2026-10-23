@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 func TestRestartReplacesAdapter(t *testing.T) {
@@ -145,15 +145,15 @@ func TestExitIsReported(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("exit not reported")
 	}
-	assert.Equal(t, st.ConversationStatusInitializing, c.Status())
+	assert.Equal(t, conv.StatusInitializing, c.Status())
 }
 
 func TestInitialPrompt(t *testing.T) {
 	c, factory, rec := start(t, nil, native.Config{InitialPrompt: "do it"})
 	// The prompt's turn began when the agent started, so nothing got in
 	// first.
-	assert.ErrorIs(t, c.StartTurn(context.Background(), native.Input{Text: "queued"}), st.ErrMessageValidationChanging)
-	assert.NotContains(t, rec.get().statuses, st.ConversationStatusStable, "the agent never looked idle")
+	assert.ErrorIs(t, c.StartTurn(context.Background(), native.Input{Text: "queued"}), conv.ErrMessageValidationChanging)
+	assert.NotContains(t, rec.get().statuses, conv.StatusStable, "the agent never looked idle")
 
 	require.Eventually(t, func() bool { return len(factory.Last().Turns()) == 1 }, 5*time.Second, time.Millisecond)
 	assert.Equal(t, "do it", factory.Last().Turns()[0].Text)
@@ -163,9 +163,9 @@ func TestInitialPrompt(t *testing.T) {
 func TestRestartSendsInitialPromptAgain(t *testing.T) {
 	c, factory, _ := start(t, nil, native.Config{
 		InitialPrompt: "do it",
-		InitialMessages: []st.ConversationMessage{
-			{Id: 0, Role: st.ConversationRoleUser, Message: "do it"},
-			{Id: 1, Role: st.ConversationRoleAgent, Message: "done"},
+		InitialMessages: []conv.Message{
+			{Id: 0, Role: conv.RoleUser, Message: "do it"},
+			{Id: 1, Role: conv.RoleAgent, Message: "done"},
 		},
 	})
 	assert.Empty(t, factory.Last().Turns(), "the continued conversation had the prompt")
@@ -193,7 +193,7 @@ func TestSendAndInitialPromptHaveDeadlines(t *testing.T) {
 	require.Eventually(t, func() bool { return len(a.Turns()) == 1 }, 5*time.Second, time.Millisecond)
 	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
 
-	require.NoError(t, c.Send(st.MessagePartText{Content: "hi"}))
+	require.NoError(t, c.Send(conv.MessagePartText{Content: "hi"}))
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Equal(t, []bool{true, true}, deadlines, "an agent that hangs can't hold its caller forever")
@@ -243,9 +243,9 @@ func TestSwitchOpensAnotherSession(t *testing.T) {
 	require.Eventually(t, func() bool { return len(first.Turns()) == 1 }, 5*time.Second, time.Millisecond)
 	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
 
-	history := []st.ConversationMessage{
-		{Id: 0, Role: st.ConversationRoleUser, Message: "earlier"},
-		{Id: 1, Role: st.ConversationRoleAgent, Message: "done"},
+	history := []conv.Message{
+		{Id: 0, Role: conv.RoleUser, Message: "earlier"},
+		{Id: 1, Role: conv.RoleAgent, Message: "done"},
 	}
 	require.NoError(t, c.Switch(context.Background(), native.Resume{Ref: "earlier-session"}, history))
 	second := factory.Last()
@@ -288,4 +288,68 @@ func TestSwitchWhileATurnRuns(t *testing.T) {
 	c, _, _ := start(t, nil, native.Config{})
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "work"}))
 	assert.ErrorIs(t, c.Switch(context.Background(), native.Resume{Ref: "other"}, nil), native.ErrTurnActive)
+}
+
+// A switch is refused while the agent compacts too, and a refused switch
+// changes nothing: reset doesn't run and the agent goes on.
+func TestBeginSwitchWhileCompactingChangesNothing(t *testing.T) {
+	compacting, release := make(chan struct{}), make(chan struct{})
+	c, factory, _ := start(t, func(a *nativetest.Adapter) {
+		a.Caps.Compact = true
+		a.OnCompact = func(context.Context) error {
+			close(compacting)
+			<-release
+			return nil
+		}
+	}, native.Config{})
+	first := factory.Last()
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
+	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+	before := c.Messages()
+	compacted := make(chan error, 1)
+	go func() { compacted <- c.Compact(context.Background()) }()
+	<-compacting
+
+	reset := false
+	_, err := c.BeginSwitch(native.Resume{Ref: "other"}, nil, func() { reset = true })
+	assert.ErrorIs(t, err, native.ErrTurnActive)
+	assert.False(t, reset)
+	assert.Equal(t, before, c.Messages())
+	assert.False(t, first.Closed())
+	assert.Len(t, factory.Adapters(), 1)
+	_, err = c.BeginReload()
+	assert.ErrorIs(t, err, native.ErrTurnActive)
+
+	close(release)
+	require.NoError(t, <-compacted)
+	assert.True(t, c.Idle())
+}
+
+// BeginRestart retires the agent before reset runs, so nothing the old
+// agent still reports lands in the conversation that replaces it; Start
+// closes it.
+func TestBeginRestartRetiresFirst(t *testing.T) {
+	c, factory, rec := start(t, nil, native.Config{})
+	first := factory.Last()
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
+	first.Sink().RequestOpened(approval("r1"))
+
+	retired := false
+	r := c.BeginRestart(func() {
+		requests := rec.get().requests
+		retired = len(requests) > 0 && requests[len(requests)-1].Status == native.RequestStatusExpired
+	})
+	assert.True(t, retired, "the agent's requests expired before the reset")
+	statuses := len(rec.get().statuses)
+	first.Sink().RichMessage(text("late", "stale"))
+	assert.Empty(t, c.Messages(), "the retired agent's events are ignored")
+	assert.False(t, c.Idle(), "no turn starts until the new agent did")
+	assert.False(t, first.Closed(), "Start closes it")
+
+	require.NoError(t, r.Start(context.Background()))
+	assert.True(t, first.Closed())
+	assert.Len(t, factory.Adapters(), 2)
+	assert.True(t, c.Idle())
+	assert.Equal(t, []conv.Status{conv.StatusInitializing, conv.StatusStable}, rec.get().statuses[statuses:],
+		"Start reports the new agent's status, from the start")
 }

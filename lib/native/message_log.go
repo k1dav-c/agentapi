@@ -6,16 +6,16 @@ import (
 
 	"github.com/coder/quartz"
 
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
-// messageLog is a conversation as st.Conversation messages: the user's
+// messageLog is a conversation as conv.Conversation messages: the user's
 // messages, and agent messages made of the text of the agent's rich
 // messages.
 type messageLog struct {
 	clock    quartz.Clock
-	messages []st.ConversationMessage
+	messages []conv.Message
 	nextID   int
 	// agent is the agent message being built, or nil until the agent says
 	// something after the last user message.
@@ -53,7 +53,7 @@ func (a *agentText) text() string {
 }
 
 // newMessageLog returns a messageLog that continues messages.
-func newMessageLog(clock quartz.Clock, messages []st.ConversationMessage) messageLog {
+func newMessageLog(clock quartz.Clock, messages []conv.Message) messageLog {
 	t := messageLog{clock: clock, messages: slices.Clone(messages), rich: make(map[string]*richPart)}
 	for _, m := range t.messages {
 		t.nextID = max(t.nextID, m.Id+1)
@@ -62,7 +62,7 @@ func newMessageLog(clock quartz.Clock, messages []st.ConversationMessage) messag
 }
 
 // snapshot returns a copy of the messages.
-func (t *messageLog) snapshot() []st.ConversationMessage {
+func (t *messageLog) snapshot() []conv.Message {
 	return slices.Clone(t.messages)
 }
 
@@ -89,8 +89,8 @@ func (t *messageLog) endAgentMessage() {
 // appendUser appends a user message and returns its Id.
 func (t *messageLog) appendUser(text string) int {
 	id := t.nextID
-	t.messages = append(t.messages, st.ConversationMessage{
-		Id: id, Message: text, Role: st.ConversationRoleUser, Time: t.clock.Now(),
+	t.messages = append(t.messages, conv.Message{
+		Id: id, Message: text, Role: conv.RoleUser, Time: t.clock.Now(),
 	})
 	t.nextID++
 	t.agent = nil
@@ -131,8 +131,8 @@ func (t *messageLog) addRich(msg transcript.RichMessage) bool {
 		}
 		if t.agent == nil {
 			t.agent = &agentText{id: t.nextID}
-			t.messages = append(t.messages, st.ConversationMessage{
-				Id: t.nextID, Role: st.ConversationRoleAgent, Time: t.clock.Now(),
+			t.messages = append(t.messages, conv.Message{
+				Id: t.nextID, Role: conv.RoleAgent, Time: t.clock.Now(),
 			})
 			t.nextID++
 		}

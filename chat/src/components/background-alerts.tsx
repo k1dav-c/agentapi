@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {useChat} from "./chat-provider";
+import {useChatSelector} from "./chat-provider";
 import {agentDisplayName} from "@/lib/agents";
 import { describeTerminalPrompt } from "@/lib/terminal-option";
 import { loginTitle } from "@/lib/login";
@@ -12,12 +12,16 @@ import { alertForTransition, faviconDataUrl, notificationsEnabled, type FaviconB
 // notification when the agent needs them or finishes while the tab is in
 // the background.
 export function BackgroundAlerts() {
-  const { agentState: kind, terminalPrompt, loginRequired, requests, agentType, currentTask } = useChat();
+  const kind = useChatSelector((chat) => chat.agentState);
+  const terminalPrompt = useChatSelector((chat) => chat.terminalPrompt);
+  const loginRequired = useChatSelector((chat) => chat.loginRequired);
+  const requests = useChatSelector((chat) => chat.requests);
+  const agentType = useChatSelector((chat) => chat.agentType);
+  const task = useChatSelector((chat) => chat.currentTask?.content ?? "");
   const previous = useRef(kind);
   // A task finished while the tab was hidden and hasn't been seen yet.
   const [unseenFinish, setUnseenFinish] = useState(false);
   const name = agentDisplayName(agentType, "The agent");
-  const task = currentTask?.content ?? "";
 
   useEffect(() => {
     const onVisible = () => {

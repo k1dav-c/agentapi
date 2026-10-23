@@ -2,12 +2,10 @@ package screentracker_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -19,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	st "github.com/coder/agentapi/lib/screentracker"
 )
 
@@ -57,10 +56,10 @@ func (a *testAgent) setScreen(s string) {
 
 type testEmitter struct{}
 
-func (testEmitter) EmitMessages([]st.ConversationMessage) {}
-func (testEmitter) EmitStatus(st.ConversationStatus)      {}
+func (testEmitter) EmitMessages([]conv.Message)           {}
+func (testEmitter) EmitStatus(conv.Status)                {}
 func (testEmitter) EmitScreen(string)                     {}
-func (testEmitter) EmitError(_ string, _ st.ErrorLevel)   {}
+func (testEmitter) EmitError(_ string, _ conv.ErrorLevel) {}
 
 // advanceFor is a shorthand for advanceUntil with a time-based condition.
 func advanceFor(ctx context.Context, t *testing.T, mClock *quartz.Mock, total time.Duration) {
@@ -87,7 +86,7 @@ func advanceUntil(ctx context.Context, t *testing.T, mClock *quartz.Mock, done f
 
 // sendAndAdvance calls Send() in a goroutine and advances the mock clock until
 // Send completes.
-func sendAndAdvance(ctx context.Context, t *testing.T, c *st.PTYConversation, mClock *quartz.Mock, parts ...st.MessagePart) {
+func sendAndAdvance(ctx context.Context, t *testing.T, c *st.PTYConversation, mClock *quartz.Mock, parts ...conv.MessagePart) {
 	t.Helper()
 	errCh := make(chan error, 1)
 	go func() {
@@ -104,7 +103,7 @@ func sendAndAdvance(ctx context.Context, t *testing.T, c *st.PTYConversation, mC
 	})
 }
 
-func assertMessages(t *testing.T, c *st.PTYConversation, expected []st.ConversationMessage) {
+func assertMessages(t *testing.T, c *st.PTYConversation, expected []conv.Message) {
 	t.Helper()
 	actual := c.Messages()
 	for i := range actual {
@@ -116,7 +115,7 @@ func assertMessages(t *testing.T, c *st.PTYConversation, expected []st.Conversat
 
 type statusTestStep struct {
 	snapshot string
-	status   st.ConversationStatus
+	status   conv.Status
 }
 type statusTestParams struct {
 	cfg   st.PTYConversationConfig
@@ -141,7 +140,7 @@ func statusTest(t *testing.T, params statusTestParams) {
 		c := st.NewPTY(ctx, params.cfg, &testEmitter{})
 		c.Start(ctx)
 
-		assert.Equal(t, st.ConversationStatusInitializing, c.Status())
+		assert.Equal(t, conv.StatusInitializing, c.Status())
 
 		for i, step := range params.steps {
 			agent.setScreen(step.snapshot)
@@ -152,9 +151,9 @@ func statusTest(t *testing.T, params statusTestParams) {
 }
 
 func TestConversation(t *testing.T) {
-	changing := st.ConversationStatusChanging
-	stable := st.ConversationStatusStable
-	initializing := st.ConversationStatusInitializing
+	changing := conv.StatusChanging
+	stable := conv.StatusStable
+	initializing := conv.StatusInitializing
 
 	statusTest(t, statusTestParams{
 		cfg: st.PTYConversationConfig{
@@ -259,22 +258,22 @@ func TestMessages(t *testing.T) {
 	t.Run("messages are copied", func(t *testing.T) {
 		c, _, _ := newConversation(context.Background(), t)
 		messages := c.Messages()
-		assertMessages(t, c, []st.ConversationMessage{
-			{Id: 0, Message: "", Role: st.ConversationRoleAgent},
+		assertMessages(t, c, []conv.Message{
+			{Id: 0, Message: "", Role: conv.RoleAgent},
 		})
 
 		messages[0].Message = "modification"
 
-		assertMessages(t, c, []st.ConversationMessage{
-			{Id: 0, Message: "", Role: st.ConversationRoleAgent},
+		assertMessages(t, c, []conv.Message{
+			{Id: 0, Message: "", Role: conv.RoleAgent},
 		})
 	})
 
 	t.Run("whitespace-padding", func(t *testing.T) {
 		c, _, _ := newConversation(context.Background(), t)
 		for _, msg := range []string{"123 ", " 123", "123\t\t", "\n123", "123\n\t", " \t123\n\t"} {
-			err := c.Send(st.MessagePartText{Content: msg})
-			assert.ErrorIs(t, err, st.ErrMessageValidationWhitespace)
+			err := c.Send(conv.MessagePartText{Content: msg})
+			assert.ErrorIs(t, err, conv.ErrMessageValidationWhitespace)
 		}
 	})
 
@@ -286,8 +285,8 @@ func TestMessages(t *testing.T) {
 		agent.setScreen("1")
 		advanceFor(ctx, t, mClock, interval)
 		msgs := c.Messages()
-		assertMessages(t, c, []st.ConversationMessage{
-			{Id: 0, Message: "1", Role: st.ConversationRoleAgent},
+		assertMessages(t, c, []conv.Message{
+			{Id: 0, Message: "1", Role: conv.RoleAgent},
 		})
 
 		advanceFor(ctx, t, mClock, interval)
@@ -302,15 +301,15 @@ func TestMessages(t *testing.T) {
 		// Agent message is recorded when the first snapshot is taken.
 		agent.setScreen("1")
 		advanceFor(ctx, t, mClock, interval*threshold)
-		assertMessages(t, c, []st.ConversationMessage{
-			{Id: 0, Message: "1", Role: st.ConversationRoleAgent},
+		assertMessages(t, c, []conv.Message{
+			{Id: 0, Message: "1", Role: conv.RoleAgent},
 		})
 
 		// Agent message is updated when the screen changes.
 		agent.setScreen("2")
 		advanceFor(ctx, t, mClock, interval)
-		assertMessages(t, c, []st.ConversationMessage{
-			{Id: 0, Message: "2", Role: st.ConversationRoleAgent},
+		assertMessages(t, c, []conv.Message{
+			{Id: 0, Message: "2", Role: conv.RoleAgent},
 		})
 
 		// Fill to stable so Send can proceed (screen is "2").
@@ -318,40 +317,40 @@ func TestMessages(t *testing.T) {
 		advanceFor(ctx, t, mClock, interval*threshold)
 
 		// User message is recorded.
-		sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: "3"})
+		sendAndAdvance(ctx, t, c, mClock, conv.MessagePartText{Content: "3"})
 
 		// After send, screen is dirty from writeStabilize. Set to "4" and stabilize.
 		agent.setScreen("4")
 		advanceFor(ctx, t, mClock, interval*threshold)
-		assertMessages(t, c, []st.ConversationMessage{
-			{Id: 0, Message: "2", Role: st.ConversationRoleAgent},
-			{Id: 1, Message: "3", Role: st.ConversationRoleUser},
-			{Id: 2, Message: "4", Role: st.ConversationRoleAgent},
+		assertMessages(t, c, []conv.Message{
+			{Id: 0, Message: "2", Role: conv.RoleAgent},
+			{Id: 1, Message: "3", Role: conv.RoleUser},
+			{Id: 2, Message: "4", Role: conv.RoleAgent},
 		})
 
 		// Agent message is updated when the screen changes before a user message.
 		agent.setScreen("5")
 		advanceFor(ctx, t, mClock, interval*threshold)
-		sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: "6"})
+		sendAndAdvance(ctx, t, c, mClock, conv.MessagePartText{Content: "6"})
 
 		agent.setScreen("7")
 		advanceFor(ctx, t, mClock, interval*threshold)
-		assertMessages(t, c, []st.ConversationMessage{
-			{Id: 0, Message: "2", Role: st.ConversationRoleAgent},
-			{Id: 1, Message: "3", Role: st.ConversationRoleUser},
-			{Id: 2, Message: "5", Role: st.ConversationRoleAgent},
-			{Id: 3, Message: "6", Role: st.ConversationRoleUser},
-			{Id: 4, Message: "7", Role: st.ConversationRoleAgent},
+		assertMessages(t, c, []conv.Message{
+			{Id: 0, Message: "2", Role: conv.RoleAgent},
+			{Id: 1, Message: "3", Role: conv.RoleUser},
+			{Id: 2, Message: "5", Role: conv.RoleAgent},
+			{Id: 3, Message: "6", Role: conv.RoleUser},
+			{Id: 4, Message: "7", Role: conv.RoleAgent},
 		})
-		assert.Equal(t, st.ConversationStatusStable, c.Status())
+		assert.Equal(t, conv.StatusStable, c.Status())
 
 		// Send another message.
-		sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: "8"})
+		sendAndAdvance(ctx, t, c, mClock, conv.MessagePartText{Content: "8"})
 
 		// After filling to stable, messages and status are correct.
 		agent.setScreen("7")
 		advanceFor(ctx, t, mClock, interval*threshold)
-		assert.Equal(t, st.ConversationStatusStable, c.Status())
+		assert.Equal(t, conv.StatusStable, c.Status())
 	})
 
 	t.Run("tracking messages overlap", func(t *testing.T) {
@@ -362,26 +361,26 @@ func TestMessages(t *testing.T) {
 		// Common overlap between screens is removed after a user message.
 		agent.setScreen("1")
 		advanceFor(ctx, t, mClock, interval*threshold)
-		sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: "2"})
+		sendAndAdvance(ctx, t, c, mClock, conv.MessagePartText{Content: "2"})
 		agent.setScreen("1\n3")
 		advanceFor(ctx, t, mClock, interval*threshold)
-		assertMessages(t, c, []st.ConversationMessage{
-			{Id: 0, Message: "1", Role: st.ConversationRoleAgent},
-			{Id: 1, Message: "2", Role: st.ConversationRoleUser},
-			{Id: 2, Message: "3", Role: st.ConversationRoleAgent},
+		assertMessages(t, c, []conv.Message{
+			{Id: 0, Message: "1", Role: conv.RoleAgent},
+			{Id: 1, Message: "2", Role: conv.RoleUser},
+			{Id: 2, Message: "3", Role: conv.RoleAgent},
 		})
 
 		agent.setScreen("1\n3x")
 		advanceFor(ctx, t, mClock, interval*threshold)
-		sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: "4"})
+		sendAndAdvance(ctx, t, c, mClock, conv.MessagePartText{Content: "4"})
 		agent.setScreen("1\n3x\n5")
 		advanceFor(ctx, t, mClock, interval*threshold)
-		assertMessages(t, c, []st.ConversationMessage{
-			{Id: 0, Message: "1", Role: st.ConversationRoleAgent},
-			{Id: 1, Message: "2", Role: st.ConversationRoleUser},
-			{Id: 2, Message: "3x", Role: st.ConversationRoleAgent},
-			{Id: 3, Message: "4", Role: st.ConversationRoleUser},
-			{Id: 4, Message: "5", Role: st.ConversationRoleAgent},
+		assertMessages(t, c, []conv.Message{
+			{Id: 0, Message: "1", Role: conv.RoleAgent},
+			{Id: 1, Message: "2", Role: conv.RoleUser},
+			{Id: 2, Message: "3x", Role: conv.RoleAgent},
+			{Id: 3, Message: "4", Role: conv.RoleUser},
+			{Id: 4, Message: "5", Role: conv.RoleAgent},
 		})
 	})
 
@@ -397,15 +396,15 @@ func TestMessages(t *testing.T) {
 		// Fill to stable with screen "1", then send.
 		agent.setScreen("1")
 		advanceFor(ctx, t, mClock, interval*threshold)
-		sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: "2"})
+		sendAndAdvance(ctx, t, c, mClock, conv.MessagePartText{Content: "2"})
 
 		// After send, set screen to "x" and take snapshots for new agent message.
 		agent.setScreen("x")
 		advanceFor(ctx, t, mClock, interval*threshold)
-		assertMessages(t, c, []st.ConversationMessage{
-			{Id: 0, Message: "1 ", Role: st.ConversationRoleAgent},
-			{Id: 1, Message: "2", Role: st.ConversationRoleUser},
-			{Id: 2, Message: "x 2", Role: st.ConversationRoleAgent},
+		assertMessages(t, c, []conv.Message{
+			{Id: 0, Message: "1 ", Role: conv.RoleAgent},
+			{Id: 1, Message: "2", Role: conv.RoleUser},
+			{Id: 2, Message: "x 2", Role: conv.RoleAgent},
 		})
 	})
 
@@ -415,8 +414,8 @@ func TestMessages(t *testing.T) {
 				return "formatted"
 			}
 		})
-		assertMessages(t, c, []st.ConversationMessage{
-			{Id: 0, Message: "", Role: st.ConversationRoleAgent},
+		assertMessages(t, c, []conv.Message{
+			{Id: 0, Message: "", Role: conv.RoleAgent},
 		})
 	})
 
@@ -426,30 +425,30 @@ func TestMessages(t *testing.T) {
 		c, agent, mClock := newConversation(ctx, t)
 
 		sendMsg := func(msg string) error {
-			return c.Send(st.MessagePartText{Content: msg})
+			return c.Send(conv.MessagePartText{Content: msg})
 		}
 
 		// Status is initializing, send should fail.
-		assert.ErrorIs(t, sendMsg("1"), st.ErrMessageValidationChanging)
+		assert.ErrorIs(t, sendMsg("1"), conv.ErrMessageValidationChanging)
 
 		// Fill to stable.
 		agent.setScreen("1")
 		advanceFor(ctx, t, mClock, interval*threshold)
-		assert.Equal(t, st.ConversationStatusStable, c.Status())
+		assert.Equal(t, conv.StatusStable, c.Status())
 
 		// Now send should succeed.
-		sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: "4"})
+		sendAndAdvance(ctx, t, c, mClock, conv.MessagePartText{Content: "4"})
 
 		// After send, screen is dirty. Set to "2" (different from "1") so status is changing.
 		agent.setScreen("2")
 		advanceFor(ctx, t, mClock, interval)
-		assert.Equal(t, st.ConversationStatusChanging, c.Status())
-		assert.ErrorIs(t, sendMsg("5"), st.ErrMessageValidationChanging)
+		assert.Equal(t, conv.StatusChanging, c.Status())
+		assert.ErrorIs(t, sendMsg("5"), conv.ErrMessageValidationChanging)
 	})
 
 	t.Run("send-message-empty-message", func(t *testing.T) {
 		c, _, _ := newConversation(context.Background(), t)
-		assert.ErrorIs(t, c.Send(st.MessagePartText{Content: ""}), st.ErrMessageValidationEmpty)
+		assert.ErrorIs(t, c.Send(conv.MessagePartText{Content: ""}), conv.ErrMessageValidationEmpty)
 	})
 
 	t.Run("send-message-no-echo-agent-reacts", func(t *testing.T) {
@@ -471,13 +470,13 @@ func TestMessages(t *testing.T) {
 
 		// When: a message is sent. Phase 1 times out (no echo),
 		// Phase 2 writes \r and the agent reacts.
-		sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: "hello"})
+		sendAndAdvance(ctx, t, c, mClock, conv.MessagePartText{Content: "hello"})
 
 		// Then: Send succeeds and the user message is recorded.
 		msgs := c.Messages()
 		require.True(t, len(msgs) >= 2)
-		assert.True(t, slices.ContainsFunc(msgs, func(m st.ConversationMessage) bool {
-			return m.Role == st.ConversationRoleUser && m.Message == "hello"
+		assert.True(t, slices.ContainsFunc(msgs, func(m conv.Message) bool {
+			return m.Role == conv.RoleUser && m.Message == "hello"
 		}), "expected user message 'hello' in conversation")
 	})
 
@@ -501,7 +500,7 @@ func TestMessages(t *testing.T) {
 		var sendErr error
 		var sendDone atomic.Bool
 		go func() {
-			sendErr = c.Send(st.MessagePartText{Content: "hello"})
+			sendErr = c.Send(conv.MessagePartText{Content: "hello"})
 			sendDone.Store(true)
 		}()
 		advanceUntil(ctx, t, mClock, func() bool { return sendDone.Load() })
@@ -509,7 +508,7 @@ func TestMessages(t *testing.T) {
 		// Then: Send fails with a Phase 2 error (not Phase 1).
 		require.Error(t, sendErr)
 		assert.Contains(t, sendErr.Error(), "failed to wait for processing to start")
-		assert.ErrorIs(t, sendErr, st.ErrMessageNotSubmitted)
+		assert.ErrorIs(t, sendErr, conv.ErrMessageNotSubmitted)
 	})
 
 	t.Run("send-message-no-echo-context-cancelled", func(t *testing.T) {
@@ -538,7 +537,7 @@ func TestMessages(t *testing.T) {
 		var sendErr error
 		var sendDone atomic.Bool
 		go func() {
-			sendErr = c.Send(st.MessagePartText{Content: "hello"})
+			sendErr = c.Send(conv.MessagePartText{Content: "hello"})
 			sendDone.Store(true)
 		}()
 
@@ -573,286 +572,11 @@ func TestMessages(t *testing.T) {
 	})
 }
 
-func TestStatePersistence(t *testing.T) {
-	t.Run("SaveState creates file with correct structure", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		// Create temp directory for state file
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/state.json"
-
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "initial"}
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: false,
-				SaveState: true,
-			},
-			InitialPrompt: []st.MessagePart{st.MessagePartText{Content: "test prompt"}},
-		}
-
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		// Generate some conversation
-		agent.setScreen("hello")
-		advanceFor(ctx, t, mClock, 300*time.Millisecond)
-
-		// Save state
-		err := c.SaveState()
-		require.NoError(t, err)
-
-		// Read and verify the saved file
-		data, err := os.ReadFile(stateFile)
-		require.NoError(t, err)
-
-		var agentState st.AgentState
-		err = json.Unmarshal(data, &agentState)
-		require.NoError(t, err)
-
-		assert.Equal(t, 1, agentState.Version)
-		assert.Equal(t, "test prompt", agentState.InitialPrompt)
-		assert.NotEmpty(t, agentState.Messages)
-	})
-
-	t.Run("SaveState creates valid JSON", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/state.json"
-
-		mClock := quartz.NewMock(t)
-		fixedTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-		mClock.Set(fixedTime)
-
-		agent := &testAgent{screen: ""}
-		writeCounter := 0
-		agent.onWrite = func(data []byte) {
-			writeCounter++
-			// Change screen on each write so writeStabilize can detect changes
-			agent.screen = fmt.Sprintf("__write_%d", writeCounter)
-		}
-
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: false,
-				SaveState: true,
-			},
-			InitialPrompt: []st.MessagePart{st.MessagePartText{Content: "test prompt"}},
-			ReadyForInitialPrompt: func(message string) bool {
-				return message == "Hello! Ready to help."
-			},
-		}
-
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		// Step 1: Agent shows initial greeting
-		agent.setScreen("Hello! Ready to help.")
-		advanceFor(ctx, t, mClock, 300*time.Millisecond)
-
-		// Step 2: Wait for initial prompt to be sent (uses advanceUntil like TestInitialPromptReadiness)
-		advanceUntil(ctx, t, mClock, func() bool {
-			return len(c.Messages()) >= 2 // greeting + user prompt
-		})
-
-		// Step 3: Agent shows response
-		agent.setScreen("Response to test prompt")
-		advanceFor(ctx, t, mClock, 300*time.Millisecond)
-
-		// Save state - this creates state.json
-		err := c.SaveState()
-		require.NoError(t, err)
-
-		// Read the saved state.json
-		actualData, err := os.ReadFile(stateFile)
-		require.NoError(t, err)
-
-		// Read the expected golden file
-		expectedData, err := os.ReadFile("testdata/expected_saved_state.json")
-		require.NoError(t, err)
-
-		// Parse both JSON files
-		var actualState, expectedState st.AgentState
-		err = json.Unmarshal(actualData, &actualState)
-		require.NoError(t, err)
-		err = json.Unmarshal(expectedData, &expectedState)
-		require.NoError(t, err)
-
-		// Compare the state files field by field
-		assert.Equal(t, expectedState.Version, actualState.Version, "version should match")
-		assert.Equal(t, expectedState.InitialPrompt, actualState.InitialPrompt, "initial_prompt should match")
-		assert.Equal(t, expectedState.InitialPromptSent, actualState.InitialPromptSent, "initial_prompt_sent should match")
-		assert.Equal(t, len(expectedState.Messages), len(actualState.Messages), "message count should match")
-
-		// Compare each message
-		for i := range expectedState.Messages {
-			if i >= len(actualState.Messages) {
-				break
-			}
-			assert.Equal(t, expectedState.Messages[i].Id, actualState.Messages[i].Id, "message %d: id should match", i)
-			assert.Equal(t, expectedState.Messages[i].Message, actualState.Messages[i].Message, "message %d: message should match", i)
-			assert.Equal(t, expectedState.Messages[i].Role, actualState.Messages[i].Role, "message %d: role should match", i)
-		}
-	})
-
-	t.Run("SaveState skips when not configured", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/state.json"
-
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "initial"}
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: false,
-				SaveState: false,
-			},
-		}
-
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		err := c.SaveState()
-		require.NoError(t, err)
-
-		// File should not be created
-		_, err = os.Stat(stateFile)
-		assert.True(t, os.IsNotExist(err))
-	})
-
-	t.Run("SaveState honors dirty flag", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/state.json"
-
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "initial"}
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: false,
-				SaveState: true,
-			},
-		}
-
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		// Generate conversation and save
-		agent.setScreen("hello")
-		advanceFor(ctx, t, mClock, 300*time.Millisecond)
-		err := c.SaveState()
-		require.NoError(t, err)
-
-		// Get file modification time
-		info1, err := os.Stat(stateFile)
-		require.NoError(t, err)
-		modTime1 := info1.ModTime()
-
-		// Save again without changes - file should not be modified
-		err = c.SaveState()
-		require.NoError(t, err)
-
-		info2, err := os.Stat(stateFile)
-		require.NoError(t, err)
-		modTime2 := info2.ModTime()
-
-		// File modification time should be the same (dirty flag prevents save)
-		assert.Equal(t, modTime1, modTime2)
-	})
-
-	t.Run("SaveState creates directory if not exists", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/nested/deep/state.json"
-
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "initial"}
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: false,
-				SaveState: true,
-			},
-		}
-
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		agent.setScreen("hello")
-		advanceFor(ctx, t, mClock, 300*time.Millisecond)
-
-		err := c.SaveState()
-		require.NoError(t, err)
-
-		// Verify file and directory were created
-		_, err = os.Stat(stateFile)
-		assert.NoError(t, err)
-	})
-
-	t.Run("LoadState restores conversation from file", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/state.json"
-
-		// Create a state file with test data
-		testState := st.AgentState{
-			Version:       1,
-			InitialPrompt: "restored prompt",
-			Messages: []st.ConversationMessage{
-				{Id: 0, Message: "agent message 1", Role: st.ConversationRoleAgent, Time: time.Now()},
-				{Id: 1, Message: "user message 1", Role: st.ConversationRoleUser, Time: time.Now()},
-				{Id: 2, Message: "agent message 2", Role: st.ConversationRoleAgent, Time: time.Now()},
-			},
-		}
-		data, err := json.MarshalIndent(testState, "", " ")
-		require.NoError(t, err)
-		err = os.WriteFile(stateFile, data, 0o644)
-		require.NoError(t, err)
-
-		// Create conversation with LoadState enabled
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "ready"}
-		cfg := st.PTYConversationConfig{
+// A conversation restored from the state database continues: the agent
+// starts anew below the restored messages.
+func TestRestoredConversation(t *testing.T) {
+	restoredConfig := func(mClock *quartz.Mock, agent *testAgent, messages []conv.Message) st.PTYConversationConfig {
+		return st.PTYConversationConfig{
 			Clock:                 mClock,
 			SnapshotInterval:      100 * time.Millisecond,
 			ScreenStabilityLength: 200 * time.Millisecond,
@@ -864,335 +588,75 @@ func TestStatePersistence(t *testing.T) {
 			ReadyForInitialPrompt: func(message string) bool {
 				return message == "ready"
 			},
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: true,
-				SaveState: false,
-			},
+			InitialMessages: messages,
 		}
+	}
 
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
+	t.Run("keeps the last agent message until the user sends", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		t.Cleanup(cancel)
+		mClock := quartz.NewMock(t)
+		agent := &testAgent{screen: "ready"}
+		c := st.NewPTY(ctx, restoredConfig(mClock, agent, []conv.Message{
+			{Id: 0, Message: "agent message 1", Role: conv.RoleAgent, Time: time.Now()},
+			{Id: 1, Message: "user message 1", Role: conv.RoleUser, Time: time.Now()},
+			{Id: 2, Message: "agent message 2", Role: conv.RoleAgent, Time: time.Now()},
+		}), &testEmitter{})
+		// Right away: the emitter, restored from the same database, must
+		// not see the messages go.
+		require.Len(t, c.Messages(), 3)
 		c.Start(ctx)
-
-		// Advance until agent is ready and state is loaded
 		advanceFor(ctx, t, mClock, 300*time.Millisecond)
 
-		// Verify messages were restored
 		messages := c.Messages()
-		assert.Len(t, messages, 3)
+		require.Len(t, messages, 3)
 		assert.Equal(t, "agent message 1", messages[0].Message)
 		assert.Equal(t, "user message 1", messages[1].Message)
-		// The last agent message may have adjustments from adjustScreenAfterStateLoad
-		assert.Contains(t, messages[2].Message, "agent message 2")
+		assert.Equal(t, "agent message 2", messages[2].Message, "the new agent's screen doesn't replace it")
 	})
 
-	t.Run("LoadState handles missing file gracefully", func(t *testing.T) {
+	t.Run("a restored user message gets the new agent's reply", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/nonexistent.json"
-
 		mClock := quartz.NewMock(t)
 		agent := &testAgent{screen: "ready"}
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
-			FormatMessage: func(message string, userInput string) string {
-				return message
-			},
-			ReadyForInitialPrompt: func(message string) bool {
-				return message == "ready"
-			},
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: true,
-				SaveState: false,
-			},
-		}
-
-		// Should not panic or error
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
+		// AgentAPI stopped before the agent answered.
+		c := st.NewPTY(ctx, restoredConfig(mClock, agent, []conv.Message{
+			{Id: 0, Message: "agent greeting", Role: conv.RoleAgent, Time: time.Now()},
+			{Id: 1, Message: "user question", Role: conv.RoleUser, Time: time.Now()},
+		}), &testEmitter{})
 		c.Start(ctx)
-
-		advanceFor(ctx, t, mClock, 300*time.Millisecond)
-
-		// Should have default initial message
-		messages := c.Messages()
-		assert.Len(t, messages, 1)
-	})
-
-	t.Run("LoadState handles empty file gracefully", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/empty.json"
-
-		// Create empty file
-		err := os.WriteFile(stateFile, []byte(""), 0o644)
-		require.NoError(t, err)
-
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "ready"}
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
-			FormatMessage: func(message string, userInput string) string {
-				return message
-			},
-			ReadyForInitialPrompt: func(message string) bool {
-				return message == "ready"
-			},
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: true,
-				SaveState: false,
-			},
-		}
-
-		// Should not panic or error
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		advanceFor(ctx, t, mClock, 300*time.Millisecond)
-
-		// Should have default initial message
-		messages := c.Messages()
-		assert.Len(t, messages, 1)
-	})
-
-	t.Run("LoadState handles corrupted JSON gracefully", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/corrupted.json"
-
-		// Create corrupted JSON file
-		err := os.WriteFile(stateFile, []byte("{invalid json}"), 0o644)
-		require.NoError(t, err)
-
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "ready"}
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
-			FormatMessage: func(message string, userInput string) string {
-				return message
-			},
-			ReadyForInitialPrompt: func(message string) bool {
-				return message == "ready"
-			},
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: true,
-				SaveState: false,
-			},
-		}
-
-		// Should not panic - logs warning and continues
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		advanceFor(ctx, t, mClock, 300*time.Millisecond)
-
-		// Should have default initial message
-		messages := c.Messages()
-		assert.Len(t, messages, 1)
-	})
-
-	t.Run("LoadState rejects unsupported version", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/unsupported_version.json"
-
-		// Create state file with unsupported version
-		unsupportedState := map[string]interface{}{
-			"version":             999, // Unsupported version
-			"messages":            []interface{}{},
-			"initial_prompt":      "",
-			"initial_prompt_sent": false,
-		}
-		stateBytes, err := json.Marshal(unsupportedState)
-		require.NoError(t, err)
-		err = os.WriteFile(stateFile, stateBytes, 0o644)
-		require.NoError(t, err)
-
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "ready"}
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
-			FormatMessage: func(message string, userInput string) string {
-				return message
-			},
-			ReadyForInitialPrompt: func(message string) bool {
-				return message == "ready"
-			},
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: true,
-				SaveState: false,
-			},
-		}
-
-		// Should not panic - logs error and continues with empty state
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		advanceFor(ctx, t, mClock, 300*time.Millisecond)
-
-		// Should have default initial message (version error causes fallback to empty state)
-		messages := c.Messages()
-		assert.Len(t, messages, 1)
-	})
-
-	t.Run("LoadState_last_message_is_user_role", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/state.json"
-
-		// Create a state file where the last message is a user message.
-		// Without the role check in updateLastAgentMessageLocked, the
-		// user message content would be used as the new agent message.
-		testState := st.AgentState{
-			Version:           1,
-			InitialPromptSent: true,
-			Messages: []st.ConversationMessage{
-				{Id: 0, Message: "agent greeting", Role: st.ConversationRoleAgent, Time: time.Now()},
-				{Id: 1, Message: "user question", Role: st.ConversationRoleUser, Time: time.Now()},
-			},
-		}
-		data, err := json.MarshalIndent(testState, "", " ")
-		require.NoError(t, err)
-		err = os.WriteFile(stateFile, data, 0o644)
-		require.NoError(t, err)
-
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "ready"}
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
-			FormatMessage: func(message string, userInput string) string {
-				return message
-			},
-			ReadyForInitialPrompt: func(message string) bool {
-				return message == "ready"
-			},
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: true,
-				SaveState: false,
-			},
-		}
-
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		// Advance past stability so state loads and a new agent message
-		// is created from the current screen content.
 		advanceFor(ctx, t, mClock, 300*time.Millisecond)
 
 		messages := c.Messages()
-		require.True(t, len(messages) >= 3, "expected at least 3 messages, got %d", len(messages))
-		// The new agent message should derive from screen content ("ready"),
-		// NOT from the last loaded message ("user question").
-		lastMsg := messages[len(messages)-1]
-		assert.Equal(t, st.ConversationRoleAgent, lastMsg.Role)
-		assert.NotEqual(t, "user question", lastMsg.Message,
-			"agent message must not contain the user message content")
-		assert.Contains(t, lastMsg.Message, "ready")
+		require.Len(t, messages, 3)
+		last := messages[2]
+		assert.Equal(t, conv.RoleAgent, last.Role)
+		assert.Equal(t, 2, last.Id)
+		assert.Contains(t, last.Message, "ready", "from the screen, not the user's message")
 	})
 
-	t.Run("LoadState_preserves_unsent_initial_prompt_status", func(t *testing.T) {
+	t.Run("an initial prompt goes out after the restored messages", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/state.json"
-
-		// Create state where the initial prompt was NOT sent (e.g. previous crash).
-		testState := st.AgentState{
-			Version:           1,
-			InitialPrompt:     "test prompt",
-			InitialPromptSent: false,
-			Messages: []st.ConversationMessage{
-				{Id: 0, Message: "agent greeting", Role: st.ConversationRoleAgent, Time: time.Now()},
-			},
-		}
-		data, err := json.MarshalIndent(testState, "", " ")
-		require.NoError(t, err)
-		err = os.WriteFile(stateFile, data, 0o644)
-		require.NoError(t, err)
-
-		writeCounter := 0
-		agent := &testAgent{screen: "ready"}
-		agent.onWrite = func(data []byte) {
-			writeCounter++
-			agent.screen = fmt.Sprintf("__write_%d", writeCounter)
-		}
-
 		mClock := quartz.NewMock(t)
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
-			ReadyForInitialPrompt: func(message string) bool {
-				return message == "ready"
-			},
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: true,
-				SaveState: false,
-			},
-			// Same initial prompt as saved state.
-			InitialPrompt: []st.MessagePart{st.MessagePartText{Content: "test prompt"}},
+		agent := &testAgent{screen: "ready"}
+		writes := 0
+		agent.onWrite = func([]byte) {
+			writes++
+			agent.screen = fmt.Sprintf("__write_%d", writes)
 		}
-
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		// Advance until we see a user message with the initial prompt.
-		advanceUntil(ctx, t, mClock, func() bool {
-			for _, m := range c.Messages() {
-				if m.Role == st.ConversationRoleUser && m.Message == "test prompt" {
-					return true
-				}
-			}
-			return false
+		cfg := restoredConfig(mClock, agent, []conv.Message{
+			{Id: 0, Message: "agent greeting", Role: conv.RoleAgent, Time: time.Now()},
 		})
+		cfg.InitialPrompt = []conv.MessagePart{conv.MessagePartText{Content: "next prompt"}}
+		c := st.NewPTY(ctx, cfg, &testEmitter{})
+		c.Start(ctx)
+		advanceUntil(ctx, t, mClock, func() bool { return len(c.Messages()) >= 2 })
 
-		// Verify the initial prompt was sent as a user message.
-		found := false
-		for _, m := range c.Messages() {
-			if m.Role == st.ConversationRoleUser && m.Message == "test prompt" {
-				found = true
-				break
-			}
-		}
-		assert.True(t, found, "initial prompt should have been sent since InitialPromptSent was false in saved state")
+		messages := c.Messages()
+		assert.Equal(t, "agent greeting", messages[0].Message)
+		assert.Equal(t, conv.Message{Id: 1, Message: "next prompt", Role: conv.RoleUser, Time: messages[1].Time}, messages[1])
 	})
 }
 
@@ -1212,7 +676,7 @@ func TestInitialPromptReadiness(t *testing.T) {
 			ReadyForInitialPrompt: func(message string) bool {
 				return message == "ready"
 			},
-			InitialPrompt: []st.MessagePart{st.MessagePartText{Content: "initial prompt here"}},
+			InitialPrompt: []conv.MessagePart{conv.MessagePartText{Content: "initial prompt here"}},
 			Logger:        discardLogger,
 		}
 
@@ -1224,7 +688,7 @@ func TestInitialPromptReadiness(t *testing.T) {
 
 		// Screen is stable but agent is not ready. Status must be
 		// "changing" so that Send() rejects instead of blocking.
-		assert.Equal(t, st.ConversationStatusChanging, c.Status())
+		assert.Equal(t, conv.StatusChanging, c.Status())
 	})
 
 	t.Run("agent becomes ready - prompt enqueued and status changes to changing", func(t *testing.T) {
@@ -1240,7 +704,7 @@ func TestInitialPromptReadiness(t *testing.T) {
 			ReadyForInitialPrompt: func(message string) bool {
 				return message == "ready"
 			},
-			InitialPrompt: []st.MessagePart{st.MessagePartText{Content: "initial prompt here"}},
+			InitialPrompt: []conv.MessagePart{conv.MessagePartText{Content: "initial prompt here"}},
 			Logger:        discardLogger,
 		}
 
@@ -1249,11 +713,11 @@ func TestInitialPromptReadiness(t *testing.T) {
 
 		// Agent not ready initially, status should be changing.
 		advanceFor(ctx, t, mClock, 1*time.Second)
-		assert.Equal(t, st.ConversationStatusChanging, c.Status())
+		assert.Equal(t, conv.StatusChanging, c.Status())
 		// Agent becomes ready, prompt gets enqueued, status becomes "changing"
 		agent.setScreen("ready")
 		advanceFor(ctx, t, mClock, 1*time.Second)
-		assert.Equal(t, st.ConversationStatusChanging, c.Status())
+		assert.Equal(t, conv.StatusChanging, c.Status())
 	})
 
 	t.Run("initial prompt lifecycle - status stays changing until sent", func(t *testing.T) {
@@ -1274,7 +738,7 @@ func TestInitialPromptReadiness(t *testing.T) {
 			ReadyForInitialPrompt: func(message string) bool {
 				return message == "ready"
 			},
-			InitialPrompt: []st.MessagePart{st.MessagePartText{Content: "initial prompt here"}},
+			InitialPrompt: []conv.MessagePart{conv.MessagePartText{Content: "initial prompt here"}},
 			Logger:        discardLogger,
 		}
 
@@ -1283,7 +747,7 @@ func TestInitialPromptReadiness(t *testing.T) {
 
 		// Status is "changing" while waiting for readiness (prompt not yet enqueued).
 		advanceFor(ctx, t, mClock, 1*time.Second)
-		assert.Equal(t, st.ConversationStatusChanging, c.Status())
+		assert.Equal(t, conv.StatusChanging, c.Status())
 		// Agent becomes ready. The snapshot loop detects this, enqueues the prompt,
 		// then sees queue + stable + ready and signals the send loop.
 		// writeStabilize runs with onWrite changing the screen, so it completes.
@@ -1298,7 +762,7 @@ func TestInitialPromptReadiness(t *testing.T) {
 		// agent message and fill the stability buffer (threshold=1).
 		agent.setScreen("response")
 		advanceFor(ctx, t, mClock, 2*time.Second)
-		assert.Equal(t, st.ConversationStatusStable, c.Status())
+		assert.Equal(t, conv.StatusStable, c.Status())
 	})
 
 	t.Run("ReadyForInitialPrompt always false - status is changing", func(t *testing.T) {
@@ -1325,7 +789,7 @@ func TestInitialPromptReadiness(t *testing.T) {
 		// Even without an initial prompt, stableSignal gates on
 		// initialPromptReady. Status must reflect that Send()
 		// would block.
-		assert.Equal(t, st.ConversationStatusChanging, c.Status())
+		assert.Equal(t, conv.StatusChanging, c.Status())
 	})
 
 	t.Run("no initial prompt configured - normal status logic applies", func(t *testing.T) {
@@ -1347,399 +811,17 @@ func TestInitialPromptReadiness(t *testing.T) {
 		// Fill buffer to reach stability with "ready" screen.
 		agent.setScreen("ready")
 		advanceFor(ctx, t, mClock, 3*time.Second)
-		assert.Equal(t, st.ConversationStatusStable, c.Status())
+		assert.Equal(t, conv.StatusStable, c.Status())
 
 		// After screen changes, status becomes changing.
 		agent.setScreen("processing...")
 		advanceFor(ctx, t, mClock, 1*time.Second)
-		assert.Equal(t, st.ConversationStatusChanging, c.Status())
+		assert.Equal(t, conv.StatusChanging, c.Status())
 
 		// After screen is stable again (3 identical snapshots), status becomes stable.
 		advanceFor(ctx, t, mClock, 1*time.Second)
 		advanceFor(ctx, t, mClock, 1*time.Second)
-		assert.Equal(t, st.ConversationStatusStable, c.Status())
-	})
-}
-
-func TestInitialPromptSent(t *testing.T) {
-	discardLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	t.Run("initialPromptSent is set when initial prompt is sent", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/state.json"
-
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "loading..."}
-		writeCounter := 0
-		agent.onWrite = func(data []byte) {
-			writeCounter++
-			agent.screen = fmt.Sprintf("__write_%d", writeCounter)
-		}
-
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      1 * time.Second,
-			ScreenStabilityLength: 0,
-			AgentIO:               agent,
-			ReadyForInitialPrompt: func(message string) bool {
-				return message == "ready"
-			},
-			InitialPrompt: []st.MessagePart{st.MessagePartText{Content: "test prompt"}},
-			Logger:        discardLogger,
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: false,
-				SaveState: true,
-			},
-		}
-
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		// Agent becomes ready and initial prompt is sent
-		agent.setScreen("ready")
-		advanceUntil(ctx, t, mClock, func() bool {
-			return len(c.Messages()) >= 2
-		})
-
-		// Save state and verify initialPromptSent is persisted
-		agent.setScreen("response")
-		advanceFor(ctx, t, mClock, 2*time.Second)
-
-		err := c.SaveState()
-		require.NoError(t, err)
-
-		data, err := os.ReadFile(stateFile)
-		require.NoError(t, err)
-
-		var agentState st.AgentState
-		err = json.Unmarshal(data, &agentState)
-		require.NoError(t, err)
-
-		assert.True(t, agentState.InitialPromptSent, "initialPromptSent should be true after initial prompt is sent")
-		assert.Equal(t, "test prompt", agentState.InitialPrompt)
-	})
-
-	t.Run("initialPromptSent prevents re-sending prompt after state load", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/state.json"
-
-		// Create a state file with initialPromptSent=true
-		testState := st.AgentState{
-			Version:           1,
-			InitialPrompt:     "test prompt",
-			InitialPromptSent: true,
-			Messages: []st.ConversationMessage{
-				{Id: 0, Message: "agent message", Role: st.ConversationRoleAgent, Time: time.Now()},
-				{Id: 1, Message: "test prompt", Role: st.ConversationRoleUser, Time: time.Now()},
-			},
-		}
-		data, err := json.MarshalIndent(testState, "", " ")
-		require.NoError(t, err)
-		err = os.WriteFile(stateFile, data, 0o644)
-		require.NoError(t, err)
-
-		// Create conversation with same initial prompt
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "ready"}
-		writeCount := 0
-		agent.onWrite = func(data []byte) {
-			writeCount++
-			agent.screen = "after_write"
-		}
-
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			ReadyForInitialPrompt: func(message string) bool {
-				return message == "ready"
-			},
-			InitialPrompt: []st.MessagePart{st.MessagePartText{Content: "test prompt"}},
-			Logger:        discardLogger,
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: true,
-				SaveState: false,
-			},
-		}
-
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		// Advance until ready and state is loaded
-		advanceFor(ctx, t, mClock, 500*time.Millisecond)
-
-		// Verify the prompt was NOT re-sent (no writes occurred)
-		assert.Equal(t, 0, writeCount, "initial prompt should not be re-sent when already sent")
-
-		// Messages should be restored from state (at minimum, the original 2)
-		messages := c.Messages()
-		assert.GreaterOrEqual(t, len(messages), 2, "messages should be restored from state")
-		// Verify the first two messages match what we saved
-		assert.Equal(t, "agent message", messages[0].Message)
-		assert.Equal(t, st.ConversationRoleAgent, messages[0].Role)
-		assert.Equal(t, "test prompt", messages[1].Message)
-		assert.Equal(t, st.ConversationRoleUser, messages[1].Role)
-	})
-
-	t.Run("new initial prompt is sent if different from saved prompt", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/state.json"
-
-		// Create a state file with old prompt
-		testState := st.AgentState{
-			Version:           1,
-			InitialPrompt:     "old prompt",
-			InitialPromptSent: true,
-			Messages: []st.ConversationMessage{
-				{Id: 0, Message: "agent message", Role: st.ConversationRoleAgent, Time: time.Now()},
-			},
-		}
-		data, err := json.MarshalIndent(testState, "", " ")
-		require.NoError(t, err)
-		err = os.WriteFile(stateFile, data, 0o644)
-		require.NoError(t, err)
-
-		// Create conversation with different initial prompt
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "loading..."}
-		writeCounter := 0
-		agent.onWrite = func(data []byte) {
-			writeCounter++
-			agent.screen = fmt.Sprintf("__write_%d", writeCounter)
-		}
-
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      1 * time.Second,
-			ScreenStabilityLength: 0,
-			AgentIO:               agent,
-			ReadyForInitialPrompt: func(message string) bool {
-				return message == "ready"
-			},
-			InitialPrompt: []st.MessagePart{st.MessagePartText{Content: "new prompt"}},
-			Logger:        discardLogger,
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: true,
-				SaveState: false,
-			},
-		}
-
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		// Agent becomes ready
-		agent.setScreen("ready")
-
-		// Advance until the new prompt is sent
-		advanceUntil(ctx, t, mClock, func() bool {
-			msgs := c.Messages()
-			// Look for the new prompt in messages
-			for _, msg := range msgs {
-				if msg.Role == st.ConversationRoleUser && msg.Message == "new prompt" {
-					return true
-				}
-			}
-			return false
-		})
-
-		// Verify the new prompt was sent
-		messages := c.Messages()
-		found := false
-		for _, msg := range messages {
-			if msg.Role == st.ConversationRoleUser && msg.Message == "new prompt" {
-				found = true
-				break
-			}
-		}
-		assert.True(t, found, "new prompt should be sent when different from saved prompt")
-	})
-
-	t.Run("initialPromptSent not set when no initial prompt configured", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/state.json"
-
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "ready"}
-
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			Logger:                discardLogger,
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: false,
-				SaveState: true,
-			},
-		}
-
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		advanceFor(ctx, t, mClock, 300*time.Millisecond)
-
-		err := c.SaveState()
-		require.NoError(t, err)
-
-		data, err := os.ReadFile(stateFile)
-		require.NoError(t, err)
-
-		var agentState st.AgentState
-		err = json.Unmarshal(data, &agentState)
-		require.NoError(t, err)
-
-		assert.False(t, agentState.InitialPromptSent, "initialPromptSent should be false when no initial prompt configured")
-	})
-
-	t.Run("restored prompt used when no new prompt provided", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/state.json"
-
-		// Create a state file with a prompt
-		testState := st.AgentState{
-			Version:           1,
-			InitialPrompt:     "saved prompt",
-			InitialPromptSent: false,
-			Messages: []st.ConversationMessage{
-				{Id: 0, Message: "agent message", Role: st.ConversationRoleAgent, Time: time.Now()},
-			},
-		}
-		data, err := json.MarshalIndent(testState, "", " ")
-		require.NoError(t, err)
-		err = os.WriteFile(stateFile, data, 0o644)
-		require.NoError(t, err)
-
-		// Create conversation without providing an initial prompt
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "loading..."}
-		writeCounter := 0
-		agent.onWrite = func(data []byte) {
-			writeCounter++
-			agent.screen = fmt.Sprintf("__write_%d", writeCounter)
-		}
-
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      1 * time.Second,
-			ScreenStabilityLength: 0,
-			AgentIO:               agent,
-			ReadyForInitialPrompt: func(message string) bool {
-				return message == "ready"
-			},
-			Logger: discardLogger,
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: true,
-				SaveState: false,
-			},
-		}
-
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		// Agent becomes ready
-		agent.setScreen("ready")
-
-		// Advance until the saved prompt is sent
-		advanceUntil(ctx, t, mClock, func() bool {
-			msgs := c.Messages()
-			for _, msg := range msgs {
-				if msg.Role == st.ConversationRoleUser && msg.Message == "saved prompt" {
-					return true
-				}
-			}
-			return false
-		})
-
-		// Verify the saved prompt was sent
-		messages := c.Messages()
-		found := false
-		for _, msg := range messages {
-			if msg.Role == st.ConversationRoleUser && msg.Message == "saved prompt" {
-				found = true
-				break
-			}
-		}
-		assert.True(t, found, "saved prompt should be sent when no new prompt provided")
-	})
-
-	t.Run("empty prompt from state is not restored", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-		t.Cleanup(cancel)
-
-		tmpDir := t.TempDir()
-		stateFile := tmpDir + "/state.json"
-
-		// Create state file with empty prompt
-		emptyPromptState := st.AgentState{
-			Version:           1,
-			Messages:          []st.ConversationMessage{},
-			InitialPrompt:     "", // Empty prompt
-			InitialPromptSent: false,
-		}
-		stateBytes, err := json.Marshal(emptyPromptState)
-		require.NoError(t, err)
-		err = os.WriteFile(stateFile, stateBytes, 0o644)
-		require.NoError(t, err)
-
-		mClock := quartz.NewMock(t)
-		agent := &testAgent{screen: "ready"}
-
-		cfg := st.PTYConversationConfig{
-			Clock:                 mClock,
-			SnapshotInterval:      100 * time.Millisecond,
-			ScreenStabilityLength: 200 * time.Millisecond,
-			AgentIO:               agent,
-			Logger:                discardLogger,
-			FormatMessage: func(message string, userInput string) string {
-				return message
-			},
-			ReadyForInitialPrompt: func(message string) bool {
-				return message == "ready"
-			},
-			StatePersistenceConfig: st.StatePersistenceConfig{
-				StateFile: stateFile,
-				LoadState: true,
-				SaveState: false,
-			},
-		}
-
-		c := st.NewPTY(ctx, cfg, &testEmitter{})
-		c.Start(ctx)
-
-		// Agent becomes ready
-		agent.setScreen("ready")
-
-		// Advance time to ensure any prompt would be sent
-		advanceFor(ctx, t, mClock, 500*time.Millisecond)
-
-		// Verify no prompt was sent (should only have the initial screen message)
-		messages := c.Messages()
-		for _, msg := range messages {
-			if msg.Role == st.ConversationRoleUser {
-				t.Errorf("Unexpected user message sent: %q (empty prompt should not be restored)", msg.Message)
-			}
-		}
+		assert.Equal(t, conv.StatusStable, c.Status())
 	})
 }
 
@@ -1771,11 +853,11 @@ func TestSendRejectsWhenInitialPromptNotReady(t *testing.T) {
 	advanceFor(ctx, t, mClock, 300*time.Millisecond)
 
 	// Status reports "changing" because initialPromptReady is false.
-	assert.Equal(t, st.ConversationStatusChanging, c.Status())
+	assert.Equal(t, conv.StatusChanging, c.Status())
 
 	// Send() rejects immediately instead of blocking forever.
-	err := c.Send(st.MessagePartText{Content: "hello"})
-	assert.ErrorIs(t, err, st.ErrMessageValidationChanging)
+	err := c.Send(conv.MessagePartText{Content: "hello"})
+	assert.ErrorIs(t, err, conv.ErrMessageValidationChanging)
 }
 
 // tickingAgent simulates a TUI that keeps redrawing a footer below its input
@@ -1812,9 +894,9 @@ func stripFooter(screen string) string {
 }
 
 func TestStabilityScreen(t *testing.T) {
-	changing := st.ConversationStatusChanging
-	stable := st.ConversationStatusStable
-	initializing := st.ConversationStatusInitializing
+	changing := conv.StatusChanging
+	stable := conv.StatusStable
+	initializing := conv.StatusInitializing
 
 	statusTest(t, statusTestParams{
 		cfg: st.PTYConversationConfig{
@@ -1858,7 +940,7 @@ func TestStabilityScreen(t *testing.T) {
 			}
 		}}
 		c, mClock := newTickingConversation(ctx, t, agent)
-		sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: "hello"})
+		sendAndAdvance(ctx, t, c, mClock, conv.MessagePartText{Content: "hello"})
 	})
 
 	t.Run("ticking footer is not mistaken for the agent reacting", func(t *testing.T) {
@@ -1869,11 +951,11 @@ func TestStabilityScreen(t *testing.T) {
 		var sendErr error
 		var sendDone atomic.Bool
 		go func() {
-			sendErr = c.Send(st.MessagePartText{Content: "hello"})
+			sendErr = c.Send(conv.MessagePartText{Content: "hello"})
 			sendDone.Store(true)
 		}()
 		advanceUntil(ctx, t, mClock, func() bool { return sendDone.Load() })
-		assert.ErrorIs(t, sendErr, st.ErrMessageNotSubmitted)
+		assert.ErrorIs(t, sendErr, conv.ErrMessageNotSubmitted)
 	})
 }
 
@@ -1910,15 +992,15 @@ func TestRepeatedRepliesEndTheirTurns(t *testing.T) {
 	}, &testEmitter{})
 	c.Start(ctx)
 	advanceFor(ctx, t, mClock, 300*time.Millisecond)
-	require.Equal(t, st.ConversationStatusStable, c.Status())
+	require.Equal(t, conv.StatusStable, c.Status())
 
 	// The second reply is the same as the first one (empty): it still ends
 	// its turn, rather than leaving the user's message last and the status
 	// changing for good.
 	for _, q := range []string{"q1", "q2"} {
-		sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: q})
+		sendAndAdvance(ctx, t, c, mClock, conv.MessagePartText{Content: q})
 		advanceFor(ctx, t, mClock, time.Second)
-		require.Equal(t, st.ConversationStatusStable, c.Status(), "after %s: %q", q, roles(c))
+		require.Equal(t, conv.StatusStable, c.Status(), "after %s: %q", q, roles(c))
 	}
 	require.Equal(t, []string{"agent:" + strings.Join(strings.Split("L1 L2 L3 L4 L5 L6 L7 L8", " "), "\n"), "user:q1", "agent:", "user:q2", "agent:"}, roles(c))
 }
@@ -1935,7 +1017,7 @@ func TestResetWhileTheInitialPromptWaits(t *testing.T) {
 		SnapshotInterval:      100 * time.Millisecond,
 		ScreenStabilityLength: 200 * time.Millisecond,
 		ReadyForInitialPrompt: func(s string) bool { return strings.HasPrefix(s, "ready") },
-		InitialPrompt:         []st.MessagePart{st.MessagePartText{Content: "initial"}},
+		InitialPrompt:         []conv.MessagePart{conv.MessagePartText{Content: "initial"}},
 		Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, &testEmitter{})
 	c.Start(ctx)
@@ -1952,7 +1034,7 @@ func TestResetWhileTheInitialPromptWaits(t *testing.T) {
 	defer tickCancel()
 	require.NoError(t, w.Wait(tickCtx), "the snapshot blocked")
 
-	status := make(chan st.ConversationStatus, 1)
+	status := make(chan conv.Status, 1)
 	go func() { status <- c.Status() }()
 	select {
 	case <-status:
@@ -1978,9 +1060,9 @@ func TestResetWhileTheInitialPromptWaits(t *testing.T) {
 	// The send loop delivers the prompt in its own time: wait for it, and
 	// for the screen to settle after it.
 	advanceUntil(ctx, t, mClock, func() bool {
-		return len(writes()) == 1 && c.Status() == st.ConversationStatusStable
+		return len(writes()) == 1 && c.Status() == conv.StatusStable
 	})
-	sendAndAdvance(ctx, t, c, mClock, st.MessagePartText{Content: "hello"})
+	sendAndAdvance(ctx, t, c, mClock, conv.MessagePartText{Content: "hello"})
 	require.Equal(t, []string{"initial", "hello"}, writes())
 }
 
@@ -1991,7 +1073,7 @@ type errorEmitter struct {
 	errors []string
 }
 
-func (e *errorEmitter) EmitError(message string, _ st.ErrorLevel) {
+func (e *errorEmitter) EmitError(message string, _ conv.ErrorLevel) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.errors = append(e.errors, message)
@@ -2016,7 +1098,7 @@ func TestFailedInitialPromptIsReported(t *testing.T) {
 		AgentIO:               agent,
 		SnapshotInterval:      100 * time.Millisecond,
 		ScreenStabilityLength: 200 * time.Millisecond,
-		InitialPrompt:         []st.MessagePart{st.MessagePartText{Content: "initial"}},
+		InitialPrompt:         []conv.MessagePart{conv.MessagePartText{Content: "initial"}},
 		Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, emitter)
 	c.Start(ctx)
@@ -2036,9 +1118,9 @@ func TestSendAfterStopFails(t *testing.T) {
 	}, &testEmitter{})
 	c.Start(ctx)
 	advanceFor(ctx, t, mClock, 300*time.Millisecond)
-	require.Equal(t, st.ConversationStatusStable, c.Status())
+	require.Equal(t, conv.StatusStable, c.Status())
 	cancel()
 	require.Eventually(t, func() bool {
-		return errors.Is(c.Send(st.MessagePartText{Content: "late"}), context.Canceled)
+		return errors.Is(c.Send(conv.MessagePartText{Content: "late"}), context.Canceled)
 	}, testTimeout, 10*time.Millisecond, "Send blocks or succeeds after the conversation stopped")
 }

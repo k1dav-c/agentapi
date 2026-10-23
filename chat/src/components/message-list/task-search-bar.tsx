@@ -56,6 +56,7 @@ export function TaskSearchBar({
             <option value="running">{uiCopy.taskToolbar.running}</option>
             <option value="queued">{uiCopy.taskToolbar.queued}</option>
             <option value="failed">{uiCopy.taskToolbar.failed}</option>
+            <option value="limited">{uiCopy.taskToolbar.limited}</option>
             <option value="completed">{uiCopy.taskToolbar.completed}</option>
             <option value="tool-error">{uiCopy.taskToolbar.toolErrors}</option>
           </select>

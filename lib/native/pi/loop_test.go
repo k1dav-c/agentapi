@@ -1,6 +1,7 @@
 package pi
 
 import (
+	"context"
 	"io"
 	"testing"
 	"time"
@@ -254,5 +255,34 @@ func TestRecords(t *testing.T) {
 			"warning: Compaction failed: context too small",
 			"warning: Pi extension /home/me/.pi/agent/extensions/guard.ts failed on tool_call: boom",
 		}, h.sink.State().Errors)
+	})
+}
+
+// A prompt Pi got but neither answered nor started may run all the same:
+// the error says so, whether the call was cut short or Pi exited first.
+func TestPromptWithoutAnswerIsUnconfirmed(t *testing.T) {
+	t.Parallel()
+
+	t.Run("cut short", func(t *testing.T) {
+		t.Parallel()
+		h := startedHarness(t)
+		ctx, cancel := context.WithCancel(h.ctx)
+		h.call("p", func() error { return h.a.StartTurn(ctx, native.Input{Text: "hi"}) })
+		assert.Equal(t, "prompt", h.pi.nextCmd()["type"])
+		cancel()
+		err := h.result("p")
+		require.ErrorIs(t, err, native.ErrUnconfirmed)
+		assert.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("exited", func(t *testing.T) {
+		t.Parallel()
+		h := startedHarness(t)
+		h.prompt("p", "hi")
+		h.pi.exit(nil)
+		err := h.result("p")
+		require.ErrorIs(t, err, native.ErrUnconfirmed)
+		assert.ErrorIs(t, err, errExited)
+		assert.NotErrorIs(t, h.a.StartTurn(h.ctx, native.Input{Text: "again"}), native.ErrUnconfirmed, "never sent")
 	})
 }

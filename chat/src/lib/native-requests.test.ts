@@ -7,6 +7,7 @@ import {
   emptyDrafts,
   mergeListedRequests,
   mergeRequests,
+  normalizeRequest,
   optionResponse,
   optionTone,
   pendingRequests,
@@ -52,6 +53,20 @@ const question = (overrides: Partial<NativeRequest> = {}): NativeRequest => ({
   status: "pending",
   created_at: "2026-10-16T10:01:00Z",
   ...overrides,
+});
+
+describe("normalizeRequest", () => {
+  test("turns null answers into empty ones", () => {
+    const payload = JSON.parse('{"id":"req-2","kind":"question","title":"Q","status":"resolved","response_capability":"live","created_at":"2026-10-16T10:01:00Z","response":{"answers":{"pm":["bun"],"notes":null}}}');
+    expect(normalizeRequest(payload).response?.answers).toEqual({pm: ["bun"], notes: []});
+  });
+
+  test("a request with nothing null keeps its object", () => {
+    const request = question({status: "resolved", response: {answers: {pm: ["bun"]}}});
+    expect(normalizeRequest(request)).toBe(request);
+    const pending = approval();
+    expect(normalizeRequest(pending)).toBe(pending);
+  });
 });
 
 describe("mergeRequests", () => {

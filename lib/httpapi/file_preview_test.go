@@ -31,7 +31,7 @@ func TestFilePreview(t *testing.T) {
 	writeFile(t, outside, "secret")
 	// A symlink in the working directory can't lead the preview out of it.
 	require.NoError(t, os.Symlink(outside, filepath.Join(dir, "secret.js")))
-	s := &Server{cwd: dir}
+	s := &fileAPI{cwd: dir}
 	get := func(path string) (*FilePreviewResponse, error) {
 		return s.getFilePreview(t.Context(), &FilePathQuery{Path: path})
 	}
@@ -69,7 +69,7 @@ func TestFileImage(t *testing.T) {
 	outside := filepath.Join(t.TempDir(), "secret.png")
 	writeFile(t, outside, pngHeader)
 	require.NoError(t, os.Symlink(outside, filepath.Join(dir, "link.png")))
-	s := &Server{cwd: dir}
+	s := &fileAPI{cwd: dir}
 	get := func(path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		s.serveFileImage(rec, httptest.NewRequest(http.MethodGet, "/files/image?path="+url.QueryEscape(path), nil))

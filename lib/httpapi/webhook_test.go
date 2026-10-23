@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	mf "github.com/coder/agentapi/lib/msgfmt"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 func TestWebhookConfigValidation(t *testing.T) {
@@ -62,21 +62,24 @@ func TestWebhookStatusChangesOnly(t *testing.T) {
 	require.NoError(t, err)
 
 	emitter := NewEventEmitter(WithStatusChangeHandler(dispatcher.statusChanged))
-	emitter.EmitStatus(st.ConversationStatusChanging)
+	emitter.EmitStatus(conv.StatusChanging)
 	assert.Empty(t, dispatcher.queue)
 
-	emitter.EmitStatus(st.ConversationStatusStable)
+	emitter.EmitStatus(conv.StatusStable)
 	require.Len(t, dispatcher.queue, 1)
 	event := <-dispatcher.queue
 	assert.Equal(t, webhookEventRunStatusChanged, event.Type)
-	assert.Equal(t, AgentStatusRunning, event.Data.PreviousStatus)
-	assert.Equal(t, AgentStatusStable, event.Data.Status)
-	assert.Equal(t, mf.AgentTypeCodex, event.Data.AgentType)
-	assert.Equal(t, TransportPTY, event.Data.Transport)
+	data, ok := event.Data.(WebhookEventData)
+	require.True(t, ok)
+	assert.Equal(t, AgentStatusRunning, data.PreviousStatus)
+	assert.Equal(t, AgentStatusStable, data.Status)
+	assert.Equal(t, mf.AgentTypeCodex, data.AgentType)
+	assert.Equal(t, TransportPTY, data.Transport)
 	assert.NotEmpty(t, event.ID)
-	assert.NotEmpty(t, event.Data.RunID)
+	assert.NotEmpty(t, data.ServerID)
+	assert.Equal(t, data.ServerID, event.Instance.ServerID)
 
-	emitter.EmitStatus(st.ConversationStatusStable)
+	emitter.EmitStatus(conv.StatusStable)
 	assert.Empty(t, dispatcher.queue)
 }
 
@@ -107,7 +110,7 @@ func TestWebhookSend(t *testing.T) {
 		Type:      webhookEventRunStatusChanged,
 		CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
 		Data: WebhookEventData{
-			RunID:          "run-1",
+			ServerID:       "run-1",
 			Status:         AgentStatusStable,
 			PreviousStatus: AgentStatusRunning,
 			AgentType:      mf.AgentTypeClaude,
@@ -174,7 +177,7 @@ func TestWebhookCustomPayloadTemplate(t *testing.T) {
 		Type:      webhookEventRunStatusChanged,
 		CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
 		Data: WebhookEventData{
-			RunID:          "run-1",
+			ServerID:       "run-1",
 			Status:         AgentStatusStable,
 			PreviousStatus: AgentStatusRunning,
 			AgentType:      mf.AgentTypeClaude,
@@ -201,6 +204,28 @@ func TestWebhookInvalidPayloadTemplate(t *testing.T) {
 	require.ErrorContains(t, err, "invalid webhook payload template")
 }
 
+func TestWebhookPayloadTemplateUnknownField(t *testing.T) {
+	t.Parallel()
+
+	newDispatcher := func(tmpl string) error {
+		_, err := newWebhookDispatcher(
+			WebhookConfig{URL: "https://example.com/hook", PayloadTemplate: tmpl},
+			slog.New(slog.NewTextHandler(io.Discard, nil)),
+			mf.AgentTypeClaude,
+			TransportPTY,
+			quartz.NewReal(),
+		)
+		return err
+	}
+	// Renamed to .ServerID in 1.0.
+	require.ErrorContains(t, newDispatcher(`{"run":"{{.RunID}}"}`), "can't evaluate field RunID")
+	require.ErrorContains(t, newDispatcher(`{{.Instance.Nope}}`), "can't evaluate field Nope")
+	// Data is a map: what an event lacks is empty, and functions that fail
+	// on empty data don't reject the template.
+	require.NoError(t, newDispatcher(`{"server":"{{.ServerID}}","host":"{{.Instance.Hostname}}","prompt":"{{.Data.prompt}}"}`))
+	require.NoError(t, newDispatcher(`{{index .Data.items 0}}`))
+}
+
 func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
 	t.Parallel()
 
@@ -216,7 +241,7 @@ func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
-	server := &Server{webhook: dispatcher}
+	server := &webhookAPI{webhook: dispatcher}
 
 	// Update URL, timeout, and max attempts.
 	request := &WebhookConfigRequest{}

@@ -83,6 +83,8 @@ export interface paths {
          * Subscribe to events
          * @description The events are sent as Server-Sent Events (SSE). Initially, the endpoint returns a list of events needed to reconstruct the current state of the conversation and the agent's status. After that, it only returns events that have occurred since the last event was sent.
          *
+         *     The server ends the stream when the client falls too far behind, when the conversation changes in a way updates can't express (a message was taken back), which gives it a new epoch, and when a long session is opened (POST /sessions/{id}/resume). Reconnect to get the state again: with sync, the old epoch gets the full state.
+         *
          *     Note: When an agent is running, the last message in the conversation history is updated frequently, and the endpoint sends a new message update event each time.
          */
         get: operations["subscribeEvents"];
@@ -474,7 +476,7 @@ export interface paths {
         post?: never;
         /**
          * Delete all messages and restart
-         * @description Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport).
+         * @description Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue.
          */
         delete: operations["delete-messages"];
         options?: never;
@@ -658,7 +660,7 @@ export interface paths {
         put?: never;
         /**
          * Open another session
-         * @description Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Native transport of Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here and 409 while the agent works on a turn.
+         * @description Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Native transport of Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here, and 409 while the agent works on a turn or compacts its context (nothing changes then) or another restart is under way.
          */
         post: operations["post-sessions-by-id-resume"];
         delete?: never;
@@ -743,6 +745,26 @@ export interface paths {
          * @description Returns a subagent's task and what it did so far, as rich messages, read from its log; ask again for a running one. Native transport of Claude Code and Codex; returns 404 for a subagent the session has no log of.
          */
         get: operations["get-subagents-by-id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the conversation's tasks
+         * @description Returns the conversation's tasks: each message of the user's and the agent's turn on it, until the agent is done (stable again, with no request or terminal dialog open). Messages the user adds while a task runs belong to it (steered). A task is running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). /events sends task_update when one starts or changes.
+         */
+        get: operations["get-tasks"];
         put?: never;
         post?: never;
         delete?: never;
@@ -877,15 +899,35 @@ export interface paths {
         };
         /**
          * Get webhook configuration
-         * @description Returns the mutable run-status webhook configuration.
+         * @description Returns the mutable webhook configuration. The secret is never returned, only whether one is set.
          */
         get: operations["get-webhook"];
         /**
          * Update webhook configuration
-         * @description Updates run-status webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent.
+         * @description Updates webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent.
          */
         put: operations["put-webhook"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhook/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test webhook event
+         * @description Sends a webhook.test event to the webhook URL once, signed like every event, and reports the receiver's answer.
+         */
+        post: operations["post-webhook-test"];
         delete?: never;
         options?: never;
         head?: never;
@@ -997,12 +1039,12 @@ export interface components {
              * @example https://example.com/schemas/CostResponseBody.json
              */
             readonly $schema?: string;
+            /** @description The agent's own session it has open. */
+            agent_session_id?: string;
             /** @description Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on. */
             calls: components["schemas"]["ModelCall"][];
             /** @description What the session spent, its subagents included (API-equivalent cost). */
             cost: components["schemas"]["SessionCost"];
-            /** @description The session the agent has open. */
-            session_id?: string;
         };
         DeleteMessagesResponseBody: {
             /**
@@ -1574,6 +1616,15 @@ export interface components {
             /** @description Messages waiting to be sent to the agent. */
             messages: components["schemas"]["QueuedMessage"][];
         };
+        QueueUpdateBody: {
+            /** @description The messages waiting for the agent, in the order they go out. */
+            queue: components["schemas"]["QueuedMessage"][];
+            /**
+             * Format: int64
+             * @description Sequence number of this change; see message_update.
+             */
+            seq: number;
+        };
         QueuedMessage: {
             /** @description Message content. */
             content: string;
@@ -1633,9 +1684,9 @@ export interface components {
             id: string;
             kind: string;
             question?: string;
+            server_id: string;
             /** Format: int64 */
-            run_id: number;
-            session_id: string;
+            turn: number;
         };
         /**
          * RequestKind
@@ -1825,7 +1876,7 @@ export interface components {
         };
         RichMessage: {
             /** @description Structured content blocks */
-            content: components["schemas"]["RichContentBlock"][] | null;
+            content: components["schemas"]["RichContentBlock"][];
             /** @description Agent's internal message ID */
             message_id: string;
             /** @description Model that generated this message */
@@ -1834,6 +1885,11 @@ export interface components {
             role: string;
             /** @description Why the model stopped generating */
             stop_reason?: string;
+            /**
+             * Format: int64
+             * @description The task the message belongs to: the ID of the user's message that started it (GET /tasks). Missing for a message from before the first task, and for a resumed session's messages, which belong to the task that started last before them.
+             */
+            task_id?: number;
             /**
              * Format: date-time
              * @description Timestamp of the message
@@ -1844,7 +1900,7 @@ export interface components {
         };
         RichMessageUpdateBody: {
             /** @description Structured content blocks */
-            content: components["schemas"]["RichContentBlock"][] | null;
+            content: components["schemas"]["RichContentBlock"][];
             /** @description Agent's internal message ID */
             message_id: string;
             /** @description Model that generated this message */
@@ -1858,6 +1914,11 @@ export interface components {
             seq: number;
             /** @description Why the model stopped generating */
             stop_reason?: string;
+            /**
+             * Format: int64
+             * @description The task the message belongs to: the ID of the user's message that started it (GET /tasks). Missing for a message from before the first task, and for a resumed session's messages, which belong to the task that started last before them.
+             */
+            task_id?: number;
             /**
              * Format: date-time
              * @description Timestamp of the message
@@ -1898,6 +1959,8 @@ export interface components {
             usd: number;
         };
         SessionEvent: {
+            /** @description The agent's own session the event belongs to. */
+            agent_session_id?: string;
             /** @description Text or tool result content */
             content?: string;
             /**
@@ -1911,8 +1974,6 @@ export interface components {
             parent_tool_use_id?: string;
             /** @description Message role when applicable */
             role?: string;
-            /** @description Agent session identifier */
-            session_id?: string;
             /** @description Original agent event or message identifier */
             source_id?: string;
             /** @description The subagent the event belongs to; missing for the agent's own events */
@@ -1955,7 +2016,7 @@ export interface components {
             updated_at: string;
         };
         SessionSyncBody: {
-            /** @description Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded. */
+            /** @description Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded. A rebuild (a message was taken back) ends the stream: reconnect with the old epoch to get the full state. */
             epoch: string;
             /** @description True when the replay that follows is the full state rather than the changes after ?since=. */
             full: boolean;
@@ -2012,6 +2073,8 @@ export interface components {
             settings: components["schemas"]["Settings"];
         };
         StatusChangeBody: {
+            /** @description The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it. */
+            agent_session_id?: string;
             /** @description Type of the agent being used by the server. */
             agent_type: string;
             /** @description Version of the AgentAPI server. */
@@ -2029,13 +2092,8 @@ export interface components {
              * @description Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests.
              */
             pending_requests?: number;
-            /**
-             * Format: int64
-             * @description Monotonically increasing run identifier within the session.
-             */
-            run_id: number;
-            /** @description Identifier for this AgentAPI server session. */
-            session_id: string;
+            /** @description Random identifier of this AgentAPI run: it changes every time AgentAPI starts. */
+            server_id: string;
             /** @description Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it. */
             session_name?: string;
             /** @description The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only. */
@@ -2053,6 +2111,11 @@ export interface components {
             terminal_prompt: string;
             /** @description Backend transport being used ('pty', 'acp' or 'native'). */
             transport: components["schemas"]["Transport"];
+            /**
+             * Format: int64
+             * @description How many times the agent started working since AgentAPI started.
+             */
+            turn: number;
             /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only. */
             usage?: components["schemas"]["AgentUsage"];
         };
@@ -2063,6 +2126,8 @@ export interface components {
              * @example https://example.com/schemas/StatusResponseBody.json
              */
             readonly $schema?: string;
+            /** @description The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it. */
+            agent_session_id?: string;
             /** @description Type of the agent being used by the server. */
             agent_type: string;
             /** @description Version of the AgentAPI server. */
@@ -2082,13 +2147,8 @@ export interface components {
              * @description Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests.
              */
             pending_requests?: number;
-            /**
-             * Format: int64
-             * @description Monotonically increasing run identifier within the session.
-             */
-            run_id: number;
-            /** @description Identifier for this AgentAPI server session. */
-            session_id: string;
+            /** @description Random identifier of this AgentAPI run: it changes every time AgentAPI starts. */
+            server_id: string;
             /** @description Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it. */
             session_name?: string;
             /** @description The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only. */
@@ -2106,6 +2166,11 @@ export interface components {
             terminal_prompt: string;
             /** @description Backend transport being used ('pty', 'acp' or 'native'). */
             transport: components["schemas"]["Transport"];
+            /**
+             * Format: int64
+             * @description How many times the agent started working since AgentAPI started.
+             */
+            turn: number;
             /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only. */
             usage?: components["schemas"]["AgentUsage"];
         };
@@ -2160,6 +2225,91 @@ export interface components {
             readonly $schema?: string;
             /** @description The subagents the agent ran in its session, in the order they started. */
             subagents: components["schemas"]["SubagentState"][];
+        };
+        Task: {
+            /**
+             * Format: date-time
+             * @description When the agent was done; missing while it runs.
+             */
+            ended_at?: string;
+            /** @description Errors the agent reported during the task. */
+            errors?: string[] | null;
+            /**
+             * Format: int64
+             * @description The ID of the user's message that started the task, as in GET /messages.
+             */
+            id: number;
+            /** @description The usage limit stop of a limited task. */
+            limit?: components["schemas"]["LimitStop"];
+            /** @description The start of the user's message (up to 1 KiB); GET /messages has all of it. */
+            prompt: string;
+            /**
+             * Format: int64
+             * @description The ID of the agent's last message of the task, as in GET /messages.
+             */
+            reply_id?: number;
+            /**
+             * Format: date-time
+             * @description When the user's message was sent.
+             */
+            started_at: string;
+            /** @description running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). */
+            status: components["schemas"]["TaskStatus"];
+            /** @description The IDs of the user's messages added to the task while it ran (steering). */
+            steered?: number[] | null;
+        };
+        /**
+         * TaskStatus
+         * @example running
+         * @enum {string}
+         */
+        TaskStatus: "completed" | "failed" | "limited" | "running";
+        TaskUpdateBody: {
+            /**
+             * Format: date-time
+             * @description When the agent was done; missing while it runs.
+             */
+            ended_at?: string;
+            /** @description Errors the agent reported during the task. */
+            errors?: string[] | null;
+            /**
+             * Format: int64
+             * @description The ID of the user's message that started the task, as in GET /messages.
+             */
+            id: number;
+            /** @description The usage limit stop of a limited task. */
+            limit?: components["schemas"]["LimitStop"];
+            /** @description The start of the user's message (up to 1 KiB); GET /messages has all of it. */
+            prompt: string;
+            /**
+             * Format: int64
+             * @description The ID of the agent's last message of the task, as in GET /messages.
+             */
+            reply_id?: number;
+            /**
+             * Format: int64
+             * @description Sequence number of this change; see message_update.
+             */
+            seq: number;
+            /**
+             * Format: date-time
+             * @description When the user's message was sent.
+             */
+            started_at: string;
+            /** @description running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). */
+            status: components["schemas"]["TaskStatus"];
+            /** @description The IDs of the user's messages added to the task while it ran (steering). */
+            steered?: number[] | null;
+        };
+        TasksResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/TasksResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description The conversation's tasks, the earliest first. */
+            tasks: components["schemas"]["Task"][];
         };
         TerminalExitBody: {
             /** @description Why the stream ended: the shell exited (connect again for a new one), or there is no terminal. */
@@ -2279,13 +2429,25 @@ export interface components {
             ok: boolean;
         };
         Usage: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Input tokens written to the prompt cache.
+             */
             cache_creation_input_tokens: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Input tokens read from the prompt cache.
+             */
             cache_read_input_tokens: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Input tokens neither read from nor written to the prompt cache.
+             */
             input_tokens: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Output tokens, reasoning included.
+             */
             output_tokens: number;
         };
         WebhookConfigRequestBody: {
@@ -2295,13 +2457,26 @@ export interface components {
              * @example https://example.com/schemas/WebhookConfigRequestBody.json
              */
             readonly $schema?: string;
+            /** @description The event types to send, or patterns of them (task.*, *). Omit to preserve; an empty list sends run.status_changed alone. */
+            events?: string[];
+            /**
+             * Format: int64
+             * @description How often instance.heartbeat is sent, in seconds; 0 turns it off. Omit to preserve.
+             */
+            heartbeat_seconds?: number;
+            /** @description The instance ID in every event. Omit to preserve; set to empty string for <hostname>:<port>. */
+            instance_id?: string;
             /**
              * Format: int64
              * @description Maximum number of delivery attempts.
              */
             max_attempts: number;
-            /** @description Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport. */
+            /** @description Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .ServerID, .Status, .PreviousStatus, .AgentType, .Transport. */
             payload_template?: string;
+            /** @description Where this AgentAPI can be reached, in every event. Omit to preserve; set to empty string to clear. */
+            public_url?: string;
+            /** @description Secret that signs every delivery with HMAC-SHA256. Omit to preserve; set to empty string to stop signing. */
+            secret?: string;
             /**
              * Format: int64
              * @description Timeout for each delivery attempt, in seconds.
@@ -2317,6 +2492,15 @@ export interface components {
              * @example https://example.com/schemas/WebhookConfigResponseBody.json
              */
             readonly $schema?: string;
+            /** @description The event types sent, or patterns of them (task.*, *). */
+            events: string[] | null;
+            /**
+             * Format: int64
+             * @description How often instance.heartbeat is sent, in seconds; 0 when it is off.
+             */
+            heartbeat_seconds: number;
+            /** @description The instance ID in every event. */
+            instance_id: string;
             /**
              * Format: int64
              * @description Maximum number of delivery attempts.
@@ -2324,6 +2508,10 @@ export interface components {
             max_attempts: number;
             /** @description Go text/template for the webhook POST body. Empty means the default JSON payload is used. */
             payload_template: string;
+            /** @description Where this AgentAPI can be reached, in every event; empty when not set. */
+            public_url: string;
+            /** @description Deliveries are signed (X-AgentAPI-Signature-256). The secret itself is never returned. */
+            secret_set: boolean;
             /**
              * Format: int64
              * @description Timeout for each delivery attempt, in seconds.
@@ -2331,6 +2519,20 @@ export interface components {
             timeout_seconds: number;
             /** @description Webhook destination. Empty means webhook delivery is disabled. */
             url: string;
+        };
+        WebhookTestResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/WebhookTestResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description Why the delivery failed. */
+            error?: string;
+            /** @description The receiver answered with a 2xx status. */
+            ok: boolean;
+            /** @description The receiver's HTTP status, such as 204 No Content. */
+            status?: string;
         };
         WorkspaceResponseBody: {
             /**
@@ -2538,7 +2740,7 @@ export interface operations {
     subscribeEvents: {
         parameters: {
             query?: {
-                /** @description Opt in to session_sync events and incremental replay. Clients that don't opt in get the full replay and no session_sync events, as before. */
+                /** @description Opt in to session_sync, task_update and queue_update events and incremental replay. Clients that don't opt in get the full replay and none of those events, as before. */
                 sync?: boolean;
                 /** @description With sync: epoch from the client's last session_sync. If it doesn't match, the full state is replayed. */
                 epoch?: string;
@@ -2594,6 +2796,17 @@ export interface operations {
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     } | {
+                        data: components["schemas"]["QueueUpdateBody"];
+                        /**
+                         * @description The event name.
+                         * @constant
+                         */
+                        event: "queue_update";
+                        /** @description The event ID. */
+                        id?: number;
+                        /** @description The retry time in milliseconds. */
+                        retry?: number;
+                    } | {
                         data: components["schemas"]["RequestUpdateBody"];
                         /**
                          * @description The event name.
@@ -2633,6 +2846,17 @@ export interface operations {
                          * @constant
                          */
                         event: "status_change";
+                        /** @description The event ID. */
+                        id?: number;
+                        /** @description The retry time in milliseconds. */
+                        retry?: number;
+                    } | {
+                        data: components["schemas"]["TaskUpdateBody"];
+                        /**
+                         * @description The event name.
+                         * @constant
+                         */
+                        event: "task_update";
                         /** @description The event ID. */
                         id?: number;
                         /** @description The retry time in milliseconds. */
@@ -3680,6 +3904,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorModel"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
             /** @description Internal Server Error */
             500: {
                 headers: {
@@ -4430,6 +4663,35 @@ export interface operations {
             };
         };
     };
+    "get-tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TasksResponseBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     subscribeTerminal: {
         parameters: {
             query?: never;
@@ -4763,6 +5025,35 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "post-webhook-test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookTestResponseBody"];
+                };
+            };
+            /** @description Error */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };

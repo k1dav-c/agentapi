@@ -2,6 +2,12 @@
 // drafts it shows while a message is sent, and the agent's structured
 // (rich) messages.
 
+import type {components} from "./api-schema";
+
+type Schemas = components["schemas"];
+
+// A message as the chat holds it: a message_update (see messageFromEvent
+// in lib/events.ts), or a rich message's text as the timeline shows it.
 export interface Message {
   id: number;
   role: string;
@@ -18,35 +24,35 @@ export interface DraftMessage extends Omit<Message, "id"> {
   error?: string;
 }
 
-export interface RichContentBlock {
-  type: "text" | "thinking" | "tool_use" | "tool_result";
-  text?: string;
-  thinking?: string;
-  tool_use_id?: string;
-  tool_name?: string;
-  tool_input?: unknown;
-  status?: "running" | "completed" | "failed";
-  is_error?: boolean;
-  // Images in a tool result (an image file the agent read), served by
-  // AgentAPI at url.
-  images?: {media_type: string; url?: string}[];
-}
+// A rich message (the agent's structured transcript: text, thinking, tool
+// calls and results) as the chat holds it. The types come from the API
+// schema (lib/api-schema.ts), where lists can be null as Go sends them;
+// here they never are: every rich message that comes in goes through
+// normalizeRichMessage.
+export type RichImage = Schemas["RichImage"];
+export type RichContentBlock = Omit<Schemas["RichContentBlock"], "images"> & {images?: RichImage[]};
+export type Usage = Schemas["Usage"];
+export type RichMessage = Omit<Schemas["RichMessage"], "content"> & {content: RichContentBlock[]};
 
-export interface Usage {
-  input_tokens: number;
-  output_tokens: number;
-  cache_creation_input_tokens: number;
-  cache_read_input_tokens: number;
-}
+// A rich message as the server sends it. Go encodes an empty list as null:
+// a message without content blocks has "content": null, a tool result
+// without images "images": null.
+export type RichMessagePayload = Schemas["RichMessage"];
 
-export interface RichMessage {
-  message_id: string;
-  role: string;
-  content: RichContentBlock[];
-  timestamp: string;
-  usage?: Usage;
-  model?: string;
-  stop_reason?: string;
+// normalizeRichMessage returns message with empty lists for null ones, so
+// the rest of the chat can iterate them. A message that has none keeps its
+// object. Every rich message that comes in (events, the cache, the REST
+// API) goes through it: one with null content made the transcript throw,
+// and as it was cached, it did again after every reload.
+export function normalizeRichMessage<T extends RichMessagePayload>(message: T): Omit<T, "content"> & {content: RichContentBlock[]} {
+  const content = Array.isArray(message.content) ? message.content : [];
+  if (content === message.content && content.every((block) => block.images !== null)) {
+    return message as Omit<T, "content"> & {content: RichContentBlock[]};
+  }
+  return {
+    ...message,
+    content: content.map((block): RichContentBlock => (block.images === null ? {...block, images: []} : (block as RichContentBlock))),
+  };
 }
 
 // Whether message is a draft, which the server hasn't confirmed yet.
@@ -58,6 +64,41 @@ export function isDraftMessage(message: Message | DraftMessage): message is Draf
 // on last.
 export function lastUserMessage<T extends {role: string}>(messages: readonly T[]): T | undefined {
   return messages.findLast((message) => message.role === "user");
+}
+
+// How many items a and b start with that are the same objects. The chat
+// keeps a message's object until the message changes (mergeByKey), so what
+// was worked out from the messages before that point still holds.
+export function commonPrefix<T>(a: readonly T[], b: readonly T[]): number {
+  const length = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < length && a[i] === b[i]) i++;
+  return i;
+}
+
+const richMessageTimes = new WeakMap<RichMessage, number>();
+
+// The time of a rich message, parsed once per message object; NaN when it
+// has none.
+export function richMessageTime(message: RichMessage): number {
+  let time = richMessageTimes.get(message);
+  if (time === undefined) {
+    time = Date.parse(message.timestamp);
+    richMessageTimes.set(message, time);
+  }
+  return time;
+}
+
+// The rich messages from time on (those of the current task, from its
+// prompt's time), found from the end: an update reads only the task's own
+// messages, not the whole session. None when time is unset, and none
+// without a time of their own.
+export function richMessagesSince(richMessages: RichMessage[], time: string | undefined): RichMessage[] {
+  const start = time ? Date.parse(time) : Number.NaN;
+  if (Number.isNaN(start)) return [];
+  let first = richMessages.length;
+  while (first > 0 && !(richMessageTime(richMessages[first - 1]) < start)) first--;
+  return richMessages.slice(first).filter((message) => richMessageTime(message) >= start);
 }
 
 // The key of a rich message: its ID and role.

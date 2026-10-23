@@ -12,12 +12,12 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/agentlog/codexlog"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
-// The adapter shapes its rich messages like jsonlwatcher.CodexParser does
+// The adapter shapes its rich messages like codexlog.Parser does
 // for the rollout file of the same activity, because the chat UI renders
 // that shape:
 //
@@ -552,7 +552,7 @@ func mcpContent(blocks []json.RawMessage) (string, []transcript.RichImage) {
 				images = append(images, transcript.RichImage{MediaType: b.MimeType, Data: data})
 			}
 		case "inputImage":
-			if img, ok := jsonlwatcher.ImageFromDataURL(b.ImageURL); ok {
+			if img, ok := codexlog.ImageFromDataURL(b.ImageURL); ok {
 				images = append(images, img)
 			}
 		}

@@ -266,9 +266,9 @@ const client = base => {
     return state.status === 'stable' && state.lifecycle === 'ready' && !state.pending_requests;
   }, 'the agent to finish');
   const send = async content => {
-    const before = (await status()).run_id;
+    const before = (await status()).turn;
     await request('/message', 'POST', {content, type: 'user'});
-    await poll(async () => (await status()).run_id > before, 'a new turn');
+    await poll(async () => (await status()).turn > before, 'a new turn');
   };
   const pending = kind => poll(async () => (await request('/requests')).requests.some(r => r.kind === kind && r.status === 'pending'), `a ${kind} request`);
   return {base, request, status, idle, send, pending};
@@ -538,6 +538,17 @@ try {
   await page.getByRole('button', {name: 'Restart agent'}).click();
   await page.getByRole('button', {name: 'Click again to restart'}).waitFor();
   await topShot(page, explorer, 'explorer-session.png', 440);
+  // The webhook, filled in but not saved, so the demo sends nothing.
+  await page.getByRole('tab', {name: 'Webhook', exact: true}).click();
+  await explorer.locator('[data-webhook-settings]').waitFor();
+  await explorer.getByPlaceholder('https://dashboard.example.com/agentapi/events').fill('https://dashboard.example.com/agentapi/events');
+  for (const group of ['tasks', 'needs-you', 'instance']) await explorer.locator(`[data-webhook-group="${group}"] input`).check();
+  await explorer.locator('[data-webhook-group="status"] input').uncheck();
+  await explorer.locator('input[type=password]').fill('example-secret');
+  await explorer.getByPlaceholder('For the receiver to link to this chat').fill('https://agent.example.com');
+  // The default is this machine's name.
+  await explorer.getByLabel('Instance ID').fill('my-app-dev:3284');
+  await topShot(page, explorer, 'explorer-webhook.png', 1000);
   await page.keyboard.press('Escape');
 
   const viewer = async (file, tab, name) => {

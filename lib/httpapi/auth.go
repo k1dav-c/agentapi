@@ -169,58 +169,65 @@ func sessionCookie(r *http.Request, name, value string, maxAge int) string {
 	return c.String()
 }
 
-func (s *Server) authSessionState(r *http.Request) AuthSessionBody {
-	if s.auth == nil {
+func (a *authAPI) authSessionState(r *http.Request) AuthSessionBody {
+	if a.auth == nil {
 		return AuthSessionBody{AuthRequired: false, Authenticated: true}
 	}
-	return AuthSessionBody{AuthRequired: true, Authenticated: s.auth.authenticated(r)}
+	return AuthSessionBody{AuthRequired: true, Authenticated: a.auth.authenticated(r)}
 }
 
-func (s *Server) getAuthSession(_ context.Context, input *authSessionInput) (*AuthSessionResponse, error) {
-	return &AuthSessionResponse{Body: s.authSessionState(input.req)}, nil
+func (a *authAPI) getAuthSession(_ context.Context, input *authSessionInput) (*AuthSessionResponse, error) {
+	return &AuthSessionResponse{Body: a.authSessionState(input.req)}, nil
 }
 
-func (s *Server) createAuthSession(_ context.Context, input *authSessionInput) (*AuthSessionResponse, error) {
+func (a *authAPI) createAuthSession(_ context.Context, input *authSessionInput) (*AuthSessionResponse, error) {
 	resp := &AuthSessionResponse{}
-	if s.auth == nil {
-		resp.Body = s.authSessionState(input.req)
+	if a.auth == nil {
+		resp.Body = a.authSessionState(input.req)
 		return resp, nil
 	}
-	if !s.auth.bearerValid(input.req.Header.Get("Authorization")) {
+	if !a.auth.bearerValid(input.req.Header.Get("Authorization")) {
 		return nil, huma.Error401Unauthorized("a valid Authorization: Bearer <token> header is required")
 	}
 	// A session cookie, no Max-Age: it lasts until the browser closes.
-	resp.SetCookie = sessionCookie(input.req, s.auth.cookieName, s.auth.cookie, 0)
+	resp.SetCookie = sessionCookie(input.req, a.auth.cookieName, a.auth.cookie, 0)
 	resp.Body = AuthSessionBody{AuthRequired: true, Authenticated: true}
 	return resp, nil
 }
 
-func (s *Server) deleteAuthSession(_ context.Context, input *authSessionInput) (*AuthSessionResponse, error) {
+func (a *authAPI) deleteAuthSession(_ context.Context, input *authSessionInput) (*AuthSessionResponse, error) {
 	resp := &AuthSessionResponse{}
-	if s.auth != nil {
-		resp.SetCookie = sessionCookie(input.req, s.auth.cookieName, "", -1)
+	if a.auth != nil {
+		resp.SetCookie = sessionCookie(input.req, a.auth.cookieName, "", -1)
 	}
-	resp.Body = s.authSessionState(input.req)
+	resp.Body = a.authSessionState(input.req)
 	// The cookie is being removed, so only a Bearer header still counts.
-	if s.auth != nil {
-		resp.Body.Authenticated = s.auth.bearerValid(input.req.Header.Get("Authorization"))
+	if a.auth != nil {
+		resp.Body.Authenticated = a.auth.bearerValid(input.req.Header.Get("Authorization"))
 	}
 	return resp, nil
 }
 
+// authAPI signs browsers in and out with the API token (auth is nil
+// without one).
+type authAPI struct {
+	auth *tokenAuth
+}
+
 func (s *Server) registerAuthRoutes() {
-	huma.Get(s.api, authSessionPath, s.getAuthSession, func(o *huma.Operation) {
+	a := &authAPI{auth: s.auth}
+	huma.Get(s.api, authSessionPath, a.getAuthSession, func(o *huma.Operation) {
 		o.Tags = []string{"Auth"}
 		o.Summary = "Get authentication state"
 		o.Description = "Reports whether the server requires an API token and whether this request is authenticated. Reachable without credentials."
 	})
-	huma.Post(s.api, authSessionPath, s.createAuthSession, func(o *huma.Operation) {
+	huma.Post(s.api, authSessionPath, a.createAuthSession, func(o *huma.Operation) {
 		o.Tags = []string{"Auth"}
 		o.Summary = "Sign in a browser"
 		o.Description = "Requires `Authorization: Bearer <token>` and sets an HttpOnly, SameSite=Strict session cookie that authenticates later requests, including EventSource and image requests that can't send headers. The cookie holds a value derived from the token, not the token itself, so changing the token signs every browser out. Without --api-token it sets nothing."
 		o.Errors = []int{401}
 	})
-	huma.Delete(s.api, authSessionPath, s.deleteAuthSession, func(o *huma.Operation) {
+	huma.Delete(s.api, authSessionPath, a.deleteAuthSession, func(o *huma.Operation) {
 		o.Tags = []string{"Auth"}
 		o.Summary = "Sign out a browser"
 		o.Description = "Removes the session cookie. Reachable without credentials."

@@ -4,17 +4,18 @@ import (
 	"encoding/json"
 	"slices"
 
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
 // EmitMessages publishes the conversation's messages, which are ordered by
 // increasing ID. Changed and new messages are sent as updates. Messages can
 // also be removed (the native transport takes back a message the agent
-// refused), which updates can't express: clients then get the full state
-// under a new epoch. A message inserted between existing ones is not
+// refused), which updates can't express: the conversation gets a new epoch
+// and the subscriptions end, so that clients load the full state again
+// (see resyncLocked). A message inserted between existing ones is not
 // supported.
-func (e *EventEmitter) EmitMessages(newMessages []st.ConversationMessage) {
+func (e *EventEmitter) EmitMessages(newMessages []conv.Message) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -50,30 +51,56 @@ func (e *EventEmitter) EmitMessages(newMessages []st.ConversationMessage) {
 	}
 	e.messages = newMessages
 	e.messageSeq = seqs
+	changed := e.tasks.messages(e.messages)
 	if removed {
+		// A task whose message went was deleted with it (TruncateMessages);
+		// the clients get the tasks with the full state.
+		for id := range e.taskSeq {
+			if e.tasks.owner(id) < 0 {
+				delete(e.taskSeq, id)
+			}
+		}
+		e.tasksStoredLocked(changed)
 		e.resyncLocked()
 		return
 	}
+	e.tasksChangedLocked(changed)
 	if e.persister != nil {
 		e.persister.SetSeq(e.epoch, e.seq)
 	}
 }
 
-// resyncLocked starts a new epoch and sends connected clients the full
-// state, for a change they can't apply as an update. Clients that reconnect
-// with the old epoch get the full state too. Caller holds e.mu.
+// resyncLocked starts a new epoch for a change clients can't apply as an
+// update, and ends the subscriptions that get the conversation's changes.
+// Their clients reconnect with the old epoch and get the full state in the
+// replay of a new subscription, whose SSE ids are right. Streaming the
+// state to them instead gave every event its own id: a client takes the
+// first one as the end of the replay, and a subscription whose buffer
+// filled halfway through was closed with the rest of the state unsent,
+// which the client then never asked for again. Caller holds e.mu.
 func (e *EventEmitter) resyncLocked() {
 	e.epoch = newEpoch()
 	if e.persister != nil {
 		e.persister.SetSeq(e.epoch, e.seq)
 	}
-	for _, event := range e.currentStateAsEvents(0, "") {
-		// Status and screen didn't change, and errors would be shown again.
-		if event.Type == EventTypeStatusChange || event.Type == EventTypeScreenUpdate || event.Type == EventTypeError {
-			continue
+	e.endConversationSubscriptionsLocked()
+}
+
+// endConversationSubscriptionsLocked ends the subscriptions that get the
+// conversation's changes; screen streams go on. Caller holds e.mu.
+func (e *EventEmitter) endConversationSubscriptionsLocked() {
+	for id, sub := range e.chans {
+		if wantsConversation(sub.wants) {
+			e.unsubscribeInner(id)
 		}
-		e.notifyChannels(event.Type, event.Payload)
 	}
+}
+
+// wantsConversation reports whether a subscription that gets the events
+// wants accepts gets changes of the conversation; a screen stream doesn't.
+func wantsConversation(wants func(EventType) bool) bool {
+	return wants(EventTypeMessageUpdate) || wants(EventTypeRichMessageUpdate) || wants(EventTypeRequestUpdate) ||
+		wants(EventTypeTaskUpdate) || wants(EventTypeQueueUpdate)
 }
 
 // EmitRichMessage emits a rich structured message from the JSONL watcher.
@@ -95,39 +122,95 @@ func (e *EventEmitter) EmitRichMessageSnapshot(msg transcript.RichMessage) {
 func (e *EventEmitter) emitRichMessage(msg transcript.RichMessage, replace bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-
-	idx := -1
-	// Search from the end: updates target recent messages.
-	for i := len(e.richMessages) - 1; i >= 0; i-- {
-		if e.richMessages[i].MessageID == msg.MessageID && e.richMessages[i].Role == msg.Role {
-			idx = i
-			break
-		}
-	}
-	if idx >= 0 && replace {
-		e.richMessages[idx] = msg
-	} else if idx >= 0 {
-		existing := e.richMessages[idx]
-		existing.Content = mergeRichContent(existing.Content, msg.Content)
-		existing.StopReason = msg.StopReason
-		existing.Model = msg.Model
-		existing.Usage = msg.Usage
-		e.richMessages[idx] = existing
-		msg = existing
-	} else {
-		e.richMessages = append(e.richMessages, msg)
-		e.richSeq = append(e.richSeq, 0)
-		idx = len(e.richMessages) - 1
-	}
-	e.seq++
-	e.richSeq[idx] = e.seq
+	msg = e.upsertRichLocked(msg, replace)
 	if e.persister != nil {
-		e.persister.PutRichMessage(idx, msg, e.seq)
 		e.persister.SetSeq(e.epoch, e.seq)
 	}
 	// Always broadcast the merged snapshot. Broadcasting the incoming Claude
 	// delta would make clients replace a complete message with its last block.
 	e.notifyChannels(EventTypeRichMessageUpdate, RichMessageUpdateBody{RichMessage: msg, Seq: e.seq})
+}
+
+// LoadRichMessages adds a resumed session's rich messages at once, each
+// stored as EmitRichMessageSnapshot stores it. The subscriptions to the
+// conversation get them one by one when they fit their buffers easily;
+// for a longer session, which would overflow them, the subscriptions end
+// instead, and their clients load the state again.
+func (e *EventEmitter) LoadRichMessages(msgs []transcript.RichMessage) {
+	if len(msgs) == 0 {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	stream := len(msgs) <= int(e.subscriptionBufSize)/4
+	for _, msg := range msgs {
+		msg = e.upsertRichLocked(msg, true)
+		if stream {
+			e.notifyChannels(EventTypeRichMessageUpdate, RichMessageUpdateBody{RichMessage: msg, Seq: e.seq})
+		}
+	}
+	if e.persister != nil {
+		e.persister.SetSeq(e.epoch, e.seq)
+	}
+	if !stream {
+		e.endConversationSubscriptionsLocked()
+	}
+}
+
+// nonNilContent is content, or an empty list for none: clients rely on the
+// content being a list, and Go would send a nil one as null.
+func nonNilContent(content []transcript.RichContentBlock) []transcript.RichContentBlock {
+	if content == nil {
+		return []transcript.RichContentBlock{}
+	}
+	return content
+}
+
+// richKey identifies a rich message, which parsers and adapters send again
+// as it grows.
+type richKey struct{ id, role string }
+
+// upsertRichLocked stores msg under the next seq, as a new rich message or
+// in place of the one with its key (with replace) or merged into it, and
+// returns what is stored. Caller holds e.mu.
+func (e *EventEmitter) upsertRichLocked(msg transcript.RichMessage, replace bool) transcript.RichMessage {
+	msg.Content = nonNilContent(msg.Content)
+	key := richKey{msg.MessageID, msg.Role}
+	idx, ok := e.richIndex[key]
+	// A message belongs to the task it began in.
+	switch {
+	case ok && e.richMessages[idx].TaskID != nil:
+		msg.TaskID = e.richMessages[idx].TaskID
+	case msg.TaskID == nil:
+		msg.TaskID = e.tasks.taskAt(msg.Timestamp)
+	}
+	switch {
+	case ok && replace:
+		e.richMessages[idx] = msg
+	case ok:
+		existing := e.richMessages[idx]
+		existing.Content = nonNilContent(mergeRichContent(existing.Content, msg.Content))
+		existing.StopReason = msg.StopReason
+		existing.Model = msg.Model
+		existing.Usage = msg.Usage
+		existing.TaskID = msg.TaskID
+		e.richMessages[idx] = existing
+		msg = existing
+	default:
+		if e.richIndex == nil {
+			e.richIndex = make(map[richKey]int)
+		}
+		e.richMessages = append(e.richMessages, msg)
+		e.richSeq = append(e.richSeq, 0)
+		idx = len(e.richMessages) - 1
+		e.richIndex[key] = idx
+	}
+	e.seq++
+	e.richSeq[idx] = e.seq
+	if e.persister != nil {
+		e.persister.PutRichMessage(idx, msg, e.seq)
+	}
+	return msg
 }
 
 func mergeRichContent(existing, incoming []transcript.RichContentBlock) []transcript.RichContentBlock {
@@ -172,6 +255,7 @@ func (e *EventEmitter) EmitSessionEvents(events []transcript.SessionEvent) {
 	for _, event := range events {
 		event.EventID = e.nextSessionEventID
 		e.nextSessionEventID++
+		e.shareContentLocked(&event)
 		e.sessionEvents = append(e.sessionEvents, event)
 	}
 	if e.persister != nil && len(events) > 0 {
@@ -183,4 +267,59 @@ func (e *EventEmitter) SessionEvents() []transcript.SessionEvent {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return slices.Clone(e.sessionEvents)
+}
+
+// The timeline holds what the rich messages hold, a second time: the agents
+// report what they said and did both ways, and the two are decoded apart.
+// Its texts, thoughts and tool results are made to share memory with the
+// rich messages' equal ones; the timeline's values don't change.
+const (
+	// minSharedContent is the shortest content worth sharing.
+	minSharedContent = 64
+	// sharedContentLookback is how many of the latest rich messages a new
+	// event's content is looked for in: an adapter reports a message's
+	// timeline events right after the message.
+	sharedContentLookback = 4
+)
+
+// shareContentLocked makes the content of a new timeline event share memory
+// with the equal text of a recent rich message. Caller holds e.mu.
+func (e *EventEmitter) shareContentLocked(event *transcript.SessionEvent) {
+	if event.Content == nil || len(*event.Content) < minSharedContent {
+		return
+	}
+	content := *event.Content
+	for i := len(e.richMessages) - 1; i >= 0 && i >= len(e.richMessages)-sharedContentLookback; i-- {
+		for _, block := range e.richMessages[i].Content {
+			for _, text := range [...]string{block.Text, block.Thinking} {
+				if text == content {
+					event.Content = &text
+					return
+				}
+			}
+		}
+	}
+}
+
+// shareRestoredContent makes the content of restored timeline events share
+// memory with the equal texts of the restored rich messages, which the
+// state database stores apart.
+func shareRestoredContent(rich []transcript.RichMessage, events []transcript.SessionEvent) {
+	texts := make(map[string]string)
+	for _, msg := range rich {
+		for _, block := range msg.Content {
+			for _, text := range [...]string{block.Text, block.Thinking} {
+				if len(text) >= minSharedContent {
+					texts[text] = text
+				}
+			}
+		}
+	}
+	for i := range events {
+		if content := events[i].Content; content != nil {
+			if text, ok := texts[*content]; ok {
+				events[i].Content = &text
+			}
+		}
+	}
 }

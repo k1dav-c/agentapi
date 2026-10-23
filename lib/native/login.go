@@ -7,7 +7,7 @@ import (
 	"os/user"
 	"sync"
 
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 )
 
 // awaitLogin records that the agent of generation gen needs a login and
@@ -26,7 +26,7 @@ func (c *Conversation) awaitLogin(ctx context.Context, gen int, resume Resume, l
 	c.loginWaiting = true
 	if c.setLoginLocked(login) {
 		c.cfg.Logger.Warn("The agent needs a login", "agent", login.Agent, "command", login.Command)
-		c.cfg.Emitter.EmitError(loginErrorText(login), st.ErrorLevelWarning)
+		c.cfg.Emitter.EmitError(loginErrorText(login), conv.ErrorLevelWarning)
 	}
 	wake := make(chan struct{})
 	c.loginWake = wake
@@ -140,7 +140,7 @@ func (c *Conversation) RetryLogin(context.Context) error {
 	}
 	old := c.retireAdapterLocked()
 	gen, resume, runCtx := c.generation, c.resumeLocked(), c.ctx
-	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
+	c.cfg.Emitter.EmitStatus(conv.StatusInitializing)
 	c.mu.Unlock()
 	if old != nil {
 		_ = old.Close()

@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-21T16:30:13.490Z",
+  "captured_at": "2026-10-23T05:42:01.451Z",
   "agentapi_version": "0.0.0-dev",
   "agents": [
     "native-demo",
@@ -30,6 +30,7 @@
     "explorer-index.png",
     "explorer-links.png",
     "explorer-session.png",
+    "explorer-webhook.png",
     "file-viewer.png",
     "file-preview.png",
     "file-markdown.png",

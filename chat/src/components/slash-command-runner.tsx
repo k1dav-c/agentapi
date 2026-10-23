@@ -1,7 +1,7 @@
 "use client";
 
 import {toast} from "sonner";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import type {PermissionMode} from "@/lib/chat-api";
 import {getErrorMessage} from "@/lib/error-utils";
 import {effortsOf, modeMeta} from "@/lib/session-settings";
@@ -12,7 +12,12 @@ import {SLASH_COMMANDS, loginCommand, openSettings, openTerminal, pickChoice, ty
 // compacts with the message itself, so /compact goes to it); run runs it,
 // saying how it went in a toast.
 export function useSlashCommandRunner() {
-  const {capabilities, features, agentSettings, getSettings, updateSettings, compact, deleteMessages, loginRequired, agentType} = useChat();
+  const capabilities = useChatSelector((chat) => chat.capabilities);
+  const features = useChatSelector((chat) => chat.features);
+  const agentSettings = useChatSelector((chat) => chat.agentSettings);
+  const loginRequired = useChatSelector((chat) => chat.loginRequired);
+  const agentType = useChatSelector((chat) => chat.agentType);
+  const {getSettings, updateSettings, compact, deleteMessages} = useChatActions();
 
   const handles = ({info}: SlashCommand) => info.kind !== "compact" || Boolean(capabilities?.compact);
 

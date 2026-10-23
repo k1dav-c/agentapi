@@ -9,12 +9,13 @@ import (
 	"sync"
 	"time"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/quartz"
 )
 
-// Compile-time assertion that ACPConversation implements st.Conversation
-var _ st.Conversation = (*ACPConversation)(nil)
+// Compile-time assertion that ACPConversation implements conv.Conversation
+var _ conv.Conversation = (*ACPConversation)(nil)
 
 // ChunkableAgentIO extends AgentIO with chunk callback support for streaming responses.
 // This interface is what ACPConversation needs from its AgentIO implementation.
@@ -32,21 +33,21 @@ type ACPConversation struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 	agentIO           ChunkableAgentIO
-	messages          []st.ConversationMessage
+	messages          []conv.Message
 	nextID            int           // monotonically increasing message ID
 	prompting         bool          // true while agent is processing
 	chunkReceived     chan struct{} // signals that handleChunk has accumulated a chunk
 	streamingResponse strings.Builder
 	logger            *slog.Logger
-	emitter           st.Emitter
-	initialPrompt     []st.MessagePart
+	emitter           conv.Emitter
+	initialPrompt     []conv.MessagePart
 	clock             quartz.Clock
 }
 
 // NewACPConversation creates a new ACPConversation.
 // If emitter is provided, it will receive events when messages/status/screen change.
 // If clock is nil, a real clock will be used.
-func NewACPConversation(ctx context.Context, agentIO ChunkableAgentIO, logger *slog.Logger, initialPrompt []st.MessagePart, emitter st.Emitter, clock quartz.Clock) *ACPConversation {
+func NewACPConversation(ctx context.Context, agentIO ChunkableAgentIO, logger *slog.Logger, initialPrompt []conv.MessagePart, emitter conv.Emitter, clock quartz.Clock) *ACPConversation {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -54,7 +55,7 @@ func NewACPConversation(ctx context.Context, agentIO ChunkableAgentIO, logger *s
 		clock = quartz.NewReal()
 	}
 	if emitter == nil {
-		emitter = st.NopEmitter{}
+		emitter = conv.NopEmitter{}
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	c := &ACPConversation{
@@ -71,7 +72,7 @@ func NewACPConversation(ctx context.Context, agentIO ChunkableAgentIO, logger *s
 }
 
 // Messages returns the conversation history.
-func (c *ACPConversation) Messages() []st.ConversationMessage {
+func (c *ACPConversation) Messages() []conv.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return slices.Clone(c.messages)
@@ -81,7 +82,7 @@ func (c *ACPConversation) Messages() []st.ConversationMessage {
 // reply, like a native turn: the reply streams into the conversation, and a
 // failed prompt is reported with EmitError. It returns a validation error
 // if the message is invalid or another message is already being processed.
-func (c *ACPConversation) Send(messageParts ...st.MessagePart) error {
+func (c *ACPConversation) Send(messageParts ...conv.MessagePart) error {
 	message := ""
 	for _, part := range messageParts {
 		message += part.String()
@@ -89,30 +90,30 @@ func (c *ACPConversation) Send(messageParts ...st.MessagePart) error {
 
 	// Validate whitespace BEFORE trimming (match PTY behavior)
 	if message != strings.TrimSpace(message) {
-		return st.ErrMessageValidationWhitespace
+		return conv.ErrMessageValidationWhitespace
 	}
 
 	if message == "" {
-		return st.ErrMessageValidationEmpty
+		return conv.ErrMessageValidationEmpty
 	}
 
 	// Check if already prompting and set state atomically
 	c.mu.Lock()
 	if c.prompting {
 		c.mu.Unlock()
-		return st.ErrMessageValidationChanging
+		return conv.ErrMessageValidationChanging
 	}
-	c.messages = append(c.messages, st.ConversationMessage{
+	c.messages = append(c.messages, conv.Message{
 		Id:      c.nextID,
-		Role:    st.ConversationRoleUser,
+		Role:    conv.RoleUser,
 		Message: message,
 		Time:    c.clock.Now(),
 	})
 	c.nextID++
 	// Add placeholder for streaming agent response
-	c.messages = append(c.messages, st.ConversationMessage{
+	c.messages = append(c.messages, conv.Message{
 		Id:      c.nextID,
-		Role:    st.ConversationRoleAgent,
+		Role:    conv.RoleAgent,
 		Message: "",
 		Time:    c.clock.Now(),
 	})
@@ -146,25 +147,25 @@ func (c *ACPConversation) Start(ctx context.Context) {
 			return
 		}
 		c.logger.Error("ACPConversation failed to send initial prompt", "error", err)
-		c.emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), st.ErrorLevelError)
+		c.emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), conv.ErrorLevelError)
 	}
 	// No prompt under way means we start in stable state
 	c.emitter.EmitStatus(c.Status())
 }
 
 // Status returns the current conversation status.
-func (c *ACPConversation) Status() st.ConversationStatus {
+func (c *ACPConversation) Status() conv.Status {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.statusLocked()
 }
 
 // statusLocked returns the status without acquiring the lock (caller must hold lock).
-func (c *ACPConversation) statusLocked() st.ConversationStatus {
+func (c *ACPConversation) statusLocked() conv.Status {
 	if c.prompting {
-		return st.ConversationStatusChanging // agent is processing
+		return conv.StatusChanging // agent is processing
 	}
-	return st.ConversationStatusStable
+	return conv.StatusStable
 }
 
 // Stop cancels any in-progress operations.
@@ -186,7 +187,7 @@ func (c *ACPConversation) handleChunk(chunk string) {
 	}
 	c.streamingResponse.WriteString(chunk)
 	// Only update the last message if it's the agent placeholder (defense-in-depth)
-	if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == st.ConversationRoleAgent {
+	if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == conv.RoleAgent {
 		c.messages[len(c.messages)-1].Message = c.streamingResponse.String()
 	}
 	messages := slices.Clone(c.messages)
@@ -238,14 +239,14 @@ func (c *ACPConversation) executePrompt(message string) {
 	if promptErr != nil {
 		c.logger.Error("ACPConversation message failed", "error", promptErr)
 		// Remove the agent's streaming message on error (may be empty or partial)
-		if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == st.ConversationRoleAgent {
+		if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == conv.RoleAgent {
 			c.messages = c.messages[:len(c.messages)-1]
 		}
 	} else {
 		// Final response should already be in the last message via streaming
 		// but ensure it's finalized.
 		response := c.streamingResponse.String()
-		if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == st.ConversationRoleAgent {
+		if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == conv.RoleAgent {
 			c.messages[len(c.messages)-1].Message = response
 		}
 		c.logger.Debug("ACPConversation message complete", "responseLen", len(response))
@@ -262,12 +263,8 @@ func (c *ACPConversation) executePrompt(message string) {
 	c.emitter.EmitScreen(screen)
 
 	if promptErr != nil && c.ctx.Err() == nil {
-		c.emitter.EmitError(fmt.Sprintf("The agent failed to answer: %v", promptErr), st.ErrorLevelError)
+		c.emitter.EmitError(fmt.Sprintf("The agent failed to answer: %v", promptErr), conv.ErrorLevelError)
 	}
-}
-
-func (c *ACPConversation) SaveState() error {
-	return fmt.Errorf("ACP mode doesn't support state persistence")
 }
 
 // Reset is a no-op for ACP conversations (restart is not supported).

@@ -3,35 +3,11 @@
 
 import type {AgentSettings, AgentUsage, LimitStop} from "./chat-api";
 import type {Capabilities} from "./dispatch";
+import type {StatusChangeEvent} from "./events";
 import {parseAgentType, type AgentType} from "./agents";
 import {parseLoginRequired, type LoginRequired} from "./login";
 
 export type ServerStatus = "stable" | "running" | "offline" | "unknown";
-
-// A status_change event as the server sends it.
-export interface StatusChangeEvent {
-  status: string;
-  lifecycle?: string;
-  agent_type: string;
-  // Missing from servers that predate it; GET /status says then.
-  transport?: string;
-  agentapi_version?: string;
-  terminal_columns?: number;
-  session_name?: string;
-  terminal_prompt?: string;
-  // Native transport only. The chat counts the pending requests itself,
-  // from the requests it holds (pending_requests is ignored).
-  capabilities?: Capabilities;
-  login_required?: unknown;
-  // Native agents with the settings capability.
-  settings?: AgentSettings;
-  // Native agents, once they report it.
-  usage?: AgentUsage;
-  // Set while a turn a usage limit stopped holds the queue.
-  limit_stop?: LimitStop;
-  // A shell terminal is available (native transport).
-  terminal?: boolean;
-}
 
 export interface AgentStatus {
   serverStatus: ServerStatus;
@@ -39,6 +15,9 @@ export interface AgentStatus {
   agentapiVersion: string;
   terminalColumns: number;
   sessionName: string;
+  // The agent's own session (status_change's agent_session_id, native
+  // transport); empty until the agent reports it.
+  agentSessionId: string;
   // Bottom of the terminal while the agent shows an interactive prompt.
   terminalPrompt: string;
   capabilities: Capabilities | null;
@@ -56,6 +35,7 @@ export const initialAgentStatus: AgentStatus = {
   agentapiVersion: "",
   terminalColumns: 0,
   sessionName: "",
+  agentSessionId: "",
   terminalPrompt: "",
   capabilities: null,
   settings: null,
@@ -68,7 +48,8 @@ export const initialAgentStatus: AgentStatus = {
 
 // applyStatusChange returns the status after event. A part the event
 // doesn't change keeps its object, and an event that changes nothing
-// returns status itself.
+// returns status itself. The chat counts the pending requests itself, from
+// the requests it holds (pending_requests is left out).
 export function applyStatusChange(status: AgentStatus, event: StatusChangeEvent): AgentStatus {
   return update(status, {
     serverStatus: event.status === "stable" || event.status === "running" ? event.status : "unknown",
@@ -76,6 +57,7 @@ export function applyStatusChange(status: AgentStatus, event: StatusChangeEvent)
     agentapiVersion: event.agentapi_version ?? "",
     terminalColumns: event.terminal_columns ?? 0,
     sessionName: event.session_name ?? "",
+    agentSessionId: event.agent_session_id ?? "",
     terminalPrompt: event.terminal_prompt ?? "",
     capabilities: event.capabilities ?? null,
     settings: event.settings ?? null,

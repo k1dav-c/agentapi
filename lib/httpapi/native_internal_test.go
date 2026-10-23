@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/handoff"
 	"github.com/coder/agentapi/lib/logctx"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
@@ -91,10 +92,10 @@ func TestNativeQueueDropsAMessageRefusedTooOften(t *testing.T) {
 	assert.Equal(t, []string{`Dropped queued message "fix the build and run the tests" after 5 failed attempts: connection reset`}, errorMessages(srv.emitter))
 }
 
-// A delivery that timed out may have reached the agent, so it isn't sent
-// again.
+// A delivery that timed out after it went out may have reached the agent,
+// so it isn't sent again.
 func TestNativeQueueDropsAMessageThatTimedOut(t *testing.T) {
-	srv, factory := newQuietNativeServer(t, func(a *nativetest.Adapter) { a.TurnErr = context.DeadlineExceeded })
+	srv, factory := newQuietNativeServer(t, func(a *nativetest.Adapter) { a.TurnErr = native.Unconfirmed(context.DeadlineExceeded) })
 	a := factory.Last()
 	a.Sink().TurnStarted()
 	sendUserMessage(t, srv, "fix the build")
@@ -102,7 +103,86 @@ func TestNativeQueueDropsAMessageThatTimedOut(t *testing.T) {
 
 	srv.dispatchNextQueuedMessage()
 	assert.Empty(t, srv.queue.Messages())
-	assert.Equal(t, []string{`Queued message "fix the build" may not have reached the agent, which didn't answer in time: context deadline exceeded`}, errorMessages(srv.emitter))
+	assert.Equal(t, []string{`Queued message "fix the build" may have reached the agent, which didn't confirm it: context deadline exceeded`}, errorMessages(srv.emitter))
+}
+
+// Stop cuts short a queued message on its way to the agent. The agent may
+// have taken it, so it leaves the queue: kept, it would be stored and, with
+// --state-db, sent again once AgentAPI restarted.
+func TestNativeQueueDropsAMessageStopCutShort(t *testing.T) {
+	srv, factory := newQuietNativeServer(t, nil)
+	a := factory.Last()
+	a.Sink().TurnStarted()
+	sendUserMessage(t, srv, "fix the build")
+	a.Sink().TurnCompleted(native.TurnResult{})
+	sending := make(chan struct{})
+	a.OnStartTurn = func(ctx context.Context) {
+		close(sending)
+		<-ctx.Done()
+	}
+	// What an adapter returns for a request it wrote when its call is
+	// cancelled.
+	a.TurnErr = native.Unconfirmed(context.Canceled)
+
+	dispatched := make(chan struct{})
+	go func() {
+		defer close(dispatched)
+		srv.dispatchNextQueuedMessage()
+	}()
+	<-sending
+	require.NoError(t, srv.Stop(context.Background()))
+	<-dispatched
+	assert.Empty(t, srv.queue.Messages())
+	assert.Equal(t, []string{`Queued message "fix the build" may have reached the agent, which didn't confirm it: context canceled`}, errorMessages(srv.emitter))
+}
+
+// Only a message that went out unconfirmed isn't sent again: a call that
+// ended before it went out (its write waited behind another) left nothing
+// with the agent.
+func TestNativeBackendResendsWhatNeverWentOut(t *testing.T) {
+	b := nativeBackend{}
+	assert.NotEmpty(t, b.notResent(native.Unconfirmed(context.Canceled)))
+	assert.NotEmpty(t, b.notResent(native.Unconfirmed(errors.New("codex app-server exited"))))
+	assert.Empty(t, b.notResent(context.Canceled))
+	assert.Empty(t, b.notResent(context.DeadlineExceeded))
+	assert.Empty(t, b.notResent(errors.New("connection reset")))
+}
+
+// A tick that got s.mu after Stop began sends nothing: the queue is stored
+// to go out after the restart.
+func TestNativeQueueSendsNothingOnceStopBegan(t *testing.T) {
+	srv, factory := newQuietNativeServer(t, nil)
+	a := factory.Last()
+	a.Sink().TurnStarted()
+	sendUserMessage(t, srv, "fix the build")
+	a.Sink().TurnCompleted(native.TurnResult{})
+	srv.shutdown()
+	srv.dispatchNextQueuedMessage()
+	assert.Empty(t, a.Turns())
+	assert.Len(t, srv.queue.Messages(), 1)
+}
+
+// The queue's tick sends a continuation scheduled for a usage limit's
+// reset once it is due, before the queued messages, and not while the
+// agent restarts.
+func TestNativeTickContinuesWhenDue(t *testing.T) {
+	srv, factory := newQuietNativeServer(t, nil)
+	a := factory.Last()
+	sendUserMessage(t, srv, "first")
+	sendUserMessage(t, srv, "second")
+	resets := srv.clock.Now()
+	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your limit", ResetsAt: &resets})
+	require.NoError(t, srv.native.ScheduleContinue(&resets))
+
+	srv.restarting.Store(true)
+	srv.beforeQueue()
+	require.Len(t, a.Turns(), 1, "not while the agent restarts")
+	srv.restarting.Store(false)
+	srv.beforeQueue()
+	srv.dispatchNextQueuedMessage()
+	require.Len(t, a.Turns(), 2)
+	assert.Equal(t, native.ContinuePrompt, a.Turns()[1].Text)
+	assert.Len(t, srv.queue.Messages(), 1, "the queued message goes after it")
 }
 
 func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
@@ -120,7 +200,7 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	})
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
-	pending, offered := srv.pendingHandoffLocked()
+	pending, offered := srv.pendingHandoff()
 	require.NotNil(t, pending)
 	require.Equal(t, "r1", offered.ID)
 
@@ -128,8 +208,8 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	// arrives. The reply must not approve the next request instead, and
 	// nothing was sent.
 	sink.RequestClosed("r1")
-	result := srv.replyNativeHandoffLocked(pending.ID, "reply-1", offered, "1")
-	assert.Equal(t, "superseded", result.Body.Outcome)
+	result := nativeBackend{srv}.answerHandoff(pending, offered, "reply-1", "1")
+	assert.Equal(t, "superseded", result.Outcome)
 	assert.Empty(t, a.Responses())
 
 	// A reply the request doesn't take is invalid, and as nothing was sent
@@ -141,8 +221,9 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	})
 	r3, ok := srv.native.Request("r3")
 	require.True(t, ok)
-	result = srv.replyNativeHandoffLocked("handoff-r3", "reply-2", r3, "1")
-	assert.Equal(t, "invalid", result.Body.Outcome)
-	assert.NotContains(t, srv.handoffReceipts, "handoff-r3")
+	result = nativeBackend{srv}.answerHandoff(&handoff.Request{ID: "handoff-r3"}, r3, "reply-2", "1")
+	assert.Equal(t, "invalid", result.Outcome)
+	_, recorded := srv.handoff.receipt("handoff-r3")
+	assert.False(t, recorded)
 	assert.Empty(t, a.Responses())
 }

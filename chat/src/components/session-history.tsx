@@ -3,7 +3,7 @@
 import {useCallback, useEffect, useState} from "react";
 import {GitFork, History, LoaderCircle, RefreshCw} from "lucide-react";
 import {toast} from "sonner";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import {Button} from "./ui/button";
 import type {SessionCost, SessionSummary} from "@/lib/chat-api";
 import {costDetails, formatUSD, periodTotals} from "@/lib/cost";
@@ -23,7 +23,9 @@ interface Pending {
 // one (this one too). active says the list shows; it loads then.
 // onOpened is called once a session opened.
 export function SessionHistory({active, onOpened}: {active: boolean; onOpened: () => void}) {
-  const {listSessions, resumeSession, serverStatus, agentType} = useChat();
+  const serverStatus = useChatSelector((chat) => chat.serverStatus);
+  const agentType = useChatSelector((chat) => chat.agentType);
+  const {listSessions, resumeSession} = useChatActions();
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [current, setCurrent] = useState<string | undefined>();
   const [total, setTotal] = useState<SessionCost | null>(null);

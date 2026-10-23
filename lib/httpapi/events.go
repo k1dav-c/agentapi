@@ -13,9 +13,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 	"github.com/coder/agentapi/lib/util"
 )
@@ -31,6 +31,8 @@ const (
 	EventTypeHeartbeat         EventType = "heartbeat"
 	EventTypeSessionSync       EventType = "session_sync"
 	EventTypeRequestUpdate     EventType = "request_update"
+	EventTypeTaskUpdate        EventType = "task_update"
+	EventTypeQueueUpdate       EventType = "queue_update"
 )
 
 type AgentStatus string
@@ -70,21 +72,22 @@ func (l LifecycleState) Schema(r huma.Registry) *huma.Schema {
 }
 
 type MessageUpdateBody struct {
-	Id      int                 `json:"id" doc:"Unique identifier for the message. This identifier also represents the order of the message in the conversation history."`
-	Role    st.ConversationRole `json:"role" doc:"Role of the message author"`
-	Message string              `json:"message" doc:"Message content. The message is formatted as it appears in the agent's terminal session, meaning that, by default, it consists of lines of text with 80 characters per line."`
-	Time    time.Time           `json:"time" doc:"Timestamp of the message"`
-	Seq     uint64              `json:"seq" doc:"Sequence number of this change. Pass the highest one seen as ?since= when reconnecting to /events to receive only later changes."`
+	Id      int       `json:"id" doc:"Unique identifier for the message. This identifier also represents the order of the message in the conversation history."`
+	Role    conv.Role `json:"role" doc:"Role of the message author"`
+	Message string    `json:"message" doc:"Message content. The message is formatted as it appears in the agent's terminal session, meaning that, by default, it consists of lines of text with 80 characters per line."`
+	Time    time.Time `json:"time" doc:"Timestamp of the message"`
+	Seq     uint64    `json:"seq" doc:"Sequence number of this change. Pass the highest one seen as ?since= when reconnecting to /events to receive only later changes."`
 }
 
 // SessionSyncBody is the first event on /events. It tells the client whether
 // the replay that follows is the full state (discard anything cached) or
 // only the changes after the ?since= sequence it asked for. It is sent
-// again, with a new epoch, when the conversation is reset or changes in a
-// way updates can't express (a message was removed); the full state
-// follows it then.
+// again, with a new epoch, when the conversation is reset, which leaves it
+// empty. When the conversation changes in a way updates can't express (a
+// message was removed), it gets a new epoch and the stream ends instead:
+// the client reconnects with its old epoch and gets the full state.
 type SessionSyncBody struct {
-	Epoch string `json:"epoch" doc:"Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded."`
+	Epoch string `json:"epoch" doc:"Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded. A rebuild (a message was taken back) ends the stream: reconnect with the old epoch to get the full state."`
 	Full  bool   `json:"full" doc:"True when the replay that follows is the full state rather than the changes after ?since=."`
 	Seq   uint64 `json:"seq" doc:"Highest sequence number in the replay that follows (the ?since= value when it holds nothing new). The replay is grouped by kind, not in seq order: it is complete at its last event, the first to carry an SSE id, and only then can a client resume from this seq."`
 }
@@ -92,11 +95,13 @@ type SessionSyncBody struct {
 type StatusChangeBody struct {
 	Status    AgentStatus    `json:"status" doc:"Backward-compatible agent activity status."`
 	Lifecycle LifecycleState `json:"lifecycle" doc:"Detailed process lifecycle state."`
-	SessionID string         `json:"session_id" doc:"Identifier for this AgentAPI server session."`
-	RunID     uint64         `json:"run_id" doc:"Monotonically increasing run identifier within the session."`
-	AgentType mf.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
-	Transport Transport      `json:"transport" doc:"Backend transport being used ('pty', 'acp' or 'native')."`
-	Version   string         `json:"agentapi_version" doc:"Version of the AgentAPI server."`
+	ServerID  string         `json:"server_id" doc:"Random identifier of this AgentAPI run: it changes every time AgentAPI starts."`
+	Turn      uint64         `json:"turn" doc:"How many times the agent started working since AgentAPI started."`
+	// AgentSessionID is the agent's own session (native transport).
+	AgentSessionID string       `json:"agent_session_id,omitempty" doc:"The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it."`
+	AgentType      mf.AgentType `json:"agent_type" doc:"Type of the agent being used by the server."`
+	Transport      Transport    `json:"transport" doc:"Backend transport being used ('pty', 'acp' or 'native')."`
+	Version        string       `json:"agentapi_version" doc:"Version of the AgentAPI server."`
 	// TerminalPrompt is the bottom of the screen while the agent shows an
 	// interactive prompt (selection list, confirmation) instead of its input
 	// box, and empty otherwise.
@@ -131,9 +136,13 @@ type ScreenUpdateBody struct {
 }
 
 type ErrorBody struct {
-	Message string        `json:"message" doc:"Error message"`
-	Level   st.ErrorLevel `json:"level" doc:"Error level"`
-	Time    time.Time     `json:"time" doc:"Timestamp when the error occurred"`
+	Message string          `json:"message" doc:"Error message"`
+	Level   conv.ErrorLevel `json:"level" doc:"Error level"`
+	Time    time.Time       `json:"time" doc:"Timestamp when the error occurred"`
+	// number counts the errors the emitter stored, from 1. A subscription
+	// replays the stored errors, so the webhook observer, which subscribes
+	// again when its subscription ends, tells the ones it sent by it.
+	number uint64
 }
 
 // RichMessageUpdateBody is the SSE payload for rich message updates.
@@ -163,7 +172,7 @@ type Event struct {
 
 type EventEmitter struct {
 	mu       sync.Mutex
-	messages []st.ConversationMessage
+	messages []conv.Message
 	// epoch identifies the current conversation state; seq numbers every
 	// message, rich message and request change so a reconnecting client can
 	// ask for only what it hasn't seen. messageSeq, richSeq and requestSeq
@@ -173,6 +182,7 @@ type EventEmitter struct {
 	messageSeq          []uint64
 	richSeq             []uint64
 	richMessages        []transcript.RichMessage
+	richIndex           map[richKey]int // a rich message's position, by its key
 	requests            []native.RequestState
 	requestSeq          []uint64
 	capabilities        *native.Capabilities
@@ -185,8 +195,9 @@ type EventEmitter struct {
 	nextSessionEventID  int
 	status              AgentStatus
 	lifecycle           LifecycleState
-	sessionID           string
-	runID               uint64
+	serverID            string
+	turn                uint64
+	agentSessionID      string
 	handoffRevision     uint64
 	agentType           mf.AgentType
 	transport           Transport
@@ -203,9 +214,22 @@ type EventEmitter struct {
 	terminalPrompt string
 	// pendingPrompt is a prompt seen on screen that hasn't been shown long
 	// enough to be published; promptTimer publishes it.
-	pendingPrompt  string
-	promptTimer    *quartz.Timer
-	errors         []ErrorBody
+	pendingPrompt string
+	promptTimer   *quartz.Timer
+	errors        []ErrorBody
+	errorCount    uint64 // the errors emitted, also before a reset
+	// tasks derives the tasks from the changes; taskSeq holds the seq of
+	// each task's latest change, by its ID.
+	tasks   *taskTracker
+	taskSeq map[int]uint64
+	// taskTimer ends a task whose agent stays idle after an answer; see
+	// taskTracker.statusChanged.
+	taskTimer *quartz.Timer
+	// queue is the message queue as the server last reported it (version
+	// queueVersion), sent with seq queueSeq.
+	queue          []QueuedMessage
+	queueVersion   uint64
+	queueSeq       uint64
 	clock          quartz.Clock
 	onStatusChange func(previous, current AgentStatus)
 	// persister, if set, stores every change of the conversation state.
@@ -216,7 +240,7 @@ type EventEmitter struct {
 // The emitter calls it with its lock held, so its methods must not block
 // (statedb.DB queues the writes).
 type Persister interface {
-	PutMessage(msg st.ConversationMessage, seq uint64)
+	PutMessage(msg conv.Message, seq uint64)
 	// TruncateMessages removes the messages with an ID of at least fromID.
 	TruncateMessages(fromID int)
 	PutRichMessage(pos int, msg transcript.RichMessage, seq uint64)
@@ -231,6 +255,9 @@ type Persister interface {
 	SetSettings(settings native.Settings)
 	// SetLimitStop stores the turn a usage limit stopped; nil removes it.
 	SetLimitStop(ls *native.LimitStop)
+	// PutTask stores the task the user's message id started, encoded as
+	// JSON.
+	PutTask(id int, data []byte, seq uint64)
 	// Reset removes the conversation; epoch is the new epoch.
 	Reset(epoch string)
 }
@@ -239,23 +266,25 @@ type Persister interface {
 type EmitterState struct {
 	Epoch         string
 	Seq           uint64
-	Messages      []st.ConversationMessage
+	Messages      []conv.Message
 	MessageSeqs   []uint64
 	RichMessages  []transcript.RichMessage
 	RichSeqs      []uint64
 	SessionEvents []transcript.SessionEvent
 	Requests      []native.RequestState
 	RequestSeqs   []uint64
+	Tasks         []Task
+	TaskSeqs      []uint64
 	SessionName   string
 }
 
-func convertStatus(status st.ConversationStatus) AgentStatus {
+func convertStatus(status conv.Status) AgentStatus {
 	switch status {
-	case st.ConversationStatusInitializing:
+	case conv.StatusInitializing:
 		return AgentStatusRunning
-	case st.ConversationStatusStable:
+	case conv.StatusStable:
 		return AgentStatusStable
-	case st.ConversationStatusChanging:
+	case conv.StatusChanging:
 		return AgentStatusRunning
 	default:
 		panic(fmt.Sprintf("unknown conversation status: %s", status))
@@ -301,8 +330,10 @@ func WithTerminalColumns(columns uint16) EventEmitterOption {
 	return func(e *EventEmitter) { e.terminalColumns = columns }
 }
 
-func WithSessionID(sessionID string) EventEmitterOption {
-	return func(e *EventEmitter) { e.sessionID = sessionID }
+// WithServerID sets the identifier of this AgentAPI run reported in status
+// updates.
+func WithServerID(serverID string) EventEmitterOption {
+	return func(e *EventEmitter) { e.serverID = serverID }
 }
 
 func WithClock(clock quartz.Clock) EventEmitterOption {
@@ -328,8 +359,16 @@ func (e *EventEmitter) Restore(state EmitterState) {
 	e.messages = slices.Clone(state.Messages)
 	e.messageSeq = slices.Clone(state.MessageSeqs)
 	e.richMessages = slices.Clone(state.RichMessages)
+	for i := range e.richMessages {
+		e.richMessages[i].Content = nonNilContent(e.richMessages[i].Content)
+	}
 	e.richSeq = slices.Clone(state.RichSeqs)
+	e.richIndex = make(map[richKey]int, len(e.richMessages))
+	for i, msg := range e.richMessages {
+		e.richIndex[richKey{msg.MessageID, msg.Role}] = i
+	}
 	e.sessionEvents = slices.Clone(state.SessionEvents)
+	shareRestoredContent(e.richMessages, e.sessionEvents)
 	e.nextSessionEventID = 1
 	for _, ev := range e.sessionEvents {
 		e.nextSessionEventID = max(e.nextSessionEventID, ev.EventID+1)
@@ -337,6 +376,17 @@ func (e *EventEmitter) Restore(state EmitterState) {
 	e.requests = slices.Clone(state.Requests)
 	e.requestSeq = slices.Clone(state.RequestSeqs)
 	e.sessionName = state.SessionName
+	e.taskSeq = map[int]uint64{}
+	for i, task := range state.Tasks {
+		e.taskSeq[task.ID] = state.TaskSeqs[i]
+	}
+	// A task that ran when AgentAPI stopped is over, and the restored
+	// messages are history: a database written before tasks were kept has
+	// none for them, which are derived as done.
+	e.tasksChangedLocked(e.tasks.restore(slices.Clone(state.Tasks), e.clock.Now()))
+	if n := len(e.messages); n > 0 && !e.messages[n-1].Time.Before(e.tasks.since) {
+		e.tasks.since = e.messages[n-1].Time.Add(time.Nanosecond)
+	}
 }
 
 // Epoch identifies the current conversation state; see SessionSyncBody.
@@ -354,7 +404,7 @@ func WithStatusChangeHandler(handler func(previous, current AgentStatus)) EventE
 
 func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 	e := &EventEmitter{
-		messages:            make([]st.ConversationMessage, 0),
+		messages:            make([]conv.Message, 0),
 		sessionEvents:       make([]transcript.SessionEvent, 0),
 		nextSessionEventID:  1,
 		status:              AgentStatusRunning,
@@ -369,6 +419,8 @@ func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 	if e.clock == nil {
 		e.clock = quartz.NewReal()
 	}
+	e.tasks = newTaskTracker(e.clock.Now())
+	e.taskSeq = map[int]uint64{}
 	return e
 }
 
@@ -418,8 +470,11 @@ func (e *EventEmitter) Reset() {
 	e.messageSeq = nil
 	e.richMessages = nil
 	e.richSeq = nil
+	e.richIndex = nil
 	e.requests = nil
 	e.requestSeq = nil
+	e.tasks.reset(e.clock.Now())
+	e.taskSeq = map[int]uint64{}
 	// A new epoch makes reconnecting clients drop their cache; connected
 	// clients are told now so they clear the old conversation.
 	e.epoch = newEpoch()
@@ -504,6 +559,25 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string) []Event 
 		events = append(events, Event{
 			Type:    EventTypeRequestUpdate,
 			Payload: RequestUpdateBody{RequestState: req, Seq: e.requestSeq[i]},
+		})
+	}
+
+	if e.queueSeq > since {
+		replaySeq = max(replaySeq, e.queueSeq)
+		events = append(events, Event{
+			Type:    EventTypeQueueUpdate,
+			Payload: QueueUpdateBody{Queue: slices.Clone(e.queue), Seq: e.queueSeq},
+		})
+	}
+	for _, task := range e.tasks.tasks {
+		seq := e.taskSeq[task.ID]
+		if seq <= since {
+			continue
+		}
+		replaySeq = max(replaySeq, seq)
+		events = append(events, Event{
+			Type:    EventTypeTaskUpdate,
+			Payload: TaskUpdateBody{Task: task.clone(), Seq: seq},
 		})
 	}
 

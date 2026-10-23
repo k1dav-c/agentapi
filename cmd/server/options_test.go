@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/httpapi"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // flagsWith returns flags with the terminal size the server needs, and
@@ -37,7 +36,8 @@ func TestLoadServerOptions(t *testing.T) {
 				assert.Equal(t, "claude", opts.agent)
 				assert.Equal(t, []string{"--model", "opus"}, opts.agentArgs)
 				assert.Equal(t, httpapi.TransportNative, opts.transport)
-				assert.Equal(t, st.StatePersistenceConfig{}, opts.state)
+				assert.Empty(t, opts.stateFile)
+				assert.Empty(t, opts.stateDB)
 			},
 		},
 		"codex, pi and the demo agent default to native": {
@@ -74,12 +74,39 @@ func TestLoadServerOptions(t *testing.T) {
 				assert.Equal(t, AgentTypeCodex, opts.agentType)
 			},
 		},
-		"a state file loads and saves unless told not to": {
-			values: map[string]any{FlagStateFile: "/tmp/state.json", FlagLoadState: false},
+		"a state file is imported into a state DB next to it": {
+			values: map[string]any{FlagStateFile: "/tmp/state.json"},
 			check: func(t *testing.T, opts serverOptions) {
-				assert.Equal(t, st.StatePersistenceConfig{StateFile: "/tmp/state.json", SaveState: true}, opts.state)
-				// The state file is the PTY transport's persistence.
+				assert.Equal(t, "/tmp/state.json", opts.stateFile)
+				assert.True(t, opts.importState)
+				assert.Equal(t, "/tmp/state.db", opts.stateDB)
+				// Command lines written for the PTY transport's state file
+				// keep it.
 				assert.Equal(t, httpapi.TransportPTY, opts.transport)
+			},
+		},
+		"--load-state=false skips the import; --state-db names the database": {
+			values: map[string]any{FlagStateFile: "/tmp/state.db", FlagLoadState: false, FlagSaveState: true},
+			check: func(t *testing.T, opts serverOptions) {
+				assert.False(t, opts.importState)
+				assert.Equal(t, "/tmp/state.db.sqlite", opts.stateDB, "not the state file itself")
+				named, err := loadServerOptions(flagsWith(map[string]any{FlagStateFile: "/tmp/s.json", FlagStateDB: "/tmp/agent.db"}), []string{"claude"})
+				require.NoError(t, err)
+				assert.Equal(t, "/tmp/agent.db", named.stateDB)
+			},
+		},
+		"a state file with native": {
+			values: map[string]any{FlagTransport: "native", FlagStateFile: "/tmp/s.json"},
+			check: func(t *testing.T, opts serverOptions) {
+				assert.Equal(t, httpapi.TransportNative, opts.transport)
+				assert.Equal(t, "/tmp/s.db", opts.stateDB)
+			},
+		},
+		"PTY with a state DB": {
+			values: map[string]any{FlagTransport: "pty", FlagStateDB: "/tmp/agent.db"},
+			check: func(t *testing.T, opts serverOptions) {
+				assert.Equal(t, httpapi.TransportPTY, opts.transport)
+				assert.Equal(t, "/tmp/agent.db", opts.stateDB)
 			},
 		},
 		"--experimental-acp is --transport acp": {
@@ -129,8 +156,7 @@ func TestLoadServerOptionsRefuses(t *testing.T) {
 		"an unknown transport":          {map[string]any{FlagTransport: "ssh"}, `unknown --transport "ssh" (one of: pty, acp, native)`},
 		"ACP and native":                {map[string]any{FlagExperimentalACP: true, FlagTransport: "native"}, "--experimental-acp and --transport=native are mutually exclusive"},
 		"a state file with ACP":         {map[string]any{FlagTransport: "acp", FlagStateFile: "/tmp/s.json"}, "ACP mode doesn't support state persistence"},
-		"a state file with native":      {map[string]any{FlagTransport: "native", FlagStateFile: "/tmp/s.json"}, "the native transport doesn't support --state-file; use --state-db"},
-		"a state DB with PTY":           {map[string]any{FlagTransport: "pty", FlagStateDB: "/tmp/agent.db"}, "--state-db needs --transport native"},
+		"a state DB with ACP":           {map[string]any{FlagTransport: "acp", FlagStateDB: "/tmp/agent.db"}, "ACP mode doesn't support state persistence"},
 		"the OpenAPI schema with ACP":   {map[string]any{FlagPrintOpenAPI: true, FlagExperimentalACP: true}, "flags --print-openapi and --experimental-acp are mutually exclusive"},
 		"a bind address with a port":    {map[string]any{FlagBind: "127.0.0.1:3284"}, "invalid --bind: '127.0.0.1:3284' must not include a port; use --port"},
 		"a bind address that isn't one": {map[string]any{FlagBind: "not a host"}, "invalid --bind"},

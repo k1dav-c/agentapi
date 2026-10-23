@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/coder/quartz"
+
+	"github.com/coder/agentapi/lib/agentlog"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 const (
@@ -21,11 +24,14 @@ const (
 
 // Config for creating a new Watcher.
 type Config struct {
-	Resolver  SessionResolver
-	Parser    LineParser
+	Resolver agentlog.SessionResolver
+	Parser   agentlog.LineParser
+	// Format, if set, is the log's: the watcher logs once per log what it
+	// holds that the format doesn't know.
+	Format    agentlog.Format
 	Logger    *slog.Logger
-	OnMessage func(RichMessage) // called when a message is completed or updated
-	OnLine    func([]byte)      // called for each complete raw JSONL record
+	OnMessage func(transcript.RichMessage) // called when a message is completed or updated
+	OnLine    func([]byte)                 // called for each complete raw JSONL record
 	// Clock paces the polling; the real clock when nil.
 	Clock quartz.Clock
 }
@@ -35,10 +41,11 @@ type Config struct {
 // messages are handed to the OnMessage callback; the watcher itself keeps
 // no message state.
 type Watcher struct {
-	resolver  SessionResolver
-	parser    LineParser
+	resolver  agentlog.SessionResolver
+	parser    agentlog.LineParser
+	format    agentlog.Format
 	logger    *slog.Logger
-	onMessage func(RichMessage)
+	onMessage func(transcript.RichMessage)
 	onLine    func([]byte)
 	clock     quartz.Clock
 }
@@ -56,6 +63,7 @@ func New(cfg Config) *Watcher {
 	return &Watcher{
 		resolver:  cfg.Resolver,
 		parser:    cfg.Parser,
+		format:    cfg.Format,
 		logger:    logger,
 		onMessage: cfg.OnMessage,
 		onLine:    cfg.OnLine,
@@ -146,6 +154,10 @@ func (w *Watcher) tailFile(ctx context.Context, path string) string {
 	w.logger.Info("Opened JSONL file for tailing", "path", path)
 
 	reader := bufio.NewReader(f)
+	var drift *agentlog.Drift
+	if w.format != nil {
+		drift = agentlog.NewDrift(w.format)
+	}
 	pollTicker := w.clock.NewTicker(pollInterval, "Watcher", "poll")
 	defer pollTicker.Stop()
 	resolveTicker := w.clock.NewTicker(sessionPollInterval, "Watcher", "resolve")
@@ -169,7 +181,13 @@ func (w *Watcher) tailFile(ctx context.Context, path string) string {
 				w.logger.Error("Error reading JSONL file", "error", err)
 				return ""
 			}
+			if drift != nil {
+				drift.Line(line)
+			}
 			w.processLine(line)
+		}
+		if drift != nil {
+			drift.Report(w.logger, path)
 		}
 
 		// Flush only completed messages (those with a terminal stop_reason).
@@ -216,7 +234,7 @@ func (w *Watcher) processLine(line []byte) {
 // re-emit the same message as its content accumulates (e.g. the Codex
 // parser emits a turn update per content block); deduplication by
 // (MessageID, Role) happens downstream in the EventEmitter.
-func (w *Watcher) emit(msgs []RichMessage) {
+func (w *Watcher) emit(msgs []transcript.RichMessage) {
 	if w.onMessage == nil {
 		return
 	}

@@ -45,11 +45,11 @@ type FileMatch struct {
 // the agent wrote isn't there: an agent working in a repository below the
 // working directory names files relative to the repository, and sometimes
 // in the wrong case.
-func (s *Server) findFile(ctx context.Context, input *FilePathQuery) (*FileFindResponse, error) {
+func (f *fileAPI) findFile(ctx context.Context, input *FilePathQuery) (*FileFindResponse, error) {
 	if strings.TrimSpace(input.Path) == "" {
 		return nil, huma.Error400BadRequest("path is empty")
 	}
-	if s.cwd == "" {
+	if f.cwd == "" {
 		return nil, huma.Error404NotFound("the agent's working directory is unknown")
 	}
 	want := filepath.ToSlash(filepath.Clean(input.Path))
@@ -62,7 +62,7 @@ func (s *Server) findFile(ctx context.Context, input *FilePathQuery) (*FileFindR
 	if want == "." || want == ".." || strings.HasPrefix(want, "../") {
 		return nil, huma.Error400BadRequest("not a file path")
 	}
-	matches, complete := findBySuffix(ctx, s.cwd, want)
+	matches, complete := findBySuffix(ctx, f.cwd, want)
 	resp := &FileFindResponse{}
 	resp.Body.Matches = matches
 	resp.Body.Complete = complete

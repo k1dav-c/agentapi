@@ -7,8 +7,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/util"
 )
 
@@ -42,7 +42,7 @@ func limitStopError(err error) error {
 		return nil
 	case errors.Is(err, native.ErrNoLimitStop):
 		return huma.Error409Conflict("no turn stopped on a usage limit")
-	case errors.Is(err, st.ErrMessageValidationChanging):
+	case errors.Is(err, conv.ErrMessageValidationChanging):
 		return huma.Error409Conflict("the agent is busy; try again once it is done")
 	case errors.Is(err, native.ErrNotStarted):
 		return huma.Error409Conflict("the agent isn't running")
@@ -92,19 +92,15 @@ func (s *Server) dismissLimitStop(_ context.Context, _ *struct{}) (*InterruptRes
 	return okResponse(), limitStopError(s.native.DismissLimitStop())
 }
 
-// continueIfDue sends a scheduled continuation once it is due. Called on the
-// queue's tick, before the queue: the queued messages go after it.
-func (s *Server) continueIfDue() {
-	if s.native == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// continueIfDueLocked sends a scheduled continuation once it is due. Called
+// on the queue's tick, before the queue: the queued messages go after it.
+// Caller holds s.mu.
+func (s *Server) continueIfDueLocked() {
 	ctx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
-	if _, err := s.native.ContinueIfDue(ctx, s.clock.Now()); err != nil && !errors.Is(err, st.ErrMessageValidationChanging) {
+	if _, err := s.native.ContinueIfDue(ctx, s.clock.Now()); err != nil && !errors.Is(err, conv.ErrMessageValidationChanging) {
 		s.logger.Error("Failed to continue the turn a usage limit stopped", "error", err)
-		s.emitter.EmitError(fmt.Sprintf("Failed to continue after the usage limit: %v", err), st.ErrorLevelError)
+		s.emitter.EmitError(fmt.Sprintf("Failed to continue after the usage limit: %v", err), conv.ErrorLevelError)
 	}
 }
 

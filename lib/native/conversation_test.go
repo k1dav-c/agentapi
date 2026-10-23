@@ -8,23 +8,24 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
 // recorded is what a recorder received.
 type recorded struct {
-	messages     []st.ConversationMessage
+	messages     []conversation.Message
 	messageEmits int
-	statuses     []st.ConversationStatus
+	statuses     []conversation.Status
 	errors       []string
 	rich         []transcript.RichMessage
 	requests     []native.RequestState
@@ -50,14 +51,14 @@ func (r *recorder) get() recorded {
 	return r.recorded
 }
 
-func (r *recorder) EmitMessages(m []st.ConversationMessage) {
+func (r *recorder) EmitMessages(m []conversation.Message) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.messages = m
 	r.messageEmits++
 }
 
-func (r *recorder) EmitStatus(s st.ConversationStatus) {
+func (r *recorder) EmitStatus(s conversation.Status) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.statuses = append(r.statuses, s)
@@ -65,7 +66,7 @@ func (r *recorder) EmitStatus(s st.ConversationStatus) {
 
 func (r *recorder) EmitScreen(string) {}
 
-func (r *recorder) EmitError(m string, _ st.ErrorLevel) {
+func (r *recorder) EmitError(m string, _ conversation.ErrorLevel) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.errors = append(r.errors, m)
@@ -175,7 +176,7 @@ func start(t *testing.T, configure func(*nativetest.Adapter), cfg native.Config)
 	t.Helper()
 	factory := &nativetest.Factory{Configure: configure}
 	c, rec := run(t, factory, cfg)
-	require.Eventually(t, func() bool { return c.Status() != st.ConversationStatusInitializing }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return c.Status() != conversation.StatusInitializing }, 5*time.Second, time.Millisecond)
 	return c, factory, rec
 }
 
@@ -197,7 +198,7 @@ func TestTurnBuildsMessages(t *testing.T) {
 	a := factory.Last()
 
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "hello"}))
-	assert.Equal(t, st.ConversationStatusChanging, c.Status())
+	assert.Equal(t, conversation.StatusChanging, c.Status())
 	assert.False(t, c.Idle())
 
 	sink := a.Sink()
@@ -211,12 +212,12 @@ func TestTurnBuildsMessages(t *testing.T) {
 
 	msgs := c.Messages()
 	require.Len(t, msgs, 2)
-	assert.Equal(t, st.ConversationRoleUser, msgs[0].Role)
+	assert.Equal(t, conversation.RoleUser, msgs[0].Role)
 	assert.Equal(t, "hello", msgs[0].Message)
-	assert.Equal(t, st.ConversationRoleAgent, msgs[1].Role)
+	assert.Equal(t, conversation.RoleAgent, msgs[1].Role)
 	assert.Equal(t, "Hello\n\nWorld", msgs[1].Message)
 	assert.Equal(t, msgs, rec.get().messages)
-	assert.Equal(t, st.ConversationStatusStable, c.Status())
+	assert.Equal(t, conversation.StatusStable, c.Status())
 	assert.Len(t, rec.get().rich, 4)
 	assert.Equal(t, []native.Input{{Text: "hello"}}, a.Turns())
 
@@ -249,9 +250,9 @@ func TestStartTurnWhileBusy(t *testing.T) {
 	c, _, _ := start(t, nil, native.Config{})
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
 	err := c.StartTurn(context.Background(), native.Input{Text: "two"})
-	assert.ErrorIs(t, err, st.ErrMessageValidationChanging)
+	assert.ErrorIs(t, err, conversation.ErrMessageValidationChanging)
 	assert.Len(t, c.Messages(), 1)
-	assert.ErrorIs(t, c.StartTurn(context.Background(), native.Input{Text: "  "}), st.ErrMessageValidationEmpty)
+	assert.ErrorIs(t, c.StartTurn(context.Background(), native.Input{Text: "  "}), conversation.ErrMessageValidationEmpty)
 }
 
 func TestStartTurnFailureRemovesMessage(t *testing.T) {
@@ -367,4 +368,25 @@ func TestRichMessageIsCopied(t *testing.T) {
 	kept := rec.get().rich[0]
 	assert.Empty(t, kept.Content[0].Status, "the adapter's change doesn't reach the observer")
 	assert.False(t, *kept.Content[0].IsError)
+}
+
+// PrepareRichMessage changes a rich message before the conversation takes
+// it, without the conversation's lock: storing images there holds up
+// nothing else.
+func TestPrepareRichMessageRunsUnlocked(t *testing.T) {
+	var conv atomic.Pointer[native.Conversation]
+	unlocked := make(chan bool, 1)
+	c, factory, rec := start(t, nil, native.Config{PrepareRichMessage: func(msg *transcript.RichMessage) {
+		unlocked <- nativetest.Returns(func() { conv.Load().Status() })
+		msg.Content[0].Images = []transcript.RichImage{{MediaType: "image/png", URL: "/uploads/x/image.png"}}
+	}})
+	conv.Store(c)
+	factory.Last().Sink().RichMessage(transcript.RichMessage{MessageID: "u1", Role: "user", Content: []transcript.RichContentBlock{
+		{Type: "tool_result", ToolUseID: "t1", Images: []transcript.RichImage{{MediaType: "image/png", Data: []byte("png")}}},
+	}})
+	assert.True(t, <-unlocked, "the conversation's lock is held")
+	got := rec.get().rich
+	require.Len(t, got, 1)
+	assert.Equal(t, "/uploads/x/image.png", got[0].Content[0].Images[0].URL)
+	assert.Nil(t, got[0].Content[0].Images[0].Data)
 }

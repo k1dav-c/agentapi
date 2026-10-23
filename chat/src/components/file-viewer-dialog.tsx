@@ -5,7 +5,7 @@ import {Eye, FileDiff, FileQuestion, FileText, GitCompare, ImageOff, LoaderCircl
 import {Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle} from "./ui/dialog";
 import {Tabs, TabsContent, TabsList, TabsTrigger} from "./ui/tabs";
 import {Button} from "./ui/button";
-import {useChat} from "./chat-provider";
+import {useChatActions} from "./chat-provider";
 import {CopyButton} from "./message-list/message-item";
 import {DiffView} from "./diff-view";
 import {PathLabel} from "./file-path";
@@ -83,7 +83,7 @@ function useLoaded<T>(read: () => Promise<T>) {
 // The dialog's content for one request. A new request remounts it, so every
 // open reads the file again.
 function FileViewerBody({request}: {request: FileViewerRequest}) {
-  const {getFileContent, getFileDiff, getFilePreview} = useChat();
+  const {getFileContent, getFileDiff, getFilePreview} = useChatActions();
   const {path, line, change} = request;
   const kind = previewKind(path);
   // A raster image shows on the File tab; SVG is text, so its image is the
@@ -343,7 +343,7 @@ const HTMLPreview = memo(function HTMLPreview({page}: {page: FilePreview}) {
 // A Markdown file as a document. Relative images load from the working
 // directory, and relative links open in the file viewer.
 const MarkdownPreview = memo(function MarkdownPreview({file}: {file: FileContent}) {
-  const {fileImageURL} = useChat();
+  const {fileImageURL} = useChatActions();
   const viewer = useFileViewer();
   const imageURL = useCallback(
     (ref: string) => {
@@ -377,7 +377,7 @@ const MarkdownPreview = memo(function MarkdownPreview({file}: {file: FileContent
 
 // An image file from the working directory, fitted to the panel.
 function ImageView({path, size, version}: {path: string; size?: number; version: number}) {
-  const {fileImageURL} = useChat();
+  const {fileImageURL} = useChatActions();
   const [failed, setFailed] = useState<number | null>(null);
   if (failed === version) {
     return <Notice alert icon={ImageOff} title="Couldn't show the image" text="It may have been deleted, or it isn't an image the browser can show." />;
@@ -525,7 +525,7 @@ function FileLoadError({error, subject, request, onRetry}: {error: unknown; subj
 // Looks for a file that wasn't where the agent said: one match opens, more
 // are offered, none says so.
 function FindFile({request, error, onRetry}: {request: FileViewerRequest; error: unknown; onRetry: () => void}) {
-  const {findFile} = useChat();
+  const {findFile} = useChatActions();
   const viewer = useFileViewer();
   const [found, setFound] = useState<FileMatches | null>(null);
   const [failed, setFailed] = useState(false);

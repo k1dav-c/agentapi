@@ -9,8 +9,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -32,7 +31,7 @@ func (s *Server) getTitle(ctx context.Context, input *struct{}) (*TitleResponse,
 	task := ""
 	messages := s.conversation.Messages()
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == st.ConversationRoleUser {
+		if messages[i].Role == conv.RoleUser {
 			task = shortText(messages[i].Message, 60)
 			break
 		}
@@ -66,13 +65,20 @@ func shortText(s string, n int) string {
 
 func (s *Server) getWorkspace(_ context.Context, _ *struct{}) (*WorkspaceResponse, error) {
 	var response WorkspaceResponse
+	response.Body.URL = coderWorkspaceURL()
+	return &response, nil
+}
+
+// coderWorkspaceURL is the dashboard page of the Coder workspace AgentAPI
+// runs in, or empty outside one.
+func coderWorkspaceURL() string {
 	base := strings.TrimRight(os.Getenv("CODER_URL"), "/")
 	owner := strings.TrimSpace(os.Getenv("CODER_WORKSPACE_OWNER_NAME"))
 	name := strings.TrimSpace(os.Getenv("CODER_WORKSPACE_NAME"))
-	if base != "" && owner != "" && name != "" {
-		response.Body.URL = base + "/@" + url.PathEscape(owner) + "/" + url.PathEscape(name)
+	if base == "" || owner == "" || name == "" {
+		return ""
 	}
-	return &response, nil
+	return base + "/@" + url.PathEscape(owner) + "/" + url.PathEscape(name)
 }
 
 // getMessages handles GET /messages, without s.mu (see getTitle).
@@ -107,7 +113,7 @@ func (s *Server) getTimeline(ctx context.Context, input *TimelineRequest) (*Time
 	if events == nil {
 		events = []transcript.SessionEvent{}
 	}
-	if input.Subagents && s.native != nil {
+	if input.Subagents && s.sessions != nil {
 		events = append(events, s.subagentEvents(events)...)
 	}
 	resp := &TimelineResponse{}
@@ -119,7 +125,7 @@ func (s *Server) getTimeline(ctx context.Context, input *TimelineRequest) (*Time
 // its session, numbered after events. A log that can't be read leaves them
 // out rather than failing the timeline.
 func (s *Server) subagentEvents(events []transcript.SessionEvent) []transcript.SessionEvent {
-	sub, err := jsonlwatcher.SubagentEvents(string(s.agentType), s.cwd, s.native.SessionRef())
+	sub, err := s.sessions.SubagentEvents(s.native.SessionRef())
 	if err != nil {
 		s.logger.Warn("Failed to read the subagents' logs", "error", err)
 		return nil
@@ -145,7 +151,7 @@ func (s *Server) subagentEvents(events []transcript.SessionEvent) []transcript.S
 func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*MessageResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	pending, _ := s.pendingHandoffLocked()
+	pending, _ := s.pendingHandoff()
 
 	resp := &MessageResponse{}
 	mode := input.Body.DispatchMode
@@ -161,6 +167,11 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 		if strings.TrimSpace(input.Body.Content) == "" {
 			return nil, huma.Error400BadRequest("message must not be empty")
 		}
+		if s.restarting.Load() {
+			// The new agent gets it once it runs.
+			s.queueMessageLocked(resp, input.Body.Content, false)
+			return resp, nil
+		}
 		if err := backend.deliver(input.Body.Content, mode, resp); err != nil {
 			return nil, err
 		}
@@ -173,6 +184,9 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 		if s.agentio == nil {
 			return nil, huma.Error400BadRequest("raw messages need a terminal; the native transport has none")
 		}
+		if s.restarting.Load() {
+			return nil, huma.Error409Conflict(errRestarting.Error())
+		}
 		if _, err := s.agentio.Write([]byte(input.Body.Content)); err != nil {
 			return nil, fmt.Errorf("failed to send message: %w", err)
 		}
@@ -180,7 +194,7 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 
 	resp.Body.Ok = true
 	if pending != nil {
-		s.handoffSuppressed = pending.ID
+		s.handoff.suppress(pending.ID)
 	}
 
 	return resp, nil
@@ -218,8 +232,8 @@ func (s *Server) registerConversationRoutes() {
 
 	huma.Delete(s.api, "/messages", s.deleteMessages, func(o *huma.Operation) {
 		o.Summary = "Delete all messages and restart"
-		o.Description = "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport)."
-		o.Errors = []int{400}
+		o.Description = "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue."
+		o.Errors = []int{400, 409}
 	})
 
 	// POST /message endpoint

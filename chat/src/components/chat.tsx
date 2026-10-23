@@ -2,7 +2,7 @@
 
 import {useCallback, useEffect, useState} from "react";
 import {ExternalLink, FolderSearch, RefreshCw, TerminalSquare} from "lucide-react";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import {useStableCallback} from "@/lib/use-stable-callback";
 import MessageInput from "./message-input";
 import MessageList from "./message-list";
@@ -44,24 +44,18 @@ export function Chat() {
     window.addEventListener(OPEN_SHORTCUTS_EVENT, openShortcutsDialog);
     return () => window.removeEventListener(OPEN_SHORTCUTS_EVENT, openShortcutsDialog);
   }, [openShortcutsDialog]);
-  const {
-    messages,
-    richMessages,
-    loading,
-    sendMessage,
-    serverStatus,
-    agentType,
-    retryFailedMessage,
-    dismissFailedMessage,
-    connectionStatus,
-    reconnectAttempt,
-    nextReconnectAt,
-    reconnectNow,
-    workspaceUrl,
-    features,
-    canStop,
-    stop,
-  } = useChat();
+  // The layout selects what changes its layout; the transcript, the dock
+  // and the composer select their own state, so it doesn't render again
+  // as messages stream.
+  const loading = useChatSelector((chat) => chat.loading);
+  const serverStatus = useChatSelector((chat) => chat.serverStatus);
+  const connectionStatus = useChatSelector((chat) => chat.connectionStatus);
+  const reconnectAttempt = useChatSelector((chat) => chat.reconnectAttempt);
+  const nextReconnectAt = useChatSelector((chat) => chat.nextReconnectAt);
+  const workspaceUrl = useChatSelector((chat) => chat.workspaceUrl);
+  const features = useChatSelector((chat) => chat.features);
+  const canStop = useChatSelector((chat) => chat.canStop);
+  const {sendMessage, retryFailedMessage, dismissFailedMessage, reconnectNow, stop} = useChatActions();
   // Only the PTY transport has the agent's terminal: TTY mode, raw keys and
   // the terminal prompt card need it. A native agent has none; the server
   // offers a shell in its working directory instead.
@@ -109,14 +103,7 @@ export function Chat() {
 
   return (
     <section className="relative flex min-h-0 flex-1 flex-col">
-      <div className="sr-only" aria-live="polite" aria-atomic="true">
-        {serverStatus === "running"
-          ? "Agent is working"
-          : serverStatus === "stable"
-            ? "Agent is ready"
-            : "Agent connection is unavailable"}
-        . {messages.length} conversation updates.
-      </div>
+      <LiveStatus />
       {connectionStatus !== "connected" && (
         <div
           className="flex min-h-10 shrink-0 items-center justify-center gap-3 border-b bg-status-warning/10 px-3 py-1.5 text-xs text-status-warning"
@@ -149,10 +136,6 @@ export function Chat() {
       ) : (
         <>
           <MessageList
-            messages={messages}
-            richMessages={richMessages}
-            serverStatus={serverStatus}
-            agentType={agentType}
             onRetryMessage={retryFailedMessage}
             onEditMessage={editFailedMessage}
             onDismissMessage={dismissFailedMessage}
@@ -235,5 +218,23 @@ export function Chat() {
       <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <BackgroundAlerts />
     </section>
+  );
+}
+
+// What the agent does and how many messages the conversation has, for
+// screen readers; a component of its own, as the count changes with every
+// message.
+function LiveStatus() {
+  const serverStatus = useChatSelector((chat) => chat.serverStatus);
+  const count = useChatSelector((chat) => chat.messages.length);
+  return (
+    <div className="sr-only" aria-live="polite" aria-atomic="true">
+      {serverStatus === "running"
+        ? "Agent is working"
+        : serverStatus === "stable"
+          ? "Agent is ready"
+          : "Agent connection is unavailable"}
+      . {count} conversation updates.
+    </div>
   );
 }

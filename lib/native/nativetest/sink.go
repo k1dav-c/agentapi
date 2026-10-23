@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -168,7 +168,7 @@ func (s *Sink) UsageChanged(usage native.AgentUsage) {
 	s.state.Usage = append(s.state.Usage, usage)
 }
 
-func (s *Sink) Error(message string, level st.ErrorLevel) {
+func (s *Sink) Error(message string, level conv.ErrorLevel) {
 	defer s.enter()()
 	s.state.Errors = append(s.state.Errors, string(level)+": "+message)
 }

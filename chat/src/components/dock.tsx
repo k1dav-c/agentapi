@@ -2,49 +2,31 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { TerminalSquare } from "lucide-react";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import { ChoiceMark, DecisionCardShell, PrimaryButton, TONE_CLASS, TerminalBlock, optionRowClass } from "./decision-card";
 import { Kbd } from "./ui/kbd";
-import { computeTokenTotals, formatTokenCount } from "@/lib/session-status";
+import { sameValue } from "@/lib/agent-status";
+import { formatTokenCount } from "@/lib/session-status";
 import { useWorkingElapsed } from "@/lib/use-elapsed";
 import { useNumberKeys } from "@/lib/use-number-keys";
 import { MULTI_SELECT_CONTINUE, describeTerminalPrompt, isMultiSelect, parseTerminalOptions, terminalOptionKeystrokes } from "@/lib/terminal-option";
-import { getToolCommand } from "@/lib/tool-format";
-import { splitThinking } from "@/lib/thinking";
 import { loginTitle } from "@/lib/login";
 
 // The strip above the composer: what the agent is doing right now. It only
 // shows while the agent works or waits for you; a ready agent needs no
 // chrome.
 export function StateStrip() {
-  const { agentState: kind, serverStatus, pendingRequestCount, loginRequired, currentTask, richMessages, queuedMessages } = useChat();
+  const kind = useChatSelector((chat) => chat.agentState);
+  const serverStatus = useChatSelector((chat) => chat.serverStatus);
+  const pendingRequestCount = useChatSelector((chat) => chat.pendingRequestCount);
+  const loginRequired = useChatSelector((chat) => chat.loginRequired);
+  const queuedCount = useChatSelector((chat) => chat.queuedMessages.length);
+  // What the agent does in its task and the tokens it took, worked out from
+  // the task's latest steps (useTranscript): the strip renders again when
+  // they change, not whenever a message streams.
+  const activity = useChatSelector((chat) => chat.taskActivity);
+  const tokens = useChatSelector((chat) => chat.taskTokens, sameValue);
   const elapsed = useWorkingElapsed(serverStatus);
-
-  const { activity, tokens } = useMemo(() => {
-    const taskStart = currentTask?.time;
-    const startMs = taskStart ? Date.parse(taskStart) : 0;
-    const current = richMessages.filter((message) => !startMs || Date.parse(message.timestamp) >= startMs);
-    const finished = new Set<string>();
-    for (const message of current) {
-      for (const block of message.content) {
-        if (block.type === "tool_result" && block.tool_use_id) finished.add(block.tool_use_id);
-      }
-    }
-    let activity = "";
-    for (const message of [...current].reverse()) {
-      for (const block of [...message.content].reverse()) {
-        if (block.type === "tool_use" && block.tool_use_id && !finished.has(block.tool_use_id)) {
-          const command = getToolCommand(block.tool_name ?? "", block.tool_input);
-          activity = command ? `$ ${command.split("\n")[0]}` : `${block.tool_name ?? "Tool"}`;
-        } else if (block.type === "thinking" && block.thinking) {
-          activity = `Thinking · ${splitThinking(block.thinking).title}`;
-        }
-        if (activity) break;
-      }
-      if (activity) break;
-    }
-    return { activity, tokens: computeTokenTotals(current) };
-  }, [currentTask, richMessages]);
 
   if (kind !== "working" && kind !== "needs-you") return null;
   const needs = kind === "needs-you";
@@ -58,7 +40,7 @@ export function StateStrip() {
         </span>
         <span className="min-w-0 flex-1 truncate font-mono text-[11.5px]">
           {needs
-            ? `${loginRequired ? loginTitle(loginRequired) : `The agent is waiting for your answer${pendingRequestCount > 1 ? ` · ${pendingRequestCount} requests` : ""}`}${queuedMessages.length ? ` · ${queuedMessages.length} queued ${queuedMessages.length === 1 ? "task waits" : "tasks wait"}` : ""}`
+            ? `${loginRequired ? loginTitle(loginRequired) : `The agent is waiting for your answer${pendingRequestCount > 1 ? ` · ${pendingRequestCount} requests` : ""}`}${queuedCount ? ` · ${queuedCount} queued ${queuedCount === 1 ? "task waits" : "tasks wait"}` : ""}`
             : activity || "Working on the task"}
         </span>
         {!needs && elapsed && <span className="shrink-0">{elapsed}</span>}
@@ -75,7 +57,9 @@ export function StateStrip() {
 // The agent's dialog as a card docked above the composer, instead of
 // buried at the end of the transcript. Number keys pick an option.
 export function DecisionCard({ onOpenTerminal }: { onOpenTerminal?: () => void }) {
-  const { terminalPrompt, sendTerminalInput, agentType } = useChat();
+  const terminalPrompt = useChatSelector((chat) => chat.terminalPrompt);
+  const agentType = useChatSelector((chat) => chat.agentType);
+  const {sendTerminalInput} = useChatActions();
   const [sentFor, setSentFor] = useState("");
   const options = useMemo(() => parseTerminalOptions(terminalPrompt), [terminalPrompt]);
   const { title, context } = useMemo(() => describeTerminalPrompt(terminalPrompt), [terminalPrompt]);

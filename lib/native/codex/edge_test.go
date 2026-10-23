@@ -566,8 +566,9 @@ func TestAnsweredQuestionThenTurnEnd(t *testing.T) {
 		"questions":[{"id":"q","header":"Q","question":"Go on?","isOther":true,"isSecret":false,"options":null}]}}`)
 	h.sync()
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
 	require.NoError(t, h.a.Respond(ctx, h.requestID(json.RawMessage("4")), native.Response{Answers: map[string][]string{"q": {"yes"}}}))
+	// Once the answer is written, the context's end changes nothing.
+	cancel()
 	h.expectSent("")
 	h.feedJSON(`{"method":"serverRequest/resolved","params":{"threadId":"` + testThread + `","requestId":4}}`)
 	h.completeTurn("turn-1", "completed", "")
@@ -940,4 +941,25 @@ func TestSubagentActivity(t *testing.T) {
 	assert.Equal(t, "Finished /root/list_files", result.Content[0].Text)
 	msg, _ = h.rec.Message("turn-1", "assistant")
 	assert.Len(t, msg.Content, 1, "the completion is not a tool call of its own")
+}
+
+// A turn/start app-server got but didn't answer may run all the same: the
+// error says so, whether the call timed out or was cancelled, so that the
+// message isn't sent again.
+func TestTurnStartWithoutAnswerIsUnconfirmed(t *testing.T) {
+	h := newHarness(t, "", nil)
+	h.boot()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.a.StartTurn(ctx, native.Input{Text: "go"}) }()
+	h.expectSent("turn/start")
+	cancel()
+	err := <-done
+	require.ErrorIs(t, err, native.ErrUnconfirmed)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	// A request that never went out is no such case.
+	h.proc.exit(nil)
+	h.eventually(h.a.loopEnded, "the loop to end")
+	assert.NotErrorIs(t, h.a.StartTurn(context.Background(), native.Input{Text: "go"}), native.ErrUnconfirmed)
 }

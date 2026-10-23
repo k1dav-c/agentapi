@@ -71,6 +71,15 @@ for any native agent.
 Steering appends to the reply, and Stop ends the turn as interrupted. The adapter lives in
 `lib/native/demo`.
 
+## What the chat keeps in the browser
+
+The chat caches each server's conversation in IndexedDB, so reopening it shows the transcript at
+once and asks the server only for what changed. A save writes only the messages that changed. Each
+server keeps one conversation; a server's cache goes after 14 days without use, and the least
+recently used go when more than 10 servers have one. Drafts, messages that failed to send and
+dismissed notices stay in localStorage. If the chat stops working, its error screen shows the error
+and offers to clear the server's cached conversation and reload.
+
 ## Interface screenshots
 
 These Chromium captures use the production chat UI built with `make build` and served by a

@@ -10,14 +10,14 @@ import (
 
 	"github.com/coder/quartz"
 
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
-var _ st.Conversation = (*Conversation)(nil)
+var _ conv.Conversation = (*Conversation)(nil)
 
 // Observer receives the structured state a Conversation produces beyond
-// what st.Emitter carries. Its methods are called with the conversation's
+// what conv.Emitter carries. Its methods are called with the conversation's
 // lock held and must not call back into the conversation. A RichMessage
 // is the observer's own copy, to keep and change.
 type Observer interface {
@@ -66,9 +66,9 @@ type Config struct {
 	ResumeRef string
 	// InitialMessages continues an earlier conversation (restored after
 	// AgentAPI restarted). The initial prompt is not sent again.
-	InitialMessages []st.ConversationMessage
+	InitialMessages []conv.Message
 	InitialPrompt   string
-	Emitter         st.Emitter
+	Emitter         conv.Emitter
 	Observer        Observer
 	Logger          *slog.Logger
 	Clock           quartz.Clock
@@ -86,6 +86,11 @@ type Config struct {
 	AutoContinue bool
 	// LimitStop is a turn a usage limit stopped before AgentAPI restarted.
 	LimitStop *LimitStop
+	// PrepareRichMessage, if set, changes every rich message an adapter
+	// reports before the conversation takes it, without the conversation's
+	// lock: work that can be slow (storing the images of a tool result)
+	// holds up nothing else. It gets the conversation's own copy.
+	PrepareRichMessage func(*transcript.RichMessage)
 }
 
 const (
@@ -97,7 +102,7 @@ const (
 	sendTimeout = 30 * time.Second
 )
 
-// Conversation is an st.Conversation backed by an Adapter.
+// Conversation is an conv.Conversation backed by an Adapter.
 type Conversation struct {
 	cfg Config
 
@@ -165,7 +170,7 @@ type Conversation struct {
 // NewConversation creates a conversation. Nothing runs until Start.
 func NewConversation(cfg Config) *Conversation {
 	if cfg.Emitter == nil {
-		cfg.Emitter = st.NopEmitter{}
+		cfg.Emitter = conv.NopEmitter{}
 	}
 	if cfg.Observer == nil {
 		cfg.Observer = nopObserver{}
@@ -214,7 +219,7 @@ func (c *Conversation) Settings() Settings {
 // Compact has the agent compact its context, while it isn't working on a
 // turn, and returns ErrTurnActive while it is (or already compacts). No
 // turn starts until it is done: StartTurn returns
-// st.ErrMessageValidationChanging, so a message waits in the queue.
+// conv.ErrMessageValidationChanging, so a message waits in the queue.
 func (c *Conversation) Compact(ctx context.Context) error {
 	c.mu.Lock()
 	compacter, ok := c.adapter.(Compacter)
@@ -397,39 +402,35 @@ func (c *Conversation) TurnActive() bool {
 	return c.turnActive
 }
 
-// Messages implements st.Conversation.
-func (c *Conversation) Messages() []st.ConversationMessage {
+// Messages implements conv.Conversation.
+func (c *Conversation) Messages() []conv.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.messages.snapshot()
 }
 
-// Status implements st.Conversation. A turn waiting only on the user's
+// Status implements conv.Conversation. A turn waiting only on the user's
 // answer to a request counts as stable, like a terminal dialog.
-func (c *Conversation) Status() st.ConversationStatus {
+func (c *Conversation) Status() conv.Status {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.statusLocked()
 }
 
-func (c *Conversation) statusLocked() st.ConversationStatus {
+func (c *Conversation) statusLocked() conv.Status {
 	if !c.started {
-		return st.ConversationStatusInitializing
+		return conv.StatusInitializing
 	}
 	if c.compacting {
-		return st.ConversationStatusChanging
+		return conv.StatusChanging
 	}
 	if !c.turnActive || c.requests.waitingOnUser() {
-		return st.ConversationStatusStable
+		return conv.StatusStable
 	}
-	return st.ConversationStatusChanging
+	return conv.StatusChanging
 }
 
-// SaveState implements st.Conversation. State persistence for native
-// sessions is handled outside the conversation.
-func (c *Conversation) SaveState() error { return nil }
-
-// Reset implements st.Conversation by clearing the messages. Use Restart to
+// Reset implements conv.Conversation by clearing the messages. Use Restart to
 // also replace the agent.
 func (c *Conversation) Reset() {
 	c.mu.Lock()
@@ -437,8 +438,8 @@ func (c *Conversation) Reset() {
 	c.mu.Unlock()
 }
 
-// Send implements st.Conversation by sending the parts' text as a turn.
-func (c *Conversation) Send(parts ...st.MessagePart) error {
+// Send implements conv.Conversation by sending the parts' text as a turn.
+func (c *Conversation) Send(parts ...conv.MessagePart) error {
 	var sb strings.Builder
 	for _, part := range parts {
 		sb.WriteString(part.String())
@@ -452,7 +453,7 @@ func (c *Conversation) Send(parts ...st.MessagePart) error {
 }
 
 // StartTurn sends a message as a new turn. It returns
-// st.ErrMessageValidationChanging while a turn is running, the agent
+// conv.ErrMessageValidationChanging while a turn is running, the agent
 // compacts its context or is still starting, so callers can queue the
 // message.
 func (c *Conversation) StartTurn(ctx context.Context, input Input) error {
@@ -479,10 +480,10 @@ type pendingTurn struct {
 func (c *Conversation) beginTurnLocked(input Input) (pendingTurn, error) {
 	text := strings.TrimSpace(input.Text)
 	if text == "" {
-		return pendingTurn{}, st.ErrMessageValidationEmpty
+		return pendingTurn{}, conv.ErrMessageValidationEmpty
 	}
 	if !c.started || c.turnActive || c.compacting || c.adapter == nil {
-		return pendingTurn{}, st.ErrMessageValidationChanging
+		return pendingTurn{}, conv.ErrMessageValidationChanging
 	}
 	c.turnActive = true
 	c.setLimitStopLocked(nil)
@@ -493,7 +494,7 @@ func (c *Conversation) beginTurnLocked(input Input) (pendingTurn, error) {
 		msg:     c.messages.appendUser(text),
 	}
 	c.cfg.Emitter.EmitMessages(c.messages.snapshot())
-	c.cfg.Emitter.EmitStatus(st.ConversationStatusChanging)
+	c.cfg.Emitter.EmitStatus(conv.StatusChanging)
 	return turn, nil
 }
 
@@ -513,7 +514,7 @@ func (c *Conversation) deliverTurn(ctx context.Context, turn pendingTurn) error 
 	}
 	c.mu.Unlock()
 	if errors.Is(err, ErrTurnActive) {
-		return st.ErrMessageValidationChanging
+		return conv.ErrMessageValidationChanging
 	}
 	return err
 }
@@ -531,7 +532,7 @@ func (c *Conversation) inputForAgentLocked(input Input) Input {
 func (c *Conversation) Steer(ctx context.Context, input Input) error {
 	text := strings.TrimSpace(input.Text)
 	if text == "" {
-		return st.ErrMessageValidationEmpty
+		return conv.ErrMessageValidationEmpty
 	}
 	c.mu.Lock()
 	adapter, gen := c.adapter, c.generation

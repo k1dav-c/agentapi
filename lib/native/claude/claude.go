@@ -19,10 +19,10 @@ import (
 
 	"github.com/coder/quartz"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/procutil"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -341,26 +341,27 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	return nil
 }
 
-// write sends one frame to the CLI.
-func (a *Adapter) write(v any) error {
-	return a.writer.Write(v)
+// write sends one frame to the CLI, unless ctx ends first (see
+// agentio.Writer.Write).
+func (a *Adapter) write(ctx context.Context, v any) error {
+	return a.writer.Write(ctx, v)
 }
 
 // sendControl writes a control request. onResponse, if set, gets a
 // successful answer in the read loop; the answer comes on the returned
 // call.
-func (a *Adapter) sendControl(subtype string, fields map[string]any, onResponse func(json.RawMessage)) (string, *agentio.Call[controlResult], error) {
+func (a *Adapter) sendControl(ctx context.Context, subtype string, fields map[string]any, onResponse func(json.RawMessage)) (string, *agentio.Call[controlResult], error) {
 	a.mu.Lock()
 	closing := a.closing
 	a.mu.Unlock()
 	if closing {
 		return "", nil, errors.New("claude is shutting down")
 	}
-	return a.issueControl(subtype, fields, onResponse)
+	return a.issueControl(ctx, subtype, fields, onResponse)
 }
 
 // issueControl is sendControl also while the adapter closes.
-func (a *Adapter) issueControl(subtype string, fields map[string]any, onResponse func(json.RawMessage)) (string, *agentio.Call[controlResult], error) {
+func (a *Adapter) issueControl(ctx context.Context, subtype string, fields map[string]any, onResponse func(json.RawMessage)) (string, *agentio.Call[controlResult], error) {
 	a.mu.Lock()
 	a.controlSeq++
 	id := fmt.Sprintf("agentapi_%d", a.controlSeq)
@@ -381,7 +382,7 @@ func (a *Adapter) issueControl(subtype string, fields map[string]any, onResponse
 	for k, v := range fields {
 		request[k] = v
 	}
-	if err := a.write(map[string]any{"type": "control_request", "request_id": id, "request": request}); err != nil {
+	if err := a.write(ctx, map[string]any{"type": "control_request", "request_id": id, "request": request}); err != nil {
 		a.calls.Drop(id)
 		return "", nil, err
 	}
@@ -389,16 +390,18 @@ func (a *Adapter) issueControl(subtype string, fields map[string]any, onResponse
 }
 
 // request sends a control request and waits for its answer. onResponse, if
-// set, gets a successful answer in the read loop first.
+// set, gets a successful answer in the read loop first. A request that was
+// sent and got no answer fails with native.ErrUnconfirmed: the CLI may
+// carry it out all the same.
 func (a *Adapter) request(ctx context.Context, subtype string, fields map[string]any, onResponse func(json.RawMessage)) (json.RawMessage, error) {
-	id, call, err := a.sendControl(subtype, fields, onResponse)
+	id, call, err := a.sendControl(ctx, subtype, fields, onResponse)
 	if err != nil {
 		return nil, err
 	}
 	res, err := call.Wait(ctx)
 	if err != nil {
 		a.calls.Drop(id)
-		return nil, err
+		return nil, native.Unconfirmed(err)
 	}
 	return res.response, res.err
 }
@@ -453,7 +456,7 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 	a.turn.interrupted = false
 	a.prompt = input.Text
 	a.mu.Unlock()
-	if err := a.write(msg); err != nil {
+	if err := a.write(ctx, msg); err != nil {
 		a.mu.Lock()
 		a.endTurnLocked()
 		a.prompt = ""
@@ -477,7 +480,9 @@ func (a *Adapter) requestTitle(prompt string) {
 			a.sink.SessionName(r.Title)
 		}
 	}
-	if _, _, err := a.sendControl("generate_session_title", map[string]any{"description": prompt, "persist": true}, onResponse); err != nil {
+	// Nobody waits for it: a write that waits for the CLI ends when Close
+	// closes its input.
+	if _, _, err := a.sendControl(context.Background(), "generate_session_title", map[string]any{"description": prompt, "persist": true}, onResponse); err != nil {
 		a.log.Debug("Failed to ask Claude Code for a session title", "error", err)
 	}
 }
@@ -495,7 +500,7 @@ func (a *Adapter) Steer(ctx context.Context, input native.Input) error {
 	if !busy {
 		return native.ErrNoActiveTurn
 	}
-	return a.write(msg)
+	return a.write(ctx, msg)
 }
 
 // Interrupt implements native.Adapter. The turn ends with the result the
@@ -548,7 +553,7 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 	}
 	p.answering = true
 	a.mu.Unlock()
-	err = a.write(map[string]any{
+	err = a.write(ctx, map[string]any{
 		"type": "control_response",
 		"response": map[string]any{
 			"subtype": "success", "request_id": requestID, "response": answer,
@@ -626,7 +631,7 @@ func (a *Adapter) interruptForClose(ended <-chan struct{}) {
 	// whose closing stdin makes it fail. Sent although Close set closing,
 	// which refuses other requests.
 	go func() {
-		if _, _, err := a.issueControl("interrupt", nil, a.interruptAccepted); err != nil {
+		if _, _, err := a.issueControl(context.Background(), "interrupt", nil, a.interruptAccepted); err != nil {
 			a.log.Debug("Failed to interrupt the turn before closing", "error", err)
 		}
 	}()
@@ -832,7 +837,7 @@ func (a *Adapter) handleControlRequest(f *frame) {
 // without blocking the read loop.
 func (a *Adapter) refuse(requestID, message string) {
 	go func() {
-		_ = a.write(map[string]any{"type": "control_response", "response": map[string]any{
+		_ = a.write(context.Background(), map[string]any{"type": "control_response", "response": map[string]any{
 			"subtype": "error", "request_id": requestID, "error": message,
 		}})
 	}()
@@ -891,7 +896,7 @@ func (a *Adapter) handleSystem(f *frame) {
 	case "task_notification":
 		a.sendRich(a.parser.taskNotification(f))
 	case "api_retry":
-		a.sink.Error("Claude Code is retrying a failed API request", st.ErrorLevelWarning)
+		a.sink.Error("Claude Code is retrying a failed API request", conv.ErrorLevelWarning)
 	}
 }
 
@@ -961,13 +966,13 @@ func (a *Adapter) handleResult(f *frame) {
 		// A result outside a turn ends nothing; an error in it is still
 		// worth showing.
 		if result.Error != "" && started {
-			a.sink.Error(result.Error, st.ErrorLevelError)
+			a.sink.Error(result.Error, conv.ErrorLevelError)
 		}
 		return
 	case replaced != nil && replaced.Error != "":
 		// With session state events a turn can have several results, and
 		// only the last one ends it: an earlier failure is shown now.
-		a.sink.Error(replaced.Error, st.ErrorLevelError)
+		a.sink.Error(replaced.Error, conv.ErrorLevelError)
 	}
 	if byResult {
 		a.endTurn()

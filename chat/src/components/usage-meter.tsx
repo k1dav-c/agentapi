@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {useChat} from "./chat-provider";
+import {useChatSelector} from "./chat-provider";
 import { Button } from "./ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import type { RateLimit } from "@/lib/chat-api";
@@ -77,7 +77,8 @@ function LimitRow({ limit, now }: { limit: RateLimit; now: number }) {
 // toolbar; its menu adds the account's rate limits (native agents that
 // report them).
 export function UsageMeter() {
-  const { features, agentUsage } = useChat();
+  const usageShown = useChatSelector((chat) => chat.features.usage);
+  const agentUsage = useChatSelector((chat) => chat.agentUsage);
   // Reset times count down while the menu is open.
   const [now, setNow] = useState(() => Date.now());
   const [open, setOpen] = useState(false);
@@ -90,7 +91,7 @@ export function UsageMeter() {
 
   const context = agentUsage?.context;
   const limits = agentUsage?.rate_limits ?? [];
-  if (!features.usage || (!context && limits.length === 0)) return null;
+  if (!usageShown || (!context && limits.length === 0)) return null;
 
   const fullest = fullestLimit(limits);
   const percent = context ? contextPercent(context) : fullest?.used_percent ?? 0;

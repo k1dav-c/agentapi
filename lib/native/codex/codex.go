@@ -315,7 +315,7 @@ func (a *Adapter) handshake(ctx context.Context) error {
 	if json.Unmarshal(result, &info) == nil && info.UserAgent != "" {
 		a.log.Debug("Connected to codex app-server", "userAgent", info.UserAgent)
 	}
-	if err := a.notify("initialized", nil); err != nil {
+	if err := a.notify(ctx, "initialized", nil); err != nil {
 		return err
 	}
 	if err := a.checkLogin(ctx); err != nil {
@@ -654,7 +654,9 @@ var (
 )
 
 // call sends a request and waits for its response, bounded by ctx. Once
-// the loop has ended, waiting calls fail with errExited.
+// the loop has ended, waiting calls fail with errExited. A request that
+// was sent and got no response fails with native.ErrUnconfirmed: app-server
+// may carry it out all the same.
 // onResult runs in the read loop before the caller sees the response, so
 // the loop's state is updated before later notifications.
 func (a *Adapter) call(ctx context.Context, method string, params any, onResult func(json.RawMessage, *rpcError)) (json.RawMessage, error) {
@@ -667,25 +669,26 @@ func (a *Adapter) call(ctx context.Context, method string, params any, onResult 
 	if err != nil {
 		return nil, err
 	}
-	if err := a.write(rpcRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params}); err != nil {
+	if err := a.write(ctx, rpcRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params}); err != nil {
 		a.calls.Drop(id)
 		return nil, err
 	}
 	res, err := c.Wait(ctx)
 	if err != nil {
 		a.calls.Drop(id)
-		return nil, err
+		return nil, native.Unconfirmed(err)
 	}
 	return res.unpack()
 }
 
-func (a *Adapter) notify(method string, params any) error {
-	return a.write(rpcRequest{JSONRPC: "2.0", Method: method, Params: params})
+func (a *Adapter) notify(ctx context.Context, method string, params any) error {
+	return a.write(ctx, rpcRequest{JSONRPC: "2.0", Method: method, Params: params})
 }
 
-// write sends one message on app-server's stdin.
-func (a *Adapter) write(v any) error {
-	return a.writer.Write(v)
+// write sends one message on app-server's stdin, unless ctx ends first
+// (see agentio.Writer.Write).
+func (a *Adapter) write(ctx context.Context, v any) error {
+	return a.writer.Write(ctx, v)
 }
 
 // writeAsync sends a message without blocking the read loop.

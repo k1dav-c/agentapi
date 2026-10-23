@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/acarl005/stripansi"
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 )
 
 type ScriptEntry struct {
@@ -73,7 +73,7 @@ func runEchoAgent(scriptPath string) {
 		}
 	}()
 
-	var messages []st.ConversationMessage
+	var messages []conv.Message
 	redrawTerminal(messages, false)
 
 	scriptIndex := 0
@@ -95,8 +95,8 @@ func runEchoAgent(scriptPath string) {
 				<-spinnerDone
 			}
 
-			messages = append(messages, st.ConversationMessage{
-				Role:    st.ConversationRoleAgent,
+			messages = append(messages, conv.Message{
+				Role:    conv.RoleAgent,
 				Message: entry.ResponseMessage,
 				Time:    time.Now(),
 			})
@@ -121,8 +121,8 @@ func runEchoAgent(scriptPath string) {
 			os.Exit(1)
 		}
 
-		messages = append(messages, st.ConversationMessage{
-			Role:    st.ConversationRoleUser,
+		messages = append(messages, conv.Message{
+			Role:    conv.RoleUser,
 			Message: entry.ExpectMessage,
 			Time:    time.Now(),
 		})
@@ -138,8 +138,8 @@ func runEchoAgent(scriptPath string) {
 			<-spinnerDone
 		}
 
-		messages = append(messages, st.ConversationMessage{
-			Role:    st.ConversationRoleAgent,
+		messages = append(messages, conv.Message{
+			Role:    conv.RoleAgent,
 			Message: entry.ResponseMessage,
 			Time:    time.Now(),
 		})
@@ -151,12 +151,12 @@ func runEchoAgent(scriptPath string) {
 	<-make(chan struct{})
 }
 
-func redrawTerminal(messages []st.ConversationMessage, thinking bool) {
+func redrawTerminal(messages []conv.Message, thinking bool) {
 	fmt.Print("\033[2J\033[H") // Clear screen and move cursor to home
 
 	// Show conversation history
 	for _, msg := range messages {
-		if msg.Role == st.ConversationRoleUser {
+		if msg.Role == conv.RoleUser {
 			fmt.Printf("> %s\n", msg.Message)
 		} else {
 			fmt.Printf("%s\n", msg.Message)

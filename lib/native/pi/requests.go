@@ -9,8 +9,8 @@ import (
 
 	"github.com/coder/quartz"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // Question IDs of the requests made from extension dialogs.
@@ -132,7 +132,7 @@ func (a *Adapter) handleUIRequest(req uiRequest) {
 		a.openDialog(req)
 	case "notify":
 		if req.NotifyType == "error" {
-			a.loop.sink.Error(req.Message, st.ErrorLevelError)
+			a.loop.sink.Error(req.Message, conv.ErrorLevelError)
 			return
 		}
 		a.log.Info("Pi extension notification", "type", req.NotifyType, "message", req.Message)
@@ -157,8 +157,6 @@ func (a *Adapter) openDialog(req uiRequest) {
 		a.beginTurn()
 		a.loop.turnDialogs = append(a.loop.turnDialogs, req.ID)
 	}
-	// The prompt that ran an extension command is under way.
-	a.acceptPrompt()
 
 	d := &dialog{id: req.ID, method: req.Method, options: req.Options}
 	r := native.Request{ID: req.ID, Title: req.Title}
@@ -215,6 +213,9 @@ func (a *Adapter) openDialog(req uiRequest) {
 	a.dialogs[req.ID] = d
 	a.mu.Unlock()
 	a.loop.sink.RequestOpened(r)
+	// The prompt that ran an extension command is under way. Its
+	// StartTurn returns once the dialog can be answered.
+	a.acceptPrompt()
 }
 
 // hasPendingTurn reports whether a prompt that starts a turn awaits its

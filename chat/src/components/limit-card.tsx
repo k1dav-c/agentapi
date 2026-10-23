@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Gauge } from "lucide-react";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import { CardStatus, DecisionCardShell, PrimaryButton, SecondaryButton } from "./decision-card";
 import { getErrorMessage } from "@/lib/error-utils";
 import { formatMessageTime } from "@/lib/format-time";
@@ -12,7 +12,9 @@ import { formatResetIn } from "@/lib/usage";
 // queued tasks wait until the limit resets. The card says when, and offers
 // to continue the task then (or now), or to let the queue go at once.
 export function LimitCard() {
-  const { limitStop, queuedMessages, continueAfterLimit, cancelContinue, dismissLimitStop } = useChat();
+  const limitStop = useChatSelector((chat) => chat.limitStop);
+  const queuedMessages = useChatSelector((chat) => chat.queuedMessages);
+  const {continueAfterLimit, cancelContinue, dismissLimitStop} = useChatActions();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   // The countdown moves on while the card shows.

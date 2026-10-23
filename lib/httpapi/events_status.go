@@ -4,19 +4,19 @@ import (
 	"reflect"
 
 	"github.com/coder/agentapi/internal/version"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
-func (e *EventEmitter) EmitStatus(newStatus st.ConversationStatus) {
+func (e *EventEmitter) EmitStatus(newStatus conv.Status) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	newAgentStatus := convertStatus(newStatus)
 	newLifecycle := LifecycleRunning
-	if newStatus == st.ConversationStatusInitializing {
+	if newStatus == conv.StatusInitializing {
 		newLifecycle = LifecycleStarting
-	} else if newStatus == st.ConversationStatusStable {
+	} else if newStatus == conv.StatusStable {
 		newLifecycle = LifecycleReady
 	}
 	if e.status == newAgentStatus && e.lifecycle == newLifecycle {
@@ -26,11 +26,11 @@ func (e *EventEmitter) EmitStatus(newStatus st.ConversationStatus) {
 	previousStatus := e.status
 	e.handoffRevision++
 	if newLifecycle == LifecycleRunning && e.lifecycle == LifecycleReady {
-		e.runID++
+		e.turn++
 	}
 	e.status = newAgentStatus
 	e.lifecycle = newLifecycle
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 	if e.onStatusChange != nil && previousStatus != newAgentStatus {
 		e.onStatusChange(previousStatus, newAgentStatus)
 	}
@@ -44,7 +44,7 @@ func (e *EventEmitter) SetLifecycle(lifecycle LifecycleState) {
 	}
 	e.lifecycle = lifecycle
 	e.handoffRevision++
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
 // SetSessionName records the name the agent gave its session.
@@ -58,7 +58,7 @@ func (e *EventEmitter) SetSessionName(name string) {
 	if e.persister != nil {
 		e.persister.SetSessionName(name)
 	}
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
 func (e *EventEmitter) StatusSnapshot() StatusChangeBody {
@@ -75,14 +75,26 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 		}
 	}
 	return StatusChangeBody{
-		Status: e.status, Lifecycle: e.lifecycle, SessionID: e.sessionID,
-		RunID: e.runID, AgentType: e.agentType, Transport: e.transport, Version: version.Version,
+		Status: e.status, Lifecycle: e.lifecycle, ServerID: e.serverID, Turn: e.turn,
+		AgentSessionID: e.agentSessionID, AgentType: e.agentType, Transport: e.transport, Version: version.Version,
 		TerminalPrompt: e.terminalPrompt, TerminalColumns: e.terminalColumns,
 		SessionName: e.sessionName, PendingRequests: pending, Capabilities: e.capabilities,
 		LoginRequired: e.loginRequired, Settings: e.settings, Usage: e.usage,
 		LimitStop: e.limitStop,
 		Terminal:  e.terminal,
 	}
+}
+
+// SetAgentSessionID records the agent's own session, which a restart or a
+// resume changes.
+func (e *EventEmitter) SetAgentSessionID(id string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.agentSessionID == id {
+		return
+	}
+	e.agentSessionID = id
+	e.notifyStatusLocked()
 }
 
 // SetCapabilities records the optional operations the agent supports.
@@ -93,7 +105,7 @@ func (e *EventEmitter) SetCapabilities(caps native.Capabilities) {
 		return
 	}
 	e.capabilities = &caps
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
 // SetSettings records the agent's settings.
@@ -104,7 +116,7 @@ func (e *EventEmitter) SetSettings(settings native.Settings) {
 		return
 	}
 	e.settings = &settings
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
 // SetUsage records the agent's usage of its limits.
@@ -115,7 +127,7 @@ func (e *EventEmitter) SetUsage(usage native.AgentUsage) {
 		return
 	}
 	e.usage = &usage
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
 // SetLimitStop records the turn a usage limit stopped (nil: none).
@@ -126,7 +138,7 @@ func (e *EventEmitter) SetLimitStop(ls *native.LimitStop) {
 		return
 	}
 	e.limitStop = ls
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
 // SetLoginRequired records that the agent waits for a login (nil: it no
@@ -143,17 +155,19 @@ func (e *EventEmitter) SetLoginRequired(login *native.LoginRequired) {
 	}
 	e.loginRequired = login
 	e.handoffRevision++
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
-func (e *EventEmitter) EmitError(message string, level st.ErrorLevel) {
+func (e *EventEmitter) EmitError(message string, level conv.ErrorLevel) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	e.errorCount++
 	errorBody := ErrorBody{
 		Message: message,
 		Level:   level,
 		Time:    e.clock.Now(),
+		number:  e.errorCount,
 	}
 
 	// Store the error so new subscribers can receive recent errors.
@@ -163,4 +177,5 @@ func (e *EventEmitter) EmitError(message string, level st.ErrorLevel) {
 	}
 
 	e.notifyChannels(EventTypeError, errorBody)
+	e.tasksChangedLocked(e.tasks.agentError(errorBody))
 }

@@ -6,7 +6,7 @@ AgentAPI serves a chat UI at `/chat`. It is embedded in the `agentapi` binary, w
 transport, on a desktop and on a phone, and talks to the server only through the
 [HTTP API](../README.md#http-api-reference). This guide goes through every part of it.
 
-The screenshots and the animations show AgentAPI v0.27.0 with the built-in `native-demo` agent
+The screenshots and the animations show AgentAPI v0.28.0 with the built-in `native-demo` agent
 working on a small sample site; the demo's replies, tool results, models and usage are simulated,
 and TTY mode shows bash run as a PTY agent. The animations draw a blue dot where the pointer is and
 where it clicks. [scripts/capture-docs.mjs](../scripts/capture-docs.mjs) takes all of them again
@@ -50,13 +50,17 @@ transport](../README.md#native-transport), which Claude Code, Codex and Pi use b
 
 Every message you send starts a task. A task shows your prompt in a tinted block labelled "You",
 then what the agent did, in order: its reply in Markdown, a row for each tool call, and its
-thinking. The task's header shows its number and state (Queued, Working, Waiting for you, Done or
-Failed), a Stop button while it works, and its ⋯ menu.
+thinking. The task's header shows its number and state (Queued, Working, Waiting for you, Done,
+Failed or Limit reached), a Stop button while it works, and its ⋯ menu. The state is the server's
+[task](../README.md#tasks): Failed when the agent reported an error or exited (hover over it for the
+first error), Limit reached when a usage limit stopped it (hover for the agent's message). The tool
+calls and thinking go with the task the server says they began in. A message you steer into a
+running task shows that task's state, and what the agent does after it shows in that task.
 
 On a wide screen the task's start time and duration hang in the left margin; on a narrower one they
 follow its number in the header. *native* For Claude Code, Codex and Pi they come with what the task
-cost: the tokens of the model calls made from its message until the next task's, its subagents'
-included, at the model providers' list prices. It is the API-equivalent cost, which a subscription
+cost: the tokens of the model calls made while it ran, its subagents' included, at the model
+providers' list prices; a call between tasks (a compaction, say) counts in none. It is the API-equivalent cost, which a subscription
 doesn't charge; hover over it for the calls and tokens. The cost is read again when a turn ends, and
 every 15 seconds while one runs. See [Session costs](../README.md#session-costs) for how it is
 counted and how to set prices.
@@ -104,7 +108,8 @@ Download buttons.
 
 The search button (⌘F / Ctrl+F) opens a search bar above the transcript. It counts the matching
 tasks and matches, highlights them and steps through them with the arrows. The menu next to it
-narrows the tasks to those that are running, queued, failed, completed, or had a tool error. While
+narrows the tasks to those that are running, queued, failed, stopped by a usage limit, completed, or
+had a tool error. While
 you search, the matching messages show as plain text, every step of a long task shows, and tool
 calls with a match open.
 
@@ -131,8 +136,8 @@ chat marked as not sent, with buttons to retry or dismiss it, also after a reloa
 ![A long turn with two queued tasks and the send menu open: Queue, Steer, and Interrupt & send](screenshots/queue-steer.png)
 
 Messages you send while the agent works wait in a queue, shown in the composer under the message
-box, and run one after the other when the turn ends; the queue is kept on the server, so every open
-chat sees it. Each queued task can be edited, moved up or down, removed, or *native* steered into
+box, and run one after the other when the turn ends; the queue is kept on the server, and every
+open chat follows its changes as they happen. Each queued task can be edited, moved up or down, removed, or *native* steered into
 the turn right away (the ↳ button). *native* The send button's menu offers three ways to send:
 
 - **Queue** (Enter): send it once this turn ends.
@@ -218,7 +223,7 @@ above the composer says so, with **Compact**. Closed, it stays away until the ne
 
 ### A usage limit
 
-![A turn stopped on the 5-hour limit: a card with the reset time and Continue at reset, Continue now and Send queued tasks, and a task held in the queue](screenshots/limit-card.png)
+![A task stopped on the 5-hour limit, marked Limit reached: a card with the reset time and Continue at reset, Continue now and Send queued tasks, and a task held in the queue](screenshots/limit-card.png)
 
 *native* When the account reaches a usage limit, the agent stops its turn, and a card above the
 composer says when the limit resets. The queued tasks wait until then, marked *held until the usage
@@ -330,14 +335,14 @@ textconv or fsmonitor of the repository or the user runs.
 
 ## Session Explorer
 
-The Explorer (⌘K / Ctrl+K, or the folder button) has five tabs. The Index, Files and Links lists
+The Explorer (⌘K / Ctrl+K, or the folder button) has six tabs. The Index, Files and Links lists
 have a filter box.
 
 ### Index
 
-![The Explorer's Index tab listing two tasks](screenshots/explorer-index.png)
+![The Explorer's Index tab listing two tasks, each marked Done](screenshots/explorer-index.png)
 
-The tasks of the session, newest first; click one to jump to it.
+The tasks of the session, newest first, each with its state; click one to jump to it.
 
 ### Files and Links
 
@@ -380,6 +385,21 @@ asks for a second click. Codex and Pi, when AgentAPI starts their CLI directly, 
 latest release first. **Download conversation JSONL** saves every message, tool call and result of
 the session, one event per line, followed by those of the subagents the agent ran; the session
 details menu has it too.
+### Webhook
+
+![The Explorer's Webhook tab: the receiver URL, event groups, signing secret, instance ID, heartbeat and public URL](screenshots/explorer-webhook.png)
+
+Sets up the webhook that pushes what happens to a receiver, such as a dashboard that watches many
+agents, also when AgentAPI started without one: the receiver's URL; the kinds of events to send
+(**Tasks**, **Needs you** for approvals, questions, plans, terminal dialogs, logins and usage limits,
+**Heartbeats**, **Run status**, **Agent errors**, **Messages**, **Tool calls**); a signing secret,
+which can be replaced or removed but not read back; the instance ID and public URL every event
+carries; and the heartbeat interval. **Delivery and payload** has the timeout, the attempts and a
+payload template. **Save** applies the settings at once, until AgentAPI restarts (with `--state-db` also after a
+restart, unless AgentAPI starts with other webhook flags); **Send test event**
+sends a `webhook.test` event to the saved URL and says how the receiver answered; **Turn off** clears
+the URL. Events set with `--webhook-events` that no kind covers whole, such as `task.completed`
+alone, are listed and kept. See [Webhooks](../README.md#webhooks) for the events and their format.
 
 ## Lineage
 
@@ -422,10 +442,11 @@ one shows above the screen, as in the shell terminal. **Back to chat** returns.
 
 ## Session details and alerts
 
-![The session details menu: status, agent, session, version, activity, queue and tokens](screenshots/session-details.png)
+![The session details menu: status, agent, session, session ID with a copy button, version, activity, queue and tokens](screenshots/session-details.png)
 
 Clicking the status in the header opens the session details: the status, agent, session name,
-AgentAPI version, what the agent is doing, the queue and the tokens in and out. Its menu downloads
+*native* the agent's session ID (its first characters, with a copy button), AgentAPI version, what
+the agent is doing, the queue and the tokens in and out. Its menu downloads
 the conversation as JSONL (as the Explorer's Session tab does), turns on browser notifications, and
 shows the keyboard shortcuts. (How full the context is and the usage limits are in the composer's
 toolbar; see [Context and usage limits](#context-and-usage-limits).)

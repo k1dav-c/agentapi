@@ -1,18 +1,15 @@
 "use client";
 
-import React, {useCallback, useEffect, useMemo, useRef, useState} from "react";
+import React, {useCallback, useEffect, useMemo, useState} from "react";
 import {Search} from "lucide-react";
 import {createPortal} from "react-dom";
 import {Button} from "./ui/button";
-import {AgentType} from "@/lib/agents";
-import type {DraftMessage, Message, RichMessage} from "@/lib/conversation";
-import type {ServerStatus} from "@/lib/agent-status";
 import {formatDateLabel} from "@/lib/format-time";
-import {costDetails, formatUSD, taskCosts} from "@/lib/cost";
-import {filterTasks, timelineSignature} from "@/lib/task-filter";
-import {type Timeline, type ToolCall, buildTimeline, collectToolCalls, shareTimeline, shareToolCalls} from "@/lib/task-timeline";
+import {costDetails, formatUSD, taskCosts, taskSpan, type TaskSpan} from "@/lib/cost";
+import {filterTasks} from "@/lib/task-filter";
+import {taskStatusDetail} from "@/lib/server-tasks";
 import {HEADER_ACTIONS_ID} from "@/app/header";
-import {useChat} from "./chat-provider";
+import {useChatSelector} from "./chat-provider";
 import {TaskGroup} from "./message-list/task-group";
 import {EmptyState, StartupScreen} from "./message-list/empty-state";
 import {JumpButtons} from "./message-list/jump-buttons";
@@ -28,10 +25,6 @@ import {useTranscriptScroll} from "./message-list/use-transcript-scroll";
 const VISIBLE_TASKS_DEFAULT = 5;
 
 interface MessageListProps {
-  messages: (Message | DraftMessage)[];
-  richMessages: RichMessage[];
-  serverStatus: ServerStatus;
-  agentType: AgentType;
   onRetryMessage: (clientId: string) => Promise<boolean>;
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
@@ -42,10 +35,6 @@ interface MessageListProps {
 }
 
 export default function MessageList({
-  messages,
-  richMessages,
-  serverStatus,
-  agentType,
   onRetryMessage,
   onEditMessage,
   onDismissMessage,
@@ -57,36 +46,38 @@ export default function MessageList({
   const [showAllTasks, setShowAllTasks] = useState(false);
   const search = useTaskSearch();
   const {taskQuery, taskFilter, filtersActive, currentSearchResult, setCurrentSearchResult, searchOpen} = search;
-  const {waitingFor, sessionCost} = useChat();
+  const messages = useChatSelector((chat) => chat.messages);
+  // Built as messages stream (useTranscript): unchanged tasks keep their
+  // objects, so their memoized components don't render again.
+  const timeline = useChatSelector((chat) => chat.timeline);
+  const serverStatus = useChatSelector((chat) => chat.serverStatus);
+  const agentType = useChatSelector((chat) => chat.agentType);
+  const waitingFor = useChatSelector((chat) => chat.waitingFor);
+  const sessionCost = useChatSelector((chat) => chat.sessionCost);
+  // The server's tasks, for each task's status (none from servers that
+  // don't derive them).
+  const taskByMessage = useChatSelector((chat) => chat.taskByMessage);
   // The page's actions render into the header's slot (one top bar); the
   // embed page has no header, so they get their own row there.
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
   useEffect(() => setHeaderSlot(document.getElementById(HEADER_ACTIONS_ID)), []);
-  // Rebuilt as messages stream; unchanged tasks and tool calls keep their
-  // objects (shareTimeline), so their memoized components don't render
-  // again.
-  const sharedCalls = useRef<ToolCall[]>([]);
-  const toolCalls = useMemo(
-    () => (sharedCalls.current = shareToolCalls(sharedCalls.current, collectToolCalls(richMessages))),
-    [richMessages],
-  );
-  const sharedTimeline = useRef<Timeline | null>(null);
-  const timeline = useMemo(
-    () => (sharedTimeline.current = shareTimeline(sharedTimeline.current, buildTimeline(messages, richMessages, toolCalls))),
-    [messages, richMessages, toolCalls],
-  );
   // What each task spent, as text, so a task whose cost didn't change
-  // doesn't render again. A task not sent yet has none.
+  // doesn't render again. A task not sent yet has none, nor one steered
+  // into another task. Worked out again when the cost or the tasks' spans
+  // change (taskSpan, as JSON), not as their replies stream: it goes
+  // through every model call.
+  const spans = JSON.stringify(
+    timeline.tasks.map((task) => taskSpan(task.prompt, task.prompt.id === undefined ? undefined : taskByMessage.get(task.prompt.id))),
+  );
   const costs = useMemo(() => {
     if (!sessionCost) return [];
-    const starts = timeline.tasks.map((task) => (task.prompt.id === undefined ? undefined : task.prompt.time));
-    return taskCosts(starts, sessionCost.calls).map((cost) =>
+    return taskCosts(JSON.parse(spans) as TaskSpan[], sessionCost.calls).map((cost) =>
       cost && {label: formatUSD(cost.usd), details: costDetails(cost, cost.unpriced)},
     );
-  }, [sessionCost, timeline.tasks]);
+  }, [sessionCost, spans]);
   const filteredTasks = useMemo(
-    () => filterTasks(timeline.tasks, serverStatus, taskFilter, taskQuery),
-    [serverStatus, taskFilter, taskQuery, timeline.tasks],
+    () => filterTasks(timeline.tasks, serverStatus, taskFilter, taskQuery, taskByMessage),
+    [serverStatus, taskByMessage, taskFilter, taskQuery, timeline.tasks],
   );
   const totalMatchCount = filteredTasks.reduce((total, task) => total + task.matchCount, 0);
   const hiddenTaskCount =
@@ -95,11 +86,10 @@ export default function MessageList({
       : 0;
   const visibleTasks = hiddenTaskCount > 0 ? filteredTasks.slice(hiddenTaskCount) : filteredTasks;
   const renderedTaskKeys = useProgressiveTasks(visibleTasks.slice(0, -1).map(({task}) => task.key), filtersActive);
-  const signature = useMemo(() => timelineSignature(timeline), [timeline]);
   const isEmpty = timeline.tasks.length === 0;
   const scroll = useTranscriptScroll(scrollArea, {
     messages,
-    signature,
+    content: timeline,
     serverStatus,
     layout: `${isEmpty}:${searchOpen}:${filtersActive}`,
   });
@@ -178,7 +168,7 @@ export default function MessageList({
                 No tasks match the current search and filter.
               </p>
             )}
-            {visibleTasks.map(({task, index, status}, visibleIndex) => {
+            {visibleTasks.map(({task, index, status, serverTask}, visibleIndex) => {
               const searchResultIndex = filteredTasks.findIndex(
                 (entry) => entry.task.key === task.key,
               );
@@ -205,6 +195,7 @@ export default function MessageList({
                 cost={costs[index]?.label}
                 costDetails={costs[index]?.details}
                 status={status}
+                statusDetail={taskStatusDetail(serverTask)}
                 onRetryMessage={onRetryMessage}
                 onEditMessage={onEditMessage}
                 onDismissMessage={onDismissMessage}

@@ -61,7 +61,7 @@ func (e *EventEmitter) updateTerminalPromptLocked(prompt string) {
 	// answer a dialog that is no longer showing.
 	if e.terminalPrompt != "" {
 		e.terminalPrompt = ""
-		e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+		e.notifyStatusLocked()
 	}
 	if prompt == "" {
 		return
@@ -76,6 +76,6 @@ func (e *EventEmitter) updateTerminalPromptLocked(prompt string) {
 		e.pendingPrompt = ""
 		e.promptTimer = nil
 		e.terminalPrompt = prompt
-		e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+		e.notifyStatusLocked()
 	}, "EventEmitter", "terminalPrompt")
 }

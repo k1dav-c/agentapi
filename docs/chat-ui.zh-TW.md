@@ -6,7 +6,7 @@ AgentAPI 在 `/chat` 提供聊天介面。它內建在 `agentapi` 執行檔裡�
 桌面和手機都可以，而且只透過 [HTTP API](../README.zh-TW.md#http-api-參考) 和伺服器溝通。
 本導覽會逐一介紹它的每個部分。
 
-截圖和動畫是 AgentAPI v0.27.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
+截圖和動畫是 AgentAPI v0.28.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
 demo 的回覆、工具結果、模型和用量都是模擬的，TTY mode 則是以 PTY agent 執行的 bash。動畫會
 在滑鼠指標所在及點擊的位置畫上藍點。[scripts/capture-docs.mjs](../scripts/capture-docs.mjs)
 可以重新擷取所有截圖和動畫（見[截圖說明](screenshots/README.md)）。標示 *native* 的部分需要
@@ -46,12 +46,15 @@ demo 的回覆、工具結果、模型和用量都是模擬的，TTY mode 則是
 
 你送出的每則訊息都會開始一個任務。任務會先在標示「You」的色塊中顯示你的提示詞，接著依序呈現
 agent 做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列，以及它的思考內容。任務的標頭會
-顯示它的編號和狀態（Queued、Working、Waiting for you、Done 或 Failed）、工作中時的 Stop
-按鈕，以及它的 ⋯ 選單。
+顯示它的編號和狀態（Queued、Working、Waiting for you、Done、Failed 或 Limit reached）、工作中時
+的 Stop 按鈕，以及它的 ⋯ 選單。狀態來自伺服器的[任務](../README.zh-TW.md#任務)：agent 回報錯誤或
+結束時是 Failed（滑鼠移上去可以看到第一個錯誤），用量限制讓它停下時是 Limit reached（滑鼠移上去
+可以看到 agent 的訊息）。工具呼叫和思考內容會歸到伺服器所說的、它們開始時所屬的任務。你 steer 進
+執行中任務的訊息會顯示那個任務的狀態，agent 在那之後做的事也顯示在那個任務裡。
 
 寬螢幕上，任務的開始時間和耗時顯示在左側空白處；較窄的螢幕上則接在標頭的任務編號後面。
-*native* 對 Claude Code、Codex 和 Pi，還會一併顯示任務的花費：從它的訊息到下一個任務之間的
-模型呼叫所用的 tokens（含 sub agent），以模型供應商的牌價計算。這是 API 等價金額，訂閱方案
+*native* 對 Claude Code、Codex 和 Pi，還會一併顯示任務的花費：任務執行期間的模型呼叫所用的
+tokens（含 sub agent），以模型供應商的牌價計算；任務之間的呼叫（例如壓縮）不算在任何任務裡。這是 API 等價金額，訂閱方案
 不會收取；滑鼠移上去可以看到呼叫次數和 tokens。回合結束時會重新讀取，回合執行中則每 15 秒
 讀取一次。計算方式和如何設定價格見[工作階段花費](../README.zh-TW.md#工作階段花費)。
 
@@ -94,8 +97,8 @@ agent 做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列�
 ![在對話紀錄中搜尋「notes」：符合的結果會醒目標示並計數](screenshots/search.png)
 
 搜尋按鈕（⌘F / Ctrl+F）會在對話紀錄上方開啟搜尋列。它會計算符合的任務數和符合處數，
-醒目標示它們，並可用箭頭逐一切換。旁邊的選單可以只列出執行中、排隊中、失敗、已完成，
-或有工具錯誤的任務。搜尋期間，符合的訊息會以純文字顯示，較長任務的每個步驟都會顯示出來，
+醒目標示它們，並可用箭頭逐一切換。旁邊的選單可以只列出執行中、排隊中、失敗、因用量限制
+停止、已完成，或有工具錯誤的任務。搜尋期間，符合的訊息會以純文字顯示，較長任務的每個步驟都會顯示出來，
 含有符合內容的工具呼叫也會展開。
 
 ## 送出任務
@@ -120,7 +123,7 @@ agent 收到的是每個附件的路徑。*native* 接受圖片的 agent（Claud
 ![較長的回合中有兩個排隊中的任務，送出選單已開啟：Queue、Steer 和 Interrupt & send](screenshots/queue-steer.png)
 
 agent 工作中時送出的訊息會在佇列中等待（顯示在輸入框裡、訊息欄下方），回合結束後依序執行；
-佇列保存在伺服器上，所以每個開著的聊天畫面都看得到。每個排隊中的任務都可以編輯、上下移動、
+佇列保存在伺服器上，每個開著的聊天畫面都會即時看到它的變化。每個排隊中的任務都可以編輯、上下移動、
 移除，或 *native* 立即 steer 進正在進行的回合（↳ 按鈕）。*native* 送出按鈕的選單提供三種送出方式：
 
 - **Queue**（Enter）：等這個回合結束再送出。
@@ -204,7 +207,7 @@ context 滿了時，agent 會壓縮它；`/compact` 則會立刻壓縮。
 
 ### 達到用量限制
 
-![因 5 小時限制而停下的回合：卡片顯示重置時間，以及 Continue at reset、Continue now 和 Send queued tasks，佇列中有一個被暫停的任務](screenshots/limit-card.png)
+![因 5 小時限制而停下、標示為 Limit reached 的任務：卡片顯示重置時間，以及 Continue at reset、Continue now 和 Send queued tasks，佇列中有一個被暫停的任務](screenshots/limit-card.png)
 
 *native* 帳號達到用量限制時，agent 會停下它的回合，輸入框上方的卡片會說明限制何時重置。排隊
 中的任務會等到那時，並標示 *held until the usage limit resets*，而不是一個接一個失敗。
@@ -309,13 +312,13 @@ diff driver、textconv 或 fsmonitor。
 
 ## 工作階段瀏覽器
 
-Explorer（⌘K / Ctrl+K，或資料夾按鈕）有五個分頁。Index、Files 和 Links 清單有篩選框。
+Explorer（⌘K / Ctrl+K，或資料夾按鈕）有六個分頁。Index、Files 和 Links 清單有篩選框。
 
 ### Index 分頁
 
-![Explorer 的 Index 分頁列出兩個任務](screenshots/explorer-index.png)
+![Explorer 的 Index 分頁列出兩個任務，都標示為 Done](screenshots/explorer-index.png)
 
-工作階段中的任務，最新的在最上面；點一下就會跳到該任務。
+工作階段中的任務，最新的在最上面，各自顯示狀態；點一下就會跳到該任務。
 
 ### Files 與 Links 分頁
 
@@ -355,6 +358,20 @@ agent 在那個工作階段上重新啟動，並顯示它的對話；**Start a c
 AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的發行版。
 **Download conversation JSONL** 會儲存這個工作階段的每則訊息、工具呼叫和結果，每行一個事件，
 後面接著 agent 執行過的 sub agent 的事件；工作階段詳細資訊的選單裡也有。
+### Webhook 分頁
+
+![Explorer 的 Webhook 分頁：接收端網址、事件群組、簽章 secret、instance ID、心跳和公開網址](screenshots/explorer-webhook.png)
+
+設定把發生的事主動推送給接收端（例如監看多個 agent 的中控平台）的 webhook，AgentAPI 啟動時
+沒有設定也可以在這裡設定：接收端網址；要送的事件種類（**Tasks**、涵蓋核准、提問、計畫、終端機
+對話框、登入和用量限制的 **Needs you**、**Heartbeats**、**Run status**、**Agent errors**、
+**Messages**、**Tool calls**）；簽章 secret，可以替換或移除，但無法讀回；每個事件都會帶的
+instance ID 和公開網址；以及心跳間隔。**Delivery and payload** 底下有逾時、嘗試次數和 payload
+範本。**Save** 會立即套用設定，維持到 AgentAPI 重新啟動為止（使用 `--state-db` 時重新啟動後也仍有效，
+除非 AgentAPI 以不同的 webhook 參數啟動）；**Send test event** 會對已儲存的
+網址送出 `webhook.test` 事件，並顯示接收端的回應；**Turn off** 會清除網址。以 `--webhook-events`
+設定、但沒有完整涵蓋任一種類的事件（例如只有 `task.completed`）會列出並保留。事件與格式見
+[Webhook](../README.zh-TW.md#webhook)。
 
 ## Lineage
 
@@ -397,10 +414,10 @@ Ctrl+C，shell 的 Ctrl+R、Ctrl+A、Ctrl+E、Ctrl+U 和 Ctrl+W，Home、End、P
 
 ## 工作階段詳細資訊與提醒
 
-![工作階段詳細資訊選單：狀態、agent、工作階段、版本、活動、佇列和 token](screenshots/session-details.png)
+![工作階段詳細資訊選單：狀態、agent、工作階段、附複製按鈕的工作階段 ID、版本、活動、佇列和 token](screenshots/session-details.png)
 
-點選標頭中的狀態會開啟工作階段詳細資訊：狀態、agent、工作階段名稱、AgentAPI 版本、agent
-正在做什麼、佇列，以及輸入和輸出的 token 數。它的選單可以把對話下載成 JSONL（和 Explorer 的
+點選標頭中的狀態會開啟工作階段詳細資訊：狀態、agent、工作階段名稱、*native* agent 的工作階段
+ID（前幾個字元，附複製按鈕）、AgentAPI 版本、agent 正在做什麼、佇列，以及輸入和輸出的 token 數。它的選單可以把對話下載成 JSONL（和 Explorer 的
 Session 分頁一樣）、開啟瀏覽器通知，以及顯示鍵盤快捷鍵。（context 用了多少和用量限制在輸入框
 的工具列上，見 [Context 與用量限制](#context-與用量限制)。）
 

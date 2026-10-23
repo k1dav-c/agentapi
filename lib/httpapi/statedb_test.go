@@ -56,7 +56,8 @@ func persistentServerWith(t *testing.T, path, cwd string, configure func(*native
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
 		Transport:      httpapi.TransportNative,
-		Native:         httpapi.NativeConfig{Factory: factory.New, StateDB: db},
+		Native:         httpapi.NativeConfig{Factory: factory.New},
+		StateDB:        db,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
@@ -117,12 +118,16 @@ func TestStateDB_RestoresConversation(t *testing.T) {
 	assert.Equal(t, "session-1", a.ResumeRef, "the agent's session is resumed")
 
 	var status struct {
-		Epoch       string `json:"epoch"`
-		SessionName string `json:"session_name"`
+		Epoch          string `json:"epoch"`
+		SessionName    string `json:"session_name"`
+		AgentSessionID string `json:"agent_session_id"`
+		ServerID       string `json:"server_id"`
 	}
 	n.do(http.MethodGet, "/status", nil, &status)
 	assert.Equal(t, before.Epoch, status.Epoch, "browser caches stay valid")
 	assert.Equal(t, "Greeting", status.SessionName)
+	assert.Equal(t, "session-1", status.AgentSessionID, "the agent's own session")
+	assert.NotEmpty(t, status.ServerID)
 
 	var msgs struct {
 		Messages []httpapi.Message `json:"messages"`
@@ -312,8 +317,8 @@ func TestStateDB_StopStoresTheQueueLast(t *testing.T) {
 				}
 				return &slowCloseAdapter{Adapter: a.(*nativetest.Adapter), closing: closing, release: release}, nil
 			},
-			StateDB: db,
 		},
+		StateDB:        db,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
@@ -402,17 +407,19 @@ func TestEvents_LastEventID(t *testing.T) {
 	}
 	n.do(http.MethodGet, "/status", nil, &status)
 
-	// session_sync, 2 messages, status, rich message: only the last carries
-	// the replay's seq.
-	ids := readEvents(t, n.url+"/events?sync=1", nil, 5)
-	require.Len(t, ids, 5)
-	assert.Equal(t, []string{"", "", "", "", "3"}, ids)
+	// session_sync, 2 messages, status, rich message, task: only the last
+	// carries the replay's seq.
+	ids := readEvents(t, n.url+"/events?sync=1", nil, 6)
+	require.Len(t, ids, 6)
+	assert.Equal(t, []string{"", "", "", "", ""}, ids[:5])
+	end := ids[5]
+	require.NotEmpty(t, end)
 
 	// Resuming from that id replays nothing but session_sync and status.
-	header := http.Header{"Last-Event-ID": {"3"}}
+	header := http.Header{"Last-Event-ID": {end}}
 	ids = readEvents(t, n.url+"/events?sync=1&epoch="+status.Epoch, header, 2)
 	require.Len(t, ids, 2)
-	assert.Equal(t, "3", ids[1], "the replay end repeats the client's position")
+	assert.Equal(t, end, ids[1], "the replay end repeats the client's position")
 }
 
 func TestStateDB_RestoresSettings(t *testing.T) {
@@ -434,4 +441,235 @@ func TestStateDB_RestoresSettings(t *testing.T) {
 	require.NotNil(t, status.Settings)
 	// The model has no efforts.
 	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "plain"}, *status.Settings)
+}
+
+// ptyScreen is a terminal agent that shows one screen and takes what is
+// typed.
+type ptyScreen struct{ screen string }
+
+func (p *ptyScreen) ReadScreen() string             { return p.screen }
+func (p *ptyScreen) Write(data []byte) (int, error) { return len(data), nil }
+
+// The PTY transport keeps its conversation in the state database too: a
+// conversation imported from a --state-file comes back, and the new agent's
+// screen neither replaces nor removes it.
+func TestStateDB_PTYRestoresConversation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path, cwd := filepath.Join(dir, "state.db"), "/work"
+	file := filepath.Join(dir, "state.json")
+	require.NoError(t, os.WriteFile(file, []byte(`{"version":1,"messages":[
+		{"id":0,"message":"Ready","role":"agent","time":"2026-10-20T10:00:00Z"},
+		{"id":1,"message":"Fix the bug","role":"user","time":"2026-10-20T10:00:01Z"},
+		{"id":2,"message":"Fixed.","role":"agent","time":"2026-10-20T10:00:02Z"}
+	]}`), 0o600))
+	db, err := statedb.Open(path, nil)
+	require.NoError(t, err)
+	n, err := db.ImportStateFile(file, map[string]string{
+		statedb.MetaAgentType: string(msgfmt.AgentTypeCustom),
+		statedb.MetaTransport: string(httpapi.TransportPTY),
+		statedb.MetaCWD:       cwd,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 3, n)
+
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeCustom,
+		Transport:      httpapi.TransportPTY,
+		PTY:            httpapi.PTYConfig{AgentIO: &ptyScreen{screen: "$ "}, TerminalColumns: 80},
+		StateDB:        db,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		CWD:            cwd,
+		UploadDir:      path + ".uploads",
+	})
+	require.NoError(t, err)
+	messages := func() []string {
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/messages", nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+		var body struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		var texts []string
+		for _, m := range body.Messages {
+			texts = append(texts, m.Content)
+		}
+		return texts
+	}
+	want := []string{"Ready", "Fix the bug", "Fixed."}
+	assert.Equal(t, want, messages())
+	// Snapshots of the new agent's screen come every 25 ms.
+	time.Sleep(300 * time.Millisecond)
+	assert.Equal(t, want, messages())
+	require.NoError(t, srv.Stop(ctx))
+	require.NoError(t, db.Close())
+
+	db, err = statedb.Open(path, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	snap, err := db.Load()
+	require.NoError(t, err)
+	require.Len(t, snap.Messages, 3, "still in the database")
+	assert.Equal(t, "Fixed.", snap.Messages[2].Message.Message)
+}
+
+// Webhook settings changed through the API survive a restart with a state
+// database, until AgentAPI starts with other webhook flags.
+func TestStateDB_KeepsWebhookSettings(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.db")
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	start := func(flags httpapi.WebhookConfig) (*httpapi.Server, *statedb.DB) {
+		db, err := statedb.Open(path, nil)
+		require.NoError(t, err)
+		srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+			AgentType:      msgfmt.AgentTypeCustom,
+			Transport:      httpapi.TransportPTY,
+			PTY:            httpapi.PTYConfig{AgentIO: &ptyScreen{screen: "$ "}, TerminalColumns: 80},
+			StateDB:        db,
+			Webhook:        flags,
+			ChatBasePath:   "/chat",
+			AllowedHosts:   []string{"*"},
+			AllowedOrigins: []string{"*"},
+			CWD:            "/work",
+			UploadDir:      path + ".uploads",
+		})
+		require.NoError(t, err)
+		return srv, db
+	}
+	stop := func(srv *httpapi.Server, db *statedb.DB) {
+		require.NoError(t, srv.Stop(ctx))
+		require.NoError(t, db.Close())
+	}
+	webhook := func(srv *httpapi.Server) (url string, events []string) {
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/webhook", nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+		var body struct {
+			URL    string   `json:"url"`
+			Events []string `json:"events"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		return body.URL, body.Events
+	}
+
+	srv, db := start(httpapi.WebhookConfig{})
+	req := httptest.NewRequest(http.MethodPut, "/webhook", strings.NewReader(`{"url":"https://dashboard.example.com/hook","timeout_seconds":10,"max_attempts":3,"events":["task.*"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	stop(srv, db)
+
+	srv, db = start(httpapi.WebhookConfig{})
+	url, events := webhook(srv)
+	assert.Equal(t, "https://dashboard.example.com/hook", url)
+	assert.Equal(t, []string{"task.*"}, events)
+	stop(srv, db)
+
+	// Other flags win.
+	srv, db = start(httpapi.WebhookConfig{URL: "https://other.example.com/hook"})
+	url, events = webhook(srv)
+	assert.Equal(t, "https://other.example.com/hook", url)
+	assert.Equal(t, []string{"run.status_changed"}, events)
+	stop(srv, db)
+}
+
+// The server derives the conversation's tasks: GET /tasks, the task of
+// each rich message, and the state database keeps them.
+func TestStateDB_KeepsTasks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	n, srv, db, err := persistentServer(t, path, "/work")
+	require.NoError(t, err)
+	a := n.factory.Last()
+	tasks := func() []httpapi.Task {
+		var body struct {
+			Tasks []httpapi.Task `json:"tasks"`
+		}
+		require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/tasks", nil, &body))
+		return body.Tasks
+	}
+
+	n.send("Fix the bug", "")
+	require.Eventually(t, func() bool { return len(tasks()) == 1 }, 5*time.Second, 5*time.Millisecond)
+	assert.Equal(t, httpapi.TaskStatusRunning, tasks()[0].Status)
+	a.Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "Fixed."}}})
+	var rich struct {
+		Messages []transcript.RichMessage `json:"messages"`
+	}
+	n.do(http.MethodGet, "/rich-messages", nil, &rich)
+	require.Len(t, rich.Messages, 1)
+	require.NotNil(t, rich.Messages[0].TaskID)
+	assert.Equal(t, tasks()[0].ID, *rich.Messages[0].TaskID, "the message belongs to the task")
+
+	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+	require.Eventually(t, func() bool { return tasks()[0].Status == httpapi.TaskStatusCompleted }, 5*time.Second, 5*time.Millisecond)
+
+	// A usage limit stops the next one.
+	n.send("And the tests", "")
+	require.Eventually(t, func() bool { return len(tasks()) == 2 }, 5*time.Second, 5*time.Millisecond)
+	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your limit"})
+	require.Eventually(t, func() bool { return tasks()[1].Status == httpapi.TaskStatusLimited }, 5*time.Second, 5*time.Millisecond)
+	before := tasks()
+	require.NotNil(t, before[1].Limit)
+	stop(t, srv, db)
+
+	n, srv, db, err = persistentServer(t, path, "/work")
+	require.NoError(t, err)
+	defer stop(t, srv, db)
+	after := tasks()
+	require.Len(t, after, 2)
+	for i := range after {
+		assert.Equal(t, before[i].ID, after[i].ID)
+		assert.Equal(t, before[i].Status, after[i].Status)
+		assert.True(t, before[i].StartedAt.Equal(after[i].StartedAt))
+	}
+}
+
+// eventNames returns the names of the SSE events /events sends within a
+// moment: the replay.
+func eventNames(t *testing.T, url string) []string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	var names []string
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 1<<20), 1<<20)
+	for scanner.Scan() {
+		if name, ok := strings.CutPrefix(scanner.Text(), "event: "); ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// Clients that don't opt in with sync don't get the events they may not
+// know: agentapi-sdk-go rejects an unknown event type.
+func TestEvents_TaskUpdatesAreOptIn(t *testing.T) {
+	n := newNativeServer(t, nil)
+	n.send("one", "")
+	require.Eventually(t, func() bool {
+		var body struct {
+			Tasks []httpapi.Task `json:"tasks"`
+		}
+		n.do(http.MethodGet, "/tasks", nil, &body)
+		return len(body.Tasks) == 1
+	}, 5*time.Second, 5*time.Millisecond)
+
+	plain := eventNames(t, n.url+"/events")
+	assert.Contains(t, plain, "message_update")
+	assert.NotContains(t, plain, "task_update")
+	assert.NotContains(t, plain, "session_sync")
+	assert.Contains(t, eventNames(t, n.url+"/events?sync=1"), "task_update")
 }

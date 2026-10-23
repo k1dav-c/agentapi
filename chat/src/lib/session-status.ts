@@ -1,5 +1,8 @@
 import type { ComponentType } from "react";
-import type {RichMessage} from "@/components/chat-provider";
+import {commonPrefix, type RichMessage, type Usage} from "@/lib/conversation";
+import type {TaskSection} from "@/lib/task-timeline";
+import {getToolCommand} from "@/lib/tool-format";
+import {splitThinking} from "@/lib/thinking";
 import type {ServerStatus} from "@/lib/agent-status";
 import { CircleAlert, CircleCheck, CircleDot, LoaderCircle, WifiOff } from "lucide-react";
 
@@ -20,19 +23,95 @@ export function formatTokenCount(count: number): string {
   return `${(count / 1_000_000).toFixed(1)}M`;
 }
 
+const noTokens: TokenTotals = {input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 0};
+
+function addUsage(totals: TokenTotals, usage: Usage): TokenTotals {
+  const input = totals.input + usage.input_tokens;
+  const output = totals.output + usage.output_tokens;
+  return {
+    input,
+    output,
+    cacheRead: totals.cacheRead + usage.cache_read_input_tokens,
+    cacheCreation: totals.cacheCreation + usage.cache_creation_input_tokens,
+    total: input + output,
+  };
+}
+
+// The tokens the rich messages used; a message ID counts once (the agent
+// may report the same model call's usage on several messages).
 export function computeTokenTotals(richMessages: RichMessage[]): TokenTotals {
   const seen = new Set<string>();
-  const totals: TokenTotals = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 0 };
+  let totals = noTokens;
   for (const message of richMessages) {
     if (!message.usage || seen.has(message.message_id)) continue;
     seen.add(message.message_id);
-    totals.input += message.usage.input_tokens;
-    totals.output += message.usage.output_tokens;
-    totals.cacheRead += message.usage.cache_read_input_tokens;
-    totals.cacheCreation += message.usage.cache_creation_input_tokens;
+    totals = addUsage(totals, message.usage);
   }
-  totals.total = totals.input + totals.output;
   return totals;
+}
+
+// TokenCounter adds up the tokens of the session's rich messages as they
+// stream in, as computeTokenTotals does, going only through the messages
+// after those that stayed the same objects. The totals keep their object
+// while they don't change.
+export class TokenCounter {
+  private messages: RichMessage[] = [];
+  // The totals after each message.
+  private after: TokenTotals[] = [];
+  // The IDs counted, and the place of the message each was counted at.
+  private counted = new Map<string, number>();
+
+  count(richMessages: RichMessage[]): TokenTotals {
+    const unchanged = commonPrefix(this.messages, richMessages);
+    for (let i = unchanged; i < this.messages.length; i++) {
+      const id = this.messages[i].message_id;
+      if (this.counted.get(id) === i) this.counted.delete(id);
+    }
+    const previous = this.after.at(-1) ?? noTokens;
+    this.after.length = unchanged;
+    let totals = this.after.at(-1) ?? noTokens;
+    for (let i = unchanged; i < richMessages.length; i++) {
+      const message = richMessages[i];
+      if (message.usage && !this.counted.has(message.message_id)) {
+        this.counted.set(message.message_id, i);
+        totals = addUsage(totals, message.usage);
+      }
+      this.after.push(totals);
+    }
+    this.messages = richMessages;
+    if (sameTotals(totals, previous)) {
+      if (this.after.length > 0) this.after[this.after.length - 1] = previous;
+      return previous;
+    }
+    return totals;
+  }
+}
+
+function sameTotals(a: TokenTotals, b: TokenTotals): boolean {
+  return a.input === b.input && a.output === b.output && a.cacheRead === b.cacheRead && a.cacheCreation === b.cacheCreation;
+}
+
+// What the agent does in a task, from its latest steps: the tool call it
+// waits on, or what it thinks about ("" when neither); and the last tool it
+// used. It reads from the task's end, so it costs little as the task grows.
+export function taskProgress(task: TaskSection | undefined): {activity: string; latestTool: string | null} {
+  let activity = "";
+  let latestTool: string | null = null;
+  const steps = task?.richActivity ?? [];
+  for (let i = steps.length - 1; i >= 0 && (!activity || latestTool === null); i--) {
+    const step = steps[i];
+    if (step.type === "tool") {
+      const call = step.toolCall;
+      latestTool ??= call.name;
+      if (!activity && call.resultTimestamp === undefined) {
+        const command = getToolCommand(call.name, call.input);
+        activity = command ? `$ ${command.split("\n")[0]}` : call.name;
+      }
+    } else if (step.type === "thinking" && !activity) {
+      activity = `Thinking · ${splitThinking(step.content).title}`;
+    }
+  }
+  return {activity, latestTool};
 }
 
 // What the agent is doing, from the user's point of view. "needs-you" wins

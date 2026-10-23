@@ -166,6 +166,23 @@ func TestClose(t *testing.T) {
 	})
 }
 
+// A CLI that stops reading can't hold StartTurn past its context: the
+// prompt may still reach the CLI if it reads again, so the error says it is
+// unconfirmed, and the turn can start again.
+func TestStartTurnGivesUpWithTheContext(t *testing.T) {
+	t.Parallel()
+	// The CLI reads the initialize and get_settings requests, then hangs.
+	proc := newFakeProcess("")
+	proc.stallAfter = 2
+	a, _ := started(t, Config{StopTimeout: 10 * time.Millisecond}, proc)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := a.StartTurn(ctx, native.Input{Text: "hi"})
+	require.ErrorIs(t, err, native.ErrUnconfirmed)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NoError(t, a.Close())
+}
+
 func TestTurnErrors(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t, Config{}, "")
@@ -702,4 +719,23 @@ func TestCloseWithoutTheTurnEnding(t *testing.T) {
 			assert.NotEqual(t, "interrupt", subtypeOf(f))
 		}
 	})
+}
+
+// A control request the CLI got but didn't answer may take effect all the
+// same: the error says so.
+func TestUnansweredRequestIsUnconfirmed(t *testing.T) {
+	t.Parallel()
+	proc := newFakeProcess("")
+	a, _ := started(t, Config{}, proc)
+	require.NoError(t, a.StartTurn(context.Background(), native.Input{Text: "hi"}))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- a.Interrupt(ctx) }()
+	proc.waitRequest(t, 1, "interrupt")
+	cancel()
+	err := <-errCh
+	require.ErrorIs(t, err, native.ErrUnconfirmed)
+	assert.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, a.Close())
 }

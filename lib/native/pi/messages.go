@@ -146,7 +146,7 @@ func (a *Adapter) handleMessageEvent(kind string, ev messageEvent) {
 }
 
 // handleMessageEnd emits the finished message. message_end carries the
-// message as Pi writes it to its session file, so jsonlwatcher's Pi parser
+// message as Pi writes it to its session file, so pilog's parser
 // turns it into the same rich messages and timeline events.
 func (a *Adapter) handleMessageEnd(msg agentMessage, raw json.RawMessage) {
 	if msg.Role == "system" {
@@ -206,8 +206,8 @@ func (a *Adapter) handleMessageEnd(msg agentMessage, raw json.RawMessage) {
 	}
 }
 
-// parsePiMessage turns a Pi message into rich messages with jsonlwatcher's
-// Pi parser, as the line of Pi's session file that holds it.
+// parsePiMessage turns a Pi message into rich messages with pilog's
+// parser, as the line of Pi's session file that holds it.
 func (a *Adapter) parsePiMessage(id string, raw json.RawMessage) ([]transcript.RichMessage, error) {
 	line, err := json.Marshal(struct {
 		Type    string          `json:"type"`
@@ -313,7 +313,7 @@ func (a *Adapter) toolResultMessage(callID, toolName string, content json.RawMes
 	})
 	rich, _ := a.parsePiMessage(resultID(callID), raw)
 	if len(rich) == 0 {
-		return transcript.RichMessage{MessageID: resultID(callID), Role: "user"}
+		return transcript.RichMessage{MessageID: resultID(callID), Role: "user", Content: []transcript.RichContentBlock{}}
 	}
 	setToolResultImages(rich, content)
 	msg := rich[0]

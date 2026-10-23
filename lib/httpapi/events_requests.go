@@ -36,7 +36,7 @@ func (e *EventEmitter) EmitRequest(state native.RequestState) {
 	e.handoffRevision++
 	e.notifyChannels(EventTypeRequestUpdate, RequestUpdateBody{RequestState: state, Seq: e.seq})
 	if e.statusChangeBody().PendingRequests != before {
-		e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+		e.notifyStatusLocked()
 	}
 }
 

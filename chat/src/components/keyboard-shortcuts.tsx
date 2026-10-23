@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import {useChat} from "./chat-provider";
+import {useChatSelector} from "./chat-provider";
 import {
   Dialog,
   DialogContent,
@@ -80,7 +80,7 @@ export function useKeyboardShortcutsKey(onOpen: () => void) {
 }
 
 export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcutsDialogProps) {
-  const { features } = useChat();
+  const features = useChatSelector((chat) => chat.features);
   const shown = shortcuts
     .filter((group) => !group.terminal || features.agentTerminal)
     .map((group) => ({

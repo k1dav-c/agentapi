@@ -1,14 +1,17 @@
 "use client";
 
-import { type ComponentType, useEffect, useMemo, useState } from "react";
+import { type ComponentType, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { notificationsEnabled, onNotificationsPreferenceChange, setNotificationsEnabled } from "@/lib/background-alerts";
-import {useChat} from "@/components/chat-provider";
+import {useChatActions, useChatSelector} from "@/components/chat-provider";
+import {sameValue} from "@/lib/agent-status";
 import {agentDisplayName} from "@/lib/agents";
 import { ModeToggle } from "@/components/mode-toggle";
 import { AgentMark } from "@/components/agent-mark";
-import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Download, Hash, Keyboard, LoaderCircle, Tag } from "lucide-react";
-import { computeTokenTotals, formatTokenCount, getStatusMeta } from "@/lib/session-status";
+import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Copy, Download, Fingerprint, Hash, Keyboard, LoaderCircle, Tag } from "lucide-react";
+import { copyText } from "@/lib/clipboard";
+import { getErrorMessage } from "@/lib/error-utils";
+import { formatTokenCount, getStatusMeta } from "@/lib/session-status";
 import { useWorkingElapsed } from "@/lib/use-elapsed";
 import { openShortcuts } from "@/components/keyboard-shortcuts";
 import { useDialogFromMenu } from "@/lib/menu-dialog";
@@ -22,19 +25,21 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 export function Header() {
-  const {
-    serverStatus,
-    agentState,
-    loginRequired,
-    agentType,
-    queuedMessages,
-    richMessages,
-    messages,
-    downloadSession,
-    customTitle,
-    agentapiVersion,
-    sessionName,
-  } = useChat();
+  const serverStatus = useChatSelector((chat) => chat.serverStatus);
+  const agentState = useChatSelector((chat) => chat.agentState);
+  const loginRequired = useChatSelector((chat) => chat.loginRequired);
+  const agentType = useChatSelector((chat) => chat.agentType);
+  const queuedCount = useChatSelector((chat) => chat.queuedMessages.length);
+  const customTitle = useChatSelector((chat) => chat.customTitle);
+  const agentapiVersion = useChatSelector((chat) => chat.agentapiVersion);
+  const sessionName = useChatSelector((chat) => chat.sessionName);
+  const agentSessionId = useChatSelector((chat) => chat.agentSessionId);
+  // The tool the agent used last in its task, and the session's tokens:
+  // worked out as messages stream (useTranscript), so the header renders
+  // again only when one of them changes.
+  const latestTool = useChatSelector((chat) => chat.latestTool);
+  const tokenTotals = useChatSelector((chat) => chat.tokenTotals, sameValue);
+  const {downloadSession} = useChatActions();
   const [downloading, setDownloading] = useState(false);
   const shortcutsFromMenu = useDialogFromMenu(openShortcuts);
   const elapsed = useWorkingElapsed(serverStatus);
@@ -64,26 +69,6 @@ export function Header() {
     toast.success("You'll be notified when the agent needs you or finishes");
   };
 
-  const latestTool = useMemo(() => {
-    const latestTaskTime = [...messages]
-      .reverse()
-      .find((message) => message.role === "user")?.time;
-    for (const message of [...richMessages].reverse()) {
-      if (
-        latestTaskTime &&
-        message.timestamp &&
-        Date.parse(message.timestamp) < Date.parse(latestTaskTime)
-      ) {
-        continue;
-      }
-      for (const block of [...message.content].reverse()) {
-        if (block.type === "tool_use" && block.tool_name) return block.tool_name;
-      }
-    }
-    return null;
-  }, [messages, richMessages]);
-
-  const tokenTotals = useMemo(() => computeTokenTotals(richMessages), [richMessages]);
   const status = getStatusMeta(agentState, loginRequired !== null);
   const StatusIcon = status.icon;
   const activityDetail =
@@ -91,7 +76,7 @@ export function Header() {
       ? [latestTool ? `Using ${latestTool}` : "Processing task", elapsed].filter(Boolean).join(" · ")
       : status.detail;
   const agentName = agentDisplayName(agentType, "Remote coding agent");
-  const held = status.kind === "needs-you" && queuedMessages.length > 0;
+  const held = status.kind === "needs-you" && queuedCount > 0;
 
   return (
     <header className="sticky top-[env(safe-area-inset-top,0px)] z-20 flex h-12 shrink-0 items-center gap-3 border-b bg-background/95 px-3 backdrop-blur-xl sm:px-5">
@@ -151,12 +136,13 @@ export function Header() {
               <SessionDetail icon={StatusIcon} label="Status" value={status.label} valueClassName={status.className} />
               <SessionDetail icon={Bot} label="Agent" value={agentDisplayName(agentType, "Unknown")} />
               {sessionName && <SessionDetail icon={MessageSquareText} label="Session" value={sessionName} />}
+              {agentSessionId && <AgentSessionDetail id={agentSessionId} />}
               {agentapiVersion && <SessionDetail icon={Tag} label="Version" value={`AgentAPI v${agentapiVersion}`} />}
               <SessionDetail icon={Activity} label="Activity" value={activityDetail} />
               <SessionDetail
                 icon={CircleCheck}
                 label="Queue"
-                value={`${queuedMessages.length} ${queuedMessages.length === 1 ? "task" : "tasks"}${held ? " · held" : ""}`}
+                value={`${queuedCount} ${queuedCount === 1 ? "task" : "tasks"}${held ? " · held" : ""}`}
               />
               {tokenTotals.total > 0 && (
                 <SessionDetail
@@ -192,12 +178,12 @@ export function Header() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        {queuedMessages.length > 0 && (
+        {queuedCount > 0 && (
           <span
             className={`hidden h-7 items-center rounded-full border px-2.5 text-xs tabular-nums sm:flex ${held ? "text-state-needs" : "text-muted-foreground"}`}
             title={held ? "Queued tasks run after you answer the agent" : "Tasks waiting to run"}
           >
-            {queuedMessages.length} queued{held ? " · held" : ""}
+            {queuedCount} queued{held ? " · held" : ""}
           </span>
         )}
         {tokenTotals.total > 0 && (
@@ -218,6 +204,37 @@ export function Header() {
 // The page's own actions (search, TTY, Explorer) render into this slot so
 // the app has a single top bar; see MessageList.
 export const HEADER_ACTIONS_ID = "header-actions";
+
+// The agent's own session ID, which GET /sessions lists and resuming
+// opens: its first characters, and a button that copies all of it.
+function AgentSessionDetail({id}: {id: string}) {
+  const copy = async () => {
+    try {
+      await copyText(id);
+      toast.success("Session ID copied");
+    } catch (error) {
+      toast.error("Could not copy the session ID", {description: getErrorMessage(error)});
+    }
+  };
+  return (
+    <div className="grid grid-cols-[1rem_4rem_1fr] items-start gap-2" data-agent-session>
+      <Fingerprint className="mt-0.5 size-3.5 text-muted-foreground" />
+      <span className="text-muted-foreground">Session ID</span>
+      <span className="flex min-w-0 items-center justify-end gap-1.5 font-medium">
+        <span className="font-mono" title={id}>{id.slice(0, 8)}</span>
+        <button
+          type="button"
+          onClick={() => void copy()}
+          className="rounded p-0.5 text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          title="Copy the agent's session ID"
+          aria-label="Copy the agent's session ID"
+        >
+          <Copy className="size-3.5" />
+        </button>
+      </span>
+    </div>
+  );
+}
 
 function SessionDetail({
   icon: Icon,

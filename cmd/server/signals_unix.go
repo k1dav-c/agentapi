@@ -14,7 +14,7 @@ import (
 
 // handleSignals sets up signal handlers for:
 // - SIGTERM, SIGINT, SIGHUP: trigger graceful shutdown by canceling the context
-// - SIGUSR1: save conversation state without exiting
+// - SIGUSR1: write what the state database hasn't written yet, without exiting
 func handleSignals(ctx context.Context, cancel context.CancelFunc, logger *slog.Logger, srv *httpapi.Server) {
 	// Handle shutdown signals (SIGTERM, SIGINT, SIGHUP)
 	shutdownCh := make(chan os.Signal, 1)

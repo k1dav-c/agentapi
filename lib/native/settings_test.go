@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 var testOptions = native.SettingOptions{
@@ -245,14 +245,14 @@ func TestCompactHoldsTurns(t *testing.T) {
 	}
 	done := compact()
 	assert.False(t, c.Idle())
-	assert.Equal(t, st.ConversationStatusChanging, c.Status())
-	assert.ErrorIs(t, c.StartTurn(context.Background(), native.InputFromText("hi")), st.ErrMessageValidationChanging)
+	assert.Equal(t, conv.StatusChanging, c.Status())
+	assert.ErrorIs(t, c.StartTurn(context.Background(), native.InputFromText("hi")), conv.ErrMessageValidationChanging)
 	assert.ErrorIs(t, c.Compact(context.Background()), native.ErrTurnActive, "one at a time")
 	assert.ErrorIs(t, c.Reload(context.Background()), native.ErrTurnActive)
 	release <- struct{}{}
 	require.NoError(t, <-done)
 	assert.True(t, c.Idle())
-	assert.Equal(t, st.ConversationStatusStable, c.Status())
+	assert.Equal(t, conv.StatusStable, c.Status())
 
 	// A restart doesn't wait for the old agent's compaction, which then
 	// can't hold the new one's turns.

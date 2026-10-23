@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,18 +17,25 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/httpapi"
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/pricing"
+	"github.com/coder/agentapi/lib/sessions"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
 // newSessionServer starts a native Claude Code server in cwd whose agent
 // had the session "earlier" there.
 func newSessionServer(t *testing.T) *nativeServer {
+	t.Helper()
+	return newSessionServerWith(t, nil)
+}
+
+// newSessionServerWith is newSessionServer with the adapters adjusted by
+// configure.
+func newSessionServerWith(t *testing.T, configure func(*nativetest.Adapter)) *nativeServer {
 	t.Helper()
 	config := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", config)
@@ -39,7 +47,12 @@ func newSessionServer(t *testing.T) *nativeServer {
 			`{"type":"custom-title","customTitle":"Bug hunt","sessionId":"earlier"}`+"\n"), 0o600))
 
 	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
-	factory := &nativetest.Factory{Configure: func(a *nativetest.Adapter) { a.Ref = "current" }}
+	factory := &nativetest.Factory{Configure: func(a *nativetest.Adapter) {
+		a.Ref = "current"
+		if configure != nil {
+			configure(a)
+		}
+	}}
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
 		Transport:      httpapi.TransportNative,
@@ -57,15 +70,20 @@ func newSessionServer(t *testing.T) *nativeServer {
 		cancel()
 	})
 	n := &nativeServer{t: t, url: ts.URL, factory: factory}
-	require.Eventually(t, func() bool { return factory.Last() != nil && factory.Last().Sink() != nil }, 5*time.Second, 5*time.Millisecond)
+	// The agent started: a message sent now starts a turn.
+	require.Eventually(t, func() bool {
+		var status httpapi.StatusChangeBody
+		n.do(http.MethodGet, "/status", nil, &status)
+		return status.Status == httpapi.AgentStatusStable
+	}, 5*time.Second, 5*time.Millisecond)
 	return n
 }
 
 func TestNative_ListSessions(t *testing.T) {
 	n := newSessionServer(t)
 	var list struct {
-		Sessions []jsonlwatcher.SessionSummary `json:"sessions"`
-		Current  string                        `json:"current"`
+		Sessions []sessions.SessionSummary `json:"sessions"`
+		Current  string                    `json:"current"`
 	}
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/sessions", nil, &list))
 	require.Len(t, list.Sessions, 1)
@@ -117,13 +135,73 @@ func TestNative_ResumeSession(t *testing.T) {
 	assert.True(t, fork.Fork)
 }
 
+// A session can't be opened while the agent compacts its context either,
+// and a refused switch leaves the conversation, the agent and the lifecycle
+// as they were.
+func TestNative_ResumeDuringCompactionChangesNothing(t *testing.T) {
+	compacting, release := make(chan struct{}, 1), make(chan struct{})
+	var releaseOnce sync.Once
+	releaseCompaction := func() { releaseOnce.Do(func() { close(release) }) }
+	n := newSessionServerWith(t, func(a *nativetest.Adapter) {
+		a.Caps.Compact = true
+		a.OnCompact = func(context.Context) error {
+			compacting <- struct{}{}
+			<-release
+			return nil
+		}
+	})
+	// Before the server stops, which waits for the compaction's request.
+	t.Cleanup(releaseCompaction)
+	first := n.factory.Last()
+	n.send("hello", "")
+	first.Sink().RichMessage(transcript.RichMessage{MessageID: "cur_1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "current answer"}}})
+	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+	epoch := n.epoch()
+
+	compacted := make(chan int, 1)
+	go func() { compacted <- n.do(http.MethodPost, "/compact", nil, nil) }()
+	<-compacting
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/sessions/earlier/resume", map[string]any{}, nil))
+
+	assert.Len(t, n.factory.Adapters(), 1, "no agent was started")
+	assert.False(t, first.Closed(), "the agent goes on compacting")
+	var rich struct {
+		Messages []struct {
+			MessageID string `json:"message_id"`
+		} `json:"messages"`
+	}
+	n.do(http.MethodGet, "/rich-messages", nil, &rich)
+	require.Len(t, rich.Messages, 1)
+	assert.Equal(t, "cur_1", rich.Messages[0].MessageID)
+	var msgs struct {
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	n.do(http.MethodGet, "/messages", nil, &msgs)
+	require.Len(t, msgs.Messages, 2)
+	assert.Equal(t, "hello", msgs.Messages[0].Content)
+	assert.Equal(t, "current answer", msgs.Messages[1].Content)
+	var status httpapi.StatusChangeBody
+	n.do(http.MethodGet, "/status", nil, &status)
+	assert.Equal(t, httpapi.LifecycleRunning, status.Lifecycle, "compacting, not restarting")
+	assert.Equal(t, epoch, n.epoch())
+
+	// Once the compaction is done, the session opens.
+	releaseCompaction()
+	assert.Equal(t, http.StatusOK, <-compacted)
+	require.Equal(t, http.StatusOK, n.do(http.MethodPost, "/sessions/earlier/resume", map[string]any{}, nil))
+	assert.Equal(t, "earlier", n.factory.Last().ResumeRef)
+	assert.True(t, first.Closed())
+}
+
 func TestNative_SessionsNeedAnAgentWithLogs(t *testing.T) {
 	n := newNativeServer(t, nil)
 	_ = n
 	// The fake server runs Claude Code: its sessions can be listed (none
-	// here). Other agents' can't, which the jsonlwatcher tests cover.
+	// here). Other agents' can't, which the sessions tests cover.
 	var list struct {
-		Sessions []jsonlwatcher.SessionSummary `json:"sessions"`
+		Sessions []sessions.SessionSummary `json:"sessions"`
 	}
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/sessions", nil, &list))
@@ -236,10 +314,10 @@ func TestNative_SessionCosts(t *testing.T) {
 
 	var list struct {
 		Sessions []struct {
-			ID   string                   `json:"id"`
-			Cost jsonlwatcher.SessionCost `json:"cost"`
+			ID   string               `json:"id"`
+			Cost sessions.SessionCost `json:"cost"`
 		} `json:"sessions"`
-		TotalCost jsonlwatcher.SessionCost `json:"total_cost"`
+		TotalCost sessions.SessionCost `json:"total_cost"`
 	}
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/sessions", nil, &list))
 	require.Len(t, list.Sessions, 2)
@@ -255,12 +333,12 @@ func TestNative_SessionCosts(t *testing.T) {
 	require.Len(t, list.TotalCost.Hourly, 2)
 
 	var cost struct {
-		SessionID string                   `json:"session_id"`
-		Cost      jsonlwatcher.SessionCost `json:"cost"`
-		Calls     []jsonlwatcher.ModelCall `json:"calls"`
+		AgentSessionID string               `json:"agent_session_id"`
+		Cost           sessions.SessionCost `json:"cost"`
+		Calls          []sessions.ModelCall `json:"calls"`
 	}
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/cost", nil, &cost))
-	assert.Equal(t, "current", cost.SessionID)
+	assert.Equal(t, "current", cost.AgentSessionID)
 	require.Len(t, cost.Calls, 2)
 	assert.InDelta(t, first, cost.Calls[0].USD, 1e-9)
 	assert.True(t, cost.Calls[0].Priced)

@@ -1,6 +1,7 @@
 package httpapi_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,6 +11,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -411,18 +414,96 @@ func TestNative_Restart(t *testing.T) {
 }
 
 // A message the agent refuses is taken back. Clients can't apply that as an
-// update, so they reload the conversation under a new epoch.
+// update: the conversation gets a new epoch and the event streams end, so
+// that the clients reconnect and load it again.
 func TestNative_RefusedMessageIsTakenBack(t *testing.T) {
 	n := newNativeServer(t, func(a *nativetest.Adapter) { a.TurnErr = errors.New("the agent refused the turn") })
+	n.factory.Last().Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "Hi"}}})
 	epoch := n.epoch()
+	events := openEvents(t, n.url+"/events?sync=1")
+	require.Equal(t, "session_sync", nextEvent(t, events).event)
 	code, _ := n.send("hello", "")
 	assert.Equal(t, http.StatusInternalServerError, code)
 	var msgs struct {
 		Messages []httpapi.Message `json:"messages"`
 	}
 	n.do(http.MethodGet, "/messages", nil, &msgs)
-	assert.Empty(t, msgs.Messages)
+	require.Len(t, msgs.Messages, 1)
+	assert.Equal(t, "Hi", msgs.Messages[0].Content)
 	assert.NotEqual(t, epoch, n.epoch())
+	for range events {
+		// The stream ends.
+	}
+
+	// The client reconnects with the epoch it had and gets the full state,
+	// the agent's message and its rich message: only the replay's last
+	// event carries an id, the replay's seq.
+	events = openEvents(t, n.url+"/events?sync=1&since=3&epoch="+epoch)
+	sync := nextEvent(t, events)
+	require.Equal(t, "session_sync", sync.event)
+	var body httpapi.SessionSyncBody
+	require.NoError(t, json.Unmarshal([]byte(sync.data), &body))
+	assert.True(t, body.Full)
+	assert.Equal(t, n.epoch(), body.Epoch)
+	var replay []string
+	for event := nextEvent(t, events); ; event = nextEvent(t, events) {
+		replay = append(replay, event.event)
+		if event.id != "" {
+			assert.Equal(t, strconv.FormatUint(body.Seq, 10), event.id)
+			break
+		}
+	}
+	assert.Equal(t, []string{"message_update", "status_change", "rich_message_update"}, replay)
+}
+
+// sseEvent is an event read from an event stream.
+type sseEvent struct{ event, id, data string }
+
+// openEvents connects to the event stream at url and delivers its events
+// until the server ends the stream, which closes the channel.
+func openEvents(t *testing.T, url string) <-chan sseEvent {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	events := make(chan sseEvent, 100)
+	go func() {
+		defer close(events)
+		defer func() { _ = resp.Body.Close() }()
+		scanner := bufio.NewScanner(resp.Body)
+		var event sseEvent
+		for scanner.Scan() {
+			line := scanner.Text()
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				event.event = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "id: "):
+				event.id = strings.TrimPrefix(line, "id: ")
+			case strings.HasPrefix(line, "data: "):
+				event.data = strings.TrimPrefix(line, "data: ")
+			case line == "" && event.data != "":
+				events <- event
+				event = sseEvent{}
+			}
+		}
+	}()
+	return events
+}
+
+// nextEvent returns the next event of a stream openEvents opened.
+func nextEvent(t *testing.T, events <-chan sseEvent) sseEvent {
+	t.Helper()
+	select {
+	case event, ok := <-events:
+		require.True(t, ok, "the stream ended")
+		return event
+	case <-time.After(5 * time.Second):
+		t.Fatal("no event")
+		return sseEvent{}
+	}
 }
 
 func TestPTY_DispatchModesRejected(t *testing.T) {
@@ -645,6 +726,105 @@ func TestNative_RestartOutlivesTheRequest(t *testing.T) {
 		a := factory.Adapters()
 		return len(a) == 2 && !a[1].Closed()
 	}, 5*time.Second, 5*time.Millisecond, "the restart went on")
+}
+
+// newUpdatingServer starts a native server whose agent's CLI update runs
+// update.
+func newUpdatingServer(t *testing.T, update func(context.Context)) (*nativeServer, *httpapi.Server) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
+	factory := &nativetest.Factory{}
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeClaude,
+		Transport:      httpapi.TransportNative,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		Native:         httpapi.NativeConfig{Factory: factory.New, UpdateAgent: update},
+	})
+	require.NoError(t, err)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(func() {
+		ts.Close()
+		_ = srv.Stop(context.Background())
+		cancel()
+	})
+	n := &nativeServer{t: t, url: ts.URL, factory: factory}
+	require.Eventually(t, func() bool {
+		var status httpapi.StatusChangeBody
+		n.do(http.MethodGet, "/status", nil, &status)
+		return status.Lifecycle == httpapi.LifecycleReady
+	}, 5*time.Second, 5*time.Millisecond)
+	return n, srv
+}
+
+// While the agent restarts (here, its CLI updates), the server goes on:
+// messages wait in the queue for the new agent, which gets them, the queue
+// can be changed, and another restart is refused.
+func TestNative_RestartDoesntHoldTheServer(t *testing.T) {
+	t.Chdir(t.TempDir())
+	updating, release := make(chan struct{}), make(chan struct{})
+	n, _ := newUpdatingServer(t, func(context.Context) {
+		close(updating)
+		<-release
+	})
+	restarted := make(chan int, 1)
+	go func() { restarted <- n.do(http.MethodDelete, "/messages", nil, nil) }()
+	<-updating
+
+	code, sent := n.send("after the restart", "")
+	require.Equal(t, http.StatusOK, code)
+	assert.True(t, sent.Queued)
+	queue := n.queue()
+	require.Len(t, queue, 1)
+	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/queue/"+strconv.Itoa(queue[0].ID), map[string]any{"content": "after the restart, edited"}, nil))
+	assert.Equal(t, http.StatusOK, n.do(http.MethodGet, "/handoff", nil, nil))
+	var status httpapi.StatusChangeBody
+	n.do(http.MethodGet, "/status", nil, &status)
+	assert.Equal(t, httpapi.LifecycleRestarting, status.Lifecycle)
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodDelete, "/messages", nil, nil), "one restart at a time")
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodPut, "/mcp?restart=true", map[string]any{"servers": map[string]any{}}, nil))
+	assert.Len(t, n.factory.Adapters(), 1, "the new agent waits for the update")
+
+	close(release)
+	assert.Equal(t, http.StatusOK, <-restarted)
+	require.Eventually(t, func() bool {
+		a := n.factory.Adapters()
+		return len(a) == 2 && len(a[1].Turns()) == 1 && len(n.queue()) == 0
+	}, 5*time.Second, 5*time.Millisecond)
+	assert.Equal(t, "after the restart, edited", n.factory.Last().Turns()[0].Text)
+}
+
+// Stop cuts a restart short rather than wait for it.
+func TestNative_StopDuringARestart(t *testing.T) {
+	updating, cut := make(chan struct{}), make(chan struct{})
+	n, srv := newUpdatingServer(t, func(ctx context.Context) {
+		close(updating)
+		<-ctx.Done()
+		close(cut)
+	})
+	restarted := make(chan int, 1)
+	go func() { restarted <- n.do(http.MethodDelete, "/messages", nil, nil) }()
+	<-updating
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- srv.Stop(context.Background()) }()
+	select {
+	case err := <-stopped:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop waited for the restart")
+	}
+	<-cut
+	assert.Equal(t, http.StatusConflict, <-restarted, "AgentAPI stops")
+	require.Eventually(t, func() bool {
+		for _, a := range n.factory.Adapters() {
+			if !a.Closed() {
+				return false
+			}
+		}
+		return true
+	}, 5*time.Second, 5*time.Millisecond, "no agent outlives Stop")
 }
 
 func TestNative_MCPRestartResumes(t *testing.T) {

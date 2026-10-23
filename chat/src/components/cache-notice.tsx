@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Archive, LoaderCircle, X } from "lucide-react";
 import { toast } from "sonner";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import { getErrorMessage } from "@/lib/error-utils";
 import { formatTokenCount } from "@/lib/session-status";
 import { coldCache, formatAgo } from "@/lib/usage";
@@ -15,7 +15,15 @@ import { usePersisted } from "@/lib/use-persisted";
 // limits. Compacting first makes that message cheap. Dismissed, it stays
 // away until the agent's next turn.
 export function CacheNotice() {
-  const { agentUsage, serverStatus, pendingRequestCount, limitStop, loginRequired, capabilities, agentType, compact, sendMessage, storageScope } = useChat();
+  const agentUsage = useChatSelector((chat) => chat.agentUsage);
+  const serverStatus = useChatSelector((chat) => chat.serverStatus);
+  const pendingRequestCount = useChatSelector((chat) => chat.pendingRequestCount);
+  const limitStop = useChatSelector((chat) => chat.limitStop);
+  const loginRequired = useChatSelector((chat) => chat.loginRequired);
+  const capabilities = useChatSelector((chat) => chat.capabilities);
+  const agentType = useChatSelector((chat) => chat.agentType);
+  const storageScope = useChatSelector((chat) => chat.storageScope);
+  const {compact, sendMessage} = useChatActions();
   const [now, setNow] = useState(() => Date.now());
   // The expiry the notice was closed for, kept over a reload.
   const [dismissed, setDismissed] = useState("");

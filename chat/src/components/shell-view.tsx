@@ -3,13 +3,14 @@
 import {useRef, useState} from "react";
 import {ArrowLeft, RotateCw, TerminalSquare} from "lucide-react";
 import {toast} from "sonner";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import {Button} from "./ui/button";
 import {TerminalKeyBar} from "./terminal-chrome";
 import {LatestLinkChip} from "./terminal-links";
 import {useXterm} from "./use-xterm";
 import {decodeBase64, terminalSize} from "@/lib/shell";
 import {withCredentials} from "@/lib/auth";
+import type {TerminalExitEvent, TerminalOutputEvent} from "@/lib/events";
 import {getErrorMessage} from "@/lib/error-utils";
 
 type ShellState = "connecting" | "open" | "exited";
@@ -19,7 +20,8 @@ type ShellState = "connecting" | "open" | "exited";
 // shares it, and it keeps running while nobody does. command, if set, is
 // typed into it once it is ready (the login card's "Run in terminal").
 export function ShellView({onExit, command}: {onExit: () => void; command?: string}) {
-  const {storageScope, terminalInput, terminalResize} = useChat();
+  const storageScope = useChatSelector((chat) => chat.storageScope);
+  const {terminalInput, terminalResize} = useChatActions();
   const containerRef = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<ShellState>("connecting");
   const [exitReason, setExitReason] = useState("");
@@ -76,7 +78,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
       eventSource.onerror = () => setState((current) => (current === "exited" ? current : "connecting"));
       eventSource.addEventListener("output", (event) => {
         try {
-          term.write(decodeBase64((JSON.parse(event.data) as {data: string}).data));
+          term.write(decodeBase64((JSON.parse(event.data) as TerminalOutputEvent).data));
         } catch {
           return;
         }
@@ -90,7 +92,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
       eventSource.addEventListener("exit", (event) => {
         let reason = "";
         try {
-          reason = (JSON.parse(event.data) as {reason?: string}).reason ?? "";
+          reason = (JSON.parse(event.data) as Partial<TerminalExitEvent>).reason ?? "";
         } catch {
           // The reason is only shown.
         }
