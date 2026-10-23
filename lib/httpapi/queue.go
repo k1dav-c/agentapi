@@ -269,7 +269,7 @@ func (s *Server) startMessageQueue() {
 func (s *Server) beforeQueue() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.restarting.Load() {
+	if s.restarting.Load() || s.shutdownCtx.Err() != nil {
 		return
 	}
 	s.backend().beforeQueue()
@@ -282,8 +282,13 @@ func (s *Server) beforeQueue() {
 func (s *Server) dispatchNextQueuedMessage() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.restarting.Load() {
+	switch {
+	case s.restarting.Load():
 		// The messages wait for the new agent.
+		return
+	case s.shutdownCtx.Err() != nil:
+		// A tick that waited for s.mu while Stop began: the messages are
+		// stored to go out after the restart.
 		return
 	}
 	next, ok := s.queue.Head()

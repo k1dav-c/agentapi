@@ -92,10 +92,10 @@ func TestNativeQueueDropsAMessageRefusedTooOften(t *testing.T) {
 	assert.Equal(t, []string{`Dropped queued message "fix the build and run the tests" after 5 failed attempts: connection reset`}, errorMessages(srv.emitter))
 }
 
-// A delivery that timed out may have reached the agent, so it isn't sent
-// again.
+// A delivery that timed out after it went out may have reached the agent,
+// so it isn't sent again.
 func TestNativeQueueDropsAMessageThatTimedOut(t *testing.T) {
-	srv, factory := newQuietNativeServer(t, func(a *nativetest.Adapter) { a.TurnErr = context.DeadlineExceeded })
+	srv, factory := newQuietNativeServer(t, func(a *nativetest.Adapter) { a.TurnErr = native.Unconfirmed(context.DeadlineExceeded) })
 	a := factory.Last()
 	a.Sink().TurnStarted()
 	sendUserMessage(t, srv, "fix the build")
@@ -103,7 +103,7 @@ func TestNativeQueueDropsAMessageThatTimedOut(t *testing.T) {
 
 	srv.dispatchNextQueuedMessage()
 	assert.Empty(t, srv.queue.Messages())
-	assert.Equal(t, []string{`Queued message "fix the build" may not have reached the agent, which didn't answer in time: context deadline exceeded`}, errorMessages(srv.emitter))
+	assert.Equal(t, []string{`Queued message "fix the build" may have reached the agent, which didn't confirm it: context deadline exceeded`}, errorMessages(srv.emitter))
 }
 
 // Stop cuts short a queued message on its way to the agent. The agent may
@@ -136,14 +136,30 @@ func TestNativeQueueDropsAMessageStopCutShort(t *testing.T) {
 	assert.Equal(t, []string{`Queued message "fix the build" may have reached the agent, which didn't confirm it: context canceled`}, errorMessages(srv.emitter))
 }
 
-// A call cut short counts as unconfirmed even when the adapter doesn't
-// say so.
-func TestNativeBackendTreatsCancelledCallsAsUncertain(t *testing.T) {
+// Only a message that went out unconfirmed isn't sent again: a call that
+// ended before it went out (its write waited behind another) left nothing
+// with the agent.
+func TestNativeBackendResendsWhatNeverWentOut(t *testing.T) {
 	b := nativeBackend{}
-	assert.NotEmpty(t, b.notResent(context.Canceled))
-	assert.NotEmpty(t, b.notResent(context.DeadlineExceeded))
+	assert.NotEmpty(t, b.notResent(native.Unconfirmed(context.Canceled)))
 	assert.NotEmpty(t, b.notResent(native.Unconfirmed(errors.New("codex app-server exited"))))
+	assert.Empty(t, b.notResent(context.Canceled))
+	assert.Empty(t, b.notResent(context.DeadlineExceeded))
 	assert.Empty(t, b.notResent(errors.New("connection reset")))
+}
+
+// A tick that got s.mu after Stop began sends nothing: the queue is stored
+// to go out after the restart.
+func TestNativeQueueSendsNothingOnceStopBegan(t *testing.T) {
+	srv, factory := newQuietNativeServer(t, nil)
+	a := factory.Last()
+	a.Sink().TurnStarted()
+	sendUserMessage(t, srv, "fix the build")
+	a.Sink().TurnCompleted(native.TurnResult{})
+	srv.shutdown()
+	srv.dispatchNextQueuedMessage()
+	assert.Empty(t, a.Turns())
+	assert.Len(t, srv.queue.Messages(), 1)
 }
 
 // The queue's tick sends a continuation scheduled for a usage limit's
