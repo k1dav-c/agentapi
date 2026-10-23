@@ -22,6 +22,8 @@ func eventSeq(event Event) uint64 {
 		return body.Seq
 	case RequestUpdateBody:
 		return body.Seq
+	case TaskUpdateBody:
+		return body.Seq
 	}
 	return 0
 }
@@ -29,7 +31,7 @@ func eventSeq(event Event) uint64 {
 // SubscribeEventsInput lets a client that cached the conversation resume
 // from where it left off.
 type SubscribeEventsInput struct {
-	Sync  bool   `query:"sync" doc:"Opt in to session_sync events and incremental replay. Clients that don't opt in get the full replay and no session_sync events, as before."`
+	Sync  bool   `query:"sync" doc:"Opt in to session_sync and task_update events and incremental replay. Clients that don't opt in get the full replay and neither of those events, as before."`
 	Since uint64 `query:"since" doc:"With sync: highest seq the client has applied. With a matching epoch, the replay holds only later changes."`
 	Epoch string `query:"epoch" doc:"With sync: epoch from the client's last session_sync. If it doesn't match, the full state is replayed."`
 	// LastEventID is sent by EventSource when it reconnects by itself.
@@ -38,8 +40,8 @@ type SubscribeEventsInput struct {
 
 // subscribeEvents is an SSE endpoint that sends events to the client.
 func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInput, send sse.Sender) {
-	// session_sync is opt-in: existing clients (e.g. agentapi-sdk-go) reject
-	// event types they don't know.
+	// session_sync and task_update are opt-in: existing clients (e.g.
+	// agentapi-sdk-go) reject event types they don't know.
 	sync := input.Sync
 	since, epoch := input.Since, input.Epoch
 	if since == 0 {
@@ -48,7 +50,9 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 	if !sync {
 		since, epoch = 0, ""
 	}
-	wants := func(t EventType) bool { return ConversationEvents(t) && (sync || t != EventTypeSessionSync) }
+	wants := func(t EventType) bool {
+		return ConversationEvents(t) && (sync || (t != EventTypeSessionSync && t != EventTypeTaskUpdate))
+	}
 	subscriberId, ch, replay := s.emitter.SubscribeTo(wants, since, epoch)
 	defer s.emitter.Unsubscribe(subscriberId)
 
@@ -154,6 +158,7 @@ func (s *Server) registerEventRoutes() {
 		"heartbeat":           HeartbeatBody{},
 		"session_sync":        SessionSyncBody{},
 		"request_update":      RequestUpdateBody{},
+		"task_update":         TaskUpdateBody{},
 	}, s.subscribeEvents)
 
 	sse.Register(s.api, huma.Operation{

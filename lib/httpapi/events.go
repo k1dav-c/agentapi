@@ -31,6 +31,7 @@ const (
 	EventTypeHeartbeat         EventType = "heartbeat"
 	EventTypeSessionSync       EventType = "session_sync"
 	EventTypeRequestUpdate     EventType = "request_update"
+	EventTypeTaskUpdate        EventType = "task_update"
 )
 
 type AgentStatus string
@@ -209,10 +210,17 @@ type EventEmitter struct {
 	terminalPrompt string
 	// pendingPrompt is a prompt seen on screen that hasn't been shown long
 	// enough to be published; promptTimer publishes it.
-	pendingPrompt  string
-	promptTimer    *quartz.Timer
-	errors         []ErrorBody
-	errorCount     uint64 // the errors emitted, also before a reset
+	pendingPrompt string
+	promptTimer   *quartz.Timer
+	errors        []ErrorBody
+	errorCount    uint64 // the errors emitted, also before a reset
+	// tasks derives the tasks from the changes; taskSeq holds the seq of
+	// each task's latest change, by its ID.
+	tasks   *taskTracker
+	taskSeq map[int]uint64
+	// taskTimer ends a task whose agent stays idle after an answer; see
+	// taskTracker.statusChanged.
+	taskTimer      *quartz.Timer
 	clock          quartz.Clock
 	onStatusChange func(previous, current AgentStatus)
 	// persister, if set, stores every change of the conversation state.
@@ -238,6 +246,9 @@ type Persister interface {
 	SetSettings(settings native.Settings)
 	// SetLimitStop stores the turn a usage limit stopped; nil removes it.
 	SetLimitStop(ls *native.LimitStop)
+	// PutTask stores the task the user's message id started, encoded as
+	// JSON.
+	PutTask(id int, data []byte, seq uint64)
 	// Reset removes the conversation; epoch is the new epoch.
 	Reset(epoch string)
 }
@@ -253,6 +264,8 @@ type EmitterState struct {
 	SessionEvents []transcript.SessionEvent
 	Requests      []native.RequestState
 	RequestSeqs   []uint64
+	Tasks         []Task
+	TaskSeqs      []uint64
 	SessionName   string
 }
 
@@ -352,6 +365,17 @@ func (e *EventEmitter) Restore(state EmitterState) {
 	e.requests = slices.Clone(state.Requests)
 	e.requestSeq = slices.Clone(state.RequestSeqs)
 	e.sessionName = state.SessionName
+	e.taskSeq = map[int]uint64{}
+	for i, task := range state.Tasks {
+		e.taskSeq[task.ID] = state.TaskSeqs[i]
+	}
+	// A task that ran when AgentAPI stopped is over, and the restored
+	// messages are history: a database written before tasks were kept has
+	// none for them, which are derived as done.
+	e.tasksChangedLocked(e.tasks.restore(slices.Clone(state.Tasks), e.clock.Now()))
+	if n := len(e.messages); n > 0 && !e.messages[n-1].Time.Before(e.tasks.since) {
+		e.tasks.since = e.messages[n-1].Time.Add(time.Nanosecond)
+	}
 }
 
 // Epoch identifies the current conversation state; see SessionSyncBody.
@@ -384,6 +408,8 @@ func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 	if e.clock == nil {
 		e.clock = quartz.NewReal()
 	}
+	e.tasks = newTaskTracker(e.clock.Now())
+	e.taskSeq = map[int]uint64{}
 	return e
 }
 
@@ -436,6 +462,8 @@ func (e *EventEmitter) Reset() {
 	e.richIndex = nil
 	e.requests = nil
 	e.requestSeq = nil
+	e.tasks.reset(e.clock.Now())
+	e.taskSeq = map[int]uint64{}
 	// A new epoch makes reconnecting clients drop their cache; connected
 	// clients are told now so they clear the old conversation.
 	e.epoch = newEpoch()
@@ -520,6 +548,18 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string) []Event 
 		events = append(events, Event{
 			Type:    EventTypeRequestUpdate,
 			Payload: RequestUpdateBody{RequestState: req, Seq: e.requestSeq[i]},
+		})
+	}
+
+	for _, task := range e.tasks.tasks {
+		seq := e.taskSeq[task.ID]
+		if seq <= since {
+			continue
+		}
+		replaySeq = max(replaySeq, seq)
+		events = append(events, Event{
+			Type:    EventTypeTaskUpdate,
+			Payload: TaskUpdateBody{Task: task.clone(), Seq: seq},
 		})
 	}
 

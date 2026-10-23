@@ -42,6 +42,9 @@ type RichMessage struct {
 	StopReason string             `json:"stop_reason,omitempty" doc:"Why the model stopped generating"`
 	Usage      *Usage             `json:"usage,omitempty" doc:"Token usage information"`
 	Timestamp  time.Time          `json:"timestamp" doc:"Timestamp of the message"`
+	// TaskID is the task the message belongs to: the ID of the user's
+	// message that started it.
+	TaskID *int `json:"task_id,omitempty" doc:"The task the message belongs to: the ID of the user's message that started it (GET /tasks). Missing for a message from before the first task, and for a resumed session's messages, which belong to the task that started last before them."`
 }
 
 // Clone returns a copy of m that shares nothing with it but the image

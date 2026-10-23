@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS rich_messages (pos INTEGER PRIMARY KEY, seq INTEGER N
 CREATE TABLE IF NOT EXISTS session_events (id INTEGER PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, pos INTEGER NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS queue (pos INTEGER PRIMARY KEY, data TEXT NOT NULL);`,
+	// The tasks: a user's message, by its ID, and the agent's turn on it.
+	`CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, seq INTEGER NOT NULL, data TEXT NOT NULL);`,
 }
 
 // Meta keys.
@@ -85,6 +87,13 @@ const (
 	metaKeyPrefix = "meta:"
 	queueKey      = "queue"
 )
+
+// Task is a stored task, as the server encoded it, with the seq of its last
+// change.
+type Task struct {
+	Data json.RawMessage
+	Seq  uint64
+}
 
 // Message is a stored conversation message with the seq of its last change.
 type Message struct {
@@ -119,6 +128,9 @@ type Snapshot struct {
 	Events       []transcript.SessionEvent
 	Requests     []Request
 	Queue        []QueuedMessage
+	// Tasks are stored as the server encoded them, in the order of their
+	// IDs.
+	Tasks []Task
 	// Clean is set when the AgentAPI that wrote the file closed it. After a
 	// crash it is not, and the last changes before the crash may be
 	// missing.
@@ -341,6 +353,12 @@ func (d *DB) Load() (Snapshot, error) {
 	}); err != nil {
 		return snap, fmt.Errorf("read requests: %w", err)
 	}
+	if err := d.scanJSON("tasks", "SELECT seq, data FROM tasks ORDER BY id", func(seq uint64, data []byte) error {
+		snap.Tasks = append(snap.Tasks, Task{Data: append(json.RawMessage(nil), data...), Seq: seq})
+		return nil
+	}); err != nil {
+		return snap, fmt.Errorf("read tasks: %w", err)
+	}
 	if err := d.scanJSON("queue", "SELECT 0, data FROM queue ORDER BY pos", func(_ uint64, data []byte) error {
 		var q QueuedMessage
 		if err := json.Unmarshal(data, &q); err != nil {
@@ -539,7 +557,20 @@ func (d *DB) encode(what string, v any) ([]byte, bool) {
 // TruncateMessages removes the messages with an ID of at least fromID.
 func (d *DB) TruncateMessages(fromID int) {
 	d.enqueue("", func(tx *sql.Tx) error {
-		_, err := tx.Exec("DELETE FROM messages WHERE id >= ?", fromID)
+		if _, err := tx.Exec("DELETE FROM messages WHERE id >= ?", fromID); err != nil {
+			return err
+		}
+		// A task goes with the message that started it.
+		_, err := tx.Exec("DELETE FROM tasks WHERE id >= ?", fromID)
+		return err
+	})
+}
+
+// PutTask stores the task the user's message id started, as data (JSON).
+func (d *DB) PutTask(id int, data []byte, seq uint64) {
+	d.enqueue("task:"+strconv.Itoa(id), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO tasks(id, seq, data) VALUES(?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET seq = excluded.seq, data = excluded.data`, id, seq, data)
 		return err
 	})
 }
@@ -643,7 +674,7 @@ func (d *DB) Reset(epoch string) {
 	}
 	d.pending = kept
 	d.enqueueLocked("", func(tx *sql.Tx) error {
-		for _, table := range []string{"messages", "rich_messages", "session_events", "requests"} {
+		for _, table := range []string{"messages", "rich_messages", "session_events", "requests", "tasks"} {
 			if _, err := tx.Exec("DELETE FROM " + table); err != nil {
 				return err
 			}

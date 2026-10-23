@@ -141,6 +141,9 @@ func TestEventEmitter(t *testing.T) {
 			Type:    EventTypeMessageUpdate,
 			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world!", Role: st.ConversationRoleUser, Time: now, Seq: 1},
 		}, newEvent)
+		// The user's message starts a task.
+		task := Task{ID: 1, Status: TaskStatusRunning, Prompt: "Hello, world!", StartedAt: now}
+		assert.Equal(t, Event{Type: EventTypeTaskUpdate, Payload: TaskUpdateBody{Task: task, Seq: 2}}, <-ch)
 
 		emitter.EmitMessages([]st.ConversationMessage{
 			{Id: 1, Message: "Hello, world! (updated)", Role: st.ConversationRoleUser, Time: now},
@@ -149,14 +152,18 @@ func TestEventEmitter(t *testing.T) {
 		newEvent = <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeMessageUpdate,
-			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world! (updated)", Role: st.ConversationRoleUser, Time: now, Seq: 2},
+			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world! (updated)", Role: st.ConversationRoleUser, Time: now, Seq: 3},
 		}, newEvent)
 
 		newEvent = <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeMessageUpdate,
-			Payload: MessageUpdateBody{Id: 2, Message: "What's up?", Role: st.ConversationRoleAgent, Time: now, Seq: 3},
+			Payload: MessageUpdateBody{Id: 2, Message: "What's up?", Role: st.ConversationRoleAgent, Time: now, Seq: 4},
 		}, newEvent)
+		// The agent's message is its reply.
+		reply := 2
+		task.ReplyID = &reply
+		assert.Equal(t, Event{Type: EventTypeTaskUpdate, Payload: TaskUpdateBody{Task: task, Seq: 5}}, <-ch)
 
 		emitter.EmitStatus(st.ConversationStatusStable)
 		newEvent = <-ch
@@ -379,7 +386,8 @@ func TestEventEmitterIncrementalReplay(t *testing.T) {
 	_, _, state := emitter.Subscribe()
 	sync := state[0].Payload.(SessionSyncBody)
 	require.True(t, sync.Full)
-	require.Equal(t, uint64(3), sync.Seq)
+	// The message, its task and the two rich messages.
+	require.Equal(t, uint64(4), sync.Seq)
 
 	// Later changes: a new message, and an update to an existing rich message.
 	emitter.EmitMessages([]st.ConversationMessage{
@@ -396,21 +404,25 @@ func TestEventEmitterIncrementalReplay(t *testing.T) {
 				out = append(out, fmt.Sprintf("message %d", p.Id))
 			case RichMessageUpdateBody:
 				out = append(out, "rich "+p.MessageID)
+			case TaskUpdateBody:
+				out = append(out, fmt.Sprintf("task %d", p.ID))
 			}
 		}
 		return out
 	}
 
-	// Resuming from the first replay gets only what changed since.
+	// Resuming from the first replay gets only what changed since: the
+	// task changed too, as the agent's message became its reply.
 	_, _, state = emitter.SubscribeSince(sync.Seq, sync.Epoch)
-	require.Equal(t, SessionSyncBody{Epoch: sync.Epoch, Full: false, Seq: 5}, state[0].Payload)
-	require.Equal(t, []string{"message 1", "rich m1"}, kinds(state))
-	updated := state[len(state)-1].Payload.(RichMessageUpdateBody)
+	require.Equal(t, SessionSyncBody{Epoch: sync.Epoch, Full: false, Seq: 7}, state[0].Payload)
+	require.Equal(t, []string{"message 1", "rich m1", "task 0"}, kinds(state))
+	updated := state[len(state)-2].Payload.(RichMessageUpdateBody)
 	require.Len(t, updated.Content, 2, "the replayed rich message is the merged snapshot")
+	require.Equal(t, 0, *updated.TaskID, "it belongs to the task")
 
 	// Up to date: nothing to replay.
-	_, _, state = emitter.SubscribeSince(5, sync.Epoch)
-	require.Equal(t, SessionSyncBody{Epoch: sync.Epoch, Full: false, Seq: 5}, state[0].Payload)
+	_, _, state = emitter.SubscribeSince(7, sync.Epoch)
+	require.Equal(t, SessionSyncBody{Epoch: sync.Epoch, Full: false, Seq: 7}, state[0].Payload)
 	require.Empty(t, kinds(state))
 
 	// An unknown epoch, or a seq from the future, gets the full state.
@@ -420,7 +432,7 @@ func TestEventEmitterIncrementalReplay(t *testing.T) {
 	}{{3, "other"}, {99, sync.Epoch}, {0, sync.Epoch}} {
 		_, _, state = emitter.SubscribeSince(tc.since, tc.epoch)
 		require.True(t, state[0].Payload.(SessionSyncBody).Full)
-		require.Equal(t, []string{"message 0", "message 1", "rich m1", "rich m2"}, kinds(state))
+		require.Equal(t, []string{"message 0", "message 1", "rich m1", "rich m2", "task 0"}, kinds(state))
 	}
 
 	// A reset starts a new epoch and tells connected clients right away.
@@ -430,13 +442,14 @@ func TestEventEmitterIncrementalReplay(t *testing.T) {
 	require.True(t, reset.Full)
 	require.Zero(t, reset.Seq, "nothing to wait for after a reset")
 	require.NotEqual(t, sync.Epoch, reset.Epoch)
-	_, _, state = emitter.SubscribeSince(5, sync.Epoch)
+	_, _, state = emitter.SubscribeSince(7, sync.Epoch)
 	require.True(t, state[0].Payload.(SessionSyncBody).Full)
 	require.Empty(t, kinds(state))
 }
 
 // recordingPersister records what an emitter stores.
 type recordingPersister struct {
+	tasks     map[int]string
 	messages  map[int]st.ConversationMessage
 	requests  map[string]native.RequestState
 	truncated []int
@@ -478,6 +491,12 @@ func (p *recordingPersister) SetSessionName(string)           {}
 func (p *recordingPersister) SetSessionRef(string)            {}
 func (p *recordingPersister) SetSettings(native.Settings)     {}
 func (p *recordingPersister) SetLimitStop(*native.LimitStop)  {}
+func (p *recordingPersister) PutTask(id int, data []byte, _ uint64) {
+	if p.tasks == nil {
+		p.tasks = map[int]string{}
+	}
+	p.tasks[id] = string(data)
+}
 
 func (p *recordingPersister) Reset(epoch string) {
 	p.epoch = epoch
@@ -525,6 +544,8 @@ func replayed(events []Event) []string {
 			names = append(names, "rich "+p.MessageID)
 		case RequestUpdateBody:
 			names = append(names, "request "+p.ID)
+		case TaskUpdateBody:
+			names = append(names, fmt.Sprintf("task %d", p.ID))
 		}
 	}
 	return names
@@ -566,15 +587,16 @@ func TestEventEmitterRemovedMessageResyncs(t *testing.T) {
 	sync := state[0].Payload.(SessionSyncBody)
 	assert.True(t, sync.Full)
 	assert.Equal(t, emitter.Epoch(), sync.Epoch)
-	assert.Equal(t, uint64(5), sync.Seq, "the replay ends with the newest change")
-	assert.Equal(t, []string{"message 0", "message 1", "rich m1", "request r1"}, replayed(state))
+	assert.Equal(t, uint64(7), sync.Seq, "the replay ends with the newest change: the task the taken-back message steered")
+	assert.Equal(t, []string{"message 0", "message 1", "rich m1", "request r1", "task 0"}, replayed(state))
+	assert.Empty(t, emitter.Tasks()[0].Steered)
 
 	// A message removed from the middle is gone from the stored rows too,
 	// and the ones after it are stored again.
 	msgs = append(msgs[:2:2], st.ConversationMessage{Id: 3, Role: st.ConversationRoleAgent, Message: "three", Time: now})
 	emitter.EmitMessages(msgs)
 	events, closed = drainClosed(ch)
-	require.Len(t, events, 1, "an added message is an update")
+	assert.Equal(t, []string{"message 3", "task 0"}, replayed(events), "an added message is an update, and the task's reply")
 	assert.False(t, closed)
 	emitter.EmitMessages([]st.ConversationMessage{msgs[0], msgs[2]})
 	assert.Equal(t, []int{2, 1}, persister.truncated)
@@ -601,6 +623,10 @@ func TestEventEmitterResyncLosesNothing(t *testing.T) {
 	for i := range 5 {
 		emitter.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: fmt.Sprint("r", i), Role: "assistant"})
 		want = append(want, fmt.Sprintf("rich r%d", i))
+	}
+	for i := range 5 {
+		// Each old message is a task that is done.
+		want = append(want, fmt.Sprintf("task %d", i))
 	}
 	emitter.EmitMessages(msgs)
 	_, ch, state := emitter.SubscribeSince(0, "")
@@ -753,22 +779,26 @@ func TestEventEmitterRestore(t *testing.T) {
 	_, _, state := emitter.SubscribeSince(6, "restored")
 	assert.Equal(t, SessionSyncBody{Epoch: "restored", Seq: 6}, state[0].Payload)
 	_, _, state = emitter.SubscribeSince(3, "restored")
-	var replayed []uint64
+	var seqs []uint64
 	for _, event := range state[1:] {
 		if seq := eventSeq(event); seq != 0 {
-			replayed = append(replayed, seq)
+			seqs = append(seqs, seq)
 		}
 	}
-	assert.Equal(t, []uint64{4, 5, 6}, replayed)
+	assert.Equal(t, []uint64{4, 5, 6}, seqs)
 
 	// New changes continue the restored numbering.
 	emitter.EmitSessionEvents([]transcript.SessionEvent{{Kind: "text"}})
 	assert.Equal(t, 8, emitter.SessionEvents()[2].EventID)
 	_, ch, _ := emitter.Subscribe()
-	emitter.EmitMessages(append(emitter.messages, st.ConversationMessage{Id: 2, Role: st.ConversationRoleUser, Message: "three", Time: now}))
+	later := now.Add(time.Second)
+	emitter.EmitMessages(append(emitter.messages, st.ConversationMessage{Id: 2, Role: st.ConversationRoleUser, Message: "three", Time: later}))
 	events := drain(ch)
-	require.Len(t, events, 1, "the restored messages are not sent again")
-	assert.Equal(t, MessageUpdateBody{Id: 2, Role: st.ConversationRoleUser, Message: "three", Time: now, Seq: 7}, events[0].Payload)
+	assert.Equal(t, []string{"message 2", "task 0", "task 2"}, replayed(events), "the restored messages are not sent again; the restored one's task is done")
+	assert.Equal(t, MessageUpdateBody{Id: 2, Role: st.ConversationRoleUser, Message: "three", Time: later, Seq: 7}, events[0].Payload)
+	tasks := emitter.Tasks()
+	assert.Equal(t, TaskStatusCompleted, tasks[0].Status)
+	assert.Equal(t, TaskStatusRunning, tasks[1].Status)
 }
 
 // The emitter keeps the most recently closed requests, as the conversation

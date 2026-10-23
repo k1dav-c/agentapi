@@ -51,10 +51,20 @@ func (e *EventEmitter) EmitMessages(newMessages []st.ConversationMessage) {
 	}
 	e.messages = newMessages
 	e.messageSeq = seqs
+	changed := e.tasks.messages(e.messages)
 	if removed {
+		// A task whose message went was deleted with it (TruncateMessages);
+		// the clients get the tasks with the full state.
+		for id := range e.taskSeq {
+			if e.tasks.owner(id) < 0 {
+				delete(e.taskSeq, id)
+			}
+		}
+		e.tasksStoredLocked(changed)
 		e.resyncLocked()
 		return
 	}
+	e.tasksChangedLocked(changed)
 	if e.persister != nil {
 		e.persister.SetSeq(e.epoch, e.seq)
 	}
@@ -89,7 +99,7 @@ func (e *EventEmitter) endConversationSubscriptionsLocked() {
 // wantsConversation reports whether a subscription that gets the events
 // wants accepts gets changes of the conversation; a screen stream doesn't.
 func wantsConversation(wants func(EventType) bool) bool {
-	return wants(EventTypeMessageUpdate) || wants(EventTypeRichMessageUpdate) || wants(EventTypeRequestUpdate)
+	return wants(EventTypeMessageUpdate) || wants(EventTypeRichMessageUpdate) || wants(EventTypeRequestUpdate) || wants(EventTypeTaskUpdate)
 }
 
 // EmitRichMessage emits a rich structured message from the JSONL watcher.
@@ -166,6 +176,13 @@ func (e *EventEmitter) upsertRichLocked(msg transcript.RichMessage, replace bool
 	msg.Content = nonNilContent(msg.Content)
 	key := richKey{msg.MessageID, msg.Role}
 	idx, ok := e.richIndex[key]
+	// A message belongs to the task it began in.
+	switch {
+	case ok && e.richMessages[idx].TaskID != nil:
+		msg.TaskID = e.richMessages[idx].TaskID
+	case msg.TaskID == nil:
+		msg.TaskID = e.tasks.taskAt(msg.Timestamp)
+	}
 	switch {
 	case ok && replace:
 		e.richMessages[idx] = msg
@@ -175,6 +192,7 @@ func (e *EventEmitter) upsertRichLocked(msg transcript.RichMessage, replace bool
 		existing.StopReason = msg.StopReason
 		existing.Model = msg.Model
 		existing.Usage = msg.Usage
+		existing.TaskID = msg.TaskID
 		e.richMessages[idx] = existing
 		msg = existing
 	default:

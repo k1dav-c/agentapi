@@ -30,7 +30,7 @@ func (e *EventEmitter) EmitStatus(newStatus st.ConversationStatus) {
 	}
 	e.status = newAgentStatus
 	e.lifecycle = newLifecycle
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 	if e.onStatusChange != nil && previousStatus != newAgentStatus {
 		e.onStatusChange(previousStatus, newAgentStatus)
 	}
@@ -44,7 +44,7 @@ func (e *EventEmitter) SetLifecycle(lifecycle LifecycleState) {
 	}
 	e.lifecycle = lifecycle
 	e.handoffRevision++
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
 // SetSessionName records the name the agent gave its session.
@@ -58,7 +58,7 @@ func (e *EventEmitter) SetSessionName(name string) {
 	if e.persister != nil {
 		e.persister.SetSessionName(name)
 	}
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
 func (e *EventEmitter) StatusSnapshot() StatusChangeBody {
@@ -93,7 +93,7 @@ func (e *EventEmitter) SetCapabilities(caps native.Capabilities) {
 		return
 	}
 	e.capabilities = &caps
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
 // SetSettings records the agent's settings.
@@ -104,7 +104,7 @@ func (e *EventEmitter) SetSettings(settings native.Settings) {
 		return
 	}
 	e.settings = &settings
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
 // SetUsage records the agent's usage of its limits.
@@ -115,7 +115,7 @@ func (e *EventEmitter) SetUsage(usage native.AgentUsage) {
 		return
 	}
 	e.usage = &usage
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
 // SetLimitStop records the turn a usage limit stopped (nil: none).
@@ -126,7 +126,7 @@ func (e *EventEmitter) SetLimitStop(ls *native.LimitStop) {
 		return
 	}
 	e.limitStop = ls
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
 // SetLoginRequired records that the agent waits for a login (nil: it no
@@ -143,7 +143,7 @@ func (e *EventEmitter) SetLoginRequired(login *native.LoginRequired) {
 	}
 	e.loginRequired = login
 	e.handoffRevision++
-	e.notifyChannels(EventTypeStatusChange, e.statusChangeBody())
+	e.notifyStatusLocked()
 }
 
 func (e *EventEmitter) EmitError(message string, level st.ErrorLevel) {
@@ -165,4 +165,5 @@ func (e *EventEmitter) EmitError(message string, level st.ErrorLevel) {
 	}
 
 	e.notifyChannels(EventTypeError, errorBody)
+	e.tasksChangedLocked(e.tasks.agentError(errorBody))
 }

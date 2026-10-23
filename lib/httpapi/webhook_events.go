@@ -62,22 +62,13 @@ type WebhookInstanceState struct {
 }
 
 // WebhookTask is the data of task.started, task.completed and task.failed:
-// a message of the user and the agent's turn on it.
+// the task as GET /tasks has it, with the text of the agent's reply.
 type WebhookTask struct {
-	// ID is the ID of the user's message, as in GET /messages.
-	ID              int        `json:"id"`
-	Prompt          string     `json:"prompt"`
-	StartedAt       time.Time  `json:"started_at"`
-	EndedAt         *time.Time `json:"ended_at,omitempty"`
-	DurationSeconds float64    `json:"duration_seconds,omitempty"`
-	// Outcome is completed, failed (an agent error, or the agent exited) or
-	// limited (a usage limit stopped it); empty while it runs.
-	Outcome string `json:"outcome,omitempty"`
-	// Reply is the agent's last message of the turn.
-	Reply  string            `json:"reply,omitempty"`
-	Errors []string          `json:"errors,omitempty"`
-	Limit  *native.LimitStop `json:"limit,omitempty"`
-	// Cost is what the turn's model calls cost at list prices (native
+	Task
+	DurationSeconds float64 `json:"duration_seconds,omitempty"`
+	// Reply is the text of the agent's last message of the task.
+	Reply string `json:"reply,omitempty"`
+	// Cost is what the task's model calls cost at list prices (native
 	// Claude Code, Codex and Pi).
 	Cost        *WebhookCost `json:"cost,omitempty"`
 	SessionName string       `json:"session_name,omitempty"`
@@ -206,10 +197,12 @@ type webhookObserver struct {
 	// lastError is the number of the latest error taken in; a new
 	// subscription replays the ones before it.
 	lastError uint64
-	task      *WebhookTask
-	// taskRan: the agent worked on the task, so its being stable again
-	// ends it.
-	taskRan bool
+	// started and ended are the tasks announced, by ID and start (IDs
+	// start over in a new conversation).
+	started, ended map[messageKey]bool
+	// replies are the texts of the agent's messages, for the replies of
+	// the tasks under way.
+	replies map[int]string
 }
 
 type messageKey struct {
@@ -226,6 +219,9 @@ func newWebhookObserver(webhook *webhookDispatcher, emitter *EventEmitter, now t
 		tools:    map[string]WebhookToolCall{},
 		toolDone: map[string]bool{},
 		requests: map[string]native.RequestStatus{},
+		started:  map[messageKey]bool{},
+		ended:    map[messageKey]bool{},
+		replies:  map[int]string{},
 	}
 }
 
@@ -276,6 +272,8 @@ func (o *webhookObserver) handle(event Event, quiet bool) {
 		o.requestUpdated(payload.RequestState, quiet)
 	case ErrorBody:
 		o.agentError(payload, quiet)
+	case TaskUpdateBody:
+		o.taskUpdated(payload.Task, quiet)
 	}
 }
 
@@ -312,21 +310,11 @@ func (o *webhookObserver) statusChanged(next StatusChangeBody, quiet bool) {
 			})
 		}
 	}
-	if next.Status == AgentStatusRunning {
-		o.taskRan = true
-	}
-	// A turn waiting on a request or a terminal dialog isn't over, though
-	// the agent is idle meanwhile.
-	if next.Status == AgentStatusStable && o.taskRan && next.PendingRequests == 0 && next.TerminalPrompt == "" {
+	// The agent's message is final once it is done; the task's end, which
+	// the emitter sends next, carries it as the reply.
+	if (previous.Status == AgentStatusRunning && next.Status == AgentStatusStable) ||
+		next.Lifecycle == LifecycleExited || next.Lifecycle == LifecycleFailed {
 		o.flushAgent()
-		o.endTask()
-	}
-	if next.Lifecycle == LifecycleExited || next.Lifecycle == LifecycleFailed {
-		if o.task != nil {
-			o.task.Errors = append(o.task.Errors, fmt.Sprintf("the agent %s", next.Lifecycle))
-		}
-		o.flushAgent()
-		o.endTask()
 	}
 }
 
@@ -348,18 +336,11 @@ func (o *webhookObserver) messageUpdated(msg MessageUpdateBody, quiet bool) {
 			o.flushAgent()
 		}
 		o.agent = &msg
+		o.replies[msg.Id] = msg.Message
 		return
 	}
 	o.flushAgent()
 	o.send(msg)
-	if o.task == nil {
-		o.task = &WebhookTask{
-			ID: msg.Id, Prompt: cut(msg.Message, webhookPromptLimit), StartedAt: msg.Time,
-			SessionName: o.status.SessionName,
-		}
-		o.taskRan = o.status.Status == AgentStatusRunning
-		o.webhook.emit(webhookEventTaskStarted, *o.task)
-	}
 }
 
 func (o *webhookObserver) flushAgent() {
@@ -372,9 +353,6 @@ func (o *webhookObserver) flushAgent() {
 		return
 	}
 	o.send(msg)
-	if o.task != nil {
-		o.task.Reply = cut(msg.Message, webhookMessageLimit)
-	}
 }
 
 func (o *webhookObserver) send(msg MessageUpdateBody) {
@@ -385,33 +363,51 @@ func (o *webhookObserver) send(msg MessageUpdateBody) {
 	})
 }
 
-// endTask sends task.completed or task.failed for the task under way.
-func (o *webhookObserver) endTask() {
-	task := o.task
-	if task == nil {
+// taskUpdated sends task.started when a task starts, and task.completed or
+// task.failed when it ends. A task from before (history) or seen in the
+// first replay isn't news.
+func (o *webhookObserver) taskUpdated(task Task, quiet bool) {
+	key := messageKey{task.ID, task.StartedAt}
+	if quiet || task.StartedAt.Before(o.since) {
+		o.started[key] = true
+		o.ended[key] = task.final()
 		return
 	}
-	o.task = nil
-	ended := o.now()
-	task.EndedAt = &ended
-	task.DurationSeconds = ended.Sub(task.StartedAt).Seconds()
-	task.SessionName = o.status.SessionName
+	if !o.started[key] {
+		o.started[key] = true
+		o.webhook.emit(webhookEventTaskStarted, o.webhookTask(task))
+	}
+	if !task.final() || o.ended[key] {
+		return
+	}
+	o.ended[key] = true
 	eventType := webhookEventTaskCompleted
-	switch {
-	case o.status.LimitStop != nil && !o.status.LimitStop.StoppedAt.Before(task.StartedAt):
-		task.Outcome = "limited"
-		task.Limit = o.status.LimitStop
+	if task.Status != TaskStatusCompleted {
 		eventType = webhookEventTaskFailed
-	case len(task.Errors) > 0:
-		task.Outcome = "failed"
-		eventType = webhookEventTaskFailed
-	default:
-		task.Outcome = "completed"
 	}
+	data := o.webhookTask(task)
 	if o.taskCost != nil && o.webhook.wants(eventType) {
-		task.Cost = o.taskCost(task.StartedAt)
+		data.Cost = o.taskCost(task.StartedAt)
 	}
-	o.webhook.emit(eventType, *task)
+	o.webhook.emit(eventType, data)
+	// The replies of earlier tasks aren't needed anymore.
+	for id := range o.replies {
+		if id < task.ID {
+			delete(o.replies, id)
+		}
+	}
+}
+
+// webhookTask is the webhook data of task.
+func (o *webhookObserver) webhookTask(task Task) WebhookTask {
+	data := WebhookTask{Task: task, SessionName: o.status.SessionName}
+	if task.EndedAt != nil {
+		data.DurationSeconds = task.EndedAt.Sub(task.StartedAt).Seconds()
+	}
+	if task.ReplyID != nil {
+		data.Reply = cut(o.replies[*task.ReplyID], webhookMessageLimit)
+	}
+	return data
 }
 
 func (o *webhookObserver) now() time.Time {
@@ -494,9 +490,6 @@ func (o *webhookObserver) agentError(err ErrorBody, quiet bool) {
 	o.lastError = max(o.lastError, err.number)
 	if quiet || err.Time.Before(o.since) {
 		return
-	}
-	if o.task != nil && err.Level == st.ErrorLevelError {
-		o.task.Errors = append(o.task.Errors, err.Message)
 	}
 	o.webhook.emit(webhookEventAgentError, err)
 }

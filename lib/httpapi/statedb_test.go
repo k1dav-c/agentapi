@@ -403,17 +403,19 @@ func TestEvents_LastEventID(t *testing.T) {
 	}
 	n.do(http.MethodGet, "/status", nil, &status)
 
-	// session_sync, 2 messages, status, rich message: only the last carries
-	// the replay's seq.
-	ids := readEvents(t, n.url+"/events?sync=1", nil, 5)
-	require.Len(t, ids, 5)
-	assert.Equal(t, []string{"", "", "", "", "3"}, ids)
+	// session_sync, 2 messages, status, rich message, task: only the last
+	// carries the replay's seq.
+	ids := readEvents(t, n.url+"/events?sync=1", nil, 6)
+	require.Len(t, ids, 6)
+	assert.Equal(t, []string{"", "", "", "", ""}, ids[:5])
+	end := ids[5]
+	require.NotEmpty(t, end)
 
 	// Resuming from that id replays nothing but session_sync and status.
-	header := http.Header{"Last-Event-ID": {"3"}}
+	header := http.Header{"Last-Event-ID": {end}}
 	ids = readEvents(t, n.url+"/events?sync=1&epoch="+status.Epoch, header, 2)
 	require.Len(t, ids, 2)
-	assert.Equal(t, "3", ids[1], "the replay end repeats the client's position")
+	assert.Equal(t, end, ids[1], "the replay end repeats the client's position")
 }
 
 func TestStateDB_RestoresSettings(t *testing.T) {
@@ -573,4 +575,97 @@ func TestStateDB_KeepsWebhookSettings(t *testing.T) {
 	assert.Equal(t, "https://other.example.com/hook", url)
 	assert.Equal(t, []string{"run.status_changed"}, events)
 	stop(srv, db)
+}
+
+// The server derives the conversation's tasks: GET /tasks, the task of
+// each rich message, and the state database keeps them.
+func TestStateDB_KeepsTasks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	n, srv, db, err := persistentServer(t, path, "/work")
+	require.NoError(t, err)
+	a := n.factory.Last()
+	tasks := func() []httpapi.Task {
+		var body struct {
+			Tasks []httpapi.Task `json:"tasks"`
+		}
+		require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/tasks", nil, &body))
+		return body.Tasks
+	}
+
+	n.send("Fix the bug", "")
+	require.Eventually(t, func() bool { return len(tasks()) == 1 }, 5*time.Second, 5*time.Millisecond)
+	assert.Equal(t, httpapi.TaskStatusRunning, tasks()[0].Status)
+	a.Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "Fixed."}}})
+	var rich struct {
+		Messages []transcript.RichMessage `json:"messages"`
+	}
+	n.do(http.MethodGet, "/rich-messages", nil, &rich)
+	require.Len(t, rich.Messages, 1)
+	require.NotNil(t, rich.Messages[0].TaskID)
+	assert.Equal(t, tasks()[0].ID, *rich.Messages[0].TaskID, "the message belongs to the task")
+
+	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+	require.Eventually(t, func() bool { return tasks()[0].Status == httpapi.TaskStatusCompleted }, 5*time.Second, 5*time.Millisecond)
+
+	// A usage limit stops the next one.
+	n.send("And the tests", "")
+	require.Eventually(t, func() bool { return len(tasks()) == 2 }, 5*time.Second, 5*time.Millisecond)
+	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your limit"})
+	require.Eventually(t, func() bool { return tasks()[1].Status == httpapi.TaskStatusLimited }, 5*time.Second, 5*time.Millisecond)
+	before := tasks()
+	require.NotNil(t, before[1].Limit)
+	stop(t, srv, db)
+
+	n, srv, db, err = persistentServer(t, path, "/work")
+	require.NoError(t, err)
+	defer stop(t, srv, db)
+	after := tasks()
+	require.Len(t, after, 2)
+	for i := range after {
+		assert.Equal(t, before[i].ID, after[i].ID)
+		assert.Equal(t, before[i].Status, after[i].Status)
+		assert.True(t, before[i].StartedAt.Equal(after[i].StartedAt))
+	}
+}
+
+// eventNames returns the names of the SSE events /events sends within a
+// moment: the replay.
+func eventNames(t *testing.T, url string) []string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	var names []string
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 1<<20), 1<<20)
+	for scanner.Scan() {
+		if name, ok := strings.CutPrefix(scanner.Text(), "event: "); ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// Clients that don't opt in with sync don't get the events they may not
+// know: agentapi-sdk-go rejects an unknown event type.
+func TestEvents_TaskUpdatesAreOptIn(t *testing.T) {
+	n := newNativeServer(t, nil)
+	n.send("one", "")
+	require.Eventually(t, func() bool {
+		var body struct {
+			Tasks []httpapi.Task `json:"tasks"`
+		}
+		n.do(http.MethodGet, "/tasks", nil, &body)
+		return len(body.Tasks) == 1
+	}, 5*time.Second, 5*time.Millisecond)
+
+	plain := eventNames(t, n.url+"/events")
+	assert.Contains(t, plain, "message_update")
+	assert.NotContains(t, plain, "task_update")
+	assert.NotContains(t, plain, "session_sync")
+	assert.Contains(t, eventNames(t, n.url+"/events?sync=1"), "task_update")
 }

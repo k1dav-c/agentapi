@@ -753,6 +753,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the conversation's tasks
+         * @description Returns the conversation's tasks: each message of the user's and the agent's turn on it, until the agent is done (stable again, with no request or terminal dialog open). Messages the user adds while a task runs belong to it (steered). A task is running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). /events sends task_update when one starts or changes.
+         */
+        get: operations["get-tasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/terminal": {
         parameters: {
             query?: never;
@@ -1857,6 +1877,11 @@ export interface components {
             /** @description Why the model stopped generating */
             stop_reason?: string;
             /**
+             * Format: int64
+             * @description The task the message belongs to: the ID of the user's message that started it (GET /tasks). Missing for a message from before the first task, and for a resumed session's messages, which belong to the task that started last before them.
+             */
+            task_id?: number;
+            /**
              * Format: date-time
              * @description Timestamp of the message
              */
@@ -1880,6 +1905,11 @@ export interface components {
             seq: number;
             /** @description Why the model stopped generating */
             stop_reason?: string;
+            /**
+             * Format: int64
+             * @description The task the message belongs to: the ID of the user's message that started it (GET /tasks). Missing for a message from before the first task, and for a resumed session's messages, which belong to the task that started last before them.
+             */
+            task_id?: number;
             /**
              * Format: date-time
              * @description Timestamp of the message
@@ -2182,6 +2212,91 @@ export interface components {
             readonly $schema?: string;
             /** @description The subagents the agent ran in its session, in the order they started. */
             subagents: components["schemas"]["SubagentState"][];
+        };
+        Task: {
+            /**
+             * Format: date-time
+             * @description When the agent was done; missing while it runs.
+             */
+            ended_at?: string;
+            /** @description Errors the agent reported during the task. */
+            errors?: string[] | null;
+            /**
+             * Format: int64
+             * @description The ID of the user's message that started the task, as in GET /messages.
+             */
+            id: number;
+            /** @description The usage limit stop of a limited task. */
+            limit?: components["schemas"]["LimitStop"];
+            /** @description The start of the user's message (up to 1 KiB); GET /messages has all of it. */
+            prompt: string;
+            /**
+             * Format: int64
+             * @description The ID of the agent's last message of the task, as in GET /messages.
+             */
+            reply_id?: number;
+            /**
+             * Format: date-time
+             * @description When the user's message was sent.
+             */
+            started_at: string;
+            /** @description running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). */
+            status: components["schemas"]["TaskStatus"];
+            /** @description The IDs of the user's messages added to the task while it ran (steering). */
+            steered?: number[] | null;
+        };
+        /**
+         * TaskStatus
+         * @example running
+         * @enum {string}
+         */
+        TaskStatus: "completed" | "failed" | "limited" | "running";
+        TaskUpdateBody: {
+            /**
+             * Format: date-time
+             * @description When the agent was done; missing while it runs.
+             */
+            ended_at?: string;
+            /** @description Errors the agent reported during the task. */
+            errors?: string[] | null;
+            /**
+             * Format: int64
+             * @description The ID of the user's message that started the task, as in GET /messages.
+             */
+            id: number;
+            /** @description The usage limit stop of a limited task. */
+            limit?: components["schemas"]["LimitStop"];
+            /** @description The start of the user's message (up to 1 KiB); GET /messages has all of it. */
+            prompt: string;
+            /**
+             * Format: int64
+             * @description The ID of the agent's last message of the task, as in GET /messages.
+             */
+            reply_id?: number;
+            /**
+             * Format: int64
+             * @description Sequence number of this change; see message_update.
+             */
+            seq: number;
+            /**
+             * Format: date-time
+             * @description When the user's message was sent.
+             */
+            started_at: string;
+            /** @description running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). */
+            status: components["schemas"]["TaskStatus"];
+            /** @description The IDs of the user's messages added to the task while it ran (steering). */
+            steered?: number[] | null;
+        };
+        TasksResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/TasksResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description The conversation's tasks, the earliest first. */
+            tasks: components["schemas"]["Task"][];
         };
         TerminalExitBody: {
             /** @description Why the stream ended: the shell exited (connect again for a new one), or there is no terminal. */
@@ -2612,7 +2727,7 @@ export interface operations {
     subscribeEvents: {
         parameters: {
             query?: {
-                /** @description Opt in to session_sync events and incremental replay. Clients that don't opt in get the full replay and no session_sync events, as before. */
+                /** @description Opt in to session_sync and task_update events and incremental replay. Clients that don't opt in get the full replay and neither of those events, as before. */
                 sync?: boolean;
                 /** @description With sync: epoch from the client's last session_sync. If it doesn't match, the full state is replayed. */
                 epoch?: string;
@@ -2707,6 +2822,17 @@ export interface operations {
                          * @constant
                          */
                         event: "status_change";
+                        /** @description The event ID. */
+                        id?: number;
+                        /** @description The retry time in milliseconds. */
+                        retry?: number;
+                    } | {
+                        data: components["schemas"]["TaskUpdateBody"];
+                        /**
+                         * @description The event name.
+                         * @constant
+                         */
+                        event: "task_update";
                         /** @description The event ID. */
                         id?: number;
                         /** @description The retry time in milliseconds. */
@@ -4504,6 +4630,35 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TasksResponseBody"];
+                };
+            };
+            /** @description Error */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };

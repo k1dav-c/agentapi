@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -126,6 +127,16 @@ func emitterStateFromSnapshot(snap statedb.Snapshot) EmitterState {
 		state.Requests = append(state.Requests, r.State)
 		state.RequestSeqs = append(state.RequestSeqs, r.Seq)
 		state.Seq = max(state.Seq, r.Seq)
+	}
+	for _, t := range snap.Tasks {
+		var task Task
+		if err := json.Unmarshal(t.Data, &task); err != nil {
+			// The task is derived again from its message.
+			continue
+		}
+		state.Tasks = append(state.Tasks, task)
+		state.TaskSeqs = append(state.TaskSeqs, t.Seq)
+		state.Seq = max(state.Seq, t.Seq)
 	}
 	return state
 }

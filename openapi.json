@@ -1890,6 +1890,11 @@
             "description": "Why the model stopped generating",
             "type": "string"
           },
+          "task_id": {
+            "description": "The task the message belongs to: the ID of the user's message that started it (GET /tasks). Missing for a message from before the first task, and for a resumed session's messages, which belong to the task that started last before them.",
+            "format": "int64",
+            "type": "integer"
+          },
           "timestamp": {
             "description": "Timestamp of the message",
             "format": "date-time",
@@ -1939,6 +1944,11 @@
           "stop_reason": {
             "description": "Why the model stopped generating",
             "type": "string"
+          },
+          "task_id": {
+            "description": "The task the message belongs to: the ID of the user's message that started it (GET /tasks). Missing for a message from before the first task, and for a resumed session's messages, which belong to the task that started last before them.",
+            "format": "int64",
+            "type": "integer"
           },
           "timestamp": {
             "description": "Timestamp of the message",
@@ -2567,6 +2577,169 @@
         },
         "required": [
           "subagents"
+        ],
+        "type": "object"
+      },
+      "Task": {
+        "additionalProperties": false,
+        "properties": {
+          "ended_at": {
+            "description": "When the agent was done; missing while it runs.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "errors": {
+            "description": "Errors the agent reported during the task.",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "id": {
+            "description": "The ID of the user's message that started the task, as in GET /messages.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "limit": {
+            "$ref": "#/components/schemas/LimitStop",
+            "description": "The usage limit stop of a limited task."
+          },
+          "prompt": {
+            "description": "The start of the user's message (up to 1 KiB); GET /messages has all of it.",
+            "type": "string"
+          },
+          "reply_id": {
+            "description": "The ID of the agent's last message of the task, as in GET /messages.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "started_at": {
+            "description": "When the user's message was sent.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus",
+            "description": "running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it)."
+          },
+          "steered": {
+            "description": "The IDs of the user's messages added to the task while it ran (steering).",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "prompt",
+          "started_at",
+          "status"
+        ],
+        "type": "object"
+      },
+      "TaskStatus": {
+        "enum": [
+          "completed",
+          "failed",
+          "limited",
+          "running"
+        ],
+        "example": "running",
+        "title": "TaskStatus",
+        "type": "string"
+      },
+      "TaskUpdateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ended_at": {
+            "description": "When the agent was done; missing while it runs.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "errors": {
+            "description": "Errors the agent reported during the task.",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "id": {
+            "description": "The ID of the user's message that started the task, as in GET /messages.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "limit": {
+            "$ref": "#/components/schemas/LimitStop",
+            "description": "The usage limit stop of a limited task."
+          },
+          "prompt": {
+            "description": "The start of the user's message (up to 1 KiB); GET /messages has all of it.",
+            "type": "string"
+          },
+          "reply_id": {
+            "description": "The ID of the agent's last message of the task, as in GET /messages.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "seq": {
+            "description": "Sequence number of this change; see message_update.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "started_at": {
+            "description": "When the user's message was sent.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus",
+            "description": "running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it)."
+          },
+          "steered": {
+            "description": "The IDs of the user's messages added to the task while it ran (steering).",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "prompt",
+          "seq",
+          "started_at",
+          "status"
+        ],
+        "type": "object"
+      },
+      "TasksResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/TasksResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "tasks": {
+            "description": "The conversation's tasks, the earliest first.",
+            "items": {
+              "$ref": "#/components/schemas/Task"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tasks"
         ],
         "type": "object"
       },
@@ -3243,12 +3416,12 @@
         "operationId": "subscribeEvents",
         "parameters": [
           {
-            "description": "Opt in to session_sync events and incremental replay. Clients that don't opt in get the full replay and no session_sync events, as before.",
+            "description": "Opt in to session_sync and task_update events and incremental replay. Clients that don't opt in get the full replay and neither of those events, as before.",
             "explode": false,
             "in": "query",
             "name": "sync",
             "schema": {
-              "description": "Opt in to session_sync events and incremental replay. Clients that don't opt in get the full replay and no session_sync events, as before.",
+              "description": "Opt in to session_sync and task_update events and incremental replay. Clients that don't opt in get the full replay and neither of those events, as before.",
               "type": "boolean"
             }
           },
@@ -3474,6 +3647,32 @@
                           "event"
                         ],
                         "title": "Event status_change",
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "data": {
+                            "$ref": "#/components/schemas/TaskUpdateBody"
+                          },
+                          "event": {
+                            "const": "task_update",
+                            "description": "The event name.",
+                            "type": "string"
+                          },
+                          "id": {
+                            "description": "The event ID.",
+                            "type": "integer"
+                          },
+                          "retry": {
+                            "description": "The retry time in milliseconds.",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "data",
+                          "event"
+                        ],
+                        "title": "Event task_update",
                         "type": "object"
                       }
                     ]
@@ -5797,6 +5996,35 @@
         "tags": [
           "Sessions"
         ]
+      }
+    },
+    "/tasks": {
+      "get": {
+        "description": "Returns the conversation's tasks: each message of the user's and the agent's turn on it, until the agent is done (stable again, with no request or terminal dialog open). Messages the user adds while a task runs belong to it (steered). A task is running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). /events sends task_update when one starts or changes.",
+        "operationId": "get-tasks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TasksResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get the conversation's tasks"
       }
     },
     "/terminal": {

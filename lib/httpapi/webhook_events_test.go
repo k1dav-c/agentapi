@@ -75,41 +75,73 @@ func TestWebhookEventPatterns(t *testing.T) {
 
 // A task: the user's message, the agent's work and its reply, until the
 // agent is stable again.
+// observed is an emitter, and an observer that takes in what it sends.
+type observed struct {
+	emitter *EventEmitter
+	o       *webhookObserver
+	events  <-chan Event
+}
+
+func newObserved(t *testing.T, d *webhookDispatcher, clock quartz.Clock) *observed {
+	t.Helper()
+	emitter := NewEventEmitter(WithClock(clock), WithSubscriptionBufSize(256))
+	o := newWebhookObserver(d, emitter, clock.Now())
+	o.clock = clock
+	_, events, replay := emitter.SubscribeTo(webhookObservedEvents, 0, "")
+	for _, event := range replay {
+		o.handle(event, true)
+	}
+	return &observed{emitter: emitter, o: o, events: events}
+}
+
+// pump hands the observer what the emitter sent since the last time.
+func (x *observed) pump() {
+	for {
+		select {
+		case event := <-x.events:
+			x.o.handle(event, false)
+		default:
+			return
+		}
+	}
+}
+
 func TestWebhookObserverTask(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
 	start := clock.Now()
 	d := testDispatcher(t, WebhookConfig{Events: []string{"*"}}, clock)
-	emitter := NewEventEmitter(WithClock(clock))
-	o := newWebhookObserver(d, emitter, start)
-	o.clock = clock
-	o.taskCost = func(since time.Time) *WebhookCost {
+	x := newObserved(t, d, clock)
+	x.o.taskCost = func(since time.Time) *WebhookCost {
 		assert.Equal(t, start, since)
 		return &WebhookCost{USD: 0.25, Calls: 2}
 	}
-	status := func(s AgentStatus) Event {
-		return Event{Type: EventTypeStatusChange, Payload: StatusChangeBody{Status: s, Lifecycle: LifecycleRunning, SessionName: "Fix the bug"}}
-	}
-	o.handle(status(AgentStatusStable), true)
+	e := x.emitter
+	e.EmitStatus(st.ConversationStatusStable)
+	e.SetSessionName("Fix the bug")
+	x.pump()
+	queued(d)
 
-	o.handle(Event{Payload: MessageUpdateBody{Id: 0, Role: st.ConversationRoleUser, Message: "Fix the bug", Time: start}}, false)
-	o.handle(status(AgentStatusRunning), false)
+	prompt := st.ConversationMessage{Id: 0, Role: st.ConversationRoleUser, Message: "Fix the bug", Time: start}
+	e.EmitMessages([]st.ConversationMessage{prompt})
+	e.EmitStatus(st.ConversationStatusChanging)
 	failed := false
-	o.handle(Event{Payload: RichMessageUpdateBody{RichMessage: transcript.RichMessage{Role: "assistant", Timestamp: start, Content: []transcript.RichContentBlock{
+	e.EmitRichMessage(transcript.RichMessage{MessageID: "a1", Role: "assistant", Timestamp: start, Content: []transcript.RichContentBlock{
 		{Type: "tool_use", ToolUseID: "t1", ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"go test"}`)},
-	}}}}, false)
+	}})
 	// Still running: no result yet.
-	o.handle(Event{Payload: RichMessageUpdateBody{RichMessage: transcript.RichMessage{Role: "user", Timestamp: start, Content: []transcript.RichContentBlock{
+	e.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: "r1", Role: "user", Timestamp: start, Content: []transcript.RichContentBlock{
 		{Type: "tool_result", ToolUseID: "t1", Text: "ok", Status: "running"},
-	}}}}, false)
-	o.handle(Event{Payload: RichMessageUpdateBody{RichMessage: transcript.RichMessage{Role: "user", Timestamp: start, Content: []transcript.RichContentBlock{
+	}})
+	e.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: "r1", Role: "user", Timestamp: start, Content: []transcript.RichContentBlock{
 		{Type: "tool_result", ToolUseID: "t1", Text: "ok", Status: "completed", IsError: &failed},
-	}}}}, false)
+	}})
 	// The reply streams in: sent once it is final.
-	o.handle(Event{Payload: MessageUpdateBody{Id: 1, Role: st.ConversationRoleAgent, Message: "Fix", Time: start}}, false)
-	o.handle(Event{Payload: MessageUpdateBody{Id: 1, Role: st.ConversationRoleAgent, Message: "Fixed it.", Time: start}}, false)
+	e.EmitMessages([]st.ConversationMessage{prompt, {Id: 1, Role: st.ConversationRoleAgent, Message: "Fix", Time: start}})
+	e.EmitMessages([]st.ConversationMessage{prompt, {Id: 1, Role: st.ConversationRoleAgent, Message: "Fixed it.", Time: start}})
 	clock.Advance(90 * time.Second)
-	o.handle(status(AgentStatusStable), false)
+	e.EmitStatus(st.ConversationStatusStable)
+	x.pump()
 
 	events := queued(d)
 	require.Equal(t, []string{
@@ -119,7 +151,7 @@ func TestWebhookObserverTask(t *testing.T) {
 
 	started := events[1].Data.(WebhookTask)
 	assert.Equal(t, "Fix the bug", started.Prompt)
-	assert.Empty(t, started.Outcome)
+	assert.Equal(t, TaskStatusRunning, started.Status)
 
 	tool := events[2].Data.(WebhookToolCall)
 	assert.Equal(t, "Bash", tool.Name)
@@ -130,8 +162,9 @@ func TestWebhookObserverTask(t *testing.T) {
 	assert.Equal(t, "Fixed it.", reply.Content)
 
 	done := events[4].Data.(WebhookTask)
-	assert.Equal(t, "completed", done.Outcome)
+	assert.Equal(t, TaskStatusCompleted, done.Status)
 	assert.Equal(t, "Fixed it.", done.Reply)
+	assert.Equal(t, 1, *done.ReplyID)
 	assert.Equal(t, 90.0, done.DurationSeconds)
 	assert.Equal(t, 0.25, done.Cost.USD)
 	assert.Equal(t, "Fix the bug", done.SessionName)
@@ -145,39 +178,48 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 	clock := quartz.NewMock(t)
 	start := clock.Now()
 	d := testDispatcher(t, WebhookConfig{Events: []string{"request.*", "login.*", "limit.*", "task.completed", "task.failed", "agent.error"}}, clock)
-	o := newWebhookObserver(d, NewEventEmitter(WithClock(clock)), start)
-	o.clock = clock
-	o.handle(Event{Payload: StatusChangeBody{Status: AgentStatusStable}}, true)
+	x := newObserved(t, d, clock)
+	e := x.emitter
+	e.EmitStatus(st.ConversationStatusStable)
 
 	request := native.RequestState{Request: native.Request{ID: "r1"}, Status: native.RequestStatusPending}
-	o.handle(Event{Payload: RequestUpdateBody{RequestState: request}}, false)
-	o.handle(Event{Payload: RequestUpdateBody{RequestState: request}}, false)
+	e.EmitRequest(request)
+	e.EmitRequest(request)
 	request.Status = native.RequestStatusResolved
-	o.handle(Event{Payload: RequestUpdateBody{RequestState: request}}, false)
+	e.EmitRequest(request)
 
-	// A turn waiting on an approval goes on once it is answered.
-	o.handle(Event{Payload: MessageUpdateBody{Id: 5, Role: st.ConversationRoleUser, Message: "Deploy", Time: start}}, false)
-	o.handle(Event{Payload: StatusChangeBody{Status: AgentStatusRunning}}, false)
+	// A turn waiting on an approval goes on once it is answered: the
+	// agent is idle for a moment in between.
+	deploy := st.ConversationMessage{Id: 0, Role: st.ConversationRoleUser, Message: "Deploy", Time: start}
+	e.EmitMessages([]st.ConversationMessage{deploy})
+	e.EmitStatus(st.ConversationStatusChanging)
 	approval := native.RequestState{Request: native.Request{ID: "r2"}, Status: native.RequestStatusPending}
-	o.handle(Event{Payload: RequestUpdateBody{RequestState: approval}}, false)
-	o.handle(Event{Payload: StatusChangeBody{Status: AgentStatusStable, PendingRequests: 1}}, false)
+	e.EmitRequest(approval)
+	e.EmitStatus(st.ConversationStatusStable)
 	approval.Status = native.RequestStatusResolved
-	o.handle(Event{Payload: RequestUpdateBody{RequestState: approval}}, false)
-	o.handle(Event{Payload: StatusChangeBody{Status: AgentStatusRunning}}, false)
-	o.handle(Event{Payload: StatusChangeBody{Status: AgentStatusStable}}, false)
+	e.EmitRequest(approval)
+	e.EmitStatus(st.ConversationStatusChanging)
+	e.EmitStatus(st.ConversationStatusStable)
 
-	login := &native.LoginRequired{Agent: "Claude Code", Command: "claude auth login"}
-	o.handle(Event{Payload: StatusChangeBody{Status: AgentStatusStable, LoginRequired: login}}, false)
-	o.handle(Event{Payload: StatusChangeBody{Status: AgentStatusStable}}, false)
+	e.SetLoginRequired(&native.LoginRequired{Agent: "Claude Code", Command: "claude auth login"})
+	e.SetLoginRequired(nil)
 
-	o.handle(Event{Payload: StatusChangeBody{Status: AgentStatusStable, TerminalPrompt: "1. Yes\n2. No"}}, false)
-	o.handle(Event{Payload: StatusChangeBody{Status: AgentStatusStable}}, false)
+	// A terminal dialog is published once it settled on the screen.
+	e.mu.Lock()
+	e.updateTerminalPromptLocked("1. Yes\n2. No")
+	e.mu.Unlock()
+	clock.Advance(terminalPromptSettle).MustWait(t.Context())
+	e.mu.Lock()
+	e.updateTerminalPromptLocked("")
+	e.mu.Unlock()
 
-	o.handle(Event{Payload: MessageUpdateBody{Id: 0, Role: st.ConversationRoleUser, Message: "Go on", Time: start}}, false)
-	o.handle(Event{Payload: StatusChangeBody{Status: AgentStatusRunning}}, false)
-	o.handle(Event{Payload: ErrorBody{Message: "warned", Level: st.ErrorLevelWarning, Time: start}}, false)
-	limit := &native.LimitStop{Message: "You've hit your limit", StoppedAt: start.Add(time.Minute)}
-	o.handle(Event{Payload: StatusChangeBody{Status: AgentStatusStable, LimitStop: limit}}, false)
+	goOn := st.ConversationMessage{Id: 1, Role: st.ConversationRoleUser, Message: "Go on", Time: start}
+	e.EmitMessages([]st.ConversationMessage{deploy, goOn})
+	e.EmitStatus(st.ConversationStatusChanging)
+	e.EmitError("warned", st.ErrorLevelWarning)
+	e.SetLimitStop(&native.LimitStop{Message: "You've hit your limit", StoppedAt: start})
+	e.EmitStatus(st.ConversationStatusStable)
+	x.pump()
 
 	events := queued(d)
 	require.Equal(t, []string{
@@ -193,7 +235,7 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 	assert.Equal(t, "1. Yes\n2. No", prompt.Prompt)
 	assert.Equal(t, prompt.ID, events[8].Data.(WebhookTerminalPrompt).ID)
 	task := events[11].Data.(WebhookTask)
-	assert.Equal(t, "limited", task.Outcome)
+	assert.Equal(t, TaskStatusLimited, task.Status)
 	assert.Empty(t, task.Errors, "a warning doesn't fail a task")
 }
 
@@ -300,7 +342,7 @@ func TestWebhookSignature(t *testing.T) {
 	defer server.Close()
 	d := testDispatcher(t, WebhookConfig{URL: server.URL, Secret: "s3cret", Events: []string{"*"}}, quartz.NewReal())
 	d.setInstance(WebhookInstance{ID: "host:3284"})
-	require.True(t, d.emit(webhookEventTaskStarted, WebhookTask{ID: 1, Prompt: "Hi"}))
+	require.True(t, d.emit(webhookEventTaskStarted, WebhookTask{Task: Task{ID: 1, Prompt: "Hi"}}))
 	d.deliver(t.Context(), <-d.queue)
 
 	timestamp := header.Get("X-AgentAPI-Timestamp")
@@ -339,7 +381,7 @@ func TestWebhookTemplateData(t *testing.T) {
 	t.Parallel()
 	d := testDispatcher(t, WebhookConfig{Events: []string{"*"}, PayloadTemplate: `{"text":"{{.Instance.ID}}: {{.Data.prompt}}"}`}, quartz.NewReal())
 	d.setInstance(WebhookInstance{ID: "box:1"})
-	require.True(t, d.emit(webhookEventTaskStarted, WebhookTask{Prompt: "Hi"}))
+	require.True(t, d.emit(webhookEventTaskStarted, WebhookTask{Task: Task{Prompt: "Hi"}}))
 	body, err := d.renderBody(<-d.queue)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"text":"box:1: Hi"}`, string(body))
