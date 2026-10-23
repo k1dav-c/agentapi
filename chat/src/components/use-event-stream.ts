@@ -1,6 +1,6 @@
 "use client";
 
-import {useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction} from "react";
+import {startTransition, useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction} from "react";
 import {toast} from "sonner";
 import {getReconnectDelay} from "@/lib/reconnect";
 import {loadSession, mergeByKey} from "@/lib/session-cache";
@@ -105,27 +105,32 @@ export function useEventStream({
     pending.replace = false;
     for (const update of [...messageUpdates, ...richUpdates, ...requestUpdates]) syncRef.current.applied(update.seq ?? 0);
 
-    if (replace || messageUpdates.length > 0) {
-      setMessages((previous) => {
-        // A server message supersedes drafts that are still being sent;
-        // failed drafts stay until they are retried or dismissed.
-        const kept = previous.filter(
-          (message) =>
-            (replace ? isDraftMessage(message) : true) &&
-            (!isDraftMessage(message) || message.deliveryStatus === "failed"),
+    // The transcript renders in a transition: a long one takes a while,
+    // and typing or a click shouldn't wait for it. Requests apply at once
+    // (see request_update).
+    startTransition(() => {
+      if (replace || messageUpdates.length > 0) {
+        setMessages((previous) => {
+          // A server message supersedes drafts that are still being sent;
+          // failed drafts stay until they are retried or dismissed.
+          const kept = previous.filter(
+            (message) =>
+              (replace ? isDraftMessage(message) : true) &&
+              (!isDraftMessage(message) || message.deliveryStatus === "failed"),
+          );
+          return mergeByKey(
+            kept,
+            messageUpdates.map(withoutSeq),
+            (message) => (isDraftMessage(message) ? undefined : String(message.id)),
+          );
+        });
+      }
+      if (replace || richUpdates.length > 0) {
+        setRichMessages((previous) =>
+          mergeByKey(replace ? [] : previous, richUpdates.map(withoutSeq), richMessageKey),
         );
-        return mergeByKey(
-          kept,
-          messageUpdates.map(withoutSeq),
-          (message) => (isDraftMessage(message) ? undefined : String(message.id)),
-        );
-      });
-    }
-    if (replace || richUpdates.length > 0) {
-      setRichMessages((previous) =>
-        mergeByKey(replace ? [] : previous, richUpdates.map(withoutSeq), richMessageKey),
-      );
-    }
+      }
+    });
     if (replace || requestUpdates.length > 0) {
       // Requests keep their seq: it decides between an event and a state
       // read from the REST API (see mergeRequests).

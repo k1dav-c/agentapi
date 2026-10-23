@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
-import {filterTasks, timelineSignature} from "./task-filter";
-import {buildTimeline, collectToolCalls} from "./task-timeline";
+import {filterTasks} from "./task-filter";
+import {buildTranscript} from "./task-timeline";
 import type {Message, RichMessage} from "./conversation";
 
 const messages: Message[] = [
@@ -20,7 +20,7 @@ const rich: RichMessage[] = [
     ],
   },
 ];
-const timeline = buildTimeline(messages, rich, collectToolCalls(rich));
+const {timeline} = buildTranscript(messages, rich);
 
 describe("task filter", () => {
   test("no query and no filter keeps every task, with its place and status", () => {
@@ -41,12 +41,5 @@ describe("task filter", () => {
     expect(found.map(({index}) => index)).toEqual([0, 1]);
     expect(found[0].matchCount).toBeGreaterThan(0);
     expect(filterTasks(timeline.tasks, "stable", "all", "nowhere")).toEqual([]);
-  });
-
-  test("the signature changes with what shows, not otherwise", () => {
-    const same = buildTimeline(messages.map((message) => ({...message})), rich, collectToolCalls(rich));
-    expect(timelineSignature(same)).toBe(timelineSignature(timeline));
-    const grown = buildTimeline([...messages.slice(0, 3), {...messages[3], content: "Running… done"}], rich, collectToolCalls(rich));
-    expect(timelineSignature(grown)).not.toBe(timelineSignature(timeline));
   });
 });

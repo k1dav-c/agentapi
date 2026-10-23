@@ -10,18 +10,20 @@ const FLOATING_BUTTONS_MIN_HEIGHT = 140;
 
 // useTranscriptScroll keeps the transcript in scrollArea pinned to its
 // end while the reader is there, counts the updates that arrive while they
-// read further up, and moves between the tasks' prompts. signature changes
-// with what the transcript shows; layout with what changes its size.
+// read further up, and moves between the tasks' prompts. content is a new
+// object whenever what the transcript shows changes (the timeline: its
+// objects stay while nothing changes); layout changes with what changes its
+// size.
 export function useTranscriptScroll(
   scrollArea: HTMLDivElement | null,
   {
     messages,
-    signature,
+    content,
     serverStatus,
     layout,
   }: {
     messages: readonly {role: string}[];
-    signature: string;
+    content: unknown;
     serverStatus: ServerStatus;
     layout: string;
   },
@@ -117,7 +119,7 @@ export function useTranscriptScroll(
       setUnreadCount((count) => count + 1);
     }
     lastScrollHeightRef.current = currentHeight;
-  }, [signature, messages, scrollArea, scrollToBottom, serverStatus]);
+  }, [content, messages, scrollArea, scrollToBottom, serverStatus]);
 
   return {
     showScrollButton: roomForButtons && showScrollButton,

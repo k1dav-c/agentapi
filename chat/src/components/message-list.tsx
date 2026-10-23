@@ -1,6 +1,6 @@
 "use client";
 
-import React, {useCallback, useEffect, useMemo, useRef, useState} from "react";
+import React, {useCallback, useEffect, useMemo, useState} from "react";
 import {Search} from "lucide-react";
 import {createPortal} from "react-dom";
 import {Button} from "./ui/button";
@@ -9,8 +9,8 @@ import type {DraftMessage, Message, RichMessage} from "@/lib/conversation";
 import type {ServerStatus} from "@/lib/agent-status";
 import {formatDateLabel} from "@/lib/format-time";
 import {costDetails, formatUSD, taskCosts} from "@/lib/cost";
-import {filterTasks, timelineSignature} from "@/lib/task-filter";
-import {type Timeline, type ToolCall, buildTimeline, collectToolCalls, shareTimeline, shareToolCalls} from "@/lib/task-timeline";
+import {filterTasks} from "@/lib/task-filter";
+import {TimelineBuilder} from "@/lib/task-timeline";
 import {HEADER_ACTIONS_ID} from "@/app/header";
 import {useChat} from "./chat-provider";
 import {TaskGroup} from "./message-list/task-group";
@@ -63,27 +63,21 @@ export default function MessageList({
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
   useEffect(() => setHeaderSlot(document.getElementById(HEADER_ACTIONS_ID)), []);
   // Rebuilt as messages stream; unchanged tasks and tool calls keep their
-  // objects (shareTimeline), so their memoized components don't render
+  // objects (TimelineBuilder), so their memoized components don't render
   // again.
-  const sharedCalls = useRef<ToolCall[]>([]);
-  const toolCalls = useMemo(
-    () => (sharedCalls.current = shareToolCalls(sharedCalls.current, collectToolCalls(richMessages))),
-    [richMessages],
-  );
-  const sharedTimeline = useRef<Timeline | null>(null);
-  const timeline = useMemo(
-    () => (sharedTimeline.current = shareTimeline(sharedTimeline.current, buildTimeline(messages, richMessages, toolCalls))),
-    [messages, richMessages, toolCalls],
-  );
+  const [builder] = useState(() => new TimelineBuilder());
+  const {timeline} = useMemo(() => builder.build(messages, richMessages), [builder, messages, richMessages]);
   // What each task spent, as text, so a task whose cost didn't change
-  // doesn't render again. A task not sent yet has none.
+  // doesn't render again. A task not sent yet has none. Worked out again
+  // when the cost or the tasks' prompts change, not as their replies
+  // stream: it goes through every model call for every task.
+  const starts = timeline.tasks.map((task) => (task.prompt.id === undefined ? "" : (task.prompt.time ?? ""))).join("\n");
   const costs = useMemo(() => {
     if (!sessionCost) return [];
-    const starts = timeline.tasks.map((task) => (task.prompt.id === undefined ? undefined : task.prompt.time));
-    return taskCosts(starts, sessionCost.calls).map((cost) =>
+    return taskCosts(starts.split("\n").map((start) => start || undefined), sessionCost.calls).map((cost) =>
       cost && {label: formatUSD(cost.usd), details: costDetails(cost, cost.unpriced)},
     );
-  }, [sessionCost, timeline.tasks]);
+  }, [sessionCost, starts]);
   const filteredTasks = useMemo(
     () => filterTasks(timeline.tasks, serverStatus, taskFilter, taskQuery),
     [serverStatus, taskFilter, taskQuery, timeline.tasks],
@@ -95,11 +89,10 @@ export default function MessageList({
       : 0;
   const visibleTasks = hiddenTaskCount > 0 ? filteredTasks.slice(hiddenTaskCount) : filteredTasks;
   const renderedTaskKeys = useProgressiveTasks(visibleTasks.slice(0, -1).map(({task}) => task.key), filtersActive);
-  const signature = useMemo(() => timelineSignature(timeline), [timeline]);
   const isEmpty = timeline.tasks.length === 0;
   const scroll = useTranscriptScroll(scrollArea, {
     messages,
-    signature,
+    content: timeline,
     serverStatus,
     layout: `${isEmpty}:${searchOpen}:${filtersActive}`,
   });
