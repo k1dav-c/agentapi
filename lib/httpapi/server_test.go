@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1010,6 +1011,83 @@ func TestServer_UploadFiles_Errors(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, string(body), "file size exceeds 10MB limit")
 	})
+}
+
+// uploadFile posts content as the form's file to /upload and returns the
+// response's status.
+func uploadFile(t *testing.T, url string, content []byte) int {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("file", "notes.txt")
+	require.NoError(t, err)
+	_, err = part.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	resp, err := http.Post(url+"/upload", writer.FormDataContentType(), &buf)
+	require.NoError(t, err)
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	return resp.StatusCode
+}
+
+// Uploads at once, as the chat sends a message's attachments: huma used
+// to change the operation shared by the requests on each one (a data race
+// the race detector reports), and to add a parameter to the schema.
+func TestServer_UploadsDontChangeTheSchema(t *testing.T) {
+	t.Parallel()
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeClaude,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		UploadDir:      t.TempDir(),
+	})
+	require.NoError(t, err)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	before := srv.GetOpenAPI()
+
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			assert.Equal(t, http.StatusOK, uploadFile(t, ts.URL, []byte(fmt.Sprint("file ", i))))
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, before, srv.GetOpenAPI())
+	resp, err := http.Get(ts.URL + "/openapi.json")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Parameters []any `json:"parameters"`
+		} `json:"paths"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&doc))
+	assert.Empty(t, doc.Paths["/upload"]["post"].Parameters)
+}
+
+// A body far larger than the limit is refused without being parsed into
+// temporary files.
+func TestServer_UploadTooLarge(t *testing.T) {
+	t.Parallel()
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeClaude,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		UploadDir:      t.TempDir(),
+	})
+	require.NoError(t, err)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	assert.Equal(t, http.StatusBadRequest, uploadFile(t, ts.URL, make([]byte, 12<<20)))
 }
 
 func TestServer_Stop_Idempotency(t *testing.T) {
