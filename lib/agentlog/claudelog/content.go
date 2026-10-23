@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -47,25 +48,33 @@ func (b userBlock) rich() transcript.RichContentBlock {
 // Code's (an interrupted turn); only the tool results are tool_result
 // blocks. It returns nil for content that is neither.
 func UserBlocks(content json.RawMessage) []transcript.RichContentBlock {
+	blocks, _ := userContent(content)
+	return blocks
+}
+
+// userContent is UserBlocks, which also says why content doesn't decode.
+func userContent(content []byte) ([]transcript.RichContentBlock, error) {
 	switch {
 	case len(content) == 0:
-		return nil
+		return nil, nil
 	case content[0] == '"':
-		var text string
-		if json.Unmarshal(content, &text) != nil {
-			return nil
+		text, ok := agentlog.Unquote(content)
+		if !ok {
+			return nil, errors.New("user content is a malformed string")
 		}
-		return []transcript.RichContentBlock{{Type: "text", Text: text}}
+		return []transcript.RichContentBlock{{Type: "text", Text: text}}, nil
+	case content[0] != '[':
+		return nil, nil
 	}
 	var blocks []userBlock
-	if json.Unmarshal(content, &blocks) != nil {
-		return nil
+	if err := decode(content, &blocks); err != nil {
+		return nil, err
 	}
 	rich := make([]transcript.RichContentBlock, 0, len(blocks))
 	for _, b := range blocks {
 		rich = append(rich, b.rich())
 	}
-	return rich
+	return rich, nil
 }
 
 // UserBlock converts one block of a user message's content, as UserBlocks
@@ -167,8 +176,7 @@ func ToolResultText(raw json.RawMessage) string {
 		return ""
 	}
 	if raw[0] == '"' {
-		var s string
-		if json.Unmarshal(raw, &s) == nil {
+		if s, ok := agentlog.Unquote(raw); ok {
 			return s
 		}
 	}

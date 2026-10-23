@@ -1,6 +1,7 @@
 package agentlog
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -67,5 +68,34 @@ func TestElements(t *testing.T) {
 	assert.True(t, Elements([]byte(` [ ] `), func([]byte) bool { t.Fatal("no elements"); return false }))
 	for _, bad := range []string{`{}`, `"[]"`, `[1,2`, `[1 2]`, ``} {
 		assert.False(t, Elements([]byte(bad), func([]byte) bool { return true }), bad)
+	}
+}
+
+func TestUnquote(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{
+		`""`,
+		`"plain"`,
+		`"line\nnext\ttab \"quoted\" back\\slash \/ \b\f\r"`,
+		`"\u65e5\u672c \u00e9 \uD83D\uDE00 \ud83d\ude00"`,
+		`"lone \ud800 surrogate \udc00 and \ud800\u0041"`,
+		`"日本語 😀 bytes"`,
+		"\"invalid \xff utf-8\"",
+		"\"invalid \xff with \\n escape\"",
+		`"bad \x escape"`,
+		`"bad \u12 escape"`,
+		`"trailing \"`,
+		`"unescaped " quote"`,
+		`"unterminated`,
+		`unquoted`,
+		`12`,
+	} {
+		var want string
+		wantOK := json.Unmarshal([]byte(value), &want) == nil
+		got, ok := Unquote([]byte(value))
+		assert.Equal(t, wantOK, ok, value)
+		if wantOK {
+			assert.Equal(t, want, got, value)
+		}
 	}
 }

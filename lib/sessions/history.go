@@ -6,6 +6,7 @@ package sessions
 import (
 	"errors"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -137,6 +138,7 @@ func (s *Store) read(path string) SessionHistory {
 	// places them.
 	texts := make(map[int][]string)
 	times := make(map[int]time.Time)
+	promptBefore := promptFinder(history.Messages)
 	for _, key := range order {
 		m := latest[key]
 		history.Rich = append(history.Rich, m)
@@ -147,7 +149,7 @@ func (s *Store) read(path string) SessionHistory {
 		if text == "" {
 			continue
 		}
-		prompt := promptBefore(history.Messages, m.Timestamp)
+		prompt := promptBefore(m.Timestamp)
 		texts[prompt] = append(texts[prompt], text)
 		if _, ok := times[prompt]; !ok {
 			times[prompt] = m.Timestamp
@@ -171,14 +173,24 @@ func (s *Store) read(path string) SessionHistory {
 	return history
 }
 
-// promptBefore returns the index of the last prompt sent before t, or -1.
-func promptBefore(prompts []st.ConversationMessage, t time.Time) int {
-	for i := len(prompts) - 1; i >= 0; i-- {
-		if !prompts[i].Time.After(t) {
-			return i
+// promptFinder returns a function that returns the index of the last
+// prompt sent before t, or -1. A long session has thousands of prompts
+// and tens of thousands of messages: while the prompts are in the order
+// of their times, as a log has them, it searches them by halves.
+func promptFinder(prompts []st.ConversationMessage) func(t time.Time) int {
+	if slices.IsSortedFunc(prompts, func(a, b st.ConversationMessage) int { return a.Time.Compare(b.Time) }) {
+		return func(t time.Time) int {
+			return sort.Search(len(prompts), func(i int) bool { return prompts[i].Time.After(t) }) - 1
 		}
 	}
-	return -1
+	return func(t time.Time) int {
+		for i := len(prompts) - 1; i >= 0; i-- {
+			if !prompts[i].Time.After(t) {
+				return i
+			}
+		}
+		return -1
+	}
 }
 
 // hasToolResult reports whether a rich message holds a tool result.

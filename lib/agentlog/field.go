@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"time"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // Field returns the raw JSON value of a top-level key of the object a log
@@ -85,6 +87,115 @@ func StringField(line []byte, key string) (string, bool) {
 	if bytes.IndexByte(value, '\\') < 0 {
 		return string(value[1 : len(value)-1]), true
 	}
+	var s string
+	if json.Unmarshal(value, &s) != nil {
+		return "", false
+	}
+	return s, true
+}
+
+// Unquote decodes a JSON string value as json.Unmarshal does, in one pass
+// over it where json.Unmarshal takes two (it validates the value first):
+// tool output fills most of a long log. It returns false for a value that
+// isn't a string.
+func Unquote(value []byte) (string, bool) {
+	if len(value) < 2 || value[0] != '"' || skipString(value, 0) != len(value) {
+		return "", false
+	}
+	s := value[1 : len(value)-1]
+	i := bytes.IndexByte(s, '\\')
+	if i < 0 {
+		if !utf8.Valid(s) {
+			return unquoteSlowly(value)
+		}
+		return string(s), true
+	}
+	b := make([]byte, 0, len(s))
+	for i >= 0 {
+		b = append(b, s[:i]...)
+		s = s[i:]
+		if len(s) < 2 {
+			return unquoteSlowly(value)
+		}
+		switch s[1] {
+		case '"', '\\', '/':
+			b, s = append(b, s[1]), s[2:]
+		case 'b':
+			b, s = append(b, '\b'), s[2:]
+		case 'f':
+			b, s = append(b, '\f'), s[2:]
+		case 'n':
+			b, s = append(b, '\n'), s[2:]
+		case 'r':
+			b, s = append(b, '\r'), s[2:]
+		case 't':
+			b, s = append(b, '\t'), s[2:]
+		case 'u':
+			r, n := unquoteRune(s)
+			if n == 0 {
+				return unquoteSlowly(value)
+			}
+			b, s = utf8.AppendRune(b, r), s[n:]
+		default:
+			return unquoteSlowly(value)
+		}
+		i = bytes.IndexByte(s, '\\')
+	}
+	b = append(b, s...)
+	if !utf8.Valid(b) {
+		return unquoteSlowly(value)
+	}
+	return string(b), true
+}
+
+// unquoteRune decodes the \uXXXX escape s starts with, and the low half
+// of a surrogate pair that follows it, and returns how many bytes they
+// took, or 0 for a malformed escape.
+func unquoteRune(s []byte) (rune, int) {
+	r := hex4(s)
+	if r < 0 {
+		return 0, 0
+	}
+	if !utf16.IsSurrogate(r) {
+		return r, 6
+	}
+	if len(s) >= 12 && s[6] == '\\' && s[7] == 'u' {
+		if low := hex4(s[6:]); low >= 0 {
+			if pair := utf16.DecodeRune(r, low); pair != utf8.RuneError {
+				return pair, 12
+			}
+		}
+	}
+	return utf8.RuneError, 6
+}
+
+// hex4 decodes the four hex digits of the \uXXXX escape s starts with,
+// or returns -1.
+func hex4(s []byte) rune {
+	if len(s) < 6 {
+		return -1
+	}
+	var r rune
+	for _, c := range s[2:6] {
+		switch {
+		case c >= '0' && c <= '9':
+			c -= '0'
+		case c >= 'a' && c <= 'f':
+			c -= 'a' - 10
+		case c >= 'A' && c <= 'F':
+			c -= 'A' - 10
+		default:
+			return -1
+		}
+		r = r<<4 | rune(c)
+	}
+	return r
+}
+
+// unquoteSlowly is Unquote by json.Unmarshal, for what Unquote doesn't
+// take on: invalid UTF-8, which json.Unmarshal replaces, and malformed
+// escapes.
+func unquoteSlowly(value []byte) (string, bool) {
 	var s string
 	if json.Unmarshal(value, &s) != nil {
 		return "", false

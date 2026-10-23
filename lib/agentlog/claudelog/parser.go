@@ -2,9 +2,11 @@ package claudelog
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 	"time"
 
+	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -29,21 +31,59 @@ func NewParser() *Parser {
 	return &Parser{}
 }
 
-// ParseLine processes a single Claude JSONL line.
+// ParseLine processes a single Claude JSONL line. Tool output fills most
+// of a long log, so the line isn't decoded whole: its message is, into the
+// blocks it becomes, and of the rest the fields the parser reads.
 func (p *Parser) ParseLine(line []byte) ([]transcript.RichMessage, error) {
-	var entry Line
-	if err := json.Unmarshal(line, &entry); err != nil {
-		return nil, err
+	typ, ok := agentlog.StringField(line, "type")
+	if !ok {
+		// Say what is wrong with the line.
+		var entry Line
+		return nil, json.Unmarshal(line, &entry)
 	}
-
-	switch entry.Type {
-	case "assistant":
-		return p.handleAssistant(&entry), nil
-	case "user":
-		return p.handleUser(&entry), nil
-	default:
+	if typ != "assistant" && typ != "user" {
 		return nil, nil
 	}
+	message, ok := agentlog.Field(line, "message")
+	if !ok || message[0] != '{' {
+		return nil, nil
+	}
+	uuid, _ := agentlog.StringField(line, "uuid")
+	timestamp, _ := agentlog.StringField(line, "timestamp")
+	if typ == "assistant" {
+		var m assistantMessage
+		if err := decode(message, &m); err != nil {
+			return nil, err
+		}
+		return p.handleAssistant(timestamp, &m), nil
+	}
+	content, _ := agentlog.Field(message, "content")
+	blocks, err := userContent(content)
+	if err != nil {
+		return nil, err
+	}
+	return p.handleUser(uuid, timestamp, blocks), nil
+}
+
+// assistantMessage is the message of an assistant line.
+type assistantMessage struct {
+	ID         string            `json:"id"`
+	Model      string            `json:"model"`
+	Content    []ContentBlock    `json:"content"`
+	StopReason *string           `json:"stop_reason"`
+	Usage      *transcript.Usage `json:"usage"`
+}
+
+// decode is json.Unmarshal, which goes on past a value of another type
+// than the field's (content that is a string where blocks were expected),
+// and doesn't fail for one.
+func decode(data []byte, v any) error {
+	err := json.Unmarshal(data, v)
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		return nil
+	}
+	return err
 }
 
 // FlushCompleted emits the current message once it has a stop_reason. It
@@ -69,11 +109,8 @@ func (p *Parser) snapshot() transcript.RichMessage {
 	return msg
 }
 
-func (p *Parser) handleAssistant(entry *Line) []transcript.RichMessage {
-	if entry.Message == nil {
-		return nil
-	}
-	msgID := entry.Message.ID
+func (p *Parser) handleAssistant(timestamp string, message *assistantMessage) []transcript.RichMessage {
+	msgID := message.ID
 	if msgID == "" {
 		return nil
 	}
@@ -85,11 +122,11 @@ func (p *Parser) handleAssistant(entry *Line) []transcript.RichMessage {
 		completed = p.finalizePending()
 	}
 	if p.current == nil {
-		ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
+		ts, _ := time.Parse(time.RFC3339Nano, timestamp)
 		p.current = &transcript.RichMessage{
 			MessageID: msgID,
 			Role:      "assistant",
-			Model:     entry.Message.Model,
+			Model:     message.Model,
 			Timestamp: ts,
 		}
 	}
@@ -97,34 +134,31 @@ func (p *Parser) handleAssistant(entry *Line) []transcript.RichMessage {
 	p.emitted = false
 
 	// Update stop_reason and usage from the latest line
-	if entry.Message.StopReason != nil {
-		rich.StopReason = *entry.Message.StopReason
+	if message.StopReason != nil {
+		rich.StopReason = *message.StopReason
 	}
-	if entry.Message.Usage != nil {
-		rich.Usage = entry.Message.Usage
+	if message.Usage != nil {
+		rich.Usage = message.Usage
 	}
 
-	// Parse the content blocks (usually one per line)
-	rich.Content = append(rich.Content, ContentBlocks(entry.Message.Content)...)
+	// The content blocks (usually one per line)
+	for _, block := range message.Content {
+		rich.Content = append(rich.Content, contentBlockToRich(block))
+	}
 	return completed
 }
 
-func (p *Parser) handleUser(entry *Line) []transcript.RichMessage {
-	if entry.Message == nil {
-		return nil
-	}
-
+func (p *Parser) handleUser(uuid, timestamp string, blocks []transcript.RichContentBlock) []transcript.RichMessage {
 	// Finalize any pending assistant message first
 	completed := p.finalizePending()
 
-	ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
+	ts, _ := time.Parse(time.RFC3339Nano, timestamp)
 	rich := transcript.RichMessage{
-		MessageID: entry.UUID,
+		MessageID: uuid,
 		Role:      "user",
 		Timestamp: ts,
+		Content:   blocks,
 	}
-
-	rich.Content = UserBlocks(entry.Message.Content)
 	return append(completed, rich)
 }
 
