@@ -575,13 +575,27 @@ runs as a standalone development server (`bun run dev`, with `?url=<server>`), a
 a variant for embedding in other pages.
 
 - `components/chat-provider.tsx` composes the client state and API operations.
-  Components subscribe to selected state through `lib/store.ts`. The hooks
-  `use-event-stream.ts`, `use-queue.ts`, and `use-session-cache.ts` handle event
-  delivery and reconnection, queued messages, and transcript caching.
-  The event stream uses `/events?sync=1` and keeps the last sequence number for
-  incremental replay. IndexedDB stores the transcript for the next visit.
-  `lib/chat-api.ts` is the typed HTTP client; `lib/api-schema.ts` contains types
-  generated from the OpenAPI schema.
+  Actions and API calls come from `useChatActions()`, an object that never
+  changes, so components that only act don't render again; state is read in
+  slices with `useChatSelector` (`lib/store.ts`), so a component renders again
+  only when its slice changes. The hooks `use-event-stream.ts`, `use-queue.ts`
+  and `use-session-cache.ts` handle event delivery and reconnection, queued
+  messages, and transcript caching.
+- The event stream uses `/events?sync=1` and keeps the last sequence number
+  for incremental replay; a stream the server closes is opened again at once,
+  without a notice, unless that keeps failing. The payload types come from
+  the generated schema (`lib/events.ts`), and null lists are made empty where
+  events arrive. IndexedDB keeps each server's conversation for the next
+  visit, one record per message, writing only what changed, with the sequence
+  number of what it saved; a server's cache goes after 14 days without use,
+  and only the 10 most recently used are kept (`lib/session-cache.ts`).
+- `lib/task-timeline.ts`'s `TimelineBuilder` turns the messages into tasks,
+  rebuilding only from the first change, and keeps the objects of what didn't
+  change so memoized tasks and tool calls don't render again. A render error
+  shows `chat-error-boundary.tsx`, which offers to clear the cached
+  conversation and reload.
+- `lib/chat-api.ts` is the typed HTTP client; `lib/api-schema.ts` contains
+  types generated from the OpenAPI schema.
 - `components/chat.tsx` lays out the page: the message list (tasks, tool rows,
   thinking), the dock above the composer (the status strip, decision cards
   for terminal dialogs, the login card, request cards, the usage limit card,

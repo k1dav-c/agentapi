@@ -496,11 +496,20 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 路徑，由伺服器改寫成 `--chat-base-path`（預設為 `/chat`）。聊天介面也能以開發伺服器獨立執行
 （`bun run dev`，加上 `?url=<伺服器>`），`/chat/embed` 則是嵌入其他頁面用的版本。
 
-- `components/chat-provider.tsx` 組合用戶端狀態與 API 操作，元件透過 `lib/store.ts` 訂閱所需狀態。
+- `components/chat-provider.tsx` 組合用戶端狀態與 API 操作。動作與 API 呼叫來自
+  `useChatActions()`，這個物件永遠不變，所以只做動作的元件不會重新 render；狀態則用
+  `useChatSelector`（`lib/store.ts`）分片讀取，元件只在它讀的那一片改變時才重新 render。
   `use-event-stream.ts`、`use-queue.ts` 與 `use-session-cache.ts` 分別處理事件串流與重新連線、
-  訊息佇列及對話快取。事件串流使用 `/events?sync=1`，並記錄最後序號以便增量重播；
-  IndexedDB 則保存對話供下次開啟時載入。`lib/chat-api.ts` 是型別化的 HTTP 用戶端，
-  `lib/api-schema.ts` 保存由 OpenAPI schema 產生的型別。
+  訊息佇列及對話快取。
+- 事件串流使用 `/events?sync=1`，並記錄最後序號以便增量重播；伺服器關閉的串流會立刻重新開啟、
+  不顯示提示，除非一直失敗。事件內容的型別來自產生的 schema（`lib/events.ts`），null 的清單在
+  事件抵達時就換成空清單。IndexedDB 為每個伺服器保存對話供下次開啟時載入：每則訊息一筆紀錄，
+  只寫入改變的部分，並記下所存內容的序號；超過 14 天沒用的伺服器快取會刪除，最多只保留最近使用
+  的 10 個（`lib/session-cache.ts`）。
+- `lib/task-timeline.ts` 的 `TimelineBuilder` 把訊息整理成任務，只從第一個改變處重建，沒變的
+  部分保留原物件，讓 memo 過的任務和工具呼叫不必重新 render。render 出錯時會顯示
+  `chat-error-boundary.tsx`，可以清除快取的對話後重新載入。
+- `lib/chat-api.ts` 是型別化的 HTTP 用戶端，`lib/api-schema.ts` 保存由 OpenAPI schema 產生的型別。
 - `components/chat.tsx` 負責頁面版面：訊息清單（任務、工具呼叫列、思考）、輸入框上方的停靠區
   （狀態列、終端機對話框的決策卡片、登入卡片、請求卡片、用量限制卡片、prompt cache 過期提醒）、
   輸入框（`message-input.tsx`，含斜線指令、工作階段設定和用量指示）、Explorer（含先前的工作階段和它們的

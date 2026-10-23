@@ -28,6 +28,17 @@
   (the same name with `.db`, or `--state-db`), which keeps the conversation from then on, and the
   file isn't written anymore. `--load-state=false` skips the import; `--save-state` has no effect.
   SIGUSR1 writes what the state database hasn't written yet.
+- Chat: a long session stays responsive while the agent works. Each update rebuilds the transcript
+  only from what changed (0.3–0.5 ms instead of 85–99 ms for 200 tasks), and components read only
+  the state they show, so the layout, composer, dock and Lineage no longer render again on every
+  update.
+- Chat: the browser cache keeps each message as its own record and writes only what changed; a
+  server's cache is removed after 14 days without use, and only the 10 most recently used servers
+  keep one. The cache moves to a new format, so the first visit after the update loads the
+  conversation again.
+- Chat: an error that stops the page shows the error, with buttons to clear the cached
+  conversation and reload, instead of a blank page.
+- Chat: a stream the server or a proxy closes is opened again at once, without a reconnect notice.
 - Webhook retries wait twice as long each time, up to 30 seconds; a 4xx response other than 408
   and 429 isn't tried again. The queue holds 1,024 events.
 
