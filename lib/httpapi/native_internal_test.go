@@ -158,10 +158,10 @@ func TestNativeTickContinuesWhenDue(t *testing.T) {
 	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your limit", ResetsAt: &resets})
 	require.NoError(t, srv.native.ScheduleContinue(&resets))
 
-	srv.restarting = true
+	srv.restarting.Store(true)
 	srv.beforeQueue()
 	require.Len(t, a.Turns(), 1, "not while the agent restarts")
-	srv.restarting = false
+	srv.restarting.Store(false)
 	srv.beforeQueue()
 	srv.dispatchNextQueuedMessage()
 	require.Len(t, a.Turns(), 2)

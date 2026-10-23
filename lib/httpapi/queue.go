@@ -269,7 +269,7 @@ func (s *Server) startMessageQueue() {
 func (s *Server) beforeQueue() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.restarting {
+	if s.restarting.Load() {
 		return
 	}
 	s.backend().beforeQueue()
@@ -282,7 +282,7 @@ func (s *Server) beforeQueue() {
 func (s *Server) dispatchNextQueuedMessage() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.restarting {
+	if s.restarting.Load() {
 		// The messages wait for the new agent.
 		return
 	}

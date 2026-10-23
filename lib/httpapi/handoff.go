@@ -236,7 +236,9 @@ func (e *EventEmitter) handoffView() handoffView {
 // reply holds s.mu, so that what it answers stays offered until it is
 // delivered.
 func (s *Server) pendingHandoff() (*handoff.Request, native.RequestState) {
-	if s.emitter == nil || s.conversation == nil {
+	if s.emitter == nil || s.conversation == nil || s.restarting.Load() {
+		// While the agent restarts, what it showed belongs to the old
+		// one, and a reply would reach no agent.
 		return nil, native.RequestState{}
 	}
 	view := s.emitter.handoffView()

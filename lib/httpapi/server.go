@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/quartz"
@@ -49,8 +50,8 @@ type Server struct {
 	// webhook dispatcher's and the state DB's.
 	mu                 sync.Mutex
 	stopOnce           sync.Once
-	stopping           bool // set under mu once Stop closed the agent: no more restarts
-	restarting         bool // set under mu while a restart runs without it (runRestartLocked)
+	stopping           bool        // set under mu once Stop closed the agent: no more restarts
+	restarting         atomic.Bool // set under mu while a restart runs without it (runRestartLocked)
 	logger             *slog.Logger
 	conversation       st.Conversation
 	native             *native.Conversation // nil unless the transport is native

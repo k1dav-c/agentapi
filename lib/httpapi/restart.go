@@ -81,7 +81,7 @@ func (s *Server) restartRefusedLocked() error {
 	case s.stopping:
 		// Stop closed the agent: don't start another one.
 		return errStopping
-	case s.restarting:
+	case s.restarting.Load():
 		return errRestarting
 	}
 	return nil
@@ -108,8 +108,8 @@ func (s *Server) restartLocked(clear bool) error {
 // /handoff, /queue) answer, and Stop can cancel the restart. A restart
 // that fails leaves the lifecycle failed.
 func (s *Server) runRestartLocked(r agentRestart) error {
-	s.restarting = true
-	defer func() { s.restarting = false }()
+	s.restarting.Store(true)
+	defer s.restarting.Store(false)
 	err := s.unlocked(func() error {
 		ctx, cancel := s.agentCtx(restartTimeout)
 		defer cancel()
