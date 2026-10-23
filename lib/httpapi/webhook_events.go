@@ -10,8 +10,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/coder/quartz"
-
 	"github.com/coder/agentapi/internal/version"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
@@ -127,7 +125,6 @@ func (s *Server) startWebhook(config ServerConfig) {
 		WorkspaceURL: coderWorkspaceURL(),
 	})
 	observer := newWebhookObserver(s.webhook, s.emitter, s.clock.Now())
-	observer.clock = s.clock
 	// The queue has a lock of its own. s.mu would hold up Stop, whose
 	// instance.stopped carries the queue's length, until a call into the
 	// agent it is about to cancel ended by itself.
@@ -172,7 +169,6 @@ func (s *Server) webhookTaskCost(since time.Time) *WebhookCost {
 type webhookObserver struct {
 	webhook *webhookDispatcher
 	emitter *EventEmitter
-	clock   quartz.Clock
 	// taskCost, if set, gives what the session's model calls since a time
 	// cost.
 	taskCost func(since time.Time) *WebhookCost
@@ -408,13 +404,6 @@ func (o *webhookObserver) webhookTask(task Task) WebhookTask {
 		data.Reply = cut(o.replies[*task.ReplyID], webhookMessageLimit)
 	}
 	return data
-}
-
-func (o *webhookObserver) now() time.Time {
-	if o.clock != nil {
-		return o.clock.Now().UTC()
-	}
-	return time.Now().UTC()
 }
 
 func (o *webhookObserver) richMessageUpdated(msg RichMessageUpdateBody, quiet bool) {

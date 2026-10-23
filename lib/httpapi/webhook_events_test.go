@@ -86,7 +86,6 @@ func newObserved(t *testing.T, d *webhookDispatcher, clock quartz.Clock) *observ
 	t.Helper()
 	emitter := NewEventEmitter(WithClock(clock), WithSubscriptionBufSize(256))
 	o := newWebhookObserver(d, emitter, clock.Now())
-	o.clock = clock
 	_, events, replay := emitter.SubscribeTo(webhookObservedEvents, 0, "")
 	for _, event := range replay {
 		o.handle(event, true)
@@ -253,7 +252,6 @@ func TestWebhookObserverHistory(t *testing.T) {
 	})
 	emitter.EmitStatus(conv.StatusStable)
 	o := newWebhookObserver(d, emitter, clock.Now())
-	o.clock = clock
 
 	ctx := t.Context()
 	go o.run(ctx)
@@ -294,7 +292,6 @@ func TestWebhookObserverResubscribes(t *testing.T) {
 	emitter := NewEventEmitter(WithClock(clock))
 	emitter.EmitStatus(conv.StatusStable)
 	o := newWebhookObserver(d, emitter, clock.Now())
-	o.clock = clock
 	subscriptions := func() int {
 		emitter.mu.Lock()
 		defer emitter.mu.Unlock()
