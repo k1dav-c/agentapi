@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/x/acpio"
 )
 
@@ -34,20 +34,20 @@ type mockAgentIO struct {
 	writeStarted chan struct{}
 }
 
-// mockEmitter implements screentracker.Emitter for testing.
+// mockEmitter implements conversation.Emitter for testing.
 type mockEmitter struct {
 	mu            sync.Mutex
 	cond          *sync.Cond
 	messagesCalls int
 	statusCalls   int
 	screenCalls   int
-	lastMessages  []screentracker.ConversationMessage
-	lastStatus    screentracker.ConversationStatus
+	lastMessages  []conversation.Message
+	lastStatus    conversation.Status
 	lastScreen    string
 	errors        []string
 }
 
-func (m *mockEmitter) EmitError(message string, _ screentracker.ErrorLevel) {
+func (m *mockEmitter) EmitError(message string, _ conversation.ErrorLevel) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.errors = append(m.errors, message)
@@ -60,14 +60,14 @@ func newMockEmitter() *mockEmitter {
 	return m
 }
 
-func (m *mockEmitter) EmitMessages(messages []screentracker.ConversationMessage) {
+func (m *mockEmitter) EmitMessages(messages []conversation.Message) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.messagesCalls++
 	m.lastMessages = messages
 }
 
-func (m *mockEmitter) EmitStatus(status screentracker.ConversationStatus) {
+func (m *mockEmitter) EmitStatus(status conversation.Status) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.statusCalls++
@@ -90,7 +90,7 @@ func (m *mockEmitter) TotalCalls() int {
 
 // WaitForStatus blocks until the emitter's last status matches target.
 // Must be called with a context that has a deadline to avoid hanging tests.
-func (m *mockEmitter) WaitForStatus(ctx context.Context, t *testing.T, target screentracker.ConversationStatus) {
+func (m *mockEmitter) WaitForStatus(ctx context.Context, t *testing.T, target conversation.Status) {
 	t.Helper()
 	m.waitFor(ctx, t, func() bool { return m.lastStatus == target }, "%q status", target)
 }
@@ -132,7 +132,7 @@ func (m *mockEmitter) waitFor(ctx context.Context, t *testing.T, cond func() boo
 func waitStable(t *testing.T, conv *acpio.ACPConversation) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		return conv.Status() == screentracker.ConversationStatusStable
+		return conv.Status() == conversation.StatusStable
 	}, 5*time.Second, time.Millisecond)
 }
 
@@ -234,7 +234,7 @@ func Test_Status_InitiallyStable(t *testing.T) {
 
 	status := conv.Status()
 
-	assert.Equal(t, screentracker.ConversationStatusStable, status)
+	assert.Equal(t, conversation.StatusStable, status)
 }
 
 func Test_Send_AddsUserMessage(t *testing.T) {
@@ -246,7 +246,7 @@ func Test_Send_AddsUserMessage(t *testing.T) {
 	conv := acpio.NewACPConversation(context.Background(), mock, nil, nil, nil, mClock)
 	conv.Start(context.Background())
 
-	require.NoError(t, conv.Send(screentracker.MessagePartText{Content: "hello"}))
+	require.NoError(t, conv.Send(conversation.MessagePartText{Content: "hello"}))
 
 	// Wait for the write to start
 	<-started
@@ -254,9 +254,9 @@ func Test_Send_AddsUserMessage(t *testing.T) {
 	messages := conv.Messages()
 	require.Len(t, messages, 2) // user message + placeholder agent message
 
-	assert.Equal(t, screentracker.ConversationRoleUser, messages[0].Role)
+	assert.Equal(t, conversation.RoleUser, messages[0].Role)
 	assert.Equal(t, "hello", messages[0].Message)
-	assert.Equal(t, screentracker.ConversationRoleAgent, messages[1].Role)
+	assert.Equal(t, conversation.RoleAgent, messages[1].Role)
 
 	// Signal a chunk so executePrompt's timer wait doesn't hang on the mock clock.
 	mock.SimulateChunks("hello response")
@@ -282,7 +282,7 @@ func Test_Send_ReturnsBeforeTheReply(t *testing.T) {
 	// Send doesn't wait for the reply: its caller, the HTTP handler, holds
 	// the server's lock.
 	errCh := make(chan error, 1)
-	go func() { errCh <- conv.Send(screentracker.MessagePartText{Content: "hello"}) }()
+	go func() { errCh <- conv.Send(conversation.MessagePartText{Content: "hello"}) }()
 	select {
 	case err := <-errCh:
 		require.NoError(t, err)
@@ -290,7 +290,7 @@ func Test_Send_ReturnsBeforeTheReply(t *testing.T) {
 		t.Fatal("Send waited for the agent's reply")
 	}
 	<-started
-	assert.Equal(t, screentracker.ConversationStatusChanging, conv.Status())
+	assert.Equal(t, conversation.StatusChanging, conv.Status())
 
 	// The user's message shows before the reply's first chunk.
 	emitter.mu.Lock()
@@ -301,7 +301,7 @@ func Test_Send_ReturnsBeforeTheReply(t *testing.T) {
 
 	mock.SimulateChunks("hi")
 	close(done)
-	emitter.WaitForStatus(ctx, t, screentracker.ConversationStatusStable)
+	emitter.WaitForStatus(ctx, t, conversation.StatusStable)
 	messages := conv.Messages()
 	require.Len(t, messages, 2)
 	assert.Equal(t, "hi", messages[1].Message)
@@ -333,12 +333,12 @@ func Test_Send_OnePromptPerMessage(t *testing.T) {
 	// Codex's composer and wraps the text in bracketed paste, in hidden
 	// parts.
 	require.NoError(t, conv.Send(
-		screentracker.MessagePartText{Content: "\x05\x15\x7f", Hidden: true},
-		screentracker.MessagePartText{Content: "\x1b[200~", Hidden: true},
-		screentracker.MessagePartText{Content: "hello"},
-		screentracker.MessagePartText{Content: "\x1b[201~", Hidden: true},
+		conversation.MessagePartText{Content: "\x05\x15\x7f", Hidden: true},
+		conversation.MessagePartText{Content: "\x1b[200~", Hidden: true},
+		conversation.MessagePartText{Content: "hello"},
+		conversation.MessagePartText{Content: "\x1b[201~", Hidden: true},
 	))
-	emitter.WaitForStatus(ctx, t, screentracker.ConversationStatusStable)
+	emitter.WaitForStatus(ctx, t, conversation.StatusStable)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -350,9 +350,9 @@ func Test_Send_RejectsEmptyMessage(t *testing.T) {
 	mock := newMockAgentIO()
 	conv := acpio.NewACPConversation(context.Background(), mock, nil, nil, nil, mClock)
 
-	err := conv.Send(screentracker.MessagePartText{Content: ""})
+	err := conv.Send(conversation.MessagePartText{Content: ""})
 
-	assert.ErrorIs(t, err, screentracker.ErrMessageValidationEmpty)
+	assert.ErrorIs(t, err, conversation.ErrMessageValidationEmpty)
 }
 
 func Test_Send_RejectsWhitespace(t *testing.T) {
@@ -376,9 +376,9 @@ func Test_Send_RejectsWhitespace(t *testing.T) {
 			mock := newMockAgentIO()
 			conv := acpio.NewACPConversation(context.Background(), mock, nil, nil, nil, mClock)
 
-			err := conv.Send(screentracker.MessagePartText{Content: tt.content})
+			err := conv.Send(conversation.MessagePartText{Content: tt.content})
 
-			assert.ErrorIs(t, err, screentracker.ErrMessageValidationWhitespace)
+			assert.ErrorIs(t, err, conversation.ErrMessageValidationWhitespace)
 		})
 	}
 }
@@ -392,14 +392,14 @@ func Test_Send_RejectsDuplicateSend(t *testing.T) {
 	conv := acpio.NewACPConversation(context.Background(), mock, nil, nil, nil, mClock)
 	conv.Start(context.Background())
 
-	require.NoError(t, conv.Send(screentracker.MessagePartText{Content: "first"}))
+	require.NoError(t, conv.Send(conversation.MessagePartText{Content: "first"}))
 
 	// Wait for the write to start
 	<-started
 
 	// Second send while first is processing should fail
-	err := conv.Send(screentracker.MessagePartText{Content: "second"})
-	assert.ErrorIs(t, err, screentracker.ErrMessageValidationChanging)
+	err := conv.Send(conversation.MessagePartText{Content: "second"})
+	assert.ErrorIs(t, err, conversation.ErrMessageValidationChanging)
 
 	// Signal a chunk so executePrompt's timer wait doesn't hang on the mock clock.
 	mock.SimulateChunks("first response")
@@ -422,13 +422,13 @@ func Test_Status_ChangesWhileProcessing(t *testing.T) {
 	conv := acpio.NewACPConversation(ctx, mock, nil, nil, emitter, mClock)
 	conv.Start(ctx)
 
-	require.NoError(t, conv.Send(screentracker.MessagePartText{Content: "test"}))
+	require.NoError(t, conv.Send(conversation.MessagePartText{Content: "test"}))
 
 	// Wait for write to start
 	<-started
 
 	// Status should be changing while processing
-	assert.Equal(t, screentracker.ConversationStatusChanging, conv.Status())
+	assert.Equal(t, conversation.StatusChanging, conv.Status())
 
 	// Signal a chunk so executePrompt's timer wait doesn't hang on the mock clock.
 	mock.SimulateChunks("test response")
@@ -437,7 +437,7 @@ func Test_Status_ChangesWhileProcessing(t *testing.T) {
 	close(done)
 
 	// Once the turn ends, the status is stable.
-	emitter.WaitForStatus(ctx, t, screentracker.ConversationStatusStable)
+	emitter.WaitForStatus(ctx, t, conversation.StatusStable)
 }
 
 func Test_Screen_ShowsStreamingContent(t *testing.T) {
@@ -458,7 +458,7 @@ func Test_Screen_ShowsStreamingContent(t *testing.T) {
 	// Initially empty
 	assert.Equal(t, "", screen())
 
-	require.NoError(t, conv.Send(screentracker.MessagePartText{Content: "question"}))
+	require.NoError(t, conv.Send(conversation.MessagePartText{Content: "question"}))
 
 	// Wait for write to start
 	<-started
@@ -493,7 +493,7 @@ func Test_Emitter_CalledOnChanges(t *testing.T) {
 	conv := acpio.NewACPConversation(ctx, mock, nil, nil, emitter, mClock)
 	conv.Start(ctx)
 
-	require.NoError(t, conv.Send(screentracker.MessagePartText{Content: "test"}))
+	require.NoError(t, conv.Send(conversation.MessagePartText{Content: "test"}))
 
 	// Wait for write to start
 	<-started
@@ -514,7 +514,7 @@ func Test_Emitter_CalledOnChanges(t *testing.T) {
 	close(done)
 
 	// Wait for completion emit
-	emitter.WaitForStatus(ctx, t, screentracker.ConversationStatusStable)
+	emitter.WaitForStatus(ctx, t, conversation.StatusStable)
 
 	emitter.mu.Lock()
 	finalMessagesCalls := emitter.messagesCalls
@@ -528,8 +528,8 @@ func Test_InitialPrompt_SentOnStart(t *testing.T) {
 	// Set up blocking to synchronize with the initial prompt send
 	started, done := mock.BlockWrite()
 
-	initialPrompt := []screentracker.MessagePart{
-		screentracker.MessagePartText{Content: "initial prompt"},
+	initialPrompt := []conversation.MessagePart{
+		conversation.MessagePartText{Content: "initial prompt"},
 	}
 
 	conv := acpio.NewACPConversation(context.Background(), mock, nil, initialPrompt, nil, mClock)
@@ -541,7 +541,7 @@ func Test_InitialPrompt_SentOnStart(t *testing.T) {
 	// Should have user message from initial prompt
 	messages := conv.Messages()
 	require.GreaterOrEqual(t, len(messages), 1)
-	assert.Equal(t, screentracker.ConversationRoleUser, messages[0].Role)
+	assert.Equal(t, conversation.RoleUser, messages[0].Role)
 	assert.Equal(t, "initial prompt", messages[0].Message)
 
 	// Signal a chunk so executePrompt's timer wait doesn't hang on the mock clock.
@@ -558,14 +558,14 @@ func Test_InitialPrompt_FailureIsReported(t *testing.T) {
 
 	emitter := newMockEmitter()
 	// Send rejects a message with surrounding whitespace.
-	initialPrompt := []screentracker.MessagePart{
-		screentracker.MessagePartText{Content: " initial prompt"},
+	initialPrompt := []conversation.MessagePart{
+		conversation.MessagePartText{Content: " initial prompt"},
 	}
 	conv := acpio.NewACPConversation(ctx, newMockAgentIO(), nil, initialPrompt, emitter, quartz.NewMock(t))
 	conv.Start(ctx)
 
 	assert.Contains(t, emitter.WaitForError(ctx, t), "Failed to send the initial prompt")
-	emitter.WaitForStatus(ctx, t, screentracker.ConversationStatusStable)
+	emitter.WaitForStatus(ctx, t, conversation.StatusStable)
 	assert.Empty(t, conv.Messages())
 }
 
@@ -578,7 +578,7 @@ func Test_Messages_AreCopied(t *testing.T) {
 	conv := acpio.NewACPConversation(context.Background(), mock, nil, nil, nil, mClock)
 	conv.Start(context.Background())
 
-	require.NoError(t, conv.Send(screentracker.MessagePartText{Content: "test"}))
+	require.NoError(t, conv.Send(conversation.MessagePartText{Content: "test"}))
 
 	// Wait for write to start
 	<-started
@@ -613,7 +613,7 @@ func Test_ErrorRemovesPartialMessage(t *testing.T) {
 	conv := acpio.NewACPConversation(ctx, mock, nil, nil, emitter, mClock)
 	conv.Start(ctx)
 
-	require.NoError(t, conv.Send(screentracker.MessagePartText{Content: "test"}))
+	require.NoError(t, conv.Send(conversation.MessagePartText{Content: "test"}))
 
 	// Wait for write to start
 	<-started
@@ -621,8 +621,8 @@ func Test_ErrorRemovesPartialMessage(t *testing.T) {
 	// Should have user message + placeholder agent message
 	messages := conv.Messages()
 	require.Len(t, messages, 2)
-	assert.Equal(t, screentracker.ConversationRoleUser, messages[0].Role)
-	assert.Equal(t, screentracker.ConversationRoleAgent, messages[1].Role)
+	assert.Equal(t, conversation.RoleUser, messages[0].Role)
+	assert.Equal(t, conversation.RoleAgent, messages[1].Role)
 
 	// Simulate the agent streaming partial content before the error
 	mock.SimulateChunks("partial ", "response ", "content")
@@ -645,7 +645,7 @@ func Test_ErrorRemovesPartialMessage(t *testing.T) {
 	// Only the user message should remain.
 	messages = conv.Messages()
 	require.Len(t, messages, 1, "partial agent message should be removed on error")
-	assert.Equal(t, screentracker.ConversationRoleUser, messages[0].Role)
+	assert.Equal(t, conversation.RoleUser, messages[0].Role)
 	assert.Equal(t, "test", messages[0].Message)
 
 	// First exchange allocated IDs 0 (user) and 1 (agent, now removed).
@@ -656,12 +656,12 @@ func Test_ErrorRemovesPartialMessage(t *testing.T) {
 	mock.writeErr = nil
 	mock.mu.Unlock()
 	started2, done2 := mock.BlockWrite()
-	require.NoError(t, conv.Send(screentracker.MessagePartText{Content: "retry"}))
+	require.NoError(t, conv.Send(conversation.MessagePartText{Content: "retry"}))
 	<-started2
 	// Signal a chunk so executePrompt's timer wait doesn't hang on the mock clock.
 	mock.SimulateChunks("retry response")
 	close(done2)
-	emitter.WaitForStatus(ctx, t, screentracker.ConversationStatusStable)
+	emitter.WaitForStatus(ctx, t, conversation.StatusStable)
 
 	messages = conv.Messages()
 	require.Len(t, messages, 3, "first user + second user + second agent")
@@ -679,7 +679,7 @@ func Test_LateChunkAfterError_DoesNotCorruptUserMessage(t *testing.T) {
 	conv.Start(context.Background())
 
 	// Given: a send that fails with an error, removing the agent placeholder
-	require.NoError(t, conv.Send(screentracker.MessagePartText{Content: "hello"}))
+	require.NoError(t, conv.Send(conversation.MessagePartText{Content: "hello"}))
 	<-started
 
 	mock.mu.Lock()
@@ -703,5 +703,5 @@ func Test_LateChunkAfterError_DoesNotCorruptUserMessage(t *testing.T) {
 	messages = conv.Messages()
 	require.Len(t, messages, 1, "no new messages should appear from a late chunk")
 	assert.Equal(t, "hello", messages[0].Message)
-	assert.Equal(t, screentracker.ConversationRoleUser, messages[0].Role)
+	assert.Equal(t, conversation.RoleUser, messages[0].Role)
 }

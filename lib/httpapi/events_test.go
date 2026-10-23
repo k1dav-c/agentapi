@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/internal/version"
+	conv "github.com/coder/agentapi/lib/conversation"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -133,39 +133,39 @@ func TestEventEmitter(t *testing.T) {
 		}, stateEvents)
 
 		now := time.Now()
-		emitter.EmitMessages([]st.ConversationMessage{
-			{Id: 1, Message: "Hello, world!", Role: st.ConversationRoleUser, Time: now},
+		emitter.EmitMessages([]conv.Message{
+			{Id: 1, Message: "Hello, world!", Role: conv.RoleUser, Time: now},
 		})
 		newEvent := <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeMessageUpdate,
-			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world!", Role: st.ConversationRoleUser, Time: now, Seq: 1},
+			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world!", Role: conv.RoleUser, Time: now, Seq: 1},
 		}, newEvent)
 		// The user's message starts a task.
 		task := Task{ID: 1, Status: TaskStatusRunning, Prompt: "Hello, world!", StartedAt: now}
 		assert.Equal(t, Event{Type: EventTypeTaskUpdate, Payload: TaskUpdateBody{Task: task, Seq: 2}}, <-ch)
 
-		emitter.EmitMessages([]st.ConversationMessage{
-			{Id: 1, Message: "Hello, world! (updated)", Role: st.ConversationRoleUser, Time: now},
-			{Id: 2, Message: "What's up?", Role: st.ConversationRoleAgent, Time: now},
+		emitter.EmitMessages([]conv.Message{
+			{Id: 1, Message: "Hello, world! (updated)", Role: conv.RoleUser, Time: now},
+			{Id: 2, Message: "What's up?", Role: conv.RoleAgent, Time: now},
 		})
 		newEvent = <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeMessageUpdate,
-			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world! (updated)", Role: st.ConversationRoleUser, Time: now, Seq: 3},
+			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world! (updated)", Role: conv.RoleUser, Time: now, Seq: 3},
 		}, newEvent)
 
 		newEvent = <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeMessageUpdate,
-			Payload: MessageUpdateBody{Id: 2, Message: "What's up?", Role: st.ConversationRoleAgent, Time: now, Seq: 4},
+			Payload: MessageUpdateBody{Id: 2, Message: "What's up?", Role: conv.RoleAgent, Time: now, Seq: 4},
 		}, newEvent)
 		// The agent's message is its reply.
 		reply := 2
 		task.ReplyID = &reply
 		assert.Equal(t, Event{Type: EventTypeTaskUpdate, Payload: TaskUpdateBody{Task: task, Seq: 5}}, <-ch)
 
-		emitter.EmitStatus(st.ConversationStatusStable)
+		emitter.EmitStatus(conv.StatusStable)
 		newEvent = <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeStatusChange,
@@ -182,14 +182,14 @@ func TestEventEmitter(t *testing.T) {
 		}
 		now := time.Now()
 
-		emitter.EmitMessages([]st.ConversationMessage{
-			{Id: 1, Message: "Hello, world!", Role: st.ConversationRoleUser, Time: now},
+		emitter.EmitMessages([]conv.Message{
+			{Id: 1, Message: "Hello, world!", Role: conv.RoleUser, Time: now},
 		})
 		for _, ch := range channels {
 			newEvent := <-ch
 			assert.Equal(t, Event{
 				Type:    EventTypeMessageUpdate,
-				Payload: MessageUpdateBody{Id: 1, Message: "Hello, world!", Role: st.ConversationRoleUser, Time: now, Seq: 1},
+				Payload: MessageUpdateBody{Id: 1, Message: "Hello, world!", Role: conv.RoleUser, Time: now, Seq: 1},
 			}, newEvent)
 		}
 	})
@@ -198,8 +198,8 @@ func TestEventEmitter(t *testing.T) {
 		emitter := NewEventEmitter(WithSubscriptionBufSize(1))
 		_, ch, _ := emitter.Subscribe()
 		for i := range 5 {
-			emitter.EmitMessages([]st.ConversationMessage{
-				{Id: i, Message: fmt.Sprintf("Hello, world! %d", i), Role: st.ConversationRoleUser, Time: time.Now()},
+			emitter.EmitMessages([]conv.Message{
+				{Id: i, Message: fmt.Sprintf("Hello, world! %d", i), Role: conv.RoleUser, Time: time.Now()},
 			})
 		}
 		_, ok := <-ch
@@ -216,7 +216,7 @@ func TestEventEmitter(t *testing.T) {
 		emitter := NewEventEmitter(WithSubscriptionBufSize(10))
 
 		for i := range 150 {
-			emitter.EmitError(fmt.Sprintf("error %d", i), st.ErrorLevelError)
+			emitter.EmitError(fmt.Sprintf("error %d", i), conv.ErrorLevelError)
 		}
 
 		_, _, stateEvents := emitter.Subscribe()
@@ -245,11 +245,11 @@ func TestEventEmitter(t *testing.T) {
 
 		emitter := NewEventEmitter(WithClock(mockClock), WithSubscriptionBufSize(10))
 
-		emitter.EmitError("err1", st.ErrorLevelError)
+		emitter.EmitError("err1", conv.ErrorLevelError)
 		mockClock.Set(fixedTime.Add(1 * time.Second))
-		emitter.EmitError("err2", st.ErrorLevelWarning)
+		emitter.EmitError("err2", conv.ErrorLevelWarning)
 		mockClock.Set(fixedTime.Add(2 * time.Second))
-		emitter.EmitError("err3", st.ErrorLevelError)
+		emitter.EmitError("err3", conv.ErrorLevelError)
 
 		_, _, stateEvents := emitter.Subscribe()
 
@@ -263,9 +263,9 @@ func TestEventEmitter(t *testing.T) {
 		assert.Len(t, errorEvents, 3)
 
 		expected := []ErrorBody{
-			{Message: "err1", Level: st.ErrorLevelError, Time: fixedTime},
-			{Message: "err2", Level: st.ErrorLevelWarning, Time: fixedTime.Add(1 * time.Second)},
-			{Message: "err3", Level: st.ErrorLevelError, Time: fixedTime.Add(2 * time.Second)},
+			{Message: "err1", Level: conv.ErrorLevelError, Time: fixedTime},
+			{Message: "err2", Level: conv.ErrorLevelWarning, Time: fixedTime.Add(1 * time.Second)},
+			{Message: "err3", Level: conv.ErrorLevelError, Time: fixedTime.Add(2 * time.Second)},
 		}
 		for i, ev := range errorEvents {
 			body, ok := ev.Payload.(ErrorBody)
@@ -288,27 +288,27 @@ func TestEventEmitter(t *testing.T) {
 		assert.Len(t, stateEvents, 3)
 
 		// Emit an error and verify it uses the mock clock time
-		emitter.EmitError("test error", st.ErrorLevelError)
+		emitter.EmitError("test error", conv.ErrorLevelError)
 
 		event := <-ch
 		assert.Equal(t, EventTypeError, event.Type)
 		errorBody, ok := event.Payload.(ErrorBody)
 		assert.True(t, ok)
 		assert.Equal(t, "test error", errorBody.Message)
-		assert.Equal(t, st.ErrorLevelError, errorBody.Level)
+		assert.Equal(t, conv.ErrorLevelError, errorBody.Level)
 		assert.Equal(t, fixedTime, errorBody.Time)
 
 		// Advance the clock and emit another error
 		newTime := fixedTime.Add(1 * time.Hour)
 		mockClock.Set(newTime)
-		emitter.EmitError("another error", st.ErrorLevelWarning)
+		emitter.EmitError("another error", conv.ErrorLevelWarning)
 
 		event = <-ch
 		assert.Equal(t, EventTypeError, event.Type)
 		errorBody, ok = event.Payload.(ErrorBody)
 		assert.True(t, ok)
 		assert.Equal(t, "another error", errorBody.Message)
-		assert.Equal(t, st.ErrorLevelWarning, errorBody.Level)
+		assert.Equal(t, conv.ErrorLevelWarning, errorBody.Level)
 		assert.Equal(t, newTime, errorBody.Time)
 	})
 }
@@ -379,7 +379,7 @@ func TestEventEmitterIncrementalReplay(t *testing.T) {
 	rich := func(id, text string) transcript.RichMessage {
 		return transcript.RichMessage{MessageID: id, Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: text}}}
 	}
-	emitter.EmitMessages([]st.ConversationMessage{{Id: 0, Role: st.ConversationRoleUser, Message: "one", Time: now}})
+	emitter.EmitMessages([]conv.Message{{Id: 0, Role: conv.RoleUser, Message: "one", Time: now}})
 	emitter.EmitRichMessage(rich("m1", "first"))
 	emitter.EmitRichMessage(rich("m2", "second"))
 
@@ -390,9 +390,9 @@ func TestEventEmitterIncrementalReplay(t *testing.T) {
 	require.Equal(t, uint64(4), sync.Seq)
 
 	// Later changes: a new message, and an update to an existing rich message.
-	emitter.EmitMessages([]st.ConversationMessage{
-		{Id: 0, Role: st.ConversationRoleUser, Message: "one", Time: now},
-		{Id: 1, Role: st.ConversationRoleAgent, Message: "two", Time: now},
+	emitter.EmitMessages([]conv.Message{
+		{Id: 0, Role: conv.RoleUser, Message: "one", Time: now},
+		{Id: 1, Role: conv.RoleAgent, Message: "two", Time: now},
 	})
 	emitter.EmitRichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "tool_use", ToolUseID: "t1"}}})
 
@@ -450,7 +450,7 @@ func TestEventEmitterIncrementalReplay(t *testing.T) {
 // recordingPersister records what an emitter stores.
 type recordingPersister struct {
 	tasks     map[int]string
-	messages  map[int]st.ConversationMessage
+	messages  map[int]conv.Message
 	requests  map[string]native.RequestState
 	truncated []int
 	deleted   []string
@@ -459,10 +459,10 @@ type recordingPersister struct {
 }
 
 func newRecordingPersister() *recordingPersister {
-	return &recordingPersister{messages: map[int]st.ConversationMessage{}, requests: map[string]native.RequestState{}}
+	return &recordingPersister{messages: map[int]conv.Message{}, requests: map[string]native.RequestState{}}
 }
 
-func (p *recordingPersister) PutMessage(msg st.ConversationMessage, _ uint64) {
+func (p *recordingPersister) PutMessage(msg conv.Message, _ uint64) {
 	p.messages[msg.Id] = msg
 }
 
@@ -555,10 +555,10 @@ func TestEventEmitterRemovedMessageResyncs(t *testing.T) {
 	persister := newRecordingPersister()
 	emitter := NewEventEmitter(WithSubscriptionBufSize(20), WithPersister(persister))
 	now := time.Now()
-	msgs := []st.ConversationMessage{
-		{Id: 0, Role: st.ConversationRoleUser, Message: "one", Time: now},
-		{Id: 1, Role: st.ConversationRoleAgent, Message: "two", Time: now},
-		{Id: 2, Role: st.ConversationRoleUser, Message: "refused", Time: now},
+	msgs := []conv.Message{
+		{Id: 0, Role: conv.RoleUser, Message: "one", Time: now},
+		{Id: 1, Role: conv.RoleAgent, Message: "two", Time: now},
+		{Id: 2, Role: conv.RoleUser, Message: "refused", Time: now},
 	}
 	emitter.EmitMessages(msgs)
 	emitter.EmitRichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant"})
@@ -593,14 +593,14 @@ func TestEventEmitterRemovedMessageResyncs(t *testing.T) {
 
 	// A message removed from the middle is gone from the stored rows too,
 	// and the ones after it are stored again.
-	msgs = append(msgs[:2:2], st.ConversationMessage{Id: 3, Role: st.ConversationRoleAgent, Message: "three", Time: now})
+	msgs = append(msgs[:2:2], conv.Message{Id: 3, Role: conv.RoleAgent, Message: "three", Time: now})
 	emitter.EmitMessages(msgs)
 	events, closed = drainClosed(ch)
 	assert.Equal(t, []string{"message 3", "task 0"}, replayed(events), "an added message is an update, and the task's reply")
 	assert.False(t, closed)
-	emitter.EmitMessages([]st.ConversationMessage{msgs[0], msgs[2]})
+	emitter.EmitMessages([]conv.Message{msgs[0], msgs[2]})
 	assert.Equal(t, []int{2, 1}, persister.truncated)
-	assert.Equal(t, map[int]st.ConversationMessage{0: msgs[0], 3: msgs[2]}, persister.messages)
+	assert.Equal(t, map[int]conv.Message{0: msgs[0], 3: msgs[2]}, persister.messages)
 	_, closed = drainClosed(ch)
 	assert.True(t, closed)
 }
@@ -613,9 +613,9 @@ func TestEventEmitterRemovedMessageResyncs(t *testing.T) {
 func TestEventEmitterResyncLosesNothing(t *testing.T) {
 	emitter := NewEventEmitter(WithSubscriptionBufSize(8))
 	var want []string
-	var msgs []st.ConversationMessage
+	var msgs []conv.Message
 	for i := range 6 {
-		msgs = append(msgs, st.ConversationMessage{Id: i, Role: st.ConversationRoleUser, Message: fmt.Sprint("m", i), Time: time.Unix(0, 0)})
+		msgs = append(msgs, conv.Message{Id: i, Role: conv.RoleUser, Message: fmt.Sprint("m", i), Time: time.Unix(0, 0)})
 		if i < 5 {
 			want = append(want, fmt.Sprintf("message %d", i))
 		}
@@ -760,7 +760,7 @@ func TestEventEmitterRestore(t *testing.T) {
 	emitter.Restore(EmitterState{
 		Epoch:         "restored",
 		Seq:           6,
-		Messages:      []st.ConversationMessage{{Id: 0, Role: st.ConversationRoleUser, Message: "one", Time: now}, {Id: 1, Role: st.ConversationRoleAgent, Message: "two", Time: now}},
+		Messages:      []conv.Message{{Id: 0, Role: conv.RoleUser, Message: "one", Time: now}, {Id: 1, Role: conv.RoleAgent, Message: "two", Time: now}},
 		MessageSeqs:   []uint64{1, 4},
 		RichMessages:  []transcript.RichMessage{{MessageID: "m1", Role: "assistant"}},
 		RichSeqs:      []uint64{5},
@@ -792,10 +792,10 @@ func TestEventEmitterRestore(t *testing.T) {
 	assert.Equal(t, 8, emitter.SessionEvents()[2].EventID)
 	_, ch, _ := emitter.Subscribe()
 	later := now.Add(time.Second)
-	emitter.EmitMessages(append(emitter.messages, st.ConversationMessage{Id: 2, Role: st.ConversationRoleUser, Message: "three", Time: later}))
+	emitter.EmitMessages(append(emitter.messages, conv.Message{Id: 2, Role: conv.RoleUser, Message: "three", Time: later}))
 	events := drain(ch)
 	assert.Equal(t, []string{"message 2", "task 0", "task 2"}, replayed(events), "the restored messages are not sent again; the restored one's task is done")
-	assert.Equal(t, MessageUpdateBody{Id: 2, Role: st.ConversationRoleUser, Message: "three", Time: later, Seq: 7}, events[0].Payload)
+	assert.Equal(t, MessageUpdateBody{Id: 2, Role: conv.RoleUser, Message: "three", Time: later, Seq: 7}, events[0].Payload)
 	tasks := emitter.Tasks()
 	assert.Equal(t, TaskStatusCompleted, tasks[0].Status)
 	assert.Equal(t, TaskStatusRunning, tasks[1].Status)
@@ -845,7 +845,7 @@ func TestEventEmitterSubscribeTo(t *testing.T) {
 		emitter.EmitScreen(fmt.Sprintf("screen %d", i))
 		<-screen
 	}
-	emitter.EmitStatus(st.ConversationStatusChanging)
+	emitter.EmitStatus(conv.StatusChanging)
 	event, open := <-conversation
 	require.True(t, open, "screen updates didn't fill the channel of /events")
 	assert.Equal(t, EventTypeStatusChange, event.Type)

@@ -8,8 +8,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/util"
 )
 
@@ -109,7 +109,7 @@ func (t *taskTracker) owner(id int) int {
 }
 
 // messages takes the conversation's messages after a change.
-func (t *taskTracker) messages(msgs []st.ConversationMessage) []int {
+func (t *taskTracker) messages(msgs []conv.Message) []int {
 	at := make(map[int]int, len(msgs))
 	for i, msg := range msgs {
 		at[msg.Id] = i
@@ -120,7 +120,7 @@ func (t *taskTracker) messages(msgs []st.ConversationMessage) []int {
 	if n := len(t.tasks); n > 0 {
 		kept := t.tasks[:0]
 		for _, task := range t.tasks {
-			if i, ok := at[task.ID]; ok && msgs[i].Role == st.ConversationRoleUser && msgs[i].Time.Equal(task.StartedAt) {
+			if i, ok := at[task.ID]; ok && msgs[i].Role == conv.RoleUser && msgs[i].Time.Equal(task.StartedAt) {
 				steered := len(task.Steered)
 				task.Steered = slices.DeleteFunc(task.Steered, func(id int) bool {
 					_, ok := at[id]
@@ -143,7 +143,7 @@ func (t *taskTracker) messages(msgs []st.ConversationMessage) []int {
 		}
 	}
 	for _, msg := range msgs {
-		if msg.Role != st.ConversationRoleUser || t.owner(msg.Id) >= 0 {
+		if msg.Role != conv.RoleUser || t.owner(msg.Id) >= 0 {
 			continue
 		}
 		if msg.Time.Before(t.since) {
@@ -178,7 +178,7 @@ func (t *taskTracker) messages(msgs []st.ConversationMessage) []int {
 		}
 		reply := -1
 		for j := from + 1; j < next; j++ {
-			if msgs[j].Role == st.ConversationRoleAgent && msgs[j].Message != "" {
+			if msgs[j].Role == conv.RoleAgent && msgs[j].Message != "" {
 				reply = j
 			}
 		}
@@ -249,7 +249,7 @@ func (t *taskTracker) endIfIdle(now time.Time) []int {
 
 // agentError notes an error the agent reported in the running task.
 func (t *taskTracker) agentError(err ErrorBody) []int {
-	if t.open < 0 || err.Level != st.ErrorLevelError {
+	if t.open < 0 || err.Level != conv.ErrorLevelError {
 		return nil
 	}
 	t.tasks[t.open].Errors = append(t.tasks[t.open].Errors, err.Message)

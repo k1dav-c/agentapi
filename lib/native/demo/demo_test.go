@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/demo"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -132,7 +132,7 @@ func TestTurn(t *testing.T) {
 	require.Len(t, obs.toolResults(), 1)
 	msgs := c.Messages()
 	require.Len(t, msgs, 2)
-	assert.Equal(t, st.ConversationRoleAgent, msgs[1].Role)
+	assert.Equal(t, conv.RoleAgent, msgs[1].Role)
 	assert.Contains(t, msgs[1].Message, "native demo agent")
 }
 
@@ -143,7 +143,7 @@ func TestApprovalDenyWithFeedback(t *testing.T) {
 	assert.Equal(t, native.RequestKindApproval, req.Kind)
 	assert.True(t, req.Feedback)
 	assert.NotEmpty(t, req.ToolUseID)
-	assert.Equal(t, st.ConversationStatusStable, c.Status())
+	assert.Equal(t, conv.StatusStable, c.Status())
 
 	_, err := c.Respond(context.Background(), req.ID, native.Response{OptionID: "deny", Text: "use make build"})
 	require.NoError(t, err)

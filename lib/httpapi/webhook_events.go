@@ -13,9 +13,9 @@ import (
 	"github.com/coder/quartz"
 
 	"github.com/coder/agentapi/internal/version"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/pricing"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // The events a webhook can be sent besides run.status_changed.
@@ -83,11 +83,11 @@ type WebhookCost struct {
 
 // WebhookMessage is the data of message.created.
 type WebhookMessage struct {
-	ID        int                 `json:"id"`
-	Role      st.ConversationRole `json:"role"`
-	Content   string              `json:"content"`
-	Time      time.Time           `json:"time"`
-	Truncated bool                `json:"truncated,omitempty"`
+	ID        int       `json:"id"`
+	Role      conv.Role `json:"role"`
+	Content   string    `json:"content"`
+	Time      time.Time `json:"time"`
+	Truncated bool      `json:"truncated,omitempty"`
 }
 
 // WebhookToolCall is the data of tool.completed.
@@ -331,7 +331,7 @@ func (o *webhookObserver) messageUpdated(msg MessageUpdateBody, quiet bool) {
 	if o.sent[key] {
 		return
 	}
-	if msg.Role != st.ConversationRoleUser {
+	if msg.Role != conv.RoleUser {
 		if o.agent != nil && o.agent.Id != msg.Id {
 			o.flushAgent()
 		}

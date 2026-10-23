@@ -13,9 +13,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 	"github.com/coder/agentapi/lib/util"
 )
@@ -72,11 +72,11 @@ func (l LifecycleState) Schema(r huma.Registry) *huma.Schema {
 }
 
 type MessageUpdateBody struct {
-	Id      int                 `json:"id" doc:"Unique identifier for the message. This identifier also represents the order of the message in the conversation history."`
-	Role    st.ConversationRole `json:"role" doc:"Role of the message author"`
-	Message string              `json:"message" doc:"Message content. The message is formatted as it appears in the agent's terminal session, meaning that, by default, it consists of lines of text with 80 characters per line."`
-	Time    time.Time           `json:"time" doc:"Timestamp of the message"`
-	Seq     uint64              `json:"seq" doc:"Sequence number of this change. Pass the highest one seen as ?since= when reconnecting to /events to receive only later changes."`
+	Id      int       `json:"id" doc:"Unique identifier for the message. This identifier also represents the order of the message in the conversation history."`
+	Role    conv.Role `json:"role" doc:"Role of the message author"`
+	Message string    `json:"message" doc:"Message content. The message is formatted as it appears in the agent's terminal session, meaning that, by default, it consists of lines of text with 80 characters per line."`
+	Time    time.Time `json:"time" doc:"Timestamp of the message"`
+	Seq     uint64    `json:"seq" doc:"Sequence number of this change. Pass the highest one seen as ?since= when reconnecting to /events to receive only later changes."`
 }
 
 // SessionSyncBody is the first event on /events. It tells the client whether
@@ -136,9 +136,9 @@ type ScreenUpdateBody struct {
 }
 
 type ErrorBody struct {
-	Message string        `json:"message" doc:"Error message"`
-	Level   st.ErrorLevel `json:"level" doc:"Error level"`
-	Time    time.Time     `json:"time" doc:"Timestamp when the error occurred"`
+	Message string          `json:"message" doc:"Error message"`
+	Level   conv.ErrorLevel `json:"level" doc:"Error level"`
+	Time    time.Time       `json:"time" doc:"Timestamp when the error occurred"`
 	// number counts the errors the emitter stored, from 1. A subscription
 	// replays the stored errors, so the webhook observer, which subscribes
 	// again when its subscription ends, tells the ones it sent by it.
@@ -172,7 +172,7 @@ type Event struct {
 
 type EventEmitter struct {
 	mu       sync.Mutex
-	messages []st.ConversationMessage
+	messages []conv.Message
 	// epoch identifies the current conversation state; seq numbers every
 	// message, rich message and request change so a reconnecting client can
 	// ask for only what it hasn't seen. messageSeq, richSeq and requestSeq
@@ -240,7 +240,7 @@ type EventEmitter struct {
 // The emitter calls it with its lock held, so its methods must not block
 // (statedb.DB queues the writes).
 type Persister interface {
-	PutMessage(msg st.ConversationMessage, seq uint64)
+	PutMessage(msg conv.Message, seq uint64)
 	// TruncateMessages removes the messages with an ID of at least fromID.
 	TruncateMessages(fromID int)
 	PutRichMessage(pos int, msg transcript.RichMessage, seq uint64)
@@ -266,7 +266,7 @@ type Persister interface {
 type EmitterState struct {
 	Epoch         string
 	Seq           uint64
-	Messages      []st.ConversationMessage
+	Messages      []conv.Message
 	MessageSeqs   []uint64
 	RichMessages  []transcript.RichMessage
 	RichSeqs      []uint64
@@ -278,13 +278,13 @@ type EmitterState struct {
 	SessionName   string
 }
 
-func convertStatus(status st.ConversationStatus) AgentStatus {
+func convertStatus(status conv.Status) AgentStatus {
 	switch status {
-	case st.ConversationStatusInitializing:
+	case conv.StatusInitializing:
 		return AgentStatusRunning
-	case st.ConversationStatusStable:
+	case conv.StatusStable:
 		return AgentStatusStable
-	case st.ConversationStatusChanging:
+	case conv.StatusChanging:
 		return AgentStatusRunning
 	default:
 		panic(fmt.Sprintf("unknown conversation status: %s", status))
@@ -404,7 +404,7 @@ func WithStatusChangeHandler(handler func(previous, current AgentStatus)) EventE
 
 func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 	e := &EventEmitter{
-		messages:            make([]st.ConversationMessage, 0),
+		messages:            make([]conv.Message, 0),
 		sessionEvents:       make([]transcript.SessionEvent, 0),
 		nextSessionEventID:  1,
 		status:              AgentStatusRunning,

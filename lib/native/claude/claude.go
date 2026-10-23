@@ -19,10 +19,10 @@ import (
 
 	"github.com/coder/quartz"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/procutil"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -896,7 +896,7 @@ func (a *Adapter) handleSystem(f *frame) {
 	case "task_notification":
 		a.sendRich(a.parser.taskNotification(f))
 	case "api_retry":
-		a.sink.Error("Claude Code is retrying a failed API request", st.ErrorLevelWarning)
+		a.sink.Error("Claude Code is retrying a failed API request", conv.ErrorLevelWarning)
 	}
 }
 
@@ -966,13 +966,13 @@ func (a *Adapter) handleResult(f *frame) {
 		// A result outside a turn ends nothing; an error in it is still
 		// worth showing.
 		if result.Error != "" && started {
-			a.sink.Error(result.Error, st.ErrorLevelError)
+			a.sink.Error(result.Error, conv.ErrorLevelError)
 		}
 		return
 	case replaced != nil && replaced.Error != "":
 		// With session state events a turn can have several results, and
 		// only the last one ends it: an earlier failure is shown now.
-		a.sink.Error(replaced.Error, st.ErrorLevelError)
+		a.sink.Error(replaced.Error, conv.ErrorLevelError)
 	}
 	if byResult {
 		a.endTurn()

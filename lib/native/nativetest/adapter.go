@@ -6,8 +6,8 @@ import (
 	"errors"
 	"sync"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // ErrClosed is returned by a Start that StartBlock holds when the adapter is
@@ -110,7 +110,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		}
 	}
 	for _, warning := range a.StartWarnings {
-		sink.Error(warning, st.ErrorLevelWarning)
+		sink.Error(warning, conv.ErrorLevelWarning)
 	}
 	if a.StartErr != nil {
 		return a.StartErr

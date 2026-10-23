@@ -9,30 +9,30 @@ import (
 	"strings"
 	"testing"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/handoff"
 	mf "github.com/coder/agentapi/lib/msgfmt"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type handoffConversation struct {
-	status st.ConversationStatus
+	status conv.Status
 	sends  int
-	parts  [][]st.MessagePart
+	parts  [][]conv.MessagePart
 }
 
-func (c *handoffConversation) Messages() []st.ConversationMessage { return nil }
-func (c *handoffConversation) Send(p ...st.MessagePart) error {
+func (c *handoffConversation) Messages() []conv.Message { return nil }
+func (c *handoffConversation) Send(p ...conv.MessagePart) error {
 	c.sends++
 	c.parts = append(c.parts, p)
 	return nil
 }
-func (c *handoffConversation) Start(context.Context)         {}
-func (c *handoffConversation) Status() st.ConversationStatus { return c.status }
-func (c *handoffConversation) Text() string                  { return "" }
-func (c *handoffConversation) Reset()                        {}
+func (c *handoffConversation) Start(context.Context) {}
+func (c *handoffConversation) Status() conv.Status   { return c.status }
+func (c *handoffConversation) Text() string          { return "" }
+func (c *handoffConversation) Reset()                {}
 
 type handoffIO struct {
 	writes []string
@@ -49,13 +49,13 @@ func (i *handoffIO) Write(data []byte) (int, error) {
 func (i *handoffIO) ReadScreen() string { return "" }
 
 func handoffServer() (*Server, *handoffConversation, *handoffIO) {
-	c := &handoffConversation{status: st.ConversationStatusStable}
+	c := &handoffConversation{status: conv.StatusStable}
 	i := &handoffIO{}
 	e := NewEventEmitter(WithServerID("session"), WithAgentType(mf.AgentTypeClaude))
-	e.EmitStatus(st.ConversationStatusStable)
-	e.EmitMessages([]st.ConversationMessage{
-		{Id: 1, Role: st.ConversationRoleUser, Message: "work"},
-		{Id: 2, Role: st.ConversationRoleAgent, Message: "What next?"},
+	e.EmitStatus(conv.StatusStable)
+	e.EmitMessages([]conv.Message{
+		{Id: 1, Role: conv.RoleUser, Message: "work"},
+		{Id: 2, Role: conv.RoleAgent, Message: "What next?"},
 	})
 	return &Server{
 		conversation: c, agentio: i, emitter: e, agentType: mf.AgentTypeClaude,
@@ -87,10 +87,10 @@ func TestHandoffView(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			e := NewEventEmitter()
-			var msgs []st.ConversationMessage
+			var msgs []conv.Message
 			for i, m := range tc.messages {
 				role, text, _ := strings.Cut(m, ":")
-				msgs = append(msgs, st.ConversationMessage{Id: i, Role: st.ConversationRole(role), Message: text})
+				msgs = append(msgs, conv.Message{Id: i, Role: conv.Role(role), Message: text})
 			}
 			e.EmitMessages(msgs)
 			view := e.handoffView()
@@ -138,7 +138,7 @@ func TestHandoffRestartInvalidatesEvenIdenticalPrompt(t *testing.T) {
 	pending := pendingHandoff(s)
 	s.emitter.SetLifecycle(LifecycleRestarting)
 	require.Nil(t, pendingHandoff(s))
-	s.emitter.EmitStatus(st.ConversationStatusStable)
+	s.emitter.EmitStatus(conv.StatusStable)
 	require.NotEqual(t, pending.ID, pendingHandoff(s).ID)
 	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: "late", Content: "continue"}})
 	require.NoError(t, err)
@@ -186,9 +186,9 @@ func TestHandoffIgnoresStartupRunningAndQueuedMessages(t *testing.T) {
 	s.emitter.Reset()
 	require.Nil(t, pendingHandoff(s))
 	s, c, _ := handoffServer()
-	c.status = st.ConversationStatusChanging
+	c.status = conv.StatusChanging
 	require.Nil(t, pendingHandoff(s))
-	c.status = st.ConversationStatusStable
+	c.status = conv.StatusStable
 	s.queue.Restore([]QueuedMessage{{ID: 1, Content: "queued"}}, 0)
 	require.Nil(t, pendingHandoff(s))
 }
@@ -200,7 +200,7 @@ func TestHandoffMCPRestartInvalidatesRequest(t *testing.T) {
 	restarted, err := s.restartQuery(true)
 	require.NoError(t, err)
 	require.True(t, restarted)
-	s.emitter.EmitStatus(st.ConversationStatusStable)
+	s.emitter.EmitStatus(conv.StatusStable)
 	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: "late", Content: "continue"}})
 	require.NoError(t, err)
 	require.Equal(t, "superseded", result.Body.Outcome)
@@ -243,20 +243,20 @@ func TestQueueNotBlockedByQuestionFarUpInScrollback(t *testing.T) {
 
 type notSubmittedConversation struct{ handoffConversation }
 
-func (c *notSubmittedConversation) Send(...st.MessagePart) error {
+func (c *notSubmittedConversation) Send(...conv.MessagePart) error {
 	c.sends++
-	return fmt.Errorf("failed to send message: %w", st.ErrMessageNotSubmitted)
+	return fmt.Errorf("failed to send message: %w", conv.ErrMessageNotSubmitted)
 }
 
 func TestQueueDoesNotRetryUnsubmittedMessage(t *testing.T) {
 	s, _, _ := handoffServer()
-	c := &notSubmittedConversation{handoffConversation{status: st.ConversationStatusStable}}
+	c := &notSubmittedConversation{handoffConversation{status: conv.StatusStable}}
 	s.conversation = c
 	s.queue.Restore([]QueuedMessage{{ID: 1, Content: "next"}, {ID: 2, Content: "after"}}, 0)
 	s.dispatchNextQueuedMessage()
 	require.Equal(t, 1, c.sends)
 	require.Equal(t, []QueuedMessage{{ID: 2, Content: "after"}}, s.queue.Messages())
-	assert.Equal(t, []string{`Queued message "next" was typed but the agent didn't submit it; check the agent's input box: failed to send message: ` + st.ErrMessageNotSubmitted.Error()}, errorMessages(s.emitter))
+	assert.Equal(t, []string{`Queued message "next" was typed but the agent didn't submit it; check the agent's input box: failed to send message: ` + conv.ErrMessageNotSubmitted.Error()}, errorMessages(s.emitter))
 }
 
 func readScreenFixture(t *testing.T, name string) string {
@@ -369,7 +369,7 @@ func TestFormatMessageClearsCodexComposer(t *testing.T) {
 	require.Len(t, parts, 4)
 	// A leftover draft (e.g. a follow-up Codex restored after an interrupt)
 	// is cleared first; it is hidden from the recorded user message.
-	require.Equal(t, st.MessagePartText{Content: clearCodexComposer, Hidden: true}, parts[0])
+	require.Equal(t, conv.MessagePartText{Content: clearCodexComposer, Hidden: true}, parts[0])
 	var text strings.Builder
 	for _, part := range parts {
 		text.WriteString(part.String())
@@ -424,9 +424,9 @@ func TestFormatMessageClosesClaudeFileSuggestions(t *testing.T) {
 	t.Parallel()
 	// typed is everything sent to the terminal; visible is the message part
 	// Send validates (it must stay trimmed).
-	split := func(parts []st.MessagePart) (typed, visible string) {
+	split := func(parts []conv.MessagePart) (typed, visible string) {
 		for _, part := range parts {
-			text, ok := part.(st.MessagePartText)
+			text, ok := part.(conv.MessagePartText)
 			require.True(t, ok)
 			typed += text.Content
 			if !text.Hidden {

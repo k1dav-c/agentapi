@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // waitCtx bounds how long a test waits for the conversation.
@@ -54,14 +54,14 @@ func TestLoginRequiredAtStartWaitsAndRetries(t *testing.T) {
 	assert.Equal(t, "claude auth login", got.Command)
 	assert.NotEmpty(t, got.Host)
 	assert.NotEmpty(t, got.User)
-	assert.Equal(t, st.ConversationStatusInitializing, c.Status())
+	assert.Equal(t, conv.StatusInitializing, c.Status())
 	select {
 	case err := <-c.Exited():
 		t.Fatalf("a missing login is not an exit: %v", err)
 	default:
 	}
 	// Messages wait in the caller's queue.
-	assert.ErrorIs(t, c.StartTurn(context.Background(), native.Input{Text: "hi"}), st.ErrMessageValidationChanging)
+	assert.ErrorIs(t, c.StartTurn(context.Background(), native.Input{Text: "hi"}), conv.ErrMessageValidationChanging)
 	errs := rec.get().errors
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0], "claude auth login")
@@ -305,7 +305,7 @@ func TestStartThatFoundNoLoginIsIgnored(t *testing.T) {
 
 	// The closed adapter still says something while AgentAPI waits.
 	first := factory.Last()
-	first.Sink().Error("Codex exited", st.ErrorLevelError)
+	first.Sink().Error("Codex exited", conv.ErrorLevelError)
 	first.Sink().RichMessage(text("m1", "stale"))
 	assert.Len(t, rec.get().errors, 1, "only the login")
 	assert.Empty(t, c.Messages())

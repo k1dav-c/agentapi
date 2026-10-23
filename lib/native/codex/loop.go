@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog/codexlog"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -38,7 +38,7 @@ func (s *loopState) now() time.Time { return s.a.cfg.Clock.Now() }
 
 func (s *loopState) sink() native.Sink { return s.a.sink }
 
-func (s *loopState) warn(message string) { s.sink().Error(message, st.ErrorLevelWarning) }
+func (s *loopState) warn(message string) { s.sink().Error(message, conv.ErrorLevelWarning) }
 
 // threadOpened returns the handler of a thread/start or thread/resume
 // result.
@@ -397,7 +397,7 @@ func (s *loopState) errorReported(n errorNotification) {
 		if isAuthError(&n.Error) {
 			s.reportLogin(nil)
 		}
-		s.sink().Error(text, st.ErrorLevelError)
+		s.sink().Error(text, conv.ErrorLevelError)
 	}
 }
 
@@ -417,7 +417,7 @@ func (s *loopState) threadNameUpdated(n threadNameUpdatedNotification) {
 
 func (s *loopState) threadStatusChanged(n threadStatusChangedNotification) {
 	if s.ours(n.ThreadID) && n.Status.Type == "systemError" {
-		s.sink().Error("Codex reported a system error for the thread", st.ErrorLevelError)
+		s.sink().Error("Codex reported a system error for the thread", conv.ErrorLevelError)
 	}
 }
 
@@ -711,7 +711,7 @@ func (s *loopState) completeTurn(tr turn) {
 	}
 	if t.lastError != "" && t.lastError != result.Error {
 		// The turn went on after the error, or failed with another one.
-		s.sink().Error(t.lastError, st.ErrorLevelError)
+		s.sink().Error(t.lastError, conv.ErrorLevelError)
 	}
 
 	s.turn = nil

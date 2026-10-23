@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	mf "github.com/coder/agentapi/lib/msgfmt"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/quartz"
 	"github.com/stretchr/testify/require"
 )
@@ -28,11 +28,11 @@ func TestDismissCodexUpdatePrompt(t *testing.T) {
 	s.emitter.EmitScreen(readScreenFixture(t, "codex_update_prompt.txt"))
 
 	// The dialog is still rendering.
-	c.status = st.ConversationStatusChanging
+	c.status = conv.StatusChanging
 	s.beforeQueue()
 	require.Empty(t, terminal.writes)
 
-	c.status = st.ConversationStatusStable
+	c.status = conv.StatusStable
 	s.beforeQueue()
 	require.Equal(t, []string{"\x1b"}, terminal.writes)
 

@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -24,8 +24,8 @@ func open(t *testing.T, path string) *statedb.DB {
 	return db
 }
 
-func msg(id int, text string) st.ConversationMessage {
-	return st.ConversationMessage{Id: id, Message: text, Role: st.ConversationRoleUser, Time: time.Unix(1700000000, 0).UTC()}
+func msg(id int, text string) conv.Message {
+	return conv.Message{Id: id, Message: text, Role: conv.RoleUser, Time: time.Unix(1700000000, 0).UTC()}
 }
 
 func TestRoundTrip(t *testing.T) {

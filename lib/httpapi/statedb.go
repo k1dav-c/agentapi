@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"slices"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/statedb"
 )
 
@@ -16,7 +16,7 @@ type restoredState struct {
 	snapshot statedb.Snapshot
 	// messages continue the restored conversation: the native agent
 	// resumes its session, a PTY agent starts anew below them.
-	messages []st.ConversationMessage
+	messages []conv.Message
 	// resumeRef resumes the native agent's session.
 	resumeRef string
 	// settings were chosen for the session.
@@ -44,7 +44,7 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 		return restoredState{}, err
 	}
 	db.OnWriteError(func(err error) {
-		emitter.EmitError(fmt.Sprintf("Failed to save the conversation in the state database; the latest changes won't survive a restart: %v", err), st.ErrorLevelError)
+		emitter.EmitError(fmt.Sprintf("Failed to save the conversation in the state database; the latest changes won't survive a restart: %v", err), conv.ErrorLevelError)
 	})
 	if snap.Empty() {
 		db.SetMeta(statedb.MetaAgentType, string(config.AgentType))
@@ -178,7 +178,7 @@ func (s *Server) persistQueue() {
 // ptyInitialPrompt is the initial prompt the PTY conversation sends: none
 // when the restored conversation got this prompt already, or when there is
 // none. A prompt that goes out is recorded, so the next restart knows.
-func ptyInitialPrompt(prompt []st.MessagePart, config ServerConfig, db *statedb.DB, restored restoredState) []st.MessagePart {
+func ptyInitialPrompt(prompt []conv.MessagePart, config ServerConfig, db *statedb.DB, restored restoredState) []conv.MessagePart {
 	if db == nil || config.InitialPrompt == "" {
 		return prompt
 	}

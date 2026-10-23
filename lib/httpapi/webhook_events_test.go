@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -117,14 +117,14 @@ func TestWebhookObserverTask(t *testing.T) {
 		return &WebhookCost{USD: 0.25, Calls: 2}
 	}
 	e := x.emitter
-	e.EmitStatus(st.ConversationStatusStable)
+	e.EmitStatus(conv.StatusStable)
 	e.SetSessionName("Fix the bug")
 	x.pump()
 	queued(d)
 
-	prompt := st.ConversationMessage{Id: 0, Role: st.ConversationRoleUser, Message: "Fix the bug", Time: start}
-	e.EmitMessages([]st.ConversationMessage{prompt})
-	e.EmitStatus(st.ConversationStatusChanging)
+	prompt := conv.Message{Id: 0, Role: conv.RoleUser, Message: "Fix the bug", Time: start}
+	e.EmitMessages([]conv.Message{prompt})
+	e.EmitStatus(conv.StatusChanging)
 	failed := false
 	e.EmitRichMessage(transcript.RichMessage{MessageID: "a1", Role: "assistant", Timestamp: start, Content: []transcript.RichContentBlock{
 		{Type: "tool_use", ToolUseID: "t1", ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"go test"}`)},
@@ -137,10 +137,10 @@ func TestWebhookObserverTask(t *testing.T) {
 		{Type: "tool_result", ToolUseID: "t1", Text: "ok", Status: "completed", IsError: &failed},
 	}})
 	// The reply streams in: sent once it is final.
-	e.EmitMessages([]st.ConversationMessage{prompt, {Id: 1, Role: st.ConversationRoleAgent, Message: "Fix", Time: start}})
-	e.EmitMessages([]st.ConversationMessage{prompt, {Id: 1, Role: st.ConversationRoleAgent, Message: "Fixed it.", Time: start}})
+	e.EmitMessages([]conv.Message{prompt, {Id: 1, Role: conv.RoleAgent, Message: "Fix", Time: start}})
+	e.EmitMessages([]conv.Message{prompt, {Id: 1, Role: conv.RoleAgent, Message: "Fixed it.", Time: start}})
 	clock.Advance(90 * time.Second)
-	e.EmitStatus(st.ConversationStatusStable)
+	e.EmitStatus(conv.StatusStable)
 	x.pump()
 
 	events := queued(d)
@@ -180,7 +180,7 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 	d := testDispatcher(t, WebhookConfig{Events: []string{"request.*", "login.*", "limit.*", "task.completed", "task.failed", "agent.error"}}, clock)
 	x := newObserved(t, d, clock)
 	e := x.emitter
-	e.EmitStatus(st.ConversationStatusStable)
+	e.EmitStatus(conv.StatusStable)
 
 	request := native.RequestState{Request: native.Request{ID: "r1"}, Status: native.RequestStatusPending}
 	e.EmitRequest(request)
@@ -190,16 +190,16 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 
 	// A turn waiting on an approval goes on once it is answered: the
 	// agent is idle for a moment in between.
-	deploy := st.ConversationMessage{Id: 0, Role: st.ConversationRoleUser, Message: "Deploy", Time: start}
-	e.EmitMessages([]st.ConversationMessage{deploy})
-	e.EmitStatus(st.ConversationStatusChanging)
+	deploy := conv.Message{Id: 0, Role: conv.RoleUser, Message: "Deploy", Time: start}
+	e.EmitMessages([]conv.Message{deploy})
+	e.EmitStatus(conv.StatusChanging)
 	approval := native.RequestState{Request: native.Request{ID: "r2"}, Status: native.RequestStatusPending}
 	e.EmitRequest(approval)
-	e.EmitStatus(st.ConversationStatusStable)
+	e.EmitStatus(conv.StatusStable)
 	approval.Status = native.RequestStatusResolved
 	e.EmitRequest(approval)
-	e.EmitStatus(st.ConversationStatusChanging)
-	e.EmitStatus(st.ConversationStatusStable)
+	e.EmitStatus(conv.StatusChanging)
+	e.EmitStatus(conv.StatusStable)
 
 	e.SetLoginRequired(&native.LoginRequired{Agent: "Claude Code", Command: "claude auth login"})
 	e.SetLoginRequired(nil)
@@ -213,12 +213,12 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 	e.updateTerminalPromptLocked("")
 	e.mu.Unlock()
 
-	goOn := st.ConversationMessage{Id: 1, Role: st.ConversationRoleUser, Message: "Go on", Time: start}
-	e.EmitMessages([]st.ConversationMessage{deploy, goOn})
-	e.EmitStatus(st.ConversationStatusChanging)
-	e.EmitError("warned", st.ErrorLevelWarning)
+	goOn := conv.Message{Id: 1, Role: conv.RoleUser, Message: "Go on", Time: start}
+	e.EmitMessages([]conv.Message{deploy, goOn})
+	e.EmitStatus(conv.StatusChanging)
+	e.EmitError("warned", conv.ErrorLevelWarning)
 	e.SetLimitStop(&native.LimitStop{Message: "You've hit your limit", StoppedAt: start})
-	e.EmitStatus(st.ConversationStatusStable)
+	e.EmitStatus(conv.StatusStable)
 	x.pump()
 
 	events := queued(d)
@@ -247,11 +247,11 @@ func TestWebhookObserverHistory(t *testing.T) {
 	d := testDispatcher(t, WebhookConfig{Events: []string{"*"}}, clock)
 	emitter := NewEventEmitter(WithClock(clock))
 	old := clock.Now().Add(-time.Hour)
-	emitter.EmitMessages([]st.ConversationMessage{
-		{Id: 0, Role: st.ConversationRoleUser, Message: "Earlier", Time: old},
-		{Id: 1, Role: st.ConversationRoleAgent, Message: "Done earlier", Time: old},
+	emitter.EmitMessages([]conv.Message{
+		{Id: 0, Role: conv.RoleUser, Message: "Earlier", Time: old},
+		{Id: 1, Role: conv.RoleAgent, Message: "Done earlier", Time: old},
 	})
-	emitter.EmitStatus(st.ConversationStatusStable)
+	emitter.EmitStatus(conv.StatusStable)
 	o := newWebhookObserver(d, emitter, clock.Now())
 	o.clock = clock
 
@@ -263,17 +263,17 @@ func TestWebhookObserverHistory(t *testing.T) {
 		return len(emitter.chans) == 1
 	}, 5*time.Second, 10*time.Millisecond)
 	// A resumed session's messages are old too.
-	emitter.EmitMessages([]st.ConversationMessage{
-		{Id: 0, Role: st.ConversationRoleUser, Message: "Earlier", Time: old},
-		{Id: 1, Role: st.ConversationRoleAgent, Message: "Done earlier", Time: old},
-		{Id: 2, Role: st.ConversationRoleUser, Message: "Resumed", Time: old.Add(time.Minute)},
+	emitter.EmitMessages([]conv.Message{
+		{Id: 0, Role: conv.RoleUser, Message: "Earlier", Time: old},
+		{Id: 1, Role: conv.RoleAgent, Message: "Done earlier", Time: old},
+		{Id: 2, Role: conv.RoleUser, Message: "Resumed", Time: old.Add(time.Minute)},
 	})
 	now := clock.Now()
-	emitter.EmitMessages([]st.ConversationMessage{
-		{Id: 0, Role: st.ConversationRoleUser, Message: "Earlier", Time: old},
-		{Id: 1, Role: st.ConversationRoleAgent, Message: "Done earlier", Time: old},
-		{Id: 2, Role: st.ConversationRoleUser, Message: "Resumed", Time: old.Add(time.Minute)},
-		{Id: 3, Role: st.ConversationRoleUser, Message: "New", Time: now},
+	emitter.EmitMessages([]conv.Message{
+		{Id: 0, Role: conv.RoleUser, Message: "Earlier", Time: old},
+		{Id: 1, Role: conv.RoleAgent, Message: "Done earlier", Time: old},
+		{Id: 2, Role: conv.RoleUser, Message: "Resumed", Time: old.Add(time.Minute)},
+		{Id: 3, Role: conv.RoleUser, Message: "New", Time: now},
 	})
 	var events []WebhookEvent
 	require.Eventually(t, func() bool {
@@ -292,7 +292,7 @@ func TestWebhookObserverResubscribes(t *testing.T) {
 	clock := quartz.NewMock(t)
 	d := testDispatcher(t, WebhookConfig{Events: []string{"message.created", "task.started", "agent.error"}}, clock)
 	emitter := NewEventEmitter(WithClock(clock))
-	emitter.EmitStatus(st.ConversationStatusStable)
+	emitter.EmitStatus(conv.StatusStable)
 	o := newWebhookObserver(d, emitter, clock.Now())
 	o.clock = clock
 	subscriptions := func() int {
@@ -304,10 +304,10 @@ func TestWebhookObserverResubscribes(t *testing.T) {
 	require.Eventually(t, func() bool { return subscriptions() == 1 }, 5*time.Second, 10*time.Millisecond)
 
 	now := clock.Now()
-	msgs := []st.ConversationMessage{{Id: 0, Role: st.ConversationRoleUser, Message: "Fix the bug", Time: now}}
+	msgs := []conv.Message{{Id: 0, Role: conv.RoleUser, Message: "Fix the bug", Time: now}}
 	emitter.EmitMessages(msgs)
-	emitter.EmitError("the agent warned", st.ErrorLevelWarning)
-	emitter.EmitMessages(append(msgs, st.ConversationMessage{Id: 1, Role: st.ConversationRoleUser, Message: "Refused", Time: now}))
+	emitter.EmitError("the agent warned", conv.ErrorLevelWarning)
+	emitter.EmitMessages(append(msgs, conv.Message{Id: 1, Role: conv.RoleUser, Message: "Refused", Time: now}))
 	var events []WebhookEvent
 	require.Eventually(t, func() bool {
 		events = append(events, queued(d)...)
@@ -316,7 +316,7 @@ func TestWebhookObserverResubscribes(t *testing.T) {
 
 	emitter.EmitMessages(msgs)
 	require.Eventually(t, func() bool { return subscriptions() == 2 }, 5*time.Second, 10*time.Millisecond, "subscribed again")
-	emitter.EmitError("the agent failed", st.ErrorLevelError)
+	emitter.EmitError("the agent failed", conv.ErrorLevelError)
 	require.Eventually(t, func() bool {
 		events = append(events, queued(d)...)
 		return len(events) >= 5

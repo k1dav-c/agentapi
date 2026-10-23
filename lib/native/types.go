@@ -13,7 +13,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/transcript"
 	"github.com/coder/agentapi/lib/util"
 )
@@ -320,7 +320,7 @@ type Sink interface {
 	// token) while running.
 	LoginRequired(LoginRequired)
 	// Error reports a problem the user should know about.
-	Error(message string, level st.ErrorLevel)
+	Error(message string, level conv.ErrorLevel)
 }
 
 // Adapter drives one agent process through its structured protocol.

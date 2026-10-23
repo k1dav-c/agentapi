@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/cors"
 
 	"github.com/coder/agentapi/internal/version"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/mcpconfig"
 	mf "github.com/coder/agentapi/lib/msgfmt"
@@ -53,7 +54,7 @@ type Server struct {
 	stopping           bool        // set under mu once Stop closed the agent: no more restarts
 	restarting         atomic.Bool // set under mu while a restart runs without it (runRestartLocked)
 	logger             *slog.Logger
-	conversation       st.Conversation
+	conversation       conv.Conversation
 	native             *native.Conversation // nil unless the transport is native
 	sessions           *sessions.Store      // the agent's sessions; nil unless native and it keeps logs
 	stateDB            *statedb.DB          // nil unless the conversation is kept
@@ -285,7 +286,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 
 	// Format initial prompt into message parts if provided
-	var initialPrompt []st.MessagePart
+	var initialPrompt []conv.MessagePart
 	if config.InitialPrompt != "" {
 		initialPrompt = FormatMessage(config.AgentType, config.InitialPrompt)
 	}
@@ -298,7 +299,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 	logger.Info("Using upload directory", "uploadDir", uploads.dir)
 
-	var conversation st.Conversation
+	var conversation conv.Conversation
 	var nativeConversation *native.Conversation
 	var observer *nativeObserver
 	if config.Transport == TransportNative {

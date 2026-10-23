@@ -9,9 +9,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/handoff"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // ptyBackend drives an agent through a screentracker conversation: a
@@ -22,7 +22,7 @@ type ptyBackend struct{ s *Server }
 // shows no dialog, which the message's Enter would answer.
 func (b ptyBackend) readyForQueued() bool {
 	s := b.s
-	if s.conversation.Status() != st.ConversationStatusStable {
+	if s.conversation.Status() != conv.StatusStable {
 		return false
 	}
 	if s.emitter == nil || s.transport != TransportPTY {
@@ -39,7 +39,7 @@ func (b ptyBackend) sendQueued(content string) error {
 // notResent: a message the agent didn't submit is still in its input box,
 // and sent again it would be typed a second time.
 func (b ptyBackend) notResent(err error) string {
-	if errors.Is(err, st.ErrMessageNotSubmitted) {
+	if errors.Is(err, conv.ErrMessageNotSubmitted) {
 		return "was typed but the agent didn't submit it; check the agent's input box"
 	}
 	return ""
@@ -102,19 +102,19 @@ func (b ptyBackend) deliver(content string, _ DispatchMode, resp *MessageRespons
 	}
 	if keys, ok := freeTextReplyKeys(s.agentType, screen); question && ok {
 		if err := s.conversation.Send(formatFreeTextReply(s.agentType, keys, content)...); err != nil {
-			if errors.Is(err, st.ErrMessageValidationChanging) {
+			if errors.Is(err, conv.ErrMessageValidationChanging) {
 				return huma.Error409Conflict("the agent's prompt is still updating; try again in a moment")
 			}
 			return fmt.Errorf("failed to send reply to the agent's prompt: %w", err)
 		}
 		return nil
 	}
-	if s.queue.Len() > 0 || s.conversation.Status() != st.ConversationStatusStable || question {
+	if s.queue.Len() > 0 || s.conversation.Status() != conv.StatusStable || question {
 		s.queueMessageLocked(resp, content, false)
 		return nil
 	}
 	if err := s.conversation.Send(FormatMessage(s.agentType, content)...); err != nil {
-		if errors.Is(err, st.ErrMessageValidationChanging) {
+		if errors.Is(err, conv.ErrMessageValidationChanging) {
 			s.queueMessageLocked(resp, content, false)
 			return nil
 		}

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 )
 
 // Start launches the agent in the background. Status reports initializing
@@ -15,7 +15,7 @@ func (c *Conversation) Start(ctx context.Context) {
 	c.mu.Lock()
 	c.ctx = ctx
 	gen, resume := c.generation, c.resumeLocked()
-	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
+	c.cfg.Emitter.EmitStatus(conv.StatusInitializing)
 	c.mu.Unlock()
 	c.launchAsync(ctx, gen, resume)
 }
@@ -100,7 +100,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error
 	if c.cfg.InitialPrompt != "" && !c.promptSent {
 		c.promptSent = true
 		if t, err := c.beginTurnLocked(prompt); err != nil {
-			c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), st.ErrorLevelError)
+			c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), conv.ErrorLevelError)
 		} else {
 			turn = &t
 		}
@@ -112,7 +112,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error
 		sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
 		defer cancel()
 		if err := c.deliverTurn(sendCtx, *turn); err != nil {
-			c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), st.ErrorLevelError)
+			c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), conv.ErrorLevelError)
 		}
 	}
 	return nil
@@ -149,7 +149,7 @@ func (c *Conversation) applyChosen(ctx context.Context, gen int, adapter Adapter
 		}
 		if err != nil {
 			c.cfg.Logger.Warn("Failed to restore a setting of the session", "setting", change, "error", err)
-			c.cfg.Emitter.EmitError(fmt.Sprintf("The agent didn't take the session's %s: %v", settingName(change), err), st.ErrorLevelWarning)
+			c.cfg.Emitter.EmitError(fmt.Sprintf("The agent didn't take the session's %s: %v", settingName(change), err), conv.ErrorLevelWarning)
 		}
 	}
 	return configurable.Settings()
@@ -182,7 +182,7 @@ func (c *Conversation) failStart(gen int, err error) {
 		return
 	}
 	c.cfg.Logger.Error("Failed to start the agent", "error", err)
-	c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to start the agent: %v", err), st.ErrorLevelError)
+	c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to start the agent: %v", err), conv.ErrorLevelError)
 	c.exitLocked(err)
 }
 
@@ -257,7 +257,7 @@ func (r *Replacement) Start(ctx context.Context) error {
 	r.CloseOld()
 	r.c.mu.Lock()
 	if r.gen == r.c.generation {
-		r.c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
+		r.c.cfg.Emitter.EmitStatus(conv.StatusInitializing)
 	}
 	r.c.mu.Unlock()
 	select {
@@ -303,7 +303,7 @@ func (c *Conversation) BeginRestart(reset func()) *Replacement {
 // messages, that session's so far; the initial prompt is not sent. It
 // returns like Replacement.Start, and ErrTurnActive while the agent works
 // on a turn or compacts its context, which a switch would cut short.
-func (c *Conversation) Switch(ctx context.Context, resume Resume, messages []st.ConversationMessage) error {
+func (c *Conversation) Switch(ctx context.Context, resume Resume, messages []conv.Message) error {
 	r, err := c.BeginSwitch(resume, messages, nil)
 	if err != nil {
 		return err
@@ -315,7 +315,7 @@ func (c *Conversation) Switch(ctx context.Context, resume Resume, messages []st.
 // retiring the agent are one step: while the agent works on a turn or
 // compacts its context, BeginSwitch returns ErrTurnActive and changes
 // nothing, reset included. reset runs as BeginRestart's does.
-func (c *Conversation) BeginSwitch(resume Resume, messages []st.ConversationMessage, reset func()) (*Replacement, error) {
+func (c *Conversation) BeginSwitch(resume Resume, messages []conv.Message, reset func()) (*Replacement, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.turnActive || c.compacting {

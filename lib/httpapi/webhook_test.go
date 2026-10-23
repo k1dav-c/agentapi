@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	mf "github.com/coder/agentapi/lib/msgfmt"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 func TestWebhookConfigValidation(t *testing.T) {
@@ -62,10 +62,10 @@ func TestWebhookStatusChangesOnly(t *testing.T) {
 	require.NoError(t, err)
 
 	emitter := NewEventEmitter(WithStatusChangeHandler(dispatcher.statusChanged))
-	emitter.EmitStatus(st.ConversationStatusChanging)
+	emitter.EmitStatus(conv.StatusChanging)
 	assert.Empty(t, dispatcher.queue)
 
-	emitter.EmitStatus(st.ConversationStatusStable)
+	emitter.EmitStatus(conv.StatusStable)
 	require.Len(t, dispatcher.queue, 1)
 	event := <-dispatcher.queue
 	assert.Equal(t, webhookEventRunStatusChanged, event.Type)
@@ -79,7 +79,7 @@ func TestWebhookStatusChangesOnly(t *testing.T) {
 	assert.NotEmpty(t, data.ServerID)
 	assert.Equal(t, data.ServerID, event.Instance.ServerID)
 
-	emitter.EmitStatus(st.ConversationStatusStable)
+	emitter.EmitStatus(conv.StatusStable)
 	assert.Empty(t, dispatcher.queue)
 }
 

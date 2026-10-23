@@ -4,8 +4,8 @@ import (
 	"regexp"
 	"time"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	mf "github.com/coder/agentapi/lib/msgfmt"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // codexUpdatePromptTailLines bounds how much of the bottom of the screen is
@@ -52,7 +52,7 @@ func (s *Server) dismissCodexUpdatePromptLocked() {
 		return
 	}
 	// Wait for the dialog to finish rendering before answering it.
-	if s.conversation.Status() != st.ConversationStatusStable {
+	if s.conversation.Status() != conv.StatusStable {
 		return
 	}
 	now := s.clock.Now()

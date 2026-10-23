@@ -12,10 +12,10 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/handoff"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 var (
@@ -218,11 +218,11 @@ func (e *EventEmitter) handoffView() handoffView {
 	reply, replied := "", false
 	for i := len(e.messages) - 1; i >= 0; i-- {
 		msg := e.messages[i]
-		if msg.Role == st.ConversationRoleUser {
+		if msg.Role == conv.RoleUser {
 			view.question, view.reply = msg.Message, reply
 			break
 		}
-		if msg.Role == st.ConversationRoleAgent && !replied {
+		if msg.Role == conv.RoleAgent && !replied {
 			reply, replied = msg.Message, true
 		}
 	}
@@ -242,7 +242,7 @@ func (s *Server) pendingHandoff() (*handoff.Request, native.RequestState) {
 		return nil, native.RequestState{}
 	}
 	view := s.emitter.handoffView()
-	if view.status.Lifecycle != LifecycleReady || s.conversation.Status() != st.ConversationStatusStable {
+	if view.status.Lifecycle != LifecycleReady || s.conversation.Status() != conv.StatusStable {
 		return nil, native.RequestState{}
 	}
 	kind, content, request, ok := s.backend().handoffOffer(view)

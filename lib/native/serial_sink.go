@@ -3,7 +3,7 @@ package native
 import (
 	"sync"
 
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -47,7 +47,7 @@ func (s *serialSink) SessionEvents(events []transcript.SessionEvent) {
 	s.do(func(k Sink) { k.SessionEvents(events) })
 }
 
-func (s *serialSink) Error(message string, level st.ErrorLevel) {
+func (s *serialSink) Error(message string, level conv.ErrorLevel) {
 	s.do(func(k Sink) { k.Error(message, level) })
 }
 

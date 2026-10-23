@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 )
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -30,7 +30,7 @@ func TestWriteRetriesAFailedBatch(t *testing.T) {
 		}
 		return nil
 	})
-	db.PutMessage(st.ConversationMessage{Id: 0, Message: "kept"}, 1)
+	db.PutMessage(conv.Message{Id: 0, Message: "kept"}, 1)
 	db.Flush()
 	assert.Zero(t, failures, "the batch was tried until it went through")
 	require.NoError(t, db.Close())
@@ -62,7 +62,7 @@ func TestWriteGivesUpAndReports(t *testing.T) {
 		attempts++
 		return broken
 	})
-	db.PutMessage(st.ConversationMessage{Id: 0, Message: "lost"}, 1)
+	db.PutMessage(conv.Message{Id: 0, Message: "lost"}, 1)
 	db.Flush()
 	assert.Equal(t, writeAttempts, attempts)
 	// Another lost batch in the same outage is not reported again.
@@ -72,7 +72,7 @@ func TestWriteGivesUpAndReports(t *testing.T) {
 	assert.Equal(t, []error{broken}, reported)
 	mu.Unlock()
 	// Writes that work again are kept, but the file misses changes.
-	db.PutMessage(st.ConversationMessage{Id: 1, Message: "later"}, 2)
+	db.PutMessage(conv.Message{Id: 1, Message: "later"}, 2)
 	err = db.Close()
 	require.ErrorIs(t, err, broken)
 

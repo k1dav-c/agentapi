@@ -23,8 +23,8 @@ import (
 	sqlite "modernc.org/sqlite" // SQLite driver without cgo.
 	sqlite3 "modernc.org/sqlite/lib"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -97,7 +97,7 @@ type Task struct {
 
 // Message is a stored conversation message with the seq of its last change.
 type Message struct {
-	Message st.ConversationMessage
+	Message conv.Message
 	Seq     uint64
 }
 
@@ -314,7 +314,7 @@ func (d *DB) Load() (Snapshot, error) {
 	delete(snap.Meta, metaClean)
 
 	if err := d.scanJSON("messages", "SELECT seq, data FROM messages ORDER BY id", func(seq uint64, data []byte) error {
-		var m st.ConversationMessage
+		var m conv.Message
 		if err := json.Unmarshal(data, &m); err != nil {
 			return err
 		}
@@ -532,7 +532,7 @@ func (d *DB) SetSeq(epoch string, seq uint64) {
 // written, on the writing goroutine: the emitter calls PutMessage with its
 // lock held, on every update of a message that streams in, and of a
 // message updated again before it was written only the latest is encoded.
-func (d *DB) PutMessage(m st.ConversationMessage, seq uint64) {
+func (d *DB) PutMessage(m conv.Message, seq uint64) {
 	d.enqueue("message:"+strconv.Itoa(m.Id), func(tx *sql.Tx) error {
 		data, ok := d.encode("message", m)
 		if !ok {

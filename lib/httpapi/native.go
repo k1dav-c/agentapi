@@ -10,8 +10,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -137,7 +137,7 @@ func (s *Server) createNativeMessageLocked(content string, mode DispatchMode, re
 	}
 	if err := s.native.StartTurn(ctx, input); err != nil {
 		switch {
-		case errors.Is(err, st.ErrMessageValidationChanging):
+		case errors.Is(err, conv.ErrMessageValidationChanging):
 			s.queueMessageLocked(resp, content, false)
 			return nil
 		case errors.Is(err, native.ErrUnconfirmed):

@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/handoff"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // A terminal agent's restart (its CLI update, its new process) runs
@@ -88,7 +88,7 @@ func TestPTYRestartOffersNoHandoff(t *testing.T) {
 	}()
 	<-restarting
 
-	s.emitter.EmitStatus(st.ConversationStatusStable)
+	s.emitter.EmitStatus(conv.StatusStable)
 	require.Equal(t, LifecycleReady, s.emitter.StatusSnapshot().Lifecycle)
 	assert.Nil(t, pendingHandoff(s))
 	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: "any", ID: "r1", Content: "go on"}})

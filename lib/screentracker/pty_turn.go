@@ -2,34 +2,36 @@ package screentracker
 
 import (
 	"time"
+
+	conv "github.com/coder/agentapi/lib/conversation"
 )
 
-func (c *PTYConversation) lastMessage(role ConversationRole) ConversationMessage {
+func (c *PTYConversation) lastMessage(role conv.Role) conv.Message {
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		if c.messages[i].Role == role {
 			return c.messages[i]
 		}
 	}
-	return ConversationMessage{}
+	return conv.Message{}
 }
 
 // previousTurnAgentMessageLocked returns the last agent message from before
 // the last user message, i.e. the finalized message of the previous turn.
 // Returns a zero value if there is no such message. Caller MUST hold c.lock.
-func (c *PTYConversation) previousTurnAgentMessageLocked() ConversationMessage {
+func (c *PTYConversation) previousTurnAgentMessageLocked() conv.Message {
 	lastUserIdx := -1
 	for i := len(c.messages) - 1; i >= 0; i-- {
-		if c.messages[i].Role == ConversationRoleUser {
+		if c.messages[i].Role == conv.RoleUser {
 			lastUserIdx = i
 			break
 		}
 	}
 	for i := lastUserIdx - 1; i >= 0; i-- {
-		if c.messages[i].Role == ConversationRoleAgent {
+		if c.messages[i].Role == conv.RoleAgent {
 			return c.messages[i]
 		}
 	}
-	return ConversationMessage{}
+	return conv.Message{}
 }
 
 // caller MUST hold c.lock
@@ -44,13 +46,13 @@ func (c *PTYConversation) updateLastAgentMessageLocked(screen string, timestamp 
 		return
 	}
 	agentMessage := screenDiff(c.screenBeforeLastUserMessage, screen, c.cfg.AgentType)
-	lastUserMessage := c.lastMessage(ConversationRoleUser)
+	lastUserMessage := c.lastMessage(conv.RoleUser)
 	var toolCalls []string
 	if c.cfg.FormatMessage != nil {
 		agentMessage = c.cfg.FormatMessage(agentMessage, lastUserMessage.Message)
 	}
 	restoredFromState := false
-	if c.restored && len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == ConversationRoleAgent {
+	if c.restored && len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == conv.RoleAgent {
 		agentMessage = c.messages[len(c.messages)-1].Message
 		restoredFromState = true
 	}
@@ -79,13 +81,13 @@ func (c *PTYConversation) updateLastAgentMessageLocked(screen string, timestamp 
 	// A new turn always gets its message, even one like the previous
 	// turn's (two empty replies in a row): until it has one, the user's
 	// message is the last one and the status stays changing.
-	shouldCreateNewMessage := len(c.messages) == 0 || c.messages[len(c.messages)-1].Role == ConversationRoleUser
+	shouldCreateNewMessage := len(c.messages) == 0 || c.messages[len(c.messages)-1].Role == conv.RoleUser
 	if !shouldCreateNewMessage && c.messages[len(c.messages)-1].Message == agentMessage {
 		return
 	}
-	conversationMessage := ConversationMessage{
+	conversationMessage := conv.Message{
 		Message: agentMessage,
-		Role:    ConversationRoleAgent,
+		Role:    conv.RoleAgent,
 		Time:    timestamp,
 	}
 	if shouldCreateNewMessage {

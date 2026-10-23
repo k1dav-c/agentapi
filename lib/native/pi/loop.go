@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog/pilog"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // abortedRunMessage is the error of the extra assistant message Pi adds
@@ -196,11 +196,11 @@ func (a *Adapter) handleLine(line []byte) {
 		}
 	case "compaction_end":
 		if ev, ok := decodeRecord[compactionEnd](a, line, env.Type); ok && ev.ErrorMessage != "" && !ev.Aborted {
-			a.loop.sink.Error(ev.ErrorMessage, st.ErrorLevelWarning)
+			a.loop.sink.Error(ev.ErrorMessage, conv.ErrorLevelWarning)
 		}
 	case "extension_error":
 		if ev, ok := decodeRecord[extensionError](a, line, env.Type); ok {
-			a.loop.sink.Error(fmt.Sprintf("Pi extension %s failed on %s: %s", ev.ExtensionPath, ev.Event, ev.Error), st.ErrorLevelWarning)
+			a.loop.sink.Error(fmt.Sprintf("Pi extension %s failed on %s: %s", ev.ExtensionPath, ev.Event, ev.Error), conv.ErrorLevelWarning)
 		}
 	default:
 		a.log.Debug("Unknown Pi record", "type", env.Type)
@@ -238,7 +238,7 @@ func (a *Adapter) handleResponse(r response) {
 	case cmdAbort:
 		switch {
 		case !r.Success:
-			a.loop.sink.Error("Pi couldn't stop the turn: "+r.Error, st.ErrorLevelWarning)
+			a.loop.sink.Error("Pi couldn't stop the turn: "+r.Error, conv.ErrorLevelWarning)
 		case a.isTurnActive() && !a.isRunActive():
 			// An extension command waiting on a dialog: abort doesn't
 			// reach it, but cancelling its dialogs ends it.
@@ -269,7 +269,7 @@ func (a *Adapter) handlePromptResponse(p *pendingCmd, deliver bool, r response) 
 		default:
 			// The caller was told the prompt started, but Pi went on
 			// without the message.
-			a.loop.sink.Error("Pi refused the message: "+r.Error, st.ErrorLevelError)
+			a.loop.sink.Error("Pi refused the message: "+r.Error, conv.ErrorLevelError)
 		}
 		if isAuthError(r.Error) {
 			a.reportLogin()

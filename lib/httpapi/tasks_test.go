@@ -8,18 +8,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
-func taskMessages(start time.Time, entries ...string) []st.ConversationMessage {
-	msgs := make([]st.ConversationMessage, len(entries))
+func taskMessages(start time.Time, entries ...string) []conv.Message {
+	msgs := make([]conv.Message, len(entries))
 	for i, entry := range entries {
-		role := st.ConversationRoleAgent
+		role := conv.RoleAgent
 		if text, ok := strings.CutPrefix(entry, ">"); ok {
-			role, entry = st.ConversationRoleUser, text
+			role, entry = conv.RoleUser, text
 		}
-		msgs[i] = st.ConversationMessage{Id: i, Role: role, Message: entry, Time: start.Add(time.Duration(i) * time.Second)}
+		msgs[i] = conv.Message{Id: i, Role: role, Message: entry, Time: start.Add(time.Duration(i) * time.Second)}
 	}
 	return msgs
 }
@@ -54,7 +54,7 @@ func TestTaskTracker(t *testing.T) {
 	// Waiting for an approval isn't the end.
 	assert.Empty(t, status(StatusChangeBody{Status: AgentStatusStable, PendingRequests: 1}, start))
 	assert.Empty(t, status(running, start))
-	assert.Empty(t, tr.agentError(ErrorBody{Message: "warned", Level: st.ErrorLevelWarning}))
+	assert.Empty(t, tr.agentError(ErrorBody{Message: "warned", Level: conv.ErrorLevelWarning}))
 	end := start.Add(time.Minute)
 	assert.Equal(t, []int{0}, status(stable, end))
 	assert.Equal(t, TaskStatusCompleted, tr.tasks[0].Status)
@@ -65,13 +65,13 @@ func TestTaskTracker(t *testing.T) {
 	msgs = append(msgs, taskMessages(start, "", "", "", "", "", ">Deploy")[5])
 	assert.Equal(t, []int{1}, tr.messages(msgs))
 	status(running, end)
-	assert.Equal(t, []int{1}, tr.agentError(ErrorBody{Message: "boom", Level: st.ErrorLevelError}))
+	assert.Equal(t, []int{1}, tr.agentError(ErrorBody{Message: "boom", Level: conv.ErrorLevelError}))
 	assert.Equal(t, 5, *tr.taskAt(start), "a rich message goes to the running task")
 	status(stable, end)
 	assert.Equal(t, TaskStatusFailed, tr.tasks[1].Status)
 	assert.Equal(t, []string{"boom"}, tr.tasks[1].Errors)
 
-	msgs = append(msgs, st.ConversationMessage{Id: 6, Role: st.ConversationRoleUser, Message: "Go on", Time: end})
+	msgs = append(msgs, conv.Message{Id: 6, Role: conv.RoleUser, Message: "Go on", Time: end})
 	tr.messages(msgs)
 	status(running, end)
 	limit := &native.LimitStop{Message: "limit", StoppedAt: end.Add(time.Second)}
@@ -80,7 +80,7 @@ func TestTaskTracker(t *testing.T) {
 	assert.Equal(t, limit, tr.tasks[2].Limit)
 
 	// The agent exiting fails the running task.
-	msgs = append(msgs, st.ConversationMessage{Id: 7, Role: st.ConversationRoleUser, Message: "Again", Time: end.Add(time.Minute)})
+	msgs = append(msgs, conv.Message{Id: 7, Role: conv.RoleUser, Message: "Again", Time: end.Add(time.Minute)})
 	tr.messages(msgs)
 	status(running, end)
 	status(StatusChangeBody{Status: AgentStatusStable, Lifecycle: LifecycleExited}, end)

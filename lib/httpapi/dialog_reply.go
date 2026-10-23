@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	st "github.com/coder/agentapi/lib/screentracker"
 )
@@ -114,8 +115,8 @@ func (p keyPressPart) String() string { return "" }
 
 // formatFreeTextReply opens the prompt's free-text field with keys and pastes
 // the message into it. The conversation's carriage return then submits it.
-func formatFreeTextReply(agentType mf.AgentType, keys string, message string) []st.MessagePart {
-	var parts []st.MessagePart
+func formatFreeTextReply(agentType mf.AgentType, keys string, message string) []conv.MessagePart {
+	var parts []conv.MessagePart
 	if keys != "" {
 		parts = append(parts, keyPressPart{keys: keys, delay: freeTextFocusDelay})
 	}

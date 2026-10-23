@@ -7,30 +7,10 @@ import (
 	"sync"
 	"time"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/quartz"
 )
-
-// MessagePartText is text typed into the agent's terminal. A hidden part
-// (a bracketed paste marker, say) isn't part of the message's text.
-type MessagePartText struct {
-	Content string
-	Hidden  bool
-}
-
-var _ MessagePart = &MessagePartText{}
-
-func (p MessagePartText) Do(writer AgentIO) error {
-	_, err := writer.Write([]byte(p.Content))
-	return err
-}
-
-func (p MessagePartText) String() string {
-	if p.Hidden {
-		return ""
-	}
-	return p.Content
-}
 
 // PTYConversationConfig is the configuration for a PTYConversation.
 type PTYConversationConfig struct {
@@ -60,13 +40,13 @@ type PTYConversationConfig struct {
 	// FormatToolCall removes the coder report_task tool call from the agent message and also returns the array of removed tool calls
 	FormatToolCall func(message string) (string, []string)
 	// InitialPrompt is the initial prompt to send to the agent once ready
-	InitialPrompt []MessagePart
+	InitialPrompt []conv.MessagePart
 	Logger        *slog.Logger
 	// InitialMessages is a conversation restored from the state database,
 	// which this one continues: the agent starts anew, but the messages
 	// stay, and the last agent message keeps its text until the user sends
 	// the next message. An InitialPrompt goes out after them.
-	InitialMessages []ConversationMessage
+	InitialMessages []conv.Message
 }
 
 func (cfg PTYConversationConfig) getStableSnapshotsThreshold() int {
@@ -83,13 +63,13 @@ func (cfg PTYConversationConfig) getStableSnapshotsThreshold() int {
 // It snapshots on output and samples until the screen is stable.
 type PTYConversation struct {
 	cfg     PTYConversationConfig
-	emitter Emitter
+	emitter conv.Emitter
 	// How many stable snapshots are required to consider the screen stable
 	stableSnapshotsThreshold int
 	// snapshots counts the snapshots taken since the start or the last
 	// reset, up to stableSnapshotsThreshold: fewer means initializing.
 	snapshots                   int
-	messages                    []ConversationMessage
+	messages                    []conv.Message
 	screenBeforeLastUserMessage string
 	lock                        sync.Mutex
 
@@ -151,24 +131,24 @@ type PTYConversation struct {
 	initialPromptSent bool
 }
 
-var _ Conversation = &PTYConversation{}
+var _ conv.Conversation = &PTYConversation{}
 
-func NewPTY(ctx context.Context, cfg PTYConversationConfig, emitter Emitter) *PTYConversation {
+func NewPTY(ctx context.Context, cfg PTYConversationConfig, emitter conv.Emitter) *PTYConversation {
 	if cfg.Clock == nil {
 		cfg.Clock = quartz.NewReal()
 	}
 	if emitter == nil {
-		emitter = NopEmitter{}
+		emitter = conv.NopEmitter{}
 	}
 	threshold := cfg.getStableSnapshotsThreshold()
 	c := &PTYConversation{
 		cfg:                      cfg,
 		emitter:                  emitter,
 		stableSnapshotsThreshold: threshold,
-		messages: []ConversationMessage{
+		messages: []conv.Message{
 			{
 				Message: "",
-				Role:    ConversationRoleAgent,
+				Role:    conv.RoleAgent,
 				Time:    cfg.Clock.Now(),
 			},
 		},
@@ -271,7 +251,7 @@ func (c *PTYConversation) signalSendLocked() {
 	}
 }
 
-func (c *PTYConversation) Status() ConversationStatus {
+func (c *PTYConversation) Status() conv.Status {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -279,25 +259,25 @@ func (c *PTYConversation) Status() ConversationStatus {
 }
 
 // caller MUST hold c.lock
-func (c *PTYConversation) statusLocked() ConversationStatus {
+func (c *PTYConversation) statusLocked() conv.Status {
 	// sanity checks
 	if c.stableSnapshotsThreshold == 0 {
 		panic("stable snapshots threshold is 0. can't check stability")
 	}
 
-	if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == ConversationRoleUser {
+	if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == conv.RoleUser {
 		// if the last message is a user message then the snapshot loop hasn't
 		// been triggered since the last user message, and we should assume
 		// the screen is changing
-		return ConversationStatusChanging
+		return conv.StatusChanging
 	}
 
 	if c.snapshots < c.stableSnapshotsThreshold {
-		return ConversationStatusInitializing
+		return conv.StatusInitializing
 	}
 
 	if !c.isScreenStableLocked() {
-		return ConversationStatusChanging
+		return conv.StatusChanging
 	}
 
 	// The send loop gates stableSignal on initialPromptReady.
@@ -305,19 +285,19 @@ func (c *PTYConversation) statusLocked() ConversationStatus {
 	// rejects with ErrMessageValidationChanging instead of blocking
 	// indefinitely on a stableSignal that will never fire.
 	if !c.initialPromptReady {
-		return ConversationStatusChanging
+		return conv.StatusChanging
 	}
 
 	// Handle initial prompt readiness: report "changing" until the queue is drained
 	// to avoid the status flipping "changing" -> "stable" -> "changing"
 	if c.pending != nil || c.sendingMessage {
-		return ConversationStatusChanging
+		return conv.StatusChanging
 	}
 
-	return ConversationStatusStable
+	return conv.StatusStable
 }
 
-func (c *PTYConversation) Messages() []ConversationMessage {
+func (c *PTYConversation) Messages() []conv.Message {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -325,8 +305,8 @@ func (c *PTYConversation) Messages() []ConversationMessage {
 }
 
 // messagesLocked returns a copy of messages. Caller MUST hold c.lock.
-func (c *PTYConversation) messagesLocked() []ConversationMessage {
-	result := make([]ConversationMessage, len(c.messages))
+func (c *PTYConversation) messagesLocked() []conv.Message {
+	result := make([]conv.Message, len(c.messages))
 	copy(result, c.messages)
 	return result
 }
@@ -344,12 +324,12 @@ func (c *PTYConversation) Reset() {
 	}
 	if msg := c.pending; msg != nil {
 		c.pending = nil
-		msg.finish(ErrConversationReset)
+		msg.finish(conv.ErrConversationReset)
 	}
-	c.messages = []ConversationMessage{
+	c.messages = []conv.Message{
 		{
 			Message: "",
-			Role:    ConversationRoleAgent,
+			Role:    conv.RoleAgent,
 			Time:    c.cfg.Clock.Now(),
 		},
 	}

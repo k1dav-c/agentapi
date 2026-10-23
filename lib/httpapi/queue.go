@@ -11,7 +11,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 )
 
 // messageQueue holds the messages waiting for the agent, in the order they
@@ -320,7 +320,7 @@ func (s *Server) dispatchNextQueuedMessage() {
 	case err == nil:
 		s.queue.Remove(next.ID)
 		return
-	case errors.Is(err, st.ErrMessageValidationChanging):
+	case errors.Is(err, conv.ErrMessageValidationChanging):
 		// The agent got busy again: on a later tick.
 		return
 	}
@@ -328,13 +328,13 @@ func (s *Server) dispatchNextQueuedMessage() {
 	s.logger.Error("Failed to send queued message", "queueId", next.ID, "attempt", attempts, "error", err)
 	if reason := backend.notResent(err); reason != "" {
 		s.queue.Remove(next.ID)
-		s.emitter.EmitError(fmt.Sprintf("Queued message %q %s: %v", shortText(next.Content, 40), reason, err), st.ErrorLevelError)
+		s.emitter.EmitError(fmt.Sprintf("Queued message %q %s: %v", shortText(next.Content, 40), reason, err), conv.ErrorLevelError)
 		return
 	}
 	if attempts >= maxQueueDispatchAttempts {
 		// It would block the queue forever.
 		s.queue.Remove(next.ID)
-		s.emitter.EmitError(fmt.Sprintf("Dropped queued message %q after %d failed attempts: %v", shortText(next.Content, 40), attempts, err), st.ErrorLevelError)
+		s.emitter.EmitError(fmt.Sprintf("Dropped queued message %q after %d failed attempts: %v", shortText(next.Content, 40), attempts, err), conv.ErrorLevelError)
 	}
 }
 

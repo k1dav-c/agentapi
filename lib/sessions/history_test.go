@@ -14,7 +14,7 @@ import (
 	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/agentlog/claudelog"
 	"github.com/coder/agentapi/lib/agentlog/pilog"
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 )
 
 // writeLog writes a session log of lines, last changed at mod.
@@ -34,7 +34,7 @@ func newStore(t testing.TB, agentType, cwd string) *Store {
 	return s
 }
 
-func roles(msgs []st.ConversationMessage) []string {
+func roles(msgs []conv.Message) []string {
 	var out []string
 	for _, m := range msgs {
 		out = append(out, string(m.Role)+": "+m.Message)

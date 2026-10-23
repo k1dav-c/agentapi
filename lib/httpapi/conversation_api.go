@@ -9,7 +9,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -31,7 +31,7 @@ func (s *Server) getTitle(ctx context.Context, input *struct{}) (*TitleResponse,
 	task := ""
 	messages := s.conversation.Messages()
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == st.ConversationRoleUser {
+		if messages[i].Role == conv.RoleUser {
 			task = shortText(messages[i].Message, 60)
 			break
 		}

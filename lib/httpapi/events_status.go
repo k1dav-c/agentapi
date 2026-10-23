@@ -4,19 +4,19 @@ import (
 	"reflect"
 
 	"github.com/coder/agentapi/internal/version"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
-func (e *EventEmitter) EmitStatus(newStatus st.ConversationStatus) {
+func (e *EventEmitter) EmitStatus(newStatus conv.Status) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	newAgentStatus := convertStatus(newStatus)
 	newLifecycle := LifecycleRunning
-	if newStatus == st.ConversationStatusInitializing {
+	if newStatus == conv.StatusInitializing {
 		newLifecycle = LifecycleStarting
-	} else if newStatus == st.ConversationStatusStable {
+	} else if newStatus == conv.StatusStable {
 		newLifecycle = LifecycleReady
 	}
 	if e.status == newAgentStatus && e.lifecycle == newLifecycle {
@@ -158,7 +158,7 @@ func (e *EventEmitter) SetLoginRequired(login *native.LoginRequired) {
 	e.notifyStatusLocked()
 }
 
-func (e *EventEmitter) EmitError(message string, level st.ErrorLevel) {
+func (e *EventEmitter) EmitError(message string, level conv.ErrorLevel) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 

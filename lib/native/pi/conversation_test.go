@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -77,7 +77,7 @@ func TestConversation(t *testing.T) {
 	f := newConvFixture(t)
 	conv := f.conv
 	f.reply(f.pi.nextCmd(), `{"sessionId":"agentapi-0123456789abcdef","model":{"input":["text"]}}`)
-	require.Eventually(t, func() bool { return conv.Status() == st.ConversationStatusStable }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return conv.Status() == conversation.StatusStable }, 5*time.Second, time.Millisecond)
 	assert.Equal(t, "agentapi-0123456789abcdef", conv.SessionRef())
 	assert.False(t, conv.Capabilities().Images, "the model takes no images")
 
@@ -93,7 +93,7 @@ func TestConversation(t *testing.T) {
 	assert.Equal(t, "c1", req.ToolUseID)
 	assert.Equal(t, []native.OptionKind{native.OptionKindAllow, native.OptionKindAllowAlways, native.OptionKindDeny},
 		[]native.OptionKind{req.Options[0].Kind, req.Options[1].Kind, req.Options[2].Kind})
-	assert.Equal(t, st.ConversationStatusStable, conv.Status(), "waiting on the user")
+	assert.Equal(t, conversation.StatusStable, conv.Status(), "waiting on the user")
 	msgs := conv.Messages()
 	require.Len(t, msgs, 2)
 	assert.Equal(t, "hello", msgs[1].Message)
@@ -120,7 +120,7 @@ func TestConversationExpiresDialogsWithTheTurn(t *testing.T) {
 	t.Parallel()
 	f := newConvFixture(t)
 	f.reply(f.pi.nextCmd(), noState)
-	require.Eventually(t, func() bool { return f.conv.Status() == st.ConversationStatusStable }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return f.conv.Status() == conversation.StatusStable }, 5*time.Second, time.Millisecond)
 
 	f.startTurn("hi")
 	f.write(`{"type":"extension_ui_request","id":"q1","method":"input","title":"Your name?"}`)
@@ -187,7 +187,7 @@ func TestModelSwitchReportsNoMixedSettings(t *testing.T) {
 	const modelA = `{"provider":"p","id":"a","reasoning":true,"input":["text"],"contextWindow":1000,"thinkingLevelMap":{}}`
 	const modelB = `{"provider":"p","id":"b","reasoning":true,"input":["text","image"],"contextWindow":2000,"thinkingLevelMap":{}}`
 	f.reply(pi.nextCmd(), `{"sessionId":"s1","thinkingLevel":"low","model":`+modelA+`}`)
-	require.Eventually(t, func() bool { return conv.Status() == st.ConversationStatusStable }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return conv.Status() == conversation.StatusStable }, 5*time.Second, time.Millisecond)
 	assert.False(t, conv.Capabilities().Images)
 
 	applied := make(chan error, 1)

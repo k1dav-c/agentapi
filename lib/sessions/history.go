@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog"
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -38,9 +38,9 @@ type SessionSummary struct {
 }
 
 // SessionHistory is a session's conversation, read from its log: the
-// messages as st.Conversation has them, and the rich messages.
+// messages as conv.Conversation has them, and the rich messages.
 type SessionHistory struct {
-	Messages []st.ConversationMessage
+	Messages []conv.Message
 	Rich     []transcript.RichMessage
 	// Title is the session's name, if it has one.
 	Title string
@@ -122,8 +122,8 @@ func (s *Store) read(path string) SessionHistory {
 			}
 		}
 		if prompt, at, ok := s.src.prompt(line); ok {
-			history.Messages = append(history.Messages, st.ConversationMessage{
-				Id: len(history.Messages), Role: st.ConversationRoleUser, Message: prompt, Time: at,
+			history.Messages = append(history.Messages, conv.Message{
+				Id: len(history.Messages), Role: conv.RoleUser, Message: prompt, Time: at,
 			})
 		}
 		if msgs, err := parser.ParseLine(line); err == nil {
@@ -155,11 +155,11 @@ func (s *Store) read(path string) SessionHistory {
 			times[prompt] = m.Timestamp
 		}
 	}
-	var messages []st.ConversationMessage
+	var messages []conv.Message
 	add := func(prompt int) {
 		if text := texts[prompt]; len(text) > 0 {
-			messages = append(messages, st.ConversationMessage{
-				Id: len(messages), Role: st.ConversationRoleAgent, Message: strings.Join(text, "\n\n"), Time: times[prompt],
+			messages = append(messages, conv.Message{
+				Id: len(messages), Role: conv.RoleAgent, Message: strings.Join(text, "\n\n"), Time: times[prompt],
 			})
 		}
 	}
@@ -177,8 +177,8 @@ func (s *Store) read(path string) SessionHistory {
 // prompt sent before t, or -1. A long session has thousands of prompts
 // and tens of thousands of messages: while the prompts are in the order
 // of their times, as a log has them, it searches them by halves.
-func promptFinder(prompts []st.ConversationMessage) func(t time.Time) int {
-	if slices.IsSortedFunc(prompts, func(a, b st.ConversationMessage) int { return a.Time.Compare(b.Time) }) {
+func promptFinder(prompts []conv.Message) func(t time.Time) int {
+	if slices.IsSortedFunc(prompts, func(a, b conv.Message) int { return a.Time.Compare(b.Time) }) {
 		return func(t time.Time) int {
 			return sort.Search(len(prompts), func(i int) bool { return prompts[i].Time.After(t) }) - 1
 		}

@@ -9,16 +9,16 @@ import (
 	"io/fs"
 	"os"
 
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 )
 
 // StateFile is what --state-file kept, the PTY transport's persistence
 // before the state database: the messages, written when AgentAPI stopped.
 type StateFile struct {
-	Version           int                      `json:"version"`
-	Messages          []st.ConversationMessage `json:"messages"`
-	InitialPrompt     string                   `json:"initial_prompt"`
-	InitialPromptSent bool                     `json:"initial_prompt_sent"`
+	Version           int            `json:"version"`
+	Messages          []conv.Message `json:"messages"`
+	InitialPrompt     string         `json:"initial_prompt"`
+	InitialPromptSent bool           `json:"initial_prompt_sent"`
 }
 
 // ErrNotEmpty is returned by ImportStateFile when the database already

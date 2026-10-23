@@ -1,7 +1,7 @@
 package native
 
 import (
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -44,7 +44,7 @@ func (s *sink) TurnCompleted(result TurnResult) {
 			// The limit stop shows what the agent said.
 			c.limitStoppedLocked(result)
 		case result.Error != "":
-			c.cfg.Emitter.EmitError(result.Error, st.ErrorLevelError)
+			c.cfg.Emitter.EmitError(result.Error, conv.ErrorLevelError)
 		}
 		c.continueAgain = false
 		if c.login != nil && provesLogin(result) {
@@ -108,7 +108,7 @@ func (s *sink) LoginRequired(login LoginRequired) {
 	login = withLocalAccount(login)
 	s.update(func(c *Conversation) {
 		if c.setLoginLocked(login) {
-			c.cfg.Emitter.EmitError(loginErrorText(login), st.ErrorLevelError)
+			c.cfg.Emitter.EmitError(loginErrorText(login), conv.ErrorLevelError)
 		}
 	})
 }
@@ -133,7 +133,7 @@ func (s *sink) SessionRef(ref string) {
 	})
 }
 
-func (s *sink) Error(message string, level st.ErrorLevel) {
+func (s *sink) Error(message string, level conv.ErrorLevel) {
 	s.update(func(c *Conversation) {
 		if !c.started {
 			// While the agent waits for a login it is started again every

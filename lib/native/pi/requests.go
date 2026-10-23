@@ -9,8 +9,8 @@ import (
 
 	"github.com/coder/quartz"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
-	st "github.com/coder/agentapi/lib/screentracker"
 )
 
 // Question IDs of the requests made from extension dialogs.
@@ -132,7 +132,7 @@ func (a *Adapter) handleUIRequest(req uiRequest) {
 		a.openDialog(req)
 	case "notify":
 		if req.NotifyType == "error" {
-			a.loop.sink.Error(req.Message, st.ErrorLevelError)
+			a.loop.sink.Error(req.Message, conv.ErrorLevelError)
 			return
 		}
 		a.log.Info("Pi extension notification", "type", req.NotifyType, "message", req.Message)

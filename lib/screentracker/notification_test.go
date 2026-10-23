@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +30,7 @@ func (a *notifyingAgent) update(s string) {
 
 // screenEmitter records the last screen a conversation emitted.
 type screenEmitter struct {
-	st.NopEmitter
+	conv.NopEmitter
 	screen atomic.Value
 }
 
@@ -53,7 +54,7 @@ func TestNotificationSnapshots(t *testing.T) {
 	}, emitter)
 	c.Start(ctx)
 	stable := func() {
-		require.Eventually(t, func() bool { return c.Status() == st.ConversationStatusStable }, 3*time.Second, 5*time.Millisecond)
+		require.Eventually(t, func() bool { return c.Status() == conv.StatusStable }, 3*time.Second, 5*time.Millisecond)
 	}
 	idle := func() {
 		// Allow a pending notification to drain before checking sustained sleep.
@@ -70,7 +71,7 @@ func TestNotificationSnapshots(t *testing.T) {
 	idle()
 	// Send must wake a sleeping snapshot loop even when Write emits no event.
 	sent := make(chan error, 1)
-	go func() { sent <- c.Send(st.MessagePartText{Content: "hello"}) }()
+	go func() { sent <- c.Send(conv.MessagePartText{Content: "hello"}) }()
 	select {
 	case err := <-sent:
 		require.NoError(t, err)
@@ -92,14 +93,14 @@ func TestNotificationSnapshots(t *testing.T) {
 
 // statusEmitter records the last status a conversation emitted.
 type statusEmitter struct {
-	st.NopEmitter
+	conv.NopEmitter
 	status atomic.Value
 }
 
-func (e *statusEmitter) EmitStatus(status st.ConversationStatus) { e.status.Store(status) }
+func (e *statusEmitter) EmitStatus(status conv.Status) { e.status.Store(status) }
 
-func (e *statusEmitter) last() st.ConversationStatus {
-	s, _ := e.status.Load().(st.ConversationStatus)
+func (e *statusEmitter) last() conv.Status {
+	s, _ := e.status.Load().(conv.Status)
 	return s
 }
 
@@ -120,12 +121,12 @@ func TestReadyWhenStable(t *testing.T) {
 		}, emitter)
 		c.Start(ctx)
 		if readyWhenStable {
-			require.Eventually(t, func() bool { return emitter.last() == st.ConversationStatusStable }, 3*time.Second, 5*time.Millisecond)
-			require.Equal(t, st.ConversationStatusStable, c.Status())
+			require.Eventually(t, func() bool { return emitter.last() == conv.StatusStable }, 3*time.Second, 5*time.Millisecond)
+			require.Equal(t, conv.StatusStable, c.Status())
 		} else {
 			time.Sleep(200 * time.Millisecond)
-			require.Equal(t, st.ConversationStatusChanging, c.Status())
-			require.Equal(t, st.ConversationStatusChanging, emitter.last())
+			require.Equal(t, conv.StatusChanging, c.Status())
+			require.Equal(t, conv.StatusChanging, emitter.last())
 		}
 		cancel()
 	}

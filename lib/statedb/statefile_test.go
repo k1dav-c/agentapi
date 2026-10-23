@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/statedb"
 )
 
@@ -34,7 +34,7 @@ func TestImportStateFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, snap.Clean, "an import is as good as a clean close")
 	require.Len(t, snap.Messages, 3)
-	assert.Equal(t, st.ConversationMessage{Id: 1, Message: "Fix the bug", Role: st.ConversationRoleUser, Time: at}, snap.Messages[1].Message)
+	assert.Equal(t, conv.Message{Id: 1, Message: "Fix the bug", Role: conv.RoleUser, Time: at}, snap.Messages[1].Message)
 	assert.EqualValues(t, 3, snap.Seq())
 	assert.NotEmpty(t, snap.Meta[statedb.MetaEpoch])
 	for key, value := range meta {

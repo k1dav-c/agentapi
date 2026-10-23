@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"slices"
 
-	st "github.com/coder/agentapi/lib/screentracker"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -15,7 +15,7 @@ import (
 // and the subscriptions end, so that clients load the full state again
 // (see resyncLocked). A message inserted between existing ones is not
 // supported.
-func (e *EventEmitter) EmitMessages(newMessages []st.ConversationMessage) {
+func (e *EventEmitter) EmitMessages(newMessages []conv.Message) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 

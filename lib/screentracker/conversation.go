@@ -1,124 +1,44 @@
 package screentracker
 
 import (
-	"context"
-	"errors"
 	"strings"
-	"time"
 
-	"github.com/coder/agentapi/lib/util"
-	"github.com/danielgtaylor/huma/v2"
+	conv "github.com/coder/agentapi/lib/conversation"
 )
 
-type ConversationStatus string
-
-const (
-	ConversationStatusChanging     ConversationStatus = "changing"
-	ConversationStatusStable       ConversationStatus = "stable"
-	ConversationStatusInitializing ConversationStatus = "initializing"
-)
-
-type ConversationRole string
-
-func (c ConversationRole) Schema(r huma.Registry) *huma.Schema {
-	return util.OpenAPISchema(r, "ConversationRole", ConversationRoleValues)
-}
-
-const (
-	ConversationRoleUser  ConversationRole = "user"
-	ConversationRoleAgent ConversationRole = "agent"
-)
-
-var ConversationRoleValues = []ConversationRole{
-	ConversationRoleUser,
-	ConversationRoleAgent,
-}
-
-type ErrorLevel string
-
-func (e ErrorLevel) Schema(r huma.Registry) *huma.Schema {
-	return util.OpenAPISchema(r, "ErrorLevel", ErrorLevelValues)
-}
-
-const (
-	ErrorLevelWarning ErrorLevel = "warning"
-	ErrorLevelError   ErrorLevel = "error"
-)
-
-var ErrorLevelValues = []ErrorLevel{
-	ErrorLevelWarning,
-	ErrorLevelError,
-}
-
-var (
-	ErrMessageValidationWhitespace = errors.New("message must be trimmed of leading and trailing whitespace")
-	ErrMessageValidationEmpty      = errors.New("message must not be empty")
-	ErrMessageValidationChanging   = errors.New("message can only be sent when the agent is waiting for user input")
-	// ErrMessageNotSubmitted means the message was typed into the agent but
-	// the agent never reacted to the carriage return. The text may still be
-	// sitting in the agent's input box, so resending it would duplicate it.
-	ErrMessageNotSubmitted = errors.New("agent did not react to the submitted message")
-	// ErrConversationReset means the conversation was reset before the
-	// message reached the agent; it isn't part of the new conversation.
-	ErrConversationReset = errors.New("the conversation was reset before the message was sent")
-)
-
+// AgentIO is the agent's terminal: what is typed into it, and what it
+// shows.
 type AgentIO interface {
 	Write(data []byte) (int, error)
 	ReadScreen() string
 }
 
-type MessagePart interface {
+// TerminalPart is a message part that types itself into the agent's
+// terminal, such as a key press. Other parts are typed as their text, a
+// hidden text part included.
+type TerminalPart interface {
+	conv.MessagePart
 	Do(writer AgentIO) error
-	String() string
 }
 
-func buildStringFromMessageParts(parts []MessagePart) string {
+// typePart types part into the agent's terminal.
+func typePart(writer AgentIO, part conv.MessagePart) error {
+	switch p := part.(type) {
+	case TerminalPart:
+		return p.Do(writer)
+	case conv.MessagePartText:
+		_, err := writer.Write([]byte(p.Content))
+		return err
+	default:
+		_, err := writer.Write([]byte(part.String()))
+		return err
+	}
+}
+
+func buildStringFromMessageParts(parts []conv.MessagePart) string {
 	var sb strings.Builder
 	for _, part := range parts {
 		sb.WriteString(part.String())
 	}
 	return sb.String()
-}
-
-// Conversation represents a conversation between a user and an agent.
-// It is intended as the primary interface for interacting with a session.
-// Implementations must support the following capabilities:
-//   - Fetching all messages between the user and agent,
-//   - Sending a message to the agent,
-//   - Starting a background loop to update the conversation state, if required,
-//   - Fetching the status of the conversation.
-//
-// What the agent's screen shows goes to the Emitter (EmitScreen).
-type Conversation interface {
-	Messages() []ConversationMessage
-	Send(...MessagePart) error
-	Start(context.Context)
-	Status() ConversationStatus
-	// Reset clears all conversation state back to the initial empty state.
-	Reset()
-}
-
-// Emitter receives conversation state updates.
-type Emitter interface {
-	EmitMessages([]ConversationMessage)
-	EmitStatus(ConversationStatus)
-	EmitScreen(string)
-	EmitError(message string, level ErrorLevel)
-}
-
-// NopEmitter is an Emitter that discards every update, for conversations
-// created without one.
-type NopEmitter struct{}
-
-func (NopEmitter) EmitMessages([]ConversationMessage) {}
-func (NopEmitter) EmitStatus(ConversationStatus)      {}
-func (NopEmitter) EmitScreen(string)                  {}
-func (NopEmitter) EmitError(string, ErrorLevel)       {}
-
-type ConversationMessage struct {
-	Id      int              `json:"id"`
-	Message string           `json:"message"`
-	Role    ConversationRole `json:"role"`
-	Time    time.Time        `json:"time"`
 }
