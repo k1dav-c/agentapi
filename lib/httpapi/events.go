@@ -32,6 +32,7 @@ const (
 	EventTypeSessionSync       EventType = "session_sync"
 	EventTypeRequestUpdate     EventType = "request_update"
 	EventTypeTaskUpdate        EventType = "task_update"
+	EventTypeQueueUpdate       EventType = "queue_update"
 )
 
 type AgentStatus string
@@ -220,7 +221,12 @@ type EventEmitter struct {
 	taskSeq map[int]uint64
 	// taskTimer ends a task whose agent stays idle after an answer; see
 	// taskTracker.statusChanged.
-	taskTimer      *quartz.Timer
+	taskTimer *quartz.Timer
+	// queue is the message queue as the server last reported it (version
+	// queueVersion), sent with seq queueSeq.
+	queue          []QueuedMessage
+	queueVersion   uint64
+	queueSeq       uint64
 	clock          quartz.Clock
 	onStatusChange func(previous, current AgentStatus)
 	// persister, if set, stores every change of the conversation state.
@@ -551,6 +557,13 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string) []Event 
 		})
 	}
 
+	if e.queueSeq > since {
+		replaySeq = max(replaySeq, e.queueSeq)
+		events = append(events, Event{
+			Type:    EventTypeQueueUpdate,
+			Payload: QueueUpdateBody{Queue: slices.Clone(e.queue), Seq: e.queueSeq},
+		})
+	}
 	for _, task := range e.tasks.tasks {
 		seq := e.taskSeq[task.ID]
 		if seq <= since {

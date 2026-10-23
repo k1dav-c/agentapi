@@ -1329,6 +1329,29 @@
         ],
         "type": "object"
       },
+      "QueueUpdateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "queue": {
+            "description": "The messages waiting for the agent, in the order they go out.",
+            "items": {
+              "$ref": "#/components/schemas/QueuedMessage"
+            },
+            "type": "array"
+          },
+          "seq": {
+            "description": "Sequence number of this change; see message_update.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queue",
+          "seq"
+        ],
+        "type": "object"
+      },
       "QueuedMessage": {
         "additionalProperties": false,
         "properties": {
@@ -3416,12 +3439,12 @@
         "operationId": "subscribeEvents",
         "parameters": [
           {
-            "description": "Opt in to session_sync and task_update events and incremental replay. Clients that don't opt in get the full replay and neither of those events, as before.",
+            "description": "Opt in to session_sync, task_update and queue_update events and incremental replay. Clients that don't opt in get the full replay and none of those events, as before.",
             "explode": false,
             "in": "query",
             "name": "sync",
             "schema": {
-              "description": "Opt in to session_sync and task_update events and incremental replay. Clients that don't opt in get the full replay and neither of those events, as before.",
+              "description": "Opt in to session_sync, task_update and queue_update events and incremental replay. Clients that don't opt in get the full replay and none of those events, as before.",
               "type": "boolean"
             }
           },
@@ -3543,6 +3566,32 @@
                           "event"
                         ],
                         "title": "Event message_update",
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "data": {
+                            "$ref": "#/components/schemas/QueueUpdateBody"
+                          },
+                          "event": {
+                            "const": "queue_update",
+                            "description": "The event name.",
+                            "type": "string"
+                          },
+                          "id": {
+                            "description": "The event ID.",
+                            "type": "integer"
+                          },
+                          "retry": {
+                            "description": "The retry time in milliseconds.",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "data",
+                          "event"
+                        ],
+                        "title": "Event queue_update",
                         "type": "object"
                       },
                       {

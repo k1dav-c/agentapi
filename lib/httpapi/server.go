@@ -374,6 +374,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		jsonlParentCtx: ctx,
 		stateDB:        stateDB,
 	}
+	// Clients follow the queue through queue_update events.
+	s.queue.onChange = emitter.SetQueue
 	if stateDB != nil {
 		s.restoreQueue(restored.snapshot)
 		if stored := restored.snapshot.Meta[statedb.MetaWebhook]; stored != "" {

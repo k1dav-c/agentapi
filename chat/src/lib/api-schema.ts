@@ -1616,6 +1616,15 @@ export interface components {
             /** @description Messages waiting to be sent to the agent. */
             messages: components["schemas"]["QueuedMessage"][];
         };
+        QueueUpdateBody: {
+            /** @description The messages waiting for the agent, in the order they go out. */
+            queue: components["schemas"]["QueuedMessage"][];
+            /**
+             * Format: int64
+             * @description Sequence number of this change; see message_update.
+             */
+            seq: number;
+        };
         QueuedMessage: {
             /** @description Message content. */
             content: string;
@@ -2727,7 +2736,7 @@ export interface operations {
     subscribeEvents: {
         parameters: {
             query?: {
-                /** @description Opt in to session_sync and task_update events and incremental replay. Clients that don't opt in get the full replay and neither of those events, as before. */
+                /** @description Opt in to session_sync, task_update and queue_update events and incremental replay. Clients that don't opt in get the full replay and none of those events, as before. */
                 sync?: boolean;
                 /** @description With sync: epoch from the client's last session_sync. If it doesn't match, the full state is replayed. */
                 epoch?: string;
@@ -2778,6 +2787,17 @@ export interface operations {
                          * @constant
                          */
                         event: "message_update";
+                        /** @description The event ID. */
+                        id?: number;
+                        /** @description The retry time in milliseconds. */
+                        retry?: number;
+                    } | {
+                        data: components["schemas"]["QueueUpdateBody"];
+                        /**
+                         * @description The event name.
+                         * @constant
+                         */
+                        event: "queue_update";
                         /** @description The event ID. */
                         id?: number;
                         /** @description The retry time in milliseconds. */

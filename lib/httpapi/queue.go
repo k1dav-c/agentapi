@@ -30,6 +30,21 @@ type messageQueue struct {
 	// failures counts the failed sends in a row of the message failedID.
 	failedID int
 	failures int
+	// version counts the changes; onChange, if set, gets the queue after
+	// each, without q.mu held.
+	version  uint64
+	onChange func(queue []QueuedMessage, version uint64)
+}
+
+// changed tells onChange about a change made with q.mu held, which it
+// releases.
+func (q *messageQueue) changed() {
+	q.version++
+	queue, version, onChange := append([]QueuedMessage{}, q.messages...), q.version, q.onChange
+	q.mu.Unlock()
+	if onChange != nil {
+		onChange(queue, version)
+	}
 }
 
 // Len is how many messages wait.
@@ -63,7 +78,6 @@ func (q *messageQueue) Snapshot() ([]QueuedMessage, int) {
 // Push queues content, queued at at: last, or first with front.
 func (q *messageQueue) Push(content string, at time.Time, front bool) QueuedMessage {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	q.lastID++
 	m := QueuedMessage{ID: q.lastID, Content: content, Time: at}
 	if front {
@@ -71,6 +85,7 @@ func (q *messageQueue) Push(content string, at time.Time, front bool) QueuedMess
 	} else {
 		q.messages = append(q.messages, m)
 	}
+	q.changed()
 	return m
 }
 
@@ -99,12 +114,13 @@ func (q *messageQueue) Get(id int) (QueuedMessage, bool) {
 // the message is queued.
 func (q *messageQueue) Update(id int, content string) bool {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	i := q.index(id)
 	if i < 0 {
+		q.mu.Unlock()
 		return false
 	}
 	q.messages[i].Content = content
+	q.changed()
 	return true
 }
 
@@ -112,12 +128,13 @@ func (q *messageQueue) Update(id int, content string) bool {
 // queued.
 func (q *messageQueue) Remove(id int) bool {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	i := q.index(id)
 	if i < 0 {
+		q.mu.Unlock()
 		return false
 	}
 	q.messages = slices.Delete(q.messages, i, i+1)
+	q.changed()
 	return true
 }
 
@@ -125,8 +142,8 @@ func (q *messageQueue) Remove(id int) bool {
 // the queue as it is, unless ids lists every queued message once.
 func (q *messageQueue) Reorder(ids []int) bool {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	if len(ids) != len(q.messages) {
+		q.mu.Unlock()
 		return false
 	}
 	byID := make(map[int]QueuedMessage, len(q.messages))
@@ -137,12 +154,14 @@ func (q *messageQueue) Reorder(ids []int) bool {
 	for _, id := range ids {
 		m, ok := byID[id]
 		if !ok {
+			q.mu.Unlock()
 			return false
 		}
 		delete(byID, id)
 		reordered = append(reordered, m)
 	}
 	q.messages = reordered
+	q.changed()
 	return true
 }
 
@@ -162,21 +181,21 @@ func (q *messageQueue) Failed(id int) int {
 // Clear empties the queue. IDs go on counting.
 func (q *messageQueue) Clear() {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	q.messages = nil
 	q.failedID = 0
 	q.failures = 0
+	q.changed()
 }
 
 // Restore puts back a queue stored before, whose last ID was lastID.
 func (q *messageQueue) Restore(messages []QueuedMessage, lastID int) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	q.messages = slices.Clone(messages)
 	q.lastID = lastID
 	for _, m := range messages {
 		q.lastID = max(q.lastID, m.ID)
 	}
+	q.changed()
 }
 
 // index returns the position of the message id, or -1. Caller holds q.mu.
@@ -333,4 +352,27 @@ func (s *Server) registerQueueRoutes() {
 		o.Description = "Reorders the queued messages. The body must list every queued message id exactly once; otherwise 409 is returned."
 		o.Errors = []int{409}
 	})
+}
+
+// QueueUpdateBody is the SSE payload of a change of the message queue.
+type QueueUpdateBody struct {
+	Queue []QueuedMessage `json:"queue" nullable:"false" doc:"The messages waiting for the agent, in the order they go out."`
+	Seq   uint64          `json:"seq" doc:"Sequence number of this change; see message_update."`
+}
+
+// SetQueue sends the message queue after a change, the version-th; a
+// change reported late, after a newer one, is dropped.
+func (e *EventEmitter) SetQueue(queue []QueuedMessage, version uint64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if version <= e.queueVersion {
+		return
+	}
+	e.queue, e.queueVersion = queue, version
+	e.seq++
+	e.queueSeq = e.seq
+	if e.persister != nil {
+		e.persister.SetSeq(e.epoch, e.seq)
+	}
+	e.notifyChannels(EventTypeQueueUpdate, QueueUpdateBody{Queue: slices.Clone(queue), Seq: e.seq})
 }

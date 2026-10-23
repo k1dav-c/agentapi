@@ -99,7 +99,8 @@ func (e *EventEmitter) endConversationSubscriptionsLocked() {
 // wantsConversation reports whether a subscription that gets the events
 // wants accepts gets changes of the conversation; a screen stream doesn't.
 func wantsConversation(wants func(EventType) bool) bool {
-	return wants(EventTypeMessageUpdate) || wants(EventTypeRichMessageUpdate) || wants(EventTypeRequestUpdate) || wants(EventTypeTaskUpdate)
+	return wants(EventTypeMessageUpdate) || wants(EventTypeRichMessageUpdate) || wants(EventTypeRequestUpdate) ||
+		wants(EventTypeTaskUpdate) || wants(EventTypeQueueUpdate)
 }
 
 // EmitRichMessage emits a rich structured message from the JSONL watcher.
