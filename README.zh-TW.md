@@ -16,7 +16,8 @@ AgentAPI 可以用來：
 - 作為 MCP 伺服器的後端，讓一個 agent 控制另一個 coding agent
 - 建立把 pull request 審查交給 agent 處理的工具
 - 從一個中控平台監看多個 agent：每個 AgentAPI 都用 [webhook](#webhook) 把任務、需要你處理的
-  請求、訊息和心跳主動推送過去
+  請求、訊息和心跳主動推送過去，同時連到多個 AgentAPI 的用戶端則透過[摘要](#監看多個實例)
+  追蹤每一個
 
 ## 關於這個 fork
 
@@ -100,7 +101,7 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 - Claude Code、Codex 和 Pi 的 [MCP 管理](#mcp-管理)，可以使用可重複套用的設定檔；重新啟動
   agent 前會先更新 Codex 和 Pi。
 - [Webhook](#webhook) 會把任務、請求、訊息和心跳主動推送到監看多個 agent 的中控平台，並以
-  HMAC 簽章；搭配[人工回覆 API](#人工回覆-api)，機器人可以在 agent 停下來時通知你，並把你的
+  HMAC 簽章；同時連到多個 AgentAPI 的用戶端，每個只要開一條[摘要串流](#監看多個實例)；搭配[人工回覆 API](#人工回覆-api)，機器人可以在 agent 停下來時通知你，並把你的
   回覆傳回去。
 - AgentAPI 的[自我更新](#agentapi-update)，會比對發行版的 checksum。
 - [安全性](#安全性)：API token（聊天介面以 cookie 登入）、監聽位址，以及允許的主機與來源。
@@ -1154,8 +1155,33 @@ agent 忙碌時收到的訊息不會被拒絕，而是依先進先出（FIFO）�
 ## 整合
 
 AgentAPI 除了被動提供 API 給呼叫它的人，也會把發生的事主動推送給你指定的接收端：
-[webhook](#webhook) 即時送出任務、請求、訊息和心跳，[人工回覆 API](#人工回覆-api) 讓機器人
-回覆 agent 正在等待的問題，[MCP 管理](#mcp-管理) 則可以修改 agent 的工具。
+[webhook](#webhook) 即時送出任務、請求、訊息和心跳，[摘要](#監看多個實例)讓一個用戶端追蹤
+多個 AgentAPI，[人工回覆 API](#人工回覆-api) 讓機器人回覆 agent 正在等待的問題，
+[MCP 管理](#mcp-管理) 則可以修改 agent 的工具。
+
+### 監看多個實例
+
+並排顯示多個 AgentAPI、每個一列的用戶端（例如列出所有 agent 的側邊欄），對每個 AgentAPI 只需要
+讀一個回應或一條串流，不必讀整段對話：
+
+- `GET /summary` 回傳這一列要顯示的內容：`instance`（和 [webhook](#webhook) 事件相同：`id`、
+  `name`、`server_id`、主機、port、目錄、agent、`url`）、`status` 和 `lifecycle`、`title`
+  （工作階段名稱，沒有的話是最新提示的開頭）、最新的[任務](#任務)和任務數、`pending_requests`、
+  `queued_messages`、開啟中的終端機對話框、`login_required`、`limit_stop` 和 `usage`（context
+  window 和帳號的用量限制）。
+- `attention` 說明 agent 為什麼在等你，最緊急的優先：`login`、`request`（核准、提問或計畫）、
+  `dialog`（終端機中的對話框）、`limit`（用量限制停下了回合）、`exited`，或 `none`。
+- `GET /events?only=summary` 會在連線時和摘要每次變動時送出 `summary_update`，加上心跳，其他
+  一概不送：沒有訊息也沒有畫面，所以用戶端可以同時對幾十個 AgentAPI 各開一條串流。回覆內容變長
+  不會改變摘要；任務開始或結束、請求、狀態變動或佇列改變才會。其他 `/events` 用戶端收不到
+  `summary_update`。
+
+`--instance-id` 為 AgentAPI 命名（預設為 `<hostname>:<port>`），`--name` 是用戶端顯示的名稱
+（預設為工作目錄的名稱），`--public-url` 是用戶端能連到它的網址；執行中可以用 `PUT /webhook`
+修改 ID 和網址。每個 webhook 事件也帶有相同的 `instance`，所以接收 webhook 的中控平台和直接連到
+每個 AgentAPI 的用戶端，用同樣的方式區分它們。在其他來源的瀏覽器中執行的用戶端，需要把該來源加進
+[`--allowed-origins`](#允許的來源)；有 [API token](#api-token-驗證) 時要用 `fetch` 加上
+`Authorization` header 讀取串流，因為 `EventSource` 無法送出 header。
 
 ### Webhook
 
@@ -1211,7 +1237,8 @@ AgentAPI 除了被動提供 API 給呼叫它的人，也會把發生的事主動
 }
 ```
 
-instance 的 `id` 是 `--webhook-instance-id`，預設為 `<hostname>:<port>`；`url` 是 `--public-url`，
+instance 的 `id` 是 `--instance-id`，預設為 `<hostname>:<port>`，`name` 是 `--name`，預設為工作
+目錄的名稱；`url` 是 `--public-url`，
 接收端可以從這個網址開啟這個 AgentAPI 的聊天介面或呼叫它的 API；`workspace_url` 則是它所在的
 Coder workspace（如果有）。AgentAPI 啟動之前的訊息和工具呼叫，以及從 agent 歷史紀錄開啟的工作
 階段中的訊息，都不會再送一次。
@@ -1553,8 +1580,9 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 | `--webhook-events` | `run.status_changed` | 要送的事件：類型、群組（`task.*`）或 `*` |
 | `--webhook-secret` | | 為每次傳送簽章的 secret（`X-AgentAPI-Signature-256`） |
 | `--webhook-heartbeat` | `60s` | `instance.heartbeat` 的間隔；`0` 為關閉 |
-| `--webhook-instance-id` | `<hostname>:<port>` | 每個事件中代表這個 AgentAPI 的 ID |
-| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在每個事件中 |
+| `--instance-id` | `<hostname>:<port>` | 在 `GET /summary` 和每個 webhook 事件中代表這個 AgentAPI 的 ID；見[監看多個實例](#監看多個實例)（`--webhook-instance-id` 是已棄用的舊名稱） |
+| `--name` | 工作目錄的名稱 | 監看多個 AgentAPI 的用戶端顯示的名稱 |
+| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中 |
 | `--webhook-timeout` | `10s` | 每次傳送的逾時時間 |
 | `--webhook-max-attempts` | `3` | 傳送的嘗試次數 |
 | `--webhook-payload-template` | | POST 內容的 Go `text/template` 範本 |
@@ -1604,7 +1632,8 @@ agentapi attach --url localhost:3284
 | `GET /timeline` | 正規化的工作階段事件，可用於匯出或其他介面；`?subagents=true` 會加上 sub agent 的事件（*native*） |
 | `GET /status` | 狀態、生命週期、server ID、回合數、epoch、工作階段名稱、版本、開啟的對話框；*native*：agent 的工作階段 ID、能力、待處理請求、設定、用量、用量限制停止、終端機、登入 |
 | `GET /title` | 工作階段的可讀標題 |
-| `GET /events` | Server-sent events；`?sync=1` 會在重新連線時增量重播，並送出任務與佇列的更新 |
+| `GET /events` | Server-sent events；`?sync=1` 會在重新連線時增量重播，並送出任務與佇列的更新；`?only=summary` 只送摘要 |
+| `GET /summary` | 監看多個 AgentAPI 的用戶端要顯示的內容：instance、狀態、attention、標題、最新任務、請求、佇列、用量；見[監看多個實例](#監看多個實例) |
 | `GET /tasks` | 對話的[任務](#任務)：你的每則訊息和 agent 處理它的回合 |
 | `GET /workspace` | AgentAPI 在 Coder workspace 中執行時，該 workspace 的網址 |
 

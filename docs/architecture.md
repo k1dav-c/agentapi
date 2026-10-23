@@ -168,6 +168,7 @@ The handlers are grouped by file:
 | `server.go`, `routes.go`, `hosts.go`, `middleware.go` | The server's setup, start and stop; the routes, which each feature registers; allowed hosts and origins; request logging |
 | `conversation_api.go`, `queue.go`, `sse.go`, `jsonl_watcher.go` | Messages, status and timeline; the queue, its dispatch and `queue_update`; `GET /events` and the screen stream; the PTY transport's session log watcher |
 | `tasks.go` | The tasks the emitter derives from the conversation (`taskTracker`), `task_update` and `GET /tasks` |
+| `summary.go` | The summary for clients that watch many AgentAPIs (`attention`, title, latest task), `summary_update` and `GET /summary` |
 | `backend.go`, `backend_pty.go`, `backend_native.go` | What depends on the transport: dispatching the queue and the work each tick (`beforeQueue`: a scheduled continuation, Codex's update prompt), delivering a message, restarts (`beginRestart`, `beginReload`), the human-reply protocol (`handoffOffer`, `answerHandoff`) |
 | `setup.go` | Starting the process of a PTY or ACP agent |
 | `native.go` | Requests, settings, interrupt, compaction, login retry; the native observer |
@@ -414,6 +415,14 @@ usage limit stop, login, terminal prompt) and the latest screen.
   an answer left the agent idle, a timer gives it 3 seconds to work again
   before the task ends. Rich messages get the `task_id` of the task running
   when they arrive. Restored and resumed messages are history, done.
+- The emitter also keeps a summary of the conversation (`summary.go`): the
+  instance, status, why the agent waits for the user (`attention`), a title,
+  the latest task, pending requests, the queue and usage. After every change
+  but the screen's it works the summary out again, if a subscription wants
+  it, and sends `summary_update` when it differs from the last one sent, so
+  a reply that grows sends nothing. Only `/events?only=summary` subscribes to
+  it, and gets nothing else; `PUT /webhook`, which can change the instance's
+  ID and URL, asks for it to be checked again.
 - `/internal/screen` streams the screen as `screen` events for TTY mode.
 - A status change between `running` and `stable` triggers the
   `run.status_changed` webhook event. The webhook observer subscribes to the

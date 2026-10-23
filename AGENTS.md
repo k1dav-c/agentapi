@@ -52,7 +52,7 @@ Experimental ACP mode uses the Agent Client Protocol.
 
 - `main.go` - Entry point using the Cobra CLI framework
 - `cmd/` - CLI command definitions, including server, attach, and update
-- `lib/httpapi/` - HTTP server, routes, OpenAPI schema, and webhooks that push events (tasks, requests, messages, heartbeats) to a receiver
+- `lib/httpapi/` - HTTP server, routes, OpenAPI schema, the summary for clients that watch many AgentAPIs (`GET /summary`, `/events?only=summary`), and webhooks that push events (tasks, requests, messages, heartbeats) to a receiver
 - `lib/conversation/` - What the transports share (imported as `conv`): messages, status, the `Conversation` and `Emitter` interfaces
 - `lib/screentracker/` - The PTY engine: terminal output parsing and message splitting
 - `lib/termexec/` - Terminal process execution and management

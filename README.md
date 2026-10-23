@@ -25,7 +25,8 @@ Use AgentAPI to:
 - Provide an MCP server backend that lets one agent control another coding agent.
 - Create tools that delegate pull request reviews to an agent.
 - Watch many agents from one dashboard: each AgentAPI pushes its tasks, the requests that need
-  you, its messages and heartbeats there with [webhooks](#webhooks).
+  you, its messages and heartbeats there with [webhooks](#webhooks), and a client that connects
+  to many follows each through its [summary](#watching-many-instances).
 
 ## About this fork
 
@@ -126,7 +127,9 @@ has the complete commit history.
 - [MCP management](#mcp-management) for Claude Code, Codex and Pi, with
   reusable profiles; restarting the agent updates Codex and Pi first.
 - [Webhooks](#webhooks) push tasks, requests, messages and heartbeats to a
-  dashboard that watches many agents, signed with HMAC; with a
+  dashboard that watches many agents, signed with HMAC, and a client that
+  connects to many follows each through one
+  [summary stream](#watching-many-instances); with a
   [human-reply API](#human-reply-api) let a bot tell you when the agent stops
   and pass your answer back.
 - [Self-update](#agentapi-update), verified against the release's checksums.
@@ -1365,9 +1368,38 @@ again. Opening a session with more than 256 rich messages ends them too, rather 
 ## Integrations
 
 AgentAPI serves its API to whoever calls it, and pushes what happens to a receiver of your choice:
-[webhooks](#webhooks) send tasks, requests, messages and heartbeats as they happen, the
+[webhooks](#webhooks) send tasks, requests, messages and heartbeats as they happen, a
+[summary](#watching-many-instances) lets one client follow many AgentAPIs, the
 [human-reply API](#human-reply-api) lets a bot answer what the agent waits on, and
 [MCP management](#mcp-management) changes the agent's tools.
+
+### Watching many instances
+
+A client that shows many AgentAPIs side by side, one row each, like a sidebar of agents, reads one
+response or one stream per AgentAPI rather than its whole conversation:
+
+- `GET /summary` returns what such a row shows: the `instance` (as in [webhook](#webhooks)
+  events: `id`, `name`, `server_id`, host, port, directory, agent, `url`), `status` and
+  `lifecycle`, a `title` (the session's name, else the start of the latest prompt), the latest
+  [task](#tasks) and how many there are, `pending_requests`, `queued_messages`, the open terminal
+  dialog, `login_required`, `limit_stop` and `usage` (the context window and the account's usage
+  limits).
+- `attention` says why the agent waits for you, the most pressing first: `login`, `request` (an
+  approval, question or plan), `dialog` (in its terminal), `limit` (a usage limit stopped its turn),
+  `exited`, or `none`.
+- `GET /events?only=summary` sends a `summary_update` with the summary when the client connects and
+  whenever it changes, plus the heartbeat, and nothing else: no messages or screen, so a client
+  can keep one stream open to each of dozens of AgentAPIs. A reply that grows doesn't change the
+  summary; a task that starts or ends, a request, a status change or a new queue does. Other
+  `/events` clients don't get `summary_update`.
+
+`--instance-id` names the AgentAPI (by default `<hostname>:<port>`), `--name` is what a client
+shows (by default the working directory's name) and `--public-url` is where a client can reach it;
+`PUT /webhook` can change the ID and the URL while it runs. The same `instance` is in every webhook
+event, so a dashboard that gets webhooks and a client that connects to each AgentAPI tell them
+apart the same way. A client in a browser on another origin needs that origin in
+[`--allowed-origins`](#allowed-origins), and with an [API token](#api-token-authentication) it
+reads the stream with `fetch` and an `Authorization` header, since `EventSource` sends no headers.
 
 ### Webhooks
 
@@ -1424,7 +1456,8 @@ Every event names the AgentAPI it comes from, so one receiver can tell many apar
 }
 ```
 
-The instance `id` is `--webhook-instance-id`, by default `<hostname>:<port>`; `url` is
+The instance `id` is `--instance-id`, by default `<hostname>:<port>`, and `name` is `--name`, by
+default the working directory's name; `url` is
 `--public-url`, where the receiver can reach this AgentAPI to open its chat or call its API, and
 `workspace_url` the Coder workspace it runs in, if any. Messages and tool calls from before AgentAPI
 started, or of a session it opened from the agent's history, are not sent again.
@@ -1801,8 +1834,9 @@ variable.
 | `--webhook-events` | `run.status_changed` | Events to send: types, groups (`task.*`) or `*` |
 | `--webhook-secret` | | Secret that signs every delivery (`X-AgentAPI-Signature-256`) |
 | `--webhook-heartbeat` | `60s` | How often `instance.heartbeat` is sent; `0` turns it off |
-| `--webhook-instance-id` | `<hostname>:<port>` | Identifies this AgentAPI in every event |
-| `--public-url` | | URL this AgentAPI is reached at, sent in every event |
+| `--instance-id` | `<hostname>:<port>` | Identifies this AgentAPI in `GET /summary` and every webhook event; see [Watching many instances](#watching-many-instances) (`--webhook-instance-id` is its deprecated old name) |
+| `--name` | the working directory's name | What clients that watch many AgentAPIs call this one |
+| `--public-url` | | URL this AgentAPI is reached at, in `GET /summary` and every webhook event |
 | `--webhook-timeout` | `10s` | Timeout of each delivery attempt |
 | `--webhook-max-attempts` | `3` | Delivery attempts |
 | `--webhook-payload-template` | | Go `text/template` for the POST body |
@@ -1853,7 +1887,8 @@ default. Endpoints marked *native* need the native transport.
 | `GET /timeline` | Normalized session events, for export or another UI; `?subagents=true` adds the subagents' (*native*) |
 | `GET /status` | Status, lifecycle, server ID, turn, epoch, session name, version, open dialog; *native*: the agent's session ID, capabilities, pending requests, settings, usage, usage limit stop, terminal, login |
 | `GET /title` | The session's human-readable title |
-| `GET /events` | Server-sent events; `?sync=1` for incremental replay on reconnect, and task and queue updates |
+| `GET /events` | Server-sent events; `?sync=1` for incremental replay on reconnect, and task and queue updates; `?only=summary` for the summary alone |
+| `GET /summary` | What a client that watches many AgentAPIs shows of this one: instance, status, attention, title, latest task, requests, queue, usage; see [Watching many instances](#watching-many-instances) |
 | `GET /tasks` | The conversation's [tasks](#tasks): each message of yours and the agent's turn on it |
 | `GET /workspace` | The Coder workspace URL, when AgentAPI runs in one |
 

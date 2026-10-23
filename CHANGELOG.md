@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- A client that watches many AgentAPIs, one row each, follows each with one response or stream:
+  `GET /summary` returns the instance, status, why the agent waits for the user (`attention`:
+  `login`, `request`, `dialog`, `limit`, `exited` or `none`), a title, the latest task, pending
+  requests, queued messages and usage, and `/events?only=summary` sends it as `summary_update` on
+  connecting and whenever it changes, and nothing else.
+- `--instance-id` (formerly `--webhook-instance-id`, which still works) and `--name` (by default the
+  working directory's name) name the instance in the summary and in webhook events, whose instance
+  gains `name`.
+
 ## v1.0.0
 
 ### Breaking changes

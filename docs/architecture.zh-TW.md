@@ -153,6 +153,7 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 | `server.go`、`routes.go`、`hosts.go`、`middleware.go` | 伺服器的設定、啟動與停止；各功能自行註冊的路由；允許的主機與來源；請求記錄 |
 | `conversation_api.go`、`queue.go`、`sse.go`、`jsonl_watcher.go` | 訊息、狀態與時間軸；佇列、派送與 `queue_update`；`GET /events` 與畫面串流；PTY 傳輸的工作階段紀錄監看 |
 | `tasks.go` | emitter 從對話推導出的任務（`taskTracker`）、`task_update` 與 `GET /tasks` |
+| `summary.go` | 給監看多個 AgentAPI 的用戶端的摘要（`attention`、標題、最新任務）、`summary_update` 與 `GET /summary` |
 | `backend.go`、`backend_pty.go`、`backend_native.go` | 依 transport 而不同的部分：派送佇列與每次檢查要做的事（`beforeQueue`：排定的繼續、Codex 的更新提示）、送出訊息、重新啟動（`beginRestart`、`beginReload`）、人工回覆協定（`handoffOffer`、`answerHandoff`） |
 | `setup.go` | 啟動 PTY 或 ACP agent 的行程 |
 | `native.go` | 請求、設定、中斷、壓縮、重試登入；native observer |
@@ -354,6 +355,11 @@ type Factory func(resume Resume) (Adapter, error)
   訊息 steer 它，agent 閒置且沒有開著的請求或終端機對話框時任務結束。若只是因為回答而讓 agent
   閒置，計時器會先給它 3 秒恢復工作，之後才結束任務。結構化訊息會取得它抵達時執行中任務的
   `task_id`。還原或接續的訊息屬於過去，視為已完成。
+- emitter 也維護對話的摘要（`summary.go`）：instance、狀態、agent 為什麼在等使用者
+  （`attention`）、標題、最新任務、待處理請求、佇列和用量。除了畫面以外的每次變更後，只要有訂閱
+  需要，它就重新算出摘要，和上次送出的不同時才送出 `summary_update`，所以回覆變長不會送出任何
+  東西。只有 `/events?only=summary` 會訂閱它，而且不會收到其他事件；`PUT /webhook` 可以修改
+  instance 的 ID 和網址，所以修改後會要求重新檢查摘要。
 - `/internal/screen` 以 `screen` 事件為 TTY mode 串流畫面。
 - 狀態在 `running` 與 `stable` 之間切換時，會觸發 `run.status_changed` webhook 事件。webhook
   observer 像 `/events` 用戶端一樣訂閱 emitter，把它的事件轉成其他 webhook 事件：emitter 的任務
