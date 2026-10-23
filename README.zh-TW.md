@@ -74,8 +74,8 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
   繼續。
 - 缺少或過期的[登入](#登入)會附上要執行的指令回報，登入之後 agent 會自己啟動。
 - agent 工作目錄中共用的[終端機](#終端機)，方便登入和執行簡單的指令。
-- [持久保存的工作階段](#持久保存的工作階段)：使用 `--state-db` 時，對話和 agent 自己的工作
-  階段在 AgentAPI 重新啟動後都會保留。
+- [持久保存的工作階段](#持久保存的工作階段)：使用 `--state-db` 時，對話在 AgentAPI 重新啟動後
+  會保留，native agent 也會接續它自己的工作階段。
 - 開啟 agent 在工作目錄中的[先前的工作階段](#先前的工作階段)，或從其中一個開始一份副本。
 - 以模型供應商的牌價查看每個[工作階段與任務的花費](#工作階段花費)（API 等價金額），含 sub agent，
   並加總今天、最近 7 天和 30 天的花費。
@@ -193,8 +193,8 @@ agent 類型決定 AgentAPI 怎麼整理 agent 的畫面，以及提供哪些功
 ### Transport
 
 `--transport` 決定 AgentAPI 如何驅動 agent。沒有指定時，Claude Code、Codex 和 Pi 使用 native
-transport，其他 agent 使用 PTY transport；以 `--state-file`（PTY transport 的保存方式）啟動的
-伺服器也使用 PTY transport：
+transport，其他 agent 使用 PTY transport；以已棄用的 `--state-file` 啟動的伺服器也使用 PTY
+transport：
 
 | | PTY | Native | ACP（實驗性） |
 | --- | --- | --- | --- |
@@ -206,7 +206,7 @@ transport，其他 agent 使用 PTY transport；以 `--state-file`（PTY transpo
 | 核准、提問、計畫 | 終端機對話框，從決策卡片或 TTY mode 回答 | 結構化的[請求](#請求核准提問與計畫) | 自動核准 |
 | 對回合 steer 和 interrupt | | ✓ | |
 | 設定、用量、壓縮 | | ✓ | |
-| AgentAPI 重新啟動後保留 | `--state-file`：訊息 | `--state-db`：對話和 agent 的工作階段 | |
+| AgentAPI 重新啟動後保留 | `--state-db`：對話；agent 重新開始 | `--state-db`：對話和 agent 的工作階段 | |
 | 聊天介面中的終端機 | TTY mode：agent 自己的終端機 | 工作目錄中的 shell | |
 
 ```bash
@@ -217,11 +217,11 @@ agentapi server -- aider                     # PTY
 agentapi server --type=kimi --experimental-acp -- kimi acp
 ```
 
-`--state-db <檔案>`（僅限 native transport）會把對話保存在 SQLite 檔案裡，AgentAPI 用同一個
-檔案再次啟動時會接續 agent 的工作階段；見[持久保存的工作階段](#持久保存的工作階段)。
+`--state-db <檔案>`（native 與 PTY transport）會把對話保存在 SQLite 檔案裡，AgentAPI 用同一個
+檔案再次啟動時，native agent 會接續它的工作階段；見[持久保存的工作階段](#持久保存的工作階段)。
 `--terminal`（預設為 true，僅限 native transport）會提供 agent 工作目錄中的 shell；見
-[終端機](#終端機)。`--state-file <檔案>`（僅限 PTY transport）會在關閉時保存從畫面解析出的
-訊息，並在啟動時載入（設定它時，`--save-state` 和 `--load-state` 預設為 true）。
+[終端機](#終端機)。`--state-file <檔案>` 已棄用：它的對話會匯入旁邊的狀態資料庫，之後由資料庫
+保存。
 
 ## 聊天介面
 
@@ -386,7 +386,7 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 ```
 
 - 支援 Claude Code、Codex 和 Pi。AgentAPI 依指令名稱選擇對應的 adapter；使用完整路徑或包裝腳本時，請用 `--type` 指定類型（沒有指定時，它們會被當成 `custom` agent，使用 PTY transport）。
-- 以 `--state-file`（PTY transport 的保存方式）啟動、又沒有指定 `--transport` 的伺服器會維持使用 PTY transport，所以為它寫的命令列仍能啟動；要保存 native 工作階段請用 `--state-db`。
+- 以已棄用的 `--state-file` 啟動、又沒有指定 `--transport` 的伺服器會維持使用 PTY transport，所以為它寫的命令列仍能啟動；見[持久保存的工作階段](#持久保存的工作階段)。
 - ACP 是另一種 transport。`--transport acp` 等同 `--experimental-acp`，不能與 native 模式一起啟用。
 - 開發聊天介面時，可用 `--type custom -- native-demo` 以 native transport 執行模擬 agent，詳見[開發指南](chat/README.md)。改用 `--type claude`、`codex` 或 `pi` 時，demo 會扮演那個 agent：AgentAPI 會替它讀取那個 agent 的紀錄，用於先前的工作階段和 sub agent。以 `--transport native` 指定其他 agent 類型時，會在啟動時被拒絕。
 
@@ -679,10 +679,11 @@ Claude Code 則用 `/compact` 訊息壓縮，聊天介面會把這則訊息送�
 ### 持久保存的工作階段
 
 `--state-db <檔案>` 會把對話保存在一個 SQLite 檔案裡：訊息、結構化訊息（工具呼叫、
-思考）、時間軸、請求和佇列，以及 agent 的工作階段 ID。AgentAPI 用同一個檔案再次啟動
-時，聊天介面會顯示原本的對話，排隊中的訊息仍在佇列裡，agent 也會接續它的工作階段，所以它
-也記得先前的對話。正常關閉後再啟動時，對話的 epoch 不變，瀏覽器的快取也仍然有效。沒有
-`--state-db` 時，AgentAPI 每次啟動都是新的 agent 工作階段。
+思考）、時間軸、請求和佇列，以及 agent 的工作階段 ID 和透過 API 修改的 webhook 設定。AgentAPI
+用同一個檔案再次啟動時，聊天介面會顯示原本的對話，排隊中的訊息仍在佇列裡。native agent 會
+接續它的工作階段，所以它也記得先前的對話；PTY agent 則在原本的對話下方重新開始，最後一則 agent
+訊息在下一則訊息之前維持原本的內容。正常關閉後再啟動時，對話的 epoch 不變，瀏覽器的快取也仍然
+有效。沒有 `--state-db` 時，AgentAPI 每次啟動都是新的對話。
 
 ```bash
 agentapi server --state-db ~/.agentapi/myproject.db -- claude
@@ -700,9 +701,15 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
   不論哪一種，為工作階段選擇的設定都會保留。
 - 寫入會每 200 毫秒批次處理一次，所以串流不必等待磁碟。當機後最後一批寫入可能遺失，所以對話會
   換成新的 epoch，用戶端會重新載入完整的對話。持續失敗的寫入會以錯誤回報。
-- `--state-db` 需要 native transport（Claude Code、Codex 和 Pi 的預設值）。使用 PTY transport
-  時 agent 無法接續工作階段；
-  `--state-file` 仍會在那裡保存從畫面解析出的訊息。Native transport 不接受 `--state-file`。
+- 還原的 native 對話不會再收到 `--initial-prompt`。PTY 對話會記錄它收到的 prompt，重新啟動後
+  只有 prompt 改變時才會再送一次。
+- 用 `PUT /webhook` 或 Explorer 修改的 webhook 設定在重新啟動後仍然有效，除非 AgentAPI 以不同的
+  webhook 參數啟動。
+- ACP transport 不保存對話。
+- `--state-file <檔案>` 是 PTY transport 過去的保存方式，已棄用。它保存的對話會在第一次啟動時
+  匯入旁邊的狀態資料庫（同名、副檔名改為 `.db`，或由 `--state-db` 指定），之後由資料庫保存對話；
+  不會再寫入這個檔案。`--load-state=false` 會略過匯入，`--save-state` 已沒有作用。SIGUSR1 會
+  寫入狀態資料庫尚未寫入的變更。
 
 ### 先前的工作階段
 
@@ -1208,7 +1215,8 @@ data，欄位名稱同 JSON，例如 `{{.Data.prompt}}`），`run.status_changed
 的事、心跳、執行狀態、agent 錯誤、訊息、工具呼叫）、簽章 secret、instance ID、心跳間隔、公開
 網址，以及 **Delivery and payload** 底下的逾時、嘗試次數和範本，所以啟動時沒有設定 webhook 的
 AgentAPI 也能在這裡設定。在這裡或用 `PUT /webhook` 修改的設定會維持到 AgentAPI 重新啟動為止；
-啟動參數則決定啟動時的設定。**Send test event**（`POST /webhook/test`）會對已儲存的網址送一次
+使用 [`--state-db`](#持久保存的工作階段) 時重新啟動後也仍有效，除非 AgentAPI 以不同的 webhook
+參數啟動。**Send test event**（`POST /webhook/test`）會對已儲存的網址送一次
 `webhook.test` 事件（和其他事件一樣簽章，不受所選事件影響），並顯示接收端的回應。
 
 ![Explorer 的 Webhook 分頁：接收端網址、事件群組、簽章 secret、instance ID、心跳和公開網址](docs/screenshots/explorer-webhook.png)
@@ -1488,12 +1496,12 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 | `--bind` | 所有網路介面 | 監聽的位址；見[監聽位址](#監聽位址) |
 | `--transport` | Claude Code、Codex 和 Pi 為 `native`，其他為 `pty` | `native`、`pty` 或 `acp`；見 [Transport](#transport) |
 | `--experimental-acp` | `false` | 等同 `--transport acp` |
-| `--state-db` | | 保存對話、並接續 agent 工作階段的 SQLite 檔案（native）；見[持久保存的工作階段](#持久保存的工作階段) |
+| `--state-db` | | 保存對話（native 與 PTY）、並接續 native agent 工作階段的 SQLite 檔案；見[持久保存的工作階段](#持久保存的工作階段) |
 | `--terminal` | `true` | 給聊天介面使用、位於 agent 工作目錄的 shell（native）；見[終端機](#終端機) |
 | `--auto-continue` | `false` | 回合因用量限制停下時，在限制重置後繼續（native）；見[達到用量限制時](#達到用量限制時) |
 | `--prices` | | 每百萬 tokens 模型價格的 JSON 檔，新增或取代內建價格；見[工作階段花費](#工作階段花費) |
-| `-s`, `--state-file` | | 保存從畫面解析出的訊息的檔案（PTY） |
-| `--load-state`, `--save-state` | 設定 `--state-file` 時為 `true` | 啟動時載入、關閉時保存狀態檔 |
+| `-s`, `--state-file` | | 已棄用：第一次啟動時匯入旁邊的狀態資料庫（可用 `--state-db` 指定其他檔案） |
+| `--load-state`, `--save-state` | | 已棄用：`--load-state=false` 會略過匯入；`--save-state` 沒有作用 |
 | `-I`, `--initial-prompt` | | 給 agent 的第一則訊息；以管線輸入時從 stdin 讀取 |
 | `-W`, `--term-width` | `80` | 模擬終端機的寬度，也是 TTY mode 每行的長度（PTY） |
 | `-H`, `--term-height` | `1000` | 模擬終端機的高度（PTY） |

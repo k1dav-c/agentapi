@@ -20,6 +20,14 @@
   and the delivery settings. **Send test event** (`POST /webhook/test`) sends a signed
   `webhook.test` event and shows the receiver's answer.
 - Docs: a screenshot of the Webhook tab; all screenshots retaken.
+- `--state-db` works with the PTY transport too: the conversation and the queue survive a restart,
+  and the agent starts anew below the conversation. A PTY conversation records the initial prompt
+  it got and sends it again only if it changed. Webhook settings changed through the API are kept
+  in the state database and apply after a restart, unless AgentAPI starts with other webhook flags.
+- `--state-file` is deprecated: its conversation is imported once into a state database next to it
+  (the same name with `.db`, or `--state-db`), which keeps the conversation from then on, and the
+  file isn't written anymore. `--load-state=false` skips the import; `--save-state` has no effect.
+  SIGUSR1 writes what the state database hasn't written yet.
 - Webhook retries wait twice as long each time, up to 30 seconds; a 4xx response other than 408
   and 429 isn't tried again. The queue holds 1,024 events.
 

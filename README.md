@@ -92,7 +92,8 @@ has the complete commit history.
 - A shared [terminal](#terminal) in the agent's working directory, for logins
   and quick commands.
 - [Persistent sessions](#persistent-sessions): with `--state-db`, the
-  conversation and the agent's own session survive an AgentAPI restart.
+  conversation survives an AgentAPI restart, and a native agent resumes its
+  own session.
 - Open one of the agent's [earlier sessions](#earlier-sessions) in its working
   directory, or start a copy of one.
 - See what each [session and task cost](#session-costs) at the model
@@ -226,8 +227,8 @@ server -- claude`, but not `-- /usr/local/bin/claude`); anything else runs as `c
 ### Transports
 
 `--transport` chooses how AgentAPI drives the agent. Without it, Claude Code, Codex and Pi use the
-native transport, and every other agent the PTY transport, as does a server started with
-`--state-file` (the PTY transport's persistence):
+native transport, and every other agent the PTY transport, as does a server started with the
+deprecated `--state-file`:
 
 | | PTY | Native | ACP (experimental) |
 | --- | --- | --- | --- |
@@ -239,7 +240,7 @@ native transport, and every other agent the PTY transport, as does a server star
 | Approvals, questions, plans | terminal dialogs, answered from decision cards or TTY mode | structured [requests](#requests-approvals-questions-and-plans) | approved automatically |
 | Steer and interrupt a turn | | ✓ | |
 | Settings, usage, compaction | | ✓ | |
-| Survives an AgentAPI restart | `--state-file`: the messages | `--state-db`: the conversation and the agent's session | |
+| Survives an AgentAPI restart | `--state-db`: the conversation; the agent starts anew | `--state-db`: the conversation and the agent's session | |
 | Terminal in the chat | TTY mode: the agent's own terminal | a shell in the working directory | |
 
 ```bash
@@ -250,12 +251,12 @@ agentapi server -- aider                     # PTY
 agentapi server --type=kimi --experimental-acp -- kimi acp
 ```
 
-`--state-db <file>` (native transport only) keeps the conversation in a SQLite file and resumes the
-agent's session when AgentAPI starts again with the same file; see
+`--state-db <file>` (native and PTY transports) keeps the conversation in a SQLite file, and a native
+agent resumes its session when AgentAPI starts again with the same file; see
 [Persistent sessions](#persistent-sessions). `--terminal` (default true, native transport only)
-offers a shell in the agent's working directory; see [Terminal](#terminal). `--state-file <file>`
-(PTY transport only) saves the screen-derived messages on shutdown and loads them on startup
-(`--save-state` and `--load-state` default to true when it is set).
+offers a shell in the agent's working directory; see [Terminal](#terminal). `--state-file <file>` is
+deprecated: its conversation is imported into a state database next to it, which keeps it from
+then on.
 
 ## Chat UI
 
@@ -443,9 +444,9 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 - Claude Code, Codex, and Pi are supported. AgentAPI selects their adapter from
   the command name; specify `--type` for full executable paths or wrapper
   scripts (without it they run as `custom` agents, with the PTY transport).
-- A server started with `--state-file`, the PTY transport's persistence, and no
-  `--transport` keeps the PTY transport, so command lines written for it still
-  start; `--state-db` keeps a native session.
+- A server started with the deprecated `--state-file` and no `--transport`
+  keeps the PTY transport, so command lines written for it still start; see
+  [Persistent sessions](#persistent-sessions).
 - ACP is a separate transport. `--transport acp` is equivalent to
   `--experimental-acp` and cannot be enabled together with native mode.
 - For UI development, `--type custom -- native-demo` runs a simulated agent with
@@ -801,11 +802,13 @@ sends it.
 ### Persistent sessions
 
 `--state-db <file>` keeps the conversation in a SQLite file: messages, rich messages (tool calls,
-thinking), the timeline, requests and the queue, plus the agent's own session ID. When AgentAPI
-starts again with the same file, the chat shows the conversation as it was, queued messages are
-still queued, and the agent resumes its session, so it remembers the conversation too. After a clean
-shutdown browser caches stay valid, because the conversation keeps its epoch. Without `--state-db`,
-every start of AgentAPI is a new agent session.
+thinking), the timeline, requests and the queue, plus the agent's own session ID and the webhook
+settings changed through the API. When AgentAPI starts again with the same file, the chat shows the
+conversation as it was and queued messages are still queued. A native agent resumes its session, so
+it remembers the conversation too; a PTY agent starts anew below it, and the last agent message
+keeps its text until the next message. After a clean shutdown browser caches stay valid, because
+the conversation keeps its epoch. Without `--state-db`, every start of AgentAPI is a new
+conversation.
 
 ```bash
 agentapi server --state-db ~/.agentapi/myproject.db -- claude
@@ -830,10 +833,18 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
   After a crash the last of them may be missing, so the conversation gets a
   new epoch and clients load it again in full. Writes that keep failing are
   reported as an error.
-- `--state-db` needs the native transport, the default for Claude Code, Codex
-  and Pi. With the PTY transport the agent can't resume its session;
-  `--state-file` still saves the screen-derived messages there. The native
-  transport doesn't take `--state-file`.
+- A restored native conversation doesn't get `--initial-prompt` again. A PTY
+  conversation records the prompt it got and sends it again after a restart
+  only if it changed.
+- Webhook settings changed with `PUT /webhook` or in the Explorer apply after
+  a restart, unless AgentAPI starts with other webhook flags.
+- The ACP transport doesn't keep its conversation.
+- `--state-file <file>`, the PTY transport's former persistence, is
+  deprecated. The conversation it holds is imported the first time into a
+  state database next to it (the same name with `.db`, or `--state-db`), which
+  keeps the conversation from then on; the file isn't written anymore.
+  `--load-state=false` skips the import, and `--save-state` has no effect.
+  SIGUSR1 writes what the state database hasn't written yet.
 
 ### Earlier sessions
 
@@ -1410,8 +1421,8 @@ In the chat, the Explorer's Webhook tab does the same: the receiver's URL, the k
 (tasks, what needs you, heartbeats, run status, agent errors, messages, tool calls), the signing
 secret, the instance ID, the heartbeat, the public URL and, under **Delivery and payload**, the
 timeout, attempts and template, so a webhook can be set up on an AgentAPI that started without one.
-Settings changed there or with `PUT /webhook` last until AgentAPI restarts; the flags set them at
-start. **Send test event** (`POST /webhook/test`) sends a `webhook.test` event to the saved URL once,
+Settings changed there or with `PUT /webhook` last until AgentAPI restarts, or with
+[`--state-db`](#persistent-sessions) after it too, unless AgentAPI starts with other webhook flags. **Send test event** (`POST /webhook/test`) sends a `webhook.test` event to the saved URL once,
 signed like the others and whatever the events chosen, and shows the receiver's answer.
 
 ![The Explorer's Webhook tab: the receiver URL, event groups, signing secret, instance ID, heartbeat and public URL](docs/screenshots/explorer-webhook.png)
@@ -1723,12 +1734,12 @@ variable.
 | `--bind` | all interfaces | Address to listen on; see [Bind address](#bind-address) |
 | `--transport` | `native` for Claude Code, Codex and Pi, else `pty` | `native`, `pty` or `acp`; see [Transports](#transports) |
 | `--experimental-acp` | `false` | The same as `--transport acp` |
-| `--state-db` | | SQLite file that keeps the conversation and resumes the agent's session (native); see [Persistent sessions](#persistent-sessions) |
+| `--state-db` | | SQLite file that keeps the conversation (native and PTY) and resumes a native agent's session; see [Persistent sessions](#persistent-sessions) |
 | `--terminal` | `true` | Shell in the agent's working directory for the chat (native); see [Terminal](#terminal) |
 | `--auto-continue` | `false` | Continue a turn a usage limit stopped once the limit resets (native); see [Usage limits](#usage-limits) |
 | `--prices` | | JSON file of model prices per million tokens, which add to or replace the built-in ones; see [Session costs](#session-costs) |
-| `-s`, `--state-file` | | File that keeps the screen-derived messages (PTY) |
-| `--load-state`, `--save-state` | `true` with `--state-file` | Load the state file on startup, save it on shutdown |
+| `-s`, `--state-file` | | Deprecated: imported once into a state database next to it (`--state-db` names another) |
+| `--load-state`, `--save-state` | | Deprecated: `--load-state=false` skips the import; `--save-state` has no effect |
 | `-I`, `--initial-prompt` | | First message for the agent; read from stdin when piped |
 | `-W`, `--term-width` | `80` | Width of the emulated terminal, and of TTY mode's lines (PTY) |
 | `-H`, `--term-height` | `1000` | Height of the emulated terminal (PTY) |

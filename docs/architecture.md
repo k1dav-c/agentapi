@@ -95,7 +95,7 @@ terminal dialog are written to the agent's terminal directly.
 | `lib/native/demo` | `native-demo`, a simulated agent for working on the chat |
 | `lib/native/nativetest` | A scriptable fake adapter for tests |
 | `lib/native/procutil` | Child process groups and graceful shutdown |
-| `lib/statedb/` | SQLite persistence for `--state-db` |
+| `lib/statedb/` | SQLite persistence for `--state-db` (native and PTY), and the import of a `--state-file` |
 | `lib/shellterm/` | The shared shell terminal of native sessions |
 | `lib/htmlpreview/` | Turns an HTML file into a page that shows by itself, for `GET /files/preview`: what it refers to by relative path becomes data: URLs |
 | `lib/mcpconfig/` | Reads and writes the agents' MCP configuration files |
@@ -403,13 +403,16 @@ also steer the running turn or interrupt it. The queue is part of the persisted 
 
 ## Persistence
 
-`lib/statedb` keeps a native session in SQLite through `modernc.org/sqlite`, which is pure Go, so
-`CGO_ENABLED=0` builds work.
+`lib/statedb` keeps a conversation in SQLite through `modernc.org/sqlite`, which is pure Go, so
+`CGO_ENABLED=0` builds work. The emitter hands it every change whatever the transport; only ACP
+doesn't use it.
 
 - The tables are `messages`, `rich_messages`, `session_events`, `requests`,
   `queue`, and `meta`, which holds the agent type, transport and working
   directory, the epoch and seq, the session reference and name, the
-  settings chosen for the session, and a usage limit stop.
+  settings chosen for the session, a usage limit stop, the webhook settings
+  changed through the API (with a fingerprint of the startup flags, which win
+  when they change) and the initial prompt a PTY conversation got.
 - Writes are queued and flushed every 200 ms in a transaction, so streaming
   never waits for the disk. A clean shutdown marks the file clean; after a
   crash the conversation gets a new epoch and clients load it again in full.
@@ -417,13 +420,18 @@ also steer the running turn or interrupt it. The queue is part of the persisted 
   AgentAPI can use it, and is created with mode 0600.
 - On startup the server restores the conversation, the queue and the session
   reference, which the native conversation passes to the factory so the agent
-  resumes its own session. Requests that were open come back expired.
+  resumes its own session. The PTY conversation gets the restored messages
+  when it is built (`InitialMessages`): its first snapshot then continues
+  them instead of replacing them, and the last agent message keeps its text
+  until the user sends the next one. Requests that were open come back
+  expired.
 - A row that can't be read is skipped, and logged, rather than keeping the
   server from starting. The schema changes through numbered migrations,
   whose version is the file's `PRAGMA user_version`.
 
-`--state-file` is the older PTY mechanism: it saves the screen-derived messages as JSON on shutdown
-and loads them on startup.
+`--state-file`, the older PTY mechanism (JSON written on shutdown), is deprecated: `cmd/server`
+imports it once into a state database next to it (`statedb.ImportStateFile`, only into an empty
+one), which keeps the conversation from then on. SIGUSR1 flushes the state database.
 
 ## Restarts and updates
 

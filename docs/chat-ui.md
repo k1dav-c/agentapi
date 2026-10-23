@@ -390,7 +390,8 @@ agents, also when AgentAPI started without one: the receiver's URL; the kinds of
 **Heartbeats**, **Run status**, **Agent errors**, **Messages**, **Tool calls**); a signing secret,
 which can be replaced or removed but not read back; the instance ID and public URL every event
 carries; and the heartbeat interval. **Delivery and payload** has the timeout, the attempts and a
-payload template. **Save** applies the settings at once, until AgentAPI restarts; **Send test event**
+payload template. **Save** applies the settings at once, until AgentAPI restarts (with `--state-db` also after a
+restart, unless AgentAPI starts with other webhook flags); **Send test event**
 sends a `webhook.test` event to the saved URL and says how the receiver answered; **Turn off** clears
 the URL. Events set with `--webhook-events` that no kind covers whole, such as `task.completed`
 alone, are listed and kept. See [Webhooks](../README.md#webhooks) for the events and their format.

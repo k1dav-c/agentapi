@@ -72,7 +72,7 @@ response messages over stdio. All three transports update the shared event emitt
 - **`lib/pricing/`** — Model prices per million tokens: the built-in `prices.json` (embedded) and a `--prices` file that adds or replaces models; `Price.Cost` turns a call's tokens into the API-equivalent USD cost.
 - **`x/acpio/`** — Experimental ACP (Agent Client Protocol) transport, alternative to PTY.
 - **`lib/native/`** — Native transport. `Conversation` (an `st.Conversation`) turns the events of an `Adapter` (one per agent: `claude/`, `codex/`, `pi/`, plus the simulated `demo/`) into conversation state, requests (approvals, questions, plans) and login state. Shared pieces: `procutil/` (child process lifecycle), `IsAuthError`, `ReadImage`; `nativetest/` has a fake adapter. `lib/procenv` prepares the environment for agent processes on all transports.
-- **`lib/statedb/`** — SQLite persistence of native sessions (`--state-db`).
+- **`lib/statedb/`** — SQLite persistence of conversations, native and PTY (`--state-db`; a deprecated `--state-file` is imported into it).
 - **`lib/shellterm/`** — The shared shell terminal of native sessions (`GET /terminal`).
 - **`cmd/`** — CLI commands via cobra/viper. Includes `server`, `attach`, and `update` subcommands.
 

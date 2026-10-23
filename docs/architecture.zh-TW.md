@@ -93,7 +93,7 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 | `lib/native/demo` | `native-demo`，開發聊天介面用的模擬 agent |
 | `lib/native/nativetest` | 測試用、可以寫腳本控制的假 adapter |
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
-| `lib/statedb/` | `--state-db` 的 SQLite 持久保存 |
+| `lib/statedb/` | `--state-db` 的 SQLite 持久保存（native 與 PTY），以及 `--state-file` 的匯入 |
 | `lib/shellterm/` | Native 工作階段共用的 shell 終端機 |
 | `lib/htmlpreview/` | 為 `GET /files/preview` 把 HTML 檔轉成能獨立顯示的頁面：以相對路徑引用的檔案都轉成 data: URL |
 | `lib/mcpconfig/` | 讀寫各 agent 的 MCP 設定檔 |
@@ -348,21 +348,27 @@ agent 忙碌時送出的訊息會在伺服器的佇列中等待（`s.queue`；�
 
 ## 持久保存
 
-`lib/statedb` 透過 `modernc.org/sqlite` 把 native 工作階段保存在 SQLite 裡；它是純 Go 的實作，
-所以 `CGO_ENABLED=0` 的建置也能使用。
+`lib/statedb` 透過 `modernc.org/sqlite` 把對話保存在 SQLite 裡；它是純 Go 的實作，所以
+`CGO_ENABLED=0` 的建置也能使用。不論哪種 transport，emitter 都會把每次變更交給它；只有 ACP
+不使用它。
 
 - 資料表有 `messages`、`rich_messages`、`session_events`、`requests`、`queue`，以及
   `meta`：保存 agent 類型、transport 和工作目錄、epoch 與 seq、工作階段參照與名稱、為
-  工作階段選擇的設定，以及用量限制造成的停止。
+  工作階段選擇的設定、用量限制造成的停止、透過 API 修改的 webhook 設定（附啟動參數的指紋，
+  參數改變時以參數為準），以及 PTY 對話收到的 initial prompt。
 - 寫入會先排隊，每 200 毫秒在一個交易中寫入，所以串流不必等待磁碟。正常關閉時會將檔案標示為
   已正常關閉；當機之後，對話會換成新的 epoch，用戶端會重新載入完整的對話。
 - 檔案以獨占鎖定模式搭配 WAL 開啟，所以第二個 AgentAPI 無法使用它；新建立的檔案權限為 0600。
 - 啟動時伺服器會還原對話、佇列和工作階段參照；native 對話會把參照交給 factory，讓 agent
-  接續它自己的工作階段。還原後，先前待處理的請求會標示為已過期。
+  接續它自己的工作階段。PTY 對話在建立時就收到還原的訊息（`InitialMessages`），所以第一次
+  snapshot 會接續它們而不是取代它們，最後一則 agent 訊息在使用者送出下一則訊息前維持原本的內容。
+  還原後，先前待處理的請求會標示為已過期。
 - 讀不出來的資料列會被略過並記錄，不會讓伺服器無法啟動。資料表結構以編號的 migration 變更，版本記在
   檔案的 `PRAGMA user_version`。
 
-`--state-file` 是較早的 PTY 機制：關閉時以 JSON 保存從畫面解析出的訊息，啟動時載入。
+`--state-file` 是較早的 PTY 機制（關閉時寫出 JSON），已棄用：`cmd/server` 會把它一次性匯入
+旁邊的狀態資料庫（`statedb.ImportStateFile`，只匯入空的資料庫），之後由資料庫保存對話。SIGUSR1
+會把狀態資料庫尚未寫入的變更寫入。
 
 ## 重新啟動與更新
 

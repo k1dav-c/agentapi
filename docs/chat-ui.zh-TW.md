@@ -364,7 +364,8 @@ AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的�
 對話框、登入和用量限制的 **Needs you**、**Heartbeats**、**Run status**、**Agent errors**、
 **Messages**、**Tool calls**）；簽章 secret，可以替換或移除，但無法讀回；每個事件都會帶的
 instance ID 和公開網址；以及心跳間隔。**Delivery and payload** 底下有逾時、嘗試次數和 payload
-範本。**Save** 會立即套用設定，維持到 AgentAPI 重新啟動為止；**Send test event** 會對已儲存的
+範本。**Save** 會立即套用設定，維持到 AgentAPI 重新啟動為止（使用 `--state-db` 時重新啟動後也仍有效，
+除非 AgentAPI 以不同的 webhook 參數啟動）；**Send test event** 會對已儲存的
 網址送出 `webhook.test` 事件，並顯示接收端的回應；**Turn off** 會清除網址。以 `--webhook-events`
 設定、但沒有完整涵蓋任一種類的事件（例如只有 `task.completed`）會列出並保留。事件與格式見
 [Webhook](../README.zh-TW.md#webhook)。
