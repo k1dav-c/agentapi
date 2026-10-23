@@ -5,18 +5,11 @@ package sessions
 
 import (
 	"errors"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/coder/agentapi/lib/agenthome"
 	"github.com/coder/agentapi/lib/agentlog"
-	"github.com/coder/agentapi/lib/agentlog/claudelog"
-	"github.com/coder/agentapi/lib/agentlog/codexlog"
-	"github.com/coder/agentapi/lib/agentlog/pilog"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -60,184 +53,50 @@ const historyMessagePrefix = "history-"
 // firstPromptLength is how much of the first prompt a summary keeps.
 const firstPromptLength = 200
 
-// historyLog is what reading one agent's session logs takes.
-type historyLog struct {
-	// files lists the session logs of the working directory, newest first,
-	// with the session IDs (empty when only the log says).
-	files func(cwd string) ([]historyFile, error)
-	// header reads the session's ID and start from its log's first line,
-	// and reports false for a log that isn't a session of the directory
-	// (another directory's, a subagent's).
-	header func(line []byte, cwd string) (id string, started time.Time, ok bool)
-	// prompt returns the user's message a line holds, if it holds one.
-	prompt func(line []byte) (string, time.Time, bool)
-	parser func() agentlog.LineParser
-	namer  func() agentlog.SessionNamer
-	// scan reads a session's lines, as agentlog.ScanFile does; nil is
-	// agentlog.ScanFile. It differs for a log that refers to another one's
-	// lines (a Codex fork).
-	scan func(path string, fn func(line []byte) bool) bool
-}
-
-// lines calls fn with the lines of the session log at path.
-func (h historyLog) lines(path string, fn func(line []byte) bool) bool {
-	if h.scan != nil {
-		return h.scan(path, fn)
-	}
-	return agentlog.ScanFile(path, fn)
-}
-
-// historyFile is a session log.
-type historyFile struct {
-	path    string
-	modTime time.Time
-}
-
-func historyLogFor(agentType string) (historyLog, bool) {
-	switch agentType {
-	case "claude":
-		return historyLog{
-			files: claudeHistoryFiles, header: func(line []byte, _ string) (string, time.Time, bool) { return claudelog.HistoryHeader(line) }, prompt: claudelog.Prompt,
-			parser: func() agentlog.LineParser { return claudelog.NewParser() }, namer: func() agentlog.SessionNamer { return claudelog.NewNamer() },
-		}, true
-	case "codex":
-		return historyLog{
-			files: codexHistoryFiles, header: codexlog.HistoryHeader, prompt: codexlog.Prompt,
-			parser: func() agentlog.LineParser { return codexlog.NewParser() }, namer: func() agentlog.SessionNamer { return codexlog.NewNamer() },
-			scan: codexlog.ScanLog,
-		}, true
-	case "pi":
-		return historyLog{
-			files: piHistoryFiles, header: pilog.HistoryHeader, prompt: pilog.Prompt,
-			parser: func() agentlog.LineParser { return pilog.NewParser() }, namer: func() agentlog.SessionNamer { return pilog.NewNamer() },
-		}, true
-	}
-	return historyLog{}, false
-}
-
 // List returns up to limit of the sessions, the latest first. Sessions in
 // which the user sent nothing are left out.
 func (s *Store) List(limit int) ([]SessionSummary, error) {
-	files, err := s.h.files(s.cwd)
+	summaries, err := s.summaries()
 	if err != nil {
 		return nil, err
 	}
-	var sessions []SessionSummary
-	for _, file := range files {
-		if len(sessions) >= limit {
-			break
-		}
-		summary, ok := s.summarize(file)
-		if ok {
-			sessions = append(sessions, summary)
-		}
+	list := slices.DeleteFunc(summaries, func(summary SessionSummary) bool { return summary.Prompts == 0 })
+	slices.SortStableFunc(list, func(a, b SessionSummary) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+	if len(list) > limit {
+		list = list[:limit]
 	}
-	return sessions, nil
-}
-
-// cachedSummary is the summary of a log as it was when last read.
-type cachedSummary struct {
-	modTime time.Time
-	summary SessionSummary
-	ok      bool
-}
-
-// summarize returns the summary of a session log, from the cache while the
-// log is unchanged.
-func (s *Store) summarize(file historyFile) (SessionSummary, bool) {
-	s.mu.Lock()
-	cached, hit := s.summaries[file.path]
-	s.mu.Unlock()
-	if hit && cached.modTime.Equal(file.modTime) {
-		return cached.summary, cached.ok
-	}
-	summary, ok := s.h.readSummary(file, s.cwd)
-	s.mu.Lock()
-	s.summaries[file.path] = cachedSummary{modTime: file.modTime, summary: summary, ok: ok}
-	s.mu.Unlock()
-	return summary, ok
-}
-
-// readSummary reads a session log for its summary.
-func (h historyLog) readSummary(file historyFile, cwd string) (SessionSummary, bool) {
-	s := SessionSummary{UpdatedAt: file.modTime, path: file.path}
-	namer := h.namer()
-	first := true
-	ok := h.lines(file.path, func(line []byte) bool {
-		if first {
-			first = false
-			id, started, ok := h.header(line, cwd)
-			if !ok {
-				return false
-			}
-			s.ID, s.CreatedAt = id, started
-		}
-		if name, changed := namer.Name(line); changed {
-			s.Title = name
-		}
-		if prompt, at, ok := h.prompt(line); ok {
-			if s.Prompts == 0 {
-				s.FirstPrompt = shorten(prompt, firstPromptLength)
-				if s.CreatedAt.IsZero() {
-					s.CreatedAt = at
-				}
-			}
-			s.Prompts++
-		}
-		return true
-	})
-	if polled, isPolled := namer.(agentlog.PolledSessionNamer); isPolled {
-		if name, changed := polled.Poll(); changed {
-			s.Title = name
-		}
-	}
-	return s, ok && s.ID != "" && s.Prompts > 0
+	return list, nil
 }
 
 // ReadHistory reads the conversation of the session id. It returns
 // ErrSessionNotFound for a session it has no log of.
 func (s *Store) ReadHistory(id string) (SessionHistory, error) {
-	if path, ok := s.cachedPath(id); ok {
-		// Listed before: no need to look through every log for it.
-		return s.h.read(path), nil
-	}
-	files, err := s.h.files(s.cwd)
-	if err != nil {
-		return SessionHistory{}, err
-	}
-	for _, file := range files {
-		if s.h.idOf(file, s.cwd) == id {
-			return s.h.read(file.path), nil
+	path, ok := s.pathOf(id)
+	if !ok {
+		// Not listed before: the first line of a log says whose it is.
+		files, err := s.src.files(s)
+		if err != nil {
+			return SessionHistory{}, err
 		}
-	}
-	return SessionHistory{}, ErrSessionNotFound
-}
-
-// cachedPath returns the log of the session id, if a listing read it and
-// it is still there.
-func (s *Store) cachedPath(id string) (string, bool) {
-	s.mu.Lock()
-	var path string
-	for p, c := range s.summaries {
-		if c.ok && c.summary.ID == id {
-			path = p
-			break
+		i := slices.IndexFunc(files, func(path string) bool { return s.idOf(path) == id })
+		if i < 0 {
+			return SessionHistory{}, ErrSessionNotFound
 		}
+		path = files[i]
 	}
-	s.mu.Unlock()
-	if path == "" {
-		return "", false
+	history := s.read(path)
+	if s.agent == "codex" {
+		history.Title = s.threadName(id)
 	}
-	_, err := os.Stat(path)
-	return path, err == nil
+	return history, nil
 }
 
 // idOf returns the ID of the session a log holds, or "" for a log that
-// isn't a session of cwd.
-func (h historyLog) idOf(file historyFile, cwd string) string {
+// isn't a session of the directory.
+func (s *Store) idOf(path string) string {
 	var id string
-	agentlog.ScanFile(file.path, func(line []byte) bool {
-		id, _, _ = h.header(line, cwd)
+	agentlog.ScanFile(path, func(line []byte) bool {
+		id, _, _ = s.src.header(line, s.cwd)
 		return false
 	})
 	return id
@@ -246,8 +105,12 @@ func (h historyLog) idOf(file historyFile, cwd string) string {
 // read reads a session log's conversation. The user's messages are the
 // prompts; an agent message joins the text of the rich messages that
 // followed one.
-func (h historyLog) read(path string) SessionHistory {
-	parser, namer := h.parser(), h.namer()
+func (s *Store) read(path string) SessionHistory {
+	parser := s.src.parser()
+	var namer agentlog.SessionNamer
+	if s.src.namer != nil {
+		namer = s.src.namer()
+	}
 	var (
 		history SessionHistory
 		// order holds the rich messages' keys in the order they first
@@ -271,11 +134,13 @@ func (h historyLog) read(path string) SessionHistory {
 			latest[key] = m
 		}
 	}
-	h.lines(path, func(line []byte) bool {
-		if name, changed := namer.Name(line); changed {
-			history.Title = name
+	s.src.lines(path, func(line []byte) bool {
+		if namer != nil {
+			if name, changed := namer.Name(line); changed {
+				history.Title = name
+			}
 		}
-		if prompt, at, ok := h.prompt(line); ok {
+		if prompt, at, ok := s.src.prompt(line); ok {
 			history.Messages = append(history.Messages, st.ConversationMessage{
 				Id: len(history.Messages), Role: st.ConversationRoleUser, Message: prompt, Time: at,
 			})
@@ -286,11 +151,6 @@ func (h historyLog) read(path string) SessionHistory {
 		return true
 	})
 	addRich(parser.Flush())
-	if polled, ok := namer.(agentlog.PolledSessionNamer); ok {
-		if name, changed := polled.Poll(); changed {
-			history.Title = name
-		}
-	}
 
 	// The agent's text after each prompt becomes the agent message that
 	// answers it: the text of the rich messages written since, as the chat
@@ -364,103 +224,4 @@ func shorten(s string, n int) string {
 		return string(runes[:n-1]) + "…"
 	}
 	return s
-}
-
-// historyFilesIn lists the .jsonl files of dir, newest first.
-func historyFilesIn(dir string) ([]historyFile, error) {
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var files []historyFile
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		files = append(files, historyFile{path: filepath.Join(dir, entry.Name()), modTime: info.ModTime()})
-	}
-	slices.SortFunc(files, func(a, b historyFile) int { return b.modTime.Compare(a.modTime) })
-	return files, nil
-}
-
-// --- Claude Code ---
-
-func claudeHistoryFiles(cwd string) ([]historyFile, error) {
-	configDir, err := agenthome.ClaudeConfigDir()
-	if err != nil {
-		return nil, err
-	}
-	return historyFilesIn(filepath.Join(configDir, "projects", claudelog.EncodeCWD(cwd)))
-}
-
-// --- Codex ---
-
-// codexHistoryScanLimit bounds how many session logs List reads to
-// find a directory's: Codex keeps every directory's in one tree.
-const codexHistoryScanLimit = 2000
-
-func codexHistoryFiles(string) ([]historyFile, error) {
-	root, err := codexlog.SessionsRoot("")
-	if err != nil {
-		return nil, err
-	}
-	var files []historyFile
-	// The tree is sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl: walking
-	// it in reverse name order goes from the latest.
-	err = walkReverse(root, 3, func(dir string) bool {
-		day, err := historyFilesIn(dir)
-		if err != nil {
-			return true
-		}
-		files = append(files, day...)
-		return len(files) < codexHistoryScanLimit
-	})
-	return files, err
-}
-
-// walkReverse calls fn with the directories depth levels below root, in
-// reverse name order, until it returns false.
-func walkReverse(root string, depth int, fn func(dir string) bool) error {
-	if depth == 0 {
-		if !fn(root) {
-			return fs.SkipAll
-		}
-		return nil
-	}
-	entries, err := os.ReadDir(root)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for i := len(entries) - 1; i >= 0; i-- {
-		if !entries[i].IsDir() {
-			continue
-		}
-		if err := walkReverse(filepath.Join(root, entries[i].Name()), depth-1, fn); err != nil {
-			if errors.Is(err, fs.SkipAll) && depth == 3 {
-				return nil
-			}
-			return err
-		}
-	}
-	return nil
-}
-
-// --- Pi ---
-
-func piHistoryFiles(cwd string) ([]historyFile, error) {
-	dir, err := pilog.SessionsDir(cwd, "")
-	if err != nil {
-		return nil, err
-	}
-	return historyFilesIn(dir)
 }

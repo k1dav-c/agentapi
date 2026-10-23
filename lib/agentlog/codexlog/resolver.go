@@ -1,16 +1,11 @@
 package codexlog
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
-	"sync"
 	"time"
-
-	"github.com/coder/agentapi/lib/agenthome"
 )
 
 // Resolver finds the JSONL session file for a Codex process.
@@ -23,50 +18,10 @@ type Resolver struct {
 	NotBefore   time.Time
 	SessionsDir string
 
-	// metas holds the first line of each session file read so far. Codex
-	// writes it when it creates the file and never changes it, and Resolve
-	// runs on every poll, so each file is read once instead of every time.
-	mu    sync.Mutex
-	metas map[string]*SessionMeta
-}
-
-// SessionMeta is the first-line metadata in a Codex session file.
-type SessionMeta struct {
-	Timestamp string `json:"timestamp"`
-	Payload   struct {
-		// ID identifies this thread. SessionID identifies the root thread
-		// of the session; sub-agent threads share it with their parent.
-		ID             string `json:"id"`
-		SessionID      string `json:"session_id"`
-		ParentThreadID string `json:"parent_thread_id"`
-		CWD            string `json:"cwd"`
-		CLIVersion     string `json:"cli_version"`
-		// AgentPath and AgentNickname say what a subagent is.
-		AgentPath     string `json:"agent_path"`
-		AgentNickname string `json:"agent_nickname"`
-		// HistoryStart is the first line that is a subagent's own: Codex
-		// starts a subagent's log with a copy of its parent's.
-		HistoryStart int64 `json:"subagent_history_start_ordinal"`
-	} `json:"payload"`
-}
-
-// IsSubAgent reports whether the file belongs to a sub-agent thread rather
-// than the session's main thread.
-func (m *SessionMeta) IsSubAgent() bool {
-	return m.Payload.ParentThreadID != "" ||
-		(m.Payload.ID != "" && m.Payload.SessionID != "" && m.Payload.ID != m.Payload.SessionID)
-}
-
-// SessionsRoot returns sessionsDir, defaulting to $CODEX_HOME/sessions.
-func SessionsRoot(sessionsDir string) (string, error) {
-	if sessionsDir != "" {
-		return sessionsDir, nil
-	}
-	home, err := agenthome.CodexHome()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, "sessions"), nil
+	// metas holds the first line of each session file read so far:
+	// Resolve runs on every poll, so each file is read once instead of
+	// every time.
+	metas Metas
 }
 
 // sessionDirs returns the date directories that may hold current
@@ -126,11 +81,13 @@ func (r *Resolver) Resolve() (string, error) {
 	for _, fi := range files {
 		listed[fi.path] = true
 	}
-	r.forgetUnlisted(listed)
+	// Forget the files no longer listed, such as yesterday's once the date
+	// moves on.
+	r.metas.Retain(func(path string) bool { return listed[path] })
 
 	// Find the newest file that matches our CWD
 	for _, fi := range files {
-		meta, err := r.sessionMeta(fi.path)
+		meta, err := r.metas.Get(fi.path)
 		if err != nil {
 			continue
 		}
@@ -151,57 +108,4 @@ func (r *Resolver) Resolve() (string, error) {
 	}
 
 	return "", fmt.Errorf("no Codex session file found for cwd %q", r.CWD)
-}
-
-// sessionMeta returns the first line of a session file, read from the file
-// the first time only. A first line that doesn't decode yet (Codex is still
-// writing it) is read again the next time.
-func (r *Resolver) sessionMeta(path string) (*SessionMeta, error) {
-	r.mu.Lock()
-	meta, ok := r.metas[path]
-	r.mu.Unlock()
-	if ok {
-		return meta, nil
-	}
-	meta, err := ReadSessionMeta(path)
-	if err != nil {
-		return nil, err
-	}
-	r.mu.Lock()
-	if r.metas == nil {
-		r.metas = make(map[string]*SessionMeta)
-	}
-	r.metas[path] = meta
-	r.mu.Unlock()
-	return meta, nil
-}
-
-// forgetUnlisted drops what was read from files that are no longer listed,
-// such as yesterday's once the date moves on.
-func (r *Resolver) forgetUnlisted(listed map[string]bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for path := range r.metas {
-		if !listed[path] {
-			delete(r.metas, path)
-		}
-	}
-}
-
-// ReadSessionMeta reads the first line of a Codex session file.
-// The session_meta line can be large (it embeds base_instructions, ~18KB),
-// so decode a single JSON value from the stream instead of reading a
-// fixed-size buffer.
-func ReadSessionMeta(path string) (*SessionMeta, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
-	var meta SessionMeta
-	if err := json.NewDecoder(bufio.NewReader(f)).Decode(&meta); err != nil {
-		return nil, err
-	}
-	return &meta, nil
 }

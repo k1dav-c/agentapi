@@ -209,10 +209,13 @@ func BenchmarkClaudeReadHistory(b *testing.B) {
 }
 
 // BenchmarkCodexSubagents is GET /subagents of a Codex session among 2000
-// rollouts.
+// rollouts, after a first request.
 func BenchmarkCodexSubagents(b *testing.B) {
 	b.Setenv("CODEX_HOME", codexBenchHome(b))
 	store := newStore(b, "codex", benchCWD)
+	if _, err := store.Subagents("019a0000-0000-7000-8000-000000001989"); err != nil {
+		b.Fatal(err)
+	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
@@ -223,10 +226,14 @@ func BenchmarkCodexSubagents(b *testing.B) {
 	}
 }
 
-// BenchmarkCodexCosts is GET /sessions' costs among 2000 Codex rollouts.
+// BenchmarkCodexCosts is GET /sessions' costs among 2000 Codex rollouts,
+// after a first request.
 func BenchmarkCodexCosts(b *testing.B) {
 	b.Setenv("CODEX_HOME", codexBenchHome(b))
 	store := newStore(b, "codex", benchCWD)
+	if _, err := store.Costs(); err != nil {
+		b.Fatal(err)
+	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {

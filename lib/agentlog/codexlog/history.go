@@ -70,6 +70,26 @@ func ScanLog(path string, fn func(line []byte) bool) bool {
 	return scanFork(path, -1, 0, fn)
 }
 
+// ScanForked reads the lines of the thread a fork continues: those of
+// thread id's log before the line numbered before (all when negative),
+// and those of the threads it continues in turn. It returns false when
+// fn did.
+func ScanForked(id string, before int64, fn func(line []byte) bool) bool {
+	parent, found := LogOf(id)
+	if !found {
+		return true
+	}
+	stopped := false
+	scanFork(parent, before, 1, func(line []byte) bool {
+		if !fn(line) {
+			stopped = true
+			return false
+		}
+		return true
+	})
+	return !stopped
+}
+
 // scanFork reads the log at path up to the line numbered before (every
 // line when negative); depth counts the forks followed. Only the first
 // log's session_meta line is passed on.

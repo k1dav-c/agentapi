@@ -34,6 +34,24 @@ func TestReadSessionMeta_LongFirstLine(t *testing.T) {
 	if meta.Timestamp != "2026-07-25T14:21:42.025Z" {
 		t.Errorf("timestamp = %q, want session metadata timestamp", meta.Timestamp)
 	}
+
+	// Longer than the buffer it is read with.
+	longer := strings.Replace(content, instructions, strings.Repeat(instructions, 5), 1)
+	if err := os.WriteFile(path, []byte(longer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	meta, err = ReadSessionMeta(path)
+	if err != nil || meta.Payload.CWD != "/home/user/project" {
+		t.Fatalf("ReadSessionMeta of a %d-byte line = %+v, %v", len(longer), meta, err)
+	}
+
+	// One Codex is still writing.
+	if err := os.WriteFile(path, []byte(firstLine[:len(firstLine)/2]), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSessionMeta(path); err == nil {
+		t.Fatal("ReadSessionMeta of half a line succeeded")
+	}
 }
 
 func TestCodexResolver_IgnoresPreviousSessionForSameCWD(t *testing.T) {
@@ -177,9 +195,7 @@ func TestCodexResolver_ReadsEachFileOnce(t *testing.T) {
 	if _, err := resolver.Resolve(); err != nil {
 		t.Fatal(err)
 	}
-	resolver.mu.Lock()
-	defer resolver.mu.Unlock()
-	if _, ok := resolver.metas[other]; ok {
+	if resolver.metas.Has(other) {
 		t.Errorf("the removed file %s is still remembered", other)
 	}
 }

@@ -1,15 +1,11 @@
 package sessions
 
 import (
-	"bytes"
-	"encoding/json"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog"
-	"github.com/coder/agentapi/lib/agentlog/codexlog"
-	"github.com/coder/agentapi/lib/agentlog/pilog"
 	"github.com/coder/agentapi/lib/pricing"
 )
 
@@ -28,7 +24,7 @@ type ModelCall struct {
 	// call by call (compacting the context, among others).
 	Unitemized bool `json:"unitemized,omitempty" doc:"Calls Claude Code counted in its own total but didn't log one by one, such as compacting the context: the difference up to this point."`
 	// report is a Claude Code cost-state line: what it counted so far.
-	report map[string]claudeModelReport
+	report map[string]agentlog.ModelReport
 	// key identifies the call across logs: a fork's log copies the calls of
 	// the session it forked.
 	key string
@@ -63,25 +59,37 @@ type SessionCost struct {
 	Hourly []HourCost `json:"hourly" nullable:"false" doc:"What was spent in each hour (UTC) with calls, the earliest first, for totals over days, weeks or months in the reader's time zone."`
 }
 
-// add counts call in c.
-func (c *SessionCost) add(call ModelCall) {
+// costSum adds calls up into a SessionCost, finding a call's model and
+// hour by key: a long session makes tens of thousands of calls over
+// hundreds of hours.
+type costSum struct {
+	c      SessionCost
+	models map[string]int
+	hours  map[int64]int
+}
+
+// add counts call.
+func (s *costSum) add(call ModelCall) {
+	c := &s.c
 	c.USD += call.USD
 	c.Tokens = c.Tokens.Add(call.Tokens)
 	c.Calls++
-	i := slices.IndexFunc(c.Models, func(m ModelCost) bool { return m.Model == call.Model })
-	if i < 0 {
+	i, ok := s.models[call.Model]
+	if !ok {
 		c.Models = append(c.Models, ModelCost{Model: call.Model, Priced: call.Priced})
 		i = len(c.Models) - 1
+		s.models[call.Model] = i
 	}
 	m := &c.Models[i]
 	m.USD += call.USD
 	m.Tokens = m.Tokens.Add(call.Tokens)
 	m.Calls++
 	hour := call.Time.UTC().Truncate(time.Hour)
-	j := slices.IndexFunc(c.Hourly, func(h HourCost) bool { return h.Hour.Equal(hour) })
-	if j < 0 {
+	j, ok := s.hours[hour.Unix()]
+	if !ok {
 		c.Hourly = append(c.Hourly, HourCost{Hour: hour})
 		j = len(c.Hourly) - 1
+		s.hours[hour.Unix()] = j
 	}
 	c.Hourly[j].USD += call.USD
 }
@@ -109,11 +117,11 @@ func (c SessionCost) sorted() SessionCost {
 
 // CostOf sums calls.
 func CostOf(calls []ModelCall) SessionCost {
-	var c SessionCost
+	sum := costSum{models: make(map[string]int), hours: make(map[int64]int)}
 	for _, call := range calls {
-		c.add(call)
+		sum.add(call)
 	}
-	return c.sorted()
+	return sum.c.sorted()
 }
 
 // DirectoryCost is what each session of a directory spent, and all of them.
@@ -131,7 +139,7 @@ func (d DirectoryCost) Cost(id string) SessionCost { return CostOf(d.Sessions[id
 // its subagents', from their logs. A fork's log copies the calls of the
 // session it continues, which count once, in the earlier session.
 func (s *Store) Costs() (DirectoryCost, error) {
-	files, err := s.h.files(s.cwd)
+	files, err := s.src.files(s)
 	if err != nil {
 		return DirectoryCost{}, err
 	}
@@ -143,26 +151,31 @@ func (s *Store) Costs() (DirectoryCost, error) {
 		calls                  []ModelCall
 	}
 	var sessions []session
-	subagents := s.subagentIndex(files)
-	for _, file := range files {
-		summary, ok := s.summarize(file)
-		if !ok {
+	subagents := s.subagentIndex()
+	// read are the logs this pass read: what the Store keeps of any other
+	// is of a log that is gone.
+	read, readSubagents := make(map[string]bool), make(map[string]bool)
+	for _, path := range files {
+		read[path] = true
+		snap, err := s.readLog(path, true)
+		if err != nil || !snap.session || snap.summary.Prompts == 0 {
 			continue
 		}
-		calls := slices.Clone(s.cachedCalls(file.path, file.modTime, nil))
-		for _, sub := range subagents(summary.ID) {
-			for _, call := range s.cachedCalls(sub.path, sub.UpdatedAt, sub.lines) {
-				call.SubagentID = sub.ID
-				calls = append(calls, call)
+		calls := modelCalls(snap.calls, "")
+		for _, sub := range subagents(snap.summary.ID) {
+			readSubagents[sub.path] = true
+			if subSnap, err := s.readSubagentLog(sub.path, true); err == nil {
+				calls = append(calls, modelCalls(subSnap.calls, sub.ID)...)
 			}
 		}
 		for i := range calls {
 			calls[i] = priced(calls[i], s.prices)
 		}
 		calls = reconcile(calls)
-		born, _ := agentlog.BirthTime(file.path)
-		sessions = append(sessions, session{id: summary.ID, born: born, started: summary.CreatedAt, changed: file.modTime, calls: calls})
+		sessions = append(sessions, session{id: snap.summary.ID, born: snap.info.Birth, started: snap.summary.CreatedAt, changed: snap.info.ModTime, calls: calls})
 	}
+	s.logs.Retain(func(path string) bool { return read[path] })
+	s.subs.Retain(func(path string) bool { return readSubagents[path] })
 	// A call two logs have counts in the session whose log came first. A
 	// fork's log starts with the lines it copied, and their times, so the
 	// file's creation tells best; the file system may not record it, or
@@ -198,6 +211,19 @@ func (s *Store) Costs() (DirectoryCost, error) {
 	return d, nil
 }
 
+// modelCalls are the calls a log records, of the subagent subagentID if
+// set.
+func modelCalls(calls []agentlog.Call, subagentID string) []ModelCall {
+	out := make([]ModelCall, 0, len(calls))
+	for _, c := range calls {
+		out = append(out, ModelCall{
+			Time: c.Time, Model: c.Model, Tokens: c.Tokens, SubagentID: subagentID,
+			report: c.Report, key: c.Key, cost: c.Cost,
+		})
+	}
+	return out
+}
+
 // priced returns call with its cost at prices, or at what the agent said.
 func priced(call ModelCall, prices *pricing.Table) ModelCall {
 	if call.report != nil {
@@ -211,13 +237,6 @@ func priced(call ModelCall, prices *pricing.Table) ModelCall {
 		call.USD, call.Priced = p.Cost(call.Tokens), true
 	}
 	return call
-}
-
-// claudeModelReport is what a Claude Code cost-state line counts for one
-// model.
-type claudeModelReport struct {
-	USD    float64
-	Tokens pricing.Tokens
 }
 
 // unitemizedMin is the smallest difference to Claude Code's own count that
@@ -242,7 +261,7 @@ func reconcile(calls []ModelCall) []ModelCall {
 		return calls
 	}
 	slices.SortStableFunc(calls, func(a, b ModelCall) int { return a.Time.Compare(b.Time) })
-	counted := make(map[string]claudeModelReport)
+	counted := make(map[string]agentlog.ModelReport)
 	next := 0
 	var added []ModelCall
 	for _, r := range reports {
@@ -283,319 +302,28 @@ func reconcile(calls []ModelCall) []ModelCall {
 
 // subagentIndex returns, for a session ID, the subagents whose logs say
 // they are its. Codex keeps every thread in one tree, so its subagents are
-// found in one pass over files.
-func (s *Store) subagentIndex(files []historyFile) func(id string) []Subagent {
+// found in one pass over its logs.
+func (s *Store) subagentIndex() func(id string) []Subagent {
 	if s.agent != "codex" {
 		return func(id string) []Subagent {
 			subs, _ := s.Subagents(id)
 			return subs
 		}
 	}
+	threads, _ := s.codexThreads()
 	byParent := make(map[string][]Subagent)
-	for _, f := range files {
-		var meta *codexlog.SessionMeta
-		agentlog.ScanFile(f.path, func(line []byte) bool {
-			var m codexlog.SessionMeta
-			if json.Unmarshal(line, &m) == nil {
-				meta = &m
-			}
-			return false
-		})
-		if meta == nil || !meta.IsSubAgent() {
+	for _, t := range threads {
+		if !t.meta.IsSubAgent() {
 			continue
 		}
-		parent := meta.Payload.ParentThreadID
-		if parent == "" {
-			parent = meta.Payload.SessionID
+		// As Subagents finds them: those of the thread, and those of the
+		// subagents its session ran.
+		sub := Subagent{ID: t.meta.Payload.ID, path: t.path, kind: "codex", from: t.meta.Payload.HistoryStart}
+		for _, parent := range slices.Compact([]string{t.meta.Payload.ParentThreadID, t.meta.Payload.SessionID}) {
+			if parent != "" && parent != sub.ID {
+				byParent[parent] = append(byParent[parent], sub)
+			}
 		}
-		byParent[parent] = append(byParent[parent], Subagent{
-			ID: meta.Payload.ID, UpdatedAt: f.modTime, path: f.path, kind: "codex", from: meta.Payload.HistoryStart,
-		})
 	}
 	return func(id string) []Subagent { return byParent[id] }
-}
-
-// cachedCallList is the model calls of a log as it was when last read.
-type cachedCallList struct {
-	modTime time.Time
-	calls   []ModelCall
-}
-
-// cachedCalls returns the model calls of the log at path, from the cache
-// while it is unchanged. lines reads a subagent's own lines; nil reads the
-// whole log.
-func (s *Store) cachedCalls(path string, modTime time.Time, lines func(func([]byte) bool)) []ModelCall {
-	s.mu.Lock()
-	cached, ok := s.calls[path]
-	s.mu.Unlock()
-	if ok && cached.modTime.Equal(modTime) {
-		return cached.calls
-	}
-	if lines == nil {
-		lines = func(fn func([]byte) bool) { agentlog.ScanFile(path, fn) }
-	}
-	calls := readCalls(s.agent, lines)
-	s.mu.Lock()
-	s.calls[path] = cachedCallList{modTime: modTime, calls: calls}
-	s.mu.Unlock()
-	return calls
-}
-
-// readCalls reads the model calls of a log.
-func readCalls(agentType string, lines func(func([]byte) bool)) []ModelCall {
-	switch agentType {
-	case "claude":
-		return claudeCalls(lines)
-	case "codex":
-		return codexCalls(lines)
-	case "pi":
-		return piCalls(lines)
-	}
-	return nil
-}
-
-// claudeCalls reads Claude Code's assistant entries: a call can be logged
-// on several lines (one per content block), each with the call's usage.
-func claudeCalls(lines func(func([]byte) bool)) []ModelCall {
-	var calls []ModelCall
-	index := make(map[string]int)
-	// latest is the time of the latest line that has one: a cost-state line
-	// has none of its own.
-	var latest time.Time
-	lines(func(line []byte) bool {
-		if bytes.Contains(line, []byte(`"cost-state"`)) {
-			if r, ok := claudeReport(line); ok {
-				calls = append(calls, ModelCall{Time: latest, report: r, cost: -1})
-			}
-			return true
-		}
-		if at, ok := lineTime(line); ok {
-			latest = at
-		}
-		if !bytes.Contains(line, []byte(`"assistant"`)) || !bytes.Contains(line, []byte(`"usage"`)) {
-			return true
-		}
-		var entry struct {
-			Type      string `json:"type"`
-			Timestamp string `json:"timestamp"`
-			RequestID string `json:"requestId"`
-			Message   *struct {
-				ID    string `json:"id"`
-				Model string `json:"model"`
-				Usage *struct {
-					Input         int `json:"input_tokens"`
-					CacheRead     int `json:"cache_read_input_tokens"`
-					CacheCreation int `json:"cache_creation_input_tokens"`
-					Output        int `json:"output_tokens"`
-					Split         *struct {
-						FiveMinutes int `json:"ephemeral_5m_input_tokens"`
-						OneHour     int `json:"ephemeral_1h_input_tokens"`
-					} `json:"cache_creation"`
-				} `json:"usage"`
-			} `json:"message"`
-		}
-		if json.Unmarshal(line, &entry) != nil || entry.Type != "assistant" || entry.Message == nil || entry.Message.Usage == nil {
-			return true
-		}
-		m := entry.Message
-		if m.Model == "" || m.Model == "<synthetic>" {
-			return true
-		}
-		u := m.Usage
-		tokens := pricing.Tokens{Input: u.Input, CacheRead: u.CacheRead, CacheWrite: u.CacheCreation, Output: u.Output}
-		if u.Split != nil && u.Split.FiveMinutes+u.Split.OneHour == u.CacheCreation {
-			tokens.CacheWrite, tokens.CacheWrite1h = u.Split.FiveMinutes, u.Split.OneHour
-		}
-		key := m.ID
-		if key == "" {
-			key = entry.RequestID
-		}
-		if i, ok := index[key]; ok && key != "" {
-			// A later line of the same call: its usage is the final one.
-			if tokens.Output >= calls[i].Tokens.Output {
-				calls[i].Tokens = tokens
-			}
-			return true
-		}
-		at, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
-		if key != "" {
-			index[key] = len(calls)
-		}
-		calls = append(calls, ModelCall{Time: at, Model: m.Model, Tokens: tokens, key: "claude:" + key, cost: -1})
-		return true
-	})
-	return slices.DeleteFunc(calls, func(c ModelCall) bool { return c.report == nil && c.Tokens.IsZero() })
-}
-
-// lineTime is the timestamp of a log line, if it has one.
-func lineTime(line []byte) (time.Time, bool) {
-	i := bytes.Index(line, []byte(`"timestamp":"`))
-	if i < 0 {
-		return time.Time{}, false
-	}
-	rest := line[i+len(`"timestamp":"`):]
-	j := bytes.IndexByte(rest, '"')
-	if j < 0 {
-		return time.Time{}, false
-	}
-	at, err := time.Parse(time.RFC3339Nano, string(rest[:j]))
-	return at, err == nil
-}
-
-// claudeReport reads a cost-state line: what Claude Code counted for each
-// model of the session so far, its subagents' included.
-func claudeReport(line []byte) (map[string]claudeModelReport, bool) {
-	var entry struct {
-		Type       string `json:"type"`
-		ModelUsage map[string]struct {
-			Input         int     `json:"inputTokens"`
-			Output        int     `json:"outputTokens"`
-			CacheRead     int     `json:"cacheReadInputTokens"`
-			CacheCreation int     `json:"cacheCreationInputTokens"`
-			CostUSD       float64 `json:"costUSD"`
-		} `json:"modelUsage"`
-	}
-	if json.Unmarshal(line, &entry) != nil || entry.Type != "cost-state" || len(entry.ModelUsage) == 0 {
-		return nil, false
-	}
-	report := make(map[string]claudeModelReport, len(entry.ModelUsage))
-	for model, u := range entry.ModelUsage {
-		report[model] = claudeModelReport{USD: u.CostUSD, Tokens: pricing.Tokens{
-			Input: u.Input, Output: u.Output, CacheRead: u.CacheRead, CacheWrite: u.CacheCreation,
-		}}
-	}
-	return report, true
-}
-
-// codexCalls reads Codex's token counts: the change of the thread's running
-// total since the last count is a call's usage. The model is the turn's.
-func codexCalls(lines func(func([]byte) bool)) []ModelCall {
-	var (
-		calls []ModelCall
-		model string
-		last  *codexTotals
-	)
-	lines(func(line []byte) bool {
-		switch {
-		case bytes.Contains(line, []byte(`"turn_context"`)):
-			var entry struct {
-				Type    string `json:"type"`
-				Payload struct {
-					Model string `json:"model"`
-				} `json:"payload"`
-			}
-			if json.Unmarshal(line, &entry) == nil && entry.Type == "turn_context" && entry.Payload.Model != "" {
-				model = entry.Payload.Model
-			}
-		case bytes.Contains(line, []byte(`"token_count"`)):
-			var entry struct {
-				Timestamp string `json:"timestamp"`
-				Type      string `json:"type"`
-				Payload   struct {
-					Type string `json:"type"`
-					Info *struct {
-						Total codexTotals `json:"total_token_usage"`
-						Last  codexTotals `json:"last_token_usage"`
-					} `json:"info"`
-				} `json:"payload"`
-			}
-			if json.Unmarshal(line, &entry) != nil || entry.Payload.Type != "token_count" || entry.Payload.Info == nil {
-				return true
-			}
-			info := entry.Payload.Info
-			used := info.Last
-			if last != nil {
-				// The total can start from a thread this one continues;
-				// within the log, its change is what was used.
-				used = info.Total.minus(*last)
-			}
-			total := info.Total
-			last = &total
-			if used.InputTokens <= 0 && used.OutputTokens <= 0 {
-				return true
-			}
-			at, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
-			calls = append(calls, ModelCall{Time: at, Model: model, Tokens: used.usage(), cost: -1})
-		}
-		return true
-	})
-	return calls
-}
-
-// codexTotals is Codex's TokenUsage. Its input counts the cached input
-// too.
-type codexTotals struct {
-	InputTokens       int `json:"input_tokens"`
-	CachedInputTokens int `json:"cached_input_tokens"`
-	CacheWriteTokens  int `json:"cache_write_input_tokens"`
-	OutputTokens      int `json:"output_tokens"`
-}
-
-func (t codexTotals) minus(o codexTotals) codexTotals {
-	return codexTotals{
-		InputTokens:       t.InputTokens - o.InputTokens,
-		CachedInputTokens: t.CachedInputTokens - o.CachedInputTokens,
-		CacheWriteTokens:  t.CacheWriteTokens - o.CacheWriteTokens,
-		OutputTokens:      t.OutputTokens - o.OutputTokens,
-	}
-}
-
-func (t codexTotals) usage() pricing.Tokens {
-	return pricing.Tokens{
-		Input:      max(0, t.InputTokens-t.CachedInputTokens-t.CacheWriteTokens),
-		CacheRead:  max(0, t.CachedInputTokens),
-		CacheWrite: max(0, t.CacheWriteTokens),
-		Output:     max(0, t.OutputTokens),
-	}
-}
-
-// piCalls reads Pi's assistant messages, which carry their usage and what
-// they cost at Pi's prices.
-func piCalls(lines func(func([]byte) bool)) []ModelCall {
-	var calls []ModelCall
-	lines(func(line []byte) bool {
-		if !bytes.Contains(line, []byte(`"assistant"`)) || !bytes.Contains(line, []byte(`"usage"`)) {
-			return true
-		}
-		var entry struct {
-			Type      string `json:"type"`
-			ID        string `json:"id"`
-			Timestamp string `json:"timestamp"`
-			Message   *struct {
-				Role      string `json:"role"`
-				Model     string `json:"model"`
-				Timestamp int64  `json:"timestamp"`
-				Usage     *struct {
-					Input      int `json:"input"`
-					Output     int `json:"output"`
-					CacheRead  int `json:"cacheRead"`
-					CacheWrite int `json:"cacheWrite"`
-					Cost       *struct {
-						Total *float64 `json:"total"`
-					} `json:"cost"`
-				} `json:"usage"`
-			} `json:"message"`
-		}
-		if json.Unmarshal(line, &entry) != nil || entry.Type != "message" || entry.Message == nil || entry.Message.Role != "assistant" || entry.Message.Usage == nil {
-			return true
-		}
-		u := entry.Message.Usage
-		call := ModelCall{
-			Time:   pilog.Timestamp(entry.Timestamp, entry.Message.Timestamp),
-			Model:  entry.Message.Model,
-			Tokens: pricing.Tokens{Input: u.Input, CacheRead: u.CacheRead, CacheWrite: u.CacheWrite, Output: u.Output},
-			cost:   -1,
-		}
-		if entry.ID != "" {
-			call.key = "pi:" + entry.ID
-		}
-		if u.Cost != nil && u.Cost.Total != nil {
-			call.cost = *u.Cost.Total
-		}
-		if !call.Tokens.IsZero() {
-			calls = append(calls, call)
-		}
-		return true
-	})
-	return calls
 }

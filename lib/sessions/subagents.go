@@ -78,9 +78,9 @@ func (s *Store) Subagents(sessionID string) ([]Subagent, error) {
 	)
 	switch s.agent {
 	case "claude":
-		subs, err = claudeSubagents(s.cwd, sessionID)
+		subs, err = s.claudeSubagents(sessionID)
 	case "codex":
-		subs, err = codexSubagents(s.cwd, sessionID)
+		subs, err = s.codexSubagents(sessionID)
 	}
 	slices.SortStableFunc(subs, func(a, b Subagent) int { return a.StartedAt.Compare(b.StartedAt) })
 	return subs, err
@@ -199,28 +199,10 @@ func (s Subagent) label() string {
 	return strings.TrimSpace(fmt.Sprintf("%s (%s)", s.Description, s.AgentType))
 }
 
-// firstTime returns the time of the first line of a log that has one.
-func firstTime(path string) time.Time {
-	var at time.Time
-	agentlog.ScanFile(path, func(line []byte) bool {
-		var entry struct {
-			Timestamp string `json:"timestamp"`
-		}
-		if json.Unmarshal(line, &entry) == nil {
-			if t, err := time.Parse(time.RFC3339Nano, entry.Timestamp); err == nil {
-				at = t
-				return false
-			}
-		}
-		return true
-	})
-	return at
-}
-
 // claudeSubagents reads <projects>/<cwd>/<session>/subagents: an
 // agent-<id>.jsonl log per subagent, with agent-<id>.meta.json saying what
 // it is and which tool call started it.
-func claudeSubagents(cwd, sessionID string) ([]Subagent, error) {
+func (s *Store) claudeSubagents(sessionID string) ([]Subagent, error) {
 	configDir, err := agenthome.ClaudeConfigDir()
 	if err != nil {
 		return nil, err
@@ -228,19 +210,23 @@ func claudeSubagents(cwd, sessionID string) ([]Subagent, error) {
 	if strings.ContainsAny(sessionID, `/\`) || sessionID == ".." {
 		return nil, fmt.Errorf("invalid session id %q", sessionID)
 	}
-	files, err := historyFilesIn(filepath.Join(configDir, "projects", claudelog.EncodeCWD(cwd), sessionID, "subagents"))
+	files, err := logsIn(filepath.Join(configDir, "projects", claudelog.EncodeCWD(s.cwd), sessionID, "subagents"))
 	if err != nil {
 		return nil, err
 	}
 	var subs []Subagent
-	for _, f := range files {
-		name := strings.TrimSuffix(filepath.Base(f.path), ".jsonl")
+	for _, path := range files {
+		snap, err := s.readSubagentLog(path, false)
+		if err != nil {
+			continue
+		}
+		name := strings.TrimSuffix(filepath.Base(path), ".jsonl")
 		var meta struct {
 			Description string `json:"description"`
 			AgentType   string `json:"agentType"`
 			ToolUseID   string `json:"toolUseId"`
 		}
-		if data, err := os.ReadFile(strings.TrimSuffix(f.path, ".jsonl") + ".meta.json"); err == nil {
+		if data, err := os.ReadFile(strings.TrimSuffix(path, ".jsonl") + ".meta.json"); err == nil {
 			_ = json.Unmarshal(data, &meta)
 		}
 		subs = append(subs, Subagent{
@@ -248,9 +234,9 @@ func claudeSubagents(cwd, sessionID string) ([]Subagent, error) {
 			Description:     meta.Description,
 			AgentType:       meta.AgentType,
 			ParentToolUseID: meta.ToolUseID,
-			StartedAt:       firstTime(f.path),
-			UpdatedAt:       f.modTime,
-			path:            f.path,
+			StartedAt:       snap.firstAt,
+			UpdatedAt:       snap.info.ModTime,
+			path:            path,
 			kind:            "claude",
 		})
 	}
@@ -259,25 +245,22 @@ func claudeSubagents(cwd, sessionID string) ([]Subagent, error) {
 
 // codexSubagents finds the threads whose parent is the session's thread
 // among Codex's session logs.
-func codexSubagents(cwd, threadID string) ([]Subagent, error) {
-	files, err := codexHistoryFiles(cwd)
+func (s *Store) codexSubagents(threadID string) ([]Subagent, error) {
+	threads, err := s.codexThreads()
 	if err != nil {
 		return nil, err
 	}
 	var subs []Subagent
-	for _, f := range files {
-		var meta *codexlog.SessionMeta
-		agentlog.ScanFile(f.path, func(line []byte) bool {
-			var m codexlog.SessionMeta
-			if json.Unmarshal(line, &m) == nil {
-				meta = &m
-			}
-			return false
-		})
-		if meta == nil || !meta.IsSubAgent() || meta.Payload.ID == threadID {
+	for _, t := range threads {
+		meta := t.meta
+		if !meta.IsSubAgent() || meta.Payload.ID == threadID {
 			continue
 		}
 		if meta.Payload.ParentThreadID != threadID && meta.Payload.SessionID != threadID {
+			continue
+		}
+		snap, err := s.readSubagentLog(t.path, false)
+		if err != nil {
 			continue
 		}
 		started, _ := time.Parse(time.RFC3339Nano, meta.Timestamp)
@@ -286,45 +269,16 @@ func codexSubagents(cwd, threadID string) ([]Subagent, error) {
 			Description: strings.ReplaceAll(filepath.Base(meta.Payload.AgentPath), "_", " "),
 			AgentType:   meta.Payload.AgentNickname,
 			StartedAt:   started,
-			UpdatedAt:   f.modTime,
-			path:        f.path,
+			UpdatedAt:   snap.info.ModTime,
+			LogStatus:   snap.status,
+			path:        t.path,
 			kind:        "codex",
 			from:        meta.Payload.HistoryStart,
 		}
 		if meta.Payload.AgentPath == "" {
 			sub.Description = ""
 		}
-		sub.LogStatus = sub.codexStatus()
 		subs = append(subs, sub)
 	}
 	return subs, nil
-}
-
-// codexStatus says how far a Codex subagent got by the last turn event of
-// its own lines: a turn that started and hasn't ended still runs.
-func (s Subagent) codexStatus() string {
-	status := ""
-	s.lines(func(line []byte) bool {
-		if !strings.Contains(string(line), `"event_msg"`) {
-			return true
-		}
-		var entry struct {
-			Payload struct {
-				Type string `json:"type"`
-			} `json:"payload"`
-		}
-		if json.Unmarshal(line, &entry) != nil {
-			return true
-		}
-		switch entry.Payload.Type {
-		case "task_started":
-			status = "running"
-		case "task_complete":
-			status = "completed"
-		case "turn_aborted":
-			status = "failed"
-		}
-		return true
-	})
-	return status
 }
