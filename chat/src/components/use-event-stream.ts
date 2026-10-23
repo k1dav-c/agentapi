@@ -9,6 +9,7 @@ import type {createChatAPI} from "@/lib/chat-api";
 import {parseTransport, type Transport} from "@/lib/dispatch";
 import {isLoginNotice} from "@/lib/login";
 import {mergeRequests, type NativeRequest} from "@/lib/native-requests";
+import {mergeTasks, type ServerTask} from "@/lib/server-tasks";
 import type {SyncTracker} from "@/lib/session-sync";
 import {applyStatusChange, update, type AgentStatus} from "@/lib/agent-status";
 import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
@@ -17,12 +18,14 @@ import {
   messageFromEvent,
   requestFromEvent,
   richMessageFromEvent,
+  taskFromEvent,
   type AgentErrorEvent,
   type MessageUpdateEvent,
   type RequestUpdateEvent,
   type RichMessageUpdateEvent,
   type SessionSyncEvent,
   type StatusChangeEvent,
+  type TaskUpdateEvent,
 } from "@/lib/events";
 import type {ConnectionStatus} from "./chat-provider";
 import {agentErrorKey, dismissedErrors, rememberDismissed} from "@/lib/agent-errors";
@@ -62,6 +65,7 @@ export function useEventStream({
   setMessages,
   setRichMessages,
   setRequests,
+  setTasks,
   setTransport,
   updateAgentStatus,
   agentStatusRef,
@@ -74,6 +78,7 @@ export function useEventStream({
   setMessages: Dispatch<SetStateAction<(Message | DraftMessage)[]>>;
   setRichMessages: Dispatch<SetStateAction<RichMessage[]>>;
   setRequests: Dispatch<SetStateAction<NativeRequest[]>>;
+  setTasks: Dispatch<SetStateAction<ServerTask[]>>;
   setTransport: Dispatch<SetStateAction<Transport>>;
   updateAgentStatus: (change: (status: AgentStatus) => AgentStatus) => void;
   agentStatusRef: RefObject<AgentStatus>;
@@ -124,6 +129,7 @@ export function useEventStream({
     const messageUpdates = batch.messages;
     const richUpdates = batch.richMessages;
     const requestUpdates = batch.requests;
+    const taskUpdates = batch.tasks;
 
     // The transcript renders in a transition: a long one takes a while,
     // and typing or a click shouldn't wait for it. Requests apply at once
@@ -151,6 +157,9 @@ export function useEventStream({
           mergeByKey(replace ? [] : previous, richUpdates.map(withoutSeq), richMessageKey),
         );
       }
+      // Tasks keep their seq, as requests do, so an update never replaces
+      // a later one.
+      if (replace || taskUpdates.length > 0) setTasks((previous) => mergeTasks(replace ? [] : previous, taskUpdates));
     });
     if (replace || requestUpdates.length > 0) {
       // Requests keep their seq: it decides between an event and a state
@@ -161,7 +170,7 @@ export function useEventStream({
       replayedRef.current = false;
       onReplayed();
     }
-  }, [onReplayed, setMessages, setRequests, setRichMessages]);
+  }, [onReplayed, setMessages, setRequests, setRichMessages, setTasks]);
 
   // Schedules applying the events received so far. An event that completes
   // the replay (see SyncTracker) applies the replay now, in one render.
@@ -341,6 +350,14 @@ export function useEventStream({
         scheduleFlush(event, true);
       });
 
+      // A task the server derives started or changed (sync clients). Tasks
+      // are part of the replay, like requests, and come last in it.
+      eventSource.addEventListener("task_update", (event) => {
+        lastEventAtRef.current = Date.now();
+        pendingRef.current!.addTask(taskFromEvent(JSON.parse(event.data) as TaskUpdateEvent));
+        scheduleFlush(event);
+      });
+
       // Handle status changes
       eventSource.addEventListener("status_change", (event) => {
         lastEventAtRef.current = Date.now();
@@ -473,6 +490,7 @@ export function useEventStream({
           setMessages((previous) => [...cached.messages, ...previous.filter(isDraftMessage)]);
           setRichMessages(cached.richMessages);
           setRequests(cached.requests);
+          setTasks(cached.tasks);
           const cachedTransport = parseTransport(cached.transport);
           if (cachedTransport) setTransport(cachedTransport);
         }
@@ -497,7 +515,7 @@ export function useEventStream({
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
-  }, [agentAPIUrl, agentStatusRef, api, markSynced, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush, setMessages, setRequests, setRichMessages, setTransport, syncRef, updateAgentStatus]);
+  }, [agentAPIUrl, agentStatusRef, api, markSynced, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush, setMessages, setRequests, setRichMessages, setTasks, setTransport, syncRef, updateAgentStatus]);
 
   return {connectionStatus, reconnectAttempt, nextReconnectAt, reconnectByUser, synced, markSynced};
 }

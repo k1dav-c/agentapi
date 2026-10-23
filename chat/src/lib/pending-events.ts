@@ -4,6 +4,7 @@
 
 import {richMessageKey, type Message, type RichMessage} from "./conversation";
 import type {NativeRequest} from "./native-requests";
+import type {ServerTask} from "./server-tasks";
 import type {SyncTracker} from "./session-sync";
 
 // Where a state of the conversation is: its epoch, and the highest change
@@ -19,6 +20,7 @@ export interface EventBatch {
   messages: (Message & {seq?: number})[];
   richMessages: (RichMessage & {seq?: number})[];
   requests: NativeRequest[];
+  tasks: ServerTask[];
   // The point of the state once the batch is applied.
   point: SyncPoint;
 }
@@ -27,6 +29,7 @@ export class PendingEvents {
   private messages = new Map<number, Message & {seq?: number}>();
   private richMessages = new Map<string, RichMessage & {seq?: number}>();
   private requests = new Map<string, NativeRequest>();
+  private tasks = new Map<number, ServerTask>();
   private replace = false;
 
   constructor(private readonly sync: SyncTracker) {}
@@ -43,12 +46,17 @@ export class PendingEvents {
     this.requests.set(request.id, request);
   }
 
+  addTask(task: ServerTask) {
+    this.tasks.set(task.id, task);
+  }
+
   // What follows is the full state: it replaces whatever is pending, and
   // the state.
   replaceAll() {
     this.messages.clear();
     this.richMessages.clear();
     this.requests.clear();
+    this.tasks.clear();
     this.replace = true;
   }
 
@@ -65,12 +73,14 @@ export class PendingEvents {
       messages: [...this.messages.values()],
       richMessages: [...this.richMessages.values()],
       requests: [...this.requests.values()],
+      tasks: [...this.tasks.values()],
     };
     this.messages.clear();
     this.richMessages.clear();
     this.requests.clear();
+    this.tasks.clear();
     this.replace = false;
-    for (const update of [...batch.messages, ...batch.richMessages, ...batch.requests]) this.sync.applied(update.seq ?? 0);
+    for (const update of [...batch.messages, ...batch.richMessages, ...batch.requests, ...batch.tasks]) this.sync.applied(update.seq ?? 0);
     return {...batch, point: {epoch: this.sync.epoch, seq: this.sync.watermark}};
   }
 }

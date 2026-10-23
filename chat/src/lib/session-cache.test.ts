@@ -12,6 +12,7 @@ import {
   type CachedSession,
 } from "./session-cache";
 import type {Message, RichMessage} from "./conversation";
+import type {ServerTask} from "./server-tasks";
 
 describe("mergeByKey", () => {
   const key = (item: {id?: number}) => (item.id === undefined ? undefined : String(item.id));
@@ -92,13 +93,13 @@ function memoryStorage() {
         for (let i = 0; records.has(key(scope, kind, i)); i++) found.push(clone(records.get(key(scope, kind, i))));
         return found;
       };
-      return {meta: clone(meta), records: {messages: list("messages"), richMessages: list("richMessages"), requests: list("requests")}};
+      return {meta: clone(meta), records: {messages: list("messages"), richMessages: list("richMessages"), requests: list("requests"), tasks: list("tasks")}};
     },
     async update(scope, change) {
       const write = change(metas.has(scope) ? clone(metas.get(scope)!) : undefined);
       if (!write) return;
       for (const [k] of records) {
-        const [s, kind, index] = JSON.parse(k) as [string, "messages" | "richMessages" | "requests", number];
+        const [s, kind, index] = JSON.parse(k) as [string, keyof CacheMeta["counts"], number];
         if (s === scope && index >= write.meta.counts[kind]) records.delete(k);
       }
       for (const {kind, index, value} of write.put) records.set(key(scope, kind, index), clone(value));
@@ -120,7 +121,8 @@ function memoryStorage() {
 
 const message = (id: number, content: string): Message => ({id, role: id % 2 ? "agent" : "user", content, time: "2026-10-22T10:00:00Z"});
 const rich = (id: string, text: string): RichMessage => ({message_id: id, role: "assistant", timestamp: "2026-10-22T10:00:01Z", content: [{type: "text", text}]});
-const session = (messages: Message[], richMessages: RichMessage[], seq: number): CachedSession => ({epoch: "e1", seq, messages, richMessages, requests: [], transport: "native"});
+const session = (messages: Message[], richMessages: RichMessage[], seq: number, tasks: ServerTask[] = []): CachedSession => ({epoch: "e1", seq, messages, richMessages, requests: [], tasks, transport: "native"});
+const serverTask = (id: number, status: ServerTask["status"], seq: number): ServerTask => ({id, status, prompt: `task ${id}`, started_at: "2026-10-22T10:00:00Z", errors: [], steered: [], seq});
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("SessionCache", () => {
@@ -187,6 +189,29 @@ describe("SessionCache", () => {
     const written = memory.written();
     await cache.save("s", session([...loaded.messages, message(2, "new")], loaded.richMessages, 3));
     expect(memory.written()).toBe(written + 1);
+  });
+
+  test("keeps the server's tasks with the conversation", async () => {
+    const memory = memoryStorage();
+    const cache = new SessionCache(memory.storage);
+    const messages = [message(0, "task")];
+    await cache.save("s", session(messages, [], 3, [serverTask(0, "running", 2)]));
+    const written = memory.written();
+    // The task ended: only its record is written again.
+    const tasks = [serverTask(0, "completed", 3)];
+    await cache.save("s", session(messages, [], 3, tasks));
+    expect(memory.written()).toBe(written + 1);
+    expect((await new SessionCache(memory.storage).load("s"))?.tasks).toEqual(tasks);
+  });
+
+  test("a cache from before the tasks were kept isn't loaded", async () => {
+    // Its watermark covers task updates it doesn't hold, which a resumed
+    // connection wouldn't send again.
+    const memory = memoryStorage();
+    await new SessionCache(memory.storage).save("s", session([message(0, "task")], [], 3));
+    const meta = memory.metas.get("s")!;
+    memory.metas.set("s", {...meta, counts: {messages: 1, richMessages: 0, requests: 0} as CacheMeta["counts"]});
+    expect(await new SessionCache(memory.storage).load("s")).toBeNull();
   });
 
   test("a load normalizes what an earlier version kept", async () => {

@@ -14,6 +14,8 @@
 
 import {normalizeRichMessage, type Message, type RichMessage, type RichMessagePayload} from "./conversation";
 import {normalizeRequest, type NativeRequest, type RequestPayload} from "./native-requests";
+import {normalizeTask, type ServerTask} from "./server-tasks";
+import type {components} from "./api-schema";
 
 export interface CachedSession {
   // Server conversation state the cache belongs to (session_sync.epoch).
@@ -24,6 +26,8 @@ export interface CachedSession {
   richMessages: RichMessage[];
   // Requests the agent made (native transport).
   requests: NativeRequest[];
+  // The tasks as the server derives them; none from servers that don't.
+  tasks: ServerTask[];
   // How the server drives the agent ("pty", "acp", "native"), so the cached
   // transcript renders for the right transport before the server says.
   transport?: string;
@@ -34,7 +38,7 @@ export const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 // How many servers' conversations are kept, the most recently used.
 export const MAX_CACHED_SERVERS = 10;
 
-const KINDS = ["messages", "richMessages", "requests"] as const;
+const KINDS = ["messages", "richMessages", "requests", "tasks"] as const;
 type Kind = (typeof KINDS)[number];
 type Lists = Record<Kind, readonly unknown[]>;
 
@@ -95,10 +99,12 @@ export class SessionCache {
     const session = stored && parseCachedSession({...stored.meta, ...stored.records});
     if (!stored || !session) return null;
     const {meta, records} = stored;
-    if (KINDS.some((kind) => records[kind].length !== meta.counts[kind])) return null;
+    // A cache written before the chat kept a kind (the tasks) can't say
+    // what of it the watermark covers: the next connection gets it all.
+    if (KINDS.some((kind) => typeof meta.counts[kind] !== "number" || records[kind].length !== meta.counts[kind])) return null;
     // What the page holds is what the records hold, unless some had to go.
     if (KINDS.every((kind) => session[kind].length === records[kind].length)) {
-      this.saved.set(scope, {lists: {messages: session.messages, richMessages: session.richMessages, requests: session.requests}, meta});
+      this.saved.set(scope, {lists: listsOf(session), meta});
     }
     const usedAt = this.now();
     void this.storage
@@ -112,7 +118,7 @@ export class SessionCache {
   // object this page last saved or loaded there, and nothing when nothing
   // changed. A page that didn't write the records last writes them all.
   async save(scope: string, session: CachedSession): Promise<void> {
-    const lists: Lists = {messages: session.messages, richMessages: session.richMessages, requests: session.requests};
+    const lists = listsOf(session);
     const saved = this.saved.get(scope);
     if (
       saved &&
@@ -128,7 +134,7 @@ export class SessionCache {
       seq: session.seq,
       transport: session.transport,
       usedAt: this.now(),
-      counts: {messages: lists.messages.length, richMessages: lists.richMessages.length, requests: lists.requests.length},
+      counts: {messages: lists.messages.length, richMessages: lists.richMessages.length, requests: lists.requests.length, tasks: lists.tasks.length},
       writer: `${this.page}:${++this.writes}`,
     };
     await this.storage.update(scope, (current) => {
@@ -181,8 +187,13 @@ export function parseCachedSession(value: unknown): CachedSession | null {
     messages: items<Message>(session.messages),
     richMessages: items<RichMessagePayload>(session.richMessages).map(normalizeRichMessage),
     requests: items<RequestPayload>(session.requests).map(normalizeRequest),
+    tasks: items<components["schemas"]["Task"]>(session.tasks).map(normalizeTask),
     transport: typeof session.transport === "string" ? session.transport : undefined,
   };
+}
+
+function listsOf(session: CachedSession): Lists {
+  return {messages: session.messages, richMessages: session.richMessages, requests: session.requests, tasks: session.tasks};
 }
 
 // The objects in list, or none when it isn't one.

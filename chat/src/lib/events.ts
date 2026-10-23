@@ -8,6 +8,7 @@ import type {components} from "./api-schema";
 import {normalizeRichMessage, type Message, type RichMessage} from "./conversation";
 import type {Capabilities} from "./dispatch";
 import {normalizeRequest, type NativeRequest} from "./native-requests";
+import {normalizeTask, type ServerTask} from "./server-tasks";
 
 type Schemas = components["schemas"];
 
@@ -16,6 +17,10 @@ export type MessageUpdateEvent = Schemas["MessageUpdateBody"];
 export type RichMessageUpdateEvent = Schemas["RichMessageUpdateBody"];
 export type RequestUpdateEvent = Schemas["RequestUpdateBody"];
 export type AgentErrorEvent = Schemas["ErrorBody"];
+// The conversation's tasks and the message queue, sent to sync clients
+// (?sync=1) only.
+export type TaskUpdateEvent = Schemas["TaskUpdateBody"];
+export type QueueUpdateEvent = Schemas["QueueUpdateBody"];
 // The screen of TTY mode (GET /internal/screen), and the shell terminal's
 // output and end (GET /terminal).
 export type ScreenEvent = Schemas["ScreenUpdateBody"];
@@ -43,4 +48,9 @@ export function richMessageFromEvent(event: RichMessageUpdateEvent): RichMessage
 // A request_update as a request, with the change's seq.
 export function requestFromEvent(event: RequestUpdateEvent): NativeRequest {
   return normalizeRequest(event);
+}
+
+// A task_update as a task, with the change's seq.
+export function taskFromEvent(event: TaskUpdateEvent): ServerTask & {seq: number} {
+  return normalizeTask(event);
 }

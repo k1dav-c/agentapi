@@ -41,6 +41,21 @@ describe("PendingEvents", () => {
     expect(batch.point).toEqual({epoch: "e1", seq: 140});
   });
 
+  test("task updates come in the batch by task, the latest of each, and count in its point", () => {
+    const sync = new SyncTracker();
+    const pending = new PendingEvents(sync);
+    sync.begin({epoch: "e1", seq: 0}, "");
+    const started = {id: 4, status: "running" as const, prompt: "fix it", started_at: "2026-10-22T10:00:00Z", errors: [], steered: []};
+    pending.addTask({...started, seq: 7});
+    pending.addTask({...started, status: "completed", seq: 9});
+    const batch = pending.take();
+    expect(batch.tasks.map((t) => [t.id, t.status])).toEqual([[4, "completed"]]);
+    expect(batch.point).toEqual({epoch: "e1", seq: 9});
+    pending.addTask({...started, seq: 10});
+    pending.replaceAll();
+    expect(pending.take().tasks).toEqual([]);
+  });
+
   test("a full replay replaces what is pending, and has the new epoch", () => {
     const sync = new SyncTracker();
     const pending = new PendingEvents(sync);

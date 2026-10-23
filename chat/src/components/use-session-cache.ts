@@ -5,6 +5,7 @@ import {saveSession} from "@/lib/session-cache";
 import type {SyncPoint} from "@/lib/pending-events";
 import type {Transport} from "@/lib/dispatch";
 import type {NativeRequest} from "@/lib/native-requests";
+import type {ServerTask} from "@/lib/server-tasks";
 import {isDraftMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
 
 // Minimum time between writes of the conversation cache.
@@ -20,6 +21,7 @@ export function useSessionCache({
   messages,
   richMessages,
   requests,
+  tasks,
   transport,
 }: {
   agentAPIUrl: string;
@@ -28,14 +30,15 @@ export function useSessionCache({
   messages: (Message | DraftMessage)[];
   richMessages: RichMessage[];
   requests: NativeRequest[];
+  tasks: ServerTask[];
   transport: Transport;
 }) {
   const saveRequestRef = useRef<() => void>(() => {});
   // The state last rendered, and its point: what is saved is a state and
   // the changes it holds, so that a reload resumes from there.
-  const latestRef = useRef({synced, messages, richMessages, requests, transport});
+  const latestRef = useRef({synced, messages, richMessages, requests, tasks, transport});
   useLayoutEffect(() => {
-    latestRef.current = {synced, messages, richMessages, requests, transport};
+    latestRef.current = {synced, messages, richMessages, requests, tasks, transport};
   });
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -53,6 +56,7 @@ export function useSessionCache({
         messages: latestRef.current.messages.filter((message): message is Message => !isDraftMessage(message)),
         richMessages: latestRef.current.richMessages,
         requests: latestRef.current.requests,
+        tasks: latestRef.current.tasks,
         transport: latestRef.current.transport,
       });
     };
@@ -74,5 +78,5 @@ export function useSessionCache({
   }, [agentAPIUrl]);
   useEffect(() => {
     saveRequestRef.current();
-  }, [synced, messages, richMessages, requests]);
+  }, [synced, messages, richMessages, requests, tasks]);
 }

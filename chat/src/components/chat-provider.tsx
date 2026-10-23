@@ -50,6 +50,7 @@ import {SyncTracker} from "@/lib/session-sync";
 import {resolveAgentAPIUrl} from "@/lib/agentapi-url";
 import {isDraftMessage, lastUserMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
 import type {Timeline, ToolCall} from "@/lib/task-timeline";
+import type {ServerTask} from "@/lib/server-tasks";
 import {useEventStream} from "./use-event-stream";
 import {useQueue} from "./use-queue";
 import {useSessionCache} from "./use-session-cache";
@@ -232,6 +233,9 @@ export interface ChatState {
   // Requests the agent made (native transport): pending ones and the most
   // recently closed, oldest first.
   requests: NativeRequest[];
+  // The tasks as the server derives them, the earliest first; none from
+  // servers that don't.
+  serverTasks: ServerTask[];
   // Whether stop can stop what the agent is doing now.
   canStop: boolean;
   reconnectAttempt: number;
@@ -313,6 +317,8 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     lifecycle,
   } = agentStatus;
   const [requests, setRequests] = useState<NativeRequest[]>([]);
+  // The tasks as the server derives them (lib/server-tasks).
+  const [serverTasks, setServerTasks] = useState<ServerTask[]>([]);
   const [api] = useState(() => createChatAPI(agentAPIUrl));
   // Server conversation state the client holds: its epoch and the highest
   // change sequence applied. Sent as /events?since=&epoch= so a reconnect
@@ -341,13 +347,14 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     setMessages,
     setRichMessages,
     setRequests,
+    setTasks: setServerTasks,
     setTransport,
     updateAgentStatus,
     agentStatusRef,
     refreshQueue,
     onReplayed,
   });
-  useSessionCache({agentAPIUrl, synced, messages, richMessages, requests, transport});
+  useSessionCache({agentAPIUrl, synced, messages, richMessages, requests, tasks: serverTasks, transport});
   const pendingRequestCount = useMemo(() => pendingRequests(requests).length, [requests]);
   const agentStarting = lifecycle === "starting";
   const agentState = getAgentState({
@@ -596,6 +603,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
       setMessages([]);
       setRichMessages([]);
       setRequests([]);
+      setServerTasks([]);
     }),
     resumeSession: useStableCallback(async (id: string, fork: boolean) => {
       const epoch = syncRef.current.epoch;
@@ -609,6 +617,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
       setMessages([]);
       setRichMessages([]);
       setRequests([]);
+      setServerTasks([]);
     }),
   };
   const [actions] = useState<ChatActions>(() => ({
@@ -637,6 +646,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     currentTask,
     dispatch,
     requests,
+    serverTasks,
     canStop: stoppable,
     serverStatus,
     connectionStatus,
