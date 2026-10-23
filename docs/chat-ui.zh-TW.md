@@ -207,7 +207,7 @@ context 滿了時，agent 會壓縮它；`/compact` 則會立刻壓縮。
 
 ### 達到用量限制
 
-![因 5 小時限制而停下的回合：卡片顯示重置時間，以及 Continue at reset、Continue now 和 Send queued tasks，佇列中有一個被暫停的任務](screenshots/limit-card.png)
+![因 5 小時限制而停下、標示為 Limit reached 的任務：卡片顯示重置時間，以及 Continue at reset、Continue now 和 Send queued tasks，佇列中有一個被暫停的任務](screenshots/limit-card.png)
 
 *native* 帳號達到用量限制時，agent 會停下它的回合，輸入框上方的卡片會說明限制何時重置。排隊
 中的任務會等到那時，並標示 *held until the usage limit resets*，而不是一個接一個失敗。
@@ -316,7 +316,7 @@ Explorer（⌘K / Ctrl+K，或資料夾按鈕）有六個分頁。Index、Files 
 
 ### Index 分頁
 
-![Explorer 的 Index 分頁列出兩個任務](screenshots/explorer-index.png)
+![Explorer 的 Index 分頁列出兩個任務，都標示為 Done](screenshots/explorer-index.png)
 
 工作階段中的任務，最新的在最上面，各自顯示狀態；點一下就會跳到該任務。
 
@@ -414,7 +414,7 @@ Ctrl+C，shell 的 Ctrl+R、Ctrl+A、Ctrl+E、Ctrl+U 和 Ctrl+W，Home、End、P
 
 ## 工作階段詳細資訊與提醒
 
-![工作階段詳細資訊選單：狀態、agent、工作階段、版本、活動、佇列和 token](screenshots/session-details.png)
+![工作階段詳細資訊選單：狀態、agent、工作階段、附複製按鈕的工作階段 ID、版本、活動、佇列和 token](screenshots/session-details.png)
 
 點選標頭中的狀態會開啟工作階段詳細資訊：狀態、agent、工作階段名稱、*native* agent 的工作階段
 ID（前幾個字元，附複製按鈕）、AgentAPI 版本、agent 正在做什麼、佇列，以及輸入和輸出的 token 數。它的選單可以把對話下載成 JSONL（和 Explorer 的

@@ -635,7 +635,7 @@ Claude Code 也會回報它的 `prompt_cache`：模型供應商在最後一次�
 停止狀態是輸入框上方的一張卡片，顯示重置時間，以及 **Continue at reset**、**Continue now** 和
 **Send queued tasks**，佇列也會標示它在等用量限制。
 
-![因 5 小時限制而停下的回合：卡片顯示重置時間，佇列中有一個被暫停的任務](docs/screenshots/limit-card.png)
+![因 5 小時限制而停下、標示為 Limit reached 的任務：卡片顯示重置時間，佇列中有一個被暫停的任務](docs/screenshots/limit-card.png)
 
 ### 終端機
 

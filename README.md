@@ -752,7 +752,7 @@ The stop is kept with `--state-db`, so a scheduled continuation still goes out a
 restarts. In the chat, the stop is a card above the composer with the reset time, **Continue at
 reset**, **Continue now**, and **Send queued tasks**, and the queue says it waits for the limit.
 
-![A turn stopped on the 5-hour limit: the card with the reset time, and a task held in the queue](docs/screenshots/limit-card.png)
+![A task stopped on the 5-hour limit, marked Limit reached: the card with the reset time, and a task held in the queue](docs/screenshots/limit-card.png)
 
 ### Terminal
 

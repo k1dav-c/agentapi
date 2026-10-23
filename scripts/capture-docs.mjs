@@ -266,9 +266,9 @@ const client = base => {
     return state.status === 'stable' && state.lifecycle === 'ready' && !state.pending_requests;
   }, 'the agent to finish');
   const send = async content => {
-    const before = (await status()).run_id;
+    const before = (await status()).turn;
     await request('/message', 'POST', {content, type: 'user'});
-    await poll(async () => (await status()).run_id > before, 'a new turn');
+    await poll(async () => (await status()).turn > before, 'a new turn');
   };
   const pending = kind => poll(async () => (await request('/requests')).requests.some(r => r.kind === kind && r.status === 'pending'), `a ${kind} request`);
   return {base, request, status, idle, send, pending};

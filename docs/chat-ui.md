@@ -223,7 +223,7 @@ above the composer says so, with **Compact**. Closed, it stays away until the ne
 
 ### A usage limit
 
-![A turn stopped on the 5-hour limit: a card with the reset time and Continue at reset, Continue now and Send queued tasks, and a task held in the queue](screenshots/limit-card.png)
+![A task stopped on the 5-hour limit, marked Limit reached: a card with the reset time and Continue at reset, Continue now and Send queued tasks, and a task held in the queue](screenshots/limit-card.png)
 
 *native* When the account reaches a usage limit, the agent stops its turn, and a card above the
 composer says when the limit resets. The queued tasks wait until then, marked *held until the usage
@@ -340,7 +340,7 @@ have a filter box.
 
 ### Index
 
-![The Explorer's Index tab listing two tasks](screenshots/explorer-index.png)
+![The Explorer's Index tab listing two tasks, each marked Done](screenshots/explorer-index.png)
 
 The tasks of the session, newest first, each with its state; click one to jump to it.
 
@@ -442,7 +442,7 @@ one shows above the screen, as in the shell terminal. **Back to chat** returns.
 
 ## Session details and alerts
 
-![The session details menu: status, agent, session, version, activity, queue and tokens](screenshots/session-details.png)
+![The session details menu: status, agent, session, session ID with a copy button, version, activity, queue and tokens](screenshots/session-details.png)
 
 Clicking the status in the header opens the session details: the status, agent, session name,
 *native* the agent's session ID (its first characters, with a copy button), AgentAPI version, what
