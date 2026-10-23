@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
@@ -33,6 +35,51 @@ func TestEventEmitterSessionEvents(t *testing.T) {
 
 	events[0].Kind = "changed"
 	require.Equal(t, "text", emitter.SessionEvents()[0].Kind)
+}
+
+// The timeline's content shares memory with the rich messages' equal texts,
+// which an agent reports apart, without changing its value.
+func TestEventEmitterSessionEventsShareRichContent(t *testing.T) {
+	output := strings.Repeat("a tool's output ", 10)
+	thought := strings.Repeat("a thought ", 10)
+	decodedApart := func(s string) *string {
+		copied := strings.Clone(s)
+		return &copied
+	}
+	emitter := NewEventEmitter()
+	emitter.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{
+		{Type: "thinking", Thinking: thought},
+	}})
+	emitter.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: "m2", Role: "user", Content: []transcript.RichContentBlock{
+		{Type: "tool_result", ToolUseID: "t1", Text: output},
+	}})
+	short := "ok"
+	emitter.EmitSessionEvents([]transcript.SessionEvent{
+		{Kind: "thinking", Content: decodedApart(thought)},
+		{Kind: "tool_result", Content: decodedApart(output)},
+		{Kind: "text", Content: decodedApart(strings.Repeat("said once ", 10))},
+		{Kind: "text", Content: &short},
+	})
+	events := emitter.SessionEvents()
+	require.Len(t, events, 4)
+	assert.Equal(t, thought, *events[0].Content)
+	assert.Same(t, unsafe.StringData(thought), unsafe.StringData(*events[0].Content))
+	assert.Same(t, unsafe.StringData(output), unsafe.StringData(*events[1].Content))
+	assert.Equal(t, strings.Repeat("said once ", 10), *events[2].Content)
+
+	// The state database stores them apart too.
+	restored := NewEventEmitter()
+	restored.Restore(EmitterState{
+		RichMessages: emitter.RichMessages(),
+		RichSeqs:     []uint64{1, 2},
+		SessionEvents: []transcript.SessionEvent{
+			{EventID: 1, Kind: "tool_result", Content: decodedApart(output)},
+		},
+	})
+	events = restored.SessionEvents()
+	require.Len(t, events, 1)
+	assert.Equal(t, output, *events[0].Content)
+	assert.Same(t, unsafe.StringData(restored.RichMessages()[1].Content[0].Text), unsafe.StringData(*events[0].Content))
 }
 
 func TestEventEmitterMergesClaudeRichMessageDeltas(t *testing.T) {

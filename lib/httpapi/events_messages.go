@@ -219,6 +219,7 @@ func (e *EventEmitter) EmitSessionEvents(events []transcript.SessionEvent) {
 	for _, event := range events {
 		event.EventID = e.nextSessionEventID
 		e.nextSessionEventID++
+		e.shareContentLocked(&event)
 		e.sessionEvents = append(e.sessionEvents, event)
 	}
 	if e.persister != nil && len(events) > 0 {
@@ -230,4 +231,59 @@ func (e *EventEmitter) SessionEvents() []transcript.SessionEvent {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return slices.Clone(e.sessionEvents)
+}
+
+// The timeline holds what the rich messages hold, a second time: the agents
+// report what they said and did both ways, and the two are decoded apart.
+// Its texts, thoughts and tool results are made to share memory with the
+// rich messages' equal ones; the timeline's values don't change.
+const (
+	// minSharedContent is the shortest content worth sharing.
+	minSharedContent = 64
+	// sharedContentLookback is how many of the latest rich messages a new
+	// event's content is looked for in: an adapter reports a message's
+	// timeline events right after the message.
+	sharedContentLookback = 4
+)
+
+// shareContentLocked makes the content of a new timeline event share memory
+// with the equal text of a recent rich message. Caller holds e.mu.
+func (e *EventEmitter) shareContentLocked(event *transcript.SessionEvent) {
+	if event.Content == nil || len(*event.Content) < minSharedContent {
+		return
+	}
+	content := *event.Content
+	for i := len(e.richMessages) - 1; i >= 0 && i >= len(e.richMessages)-sharedContentLookback; i-- {
+		for _, block := range e.richMessages[i].Content {
+			for _, text := range [...]string{block.Text, block.Thinking} {
+				if text == content {
+					event.Content = &text
+					return
+				}
+			}
+		}
+	}
+}
+
+// shareRestoredContent makes the content of restored timeline events share
+// memory with the equal texts of the restored rich messages, which the
+// state database stores apart.
+func shareRestoredContent(rich []transcript.RichMessage, events []transcript.SessionEvent) {
+	texts := make(map[string]string)
+	for _, msg := range rich {
+		for _, block := range msg.Content {
+			for _, text := range [...]string{block.Text, block.Thinking} {
+				if len(text) >= minSharedContent {
+					texts[text] = text
+				}
+			}
+		}
+	}
+	for i := range events {
+		if content := events[i].Content; content != nil {
+			if text, ok := texts[*content]; ok {
+				events[i].Content = &text
+			}
+		}
+	}
 }

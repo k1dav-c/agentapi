@@ -341,6 +341,7 @@ func (e *EventEmitter) Restore(state EmitterState) {
 		e.richIndex[richKey{msg.MessageID, msg.Role}] = i
 	}
 	e.sessionEvents = slices.Clone(state.SessionEvents)
+	shareRestoredContent(e.richMessages, e.sessionEvents)
 	e.nextSessionEventID = 1
 	for _, ev := range e.sessionEvents {
 		e.nextSessionEventID = max(e.nextSessionEventID, ev.EventID+1)
