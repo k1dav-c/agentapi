@@ -30,6 +30,21 @@ export type NativeRequest = Omit<Schemas["RequestState"], "$schema" | "response"
   seq?: number;
 };
 
+// A request as the server sends it: Go encodes an answer without values as
+// null.
+export type RequestPayload = Omit<NativeRequest, "response"> & {
+  response?: Omit<RequestResponse, "answers"> & {answers?: Record<string, string[] | null>};
+};
+
+// normalizeRequest returns request with empty lists for null answers; a
+// request that has none keeps its object.
+export function normalizeRequest<T extends RequestPayload>(request: T): Omit<T, "response"> & {response?: RequestResponse} {
+  const answers = request.response?.answers;
+  if (!answers || Object.values(answers).every(Array.isArray)) return request as Omit<T, "response"> & {response?: RequestResponse};
+  const fixed = Object.fromEntries(Object.entries(answers).map(([id, values]) => [id, Array.isArray(values) ? values : []]));
+  return {...request, response: {...request.response, answers: fixed}};
+}
+
 // How many closed requests the client keeps; the server keeps 50.
 const MAX_CLOSED = 100;
 

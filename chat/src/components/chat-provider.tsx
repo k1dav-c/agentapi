@@ -59,6 +59,7 @@ import {
 import type {LoginRequired} from "@/lib/login";
 import {getAgentState, waitingFor, type AgentStateKind, type WaitingFor} from "@/lib/session-status";
 import {SyncTracker} from "@/lib/session-sync";
+import {resolveAgentAPIUrl} from "@/lib/agentapi-url";
 import {isDraftMessage, lastUserMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
 import {useEventStream} from "./use-event-stream";
 import {useQueue} from "./use-queue";
@@ -241,37 +242,13 @@ const ChatStoreContext = createContext<Store<ChatContextValue> | undefined>(unde
 
 export const useAgentAPIUrl = (): string => {
   const searchParams = useSearchParams();
-  const paramsUrl = searchParams.get("url");
-  if (paramsUrl) {
-    return paramsUrl;
-  }
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH;
-  if (!basePath) {
+  const url = resolveAgentAPIUrl(searchParams.get("url"));
+  if (!url) {
     throw new Error(
       "agentAPIUrl is not set. Please set the url query parameter to the URL of the AgentAPI or the NEXT_PUBLIC_BASE_PATH environment variable."
     );
   }
-  // NOTE(cian): We use '../' here to construct the agent API URL relative
-  // to the chat's location. Let's say the app is hosted on a subpath
-  // `/@admin/workspace.agent/apps/ccw/`. When you visit this URL you get
-  // redirected to `/@admin/workspace.agent/apps/ccw/chat/embed`. This serves
-  // this React application, but it needs to know where the agent API is hosted.
-  // This will be at the root of where the application is mounted e.g.
-  // `/@admin/workspace.agent/apps/ccw/`. Previously we used
-  // `window.location.origin` but this assumes that the application owns the
-  // entire origin.
-  // See: https://github.com/coder/coder/issues/18779#issuecomment-3133290494 for more context.
-  let chatURL: string = new URL(basePath, window.location.origin).toString();
-  // NOTE: trailing slashes and relative URLs are tricky.
-  // https://developer.mozilla.org/en-US/docs/Web/API/URL_API/Resolving_relative_references#current_directory_relative
-  if (!chatURL.endsWith("/")) {
-    chatURL += "/";
-  }
-  const agentAPIURL = new URL("..", chatURL).toString();
-  if (agentAPIURL.endsWith("/")) {
-    return agentAPIURL.slice(0, -1);
-  }
-  return agentAPIURL;
+  return url;
 };
 
 export function ChatProvider({ children }: PropsWithChildren) {

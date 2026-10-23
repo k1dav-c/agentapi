@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {loadSession, mergeByKey} from "./session-cache";
+import {loadSession, mergeByKey, parseCachedSession} from "./session-cache";
 
 describe("mergeByKey", () => {
   const key = (item: {id?: number}) => (item.id === undefined ? undefined : String(item.id));
@@ -29,5 +29,35 @@ describe("mergeByKey", () => {
 describe("loadSession", () => {
   test("returns null instead of throwing when IndexedDB is unavailable", async () => {
     expect(await loadSession("http://localhost:3284")).toBeNull();
+  });
+});
+
+describe("parseCachedSession", () => {
+  test("normalizes what an earlier version cached", () => {
+    // A cache that holds a rich message with null content showed a blank
+    // page on every reload.
+    const cached = parseCachedSession({
+      epoch: "e1",
+      seq: 12,
+      messages: [{id: 0, role: "user", content: "hi", time: "2026-10-22T10:00:00Z"}],
+      richMessages: [{message_id: "m1", role: "assistant", content: null, timestamp: "2026-10-22T10:00:01Z"}],
+      savedAt: 1,
+    });
+    expect(cached?.richMessages[0].content).toEqual([]);
+    expect(cached?.requests).toEqual([]);
+    expect(cached?.seq).toBe(12);
+  });
+
+  test("rejects what isn't a cached session", () => {
+    expect(parseCachedSession(undefined)).toBeNull();
+    expect(parseCachedSession({epoch: "e1", messages: []})).toBeNull();
+    expect(parseCachedSession({epoch: 1, seq: 1, messages: []})).toBeNull();
+  });
+
+  test("drops entries that aren't objects", () => {
+    const cached = parseCachedSession({epoch: "e1", seq: 1, messages: [null, {id: 0, role: "user", content: "a"}], richMessages: "x", requests: [null], savedAt: 1});
+    expect(cached?.messages).toHaveLength(1);
+    expect(cached?.richMessages).toEqual([]);
+    expect(cached?.requests).toEqual([]);
   });
 });

@@ -49,6 +49,29 @@ export interface RichMessage {
   stop_reason?: string;
 }
 
+// A rich message as the server sends it. Go encodes an empty list as null:
+// a message without content blocks has "content": null, a tool result
+// without images "images": null.
+export type RichMessagePayload = Omit<RichMessage, "content"> & {
+  content: (Omit<RichContentBlock, "images"> & {images?: RichContentBlock["images"] | null})[] | null;
+};
+
+// normalizeRichMessage returns message with empty lists for null ones, so
+// the rest of the chat can iterate them. A message that has none keeps its
+// object. Every rich message that comes in (events, the cache, the REST
+// API) goes through it: one with null content made the transcript throw,
+// and as it was cached, it did again after every reload.
+export function normalizeRichMessage<T extends RichMessagePayload>(message: T): Omit<T, "content"> & {content: RichContentBlock[]} {
+  const content = Array.isArray(message.content) ? message.content : [];
+  if (content === message.content && content.every((block) => block.images !== null)) {
+    return message as Omit<T, "content"> & {content: RichContentBlock[]};
+  }
+  return {
+    ...message,
+    content: content.map((block) => (block.images === null ? {...block, images: []} : block) as RichContentBlock),
+  };
+}
+
 // Whether message is a draft, which the server hasn't confirmed yet.
 export function isDraftMessage(message: Message | DraftMessage): message is DraftMessage {
   return message.id === undefined;

@@ -1,7 +1,8 @@
 import {authFetch, withAuthRetry} from "./auth";
 import type {FileUploadResponse, QueuedMessage, SendResult} from "@/components/chat-provider";
 import {parseTransport, type DispatchMode, type Transport} from "./dispatch";
-import type {NativeRequest, RequestResponse} from "./native-requests";
+import {normalizeRequest, type NativeRequest, type RequestPayload, type RequestResponse} from "./native-requests";
+import {normalizeRichMessage, type RichMessage, type RichMessagePayload} from "./conversation";
 import {parseLoginRequired, type LoginRequired, type LoginRetryOutcome} from "./login";
 import {ApiError} from "./error-utils";
 import type {components} from "./api-schema";
@@ -69,7 +70,7 @@ export type CostReport = Body<Schemas["CostResponseBody"]>;
 // A subagent the agent ran in its session, and what it did (GET
 // /subagents, GET /subagents/{id}).
 export type Subagent = Schemas["SubagentState"];
-export type SubagentRun = Body<Schemas["SubagentResponseBody"]>;
+export type SubagentRun = Omit<Body<Schemas["SubagentResponseBody"]>, "messages"> & {messages: RichMessage[]};
 
 interface APIErrorDetail {
   message: string;
@@ -171,8 +172,9 @@ export function createChatAPI(baseURL: string) {
       return list.subagents ?? [];
     },
 
-    getSubagent(id: string): Promise<SubagentRun> {
-      return jsonRequest(`/subagents/${encodeURIComponent(id)}`, {fallback: "Failed to read the subagent"});
+    async getSubagent(id: string): Promise<SubagentRun> {
+      const run = await jsonRequest<Body<Schemas["SubagentResponseBody"]>>(`/subagents/${encodeURIComponent(id)}`, {fallback: "Failed to read the subagent"});
+      return {...run, messages: (run.messages ?? []).map((message) => normalizeRichMessage(message as RichMessagePayload))};
     },
 
     async listSessions(): Promise<SessionList> {
@@ -343,18 +345,18 @@ export function createChatAPI(baseURL: string) {
     },
 
     async getRequests(): Promise<NativeRequest[]> {
-      const data = await jsonRequest<{requests?: NativeRequest[]}>("/requests", {fallback: "Failed to load the agent's requests"});
-      return data.requests ?? [];
+      const data = await jsonRequest<{requests?: RequestPayload[]}>("/requests", {fallback: "Failed to load the agent's requests"});
+      return (data.requests ?? []).map(normalizeRequest);
     },
 
     async respondRequest(id: string, body: RequestResponse): Promise<NativeRequest> {
-      const data = await jsonRequest<NativeRequest & {$schema?: string}>(`/requests/${encodeURIComponent(id)}/respond`, {
+      const data = await jsonRequest<RequestPayload & {$schema?: string}>(`/requests/${encodeURIComponent(id)}/respond`, {
         method: "POST",
         body,
         fallback: "Failed to answer the agent",
       });
       delete data.$schema;
-      return data;
+      return normalizeRequest(data);
     },
 
     async steerQueuedMessage(id: number): Promise<void> {

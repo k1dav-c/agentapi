@@ -8,10 +8,10 @@ import {bootstrapSession, ensureSession, withCredentials} from "@/lib/auth";
 import type {createChatAPI} from "@/lib/chat-api";
 import {parseTransport, type Transport} from "@/lib/dispatch";
 import {isLoginNotice} from "@/lib/login";
-import {mergeRequests, type NativeRequest} from "@/lib/native-requests";
+import {mergeRequests, normalizeRequest, type NativeRequest, type RequestPayload} from "@/lib/native-requests";
 import type {SyncTracker} from "@/lib/session-sync";
 import {applyStatusChange, update, type AgentStatus, type StatusChangeEvent} from "@/lib/agent-status";
-import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
+import {isDraftMessage, normalizeRichMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage, type RichMessagePayload} from "@/lib/conversation";
 import type {ConnectionStatus} from "./chat-provider";
 import {agentErrorKey, dismissedErrors, rememberDismissed} from "@/lib/agent-errors";
 
@@ -310,7 +310,7 @@ export function useEventStream({
       eventSource.addEventListener("rich_message_update", (event) => {
         lastEventAtRef.current = Date.now();
         assumeFullReplay();
-        const data: RichMessage & {seq?: number} = JSON.parse(event.data);
+        const data = normalizeRichMessage<RichMessagePayload & {seq?: number}>(JSON.parse(event.data));
         pendingRef.current.rich.set(richMessageKey(data), data);
         scheduleFlush(event);
       });
@@ -322,7 +322,7 @@ export function useEventStream({
       eventSource.addEventListener("request_update", (event) => {
         lastEventAtRef.current = Date.now();
         assumeFullReplay();
-        const data: NativeRequest = JSON.parse(event.data);
+        const data = normalizeRequest<RequestPayload>(JSON.parse(event.data));
         pendingRef.current.requests.set(data.id, data);
         scheduleFlush(event, true);
       });
@@ -439,7 +439,7 @@ export function useEventStream({
     };
     if (cacheLoadedForRef.current !== agentAPIUrl) {
       cacheLoadedForRef.current = agentAPIUrl;
-      void loadSession<Message, RichMessage, NativeRequest>(agentAPIUrl).then((cached) => {
+      void loadSession(agentAPIUrl).then((cached) => {
         if (cached && !started && !disposed) {
           syncRef.current.restore(cached.epoch, cached.seq);
           setMessages((previous) => [...cached.messages, ...previous.filter(isDraftMessage)]);

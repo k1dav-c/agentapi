@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {isDraftMessage, lastUserMessage, richMessageKey, withoutSeq, type DraftMessage, type Message} from "./conversation";
+import {isDraftMessage, lastUserMessage, normalizeRichMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessagePayload} from "./conversation";
 
 describe("conversation", () => {
   test("a message without a server ID is a draft", () => {
@@ -33,5 +33,32 @@ describe("the current task", () => {
     ];
     expect(lastUserMessage(messages)?.content).toBe("second");
     expect(lastUserMessage([{id: 0, role: "agent", content: "hello"}])).toBeUndefined();
+  });
+});
+
+describe("normalizeRichMessage", () => {
+  test("turns null content into no blocks", () => {
+    // What Go sends for a message without content blocks, such as a Pi
+    // tool result the adapter couldn't parse.
+    const payload = JSON.parse('{"message_id":"m1","role":"user","content":null,"timestamp":"2026-10-22T10:00:00Z","seq":7}');
+    const message = normalizeRichMessage<RichMessagePayload & {seq: number}>(payload);
+    expect(message.content).toEqual([]);
+    expect(message.seq).toBe(7);
+    expect(normalizeRichMessage({message_id: "m2", role: "assistant", timestamp: ""} as unknown as RichMessagePayload).content).toEqual([]);
+  });
+
+  test("turns a tool result's null images into none", () => {
+    const message = normalizeRichMessage({
+      message_id: "m1",
+      role: "user",
+      timestamp: "",
+      content: [{type: "tool_result", tool_use_id: "t1", text: "ok", images: null}],
+    });
+    expect(message.content[0].images).toEqual([]);
+  });
+
+  test("a message with nothing null keeps its object", () => {
+    const message: RichMessagePayload = {message_id: "m1", role: "assistant", timestamp: "", content: [{type: "text", text: "hi"}]};
+    expect(Object.is(normalizeRichMessage(message), message)).toBe(true);
   });
 });

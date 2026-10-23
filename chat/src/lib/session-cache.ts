@@ -4,16 +4,19 @@
 // IndexedDB rather than localStorage: long sessions exceed localStorage's
 // ~5 MB quota, and localStorage reads block the page while they parse.
 
-export interface CachedSession<M, R, Q = unknown> {
+import {normalizeRichMessage, type Message, type RichMessage, type RichMessagePayload} from "./conversation";
+import {normalizeRequest, type NativeRequest, type RequestPayload} from "./native-requests";
+
+export interface CachedSession {
   // Server conversation state the cache belongs to (session_sync.epoch).
   epoch: string;
   // Highest change sequence applied; sent back as /events?since=.
   seq: number;
-  messages: M[];
-  richMessages: R[];
+  messages: Message[];
+  richMessages: RichMessage[];
   // Requests the agent made (native transport). Missing in caches written
   // before requests existed.
-  requests?: Q[];
+  requests?: NativeRequest[];
   // How the server drives the agent ("pty", "acp", "native"), so the cached
   // transcript renders for the right transport before the server says.
   transport?: string;
@@ -42,20 +45,38 @@ function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => 
 }
 
 // Loads the cached session for key, or null when there is none or storage is
-// unavailable (private mode, blocked site data). Never throws. A cache
-// written before requests existed loads with none.
-export async function loadSession<M, R, Q = unknown>(key: string): Promise<(CachedSession<M, R, Q> & {requests: Q[]}) | null> {
+// unavailable (private mode, blocked site data). Never throws.
+export async function loadSession(key: string): Promise<(CachedSession & {requests: NativeRequest[]}) | null> {
   try {
     if (typeof indexedDB === "undefined") return null;
-    const value = await withStore<CachedSession<M, R, Q> | undefined>("readonly", (store) => store.get(key));
-    if (!value || typeof value.epoch !== "string" || !Array.isArray(value.messages)) return null;
-    return {...value, requests: Array.isArray(value.requests) ? value.requests : []};
+    return parseCachedSession(await withStore<unknown>("readonly", (store) => store.get(key)));
   } catch {
     return null;
   }
 }
 
-export async function saveSession<M, R, Q = unknown>(key: string, session: CachedSession<M, R, Q>): Promise<void> {
+// parseCachedSession checks what the cache held, and normalizes it as the
+// events are normalized when they arrive: a cache written by an earlier
+// version can hold a rich message with null content, which the transcript
+// can't show. A cache written before requests existed loads with none.
+export function parseCachedSession(value: unknown): (CachedSession & {requests: NativeRequest[]}) | null {
+  if (!value || typeof value !== "object") return null;
+  const session = value as Partial<Record<keyof CachedSession, unknown>>;
+  if (typeof session.epoch !== "string" || typeof session.seq !== "number" || !Array.isArray(session.messages)) return null;
+  return {
+    ...(value as CachedSession),
+    messages: items<Message>(session.messages),
+    richMessages: items<RichMessagePayload>(session.richMessages).map(normalizeRichMessage),
+    requests: items<RequestPayload>(session.requests).map(normalizeRequest),
+  };
+}
+
+// The objects in list, or none when it isn't one.
+function items<T>(list: unknown): T[] {
+  return Array.isArray(list) ? list.filter((item): item is T => typeof item === "object" && item !== null) : [];
+}
+
+export async function saveSession(key: string, session: CachedSession): Promise<void> {
   try {
     if (typeof indexedDB === "undefined") return;
     await withStore("readwrite", (store) => store.put(session, key));

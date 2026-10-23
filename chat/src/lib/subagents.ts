@@ -38,8 +38,7 @@ export function subagentCounts(richMessages: RichMessage[]): {total: number; run
 export function subagentTask(run: SubagentRun): TaskSection {
   const time = run.messages[0]?.timestamp ?? run.subagent.started_at;
   const prompt = {id: 0, role: "user", content: run.prompt || run.subagent.description || "Subagent task", time: run.subagent.started_at < time ? run.subagent.started_at : time};
-  const messages = run.messages as RichMessage[];
-  const timeline = buildTimeline([prompt], messages, collectToolCalls(messages));
+  const timeline = buildTimeline([prompt], run.messages, collectToolCalls(run.messages));
   return {...timeline.tasks[0], key: `subagent-${run.subagent.id}`};
 }
 
