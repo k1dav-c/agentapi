@@ -50,7 +50,7 @@ import {SyncTracker} from "@/lib/session-sync";
 import {resolveAgentAPIUrl} from "@/lib/agentapi-url";
 import {isDraftMessage, lastUserMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
 import type {Timeline, ToolCall} from "@/lib/task-timeline";
-import type {ServerTask} from "@/lib/server-tasks";
+import {tasksByMessage, type ServerTask} from "@/lib/server-tasks";
 import {useEventStream} from "./use-event-stream";
 import {useQueue} from "./use-queue";
 import {useSessionCache} from "./use-session-cache";
@@ -234,8 +234,10 @@ export interface ChatState {
   // recently closed, oldest first.
   requests: NativeRequest[];
   // The tasks as the server derives them, the earliest first; none from
-  // servers that don't.
+  // servers that don't. And each by the user messages that belong to it
+  // (tasksByMessage).
   serverTasks: ServerTask[];
+  taskByMessage: ReadonlyMap<number, ServerTask>;
   // Whether stop can stop what the agent is doing now.
   canStop: boolean;
   reconnectAttempt: number;
@@ -376,6 +378,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
   const currentTask = useMemo(() => lastUserMessage(messages), [messages]);
   const transcript = useTranscript(messages, richMessages);
+  const taskByMessage = useMemo(() => tasksByMessage(serverTasks), [serverTasks]);
 
   // Rendered as <title> rather than set on document.title from an effect:
   // Next re-applies the layout's static title after hydration, which
@@ -647,6 +650,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     dispatch,
     requests,
     serverTasks,
+    taskByMessage,
     canStop: stoppable,
     serverStatus,
     connectionStatus,

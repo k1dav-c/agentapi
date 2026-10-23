@@ -20,6 +20,7 @@ export const uiCopy = {
     running: "Running",
     queued: "Queued",
     failed: "Failed",
+    limited: "Limit reached",
     completed: "Completed",
     toolErrors: "Tool errors",
   },

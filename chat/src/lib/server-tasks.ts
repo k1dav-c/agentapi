@@ -42,6 +42,14 @@ export function mergeTasks(previous: ServerTask[], updates: Iterable<ServerTask>
   return next;
 }
 
+// What to say of how a task ended, beside its status: the first error of
+// a failed task, what the agent said of the limit that stopped one.
+export function taskStatusDetail(task: ServerTask | undefined): string | undefined {
+  if (task?.status === "failed") return task.errors[0];
+  if (task?.status === "limited") return task.limit?.message;
+  return undefined;
+}
+
 // tasksByMessage returns the tasks by the user messages that belong to
 // them: the one that started each, and those steered into it.
 export function tasksByMessage(tasks: ServerTask[]): Map<number, ServerTask> {

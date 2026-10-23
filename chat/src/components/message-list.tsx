@@ -7,6 +7,7 @@ import {Button} from "./ui/button";
 import {formatDateLabel} from "@/lib/format-time";
 import {costDetails, formatUSD, taskCosts} from "@/lib/cost";
 import {filterTasks} from "@/lib/task-filter";
+import {taskStatusDetail} from "@/lib/server-tasks";
 import {HEADER_ACTIONS_ID} from "@/app/header";
 import {useChatSelector} from "./chat-provider";
 import {TaskGroup} from "./message-list/task-group";
@@ -53,6 +54,9 @@ export default function MessageList({
   const agentType = useChatSelector((chat) => chat.agentType);
   const waitingFor = useChatSelector((chat) => chat.waitingFor);
   const sessionCost = useChatSelector((chat) => chat.sessionCost);
+  // The server's tasks, for each task's status (none from servers that
+  // don't derive them).
+  const taskByMessage = useChatSelector((chat) => chat.taskByMessage);
   // The page's actions render into the header's slot (one top bar); the
   // embed page has no header, so they get their own row there.
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
@@ -69,8 +73,8 @@ export default function MessageList({
     );
   }, [sessionCost, starts]);
   const filteredTasks = useMemo(
-    () => filterTasks(timeline.tasks, serverStatus, taskFilter, taskQuery),
-    [serverStatus, taskFilter, taskQuery, timeline.tasks],
+    () => filterTasks(timeline.tasks, serverStatus, taskFilter, taskQuery, taskByMessage),
+    [serverStatus, taskByMessage, taskFilter, taskQuery, timeline.tasks],
   );
   const totalMatchCount = filteredTasks.reduce((total, task) => total + task.matchCount, 0);
   const hiddenTaskCount =
@@ -161,7 +165,7 @@ export default function MessageList({
                 No tasks match the current search and filter.
               </p>
             )}
-            {visibleTasks.map(({task, index, status}, visibleIndex) => {
+            {visibleTasks.map(({task, index, status, serverTask}, visibleIndex) => {
               const searchResultIndex = filteredTasks.findIndex(
                 (entry) => entry.task.key === task.key,
               );
@@ -188,6 +192,7 @@ export default function MessageList({
                 cost={costs[index]?.label}
                 costDetails={costs[index]?.details}
                 status={status}
+                statusDetail={taskStatusDetail(serverTask)}
                 onRetryMessage={onRetryMessage}
                 onEditMessage={onEditMessage}
                 onDismissMessage={onDismissMessage}

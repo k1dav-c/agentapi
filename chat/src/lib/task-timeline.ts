@@ -1,5 +1,6 @@
 import {commonPrefix, richMessageTime, type DraftMessage, type Message, type RichContentBlock, type RichMessage} from "@/lib/conversation";
 import {sameValue, type ServerStatus} from "@/lib/agent-status";
+import type {ServerTask} from "./server-tasks";
 import { formatToolInput } from "./tool-format";
 
 export interface ToolCall {
@@ -41,14 +42,32 @@ export type TaskActivity =
       timestamp: string;
     };
 
-export type TaskStatus = "queued" | "running" | "completed" | "failed";
+// A task's status: limited when a usage limit stopped it (the server says
+// so).
+export type TaskStatus = "queued" | "running" | "completed" | "failed" | "limited";
 export type TaskFilter = "all" | TaskStatus | "tool-error";
 
+// How a task's status shows: its label, and the color of its state.
+export const TASK_STATUS_META: Record<TaskStatus, {label: string; className: string}> = {
+  queued: {label: "Queued", className: "text-muted-foreground"},
+  running: {label: "Working", className: "text-state-working"},
+  completed: {label: "Done", className: "text-state-ready"},
+  failed: {label: "Failed", className: "text-state-fault"},
+  limited: {label: "Limit reached", className: "text-state-needs"},
+};
+
+// getTaskStatus returns the status of the task at index. A task the server
+// derives (serverTask: the one its prompt started, or was steered into)
+// has the server's status, which knows when the agent is done and how the
+// turn ended. Without one (a server that doesn't derive tasks), it is
+// worked out here: the latest task runs while the agent does, and a task
+// failed when its last step did.
 export function getTaskStatus(
   task: TaskSection,
   index: number,
   taskCount: number,
   serverStatus: ServerStatus,
+  serverTask?: ServerTask,
 ): TaskStatus {
   if (
     task.prompt.id === undefined &&
@@ -59,6 +78,7 @@ export function getTaskStatus(
   if (task.prompt.id === undefined) {
     return serverStatus === "running" ? "queued" : "running";
   }
+  if (serverTask) return serverTask.status;
   if (index === taskCount - 1 && serverStatus === "running") return "running";
   // Agents often run commands that fail on purpose or recover from one (a
   // grep with no match exits 1), so a failed command only fails the task

@@ -1,6 +1,7 @@
 import {describe, expect, test} from "bun:test";
 import {buildTranscript, getTaskActivity, getTaskStatus, TimelineBuilder, type TaskSection, type ToolCall} from "./task-timeline";
 import type {DraftMessage, Message, RichMessage} from "./conversation";
+import type {ServerTask} from "./server-tasks";
 
 const tool = (id: string, timestamp: string): ToolCall => ({id, name: "Bash", input: {command: "ls"}, timestamp});
 
@@ -85,6 +86,25 @@ describe("getTaskStatus", () => {
   test("without a session log, the last tool call decides", () => {
     expect(getTaskStatus(task({toolCalls: [failed, tool("t2", "2026-10-04T08:00:04Z")]}), 0, 1, "stable")).toBe("completed");
     expect(getTaskStatus(task({toolCalls: [failed]}), 0, 1, "stable")).toBe("failed");
+  });
+
+  const serverTask = (status: ServerTask["status"]): ServerTask => ({id: 0, status, prompt: "List files", started_at: "2026-10-04T08:00:00Z", errors: [], steered: []});
+
+  test("the server's task says how it is, over what the steps suggest", () => {
+    const endsFailing = task({toolCalls: [failed], richActivity: [reply, {type: "tool", key: "t1", toolCall: failed}]});
+    expect(getTaskStatus(endsFailing, 0, 1, "stable", serverTask("completed"))).toBe("completed");
+    // A task the agent is still on, though the agent looks idle (it waits
+    // for an answer's turn to start).
+    expect(getTaskStatus(task({}), 0, 2, "stable", serverTask("running"))).toBe("running");
+    expect(getTaskStatus(task({}), 0, 1, "stable", serverTask("limited"))).toBe("limited");
+    expect(getTaskStatus(task({}), 0, 1, "running", serverTask("failed"))).toBe("failed");
+  });
+
+  test("a message not sent yet is the chat's own", () => {
+    const draft = task({prompt: {role: "user", content: "next", clientId: "c1", deliveryStatus: "sending"}});
+    expect(getTaskStatus(draft, 1, 2, "running", serverTask("completed"))).toBe("queued");
+    const unsent = task({prompt: {role: "user", content: "next", clientId: "c1", deliveryStatus: "failed"}});
+    expect(getTaskStatus(unsent, 1, 2, "stable", serverTask("completed"))).toBe("failed");
   });
 });
 
