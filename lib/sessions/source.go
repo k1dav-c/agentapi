@@ -172,33 +172,6 @@ func claudeLogsByID(s *Store, id string) (own, elsewhere []string) {
 
 // --- Codex ---
 
-// codexHistoryScanLimit bounds how many session logs a Store looks
-// through to find the directory's: Codex keeps every directory's in one
-// tree.
-const codexHistoryScanLimit = 2000
-
-// codexRollouts lists the latest of Codex's session logs, of all
-// directories.
-func codexRollouts() ([]string, error) {
-	root, err := codexlog.SessionsRoot("")
-	if err != nil {
-		return nil, err
-	}
-	var files []string
-	// The tree is sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl: walking
-	// it in reverse name order goes from the latest.
-	err = walkReverse(root, 3, func(dir string) bool {
-		day, err := logsIn(dir)
-		if err != nil {
-			return true
-		}
-		slices.Reverse(day)
-		files = append(files, day...)
-		return len(files) < codexHistoryScanLimit
-	})
-	return files, err
-}
-
 // codexThread is one of Codex's session logs, with its first line.
 type codexThread struct {
 	path string
@@ -206,9 +179,15 @@ type codexThread struct {
 }
 
 // codexThreads lists Codex's session logs with their first lines, which
-// say where the thread ran and whose subagent it is.
+// say where the thread ran and whose subagent it is. Codex keeps every
+// directory's logs in one tree, so finding a directory's takes all their
+// first lines; the Store reads each once.
 func (s *Store) codexThreads() ([]codexThread, error) {
-	rollouts, err := codexRollouts()
+	root, err := codexlog.SessionsRoot("")
+	if err != nil {
+		return nil, err
+	}
+	rollouts, err := codexlog.Rollouts(root)
 	if err != nil {
 		return nil, err
 	}
@@ -247,36 +226,6 @@ func codexLogsByID(_ *Store, id string) (own, elsewhere []string) {
 		return []string{path}, nil
 	}
 	return nil, nil
-}
-
-// walkReverse calls fn with the directories depth levels below root, in
-// reverse name order, until it returns false.
-func walkReverse(root string, depth int, fn func(dir string) bool) error {
-	if depth == 0 {
-		if !fn(root) {
-			return fs.SkipAll
-		}
-		return nil
-	}
-	entries, err := os.ReadDir(root)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for i := len(entries) - 1; i >= 0; i-- {
-		if !entries[i].IsDir() {
-			continue
-		}
-		if err := walkReverse(filepath.Join(root, entries[i].Name()), depth-1, fn); err != nil {
-			if errors.Is(err, fs.SkipAll) && depth == 3 {
-				return nil
-			}
-			return err
-		}
-	}
-	return nil
 }
 
 // --- Pi ---

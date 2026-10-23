@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -59,6 +60,49 @@ func SessionsRoot(sessionsDir string) (string, error) {
 // metaReaders are the buffers ReadSessionMeta reads with: finding a
 // directory's sessions reads the first line of thousands of files.
 var metaReaders = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, 64*1024) }}
+
+// Rollouts lists the session logs under root, a tree of
+// YYYY/MM/DD/rollout-<time>-<thread id>.jsonl files, the latest first.
+func Rollouts(root string) ([]string, error) {
+	var files []string
+	err := walkReverse(root, 3, func(dir string) error {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil
+		}
+		for i := len(entries) - 1; i >= 0; i-- {
+			if name := entries[i].Name(); !entries[i].IsDir() && filepath.Ext(name) == ".jsonl" {
+				files = append(files, filepath.Join(dir, name))
+			}
+		}
+		return nil
+	})
+	return files, err
+}
+
+// walkReverse calls fn with the directories depth levels below root, in
+// reverse name order.
+func walkReverse(root string, depth int, fn func(dir string) error) error {
+	if depth == 0 {
+		return fn(root)
+	}
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		if !entries[i].IsDir() {
+			continue
+		}
+		if err := walkReverse(filepath.Join(root, entries[i].Name()), depth-1, fn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // ReadSessionMeta reads the first line of a Codex session file. The
 // session_meta line can be large: it embeds base_instructions, ~18KB.

@@ -378,3 +378,30 @@ func TestSessionsThroughASymlink(t *testing.T) {
 		assert.Equal(t, "p1", list[0].ID)
 	})
 }
+
+// Codex keeps every directory's sessions in one tree: a directory's are
+// found however many other directories' came since.
+func TestCodexSessionsAmongManyRollouts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	old := filepath.Join(home, "sessions", "2026", "01", "02", "rollout-2026-01-02T10-00-00-old.jsonl")
+	writeLog(t, old, time.Now().AddDate(0, -9, 0),
+		`{"timestamp":"2026-01-02T10:00:00.000Z","type":"session_meta","payload":{"id":"old","session_id":"old","cwd":"/w"}}`,
+		`{"timestamp":"2026-01-02T10:00:01.000Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}`,
+		`{"timestamp":"2026-01-02T10:00:01.100Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Long ago"}]}}`,
+		`{"timestamp":"2026-01-02T10:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"output_tokens":10},"last_token_usage":{"input_tokens":1000,"output_tokens":10}}}}`)
+	for i := range 2100 {
+		at := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(i) * time.Minute)
+		path := filepath.Join(home, "sessions", at.Format("2006/01/02"), fmt.Sprintf("rollout-%s-o%d.jsonl", at.Format("2006-01-02T15-04-05"), i))
+		writeLog(t, path, at, fmt.Sprintf(`{"timestamp":%q,"type":"session_meta","payload":{"id":"o%d","session_id":"o%d","cwd":"/elsewhere"}}`, at.Format(time.RFC3339), i, i))
+	}
+	store := newStore(t, "codex", "/w")
+	list, err := store.List(10)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, "old", list[0].ID)
+	d, err := store.Costs()
+	require.NoError(t, err)
+	assert.Equal(t, 1, d.Total.Calls)
+	assert.True(t, store.metas.Has(old), "the first lines are kept for the next request")
+}

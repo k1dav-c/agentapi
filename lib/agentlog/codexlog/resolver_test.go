@@ -225,3 +225,37 @@ func TestCodexResolverThroughASymlink(t *testing.T) {
 		t.Fatalf("Resolve() = %q, %v; want %s", got, err, want)
 	}
 }
+
+func TestRollouts(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{
+		"2026/09/30/rollout-2026-09-30T23-00-00-a.jsonl",
+		"2026/10/01/rollout-2026-10-01T08-00-00-b.jsonl",
+		"2026/10/01/rollout-2026-10-01T09-00-00-c.jsonl",
+		"2026/10/01/notes.txt",
+		"2025/12/31/rollout-2025-12-31T10-00-00-d.jsonl",
+	} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := Rollouts(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, path := range got {
+		names = append(names, filepath.Base(path))
+	}
+	want := []string{"rollout-2026-10-01T09-00-00-c.jsonl", "rollout-2026-10-01T08-00-00-b.jsonl", "rollout-2026-09-30T23-00-00-a.jsonl", "rollout-2025-12-31T10-00-00-d.jsonl"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("Rollouts = %v, want %v", names, want)
+	}
+	if got, err := Rollouts(filepath.Join(root, "missing")); err != nil || len(got) != 0 {
+		t.Fatalf("Rollouts of a missing tree = %v, %v", got, err)
+	}
+}
