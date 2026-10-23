@@ -1,6 +1,7 @@
 package pi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -502,7 +503,7 @@ func (a *Adapter) cancelTurnDialogs(withdraw bool) {
 			a.loop.sink.RequestClosed(id)
 		}
 		go func(id string) {
-			if err := a.send(uiResponse{Type: "extension_ui_response", ID: id, Cancelled: true}); err != nil {
+			if err := a.send(context.Background(), uiResponse{Type: "extension_ui_response", ID: id, Cancelled: true}); err != nil {
 				a.log.Debug("Failed to cancel a Pi dialog", "id", id, "error", err)
 			}
 		}(id)

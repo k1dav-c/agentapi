@@ -566,8 +566,9 @@ func TestAnsweredQuestionThenTurnEnd(t *testing.T) {
 		"questions":[{"id":"q","header":"Q","question":"Go on?","isOther":true,"isSecret":false,"options":null}]}}`)
 	h.sync()
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
 	require.NoError(t, h.a.Respond(ctx, h.requestID(json.RawMessage("4")), native.Response{Answers: map[string][]string{"q": {"yes"}}}))
+	// Once the answer is written, the context's end changes nothing.
+	cancel()
 	h.expectSent("")
 	h.feedJSON(`{"method":"serverRequest/resolved","params":{"threadId":"` + testThread + `","requestId":4}}`)
 	h.completeTurn("turn-1", "completed", "")

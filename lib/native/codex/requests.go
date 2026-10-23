@@ -613,7 +613,7 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 	}
 	a.mu.Unlock()
 
-	if err := a.write(rpcResponse{JSONRPC: "2.0", ID: r.rpcID, Result: result}); err != nil {
+	if err := a.write(ctx, rpcResponse{JSONRPC: "2.0", ID: r.rpcID, Result: result}); err != nil {
 		a.mu.Lock()
 		r.answered = false
 		a.mu.Unlock()

@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/coder/agentapi/lib/native"
 )
@@ -84,16 +85,58 @@ func (w *Writer) Attach(stdin io.Writer) {
 	w.w = stdin
 }
 
+// States of a write; see Write.
+const (
+	writeWaiting int32 = iota
+	writeStarted
+	writeAbandoned
+)
+
 // Write writes v as one line. It returns native.ErrNotStarted before
 // Attach.
-func (w *Writer) Write(v any) error {
+//
+// An agent that stops reading its input blocks a write for good, so Write
+// gives up when ctx ends. A record that was still waiting behind another
+// write is then never written, and Write returns ctx.Err(). One whose
+// write had begun can't be taken back without breaking the line the agent
+// reads: it goes on in the background, the agent may yet get it, and
+// Write returns ctx.Err() marked native.ErrUnconfirmed. Closing the
+// agent's input ends a write that waits for good.
+func (w *Writer) Write(ctx context.Context, v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	var state atomic.Int32
+	done := make(chan error, 1)
+	go func() {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if !state.CompareAndSwap(writeWaiting, writeStarted) {
+			return
+		}
+		done <- w.writeLocked(data)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+	}
+	if state.CompareAndSwap(writeWaiting, writeAbandoned) {
+		return ctx.Err()
+	}
+	select {
+	case err := <-done:
+		// It ended just now.
+		return err
+	default:
+		return native.Unconfirmed(fmt.Errorf("write to %s: %w", w.name, ctx.Err()))
+	}
+}
+
+// writeLocked writes data to the agent's stdin. Caller holds w.mu.
+func (w *Writer) writeLocked(data []byte) error {
 	if w.w == nil {
 		return native.ErrNotStarted
 	}
@@ -117,7 +160,7 @@ func (w *Writer) Writing() bool {
 // which must not wait for an agent that doesn't read. A failure is logged.
 func (w *Writer) WriteAsync(v any, logger *slog.Logger) {
 	go func() {
-		if err := w.Write(v); err != nil {
+		if err := w.Write(context.Background(), v); err != nil {
 			logger.Debug("Failed to write to the agent", "agent", w.name, "error", err)
 		}
 	}()

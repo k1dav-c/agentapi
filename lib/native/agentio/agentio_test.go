@@ -1,6 +1,7 @@
 package agentio_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,8 +49,9 @@ func TestReadLinesKeepsLines(t *testing.T) {
 
 func TestWriter(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
 	w := agentio.NewWriter("test")
-	assert.ErrorIs(t, w.Write(map[string]int{"a": 1}), native.ErrNotStarted)
+	assert.ErrorIs(t, w.Write(ctx, map[string]int{"a": 1}), native.ErrNotStarted)
 
 	var buf bytes.Buffer
 	var mu sync.Mutex
@@ -62,7 +65,7 @@ func TestWriter(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			assert.NoError(t, w.Write(map[string]int{"n": i}))
+			assert.NoError(t, w.Write(ctx, map[string]int{"n": i}))
 		}()
 	}
 	wg.Wait()
@@ -73,7 +76,50 @@ func TestWriter(t *testing.T) {
 	}
 
 	w.Attach(writerFunc(func([]byte) (int, error) { return 0, io.ErrClosedPipe }))
-	assert.EqualError(t, w.Write(1), "write to test: io: read/write on closed pipe")
+	assert.EqualError(t, w.Write(ctx, 1), "write to test: io: read/write on closed pipe")
+}
+
+// An agent that stops reading its input can't hold a write past its
+// context. A record whose write began may still reach the agent; one that
+// waited behind it never goes out.
+func TestWriterGivesUpWithTheContext(t *testing.T) {
+	t.Parallel()
+	r, pipe := io.Pipe()
+	w := agentio.NewWriter("test")
+	w.Attach(pipe)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	go func() { first <- w.Write(ctx, "first") }()
+	require.Eventually(t, w.Writing, 5*time.Second, time.Millisecond)
+	second := make(chan error, 1)
+	go func() { second <- w.Write(ctx, "second") }()
+	cancel()
+	err := <-first
+	require.ErrorIs(t, err, native.ErrUnconfirmed, "the agent may yet read it")
+	assert.ErrorIs(t, err, context.Canceled)
+	err = <-second
+	require.ErrorIs(t, err, context.Canceled)
+	assert.NotErrorIs(t, err, native.ErrUnconfirmed, "it never went out")
+
+	// The agent reads again: it gets the record whose write began, whole,
+	// and nothing of the other.
+	lines := make(chan string, 10)
+	go func() {
+		reader := bufio.NewReader(r)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			lines <- line
+		}
+	}()
+	require.NoError(t, w.Write(context.Background(), "third"))
+	assert.Equal(t, "\"first\"\n", <-lines)
+	assert.Equal(t, "\"third\"\n", <-lines)
+	_ = r.Close()
+	assert.Error(t, w.Write(context.Background(), "fourth"), "the agent's input is closed")
 }
 
 type writerFunc func([]byte) (int, error)

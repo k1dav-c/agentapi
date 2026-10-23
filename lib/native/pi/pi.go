@@ -354,9 +354,10 @@ func (a *Adapter) markDone(err error) {
 	})
 }
 
-// send writes one command line.
-func (a *Adapter) send(cmd any) error {
-	return a.writer.Write(cmd)
+// send writes one command line, unless ctx ends first (see
+// agentio.Writer.Write).
+func (a *Adapter) send(ctx context.Context, cmd any) error {
+	return a.writer.Write(ctx, cmd)
 }
 
 // addPendingLocked registers a command that waits for its response under
@@ -382,7 +383,7 @@ func (a *Adapter) request(ctx context.Context, kind cmdKind, cmd command) (cmdRe
 	id, p := a.addPendingLocked(kind)
 	a.mu.Unlock()
 
-	if err := a.send(cmd.withID(id)); err != nil {
+	if err := a.send(ctx, cmd.withID(id)); err != nil {
 		a.mu.Lock()
 		delete(a.pending, id)
 		a.mu.Unlock()
@@ -450,7 +451,7 @@ func (a *Adapter) Steer(ctx context.Context, input native.Input) error {
 // reports it with StopReason "interrupted". If Pi doesn't end the turn
 // within interruptTimeout (an extension command that doesn't stop), the
 // adapter ends it.
-func (a *Adapter) Interrupt(context.Context) error {
+func (a *Adapter) Interrupt(ctx context.Context) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
@@ -464,7 +465,7 @@ func (a *Adapter) Interrupt(context.Context) error {
 	turn := a.turnSeq
 	id, _ := a.addPendingLocked(cmdAbort)
 	a.mu.Unlock()
-	if err := a.send(simpleCommand{ID: id, Type: "abort"}); err != nil {
+	if err := a.send(ctx, simpleCommand{ID: id, Type: "abort"}); err != nil {
 		a.mu.Lock()
 		delete(a.pending, id)
 		if first && a.turnSeq == turn {
@@ -481,7 +482,7 @@ func (a *Adapter) Interrupt(context.Context) error {
 }
 
 // Respond answers an extension dialog.
-func (a *Adapter) Respond(_ context.Context, requestID string, response native.Response) error {
+func (a *Adapter) Respond(ctx context.Context, requestID string, response native.Response) error {
 	a.mu.Lock()
 	d := a.dialogs[requestID]
 	if a.exited || d == nil || d.answering {
@@ -495,7 +496,7 @@ func (a *Adapter) Respond(_ context.Context, requestID string, response native.R
 	}
 	d.answering = true
 	a.mu.Unlock()
-	err = a.send(reply)
+	err = a.send(ctx, reply)
 	a.mu.Lock()
 	d.answering = false
 	if err == nil && a.dialogs[requestID] == d {
@@ -550,7 +551,7 @@ func (a *Adapter) shutdown() {
 		// from going on: the wait is bounded, and Stop's closing stdin
 		// makes the write fail.
 		go func() {
-			if err := a.send(simpleCommand{ID: abortID, Type: "abort"}); err != nil {
+			if err := a.send(context.Background(), simpleCommand{ID: abortID, Type: "abort"}); err != nil {
 				a.mu.Lock()
 				delete(a.pending, abortID)
 				a.mu.Unlock()

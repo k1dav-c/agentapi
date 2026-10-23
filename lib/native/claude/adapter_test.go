@@ -166,6 +166,23 @@ func TestClose(t *testing.T) {
 	})
 }
 
+// A CLI that stops reading can't hold StartTurn past its context: the
+// prompt may still reach the CLI if it reads again, so the error says it is
+// unconfirmed, and the turn can start again.
+func TestStartTurnGivesUpWithTheContext(t *testing.T) {
+	t.Parallel()
+	// The CLI reads the initialize and get_settings requests, then hangs.
+	proc := newFakeProcess("")
+	proc.stallAfter = 2
+	a, _ := started(t, Config{StopTimeout: 10 * time.Millisecond}, proc)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := a.StartTurn(ctx, native.Input{Text: "hi"})
+	require.ErrorIs(t, err, native.ErrUnconfirmed)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NoError(t, a.Close())
+}
+
 func TestTurnErrors(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t, Config{}, "")
