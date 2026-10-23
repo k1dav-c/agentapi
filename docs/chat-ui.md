@@ -2,16 +2,18 @@
 
 English | [繁體中文](chat-ui.zh-TW.md)
 
-AgentAPI serves a chat UI at `/chat`. It is embedded in the `agentapi` binary, works with every
-transport, on a desktop and on a phone, and talks to the server only through the
-[HTTP API](../README.md#http-api-reference). This guide goes through every part of it.
+Open `/chat` to use the chat UI embedded in the `agentapi` binary. It works with every transport
+on desktops and phones, communicating with the server through the
+[HTTP API](../README.md#http-api-reference).
 
-The screenshots and the animations show AgentAPI v0.28.0 with the built-in `native-demo` agent
-working on a small sample site; the demo's replies, tool results, models and usage are simulated,
-and TTY mode shows bash run as a PTY agent. The animations draw a blue dot where the pointer is and
-where it clicks. [scripts/capture-docs.mjs](../scripts/capture-docs.mjs) takes all of them again
-(see the [screenshot guide](screenshots/README.md)). Parts marked *native* need the [native
-transport](../README.md#native-transport), which Claude Code, Codex and Pi use by default.
+Screenshots and animations show AgentAPI v0.28.0 running `native-demo` on a sample site. The demo's
+replies, tool results, models and usage are simulated; TTY mode runs bash as a PTY agent. A blue dot
+marks the pointer and clicks. To reproduce the captures, use
+[scripts/capture-docs.mjs](../scripts/capture-docs.mjs) as described in the
+[screenshot guide](screenshots/README.md).
+
+Features marked *native* require the [native transport](../README.md#native-transport), the default
+for Claude Code, Codex and Pi.
 
 ## Contents
 
@@ -51,19 +53,19 @@ transport](../README.md#native-transport), which Claude Code, Codex and Pi use b
 Every message you send starts a task. A task shows your prompt in a tinted block labelled "You",
 then what the agent did, in order: its reply in Markdown, a row for each tool call, and its
 thinking. The task's header shows its number and state (Queued, Working, Waiting for you, Done,
-Failed or Limit reached), a Stop button while it works, and its ⋯ menu. The state is the server's
-[task](../README.md#tasks): Failed when the agent reported an error or exited (hover over it for the
-first error), Limit reached when a usage limit stopped it (hover for the agent's message). The tool
-calls and thinking go with the task the server says they began in. A message you steer into a
-running task shows that task's state, and what the agent does after it shows in that task.
+Failed or Limit reached), a Stop button while it works, and its ⋯ menu. The server's
+[task](../README.md#tasks) determines the state. Failed means the agent reported an error or exited; hover to see the first error. Limit reached means a usage limit stopped it; hover
+for the agent's message. The server also assigns tool calls and thinking to tasks. A steered
+message shares the running task's state, and subsequent activity stays in that task.
 
-On a wide screen the task's start time and duration hang in the left margin; on a narrower one they
-follow its number in the header. *native* For Claude Code, Codex and Pi they come with what the task
-cost: the tokens of the model calls made while it ran, its subagents' included, at the model
-providers' list prices; a call between tasks (a compaction, say) counts in none. It is the API-equivalent cost, which a subscription
-doesn't charge; hover over it for the calls and tokens. The cost is read again when a turn ends, and
-every 15 seconds while one runs. See [Session costs](../README.md#session-costs) for how it is
-counted and how to set prices.
+The task's start time and duration appear in the left margin on wide screens, or after its number
+in the header on narrower screens. *native* Claude Code, Codex and Pi also show the cost of model
+calls made during the task, including subagents, at provider list prices. Calls between tasks,
+such as compaction, don't count toward a task.
+
+This API-equivalent cost isn't charged by subscriptions. Hover for calls and tokens. Costs refresh
+at the end of a turn and every 15 seconds during it. See [Session costs](../README.md#session-costs)
+for the calculation and price configuration.
 
 ![A task's time rail: its start time, duration and cost](screenshots/task-cost.png)
 
@@ -80,10 +82,9 @@ the raw input a click away. Tool results that are images (Claude Code reading a 
 
 ### Thinking
 
-On a wide screen the agent's thinking appears as notes in the right margin, next to the step it
-belongs to; a note taller than its step makes room beside it rather than pushing the notes after it
-away from their steps, and a long note shows six lines until you click it. On a narrow screen it
-folds into a "Thinking · *title*" line inside the task.
+On wide screens, thinking appears in the right margin beside the relevant step. Tall notes reserve
+space beside that step so later notes stay aligned. Long notes show six lines; click to expand.
+On narrow screens, thinking collapses into a "Thinking · *title*" line within the task.
 
 ### Messages and long tasks
 
@@ -135,10 +136,10 @@ chat marked as not sent, with buttons to retry or dismiss it, also after a reloa
 
 ![A long turn with two queued tasks and the send menu open: Queue, Steer, and Interrupt & send](screenshots/queue-steer.png)
 
-Messages you send while the agent works wait in a queue, shown in the composer under the message
-box, and run one after the other when the turn ends; the queue is kept on the server, and every
-open chat follows its changes as they happen. Each queued task can be edited, moved up or down, removed, or *native* steered into
-the turn right away (the ↳ button). *native* The send button's menu offers three ways to send:
+Messages sent while the agent works wait in a server queue, shown below the message box. They run
+in order after the turn ends, and every open chat follows queue changes live. You can edit, move
+or remove queued tasks. *native* The ↳ button steers a queued task into the running turn.
+*native* The send menu offers three modes:
 
 - **Queue** (Enter): send it once this turn ends.
 - **Steer** (⌘/Ctrl+Enter): add it to the turn the agent is working on.
@@ -153,9 +154,8 @@ an answer to a request, a new message queues behind it.
 
 ![The slash commands listed after typing a slash](screenshots/slash-commands.png)
 
-*native* Typing `/` lists the commands the chat runs itself, for what an agent's terminal UI would
-do; Tab completes one. Anything else that starts with `/` goes to the agent as typed, so its own
-commands (such as Claude Code's `/code-review`) still work.
+*native* Type `/` to list commands handled by the chat; Tab completes a suggestion. Other slash
+commands go directly to the agent, including Claude Code's `/code-review`.
 
 | Command | What it does |
 | --- | --- |
@@ -208,10 +208,9 @@ model supports. Codex takes a new model or effort with its next turn.
 
 ![The context popover: the tokens in the context window, and the 5-hour and weekly usage limits](screenshots/context-usage.png)
 
-The ring shows how full the context window is. Its popover has the tokens in the context after the
-last turn, and the account's usage limits with how much is used and when each resets: Claude Code's
-5-hour and weekly limits, Codex's windows. When the context fills up, the agent compacts it;
-`/compact` does it now.
+The ring shows context-window usage. Open it to see the token count after the last turn and the
+account's limits, usage and reset times: Claude Code's 5-hour and weekly limits, or Codex's usage
+windows. The agent compacts a full context automatically; use `/compact` to request it now.
 
 ![A note above the composer: the prompt cache expired and the next message reads 120k tokens again, with Compact](screenshots/cold-cache.png)
 
@@ -295,10 +294,10 @@ reloads the file; on a phone the viewer takes the whole screen.
 
 ![The viewer on my-app/docs/notes.md, with a note that docs/notes.md isn't in the working directory and this is the file found for it](screenshots/file-find.png)
 
-An agent started in a home directory works in a repository below it and names files relative to the
-repository, sometimes in the wrong case. When a path isn't in the working directory, the viewer
-looks for it below: one match opens, with a note naming the path the agent wrote, and several are
-listed to choose from.
+An agent started in a home directory may name files relative to a repository below it, sometimes
+with the wrong case. If that path doesn't resolve in the working directory, the viewer searches
+below it. A single match opens with a note showing the original path; multiple matches are listed
+for you to choose from.
 
 ![Opening index.html and its preview, then the diff of README.md](screenshots/demo-files.gif)
 
@@ -370,13 +369,14 @@ See [MCP management](../README.md#mcp-management) for the API.
 
 ![The Explorer's Session tab: what the sessions cost today, in 7 and 30 days and in all, and Claude Code's sessions in the directory with Open and Start a copy, one asking for a second click](screenshots/explorer-sessions.png)
 
-*native* For Claude Code, Codex and Pi the tab starts with the agent's sessions in its working
-directory, read from the agent's own logs: each with its name, first message, number of messages,
-when it last changed and what it cost. Above them, a card adds up what all of them and their
-subagents cost today, in the last 7 and 30 days (counting today, in your time zone) and in all, as
-the API-equivalent cost at list prices; hover over a cost for its tokens. **Open** restarts the agent on that session and shows its conversation;
-**Start a copy** opens a copy under a new id and leaves the session as it was. Both replace this
-conversation and its queue, and ask for a second click.
+*native* For Claude Code, Codex and Pi, this tab lists sessions in the working directory from the
+agent's logs, with names, first messages, message counts, last-change times and costs. A card above
+the list totals session and subagent costs for today, the last 7 and 30 days (including today, in
+your time zone), and all time. These are API-equivalent costs at list prices; hover for tokens.
+
+**Open** restarts the agent on a session and displays its conversation. **Start a copy** opens a
+copy under a new id, leaving the original session unchanged. Both replace the current conversation
+and queue and require a second click.
 
 ![The Explorer's Session tab asking for a second click to restart the agent](screenshots/explorer-session.png)
 
@@ -389,17 +389,17 @@ details menu has it too.
 
 ![The Explorer's Webhook tab: the receiver URL, event groups, signing secret, instance ID, heartbeat and public URL](screenshots/explorer-webhook.png)
 
-Sets up the webhook that pushes what happens to a receiver, such as a dashboard that watches many
-agents, also when AgentAPI started without one: the receiver's URL; the kinds of events to send
-(**Tasks**, **Needs you** for approvals, questions, plans, terminal dialogs, logins and usage limits,
-**Heartbeats**, **Run status**, **Agent errors**, **Messages**, **Tool calls**); a signing secret,
-which can be replaced or removed but not read back; the instance ID and public URL every event
-carries; and the heartbeat interval. **Delivery and payload** has the timeout, the attempts and a
-payload template. **Save** applies the settings at once, until AgentAPI restarts (with `--state-db` also after a
-restart, unless AgentAPI starts with other webhook flags); **Send test event**
-sends a `webhook.test` event to the saved URL and says how the receiver answered; **Turn off** clears
-the URL. Events set with `--webhook-events` that no kind covers whole, such as `task.completed`
-alone, are listed and kept. See [Webhooks](../README.md#webhooks) for the events and their format.
+Configure a webhook here even if AgentAPI started without one. Set the receiver URL, signing
+secret, instance ID, public URL and heartbeat interval, then choose event groups: **Tasks**,
+**Needs you** (approvals, questions, plans, terminal dialogs, logins and usage limits), **Heartbeats**,
+**Run status**, **Agent errors**, **Messages** and **Tool calls**. The secret can be replaced or
+removed but never read back. **Delivery and payload** contains the timeout, attempt count and template.
+
+**Save** applies settings immediately. They last until AgentAPI restarts; with `--state-db`, they
+survive a restart unless new webhook flags override them. **Send test event** sends `webhook.test`
+to the saved URL and shows the response. **Turn off** clears the URL. Individual events selected
+with `--webhook-events`, such as `task.completed` alone, remain listed even if they don't cover a
+whole group. See [Webhooks](../README.md#webhooks) for events and payloads.
 
 ## Lineage
 
@@ -474,7 +474,6 @@ can be shown in full. The file viewer takes the whole screen, and the terminals 
 
 ## Connection and caching
 
-The chat follows the server with server-sent events. Heartbeats show a lost connection; it
-reconnects by itself and replays only what changed while it was away. The status and the page title
-show the connection state. Reopening a long conversation is fast: the chat caches the transcript in
-the browser (IndexedDB), shows it at once and asks the server only for what changed since.
+The chat follows server-sent events, uses heartbeats to detect lost connections and reconnects
+automatically with incremental replay. The status and page title show the connection state.
+On reopening, it displays the IndexedDB-cached transcript immediately, then fetches changes.

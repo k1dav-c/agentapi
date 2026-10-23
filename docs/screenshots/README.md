@@ -1,8 +1,7 @@
 # Documentation screenshots
 
-These screenshots and animated GIFs of the chat UI illustrate the [chat UI guide](../chat-ui.md) and
-the [README](../../README.md). They were taken with Chromium from an AgentAPI v0.28.0 binary, which
-serves the production chat UI and the API.
+The [chat UI guide](../chat-ui.md) and [README](../../README.md) use these screenshots and GIFs.
+Chromium captured them from an AgentAPI v0.28.0 binary serving the production chat UI and API.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
 project, `my-app` (a page with a stylesheet, a script and release notes, two commits and
@@ -61,9 +60,9 @@ device scale factor of 1.
 | [login-card.png](login-card.png) | A login card |
 | [tty-mode.png](tty-mode.png) | TTY mode on a PTY agent |
 
-The GIFs record the main flows on a 1100 × 720 window (the phone one on 390 × 844), with a blue dot
-where the pointer is and where it clicks, since headless Chromium draws no pointer. Each frame keeps
-only what changed, so they stay small.
+The GIFs use a 1100 × 720 window, or 390 × 844 for the phone view. A blue dot marks the pointer and
+clicks because headless Chromium draws no pointer. Frames store only changed pixels to keep files
+small.
 
 | GIF | What it shows |
 | --- | --- |
@@ -111,11 +110,10 @@ runs the script) and a neutral shell prompt.
    node scripts/capture-docs.mjs
    ```
 
-The script creates the sample project and a home directory in a temporary directory, starts the three
-servers bound to 127.0.0.1, takes every view and records every GIF, writes
-[capture.json](capture.json) (the binary's version, the browser, the capture time, the viewports and
-the images) and stops the servers and removes the temporary directory again, also when a step fails.
-It fails if the chat reports an error. A run takes about five minutes.
+The script creates a temporary sample project and home directory, then starts three servers on
+127.0.0.1. It captures every view and GIF and writes [capture.json](capture.json) with the binary
+version, browser, capture time, viewports and images. It stops the servers and removes temporary
+files even if a step fails. A chat error fails the run, which takes about five minutes.
 
 The binary's version shows in the chat's header. To show the version a merge will release, build
 with it: `make build VERSION=0.27.0`.

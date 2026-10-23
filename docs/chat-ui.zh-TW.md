@@ -2,9 +2,8 @@
 
 [English](chat-ui.md) | 繁體中文
 
-AgentAPI 在 `/chat` 提供聊天介面。它內建在 `agentapi` 執行檔裡，所有 transport 都能使用，
-桌面和手機都可以，而且只透過 [HTTP API](../README.zh-TW.md#http-api-參考) 和伺服器溝通。
-本導覽會逐一介紹它的每個部分。
+開啟 `/chat` 即可使用 `agentapi` 執行檔內建的聊天介面。它支援所有 transport，適用於桌面與手機，
+透過 [HTTP API](../README.zh-TW.md#http-api-參考) 與伺服器溝通。
 
 截圖和動畫是 AgentAPI v0.28.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
 demo 的回覆、工具結果、模型和用量都是模擬的，TTY mode 則是以 PTY agent 執行的 bash。動畫會
@@ -47,16 +46,17 @@ demo 的回覆、工具結果、模型和用量都是模擬的，TTY mode 則是
 你送出的每則訊息都會開始一個任務。任務會先在標示「You」的色塊中顯示你的提示詞，接著依序呈現
 agent 做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列，以及它的思考內容。任務的標頭會
 顯示它的編號和狀態（Queued、Working、Waiting for you、Done、Failed 或 Limit reached）、工作中時
-的 Stop 按鈕，以及它的 ⋯ 選單。狀態來自伺服器的[任務](../README.zh-TW.md#任務)：agent 回報錯誤或
-結束時是 Failed（滑鼠移上去可以看到第一個錯誤），用量限制讓它停下時是 Limit reached（滑鼠移上去
-可以看到 agent 的訊息）。工具呼叫和思考內容會歸到伺服器所說的、它們開始時所屬的任務。你 steer 進
-執行中任務的訊息會顯示那個任務的狀態，agent 在那之後做的事也顯示在那個任務裡。
+的 Stop 按鈕，以及它的 ⋯ 選單。狀態由伺服器的[任務](../README.zh-TW.md#任務)決定：agent 回報錯誤或結束時顯示 Failed，
+滑鼠移上去可看第一個錯誤；因用量限制停止時顯示 Limit reached，可看 agent 的訊息。
+工具呼叫與思考內容的任務歸屬也由伺服器指定。steer 進來的訊息會共用目前任務的狀態，
+之後的活動也會歸在同一任務。
 
-寬螢幕上，任務的開始時間和耗時顯示在左側空白處；較窄的螢幕上則接在標頭的任務編號後面。
-*native* 對 Claude Code、Codex 和 Pi，還會一併顯示任務的花費：任務執行期間的模型呼叫所用的
-tokens（含 sub agent），以模型供應商的牌價計算；任務之間的呼叫（例如壓縮）不算在任何任務裡。這是 API 等價金額，訂閱方案
-不會收取；滑鼠移上去可以看到呼叫次數和 tokens。回合結束時會重新讀取，回合執行中則每 15 秒
-讀取一次。計算方式和如何設定價格見[工作階段花費](../README.zh-TW.md#工作階段花費)。
+寬螢幕上，開始時間與耗時顯示在左側空白處；窄螢幕上則接在標頭的任務編號後。
+*native* Claude Code、Codex 和 Pi 另會顯示任務執行期間的模型呼叫花費，含 sub agent，
+依供應商牌價計算。任務之間的呼叫，例如壓縮，不算入任何任務。
+
+這是 API 等價金額，訂閱方案不按此收費。滑鼠移上去可看呼叫次數與 tokens。花費會在回合結束時，
+以及執行期間每 15 秒更新。計算與價格設定見[工作階段花費](../README.zh-TW.md#工作階段花費)。
 
 ![任務的時間軸：開始時間、耗時和花費](screenshots/task-cost.png)
 
@@ -72,9 +72,8 @@ tokens（含 sub agent），以模型供應商的牌價計算；任務之間的�
 
 ### 思考內容
 
-在寬螢幕上，agent 的思考內容會以旁註顯示在右側，緊鄰它所屬的步驟；比所屬步驟還高的旁註會在
-步驟旁撐出空間，而不會把後面的旁註推離它們的步驟；較長的旁註只顯示六行，點一下才會完整顯示。
-在窄螢幕上，它會收合成任務中的一行「Thinking · *標題*」。
+寬螢幕上，思考內容以旁註顯示在對應步驟右側。較高的旁註會在該步驟旁預留空間，讓後面的旁註
+保持對齊；長旁註先顯示六行，點選可展開。窄螢幕上則收合為任務中的一行「Thinking · *標題*」。
 
 ### 訊息與較長的任務
 
@@ -122,9 +121,9 @@ agent 收到的是每個附件的路徑。*native* 接受圖片的 agent（Claud
 
 ![較長的回合中有兩個排隊中的任務，送出選單已開啟：Queue、Steer 和 Interrupt & send](screenshots/queue-steer.png)
 
-agent 工作中時送出的訊息會在佇列中等待（顯示在輸入框裡、訊息欄下方），回合結束後依序執行；
-佇列保存在伺服器上，每個開著的聊天畫面都會即時看到它的變化。每個排隊中的任務都可以編輯、上下移動、
-移除，或 *native* 立即 steer 進正在進行的回合（↳ 按鈕）。*native* 送出按鈕的選單提供三種送出方式：
+agent 工作中時，訊息會排入伺服器的佇列，顯示在訊息欄下方，等回合結束後依序執行。
+所有開啟的聊天畫面都會即時同步佇列。排隊中的任務可編輯、移動或移除。
+*native* ↳ 按鈕可立即 steer 進目前回合，送出選單則有三種模式：
 
 - **Queue**（Enter）：等這個回合結束再送出。
 - **Steer**（⌘/Ctrl+Enter）：加進 agent 正在進行的回合。
@@ -139,9 +138,8 @@ agent 工作中時送出的訊息會在佇列中等待（顯示在輸入框裡�
 
 ![輸入斜線後列出的斜線指令](screenshots/slash-commands.png)
 
-*native* 輸入 `/` 會列出由聊天介面自己執行的指令，用來做 agent 的終端機介面原本會做的事；
-按 Tab 可以補完指令。其他以 `/` 開頭的內容都會原樣送給 agent，所以它自己的指令（例如 Claude Code
-的 `/code-review`）仍然可以使用。
+*native* 輸入 `/` 可列出聊天介面處理的指令，按 Tab 補完建議。其他斜線指令會直接送給 agent，
+包括 Claude Code 的 `/code-review`。
 
 | 指令 | 作用 |
 | --- | --- |
@@ -274,9 +272,9 @@ inline code 裡的路徑（`lib/foo.go:12` 會開在第 12 行），以及 Explo
 
 ![檢視器開啟 my-app/docs/notes.md，並註明 docs/notes.md 不在工作目錄裡，這是找到的對應檔案](screenshots/file-find.png)
 
-在 home 目錄啟動的 agent，會在底下的某個 repo 裡工作，提到檔案時用的是相對於 repo 的路徑，
-有時大小寫也不對。路徑不在工作目錄裡時，檢視器會在工作目錄底下搜尋：只找到一個就直接開啟，
-並註明 agent 原本寫的路徑；找到多個則列出來讓你選。
+從 home 目錄啟動的 agent 可能用下層 repo 的相對路徑提到檔案，也可能寫錯大小寫。
+路徑無法在工作目錄中解析時，檢視器會往下搜尋：一個符合結果會直接開啟，並註明原路徑；
+多個結果則列出供選擇。
 
 ![開啟 index.html 和它的預覽，接著查看 README.md 的 diff](screenshots/demo-files.gif)
 
@@ -345,12 +343,12 @@ API 請參閱 [MCP 管理](../README.zh-TW.md#mcp-管理)。
 
 ![Explorer 的 Session 分頁：今天、7 天、30 天和全部的花費，以及這個目錄中 Claude Code 的工作階段，各有 Open 和 Start a copy，其中一個要求再點一次](screenshots/explorer-sessions.png)
 
-*native* 對 Claude Code、Codex 和 Pi，這個分頁最上方會列出 agent 在工作目錄中的工作階段，資料
-來自 agent 自己的紀錄：每一個都有名稱、第一則訊息、訊息數、最後變動的時間和花費。列表上方的
-卡片會加總全部工作階段及其 sub agent 今天、最近 7 天和 30 天（含今天，依你的時區）以及全部的
-花費，皆為以牌價計算的 API 等價金額；滑鼠移到金額上可以看到 tokens。**Open** 會讓
-agent 在那個工作階段上重新啟動，並顯示它的對話；**Start a copy** 會以新的 id 開啟它的副本，
-原本的工作階段維持不變。兩者都會取代目前的對話和佇列，並要求你再點一次。
+*native* 此分頁從 Claude Code、Codex 和 Pi 的紀錄列出工作目錄中的工作階段，包含名稱、第一則
+訊息、訊息數、最後變動時間和花費。上方卡片加總工作階段及 sub agent 今天、最近 7 天和 30 天
+（含今天，依你的時區），以及全部期間的花費。金額以牌價計算，為 API 等價金額；滑鼠移上去可看 tokens。
+
+**Open** 會在該工作階段重新啟動 agent 並顯示對話；**Start a copy** 會以新 id 開啟副本，保留原工作階段。
+兩者都會取代目前的對話與佇列，並要求再點一次確認。
 
 ![Explorer 的 Session 分頁要求再點一次才會重新啟動 agent](screenshots/explorer-session.png)
 
@@ -362,16 +360,15 @@ AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的�
 
 ![Explorer 的 Webhook 分頁：接收端網址、事件群組、簽章 secret、instance ID、心跳和公開網址](screenshots/explorer-webhook.png)
 
-設定把發生的事主動推送給接收端（例如監看多個 agent 的中控平台）的 webhook，AgentAPI 啟動時
-沒有設定也可以在這裡設定：接收端網址；要送的事件種類（**Tasks**、涵蓋核准、提問、計畫、終端機
-對話框、登入和用量限制的 **Needs you**、**Heartbeats**、**Run status**、**Agent errors**、
-**Messages**、**Tool calls**）；簽章 secret，可以替換或移除，但無法讀回；每個事件都會帶的
-instance ID 和公開網址；以及心跳間隔。**Delivery and payload** 底下有逾時、嘗試次數和 payload
-範本。**Save** 會立即套用設定，維持到 AgentAPI 重新啟動為止（使用 `--state-db` 時重新啟動後也仍有效，
-除非 AgentAPI 以不同的 webhook 參數啟動）；**Send test event** 會對已儲存的
-網址送出 `webhook.test` 事件，並顯示接收端的回應；**Turn off** 會清除網址。以 `--webhook-events`
-設定、但沒有完整涵蓋任一種類的事件（例如只有 `task.completed`）會列出並保留。事件與格式見
-[Webhook](../README.zh-TW.md#webhook)。
+即使 AgentAPI 啟動時沒有設定 webhook，也能在這裡設定接收端網址、簽章 secret、instance ID、
+公開網址和心跳間隔。事件群組包括 **Tasks**、**Needs you**（核准、提問、計畫、終端機對話框、
+登入與用量限制）、**Heartbeats**、**Run status**、**Agent errors**、**Messages** 和
+**Tool calls**。secret 可替換或移除，但無法讀回。**Delivery and payload** 提供逾時、嘗試次數與範本。
+
+**Save** 立即套用設定，維持到 AgentAPI 重新啟動；使用 `--state-db` 時也會跨重新啟動保留，
+除非新的 webhook 參數覆蓋設定。**Send test event** 向已儲存的網址送出 `webhook.test` 並顯示回應；
+**Turn off** 清除網址。透過 `--webhook-events` 單獨選取的事件，例如 `task.completed`，即使未涵蓋
+整個群組，也會列出並保留。事件與格式見 [Webhook](../README.zh-TW.md#webhook)。
 
 ## Lineage
 
@@ -442,7 +439,6 @@ agent 的警告和錯誤（失敗的回合、它忽略的設定）會以角落�
 
 ## 連線與快取
 
-聊天介面透過 server-sent events 追蹤伺服器的狀態。心跳（heartbeat）能察覺連線中斷；它會
-自己重新連線，並只重播離線期間有變動的部分。狀態和網頁標題會顯示連線狀態。重新開啟很長的
-對話也很快：聊天介面會把對話紀錄快取在瀏覽器中（IndexedDB），先立即顯示，再只向伺服器取得
-之後的變更。
+聊天介面追蹤 server-sent events，以心跳偵測斷線，並自動重新連線、增量重播。
+狀態列與網頁標題會顯示連線狀態。重新開啟時，介面先顯示 IndexedDB 快取的對話紀錄，
+再向伺服器取得變更。
