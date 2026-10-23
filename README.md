@@ -1459,6 +1459,8 @@ An optional Go `text/template` (`--webhook-payload-template`) reshapes the body 
 such as a chat service's incoming webhook. Available fields are `.ID`, `.Type`, `.CreatedAt`,
 `.Instance` and `.Data` (the event's data with its JSON field names, such as `{{.Data.prompt}}`), and
 for `run.status_changed` `.ServerID`, `.Status`, `.PreviousStatus`, `.AgentType` and `.Transport`.
+A template that uses another field (such as `.RunID`, named `.ServerID` since 1.0) is refused at
+startup and by `PUT /webhook`, since it would fail every delivery.
 
 All flags have `AGENTAPI_` environment variables (`AGENTAPI_WEBHOOK_URL`, `AGENTAPI_WEBHOOK_EVENTS`
 with the events separated by spaces, `AGENTAPI_WEBHOOK_SECRET`, and so on). `GET /webhook` shows the

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -216,6 +217,13 @@ func parseWebhookTemplate(templateStr string) (*template.Template, error) {
 	}
 	tmpl, err := template.New("webhook").Parse(templateStr)
 	if err != nil {
+		return nil, fmt.Errorf("invalid webhook payload template: %w", err)
+	}
+	// A field WebhookTemplateData lacks (.RunID before 1.0) fails only when
+	// the template runs, so run it once on an empty event: it would fail
+	// every delivery. Other errors may come from the empty data alone.
+	sample := WebhookTemplateData{Instance: &WebhookInstance{}, Data: map[string]any{}}
+	if err := tmpl.Execute(io.Discard, sample); err != nil && strings.Contains(err.Error(), "can't evaluate field") {
 		return nil, fmt.Errorf("invalid webhook payload template: %w", err)
 	}
 	return tmpl, nil

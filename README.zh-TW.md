@@ -1244,7 +1244,8 @@ valid = hmac.compare_digest(expected, signature) and abs(time.time() - int(times
 可以用 Go `text/template`（`--webhook-payload-template`）改寫 body 的格式以符合接收端，例如聊天
 服務的 incoming webhook。可用欄位有 `.ID`、`.Type`、`.CreatedAt`、`.Instance` 和 `.Data`（事件的
 data，欄位名稱同 JSON，例如 `{{.Data.prompt}}`），`run.status_changed` 另有 `.ServerID`、`.Status`、
-`.PreviousStatus`、`.AgentType` 和 `.Transport`。
+`.PreviousStatus`、`.AgentType` 和 `.Transport`。用到其他欄位的範本（例如 1.0 起改名為 `.ServerID` 的
+`.RunID`）每次送出都會失敗，所以啟動時和 `PUT /webhook` 會直接拒絕。
 
 每個參數都有對應的 `AGENTAPI_` 環境變數（`AGENTAPI_WEBHOOK_URL`、以空白分隔事件的
 `AGENTAPI_WEBHOOK_EVENTS`、`AGENTAPI_WEBHOOK_SECRET` 等）。`GET /webhook` 顯示目前設定（只顯示

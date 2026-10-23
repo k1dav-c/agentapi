@@ -9,7 +9,8 @@
   started working) instead of `session_id` and `run_id`, and add `agent_session_id`, the agent's
   own session. `GET /cost` and timeline events carry `agent_session_id` instead of `session_id`;
   human-reply requests carry `server_id` and `turn`; webhook events carry `server_id` instead of
-  `run_id` in their instance and in `run.status_changed`, and payload templates use `.ServerID`.
+  `run_id` in their instance and in `run.status_changed`, and payload templates use `.ServerID`
+  (a template that still uses `.RunID` is refused at startup instead of failing every delivery).
 - `--state-file` is deprecated: its conversation is imported once into a state database next to it
   (the same name with `.db`, or `--state-db`), which keeps the conversation from then on, and the
   file isn't written anymore. `--load-state=false` skips the import; `--save-state` has no effect.

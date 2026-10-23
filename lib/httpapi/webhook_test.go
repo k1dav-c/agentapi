@@ -204,6 +204,28 @@ func TestWebhookInvalidPayloadTemplate(t *testing.T) {
 	require.ErrorContains(t, err, "invalid webhook payload template")
 }
 
+func TestWebhookPayloadTemplateUnknownField(t *testing.T) {
+	t.Parallel()
+
+	newDispatcher := func(tmpl string) error {
+		_, err := newWebhookDispatcher(
+			WebhookConfig{URL: "https://example.com/hook", PayloadTemplate: tmpl},
+			slog.New(slog.NewTextHandler(io.Discard, nil)),
+			mf.AgentTypeClaude,
+			TransportPTY,
+			quartz.NewReal(),
+		)
+		return err
+	}
+	// Renamed to .ServerID in 1.0.
+	require.ErrorContains(t, newDispatcher(`{"run":"{{.RunID}}"}`), "can't evaluate field RunID")
+	require.ErrorContains(t, newDispatcher(`{{.Instance.Nope}}`), "can't evaluate field Nope")
+	// Data is a map: what an event lacks is empty, and functions that fail
+	// on empty data don't reject the template.
+	require.NoError(t, newDispatcher(`{"server":"{{.ServerID}}","host":"{{.Instance.Hostname}}","prompt":"{{.Data.prompt}}"}`))
+	require.NoError(t, newDispatcher(`{{index .Data.items 0}}`))
+}
+
 func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
 	t.Parallel()
 
