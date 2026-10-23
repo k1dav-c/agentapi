@@ -24,10 +24,10 @@ type agentBackend interface {
 	// canRestart reports whether the agent can be replaced while AgentAPI
 	// runs.
 	canRestart() bool
-	// beginRestart begins replacing the agent with a new one and returns
-	// the rest (see agentRestart). With clear the conversation starts
-	// over; a native agent's always does, since the new agent starts a new
-	// session.
+	// beginRestart begins replacing the agent with a new one, with the
+	// lifecycle restarting, and returns the rest (see agentRestart). With
+	// clear the conversation starts over; a native agent's always does,
+	// since the new agent starts a new session.
 	beginRestart(clear bool) agentRestart
 	// beginReload begins restarting the agent on its session after its
 	// configuration (the MCP servers) changed, keeping the conversation.

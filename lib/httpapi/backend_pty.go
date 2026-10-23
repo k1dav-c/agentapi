@@ -54,6 +54,7 @@ func (b ptyBackend) canRestart() bool {
 // the new process.
 func (b ptyBackend) beginRestart(clear bool) agentRestart {
 	s := b.s
+	s.emitter.SetLifecycle(LifecycleRestarting)
 	// The old session's log stays out of the conversation.
 	s.stopJSONLWatcher()
 	if clear {

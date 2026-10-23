@@ -749,8 +749,13 @@ func newUpdatingServer(t *testing.T, update func(context.Context)) (*nativeServe
 		_ = srv.Stop(context.Background())
 		cancel()
 	})
-	require.Eventually(t, func() bool { return len(factory.Adapters()) == 1 }, 5*time.Second, 5*time.Millisecond)
-	return &nativeServer{t: t, url: ts.URL, factory: factory}, srv
+	n := &nativeServer{t: t, url: ts.URL, factory: factory}
+	require.Eventually(t, func() bool {
+		var status httpapi.StatusChangeBody
+		n.do(http.MethodGet, "/status", nil, &status)
+		return status.Lifecycle == httpapi.LifecycleReady
+	}, 5*time.Second, 5*time.Millisecond)
+	return n, srv
 }
 
 // While the agent restarts (here, its CLI updates), the server goes on:
@@ -785,10 +790,9 @@ func TestNative_RestartDoesntHoldTheServer(t *testing.T) {
 	assert.Equal(t, http.StatusOK, <-restarted)
 	require.Eventually(t, func() bool {
 		a := n.factory.Adapters()
-		return len(a) == 2 && len(a[1].Turns()) == 1
+		return len(a) == 2 && len(a[1].Turns()) == 1 && len(n.queue()) == 0
 	}, 5*time.Second, 5*time.Millisecond)
 	assert.Equal(t, "after the restart, edited", n.factory.Last().Turns()[0].Text)
-	assert.Empty(t, n.queue())
 }
 
 // Stop cuts a restart short rather than wait for it.

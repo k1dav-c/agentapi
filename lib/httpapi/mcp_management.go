@@ -94,7 +94,6 @@ func (s *Server) restartQuery(restart bool) (bool, error) {
 	case err != nil:
 		return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", err)
 	case !reloads:
-		s.emitter.SetLifecycle(LifecycleRestarting)
 		restarting = s.backend().beginRestart(false)
 	}
 	if err := s.runRestartLocked(restarting); err != nil {

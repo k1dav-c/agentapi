@@ -50,7 +50,12 @@ func (b nativeBackend) canRestart() bool {
 // the new one, which starts empty however the restart was asked for.
 func (b nativeBackend) beginRestart(bool) agentRestart {
 	s := b.s
-	replacement := s.native.BeginRestart(s.forgetConversationLocked)
+	replacement := s.native.BeginRestart(func() {
+		// Once the old agent is retired, so that nothing it still reports
+		// changes it.
+		s.emitter.SetLifecycle(LifecycleRestarting)
+		s.forgetConversationLocked()
+	})
 	return agentRestart{run: func(ctx context.Context) error {
 		if s.updateAgent != nil {
 			// The update can take minutes: the old agent stops first, so

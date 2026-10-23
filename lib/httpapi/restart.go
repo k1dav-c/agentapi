@@ -95,7 +95,6 @@ func (s *Server) restartLocked(clear bool) error {
 	if err := s.restartRefusedLocked(); err != nil {
 		return err
 	}
-	s.emitter.SetLifecycle(LifecycleRestarting)
 	return s.runRestartLocked(s.backend().beginRestart(clear))
 }
 
