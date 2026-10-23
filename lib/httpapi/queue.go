@@ -272,6 +272,10 @@ func (s *Server) startMessageQueue() {
 func (s *Server) dispatchNextQueuedMessage() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.restarting {
+		// The messages wait for the new agent.
+		return
+	}
 	next, ok := s.queue.Head()
 	backend := s.backend()
 	if !ok || !backend.readyForQueued() {

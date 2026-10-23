@@ -46,27 +46,33 @@ func (b ptyBackend) canRestart() bool {
 	return b.s.restartAgent != nil
 }
 
-// restart starts the agent's command again (restartAgent updates the agent
-// first). Without clear the conversation goes on with the new process.
-func (b ptyBackend) restart(ctx context.Context, clear bool) error {
+// beginRestart begins starting the agent's command again (restartAgent
+// updates the agent first). Without clear the conversation goes on with
+// the new process.
+func (b ptyBackend) beginRestart(clear bool) agentRestart {
 	s := b.s
 	// The old session's log stays out of the conversation.
 	s.stopJSONLWatcher()
 	if clear {
 		s.resetConversationLocked()
 	}
-	pid, err := s.restartAgent(ctx)
-	if err != nil {
-		return err
+	var pid int
+	return agentRestart{
+		run: func(ctx context.Context) error {
+			var err error
+			pid, err = s.restartAgent(ctx)
+			return err
+		},
+		done: func() {
+			s.startJSONLWatcher(pid)
+			s.emitter.SetLifecycle(LifecycleStarting)
+		},
 	}
-	s.startJSONLWatcher(pid)
-	s.emitter.SetLifecycle(LifecycleStarting)
-	return nil
 }
 
-// reload: a terminal agent reads its configuration when it starts.
-func (b ptyBackend) reload(context.Context) (bool, error) {
-	return false, nil
+// beginReload: a terminal agent reads its configuration when it starts.
+func (b ptyBackend) beginReload() (agentRestart, bool, error) {
+	return agentRestart{}, false, nil
 }
 
 // close: the terminal agent's process is stopped by whoever started it.

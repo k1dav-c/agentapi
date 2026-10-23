@@ -476,7 +476,7 @@ export interface paths {
         post?: never;
         /**
          * Delete all messages and restart
-         * @description Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport).
+         * @description Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue.
          */
         delete: operations["delete-messages"];
         options?: never;
@@ -3747,6 +3747,15 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

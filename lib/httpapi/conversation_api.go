@@ -167,6 +167,11 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 		if strings.TrimSpace(input.Body.Content) == "" {
 			return nil, huma.Error400BadRequest("message must not be empty")
 		}
+		if s.restarting {
+			// The new agent gets it once it runs.
+			s.queueMessageLocked(resp, input.Body.Content, false)
+			return resp, nil
+		}
 		if err := backend.deliver(input.Body.Content, mode, resp); err != nil {
 			return nil, err
 		}
@@ -178,6 +183,9 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 	case MessageTypeRaw:
 		if s.agentio == nil {
 			return nil, huma.Error400BadRequest("raw messages need a terminal; the native transport has none")
+		}
+		if s.restarting {
+			return nil, huma.Error409Conflict(errRestarting.Error())
 		}
 		if _, err := s.agentio.Write([]byte(input.Body.Content)); err != nil {
 			return nil, fmt.Errorf("failed to send message: %w", err)
@@ -224,8 +232,8 @@ func (s *Server) registerConversationRoutes() {
 
 	huma.Delete(s.api, "/messages", s.deleteMessages, func(o *huma.Operation) {
 		o.Summary = "Delete all messages and restart"
-		o.Description = "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport)."
-		o.Errors = []int{400}
+		o.Description = "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue."
+		o.Errors = []int{400, 409}
 	})
 
 	// POST /message endpoint

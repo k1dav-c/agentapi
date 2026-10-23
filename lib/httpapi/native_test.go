@@ -728,6 +728,101 @@ func TestNative_RestartOutlivesTheRequest(t *testing.T) {
 	}, 5*time.Second, 5*time.Millisecond, "the restart went on")
 }
 
+// newUpdatingServer starts a native server whose agent's CLI update runs
+// update.
+func newUpdatingServer(t *testing.T, update func(context.Context)) (*nativeServer, *httpapi.Server) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
+	factory := &nativetest.Factory{}
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeClaude,
+		Transport:      httpapi.TransportNative,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		Native:         httpapi.NativeConfig{Factory: factory.New, UpdateAgent: update},
+	})
+	require.NoError(t, err)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(func() {
+		ts.Close()
+		_ = srv.Stop(context.Background())
+		cancel()
+	})
+	require.Eventually(t, func() bool { return len(factory.Adapters()) == 1 }, 5*time.Second, 5*time.Millisecond)
+	return &nativeServer{t: t, url: ts.URL, factory: factory}, srv
+}
+
+// While the agent restarts (here, its CLI updates), the server goes on:
+// messages wait in the queue for the new agent, which gets them, the queue
+// can be changed, and another restart is refused.
+func TestNative_RestartDoesntHoldTheServer(t *testing.T) {
+	t.Chdir(t.TempDir())
+	updating, release := make(chan struct{}), make(chan struct{})
+	n, _ := newUpdatingServer(t, func(context.Context) {
+		close(updating)
+		<-release
+	})
+	restarted := make(chan int, 1)
+	go func() { restarted <- n.do(http.MethodDelete, "/messages", nil, nil) }()
+	<-updating
+
+	code, sent := n.send("after the restart", "")
+	require.Equal(t, http.StatusOK, code)
+	assert.True(t, sent.Queued)
+	queue := n.queue()
+	require.Len(t, queue, 1)
+	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/queue/"+strconv.Itoa(queue[0].ID), map[string]any{"content": "after the restart, edited"}, nil))
+	assert.Equal(t, http.StatusOK, n.do(http.MethodGet, "/handoff", nil, nil))
+	var status httpapi.StatusChangeBody
+	n.do(http.MethodGet, "/status", nil, &status)
+	assert.Equal(t, httpapi.LifecycleStarting, status.Lifecycle)
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodDelete, "/messages", nil, nil), "one restart at a time")
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodPut, "/mcp?restart=true", map[string]any{"servers": map[string]any{}}, nil))
+	assert.Len(t, n.factory.Adapters(), 1, "the new agent waits for the update")
+
+	close(release)
+	assert.Equal(t, http.StatusOK, <-restarted)
+	require.Eventually(t, func() bool {
+		a := n.factory.Adapters()
+		return len(a) == 2 && len(a[1].Turns()) == 1
+	}, 5*time.Second, 5*time.Millisecond)
+	assert.Equal(t, "after the restart, edited", n.factory.Last().Turns()[0].Text)
+	assert.Empty(t, n.queue())
+}
+
+// Stop cuts a restart short rather than wait for it.
+func TestNative_StopDuringARestart(t *testing.T) {
+	updating, cut := make(chan struct{}), make(chan struct{})
+	n, srv := newUpdatingServer(t, func(ctx context.Context) {
+		close(updating)
+		<-ctx.Done()
+		close(cut)
+	})
+	restarted := make(chan int, 1)
+	go func() { restarted <- n.do(http.MethodDelete, "/messages", nil, nil) }()
+	<-updating
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- srv.Stop(context.Background()) }()
+	select {
+	case err := <-stopped:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop waited for the restart")
+	}
+	<-cut
+	assert.Equal(t, http.StatusInternalServerError, <-restarted)
+	require.Eventually(t, func() bool {
+		for _, a := range n.factory.Adapters() {
+			if !a.Closed() {
+				return false
+			}
+		}
+		return true
+	}, 5*time.Second, 5*time.Millisecond, "no agent outlives Stop")
+}
+
 func TestNative_MCPRestartResumes(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

@@ -30,6 +30,10 @@ func (s *Server) agentCtx(timeout time.Duration) (context.Context, context.Cance
 // errStopping is returned for a restart asked for while AgentAPI stops.
 var errStopping = errors.New("AgentAPI is stopping")
 
+// errRestarting is returned for a restart asked for while another one is
+// under way.
+var errRestarting = errors.New("the agent is restarting; try again once it is ready")
+
 // deleteMessages clears all conversation state (messages, rich messages,
 // requests, timeline, errors, the queue) and restarts the agent process.
 func (s *Server) deleteMessages(_ context.Context, _ *struct{}) (*DeleteMessagesResponse, error) {
@@ -39,10 +43,10 @@ func (s *Server) deleteMessages(_ context.Context, _ *struct{}) (*DeleteMessages
 	// Serialize process replacement with message and handoff reply delivery.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	ctx, cancel := s.agentCtx(restartTimeout)
-	defer cancel()
-	if err := s.restartLocked(ctx, true); err != nil {
+	switch err := s.restartLocked(true); {
+	case errors.Is(err, errRestarting), errors.Is(err, errStopping):
+		return nil, huma.Error409Conflict(err.Error())
+	case err != nil:
 		return nil, huma.Error500InternalServerError(fmt.Sprintf("agent restart failed: %v", err))
 	}
 
@@ -69,17 +73,58 @@ func (s *Server) resetConversationLocked() {
 	s.conversation.Reset()
 }
 
-// restartLocked replaces the agent with a new one. With clear the
-// conversation starts over; a native agent's always does. Caller holds s.mu.
-func (s *Server) restartLocked(ctx context.Context, clear bool) error {
-	if s.stopping {
+// restartRefusedLocked returns why the agent can't be replaced now, or
+// nil: AgentAPI stops, or another replacement is under way. Caller holds
+// s.mu.
+func (s *Server) restartRefusedLocked() error {
+	switch {
+	case s.stopping:
 		// Stop closed the agent: don't start another one.
 		return errStopping
+	case s.restarting:
+		return errRestarting
+	}
+	return nil
+}
+
+// restartLocked replaces the agent with a new one. With clear the
+// conversation starts over; a native agent's always does. Caller holds
+// s.mu, which is released while the agent restarts (see
+// runRestartLocked).
+func (s *Server) restartLocked(clear bool) error {
+	if err := s.restartRefusedLocked(); err != nil {
+		return err
 	}
 	s.emitter.SetLifecycle(LifecycleRestarting)
-	if err := s.backend().restart(ctx, clear); err != nil {
+	return s.runRestartLocked(s.backend().beginRestart(clear))
+}
+
+// runRestartLocked does what is left of a replacement of the agent that
+// began with s.mu held: stopping the old agent, updating its CLI, starting
+// the new one can take minutes, so they run without s.mu, which the caller
+// has again when it returns. Meanwhile s.restarting is set: messages wait
+// in the queue, which sends nothing, and other replacements are refused,
+// so nothing gets in between; requests that don't take s.mu (GET /status,
+// /handoff, /queue) answer, and Stop can cancel the restart. A restart
+// that fails leaves the lifecycle failed.
+func (s *Server) runRestartLocked(r agentRestart) error {
+	s.restarting = true
+	s.mu.Unlock()
+	ctx, cancel := s.agentCtx(restartTimeout)
+	err := r.run(ctx)
+	cancel()
+	s.mu.Lock()
+	s.restarting = false
+	switch {
+	case err != nil:
 		s.emitter.SetLifecycle(LifecycleFailed)
 		return err
+	case s.stopping:
+		// Stop closed the new agent meanwhile.
+		return errStopping
+	}
+	if r.done != nil {
+		r.done()
 	}
 	return nil
 }

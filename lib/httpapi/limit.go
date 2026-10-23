@@ -100,6 +100,10 @@ func (s *Server) continueIfDue() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.restarting {
+		// It goes out once the new agent runs.
+		return
+	}
 	ctx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
 	if _, err := s.native.ContinueIfDue(ctx, s.clock.Now()); err != nil && !errors.Is(err, st.ErrMessageValidationChanging) {

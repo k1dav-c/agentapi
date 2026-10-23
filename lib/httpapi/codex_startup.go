@@ -53,8 +53,9 @@ func (s *Server) dismissCodexUpdatePrompt() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Wait for the dialog to finish rendering before answering it.
-	if s.conversation.Status() != st.ConversationStatusStable {
+	// Wait for the dialog to finish rendering before answering it, and for
+	// a restart to start the new process.
+	if s.restarting || s.conversation.Status() != st.ConversationStatusStable {
 		return
 	}
 	now := s.clock.Now()

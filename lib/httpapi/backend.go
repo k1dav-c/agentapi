@@ -22,14 +22,16 @@ type agentBackend interface {
 	// canRestart reports whether the agent can be replaced while AgentAPI
 	// runs.
 	canRestart() bool
-	// restart replaces the agent with a new one. With clear the
-	// conversation starts over; a native agent's always does, since the new
-	// agent starts a new session.
-	restart(ctx context.Context, clear bool) error
-	// reload restarts the agent on its session after its configuration
-	// (the MCP servers) changed, keeping the conversation. It reports false
-	// when the agent can't, and needs a restart instead.
-	reload(ctx context.Context) (bool, error)
+	// beginRestart begins replacing the agent with a new one and returns
+	// the rest (see agentRestart). With clear the conversation starts
+	// over; a native agent's always does, since the new agent starts a new
+	// session.
+	beginRestart(clear bool) agentRestart
+	// beginReload begins restarting the agent on its session after its
+	// configuration (the MCP servers) changed, keeping the conversation.
+	// It reports false, having changed nothing, when the agent can't, and
+	// needs a restart instead.
+	beginReload() (agentRestart, bool, error)
 	// close stops the agent for good, when AgentAPI stops.
 	close() error
 
@@ -42,6 +44,18 @@ type agentBackend interface {
 	// pendingRequest returns the request the agent waits on that the
 	// human reply protocol offers, as text, or false.
 	pendingRequest() (native.RequestState, string, bool)
+}
+
+// agentRestart is what is left of a replacement of the agent once it
+// began: the old agent no longer changes the conversation, and run does
+// the slow part, which can take minutes.
+type agentRestart struct {
+	// run stops the old agent, updates its CLI if the server does, and
+	// starts the new one. It runs without s.mu.
+	run func(ctx context.Context) error
+	// done, if set, completes the restart once run succeeded. Caller
+	// holds s.mu.
+	done func()
 }
 
 // backend returns the server's agentBackend.

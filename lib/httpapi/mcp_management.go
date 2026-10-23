@@ -79,22 +79,25 @@ func (s *Server) restartQuery(restart bool) (bool, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ctx, cancel := s.agentCtx(restartTimeout)
-	defer cancel()
-	if s.stopping {
-		return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", errStopping)
+	switch err := s.restartRefusedLocked(); {
+	case errors.Is(err, errRestarting):
+		return false, huma.Error409Conflict("MCP config was written, but the agent is restarting; restart it again once it is ready")
+	case err != nil:
+		return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", err)
 	}
 	// The agent restarts on its session if it can, and the conversation
 	// stays; otherwise it is replaced.
-	switch reloaded, err := s.backend().reload(ctx); {
+	restarting, reloads, err := s.backend().beginReload()
+	switch {
 	case errors.Is(err, native.ErrTurnActive):
 		return false, huma.Error409Conflict("MCP config was written, but the agent is working on a turn; restart it once the turn ends")
 	case err != nil:
 		return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", err)
-	case reloaded:
-		return true, nil
+	case !reloads:
+		s.emitter.SetLifecycle(LifecycleRestarting)
+		restarting = s.backend().beginRestart(false)
 	}
-	if err := s.restartLocked(ctx, false); err != nil {
+	if err := s.runRestartLocked(restarting); err != nil {
 		return false, fmt.Errorf("MCP config was written, but agent restart failed: %w", err)
 	}
 	return true, nil

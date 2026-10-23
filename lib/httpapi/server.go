@@ -49,6 +49,7 @@ type Server struct {
 	mu                 sync.Mutex
 	stopOnce           sync.Once
 	stopping           bool // set under mu once Stop closed the agent: no more restarts
+	restarting         bool // set under mu while a restart runs without it (runRestartLocked)
 	logger             *slog.Logger
 	conversation       st.Conversation
 	native             *native.Conversation // nil unless the transport is native
@@ -490,8 +491,9 @@ func (s *Server) Stop(ctx context.Context) error {
 				err = nil
 			}
 		}
-		// A restart under way has been cancelled with shutdownCtx; once it
-		// let go of mu, none can start another agent.
+		// A restart under way was cancelled with shutdownCtx, and lets go
+		// of mu while it waits for its agent; from now on none can start
+		// another one.
 		s.mu.Lock()
 		s.stopping = true
 		s.mu.Unlock()

@@ -123,8 +123,8 @@ func (s *Server) resumeSession(_ context.Context, input *ResumeSessionRequest) (
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.stopping {
-		return nil, huma.Error409Conflict(errStopping.Error())
+	if err := s.restartRefusedLocked(); err != nil {
+		return nil, huma.Error409Conflict(err.Error())
 	}
 	// The check that no turn runs and the retirement of the agent are one
 	// step, before anything is cleared: a refused switch leaves the
@@ -144,15 +144,13 @@ func (s *Server) resumeSession(_ context.Context, input *ResumeSessionRequest) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to open the session: %w", err)
 	}
-	ctx, cancel := s.agentCtx(restartTimeout)
-	defer cancel()
-	if err := replacement.Start(ctx); err != nil {
-		s.emitter.SetLifecycle(LifecycleFailed)
+	if err := s.runRestartLocked(agentRestart{run: replacement.Start, done: func() {
+		if !input.Body.Fork {
+			// A copy is named by the agent, if at all.
+			s.emitter.SetSessionName(history.Title)
+		}
+	}}); err != nil {
 		return nil, huma.Error500InternalServerError(fmt.Sprintf("failed to open the session: %v", err))
-	}
-	if !input.Body.Fork {
-		// A copy is named by the agent, if at all.
-		s.emitter.SetSessionName(history.Title)
 	}
 	return okResponse(), nil
 }
