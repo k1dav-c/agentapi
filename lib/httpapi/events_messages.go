@@ -73,6 +73,12 @@ func (e *EventEmitter) resyncLocked() {
 	if e.persister != nil {
 		e.persister.SetSeq(e.epoch, e.seq)
 	}
+	e.endConversationSubscriptionsLocked()
+}
+
+// endConversationSubscriptionsLocked ends the subscriptions that get the
+// conversation's changes; screen streams go on. Caller holds e.mu.
+func (e *EventEmitter) endConversationSubscriptionsLocked() {
 	for id, sub := range e.chans {
 		if wantsConversation(sub.wants) {
 			e.unsubscribeInner(id)
@@ -105,18 +111,48 @@ func (e *EventEmitter) EmitRichMessageSnapshot(msg transcript.RichMessage) {
 func (e *EventEmitter) emitRichMessage(msg transcript.RichMessage, replace bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-
-	idx := -1
-	// Search from the end: updates target recent messages.
-	for i := len(e.richMessages) - 1; i >= 0; i-- {
-		if e.richMessages[i].MessageID == msg.MessageID && e.richMessages[i].Role == msg.Role {
-			idx = i
-			break
-		}
+	msg = e.upsertRichLocked(msg, replace)
+	if e.persister != nil {
+		e.persister.SetSeq(e.epoch, e.seq)
 	}
-	if idx >= 0 && replace {
+	// Always broadcast the merged snapshot. Broadcasting the incoming Claude
+	// delta would make clients replace a complete message with its last block.
+	e.notifyChannels(EventTypeRichMessageUpdate, RichMessageUpdateBody{RichMessage: msg, Seq: e.seq})
+}
+
+// LoadRichMessages adds a resumed session's rich messages at once, each
+// stored as EmitRichMessageSnapshot stores it. The subscriptions to the
+// conversation end rather than get them one by one, which a long session
+// would overflow: their clients load the state again.
+func (e *EventEmitter) LoadRichMessages(msgs []transcript.RichMessage) {
+	if len(msgs) == 0 {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, msg := range msgs {
+		e.upsertRichLocked(msg, true)
+	}
+	if e.persister != nil {
+		e.persister.SetSeq(e.epoch, e.seq)
+	}
+	e.endConversationSubscriptionsLocked()
+}
+
+// richKey identifies a rich message, which parsers and adapters send again
+// as it grows.
+type richKey struct{ id, role string }
+
+// upsertRichLocked stores msg under the next seq, as a new rich message or
+// in place of the one with its key (with replace) or merged into it, and
+// returns what is stored. Caller holds e.mu.
+func (e *EventEmitter) upsertRichLocked(msg transcript.RichMessage, replace bool) transcript.RichMessage {
+	key := richKey{msg.MessageID, msg.Role}
+	idx, ok := e.richIndex[key]
+	switch {
+	case ok && replace:
 		e.richMessages[idx] = msg
-	} else if idx >= 0 {
+	case ok:
 		existing := e.richMessages[idx]
 		existing.Content = mergeRichContent(existing.Content, msg.Content)
 		existing.StopReason = msg.StopReason
@@ -124,20 +160,21 @@ func (e *EventEmitter) emitRichMessage(msg transcript.RichMessage, replace bool)
 		existing.Usage = msg.Usage
 		e.richMessages[idx] = existing
 		msg = existing
-	} else {
+	default:
+		if e.richIndex == nil {
+			e.richIndex = make(map[richKey]int)
+		}
 		e.richMessages = append(e.richMessages, msg)
 		e.richSeq = append(e.richSeq, 0)
 		idx = len(e.richMessages) - 1
+		e.richIndex[key] = idx
 	}
 	e.seq++
 	e.richSeq[idx] = e.seq
 	if e.persister != nil {
 		e.persister.PutRichMessage(idx, msg, e.seq)
-		e.persister.SetSeq(e.epoch, e.seq)
 	}
-	// Always broadcast the merged snapshot. Broadcasting the incoming Claude
-	// delta would make clients replace a complete message with its last block.
-	e.notifyChannels(EventTypeRichMessageUpdate, RichMessageUpdateBody{RichMessage: msg, Seq: e.seq})
+	return msg
 }
 
 func mergeRichContent(existing, incoming []transcript.RichContentBlock) []transcript.RichContentBlock {

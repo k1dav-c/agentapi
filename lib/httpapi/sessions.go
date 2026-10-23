@@ -134,9 +134,7 @@ func (s *Server) resumeSession(_ context.Context, input *ResumeSessionRequest) (
 		// The conversation, its queue and its requests are the old
 		// session's.
 		s.forgetConversationLocked()
-		for _, msg := range history.Rich {
-			s.emitter.EmitRichMessageSnapshot(msg)
-		}
+		s.emitter.LoadRichMessages(history.Rich)
 	})
 	if errors.Is(err, native.ErrTurnActive) {
 		return nil, huma.Error409Conflict("the agent is working on a turn or compacting its context; interrupt it or wait until it is done")

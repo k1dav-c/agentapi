@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -564,6 +565,70 @@ func TestEventEmitterResyncLosesNothing(t *testing.T) {
 	_, _, state = emitter.SubscribeSince(synced.Seq, synced.Epoch)
 	assert.True(t, state[0].Payload.(SessionSyncBody).Full)
 	assert.Equal(t, want, replayed(state))
+}
+
+// Rich messages are found by their key, also after a restore, and the
+// index goes with a reset.
+func TestEventEmitterFindsRichMessagesByKey(t *testing.T) {
+	persister := newRecordingPersister()
+	emitter := NewEventEmitter(WithPersister(persister))
+	text := func(id, role, s string) transcript.RichMessage {
+		return transcript.RichMessage{MessageID: id, Role: role, Content: []transcript.RichContentBlock{{Type: "text", Text: s}}}
+	}
+	emitter.Restore(EmitterState{
+		Seq:          2,
+		RichMessages: []transcript.RichMessage{text("m1", "assistant", "one"), text("m1", "user", "result")},
+		RichSeqs:     []uint64{1, 2},
+	})
+	emitter.EmitRichMessageSnapshot(text("m1", "assistant", "one, grown"))
+	emitter.EmitRichMessageSnapshot(text("m2", "assistant", "two"))
+	emitter.EmitRichMessage(transcript.RichMessage{MessageID: "m1", Role: "user", Content: []transcript.RichContentBlock{{Type: "text", Text: "more"}}})
+	rich := emitter.RichMessages()
+	require.Len(t, rich, 3)
+	assert.Equal(t, "one, grown", rich[0].Content[0].Text)
+	require.Len(t, rich[1].Content, 2, "merged")
+	assert.Equal(t, "two", rich[2].Content[0].Text)
+
+	emitter.Reset()
+	emitter.EmitRichMessageSnapshot(text("m2", "assistant", "new conversation"))
+	rich = emitter.RichMessages()
+	require.Len(t, rich, 1)
+	assert.Equal(t, "new conversation", rich[0].Content[0].Text)
+}
+
+// A resumed session's rich messages are stored at once, and the
+// subscriptions to the conversation end rather than get them one by one;
+// the clients' replay holds them all.
+func TestEventEmitterLoadRichMessages(t *testing.T) {
+	emitter := NewEventEmitter(WithSubscriptionBufSize(4))
+	_, ch, _ := emitter.Subscribe()
+	_, screen, _ := emitter.SubscribeTo(ScreenEvents, 0, "")
+	var history []transcript.RichMessage
+	var want []string
+	for i := range 10 {
+		history = append(history, transcript.RichMessage{MessageID: fmt.Sprint("h", i), Role: "assistant"})
+		want = append(want, fmt.Sprintf("rich h%d", i))
+	}
+	emitter.LoadRichMessages(history)
+	events, closed := drainClosed(ch)
+	assert.True(t, closed)
+	assert.Empty(t, events)
+	_, closed = drainClosed(screen)
+	assert.False(t, closed)
+
+	_, _, state := emitter.SubscribeSince(0, "")
+	assert.Equal(t, want, replayed(state))
+	assert.Equal(t, uint64(10), state[0].Payload.(SessionSyncBody).Seq)
+}
+
+// Emitting rich messages one by one takes time in proportion to their
+// number: a resumed session's used to take quadratic time, under s.mu.
+func BenchmarkEmitRichMessageSnapshot(b *testing.B) {
+	emitter := NewEventEmitter()
+	b.ResetTimer()
+	for i := range b.N {
+		emitter.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: strconv.Itoa(i), Role: "assistant"})
+	}
 }
 
 func TestEventEmitterRequests(t *testing.T) {

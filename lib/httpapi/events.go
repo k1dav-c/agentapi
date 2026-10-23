@@ -178,6 +178,7 @@ type EventEmitter struct {
 	messageSeq          []uint64
 	richSeq             []uint64
 	richMessages        []transcript.RichMessage
+	richIndex           map[richKey]int // a rich message's position, by its key
 	requests            []native.RequestState
 	requestSeq          []uint64
 	capabilities        *native.Capabilities
@@ -335,6 +336,10 @@ func (e *EventEmitter) Restore(state EmitterState) {
 	e.messageSeq = slices.Clone(state.MessageSeqs)
 	e.richMessages = slices.Clone(state.RichMessages)
 	e.richSeq = slices.Clone(state.RichSeqs)
+	e.richIndex = make(map[richKey]int, len(e.richMessages))
+	for i, msg := range e.richMessages {
+		e.richIndex[richKey{msg.MessageID, msg.Role}] = i
+	}
 	e.sessionEvents = slices.Clone(state.SessionEvents)
 	e.nextSessionEventID = 1
 	for _, ev := range e.sessionEvents {
@@ -424,6 +429,7 @@ func (e *EventEmitter) Reset() {
 	e.messageSeq = nil
 	e.richMessages = nil
 	e.richSeq = nil
+	e.richIndex = nil
 	e.requests = nil
 	e.requestSeq = nil
 	// A new epoch makes reconnecting clients drop their cache; connected
