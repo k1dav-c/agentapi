@@ -211,7 +211,7 @@ func (s *Store) claudeSubagents(sessionID string) (subs []Subagent, err error) {
 	if path, ok := s.find(sessionID); ok {
 		dirs = []string{filepath.Dir(path)}
 	} else if own, _ := claudeLogsByID(s, sessionID); len(own) == 0 {
-		if dirs, err = claudelog.ProjectDirs(s.cwd); err != nil {
+		if dirs, err = claudeProjectDirs(s); err != nil {
 			return nil, err
 		}
 	}

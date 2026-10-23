@@ -3,7 +3,6 @@ package pilog
 import (
 	"bytes"
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -36,18 +35,16 @@ func (n *Namer) Name(line []byte) (string, bool) {
 	return n.name, true
 }
 
-// HistoryHeader reads the session ID and start from the first line of a
-// log, and reports false for a log that isn't a session of cwd.
-func HistoryHeader(line []byte, cwd string) (string, time.Time, bool) {
+// Header reads the session ID, its start and working directory (empty
+// when the log doesn't say) from the first line of a log, and reports
+// false for a log that isn't a session's.
+func Header(line []byte) (id string, started time.Time, cwd string, ok bool) {
 	var header SessionHeader
 	if json.Unmarshal(line, &header) != nil || header.Type != "session" || header.ID == "" {
-		return "", time.Time{}, false
+		return "", time.Time{}, "", false
 	}
-	if header.CWD != "" && filepath.Clean(header.CWD) != filepath.Clean(cwd) {
-		return "", time.Time{}, false
-	}
-	started, _ := time.Parse(time.RFC3339Nano, header.Timestamp)
-	return header.ID, started, true
+	started, _ = time.Parse(time.RFC3339Nano, header.Timestamp)
+	return header.ID, started, header.CWD, true
 }
 
 // Prompt returns the user's message a line holds, if it holds one.

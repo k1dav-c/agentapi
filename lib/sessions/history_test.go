@@ -11,7 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/agentlog/claudelog"
+	"github.com/coder/agentapi/lib/agentlog/pilog"
 	st "github.com/coder/agentapi/lib/screentracker"
 )
 
@@ -330,4 +332,49 @@ func TestClaudeSessionsOfALongPath(t *testing.T) {
 	}
 	_, err = store.ReadHistory("s4")
 	assert.ErrorIs(t, err, ErrSessionNotFound, "nothing says it is the directory's")
+}
+
+// AgentAPI can run in a path through a symbolic link (os.Getwd returns
+// $PWD), while the agents record the real path, and name the directories
+// of their logs after it.
+func TestSessionsThroughASymlink(t *testing.T) {
+	root := agentlog.RealPath(t.TempDir())
+	real := filepath.Join(root, "real")
+	link := filepath.Join(root, "link")
+	require.NoError(t, os.Mkdir(real, 0o700))
+	require.NoError(t, os.Symlink(real, link))
+
+	t.Run("claude", func(t *testing.T) {
+		config := t.TempDir()
+		t.Setenv("CLAUDE_CONFIG_DIR", config)
+		writeLog(t, filepath.Join(config, "projects", claudelog.ProjectDirName(real), "s1.jsonl"), time.Now(),
+			claudeLine("s1", real, "2026-10-20T10:00:00.000Z", "Hi"))
+		list, err := newStore(t, "claude", link).List(10)
+		require.NoError(t, err)
+		require.Len(t, list, 1)
+		assert.Equal(t, "s1", list[0].ID)
+	})
+	t.Run("codex", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("CODEX_HOME", home)
+		writeLog(t, filepath.Join(home, "sessions", "2026", "10", "20", "rollout-2026-10-20T10-00-00-t1.jsonl"), time.Now(),
+			`{"timestamp":"2026-10-20T10:00:00.000Z","type":"session_meta","payload":{"id":"t1","session_id":"t1","cwd":"`+real+`"}}`,
+			`{"timestamp":"2026-10-20T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Hi"}]}}`)
+		list, err := newStore(t, "codex", link).List(10)
+		require.NoError(t, err)
+		require.Len(t, list, 1)
+		assert.Equal(t, "t1", list[0].ID)
+	})
+	t.Run("pi", func(t *testing.T) {
+		agentDir := t.TempDir()
+		t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+		t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+		writeLog(t, filepath.Join(agentDir, "sessions", pilog.SessionDirName(real), "2026-10-20T10-00-00-000Z_p1.jsonl"), time.Now(),
+			`{"type":"session","version":3,"id":"p1","timestamp":"2026-10-20T10:00:00.000Z","cwd":"`+real+`"}`,
+			`{"type":"message","id":"u1","timestamp":"2026-10-20T10:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"Hi"}]}}`)
+		list, err := newStore(t, "pi", link).List(10)
+		require.NoError(t, err)
+		require.Len(t, list, 1)
+		assert.Equal(t, "p1", list[0].ID)
+	})
 }

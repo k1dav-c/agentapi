@@ -68,7 +68,7 @@ func (l *sessionLog) Line(line []byte) bool {
 		// a line records does.
 		if cwd, ok := agentlog.StringField(line, "cwd"); ok && cwd != "" {
 			l.recordedCWD = true
-			if !l.store.sameDir(cwd) {
+			if !l.store.dir.Is(cwd) {
 				l.session = false
 				return false
 			}
@@ -104,8 +104,8 @@ func (l *sessionLog) head(line []byte) bool {
 		}
 		return true
 	}
-	id, started, ok := l.src.header(line, l.store.cwd)
-	if !ok {
+	id, started, cwd, ok := l.src.header(line)
+	if !ok || (cwd != "" && !l.store.dir.Is(cwd)) {
 		return false
 	}
 	l.session, l.id, l.started = true, id, started

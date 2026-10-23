@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/coder/agentapi/lib/agentlog"
 )
 
 // Resolver finds the JSONL session file for a Codex process.
@@ -85,7 +87,9 @@ func (r *Resolver) Resolve() (string, error) {
 	// moves on.
 	r.metas.Retain(func(path string) bool { return listed[path] })
 
-	// Find the newest file that matches our CWD
+	// Find the newest file that matches our CWD, which Codex records by its
+	// real path.
+	cwd := agentlog.NewDir(r.CWD)
 	for _, fi := range files {
 		meta, err := r.metas.Get(fi.path)
 		if err != nil {
@@ -101,7 +105,7 @@ func (r *Resolver) Resolve() (string, error) {
 		if err != nil {
 			continue
 		}
-		if meta.Payload.CWD == r.CWD &&
+		if cwd.Is(meta.Payload.CWD) &&
 			(r.NotBefore.IsZero() || !startedAt.Before(r.NotBefore)) {
 			return fi.path, nil
 		}

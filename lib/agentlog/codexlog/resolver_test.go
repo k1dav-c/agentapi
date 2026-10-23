@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coder/agentapi/lib/agentlog"
 )
 
 func TestReadSessionMeta_LongFirstLine(t *testing.T) {
@@ -197,5 +199,29 @@ func TestCodexResolver_ReadsEachFileOnce(t *testing.T) {
 	}
 	if resolver.metas.Has(other) {
 		t.Errorf("the removed file %s is still remembered", other)
+	}
+}
+
+func TestCodexResolverThroughASymlink(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "real")
+	link := filepath.Join(root, "link")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	sessionsDir := t.TempDir()
+	now := time.Now().UTC()
+	dateDir := filepath.Join(sessionsDir, now.Format("2006"), now.Format("01"), now.Format("02"))
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Codex records the real path of its working directory.
+	want := writeCodexSession(t, dateDir, "s.jsonl", agentlog.RealPath(real), now)
+	got, err := (&Resolver{CWD: link, NotBefore: now.Add(-time.Minute), SessionsDir: sessionsDir}).Resolve()
+	if err != nil || got != want {
+		t.Fatalf("Resolve() = %q, %v; want %s", got, err, want)
 	}
 }

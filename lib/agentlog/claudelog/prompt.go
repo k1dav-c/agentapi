@@ -8,9 +8,10 @@ import (
 	"github.com/coder/agentapi/lib/agentlog"
 )
 
-// HistoryHeader reads the session ID and start from the first line of a
-// log, and reports false for a subagent's log.
-func HistoryHeader(line []byte) (string, time.Time, bool) {
+// Header reads the session ID and start from the first line of a log,
+// and reports false for a subagent's log. The working directory is in the
+// lines that follow.
+func Header(line []byte) (string, time.Time, bool) {
 	var entry struct {
 		SessionID   string `json:"sessionId"`
 		Timestamp   string `json:"timestamp"`

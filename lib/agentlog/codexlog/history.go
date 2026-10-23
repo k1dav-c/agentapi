@@ -10,19 +10,16 @@ import (
 	"github.com/coder/agentapi/lib/agentlog"
 )
 
-// HistoryHeader reads the thread ID and start from the first line of a
-// log, and reports false for a log that isn't a session of cwd (another
-// directory's, a subagent's).
-func HistoryHeader(line []byte, cwd string) (string, time.Time, bool) {
+// Header reads the thread ID, its start and working directory from the
+// first line of a log, and reports false for a log that isn't a session's
+// (a subagent's).
+func Header(line []byte) (id string, started time.Time, cwd string, ok bool) {
 	var meta SessionMeta
 	if json.Unmarshal(line, &meta) != nil || meta.Payload.ID == "" || meta.IsSubAgent() {
-		return "", time.Time{}, false
+		return "", time.Time{}, "", false
 	}
-	if filepath.Clean(meta.Payload.CWD) != filepath.Clean(cwd) {
-		return "", time.Time{}, false
-	}
-	started, _ := time.Parse(time.RFC3339Nano, meta.Timestamp)
-	return meta.Payload.ID, started, true
+	started, _ = time.Parse(time.RFC3339Nano, meta.Timestamp)
+	return meta.Payload.ID, started, meta.Payload.CWD, true
 }
 
 // Prompt takes the user's messages from the model's input, without the

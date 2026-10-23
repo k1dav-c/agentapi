@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/coder/agentapi/lib/agenthome"
+	"github.com/coder/agentapi/lib/agentlog"
 )
 
 // Resolver finds the JSONL session file of a Pi coding agent process.
@@ -87,7 +88,8 @@ func (r *Resolver) sessionsDir(session Session) (string, error) {
 	if r.SessionsDir != "" {
 		return r.SessionsDir, nil
 	}
-	return SessionsDir(r.CWD, session.Dir)
+	// Pi names the directory after the real path of its working directory.
+	return SessionsDir(agentlog.RealPath(r.CWD), session.Dir)
 }
 
 // SessionsDir is the directory that holds the session files of a Pi
@@ -151,12 +153,13 @@ func (r *Resolver) Resolve() (string, error) {
 	// it can be another process's older session that is still in use.
 	var started string
 	var startedAt time.Time
+	cwd := agentlog.NewDir(r.CWD)
 	for _, file := range files {
 		header, err := ReadSessionHeader(file.path)
 		if err != nil || header.Type != "session" {
 			continue
 		}
-		if r.CWD != "" && header.CWD != "" && filepath.Clean(header.CWD) != filepath.Clean(r.CWD) {
+		if r.CWD != "" && header.CWD != "" && !cwd.Is(header.CWD) {
 			continue
 		}
 		if r.NotBefore.IsZero() {

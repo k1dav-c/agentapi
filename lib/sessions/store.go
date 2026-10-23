@@ -3,7 +3,6 @@ package sessions
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -21,8 +20,10 @@ import (
 // only what was appended since. The server holds one for its agent and
 // directory. It is safe for concurrent use.
 type Store struct {
-	agent  string
-	cwd    string
+	agent string
+	// dir is the working directory: AgentAPI's, which the logs record by
+	// its real path.
+	dir    *agentlog.Dir
 	prices *pricing.Table
 	src    source
 
@@ -81,7 +82,7 @@ func New(agentType, cwd string, config Config) (*Store, error) {
 	}
 	s := &Store{
 		agent:  agentType,
-		cwd:    cwd,
+		dir:    agentlog.NewDir(cwd),
 		prices: prices,
 		src:    src,
 		names:  agentlog.NewIndex(codexlog.NewThreadNames, 1, maxLogBytes),
@@ -197,12 +198,6 @@ func (s *Store) identify(path string) (id string, ok, recorded bool) {
 		return l.Line(line) && !l.identified() && l.lines < maxIdentifyLines
 	})
 	return l.id, l.session && l.id != "", l.recordedCWD
-}
-
-// sameDir reports whether a working directory a log records is the
-// directory.
-func (s *Store) sameDir(recorded string) bool {
-	return filepath.Clean(recorded) == filepath.Clean(s.cwd)
 }
 
 // threadName is the name Codex gave its thread id, from its session index.

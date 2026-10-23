@@ -27,10 +27,11 @@ type source struct {
 	// linesRecordCWD says the lines of a log record the working directory
 	// (Claude Code's), where its first line doesn't.
 	linesRecordCWD bool
-	// header reads the session's ID and start from its log's first line,
-	// and reports false for a log that isn't a session of the directory
-	// (another directory's, a subagent's).
-	header func(line []byte, cwd string) (id string, started time.Time, ok bool)
+	// header reads the session's ID, its start and working directory
+	// (empty when only the lines that follow say) from its log's first
+	// line, and reports false for a log that isn't a session's (a
+	// subagent's).
+	header func(line []byte) (id string, started time.Time, cwd string, ok bool)
 	// prompt returns the user's message a line holds, if it holds one.
 	prompt func(line []byte) (string, time.Time, bool)
 	parser func() agentlog.LineParser
@@ -51,7 +52,7 @@ func sourceFor(agentType string) (source, bool) {
 			files:          claudeFiles,
 			byID:           claudeLogsByID,
 			linesRecordCWD: true,
-			header:         func(line []byte, _ string) (string, time.Time, bool) { return claudelog.HistoryHeader(line) },
+			header:         claudeHeader,
 			prompt:         claudelog.Prompt,
 			parser:         func() agentlog.LineParser { return claudelog.NewParser() },
 			namer:          func() agentlog.SessionNamer { return claudelog.NewNamer() },
@@ -61,7 +62,7 @@ func sourceFor(agentType string) (source, bool) {
 		return source{
 			files:  codexFiles,
 			byID:   codexLogsByID,
-			header: codexlog.HistoryHeader,
+			header: codexlog.Header,
 			prompt: codexlog.Prompt,
 			parser: func() agentlog.LineParser { return codexlog.NewParser() },
 			calls:  func() agentlog.CallReader { return codexlog.NewCalls() },
@@ -71,7 +72,7 @@ func sourceFor(agentType string) (source, bool) {
 		return source{
 			files:  piFiles,
 			byID:   piLogsByID,
-			header: pilog.HistoryHeader,
+			header: pilog.Header,
 			prompt: pilog.Prompt,
 			parser: func() agentlog.LineParser { return pilog.NewParser() },
 			namer:  func() agentlog.SessionNamer { return pilog.NewNamer() },
@@ -110,8 +111,31 @@ func logsIn(dir string) ([]string, error) {
 
 // --- Claude Code ---
 
+func claudeHeader(line []byte) (string, time.Time, string, bool) {
+	id, started, ok := claudelog.Header(line)
+	return id, started, "", ok
+}
+
+// claudeProjectDirs are the project directories that may hold the
+// directory's sessions, by its real path and the one AgentAPI was given.
+func claudeProjectDirs(s *Store) ([]string, error) {
+	var dirs []string
+	for _, path := range s.dir.Paths() {
+		named, err := claudelog.ProjectDirs(path)
+		if err != nil {
+			return nil, err
+		}
+		for _, dir := range named {
+			if !slices.Contains(dirs, dir) {
+				dirs = append(dirs, dir)
+			}
+		}
+	}
+	return dirs, nil
+}
+
 func claudeFiles(s *Store) ([]string, error) {
-	dirs, err := claudelog.ProjectDirs(s.cwd)
+	dirs, err := claudeProjectDirs(s)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +154,7 @@ func claudeFiles(s *Store) ([]string, error) {
 // directory's project directories, and in any other, for a directory
 // whose name Claude Code made otherwise.
 func claudeLogsByID(s *Store, id string) (own, elsewhere []string) {
-	if dirs, err := claudelog.ProjectDirs(s.cwd); err == nil {
+	if dirs, err := claudeProjectDirs(s); err == nil {
 		for _, dir := range dirs {
 			path := filepath.Join(dir, id+".jsonl")
 			if _, err := os.Stat(path); err == nil {
@@ -210,7 +234,7 @@ func codexFiles(s *Store) ([]string, error) {
 	}
 	var files []string
 	for _, t := range threads {
-		if !t.meta.IsSubAgent() && filepath.Clean(t.meta.Payload.CWD) == filepath.Clean(s.cwd) {
+		if !t.meta.IsSubAgent() && s.dir.Is(t.meta.Payload.CWD) {
 			files = append(files, t.path)
 		}
 	}
@@ -258,11 +282,24 @@ func walkReverse(root string, depth int, fn func(dir string) bool) error {
 // --- Pi ---
 
 func piFiles(s *Store) ([]string, error) {
-	dir, err := pilog.SessionsDir(s.cwd, "")
-	if err != nil {
-		return nil, err
+	var files []string
+	var dirs []string
+	for _, path := range s.dir.Paths() {
+		dir, err := pilog.SessionsDir(path, "")
+		if err != nil {
+			return nil, err
+		}
+		if slices.Contains(dirs, dir) {
+			continue
+		}
+		dirs = append(dirs, dir)
+		logs, err := logsIn(dir)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, logs...)
 	}
-	return logsIn(dir)
+	return files, nil
 }
 
 // piLogsByID lists the logs of session id: Pi names a session's log
