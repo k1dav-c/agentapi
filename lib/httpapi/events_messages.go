@@ -122,21 +122,28 @@ func (e *EventEmitter) emitRichMessage(msg transcript.RichMessage, replace bool)
 
 // LoadRichMessages adds a resumed session's rich messages at once, each
 // stored as EmitRichMessageSnapshot stores it. The subscriptions to the
-// conversation end rather than get them one by one, which a long session
-// would overflow: their clients load the state again.
+// conversation get them one by one when they fit their buffers easily;
+// for a longer session, which would overflow them, the subscriptions end
+// instead, and their clients load the state again.
 func (e *EventEmitter) LoadRichMessages(msgs []transcript.RichMessage) {
 	if len(msgs) == 0 {
 		return
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	stream := len(msgs) <= int(e.subscriptionBufSize)/4
 	for _, msg := range msgs {
-		e.upsertRichLocked(msg, true)
+		msg = e.upsertRichLocked(msg, true)
+		if stream {
+			e.notifyChannels(EventTypeRichMessageUpdate, RichMessageUpdateBody{RichMessage: msg, Seq: e.seq})
+		}
 	}
 	if e.persister != nil {
 		e.persister.SetSeq(e.epoch, e.seq)
 	}
-	e.endConversationSubscriptionsLocked()
+	if !stream {
+		e.endConversationSubscriptionsLocked()
+	}
 }
 
 // richKey identifies a rich message, which parsers and adapters send again

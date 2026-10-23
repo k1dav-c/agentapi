@@ -643,29 +643,42 @@ func TestEventEmitterFindsRichMessagesByKey(t *testing.T) {
 	assert.Equal(t, "new conversation", rich[0].Content[0].Text)
 }
 
-// A resumed session's rich messages are stored at once, and the
-// subscriptions to the conversation end rather than get them one by one;
+// A resumed session's rich messages are stored at once. A short session's
+// go to the subscriptions one by one; for a long one, which would overflow
+// their buffers, the subscriptions to the conversation end instead, and
 // the clients' replay holds them all.
 func TestEventEmitterLoadRichMessages(t *testing.T) {
-	emitter := NewEventEmitter(WithSubscriptionBufSize(4))
-	_, ch, _ := emitter.Subscribe()
-	_, screen, _ := emitter.SubscribeTo(ScreenEvents, 0, "")
-	var history []transcript.RichMessage
-	var want []string
-	for i := range 10 {
-		history = append(history, transcript.RichMessage{MessageID: fmt.Sprint("h", i), Role: "assistant"})
-		want = append(want, fmt.Sprintf("rich h%d", i))
+	history := func(n int) ([]transcript.RichMessage, []string) {
+		var msgs []transcript.RichMessage
+		var names []string
+		for i := range n {
+			msgs = append(msgs, transcript.RichMessage{MessageID: fmt.Sprint("h", i), Role: "assistant"})
+			names = append(names, fmt.Sprintf("rich h%d", i))
+		}
+		return msgs, names
 	}
-	emitter.LoadRichMessages(history)
+
+	emitter := NewEventEmitter(WithSubscriptionBufSize(40))
+	_, ch, _ := emitter.Subscribe()
+	short, want := history(10)
+	emitter.LoadRichMessages(short)
 	events, closed := drainClosed(ch)
+	assert.False(t, closed)
+	assert.Equal(t, want, replayed(events))
+
+	emitter = NewEventEmitter(WithSubscriptionBufSize(40))
+	_, ch, _ = emitter.Subscribe()
+	_, screen, _ := emitter.SubscribeTo(ScreenEvents, 0, "")
+	long, want := history(11)
+	emitter.LoadRichMessages(long)
+	events, closed = drainClosed(ch)
 	assert.True(t, closed)
 	assert.Empty(t, events)
 	_, closed = drainClosed(screen)
 	assert.False(t, closed)
-
 	_, _, state := emitter.SubscribeSince(0, "")
 	assert.Equal(t, want, replayed(state))
-	assert.Equal(t, uint64(10), state[0].Payload.(SessionSyncBody).Seq)
+	assert.Equal(t, uint64(11), state[0].Payload.(SessionSyncBody).Seq)
 }
 
 // Emitting rich messages one by one takes time in proportion to their
