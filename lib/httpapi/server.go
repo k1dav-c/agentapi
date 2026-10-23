@@ -69,7 +69,8 @@ type Server struct {
 	shutdownCtx        context.Context
 	shutdown           context.CancelFunc
 	transport          Transport
-	queue              messageQueue // guarded by mu
+	queue              messageQueue  // guarded by mu
+	queueLoop          quartz.Waiter // the queue's loop, nil until it starts
 	mcpStore           mcpconfig.Store
 	mcpMu              sync.Mutex
 	webhook            *webhookDispatcher
@@ -484,18 +485,24 @@ func (s *Server) Stop(ctx context.Context) error {
 		// Ends the queue loop and the event streams, which the HTTP
 		// shutdown would otherwise wait for.
 		s.shutdown()
-		// No request can change the queue once the HTTP server and the
-		// agent have stopped, so the queue is stored after both.
+		// No request can change the queue once the HTTP server, the queue
+		// loop and the agent have stopped, so the queue is stored after
+		// them.
 		if s.srv != nil {
 			if err = s.srv.Shutdown(ctx); errors.Is(err, http.ErrServerClosed) {
 				err = nil
 			}
 		}
+		if s.queueLoop != nil {
+			// A tick under way may still send a message.
+			_ = s.queueLoop.Wait("messageQueueDispatch")
+		}
 		// A restart under way was cancelled with shutdownCtx, and lets go
 		// of mu while it waits for its agent; from now on none can start
-		// another one.
+		// another one, or another session-log watcher.
 		s.mu.Lock()
 		s.stopping = true
+		s.stopJSONLWatcher()
 		s.mu.Unlock()
 		if closeErr := s.backend().close(); closeErr != nil {
 			s.logger.Error("Failed to stop the agent", "error", closeErr)

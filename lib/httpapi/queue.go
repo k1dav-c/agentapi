@@ -249,14 +249,14 @@ func (s *Server) queueMessageLocked(resp *MessageResponse, content string, front
 	resp.Body.Queued = true
 }
 
-// startMessageQueue starts the queue dispatch loop. Dispatch is driven by
-// polling rather than by subscribing to status events: an event subscriber
-// channel is closed by the emitter when it fills up (which a slow
-// conversation.Send call could cause), and status events don't fire again
-// when a message fails transient validation while the agent stays stable.
-// Polling is immune to both.
+// startMessageQueue starts the queue dispatch loop, which runs until Stop.
+// Dispatch is driven by polling rather than by subscribing to status
+// events: an event subscriber channel is closed by the emitter when it
+// fills up (which a slow conversation.Send call could cause), and status
+// events don't fire again when a message fails transient validation while
+// the agent stays stable. Polling is immune to both.
 func (s *Server) startMessageQueue() {
-	s.clock.TickerFunc(s.shutdownCtx, messageQueueDispatchInterval, func() error {
+	s.queueLoop = s.clock.TickerFunc(s.shutdownCtx, messageQueueDispatchInterval, func() error {
 		s.dismissCodexUpdatePrompt()
 		s.continueIfDue()
 		s.dispatchNextQueuedMessage()
