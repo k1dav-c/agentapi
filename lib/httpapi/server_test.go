@@ -1072,6 +1072,28 @@ func TestServer_UploadsDontChangeTheSchema(t *testing.T) {
 	assert.Empty(t, doc.Paths["/upload"]["post"].Parameters)
 }
 
+// The parts of an upload too large for memory go to temporary files, which
+// are removed once the upload is stored.
+func TestServer_UploadLeavesNoTemporaryFiles(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeClaude,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		UploadDir:      t.TempDir(),
+	})
+	require.NoError(t, err)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	require.Equal(t, http.StatusOK, uploadFile(t, ts.URL, make([]byte, 1<<20)))
+	left, err := filepath.Glob(filepath.Join(tmp, "multipart-*"))
+	require.NoError(t, err)
+	assert.Empty(t, left)
+}
+
 // A body far larger than the limit is refused without being parsed into
 // temporary files.
 func TestServer_UploadTooLarge(t *testing.T) {

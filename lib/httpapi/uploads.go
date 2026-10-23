@@ -82,6 +82,9 @@ func (s *Server) serveUploadRequest(ctx huma.Context, _ func(huma.Context)) {
 		s.uploadInvalid(ctx, "body", "cannot read multipart form: "+err.Error())
 		return
 	}
+	// The parts too large for memory went to temporary files, which
+	// net/http would remove only for its own copy of the request.
+	defer func() { _ = r.MultipartForm.RemoveAll() }()
 	files := r.MultipartForm.File["file"]
 	switch len(files) {
 	case 0:
