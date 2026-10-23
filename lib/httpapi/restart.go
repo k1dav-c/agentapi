@@ -51,13 +51,22 @@ func (s *Server) deleteMessages(_ context.Context, _ *struct{}) (*DeleteMessages
 	return response, nil
 }
 
-// resetConversationLocked clears all conversation state: messages, rich
-// messages, requests, timeline, errors and the queue, whose IDs go on
-// counting. Caller holds s.mu.
-func (s *Server) resetConversationLocked() {
+// forgetConversationLocked clears what the server keeps of the
+// conversation: the emitter's state (messages, rich messages, requests,
+// timeline, errors) and the queue, whose IDs go on counting. It leaves the
+// conversation itself alone, so the native conversation can have it run
+// while it replaces its agent. Caller holds s.mu.
+func (s *Server) forgetConversationLocked() {
 	s.emitter.Reset()
-	s.conversation.Reset()
 	s.queue.Clear()
+}
+
+// resetConversationLocked clears all conversation state: the
+// conversation's messages, and what forgetConversationLocked clears.
+// Caller holds s.mu.
+func (s *Server) resetConversationLocked() {
+	s.forgetConversationLocked()
+	s.conversation.Reset()
 }
 
 // restartLocked replaces the agent with a new one. With clear the

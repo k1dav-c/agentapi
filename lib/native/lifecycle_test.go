@@ -289,3 +289,64 @@ func TestSwitchWhileATurnRuns(t *testing.T) {
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "work"}))
 	assert.ErrorIs(t, c.Switch(context.Background(), native.Resume{Ref: "other"}, nil), native.ErrTurnActive)
 }
+
+// A switch is refused while the agent compacts too, and a refused switch
+// changes nothing: reset doesn't run and the agent goes on.
+func TestBeginSwitchWhileCompactingChangesNothing(t *testing.T) {
+	compacting, release := make(chan struct{}), make(chan struct{})
+	c, factory, _ := start(t, func(a *nativetest.Adapter) {
+		a.Caps.Compact = true
+		a.OnCompact = func(context.Context) error {
+			close(compacting)
+			<-release
+			return nil
+		}
+	}, native.Config{})
+	first := factory.Last()
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
+	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+	before := c.Messages()
+	compacted := make(chan error, 1)
+	go func() { compacted <- c.Compact(context.Background()) }()
+	<-compacting
+
+	reset := false
+	_, err := c.BeginSwitch(native.Resume{Ref: "other"}, nil, func() { reset = true })
+	assert.ErrorIs(t, err, native.ErrTurnActive)
+	assert.False(t, reset)
+	assert.Equal(t, before, c.Messages())
+	assert.False(t, first.Closed())
+	assert.Len(t, factory.Adapters(), 1)
+	_, err = c.BeginReload()
+	assert.ErrorIs(t, err, native.ErrTurnActive)
+
+	close(release)
+	require.NoError(t, <-compacted)
+	assert.True(t, c.Idle())
+}
+
+// BeginRestart retires the agent before reset runs, so nothing the old
+// agent still reports lands in the conversation that replaces it; Start
+// closes it.
+func TestBeginRestartRetiresFirst(t *testing.T) {
+	c, factory, rec := start(t, nil, native.Config{})
+	first := factory.Last()
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
+	first.Sink().RequestOpened(approval("r1"))
+
+	retired := false
+	r := c.BeginRestart(func() {
+		requests := rec.get().requests
+		retired = len(requests) > 0 && requests[len(requests)-1].Status == native.RequestStatusExpired
+	})
+	assert.True(t, retired, "the agent's requests expired before the reset")
+	first.Sink().RichMessage(text("late", "stale"))
+	assert.Empty(t, c.Messages(), "the retired agent's events are ignored")
+	assert.False(t, c.Idle(), "no turn starts until the new agent did")
+	assert.False(t, first.Closed(), "Start closes it")
+
+	require.NoError(t, r.Start(context.Background()))
+	assert.True(t, first.Closed())
+	assert.Len(t, factory.Adapters(), 2)
+	assert.True(t, c.Idle())
+}

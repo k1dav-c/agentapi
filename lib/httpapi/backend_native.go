@@ -36,33 +36,35 @@ func (b nativeBackend) canRestart() bool {
 }
 
 // restart starts a new agent in a new session, after updating the agent
-// CLI when the server can.
+// CLI when the server can. The old agent is retired before the
+// conversation is cleared, so nothing it still reports lands in the new
+// one, which starts empty however the restart was asked for.
 func (b nativeBackend) restart(ctx context.Context, _ bool) error {
 	s := b.s
+	replacement := s.native.BeginRestart(s.forgetConversationLocked)
 	if s.updateAgent != nil {
 		// The update can take minutes: the old agent stops first, so it
-		// doesn't go on working, and into the new conversation.
-		_ = s.native.Close()
-	}
-	// The new session starts with an empty conversation, so the old one
-	// goes, however the restart was asked for.
-	s.resetConversationLocked()
-	if s.updateAgent != nil {
+		// doesn't go on working meanwhile.
+		replacement.CloseOld()
 		// The new agent is the latest release; a failed update (e.g.
 		// offline) still restarts the installed one.
 		s.updateAgent(ctx)
 	}
 	// The conversation reports the new agent's status itself.
-	return s.native.Restart(ctx)
+	return replacement.Start(ctx)
 }
 
 // reload restarts the agent on its session, which it resumes. One whose
 // session can't be resumed needs a restart, into a new session.
 func (b nativeBackend) reload(ctx context.Context) (bool, error) {
-	switch err := b.s.native.Reload(ctx); {
+	replacement, err := b.s.native.BeginReload()
+	switch {
 	case errors.Is(err, native.ErrUnsupported):
 		return false, nil
 	case err != nil:
+		return false, err
+	}
+	if err := replacement.Start(ctx); err != nil {
 		return false, err
 	}
 	return true, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	st "github.com/coder/agentapi/lib/screentracker"
 )
@@ -212,112 +213,167 @@ func (c *Conversation) exitLocked(err error) {
 // The exits Restart and Close cause are not delivered.
 func (c *Conversation) Exited() <-chan error { return c.exited }
 
-// Restart replaces the agent with a new one in a new session and clears the
-// conversation; the initial prompt is sent again. It returns once the new
-// agent accepts turns or waits for a login, or with the error it failed to
-// start with, which Exited delivers too. If ctx ends first, Restart returns
-// ctx.Err() and the agent goes on starting in the background.
-func (c *Conversation) Restart(ctx context.Context) error {
-	c.mu.Lock()
+// Replacement replaces the conversation's agent with a new one, in two
+// steps, so that a caller can make the change at once and wait for the new
+// agent without holding up anything else. The first step (BeginRestart,
+// BeginSwitch, BeginReload) retires the agent: from then on its events are
+// ignored, its requests can't be answered and no turn starts. Start, the
+// second, closes the retired agent and starts the new one. A Replacement
+// must be started, or the retired agent stays open.
+type Replacement struct {
+	c      *Conversation
+	gen    int
+	resume Resume
+	runCtx context.Context
+	old    Adapter
+	once   sync.Once
+}
+
+// replaceLocked retires the agent for one that opens the session resume
+// says.
+func (c *Conversation) replaceLocked(resume Resume) *Replacement {
 	old := c.retireAdapterLocked()
+	return &Replacement{c: c, gen: c.generation, resume: resume, runCtx: c.ctx, old: old}
+}
+
+// CloseOld closes the agent that was retired, once. Start closes it too;
+// calling CloseOld first stops the old agent before something that waits
+// for it (an update of the agent's CLI).
+func (r *Replacement) CloseOld() {
+	r.once.Do(func() {
+		if r.old != nil {
+			_ = r.old.Close()
+		}
+	})
+}
+
+// Start closes the retired agent and starts the new one. It returns once
+// the new agent accepts turns or waits for a login, or with the error it
+// failed to start with, which Exited delivers too. If ctx ends first, Start
+// returns ctx.Err() and the agent goes on starting in the background. A
+// conversation that was closed or replaced again meanwhile starts nothing.
+func (r *Replacement) Start(ctx context.Context) error {
+	r.CloseOld()
+	select {
+	case err := <-r.c.launchAsync(r.runCtx, r.gen, r.resume):
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Restart replaces the agent with a new one in a new session and clears the
+// conversation; the initial prompt is sent again. It returns like
+// Replacement.Start.
+func (c *Conversation) Restart(ctx context.Context) error {
+	return c.BeginRestart(nil).Start(ctx)
+}
+
+// BeginRestart is the first step of Restart: it retires the agent and
+// clears the conversation, and returns what starts the new agent. reset, if
+// set, runs once the agent is retired, before the cleared conversation is
+// reported, with the conversation's lock held: like an Observer, it must
+// not call back into the conversation.
+func (c *Conversation) BeginRestart(reset func()) *Replacement {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r := c.replaceLocked(Resume{})
+	if reset != nil {
+		reset()
+	}
 	c.sessionRef = ""
 	c.forking = false
 	c.promptSent = false
 	c.messages.reset()
 	c.setLimitStopLocked(nil)
-	if c.usage.Context != nil || c.usage.PromptCache != nil {
-		// A new session starts with an empty context, and nothing cached.
-		usage := c.usage
-		usage.Context = nil
-		usage.PromptCache = nil
-		c.setUsageLocked(usage)
-	}
-	gen, runCtx := c.generation, c.ctx
+	c.clearSessionUsageLocked()
 	c.cfg.Emitter.EmitMessages(nil)
 	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
-	c.mu.Unlock()
-	if old != nil {
-		_ = old.Close()
-	}
-	select {
-	case err := <-c.launchAsync(runCtx, gen, Resume{}):
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return r
 }
 
 // Switch replaces the agent with a new one that opens the session resume
 // says (an earlier one, or a copy of it), and the conversation with
 // messages, that session's so far; the initial prompt is not sent. It
-// returns like Restart, and ErrTurnActive while the agent works on a turn
-// or compacts its context, which a switch would cut short.
+// returns like Replacement.Start, and ErrTurnActive while the agent works
+// on a turn or compacts its context, which a switch would cut short.
 func (c *Conversation) Switch(ctx context.Context, resume Resume, messages []st.ConversationMessage) error {
-	c.mu.Lock()
-	if c.turnActive || c.compacting {
-		c.mu.Unlock()
-		return ErrTurnActive
+	r, err := c.BeginSwitch(resume, messages, nil)
+	if err != nil {
+		return err
 	}
-	old := c.retireAdapterLocked()
+	return r.Start(ctx)
+}
+
+// BeginSwitch is the first step of Switch. Checking that no turn runs and
+// retiring the agent are one step: while the agent works on a turn or
+// compacts its context, BeginSwitch returns ErrTurnActive and changes
+// nothing, reset included. reset runs as BeginRestart's does.
+func (c *Conversation) BeginSwitch(resume Resume, messages []st.ConversationMessage, reset func()) (*Replacement, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.turnActive || c.compacting {
+		return nil, ErrTurnActive
+	}
+	r := c.replaceLocked(resume)
+	if reset != nil {
+		reset()
+	}
 	c.sessionRef, c.forking = resume.Ref, resume.Fork
 	c.promptSent = true
 	c.messages = newMessageLog(c.cfg.Clock, messages)
 	c.setLimitStopLocked(nil)
+	// The agent reports the session's usage once it ran a turn.
+	c.clearSessionUsageLocked()
+	// Until the agent reports a fork's own ref, AgentAPI would resume the
+	// session it forked after a restart.
+	c.cfg.Observer.SessionRef(resume.Ref)
+	c.cfg.Emitter.EmitMessages(c.messages.snapshot())
+	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
+	return r, nil
+}
+
+// clearSessionUsageLocked forgets the usage that belongs to the session: a
+// new one starts with an empty context, and nothing cached. The rate limits
+// are the account's and stay.
+func (c *Conversation) clearSessionUsageLocked() {
 	if c.usage.Context != nil || c.usage.PromptCache != nil {
-		// The agent reports the session's once it ran a turn.
 		usage := c.usage
 		usage.Context = nil
 		usage.PromptCache = nil
 		c.setUsageLocked(usage)
 	}
-	// Until the agent reports a fork's own ref, AgentAPI would resume the
-	// session it forked after a restart.
-	c.cfg.Observer.SessionRef(resume.Ref)
-	gen, runCtx := c.generation, c.ctx
-	c.cfg.Emitter.EmitMessages(c.messages.snapshot())
-	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
-	c.mu.Unlock()
-	if old != nil {
-		_ = old.Close()
-	}
-	select {
-	case err := <-c.launchAsync(runCtx, gen, resume):
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 // Reload replaces the agent with a new one that resumes the session, so the
 // conversation goes on while what the agent reads when it starts (its MCP
-// servers, its settings files) is read again. It returns like Restart. It
-// returns ErrTurnActive while the agent works on a turn, which a reload
-// would stop (or compacts its context), and ErrUnsupported for an agent
-// whose session can't be resumed (Claude Code with
-// --no-session-persistence).
+// servers, its settings files) is read again. It returns like
+// Replacement.Start. It returns ErrTurnActive while the agent works on a
+// turn, which a reload would stop (or compacts its context), and
+// ErrUnsupported for an agent whose session can't be resumed (Claude Code
+// with --no-session-persistence).
 func (c *Conversation) Reload(ctx context.Context) error {
+	r, err := c.BeginReload()
+	if err != nil {
+		return err
+	}
+	return r.Start(ctx)
+}
+
+// BeginReload is the first step of Reload. Like BeginSwitch, it changes
+// nothing when it returns an error.
+func (c *Conversation) BeginReload() (*Replacement, error) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.turnActive || c.compacting {
-		c.mu.Unlock()
-		return ErrTurnActive
+		return nil, ErrTurnActive
 	}
 	if c.started && !c.caps.Resume {
-		c.mu.Unlock()
-		return ErrUnsupported
+		return nil, ErrUnsupported
 	}
-	old := c.retireAdapterLocked()
-	gen, resume, runCtx := c.generation, c.resumeLocked(), c.ctx
+	r := c.replaceLocked(c.resumeLocked())
 	c.cfg.Emitter.EmitStatus(st.ConversationStatusInitializing)
-	c.mu.Unlock()
-	if old != nil {
-		_ = old.Close()
-	}
-	select {
-	case err := <-c.launchAsync(runCtx, gen, resume):
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return r, nil
 }
 
 // Close stops the agent. The exit is not reported on Exited.

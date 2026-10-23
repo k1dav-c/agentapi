@@ -104,15 +104,9 @@ func (s *Server) getCost(_ context.Context, _ *struct{}) (*CostResponse, error) 
 
 // resumeSession replaces the agent with one that opens another of its
 // sessions, or a copy of one, and the conversation with that session's.
+// The session's log is read, and its images stored, before s.mu is taken:
+// a long session takes a while.
 func (s *Server) resumeSession(_ context.Context, input *ResumeSessionRequest) (*InterruptResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stopping {
-		return nil, huma.Error409Conflict(errStopping.Error())
-	}
-	if s.native.TurnActive() {
-		return nil, huma.Error409Conflict("the agent is working on a turn; interrupt it or wait until it is done")
-	}
 	if input.ID == s.native.SessionRef() && !input.Body.Fork {
 		return okResponse(), nil
 	}
@@ -123,19 +117,36 @@ func (s *Server) resumeSession(_ context.Context, input *ResumeSessionRequest) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the session: %w", err)
 	}
+	for i := range history.Rich {
+		s.storeRichImages(&history.Rich[i])
+	}
 
-	s.emitter.SetLifecycle(LifecycleRestarting)
-	// The conversation, its queue and its requests are the old session's.
-	s.resetConversationLocked()
-	for _, msg := range history.Rich {
-		s.observer.RichMessage(msg)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return nil, huma.Error409Conflict(errStopping.Error())
+	}
+	// The check that no turn runs and the retirement of the agent are one
+	// step, before anything is cleared: a refused switch leaves the
+	// conversation as it was.
+	replacement, err := s.native.BeginSwitch(native.Resume{Ref: input.ID, Fork: input.Body.Fork}, history.Messages, func() {
+		s.emitter.SetLifecycle(LifecycleRestarting)
+		// The conversation, its queue and its requests are the old
+		// session's.
+		s.forgetConversationLocked()
+		for _, msg := range history.Rich {
+			s.emitter.EmitRichMessageSnapshot(msg)
+		}
+	})
+	if errors.Is(err, native.ErrTurnActive) {
+		return nil, huma.Error409Conflict("the agent is working on a turn or compacting its context; interrupt it or wait until it is done")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to open the session: %w", err)
 	}
 	ctx, cancel := s.agentCtx(restartTimeout)
 	defer cancel()
-	switch err := s.native.Switch(ctx, native.Resume{Ref: input.ID, Fork: input.Body.Fork}, history.Messages); {
-	case errors.Is(err, native.ErrTurnActive):
-		return nil, huma.Error409Conflict("the agent started a turn; try again once it is done")
-	case err != nil:
+	if err := replacement.Start(ctx); err != nil {
 		s.emitter.SetLifecycle(LifecycleFailed)
 		return nil, huma.Error500InternalServerError(fmt.Sprintf("failed to open the session: %v", err))
 	}
@@ -162,7 +173,7 @@ func (s *Server) registerSessionRoutes() {
 	huma.Post(s.api, "/sessions/{id}/resume", guard(s.requireSessionHistory, s.resumeSession), func(o *huma.Operation) {
 		o.Tags = []string{"Sessions"}
 		o.Summary = "Open another session"
-		o.Description = "Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Native transport of Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here and 409 while the agent works on a turn."
+		o.Description = "Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Native transport of Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here and 409 while the agent works on a turn or compacts its context, in which case nothing changes."
 		o.Errors = []int{400, 404, 409}
 	})
 }

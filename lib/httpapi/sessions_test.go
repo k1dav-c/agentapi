@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +30,13 @@ import (
 // had the session "earlier" there.
 func newSessionServer(t *testing.T) *nativeServer {
 	t.Helper()
+	return newSessionServerWith(t, nil)
+}
+
+// newSessionServerWith is newSessionServer with the adapters adjusted by
+// configure.
+func newSessionServerWith(t *testing.T, configure func(*nativetest.Adapter)) *nativeServer {
+	t.Helper()
 	config := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", config)
 	dir := filepath.Join(config, "projects", "-work-app")
@@ -39,7 +47,12 @@ func newSessionServer(t *testing.T) *nativeServer {
 			`{"type":"custom-title","customTitle":"Bug hunt","sessionId":"earlier"}`+"\n"), 0o600))
 
 	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
-	factory := &nativetest.Factory{Configure: func(a *nativetest.Adapter) { a.Ref = "current" }}
+	factory := &nativetest.Factory{Configure: func(a *nativetest.Adapter) {
+		a.Ref = "current"
+		if configure != nil {
+			configure(a)
+		}
+	}}
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
 		Transport:      httpapi.TransportNative,
@@ -115,6 +128,71 @@ func TestNative_ResumeSession(t *testing.T) {
 	fork := n.factory.Last()
 	assert.Equal(t, "earlier", fork.ResumeRef)
 	assert.True(t, fork.Fork)
+}
+
+// A session can't be opened while the agent compacts its context either,
+// and a refused switch leaves the conversation, the agent and the lifecycle
+// as they were.
+func TestNative_ResumeDuringCompactionChangesNothing(t *testing.T) {
+	compacting, release := make(chan struct{}, 1), make(chan struct{})
+	var releaseOnce sync.Once
+	releaseCompaction := func() { releaseOnce.Do(func() { close(release) }) }
+	n := newSessionServerWith(t, func(a *nativetest.Adapter) {
+		a.Caps.Compact = true
+		a.OnCompact = func(context.Context) error {
+			compacting <- struct{}{}
+			<-release
+			return nil
+		}
+	})
+	// Before the server stops, which waits for the compaction's request.
+	t.Cleanup(releaseCompaction)
+	first := n.factory.Last()
+	require.Eventually(t, func() bool {
+		var status httpapi.StatusChangeBody
+		n.do(http.MethodGet, "/status", nil, &status)
+		return status.Status == httpapi.AgentStatusStable
+	}, 5*time.Second, 5*time.Millisecond)
+	n.send("hello", "")
+	first.Sink().RichMessage(transcript.RichMessage{MessageID: "cur_1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "current answer"}}})
+	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+	epoch := n.epoch()
+
+	compacted := make(chan int, 1)
+	go func() { compacted <- n.do(http.MethodPost, "/compact", nil, nil) }()
+	<-compacting
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/sessions/earlier/resume", map[string]any{}, nil))
+
+	assert.Len(t, n.factory.Adapters(), 1, "no agent was started")
+	assert.False(t, first.Closed(), "the agent goes on compacting")
+	var rich struct {
+		Messages []struct {
+			MessageID string `json:"message_id"`
+		} `json:"messages"`
+	}
+	n.do(http.MethodGet, "/rich-messages", nil, &rich)
+	require.Len(t, rich.Messages, 1)
+	assert.Equal(t, "cur_1", rich.Messages[0].MessageID)
+	var msgs struct {
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	n.do(http.MethodGet, "/messages", nil, &msgs)
+	require.Len(t, msgs.Messages, 2)
+	assert.Equal(t, "hello", msgs.Messages[0].Content)
+	assert.Equal(t, "current answer", msgs.Messages[1].Content)
+	var status httpapi.StatusChangeBody
+	n.do(http.MethodGet, "/status", nil, &status)
+	assert.Equal(t, httpapi.LifecycleRunning, status.Lifecycle, "compacting, not restarting")
+	assert.Equal(t, epoch, n.epoch())
+
+	// Once the compaction is done, the session opens.
+	releaseCompaction()
+	assert.Equal(t, http.StatusOK, <-compacted)
+	require.Equal(t, http.StatusOK, n.do(http.MethodPost, "/sessions/earlier/resume", map[string]any{}, nil))
+	assert.Equal(t, "earlier", n.factory.Last().ResumeRef)
+	assert.True(t, first.Closed())
 }
 
 func TestNative_SessionsNeedAnAgentWithLogs(t *testing.T) {
