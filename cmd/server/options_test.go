@@ -128,6 +128,16 @@ func TestLoadServerOptions(t *testing.T) {
 				assert.Equal(t, "::1", opts.bind)
 			},
 		},
+		"--instance-id and --name name the instance; --webhook-instance-id is the old name": {
+			values: map[string]any{FlagInstanceID: "build-box", FlagName: "API", FlagWebhookInstanceID: "old"},
+			check: func(t *testing.T, opts serverOptions) {
+				assert.Equal(t, "build-box", opts.webhook.InstanceID)
+				assert.Equal(t, "API", opts.name)
+				old, err := loadServerOptions(flagsWith(map[string]any{FlagWebhookInstanceID: "old"}), []string{"claude"})
+				require.NoError(t, err)
+				assert.Equal(t, "old", old.webhook.InstanceID)
+			},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

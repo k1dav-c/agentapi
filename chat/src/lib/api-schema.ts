@@ -753,6 +753,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a summary of the agent
+         * @description Returns what a client that watches many AgentAPIs shows of one in a single response: who it is (instance), whether the agent works or waits, why it waits for the user (attention), a title, the latest task, what waits (requests, queued messages) and the usage limits. GET /events?only=summary sends summary_update whenever it changes, and no other events.
+         */
+        get: operations["get-summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks": {
         parameters: {
             query?: never;
@@ -972,6 +992,12 @@ export interface components {
             /** @description The account's usage limits (Claude Code's 5-hour and weekly limits, Codex's primary and secondary windows). */
             rate_limits?: components["schemas"]["RateLimit"][];
         };
+        /**
+         * Attention
+         * @example none
+         * @enum {string}
+         */
+        Attention: "dialog" | "exited" | "limit" | "login" | "none" | "request";
         AuthSessionBody: {
             /**
              * Format: uri
@@ -2226,6 +2252,94 @@ export interface components {
             /** @description The subagents the agent ran in its session, in the order they started. */
             subagents: components["schemas"]["SubagentState"][];
         };
+        SummaryBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/SummaryBody.json
+             */
+            readonly $schema?: string;
+            /** @description The agent's own session, as in GET /status. */
+            agent_session_id?: string;
+            /** @description Why the agent waits for the user: login, request (an approval, question or plan), dialog (in its terminal), limit (a usage limit stopped its turn), exited, or none. */
+            attention: components["schemas"]["Attention"];
+            /** @description Who this AgentAPI is: its ID (--instance-id), name (--name), server ID, host, port, directory, agent and URL, as in webhook events. */
+            instance: components["schemas"]["WebhookInstance"];
+            /** @description The agent process's lifecycle state. */
+            lifecycle: components["schemas"]["LifecycleState"];
+            /** @description Set while a usage limit holds the agent, as in GET /status. */
+            limit_stop?: components["schemas"]["LimitStop"];
+            /** @description Set while the agent waits for the user to log in, as in GET /status. */
+            login_required?: components["schemas"]["LoginRequired"];
+            /**
+             * Format: int64
+             * @description Requests (approvals, questions, plans) the agent waits on; see GET /requests.
+             */
+            pending_requests: number;
+            /**
+             * Format: int64
+             * @description Messages waiting in the queue; see GET /queue.
+             */
+            queued_messages: number;
+            /** @description The name the agent gave the session, as in GET /status. */
+            session_name?: string;
+            /** @description Whether the agent works (running) or waits (stable). */
+            status: components["schemas"]["AgentStatus"];
+            /** @description The latest task, as in GET /tasks; missing before the first. */
+            task?: components["schemas"]["Task"];
+            /**
+             * Format: int64
+             * @description How many tasks the conversation has.
+             */
+            tasks: number;
+            /** @description The bottom of the agent's terminal while it shows a dialog to answer, as in GET /status. */
+            terminal_prompt?: string;
+            /** @description The name the agent gave the session, else the start of the latest task's prompt; empty before the first task. */
+            title: string;
+            /** @description The context window and the account's usage limits, as in GET /status. */
+            usage?: components["schemas"]["AgentUsage"];
+        };
+        SummaryUpdateBody: {
+            /** @description The agent's own session, as in GET /status. */
+            agent_session_id?: string;
+            /** @description Why the agent waits for the user: login, request (an approval, question or plan), dialog (in its terminal), limit (a usage limit stopped its turn), exited, or none. */
+            attention: components["schemas"]["Attention"];
+            /** @description Who this AgentAPI is: its ID (--instance-id), name (--name), server ID, host, port, directory, agent and URL, as in webhook events. */
+            instance: components["schemas"]["WebhookInstance"];
+            /** @description The agent process's lifecycle state. */
+            lifecycle: components["schemas"]["LifecycleState"];
+            /** @description Set while a usage limit holds the agent, as in GET /status. */
+            limit_stop?: components["schemas"]["LimitStop"];
+            /** @description Set while the agent waits for the user to log in, as in GET /status. */
+            login_required?: components["schemas"]["LoginRequired"];
+            /**
+             * Format: int64
+             * @description Requests (approvals, questions, plans) the agent waits on; see GET /requests.
+             */
+            pending_requests: number;
+            /**
+             * Format: int64
+             * @description Messages waiting in the queue; see GET /queue.
+             */
+            queued_messages: number;
+            /** @description The name the agent gave the session, as in GET /status. */
+            session_name?: string;
+            /** @description Whether the agent works (running) or waits (stable). */
+            status: components["schemas"]["AgentStatus"];
+            /** @description The latest task, as in GET /tasks; missing before the first. */
+            task?: components["schemas"]["Task"];
+            /**
+             * Format: int64
+             * @description How many tasks the conversation has.
+             */
+            tasks: number;
+            /** @description The bottom of the agent's terminal while it shows a dialog to answer, as in GET /status. */
+            terminal_prompt?: string;
+            /** @description The name the agent gave the session, else the start of the latest task's prompt; empty before the first task. */
+            title: string;
+            /** @description The context window and the account's usage limits, as in GET /status. */
+            usage?: components["schemas"]["AgentUsage"];
+        };
         Task: {
             /**
              * Format: date-time
@@ -2520,6 +2634,22 @@ export interface components {
             /** @description Webhook destination. Empty means webhook delivery is disabled. */
             url: string;
         };
+        WebhookInstance: {
+            agent_type: string;
+            agentapi_version?: string;
+            cwd?: string;
+            hostname?: string;
+            id: string;
+            name?: string;
+            /** Format: int64 */
+            pid?: number;
+            /** Format: int64 */
+            port?: number;
+            server_id: string;
+            transport: components["schemas"]["Transport"];
+            url?: string;
+            workspace_url?: string;
+        };
         WebhookTestResponseBody: {
             /**
              * Format: uri
@@ -2746,6 +2876,8 @@ export interface operations {
                 epoch?: string;
                 /** @description With sync: highest seq the client has applied. With a matching epoch, the replay holds only later changes. */
                 since?: number;
+                /** @description summary: only summary_update events (and heartbeats), with the summary GET /summary returns whenever it changes, for a client that watches many AgentAPIs. sync, since and epoch don't apply. */
+                only?: "summary";
             };
             header?: {
                 /** @description With sync: used as since when since is not given. With sync, events carry SSE ids: the last event of the replay has the replay's seq and each later message, rich message or request update has its own, so a reconnecting EventSource resumes where it left off (pass epoch in the URL, e.g. from GET /status). */
@@ -2846,6 +2978,17 @@ export interface operations {
                          * @constant
                          */
                         event: "status_change";
+                        /** @description The event ID. */
+                        id?: number;
+                        /** @description The retry time in milliseconds. */
+                        retry?: number;
+                    } | {
+                        data: components["schemas"]["SummaryUpdateBody"];
+                        /**
+                         * @description The event name.
+                         * @constant
+                         */
+                        event: "summary_update";
                         /** @description The event ID. */
                         id?: number;
                         /** @description The retry time in milliseconds. */
@@ -4654,6 +4797,35 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SummaryBody"];
+                };
+            };
+            /** @description Error */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };

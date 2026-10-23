@@ -33,6 +33,7 @@ const (
 	EventTypeRequestUpdate     EventType = "request_update"
 	EventTypeTaskUpdate        EventType = "task_update"
 	EventTypeQueueUpdate       EventType = "queue_update"
+	EventTypeSummaryUpdate     EventType = "summary_update"
 )
 
 type AgentStatus string
@@ -227,9 +228,13 @@ type EventEmitter struct {
 	taskTimer *quartz.Timer
 	// queue is the message queue as the server last reported it (version
 	// queueVersion), sent with seq queueSeq.
-	queue          []QueuedMessage
-	queueVersion   uint64
-	queueSeq       uint64
+	queue        []QueuedMessage
+	queueVersion uint64
+	queueSeq     uint64
+	// instance names the AgentAPI in summaries; summary is the summary
+	// last sent, nil while no subscription wants it.
+	instance       func() WebhookInstance
+	summary        *SummaryBody
 	clock          quartz.Clock
 	onStatusChange func(previous, current AgentStatus)
 	// persister, if set, stores every change of the conversation state.
@@ -432,10 +437,14 @@ type subscriber struct {
 
 // AllEvents, ConversationEvents and ScreenEvents pick the events a
 // subscription gets: all, all but the screen (GET /events), or only the
-// screen (GET /internal/screen).
-func AllEvents(EventType) bool            { return true }
-func ConversationEvents(t EventType) bool { return t != EventTypeScreenUpdate }
-func ScreenEvents(t EventType) bool       { return t == EventTypeScreenUpdate }
+// screen (GET /internal/screen). The summary, a view of the others, goes
+// only to subscriptions that ask for it (SummaryEvents).
+func AllEvents(t EventType) bool { return t != EventTypeSummaryUpdate }
+
+func ConversationEvents(t EventType) bool {
+	return t != EventTypeScreenUpdate && t != EventTypeSummaryUpdate
+}
+func ScreenEvents(t EventType) bool { return t == EventTypeScreenUpdate }
 
 // Assumes the caller holds the lock.
 func (e *EventEmitter) notifyChannels(eventType EventType, payload any) {
@@ -451,6 +460,11 @@ func (e *EventEmitter) notifyChannels(eventType EventType, payload any) {
 			// Listeners must actively drain the channel.
 			e.unsubscribeInner(chanId)
 		}
+	}
+	// What changes the conversation's state may change its summary; the
+	// screen alone doesn't (a dialog on it comes with a status change).
+	if eventType != EventTypeSummaryUpdate && eventType != EventTypeScreenUpdate && eventType != EventTypeHeartbeat {
+		e.summaryChangedLocked()
 	}
 }
 
@@ -493,6 +507,7 @@ func (e *EventEmitter) Reset() {
 		e.promptTimer.Stop()
 		e.promptTimer = nil
 	}
+	e.summaryChangedLocked()
 }
 
 // currentStateAsEvents returns the events that rebuild the current state for
@@ -581,6 +596,8 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string) []Event 
 		})
 	}
 
+	events = append(events, Event{Type: EventTypeSummaryUpdate, Payload: SummaryUpdateBody{SummaryBody: e.summaryLocked()}})
+
 	events[0].Payload = SessionSyncBody{Epoch: e.epoch, Full: full, Seq: replaySeq}
 	return events
 }
@@ -611,6 +628,11 @@ func (e *EventEmitter) SubscribeTo(wants func(EventType) bool, since uint64, epo
 	ch := make(chan Event, e.subscriptionBufSize)
 	e.chans[e.chanIdx] = subscriber{ch: ch, wants: wants}
 	e.chanIdx++
+	if wants(EventTypeSummaryUpdate) && e.summary == nil {
+		// The replay holds the summary: what changes next is news.
+		summary := stateEvents[len(stateEvents)-1].Payload.(SummaryUpdateBody).SummaryBody
+		e.summary = &summary
+	}
 	return e.chanIdx - 1, ch, stateEvents
 }
 

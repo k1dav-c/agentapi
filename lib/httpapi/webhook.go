@@ -162,6 +162,7 @@ type WebhookEventData struct {
 // receiver can tell many apart.
 type WebhookInstance struct {
 	ID           string       `json:"id"`
+	Name         string       `json:"name,omitempty"`
 	ServerID     string       `json:"server_id"`
 	Hostname     string       `json:"hostname,omitempty"`
 	Port         int          `json:"port,omitempty"`
@@ -680,6 +681,9 @@ func (w *webhookAPI) updateWebhookConfig(_ context.Context, request *WebhookConf
 	if w.stateDB != nil {
 		w.stateDB.SetMeta(statedb.MetaWebhook, w.webhook.stored())
 	}
+	if w.instanceChanged != nil {
+		w.instanceChanged()
+	}
 	return w.getWebhookConfig(context.Background(), nil)
 }
 
@@ -730,10 +734,13 @@ func (w *webhookAPI) testWebhook(ctx context.Context, _ *struct{}) (*WebhookTest
 type webhookAPI struct {
 	webhook *webhookDispatcher
 	stateDB *statedb.DB
+	// instanceChanged tells the summary's subscribers the instance's ID or
+	// URL may have changed.
+	instanceChanged func()
 }
 
 func (s *Server) registerWebhookRoutes() {
-	w := &webhookAPI{webhook: s.webhook, stateDB: s.stateDB}
+	w := &webhookAPI{webhook: s.webhook, stateDB: s.stateDB, instanceChanged: s.emitter.SummaryChanged}
 	huma.Get(s.api, "/webhook", w.getWebhookConfig, func(o *huma.Operation) {
 		o.Tags = []string{"Webhook"}
 		o.Summary = "Get webhook configuration"

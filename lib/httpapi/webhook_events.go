@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 	"unicode/utf8"
@@ -115,8 +116,13 @@ type WebhookTerminalPrompt struct {
 // events, and the instance's.
 func (s *Server) startWebhook(config ServerConfig) {
 	hostname, _ := os.Hostname()
+	name := config.Name
+	if name == "" && config.CWD != "" {
+		name = filepath.Base(config.CWD)
+	}
 	s.webhook.setInstance(WebhookInstance{
 		ID:           net.JoinHostPort(hostname, strconv.Itoa(config.Port)),
+		Name:         name,
 		Hostname:     hostname,
 		Port:         config.Port,
 		PID:          os.Getpid(),

@@ -31,6 +31,19 @@
         },
         "type": "object"
       },
+      "Attention": {
+        "enum": [
+          "dialog",
+          "exited",
+          "limit",
+          "login",
+          "none",
+          "request"
+        ],
+        "example": "none",
+        "title": "Attention",
+        "type": "string"
+      },
       "AuthSessionBody": {
         "additionalProperties": false,
         "properties": {
@@ -2611,6 +2624,171 @@
         ],
         "type": "object"
       },
+      "SummaryBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/SummaryBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "agent_session_id": {
+            "description": "The agent's own session, as in GET /status.",
+            "type": "string"
+          },
+          "attention": {
+            "$ref": "#/components/schemas/Attention",
+            "description": "Why the agent waits for the user: login, request (an approval, question or plan), dialog (in its terminal), limit (a usage limit stopped its turn), exited, or none."
+          },
+          "instance": {
+            "$ref": "#/components/schemas/WebhookInstance",
+            "description": "Who this AgentAPI is: its ID (--instance-id), name (--name), server ID, host, port, directory, agent and URL, as in webhook events."
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/LifecycleState",
+            "description": "The agent process's lifecycle state."
+          },
+          "limit_stop": {
+            "$ref": "#/components/schemas/LimitStop",
+            "description": "Set while a usage limit holds the agent, as in GET /status."
+          },
+          "login_required": {
+            "$ref": "#/components/schemas/LoginRequired",
+            "description": "Set while the agent waits for the user to log in, as in GET /status."
+          },
+          "pending_requests": {
+            "description": "Requests (approvals, questions, plans) the agent waits on; see GET /requests.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "queued_messages": {
+            "description": "Messages waiting in the queue; see GET /queue.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "session_name": {
+            "description": "The name the agent gave the session, as in GET /status.",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentStatus",
+            "description": "Whether the agent works (running) or waits (stable)."
+          },
+          "task": {
+            "$ref": "#/components/schemas/Task",
+            "description": "The latest task, as in GET /tasks; missing before the first."
+          },
+          "tasks": {
+            "description": "How many tasks the conversation has.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "terminal_prompt": {
+            "description": "The bottom of the agent's terminal while it shows a dialog to answer, as in GET /status.",
+            "type": "string"
+          },
+          "title": {
+            "description": "The name the agent gave the session, else the start of the latest task's prompt; empty before the first task.",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/AgentUsage",
+            "description": "The context window and the account's usage limits, as in GET /status."
+          }
+        },
+        "required": [
+          "attention",
+          "instance",
+          "lifecycle",
+          "pending_requests",
+          "queued_messages",
+          "status",
+          "tasks",
+          "title"
+        ],
+        "type": "object"
+      },
+      "SummaryUpdateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_session_id": {
+            "description": "The agent's own session, as in GET /status.",
+            "type": "string"
+          },
+          "attention": {
+            "$ref": "#/components/schemas/Attention",
+            "description": "Why the agent waits for the user: login, request (an approval, question or plan), dialog (in its terminal), limit (a usage limit stopped its turn), exited, or none."
+          },
+          "instance": {
+            "$ref": "#/components/schemas/WebhookInstance",
+            "description": "Who this AgentAPI is: its ID (--instance-id), name (--name), server ID, host, port, directory, agent and URL, as in webhook events."
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/LifecycleState",
+            "description": "The agent process's lifecycle state."
+          },
+          "limit_stop": {
+            "$ref": "#/components/schemas/LimitStop",
+            "description": "Set while a usage limit holds the agent, as in GET /status."
+          },
+          "login_required": {
+            "$ref": "#/components/schemas/LoginRequired",
+            "description": "Set while the agent waits for the user to log in, as in GET /status."
+          },
+          "pending_requests": {
+            "description": "Requests (approvals, questions, plans) the agent waits on; see GET /requests.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "queued_messages": {
+            "description": "Messages waiting in the queue; see GET /queue.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "session_name": {
+            "description": "The name the agent gave the session, as in GET /status.",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentStatus",
+            "description": "Whether the agent works (running) or waits (stable)."
+          },
+          "task": {
+            "$ref": "#/components/schemas/Task",
+            "description": "The latest task, as in GET /tasks; missing before the first."
+          },
+          "tasks": {
+            "description": "How many tasks the conversation has.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "terminal_prompt": {
+            "description": "The bottom of the agent's terminal while it shows a dialog to answer, as in GET /status.",
+            "type": "string"
+          },
+          "title": {
+            "description": "The name the agent gave the session, else the start of the latest task's prompt; empty before the first task.",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/AgentUsage",
+            "description": "The context window and the account's usage limits, as in GET /status."
+          }
+        },
+        "required": [
+          "attention",
+          "instance",
+          "lifecycle",
+          "pending_requests",
+          "queued_messages",
+          "status",
+          "tasks",
+          "title"
+        ],
+        "type": "object"
+      },
       "Task": {
         "additionalProperties": false,
         "properties": {
@@ -3167,6 +3345,56 @@
         ],
         "type": "object"
       },
+      "WebhookInstance": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_type": {
+            "type": "string"
+          },
+          "agentapi_version": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pid": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "server_id": {
+            "type": "string"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/Transport"
+          },
+          "url": {
+            "type": "string"
+          },
+          "workspace_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_type",
+          "id",
+          "server_id",
+          "transport"
+        ],
+        "type": "object"
+      },
       "WebhookTestResponseBody": {
         "additionalProperties": false,
         "properties": {
@@ -3488,6 +3716,19 @@
               "minimum": 0,
               "type": "integer"
             }
+          },
+          {
+            "description": "summary: only summary_update events (and heartbeats), with the summary GET /summary returns whenever it changes, for a client that watches many AgentAPIs. sync, since and epoch don't apply.",
+            "explode": false,
+            "in": "query",
+            "name": "only",
+            "schema": {
+              "description": "summary: only summary_update events (and heartbeats), with the summary GET /summary returns whenever it changes, for a client that watches many AgentAPIs. sync, since and epoch don't apply.",
+              "enum": [
+                "summary"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3704,6 +3945,32 @@
                           "event"
                         ],
                         "title": "Event status_change",
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "data": {
+                            "$ref": "#/components/schemas/SummaryUpdateBody"
+                          },
+                          "event": {
+                            "const": "summary_update",
+                            "description": "The event name.",
+                            "type": "string"
+                          },
+                          "id": {
+                            "description": "The event ID.",
+                            "type": "integer"
+                          },
+                          "retry": {
+                            "description": "The retry time in milliseconds.",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "data",
+                          "event"
+                        ],
+                        "title": "Event summary_update",
                         "type": "object"
                       },
                       {
@@ -6053,6 +6320,35 @@
         "tags": [
           "Sessions"
         ]
+      }
+    },
+    "/summary": {
+      "get": {
+        "description": "Returns what a client that watches many AgentAPIs shows of one in a single response: who it is (instance), whether the agent works or waits, why it waits for the user (attention), a title, the latest task, what waits (requests, queued messages) and the usage limits. GET /events?only=summary sends summary_update whenever it changes, and no other events.",
+        "operationId": "get-summary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SummaryBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get a summary of the agent"
       }
     },
     "/tasks": {

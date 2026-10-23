@@ -103,6 +103,9 @@ type ServerConfig struct {
 	CWD            string // Working directory (used by Codex resolver)
 	// Webhook sends an event whenever the agent status changes.
 	Webhook WebhookConfig
+	// Name is what clients call this AgentAPI (GET /summary, webhook
+	// events); empty is the working directory's name.
+	Name string
 	// PTY, ACP and Native configure the transport of the same name; the
 	// others are ignored.
 	PTY    PTYConfig
@@ -269,6 +272,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		WithTerminalColumns(config.PTY.TerminalColumns),
 		WithClock(config.Clock),
 		WithStatusChangeHandler(webhook.statusChanged),
+		WithInstance(webhook.instanceSnapshot),
 	}
 	stateDB := config.StateDB
 	if stateDB != nil {

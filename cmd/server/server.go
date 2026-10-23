@@ -181,6 +181,7 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 		APIToken:       apiToken,
 		Bind:           opts.bind,
 		Webhook:        opts.webhook,
+		Name:           opts.name,
 		StateDB:        stateDB,
 	}
 	switch opts.transport {
@@ -438,6 +439,8 @@ const (
 	FlagWebhookSecret          = "webhook-secret"
 	FlagWebhookHeartbeat       = "webhook-heartbeat"
 	FlagWebhookInstanceID      = "webhook-instance-id"
+	FlagInstanceID             = "instance-id"
+	FlagName                   = "name"
 	FlagPublicURL              = "public-url"
 	FlagAPIToken               = "api-token"
 	FlagBind                   = "bind"
@@ -496,8 +499,10 @@ func CreateServerCmd() *cobra.Command {
 		{FlagWebhookEvents, "", []string{}, "Webhook events to send: event types (task.completed), groups (task.*) or * for all. Default: run.status_changed. Comma-separated via flag, space-separated via AGENTAPI_WEBHOOK_EVENTS", "stringSlice"},
 		{FlagWebhookSecret, "", "", "Secret that signs every webhook delivery: X-AgentAPI-Signature-256 is sha256= and the hex HMAC-SHA256 of <X-AgentAPI-Timestamp>.<body>", "string"},
 		{FlagWebhookHeartbeat, "", 60 * time.Second, "How often the instance.heartbeat webhook event is sent; 0 turns it off", "duration"},
-		{FlagWebhookInstanceID, "", "", "Identifies this AgentAPI in every webhook event (default <hostname>:<port>)", "string"},
-		{FlagPublicURL, "", "", "URL this AgentAPI is reached at, sent in every webhook event so the receiver can link to its chat or call its API", "string"},
+		{FlagInstanceID, "", "", "Identifies this AgentAPI to clients that watch many (GET /summary) and in every webhook event (default <hostname>:<port>)", "string"},
+		{FlagName, "", "", "What clients that watch many AgentAPIs call this one, in GET /summary and webhook events (default the working directory's name)", "string"},
+		{FlagWebhookInstanceID, "", "", "Deprecated: use --instance-id", "string"},
+		{FlagPublicURL, "", "", "URL this AgentAPI is reached at, in GET /summary and every webhook event so clients and receivers can link to its chat or call its API", "string"},
 		{FlagAPIToken, "", "", "API token for Bearer authentication. If set without a value, a random token is generated. Empty (default) disables authentication.", "string"},
 		{FlagBind, "", "", "Address to listen on: an IP address or hostname without a port (e.g. 127.0.0.1 or ::1). Empty (default) listens on all interfaces", "string"},
 	}

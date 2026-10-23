@@ -27,6 +27,8 @@ var optInEvents = map[EventType]bool{
 	EventTypeSessionSync:       true,
 	EventTypeTaskUpdate:        true,
 	EventTypeQueueUpdate:       true,
+	// Only ?only=summary gets it, and nothing else.
+	EventTypeSummaryUpdate: true,
 }
 
 func eventSeq(event Event) uint64 {
@@ -51,6 +53,7 @@ type SubscribeEventsInput struct {
 	Sync  bool   `query:"sync" doc:"Opt in to session_sync, task_update and queue_update events and incremental replay. Clients that don't opt in get the full replay and none of those events, as before."`
 	Since uint64 `query:"since" doc:"With sync: highest seq the client has applied. With a matching epoch, the replay holds only later changes."`
 	Epoch string `query:"epoch" doc:"With sync: epoch from the client's last session_sync. If it doesn't match, the full state is replayed."`
+	Only  string `query:"only" enum:"summary" doc:"summary: only summary_update events (and heartbeats), with the summary GET /summary returns whenever it changes, for a client that watches many AgentAPIs. sync, since and epoch don't apply."`
 	// LastEventID is sent by EventSource when it reconnects by itself.
 	LastEventID uint64 `header:"Last-Event-ID" doc:"With sync: used as since when since is not given. With sync, events carry SSE ids: the last event of the replay has the replay's seq and each later message, rich message or request update has its own, so a reconnecting EventSource resumes where it left off (pass epoch in the URL, e.g. from GET /status)."`
 }
@@ -69,6 +72,10 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 	}
 	wants := func(t EventType) bool {
 		return ConversationEvents(t) && (sync || !optInEvents[t])
+	}
+	if input.Only == "summary" {
+		sync, since, epoch = false, 0, ""
+		wants = SummaryEvents
 	}
 	subscriberId, ch, replay := s.emitter.SubscribeTo(wants, since, epoch)
 	defer s.emitter.Unsubscribe(subscriberId)
@@ -177,6 +184,7 @@ func (s *Server) registerEventRoutes() {
 		"request_update":      RequestUpdateBody{},
 		"task_update":         TaskUpdateBody{},
 		"queue_update":        QueueUpdateBody{},
+		"summary_update":      SummaryUpdateBody{},
 	}, s.subscribeEvents)
 
 	sse.Register(s.api, huma.Operation{

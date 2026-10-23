@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"log/slog"
@@ -54,6 +55,8 @@ type serverOptions struct {
 	// prices is a JSON file of model prices that adds to the built-in ones.
 	prices  string
 	webhook httpapi.WebhookConfig
+	// name is what clients that watch many AgentAPIs call this one.
+	name string
 }
 
 // flagSource is where the options are read from: the viper the flags are
@@ -90,6 +93,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 		terminal:       flags.GetBool(FlagTerminal),
 		autoContinue:   flags.GetBool(FlagAutoContinue),
 		prices:         flags.GetString(FlagPrices),
+		name:           flags.GetString(FlagName),
 		webhook: httpapi.WebhookConfig{
 			URL:             flags.GetString(FlagWebhookURL),
 			Timeout:         flags.GetDuration(FlagWebhookTimeout),
@@ -98,7 +102,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 			Events:          flags.GetStringSlice(FlagWebhookEvents),
 			Secret:          flags.GetString(FlagWebhookSecret),
 			Heartbeat:       heartbeatOption(flags.GetDuration(FlagWebhookHeartbeat)),
-			InstanceID:      flags.GetString(FlagWebhookInstanceID),
+			InstanceID:      cmp.Or(flags.GetString(FlagInstanceID), flags.GetString(FlagWebhookInstanceID)),
 			PublicURL:       flags.GetString(FlagPublicURL),
 		},
 	}
