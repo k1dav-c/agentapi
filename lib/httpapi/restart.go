@@ -116,12 +116,13 @@ func (s *Server) runRestartLocked(r agentRestart) error {
 		return r.run(ctx)
 	})
 	switch {
+	case s.stopping || s.shutdownCtx.Err() != nil:
+		// Stop cut the restart short, whether or not the new agent
+		// started in time, and closes what did.
+		return errStopping
 	case err != nil:
 		s.emitter.SetLifecycle(LifecycleFailed)
 		return err
-	case s.stopping:
-		// Stop closed the new agent meanwhile.
-		return errStopping
 	}
 	if r.done != nil {
 		r.done()

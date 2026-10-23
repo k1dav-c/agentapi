@@ -812,7 +812,7 @@ func TestNative_StopDuringARestart(t *testing.T) {
 		t.Fatal("Stop waited for the restart")
 	}
 	<-cut
-	assert.Equal(t, http.StatusInternalServerError, <-restarted)
+	assert.Equal(t, http.StatusConflict, <-restarted, "AgentAPI stops")
 	require.Eventually(t, func() bool {
 		for _, a := range n.factory.Adapters() {
 			if !a.Closed() {
