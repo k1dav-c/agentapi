@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -31,6 +32,12 @@ func (s *Server) serveUpload(w http.ResponseWriter, r *http.Request) {
 // every message. Images whose content isn't a previewable raster image, or
 // that can't be saved, are dropped.
 func (s *Server) storeRichImages(msg *transcript.RichMessage) {
+	s.uploads.storeRichImages(msg, s.logger)
+}
+
+// storeRichImages is Server.storeRichImages; logger notes the images that
+// can't be stored.
+func (u *uploadStore) storeRichImages(msg *transcript.RichMessage, logger *slog.Logger) {
 	for i := range msg.Content {
 		block := &msg.Content[i]
 		if len(block.Images) == 0 {
@@ -38,9 +45,9 @@ func (s *Server) storeRichImages(msg *transcript.RichMessage) {
 		}
 		var stored []transcript.RichImage
 		for _, image := range block.Images {
-			url, err := s.uploads.saveImage(image.Data)
+			url, err := u.saveImage(image.Data)
 			if err != nil {
-				s.logger.Debug("Failed to store tool result image", "tool_use_id", block.ToolUseID, "error", err)
+				logger.Debug("Failed to store tool result image", "tool_use_id", block.ToolUseID, "error", err)
 				continue
 			}
 			stored = append(stored, transcript.RichImage{MediaType: image.MediaType, URL: url})

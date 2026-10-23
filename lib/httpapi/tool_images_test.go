@@ -74,3 +74,20 @@ func TestStoreRichImages(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, pngBytes.Bytes(), got)
 }
+
+// A native agent's tool result images are stored before the conversation
+// takes the message, and clients get their URLs.
+func TestNativeRichImagesAreStored(t *testing.T) {
+	srv, factory := newQuietNativeServer(t, nil)
+	var pngBytes bytes.Buffer
+	require.NoError(t, png.Encode(&pngBytes, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+	factory.Last().Sink().RichMessage(transcript.RichMessage{MessageID: "u1", Role: "user", Content: []transcript.RichContentBlock{{
+		Type: "tool_result", ToolUseID: "toolu_img",
+		Images: []transcript.RichImage{{MediaType: "image/png", Data: pngBytes.Bytes()}},
+	}}})
+	rich := srv.emitter.RichMessages()
+	require.Len(t, rich, 1)
+	require.Len(t, rich[0].Content[0].Images, 1)
+	assert.Regexp(t, `^/uploads/[0-9a-f]{16}/image\.png$`, rich[0].Content[0].Images[0].URL)
+	assert.Nil(t, rich[0].Content[0].Images[0].Data)
+}

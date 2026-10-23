@@ -20,14 +20,12 @@ import (
 const nativeCallTimeout = 30 * time.Second
 
 // nativeObserver passes a native conversation's structured state to the
-// event emitter.
+// event emitter. The images of a rich message were stored before (see
+// native.Config.PrepareRichMessage).
 type nativeObserver struct {
 	emitter *EventEmitter
 	// persister stores the session ref, if state is persisted.
 	persister Persister
-	// storeImages saves tool result images and replaces their data with
-	// URLs. Set once the server exists.
-	storeImages func(*transcript.RichMessage)
 }
 
 var _ native.Observer = (*nativeObserver)(nil)
@@ -39,9 +37,6 @@ func (o *nativeObserver) LoginRequired(login *native.LoginRequired) {
 }
 
 func (o *nativeObserver) RichMessage(msg transcript.RichMessage) {
-	if o.storeImages != nil {
-		o.storeImages(&msg)
-	}
 	o.emitter.EmitRichMessageSnapshot(msg)
 }
 

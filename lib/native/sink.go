@@ -73,6 +73,9 @@ func (s *sink) RichMessage(msg transcript.RichMessage) {
 	// The adapter may change its message once the call returns; the
 	// observer keeps (and changes) this copy.
 	msg = msg.Clone()
+	if prepare := s.c.cfg.PrepareRichMessage; prepare != nil {
+		prepare(&msg)
+	}
 	s.update(func(c *Conversation) {
 		c.cfg.Observer.RichMessage(msg)
 		if msg.Role == "assistant" && c.messages.addRich(msg) {

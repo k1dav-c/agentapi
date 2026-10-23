@@ -30,6 +30,7 @@ import (
 	"github.com/coder/agentapi/lib/sessions"
 	"github.com/coder/agentapi/lib/shellterm"
 	"github.com/coder/agentapi/lib/statedb"
+	"github.com/coder/agentapi/lib/transcript"
 	"github.com/coder/agentapi/x/acpio"
 )
 
@@ -285,6 +286,14 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		initialPrompt = FormatMessage(config.AgentType, config.InitialPrompt)
 	}
 
+	// The directory for uploads: a temporary one unless the conversation
+	// is kept, whose messages refer to uploads by path.
+	uploads, err := newUploadStore(config.UploadDir)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("Using upload directory", "uploadDir", uploads.dir)
+
 	var conversation st.Conversation
 	var nativeConversation *native.Conversation
 	var observer *nativeObserver
@@ -308,6 +317,9 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			Observer:        observer,
 			Logger:          logger,
 			Clock:           config.Clock,
+			PrepareRichMessage: func(msg *transcript.RichMessage) {
+				uploads.storeRichImages(msg, logger)
+			},
 		})
 		conversation = nativeConversation
 	} else if config.Transport == TransportACP {
@@ -332,14 +344,6 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			InitialMessages:       restored.messages,
 		}, emitter)
 	}
-
-	// The directory for uploads: a temporary one unless the conversation
-	// is kept, whose messages refer to uploads by path.
-	uploads, err := newUploadStore(config.UploadDir)
-	if err != nil {
-		return nil, err
-	}
-	logger.Info("Using upload directory", "uploadDir", uploads.dir)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
@@ -400,9 +404,6 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		if err != nil {
 			return nil, err
 		}
-	}
-	if observer != nil {
-		observer.storeImages = s.storeRichImages
 	}
 	s.startWebhook(config)
 

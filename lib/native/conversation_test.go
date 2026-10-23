@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -367,4 +368,25 @@ func TestRichMessageIsCopied(t *testing.T) {
 	kept := rec.get().rich[0]
 	assert.Empty(t, kept.Content[0].Status, "the adapter's change doesn't reach the observer")
 	assert.False(t, *kept.Content[0].IsError)
+}
+
+// PrepareRichMessage changes a rich message before the conversation takes
+// it, without the conversation's lock: storing images there holds up
+// nothing else.
+func TestPrepareRichMessageRunsUnlocked(t *testing.T) {
+	var conv atomic.Pointer[native.Conversation]
+	unlocked := make(chan bool, 1)
+	c, factory, rec := start(t, nil, native.Config{PrepareRichMessage: func(msg *transcript.RichMessage) {
+		unlocked <- nativetest.Returns(func() { conv.Load().Status() })
+		msg.Content[0].Images = []transcript.RichImage{{MediaType: "image/png", URL: "/uploads/x/image.png"}}
+	}})
+	conv.Store(c)
+	factory.Last().Sink().RichMessage(transcript.RichMessage{MessageID: "u1", Role: "user", Content: []transcript.RichContentBlock{
+		{Type: "tool_result", ToolUseID: "t1", Images: []transcript.RichImage{{MediaType: "image/png", Data: []byte("png")}}},
+	}})
+	assert.True(t, <-unlocked, "the conversation's lock is held")
+	got := rec.get().rich
+	require.Len(t, got, 1)
+	assert.Equal(t, "/uploads/x/image.png", got[0].Content[0].Images[0].URL)
+	assert.Nil(t, got[0].Content[0].Images[0].Data)
 }

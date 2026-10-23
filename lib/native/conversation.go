@@ -86,6 +86,11 @@ type Config struct {
 	AutoContinue bool
 	// LimitStop is a turn a usage limit stopped before AgentAPI restarted.
 	LimitStop *LimitStop
+	// PrepareRichMessage, if set, changes every rich message an adapter
+	// reports before the conversation takes it, without the conversation's
+	// lock: work that can be slow (storing the images of a tool result)
+	// holds up nothing else. It gets the conversation's own copy.
+	PrepareRichMessage func(*transcript.RichMessage)
 }
 
 const (
