@@ -122,6 +122,9 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
 				logger.Error("Failed to close the state database", "error", err)
 			}
 		}()
+		if opts.stateFile != "" {
+			importStateFile(stateDB, opts, cwd, logger)
+		}
 	}
 	apiToken, err := resolveAPIToken(opts, logger)
 	if err != nil {
@@ -178,15 +181,15 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 		APIToken:       apiToken,
 		Bind:           opts.bind,
 		Webhook:        opts.webhook,
+		StateDB:        stateDB,
 	}
 	switch opts.transport {
 	case httpapi.TransportPTY:
 		config.PTY = httpapi.PTYConfig{
-			AgentIO:                agent.io,
-			TerminalColumns:        opts.termWidth,
-			StatePersistenceConfig: opts.state,
-			AgentPID:               agent.pid(),
-			RestartAgent:           agent.restart(),
+			AgentIO:         agent.io,
+			TerminalColumns: opts.termWidth,
+			AgentPID:        agent.pid(),
+			RestartAgent:    agent.restart(),
 		}
 	case httpapi.TransportACP:
 		if agent.acp != nil {
@@ -197,7 +200,6 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 			Factory:      agent.factory,
 			UpdateAgent:  agent.updateNative,
 			Terminal:     opts.terminal,
-			StateDB:      stateDB,
 			AutoContinue: opts.autoContinue,
 			Prices:       prices,
 		}
@@ -261,9 +263,6 @@ func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, agent 
 	case <-gracefulCtx.Done():
 	}
 
-	if err := srv.SaveState("shutdown"); err != nil {
-		logger.Error("Failed to save state during shutdown", "error", err)
-	}
 	stopServer()
 	select {
 	case err := <-exitCh:
@@ -477,12 +476,12 @@ func CreateServerCmd() *cobra.Command {
 		// localhost:3284 is the default origin when you open the chat interface in your browser. localhost:3000 and 3001 are used during development.
 		{FlagAllowedOrigins, "o", []string{"http://localhost:3284", "http://localhost:3000", "http://localhost:3001"}, "HTTP allowed origins. Use '*' for all, comma-separated list via flag, space-separated list via AGENTAPI_ALLOWED_ORIGINS env var", "stringSlice"},
 		{FlagInitialPrompt, "I", "", "Initial prompt for the agent. Recommended only if the agent doesn't support initial prompt in interaction mode. Will be read from stdin if piped (e.g., echo 'prompt' | agentapi server -- my-agent)", "string"},
-		{FlagStateFile, "s", "", "Path to file for saving/loading server state", "string"},
-		{FlagLoadState, "", false, "Load state from state-file on startup (defaults to true when state-file is set)", "bool"},
-		{FlagSaveState, "", false, "Save state to state-file on shutdown (defaults to true when state-file is set)", "bool"},
+		{FlagStateFile, "s", "", "Deprecated: use --state-db. A state file written by an earlier AgentAPI, whose conversation is imported into a state database next to it (the same name with .db, or --state-db) the first time; that database keeps the conversation from then on", "string"},
+		{FlagLoadState, "", false, "Deprecated: with --load-state=false the state file isn't imported", "bool"},
+		{FlagSaveState, "", false, "Deprecated and without effect: the state database keeps every change", "bool"},
 		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts", "string"},
 		{FlagExperimentalACP, "", false, "Use the experimental ACP transport (same as --transport acp)", "bool"},
-		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) and resumes the agent's session when AgentAPI restarts. Native transport only", "string"},
+		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) when AgentAPI restarts; with the native transport the agent also resumes its session, with PTY it starts anew below the conversation. Not with ACP", "string"},
 		{FlagTransport, "", "native", "How to drive the agent: native (its own structured protocol; claude, codex and pi), pty (its terminal UI) or acp (same as --experimental-acp). Without it, claude, codex and pi use native, other agents and --state-file pty", "string"},
 		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal. Native transport only, where the agent has no terminal of its own", "bool"},
 		{FlagAutoContinue, "", false, "When a usage limit stops the agent's turn, continue it once the limit resets, if the agent says when. Native transport only", "bool"},

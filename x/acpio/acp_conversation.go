@@ -266,9 +266,5 @@ func (c *ACPConversation) executePrompt(message string) {
 	}
 }
 
-func (c *ACPConversation) SaveState() error {
-	return fmt.Errorf("ACP mode doesn't support state persistence")
-}
-
 // Reset is a no-op for ACP conversations (restart is not supported).
 func (c *ACPConversation) Reset() {}

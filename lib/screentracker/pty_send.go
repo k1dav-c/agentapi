@@ -167,8 +167,7 @@ func (c *PTYConversation) sendMessage(ctx context.Context, gen uint64, messagePa
 		Role:    ConversationRoleUser,
 		Time:    now,
 	})
-	c.userSentMessageAfterLoadState = true
-	c.dirty = true
+	c.restored = false
 	// screenBeforeLastUserMessage and messages changed; the next
 	// updateLastAgentMessageLocked pass must recompute the diff.
 	c.fmtCacheValid = false

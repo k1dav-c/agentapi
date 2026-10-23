@@ -425,10 +425,6 @@ func (c *Conversation) statusLocked() st.ConversationStatus {
 	return st.ConversationStatusChanging
 }
 
-// SaveState implements st.Conversation. State persistence for native
-// sessions is handled outside the conversation.
-func (c *Conversation) SaveState() error { return nil }
-
 // Reset implements st.Conversation by clearing the messages. Use Restart to
 // also replace the agent.
 func (c *Conversation) Reset() {

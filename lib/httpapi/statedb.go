@@ -13,9 +13,10 @@ import (
 // restoredState is what the state database gave back on start.
 type restoredState struct {
 	snapshot statedb.Snapshot
-	// messages continue the restored conversation.
+	// messages continue the restored conversation: the native agent
+	// resumes its session, a PTY agent starts anew below them.
 	messages []st.ConversationMessage
-	// resumeRef resumes the agent's session.
+	// resumeRef resumes the native agent's session.
 	resumeRef string
 	// settings were chosen for the session.
 	settings native.Settings
@@ -31,8 +32,8 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 	if db == nil {
 		return restoredState{}, nil
 	}
-	if config.Transport != TransportNative {
-		return restoredState{}, fmt.Errorf("a state database needs the native transport")
+	if config.Transport == TransportACP {
+		return restoredState{}, fmt.Errorf("a state database needs the native or PTY transport")
 	}
 	snap, err := db.Load()
 	if err != nil {
@@ -160,4 +161,20 @@ func (s *Server) persistQueue() {
 	s.stateDB.PutQueue(stored, lastID)
 	s.savedQueue = queued
 	s.savedNextQueueID = lastID
+}
+
+// ptyInitialPrompt is the initial prompt the PTY conversation sends: none
+// when the restored conversation got this prompt already, or when there is
+// none. A prompt that goes out is recorded, so the next restart knows.
+func ptyInitialPrompt(prompt []st.MessagePart, config ServerConfig, db *statedb.DB, restored restoredState) []st.MessagePart {
+	if db == nil || config.InitialPrompt == "" {
+		return prompt
+	}
+	if len(restored.messages) > 0 && restored.snapshot.Meta[statedb.MetaInitialPrompt] == config.InitialPrompt {
+		return nil
+	}
+	// Recorded before the agent is ready for it: after a crash in between
+	// it isn't sent again.
+	db.SetMeta(statedb.MetaInitialPrompt, config.InitialPrompt)
+	return prompt
 }

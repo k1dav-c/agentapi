@@ -32,7 +32,6 @@ func (c *handoffConversation) Send(p ...st.MessagePart) error {
 func (c *handoffConversation) Start(context.Context)         {}
 func (c *handoffConversation) Status() st.ConversationStatus { return c.status }
 func (c *handoffConversation) Text() string                  { return "" }
-func (c *handoffConversation) SaveState() error              { return nil }
 func (c *handoffConversation) Reset()                        {}
 
 type handoffIO struct {

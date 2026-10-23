@@ -2,8 +2,8 @@ package screentracker
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -60,9 +60,13 @@ type PTYConversationConfig struct {
 	// FormatToolCall removes the coder report_task tool call from the agent message and also returns the array of removed tool calls
 	FormatToolCall func(message string) (string, []string)
 	// InitialPrompt is the initial prompt to send to the agent once ready
-	InitialPrompt          []MessagePart
-	Logger                 *slog.Logger
-	StatePersistenceConfig StatePersistenceConfig
+	InitialPrompt []MessagePart
+	Logger        *slog.Logger
+	// InitialMessages is a conversation restored from the state database,
+	// which this one continues: the agent starts anew, but the messages
+	// stay, and the last agent message keeps its text until the user sends
+	// the next message. An InitialPrompt goes out after them.
+	InitialMessages []ConversationMessage
 }
 
 func (cfg PTYConversationConfig) getStableSnapshotsThreshold() int {
@@ -136,12 +140,10 @@ type PTYConversation struct {
 	snapshotWake chan struct{}
 	// toolCallMessageSet keeps track of the tool calls that have been detected & logged in the current agent message
 	toolCallMessageSet map[string]bool
-	// dirty tracks whether the conversation state has changed since the last save
-	dirty bool
-	// userSentMessageAfterLoadState tracks if the user has sent their first message after we load the state
-	userSentMessageAfterLoadState bool
-	// loadStateStatus tracks the status of loading conversation state from file.
-	loadStateStatus LoadStateStatus
+	// restored: the conversation continues InitialMessages, and the user
+	// hasn't sent a message since, so the screen of the new agent mustn't
+	// replace the last restored agent message.
+	restored bool
 	// initialPromptReady is set to true when ReadyForInitialPrompt returns true.
 	// Checked inline in the snapshot loop on each tick.
 	initialPromptReady bool
@@ -170,13 +172,14 @@ func NewPTY(ctx context.Context, cfg PTYConversationConfig, emitter Emitter) *PT
 				Time:    cfg.Clock.Now(),
 			},
 		},
-		stableSignal:                  make(chan struct{}, 1),
-		snapshotWake:                  make(chan struct{}, 1),
-		toolCallMessageSet:            make(map[string]bool),
-		dirty:                         false,
-		userSentMessageAfterLoadState: false,
-		loadStateStatus:               LoadStatePending,
-		writingMessage:                false,
+		stableSignal:       make(chan struct{}, 1),
+		snapshotWake:       make(chan struct{}, 1),
+		toolCallMessageSet: make(map[string]bool),
+		writingMessage:     false,
+	}
+	if len(cfg.InitialMessages) > 0 {
+		c.messages = slices.Clone(cfg.InitialMessages)
+		c.restored = true
 	}
 	if c.cfg.ReadyForInitialPrompt == nil {
 		c.cfg.ReadyForInitialPrompt = func(string) bool { return true }
@@ -201,8 +204,8 @@ func (c *PTYConversation) Start(ctx context.Context) {
 }
 
 // snapshot takes a snapshot of the screen, acts on what it shows (the
-// agent is ready, the saved conversation can be loaded, the initial prompt
-// or a message can go out) and emits the conversation's state.
+// agent is ready, the initial prompt or a message can go out) and emits
+// the conversation's state.
 func (c *PTYConversation) snapshot() error {
 	c.lock.Lock()
 	screen := c.cfg.AgentIO.ReadScreen()
@@ -210,14 +213,10 @@ func (c *PTYConversation) snapshot() error {
 	status := c.statusLocked()
 	messages := c.messagesLocked()
 	c.checkReadyLocked(screen)
-	loadErr := c.loadStateWhenReadyLocked()
 	c.queueInitialPromptLocked()
 	c.signalSendLocked()
 	c.lock.Unlock()
 
-	if loadErr != "" {
-		c.emitter.EmitError(loadErr, ErrorLevelWarning)
-	}
 	c.emitter.EmitStatus(status)
 	c.emitter.EmitMessages(messages)
 	c.emitter.EmitScreen(screen)
@@ -248,29 +247,6 @@ func (c *PTYConversation) checkReadyLocked(screen string) {
 	}
 }
 
-// loadStateWhenReadyLocked loads the saved conversation once the agent is
-// ready, and returns the error to show if that failed. Caller holds
-// c.lock.
-func (c *PTYConversation) loadStateWhenReadyLocked() string {
-	if !c.initialPromptReady || c.loadStateStatus != LoadStatePending || !c.cfg.StatePersistenceConfig.LoadState {
-		return ""
-	}
-	// Load-state status and restored messages feed into
-	// updateLastAgentMessageLocked; force a fresh pass.
-	c.fmtCacheValid = false
-	err, shouldEmit := c.loadStateLocked()
-	if err == nil {
-		c.loadStateStatus = LoadStateSucceeded
-		return ""
-	}
-	c.loadStateStatus = LoadStateFailed
-	if !shouldEmit {
-		return ""
-	}
-	c.cfg.Logger.Error("Failed to load state", "error", err)
-	return fmt.Sprintf("Failed to restore previous session: %v", err)
-}
-
 // queueInitialPromptLocked queues the initial prompt once the agent is
 // ready. Caller holds c.lock.
 func (c *PTYConversation) queueInitialPromptLocked() {
@@ -279,7 +255,6 @@ func (c *PTYConversation) queueInitialPromptLocked() {
 	}
 	c.pending = &outboundMessage{parts: c.cfg.InitialPrompt, initial: true, gen: c.sendGen}
 	c.initialPromptSent = true
-	c.dirty = true
 }
 
 // signalSendLocked tells the send loop to send the message that waits,
@@ -384,8 +359,7 @@ func (c *PTYConversation) Reset() {
 	c.lastSnapshotScreen = ""
 	c.fmtCacheValid = false
 	c.toolCallMessageSet = make(map[string]bool)
-	c.dirty = false
-	c.userSentMessageAfterLoadState = false
+	c.restored = false
 	c.initialPromptReady = false
 	c.initialPromptSent = false
 	c.readinessChecked = false

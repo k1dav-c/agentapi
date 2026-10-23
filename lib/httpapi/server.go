@@ -104,6 +104,9 @@ type ServerConfig struct {
 	PTY    PTYConfig
 	ACP    ACPConfig
 	Native NativeConfig
+	// StateDB, if set, stores the conversation and restores it on start
+	// (the native and PTY transports).
+	StateDB *statedb.DB
 	// UploadDir is where uploads and tool result images are kept. Empty
 	// means a temporary directory that is removed on stop.
 	UploadDir string
@@ -122,8 +125,7 @@ type PTYConfig struct {
 	// AgentIO is the agent's terminal; nil runs no agent (--print-openapi).
 	AgentIO st.AgentIO
 	// TerminalColumns is the width of the agent's emulated terminal.
-	TerminalColumns        uint16
-	StatePersistenceConfig st.StatePersistenceConfig
+	TerminalColumns uint16
 	// AgentPID is the agent's process, whose session log the JSONL watcher
 	// reads; 0 runs no watcher.
 	AgentPID int
@@ -142,8 +144,6 @@ type ACPConfig struct {
 type NativeConfig struct {
 	// Factory creates the agent's adapter.
 	Factory native.Factory
-	// StateDB, if set, stores the conversation and restores it on start.
-	StateDB *statedb.DB
 	// Terminal offers a shell in the agent's working directory (GET
 	// /terminal).
 	Terminal bool
@@ -260,7 +260,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		WithClock(config.Clock),
 		WithStatusChangeHandler(webhook.statusChanged),
 	}
-	stateDB := config.Native.StateDB
+	stateDB := config.StateDB
 	if stateDB != nil {
 		emitterOptions = append(emitterOptions, WithPersister(stateDB))
 	}
@@ -313,19 +313,19 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		conversation = acpio.NewACPConversation(ctx, config.ACP.AgentIO, logger, initialPrompt, emitter, config.Clock)
 	} else {
 		conversation = st.NewPTY(ctx, st.PTYConversationConfig{
-			AgentType:              config.AgentType,
-			AgentIO:                config.PTY.AgentIO,
-			Clock:                  config.Clock,
-			SnapshotInterval:       snapshotInterval,
-			ScreenStabilityLength:  2 * time.Second,
-			FormatMessage:          formatMessage,
-			ReadyForInitialPrompt:  isAgentReadyForInitialPrompt,
-			ReadyWhenStable:        mf.ReadyWhenStable(config.AgentType),
-			StabilityScreen:        stabilityScreen,
-			FormatToolCall:         formatToolCall,
-			InitialPrompt:          initialPrompt,
-			Logger:                 logger,
-			StatePersistenceConfig: config.PTY.StatePersistenceConfig,
+			AgentType:             config.AgentType,
+			AgentIO:               config.PTY.AgentIO,
+			Clock:                 config.Clock,
+			SnapshotInterval:      snapshotInterval,
+			ScreenStabilityLength: 2 * time.Second,
+			FormatMessage:         formatMessage,
+			ReadyForInitialPrompt: isAgentReadyForInitialPrompt,
+			ReadyWhenStable:       mf.ReadyWhenStable(config.AgentType),
+			StabilityScreen:       stabilityScreen,
+			FormatToolCall:        formatToolCall,
+			InitialPrompt:         ptyInitialPrompt(initialPrompt, config, stateDB, restored),
+			Logger:                logger,
+			InitialMessages:       restored.messages,
 		}, emitter)
 	}
 
@@ -367,6 +367,16 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 	if stateDB != nil {
 		s.restoreQueue(restored.snapshot)
+		if stored := restored.snapshot.Meta[statedb.MetaWebhook]; stored != "" {
+			switch ok, err := webhook.restore(stored); {
+			case err != nil:
+				logger.Warn("Ignoring the stored webhook settings", "error", err)
+			case ok:
+				logger.Info("Restored the webhook settings changed through the API")
+			default:
+				logger.Info("The webhook flags changed since its settings were changed through the API; using the flags")
+			}
+		}
 	}
 	if mcpconfig.SupportedAgent(config.AgentType) {
 		store, err := mcpconfig.NewStore(config.AgentType, config.CWD)
@@ -487,10 +497,16 @@ func (s *Server) Stop(ctx context.Context) error {
 	return err
 }
 
+// SaveState writes what the state database hasn't written yet, the queue
+// included. It keeps every change as it happens, so this only narrows what
+// a crash could lose; source says who asked (SIGUSR1). Without a state
+// database there is nothing to save.
 func (s *Server) SaveState(source string) error {
-	if err := s.conversation.SaveState(); err != nil {
-		s.logger.Error("Failed to save conversation state", "source", source, "error", err)
-		return err
+	if s.stateDB == nil {
+		return nil
 	}
+	s.persistQueue()
+	s.stateDB.Flush()
+	s.logger.Info("Saved the state database", "source", source)
 	return nil
 }

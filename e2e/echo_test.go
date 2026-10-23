@@ -135,11 +135,14 @@ func TestE2E(t *testing.T) {
 		require.Equal(t, script[1].ExpectMessage, strings.TrimSpace(msgResp.Messages[1].Content))
 		require.Equal(t, script[1].ResponseMessage, strings.TrimSpace(msgResp.Messages[2].Content))
 
-		// Step 2: Stop server (triggers state save)
+		// Step 2: Stop server
 		cleanup()
 
 		// Verify state file was created
-		require.FileExists(t, stateFile, "State file should exist after shutdown")
+		// The deprecated --state-file is imported into a state database next
+		// to it, which keeps the conversation.
+		require.FileExists(t, strings.TrimSuffix(stateFile, ".json")+".db", "the state database should exist after shutdown")
+		require.NoFileExists(t, stateFile, "nothing writes the state file anymore")
 
 		// Step 3: Start new server instance and load state
 		// Note: We don't wait for stable here because the echo agent will try to replay
@@ -188,7 +191,10 @@ func TestE2E(t *testing.T) {
 
 		// Step 2: Close server
 		cleanup()
-		require.FileExists(t, stateFile, "State file should exist after shutdown")
+		// The deprecated --state-file is imported into a state database next
+		// to it, which keeps the conversation.
+		require.FileExists(t, strings.TrimSuffix(stateFile, ".json")+".db", "the state database should exist after shutdown")
+		require.NoFileExists(t, stateFile, "nothing writes the state file anymore")
 
 		// Step 3: Restart WITHOUT an initial prompt
 		_, apiClient2, cleanup2 := setup(ctx, t, &params{
@@ -245,7 +251,10 @@ func TestE2E(t *testing.T) {
 
 		// Step 2: Close server
 		cleanup()
-		require.FileExists(t, stateFile, "State file should exist after shutdown")
+		// The deprecated --state-file is imported into a state database next
+		// to it, which keeps the conversation.
+		require.FileExists(t, strings.TrimSuffix(stateFile, ".json")+".db", "the state database should exist after shutdown")
+		require.NoFileExists(t, stateFile, "nothing writes the state file anymore")
 
 		// Step 3: Restart with DIFFERENT initial prompt using a different script
 		initialPrompt2 := "Different initial prompt"

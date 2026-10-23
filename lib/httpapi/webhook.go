@@ -25,6 +25,7 @@ import (
 	"github.com/coder/quartz"
 
 	mf "github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/statedb"
 )
 
 const (
@@ -199,7 +200,9 @@ type webhookDispatcher struct {
 	agentType mf.AgentType
 	transport Transport
 	instance  WebhookInstance
-	queue     chan WebhookEvent
+	// startup is the configuration AgentAPI started with.
+	startup WebhookConfig
+	queue   chan WebhookEvent
 	// snapshot, if set, gives the data of instance.started and
 	// instance.heartbeat.
 	snapshot func() any
@@ -237,6 +240,7 @@ func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType m
 		agentType:     agentType,
 		transport:     transport,
 		instance:      WebhookInstance{RunID: runID, AgentType: agentType, Transport: transport},
+		startup:       config,
 		queue:         make(chan WebhookEvent, webhookQueueSize),
 		configChanged: make(chan struct{}, 1),
 	}, nil
@@ -256,6 +260,41 @@ func webhookConfigWithDefaults(config WebhookConfig) WebhookConfig {
 		config.Heartbeat = defaultWebhookHeartbeat
 	}
 	return config
+}
+
+// storedWebhook is the webhook as the API left it, kept in the state
+// database with the startup configuration it replaced: it applies again
+// after a restart, unless AgentAPI starts with another configuration.
+type storedWebhook struct {
+	Startup string        `json:"startup"`
+	Config  WebhookConfig `json:"config"`
+}
+
+// webhookFingerprint identifies a startup configuration.
+func webhookFingerprint(config WebhookConfig) string {
+	data, _ := json.Marshal(config)
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// stored is the configuration to keep in the state database.
+func (d *webhookDispatcher) stored() string {
+	data, _ := json.Marshal(storedWebhook{Startup: webhookFingerprint(d.startup), Config: d.configSnapshot()})
+	return string(data)
+}
+
+// restore applies the configuration kept in the state database, unless
+// AgentAPI started with another one than it replaced. It reports whether it
+// did.
+func (d *webhookDispatcher) restore(stored string) (bool, error) {
+	var s storedWebhook
+	if err := json.Unmarshal([]byte(stored), &s); err != nil {
+		return false, err
+	}
+	if s.Startup != webhookFingerprint(d.startup) {
+		return false, nil
+	}
+	return true, d.updateConfig(s.Config)
 }
 
 // setInstance describes the AgentAPI that sends the events.
@@ -629,6 +668,9 @@ func (s *Server) updateWebhookConfig(_ context.Context, request *WebhookConfigRe
 	}
 	if err := s.webhook.updateConfig(config); err != nil {
 		return nil, huma.Error400BadRequest(err.Error())
+	}
+	if s.stateDB != nil {
+		s.stateDB.SetMeta(statedb.MetaWebhook, s.webhook.stored())
 	}
 	return s.getWebhookConfig(context.Background(), nil)
 }

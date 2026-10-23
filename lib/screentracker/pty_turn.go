@@ -50,8 +50,7 @@ func (c *PTYConversation) updateLastAgentMessageLocked(screen string, timestamp 
 		agentMessage = c.cfg.FormatMessage(agentMessage, lastUserMessage.Message)
 	}
 	restoredFromState := false
-	if c.loadStateStatus == LoadStateSucceeded && !c.userSentMessageAfterLoadState && len(c.messages) > 0 &&
-		c.messages[len(c.messages)-1].Role == ConversationRoleAgent {
+	if c.restored && len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == ConversationRoleAgent {
 		agentMessage = c.messages[len(c.messages)-1].Message
 		restoredFromState = true
 	}
@@ -99,6 +98,4 @@ func (c *PTYConversation) updateLastAgentMessageLocked(screen string, timestamp 
 		c.messages[len(c.messages)-1] = conversationMessage
 	}
 	c.messages[len(c.messages)-1].Id = len(c.messages) - 1
-
-	c.dirty = true
 }

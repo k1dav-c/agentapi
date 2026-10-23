@@ -95,7 +95,6 @@ type Conversation interface {
 	Send(...MessagePart) error
 	Start(context.Context)
 	Status() ConversationStatus
-	SaveState() error
 	// Reset clears all conversation state back to the initial empty state.
 	Reset()
 }
@@ -122,10 +121,4 @@ type ConversationMessage struct {
 	Message string           `json:"message"`
 	Role    ConversationRole `json:"role"`
 	Time    time.Time        `json:"time"`
-}
-
-type StatePersistenceConfig struct {
-	StateFile string
-	LoadState bool
-	SaveState bool
 }

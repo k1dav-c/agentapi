@@ -66,6 +66,12 @@ const (
 	MetaSessionName = "session_name"
 	// MetaLimitStop holds the turn a usage limit stopped, as JSON.
 	MetaLimitStop = "limit_stop"
+	// MetaWebhook holds the webhook settings changed through the API, as
+	// JSON. A reset keeps them.
+	MetaWebhook = "webhook"
+	// MetaInitialPrompt is the initial prompt the conversation got (PTY):
+	// after a restart it goes out again only if it changed.
+	MetaInitialPrompt = "initial_prompt"
 	// metaSettings holds the settings chosen for the session (JSON). A
 	// reset keeps them.
 	metaSettings    = "settings"
