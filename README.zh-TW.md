@@ -6,9 +6,8 @@ AgentAPI 提供統一的 HTTP API，讓你控制 [Claude Code](https://github.co
 
 ![AgentAPI 聊天介面中的兩個任務：提示詞、工具呼叫、思考旁註和輸入框](docs/screenshots/chat-desktop.png)
 
-截圖是 AgentAPI v0.28.0 搭配內建 `native-demo` agent 的畫面，它的回覆、工具結果、模型和用量
-都是模擬的。[聊天介面導覽](docs/chat-ui.zh-TW.md)以截圖和動畫逐一介紹聊天介面的每項功能，
-[截圖說明](docs/screenshots/README.md)則說明它們是怎麼擷取的。
+截圖使用 AgentAPI v0.28.0 與內建的 `native-demo` agent；回覆、工具結果、模型和用量都是模擬的。
+功能與動畫見[聊天介面導覽](docs/chat-ui.zh-TW.md)，重新擷取的方法見[截圖說明](docs/screenshots/README.md)。
 
 AgentAPI 可以用來：
 
@@ -23,8 +22,8 @@ AgentAPI 可以用來：
 
 此 fork 以上游 v0.12.2 為基礎，預設以 [native transport](#native-transport) 透過 Claude Code、
 Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬方式（[PTY transport](#pty-transport)）。
-工作階段管理與聊天功能則支援不同的 transport，方便處理長時間執行的任務，[webhook](#webhook)
-則把它們回報給中控平台。[CHANGELOG.md](CHANGELOG.md) 列出有哪些變更，
+工作階段管理與聊天功能支援不同的 transport，可用來處理長時間執行的任務；
+[webhook](#webhook) 會把任務狀態回報給中控平台。[CHANGELOG.md](CHANGELOG.md) 列出有哪些變更，
 [docs/architecture.zh-TW.md](docs/architecture.zh-TW.md) 說明它的架構，完整的 commit 歷史
 請參閱[與上游的完整比較](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)。
 
@@ -163,9 +162,9 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 
 ### 支援的 agent
 
-agent 類型決定 AgentAPI 怎麼整理 agent 的畫面，以及提供哪些功能。它來自 `--type`；沒有指定
-時，若 agent 指令剛好是類型名稱之一，就用指令判斷（`agentapi server -- claude` 可以，
-`-- /usr/local/bin/claude` 不行）；其他情況都以 `custom` 執行。
+agent 類型決定畫面的整理方式與可用功能。可用 `--type` 指定；沒有指定時，AgentAPI 會從符合
+已知類型名稱的指令判斷，例如 `agentapi server -- claude`。使用 `-- /usr/local/bin/claude`
+這類完整路徑時，需明確指定類型；無法辨識的指令會以 `custom` 執行。
 
 | Agent | 類型 | PTY | Native | 結構化活動 | MCP 管理 |
 | --- | --- | :-: | :-: | :-: | :-: |
@@ -228,27 +227,25 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 
 ## 聊天介面
 
-`/chat` 的聊天介面內建在執行檔裡，所有 transport 都能使用，桌面和手機都可以。它有適合手機的
-版面、可搜尋的工具活動、連線狀態指示和精簡的工具呼叫卡片，標頭會顯示 agent 的標誌（Claude
-的橘色方塊、Pi 的 logo）和 AgentAPI 版本。[聊天介面導覽](docs/chat-ui.zh-TW.md)以截圖和動畫
-呈現它的每個部分。
+`/chat` 的聊天介面內建在執行檔裡，支援所有 transport，適用於桌面與手機。介面提供工具活動搜尋、
+精簡的工具呼叫卡片與連線狀態指示。標頭顯示 AgentAPI 版本與 agent 標誌，例如 Claude 的橘色方塊
+或 Pi 的 logo。截圖與動畫見[聊天介面導覽](docs/chat-ui.zh-TW.md)。
 
 ![在聊天介面中送出任務：agent 思考、執行工具，然後回覆](docs/screenshots/demo-task.gif)
 
 ### 任務與對話紀錄
 
-內建聊天介面以任務為單位整理對話。每則使用者請求都會成為可單獨瀏覽的任務，
-包含對應的回覆、思考區塊、工具呼叫和背景活動。
+聊天介面把每則使用者請求與對應的回覆、思考內容、工具呼叫和背景活動整理成一個任務，
+可在對話紀錄中逐個瀏覽。
 
 每個任務左側都有時間軸：開始時間、耗時，以及 Claude Code、Codex 和 Pi 的任務[花費](#工作階段花費)。
 你的提示詞放在標示「You」的色塊中；agent 的回覆則以
 標誌和名稱（例如 Pi）開頭，內容以 Markdown 顯示。每次工具呼叫各占一列，
 列出指令（`$ command`）、結束代碼、耗時和輸出預覽；寬螢幕上另以旁註顯示思考內容。
 
-每個任務的狀態（Working、Done、Failed、Limit reached）來自伺服器的[任務](#任務)，它的工具呼叫和
-思考內容也是伺服器所說、在這個任務中開始的那些。輸入框上方的狀態列會顯示 agent 目前的活動。當
-agent 等待你回答時，標頭、分頁標題和狀態列都會顯示「Needs you」，佇列中的任務則會標示為暫緩
-（held）。較長的任務會先顯示最近的 40 個步驟。
+顯示的狀態（Working、Done、Failed、Limit reached）和工具呼叫、思考內容的歸屬，都由伺服器的
+[任務](#任務)資料決定。輸入框上方的狀態列顯示 agent 目前的活動。等待回答時，標頭、分頁標題和
+狀態列會顯示「Needs you」，佇列中的任務會標示為暫緩（held）。較長的任務先顯示最近的 40 個步驟。
 
 每則 agent 訊息都能個別切換 Markdown 或原始文字顯示，不會影響其他訊息。
 
@@ -269,20 +266,19 @@ agent 等待你回答時，標頭、分頁標題和狀態列都會顯示「Needs
 
 ### Lineage
 
-native 的 Claude Code 或 Codex 執行 sub agent（Claude Code 的 Agent 工具、Codex 的 spawn_agent）時，header 上會出現一個按鈕，顯示 sub agent
-的數量和還在執行的數量，點下去會打開 Lineage 面板：列出每個 sub agent 被交付的任務、類型、
-狀態（執行中、完成或失敗）和執行時間。選一個就能看到它做了什麼，一步一步呈現，就像對話紀錄
-呈現一個任務那樣：思考內容、工具呼叫與結果，以及它的回答；執行中的會持續更新。Agent 或
-spawn_agent 工具呼叫上的 **Steps** 按鈕可以直接打開它對應的 sub agent。
+Claude Code 或 Codex 使用 native transport 執行 sub agent 時，標頭按鈕會顯示總數與執行中的數量。
+點選可開啟 Lineage 面板，查看每個 sub agent 的任務、類型、狀態和執行時間。選取其中一個，
+就能即時查看它的思考內容、工具呼叫、結果與回答。Agent 或 spawn_agent 工具呼叫上的 **Steps**
+按鈕可直接開啟對應的 sub agent。
 
 ![Lineage 面板顯示一個 sub agent：它的任務、讀的檔案、跑的指令和它的回答](docs/screenshots/lineage.png)
 
-這些步驟是從 sub agent 自己的紀錄讀出來的（Claude Code 會在工作階段旁為每個 sub agent 留一份紀錄），
-所以面板顯示的是 agent 目前開啟的工作階段的 sub agent，從[先前的工作階段](#先前的工作階段)開啟的
-也一樣；工作階段的副本則不會帶著原本的 sub agent。`GET /subagents` 會列出它們，
-`GET /subagents/{id}` 回傳其中一個的任務和訊息。Claude Code sub agent 的狀態取自它的 Agent 工具
-呼叫；Codex 的 spawn 呼叫會立刻結束、sub agent 則繼續執行，所以它的狀態取自 sub agent 自己的紀錄。
-Codex 交給 sub agent 的任務是加密的，所以面板改用它的任務名稱和暱稱來命名。
+AgentAPI 從每個 sub agent 的紀錄讀取步驟；Claude Code 會把這些紀錄放在主工作階段的紀錄旁。
+從[先前的工作階段](#先前的工作階段)開啟的對話也能查看 sub agent，工作階段副本則不會帶入原本的
+sub agent。`GET /subagents` 列出清單，`GET /subagents/{id}` 回傳單一 sub agent 的任務和訊息。
+
+Claude Code sub agent 的狀態取自 Agent 工具呼叫。Codex 的 spawn 呼叫會在 sub agent 完成前回傳，
+所以狀態改從 sub agent 自己的紀錄讀取。Codex 會加密交付的任務，面板因此用任務名稱和暱稱標示。
 
 ### 附件與圖片
 
@@ -348,12 +344,12 @@ HTML、Markdown 和 SVG 檔案還有第三個分頁 Preview，圖片檔則直接
 
 ### 使用 native transport 時
 
-使用 native transport 時，agent 提出的請求（工具核准、它的提問、
-待核准的計畫）會以卡片停靠在輸入框上方（在手機上最多佔螢幕的 60%）；agent 工作中時，送出
-按鈕也可以把訊息 steer 進正在進行的回合，或中斷它。輸入框的工具列可以切換 agent 的權限模式、
-模型和推理強度，並顯示 context 用了多少和用量限制；輸入框可以使用 `/model`、`/compact` 等
-斜線指令；終端機按鈕會開啟 agent 工作目錄中的 shell，取代需要 agent 自己終端機的 TTY mode
-（畫面相關的檢視仍會隱藏，ACP 也是）。請參閱 [Native transport](#native-transport)。
+使用 native transport 時，工具核准、提問與計畫核准會以卡片顯示在輸入框上方，手機上最多占螢幕的
+60%。agent 工作中時，送出選單可以把訊息 steer 進目前回合，或中斷回合。工具列提供權限模式、
+模型和推理強度設定，並顯示 context 使用量與用量限制；輸入框也支援 `/model`、`/compact` 等斜線指令。
+
+終端機按鈕會開啟 agent 工作目錄中的 shell。TTY mode 需要 agent 自己的終端機，因此 native 與
+ACP 工作階段會隱藏畫面相關的檢視。詳見 [Native transport](#native-transport)。
 
 ### 提醒、連線復原與快取
 
@@ -583,10 +579,11 @@ agent 執行期間，可以切換權限模式、模型和推理強度。`GET /se
 | plan | `plan` | plan collaboration mode | — |
 
 若 agent 使用未對應到上述四種模式的設定，例如 Claude Code 核准計畫後的 `acceptEdits`，
-或命令列指定的 Codex 政策，介面便不會標示這四種模式中的任何一種。Claude Code 和 Pi 會立即套用變更；Codex 則在下一個回合套用，因為
-app-server 只在那時接受設定。選擇的設定會再套用到取代目前 agent 的新 agent：重新啟動後、
-重新登入後，以及使用 `--state-db`（會保存設定）時 AgentAPI 重新啟動後。agent 自己變更的
-設定（例如核准計畫後切換的模式）也會跟著更新。
+或命令列指定的 Codex 政策，介面便不會標示這四種模式中的任何一種。Claude Code 和 Pi 會立即套用
+變更；Codex 則在下一個回合套用，因為 app-server 只在那時接受設定。
+
+AgentAPI 會在 agent 重新啟動或重新登入後，再次套用你選擇的設定；使用 `--state-db` 時，
+AgentAPI 重新啟動後也會還原設定。agent 自行變更的設定，例如核准計畫後切換的模式，也會反映在介面上。
 
 在聊天介面中，輸入框的工具列有一個模式選單，以及一個模型與推理強度的選單（手機上會放在按鈕
 上方的獨立一列）。
@@ -600,8 +597,9 @@ app-server 只在那時接受設定。選擇的設定會再套用到取代目前
 
 ### Context 與用量限制
 
-`GET /status` 和 `status_change` 會回報 agent 的 `usage`：上一個回合後的上下文視窗使用量（context window）（`context`：以 token 計的 `used` 和 `size`），以及帳號的用量限制
-（`rate_limits`：名稱、已用多少、何時重置，Claude Code 另外會說明是否接近或已達上限）。
+`GET /status` 和 `status_change` 透過 `usage` 回報上一個回合後的 context window 使用量，
+以及帳號的用量限制。`context` 包含以 token 計的 `used` 和 `size`；`rate_limits` 列出名稱、
+使用量和重置時間，Claude Code 另會標示是否接近或已達上限。
 Claude Code 會在每個回合之後回報它的 5 小時與每週限制和 context，Codex 回報它的 context
 和用量窗口，Pi 回報它的 context。新工作階段的 context 會歸零；帳號的用量限制則維持原狀。
 在聊天介面中，輸入框工具列上的圓環顯示 context 用了多少，它的選單則列出各項限制和重置倒數。
@@ -640,16 +638,17 @@ Claude Code 也會回報它的 `prompt_cache`：模型供應商在最後一次�
 
 ### 終端機
 
-Native agent 沒有自己的終端機，所以 AgentAPI 會在 agent 的工作目錄執行一個 shell，給聊天
-介面的終端機按鈕使用：登入、git 指令或其他任何事情都可以。它是真正的終端機（顏色、游標、
-全螢幕程式都可以用），會配合視窗大小，在手機上也一樣，並有一排按鍵列補上螢幕鍵盤沒有的按鍵。
-所有開啟它的人共用同一個 shell，就像 tmux 視窗，沒有人在看時也會繼續執行；shell 結束後，
-下次開啟會啟動新的 shell。它的環境變數和 agent 相同，但不含 AgentAPI 自己的變數。終端機裡的
-網頁連結點一下就會開啟，被折成多行的連結也一樣；指令最後印出的連結（例如登入網址）會顯示在
-終端機上方，點一下就能開啟或複製；TTY mode 也是如此。按鍵列有方向鍵、Enter、Esc、Tab、
-Shift+Tab、Ctrl+C，shell 的 Ctrl+R、Ctrl+A、Ctrl+E、Ctrl+U 和 Ctrl+W，Home、End、Page up 和
-Page down、/ - | ~、Alt+↑、Ctrl+L，以及要按兩次的 Ctrl+D 和 Ctrl+Z；它的 Ctrl 和 Alt 按鈕會
-按住修飾鍵，套用到下一個輸入的按鍵。
+AgentAPI 在 native agent 的工作目錄中提供 shell，可用來登入、執行 git 指令或處理其他工作。
+終端機支援顏色、游標移動與全螢幕程式，大小會配合桌面或手機視窗。所有人共用同一個 shell，
+就像 tmux 視窗；沒有人觀看時仍會執行，結束後再次開啟則啟動新的 shell。環境變數與 agent 相同，
+但會移除 AgentAPI 自己的變數。
+
+網頁連結可以直接點選，跨行的連結也一樣。指令最後印出的連結，例如登入網址，會額外顯示在終端機
+上方，方便開啟或複製；TTY mode 也有相同行為。
+
+按鍵列提供方向鍵、Enter、Esc、Tab、Shift+Tab、Ctrl+C、Ctrl+R、Ctrl+A、Ctrl+E、Ctrl+U、
+Ctrl+W、Home、End、Page up、Page down、/ - | ~、Alt+↑ 和 Ctrl+L。Ctrl+D 與 Ctrl+Z 需要再按一次。
+Ctrl 和 Alt 按鈕會按住修飾鍵，套用到下一個輸入的按鍵。
 
 - `GET /terminal` 以 server-sent events 串流它的輸出（`output` 事件帶 base64 資料，第一個
   事件是最近的輸出，供重播；shell 結束時送出 `exit`），shell 沒有在執行時會啟動它。
@@ -717,8 +716,8 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
 
 ### 先前的工作階段
 
-Claude Code、Codex 和 Pi 會為每個工作階段留下紀錄，AgentAPI 讀取這些紀錄，列出 agent 在工作
-目錄中的工作階段，並開啟其中一個，不需要 `--state-db`：
+AgentAPI 讀取 Claude Code、Codex 和 Pi 的紀錄，列出並開啟工作目錄中先前的工作階段。
+這項功能不需要 `--state-db`：
 
 - `GET /sessions` 由新到舊列出它們，以及 agent 目前開啟的那一個（`current`）：每一個都有
   `id`、`title`（agent 或使用者為它取的名字）、`first_prompt`、`prompts`（訊息數），以及開始和
@@ -980,23 +979,17 @@ AgentAPI 依照以下步驟，從終端機輸出中解析個別訊息：
 3. 將訊息送給 agent。此後每當終端機輸出改變，就擷取新快照並與初始快照比對。初始內容下方新增的文字，會被視為 agent 的下一則訊息。
 4. 如果在使用者送出新訊息之前，終端機輸出又有變化，就會更新這則 agent 訊息。
 
-這樣就能把終端機輸出切分成一連串的訊息。
-
 #### 從 agent 訊息中移除 TUI 元素
 
-終端機輸出可能包含下列與回覆無關的內容：
+AgentAPI 會從回覆移除兩種常見的 TUI 內容：
 
-- 訊息開頭的使用者輸入。Coding agent 常常會把輸入內容回顯給使用者，讓它顯示在終端機上。
-- 訊息結尾的輸入框。這是使用者平常輸入內容的地方。
-
-AgentAPI 會自動移除這些內容。
-
-- 使用者輸入：移除包含使用者上一則訊息文字的行。
-- 輸入框：在訊息結尾尋找包含常見 TUI 元素（例如 `>` 或 `------`）的行。
+- 回顯的使用者輸入：包含使用者上一則訊息文字的行。
+- 輸入框：訊息結尾包含 `>` 或 `------` 等常見 TUI 元素的行。
 
 #### 如果 Claude Code、Goose、Aider 或 Codex 更新了它們的 TUI，會怎麼樣？
 
-把終端機輸出切分成一連串訊息的部分應該仍然可以運作，因為它不依賴 TUI 的結構。移除多餘內容的邏輯可能需要更新，以處理新的元素。AgentAPI 仍然可以使用，但 agent 訊息中可能會出現一些多餘的 TUI 元素。
+訊息切分不依賴 TUI 結構，應該仍能運作。移除 TUI 元素的邏輯可能需要更新；更新之前，
+回覆中可能會夾帶介面文字。
 
 ### Claude、Codex 與 Pi 的結構化活動
 
@@ -1154,40 +1147,38 @@ agent 忙碌時收到的訊息不會被拒絕，而是依先進先出（FIFO）�
 
 ## 整合
 
-AgentAPI 除了被動提供 API 給呼叫它的人，也會把發生的事主動推送給你指定的接收端：
-[webhook](#webhook) 即時送出任務、請求、訊息和心跳，[摘要](#監看多個實例)讓一個用戶端追蹤
-多個 AgentAPI，[人工回覆 API](#人工回覆-api) 讓機器人回覆 agent 正在等待的問題，
-[MCP 管理](#mcp-管理) 則可以修改 agent 的工具。
+用 [webhook](#webhook) 向接收端推送任務、請求、訊息和心跳，用[摘要](#監看多個實例)監看多個
+AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agent，並透過
+[MCP 管理](#mcp-管理)設定 agent 的工具。
 
 ### 監看多個實例
 
-並排顯示多個 AgentAPI、每個一列的用戶端（例如列出所有 agent 的側邊欄），對每個 AgentAPI 只需要
-讀一個回應或一條串流，不必讀整段對話：
+在側邊欄或儀表板顯示多個 AgentAPI 時，每個實例讀取一份摘要回應，或開啟一條摘要串流即可：
 
-- `GET /summary` 回傳這一列要顯示的內容：`instance`（和 [webhook](#webhook) 事件相同：`id`、
-  `name`、`server_id`、主機、port、目錄、agent、`url`）、`status` 和 `lifecycle`、`title`
-  （工作階段名稱，沒有的話是最新提示的開頭）、最新的[任務](#任務)和任務數、`pending_requests`、
-  `queued_messages`、開啟中的終端機對話框、`login_required`、`limit_stop` 和 `usage`（context
-  window 和帳號的用量限制）。
-- `attention` 說明 agent 為什麼在等你，最緊急的優先：`login`、`request`（核准、提問或計畫）、
-  `dialog`（終端機中的對話框）、`limit`（用量限制停下了回合）、`exited`，或 `none`。
-- `GET /events?only=summary` 會在連線時和摘要每次變動時送出 `summary_update`，加上心跳，其他
-  一概不送：沒有訊息也沒有畫面，所以用戶端可以同時對幾十個 AgentAPI 各開一條串流。回覆內容變長
-  不會改變摘要；任務開始或結束、請求、狀態變動或佇列改變才會。其他 `/events` 用戶端收不到
-  `summary_update`。
+- `GET /summary` 回傳實例身分 `instance`（與 [webhook](#webhook) 事件相同：`id`、`name`、
+  `server_id`、主機、port、目錄、agent 與 `url`）、`status`、`lifecycle`，以及取自工作階段名稱
+  或最新提示開頭的 `title`。另外包含最新[任務](#任務)、任務數、`pending_requests`、
+  `queued_messages`、開啟中的終端機對話框、`login_required`、`limit_stop` 和 `usage`
+  （context window 與帳號用量限制）。
+- `attention` 依優先順序標示需要使用者處理的原因：`login`、`request`（核准、提問或計畫）、
+  `dialog`（終端機對話框）、`limit`（用量限制使回合停止）、`exited`，或 `none`。
+- `GET /events?only=summary` 在連線時及摘要變動時送出 `summary_update`，另有心跳。
+  串流省略訊息與畫面更新，讓用戶端能同時追蹤幾十個實例。回覆文字增長不會改變摘要；
+  任務開始或結束、請求、狀態與佇列的變更才會。其他 `/events` 用戶端不會收到 `summary_update`。
 
-`--instance-id` 為 AgentAPI 命名（預設為 `<hostname>:<port>`），`--name` 是用戶端顯示的名稱
-（預設為工作目錄的名稱），`--public-url` 是用戶端能連到它的網址；執行中可以用 `PUT /webhook`
-修改 ID 和網址。每個 webhook 事件也帶有相同的 `instance`，所以接收 webhook 的中控平台和直接連到
-每個 AgentAPI 的用戶端，用同樣的方式區分它們。在其他來源的瀏覽器中執行的用戶端，需要把該來源加進
-[`--allowed-origins`](#允許的來源)；有 [API token](#api-token-驗證) 時要用 `fetch` 加上
-`Authorization` header 讀取串流，因為 `EventSource` 無法送出 header。
+用 `--instance-id` 指定實例識別碼（預設 `<hostname>:<port>`），`--name` 指定顯示名稱
+（預設為工作目錄名稱），`--public-url` 指定連線網址。執行中可透過 `PUT /webhook` 修改 ID 與網址。
+webhook 事件使用同一份 `instance` 身分資訊，方便接收 webhook 或直接連線的用戶端一致地識別實例。
+
+瀏覽器用戶端若來自其他來源，需將該來源加入 [`--allowed-origins`](#允許的來源)。
+使用 [API token](#api-token-驗證) 時，以 `fetch` 加上 `Authorization` 標頭讀取串流；
+`EventSource` 無法設定該標頭。
 
 ### Webhook
 
-除了被動提供 API 之外，AgentAPI 也能主動把發生的事推送給接收端，例如同時監看多個 agent 的中控
-平台：每次有變化，它就把一個 JSON 事件 POST 到 `--webhook-url`。預設只送 `run.status_changed`；
-`--webhook-events` 可以挑選更多事件，依類型（`task.completed`）、群組（`task.*`）或全部（`*`）：
+AgentAPI 會把 JSON 事件 POST 到 `--webhook-url`，例如同時監看多個 agent 的中控平台。
+預設只送 `run.status_changed`；可用 `--webhook-events` 依類型（`task.completed`）、群組
+（`task.*`）或全部（`*`）選擇事件：
 
 | 事件 | 何時送出 | `data` |
 | --- | --- | --- |
@@ -1262,11 +1253,12 @@ expected = "sha256=" + hmac.new(secret, f"{timestamp}.".encode() + body, hashlib
 valid = hmac.compare_digest(expected, signature) and abs(time.time() - int(timestamp)) < 300
 ```
 
-事件一次送一個，依發生順序。傳送失敗（網路錯誤、逾時、5xx、408 或 429 回應）時，會在 1、2、
-4…秒（最多 30 秒）後重試，共 `--webhook-max-attempts`（3）次、每次逾時 `--webhook-timeout`
-（10 秒），之後放棄並記錄在 log；4xx 回應不會重試。接收端無法連線時，事件會在最多 1,024 個的
-佇列中等待，佇列滿了之後較新的事件會被丟棄，所以漏收事件的接收端應從 API（或下一次心跳）讀取
-目前狀態。關閉時，AgentAPI 最多會等 5 秒讓 `instance.stopped` 送達。
+事件依序傳送，一次一個。網路錯誤、逾時和 HTTP 5xx、408 或 429 回應會觸發重試，間隔為
+1、2、4…秒，最多 30 秒；其他 4xx 回應不重試。每次傳送總共允許 `--webhook-max-attempts`
+（3）次嘗試，每次逾時為 `--webhook-timeout`（10 秒）；用完次數後會放棄並記錄在 log。
+
+佇列最多保存 1,024 個事件，滿了就丟棄新事件。漏收事件的接收端應透過 API 或下一次心跳取得目前
+狀態。關閉時，AgentAPI 最多等 5 秒讓 `instance.stopped` 送達。
 
 可以用 Go `text/template`（`--webhook-payload-template`）改寫 body 的格式以符合接收端，例如聊天
 服務的 incoming webhook。可用欄位有 `.ID`、`.Type`、`.CreatedAt`、`.Instance` 和 `.Data`（事件的
@@ -1279,13 +1271,14 @@ data，欄位名稱同 JSON，例如 `{{.Data.prompt}}`），`run.status_changed
 是否設定了 secret，不會回傳 secret 本身），`PUT /webhook` 不需重新啟動就能修改；省略的
 `events`、`secret`、`heartbeat_seconds`、`instance_id` 和 `public_url` 會維持原值。
 
-聊天介面中，Explorer 的 Webhook 分頁也能做同樣的設定：接收端網址、事件種類（任務、需要你處理
-的事、心跳、執行狀態、agent 錯誤、訊息、工具呼叫）、簽章 secret、instance ID、心跳間隔、公開
-網址，以及 **Delivery and payload** 底下的逾時、嘗試次數和範本，所以啟動時沒有設定 webhook 的
-AgentAPI 也能在這裡設定。在這裡或用 `PUT /webhook` 修改的設定會維持到 AgentAPI 重新啟動為止；
-使用 [`--state-db`](#持久保存的工作階段) 時重新啟動後也仍有效，除非 AgentAPI 以不同的 webhook
-參數啟動。**Send test event**（`POST /webhook/test`）會對已儲存的網址送一次
-`webhook.test` 事件（和其他事件一樣簽章，不受所選事件影響），並顯示接收端的回應。
+Explorer 的 Webhook 分頁可設定接收端網址、事件群組、簽章 secret、instance ID、心跳間隔與
+公開網址；**Delivery and payload** 提供逾時、嘗試次數與範本。即使 AgentAPI 啟動時沒有設定
+webhook，也能在這裡設定。
+
+這裡或 `PUT /webhook` 的變更會維持到 AgentAPI 重新啟動。使用
+[`--state-db`](#持久保存的工作階段) 時，重新啟動後也會保留，除非新的 webhook 參數覆蓋設定。
+**Send test event**（`POST /webhook/test`）會向已儲存的網址送出一次已簽章的 `webhook.test`
+事件，不受事件選擇影響，並顯示接收端回應。
 
 ![Explorer 的 Webhook 分頁：接收端網址、事件群組、簽章 secret、instance ID、心跳和公開網址](docs/screenshots/explorer-webhook.png)
 
@@ -1731,9 +1724,10 @@ agent 就能開發介面。
 
 ## 執行穩定性
 
-此 fork 也修正了寬字元的終端機游標追蹤、PTY 資源洩漏、並行事件傳送、訊息追蹤的競爭條件、ACP 關閉
-流程、TUI 重繪殘影、JSONL 監看器的緩衝資料寫出（flush）、Claude delta 串流期間結構化訊息內容區塊
-的合併，以及 Claude Code 將工作階段轉存至新 JSONL 檔案時的動態監看檔案切換。這些變更有助於 AgentAPI 在長時間工作階段、行程替換，以及瀏覽器或網路暫時中斷時保持穩定。
+此 fork 修正了寬字元游標追蹤、PTY 資源洩漏、並行事件傳送、訊息追蹤的競爭條件、ACP 關閉流程
+與 TUI 重繪殘影。另修正 JSONL 監看器的緩衝寫出（flush）、Claude delta 串流期間的內容區塊合併，
+以及 Claude Code 將工作階段轉存到新 JSONL 檔案後的監看切換。這些修正處理長時間工作階段、
+行程替換，以及瀏覽器或網路暫時中斷時的問題。
 
 ## 開發藍圖
 
@@ -1747,4 +1741,5 @@ agent 就能開發介面。
 AgentAPI 目前讓開發者能以程式控制 coding agent。我們期待主要的 agent 未來都能提供正式的 SDK。
 屆時是否仍需要 AgentAPI，將取決於各家廠商是採用共同的 API，還是繼續使用各自的格式。
 
-如果是前者，我們會停止維護 AgentAPI，改為推薦官方 SDK。如果是後者，我們的目標是讓 AgentAPI 成為能控制任何 coding agent 的通用轉接層，讓使用 AgentAPI 的開發者不必修改程式碼就能在不同 agent 之間切換。
+若各家採用共同 API，我們會停止維護 AgentAPI，改為推薦官方 SDK。若協定仍各不相同，
+我們會繼續朝通用轉接層的方向開發，讓開發者不必修改程式碼就能切換 agent。

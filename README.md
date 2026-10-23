@@ -14,10 +14,9 @@ with an HTTP API.
 
 ![The AgentAPI chat with two tasks: prompts, tool calls, thinking notes and the composer](docs/screenshots/chat-desktop.png)
 
-The screenshots show AgentAPI v0.28.0 with the built-in `native-demo` agent, whose replies, tool
-results, models and usage are simulated. The [chat UI guide](docs/chat-ui.md) goes through every
-feature of the chat with screenshots and animations, and the
-[screenshot guide](docs/screenshots/README.md) explains how they are taken.
+The screenshots show AgentAPI v0.28.0 running the built-in `native-demo` agent. Its replies, tool
+results, models and usage are simulated. See the [chat UI guide](docs/chat-ui.md) for features and
+animations, or the [screenshot guide](docs/screenshots/README.md) to reproduce the captures.
 
 Use AgentAPI to:
 
@@ -196,9 +195,9 @@ has the complete commit history.
 
 ### Supported agents
 
-The agent type decides how AgentAPI formats the agent's screen and which features it offers. It
-comes from `--type`, or else from the agent command when that is one of the type names (`agentapi
-server -- claude`, but not `-- /usr/local/bin/claude`); anything else runs as `custom`.
+The agent type determines screen formatting and available features. Set it with `--type`, or let
+AgentAPI detect it from a command that matches a known type name, such as `agentapi server -- claude`.
+Full paths such as `-- /usr/local/bin/claude` need an explicit type; unrecognized commands use `custom`.
 
 | Agent | Type | PTY | Native | Structured activity | MCP management |
 | --- | --- | :-: | :-: | :-: | :-: |
@@ -265,19 +264,17 @@ then on.
 
 ## Chat UI
 
-The chat UI at `/chat` is embedded in the binary and works with every transport, on a desktop and on
-a phone. It has layouts for phones, searchable tool activity, connection-state indicators and
-compact tool-call cards, and its header shows the agent's mark (Claude's orange square, Pi's logo)
-and the AgentAPI version. The [chat UI guide](docs/chat-ui.md) shows every part of it with
-screenshots and animations.
+The chat UI at `/chat` is embedded in the binary and works with every transport on desktops and
+phones. It includes searchable tool activity, compact tool-call cards and connection indicators.
+The header shows the AgentAPI version and the agent's mark, such as Claude's orange square or Pi's
+logo. See the [chat UI guide](docs/chat-ui.md) for screenshots and animations.
 
 ![Sending a task in the chat: the agent thinks, runs a tool and replies](docs/screenshots/demo-task.gif)
 
 ### Tasks and the transcript
 
-The embedded chat UI is organized around tasks instead of a single flat transcript. Each user
-request becomes a navigable task with its associated response, thinking blocks, tool calls, and
-background activity.
+The chat groups each user request with its response, thinking, tool calls and background activity
+as a task. You can navigate between tasks in the transcript.
 
 Each task has a timeline on the left: when it started, how long it took and, for Claude Code, Codex
 and Pi, what it [cost](#session-costs). Your prompt appears in a tinted block labelled "You", followed
@@ -285,11 +282,10 @@ by the agent's logo, name, and reply in Markdown. Each tool call occupies one ro
 (`$ command`), exit code, duration, and output preview. On wide screens, thinking appears as margin
 notes.
 
-Each task's state (Working, Done, Failed, Limit reached) is the server's [task](#tasks), and its
-tool calls and thinking are the ones the server says began in it. A status strip above the composer
-shows the agent's current activity. The header, tab title, and
-status strip show "Needs you" while the agent waits for an answer, and queued tasks are marked as
-held. Long tasks show their latest 40 steps first.
+The server's [task](#tasks) determines the displayed state (Working, Done, Failed, Limit reached)
+and which tool calls and thinking belong to it. A strip above the composer shows the agent's
+current activity. While the agent waits for an answer, the header, tab title and status strip show
+"Needs you", and queued tasks are marked as held. Long tasks show their latest 40 steps first.
 
 Each agent message has its own Markdown/raw toggle so you can switch display modes without
 affecting the rest of the conversation.
@@ -311,23 +307,21 @@ Each task's ⋯ menu previews, copies or exports the task as Markdown.
 
 ### Lineage
 
-When a native Claude Code or Codex runs subagents (Claude Code's Agent tool, Codex's spawn_agent), a
-button in the header counts them, with
-how many still work, and opens the Lineage panel: each subagent with what it was asked to do, its
-kind, whether it works, is done or failed, and for how long. Choosing one shows what it did, step by
-step, the way the transcript shows a task: its thinking, tool calls with their results, and its
-answer, which follow it while it works. The **Steps** button on an Agent or spawn_agent tool call
-opens the panel on its subagent.
+When Claude Code or Codex runs subagents with the native transport, a header button shows their
+total and running counts. It opens the Lineage panel, which lists each subagent's task, kind,
+state and elapsed time. Select one to follow its thinking, tool calls, results and answer as it
+works. The **Steps** button on an Agent or spawn_agent tool call opens that subagent directly.
 
 ![The Lineage panel on a subagent: its task, a file it read, a command it ran and its answer](docs/screenshots/lineage.png)
 
-The steps are read from the subagents' own logs (Claude Code keeps one per subagent next to the
-session's), so the panel shows those of the session the agent has open, also one opened from
-[earlier sessions](#earlier-sessions); a copy of a session starts without the subagents of the
-original. `GET /subagents` lists them and `GET /subagents/{id}` returns one's task and messages. A Claude Code
-subagent's state comes from its Agent tool call; a Codex subagent's from its own log, as Codex's
-spawn call ends at once while the subagent works on. Codex sends the subagent its task encrypted,
-so the panel names a Codex subagent after its task name and nickname instead.
+AgentAPI reads the steps from each subagent's log. Claude Code keeps these logs beside the parent
+session's log. The panel includes subagents from [earlier sessions](#earlier-sessions) you open;
+a copy of a session starts without the original's subagents. `GET /subagents` lists them, and
+`GET /subagents/{id}` returns a subagent's task and messages.
+
+Claude Code reports a subagent's state through its Agent tool call. Codex's spawn call returns
+before the subagent finishes, so AgentAPI reads its state from its own log. Codex encrypts the task
+sent to a subagent; the panel uses its task name and nickname as the label.
 
 ### Attachments and images
 
@@ -403,13 +397,13 @@ the window (11–20px); the mirror uses the agent's real terminal width, so star
 
 ### With the native transport
 
-With the native transport, what the agent asks for (a tool approval, its questions, a plan to
-approve) docks above the composer as a card, at most 60% of a phone's screen, and while the agent
-works the send button can also steer the message into the running turn or interrupt it. The
-composer's toolbar switches the agent's permission mode, model and reasoning effort and shows how
-full its context is and its rate limits; slash commands such as `/model` and `/compact` work from
-the composer; and the terminal button opens a shell in the agent's working directory instead of TTY
-mode, which needs the agent's own terminal (the screen views stay hidden, also for ACP). See
+Native requests for tool approval, answers or plan approval appear as cards above the composer,
+using at most 60% of a phone's screen. While the agent works, the send menu can steer a message into
+the running turn or interrupt it. The toolbar controls permission mode, model and reasoning effort,
+and shows context usage and rate limits. Slash commands include `/model` and `/compact`.
+
+The terminal button opens a shell in the agent's working directory. TTY mode requires the agent's
+own terminal, so screen views stay hidden for native and ACP sessions. See
 [Native transport](#native-transport).
 
 ### Alerts, connection recovery and caching
@@ -695,10 +689,10 @@ own review decides what may run), **ask** (tool calls that need approval come as
 
 If the agent uses a policy outside these four modes, such as Claude Code's `acceptEdits` after plan
 approval or a custom Codex command-line policy, the UI does not label it as one of these modes.
-Claude Code and Pi apply a change at once; Codex takes it with its next turn, the only time
-app-server does. The settings chosen are given again to the agent that replaces this one: after a
-restart, a new login, and, with `--state-db` (which stores them), after AgentAPI restarts. A setting
-the agent changes by itself, such as the mode an approved plan switches to, is followed.
+Claude Code and Pi apply changes immediately. Codex applies them on the next turn, when app-server
+accepts settings. AgentAPI reapplies your choices after an agent restart or a new login; with
+`--state-db`, it also restores them after an AgentAPI restart. The UI follows changes the agent
+makes itself, such as switching modes after plan approval.
 
 In the chat, the composer's toolbar has a menu for the mode and one for the model and effort (on a
 phone in a row of their own above the buttons).
@@ -759,17 +753,18 @@ reset**, **Continue now**, and **Send queued tasks**, and the queue says it wait
 
 ### Terminal
 
-A native agent has no terminal of its own, so AgentAPI runs a shell in the agent's working directory
-for the chat's terminal button: for a login, a git command or anything else. It is a real terminal
-(colors, the cursor, full screen programs), sized to the window, also on a phone, where a key bar
-adds the keys an on-screen keyboard lacks. Everyone who opens it shares it, like a tmux window, and
-it keeps running when nobody watches; once its shell exits, the next open starts a new one. Its
-environment is the agent's, without AgentAPI's own variables. Web links in it open on a click, also
-when they run over several lines, and the last link a command printed (a login URL) shows above the
-terminal to open or copy with one tap; TTY mode does the same. The key bar has arrows, Enter, Esc,
-Tab, Shift+Tab, Ctrl+C, a shell's Ctrl+R, Ctrl+A, Ctrl+E, Ctrl+U and Ctrl+W, Home, End, Page up and
-Page down, / - | ~, Alt+↑, Ctrl+L, and Ctrl+D and Ctrl+Z, which ask for a second press; its Ctrl and
-Alt buttons hold the modifier for the next key typed.
+AgentAPI provides a shell in the native agent's working directory for logins, git commands and
+other work. It supports colors, cursor movement and full-screen programs, and fits the window on
+desktops and phones. Everyone shares the same shell, like a tmux window. It keeps running with no
+viewers; if it exits, opening the terminal starts a new one. Its environment matches the agent's,
+with AgentAPI's own variables removed.
+
+Web links are clickable even when wrapped across lines. The last link printed by a command, such
+as a login URL, also appears above the terminal for opening or copying. TTY mode behaves the same.
+
+The key bar supplies arrows, Enter, Esc, Tab, Shift+Tab, Ctrl+C, Ctrl+R, Ctrl+A, Ctrl+E, Ctrl+U,
+Ctrl+W, Home, End, Page up, Page down, / - | ~, Alt+↑ and Ctrl+L. Ctrl+D and Ctrl+Z require a second
+press. The Ctrl and Alt buttons hold the modifier for the next key.
 
 - `GET /terminal` streams its output as server-sent events (`output` events
   with base64 data, the first one the recent output to replay; `exit` when the
@@ -855,8 +850,8 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
 
 ### Earlier sessions
 
-Claude Code, Codex and Pi keep a log of every session, which AgentAPI reads to list the sessions the
-agent had in its working directory and to open one, without `--state-db`:
+AgentAPI reads Claude Code, Codex and Pi session logs to list and open earlier sessions in the
+working directory. This works without `--state-db`:
 
 - `GET /sessions` lists them, the latest first, with the one the agent has
   open (`current`): each with its `id`, `title` (the agent's or the user's
@@ -885,9 +880,9 @@ ask for a second click.
 
 ### Session costs
 
-AgentAPI turns the tokens of each model call, read from the agent's session logs, into what they
-cost at the model providers' list prices, in USD. It is the API-equivalent cost: a Claude or ChatGPT
-subscription doesn't charge per token, so it says what the work would have cost with an API key.
+AgentAPI reads model calls from the agent's session logs and prices their tokens in USD at the
+providers' list prices. This is an API-equivalent cost: Claude and ChatGPT subscriptions don't
+charge per token, so it estimates what the same work would cost with an API key.
 
 - Claude Code: every call in the session's log and in its subagents' logs, with the cache writes
   priced as Anthropic's 5-minute or one-hour cache. Calls Claude Code counts in its own total but
@@ -1166,26 +1161,17 @@ To parse individual messages from the terminal output, we take the following ste
 3. The user message is then submitted to the agent. From this point on, any time the terminal output changes, a new snapshot is taken. It's diffed against the initial snapshot, and any new text that appears below the initial content is treated as the agent's next message.
 4. If the terminal output changes again before a new user message is sent, the agent message is updated.
 
-This lets us split the terminal output into a sequence of messages.
-
 #### Removing TUI elements from agent messages
 
-Terminal output can include content that is not part of the agent's reply:
+AgentAPI removes two common TUI elements from replies:
 
-- The user's input at the beginning of the message. Coding agents often echo the input back to the user to make it visible in the terminal.
-- An input box at the end of the message. This is where the user usually types their input.
-
-AgentAPI automatically removes these.
-
-- For user input, we strip the lines that contain the text from the user's last message.
-- For the input box, we look for lines at the end of the message that contain common TUI elements, like `>` or `------`.
+- Echoed user input: lines containing the text of the user's last message.
+- The input box: trailing lines with common TUI elements such as `>` or `------`.
 
 #### What will happen when Claude Code, Goose, Aider, or Codex update their TUI?
 
-Splitting the terminal output into a sequence of messages should still work, since it doesn't depend
-on the TUI structure. The logic for removing TUI elements may need to be updated to account for new
-elements. AgentAPI will still be usable, but some extra TUI elements may become visible in the agent
-messages.
+Message splitting should still work because it doesn't depend on the TUI structure. Removing TUI
+elements may need an update; until then, replies may include extra interface text.
 
 ### Structured Claude, Codex and Pi activity
 
@@ -1367,46 +1353,43 @@ again. Opening a session with more than 256 rich messages ends them too, rather 
 
 ## Integrations
 
-AgentAPI serves its API to whoever calls it, and pushes what happens to a receiver of your choice:
-[webhooks](#webhooks) send tasks, requests, messages and heartbeats as they happen, a
-[summary](#watching-many-instances) lets one client follow many AgentAPIs, the
-[human-reply API](#human-reply-api) lets a bot answer what the agent waits on, and
-[MCP management](#mcp-management) changes the agent's tools.
+Use [webhooks](#webhooks) to send tasks, requests, messages and heartbeats to a receiver,
+the [summary](#watching-many-instances) to monitor several AgentAPIs,
+the [human-reply API](#human-reply-api) to answer the agent through a bot, and
+[MCP management](#mcp-management) to configure the agent's tools.
 
 ### Watching many instances
 
-A client that shows many AgentAPIs side by side, one row each, like a sidebar of agents, reads one
-response or one stream per AgentAPI rather than its whole conversation:
+To display several AgentAPIs in a sidebar or dashboard, read one summary response or stream per
+instance:
 
-- `GET /summary` returns what such a row shows: the `instance` (as in [webhook](#webhooks)
-  events: `id`, `name`, `server_id`, host, port, directory, agent, `url`), `status` and
-  `lifecycle`, a `title` (the session's name, else the start of the latest prompt), the latest
-  [task](#tasks) and how many there are, `pending_requests`, `queued_messages`, the open terminal
-  dialog, `login_required`, `limit_stop` and `usage` (the context window and the account's usage
-  limits).
-- `attention` says why the agent waits for you, the most pressing first: `login`, `request` (an
-  approval, question or plan), `dialog` (in its terminal), `limit` (a usage limit stopped its turn),
-  `exited`, or `none`.
-- `GET /events?only=summary` sends a `summary_update` with the summary when the client connects and
-  whenever it changes, plus the heartbeat, and nothing else: no messages or screen, so a client
-  can keep one stream open to each of dozens of AgentAPIs. A reply that grows doesn't change the
-  summary; a task that starts or ends, a request, a status change or a new queue does. Other
-  `/events` clients don't get `summary_update`.
+- `GET /summary` returns the `instance` identity (as in [webhook](#webhooks) events: `id`, `name`,
+  `server_id`, host, port, directory, agent and `url`), `status`, `lifecycle` and a `title` from the
+  session name or the start of the latest prompt. It also includes the latest [task](#tasks), task
+  count, `pending_requests`, `queued_messages`, the open terminal dialog, `login_required`,
+  `limit_stop` and `usage` (context window and account limits).
+- `attention` identifies why the agent needs you, in priority order: `login`, `request` (approval,
+  question or plan), `dialog` (in the terminal), `limit` (a usage limit stopped the turn), `exited`,
+  or `none`.
+- `GET /events?only=summary` sends `summary_update` on connection and when the summary changes,
+  plus heartbeats. It omits messages and screen updates, allowing a client to follow dozens of
+  instances. Reply text growing doesn't change the summary; task starts and ends, requests, status
+  changes and queue changes do. Other `/events` clients don't receive `summary_update`.
 
-`--instance-id` names the AgentAPI (by default `<hostname>:<port>`), `--name` is what a client
-shows (by default the working directory's name) and `--public-url` is where a client can reach it;
-`PUT /webhook` can change the ID and the URL while it runs. The same `instance` is in every webhook
-event, so a dashboard that gets webhooks and a client that connects to each AgentAPI tell them
-apart the same way. A client in a browser on another origin needs that origin in
-[`--allowed-origins`](#allowed-origins), and with an [API token](#api-token-authentication) it
-reads the stream with `fetch` and an `Authorization` header, since `EventSource` sends no headers.
+Set `--instance-id` to identify the instance (default `<hostname>:<port>`), `--name` for its display
+name (default the working directory's name), and `--public-url` for its address. `PUT /webhook` can
+change the ID and URL at runtime. Webhook events carry the same `instance` identity, so clients
+using webhooks or direct connections can identify instances consistently.
+
+For a browser client on another origin, add that origin to
+[`--allowed-origins`](#allowed-origins). To send an [API token](#api-token-authentication), read the
+stream with `fetch` and an `Authorization` header; `EventSource` can't set that header.
 
 ### Webhooks
 
-Besides the API it serves, AgentAPI can push what happens to a receiver, such as a dashboard that
-watches many agents: it POSTs a JSON event to `--webhook-url` for each change. By default it sends
-only `run.status_changed`; `--webhook-events` picks more, by type (`task.completed`), by group
-(`task.*`) or all of them (`*`):
+AgentAPI POSTs JSON events to `--webhook-url`, for example to a dashboard monitoring several agents.
+It sends only `run.status_changed` by default. Select events with `--webhook-events` by type
+(`task.completed`), group (`task.*`) or all events (`*`):
 
 | Event | Sent when | `data` |
 | --- | --- | --- |
@@ -1481,12 +1464,14 @@ expected = "sha256=" + hmac.new(secret, f"{timestamp}.".encode() + body, hashlib
 valid = hmac.compare_digest(expected, signature) and abs(time.time() - int(timestamp)) < 300
 ```
 
-Events are sent one at a time, in order. A delivery that fails (a network error, a timeout, a 5xx,
-408 or 429 response) is tried again after 1, 2, 4… seconds, up to 30, for `--webhook-max-attempts`
-(3) attempts with `--webhook-timeout` (10s) each, and then given up and logged; a 4xx response is
-not tried again. While the receiver is down, events wait in a queue of 1,024 and newer ones are
-dropped once it is full, so a receiver that missed some reads the current state from the API (or the
-next heartbeat). On shutdown AgentAPI waits up to 5 seconds for `instance.stopped` to be delivered.
+Events are delivered in order, one at a time. Network errors, timeouts and HTTP 5xx, 408 or 429
+responses trigger retries after 1, 2, 4… seconds, capped at 30 seconds. Other 4xx responses aren't
+retried. Each delivery allows `--webhook-max-attempts` (3) attempts, each with a
+`--webhook-timeout` (10s) timeout; exhausted deliveries are logged and discarded.
+
+The queue holds 1,024 events and drops new ones when full. A receiver that misses events should
+read the current state from the API or the next heartbeat. On shutdown, AgentAPI waits up to
+5 seconds to deliver `instance.stopped`.
 
 An optional Go `text/template` (`--webhook-payload-template`) reshapes the body for the receiver,
 such as a chat service's incoming webhook. Available fields are `.ID`, `.Type`, `.CreatedAt`,
@@ -1501,13 +1486,14 @@ configuration (whether a secret is set, never the secret) and `PUT /webhook` cha
 restart; its `events`, `secret`, `heartbeat_seconds`, `instance_id` and `public_url` are kept when
 left out.
 
-In the chat, the Explorer's Webhook tab does the same: the receiver's URL, the kinds of events
-(tasks, what needs you, heartbeats, run status, agent errors, messages, tool calls), the signing
-secret, the instance ID, the heartbeat, the public URL and, under **Delivery and payload**, the
-timeout, attempts and template, so a webhook can be set up on an AgentAPI that started without one.
-Settings changed there or with `PUT /webhook` last until AgentAPI restarts, or with
-[`--state-db`](#persistent-sessions) after it too, unless AgentAPI starts with other webhook flags. **Send test event** (`POST /webhook/test`) sends a `webhook.test` event to the saved URL once,
-signed like the others and whatever the events chosen, and shows the receiver's answer.
+The Explorer's Webhook tab configures the receiver URL, event groups, signing secret, instance ID,
+heartbeat and public URL. **Delivery and payload** contains the timeout, attempt count and template.
+You can configure a webhook here even if AgentAPI started without one.
+
+Changes made here or through `PUT /webhook` last until AgentAPI restarts. With
+[`--state-db`](#persistent-sessions), they survive restarts unless different webhook flags override
+them. **Send test event** (`POST /webhook/test`) sends one signed `webhook.test` event to the saved
+URL, regardless of the event selection, and shows the receiver's response.
 
 ![The Explorer's Webhook tab: the receiver URL, event groups, signing secret, instance ID, heartbeat and public URL](docs/screenshots/explorer-webhook.png)
 
@@ -1641,9 +1627,8 @@ from those who can.
 ### Allowed hosts
 
 By default, the server only allows requests with the `Host` header set to `localhost`, `127.0.0.1`
-or `[::1]`. If you'd like to host AgentAPI elsewhere, you can change this by using the
-`AGENTAPI_ALLOWED_HOSTS` environment variable or the `--allowed-hosts` flag. Hosts must be hostnames
-only (no ports); the server ignores the port portion of incoming requests when authorizing. This
+or `[::1]`. To host AgentAPI elsewhere, set `AGENTAPI_ALLOWED_HOSTS` or `--allowed-hosts`.
+Hosts must be hostnames only (no ports); the server ignores the port portion of incoming requests when authorizing. This
 checks the `Host` header only; to keep the server off the network altogether, also listen on
 loopback with `--bind 127.0.0.1` (see [Bind address](#bind-address)).
 
@@ -1671,9 +1656,8 @@ AGENTAPI_ALLOWED_HOSTS='example.com example.org' agentapi server -- claude
 ### Allowed origins
 
 By default, the server allows CORS requests from `http://localhost:3284`, `http://localhost:3000`,
-and `http://localhost:3001`. If you'd like to change which origins can make cross-origin requests
-to AgentAPI, you can change this by using the `AGENTAPI_ALLOWED_ORIGINS` environment variable or the
-`--allowed-origins` flag.
+and `http://localhost:3001`. Set `AGENTAPI_ALLOWED_ORIGINS` or `--allowed-origins` to change which
+origins may make cross-origin requests.
 
 To allow requests from any origin, use `*` as the allowed origin:
 
@@ -1987,12 +1971,11 @@ without a real one.
 
 ## Runtime reliability
 
-The fork also includes fixes for wide-character terminal cursor tracking, PTY lifecycle leaks,
-concurrent event delivery, message tracking races, ACP shutdown, TUI re-render artifacts, JSONL
-watcher flushing, rich message content-block merging during Claude delta streaming, and runtime
-session-file switching when Claude Code parks a session to a new JSONL. These changes are intended
-to keep AgentAPI stable across long sessions, process replacement, and temporary browser or network
-interruptions.
+The fork fixes wide-character cursor tracking, PTY lifecycle leaks, concurrent event delivery,
+message tracking races, ACP shutdown and TUI redraw artifacts. It also fixes JSONL watcher flushing,
+content-block merging during Claude delta streaming, and switching the watched file when Claude
+Code parks a session in a new JSONL file. These fixes address long sessions, process replacement
+and temporary browser or network interruptions.
 
 ## Roadmap
 
@@ -2007,6 +1990,6 @@ AgentAPI currently lets developers control coding agents programmatically. We ho
 will eventually offer official SDKs. Whether AgentAPI is still needed will depend on whether vendors
 adopt a common API or continue to use their own formats.
 
-In the former case, we'll deprecate AgentAPI in favor of the official SDKs. In the latter case, our
-goal will be to make AgentAPI a universal adapter to control any coding agent, so a developer using
-AgentAPI can switch between agents without changing their code.
+If vendors adopt a common API, we'll deprecate AgentAPI and recommend the official SDKs. If their
+formats remain different, we'll work toward a universal adapter so developers can switch agents
+without changing their code.
