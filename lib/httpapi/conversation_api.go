@@ -66,13 +66,20 @@ func shortText(s string, n int) string {
 
 func (s *Server) getWorkspace(_ context.Context, _ *struct{}) (*WorkspaceResponse, error) {
 	var response WorkspaceResponse
+	response.Body.URL = coderWorkspaceURL()
+	return &response, nil
+}
+
+// coderWorkspaceURL is the dashboard page of the Coder workspace AgentAPI
+// runs in, or empty outside one.
+func coderWorkspaceURL() string {
 	base := strings.TrimRight(os.Getenv("CODER_URL"), "/")
 	owner := strings.TrimSpace(os.Getenv("CODER_WORKSPACE_OWNER_NAME"))
 	name := strings.TrimSpace(os.Getenv("CODER_WORKSPACE_NAME"))
-	if base != "" && owner != "" && name != "" {
-		response.Body.URL = base + "/@" + url.PathEscape(owner) + "/" + url.PathEscape(name)
+	if base == "" || owner == "" || name == "" {
+		return ""
 	}
-	return &response, nil
+	return base + "/@" + url.PathEscape(owner) + "/" + url.PathEscape(name)
 }
 
 // getMessages handles GET /messages, without s.mu (see getTitle).

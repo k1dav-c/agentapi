@@ -338,7 +338,6 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	logger.Info("Using upload directory", "uploadDir", uploads.dir)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	webhook.start(shutdownCtx)
 
 	s := &Server{
 		router:         router,
@@ -385,6 +384,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	if observer != nil {
 		observer.storeImages = s.storeRichImages
 	}
+	s.startWebhook(config)
 
 	// Register API routes
 	s.registerRoutes()
@@ -458,6 +458,8 @@ func (s *Server) Start() error {
 func (s *Server) Stop(ctx context.Context) error {
 	var err error
 	s.stopOnce.Do(func() {
+		// Tells the webhook's receiver, while it can still be sent.
+		s.webhook.stop(ctx)
 		// Ends the queue loop and the event streams, which the HTTP
 		// shutdown would otherwise wait for.
 		s.shutdown()

@@ -2838,6 +2838,24 @@
             "readOnly": true,
             "type": "string"
           },
+          "events": {
+            "description": "The event types to send, or patterns of them (task.*, *). Omit to preserve; an empty list sends run.status_changed alone.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "heartbeat_seconds": {
+            "description": "How often instance.heartbeat is sent, in seconds; 0 turns it off. Omit to preserve.",
+            "format": "int64",
+            "maximum": 86400,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "instance_id": {
+            "description": "The instance ID in every event. Omit to preserve; set to empty string for <hostname>:<port>.",
+            "type": "string"
+          },
           "max_attempts": {
             "description": "Maximum number of delivery attempts.",
             "format": "int64",
@@ -2846,7 +2864,15 @@
             "type": "integer"
           },
           "payload_template": {
-            "description": "Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport.",
+            "description": "Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .RunID, .Status, .PreviousStatus, .AgentType, .Transport.",
+            "type": "string"
+          },
+          "public_url": {
+            "description": "Where this AgentAPI can be reached, in every event. Omit to preserve; set to empty string to clear.",
+            "type": "string"
+          },
+          "secret": {
+            "description": "Secret that signs every delivery with HMAC-SHA256. Omit to preserve; set to empty string to stop signing.",
             "type": "string"
           },
           "timeout_seconds": {
@@ -2878,6 +2904,23 @@
             "readOnly": true,
             "type": "string"
           },
+          "events": {
+            "description": "The event types sent, or patterns of them (task.*, *).",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "heartbeat_seconds": {
+            "description": "How often instance.heartbeat is sent, in seconds; 0 when it is off.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "instance_id": {
+            "description": "The instance ID in every event.",
+            "type": "string"
+          },
           "max_attempts": {
             "description": "Maximum number of delivery attempts.",
             "format": "int64",
@@ -2886,6 +2929,14 @@
           "payload_template": {
             "description": "Go text/template for the webhook POST body. Empty means the default JSON payload is used.",
             "type": "string"
+          },
+          "public_url": {
+            "description": "Where this AgentAPI can be reached, in every event; empty when not set.",
+            "type": "string"
+          },
+          "secret_set": {
+            "description": "Deliveries are signed (X-AgentAPI-Signature-256). The secret itself is never returned.",
+            "type": "boolean"
           },
           "timeout_seconds": {
             "description": "Timeout for each delivery attempt, in seconds.",
@@ -2898,10 +2949,43 @@
           }
         },
         "required": [
+          "events",
+          "heartbeat_seconds",
+          "instance_id",
           "max_attempts",
           "payload_template",
+          "public_url",
+          "secret_set",
           "timeout_seconds",
           "url"
+        ],
+        "type": "object"
+      },
+      "WebhookTestResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/WebhookTestResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "error": {
+            "description": "Why the delivery failed.",
+            "type": "string"
+          },
+          "ok": {
+            "description": "The receiver answered with a 2xx status.",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "The receiver's HTTP status, such as 204 No Content.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok"
         ],
         "type": "object"
       },
@@ -6053,7 +6137,7 @@
     },
     "/webhook": {
       "get": {
-        "description": "Returns the mutable run-status webhook configuration.",
+        "description": "Returns the mutable webhook configuration. The secret is never returned, only whether one is set.",
         "operationId": "get-webhook",
         "responses": {
           "200": {
@@ -6083,7 +6167,7 @@
         ]
       },
       "put": {
-        "description": "Updates run-status webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent.",
+        "description": "Updates webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent.",
         "operationId": "put-webhook",
         "requestBody": {
           "content": {
@@ -6138,6 +6222,38 @@
           }
         },
         "summary": "Update webhook configuration",
+        "tags": [
+          "Webhook"
+        ]
+      }
+    },
+    "/webhook/test": {
+      "post": {
+        "description": "Sends a webhook.test event to the webhook URL once, signed like every event, and reports the receiver's answer.",
+        "operationId": "post-webhook-test",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookTestResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Send a test webhook event",
         "tags": [
           "Webhook"
         ]

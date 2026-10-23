@@ -432,6 +432,11 @@ const (
 	FlagWebhookTimeout         = "webhook-timeout"
 	FlagWebhookMaxAttempts     = "webhook-max-attempts"
 	FlagWebhookPayloadTemplate = "webhook-payload-template"
+	FlagWebhookEvents          = "webhook-events"
+	FlagWebhookSecret          = "webhook-secret"
+	FlagWebhookHeartbeat       = "webhook-heartbeat"
+	FlagWebhookInstanceID      = "webhook-instance-id"
+	FlagPublicURL              = "public-url"
 	FlagAPIToken               = "api-token"
 	FlagBind                   = "bind"
 )
@@ -482,10 +487,15 @@ func CreateServerCmd() *cobra.Command {
 		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal. Native transport only, where the agent has no terminal of its own", "bool"},
 		{FlagAutoContinue, "", false, "When a usage limit stops the agent's turn, continue it once the limit resets, if the agent says when. Native transport only", "bool"},
 		{FlagPrices, "", "", "JSON file of model prices per million tokens, which add to or replace the built-in ones for the sessions' API-equivalent cost (GET /sessions, GET /cost)", "string"},
-		{FlagWebhookURL, "", "", "URL notified when the agent run status changes", "string"},
+		{FlagWebhookURL, "", "", "URL the webhook events are POSTed to (by default only run.status_changed; see --webhook-events)", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},
 		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},
-		{FlagWebhookPayloadTemplate, "", "", "Go text/template for custom webhook POST body. Available fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport", "string"},
+		{FlagWebhookPayloadTemplate, "", "", "Go text/template for custom webhook POST body. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .RunID, .Status, .PreviousStatus, .AgentType, .Transport", "string"},
+		{FlagWebhookEvents, "", []string{}, "Webhook events to send: event types (task.completed), groups (task.*) or * for all. Default: run.status_changed. Comma-separated via flag, space-separated via AGENTAPI_WEBHOOK_EVENTS", "stringSlice"},
+		{FlagWebhookSecret, "", "", "Secret that signs every webhook delivery: X-AgentAPI-Signature-256 is sha256= and the hex HMAC-SHA256 of <X-AgentAPI-Timestamp>.<body>", "string"},
+		{FlagWebhookHeartbeat, "", 60 * time.Second, "How often the instance.heartbeat webhook event is sent; 0 turns it off", "duration"},
+		{FlagWebhookInstanceID, "", "", "Identifies this AgentAPI in every webhook event (default <hostname>:<port>)", "string"},
+		{FlagPublicURL, "", "", "URL this AgentAPI is reached at, sent in every webhook event so the receiver can link to its chat or call its API", "string"},
 		{FlagAPIToken, "", "", "API token for Bearer authentication. If set without a value, a random token is generated. Empty (default) disables authentication.", "string"},
 		{FlagBind, "", "", "Address to listen on: an IP address or hostname without a port (e.g. 127.0.0.1 or ::1). Empty (default) listens on all interfaces", "string"},
 	}

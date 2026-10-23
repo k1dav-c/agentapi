@@ -877,15 +877,35 @@ export interface paths {
         };
         /**
          * Get webhook configuration
-         * @description Returns the mutable run-status webhook configuration.
+         * @description Returns the mutable webhook configuration. The secret is never returned, only whether one is set.
          */
         get: operations["get-webhook"];
         /**
          * Update webhook configuration
-         * @description Updates run-status webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent.
+         * @description Updates webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent.
          */
         put: operations["put-webhook"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhook/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test webhook event
+         * @description Sends a webhook.test event to the webhook URL once, signed like every event, and reports the receiver's answer.
+         */
+        post: operations["post-webhook-test"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2295,13 +2315,26 @@ export interface components {
              * @example https://example.com/schemas/WebhookConfigRequestBody.json
              */
             readonly $schema?: string;
+            /** @description The event types to send, or patterns of them (task.*, *). Omit to preserve; an empty list sends run.status_changed alone. */
+            events?: string[];
+            /**
+             * Format: int64
+             * @description How often instance.heartbeat is sent, in seconds; 0 turns it off. Omit to preserve.
+             */
+            heartbeat_seconds?: number;
+            /** @description The instance ID in every event. Omit to preserve; set to empty string for <hostname>:<port>. */
+            instance_id?: string;
             /**
              * Format: int64
              * @description Maximum number of delivery attempts.
              */
             max_attempts: number;
-            /** @description Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .RunID, .Status, .PreviousStatus, .AgentType, .Transport. */
+            /** @description Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .RunID, .Status, .PreviousStatus, .AgentType, .Transport. */
             payload_template?: string;
+            /** @description Where this AgentAPI can be reached, in every event. Omit to preserve; set to empty string to clear. */
+            public_url?: string;
+            /** @description Secret that signs every delivery with HMAC-SHA256. Omit to preserve; set to empty string to stop signing. */
+            secret?: string;
             /**
              * Format: int64
              * @description Timeout for each delivery attempt, in seconds.
@@ -2317,6 +2350,15 @@ export interface components {
              * @example https://example.com/schemas/WebhookConfigResponseBody.json
              */
             readonly $schema?: string;
+            /** @description The event types sent, or patterns of them (task.*, *). */
+            events: string[] | null;
+            /**
+             * Format: int64
+             * @description How often instance.heartbeat is sent, in seconds; 0 when it is off.
+             */
+            heartbeat_seconds: number;
+            /** @description The instance ID in every event. */
+            instance_id: string;
             /**
              * Format: int64
              * @description Maximum number of delivery attempts.
@@ -2324,6 +2366,10 @@ export interface components {
             max_attempts: number;
             /** @description Go text/template for the webhook POST body. Empty means the default JSON payload is used. */
             payload_template: string;
+            /** @description Where this AgentAPI can be reached, in every event; empty when not set. */
+            public_url: string;
+            /** @description Deliveries are signed (X-AgentAPI-Signature-256). The secret itself is never returned. */
+            secret_set: boolean;
             /**
              * Format: int64
              * @description Timeout for each delivery attempt, in seconds.
@@ -2331,6 +2377,20 @@ export interface components {
             timeout_seconds: number;
             /** @description Webhook destination. Empty means webhook delivery is disabled. */
             url: string;
+        };
+        WebhookTestResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/WebhookTestResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description Why the delivery failed. */
+            error?: string;
+            /** @description The receiver answered with a 2xx status. */
+            ok: boolean;
+            /** @description The receiver's HTTP status, such as 204 No Content. */
+            status?: string;
         };
         WorkspaceResponseBody: {
             /**
@@ -4763,6 +4823,35 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "post-webhook-test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookTestResponseBody"];
+                };
+            };
+            /** @description Error */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };

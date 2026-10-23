@@ -89,6 +89,11 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 			Timeout:         flags.GetDuration(FlagWebhookTimeout),
 			MaxAttempts:     flags.GetInt(FlagWebhookMaxAttempts),
 			PayloadTemplate: flags.GetString(FlagWebhookPayloadTemplate),
+			Events:          flags.GetStringSlice(FlagWebhookEvents),
+			Secret:          flags.GetString(FlagWebhookSecret),
+			Heartbeat:       heartbeatOption(flags.GetDuration(FlagWebhookHeartbeat)),
+			InstanceID:      flags.GetString(FlagWebhookInstanceID),
+			PublicURL:       flags.GetString(FlagPublicURL),
 		},
 	}
 	var err error
@@ -193,4 +198,13 @@ func readPipedPrompt(logger *slog.Logger) (string, error) {
 		logger.Info("Read initial prompt from stdin", "bytes", len(data))
 	}
 	return string(data), nil
+}
+
+// heartbeatOption is the webhook heartbeat interval of
+// --webhook-heartbeat, where 0 turns it off.
+func heartbeatOption(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return -1
+	}
+	return interval
 }
