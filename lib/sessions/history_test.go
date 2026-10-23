@@ -59,6 +59,7 @@ func TestClaudeSessionHistory(t *testing.T) {
 		`{"type":"user","timestamp":"2026-10-17T14:11:30.000Z","sessionId":"s1","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}`,
 		`{"type":"user","timestamp":"2026-10-17T14:12:00.000Z","sessionId":"s1","message":{"role":"user","content":[{"type":"text","text":"Thanks"}]}}`,
 		`{"type":"custom-title","customTitle":"Bug hunt","sessionId":"s1"}`,
+		`{"type":"user","timestamp":"2026-10-17T14:13:00.000Z","sessionId":"s1","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}},{"type":"text","text":"And this?"}]}}`,
 	)
 	// A session in which the user sent nothing.
 	writeLog(t, filepath.Join(dir, "s2.jsonl"), now,
@@ -75,19 +76,27 @@ func TestClaudeSessionHistory(t *testing.T) {
 	assert.Equal(t, "s1", s.ID)
 	assert.Equal(t, "Bug hunt", s.Title, "the custom title wins")
 	assert.Equal(t, "Fix the bug", s.FirstPrompt)
-	assert.Equal(t, 2, s.Prompts)
+	assert.Equal(t, 3, s.Prompts)
 	assert.Equal(t, time.Date(2026, 10, 17, 14, 10, 11, 834e6, time.UTC), s.CreatedAt)
 
 	h, err := store.ReadHistory("s1")
 	require.NoError(t, err)
 	assert.Equal(t, "Bug hunt", h.Title)
-	assert.Equal(t, []string{"user: Fix the bug", "agent: Looking.\n\nFixed.", "user: Thanks"}, roles(h.Messages))
+	assert.Equal(t, []string{"user: Fix the bug", "agent: Looking.\n\nFixed.", "user: Thanks", "user: And this?"}, roles(h.Messages))
 	for i, m := range h.Messages {
 		assert.Equal(t, i, m.Id)
 	}
 	var ids []string
 	for _, m := range h.Rich {
 		ids = append(ids, m.MessageID+"/"+m.Role)
+		if m.Role == "user" {
+			// The note of the interrupted turn and the prompts aren't tool
+			// results.
+			for _, b := range m.Content {
+				assert.Equal(t, "tool_result", b.Type)
+				assert.NotEmpty(t, b.ToolUseID)
+			}
+		}
 	}
 	assert.Contains(t, ids, "history-msg_1/assistant")
 	assert.Contains(t, ids, "history-msg_2/assistant")

@@ -46,6 +46,34 @@ func Field(line []byte, key string) (value []byte, ok bool) {
 	}
 }
 
+// Elements calls fn with each element of a JSON array, as Field finds
+// values, until it returns false. It reports whether value is an array.
+func Elements(value []byte, fn func(elem []byte) bool) bool {
+	i := skipSpace(value, 0)
+	if i >= len(value) || value[i] != '[' {
+		return false
+	}
+	i = skipSpace(value, i+1)
+	if i < len(value) && value[i] == ']' {
+		return true
+	}
+	for i < len(value) {
+		end := skipValue(value, i)
+		if end < 0 {
+			return false
+		}
+		if !fn(value[i:end]) {
+			return true
+		}
+		i = skipSpace(value, end)
+		if i >= len(value) || value[i] != ',' {
+			return i < len(value) && value[i] == ']'
+		}
+		i = skipSpace(value, i+1)
+	}
+	return false
+}
+
 // StringField returns the value of a top-level string field of a log
 // line, as Field finds it. Values with escapes are returned as they are
 // written, which the record types and timestamps it is for never have.

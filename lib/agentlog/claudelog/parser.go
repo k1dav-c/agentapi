@@ -1,7 +1,6 @@
 package claudelog
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"slices"
 	"time"
@@ -125,24 +124,7 @@ func (p *Parser) handleUser(entry *Line) []transcript.RichMessage {
 		Timestamp: ts,
 	}
 
-	content := entry.Message.Content
-
-	// Try to parse as a string first (human prompt)
-	var textContent string
-	if err := json.Unmarshal(content, &textContent); err == nil {
-		rich.Content = []transcript.RichContentBlock{
-			{Type: "text", Text: textContent},
-		}
-	} else {
-		// Try to parse as array of tool_result blocks
-		var toolResults []ToolResultBlock
-		if err := json.Unmarshal(content, &toolResults); err == nil {
-			for _, tr := range toolResults {
-				rich.Content = append(rich.Content, ToolResult(tr))
-			}
-		}
-	}
-
+	rich.Content = UserBlocks(entry.Message.Content)
 	return append(completed, rich)
 }
 
@@ -158,119 +140,4 @@ func (p *Parser) finalizePending() []transcript.RichMessage {
 	}
 	p.current, p.emitted = nil, false
 	return result
-}
-
-// ContentBlocks converts the content of a Claude assistant message
-// (an array of content blocks) to rich content blocks. It returns nil for
-// content that is not such an array.
-func ContentBlocks(content json.RawMessage) []transcript.RichContentBlock {
-	var blocks []ContentBlock
-	if json.Unmarshal(content, &blocks) != nil {
-		return nil
-	}
-	rich := make([]transcript.RichContentBlock, 0, len(blocks))
-	for _, block := range blocks {
-		rich = append(rich, contentBlockToRich(block))
-	}
-	return rich
-}
-
-// ToolResult converts a tool_result block of a Claude user message to
-// a rich content block with its text and images.
-func ToolResult(tr ToolResultBlock) transcript.RichContentBlock {
-	return transcript.RichContentBlock{
-		Type:      "tool_result",
-		ToolUseID: tr.ToolUseID,
-		IsError:   tr.IsError,
-		Text:      ToolResultText(tr.Content),
-		Images:    parseToolResultImages(tr.Content),
-	}
-}
-
-// Image decodes the image of an image content block. It returns false
-// for a source that isn't base64 data and for data that doesn't decode.
-func Image(source *ImageSource) (transcript.RichImage, bool) {
-	if source == nil || source.Type != "base64" {
-		return transcript.RichImage{}, false
-	}
-	data, err := base64.StdEncoding.DecodeString(source.Data)
-	if err != nil || len(data) == 0 {
-		return transcript.RichImage{}, false
-	}
-	return transcript.RichImage{MediaType: source.MediaType, Data: data}, true
-}
-
-// contentBlockToRich converts a parsed ContentBlock to a rich content block.
-func contentBlockToRich(block ContentBlock) transcript.RichContentBlock {
-	switch block.Type {
-	case "text":
-		return transcript.RichContentBlock{Type: "text", Text: block.Text}
-	case "thinking":
-		return transcript.RichContentBlock{Type: "thinking", Thinking: block.Thinking}
-	case "tool_use":
-		return transcript.RichContentBlock{
-			Type:      "tool_use",
-			ToolUseID: block.ID,
-			ToolName:  block.Name,
-			ToolInput: block.Input,
-		}
-	default:
-		return transcript.RichContentBlock{Type: block.Type, Text: block.Text}
-	}
-}
-
-// parseToolResultImages returns the base64 images in a tool_result
-// content array (Claude Code's Read returns an image file this way).
-// Images that don't decode are skipped.
-func parseToolResultImages(raw json.RawMessage) []transcript.RichImage {
-	var blocks []ToolResultContent
-	if len(raw) == 0 || raw[0] != '[' || json.Unmarshal(raw, &blocks) != nil {
-		return nil
-	}
-	var images []transcript.RichImage
-	for _, b := range blocks {
-		if b.Type != "image" {
-			continue
-		}
-		if image, ok := Image(b.Source); ok {
-			images = append(images, image)
-		}
-	}
-	return images
-}
-
-// ToolResultText extracts text from a tool_result content field,
-// which can be a string or an array of {type, text} objects.
-func ToolResultText(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
-	}
-
-	var blocks []ToolResultContent
-	if err := json.Unmarshal(raw, &blocks); err == nil {
-		var texts []string
-		for _, b := range blocks {
-			if b.Text != "" {
-				texts = append(texts, b.Text)
-			}
-		}
-		if len(texts) == 1 {
-			return texts[0]
-		}
-		result := ""
-		for i, t := range texts {
-			if i > 0 {
-				result += "\n"
-			}
-			result += t
-		}
-		return result
-	}
-
-	return string(raw)
 }

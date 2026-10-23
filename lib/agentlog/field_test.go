@@ -45,3 +45,23 @@ func TestField(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "assistant", typ)
 }
+
+func TestElements(t *testing.T) {
+	t.Parallel()
+	var types []string
+	ok := Elements([]byte(`[{"type":"tool_result","content":"a ] } \"b"}, {"type":"text","text":"hi"} ,"s",1]`), func(elem []byte) bool {
+		typ, _ := StringField(elem, "type")
+		types = append(types, typ)
+		return true
+	})
+	assert.True(t, ok)
+	assert.Equal(t, []string{"tool_result", "text", "", ""}, types)
+
+	n := 0
+	assert.True(t, Elements([]byte(`[1,2,3]`), func([]byte) bool { n++; return n < 2 }))
+	assert.Equal(t, 2, n, "until fn returns false")
+	assert.True(t, Elements([]byte(` [ ] `), func([]byte) bool { t.Fatal("no elements"); return false }))
+	for _, bad := range []string{`{}`, `"[]"`, `[1,2`, `[1 2]`, ``} {
+		assert.False(t, Elements([]byte(bad), func([]byte) bool { return true }), bad)
+	}
+}

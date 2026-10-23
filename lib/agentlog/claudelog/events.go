@@ -46,47 +46,37 @@ func (p *EventParser) Events(entry Line) []transcript.SessionEvent {
 	sessionID := agentlog.Optional(p.sessionID)
 	sourceID := agentlog.Optional(entry.UUID)
 
-	var text string
-	if err := json.Unmarshal(entry.Message.Content, &text); err == nil {
-		return []transcript.SessionEvent{agentlog.NewEvent("text", agentlog.Optional(entry.Message.Role), &text, eventTime, sessionID, nil)}
+	role := agentlog.Optional(entry.Message.Role)
+	// The blocks are a user message's (text, tool results) or the model's
+	// (text, thinking, tool calls); either can be a string.
+	content := entry.Message.Content
+	blocks := UserBlocks(content)
+	if entry.Message.Role == "assistant" && len(content) > 0 && content[0] == '[' {
+		blocks = ContentBlocks(content)
 	}
-
-	var blocks []ContentBlock
-	if err := json.Unmarshal(entry.Message.Content, &blocks); err == nil {
-		events := make([]transcript.SessionEvent, 0, len(blocks))
-		for _, block := range blocks {
-			switch block.Type {
-			case "text":
-				content := block.Text
-				events = append(events, agentlog.NewEvent("text", agentlog.Optional(entry.Message.Role), &content, eventTime, sessionID, nil))
-			case "thinking":
-				if block.Thinking != "" {
-					content := block.Thinking
-					events = append(events, agentlog.NewEvent("thinking", agentlog.Optional(entry.Message.Role), &content, eventTime, sessionID, sourceID))
-				}
-			case "tool_use":
-				event := agentlog.NewEvent("tool_call", agentlog.Ptr("assistant"), nil, eventTime, sessionID, sourceID)
-				event.ToolName = agentlog.Optional(block.Name)
-				event.ToolUseID = agentlog.Optional(block.ID)
-				event.ToolInput = agentlog.NormalizeJSON(block.Input)
-				events = append(events, event)
+	var events []transcript.SessionEvent
+	for _, block := range blocks {
+		switch block.Type {
+		case "text":
+			content := block.Text
+			events = append(events, agentlog.NewEvent("text", role, &content, eventTime, sessionID, nil))
+		case "thinking":
+			if block.Thinking != "" {
+				content := block.Thinking
+				events = append(events, agentlog.NewEvent("thinking", role, &content, eventTime, sessionID, sourceID))
 			}
-		}
-		if len(events) > 0 {
-			return events
-		}
-	}
-
-	var results []ToolResultBlock
-	if err := json.Unmarshal(entry.Message.Content, &results); err == nil {
-		events := make([]transcript.SessionEvent, 0, len(results))
-		for _, result := range results {
-			content := ToolResultText(result.Content)
+		case "tool_use":
+			event := agentlog.NewEvent("tool_call", agentlog.Ptr("assistant"), nil, eventTime, sessionID, sourceID)
+			event.ToolName = agentlog.Optional(block.ToolName)
+			event.ToolUseID = agentlog.Optional(block.ToolUseID)
+			event.ToolInput = agentlog.NormalizeJSON(block.ToolInput)
+			events = append(events, event)
+		case "tool_result":
+			content := block.Text
 			event := agentlog.NewEvent("tool_result", nil, &content, eventTime, sessionID, nil)
-			event.ToolUseID = agentlog.Optional(result.ToolUseID)
+			event.ToolUseID = agentlog.Optional(block.ToolUseID)
 			events = append(events, event)
 		}
-		return events
 	}
-	return nil
+	return events
 }

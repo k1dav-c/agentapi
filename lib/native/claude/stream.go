@@ -464,21 +464,11 @@ func (p *streamParser) user(f *frame) ([]transcript.RichMessage, []transcript.Se
 	return []transcript.RichMessage{*rich}, p.sessionEvents(f)
 }
 
-// userBlock converts one content block of a user frame.
+// userBlock converts one content block of a user frame, as the session
+// log's parser does, with the status of a tool result.
 func (p *streamParser) userBlock(raw json.RawMessage) (transcript.RichContentBlock, bool) {
-	var head struct {
-		Type   string                 `json:"type"`
-		Text   string                 `json:"text"`
-		Source *claudelog.ImageSource `json:"source"`
-	}
-	if json.Unmarshal(raw, &head) != nil {
-		return transcript.RichContentBlock{}, false
-	}
-	switch head.Type {
-	case "tool_result":
-		var result claudelog.ToolResultBlock
-		_ = decode(raw, &result)
-		block := claudelog.ToolResult(result)
+	block, ok := claudelog.UserBlock(raw)
+	if ok && block.Type == "tool_result" {
 		block.Status = "completed"
 		switch {
 		case p.background[block.ToolUseID]:
@@ -486,18 +476,8 @@ func (p *streamParser) userBlock(raw json.RawMessage) (transcript.RichContentBlo
 		case block.IsError != nil && *block.IsError:
 			block.Status = "failed"
 		}
-		return block, true
-	case "text":
-		return transcript.RichContentBlock{Type: "text", Text: head.Text}, true
-	case "image":
-		block := transcript.RichContentBlock{Type: "image"}
-		if image, ok := claudelog.Image(head.Source); ok {
-			block.Images = []transcript.RichImage{image}
-		}
-		return block, true
-	default:
-		return transcript.RichContentBlock{Type: head.Type, Text: head.Text}, true
 	}
+	return block, ok
 }
 
 // sessionEvents converts a main-thread assistant or user frame to timeline

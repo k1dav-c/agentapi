@@ -66,3 +66,66 @@ func TestImage(t *testing.T) {
 		assert.False(t, ok, name)
 	}
 }
+
+// A user entry holds tool results, or what the user sent, or Claude
+// Code's note of an interrupted turn: only tool results are tool_result
+// blocks, wherever the entry is read.
+func TestUserContent(t *testing.T) {
+	t.Parallel()
+	const png = "iVBORw0KGgo="
+	lines := map[string]string{
+		"interrupted":     `{"type":"user","uuid":"u1","timestamp":"2026-10-20T10:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}`,
+		"image prompt":    `{"type":"user","uuid":"u2","timestamp":"2026-10-20T10:00:01.000Z","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + png + `"}},{"type":"text","text":"What is this?"}]}}`,
+		"result and text": `{"type":"user","uuid":"u3","timestamp":"2026-10-20T10:00:02.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"done"},{"type":"text","text":"and then"}]}}`,
+	}
+	want := map[string][]transcript.RichContentBlock{
+		"interrupted": {{Type: "text", Text: "[Request interrupted by user for tool use]"}},
+		"image prompt": {
+			{Type: "image", Images: []transcript.RichImage{{MediaType: "image/png", Data: []byte("\x89PNG\r\n\x1a\n")}}},
+			{Type: "text", Text: "What is this?"},
+		},
+		"result and text": {{Type: "tool_result", ToolUseID: "toolu_1", Text: "done"}, {Type: "text", Text: "and then"}},
+	}
+	for name, line := range lines {
+		msgs, err := NewParser().ParseLine([]byte(line))
+		require.NoError(t, err, name)
+		require.Len(t, msgs, 1, name)
+		assert.Equal(t, want[name], msgs[0].Content, name)
+
+		events, err := NewEventParser().ParseSessionEvents([]byte(line))
+		require.NoError(t, err, name)
+		var kinds []string
+		for _, e := range events {
+			kinds = append(kinds, e.Kind)
+		}
+		wantKinds := map[string][]string{"interrupted": {"text"}, "image prompt": {"text"}, "result and text": {"tool_result", "text"}}[name]
+		assert.Equal(t, wantKinds, kinds, name)
+	}
+
+	block, ok := UserBlock(json.RawMessage(`{"type":"tool_result","tool_use_id":"toolu_2","is_error":true,"content":[{"type":"text","text":"failed"}]}`))
+	require.True(t, ok)
+	assert.Equal(t, "tool_result", block.Type)
+	assert.Equal(t, "failed", block.Text)
+	require.NotNil(t, block.IsError)
+	assert.True(t, *block.IsError)
+	_, ok = UserBlock(json.RawMessage(`{"type":`))
+	assert.False(t, ok)
+}
+
+func TestPrompt(t *testing.T) {
+	t.Parallel()
+	for line, want := range map[string]string{
+		`{"type":"user","timestamp":"2026-10-20T10:00:00.000Z","message":{"role":"user","content":"Fix the bug"}}`:                                                                                                            "Fix the bug",
+		`{"type":"user","timestamp":"2026-10-20T10:00:00.000Z","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"x"}},{"type":"text","text":"What is this?"}]}}`: "What is this?",
+		`{"type":"user","timestamp":"2026-10-20T10:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`:                                                                 "",
+		`{"type":"user","timestamp":"2026-10-20T10:00:00.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Fix the bug"}]}}`:                                                      "",
+		`{"type":"user","timestamp":"2026-10-20T10:00:00.000Z","isMeta":true,"message":{"role":"user","content":"Skill text"}}`:                                                                                               "",
+		`{"type":"user","timestamp":"2026-10-20T10:00:00.000Z","origin":{"kind":"task-notification"},"promptSource":"system","message":{"role":"user","content":"<task-notification>done</task-notification>"}}`:              "",
+		`{"type":"user","timestamp":"2026-10-20T10:00:00.000Z","message":{"role":"user","content":"<bash-input>ls</bash-input>"}}`:                                                                                            "",
+		`{"type":"assistant","timestamp":"2026-10-20T10:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Fixed"}]}}`:                                                                               "",
+	} {
+		text, _, ok := Prompt([]byte(line))
+		assert.Equal(t, want, text, line)
+		assert.Equal(t, want != "", ok, line)
+	}
+}
