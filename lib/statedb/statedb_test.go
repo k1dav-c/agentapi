@@ -240,3 +240,34 @@ func TestLimitStopRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, ls)
 }
+
+// A rich message is stored as it was when PutRichMessage was called, though
+// it is encoded later, and one that can't be encoded is left out without
+// the rows written with it.
+func TestRichMessagesAreEncodedWhenWritten(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db := open(t, path)
+	_, err := db.Load()
+	require.NoError(t, err)
+	m := transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{
+		{Type: "tool_use", ToolUseID: "t1", ToolInput: []byte(`{"command":"ls"}`)},
+	}}
+	db.PutRichMessage(0, m, 1)
+	m.Content[0].ToolInput[2] = 'X'
+	m.Content[0].ToolName = "changed"
+	db.PutRichMessage(1, transcript.RichMessage{MessageID: "broken", Role: "assistant", Content: []transcript.RichContentBlock{
+		{Type: "tool_use", ToolInput: []byte(`{not json`)},
+	}}, 2)
+	db.PutMessage(msg(0, "a"), 3)
+	require.NoError(t, db.Close())
+
+	db = open(t, path)
+	defer func() { _ = db.Close() }()
+	snap, err := db.Load()
+	require.NoError(t, err)
+	require.Len(t, snap.RichMessages, 1)
+	assert.JSONEq(t, `{"command":"ls"}`, string(snap.RichMessages[0].Message.Content[0].ToolInput))
+	assert.Empty(t, snap.RichMessages[0].Message.Content[0].ToolName)
+	require.Len(t, snap.Messages, 1)
+	assert.Equal(t, "a", snap.Messages[0].Message.Message)
+}

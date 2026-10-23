@@ -510,17 +510,30 @@ func (d *DB) SetSeq(epoch string, seq uint64) {
 	d.SetMeta(metaSeq, strconv.FormatUint(seq, 10))
 }
 
-// PutMessage stores a conversation message.
+// PutMessage stores a conversation message. It is encoded when it is
+// written, on the writing goroutine: the emitter calls PutMessage with its
+// lock held, on every update of a message that streams in, and of a
+// message updated again before it was written only the latest is encoded.
 func (d *DB) PutMessage(m st.ConversationMessage, seq uint64) {
-	data, err := json.Marshal(m)
-	if err != nil {
-		d.logger.Error("Failed to encode message for the state database", "error", err)
-		return
-	}
 	d.enqueue("message:"+strconv.Itoa(m.Id), func(tx *sql.Tx) error {
+		data, ok := d.encode("message", m)
+		if !ok {
+			return nil
+		}
 		_, err := tx.Exec("INSERT INTO messages(id, seq, data) VALUES(?, ?, ?) ON CONFLICT(id) DO UPDATE SET seq = excluded.seq, data = excluded.data", m.Id, seq, data)
 		return err
 	})
+}
+
+// encode encodes v, a what, as JSON, or logs why it can't; a row that
+// can't be encoded is left out rather than failing the others.
+func (d *DB) encode(what string, v any) ([]byte, bool) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		d.logger.Error("Failed to encode a "+what+" for the state database", "error", err)
+		return nil, false
+	}
+	return data, true
 }
 
 // TruncateMessages removes the messages with an ID of at least fromID.
@@ -531,14 +544,17 @@ func (d *DB) TruncateMessages(fromID int) {
 	})
 }
 
-// PutRichMessage stores the rich message at position pos.
+// PutRichMessage stores the rich message at position pos. Like a message,
+// it is encoded when it is written, from a copy, so the caller may change
+// m once PutRichMessage returned: a rich message that streams in is sent
+// whole on every change, and encoding it each time held up the emitter.
 func (d *DB) PutRichMessage(pos int, m transcript.RichMessage, seq uint64) {
-	data, err := json.Marshal(m)
-	if err != nil {
-		d.logger.Error("Failed to encode rich message for the state database", "error", err)
-		return
-	}
+	m = m.Clone()
 	d.enqueue("rich:"+strconv.Itoa(pos), func(tx *sql.Tx) error {
+		data, ok := d.encode("rich message", m)
+		if !ok {
+			return nil
+		}
 		_, err := tx.Exec("INSERT INTO rich_messages(pos, seq, data) VALUES(?, ?, ?) ON CONFLICT(pos) DO UPDATE SET seq = excluded.seq, data = excluded.data", pos, seq, data)
 		return err
 	})
