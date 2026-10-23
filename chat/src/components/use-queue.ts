@@ -1,65 +1,104 @@
 "use client";
 
-import {useCallback, useRef, useState} from "react";
-import type {QueuedMessage} from "./chat-provider";
+import {useCallback, useEffect, useRef, useState} from "react";
 import type {createChatAPI} from "@/lib/chat-api";
 import {sameValue} from "@/lib/agent-status";
+import {QueueView, type QueuedMessage} from "@/lib/queue";
 
-// useQueue keeps the queued messages as the server has them (GET /queue),
-// and changes them.
+// How often the queue is read while no queue event came: a server that
+// sends none (older than queue_update) says nothing of a queued message it
+// sent.
+const QUEUE_POLL_MS = 60_000;
+
+// useQueue keeps the queued messages as the server has them, and changes
+// them. A server that sends queue_update events (sync clients) says every
+// change, applied with the other events (applyQueue). The queue is read
+// (GET /queue) on every connection; after the chat changed it, a status
+// change while it holds messages, and every QUEUE_POLL_MS, only while the
+// server sends no queue events.
 export function useQueue(api: ReturnType<typeof createChatAPI>) {
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
-  const lastQueueRefreshRef = useRef(0);
-  const queuedCountRef = useRef(0);
-  const refreshQueue = useCallback(async (force = false) => {
-    const now = Date.now();
-    // Throttle: skip if last refresh was less than 30s ago, unless forced.
-    // A non-empty queue is never throttled: the server sends a queued task
-    // as soon as the agent is free, and a stale entry looks like a message
-    // that failed to send.
-    if (!force && queuedCountRef.current === 0 && now - lastQueueRefreshRef.current < 30_000) return;
-    lastQueueRefreshRef.current = now;
+  const viewRef = useRef<QueueView | null>(null);
+  viewRef.current ??= new QueueView();
+  const lastEventAtRef = useRef(0);
+
+  // The same queue keeps its object: the composer and the cards that
+  // select it don't render again on every read.
+  const show = useCallback(() => {
+    const shown = viewRef.current!.shown;
+    setQueuedMessages((previous) => (sameValue(previous, shown) ? previous : shown));
+  }, []);
+
+  const refreshQueue = useCallback(async () => {
+    const view = viewRef.current!;
+    const since = view.events;
     try {
-      const queue = await api.getQueue();
-      queuedCountRef.current = queue.length;
-      // The same queue keeps its object: the composer and the cards that
-      // select it don't render again on every refresh.
-      setQueuedMessages((previous) => (sameValue(previous, queue) ? previous : queue));
+      if (view.read(await api.getQueue(), since)) show();
     } catch {
       // The connection status handler reports connectivity failures.
     }
-  }, [api]);
+  }, [api, show]);
+
+  // A queue_update.
+  const applyQueue = useCallback((queue: QueuedMessage[]) => {
+    viewRef.current!.event(queue);
+    lastEventAtRef.current = Date.now();
+    show();
+  }, [show]);
+
+  // Reads the queue after a change, unless the server says it.
+  const queueChanged = useCallback(async () => {
+    if (viewRef.current!.events === 0) await refreshQueue();
+  }, [refreshQueue]);
+
+  // The agent's status changed: the server sends a queued message as soon
+  // as the agent is free, and one that sends no queue events doesn't say.
+  const queueMayHaveSent = useCallback(() => {
+    const view = viewRef.current!;
+    if (view.events === 0 && view.shown.length > 0) void refreshQueue();
+  }, [refreshQueue]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (Date.now() - lastEventAtRef.current >= QUEUE_POLL_MS) void refreshQueue();
+    }, QUEUE_POLL_MS);
+    return () => clearInterval(timer);
+  }, [refreshQueue]);
 
   const updateQueuedMessage = async (id: number, content: string) => {
     await api.updateQueuedMessage(id, content);
-    await refreshQueue(true);
+    await queueChanged();
   };
 
   const deleteQueuedMessage = async (id: number) => {
     await api.deleteQueuedMessage(id);
-    await refreshQueue(true);
+    await queueChanged();
   };
 
   const steerQueuedMessage = async (id: number) => {
     try {
       await api.steerQueuedMessage(id);
     } finally {
-      await refreshQueue(true);
+      await queueChanged();
     }
   };
 
+  // The new order shows at once, also as queue events come, until the
+  // server took it or refused it (409: the queue changed in the meantime).
   const reorderQueue = async (ids: number[]) => {
-    // Show the new order at once; the refresh corrects it if the server
-    // refused.
-    setQueuedMessages((previous) =>
-      ids.flatMap((id) => previous.filter((message) => message.id === id)),
-    );
+    const view = viewRef.current!;
+    view.reorder(ids);
+    show();
+    let ok = false;
     try {
       await api.reorderQueue(ids);
+      ok = true;
     } finally {
-      await refreshQueue(true);
+      view.reordered(ok);
+      show();
+      await queueChanged();
     }
   };
 
-  return {queuedMessages, refreshQueue, updateQueuedMessage, deleteQueuedMessage, steerQueuedMessage, reorderQueue};
+  return {queuedMessages, refreshQueue, applyQueue, queueChanged, queueMayHaveSent, updateQueuedMessage, deleteQueuedMessage, steerQueuedMessage, reorderQueue};
 }

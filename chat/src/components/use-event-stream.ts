@@ -10,6 +10,7 @@ import {parseTransport, type Transport} from "@/lib/dispatch";
 import {isLoginNotice} from "@/lib/login";
 import {mergeRequests, type NativeRequest} from "@/lib/native-requests";
 import {mergeTasks, type ServerTask} from "@/lib/server-tasks";
+import type {QueuedMessage} from "@/lib/queue";
 import type {SyncTracker} from "@/lib/session-sync";
 import {applyStatusChange, update, type AgentStatus} from "@/lib/agent-status";
 import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
@@ -17,10 +18,12 @@ import {PendingEvents, type SyncPoint} from "@/lib/pending-events";
 import {
   messageFromEvent,
   requestFromEvent,
+  queueFromEvent,
   richMessageFromEvent,
   taskFromEvent,
   type AgentErrorEvent,
   type MessageUpdateEvent,
+  type QueueUpdateEvent,
   type RequestUpdateEvent,
   type RichMessageUpdateEvent,
   type SessionSyncEvent,
@@ -70,6 +73,8 @@ export function useEventStream({
   updateAgentStatus,
   agentStatusRef,
   refreshQueue,
+  applyQueue,
+  queueMayHaveSent,
   onReplayed,
 }: {
   agentAPIUrl: string;
@@ -82,7 +87,12 @@ export function useEventStream({
   setTransport: Dispatch<SetStateAction<Transport>>;
   updateAgentStatus: (change: (status: AgentStatus) => AgentStatus) => void;
   agentStatusRef: RefObject<AgentStatus>;
-  refreshQueue: (force?: boolean) => Promise<void>;
+  // Reading the queue (GET /queue), as every connection does; applying a
+  // queue_update; and telling of a status change, after which the server
+  // may have sent a queued message.
+  refreshQueue: () => Promise<void>;
+  applyQueue: (queue: QueuedMessage[]) => void;
+  queueMayHaveSent: () => void;
   // Called once the replay of what changed since the cache or the last
   // connection was applied: it doesn't tell of what the server dropped.
   onReplayed: () => void;
@@ -166,11 +176,12 @@ export function useEventStream({
       // read from the REST API (see mergeRequests).
       setRequests((previous) => mergeRequests(replace ? [] : previous, requestUpdates));
     }
+    if (batch.queue) applyQueue(batch.queue);
     if (replayedRef.current) {
       replayedRef.current = false;
       onReplayed();
     }
-  }, [onReplayed, setMessages, setRequests, setRichMessages, setTasks]);
+  }, [applyQueue, onReplayed, setMessages, setRequests, setRichMessages, setTasks]);
 
   // Schedules applying the events received so far. An event that completes
   // the replay (see SyncTracker) applies the replay now, in one render.
@@ -358,6 +369,15 @@ export function useEventStream({
         scheduleFlush(event);
       });
 
+      // The message queue changed (sync clients): the whole queue, applied
+      // with the messages it sent. The replay holds the latest.
+      eventSource.addEventListener("queue_update", (event) => {
+        lastEventAtRef.current = Date.now();
+        const data = JSON.parse(event.data) as QueueUpdateEvent;
+        pendingRef.current!.setQueue(queueFromEvent(data), data.seq);
+        scheduleFlush(event);
+      });
+
       // Handle status changes
       eventSource.addEventListener("status_change", (event) => {
         lastEventAtRef.current = Date.now();
@@ -366,6 +386,7 @@ export function useEventStream({
         // The replay's last event may be its status.
         if (syncRef.current.replaying) scheduleFlush(event);
         updateAgentStatus((status) => applyStatusChange(status, data));
+        queueMayHaveSent();
         // The transport decides whether the terminal (TTY mode, raw keys)
         // exists at all.
         const reported = parseTransport(data.transport);
@@ -379,7 +400,6 @@ export function useEventStream({
             // Reported through the connection status.
           });
         }
-        void refreshQueue();
       });
 
       // Handle agent error events
@@ -515,7 +535,7 @@ export function useEventStream({
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
-  }, [agentAPIUrl, agentStatusRef, api, markSynced, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush, setMessages, setRequests, setRichMessages, setTasks, setTransport, syncRef, updateAgentStatus]);
+  }, [agentAPIUrl, agentStatusRef, api, markSynced, queueMayHaveSent, reconnectNonce, reconnectNow, refreshQueue, scheduleFlush, setMessages, setRequests, setRichMessages, setTasks, setTransport, syncRef, updateAgentStatus]);
 
   return {connectionStatus, reconnectAttempt, nextReconnectAt, reconnectByUser, synced, markSynced};
 }

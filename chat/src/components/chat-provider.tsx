@@ -50,6 +50,7 @@ import {SyncTracker} from "@/lib/session-sync";
 import {resolveAgentAPIUrl} from "@/lib/agentapi-url";
 import {isDraftMessage, lastUserMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
 import type {Timeline, ToolCall} from "@/lib/task-timeline";
+import type {QueuedMessage} from "@/lib/queue";
 import {tasksByMessage, type ServerTask} from "@/lib/server-tasks";
 import {useEventStream} from "./use-event-stream";
 import {useQueue} from "./use-queue";
@@ -79,11 +80,7 @@ export interface FileUploadResponse {
   error?: string;
 }
 
-export interface QueuedMessage {
-  id: number;
-  content: string;
-  time: string;
-}
+export type {QueuedMessage} from "@/lib/queue";
 
 type ChatAPI = ReturnType<typeof createChatAPI>;
 
@@ -329,7 +326,8 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   // The requests as last rendered, for refreshRequests.
   const requestsRef = useRef(requests);
   requestsRef.current = requests;
-  const {queuedMessages, refreshQueue, updateQueuedMessage, deleteQueuedMessage, steerQueuedMessage, reorderQueue} = useQueue(api);
+  const {queuedMessages, refreshQueue, applyQueue, queueChanged, queueMayHaveSent, updateQueuedMessage, deleteQueuedMessage, steerQueuedMessage, reorderQueue} =
+    useQueue(api);
   // Reads the requests from the REST API; see mergeListedRequests.
   const refreshRequests = async () => {
     const heldWhenAsked = requestsRef.current;
@@ -354,6 +352,8 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     updateAgentStatus,
     agentStatusRef,
     refreshQueue,
+    applyQueue,
+    queueMayHaveSent,
     onReplayed,
   });
   useSessionCache({agentAPIUrl, synced, messages, richMessages, requests, tasks: serverTasks, transport});
@@ -447,7 +447,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
 
     try {
       const result = await api.sendMessage(content, type, mode);
-      await refreshQueue(true);
+      await queueChanged();
       if (type === "user") {
         setMessages((previous) =>
           previous.filter(

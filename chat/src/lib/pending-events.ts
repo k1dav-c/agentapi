@@ -4,6 +4,7 @@
 
 import {richMessageKey, type Message, type RichMessage} from "./conversation";
 import type {NativeRequest} from "./native-requests";
+import type {QueuedMessage} from "./queue";
 import type {ServerTask} from "./server-tasks";
 import type {SyncTracker} from "./session-sync";
 
@@ -21,6 +22,8 @@ export interface EventBatch {
   richMessages: (RichMessage & {seq?: number})[];
   requests: NativeRequest[];
   tasks: ServerTask[];
+  // The message queue, when an update said it: the latest.
+  queue?: QueuedMessage[];
   // The point of the state once the batch is applied.
   point: SyncPoint;
 }
@@ -30,6 +33,7 @@ export class PendingEvents {
   private richMessages = new Map<string, RichMessage & {seq?: number}>();
   private requests = new Map<string, NativeRequest>();
   private tasks = new Map<number, ServerTask>();
+  private queue: {queue: QueuedMessage[]; seq: number} | undefined;
   private replace = false;
 
   constructor(private readonly sync: SyncTracker) {}
@@ -50,6 +54,11 @@ export class PendingEvents {
     this.tasks.set(task.id, task);
   }
 
+  // A queue update holds the whole queue: the latest replaces the others.
+  setQueue(queue: QueuedMessage[], seq: number) {
+    this.queue = {queue, seq};
+  }
+
   // What follows is the full state: it replaces whatever is pending, and
   // the state.
   replaceAll() {
@@ -57,6 +66,7 @@ export class PendingEvents {
     this.richMessages.clear();
     this.requests.clear();
     this.tasks.clear();
+    this.queue = undefined;
     this.replace = true;
   }
 
@@ -74,13 +84,17 @@ export class PendingEvents {
       richMessages: [...this.richMessages.values()],
       requests: [...this.requests.values()],
       tasks: [...this.tasks.values()],
+      queue: this.queue?.queue,
     };
+    const queueSeq = this.queue?.seq;
     this.messages.clear();
     this.richMessages.clear();
     this.requests.clear();
     this.tasks.clear();
+    this.queue = undefined;
     this.replace = false;
     for (const update of [...batch.messages, ...batch.richMessages, ...batch.requests, ...batch.tasks]) this.sync.applied(update.seq ?? 0);
+    if (queueSeq !== undefined) this.sync.applied(queueSeq);
     return {...batch, point: {epoch: this.sync.epoch, seq: this.sync.watermark}};
   }
 }

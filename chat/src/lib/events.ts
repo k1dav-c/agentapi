@@ -9,6 +9,7 @@ import {normalizeRichMessage, type Message, type RichMessage} from "./conversati
 import type {Capabilities} from "./dispatch";
 import {normalizeRequest, type NativeRequest} from "./native-requests";
 import {normalizeTask, type ServerTask} from "./server-tasks";
+import type {QueuedMessage} from "./queue";
 
 type Schemas = components["schemas"];
 
@@ -48,6 +49,11 @@ export function richMessageFromEvent(event: RichMessageUpdateEvent): RichMessage
 // A request_update as a request, with the change's seq.
 export function requestFromEvent(event: RequestUpdateEvent): NativeRequest {
   return normalizeRequest(event);
+}
+
+// A queue_update's queue (never null).
+export function queueFromEvent(event: QueueUpdateEvent): QueuedMessage[] {
+  return event.queue ?? [];
 }
 
 // A task_update as a task, with the change's seq.

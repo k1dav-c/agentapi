@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {messageFromEvent, requestFromEvent, richMessageFromEvent, taskFromEvent, type RequestUpdateEvent, type RichMessageUpdateEvent, type TaskUpdateEvent} from "./events";
+import {messageFromEvent, queueFromEvent, requestFromEvent, richMessageFromEvent, taskFromEvent, type RequestUpdateEvent, type RichMessageUpdateEvent, type TaskUpdateEvent} from "./events";
 
 describe("events as they arrive", () => {
   test("a message_update becomes a message with its seq", () => {
@@ -44,5 +44,11 @@ describe("events as they arrive", () => {
     expect(task.status).toBe("limited");
     expect(task.errors).toEqual([]);
     expect(task.steered).toEqual([]);
+  });
+
+  test("a queue_update is its queue", () => {
+    const queue = [{id: 2, content: "next", time: "2026-10-22T10:00:00Z"}];
+    expect(queueFromEvent({queue, seq: 5})).toBe(queue);
+    expect(queueFromEvent(JSON.parse('{"queue":null,"seq":6}'))).toEqual([]);
   });
 });

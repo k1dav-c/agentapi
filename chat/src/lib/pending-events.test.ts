@@ -56,6 +56,22 @@ describe("PendingEvents", () => {
     expect(pending.take().tasks).toEqual([]);
   });
 
+  test("a queue update holds the whole queue: the latest is in the batch, its seq in the point", () => {
+    const sync = new SyncTracker();
+    const pending = new PendingEvents(sync);
+    sync.begin({epoch: "e1", seq: 0}, "");
+    expect(pending.take().queue).toBeUndefined();
+    pending.setQueue([{id: 1, content: "next", time: "2026-10-22T10:00:00Z"}], 11);
+    pending.setQueue([], 12);
+    const batch = pending.take();
+    expect(batch.queue).toEqual([]);
+    expect(batch.point).toEqual({epoch: "e1", seq: 12});
+    expect(pending.take().queue).toBeUndefined();
+    pending.setQueue([], 13);
+    pending.replaceAll();
+    expect(pending.take().queue).toBeUndefined();
+  });
+
   test("a full replay replaces what is pending, and has the new epoch", () => {
     const sync = new SyncTracker();
     const pending = new PendingEvents(sync);
