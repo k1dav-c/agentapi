@@ -241,6 +241,20 @@ func BenchmarkCodexSubagents(b *testing.B) {
 	}
 }
 
+// BenchmarkCodexSubagentsFirstRequest is the first GET /subagents of a
+// server among 2000 Codex rollouts, which reads their first lines.
+func BenchmarkCodexSubagentsFirstRequest(b *testing.B) {
+	b.Setenv("CODEX_HOME", codexBenchHome(b))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		subs, err := newStore(b, "codex", benchCWD).Subagents("019a0000-0000-7000-8000-000000001989")
+		if err != nil || len(subs) != 10 {
+			b.Fatalf("got %d subagents, %v", len(subs), err)
+		}
+	}
+}
+
 // BenchmarkCodexCosts is GET /sessions' costs among 2000 Codex rollouts,
 // after a first request.
 func BenchmarkCodexCosts(b *testing.B) {
