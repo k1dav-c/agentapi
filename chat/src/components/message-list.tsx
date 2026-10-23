@@ -5,7 +5,7 @@ import {Search} from "lucide-react";
 import {createPortal} from "react-dom";
 import {Button} from "./ui/button";
 import {formatDateLabel} from "@/lib/format-time";
-import {costDetails, formatUSD, taskCosts} from "@/lib/cost";
+import {costDetails, formatUSD, taskCosts, taskSpan, type TaskSpan} from "@/lib/cost";
 import {filterTasks} from "@/lib/task-filter";
 import {taskStatusDetail} from "@/lib/server-tasks";
 import {HEADER_ACTIONS_ID} from "@/app/header";
@@ -62,16 +62,19 @@ export default function MessageList({
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
   useEffect(() => setHeaderSlot(document.getElementById(HEADER_ACTIONS_ID)), []);
   // What each task spent, as text, so a task whose cost didn't change
-  // doesn't render again. A task not sent yet has none. Worked out again
-  // when the cost or the tasks' prompts change, not as their replies
-  // stream: it goes through every model call for every task.
-  const starts = timeline.tasks.map((task) => (task.prompt.id === undefined ? "" : (task.prompt.time ?? ""))).join("\n");
+  // doesn't render again. A task not sent yet has none, nor one steered
+  // into another task. Worked out again when the cost or the tasks' spans
+  // change (taskSpan, as JSON), not as their replies stream: it goes
+  // through every model call.
+  const spans = JSON.stringify(
+    timeline.tasks.map((task) => taskSpan(task.prompt, task.prompt.id === undefined ? undefined : taskByMessage.get(task.prompt.id))),
+  );
   const costs = useMemo(() => {
     if (!sessionCost) return [];
-    return taskCosts(starts.split("\n").map((start) => start || undefined), sessionCost.calls).map((cost) =>
+    return taskCosts(JSON.parse(spans) as TaskSpan[], sessionCost.calls).map((cost) =>
       cost && {label: formatUSD(cost.usd), details: costDetails(cost, cost.unpriced)},
     );
-  }, [sessionCost, starts]);
+  }, [sessionCost, spans]);
   const filteredTasks = useMemo(
     () => filterTasks(timeline.tasks, serverStatus, taskFilter, taskQuery, taskByMessage),
     [serverStatus, taskByMessage, taskFilter, taskQuery, timeline.tasks],

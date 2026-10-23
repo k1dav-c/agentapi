@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
 import type {ModelCall} from "./chat-api";
-import {costDetails, formatTokens, formatUSD, periodTotals, taskCosts} from "./cost";
+import {costDetails, formatTokens, formatUSD, periodTotals, taskCosts, taskSpan} from "./cost";
 
 function call(time: string, usd: number, priced = true): ModelCall {
   return {time, usd, priced, model: "claude-opus-5-5", tokens: {input: 10, cache_read: 1000, cache_write: 100, output: 50}};
@@ -27,7 +27,7 @@ describe("formatTokens", () => {
 describe("taskCosts", () => {
   test("a task's calls run until the next task's prompt", () => {
     const costs = taskCosts(
-      ["2026-10-20T10:00:00Z", "2026-10-20T11:00:00Z", undefined],
+      [{from: "2026-10-20T10:00:00Z"}, {from: "2026-10-20T11:00:00Z"}, null],
       [
         call("2026-10-20T09:59:59Z", 0.5), // before the first task: in it
         call("2026-10-20T10:00:05Z", 1),
@@ -44,7 +44,39 @@ describe("taskCosts", () => {
   });
 
   test("no sent task, no costs", () => {
-    expect(taskCosts([undefined], [call("2026-10-20T10:00:00Z", 1)])).toEqual([undefined]);
+    expect(taskCosts([null], [call("2026-10-20T10:00:00Z", 1)])).toEqual([undefined]);
+  });
+
+  test("a task the server derives spent the calls made while it ran", () => {
+    const now = Date.parse("2026-10-20T12:30:00Z");
+    const costs = taskCosts(
+      [
+        {ran: {from: "2026-10-20T10:00:00Z", until: "2026-10-20T10:20:00Z"}},
+        // A message steered into the first task: its calls count there.
+        null,
+        // Still running.
+        {ran: {from: "2026-10-20T12:00:00Z"}},
+      ],
+      [
+        call("2026-10-20T09:59:59Z", 8), // before any task: in none
+        call("2026-10-20T10:00:00Z", 1),
+        call("2026-10-20T10:20:00Z", 2),
+        call("2026-10-20T11:00:00Z", 4), // between the tasks (a compaction): in none
+        call("2026-10-20T12:10:00Z", 16),
+        call("2026-10-20T12:40:00Z", 32), // after now: in none
+      ],
+      now,
+    );
+    expect(costs.map((cost) => cost?.usd)).toEqual([3, undefined, 16]);
+  });
+
+  test("a task's span: the server's while it ran, else its prompt's time", () => {
+    const task = {id: 4, started_at: "2026-10-20T10:00:00Z", ended_at: "2026-10-20T10:05:00Z"};
+    expect(taskSpan({id: 4, time: "2026-10-20T10:00:00Z"}, task)).toEqual({ran: {from: "2026-10-20T10:00:00Z", until: "2026-10-20T10:05:00Z"}});
+    // Steered into task 4.
+    expect(taskSpan({id: 6, time: "2026-10-20T10:01:00Z"}, task)).toBeNull();
+    expect(taskSpan({id: 6, time: "2026-10-20T10:01:00Z"})).toEqual({from: "2026-10-20T10:01:00Z"});
+    expect(taskSpan({time: "2026-10-20T10:01:00Z"})).toBeNull();
   });
 });
 

@@ -50,13 +50,42 @@ function addCall(cost: TaskCost, call: ModelCall): TaskCost {
   };
 }
 
-// What each task spent: a task's calls are those made from its prompt on,
-// until the next task's prompt. starts are the tasks' prompt times in
-// order; a task without one (not sent yet) gets no cost. Calls before the
-// first task count in it.
-export function taskCosts(starts: (string | undefined)[], calls: ModelCall[]): (TaskCost | undefined)[] {
-  const bounds = starts.map((start) => (start ? Date.parse(start) : NaN));
-  const costs: (TaskCost | undefined)[] = starts.map(() => undefined);
+// When a task's model calls were made. The server says when a task it
+// derives ran: from its start until it ended (ran.until), or until now
+// while it runs. A task only the chat knows (from a server that derives
+// none) has the time of its prompt (from): its calls run until the next
+// task's prompt. null for a task that has none: not sent yet, or steered
+// into another task, whose calls count there.
+export type TaskSpan = {ran: {from: string; until?: string}} | {from: string} | null;
+
+// taskSpan returns the span of a task, as the server's task that its
+// prompt started (serverTask) or its prompt says.
+export function taskSpan(prompt: {id?: number; time?: string}, serverTask?: {id: number; started_at: string; ended_at?: string}): TaskSpan {
+  if (prompt.id === undefined) return null;
+  if (serverTask) return serverTask.id === prompt.id ? {ran: {from: serverTask.started_at, until: serverTask.ended_at}} : null;
+  return prompt.time ? {from: prompt.time} : null;
+}
+
+// What each task spent, by the spans of the tasks in order. When the
+// server says when tasks ran, a task's calls are those made while it ran;
+// otherwise, those made from its prompt on until the next task's prompt,
+// and calls before the first task count in it.
+export function taskCosts(spans: TaskSpan[], calls: ModelCall[], now = Date.now()): (TaskCost | undefined)[] {
+  const costs: (TaskCost | undefined)[] = spans.map(() => undefined);
+  const add = (task: number, call: ModelCall) => {
+    costs[task] = addCall(costs[task] ?? {usd: 0, calls: 0, tokens: noTokens, unpriced: false}, call);
+  };
+  const ran = spans.flatMap((span, task) => (span && "ran" in span ? [{task, from: Date.parse(span.ran.from), until: span.ran.until ? Date.parse(span.ran.until) : now}] : []));
+  if (ran.length > 0) {
+    ran.sort((a, b) => a.from - b.from);
+    for (const call of calls) {
+      const at = Date.parse(call.time);
+      const span = ran[lastAtOrBefore(ran, at)];
+      if (span && at <= span.until) add(span.task, call);
+    }
+    return costs;
+  }
+  const bounds = spans.map((span) => (span && "from" in span ? Date.parse(span.from) : NaN));
   const firstTask = bounds.findIndex((bound) => !Number.isNaN(bound));
   if (firstTask < 0) return costs;
   for (const call of calls) {
@@ -65,9 +94,26 @@ export function taskCosts(starts: (string | undefined)[], calls: ModelCall[]): (
     for (let index = firstTask + 1; index < bounds.length; index++) {
       if (!Number.isNaN(bounds[index]) && bounds[index] <= at) task = index;
     }
-    costs[task] = addCall(costs[task] ?? {usd: 0, calls: 0, tokens: noTokens, unpriced: false}, call);
+    add(task, call);
   }
   return costs;
+}
+
+// The index of the last span that starts at or before at, or -1.
+function lastAtOrBefore(spans: {from: number}[], at: number): number {
+  let low = 0;
+  let high = spans.length - 1;
+  let match = -1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if (spans[middle].from <= at) {
+      match = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return match;
 }
 
 export interface PeriodTotals {
