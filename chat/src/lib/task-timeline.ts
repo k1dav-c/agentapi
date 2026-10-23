@@ -107,6 +107,8 @@ interface MessageParts {
   // The message's time, parsed: the tasks are found by binary search over
   // their prompts' times, and parsing in every step was most of the work.
   time: number;
+  // The task the server says the message began in (its task_id).
+  taskId?: number;
   // Its blocks that start or finish a tool call.
   toolBlocks: RichContentBlock[];
   // What an agent's message shows in its task, in order: its text and
@@ -125,8 +127,10 @@ interface ToolTouch {
 
 interface CallEntry {
   call: ToolCall;
-  // Its timestamp, parsed.
+  // Its timestamp, parsed, and the task the message it has it from began
+  // in.
   time: number;
+  taskId?: number;
   // The blocks the call was made from: the same blocks make the same call.
   touches: ToolTouch[];
   // Its place among the calls, in the order they started.
@@ -141,7 +145,11 @@ interface TaskItems {
 }
 
 // TimelineBuilder builds the transcript of a conversation as messages
-// stream in, and makes again only what changed. The chat keeps a message's
+// stream in, and makes again only what changed. A rich message goes into
+// the task the server says it began in (task_id), and one without (a
+// resumed session's, or from a server that doesn't say) into the last task
+// whose prompt is at or before it; a tool call goes where the message it
+// has its time from does. The chat keeps a message's
 // object until the message changes (mergeByKey), so what a build gets
 // usually starts with what the last one got: it remakes the tool calls the
 // rest touches, and the tasks from the first one something changed in. The
@@ -167,6 +175,8 @@ export class TimelineBuilder {
   // it holds.
   private starts: number[] = [];
   private times: number[] = [];
+  // Each task's place, by the ID of its prompt.
+  private taskIndex = new Map<number, number>();
   private items: TaskItems[] = [];
   private last: Transcript = {toolCalls: [], timeline: {prelude: [], tasks: []}};
 
@@ -205,7 +215,7 @@ export class TimelineBuilder {
       }
       if (block.type === "tool_use" && block.tool_use_id) activity.push(block.tool_use_id);
     });
-    parts = {time: richMessageTime(message), toolBlocks, activity};
+    parts = {time: richMessageTime(message), taskId: message.task_id, toolBlocks, activity};
     this.parts.set(message, parts);
     return parts;
   }
@@ -262,8 +272,9 @@ export class TimelineBuilder {
       if (same && position === previous.position) continue;
       const made = same ? previous.call : makeToolCall(id, touches);
       const call = previous && sameValue(previous.call, made) ? previous.call : made;
-      this.calls.set(id, {call, time: call === previous?.call ? previous.time : Date.parse(call.timestamp), touches, position});
-      if (call !== previous?.call || position !== previous.position) changes.set(id, previous);
+      const taskId = timeSource(touches).message.task_id;
+      this.calls.set(id, {call, time: call === previous?.call ? previous.time : Date.parse(call.timestamp), taskId, touches, position});
+      if (call !== previous?.call || position !== previous.position || taskId !== previous.taskId) changes.set(id, previous);
     }
     this.richMessages = richMessages;
     return {changes, orderChanged: !sameItems(removed, this.order.slice(cut))};
@@ -285,11 +296,18 @@ export class TimelineBuilder {
       if (message.role === "user") starts.push(i);
     });
     const times = starts.map((start) => this.promptTime(messages[start]));
-    const changed = this.firstChangedTask(messages, starts, times, richMessages, oldRich, unchanged, changes);
+    const taskIndex = new Map<number, number>();
+    starts.forEach((start, j) => {
+      const id = messages[start].id;
+      if (id !== undefined) taskIndex.set(id, j);
+    });
+    const place = placer(times, taskIndex);
+    const changed = this.firstChangedTask(messages, starts, times, place, richMessages, oldRich, unchanged, changes);
     const previous = this.last.timeline;
     this.messages = messages;
     this.starts = starts;
     this.times = times;
+    this.taskIndex = taskIndex;
     if (changed === starts.length && changed === previous.tasks.length) return previous;
     const from = Math.max(0, changed);
 
@@ -317,11 +335,12 @@ export class TimelineBuilder {
     const entries: CallEntry[][] = items.map(() => []);
     for (const id of callIDs) {
       const entry = this.calls.get(id);
-      const index = entry ? taskAt(times, entry.time) : -1;
+      const index = entry ? place(entry.time, entry.taskId) : -1;
       if (index >= from) entries[index - from].push(entry!);
     }
     for (const i of parts) {
-      const index = taskAt(times, this.partsOf(richMessages[i]).time);
+      const {time, taskId} = this.partsOf(richMessages[i]);
+      const index = place(time, taskId);
       if (index >= from) items[index - from].parts.push(i);
     }
 
@@ -358,6 +377,7 @@ export class TimelineBuilder {
     messages: (Message | DraftMessage)[],
     starts: number[],
     times: number[],
+    place: Placer,
     richMessages: RichMessage[],
     oldRich: RichMessage[],
     unchanged: number,
@@ -365,8 +385,10 @@ export class TimelineBuilder {
   ): number {
     if (!inOrder(times) || !inOrder(this.times)) return -1;
     let from = starts.length;
-    const at = (list: number[], time: number) => {
-      const index = taskAt(list, time);
+    // Where something went in the last build, and goes now.
+    const placeBefore = placer(this.times, this.taskIndex);
+    const at = (where: Placer, time: number, taskId: number | undefined) => {
+      const index = where(time, taskId);
       if (index >= 0) from = Math.min(from, index);
     };
     // The first message that changed, and the task it is in.
@@ -380,16 +402,23 @@ export class TimelineBuilder {
     while (same < Math.min(times.length, this.times.length) && Object.is(times[same], this.times[same])) same++;
     if (same < Math.max(times.length, this.times.length)) from = Math.min(from, same - 1);
     // The agent's rich messages that changed, where they were and are.
-    for (let i = unchanged; i < oldRich.length; i++) if (oldRich[i].role === "assistant") at(this.times, this.partsOf(oldRich[i]).time);
-    for (let i = unchanged; i < richMessages.length; i++) if (richMessages[i].role === "assistant") at(times, this.partsOf(richMessages[i]).time);
+    for (const [where, list] of [[placeBefore, oldRich], [place, richMessages]] as const) {
+      for (let i = unchanged; i < list.length; i++) {
+        if (list[i].role !== "assistant") continue;
+        const {time, taskId} = this.partsOf(list[i]);
+        at(where, time, taskId);
+      }
+    }
     // The tool calls that changed, and the messages that show them.
     for (const [id, previous] of changes) {
       const entry = this.calls.get(id);
-      for (const [list, made] of [[this.times, previous], [times, entry]] as const) {
+      for (const [where, made] of [[placeBefore, previous], [place, entry]] as const) {
         if (!made) continue;
-        at(list, made.time);
+        at(where, made.time, made.taskId);
         for (const {block, message} of made.touches) {
-          if (block.type === "tool_use" && message.role === "assistant") at(list, this.partsOf(message).time);
+          if (block.type !== "tool_use" || message.role !== "assistant") continue;
+          const {time, taskId} = this.partsOf(message);
+          at(where, time, taskId);
         }
       }
     }
@@ -432,6 +461,12 @@ export function buildTranscript(messages: (Message | DraftMessage)[], richMessag
 // says something the chat doesn't know.
 function toolStatus(status: string | undefined): ToolCall["status"] {
   return status === "running" || status === "completed" || status === "failed" ? status : undefined;
+}
+
+// The block of a tool call it has its time from: the last tool use, or
+// the first block when it has no tool use (a result came first).
+function timeSource(touches: ToolTouch[]): ToolTouch {
+  return touches.findLast((touch) => touch.block.type === "tool_use") ?? touches[0];
 }
 
 // makeToolCall makes a tool call from its blocks, in order: the tool use
@@ -495,6 +530,14 @@ function inOrder(times: number[]): boolean {
     if (Number.isNaN(times[i - 1]) ? !Number.isNaN(times[i]) : times[i] < times[i - 1]) return false;
   }
   return true;
+}
+
+// Where something goes among the tasks, by its time and the task it
+// began in (taskId; see TimelineBuilder): a task's index, -1 for none.
+type Placer = (time: number, taskId: number | undefined) => number;
+
+function placer(times: number[], taskIndex: ReadonlyMap<number, number>): Placer {
+  return (time, taskId) => (taskId === undefined ? undefined : taskIndex.get(taskId)) ?? taskAt(times, time);
 }
 
 // The index of the task a time falls in: the last whose prompt is at or

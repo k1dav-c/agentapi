@@ -187,6 +187,35 @@ describe("rebuilding as messages stream", () => {
     expect(builder.build(messages, moved).timeline.tasks.map((task) => task.richActivity.length)).toEqual([1, 0, 2]);
   });
 
+  test("a rich message goes into the task the server says it began in, one without by its time", () => {
+    const messages = [user(1, "2026-01-01T00:00:00Z"), user(3, "2026-01-01T00:01:00Z")];
+    // Stamped after the second prompt, but part of the first task (it ran
+    // on, or the clocks differ).
+    const late: RichMessage = {...rich("a", "2026-01-01T00:01:10Z", [{type: "text", text: "still on task 1"}]), task_id: 1};
+    const untagged = rich("b", "2026-01-01T00:01:20Z", [{type: "text", text: "by time"}]);
+    const unknown: RichMessage = {...rich("c", "2026-01-01T00:00:30Z", [{type: "text", text: "a task the chat doesn't have"}]), task_id: 99};
+    const use: RichMessage = {...rich("d", "2026-01-01T00:01:30Z", [{type: "tool_use", tool_use_id: "t1", tool_name: "Bash", tool_input: {command: "ls"}}]), task_id: 1};
+    const result: RichMessage = {message_id: "r", role: "user", timestamp: "2026-01-01T00:01:31Z", content: [{type: "tool_result", tool_use_id: "t1", text: "a.go"}]};
+    const {timeline} = buildTranscript(messages, [late, untagged, unknown, use, result]);
+    const keys = (index: number) => timeline.tasks[index].richActivity.map((item) => item.key);
+    expect(keys(0)).toEqual(["rich-message-a-0", "rich-message-c-0", "rich-tool-t1"]);
+    expect(keys(1)).toEqual(["rich-message-b-0"]);
+    // The tool call goes where its use's message does.
+    expect(timeline.tasks[0].toolCalls.map((call) => call.id)).toEqual(["t1"]);
+    expect(timeline.tasks[1].toolCalls).toEqual([]);
+  });
+
+  test("a message that comes again with another task moves there", () => {
+    const messages = [user(1, "2026-01-01T00:00:00Z"), user(3, "2026-01-01T00:01:00Z")];
+    const message = {...rich("a", "2026-01-01T00:01:10Z", [{type: "tool_use", tool_use_id: "t1", tool_name: "Bash", tool_input: {command: "ls"}}]), task_id: 3};
+    const builder = new TimelineBuilder();
+    expect(builder.build(messages, [message]).timeline.tasks.map((task) => task.toolCalls.length)).toEqual([0, 1]);
+    const moved = [{...message, task_id: 1}];
+    const built = builder.build(messages, moved);
+    expect(built).toEqual(buildTranscript(messages, moved));
+    expect(built.timeline.tasks.map((task) => task.toolCalls.length)).toEqual([1, 0]);
+  });
+
   test("tool calls that come into a task are in the order they started", () => {
     const messages = [user(1, "2026-01-01T00:00:00Z"), user(2, "2026-01-01T00:01:00Z")];
     const use = (id: string, time: string, path: string) => rich(`${id}-${time}`, time, [{type: "tool_use", tool_use_id: id, tool_name: "Read", tool_input: {path}}]);
@@ -251,11 +280,20 @@ function walk(seed: number, steps: number) {
   let nextId = 0;
   let calls = 0;
   const open: string[] = [];
+  // The task the server says a rich message began in: mostly the latest,
+  // now and then an earlier one or one the chat doesn't have, or none (a
+  // resumed session's messages).
+  const tagged = (message: RichMessage): RichMessage => {
+    const ids = messages.flatMap((m) => (m.role === "user" && m.id !== undefined ? [m.id] : []));
+    const pick = random(6);
+    const taskId = pick < 3 ? ids.at(-1) : pick === 3 && ids.length > 0 ? ids[random(ids.length)] : pick === 4 ? 9999 : undefined;
+    return taskId === undefined ? message : {...message, task_id: taskId};
+  };
   const builder = new TimelineBuilder();
   let previous = builder.build(messages, richMessages);
   for (let step = 0; step < steps; step++) {
     clock += 1 + random(5);
-    switch (random(14)) {
+    switch (random(15)) {
       case 0:
         // A task the server confirmed; drafts still being sent go.
         messages = [...messages.filter((m) => m.id !== undefined || (m as DraftMessage).deliveryStatus === "failed"), user(nextId++, time(clock))];
@@ -275,18 +313,18 @@ function walk(seed: number, steps: number) {
       case 3: {
         const id = `t${calls++}`;
         open.push(id);
-        richMessages = [...richMessages, rich(`m${step}`, time(clock), [
+        richMessages = [...richMessages, tagged(rich(`m${step}`, time(clock), [
           {type: "thinking", thinking: `step ${step}`},
           {type: "tool_use", tool_use_id: id, tool_name: "Bash", tool_input: {command: `run ${step}`}, status: "running"},
-        ])];
+        ]))];
         break;
       }
       case 4: {
         const id = open.splice(random(open.length + 1), 1)[0];
         if (!id) break;
-        richMessages = [...richMessages, {message_id: `r${step}`, role: "user", timestamp: time(clock), content: [
+        richMessages = [...richMessages, tagged({message_id: `r${step}`, role: "user", timestamp: time(clock), content: [
           {type: "tool_result", tool_use_id: id, text: `result ${step}`, is_error: random(3) === 0},
-        ]}];
+        ]})];
         break;
       }
       case 5: {
@@ -316,13 +354,13 @@ function walk(seed: number, steps: number) {
         break;
       case 8:
         // An agent's message from the past, and one without content.
-        richMessages = [...richMessages, rich(`p${step}`, time(random(clock)), [{type: "text", text: `late ${step}`}]), rich(`e${step}`, time(clock), [])];
+        richMessages = [...richMessages, tagged(rich(`p${step}`, time(random(clock)), [{type: "text", text: `late ${step}`}])), rich(`e${step}`, time(clock), [])];
         break;
       case 9:
         // A tool call that starts again (the agent sends its use again).
         if (calls > 0) {
           const id = `t${random(calls)}`;
-          richMessages = [...richMessages, rich(`u${step}`, time(clock), [{type: "tool_use", tool_use_id: id, tool_name: "Read", tool_input: {path: `/f${step}`}, status: "completed"}])];
+          richMessages = [...richMessages, tagged(rich(`u${step}`, time(clock), [{type: "tool_use", tool_use_id: id, tool_name: "Read", tool_input: {path: `/f${step}`}, status: "completed"}]))];
         }
         break;
       case 10:
@@ -343,13 +381,22 @@ function walk(seed: number, steps: number) {
         break;
       case 12:
         // An agent's message that comes before the task it belongs to.
-        richMessages = [...richMessages, rich(`f${step}`, time(clock + 1 + random(8)), [{type: "text", text: `early ${step}`}])];
+        richMessages = [...richMessages, tagged(rich(`f${step}`, time(clock + 1 + random(8)), [{type: "text", text: `early ${step}`}]))];
         break;
       case 13:
         // A rich message that moves in time.
         if (richMessages.length > 0) {
           const index = random(richMessages.length);
           richMessages = replaceAt(richMessages, index, {...richMessages[index], timestamp: time(random(clock + 5))});
+        }
+        break;
+      case 14:
+        // A rich message sent again with another task (or none).
+        if (richMessages.length > 0) {
+          const index = random(richMessages.length);
+          const message = {...richMessages[index]};
+          delete message.task_id;
+          richMessages = replaceAt(richMessages, index, tagged(message));
         }
         break;
     }
