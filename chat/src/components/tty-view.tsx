@@ -3,7 +3,7 @@
 import {useEffect, useRef, useState} from "react";
 import {ArrowLeft, TerminalSquare} from "lucide-react";
 import {toast} from "sonner";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import {Button} from "./ui/button";
 import {TERMINAL_FONT_SIZE as FONT_SIZE, TERMINAL_LINE_HEIGHT as LINE_HEIGHT, TerminalKeyBar} from "./terminal-chrome";
 import {LatestLinkChip} from "./terminal-links";
@@ -23,7 +23,9 @@ const PANEL_PADDING = 16;
 // the agent's emulated terminal screen as-is and sends every keystroke
 // straight to the agent, like attaching to the terminal.
 export function TtyView({onExit}: {onExit: () => void}) {
-  const {storageScope, sendTerminalInput, terminalColumns} = useChat();
+  const storageScope = useChatSelector((chat) => chat.storageScope);
+  const terminalColumns = useChatSelector((chat) => chat.terminalColumns);
+  const {sendTerminalInput} = useChatActions();
   const columns = terminalColumns || DEFAULT_COLUMNS;
   const columnsRef = useRef(columns);
   const containerRef = useRef<HTMLDivElement>(null);

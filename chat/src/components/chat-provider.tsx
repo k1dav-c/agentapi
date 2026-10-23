@@ -24,20 +24,8 @@ import {
   httpURL,
   type AgentSettings,
   type AgentUsage,
-  type ContinueAt,
   type CostReport,
-  type FileContent,
-  type FileDiff,
-  type FileMatches,
-  type FilePreview,
   type LimitStop,
-  type MCPCheckResult,
-  type MCPConfig,
-  type MCPProfiles,
-  type SessionList,
-  type Subagent,
-  type SubagentRun,
-  type UploadOptions,
 } from "@/lib/chat-api";
 import {features, type Features} from "@/lib/features";
 import type {AgentType} from "@/lib/agents";
@@ -57,14 +45,16 @@ import {
   type RequestResponse,
 } from "@/lib/native-requests";
 import type {LoginRequired} from "@/lib/login";
-import {getAgentState, waitingFor, type AgentStateKind, type WaitingFor} from "@/lib/session-status";
+import {getAgentState, waitingFor, type AgentStateKind, type TokenTotals, type WaitingFor} from "@/lib/session-status";
 import {SyncTracker} from "@/lib/session-sync";
 import {resolveAgentAPIUrl} from "@/lib/agentapi-url";
 import {isDraftMessage, lastUserMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
+import type {Timeline, ToolCall} from "@/lib/task-timeline";
 import {useEventStream} from "./use-event-stream";
 import {useQueue} from "./use-queue";
 import {useSessionCache} from "./use-session-cache";
 import {useSessionCost} from "./use-session-cost";
+import {useTranscript} from "./use-transcript";
 import {Store, useStoreSelector} from "@/lib/store";
 import {useStableCallback} from "@/lib/use-stable-callback";
 import {usePersisted} from "@/lib/use-persisted";
@@ -94,9 +84,105 @@ export interface QueuedMessage {
   time: string;
 }
 
-interface ChatContextValue {
+type ChatAPI = ReturnType<typeof createChatAPI>;
+
+// The API calls components make as they are (lib/chat-api.ts).
+const API_CALLS = [
+  // GET /settings: the settings and the values they can take.
+  "getSettings",
+  // POST /compact (agents with the compact capability).
+  "compact",
+  // Continuing the turn a usage limit stopped, now or once the limit
+  // resets; cancelling a scheduled continuation; dismissing the stop,
+  // which lets the queued tasks go.
+  "continueAfterLimit",
+  "cancelContinue",
+  "dismissLimitStop",
+  // The agent's sessions in the working directory (features.sessionHistory).
+  "listSessions",
+  // The subagents the agent ran in its session, and what one did
+  // (features.subagents).
+  "listSubagents",
+  "getSubagent",
+  // Typing into and resizing the shell terminal (GET /terminal).
+  "terminalInput",
+  "terminalResize",
+  // GET, PUT /webhook and POST /webhook/test: pushing events to a receiver.
+  "getWebhook",
+  "updateWebhook",
+  "testWebhook",
+  "getMCP",
+  "updateMCP",
+  "checkMCP",
+  "createMCPServer",
+  "updateMCPServer",
+  "deleteMCPServer",
+  "getMCPProfiles",
+  "saveMCPProfile",
+  "deleteMCPProfile",
+  "applyMCPProfile",
+  // A file in the agent's working directory and its uncommitted changes,
+  // for the file viewer (GET /files/content, GET /files/diff); the files
+  // whose path ends with one the agent named that isn't there (GET
+  // /files/find).
+  "getFileContent",
+  "getFileDiff",
+  "getFilePreview",
+  "findFile",
+  "fileImageURL",
+  "uploadFiles",
+] as const;
+
+// What components do: the chat's actions, and the API calls they make as
+// they are. The value never changes (see useChatActions).
+export interface ChatActions extends Pick<ChatAPI, (typeof API_CALLS)[number]> {
+  // PUT /settings: changes the settings set in change.
+  updateSettings: (change: AgentSettings) => ReturnType<ChatAPI["updateSettings"]>;
+  // Opens one of the agent's sessions (or a copy of it) in place of this
+  // conversation.
+  resumeSession: (id: string, fork: boolean) => Promise<void>;
+  // Checks the login again now (POST /login/retry).
+  retryLogin: () => Promise<void>;
+  respondToRequest: (id: string, response: RequestResponse) => Promise<NativeRequest>;
+  // Stops what the agent is doing now (Esc on a PTY agent's terminal, POST
+  // /interrupt on the native transport); see ChatState.canStop. It reports
+  // a failure itself and resolves to false.
+  stop: () => Promise<boolean>;
+  steerQueuedMessage: (id: number) => Promise<void>;
+  reorderQueue: (ids: number[]) => Promise<void>;
+  sendMessage: (message: string, type?: MessageType, mode?: DispatchMode) => Promise<SendResult>;
+  // Sends keystrokes to the agent's terminal as-is (TTY mode).
+  sendTerminalInput: (data: string) => Promise<void>;
+  retryFailedMessage: (clientId: string) => Promise<boolean>;
+  dismissFailedMessage: (clientId: string) => void;
+  updateQueuedMessage: (id: number, content: string) => Promise<void>;
+  deleteQueuedMessage: (id: number) => Promise<void>;
+  // Reconnects right away, as the user asked: also asks for the API token
+  // again if the user closed the sign-in dialog.
+  reconnectNow: () => void;
+  downloadSession: () => Promise<void>;
+  deleteMessages: () => Promise<void>;
+}
+
+// The chat's state. Components read the parts they need with
+// useChatSelector.
+export interface ChatState {
   messages: (Message | DraftMessage)[];
   richMessages: RichMessage[];
+  // What the transcript shows: the tasks, and the tool calls in the order
+  // they started (TimelineBuilder).
+  timeline: Timeline;
+  toolCalls: ToolCall[];
+  // The tokens the session used, and the task the agent works on (the last
+  // one sent).
+  tokenTotals: TokenTotals;
+  taskTokens: TokenTotals;
+  // What the agent does in that task ("$ go test ./...", "Thinking · …";
+  // "" when it waits on nothing), and the last tool it used there.
+  taskActivity: string;
+  latestTool: string | null;
+  // How many subagents the agent ran, and how many still run.
+  subagents: {total: number; running: number};
   // Bottom of the terminal while the agent shows an interactive prompt
   // (selection list, confirmation) that must be answered; empty otherwise.
   terminalPrompt: string;
@@ -118,10 +204,6 @@ interface ChatContextValue {
   // The permission mode, model and effort of a native agent that can change
   // them (capabilities.settings); null otherwise.
   agentSettings: AgentSettings | null;
-  // GET /settings: the settings and the values they can take.
-  getSettings: ReturnType<typeof createChatAPI>["getSettings"];
-  // PUT /settings: changes the settings set in change.
-  updateSettings: (change: AgentSettings) => ReturnType<ReturnType<typeof createChatAPI>["updateSettings"]>;
   // How full the context window is and the account's rate limits, as the
   // agent last reported them (native transport); null until it does.
   agentUsage: AgentUsage | null;
@@ -129,28 +211,11 @@ interface ChatContextValue {
   // (features.cost); null until read.
   sessionCost: CostReport | null;
   // Whether the server offers a shell terminal (native transport, GET
-  // /terminal), and typing into and resizing it.
+  // /terminal).
   terminalAvailable: boolean;
-  // POST /compact (agents with the compact capability).
-  compact: () => Promise<void>;
   // The turn a usage limit stopped, while it holds the queue (native
-  // transport); null otherwise. Continuing it now or once the limit resets,
-  // cancelling a scheduled continuation, and dismissing the stop, which
-  // lets the queued tasks go.
+  // transport); null otherwise.
   limitStop: LimitStop | null;
-  continueAfterLimit: (at: ContinueAt) => Promise<void>;
-  cancelContinue: () => Promise<void>;
-  dismissLimitStop: () => Promise<void>;
-  // The agent's sessions in the working directory, and opening one (or a
-  // copy of it) in place of this conversation (features.sessionHistory).
-  listSessions: () => Promise<SessionList>;
-  // The subagents the agent ran in its session, and what one did
-  // (features.subagents).
-  listSubagents: () => Promise<Subagent[]>;
-  getSubagent: (id: string) => Promise<SubagentRun>;
-  resumeSession: (id: string, fork: boolean) => Promise<void>;
-  terminalInput: (data: string) => Promise<void>;
-  terminalResize: (cols: number, rows: number) => Promise<void>;
   // The agent is starting (lifecycle "starting"): there is no turn yet, and
   // while it finds no login AgentAPI starts it again by itself.
   agentStarting: boolean;
@@ -164,63 +229,13 @@ interface ChatContextValue {
   currentTask?: Message | DraftMessage;
   // What the composer may offer: steer, interrupt (see lib/dispatch).
   dispatch: DispatchContext;
-  // Checks the login again now (POST /login/retry).
-  retryLogin: () => Promise<void>;
   // Requests the agent made (native transport): pending ones and the most
   // recently closed, oldest first.
   requests: NativeRequest[];
-  respondToRequest: (id: string, response: RequestResponse) => Promise<NativeRequest>;
-  // Whether Stop can stop what the agent is doing now, and stopping it
-  // (Esc on a PTY agent's terminal, POST /interrupt on the native
-  // transport). stop reports a failure itself and resolves to false.
+  // Whether stop can stop what the agent is doing now.
   canStop: boolean;
-  stop: () => Promise<boolean>;
-  steerQueuedMessage: (id: number) => Promise<void>;
-  reorderQueue: (ids: number[]) => Promise<void>;
-  sendMessage: (message: string, type?: MessageType, mode?: DispatchMode) => Promise<SendResult>;
-  // Sends keystrokes to the agent's terminal as-is (TTY mode).
-  sendTerminalInput: (data: string) => Promise<void>;
-  retryFailedMessage: (clientId: string) => Promise<boolean>;
-  dismissFailedMessage: (clientId: string) => void;
-  updateQueuedMessage: (id: number, content: string) => Promise<void>;
-  deleteQueuedMessage: (id: number) => Promise<void>;
-  uploadFiles: (
-    formData: FormData,
-    options?: UploadOptions,
-  ) => Promise<FileUploadResponse>;
   reconnectAttempt: number;
   nextReconnectAt: number | null;
-  // Reconnects right away, as the user asked: also asks for the API token
-  // again if the user closed the sign-in dialog.
-  reconnectNow: () => void;
-  downloadSession: () => Promise<void>;
-  deleteMessages: () => Promise<void>;
-  // GET, PUT /webhook and POST /webhook/test: pushing events to a receiver.
-  getWebhook: ReturnType<typeof createChatAPI>["getWebhook"];
-  updateWebhook: ReturnType<typeof createChatAPI>["updateWebhook"];
-  testWebhook: ReturnType<typeof createChatAPI>["testWebhook"];
-  getMCP: () => Promise<MCPConfig>;
-  updateMCP: (
-    servers: Record<string, unknown>,
-    restart?: boolean,
-  ) => Promise<MCPConfig>;
-  checkMCP: (servers?: Record<string, unknown>) => Promise<MCPCheckResult[]>;
-  createMCPServer: (name: string, config: unknown, restart?: boolean) => Promise<void>;
-  updateMCPServer: (name: string, config: unknown, restart?: boolean) => Promise<void>;
-  deleteMCPServer: (name: string, restart?: boolean) => Promise<void>;
-  getMCPProfiles: () => Promise<MCPProfiles>;
-  saveMCPProfile: (name: string, servers: Record<string, unknown>) => Promise<MCPProfiles>;
-  deleteMCPProfile: (name: string) => Promise<MCPProfiles>;
-  applyMCPProfile: (name: string, restart?: boolean) => Promise<void>;
-  // A file in the agent's working directory and its uncommitted changes,
-  // for the file viewer (GET /files/content, GET /files/diff).
-  getFileContent: (path: string) => Promise<FileContent>;
-  getFileDiff: (path: string) => Promise<FileDiff>;
-  getFilePreview: (path: string) => Promise<FilePreview>;
-  // The files under the working directory whose path ends with path, for
-  // one the agent named that isn't there (GET /files/find).
-  findFile: (path: string) => Promise<FileMatches>;
-  fileImageURL: (path: string, version?: number) => string;
   storageScope: string;
   agentType: AgentType;
   // AgentAPI server version (e.g. "0.14.0"); empty until the first status
@@ -237,8 +252,8 @@ interface ChatContextValue {
   workspaceUrl?: string;
 }
 
-const ChatContext = createContext<ChatContextValue | undefined>(undefined);
-const ChatStoreContext = createContext<Store<ChatContextValue> | undefined>(undefined);
+const ChatActionsContext = createContext<ChatActions | undefined>(undefined);
+const ChatStoreContext = createContext<Store<ChatState> | undefined>(undefined);
 
 export const useAgentAPIUrl = (): string => {
   const searchParams = useSearchParams();
@@ -252,6 +267,16 @@ export const useAgentAPIUrl = (): string => {
 };
 
 export function ChatProvider({ children }: PropsWithChildren) {
+  const agentAPIUrl = useAgentAPIUrl();
+  // Another server is another chat: its state and actions start over.
+  return (
+    <ChatSession key={agentAPIUrl} agentAPIUrl={agentAPIUrl}>
+      {children}
+    </ChatSession>
+  );
+}
+
+function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: string}>) {
   const searchParams = useSearchParams();
   const customTitle = searchParams.get("title") ?? undefined;
   const workspaceValue = searchParams.get("workspace");
@@ -288,8 +313,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     lifecycle,
   } = agentStatus;
   const [requests, setRequests] = useState<NativeRequest[]>([]);
-  const agentAPIUrl = useAgentAPIUrl();
-  const api = useMemo(() => createChatAPI(agentAPIUrl), [agentAPIUrl]);
+  const [api] = useState(() => createChatAPI(agentAPIUrl));
   // Server conversation state the client holds: its epoch and the highest
   // change sequence applied. Sent as /events?since=&epoch= so a reconnect
   // only receives what changed.
@@ -331,6 +355,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const sessionCost = useSessionCost(api, chatFeatures.cost, serverStatus, lifecycle !== "starting" && lifecycle !== "restarting");
   const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
   const currentTask = useMemo(() => lastUserMessage(messages), [messages]);
+  const transcript = useTranscript(messages, richMessages);
 
   // Rendered as <title> rather than set on document.title from an effect:
   // Next re-applies the layout's static title after hydration, which
@@ -464,10 +489,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
     return result.ok;
   };
 
-  // Upload files to workspace
-  const uploadFiles = (formData: FormData, options: UploadOptions = {}) =>
-    api.uploadFiles(formData, options);
-
   // Reads the requests from the REST API; see mergeListedRequests.
   const refreshRequests = async () => {
     const heldWhenAsked = requestsRef.current;
@@ -529,9 +550,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
     }
   };
 
-  // Actions keep their identity from render to render, so the components
-  // that take them don't render again when the state changes.
-  const actions = {
+  // The actions keep their identity from render to render, and each calls
+  // what the latest render made of it: the object is made once, and a
+  // component that takes it never renders again for it.
+  const callbacks = {
     sendMessage: useStableCallback(sendMessage),
     sendTerminalInput: useStableCallback(async (data: string) => {
       await api.sendMessage(data, "raw");
@@ -551,7 +573,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
     dismissFailedMessage: useStableCallback(dismissFailedMessage),
     updateQueuedMessage: useStableCallback(updateQueuedMessage),
     deleteQueuedMessage: useStableCallback(deleteQueuedMessage),
-    uploadFiles: useStableCallback(uploadFiles),
     reconnectNow: useStableCallback(reconnectByUser),
     downloadSession: useStableCallback(downloadSession),
     deleteMessages: useStableCallback(async () => {
@@ -581,8 +602,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
       setRequests([]);
     }),
   };
-  const value: ChatContextValue = {
-    ...actions,
+  const [actions] = useState<ChatActions>(() => ({
+    ...(Object.fromEntries(API_CALLS.map((name) => [name, api[name]])) as Pick<ChatAPI, (typeof API_CALLS)[number]>),
+    ...callbacks,
+  }));
+  const state: ChatState = {
+    ...transcript,
     messages,
     richMessages,
     terminalPrompt,
@@ -596,17 +621,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     agentUsage,
     sessionCost,
     terminalAvailable,
-    compact: api.compact,
     limitStop,
-    continueAfterLimit: api.continueAfterLimit,
-    cancelContinue: api.cancelContinue,
-    dismissLimitStop: api.dismissLimitStop,
-    listSessions: api.listSessions,
-    listSubagents: api.listSubagents,
-    getSubagent: api.getSubagent,
-    terminalInput: api.terminalInput,
-    terminalResize: api.terminalResize,
-    getSettings: api.getSettings,
     agentStarting,
     agentState,
     waitingFor: waitingFor(agentState, loginRequired !== null),
@@ -619,24 +634,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
     queuedMessages,
     reconnectAttempt,
     nextReconnectAt,
-    getWebhook: api.getWebhook,
-    updateWebhook: api.updateWebhook,
-    testWebhook: api.testWebhook,
-    getMCP: api.getMCP,
-    updateMCP: api.updateMCP,
-    checkMCP: api.checkMCP,
-    createMCPServer: api.createMCPServer,
-    updateMCPServer: api.updateMCPServer,
-    deleteMCPServer: api.deleteMCPServer,
-    getMCPProfiles: api.getMCPProfiles,
-    saveMCPProfile: api.saveMCPProfile,
-    deleteMCPProfile: api.deleteMCPProfile,
-    applyMCPProfile: api.applyMCPProfile,
-    getFileContent: api.getFileContent,
-    getFileDiff: api.getFileDiff,
-    getFilePreview: api.getFilePreview,
-    findFile: api.findFile,
-    fileImageURL: api.fileImageURL,
     storageScope: agentAPIUrl,
     agentType,
     agentapiVersion,
@@ -645,42 +642,41 @@ export function ChatProvider({ children }: PropsWithChildren) {
     customTitle,
     workspaceUrl: workspaceParam ?? serverWorkspaceUrl,
   };
-  // Components that read a part of the value with useChatSelector render
-  // again only when that part changes; the value is handed over once this
+  // Components read a part of the state with useChatSelector and render
+  // again only when that part changes; the state is handed over once this
   // render is committed.
-  const storeRef = useRef<Store<ChatContextValue> | null>(null);
-  storeRef.current ??= new Store(value);
+  const storeRef = useRef<Store<ChatState> | null>(null);
+  storeRef.current ??= new Store(state);
   const store = storeRef.current;
-  useLayoutEffect(() => store.set(value));
+  useLayoutEffect(() => store.set(state));
 
   return (
     <ChatStoreContext.Provider value={store}>
-      <ChatContext.Provider value={value}>
+      <ChatActionsContext.Provider value={actions}>
         <title>{documentTitle}</title>
         {children}
         <AuthDialog />
-      </ChatContext.Provider>
+      </ChatActionsContext.Provider>
     </ChatStoreContext.Provider>
   );
 }
 
-// useChat returns all of the chat's state and actions; the component
-// renders again whenever any of it changes. A component that needs a part
-// of it, or that is rendered many times (a task, a tool call), reads it
-// with useChatSelector instead.
-export function useChat() {
-  const context = useContext(ChatContext);
-  if (!context) {
-    throw new Error("useChat must be used within a ChatProvider");
+// useChatActions returns what components can do: the chat's actions and
+// its API calls. The value never changes, so it never renders a component
+// again.
+export function useChatActions(): ChatActions {
+  const actions = useContext(ChatActionsContext);
+  if (!actions) {
+    throw new Error("useChatActions must be used within a ChatProvider");
   }
-  return context;
+  return actions;
 }
 
 // useChatSelector returns selector's part of the chat's state; the
 // component renders again only when that part changes (isEqual, by default
-// the same object or value). Actions keep their identity, so selecting them
-// doesn't render again.
-export function useChatSelector<S>(selector: (chat: ChatContextValue) => S, isEqual?: (a: S, b: S) => boolean): S {
+// the same object or value). Select the smallest part that does: a
+// component that selects the messages renders again as they stream.
+export function useChatSelector<S>(selector: (chat: ChatState) => S, isEqual?: (a: S, b: S) => boolean): S {
   const store = useContext(ChatStoreContext);
   if (!store) {
     throw new Error("useChatSelector must be used within a ChatProvider");

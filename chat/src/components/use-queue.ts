@@ -3,6 +3,7 @@
 import {useCallback, useRef, useState} from "react";
 import type {QueuedMessage} from "./chat-provider";
 import type {createChatAPI} from "@/lib/chat-api";
+import {sameValue} from "@/lib/agent-status";
 
 // useQueue keeps the queued messages as the server has them (GET /queue),
 // and changes them.
@@ -21,7 +22,9 @@ export function useQueue(api: ReturnType<typeof createChatAPI>) {
     try {
       const queue = await api.getQueue();
       queuedCountRef.current = queue.length;
-      setQueuedMessages(queue);
+      // The same queue keeps its object: the composer and the cards that
+      // select it don't render again on every refresh.
+      setQueuedMessages((previous) => (sameValue(previous, queue) ? previous : queue));
     } catch {
       // The connection status handler reports connectivity failures.
     }

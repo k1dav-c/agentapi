@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Brain, ChevronDown, ClipboardList, Hand, LoaderCircle, Shield, ShieldCheck, Zap } from "lucide-react";
 import { toast } from "sonner";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -32,7 +32,9 @@ const MODE_ICONS: Record<PermissionMode, ReactNode> = {
 // toolbar (native agents with the settings capability). Each opens a menu
 // that switches it; the values come from GET /settings when it opens.
 export function SessionSettings({ className }: { className?: string }) {
-  const { features, agentSettings, getSettings, updateSettings } = useChat();
+  const features = useChatSelector((chat) => chat.features);
+  const agentSettings = useChatSelector((chat) => chat.agentSettings);
+  const {getSettings, updateSettings} = useChatActions();
   const [options, setOptions] = useState<SettingOptions | null>(null);
   // The menu that is open, also when a slash command opened it.
   const [openMenu, setOpenMenu] = useState<SettingsMenu | null>(null);

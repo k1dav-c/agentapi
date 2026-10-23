@@ -66,6 +66,41 @@ export function lastUserMessage<T extends {role: string}>(messages: readonly T[]
   return messages.findLast((message) => message.role === "user");
 }
 
+// How many items a and b start with that are the same objects. The chat
+// keeps a message's object until the message changes (mergeByKey), so what
+// was worked out from the messages before that point still holds.
+export function commonPrefix<T>(a: readonly T[], b: readonly T[]): number {
+  const length = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < length && a[i] === b[i]) i++;
+  return i;
+}
+
+const richMessageTimes = new WeakMap<RichMessage, number>();
+
+// The time of a rich message, parsed once per message object; NaN when it
+// has none.
+export function richMessageTime(message: RichMessage): number {
+  let time = richMessageTimes.get(message);
+  if (time === undefined) {
+    time = Date.parse(message.timestamp);
+    richMessageTimes.set(message, time);
+  }
+  return time;
+}
+
+// The rich messages from time on (those of the current task, from its
+// prompt's time), found from the end: an update reads only the task's own
+// messages, not the whole session. None when time is unset, and none
+// without a time of their own.
+export function richMessagesSince(richMessages: RichMessage[], time: string | undefined): RichMessage[] {
+  const start = time ? Date.parse(time) : Number.NaN;
+  if (Number.isNaN(start)) return [];
+  let first = richMessages.length;
+  while (first > 0 && !(richMessageTime(richMessages[first - 1]) < start)) first--;
+  return richMessages.slice(first).filter((message) => richMessageTime(message) >= start);
+}
+
 // The key of a rich message: its ID and role.
 export const richMessageKey = (message: RichMessage) => `${message.message_id}\u0000${message.role}`;
 

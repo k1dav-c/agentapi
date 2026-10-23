@@ -1,4 +1,4 @@
-import type {DraftMessage, Message, RichContentBlock, RichMessage} from "@/lib/conversation";
+import {commonPrefix, richMessageTime, type DraftMessage, type Message, type RichContentBlock, type RichMessage} from "@/lib/conversation";
 import {sameValue, type ServerStatus} from "@/lib/agent-status";
 import { formatToolInput } from "./tool-format";
 
@@ -185,7 +185,7 @@ export class TimelineBuilder {
       }
       if (block.type === "tool_use" && block.tool_use_id) activity.push(block.tool_use_id);
     });
-    parts = {time: Date.parse(message.timestamp), toolBlocks, activity};
+    parts = {time: richMessageTime(message), toolBlocks, activity};
     this.parts.set(message, parts);
     return parts;
   }
@@ -448,14 +448,6 @@ function makeToolCall(id: string, touches: ToolTouch[]): ToolCall {
 
 function sameTouches(a: ToolTouch[], b: ToolTouch[]): boolean {
   return a.length === b.length && a.every((touch, i) => touch.block === b[i].block && touch.message === b[i].message && touch.index === b[i].index);
-}
-
-// How many items a and b start with that are the same objects.
-function commonPrefix<T>(a: T[], b: T[]): number {
-  const length = Math.min(a.length, b.length);
-  let i = 0;
-  while (i < length && a[i] === b[i]) i++;
-  return i;
 }
 
 // The index of the last of starts at or before index; -1 when none is.

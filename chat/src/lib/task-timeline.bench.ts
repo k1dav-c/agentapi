@@ -1,11 +1,13 @@
-// What the transcript costs on every streamed update of a long session,
+// What the chat works out on every streamed update of a long session,
 // before React renders: a synthetic session of 50, 100 and 200 tasks (20
 // tool calls each with long results; 18.6M characters at 200), whose last
 // reply grows one update at a time. Run it from chat/ with
 //
 //   bun src/lib/task-timeline.bench.ts
 
-import type {Message, RichMessage} from "./conversation";
+import {richMessagesSince, type Message, type RichMessage} from "./conversation";
+import {computeTokenTotals, taskProgress, TokenCounter} from "./session-status";
+import {subagentCounts} from "./subagents";
 import {filterTasks} from "./task-filter";
 import {TimelineBuilder} from "./task-timeline";
 
@@ -63,10 +65,18 @@ function streamUpdate<T extends {messages: Message[]; richMessages: RichMessage[
 
 function bench(taskCount: number) {
   let session = syntheticSession(taskCount);
+  // What the chat works out on an update (useTranscript, MessageList): the
+  // transcript, the tokens, the current task's progress and the subagents.
   const builder = new TimelineBuilder();
+  const counter = new TokenCounter();
   const update = () => {
-    const {timeline} = builder.build(session.messages, session.richMessages);
+    const {timeline, toolCalls} = builder.build(session.messages, session.richMessages);
     filterTasks(timeline.tasks, "running", "all", "");
+    counter.count(session.richMessages);
+    const task = timeline.tasks.findLast((candidate) => candidate.prompt.id !== undefined);
+    computeTokenTotals(richMessagesSince(session.richMessages, task?.prompt.time));
+    taskProgress(task);
+    subagentCounts(toolCalls);
   };
   update();
   const runs = 40;

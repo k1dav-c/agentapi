@@ -38,13 +38,18 @@ export function useTranscriptScroll(
   const [canScrollToNextUser, setCanScrollToNextUser] = useState(false);
   const isAtBottomRef = useRef(true);
   const lastScrollHeightRef = useRef(0);
+  // What was last rendered. Scrolling to the bottom and the scroll events
+  // come with every streamed update, and setting a state to the value it
+  // has can still render the transcript once more: they set what changed.
+  const shownRef = useRef({showScrollButton, unreadCount, canScrollToPreviousUser, canScrollToNextUser});
+  shownRef.current = {showScrollButton, unreadCount, canScrollToPreviousUser, canScrollToNextUser};
 
   const scrollToBottom = useCallback(
     (behavior: ScrollBehavior = "smooth") => {
       scrollArea?.scrollTo({top: scrollArea.scrollHeight, behavior});
       isAtBottomRef.current = true;
-      setShowScrollButton(false);
-      setUnreadCount(0);
+      if (shownRef.current.showScrollButton) setShowScrollButton(false);
+      if (shownRef.current.unreadCount !== 0) setUnreadCount(0);
     },
     [scrollArea],
   );
@@ -75,10 +80,13 @@ export function useTranscriptScroll(
       if (atBottom) isAtBottomRef.current = true;
       else if (scrollTop < lastScrollTop - 2) isAtBottomRef.current = false;
       lastScrollTop = scrollTop;
-      setShowScrollButton(!isAtBottomRef.current);
-      if (isAtBottomRef.current) setUnreadCount(0);
-      setCanScrollToPreviousUser(getPreviousUserMessageTop(scrollArea) !== undefined);
-      setCanScrollToNextUser(getNextUserMessageTop(scrollArea) !== undefined);
+      const shown = shownRef.current;
+      if (shown.showScrollButton === isAtBottomRef.current) setShowScrollButton(!isAtBottomRef.current);
+      if (isAtBottomRef.current && shown.unreadCount !== 0) setUnreadCount(0);
+      const previous = getPreviousUserMessageTop(scrollArea) !== undefined;
+      if (previous !== shown.canScrollToPreviousUser) setCanScrollToPreviousUser(previous);
+      const next = getNextUserMessageTop(scrollArea) !== undefined;
+      if (next !== shown.canScrollToNextUser) setCanScrollToNextUser(next);
     };
     handleScroll();
     scrollArea.addEventListener("scroll", handleScroll, {passive: true});

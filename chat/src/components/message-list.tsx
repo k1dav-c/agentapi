@@ -4,15 +4,11 @@ import React, {useCallback, useEffect, useMemo, useState} from "react";
 import {Search} from "lucide-react";
 import {createPortal} from "react-dom";
 import {Button} from "./ui/button";
-import {AgentType} from "@/lib/agents";
-import type {DraftMessage, Message, RichMessage} from "@/lib/conversation";
-import type {ServerStatus} from "@/lib/agent-status";
 import {formatDateLabel} from "@/lib/format-time";
 import {costDetails, formatUSD, taskCosts} from "@/lib/cost";
 import {filterTasks} from "@/lib/task-filter";
-import {TimelineBuilder} from "@/lib/task-timeline";
 import {HEADER_ACTIONS_ID} from "@/app/header";
-import {useChat} from "./chat-provider";
+import {useChatSelector} from "./chat-provider";
 import {TaskGroup} from "./message-list/task-group";
 import {EmptyState, StartupScreen} from "./message-list/empty-state";
 import {JumpButtons} from "./message-list/jump-buttons";
@@ -28,10 +24,6 @@ import {useTranscriptScroll} from "./message-list/use-transcript-scroll";
 const VISIBLE_TASKS_DEFAULT = 5;
 
 interface MessageListProps {
-  messages: (Message | DraftMessage)[];
-  richMessages: RichMessage[];
-  serverStatus: ServerStatus;
-  agentType: AgentType;
   onRetryMessage: (clientId: string) => Promise<boolean>;
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
@@ -42,10 +34,6 @@ interface MessageListProps {
 }
 
 export default function MessageList({
-  messages,
-  richMessages,
-  serverStatus,
-  agentType,
   onRetryMessage,
   onEditMessage,
   onDismissMessage,
@@ -57,16 +45,18 @@ export default function MessageList({
   const [showAllTasks, setShowAllTasks] = useState(false);
   const search = useTaskSearch();
   const {taskQuery, taskFilter, filtersActive, currentSearchResult, setCurrentSearchResult, searchOpen} = search;
-  const {waitingFor, sessionCost} = useChat();
+  const messages = useChatSelector((chat) => chat.messages);
+  // Built as messages stream (useTranscript): unchanged tasks keep their
+  // objects, so their memoized components don't render again.
+  const timeline = useChatSelector((chat) => chat.timeline);
+  const serverStatus = useChatSelector((chat) => chat.serverStatus);
+  const agentType = useChatSelector((chat) => chat.agentType);
+  const waitingFor = useChatSelector((chat) => chat.waitingFor);
+  const sessionCost = useChatSelector((chat) => chat.sessionCost);
   // The page's actions render into the header's slot (one top bar); the
   // embed page has no header, so they get their own row there.
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
   useEffect(() => setHeaderSlot(document.getElementById(HEADER_ACTIONS_ID)), []);
-  // Rebuilt as messages stream; unchanged tasks and tool calls keep their
-  // objects (TimelineBuilder), so their memoized components don't render
-  // again.
-  const [builder] = useState(() => new TimelineBuilder());
-  const {timeline} = useMemo(() => builder.build(messages, richMessages), [builder, messages, richMessages]);
   // What each task spent, as text, so a task whose cost didn't change
   // doesn't render again. A task not sent yet has none. Worked out again
   // when the cost or the tasks' prompts change, not as their replies

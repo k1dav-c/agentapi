@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { KeyRound, RefreshCw, TerminalSquare } from "lucide-react";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import { CardStatus, CommandBlock, DecisionCardShell, MarkdownDetail, PrimaryButton, SecondaryButton } from "./decision-card";
 import { getErrorMessage } from "@/lib/error-utils";
 import { loginNote, loginTitle, loginWhere } from "@/lib/login";
@@ -16,7 +16,9 @@ const CHECKING_MS = 5000;
 // says what to run and where, docked above the composer like a request.
 // onRunInTerminal, if set, runs the command in the server's terminal.
 export function LoginCard({ onRunInTerminal }: { onRunInTerminal?: (command: string) => void }) {
-  const { loginRequired: login, agentStarting, retryLogin } = useChat();
+  const login = useChatSelector((chat) => chat.loginRequired);
+  const agentStarting = useChatSelector((chat) => chat.agentStarting);
+  const {retryLogin} = useChatActions();
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);

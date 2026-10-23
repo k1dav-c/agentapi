@@ -1,19 +1,20 @@
 "use client";
 
-import { useMemo } from "react";
 import { Hash } from "lucide-react";
-import {useChat} from "./chat-provider";
+import {useChatSelector} from "./chat-provider";
 import {AgentType} from "@/lib/agents";
-import { computeTokenTotals, formatTokenCount, getStatusMeta } from "@/lib/session-status";
+import {sameValue} from "@/lib/agent-status";
+import { formatTokenCount, getStatusMeta } from "@/lib/session-status";
 
 export function EmbedStatusBar() {
-  const { agentState, loginRequired, agentType, agentapiVersion, richMessages, customTitle } = useChat();
+  const agentState = useChatSelector((chat) => chat.agentState);
+  const loginRequired = useChatSelector((chat) => chat.loginRequired);
+  const agentType = useChatSelector((chat) => chat.agentType);
+  const agentapiVersion = useChatSelector((chat) => chat.agentapiVersion);
+  const customTitle = useChatSelector((chat) => chat.customTitle);
+  const tokenTotals = useChatSelector((chat) => chat.tokenTotals, sameValue);
 
   const status = getStatusMeta(agentState, loginRequired !== null);
-  const tokenTotals = useMemo(
-    () => computeTokenTotals(richMessages),
-    [richMessages],
-  );
   const StatusIcon = status.icon;
   const agentName = customTitle
     ?? (agentType !== "unknown" && AgentType[agentType]

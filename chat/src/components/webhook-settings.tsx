@@ -3,7 +3,7 @@
 import {useCallback, useEffect, useState} from "react";
 import {CircleCheck, CircleX, LoaderCircle, Send} from "lucide-react";
 import {toast} from "sonner";
-import {useChat} from "./chat-provider";
+import {useChatActions} from "./chat-provider";
 import {Button} from "./ui/button";
 import type {WebhookChange, WebhookConfig, WebhookTest} from "@/lib/chat-api";
 import {getErrorMessage} from "@/lib/error-utils";
@@ -48,7 +48,7 @@ function formOf(config: WebhookConfig): Form {
 // that watches many agents (PUT /webhook): set here when AgentAPI started
 // without one. active says the tab shows; it loads then.
 export function WebhookSettings({active}: {active: boolean}) {
-  const {getWebhook, updateWebhook, testWebhook} = useChat();
+  const {getWebhook, updateWebhook, testWebhook} = useChatActions();
   const [config, setConfig] = useState<WebhookConfig | null>(null);
   const [form, setForm] = useState<Form | null>(null);
   const [error, setError] = useState("");

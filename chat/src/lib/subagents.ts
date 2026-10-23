@@ -2,9 +2,8 @@
 // panel: which tool calls started one, and a subagent's run as a task the
 // transcript can show.
 
-import type {RichMessage} from "./conversation";
 import type {SubagentRun} from "./chat-api";
-import {buildTranscript, type TaskSection} from "./task-timeline";
+import {buildTranscript, type TaskSection, type ToolCall} from "./task-timeline";
 
 // The tools that start a subagent: Claude Code's Agent (Task before 2.1),
 // Codex's spawn_agent.
@@ -14,23 +13,18 @@ export function isSubagentTool(name: string | undefined): boolean {
   return name !== undefined && SUBAGENT_TOOLS.has(name);
 }
 
-// How many subagents the agent started in its rich messages, and how many
-// of them still run: their tool call has no result yet, or one that says
-// the subagent runs in the background.
-export function subagentCounts(richMessages: RichMessage[]): {total: number; running: number} {
-  const started = new Set<string>();
-  const results = new Map<string, string | undefined>();
-  for (const message of richMessages) {
-    for (const block of message.content) {
-      if (block.type === "tool_use" && block.tool_use_id && isSubagentTool(block.tool_name)) started.add(block.tool_use_id);
-      if (block.type === "tool_result" && block.tool_use_id) results.set(block.tool_use_id, block.status);
-    }
-  }
+// How many subagents the agent started (its tool calls), and how many of
+// them still run: their tool call has no result yet, or one that says the
+// subagent runs in the background.
+export function subagentCounts(toolCalls: ToolCall[]): {total: number; running: number} {
+  let total = 0;
   let running = 0;
-  for (const id of started) {
-    if (!results.has(id) || results.get(id) === "running") running++;
+  for (const call of toolCalls) {
+    if (!isSubagentTool(call.name)) continue;
+    total++;
+    if (call.resultTimestamp === undefined || call.status === "running") running++;
   }
-  return {total: started.size, running};
+  return {total, running};
 }
 
 // subagentTask turns a subagent's run into a task: its prompt, then its

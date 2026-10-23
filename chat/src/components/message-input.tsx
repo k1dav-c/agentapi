@@ -7,7 +7,7 @@ import {Square, Paperclip, Mic, MicOff, LoaderCircle, MoreHorizontal} from "luci
 import type {SendResult} from "./chat-provider";
 import type {ServerStatus} from "@/lib/agent-status";
 import TextareaAutosize from "react-textarea-autosize";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import {SessionSettings} from "./session-settings";
 import {useSlashCommandRunner} from "./slash-command-runner";
 import {completion, matchingCommands, parseSlashCommand, runsHere} from "@/lib/slash-commands";
@@ -45,17 +45,17 @@ export default function MessageInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isStopping, setIsStopping] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const {
-    uploadFiles,
-    queuedMessages,
-    storageScope,
-    features,
-    waitingFor,
-    dispatch,
-    canStop,
-    stop,
-    limitStop,
-  } = useChat();
+  // Selected one by one: the composer renders again when one of these
+  // changes, not as messages stream (TextareaAutosize measures the text
+  // area again on every render).
+  const queuedMessages = useChatSelector((chat) => chat.queuedMessages);
+  const storageScope = useChatSelector((chat) => chat.storageScope);
+  const features = useChatSelector((chat) => chat.features);
+  const waitingFor = useChatSelector((chat) => chat.waitingFor);
+  const dispatch = useChatSelector((chat) => chat.dispatch);
+  const canStop = useChatSelector((chat) => chat.canStop);
+  const limitStop = useChatSelector((chat) => chat.limitStop);
+  const {uploadFiles, stop} = useChatActions();
   const modes = dispatchModes(dispatch);
   const steerable = canSteer(dispatch);
   const active = turnActive(dispatch);

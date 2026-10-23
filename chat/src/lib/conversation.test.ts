@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {isDraftMessage, lastUserMessage, normalizeRichMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessagePayload} from "./conversation";
+import {commonPrefix, isDraftMessage, lastUserMessage, normalizeRichMessage, richMessageKey, richMessagesSince, withoutSeq, type DraftMessage, type Message, type RichMessage, type RichMessagePayload} from "./conversation";
 
 describe("conversation", () => {
   test("a message without a server ID is a draft", () => {
@@ -60,5 +60,24 @@ describe("normalizeRichMessage", () => {
   test("a message with nothing null keeps its object", () => {
     const message: RichMessagePayload = {message_id: "m1", role: "assistant", timestamp: "", content: [{type: "text", text: "hi"}]};
     expect(Object.is(normalizeRichMessage(message), message)).toBe(true);
+  });
+});
+
+describe("finding what changed", () => {
+  test("the common start of two lists is the items that are the same objects", () => {
+    const a = {id: 1};
+    const b = {id: 2};
+    expect(commonPrefix([a, b], [a, b, {id: 3}])).toBe(2);
+    expect(commonPrefix([a, b], [a, {id: 2}])).toBe(1);
+    expect(commonPrefix([], [a])).toBe(0);
+  });
+
+  test("the current task's rich messages are those from its prompt's time", () => {
+    const at = (id: string, timestamp: string): RichMessage => ({message_id: id, role: "assistant", timestamp, content: []});
+    const messages = [at("old", "2026-10-22T09:59:00Z"), at("a", "2026-10-22T10:00:01Z"), at("bad", "not a time"), at("b", "2026-10-22T10:00:02Z")];
+    expect(richMessagesSince(messages, "2026-10-22T10:00:00Z").map((m) => m.message_id)).toEqual(["a", "b"]);
+    expect(richMessagesSince(messages, "2026-10-22T11:00:00Z")).toEqual([]);
+    // A task not sent yet has none.
+    expect(richMessagesSince(messages, undefined)).toEqual([]);
   });
 });

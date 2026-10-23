@@ -24,7 +24,8 @@ import {
 import {toast} from "sonner";
 import {editableMCPServers} from "@/lib/mcp-sample";
 import {agentDisplayName, updatesOnRestart} from "@/lib/agents";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
+import type {DraftMessage, Message} from "@/lib/conversation";
 import {useFileViewer} from "./file-viewer-context";
 import {Button} from "./ui/button";
 import {
@@ -44,9 +45,14 @@ interface ExplorerProps {
 }
 
 
+// What the Explorer lists while it lists no messages: selecting the
+// messages only then, it doesn't render again as they stream.
+const NO_MESSAGES: (Message | DraftMessage)[] = [];
+
 export function Explorer({onNavigateTask}: ExplorerProps) {
+  const features = useChatSelector((chat) => chat.features);
+  const agentType = useChatSelector((chat) => chat.agentType);
   const {
-    messages,
     deleteMessages,
     getMCP,
     updateMCP,
@@ -55,10 +61,8 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     saveMCPProfile,
     deleteMCPProfile,
     applyMCPProfile,
-    features,
-    agentType,
     downloadSession,
-  } = useChat();
+  } = useChatActions();
   const [downloading, setDownloading] = useState(false);
   const {restartKeepsConversation} = features;
   const fileViewer = useFileViewer();
@@ -105,6 +109,8 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
   // tab that shows is listed, while the Explorer is open: the messages
   // change many times a second while the agent works.
   const shown = open ? activeTab : null;
+  const listed = shown === "index" || shown === "links" || shown === "files";
+  const messages = useChatSelector((chat) => (listed ? chat.messages : NO_MESSAGES));
   const tasks = useMemo(
     () =>
       shown === "index"

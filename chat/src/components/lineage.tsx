@@ -2,16 +2,17 @@
 
 import {useEffect, useMemo, useRef, useState} from "react";
 import {ChevronLeft, ChevronRight, LoaderCircle, Workflow} from "lucide-react";
-import {useChat} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import {Button} from "./ui/button";
 import {Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle} from "./ui/dialog";
 import {TaskGroup} from "./message-list/task-group";
 import type {Subagent, SubagentRun} from "@/lib/chat-api";
 import type {TaskStatus} from "@/lib/task-timeline";
 import {getErrorMessage} from "@/lib/error-utils";
-import {OPEN_LINEAGE_EVENT, subagentCounts, subagentTask} from "@/lib/subagents";
+import {OPEN_LINEAGE_EVENT, subagentTask} from "@/lib/subagents";
 import {cn} from "@/lib/utils";
 import {agentDisplayName} from "@/lib/agents";
+import {sameValue} from "@/lib/agent-status";
 
 // How often an open panel reads the subagents again, and a running
 // subagent's steps: they come from the subagents' logs, which grow as they
@@ -40,8 +41,12 @@ const noop = () => undefined;
 // long, and what it did, step by step, as the transcript shows a task. The
 // header button counts them; a subagent's tool call opens the panel on it.
 export function Lineage() {
-  const {features, richMessages, listSubagents, getSubagent, agentType} = useChat();
-  const counts = useMemo(() => subagentCounts(richMessages), [richMessages]);
+  const subagentsShown = useChatSelector((chat) => chat.features.subagents);
+  const agentType = useChatSelector((chat) => chat.agentType);
+  // Counted as tool calls change (useTranscript): the button renders again
+  // when a subagent starts or ends, not whenever a message streams.
+  const counts = useChatSelector((chat) => chat.subagents, sameValue);
+  const {listSubagents, getSubagent} = useChatActions();
   const [open, setOpen] = useState(false);
   const [subagents, setSubagents] = useState<Subagent[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -118,7 +123,7 @@ export function Lineage() {
 
   const task = useMemo(() => (run && run.subagent.id === selected ? subagentTask(run) : null), [run, selected]);
 
-  if (!features.subagents || counts.total === 0) return null;
+  if (!subagentsShown || counts.total === 0) return null;
   const current = subagents?.find((subagent) => subagent.id === selected);
 
   return (
