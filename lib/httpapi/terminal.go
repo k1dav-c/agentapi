@@ -47,12 +47,12 @@ const noTerminal = "There is no terminal: it needs the native transport, and --t
 
 // subscribeTerminal streams the terminal's output, starting its shell if it
 // doesn't run.
-func (s *Server) subscribeTerminal(ctx context.Context, _ *struct{}, send sse.Sender) {
-	if s.terminal == nil {
+func (t *terminalAPI) subscribeTerminal(ctx context.Context, _ *struct{}, send sse.Sender) {
+	if t.terminal == nil {
 		_ = send.Data(TerminalExitBody{Reason: noTerminal})
 		return
 	}
-	history, output, stop, err := s.terminal.Watch()
+	history, output, stop, err := t.terminal.Watch()
 	if err != nil {
 		_ = send.Data(TerminalExitBody{Reason: err.Error()})
 		return
@@ -67,7 +67,7 @@ func (s *Server) subscribeTerminal(ctx context.Context, _ *struct{}, send sse.Se
 		select {
 		case data, ok := <-output:
 			if !ok {
-				if s.terminal.Running() {
+				if t.terminal.Running() {
 					// This connection fell too far behind: the client
 					// connects again, for the recent output.
 					return
@@ -78,7 +78,7 @@ func (s *Server) subscribeTerminal(ctx context.Context, _ *struct{}, send sse.Se
 			if err := send.Data(TerminalOutputBody{Data: base64.StdEncoding.EncodeToString(data)}); err != nil {
 				return
 			}
-		case <-s.shutdownCtx.Done():
+		case <-t.shutdownCtx.Done():
 			return
 		case <-ctx.Done():
 			return
@@ -86,11 +86,11 @@ func (s *Server) subscribeTerminal(ctx context.Context, _ *struct{}, send sse.Se
 	}
 }
 
-func (s *Server) terminalInput(_ context.Context, input *TerminalInputRequest) (*InterruptResponse, error) {
-	if s.terminal == nil {
+func (t *terminalAPI) terminalInput(_ context.Context, input *TerminalInputRequest) (*InterruptResponse, error) {
+	if t.terminal == nil {
 		return nil, huma.Error404NotFound(noTerminal)
 	}
-	if err := s.terminal.Write([]byte(input.Body.Data)); err != nil {
+	if err := t.terminal.Write([]byte(input.Body.Data)); err != nil {
 		if errors.Is(err, shellterm.ErrNotRunning) {
 			return nil, huma.Error409Conflict("the terminal's shell is not running; GET /terminal starts it")
 		}
@@ -99,17 +99,26 @@ func (s *Server) terminalInput(_ context.Context, input *TerminalInputRequest) (
 	return okResponse(), nil
 }
 
-func (s *Server) terminalResize(_ context.Context, input *TerminalResizeRequest) (*InterruptResponse, error) {
-	if s.terminal == nil {
+func (t *terminalAPI) terminalResize(_ context.Context, input *TerminalResizeRequest) (*InterruptResponse, error) {
+	if t.terminal == nil {
 		return nil, huma.Error404NotFound(noTerminal)
 	}
-	if err := s.terminal.Resize(input.Body.Cols, input.Body.Rows); err != nil {
+	if err := t.terminal.Resize(input.Body.Cols, input.Body.Rows); err != nil {
 		return nil, err
 	}
 	return okResponse(), nil
 }
 
+// terminalAPI serves the shared shell terminal (nil without one) until
+// stop ends.
+type terminalAPI struct {
+	terminal *shellterm.Terminal
+	// shutdownCtx ends the terminal's streams when the server stops.
+	shutdownCtx context.Context
+}
+
 func (s *Server) registerTerminalRoutes() {
+	t := &terminalAPI{terminal: s.terminal, shutdownCtx: s.shutdownCtx}
 	sse.Register(s.api, huma.Operation{
 		OperationID: "subscribeTerminal",
 		Method:      http.MethodGet,
@@ -120,13 +129,13 @@ func (s *Server) registerTerminalRoutes() {
 	}, map[string]any{
 		"output": TerminalOutputBody{},
 		"exit":   TerminalExitBody{},
-	}, s.subscribeTerminal)
-	huma.Post(s.api, "/terminal/input", s.terminalInput, func(o *huma.Operation) {
+	}, t.subscribeTerminal)
+	huma.Post(s.api, "/terminal/input", t.terminalInput, func(o *huma.Operation) {
 		o.Tags = []string{"Terminal"}
 		o.Summary = "Type into the terminal"
 		o.Errors = []int{404, 409}
 	})
-	huma.Post(s.api, "/terminal/resize", s.terminalResize, func(o *huma.Operation) {
+	huma.Post(s.api, "/terminal/resize", t.terminalResize, func(o *huma.Operation) {
 		o.Tags = []string{"Terminal"}
 		o.Summary = "Resize the terminal"
 		o.Description = "Sets the terminal's size in cells; the last client to resize decides it."

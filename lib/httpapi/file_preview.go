@@ -31,16 +31,17 @@ type FilePreviewResponse struct {
 // registerFilePreviewRoutes adds the routes that preview files: an HTML
 // page, and the images of Markdown files and the file viewer.
 func (s *Server) registerFilePreviewRoutes() {
-	huma.Get(s.api, "/files/preview", s.getFilePreview, func(o *huma.Operation) {
+	f := &fileAPI{cwd: s.cwd}
+	huma.Get(s.api, "/files/preview", f.getFilePreview, func(o *huma.Operation) {
 		o.Description = "Returns an HTML file in the agent's working directory as a page that shows by itself, for the chat's preview: the stylesheets, scripts, images, fonts and media it refers to by relative path are inlined. Show it in an iframe sandboxed without allow-same-origin, so its scripts get no access to the chat or the API."
 		o.Errors = []int{400, 403, 404}
 	})
 	// The image itself, so not part of the OpenAPI schema.
-	s.router.Get("/files/image", s.serveFileImage)
+	s.router.Get("/files/image", f.serveFileImage)
 }
 
-func (s *Server) getFilePreview(_ context.Context, input *FilePathQuery) (*FilePreviewResponse, error) {
-	rel, err := s.workspacePath(input.Path)
+func (f *fileAPI) getFilePreview(_ context.Context, input *FilePathQuery) (*FilePreviewResponse, error) {
+	rel, err := f.workspacePath(input.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +50,7 @@ func (s *Server) getFilePreview(_ context.Context, input *FilePathQuery) (*FileP
 	}
 	// The root keeps the page and what it refers to inside the working
 	// directory, symlinks included.
-	root, err := os.OpenRoot(s.cwd)
+	root, err := os.OpenRoot(f.cwd)
 	if err != nil {
 		return nil, fmt.Errorf("open the agent's working directory: %w", err)
 	}
@@ -82,14 +83,14 @@ func (s *Server) getFilePreview(_ context.Context, input *FilePathQuery) (*FileP
 // browser is told not to sniff or run: raster images by their content, and
 // SVG (which can carry script) only in a sandbox where nothing runs or
 // loads.
-func (s *Server) serveFileImage(w http.ResponseWriter, r *http.Request) {
+func (f *fileAPI) serveFileImage(w http.ResponseWriter, r *http.Request) {
 	given := r.URL.Query().Get("path")
-	rel, err := s.workspacePath(given)
+	rel, err := f.workspacePath(given)
 	if err != nil {
 		writeStatusError(w, err)
 		return
 	}
-	root, err := os.OpenRoot(s.cwd)
+	root, err := os.OpenRoot(f.cwd)
 	if err != nil {
 		http.Error(w, "the agent's working directory can't be opened", http.StatusInternalServerError)
 		return
@@ -106,19 +107,19 @@ func (s *Server) serveFileImage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, given+" is not a file", http.StatusBadRequest)
 		return
 	}
-	f, err := root.Open(rel)
+	file, err := root.Open(rel)
 	if err != nil {
 		writeStatusError(w, fileError(given, err))
 		return
 	}
-	defer func() { _ = f.Close() }()
+	defer func() { _ = file.Close() }()
 
 	contentType := ""
 	if strings.EqualFold(path.Ext(rel), ".svg") {
 		contentType = "image/svg+xml"
 	} else {
 		head := make([]byte, 512)
-		n, err := io.ReadFull(f, head)
+		n, err := io.ReadFull(file, head)
 		if err != nil && n == 0 && !errors.Is(err, io.EOF) {
 			http.Error(w, "failed to read the file", http.StatusInternalServerError)
 			return
@@ -126,7 +127,7 @@ func (s *Server) serveFileImage(w http.ResponseWriter, r *http.Request) {
 		if sniffed := http.DetectContentType(head[:n]); previewableImageTypes[sniffed] || sniffed == "image/x-icon" {
 			contentType = sniffed
 		}
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
 			http.Error(w, "failed to read the file", http.StatusInternalServerError)
 			return
 		}
@@ -142,7 +143,7 @@ func (s *Server) serveFileImage(w http.ResponseWriter, r *http.Request) {
 	// Files change as the agent works: the browser checks every time
 	// (Last-Modified), and keeps an image that didn't change.
 	header.Set("Cache-Control", "private, no-cache")
-	http.ServeContent(w, r, "", info.ModTime(), f)
+	http.ServeContent(w, r, "", info.ModTime(), file)
 }
 
 // writeStatusError writes err as plain text with the status a huma error

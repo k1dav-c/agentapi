@@ -219,7 +219,7 @@ func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
-	server := &Server{webhook: dispatcher}
+	server := &webhookAPI{webhook: dispatcher}
 
 	// Update URL, timeout, and max attempts.
 	request := &WebhookConfigRequest{}

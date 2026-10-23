@@ -39,7 +39,7 @@ func TestFileContent(t *testing.T) {
 	outside := filepath.Join(t.TempDir(), "secret.txt")
 	writeFile(t, outside, "secret")
 	require.NoError(t, os.Symlink(outside, filepath.Join(dir, "link.txt")))
-	s := &Server{cwd: dir}
+	s := &fileAPI{cwd: dir}
 	get := func(path string) (*FileContentResponse, error) {
 		return s.getFileContent(t.Context(), &FilePathQuery{Path: path})
 	}
@@ -106,7 +106,7 @@ func TestFileDiff(t *testing.T) {
 	t.Run("not in a repository", func(t *testing.T) {
 		dir := t.TempDir()
 		writeFile(t, filepath.Join(dir, "a.txt"), "x\n")
-		resp, err := (&Server{cwd: dir}).getFileDiff(t.Context(), &FilePathQuery{Path: "a.txt"})
+		resp, err := (&fileAPI{cwd: dir}).getFileDiff(t.Context(), &FilePathQuery{Path: "a.txt"})
 		require.NoError(t, err)
 		assert.Equal(t, FileDiffNotInRepo, resp.Body.Status)
 		assert.Empty(t, resp.Body.Diff)
@@ -127,7 +127,7 @@ func TestFileDiff(t *testing.T) {
 	require.NoError(t, os.Remove(filepath.Join(repo, "app", "gone.txt")))
 	require.NoError(t, os.RemoveAll(filepath.Join(repo, "app", "dir")))
 	// The working directory is a subdirectory of the repository.
-	s := &Server{cwd: filepath.Join(repo, "app")}
+	s := &fileAPI{cwd: filepath.Join(repo, "app")}
 
 	for _, tc := range []struct {
 		path     string
@@ -157,7 +157,7 @@ func TestFileDiff(t *testing.T) {
 		dir := t.TempDir()
 		git(t, dir, "init", "-q")
 		writeFile(t, filepath.Join(dir, "a.txt"), "first\n")
-		resp, err := (&Server{cwd: dir}).getFileDiff(t.Context(), &FilePathQuery{Path: "a.txt"})
+		resp, err := (&fileAPI{cwd: dir}).getFileDiff(t.Context(), &FilePathQuery{Path: "a.txt"})
 		require.NoError(t, err)
 		assert.Equal(t, FileDiffUntracked, resp.Body.Status)
 		assert.Contains(t, resp.Body.Diff, "+first")
@@ -186,7 +186,7 @@ func TestFileDiffStaysInTheWorkingDirectory(t *testing.T) {
 	work := t.TempDir()
 	git(t, work, "init", "-q")
 	require.NoError(t, os.Symlink(other, filepath.Join(work, "link")))
-	s := &Server{cwd: work}
+	s := &fileAPI{cwd: work}
 
 	_, err := s.getFileDiff(t.Context(), &FilePathQuery{Path: "link/secret.env"})
 	require.Error(t, err)
@@ -214,7 +214,7 @@ func TestFileDiffRunsNoRepositoryPrograms(t *testing.T) {
 	git(t, repo, "config", "filter.evil.clean", "touch "+marker+"; cat")
 	writeFile(t, filepath.Join(repo, "a.txt"), "two\n")
 
-	resp, err := (&Server{cwd: repo}).getFileDiff(t.Context(), &FilePathQuery{Path: "a.txt"})
+	resp, err := (&fileAPI{cwd: repo}).getFileDiff(t.Context(), &FilePathQuery{Path: "a.txt"})
 	require.NoError(t, err)
 	assert.Equal(t, FileDiffModified, resp.Body.Status)
 	assert.Contains(t, resp.Body.Diff, "+two")
@@ -229,7 +229,7 @@ func TestFileDiffOfALargeFile(t *testing.T) {
 	writeFile(t, filepath.Join(repo, "big.txt"), large)
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-q", "-m", "init")
-	s := &Server{cwd: repo}
+	s := &fileAPI{cwd: repo}
 
 	// Too large to compare by content, yet unchanged.
 	resp, err := s.getFileDiff(t.Context(), &FilePathQuery{Path: "big.txt"})

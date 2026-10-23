@@ -23,7 +23,7 @@ func TestFindFile(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "app", ".github", "workflows", "ci.yml"), "on: push\n")
 	old := time.Now().Add(-time.Hour)
 	require.NoError(t, os.Chtimes(filepath.Join(dir, "law-mcp", "docs", "design.md"), old, old))
-	s := &Server{cwd: dir}
+	s := &fileAPI{cwd: dir}
 	find := func(path string) []FileMatch {
 		t.Helper()
 		resp, err := s.findFile(t.Context(), &FilePathQuery{Path: path})

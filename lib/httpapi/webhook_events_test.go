@@ -443,7 +443,7 @@ func TestWebhookTestEvent(t *testing.T) {
 	}))
 	defer server.Close()
 	d := testDispatcher(t, WebhookConfig{URL: server.URL, Events: []string{"task.*"}}, quartz.NewReal())
-	s := &Server{webhook: d}
+	s := &webhookAPI{webhook: d}
 	response, err := s.testWebhook(t.Context(), nil)
 	require.NoError(t, err)
 	assert.False(t, response.Body.OK)

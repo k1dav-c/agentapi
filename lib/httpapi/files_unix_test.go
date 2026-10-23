@@ -18,7 +18,7 @@ func TestFileContentOfAFIFO(t *testing.T) {
 	require.NoError(t, syscall.Mkfifo(filepath.Join(dir, "pipe"), 0o600))
 	done := make(chan error, 1)
 	go func() {
-		_, err := (&Server{cwd: dir}).getFileContent(t.Context(), &FilePathQuery{Path: "pipe"})
+		_, err := (&fileAPI{cwd: dir}).getFileContent(t.Context(), &FilePathQuery{Path: "pipe"})
 		done <- err
 	}()
 	select {

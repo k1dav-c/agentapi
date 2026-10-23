@@ -625,8 +625,8 @@ type WebhookConfigRequest struct {
 	}
 }
 
-func (s *Server) getWebhookConfig(_ context.Context, _ *struct{}) (*WebhookConfigResponse, error) {
-	config := s.webhook.configSnapshot()
+func (w *webhookAPI) getWebhookConfig(_ context.Context, _ *struct{}) (*WebhookConfigResponse, error) {
+	config := w.webhook.configSnapshot()
 	response := &WebhookConfigResponse{}
 	response.Body.URL = config.URL
 	response.Body.TimeoutSeconds = int(config.Timeout / time.Second)
@@ -635,13 +635,13 @@ func (s *Server) getWebhookConfig(_ context.Context, _ *struct{}) (*WebhookConfi
 	response.Body.Events = config.Events
 	response.Body.SecretSet = config.Secret != ""
 	response.Body.HeartbeatSeconds = max(0, int(config.Heartbeat/time.Second))
-	response.Body.InstanceID = s.webhook.instanceSnapshot().ID
+	response.Body.InstanceID = w.webhook.instanceSnapshot().ID
 	response.Body.PublicURL = config.PublicURL
 	return response, nil
 }
 
-func (s *Server) updateWebhookConfig(_ context.Context, request *WebhookConfigRequest) (*WebhookConfigResponse, error) {
-	config := s.webhook.configSnapshot()
+func (w *webhookAPI) updateWebhookConfig(_ context.Context, request *WebhookConfigRequest) (*WebhookConfigResponse, error) {
+	config := w.webhook.configSnapshot()
 	config.URL = request.Body.URL
 	config.Timeout = time.Duration(request.Body.TimeoutSeconds) * time.Second
 	config.MaxAttempts = request.Body.MaxAttempts
@@ -666,13 +666,13 @@ func (s *Server) updateWebhookConfig(_ context.Context, request *WebhookConfigRe
 	if request.Body.PublicURL != nil {
 		config.PublicURL = *request.Body.PublicURL
 	}
-	if err := s.webhook.updateConfig(config); err != nil {
+	if err := w.webhook.updateConfig(config); err != nil {
 		return nil, huma.Error400BadRequest(err.Error())
 	}
-	if s.stateDB != nil {
-		s.stateDB.SetMeta(statedb.MetaWebhook, s.webhook.stored())
+	if w.stateDB != nil {
+		w.stateDB.SetMeta(statedb.MetaWebhook, w.webhook.stored())
 	}
-	return s.getWebhookConfig(context.Background(), nil)
+	return w.getWebhookConfig(context.Background(), nil)
 }
 
 // WebhookTestResponse is the outcome of POST /webhook/test.
@@ -706,9 +706,9 @@ func (d *webhookDispatcher) test(ctx context.Context) (status string, err error)
 	return d.send(ctx, config, &http.Client{Timeout: config.Timeout}, event, body)
 }
 
-func (s *Server) testWebhook(ctx context.Context, _ *struct{}) (*WebhookTestResponse, error) {
+func (w *webhookAPI) testWebhook(ctx context.Context, _ *struct{}) (*WebhookTestResponse, error) {
 	response := &WebhookTestResponse{}
-	status, err := s.webhook.test(ctx)
+	status, err := w.webhook.test(ctx)
 	response.Body.OK = err == nil
 	response.Body.Status = status
 	if err != nil {
@@ -717,19 +717,27 @@ func (s *Server) testWebhook(ctx context.Context, _ *struct{}) (*WebhookTestResp
 	return response, nil
 }
 
+// webhookAPI reads and changes the webhook, and keeps a change in the
+// state database (nil without one).
+type webhookAPI struct {
+	webhook *webhookDispatcher
+	stateDB *statedb.DB
+}
+
 func (s *Server) registerWebhookRoutes() {
-	huma.Get(s.api, "/webhook", s.getWebhookConfig, func(o *huma.Operation) {
+	w := &webhookAPI{webhook: s.webhook, stateDB: s.stateDB}
+	huma.Get(s.api, "/webhook", w.getWebhookConfig, func(o *huma.Operation) {
 		o.Tags = []string{"Webhook"}
 		o.Summary = "Get webhook configuration"
 		o.Description = "Returns the mutable webhook configuration. The secret is never returned, only whether one is set."
 	})
-	huma.Put(s.api, "/webhook", s.updateWebhookConfig, func(o *huma.Operation) {
+	huma.Put(s.api, "/webhook", w.updateWebhookConfig, func(o *huma.Operation) {
 		o.Tags = []string{"Webhook"}
 		o.Summary = "Update webhook configuration"
 		o.Description = "Updates webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent."
 		o.Errors = []int{400}
 	})
-	huma.Post(s.api, "/webhook/test", s.testWebhook, func(o *huma.Operation) {
+	huma.Post(s.api, "/webhook/test", w.testWebhook, func(o *huma.Operation) {
 		o.Tags = []string{"Webhook"}
 		o.Summary = "Send a test webhook event"
 		o.Description = "Sends a webhook.test event to the webhook URL once, signed like every event, and reports the receiver's answer."
