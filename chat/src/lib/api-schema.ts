@@ -83,6 +83,8 @@ export interface paths {
          * Subscribe to events
          * @description The events are sent as Server-Sent Events (SSE). Initially, the endpoint returns a list of events needed to reconstruct the current state of the conversation and the agent's status. After that, it only returns events that have occurred since the last event was sent.
          *
+         *     The server ends the stream when the client falls too far behind, and when the conversation changes in a way updates can't express (a message was taken back), which gives it a new epoch. Reconnect to get the state again: with sync, the old epoch gets the full state.
+         *
          *     Note: When an agent is running, the last message in the conversation history is updated frequently, and the endpoint sends a new message update event each time.
          */
         get: operations["subscribeEvents"];
@@ -1975,7 +1977,7 @@ export interface components {
             updated_at: string;
         };
         SessionSyncBody: {
-            /** @description Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded. */
+            /** @description Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded. A rebuild (a message was taken back) ends the stream: reconnect with the old epoch to get the full state. */
             epoch: string;
             /** @description True when the replay that follows is the full state rather than the changes after ?since=. */
             full: boolean;

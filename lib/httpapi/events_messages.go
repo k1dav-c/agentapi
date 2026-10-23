@@ -11,8 +11,9 @@ import (
 // EmitMessages publishes the conversation's messages, which are ordered by
 // increasing ID. Changed and new messages are sent as updates. Messages can
 // also be removed (the native transport takes back a message the agent
-// refused), which updates can't express: clients then get the full state
-// under a new epoch. A message inserted between existing ones is not
+// refused), which updates can't express: the conversation gets a new epoch
+// and the subscriptions end, so that clients load the full state again
+// (see resyncLocked). A message inserted between existing ones is not
 // supported.
 func (e *EventEmitter) EmitMessages(newMessages []st.ConversationMessage) {
 	e.mu.Lock()
@@ -59,21 +60,30 @@ func (e *EventEmitter) EmitMessages(newMessages []st.ConversationMessage) {
 	}
 }
 
-// resyncLocked starts a new epoch and sends connected clients the full
-// state, for a change they can't apply as an update. Clients that reconnect
-// with the old epoch get the full state too. Caller holds e.mu.
+// resyncLocked starts a new epoch for a change clients can't apply as an
+// update, and ends the subscriptions that get the conversation's changes.
+// Their clients reconnect with the old epoch and get the full state in the
+// replay of a new subscription, whose SSE ids are right. Streaming the
+// state to them instead gave every event its own id: a client takes the
+// first one as the end of the replay, and a subscription whose buffer
+// filled halfway through was closed with the rest of the state unsent,
+// which the client then never asked for again. Caller holds e.mu.
 func (e *EventEmitter) resyncLocked() {
 	e.epoch = newEpoch()
 	if e.persister != nil {
 		e.persister.SetSeq(e.epoch, e.seq)
 	}
-	for _, event := range e.currentStateAsEvents(0, "") {
-		// Status and screen didn't change, and errors would be shown again.
-		if event.Type == EventTypeStatusChange || event.Type == EventTypeScreenUpdate || event.Type == EventTypeError {
-			continue
+	for id, sub := range e.chans {
+		if wantsConversation(sub.wants) {
+			e.unsubscribeInner(id)
 		}
-		e.notifyChannels(event.Type, event.Payload)
 	}
+}
+
+// wantsConversation reports whether a subscription that gets the events
+// wants accepts gets changes of the conversation; a screen stream doesn't.
+func wantsConversation(wants func(EventType) bool) bool {
+	return wants(EventTypeMessageUpdate) || wants(EventTypeRichMessageUpdate) || wants(EventTypeRequestUpdate)
 }
 
 // EmitRichMessage emits a rich structured message from the JSONL watcher.

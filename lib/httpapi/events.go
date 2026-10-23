@@ -80,11 +80,12 @@ type MessageUpdateBody struct {
 // SessionSyncBody is the first event on /events. It tells the client whether
 // the replay that follows is the full state (discard anything cached) or
 // only the changes after the ?since= sequence it asked for. It is sent
-// again, with a new epoch, when the conversation is reset or changes in a
-// way updates can't express (a message was removed); the full state
-// follows it then.
+// again, with a new epoch, when the conversation is reset, which leaves it
+// empty. When the conversation changes in a way updates can't express (a
+// message was removed), it gets a new epoch and the stream ends instead:
+// the client reconnects with its old epoch and gets the full state.
 type SessionSyncBody struct {
-	Epoch string `json:"epoch" doc:"Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded."`
+	Epoch string `json:"epoch" doc:"Identifies this conversation state. It changes when the conversation is reset or rebuilt, and when the server restarts (with --state-db, only after an unclean exit); a cache from another epoch must be discarded. A rebuild (a message was taken back) ends the stream: reconnect with the old epoch to get the full state."`
 	Full  bool   `json:"full" doc:"True when the replay that follows is the full state rather than the changes after ?since=."`
 	Seq   uint64 `json:"seq" doc:"Highest sequence number in the replay that follows (the ?since= value when it holds nothing new). The replay is grouped by kind, not in seq order: it is complete at its last event, the first to carry an SSE id, and only then can a client resume from this seq."`
 }
@@ -134,6 +135,10 @@ type ErrorBody struct {
 	Message string        `json:"message" doc:"Error message"`
 	Level   st.ErrorLevel `json:"level" doc:"Error level"`
 	Time    time.Time     `json:"time" doc:"Timestamp when the error occurred"`
+	// number counts the errors the emitter stored, from 1. A subscription
+	// replays the stored errors, so the webhook observer, which subscribes
+	// again when its subscription ends, tells the ones it sent by it.
+	number uint64
 }
 
 // RichMessageUpdateBody is the SSE payload for rich message updates.
@@ -206,6 +211,7 @@ type EventEmitter struct {
 	pendingPrompt  string
 	promptTimer    *quartz.Timer
 	errors         []ErrorBody
+	errorCount     uint64 // the errors emitted, also before a reset
 	clock          quartz.Clock
 	onStatusChange func(previous, current AgentStatus)
 	// persister, if set, stores every change of the conversation state.

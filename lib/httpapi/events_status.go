@@ -150,10 +150,12 @@ func (e *EventEmitter) EmitError(message string, level st.ErrorLevel) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	e.errorCount++
 	errorBody := ErrorBody{
 		Message: message,
 		Level:   level,
 		Time:    e.clock.Now(),
+		number:  e.errorCount,
 	}
 
 	// Store the error so new subscribers can receive recent errors.

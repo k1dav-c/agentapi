@@ -1,6 +1,7 @@
 package httpapi_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,6 +11,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -411,18 +414,96 @@ func TestNative_Restart(t *testing.T) {
 }
 
 // A message the agent refuses is taken back. Clients can't apply that as an
-// update, so they reload the conversation under a new epoch.
+// update: the conversation gets a new epoch and the event streams end, so
+// that the clients reconnect and load it again.
 func TestNative_RefusedMessageIsTakenBack(t *testing.T) {
 	n := newNativeServer(t, func(a *nativetest.Adapter) { a.TurnErr = errors.New("the agent refused the turn") })
+	n.factory.Last().Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "Hi"}}})
 	epoch := n.epoch()
+	events := openEvents(t, n.url+"/events?sync=1")
+	require.Equal(t, "session_sync", nextEvent(t, events).event)
 	code, _ := n.send("hello", "")
 	assert.Equal(t, http.StatusInternalServerError, code)
 	var msgs struct {
 		Messages []httpapi.Message `json:"messages"`
 	}
 	n.do(http.MethodGet, "/messages", nil, &msgs)
-	assert.Empty(t, msgs.Messages)
+	require.Len(t, msgs.Messages, 1)
+	assert.Equal(t, "Hi", msgs.Messages[0].Content)
 	assert.NotEqual(t, epoch, n.epoch())
+	for range events {
+		// The stream ends.
+	}
+
+	// The client reconnects with the epoch it had and gets the full state,
+	// the agent's message and its rich message: only the replay's last
+	// event carries an id, the replay's seq.
+	events = openEvents(t, n.url+"/events?sync=1&since=3&epoch="+epoch)
+	sync := nextEvent(t, events)
+	require.Equal(t, "session_sync", sync.event)
+	var body httpapi.SessionSyncBody
+	require.NoError(t, json.Unmarshal([]byte(sync.data), &body))
+	assert.True(t, body.Full)
+	assert.Equal(t, n.epoch(), body.Epoch)
+	var replay []string
+	for event := nextEvent(t, events); ; event = nextEvent(t, events) {
+		replay = append(replay, event.event)
+		if event.id != "" {
+			assert.Equal(t, strconv.FormatUint(body.Seq, 10), event.id)
+			break
+		}
+	}
+	assert.Equal(t, []string{"message_update", "status_change", "rich_message_update"}, replay)
+}
+
+// sseEvent is an event read from an event stream.
+type sseEvent struct{ event, id, data string }
+
+// openEvents connects to the event stream at url and delivers its events
+// until the server ends the stream, which closes the channel.
+func openEvents(t *testing.T, url string) <-chan sseEvent {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	events := make(chan sseEvent, 100)
+	go func() {
+		defer close(events)
+		defer func() { _ = resp.Body.Close() }()
+		scanner := bufio.NewScanner(resp.Body)
+		var event sseEvent
+		for scanner.Scan() {
+			line := scanner.Text()
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				event.event = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "id: "):
+				event.id = strings.TrimPrefix(line, "id: ")
+			case strings.HasPrefix(line, "data: "):
+				event.data = strings.TrimPrefix(line, "data: ")
+			case line == "" && event.data != "":
+				events <- event
+				event = sseEvent{}
+			}
+		}
+	}()
+	return events
+}
+
+// nextEvent returns the next event of a stream openEvents opened.
+func nextEvent(t *testing.T, events <-chan sseEvent) sseEvent {
+	t.Helper()
+	select {
+	case event, ok := <-events:
+		require.True(t, ok, "the stream ended")
+		return event
+	case <-time.After(5 * time.Second):
+		t.Fatal("no event")
+		return sseEvent{}
+	}
 }
 
 func TestPTY_DispatchModesRejected(t *testing.T) {

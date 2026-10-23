@@ -143,7 +143,7 @@ func (s *Server) registerEventRoutes() {
 		Method:      http.MethodGet,
 		Path:        "/events",
 		Summary:     "Subscribe to events",
-		Description: "The events are sent as Server-Sent Events (SSE). Initially, the endpoint returns a list of events needed to reconstruct the current state of the conversation and the agent's status. After that, it only returns events that have occurred since the last event was sent.\n\nNote: When an agent is running, the last message in the conversation history is updated frequently, and the endpoint sends a new message update event each time.",
+		Description: "The events are sent as Server-Sent Events (SSE). Initially, the endpoint returns a list of events needed to reconstruct the current state of the conversation and the agent's status. After that, it only returns events that have occurred since the last event was sent.\n\nThe server ends the stream when the client falls too far behind, and when the conversation changes in a way updates can't express (a message was taken back), which gives it a new epoch. Reconnect to get the state again: with sync, the old epoch gets the full state.\n\nNote: When an agent is running, the last message in the conversation history is updated frequently, and the endpoint sends a new message update event each time.",
 		Middlewares: []func(huma.Context, func(huma.Context)){sseMiddleware},
 	}, map[string]any{
 		// Mapping of event type name to Go struct for that event.

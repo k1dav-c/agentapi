@@ -450,6 +450,38 @@ func drain(ch <-chan Event) []Event {
 	}
 }
 
+// drainClosed returns the events waiting in ch, and whether it was closed.
+func drainClosed(ch <-chan Event) ([]Event, bool) {
+	var events []Event
+	for {
+		select {
+		case event, ok := <-ch:
+			if !ok {
+				return events, true
+			}
+			events = append(events, event)
+		default:
+			return events, false
+		}
+	}
+}
+
+// replayed names the changes in a replay.
+func replayed(events []Event) []string {
+	var names []string
+	for _, event := range events {
+		switch p := event.Payload.(type) {
+		case MessageUpdateBody:
+			names = append(names, fmt.Sprintf("message %d", p.Id))
+		case RichMessageUpdateBody:
+			names = append(names, "rich "+p.MessageID)
+		case RequestUpdateBody:
+			names = append(names, "request "+p.ID)
+		}
+	}
+	return names
+}
+
 func TestEventEmitterRemovedMessageResyncs(t *testing.T) {
 	persister := newRecordingPersister()
 	emitter := NewEventEmitter(WithSubscriptionBufSize(20), WithPersister(persister))
@@ -465,49 +497,73 @@ func TestEventEmitterRemovedMessageResyncs(t *testing.T) {
 	_, _, state := emitter.Subscribe()
 	cached := state[0].Payload.(SessionSyncBody)
 	_, ch, _ := emitter.Subscribe()
+	_, screen, _ := emitter.SubscribeTo(ScreenEvents, 0, "")
 
 	// The agent refused the last message, and it was taken back. Updates
-	// can't say so: connected clients get the full state under a new epoch.
+	// can't say so: the conversation gets a new epoch, and the
+	// subscriptions to it end, so that their clients load it again.
 	emitter.EmitMessages(msgs[:2])
-	events := drain(ch)
-	require.NotEmpty(t, events)
-	sync, ok := events[0].Payload.(SessionSyncBody)
-	require.True(t, ok, "the full state starts with a session_sync")
-	assert.True(t, sync.Full)
-	assert.NotEqual(t, cached.Epoch, sync.Epoch)
-	assert.Equal(t, uint64(5), sync.Seq, "the replay ends with the newest change")
-	var replayed []string
-	for _, event := range events[1:] {
-		switch p := event.Payload.(type) {
-		case MessageUpdateBody:
-			replayed = append(replayed, fmt.Sprintf("message %d", p.Id))
-		case RichMessageUpdateBody:
-			replayed = append(replayed, "rich "+p.MessageID)
-		case RequestUpdateBody:
-			replayed = append(replayed, "request "+p.ID)
-		default:
-			t.Errorf("unexpected %s event in the replay", event.Type)
-		}
-	}
-	assert.Equal(t, []string{"message 0", "message 1", "rich m1", "request r1"}, replayed)
+	events, closed := drainClosed(ch)
+	assert.True(t, closed, "the subscription ended")
+	assert.Empty(t, events, "nothing is streamed")
+	_, closed = drainClosed(screen)
+	assert.False(t, closed, "the screen stream goes on")
 	assert.Equal(t, []int{2}, persister.truncated)
-	assert.Equal(t, sync.Epoch, persister.epoch, "the new epoch is stored")
+	assert.NotEqual(t, cached.Epoch, emitter.Epoch())
+	assert.Equal(t, emitter.Epoch(), persister.epoch, "the new epoch is stored")
 
-	// A client that cached the message and reconnects gets the full state.
-	_, _, state = emitter.SubscribeSince(cached.Seq, cached.Epoch)
-	assert.True(t, state[0].Payload.(SessionSyncBody).Full)
+	// A client that cached the message reconnects with its epoch and gets
+	// the full state.
+	_, ch, state = emitter.SubscribeSince(cached.Seq, cached.Epoch)
+	sync := state[0].Payload.(SessionSyncBody)
+	assert.True(t, sync.Full)
+	assert.Equal(t, emitter.Epoch(), sync.Epoch)
+	assert.Equal(t, uint64(5), sync.Seq, "the replay ends with the newest change")
+	assert.Equal(t, []string{"message 0", "message 1", "rich m1", "request r1"}, replayed(state))
 
 	// A message removed from the middle is gone from the stored rows too,
 	// and the ones after it are stored again.
 	msgs = append(msgs[:2:2], st.ConversationMessage{Id: 3, Role: st.ConversationRoleAgent, Message: "three", Time: now})
 	emitter.EmitMessages(msgs)
-	require.Len(t, drain(ch), 1, "an added message is an update")
+	events, closed = drainClosed(ch)
+	require.Len(t, events, 1, "an added message is an update")
+	assert.False(t, closed)
 	emitter.EmitMessages([]st.ConversationMessage{msgs[0], msgs[2]})
 	assert.Equal(t, []int{2, 1}, persister.truncated)
 	assert.Equal(t, map[int]st.ConversationMessage{0: msgs[0], 3: msgs[2]}, persister.messages)
-	events = drain(ch)
-	require.NotEmpty(t, events)
-	assert.True(t, events[0].Payload.(SessionSyncBody).Full)
+	_, closed = drainClosed(ch)
+	assert.True(t, closed)
+}
+
+// A resync used to stream the full state to the connected clients, each
+// event with its SSE id. The chat takes the first id as the end of the
+// replay, and a subscription whose buffer filled halfway was closed with
+// the rest unsent, which the client, resuming after that id, never got.
+// The client that reconnects now gets all of it.
+func TestEventEmitterResyncLosesNothing(t *testing.T) {
+	emitter := NewEventEmitter(WithSubscriptionBufSize(8))
+	var want []string
+	var msgs []st.ConversationMessage
+	for i := range 6 {
+		msgs = append(msgs, st.ConversationMessage{Id: i, Role: st.ConversationRoleUser, Message: fmt.Sprint("m", i), Time: time.Unix(0, 0)})
+		if i < 5 {
+			want = append(want, fmt.Sprintf("message %d", i))
+		}
+	}
+	for i := range 5 {
+		emitter.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: fmt.Sprint("r", i), Role: "assistant"})
+		want = append(want, fmt.Sprintf("rich r%d", i))
+	}
+	emitter.EmitMessages(msgs)
+	_, ch, state := emitter.SubscribeSince(0, "")
+	synced := state[0].Payload.(SessionSyncBody)
+
+	emitter.EmitMessages(msgs[:5])
+	_, closed := drainClosed(ch)
+	require.True(t, closed)
+	_, _, state = emitter.SubscribeSince(synced.Seq, synced.Epoch)
+	assert.True(t, state[0].Payload.(SessionSyncBody).Full)
+	assert.Equal(t, want, replayed(state))
 }
 
 func TestEventEmitterRequests(t *testing.T) {

@@ -242,6 +242,52 @@ func TestWebhookObserverHistory(t *testing.T) {
 	assert.Equal(t, "New", events[0].Data.(WebhookMessage).Content)
 }
 
+// A subscription the emitter ends, here because a message was taken back,
+// is taken up again. The new one replays what was sent already, which isn't
+// sent again, and what changed meanwhile goes out.
+func TestWebhookObserverResubscribes(t *testing.T) {
+	t.Parallel()
+	clock := quartz.NewMock(t)
+	d := testDispatcher(t, WebhookConfig{Events: []string{"message.created", "task.started", "agent.error"}}, clock)
+	emitter := NewEventEmitter(WithClock(clock))
+	emitter.EmitStatus(st.ConversationStatusStable)
+	o := newWebhookObserver(d, emitter, clock.Now())
+	o.clock = clock
+	subscriptions := func() int {
+		emitter.mu.Lock()
+		defer emitter.mu.Unlock()
+		return emitter.chanIdx
+	}
+	go o.run(t.Context())
+	require.Eventually(t, func() bool { return subscriptions() == 1 }, 5*time.Second, 10*time.Millisecond)
+
+	now := clock.Now()
+	msgs := []st.ConversationMessage{{Id: 0, Role: st.ConversationRoleUser, Message: "Fix the bug", Time: now}}
+	emitter.EmitMessages(msgs)
+	emitter.EmitError("the agent warned", st.ErrorLevelWarning)
+	emitter.EmitMessages(append(msgs, st.ConversationMessage{Id: 1, Role: st.ConversationRoleUser, Message: "Refused", Time: now}))
+	var events []WebhookEvent
+	require.Eventually(t, func() bool {
+		events = append(events, queued(d)...)
+		return len(events) >= 4
+	}, 5*time.Second, 10*time.Millisecond)
+
+	emitter.EmitMessages(msgs)
+	require.Eventually(t, func() bool { return subscriptions() == 2 }, 5*time.Second, 10*time.Millisecond, "subscribed again")
+	emitter.EmitError("the agent failed", st.ErrorLevelError)
+	require.Eventually(t, func() bool {
+		events = append(events, queued(d)...)
+		return len(events) >= 5
+	}, 5*time.Second, 10*time.Millisecond)
+	assert.Equal(t, []string{
+		webhookEventMessageCreated, webhookEventTaskStarted, webhookEventAgentError, webhookEventMessageCreated,
+		webhookEventAgentError,
+	}, eventTypes(events))
+	assert.Equal(t, "the agent failed", events[4].Data.(ErrorBody).Message)
+	time.Sleep(50 * time.Millisecond)
+	assert.Empty(t, queued(d), "nothing was sent twice")
+}
+
 func TestWebhookSignature(t *testing.T) {
 	t.Parallel()
 	var header http.Header

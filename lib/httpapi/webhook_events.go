@@ -204,7 +204,10 @@ type webhookObserver struct {
 	requests map[string]native.RequestStatus
 	// prompts counts the terminal dialogs, for their IDs.
 	prompts int
-	task    *WebhookTask
+	// lastError is the number of the latest error taken in; a new
+	// subscription replays the ones before it.
+	lastError uint64
+	task      *WebhookTask
 	// taskRan: the agent worked on the task, so its being stable again
 	// ends it.
 	taskRan bool
@@ -232,8 +235,10 @@ func webhookObservedEvents(t EventType) bool {
 }
 
 // run reads the conversation's events until ctx ends. The state at the
-// start is history; a subscription the emitter dropped (its buffer filled)
-// is taken up again, and what changed meanwhile is sent then.
+// start is history; a subscription the emitter ended (its buffer filled, or
+// the conversation was rebuilt) is taken up again, and what changed
+// meanwhile is sent then: the replay holds what was sent already too,
+// which the handlers recognize.
 func (o *webhookObserver) run(ctx context.Context) {
 	first := true
 	for ctx.Err() == nil {
@@ -483,6 +488,11 @@ func (o *webhookObserver) requestUpdated(state native.RequestState, quiet bool) 
 }
 
 func (o *webhookObserver) agentError(err ErrorBody, quiet bool) {
+	if err.number != 0 && err.number <= o.lastError {
+		// Replayed by a new subscription.
+		return
+	}
+	o.lastError = max(o.lastError, err.number)
 	if quiet || err.Time.Before(o.since) {
 		return
 	}
