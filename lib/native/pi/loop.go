@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/agentlog/pilog"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 )
@@ -23,8 +23,8 @@ type loopState struct {
 	usage native.AgentUsage
 
 	sessionName string
-	events      *jsonlwatcher.PiSessionEventParser
-	parser      *jsonlwatcher.PiParser
+	events      *pilog.EventParser
+	parser      *pilog.Parser
 
 	// stream is the assistant message being streamed.
 	stream *streamMessage
@@ -56,8 +56,8 @@ func newLoopState(sink native.Sink, cwd string) loopState {
 	return loopState{
 		sink:      sink,
 		cwd:       cwd,
-		events:    jsonlwatcher.NewPiSessionEventParser(),
-		parser:    jsonlwatcher.NewPiParser(),
+		events:    pilog.NewEventParser(),
+		parser:    pilog.NewParser(),
 		usedIDs:   make(map[string]bool),
 		throttles: make(map[string]*throttle),
 	}

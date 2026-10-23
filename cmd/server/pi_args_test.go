@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/agentlog/pilog"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -18,8 +18,16 @@ func TestWithPiSessionID(t *testing.T) {
 	assert.NotEqual(t, got[3], withPiSessionID(nil)[1], "each start gets a new session")
 
 	for _, args := range [][]string{
-		{"--continue"}, {"-c"}, {"--resume"}, {"--session", "abc"}, {"--session=abc"},
-		{"--session-id", "mine"}, {"--no-session"}, {"--fork", "abc"}, {"-p", "hi"}, {"--mode", "rpc"},
+		{"--continue"},
+		{"-c"},
+		{"--resume"},
+		{"--session", "abc"},
+		{"--session=abc"},
+		{"--session-id", "mine"},
+		{"--no-session"},
+		{"--fork", "abc"},
+		{"-p", "hi"},
+		{"--mode", "rpc"},
 	} {
 		assert.Equal(t, args, withPiSessionID(args), "user-chosen session: %v", args)
 	}
@@ -33,6 +41,6 @@ func TestIsPiCLI(t *testing.T) {
 }
 
 func TestPiSessionOptions(t *testing.T) {
-	assert.Equal(t, jsonlwatcher.PiSession{ID: "abc", Dir: "/tmp/s"}, piSessionOptions([]string{"--session-dir=/tmp/s", "--model", "x", "--session-id", "abc"}))
-	assert.Equal(t, jsonlwatcher.PiSession{}, piSessionOptions([]string{"--continue"}))
+	assert.Equal(t, pilog.Session{ID: "abc", Dir: "/tmp/s"}, piSessionOptions([]string{"--session-dir=/tmp/s", "--model", "x", "--session-id", "abc"}))
+	assert.Equal(t, pilog.Session{}, piSessionOptions([]string{"--continue"}))
 }

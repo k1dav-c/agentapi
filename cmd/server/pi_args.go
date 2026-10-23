@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/agentlog/pilog"
 	nativepi "github.com/coder/agentapi/lib/native/pi"
 )
 
@@ -41,8 +41,8 @@ func withPiSessionID(args []string) []string {
 }
 
 // piSessionOptions returns the session ID and directory Pi was started with.
-func piSessionOptions(args []string) jsonlwatcher.PiSession {
-	return jsonlwatcher.PiSession{
+func piSessionOptions(args []string) pilog.Session {
+	return pilog.Session{
 		ID:  piFlagValue(args, "--session-id"),
 		Dir: piFlagValue(args, "--session-dir"),
 	}

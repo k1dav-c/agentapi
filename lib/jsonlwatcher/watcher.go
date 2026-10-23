@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/coder/quartz"
+
+	"github.com/coder/agentapi/lib/agentlog"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 const (
@@ -21,11 +24,11 @@ const (
 
 // Config for creating a new Watcher.
 type Config struct {
-	Resolver  SessionResolver
-	Parser    LineParser
+	Resolver  agentlog.SessionResolver
+	Parser    agentlog.LineParser
 	Logger    *slog.Logger
-	OnMessage func(RichMessage) // called when a message is completed or updated
-	OnLine    func([]byte)      // called for each complete raw JSONL record
+	OnMessage func(transcript.RichMessage) // called when a message is completed or updated
+	OnLine    func([]byte)                 // called for each complete raw JSONL record
 	// Clock paces the polling; the real clock when nil.
 	Clock quartz.Clock
 }
@@ -35,10 +38,10 @@ type Config struct {
 // messages are handed to the OnMessage callback; the watcher itself keeps
 // no message state.
 type Watcher struct {
-	resolver  SessionResolver
-	parser    LineParser
+	resolver  agentlog.SessionResolver
+	parser    agentlog.LineParser
 	logger    *slog.Logger
-	onMessage func(RichMessage)
+	onMessage func(transcript.RichMessage)
 	onLine    func([]byte)
 	clock     quartz.Clock
 }
@@ -216,7 +219,7 @@ func (w *Watcher) processLine(line []byte) {
 // re-emit the same message as its content accumulates (e.g. the Codex
 // parser emits a turn update per content block); deduplication by
 // (MessageID, Role) happens downstream in the EventEmitter.
-func (w *Watcher) emit(msgs []RichMessage) {
+func (w *Watcher) emit(msgs []transcript.RichMessage) {
 	if w.onMessage == nil {
 		return
 	}

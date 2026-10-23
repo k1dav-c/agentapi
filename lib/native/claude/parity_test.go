@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/agentlog/claudelog"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -22,7 +22,7 @@ func sessionLogMessages(t *testing.T, name string) []transcript.RichMessage {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testdata", name+".session.jsonl"))
 	require.NoError(t, err)
-	parser := jsonlwatcher.NewClaudeParser()
+	parser := claudelog.NewParser()
 	sink := nativetest.NewSink(t)
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 0, 1<<20), 16<<20)

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -33,7 +34,7 @@ func (s *Server) startJSONLWatcher(pid int) {
 	// names it.
 	s.emitter.SetSessionName("")
 	namer := agent.Namer
-	if polled, ok := namer.(jsonlwatcher.PolledSessionNamer); ok {
+	if polled, ok := namer.(agentlog.PolledSessionNamer); ok {
 		done.Add(1)
 		go func() {
 			defer done.Done()

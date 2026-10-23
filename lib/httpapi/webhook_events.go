@@ -13,10 +13,10 @@ import (
 	"github.com/coder/quartz"
 
 	"github.com/coder/agentapi/internal/version"
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/pricing"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/sessions"
 )
 
 // The events a webhook can be sent besides run.status_changed.
@@ -143,7 +143,7 @@ func (s *Server) startWebhook(config ServerConfig) {
 		defer s.mu.Unlock()
 		return s.queue.Len()
 	}
-	if s.native != nil && jsonlwatcher.HasSessionHistory(string(s.agentType)) {
+	if s.native != nil && sessions.HasHistory(string(s.agentType)) {
 		observer.taskCost = s.webhookTaskCost
 	}
 	s.webhook.snapshot = func() any { return observer.state() }
@@ -158,7 +158,7 @@ func (s *Server) webhookTaskCost(since time.Time) *WebhookCost {
 	if id == "" {
 		return nil
 	}
-	costs, err := jsonlwatcher.DirectoryCosts(string(s.agentType), s.cwd, s.prices)
+	costs, err := sessions.DirectoryCosts(string(s.agentType), s.cwd, s.prices)
 	if err != nil {
 		s.logger.Warn("Failed to read what the task cost", "error", err)
 		return nil

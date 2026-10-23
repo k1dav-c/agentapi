@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/agentlog/codexlog"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -23,7 +23,7 @@ func parseRollout(t *testing.T, name string) []transcript.RichMessage {
 	f, err := os.Open(filepath.Join("testdata", name))
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
-	p := jsonlwatcher.NewCodexParser()
+	p := codexlog.NewParser()
 	var all []transcript.RichMessage
 	add := func(msgs []transcript.RichMessage) { all = append(all, msgs...) }
 	sc := bufio.NewScanner(f)

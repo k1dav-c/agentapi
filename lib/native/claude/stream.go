@@ -10,7 +10,7 @@ import (
 
 	"github.com/coder/quartz"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/agentlog/claudelog"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -160,7 +160,7 @@ type resultRef struct {
 
 // streamParser turns stream-json frames into rich messages and timeline
 // events of the same shape the session-log parsers produce. It differs from
-// jsonlwatcher.ClaudeParser where the stream differs from the session log:
+// claudelog.Parser where the stream differs from the session log:
 // stop_reason and usage come from message_delta (assistant frames carry
 // null), a tool result between the blocks of one message doesn't split it,
 // text-only user frames (interrupt markers, replayed prompts) are not tool
@@ -174,7 +174,7 @@ type streamParser struct {
 	throttle time.Duration
 	// sessionID labels timeline events.
 	sessionID string
-	events    *jsonlwatcher.ClaudeSessionEventParser
+	events    *claudelog.EventParser
 	messages  map[string]*assistantMessage
 	order     []string
 	results   map[string]resultRef
@@ -195,7 +195,7 @@ func newStreamParser(clock quartz.Clock, throttle time.Duration) *streamParser {
 	return &streamParser{
 		clock:      clock,
 		throttle:   throttle,
-		events:     jsonlwatcher.NewClaudeSessionEventParser(),
+		events:     claudelog.NewEventParser(),
 		messages:   make(map[string]*assistantMessage),
 		results:    make(map[string]resultRef),
 		background: make(map[string]bool),
@@ -249,7 +249,7 @@ func (p *streamParser) startMessage(id string, msg *apiMessage) {
 // startBlock begins block index from a content_block_start event, unless
 // its final state arrived already, and reports whether it did.
 func (m *assistantMessage) startBlock(index int, raw json.RawMessage) bool {
-	var block jsonlwatcher.ContentBlock
+	var block claudelog.ContentBlock
 	if json.Unmarshal(raw, &block) != nil {
 		return false
 	}
@@ -403,7 +403,7 @@ func (p *streamParser) assistant(f *frame) ([]transcript.RichMessage, []transcri
 			m.msg.Usage = msg.Usage
 		}
 	}
-	for _, block := range jsonlwatcher.ClaudeContentBlocks(msg.Content) {
+	for _, block := range claudelog.ContentBlocks(msg.Content) {
 		placed := false
 		// Blocks complete in index order, each just before its
 		// content_block_stop: the first one still streaming is this one.
@@ -467,18 +467,18 @@ func (p *streamParser) user(f *frame) ([]transcript.RichMessage, []transcript.Se
 // userBlock converts one content block of a user frame.
 func (p *streamParser) userBlock(raw json.RawMessage) (transcript.RichContentBlock, bool) {
 	var head struct {
-		Type   string                    `json:"type"`
-		Text   string                    `json:"text"`
-		Source *jsonlwatcher.ImageSource `json:"source"`
+		Type   string                 `json:"type"`
+		Text   string                 `json:"text"`
+		Source *claudelog.ImageSource `json:"source"`
 	}
 	if json.Unmarshal(raw, &head) != nil {
 		return transcript.RichContentBlock{}, false
 	}
 	switch head.Type {
 	case "tool_result":
-		var result jsonlwatcher.ToolResultBlock
+		var result claudelog.ToolResultBlock
 		_ = decode(raw, &result)
-		block := jsonlwatcher.ClaudeToolResult(result)
+		block := claudelog.ToolResult(result)
 		block.Status = "completed"
 		switch {
 		case p.background[block.ToolUseID]:
@@ -491,7 +491,7 @@ func (p *streamParser) userBlock(raw json.RawMessage) (transcript.RichContentBlo
 		return transcript.RichContentBlock{Type: "text", Text: head.Text}, true
 	case "image":
 		block := transcript.RichContentBlock{Type: "image"}
-		if image, ok := jsonlwatcher.ClaudeImage(head.Source); ok {
+		if image, ok := claudelog.Image(head.Source); ok {
 			block.Images = []transcript.RichImage{image}
 		}
 		return block, true
@@ -503,7 +503,7 @@ func (p *streamParser) userBlock(raw json.RawMessage) (transcript.RichContentBlo
 // sessionEvents converts a main-thread assistant or user frame to timeline
 // events with the session-log event parser.
 func (p *streamParser) sessionEvents(f *frame) []transcript.SessionEvent {
-	var msg jsonlwatcher.JSONLMessage
+	var msg claudelog.Message
 	if err := json.Unmarshal(f.Message, &msg); err != nil {
 		return nil
 	}
@@ -511,7 +511,7 @@ func (p *streamParser) sessionEvents(f *frame) []transcript.SessionEvent {
 	if sessionID == "" {
 		sessionID = p.sessionID
 	}
-	return p.events.Events(jsonlwatcher.JSONLLine{
+	return p.events.Events(claudelog.Line{
 		Type: f.Type, UUID: f.UUID, Timestamp: f.Timestamp, SessionID: sessionID, Message: &msg,
 	})
 }

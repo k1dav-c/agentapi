@@ -1,17 +1,27 @@
+// Package jsonlwatcher tails the session log of an agent that runs in a
+// terminal (the PTY transport), for the rich messages and timeline events
+// its records hold.
 package jsonlwatcher
 
-import "time"
+import (
+	"time"
+
+	"github.com/coder/agentapi/lib/agentlog"
+	"github.com/coder/agentapi/lib/agentlog/claudelog"
+	"github.com/coder/agentapi/lib/agentlog/codexlog"
+	"github.com/coder/agentapi/lib/agentlog/pilog"
+)
 
 // Agent is what following one agent's session log takes.
 type Agent struct {
 	// Resolver finds the session log.
-	Resolver SessionResolver
+	Resolver agentlog.SessionResolver
 	// Parser turns its lines into rich messages, and Events into timeline
 	// events.
-	Parser LineParser
-	Events SessionEventParser
+	Parser agentlog.LineParser
+	Events agentlog.SessionEventParser
 	// Namer follows the name the agent gives the session.
-	Namer SessionNamer
+	Namer agentlog.SessionNamer
 }
 
 // ForAgent returns how to follow the session log of an agent of agentType
@@ -21,24 +31,24 @@ func ForAgent(agentType string, pid int, cwd string, started time.Time) (Agent, 
 	switch agentType {
 	case "claude":
 		return Agent{
-			Resolver: &ClaudeResolver{PID: pid},
-			Parser:   NewClaudeParser(),
-			Events:   NewClaudeSessionEventParser(),
-			Namer:    NewSessionNamer(agentType),
+			Resolver: &claudelog.Resolver{PID: pid},
+			Parser:   claudelog.NewParser(),
+			Events:   claudelog.NewEventParser(),
+			Namer:    claudelog.NewNamer(),
 		}, true
 	case "codex":
 		return Agent{
-			Resolver: &CodexResolver{CWD: cwd, NotBefore: started},
-			Parser:   NewCodexParser(),
-			Events:   NewCodexSessionEventParser(),
-			Namer:    NewSessionNamer(agentType),
+			Resolver: &codexlog.Resolver{CWD: cwd, NotBefore: started},
+			Parser:   codexlog.NewParser(),
+			Events:   codexlog.NewEventParser(),
+			Namer:    codexlog.NewNamer(),
 		}, true
 	case "pi":
 		return Agent{
-			Resolver: &PiResolver{PID: pid, CWD: cwd, NotBefore: started},
-			Parser:   NewPiParser(),
-			Events:   NewPiSessionEventParser(),
-			Namer:    NewSessionNamer(agentType),
+			Resolver: &pilog.Resolver{PID: pid, CWD: cwd, NotBefore: started},
+			Parser:   pilog.NewParser(),
+			Events:   pilog.NewEventParser(),
+			Namer:    pilog.NewNamer(),
 		}, true
 	}
 	return Agent{}, false

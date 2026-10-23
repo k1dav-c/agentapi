@@ -8,7 +8,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/sessions"
 	"github.com/coder/agentapi/lib/transcript"
 	"github.com/coder/agentapi/lib/util"
 )
@@ -33,7 +33,7 @@ func (s SubagentStatus) Schema(r huma.Registry) *huma.Schema {
 
 // SubagentState is a subagent and how far it got.
 type SubagentState struct {
-	jsonlwatcher.Subagent
+	sessions.Subagent
 	Status SubagentStatus `json:"status" doc:"running, completed or failed: for Claude Code from the Agent tool call that started it, for Codex from the subagent's own log; unknown when neither says."`
 }
 
@@ -62,7 +62,7 @@ func (s *Server) requireSubagents() error {
 	if err := s.requireNative(); err != nil {
 		return err
 	}
-	if !jsonlwatcher.HasSessionHistory(string(s.agentType)) {
+	if !sessions.HasHistory(string(s.agentType)) {
 		return huma.Error400BadRequest("this agent's subagents can't be read")
 	}
 	return nil
@@ -118,7 +118,7 @@ func (s *Server) subagentCalls() subagentCalls {
 // stateOf says how far sub got: as its log says (Codex: its spawn call
 // completes at once, while it goes on), else as the result of the tool call
 // that started it.
-func (c subagentCalls) stateOf(sub jsonlwatcher.Subagent) SubagentState {
+func (c subagentCalls) stateOf(sub sessions.Subagent) SubagentState {
 	if sub.ParentToolUseID == "" {
 		sub.ParentToolUseID = c.spawns[sub.ID]
 	}
@@ -135,7 +135,7 @@ func (c subagentCalls) stateOf(sub jsonlwatcher.Subagent) SubagentState {
 // listSubagents handles GET /subagents, without s.mu: it reads the
 // subagents' logs.
 func (s *Server) listSubagents(_ context.Context, _ *struct{}) (*SubagentsResponse, error) {
-	subs, err := jsonlwatcher.Subagents(string(s.agentType), s.cwd, s.native.SessionRef())
+	subs, err := sessions.Subagents(string(s.agentType), s.cwd, s.native.SessionRef())
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the subagents: %w", err)
 	}
@@ -150,8 +150,8 @@ func (s *Server) listSubagents(_ context.Context, _ *struct{}) (*SubagentsRespon
 
 // getSubagent handles GET /subagents/{id}.
 func (s *Server) getSubagent(_ context.Context, input *SubagentPath) (*SubagentResponse, error) {
-	sub, run, err := jsonlwatcher.ReadSubagent(string(s.agentType), s.cwd, s.native.SessionRef(), input.ID)
-	if errors.Is(err, jsonlwatcher.ErrSubagentNotFound) {
+	sub, run, err := sessions.ReadSubagent(string(s.agentType), s.cwd, s.native.SessionRef(), input.ID)
+	if errors.Is(err, sessions.ErrSubagentNotFound) {
 		return nil, huma.Error404NotFound("the agent ran no such subagent in this session")
 	}
 	if err != nil {

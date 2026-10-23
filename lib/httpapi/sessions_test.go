@@ -16,12 +16,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/httpapi"
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/pricing"
+	"github.com/coder/agentapi/lib/sessions"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -64,8 +64,8 @@ func newSessionServer(t *testing.T) *nativeServer {
 func TestNative_ListSessions(t *testing.T) {
 	n := newSessionServer(t)
 	var list struct {
-		Sessions []jsonlwatcher.SessionSummary `json:"sessions"`
-		Current  string                        `json:"current"`
+		Sessions []sessions.SessionSummary `json:"sessions"`
+		Current  string                    `json:"current"`
 	}
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/sessions", nil, &list))
 	require.Len(t, list.Sessions, 1)
@@ -121,9 +121,9 @@ func TestNative_SessionsNeedAnAgentWithLogs(t *testing.T) {
 	n := newNativeServer(t, nil)
 	_ = n
 	// The fake server runs Claude Code: its sessions can be listed (none
-	// here). Other agents' can't, which the jsonlwatcher tests cover.
+	// here). Other agents' can't, which the sessions tests cover.
 	var list struct {
-		Sessions []jsonlwatcher.SessionSummary `json:"sessions"`
+		Sessions []sessions.SessionSummary `json:"sessions"`
 	}
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/sessions", nil, &list))
@@ -236,10 +236,10 @@ func TestNative_SessionCosts(t *testing.T) {
 
 	var list struct {
 		Sessions []struct {
-			ID   string                   `json:"id"`
-			Cost jsonlwatcher.SessionCost `json:"cost"`
+			ID   string               `json:"id"`
+			Cost sessions.SessionCost `json:"cost"`
 		} `json:"sessions"`
-		TotalCost jsonlwatcher.SessionCost `json:"total_cost"`
+		TotalCost sessions.SessionCost `json:"total_cost"`
 	}
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/sessions", nil, &list))
 	require.Len(t, list.Sessions, 2)
@@ -255,9 +255,9 @@ func TestNative_SessionCosts(t *testing.T) {
 	require.Len(t, list.TotalCost.Hourly, 2)
 
 	var cost struct {
-		SessionID string                   `json:"session_id"`
-		Cost      jsonlwatcher.SessionCost `json:"cost"`
-		Calls     []jsonlwatcher.ModelCall `json:"calls"`
+		SessionID string               `json:"session_id"`
+		Cost      sessions.SessionCost `json:"cost"`
+		Calls     []sessions.ModelCall `json:"calls"`
 	}
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/cost", nil, &cost))
 	assert.Equal(t, "current", cost.SessionID)

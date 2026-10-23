@@ -7,8 +7,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/sessions"
 )
 
 // sessionListLimit is how many sessions GET /sessions lists.
@@ -16,8 +16,8 @@ const sessionListLimit = 100
 
 // SessionInfo is one of the agent's sessions and what it spent.
 type SessionInfo struct {
-	jsonlwatcher.SessionSummary
-	Cost jsonlwatcher.SessionCost `json:"cost" doc:"What the session spent, its subagents included, at the model providers' list prices (API-equivalent cost). A call a fork copied counts in the session it copied it from."`
+	sessions.SessionSummary
+	Cost sessions.SessionCost `json:"cost" doc:"What the session spent, its subagents included, at the model providers' list prices (API-equivalent cost). A call a fork copied counts in the session it copied it from."`
 }
 
 // SessionsResponse lists the agent's sessions in the working directory.
@@ -28,7 +28,7 @@ type SessionsResponse struct {
 		Current string `json:"current,omitempty" doc:"The id of the session the agent has open, if it opened one."`
 		// TotalCost covers every session of the directory, also those past
 		// the list's limit.
-		TotalCost jsonlwatcher.SessionCost `json:"total_cost" doc:"What all the agent's sessions in the working directory spent, each call counted once, with its hours for totals by day, week or month."`
+		TotalCost sessions.SessionCost `json:"total_cost" doc:"What all the agent's sessions in the working directory spent, each call counted once, with its hours for totals by day, week or month."`
 	}
 }
 
@@ -36,9 +36,9 @@ type SessionsResponse struct {
 type CostResponse struct {
 	Body struct {
 		// SessionID is empty before the agent opened a session.
-		SessionID string                   `json:"session_id,omitempty" doc:"The session the agent has open."`
-		Cost      jsonlwatcher.SessionCost `json:"cost" doc:"What the session spent, its subagents included (API-equivalent cost)."`
-		Calls     []jsonlwatcher.ModelCall `json:"calls" nullable:"false" doc:"Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on."`
+		SessionID string               `json:"session_id,omitempty" doc:"The session the agent has open."`
+		Cost      sessions.SessionCost `json:"cost" doc:"What the session spent, its subagents included (API-equivalent cost)."`
+		Calls     []sessions.ModelCall `json:"calls" nullable:"false" doc:"Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on."`
 	}
 }
 
@@ -56,7 +56,7 @@ func (s *Server) requireSessionHistory() error {
 	if err := s.requireNative(); err != nil {
 		return err
 	}
-	if !jsonlwatcher.HasSessionHistory(string(s.agentType)) {
+	if !sessions.HasHistory(string(s.agentType)) {
 		return huma.Error400BadRequest("this agent's sessions can't be listed")
 	}
 	return nil
@@ -65,17 +65,17 @@ func (s *Server) requireSessionHistory() error {
 // listSessions handles GET /sessions, without s.mu: it only reads the
 // agent's session logs.
 func (s *Server) listSessions(_ context.Context, _ *struct{}) (*SessionsResponse, error) {
-	sessions, err := jsonlwatcher.ListSessions(string(s.agentType), s.cwd, sessionListLimit)
+	list, err := sessions.List(string(s.agentType), s.cwd, sessionListLimit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the sessions: %w", err)
 	}
-	costs, err := jsonlwatcher.DirectoryCosts(string(s.agentType), s.cwd, s.prices)
+	costs, err := sessions.DirectoryCosts(string(s.agentType), s.cwd, s.prices)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read what the sessions spent: %w", err)
 	}
 	resp := &SessionsResponse{}
-	resp.Body.Sessions = make([]SessionInfo, 0, len(sessions))
-	for _, session := range sessions {
+	resp.Body.Sessions = make([]SessionInfo, 0, len(list))
+	for _, session := range list {
 		resp.Body.Sessions = append(resp.Body.Sessions, SessionInfo{SessionSummary: session, Cost: costs.Cost(session.ID)})
 	}
 	resp.Body.Current = s.native.SessionRef()
@@ -88,9 +88,9 @@ func (s *Server) listSessions(_ context.Context, _ *struct{}) (*SessionsResponse
 func (s *Server) getCost(_ context.Context, _ *struct{}) (*CostResponse, error) {
 	resp := &CostResponse{}
 	resp.Body.SessionID = s.native.SessionRef()
-	resp.Body.Calls = []jsonlwatcher.ModelCall{}
+	resp.Body.Calls = []sessions.ModelCall{}
 	if resp.Body.SessionID != "" {
-		costs, err := jsonlwatcher.DirectoryCosts(string(s.agentType), s.cwd, s.prices)
+		costs, err := sessions.DirectoryCosts(string(s.agentType), s.cwd, s.prices)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read what the session spent: %w", err)
 		}
@@ -98,7 +98,7 @@ func (s *Server) getCost(_ context.Context, _ *struct{}) (*CostResponse, error) 
 			resp.Body.Calls = calls
 		}
 	}
-	resp.Body.Cost = jsonlwatcher.CostOf(resp.Body.Calls)
+	resp.Body.Cost = sessions.CostOf(resp.Body.Calls)
 	return resp, nil
 }
 
@@ -116,8 +116,8 @@ func (s *Server) resumeSession(_ context.Context, input *ResumeSessionRequest) (
 	if input.ID == s.native.SessionRef() && !input.Body.Fork {
 		return okResponse(), nil
 	}
-	history, err := jsonlwatcher.ReadSessionHistory(string(s.agentType), s.cwd, input.ID)
-	if errors.Is(err, jsonlwatcher.ErrSessionNotFound) {
+	history, err := sessions.ReadHistory(string(s.agentType), s.cwd, input.ID)
+	if errors.Is(err, sessions.ErrSessionNotFound) {
 		return nil, huma.Error404NotFound("the agent has no such session in this directory")
 	}
 	if err != nil {

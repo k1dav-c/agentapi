@@ -9,8 +9,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/sessions"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -126,7 +126,7 @@ func (s *Server) getTimeline(ctx context.Context, input *TimelineRequest) (*Time
 // its session, numbered after events. A log that can't be read leaves them
 // out rather than failing the timeline.
 func (s *Server) subagentEvents(events []transcript.SessionEvent) []transcript.SessionEvent {
-	sub, err := jsonlwatcher.SubagentEvents(string(s.agentType), s.cwd, s.native.SessionRef())
+	sub, err := sessions.SubagentEvents(string(s.agentType), s.cwd, s.native.SessionRef())
 	if err != nil {
 		s.logger.Warn("Failed to read the subagents' logs", "error", err)
 		return nil

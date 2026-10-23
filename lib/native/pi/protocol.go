@@ -59,7 +59,7 @@ type streamEvent struct {
 }
 
 // agentMessage holds the fields of a Pi message the adapter looks at. The
-// whole message goes to jsonlwatcher's Pi parser.
+// whole message goes to pilog's parser.
 type agentMessage struct {
 	Role         string          `json:"role"`
 	Content      json.RawMessage `json:"content"`

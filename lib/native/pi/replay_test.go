@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/jsonlwatcher"
+	"github.com/coder/agentapi/lib/agentlog/pilog"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -633,7 +633,7 @@ func TestParity(t *testing.T) {
 
 			data, err := os.ReadFile("testdata/" + tc.session)
 			require.NoError(t, err)
-			parser := jsonlwatcher.NewPiParser()
+			parser := pilog.NewParser()
 			var want []transcript.RichMessage
 			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 				if strings.Contains(line, `"role":"bashExecution"`) {
