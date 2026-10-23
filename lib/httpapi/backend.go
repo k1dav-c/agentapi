@@ -9,7 +9,8 @@ import (
 
 // agentBackend is the part of the server's work that depends on the
 // transport: a terminal or ACP conversation (ptyBackend) or a native one
-// (nativeBackend). Its methods are called with s.mu held.
+// (nativeBackend). Its methods are called with s.mu held, but for
+// handoffOffer, which only reads, and GET /handoff calls without it.
 type agentBackend interface {
 	// readyForQueued reports whether the agent can take the next queued
 	// message.

@@ -54,7 +54,6 @@ type Server struct {
 	logger             *slog.Logger
 	conversation       st.Conversation
 	native             *native.Conversation // nil unless the transport is native
-	observer           *nativeObserver      // the native conversation's
 	sessions           *sessions.Store      // the agent's sessions; nil unless native and it keeps logs
 	stateDB            *statedb.DB          // nil unless the conversation is kept
 	savedQueue         []QueuedMessage      // the queue as last stored in stateDB
@@ -395,7 +394,6 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		s.mcpStore = store
 	}
 
-	s.observer = observer
 	if config.Transport == TransportNative && sessions.Supported(string(config.AgentType)) {
 		s.sessions, err = sessions.New(string(config.AgentType), config.CWD, sessions.Config{
 			Prices:       config.Native.Prices,
