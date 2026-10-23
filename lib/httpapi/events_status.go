@@ -26,7 +26,7 @@ func (e *EventEmitter) EmitStatus(newStatus st.ConversationStatus) {
 	previousStatus := e.status
 	e.handoffRevision++
 	if newLifecycle == LifecycleRunning && e.lifecycle == LifecycleReady {
-		e.runID++
+		e.turn++
 	}
 	e.status = newAgentStatus
 	e.lifecycle = newLifecycle
@@ -75,14 +75,26 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 		}
 	}
 	return StatusChangeBody{
-		Status: e.status, Lifecycle: e.lifecycle, SessionID: e.sessionID,
-		RunID: e.runID, AgentType: e.agentType, Transport: e.transport, Version: version.Version,
+		Status: e.status, Lifecycle: e.lifecycle, ServerID: e.serverID, Turn: e.turn,
+		AgentSessionID: e.agentSessionID, AgentType: e.agentType, Transport: e.transport, Version: version.Version,
 		TerminalPrompt: e.terminalPrompt, TerminalColumns: e.terminalColumns,
 		SessionName: e.sessionName, PendingRequests: pending, Capabilities: e.capabilities,
 		LoginRequired: e.loginRequired, Settings: e.settings, Usage: e.usage,
 		LimitStop: e.limitStop,
 		Terminal:  e.terminal,
 	}
+}
+
+// SetAgentSessionID records the agent's own session, which a restart or a
+// resume changes.
+func (e *EventEmitter) SetAgentSessionID(id string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.agentSessionID == id {
+		return
+	}
+	e.agentSessionID = id
+	e.notifyStatusLocked()
 }
 
 // SetCapabilities records the optional operations the agent supports.

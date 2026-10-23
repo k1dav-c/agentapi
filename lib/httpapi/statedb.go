@@ -74,6 +74,7 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 		}
 	}
 	resumeRef := snap.Meta[statedb.MetaSessionRef]
+	emitter.SetAgentSessionID(resumeRef)
 	settings, err := snap.Settings()
 	if err != nil {
 		// The agent starts with its own settings.

@@ -51,7 +51,7 @@ func (i *handoffIO) ReadScreen() string { return "" }
 func handoffServer() (*Server, *handoffConversation, *handoffIO) {
 	c := &handoffConversation{status: st.ConversationStatusStable}
 	i := &handoffIO{}
-	e := NewEventEmitter(WithSessionID("session"), WithAgentType(mf.AgentTypeClaude))
+	e := NewEventEmitter(WithServerID("session"), WithAgentType(mf.AgentTypeClaude))
 	e.EmitStatus(st.ConversationStatusStable)
 	e.EmitMessages([]st.ConversationMessage{
 		{Id: 1, Role: st.ConversationRoleUser, Message: "work"},

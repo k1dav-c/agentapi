@@ -99,7 +99,7 @@ type SessionEvent struct {
 	Role      *string         `json:"role,omitempty" doc:"Message role when applicable"`
 	EventTime time.Time       `json:"time" doc:"Timestamp recorded by the agent session"`
 	Content   *string         `json:"content,omitempty" doc:"Text or tool result content"`
-	SessionID *string         `json:"session_id,omitempty" doc:"Agent session identifier"`
+	SessionID *string         `json:"agent_session_id,omitempty" doc:"The agent's own session the event belongs to."`
 	SourceID  *string         `json:"source_id,omitempty" doc:"Original agent event or message identifier"`
 	ToolName  *string         `json:"tool_name,omitempty" doc:"Tool name for tool_call events"`
 	ToolInput json.RawMessage `json:"tool_input,omitempty" doc:"Tool input for tool_call events"`

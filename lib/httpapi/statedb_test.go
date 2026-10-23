@@ -118,12 +118,16 @@ func TestStateDB_RestoresConversation(t *testing.T) {
 	assert.Equal(t, "session-1", a.ResumeRef, "the agent's session is resumed")
 
 	var status struct {
-		Epoch       string `json:"epoch"`
-		SessionName string `json:"session_name"`
+		Epoch          string `json:"epoch"`
+		SessionName    string `json:"session_name"`
+		AgentSessionID string `json:"agent_session_id"`
+		ServerID       string `json:"server_id"`
 	}
 	n.do(http.MethodGet, "/status", nil, &status)
 	assert.Equal(t, before.Epoch, status.Epoch, "browser caches stay valid")
 	assert.Equal(t, "Greeting", status.SessionName)
+	assert.Equal(t, "session-1", status.AgentSessionID, "the agent's own session")
+	assert.NotEmpty(t, status.ServerID)
 
 	var msgs struct {
 		Messages []httpapi.Message `json:"messages"`

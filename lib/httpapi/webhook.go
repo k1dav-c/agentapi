@@ -150,7 +150,7 @@ type WebhookEvent struct {
 }
 
 type WebhookEventData struct {
-	RunID          string       `json:"run_id" doc:"Identifier for this AgentAPI process run."`
+	ServerID       string       `json:"server_id" doc:"Random identifier of this AgentAPI run, as server_id in GET /status."`
 	Status         AgentStatus  `json:"status" doc:"Current agent status."`
 	PreviousStatus AgentStatus  `json:"previous_status" doc:"Previous agent status."`
 	AgentType      mf.AgentType `json:"agent_type" doc:"Type of agent being used."`
@@ -161,7 +161,7 @@ type WebhookEventData struct {
 // receiver can tell many apart.
 type WebhookInstance struct {
 	ID           string       `json:"id"`
-	RunID        string       `json:"run_id"`
+	ServerID     string       `json:"server_id"`
 	Hostname     string       `json:"hostname,omitempty"`
 	Port         int          `json:"port,omitempty"`
 	PID          int          `json:"pid,omitempty"`
@@ -179,7 +179,7 @@ type WebhookTemplateData struct {
 	Type      string
 	CreatedAt time.Time
 	// The fields of run.status_changed; empty for other events.
-	RunID          string
+	ServerID       string
 	Status         string
 	PreviousStatus string
 	AgentType      string
@@ -196,7 +196,7 @@ type webhookDispatcher struct {
 	tmpl      *template.Template // nil when using the default JSON payload
 	logger    *slog.Logger
 	clock     quartz.Clock
-	runID     string
+	serverID  string
 	agentType mf.AgentType
 	transport Transport
 	instance  WebhookInstance
@@ -230,16 +230,16 @@ func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType m
 	if err != nil {
 		return nil, err
 	}
-	runID := randomWebhookID()
+	serverID := randomWebhookID()
 	return &webhookDispatcher{
 		config:        config,
 		tmpl:          tmpl,
 		logger:        logger,
 		clock:         clock,
-		runID:         runID,
+		serverID:      serverID,
 		agentType:     agentType,
 		transport:     transport,
-		instance:      WebhookInstance{RunID: runID, AgentType: agentType, Transport: transport},
+		instance:      WebhookInstance{ServerID: serverID, AgentType: agentType, Transport: transport},
 		startup:       config,
 		queue:         make(chan WebhookEvent, webhookQueueSize),
 		configChanged: make(chan struct{}, 1),
@@ -301,7 +301,7 @@ func (d *webhookDispatcher) restore(stored string) (bool, error) {
 func (d *webhookDispatcher) setInstance(instance WebhookInstance) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	instance.RunID = d.runID
+	instance.ServerID = d.serverID
 	instance.AgentType = d.agentType
 	instance.Transport = d.transport
 	d.instance = instance
@@ -362,7 +362,7 @@ func randomWebhookID() string {
 
 func (d *webhookDispatcher) statusChanged(previous, current AgentStatus) {
 	d.emit(webhookEventRunStatusChanged, WebhookEventData{
-		RunID:          d.runID,
+		ServerID:       d.serverID,
 		Status:         current,
 		PreviousStatus: previous,
 		AgentType:      d.agentType,
@@ -480,7 +480,7 @@ func (d *webhookDispatcher) renderBody(event WebhookEvent) ([]byte, error) {
 		Instance:  event.Instance,
 	}
 	if status, ok := event.Data.(WebhookEventData); ok {
-		data.RunID = status.RunID
+		data.ServerID = status.ServerID
 		data.Status = string(status.Status)
 		data.PreviousStatus = string(status.PreviousStatus)
 		data.AgentType = string(status.AgentType)
@@ -616,7 +616,7 @@ type WebhookConfigRequest struct {
 		URL              string    `json:"url" doc:"Webhook destination. Set to an empty string to disable delivery."`
 		TimeoutSeconds   int       `json:"timeout_seconds" minimum:"1" maximum:"3600" doc:"Timeout for each delivery attempt, in seconds."`
 		MaxAttempts      int       `json:"max_attempts" minimum:"1" maximum:"10" doc:"Maximum number of delivery attempts."`
-		PayloadTemplate  *string   `json:"payload_template,omitempty" doc:"Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .RunID, .Status, .PreviousStatus, .AgentType, .Transport."`
+		PayloadTemplate  *string   `json:"payload_template,omitempty" doc:"Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .ServerID, .Status, .PreviousStatus, .AgentType, .Transport."`
 		Events           *[]string `json:"events,omitempty" doc:"The event types to send, or patterns of them (task.*, *). Omit to preserve; an empty list sends run.status_changed alone."`
 		Secret           *string   `json:"secret,omitempty" doc:"Secret that signs every delivery with HMAC-SHA256. Omit to preserve; set to empty string to stop signing."`
 		HeartbeatSeconds *int      `json:"heartbeat_seconds,omitempty" minimum:"0" maximum:"86400" doc:"How often instance.heartbeat is sent, in seconds; 0 turns it off. Omit to preserve."`

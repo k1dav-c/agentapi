@@ -492,7 +492,7 @@ func CreateServerCmd() *cobra.Command {
 		{FlagWebhookURL, "", "", "URL the webhook events are POSTed to (by default only run.status_changed; see --webhook-events)", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},
 		{FlagWebhookMaxAttempts, "", 3, "Maximum webhook delivery attempts", "int"},
-		{FlagWebhookPayloadTemplate, "", "", "Go text/template for custom webhook POST body. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .RunID, .Status, .PreviousStatus, .AgentType, .Transport", "string"},
+		{FlagWebhookPayloadTemplate, "", "", "Go text/template for custom webhook POST body. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .ServerID, .Status, .PreviousStatus, .AgentType, .Transport", "string"},
 		{FlagWebhookEvents, "", []string{}, "Webhook events to send: event types (task.completed), groups (task.*) or * for all. Default: run.status_changed. Comma-separated via flag, space-separated via AGENTAPI_WEBHOOK_EVENTS", "stringSlice"},
 		{FlagWebhookSecret, "", "", "Secret that signs every webhook delivery: X-AgentAPI-Signature-256 is sha256= and the hex HMAC-SHA256 of <X-AgentAPI-Timestamp>.<body>", "string"},
 		{FlagWebhookHeartbeat, "", 60 * time.Second, "How often the instance.heartbeat webhook event is sent; 0 turns it off", "duration"},

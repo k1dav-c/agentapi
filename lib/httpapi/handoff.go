@@ -259,13 +259,13 @@ func (s *Server) pendingHandoff() (*handoff.Request, native.RequestState) {
 	status := view.status
 	// The request ID is part of the hash: two identical approvals are
 	// different requests.
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%s:%q:%s", status.SessionID, view.revision, status.RunID, kind, request.ID, content)))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%s:%q:%s", status.ServerID, view.revision, status.Turn, kind, request.ID, content)))
 	id := hex.EncodeToString(sum[:])
 	if s.handoff.isSuppressed(id) {
 		return nil, native.RequestState{}
 	}
 	return &handoff.Request{
-		ID: id, SessionID: status.SessionID, RunID: status.RunID,
+		ID: id, ServerID: status.ServerID, Turn: status.Turn,
 		AgentType: string(status.AgentType), Kind: kind, Question: view.question, Content: content,
 	}, request
 }

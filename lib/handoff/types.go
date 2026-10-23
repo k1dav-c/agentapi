@@ -3,8 +3,8 @@ package handoff
 
 type Request struct {
 	ID        string `json:"id"`
-	SessionID string `json:"session_id"`
-	RunID     uint64 `json:"run_id"`
+	ServerID  string `json:"server_id"`
+	Turn      uint64 `json:"turn"`
 	AgentType string `json:"agent_type"`
 	Kind      string `json:"kind"` // message or terminal
 	Question  string `json:"question,omitempty"`

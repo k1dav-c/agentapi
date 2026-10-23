@@ -76,8 +76,8 @@ func TestWebhookStatusChangesOnly(t *testing.T) {
 	assert.Equal(t, mf.AgentTypeCodex, data.AgentType)
 	assert.Equal(t, TransportPTY, data.Transport)
 	assert.NotEmpty(t, event.ID)
-	assert.NotEmpty(t, data.RunID)
-	assert.Equal(t, data.RunID, event.Instance.RunID)
+	assert.NotEmpty(t, data.ServerID)
+	assert.Equal(t, data.ServerID, event.Instance.ServerID)
 
 	emitter.EmitStatus(st.ConversationStatusStable)
 	assert.Empty(t, dispatcher.queue)
@@ -110,7 +110,7 @@ func TestWebhookSend(t *testing.T) {
 		Type:      webhookEventRunStatusChanged,
 		CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
 		Data: WebhookEventData{
-			RunID:          "run-1",
+			ServerID:       "run-1",
 			Status:         AgentStatusStable,
 			PreviousStatus: AgentStatusRunning,
 			AgentType:      mf.AgentTypeClaude,
@@ -177,7 +177,7 @@ func TestWebhookCustomPayloadTemplate(t *testing.T) {
 		Type:      webhookEventRunStatusChanged,
 		CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
 		Data: WebhookEventData{
-			RunID:          "run-1",
+			ServerID:       "run-1",
 			Status:         AgentStatusStable,
 			PreviousStatus: AgentStatusRunning,
 			AgentType:      mf.AgentTypeClaude,

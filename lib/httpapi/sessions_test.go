@@ -333,12 +333,12 @@ func TestNative_SessionCosts(t *testing.T) {
 	require.Len(t, list.TotalCost.Hourly, 2)
 
 	var cost struct {
-		SessionID string               `json:"session_id"`
-		Cost      sessions.SessionCost `json:"cost"`
-		Calls     []sessions.ModelCall `json:"calls"`
+		AgentSessionID string               `json:"agent_session_id"`
+		Cost           sessions.SessionCost `json:"cost"`
+		Calls          []sessions.ModelCall `json:"calls"`
 	}
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/cost", nil, &cost))
-	assert.Equal(t, "current", cost.SessionID)
+	assert.Equal(t, "current", cost.AgentSessionID)
 	require.Len(t, cost.Calls, 2)
 	assert.InDelta(t, first, cost.Calls[0].USD, 1e-9)
 	assert.True(t, cost.Calls[0].Priced)

@@ -1039,12 +1039,12 @@ export interface components {
              * @example https://example.com/schemas/CostResponseBody.json
              */
             readonly $schema?: string;
+            /** @description The agent's own session it has open. */
+            agent_session_id?: string;
             /** @description Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on. */
             calls: components["schemas"]["ModelCall"][];
             /** @description What the session spent, its subagents included (API-equivalent cost). */
             cost: components["schemas"]["SessionCost"];
-            /** @description The session the agent has open. */
-            session_id?: string;
         };
         DeleteMessagesResponseBody: {
             /**
@@ -1684,9 +1684,9 @@ export interface components {
             id: string;
             kind: string;
             question?: string;
+            server_id: string;
             /** Format: int64 */
-            run_id: number;
-            session_id: string;
+            turn: number;
         };
         /**
          * RequestKind
@@ -1959,6 +1959,8 @@ export interface components {
             usd: number;
         };
         SessionEvent: {
+            /** @description The agent's own session the event belongs to. */
+            agent_session_id?: string;
             /** @description Text or tool result content */
             content?: string;
             /**
@@ -1972,8 +1974,6 @@ export interface components {
             parent_tool_use_id?: string;
             /** @description Message role when applicable */
             role?: string;
-            /** @description Agent session identifier */
-            session_id?: string;
             /** @description Original agent event or message identifier */
             source_id?: string;
             /** @description The subagent the event belongs to; missing for the agent's own events */
@@ -2073,6 +2073,8 @@ export interface components {
             settings: components["schemas"]["Settings"];
         };
         StatusChangeBody: {
+            /** @description The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it. */
+            agent_session_id?: string;
             /** @description Type of the agent being used by the server. */
             agent_type: string;
             /** @description Version of the AgentAPI server. */
@@ -2090,13 +2092,8 @@ export interface components {
              * @description Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests.
              */
             pending_requests?: number;
-            /**
-             * Format: int64
-             * @description Monotonically increasing run identifier within the session.
-             */
-            run_id: number;
-            /** @description Identifier for this AgentAPI server session. */
-            session_id: string;
+            /** @description Random identifier of this AgentAPI run: it changes every time AgentAPI starts. */
+            server_id: string;
             /** @description Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it. */
             session_name?: string;
             /** @description The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only. */
@@ -2114,6 +2111,11 @@ export interface components {
             terminal_prompt: string;
             /** @description Backend transport being used ('pty', 'acp' or 'native'). */
             transport: components["schemas"]["Transport"];
+            /**
+             * Format: int64
+             * @description How many times the agent started working since AgentAPI started.
+             */
+            turn: number;
             /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only. */
             usage?: components["schemas"]["AgentUsage"];
         };
@@ -2124,6 +2126,8 @@ export interface components {
              * @example https://example.com/schemas/StatusResponseBody.json
              */
             readonly $schema?: string;
+            /** @description The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it. */
+            agent_session_id?: string;
             /** @description Type of the agent being used by the server. */
             agent_type: string;
             /** @description Version of the AgentAPI server. */
@@ -2143,13 +2147,8 @@ export interface components {
              * @description Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests.
              */
             pending_requests?: number;
-            /**
-             * Format: int64
-             * @description Monotonically increasing run identifier within the session.
-             */
-            run_id: number;
-            /** @description Identifier for this AgentAPI server session. */
-            session_id: string;
+            /** @description Random identifier of this AgentAPI run: it changes every time AgentAPI starts. */
+            server_id: string;
             /** @description Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it. */
             session_name?: string;
             /** @description The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only. */
@@ -2167,6 +2166,11 @@ export interface components {
             terminal_prompt: string;
             /** @description Backend transport being used ('pty', 'acp' or 'native'). */
             transport: components["schemas"]["Transport"];
+            /**
+             * Format: int64
+             * @description How many times the agent started working since AgentAPI started.
+             */
+            turn: number;
             /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only. */
             usage?: components["schemas"]["AgentUsage"];
         };
@@ -2467,7 +2471,7 @@ export interface components {
              * @description Maximum number of delivery attempts.
              */
             max_attempts: number;
-            /** @description Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .RunID, .Status, .PreviousStatus, .AgentType, .Transport. */
+            /** @description Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .ServerID, .Status, .PreviousStatus, .AgentType, .Transport. */
             payload_template?: string;
             /** @description Where this AgentAPI can be reached, in every event. Omit to preserve; set to empty string to clear. */
             public_url?: string;

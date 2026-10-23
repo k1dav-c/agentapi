@@ -95,11 +95,13 @@ type SessionSyncBody struct {
 type StatusChangeBody struct {
 	Status    AgentStatus    `json:"status" doc:"Backward-compatible agent activity status."`
 	Lifecycle LifecycleState `json:"lifecycle" doc:"Detailed process lifecycle state."`
-	SessionID string         `json:"session_id" doc:"Identifier for this AgentAPI server session."`
-	RunID     uint64         `json:"run_id" doc:"Monotonically increasing run identifier within the session."`
-	AgentType mf.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
-	Transport Transport      `json:"transport" doc:"Backend transport being used ('pty', 'acp' or 'native')."`
-	Version   string         `json:"agentapi_version" doc:"Version of the AgentAPI server."`
+	ServerID  string         `json:"server_id" doc:"Random identifier of this AgentAPI run: it changes every time AgentAPI starts."`
+	Turn      uint64         `json:"turn" doc:"How many times the agent started working since AgentAPI started."`
+	// AgentSessionID is the agent's own session (native transport).
+	AgentSessionID string       `json:"agent_session_id,omitempty" doc:"The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it."`
+	AgentType      mf.AgentType `json:"agent_type" doc:"Type of the agent being used by the server."`
+	Transport      Transport    `json:"transport" doc:"Backend transport being used ('pty', 'acp' or 'native')."`
+	Version        string       `json:"agentapi_version" doc:"Version of the AgentAPI server."`
 	// TerminalPrompt is the bottom of the screen while the agent shows an
 	// interactive prompt (selection list, confirmation) instead of its input
 	// box, and empty otherwise.
@@ -193,8 +195,9 @@ type EventEmitter struct {
 	nextSessionEventID  int
 	status              AgentStatus
 	lifecycle           LifecycleState
-	sessionID           string
-	runID               uint64
+	serverID            string
+	turn                uint64
+	agentSessionID      string
 	handoffRevision     uint64
 	agentType           mf.AgentType
 	transport           Transport
@@ -327,8 +330,10 @@ func WithTerminalColumns(columns uint16) EventEmitterOption {
 	return func(e *EventEmitter) { e.terminalColumns = columns }
 }
 
-func WithSessionID(sessionID string) EventEmitterOption {
-	return func(e *EventEmitter) { e.sessionID = sessionID }
+// WithServerID sets the identifier of this AgentAPI run reported in status
+// updates.
+func WithServerID(serverID string) EventEmitterOption {
+	return func(e *EventEmitter) { e.serverID = serverID }
 }
 
 func WithClock(clock quartz.Clock) EventEmitterOption {

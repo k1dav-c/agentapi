@@ -162,6 +162,10 @@
             "readOnly": true,
             "type": "string"
           },
+          "agent_session_id": {
+            "description": "The agent's own session it has open.",
+            "type": "string"
+          },
           "calls": {
             "description": "Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on.",
             "items": {
@@ -172,10 +176,6 @@
           "cost": {
             "$ref": "#/components/schemas/SessionCost",
             "description": "What the session spent, its subagents included (API-equivalent cost)."
-          },
-          "session_id": {
-            "description": "The session the agent has open.",
-            "type": "string"
           }
         },
         "required": [
@@ -1478,13 +1478,13 @@
           "question": {
             "type": "string"
           },
-          "run_id": {
+          "server_id": {
+            "type": "string"
+          },
+          "turn": {
             "format": "int64",
             "minimum": 0,
             "type": "integer"
-          },
-          "session_id": {
-            "type": "string"
           }
         },
         "required": [
@@ -1492,8 +1492,8 @@
           "content",
           "id",
           "kind",
-          "run_id",
-          "session_id"
+          "server_id",
+          "turn"
         ],
         "type": "object"
       },
@@ -2071,6 +2071,10 @@
       "SessionEvent": {
         "additionalProperties": false,
         "properties": {
+          "agent_session_id": {
+            "description": "The agent's own session the event belongs to.",
+            "type": "string"
+          },
           "content": {
             "description": "Text or tool result content",
             "type": "string"
@@ -2090,10 +2094,6 @@
           },
           "role": {
             "description": "Message role when applicable",
-            "type": "string"
-          },
-          "session_id": {
-            "description": "Agent session identifier",
             "type": "string"
           },
           "source_id": {
@@ -2307,6 +2307,10 @@
       "StatusChangeBody": {
         "additionalProperties": false,
         "properties": {
+          "agent_session_id": {
+            "description": "The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it.",
+            "type": "string"
+          },
           "agent_type": {
             "description": "Type of the agent being used by the server.",
             "type": "string"
@@ -2336,14 +2340,8 @@
             "format": "int64",
             "type": "integer"
           },
-          "run_id": {
-            "description": "Monotonically increasing run identifier within the session.",
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "session_id": {
-            "description": "Identifier for this AgentAPI server session.",
+          "server_id": {
+            "description": "Random identifier of this AgentAPI run: it changes every time AgentAPI starts.",
             "type": "string"
           },
           "session_name": {
@@ -2376,6 +2374,12 @@
             "$ref": "#/components/schemas/Transport",
             "description": "Backend transport being used ('pty', 'acp' or 'native')."
           },
+          "turn": {
+            "description": "How many times the agent started working since AgentAPI started.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "usage": {
             "$ref": "#/components/schemas/AgentUsage",
             "description": "How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only."
@@ -2385,11 +2389,11 @@
           "agent_type",
           "agentapi_version",
           "lifecycle",
-          "run_id",
-          "session_id",
+          "server_id",
           "status",
           "terminal_prompt",
-          "transport"
+          "transport",
+          "turn"
         ],
         "type": "object"
       },
@@ -2401,6 +2405,10 @@
             "example": "https://example.com/schemas/StatusResponseBody.json",
             "format": "uri",
             "readOnly": true,
+            "type": "string"
+          },
+          "agent_session_id": {
+            "description": "The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it.",
             "type": "string"
           },
           "agent_type": {
@@ -2436,14 +2444,8 @@
             "format": "int64",
             "type": "integer"
           },
-          "run_id": {
-            "description": "Monotonically increasing run identifier within the session.",
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "session_id": {
-            "description": "Identifier for this AgentAPI server session.",
+          "server_id": {
+            "description": "Random identifier of this AgentAPI run: it changes every time AgentAPI starts.",
             "type": "string"
           },
           "session_name": {
@@ -2476,6 +2478,12 @@
             "$ref": "#/components/schemas/Transport",
             "description": "Backend transport being used ('pty', 'acp' or 'native')."
           },
+          "turn": {
+            "description": "How many times the agent started working since AgentAPI started.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "usage": {
             "$ref": "#/components/schemas/AgentUsage",
             "description": "How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only."
@@ -2486,11 +2494,11 @@
           "agentapi_version",
           "epoch",
           "lifecycle",
-          "run_id",
-          "session_id",
+          "server_id",
           "status",
           "terminal_prompt",
-          "transport"
+          "transport",
+          "turn"
         ],
         "type": "object"
       },
@@ -3062,7 +3070,7 @@
             "type": "integer"
           },
           "payload_template": {
-            "description": "Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .RunID, .Status, .PreviousStatus, .AgentType, .Transport.",
+            "description": "Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .ServerID, .Status, .PreviousStatus, .AgentType, .Transport.",
             "type": "string"
           },
           "public_url": {

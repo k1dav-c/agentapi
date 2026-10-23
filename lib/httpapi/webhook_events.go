@@ -50,7 +50,7 @@ const (
 type WebhookInstanceState struct {
 	Status          AgentStatus           `json:"status"`
 	Lifecycle       LifecycleState        `json:"lifecycle"`
-	SessionID       string                `json:"session_id"`
+	AgentSessionID  string                `json:"agent_session_id,omitempty"`
 	SessionName     string                `json:"session_name,omitempty"`
 	PendingRequests int                   `json:"pending_requests"`
 	QueuedMessages  int                   `json:"queued_messages"`
@@ -498,7 +498,7 @@ func (o *webhookObserver) agentError(err ErrorBody, quiet bool) {
 func (o *webhookObserver) state() WebhookInstanceState {
 	status := o.emitter.StatusSnapshot()
 	state := WebhookInstanceState{
-		Status: status.Status, Lifecycle: status.Lifecycle, SessionID: status.SessionID,
+		Status: status.Status, Lifecycle: status.Lifecycle, AgentSessionID: status.AgentSessionID,
 		SessionName: status.SessionName, PendingRequests: status.PendingRequests,
 		TerminalPrompt: status.TerminalPrompt, LoginRequired: status.LoginRequired,
 		LimitStop: status.LimitStop, Usage: status.Usage, Settings: status.Settings,

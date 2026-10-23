@@ -254,14 +254,17 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("configure webhook: %w", err)
 	}
-	var sessionBytes [16]byte
-	if _, err := rand.Read(sessionBytes[:]); err != nil {
-		return nil, fmt.Errorf("generate session ID: %w", err)
+	var serverBytes [16]byte
+	if _, err := rand.Read(serverBytes[:]); err != nil {
+		return nil, fmt.Errorf("generate server ID: %w", err)
 	}
+	// The status and the webhook name this run the same.
+	serverID := hex.EncodeToString(serverBytes[:])
+	webhook.serverID = serverID
 	emitterOptions := []EventEmitterOption{
 		WithAgentType(config.AgentType),
 		WithTransport(config.Transport),
-		WithSessionID(hex.EncodeToString(sessionBytes[:])),
+		WithServerID(serverID),
 		WithTerminalColumns(config.PTY.TerminalColumns),
 		WithClock(config.Clock),
 		WithStatusChangeHandler(webhook.statusChanged),

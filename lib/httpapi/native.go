@@ -52,6 +52,7 @@ func (o *nativeObserver) SessionRef(ref string) {
 	if o.persister != nil {
 		o.persister.SetSessionRef(ref)
 	}
+	o.emitter.SetAgentSessionID(ref)
 }
 
 func (o *nativeObserver) RequestUpdated(state native.RequestState) { o.emitter.EmitRequest(state) }

@@ -36,9 +36,9 @@ type SessionsResponse struct {
 type CostResponse struct {
 	Body struct {
 		// SessionID is empty before the agent opened a session.
-		SessionID string               `json:"session_id,omitempty" doc:"The session the agent has open."`
-		Cost      sessions.SessionCost `json:"cost" doc:"What the session spent, its subagents included (API-equivalent cost)."`
-		Calls     []sessions.ModelCall `json:"calls" nullable:"false" doc:"Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on."`
+		AgentSessionID string               `json:"agent_session_id,omitempty" doc:"The agent's own session it has open."`
+		Cost           sessions.SessionCost `json:"cost" doc:"What the session spent, its subagents included (API-equivalent cost)."`
+		Calls          []sessions.ModelCall `json:"calls" nullable:"false" doc:"Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on."`
 	}
 }
 
@@ -87,14 +87,14 @@ func (s *Server) listSessions(_ context.Context, _ *struct{}) (*SessionsResponse
 // call by call. Without s.mu: it only reads the agent's session logs.
 func (s *Server) getCost(_ context.Context, _ *struct{}) (*CostResponse, error) {
 	resp := &CostResponse{}
-	resp.Body.SessionID = s.native.SessionRef()
+	resp.Body.AgentSessionID = s.native.SessionRef()
 	resp.Body.Calls = []sessions.ModelCall{}
-	if resp.Body.SessionID != "" {
+	if resp.Body.AgentSessionID != "" {
 		costs, err := s.sessions.Costs()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read what the session spent: %w", err)
 		}
-		if calls := costs.Sessions[resp.Body.SessionID]; calls != nil {
+		if calls := costs.Sessions[resp.Body.AgentSessionID]; calls != nil {
 			resp.Body.Calls = calls
 		}
 	}

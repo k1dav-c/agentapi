@@ -5,8 +5,8 @@ import type {StatusChangeEvent} from "./events";
 const event: StatusChangeEvent = {
   status: "running",
   agent_type: "codex",
-  run_id: 1,
-  session_id: "s1",
+  turn: 1,
+  server_id: "s1",
   lifecycle: "ready",
   agentapi_version: "1.2.3",
   capabilities: {steer: true, interrupt: true, resume: true, images: false, settings: true},
