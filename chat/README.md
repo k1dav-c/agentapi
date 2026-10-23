@@ -1,8 +1,7 @@
 # AgentAPI Chat Interface
 
-The AgentAPI web chat interface provides task-based conversations, tool activity, attachments, and
-direct terminal access. It also serves as an example of how to build a client with the AgentAPI HTTP
-API. Claude Code generated 95% of the code.
+The AgentAPI web chat groups conversations by task and displays tool activity, attachments and a
+terminal. It is also an example client for the AgentAPI HTTP API. Claude Code generated 95% of the code.
 
 ## Development Setup
 
@@ -56,10 +55,10 @@ to try specific interactions:
   for the note that suggests compacting
 - `delegate`: the agent hands a task to a subagent with an Agent tool call
 
-To try the Explorer's earlier sessions, the costs and the Lineage panel, run the demo as Claude Code
-(or Codex, or Pi) with `--type claude -- native-demo`: AgentAPI then reads that agent's session logs
-for it, in the agent's own directories, so it shows whatever sessions, subagent logs and model calls
-are there. The demo writes no log of its own, so its tasks show no cost.
+To try earlier sessions, costs and Lineage, run the demo as Claude Code with
+`--type claude -- native-demo`, or use the Codex or Pi type. AgentAPI reads that agent's log
+directories and shows the sessions, subagents and model calls it finds. The demo writes no session
+log, so its own tasks have no cost.
 
 Its settings can change from the composer's menus or slash commands: models Swift, Deep, and Plain
 (which has no effort setting) and all four permission modes. In ask mode every turn's first command
@@ -73,18 +72,18 @@ Steering appends to the reply, and Stop ends the turn as interrupted. The adapte
 
 ## What the chat keeps in the browser
 
-The chat caches each server's conversation in IndexedDB, so reopening it shows the transcript at
-once and asks the server only for what changed. A save writes only the messages that changed. Each
-server keeps one conversation; a server's cache goes after 14 days without use, and the least
-recently used go when more than 10 servers have one. Drafts, messages that failed to send and
-dismissed notices stay in localStorage. If the chat stops working, its error screen shows the error
-and offers to clear the server's cached conversation and reload.
+The chat stores one conversation per server in IndexedDB. Reopening shows the cached transcript
+immediately, then fetches changes; saves write only changed messages. Caches expire after 14 days
+without use, and only the 10 most recently used servers keep one.
+
+Drafts, failed messages and dismissed notices stay in localStorage. If the chat crashes, the error
+screen shows the error and offers to clear that server's cached conversation and reload.
 
 ## Interface screenshots
 
-These Chromium captures use the production chat UI built with `make build` and served by a
-dedicated AgentAPI server running the built-in `native-demo` adapter. The backend delivers real native events and requests; the agent's
-replies and tool results are simulated.
+These Chromium captures show the production chat UI built with `make build`, served by a dedicated
+AgentAPI server running `native-demo`. The backend delivers real native events and requests;
+agent replies and tool results are simulated.
 
 ![Native desktop chat with structured tool activity and session controls](../docs/screenshots/chat-desktop.png)
 

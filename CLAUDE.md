@@ -1,7 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this
-repository.
+Use these commands and conventions when working on AgentAPI with Claude Code (claude.ai/code).
 
 ## Project overview
 
@@ -47,8 +46,8 @@ scripted echo agent that simulates real agent behavior.
 
 ## Architecture
 
-[docs/architecture.md](docs/architecture.md) describes the packages, the data flow of each
-transport, events, persistence and the security model in full.
+See [docs/architecture.md](docs/architecture.md) for packages, transport data flows, events,
+persistence and the security model.
 
 ### PTY message flow
 
@@ -63,16 +62,16 @@ response messages over stdio. All three transports update the shared event emitt
 
 ### Key packages
 
-- **`lib/httpapi/`** — HTTP server (chi router + huma for OpenAPI). Routes: `/messages`, `/message`, `/status`, `/events` (SSE), `/queue`, `/tasks`, `/summary`, `/upload`, `/rich-messages`. The chat UI is embedded via `//go:embed` from `lib/httpapi/chat/`. The `EventEmitter` keeps the conversation state clients read and derives the tasks (`tasks.go`: a user message and the agent's turn on it); `task_update` and `queue_update` go only to `/events?sync=1` clients; `summary.go` keeps a summary for clients that watch many AgentAPIs, sent as `summary_update` only to `/events?only=summary`. Features outside the conversation's changes are small modules with narrow dependencies (`fileAPI`, `terminalAPI`, `uploadAPI`, `authAPI`, `webhookAPI`). Webhooks push events to a receiver: `webhook.go` delivers them (queue, retries, HMAC signatures, heartbeats), `webhook_events.go` subscribes to the emitter and turns its events into task, request, message and tool events.
-- **`lib/conversation/`** — What the transports share, imported as `conv`: `conv.Message`, roles, status, error levels, validation errors, the `Conversation` interface the server drives a transport through and the `Emitter` a transport reports to.
+- **`lib/httpapi/`** — HTTP server (chi router + huma for OpenAPI). Routes: `/messages`, `/message`, `/status`, `/events` (SSE), `/queue`, `/tasks`, `/summary`, `/upload`, `/rich-messages`. The chat UI is embedded via `//go:embed` from `lib/httpapi/chat/`. The `EventEmitter` keeps the conversation state clients read and derives the tasks (`tasks.go`: a user message and the agent's turn on it); `task_update` and `queue_update` go only to `/events?sync=1` clients. For monitoring multiple AgentAPIs, `summary.go` provides instance summaries through `/summary` and sends `summary_update` to `/events?only=summary`. Features outside the conversation's changes are small modules with narrow dependencies (`fileAPI`, `terminalAPI`, `uploadAPI`, `authAPI`, `webhookAPI`). Webhooks push events to a receiver: `webhook.go` delivers them (queue, retries, HMAC signatures, heartbeats), `webhook_events.go` subscribes to the emitter and turns its events into task, request, message and tool events.
+- **`lib/conversation/`** — Shared types and interfaces, imported as `conv`: `conv.Message`, roles, status, error levels and validation errors. The server calls transports through `Conversation`; transports report changes through `Emitter`.
 - **`lib/screentracker/`** — The PTY engine: `PTYConversation` (a `conv.Conversation`) manages terminal snapshots, screen diffing, message splitting, and status detection (stable vs. changing); `AgentIO` and `TerminalPart` type into the agent's terminal.
 - **`lib/termexec/`** — Terminal process execution. Wraps PTY creation and process lifecycle.
 - **`lib/msgfmt/`** — Agent-specific message formatting. Strips echoed user input and TUI elements (input boxes, borders) from terminal output. Each agent type has different formatting quirks.
 - **`lib/transcript/`** — The types of the structured transcript the transports share: rich messages (content blocks, images, usage) and timeline events.
 - **`lib/agentlog/`** — The agents' session-log formats, one package each (`claudelog/`, `codexlog/`, `pilog/`): record types, parsers into rich messages and timeline events (the native adapters use them too), prompt and injected-context classification, model calls, file layout and resolvers; plus line reading, the incremental file index and format-drift warnings.
-- **`lib/sessions/`** — A directory's earlier sessions through a server-held `Store`: the list and history (`GET /sessions`, resume), subagents (`GET /subagents`, `GET /timeline?subagents=true`) and costs (`GET /sessions`, `GET /cost`), read incrementally from the logs.
+- **`lib/sessions/`** — A server-held `Store` reads session logs incrementally for earlier sessions and history (`GET /sessions`, resume), subagents (`GET /subagents`, `GET /timeline?subagents=true`) and costs (`GET /sessions`, `GET /cost`).
 - **`lib/jsonlwatcher/`** — Tails the session log of a PTY agent's process for rich structured messages (tool calls, thinking, usage), alongside the PTY transport.
-- **`lib/pricing/`** — Model prices per million tokens: the built-in `prices.json` (embedded) and a `--prices` file that adds or replaces models; `Price.Cost` turns a call's tokens into the API-equivalent USD cost.
+- **`lib/pricing/`** — Model prices per million tokens, from the embedded `prices.json` and any additions or overrides in a `--prices` file. `Price.Cost` calculates a call's API-equivalent USD cost from its tokens.
 - **`x/acpio/`** — Experimental ACP (Agent Client Protocol) transport, alternative to PTY.
 - **`lib/native/`** — Native transport. `Conversation` (a `conv.Conversation`) turns the events of an `Adapter` (one per agent: `claude/`, `codex/`, `pi/`, plus the simulated `demo/`) into conversation state, requests (approvals, questions, plans) and login state. Shared pieces: `procutil/` (child process lifecycle), `IsAuthError`, `ReadImage`; `nativetest/` has a fake adapter. `lib/procenv` prepares the environment for agent processes on all transports.
 - **`lib/statedb/`** — SQLite persistence of conversations, native and PTY (`--state-db`; a deprecated `--state-file` is imported into it).
@@ -94,9 +93,8 @@ response messages over stdio. All three transports update the shared event emitt
 
 ### Exhaustive switch/map enforcement
 
-The `exhaustive` golangci-lint checker is enabled for both switches and maps. When adding a new
-`AgentType` or enum value, all switch statements and map literals over that type must be updated or
-the linter will fail.
+The `exhaustive` golangci-lint checker covers switches and maps. When adding an `AgentType` or enum
+value, update every switch and map literal over that type to pass lint.
 
 ## Conventions
 

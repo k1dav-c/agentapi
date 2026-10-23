@@ -1,11 +1,11 @@
 # End-to-End Testing Framework
 
-This directory contains AgentAPI's end-to-end (E2E) tests. The tests use JSON conversation scripts
-and a fake agent to simulate agent interactions.
+AgentAPI's end-to-end (E2E) tests send scripted conversations through the server. A fake agent reads
+the JSON scripts and checks incoming messages before returning predefined responses.
 
 ## Run the tests
 
-Run this command from the repository root:
+From the repository root:
 
 ```shell
 go test ./e2e
@@ -25,7 +25,7 @@ For each test, `echo_test.go`:
 ## Adding a new test
 
 1. Create a new JSON file in `testdata/` with a unique name.
-2. Define the scripted conversation in the JSON file. Each message has the following fields:
+2. Define the conversation. Each message has these fields:
    - `expectMessage`: The message from the user that the fake agent expects.
    - `thinkDurationMS` (optional): The simulated thinking time in milliseconds before the agent
      responds.

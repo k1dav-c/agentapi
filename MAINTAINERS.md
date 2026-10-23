@@ -2,10 +2,9 @@
 
 ## Release Process
 
-Releases are automated by `.github/workflows/release.yml`. Every push to `main` runs
-`next-version.sh`, which determines the next version from
-[Conventional Commit](https://www.conventionalcommits.org/) messages since the last `vX.Y.Z` tag.
-The highest applicable bump wins:
+On every push to `main`, `.github/workflows/release.yml` runs `next-version.sh` to choose the next
+version from [Conventional Commit](https://www.conventionalcommits.org/) messages since the last
+`vX.Y.Z` tag. The highest applicable bump wins:
 
 | Commits since the last release                                   | Bump  |
 |------------------------------------------------------------------|-------|
@@ -14,10 +13,10 @@ The highest applicable bump wins:
 | Other commits (`fix:`, `perf:`, `refactor:`, or non-conventional messages), excluding merge commits | patch |
 | Only `docs:`, `chore:`, `test:`, `ci:`, `style:`, `build:`, or merge commits | none |
 
-When a release is needed, the workflow builds versioned binaries (`make build VERSION=X.Y.Z`),
-creates the `vX.Y.Z` tag and a GitHub release with generated notes, and attaches the binaries and
-`checksums.txt`. The running version is shown in the chat UI header and reported as
-`agentapi_version` by `GET /status` and the `status_change` SSE event.
+For a release, the workflow builds binaries with `make build VERSION=X.Y.Z`, creates the `vX.Y.Z`
+tag and a GitHub release with generated notes, then attaches the binaries and `checksums.txt`.
+The chat header, `GET /status` and the `status_change` SSE event report the running version
+(`agentapi_version`).
 
 To force a release or a specific bump, run the workflow manually (Actions → Release → Run workflow)
 and pick `patch`, `minor` or `major`.

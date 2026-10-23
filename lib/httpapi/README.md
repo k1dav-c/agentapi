@@ -1,5 +1,4 @@
 # Embedded chat assets
 
-The `chat/marker` file keeps the embedded asset directory nonempty, allowing the AgentAPI binary to
-build before chat UI assets are generated. Without it, `go build` would fail when the directory
-contains no files.
+`chat/marker` keeps the embedded asset directory nonempty so `go build` works before the chat UI
+assets are generated. Embedding an empty directory would fail.
