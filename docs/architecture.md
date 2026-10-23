@@ -645,7 +645,13 @@ a variant for embedding in other pages.
   and only the 10 most recently used are kept (`lib/session-cache.ts`).
 - `lib/task-timeline.ts`'s `TimelineBuilder` turns the messages into tasks,
   rebuilding only from the first change, and keeps the objects of what didn't
-  change so memoized tasks and tool calls don't render again. A render error
+  change so memoized tasks and tool calls don't render again. A section takes
+  its state from the server's task (`task_update`, held and cached like the
+  requests), the one its prompt started or was steered into; rich activity
+  goes to the task its `task_id` names, and only untagged activity is placed
+  by time. A task's cost is the model calls made while it ran. The queue
+  follows `queue_update` events; `GET /queue` is read on each connection,
+  and every 60 seconds only while no event came. A render error
   shows `chat-error-boundary.tsx`, which offers to clear the cached
   conversation and reload.
 - `lib/chat-api.ts` is the typed HTTP client; `lib/api-schema.ts` contains

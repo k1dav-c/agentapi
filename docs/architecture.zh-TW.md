@@ -544,7 +544,11 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   只寫入改變的部分，並記下所存內容的序號；超過 14 天沒用的伺服器快取會刪除，最多只保留最近使用
   的 10 個（`lib/session-cache.ts`）。
 - `lib/task-timeline.ts` 的 `TimelineBuilder` 把訊息整理成任務，只從第一個改變處重建，沒變的
-  部分保留原物件，讓 memo 過的任務和工具呼叫不必重新 render。render 出錯時會顯示
+  部分保留原物件，讓 memo 過的任務和工具呼叫不必重新 render。每一段的狀態取自伺服器的任務
+  （`task_update`，和請求一樣保存與快取），也就是它的提示詞開始、或被 steer 進去的那個任務；結構化
+  的活動依 `task_id` 歸到所指的任務，只有沒有標記的活動才依時間放置。任務的花費是它執行期間的模型
+  呼叫。佇列依 `queue_update` 事件更新；每次連線時讀取 `GET /queue`，只有一直沒收到事件時才每 60 秒
+  讀取一次。render 出錯時會顯示
   `chat-error-boundary.tsx`，可以清除快取的對話後重新載入。
 - `lib/chat-api.ts` 是型別化的 HTTP 用戶端，`lib/api-schema.ts` 保存由 OpenAPI schema 產生的型別。
 - `components/chat.tsx` 負責頁面版面：訊息清單（任務、工具呼叫列、思考）、輸入框上方的停靠區

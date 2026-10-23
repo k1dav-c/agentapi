@@ -244,9 +244,10 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 標誌和名稱（例如 Pi）開頭，內容以 Markdown 顯示。每次工具呼叫各占一列，
 列出指令（`$ command`）、結束代碼、耗時和輸出預覽；寬螢幕上另以旁註顯示思考內容。
 
-輸入框上方的狀態列會顯示 agent 目前的活動。當 agent 等待你回答時，標頭、分頁標題
-和狀態列都會顯示「Needs you」，佇列中的任務則會標示為暫緩（held）。較長的任務會先顯示
-最近的 40 個步驟。
+每個任務的狀態（Working、Done、Failed、Limit reached）來自伺服器的[任務](#任務)，它的工具呼叫和
+思考內容也是伺服器所說、在這個任務中開始的那些。輸入框上方的狀態列會顯示 agent 目前的活動。當
+agent 等待你回答時，標頭、分頁標題和狀態列都會顯示「Needs you」，佇列中的任務則會標示為暫緩
+（held）。較長的任務會先顯示最近的 40 個步驟。
 
 每則 agent 訊息都能個別切換 Markdown 或原始文字顯示，不會影響其他訊息。
 

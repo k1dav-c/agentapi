@@ -282,7 +282,9 @@ by the agent's logo, name, and reply in Markdown. Each tool call occupies one ro
 (`$ command`), exit code, duration, and output preview. On wide screens, thinking appears as margin
 notes.
 
-A status strip above the composer shows the agent's current activity. The header, tab title, and
+Each task's state (Working, Done, Failed, Limit reached) is the server's [task](#tasks), and its
+tool calls and thinking are the ones the server says began in it. A status strip above the composer
+shows the agent's current activity. The header, tab title, and
 status strip show "Needs you" while the agent waits for an answer, and queued tasks are marked as
 held. Long tasks show their latest 40 steps first.
 
