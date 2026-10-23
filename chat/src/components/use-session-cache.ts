@@ -1,8 +1,8 @@
 "use client";
 
-import {useEffect, useRef, type RefObject} from "react";
+import {useEffect, useLayoutEffect, useRef} from "react";
 import {saveSession} from "@/lib/session-cache";
-import type {SyncTracker} from "@/lib/session-sync";
+import type {SyncPoint} from "@/lib/pending-events";
 import type {Transport} from "@/lib/dispatch";
 import type {NativeRequest} from "@/lib/native-requests";
 import {isDraftMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
@@ -16,32 +16,37 @@ const CACHE_SAVE_INTERVAL_MS = 2000;
 // it left off. A save writes only the messages that changed.
 export function useSessionCache({
   agentAPIUrl,
-  syncRef,
+  synced,
   messages,
   richMessages,
   requests,
   transport,
 }: {
   agentAPIUrl: string;
-  syncRef: RefObject<SyncTracker>;
+  // The point of the conversation the state is at (see useEventStream).
+  synced: SyncPoint;
   messages: (Message | DraftMessage)[];
   richMessages: RichMessage[];
   requests: NativeRequest[];
   transport: Transport;
 }) {
   const saveRequestRef = useRef<() => void>(() => {});
-  const latestRef = useRef({messages, richMessages, requests, transport});
-  latestRef.current = {messages, richMessages, requests, transport};
+  // The state last rendered, and its point: what is saved is a state and
+  // the changes it holds, so that a reload resumes from there.
+  const latestRef = useRef({synced, messages, richMessages, requests, transport});
+  useLayoutEffect(() => {
+    latestRef.current = {synced, messages, richMessages, requests, transport};
+  });
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let lastSave = 0;
     const save = () => {
       timer = null;
-      lastSave = Date.now();
-      // The watermark doesn't pass a replay still on its way, so a reload
-      // gets the rest of it again.
-      const {epoch, watermark: seq} = syncRef.current;
+      // Nothing to save until the state is at a point of a conversation;
+      // the first one is saved as soon as it is rendered.
+      const {epoch, seq} = latestRef.current.synced;
       if (!epoch) return;
+      lastSave = Date.now();
       void saveSession(agentAPIUrl, {
         epoch,
         seq,
@@ -66,8 +71,8 @@ export function useSessionCache({
       if (timer) clearTimeout(timer);
       saveRequestRef.current = () => {};
     };
-  }, [agentAPIUrl, syncRef]);
+  }, [agentAPIUrl]);
   useEffect(() => {
     saveRequestRef.current();
-  }, [messages, richMessages, requests]);
+  }, [synced, messages, richMessages, requests]);
 }

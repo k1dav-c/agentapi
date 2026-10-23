@@ -322,7 +322,19 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const requestsRef = useRef(requests);
   requestsRef.current = requests;
   const {queuedMessages, refreshQueue, updateQueuedMessage, deleteQueuedMessage, steerQueuedMessage, reorderQueue} = useQueue(api);
-  const {connectionStatus, reconnectAttempt, nextReconnectAt, reconnectByUser} = useEventStream({
+  // Reads the requests from the REST API; see mergeListedRequests.
+  const refreshRequests = async () => {
+    const heldWhenAsked = requestsRef.current;
+    const listed = await api.getRequests();
+    setRequests((previous) => mergeListedRequests(previous, listed, heldWhenAsked));
+  };
+  // A connection that resumes gets what changed since, but the server lets
+  // go of closed requests without a word: a request still held as pending
+  // may be gone. Once the replay is applied, the requests are listed again.
+  const onReplayed = useStableCallback(() => {
+    if (pendingRequests(requestsRef.current).length > 0) void refreshRequests().catch(() => undefined);
+  });
+  const {connectionStatus, reconnectAttempt, nextReconnectAt, reconnectByUser, synced, markSynced} = useEventStream({
     agentAPIUrl,
     api,
     syncRef,
@@ -333,8 +345,9 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     updateAgentStatus,
     agentStatusRef,
     refreshQueue,
+    onReplayed,
   });
-  useSessionCache({agentAPIUrl, syncRef, messages, richMessages, requests, transport});
+  useSessionCache({agentAPIUrl, synced, messages, richMessages, requests, transport});
   const pendingRequestCount = useMemo(() => pendingRequests(requests).length, [requests]);
   const agentStarting = lifecycle === "starting";
   const agentState = getAgentState({
@@ -489,12 +502,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     return result.ok;
   };
 
-  // Reads the requests from the REST API; see mergeListedRequests.
-  const refreshRequests = async () => {
-    const heldWhenAsked = requestsRef.current;
-    const listed = await api.getRequests();
-    setRequests((previous) => mergeListedRequests(previous, listed, heldWhenAsked));
-  };
 
   const respondToRequest = async (id: string, response: RequestResponse) => {
     try {
@@ -584,6 +591,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
       // doesn't send it needs clearing here.
       if (syncRef.current.epoch !== epoch) return;
       syncRef.current.reset();
+      markSynced();
       void clearSession(agentAPIUrl);
       setMessages([]);
       setRichMessages([]);
@@ -596,6 +604,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
       // under a new epoch.
       if (syncRef.current.epoch !== epoch) return;
       syncRef.current.reset();
+      markSynced();
       void clearSession(agentAPIUrl);
       setMessages([]);
       setRichMessages([]);
