@@ -2,9 +2,8 @@
 
 [English](architecture.md) | 繁體中文
 
-AgentAPI 是單一的 Go 執行檔，每個行程啟動一個 coding agent，並透過三種 transport 之一
-與它溝通。AgentAPI 提供 HTTP API、事件串流與內建聊天介面。本文說明實作架構；功能與用法請參閱
-[README](../README.zh-TW.md)。
+每個 AgentAPI 行程透過三種 transport 之一執行一個 coding agent，並提供 HTTP API、事件串流
+與內建聊天介面。本指南說明這個 Go 執行檔的實作架構；功能與用法見 [README](../README.zh-TW.md)。
 
 ## 目錄
 
@@ -73,10 +72,9 @@ flowchart TB
 每個 AgentAPI 行程執行一個 agent。所有 transport 都實作 `conv.Conversation`，供伺服器
 傳送訊息與讀取對話，並將變更回報給同一個事件發送器（emitter）。
 
-因此核心 HTTP API、事件串流、佇列與聊天介面在每種 transport 上的運作方式都相同。各 transport
-專屬的功能，例如 native 請求、設定與 shell 終端機，則由獨立端點提供。處理常式透過對話介面操作
-agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原始訊息（raw message）和回答終端機
-對話框的按鍵會直接寫入 agent 的終端機。
+因此，核心 HTTP API、事件串流、佇列與聊天介面在各 transport 上的運作方式相同。native 請求、
+設定與 shell 終端機則有獨立端點。處理常式呼叫對話介面，從 emitter 讀取狀態；只有原始訊息
+（raw message）和終端機對話框的回答，會把按鍵直接寫入 agent 的終端機。
 
 ## 儲存庫結構
 
@@ -84,15 +82,15 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 | --- | --- |
 | `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、transport、啟動 agent、訊號）、`attach`，以及 `update`（會驗證 checksum 的自我更新） |
 | `lib/httpapi/` | HTTP 伺服器：路由與處理常式、`EventEmitter`、佇列、token 驗證、webhook、MCP／檔案／終端機端點，以及嵌入的聊天介面 |
-| `lib/conversation/` | 各 transport 共用的部分（以 `conv` 匯入）：訊息、角色、狀態與錯誤等級，伺服器驅動 transport 的 `Conversation` 介面，以及 transport 回報變更的 `Emitter` |
+| `lib/conversation/` | 共用型別（以 `conv` 匯入）：訊息、角色、狀態與錯誤等級。伺服器透過 `Conversation` 呼叫 transport，transport 透過 `Emitter` 回報變更 |
 | `lib/screentracker/` | PTY 對話：畫面快照、訊息切分、穩定狀態偵測，以及把訊息片段輸入 agent 的終端機（`AgentIO`、`TerminalPart`） |
 | `lib/termexec/` | 在虛擬終端機中執行 agent，搭配記憶體內的 VT100 模擬器（`xpty`、`vt10x`）；重新啟動時可以替換行程 |
 | `lib/msgfmt/` | 各 agent 專屬的畫面輸出整理：回顯的輸入、輸入框、狀態列、工具呼叫，以及判斷何時可以送出第一個提示 |
 | `lib/transcript/` | 各傳輸共用的結構化對話型別：結構化訊息與其內容區塊、時間軸事件 |
 | `lib/agentlog/` | 各 agent 工作階段紀錄的格式，一種 agent 一個套件（`claudelog`、`codexlog`、`pilog`）：紀錄型別、解析成結構化訊息與時間軸事件的 parser（native adapter 也使用）、prompt 與注入內容的辨識、模型呼叫、檔案配置與 resolver；另有逐行讀取、增量檔案索引和格式變動警告 |
-| `lib/sessions/` | 目錄中先前的工作階段，透過伺服器持有的 `Store` 讀取：清單與單一工作階段的對話（`history.go`）、工作階段執行過的 sub agent（`subagents.go`），以及各工作階段的花費（`cost.go`） |
+| `lib/sessions/` | 伺服器持有的 `Store` 讀取目錄中先前的工作階段與對話（`history.go`）、sub agent（`subagents.go`）及花費（`cost.go`） |
 | `lib/jsonlwatcher/` | 找到並追蹤 PTY agent 行程的工作階段紀錄檔，取得它的結構化訊息 |
-| `lib/pricing/` | 每百萬 tokens 的模型價格（內建的 `prices.json` 和 `--prices` 檔案），以及一次呼叫的 tokens 依此價格的金額 |
+| `lib/pricing/` | 每百萬 tokens 的模型價格（內建 `prices.json` 與 `--prices` 檔案），以及單次呼叫的花費計算 |
 | `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入 |
 | `lib/native/claude`、`codex`、`pi` | 每種 agent 協定各一個 adapter |
 | `lib/native/agentio` | 這些 adapter 共用的 JSON lines 通訊：逐行讀取 agent 的輸出、寫入它的 stdin，並把它的回應對應到等待中的請求 |
@@ -101,7 +99,7 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
 | `lib/statedb/` | `--state-db` 的 SQLite 持久保存（native 與 PTY），以及 `--state-file` 的匯入 |
 | `lib/shellterm/` | Native 工作階段共用的 shell 終端機 |
-| `lib/htmlpreview/` | 為 `GET /files/preview` 把 HTML 檔轉成能獨立顯示的頁面：以相對路徑引用的檔案都轉成 data: URL |
+| `lib/htmlpreview/` | 為 `GET /files/preview` 將相對路徑引用的資源嵌入為 data: URL，產生可獨立顯示的 HTML 預覽 |
 | `lib/mcpconfig/` | 讀寫各 agent 的 MCP 設定檔 |
 | `lib/procenv/` | AgentAPI 啟動的行程的環境變數：各種 transport 的 agent，以及終端機的 shell |
 | `lib/agenthome/` | 各 agent 保存狀態的目錄（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`PI_CODING_AGENT_DIR`） |
@@ -166,14 +164,17 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 | `events.go`、`events_*.go`、`models.go` | Emitter（訂閱與重播；它保存的狀態、畫面、請求與訊息）與 API 的型別 |
 | `embed.go`、`uploads.go` | 嵌入的聊天介面；上傳的檔案（`uploadAPI`，它從操作的 middleware 處理 `POST /upload`：huma v2.32 每次處理 multipart 請求都會改動共用的操作） |
 
-未透過 huma 宣告的 chi 路由提供聊天介面（`/chat/*`，`/` 會重新導向到這裡）、上傳的圖片
-（`/uploads/{checksum}/{name}`），以及工作目錄中的圖片檔（`/files/image`）。TTY mode 的畫面串流
-（`/internal/screen`）則是不列入 OpenAPI schema 的 huma 操作。`Server` 持有對話、emitter、
-佇列與它的鎖（`s.mu`）、webhook 傳送器、MCP 儲存、shell 終端機和狀態資料庫。不參與對話變更的
-功能則由只持有所需依賴的小模組處理，在註冊路由時建立：`fileAPI`（工作目錄）、`terminalAPI`
-（shell）、`uploadAPI`（上傳儲存）、`authAPI`（token 檢查）和 `webhookAPI`（傳送器與狀態資料庫）。
-遇到依 transport 而異的操作時，處理常式會呼叫對應的 `agentBackend`：`ptyBackend` 驅動終端機或
-ACP 對話，`nativeBackend` 驅動 native 對話。
+huma 以外的 chi 路由提供聊天介面（`/chat/*`，`/` 會重新導向到這裡）、上傳圖片
+（`/uploads/{checksum}/{name}`）與工作目錄圖片（`/files/image`）。TTY mode 的畫面串流
+（`/internal/screen`）是隱藏於 OpenAPI schema 的 huma 操作。
+
+`Server` 持有對話、emitter、佇列與鎖（`s.mu`）、webhook 傳送器、MCP 儲存、shell 終端機和
+狀態資料庫。對話變更以外的功能交給註冊路由時建立的小模組：`fileAPI` 持有工作目錄，
+`terminalAPI` 持有 shell，`uploadAPI` 持有上傳儲存，`authAPI` 持有 token 檢查，
+`webhookAPI` 持有傳送器與狀態資料庫。
+
+依 transport 而異的操作由 `agentBackend` 處理：`ptyBackend` 驅動終端機或 ACP 對話，
+`nativeBackend` 驅動 native 對話。
 
 ## 對話與 transport
 
@@ -296,9 +297,8 @@ type Factory func(resume Resume) (Adapter, error)
   （`GET /sessions`、`GET /cost`）：Claude Code 的 assistant 訊息（每個 message id 一次）、Codex 的
   token 計數、Pi 回報的金額。`lib/pricing` 為每次呼叫計價；Claude Code 的 `cost-state` 紀錄會把
   紀錄檔沒有列出的部分（壓縮）補成未逐筆列出的呼叫。分支複製的呼叫只算一次，算在最先建立的
-  工作階段。Store 為每個紀錄檔保存增量索引（大小、讀到的位置和讀取器的狀態），所以變長的紀錄檔
-  會從上次的位置接著讀，而且只讀完整的行；變短或被換掉的會重新讀取。同時的請求共用一次讀取，
-  索引有大小上限，已不存在的紀錄檔會被移除。
+  工作階段。Store 索引每個紀錄檔的大小、讀取位置與讀取器狀態，只讀取新增的完整行；
+  檔案縮小或被替換時重新讀取。同時發出的請求共用一次讀取。索引有大小上限，會移除已不存在的紀錄檔。
 - **紀錄格式。** 每種格式只在一個地方解碼（`lib/agentlog`）：什麼是 prompt、注入的內容或工具
   結果只判斷一次，native adapter、歷史、花費和 PTY 監看器都用同一套。parser 不認得的紀錄和無法
   解碼的行，每個紀錄檔只會以 Warn 記錄一次，並附上紀錄中的 CLI 版本，所以格式改變時會出現在
@@ -348,18 +348,18 @@ type Factory func(resume Resume) (Adapter, error)
   （沒有選用 sync 的用戶端永遠收不到：有些用戶端遇到不認得的事件類型會出錯）；epoch 相符時只重播
   `since=<seq>` 之後的變更，事件也會帶有 SSE id，讓重新連線的 `EventSource` 從
   `Last-Event-ID` 接續。
-- 無法用更新表達的變更（收回訊息）會讓對話換成新的 epoch，並結束對話的訂閱，而不是串流整個
-  狀態：用戶端用舊的 epoch 重新連線，就會拿到 SSE id 正確的完整重播。落後超過緩衝的訂閱也會
-  這樣結束；開啟結構化訊息超過緩衝四分之一的工作階段時，也會結束訂閱，而不是逐則串流。
-- emitter 會為所有 transport 推導任務（`tasks.go`）：使用者訊息開始一個任務，任務執行中加進來的
-  訊息 steer 它，agent 閒置且沒有開著的請求或終端機對話框時任務結束。若只是因為回答而讓 agent
-  閒置，計時器會先給它 3 秒恢復工作，之後才結束任務。結構化訊息會取得它抵達時執行中任務的
-  `task_id`。還原或接續的訊息屬於過去，視為已完成。
-- emitter 也維護對話的摘要（`summary.go`）：instance、狀態、agent 為什麼在等使用者
-  （`attention`）、標題、最新任務、待處理請求、佇列和用量。除了畫面以外的每次變更後，只要有訂閱
-  需要，它就重新算出摘要，和上次送出的不同時才送出 `summary_update`，所以回覆變長不會送出任何
-  東西。只有 `/events?only=summary` 會訂閱它，而且不會收到其他事件；`PUT /webhook` 可以修改
-  instance 的 ID 和網址，所以修改後會要求重新檢查摘要。
+- 收回訊息等無法用更新表達的變更，會產生新的 epoch 並結束對話訂閱。用戶端以舊 epoch
+  重新連線後，會收到 SSE id 正確的完整重播。訂閱落後超過緩衝，或開啟工作階段需串流超過
+  緩衝四分之一的結構化訊息時，也會結束訂閱。
+- emitter 為所有 transport 推導任務（`tasks.go`）。使用者訊息開始任務，執行中加入的訊息會
+  steer 該任務；agent 閒置且沒有待處理請求或終端機對話框時，任務結束。回答後若 agent
+  暫時閒置，計時器會先留 3 秒讓它恢復工作。結構化訊息抵達時，會取得目前任務的 `task_id`。
+  還原或接續的訊息視為已完成的歷史紀錄。
+- emitter 維護對話摘要（`summary.go`），包含 instance、狀態、`attention`（需要使用者處理的
+  原因）、標題、最新任務、待處理請求、佇列和用量。有摘要訂閱者時，畫面以外的每次變更都會觸發
+  重新計算，摘要不同才送出 `summary_update`；因此回覆文字增長不會觸發摘要更新。
+  只有 `/events?only=summary` 訂閱這些更新，串流另會送出心跳。`PUT /webhook` 可修改
+  instance 的 ID 與網址，因此也會觸發摘要檢查。
 - `/internal/screen` 以 `screen` 事件為 TTY mode 串流畫面。
 - 狀態在 `running` 與 `stable` 之間切換時，會觸發 `run.status_changed` webhook 事件。webhook
   observer 像 `/events` 用戶端一樣訂閱 emitter，把它的事件轉成其他 webhook 事件：emitter 的任務
@@ -371,21 +371,21 @@ type Factory func(resume Resume) (Adapter, error)
 
 ## 訊息佇列
 
-agent 忙碌時送出的訊息會在伺服器的佇列中等待（`s.queue`；它有自己的鎖，所以讀取不必等待，
-變更佇列時也都會持有 `s.mu`）。派送迴圈每 500 毫秒檢查第一則訊息是否能送出：native agent 的
-對話必須閒置，且沒有因用量限制而暫停佇列；PTY agent 的畫面則必須穩定且未顯示對話框；agent 重新
-啟動期間兩者都不送。被拒絕的訊息總共最多嘗試 5 次，但可能重複送達的訊息會立刻丟棄：adapter 已經
-寫出、卻沒有得到確認的 native 送出（`native.ErrUnconfirmed`：呼叫逾時、被取消或 agent 結束），
-以及 PTY agent 已輸入但沒有送出的訊息（再送一次會重複輸入）。寫入 native agent stdin 的動作會隨
-呼叫的 context 結束，所以不再讀取的 agent 無法佔住 `s.mu`。使用 native transport 時，訊息也可以
-steer 進執行中的回合，或中斷它。佇列的每次變更都會在佇列的鎖之外、帶著版本號送到 emitter，成為
-`queue_update`，所以較舊的變更晚到時會被捨棄。佇列也是持久保存狀態的一部分。
+agent 忙碌時，訊息會在 `s.queue` 等待。佇列有獨立的鎖，讀取不必等待伺服器的鎖；變更時也會
+持有 `s.mu`。派送迴圈每 500 毫秒檢查第一則訊息：native agent 必須閒置，且沒有用量限制暫停
+佇列；PTY agent 的畫面必須穩定且沒有對話框。重新啟動期間，兩者都不派送訊息。
+
+被拒絕的訊息最多嘗試 5 次。可能重複送達的訊息會立即丟棄：已寫出但未確認的 native 訊息
+（`native.ErrUnconfirmed`，原因可能是逾時、取消或 agent 結束），或已輸入但未送出的 PTY 訊息。
+寫入 native stdin 的動作會隨呼叫的 context 結束，避免不再讀取的 agent 佔住 `s.mu`。
+
+native 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之外以 `queue_update` 送到 emitter，
+並帶版本號，供 emitter 捨棄晚到的舊變更。佇列會隨對話一起持久保存。
 
 ## 持久保存
 
-`lib/statedb` 透過 `modernc.org/sqlite` 把對話保存在 SQLite 裡；它是純 Go 的實作，所以
-`CGO_ENABLED=0` 的建置也能使用。不論哪種 transport，emitter 都會把每次變更交給它；只有 ACP
-不使用它。
+`lib/statedb` 使用純 Go 的 `modernc.org/sqlite`，把對話保存在 SQLite，支援 `CGO_ENABLED=0`
+建置。native 與 PTY transport 的 emitter 會交付每次變更；ACP 不使用持久保存。
 
 - 資料表有 `messages`、`rich_messages`、`session_events`、`requests`、`queue`、`tasks`（每個
   任務以伺服器編碼後的形式、依開始它的訊息 ID 保存），以及
@@ -399,8 +399,8 @@ steer 進執行中的回合，或中斷它。佇列的每次變更都會在佇�
   接續它自己的工作階段。PTY 對話在建立時就收到還原的訊息（`InitialMessages`），所以第一次
   snapshot 會接續它們而不是取代它們，最後一則 agent 訊息在使用者送出下一則訊息前維持原本的內容。
   還原後，先前待處理的請求會標示為已過期。
-- 讀不出來的資料列會被略過並記錄，不會讓伺服器無法啟動。資料表結構以編號的 migration 變更，版本記在
-  檔案的 `PRAGMA user_version`。
+- 無法讀取的資料列會記錄後略過，讓伺服器仍能啟動。編號的 migration 負責更新資料表結構，
+  `PRAGMA user_version` 記錄版本。
 
 `--state-file` 是較早的 PTY 機制（關閉時寫出 JSON），已棄用：`cmd/server` 會把它一次性匯入
 旁邊的狀態資料庫（`statedb.ImportStateFile`，只匯入空的資料庫），之後由資料庫保存對話。SIGUSR1
@@ -458,9 +458,8 @@ Content-Security-Policy。
 
 `lib/mcpconfig` 讀寫各 agent 的 MCP 設定（Claude Code 工作目錄中的 `.mcp.json`、Codex 的
 `$CODEX_HOME/config.toml`、Pi 的 `$PI_CODING_AGENT_DIR/mcp.json`，預設為
-`~/.pi/agent/mcp.json`），並保留不相關的設定。設定檔（profile）是可以套用的已儲存設定。agent
-在啟動時讀取這些檔案，所以變更要重新啟動後才會生效（native agent 則是接續同一個工作階段重新
-載入）。
+`~/.pi/agent/mcp.json`），並保留不相關的設定。設定檔（profile）可儲存整組伺服器供重複套用。
+agent 啟動時才讀取設定，因此變更需要重新啟動；native agent 則可重新載入同一個工作階段。
 
 ## 安全模型
 
@@ -549,8 +548,8 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   事件抵達時就換成空清單。IndexedDB 為每個伺服器保存對話供下次開啟時載入：每則訊息一筆紀錄，
   只寫入改變的部分，並記下所存內容的序號；超過 14 天沒用的伺服器快取會刪除，最多只保留最近使用
   的 10 個（`lib/session-cache.ts`）。
-- `lib/task-timeline.ts` 的 `TimelineBuilder` 把訊息整理成任務，只從第一個改變處重建，沒變的
-  部分保留原物件，讓 memo 過的任務和工具呼叫不必重新 render。每一段的狀態取自伺服器的任務
+- `lib/task-timeline.ts` 的 `TimelineBuilder` 將訊息分組為任務，從第一個變更處重建並保留未變的
+  物件，讓經過 memo 的任務與工具呼叫不必重新 render。每一段的狀態取自伺服器的任務
   （`task_update`，和請求一樣保存與快取），也就是它的提示詞開始、或被 steer 進去的那個任務；結構化
   的活動依 `task_id` 歸到所指的任務，只有沒有標記的活動才依時間放置。任務的花費是它執行期間的模型
   呼叫。佇列依 `queue_update` 事件更新；每次連線時讀取 `GET /queue`，只有一直沒收到事件時才每 60 秒
