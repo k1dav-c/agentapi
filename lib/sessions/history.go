@@ -5,13 +5,11 @@ package sessions
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/coder/agentapi/lib/agenthome"
@@ -117,22 +115,10 @@ func historyLogFor(agentType string) (historyLog, bool) {
 	return historyLog{}, false
 }
 
-// HasHistory reports whether List reads the sessions of an agent of
-// agentType.
-func HasHistory(agentType string) bool {
-	_, ok := historyLogFor(agentType)
-	return ok
-}
-
-// List returns up to limit of the sessions an agent of agentType
-// ("claude", "codex" or "pi") had in cwd, the latest first. Sessions in
+// List returns up to limit of the sessions, the latest first. Sessions in
 // which the user sent nothing are left out.
-func List(agentType, cwd string, limit int) ([]SessionSummary, error) {
-	h, ok := historyLogFor(agentType)
-	if !ok {
-		return nil, fmt.Errorf("no session history for agent %q", agentType)
-	}
-	files, err := h.files(cwd)
+func (s *Store) List(limit int) ([]SessionSummary, error) {
+	files, err := s.h.files(s.cwd)
 	if err != nil {
 		return nil, err
 	}
@@ -141,42 +127,35 @@ func List(agentType, cwd string, limit int) ([]SessionSummary, error) {
 		if len(sessions) >= limit {
 			break
 		}
-		s, ok := h.summarize(file, cwd)
+		summary, ok := s.summarize(file)
 		if ok {
-			sessions = append(sessions, s)
+			sessions = append(sessions, summary)
 		}
 	}
 	return sessions, nil
 }
 
-// summaryCache keeps the summaries of session logs that haven't changed
-// since they were read: reading a long log takes a while.
-var summaryCache = struct {
-	sync.Mutex
-	entries map[string]cachedSummary
-}{entries: make(map[string]cachedSummary)}
-
+// cachedSummary is the summary of a log as it was when last read.
 type cachedSummary struct {
 	modTime time.Time
-	cwd     string
 	summary SessionSummary
 	ok      bool
 }
 
 // summarize returns the summary of a session log, from the cache while the
 // log is unchanged.
-func (h historyLog) summarize(file historyFile, cwd string) (SessionSummary, bool) {
-	summaryCache.Lock()
-	cached, hit := summaryCache.entries[file.path]
-	summaryCache.Unlock()
-	if hit && cached.modTime.Equal(file.modTime) && cached.cwd == cwd {
+func (s *Store) summarize(file historyFile) (SessionSummary, bool) {
+	s.mu.Lock()
+	cached, hit := s.summaries[file.path]
+	s.mu.Unlock()
+	if hit && cached.modTime.Equal(file.modTime) {
 		return cached.summary, cached.ok
 	}
-	s, ok := h.readSummary(file, cwd)
-	summaryCache.Lock()
-	summaryCache.entries[file.path] = cachedSummary{modTime: file.modTime, cwd: cwd, summary: s, ok: ok}
-	summaryCache.Unlock()
-	return s, ok
+	summary, ok := s.h.readSummary(file, s.cwd)
+	s.mu.Lock()
+	s.summaries[file.path] = cachedSummary{modTime: file.modTime, summary: summary, ok: ok}
+	s.mu.Unlock()
+	return summary, ok
 }
 
 // readSummary reads a session log for its summary.
@@ -215,42 +194,37 @@ func (h historyLog) readSummary(file historyFile, cwd string) (SessionSummary, b
 	return s, ok && s.ID != "" && s.Prompts > 0
 }
 
-// ReadHistory reads the conversation of the session id an agent of
-// agentType had in cwd. It returns ErrSessionNotFound for a session it has
-// no log of.
-func ReadHistory(agentType, cwd, id string) (SessionHistory, error) {
-	h, ok := historyLogFor(agentType)
-	if !ok {
-		return SessionHistory{}, fmt.Errorf("no session history for agent %q", agentType)
-	}
-	if path, ok := cachedPath(id, cwd); ok {
+// ReadHistory reads the conversation of the session id. It returns
+// ErrSessionNotFound for a session it has no log of.
+func (s *Store) ReadHistory(id string) (SessionHistory, error) {
+	if path, ok := s.cachedPath(id); ok {
 		// Listed before: no need to look through every log for it.
-		return h.read(path), nil
+		return s.h.read(path), nil
 	}
-	files, err := h.files(cwd)
+	files, err := s.h.files(s.cwd)
 	if err != nil {
 		return SessionHistory{}, err
 	}
 	for _, file := range files {
-		if h.idOf(file, cwd) == id {
-			return h.read(file.path), nil
+		if s.h.idOf(file, s.cwd) == id {
+			return s.h.read(file.path), nil
 		}
 	}
 	return SessionHistory{}, ErrSessionNotFound
 }
 
-// cachedPath returns the log of the session id of cwd, if a listing read it
-// and it is still there.
-func cachedPath(id, cwd string) (string, bool) {
-	summaryCache.Lock()
+// cachedPath returns the log of the session id, if a listing read it and
+// it is still there.
+func (s *Store) cachedPath(id string) (string, bool) {
+	s.mu.Lock()
 	var path string
-	for p, c := range summaryCache.entries {
-		if c.ok && c.cwd == cwd && c.summary.ID == id {
+	for p, c := range s.summaries {
+		if c.ok && c.summary.ID == id {
 			path = p
 			break
 		}
 	}
-	summaryCache.Unlock()
+	s.mu.Unlock()
 	if path == "" {
 		return "", false
 	}

@@ -64,11 +64,11 @@ type SubagentRun struct {
 	Messages []transcript.RichMessage
 }
 
-// Subagents lists the subagents an agent of agentType ran in its session
-// sessionID in cwd, in the order they started: Claude Code keeps a log per
-// subagent next to the session's, Codex a thread whose parent is the
-// session's. Pi runs none.
-func Subagents(agentType, cwd, sessionID string) ([]Subagent, error) {
+// Subagents lists the subagents the agent ran in its session sessionID,
+// in the order they started: Claude Code keeps a log per subagent next to
+// the session's, Codex a thread whose parent is the session's. Pi runs
+// none.
+func (s *Store) Subagents(sessionID string) ([]Subagent, error) {
 	if sessionID == "" {
 		return nil, nil
 	}
@@ -76,11 +76,11 @@ func Subagents(agentType, cwd, sessionID string) ([]Subagent, error) {
 		subs []Subagent
 		err  error
 	)
-	switch agentType {
+	switch s.agent {
 	case "claude":
-		subs, err = claudeSubagents(cwd, sessionID)
+		subs, err = claudeSubagents(s.cwd, sessionID)
 	case "codex":
-		subs, err = codexSubagents(cwd, sessionID)
+		subs, err = codexSubagents(s.cwd, sessionID)
 	}
 	slices.SortStableFunc(subs, func(a, b Subagent) int { return a.StartedAt.Compare(b.StartedAt) })
 	return subs, err
@@ -90,8 +90,8 @@ func Subagents(agentType, cwd, sessionID string) ([]Subagent, error) {
 // Subagents, each subagent's in turn, starting with a system event. Each
 // event says its subagent and, for Claude Code, the Agent tool call that
 // started it.
-func SubagentEvents(agentType, cwd, sessionID string) ([]transcript.SessionEvent, error) {
-	subs, err := Subagents(agentType, cwd, sessionID)
+func (s *Store) SubagentEvents(sessionID string) ([]transcript.SessionEvent, error) {
+	subs, err := s.Subagents(sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -104,8 +104,8 @@ func SubagentEvents(agentType, cwd, sessionID string) ([]transcript.SessionEvent
 
 // ReadSubagent reads what the subagent id of the session did. It returns
 // ErrSubagentNotFound for one the session has no log of.
-func ReadSubagent(agentType, cwd, sessionID, id string) (Subagent, SubagentRun, error) {
-	subs, err := Subagents(agentType, cwd, sessionID)
+func (s *Store) ReadSubagent(sessionID, id string) (Subagent, SubagentRun, error) {
+	subs, err := s.Subagents(sessionID)
 	if err != nil {
 		return Subagent{}, SubagentRun{}, err
 	}

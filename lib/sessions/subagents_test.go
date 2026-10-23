@@ -24,7 +24,8 @@ func TestClaudeSubagentEvents(t *testing.T) {
 	writeLog(t, filepath.Join(dir, "agent-a.jsonl"), time.Now(),
 		`{"isSidechain":true,"agentId":"a","type":"user","timestamp":"2026-10-18T10:00:01.000Z","sessionId":"s1","message":{"role":"user","content":"Find the bug"}}`)
 
-	events, err := SubagentEvents("claude", "/w", "s1")
+	store := newStore(t, "claude", "/w")
+	events, err := store.SubagentEvents("s1")
 	require.NoError(t, err)
 	require.Len(t, events, 5)
 	assert.Equal(t, "system", events[0].Kind)
@@ -41,12 +42,12 @@ func TestClaudeSubagentEvents(t *testing.T) {
 	assert.Equal(t, "tool_call", events[4].Kind)
 	assert.Equal(t, "Read", *events[4].ToolName)
 
-	none, err := SubagentEvents("claude", "/w", "other")
+	none, err := store.SubagentEvents("other")
 	require.NoError(t, err)
 	assert.Empty(t, none)
-	_, err = SubagentEvents("claude", "/w", "../s1")
+	_, err = store.SubagentEvents("../s1")
 	assert.Error(t, err)
-	none, err = SubagentEvents("pi", "/w", "s1")
+	none, err = newStore(t, "pi", "/w").SubagentEvents("s1")
 	require.NoError(t, err)
 	assert.Empty(t, none)
 }
@@ -71,7 +72,8 @@ func TestCodexSubagentEvents(t *testing.T) {
 		`{"timestamp":"2026-10-18T10:00:05.000Z","type":"session_meta","payload":{"id":"x","session_id":"t9","parent_thread_id":"t9","cwd":"/w"}}`,
 		`{"timestamp":"2026-10-18T10:00:06.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Other."}]}}`)
 
-	events, err := SubagentEvents("codex", "/w", "t1")
+	store := newStore(t, "codex", "/w")
+	events, err := store.SubagentEvents("t1")
 	require.NoError(t, err)
 	var texts []string
 	for _, e := range events {
@@ -82,13 +84,13 @@ func TestCodexSubagentEvents(t *testing.T) {
 	}
 	assert.Equal(t, []string{"Checked."}, texts, "not the parent's copied lines")
 
-	subs, err := Subagents("codex", "/w", "t1")
+	subs, err := store.Subagents("t1")
 	require.NoError(t, err)
 	require.Len(t, subs, 1)
 	assert.Equal(t, "list files", subs[0].Description)
 	assert.Equal(t, "Maxwell", subs[0].AgentType)
 	assert.Equal(t, "completed", subs[0].LogStatus)
-	_, run, err := ReadSubagent("codex", "/w", "t1", "sub")
+	_, run, err := store.ReadSubagent("t1", "sub")
 	require.NoError(t, err)
 	require.Len(t, run.Messages, 1)
 	assert.Equal(t, "Checked.", run.Messages[0].Content[0].Text)

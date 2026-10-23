@@ -56,7 +56,7 @@ func TestClaudeCosts(t *testing.T) {
 	)
 	require.NoError(t, os.Chtimes(filepath.Join(dir, "s2.jsonl"), time.Now(), time.Now()))
 
-	d, err := DirectoryCosts("claude", "/w", pricing.Builtin())
+	d, err := newStore(t, "claude", "/w").Costs()
 	require.NoError(t, err)
 	s1 := d.Cost("s1")
 	sub := opus.Cost(pricing.Tokens{Input: 3, CacheRead: 1000, Output: 100})
@@ -98,7 +98,7 @@ func TestClaudeCostReconciled(t *testing.T) {
 		// Later calls aren't in the report yet.
 		claudeCall("s1", "2026-10-20T10:10:00.000Z", "msg_2", 10, 20000, 0, 0, 500),
 	)
-	d, err := DirectoryCosts("claude", "/w", pricing.Builtin())
+	d, err := newStore(t, "claude", "/w").Costs()
 	require.NoError(t, err)
 	c := d.Cost("s1")
 	assert.InDelta(t, 2*logged+0.5, c.USD, 1e-6)
@@ -134,7 +134,7 @@ func TestCodexCosts(t *testing.T) {
 		count("2026-10-20T10:00:03.000Z", [4]int{22000, 18000, 0, 150}, [4]int{12000, 10000, 0, 50}),
 	)
 	sol, _ := pricing.Builtin().Lookup("gpt-6.1-sol")
-	d, err := DirectoryCosts("codex", "/w", pricing.Builtin())
+	d, err := newStore(t, "codex", "/w").Costs()
 	require.NoError(t, err)
 	c := d.Cost("t1")
 	assert.Equal(t, 2, c.Calls)
@@ -155,7 +155,7 @@ func TestPiCostsAndUnknownPrices(t *testing.T) {
 		// A model without a price, which Pi didn't price either.
 		`{"type":"message","id":"a2","timestamp":"2026-10-20T10:00:03.000Z","message":{"role":"assistant","model":"local-llama","content":[{"type":"text","text":"Hi"}],"usage":{"input":500,"output":5,"cacheRead":0,"cacheWrite":0}}}`,
 	)
-	d, err := DirectoryCosts("pi", "/w", pricing.Builtin())
+	d, err := newStore(t, "pi", "/w").Costs()
 	require.NoError(t, err)
 	c := d.Cost("p1")
 	assert.Equal(t, 2, c.Calls)

@@ -56,7 +56,7 @@ func (s *Server) requireSessionHistory() error {
 	if err := s.requireNative(); err != nil {
 		return err
 	}
-	if !sessions.HasHistory(string(s.agentType)) {
+	if s.sessions == nil {
 		return huma.Error400BadRequest("this agent's sessions can't be listed")
 	}
 	return nil
@@ -65,11 +65,11 @@ func (s *Server) requireSessionHistory() error {
 // listSessions handles GET /sessions, without s.mu: it only reads the
 // agent's session logs.
 func (s *Server) listSessions(_ context.Context, _ *struct{}) (*SessionsResponse, error) {
-	list, err := sessions.List(string(s.agentType), s.cwd, sessionListLimit)
+	list, err := s.sessions.List(sessionListLimit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the sessions: %w", err)
 	}
-	costs, err := sessions.DirectoryCosts(string(s.agentType), s.cwd, s.prices)
+	costs, err := s.sessions.Costs()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read what the sessions spent: %w", err)
 	}
@@ -90,7 +90,7 @@ func (s *Server) getCost(_ context.Context, _ *struct{}) (*CostResponse, error) 
 	resp.Body.SessionID = s.native.SessionRef()
 	resp.Body.Calls = []sessions.ModelCall{}
 	if resp.Body.SessionID != "" {
-		costs, err := sessions.DirectoryCosts(string(s.agentType), s.cwd, s.prices)
+		costs, err := s.sessions.Costs()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read what the session spent: %w", err)
 		}
@@ -116,7 +116,7 @@ func (s *Server) resumeSession(_ context.Context, input *ResumeSessionRequest) (
 	if input.ID == s.native.SessionRef() && !input.Body.Fork {
 		return okResponse(), nil
 	}
-	history, err := sessions.ReadHistory(string(s.agentType), s.cwd, input.ID)
+	history, err := s.sessions.ReadHistory(input.ID)
 	if errors.Is(err, sessions.ErrSessionNotFound) {
 		return nil, huma.Error404NotFound("the agent has no such session in this directory")
 	}

@@ -22,6 +22,15 @@ func writeLog(t *testing.T, path string, mod time.Time, lines ...string) {
 	require.NoError(t, os.Chtimes(path, mod, mod))
 }
 
+// newStore returns a Store of the sessions an agent of agentType had in
+// cwd.
+func newStore(t testing.TB, agentType, cwd string) *Store {
+	t.Helper()
+	s, err := New(agentType, cwd, Config{})
+	require.NoError(t, err)
+	return s
+}
+
 func roles(msgs []st.ConversationMessage) []string {
 	var out []string
 	for _, m := range msgs {
@@ -58,7 +67,8 @@ func TestClaudeSessionHistory(t *testing.T) {
 	writeLog(t, filepath.Join(config, "projects", "-other", "s3.jsonl"), now,
 		`{"type":"user","timestamp":"2026-10-17T15:00:00.000Z","sessionId":"s3","message":{"role":"user","content":"elsewhere"}}`)
 
-	sessions, err := List("claude", cwd, 10)
+	store := newStore(t, "claude", cwd)
+	sessions, err := store.List(10)
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
 	s := sessions[0]
@@ -68,7 +78,7 @@ func TestClaudeSessionHistory(t *testing.T) {
 	assert.Equal(t, 2, s.Prompts)
 	assert.Equal(t, time.Date(2026, 10, 17, 14, 10, 11, 834e6, time.UTC), s.CreatedAt)
 
-	h, err := ReadHistory("claude", cwd, "s1")
+	h, err := store.ReadHistory("s1")
 	require.NoError(t, err)
 	assert.Equal(t, "Bug hunt", h.Title)
 	assert.Equal(t, []string{"user: Fix the bug", "agent: Looking.\n\nFixed.", "user: Thanks"}, roles(h.Messages))
@@ -82,7 +92,7 @@ func TestClaudeSessionHistory(t *testing.T) {
 	assert.Contains(t, ids, "history-msg_1/assistant")
 	assert.Contains(t, ids, "history-msg_2/assistant")
 
-	_, err = ReadHistory("claude", cwd, "s3")
+	_, err = store.ReadHistory("s3")
 	assert.ErrorIs(t, err, ErrSessionNotFound)
 }
 
@@ -111,14 +121,15 @@ func TestCodexSessionHistory(t *testing.T) {
 		`{"timestamp":"2026-10-18T15:03:00.100Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"other"}]}}`)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "session_index.jsonl"), []byte(`{"id":"t1","thread_name":"Code review","updated_at":"2026-10-18T15:02:00Z"}`+"\n"), 0o600))
 
-	sessions, err := List("codex", cwd, 10)
+	store := newStore(t, "codex", cwd)
+	sessions, err := store.List(10)
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
 	assert.Equal(t, "t1", sessions[0].ID)
 	assert.Equal(t, "Code review", sessions[0].Title)
 	assert.Equal(t, "Why review code?", sessions[0].FirstPrompt)
 
-	h, err := ReadHistory("codex", cwd, "t1")
+	h, err := store.ReadHistory("t1")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"user: Why review code?", "agent: To catch bugs."}, roles(h.Messages))
 }
@@ -136,13 +147,14 @@ func TestPiSessionHistory(t *testing.T) {
 		`{"type":"session_info","name":"Ping"}`,
 	)
 
-	sessions, err := List("pi", cwd, 10)
+	store := newStore(t, "pi", cwd)
+	sessions, err := store.List(10)
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
 	assert.Equal(t, "agentapi-1", sessions[0].ID)
 	assert.Equal(t, "Ping", sessions[0].Title)
 
-	h, err := ReadHistory("pi", cwd, "agentapi-1")
+	h, err := store.ReadHistory("agentapi-1")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"user: Say pong", "agent: pong"}, roles(h.Messages))
 }
@@ -156,15 +168,15 @@ func TestListSessionsLimit(t *testing.T) {
 		writeLog(t, filepath.Join(dir, id+".jsonl"), now.Add(time.Duration(i)*time.Minute),
 			`{"type":"user","timestamp":"2026-10-17T14:10:12.000Z","sessionId":"`+id+`","message":{"role":"user","content":"hi `+id+`"}}`)
 	}
-	sessions, err := List("claude", "/w", 2)
+	sessions, err := newStore(t, "claude", "/w").List(2)
 	require.NoError(t, err)
 	require.Len(t, sessions, 2)
 	assert.Equal(t, "c", sessions[0].ID, "the latest first")
 	assert.Equal(t, "b", sessions[1].ID)
 
-	_, err = List("aider", "/w", 2)
+	_, err = New("aider", "/w", Config{})
 	assert.Error(t, err)
-	assert.False(t, HasHistory("aider"))
+	assert.False(t, Supported("aider"))
 }
 
 func TestCodexForkHistory(t *testing.T) {
@@ -189,14 +201,15 @@ func TestCodexForkHistory(t *testing.T) {
 		`{"timestamp":"2026-10-18T10:01:00.000Z","ordinal":0,"type":"session_meta","payload":{"id":"t2","session_id":"t2","forked_from_id":"t1","forked_from_ordinal_exclusive":5,"cwd":"/work/app"}}`,
 		user(1, "10:01:01", "in the fork"), reply(2, "10:01:02", "m3", "forked"))
 
-	sessions, err := List("codex", cwd, 10)
+	store := newStore(t, "codex", cwd)
+	sessions, err := store.List(10)
 	require.NoError(t, err)
 	require.Len(t, sessions, 2)
 	assert.Equal(t, "t2", sessions[0].ID)
 	assert.Equal(t, "first", sessions[0].FirstPrompt)
 	assert.Equal(t, 3, sessions[0].Prompts, "the thread's two before the fork, and its own")
 
-	h, err := ReadHistory("codex", cwd, "t2")
+	h, err := store.ReadHistory("t2")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"user: first", "agent: one", "user: second", "agent: two", "user: in the fork", "agent: forked"}, roles(h.Messages))
 }

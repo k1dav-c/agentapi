@@ -62,7 +62,7 @@ func (s *Server) requireSubagents() error {
 	if err := s.requireNative(); err != nil {
 		return err
 	}
-	if !sessions.HasHistory(string(s.agentType)) {
+	if s.sessions == nil {
 		return huma.Error400BadRequest("this agent's subagents can't be read")
 	}
 	return nil
@@ -135,7 +135,7 @@ func (c subagentCalls) stateOf(sub sessions.Subagent) SubagentState {
 // listSubagents handles GET /subagents, without s.mu: it reads the
 // subagents' logs.
 func (s *Server) listSubagents(_ context.Context, _ *struct{}) (*SubagentsResponse, error) {
-	subs, err := sessions.Subagents(string(s.agentType), s.cwd, s.native.SessionRef())
+	subs, err := s.sessions.Subagents(s.native.SessionRef())
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the subagents: %w", err)
 	}
@@ -150,7 +150,7 @@ func (s *Server) listSubagents(_ context.Context, _ *struct{}) (*SubagentsRespon
 
 // getSubagent handles GET /subagents/{id}.
 func (s *Server) getSubagent(_ context.Context, input *SubagentPath) (*SubagentResponse, error) {
-	sub, run, err := sessions.ReadSubagent(string(s.agentType), s.cwd, s.native.SessionRef(), input.ID)
+	sub, run, err := s.sessions.ReadSubagent(s.native.SessionRef(), input.ID)
 	if errors.Is(err, sessions.ErrSubagentNotFound) {
 		return nil, huma.Error404NotFound("the agent ran no such subagent in this session")
 	}

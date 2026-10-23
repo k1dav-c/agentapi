@@ -8,8 +8,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/coder/agentapi/lib/pricing"
 )
 
 // The benchmarks read synthetic logs the size of a long-running agent's:
@@ -177,7 +175,8 @@ func codexBenchHome(b *testing.B) string {
 func BenchmarkClaudeCostAfterAppend(b *testing.B) {
 	config, path := claudeBenchLog(b)
 	b.Setenv("CLAUDE_CONFIG_DIR", config)
-	if _, err := DirectoryCosts("claude", benchCWD, pricing.Builtin()); err != nil {
+	store := newStore(b, "claude", benchCWD)
+	if _, err := store.Costs(); err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
@@ -186,7 +185,7 @@ func BenchmarkClaudeCostAfterAppend(b *testing.B) {
 		b.StopTimer()
 		appendLine(b, path, i)
 		b.StartTimer()
-		d, err := DirectoryCosts("claude", benchCWD, pricing.Builtin())
+		d, err := store.Costs()
 		if err != nil || d.Cost("big").Calls == 0 {
 			b.Fatal("no calls read", err)
 		}
@@ -198,10 +197,11 @@ func BenchmarkClaudeCostAfterAppend(b *testing.B) {
 func BenchmarkClaudeReadHistory(b *testing.B) {
 	config, _ := claudeBenchLog(b)
 	b.Setenv("CLAUDE_CONFIG_DIR", config)
+	store := newStore(b, "claude", benchCWD)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		h, err := ReadHistory("claude", benchCWD, "big")
+		h, err := store.ReadHistory("big")
 		if err != nil || len(h.Messages) == 0 {
 			b.Fatal("no history read", err)
 		}
@@ -212,10 +212,11 @@ func BenchmarkClaudeReadHistory(b *testing.B) {
 // rollouts.
 func BenchmarkCodexSubagents(b *testing.B) {
 	b.Setenv("CODEX_HOME", codexBenchHome(b))
+	store := newStore(b, "codex", benchCWD)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		subs, err := Subagents("codex", benchCWD, "019a0000-0000-7000-8000-000000001989")
+		subs, err := store.Subagents("019a0000-0000-7000-8000-000000001989")
 		if err != nil || len(subs) != 10 {
 			b.Fatalf("got %d subagents, %v", len(subs), err)
 		}
@@ -225,10 +226,11 @@ func BenchmarkCodexSubagents(b *testing.B) {
 // BenchmarkCodexCosts is GET /sessions' costs among 2000 Codex rollouts.
 func BenchmarkCodexCosts(b *testing.B) {
 	b.Setenv("CODEX_HOME", codexBenchHome(b))
+	store := newStore(b, "codex", benchCWD)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		d, err := DirectoryCosts("codex", benchCWD, pricing.Builtin())
+		d, err := store.Costs()
 		if err != nil || len(d.Sessions) == 0 {
 			b.Fatal("no sessions read", err)
 		}

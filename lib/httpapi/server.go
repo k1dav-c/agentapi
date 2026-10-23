@@ -27,6 +27,7 @@ import (
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/pricing"
 	st "github.com/coder/agentapi/lib/screentracker"
+	"github.com/coder/agentapi/lib/sessions"
 	"github.com/coder/agentapi/lib/shellterm"
 	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/x/acpio"
@@ -52,7 +53,7 @@ type Server struct {
 	conversation       st.Conversation
 	native             *native.Conversation // nil unless the transport is native
 	observer           *nativeObserver      // the native conversation's
-	prices             *pricing.Table       // what model calls cost
+	sessions           *sessions.Store      // the agent's sessions; nil unless native and it keeps logs
 	stateDB            *statedb.DB          // nil unless the conversation is kept
 	savedQueue         []QueuedMessage      // the queue as last stored in stateDB
 	savedNextQueueID   int
@@ -387,9 +388,11 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 
 	s.observer = observer
-	s.prices = config.Native.Prices
-	if s.prices == nil {
-		s.prices = pricing.Builtin()
+	if config.Transport == TransportNative && sessions.Supported(string(config.AgentType)) {
+		s.sessions, err = sessions.New(string(config.AgentType), config.CWD, sessions.Config{Prices: config.Native.Prices})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if observer != nil {
 		observer.storeImages = s.storeRichImages

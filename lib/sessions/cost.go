@@ -3,10 +3,8 @@ package sessions
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog"
@@ -129,16 +127,11 @@ type DirectoryCost struct {
 // Cost is what session id spent.
 func (d DirectoryCost) Cost(id string) SessionCost { return CostOf(d.Sessions[id]) }
 
-// DirectoryCosts reads what every session an agent of agentType had in cwd
-// spent, at prices: each session's model calls and its subagents', from
-// their logs. A fork's log copies the calls of the session it continues,
-// which count once, in the earlier session.
-func DirectoryCosts(agentType, cwd string, prices *pricing.Table) (DirectoryCost, error) {
-	h, ok := historyLogFor(agentType)
-	if !ok {
-		return DirectoryCost{}, fmt.Errorf("no session history for agent %q", agentType)
-	}
-	files, err := h.files(cwd)
+// Costs reads what every session spent: each session's model calls and
+// its subagents', from their logs. A fork's log copies the calls of the
+// session it continues, which count once, in the earlier session.
+func (s *Store) Costs() (DirectoryCost, error) {
+	files, err := s.h.files(s.cwd)
 	if err != nil {
 		return DirectoryCost{}, err
 	}
@@ -150,25 +143,25 @@ func DirectoryCosts(agentType, cwd string, prices *pricing.Table) (DirectoryCost
 		calls                  []ModelCall
 	}
 	var sessions []session
-	subagents := subagentIndex(agentType, cwd, files)
+	subagents := s.subagentIndex(files)
 	for _, file := range files {
-		s, ok := h.summarize(file, cwd)
+		summary, ok := s.summarize(file)
 		if !ok {
 			continue
 		}
-		calls := slices.Clone(cachedCalls(agentType, file.path, file.modTime, nil))
-		for _, sub := range subagents(s.ID) {
-			for _, call := range cachedCalls(agentType, sub.path, sub.UpdatedAt, sub.lines) {
+		calls := slices.Clone(s.cachedCalls(file.path, file.modTime, nil))
+		for _, sub := range subagents(summary.ID) {
+			for _, call := range s.cachedCalls(sub.path, sub.UpdatedAt, sub.lines) {
 				call.SubagentID = sub.ID
 				calls = append(calls, call)
 			}
 		}
 		for i := range calls {
-			calls[i] = priced(calls[i], prices)
+			calls[i] = priced(calls[i], s.prices)
 		}
 		calls = reconcile(calls)
 		born, _ := agentlog.BirthTime(file.path)
-		sessions = append(sessions, session{id: s.ID, born: born, started: s.CreatedAt, changed: file.modTime, calls: calls})
+		sessions = append(sessions, session{id: summary.ID, born: born, started: summary.CreatedAt, changed: file.modTime, calls: calls})
 	}
 	// A call two logs have counts in the session whose log came first. A
 	// fork's log starts with the lines it copied, and their times, so the
@@ -291,10 +284,10 @@ func reconcile(calls []ModelCall) []ModelCall {
 // subagentIndex returns, for a session ID, the subagents whose logs say
 // they are its. Codex keeps every thread in one tree, so its subagents are
 // found in one pass over files.
-func subagentIndex(agentType, cwd string, files []historyFile) func(id string) []Subagent {
-	if agentType != "codex" {
+func (s *Store) subagentIndex(files []historyFile) func(id string) []Subagent {
+	if s.agent != "codex" {
 		return func(id string) []Subagent {
-			subs, _ := Subagents(agentType, cwd, id)
+			subs, _ := s.Subagents(id)
 			return subs
 		}
 	}
@@ -322,12 +315,7 @@ func subagentIndex(agentType, cwd string, files []historyFile) func(id string) [
 	return func(id string) []Subagent { return byParent[id] }
 }
 
-// callCache keeps the calls read from logs that haven't changed since.
-var callCache = struct {
-	sync.Mutex
-	entries map[string]cachedCallList
-}{entries: make(map[string]cachedCallList)}
-
+// cachedCallList is the model calls of a log as it was when last read.
 type cachedCallList struct {
 	modTime time.Time
 	calls   []ModelCall
@@ -336,20 +324,20 @@ type cachedCallList struct {
 // cachedCalls returns the model calls of the log at path, from the cache
 // while it is unchanged. lines reads a subagent's own lines; nil reads the
 // whole log.
-func cachedCalls(agentType, path string, modTime time.Time, lines func(func([]byte) bool)) []ModelCall {
-	callCache.Lock()
-	cached, ok := callCache.entries[path]
-	callCache.Unlock()
+func (s *Store) cachedCalls(path string, modTime time.Time, lines func(func([]byte) bool)) []ModelCall {
+	s.mu.Lock()
+	cached, ok := s.calls[path]
+	s.mu.Unlock()
 	if ok && cached.modTime.Equal(modTime) {
 		return cached.calls
 	}
 	if lines == nil {
 		lines = func(fn func([]byte) bool) { agentlog.ScanFile(path, fn) }
 	}
-	calls := readCalls(agentType, lines)
-	callCache.Lock()
-	callCache.entries[path] = cachedCallList{modTime: modTime, calls: calls}
-	callCache.Unlock()
+	calls := readCalls(s.agent, lines)
+	s.mu.Lock()
+	s.calls[path] = cachedCallList{modTime: modTime, calls: calls}
+	s.mu.Unlock()
 	return calls
 }
 
