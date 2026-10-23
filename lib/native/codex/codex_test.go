@@ -72,7 +72,8 @@ func TestSimpleTextWithReasoning(t *testing.T) {
 	assert.Equal(t, `Exactly 5 integers: \(n=40,41,44,49,\) and \(56\) make \(n^2+n+41\) composite.`, msg.Content[7].Text)
 	assert.Equal(t, "gpt-6-luna", msg.Model)
 	assert.Equal(t, "end_turn", msg.StopReason)
-	assert.Equal(t, &transcript.Usage{InputTokens: 13689, OutputTokens: 3509, CacheReadInputTokens: 11008}, msg.Usage)
+	// Codex's 13689 input tokens count the 11008 cached ones too.
+	assert.Equal(t, &transcript.Usage{InputTokens: 2681, OutputTokens: 3509, CacheReadInputTokens: 11008}, msg.Usage)
 
 	// Thinking streamed: a snapshot showed the first summary part alone.
 	sawPartial := false

@@ -71,12 +71,21 @@ func (b RichContentBlock) clone() RichContentBlock {
 	return b
 }
 
-// Usage captures token usage information.
+// Usage is the tokens of a model call. Whichever agent made the call, the
+// fields count as Anthropic's API does: the input read from or written to
+// the prompt cache is in the cache fields and not in InputTokens, so the
+// four add up to the call's tokens. Codex counts the cached input in its
+// input too; its usage is converted.
 type Usage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	// InputTokens is the input neither read from nor written to the
+	// prompt cache.
+	InputTokens int `json:"input_tokens" doc:"Input tokens neither read from nor written to the prompt cache."`
+	// OutputTokens is the output, reasoning included.
+	OutputTokens int `json:"output_tokens" doc:"Output tokens, reasoning included."`
+	// CacheCreationInputTokens is the input written to the prompt cache.
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens" doc:"Input tokens written to the prompt cache."`
+	// CacheReadInputTokens is the input read from the prompt cache.
+	CacheReadInputTokens int `json:"cache_read_input_tokens" doc:"Input tokens read from the prompt cache."`
 }
 
 // SessionEvent is a normalized event suitable for one-record-per-line JSONL

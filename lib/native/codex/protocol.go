@@ -233,10 +233,11 @@ type errorNotification struct {
 }
 
 type tokenUsageBreakdown struct {
-	TotalTokens       int64 `json:"totalTokens"`
-	InputTokens       int   `json:"inputTokens"`
-	CachedInputTokens int   `json:"cachedInputTokens"`
-	OutputTokens      int   `json:"outputTokens"`
+	TotalTokens           int64 `json:"totalTokens"`
+	InputTokens           int   `json:"inputTokens"`
+	CachedInputTokens     int   `json:"cachedInputTokens"`
+	CacheWriteInputTokens int   `json:"cacheWriteInputTokens"`
+	OutputTokens          int   `json:"outputTokens"`
 }
 
 type threadTokenUsageUpdatedNotification struct {

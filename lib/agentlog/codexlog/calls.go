@@ -8,6 +8,7 @@ import (
 
 	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/pricing"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // Calls reads Codex's token counts: the change of the thread's running
@@ -78,7 +79,8 @@ func (c *Calls) Size() int {
 	return len(c.calls) * agentlog.CallSize
 }
 
-// Totals is Codex's TokenUsage. Its input counts the cached input too.
+// Totals is Codex's TokenUsage, a call's or a running total. Its input
+// counts the input read from and written to the cache too.
 type Totals struct {
 	InputTokens       int `json:"input_tokens"`
 	CachedInputTokens int `json:"cached_input_tokens"`
@@ -92,6 +94,18 @@ func (t Totals) minus(o Totals) Totals {
 		CachedInputTokens: t.CachedInputTokens - o.CachedInputTokens,
 		CacheWriteTokens:  t.CacheWriteTokens - o.CacheWriteTokens,
 		OutputTokens:      t.OutputTokens - o.OutputTokens,
+	}
+}
+
+// Usage is t as transcript.Usage counts tokens: the input apart from what
+// was read from or written to the cache.
+func (t Totals) Usage() *transcript.Usage {
+	tokens := t.Tokens()
+	return &transcript.Usage{
+		InputTokens:              tokens.Input,
+		OutputTokens:             tokens.Output,
+		CacheReadInputTokens:     tokens.CacheRead,
+		CacheCreationInputTokens: tokens.CacheWrite,
 	}
 }
 

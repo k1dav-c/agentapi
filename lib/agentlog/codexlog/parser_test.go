@@ -129,8 +129,9 @@ func TestCodexParser_BasicTurn(t *testing.T) {
 	if assistantMsg.Usage == nil {
 		t.Fatal("expected usage to be set")
 	}
-	if assistantMsg.Usage.InputTokens != 500 {
-		t.Errorf("Usage.InputTokens = %d, want 500", assistantMsg.Usage.InputTokens)
+	// Codex's 500 input tokens count the 200 cached ones too.
+	if want := (transcript.Usage{InputTokens: 300, OutputTokens: 100, CacheReadInputTokens: 200}); *assistantMsg.Usage != want {
+		t.Errorf("Usage = %+v, want %+v", *assistantMsg.Usage, want)
 	}
 
 	// [2] tool_result — should come AFTER assistant
@@ -461,4 +462,14 @@ func TestPromptStartingWithATag(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, events, 1)
 	assert.Equal(t, text, *events[0].Content)
+}
+
+// Codex's input counts what was read from and written to the cache; the
+// transcript's and pricing's don't.
+func TestTotalsUsage(t *testing.T) {
+	t.Parallel()
+	u := Totals{InputTokens: 1000, CachedInputTokens: 600, CacheWriteTokens: 100, OutputTokens: 50}
+	assert.Equal(t, &transcript.Usage{InputTokens: 300, CacheReadInputTokens: 600, CacheCreationInputTokens: 100, OutputTokens: 50}, u.Usage())
+	assert.Equal(t, 300, u.Tokens().Input)
+	assert.Equal(t, &transcript.Usage{CacheReadInputTokens: 600}, Totals{InputTokens: 500, CachedInputTokens: 600}.Usage(), "never below zero")
 }

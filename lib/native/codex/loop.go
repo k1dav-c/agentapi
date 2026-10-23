@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/agentapi/lib/agentlog/codexlog"
 	"github.com/coder/agentapi/lib/native"
 	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/transcript"
@@ -365,11 +366,14 @@ func (s *loopState) tokenUsageUpdated(n threadTokenUsageUpdatedNotification) {
 		return
 	}
 	seg := s.turn.current()
-	seg.usage = &transcript.Usage{
-		InputTokens:          n.TokenUsage.Last.InputTokens,
-		OutputTokens:         n.TokenUsage.Last.OutputTokens,
-		CacheReadInputTokens: n.TokenUsage.Last.CachedInputTokens,
-	}
+	// Codex counts the cached input in its input; the transcript doesn't.
+	last := n.TokenUsage.Last
+	seg.usage = codexlog.Totals{
+		InputTokens:       last.InputTokens,
+		CachedInputTokens: last.CachedInputTokens,
+		CacheWriteTokens:  last.CacheWriteInputTokens,
+		OutputTokens:      last.OutputTokens,
+	}.Usage()
 	s.touch(&seg.msgState, false)
 }
 

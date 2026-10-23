@@ -66,15 +66,7 @@ type codexPayload struct {
 }
 
 type codexTokenInfo struct {
-	LastTokenUsage *codexTokenUsage `json:"last_token_usage"`
-}
-
-type codexTokenUsage struct {
-	InputTokens       int `json:"input_tokens"`
-	CachedInputTokens int `json:"cached_input_tokens"`
-	OutputTokens      int `json:"output_tokens"`
-	ReasoningTokens   int `json:"reasoning_output_tokens"`
-	TotalTokens       int `json:"total_tokens"`
+	LastTokenUsage *Totals `json:"last_token_usage"`
 }
 
 // codexContentBlock is a content block in a Codex message.
@@ -126,12 +118,7 @@ func (p *Parser) handleEventMsg(payload *codexPayload, timestamp string) []trans
 
 	case "token_count":
 		if payload.Info != nil && payload.Info.LastTokenUsage != nil {
-			u := payload.Info.LastTokenUsage
-			p.lastUsage = &transcript.Usage{
-				InputTokens:          u.InputTokens,
-				OutputTokens:         u.OutputTokens,
-				CacheReadInputTokens: u.CachedInputTokens,
-			}
+			p.lastUsage = payload.Info.LastTokenUsage.Usage()
 			// Attach usage to current turn if exists
 			if p.currentTurn != nil {
 				p.currentTurn.Usage = p.lastUsage

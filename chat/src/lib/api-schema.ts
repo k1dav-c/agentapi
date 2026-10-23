@@ -2299,13 +2299,25 @@ export interface components {
             ok: boolean;
         };
         Usage: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Input tokens written to the prompt cache.
+             */
             cache_creation_input_tokens: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Input tokens read from the prompt cache.
+             */
             cache_read_input_tokens: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Input tokens neither read from nor written to the prompt cache.
+             */
             input_tokens: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Output tokens, reasoning included.
+             */
             output_tokens: number;
         };
         WebhookConfigRequestBody: {

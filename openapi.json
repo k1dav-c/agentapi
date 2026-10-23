@@ -2804,18 +2804,22 @@
         "additionalProperties": false,
         "properties": {
           "cache_creation_input_tokens": {
+            "description": "Input tokens written to the prompt cache.",
             "format": "int64",
             "type": "integer"
           },
           "cache_read_input_tokens": {
+            "description": "Input tokens read from the prompt cache.",
             "format": "int64",
             "type": "integer"
           },
           "input_tokens": {
+            "description": "Input tokens neither read from nor written to the prompt cache.",
             "format": "int64",
             "type": "integer"
           },
           "output_tokens": {
+            "description": "Output tokens, reasoning included.",
             "format": "int64",
             "type": "integer"
           }
