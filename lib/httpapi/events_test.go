@@ -842,3 +842,21 @@ func TestEventEmitterScreenQuestion(t *testing.T) {
 	clock.Advance(terminalPromptSettle).MustWait(context.Background())
 	assert.Empty(t, acp.StatusSnapshot().TerminalPrompt)
 }
+
+// A rich message without content is sent with an empty list, never null:
+// clients iterate it.
+func TestEmitter_RichMessageContentIsNeverNull(t *testing.T) {
+	t.Parallel()
+	e := NewEventEmitter()
+	e.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: "m1", Role: "user"})
+	e.EmitRichMessage(transcript.RichMessage{MessageID: "m2", Role: "assistant"})
+	e.EmitRichMessage(transcript.RichMessage{MessageID: "m2", Role: "assistant"})
+	for _, msg := range e.RichMessages() {
+		data, err := json.Marshal(msg)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"content":[]`, msg.MessageID)
+	}
+	restored := NewEventEmitter()
+	restored.Restore(EmitterState{RichMessages: []transcript.RichMessage{{MessageID: "m3", Role: "user"}}, RichSeqs: []uint64{1}})
+	assert.NotNil(t, restored.RichMessages()[0].Content)
+}

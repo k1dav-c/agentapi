@@ -313,7 +313,7 @@ func (a *Adapter) toolResultMessage(callID, toolName string, content json.RawMes
 	})
 	rich, _ := a.parsePiMessage(resultID(callID), raw)
 	if len(rich) == 0 {
-		return transcript.RichMessage{MessageID: resultID(callID), Role: "user"}
+		return transcript.RichMessage{MessageID: resultID(callID), Role: "user", Content: []transcript.RichContentBlock{}}
 	}
 	setToolResultImages(rich, content)
 	msg := rich[0]

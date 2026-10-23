@@ -335,6 +335,9 @@ func (e *EventEmitter) Restore(state EmitterState) {
 	e.messages = slices.Clone(state.Messages)
 	e.messageSeq = slices.Clone(state.MessageSeqs)
 	e.richMessages = slices.Clone(state.RichMessages)
+	for i := range e.richMessages {
+		e.richMessages[i].Content = nonNilContent(e.richMessages[i].Content)
+	}
 	e.richSeq = slices.Clone(state.RichSeqs)
 	e.richIndex = make(map[richKey]int, len(e.richMessages))
 	for i, msg := range e.richMessages {

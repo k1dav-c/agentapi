@@ -146,6 +146,15 @@ func (e *EventEmitter) LoadRichMessages(msgs []transcript.RichMessage) {
 	}
 }
 
+// nonNilContent is content, or an empty list for none: clients rely on the
+// content being a list, and Go would send a nil one as null.
+func nonNilContent(content []transcript.RichContentBlock) []transcript.RichContentBlock {
+	if content == nil {
+		return []transcript.RichContentBlock{}
+	}
+	return content
+}
+
 // richKey identifies a rich message, which parsers and adapters send again
 // as it grows.
 type richKey struct{ id, role string }
@@ -154,6 +163,7 @@ type richKey struct{ id, role string }
 // in place of the one with its key (with replace) or merged into it, and
 // returns what is stored. Caller holds e.mu.
 func (e *EventEmitter) upsertRichLocked(msg transcript.RichMessage, replace bool) transcript.RichMessage {
+	msg.Content = nonNilContent(msg.Content)
 	key := richKey{msg.MessageID, msg.Role}
 	idx, ok := e.richIndex[key]
 	switch {
@@ -161,7 +171,7 @@ func (e *EventEmitter) upsertRichLocked(msg transcript.RichMessage, replace bool
 		e.richMessages[idx] = msg
 	case ok:
 		existing := e.richMessages[idx]
-		existing.Content = mergeRichContent(existing.Content, msg.Content)
+		existing.Content = nonNilContent(mergeRichContent(existing.Content, msg.Content))
 		existing.StopReason = msg.StopReason
 		existing.Model = msg.Model
 		existing.Usage = msg.Usage

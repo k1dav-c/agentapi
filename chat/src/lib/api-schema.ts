@@ -1847,7 +1847,7 @@ export interface components {
         };
         RichMessage: {
             /** @description Structured content blocks */
-            content: components["schemas"]["RichContentBlock"][] | null;
+            content: components["schemas"]["RichContentBlock"][];
             /** @description Agent's internal message ID */
             message_id: string;
             /** @description Model that generated this message */
@@ -1866,7 +1866,7 @@ export interface components {
         };
         RichMessageUpdateBody: {
             /** @description Structured content blocks */
-            content: components["schemas"]["RichContentBlock"][] | null;
+            content: components["schemas"]["RichContentBlock"][];
             /** @description Agent's internal message ID */
             message_id: string;
             /** @description Model that generated this message */

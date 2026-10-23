@@ -37,7 +37,7 @@ type RichImage struct {
 type RichMessage struct {
 	MessageID  string             `json:"message_id" doc:"Agent's internal message ID"`
 	Role       string             `json:"role" doc:"Role of the message author (user or assistant)"`
-	Content    []RichContentBlock `json:"content" doc:"Structured content blocks"`
+	Content    []RichContentBlock `json:"content" nullable:"false" doc:"Structured content blocks"`
 	Model      string             `json:"model,omitempty" doc:"Model that generated this message"`
 	StopReason string             `json:"stop_reason,omitempty" doc:"Why the model stopped generating"`
 	Usage      *Usage             `json:"usage,omitempty" doc:"Token usage information"`
