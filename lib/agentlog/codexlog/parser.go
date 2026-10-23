@@ -193,25 +193,14 @@ func (p *Parser) handleMessage(payload *codexPayload, timestamp string) []transc
 		return p.turnSnapshot()
 
 	case "user":
-		// Extract user prompt text from input_text blocks, skip system/env context
 		var blocks []codexContentBlock
 		if err := json.Unmarshal(payload.Content, &blocks); err != nil {
 			return nil
 		}
 
-		// Find actual user input (not system context wrapped in XML tags)
-		var userText string
-		for _, b := range blocks {
-			if b.Type == "input_text" && b.Text != "" {
-				// Skip system context blocks (they start with XML-like tags)
-				if len(b.Text) > 0 && b.Text[0] == '<' {
-					continue
-				}
-				userText = b.Text
-			}
-		}
-
-		if userText == "" {
+		// What the user wrote, not the context Codex added.
+		text := userText(blocks)
+		if text == "" {
 			return nil
 		}
 
@@ -229,7 +218,7 @@ func (p *Parser) handleMessage(payload *codexPayload, timestamp string) []transc
 			Role:      "user",
 			Timestamp: ts,
 			Content: []transcript.RichContentBlock{
-				{Type: "text", Text: userText},
+				{Type: "text", Text: text},
 			},
 		}
 		// A prompt ends the turn before it, also in logs without task

@@ -25,9 +25,9 @@ func HistoryHeader(line []byte, cwd string) (string, time.Time, bool) {
 	return meta.Payload.ID, started, true
 }
 
-// Prompt takes the user's messages from the model's input. Codex adds
-// messages of its own there (the environment, AGENTS.md), which start with
-// a tag.
+// Prompt takes the user's messages from the model's input, without the
+// context Codex adds there in the user's name (the environment,
+// AGENTS.md).
 func Prompt(line []byte) (string, time.Time, bool) {
 	if !bytes.Contains(line, []byte(`"response_item"`)) || !bytes.Contains(line, []byte(`"user"`)) {
 		return "", time.Time{}, false
@@ -44,14 +44,8 @@ func Prompt(line []byte) (string, time.Time, bool) {
 	if json.Unmarshal(payload.Content, &blocks) != nil {
 		return "", time.Time{}, false
 	}
-	var texts []string
-	for _, b := range blocks {
-		if b.Text != "" {
-			texts = append(texts, b.Text)
-		}
-	}
-	text := strings.TrimSpace(strings.Join(texts, "\n"))
-	if text == "" || strings.HasPrefix(text, "<") {
+	text := strings.TrimSpace(userText(blocks))
+	if text == "" {
 		return "", time.Time{}, false
 	}
 	at, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)

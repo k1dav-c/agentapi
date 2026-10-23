@@ -222,3 +222,29 @@ func TestCodexForkHistory(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"user: first", "agent: one", "user: second", "agent: two", "user: in the fork", "agent: forked"}, roles(h.Messages))
 }
+
+// A prompt that starts with a tag (pasted HTML) is the user's: the
+// session is listed, and what it spent counts.
+func TestCodexPromptStartingWithATag(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	day := filepath.Join(home, "sessions", "2026", "10", "20")
+	writeLog(t, filepath.Join(day, "rollout-2026-10-20T10-00-00-t1.jsonl"), time.Now(),
+		`{"timestamp":"2026-10-20T10:00:00.000Z","type":"session_meta","payload":{"id":"t1","session_id":"t1","cwd":"/w"}}`,
+		`{"timestamp":"2026-10-20T10:00:01.000Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}`,
+		`{"timestamp":"2026-10-20T10:00:01.100Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/w</cwd>\n</environment_context>"}]}}`,
+		`{"timestamp":"2026-10-20T10:00:01.200Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<html><body><h1>Hi</h1></body></html>\nWhy is the heading blue?"}]}}`,
+		`{"timestamp":"2026-10-20T10:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":10},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":10}}}}`,
+	)
+	store := newStore(t, "codex", "/w")
+	sessions, err := store.List(10)
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	assert.Equal(t, "<html><body><h1>Hi</h1></body></html> Why is the heading blue?", sessions[0].FirstPrompt)
+	h, err := store.ReadHistory("t1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"user: <html><body><h1>Hi</h1></body></html>\nWhy is the heading blue?"}, roles(h.Messages))
+	d, err := store.Costs()
+	require.NoError(t, err)
+	assert.Equal(t, 1, d.Total.Calls)
+}

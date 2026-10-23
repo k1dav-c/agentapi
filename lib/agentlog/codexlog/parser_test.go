@@ -4,6 +4,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -37,7 +40,7 @@ func TestCodexParser_BasicTurn(t *testing.T) {
 	all = applyRich(all, completed)
 
 	// user message (with env context to skip)
-	completed, _ = parser.ParseLine([]byte(`{"type":"response_item","timestamp":"2026-07-24T10:35:27.200Z","payload":{"type":"message","id":"user-1","role":"user","content":[{"type":"input_text","text":"<env>system</env>"},{"type":"input_text","text":"List files"}]}}`))
+	completed, _ = parser.ParseLine([]byte(`{"type":"response_item","timestamp":"2026-07-24T10:35:27.200Z","payload":{"type":"message","id":"user-1","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/work</cwd>\n</environment_context>"},{"type":"input_text","text":"List files"}]}}`))
 	all = applyRich(all, completed)
 
 	if len(all) != 1 {
@@ -412,4 +415,50 @@ func TestCodexParser_Reasoning(t *testing.T) {
 	if len(blocks) != 1 || blocks[0].Type != "thinking" || blocks[0].Thinking != "**One**\n\n**Two**\n\nraw" {
 		t.Fatalf("blocks = %+v", blocks)
 	}
+}
+
+// Codex adds context to the model's input in the user's name; the user's
+// own messages can start with a tag too.
+func TestUserText(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		blocks []string
+		want   string
+	}{
+		{[]string{"<environment_context>\n  <cwd>/work</cwd>\n  <shell>zsh</shell>\n</environment_context>"}, ""},
+		{[]string{"# AGENTS.md instructions for /work\n\n<INSTRUCTIONS>\nUse tabs.\n</INSTRUCTIONS>"}, ""},
+		{[]string{"<user_instructions>\nUse tabs.\n</user_instructions>"}, ""},
+		{[]string{"<turn_aborted>\n  <turn_id>t1</turn_id>\n  <reason>interrupted</reason>\n</turn_aborted>"}, ""},
+		{[]string{"<user_shell_command>\n<command>ls</command>\n</user_shell_command>"}, ""},
+		{[]string{"<skill>\n<name>review</name>\n</skill>"}, ""},
+		{[]string{"<subagent_notification>{\"status\":\"done\"}</subagent_notification>"}, ""},
+		{[]string{"Fix the bug", "<environment_context>\n</environment_context>"}, "Fix the bug"},
+		{[]string{"<!DOCTYPE html>\n<html><body>Why is this blank?</body></html>"}, "<!DOCTYPE html>\n<html><body>Why is this blank?</body></html>"},
+		{[]string{"<div>hi</div> is not centered"}, "<div>hi</div> is not centered"},
+		{[]string{"<environment_context> means what?"}, "<environment_context> means what?"},
+		{[]string{"What is in this picture?", "<image name=[Image #1] path=/tmp/a.png>", "", "</image>"}, "What is in this picture?"},
+		{[]string{"Compare", "and this"}, "Compare\nand this"},
+	} {
+		blocks := make([]codexContentBlock, 0, len(tc.blocks))
+		for _, text := range tc.blocks {
+			blocks = append(blocks, codexContentBlock{Type: "input_text", Text: text})
+		}
+		assert.Equal(t, tc.want, userText(blocks), tc.blocks)
+	}
+}
+
+func TestPromptStartingWithATag(t *testing.T) {
+	t.Parallel()
+	line := `{"timestamp":"2026-10-18T15:01:41.413Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<table><tr><td>1</td></tr></table> renders empty"}]}}`
+	text, _, ok := Prompt([]byte(line))
+	assert.True(t, ok)
+	assert.Equal(t, "<table><tr><td>1</td></tr></table> renders empty", text)
+	msgs, err := NewParser().ParseLine([]byte(line))
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, text, msgs[0].Content[0].Text)
+	events, err := NewEventParser().ParseSessionEvents([]byte(line))
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, text, *events[0].Content)
 }

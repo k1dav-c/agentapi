@@ -60,20 +60,21 @@ func (p *EventParser) ParseSessionEvents(line []byte) ([]transcript.SessionEvent
 				return nil, err
 			}
 			role := agentlog.Optional(payload.Role)
-			var textParts []string
-			for _, block := range blocks {
-				if block.Text == "" {
-					continue
+			var text string
+			if payload.Role == "user" {
+				text = userText(blocks)
+			} else {
+				var textParts []string
+				for _, block := range blocks {
+					if block.Text != "" {
+						textParts = append(textParts, block.Text)
+					}
 				}
-				if payload.Role == "user" && strings.HasPrefix(block.Text, "<") {
-					continue
-				}
-				textParts = append(textParts, block.Text)
+				text = strings.Join(textParts, "\n")
 			}
-			if len(textParts) == 0 {
+			if text == "" {
 				return nil, nil
 			}
-			text := strings.Join(textParts, "\n")
 			return []transcript.SessionEvent{agentlog.NewEvent("text", role, &text, eventTime, sessionID, nil)}, nil
 		case "function_call", "custom_tool_call":
 			input := payload.Args
