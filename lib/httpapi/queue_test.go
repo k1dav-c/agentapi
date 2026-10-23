@@ -97,6 +97,10 @@ func TestReadsDontWaitForTheServerLock(t *testing.T) {
 		assert.NoError(t, err)
 		_, err = s.getStatus(t.Context(), nil)
 		assert.NoError(t, err)
+		// The human reply protocol's offer: nothing while a message waits.
+		pending, err := s.getPendingHandoff(t.Context(), nil)
+		assert.NoError(t, err)
+		assert.Nil(t, pending.Body.Request)
 	}()
 	select {
 	case <-done:

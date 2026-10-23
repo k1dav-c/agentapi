@@ -151,7 +151,7 @@ func (s *Server) subagentEvents(events []transcript.SessionEvent) []transcript.S
 func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*MessageResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	pending, _ := s.pendingHandoffLocked()
+	pending, _ := s.pendingHandoff()
 
 	resp := &MessageResponse{}
 	mode := input.Body.DispatchMode
@@ -194,7 +194,7 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 
 	resp.Body.Ok = true
 	if pending != nil {
-		s.handoffSuppressed = pending.ID
+		s.handoff.suppress(pending.ID)
 	}
 
 	return resp, nil

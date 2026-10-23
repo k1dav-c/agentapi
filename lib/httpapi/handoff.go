@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -141,77 +142,140 @@ type handoffReceipt struct {
 	result  handoff.Result
 }
 
+// handoffState is what the human reply protocol remembers: the request it
+// stopped offering, and the outcome of the replies it took, by request. It
+// has a lock of its own, so that GET /handoff doesn't take s.mu.
+type handoffState struct {
+	mu         sync.Mutex
+	suppressed string
+	receipts   map[string]handoffReceipt
+}
+
+// suppress stops offering the request id.
+func (h *handoffState) suppress(id string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.suppressed = id
+}
+
+// isSuppressed reports whether the request id is no longer offered.
+func (h *handoffState) isSuppressed(id string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return id == h.suppressed
+}
+
+// receipt returns the outcome of the reply the request id took.
+func (h *handoffState) receipt(id string) (handoffReceipt, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	receipt, ok := h.receipts[id]
+	return receipt, ok
+}
+
+// record stops offering the request id and records the outcome of the
+// reply replyID to it.
+func (h *handoffState) record(id, replyID string, result handoff.Result) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.receipts == nil {
+		h.receipts = make(map[string]handoffReceipt)
+	}
+	if _, ok := h.receipts[id]; !ok && len(h.receipts) >= 256 {
+		clear(h.receipts)
+	}
+	h.suppressed = id
+	h.receipts[id] = handoffReceipt{replyID, result}
+}
+
 type (
 	PendingHandoffResponse struct{ Body handoff.Pending }
 	HandoffReplyRequest    struct{ Body handoff.Reply }
 	HandoffReplyResponse   struct{ Body handoff.Result }
 )
 
-// pendingHandoffLocked returns what the human reply protocol offers now, or
-// nil. For kind "request" it also returns the native request offered, which
-// a reply must answer even if other requests opened since. Caller holds
-// s.mu. Read the emitter as one snapshot: its revision changes on every
-// lifecycle transition and reset, invalidating replies to previous PTYs.
-func (s *Server) pendingHandoffLocked() (*handoff.Request, native.RequestState) {
+// handoffView is what the human reply protocol reads of the emitter, as of
+// one moment.
+type handoffView struct {
+	status StatusChangeBody
+	// revision changes on every lifecycle transition and reset, which
+	// invalidates the replies to what was offered before.
+	revision uint64
+	screen   string
+	// dialog: the screen shows a dialog of the agent's terminal.
+	dialog bool
+	// question is the user's last message, and reply the agent's last
+	// message after it; both are empty without one.
+	question, reply string
+}
+
+// handoffView returns what the human reply protocol reads of the emitter.
+func (e *EventEmitter) handoffView() handoffView {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	view := handoffView{
+		status: e.statusChangeBody(), revision: e.handoffRevision,
+		screen: e.screen, dialog: e.screenQuestion,
+	}
+	reply, replied := "", false
+	for i := len(e.messages) - 1; i >= 0; i-- {
+		msg := e.messages[i]
+		if msg.Role == st.ConversationRoleUser {
+			view.question, view.reply = msg.Message, reply
+			break
+		}
+		if msg.Role == st.ConversationRoleAgent && !replied {
+			reply, replied = msg.Message, true
+		}
+	}
+	return view
+}
+
+// pendingHandoff returns what the human reply protocol offers now, or nil.
+// For kind "request" it also returns the native request offered, which a
+// reply must answer even if other requests opened since. It doesn't need
+// s.mu, so GET /handoff answers while a call into the agent holds it; a
+// reply holds s.mu, so that what it answers stays offered until it is
+// delivered.
+func (s *Server) pendingHandoff() (*handoff.Request, native.RequestState) {
 	if s.emitter == nil || s.conversation == nil {
 		return nil, native.RequestState{}
 	}
-	s.emitter.mu.Lock()
-	status := s.emitter.statusChangeBody()
-	revision := s.emitter.handoffRevision
-	screen, dialog := s.emitter.screen, s.emitter.screenQuestion
-	messages := append([]st.ConversationMessage(nil), s.emitter.messages...)
-	s.emitter.mu.Unlock()
-	if status.Lifecycle != LifecycleReady || s.conversation.Status() != st.ConversationStatusStable {
+	view := s.emitter.handoffView()
+	if view.status.Lifecycle != LifecycleReady || s.conversation.Status() != st.ConversationStatusStable {
 		return nil, native.RequestState{}
 	}
-	kind, content, question := "message", "", ""
-	for _, message := range messages {
-		if message.Role == st.ConversationRoleUser {
-			question = message.Message
-		}
-	}
-	backend := s.backend()
-	request, text, ok := backend.pendingRequest()
-	if ok {
+	kind, content := "message", view.reply
+	request, text, ok := s.backend().pendingRequest()
+	switch {
+	case ok:
 		kind, content = "request", text
-	} else if dialog && s.transport == TransportPTY {
-		kind, content = "terminal", screen
-	} else {
-		if s.queue.Len() > 0 {
-			return nil, native.RequestState{}
-		}
-		hasUser := false
-		for _, message := range messages {
-			if message.Role == st.ConversationRoleUser {
-				hasUser = true
-				content = ""
-			}
-			if message.Role == st.ConversationRoleAgent && hasUser {
-				content = message.Message
-			}
-		}
+	case view.dialog && s.transport == TransportPTY:
+		kind, content = "terminal", view.screen
+	case s.queue.Len() > 0:
+		return nil, native.RequestState{}
 	}
 	if strings.TrimSpace(content) == "" {
 		return nil, native.RequestState{}
 	}
+	status := view.status
 	// The request ID is part of the hash: two identical approvals are
 	// different requests.
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%s:%q:%s", status.SessionID, revision, status.RunID, kind, request.ID, content)))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%s:%q:%s", status.SessionID, view.revision, status.RunID, kind, request.ID, content)))
 	id := hex.EncodeToString(sum[:])
-	if id == s.handoffSuppressed {
+	if s.handoff.isSuppressed(id) {
 		return nil, native.RequestState{}
 	}
 	return &handoff.Request{
 		ID: id, SessionID: status.SessionID, RunID: status.RunID,
-		AgentType: string(status.AgentType), Kind: kind, Question: question, Content: content,
+		AgentType: string(status.AgentType), Kind: kind, Question: view.question, Content: content,
 	}, request
 }
 
+// getPendingHandoff handles GET /handoff, without s.mu (see
+// pendingHandoff).
 func (s *Server) getPendingHandoff(_ context.Context, _ *struct{}) (*PendingHandoffResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	pending, _ := s.pendingHandoffLocked()
+	pending, _ := s.pendingHandoff()
 	return &PendingHandoffResponse{Body: handoff.Pending{Request: pending}}, nil
 }
 
@@ -222,13 +286,13 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 	if reply.ID == "" || reply.RequestID == "" || strings.TrimSpace(reply.Content) == "" || len(reply.Content) > 16000 {
 		return nil, huma.Error400BadRequest("request_id, id and nonempty content (at most 16000 bytes) are required")
 	}
-	if receipt, ok := s.handoffReceipts[reply.RequestID]; ok {
+	if receipt, ok := s.handoff.receipt(reply.RequestID); ok {
 		if receipt.replyID == reply.ID {
 			return &HandoffReplyResponse{Body: receipt.result}, nil
 		}
 		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "superseded"}}, nil
 	}
-	pending, request := s.pendingHandoffLocked()
+	pending, request := s.pendingHandoff()
 	if pending == nil || pending.ID != reply.RequestID {
 		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "superseded"}}, nil
 	}
@@ -251,9 +315,8 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 	}
 	// Reserve before touching the PTY. A failed/partial write must never be
 	// retried automatically; it may already have approved an operation.
-	s.reserveHandoffLocked(pending.ID)
 	result := handoff.Result{Outcome: "uncertain"}
-	s.handoffReceipts[pending.ID] = handoffReceipt{reply.ID, result}
+	s.handoff.record(pending.ID, reply.ID, result)
 	var err error
 	if freeText {
 		err = s.conversation.Send(formatFreeTextReply(s.agentType, freeTextKeys, strings.TrimSpace(content))...)
@@ -271,19 +334,8 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 	} else {
 		s.logger.Error("Human reply delivery is uncertain; refusing automatic retry", "request_id", pending.ID, "error", err)
 	}
-	s.handoffReceipts[pending.ID] = handoffReceipt{reply.ID, result}
+	s.handoff.record(pending.ID, reply.ID, result)
 	return &HandoffReplyResponse{Body: result}, nil
-}
-
-// reserveHandoffLocked records that the pending handoff is being answered.
-func (s *Server) reserveHandoffLocked(id string) {
-	if s.handoffReceipts == nil {
-		s.handoffReceipts = make(map[string]handoffReceipt)
-	}
-	if len(s.handoffReceipts) >= 256 {
-		clear(s.handoffReceipts)
-	}
-	s.handoffSuppressed = id
 }
 
 // replyNativeHandoffLocked answers r, the native request the pending handoff
@@ -308,8 +360,7 @@ func (s *Server) replyNativeHandoffLocked(pendingID, replyID string, r native.Re
 		s.logger.Error("Human reply delivery is uncertain; refusing automatic retry", "request_id", r.ID, "error", err)
 		result.Outcome = "uncertain"
 	}
-	s.reserveHandoffLocked(pendingID)
-	s.handoffReceipts[pendingID] = handoffReceipt{replyID, result}
+	s.handoff.record(pendingID, replyID, result)
 	return &HandoffReplyResponse{Body: result}
 }
 

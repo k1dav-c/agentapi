@@ -62,7 +62,7 @@ func (s *Server) dismissCodexUpdatePrompt() {
 	if now.Sub(s.codexUpdateDismissedAt) < codexUpdatePromptRetryInterval {
 		return
 	}
-	screen := s.currentScreenLocked()
+	screen, _ := s.emitter.Screen()
 	if !isCodexUpdatePrompt(screen) {
 		return
 	}

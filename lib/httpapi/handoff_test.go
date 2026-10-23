@@ -66,8 +66,38 @@ func handoffServer() (*Server, *handoffConversation, *handoffIO) {
 
 // pendingHandoff returns what the human reply protocol of s offers.
 func pendingHandoff(s *Server) *handoff.Request {
-	pending, _ := s.pendingHandoffLocked()
+	pending, _ := s.pendingHandoff()
 	return pending
+}
+
+// The human reply protocol offers the agent's last message after the
+// user's last one, whatever it holds.
+func TestHandoffView(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name            string
+		messages        []string
+		question, reply string
+	}{
+		{"no message of the user", []string{"agent:hi"}, "", ""},
+		{"no answer yet", []string{"agent:", "user:fix it"}, "fix it", ""},
+		{"the last answer", []string{"user:first", "agent:old", "user:fix it", "agent:on it", "agent:done"}, "fix it", "done"},
+		{"an empty last answer", []string{"user:fix it", "agent:done", "agent:"}, "fix it", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := NewEventEmitter()
+			var msgs []st.ConversationMessage
+			for i, m := range tc.messages {
+				role, text, _ := strings.Cut(m, ":")
+				msgs = append(msgs, st.ConversationMessage{Id: i, Role: st.ConversationRole(role), Message: text})
+			}
+			e.EmitMessages(msgs)
+			view := e.handoffView()
+			assert.Equal(t, tc.question, view.question)
+			assert.Equal(t, tc.reply, view.reply)
+		})
+	}
 }
 
 func TestHandoffReplyDeduplicatesAndInvalidates(t *testing.T) {

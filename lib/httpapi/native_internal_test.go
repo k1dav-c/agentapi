@@ -160,7 +160,7 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	})
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
-	pending, offered := srv.pendingHandoffLocked()
+	pending, offered := srv.pendingHandoff()
 	require.NotNil(t, pending)
 	require.Equal(t, "r1", offered.ID)
 
@@ -183,6 +183,7 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	require.True(t, ok)
 	result = srv.replyNativeHandoffLocked("handoff-r3", "reply-2", r3, "1")
 	assert.Equal(t, "invalid", result.Body.Outcome)
-	assert.NotContains(t, srv.handoffReceipts, "handoff-r3")
+	_, recorded := srv.handoff.receipt("handoff-r3")
+	assert.False(t, recorded)
 	assert.Empty(t, a.Responses())
 }

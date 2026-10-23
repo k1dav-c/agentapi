@@ -72,8 +72,7 @@ type Server struct {
 	mcpStore           mcpconfig.Store
 	mcpMu              sync.Mutex
 	webhook            *webhookDispatcher
-	handoffSuppressed  string
-	handoffReceipts    map[string]handoffReceipt
+	handoff            handoffState
 	restartAgent       func(context.Context) (int, error)
 	updateAgent        func(context.Context)
 	terminal           *shellterm.Terminal // nil without a terminal

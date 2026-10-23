@@ -134,13 +134,3 @@ func isTerminalKeyAnswer(answer string) bool {
 	_, err := strconv.Atoi(answer)
 	return err == nil && len(answer) == 1
 }
-
-// currentScreenLocked returns the last rendered terminal screen.
-func (s *Server) currentScreenLocked() string {
-	if s.emitter == nil {
-		return ""
-	}
-	s.emitter.mu.Lock()
-	defer s.emitter.mu.Unlock()
-	return s.emitter.screen
-}
