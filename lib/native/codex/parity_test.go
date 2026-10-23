@@ -2,9 +2,11 @@ package codex
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/coder/agentapi/lib/agentlog/codexlog"
 	"github.com/coder/agentapi/lib/native/nativetest"
+	"github.com/coder/agentapi/lib/sessions"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -93,6 +96,64 @@ func TestParityWithRolloutParser(t *testing.T) {
 			want := normalized(t, dropEmpty(parseRollout(t, tt.rollout)))
 			got := normalized(t, dropEmpty(h.rec.Final()))
 			assert.Equal(t, want, got)
+		})
+	}
+}
+
+// What a resumed session shows is what the adapter showed while it ran,
+// and what its rollout says the last call cost is the usage the adapter
+// reported for its turn.
+func TestParityWithSessionStore(t *testing.T) {
+	for _, tt := range []struct{ fixture, rollout string }{
+		{"simple_text", "rollout_simple_text.jsonl"},
+		{"command_approval_accept", "rollout_command_approval_accept.jsonl"},
+	} {
+		t.Run(tt.fixture, func(t *testing.T) {
+			h := runFixture(t, tt.fixture, "", nil)
+			var live []transcript.RichMessage
+			var usage *transcript.Usage
+			for _, m := range dropEmpty(h.rec.Final()) {
+				if m.Role == "user" && !slices.ContainsFunc(m.Content, func(b transcript.RichContentBlock) bool { return b.Type == "tool_result" }) {
+					// A resumed session's prompts are its messages, not rich ones.
+					continue
+				}
+				live = append(live, m)
+				if m.Usage != nil {
+					usage = m.Usage
+				}
+			}
+
+			data, err := os.ReadFile(filepath.Join("testdata", tt.rollout))
+			require.NoError(t, err)
+			var meta struct {
+				Payload struct {
+					ID  string `json:"id"`
+					CWD string `json:"cwd"`
+				} `json:"payload"`
+			}
+			require.NoError(t, json.Unmarshal(bytes.SplitN(data, []byte("\n"), 2)[0], &meta))
+			home := t.TempDir()
+			t.Setenv("CODEX_HOME", home)
+			day := filepath.Join(home, "sessions", "2026", "10", "16")
+			require.NoError(t, os.MkdirAll(day, 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(day, "rollout-2026-10-16T07-53-23-"+meta.Payload.ID+".jsonl"), data, 0o600))
+			store, err := sessions.New("codex", meta.Payload.CWD, sessions.Config{})
+			require.NoError(t, err)
+
+			history, err := store.ReadHistory(meta.Payload.ID)
+			require.NoError(t, err)
+			assert.Equal(t, normalized(t, live), normalized(t, dropEmpty(history.Rich)))
+
+			costs, err := store.Costs()
+			require.NoError(t, err)
+			calls := costs.Sessions[meta.Payload.ID]
+			require.NotEmpty(t, calls)
+			require.NotNil(t, usage)
+			last := calls[len(calls)-1].Tokens
+			assert.Equal(t, *usage, transcript.Usage{
+				InputTokens: last.Input, OutputTokens: last.Output,
+				CacheReadInputTokens: last.CacheRead, CacheCreationInputTokens: last.CacheWrite,
+			})
 		})
 	}
 }
