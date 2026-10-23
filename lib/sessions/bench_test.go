@@ -192,6 +192,21 @@ func BenchmarkClaudeCostAfterAppend(b *testing.B) {
 	}
 }
 
+// BenchmarkClaudeCostFirstRead is the first GET /cost of a server: it
+// reads all of a 111 MB session log.
+func BenchmarkClaudeCostFirstRead(b *testing.B) {
+	config, _ := claudeBenchLog(b)
+	b.Setenv("CLAUDE_CONFIG_DIR", config)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		d, err := newStore(b, "claude", benchCWD).Costs()
+		if err != nil || d.Cost("big").Calls == 0 {
+			b.Fatal("no calls read", err)
+		}
+	}
+}
+
 // BenchmarkClaudeReadHistory reads the conversation of a 111 MB session
 // log, as resuming the session does.
 func BenchmarkClaudeReadHistory(b *testing.B) {

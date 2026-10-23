@@ -1,7 +1,6 @@
 package claudelog
 
 import (
-	"bytes"
 	"encoding/json"
 	"slices"
 	"time"
@@ -28,54 +27,76 @@ func NewCalls() *Calls {
 	return &Calls{index: make(map[string]int)}
 }
 
-// Line reads a line of the log.
+// Line reads a line of the log. Most of a line is the message's content,
+// which a call's usage doesn't need: the line's fields are found without
+// decoding it, and only the usage is decoded.
 func (c *Calls) Line(line []byte) {
-	if bytes.Contains(line, []byte(`"cost-state"`)) {
+	var typ, timestamp, requestID string
+	var message []byte
+	if !agentlog.Members(line, func(key, value []byte) bool {
+		switch string(key) {
+		case "type":
+			typ, _ = agentlog.Unquote(value)
+		case "timestamp":
+			timestamp, _ = agentlog.Unquote(value)
+		case "requestId":
+			requestID, _ = agentlog.Unquote(value)
+		case "message":
+			message = value
+		}
+		return true
+	}) {
+		return
+	}
+	if typ == "cost-state" {
 		if r, ok := report(line); ok {
 			c.calls = append(c.calls, agentlog.Call{Time: c.latest, Report: r, Cost: -1})
 		}
 		return
 	}
-	if at, ok := agentlog.LineTime(line); ok {
+	at, err := time.Parse(time.RFC3339Nano, timestamp)
+	if err == nil {
 		c.latest = at
 	}
-	if !bytes.Contains(line, []byte(`"assistant"`)) || !bytes.Contains(line, []byte(`"usage"`)) {
+	if typ != "assistant" {
 		return
 	}
-	var entry struct {
-		Type      string `json:"type"`
-		Timestamp string `json:"timestamp"`
-		RequestID string `json:"requestId"`
-		Message   *struct {
-			ID    string `json:"id"`
-			Model string `json:"model"`
-			Usage *struct {
-				Input         int `json:"input_tokens"`
-				CacheRead     int `json:"cache_read_input_tokens"`
-				CacheCreation int `json:"cache_creation_input_tokens"`
-				Output        int `json:"output_tokens"`
-				Split         *struct {
-					FiveMinutes int `json:"ephemeral_5m_input_tokens"`
-					OneHour     int `json:"ephemeral_1h_input_tokens"`
-				} `json:"cache_creation"`
-			} `json:"usage"`
-		} `json:"message"`
-	}
-	if json.Unmarshal(line, &entry) != nil || entry.Type != "assistant" || entry.Message == nil || entry.Message.Usage == nil {
+	var id, model string
+	var usage []byte
+	agentlog.Members(message, func(key, value []byte) bool {
+		switch string(key) {
+		case "id":
+			id, _ = agentlog.Unquote(value)
+		case "model":
+			model, _ = agentlog.Unquote(value)
+		case "usage":
+			usage = value
+		}
+		return true
+	})
+	if usage == nil || model == "" || model == "<synthetic>" {
 		return
 	}
-	m := entry.Message
-	if m.Model == "" || m.Model == "<synthetic>" {
+	var u struct {
+		Input         int `json:"input_tokens"`
+		CacheRead     int `json:"cache_read_input_tokens"`
+		CacheCreation int `json:"cache_creation_input_tokens"`
+		Output        int `json:"output_tokens"`
+		Split         *struct {
+			FiveMinutes int `json:"ephemeral_5m_input_tokens"`
+			OneHour     int `json:"ephemeral_1h_input_tokens"`
+		} `json:"cache_creation"`
+	}
+	if json.Unmarshal(usage, &u) != nil {
 		return
 	}
-	u := m.Usage
 	tokens := pricing.Tokens{Input: u.Input, CacheRead: u.CacheRead, CacheWrite: u.CacheCreation, Output: u.Output}
 	if u.Split != nil && u.Split.FiveMinutes+u.Split.OneHour == u.CacheCreation {
 		tokens.CacheWrite, tokens.CacheWrite1h = u.Split.FiveMinutes, u.Split.OneHour
 	}
-	key := m.ID
+	key := id
 	if key == "" {
-		key = entry.RequestID
+		key = requestID
 	}
 	if i, ok := c.index[key]; ok && key != "" {
 		// A later line of the same call: its usage is the final one.
@@ -84,11 +105,10 @@ func (c *Calls) Line(line []byte) {
 		}
 		return
 	}
-	at, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
 	if key != "" {
 		c.index[key] = len(c.calls)
 	}
-	c.calls = append(c.calls, agentlog.Call{Time: at, Model: m.Model, Tokens: tokens, Key: "claude:" + key, Cost: -1})
+	c.calls = append(c.calls, agentlog.Call{Time: at, Model: model, Tokens: tokens, Key: "claude:" + key, Cost: -1})
 }
 
 // Calls returns the calls read so far.
