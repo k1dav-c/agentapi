@@ -10,6 +10,7 @@ import {LatestLinkChip} from "./terminal-links";
 import {useXterm} from "./use-xterm";
 import {fitTerminalFontSize, screenToTerminalOutput} from "@/lib/tty";
 import {withCredentials} from "@/lib/auth";
+import type {ScreenEvent} from "@/lib/events";
 
 // The mirror uses the width of the agent's terminal (80 columns unless
 // AgentAPI was started with --term-width), so lines wrap exactly as the
@@ -101,7 +102,7 @@ export function TtyView({onExit}: {onExit: () => void}) {
       eventSource.onerror = () => setConnected(false);
       eventSource.addEventListener("screen", (event) => {
         try {
-          latest = (JSON.parse(event.data) as {screen?: string}).screen ?? "";
+          latest = (JSON.parse(event.data) as Partial<ScreenEvent>).screen ?? "";
         } catch {
           return;
         }

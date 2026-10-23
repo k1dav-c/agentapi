@@ -8,32 +8,23 @@ import {bootstrapSession, ensureSession, withCredentials} from "@/lib/auth";
 import type {createChatAPI} from "@/lib/chat-api";
 import {parseTransport, type Transport} from "@/lib/dispatch";
 import {isLoginNotice} from "@/lib/login";
-import {mergeRequests, normalizeRequest, type NativeRequest, type RequestPayload} from "@/lib/native-requests";
+import {mergeRequests, type NativeRequest} from "@/lib/native-requests";
 import type {SyncTracker} from "@/lib/session-sync";
-import {applyStatusChange, update, type AgentStatus, type StatusChangeEvent} from "@/lib/agent-status";
-import {isDraftMessage, normalizeRichMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage, type RichMessagePayload} from "@/lib/conversation";
+import {applyStatusChange, update, type AgentStatus} from "@/lib/agent-status";
+import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
+import {
+  messageFromEvent,
+  requestFromEvent,
+  richMessageFromEvent,
+  type AgentErrorEvent,
+  type MessageUpdateEvent,
+  type RequestUpdateEvent,
+  type RichMessageUpdateEvent,
+  type SessionSyncEvent,
+  type StatusChangeEvent,
+} from "@/lib/events";
 import type {ConnectionStatus} from "./chat-provider";
 import {agentErrorKey, dismissedErrors, rememberDismissed} from "@/lib/agent-errors";
-
-interface MessageUpdateEvent {
-  id: number;
-  role: string;
-  message: string;
-  time: string;
-  seq?: number;
-}
-
-interface SessionSyncEvent {
-  epoch: string;
-  full: boolean;
-  seq: number;
-}
-
-interface ErrorEventData {
-  message: string;
-  level: string;
-  time: string;
-}
 
 // How long incoming conversation events are collected before they are
 // applied together. A reload replays the whole session as one event per
@@ -273,7 +264,7 @@ export function useEventStream({
       eventSource.addEventListener("session_sync", (event) => {
         lastEventAtRef.current = Date.now();
         synced = true;
-        const data: SessionSyncEvent = JSON.parse(event.data);
+        const data = JSON.parse(event.data) as SessionSyncEvent;
         const full = syncRef.current.begin(data, event.lastEventId);
         if (full) {
           // Everything that follows is the full state: replace what the
@@ -296,22 +287,16 @@ export function useEventStream({
       eventSource.addEventListener("message_update", (event) => {
         lastEventAtRef.current = Date.now();
         assumeFullReplay();
-        const data: MessageUpdateEvent = JSON.parse(event.data);
-        pendingRef.current.messages.set(data.id, {
-          role: data.role,
-          content: data.message,
-          id: data.id,
-          time: data.time,
-          seq: data.seq,
-        } as Message & {seq?: number});
+        const message = messageFromEvent(JSON.parse(event.data) as MessageUpdateEvent);
+        pendingRef.current.messages.set(message.id, message);
         scheduleFlush(event);
       });
 
       eventSource.addEventListener("rich_message_update", (event) => {
         lastEventAtRef.current = Date.now();
         assumeFullReplay();
-        const data = normalizeRichMessage<RichMessagePayload & {seq?: number}>(JSON.parse(event.data));
-        pendingRef.current.rich.set(richMessageKey(data), data);
+        const message = richMessageFromEvent(JSON.parse(event.data) as RichMessageUpdateEvent);
+        pendingRef.current.rich.set(richMessageKey(message), message);
         scheduleFlush(event);
       });
 
@@ -322,8 +307,8 @@ export function useEventStream({
       eventSource.addEventListener("request_update", (event) => {
         lastEventAtRef.current = Date.now();
         assumeFullReplay();
-        const data = normalizeRequest<RequestPayload>(JSON.parse(event.data));
-        pendingRef.current.requests.set(data.id, data);
+        const request = requestFromEvent(JSON.parse(event.data) as RequestUpdateEvent);
+        pendingRef.current.requests.set(request.id, request);
         scheduleFlush(event, true);
       });
 
@@ -331,7 +316,7 @@ export function useEventStream({
       eventSource.addEventListener("status_change", (event) => {
         lastEventAtRef.current = Date.now();
         assumeFullReplay();
-        const data: StatusChangeEvent = JSON.parse(event.data);
+        const data = JSON.parse(event.data) as StatusChangeEvent;
         // The replay's last event may be its status.
         if (syncRef.current.replaying) scheduleFlush(event);
         updateAgentStatus((status) => applyStatusChange(status, data));
@@ -356,7 +341,7 @@ export function useEventStream({
         const messageEvent = event as MessageEvent;
         if (syncRef.current.replaying) scheduleFlush(messageEvent);
         try {
-          const data: ErrorEventData = JSON.parse(messageEvent.data);
+          const data = JSON.parse(messageEvent.data) as AgentErrorEvent;
           const key = agentErrorKey(data);
           // Shown on this page already, or closed before a reload.
           if (shownErrorsRef.current.has(key) || dismissedErrors(agentAPIUrl).has(key)) return;

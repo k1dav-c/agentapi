@@ -68,6 +68,12 @@ export function getTaskStatus(
   return task.toolCalls.at(-1)?.isError ? "failed" : "completed";
 }
 
+// A tool call's status as a block reports it; undefined when it doesn't, or
+// says something the chat doesn't know.
+function toolStatus(status: string | undefined): ToolCall["status"] {
+  return status === "running" || status === "completed" || status === "failed" ? status : undefined;
+}
+
 export function collectToolCalls(richMessages: RichMessage[]): ToolCall[] {
   const calls = new Map<string, ToolCall>();
 
@@ -79,7 +85,7 @@ export function collectToolCalls(richMessages: RichMessage[]): ToolCall[] {
           id: block.tool_use_id,
           name: block.tool_name || "Tool",
           input: block.tool_input,
-          status: block.status || "running",
+          status: toolStatus(block.status) ?? "running",
           timestamp: message.timestamp,
         });
       }
@@ -93,7 +99,7 @@ export function collectToolCalls(richMessages: RichMessage[]): ToolCall[] {
           input: existing?.input,
           result: block.text ?? "",
           ...(images?.length ? {images} : {}),
-          status: block.status || (block.is_error ? "failed" : "completed"),
+          status: toolStatus(block.status) ?? (block.is_error ? "failed" : "completed"),
           isError: block.status === "failed" || block.is_error,
           timestamp: existing?.timestamp || message.timestamp,
           resultTimestamp: message.timestamp,

@@ -1,9 +1,12 @@
 import {describe, expect, test} from "bun:test";
-import {applyStatusChange, initialAgentStatus, sameValue, update, type StatusChangeEvent} from "./agent-status";
+import {applyStatusChange, initialAgentStatus, sameValue, update} from "./agent-status";
+import type {StatusChangeEvent} from "./events";
 
 const event: StatusChangeEvent = {
   status: "running",
   agent_type: "codex",
+  run_id: 1,
+  session_id: "s1",
   lifecycle: "ready",
   agentapi_version: "1.2.3",
   capabilities: {steer: true, interrupt: true, resume: true, images: false, settings: true},
@@ -41,7 +44,8 @@ describe("applyStatusChange", () => {
   });
 
   test("an unknown status or agent", () => {
-    const status = applyStatusChange(initialAgentStatus, {status: "weird", agent_type: "brand-new"});
+    // Not what the schema allows, but what a newer server might send.
+    const status = applyStatusChange(initialAgentStatus, {status: "weird", agent_type: "brand-new"} as unknown as StatusChangeEvent);
     expect(status.serverStatus).toBe("unknown");
     expect(status.agentType).toBe("custom");
   });

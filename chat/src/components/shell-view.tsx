@@ -10,6 +10,7 @@ import {LatestLinkChip} from "./terminal-links";
 import {useXterm} from "./use-xterm";
 import {decodeBase64, terminalSize} from "@/lib/shell";
 import {withCredentials} from "@/lib/auth";
+import type {TerminalExitEvent, TerminalOutputEvent} from "@/lib/events";
 import {getErrorMessage} from "@/lib/error-utils";
 
 type ShellState = "connecting" | "open" | "exited";
@@ -76,7 +77,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
       eventSource.onerror = () => setState((current) => (current === "exited" ? current : "connecting"));
       eventSource.addEventListener("output", (event) => {
         try {
-          term.write(decodeBase64((JSON.parse(event.data) as {data: string}).data));
+          term.write(decodeBase64((JSON.parse(event.data) as TerminalOutputEvent).data));
         } catch {
           return;
         }
@@ -90,7 +91,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
       eventSource.addEventListener("exit", (event) => {
         let reason = "";
         try {
-          reason = (JSON.parse(event.data) as {reason?: string}).reason ?? "";
+          reason = (JSON.parse(event.data) as Partial<TerminalExitEvent>).reason ?? "";
         } catch {
           // The reason is only shown.
         }

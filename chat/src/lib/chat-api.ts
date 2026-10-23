@@ -2,7 +2,7 @@ import {authFetch, withAuthRetry} from "./auth";
 import type {FileUploadResponse, QueuedMessage, SendResult} from "@/components/chat-provider";
 import {parseTransport, type DispatchMode, type Transport} from "./dispatch";
 import {normalizeRequest, type NativeRequest, type RequestPayload, type RequestResponse} from "./native-requests";
-import {normalizeRichMessage, type RichMessage, type RichMessagePayload} from "./conversation";
+import {normalizeRichMessage, type RichMessage} from "./conversation";
 import {parseLoginRequired, type LoginRequired, type LoginRetryOutcome} from "./login";
 import {ApiError} from "./error-utils";
 import type {components} from "./api-schema";
@@ -174,7 +174,7 @@ export function createChatAPI(baseURL: string) {
 
     async getSubagent(id: string): Promise<SubagentRun> {
       const run = await jsonRequest<Body<Schemas["SubagentResponseBody"]>>(`/subagents/${encodeURIComponent(id)}`, {fallback: "Failed to read the subagent"});
-      return {...run, messages: (run.messages ?? []).map((message) => normalizeRichMessage(message as RichMessagePayload))};
+      return {...run, messages: (run.messages ?? []).map(normalizeRichMessage)};
     },
 
     async listSessions(): Promise<SessionList> {

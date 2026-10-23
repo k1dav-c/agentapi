@@ -2,6 +2,12 @@
 // drafts it shows while a message is sent, and the agent's structured
 // (rich) messages.
 
+import type {components} from "./api-schema";
+
+type Schemas = components["schemas"];
+
+// A message as the chat holds it: a message_update (see messageFromEvent
+// in lib/events.ts), or a rich message's text as the timeline shows it.
 export interface Message {
   id: number;
   role: string;
@@ -18,43 +24,20 @@ export interface DraftMessage extends Omit<Message, "id"> {
   error?: string;
 }
 
-export interface RichContentBlock {
-  type: "text" | "thinking" | "tool_use" | "tool_result";
-  text?: string;
-  thinking?: string;
-  tool_use_id?: string;
-  tool_name?: string;
-  tool_input?: unknown;
-  status?: "running" | "completed" | "failed";
-  is_error?: boolean;
-  // Images in a tool result (an image file the agent read), served by
-  // AgentAPI at url.
-  images?: {media_type: string; url?: string}[];
-}
-
-export interface Usage {
-  input_tokens: number;
-  output_tokens: number;
-  cache_creation_input_tokens: number;
-  cache_read_input_tokens: number;
-}
-
-export interface RichMessage {
-  message_id: string;
-  role: string;
-  content: RichContentBlock[];
-  timestamp: string;
-  usage?: Usage;
-  model?: string;
-  stop_reason?: string;
-}
+// A rich message (the agent's structured transcript: text, thinking, tool
+// calls and results) as the chat holds it. The types come from the API
+// schema (lib/api-schema.ts), where lists can be null as Go sends them;
+// here they never are: every rich message that comes in goes through
+// normalizeRichMessage.
+export type RichImage = Schemas["RichImage"];
+export type RichContentBlock = Omit<Schemas["RichContentBlock"], "images"> & {images?: RichImage[]};
+export type Usage = Schemas["Usage"];
+export type RichMessage = Omit<Schemas["RichMessage"], "content"> & {content: RichContentBlock[]};
 
 // A rich message as the server sends it. Go encodes an empty list as null:
 // a message without content blocks has "content": null, a tool result
 // without images "images": null.
-export type RichMessagePayload = Omit<RichMessage, "content"> & {
-  content: (Omit<RichContentBlock, "images"> & {images?: RichContentBlock["images"] | null})[] | null;
-};
+export type RichMessagePayload = Schemas["RichMessage"];
 
 // normalizeRichMessage returns message with empty lists for null ones, so
 // the rest of the chat can iterate them. A message that has none keeps its
@@ -68,7 +51,7 @@ export function normalizeRichMessage<T extends RichMessagePayload>(message: T): 
   }
   return {
     ...message,
-    content: content.map((block) => (block.images === null ? {...block, images: []} : block) as RichContentBlock),
+    content: content.map((block): RichContentBlock => (block.images === null ? {...block, images: []} : (block as RichContentBlock))),
   };
 }
 
