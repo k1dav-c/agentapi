@@ -4,26 +4,25 @@
 
 ### Features
 
-- A client that watches many AgentAPIs, one row each, follows each with one response or stream:
-  `GET /summary` returns the instance, status, why the agent waits for the user (`attention`:
-  `login`, `request`, `dialog`, `limit`, `exited` or `none`), a title, the latest task, pending
-  requests, queued messages and usage, and `/events?only=summary` sends it as `summary_update` on
-  connecting and whenever it changes, and nothing else.
-- `--instance-id` (formerly `--webhook-instance-id`, which still works) and `--name` (by default the
-  working directory's name) name the instance in the summary and in webhook events, whose instance
-  gains `name`.
+- Monitor each AgentAPI with one summary response or stream. `GET /summary` returns its instance,
+  status, `attention` (`login`, `request`, `dialog`, `limit`, `exited` or `none`), title, latest
+  task, pending requests, queued messages and usage. `/events?only=summary` sends `summary_update`
+  on connection and when the summary changes, plus heartbeats.
+- Set instance identity with `--instance-id` and the display name with `--name` (default the working
+  directory's name). Both appear in summaries and webhook events, whose instance gains `name`.
+  The former flag `--webhook-instance-id` still works.
 
 ## v1.0.0
 
 ### Breaking changes
 
-- Identifiers are named for what they identify. `GET /status` and `status_change` events return
-  `server_id` (a random identifier of the AgentAPI run) and `turn` (how many times the agent
-  started working) instead of `session_id` and `run_id`, and add `agent_session_id`, the agent's
-  own session. `GET /cost` and timeline events carry `agent_session_id` instead of `session_id`;
-  human-reply requests carry `server_id` and `turn`; webhook events carry `server_id` instead of
-  `run_id` in their instance and in `run.status_changed`, and payload templates use `.ServerID`
-  (a template that still uses `.RunID` is refused at startup instead of failing every delivery).
+- Update clients for renamed identifiers. In `GET /status` and `status_change`, `session_id`
+  becomes `server_id` (the random ID of an AgentAPI run), and `run_id` becomes `turn` (the number
+  of times the agent started working). The new `agent_session_id` identifies the agent's own session.
+  `GET /cost` and timeline events also rename `session_id` to `agent_session_id`. Human-reply
+  requests use `server_id` and `turn`; webhook instances and `run.status_changed` rename `run_id`
+  to `server_id`. Change `.RunID` to `.ServerID` in payload templates; old templates are rejected
+  at startup.
 - `--state-file` is deprecated: its conversation is imported once into a state database next to it
   (the same name with `.db`, or `--state-db`), which keeps the conversation from then on, and the
   file isn't written anymore. `--load-state=false` skips the import; `--save-state` has no effect.
@@ -31,8 +30,8 @@
 
 ### Features
 
-- Webhooks push what happens to a receiver, such as a dashboard that watches many agents, besides
-  the API AgentAPI serves. `--webhook-events` picks them by type, group (`task.*`) or all (`*`):
+- Send webhook events to a receiver, such as a dashboard monitoring several agents. Select events
+  with `--webhook-events` by type, group (`task.*`) or all events (`*`):
   `instance.started`, `instance.heartbeat` and `instance.stopped`; `task.started`, and
   `task.completed` or `task.failed` with the prompt, reply, duration, status and API-equivalent
   cost; `request.opened` and `request.closed` for approvals, questions, plans and terminal dialogs;
@@ -45,12 +44,11 @@
   30 seconds; a 4xx response other than 408 and 429 isn't tried again.
 - Chat: the Explorer's Webhook tab sets up the webhook, also on an AgentAPI started without one,
   and sends a test event.
-- Tasks: the server groups the conversation into tasks for every transport: a message and the
-  agent's turn on it, with the messages that steered it, ending `completed`, `failed` or `limited`
-  once the agent is idle with nothing open. `GET /tasks` lists them, `/events?sync=1` sends
-  `task_update`, rich messages carry their `task_id`, and the state database keeps them. The chat
-  shows each task's status, its tool calls and its cost from them, and the webhook's `task.*`
-  events follow them.
+- Track tasks on every transport. A task groups a message, the agent's turn and any steering
+  messages; it ends as `completed`, `failed` or `limited` when the agent is idle with no open
+  request or dialog. `GET /tasks` lists tasks, `/events?sync=1` sends `task_update`, and rich
+  messages carry `task_id`. The state database saves tasks; the chat shows their status, tool
+  calls and cost, and webhooks report them through `task.*` events.
 - `/events?sync=1` sends `queue_update` with the whole queue whenever it changes, so the chat sees
   what another client queued without polling. `task_update` and `queue_update`, like
   `session_sync`, go only to clients that opt in with `sync`.
@@ -66,17 +64,18 @@
 
 - Opening an earlier session while the agent compacted its context returned 409 after deleting the
   conversation, and left the lifecycle at `restarting`; a refused resume now changes nothing.
-- A conversation change updates can't express (a message taken back) streamed the whole state to
-  connected clients, and a client whose stream ended midway lost the rest for good. The server now
-  ends the streams, and clients reconnect for the full replay.
-- A message sent just as AgentAPI stopped could reach the agent and be sent again after a restart
-  with `--state-db`; a send that went out unconfirmed is no longer sent again.
+- Retracting a message now closes event streams so clients reconnect for a full replay. Previously,
+  the server streamed the whole state to connected clients; a stream ending midway could lose the
+  remaining state permanently.
+- Don't resend unconfirmed messages after a restart with `--state-db`. A message sent during
+  shutdown may already have reached the agent, so retrying could run it twice.
 - A restart (`DELETE /messages`, an MCP change with `?restart=true`, opening a session, a Codex or
   Pi update) no longer holds up every other request for minutes; messages wait in the queue
   meanwhile. An agent that stopped reading its input can no longer hang AgentAPI or its shutdown.
 - `POST /upload` no longer races on huma's shared operation (each upload also grew the OpenAPI
   schema) and removes the temporary files of its form.
-- A rich message without content was sent as `null`, which blanked the chat, also after a reload.
+- Rich messages without content no longer blank the chat, including after reload. They were sent
+  as `null`.
 - Pi opens a dialog before the prompt that started it returns.
 - Earlier sessions: Codex sessions whose prompt starts with `<` (pasted HTML, say) and sessions
   older than the newest 2000 Codex rollouts are listed again and count in the costs. Codex's
@@ -94,12 +93,11 @@
 
 ### Performance
 
-- Earlier sessions, subagents and costs are read incrementally: a log that grew is read from where
-  it was left. After one line was added to a 111 MB log, GET /cost took 72 ms instead of 3.5 s;
-  GET /subagents with 2000 Codex rollouts takes 10 ms instead of 0.8 s. Concurrent cost requests
-  share one reading.
-- A resumed session with tens of thousands of rich messages loads at once (80,000 took 38 s), and
-  the state database encodes messages off the emitter's lock.
+- Read session, subagent and cost logs incrementally from the last offset. With one line added to
+  a 111 MB log, GET /cost took 72 ms instead of 3.5 s. With 2000 Codex rollouts, GET /subagents
+  took 10 ms instead of 0.8 s. Concurrent cost requests share the read.
+- Load resumed sessions with tens of thousands of rich messages at once; 80,000 previously took
+  38 s. The state database now encodes messages outside the emitter's lock.
 - Chat: a long session stays responsive while the agent works. Each update rebuilds the transcript
   only from what changed (0.3–0.5 ms instead of 85–99 ms for 200 tasks), and components read only
   the state they show, so the layout, composer, dock and Lineage no longer render again on every
@@ -109,24 +107,24 @@
   keep one. The cache moves to a new format, so the first visit after the update loads the
   conversation again. A stream the server or a proxy closes is opened again at once, without a
   reconnect notice.
-- Records a log parser doesn't know, and lines it can't decode, are logged once per log with the
-  agent CLI version, so a changed log format shows in the server's log.
+- Log unknown records and undecodable lines once per session log, with the agent CLI version,
+  to expose changes in log formats.
 
 ### Internal
 
-- The conversation types the transports share moved from the PTY engine to `lib/conversation`; the
-  agents' log formats to `lib/agentlog` (one package per agent) and the earlier sessions to
-  `lib/sessions`, leaving `lib/jsonlwatcher` the PTY's log tailer. File, terminal, upload, auth and
-  webhook handlers are modules holding only what they need.
+- Move shared conversation types from the PTY engine to `lib/conversation`, agent log formats to
+  `lib/agentlog` (one package per agent), and earlier sessions to `lib/sessions`.
+  `lib/jsonlwatcher` now tails PTY session logs. File, terminal, upload, auth and webhook handlers
+  use modules with only their required dependencies.
 
 ## v0.28.0
 
 ### Features
 
-- Native agents: what each session and task cost, in USD at the model providers' list prices (the
-  API-equivalent cost, which a subscription doesn't charge), from the tokens of the model calls in
-  Claude Code's, Codex's and Pi's session logs, subagents included. `GET /sessions` gives each
-  session's cost and the total with hourly buckets; `GET /cost` gives the open session's cost and its
+- Native agents: show session and task costs in USD at provider list prices, calculated from model
+  calls in Claude Code, Codex and Pi logs, including subagents. These API-equivalent costs aren't
+  charged by subscriptions. `GET /sessions` gives each session's cost and the total with hourly
+  buckets; `GET /cost` gives the open session's cost and its
   model calls. Built-in prices cover Anthropic's and OpenAI's models, and `--prices <file>` adds
   models or replaces their prices. The chat shows each task's cost beside its time, and in the
   Explorer's Session tab what each session cost and what they all cost today, in the last 7 and 30
@@ -199,9 +197,9 @@
 
 - Chat: links in the terminal and TTY mode open on a click, also when they run over several lines,
   and the last link a command printed (a login URL) shows above the terminal to open or copy.
-- Codex logs in with a device code by default: the login card and `/login` run `codex login
-  --device-auth`, which works on a server without a browser, where the browser sign-in's redirect
-  to localhost can't come back.
+- Use device-code login for Codex by default. The login card and `/login` run `codex login
+  --device-auth`, which works on servers where a browser elsewhere can't reach the sign-in
+  redirect to localhost.
 - Chat: thinking stays beside the steps it explains on a wide screen; a note taller than its step
   no longer pushes the notes after it below their steps, or past the end of the task.
 - A custom PTY agent that draws no input box (a shell, a REPL) counts as ready once its screen
@@ -1004,8 +1002,8 @@
 
 ### Breaking changes
 
-- If you're running agentapi behind a reverse proxy, you'll now likely need to set the
-  `--allowed-hosts` flag. See the [README](./README.md) for more details.
+- When running agentapi behind a reverse proxy, you may need to set `--allowed-hosts`.
+  See the [README](./README.md) for configuration.
 
 ### New features
 
