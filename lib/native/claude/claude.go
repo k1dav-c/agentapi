@@ -389,7 +389,9 @@ func (a *Adapter) issueControl(subtype string, fields map[string]any, onResponse
 }
 
 // request sends a control request and waits for its answer. onResponse, if
-// set, gets a successful answer in the read loop first.
+// set, gets a successful answer in the read loop first. A request that was
+// sent and got no answer fails with native.ErrUnconfirmed: the CLI may
+// carry it out all the same.
 func (a *Adapter) request(ctx context.Context, subtype string, fields map[string]any, onResponse func(json.RawMessage)) (json.RawMessage, error) {
 	id, call, err := a.sendControl(subtype, fields, onResponse)
 	if err != nil {
@@ -398,7 +400,7 @@ func (a *Adapter) request(ctx context.Context, subtype string, fields map[string
 	res, err := call.Wait(ctx)
 	if err != nil {
 		a.calls.Drop(id)
-		return nil, err
+		return nil, native.Unconfirmed(err)
 	}
 	return res.response, res.err
 }

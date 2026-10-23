@@ -105,6 +105,46 @@ func TestNativeQueueDropsAMessageThatTimedOut(t *testing.T) {
 	assert.Equal(t, []string{`Queued message "fix the build" may not have reached the agent, which didn't answer in time: context deadline exceeded`}, errorMessages(srv.emitter))
 }
 
+// Stop cuts short a queued message on its way to the agent. The agent may
+// have taken it, so it leaves the queue: kept, it would be stored and, with
+// --state-db, sent again once AgentAPI restarted.
+func TestNativeQueueDropsAMessageStopCutShort(t *testing.T) {
+	srv, factory := newQuietNativeServer(t, nil)
+	a := factory.Last()
+	a.Sink().TurnStarted()
+	sendUserMessage(t, srv, "fix the build")
+	a.Sink().TurnCompleted(native.TurnResult{})
+	sending := make(chan struct{})
+	a.OnStartTurn = func(ctx context.Context) {
+		close(sending)
+		<-ctx.Done()
+	}
+	// What an adapter returns for a request it wrote when its call is
+	// cancelled.
+	a.TurnErr = native.Unconfirmed(context.Canceled)
+
+	dispatched := make(chan struct{})
+	go func() {
+		defer close(dispatched)
+		srv.dispatchNextQueuedMessage()
+	}()
+	<-sending
+	require.NoError(t, srv.Stop(context.Background()))
+	<-dispatched
+	assert.Empty(t, srv.queue.Messages())
+	assert.Equal(t, []string{`Queued message "fix the build" may have reached the agent, which didn't confirm it: context canceled`}, errorMessages(srv.emitter))
+}
+
+// A call cut short counts as unconfirmed even when the adapter doesn't
+// say so.
+func TestNativeBackendTreatsCancelledCallsAsUncertain(t *testing.T) {
+	b := nativeBackend{}
+	assert.NotEmpty(t, b.notResent(context.Canceled))
+	assert.NotEmpty(t, b.notResent(context.DeadlineExceeded))
+	assert.NotEmpty(t, b.notResent(native.Unconfirmed(errors.New("codex app-server exited"))))
+	assert.Empty(t, b.notResent(errors.New("connection reset")))
+}
+
 func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	srv, factory := newQuietNativeServer(t, nil)
 	a := factory.Last()

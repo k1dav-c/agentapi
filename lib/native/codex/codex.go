@@ -654,7 +654,9 @@ var (
 )
 
 // call sends a request and waits for its response, bounded by ctx. Once
-// the loop has ended, waiting calls fail with errExited.
+// the loop has ended, waiting calls fail with errExited. A request that
+// was sent and got no response fails with native.ErrUnconfirmed: app-server
+// may carry it out all the same.
 // onResult runs in the read loop before the caller sees the response, so
 // the loop's state is updated before later notifications.
 func (a *Adapter) call(ctx context.Context, method string, params any, onResult func(json.RawMessage, *rpcError)) (json.RawMessage, error) {
@@ -674,7 +676,7 @@ func (a *Adapter) call(ctx context.Context, method string, params any, onResult 
 	res, err := c.Wait(ctx)
 	if err != nil {
 		a.calls.Drop(id)
-		return nil, err
+		return nil, native.Unconfirmed(err)
 	}
 	return res.unpack()
 }

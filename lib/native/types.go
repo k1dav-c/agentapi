@@ -41,6 +41,29 @@ var (
 // waiting for a login.
 var ErrNoLoginRequired = errors.New("the agent is not waiting for a login")
 
+// ErrUnconfirmed matches, with errors.Is, the error of a call whose request
+// was written to the agent but never confirmed: the call timed out or was
+// cancelled, or the agent exited first. The agent may have taken the
+// request, so sending it again could carry it out twice. Adapters mark such
+// errors with Unconfirmed.
+var ErrUnconfirmed = errors.New("the agent didn't confirm the request")
+
+// Unconfirmed marks err, why a request written to the agent wasn't
+// confirmed, as ErrUnconfirmed. The message stays err's, and errors.Is
+// still finds err.
+func Unconfirmed(err error) error {
+	if err == nil {
+		return nil
+	}
+	return unconfirmedError{err}
+}
+
+type unconfirmedError struct{ err error }
+
+func (e unconfirmedError) Error() string        { return e.err.Error() }
+func (e unconfirmedError) Unwrap() error        { return e.err }
+func (e unconfirmedError) Is(target error) bool { return target == ErrUnconfirmed }
+
 // RefusedError is an agent's refusal of a request, in its own words: the
 // request reached it, and it won't do it (Pi's "Nothing to compact").
 type RefusedError struct {

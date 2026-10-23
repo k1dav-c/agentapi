@@ -140,9 +140,12 @@ func (s *Server) createNativeMessageLocked(content string, mode DispatchMode, re
 		return nil
 	}
 	if err := s.native.StartTurn(ctx, input); err != nil {
-		if errors.Is(err, st.ErrMessageValidationChanging) {
+		switch {
+		case errors.Is(err, st.ErrMessageValidationChanging):
 			s.queueMessageLocked(resp, content, false)
 			return nil
+		case errors.Is(err, native.ErrUnconfirmed):
+			return fmt.Errorf("the message may have reached the agent, which didn't confirm it; check before you send it again: %w", err)
 		}
 		return fmt.Errorf("failed to send message: %w", err)
 	}
@@ -317,6 +320,11 @@ func (s *Server) steerQueuedMessage(_ context.Context, input *SteerQueuedMessage
 		return nil, huma.Error400BadRequest("this agent can't add a message to a running turn")
 	case errors.Is(err, native.ErrNoActiveTurn), errors.Is(err, native.ErrNotStarted):
 		return nil, huma.Error409Conflict("the agent is not working on a turn; the message will be sent next")
+	case errors.Is(err, native.ErrUnconfirmed):
+		// The turn may have it; sent again from the queue it could run
+		// twice.
+		s.queue.Remove(input.ID)
+		return nil, fmt.Errorf("the message may have reached the agent, which didn't confirm it, and was taken out of the queue: %w", err)
 	case err != nil:
 		return nil, fmt.Errorf("failed to steer the agent: %w", err)
 	}

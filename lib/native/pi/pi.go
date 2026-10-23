@@ -370,7 +370,9 @@ func (a *Adapter) addPendingLocked(kind cmdKind) (string, *pendingCmd) {
 }
 
 // request sends a command and waits for its response, or for the loop to
-// report it accepted.
+// report it accepted. A command that was sent and got neither fails with
+// native.ErrUnconfirmed (as the error or the result's): Pi may carry it out
+// all the same.
 func (a *Adapter) request(ctx context.Context, kind cmdKind, cmd command) (cmdResult, error) {
 	a.mu.Lock()
 	if a.exited {
@@ -388,13 +390,17 @@ func (a *Adapter) request(ctx context.Context, kind cmdKind, cmd command) (cmdRe
 	}
 	select {
 	case res := <-p.done:
+		if errors.Is(res.err, errExited) {
+			// Pi exited before it answered.
+			res.err = native.Unconfirmed(res.err)
+		}
 		return res, nil
 	case <-ctx.Done():
 		// A late response is handled by the loop without a caller.
 		a.mu.Lock()
 		p.detached = true
 		a.mu.Unlock()
-		return cmdResult{}, ctx.Err()
+		return cmdResult{}, native.Unconfirmed(ctx.Err())
 	}
 }
 

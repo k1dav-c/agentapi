@@ -22,11 +22,19 @@ func (b nativeBackend) sendQueued(content string) error {
 	return b.s.native.StartTurn(ctx, native.InputFromText(content))
 }
 
-// notResent: a call that timed out may have reached the agent, and sent
-// again the message could run its task twice.
+// notResent: a message the agent may have taken could run its task twice
+// if it were sent again. The adapters mark a message that went out but
+// wasn't confirmed; a call cut short counts as one too, whether it timed
+// out or AgentAPI stopped meanwhile, which would otherwise keep the message
+// queued and, with --state-db, send it again after the restart.
 func (b nativeBackend) notResent(err error) string {
-	if errors.Is(err, context.DeadlineExceeded) {
+	switch {
+	case errors.Is(err, native.ErrUnconfirmed):
+		return "may have reached the agent, which didn't confirm it"
+	case errors.Is(err, context.DeadlineExceeded):
 		return "may not have reached the agent, which didn't answer in time"
+	case errors.Is(err, context.Canceled):
+		return "may have reached the agent before AgentAPI stopped"
 	}
 	return ""
 }

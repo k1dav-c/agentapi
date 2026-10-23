@@ -137,11 +137,10 @@ func (s *Server) startWebhook(config ServerConfig) {
 	})
 	observer := newWebhookObserver(s.webhook, s.emitter, s.clock.Now())
 	observer.clock = s.clock
-	observer.queued = func() int {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return s.queue.Len()
-	}
+	// The queue has a lock of its own. s.mu would hold up Stop, whose
+	// instance.stopped carries the queue's length, until a call into the
+	// agent it is about to cancel ended by itself.
+	observer.queued = s.queue.Len
 	if s.sessions != nil {
 		observer.taskCost = s.webhookTaskCost
 	}

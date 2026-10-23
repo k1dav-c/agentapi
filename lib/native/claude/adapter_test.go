@@ -703,3 +703,22 @@ func TestCloseWithoutTheTurnEnding(t *testing.T) {
 		}
 	})
 }
+
+// A control request the CLI got but didn't answer may take effect all the
+// same: the error says so.
+func TestUnansweredRequestIsUnconfirmed(t *testing.T) {
+	t.Parallel()
+	proc := newFakeProcess("")
+	a, _ := started(t, Config{}, proc)
+	require.NoError(t, a.StartTurn(context.Background(), native.Input{Text: "hi"}))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- a.Interrupt(ctx) }()
+	proc.waitRequest(t, 1, "interrupt")
+	cancel()
+	err := <-errCh
+	require.ErrorIs(t, err, native.ErrUnconfirmed)
+	assert.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, a.Close())
+}
