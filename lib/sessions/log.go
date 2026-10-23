@@ -13,8 +13,8 @@ import (
 // written: the session's summary and the model calls. It reads the lines
 // appended later from where it stopped (agentlog.Index).
 type sessionLog struct {
-	src *source
-	cwd string
+	store *Store
+	src   *source
 	// subagent says the log is a subagent's: its calls are read, and no
 	// summary.
 	subagent bool
@@ -22,8 +22,10 @@ type sessionLog struct {
 
 	lines int
 	// session says the log is one of the directory's sessions: its first
-	// line said so.
+	// line said so, and the working directory its lines record (Claude
+	// Code) is the directory.
 	session     bool
+	recordedCWD bool
 	id          string
 	started     time.Time
 	title       string
@@ -45,7 +47,7 @@ type sessionLog struct {
 }
 
 func (s *Store) newSessionLog(subagent bool) *sessionLog {
-	l := &sessionLog{src: &s.src, cwd: s.cwd, subagent: subagent, codex: s.agent == "codex", calls: s.src.calls()}
+	l := &sessionLog{store: s, src: &s.src, subagent: subagent, codex: s.agent == "codex", calls: s.src.calls()}
 	if s.src.namer != nil {
 		l.namer = s.src.namer()
 	}
@@ -59,6 +61,18 @@ func (l *sessionLog) Line(line []byte) bool {
 	if first && !l.head(line) {
 		// Not a session of the directory: nothing of it counts.
 		return false
+	}
+	if l.src.linesRecordCWD && !l.subagent && !l.recordedCWD {
+		// The directory's name doesn't say whose log it is: Claude Code
+		// names /w/a_b's and /w/a-b's alike. The first working directory
+		// a line records does.
+		if cwd, ok := agentlog.StringField(line, "cwd"); ok && cwd != "" {
+			l.recordedCWD = true
+			if !l.store.sameDir(cwd) {
+				l.session = false
+				return false
+			}
+		}
 	}
 	if l.firstAt.IsZero() {
 		if at, ok := agentlog.LineTime(line); ok {
@@ -90,7 +104,7 @@ func (l *sessionLog) head(line []byte) bool {
 		}
 		return true
 	}
-	id, started, ok := l.src.header(line, l.cwd)
+	id, started, ok := l.src.header(line, l.store.cwd)
 	if !ok {
 		return false
 	}
@@ -111,6 +125,13 @@ func (l *sessionLog) head(line []byte) bool {
 		}
 	}
 	return true
+}
+
+// identified reports whether the log said whose session it holds: its
+// first line did, and the first working directory its lines record
+// (Claude Code).
+func (l *sessionLog) identified() bool {
+	return l.lines > 0 && (!l.src.linesRecordCWD || l.recordedCWD)
 }
 
 // own reports whether a line of a Codex subagent's log is its own rather

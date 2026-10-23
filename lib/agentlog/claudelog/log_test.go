@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -353,4 +354,50 @@ func TestResolverHonorsTheAgentsHome(t *testing.T) {
 	path, err := (&Resolver{PID: 4242}).Resolve()
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(project, "s-1.jsonl"), path)
+}
+
+// The names Claude Code 2.1.302 gives these directories' project
+// directories, from its own code.
+func TestProjectDirName(t *testing.T) {
+	t.Parallel()
+	for cwd, want := range map[string]string{
+		"/home/me/work":                "-home-me-work",
+		"/" + strings.Repeat("a", 250): "-" + strings.Repeat("a", 199) + "-feo44x",
+		"/home/me/" + strings.Repeat("projects/very-long-directory-name_", 8) + "end": "-home-me-" + strings.Repeat("projects-very-long-directory-name-", 5) + "projects-very-long-di-1iwkgz",
+		"/tmp/😀/" + strings.Repeat("x", 210):                                          "-tmp----" + strings.Repeat("x", 192) + "-nwb7yz",
+		"/home/me/日本語/" + strings.Repeat("y", 205):                                    "-home-me-----" + strings.Repeat("y", 187) + "-pfvhxx",
+	} {
+		assert.Equal(t, want, ProjectDirName(cwd), cwd)
+	}
+	assert.Equal(t, "-tmp----x", EncodeCWD("/tmp/😀/x"), "two dashes for a character outside the BMP, as in UTF-16")
+}
+
+func TestProjectDirsAndLogsByID(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	long := "/" + strings.Repeat("a", 250)
+	dirs, err := ProjectDirs(long)
+	require.NoError(t, err)
+	require.Len(t, dirs, 2)
+	assert.Equal(t, filepath.Join(config, "projects", ProjectDirName(long)), dirs[0])
+	assert.Equal(t, filepath.Join(config, "projects", EncodeCWD(long)), dirs[1], "an older Claude Code's whole name")
+	dirs, err = ProjectDirs("/" + strings.Repeat("a", 300))
+	require.NoError(t, err)
+	assert.Len(t, dirs, 1, "a name too long for a file system")
+
+	// Another version's hash.
+	other := filepath.Join(config, "projects", EncodeCWD(long)[:200]+"-zzz")
+	require.NoError(t, os.MkdirAll(other, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(other, "s1.jsonl"), []byte("{}\n"), 0o600))
+	dirs, err = ProjectDirs(long)
+	require.NoError(t, err)
+	assert.Contains(t, dirs, other)
+	dirs, err = ProjectDirs("/work")
+	require.NoError(t, err)
+	assert.Equal(t, []string{filepath.Join(config, "projects", "-work")}, dirs)
+
+	assert.Equal(t, []string{filepath.Join(other, "s1.jsonl")}, LogsByID("s1"))
+	assert.Empty(t, LogsByID("s2"))
+	assert.Empty(t, LogsByID("../s1"))
+	assert.Empty(t, LogsByID("*"))
 }

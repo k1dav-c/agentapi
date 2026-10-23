@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coder/agentapi/lib/agenthome"
 	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/agentlog/claudelog"
 	"github.com/coder/agentapi/lib/agentlog/codexlog"
@@ -199,22 +198,31 @@ func (s Subagent) label() string {
 	return strings.TrimSpace(fmt.Sprintf("%s (%s)", s.Description, s.AgentType))
 }
 
-// claudeSubagents reads <projects>/<cwd>/<session>/subagents: an
-// agent-<id>.jsonl log per subagent, with agent-<id>.meta.json saying what
-// it is and which tool call started it.
-func (s *Store) claudeSubagents(sessionID string) ([]Subagent, error) {
-	configDir, err := agenthome.ClaudeConfigDir()
-	if err != nil {
-		return nil, err
-	}
+// claudeSubagents reads <session>/subagents next to the session's log
+// (<session>.jsonl): an agent-<id>.jsonl log per subagent, with
+// agent-<id>.meta.json saying what it is and which tool call started it.
+func (s *Store) claudeSubagents(sessionID string) (subs []Subagent, err error) {
 	if strings.ContainsAny(sessionID, `/\`) || sessionID == ".." {
 		return nil, fmt.Errorf("invalid session id %q", sessionID)
 	}
-	files, err := logsIn(filepath.Join(configDir, "projects", claudelog.EncodeCWD(s.cwd), sessionID, "subagents"))
-	if err != nil {
-		return nil, err
+	// Next to the session's log; before Claude Code wrote it, where it
+	// would. Another directory's session has none here.
+	var dirs []string
+	if path, ok := s.find(sessionID); ok {
+		dirs = []string{filepath.Dir(path)}
+	} else if own, _ := claudeLogsByID(s, sessionID); len(own) == 0 {
+		if dirs, err = claudelog.ProjectDirs(s.cwd); err != nil {
+			return nil, err
+		}
 	}
-	var subs []Subagent
+	var files []string
+	for _, dir := range dirs {
+		logs, err := logsIn(filepath.Join(dir, sessionID, "subagents"))
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, logs...)
+	}
 	for _, path := range files {
 		snap, err := s.readSubagentLog(path, false)
 		if err != nil {

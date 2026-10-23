@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentlog/claudelog"
 	st "github.com/coder/agentapi/lib/screentracker"
 )
 
@@ -247,4 +248,86 @@ func TestCodexPromptStartingWithATag(t *testing.T) {
 	d, err := store.Costs()
 	require.NoError(t, err)
 	assert.Equal(t, 1, d.Total.Calls)
+}
+
+// claudeLine is a line of a Claude Code log that records the working
+// directory, as all user and assistant lines do.
+func claudeLine(session, cwd, at, text string) string {
+	return fmt.Sprintf(`{"type":"user","timestamp":%q,"sessionId":%q,"cwd":%q,"message":{"role":"user","content":%q}}`, at, session, cwd, text)
+}
+
+// Claude Code names /w/a_b's project directory and /w/a-b's alike; the
+// working directory a log's lines record tells them apart.
+func TestClaudeSessionsOfDirectoriesNamedAlike(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	dir := filepath.Join(config, "projects", "-w-a-b")
+	writeLog(t, filepath.Join(dir, "x.jsonl"), time.Now(),
+		`{"type":"mode","sessionId":"x","mode":"normal"}`,
+		claudeLine("x", "/w/a_b", "2026-10-20T10:00:00.000Z", "In a_b"),
+		claudeCall("x", "2026-10-20T10:00:05.000Z", "msg_x", 10, 20000, 0, 0, 200))
+	writeLog(t, filepath.Join(dir, "x", "subagents", "agent-s1.jsonl"), time.Now(),
+		`{"isSidechain":true,"type":"user","timestamp":"2026-10-20T10:00:06.000Z","sessionId":"x","message":{"role":"user","content":"Look"}}`)
+	writeLog(t, filepath.Join(dir, "y.jsonl"), time.Now(),
+		claudeLine("y", "/w/a-b", "2026-10-20T11:00:00.000Z", "In a-b"),
+		claudeCall("y", "2026-10-20T11:00:05.000Z", "msg_y", 10, 20000, 0, 0, 200))
+
+	store := newStore(t, "claude", "/w/a-b")
+	list, err := store.List(10)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, "y", list[0].ID)
+	d, err := store.Costs()
+	require.NoError(t, err)
+	assert.Equal(t, 1, d.Total.Calls, "a_b's session isn't a-b's to pay for")
+	_, err = store.ReadHistory("x")
+	assert.ErrorIs(t, err, ErrSessionNotFound)
+	subs, err := store.Subagents("x")
+	require.NoError(t, err)
+	assert.Empty(t, subs)
+
+	other := newStore(t, "claude", "/w/a_b")
+	list, err = other.List(10)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, "x", list[0].ID)
+	subs, err = other.Subagents("x")
+	require.NoError(t, err)
+	assert.Len(t, subs, 1)
+}
+
+// Claude Code shortens the project directory of a long path, and has
+// named it otherwise before: its sessions are found all the same.
+func TestClaudeSessionsOfALongPath(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	cwd := "/work/" + strings.Repeat("deep/", 50) + "app"
+	projects := filepath.Join(config, "projects")
+	writeLog(t, filepath.Join(projects, claudelog.ProjectDirName(cwd), "s1.jsonl"), time.Now(),
+		claudeLine("s1", cwd, "2026-10-20T10:00:00.000Z", "First"))
+	// Another version's hash.
+	writeLog(t, filepath.Join(projects, claudelog.EncodeCWD(cwd)[:200]+"-abc123", "s2.jsonl"), time.Now(),
+		claudeLine("s2", cwd, "2026-10-20T11:00:00.000Z", "Second"))
+	// A directory named otherwise yet: found by the session's ID, and
+	// taken for the directory's only as its lines record it.
+	writeLog(t, filepath.Join(projects, "-elsewhere", "s3.jsonl"), time.Now(),
+		claudeLine("s3", cwd, "2026-10-20T12:00:00.000Z", "Third"))
+	writeLog(t, filepath.Join(projects, "-elsewhere", "s4.jsonl"), time.Now(),
+		`{"type":"user","timestamp":"2026-10-20T13:00:00.000Z","sessionId":"s4","message":{"role":"user","content":"Fourth"}}`)
+
+	store := newStore(t, "claude", cwd)
+	list, err := store.List(10)
+	require.NoError(t, err)
+	var ids []string
+	for _, s := range list {
+		ids = append(ids, s.ID)
+	}
+	assert.ElementsMatch(t, []string{"s1", "s2"}, ids)
+	for id, want := range map[string]string{"s1": "First", "s2": "Second", "s3": "Third"} {
+		h, err := store.ReadHistory(id)
+		require.NoError(t, err, id)
+		assert.Equal(t, []string{"user: " + want}, roles(h.Messages), id)
+	}
+	_, err = store.ReadHistory("s4")
+	assert.ErrorIs(t, err, ErrSessionNotFound, "nothing says it is the directory's")
 }

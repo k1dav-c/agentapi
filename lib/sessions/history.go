@@ -71,35 +71,15 @@ func (s *Store) List(limit int) ([]SessionSummary, error) {
 // ReadHistory reads the conversation of the session id. It returns
 // ErrSessionNotFound for a session it has no log of.
 func (s *Store) ReadHistory(id string) (SessionHistory, error) {
-	path, ok := s.pathOf(id)
+	path, ok := s.find(id)
 	if !ok {
-		// Not listed before: the first line of a log says whose it is.
-		files, err := s.src.files(s)
-		if err != nil {
-			return SessionHistory{}, err
-		}
-		i := slices.IndexFunc(files, func(path string) bool { return s.idOf(path) == id })
-		if i < 0 {
-			return SessionHistory{}, ErrSessionNotFound
-		}
-		path = files[i]
+		return SessionHistory{}, ErrSessionNotFound
 	}
 	history := s.read(path)
 	if s.agent == "codex" {
 		history.Title = s.threadName(id)
 	}
 	return history, nil
-}
-
-// idOf returns the ID of the session a log holds, or "" for a log that
-// isn't a session of the directory.
-func (s *Store) idOf(path string) string {
-	var id string
-	agentlog.ScanFile(path, func(line []byte) bool {
-		id, _, _ = s.src.header(line, s.cwd)
-		return false
-	})
-	return id
 }
 
 // read reads a session log's conversation. The user's messages are the

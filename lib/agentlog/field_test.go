@@ -40,6 +40,10 @@ func TestField(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, `"x"`, string(value))
 
+	cwd, ok := StringField([]byte(`{"cwd":"C:\\Users\\me \u65e5"}`), "cwd")
+	assert.True(t, ok)
+	assert.Equal(t, `C:\Users\me 日`, cwd, "escapes are decoded")
+
 	long := `{"message":"` + strings.Repeat(`a\"b`, 100000) + `","type":"assistant"}`
 	typ, ok = StringField([]byte(long), "type")
 	assert.True(t, ok)

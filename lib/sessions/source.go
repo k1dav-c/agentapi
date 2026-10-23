@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
-	"github.com/coder/agentapi/lib/agenthome"
 	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/agentlog/claudelog"
 	"github.com/coder/agentapi/lib/agentlog/codexlog"
@@ -19,6 +19,14 @@ import (
 type source struct {
 	// files lists the logs that may be the directory's sessions.
 	files func(s *Store) ([]string, error)
+	// byID lists the logs that may be session id's, by their names: in the
+	// directory's own places, and elsewhere, where a log must record the
+	// directory (a long path's project directory Claude Code named
+	// otherwise).
+	byID func(s *Store, id string) (own, elsewhere []string)
+	// linesRecordCWD says the lines of a log record the working directory
+	// (Claude Code's), where its first line doesn't.
+	linesRecordCWD bool
 	// header reads the session's ID and start from its log's first line,
 	// and reports false for a log that isn't a session of the directory
 	// (another directory's, a subagent's).
@@ -40,16 +48,19 @@ func sourceFor(agentType string) (source, bool) {
 	switch agentType {
 	case "claude":
 		return source{
-			files:  claudeFiles,
-			header: func(line []byte, _ string) (string, time.Time, bool) { return claudelog.HistoryHeader(line) },
-			prompt: claudelog.Prompt,
-			parser: func() agentlog.LineParser { return claudelog.NewParser() },
-			namer:  func() agentlog.SessionNamer { return claudelog.NewNamer() },
-			calls:  func() agentlog.CallReader { return claudelog.NewCalls() },
+			files:          claudeFiles,
+			byID:           claudeLogsByID,
+			linesRecordCWD: true,
+			header:         func(line []byte, _ string) (string, time.Time, bool) { return claudelog.HistoryHeader(line) },
+			prompt:         claudelog.Prompt,
+			parser:         func() agentlog.LineParser { return claudelog.NewParser() },
+			namer:          func() agentlog.SessionNamer { return claudelog.NewNamer() },
+			calls:          func() agentlog.CallReader { return claudelog.NewCalls() },
 		}, true
 	case "codex":
 		return source{
 			files:  codexFiles,
+			byID:   codexLogsByID,
 			header: codexlog.HistoryHeader,
 			prompt: codexlog.Prompt,
 			parser: func() agentlog.LineParser { return codexlog.NewParser() },
@@ -59,6 +70,7 @@ func sourceFor(agentType string) (source, bool) {
 	case "pi":
 		return source{
 			files:  piFiles,
+			byID:   piLogsByID,
 			header: pilog.HistoryHeader,
 			prompt: pilog.Prompt,
 			parser: func() agentlog.LineParser { return pilog.NewParser() },
@@ -99,11 +111,39 @@ func logsIn(dir string) ([]string, error) {
 // --- Claude Code ---
 
 func claudeFiles(s *Store) ([]string, error) {
-	configDir, err := agenthome.ClaudeConfigDir()
+	dirs, err := claudelog.ProjectDirs(s.cwd)
 	if err != nil {
 		return nil, err
 	}
-	return logsIn(filepath.Join(configDir, "projects", claudelog.EncodeCWD(s.cwd)))
+	var files []string
+	for i, dir := range dirs {
+		logs, err := logsIn(dir)
+		if err != nil && i == 0 {
+			return nil, err
+		}
+		files = append(files, logs...)
+	}
+	return files, nil
+}
+
+// claudeLogsByID lists the logs named after session id: in the
+// directory's project directories, and in any other, for a directory
+// whose name Claude Code made otherwise.
+func claudeLogsByID(s *Store, id string) (own, elsewhere []string) {
+	if dirs, err := claudelog.ProjectDirs(s.cwd); err == nil {
+		for _, dir := range dirs {
+			path := filepath.Join(dir, id+".jsonl")
+			if _, err := os.Stat(path); err == nil {
+				own = append(own, path)
+			}
+		}
+	}
+	for _, path := range claudelog.LogsByID(id) {
+		if !slices.Contains(own, path) {
+			elsewhere = append(elsewhere, path)
+		}
+	}
+	return own, elsewhere
 }
 
 // --- Codex ---
@@ -177,6 +217,14 @@ func codexFiles(s *Store) ([]string, error) {
 	return files, nil
 }
 
+// codexLogsByID lists the log of thread id: Codex names it after it.
+func codexLogsByID(_ *Store, id string) (own, elsewhere []string) {
+	if path, ok := codexlog.LogOf(id); ok {
+		return []string{path}, nil
+	}
+	return nil, nil
+}
+
 // walkReverse calls fn with the directories depth levels below root, in
 // reverse name order, until it returns false.
 func walkReverse(root string, depth int, fn func(dir string) bool) error {
@@ -215,4 +263,16 @@ func piFiles(s *Store) ([]string, error) {
 		return nil, err
 	}
 	return logsIn(dir)
+}
+
+// piLogsByID lists the logs of session id: Pi names a session's log
+// <time>_<id>.jsonl.
+func piLogsByID(s *Store, id string) (own, elsewhere []string) {
+	files, _ := piFiles(s)
+	for _, path := range files {
+		if strings.HasSuffix(filepath.Base(path), "_"+id+".jsonl") {
+			own = append(own, path)
+		}
+	}
+	return own, nil
 }

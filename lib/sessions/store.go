@@ -3,6 +3,8 @@ package sessions
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -107,6 +109,13 @@ func (s *Store) readLog(path string, withCalls bool) (logSnapshot, error) {
 		s.mu.Lock()
 		s.paths[snap.summary.ID] = path
 		s.mu.Unlock()
+	} else if snap.summary.ID != "" {
+		// Read on, it turned out another directory's.
+		s.mu.Lock()
+		if s.paths[snap.summary.ID] == path {
+			delete(s.paths, snap.summary.ID)
+		}
+		s.mu.Unlock()
 	}
 	return snap, nil
 }
@@ -152,6 +161,48 @@ func (s *Store) pathOf(id string) (string, bool) {
 		return "", false
 	}
 	return path, true
+}
+
+// find returns the log of session id, if it is one of the directory's.
+func (s *Store) find(id string) (string, bool) {
+	if path, ok := s.pathOf(id); ok {
+		return path, true
+	}
+	own, elsewhere := s.src.byID(s, id)
+	for _, path := range append(own, elsewhere...) {
+		got, ok, recorded := s.identify(path)
+		// Away from the directory's own places, only the directory its
+		// lines record tells whose the log is.
+		if ok && got == id && (recorded || slices.Contains(own, path)) {
+			s.mu.Lock()
+			s.paths[id] = path
+			s.mu.Unlock()
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// maxIdentifyLines bounds how far identify reads a log for the working
+// directory its lines record.
+const maxIdentifyLines = 1000
+
+// identify reads the start of a log for the session it holds, and reports
+// whether it is one of the directory's, and whether its lines record the
+// directory (Claude Code's). It reads as far as that takes, where reading
+// the log through the index would read it all.
+func (s *Store) identify(path string) (id string, ok, recorded bool) {
+	l := s.newSessionLog(false)
+	agentlog.ScanFile(path, func(line []byte) bool {
+		return l.Line(line) && !l.identified() && l.lines < maxIdentifyLines
+	})
+	return l.id, l.session && l.id != "", l.recordedCWD
+}
+
+// sameDir reports whether a working directory a log records is the
+// directory.
+func (s *Store) sameDir(recorded string) bool {
+	return filepath.Clean(recorded) == filepath.Clean(s.cwd)
 }
 
 // threadName is the name Codex gave its thread id, from its session index.

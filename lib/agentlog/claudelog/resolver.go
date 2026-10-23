@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/coder/agentapi/lib/agenthome"
@@ -58,7 +57,7 @@ func (r *Resolver) Resolve() (string, error) {
 		return "", fmt.Errorf("session file %s has empty cwd", sessionFile)
 	}
 
-	encodedCWD := EncodeCWD(meta.CWD)
+	encodedCWD := ProjectDirName(meta.CWD)
 
 	// If the session has a parkedJobId, scan other session files first to find
 	// the background process that has the matching jobId — its sessionId
@@ -99,8 +98,8 @@ func (r *Resolver) Resolve() (string, error) {
 			return jsonlPath, nil
 		}
 		// Session ids are unique, so if the project directory name doesn't
-		// match our encoding (e.g. Claude Code shortens very long paths),
-		// find the file by id instead.
+		// match our encoding (an older Claude Code named the directories of
+		// long paths otherwise), find the file by id instead.
 		if matches, _ := filepath.Glob(filepath.Join(projectsDir, "*", meta.SessionID+".jsonl")); len(matches) > 0 {
 			return matches[0], nil
 		}
@@ -111,16 +110,4 @@ func (r *Resolver) Resolve() (string, error) {
 		return "", fmt.Errorf("session file %s has empty sessionId", sessionFile)
 	}
 	return filepath.Join(projectsDir, encodedCWD, meta.SessionID+".jsonl"), nil
-}
-
-// nonAlphanumericRe matches the characters Claude Code replaces with a dash
-// when naming a project directory.
-var nonAlphanumericRe = regexp.MustCompile(`[^a-zA-Z0-9]`)
-
-// EncodeCWD encodes a working directory path the way Claude Code names its
-// projects directory: every character other than an ASCII letter or digit
-// becomes a dash. For example, "/home/k1dave6412" becomes "-home-k1dave6412"
-// and "/home/me/.cache/my_app" becomes "-home-me--cache-my-app".
-func EncodeCWD(cwd string) string {
-	return nonAlphanumericRe.ReplaceAllString(cwd, "-")
 }

@@ -2,6 +2,7 @@ package agentlog
 
 import (
 	"bytes"
+	"encoding/json"
 	"time"
 )
 
@@ -75,14 +76,20 @@ func Elements(value []byte, fn func(elem []byte) bool) bool {
 }
 
 // StringField returns the value of a top-level string field of a log
-// line, as Field finds it. Values with escapes are returned as they are
-// written, which the record types and timestamps it is for never have.
+// line, as Field finds it.
 func StringField(line []byte, key string) (string, bool) {
 	value, ok := Field(line, key)
 	if !ok || len(value) < 2 || value[0] != '"' {
 		return "", false
 	}
-	return string(value[1 : len(value)-1]), true
+	if bytes.IndexByte(value, '\\') < 0 {
+		return string(value[1 : len(value)-1]), true
+	}
+	var s string
+	if json.Unmarshal(value, &s) != nil {
+		return "", false
+	}
+	return s, true
 }
 
 // LineTime is the timestamp of a log line, if it has one.
