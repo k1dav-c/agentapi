@@ -857,8 +857,11 @@ agent had in its working directory and to open one, without `--state-db`:
   last changed. Sessions in which the user sent nothing are left out. They
   are read from Claude Code's projects directory, Codex's sessions and Pi's
   session directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
-  `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` are honored, a
-  `--session-dir` passed to Pi is not).
+  `PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR` and a `--session-dir`
+  passed to Pi are honored). A session belongs to the directory its log
+  records, also when AgentAPI runs in it through a symlink; Claude Code names
+  some directories alike (`/w/a_b` and `/w/a-b`), and their sessions are told
+  apart.
 - `POST /sessions/{id}/resume` restarts the agent on that session, and
   replaces the conversation with the session's, read from its log. With
   `{"fork": true}` the agent opens a copy of it under a new id (Claude Code's
@@ -881,7 +884,8 @@ subscription doesn't charge per token, so it says what the work would have cost 
   priced as Anthropic's 5-minute or one-hour cache. Calls Claude Code counts in its own total but
   doesn't log one by one, such as compacting the context, are added from its cost records as
   unitemized calls.
-- Codex: each turn's token counts, its subagents' included; cached input is priced as a cache read.
+- Codex: each turn's token counts, its subagents' included; input read from the cache is priced as a
+  cache read, and the rest as input.
 - Pi: the cost Pi reports for each call.
 
 A call a fork copied from another session counts in the session it came from, so totals don't count

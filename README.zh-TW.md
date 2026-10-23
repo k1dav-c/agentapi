@@ -720,7 +720,9 @@ Claude Code、Codex 和 Pi 會為每個工作階段留下紀錄，AgentAPI 讀�
   `id`、`title`（agent 或使用者為它取的名字）、`first_prompt`、`prompts`（訊息數），以及開始和
   最後變動的時間。使用者沒送過訊息的工作階段不會列出。資料來自 Claude Code 的 projects 目錄、
   Codex 的 sessions 和 Pi 的工作階段目錄（會參考 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、
-  `PI_CODING_AGENT_DIR` 和 `PI_CODING_AGENT_SESSION_DIR`，但不會參考傳給 Pi 的 `--session-dir`）。
+  `PI_CODING_AGENT_DIR`、`PI_CODING_AGENT_SESSION_DIR`，以及傳給 Pi 的 `--session-dir`）。工作階段
+  屬於它的紀錄所記載的目錄，AgentAPI 經由 symlink 在該目錄中執行時也一樣；Claude Code 會把某些
+  目錄取成相同的名稱（例如 `/w/a_b` 和 `/w/a-b`），它們的工作階段也能分辨出來。
 - `POST /sessions/{id}/resume` 讓 agent 在那個工作階段上重新啟動，並把對話換成從紀錄讀出的
   內容。帶 `{"fork": true}` 時，agent 會以新的 id 開啟它的副本（Claude Code 的
   `--fork-session`、Codex 的 `thread/fork`、Pi 的 `--fork`），原本的工作階段維持不變。佇列和尚未
@@ -740,7 +742,8 @@ key 做同樣的工作要花多少錢。
 - Claude Code：工作階段紀錄和它的 sub agent 紀錄中的每次呼叫，cache 寫入分別以 Anthropic 的
   5 分鐘或一小時 cache 計價。Claude Code 計入自己的總額、卻沒有逐筆記錄的呼叫（例如壓縮
   context），會從它的花費紀錄補上，列為未逐筆列出（unitemized）的呼叫。
-- Codex：每個回合的 token 計數，含它的 sub agent；cache 中的輸入以 cache 讀取計價。
+- Codex：每個回合的 token 計數，含它的 sub agent；從 cache 讀取的輸入以 cache 讀取計價，其餘以
+  輸入計價。
 - Pi：Pi 為每次呼叫回報的金額。
 
 分支（fork）從另一個工作階段複製來的呼叫，算在原本的工作階段，所以加總時不會重複計算。內建

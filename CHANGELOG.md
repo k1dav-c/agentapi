@@ -42,6 +42,31 @@
 - Webhook retries wait twice as long each time, up to 30 seconds; a 4xx response other than 408
   and 429 isn't tried again. The queue holds 1,024 events.
 
+### Fixes
+
+- Earlier sessions: Codex sessions whose prompt starts with `<` (pasted HTML, say) and sessions
+  older than the newest 2000 Codex rollouts are listed again and count in the costs. Codex's
+  injected context is recognized by its tags, and a prompt of several text blocks keeps all of them.
+- Earlier sessions: Claude Code sessions of directories Claude Code names alike (`/w/a_b` and
+  `/w/a-b`) are told apart by the directory their log records, and directories with long paths or
+  reached through a symlink find their sessions; Pi's `--session-dir`, `PI_CODING_AGENT_SESSION_DIR`
+  and settings `sessionDir` are honored.
+- A resumed Claude Code session no longer shows empty tool results for interruptions and prompts
+  with images, and task notifications and `!` shell commands aren't taken for prompts.
+- Costs count the sessions without a prompt, Pi's calls that keep its prompt cache warm, and
+  nested Codex subagents.
+- Codex's `input_tokens` no longer include the input read from the cache, as for Claude Code and
+  Pi, so Codex's token totals in the chat are smaller and the costs unchanged.
+
+### Performance
+
+- Earlier sessions, subagents and costs are read incrementally: a log that grew is read from where
+  it was left. After one line was added to a 111 MB log, GET /cost took 72 ms instead of 3.5 s;
+  GET /subagents with 2000 Codex rollouts takes 10 ms instead of 0.8 s. Concurrent cost requests
+  share one reading.
+- Records a log parser doesn't know, and lines it can't decode, are logged once per log with the
+  agent CLI version, so a changed log format shows in the server's log.
+
 ## v0.28.0
 
 ### Features

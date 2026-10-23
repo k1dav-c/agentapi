@@ -46,6 +46,7 @@ flowchart TB
     acp["ACP<br/>x/acpio"]
     native["Native<br/>lib/native"]
     jsonl["Session-log watcher<br/>lib/jsonlwatcher"]
+    sessions["Earlier sessions, subagents, costs<br/>lib/sessions"]
   end
   tui["Agent's terminal UI in a PTY<br/>lib/termexec"]
   acpagent["Agent's ACP server"]
@@ -65,6 +66,8 @@ flowchart TB
   acp -. "updates" .-> emitter
   native -. "updates" .-> emitter
   jsonl -. "updates" .-> emitter
+  http --> sessions
+  proto -. "session logs" .-> sessions
 ```
 
 Each AgentAPI process runs one agent. Every transport implements `st.Conversation`, the server's
@@ -87,7 +90,9 @@ terminal dialog are written to the agent's terminal directly.
 | `lib/termexec/` | Runs the agent in a pseudo-terminal with an in-memory VT100 emulator (`xpty`, `vt10x`); the process can be swapped for a restart |
 | `lib/msgfmt/` | Per-agent formatting of screen output: echoed input, input boxes, status lines, tool calls, readiness for the first prompt |
 | `lib/transcript/` | The structured transcript's types, which the transports share: rich messages with their content blocks, and timeline events |
-| `lib/jsonlwatcher/` | Finds and tails the Claude Code, Codex and Pi session logs and parses them into rich messages and timeline events; lists the agent's earlier sessions in a directory and reads one's conversation (`history.go`), reads the logs of the subagents a session ran (`subagents.go`), and reads what the sessions in a directory cost from their model calls (`cost.go`) |
+| `lib/agentlog/` | The agents' session-log formats, one package each (`claudelog`, `codexlog`, `pilog`): their records, the parsers into rich messages and timeline events (the native adapters use them too), prompts and injected context, model calls, file layout and resolvers; plus line reading, the incremental file index and format-drift warnings |
+| `lib/sessions/` | A directory's earlier sessions, read through a `Store` the server holds: the list and one's conversation (`history.go`), the subagents a session ran (`subagents.go`) and what the sessions cost (`cost.go`) |
+| `lib/jsonlwatcher/` | Finds and tails the session log of a PTY agent's process, for its rich messages |
 | `lib/pricing/` | Model prices per million tokens (the built-in `prices.json`, and a `--prices` file), and what a call's tokens cost at them |
 | `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |
@@ -231,9 +236,9 @@ sequenceDiagram
   none (a shell, a REPL), also once its screen is stable.
 - `jsonlwatcher` finds the Claude Code, Codex or Pi session log that belongs
   to the agent's process (by its process ID and working directory) and tails
-  it. Agent-specific parsers turn its lines into rich messages (thinking, tool
-  calls with their results, usage) and timeline events, which reach the
-  emitter next to the screen-derived messages.
+  it. The parsers of `lib/agentlog` turn its lines into rich messages
+  (thinking, tool calls with their results, usage) and timeline events, which
+  reach the emitter next to the screen-derived messages.
 - Terminal dialogs (Claude Code's plan approval and permission prompts, Codex
   approvals, Pi's trust prompt) are recognized on the screen and reported as
   `terminal_prompt`. `handoff.go` turns an answer into the keys the dialog
@@ -310,19 +315,28 @@ type Factory func(resume Resume) (Adapter, error)
   changed MCP configuration is read again and the conversation stays;
   `Switch` opens another session, or a copy of it, with that session's
   messages, which the server reads from the agent's session log
-  (`jsonlwatcher.ReadSessionHistory`; `GET /sessions` lists them). The
+  (`sessions.Store.ReadHistory`; `GET /sessions` lists them). The
   subagents the agent ran in the session are read the same way, from their
-  own logs (`jsonlwatcher.Subagents`), for `GET /subagents` and the chat's
+  own logs (`sessions.Store.Subagents`), for `GET /subagents` and the chat's
   Lineage panel; their state comes from the Agent tool call that started
   them.
-- **Costs.** `jsonlwatcher.DirectoryCosts` reads the model calls of every
-  session in the directory, its subagents' included, from the same logs
-  (`GET /sessions`, `GET /cost`): Claude Code's assistant messages (one per
-  message id), Codex's token counts, Pi's reported costs. `lib/pricing`
-  prices each call; Claude Code's `cost-state` records add what its log
-  doesn't list (compaction) as unitemized calls. A call a fork copied counts
-  once, in the session born first. The calls of a log are cached by path and
-  modification time, so only the logs that changed are read again.
+- **Costs.** `sessions.Store.Costs` reads the model calls of every session
+  in the directory, its subagents' included, from the same logs (`GET
+  /sessions`, `GET /cost`): Claude Code's assistant messages (one per message
+  id), Codex's token counts, Pi's reported costs. `lib/pricing` prices each
+  call; Claude Code's `cost-state` records add what its log doesn't list
+  (compaction) as unitemized calls. A call a fork copied counts once, in the
+  session born first. The Store keeps an incremental index of each log (its
+  size, the offset read to and the reader's state), so a log that grew is
+  read from where it was left, complete lines only, and one that shrank or
+  was replaced is read again; concurrent requests share one reading, and
+  the index is bounded and drops logs that are gone.
+- **Log formats.** Each format is decoded in one place (`lib/agentlog`):
+  what is a prompt, injected context or a tool result is decided once, for
+  the native adapters, the history, the costs and the PTY watcher alike.
+  Records a parser doesn't know, and lines it can't decode, are logged once
+  per log at Warn with the CLI version the log records, so a changed format
+  shows in the server's log.
 - **Usage limits.** An adapter ends a turn the account's usage limit stopped
   with the `limited` stop reason (Claude Code's limit messages and a
   `rejected` rate limit event, Codex's `usageLimitExceeded`, a quota error of

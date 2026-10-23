@@ -46,6 +46,7 @@ flowchart TB
     acp["ACP<br/>x/acpio"]
     native["Native<br/>lib/native"]
     jsonl["工作階段紀錄監看器<br/>lib/jsonlwatcher"]
+    sessions["先前的工作階段、sub agent、花費<br/>lib/sessions"]
   end
   tui["PTY 中的 agent 終端機介面<br/>lib/termexec"]
   acpagent["Agent 的 ACP 伺服器"]
@@ -65,6 +66,8 @@ flowchart TB
   acp -. "更新" .-> emitter
   native -. "更新" .-> emitter
   jsonl -. "更新" .-> emitter
+  http --> sessions
+  proto -. "工作階段紀錄" .-> sessions
 ```
 
 每個 AgentAPI 行程執行一個 agent。所有 transport 都實作 `st.Conversation`，供伺服器
@@ -85,7 +88,9 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 | `lib/termexec/` | 在虛擬終端機中執行 agent，搭配記憶體內的 VT100 模擬器（`xpty`、`vt10x`）；重新啟動時可以替換行程 |
 | `lib/msgfmt/` | 各 agent 專屬的畫面輸出整理：回顯的輸入、輸入框、狀態列、工具呼叫，以及判斷何時可以送出第一個提示 |
 | `lib/transcript/` | 各傳輸共用的結構化對話型別：結構化訊息與其內容區塊、時間軸事件 |
-| `lib/jsonlwatcher/` | 找到並追蹤 Claude Code、Codex 和 Pi 的工作階段紀錄檔，解析成結構化訊息與時間軸事件；列出 agent 在某個目錄中先前的工作階段並讀取其對話（`history.go`），讀取工作階段執行過的 sub agent 的紀錄（`subagents.go`），以及從模型呼叫算出目錄中各工作階段的花費（`cost.go`） |
+| `lib/agentlog/` | 各 agent 工作階段紀錄的格式，一種 agent 一個套件（`claudelog`、`codexlog`、`pilog`）：紀錄型別、解析成結構化訊息與時間軸事件的 parser（native adapter 也使用）、prompt 與注入內容的辨識、模型呼叫、檔案配置與 resolver；另有逐行讀取、增量檔案索引和格式變動警告 |
+| `lib/sessions/` | 目錄中先前的工作階段，透過伺服器持有的 `Store` 讀取：清單與單一工作階段的對話（`history.go`）、工作階段執行過的 sub agent（`subagents.go`），以及各工作階段的花費（`cost.go`） |
+| `lib/jsonlwatcher/` | 找到並追蹤 PTY agent 行程的工作階段紀錄檔，取得它的結構化訊息 |
 | `lib/pricing/` | 每百萬 tokens 的模型價格（內建的 `prices.json` 和 `--prices` 檔案），以及一次呼叫的 tokens 依此價格的金額 |
 | `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入 |
 | `lib/native/claude`、`codex`、`pi` | 每種 agent 協定各一個 adapter |
@@ -212,7 +217,7 @@ sequenceDiagram
   可以接受第一個提示：輸入框出現時；至於可能不會畫出輸入框的 `custom` agent（例如 shell 或
   REPL），畫面穩定後也可以。
 - `jsonlwatcher` 會找到屬於 agent 行程的 Claude Code、Codex 或 Pi 工作階段紀錄檔（依行程 ID
-  和工作目錄）並持續追蹤。各 agent 專屬的解析器把每一行轉成結構化訊息（思考、工具呼叫與
+  和工作目錄）並持續追蹤。`lib/agentlog` 的解析器把每一行轉成結構化訊息（思考、工具呼叫與
   結果、用量）和時間軸事件，和從畫面解析出的訊息一起送進 emitter。
 - 終端機對話框（Claude Code 的計畫核准與權限提示、Codex 的核准、Pi 的信任提示）會在畫面上
   被辨識出來，回報為 `terminal_prompt`。`handoff.go` 會把回答轉成對話框需要的按鍵，
@@ -278,14 +283,20 @@ type Factory func(resume Resume) (Adapter, error)
   選擇的設定、回報它的能力，並送出初始提示。`Restart` 會換成新的工作階段；`Reload` 則接續
   同一個工作階段，重新讀取 MCP 設定並保留對話；`Switch` 會開啟另一個工作階段或它的副本，並
   帶入該工作階段的訊息，這些訊息由伺服器從 agent 的工作階段紀錄讀出
-  （`jsonlwatcher.ReadSessionHistory`；`GET /sessions` 會列出它們）。agent 在工作階段中執行過的
-  sub agent 也以同樣方式從它們自己的紀錄讀出（`jsonlwatcher.Subagents`），提供給
+  （`sessions.Store.ReadHistory`；`GET /sessions` 會列出它們）。agent 在工作階段中執行過的
+  sub agent 也以同樣方式從它們自己的紀錄讀出（`sessions.Store.Subagents`），提供給
   `GET /subagents` 和聊天介面的 Lineage 面板；它們的狀態取自啟動它們的 Agent 工具呼叫。
-- **花費。** `jsonlwatcher.DirectoryCosts` 從同樣的紀錄讀出目錄中每個工作階段（含 sub agent）的
-  模型呼叫（`GET /sessions`、`GET /cost`）：Claude Code 的 assistant 訊息（每個 message id 一次）、
-  Codex 的 token 計數、Pi 回報的金額。`lib/pricing` 為每次呼叫計價；Claude Code 的 `cost-state`
-  紀錄會把紀錄檔沒有列出的部分（壓縮）補成未逐筆列出的呼叫。分支複製的呼叫只算一次，算在
-  最先建立的工作階段。每個紀錄檔的呼叫依路徑和修改時間快取，只有變動過的紀錄檔會重新讀取。
+- **花費。** `sessions.Store.Costs` 從同樣的紀錄讀出目錄中每個工作階段（含 sub agent）的模型呼叫
+  （`GET /sessions`、`GET /cost`）：Claude Code 的 assistant 訊息（每個 message id 一次）、Codex 的
+  token 計數、Pi 回報的金額。`lib/pricing` 為每次呼叫計價；Claude Code 的 `cost-state` 紀錄會把
+  紀錄檔沒有列出的部分（壓縮）補成未逐筆列出的呼叫。分支複製的呼叫只算一次，算在最先建立的
+  工作階段。Store 為每個紀錄檔保存增量索引（大小、讀到的位置和讀取器的狀態），所以變長的紀錄檔
+  會從上次的位置接著讀，而且只讀完整的行；變短或被換掉的會重新讀取。同時的請求共用一次讀取，
+  索引有大小上限，已不存在的紀錄檔會被移除。
+- **紀錄格式。** 每種格式只在一個地方解碼（`lib/agentlog`）：什麼是 prompt、注入的內容或工具
+  結果只判斷一次，native adapter、歷史、花費和 PTY 監看器都用同一套。parser 不認得的紀錄和無法
+  解碼的行，每個紀錄檔只會以 Warn 記錄一次，並附上紀錄中的 CLI 版本，所以格式改變時會出現在
+  伺服器的 log 裡。
 - **用量限制。** 帳號的用量限制讓回合停下時，adapter 會以 `limited` 停止原因結束回合（Claude Code
   的限制訊息與 `rejected` 的 rate limit 事件、Codex 的 `usageLimitExceeded`、Pi 模型供應商的
   額度錯誤）。對話會把它記成帶有重置時間的 `LimitStop`，直到下一個回合開始：期間伺服器的佇列
