@@ -70,7 +70,12 @@ func newSessionServerWith(t *testing.T, configure func(*nativetest.Adapter)) *na
 		cancel()
 	})
 	n := &nativeServer{t: t, url: ts.URL, factory: factory}
-	require.Eventually(t, func() bool { return factory.Last() != nil && factory.Last().Sink() != nil }, 5*time.Second, 5*time.Millisecond)
+	// The agent started: a message sent now starts a turn.
+	require.Eventually(t, func() bool {
+		var status httpapi.StatusChangeBody
+		n.do(http.MethodGet, "/status", nil, &status)
+		return status.Status == httpapi.AgentStatusStable
+	}, 5*time.Second, 5*time.Millisecond)
 	return n
 }
 
@@ -148,11 +153,6 @@ func TestNative_ResumeDuringCompactionChangesNothing(t *testing.T) {
 	// Before the server stops, which waits for the compaction's request.
 	t.Cleanup(releaseCompaction)
 	first := n.factory.Last()
-	require.Eventually(t, func() bool {
-		var status httpapi.StatusChangeBody
-		n.do(http.MethodGet, "/status", nil, &status)
-		return status.Status == httpapi.AgentStatusStable
-	}, 5*time.Second, 5*time.Millisecond)
 	n.send("hello", "")
 	first.Sink().RichMessage(transcript.RichMessage{MessageID: "cur_1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "current answer"}}})
 	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})

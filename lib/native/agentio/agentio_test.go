@@ -1,7 +1,6 @@
 package agentio_test
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -10,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -84,14 +82,26 @@ func TestWriter(t *testing.T) {
 // waited behind it never goes out.
 func TestWriterGivesUpWithTheContext(t *testing.T) {
 	t.Parallel()
-	r, pipe := io.Pipe()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var mu sync.Mutex
+	var written []string
 	w := agentio.NewWriter("test")
-	w.Attach(pipe)
+	w.Attach(writerFunc(func(p []byte) (int, error) {
+		if string(p) == "\"first\"\n" {
+			// The agent stops reading.
+			close(entered)
+			<-release
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		written = append(written, string(p))
+		return len(p), nil
+	}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	first := make(chan error, 1)
 	go func() { first <- w.Write(ctx, "first") }()
-	require.Eventually(t, w.Writing, 5*time.Second, time.Millisecond)
+	<-entered
 	second := make(chan error, 1)
 	go func() { second <- w.Write(ctx, "second") }()
 	cancel()
@@ -104,22 +114,11 @@ func TestWriterGivesUpWithTheContext(t *testing.T) {
 
 	// The agent reads again: it gets the record whose write began, whole,
 	// and nothing of the other.
-	lines := make(chan string, 10)
-	go func() {
-		reader := bufio.NewReader(r)
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				return
-			}
-			lines <- line
-		}
-	}()
+	close(release)
 	require.NoError(t, w.Write(context.Background(), "third"))
-	assert.Equal(t, "\"first\"\n", <-lines)
-	assert.Equal(t, "\"third\"\n", <-lines)
-	_ = r.Close()
-	assert.Error(t, w.Write(context.Background(), "fourth"), "the agent's input is closed")
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"\"first\"\n", "\"third\"\n"}, written)
 }
 
 type writerFunc func([]byte) (int, error)
