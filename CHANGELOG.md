@@ -2,48 +2,68 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- Identifiers are named for what they identify. `GET /status` and `status_change` events return
+  `server_id` (a random identifier of the AgentAPI run) and `turn` (how many times the agent
+  started working) instead of `session_id` and `run_id`, and add `agent_session_id`, the agent's
+  own session. `GET /cost` and timeline events carry `agent_session_id` instead of `session_id`;
+  human-reply requests carry `server_id` and `turn`; webhook events carry `server_id` instead of
+  `run_id` in their instance and in `run.status_changed`, and payload templates use `.ServerID`.
+- `--state-file` is deprecated: its conversation is imported once into a state database next to it
+  (the same name with `.db`, or `--state-db`), which keeps the conversation from then on, and the
+  file isn't written anymore. `--load-state=false` skips the import; `--save-state` has no effect.
+  SIGUSR1 writes what the state database hasn't written yet.
+
 ### Features
 
 - Webhooks push what happens to a receiver, such as a dashboard that watches many agents, besides
   the API AgentAPI serves. `--webhook-events` picks them by type, group (`task.*`) or all (`*`):
   `instance.started`, `instance.heartbeat` and `instance.stopped`; `task.started`, and
-  `task.completed` or `task.failed` with the prompt, reply, duration, outcome and API-equivalent
+  `task.completed` or `task.failed` with the prompt, reply, duration, status and API-equivalent
   cost; `request.opened` and `request.closed` for approvals, questions, plans and terminal dialogs;
   `login.*`, `limit.*`, `agent.error`; `message.created` and `tool.completed`. The default is
   `run.status_changed` alone, as before. Every event names its instance (`--webhook-instance-id`,
   `--public-url`, the Coder workspace), `--webhook-secret` signs every delivery with HMAC-SHA256
   (`X-AgentAPI-Signature-256`), and `--webhook-heartbeat` sets the heartbeat. `GET/PUT /webhook`
-  read and change the new settings; the secret is never returned. Payload templates get `.Instance`
-  and `.Data`.
-- Chat: the Explorer's Webhook tab sets up the webhook, also on an AgentAPI started without one:
-  the URL, the kinds of events, the signing secret, the instance ID, the heartbeat, the public URL
-  and the delivery settings. **Send test event** (`POST /webhook/test`) sends a signed
-  `webhook.test` event and shows the receiver's answer.
-- Docs: a screenshot of the Webhook tab; all screenshots retaken.
+  read and change the settings (the secret is never returned) and `POST /webhook/test` sends a test
+  event. Payload templates get `.Instance` and `.Data`. Retries wait twice as long each time, up to
+  30 seconds; a 4xx response other than 408 and 429 isn't tried again.
+- Chat: the Explorer's Webhook tab sets up the webhook, also on an AgentAPI started without one,
+  and sends a test event.
+- Tasks: the server groups the conversation into tasks for every transport: a message and the
+  agent's turn on it, with the messages that steered it, ending `completed`, `failed` or `limited`
+  once the agent is idle with nothing open. `GET /tasks` lists them, `/events?sync=1` sends
+  `task_update`, rich messages carry their `task_id`, and the state database keeps them. The chat
+  shows each task's status, its tool calls and its cost from them, and the webhook's `task.*`
+  events follow them.
+- `/events?sync=1` sends `queue_update` with the whole queue whenever it changes, so the chat sees
+  what another client queued without polling. `task_update` and `queue_update`, like
+  `session_sync`, go only to clients that opt in with `sync`.
 - `--state-db` works with the PTY transport too: the conversation and the queue survive a restart,
   and the agent starts anew below the conversation. A PTY conversation records the initial prompt
   it got and sends it again only if it changed. Webhook settings changed through the API are kept
   in the state database and apply after a restart, unless AgentAPI starts with other webhook flags.
-- `--state-file` is deprecated: its conversation is imported once into a state database next to it
-  (the same name with `.db`, or `--state-db`), which keeps the conversation from then on, and the
-  file isn't written anymore. `--load-state=false` skips the import; `--save-state` has no effect.
-  SIGUSR1 writes what the state database hasn't written yet.
-- Chat: a long session stays responsive while the agent works. Each update rebuilds the transcript
-  only from what changed (0.3–0.5 ms instead of 85–99 ms for 200 tasks), and components read only
-  the state they show, so the layout, composer, dock and Lineage no longer render again on every
-  update.
-- Chat: the browser cache keeps each message as its own record and writes only what changed; a
-  server's cache is removed after 14 days without use, and only the 10 most recently used servers
-  keep one. The cache moves to a new format, so the first visit after the update loads the
-  conversation again.
 - Chat: an error that stops the page shows the error, with buttons to clear the cached
   conversation and reload, instead of a blank page.
-- Chat: a stream the server or a proxy closes is opened again at once, without a reconnect notice.
-- Webhook retries wait twice as long each time, up to 30 seconds; a 4xx response other than 408
-  and 429 isn't tried again. The queue holds 1,024 events.
+- Docs: a screenshot of the Webhook tab; all screenshots retaken.
 
 ### Fixes
 
+- Opening an earlier session while the agent compacted its context returned 409 after deleting the
+  conversation, and left the lifecycle at `restarting`; a refused resume now changes nothing.
+- A conversation change updates can't express (a message taken back) streamed the whole state to
+  connected clients, and a client whose stream ended midway lost the rest for good. The server now
+  ends the streams, and clients reconnect for the full replay.
+- A message sent just as AgentAPI stopped could reach the agent and be sent again after a restart
+  with `--state-db`; a send that went out unconfirmed is no longer sent again.
+- A restart (`DELETE /messages`, an MCP change with `?restart=true`, opening a session, a Codex or
+  Pi update) no longer holds up every other request for minutes; messages wait in the queue
+  meanwhile. An agent that stopped reading its input can no longer hang AgentAPI or its shutdown.
+- `POST /upload` no longer races on huma's shared operation (each upload also grew the OpenAPI
+  schema) and removes the temporary files of its form.
+- A rich message without content was sent as `null`, which blanked the chat, also after a reload.
+- Pi opens a dialog before the prompt that started it returns.
 - Earlier sessions: Codex sessions whose prompt starts with `<` (pasted HTML, say) and sessions
   older than the newest 2000 Codex rollouts are listed again and count in the costs. Codex's
   injected context is recognized by its tags, and a prompt of several text blocks keeps all of them.
@@ -64,8 +84,26 @@
   it was left. After one line was added to a 111 MB log, GET /cost took 72 ms instead of 3.5 s;
   GET /subagents with 2000 Codex rollouts takes 10 ms instead of 0.8 s. Concurrent cost requests
   share one reading.
+- A resumed session with tens of thousands of rich messages loads at once (80,000 took 38 s), and
+  the state database encodes messages off the emitter's lock.
+- Chat: a long session stays responsive while the agent works. Each update rebuilds the transcript
+  only from what changed (0.3–0.5 ms instead of 85–99 ms for 200 tasks), and components read only
+  the state they show, so the layout, composer, dock and Lineage no longer render again on every
+  update.
+- Chat: the browser cache keeps each message as its own record and writes only what changed; a
+  server's cache is removed after 14 days without use, and only the 10 most recently used servers
+  keep one. The cache moves to a new format, so the first visit after the update loads the
+  conversation again. A stream the server or a proxy closes is opened again at once, without a
+  reconnect notice.
 - Records a log parser doesn't know, and lines it can't decode, are logged once per log with the
   agent CLI version, so a changed log format shows in the server's log.
+
+### Internal
+
+- The conversation types the transports share moved from the PTY engine to `lib/conversation`; the
+  agents' log formats to `lib/agentlog` (one package per agent) and the earlier sessions to
+  `lib/sessions`, leaving `lib/jsonlwatcher` the PTY's log tailer. File, terminal, upload, auth and
+  webhook handlers are modules holding only what they need.
 
 ## v0.28.0
 

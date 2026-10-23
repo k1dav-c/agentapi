@@ -59,6 +59,8 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
   token 用量。
 - agent 工作中時送出的訊息會在可以編輯、重新排序的[佇列](#訊息佇列)中等待；使用 native
   transport 時，也可以把訊息 [steer 進執行中的回合或中斷它](#steerinterrupt-與佇列)。
+- 你的每則訊息和 agent 處理它的回合都是伺服器追蹤的[任務](#任務)：執行中、已完成、失敗，
+  或因用量限制而停止。
 - 透過 [server-sent events](#事件與增量同步) 即時追蹤一切，有 heartbeat，重新連線後只重播
   有變動的部分。
 
@@ -726,7 +728,8 @@ Claude Code、Codex 和 Pi 會為每個工作階段留下紀錄，AgentAPI 讀�
 - `POST /sessions/{id}/resume` 讓 agent 在那個工作階段上重新啟動，並把對話換成從紀錄讀出的
   內容。帶 `{"fork": true}` 時，agent 會以新的 id 開啟它的副本（Claude Code 的
   `--fork-session`、Codex 的 `thread/fork`、Pi 的 `--fork`），原本的工作階段維持不變。佇列和尚未
-  回覆的請求會像重新啟動時一樣清除；agent 正在執行回合時回傳 409。
+  回覆的請求會像重新啟動時一樣清除；agent 正在執行回合、壓縮 context 或重新啟動時回傳 409，
+  被拒絕的開啟不會改動目前的對話。
 
 在聊天介面中，Explorer 的 Session 分頁會列出這些工作階段，並提供 **Open** 和
 **Start a copy**，兩者都要點第二次確認。
@@ -1080,17 +1083,45 @@ AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新�
   `"type": "raw"` 則是把按鍵輸入 agent 的終端機（PTY transport）。
 - `GET /messages` 回傳對話；`GET /rich-messages` 和 `GET /timeline` 回傳結構化的形式（見
   [Claude、Codex 與 Pi 的結構化活動](#claudecodex-與-pi-的結構化活動)）。
-- `DELETE /messages` 清除對話（訊息、結構化訊息、請求、時間軸、錯誤和佇列），並重新啟動
-  agent（native transport 會開始新的工作階段）。ACP transport 無法重新啟動 agent，所以會
-  回傳 400。
+- 已經送出、但沒有得到確認的訊息（呼叫逾時，或 AgentAPI 正在停止）可能已經送到 agent：它不會
+  再送一次，而是以錯誤離開佇列。
+- `DELETE /messages` 清除對話（訊息、結構化訊息、請求、任務、時間軸、錯誤和佇列），並重新
+  啟動 agent（native transport 會開始新的工作階段）。ACP transport 無法重新啟動 agent，所以
+  會回傳 400。agent 重新啟動期間，訊息會在佇列中等待；原始按鍵、另一次重新啟動和開啟工作階段
+  會回傳 409，AgentAPI 停止期間的重新啟動也一樣。
 - `GET /status` 回傳向下相容的 `stable`/`running` 狀態、詳細的生命週期（`starting`、
-  `ready`、`running`、`restarting`、`exited` 或 `failed`）、transport、工作階段 ID、單調遞增
-  的執行 ID、對話的 `epoch`、工作階段名稱、AgentAPI 版本、agent 目前開啟的對話框
-  （`terminal_prompt`）以及終端機寬度（`terminal_columns`）。使用 native transport 時還會
-  回報 `capabilities`、`pending_requests`、`settings`、`usage`、`terminal` 和
-  `login_required`。
+  `ready`、`running`、`restarting`、`exited` 或 `failed`）、transport、`server_id`（這次
+  AgentAPI 執行的隨機識別碼，每次啟動都會不同）、`turn`（agent 開始工作的次數）、對話的
+  `epoch`、工作階段名稱、AgentAPI 版本、agent 目前開啟的對話框（`terminal_prompt`）以及終端機
+  寬度（`terminal_columns`）。使用 native transport 時還會回報 `agent_session_id`（agent 自己的
+  工作階段，即 [`GET /sessions`](#先前的工作階段) 列出的那些）、`capabilities`、
+  `pending_requests`、`settings`、`usage`、`terminal` 和 `login_required`。
+- `GET /tasks` 回傳對話的[任務](#任務)。
 - `GET /title` 回傳工作階段的可讀標題。
-- `POST /upload` 儲存檔案（最大 10 MB）並回傳路徑，訊息以 `@"<路徑>"` 引用它。
+- `POST /upload` 儲存檔案（最大 10 MB；超過 11 MiB 的內容會在讀取前就被拒絕）並回傳路徑，
+  訊息以 `@"<路徑>"` 引用它。
+
+### 任務
+
+AgentAPI 把對話分成一個個任務，所有 transport 都適用：一個任務是你的一則訊息，加上 agent 處理
+它的回合。任務執行中你加進去的訊息（steering）屬於這個任務；它結束後的下一則訊息才會開始下一個
+任務。agent 回到閒置、而且沒有開著的請求或終端機對話框時，任務就結束。如果是因為回答了請求或
+對話框才讓 agent 閒置下來，AgentAPI 會先等 3 秒再結束任務，因為 agent 通常會繼續工作。
+
+`GET /tasks` 由舊到新列出任務，每個都有：
+
+- `id`：開始這個任務的訊息 ID，同 `GET /messages`；
+- `status`：`running`、`completed`、`failed`（agent 回報錯誤或結束；`errors` 說明原因）或
+  `limited`（[用量限制](#達到用量限制時)讓它停下；`limit` 是那次停止）；
+- `prompt`（訊息的開頭）、`started_at` 和 `ended_at`；
+- `reply_id`：agent 在這個任務的最後一則訊息；
+- `steered`：任務執行中加進去的訊息 ID。
+
+每則結構化訊息都帶有它開始時所屬任務的 `task_id`，所以用戶端可以把工具呼叫和思考內容依任務
+分組，不必從時間戳記猜；接續的工作階段中的結構化訊息則沒有。AgentAPI 啟動前就存在、或從歷史
+開啟的訊息屬於過去：它們的任務是已完成。[狀態資料庫](#持久保存的工作階段)會保存任務，AgentAPI
+停止時還在執行的任務，重新啟動後就算結束。`/events?sync=1` 會在任務開始或改變時送出
+`task_update`；聊天介面和 [webhook](#webhook) 的 `task.*` 事件都使用同一份任務。
 
 ### 訊息佇列
 
@@ -1101,19 +1132,23 @@ agent 忙碌時收到的訊息不會被拒絕，而是依先進先出（FIFO）�
 - `PUT /queue/{id}` 編輯、`DELETE /queue/{id}` 移除一則排隊中的訊息。
 - `PUT /queue` 以 `{"ids": [...]}` 重新排列佇列，必須把每則排隊中的訊息各列出一次。
 - `POST /queue/{id}/steer` 把排隊中的訊息移進 agent 正在進行的回合（native transport）。
+- 加上 `?sync=1` 時，`/events` 會在佇列改變時送出包含整個佇列的 `queue_update`，所以用戶端
+  不必詢問就能看到別人排了什麼。
 
 ### 事件與增量同步
 
 `GET /events` 以 server-sent events 串流事件：`message_update`、`status_change`、
 `rich_message_update`、`agent_error`、`request_update`（native transport），以及每 15 秒
 一次的 `heartbeat`，讓用戶端能察覺連線已經失效。加上 `?sync=1` 時，串流會以 `session_sync`
-事件開頭，每次更新都會帶有 `seq`；用 `&since=<seq>&epoch=<epoch>` 重新連線時，只會重播有
-變動的部分。
+事件開頭，另外加上 `task_update` 和 `queue_update`，每次更新都會帶有 `seq`；用
+`&since=<seq>&epoch=<epoch>` 重新連線時，只會重播有變動的部分。沒有加 `sync` 的用戶端收不到
+這三種事件：有些用戶端（例如 agentapi-sdk-go）遇到不認得的事件類型就會出錯。
 
 加上 `?sync=1` 時，事件也會帶有 SSE id（重播的最後一個事件是重播的 `seq`，之後的變更
 各自帶自己的 `seq`），所以一般的 `EventSource` 自動重新連線時，會從它的 `Last-Event-ID`
 接續；請把 `GET /status` 回傳的 `epoch` 放進網址。有訊息被收回時（agent 拒絕開始的回合），
-對話會換成新的 epoch，已連線的用戶端會收到 `full: true` 的 `session_sync`，接著是完整的狀態。
+對話會換成新的 epoch，伺服器會結束事件串流（畫面串流除外）：用戶端重新連線，用舊的 epoch
+就會再拿到完整的狀態。開啟超過 256 則結構化訊息的工作階段時，也會結束串流，而不是逐則送出。
 
 ## 整合
 
@@ -1129,10 +1164,10 @@ AgentAPI 除了被動提供 API 給呼叫它的人，也會把發生的事主動
 
 | 事件 | 何時送出 | `data` |
 | --- | --- | --- |
-| `run.status_changed` | agent 在 `running` 與 `stable` 之間切換 | `status`、`previous_status`、`run_id`、`agent_type`、`transport` |
-| `instance.started`、`instance.heartbeat`、`instance.stopped` | AgentAPI 啟動時、每隔 `--webhook-heartbeat`（60 秒），以及關閉時 | agent 的狀況：`status`、`lifecycle`、`session_id`、`session_name`、`pending_requests`、`queued_messages`，以及有值時的 `terminal_prompt`、`login_required`、`limit_stop`、`usage`、`settings` |
-| `task.started` | 你的一則訊息送到 agent | 任務：`id`（那則訊息的 ID）、`prompt`、`started_at` |
-| `task.completed`、`task.failed` | agent 完成它：回到 stable，且沒有開著的請求或終端機對話框 | 任務加上 `ended_at`、`duration_seconds`、`outcome`（`completed`；agent 回報錯誤或結束時為 `failed`；用量限制時為 `limited`）、agent 最後一則訊息（`reply`）、`errors`、`limit`、`session_name`，以及 native Claude Code、Codex 和 Pi 的 API 等價花費 `cost`（見[工作階段花費](#工作階段花費)） |
+| `run.status_changed` | agent 在 `running` 與 `stable` 之間切換 | `status`、`previous_status`、`server_id`、`agent_type`、`transport` |
+| `instance.started`、`instance.heartbeat`、`instance.stopped` | AgentAPI 啟動時、每隔 `--webhook-heartbeat`（60 秒），以及關閉時 | agent 的狀況：`status`、`lifecycle`、`session_name`、`pending_requests`、`queued_messages`，以及有值時的 `agent_session_id`、`terminal_prompt`、`login_required`、`limit_stop`、`usage`、`settings` |
+| `task.started` | [任務](#任務)開始：你的一則訊息送到 agent | 任務，同 `GET /tasks`：`id`（那則訊息的 ID）、`status`、`prompt`、`started_at` |
+| `task.completed`、`task.failed` | [任務](#任務)結束：`completed`，或 `failed` 與 `limited`（`task.failed`） | 任務加上 `status`、`ended_at`、`duration_seconds`、agent 最後一則訊息（`reply`、`reply_id`）、`steered`、`errors`、`limit`、`session_name`，以及 native Claude Code、Codex 和 Pi 的 API 等價花費 `cost`（見[工作階段花費](#工作階段花費)） |
 | `request.opened`、`request.closed` | 核准、提問或計畫（native；請求內容同 `GET /requests`），或終端機對話框（PTY；`kind` 為 `terminal_prompt`，附 `prompt`）開啟或關閉 | 請求 |
 | `login.required`、`login.completed` | native agent 需要登入，或不再需要 | `agent`、`message`、要執行的 `command` |
 | `limit.stopped`、`limit.cleared` | 用量限制讓回合停下，或停止狀態結束 | `message`、`stopped_at`、`resets_at` |
@@ -1149,14 +1184,14 @@ AgentAPI 除了被動提供 API 給呼叫它的人，也會把發生的事主動
   "created_at": "2026-10-22T12:00:00Z",
   "instance": {
     "id": "my-host:3284",
-    "run_id": "agentapi-process-run-id",
+    "server_id": "agentapi-run-id",
     "hostname": "my-host",
     "port": 3284,
     "pid": 4242,
     "cwd": "/home/me/project",
     "agent_type": "claude",
     "transport": "native",
-    "agentapi_version": "0.29.0",
+    "agentapi_version": "1.0.0",
     "url": "https://agent.example.com",
     "workspace_url": "https://coder.example.com/@me/dev"
   },
@@ -1166,7 +1201,8 @@ AgentAPI 除了被動提供 API 給呼叫它的人，也會把發生的事主動
     "started_at": "2026-10-22T11:58:30Z",
     "ended_at": "2026-10-22T12:00:00Z",
     "duration_seconds": 90,
-    "outcome": "completed",
+    "status": "completed",
+    "reply_id": 5,
     "reply": "Fixed: the test compared times in two time zones.",
     "cost": {"usd": 0.42, "tokens": {"input": 12, "cache_read": 81000, "cache_write": 4200, "output": 1900}, "calls": 6},
     "session_name": "Fix the failing test"
@@ -1206,7 +1242,7 @@ valid = hmac.compare_digest(expected, signature) and abs(time.time() - int(times
 
 可以用 Go `text/template`（`--webhook-payload-template`）改寫 body 的格式以符合接收端，例如聊天
 服務的 incoming webhook。可用欄位有 `.ID`、`.Type`、`.CreatedAt`、`.Instance` 和 `.Data`（事件的
-data，欄位名稱同 JSON，例如 `{{.Data.prompt}}`），`run.status_changed` 另有 `.RunID`、`.Status`、
+data，欄位名稱同 JSON，例如 `{{.Data.prompt}}`），`run.status_changed` 另有 `.ServerID`、`.Status`、
 `.PreviousStatus`、`.AgentType` 和 `.Transport`。
 
 每個參數都有對應的 `AGENTAPI_` 環境變數（`AGENTAPI_WEBHOOK_URL`、以空白分隔事件的
@@ -1224,16 +1260,16 @@ AgentAPI 也能在這裡設定。在這裡或用 `PUT /webhook` 修改的設定�
 
 ![Explorer 的 Webhook 分頁：接收端網址、事件群組、簽章 secret、instance ID、心跳和公開網址](docs/screenshots/explorer-webhook.png)
 
-原本的執行狀態事件格式不變：
+沒有設定 `--webhook-events` 時，AgentAPI 送出的執行狀態事件：
 
 ```json
 {
   "id": "unique-delivery-id",
   "type": "run.status_changed",
   "created_at": "2026-07-26T12:00:00Z",
-  "instance": {"id": "my-host:3284", "run_id": "agentapi-process-run-id", "agent_type": "claude", "transport": "pty"},
+  "instance": {"id": "my-host:3284", "server_id": "agentapi-run-id", "agent_type": "claude", "transport": "pty"},
   "data": {
-    "run_id": "agentapi-process-run-id",
+    "server_id": "agentapi-run-id",
     "status": "stable",
     "previous_status": "running",
     "agent_type": "claude",
@@ -1564,9 +1600,10 @@ agentapi attach --url localhost:3284
 | `DELETE /messages` | 清除對話和佇列，並重新啟動 agent（*native*：開始新的工作階段；ACP 會回傳 400） |
 | `GET /rich-messages` | 結構化的對話：思考內容、工具呼叫與結果、用量 |
 | `GET /timeline` | 正規化的工作階段事件，可用於匯出或其他介面；`?subagents=true` 會加上 sub agent 的事件（*native*） |
-| `GET /status` | 狀態、生命週期、執行與工作階段 ID、epoch、工作階段名稱、版本、開啟的對話框；*native*：能力、待處理請求、設定、用量、用量限制停止、終端機、登入 |
+| `GET /status` | 狀態、生命週期、server ID、回合數、epoch、工作階段名稱、版本、開啟的對話框；*native*：agent 的工作階段 ID、能力、待處理請求、設定、用量、用量限制停止、終端機、登入 |
 | `GET /title` | 工作階段的可讀標題 |
-| `GET /events` | Server-sent events；`?sync=1` 會在重新連線時增量重播 |
+| `GET /events` | Server-sent events；`?sync=1` 會在重新連線時增量重播，並送出任務與佇列的更新 |
+| `GET /tasks` | 對話的[任務](#任務)：你的每則訊息和 agent 處理它的回合 |
 | `GET /workspace` | AgentAPI 在 Coder workspace 中執行時，該 workspace 的網址 |
 
 ### 佇列

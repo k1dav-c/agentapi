@@ -72,6 +72,8 @@ has the complete commit history.
 - Messages sent while the agent works wait in a [queue](#message-queue) that
   you can edit and reorder; with the native transport they can also
   [steer or interrupt](#steer-interrupt-and-the-queue) the running turn.
+- Each message and the agent's turn on it is a [task](#tasks) the server
+  tracks: running, completed, failed, or stopped by a usage limit.
 - Follow everything live over [server-sent events](#events-and-incremental-sync),
   with heartbeats and an incremental replay after a reconnect.
 
@@ -867,7 +869,9 @@ agent had in its working directory and to open one, without `--state-db`:
   `{"fork": true}` the agent opens a copy of it under a new id (Claude Code's
   `--fork-session`, Codex's `thread/fork`, Pi's `--fork`), and the session
   itself stays as it was. The queue and open requests are cleared, as on a
-  restart; it returns 409 while the agent works on a turn.
+  restart; it returns 409 while the agent works on a turn, compacts its
+  context or restarts, and a resume refused so leaves the conversation as it
+  was.
 
 In the chat, the Explorer's Session tab lists the sessions with **Open** and **Start a copy**, which
 ask for a second click.
@@ -1274,21 +1278,55 @@ These endpoints work with every transport, except where noted; the
 - `GET /messages` returns the conversation; `GET /rich-messages` and
   `GET /timeline` return its structured form (see
   [Structured Claude, Codex and Pi activity](#structured-claude-codex-and-pi-activity)).
+- A message that went out but wasn't confirmed (the call timed out, or
+  AgentAPI was stopping) may have reached the agent: it isn't sent again,
+  but leaves the queue with an error.
 - `DELETE /messages` clears the conversation (messages, rich messages,
-  requests, timeline, errors and the queue) and restarts the agent (with the
-  native transport, in a new session). With the ACP transport, which can't
-  restart its agent, it returns 400.
+  requests, tasks, timeline, errors and the queue) and restarts the agent
+  (with the native transport, in a new session). With the ACP transport,
+  which can't restart its agent, it returns 400. While the agent restarts,
+  messages wait in the queue; raw keys, another restart and opening a
+  session get 409, and so does a restart while AgentAPI stops.
 - `GET /status` returns the backward-compatible `stable`/`running` status,
   the detailed lifecycle (`starting`, `ready`, `running`, `restarting`,
-  `exited` or `failed`), the transport, a session ID, a monotonically
-  increasing run ID, the conversation's `epoch`, the session name, the
+  `exited` or `failed`), the transport, `server_id` (a random identifier of
+  this AgentAPI run, new at every start), `turn` (how many times the agent
+  started working), the conversation's `epoch`, the session name, the
   AgentAPI version, the agent's open dialog (`terminal_prompt`) and the
   terminal width (`terminal_columns`). With the native transport it also
-  reports `capabilities`, `pending_requests`, `settings`, `usage`, `terminal`
-  and `login_required`.
+  reports `agent_session_id` (the agent's own session, which
+  [`GET /sessions`](#earlier-sessions) lists), `capabilities`,
+  `pending_requests`, `settings`, `usage`, `terminal` and `login_required`.
+- `GET /tasks` returns the conversation's [tasks](#tasks).
 - `GET /title` returns the session's human-readable title.
-- `POST /upload` stores a file (up to 10 MB) and returns its path, which a
-  message references as `@"<path>"`.
+- `POST /upload` stores a file (up to 10 MB; a body over 11 MiB is refused
+  before it is read) and returns its path, which a message references as
+  `@"<path>"`.
+
+### Tasks
+
+AgentAPI groups the conversation into tasks, for every transport: a task is a message of yours and
+the agent's turn on it. Messages you add while it runs (steering) belong to it; the next message
+after it ends starts the next task. A task ends when the agent is idle again with no request or
+terminal dialog open. When answering a request or dialog leaves the agent idle, AgentAPI waits 3
+seconds before ending the task, since the agent usually works on.
+
+`GET /tasks` lists them, the earliest first, each with:
+
+- `id`: the ID of the message that started it, as in `GET /messages`;
+- `status`: `running`, `completed`, `failed` (the agent reported an error or
+  exited; `errors` says what) or `limited` (a [usage limit](#usage-limits)
+  stopped it; `limit` has the stop);
+- `prompt` (the start of the message), `started_at` and `ended_at`;
+- `reply_id`: the agent's last message of the task;
+- `steered`: the IDs of the messages added while it ran.
+
+Each rich message carries the `task_id` of the task it began in, so a client groups the tool calls
+and thinking by task without guessing from timestamps; a resumed session's rich messages have none.
+Messages restored or opened from before AgentAPI started are history: their tasks are completed. The
+[state database](#persistent-sessions) keeps the tasks, and a task that ran when AgentAPI stopped is
+over after a restart. `/events?sync=1` sends `task_update` when a task starts or changes, and the
+chat and the [webhook](#webhooks)'s `task.*` events use the same tasks.
 
 ### Message queue
 
@@ -1303,20 +1341,24 @@ UI.
   queued message once.
 - `POST /queue/{id}/steer` moves a queued message into the turn the agent is
   working on (native transport).
+- With `?sync=1`, `/events` sends a `queue_update` with the whole queue
+  whenever it changes, so a client sees what another queued without asking.
 
 ### Events and incremental sync
 
 `GET /events` streams server-sent events: `message_update`, `status_change`,
 `rich_message_update`, `agent_error`, `request_update` (native transport) and a `heartbeat` every
 15 seconds, so clients can detect a lost connection. With `?sync=1` the stream starts with a
-`session_sync` event and every update carries a `seq`; reconnecting with
-`&since=<seq>&epoch=<epoch>` replays only what changed.
+`session_sync` event, adds `task_update` and `queue_update`, and every update carries a `seq`;
+reconnecting with `&since=<seq>&epoch=<epoch>` replays only what changed. Clients without `sync`
+don't get those three events: some (such as agentapi-sdk-go) reject event types they don't know.
 
 With `?sync=1`, events also carry SSE IDs (the end of the replay has the replay's `seq`, later
 changes their own), so a plain `EventSource` that reconnects by itself resumes from its
 `Last-Event-ID`; put the `epoch` from `GET /status` in the URL. When a message is taken back (a
-turn the agent refused to start), the conversation gets a new epoch and connected clients receive a
-`session_sync` with `full: true` followed by the whole state.
+turn the agent refused to start), the conversation gets a new epoch and the server ends the event
+streams (screen streams excepted): clients reconnect, and with their old epoch get the whole state
+again. Opening a session with more than 256 rich messages ends them too, rather than streaming it.
 
 ## Integrations
 
@@ -1334,10 +1376,10 @@ only `run.status_changed`; `--webhook-events` picks more, by type (`task.complet
 
 | Event | Sent when | `data` |
 | --- | --- | --- |
-| `run.status_changed` | The agent changes between `running` and `stable` | `status`, `previous_status`, `run_id`, `agent_type`, `transport` |
-| `instance.started`, `instance.heartbeat`, `instance.stopped` | AgentAPI starts, every `--webhook-heartbeat` (60s), and shuts down | What the agent does: `status`, `lifecycle`, `session_id`, `session_name`, `pending_requests`, `queued_messages`, and `terminal_prompt`, `login_required`, `limit_stop`, `usage`, `settings` when set |
-| `task.started` | A message of yours reaches the agent | The task: `id` (the message's), `prompt`, `started_at` |
-| `task.completed`, `task.failed` | The agent is done with it: stable, with no request or terminal dialog open | The task with `ended_at`, `duration_seconds`, `outcome` (`completed`, or `failed` after an agent error or exit, `limited` after a usage limit), the agent's last message (`reply`), `errors`, `limit`, `session_name`, and for native Claude Code, Codex and Pi its API-equivalent `cost` (see [Session costs](#session-costs)) |
+| `run.status_changed` | The agent changes between `running` and `stable` | `status`, `previous_status`, `server_id`, `agent_type`, `transport` |
+| `instance.started`, `instance.heartbeat`, `instance.stopped` | AgentAPI starts, every `--webhook-heartbeat` (60s), and shuts down | What the agent does: `status`, `lifecycle`, `session_name`, `pending_requests`, `queued_messages`, and `agent_session_id`, `terminal_prompt`, `login_required`, `limit_stop`, `usage`, `settings` when set |
+| `task.started` | A [task](#tasks) starts: a message of yours reaches the agent | The task as `GET /tasks` has it: `id` (the message's), `status`, `prompt`, `started_at` |
+| `task.completed`, `task.failed` | The [task](#tasks) ends: `completed`, or `failed` and `limited` (`task.failed`) | The task with `status`, `ended_at`, `duration_seconds`, the agent's last message (`reply`, `reply_id`), `steered`, `errors`, `limit`, `session_name`, and for native Claude Code, Codex and Pi its API-equivalent `cost` (see [Session costs](#session-costs)) |
 | `request.opened`, `request.closed` | An approval, question or plan (native; the request as `GET /requests` has it), or a terminal dialog (PTY; `kind` `terminal_prompt` with the `prompt`), opens or closes | The request |
 | `login.required`, `login.completed` | The native agent needs a login, or no longer does | `agent`, `message`, `command` to run |
 | `limit.stopped`, `limit.cleared` | A usage limit stopped a turn, or the stop is over | `message`, `stopped_at`, `resets_at` |
@@ -1354,14 +1396,14 @@ Every event names the AgentAPI it comes from, so one receiver can tell many apar
   "created_at": "2026-10-22T12:00:00Z",
   "instance": {
     "id": "my-host:3284",
-    "run_id": "agentapi-process-run-id",
+    "server_id": "agentapi-run-id",
     "hostname": "my-host",
     "port": 3284,
     "pid": 4242,
     "cwd": "/home/me/project",
     "agent_type": "claude",
     "transport": "native",
-    "agentapi_version": "0.29.0",
+    "agentapi_version": "1.0.0",
     "url": "https://agent.example.com",
     "workspace_url": "https://coder.example.com/@me/dev"
   },
@@ -1371,7 +1413,8 @@ Every event names the AgentAPI it comes from, so one receiver can tell many apar
     "started_at": "2026-10-22T11:58:30Z",
     "ended_at": "2026-10-22T12:00:00Z",
     "duration_seconds": 90,
-    "outcome": "completed",
+    "status": "completed",
+    "reply_id": 5,
     "reply": "Fixed: the test compared times in two time zones.",
     "cost": {"usd": 0.42, "tokens": {"input": 12, "cache_read": 81000, "cache_write": 4200, "output": 1900}, "calls": 6},
     "session_name": "Fix the failing test"
@@ -1413,7 +1456,7 @@ next heartbeat). On shutdown AgentAPI waits up to 5 seconds for `instance.stoppe
 An optional Go `text/template` (`--webhook-payload-template`) reshapes the body for the receiver,
 such as a chat service's incoming webhook. Available fields are `.ID`, `.Type`, `.CreatedAt`,
 `.Instance` and `.Data` (the event's data with its JSON field names, such as `{{.Data.prompt}}`), and
-for `run.status_changed` `.RunID`, `.Status`, `.PreviousStatus`, `.AgentType` and `.Transport`.
+for `run.status_changed` `.ServerID`, `.Status`, `.PreviousStatus`, `.AgentType` and `.Transport`.
 
 All flags have `AGENTAPI_` environment variables (`AGENTAPI_WEBHOOK_URL`, `AGENTAPI_WEBHOOK_EVENTS`
 with the events separated by spaces, `AGENTAPI_WEBHOOK_SECRET`, and so on). `GET /webhook` shows the
@@ -1431,16 +1474,16 @@ signed like the others and whatever the events chosen, and shows the receiver's 
 
 ![The Explorer's Webhook tab: the receiver URL, event groups, signing secret, instance ID, heartbeat and public URL](docs/screenshots/explorer-webhook.png)
 
-The original run-status event keeps its format:
+The run-status event, which AgentAPI sends when `--webhook-events` isn't given:
 
 ```json
 {
   "id": "unique-delivery-id",
   "type": "run.status_changed",
   "created_at": "2026-07-26T12:00:00Z",
-  "instance": {"id": "my-host:3284", "run_id": "agentapi-process-run-id", "agent_type": "claude", "transport": "pty"},
+  "instance": {"id": "my-host:3284", "server_id": "agentapi-run-id", "agent_type": "claude", "transport": "pty"},
   "data": {
-    "run_id": "agentapi-process-run-id",
+    "server_id": "agentapi-run-id",
     "status": "stable",
     "previous_status": "running",
     "agent_type": "claude",
@@ -1804,9 +1847,10 @@ default. Endpoints marked *native* need the native transport.
 | `DELETE /messages` | Clear the conversation and the queue, and restart the agent (*native*: in a new session; 400 with ACP) |
 | `GET /rich-messages` | The structured conversation: thinking, tool calls with results, usage |
 | `GET /timeline` | Normalized session events, for export or another UI; `?subagents=true` adds the subagents' (*native*) |
-| `GET /status` | Status, lifecycle, run and session IDs, epoch, session name, version, open dialog; *native*: capabilities, pending requests, settings, usage, usage limit stop, terminal, login |
+| `GET /status` | Status, lifecycle, server ID, turn, epoch, session name, version, open dialog; *native*: the agent's session ID, capabilities, pending requests, settings, usage, usage limit stop, terminal, login |
 | `GET /title` | The session's human-readable title |
-| `GET /events` | Server-sent events; `?sync=1` for incremental replay on reconnect |
+| `GET /events` | Server-sent events; `?sync=1` for incremental replay on reconnect, and task and queue updates |
+| `GET /tasks` | The conversation's [tasks](#tasks): each message of yours and the agent's turn on it |
 | `GET /workspace` | The Coder workspace URL, when AgentAPI runs in one |
 
 ### Queue

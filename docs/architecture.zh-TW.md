@@ -41,7 +41,7 @@ flowchart TB
     emitter["EventEmitter<br/>對話狀態、SSE"]
     db[("狀態資料庫<br/>lib/statedb")]
     shell["Shell 終端機<br/>lib/shellterm"]
-    conv{{"st.Conversation"}}
+    conv{{"conv.Conversation"}}
     pty["PTY<br/>lib/screentracker"]
     acp["ACP<br/>x/acpio"]
     native["Native<br/>lib/native"]
@@ -70,7 +70,7 @@ flowchart TB
   proto -. "工作階段紀錄" .-> sessions
 ```
 
-每個 AgentAPI 行程執行一個 agent。所有 transport 都實作 `st.Conversation`，供伺服器
+每個 AgentAPI 行程執行一個 agent。所有 transport 都實作 `conv.Conversation`，供伺服器
 傳送訊息與讀取對話，並將變更回報給同一個事件發送器（emitter）。
 
 因此核心 HTTP API、事件串流、佇列與聊天介面在每種 transport 上的運作方式都相同。各 transport
@@ -84,7 +84,8 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 | --- | --- |
 | `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、transport、啟動 agent、訊號）、`attach`，以及 `update`（會驗證 checksum 的自我更新） |
 | `lib/httpapi/` | HTTP 伺服器：路由與處理常式、`EventEmitter`、佇列、token 驗證、webhook、MCP／檔案／終端機端點，以及嵌入的聊天介面 |
-| `lib/screentracker/` | `Conversation` 與 `Emitter` 介面，以及 PTY 對話：畫面快照、訊息切分、穩定狀態偵測 |
+| `lib/conversation/` | 各 transport 共用的部分（以 `conv` 匯入）：訊息、角色、狀態與錯誤等級，伺服器驅動 transport 的 `Conversation` 介面，以及 transport 回報變更的 `Emitter` |
+| `lib/screentracker/` | PTY 對話：畫面快照、訊息切分、穩定狀態偵測，以及把訊息片段輸入 agent 的終端機（`AgentIO`、`TerminalPart`） |
 | `lib/termexec/` | 在虛擬終端機中執行 agent，搭配記憶體內的 VT100 模擬器（`xpty`、`vt10x`）；重新啟動時可以替換行程 |
 | `lib/msgfmt/` | 各 agent 專屬的畫面輸出整理：回顯的輸入、輸入框、狀態列、工具呼叫，以及判斷何時可以送出第一個提示 |
 | `lib/transcript/` | 各傳輸共用的結構化對話型別：結構化訊息與其內容區塊、時間軸事件 |
@@ -118,19 +119,21 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 1. 旗標來自命令列或 `AGENTAPI_*` 環境變數（viper）。agent 類型取自 `--type`；沒有指定時，
    若 agent 指令符合已知類型別名，就採用該類型；否則使用 `custom`。transport 取自
    `--transport`；沒有指定時，`hasNativeAdapter` 涵蓋的 agent（Claude Code、Codex、Pi 和
-   `native-demo`）使用 native（除非設定了 `--state-file`），其他 agent 使用 PTY。
+   `native-demo`）使用 native（除非設定了已棄用的 `--state-file`），其他 agent 使用 PTY。
 2. Transport 啟動 agent：
    - PTY：`termexec` 在 `--term-width` × `--term-height` 格的虛擬終端機中執行指令。
    - ACP：`httpapi.SetupACP` 啟動指令，再由 `acpio` 透過它的 stdio 開啟 ACP 工作階段。
    - Native：`nativeFactory` 依 agent 類型建立 `native.Factory`（Claude Code、Codex、Pi 或
      `native-demo`）。每個 adapter 會先檢查 agent 的參數，拒絕和它的協定衝突的參數。
-3. 使用 `--state-db` 時，`statedb.Open` 會開啟檔案、取得它的獨占鎖，並執行資料表結構的 migration。
+3. 使用 `--state-db`（或 `--state-file` 旁的資料庫）時，`statedb.Open` 會開啟檔案、取得它的獨占鎖，
+   並執行資料表結構的 migration；資料庫還沒有對話時，會匯入 `--state-file`。
 4. `httpapi.NewServer` 建立 emitter、還原保存的狀態（檔案若屬於其他 agent 類型、transport 或
    工作目錄就拒絕使用）、建立對話、註冊路由，並啟動對話、佇列迴圈、webhook 傳送器，以及
    （PTY 的）工作階段紀錄監看器。
-5. 收到 SIGINT、SIGTERM 或 SIGHUP，或 agent 自行結束時，HTTP 伺服器會關閉，仍在執行的 native
-   或 PTY agent 以及 shell 終端機會被關閉，狀態資料庫會寫入並關閉。使用 `--state-file` 時，PTY
-   對話會先保存它的訊息；收到 SIGUSR1 時只保存訊息，不會停止。
+5. 收到 SIGINT、SIGTERM 或 SIGHUP，或 agent 自行結束時，webhook 會送出 `instance.stopped`，進行中的
+   重新啟動會被取消，HTTP 伺服器關閉，佇列迴圈與工作階段紀錄監看器停止，仍在執行的 native 或 PTY
+   agent 以及 shell 終端機會被關閉，狀態資料庫會寫入並關閉。收到 SIGUSR1 時只寫入狀態資料庫，
+   不會停止。
 
 ## HTTP 伺服器
 
@@ -148,42 +151,44 @@ agent，並從 emitter 讀取狀態，不直接存取 agent 行程；只有原�
 | 檔案 | 處理 |
 | --- | --- |
 | `server.go`、`routes.go`、`hosts.go`、`middleware.go` | 伺服器的設定、啟動與停止；各功能自行註冊的路由；允許的主機與來源；請求記錄 |
-| `conversation_api.go`、`queue.go`、`sse.go`、`jsonl_watcher.go` | 訊息、狀態與時間軸；佇列與派送；`GET /events` 與畫面串流；PTY 傳輸的工作階段紀錄監看 |
-| `backend.go`、`backend_pty.go`、`backend_native.go` | 依 transport 而不同的部分：派送佇列、送出訊息、重新啟動、人工回覆協定的待處理請求 |
+| `conversation_api.go`、`queue.go`、`sse.go`、`jsonl_watcher.go` | 訊息、狀態與時間軸；佇列、派送與 `queue_update`；`GET /events` 與畫面串流；PTY 傳輸的工作階段紀錄監看 |
+| `tasks.go` | emitter 從對話推導出的任務（`taskTracker`）、`task_update` 與 `GET /tasks` |
+| `backend.go`、`backend_pty.go`、`backend_native.go` | 依 transport 而不同的部分：派送佇列與每次檢查要做的事（`beforeQueue`：排定的繼續、Codex 的更新提示）、送出訊息、重新啟動（`beginRestart`、`beginReload`）、人工回覆協定（`handoffOffer`、`answerHandoff`） |
 | `setup.go` | 啟動 PTY 或 ACP agent 的行程 |
 | `native.go` | 請求、設定、中斷、壓縮、重試登入；native observer |
 | `limit.go`、`sessions.go`、`subagents.go` | 因用量限制停下的回合（`/limit`）；agent 先前的工作階段和它們的花費（`/sessions`、`/cost`）；它的 sub agent（`/subagents`） |
-| `terminal.go`、`files.go`、`file_preview.go`、`files_find.go` | Shell 終端機與檔案檢視器，以及搜尋 agent 用 repo 相對路徑提到的檔案 |
+| `terminal.go`、`files.go`、`file_preview.go`、`files_find.go` | Shell 終端機（`terminalAPI`），以及檔案檢視器與搜尋 agent 用 repo 相對路徑提到的檔案（`fileAPI`） |
 | `mcp.go`、`mcp_management.go` | MCP 伺服器與設定檔 |
 | `webhook.go`、`webhook_events.go`、`handoff.go`、`dialog_reply.go` | Webhook 傳送（佇列、重試、簽章、心跳），以及把對話事件轉成 webhook 事件的 observer；人工回覆 API；終端機對話框的回答 |
-| `auth.go` | Token 驗證與聊天介面登入 |
+| `auth.go` | Token 驗證與聊天介面登入（`authAPI`） |
 | `restart.go`、`statedb.go` | 重新啟動；還原與保存狀態 |
 | `events.go`、`events_*.go`、`models.go` | Emitter（訂閱與重播；它保存的狀態、畫面、請求與訊息）與 API 的型別 |
-| `embed.go`、`uploads.go` | 嵌入的聊天介面；上傳的檔案 |
+| `embed.go`、`uploads.go` | 嵌入的聊天介面；上傳的檔案（`uploadAPI`，它從操作的 middleware 處理 `POST /upload`：huma v2.32 每次處理 multipart 請求都會改動共用的操作） |
 
 未透過 huma 宣告的 chi 路由提供聊天介面（`/chat/*`，`/` 會重新導向到這裡）、上傳的圖片
 （`/uploads/{checksum}/{name}`），以及工作目錄中的圖片檔（`/files/image`）。TTY mode 的畫面串流
 （`/internal/screen`）則是不列入 OpenAPI schema 的 huma 操作。`Server` 持有對話、emitter、
-佇列與它的鎖（`s.mu`）、webhook 傳送器、MCP 儲存、shell 終端機和狀態資料庫。遇到依 transport
-而異的操作時，處理常式會呼叫對應的 `agentBackend`：`ptyBackend` 驅動終端機或 ACP 對話，
-`nativeBackend` 驅動 native 對話。
+佇列與它的鎖（`s.mu`）、webhook 傳送器、MCP 儲存、shell 終端機和狀態資料庫。不參與對話變更的
+功能則由只持有所需依賴的小模組處理，在註冊路由時建立：`fileAPI`（工作目錄）、`terminalAPI`
+（shell）、`uploadAPI`（上傳儲存）、`authAPI`（token 檢查）和 `webhookAPI`（傳送器與狀態資料庫）。
+遇到依 transport 而異的操作時，處理常式會呼叫對應的 `agentBackend`：`ptyBackend` 驅動終端機或
+ACP 對話，`nativeBackend` 驅動 native 對話。
 
 ## 對話與 transport
 
 ```go
-// lib/screentracker
+// lib/conversation（以 conv 匯入）
 type Conversation interface {
-	Messages() []ConversationMessage
+	Messages() []Message
 	Send(...MessagePart) error
 	Start(context.Context)
-	Status() ConversationStatus // initializing, changing or stable
-	SaveState() error
+	Status() Status // initializing, changing or stable
 	Reset()
 }
 
 type Emitter interface {
-	EmitMessages([]ConversationMessage)
-	EmitStatus(ConversationStatus)
+	EmitMessages([]Message)
+	EmitStatus(Status)
 	EmitScreen(string)
 	EmitError(message string, level ErrorLevel)
 }
@@ -246,7 +251,7 @@ flowchart LR
   observer --> db[("狀態資料庫")]
 ```
 
-`native.Conversation` 以 `Adapter` 為基礎實作 `st.Conversation`，每種 agent 協定各一個：
+`native.Conversation` 以 `Adapter` 為基礎實作 `conv.Conversation`，每種 agent 協定各一個：
 
 ```go
 // lib/native
@@ -329,33 +334,46 @@ type Factory func(resume Resume) (Adapter, error)
 ## 事件與對話狀態
 
 `EventEmitter`（`lib/httpapi/events.go`）保存用戶端讀取的內容：訊息、結構化訊息、時間軸、
-請求、狀態快照（狀態、生命週期、執行 ID、能力、設定、含 prompt cache 的用量、用量限制造成的停止、
-登入、終端機提示）以及最新的畫面。
+請求、任務、佇列、狀態快照（狀態、生命週期、server ID、回合數、agent 的工作階段 ID、能力、設定、
+含 prompt cache 的用量、用量限制造成的停止、登入、終端機提示）以及最新的畫面。
 
-- 訊息、結構化訊息或請求的每次變更都會取得下一個序號（`seq`）；狀態、錯誤和畫面則整份重播，
-  時間軸由 `GET /timeline` 讀取。對話以 `epoch` 識別，歷史被改寫時（收回訊息、重設、當機後
-  還原）epoch 會改變。
+- 訊息、結構化訊息、請求、任務或佇列的每次變更都會取得下一個序號（`seq`）；狀態、錯誤和畫面
+  則整份重播，時間軸由 `GET /timeline` 讀取。對話以 `epoch` 識別，歷史被改寫時（收回訊息、
+  重設、當機後還原）epoch 會改變。結構化訊息透過索引依 key 查找，所以有數萬則結構化訊息的接續
+  工作階段也能一次載入。
 - `GET /events` 以 server-sent events 串流變更：`message_update`、`status_change`、
   `rich_message_update`、`agent_error`、`request_update`，以及每 15 秒一次的 `heartbeat`。
-  加上 `?sync=1` 時，串流會以 `session_sync` 事件開頭；epoch 相符時只重播 `since=<seq>`
-  之後的變更，事件也會帶有 SSE id，讓重新連線的 `EventSource` 從 `Last-Event-ID` 接續。
+  加上 `?sync=1` 時，串流會以 `session_sync` 事件開頭，並加上 `task_update` 和 `queue_update`
+  （沒有選用 sync 的用戶端永遠收不到：有些用戶端遇到不認得的事件類型會出錯）；epoch 相符時只重播
+  `since=<seq>` 之後的變更，事件也會帶有 SSE id，讓重新連線的 `EventSource` 從
+  `Last-Event-ID` 接續。
+- 無法用更新表達的變更（收回訊息）會讓對話換成新的 epoch，並結束對話的訂閱，而不是串流整個
+  狀態：用戶端用舊的 epoch 重新連線，就會拿到 SSE id 正確的完整重播。落後超過緩衝的訂閱也會
+  這樣結束；開啟結構化訊息超過緩衝四分之一的工作階段時，也會結束訂閱，而不是逐則串流。
+- emitter 會為所有 transport 推導任務（`tasks.go`）：使用者訊息開始一個任務，任務執行中加進來的
+  訊息 steer 它，agent 閒置且沒有開著的請求或終端機對話框時任務結束。若只是因為回答而讓 agent
+  閒置，計時器會先給它 3 秒恢復工作，之後才結束任務。結構化訊息會取得它抵達時執行中任務的
+  `task_id`。還原或接續的訊息屬於過去，視為已完成。
 - `/internal/screen` 以 `screen` 事件為 TTY mode 串流畫面。
 - 狀態在 `running` 與 `stable` 之間切換時，會觸發 `run.status_changed` webhook 事件。webhook
-  observer 像 `/events` 用戶端一樣訂閱 emitter，把它的事件轉成其他 webhook 事件：使用者訊息開始
-  一個任務，agent 回到 stable 且沒有開著的請求或終端機對話框時任務結束；agent 的訊息在下一則開始
-  或回合結束時才送出；observer 訂閱時 emitter 已有的內容，以及比 AgentAPI 啟動時間更早的訊息
-  （接續的工作階段的訊息）都不會送出。傳送器從佇列依序一次送一個事件，失敗會重試，並以
-  `--webhook-secret` 簽章。
-- 有狀態資料庫時，emitter 會把每次變更交給它的 `Persister`。
+  observer 像 `/events` 用戶端一樣訂閱 emitter，把它的事件轉成其他 webhook 事件：emitter 的任務
+  更新轉成 `task.*`，agent 的訊息在下一則開始或回合結束時才送出；observer 訂閱時 emitter 已有的
+  內容，以及比 AgentAPI 啟動時間更早的訊息（接續的工作階段的訊息）都不會送出。傳送器從佇列依序
+  一次送一個事件，失敗會重試，並以 `--webhook-secret` 簽章。
+- 有狀態資料庫時，emitter 會把每次變更交給它的 `Persister`，它在自己的寫入 goroutine 上從副本
+  編碼訊息與結構化訊息，所以串流中的長訊息不會拖慢 emitter。
 
 ## 訊息佇列
 
-agent 忙碌時送出的訊息會在伺服器的佇列中等待（`s.queue`；變更佇列時都會持有 `s.mu`）。派送
-迴圈每 500 毫秒檢查第一則訊息是否能送出：native agent 的對話必須閒置，且沒有因用量限制而暫停
-佇列；PTY agent 的畫面則必須穩定且未顯示對話框。被拒絕的訊息總共最多嘗試 5 次，但可能重複送達的訊息會立刻丟棄：native agent
-逾時的送出（agent 可能已經收到），以及 PTY agent 已輸入但沒有送出的訊息（再送一次會重複輸入）。
-使用 native transport 時，訊息也可以 steer 進執行中的回合，或中斷它。佇列也是持久保存狀態的
-一部分。
+agent 忙碌時送出的訊息會在伺服器的佇列中等待（`s.queue`；它有自己的鎖，所以讀取不必等待，
+變更佇列時也都會持有 `s.mu`）。派送迴圈每 500 毫秒檢查第一則訊息是否能送出：native agent 的
+對話必須閒置，且沒有因用量限制而暫停佇列；PTY agent 的畫面則必須穩定且未顯示對話框；agent 重新
+啟動期間兩者都不送。被拒絕的訊息總共最多嘗試 5 次，但可能重複送達的訊息會立刻丟棄：adapter 已經
+寫出、卻沒有得到確認的 native 送出（`native.ErrUnconfirmed`：呼叫逾時、被取消或 agent 結束），
+以及 PTY agent 已輸入但沒有送出的訊息（再送一次會重複輸入）。寫入 native agent stdin 的動作會隨
+呼叫的 context 結束，所以不再讀取的 agent 無法佔住 `s.mu`。使用 native transport 時，訊息也可以
+steer 進執行中的回合，或中斷它。佇列的每次變更都會在佇列的鎖之外、帶著版本號送到 emitter，成為
+`queue_update`，所以較舊的變更晚到時會被捨棄。佇列也是持久保存狀態的一部分。
 
 ## 持久保存
 
@@ -363,7 +381,8 @@ agent 忙碌時送出的訊息會在伺服器的佇列中等待（`s.queue`；�
 `CGO_ENABLED=0` 的建置也能使用。不論哪種 transport，emitter 都會把每次變更交給它；只有 ACP
 不使用它。
 
-- 資料表有 `messages`、`rich_messages`、`session_events`、`requests`、`queue`，以及
+- 資料表有 `messages`、`rich_messages`、`session_events`、`requests`、`queue`、`tasks`（每個
+  任務以伺服器編碼後的形式、依開始它的訊息 ID 保存），以及
   `meta`：保存 agent 類型、transport 和工作目錄、epoch 與 seq、工作階段參照與名稱、為
   工作階段選擇的設定、用量限制造成的停止、透過 API 修改的 webhook 設定（附啟動參數的指紋，
   參數改變時以參數為準），以及 PTY 對話收到的 initial prompt。
@@ -387,6 +406,13 @@ agent 忙碌時送出的訊息會在伺服器的佇列中等待（`s.queue`；�
   Codex 和 Pi 執行 `codex update` 或 `pi update --self`。native agent 會被關閉，再由 `Restart`
   開始新的工作階段；PTY agent 則會在可替換的終端機中取得新的行程，以及新的工作階段紀錄監看器。
   使用 ACP 時這個請求會以 400 失敗，因為 agent 無法重新啟動。
+- 替換 native agent（重新啟動、重新載入、開啟另一個工作階段）分成兩步。`BeginRestart`、
+  `BeginReload` 和 `BeginSwitch` 在 `s.mu` 底下讓舊 agent 退役：之後它的事件會被忽略；有回合在
+  執行或正在壓縮 context 時，`BeginSwitch` 會以 `ErrTurnActive` 拒絕，而且不改動任何東西。
+  `Replacement.Start` 接著在不持有 `s.mu` 的情況下關閉舊 agent、更新 CLI 並啟動新的 agent
+  （`runRestartLocked`）：這段期間 `s.restarting` 會暫停佇列，其他替換、原始按鍵和人工回覆協定會
+  得到 409 或沒有內容，不需要 `s.mu` 的請求（`/status`、`/handoff`、`/queue`）照常回應。Stop 會
+  取消進行中的重新啟動。接續工作階段的歷史會在取得 `s.mu` 之前讀取。
 - 帶 `?restart=true` 的 MCP 變更：native agent 會接續它的工作階段重新載入（`Reload`），對話
   會保留。有回合在執行時，重新載入會以 409 拒絕，但設定檔已經寫入。無法接續工作階段的 agent
   則改為重新啟動。
