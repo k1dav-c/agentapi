@@ -142,12 +142,15 @@ func (s *Server) resumeSession(_ context.Context, input *ResumeSessionRequest) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to open the session: %w", err)
 	}
-	if err := s.runRestartLocked(agentRestart{run: replacement.Start, done: func() {
+	switch err := s.runRestartLocked(agentRestart{run: replacement.Start, done: func() {
 		if !input.Body.Fork {
 			// A copy is named by the agent, if at all.
 			s.emitter.SetSessionName(history.Title)
 		}
-	}}); err != nil {
+	}}); {
+	case errors.Is(err, errStopping):
+		return nil, huma.Error409Conflict(err.Error())
+	case err != nil:
 		return nil, huma.Error500InternalServerError(fmt.Sprintf("failed to open the session: %v", err))
 	}
 	return okResponse(), nil
