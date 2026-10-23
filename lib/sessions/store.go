@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/agentlog/codexlog"
@@ -29,6 +32,13 @@ type Store struct {
 	names *agentlog.Index[*codexlog.ThreadNames]
 	// metas holds the first lines of Codex's session logs.
 	metas codexlog.Metas
+	// costs makes concurrent Costs calls share one reading: GET /sessions,
+	// GET /cost and the webhook ask at once, as the chat does on every
+	// turn, and a long log takes a while.
+	costs singleflight.Group
+	// costPasses counts the readings, and costPass runs in each (tests).
+	costPasses atomic.Int64
+	costPass   func()
 
 	mu sync.Mutex
 	// paths finds the log of a session by its ID, as the logs read so far

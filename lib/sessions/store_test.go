@@ -3,6 +3,7 @@ package sessions
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -111,4 +112,32 @@ func TestStoreForgetsLogsThatAreGone(t *testing.T) {
 	assert.Zero(t, store.subs.Len())
 	_, err = store.ReadHistory("s1")
 	assert.ErrorIs(t, err, ErrSessionNotFound)
+}
+
+func TestConcurrentCostsShareAReading(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	writeLog(t, filepath.Join(config, "projects", "-w", "s1.jsonl"), time.Now(),
+		claudePromptLine("s1", "2026-10-20T10:00:00.000Z", "Fix the bug"),
+		claudeCall("s1", "2026-10-20T10:00:05.000Z", "msg_1", 10, 20000, 0, 0, 200))
+	store := newStore(t, "claude", "/w")
+	// A reading that takes a while, as one of a long log does.
+	store.costPass = func() { time.Sleep(200 * time.Millisecond) }
+	var (
+		wg    sync.WaitGroup
+		start = make(chan struct{})
+	)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			d, err := store.Costs()
+			assert.NoError(t, err)
+			assert.Equal(t, 1, d.Cost("s1").Calls)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	assert.LessOrEqual(t, store.costPasses.Load(), int64(2), "the calls share a reading")
 }

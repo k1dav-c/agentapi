@@ -138,7 +138,22 @@ func (d DirectoryCost) Cost(id string) SessionCost { return CostOf(d.Sessions[id
 // Costs reads what every session spent: each session's model calls and
 // its subagents', from their logs. A fork's log copies the calls of the
 // session it continues, which count once, in the earlier session.
+// Concurrent calls share one reading, and its result: the caller must not
+// change it.
 func (s *Store) Costs() (DirectoryCost, error) {
+	d, err, _ := s.costs.Do("", func() (any, error) { return s.readCosts() })
+	if err != nil {
+		return DirectoryCost{}, err
+	}
+	return d.(DirectoryCost), nil
+}
+
+// readCosts reads what every session spent, for Costs.
+func (s *Store) readCosts() (DirectoryCost, error) {
+	s.costPasses.Add(1)
+	if s.costPass != nil {
+		s.costPass()
+	}
 	files, err := s.src.files(s)
 	if err != nil {
 		return DirectoryCost{}, err
