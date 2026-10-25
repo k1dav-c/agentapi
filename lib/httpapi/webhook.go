@@ -734,13 +734,13 @@ func (w *webhookAPI) testWebhook(ctx context.Context, _ *struct{}) (*WebhookTest
 type webhookAPI struct {
 	webhook *webhookDispatcher
 	stateDB *statedb.DB
-	// instanceChanged tells the summary's subscribers the instance's ID or
-	// URL may have changed.
+	// instanceChanged tells the summary's subscribers and the registry the
+	// instance's ID or URL may have changed.
 	instanceChanged func()
 }
 
 func (s *Server) registerWebhookRoutes() {
-	w := &webhookAPI{webhook: s.webhook, stateDB: s.stateDB, instanceChanged: s.emitter.SummaryChanged}
+	w := &webhookAPI{webhook: s.webhook, stateDB: s.stateDB, instanceChanged: s.instanceChanged}
 	huma.Get(s.api, "/webhook", w.getWebhookConfig, func(o *huma.Operation) {
 		o.Tags = []string{"Webhook"}
 		o.Summary = "Get webhook configuration"

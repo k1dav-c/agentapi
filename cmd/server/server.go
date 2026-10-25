@@ -183,6 +183,7 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 		Webhook:        opts.webhook,
 		Name:           opts.name,
 		StateDB:        stateDB,
+		RegistryDir:    opts.registryDir,
 	}
 	switch opts.transport {
 	case httpapi.TransportPTY:
@@ -441,6 +442,8 @@ const (
 	FlagWebhookInstanceID      = "webhook-instance-id"
 	FlagInstanceID             = "instance-id"
 	FlagName                   = "name"
+	FlagRegistry               = "registry"
+	FlagRegistryDir            = "registry-dir"
 	FlagPublicURL              = "public-url"
 	FlagAPIToken               = "api-token"
 	FlagBind                   = "bind"
@@ -502,6 +505,8 @@ func CreateServerCmd() *cobra.Command {
 		{FlagInstanceID, "", "", "Identifies this AgentAPI to clients that watch many (GET /summary) and in every webhook event (default <hostname>:<port>)", "string"},
 		{FlagName, "", "", "What clients that watch many AgentAPIs call this one, in GET /summary and webhook events (default the working directory's name)", "string"},
 		{FlagWebhookInstanceID, "", "", "Deprecated: use --instance-id", "string"},
+		{FlagRegistry, "", true, "While serving, keep an entry in the registry directory, where agentapi list and clients that watch many AgentAPIs find the ones running on this machine", "bool"},
+		{FlagRegistryDir, "", "", "Registry directory (default ~/.agentapi/instances)", "string"},
 		{FlagPublicURL, "", "", "URL this AgentAPI is reached at, in GET /summary and every webhook event so clients and receivers can link to its chat or call its API", "string"},
 		{FlagAPIToken, "", "", "API token for Bearer authentication. If set without a value, a random token is generated. Empty (default) disables authentication.", "string"},
 		{FlagBind, "", "", "Address to listen on: an IP address or hostname without a port (e.g. 127.0.0.1 or ::1). Empty (default) listens on all interfaces", "string"},

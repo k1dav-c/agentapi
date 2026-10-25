@@ -1,6 +1,8 @@
 package server
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -126,6 +128,20 @@ func TestLoadServerOptions(t *testing.T) {
 			values: map[string]any{FlagBind: "[::1]"},
 			check: func(t *testing.T, opts serverOptions) {
 				assert.Equal(t, "::1", opts.bind)
+			},
+		},
+		"--registry keeps an entry in ~/.agentapi/instances or --registry-dir": {
+			values: map[string]any{FlagRegistry: true},
+			check: func(t *testing.T, opts serverOptions) {
+				home, err := os.UserHomeDir()
+				require.NoError(t, err)
+				assert.Equal(t, filepath.Join(home, ".agentapi", "instances"), opts.registryDir)
+				named, err := loadServerOptions(flagsWith(map[string]any{FlagRegistry: true, FlagRegistryDir: "/tmp/reg"}), []string{"claude"})
+				require.NoError(t, err)
+				assert.Equal(t, "/tmp/reg", named.registryDir)
+				off, err := loadServerOptions(flagsWith(map[string]any{FlagRegistry: false, FlagRegistryDir: "/tmp/reg"}), []string{"claude"})
+				require.NoError(t, err)
+				assert.Empty(t, off.registryDir)
 			},
 		},
 		"--instance-id and --name name the instance; --webhook-instance-id is the old name": {
