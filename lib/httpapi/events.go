@@ -233,8 +233,11 @@ type EventEmitter struct {
 	queueSeq     uint64
 	// instance names the AgentAPI in summaries; summary is the summary
 	// last sent, nil while no subscription wants it.
-	instance       func() WebhookInstance
-	summary        *SummaryBody
+	instance func() WebhookInstance
+	summary  *SummaryBody
+	// seenAt is when a client last showed the conversation to the user: a
+	// task that ended after it is unread.
+	seenAt         time.Time
 	clock          quartz.Clock
 	onStatusChange func(previous, current AgentStatus)
 	// persister, if set, stores every change of the conversation state.
@@ -260,6 +263,8 @@ type Persister interface {
 	SetSettings(settings native.Settings)
 	// SetLimitStop stores the turn a usage limit stopped; nil removes it.
 	SetLimitStop(ls *native.LimitStop)
+	// SetSeenAt stores when a client last showed the conversation.
+	SetSeenAt(at time.Time)
 	// PutTask stores the task the user's message id started, encoded as
 	// JSON.
 	PutTask(id int, data []byte, seq uint64)
@@ -281,6 +286,9 @@ type EmitterState struct {
 	Tasks         []Task
 	TaskSeqs      []uint64
 	SessionName   string
+	// SeenAt is when a client last showed the conversation; zero takes
+	// the restored tasks as seen.
+	SeenAt time.Time
 }
 
 func convertStatus(status conv.Status) AgentStatus {
@@ -381,6 +389,10 @@ func (e *EventEmitter) Restore(state EmitterState) {
 	e.requests = slices.Clone(state.Requests)
 	e.requestSeq = slices.Clone(state.RequestSeqs)
 	e.sessionName = state.SessionName
+	e.seenAt = state.SeenAt
+	if e.seenAt.IsZero() {
+		e.seenAt = e.clock.Now()
+	}
 	e.taskSeq = map[int]uint64{}
 	for i, task := range state.Tasks {
 		e.taskSeq[task.ID] = state.TaskSeqs[i]

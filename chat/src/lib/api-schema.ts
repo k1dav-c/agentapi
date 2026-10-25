@@ -793,6 +793,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark the tasks seen
+         * @description Records that a client showed the conversation to the user now, so the tasks that ended until now are read: the summary's unread is false until a task ends again. Every client of this AgentAPI shares it: the chat calls it while it shows the conversation, and summary clients get summary_update. Returns the summary.
+         */
+        post: operations["post-tasks-seen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/terminal": {
         parameters: {
             query?: never;
@@ -2281,6 +2301,11 @@ export interface components {
              * @description Messages waiting in the queue; see GET /queue.
              */
             queued_messages: number;
+            /**
+             * Format: date-time
+             * @description When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did.
+             */
+            seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
             /** @description Whether the agent works (running) or waits (stable). */
@@ -2296,6 +2321,8 @@ export interface components {
             terminal_prompt?: string;
             /** @description The name the agent gave the session, else the start of the latest task's prompt; empty before the first task. */
             title: string;
+            /** @description The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet. */
+            unread: boolean;
             /** @description The context window and the account's usage limits, as in GET /status. */
             usage?: components["schemas"]["AgentUsage"];
         };
@@ -2322,6 +2349,11 @@ export interface components {
              * @description Messages waiting in the queue; see GET /queue.
              */
             queued_messages: number;
+            /**
+             * Format: date-time
+             * @description When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did.
+             */
+            seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
             /** @description Whether the agent works (running) or waits (stable). */
@@ -2337,6 +2369,8 @@ export interface components {
             terminal_prompt?: string;
             /** @description The name the agent gave the session, else the start of the latest task's prompt; empty before the first task. */
             title: string;
+            /** @description The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet. */
+            unread: boolean;
             /** @description The context window and the account's usage limits, as in GET /status. */
             usage?: components["schemas"]["AgentUsage"];
         };
@@ -4851,6 +4885,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TasksResponseBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "post-tasks-seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SummaryBody"];
                 };
             };
             /** @description Error */

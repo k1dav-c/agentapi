@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -112,4 +113,55 @@ func TestSummaryEvents(t *testing.T) {
 	for _, event := range drain(others) {
 		assert.NotEqual(t, EventTypeSummaryUpdate, event.Type)
 	}
+}
+
+// A task that ends after a client last showed the conversation is unread
+// until one shows it again.
+func TestSummaryUnread(t *testing.T) {
+	t.Parallel()
+	clock := quartz.NewMock(t)
+	e := NewEventEmitter(WithClock(clock))
+	e.EmitStatus(conv.StatusStable)
+	_, ch, _ := e.SubscribeTo(SummaryEvents, 0, "")
+
+	e.EmitMessages(taskMessages(clock.Now(), "", ">Fix the bug"))
+	e.EmitStatus(conv.StatusChanging)
+	assert.False(t, e.Summary().Unread, "a running task")
+	clock.Advance(time.Minute)
+	e.EmitStatus(conv.StatusStable)
+	assert.True(t, e.Summary().Unread)
+	got := summaries(t, drain(ch))
+	assert.True(t, got[len(got)-1].Unread, "summary clients hear of it")
+
+	clock.Advance(time.Second)
+	seen := e.MarkSeen()
+	assert.False(t, seen.Unread)
+	assert.Equal(t, clock.Now(), seen.SeenAt)
+	got = summaries(t, drain(ch))
+	require.Len(t, got, 1)
+	assert.False(t, got[0].Unread)
+}
+
+// Restored tasks are read unless the state database says when they were
+// last seen.
+func TestSummaryUnreadRestored(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	end := start.Add(time.Minute)
+	task := Task{ID: 0, Status: TaskStatusCompleted, Prompt: "Fix the bug", StartedAt: start, EndedAt: &end}
+	state := EmitterState{
+		Messages:    taskMessages(start, ">Fix the bug", "Fixed"),
+		MessageSeqs: []uint64{1, 2},
+		Tasks:       []Task{task},
+		TaskSeqs:    []uint64{3},
+		Seq:         3,
+	}
+	e := NewEventEmitter()
+	e.Restore(state)
+	assert.False(t, e.Summary().Unread, "a database that never recorded it")
+
+	state.SeenAt = start
+	e = NewEventEmitter()
+	e.Restore(state)
+	assert.True(t, e.Summary().Unread, "it ended after it was last seen")
 }

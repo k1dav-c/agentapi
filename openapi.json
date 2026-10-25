@@ -2668,6 +2668,11 @@
             "format": "int64",
             "type": "integer"
           },
+          "seen_at": {
+            "description": "When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did.",
+            "format": "date-time",
+            "type": "string"
+          },
           "session_name": {
             "description": "The name the agent gave the session, as in GET /status.",
             "type": "string"
@@ -2693,6 +2698,10 @@
             "description": "The name the agent gave the session, else the start of the latest task's prompt; empty before the first task.",
             "type": "string"
           },
+          "unread": {
+            "description": "The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet.",
+            "type": "boolean"
+          },
           "usage": {
             "$ref": "#/components/schemas/AgentUsage",
             "description": "The context window and the account's usage limits, as in GET /status."
@@ -2704,9 +2713,11 @@
           "lifecycle",
           "pending_requests",
           "queued_messages",
+          "seen_at",
           "status",
           "tasks",
-          "title"
+          "title",
+          "unread"
         ],
         "type": "object"
       },
@@ -2747,6 +2758,11 @@
             "format": "int64",
             "type": "integer"
           },
+          "seen_at": {
+            "description": "When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did.",
+            "format": "date-time",
+            "type": "string"
+          },
           "session_name": {
             "description": "The name the agent gave the session, as in GET /status.",
             "type": "string"
@@ -2772,6 +2788,10 @@
             "description": "The name the agent gave the session, else the start of the latest task's prompt; empty before the first task.",
             "type": "string"
           },
+          "unread": {
+            "description": "The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet.",
+            "type": "boolean"
+          },
           "usage": {
             "$ref": "#/components/schemas/AgentUsage",
             "description": "The context window and the account's usage limits, as in GET /status."
@@ -2783,9 +2803,11 @@
           "lifecycle",
           "pending_requests",
           "queued_messages",
+          "seen_at",
           "status",
           "tasks",
-          "title"
+          "title",
+          "unread"
         ],
         "type": "object"
       },
@@ -6378,6 +6400,35 @@
           }
         },
         "summary": "Get the conversation's tasks"
+      }
+    },
+    "/tasks/seen": {
+      "post": {
+        "description": "Records that a client showed the conversation to the user now, so the tasks that ended until now are read: the summary's unread is false until a task ends again. Every client of this AgentAPI shares it: the chat calls it while it shows the conversation, and summary clients get summary_update. Returns the summary.",
+        "operationId": "post-tasks-seen",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SummaryBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Mark the tasks seen"
       }
     },
     "/terminal": {

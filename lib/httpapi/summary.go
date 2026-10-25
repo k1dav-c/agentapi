@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"reflect"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -55,8 +56,12 @@ type SummaryBody struct {
 	QueuedMessages  int    `json:"queued_messages" doc:"Messages waiting in the queue; see GET /queue."`
 	TerminalPrompt  string `json:"terminal_prompt,omitempty" doc:"The bottom of the agent's terminal while it shows a dialog to answer, as in GET /status."`
 	// Task is the latest task, nil before the first.
-	Task          *Task                 `json:"task,omitempty" doc:"The latest task, as in GET /tasks; missing before the first."`
-	Tasks         int                   `json:"tasks" doc:"How many tasks the conversation has."`
+	Task  *Task `json:"task,omitempty" doc:"The latest task, as in GET /tasks; missing before the first."`
+	Tasks int   `json:"tasks" doc:"How many tasks the conversation has."`
+	// Unread: the latest task ended after a client last showed the
+	// conversation (POST /tasks/seen).
+	Unread        bool                  `json:"unread" doc:"The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet."`
+	SeenAt        time.Time             `json:"seen_at" doc:"When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did."`
 	LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in, as in GET /status."`
 	LimitStop     *native.LimitStop     `json:"limit_stop,omitempty" doc:"Set while a usage limit holds the agent, as in GET /status."`
 	Usage         *native.AgentUsage    `json:"usage,omitempty" doc:"The context window and the account's usage limits, as in GET /status."`
@@ -85,10 +90,12 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 	if e.instance != nil {
 		summary.Instance = e.instance()
 	}
+	summary.SeenAt = e.seenAt
 	summary.Title = summary.SessionName
 	if n := len(e.tasks.tasks); n > 0 {
 		task := e.tasks.tasks[n-1].clone()
 		summary.Task = &task
+		summary.Unread = task.EndedAt != nil && task.EndedAt.After(e.seenAt)
 		if summary.Title == "" {
 			summary.Title = shortText(task.Prompt, summaryTitleLimit)
 		}
@@ -114,6 +121,19 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 func (e *EventEmitter) Summary() SummaryBody {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	return e.summaryLocked()
+}
+
+// MarkSeen records that a client showed the conversation to the user now,
+// and returns the summary.
+func (e *EventEmitter) MarkSeen() SummaryBody {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.seenAt = e.clock.Now()
+	if e.persister != nil {
+		e.persister.SetSeenAt(e.seenAt)
+	}
+	e.summaryChangedLocked()
 	return e.summaryLocked()
 }
 
@@ -164,7 +184,18 @@ func (s *Server) getSummary(_ context.Context, _ *struct{}) (*SummaryResponse, e
 	return &SummaryResponse{Body: s.emitter.Summary()}, nil
 }
 
+func (s *Server) markSeen(_ context.Context, _ *struct{}) (*SummaryResponse, error) {
+	return &SummaryResponse{Body: s.emitter.MarkSeen()}, nil
+}
+
 func (s *Server) registerSummaryRoutes() {
+	huma.Post(s.api, "/tasks/seen", s.markSeen, func(o *huma.Operation) {
+		o.Summary = "Mark the tasks seen"
+		o.Description = "Records that a client showed the conversation to the user now, so the tasks that ended " +
+			"until now are read: the summary's unread is false until a task ends again. Every client of this " +
+			"AgentAPI shares it: the chat calls it while it shows the conversation, and summary clients get " +
+			"summary_update. Returns the summary."
+	})
 	huma.Get(s.api, "/summary", s.getSummary, func(o *huma.Operation) {
 		o.Summary = "Get a summary of the agent"
 		o.Description = "Returns what a client that watches many AgentAPIs shows of one in a single response: " +
