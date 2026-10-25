@@ -708,6 +708,8 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
   只有 prompt 改變時才會再送一次。
 - 用 `PUT /webhook` 或 Explorer 修改的 webhook 設定在重新啟動後仍然有效，除非 AgentAPI 以不同的
   webhook 參數啟動。
+- 用戶端上次顯示對話的時間（`POST /tasks/seen`）會保存下來，所以沒看過就結束的任務在重新啟動後
+  仍是[未讀](#監看多個實例)。1.2 之前寫入的資料庫，任務會視為已讀。
 - ACP transport 不保存對話。
 - `--state-file <檔案>` 是 PTY transport 過去的保存方式，已棄用。它保存的對話會在第一次啟動時
   匯入旁邊的狀態資料庫（同名、副檔名改為 `.db`，或由 `--state-db` 指定），之後由資料庫保存對話；
@@ -1165,6 +1167,16 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
 - `GET /events?only=summary` 在連線時及摘要變動時送出 `summary_update`，另有心跳。
   串流省略訊息與畫面更新，讓用戶端能同時追蹤幾十個實例。回覆文字增長不會改變摘要；
   任務開始或結束、請求、狀態與佇列的變更才會。其他 `/events` 用戶端不會收到 `summary_update`。
+- 最新任務在用戶端上次顯示對話之後才結束時，`unread` 為 true，`seen_at` 則是上次顯示的時間。
+  `POST /tasks/seen` 會替這個實例的所有用戶端把任務標為已讀；聊天介面顯示對話時會自動呼叫它。
+  [狀態資料庫](#持久保存的工作階段)會保存這項資訊，所以沒看過的任務在重新啟動後仍是未讀。
+
+要找出一台機器上的實例，可以讀取登記目錄：每個 AgentAPI 執行期間會在 `~/.agentapi/instances`
+（`--registry-dir`；`--registry=false` 可關閉）保留一份登記檔，內容有 `id`、`name`、`server_id`、
+`url`（`--public-url`，沒有的話是監聽位址）、PID、目錄、agent 和 `auth_required`，不含 token。
+停止時會刪除登記檔；行程已經不在（當掉）的登記檔，會在列出登記目錄時刪除。使用前請先確認
+`GET /summary` 回傳的 `server_id` 與登記檔相同：該 port 可能已被另一個 AgentAPI 使用。
+[`agentapi list`](#agentapi-list) 會列出已登記的實例和它們的摘要。
 
 用 `--instance-id` 指定實例識別碼（預設 `<hostname>:<port>`），`--name` 指定顯示名稱
 （預設為工作目錄名稱），`--public-url` 指定連線網址。執行中可透過 `PUT /webhook` 修改 ID 與網址。
@@ -1575,6 +1587,8 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 | `--webhook-heartbeat` | `60s` | `instance.heartbeat` 的間隔；`0` 為關閉 |
 | `--instance-id` | `<hostname>:<port>` | 在 `GET /summary` 和每個 webhook 事件中代表這個 AgentAPI 的 ID；見[監看多個實例](#監看多個實例)（`--webhook-instance-id` 是已棄用的舊名稱） |
 | `--name` | 工作目錄的名稱 | 監看多個 AgentAPI 的用戶端顯示的名稱 |
+| `--registry` | `true` | 執行期間在登記目錄保留登記檔；見[監看多個實例](#監看多個實例) |
+| `--registry-dir` | `~/.agentapi/instances` | 登記目錄 |
 | `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中 |
 | `--webhook-timeout` | `10s` | 每次傳送的逾時時間 |
 | `--webhook-max-attempts` | `3` | 傳送的嘗試次數 |
@@ -1595,6 +1609,21 @@ agentapi update --force  # 即使已是最新版本也執行更新
 
 更新前，AgentAPI 會先依據該版本的 `checksums.txt` 清單，以 SHA-256 驗證下載的執行檔，
 通過後才取代目前的執行檔。若清單不存在、格式錯誤，或檢查碼與下載檔案不符，就會拒絕更新。
+
+### `agentapi list`
+
+從[登記目錄](#監看多個實例)列出這台機器上執行中的 AgentAPI，以及每個 `GET /summary` 的內容：
+閒置、工作中、需要你處理什麼（`needs request`），以及未讀的任務。
+
+```bash
+agentapi list
+NAME      AGENT   STATE                  URL                    TITLE
+api       claude  needs request, unread  http://localhost:3284  Fix the failing test
+frontend  codex   working                http://localhost:3285  Add the settings page
+```
+
+`--json` 以 JSON 輸出登記檔和摘要，`--registry-dir` 讀取其他目錄，`--api-token`（或
+`AGENTAPI_API_TOKEN`）會送給需要 token 的實例。
 
 ### `agentapi attach`
 
@@ -1628,6 +1657,7 @@ agentapi attach --url localhost:3284
 | `GET /events` | Server-sent events；`?sync=1` 會在重新連線時增量重播，並送出任務與佇列的更新；`?only=summary` 只送摘要 |
 | `GET /summary` | 監看多個 AgentAPI 的用戶端要顯示的內容：instance、狀態、attention、標題、最新任務、請求、佇列、用量；見[監看多個實例](#監看多個實例) |
 | `GET /tasks` | 對話的[任務](#任務)：你的每則訊息和 agent 處理它的回合 |
+| `POST /tasks/seen` | 替所有用戶端把任務標為已讀：摘要的 `unread` 會是 false，直到下一個任務結束 |
 | `GET /workspace` | AgentAPI 在 Coder workspace 中執行時，該 workspace 的網址 |
 
 ### 佇列

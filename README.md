@@ -840,6 +840,9 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
   only if it changed.
 - Webhook settings changed with `PUT /webhook` or in the Explorer apply after
   a restart, unless AgentAPI starts with other webhook flags.
+- When a client last showed the conversation (`POST /tasks/seen`) is kept, so
+  a task that ended unseen is still [unread](#watching-many-instances) after a
+  restart. A database written before 1.2 takes its tasks as seen.
 - The ACP transport doesn't keep its conversation.
 - `--state-file <file>`, the PTY transport's former persistence, is
   deprecated. The conversation it holds is imported the first time into a
@@ -1375,6 +1378,18 @@ instance:
   plus heartbeats. It omits messages and screen updates, allowing a client to follow dozens of
   instances. Reply text growing doesn't change the summary; task starts and ends, requests, status
   changes and queue changes do. Other `/events` clients don't receive `summary_update`.
+- `unread` is true when the latest task ended after a client last showed the conversation, and
+  `seen_at` says when that was. `POST /tasks/seen` marks the tasks seen for every client of the
+  instance; the chat calls it while it shows the conversation. The
+  [state database](#persistent-sessions) keeps it, so an unseen task stays unread after a restart.
+
+To find the instances on a machine, read the registry: while it serves, each AgentAPI keeps an
+entry in `~/.agentapi/instances` (`--registry-dir`; `--registry=false` turns it off) with its `id`,
+`name`, `server_id`, `url` (`--public-url`, else its listen address), PID, directory, agent and
+`auth_required`, never the token. It removes the entry when it stops; an entry whose process is
+gone (after a crash) is removed when the registry is listed. Check that `GET /summary` returns the
+entry's `server_id` before using one: another AgentAPI may have taken the port.
+[`agentapi list`](#agentapi-list) shows the registered instances with their summaries.
 
 Set `--instance-id` to identify the instance (default `<hostname>:<port>`), `--name` for its display
 name (default the working directory's name), and `--public-url` for its address. `PUT /webhook` can
@@ -1820,6 +1835,8 @@ variable.
 | `--webhook-heartbeat` | `60s` | How often `instance.heartbeat` is sent; `0` turns it off |
 | `--instance-id` | `<hostname>:<port>` | Identifies this AgentAPI in `GET /summary` and every webhook event; see [Watching many instances](#watching-many-instances) (`--webhook-instance-id` is its deprecated old name) |
 | `--name` | the working directory's name | What clients that watch many AgentAPIs call this one |
+| `--registry` | `true` | Keep an entry in the registry directory while serving; see [Watching many instances](#watching-many-instances) |
+| `--registry-dir` | `~/.agentapi/instances` | Registry directory |
 | `--public-url` | | URL this AgentAPI is reached at, in `GET /summary` and every webhook event |
 | `--webhook-timeout` | `10s` | Timeout of each delivery attempt |
 | `--webhook-max-attempts` | `3` | Delivery attempts |
@@ -1841,6 +1858,22 @@ agentapi update --force  # update even if already at the latest version
 Release binaries are verified against the release's `checksums.txt` SHA-256 manifest before the
 running executable is replaced. An update is rejected if the manifest is missing, malformed, or does
 not match the download.
+
+### `agentapi list`
+
+List the AgentAPIs running on this machine from the [registry](#watching-many-instances), with
+what each `GET /summary` says: idle, working, what it needs from you (`needs request`), and an
+unread task.
+
+```bash
+agentapi list
+NAME      AGENT   STATE                  URL                    TITLE
+api       claude  needs request, unread  http://localhost:3284  Fix the failing test
+frontend  codex   working                http://localhost:3285  Add the settings page
+```
+
+`--json` prints the entries and summaries as JSON, `--registry-dir` reads another directory, and
+`--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the instances that need a token.
 
 ### `agentapi attach`
 
@@ -1874,6 +1907,7 @@ default. Endpoints marked *native* need the native transport.
 | `GET /events` | Server-sent events; `?sync=1` for incremental replay on reconnect, and task and queue updates; `?only=summary` for the summary alone |
 | `GET /summary` | What a client that watches many AgentAPIs shows of this one: instance, status, attention, title, latest task, requests, queue, usage; see [Watching many instances](#watching-many-instances) |
 | `GET /tasks` | The conversation's [tasks](#tasks): each message of yours and the agent's turn on it |
+| `POST /tasks/seen` | Mark the tasks seen for every client: the summary's `unread` is false until a task ends again |
 | `GET /workspace` | The Coder workspace URL, when AgentAPI runs in one |
 
 ### Queue
