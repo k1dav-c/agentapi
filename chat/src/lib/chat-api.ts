@@ -214,6 +214,12 @@ export function createChatAPI(baseURL: string) {
       return jsonRequest("/webhook", {method: "PUT", body: change, fallback: "Failed to save the webhook settings"});
     },
 
+    // Records that the user saw the conversation now, so the tasks that
+    // ended are read for every client (POST /tasks/seen).
+    async markSeen(): Promise<void> {
+      await jsonRequest("/tasks/seen", {method: "POST", fallback: "Failed to mark the tasks seen"});
+    },
+
     // Sends a webhook.test event now and says how the receiver answered.
     testWebhook(): Promise<WebhookTest> {
       return jsonRequest("/webhook/test", {method: "POST", fallback: "Failed to send the test event"});

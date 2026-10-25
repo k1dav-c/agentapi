@@ -60,3 +60,10 @@ export function tasksByMessage(tasks: ServerTask[]): Map<number, ServerTask> {
   }
   return byMessage;
 }
+
+// latestTaskEnd returns when the latest task ended, undefined while it runs
+// or before the first: what the user hasn't seen until a client shows the
+// conversation once it ended.
+export function latestTaskEnd(tasks: readonly ServerTask[]): string | undefined {
+  return tasks.at(-1)?.ended_at;
+}

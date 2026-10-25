@@ -17,6 +17,7 @@ import {LimitCard} from "./limit-card";
 import {CacheNotice} from "./cache-notice";
 import {Lineage} from "./lineage";
 import {BackgroundAlerts} from "./background-alerts";
+import {SeenMarker} from "./seen-marker";
 
 // The Explorer (task index, MCP settings) isn't needed for the
 // first paint, so it loads right after, keeping the initial bundle small.
@@ -217,6 +218,7 @@ export function Chat() {
       )}
       <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <BackgroundAlerts />
+      <SeenMarker />
     </section>
   );
 }

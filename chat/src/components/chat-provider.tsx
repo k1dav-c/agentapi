@@ -105,6 +105,8 @@ const API_CALLS = [
   // Typing into and resizing the shell terminal (GET /terminal).
   "terminalInput",
   "terminalResize",
+  // POST /tasks/seen: the user saw the conversation (SeenMarker).
+  "markSeen",
   // GET, PUT /webhook and POST /webhook/test: pushing events to a receiver.
   "getWebhook",
   "updateWebhook",
