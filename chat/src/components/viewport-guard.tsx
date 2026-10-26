@@ -1,18 +1,18 @@
 "use client";
 
 import {useEffect} from "react";
-import {keyboardInset} from "@/lib/terminal-keys";
+import {viewportFrame} from "@/lib/viewport-frame";
 
 // ViewportGuard keeps the page where it can be seen. The pages scroll
 // inside their own panes, never the window, in a frame (.app-frame) fixed
-// to the visible part of the screen. iOS shrinks neither the page nor a
-// fixed frame for the on-screen keyboard: the frame's bottom follows the
-// bottom of what the browser reports visible (the visual viewport), the
-// same rule in every browser, so the composer and the terminal's key bar
-// stay above the keyboard, in a chat the hub frames too. iOS also scrolls
-// the window to keep a focused field above the keyboard and often leaves
-// it there once the keyboard closes, cutting off the top of the page:
-// while nothing is being typed in, the window goes back to the top.
+// to the visible part of the screen. iOS shrinks no fixed frame for the
+// on-screen keyboard: while it is up the frame takes the place and size of
+// what the browser reports visible (the visual viewport, viewportFrame),
+// the same rule in every browser, so the composer and the terminal's key
+// bar stay above the keyboard, in a chat the hub frames too. iOS also
+// scrolls the window to keep a focused field above the keyboard and often
+// leaves it there once the keyboard closes, cutting off the top of the
+// page: while nothing is being typed in, the window goes back to the top.
 export function ViewportGuard() {
   useEffect(() => {
     const typing = () => document.activeElement?.matches("input, textarea, select, [contenteditable=true], [contenteditable='']") ?? false;
@@ -26,16 +26,22 @@ export function ViewportGuard() {
       timer = setTimeout(reset, 120);
     };
     const viewport = window.visualViewport;
-    const root = document.documentElement.style;
+    const html = document.documentElement;
     // In a frame (the hub's) the page around it fits itself, and the frame
     // with it.
     const fit = () => {
       if (!viewport || window.top !== window) return;
-      const inset = keyboardInset(window.innerHeight, viewport);
-      root.setProperty("--keyboard-inset", `${inset}px`);
-      root.setProperty("--viewport-top", `${inset ? Math.max(0, Math.round(viewport.offsetTop)) : 0}px`);
-      // The home indicator's space is the keyboard's while it is up.
-      root.setProperty("--safe-bottom", inset ? "0px" : "env(safe-area-inset-bottom)");
+      const frame = viewportFrame(window.innerHeight, viewport);
+      if (frame) {
+        html.style.setProperty("--viewport-top", `${frame.top}px`);
+        html.style.setProperty("--viewport-height", `${frame.height}px`);
+        // The home indicator's space is the keyboard's while it is up.
+        html.style.setProperty("--safe-bottom", "0px");
+        html.dataset.viewportFrame = "";
+      } else {
+        html.style.removeProperty("--safe-bottom");
+        delete html.dataset.viewportFrame;
+      }
     };
     const onViewport = () => {
       fit();

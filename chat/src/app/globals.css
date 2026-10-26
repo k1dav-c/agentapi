@@ -234,11 +234,17 @@
 /* The hub. A halo breathes around what needs you; a working arc turns;
    the sign-in picture's links and nodes drift. All of it stops under
    reduced motion (below). */
-/* A page's frame: the visible part of the screen, above an on-screen
-   keyboard iOS doesn't shrink the page for (ViewportGuard sets both). */
+/* A page's frame: the screen, between the browser's toolbars; while an
+   on-screen keyboard is up, the part of the page the browser shows
+   (ViewportGuard sets it). */
 .app-frame {
   position: fixed;
-  inset: var(--viewport-top, 0px) 0 var(--keyboard-inset, 0px);
+  inset: 0;
+}
+:root[data-viewport-frame] .app-frame {
+  top: var(--viewport-top);
+  bottom: auto;
+  height: var(--viewport-height);
 }
 
 .hub-halo { animation: hub-halo 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }

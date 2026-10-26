@@ -72,20 +72,3 @@ export function withModifier(data: string, modifier: StickyModifier): string {
   if (first === "?") return `\x7f${rest}`;
   return data;
 }
-
-// How far an on-screen keyboard overlaps the bottom of the page, in CSS
-// pixels: the part of the layout viewport (innerHeight) below the visual
-// viewport. One rule for every browser: no guess at bars the visual
-// viewport may or may not leave out.
-// Browsers that shrink the layout for the keyboard (Android with
-// interactive-widget=resizes-content) report no overlap; iOS Safari keeps
-// the layout and only shrinks the visual viewport.
-export function keyboardInset(
-  innerHeight: number,
-  viewport: {height: number; offsetTop: number} | null,
-): number {
-  if (!viewport) return 0;
-  const inset = Math.round(innerHeight - viewport.height - viewport.offsetTop);
-  // Ignore small differences (browser chrome sliding in and out).
-  return inset > 80 ? inset : 0;
-}
