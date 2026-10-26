@@ -569,6 +569,12 @@ func (e *permanentWebhookError) Error() string {
 	return fmt.Sprintf("unexpected HTTP status %s", e.status)
 }
 
+// SignWebhook is the X-AgentAPI-Signature-256 of body sent at timestamp
+// (Unix seconds) with secret, as an AgentAPI signs its webhook events.
+func SignWebhook(secret, timestamp string, body []byte) string {
+	return webhookSignature(secret, timestamp, body)
+}
+
 // webhookSignature is the X-AgentAPI-Signature-256 of body sent at
 // timestamp: the HMAC-SHA256, keyed with secret, of "<timestamp>.<body>".
 func webhookSignature(secret, timestamp string, body []byte) string {

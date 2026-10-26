@@ -1464,7 +1464,9 @@ applies it to the registered AgentAPIs running now: each sends `instance.heartbe
 once. After a restart (of the workspace, for example), the AgentAPIs send `instance.started` from
 the file. `--public-url` is where the hub reaches them; `{port}` and `{hostname}` are filled in for
 each. AgentAPIs that started before 1.2 aren't registered: restart them once. `agentapi hub status`
-shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes it.
+shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes it. `join`
+first sends the hub a signed test event and stops if the hub doesn't take it (not reached, a sign-in
+page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet.
 
 ### Webhooks
 

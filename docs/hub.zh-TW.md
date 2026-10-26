@@ -99,6 +99,8 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
   --public-url 'http://dev-1.vpn:{port}'
 ```
 
+- `join` 會先送給 hub 一個有簽章的測試事件，hub 沒收下就停止（連不到、被登入頁擋住，或 secret 不同），
+  見[參考資料](#agentapi-hub-joinleavestatus)。
 - `join` 把 hub 寫進 `~/.agentapi/config.yaml`。這個使用者的每個 `agentapi server` 啟動時都會讀
   這個檔案，所以由腳本以固定參數啟動的 AgentAPI（例如 Coder workspace 的啟動腳本）不必改腳本也能
   加入。旗標和 `AGENTAPI_*` 環境變數仍然優先於這個檔案。
@@ -267,6 +269,8 @@ token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie�
 | 看到的狀況 | 原因 | 處理方式 |
 | --- | --- | --- |
 | 實例一直沒出現 | AgentAPI 在 `join` 之前、或 1.2 之前就啟動了 | 重新啟動它，或重開它的 workspace |
+| `join` 說 hub 前面有登入頁 | hub 的網址是 Coder 的 port 網址（或其他需要登入的網址） | 改用 hub 在你的網路或 VPN 上的位址；事件是由 AgentAPI 自己送出的 |
+| `join` 說 hub 在另一台機器上 | `--public-url` 寫的是 `localhost` | 改成 hub 連得到這台機器的位址 |
 | 實例一直沒出現；hub 的 log 有「Refused an event」 | `join` 和 hub 的 `--secret` 不同，或兩邊時鐘差超過 10 分鐘 | 用 hub 的 secret 重新執行 `agentapi hub join`；檢查時鐘 |
 | 實例一直沒出現；`agentapi hub status` 顯示沒有 hub | `join` 寫入的設定檔，不是 AgentAPI 讀的那個 | 用同一個使用者，或兩邊傳同一個 `--config` |
 | Unreachable：`400 Bad Request` | AgentAPI 拒絕以 VPN 名稱作為 `Host` | 在 `--allowed-hosts` 允許它（步驟 3） |
@@ -307,6 +311,12 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | `--api-token` | `AGENTAPI_API_TOKEN` | 給需要 token 的執行中 AgentAPI |
 | `--config` | `~/.agentapi/config.yaml` | 要寫入的設定檔 |
 | `--registry-dir` | `~/.agentapi/instances` | 執行中 AgentAPI 的登記目錄 |
+| `--no-check` | `false` | 不檢查 hub 是否收得到事件就加入（用於還沒啟動的 hub） |
+
+`join` 在寫入任何東西之前，會先確認 hub 收得到這台機器的事件：它送給 hub 一個有簽章的
+`webhook.test` 事件。hub 連不到、前面有登入頁（Coder 的 port 網址會導向 Coder 登入），或 secret
+不一樣時，它會停下來並說明原因。hub 在另一台機器上、`--public-url` 卻寫 `localhost`（hub 連不到）
+時，它也會停下來。
 
 `join` 把 `webhook-url`、`webhook-secret`、`webhook-events` 和 `public-url` 寫進設定檔，並用
 `PUT /webhook` 套用到執行中的 AgentAPI，保留各自的逾時和重試次數。`leave` 移除這些設定，並關掉執行中
