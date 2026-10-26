@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- `agentapi hub serve --no-token` runs a hub without a sign-in, for one only a sign-in of its own
+  reaches (a Coder workspace app, a private VPN): everyone who reaches it is in. A hub still needs
+  `--token` or `--no-token`, and takes only one of them.
+
 ## v1.4.1
 
 ### Fixes

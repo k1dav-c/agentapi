@@ -374,6 +374,29 @@ func TestNewRefusesWithoutSecrets(t *testing.T) {
 	assert.ErrorContains(t, err, "--token")
 	_, err = hub.New(hub.Config{Token: "t"})
 	assert.ErrorContains(t, err, "--secret")
+	_, err = hub.New(hub.Config{Token: "t", NoToken: true, Secret: "s"})
+	assert.ErrorContains(t, err, "not both")
+}
+
+// A hub without a token lets everyone in: no sign-in, no bearer.
+func TestHubNoToken(t *testing.T) {
+	h, err := hub.New(hub.Config{NoToken: true, Secret: hubSecret})
+	require.NoError(t, err)
+	srv := httptest.NewServer(h.Handler())
+	t.Cleanup(srv.Close)
+
+	var session struct {
+		Authenticated bool `json:"authenticated"`
+	}
+	require.Equal(t, http.StatusOK, request(t, http.MethodGet, srv.URL+"/api/session", "", nil, &session))
+	assert.True(t, session.Authenticated)
+	var list struct {
+		Instances []hub.Instance `json:"instances"`
+	}
+	assert.Equal(t, http.StatusOK, request(t, http.MethodGet, srv.URL+"/api/instances", "", nil, &list))
+	// Signing in with anything works too, for a page that tries.
+	assert.Equal(t, http.StatusOK, request(t, http.MethodPost, srv.URL+"/api/session", "", map[string]string{"token": "anything"}, &session))
+	assert.True(t, session.Authenticated)
 }
 
 type sseEvent struct{ event, data string }

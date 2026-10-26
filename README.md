@@ -1967,8 +1967,9 @@ agentapi hub status
 agentapi hub leave
 ```
 
-`serve` runs the hub: `--token` (or `AGENTAPI_HUB_TOKEN`) is what you sign in with, `--secret` (or
-`AGENTAPI_HUB_SECRET`) checks the AgentAPIs' events, `--instance-token` (or
+`serve` runs the hub: `--token` (or `AGENTAPI_HUB_TOKEN`) is what you sign in with (`--no-token`
+instead skips signing in, for a hub behind a sign-in of its own such as a Coder workspace app),
+`--secret` (or `AGENTAPI_HUB_SECRET`) checks the AgentAPIs' events, `--instance-token` (or
 `AGENTAPI_HUB_INSTANCE_TOKEN`, else `AGENTAPI_API_TOKEN`) is sent to them, `--state` keeps the
 instances, and `--port` and `--bind` set where it listens.
 

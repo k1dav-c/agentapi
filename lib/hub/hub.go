@@ -31,8 +31,13 @@ import (
 
 // Config is how the hub runs.
 type Config struct {
-	// Token is what a browser signs in with; it is required.
+	// Token is what a browser signs in with; it is required, unless
+	// NoToken.
 	Token string
+	// NoToken lets in everyone who reaches the hub, without signing in:
+	// for a hub only a sign-in of its own reaches (a Coder workspace app,
+	// a private VPN). Token must be empty.
+	NoToken bool
 	// Secret checks the instances' webhook events; it is required, since
 	// an event names the URL the hub sends an instance token to.
 	Secret string
@@ -70,8 +75,11 @@ type Hub struct {
 
 // New returns the hub of config, with the instances it kept.
 func New(config Config) (*Hub, error) {
-	if config.Token == "" {
-		return nil, errors.New("the hub needs a token to sign in with (--token)")
+	switch {
+	case config.NoToken && config.Token != "":
+		return nil, errors.New("the hub takes a token to sign in with (--token) or none (--no-token), not both")
+	case !config.NoToken && config.Token == "":
+		return nil, errors.New("the hub needs a token to sign in with (--token), or --no-token to let in everyone who reaches it")
 	}
 	if config.Secret == "" {
 		return nil, errors.New("the hub needs the secret the instances sign their events with (--secret)")
@@ -166,8 +174,12 @@ func (h *Hub) sessionValue() string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// signedIn reports whether r carries the session cookie or the hub token.
+// signedIn reports whether r carries the session cookie or the hub token;
+// everyone is, on a hub without a token.
 func (h *Hub) signedIn(r *http.Request) bool {
+	if h.config.NoToken {
+		return true
+	}
 	if c, err := r.Cookie(sessionCookie); err == nil && hmac.Equal([]byte(c.Value), []byte(h.sessionValue())) {
 		return true
 	}
@@ -197,6 +209,10 @@ func (h *Hub) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"token\": ...}"})
+		return
+	}
+	if h.config.NoToken {
+		writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
 		return
 	}
 	if !hmac.Equal([]byte(body.Token), []byte(h.config.Token)) {
