@@ -493,6 +493,14 @@ try {
   await elementShot(page, page.getByRole('dialog'), 'keyboard-shortcuts.png');
   await page.keyboard.press('Escape');
 
+  // How to add this AgentAPI to a hub, with a hub address typed in.
+  await page.getByRole('button', {name: /Open session details/}).click();
+  await page.getByRole('menuitem', {name: 'Add to an AgentAPI hub…'}).click();
+  const joinHub = page.getByRole('dialog', {name: 'Add to an AgentAPI hub'});
+  await joinHub.getByLabel('Hub address').fill('hub.vpn:3290');
+  await elementShot(page, joinHub, 'join-hub.png');
+  await page.keyboard.press('Escape');
+
   // Menus hide the rest of the page from the accessibility tree, so the composer is found by CSS.
   const composer = page.locator('form:has(textarea[aria-label="Task message"])');
   await page.locator('button[title^="Permission mode"]').click();

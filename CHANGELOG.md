@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- The chat shows how to add its AgentAPI to a hub: **Add to an AgentAPI hub…** in the status menu
+  has the steps with commands to copy (run a hub, join this machine, open the hub), filled in with
+  the hub's address you type, and says which hub the AgentAPI already reports to.
+
 ## v1.5.0
 
 ### Features

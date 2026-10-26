@@ -1,8 +1,8 @@
 "use client";
 
-import {useState} from "react";
-import {ArrowRight, Check, CircleCheck, Copy, ClipboardList, Gauge, KeyRound, MessageCircleQuestion, ShieldQuestion, SquareTerminal} from "lucide-react";
+import {ArrowRight, CircleCheck, ClipboardList, Gauge, KeyRound, MessageCircleQuestion, ShieldQuestion, SquareTerminal} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
+import {CopyCommand} from "@/components/copy-command";
 import {
   activity,
   displayName,
@@ -267,28 +267,6 @@ export function Overview({
   );
 }
 
-// Command is a command to copy, on one line that scrolls.
-function Command({text}: {text: string}) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="mt-2 flex items-stretch overflow-hidden rounded-lg border bg-term text-term-foreground">
-      <code className="min-w-0 flex-1 overflow-x-auto px-3 py-2.5 font-mono text-[12.5px] leading-5 whitespace-pre [scrollbar-width:thin]">{text}</code>
-      <button
-        type="button"
-        onClick={() => {
-          void navigator.clipboard?.writeText(text).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1600);
-          });
-        }}
-        className="flex w-11 shrink-0 items-center justify-center border-l border-white/10 text-term-dim outline-none hover:text-term-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        aria-label={copied ? "Copied" : "Copy the command"}
-      >
-        {copied ? <Check className="size-4 text-state-ready" /> : <Copy className="size-4" />}
-      </button>
-    </div>
-  );
-}
 
 // Onboarding shows how to connect the first agents: once per machine.
 export function Onboarding({root, onAdd, compact = false}: {root: string; onAdd: () => void; compact?: boolean}) {
@@ -316,7 +294,7 @@ export function Onboarding({root, onAdd, compact = false}: {root: string; onAdd:
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold">{step.title}</p>
               <p className="mt-0.5 text-sm text-muted-foreground">{step.body}</p>
-              {step.command && <Command text={step.command} />}
+              {step.command && <CopyCommand text={step.command} />}
             </div>
           </li>
         ))}

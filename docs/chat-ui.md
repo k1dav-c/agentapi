@@ -451,13 +451,19 @@ one shows above the screen, as in the shell terminal. **Back to chat** returns.
 Clicking the status in the header opens the session details: the status, agent, session name,
 *native* the agent's session ID (its first characters, with a copy button), AgentAPI version, what
 the agent is doing, the queue and the tokens in and out. Its menu downloads the conversation as
-JSONL (as the Explorer's Session tab does), turns on browser notifications, and shows the keyboard
-shortcuts. (How full the context is and the usage limits are in the composer's toolbar; see
+JSONL (as the Explorer's Session tab does), turns on browser notifications, shows the keyboard
+shortcuts, and shows how to add this AgentAPI to a [hub](hub.md). (How full the context is and the usage limits are in the composer's toolbar; see
 [Context and usage limits](#context-and-usage-limits).)
 
 While the tab is in the background, its icon shows an amber dot when the agent needs you, a blue dot
 while it works and a green dot when a task finishes. With notifications on, the browser also shows
 "*Agent* needs you" or "*Agent* finished".
+
+**Add to an AgentAPI hub…** has the steps to copy: run a hub, join this machine to it, open it.
+The hub's address, typed in, goes into the commands. When this AgentAPI already reports to a hub,
+it says which.
+
+![Adding this AgentAPI to a hub: the hub's address, and the commands to copy](screenshots/join-hub.png)
 
 When a task ends while the chat is visible, or the chat becomes visible after one ended, it tells
 the server you saw it (`POST /tasks/seen`), so a dashboard that watches many AgentAPIs, `agentapi

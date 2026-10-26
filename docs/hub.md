@@ -246,7 +246,9 @@ an approval from the phone:
 ![The guide an empty hub shows](screenshots/hub-empty.png)
 
 A hub no agent has joined yet shows the three steps of [Setting it up](#3-join-each-machines-agentapis)
-with commands to copy, its own address filled in.
+with commands to copy, its own address filled in. An AgentAPI's own chat has the same steps for
+its machine: **Add to an AgentAPI hub…** in the menu of the status in its header
+([Session details](chat-ui.md#session-details-and-alerts)).
 
 ### Adding and forgetting instances
 

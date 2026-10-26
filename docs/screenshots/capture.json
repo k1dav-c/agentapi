@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-26T16:22:07.065Z",
+  "captured_at": "2026-10-26T17:54:08.272Z",
   "agentapi_version": "0.0.0-dev",
   "agents": [
     "native-demo",
@@ -23,6 +23,7 @@
     "task-preview.png",
     "session-details.png",
     "keyboard-shortcuts.png",
+    "join-hub.png",
     "permission-mode.png",
     "model-settings.png",
     "context-usage.png",

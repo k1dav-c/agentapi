@@ -415,11 +415,17 @@ Ctrl+C，shell 的 Ctrl+R、Ctrl+A、Ctrl+E、Ctrl+U 和 Ctrl+W，Home、End、P
 
 點選標頭中的狀態會開啟工作階段詳細資訊：狀態、agent、工作階段名稱、*native* agent 的工作階段
 ID（前幾個字元，附複製按鈕）、AgentAPI 版本、agent 正在做什麼、佇列，以及輸入和輸出的 token 數。它的選單可以把對話下載成 JSONL（和 Explorer 的
-Session 分頁一樣）、開啟瀏覽器通知，以及顯示鍵盤快捷鍵。（context 用了多少和用量限制在輸入框
+Session 分頁一樣）、開啟瀏覽器通知、顯示鍵盤快捷鍵，以及說明如何把這個 AgentAPI 加入
+[hub](hub.zh-TW.md)。（context 用了多少和用量限制在輸入框
 的工具列上，見 [Context 與用量限制](#context-與用量限制)。）
 
 分頁在背景時，圖示會以圓點顯示狀態：琥珀色表示 agent 需要你回應，藍色表示工作中，綠色表示
 任務完成。開啟通知時，瀏覽器也會顯示「*agent 名稱* needs you」或「*agent 名稱* finished」。
+
+**Add to an AgentAPI hub…** 列出可以直接複製的步驟：啟動 hub、讓這台機器加入、打開 hub。輸入
+hub 的位址後，指令會自動帶入。這個 AgentAPI 已經回報給某個 hub 時，會顯示是哪一個。
+
+![把這個 AgentAPI 加入 hub：hub 的位址和可以複製的指令](screenshots/join-hub.png)
 
 任務在聊天介面顯示時結束，或任務結束後聊天介面再次顯示時，聊天介面會告訴伺服器你已經看過
 （`POST /tasks/seen`），所以監看多個 AgentAPI 的儀表板、`agentapi list` 和其他分頁都不會再把這個
