@@ -1,7 +1,8 @@
 # Documentation screenshots
 
 The [chat UI guide](../chat-ui.md) and [README](../../README.md) use these screenshots and GIFs.
-Chromium captured them from an AgentAPI v0.28.0 binary serving the production chat UI and API.
+Chromium captured them from an AgentAPI binary built from the source (`go build`, version `0.0.0-dev`)
+after v1.2.0, serving the production chat UI and API.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
 project, `my-app` (a page with a stylesheet, a script and release notes, two commits and
@@ -15,7 +16,10 @@ uncommitted changes):
   `my-app`, for the earlier sessions, a subagent and a file found below the working directory.
   AgentAPI reads Claude Code's logs for it, which the script writes into its home directory: three
   earlier sessions, and the log of the subagent the demo's Agent tool call starts;
-- bash as a PTY agent (`--term-width 100`), for TTY mode.
+- bash as a PTY agent (`--term-width 100`), for TTY mode;
+- `agentapi hub serve` with three `native-demo` instances that join it with `agentapi hub join`, for
+  the hub: one waits for an approval, one works and one finished a task. The rows name the
+  machine; the screenshots show placeholders (`dev-1` and so on).
 
 ## Gallery
 
@@ -59,6 +63,8 @@ device scale factor of 1.
 | [file-find.png](file-find.png) | The file viewer on a file found below the working directory |
 | [login-card.png](login-card.png) | A login card |
 | [tty-mode.png](tty-mode.png) | TTY mode on a PTY agent |
+| [hub-desktop.png](hub-desktop.png) | The hub: its instances, what needs you first, and one open in the chat with its approval |
+| [hub-phone.png](hub-phone.png) | The hub's list on a phone |
 
 The GIFs use a 1100 × 720 window, or 390 × 844 for the phone view. A blue dot marks the pointer and
 clicks because headless Chromium draws no pointer. Frames store only changed pixels to keep files

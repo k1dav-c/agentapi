@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -210,6 +211,17 @@ type webhookDispatcher struct {
 	snapshot func() any
 	// configChanged wakes the heartbeat loop when the interval changes.
 	configChanged chan struct{}
+}
+
+// ExpandPublicURL fills in a public URL's placeholders: {port} is the port
+// AgentAPI listens on and {hostname} the machine's name. One setting then
+// serves every AgentAPI of a machine (the config file of agentapi hub join).
+func ExpandPublicURL(publicURL string, port int) string {
+	if !strings.Contains(publicURL, "{") {
+		return publicURL
+	}
+	hostname, _ := os.Hostname()
+	return strings.NewReplacer("{port}", strconv.Itoa(port), "{hostname}", hostname).Replace(publicURL)
 }
 
 func parseWebhookTemplate(templateStr string) (*template.Template, error) {
@@ -651,6 +663,7 @@ func (w *webhookAPI) getWebhookConfig(_ context.Context, _ *struct{}) (*WebhookC
 
 func (w *webhookAPI) updateWebhookConfig(_ context.Context, request *WebhookConfigRequest) (*WebhookConfigResponse, error) {
 	config := w.webhook.configSnapshot()
+	previousURL := config.URL
 	config.URL = request.Body.URL
 	config.Timeout = time.Duration(request.Body.TimeoutSeconds) * time.Second
 	config.MaxAttempts = request.Body.MaxAttempts
@@ -683,6 +696,11 @@ func (w *webhookAPI) updateWebhookConfig(_ context.Context, request *WebhookConf
 	}
 	if w.instanceChanged != nil {
 		w.instanceChanged()
+	}
+	// A new receiver (agentapi hub join) learns of this AgentAPI now
+	// rather than at the next heartbeat.
+	if config.URL != "" && config.URL != previousURL {
+		w.webhook.emit(webhookEventInstanceHeartbeat, w.webhook.snapshotData())
 	}
 	return w.getWebhookConfig(context.Background(), nil)
 }

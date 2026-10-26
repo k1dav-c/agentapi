@@ -83,7 +83,7 @@ answers write keys directly to the agent's terminal.
 
 | Path | What it holds |
 | --- | --- |
-| `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, transport, starting the agent, signals), `attach`, `list` (the registered AgentAPIs and their summaries), and `update` (self-update with checksum verification) |
+| `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, transport, starting the agent, signals), `attach`, `list` (the registered AgentAPIs and their summaries), `hub` (`serve`: the hub; `join`, `leave` and `status`: a hub's webhook in the config file and in the running AgentAPIs), and `update` (self-update with checksum verification) |
 | `lib/httpapi/` | The HTTP server: routes and handlers, the `EventEmitter`, the queue, token auth, webhooks, the MCP, files and terminal endpoints, and the embedded chat UI |
 | `lib/conversation/` | Shared types (imported as `conv`): messages, roles, status and error levels. The server calls transports through `Conversation`; transports report changes through `Emitter` |
 | `lib/screentracker/` | The PTY conversation: screen snapshots, message splitting, stability detection, and typing parts into the agent's terminal (`AgentIO`, `TerminalPart`) |
@@ -101,6 +101,8 @@ answers write keys directly to the agent's terminal.
 | `lib/native/nativetest` | A scriptable fake adapter for tests |
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db` (native and PTY), and the import of a `--state-file` |
+| `lib/hub/` | `agentapi hub serve`: the instances (`store.go`, kept in a file), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`) |
+| `lib/userconfig/` | The user's settings file, `~/.agentapi/config.yaml`: flags by name, read by `agentapi server`, written by `agentapi hub` |
 | `lib/registry/` | The entries of the AgentAPIs running on a machine (`~/.agentapi/instances`): writing one atomically, listing them and removing those whose process is gone |
 | `lib/shellterm/` | The shared shell terminal of native sessions |
 | `lib/htmlpreview/` | Makes HTML previews self-contained for `GET /files/preview` by embedding resources referenced by relative paths as data: URLs |
@@ -118,8 +120,10 @@ answers write keys directly to the agent's terminal.
 
 `agentapi server [flags] -- <agent command>` (`cmd/server/server.go`):
 
-1. Flags come from the command line or from `AGENTAPI_*` environment
-   variables (viper). The agent type is `--type`, else the agent command when
+1. Flags come from the command line, from `AGENTAPI_*` environment
+   variables or from `~/.agentapi/config.yaml` (`--config`; viper, in that
+   order; `cmd/server/userconfig.go`, which reports names that aren't flags
+   and ignores a file it can't read). The agent type is `--type`, else the agent command when
    it is a type name, else `custom`. The transport is `--transport`, else
    native for an agent `hasNativeAdapter` covers (Claude Code, Codex, Pi and
    `native-demo`) unless the deprecated `--state-file` is set, else PTY.
@@ -578,6 +582,13 @@ for native agents.
   outside the working directory can't be opened.
 - The webhook sends what it is configured to, the conversation included, to
   its URL, which `PUT /webhook` can change; its HMAC secret is write-only.
+- The hub (`lib/hub`) holds the instances' API tokens and sends them only to
+  instance URLs from events signed with its secret (HMAC of the timestamp and
+  body, at most 10 minutes old, each delivery once) or added by someone signed
+  in. Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
+  derived from it; the proxy drops their cookies and `Authorization`, `Origin`
+  and `Referer` headers and the instances' `Set-Cookie`, so neither side's
+  credentials reach the other.
 - Agents, on every transport, don't inherit the variables (one of them a
   secret) that a parent agent session sets for the commands it runs, nor
   AgentAPI's API token (`lib/procenv`).

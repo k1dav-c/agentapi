@@ -25,6 +25,21 @@ terminal. It is also an example client for the AgentAPI HTTP API. Claude Code ge
 
 4. Open <http://localhost:3000/chat/?url=http://localhost:3284> in your browser.
 
+### Developing the hub's page
+
+The hub's page (`src/app/hub/`, `src/components/hub-view.tsx`) talks to `agentapi hub serve` on the
+same origin, so build the chat into the binary (`make embed` from the repository root), run a hub
+and join it a demo instance:
+
+```bash
+go run main.go hub serve --token dev --secret dev --state /tmp/hub-dev.json &
+# A config file of its own: hub join would otherwise change ~/.agentapi/config.yaml.
+go run main.go hub join http://localhost:3290/hooks --secret dev --public-url 'http://localhost:{port}' --config /tmp/hub-dev.yaml
+go run main.go server --config /tmp/hub-dev.yaml --type custom -- native-demo
+```
+
+Then open <http://localhost:3290/> and sign in with `dev`.
+
 ### Developing against the native transport without an agent
 
 `native-demo` simulates an agent for developing request cards, steering, interrupts, and queue

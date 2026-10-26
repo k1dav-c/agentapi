@@ -3,7 +3,9 @@ package httpapi_test
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,5 +59,36 @@ func TestEvents_SummaryInstanceChange(t *testing.T) {
 		if body.Instance.ID == id {
 			break
 		}
+	}
+}
+
+// A new webhook receiver (agentapi hub join) hears of the AgentAPI at once,
+// not at the next heartbeat.
+func TestWebhook_NewReceiverHearsAtOnce(t *testing.T) {
+	events := make(chan string, 10)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var event struct {
+			Type string `json:"type"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&event)
+		events <- event.Type
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer receiver.Close()
+	n := newNativeServer(t, nil)
+	body := map[string]any{"url": receiver.URL, "timeout_seconds": 10, "max_attempts": 1, "events": []string{"instance.*"}}
+	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/webhook", body, nil))
+	select {
+	case event := <-events:
+		assert.Equal(t, "instance.heartbeat", event)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the receiver heard nothing")
+	}
+	// The same receiver again sends nothing new.
+	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/webhook", body, nil))
+	select {
+	case event := <-events:
+		t.Fatalf("unexpected %s", event)
+	case <-time.After(300 * time.Millisecond):
 	}
 }

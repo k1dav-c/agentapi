@@ -443,6 +443,7 @@ const (
 	FlagInstanceID             = "instance-id"
 	FlagName                   = "name"
 	FlagRegistry               = "registry"
+	FlagConfig                 = "config"
 	FlagRegistryDir            = "registry-dir"
 	FlagPublicURL              = "public-url"
 	FlagAPIToken               = "api-token"
@@ -469,6 +470,7 @@ func CreateServerCmd() *cobra.Command {
 				logger = slog.New(logctx.DiscardHandler)
 			}
 			ctx := logctx.WithLogger(context.Background(), logger)
+			readUserConfig(viper.GetViper(), cmd.Flags(), logger)
 			return runServer(ctx, logger, cmd.Flags().Args())
 		},
 	}
@@ -507,7 +509,8 @@ func CreateServerCmd() *cobra.Command {
 		{FlagWebhookInstanceID, "", "", "Deprecated: use --instance-id", "string"},
 		{FlagRegistry, "", true, "While serving, keep an entry in the registry directory, where agentapi list and clients that watch many AgentAPIs find the ones running on this machine", "bool"},
 		{FlagRegistryDir, "", "", "Registry directory (default ~/.agentapi/instances)", "string"},
-		{FlagPublicURL, "", "", "URL this AgentAPI is reached at, in GET /summary and every webhook event so clients and receivers can link to its chat or call its API", "string"},
+		{FlagConfig, "", "", "Settings file: agentapi server flags by name (YAML), below flags and AGENTAPI_* variables; agentapi hub join writes it (default ~/.agentapi/config.yaml)", "string"},
+		{FlagPublicURL, "", "", "URL this AgentAPI is reached at, in GET /summary and every webhook event so clients and receivers can link to its chat or call its API; {port} and {hostname} are filled in", "string"},
 		{FlagAPIToken, "", "", "API token for Bearer authentication. If set without a value, a random token is generated. Empty (default) disables authentication.", "string"},
 		{FlagBind, "", "", "Address to listen on: an IP address or hostname without a port (e.g. 127.0.0.1 or ::1). Empty (default) listens on all interfaces", "string"},
 	}
