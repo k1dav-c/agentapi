@@ -1696,7 +1696,8 @@ agentapi hub status
 agentapi hub leave
 ```
 
-`serve` 執行 hub：`--token`（或 `AGENTAPI_HUB_TOKEN`）是登入用的 token，`--secret`（或
+`serve` 執行 hub：`--token`（或 `AGENTAPI_HUB_TOKEN`）是登入用的 token（改用 `--no-token` 則不需登入，
+適合本身已在另一層登入後面的 hub，例如 Coder workspace app），`--secret`（或
 `AGENTAPI_HUB_SECRET`）用來檢查 AgentAPI 的事件，`--instance-token`（或
 `AGENTAPI_HUB_INSTANCE_TOKEN`，否則 `AGENTAPI_API_TOKEN`）會送給它們，`--state` 保存實例，
 `--port` 和 `--bind` 設定監聽位置。

@@ -27,6 +27,7 @@ func serveCmd() *cobra.Command {
 		port          int
 		bind          string
 		token         string
+		noToken       bool
 		secret        string
 		instanceToken string
 		statePath     string
@@ -36,7 +37,9 @@ func serveCmd() *cobra.Command {
 		Short: "Run a hub: watch many AgentAPIs and open any of them in the chat",
 		Long: "Run a hub. AgentAPIs join it with agentapi hub join <this hub>/hooks: their signed instance.* events " +
 			"add them, and the hub follows each one's summary. Sign in at the hub's address with --token to see them " +
-			"all and open any of them in the chat; the hub sends the instances' API token (--instance-token) for you.",
+			"all and open any of them in the chat; the hub sends the instances' API token (--instance-token) for you. " +
+			"With --no-token everyone who reaches the hub is in: only for a hub behind a sign-in of its own, such as a " +
+			"Coder workspace app or a private VPN.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
@@ -52,10 +55,13 @@ func serveCmd() *cobra.Command {
 			}
 			logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 			h, err := hub.New(hub.Config{
-				Token: token, Secret: secret, InstanceToken: instanceToken, StatePath: statePath, Logger: logger,
+				Token: token, NoToken: noToken, Secret: secret, InstanceToken: instanceToken, StatePath: statePath, Logger: logger,
 			})
 			if err != nil {
 				return err
+			}
+			if noToken {
+				logger.Warn("The hub has no token: everyone who reaches it sees the instances and opens them, with their API token")
 			}
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -91,7 +97,8 @@ func serveCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&port, "port", defaultHubPort, "Port to listen on")
 	cmd.Flags().StringVar(&bind, "bind", "", "Address to listen on, such as this machine's VPN address (default all interfaces)")
-	cmd.Flags().StringVar(&token, "token", "", "Token browsers sign in with (default $AGENTAPI_HUB_TOKEN); required")
+	cmd.Flags().StringVar(&token, "token", "", "Token browsers sign in with (default $AGENTAPI_HUB_TOKEN); required, unless --no-token")
+	cmd.Flags().BoolVar(&noToken, "no-token", false, "Let in everyone who reaches the hub, without signing in: only behind a sign-in of its own (a Coder workspace app, a private VPN)")
 	cmd.Flags().StringVar(&secret, "secret", "", "Secret the AgentAPIs sign their events with, as given to agentapi hub join (default $AGENTAPI_HUB_SECRET); required")
 	cmd.Flags().StringVar(&instanceToken, "instance-token", "", "API token sent to the AgentAPIs (default $AGENTAPI_HUB_INSTANCE_TOKEN, else $AGENTAPI_API_TOKEN)")
 	cmd.Flags().StringVar(&statePath, "state", "", "File that keeps the instances (default ~/.agentapi/hub/instances.json)")

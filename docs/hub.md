@@ -144,6 +144,10 @@ The token goes to the hub once and comes back as an HttpOnly cookie derived from
 stores the token. Changing `--token` signs every browser out. A wrong token is refused on the spot,
 and the eye button shows what you pasted.
 
+A hub that only a sign-in of its own reaches, such as a Coder workspace app or a private VPN, can
+run without a token: `--no-token` (instead of `--token`) skips this page, and everyone who reaches
+the hub is in. The hub refuses to start with neither.
+
 ### The overview
 
 ![The overview: how many need you, a tile per state, and a card for each request](screenshots/hub-desktop.png)
@@ -277,6 +281,8 @@ instance that joined with its webhook comes back the next time it starts.
 - Signing in sends the hub token. Serve the hub only on the VPN, or behind HTTPS.
 - Anyone signed in to the hub can do what the AgentAPIs allow: send tasks, answer approvals, use
   their terminals. Give the hub token only to people you would give the instance token.
+- With `--no-token`, that is everyone who reaches the hub's port: keep it behind a sign-in of its
+  own, and never on a public address.
 
 ## Troubleshooting
 
@@ -304,7 +310,8 @@ failed.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--token` | `AGENTAPI_HUB_TOKEN` | Token browsers sign in with; required |
+| `--token` | `AGENTAPI_HUB_TOKEN` | Token browsers sign in with; required, unless `--no-token` |
+| `--no-token` | `false` | No sign-in: everyone who reaches the hub is in (only behind a sign-in of its own) |
 | `--secret` | `AGENTAPI_HUB_SECRET` | Secret the AgentAPIs sign their events with; required |
 | `--instance-token` | `AGENTAPI_HUB_INSTANCE_TOKEN`, else `AGENTAPI_API_TOKEN` | API token sent to the AgentAPIs |
 | `--state` | `~/.agentapi/hub/instances.json` | File that keeps the instances |

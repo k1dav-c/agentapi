@@ -134,6 +134,10 @@ agentapi list         # 這台機器上執行中的 AgentAPI，以及各自的�
 token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie；頁面不會保存 token。更換
 `--token` 會讓所有瀏覽器登出。token 錯誤時會當場拒絕，眼睛按鈕可以顯示你貼上的內容。
 
+如果 hub 本身就在另一層登入後面，例如 Coder workspace app 或私人 VPN，可以不設 token：用
+`--no-token` 取代 `--token`，就不會出現這個頁面，連得到 hub 的人都能直接進入。兩個都沒給時，hub
+不會啟動。
+
 ### 總覽
 
 ![總覽：需要你處理的數量、每種狀態一格，以及每個請求一張卡片](screenshots/hub-desktop.png)
@@ -254,6 +258,8 @@ token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie�
 - 登入時會送出 hub token。hub 只開在 VPN 上，或放在 HTTPS 後面。
 - 登入 hub 的人能做的事，等同各 AgentAPI 允許的事：送任務、回覆核准、使用終端機。hub token 只給
   你也願意給實例 token 的人。
+- 用 `--no-token` 時，這指的是所有連得到 hub port 的人：hub 一定要放在另一層登入後面，不能開在公開
+  位址上。
 
 ## 疑難排解
 
@@ -280,7 +286,8 @@ AgentAPI 的 log 會記下傳送失敗的 webhook。
 
 | 旗標 | 預設值 | 說明 |
 | --- | --- | --- |
-| `--token` | `AGENTAPI_HUB_TOKEN` | 瀏覽器登入用的 token；必填 |
+| `--token` | `AGENTAPI_HUB_TOKEN` | 瀏覽器登入用的 token；除非用 `--no-token`，否則必填 |
+| `--no-token` | `false` | 不需登入：連得到 hub 的人都能進入（只用在另一層登入後面） |
 | `--secret` | `AGENTAPI_HUB_SECRET` | AgentAPI 為事件簽章用的 secret；必填 |
 | `--instance-token` | `AGENTAPI_HUB_INSTANCE_TOKEN`，否則 `AGENTAPI_API_TOKEN` | 送給 AgentAPI 的 API token |
 | `--state` | `~/.agentapi/hub/instances.json` | 保存實例的檔案 |
