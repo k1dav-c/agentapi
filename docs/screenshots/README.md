@@ -14,12 +14,13 @@ uncommitted changes):
   results, models, context and usage limits are simulated, so no paid agent runs;
 - the same demo posing as Claude Code (`--type claude -- native-demo`), one directory above
   `my-app`, for the earlier sessions, a subagent and a file found below the working directory.
-  AgentAPI reads Claude Code's logs for it, which the script writes into its home directory: three
-  earlier sessions, and the log of the subagent the demo's Agent tool call starts;
+  AgentAPI reads Claude Code's logs for it, which the script writes into a temporary home
+  directory: three earlier sessions, and the log of the subagent the demo's Agent tool call starts;
 - bash as a PTY agent (`--term-width 100`), for TTY mode;
-- `agentapi hub serve` with three `native-demo` instances that join it with `agentapi hub join`, for
-  the hub: one waits for an approval, one works and one finished a task. The rows name the
-  machine; the screenshots show placeholders (`dev-1` and so on).
+- `agentapi hub serve` with six `native-demo` instances that join it with `agentapi hub join`, for
+  the hub: one waits for an approval, one works, one finished a task, one is idle, one stopped
+  and one was killed, so the hub can't reach it. The rows name the machine; the screenshots show
+  placeholders (`dev-1` and so on).
 
 ## Gallery
 
@@ -64,7 +65,11 @@ device scale factor of 1.
 | [login-card.png](login-card.png) | A login card |
 | [tty-mode.png](tty-mode.png) | TTY mode on a PTY agent |
 | [hub-desktop.png](hub-desktop.png) | The hub: its instances, what needs you first, and one open in the chat with its approval |
+| [hub-sign-in.png](hub-sign-in.png) | Signing in to the hub |
+| [hub-list.png](hub-list.png) | The hub's list with every state: needs your answer, working, finished, idle, unreachable, stopped |
+| [hub-add.png](hub-add.png) | Adding an instance by its URL and token |
 | [hub-phone.png](hub-phone.png) | The hub's list on a phone |
+| [hub-phone-chat.png](hub-phone-chat.png) | An instance open from the hub on a phone, with the way back to the list |
 
 The GIFs use a 1100 × 720 window, or 390 × 844 for the phone view. A blue dot marks the pointer and
 clicks because headless Chromium draws no pointer. Frames store only changed pixels to keep files
@@ -80,6 +85,7 @@ small.
 | [demo-files.gif](demo-files.gif) | A file, its preview, and a diff |
 | [demo-terminal.gif](demo-terminal.gif) | The shell terminal: a command, a link above it, and a held Ctrl |
 | [demo-phone.gif](demo-phone.gif) | The terminal on a phone, typed with the key bar |
+| [demo-hub.gif](demo-hub.gif) | On a phone: opening the instance that needs you, allowing its command, and back to the list where it no longer does |
 
 The login card names the host and user to log in as; the script shows `dev-machine` and `dev` in
 their place. The servers get a clean environment (no tokens or workspace links of the shell that
@@ -119,7 +125,7 @@ runs the script) and a neutral shell prompt.
 The script creates a temporary sample project and home directory, then starts three servers on
 127.0.0.1. It captures every view and GIF and writes [capture.json](capture.json) with the binary
 version, browser, capture time, viewports and images. It stops the servers and removes temporary
-files even if a step fails. A chat error fails the run, which takes about five minutes.
+files even if a step fails. The run takes about five minutes; a chat error fails it.
 
 The binary's version shows in the chat's header. To show the version a merge will release, build
 with it: `make build VERSION=0.27.0`.

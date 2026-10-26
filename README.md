@@ -23,7 +23,7 @@ Use AgentAPI to:
 - Build a unified chat interface for coding agents.
 - Provide an MCP server backend that lets one agent control another coding agent.
 - Create tools that delegate pull request reviews to an agent.
-- Watch many agents from one dashboard: each AgentAPI pushes its tasks, the requests that need
+- Watch many agents from one dashboard. Each AgentAPI pushes its tasks, the requests that need
   you, its messages and heartbeats there with [webhooks](#webhooks), and a client that connects
   to many follows each through its [summary](#watching-many-instances). The built-in
   [hub](#running-a-hub) is such a dashboard, on a desktop or a phone.
@@ -35,7 +35,8 @@ protocols with the [native transport](#native-transport) by default, and keeps t
 (the [PTY transport](#pty-transport)) for every other agent. Session management and chat features
 support long-running tasks across transports, and [webhooks](#webhooks) report them to a central
 platform. [CHANGELOG.md](CHANGELOG.md) lists what
-changed, [docs/architecture.md](docs/architecture.md) describes how it is built, and the
+changed, [docs/architecture.md](docs/architecture.md) describes how it is built,
+[docs/hub.md](docs/hub.md) how to watch many AgentAPIs from one page, and the
 [full comparison with upstream](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)
 has the complete commit history.
 
@@ -73,8 +74,8 @@ has the complete commit history.
 - Messages sent while the agent works wait in a [queue](#message-queue) that
   you can edit and reorder; with the native transport they can also
   [steer or interrupt](#steer-interrupt-and-the-queue) the running turn.
-- Each message and the agent's turn on it is a [task](#tasks) the server
-  tracks: running, completed, failed, or stopped by a usage limit.
+- The server tracks each message and the agent's turn on it as a
+  [task](#tasks): running, completed, failed, or stopped by a usage limit.
 - Follow everything live over [server-sent events](#events-and-incremental-sync),
   with heartbeats and an incremental replay after a reconnect.
 
@@ -87,11 +88,11 @@ has the complete commit history.
   while the agent runs: bypass (the default), auto, ask or plan.
 - See how full the [context and the rate limits](#context-and-rate-limits)
   are, and [compact](#slash-commands-and-compaction) the context; the chat
-  suggests it once Claude Code's prompt cache expired.
-- A turn a [usage limit](#usage-limits) stops holds the queue until the limit
-  resets, and can go on by itself then.
-- A missing or expired [login](#logging-in) is reported with the command to
-  run, and the agent starts by itself once it is logged in.
+  suggests it once Claude Code's prompt cache has expired.
+- When a [usage limit](#usage-limits) stops a turn, the queue waits until the
+  limit resets, and the turn can continue by itself then.
+- AgentAPI reports a missing or expired [login](#logging-in) with the command
+  to run, and starts the agent by itself once it is logged in.
 - A shared [terminal](#terminal) in the agent's working directory, for logins
   and quick commands.
 - [Persistent sessions](#persistent-sessions): with `--state-db`, the
@@ -112,7 +113,7 @@ has the complete commit history.
   servers, the agent's [earlier sessions](#earlier-sessions), Restart and the
   [webhook](#webhooks).
 - [Lineage](#lineage): the subagents the agent ran, and what each did, step by
-  step, also while it works.
+  step, even while it works.
 - [Decision cards](#decision-cards) for terminal dialogs and native requests,
   menus for the agent's settings, a ring for its context, and slash commands.
 - A [file viewer](#file-viewer) with the file, its git diff and a preview of
@@ -127,15 +128,14 @@ has the complete commit history.
 - [MCP management](#mcp-management) for Claude Code, Codex and Pi, with
   reusable profiles; restarting the agent updates Codex and Pi first.
 - [A hub](#running-a-hub) (`agentapi hub serve`) watches the AgentAPIs of many
-  machines, what needs you first, and opens any of them in the chat, on a desktop
-  or a phone; [`agentapi hub join`](#joining-a-hub) connects a machine's
-  AgentAPIs to it, also after a restart.
-- [Webhooks](#webhooks) push tasks, requests, messages and heartbeats to a
-  dashboard that watches many agents, signed with HMAC, and a client that
-  connects to many follows each through one
-  [summary stream](#watching-many-instances); with a
-  [human-reply API](#human-reply-api) let a bot tell you when the agent stops
-  and pass your answer back.
+  machines, lists what needs you first, and opens any of them in the chat on a
+  desktop or a phone. [`agentapi hub join`](#joining-a-hub) connects a
+  machine's AgentAPIs to it, and they stay connected after a restart.
+- [Webhooks](#webhooks) push HMAC-signed tasks, requests, messages and
+  heartbeats to a dashboard that watches many agents. A client that connects
+  to many follows each through one [summary stream](#watching-many-instances).
+  With the [human-reply API](#human-reply-api), a bot can tell you when the
+  agent stops and pass your answer back.
 - [Self-update](#agentapi-update), verified against the release's checksums.
 - [Security](#security): an API token (the chat signs in with a cookie), the
   listen address, and the allowed hosts and origins.
@@ -264,8 +264,8 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 agent resumes its session when AgentAPI starts again with the same file; see
 [Persistent sessions](#persistent-sessions). `--terminal` (default true, native transport only)
 offers a shell in the agent's working directory; see [Terminal](#terminal). `--state-file <file>` is
-deprecated: its conversation is imported into a state database next to it, which keeps it from
-then on.
+deprecated: AgentAPI imports its conversation into a state database next to it and keeps it there
+from then on.
 
 ## Chat UI
 
@@ -359,11 +359,11 @@ HEAD (`GET /files/content`, `GET /files/diff`, cut at 1 MiB). Only files inside 
 directory can be opened. An expanded tool call lists its files and shows its change as a diff, with
 the raw input a click away. On a phone the viewer is full screen.
 
-A path that isn't in the working directory is looked for below it (`GET /files/find`), ignoring
-case: an agent working in a repository below its working directory (a home directory) names files
-relative to the repository. One match opens, with a note naming the path the agent wrote; several
-are listed to choose from. The search leaves out hidden directories, dependencies and Go's module
-cache unless the path goes into them, and stops after 50,000 entries or 2 seconds.
+If a path isn't in the working directory, AgentAPI looks for it below (`GET /files/find`), ignoring
+case. This covers an agent whose working directory is a home directory and that names files
+relative to a repository below it. One match opens with a note naming the path the agent wrote;
+several are listed to choose from. The search leaves out hidden directories, dependencies and Go's
+module cache unless the path goes into them, and stops after 50,000 entries or 2 seconds.
 
 ![The viewer on my-app/docs/notes.md, with a note that docs/notes.md isn't in the working directory](docs/screenshots/file-find.png)
 
@@ -414,15 +414,15 @@ own terminal, so screen views stay hidden for native and ACP sessions. See
 ### Alerts, connection recovery and caching
 
 While the tab is in the background, its icon shows an amber dot when the agent needs you, a blue dot
-while it works, and a green dot when a task finishes. Browser notifications can be turned on from
-the status menu, which also downloads the conversation as JSONL (so does the Explorer's Session
-tab), with the steps of the subagents a native Claude Code or Codex ran after the agent's own.
+while it works, and a green dot when a task finishes. Turn on browser notifications from the status
+menu. The menu also downloads the conversation as JSONL, as does the Explorer's Session tab; for a
+native Claude Code or Codex, its subagents' steps follow the agent's own.
 
 ![The session details menu opened from the status in the header](docs/screenshots/session-details.png)
 
 The agent's warnings and errors show as notifications that stay until you close them. The server
-sends its recent ones again on every connection, so the chat remembers the ones you closed, per
-server: a reload doesn't bring them back.
+resends its recent ones on every connection, so the chat remembers per server which ones you
+closed, and a reload doesn't bring them back.
 
 Long-running browser sessions are protected by SSE heartbeats, automatic reconnection,
 stale-connection detection, and local recovery of messages that failed before reaching the server.
@@ -447,9 +447,9 @@ agentapi server -- codex -a on-request
 agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking low
 ```
 
-- Claude Code, Codex, and Pi are supported. AgentAPI selects their adapter from
-  the command name; specify `--type` for full executable paths or wrapper
-  scripts (without it they run as `custom` agents, with the PTY transport).
+- AgentAPI selects the adapter from the command name. Specify `--type` for
+  full executable paths or wrapper scripts; without it they run as `custom`
+  agents with the PTY transport.
 - A server started with the deprecated `--state-file` and no `--transport`
   keeps the PTY transport, so command lines written for it still start; see
   [Persistent sessions](#persistent-sessions).
@@ -457,9 +457,8 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
   `--experimental-acp` and cannot be enabled together with native mode.
 - For UI development, `--type custom -- native-demo` runs a simulated agent with
   the native transport; see the [development guide](chat/README.md). With
-  `--type claude`, `codex` or `pi` instead, the demo poses as that agent:
-  AgentAPI reads that agent's logs for it, for its earlier sessions and
-  subagents.
+  `--type claude`, `codex` or `pi` instead, the demo poses as that agent, and
+  AgentAPI reads that agent's logs for its earlier sessions and subagents.
   `--transport native` with any other agent type is rejected at startup.
 
 **What to expect**
@@ -533,11 +532,12 @@ command in the chat terminal.
   Check the login with `claude auth status`.
 - Codex: `codex login --device-auth` signs in with a ChatGPT plan from any
   device: open the link it shows and enter its one-time code. The login card
-  and `/login` run it, since AgentAPI usually runs on a server without a
+  and `/login` run it because AgentAPI usually runs on a server without a
   browser: `codex login`'s browser sign-in redirects the browser to
   `localhost:1455` on the machine that runs Codex, which a browser elsewhere
-  can't reach. `codex login` still works with a browser on the same machine, and `printenv OPENAI_API_KEY | codex login --with-api-key`
-  uses an API key. Check the login with `codex login status`.
+  can't reach. `codex login` still works with a browser on the same machine,
+  and `printenv OPENAI_API_KEY | codex login --with-api-key` uses an API key.
+  Check the login with `codex login status`.
 - Pi: run `/login` inside `pi`, or set a provider key such as
   `ANTHROPIC_API_KEY` in AgentAPI's environment.
 
@@ -584,7 +584,7 @@ Pi extensions) and plan approvals (Claude's `ExitPlanMode`) arrive as requests:
   plans (with optional `text` as feedback when the request has `feedback`),
   `answers` keyed by question ID for questions. A request is answered at most
   once: 409 when it is no longer pending (already answered, withdrawn or
-  expired, also for a request restored from `--state-db`), 400 when the
+  expired, including a request restored from `--state-db`), 400 when the
   answer doesn't fit the request.
 - Each request has a `status` (`pending`, `resolved`, `withdrawn`, `expired`)
   and a `response_capability`: `live` (the agent is waiting), `message` (the
@@ -641,20 +641,21 @@ approving it does not change files.
 - `POST /message` takes `dispatch_mode`: `queue` (the default, as on every
   transport: send the message once the agent is idle), `steer` (add it to the
   turn the agent is working on; the reply says `steered`) or `interrupt` (stop
-  that turn and send the message next). They need the native transport. While
-  a turn runs they also need the matching capability, otherwise the answer is
-  400; when no turn is running (also while the agent restarts or waits for a
-  login), both send or queue the message as usual.
+  that turn and send the message next). `steer` and `interrupt` need the
+  native transport. While a turn runs they also need the matching capability,
+  otherwise the answer is 400. When no turn is running (including while the
+  agent restarts or waits for a login), both send or queue the message as
+  usual.
 - `POST /interrupt` stops the running turn (409 if there is none, or while no
   agent runs).
 - `POST /queue/{id}/steer` moves a queued message into the running turn (409
   if no turn is running; the message stays queued).
 - `PUT /queue` with `{"ids": [...]}` reorders the queue. It must list every
   queued message once (409 otherwise). This works on every transport.
-- A queued message the agent refuses is tried up to 5 times in all, then
-  dropped with an error that quotes it. One the agent didn't answer in time is
-  dropped at once: it may have reached the agent, and sending it again could
-  run the task twice.
+- If the agent refuses a queued message, AgentAPI tries it up to 5 times in
+  all, then drops it with an error that quotes it. A message the agent didn't
+  answer in time is dropped at once: it may have reached the agent, and
+  sending it again could run the task twice.
 
 `GET /status` reports the supported `capabilities`: `steer`, `interrupt`, `resume` (the session
 can be resumed when AgentAPI starts again, see [Persistent sessions](#persistent-sessions)),
@@ -717,15 +718,15 @@ the last turn (`context`: `used` and `size` in tokens) and the account's rate li
 a label, how much is used, when it resets and, for Claude Code, whether it is close to or at the
 limit). Claude Code reports its 5-hour and weekly limits and its context after every turn, Codex its
 context and its usage windows, and Pi its context. A new session starts with an empty context; the
-rate limits, which are the account's, stay. In the chat, a ring in the composer's toolbar shows how
-full the context is, and its menu the limits with the time to each reset.
+rate limits belong to the account and stay. In the chat, a ring in the composer's toolbar shows how
+full the context is, and its menu shows the limits with the time to each reset.
 
 Claude Code also reports its `prompt_cache`: how long the model provider keeps the conversation's
 cache after its last use (`ttl_seconds`: an hour on a subscription, five minutes with an API key, on
-Bedrock or Vertex) and when it expires (`expires_at`). Once it expired, the next message has the
-model read the whole context again, at the full price and against the usage limits. While the agent
-is idle with an expired cache and at least 50k tokens of context, the chat says so above the
-composer and offers to compact first; dismissed, the note stays away until the next turn.
+Bedrock or Vertex) and when it expires (`expires_at`). Once it has expired, the model reads the
+whole context again on the next message, at the full price and against the usage limits. While the
+agent is idle with an expired cache and at least 50k tokens of context, the chat says so above the
+composer and offers to compact first. A dismissed note stays hidden until the next turn.
 
 ![A note above the composer: the prompt cache expired and the next message reads 120k tokens again, with Compact](docs/screenshots/cold-cache.png)
 
@@ -737,8 +738,8 @@ When the account reaches a usage limit, the agent stops its turn: Claude Code sa
 limit", Codex reports `usageLimitExceeded`, Pi the provider's quota error. `GET /status` and
 `status_change` then report `limit_stop`: the agent's `message`, when it stopped and, if the agent
 says, when the limit resets (`resets_at`, else the reset of the limit `rate_limits` reports as
-reached). Queued messages wait until then instead of failing one after another; a message you send
-yourself goes out at once, past them, and ends the stop.
+reached). Queued messages wait until then instead of failing one after another. A message you send
+yourself goes out at once, ahead of them, and ends the stop.
 
 - `POST /limit/continue` with `{"at": "now"}` sends a message that asks the
   agent to go on with the task; `{"at": "reset"}` schedules it for a minute
@@ -812,10 +813,10 @@ sends it.
 thinking), the timeline, requests and the queue, plus the agent's own session ID and the webhook
 settings changed through the API. When AgentAPI starts again with the same file, the chat shows the
 conversation as it was and queued messages are still queued. A native agent resumes its session, so
-it remembers the conversation too; a PTY agent starts anew below it, and the last agent message
-keeps its text until the next message. After a clean shutdown browser caches stay valid, because
-the conversation keeps its epoch. Without `--state-db`, every start of AgentAPI is a new
-conversation.
+it remembers the conversation too. A PTY agent starts fresh below the restored conversation, and the
+last agent message keeps its text until the next message. After a clean shutdown, browser caches
+stay valid because the conversation keeps its epoch. Without `--state-db`, every start of AgentAPI
+is a new conversation.
 
 ```bash
 agentapi server --state-db ~/.agentapi/myproject.db -- claude
@@ -845,9 +846,9 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
   only if it changed.
 - Webhook settings changed with `PUT /webhook` or in the Explorer apply after
   a restart, unless AgentAPI starts with other webhook flags.
-- When a client last showed the conversation (`POST /tasks/seen`) is kept, so
-  a task that ended unseen is still [unread](#watching-many-instances) after a
-  restart. A database written before 1.2 takes its tasks as seen.
+- The time a client last showed the conversation (`POST /tasks/seen`) is
+  kept, so a task that ended unseen is still [unread](#watching-many-instances)
+  after a restart. A database written before 1.2 treats its tasks as seen.
 - The ACP transport doesn't keep its conversation.
 - `--state-file <file>`, the PTY transport's former persistence, is
   deprecated. The conversation it holds is imported the first time into a
@@ -869,16 +870,16 @@ working directory. This works without `--state-db`:
   session directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
   `PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR` and a `--session-dir`
   passed to Pi are honored). A session belongs to the directory its log
-  records, also when AgentAPI runs in it through a symlink; Claude Code names
-  some directories alike (`/w/a_b` and `/w/a-b`), and their sessions are told
-  apart.
+  records, even when AgentAPI runs in it through a symlink. Claude Code gives
+  some directories the same name (`/w/a_b` and `/w/a-b`); AgentAPI keeps their
+  sessions apart.
 - `POST /sessions/{id}/resume` restarts the agent on that session, and
   replaces the conversation with the session's, read from its log. With
   `{"fork": true}` the agent opens a copy of it under a new id (Claude Code's
   `--fork-session`, Codex's `thread/fork`, Pi's `--fork`), and the session
   itself stays as it was. The queue and open requests are cleared, as on a
-  restart; it returns 409 while the agent works on a turn, compacts its
-  context or restarts, and a resume refused so leaves the conversation as it
+  restart. It returns 409 while the agent works on a turn, compacts its
+  context or restarts, and the refused resume leaves the conversation as it
   was.
 
 In the chat, the Explorer's Session tab lists the sessions with **Open** and **Start a copy**, which
@@ -900,9 +901,9 @@ charge per token, so it estimates what the same work would cost with an API key.
   cache read, and the rest as input.
 - Pi: the cost Pi reports for each call.
 
-A call a fork copied from another session counts in the session it came from, so totals don't count
-it twice. The built-in prices cover Anthropic's and OpenAI's models; `--prices <file>` adds models or
-replaces their prices, in USD per million tokens:
+A call that a fork copied from another session counts in the session it came from, so totals don't
+count it twice. The built-in prices cover Anthropic's and OpenAI's models; `--prices <file>` adds
+models or replaces their prices, in USD per million tokens:
 
 ```json
 {
@@ -924,7 +925,7 @@ tokens but no cost (`priced: false`).
   `subagent_id`), from which a task's cost is the calls made from its message until the next.
 
 In the chat, each task shows what it cost under its start time and duration (in its header on narrow
-screens), with the tokens in the tooltip; the cost is read again when a turn ends, and every 15
+screens), with the tokens in the tooltip. The chat refreshes the cost when a turn ends, and every 15
 seconds while one runs. The Explorer's Session tab shows what each session cost, and what all of
 them cost today, in the last 7 and 30 days and in all, by your time zone.
 
@@ -958,7 +959,7 @@ Claude Code supports `steer` (a steered message joins the running turn at Claude
 `resume` and `images`. The session name is the title Claude Code generates after the first prompt;
 after `/clear` the new session is titled too, and it is the one `--state-db` resumes. A turn ends
 when Claude Code reports it is idle, so a background subagent and the turn it wakes up when it
-finishes belong to the turn that started it; the subagent's own steps are left out of the
+finishes belong to the turn that started it. The subagent's own steps are left out of the
 conversation, as in the session log, and its tool call shows as running until it reports.
 
 Command line and environment:
@@ -967,17 +968,17 @@ Command line and environment:
   --verbose --include-partial-messages --replay-user-messages
   --permission-prompt-tool stdio`, and `--session-id` for a new session or
   `--resume` for a resumed one.
-- Unless you choose otherwise it adds `--permission-mode bypassPermissions`,
-  so tools run without asking; questions (AskUserQuestion) and plans
+- Unless you choose otherwise, it adds `--permission-mode bypassPermissions`,
+  so tools run without asking. Questions (AskUserQuestion) and plans
   (ExitPlanMode) still come as requests, and approving a plan offers to
   bypass permissions. Pass `--permission-mode default` (or `acceptEdits`,
   `plan`, …) to start in another mode, or switch it while Claude Code runs
-  (see [Settings](#settings-permission-mode-model-and-effort)); AgentAPI also
+  (see [Settings](#settings-permission-mode-model-and-effort)). AgentAPI also
   adds `--allow-dangerously-skip-permissions`, so a session can switch to
   bypass later. Claude Code refuses `bypassPermissions` as root outside a
-  sandbox, so when AgentAPI runs as root it adds `--permission-mode default`
+  sandbox. When AgentAPI runs as root, it adds `--permission-mode default`
   instead, leaves out `--allow-dangerously-skip-permissions` and logs a
-  warning; set `IS_SANDBOX=1` in a sandbox, or choose a mode yourself
+  warning. Set `IS_SANDBOX=1` in a sandbox, or choose a mode yourself
   (`--allow-dangerously-skip-permissions` alone still makes Claude Code exit
   as root). It also adds `--thinking adaptive --thinking-display summarized`
   (without it thinking is empty). Your `--permission-mode`,
@@ -989,7 +990,7 @@ Command line and environment:
   `--from-pr`, `--teleport`, `--permission-prompt-tool`,
   `--permission-prompts`, `--bg`/`--background`, `--cloud`/`--remote`,
   `--desktop`, `--remote-control`/`--rc`, `--sdk-url`, `--resume-session-at`
-  and `--resume-drops-turn`, also inside a group of short flags such as
+  and `--resume-drops-turn`, even inside a group of short flags such as
   `-pc`. Your own copies of `--verbose`,
   `--include-partial-messages` and `--replay-user-messages` are dropped.
   Everything else (`--model`, `--allowedTools`, `--mcp-config`,
@@ -1023,7 +1024,7 @@ Codex's command line after `codex` is handled like this:
   settings; `--dangerously-bypass-approvals-and-sandbox` means `-a never -s
   danger-full-access`. Without them (or `-c approval_policy=...`,
   `sandbox_mode`, `approvals_reviewer`), the thread runs without approvals or
-  sandbox, the native transport's bypass mode; switch it from the chat or with
+  sandbox (the native transport's bypass mode). Switch it from the chat or with
   `PUT /settings` (see [Settings](#settings-permission-mode-model-and-effort)).
   Codex 0.160 refuses `approval_policy = "untrusted"` in its config, so use
   `-a untrusted` for that policy.
@@ -1041,23 +1042,25 @@ Codex's command line after `codex` is handled like this:
 
 Codex supports `steer`, `interrupt`, `resume` and `images`. Command, file-edit and MCP tool
 approvals, permission requests, MCP form elicitations and `request_user_input` questions arrive as
-requests (Codex asks those questions in the plan mode; with codex-cli 0.160,
-`--enable default_mode_request_user_input` lets Codex ask them in the default mode too). The plan
-mode is Codex's plan collaboration mode, an experimental part of app-server's API that AgentAPI opts
-into: Codex ends its turn with a plan, and AgentAPI asks "Implement this plan?" as the Codex TUI
+requests. Codex asks those questions in the plan mode; with codex-cli 0.160,
+`--enable default_mode_request_user_input` lets it ask them in the default mode too. The plan mode
+is Codex's plan collaboration mode, an experimental part of app-server's API that AgentAPI opts
+into. Codex ends its turn with a plan, and AgentAPI asks "Implement this plan?" as the Codex TUI
 does. The Yes options (`implement_bypass`, `implement_auto` and `implement_ask`, the mode before
-the plan first) leave the plan mode for that permission mode and have Codex implement the plan in
-the same turn; No (`keep_planning`) with feedback sends the feedback back to Codex, still planning;
-No alone ends the turn. The other requests' option IDs are Codex's own decisions (`accept`,
-`acceptForSession`, `acceptWithExecpolicyAmendment`, `decline`, `cancel`, …), nothing is
-approved automatically, and requests AgentAPI can't show are declined. A command approval shows the
-command that runs, without the shell wrapper; Codex's reading of it (files it reads, searches) is in
-the detail. Requests still open when a turn ends are declined (MCP elicitations cancelled), so
-neither Codex nor an MCP server keeps waiting. A steered message joins the running turn at Codex's
-next model request (the current output keeps streaming); the reply to it is filed under the steering
-message. An interrupt ends the turn within milliseconds, and tool calls it cut short show as failed.
+the plan first) leave the plan mode for that permission mode, and Codex implements the plan in the
+same turn. No (`keep_planning`) with feedback sends the feedback back to Codex, which keeps
+planning; No alone ends the turn.
 
-The session reference is Codex's thread ID. Resuming it continues the thread with its context; a
+The other requests' option IDs are Codex's own decisions (`accept`, `acceptForSession`,
+`acceptWithExecpolicyAmendment`, `decline`, `cancel`, …). Nothing is approved automatically, and
+requests AgentAPI can't show are declined. A command approval shows the command that runs, without
+the shell wrapper; Codex's reading of it (files it reads, searches) is in the detail. Requests still
+open when a turn ends are declined (MCP elicitations cancelled), so neither Codex nor an MCP server
+keeps waiting. A steered message joins the running turn at Codex's next model request (the current
+output keeps streaming); the reply to it is filed under the steering message. An interrupt ends the
+turn within milliseconds, and tool calls it cut short show as failed.
+
+The session reference is Codex's thread ID. Resuming it continues the thread with its context. A
 turn that was running when the process died comes back as interrupted, approvals that were pending
 are gone, and Codex's earlier turns are not loaded into AgentAPI's conversation (the chat shows them
 only from the `--state-db` file). A thread that can't be resumed is replaced by a new one, with a
@@ -1108,9 +1111,9 @@ AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
   message), and the extension gets a cancel; interrupting an extension command
   that waits on a dialog withdraws the dialog. An extension command that runs
   without a model turn ends with the stop reason `handled`. An extension's
-  `notify` with level error shows as
-  an error, and its `setTitle` stands in for the session name until Pi has one;
-  Pi's own name (`--name`, renames) is the session name.
+  `notify` with level error shows as an error, and its `setTitle` stands in
+  for the session name until Pi has one; Pi's own name (`--name`, renames) is
+  the session name.
 - **Resume.** Pi's session ID is the session reference. Resuming starts Pi with
   the same `--session-id` (keep the same directory and `--session-dir`), so Pi
   keeps the context; Pi doesn't replay earlier messages, so the chat shows them
@@ -1131,8 +1134,8 @@ AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
 
 - The agent has no terminal of its own. The chat hides TTY mode, the terminal
   prompt card, the live screen tail and "Terminal output" (for ACP too, where
-  Stop and the answer buttons on tool calls aren't offered either), `raw`
-  messages (keys for the terminal) are refused with 400, and the agent's slash
+  Stop and the answer buttons on tool calls aren't offered either). `raw`
+  messages (keys for the terminal) are refused with 400. The agent's slash
   commands that need its interactive UI don't work, apart from the ones the
   chat runs itself. The [terminal](#terminal) is a separate shell.
 - Restart (Explorer → Restart or `DELETE /messages`) replaces the agent with a
@@ -1191,8 +1194,8 @@ stable message identifiers that cannot always be reconstructed reliably from ter
 - `GET /timeline` returns normalized session events suitable for export,
   auditing, or building another UI. With `?subagents=true` (native Claude
   Code and Codex), the events of the subagents the agent ran follow, read
-  from their own logs: each subagent's in turn, starting with a system event,
-  and each event with its `subagent_id` and, for Claude Code, the
+  from their own logs. Each subagent's events come in turn, starting with a
+  system event; each event has its `subagent_id` and, for Claude Code, the
   `parent_tool_use_id` of the Agent tool call that started it. The agent's
   own events only have the subagent's prompt and final answer.
 - Background and delegated tasks remain visible with their running, completed,
@@ -1270,8 +1273,8 @@ These endpoints work with every transport, except where noted; the
 
 - `POST /message` sends a message: `{"content": "Hello, agent!", "type": "user"}`.
   A 200 means AgentAPI saw the agent start on it, or queued it (`queued`)
-  while the agent is busy; `dispatch_mode` chooses what happens while it is
-  busy (see [Steer, interrupt and the queue](#steer-interrupt-and-the-queue)).
+  because the agent is busy; `dispatch_mode` chooses what happens then (see
+  [Steer, interrupt and the queue](#steer-interrupt-and-the-queue)).
   `"type": "raw"` types keys into the agent's terminal instead (PTY
   transport).
 - `GET /messages` returns the conversation; `GET /rich-messages` and
@@ -1308,7 +1311,7 @@ AgentAPI groups the conversation into tasks, for every transport: a task is a me
 the agent's turn on it. Messages you add while it runs (steering) belong to it; the next message
 after it ends starts the next task. A task ends when the agent is idle again with no request or
 terminal dialog open. When answering a request or dialog leaves the agent idle, AgentAPI waits 3
-seconds before ending the task, since the agent usually works on.
+seconds before ending the task, since the agent usually continues working.
 
 `GET /tasks` lists them, the earliest first, each with:
 
@@ -1341,7 +1344,8 @@ UI.
 - `POST /queue/{id}/steer` moves a queued message into the turn the agent is
   working on (native transport).
 - With `?sync=1`, `/events` sends a `queue_update` with the whole queue
-  whenever it changes, so a client sees what another queued without asking.
+  whenever it changes, so a client sees what another client queued without
+  asking.
 
 ### Events and incremental sync
 
@@ -1407,8 +1411,10 @@ stream with `fetch` and an `Authorization` header; `EventSource` can't set that 
 
 #### Running a hub
 
-A hub watches many AgentAPIs, on any machines it can reach: run it where it stays up (an always-on
-workspace, say) and reach it, and the AgentAPIs, over a private network such as a VPN of your own.
+A hub watches many AgentAPIs on any machines it can reach. Run it somewhere that stays up, such as
+an always-on workspace, and reach it and the AgentAPIs over a private network such as your own VPN.
+The [hub guide](docs/hub.md) covers setup step by step, every state, tokens, troubleshooting and the
+hub's API.
 
 ```bash
 agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token "$AGENTAPI_TOKEN"
@@ -1417,10 +1423,10 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 ![The hub: its instances, what needs you first, and one open in the chat](docs/screenshots/hub-desktop.png)
 
 Open `http://<hub>:3290/` on a desktop or a phone and sign in with `--token`. The list shows every
-instance, what needs you first: the reason it waits (an approval or question, a login, a usage
-limit), working, finished a task you haven't seen, idle, unreachable or stopped, with its title,
-agent, machine, queue and usage limit; the tab title counts what needs you. Pick one to open it in
-the chat. On a phone the list and the chat take turns.
+instance, those that need you first. Each shows its state (the reason it waits, such as an
+approval or question, a login or a usage limit; or working, finished a task you haven't seen, idle,
+unreachable or stopped) with its title, agent, machine, queue and usage limit. The tab title counts
+what needs you. Pick one to open it in the chat. On a phone the list and the chat take turns.
 
 - AgentAPIs join it with [`agentapi hub join`](#joining-a-hub): their signed `instance.*` events
   add them, and the hub follows each one's [summary stream](#watching-many-instances) from one
@@ -1431,10 +1437,10 @@ the chat. On a phone the list and the chat take turns.
   browser never holds the instances' tokens or reaches them itself, so no instance needs CORS for
   it.
 - It accepts only events signed with `--secret` and at most 10 minutes old, and ignores a delivery
-  it already took: an event names the URL the hub sends an instance token to.
+  it already received, because an event names the URL the hub sends an instance token to.
 - It keeps the instances in `~/.agentapi/hub/instances.json` (`--state`, readable by its owner
   only), so it knows them after a restart.
-- `--port` (default 3290) and `--bind` (the VPN address, say) set where it listens. Serve it
+- `--port` (default 3290) and `--bind` (such as the VPN address) set where it listens. Serve it
   over HTTPS, or only on the private network: signing in sends the token. To reach the instances
   through a VPN client running in userspace, set `ALL_PROXY` to its SOCKS5 proxy.
 - The hub serves the chat of its own version: run the same AgentAPI version on the hub and the
@@ -1454,10 +1460,10 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 
 `join` writes the hub's webhook (`webhook-url`, `webhook-secret`, `webhook-events`, `public-url`)
 into `~/.agentapi/config.yaml`, which every `agentapi server` of the user reads when it starts, and
 applies it to the registered AgentAPIs running now: each sends `instance.heartbeat` to the hub at
-once. After a restart (of the workspace, say) the AgentAPIs send `instance.started` from the file.
-`--public-url` is where the hub reaches them; `{port}` and `{hostname}` are filled in for each.
-AgentAPIs that started before 1.2 aren't registered: restart them once. `agentapi hub status` shows
-the hub and where each running AgentAPI reports; `agentapi hub leave` removes it.
+once. After a restart (of the workspace, for example), the AgentAPIs send `instance.started` from
+the file. `--public-url` is where the hub reaches them; `{port}` and `{hostname}` are filled in for
+each. AgentAPIs that started before 1.2 aren't registered: restart them once. `agentapi hub status`
+shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes it.
 
 ### Webhooks
 
@@ -1514,9 +1520,9 @@ Every event names the AgentAPI it comes from, so one receiver can tell many apar
 ```
 
 The instance `id` is `--instance-id`, by default `<hostname>:<port>`, and `name` is `--name`, by
-default the working directory's name; `url` is
-`--public-url`, where the receiver can reach this AgentAPI to open its chat or call its API, and
-`workspace_url` the Coder workspace it runs in, if any. Messages and tool calls from before AgentAPI
+default the working directory's name. `url` is `--public-url`, where the receiver can reach this
+AgentAPI to open its chat or call its API, and `workspace_url` the Coder workspace it runs in, if
+any. Messages and tool calls from before AgentAPI
 started, or of a session it opened from the agent's history, are not sent again.
 
 ```bash
@@ -1607,8 +1613,8 @@ integration can tell you when the agent stops and pass your answer back.
 
 ### MCP management
 
-Claude, Codex and Pi MCP servers can be managed while AgentAPI is running. The implementation
-preserves unrelated settings in `.mcp.json` (Claude), `$CODEX_HOME/config.toml` (Codex) or
+You can manage Claude, Codex and Pi MCP servers while AgentAPI is running. AgentAPI preserves
+unrelated settings in `.mcp.json` (Claude), `$CODEX_HOME/config.toml` (Codex) or
 `~/.pi/agent/mcp.json` (Pi).
 
 The API and Session Explorer support:
@@ -1673,15 +1679,15 @@ header to the event stream or to images:
 `POST /auth/session` with `Authorization: Bearer <token>` sets the cookie
 (`agentapi_session_<hash>`, HttpOnly, SameSite=Strict, `Path=/`, and Secure over HTTPS or behind a
 proxy that sends `X-Forwarded-Proto: https`). It holds an HMAC of the token, not the token, so
-changing the token signs every browser out, and the name comes from it, so servers with different
-tokens on one host keep their own sign-ins. `DELETE /auth/session` signs out, and
+changing the token signs every browser out. Its name comes from the token, so servers with
+different tokens on one host keep their own sign-ins. `DELETE /auth/session` signs out, and
 `GET /auth/session` (no credentials needed) reports `auth_required` and `authenticated`. Because
 the cookie is SameSite=Strict, pages on other sites can't make requests with it. A chat UI served
 from another origin (e.g. `bun run dev` on port 3000) needs that origin in `--allowed-origins`;
-`--allowed-origins '*'` doesn't allow requests with cookies. Ports don't make another site, and the
-default allowed origins include `http://localhost:3000` and `http://localhost:3001` for chat
-development: on a shared machine, set `--allowed-origins` to the origins you use, so a signed-in
-browser's cookie only works for them.
+`--allowed-origins '*'` doesn't allow requests with cookies. A different port is not a different
+site, and the default allowed origins include `http://localhost:3000` and `http://localhost:3001`
+for chat development. On a shared machine, set `--allowed-origins` to the origins you use, so a
+signed-in browser's cookie only works for them.
 
 ### Bind address
 
@@ -1702,9 +1708,9 @@ from those who can.
 
 By default, the server only allows requests with the `Host` header set to `localhost`, `127.0.0.1`
 or `[::1]`. To host AgentAPI elsewhere, set `AGENTAPI_ALLOWED_HOSTS` or `--allowed-hosts`.
-Hosts must be hostnames only (no ports); the server ignores the port portion of incoming requests when authorizing. This
-checks the `Host` header only; to keep the server off the network altogether, also listen on
-loopback with `--bind 127.0.0.1` (see [Bind address](#bind-address)).
+Hosts must be hostnames only (no ports); the server ignores the port portion of incoming requests
+when authorizing. This checks the `Host` header only; to keep the server off the network
+altogether, also listen on loopback with `--bind 127.0.0.1` (see [Bind address](#bind-address)).
 
 To allow requests from any host, use `*` as the allowed host.
 
@@ -1760,22 +1766,22 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
 
 - Have the agent run anything it can. Native agents start in the bypass
   permission mode, where tools run without asking, unless the command line
-  picks another mode or Claude Code runs as root outside a sandbox (it starts
-  in `default` then); Claude Code gets `--allow-dangerously-skip-permissions`
+  picks another mode or Claude Code runs as root outside a sandbox (it then
+  starts in `default`). Claude Code gets `--allow-dangerously-skip-permissions`
   (except as root outside a sandbox), so a client can switch any session to
-  bypass; Codex's default overrides the policies in `~/.codex/config.toml`
-  unless the command line picks one; and the ACP transport approves every
+  bypass. Codex's default overrides the policies in `~/.codex/config.toml`
+  unless the command line picks one, and the ACP transport approves every
   permission request.
 - Run commands in the [terminal](#terminal) (native transport, on by default;
   `--terminal=false` turns it off).
 - Read files in the agent's working directory with the file viewer endpoints;
-  paths outside it, also through symlinks, are refused, and the diff only
+  paths outside it, even through symlinks, are refused, and the diff only
   reads the git repository. An HTML preview's scripts run in a sandbox
   without access to the chat or the API. `GET /files/find` lists the paths of
   files below the working directory whose path ends with the one asked for.
-- Read the conversations of the agent's earlier sessions in its working
-  directory, and the steps of the subagents it ran, from the agent's own logs
-  (`~/.claude`, `~/.codex`, `~/.pi`), and what they cost, and open any of those sessions.
+- Read the conversations, subagent steps and costs of the agent's earlier
+  sessions in its working directory from the agent's own logs (`~/.claude`,
+  `~/.codex`, `~/.pi`), and open any of those sessions.
 - Upload files of up to 10 MB; only images are served back.
 - Change the MCP servers and the webhook, and restart the agent. The webhook can send the
   conversation (`message.created`, `tool.completed`) to any URL; `GET /webhook` never returns its
@@ -1869,11 +1875,11 @@ Flags can also be set with environment variables: `AGENTAPI_` and the flag's nam
 `_` for `-` (`AGENTAPI_ALLOWED_HOSTS`). Lists are comma-separated in a flag and space-separated in a
 variable.
 
-They can also be set in `~/.agentapi/config.yaml` (`--config` names another file), by the flag's
-name, for every server the user starts: a flag or a variable overrides it. A setting that names no
-flag is reported in the log, and a file AgentAPI can't read is reported and ignored, so the agent
-still starts. [`agentapi hub join`](#agentapi-hub) writes it; keep it readable by its owner only
-(`chmod 600`) when it holds a secret.
+They can also be set by the flag's name in `~/.agentapi/config.yaml` (`--config` names another
+file) for every server the user starts; a flag or a variable overrides the file. A setting that
+names no flag is reported in the log, and a file AgentAPI can't read is reported and ignored, so the
+agent still starts. [`agentapi hub join`](#agentapi-hub) writes it; keep it readable by its owner
+only (`chmod 600`) when it holds a secret.
 
 ```yaml
 webhook-url: http://hub.vpn:3290/hooks
@@ -1891,7 +1897,7 @@ public-url: http://dev-1.vpn:{port}
 | `--experimental-acp` | `false` | The same as `--transport acp` |
 | `--state-db` | | SQLite file that keeps the conversation (native and PTY) and resumes a native agent's session; see [Persistent sessions](#persistent-sessions) |
 | `--terminal` | `true` | Shell in the agent's working directory for the chat (native); see [Terminal](#terminal) |
-| `--auto-continue` | `false` | Continue a turn a usage limit stopped once the limit resets (native); see [Usage limits](#usage-limits) |
+| `--auto-continue` | `false` | Continue a turn stopped by a usage limit once the limit resets (native); see [Usage limits](#usage-limits) |
 | `--prices` | | JSON file of model prices per million tokens, which add to or replace the built-in ones; see [Session costs](#session-costs) |
 | `-s`, `--state-file` | | Deprecated: imported once into a state database next to it (`--state-db` names another) |
 | `--load-state`, `--save-state` | | Deprecated: `--load-state=false` skips the import; `--save-state` has no effect |
@@ -1969,8 +1975,8 @@ instances, and `--port` and `--bind` set where it listens.
 AgentAPIs running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `--events` picks them
 (default `instance.*`, `task.*`, `request.*`, `login.*`, `limit.*`, `agent.error`), `--public-url`
 is where the hub reaches them, `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the ones that need
-a token, and `--config` and `--registry-dir` name other files. An AgentAPI it can't change now
-applies the file when it restarts.
+a token, and `--config` and `--registry-dir` name other files. An AgentAPI that `join` can't
+update now applies the file when it restarts.
 
 ### `agentapi attach`
 
@@ -2026,7 +2032,7 @@ default. Endpoints marked *native* need the native transport.
 | `GET /settings`, `PUT /settings` | The permission mode, model and reasoning effort, with the values they can take; PUT changes the ones in its body |
 | `POST /compact` | Compact the agent's context (Codex, Pi) |
 | `POST /login/retry` | Check the agent's login again now, while `login_required` is reported (409 when no login is needed) |
-| `POST /limit/continue`, `DELETE /limit/continue` | Continue a turn a usage limit stopped, now or at the reset; cancel a scheduled continuation |
+| `POST /limit/continue`, `DELETE /limit/continue` | Continue a turn stopped by a usage limit, now or at the reset; cancel a scheduled continuation |
 | `DELETE /limit` | Forget a usage limit stop, so the queued messages go out |
 | `GET /sessions` | The agent's sessions in its working directory (Claude Code, Codex, Pi), with what each cost and the total |
 | `GET /cost` | What the open session cost, and its model calls (Claude Code, Codex, Pi) |

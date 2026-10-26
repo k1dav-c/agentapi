@@ -18,7 +18,7 @@ Use these commands and conventions when changing AgentAPI.
 - After `make gen`, run `bun run gen:api` in `chat/` and commit
   `chat/src/lib/api-schema.ts`, which contains the chat's API types. A chat test
   checks that they match `openapi.json`.
-- Don't write it with `go run main.go server --print-openapi dummy > openapi.json`:
+- Don't write the schema with `go run main.go server --print-openapi dummy > openapi.json`:
   that escapes `<` and `>` in descriptions as `\u003c` / `\u003e`, while
   `make gen` doesn't. The Release workflow runs `make gen` and fails with
   "Unstaged changes" on any difference, which prevents the release.

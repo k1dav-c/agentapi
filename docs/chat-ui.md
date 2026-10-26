@@ -55,9 +55,10 @@ Every message you send starts a task. A task shows your prompt in a tinted block
 then what the agent did, in order: its reply in Markdown, a row for each tool call, and its
 thinking. The task's header shows its number and state (Queued, Working, Waiting for you, Done,
 Failed or Limit reached), a Stop button while it works, and its ⋯ menu. The server's
-[task](../README.md#tasks) determines the state. Failed means the agent reported an error or exited; hover to see the first error. Limit reached means a usage limit stopped it; hover
-for the agent's message. The server also assigns tool calls and thinking to tasks. A steered
-message shares the running task's state, and subsequent activity stays in that task.
+[task](../README.md#tasks) determines the state. Failed means the agent reported an error or
+exited; hover to see the first error. Limit reached means a usage limit stopped it; hover for the
+agent's message. The server also assigns tool calls and thinking to tasks. A steered message shares
+the running task's state, and subsequent activity stays in that task.
 
 The task's start time and duration appear in the left margin on wide screens, or after its number
 in the header on narrower screens. *native* Claude Code, Codex and Pi also show the cost of model
@@ -77,8 +78,8 @@ for the calculation and price configuration.
 A tool call takes one row: its command (`$ ls`) or the tool's name, its state (waiting for approval,
 an error, a failed command's exit code) and how long it took. Click the row for the tool's input and
 its whole result. File names on the row, from the tools that read, write or edit files, open the
-[file viewer](#files), and an expanded call that changed a file shows the change as a diff, with
-the raw input a click away. Tool results that are images (Claude Code reading a screenshot, Codex's
+[file viewer](#files). An expanded call that changed a file shows the change as a diff, with the raw
+input a click away. Tool results that are images (Claude Code reading a screenshot, Codex's
 `view_image`) show as thumbnails that open in full size.
 
 ### Thinking
@@ -111,9 +112,8 @@ Download buttons.
 The search button (⌘F / Ctrl+F) opens a search bar above the transcript. It counts the matching
 tasks and matches, highlights them and steps through them with the arrows. The menu next to it
 narrows the tasks to those that are running, queued, failed, stopped by a usage limit, completed, or
-had a tool error. While
-you search, the matching messages show as plain text, every step of a long task shows, and tool
-calls with a match open.
+had a tool error. While you search, the matching messages show as plain text, every step of a long
+task shows, and tool calls with a match open.
 
 ## Sending tasks
 
@@ -131,7 +131,7 @@ voice input where the browser supports speech recognition: it dictates into the 
 browser's language.
 
 The draft and its attachments survive a reload. A message that didn't reach the server stays in the
-chat marked as not sent, with buttons to retry or dismiss it, also after a reload.
+chat marked as not sent, even after a reload, with buttons to retry or dismiss it.
 
 ### While the agent works
 
@@ -146,8 +146,8 @@ or remove queued tasks. *native* The ↳ button steers a queued task into the ru
 - **Steer** (⌘/Ctrl+Enter): add it to the turn the agent is working on.
 - **Interrupt & send** (⌘/Ctrl+Shift+Enter): stop this turn, then send it.
 
-The red button next to it, and the task's Stop button, interrupt the turn. While the agent waits for
-an answer to a request, a new message queues behind it.
+The red button next to the send button, and the task's Stop button, interrupt the turn. While the
+agent waits for an answer to a request, a new message queues behind it.
 
 ![A long turn: a task queued, another steered into the turn, then Stop](screenshots/demo-queue.gif)
 
@@ -182,8 +182,8 @@ when the shell terminal is on.
 ## Agent settings
 
 *native* The composer's toolbar changes the agent's settings while it runs (`PUT /settings`). They
-stay for the session: AgentAPI gives them to the agent again after a restart, a new login and, with
-`--state-db`, an AgentAPI restart.
+stay for the session: AgentAPI gives them to the agent again after it restarts or logs in again and,
+with `--state-db`, after AgentAPI restarts.
 
 ![Switching to the ask mode and the Deep model at max effort, then the context](screenshots/demo-settings.gif)
 
@@ -216,10 +216,10 @@ windows. The agent compacts a full context automatically; use `/compact` to requ
 ![A note above the composer: the prompt cache expired and the next message reads 120k tokens again, with Compact](screenshots/cold-cache.png)
 
 *native* Claude Code keeps the conversation in the model provider's prompt cache for an hour after
-its last use on a subscription, five minutes with an API key. Once the cache expired, the next
+its last use on a subscription, five minutes with an API key. Once the cache has expired, the next
 message has the model read the whole context again, at the full price and against the usage
 limits. While the agent is idle with an expired cache and at least 50k tokens of context, a note
-above the composer says so, with **Compact**. Closed, it stays away until the next turn.
+above the composer says so, with **Compact**. A closed note stays away until the next turn.
 
 ### A usage limit
 
@@ -281,10 +281,10 @@ expects. A dialog with a free-text field can also be answered with a normal mess
 When the agent isn't logged in, or loses its login during a session, a login card names the command
 to run (`claude auth login`, `codex login --device-auth`, or Pi's `/login`) and the host and user to
 run it as. Codex signs in with a device code: open the link it prints, on any device, and enter its
-one-time code, so no browser has to run where AgentAPI runs.
-**Run in terminal** runs it in the [shell terminal](#shell-terminal); **Check again** checks right
-away. AgentAPI also tries again every 5 seconds, and messages wait in the queue meanwhile. (The
-screenshot shows `dev-machine` and `dev` in place of the real host and user.)
+one-time code, so no browser has to run where AgentAPI runs. **Run in terminal** runs it in the
+[shell terminal](#shell-terminal); **Check again** checks right away. AgentAPI also tries again
+every 5 seconds, and messages wait in the queue meanwhile. (The screenshot shows `dev-machine` and
+`dev` in place of the real host and user.)
 
 ## Files
 
@@ -360,7 +360,7 @@ Codex, `$PI_CODING_AGENT_DIR/mcp.json` for Pi):
 
 - **MCP servers**: the servers as JSON in the agent's own format, with import and export. Saving
   writes the file atomically and, unless you turn it off, restarts the agent to load it. With the
-  native transport an agent that can resume its session does, so the conversation stays.
+  native transport, an agent that can resume its session resumes it, so the conversation stays.
 - **Connectivity**: checks that each server starts or answers.
 - **Profiles**: saves, applies, imports and exports whole sets of servers.
 
@@ -386,6 +386,7 @@ asks for a second click. Codex and Pi, when AgentAPI starts their CLI directly, 
 latest release first. **Download conversation JSONL** saves every message, tool call and result of
 the session, one event per line, followed by those of the subagents the agent ran; the session
 details menu has it too.
+
 ### Webhook
 
 ![The Explorer's Webhook tab: the receiver URL, event groups, signing secret, instance ID, heartbeat and public URL](screenshots/explorer-webhook.png)
@@ -406,12 +407,12 @@ whole group. See [Webhooks](../README.md#webhooks) for events and payloads.
 
 ![The Lineage panel on a subagent: the task Claude Code gave it, a file it read, a command it ran and its answer](screenshots/lineage.png)
 
-*native* When Claude Code or Codex hands work to subagents, a button in the header counts them, with
-how many still work. It opens the Lineage panel, which lists each subagent with its task, kind,
-state and time. Choosing one shows what it did the way the transcript shows a task: its thinking,
-tool calls and answer, updated while it works. The **Steps** button on the Agent (or spawn_agent)
-tool call that started a subagent opens it directly. The steps come from the subagents' own logs,
-so a session opened from the Session tab shows its subagents too.
+*native* When Claude Code or Codex hands work to subagents, a button in the header shows how many
+there are and how many still work. It opens the Lineage panel, which lists each subagent with its
+task, kind, state and time. Choosing one shows what it did the way the transcript shows a task: its
+thinking, tool calls and answer, updated while it works. The **Steps** button on the Agent (or
+spawn_agent) tool call that started a subagent opens it directly. The steps come from the
+subagents' own logs, so a session opened from the Session tab shows its subagents too.
 
 ## Terminals
 
@@ -425,9 +426,11 @@ the same shell, which keeps running while nobody watches. The key bar sends the 
 keyboard lacks: arrows, Enter, Esc, Tab, Shift+Tab, Ctrl+C, a shell's Ctrl+R, Ctrl+A, Ctrl+E, Ctrl+U
 and Ctrl+W, Home, End, Page up and Page down, / - | ~, Alt+↑ and Ctrl+L. Its **Ctrl** and **Alt**
 buttons hold the modifier for the next key you type, for any other combination. Ctrl+D and Ctrl+Z
-ask for a second press. Web links in the terminal open on a click, also when they run over several
-lines, and the last link a command printed (such as a login link) shows above the terminal,
-shortened, to open or copy with one tap. Start AgentAPI with `--terminal=false` to turn it off.
+ask for a second press.
+
+Web links in the terminal open on a click, even when they run over several lines, and the last link
+a command printed (such as a login link) shows above the terminal, shortened, to open or copy with
+one tap. Start AgentAPI with `--terminal=false` to turn the terminal off.
 
 ![The terminal: git status, a link that shows above the terminal, and a held Ctrl clearing the screen](screenshots/demo-terminal.gif)
 
@@ -447,10 +450,10 @@ one shows above the screen, as in the shell terminal. **Back to chat** returns.
 
 Clicking the status in the header opens the session details: the status, agent, session name,
 *native* the agent's session ID (its first characters, with a copy button), AgentAPI version, what
-the agent is doing, the queue and the tokens in and out. Its menu downloads
-the conversation as JSONL (as the Explorer's Session tab does), turns on browser notifications, and
-shows the keyboard shortcuts. (How full the context is and the usage limits are in the composer's
-toolbar; see [Context and usage limits](#context-and-usage-limits).)
+the agent is doing, the queue and the tokens in and out. Its menu downloads the conversation as
+JSONL (as the Explorer's Session tab does), turns on browser notifications, and shows the keyboard
+shortcuts. (How full the context is and the usage limits are in the composer's toolbar; see
+[Context and usage limits](#context-and-usage-limits).)
 
 While the tab is in the background, its icon shows an amber dot when the agent needs you, a blue dot
 while it works and a green dot when a task finishes. With notifications on, the browser also shows
@@ -483,13 +486,13 @@ can be shown in full. The file viewer takes the whole screen, and the terminals 
 ![The hub on a phone](screenshots/hub-phone.png)
 
 A [hub](../README.md#running-a-hub) (`agentapi hub serve`) serves this chat for every AgentAPI it
-watches. Its page lists them, what needs you first: an amber dot and the reason (an approval or
-question, a login, a usage limit), a pulsing blue one while it works, a green one for a task that
-finished and you haven't seen, then idle, unreachable and stopped ones, with the title, agent,
-machine, queue and the fullest usage limit. The tab title counts what needs you. Picking one opens
-it in this chat beside the list (or instead of it on a phone, with a back button), through the hub,
-which sends the instance's token. `+` adds an instance by its URL and token; a stopped or
-unreachable one can be forgotten.
+watches. Its page lists each with the title, agent, machine, queue and the fullest usage limit.
+What needs you comes first, with an amber dot and the reason (an approval or question, a login, a
+usage limit); then a pulsing blue dot while one works, a green one for a finished task you haven't
+seen, then idle, unreachable and stopped ones. The tab title counts what needs you. Picking one
+opens it in this chat beside the list (or instead of it on a phone, with a back button), through
+the hub, which sends the instance's token. `+` adds an instance by its URL and token; a stopped or
+unreachable one can be forgotten. The [hub guide](hub.md) covers setup and every state in detail.
 
 ## Connection and caching
 

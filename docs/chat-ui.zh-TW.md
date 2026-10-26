@@ -65,11 +65,10 @@ agent 做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列�
 
 ![展開的工具呼叫，包含它的輸入和結果](screenshots/tool-call.png)
 
-每個工具呼叫占一列：它的指令（`$ ls`）或工具名稱、狀態（等待核准、錯誤、失敗指令的結束代碼）
+每個工具呼叫占一列：指令（`$ ls`）或工具名稱、狀態（等待核准、錯誤、失敗指令的結束代碼）
 和耗時。點一下這一列就能看到工具的輸入和完整結果。讀取、寫入或編輯檔案的工具，列上的檔名會
-開啟[檔案檢視器](#檔案)；展開修改過檔案的呼叫，會以 diff 顯示它的變更，原始輸入點一下就能
-看到。圖片形式的工具結果（Claude Code 讀取截圖、Codex 的 `view_image`）會顯示為縮圖，點開
-就能看原尺寸的圖片。
+開啟[檔案檢視器](#檔案)；展開修改過檔案的呼叫會以 diff 顯示變更，點一下可看原始輸入。圖片
+形式的工具結果（Claude Code 讀取截圖、Codex 的 `view_image`）會顯示為縮圖，點開就能看原尺寸。
 
 ### 思考內容
 
@@ -79,16 +78,16 @@ agent 做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列�
 ### 訊息與較長的任務
 
 每則 agent 訊息都有按鈕，可以改以原始文字而非 Markdown 顯示（每則訊息分開切換）、在訊息中
-搜尋，以及複製它；你的提示詞則有複製按鈕。步驟很多的任務只會顯示最近的 40 個步驟，
-**Show *n* earlier steps** 會顯示其餘的步驟。
+搜尋，以及複製；你的提示詞則有複製按鈕。步驟很多的任務只會顯示最近的 40 個步驟，
+**Show *n* earlier steps** 會顯示其餘步驟。
 
 ### 任務選單
 
 ![任務選單，包含 Preview Markdown、Copy task and output 和 Export Markdown](screenshots/task-menu.png)
 
 任務標頭的 ⋯ 按鈕會把任務轉成 Markdown：提示詞、agent 的輸出，以及每個工具呼叫和它的輸入與
-結果。**Copy task and output** 會把它複製到剪貼簿，**Export Markdown** 會把它下載成檔案，
-**Preview Markdown** 則會先顯示它，並提供 Copy 和 Download 按鈕。
+結果。**Copy task and output** 複製到剪貼簿，**Export Markdown** 下載成檔案，
+**Preview Markdown** 則先預覽，並提供 Copy 和 Download 按鈕。
 
 ![任務的 Markdown 預覽，附有 Copy 和 Download](screenshots/task-preview.png)
 
@@ -96,17 +95,17 @@ agent 做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列�
 
 ![在對話紀錄中搜尋「notes」：符合的結果會醒目標示並計數](screenshots/search.png)
 
-搜尋按鈕（⌘F / Ctrl+F）會在對話紀錄上方開啟搜尋列。它會計算符合的任務數和符合處數，
-醒目標示它們，並可用箭頭逐一切換。旁邊的選單可以只列出執行中、排隊中、失敗、因用量限制
-停止、已完成，或有工具錯誤的任務。搜尋期間，符合的訊息會以純文字顯示，較長任務的每個步驟都會顯示出來，
-含有符合內容的工具呼叫也會展開。
+搜尋按鈕（⌘F / Ctrl+F）會在對話紀錄上方開啟搜尋列。搜尋列會計算符合的任務數和符合處數並
+醒目標示，可用箭頭逐一切換。旁邊的選單可以只列出執行中、排隊中、失敗、因用量限制停止、
+已完成，或有工具錯誤的任務。搜尋期間，符合的訊息會以純文字顯示，較長任務的每個步驟都會
+顯示出來，含有符合內容的工具呼叫也會展開。
 
 ## 送出任務
 
 ### 輸入框
 
-按 Enter 送出，Shift+Enter 換行。迴紋針按鈕可以附加檔案，每個最大 10 MB；貼上圖片也會把它
-加為附件（貼上的文字仍然是文字）。附件會顯示在輸入框中，圖片以縮圖呈現、點開就能看原尺寸，
+按 Enter 送出，Shift+Enter 換行。迴紋針按鈕可以附加檔案，每個最大 10 MB；貼上的圖片也會
+成為附件（貼上的文字仍然是文字）。附件會顯示在輸入框中，圖片以縮圖呈現、點開就能看原尺寸，
 送出前也可以移除。
 
 ![附加了一張圖片的輸入框](screenshots/attachments.png)
@@ -186,7 +185,7 @@ Pi 沒有權限模式，所以它的工具列沒有模式選單。
 
 ![模型選單，列出三個模型和所選模型的推理強度](screenshots/model-settings.png)
 
-選單會列出 agent 的模型和它們的說明，以及所選模型支援的推理強度。Codex 會在下一個回合才採用
+選單會列出 agent 的模型及說明，以及所選模型支援的推理強度。Codex 會在下一個回合才採用
 新的模型或推理強度。
 
 ### Context 與用量限制
@@ -194,7 +193,7 @@ Pi 沒有權限模式，所以它的工具列沒有模式選單。
 ![context 彈出視窗：context window 中的 token 數，以及 5 小時與每週的用量限制](screenshots/context-usage.png)
 
 圓環顯示 context window 用了多少。它的彈出視窗列出上一個回合後 context 中的 token 數，以及
-帳號的用量限制、各用了多少和何時重置：Claude Code 的 5 小時與每週限制、Codex 的用量窗口。
+帳號的用量限制、各用了多少和何時重置：Claude Code 的 5 小時與每週限制、Codex 的用量週期。
 context 滿了時，agent 會壓縮它；`/compact` 則會立刻壓縮。
 
 ![輸入框上方的提醒：prompt cache 已過期，下一則訊息會重新讀取 120k token，旁邊是 Compact](screenshots/cold-cache.png)
@@ -215,10 +214,9 @@ context 滿了時，agent 會壓縮它；`/compact` 則會立刻壓縮。
 
 ## 請求與決策卡片
 
-agent 向你提出的事項會以卡片顯示在輸入框上方，agent 則等待你回應。卡片上方的狀態列、
-標頭和分頁標題會顯示「Needs you」，任務會顯示「Waiting for you」，它的工具呼叫列則會
-標示它在等什麼。數字鍵可以選擇選項。每個請求只會被回覆一次，任何開著的聊天畫面都能回覆；
-已經無法回覆的請求會註明這一點。
+agent 需要你回應時，會在輸入框上方顯示卡片並等待。卡片上方的狀態列、標頭和分頁標題會顯示
+「Needs you」，任務會顯示「Waiting for you」，工具呼叫列則標示 agent 在等什麼。數字鍵可以
+選擇選項。每個請求只能回覆一次，任何開著的聊天畫面都能回覆；已經無法回覆的請求會註明這一點。
 
 ### 核准
 
@@ -291,9 +289,9 @@ HTML、Markdown 和 SVG 檔案有 **Preview** 分頁，圖片檔則直接顯示�
 
 ![index.html 的預覽：套用樣式表並顯示 logo 的頁面](screenshots/file-preview.png)
 
-HTML 頁面呈現時，它以相對路徑引用的樣式表、腳本、圖片、字型和影音都會內嵌進頁面（每個檔案
+呈現 HTML 頁面時，頁面以相對路徑引用的樣式表、腳本、圖片、字型和影音都會內嵌進去（每個檔案
 最多 4 MiB，合計 16 MiB；沒有內嵌的項目會列在提示中）。頁面在有 sandbox、沒有自己 origin
-的 frame 中執行：它的腳本可以執行，但無法存取聊天介面、它的登入狀態或 API，儲存空間和
+的 frame 中執行：腳本可以執行，但無法存取聊天介面、它的登入狀態或 API，儲存空間和
 cookie 也只在預覽開著的期間保留。
 
 ![Markdown 檔案的預覽，包含標題、圖片、清單、表格和程式碼](screenshots/file-markdown.png)
@@ -324,7 +322,7 @@ Explorer（⌘K / Ctrl+K，或資料夾按鈕）有六個分頁。Index、Files 
 ![Explorer 的 Links 分頁，顯示一個連結和它出自的任務](screenshots/explorer-links.png)
 
 **Files** 列出工作階段中提到的絕對檔案路徑，可以在檔案檢視器中開啟。
-**Links** 列出網頁連結，每個都附上它出自的任務，被終端機折到下一行的連結也包括在內。
+**Links** 列出網頁連結，每個都附上它出自的任務，終端機折到下一行的連結也包括在內。
 
 ### MCP 分頁
 
@@ -353,10 +351,11 @@ API 請參閱 [MCP 管理](../README.zh-TW.md#mcp-管理)。
 
 ![Explorer 的 Session 分頁要求再點一次才會重新啟動 agent](screenshots/explorer-session.png)
 
-**Restart agent** 會停止 agent、清除對話，並在新的工作階段中重新啟動它；它會要求你再點一次。
+**Restart agent** 會停止 agent、清除對話，並在新的工作階段中重新啟動它；需要再點一次。
 AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的發行版。
 **Download conversation JSONL** 會儲存這個工作階段的每則訊息、工具呼叫和結果，每行一個事件，
 後面接著 agent 執行過的 sub agent 的事件；工作階段詳細資訊的選單裡也有。
+
 ### Webhook 分頁
 
 ![Explorer 的 Webhook 分頁：接收端網址、事件群組、簽章 secret、instance ID、心跳和公開網址](screenshots/explorer-webhook.png)
@@ -375,7 +374,7 @@ AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的�
 
 ![Lineage 面板顯示一個 sub agent：Claude Code 交給它的任務、它讀的檔案、跑的指令和它的回答](screenshots/lineage.png)
 
-*native* Claude Code 或 Codex 把工作交給 sub agent 時，header 上會出現一個按鈕，顯示 sub agent
+*native* Claude Code 或 Codex 把工作交給 sub agent 時，標頭上會出現一個按鈕，顯示 sub agent
 的數量和還在執行的數量。點下去會打開 Lineage 面板，列出每個 sub agent 的任務、類型、狀態和
 執行時間。選一個就能看到它做了什麼，呈現方式和對話紀錄裡的任務一樣：思考內容、工具呼叫和
 它的回答，執行中會持續更新。啟動 sub agent 的 Agent（或 spawn_agent）工具呼叫上的 **Steps**
@@ -393,8 +392,8 @@ AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的�
 它也會繼續執行。按鍵列可以送出手機鍵盤沒有的按鍵：方向鍵、Enter、Esc、Tab、Shift+Tab、
 Ctrl+C，shell 的 Ctrl+R、Ctrl+A、Ctrl+E、Ctrl+U 和 Ctrl+W，Home、End、Page up 和 Page down、
 / - | ~、Alt+↑ 和 Ctrl+L。
-它的 **Ctrl** 和 **Alt** 按鈕會按住修飾鍵，套用到你輸入的下一個按鍵，任何其他組合鍵都能這樣
-輸入。Ctrl+D 和 Ctrl+Z 會要求你再按一次。終端機裡的網頁連結點一下就會開啟，被折成多行的連結
+按鍵列的 **Ctrl** 和 **Alt** 按鈕會按住修飾鍵，套用到你輸入的下一個按鍵，任何其他組合鍵都能這樣
+輸入。Ctrl+D 和 Ctrl+Z 會要求你再按一次。終端機裡的網頁連結點一下就會開啟，折成多行的連結
 也一樣；指令最後印出的連結（例如登入連結）會縮短後顯示在終端機上方，點一下就能開啟或複製。以
 `--terminal=false` 啟動 AgentAPI 可以關閉它。
 
@@ -435,7 +434,7 @@ agent 的警告和錯誤（失敗的回合、它忽略的設定）會以角落�
 ![手機上的聊天介面](screenshots/chat-mobile.png)
 
 在手機上，對話紀錄會占滿整個寬度，思考內容收合在任務中，工具列則在訊息欄下方換行。請求卡片
-最多占螢幕的 60%，被截成兩行的標題可以展開來看完整內容。檔案檢視器會占滿整個螢幕，終端機
+最多占螢幕的 60%，截成兩行的標題可以展開看完整內容。檔案檢視器會占滿整個螢幕，終端機
 則有按鍵列。
 
 ![手機上的提問卡片](screenshots/mobile-question.png)
@@ -451,7 +450,8 @@ agent 的警告和錯誤（失敗的回合、它忽略的設定）會以角落�
 限制）、工作中閃爍的藍點、完成而你還沒看過的綠點，接著是閒置、連不到和已停止的，並顯示標題、
 agent、機器、佇列和用得最多的用量限制。分頁標題會顯示需要你處理的數量。點選一個，就會在清單旁
 （手機上則取代清單，並有返回按鈕）透過 hub 以這個聊天介面開啟它，hub 會替你送出實例的 token。
-`+` 可以用網址和 token 加入實例；已停止或連不到的可以移除。
+`+` 可以用網址和 token 加入實例；已停止或連不到的可以移除。架設方式和每種狀態的細節見
+[hub 指南](hub.zh-TW.md)。
 
 ## 連線與快取
 

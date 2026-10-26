@@ -432,8 +432,8 @@ const home = path.join(root, 'home');
 const project = path.join(root, 'my-app');
 let browser;
 try {
-  for (let p = port; p < port + 7; p++) {
-    if (!await portFree(p)) throw new Error(`Port ${p} is in use; set AGENTAPI_SCREENSHOT_PORT to the first of seven free ports.`);
+  for (let p = port; p < port + 10; p++) {
+    if (!await portFree(p)) throw new Error(`Port ${p} is in use; set AGENTAPI_SCREENSHOT_PORT to the first of ten free ports.`);
   }
   // A clean environment: no tokens or workspace links of the shell the script runs in, and a
   // neutral prompt in the terminal.
@@ -887,8 +887,9 @@ try {
   await tty.waitForTimeout(500);
   await shot(tty, 'tty-mode.png');
 
-  // A hub watching three demo instances, which join it as agentapi hub join has them do: one waits
-  // for an approval, one works, one finished a task nobody saw.
+  // A hub watching six demo instances, which join it as agentapi hub join has them do: one waits
+  // for an approval, one works, one finished a task nobody saw, one is idle, one stopped and one
+  // can't be reached (it was killed, so it never said it stopped).
   const hubPort = port + 3;
   const hubHome = path.join(root, 'hub-home');
   await mkdir(hubHome, {recursive: true});
@@ -899,58 +900,115 @@ try {
     '--token', 'docs-token', '--secret', 'docs-secret', '--state', path.join(hubHome, 'instances.json')]);
   await poll(async () => (await fetch(`http://127.0.0.1:${hubPort}/api/session`)).ok, 'the hub');
   const hubInstances = {};
-  for (const [i, name] of ['api-server', 'web-app', 'docs-site'].entries()) {
+  const hubNames = ['api-server', 'web-app', 'docs-site', 'billing', 'old-prototype', 'mobile-app'];
+  for (const [i, name] of hubNames.entries()) {
     const dir = path.join(root, 'workspaces', name);
     await mkdir(dir, {recursive: true});
     startServer(name, dir, hubEnv, ['--port', String(port + 4 + i), '--transport', 'native', '--type', 'custom', '--', 'native-demo']);
     hubInstances[name] = client(`http://127.0.0.1:${port + 4 + i}`);
     await poll(async () => (await hubInstances[name].status()).lifecycle === 'ready', `the ${name} instance`);
   }
+  const hubAPI = `http://127.0.0.1:${hubPort}`;
+  const hubList = async () => {
+    const response = await fetch(`${hubAPI}/api/instances`, {headers: {Authorization: 'Bearer docs-token'}});
+    return (await response.json()).instances;
+  };
+  await poll(async () => (await hubList()).filter(instance => instance.summary).length === hubNames.length, 'the hub to follow the instances');
+  const stopInstance = async (name, signal) => {
+    const server = servers.find(entry => entry.name === name);
+    server.child.kill(signal);
+    await server.exited;
+  };
+  await stopInstance('old-prototype', 'SIGTERM');
+  await stopInstance('mobile-app', 'SIGKILL');
   await hubInstances['api-server'].send('Add pagination to the orders endpoint.');
   await hubInstances['api-server'].idle();
   await hubInstances['web-app'].send('approve');
   await hubInstances['web-app'].pending('approval');
   await hubInstances['docs-site'].send('long');
-  const hubAPI = `http://127.0.0.1:${hubPort}`;
   await poll(async () => {
-    const response = await fetch(`${hubAPI}/api/instances`, {headers: {Authorization: 'Bearer docs-token'}});
-    const {instances} = await response.json();
-    return instances.length === 3 && instances.every(instance => instance.summary);
-  }, 'the hub to follow the instances');
-  const hubContext = await browser.newContext({...contextOptions, viewport: {width: 1440, height: 1000}});
-  hubContext.on('weberror', event => errors.push(event.error().message));
-  const hubPage = await hubContext.newPage();
-  hubPage.setDefaultTimeout(20_000);
-  await hubPage.goto(`${hubAPI}/`);
-  await hubPage.getByLabel('Hub token').fill('docs-token');
-  await hubPage.getByRole('button', {name: 'Sign in'}).click();
+    const states = Object.fromEntries((await hubList()).map(instance => [instance.name, instance.connection]));
+    return states['old-prototype'] === 'stopped' && states['mobile-app'] === 'unreachable';
+  }, 'the hub to see the stopped and the killed instance');
+
+  // The rows name the machine; the screenshots show placeholders, also when a row renders again.
+  const hubHostStyle = [1, 2, 3, 4, 5, 6].map(n =>
+    `ul[aria-label="Instances"] > li:nth-child(${n}) [data-hub-host] { font-size: 0; }
+     ul[aria-label="Instances"] > li:nth-child(${n}) [data-hub-host]::after { content: "dev-${n}"; font-size: 11px; }`).join('\n');
+  const openHub = async (options, {signIn = true, pointer = false} = {}) => {
+    const context = await browser.newContext({...contextOptions, ...options});
+    context.on('weberror', event => errors.push(event.error().message));
+    if (pointer) await context.addInitScript(pointerScript);
+    const page = await context.newPage();
+    page.setDefaultTimeout(20_000);
+    await page.goto(`${hubAPI}/`);
+    await page.addStyleTag({content: hubHostStyle});
+    if (signIn) {
+      await page.getByLabel('Hub token').fill('docs-token');
+      await page.getByRole('button', {name: 'Sign in'}).click();
+      await page.getByRole('list', {name: 'Instances'}).getByText('Needs your answer').waitFor();
+      await page.evaluate(() => document.fonts.ready);
+    }
+    return page;
+  };
+  const desktop = {viewport: {width: 1440, height: 1000}};
+  const hubPhoneOptions = {viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true};
+
+  // Signing in.
+  const signIn = await openHub(desktop, {signIn: false});
+  await signIn.getByLabel('Hub token').fill('docs-token');
+  await elementShot(signIn, signIn.locator('form'), 'hub-sign-in.png');
+  await signIn.context().close();
+
+  const hubPage = await openHub(desktop);
   const hubRows = hubPage.getByRole('list', {name: 'Instances'});
-  await hubRows.getByText('Needs your answer').waitFor();
-  await hubRows.getByText('Working').waitFor();
-  await hubRows.getByText('Finished').waitFor();
-  // The rows name the machine; the screenshots show placeholders.
-  const hideHosts = page => page.locator('[data-hub-host]').evaluateAll(nodes => nodes.forEach((node, i) => { node.textContent = `dev-${i + 1}`; }));
+  for (const label of ['Working', 'Finished', 'Idle', 'Unreachable', 'Stopped']) await hubRows.getByText(label, {exact: true}).waitFor();
+  await hubPage.waitForTimeout(500);
+  await elementShot(hubPage, hubPage.locator('aside'), 'hub-list.png');
+  // Adding an instance by its URL.
+  await hubPage.getByRole('button', {name: 'Add an instance'}).click();
+  const addDialog = hubPage.getByRole('dialog');
+  await addDialog.getByLabel('URL').fill('http://dev-7.vpn:3284');
+  await addDialog.getByLabel('API token').fill('instance-token');
+  await elementShot(hubPage, addDialog, 'hub-add.png');
+  await hubPage.keyboard.press('Escape');
+  // An instance that waits for an approval, open in the chat.
   await hubRows.getByText('web-app').click();
   await hubPage.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first().waitFor();
-  await hideHosts(hubPage);
   await hubPage.waitForTimeout(800);
   await shot(hubPage, 'hub-desktop.png');
-  const hubPhone = await browser.newContext({...contextOptions, viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
-  hubPhone.on('weberror', event => errors.push(event.error().message));
-  await hubPhone.addCookies(await hubContext.cookies());
-  const hubPhonePage = await hubPhone.newPage();
-  await hubPhonePage.goto(`${hubAPI}/`);
-  await hubPhonePage.getByRole('list', {name: 'Instances'}).getByText('Needs your answer').waitFor();
-  await hideHosts(hubPhonePage);
+  await hubPage.context().close();
+
+  // A phone: the list, then the chat with the way back.
+  const hubPhonePage = await openHub(hubPhoneOptions);
   await shot(hubPhonePage, 'hub-phone.png');
-  await hubPhone.close();
-  await hubContext.close();
+  await tap(hubPhonePage, hubPhonePage.getByRole('list', {name: 'Instances'}).getByText('web-app'));
+  await hubPhonePage.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first().waitFor();
+  await hubPhonePage.waitForTimeout(800);
+  await shot(hubPhonePage, 'hub-phone-chat.png');
+  await hubPhonePage.context().close();
+
+  // On a phone: answer the approval from the hub, and the row stops asking for you.
+  const hubGif = await openHub(hubPhoneOptions, {pointer: true});
+  await recordGif(hubGif, 'demo-hub.gif', async () => {
+    await hubGif.waitForTimeout(600);
+    await tap(hubGif, hubGif.getByRole('list', {name: 'Instances'}).getByText('web-app'));
+    const allow = hubGif.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first();
+    await allow.waitFor();
+    await hubGif.waitForTimeout(700);
+    await tap(hubGif, allow);
+    await hubGif.waitForTimeout(1500);
+    await tap(hubGif, hubGif.getByRole('button', {name: 'Instances'}));
+    await hubGif.getByRole('list', {name: 'Instances'}).getByText('web-app').waitFor();
+    await hubGif.waitForTimeout(1200);
+  });
+  await hubGif.context().close();
 
   if (errors.length) throw new Error(errors.join('\n'));
   await writeFile(path.join(output, 'capture.json'), JSON.stringify({
     captured_at: new Date().toISOString(),
     agentapi_version: version,
-    agents: ['native-demo', 'native-demo posing as Claude Code', 'bash (PTY)', 'three native-demo instances behind agentapi hub serve'],
+    agents: ['native-demo', 'native-demo posing as Claude Code', 'bash (PTY)', 'six native-demo instances behind agentapi hub serve'],
     browser: browser.version(),
     desktop_viewport: {width: 1440, height: 1000},
     mobile_viewport: {width: 390, height: 844},
