@@ -78,6 +78,14 @@ export function withModifier(data: string, modifier: StickyModifier): string {
 // than shrinking it, so it isn't part of the measured overlap.
 export const IOS_FORM_BAR_HEIGHT = 44;
 
+// How much of the visual viewport the form bar covers: Safari's sits over
+// it, while Chrome, Firefox and Edge on iOS take theirs out of the visual
+// viewport too (measured in Chrome).
+export function formBarHeight(userAgent: string, platform: string, maxTouchPoints: number): number {
+  if (!isIOS(userAgent, platform, maxTouchPoints)) return 0;
+  return /CriOS|FxiOS|EdgiOS|OPiOS/.test(userAgent) ? 0 : IOS_FORM_BAR_HEIGHT;
+}
+
 // How far an on-screen keyboard overlaps the bottom of the page, in CSS
 // pixels: the part of the layout viewport (innerHeight) below the visual
 // viewport, plus formBar (iOS's arrows-and-Done bar) while a keyboard is up.

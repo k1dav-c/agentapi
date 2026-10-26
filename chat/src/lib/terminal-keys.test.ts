@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {IOS_FORM_BAR_HEIGHT, isIOS, keyboardInset, terminalShortcuts, withModifier} from "./terminal-keys";
+import {IOS_FORM_BAR_HEIGHT, formBarHeight, isIOS, keyboardInset, terminalShortcuts, withModifier} from "./terminal-keys";
 
 describe("terminalShortcuts", () => {
   test("sends the escape sequences a terminal sends", () => {
@@ -47,6 +47,16 @@ describe("keyboardInset", () => {
     expect(keyboardInset(508, {height: 508, offsetTop: 0})).toBe(0);
     expect(keyboardInset(844, {height: 790, offsetTop: 0})).toBe(0);
     expect(keyboardInset(844, null)).toBe(0);
+  });
+});
+
+describe("formBarHeight", () => {
+  test("covers Safari's visual viewport, not the other iOS browsers'", () => {
+    const safari = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1";
+    const chrome = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/141.0 Mobile/15E148 Safari/604.1";
+    expect(formBarHeight(safari, "iPhone", 5)).toBe(IOS_FORM_BAR_HEIGHT);
+    expect(formBarHeight(chrome, "iPhone", 5)).toBe(0);
+    expect(formBarHeight("Mozilla/5.0 (Linux; Android 15; Pixel 9)", "Linux armv8l", 5)).toBe(0);
   });
 });
 

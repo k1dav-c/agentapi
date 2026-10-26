@@ -209,11 +209,15 @@ export default function MessageInput({
   };
 
   return (
-    <div className="shrink-0 border-t bg-background/90 backdrop-blur-xl">
+    // It gives way when the page is short (a phone's keyboard is up): after
+    // the transcript, the cards above the composer scroll in their own space,
+    // and the composer stays whole.
+    <div className="flex min-h-0 flex-col border-t bg-background/90 backdrop-blur-xl">
       {/* Aligned with the transcript's text column (past the time rail). */}
-      <div className="mx-auto w-full max-w-[49rem] px-4 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 sm:px-6 sm:pb-3 sm:pt-3">
-       <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
-        {dock}
+      <div className="mx-auto flex min-h-0 w-full max-w-[49rem] flex-col px-4 pb-[calc(var(--safe-bottom,env(safe-area-inset-bottom))+0.5rem)] pt-2 sm:px-6 sm:pb-3 sm:pt-3">
+       <div className="flex min-h-0 flex-col gap-2">
+        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)] gap-2 overflow-y-auto overscroll-contain empty:hidden">{dock}</div>
+        <div className="shrink-0">
         <DragDrop
           onFilesAdded={handleFilesAdded}
           disabled={disabled}
@@ -404,8 +408,9 @@ export default function MessageInput({
             </div>
           </form>
         </DragDrop>
+        </div>
 
-        <p className="hidden text-center text-[11px] text-muted-foreground sm:block">
+        <p className="hidden shrink-0 text-center text-[11px] text-muted-foreground sm:block">
           {features.agentTerminal
             ? "Enter to send · Shift+Enter for a new line · Keys for the terminal itself: TTY mode"
             : [

@@ -92,7 +92,7 @@ export function TerminalKeyBar({
     else term.focus();
   };
   return (
-    <div className="flex shrink-0 items-start gap-1.5 border-t bg-background/95 px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2">
+    <div className="flex shrink-0 items-start gap-1.5 border-t bg-background/95 px-3 pb-[calc(var(--safe-bottom,env(safe-area-inset-bottom))+0.5rem)] pt-2">
       {touch && (
         <button
           type="button"

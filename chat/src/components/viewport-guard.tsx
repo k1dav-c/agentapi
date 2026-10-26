@@ -1,13 +1,13 @@
 "use client";
 
 import {useEffect} from "react";
-import {IOS_FORM_BAR_HEIGHT, isIOS, keyboardInset} from "@/lib/terminal-keys";
+import {formBarHeight, keyboardInset} from "@/lib/terminal-keys";
 
 // ViewportGuard keeps the page where it can be seen. The pages scroll
 // inside their own panes, never the window, in a frame (.app-frame) fixed
 // to the visible part of the screen. iOS shrinks neither the page nor a
 // fixed frame for the on-screen keyboard: the frame's bottom follows the
-// keyboard's top (and its arrows-and-Done bar), so the composer and the
+// keyboard's top (and Safari's arrows-and-Done bar), so the composer and the
 // terminal's key bar stay above it, in a chat the hub frames too. iOS also
 // scrolls the window to keep a focused field above the keyboard and often
 // leaves it there once the keyboard closes, cutting off the top of the
@@ -25,7 +25,7 @@ export function ViewportGuard() {
       timer = setTimeout(reset, 120);
     };
     const viewport = window.visualViewport;
-    const formBar = isIOS(navigator.userAgent, navigator.platform, navigator.maxTouchPoints) ? IOS_FORM_BAR_HEIGHT : 0;
+    const formBar = formBarHeight(navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
     const root = document.documentElement.style;
     // In a frame (the hub's) the page around it fits itself, and the frame
     // with it.
@@ -34,6 +34,8 @@ export function ViewportGuard() {
       const inset = keyboardInset(window.innerHeight, viewport, formBar);
       root.setProperty("--keyboard-inset", `${inset}px`);
       root.setProperty("--viewport-top", `${inset ? Math.max(0, Math.round(viewport.offsetTop)) : 0}px`);
+      // The home indicator's space is the keyboard's while it is up.
+      root.setProperty("--safe-bottom", inset ? "0px" : "env(safe-area-inset-bottom)");
     };
     const onViewport = () => {
       fit();
