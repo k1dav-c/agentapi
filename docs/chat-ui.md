@@ -491,8 +491,10 @@ What needs you comes first, with an amber dot and the reason (an approval or que
 usage limit); then a pulsing blue dot while one works, a green one for a finished task you haven't
 seen, then idle, unreachable and stopped ones. The tab title counts what needs you. Picking one
 opens it in this chat beside the list (or instead of it on a phone, with a back button), through
-the hub, which sends the instance's token. `+` adds an instance by its URL and token; a stopped or
-unreachable one can be forgotten. The [hub guide](hub.md) covers setup and every state in detail.
+the hub, which sends the instance's token. `+` adds an instance by its URL and token. Each row's
+`⋯` menu puts the instance in a group of your own (the list then shows a folding header per group)
+or forgets a stopped or unreachable one. The [hub guide](hub.md) covers setup, groups and every
+state in detail.
 
 ## Connection and caching
 

@@ -931,10 +931,18 @@ try {
     return states['old-prototype'] === 'stopped' && states['mobile-app'] === 'unreachable';
   }, 'the hub to see the stopped and the killed instance');
 
+  // Groups of one's own, as the rows' menus set them.
+  const hubGroups = {'web-app': 'Client work', 'api-server': 'Client work', 'docs-site': 'Internal', billing: 'Internal'};
+  for (const instance of await hubList()) {
+    if (!hubGroups[instance.name]) continue;
+    await fetch(`${hubAPI}/api/instances/${encodeURIComponent(instance.id)}`, {method: 'PATCH',
+      headers: {Authorization: 'Bearer docs-token', 'Content-Type': 'application/json'}, body: JSON.stringify({group: hubGroups[instance.name]})});
+  }
+
   // The rows name the machine; the screenshots show placeholders, also when a row renders again.
-  const hubHostStyle = [1, 2, 3, 4, 5, 6].map(n =>
-    `ul[aria-label="Instances"] > li:nth-child(${n}) [data-hub-host] { font-size: 0; }
-     ul[aria-label="Instances"] > li:nth-child(${n}) [data-hub-host]::after { content: "dev-${n}"; font-size: 11px; }`).join('\n');
+  const hubHostStyle = `ul[aria-label="Instances"] { counter-reset: host; }
+    [data-hub-host] { font-size: 0; counter-increment: host; }
+    [data-hub-host]::after { content: "dev-" counter(host); font-size: 11px; }`;
   const openHub = async (options, {signIn = true, pointer = false} = {}) => {
     const context = await browser.newContext({...contextOptions, ...options});
     context.on('weberror', event => errors.push(event.error().message));
@@ -982,6 +990,11 @@ try {
   // A phone: the list, then the chat with the way back.
   const hubPhonePage = await openHub(hubPhoneOptions);
   await shot(hubPhonePage, 'hub-phone.png');
+  // A row's menu: its group, a new one, and forgetting a stopped instance.
+  await tap(hubPhonePage, hubPhonePage.getByRole('button', {name: 'Actions for old-prototype'}));
+  await hubPhonePage.getByRole('menuitem', {name: 'Forget'}).waitFor();
+  await shot(hubPhonePage, 'hub-phone-menu.png');
+  await hubPhonePage.keyboard.press('Escape');
   await tap(hubPhonePage, hubPhonePage.getByRole('list', {name: 'Instances'}).getByText('web-app'));
   await hubPhonePage.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first().waitFor();
   await hubPhonePage.waitForTimeout(800);

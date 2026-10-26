@@ -147,8 +147,8 @@ stores the token. Changing `--token` signs every browser out.
 
 Each row shows the instance's name (`--name`, by default its working directory's name), what it is
 doing, its title (the session's name, else the start of the latest prompt), the agent, the machine,
-how many messages wait in its queue and its fullest usage limit. The rows sort by state in this
-order, then by name:
+how many messages wait in its queue and its fullest usage limit. Within a [group](#groups), the
+rows sort by state in this order, then by name:
 
 | Dot | Label | Meaning |
 | --- | --- | --- |
@@ -167,6 +167,21 @@ hub`, so a pinned tab shows it.
 
 "Finished" follows the instance's unread mark, which every client of that AgentAPI shares: opening
 the instance in the hub, or in its own chat, marks it read everywhere.
+
+### Groups
+
+![A row's menu on a phone: its group, a new one, and Forget](screenshots/hub-phone-menu.png)
+
+Sort the instances into groups of your own, by client, project or machine. The **⋯** at the end of
+each row moves the instance to a group, to a **New group…**, or to **No group**. Groups are kept on
+the hub, so the phone and the desktop show the same ones, and an instance's own events never move
+it.
+
+Once there is a group, the list gets a header per group, by name, with the instances in no group
+last under **Ungrouped**. A header shows how many instances the group has and, in amber, how many
+need you, so a folded group still tells you. Tap a header to fold or unfold it; each browser
+remembers which groups it folded. The pencil renames the group, moving all its instances. A group
+name has at most 40 characters, and a group with no instance left disappears.
 
 ### Opening an instance
 
@@ -195,8 +210,8 @@ AgentAPI 1.1 or later. A token given here is kept for that instance and sent ins
 `--instance-token`. An instance added this way doesn't report starting or stopping; the hub just
 finds it reachable or not.
 
-A stopped or unreachable row shows **Forget** when you hover it, which removes it from the hub.
-An instance that joined with its webhook comes back the next time it starts.
+The **⋯** menu of a stopped or unreachable row has **Forget**, which removes it from the hub. An
+instance that joined with its webhook comes back the next time it starts.
 
 ## Tokens and security
 
@@ -281,6 +296,7 @@ be changed now applies the file when it restarts.
 | `DELETE /api/session` | Signs out |
 | `GET /api/instances` | The instances, with their summaries and connection state |
 | `POST /api/instances` | `{"url": …, "token": …}` adds an instance by its URL |
+| `PATCH /api/instances/{id}` | `{"group": …}` puts an instance in a group; `""` in none |
 | `DELETE /api/instances/{id}` | Forgets an instance |
 | `GET /api/events` | Server-sent events: `instances` (all of them), then `instance` (one changed), `removed` (`{"id"}`) and a `heartbeat` every 15 s |
 | `/i/{id}/…` | The instance's own API and chat, through the hub |
@@ -294,7 +310,7 @@ Every endpoint but `/hooks` and `/api/session` needs the session cookie or
 | --- | --- | --- |
 | `~/.agentapi/config.yaml` | `agentapi hub join` | The hub's webhook, read by every `agentapi server` |
 | `~/.agentapi/instances/` | `agentapi server` | The AgentAPIs running on this machine, for `join` and `agentapi list` |
-| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, and tokens of the ones added by hand |
+| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups, and tokens of the ones added by hand |
 
 ## Limits
 

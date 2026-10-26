@@ -138,8 +138,8 @@ token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie�
 ![清單會顯示的每種狀態](screenshots/hub-list.png)
 
 每一列顯示實例的名稱（`--name`，預設為工作目錄名稱）、目前在做什麼、標題（工作階段名稱，沒有的話
-是最新提示的開頭）、agent、機器、佇列中等待的訊息數，以及用得最多的用量限制。各列依下表的狀態順序
-排列，同狀態再依名稱排序：
+是最新提示的開頭）、agent、機器、佇列中等待的訊息數，以及用得最多的用量限制。同一個[群組](#群組)內，
+各列依下表的狀態順序排列，同狀態再依名稱排序：
 
 | 圓點 | 標示 | 意思 |
 | --- | --- | --- |
@@ -157,6 +157,19 @@ token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie�
 
 「Finished」依據實例的未讀標記，這個標記由該 AgentAPI 的所有用戶端共用：在 hub 或實例自己的聊天
 介面開啟它，各處都會變成已讀。
+
+### 群組
+
+![手機上一列的選單：群組、新群組和 Forget](screenshots/hub-phone-menu.png)
+
+可以依客戶、專案或機器，把實例分成自己的群組。每一列最後的 **⋯** 可以把實例移到某個群組、
+**New group…**（新群組）或 **No group**（不分組）。群組保存在 hub 上，所以手機和桌面看到的一樣；
+實例自己的事件不會改動它所屬的群組。
+
+有了群組之後，清單會依名稱為每個群組加上標題，沒有分組的實例排在最後的 **Ungrouped** 底下。標題會
+顯示群組裡的實例數，並以琥珀色顯示需要你處理的數量，所以收合的群組仍然看得到。點標題可以收合或
+展開；每個瀏覽器各自記住收合了哪些群組。鉛筆圖示可以為群組改名，裡面的實例會一起移過去。群組名稱
+最多 40 個字元；群組裡沒有實例時就會消失。
 
 ### 開啟實例
 
@@ -182,7 +195,7 @@ token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie�
 這個實例保存，取代 `--instance-token` 送出。這樣加入的實例不會回報啟動或停止；hub 只會發現它連得到
 或連不到。
 
-已停止或連不到的那一列，滑鼠移過去會出現 **Forget**，可以把它從 hub 移除。用 webhook 加入的實例，
+已停止或連不到的那一列，**⋯** 選單裡有 **Forget**，可以把它從 hub 移除。用 webhook 加入的實例，
 下次啟動時會再出現。
 
 ## Token 與安全性
@@ -264,6 +277,7 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `DELETE /api/session` | 登出 |
 | `GET /api/instances` | 所有實例，含摘要和連線狀態 |
 | `POST /api/instances` | `{"url": …, "token": …}` 以網址加入實例 |
+| `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組；`""` 為不分組 |
 | `DELETE /api/instances/{id}` | 移除實例 |
 | `GET /api/events` | Server-sent events：先送 `instances`（全部），再送 `instance`（某個有變動）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面 |
@@ -277,7 +291,7 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | --- | --- | --- |
 | `~/.agentapi/config.yaml` | `agentapi hub join` | hub 的 webhook，每個 `agentapi server` 都會讀取 |
 | `~/.agentapi/instances/` | `agentapi server` | 這台機器上執行中的 AgentAPI，供 `join` 和 `agentapi list` 使用 |
-| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例，以及手動加入的實例的 token |
+| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組，以及手動加入的實例的 token |
 
 ## 限制
 

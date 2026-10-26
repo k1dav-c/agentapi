@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-26T06:33:55.746Z",
+  "captured_at": "2026-10-26T08:48:26.545Z",
   "agentapi_version": "0.0.0-dev",
   "agents": [
     "native-demo",
@@ -65,6 +65,7 @@
     "hub-add.png",
     "hub-desktop.png",
     "hub-phone.png",
+    "hub-phone-menu.png",
     "hub-phone-chat.png",
     "demo-hub.gif"
   ]

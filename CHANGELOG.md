@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Sort the hub's instances into groups of your own: each row's `⋯` menu moves the instance to a
+  group, a new one or none. Groups are kept on the hub (`PATCH /api/instances/{id}`), so every
+  browser shows the same ones. The list then gets a header per group that folds, counts the
+  instances and how many need you, and renames the group.
+
+### Fixes
+
+- A stopped or unreachable instance can be forgotten on a phone: **Forget** moved from a
+  hover-only button to the row's `⋯` menu.
+
 ## v1.3.0
 
 ### Features
