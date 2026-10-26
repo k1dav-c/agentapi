@@ -88,6 +88,9 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validSignature(h.config.Secret, r, body, h.now()) {
+		// A wrong --secret on the instance's side shows here.
+		h.logger.Warn("Refused an event with an invalid or missing signature, or more than 10 minutes off",
+			"from", r.RemoteAddr, "instance", r.Header.Get("X-AgentAPI-Instance"), "event", r.Header.Get("X-AgentAPI-Event"))
 		http.Error(w, "invalid or missing signature", http.StatusUnauthorized)
 		return
 	}
@@ -137,6 +140,7 @@ func (h *Hub) upsertFromWebhook(instance httpapi.WebhookInstance, url string) {
 		}
 		i.LastSeen = h.now()
 		if restart {
+			h.logger.Info("Following an instance", "instance", instance.ID, "url", url, "server_id", instance.ServerID)
 			i.Connection = ConnectionConnecting
 			i.Error = ""
 		}
@@ -156,6 +160,7 @@ func (h *Hub) stopped(id, serverID string) {
 		if serverID != "" && i.ServerID != "" && serverID != i.ServerID {
 			return
 		}
+		h.logger.Info("An instance stopped", "instance", id)
 		i.Connection = ConnectionStopped
 		i.Error = ""
 		i.LastSeen = h.now()

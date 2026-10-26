@@ -85,6 +85,9 @@ func (h *Hub) follow(ctx context.Context, id string) {
 			if i.Connection == ConnectionStopped {
 				return
 			}
+			if i.Connection != ConnectionUnreachable || i.Error != message {
+				h.logger.Warn("An instance is unreachable", "instance", id, "url", i.URL, "error", message)
+			}
 			i.Connection = ConnectionUnreachable
 			i.Error = message
 		})
