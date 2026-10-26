@@ -486,12 +486,11 @@ can be shown in full. The file viewer takes the whole screen, and the terminals 
 ![The hub on a phone](screenshots/hub-phone.png)
 
 A [hub](../README.md#running-a-hub) (`agentapi hub serve`) serves this chat for every AgentAPI it
-watches. Its page lists each with the title, agent, machine, queue and the fullest usage limit.
-What needs you comes first, with an amber dot and the reason (an approval or question, a login, a
-usage limit); then a pulsing blue dot while one works, a green one for a finished task you haven't
-seen, then idle, unreachable and stopped ones. The tab title counts what needs you. Picking one
-opens it in this chat beside the list (or instead of it on a phone, with a back button), through
-the hub, which sends the instance's token. `+` adds an instance by its URL and token. Each row's
+watches. Its list puts what needs you first, each state with a glyph of its own, and says what each
+agent waits for (the approval's command, the question) or does; search and chips filter it. On a
+desktop, an overview counts each state and has a card per request. Picking an agent opens it in
+this chat beside the list (or instead of it on a phone, with a back button), under the hub's bar
+in place of the chat's own, through the hub, which sends the instance's token. `+` adds an instance by its URL and token. Each row's
 `⋯` menu puts the instance in a group of your own (the list then shows a folding header per group)
 or forgets a stopped or unreachable one. The [hub guide](hub.md) covers setup, groups and every
 state in detail.

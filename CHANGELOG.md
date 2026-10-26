@@ -4,6 +4,15 @@
 
 ### Features
 
+- A new hub page. The sign-in shows the hub's agents in their states. The list gives each state a
+  glyph of its own and says what each agent waits for (the approval's command, the question, the
+  login) or does, how long ago; search (`/`) and chips filter it. On a desktop an overview counts
+  each state and has a card per request with **Answer**, what runs with its running time, and what
+  finished unseen. An open agent gets the hub's bar in place of the chat's own. Keys (`/`, `j`,
+  `k`, `Enter`, `Esc`), optional browser notifications, a tab icon with the count, and a guide with
+  commands to copy while no agent has joined.
+- The summary names the oldest request the agent waits on (`request`: its ID, kind, title and when
+  the agent asked), so a client shows what each agent waits for without opening it.
 - Sort the hub's instances into groups of your own: each row's `⋯` menu moves the instance to a
   group, a new one or none. Groups are kept on the hub (`PATCH /api/instances/{id}`), so every
   browser shows the same ones. The list then gets a header per group that folds, counts the

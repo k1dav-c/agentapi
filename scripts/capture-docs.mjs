@@ -432,8 +432,8 @@ const home = path.join(root, 'home');
 const project = path.join(root, 'my-app');
 let browser;
 try {
-  for (let p = port; p < port + 10; p++) {
-    if (!await portFree(p)) throw new Error(`Port ${p} is in use; set AGENTAPI_SCREENSHOT_PORT to the first of ten free ports.`);
+  for (let p = port; p < port + 14; p++) {
+    if (!await portFree(p)) throw new Error(`Port ${p} is in use; set AGENTAPI_SCREENSHOT_PORT to the first of fourteen free ports.`);
   }
   // A clean environment: no tokens or workspace links of the shell the script runs in, and a
   // neutral prompt in the terminal.
@@ -899,63 +899,91 @@ try {
   startProcess('hub', root, hubEnv, ['hub', 'serve', '--bind', '127.0.0.1', '--port', String(hubPort),
     '--token', 'docs-token', '--secret', 'docs-secret', '--state', path.join(hubHome, 'instances.json')]);
   await poll(async () => (await fetch(`http://127.0.0.1:${hubPort}/api/session`)).ok, 'the hub');
+  // Nine demo instances, posing as the agents they'd be: one asks for an approval, one asks
+  // questions, one needs a login, one hit its usage limit, one works, one finished a task nobody
+  // saw, one is idle, one stopped and one was killed, so the hub can't reach it.
+  const hubSetup = [
+    {name: 'checkout-api', type: 'claude', group: 'Client work', message: 'Deploy the release: approve', wait: 'approval'},
+    {name: 'marketing-site', type: 'codex', group: 'Client work', message: 'ask me about the launch copy', wait: 'question'},
+    {name: 'mobile-app', type: 'codex', group: 'Client work', message: 'Check the login'},
+    {name: 'data-pipeline', type: 'claude', group: 'Internal', message: 'Rebuild the nightly aggregates; limit'},
+    {name: 'billing-service', type: 'claude', group: 'Internal'},
+    {name: 'design-system', type: 'pi', group: 'Internal', message: 'Refactor the button tokens and update the docs', idle: true},
+    {name: 'docs', type: 'custom'},
+    {name: 'legacy-cms', type: 'custom'},
+    {name: 'prototype-2025', type: 'custom'},
+  ];
   const hubInstances = {};
-  const hubNames = ['api-server', 'web-app', 'docs-site', 'billing', 'old-prototype', 'mobile-app'];
-  for (const [i, name] of hubNames.entries()) {
-    const dir = path.join(root, 'workspaces', name);
+  for (const [i, instance] of hubSetup.entries()) {
+    const dir = path.join(root, 'workspaces', instance.name);
     await mkdir(dir, {recursive: true});
-    startServer(name, dir, hubEnv, ['--port', String(port + 4 + i), '--transport', 'native', '--type', 'custom', '--', 'native-demo']);
-    hubInstances[name] = client(`http://127.0.0.1:${port + 4 + i}`);
-    await poll(async () => (await hubInstances[name].status()).lifecycle === 'ready', `the ${name} instance`);
+    startServer(instance.name, dir, hubEnv, ['--port', String(port + 4 + i), '--transport', 'native', '--type', instance.type, '--', 'native-demo']);
+    hubInstances[instance.name] = client(`http://127.0.0.1:${port + 4 + i}`);
+    await poll(async () => (await hubInstances[instance.name].status()).lifecycle === 'ready', `the ${instance.name} instance`);
   }
   const hubAPI = `http://127.0.0.1:${hubPort}`;
   const hubList = async () => {
     const response = await fetch(`${hubAPI}/api/instances`, {headers: {Authorization: 'Bearer docs-token'}});
     return (await response.json()).instances;
   };
-  await poll(async () => (await hubList()).filter(instance => instance.summary).length === hubNames.length, 'the hub to follow the instances');
+  await poll(async () => (await hubList()).filter(instance => instance.summary).length === hubSetup.length, 'the hub to follow the instances');
+  // Groups of one's own, as the rows' menus set them.
+  for (const instance of await hubList()) {
+    const group = hubSetup.find(entry => entry.name === instance.name)?.group;
+    if (!group) continue;
+    await fetch(`${hubAPI}/api/instances/${encodeURIComponent(instance.id)}`, {method: 'PATCH',
+      headers: {Authorization: 'Bearer docs-token', 'Content-Type': 'application/json'}, body: JSON.stringify({group})});
+  }
   const stopInstance = async (name, signal) => {
     const server = servers.find(entry => entry.name === name);
     server.child.kill(signal);
     await server.exited;
   };
-  await stopInstance('old-prototype', 'SIGTERM');
-  await stopInstance('mobile-app', 'SIGKILL');
-  await hubInstances['api-server'].send('Add pagination to the orders endpoint.');
-  await hubInstances['api-server'].idle();
-  await hubInstances['web-app'].send('approve');
-  await hubInstances['web-app'].pending('approval');
-  await hubInstances['docs-site'].send('long');
-  await poll(async () => {
-    const states = Object.fromEntries((await hubList()).map(instance => [instance.name, instance.connection]));
-    return states['old-prototype'] === 'stopped' && states['mobile-app'] === 'unreachable';
-  }, 'the hub to see the stopped and the killed instance');
-
-  // Groups of one's own, as the rows' menus set them.
-  const hubGroups = {'web-app': 'Client work', 'api-server': 'Client work', 'docs-site': 'Internal', billing: 'Internal'};
-  for (const instance of await hubList()) {
-    if (!hubGroups[instance.name]) continue;
-    await fetch(`${hubAPI}/api/instances/${encodeURIComponent(instance.id)}`, {method: 'PATCH',
-      headers: {Authorization: 'Bearer docs-token', 'Content-Type': 'application/json'}, body: JSON.stringify({group: hubGroups[instance.name]})});
+  await stopInstance('prototype-2025', 'SIGTERM');
+  await stopInstance('legacy-cms', 'SIGKILL');
+  for (const instance of hubSetup) {
+    if (!instance.message) continue;
+    if (instance.idle) {
+      await hubInstances[instance.name].send(instance.message);
+      await hubInstances[instance.name].idle();
+    } else {
+      await hubInstances[instance.name].request('/message', 'POST', {content: instance.message, type: 'user'});
+    }
   }
+  await hubInstances['checkout-api'].pending('approval');
+  await hubInstances['marketing-site'].pending('question');
+  await poll(async () => {
+    const byName = Object.fromEntries((await hubList()).map(instance => [instance.name, instance]));
+    return byName['prototype-2025'].connection === 'stopped' && byName['legacy-cms'].connection === 'unreachable' &&
+      byName['mobile-app'].summary?.attention === 'login' && byName['data-pipeline'].summary?.attention === 'limit';
+  }, 'the hub to see every state');
+  const startWork = () => hubInstances['billing-service'].request('/message', 'POST', {content: 'long migration of the invoices table', type: 'user'});
+
+  // An empty hub, for the guide that connects the first agents.
+  const emptyPort = port + 13;
+  startProcess('empty hub', root, hubEnv, ['hub', 'serve', '--bind', '127.0.0.1', '--port', String(emptyPort),
+    '--token', 'docs-token', '--secret', 'docs-secret', '--state', path.join(hubHome, 'empty.json')]);
+  await poll(async () => (await fetch(`http://127.0.0.1:${emptyPort}/api/session`)).ok, 'the empty hub');
 
   // The rows name the machine; the screenshots show placeholders, also when a row renders again.
-  const hubHostStyle = `ul[aria-label="Instances"] { counter-reset: host; }
+  const hubHostStyle = `body { counter-reset: host; }
     [data-hub-host] { font-size: 0; counter-increment: host; }
-    [data-hub-host]::after { content: "dev-" counter(host); font-size: 11px; }`;
-  const openHub = async (options, {signIn = true, pointer = false} = {}) => {
-    const context = await browser.newContext({...contextOptions, ...options});
+    [data-hub-host]::after { content: "dev-" counter(host); font-size: 12px; }`;
+  const openHub = async (options, {signIn = true, pointer = false, theme = 'light', url = hubAPI} = {}) => {
+    const context = await browser.newContext({...contextOptions, colorScheme: theme, ...options});
     context.on('weberror', event => errors.push(event.error().message));
+    await context.addInitScript(value => { try { localStorage.setItem('theme', value); } catch {} }, theme);
     if (pointer) await context.addInitScript(pointerScript);
     const page = await context.newPage();
     page.setDefaultTimeout(20_000);
-    await page.goto(`${hubAPI}/`);
+    await page.goto(`${url}/`);
     await page.addStyleTag({content: hubHostStyle});
+    await page.evaluate(() => document.fonts.ready);
     if (signIn) {
       await page.getByLabel('Hub token').fill('docs-token');
       await page.getByRole('button', {name: 'Sign in'}).click();
-      await page.getByRole('list', {name: 'Instances'}).getByText('Needs your answer').waitFor();
-      await page.evaluate(() => document.fonts.ready);
+      if (url === hubAPI) await page.getByRole('list', {name: 'Instances'}).getByText('Approval', {exact: true}).first().waitFor();
+      else await page.getByRole('heading', {name: 'Connect your first agent'}).waitFor();
     }
     return page;
   };
@@ -965,37 +993,48 @@ try {
   // Signing in.
   const signIn = await openHub(desktop, {signIn: false});
   await signIn.getByLabel('Hub token').fill('docs-token');
-  await elementShot(signIn, signIn.locator('form'), 'hub-sign-in.png');
+  await shot(signIn, 'hub-sign-in.png');
   await signIn.context().close();
 
-  const hubPage = await openHub(desktop);
-  const hubRows = hubPage.getByRole('list', {name: 'Instances'});
-  for (const label of ['Working', 'Finished', 'Idle', 'Unreachable', 'Stopped']) await hubRows.getByText(label, {exact: true}).waitFor();
-  await hubPage.waitForTimeout(500);
-  await elementShot(hubPage, hubPage.locator('aside'), 'hub-list.png');
-  // Adding an instance by its URL.
-  await hubPage.getByRole('button', {name: 'Add an instance'}).click();
-  const addDialog = hubPage.getByRole('dialog');
-  await addDialog.getByLabel('URL').fill('http://dev-7.vpn:3284');
-  await addDialog.getByLabel('API token').fill('instance-token');
-  await elementShot(hubPage, addDialog, 'hub-add.png');
-  await hubPage.keyboard.press('Escape');
-  // An instance that waits for an approval, open in the chat.
-  await hubRows.getByText('web-app').click();
-  await hubPage.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first().waitFor();
-  await hubPage.waitForTimeout(800);
-  await shot(hubPage, 'hub-desktop.png');
-  await hubPage.context().close();
+  // The overview, light and dark, while one agent works.
+  await startWork();
+  for (const theme of ['light', 'dark']) {
+    const page = await openHub(desktop, {theme});
+    await page.getByText('Working', {exact: true}).first().waitFor();
+    await page.waitForTimeout(800);
+    await shot(page, theme === 'light' ? 'hub-desktop.png' : 'hub-desktop-dark.png');
+    if (theme === 'light') {
+      await elementShot(page, page.locator('aside'), 'hub-list.png');
+      // Adding an instance by its URL.
+      await page.getByRole('button', {name: 'Add an instance'}).click();
+      const addDialog = page.getByRole('dialog');
+      await addDialog.getByLabel('URL').fill('http://dev-7.vpn:3284');
+      await addDialog.getByLabel('API token').fill('instance-token');
+      await elementShot(page, addDialog, 'hub-add.png');
+      await page.keyboard.press('Escape');
+      // An instance that waits for an approval, open in the chat.
+      await page.getByRole('list', {name: 'Instances'}).getByText('checkout-api').click();
+      await page.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first().waitFor();
+      await page.waitForTimeout(800);
+      await shot(page, 'hub-instance.png');
+    }
+    await page.context().close();
+  }
 
-  // A phone: the list, then the chat with the way back.
+  // A hub no agent has joined yet.
+  const empty = await openHub(desktop, {url: `http://127.0.0.1:${emptyPort}`});
+  await empty.waitForTimeout(500);
+  await shot(empty, 'hub-empty.png');
+  await empty.context().close();
+
+  // A phone: the list, a row's menu, then the chat with the way back.
   const hubPhonePage = await openHub(hubPhoneOptions);
   await shot(hubPhonePage, 'hub-phone.png');
-  // A row's menu: its group, a new one, and forgetting a stopped instance.
-  await tap(hubPhonePage, hubPhonePage.getByRole('button', {name: 'Actions for old-prototype'}));
+  await tap(hubPhonePage, hubPhonePage.getByRole('button', {name: 'Actions for prototype-2025'}));
   await hubPhonePage.getByRole('menuitem', {name: 'Forget'}).waitFor();
   await shot(hubPhonePage, 'hub-phone-menu.png');
   await hubPhonePage.keyboard.press('Escape');
-  await tap(hubPhonePage, hubPhonePage.getByRole('list', {name: 'Instances'}).getByText('web-app'));
+  await tap(hubPhonePage, hubPhonePage.getByRole('list', {name: 'Instances'}).getByText('checkout-api'));
   await hubPhonePage.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first().waitFor();
   await hubPhonePage.waitForTimeout(800);
   await shot(hubPhonePage, 'hub-phone-chat.png');
@@ -1005,14 +1044,14 @@ try {
   const hubGif = await openHub(hubPhoneOptions, {pointer: true});
   await recordGif(hubGif, 'demo-hub.gif', async () => {
     await hubGif.waitForTimeout(600);
-    await tap(hubGif, hubGif.getByRole('list', {name: 'Instances'}).getByText('web-app'));
+    await tap(hubGif, hubGif.getByRole('list', {name: 'Instances'}).getByText('checkout-api'));
     const allow = hubGif.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first();
     await allow.waitFor();
     await hubGif.waitForTimeout(700);
     await tap(hubGif, allow);
     await hubGif.waitForTimeout(1500);
-    await tap(hubGif, hubGif.getByRole('button', {name: 'Instances'}));
-    await hubGif.getByRole('list', {name: 'Instances'}).getByText('web-app').waitFor();
+    await tap(hubGif, hubGif.getByRole('button', {name: 'Agents'}));
+    await hubGif.getByRole('list', {name: 'Instances'}).getByText('checkout-api').waitFor();
     await hubGif.waitForTimeout(1200);
   });
   await hubGif.context().close();
@@ -1021,7 +1060,7 @@ try {
   await writeFile(path.join(output, 'capture.json'), JSON.stringify({
     captured_at: new Date().toISOString(),
     agentapi_version: version,
-    agents: ['native-demo', 'native-demo posing as Claude Code', 'bash (PTY)', 'six native-demo instances behind agentapi hub serve'],
+    agents: ['native-demo', 'native-demo posing as Claude Code', 'bash (PTY)', 'nine native-demo instances behind agentapi hub serve, posing as Claude Code, Codex and Pi'],
     browser: browser.version(),
     desktop_viewport: {width: 1440, height: 1000},
     mobile_viewport: {width: 390, height: 844},

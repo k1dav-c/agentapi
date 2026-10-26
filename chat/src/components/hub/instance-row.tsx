@@ -166,7 +166,7 @@ export function InstanceRow({
 
 export function GroupHeader({group, folded, onToggle, onRename}: {group: HubGroup; folded: boolean; onToggle: () => void; onRename: () => void}) {
   return (
-    <li className="sticky top-0 z-10 bg-background px-2 pt-3 pb-1">
+    <div className="sticky top-0 z-10 bg-background px-2 pt-3 pb-1">
       <div className="flex items-center">
         <button
           type="button"
@@ -190,6 +190,6 @@ export function GroupHeader({group, folded, onToggle, onRename}: {group: HubGrou
           </Button>
         )}
       </div>
-    </li>
+    </div>
   );
 }

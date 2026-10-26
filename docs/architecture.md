@@ -652,7 +652,9 @@ AgentAPI's own `AGENTAPI_*` variables.
 build into `lib/httpapi/chat/`, which `embed.go` embeds with `go:embed`. The build uses a
 placeholder base path that the server rewrites to `--chat-base-path` (default `/chat`). The UI also
 runs as a standalone development server (`bun run dev`, with `?url=<server>`), and `/chat/embed` is
-a variant for embedding in other pages.
+a variant for embedding in other pages (`hub=1` leaves its status bar to the hub's own). `/chat/hub/`
+is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, its logic in
+`lib/hub.ts`), which `agentapi hub serve` serves with the same build.
 
 - `components/chat-provider.tsx` composes the client state and API operations.
   Actions and API calls come from `useChatActions()`, an object that never

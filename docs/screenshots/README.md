@@ -17,9 +17,11 @@ uncommitted changes):
   AgentAPI reads Claude Code's logs for it, which the script writes into a temporary home
   directory: three earlier sessions, and the log of the subagent the demo's Agent tool call starts;
 - bash as a PTY agent (`--term-width 100`), for TTY mode;
-- `agentapi hub serve` with six `native-demo` instances that join it with `agentapi hub join`, for
-  the hub: one waits for an approval, one works, one finished a task, one is idle, one stopped
-  and one was killed, so the hub can't reach it. Four of them are in two groups. The rows name the machine; the screenshots show
+- `agentapi hub serve` with nine `native-demo` instances that join it with `agentapi hub join`,
+  posing as Claude Code, Codex and Pi, for the hub: one asks for an approval, one asks questions,
+  one needs a login, one hit its usage limit, one works, one finished a task, one is idle, one
+  stopped and one was killed, so the hub can't reach it. Six are in two groups. A second, empty
+  hub shows the guide for the first agents. The rows name the machine; the screenshots show
   placeholders (`dev-1` and so on).
 
 ## Gallery
@@ -64,9 +66,12 @@ device scale factor of 1.
 | [file-find.png](file-find.png) | The file viewer on a file found below the working directory |
 | [login-card.png](login-card.png) | A login card |
 | [tty-mode.png](tty-mode.png) | TTY mode on a PTY agent |
-| [hub-desktop.png](hub-desktop.png) | The hub: its instances, what needs you first, and one open in the chat with its approval |
-| [hub-sign-in.png](hub-sign-in.png) | Signing in to the hub |
-| [hub-list.png](hub-list.png) | The hub's list in two groups and Ungrouped, with every state: needs your answer, working, finished, idle, unreachable, stopped |
+| [hub-desktop.png](hub-desktop.png) | The hub's overview: how many need you, a tile per state, a card per request, what runs and what finished |
+| [hub-desktop-dark.png](hub-desktop-dark.png) | The same overview in the dark theme |
+| [hub-instance.png](hub-instance.png) | An agent open beside the list, its approval ready to answer |
+| [hub-empty.png](hub-empty.png) | The guide an empty hub shows, with commands to copy |
+| [hub-sign-in.png](hub-sign-in.png) | Signing in to the hub, beside its picture of agents in their states |
+| [hub-list.png](hub-list.png) | The hub's list in two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped |
 | [hub-add.png](hub-add.png) | Adding an instance by its URL and token |
 | [hub-phone.png](hub-phone.png) | The hub's list on a phone, in groups |
 | [hub-phone-menu.png](hub-phone-menu.png) | A row's menu on a phone: its group, a new one, and Forget |

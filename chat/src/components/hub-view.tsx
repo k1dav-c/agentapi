@@ -1,6 +1,6 @@
 "use client";
 
-import {Fragment, useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {ArrowLeft, Bell, BellOff, ExternalLink, Plus, Search, X} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {ModeToggle} from "@/components/mode-toggle";
@@ -400,8 +400,10 @@ export function HubView() {
           {groups.map((group) => {
             // A search or a filter shows every match, folded or not.
             const folded = showHeaders && !filtered && collapsed.has(group.name);
+            // Each group is a block of its own, so its header sticks only
+            // while its rows scroll by, and the next header pushes it off.
             return (
-              <Fragment key={group.name || "\u0000"}>
+              <li key={group.name || "\u0000"}>
                 {showHeaders && (
                   <GroupHeader
                     group={group}
@@ -414,21 +416,24 @@ export function HubView() {
                     onRename={() => setNaming({mode: "rename", from: group.name})}
                   />
                 )}
-                {!folded &&
-                  group.instances.map((instance) => (
-                    <InstanceRow
-                      key={instance.id}
-                      instance={instance}
-                      groups={names}
-                      now={now}
-                      selected={instance.id === selected}
-                      onSelect={() => select(instance.id)}
-                      onForget={() => void forget(instance.id)}
-                      onGroup={(name) => void setGroup(instance.id, name)}
-                      onNewGroup={() => setNaming({mode: "new", id: instance.id})}
-                    />
-                  ))}
-              </Fragment>
+                {!folded && (
+                  <ul aria-label={group.name || (showHeaders ? "Ungrouped" : undefined)}>
+                    {group.instances.map((instance) => (
+                      <InstanceRow
+                        key={instance.id}
+                        instance={instance}
+                        groups={names}
+                        now={now}
+                        selected={instance.id === selected}
+                        onSelect={() => select(instance.id)}
+                        onForget={() => void forget(instance.id)}
+                        onGroup={(name) => void setGroup(instance.id, name)}
+                        onNewGroup={() => setNaming({mode: "new", id: instance.id})}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </li>
             );
           })}
         </ul>
