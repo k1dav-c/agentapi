@@ -123,6 +123,18 @@ agentapi hub status   # 設定檔裡的 hub，以及每個執行中的 AgentAPI 
 agentapi list         # 這台機器上執行中的 AgentAPI，以及各自的摘要
 ```
 
+這一步也可以交給那台機器上的 agent。[agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md)
+會讓 Claude Code 檢查版本和 hub 是否有回應，向你詢問 hub 的網址、secret 和這台機器的位址，然後加入，
+並確認每個 AgentAPI 回報到哪裡。它不會重新啟動 AgentAPI，也不會印出 secret。在那台機器上安裝：
+
+```bash
+mkdir -p ~/.claude/skills/agentapi-hub-join
+curl -fsSL https://raw.githubusercontent.com/k1dav-c/agentapi/main/skills/agentapi-hub-join/SKILL.md \
+  -o ~/.claude/skills/agentapi-hub-join/SKILL.md
+```
+
+然後跟 agent 說，例如：「把這台機器加入 http://hub.vpn:3290 的 hub」。
+
 ### 4. 開啟 hub
 
 在連上 VPN 的桌面或手機開啟 `http://hub.vpn:3290/`，用 `HUB_TOKEN` 登入。登入狀態維持 30 天。

@@ -66,6 +66,7 @@ to PTY mode, which parses terminal output. Experimental ACP mode uses the Agent 
 - `lib/userconfig/` - The user's settings file (`~/.agentapi/config.yaml`), which agentapi server reads and agentapi hub join writes
 - `lib/registry/` - The registry of the AgentAPIs running on a machine (`~/.agentapi/instances`), which `agentapi list` reads
 - `chat/` - Next.js web UI (embedded into Go binary)
+- `skills/` - Agent skills for users of AgentAPI, such as `agentapi-hub-join` (an agent joins its machine to a hub); installed into `~/.claude/skills/`, not used to work on this repository
 
 ### Shared architecture
 

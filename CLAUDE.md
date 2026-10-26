@@ -79,6 +79,7 @@ response messages over stdio. All three transports update the shared event emitt
 - **`lib/userconfig/`** — The user's settings file, `~/.agentapi/config.yaml`: `agentapi server` flags by name, below flags and `AGENTAPI_*` variables (`cmd/server/userconfig.go`); `agentapi hub join` writes a hub's webhook into it.
 - **`lib/registry/`** — The registry of the AgentAPIs running on a machine (`~/.agentapi/instances`): each server writes its entry while it serves (`--registry`, `--registry-dir`); `agentapi list` and clients that watch many read it.
 - **`lib/shellterm/`** — The shared shell terminal of native sessions (`GET /terminal`).
+- **`skills/`** — Agent skills for users of AgentAPI (`agentapi-hub-join`: an agent joins its machine to a hub, documented in `docs/hub.md`); they install into `~/.claude/skills/` and aren't for working on this repository.
 - **`cmd/`** — CLI commands via cobra/viper. Includes `server`, `attach`, `list` (the AgentAPIs in the registry, with their summaries), `hub` (`serve`: the hub; `join`, `leave`, `status`: connecting a machine's AgentAPIs to a hub), and `update` subcommands.
 
 ### Three transport modes

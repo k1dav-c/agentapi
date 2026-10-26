@@ -1234,6 +1234,8 @@ AgentAPI 會依設定檔送出 `instance.started`。`--public-url` 是 hub 連�
 `agentapi hub status` 顯示 hub 以及每個執行中的 AgentAPI 回報到哪裡；`agentapi hub leave` 會移除 hub。
 `join` 會先送給 hub 一個有簽章的測試事件，hub 沒收下就停止（連不到、被登入頁擋住，或 secret 不同）；
 hub 還沒啟動時，可以用 `--no-check` 略過。
+也可以用 [agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.md) 交給 agent 處理，安裝方式見
+[hub 指南](docs/hub.zh-TW.md#3-讓每台機器的-agentapi-加入)。
 
 ### Webhook
 
