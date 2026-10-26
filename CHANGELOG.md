@@ -21,6 +21,9 @@
 
 ### Fixes
 
+- On an iPhone, the top of the chat and of the hub no longer stays cut off after the keyboard
+  closes: the window stays put (the pages scroll in their own panes) and goes back to the top once
+  nothing is being typed in.
 - A stopped or unreachable instance can be forgotten on a phone: **Forget** moved from a
   hover-only button to the row's `⋯` menu.
 

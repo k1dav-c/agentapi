@@ -34,7 +34,7 @@ export function SignIn({root, onSignedIn}: {root: string; onSignedIn: () => void
     setAttempt((n) => n + 1);
   };
   return (
-    <main className="grid min-h-svh bg-background lg:grid-cols-[1.15fr_1fr]">
+    <main className="grid h-svh overflow-y-auto overscroll-contain bg-background lg:grid-cols-[1.15fr_1fr]">
       <section className="hub-grid relative hidden flex-col justify-between overflow-hidden border-r p-12 lg:flex" aria-hidden="true">
         <div className="flex items-center gap-2.5">
           <HubMark className="size-8" />

@@ -148,6 +148,13 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* The pages scroll inside their own panes; the window stays put, so a
+     swipe on a header can't drag the page off the screen (iOS). */
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
   body {
     @apply bg-background text-foreground;
     min-width: 320px;

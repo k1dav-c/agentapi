@@ -6,6 +6,7 @@ import "./hljs-theme.css";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ViewportGuard } from "@/components/viewport-guard";
 import {defaultLocale, uiCopy} from "@/lib/ui-copy";
 
 const geistSans = Geist({
@@ -27,6 +28,8 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Where supported, the keyboard shrinks the page instead of sliding it up.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({
@@ -49,6 +52,7 @@ export default function RootLayout({
             {children}
           </TooltipProvider>
           <Toaster richColors closeButton />
+          <ViewportGuard />
         </ThemeProvider>
       </body>
     </html>
