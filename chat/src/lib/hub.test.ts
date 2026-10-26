@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {applyHubEvent, chatURL, hubRoot, instanceState, needsYou, sortInstances, stateLabel, usagePercent, type HubInstance, type Summary} from "./hub";
+import {applyHubEvent, chatURL, groupInstances, groupNames, hubRoot, instanceState, needsYou, sortInstances, stateLabel, usagePercent, type HubInstance, type Summary} from "./hub";
 
 const summary = (overrides: Partial<Summary> = {}): Summary =>
   ({
@@ -71,5 +71,21 @@ describe("hub", () => {
     expect(
       usagePercent(summary({usage: {rate_limits: [{id: "five_hour", label: "5h", used_percent: 40}, {id: "seven_day", label: "7d", used_percent: 72}]}})),
     ).toBe(72);
+  });
+
+  test("rows split into their groups, by name, with the ungrouped last", () => {
+    const groups = groupInstances([
+      instance("a", {group: "Work"}),
+      instance("b"),
+      instance("c", {group: "Clients", summary: summary({attention: "request"})}),
+      instance("d", {group: "Work", summary: summary({status: "running"})}),
+    ]);
+    expect(groups.map((g) => [g.name, g.instances.map((i) => i.id), g.needsYou])).toEqual([
+      ["Clients", ["c"], 1],
+      ["Work", ["d", "a"], 0],
+      ["", ["b"], 0],
+    ]);
+    expect(groupNames([instance("a", {group: "Work"}), instance("b", {group: "Clients"}), instance("c", {group: "Work"})])).toEqual(["Clients", "Work"]);
+    expect(groupInstances([instance("a"), instance("b")]).map((g) => g.name)).toEqual([""]);
   });
 });

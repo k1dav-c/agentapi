@@ -346,3 +346,37 @@ func next(t *testing.T, events <-chan sseEvent) sseEvent {
 		return sseEvent{}
 	}
 }
+
+// A group set on the hub's page stays: through the instance's own events
+// and a restart of the hub.
+func TestHubGroups(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "instances.json")
+	hubSrv := startHub(t, statePath)
+	event := func(id string) map[string]any {
+		return map[string]any{
+			"id": id, "type": "instance.heartbeat", "created_at": time.Now(),
+			"instance": map[string]any{"id": "dev-1:3284", "name": "api", "server_id": "s1", "url": "http://127.0.0.1:1", "agent_type": "claude"},
+		}
+	}
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, event("g1"), hubSecret, time.Now()))
+	path := hubSrv.URL + "/api/instances/" + url.PathEscape("dev-1:3284")
+
+	var changed hub.Instance
+	require.Equal(t, http.StatusOK, request(t, http.MethodPatch, path, hubToken, map[string]string{"group": "  Client   work "}, &changed))
+	assert.Equal(t, "Client work", changed.Group, "spaces are collapsed")
+	assert.Equal(t, http.StatusBadRequest, request(t, http.MethodPatch, path, hubToken, map[string]string{"group": strings.Repeat("長", 41)}, nil))
+	assert.Equal(t, http.StatusBadRequest, request(t, http.MethodPatch, path, hubToken, map[string]string{}, nil))
+	assert.Equal(t, http.StatusNotFound, request(t, http.MethodPatch, hubSrv.URL+"/api/instances/nope", hubToken, map[string]string{"group": "x"}, nil))
+	assert.Equal(t, http.StatusUnauthorized, request(t, http.MethodPatch, path, "", map[string]string{"group": "x"}, nil))
+
+	// The instance's events don't touch it.
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, event("g2"), hubSecret, time.Now()))
+	assert.Equal(t, "Client work", instances(t, hubSrv.URL)[0].Group)
+
+	// A hub that starts again knows it.
+	again := startHub(t, statePath)
+	assert.Equal(t, "Client work", instances(t, again.URL)[0].Group)
+	var ungrouped hub.Instance
+	require.Equal(t, http.StatusOK, request(t, http.MethodPatch, again.URL+"/api/instances/"+url.PathEscape("dev-1:3284"), hubToken, map[string]string{"group": ""}, &ungrouped))
+	assert.Empty(t, ungrouped.Group)
+}

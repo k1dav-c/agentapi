@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -129,6 +130,7 @@ func (h *Hub) Handler() http.Handler {
 		r.Use(h.requireSession)
 		r.Get("/api/instances", h.listInstances)
 		r.Post("/api/instances", h.addInstance)
+		r.Patch("/api/instances/{id}", h.updateInstance)
 		r.Delete("/api/instances/{id}", h.removeInstance)
 		r.Get("/api/events", h.streamEvents)
 		r.Handle("/i/{id}", http.HandlerFunc(h.proxy))
@@ -303,6 +305,35 @@ func (h *Hub) fetchSummary(ctx context.Context, base, token string) (*httpapi.Su
 		return nil, fmt.Errorf("GET /summary: %w", err)
 	}
 	return &summary, nil
+}
+
+// maxGroupName is the longest group name, in characters.
+const maxGroupName = 40
+
+// updateInstance changes what the hub's page sets on an instance (PATCH
+// /api/instances/{id}): {"group": "..."} puts it in a group, "" in none.
+func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Group *string `json:"group"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil || body.Group == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"group\": ...}"})
+		return
+	}
+	group := strings.Join(strings.Fields(*body.Group), " ")
+	if utf8.RuneCountInString(group) > maxGroupName {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("a group name has at most %d characters", maxGroupName)})
+		return
+	}
+	updated, ok, err := h.store.update(instanceParam(r), false, true, func(i *Instance) { i.Group = group })
+	if err != nil {
+		h.logger.Warn("Failed to keep the hub's instances", "error", err)
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such instance"})
+		return
+	}
+	writeJSON(w, http.StatusOK, updated.public())
 }
 
 func (h *Hub) removeInstance(w http.ResponseWriter, r *http.Request) {

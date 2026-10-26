@@ -48,6 +48,9 @@ type Instance struct {
 	AgentType string    `json:"agent_type,omitempty"`
 	Source    Source    `json:"source"`
 	LastSeen  time.Time `json:"last_seen"`
+	// Group is the group someone put the instance in on the hub's page;
+	// empty is none. The instance's own events never change it.
+	Group string `json:"group,omitempty"`
 	// Token, for a manual instance that has its own, is sent to it; it
 	// never leaves the hub.
 	Token string `json:"token,omitempty"`
@@ -106,6 +109,7 @@ type storedInstance struct {
 	LastSeen  time.Time `json:"last_seen"`
 	Token     string    `json:"token,omitempty"`
 	Stopped   bool      `json:"stopped,omitempty"`
+	Group     string    `json:"group,omitempty"`
 }
 
 func newStore(path string) (*store, error) {
@@ -132,7 +136,7 @@ func newStore(path string) (*store, error) {
 		s.instances[si.ID] = &Instance{
 			ID: si.ID, Name: si.Name, URL: si.URL, ServerID: si.ServerID, Hostname: si.Hostname,
 			Port: si.Port, CWD: si.CWD, AgentType: si.AgentType, Source: si.Source,
-			LastSeen: si.LastSeen, Token: si.Token, Connection: connection,
+			LastSeen: si.LastSeen, Token: si.Token, Connection: connection, Group: si.Group,
 		}
 	}
 	return s, nil
@@ -148,7 +152,7 @@ func (s *store) saveLocked() error {
 		stored = append(stored, storedInstance{
 			ID: i.ID, Name: i.Name, URL: i.URL, ServerID: i.ServerID, Hostname: i.Hostname,
 			Port: i.Port, CWD: i.CWD, AgentType: i.AgentType, Source: i.Source,
-			LastSeen: i.LastSeen, Token: i.Token, Stopped: i.Connection == ConnectionStopped,
+			LastSeen: i.LastSeen, Token: i.Token, Stopped: i.Connection == ConnectionStopped, Group: i.Group,
 		})
 	}
 	data, err := json.MarshalIndent(stored, "", "  ")

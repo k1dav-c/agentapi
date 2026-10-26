@@ -1,27 +1,47 @@
 "use client";
 
-import {useCallback, useEffect, useMemo, useState} from "react";
-import {ArrowLeft, Plus, RefreshCw, Trash2} from "lucide-react";
+import {Fragment, useCallback, useEffect, useMemo, useState} from "react";
+import {ArrowLeft, ChevronDown, ChevronRight, FolderPlus, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2} from "lucide-react";
 import {Button} from "@/components/ui/button";
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {agentDisplayName, parseAgentType} from "@/lib/agents";
 import {
   applyHubEvent,
   chatURL,
   displayName,
+  groupInstances,
+  groupNames,
   hubRoot,
   instanceState,
   needsYou,
-  sortInstances,
   stateLabel,
   usagePercent,
   type HubEvent,
+  type HubGroup,
   type HubInstance,
   type InstanceState,
 } from "@/lib/hub";
 import {cn} from "@/lib/utils";
 
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "/chat").replace(/\/$/, "");
+
+// The longest group name the hub takes.
+const maxGroupName = 40;
+// Where the browser keeps which groups are folded.
+const collapsedKey = "agentapi.hub.collapsed";
+
+// A group being named: a new one for an instance, or a rename.
+type Naming = {mode: "new"; id: string} | {mode: "rename"; from: string};
 
 const dotClass: Record<InstanceState, string> = {
   "needs-you": "bg-amber-500",
@@ -45,6 +65,29 @@ export function HubView() {
     typeof window === "undefined" ? undefined : decodeURIComponent(window.location.hash.slice(1)) || undefined,
   );
   const [adding, setAdding] = useState(false);
+  const [naming, setNaming] = useState<Naming | null>(null);
+  // The folded groups, by name ("" for the ungrouped), kept in this browser.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(collapsedKey) ?? "[]"));
+    } catch {
+      return new Set();
+    }
+  });
+  const changeCollapsed = useCallback((change: (next: Set<string>) => void) => {
+    setCollapsed((previous) => {
+      const next = new Set(previous);
+      change(next);
+      try {
+        localStorage.setItem(collapsedKey, JSON.stringify([...next]));
+      } catch {}
+      return next;
+    });
+  }, []);
+  const toggleGroup = (name: string) =>
+    changeCollapsed((next) => {
+      if (!next.delete(name)) next.add(name);
+    });
 
   useEffect(() => {
     if (!root) return;
@@ -81,7 +124,11 @@ export function HubView() {
     return () => source.close();
   }, [signedIn, root]);
 
-  const rows = useMemo(() => sortInstances(instances.values()), [instances]);
+  const groups = useMemo(() => groupInstances(instances.values()), [instances]);
+  const names = useMemo(() => groupNames(instances.values()), [instances]);
+  // Headers only once there is a group: until then the list looks as before.
+  const showHeaders = names.length > 0;
+  const total = instances.size;
   const waiting = needsYou(instances.values());
   useEffect(() => {
     document.title = waiting > 0 ? `(${waiting}) AgentAPI hub` : "AgentAPI hub";
@@ -95,6 +142,24 @@ export function HubView() {
   const forget = async (id: string) => {
     await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {method: "DELETE", credentials: "same-origin"});
     if (selected === id) select(undefined);
+  };
+
+  // The change comes back on the event stream, like any other.
+  const setGroup = async (id: string, group: string) => {
+    await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({group}),
+    });
+  };
+  const renameGroup = async (from: string, to: string) => {
+    // A folded group stays folded under its new name.
+    changeCollapsed((next) => {
+      if (next.delete(from)) next.add(to);
+    });
+    const members = [...instances.values()].filter((instance) => (instance.group?.trim() ?? "") === from);
+    await Promise.all(members.map((instance) => setGroup(instance.id, to)));
   };
 
   if (signedIn === undefined) return <div className="p-4 text-center text-sm text-muted-foreground">Loading the hub...</div>;
@@ -113,7 +178,7 @@ export function HubView() {
           <div className="min-w-0">
             <h1 className="text-sm font-semibold">AgentAPI hub</h1>
             <p className="text-xs text-muted-foreground">
-              {connected ? `${rows.length} instance${rows.length === 1 ? "" : "s"}` : "Reconnecting..."}
+              {connected ? `${total} instance${total === 1 ? "" : "s"}` : "Reconnecting..."}
               {waiting > 0 && ` · ${waiting} need${waiting === 1 ? "s" : ""} you`}
             </p>
           </div>
@@ -122,20 +187,39 @@ export function HubView() {
           </Button>
         </header>
         <ul className="flex-1 overflow-y-auto" aria-label="Instances">
-          {rows.length === 0 && (
+          {total === 0 && (
             <li className="p-4 text-sm text-muted-foreground">
-              No instance yet. On a machine that runs AgentAPI, run <code className="font-mono">agentapi hub join {root}/hooks --secret …</code>, or add one by its URL.
+              No instance yet. On a machine that runs AgentAPI, run <code className="break-all font-mono">agentapi hub join {root}/hooks --secret …</code>, or add one by its URL.
             </li>
           )}
-          {rows.map((instance) => (
-            <InstanceRow
-              key={instance.id}
-              instance={instance}
-              selected={instance.id === selected}
-              onSelect={() => select(instance.id)}
-              onForget={() => void forget(instance.id)}
-            />
-          ))}
+          {groups.map((group) => {
+            const folded = showHeaders && collapsed.has(group.name);
+            return (
+              <Fragment key={group.name || "\u0000"}>
+                {showHeaders && (
+                  <GroupHeader
+                    group={group}
+                    folded={folded}
+                    onToggle={() => toggleGroup(group.name)}
+                    onRename={() => setNaming({mode: "rename", from: group.name})}
+                  />
+                )}
+                {!folded &&
+                  group.instances.map((instance) => (
+                    <InstanceRow
+                      key={instance.id}
+                      instance={instance}
+                      groups={names}
+                      selected={instance.id === selected}
+                      onSelect={() => select(instance.id)}
+                      onForget={() => void forget(instance.id)}
+                      onGroup={(name) => void setGroup(instance.id, name)}
+                      onNewGroup={() => setNaming({mode: "new", id: instance.id})}
+                    />
+                  ))}
+              </Fragment>
+            );
+          })}
         </ul>
       </aside>
       <section className={cn("min-w-0 flex-1 flex-col", current ? "flex" : "hidden md:flex")}>
@@ -159,22 +243,76 @@ export function HubView() {
         )}
       </section>
       <AddInstance root={root} open={adding} onOpenChange={setAdding} onAdded={(id) => select(id)} />
+      <GroupName
+        naming={naming}
+        onClose={() => setNaming(null)}
+        onSave={(name) => {
+          if (naming?.mode === "new") void setGroup(naming.id, name);
+          else if (naming?.mode === "rename") void renameGroup(naming.from, name);
+          setNaming(null);
+        }}
+      />
     </main>
   );
 }
 
-function InstanceRow({instance, selected, onSelect, onForget}: {instance: HubInstance; selected: boolean; onSelect: () => void; onForget: () => void}) {
+function GroupHeader({group, folded, onToggle, onRename}: {group: HubGroup; folded: boolean; onToggle: () => void; onRename: () => void}) {
+  const Chevron = folded ? ChevronRight : ChevronDown;
+  return (
+    <li className="flex items-center gap-1 border-b bg-muted/40 pr-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!folded}
+        className="flex min-w-0 flex-1 items-center gap-1.5 px-3 py-1.5 text-left text-xs font-semibold text-muted-foreground hover:text-foreground"
+      >
+        <Chevron className="size-3.5 shrink-0" aria-hidden />
+        <span className="min-w-0 truncate">{group.name || "Ungrouped"}</span>
+        <span className="shrink-0 font-normal">{group.instances.length}</span>
+        {group.needsYou > 0 && (
+          <span className="shrink-0 rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold text-white" aria-label={`${group.needsYou} need you`}>
+            {group.needsYou}
+          </span>
+        )}
+      </button>
+      {group.name && (
+        <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`Rename the group ${group.name}`} onClick={onRename}>
+          <Pencil className="size-3.5" />
+        </Button>
+      )}
+    </li>
+  );
+}
+
+function InstanceRow({
+  instance,
+  groups,
+  selected,
+  onSelect,
+  onForget,
+  onGroup,
+  onNewGroup,
+}: {
+  instance: HubInstance;
+  groups: string[];
+  selected: boolean;
+  onSelect: () => void;
+  onForget: () => void;
+  onGroup: (name: string) => void;
+  onNewGroup: () => void;
+}) {
   const state = instanceState(instance);
   const summary = instance.summary;
   const usage = usagePercent(summary);
   const agent = instance.agent_type ? agentDisplayName(parseAgentType(instance.agent_type), instance.agent_type) : "";
+  const gone = state === "stopped" || state === "unreachable";
   return (
-    <li className={cn("group border-b", selected && "bg-accent")}>
-      <button type="button" onClick={onSelect} className="flex w-full items-start gap-3 px-3 py-2.5 text-left hover:bg-accent/60">
+    <li className={cn("flex items-start border-b", selected && "bg-accent")}>
+      <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-start gap-3 py-2.5 pr-1 pl-3 text-left hover:bg-accent/60">
         <span className={cn("mt-1.5 size-2.5 shrink-0 rounded-full", dotClass[state])} aria-hidden />
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-2">
-            <span className="truncate text-sm font-medium">{displayName(instance)}</span>
+            <span className="min-w-0 truncate text-sm font-medium">{displayName(instance)}</span>
             <span className={cn("shrink-0 text-xs", state === "needs-you" ? "font-medium text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
               {stateLabel(instance)}
             </span>
@@ -190,14 +328,83 @@ function InstanceRow({instance, selected, onSelect, onForget}: {instance: HubIns
           </span>
         </span>
       </button>
-      {(state === "stopped" || state === "unreachable") && (
-        <div className="hidden justify-end px-3 pb-2 group-hover:flex">
-          <Button variant="ghost" size="sm" onClick={onForget}>
-            <Trash2 /> Forget
+      {/* Not modal: a modal menu that opens the naming dialog leaves the page
+          unclickable once both close (Radix's pointer-events lock). */}
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="mt-1.5 mr-1 size-8 shrink-0" aria-label={`Actions for ${displayName(instance)}`}>
+            <MoreHorizontal />
           </Button>
-        </div>
-      )}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56 max-w-[calc(100vw-1rem)]">
+          <DropdownMenuLabel>Group</DropdownMenuLabel>
+          <DropdownMenuRadioGroup value={instance.group?.trim() ?? ""} onValueChange={onGroup}>
+            <DropdownMenuRadioItem value="">No group</DropdownMenuRadioItem>
+            {groups.map((name) => (
+              <DropdownMenuRadioItem key={name} value={name}>
+                <span className="truncate">{name}</span>
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+          <DropdownMenuItem onSelect={onNewGroup}>
+            <FolderPlus /> New group…
+          </DropdownMenuItem>
+          {gone && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onSelect={onForget}>
+                <Trash2 /> Forget
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </li>
+  );
+}
+
+// GroupName names a new group for an instance, or renames a group.
+function GroupName({naming, onClose, onSave}: {naming: Naming | null; onClose: () => void; onSave: (name: string) => void}) {
+  const [name, setName] = useState("");
+  useEffect(() => {
+    setName(naming?.mode === "rename" ? naming.from : "");
+  }, [naming]);
+  const trimmed = name.trim().replace(/\s+/g, " ");
+  return (
+    <Dialog open={naming !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (trimmed) onSave(trimmed);
+          }}
+          className="space-y-3"
+        >
+          <DialogHeader>
+            <DialogTitle>{naming?.mode === "rename" ? "Rename the group" : "New group"}</DialogTitle>
+            <DialogDescription>
+              {naming?.mode === "rename"
+                ? "Every instance in the group moves to the new name."
+                : "The instance moves to the new group. Groups are kept on the hub, so every browser sees them."}
+            </DialogDescription>
+          </DialogHeader>
+          <input
+            autoFocus
+            value={name}
+            maxLength={maxGroupName}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Group name"
+            aria-label="Group name"
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+          />
+          <DialogFooter>
+            <Button type="submit" disabled={!trimmed}>
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

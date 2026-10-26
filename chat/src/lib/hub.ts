@@ -20,6 +20,8 @@ export interface HubInstance {
   last_seen: string;
   connection: HubConnection;
   error?: string;
+  // group is the group someone put it in on the hub's page; none when empty.
+  group?: string;
   summary?: Summary | null;
 }
 
@@ -143,4 +145,31 @@ export function usagePercent(summary: Summary | null | undefined): number | unde
     if (limit.used_percent !== undefined) fullest = Math.max(fullest ?? 0, limit.used_percent);
   }
   return fullest;
+}
+
+// A group of rows: name is "" for the instances in no group.
+export interface HubGroup {
+  name: string;
+  instances: HubInstance[];
+  needsYou: number;
+}
+
+// groupInstances splits the rows into their groups, by name, with the
+// instances in no group last; each group's rows in sortInstances order.
+export function groupInstances(instances: Iterable<HubInstance>): HubGroup[] {
+  const byName = new Map<string, HubInstance[]>();
+  for (const instance of sortInstances(instances)) {
+    const name = instance.group?.trim() ?? "";
+    byName.set(name, [...(byName.get(name) ?? []), instance]);
+  }
+  return [...byName.entries()]
+    .sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)))
+    .map(([name, rows]) => ({name, instances: rows, needsYou: needsYou(rows)}));
+}
+
+// groupNames lists the groups in use, by name.
+export function groupNames(instances: Iterable<HubInstance>): string[] {
+  const names = new Set<string>();
+  for (const instance of instances) if (instance.group?.trim()) names.add(instance.group.trim());
+  return [...names].sort((a, b) => a.localeCompare(b));
 }
