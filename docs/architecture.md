@@ -83,7 +83,7 @@ answers write keys directly to the agent's terminal.
 
 | Path | What it holds |
 | --- | --- |
-| `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, transport, starting the agent, signals), `attach`, and `update` (self-update with checksum verification) |
+| `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, transport, starting the agent, signals), `attach`, `list` (the registered AgentAPIs and their summaries), and `update` (self-update with checksum verification) |
 | `lib/httpapi/` | The HTTP server: routes and handlers, the `EventEmitter`, the queue, token auth, webhooks, the MCP, files and terminal endpoints, and the embedded chat UI |
 | `lib/conversation/` | Shared types (imported as `conv`): messages, roles, status and error levels. The server calls transports through `Conversation`; transports report changes through `Emitter` |
 | `lib/screentracker/` | The PTY conversation: screen snapshots, message splitting, stability detection, and typing parts into the agent's terminal (`AgentIO`, `TerminalPart`) |
@@ -101,6 +101,7 @@ answers write keys directly to the agent's terminal.
 | `lib/native/nativetest` | A scriptable fake adapter for tests |
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db` (native and PTY), and the import of a `--state-file` |
+| `lib/registry/` | The entries of the AgentAPIs running on a machine (`~/.agentapi/instances`): writing one atomically, listing them and removing those whose process is gone |
 | `lib/shellterm/` | The shared shell terminal of native sessions |
 | `lib/htmlpreview/` | Makes HTML previews self-contained for `GET /files/preview` by embedding resources referenced by relative paths as data: URLs |
 | `lib/mcpconfig/` | Reads and writes the agents' MCP configuration files |
@@ -138,8 +139,10 @@ answers write keys directly to the agent's terminal.
    a file written for another agent type, transport or working directory),
    creates the conversation, registers the routes, and starts the conversation,
    the queue loop, the webhook dispatcher and (PTY) the session-log watcher.
+   `Start` listens, then writes the registry entry (unless `--registry=false`)
+   and serves.
 5. On SIGINT, SIGTERM or SIGHUP, or when the agent exits, the webhook sends
-   `instance.stopped`, a restart under way is cancelled, the HTTP server
+   `instance.stopped`, the registry entry is removed, a restart under way is cancelled, the HTTP server
    shuts down, the queue loop and the session-log watcher stop, a native or
    PTY agent that still runs and the shell terminal are closed, and the
    state DB is flushed and closed. SIGUSR1 flushes the state DB without
@@ -167,7 +170,7 @@ The handlers are grouped by file:
 | `server.go`, `routes.go`, `hosts.go`, `middleware.go` | The server's setup, start and stop; the routes, which each feature registers; allowed hosts and origins; request logging |
 | `conversation_api.go`, `queue.go`, `sse.go`, `jsonl_watcher.go` | Messages, status and timeline; the queue, its dispatch and `queue_update`; `GET /events` and the screen stream; the PTY transport's session log watcher |
 | `tasks.go` | The tasks the emitter derives from the conversation (`taskTracker`), `task_update` and `GET /tasks` |
-| `summary.go` | The summary for clients that watch many AgentAPIs (`attention`, title, latest task), `summary_update` and `GET /summary` |
+| `summary.go`, `registry.go` | The summary for clients that watch many AgentAPIs (`attention`, title, latest task, `unread`), `summary_update`, `GET /summary` and `POST /tasks/seen`; the server's registry entry (`instanceRegistry`) |
 | `backend.go`, `backend_pty.go`, `backend_native.go` | What depends on the transport: dispatching the queue and the work each tick (`beforeQueue`: a scheduled continuation, Codex's update prompt), delivering a message, restarts (`beginRestart`, `beginReload`), the human-reply protocol (`handoffOffer`, `answerHandoff`) |
 | `setup.go` | Starting the process of a PTY or ACP agent |
 | `native.go` | Requests, settings, interrupt, compaction, login retry; the native observer |
@@ -420,7 +423,12 @@ usage limit stop, login, terminal prompt) and the latest screen.
   `summary_update` only if the summary differs. Growing reply text therefore
   sends no summary update. Only `/events?only=summary` subscribes to these
   updates; its stream also sends heartbeats. `PUT /webhook` triggers another
-  check because it can change the instance ID and URL.
+  check, and rewrites the registry entry, because it can change the instance
+  ID and URL.
+- The emitter also keeps when a client last showed the conversation
+  (`POST /tasks/seen`, which the chat calls while it shows it): the latest
+  task is `unread` when it ended after that. The state DB keeps it; a restore
+  without it takes the restored tasks as seen.
 - `/internal/screen` streams the screen as `screen` events for TTY mode.
 - A status change between `running` and `stable` triggers the
   `run.status_changed` webhook event. The webhook observer subscribes to the
@@ -462,7 +470,8 @@ use persistence.
   directory, the epoch and seq, the session reference and name, the
   settings chosen for the session, a usage limit stop, the webhook settings
   changed through the API (with a fingerprint of the startup flags, which win
-  when they change) and the initial prompt a PTY conversation got.
+  when they change), the initial prompt a PTY conversation got and when a
+  client last showed the conversation (`seen_at`).
 - Writes are queued and flushed every 200 ms in a transaction, so streaming
   never waits for the disk. A clean shutdown marks the file clean; after a
   crash the conversation gets a new epoch and clients load it again in full.

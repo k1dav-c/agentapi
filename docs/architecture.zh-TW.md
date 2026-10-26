@@ -80,7 +80,7 @@ flowchart TB
 
 | 路徑 | 內容 |
 | --- | --- |
-| `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、transport、啟動 agent、訊號）、`attach`，以及 `update`（會驗證 checksum 的自我更新） |
+| `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、transport、啟動 agent、訊號）、`attach`、`list`（已登記的 AgentAPI 和它們的摘要），以及 `update`（會驗證 checksum 的自我更新） |
 | `lib/httpapi/` | HTTP 伺服器：路由與處理常式、`EventEmitter`、佇列、token 驗證、webhook、MCP／檔案／終端機端點，以及嵌入的聊天介面 |
 | `lib/conversation/` | 共用型別（以 `conv` 匯入）：訊息、角色、狀態與錯誤等級。伺服器透過 `Conversation` 呼叫 transport，transport 透過 `Emitter` 回報變更 |
 | `lib/screentracker/` | PTY 對話：畫面快照、訊息切分、穩定狀態偵測，以及把訊息片段輸入 agent 的終端機（`AgentIO`、`TerminalPart`） |
@@ -98,6 +98,7 @@ flowchart TB
 | `lib/native/nativetest` | 測試用、可以寫腳本控制的假 adapter |
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
 | `lib/statedb/` | `--state-db` 的 SQLite 持久保存（native 與 PTY），以及 `--state-file` 的匯入 |
+| `lib/registry/` | 一台機器上執行中 AgentAPI 的登記檔（`~/.agentapi/instances`）：以原子方式寫入、列出，並刪除行程已不在的登記檔 |
 | `lib/shellterm/` | Native 工作階段共用的 shell 終端機 |
 | `lib/htmlpreview/` | 為 `GET /files/preview` 將相對路徑引用的資源嵌入為 data: URL，產生可獨立顯示的 HTML 預覽 |
 | `lib/mcpconfig/` | 讀寫各 agent 的 MCP 設定檔 |
@@ -127,8 +128,9 @@ flowchart TB
    並執行資料表結構的 migration；資料庫還沒有對話時，會匯入 `--state-file`。
 4. `httpapi.NewServer` 建立 emitter、還原保存的狀態（檔案若屬於其他 agent 類型、transport 或
    工作目錄就拒絕使用）、建立對話、註冊路由，並啟動對話、佇列迴圈、webhook 傳送器，以及
-   （PTY 的）工作階段紀錄監看器。
-5. 收到 SIGINT、SIGTERM 或 SIGHUP，或 agent 自行結束時，webhook 會送出 `instance.stopped`，進行中的
+   （PTY 的）工作階段紀錄監看器。`Start` 開始監聽後寫入登記檔（除非 `--registry=false`），
+   再開始服務。
+5. 收到 SIGINT、SIGTERM 或 SIGHUP，或 agent 自行結束時，webhook 會送出 `instance.stopped`，登記檔會被刪除，進行中的
    重新啟動會被取消，HTTP 伺服器關閉，佇列迴圈與工作階段紀錄監看器停止，仍在執行的 native 或 PTY
    agent 以及 shell 終端機會被關閉，狀態資料庫會寫入並關閉。收到 SIGUSR1 時只寫入狀態資料庫，
    不會停止。
@@ -151,7 +153,7 @@ flowchart TB
 | `server.go`、`routes.go`、`hosts.go`、`middleware.go` | 伺服器的設定、啟動與停止；各功能自行註冊的路由；允許的主機與來源；請求記錄 |
 | `conversation_api.go`、`queue.go`、`sse.go`、`jsonl_watcher.go` | 訊息、狀態與時間軸；佇列、派送與 `queue_update`；`GET /events` 與畫面串流；PTY 傳輸的工作階段紀錄監看 |
 | `tasks.go` | emitter 從對話推導出的任務（`taskTracker`）、`task_update` 與 `GET /tasks` |
-| `summary.go` | 給監看多個 AgentAPI 的用戶端的摘要（`attention`、標題、最新任務）、`summary_update` 與 `GET /summary` |
+| `summary.go`、`registry.go` | 給監看多個 AgentAPI 的用戶端的摘要（`attention`、標題、最新任務、`unread`）、`summary_update`、`GET /summary` 與 `POST /tasks/seen`；伺服器的登記檔（`instanceRegistry`） |
 | `backend.go`、`backend_pty.go`、`backend_native.go` | 依 transport 而不同的部分：派送佇列與每次檢查要做的事（`beforeQueue`：排定的繼續、Codex 的更新提示）、送出訊息、重新啟動（`beginRestart`、`beginReload`）、人工回覆協定（`handoffOffer`、`answerHandoff`） |
 | `setup.go` | 啟動 PTY 或 ACP agent 的行程 |
 | `native.go` | 請求、設定、中斷、壓縮、重試登入；native observer |
@@ -359,7 +361,10 @@ type Factory func(resume Resume) (Adapter, error)
   原因）、標題、最新任務、待處理請求、佇列和用量。有摘要訂閱者時，畫面以外的每次變更都會觸發
   重新計算，摘要不同才送出 `summary_update`；因此回覆文字增長不會觸發摘要更新。
   只有 `/events?only=summary` 訂閱這些更新，串流另會送出心跳。`PUT /webhook` 可修改
-  instance 的 ID 與網址，因此也會觸發摘要檢查。
+  instance 的 ID 與網址，因此也會觸發摘要檢查，並重寫登記檔。
+- emitter 也記錄用戶端上次顯示對話的時間（`POST /tasks/seen`，聊天介面顯示對話時會呼叫）：
+  最新任務在那之後才結束時就是 `unread`。狀態資料庫會保存這個時間；還原時若沒有，還原的任務
+  視為已讀。
 - `/internal/screen` 以 `screen` 事件為 TTY mode 串流畫面。
 - 狀態在 `running` 與 `stable` 之間切換時，會觸發 `run.status_changed` webhook 事件。webhook
   observer 像 `/events` 用戶端一樣訂閱 emitter，把它的事件轉成其他 webhook 事件：emitter 的任務
@@ -391,7 +396,8 @@ native 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之
   任務以伺服器編碼後的形式、依開始它的訊息 ID 保存），以及
   `meta`：保存 agent 類型、transport 和工作目錄、epoch 與 seq、工作階段參照與名稱、為
   工作階段選擇的設定、用量限制造成的停止、透過 API 修改的 webhook 設定（附啟動參數的指紋，
-  參數改變時以參數為準），以及 PTY 對話收到的 initial prompt。
+  參數改變時以參數為準）、PTY 對話收到的 initial prompt，以及用戶端上次顯示對話的時間
+  （`seen_at`）。
 - 寫入會先排隊，每 200 毫秒在一個交易中寫入，所以串流不必等待磁碟。正常關閉時會將檔案標示為
   已正常關閉；當機之後，對話會換成新的 epoch，用戶端會重新載入完整的對話。
 - 檔案以獨占鎖定模式搭配 WAL 開啟，所以第二個 AgentAPI 無法使用它；新建立的檔案權限為 0600。

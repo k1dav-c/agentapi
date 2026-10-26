@@ -491,6 +491,7 @@ func (p *recordingPersister) SetSessionName(string)           {}
 func (p *recordingPersister) SetSessionRef(string)            {}
 func (p *recordingPersister) SetSettings(native.Settings)     {}
 func (p *recordingPersister) SetLimitStop(*native.LimitStop)  {}
+func (p *recordingPersister) SetSeenAt(time.Time)             {}
 func (p *recordingPersister) PutTask(id int, data []byte, _ uint64) {
 	if p.tasks == nil {
 		p.tasks = map[int]string{}

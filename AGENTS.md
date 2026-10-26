@@ -50,7 +50,7 @@ to PTY mode, which parses terminal output. Experimental ACP mode uses the Agent 
 ### Core components
 
 - `main.go` - Entry point using the Cobra CLI framework
-- `cmd/` - CLI command definitions, including server, attach, and update
+- `cmd/` - CLI command definitions, including server, attach, list, and update
 - `lib/httpapi/` - HTTP server, routes, OpenAPI schema, instance summaries for monitoring multiple AgentAPIs (`GET /summary`, `/events?only=summary`), and webhooks that push events (tasks, requests, messages, heartbeats) to a receiver
 - `lib/conversation/` - Shared messages, status, and the `Conversation` and `Emitter` interfaces (imported as `conv`)
 - `lib/screentracker/` - The PTY engine: terminal output parsing and message splitting
@@ -62,6 +62,7 @@ to PTY mode, which parses terminal output. Experimental ACP mode uses the Agent 
 - `lib/jsonlwatcher/` - Tails a PTY agent's session log for rich messages
 - `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation
 - `lib/statedb/` - SQLite persistence of conversations, native and PTY (`--state-db`; a deprecated `--state-file` is imported into it)
+- `lib/registry/` - The registry of the AgentAPIs running on a machine (`~/.agentapi/instances`), which `agentapi list` reads
 - `chat/` - Next.js web UI (embedded into Go binary)
 
 ### Shared architecture

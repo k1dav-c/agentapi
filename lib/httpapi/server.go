@@ -75,6 +75,7 @@ type Server struct {
 	mcpStore           mcpconfig.Store
 	mcpMu              sync.Mutex
 	webhook            *webhookDispatcher
+	registry           *instanceRegistry // nil without a registry directory
 	handoff            handoffState
 	restartAgent       func(context.Context) (int, error)
 	updateAgent        func(context.Context)
@@ -125,6 +126,9 @@ type ServerConfig struct {
 	// Bind is the address the server listens on: an IP address or hostname
 	// without a port. Empty listens on all interfaces.
 	Bind string
+	// RegistryDir, if set, is where the server writes an entry while it
+	// serves, for clients that find the AgentAPIs of a machine there.
+	RegistryDir string
 }
 
 // PTYConfig is what the PTY transport needs.
@@ -416,6 +420,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		}
 	}
 	s.startWebhook(config)
+	s.registry = s.newInstanceRegistry(config.RegistryDir, bind)
 
 	// Register API routes
 	s.registerRoutes()
@@ -481,7 +486,23 @@ func (s *Server) ListenAddr() string {
 // Start serves HTTP until Stop. After Stop it returns http.ErrServerClosed
 // at once, even when Stop came first.
 func (s *Server) Start() error {
-	return s.srv.ListenAndServe()
+	listener, err := net.Listen("tcp", s.srv.Addr)
+	if err != nil {
+		return err
+	}
+	if s.registry != nil {
+		s.registry.listening(listener.Addr())
+	}
+	return s.srv.Serve(listener)
+}
+
+// instanceChanged tells the summary's subscribers and the registry that
+// the instance's ID or URL may have changed.
+func (s *Server) instanceChanged() {
+	s.emitter.SummaryChanged()
+	if s.registry != nil {
+		s.registry.changed()
+	}
 }
 
 // Stop gracefully stops the HTTP server and the agent. It is safe to call
@@ -491,6 +512,9 @@ func (s *Server) Stop(ctx context.Context) error {
 	s.stopOnce.Do(func() {
 		// Tells the webhook's receiver, while it can still be sent.
 		s.webhook.stop(ctx)
+		if s.registry != nil {
+			s.registry.stop()
+		}
 		// Ends the queue loop and the event streams, which the HTTP
 		// shutdown would otherwise wait for.
 		s.shutdown()

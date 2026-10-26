@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/registry"
 )
 
 // serverOptions are the settings of `agentapi server`, from its flags and
@@ -57,6 +58,9 @@ type serverOptions struct {
 	webhook httpapi.WebhookConfig
 	// name is what clients that watch many AgentAPIs call this one.
 	name string
+	// registryDir is where the server keeps its entry while it serves;
+	// empty without --registry.
+	registryDir string
 }
 
 // flagSource is where the options are read from: the viper the flags are
@@ -94,6 +98,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 		autoContinue:   flags.GetBool(FlagAutoContinue),
 		prices:         flags.GetString(FlagPrices),
 		name:           flags.GetString(FlagName),
+		registryDir:    flags.GetString(FlagRegistryDir),
 		webhook: httpapi.WebhookConfig{
 			URL:             flags.GetString(FlagWebhookURL),
 			Timeout:         flags.GetDuration(FlagWebhookTimeout),
@@ -122,6 +127,14 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 	}
 	if opts.stateFile != "" && opts.stateDB == "" {
 		opts.stateDB = stateDBForFile(opts.stateFile)
+	}
+	switch {
+	case !flags.GetBool(FlagRegistry):
+		opts.registryDir = ""
+	case opts.registryDir == "":
+		if opts.registryDir, err = registry.DefaultDir(); err != nil {
+			return serverOptions{}, fmt.Errorf("%w; set --registry-dir or --registry=false", err)
+		}
 	}
 	if opts.transport, err = transportOption(flags, opts.agentType, opts.agent, opts.stateFile != ""); err != nil {
 		return serverOptions{}, err

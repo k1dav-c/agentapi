@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
@@ -113,6 +114,9 @@ func emitterStateFromSnapshot(snap statedb.Snapshot) EmitterState {
 		Seq:           snap.Seq(),
 		SessionEvents: snap.Events,
 		SessionName:   snap.Meta[statedb.MetaSessionName],
+	}
+	if seen, err := time.Parse(time.RFC3339Nano, snap.Meta[statedb.MetaSeenAt]); err == nil {
+		state.SeenAt = seen
 	}
 	for _, m := range snap.Messages {
 		state.Messages = append(state.Messages, m.Message)

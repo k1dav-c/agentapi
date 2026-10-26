@@ -673,3 +673,36 @@ func TestEvents_TaskUpdatesAreOptIn(t *testing.T) {
 	assert.NotContains(t, plain, "session_sync")
 	assert.Contains(t, eventNames(t, n.url+"/events?sync=1"), "task_update")
 }
+
+// A task that ended unseen is still unread after a restart; one a client
+// saw isn't.
+func TestStateDB_KeepsSeen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	n, srv, db, err := persistentServer(t, path, "/work")
+	require.NoError(t, err)
+	summary := func() httpapi.SummaryBody {
+		var body httpapi.SummaryBody
+		require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/summary", nil, &body))
+		return body
+	}
+	n.do(http.MethodPost, "/tasks/seen", nil, nil)
+	n.send("Fix the bug", "")
+	require.Eventually(t, func() bool { return summary().Task != nil }, 5*time.Second, 5*time.Millisecond)
+	n.factory.Last().Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+	require.Eventually(t, func() bool { return summary().Unread }, 5*time.Second, 5*time.Millisecond)
+	stop(t, srv, db)
+
+	n, srv, db, err = persistentServer(t, path, "/work")
+	require.NoError(t, err)
+	assert.True(t, summary().Unread, "still unread")
+	var seen httpapi.SummaryBody
+	require.Equal(t, http.StatusOK, n.do(http.MethodPost, "/tasks/seen", nil, &seen))
+	assert.False(t, seen.Unread)
+	stop(t, srv, db)
+
+	n, srv, db, err = persistentServer(t, path, "/work")
+	require.NoError(t, err)
+	defer stop(t, srv, db)
+	assert.False(t, summary().Unread)
+	assert.True(t, seen.SeenAt.Equal(summary().SeenAt))
+}

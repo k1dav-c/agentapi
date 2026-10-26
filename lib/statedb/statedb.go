@@ -74,6 +74,10 @@ const (
 	// MetaInitialPrompt is the initial prompt the conversation got (PTY):
 	// after a restart it goes out again only if it changed.
 	MetaInitialPrompt = "initial_prompt"
+	// MetaSeenAt is when a client last showed the conversation to the
+	// user (RFC 3339), which tells a task that ended since as unread. A
+	// reset keeps it.
+	MetaSeenAt = "seen_at"
 	// metaSettings holds the settings chosen for the session (JSON). A
 	// reset keeps them.
 	metaSettings    = "settings"
@@ -496,6 +500,11 @@ func (s Snapshot) Settings() (native.Settings, error) {
 }
 
 // SetLimitStop stores the turn a usage limit stopped; nil removes it.
+// SetSeenAt stores when a client last showed the conversation.
+func (d *DB) SetSeenAt(at time.Time) {
+	d.SetMeta(MetaSeenAt, at.UTC().Format(time.RFC3339Nano))
+}
+
 func (d *DB) SetLimitStop(ls *native.LimitStop) {
 	value := ""
 	if ls != nil {

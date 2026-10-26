@@ -455,6 +455,11 @@ While the tab is in the background, its icon shows an amber dot when the agent n
 while it works and a green dot when a task finishes. With notifications on, the browser also shows
 "*Agent* needs you" or "*Agent* finished".
 
+When a task ends while the chat is visible, or the chat becomes visible after one ended, it tells
+the server you saw it (`POST /tasks/seen`), so a dashboard that watches many AgentAPIs, `agentapi
+list` and other tabs stop showing the task as unread (see the README's
+[Watching many instances](../README.md#watching-many-instances)).
+
 The agent's warnings and errors (a turn that failed, a setting it ignores) show as notifications in
 the corner that stay until you close them. A closed one stays closed after a reload, although the
 server sends its recent ones again on every connection; a warning the agent repeats on every start
