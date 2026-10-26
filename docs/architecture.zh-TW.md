@@ -80,7 +80,7 @@ flowchart TB
 
 | 路徑 | 內容 |
 | --- | --- |
-| `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、transport、啟動 agent、訊號）、`attach`、`list`（已登記的 AgentAPI 和它們的摘要），以及 `update`（會驗證 checksum 的自我更新） |
+| `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、transport、啟動 agent、訊號）、`attach`、`list`（已登記的 AgentAPI 和它們的摘要）、`hub`（`join`、`leave`、`status`：設定檔和執行中 AgentAPI 的 hub webhook），以及 `update`（會驗證 checksum 的自我更新） |
 | `lib/httpapi/` | HTTP 伺服器：路由與處理常式、`EventEmitter`、佇列、token 驗證、webhook、MCP／檔案／終端機端點，以及嵌入的聊天介面 |
 | `lib/conversation/` | 共用型別（以 `conv` 匯入）：訊息、角色、狀態與錯誤等級。伺服器透過 `Conversation` 呼叫 transport，transport 透過 `Emitter` 回報變更 |
 | `lib/screentracker/` | PTY 對話：畫面快照、訊息切分、穩定狀態偵測，以及把訊息片段輸入 agent 的終端機（`AgentIO`、`TerminalPart`） |
@@ -98,6 +98,7 @@ flowchart TB
 | `lib/native/nativetest` | 測試用、可以寫腳本控制的假 adapter |
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
 | `lib/statedb/` | `--state-db` 的 SQLite 持久保存（native 與 PTY），以及 `--state-file` 的匯入 |
+| `lib/userconfig/` | 使用者的設定檔 `~/.agentapi/config.yaml`：以旗標名稱設定，`agentapi server` 讀取、`agentapi hub` 寫入 |
 | `lib/registry/` | 一台機器上執行中 AgentAPI 的登記檔（`~/.agentapi/instances`）：以原子方式寫入、列出，並刪除行程已不在的登記檔 |
 | `lib/shellterm/` | Native 工作階段共用的 shell 終端機 |
 | `lib/htmlpreview/` | 為 `GET /files/preview` 將相對路徑引用的資源嵌入為 data: URL，產生可獨立顯示的 HTML 預覽 |
@@ -115,7 +116,8 @@ flowchart TB
 
 `agentapi server [旗標] -- <agent 指令>`（`cmd/server/server.go`）：
 
-1. 旗標來自命令列或 `AGENTAPI_*` 環境變數（viper）。agent 類型取自 `--type`；沒有指定時，
+1. 旗標依序來自命令列、`AGENTAPI_*` 環境變數或 `~/.agentapi/config.yaml`（`--config`；viper；
+   `cmd/server/userconfig.go` 會記下不是旗標的名稱，讀不了的檔案則略過）。agent 類型取自 `--type`；沒有指定時，
    若 agent 指令符合已知類型別名，就採用該類型；否則使用 `custom`。transport 取自
    `--transport`；沒有指定時，`hasNativeAdapter` 涵蓋的 agent（Claude Code、Codex、Pi 和
    `native-demo`）使用 native（除非設定了已棄用的 `--state-file`），其他 agent 使用 PTY。

@@ -1186,6 +1186,24 @@ webhook 事件使用同一份 `instance` 身分資訊，方便接收 webhook 或
 使用 [API token](#api-token-驗證) 時，以 `fetch` 加上 `Authorization` 標頭讀取串流；
 `EventSource` 無法設定該標頭。
 
+#### 加入 hub
+
+hub 是監看多個 AgentAPI 的接收端，例如放在常開的 workspace、透過 VPN 連到其他機器的那一個。
+[`agentapi hub join`](#agentapi-hub) 不必改變 AgentAPI 的啟動方式就能把一台機器上的 AgentAPI
+接到 hub，所以由腳本以固定參數啟動的 AgentAPI（例如 Coder workspace 的）也適用：
+
+```bash
+sudo agentapi update   # 最新版才會讀設定檔
+agentapi hub join http://hub.vpn:8080/hooks --secret "$HUB_SECRET" --public-url 'http://dev-1.vpn:{port}'
+```
+
+`join` 會把 hub 的 webhook（`webhook-url`、`webhook-secret`、`webhook-events`、`public-url`）寫進
+`~/.agentapi/config.yaml`，這個使用者的每個 `agentapi server` 啟動時都會讀取；同時套用到正在執行、
+已登記的 AgentAPI：它們會立刻送 `instance.heartbeat` 給 hub。重新啟動（例如 workspace 重開）後，
+AgentAPI 會依設定檔送出 `instance.started`。`--public-url` 是 hub 連回它們的網址，`{port}` 和
+`{hostname}` 會替每個實例填入。1.2 之前啟動的 AgentAPI 沒有登記，需要重新啟動一次。
+`agentapi hub status` 顯示 hub 以及每個執行中的 AgentAPI 回報到哪裡；`agentapi hub leave` 會移除 hub。
+
 ### Webhook
 
 AgentAPI 會把 JSON 事件 POST 到 `--webhook-url`，例如同時監看多個 agent 的中控平台。
@@ -1195,7 +1213,7 @@ AgentAPI 會把 JSON 事件 POST 到 `--webhook-url`，例如同時監看多個 
 | 事件 | 何時送出 | `data` |
 | --- | --- | --- |
 | `run.status_changed` | agent 在 `running` 與 `stable` 之間切換 | `status`、`previous_status`、`server_id`、`agent_type`、`transport` |
-| `instance.started`、`instance.heartbeat`、`instance.stopped` | AgentAPI 啟動時、每隔 `--webhook-heartbeat`（60 秒），以及關閉時 | agent 的狀況：`status`、`lifecycle`、`session_name`、`pending_requests`、`queued_messages`，以及有值時的 `agent_session_id`、`terminal_prompt`、`login_required`、`limit_stop`、`usage`、`settings` |
+| `instance.started`、`instance.heartbeat`、`instance.stopped` | AgentAPI 啟動時、每隔 `--webhook-heartbeat`（60 秒）、`PUT /webhook` 把 webhook 指向新網址時，以及關閉時 | agent 的狀況：`status`、`lifecycle`、`session_name`、`pending_requests`、`queued_messages`，以及有值時的 `agent_session_id`、`terminal_prompt`、`login_required`、`limit_stop`、`usage`、`settings` |
 | `task.started` | [任務](#任務)開始：你的一則訊息送到 agent | 任務，同 `GET /tasks`：`id`（那則訊息的 ID）、`status`、`prompt`、`started_at` |
 | `task.completed`、`task.failed` | [任務](#任務)結束：`completed`，或 `failed` 與 `limited`（`task.failed`） | 任務加上 `status`、`ended_at`、`duration_seconds`、agent 最後一則訊息（`reply`、`reply_id`）、`steered`、`errors`、`limit`、`session_name`，以及 native Claude Code、Codex 和 Pi 的 API 等價花費 `cost`（見[工作階段花費](#工作階段花費)） |
 | `request.opened`、`request.closed` | 核准、提問或計畫（native；請求內容同 `GET /requests`），或終端機對話框（PTY；`kind` 為 `terminal_prompt`，附 `prompt`）開啟或關閉 | 請求 |
@@ -1562,6 +1580,18 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 每個旗標都可以改用環境變數設定：`AGENTAPI_` 加上大寫的旗標名稱，並把 `-` 換成 `_`
 （例如 `AGENTAPI_ALLOWED_HOSTS`）。清單在旗標中以逗號分隔，在環境變數中以空白分隔。
 
+也可以寫在 `~/.agentapi/config.yaml`（`--config` 可指定其他檔案），以旗標名稱為 key，套用到這個
+使用者啟動的每個伺服器；旗標或環境變數會覆蓋它。不是旗標名稱的設定會記在 log 中；讀不了的檔案會
+記下並略過，agent 仍會啟動。[`agentapi hub join`](#agentapi-hub) 會寫入這個檔案；含有 secret 時
+請只讓擁有者讀取（`chmod 600`）。
+
+```yaml
+webhook-url: http://hub.vpn:8080/hooks
+webhook-secret: s3cret
+webhook-events: [instance.*, task.*, request.*]
+public-url: http://dev-1.vpn:{port}
+```
+
 | 旗標 | 預設值 | 說明 |
 | --- | --- | --- |
 | `-t`, `--type` | 由 agent 指令判斷 | agent 類型；見[支援的 agent](#支援的-agent) |
@@ -1589,7 +1619,8 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 | `--name` | 工作目錄的名稱 | 監看多個 AgentAPI 的用戶端顯示的名稱 |
 | `--registry` | `true` | 執行期間在登記目錄保留登記檔；見[監看多個實例](#監看多個實例) |
 | `--registry-dir` | `~/.agentapi/instances` | 登記目錄 |
-| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中 |
+| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會被填入 |
+| `--config` | `~/.agentapi/config.yaml` | 設定檔：以旗標名稱設定，優先順序低於旗標和環境變數 |
 | `--webhook-timeout` | `10s` | 每次傳送的逾時時間 |
 | `--webhook-max-attempts` | `3` | 傳送的嘗試次數 |
 | `--webhook-payload-template` | | POST 內容的 Go `text/template` 範本 |
@@ -1624,6 +1655,22 @@ frontend  codex   working                http://localhost:3285  Add the settings
 
 `--json` 以 JSON 輸出登記檔和摘要，`--registry-dir` 讀取其他目錄，`--api-token`（或
 `AGENTAPI_API_TOKEN`）會送給需要 token 的實例。
+
+### `agentapi hub`
+
+把這台機器上的 AgentAPI 接到 hub；見[加入 hub](#加入-hub)。
+
+```bash
+agentapi hub join http://hub.vpn:8080/hooks --secret "$HUB_SECRET" --public-url 'http://dev-1.vpn:{port}'
+agentapi hub status
+agentapi hub leave
+```
+
+`join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 AgentAPI。
+`--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`、
+`task.*`、`request.*`、`login.*`、`limit.*`、`agent.error`），`--public-url` 是 hub 連回它們的網址，
+`--api-token`（或 `AGENTAPI_API_TOKEN`）會送給需要 token 的實例，`--config` 和 `--registry-dir`
+可指定其他檔案。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。
 
 ### `agentapi attach`
 

@@ -1400,6 +1400,26 @@ For a browser client on another origin, add that origin to
 [`--allowed-origins`](#allowed-origins). To send an [API token](#api-token-authentication), read the
 stream with `fetch` and an `Authorization` header; `EventSource` can't set that header.
 
+#### Joining a hub
+
+A hub is the receiver that watches many AgentAPIs, such as one in an always-on workspace that
+reaches the others over a VPN. [`agentapi hub join`](#agentapi-hub) connects a machine's AgentAPIs
+to it without changing how they start, so it also works for AgentAPIs a script starts with fixed
+flags, such as a Coder workspace's:
+
+```bash
+sudo agentapi update   # the latest release reads the config file
+agentapi hub join http://hub.vpn:8080/hooks --secret "$HUB_SECRET" --public-url 'http://dev-1.vpn:{port}'
+```
+
+`join` writes the hub's webhook (`webhook-url`, `webhook-secret`, `webhook-events`, `public-url`)
+into `~/.agentapi/config.yaml`, which every `agentapi server` of the user reads when it starts, and
+applies it to the registered AgentAPIs running now: each sends `instance.heartbeat` to the hub at
+once. After a restart (of the workspace, say) the AgentAPIs send `instance.started` from the file.
+`--public-url` is where the hub reaches them; `{port}` and `{hostname}` are filled in for each.
+AgentAPIs that started before 1.2 aren't registered: restart them once. `agentapi hub status` shows
+the hub and where each running AgentAPI reports; `agentapi hub leave` removes it.
+
 ### Webhooks
 
 AgentAPI POSTs JSON events to `--webhook-url`, for example to a dashboard monitoring several agents.
@@ -1409,7 +1429,7 @@ It sends only `run.status_changed` by default. Select events with `--webhook-eve
 | Event | Sent when | `data` |
 | --- | --- | --- |
 | `run.status_changed` | The agent changes between `running` and `stable` | `status`, `previous_status`, `server_id`, `agent_type`, `transport` |
-| `instance.started`, `instance.heartbeat`, `instance.stopped` | AgentAPI starts, every `--webhook-heartbeat` (60s), and shuts down | What the agent does: `status`, `lifecycle`, `session_name`, `pending_requests`, `queued_messages`, and `agent_session_id`, `terminal_prompt`, `login_required`, `limit_stop`, `usage`, `settings` when set |
+| `instance.started`, `instance.heartbeat`, `instance.stopped` | AgentAPI starts, every `--webhook-heartbeat` (60s) and when `PUT /webhook` points the webhook at a new URL, and shuts down | What the agent does: `status`, `lifecycle`, `session_name`, `pending_requests`, `queued_messages`, and `agent_session_id`, `terminal_prompt`, `login_required`, `limit_stop`, `usage`, `settings` when set |
 | `task.started` | A [task](#tasks) starts: a message of yours reaches the agent | The task as `GET /tasks` has it: `id` (the message's), `status`, `prompt`, `started_at` |
 | `task.completed`, `task.failed` | The [task](#tasks) ends: `completed`, or `failed` and `limited` (`task.failed`) | The task with `status`, `ended_at`, `duration_seconds`, the agent's last message (`reply`, `reply_id`), `steered`, `errors`, `limit`, `session_name`, and for native Claude Code, Codex and Pi its API-equivalent `cost` (see [Session costs](#session-costs)) |
 | `request.opened`, `request.closed` | An approval, question or plan (native; the request as `GET /requests` has it), or a terminal dialog (PTY; `kind` `terminal_prompt` with the `prompt`), opens or closes | The request |
@@ -1810,6 +1830,19 @@ Flags can also be set with environment variables: `AGENTAPI_` and the flag's nam
 `_` for `-` (`AGENTAPI_ALLOWED_HOSTS`). Lists are comma-separated in a flag and space-separated in a
 variable.
 
+They can also be set in `~/.agentapi/config.yaml` (`--config` names another file), by the flag's
+name, for every server the user starts: a flag or a variable overrides it. A setting that names no
+flag is reported in the log, and a file AgentAPI can't read is reported and ignored, so the agent
+still starts. [`agentapi hub join`](#agentapi-hub) writes it; keep it readable by its owner only
+(`chmod 600`) when it holds a secret.
+
+```yaml
+webhook-url: http://hub.vpn:8080/hooks
+webhook-secret: s3cret
+webhook-events: [instance.*, task.*, request.*]
+public-url: http://dev-1.vpn:{port}
+```
+
 | Flag | Default | Description |
 | --- | --- | --- |
 | `-t`, `--type` | from the agent command | Agent type; see [Supported agents](#supported-agents) |
@@ -1837,7 +1870,8 @@ variable.
 | `--name` | the working directory's name | What clients that watch many AgentAPIs call this one |
 | `--registry` | `true` | Keep an entry in the registry directory while serving; see [Watching many instances](#watching-many-instances) |
 | `--registry-dir` | `~/.agentapi/instances` | Registry directory |
-| `--public-url` | | URL this AgentAPI is reached at, in `GET /summary` and every webhook event |
+| `--public-url` | | URL this AgentAPI is reached at, in `GET /summary` and every webhook event; `{port}` and `{hostname}` are filled in |
+| `--config` | `~/.agentapi/config.yaml` | Settings file: flags by name, below flags and variables |
 | `--webhook-timeout` | `10s` | Timeout of each delivery attempt |
 | `--webhook-max-attempts` | `3` | Delivery attempts |
 | `--webhook-payload-template` | | Go `text/template` for the POST body |
@@ -1874,6 +1908,23 @@ frontend  codex   working                http://localhost:3285  Add the settings
 
 `--json` prints the entries and summaries as JSON, `--registry-dir` reads another directory, and
 `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the instances that need a token.
+
+### `agentapi hub`
+
+Connect this machine's AgentAPIs to a hub; see [Joining a hub](#joining-a-hub).
+
+```bash
+agentapi hub join http://hub.vpn:8080/hooks --secret "$HUB_SECRET" --public-url 'http://dev-1.vpn:{port}'
+agentapi hub status
+agentapi hub leave
+```
+
+`join` writes the hub's webhook into `~/.agentapi/config.yaml` and applies it to the registered
+AgentAPIs running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `--events` picks them
+(default `instance.*`, `task.*`, `request.*`, `login.*`, `limit.*`, `agent.error`), `--public-url`
+is where the hub reaches them, `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the ones that need
+a token, and `--config` and `--registry-dir` name other files. An AgentAPI it can't change now
+applies the file when it restarts.
 
 ### `agentapi attach`
 
