@@ -1,10 +1,11 @@
 {
-  "captured_at": "2026-10-23T05:42:01.451Z",
+  "captured_at": "2026-10-26T04:20:18.833Z",
   "agentapi_version": "0.0.0-dev",
   "agents": [
     "native-demo",
     "native-demo posing as Claude Code",
-    "bash (PTY)"
+    "bash (PTY)",
+    "three native-demo instances behind agentapi hub serve"
   ],
   "browser": "153.0.8010.12",
   "desktop_viewport": {
@@ -58,6 +59,8 @@
     "lineage.png",
     "file-find.png",
     "login-card.png",
-    "tty-mode.png"
+    "tty-mode.png",
+    "hub-desktop.png",
+    "hub-phone.png"
   ]
 }

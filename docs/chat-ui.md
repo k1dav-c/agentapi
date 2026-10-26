@@ -28,6 +28,7 @@ for Claude Code, Codex and Pi.
 - [Terminals](#terminals)
 - [Session details and alerts](#session-details-and-alerts)
 - [Phones](#phones)
+- [The hub](#the-hub)
 - [Connection and caching](#connection-and-caching)
 
 ## The window
@@ -476,6 +477,19 @@ can be shown in full. The file viewer takes the whole screen, and the terminals 
 ![A question card on a phone](screenshots/mobile-question.png)
 
 ![The terminal on a phone: the keyboard button, a command, and keys from the key bar](screenshots/demo-phone.gif)
+
+## The hub
+
+![The hub on a phone](screenshots/hub-phone.png)
+
+A [hub](../README.md#running-a-hub) (`agentapi hub serve`) serves this chat for every AgentAPI it
+watches. Its page lists them, what needs you first: an amber dot and the reason (an approval or
+question, a login, a usage limit), a pulsing blue one while it works, a green one for a task that
+finished and you haven't seen, then idle, unreachable and stopped ones, with the title, agent,
+machine, queue and the fullest usage limit. The tab title counts what needs you. Picking one opens
+it in this chat beside the list (or instead of it on a phone, with a back button), through the hub,
+which sends the instance's token. `+` adds an instance by its URL and token; a stopped or
+unreachable one can be forgotten.
 
 ## Connection and caching
 

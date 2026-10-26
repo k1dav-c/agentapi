@@ -16,7 +16,7 @@ AgentAPI 可以用來：
 - 建立把 pull request 審查交給 agent 處理的工具
 - 從一個中控平台監看多個 agent：每個 AgentAPI 都用 [webhook](#webhook) 把任務、需要你處理的
   請求、訊息和心跳主動推送過去，同時連到多個 AgentAPI 的用戶端則透過[摘要](#監看多個實例)
-  追蹤每一個
+  追蹤每一個。內建的 [hub](#執行-hub) 就是這樣的儀表板，桌面和手機都能用
 
 ## 關於這個 fork
 
@@ -99,6 +99,9 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 
 - Claude Code、Codex 和 Pi 的 [MCP 管理](#mcp-管理)，可以使用可重複套用的設定檔；重新啟動
   agent 前會先更新 Codex 和 Pi。
+- [hub](#執行-hub)（`agentapi hub serve`）監看多台機器上的 AgentAPI，需要你處理的排最前面，並能在
+  聊天介面中開啟任何一個，桌面和手機都能用；[`agentapi hub join`](#加入-hub) 把一台機器上的
+  AgentAPI 接到 hub，重新啟動後也一樣。
 - [Webhook](#webhook) 會把任務、請求、訊息和心跳主動推送到監看多個 agent 的中控平台，並以
   HMAC 簽章；同時連到多個 AgentAPI 的用戶端，每個只要開一條[摘要串流](#監看多個實例)；搭配[人工回覆 API](#人工回覆-api)，機器人可以在 agent 停下來時通知你，並把你的
   回覆傳回去。
@@ -1186,15 +1189,43 @@ webhook 事件使用同一份 `instance` 身分資訊，方便接收 webhook 或
 使用 [API token](#api-token-驗證) 時，以 `fetch` 加上 `Authorization` 標頭讀取串流；
 `EventSource` 無法設定該標頭。
 
+#### 執行 hub
+
+hub 監看它連得到的任何機器上的多個 AgentAPI：把它放在會一直開著的地方（例如常開的
+workspace），並透過私有網路（例如你自己的 VPN）連到它和各個 AgentAPI。
+
+```bash
+agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token "$AGENTAPI_TOKEN"
+```
+
+![hub：所有實例、需要你處理的排最前面，以及在聊天介面中開啟的一個](docs/screenshots/hub-desktop.png)
+
+在桌面或手機開啟 `http://<hub>:3290/`，用 `--token` 登入。清單列出每個實例，需要你處理的排最前面：
+它在等什麼（核准或提問、登入、用量限制）、工作中、完成了你還沒看過的任務、閒置、連不到或已停止，
+並顯示標題、agent、機器、佇列和用量限制；分頁標題會顯示需要你處理的數量。點選一個就會在聊天介面
+中開啟。手機上清單和聊天介面輪流顯示。
+
+- AgentAPI 用 [`agentapi hub join`](#加入-hub) 加入：它們有簽章的 `instance.*` 事件會新增它們，
+  hub 再以一條連線追蹤每個實例的[摘要串流](#監看多個實例)。也可以用 `+` 輸入網址（和 token）手動
+  加入；已停止或連不到的可以移除。
+- hub 透過自己開啟實例（`/i/<id>/...`），以實例的 API token（`--instance-token`，或加入時給的）
+  取代你的憑證。瀏覽器不會拿到實例的 token，也不會直接連到實例，所以實例不必為它設定 CORS。
+- 只接受以 `--secret` 簽章、而且不超過 10 分鐘的事件，已處理過的傳送會被忽略：事件裡的網址就是
+  hub 送出實例 token 的地方。
+- 實例會保存在 `~/.agentapi/hub/instances.json`（`--state`，只有擁有者能讀取），重新啟動後仍記得。
+- `--port`（預設 3290）和 `--bind`（例如 VPN 位址）設定監聽位置。請用 HTTPS 提供，或只開在私有
+  網路上：登入時會送出 token。若 VPN 用戶端以 userspace 模式執行，把 `ALL_PROXY` 設成它的 SOCKS5
+  proxy，hub 才連得到實例。
+- hub 提供的是它自己版本的聊天介面：hub 和實例請使用相同的 AgentAPI 版本。
+
 #### 加入 hub
 
-hub 是監看多個 AgentAPI 的接收端，例如放在常開的 workspace、透過 VPN 連到其他機器的那一個。
 [`agentapi hub join`](#agentapi-hub) 不必改變 AgentAPI 的啟動方式就能把一台機器上的 AgentAPI
 接到 hub，所以由腳本以固定參數啟動的 AgentAPI（例如 Coder workspace 的）也適用：
 
 ```bash
 sudo agentapi update   # 最新版才會讀設定檔
-agentapi hub join http://hub.vpn:8080/hooks --secret "$HUB_SECRET" --public-url 'http://dev-1.vpn:{port}'
+agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://dev-1.vpn:{port}'
 ```
 
 `join` 會把 hub 的 webhook（`webhook-url`、`webhook-secret`、`webhook-events`、`public-url`）寫進
@@ -1586,7 +1617,7 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 請只讓擁有者讀取（`chmod 600`）。
 
 ```yaml
-webhook-url: http://hub.vpn:8080/hooks
+webhook-url: http://hub.vpn:3290/hooks
 webhook-secret: s3cret
 webhook-events: [instance.*, task.*, request.*]
 public-url: http://dev-1.vpn:{port}
@@ -1658,13 +1689,20 @@ frontend  codex   working                http://localhost:3285  Add the settings
 
 ### `agentapi hub`
 
-把這台機器上的 AgentAPI 接到 hub；見[加入 hub](#加入-hub)。
+執行監看多個 AgentAPI 的 hub，或把這台機器上的 AgentAPI 接到 hub；見[執行 hub](#執行-hub) 和
+[加入 hub](#加入-hub)。
 
 ```bash
-agentapi hub join http://hub.vpn:8080/hooks --secret "$HUB_SECRET" --public-url 'http://dev-1.vpn:{port}'
+agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token "$AGENTAPI_TOKEN"
+agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://dev-1.vpn:{port}'
 agentapi hub status
 agentapi hub leave
 ```
+
+`serve` 執行 hub：`--token`（或 `AGENTAPI_HUB_TOKEN`）是登入用的 token，`--secret`（或
+`AGENTAPI_HUB_SECRET`）用來檢查 AgentAPI 的事件，`--instance-token`（或
+`AGENTAPI_HUB_INSTANCE_TOKEN`，否則 `AGENTAPI_API_TOKEN`）會送給它們，`--state` 保存實例，
+`--port` 和 `--bind` 設定監聽位置。
 
 `join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 AgentAPI。
 `--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`、

@@ -184,7 +184,7 @@ function InstanceRow({instance, selected, onSelect, onForget}: {instance: HubIns
           </span>
           <span className="flex min-w-0 gap-2 text-[11px] text-muted-foreground/80">
             {agent && <span className="shrink-0">{agent}</span>}
-            {instance.hostname && <span className="min-w-0 truncate">{instance.hostname}</span>}
+            {instance.hostname && <span className="min-w-0 truncate" data-hub-host>{instance.hostname}</span>}
             {summary && summary.queued_messages > 0 && <span className="shrink-0 whitespace-nowrap">{summary.queued_messages} queued</span>}
             {usage !== undefined && <span className="shrink-0 whitespace-nowrap">{Math.round(usage)}% limit</span>}
           </span>

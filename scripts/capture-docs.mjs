@@ -233,8 +233,10 @@ const portFree = p => new Promise(resolve => {
 });
 
 const servers = [];
-const startServer = (name, cwd, env, args) => {
-  const child = spawn(binary, ['server', '--bind', '127.0.0.1', '--allowed-hosts', 'localhost,127.0.0.1', ...args], {
+const startServer = (name, cwd, env, args) => startProcess(name, cwd, env,
+  ['server', '--bind', '127.0.0.1', '--allowed-hosts', 'localhost,127.0.0.1', ...args]);
+const startProcess = (name, cwd, env, args) => {
+  const child = spawn(binary, args, {
     cwd, env, stdio: ['ignore', 'ignore', 'pipe'],
   });
   let log = '';
@@ -430,8 +432,8 @@ const home = path.join(root, 'home');
 const project = path.join(root, 'my-app');
 let browser;
 try {
-  for (const p of [port, port + 1, port + 2]) {
-    if (!await portFree(p)) throw new Error(`Port ${p} is in use; set AGENTAPI_SCREENSHOT_PORT to the first of three free ports.`);
+  for (let p = port; p < port + 7; p++) {
+    if (!await portFree(p)) throw new Error(`Port ${p} is in use; set AGENTAPI_SCREENSHOT_PORT to the first of seven free ports.`);
   }
   // A clean environment: no tokens or workspace links of the shell the script runs in, and a
   // neutral prompt in the terminal.
@@ -885,11 +887,70 @@ try {
   await tty.waitForTimeout(500);
   await shot(tty, 'tty-mode.png');
 
+  // A hub watching three demo instances, which join it as agentapi hub join has them do: one waits
+  // for an approval, one works, one finished a task nobody saw.
+  const hubPort = port + 3;
+  const hubHome = path.join(root, 'hub-home');
+  await mkdir(hubHome, {recursive: true});
+  const hubEnv = {...env, HOME: hubHome};
+  execFileSync(binary, ['hub', 'join', `http://127.0.0.1:${hubPort}/hooks`, '--secret', 'docs-secret',
+    '--public-url', 'http://127.0.0.1:{port}'], {env: hubEnv, stdio: 'ignore'});
+  startProcess('hub', root, hubEnv, ['hub', 'serve', '--bind', '127.0.0.1', '--port', String(hubPort),
+    '--token', 'docs-token', '--secret', 'docs-secret', '--state', path.join(hubHome, 'instances.json')]);
+  await poll(async () => (await fetch(`http://127.0.0.1:${hubPort}/api/session`)).ok, 'the hub');
+  const hubInstances = {};
+  for (const [i, name] of ['api-server', 'web-app', 'docs-site'].entries()) {
+    const dir = path.join(root, 'workspaces', name);
+    await mkdir(dir, {recursive: true});
+    startServer(name, dir, hubEnv, ['--port', String(port + 4 + i), '--transport', 'native', '--type', 'custom', '--', 'native-demo']);
+    hubInstances[name] = client(`http://127.0.0.1:${port + 4 + i}`);
+    await poll(async () => (await hubInstances[name].status()).lifecycle === 'ready', `the ${name} instance`);
+  }
+  await hubInstances['api-server'].send('Add pagination to the orders endpoint.');
+  await hubInstances['api-server'].idle();
+  await hubInstances['web-app'].send('approve');
+  await hubInstances['web-app'].pending('approval');
+  await hubInstances['docs-site'].send('long');
+  const hubAPI = `http://127.0.0.1:${hubPort}`;
+  await poll(async () => {
+    const response = await fetch(`${hubAPI}/api/instances`, {headers: {Authorization: 'Bearer docs-token'}});
+    const {instances} = await response.json();
+    return instances.length === 3 && instances.every(instance => instance.summary);
+  }, 'the hub to follow the instances');
+  const hubContext = await browser.newContext({...contextOptions, viewport: {width: 1440, height: 1000}});
+  hubContext.on('weberror', event => errors.push(event.error().message));
+  const hubPage = await hubContext.newPage();
+  hubPage.setDefaultTimeout(20_000);
+  await hubPage.goto(`${hubAPI}/`);
+  await hubPage.getByLabel('Hub token').fill('docs-token');
+  await hubPage.getByRole('button', {name: 'Sign in'}).click();
+  const hubRows = hubPage.getByRole('list', {name: 'Instances'});
+  await hubRows.getByText('Needs your answer').waitFor();
+  await hubRows.getByText('Working').waitFor();
+  await hubRows.getByText('Finished').waitFor();
+  // The rows name the machine; the screenshots show placeholders.
+  const hideHosts = page => page.locator('[data-hub-host]').evaluateAll(nodes => nodes.forEach((node, i) => { node.textContent = `dev-${i + 1}`; }));
+  await hubRows.getByText('web-app').click();
+  await hubPage.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first().waitFor();
+  await hideHosts(hubPage);
+  await hubPage.waitForTimeout(800);
+  await shot(hubPage, 'hub-desktop.png');
+  const hubPhone = await browser.newContext({...contextOptions, viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
+  hubPhone.on('weberror', event => errors.push(event.error().message));
+  await hubPhone.addCookies(await hubContext.cookies());
+  const hubPhonePage = await hubPhone.newPage();
+  await hubPhonePage.goto(`${hubAPI}/`);
+  await hubPhonePage.getByRole('list', {name: 'Instances'}).getByText('Needs your answer').waitFor();
+  await hideHosts(hubPhonePage);
+  await shot(hubPhonePage, 'hub-phone.png');
+  await hubPhone.close();
+  await hubContext.close();
+
   if (errors.length) throw new Error(errors.join('\n'));
   await writeFile(path.join(output, 'capture.json'), JSON.stringify({
     captured_at: new Date().toISOString(),
     agentapi_version: version,
-    agents: ['native-demo', 'native-demo posing as Claude Code', 'bash (PTY)'],
+    agents: ['native-demo', 'native-demo posing as Claude Code', 'bash (PTY)', 'three native-demo instances behind agentapi hub serve'],
     browser: browser.version(),
     desktop_viewport: {width: 1440, height: 1000},
     mobile_viewport: {width: 390, height: 844},

@@ -4,6 +4,12 @@
 
 ### Features
 
+- `agentapi hub serve` runs a hub that watches the AgentAPIs of many machines, such as Coder
+  workspaces on a VPN of your own. AgentAPIs join it with `agentapi hub join`; their signed
+  `instance.*` events add them, and the hub follows each one's summary. Its page (`/chat/hub/`),
+  on a desktop or a phone, lists them, what needs you first, and opens any of them in the chat
+  through the hub, which sends the instance's API token: the browser never holds the instances'
+  tokens. Instances can also be added by URL; the hub keeps them across restarts.
 - `agentapi server` reads its flags from `~/.agentapi/config.yaml` (`--config`) as well, below
   flags and `AGENTAPI_*` variables, so a setting outlives a restart that runs the same command
   line, such as a Coder workspace's start script.
