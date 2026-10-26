@@ -91,6 +91,7 @@ func joinCmd() *cobra.Command {
 		secret    string
 		events    []string
 		publicURL string
+		noCheck   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "join <hub webhook URL>",
@@ -111,6 +112,20 @@ func joinCmd() *cobra.Command {
 			if secret == "" {
 				_, _ = fmt.Fprintln(out, "Warning: without --secret the hub can't tell the events are this machine's.")
 			}
+			if publicURL != "" {
+				if err := checkURL(httpapi.ExpandPublicURL(publicURL, 1)); err != nil {
+					return fmt.Errorf("--public-url: %w", err)
+				}
+			}
+			if !noCheck {
+				if err := checkReach(out, hubURL, publicURL); err != nil {
+					return err
+				}
+				if err := checkHub(cmd.Context(), hubURL, secret); err != nil {
+					return fmt.Errorf("%w\n(--no-check joins without checking, for a hub that doesn't run yet)", err)
+				}
+				_, _ = fmt.Fprintf(out, "The hub at %s took a signed test event.\n", hubURL)
+			}
 			config, err := userconfig.Load(opts.configPath)
 			if err != nil {
 				return err
@@ -118,9 +133,6 @@ func joinCmd() *cobra.Command {
 			config[keyURL] = hubURL
 			config[keyEvents] = events
 			if publicURL != "" {
-				if err := checkURL(httpapi.ExpandPublicURL(publicURL, 1)); err != nil {
-					return fmt.Errorf("--public-url: %w", err)
-				}
 				config[keyPublic] = publicURL
 			}
 			if secret != "" {
@@ -138,6 +150,7 @@ func joinCmd() *cobra.Command {
 	opts.addFlags(cmd)
 	cmd.Flags().StringVar(&secret, "secret", "", "Secret that signs the events, which the hub checks (default $AGENTAPI_HUB_SECRET)")
 	cmd.Flags().StringSliceVar(&events, "events", defaultEvents, "Events to send to the hub")
+	cmd.Flags().BoolVar(&noCheck, "no-check", false, "Join without checking that the hub takes this machine's events (for a hub that doesn't run yet)")
 	cmd.Flags().StringVar(&publicURL, "public-url", "", "Where the hub reaches this machine's AgentAPIs, such as http://dev-1.vpn:{port} ({port} and {hostname} are filled in for each)")
 	return cmd
 }

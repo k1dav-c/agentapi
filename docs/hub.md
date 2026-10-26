@@ -105,6 +105,8 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
   --public-url 'http://dev-1.vpn:{port}'
 ```
 
+- `join` first sends the hub a signed test event and stops if the hub doesn't take it (unreached, a
+  sign-in page in the way, or another secret); see the [reference](#agentapi-hub-join-leave-status).
 - `join` writes the hub into `~/.agentapi/config.yaml`. Every `agentapi server` of this user reads
   that file when it starts, so AgentAPIs started by a script with fixed flags, such as a Coder
   workspace's start script, join without a change to the script. Flags and `AGENTAPI_*` variables
@@ -291,6 +293,8 @@ instance that joined with its webhook comes back the next time it starts.
 | What you see | Why | What to do |
 | --- | --- | --- |
 | An instance never appears | Its AgentAPI started before `join`, or before 1.2 | Restart it, or its workspace |
+| `join` says a sign-in page is in front of the hub | The hub's URL is a Coder port URL (or another behind a login) | Join with the hub's address on your network or VPN; the AgentAPIs send events themselves |
+| `join` says the hub is on another machine | `--public-url` names `localhost` | Give the address the hub reaches this machine at |
 | An instance never appears; the hub logs "Refused an event" | `--secret` of `join` and of the hub differ, or the clocks are more than 10 minutes apart | Run `agentapi hub join` again with the hub's secret; check the clocks |
 | An instance never appears; `agentapi hub status` shows no hub | `join` wrote to another config file than the one the AgentAPI reads | Use the same user, or pass the same `--config` to both |
 | Unreachable: `400 Bad Request` | The AgentAPI refuses the VPN name as `Host` | Allow it in `--allowed-hosts` (step 3) |
@@ -333,6 +337,12 @@ The hub reaches the instances through the proxy of the environment (`HTTP_PROXY`
 | `--api-token` | `AGENTAPI_API_TOKEN` | Token for running AgentAPIs that need one |
 | `--config` | `~/.agentapi/config.yaml` | Config file to write |
 | `--registry-dir` | `~/.agentapi/instances` | Where the running AgentAPIs are registered |
+| `--no-check` | `false` | Join without checking that the hub takes the events (for a hub that doesn't run yet) |
+
+Before it writes anything, `join` checks that the hub takes this machine's events: it sends the hub
+a signed `webhook.test` event and stops, saying why, when the hub isn't reached, a sign-in page is
+in front of it (a Coder port URL redirects to Coder's login), or the secret differs. It also stops
+when the hub is on another machine and `--public-url` names `localhost`, which the hub can't reach.
 
 `join` writes `webhook-url`, `webhook-secret`, `webhook-events` and `public-url` into the config
 file and applies them to the running AgentAPIs with `PUT /webhook`, keeping their timeout and

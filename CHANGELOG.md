@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- `agentapi hub join` no longer reports success for a hub that will never get the events. It first
+  sends the hub a signed test event and stops, saying why, when the hub isn't reached, a sign-in
+  page is in front of it (a Coder port URL), or the secret differs; and when the hub is on another
+  machine and `--public-url` names `localhost`. `--no-check` joins a hub that doesn't run yet.
+
 ## v1.6.0
 
 ### Features
