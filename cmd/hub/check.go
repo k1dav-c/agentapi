@@ -40,7 +40,7 @@ func checkReach(out io.Writer, hubURL, publicURL string) error {
 	public, err := url.Parse(httpapi.ExpandPublicURL(publicURL, 1))
 	if err == nil && loopbackHost(public.Hostname()) {
 		return fmt.Errorf("the hub at %s is on another machine, so it can't reach this one at %s: "+
-			"give --public-url the address the hub reaches this machine at, such as http://dev-1.vpn:{port}", hubURL, public.Host)
+			"give --public-url the address the hub reaches this machine at, such as http://dev-1.vpn:{port}", hubURL, public.Hostname())
 	}
 	return nil
 }

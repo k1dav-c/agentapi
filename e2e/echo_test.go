@@ -379,8 +379,10 @@ func setup(ctx context.Context, t testing.TB, p *params, waitForStable bool) ([]
 	bin, args := p.cmdFn(ctx, t, serverPort, binaryPath, cwd, scriptFilePath)
 	t.Logf("Running command: %s %s", bin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, bin, args...)
-	// The test's servers don't register in the user's registry.
-	cmd.Env = append(os.Environ(), "AGENTAPI_REGISTRY_DIR="+t.TempDir())
+	// The test's servers don't register in the user's registry, nor read
+	// the user's config file: one that names a hub (agentapi hub join)
+	// would have them report to it.
+	cmd.Env = append(os.Environ(), "AGENTAPI_REGISTRY_DIR="+t.TempDir(), "AGENTAPI_CONFIG="+filepath.Join(t.TempDir(), "config.yaml"))
 
 	// Capture output for debugging
 	stdout, err := cmd.StdoutPipe()
