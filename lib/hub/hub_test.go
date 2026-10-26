@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -37,9 +38,16 @@ const (
 )
 
 // startHub runs a hub keeping its instances in statePath.
+// startHub runs a hub that calls an instance unreachable soon after it
+// fails.
 func startHub(t *testing.T, statePath string) *httptest.Server {
 	t.Helper()
-	h, err := hub.New(hub.Config{Token: hubToken, Secret: hubSecret, InstanceToken: instanceToken, StatePath: statePath})
+	return startHubGrace(t, statePath, 200*time.Millisecond)
+}
+
+func startHubGrace(t *testing.T, statePath string, grace time.Duration) *httptest.Server {
+	t.Helper()
+	h, err := hub.New(hub.Config{Token: hubToken, Secret: hubSecret, InstanceToken: instanceToken, StatePath: statePath, ConnectGrace: grace})
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -60,6 +68,12 @@ func startHub(t *testing.T, statePath string) *httptest.Server {
 // instanceToken.
 func startInstance(t *testing.T) (*httptest.Server, *httpapi.Server) {
 	t.Helper()
+	return startInstanceOn(t, nil)
+}
+
+// startInstanceOn runs it on listener; nil is a new one.
+func startInstanceOn(t *testing.T, listener net.Listener) (*httptest.Server, *httpapi.Server) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
 	factory := &nativetest.Factory{}
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
@@ -73,7 +87,12 @@ func startInstance(t *testing.T) (*httptest.Server, *httpapi.Server) {
 		APIToken:       instanceToken,
 	})
 	require.NoError(t, err)
-	ts := httptest.NewServer(srv.Handler())
+	ts := httptest.NewUnstartedServer(srv.Handler())
+	if listener != nil {
+		_ = ts.Listener.Close()
+		ts.Listener = listener
+	}
+	ts.Start()
 	t.Cleanup(func() {
 		ts.Close()
 		_ = srv.Stop(context.Background())
@@ -247,6 +266,63 @@ func TestHubWebhookSignature(t *testing.T) {
 	assert.NotEqual(t, hub.ConnectionStopped, instances(t, hubSrv.URL)[0].Connection, "a replayed delivery")
 	assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, event("e4", "instance.stopped"), hubSecret, time.Now()))
 	assert.Equal(t, hub.ConnectionStopped, instances(t, hubSrv.URL)[0].Connection)
+}
+
+// An instance that isn't listening yet when its first event comes (it is
+// starting) is connecting, not unreachable, until it does; one that never
+// does is unreachable once the connect grace is over.
+func TestHubConnectGrace(t *testing.T) {
+	hubSrv := startHubGrace(t, "", 3*time.Second)
+	// A port nothing listens on yet.
+	reserved, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := reserved.Addr().String()
+	require.NoError(t, reserved.Close())
+	started := map[string]any{
+		"id": "e1", "type": "instance.started", "created_at": time.Now(),
+		"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": "http://" + addr, "agent_type": "claude"},
+	}
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, started, hubSecret, time.Now()))
+
+	// It starts a moment later; until then it is connecting.
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		assert.Equal(t, hub.ConnectionConnecting, instances(t, hubSrv.URL)[0].Connection)
+		time.Sleep(50 * time.Millisecond)
+	}
+	listener, err := net.Listen("tcp", addr)
+	require.NoError(t, err)
+	startInstanceOn(t, listener)
+	// Stopped before the instance closes (cleanups run last first): its
+	// server waits for the hub's stream to end. No server ID: the hub took
+	// the instance's own from its summary.
+	t.Cleanup(func() {
+		stopped := map[string]any{"id": "e3", "type": "instance.stopped", "created_at": time.Now(), "instance": map[string]any{"id": "dev-1:3284", "url": "http://" + addr}}
+		assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, stopped, hubSecret, time.Now()))
+	})
+	require.Eventually(t, func() bool {
+		connection := instances(t, hubSrv.URL)[0].Connection
+		assert.NotEqual(t, hub.ConnectionUnreachable, connection)
+		return connection == hub.ConnectionConnected
+	}, 10*time.Second, 50*time.Millisecond)
+
+	// One that never listens is unreachable after the grace.
+	other := map[string]any{
+		"id": "e2", "type": "instance.started", "created_at": time.Now(),
+		"instance": map[string]any{"id": "dev-2:3284", "server_id": "s2", "url": "http://127.0.0.1:1", "agent_type": "codex"},
+	}
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, other, hubSecret, time.Now()))
+	connection := func() hub.Connection {
+		for _, instance := range instances(t, hubSrv.URL) {
+			if instance.ID == "dev-2:3284" {
+				return instance.Connection
+			}
+		}
+		return ""
+	}
+	time.Sleep(time.Second)
+	assert.Equal(t, hub.ConnectionConnecting, connection(), "within the grace")
+	require.Eventually(t, func() bool { return connection() == hub.ConnectionUnreachable }, 20*time.Second, 100*time.Millisecond)
 }
 
 // An instance added by its URL, with its own token.

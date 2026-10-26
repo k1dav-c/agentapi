@@ -21,6 +21,11 @@ const (
 	// watchIdle is how long a summary stream may stay silent: it sends a
 	// heartbeat every 15 seconds.
 	watchIdle = 45 * time.Second
+	// defaultConnectGrace is how long the hub keeps trying before it calls
+	// an instance unreachable: one that is starting doesn't listen yet when
+	// its first event comes, and a stream drops now and then; both connect
+	// again within it.
+	defaultConnectGrace = 10 * time.Second
 )
 
 // watch starts (or starts again) following the summary of instance.
@@ -53,9 +58,13 @@ func (h *Hub) unwatch(id string) {
 }
 
 // follow reads the instance's summary stream until ctx ends, opening it
-// again after a failure.
+// again after a failure. Within the connect grace a failure leaves the
+// instance connecting (with its last summary, if it had one); it is
+// unreachable once it has failed for longer.
 func (h *Hub) follow(ctx context.Context, id string) {
 	wait := watchRetryMin
+	// When the failures began; zero while the stream is open.
+	var failing time.Time
 	for ctx.Err() == nil {
 		instance, ok := h.store.get(id)
 		if !ok || instance.Connection == ConnectionStopped {
@@ -64,6 +73,7 @@ func (h *Hub) follow(ctx context.Context, id string) {
 		connected := false
 		err := h.readSummaries(ctx, instance, func(summary httpapi.SummaryBody) {
 			connected = true
+			failing = time.Time{}
 			wait = watchRetryMin
 			_, _, _ = h.store.update(id, false, false, func(i *Instance) {
 				i.Summary = &summary
@@ -81,8 +91,17 @@ func (h *Hub) follow(ctx context.Context, id string) {
 		if err != nil {
 			message = err.Error()
 		}
+		if failing.IsZero() {
+			failing = h.now()
+		}
+		grace := h.now().Sub(failing) < h.config.ConnectGrace
 		_, _, _ = h.store.update(id, false, false, func(i *Instance) {
 			if i.Connection == ConnectionStopped {
+				return
+			}
+			if grace {
+				i.Connection = ConnectionConnecting
+				i.Error = message
 				return
 			}
 			if i.Connection != ConnectionUnreachable || i.Error != message {
