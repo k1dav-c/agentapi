@@ -151,6 +151,31 @@ export function HubView() {
   const names = useMemo(() => groupNames(all), [all]);
   const showHeaders = names.length > 0;
 
+  // Opening an agent from the list is a page of its own in the browser's
+  // history, so Back (a phone's back gesture) returns to the list; going
+  // from one agent to another replaces it, and closing goes back.
+  const select = useCallback((id: string | undefined) => {
+    const opened = history.state?.hub === "agent";
+    if (id) {
+      const url = `#${encodeURIComponent(id)}`;
+      if (opened) history.replaceState({hub: "agent"}, "", url);
+      else history.pushState({hub: "agent"}, "", url);
+    } else if (opened) {
+      history.back();
+      return;
+    } else {
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    setSelected(id);
+  }, []);
+
+  // Back and forward show what the URL names.
+  useEffect(() => {
+    const onPop = () => setSelected(decodeURIComponent(window.location.hash.slice(1)) || undefined);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   // Tell people who aren't looking: a screen reader, the tab, a notification.
   const previousStates = useRef<Map<string, InstanceState>>(new Map());
   useEffect(() => {
@@ -166,14 +191,14 @@ export function HubView() {
           const notification = new Notification(`${displayName(instance)} needs you`, {body: text, tag: `agentapi-hub-${instance.id}`});
           notification.onclick = () => {
             window.focus();
-            setSelected(instance.id);
+            select(instance.id);
             notification.close();
           };
         }
       }
     }
     previousStates.current = next;
-  }, [all, notify]);
+  }, [all, notify, select]);
 
   useEffect(() => {
     document.title = waiting > 0 ? `(${waiting}) AgentAPI Hub` : "AgentAPI Hub";
@@ -188,11 +213,6 @@ export function HubView() {
     }
     link.href = faviconUrl(waiting, counts.working > 0);
   }, [waiting, counts.working]);
-
-  const select = useCallback((id: string | undefined) => {
-    setSelected(id);
-    history.replaceState(null, "", id ? `#${encodeURIComponent(id)}` : window.location.pathname);
-  }, []);
 
   // Keys: / searches, j and k (or the arrows) move between rows, Esc goes
   // back to the overview.

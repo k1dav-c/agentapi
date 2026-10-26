@@ -8,7 +8,8 @@
   glyph of its own and says what each agent waits for (the approval's command, the question, the
   login) or does, how long ago; search (`/`) and chips filter it. On a desktop an overview counts
   each state and has a card per request with **Answer**, what runs with its running time, and what
-  finished unseen. An open agent gets the hub's bar in place of the chat's own. Keys (`/`, `j`,
+  finished unseen. An open agent gets the hub's bar in place of the chat's own, and the browser's
+  back (a phone's back gesture) returns from it to the list. Keys (`/`, `j`,
   `k`, `Enter`, `Esc`), optional browser notifications, a tab icon with the count, and a guide with
   commands to copy while no agent has joined.
 - The summary names the oldest request the agent waits on (`request`: its ID, kind, title and when
