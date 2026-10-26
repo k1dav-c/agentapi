@@ -1378,8 +1378,9 @@ instance:
 - `GET /summary` returns the `instance` identity (as in [webhook](#webhooks) events: `id`, `name`,
   `server_id`, host, port, directory, agent and `url`), `status`, `lifecycle` and a `title` from the
   session name or the start of the latest prompt. It also includes the latest [task](#tasks), task
-  count, `pending_requests`, `queued_messages`, the open terminal dialog, `login_required`,
-  `limit_stop` and `usage` (context window and account limits).
+  count, `pending_requests`, the oldest pending `request` (its kind, title and when the agent asked),
+  `queued_messages`, the open terminal dialog, `login_required`, `limit_stop` and `usage` (context
+  window and account limits).
 - `attention` identifies why the agent needs you, in priority order: `login`, `request` (approval,
   question or plan), `dialog` (in the terminal), `limit` (a usage limit stopped the turn), `exited`,
   or `none`.
@@ -1420,7 +1421,7 @@ hub's API.
 agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token "$AGENTAPI_TOKEN"
 ```
 
-![The hub: its instances, what needs you first, and one open in the chat](docs/screenshots/hub-desktop.png)
+![The hub: every agent on the left, and an overview of what needs you, with a card per request](docs/screenshots/hub-desktop.png)
 
 Open `http://<hub>:3290/` on a desktop or a phone and sign in with `--token`. The list shows every
 instance, those that need you first. Each shows its state (the reason it waits, such as an

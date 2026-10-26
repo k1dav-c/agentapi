@@ -2301,6 +2301,8 @@ export interface components {
              * @description Messages waiting in the queue; see GET /queue.
              */
             queued_messages: number;
+            /** @description The oldest request the agent waits on (see GET /requests); missing when none waits. */
+            request?: components["schemas"]["SummaryRequest"];
             /**
              * Format: date-time
              * @description When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did.
@@ -2326,6 +2328,19 @@ export interface components {
             /** @description The context window and the account's usage limits, as in GET /status. */
             usage?: components["schemas"]["AgentUsage"];
         };
+        SummaryRequest: {
+            /**
+             * Format: date-time
+             * @description When the agent asked.
+             */
+            created_at: string;
+            /** @description The request's ID, as in GET /requests. */
+            id: string;
+            /** @description approval, question or plan. */
+            kind: components["schemas"]["RequestKind"];
+            /** @description One-line summary, such as the command to run. */
+            title: string;
+        };
         SummaryUpdateBody: {
             /** @description The agent's own session, as in GET /status. */
             agent_session_id?: string;
@@ -2349,6 +2364,8 @@ export interface components {
              * @description Messages waiting in the queue; see GET /queue.
              */
             queued_messages: number;
+            /** @description The oldest request the agent waits on (see GET /requests); missing when none waits. */
+            request?: components["schemas"]["SummaryRequest"];
             /**
              * Format: date-time
              * @description When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did.

@@ -139,34 +139,49 @@ Open `http://hub.vpn:3290/` on a desktop or a phone that is on the VPN, and sign
 ![The hub's sign-in](screenshots/hub-sign-in.png)
 
 The token goes to the hub once and comes back as an HttpOnly cookie derived from it; the page never
-stores the token. Changing `--token` signs every browser out.
+stores the token. Changing `--token` signs every browser out. A wrong token is refused on the spot,
+and the eye button shows what you pasted.
+
+### The overview
+
+![The overview: how many need you, a tile per state, and a card for each request](screenshots/hub-desktop.png)
+
+With no agent open, the right side says how many agents need you and why. A tile per state (need
+you, working, finished unseen, offline) counts them; pick one to filter the list. Below, a card per
+agent that needs you names what it waits for (the approval's command, the question, the login, the
+usage limit) and since when, with **Answer** or **Open**. Running agents show their prompt and how
+long they've run; finished ones you haven't seen show their title.
+
+![The overview in the dark theme](screenshots/hub-desktop-dark.png)
 
 ### The list
 
 ![Every state the list shows](screenshots/hub-list.png)
 
-Each row shows the instance's name (`--name`, by default its working directory's name), what it is
-doing, its title (the session's name, else the start of the latest prompt), the agent, the machine,
-how many messages wait in its queue and its fullest usage limit. Within a [group](#groups), the
-rows sort by state in this order, then by name:
+Each row shows the agent's name (`--name`, by default its working directory's name), what it waits
+for or does, how long ago, the agent and the machine; a queue that isn't empty and a usage limit
+above 60% join them. Within a [group](#groups), the rows sort by state in this order, then by name.
+Each state has a shape of its own, so it reads without its color:
 
-| Dot | Label | Meaning |
+| Glyph | Second line starts with | Meaning |
 | --- | --- | --- |
-| Amber | Needs your answer | An approval, a question, a plan or a terminal dialog waits for you |
-| Amber | Needs login | The agent can't work until you log in on its machine |
-| Amber | Usage limit | A usage limit stopped its turn; queued messages wait for the reset |
-| Pulsing blue | Working | The agent works on a task |
-| Green | Finished | A task ended since anyone last looked at this instance |
-| Grey | Idle | Nothing to do |
-| Grey, pulsing | Connecting | The hub is opening its summary stream |
-| Red | Unreachable | The hub can't reach it; the row shows why instead of the title |
-| Hollow | Stopped, Agent exited | The AgentAPI stopped, or its agent exited |
+| Amber ! | Approval, Question, Plan, Dialog | A request waits for your answer; the line shows it |
+| Amber ! | Login | The agent can't work until you log in on its machine |
+| Amber ! | Usage limit | A usage limit stopped its turn; queued messages wait for the reset |
+| Turning blue arc | Working | The agent works on the task shown |
+| Green check | Finished | A task ended since anyone last looked at this agent |
+| Grey ring | (its title) | Idle |
+| Dashed ring, turning | Connecting | The hub is opening its summary stream |
+| Broken red ring | Unreachable | The hub can't reach it; the line says why |
+| Square | Stopped, Exited | The AgentAPI stopped, or its agent exited |
 
-The header counts the instances and how many need you. The tab title does too, as `(2) AgentAPI
-hub`, so a pinned tab shows it.
+Search (**/**) matches any word of a name, group, title, machine or agent. The chips under it show
+all agents or only those that need you, work, finished unseen, or are offline, each with its count.
+The header says whether the hub's stream is live and how many agents there are; the tab's title and
+icon count the ones that need you, so a pinned tab shows it.
 
-"Finished" follows the instance's unread mark, which every client of that AgentAPI shares: opening
-the instance in the hub, or in its own chat, marks it read everywhere.
+"Finished" follows the agent's unread mark, which every client of that AgentAPI shares: opening it
+in the hub, or in its own chat, marks it read everywhere.
 
 ### Groups
 
@@ -185,9 +200,27 @@ name has at most 40 characters, and a group with no instance left disappears.
 
 ### Opening an instance
 
-Pick a row to open the instance's chat beside the list: everything the chat does works here,
-answering requests included. The URL keeps the instance (`#<id>`), so a reload or a bookmark comes
-back to it.
+![An agent open beside the list, its approval ready to answer](screenshots/hub-instance.png)
+
+Pick a row or a card to open the agent's chat beside the list: everything the chat does works here,
+answering requests included. The bar above it shows the agent's state, agent and machine, with the
+chat's own search, terminal and Explorer buttons; **New tab** opens the chat on its own, and **×** (or **Esc**) goes back to the overview. Opening an agent
+is a page in the browser's history, so Back returns to the list or the overview; moving from one
+agent to another doesn't add one. The URL keeps the agent (`#<id>`), so a reload or a bookmark
+comes back to it.
+
+### Keys and notifications
+
+| Key | Does |
+| --- | --- |
+| `/` | Search |
+| `j`, `k` (or the arrows) | Move between the rows |
+| `Enter` | Open the row |
+| `Esc` | Clear the search, or go back to the overview |
+
+The keys work while the hub has the focus; inside an open chat, keys go to the chat. The bell asks
+the browser to notify you when an agent starts needing you while the hub's tab is in the background,
+and a screen reader hears the same as it happens.
 
 ### On a phone
 
@@ -195,10 +228,19 @@ back to it.
 | --- | --- |
 | ![The hub's list on a phone](screenshots/hub-phone.png) | ![An instance open on a phone](screenshots/hub-phone-chat.png) |
 
-On a narrow screen the list and the chat take turns; **Instances** at the top goes back. Answering
+On a narrow screen the list and the chat take turns; the back arrow at the top, or the phone's
+back gesture, goes back to the list. The chat keeps the screen for the conversation: one bar above
+it, and the composer one row. Answering
 an approval from the phone:
 
 ![Answering an approval from the hub on a phone](screenshots/demo-hub.gif)
+
+### Connecting the first agents
+
+![The guide an empty hub shows](screenshots/hub-empty.png)
+
+A hub no agent has joined yet shows the three steps of [Setting it up](#3-join-each-machines-agentapis)
+with commands to copy, its own address filled in.
 
 ### Adding and forgetting instances
 
