@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/coder/agentapi/cmd/attach"
+	"github.com/coder/agentapi/cmd/hub"
 	"github.com/coder/agentapi/cmd/list"
 	"github.com/coder/agentapi/cmd/server"
 	"github.com/coder/agentapi/cmd/update"
@@ -34,4 +35,5 @@ func init() {
 	rootCmd.AddCommand(attach.AttachCmd)
 	rootCmd.AddCommand(update.UpdateCmd)
 	rootCmd.AddCommand(list.ListCmd)
+	rootCmd.AddCommand(hub.HubCmd())
 }

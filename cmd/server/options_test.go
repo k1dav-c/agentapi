@@ -144,6 +144,12 @@ func TestLoadServerOptions(t *testing.T) {
 				assert.Empty(t, off.registryDir)
 			},
 		},
+		"--public-url fills in {port}": {
+			values: map[string]any{FlagPublicURL: "http://dev-1.vpn:{port}", FlagPort: 3290},
+			check: func(t *testing.T, opts serverOptions) {
+				assert.Equal(t, "http://dev-1.vpn:3290", opts.webhook.PublicURL)
+			},
+		},
 		"--instance-id and --name name the instance; --webhook-instance-id is the old name": {
 			values: map[string]any{FlagInstanceID: "build-box", FlagName: "API", FlagWebhookInstanceID: "old"},
 			check: func(t *testing.T, opts serverOptions) {

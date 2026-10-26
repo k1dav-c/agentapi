@@ -108,7 +108,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 			Secret:          flags.GetString(FlagWebhookSecret),
 			Heartbeat:       heartbeatOption(flags.GetDuration(FlagWebhookHeartbeat)),
 			InstanceID:      cmp.Or(flags.GetString(FlagInstanceID), flags.GetString(FlagWebhookInstanceID)),
-			PublicURL:       flags.GetString(FlagPublicURL),
+			PublicURL:       httpapi.ExpandPublicURL(flags.GetString(FlagPublicURL), flags.GetInt(FlagPort)),
 		},
 	}
 	var err error
