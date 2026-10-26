@@ -76,12 +76,12 @@ func (o *options) resolve() error {
 func HubCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hub",
-		Short: "Connect this machine's AgentAPIs to a hub",
+		Short: "Run a hub that watches many AgentAPIs, or connect this machine's to one",
 		Long: "A hub watches many AgentAPIs: it receives their webhook events. agentapi hub join writes the hub's " +
 			"webhook into ~/.agentapi/config.yaml, which agentapi server reads when it starts, so the AgentAPIs this " +
 			"user starts, also after a restart, report to the hub; it also applies it to the ones running now.",
 	}
-	cmd.AddCommand(joinCmd(), leaveCmd(), statusCmd())
+	cmd.AddCommand(joinCmd(), leaveCmd(), statusCmd(), serveCmd())
 	return cmd
 }
 
