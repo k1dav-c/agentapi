@@ -2,7 +2,7 @@ import { Chat } from "@/components/chat";
 import {ChatProvider} from "@/components/chat-provider";
 import {ChatErrorBoundary} from "@/components/chat-error-boundary";
 import { FileViewerProvider } from "@/components/file-viewer";
-import { EmbedStatusBar } from "@/components/embed-status-bar";
+import { EmbedBar } from "@/components/embed-bar";
 import { Suspense } from "react";
 
 export default function EmbedPage() {
@@ -16,7 +16,7 @@ export default function EmbedPage() {
         <ChatProvider>
           <FileViewerProvider>
             <main className="flex h-svh flex-col overflow-hidden bg-background">
-              <EmbedStatusBar />
+              <EmbedBar />
               <Chat />
             </main>
           </FileViewerProvider>

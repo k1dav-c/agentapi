@@ -1,61 +1,95 @@
 "use client";
 
-import {Fragment, useCallback, useEffect, useMemo, useState} from "react";
-import {ArrowLeft, ChevronDown, ChevronRight, FolderPlus, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2} from "lucide-react";
+import {Fragment, useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {ArrowLeft, Bell, BellOff, ExternalLink, Plus, Search, X} from "lucide-react";
+import {AgentMark} from "@/components/agent-mark";
+import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
-import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from "@/components/ui/dialog";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {agentDisplayName, parseAgentType} from "@/lib/agents";
-import {
+  activity,
   applyHubEvent,
   chatURL,
+  countFilters,
   displayName,
   groupInstances,
   groupNames,
   hubRoot,
   instanceState,
-  needsYou,
+  matchesFilter,
+  matchesSearch,
   stateLabel,
-  usagePercent,
   type HubEvent,
-  type HubGroup,
+  type HubFilter,
   type HubInstance,
   type InstanceState,
 } from "@/lib/hub";
 import {cn} from "@/lib/utils";
+import {HubMark} from "./hub/brand";
+import {AddInstance, GroupName, type Naming} from "./hub/dialogs";
+import {GroupHeader, InstanceRow, agentName} from "./hub/instance-row";
+import {Onboarding, Overview} from "./hub/overview";
+import {SignIn} from "./hub/sign-in";
+import {StatusGlyph, stateTone} from "./hub/status-glyph";
 
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "/chat").replace(/\/$/, "");
 
-// The longest group name the hub takes.
-const maxGroupName = 40;
-// Where the browser keeps which groups are folded.
+// Where the browser keeps which groups are folded, and whether to notify.
 const collapsedKey = "agentapi.hub.collapsed";
+const notifyKey = "agentapi.hub.notify";
 
-// A group being named: a new one for an instance, or a rename.
-type Naming = {mode: "new"; id: string} | {mode: "rename"; from: string};
+const filters: {id: HubFilter; label: string}[] = [
+  {id: "all", label: "All"},
+  {id: "needs-you", label: "Need you"},
+  {id: "working", label: "Working"},
+  {id: "unread", label: "Unseen"},
+  {id: "offline", label: "Offline"},
+];
 
-const dotClass: Record<InstanceState, string> = {
-  "needs-you": "bg-amber-500",
-  working: "bg-blue-500 animate-pulse",
-  unread: "bg-green-500",
-  idle: "bg-muted-foreground/40",
-  connecting: "bg-muted-foreground/40 animate-pulse",
-  unreachable: "bg-red-500",
-  stopped: "border border-muted-foreground/60 bg-transparent",
-};
+function readStorage<T>(key: string, fallback: T): T {
+  try {
+    const value = localStorage.getItem(key);
+    return value === null ? fallback : (JSON.parse(value) as T);
+  } catch {
+    return fallback;
+  }
+}
 
-// HubView is the hub's page: sign in, the instances the hub watches in a
-// sidebar (what needs you first), and the selected one in the chat. On a
-// narrow screen the list and the chat take turns.
+function writeStorage(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+// useNow ticks: every second while something runs (for the running
+// times), else every half minute (for the ages).
+function useNow(fast: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), fast ? 1000 : 30_000);
+    return () => clearInterval(timer);
+  }, [fast]);
+  return now;
+}
+
+// The tab icon: the hub's mark, with a dot in the most pressing state and
+// the number that need you.
+function faviconUrl(waiting: number, working: boolean): string {
+  const dot = waiting > 0 ? "#c27c0e" : working ? "#4f6bed" : "";
+  const badge = dot
+    ? `<circle cx="24" cy="8" r="7.5" fill="${dot}" stroke="#ffffff" stroke-width="1.5"/>` +
+      (waiting > 0 ? `<text x="24" y="11.4" font-family="system-ui,sans-serif" font-size="10" font-weight="700" fill="#ffffff" text-anchor="middle">${waiting > 9 ? "9+" : waiting}</text>` : "")
+    : "";
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#232733"/>` +
+    `<circle cx="16" cy="16" r="3.6" fill="#ffffff"/><circle cx="9.3" cy="9.3" r="2.2" fill="#c27c0e"/><circle cx="24.6" cy="20" r="2.2" fill="#4f6bed"/><circle cx="12" cy="25" r="2.2" fill="#16a07a"/>` +
+    badge +
+    `</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+// HubView is the hub's page: sign in, the instances in a sidebar (what
+// needs you first), and on the right either the overview or the chat of
+// the one picked. On a narrow screen the list and the chat take turns.
 export function HubView() {
   const root = useMemo(() => (typeof window === "undefined" ? "" : hubRoot(basePath, window.location.origin)), []);
   const [signedIn, setSignedIn] = useState<boolean | undefined>(undefined);
@@ -64,30 +98,14 @@ export function HubView() {
   const [selected, setSelected] = useState<string | undefined>(() =>
     typeof window === "undefined" ? undefined : decodeURIComponent(window.location.hash.slice(1)) || undefined,
   );
+  const [filter, setFilter] = useState<HubFilter>("all");
+  const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [naming, setNaming] = useState<Naming | null>(null);
-  // The folded groups, by name ("" for the ungrouped), kept in this browser.
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem(collapsedKey) ?? "[]"));
-    } catch {
-      return new Set();
-    }
-  });
-  const changeCollapsed = useCallback((change: (next: Set<string>) => void) => {
-    setCollapsed((previous) => {
-      const next = new Set(previous);
-      change(next);
-      try {
-        localStorage.setItem(collapsedKey, JSON.stringify([...next]));
-      } catch {}
-      return next;
-    });
-  }, []);
-  const toggleGroup = (name: string) =>
-    changeCollapsed((next) => {
-      if (!next.delete(name)) next.add(name);
-    });
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(readStorage<string[]>(collapsedKey, [])));
+  const [notify, setNotify] = useState<boolean>(() => readStorage(notifyKey, false));
+  const [announcement, setAnnouncement] = useState("");
+  const search = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!root) return;
@@ -124,26 +142,115 @@ export function HubView() {
     return () => source.close();
   }, [signedIn, root]);
 
-  const groups = useMemo(() => groupInstances(instances.values()), [instances]);
-  const names = useMemo(() => groupNames(instances.values()), [instances]);
-  // Headers only once there is a group: until then the list looks as before.
+  const all = useMemo(() => [...instances.values()], [instances]);
+  const counts = useMemo(() => countFilters(all), [all]);
+  const waiting = counts["needs-you"];
+  const now = useNow(counts.working > 0);
+  const visible = useMemo(() => all.filter((i) => matchesFilter(i, filter) && matchesSearch(i, query)), [all, filter, query]);
+  const groups = useMemo(() => groupInstances(visible), [visible]);
+  const names = useMemo(() => groupNames(all), [all]);
   const showHeaders = names.length > 0;
-  const total = instances.size;
-  const waiting = needsYou(instances.values());
+
+  // Tell people who aren't looking: a screen reader, the tab, a notification.
+  const previousStates = useRef<Map<string, InstanceState>>(new Map());
   useEffect(() => {
-    document.title = waiting > 0 ? `(${waiting}) AgentAPI hub` : "AgentAPI hub";
-  }, [waiting]);
+    const before = previousStates.current;
+    const next = new Map<string, InstanceState>();
+    for (const instance of all) {
+      const state = instanceState(instance);
+      next.set(instance.id, state);
+      if (state === "needs-you" && before.size > 0 && before.get(instance.id) !== "needs-you") {
+        const text = `${displayName(instance)}: ${activity(instance).text}`;
+        setAnnouncement(`${displayName(instance)} needs you. ${activity(instance).text}`);
+        if (notify && document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") {
+          const notification = new Notification(`${displayName(instance)} needs you`, {body: text, tag: `agentapi-hub-${instance.id}`});
+          notification.onclick = () => {
+            window.focus();
+            setSelected(instance.id);
+            notification.close();
+          };
+        }
+      }
+    }
+    previousStates.current = next;
+  }, [all, notify]);
+
+  useEffect(() => {
+    document.title = waiting > 0 ? `(${waiting}) AgentAPI Hub` : "AgentAPI Hub";
+    let link = document.querySelector<HTMLLinkElement>("link[data-hub-icon]");
+    if (!link) {
+      document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]').forEach((icon) => icon.remove());
+      link = document.createElement("link");
+      link.rel = "icon";
+      link.type = "image/svg+xml";
+      link.setAttribute("data-hub-icon", "");
+      document.head.appendChild(link);
+    }
+    link.href = faviconUrl(waiting, counts.working > 0);
+  }, [waiting, counts.working]);
 
   const select = useCallback((id: string | undefined) => {
     setSelected(id);
     history.replaceState(null, "", id ? `#${encodeURIComponent(id)}` : window.location.pathname);
   }, []);
 
+  // Keys: / searches, j and k (or the arrows) move between rows, Esc goes
+  // back to the overview.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const typing = target?.closest("input, textarea, [contenteditable=true]");
+      if (event.key === "/" && !typing) {
+        event.preventDefault();
+        search.current?.focus();
+        return;
+      }
+      if (event.key === "Escape") {
+        if (typing === search.current && query) setQuery("");
+        else if (!document.querySelector("[role=dialog], [role=menu]")) select(undefined);
+        return;
+      }
+      if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
+      const step = event.key === "j" || event.key === "ArrowDown" ? 1 : event.key === "k" || event.key === "ArrowUp" ? -1 : 0;
+      if (!step) return;
+      const rows = [...document.querySelectorAll<HTMLButtonElement>("[data-hub-row]")];
+      if (rows.length === 0) return;
+      event.preventDefault();
+      const at = rows.indexOf(document.activeElement as HTMLButtonElement);
+      const next = rows[at === -1 ? (step > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + step))];
+      next.focus();
+      next.scrollIntoView({block: "nearest"});
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [query, select]);
+
+  const changeCollapsed = useCallback((change: (next: Set<string>) => void) => {
+    setCollapsed((previous) => {
+      const next = new Set(previous);
+      change(next);
+      writeStorage(collapsedKey, [...next]);
+      return next;
+    });
+  }, []);
+
+  const toggleNotify = async () => {
+    if (notify) {
+      setNotify(false);
+      writeStorage(notifyKey, false);
+      return;
+    }
+    if (typeof Notification === "undefined") return;
+    const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
+    const on = permission === "granted";
+    setNotify(on);
+    writeStorage(notifyKey, on);
+  };
+
   const forget = async (id: string) => {
     await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {method: "DELETE", credentials: "same-origin"});
     if (selected === id) select(undefined);
   };
-
   // The change comes back on the event stream, like any other.
   const setGroup = async (id: string, group: string) => {
     await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {
@@ -158,49 +265,152 @@ export function HubView() {
     changeCollapsed((next) => {
       if (next.delete(from)) next.add(to);
     });
-    const members = [...instances.values()].filter((instance) => (instance.group?.trim() ?? "") === from);
+    const members = all.filter((instance) => (instance.group?.trim() ?? "") === from);
     await Promise.all(members.map((instance) => setGroup(instance.id, to)));
   };
 
-  if (signedIn === undefined) return <div className="p-4 text-center text-sm text-muted-foreground">Loading the hub...</div>;
+  if (signedIn === undefined) {
+    return (
+      <main className="flex h-svh items-center justify-center bg-background">
+        <HubMark className="size-10 animate-pulse" />
+        <span className="sr-only">Loading the hub</span>
+      </main>
+    );
+  }
   if (!signedIn) return <SignIn root={root} onSignedIn={() => setSignedIn(true)} />;
 
   const current = selected ? instances.get(selected) : undefined;
+  const filtered = filter !== "all" || query.trim() !== "";
   return (
     <main className="flex h-svh overflow-hidden bg-background">
-      <aside
-        className={cn(
-          "flex w-full flex-col border-r md:w-80 md:shrink-0",
-          current ? "hidden md:flex" : "flex",
-        )}
-      >
-        <header className="flex items-center justify-between gap-2 border-b px-3 py-2">
-          <div className="min-w-0">
-            <h1 className="text-sm font-semibold">AgentAPI hub</h1>
-            <p className="text-xs text-muted-foreground">
-              {connected ? `${total} instance${total === 1 ? "" : "s"}` : "Reconnecting..."}
-              {waiting > 0 && ` · ${waiting} need${waiting === 1 ? "s" : ""} you`}
-            </p>
+      <aside className={cn("flex w-full flex-col border-r bg-background md:w-[360px] md:shrink-0", current ? "hidden md:flex" : "flex")}>
+        <header className="space-y-3 border-b px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
+          <div className="flex items-center gap-2.5">
+            <HubMark className="size-8" />
+            <div className="min-w-0 flex-1">
+              <h1 className="text-[15px] leading-tight font-semibold tracking-tight">AgentAPI Hub</h1>
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+                <span
+                  aria-hidden="true"
+                  className={cn("size-1.5 rounded-full", connected ? "bg-state-ready" : "animate-pulse bg-state-needs")}
+                />
+                {connected ? `Live · ${counts.all} ${counts.all === 1 ? "agent" : "agents"}` : "Reconnecting…"}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-9 rounded-full text-muted-foreground"
+              onClick={() => void toggleNotify()}
+              aria-pressed={notify}
+              aria-label={notify ? "Stop notifying me" : "Notify me when an agent needs me"}
+              title={notify ? "Notifications on" : "Notify me when an agent needs me"}
+            >
+              {notify ? <Bell className="size-4 text-foreground" /> : <BellOff className="size-4" />}
+            </Button>
+            <ModeToggle />
+            <Button variant="outline" size="icon" className="size-9 rounded-full" aria-label="Add an instance" title="Add an instance" onClick={() => setAdding(true)}>
+              <Plus className="size-4" />
+            </Button>
           </div>
-          <Button variant="ghost" size="icon" aria-label="Add an instance" onClick={() => setAdding(true)}>
-            <Plus />
-          </Button>
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <input
+              ref={search}
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search agents"
+              aria-label="Search agents"
+              className="h-10 w-full rounded-xl border bg-muted/50 pr-10 pl-9 text-sm outline-none transition-colors placeholder:text-muted-foreground/80 focus-visible:border-ring focus-visible:bg-card focus-visible:ring-[3px] focus-visible:ring-ring/40 [&::-webkit-search-cancel-button]:hidden"
+            />
+            {query ? (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label="Clear the search"
+                className="absolute top-1/2 right-1 flex size-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            ) : (
+              <kbd className="pointer-events-none absolute top-1/2 right-2.5 hidden -translate-y-1/2 rounded border bg-background px-1.5 font-mono text-[11px] text-muted-foreground md:block">/</kbd>
+            )}
+          </div>
+          <div
+            role="group"
+            aria-label="Filter the agents"
+            className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-0.5 [mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {filters.map((f) => {
+              const active = filter === f.id;
+              const count = counts[f.id];
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setFilter(active && f.id !== "all" ? "all" : f.id)}
+                  className={cn(
+                    "flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                    active ? "border-foreground bg-foreground text-background" : "bg-background text-muted-foreground hover:text-foreground",
+                    !active && f.id === "needs-you" && count > 0 && "border-state-needs/40 text-state-needs",
+                  )}
+                >
+                  {f.label}
+                  <span className={cn("tabular-nums", active ? "text-background/70" : "text-muted-foreground/70")}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
         </header>
-        <ul className="flex-1 overflow-y-auto" aria-label="Instances">
-          {total === 0 && (
-            <li className="p-4 text-sm text-muted-foreground">
-              No instance yet. On a machine that runs AgentAPI, run <code className="break-all font-mono">agentapi hub join {root}/hooks --secret …</code>, or add one by its URL.
+
+        <ul className="flex-1 overflow-y-auto overscroll-contain pb-[max(0.75rem,env(safe-area-inset-bottom))]" aria-label="Instances">
+          {counts.all === 0 && (
+            <li>
+              <div className="md:hidden">
+                <Onboarding root={root} onAdd={() => setAdding(true)} compact />
+              </div>
+              <div className="hidden px-6 py-12 text-center md:block">
+                <HubMark className="mx-auto size-10 opacity-60" />
+                <p className="mt-4 text-sm font-medium">No agents yet</p>
+                <p className="mt-1 text-sm text-muted-foreground">The steps on the right connect them.</p>
+              </div>
+            </li>
+          )}
+          {counts.all > 0 && visible.length === 0 && (
+            <li className="px-6 py-12 text-center">
+              <p className="text-sm font-medium">Nothing matches</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {query ? `No agent matches “${query.trim()}”` : "No agent is in this state right now"}.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-4"
+                onClick={() => {
+                  setFilter("all");
+                  setQuery("");
+                }}
+              >
+                Show all
+              </Button>
             </li>
           )}
           {groups.map((group) => {
-            const folded = showHeaders && collapsed.has(group.name);
+            // A search or a filter shows every match, folded or not.
+            const folded = showHeaders && !filtered && collapsed.has(group.name);
             return (
               <Fragment key={group.name || "\u0000"}>
                 {showHeaders && (
                   <GroupHeader
                     group={group}
                     folded={folded}
-                    onToggle={() => toggleGroup(group.name)}
+                    onToggle={() =>
+                      changeCollapsed((next) => {
+                        if (!next.delete(group.name)) next.add(group.name);
+                      })
+                    }
                     onRename={() => setNaming({mode: "rename", from: group.name})}
                   />
                 )}
@@ -210,6 +420,7 @@ export function HubView() {
                       key={instance.id}
                       instance={instance}
                       groups={names}
+                      now={now}
                       selected={instance.id === selected}
                       onSelect={() => select(instance.id)}
                       onForget={() => void forget(instance.id)}
@@ -221,27 +432,26 @@ export function HubView() {
             );
           })}
         </ul>
+        <p className="hidden border-t px-4 py-2 text-[11px] text-muted-foreground md:block" aria-hidden="true">
+          <kbd className="font-mono">/</kbd> search · <kbd className="font-mono">j</kbd> <kbd className="font-mono">k</kbd> move ·{" "}
+          <kbd className="font-mono">↵</kbd> open · <kbd className="font-mono">esc</kbd> overview
+        </p>
       </aside>
-      <section className={cn("min-w-0 flex-1 flex-col", current ? "flex" : "hidden md:flex")}>
+
+      <section className={cn("min-w-0 flex-1 flex-col bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]", current ? "flex" : "hidden md:flex")}>
         {current ? (
           <>
-            <div className="flex items-center gap-2 border-b px-2 py-1 md:hidden">
-              <Button variant="ghost" size="sm" onClick={() => select(undefined)}>
-                <ArrowLeft /> Instances
-              </Button>
-              <span className="truncate text-sm font-medium">{displayName(current)}</span>
-            </div>
-            <iframe
-              key={current.id}
-              title={displayName(current)}
-              src={chatURL(basePath, root, current.id)}
-              className="min-h-0 w-full flex-1 border-0"
-            />
+            <InstanceBar instance={current} root={root} onBack={() => select(undefined)} />
+            <iframe key={current.id} title={`${displayName(current)} chat`} src={chatURL(basePath, root, current.id)} className="min-h-0 w-full flex-1 border-0 bg-background" />
           </>
         ) : (
-          <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">Pick an instance to open its chat.</div>
+          <Overview root={root} instances={all} counts={counts} now={now} onOpen={select} onFilter={setFilter} onAdd={() => setAdding(true)} />
         )}
       </section>
+
+      <div className="sr-only" aria-live="assertive" role="status">
+        {announcement}
+      </div>
       <AddInstance root={root} open={adding} onOpenChange={setAdding} onAdded={(id) => select(id)} />
       <GroupName
         naming={naming}
@@ -256,244 +466,47 @@ export function HubView() {
   );
 }
 
-function GroupHeader({group, folded, onToggle, onRename}: {group: HubGroup; folded: boolean; onToggle: () => void; onRename: () => void}) {
-  const Chevron = folded ? ChevronRight : ChevronDown;
-  return (
-    <li className="flex items-center gap-1 border-b bg-muted/40 pr-1">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={!folded}
-        className="flex min-w-0 flex-1 items-center gap-1.5 px-3 py-1.5 text-left text-xs font-semibold text-muted-foreground hover:text-foreground"
-      >
-        <Chevron className="size-3.5 shrink-0" aria-hidden />
-        <span className="min-w-0 truncate">{group.name || "Ungrouped"}</span>
-        <span className="shrink-0 font-normal">{group.instances.length}</span>
-        {group.needsYou > 0 && (
-          <span className="shrink-0 rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold text-white" aria-label={`${group.needsYou} need you`}>
-            {group.needsYou}
-          </span>
-        )}
-      </button>
-      {group.name && (
-        <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`Rename the group ${group.name}`} onClick={onRename}>
-          <Pencil className="size-3.5" />
-        </Button>
-      )}
-    </li>
-  );
-}
-
-function InstanceRow({
-  instance,
-  groups,
-  selected,
-  onSelect,
-  onForget,
-  onGroup,
-  onNewGroup,
-}: {
-  instance: HubInstance;
-  groups: string[];
-  selected: boolean;
-  onSelect: () => void;
-  onForget: () => void;
-  onGroup: (name: string) => void;
-  onNewGroup: () => void;
-}) {
+// InstanceBar heads the open instance: back to the list or overview, what
+// it is and does, and its own chat in a tab of its own.
+function InstanceBar({instance, root, onBack}: {instance: HubInstance; root: string; onBack: () => void}) {
   const state = instanceState(instance);
-  const summary = instance.summary;
-  const usage = usagePercent(summary);
-  const agent = instance.agent_type ? agentDisplayName(parseAgentType(instance.agent_type), instance.agent_type) : "";
-  const gone = state === "stopped" || state === "unreachable";
+  const agent = agentName(instance);
   return (
-    <li className={cn("flex items-start border-b", selected && "bg-accent")}>
-      <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-start gap-3 py-2.5 pr-1 pl-3 text-left hover:bg-accent/60">
-        <span className={cn("mt-1.5 size-2.5 shrink-0 rounded-full", dotClass[state])} aria-hidden />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-baseline justify-between gap-2">
-            <span className="min-w-0 truncate text-sm font-medium">{displayName(instance)}</span>
-            <span className={cn("shrink-0 text-xs", state === "needs-you" ? "font-medium text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
-              {stateLabel(instance)}
-            </span>
-          </span>
-          <span className="block truncate text-xs text-muted-foreground">
-            {summary?.title || instance.error || instance.url}
-          </span>
-          <span className="flex min-w-0 gap-2 text-[11px] text-muted-foreground/80">
-            {agent && <span className="shrink-0">{agent}</span>}
-            {instance.hostname && <span className="min-w-0 truncate" data-hub-host>{instance.hostname}</span>}
-            {summary && summary.queued_messages > 0 && <span className="shrink-0 whitespace-nowrap">{summary.queued_messages} queued</span>}
-            {usage !== undefined && <span className="shrink-0 whitespace-nowrap">{Math.round(usage)}% limit</span>}
-          </span>
-        </span>
-      </button>
-      {/* Not modal: a modal menu that opens the naming dialog leaves the page
-          unclickable once both close (Radix's pointer-events lock). */}
-      <DropdownMenu modal={false}>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="mt-1.5 mr-1 size-8 shrink-0" aria-label={`Actions for ${displayName(instance)}`}>
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56 max-w-[calc(100vw-1rem)]">
-          <DropdownMenuLabel>Group</DropdownMenuLabel>
-          <DropdownMenuRadioGroup value={instance.group?.trim() ?? ""} onValueChange={onGroup}>
-            <DropdownMenuRadioItem value="">No group</DropdownMenuRadioItem>
-            {groups.map((name) => (
-              <DropdownMenuRadioItem key={name} value={name}>
-                <span className="truncate">{name}</span>
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-          <DropdownMenuItem onSelect={onNewGroup}>
-            <FolderPlus /> New group…
-          </DropdownMenuItem>
-          {gone && (
+    <div className="flex h-14 shrink-0 items-center gap-2 border-b bg-background px-2 pt-[env(safe-area-inset-top)] md:px-3">
+      <Button variant="ghost" size="sm" className="h-9 gap-1 px-2 md:hidden" onClick={onBack}>
+        <ArrowLeft className="size-4" /> Agents
+      </Button>
+      <Button variant="ghost" size="icon" className="hidden size-9 rounded-full md:inline-flex" onClick={onBack} aria-label="Back to the overview" title="Back to the overview (esc)">
+        <X className="size-4" />
+      </Button>
+      <StatusGlyph state={state} className="ml-1 hidden sm:block" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm leading-tight font-semibold">{displayName(instance)}</p>
+        <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <span className={cn("shrink-0 font-medium", stateTone[state])}>{stateLabel(instance)}</span>
+          {agent && (
             <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onSelect={onForget}>
-                <Trash2 /> Forget
-              </DropdownMenuItem>
+              <span aria-hidden="true" className="text-muted-foreground/40">·</span>
+              {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3" />}
+              <span className="shrink-0">{agent}</span>
             </>
           )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </li>
-  );
-}
-
-// GroupName names a new group for an instance, or renames a group.
-function GroupName({naming, onClose, onSave}: {naming: Naming | null; onClose: () => void; onSave: (name: string) => void}) {
-  const [name, setName] = useState("");
-  useEffect(() => {
-    setName(naming?.mode === "rename" ? naming.from : "");
-  }, [naming]);
-  const trimmed = name.trim().replace(/\s+/g, " ");
-  return (
-    <Dialog open={naming !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (trimmed) onSave(trimmed);
-          }}
-          className="space-y-3"
-        >
-          <DialogHeader>
-            <DialogTitle>{naming?.mode === "rename" ? "Rename the group" : "New group"}</DialogTitle>
-            <DialogDescription>
-              {naming?.mode === "rename"
-                ? "Every instance in the group moves to the new name."
-                : "The instance moves to the new group. Groups are kept on the hub, so every browser sees them."}
-            </DialogDescription>
-          </DialogHeader>
-          <input
-            autoFocus
-            value={name}
-            maxLength={maxGroupName}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Group name"
-            aria-label="Group name"
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-          />
-          <DialogFooter>
-            <Button type="submit" disabled={!trimmed}>
-              Save
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function SignIn({root, onSignedIn}: {root: string; onSignedIn: () => void}) {
-  const [token, setToken] = useState("");
-  const [error, setError] = useState("");
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setError("");
-    const response = await fetch(`${root}/api/session`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({token}),
-    }).catch(() => undefined);
-    if (response?.ok) onSignedIn();
-    else setError(response?.status === 401 ? "Wrong token." : "The hub didn't answer.");
-  };
-  return (
-    <main className="flex h-svh items-center justify-center bg-background p-4">
-      <form onSubmit={submit} className="w-full max-w-sm space-y-3 rounded-lg border p-5">
-        <h1 className="text-base font-semibold">AgentAPI hub</h1>
-        <p className="text-sm text-muted-foreground">Sign in with the hub&apos;s token (agentapi hub serve --token).</p>
-        <input
-          type="password"
-          autoFocus
-          autoComplete="current-password"
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
-          className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-          placeholder="Hub token"
-          aria-label="Hub token"
-        />
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <Button type="submit" className="w-full" disabled={!token}>
-          Sign in
-        </Button>
-      </form>
-    </main>
-  );
-}
-
-function AddInstance({root, open, onOpenChange, onAdded}: {root: string; open: boolean; onOpenChange: (open: boolean) => void; onAdded: (id: string) => void}) {
-  const [url, setURL] = useState("");
-  const [token, setToken] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const response = await fetch(`${root}/api/instances`, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({url, token}),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setError(body.error ?? `The hub answered ${response.status}.`);
-        return;
-      }
-      setURL("");
-      setToken("");
-      onOpenChange(false);
-      onAdded(body.id);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <form onSubmit={submit} className="space-y-3">
-          <DialogHeader>
-            <DialogTitle>Add an instance</DialogTitle>
-            <DialogDescription>An AgentAPI the hub can reach, such as http://dev-1.vpn:3284. Instances that run agentapi hub join appear by themselves.</DialogDescription>
-          </DialogHeader>
-          <input value={url} onChange={(e) => setURL(e.target.value)} placeholder="http://dev-1.vpn:3284" aria-label="URL" className="w-full rounded-md border bg-background px-3 py-2 text-sm" />
-          <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="API token (if it needs one)" aria-label="API token" className="w-full rounded-md border bg-background px-3 py-2 text-sm" />
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          <DialogFooter>
-            <Button type="submit" disabled={!url || busy}>
-              {busy ? <RefreshCw className="animate-spin" /> : <Plus />} Add
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+          {instance.hostname && (
+            <>
+              <span aria-hidden="true" className="hidden text-muted-foreground/40 sm:inline">·</span>
+              <span className="hidden min-w-0 truncate sm:inline" data-hub-host>
+                {instance.hostname}
+              </span>
+            </>
+          )}
+        </p>
+      </div>
+      <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-muted-foreground" asChild>
+        <a href={chatURL(basePath, root, instance.id)} target="_blank" rel="noreferrer" aria-label={`Open ${displayName(instance)} in a new tab`}>
+          <ExternalLink className="size-4" />
+          <span className="hidden lg:inline">New tab</span>
+        </a>
+      </Button>
+    </div>
   );
 }
