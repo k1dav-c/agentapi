@@ -48,6 +48,9 @@ type Config struct {
 	Client *http.Client
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+	// ConnectGrace is how long the hub keeps trying an instance it can't
+	// reach before it calls it unreachable; zero is 10 seconds.
+	ConnectGrace time.Duration
 }
 
 // Hub is the server.
@@ -81,6 +84,9 @@ func New(config Config) (*Hub, error) {
 	}
 	if config.Now == nil {
 		config.Now = time.Now
+	}
+	if config.ConnectGrace == 0 {
+		config.ConnectGrace = defaultConnectGrace
 	}
 	client := config.Client
 	if client == nil {

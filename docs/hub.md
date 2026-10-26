@@ -40,7 +40,9 @@ hub never has to be on the public internet.
    events, and the hub adds, updates or stops the instance.
 2. The hub follows each instance's summary (`GET /events?only=summary`): its state, what it waits
    for, its title, latest task, queue and usage limits. One connection per instance, reopened after
-   1 s, then up to every 30 s when it fails. A stream silent for 45 s counts as lost.
+   1 s, then up to every 30 s when it fails. A stream silent for 45 s counts as lost. An instance
+   stays connecting for the first 10 s of failures (one that is starting isn't listening yet when
+   its first event comes); after that it is unreachable.
 3. A browser signs in with the hub token and gets every instance and each change from one stream.
 4. Opening an instance loads the chat through the hub (`/i/<id>/…`). The hub forwards each request
    with the instance's API token in place of the browser's credentials.
@@ -171,8 +173,8 @@ Each state has a shape of its own, so it reads without its color:
 | Turning blue arc | Working | The agent works on the task shown |
 | Green check | Finished | A task ended since anyone last looked at this agent |
 | Grey ring | (its title) | Idle |
-| Dashed ring, turning | Connecting | The hub is opening its summary stream |
-| Broken red ring | Unreachable | The hub can't reach it; the line says why |
+| Dashed ring, turning | Connecting | The hub is opening its summary stream, or opening it again |
+| Broken red ring | Unreachable | The hub hasn't reached it for 10 s; the line says why |
 | Square | Stopped, Exited | The AgentAPI stopped, or its agent exited |
 
 Search (**/**) matches any word of a name, group, title, machine or agent. The chips under it show

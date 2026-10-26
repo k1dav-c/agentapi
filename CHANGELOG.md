@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- A hub no longer shows an instance that is starting, or whose stream drops for a moment, as
+  unreachable: it stays connecting (with its last state, if it had one) while the hub tries again
+  for 10 s, and is unreachable only after that.
+
 ## v1.4.0
 
 ### Features
