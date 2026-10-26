@@ -24,7 +24,8 @@ AgentAPI 可以用來：
 Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬方式（[PTY transport](#pty-transport)）。
 工作階段管理與聊天功能支援不同的 transport，可用來處理長時間執行的任務；
 [webhook](#webhook) 會把任務狀態回報給中控平台。[CHANGELOG.md](CHANGELOG.md) 列出有哪些變更，
-[docs/architecture.zh-TW.md](docs/architecture.zh-TW.md) 說明它的架構，完整的 commit 歷史
+[docs/architecture.zh-TW.md](docs/architecture.zh-TW.md) 說明它的架構，
+[docs/hub.zh-TW.md](docs/hub.zh-TW.md) 說明怎麼在一個頁面監看多個 AgentAPI，完整的 commit 歷史
 請參閱[與上游的完整比較](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)。
 
 ## 目錄
@@ -1188,7 +1189,8 @@ webhook 事件使用同一份 `instance` 身分資訊，方便接收 webhook 或
 #### 執行 hub
 
 hub 監看它連得到的任何機器上的多個 AgentAPI：把它放在會一直開著的地方（例如常開的
-workspace），並透過私有網路（例如你自己的 VPN）連到它和各個 AgentAPI。
+workspace），並透過私有網路（例如你自己的 VPN）連到它和各個 AgentAPI。一步步的架設方式、每種
+狀態、各個 token、疑難排解和 hub 的 API，見 [hub 指南](docs/hub.zh-TW.md)。
 
 ```bash
 agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token "$AGENTAPI_TOKEN"

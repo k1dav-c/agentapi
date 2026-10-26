@@ -9,7 +9,8 @@
   add them, and the hub follows each one's summary. Instances can also be added by URL; the hub
   keeps them across restarts. Its page (`/chat/hub/`, desktop or phone) lists them, those that
   need you first, and opens any of them in the chat through the hub. The hub sends the instance's
-  API token, so the browser never holds the instances' tokens.
+  API token, so the browser never holds the instances' tokens. The [hub guide](docs/hub.md) covers
+  setup, every state, troubleshooting and the hub's API.
 - Set `agentapi server` flags in `~/.agentapi/config.yaml` (`--config`); flags and `AGENTAPI_*`
   variables override it. A setting there outlives a restart that runs the same command line, such
   as a Coder workspace's start script.

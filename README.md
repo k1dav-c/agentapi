@@ -35,7 +35,8 @@ protocols with the [native transport](#native-transport) by default, and keeps t
 (the [PTY transport](#pty-transport)) for every other agent. Session management and chat features
 support long-running tasks across transports, and [webhooks](#webhooks) report them to a central
 platform. [CHANGELOG.md](CHANGELOG.md) lists what
-changed, [docs/architecture.md](docs/architecture.md) describes how it is built, and the
+changed, [docs/architecture.md](docs/architecture.md) describes how it is built,
+[docs/hub.md](docs/hub.md) how to watch many AgentAPIs from one page, and the
 [full comparison with upstream](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)
 has the complete commit history.
 
@@ -1412,6 +1413,8 @@ stream with `fetch` and an `Authorization` header; `EventSource` can't set that 
 
 A hub watches many AgentAPIs on any machines it can reach. Run it somewhere that stays up, such as
 an always-on workspace, and reach it and the AgentAPIs over a private network such as your own VPN.
+The [hub guide](docs/hub.md) covers setup step by step, every state, tokens, troubleshooting and the
+hub's API.
 
 ```bash
 agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token "$AGENTAPI_TOKEN"

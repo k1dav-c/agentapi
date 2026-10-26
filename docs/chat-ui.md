@@ -492,7 +492,7 @@ usage limit); then a pulsing blue dot while one works, a green one for a finishe
 seen, then idle, unreachable and stopped ones. The tab title counts what needs you. Picking one
 opens it in this chat beside the list (or instead of it on a phone, with a back button), through
 the hub, which sends the instance's token. `+` adds an instance by its URL and token; a stopped or
-unreachable one can be forgotten.
+unreachable one can be forgotten. The [hub guide](hub.md) covers setup and every state in detail.
 
 ## Connection and caching
 
