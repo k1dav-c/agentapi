@@ -39,6 +39,10 @@ func (a Attention) Schema(r huma.Registry) *huma.Schema {
 // summaryTitleLimit is how many characters of the prompt a title takes.
 const summaryTitleLimit = 60
 
+// summaryRequestTitleLimit is how many characters of a request's title a
+// summary carries.
+const summaryRequestTitleLimit = 120
+
 // SummaryBody is what a client that watches many AgentAPIs shows of one:
 // who it is, whether it works or waits for the user, and its latest task.
 type SummaryBody struct {
@@ -65,6 +69,17 @@ type SummaryBody struct {
 	LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in, as in GET /status."`
 	LimitStop     *native.LimitStop     `json:"limit_stop,omitempty" doc:"Set while a usage limit holds the agent, as in GET /status."`
 	Usage         *native.AgentUsage    `json:"usage,omitempty" doc:"The context window and the account's usage limits, as in GET /status."`
+	// Request is the oldest pending request, what a client shows of what
+	// the agent waits for without opening it.
+	Request *SummaryRequest `json:"request,omitempty" doc:"The oldest request the agent waits on (see GET /requests); missing when none waits."`
+}
+
+// SummaryRequest is what a summary says of a pending request.
+type SummaryRequest struct {
+	ID        string             `json:"id" doc:"The request's ID, as in GET /requests."`
+	Kind      native.RequestKind `json:"kind" doc:"approval, question or plan."`
+	Title     string             `json:"title" doc:"One-line summary, such as the command to run."`
+	CreatedAt time.Time          `json:"created_at" doc:"When the agent asked."`
 }
 
 // SummaryUpdateBody is the SSE payload of the summary after it changed.
@@ -91,6 +106,14 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 		summary.Instance = e.instance()
 	}
 	summary.SeenAt = e.seenAt
+	for _, r := range e.requests {
+		if r.Status != native.RequestStatusPending {
+			continue
+		}
+		if summary.Request == nil || r.CreatedAt.Before(summary.Request.CreatedAt) {
+			summary.Request = &SummaryRequest{ID: r.ID, Kind: r.Kind, Title: shortText(r.Title, summaryRequestTitleLimit), CreatedAt: r.CreatedAt}
+		}
+	}
 	summary.Title = summary.SessionName
 	if n := len(e.tasks.tasks); n > 0 {
 		task := e.tasks.tasks[n-1].clone()

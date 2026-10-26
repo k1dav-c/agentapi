@@ -1159,9 +1159,9 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
 
 - `GET /summary` 回傳實例身分 `instance`（與 [webhook](#webhook) 事件相同：`id`、`name`、
   `server_id`、主機、port、目錄、agent 與 `url`）、`status`、`lifecycle`，以及取自工作階段名稱
-  或最新提示開頭的 `title`。另外包含最新[任務](#任務)、任務數、`pending_requests`、
-  `queued_messages`、開啟中的終端機對話框、`login_required`、`limit_stop` 和 `usage`
-  （context window 與帳號用量限制）。
+  或最新提示開頭的 `title`。另外包含最新[任務](#任務)、任務數、`pending_requests`、最早的待處理
+  `request`（類型、標題和 agent 提出的時間）、`queued_messages`、開啟中的終端機對話框、
+  `login_required`、`limit_stop` 和 `usage`（context window 與帳號用量限制）。
 - `attention` 依優先順序標示需要使用者處理的原因：`login`、`request`（核准、提問或計畫）、
   `dialog`（終端機對話框）、`limit`（用量限制使回合停止）、`exited`，或 `none`。
 - `GET /events?only=summary` 在連線時及摘要變動時送出 `summary_update`，另有心跳。
@@ -1196,7 +1196,7 @@ workspace），並透過私有網路（例如你自己的 VPN）連到它和各�
 agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token "$AGENTAPI_TOKEN"
 ```
 
-![hub：所有實例、需要你處理的排最前面，以及在聊天介面中開啟的一個](docs/screenshots/hub-desktop.png)
+![hub：左側是所有 agent，右側是需要你處理的總覽，每個請求一張卡片](docs/screenshots/hub-desktop.png)
 
 在桌面或手機開啟 `http://<hub>:3290/`，用 `--token` 登入。清單列出每個實例，需要你處理的排最前面。
 每個實例顯示它在等什麼（核准或提問、登入、用量限制）、工作中、完成了你還沒看過的任務、閒置、
@@ -1205,7 +1205,7 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 
 - AgentAPI 用 [`agentapi hub join`](#加入-hub) 加入：它們有簽章的 `instance.*` 事件會新增它們，
   hub 再以一條連線追蹤每個實例的[摘要串流](#監看多個實例)。也可以用 `+` 輸入網址（和 token）手動
-  加入；已停止或連不到的可以移除。
+  加入；每一列的 `⋯` 選單可以把實例放進自己建立的群組，或移除已停止、連不到的實例。
 - hub 透過自己開啟實例（`/i/<id>/...`），以實例的 API token（`--instance-token`，或加入時給的）
   取代你的憑證。瀏覽器不會拿到實例的 token，也不會直接連到實例，所以實例不必為它設定 CORS。
 - 只接受以 `--secret` 簽章、而且不超過 10 分鐘的事件，已處理過的傳送會被忽略：事件裡的網址就是

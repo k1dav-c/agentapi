@@ -165,3 +165,18 @@ func TestSummaryUnreadRestored(t *testing.T) {
 	e.Restore(state)
 	assert.True(t, e.Summary().Unread, "it ended after it was last seen")
 }
+
+// The summary names the oldest request the agent waits on.
+func TestSummaryRequest(t *testing.T) {
+	t.Parallel()
+	e := NewEventEmitter()
+	assert.Nil(t, e.Summary().Request)
+	start := time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC)
+	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r2", Kind: native.RequestKindQuestion, Title: "Which fix?", CreatedAt: start.Add(time.Minute)}, Status: native.RequestStatusPending})
+	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1", Kind: native.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, Status: native.RequestStatusPending})
+	request := e.Summary().Request
+	require.NotNil(t, request)
+	assert.Equal(t, SummaryRequest{ID: "r1", Kind: native.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, *request)
+	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1", Kind: native.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, Status: native.RequestStatusResolved})
+	assert.Equal(t, "r2", e.Summary().Request.ID)
+}

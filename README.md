@@ -1378,8 +1378,9 @@ instance:
 - `GET /summary` returns the `instance` identity (as in [webhook](#webhooks) events: `id`, `name`,
   `server_id`, host, port, directory, agent and `url`), `status`, `lifecycle` and a `title` from the
   session name or the start of the latest prompt. It also includes the latest [task](#tasks), task
-  count, `pending_requests`, `queued_messages`, the open terminal dialog, `login_required`,
-  `limit_stop` and `usage` (context window and account limits).
+  count, `pending_requests`, the oldest pending `request` (its kind, title and when the agent asked),
+  `queued_messages`, the open terminal dialog, `login_required`, `limit_stop` and `usage` (context
+  window and account limits).
 - `attention` identifies why the agent needs you, in priority order: `login`, `request` (approval,
   question or plan), `dialog` (in the terminal), `limit` (a usage limit stopped the turn), `exited`,
   or `none`.
@@ -1420,7 +1421,7 @@ hub's API.
 agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token "$AGENTAPI_TOKEN"
 ```
 
-![The hub: its instances, what needs you first, and one open in the chat](docs/screenshots/hub-desktop.png)
+![The hub: every agent on the left, and an overview of what needs you, with a card per request](docs/screenshots/hub-desktop.png)
 
 Open `http://<hub>:3290/` on a desktop or a phone and sign in with `--token`. The list shows every
 instance, those that need you first. Each shows its state (the reason it waits, such as an
@@ -1430,8 +1431,8 @@ what needs you. Pick one to open it in the chat. On a phone the list and the cha
 
 - AgentAPIs join it with [`agentapi hub join`](#joining-a-hub): their signed `instance.*` events
   add them, and the hub follows each one's [summary stream](#watching-many-instances) from one
-  connection. `+` adds one by its URL (and token) instead; a stopped or unreachable one can be
-  forgotten.
+  connection. `+` adds one by its URL (and token) instead. Each row's `⋯` menu puts the
+  instance in a group of your own, or forgets a stopped or unreachable one.
 - The hub opens an instance through itself (`/i/<id>/...`), sending the instance's API token
   (`--instance-token`, or the one given when it was added) in place of your credentials. The
   browser never holds the instances' tokens or reaches them itself, so no instance needs CORS for

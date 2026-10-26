@@ -100,7 +100,7 @@ answers write keys directly to the agent's terminal.
 | `lib/native/nativetest` | A scriptable fake adapter for tests |
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db` (native and PTY), and the import of a `--state-file` |
-| `lib/hub/` | `agentapi hub serve`: the instances (`store.go`, kept in a file), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`); the user guide is [hub.md](hub.md) |
+| `lib/hub/` | `agentapi hub serve`: the instances and the groups set on its page (`store.go`, kept in a file), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`); the user guide is [hub.md](hub.md) |
 | `lib/userconfig/` | The user's settings file, `~/.agentapi/config.yaml`: flags by name, read by `agentapi server`, written by `agentapi hub` |
 | `lib/registry/` | The entries of the AgentAPIs running on a machine (`~/.agentapi/instances`): writing one atomically, listing them and removing those whose process is gone |
 | `lib/shellterm/` | The shared shell terminal of native sessions |
@@ -652,7 +652,9 @@ AgentAPI's own `AGENTAPI_*` variables.
 build into `lib/httpapi/chat/`, which `embed.go` embeds with `go:embed`. The build uses a
 placeholder base path that the server rewrites to `--chat-base-path` (default `/chat`). The UI also
 runs as a standalone development server (`bun run dev`, with `?url=<server>`), and `/chat/embed` is
-a variant for embedding in other pages.
+a variant for embedding in other pages (`hub=1`: in the hub's frame it draws the hub's bar for the instance, from what the hub sends it in window messages, `lib/hub-frame.ts`). `/chat/hub/`
+is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, its logic in
+`lib/hub.ts`), which `agentapi hub serve` serves with the same build.
 
 - `components/chat-provider.tsx` composes the client state and API operations.
   Actions and API calls come from `useChatActions()`, an object that never

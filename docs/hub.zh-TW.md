@@ -131,37 +131,79 @@ agentapi list         # 這台機器上執行中的 AgentAPI，以及各自的�
 ![hub 的登入畫面](screenshots/hub-sign-in.png)
 
 token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie；頁面不會保存 token。更換
-`--token` 會讓所有瀏覽器登出。
+`--token` 會讓所有瀏覽器登出。token 錯誤時會當場拒絕，眼睛按鈕可以顯示你貼上的內容。
+
+### 總覽
+
+![總覽：需要你處理的數量、每種狀態一格，以及每個請求一張卡片](screenshots/hub-desktop.png)
+
+沒有開啟任何 agent 時，右側會顯示有幾個 agent 需要你、各自為了什麼。每種狀態一格（需要你、工作中、
+已完成未讀、離線），點一下就會篩選清單。下方每個需要你的 agent 各有一張卡片，寫出它在等什麼（核准
+的指令、提問、登入、用量限制）和等了多久，並有 **Answer** 或 **Open** 按鈕。工作中的 agent 會顯示
+提示和已經跑了多久；你還沒看過的已完成 agent 會顯示標題。
+
+![深色主題的總覽](screenshots/hub-desktop-dark.png)
 
 ### 清單
 
 ![清單會顯示的每種狀態](screenshots/hub-list.png)
 
-每一列顯示實例的名稱（`--name`，預設為工作目錄名稱）、目前在做什麼、標題（工作階段名稱，沒有的話
-是最新提示的開頭）、agent、機器、佇列中等待的訊息數，以及用得最多的用量限制。各列依下表的狀態順序
-排列，同狀態再依名稱排序：
+每一列顯示 agent 的名稱（`--name`，預設為工作目錄名稱）、它在等什麼或在做什麼、多久以前、agent 和
+機器；佇列有訊息、或用量限制超過 60% 時也會顯示。同一個[群組](#群組)內，各列依下表的狀態順序排列，
+同狀態再依名稱排序。每種狀態都有自己的形狀，不靠顏色也看得出來：
 
-| 圓點 | 標示 | 意思 |
+| 圖示 | 第二行開頭 | 意思 |
 | --- | --- | --- |
-| 琥珀色 | Needs your answer | 有核准、提問、計畫或終端機對話框在等你 |
-| 琥珀色 | Needs login | 要先在它的機器上登入，agent 才能工作 |
-| 琥珀色 | Usage limit | 用量限制停下了回合；佇列中的訊息等重置後才送出 |
-| 閃爍的藍色 | Working | agent 正在處理任務 |
-| 綠色 | Finished | 上次有人查看這個實例之後，有任務結束了 |
-| 灰色 | Idle | 沒有工作 |
-| 閃爍的灰色 | Connecting | hub 正在開啟它的摘要串流 |
-| 紅色 | Unreachable | hub 連不到它；標題的位置改顯示原因 |
-| 空心 | Stopped、Agent exited | AgentAPI 已停止，或它的 agent 已結束 |
+| 琥珀色 ! | Approval、Question、Plan、Dialog | 有請求在等你回覆；這一行會顯示內容 |
+| 琥珀色 ! | Login | 要先在它的機器上登入，agent 才能工作 |
+| 琥珀色 ! | Usage limit | 用量限制停下了回合；佇列中的訊息等重置後才送出 |
+| 轉動的藍色弧線 | Working | agent 正在處理顯示的任務 |
+| 綠色勾勾 | Finished | 上次有人查看這個 agent 之後，有任務結束了 |
+| 灰色圓環 | （它的標題） | 閒置 |
+| 轉動的虛線圓環 | Connecting | hub 正在開啟它的摘要串流 |
+| 斷開的紅色圓環 | Unreachable | hub 連不到它；這一行會說明原因 |
+| 方塊 | Stopped、Exited | AgentAPI 已停止，或它的 agent 已結束 |
 
-頁首會顯示實例數和需要你處理的數量。分頁標題也會顯示，例如 `(2) AgentAPI hub`，釘選的分頁也看得到。
+搜尋（**/**）會比對名稱、群組、標題、機器或 agent 中的任何字詞。搜尋框下方的標籤可以顯示全部，或只
+顯示需要你、工作中、已完成未讀、離線的 agent，並附上數量。頁首顯示 hub 的串流是否連線中，以及共有
+幾個 agent；分頁的標題和圖示會顯示需要你處理的數量，釘選的分頁也看得到。
 
-「Finished」依據實例的未讀標記，這個標記由該 AgentAPI 的所有用戶端共用：在 hub 或實例自己的聊天
-介面開啟它，各處都會變成已讀。
+「Finished」依據 agent 的未讀標記，這個標記由該 AgentAPI 的所有用戶端共用：在 hub 或它自己的聊天
+介面開啟，各處都會變成已讀。
+
+### 群組
+
+![手機上一列的選單：群組、新群組和 Forget](screenshots/hub-phone-menu.png)
+
+可以依客戶、專案或機器，把實例分成自己的群組。每一列最後的 **⋯** 可以把實例移到某個群組、
+**New group…**（新群組）或 **No group**（不分組）。群組保存在 hub 上，所以手機和桌面看到的一樣；
+實例自己的事件不會改動它所屬的群組。
+
+有了群組之後，清單會依名稱為每個群組加上標題，沒有分組的實例排在最後的 **Ungrouped** 底下。標題會
+顯示群組裡的實例數，並以琥珀色顯示需要你處理的數量，所以收合的群組仍然看得到。點標題可以收合或
+展開；每個瀏覽器各自記住收合了哪些群組。鉛筆圖示可以為群組改名，裡面的實例會一起移過去。群組名稱
+最多 40 個字元；群組裡沒有實例時就會消失。
 
 ### 開啟實例
 
-點選一列，就會在清單旁開啟這個實例的聊天介面：聊天介面的功能在這裡都能用，包括回覆請求。網址會記住
-目前的實例（`#<id>`），重新整理或從書籤開啟都會回到同一個實例。
+![在清單旁開啟的 agent，核准正等著回覆](screenshots/hub-instance.png)
+
+點選一列或一張卡片，就會在清單旁開啟這個 agent 的聊天介面：聊天介面的功能在這裡都能用，包括回覆
+請求。上方的列顯示 agent 的狀態、agent 和機器，也放著聊天介面自己的搜尋、終端機和 Explorer 按鈕；**New tab** 會單獨開啟聊天介面，**×**（或
+**Esc**）會回到總覽。開啟 agent 會在瀏覽紀錄新增一頁，所以「上一頁」會回到清單或總覽；從一個 agent
+換到另一個則不會再新增。網址會記住目前的 agent（`#<id>`），重新整理或從書籤開啟都會回到同一個。
+
+### 快捷鍵與通知
+
+| 按鍵 | 作用 |
+| --- | --- |
+| `/` | 搜尋 |
+| `j`、`k`（或方向鍵） | 在各列之間移動 |
+| `Enter` | 開啟該列 |
+| `Esc` | 清除搜尋，或回到總覽 |
+
+快捷鍵在焦點位於 hub 時有效；在開啟的聊天介面裡，按鍵會交給聊天介面。鈴鐺按鈕會請瀏覽器在 hub 分頁
+位於背景、有 agent 開始需要你時通知你；螢幕閱讀器也會即時讀出同樣的訊息。
 
 ### 在手機上
 
@@ -169,9 +211,16 @@ token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie�
 | --- | --- |
 | ![手機上的 hub 清單](screenshots/hub-phone.png) | ![在手機上開啟的實例](screenshots/hub-phone-chat.png) |
 
-在窄螢幕上，清單和聊天介面輪流顯示；上方的 **Instances** 可以返回清單。在手機上回覆核准：
+在窄螢幕上，清單和聊天介面輪流顯示；上方的返回箭頭或手機的「上一頁」手勢都會回到清單。聊天介面把螢幕留給對話：上方只有一列，輸入框也只占一行。在手機上回覆核准：
 
 ![在手機上透過 hub 回覆核准](screenshots/demo-hub.gif)
+
+### 接上第一批 agent
+
+![空的 hub 顯示的步驟](screenshots/hub-empty.png)
+
+還沒有 agent 加入的 hub，會顯示[架設](#3-讓每台機器的-agentapi-加入)的三個步驟，附上可以複製的指令，
+並已填好 hub 自己的位址。
 
 ### 加入與移除實例
 
@@ -182,7 +231,7 @@ token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie�
 這個實例保存，取代 `--instance-token` 送出。這樣加入的實例不會回報啟動或停止；hub 只會發現它連得到
 或連不到。
 
-已停止或連不到的那一列，滑鼠移過去會出現 **Forget**，可以把它從 hub 移除。用 webhook 加入的實例，
+已停止或連不到的那一列，**⋯** 選單裡有 **Forget**，可以把它從 hub 移除。用 webhook 加入的實例，
 下次啟動時會再出現。
 
 ## Token 與安全性
@@ -264,6 +313,7 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `DELETE /api/session` | 登出 |
 | `GET /api/instances` | 所有實例，含摘要和連線狀態 |
 | `POST /api/instances` | `{"url": …, "token": …}` 以網址加入實例 |
+| `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組；`""` 為不分組 |
 | `DELETE /api/instances/{id}` | 移除實例 |
 | `GET /api/events` | Server-sent events：先送 `instances`（全部），再送 `instance`（某個有變動）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面 |
@@ -277,7 +327,7 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | --- | --- | --- |
 | `~/.agentapi/config.yaml` | `agentapi hub join` | hub 的 webhook，每個 `agentapi server` 都會讀取 |
 | `~/.agentapi/instances/` | `agentapi server` | 這台機器上執行中的 AgentAPI，供 `join` 和 `agentapi list` 使用 |
-| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例，以及手動加入的實例的 token |
+| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組，以及手動加入的實例的 token |
 
 ## 限制
 

@@ -2668,6 +2668,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "request": {
+            "$ref": "#/components/schemas/SummaryRequest",
+            "description": "The oldest request the agent waits on (see GET /requests); missing when none waits."
+          },
           "seen_at": {
             "description": "When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did.",
             "format": "date-time",
@@ -2721,6 +2725,35 @@
         ],
         "type": "object"
       },
+      "SummaryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "description": "When the agent asked.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "The request's ID, as in GET /requests.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RequestKind",
+            "description": "approval, question or plan."
+          },
+          "title": {
+            "description": "One-line summary, such as the command to run.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_at",
+          "id",
+          "kind",
+          "title"
+        ],
+        "type": "object"
+      },
       "SummaryUpdateBody": {
         "additionalProperties": false,
         "properties": {
@@ -2757,6 +2790,10 @@
             "description": "Messages waiting in the queue; see GET /queue.",
             "format": "int64",
             "type": "integer"
+          },
+          "request": {
+            "$ref": "#/components/schemas/SummaryRequest",
+            "description": "The oldest request the agent waits on (see GET /requests); missing when none waits."
           },
           "seen_at": {
             "description": "When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did.",

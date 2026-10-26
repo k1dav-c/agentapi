@@ -150,3 +150,16 @@ export function UsageMeter() {
     </DropdownMenu>
   );
 }
+
+// Whether the context or a usage limit is filling up (amber or red), which
+// is worth showing where the meter is otherwise out of the way.
+export function useUsageAlert(): boolean {
+  const usageShown = useChatSelector((chat) => chat.features.usage);
+  const agentUsage = useChatSelector((chat) => chat.agentUsage);
+  const context = agentUsage?.context;
+  const limits = agentUsage?.rate_limits ?? [];
+  if (!usageShown || (!context && limits.length === 0)) return false;
+  const fullest = fullestLimit(limits);
+  const tones = [context ? usageTone(contextPercent(context)) : "ok", fullest ? usageTone(fullest.used_percent, fullest.status) : "ok"];
+  return tones.some((tone) => tone !== "ok");
+}

@@ -38,7 +38,7 @@ export function TtyView({onExit}: {onExit: () => void}) {
   // Estimated until xterm has rendered a row we can measure.
   const rowsFor = (container: HTMLElement, rowHeight = FONT_SIZE * LINE_HEIGHT) => Math.max(10, Math.floor(container.clientHeight / rowHeight));
 
-  const {termRef, inputRef, link, modifier, setModifier, touch, keyboardOpen, inset} = useXterm({
+  const {termRef, inputRef, link, modifier, setModifier, touch, keyboardOpen} = useXterm({
     containerRef,
     key: storageScope,
     options: (container) => ({cols: columnsRef.current, rows: rowsFor(container), scrollback: 5000, cursorBlink: false}),
@@ -130,7 +130,7 @@ export function TtyView({onExit}: {onExit: () => void}) {
   }, [columns]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" style={inset ? {paddingBottom: inset} : undefined}>
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-background/95 px-3 py-2 text-xs sm:px-4">
         <TerminalSquare className="size-4 shrink-0 text-muted-foreground" />
         <span className="font-semibold">TTY mode</span>

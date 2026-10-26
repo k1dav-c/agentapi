@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 // narrower than its text (min-w-0), so a long path in a label wraps instead
 // of widening the card past the screen.
 export const optionRowClass =
-  "flex min-h-10 w-full min-w-0 items-center gap-3 rounded-lg border px-2.5 py-1.5 text-left text-[13px] outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60";
+  "flex min-h-10 w-full min-w-0 items-center gap-3 rounded-lg border px-2.5 py-1.5 text-left max-sm:px-3 text-[13px] outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60";
 
 export const TONE_CLASS = {
   primary: "border-primary bg-primary text-primary-foreground hover:bg-primary/90",
@@ -102,7 +102,7 @@ export function DecisionCardShell({
     >
       <TitleClamped.Provider value={clamped}>
         <div ref={bodyRef} className="min-h-0 overflow-y-auto overscroll-contain">
-          <header className="px-3.5 pb-1 pt-3">
+          <header className="px-3.5 pb-1 pt-3 max-sm:px-3 max-sm:pt-2.5">
             {label && (
               <div className="mb-1 flex items-center gap-1.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-state-needs">
                 {Icon && <Icon className="size-3.5" />}

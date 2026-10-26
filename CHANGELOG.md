@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- A new hub page. The sign-in shows the hub's agents in their states. The list gives each state a
+  glyph of its own and says what each agent waits for (the approval's command, the question, the
+  login) or does, how long ago; search (`/`) and chips filter it. On a desktop an overview counts
+  each state and has a card per request with **Answer**, what runs with its running time, and what
+  finished unseen. An open agent gets the hub's bar in place of the chat's own, and the browser's
+  back (a phone's back gesture) returns from it to the list. Keys (`/`, `j`,
+  `k`, `Enter`, `Esc`), optional browser notifications, a tab icon with the count, and a guide with
+  commands to copy while no agent has joined.
+- The summary names the oldest request the agent waits on (`request`: its ID, kind, title and when
+  the agent asked), so a client shows what each agent waits for without opening it.
+- Sort the hub's instances into groups of your own: each row's `⋯` menu moves the instance to a
+  group, a new one or none. Groups are kept on the hub (`PATCH /api/instances/{id}`), so every
+  browser shows the same ones. The list then gets a header per group that folds, counts the
+  instances and how many need you, and renames the group.
+- The chat leaves more of a phone's screen to the conversation. An agent the hub opens has one bar,
+  the hub's, with the chat's search, terminal and Explorer buttons in it, instead of two. On a
+  phone the composer is one row: the message, `⋯` (attach, voice, the agent's settings) and send,
+  with stop while the agent works; it grows as the message wraps. The agent's mode, model, effort
+  and usage take a second row when asked for from `⋯`, when a slash command opens one of their
+  menus, or while the usage nears a limit. While a card asks for you, the status line above it no longer says so too, and the cards
+  leave out the number keys a phone doesn't have.
+
+### Fixes
+
+- On an iPhone, the top of the chat and of the hub no longer stays cut off after the keyboard
+  closes: the window stays put (the pages scroll in their own panes) and goes back to the top once
+  nothing is being typed in.
+- On an iPhone, the end of the hub's list and the chat's composer no longer sit under a browser's
+  bottom toolbar (Chrome's floats over the page): the pages are frames fixed to the visible area
+  between the toolbars, not a screen-high box.
+- On an iPhone, the composer no longer sits under the keyboard: iOS doesn't shrink the page for it,
+  so while it is up the page's frame takes the place and size of what the browser reports
+  visible, the same rule in every iOS browser (whether it shrinks the visible part, or the window
+  and scrolls it), also for a chat the hub opens, where typing in it no longer lets the window be
+  pulled back to the top as it scrolls. While it is up, a card above the composer scrolls in the room left and the
+  composer stays whole. The terminals' key bar keeps above the keyboard the same way.
+- A stopped or unreachable instance can be forgotten on a phone: **Forget** moved from a
+  hover-only button to the row's `⋯` menu.
+
 ## v1.3.0
 
 ### Features

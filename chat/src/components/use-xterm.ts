@@ -41,7 +41,7 @@ export function useXterm({
   });
   const inputRef = useRef<OrderedInput | null>(null);
   const keyboard = useTerminalKeyboard();
-  const {setKeyboardOpen, inset, keyboardOpen} = keyboard;
+  const {setKeyboardOpen, keyboardOpen} = keyboard;
   const optionsFor = useStableCallback(options);
   const sendData = useStableCallback(send);
   const reportError = useStableCallback(onSendError);
@@ -96,7 +96,7 @@ export function useXterm({
   // Keep the last lines in view when the keyboard opens or closes.
   useEffect(() => {
     termRef.current?.scrollToBottom();
-  }, [inset, keyboardOpen]);
+  }, [keyboardOpen]);
 
   return {termRef, inputRef, link, modifier, setModifier, ...keyboard};
 }
