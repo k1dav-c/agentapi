@@ -38,6 +38,7 @@ device scale factor of 1.
 | [search.png](search.png) | Searching the transcript, with highlighted and counted matches |
 | [session-details.png](session-details.png) | The session details menu opened from the status, with the agent's session ID |
 | [keyboard-shortcuts.png](keyboard-shortcuts.png) | The keyboard shortcuts |
+| [join-hub.png](join-hub.png) | Add to an AgentAPI hub: the hub's address and the commands to copy |
 | [permission-mode.png](permission-mode.png) | The permission mode menu |
 | [model-settings.png](model-settings.png) | The model and reasoning effort menu |
 | [context-usage.png](context-usage.png) | The context window and the usage limits |

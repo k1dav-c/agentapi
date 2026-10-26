@@ -225,7 +225,8 @@ token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie�
 ![空的 hub 顯示的步驟](screenshots/hub-empty.png)
 
 還沒有 agent 加入的 hub，會顯示[架設](#3-讓每台機器的-agentapi-加入)的三個步驟，附上可以複製的指令，
-並已填好 hub 自己的位址。
+並已填好 hub 自己的位址。AgentAPI 自己的聊天介面也有同樣的步驟，針對它所在的機器：標頭狀態選單裡的
+**Add to an AgentAPI hub…**（見[工作階段詳細資訊](chat-ui.zh-TW.md#工作階段詳細資訊與提醒)）。
 
 ### 加入與移除實例
 

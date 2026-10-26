@@ -8,13 +8,14 @@ import {sameValue} from "@/lib/agent-status";
 import {agentDisplayName} from "@/lib/agents";
 import { ModeToggle } from "@/components/mode-toggle";
 import { AgentMark } from "@/components/agent-mark";
-import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Copy, Download, Fingerprint, Hash, Keyboard, LoaderCircle, Tag } from "lucide-react";
+import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Copy, Download, Fingerprint, Hash, Keyboard, LayoutGrid, LoaderCircle, Tag } from "lucide-react";
 import { copyText } from "@/lib/clipboard";
 import { getErrorMessage } from "@/lib/error-utils";
 import { formatTokenCount, getStatusMeta } from "@/lib/session-status";
 import { useWorkingElapsed } from "@/lib/use-elapsed";
 import { openShortcuts } from "@/components/keyboard-shortcuts";
 import { useDialogFromMenu } from "@/lib/menu-dialog";
+import { JoinHubDialog } from "@/components/join-hub-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,6 +43,9 @@ export function Header() {
   const {downloadSession} = useChatActions();
   const [downloading, setDownloading] = useState(false);
   const shortcutsFromMenu = useDialogFromMenu(openShortcuts);
+  // How to add this AgentAPI to a hub, with the commands to copy.
+  const [joinHubOpen, setJoinHubOpen] = useState(false);
+  const joinHubFromMenu = useDialogFromMenu(() => setJoinHubOpen(true));
   const elapsed = useWorkingElapsed(serverStatus);
   const [notify, setNotify] = useState(false);
   useEffect(() => {
@@ -129,7 +133,10 @@ export function Header() {
               )}
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-72 p-2" onCloseAutoFocus={shortcutsFromMenu.onCloseAutoFocus}>
+          <DropdownMenuContent align="end" className="w-72 p-2" onCloseAutoFocus={(event) => {
+            shortcutsFromMenu.onCloseAutoFocus(event);
+            joinHubFromMenu.onCloseAutoFocus(event);
+          }}>
             <DropdownMenuLabel>Session details</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <div className="space-y-3 px-2 py-2 text-xs">
@@ -176,6 +183,10 @@ export function Header() {
               <Keyboard />
               Keyboard shortcuts
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={joinHubFromMenu.onSelect}>
+              <LayoutGrid />
+              Add to an AgentAPI hub…
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         {queuedCount > 0 && (
@@ -197,6 +208,7 @@ export function Header() {
         <div id={HEADER_ACTIONS_ID} className="flex items-center gap-0.5" />
         <ModeToggle />
       </div>
+      <JoinHubDialog open={joinHubOpen} onOpenChange={setJoinHubOpen} />
     </header>
   );
 }
