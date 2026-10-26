@@ -37,7 +37,8 @@
 - On an iPhone, the composer no longer sits under the keyboard: iOS doesn't shrink the page for it,
   so while it is up the page's frame takes the place and size of what the browser reports
   visible, the same rule in every iOS browser (whether it shrinks the visible part, or the window
-  and scrolls it), also for a chat the hub opens. While it is up, a card above the composer scrolls in the room left and the
+  and scrolls it), also for a chat the hub opens, where typing in it no longer lets the window be
+  pulled back to the top as it scrolls. While it is up, a card above the composer scrolls in the room left and the
   composer stays whole. The terminals' key bar keeps above the keyboard the same way.
 - A stopped or unreachable instance can be forgotten on a phone: **Forget** moved from a
   hover-only button to the row's `⋯` menu.

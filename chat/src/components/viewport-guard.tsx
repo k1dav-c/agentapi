@@ -15,7 +15,21 @@ import {viewportFrame} from "@/lib/viewport-frame";
 // page: while nothing is being typed in, the window goes back to the top.
 export function ViewportGuard() {
   useEffect(() => {
-    const typing = () => document.activeElement?.matches("input, textarea, select, [contenteditable=true], [contenteditable='']") ?? false;
+    // What has the focus, also inside a frame (the chat the hub opens, where
+    // the window's own focus is only the frame): while a field there is
+    // typed in, the window stays where iOS scrolled it for the keyboard.
+    const focused = () => {
+      let element = document.activeElement;
+      while (element instanceof HTMLIFrameElement) {
+        try {
+          element = element.contentDocument?.activeElement ?? null;
+        } catch {
+          return element;
+        }
+      }
+      return element;
+    };
+    const typing = () => focused()?.matches("input, textarea, select, [contenteditable=true], [contenteditable='']") ?? false;
     const reset = () => {
       if (!typing() && (window.scrollX !== 0 || window.scrollY !== 0)) window.scrollTo(0, 0);
     };
