@@ -6,8 +6,8 @@
 
 - An agent skill, `skills/agentapi-hub-join`, has Claude Code join its machine's AgentAPIs to a hub:
   it checks the version and that the hub answers, asks for the hub's URL, secret and this machine's
-  address, joins and checks where each AgentAPI reports, without restarting one or printing the
-  secret. The hub guide shows how to install it.
+  address, joins (explaining what `join`'s checks of the hub report) and checks where each AgentAPI
+  reports, without restarting one or printing the secret. The hub guide shows how to install it.
 
 ## v1.6.1
 

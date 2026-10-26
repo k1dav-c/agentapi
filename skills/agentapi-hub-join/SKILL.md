@@ -27,13 +27,14 @@ send requests, not browsers.
 
 ## Steps
 
-1. **Check the version.** The hub needs AgentAPI 1.3 or later here:
+1. **Check the version.** The hub needs AgentAPI 1.3 or later here, and from 1.6.1 `join` checks
+   that the hub takes this machine's events before it writes anything:
 
    ```bash
    agentapi --version
    ```
 
-   If it is older, ask before you run `sudo agentapi update`.
+   If it is older than 1.6.1, ask before you run `sudo agentapi update`.
 
 2. **Check that this machine reaches the hub.** An unsigned event is refused with 401, which shows
    the hub is there:
@@ -58,7 +59,20 @@ send requests, not browsers.
    it. If this machine's AgentAPIs need an API token (`--api-token`), add `--api-token` (or set
    `AGENTAPI_API_TOKEN`); the hub then needs the same token as its `--instance-token`.
 
-   `join` prints one line per running AgentAPI:
+   `join` first sends the hub a signed test event. `The hub at … took a signed test event` means the
+   hub gets this machine's events. Otherwise it stops without writing anything, and says why:
+   - `can't reach the hub` or `didn't answer`: wrong address, or no route to the hub.
+   - `a sign-in page is in front of it`: the URL is behind a login, such as a Coder port URL. Ask for
+     the hub's address on the network or VPN instead.
+   - `refused the signature`: the secret differs from the hub's, or the clocks are more than 10
+     minutes apart.
+   - `is on another machine, so it can't reach this one at localhost`: give the address the hub
+     reaches this machine at as `--public-url`.
+
+   Don't work around these with `--no-check`; that is only for a hub that doesn't run yet, and
+   only when the user says so.
+
+   Then it prints one line per running AgentAPI:
    - `applied`: it reports to the hub now.
    - `needs an API token`: give `--api-token` and run `join` again.
    - Any AgentAPI that isn't listed started before 1.2: it joins when it next starts.
