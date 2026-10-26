@@ -548,7 +548,7 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 `chat/` 是 Next.js 15 與 React 19 的應用程式，用 bun 建置成靜態輸出。`make embed` 會把建置
 結果複製到 `lib/httpapi/chat/`，再由 `embed.go` 以 `go:embed` 嵌入。建置時使用一個佔位的基礎
 路徑，由伺服器改寫成 `--chat-base-path`（預設為 `/chat`）。聊天介面也能以開發伺服器獨立執行
-（`bun run dev`，加上 `?url=<伺服器>`），`/chat/embed` 則是嵌入其他頁面用的版本（`hub=1` 會把狀態列交給 hub 自己的列）。`/chat/hub/`
+（`bun run dev`，加上 `?url=<伺服器>`），`/chat/embed` 則是嵌入其他頁面用的版本（`hub=1`：在 hub 的框架裡，它依 hub 用視窗訊息送來的內容畫出 hub 的實例列，見 `lib/hub-frame.ts`）。`/chat/hub/`
 是 hub 的頁面（`components/hub-view.tsx`，各部分在 `components/hub/`，邏輯在 `lib/hub.ts`），由
 `agentapi hub serve` 以同一份建置提供。
 

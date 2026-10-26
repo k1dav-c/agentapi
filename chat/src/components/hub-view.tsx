@@ -23,6 +23,7 @@ import {
   type HubInstance,
   type InstanceState,
 } from "@/lib/hub";
+import {frameMessage, toFrame, type FromFrame} from "@/lib/hub-frame";
 import {cn} from "@/lib/utils";
 import {HubMark} from "./hub/brand";
 import {AddInstance, GroupName, type Naming} from "./hub/dialogs";
@@ -168,6 +169,22 @@ export function HubView() {
     }
     setSelected(id);
   }, []);
+
+  // The open instance's chat draws the bar above itself once it is ready
+  // (FrameBar), with its own actions in it; until then the hub's bar shows.
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [framed, setFramed] = useState<string>();
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const chat = frame.current;
+      if (!chat || event.source !== chat.contentWindow) return;
+      const message = frameMessage<FromFrame>(event);
+      if (message?.type === "ready") setFramed(chat.dataset.instance);
+      else if (message?.type === "back") select(undefined);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [select]);
 
   // Back and forward show what the URL names.
   useEffect(() => {
@@ -466,8 +483,15 @@ export function HubView() {
       <section className={cn("min-w-0 flex-1 flex-col bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]", current ? "flex" : "hidden md:flex")}>
         {current ? (
           <>
-            <InstanceBar instance={current} root={root} onBack={() => select(undefined)} />
-            <iframe key={current.id} title={`${displayName(current)} chat`} src={chatURL(basePath, root, current.id)} className="min-h-0 w-full flex-1 border-0 bg-background" />
+            {framed === current.id ? <FrameInfo frame={frame} instance={current} root={root} /> : <InstanceBar instance={current} root={root} onBack={() => select(undefined)} />}
+            <iframe
+              ref={frame}
+              key={current.id}
+              data-instance={current.id}
+              title={`${displayName(current)} chat`}
+              src={chatURL(basePath, root, current.id, true)}
+              className={cn("min-h-0 w-full flex-1 border-0 bg-background", framed === current.id && "pt-[env(safe-area-inset-top)]")}
+            />
           </>
         ) : (
           <Overview root={root} instances={all} counts={counts} now={now} onOpen={select} onFilter={setFilter} onAdd={() => setAdding(true)} />
@@ -491,21 +515,41 @@ export function HubView() {
   );
 }
 
+// FrameInfo tells the open instance's chat what its bar shows, whenever
+// that changes.
+function FrameInfo({frame, instance, root}: {frame: React.RefObject<HTMLIFrameElement | null>; instance: HubInstance; root: string}) {
+  const info = JSON.stringify(
+    toFrame({
+      name: displayName(instance),
+      state: instanceState(instance),
+      label: stateLabel(instance),
+      agentType: instance.agent_type || undefined,
+      agent: agentName(instance) || undefined,
+      hostname: instance.hostname || undefined,
+      tab: chatURL(basePath, root, instance.id),
+    }),
+  );
+  useEffect(() => {
+    frame.current?.contentWindow?.postMessage(JSON.parse(info), window.location.origin);
+  }, [frame, info]);
+  return null;
+}
+
 // InstanceBar heads the open instance: back to the list or overview, what
 // it is and does, and its own chat in a tab of its own.
 function InstanceBar({instance, root, onBack}: {instance: HubInstance; root: string; onBack: () => void}) {
   const state = instanceState(instance);
   const agent = agentName(instance);
   return (
-    <div className="flex h-14 shrink-0 items-center gap-2 border-b bg-background px-2 pt-[env(safe-area-inset-top)] md:px-3">
-      <Button variant="ghost" size="sm" className="h-9 gap-1 px-2 md:hidden" onClick={onBack}>
-        <ArrowLeft className="size-4" /> Agents
+    <div className="box-content flex h-12 shrink-0 items-center gap-1 border-b bg-background px-1.5 pt-[env(safe-area-inset-top)] sm:h-14 md:gap-2 md:px-3">
+      <Button variant="ghost" size="icon" className="size-10 shrink-0 rounded-full md:hidden" onClick={onBack} aria-label="Back to Agents">
+        <ArrowLeft className="size-5" />
       </Button>
       <Button variant="ghost" size="icon" className="hidden size-9 rounded-full md:inline-flex" onClick={onBack} aria-label="Back to the overview" title="Back to the overview (esc)">
         <X className="size-4" />
       </Button>
       <StatusGlyph state={state} className="ml-1 hidden sm:block" />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 pl-0.5 md:pl-1">
         <p className="truncate text-sm leading-tight font-semibold">{displayName(instance)}</p>
         <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
           <span className={cn("shrink-0 font-medium", stateTone[state])}>{stateLabel(instance)}</span>
@@ -526,7 +570,7 @@ function InstanceBar({instance, root, onBack}: {instance: HubInstance; root: str
           )}
         </p>
       </div>
-      <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-muted-foreground" asChild>
+      <Button variant="ghost" size="sm" className="hidden h-9 shrink-0 gap-1.5 text-muted-foreground sm:inline-flex" asChild>
         <a href={chatURL(basePath, root, instance.id)} target="_blank" rel="noreferrer" aria-label={`Open ${displayName(instance)} in a new tab`}>
           <ExternalLink className="size-4" />
           <span className="hidden lg:inline">New tab</span>

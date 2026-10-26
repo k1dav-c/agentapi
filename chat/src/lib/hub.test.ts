@@ -61,7 +61,8 @@ describe("hub", () => {
   test("the chat opens an instance through the hub", () => {
     expect(hubRoot("/chat", "https://hub.vpn:3290")).toBe("https://hub.vpn:3290");
     expect(hubRoot("/apps/hub/chat", "https://coder.example.com")).toBe("https://coder.example.com/apps/hub");
-    expect(chatURL("/chat", "https://hub.vpn:3290", "dev-1:3284")).toBe(
+    expect(chatURL("/chat", "https://hub.vpn:3290", "dev-1:3284")).toBe("/chat/embed?url=https%3A%2F%2Fhub.vpn%3A3290%2Fi%2Fdev-1%253A3284");
+    expect(chatURL("/chat", "https://hub.vpn:3290", "dev-1:3284", true)).toBe(
       "/chat/embed?url=https%3A%2F%2Fhub.vpn%3A3290%2Fi%2Fdev-1%253A3284&hub=1",
     );
   });

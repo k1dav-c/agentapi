@@ -132,10 +132,11 @@ export function hubRoot(basePath: string, origin: string): string {
   return new URL("..", chat).toString().replace(/\/$/, "");
 }
 
-// chatURL opens the instance id in the chat, through the hub's proxy;
-// hub=1 leaves the status bar to the hub's own.
-export function chatURL(basePath: string, root: string, id: string): string {
-  return `${basePath}/embed?url=${encodeURIComponent(`${root}/i/${encodeURIComponent(id)}`)}&hub=1`;
+// chatURL opens the instance id in the chat, through the hub's proxy. In
+// the hub's frame (hub=1) the chat draws the hub's bar for the instance
+// instead of its status bar.
+export function chatURL(basePath: string, root: string, id: string, framed = false): string {
+  return `${basePath}/embed?url=${encodeURIComponent(`${root}/i/${encodeURIComponent(id)}`)}${framed ? "&hub=1" : ""}`;
 }
 
 // usagePercent is the fullest of the account's usage limits, if known.

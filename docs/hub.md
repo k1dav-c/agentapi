@@ -203,8 +203,8 @@ name has at most 40 characters, and a group with no instance left disappears.
 ![An agent open beside the list, its approval ready to answer](screenshots/hub-instance.png)
 
 Pick a row or a card to open the agent's chat beside the list: everything the chat does works here,
-answering requests included. The bar above it shows the agent's state, agent and machine; **New
-tab** opens the chat on its own, and **×** (or **Esc**) goes back to the overview. Opening an agent
+answering requests included. The bar above it shows the agent's state, agent and machine, with the
+chat's own search, terminal and Explorer buttons; **New tab** opens the chat on its own, and **×** (or **Esc**) goes back to the overview. Opening an agent
 is a page in the browser's history, so Back returns to the list or the overview; moving from one
 agent to another doesn't add one. The URL keeps the agent (`#<id>`), so a reload or a bookmark
 comes back to it.
@@ -228,8 +228,9 @@ and a screen reader hears the same as it happens.
 | --- | --- |
 | ![The hub's list on a phone](screenshots/hub-phone.png) | ![An instance open on a phone](screenshots/hub-phone-chat.png) |
 
-On a narrow screen the list and the chat take turns; **Agents** at the top, or the phone's back
-gesture, goes back to the list. Answering
+On a narrow screen the list and the chat take turns; the back arrow at the top, or the phone's
+back gesture, goes back to the list. The chat keeps the screen for the conversation: one bar above
+it, and the composer one row until you tap into it. Answering
 an approval from the phone:
 
 ![Answering an approval from the hub on a phone](screenshots/demo-hub.gif)

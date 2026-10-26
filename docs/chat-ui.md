@@ -234,7 +234,7 @@ tasks** lets the queue go at once. A task you send yourself goes out right away.
 ## Requests and decision cards
 
 What the agent asks you appears above the composer as a card, and the agent waits. The status line
-above the card, the header and the tab title say "Needs you", the task shows "Waiting for you", and
+above the card (not on a phone, where the card says it), the header and the tab title say "Needs you", the task shows "Waiting for you", and
 its tool row shows what it waits for. Number keys pick an option. A request is answered once, from
 any open chat; one that can no longer be answered says so.
 
@@ -473,8 +473,11 @@ shows once per page.
 
 ![The chat on a phone](screenshots/chat-mobile.png)
 
-On a phone the transcript takes the full width, thinking folds into the task and the toolbar wraps
-under the message box. A request card takes at most 60% of the screen and a title cut to two lines
+On a phone the transcript takes the full width and thinking folds into the task. The composer is
+one row, the message box with send and stop, until you tap into it: then the agent's settings, its
+usage and the attach button show, under the message box, and they fold away again on a tap outside
+it. While a card asks for you, the card alone says so (the status line above it is left to screen
+readers), and its options leave out the number keys. A request card takes at most 60% of the screen and a title cut to two lines
 can be shown in full. The file viewer takes the whole screen, and the terminals have the key bar.
 
 ![A question card on a phone](screenshots/mobile-question.png)
@@ -489,8 +492,8 @@ A [hub](../README.md#running-a-hub) (`agentapi hub serve`) serves this chat for 
 watches. Its list puts what needs you first, each state with a glyph of its own, and says what each
 agent waits for (the approval's command, the question) or does; search and chips filter it. On a
 desktop, an overview counts each state and has a card per request. Picking an agent opens it in
-this chat beside the list (or instead of it on a phone, with a back button), under the hub's bar
-in place of the chat's own, through the hub, which sends the instance's token. `+` adds an instance by its URL and token. Each row's
+this chat beside the list (or instead of it on a phone, with a back button), under one bar: the
+hub's, with the chat's own buttons in it. It opens through the hub, which sends the instance's token. `+` adds an instance by its URL and token. Each row's
 `⋯` menu puts the instance in a group of your own (the list then shows a folding header per group)
 or forgets a stopped or unreachable one. The [hub guide](hub.md) covers setup, groups and every
 state in detail.

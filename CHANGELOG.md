@@ -18,6 +18,11 @@
   group, a new one or none. Groups are kept on the hub (`PATCH /api/instances/{id}`), so every
   browser shows the same ones. The list then gets a header per group that folds, counts the
   instances and how many need you, and renames the group.
+- The chat leaves more of a phone's screen to the conversation. An agent the hub opens has one bar,
+  the hub's, with the chat's search, terminal and Explorer buttons in it, instead of two. The
+  composer is one row (the message, send and stop) until you tap into it, and folds again on a tap
+  outside. While a card asks for you, the status line above it no longer says so too, and the cards
+  leave out the number keys a phone doesn't have.
 
 ### Fixes
 

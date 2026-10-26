@@ -1050,7 +1050,7 @@ try {
     await hubGif.waitForTimeout(700);
     await tap(hubGif, allow);
     await hubGif.waitForTimeout(1500);
-    await tap(hubGif, hubGif.getByRole('button', {name: 'Agents'}));
+    await tap(hubGif, hubGif.frameLocator('iframe').getByRole('button', {name: 'Back to Agents'}));
     await hubGif.getByRole('list', {name: 'Instances'}).getByText('checkout-api').waitFor();
     await hubGif.waitForTimeout(1200);
   });

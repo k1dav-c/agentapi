@@ -22,6 +22,8 @@ import {AttachmentList, useAttachments} from "./message-input/attachments";
 import {QueuedTasks} from "./message-input/queued-tasks";
 import {SendButtonGroup} from "./message-input/send-button";
 import {useSpeechInput} from "./message-input/speech";
+import {cn} from "@/lib/utils";
+import {useMediaQuery} from "@/lib/use-media-query";
 
 interface MessageInputProps {
   onSendMessage: (message: string, type: "user" | "raw", mode?: DispatchMode) => Promise<SendResult>;
@@ -109,6 +111,27 @@ export default function MessageInput({
     setMessage(text);
     textareaRef.current?.focus();
   };
+
+  // On a phone the composer is one row (the message, send and stop) until
+  // it is used: its settings, usage and attach buttons show once the
+  // message box is focused or has something in it, and fold away again on
+  // a tap outside it (not on its own menus and dialogs).
+  const composerRef = useRef<HTMLFormElement>(null);
+  const [composing, setComposing] = useState(false);
+  const compact = !composing && !message && attachments.attachments.length === 0 && queuedMessages.length === 0;
+  // One line there, with a placeholder that fits it.
+  const oneRow = useMediaQuery("(max-width: 639.98px)") && compact;
+  useEffect(() => {
+    if (!composing) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target || composerRef.current?.contains(target)) return;
+      if (target.closest("[data-radix-popper-content-wrapper], [role=dialog], [role=menu], [role=listbox]")) return;
+      setComposing(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [composing]);
 
   const submit = async (mode: DispatchMode = "queue") => {
     if (sendBlocked || (serverStatus !== "running" && serverStatus !== "stable")) return;
@@ -203,10 +226,12 @@ export default function MessageInput({
             onChange={handleFileInputChange}
           />
           <form
+            ref={composerRef}
             onSubmit={handleSubmit}
+            data-compact={compact || undefined}
             className="overflow-hidden rounded-2xl border bg-card shadow-lg shadow-black/5 transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"
           >
-            <div className="flex flex-col">
+            <div className={cn("flex flex-col", compact && "max-sm:flex-row max-sm:items-center")}>
               {slashSuggestions.length > 0 && (
                 <div className="border-b bg-muted/30 px-2 py-1.5" role="group" aria-label="Chat commands" data-slash-suggestions>
                   {slashSuggestions.map((command) => (
@@ -225,14 +250,15 @@ export default function MessageInput({
                   <p className="px-2 pt-0.5 text-[11px] text-muted-foreground">Tab completes; other commands go to the agent.</p>
                 </div>
               )}
-              <div className="flex">
+              <div className="flex min-w-0 flex-1">
                   <TextareaAutosize
                     ref={textareaRef}
                     minRows={1}
-                    maxRows={4}
+                    maxRows={oneRow ? 1 : 4}
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
+                    onFocus={() => setComposing(true)}
                     onPaste={(event) => {
                       // A pasted screenshot or image is uploaded like an
                       // attachment; pasted text pastes as usual.
@@ -244,7 +270,9 @@ export default function MessageInput({
                     }}
                     aria-label="Task message"
                     placeholder={
-                      waitingForLogin
+                      oneRow && (serverStatus === "running" || serverStatus === "stable")
+                        ? serverStatus === "stable" && !waitingFor ? "Describe a task…" : "Queue a task…"
+                        : waitingForLogin
                         ? "Queue a task (runs after the agent is logged in)…"
                         : waitingForAnswer
                           ? "Queue a task (runs after you answer)…"
@@ -254,7 +282,10 @@ export default function MessageInput({
                               ? "Describe a task…"
                               : "Reconnecting… Your draft is saved."
                     }
-                    className="min-h-14 max-h-32 w-full resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-6 outline-none sm:min-h-16 sm:px-5"
+                    className={cn(
+                      "min-h-14 max-h-32 w-full resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-6 outline-none sm:min-h-16 sm:px-5",
+                      compact && "max-sm:min-h-12 max-sm:truncate max-sm:py-3",
+                    )}
                     disabled={
                       disabled ||
                       (serverStatus !== "stable" && serverStatus !== "running")
@@ -279,16 +310,22 @@ export default function MessageInput({
                 />
               )}
 
-              <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 border-t bg-muted/25 px-3 py-2">
+              <div
+                className={cn(
+                  "flex flex-wrap items-center justify-end gap-x-3 gap-y-1 border-t bg-muted/25 px-3 py-2",
+                  compact && "max-sm:shrink-0 max-sm:border-t-0 max-sm:bg-transparent max-sm:py-1 max-sm:pr-1 max-sm:pl-0",
+                )}
+              >
 
                 {/* The agent's settings and usage: a row of their own on a
                     phone, where they don't fit beside the buttons. */}
-                <div className="mr-auto flex min-w-0 items-center gap-1 empty:hidden max-sm:w-full">
+                <div className={cn("mr-auto flex min-w-0 items-center gap-1 empty:hidden max-sm:w-full", compact && "max-sm:hidden")}>
                   <SessionSettings />
                   <UsageMeter />
                 </div>
 
                 <div className="flex min-w-0 flex-row items-center gap-2">
+                    <div className={cn("contents", compact && "max-sm:hidden")}>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -329,6 +366,7 @@ export default function MessageInput({
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
+                    </div>
 
                   {(serverStatus === "stable" || serverStatus === "running") && (
                     <SendButtonGroup

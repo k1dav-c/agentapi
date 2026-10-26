@@ -19,6 +19,7 @@ import { Kbd } from "./ui/kbd";
 import { ApiError } from "@/lib/error-utils";
 import { isImeComposing } from "@/lib/keys";
 import { useNumberKeys } from "@/lib/use-number-keys";
+import {cn} from "@/lib/utils";
 import {
   answerByMessageHint,
   approvalCommand,
@@ -150,13 +151,13 @@ function OptionsBody({
 
   const body = (
     // Hidden when there is nothing in it.
-    <div className="grid gap-2 px-3.5 pb-1 pt-1 empty:hidden">
+    <div className="grid gap-2 px-3.5 pb-1 pt-1 empty:hidden max-sm:px-3">
       {request.kind === "approval" && <RequestCommand request={request} />}
       {request.detail && <MarkdownDetail content={request.detail} tall={request.kind === "plan"} data-request-detail />}
     </div>
   );
   return render(body, (
-    <div className="grid gap-2 px-3.5 pb-2 pt-2">
+    <div className="grid gap-2 px-3.5 pb-2 pt-2 max-sm:px-3">
       <div className={`grid gap-1.5 ${options.length <= 3 ? "sm:grid-flow-col sm:auto-cols-fr" : ""}`}>
         {options.map((option, index) => {
           const tone = optionTone(option.kind);
@@ -177,7 +178,15 @@ function OptionsBody({
                 {option.description && (
                   // Clamped: a permission rule can list long paths, which
                   // stretched every button of the row. The title shows it all.
-                  <span className={`line-clamp-2 text-[11.5px] [overflow-wrap:anywhere] ${tone === "primary" ? "text-primary-foreground/75" : "text-muted-foreground"}`}>
+                  // On a phone the feedback option has none: the field below
+                  // says what it is for.
+                  <span
+                    className={cn(
+                      "line-clamp-2 text-[11.5px] [overflow-wrap:anywhere] max-sm:line-clamp-1",
+                      tone === "primary" ? "text-primary-foreground/75" : "text-muted-foreground",
+                      option === feedbackOption && "max-sm:hidden",
+                    )}
+                  >
                     {option.description}
                   </span>
                 )}
@@ -204,7 +213,7 @@ function OptionsBody({
             placeholder={
               request.kind === "plan"
                 ? `What should change? Sent with “${feedbackOption.label}”`
-                : `Optional: what to do instead. Sent with “${feedbackOption.label}”`
+                : "What to do instead (optional)"
             }
             className="w-full resize-none rounded-lg border bg-background px-2.5 py-2 text-[13px] leading-5 outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
           />
