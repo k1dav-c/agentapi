@@ -29,7 +29,7 @@ terminal. It is also an example client for the AgentAPI HTTP API. Claude Code ge
 
 The hub's page (`src/app/hub/`, `src/components/hub-view.tsx`) talks to `agentapi hub serve` on the
 same origin, so build the chat into the binary (`make embed` from the repository root), run a hub
-and join it a demo instance:
+and join a demo instance to it:
 
 ```bash
 go run main.go hub serve --token dev --secret dev --state /tmp/hub-dev.json &
@@ -61,9 +61,9 @@ to try specific interactions:
 - `long`: a turn that keeps working for about half a minute, to try steering,
   Stop, Interrupt & send and reordering the queue
 - `login`: the agent loses its login, so the login card docks above the
-  composer. Check again restarts the demo, whose first start still finds no
-  login: the card stays, now saying AgentAPI checks by itself, and the next
-  start (about 5 seconds later, or Check again) works
+  composer. Check again restarts the demo, but its first start still finds no
+  login: the card stays and now says AgentAPI checks by itself. The next start
+  (about 5 seconds later, or Check again) works
 - `limit`: the account reaches its 5-hour limit after the message's requests,
   so the usage limit card docks above the composer and queued tasks wait
 - `cold`: the turn leaves a large context whose prompt cache already expired,
@@ -77,7 +77,7 @@ log, so its own tasks have no cost.
 
 Its settings can change from the composer's menus or slash commands: models Swift, Deep, and Plain
 (which has no effort setting) and all four permission modes. In ask mode every turn's first command
-needs approval; in the plan mode every turn ends with a plan, whose approval switches back to
+needs approval; in plan mode every turn ends with a plan, whose approval switches back to
 bypass. Every turn reports simulated context and rate-limit usage that grows with each turn, and
 `/compact` empties the context. The terminal button opens a real shell in the working directory, as
 for any native agent.

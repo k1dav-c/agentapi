@@ -14,8 +14,8 @@ uncommitted changes):
   results, models, context and usage limits are simulated, so no paid agent runs;
 - the same demo posing as Claude Code (`--type claude -- native-demo`), one directory above
   `my-app`, for the earlier sessions, a subagent and a file found below the working directory.
-  AgentAPI reads Claude Code's logs for it, which the script writes into its home directory: three
-  earlier sessions, and the log of the subagent the demo's Agent tool call starts;
+  AgentAPI reads Claude Code's logs for it, which the script writes into a temporary home
+  directory: three earlier sessions, and the log of the subagent the demo's Agent tool call starts;
 - bash as a PTY agent (`--term-width 100`), for TTY mode;
 - `agentapi hub serve` with three `native-demo` instances that join it with `agentapi hub join`, for
   the hub: one waits for an approval, one works and one finished a task. The rows name the
@@ -119,7 +119,7 @@ runs the script) and a neutral shell prompt.
 The script creates a temporary sample project and home directory, then starts three servers on
 127.0.0.1. It captures every view and GIF and writes [capture.json](capture.json) with the binary
 version, browser, capture time, viewports and images. It stops the servers and removes temporary
-files even if a step fails. A chat error fails the run, which takes about five minutes.
+files even if a step fails. The run takes about five minutes; a chat error fails it.
 
 The binary's version shows in the chat's header. To show the version a merge will release, build
 with it: `make build VERSION=0.27.0`.

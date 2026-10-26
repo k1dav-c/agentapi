@@ -14,9 +14,9 @@ AgentAPI 可以用來：
 - 為各種程式開發代理（coding agent）打造統一的聊天介面
 - 作為 MCP 伺服器的後端，讓一個 agent 控制另一個 coding agent
 - 建立把 pull request 審查交給 agent 處理的工具
-- 從一個中控平台監看多個 agent：每個 AgentAPI 都用 [webhook](#webhook) 把任務、需要你處理的
-  請求、訊息和心跳主動推送過去，同時連到多個 AgentAPI 的用戶端則透過[摘要](#監看多個實例)
-  追蹤每一個。內建的 [hub](#執行-hub) 就是這樣的儀表板，桌面和手機都能用
+- 從一個中控平台監看多個 agent：每個 AgentAPI 用 [webhook](#webhook) 推送任務、需要你處理的
+  請求、訊息和心跳。連到多個 AgentAPI 的用戶端則透過[摘要](#監看多個實例)追蹤每一個。
+  內建的 [hub](#執行-hub) 就是這樣的儀表板，桌面和手機都能用
 
 ## 關於這個 fork
 
@@ -84,14 +84,14 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 
 **聊天介面**（`/chat`）
 
-- [任務](#任務與對話紀錄)以對話紀錄的形式呈現，工具呼叫一行一列，思考內容以旁註顯示，
-  並標出每個任務的花費，也可以匯出成 Markdown；[工作階段瀏覽器](#工作階段瀏覽器)提供連結、檔案、任務索引、
-  MCP 伺服器、agent [先前的工作階段](#先前的工作階段)、重新啟動和 [webhook](#webhook)。
+- [任務](#任務與對話紀錄)以對話紀錄呈現：工具呼叫一行一列，思考內容是旁註，每個任務標出花費，
+  可匯出成 Markdown。[工作階段瀏覽器](#工作階段瀏覽器)提供連結、檔案、任務索引、MCP 伺服器、
+  agent [先前的工作階段](#先前的工作階段)、重新啟動和 [webhook](#webhook)。
 - [Lineage](#lineage)：agent 執行過的 sub agent，以及每一個做了什麼，一步一步呈現，執行中也能看。
 - 終端機對話框和 native 請求的[決策卡片](#決策卡片)、agent 設定的選單、顯示 context 的圓環，
   以及斜線指令。
-- 可以查看檔案、git diff，並預覽 HTML、Markdown 和圖片的[檔案檢視器](#檔案檢視器)，agent 用
-  工作目錄底下某個 repo 的相對路徑提到的檔案也找得到；[TTY mode](#tty-mode) 和 native 終端機，
+- [檔案檢視器](#檔案檢視器)：查看檔案和 git diff，預覽 HTML、Markdown 和圖片。agent 提到的路徑
+  若是相對於工作目錄底下某個 repo，也找得到。[TTY mode](#tty-mode) 和 native 終端機，
   在手機上也能使用。
 - [背景提醒](#提醒連線復原與快取)、瀏覽器通知、對話紀錄快取，以及斷線後的復原。
 
@@ -102,9 +102,9 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 - [hub](#執行-hub)（`agentapi hub serve`）監看多台機器上的 AgentAPI，需要你處理的排最前面，並能在
   聊天介面中開啟任何一個，桌面和手機都能用；[`agentapi hub join`](#加入-hub) 把一台機器上的
   AgentAPI 接到 hub，重新啟動後也一樣。
-- [Webhook](#webhook) 會把任務、請求、訊息和心跳主動推送到監看多個 agent 的中控平台，並以
-  HMAC 簽章；同時連到多個 AgentAPI 的用戶端，每個只要開一條[摘要串流](#監看多個實例)；搭配[人工回覆 API](#人工回覆-api)，機器人可以在 agent 停下來時通知你，並把你的
-  回覆傳回去。
+- [Webhook](#webhook) 把任務、請求、訊息和心跳推送到監看多個 agent 的中控平台，並以 HMAC
+  簽章。連到多個 AgentAPI 的用戶端，每個只要開一條[摘要串流](#監看多個實例)。搭配
+  [人工回覆 API](#人工回覆-api)，機器人可以在 agent 停下來時通知你，並把你的回覆傳回去。
 - AgentAPI 的[自我更新](#agentapi-update)，會比對發行版的 checksum。
 - [安全性](#安全性)：API token（聊天介面以 cookie 登入）、監聽位址，以及允許的主機與來源。
 
@@ -285,14 +285,14 @@ Claude Code sub agent 的狀態取自 Agent 工具呼叫。Codex 的 spawn 呼�
 
 ### 附件與圖片
 
-你可以直接在輸入框貼上圖片，系統會將圖片作為附件上傳；貼上文字時則維持文字輸入。
+在輸入框貼上的圖片會上傳成附件；貼上的文字仍是文字。
 圖片附件和已送出訊息中的圖片都會顯示為縮圖，點選即可查看原圖。agent 收到的是圖片的檔案路徑。
 
 ### 決策卡片
 
 需要你回應的項目會以決策卡片顯示在輸入框上方：使用 PTY transport 時是它的終端機對話框（見
 [互動式提示支援](#互動式提示支援)），使用 native transport 時是它的[請求](#請求核准提問與計畫)，
-等待登入時則是[登入卡片](#登入)。數字鍵可以選擇選項。在手機上卡片最多佔螢幕的 60%，被截成
+等待登入時則是[登入卡片](#登入)。數字鍵可以選擇選項。在手機上卡片最多占螢幕的 60%，被截成
 兩行的標題可以展開來看完整內容。
 
 ![輸入框上方的提問卡片，停在三個步驟中的第一步](docs/screenshots/native-question.png)
@@ -363,7 +363,7 @@ ACP 工作階段會隱藏畫面相關的檢視。詳見 [Native transport](#nati
 ![從標頭的狀態開啟的工作階段詳細資訊選單](docs/screenshots/session-details.png)
 
 agent 的警告和錯誤會以通知顯示，直到你關掉為止。伺服器每次連線都會重送最近的通知，所以聊天介面
-會依伺服器記住你關掉了哪些：重新整理後不會再出現。
+會分別記住你在各伺服器關掉的通知，重新整理後不會再出現。
 
 為了維持長時間連線，聊天介面提供 SSE 心跳（heartbeat）、自動重新連線和失效連線偵測，
 並能在本機復原傳送失敗、尚未送達伺服器的訊息。網頁標題和工作階段標頭會顯示目前的任務、
@@ -453,9 +453,10 @@ Native 模式使用 agent CLI 儲存的登入資訊。請以執行 AgentAPI 的�
   `CLAUDE_CODE_OAUTH_TOKEN` 所需的 token。用 `claude auth status` 檢查登入狀態。
 - Codex：`codex login --device-auth` 讓你從任何裝置以 ChatGPT 方案登入：開啟它顯示的連結，
   再輸入它提供的一次性代碼。登入卡片和 `/login` 執行的就是這個指令，因為 AgentAPI 通常在沒有
-  瀏覽器的伺服器上執行：`codex login` 的瀏覽器登入會把瀏覽器導向執行 Codex 那台機器的
-  `localhost:1455`，其他機器上的瀏覽器連不到。在同一台機器上有瀏覽器時，`codex login` 仍然可以使用；使用 API 金鑰時執行
-  `printenv OPENAI_API_KEY | codex login --with-api-key`。用 `codex login status` 檢查登入狀態。
+  瀏覽器的伺服器上執行。`codex login` 的瀏覽器登入會導向執行 Codex 那台機器的
+  `localhost:1455`，其他機器上的瀏覽器連不到；同一台機器上有瀏覽器時仍可使用。
+  使用 API 金鑰時執行 `printenv OPENAI_API_KEY | codex login --with-api-key`。
+  用 `codex login status` 檢查登入狀態。
 - Pi：在 `pi` 中執行 `/login`，或在 AgentAPI 的環境中設定供應商金鑰，例如 `ANTHROPIC_API_KEY`。
 
 AgentAPI 啟動 agent 時，會依下列方式檢查登入：
@@ -549,10 +550,9 @@ Pi 的 `No API key found`，以及訂閱登入過期後的 `Authentication faile
 `GET /status` 會回報 `capabilities`：`steer`、`interrupt`、`resume`（AgentAPI 再次啟動時
 可以接續工作階段，見[持久保存的工作階段](#持久保存的工作階段)）、`settings`（見
 [工作階段設定](#工作階段設定)）、`compact`（見[斜線指令與壓縮](#斜線指令與壓縮)）和
-`images`（附加的圖片，
-也就是指向 10 MB 以內 PNG、JPEG、GIF 或 WebP 檔案的 `@"<路徑>"`，除了路徑之外也會以圖片
-送給 agent；不支援圖片的 agent 只會收到路徑）。沒有 agent 在執行時（重新啟動、等待登入），
-會回報上一個 agent 支援的能力。
+`images`（附加的圖片，也就是指向 10 MB 以內 PNG、JPEG、GIF 或 WebP 檔案的 `@"<路徑>"`，
+除了路徑之外也會以圖片送給 agent；不支援圖片的 agent 只會收到路徑）。沒有 agent 在執行時
+（重新啟動、等待登入），會回報上一個 agent 支援的能力。
 
 在聊天介面中，agent 工作中時，送出按鈕的選單除了排入佇列（Enter），還有 **Steer**
 （⌘/Ctrl+Enter）和 **Interrupt & send**（⌘/Ctrl+Shift+Enter），Stop 則會中斷目前的回合
@@ -582,7 +582,7 @@ agent 執行期間，可以切換權限模式、模型和推理強度。`GET /se
 | plan | `plan` | plan collaboration mode | — |
 
 若 agent 使用未對應到上述四種模式的設定，例如 Claude Code 核准計畫後的 `acceptEdits`，
-或命令列指定的 Codex 政策，介面便不會標示這四種模式中的任何一種。Claude Code 和 Pi 會立即套用
+或命令列指定的 Codex 政策，介面不會標示其中任何一種模式。Claude Code 和 Pi 會立即套用
 變更；Codex 則在下一個回合套用，因為 app-server 只在那時接受設定。
 
 AgentAPI 會在 agent 重新啟動或重新登入後，再次套用你選擇的設定；使用 `--state-db` 時，
@@ -604,12 +604,12 @@ AgentAPI 重新啟動後也會還原設定。agent 自行變更的設定，例�
 以及帳號的用量限制。`context` 包含以 token 計的 `used` 和 `size`；`rate_limits` 列出名稱、
 使用量和重置時間，Claude Code 另會標示是否接近或已達上限。
 Claude Code 會在每個回合之後回報它的 5 小時與每週限制和 context，Codex 回報它的 context
-和用量窗口，Pi 回報它的 context。新工作階段的 context 會歸零；帳號的用量限制則維持原狀。
+和用量週期，Pi 回報它的 context。新工作階段的 context 會歸零；帳號的用量限制則維持原狀。
 在聊天介面中，輸入框工具列上的圓環顯示 context 用了多少，它的選單則列出各項限制和重置倒數。
 
-Claude Code 也會回報它的 `prompt_cache`：模型供應商在最後一次使用後會保留對話的快取多久
-（`ttl_seconds`：訂閱帳號為一小時，使用 API key、Bedrock 或 Vertex 時為五分鐘），以及快取何時
-過期（`expires_at`）。過期之後，下一則訊息會讓模型重新讀取整個 context，以全額計價，也會算進
+Claude Code 也會回報它的 `prompt_cache`：`ttl_seconds` 是模型供應商在最後一次使用後保留對話
+快取的時間（訂閱帳號為一小時，使用 API key、Bedrock 或 Vertex 時為五分鐘），`expires_at` 是快取
+過期的時間。過期之後，下一則訊息會讓模型重新讀取整個 context，以全額計價，也會算進
 用量限制。agent 閒置、快取已過期且 context 至少有 50k token 時，聊天介面會在輸入框上方提醒，
 並提供先壓縮的按鈕；關掉提醒後，要到下一個回合結束才會再出現。
 
@@ -658,7 +658,7 @@ Ctrl 和 Alt 按鈕會按住修飾鍵，套用到下一個輸入的按鍵。
 - `POST /terminal/input`（`{"data": "..."}`）輸入按鍵，`POST /terminal/resize`
   （`{"cols": 120, "rows": 40}`）調整大小。
 - 使用 native transport 時預設開啟，`--terminal=false` 可以關閉。它和 API 的其他部分受到相同
-  的保護，所以伺服器可以被別人連到時，請使用 `--api-token`。
+  的保護，所以別人連得到伺服器時，請使用 `--api-token`。
 
 ![shell 終端機：在 agent 工作目錄中執行的 git status 和 git log，以及按鍵列](docs/screenshots/terminal.png)
 
@@ -676,7 +676,7 @@ Native agent 不會執行互動式終端機介面，因此下列斜線指令由�
 輸入指令名稱時，輸入框會提示可用的指令，按 Tab 會補完第一個。其他內容會原樣送給 agent，所以
 agent 自己的指令（Claude Code 的 `/code-review`、Pi 擴充功能的指令）仍然可以使用。
 `POST /compact` 會在 agent 沒有在執行回合時壓縮它的 context：Codex（`thread/compact/start`）
-會用一個獨立回合進行壓縮，Pi（它的 `compact` 指令）會在完成後才回覆。壓縮期間送出的訊息會在
+會用一個獨立回合壓縮，Pi（它的 `compact` 指令）會在完成後才回覆。壓縮期間送出的訊息會在
 佇列中等待；agent 拒絕壓縮時（例如 Pi 的「Nothing to compact」）會回傳 409 並附上原因。
 Claude Code 則用 `/compact` 訊息壓縮，聊天介面會把這則訊息送給它。
 
@@ -807,27 +807,25 @@ Claude Code 支援 `steer`（steer 的訊息會在 Claude 的下一步加入正�
 `interrupt`（Claude Code 在 10 秒內沒有結束被中斷的回合時，AgentAPI 會結束它）、`resume`
 和 `images`。工作階段名稱是 Claude Code 在第一個提示之後產生的標題；`/clear` 之後的新工作
 階段也會取得標題，而 `--state-db` 接續的就是這個新工作階段。回合會在 Claude Code 回報閒置時
-結束，所以背景子 agent 以及它完成時喚醒的回合，都屬於
-啟動它的那個回合；子 agent 自己的步驟不會出現在對話中（和工作階段紀錄檔一樣），它的工具
-呼叫在它回報之前會顯示為執行中。
+結束，所以背景 sub agent 以及它完成時喚醒的回合，都屬於啟動它的那個回合。sub agent 自己的步驟
+不會出現在對話中（和工作階段紀錄檔一樣），它的工具呼叫在它回報之前會顯示為執行中。
 
 命令列與環境變數：
 
 - AgentAPI 會加上 `-p --output-format stream-json --input-format stream-json --verbose
   --include-partial-messages --replay-user-messages --permission-prompt-tool stdio`，
   新工作階段加上 `--session-id`，接續工作階段時加上 `--resume`。
-- 除非你另有指定，否則會加上 `--permission-mode bypassPermissions`，工具會直接執行、
-  不會詢問；提問（AskUserQuestion）和計畫（ExitPlanMode）仍然會以請求的形式出現，
-  核准計畫時也可以選擇略過權限。想以其他模式啟動，請加上 `--permission-mode default`
-  （或 `acceptEdits`、`plan` 等），也可以在 Claude Code 執行中切換（見
-  [工作階段設定](#工作階段設定)）；AgentAPI 也會加上 `--allow-dangerously-skip-permissions`，
-  讓工作階段之後可以切換到 bypass。Claude Code 不允許在沙箱外以 root 使用
-  `bypassPermissions`，所以 AgentAPI 以 root 執行時會改加 `--permission-mode default`、
-  不加 `--allow-dangerously-skip-permissions`，並記錄一則警告；在沙箱中請設定 `IS_SANDBOX=1`，或自己指定模式
-  （單獨使用 `--allow-dangerously-skip-permissions` 仍會讓 Claude Code 以 root 執行時直接
-  結束）。另外也會加上 `--thinking adaptive --thinking-display summarized`（少了它思考內容會
-  是空的）。你自己的
-  `--permission-mode`、`--dangerously-skip-permissions`、`--thinking`、
+- 除非你另有指定，否則會加上 `--permission-mode bypassPermissions`，工具直接執行、不詢問。
+  提問（AskUserQuestion）和計畫（ExitPlanMode）仍會以請求出現，核准計畫時也可以選擇略過權限。
+  想以其他模式啟動，請加上 `--permission-mode default`（或 `acceptEdits`、`plan` 等），也可以
+  在 Claude Code 執行中切換（見[工作階段設定](#工作階段設定)）。AgentAPI 也會加上
+  `--allow-dangerously-skip-permissions`，讓工作階段之後可以切換到 bypass。
+- Claude Code 不允許在沙箱外以 root 使用 `bypassPermissions`，所以 AgentAPI 以 root 執行時會
+  改加 `--permission-mode default`、不加 `--allow-dangerously-skip-permissions`，並記錄一則
+  警告。在沙箱中請設定 `IS_SANDBOX=1`，或自己指定模式（單獨使用
+  `--allow-dangerously-skip-permissions` 仍會讓 Claude Code 以 root 執行時直接結束）。
+- 另外也會加上 `--thinking adaptive --thinking-display summarized`（少了它思考內容會是空的）。
+  你自己的 `--permission-mode`、`--dangerously-skip-permissions`、`--thinking`、
   `--max-thinking-tokens` 或 `--thinking-display` 優先。
 - 和協定或 AgentAPI 管理的工作階段衝突的參數會在啟動時被拒絕：`-p`/`--print`、
   `--output-format`、`--input-format`、`-r`/`--resume`、`-c`/`--continue`、
@@ -835,9 +833,8 @@ Claude Code 支援 `steer`（steer 的訊息會在 Claude 的下一步加入正�
   `--permission-prompt-tool`、`--permission-prompts`、`--bg`/`--background`、
   `--cloud`/`--remote`、`--desktop`、`--remote-control`/`--rc`、`--sdk-url`、
   `--resume-session-at` 和 `--resume-drops-turn`，寫在短旗標群組裡（例如 `-pc`）也一樣。
-  你自己傳入的 `--verbose`、
-  `--include-partial-messages` 和 `--replay-user-messages` 會被移除。其他參數
-  （`--model`、`--allowedTools`、`--mcp-config`、`--append-system-prompt` 等）都會原樣
+  你自己傳入的 `--verbose`、`--include-partial-messages` 和 `--replay-user-messages` 會被移除。
+  其他參數（`--model`、`--allowedTools`、`--mcp-config`、`--append-system-prompt` 等）都會原樣
   傳遞。
 - 除了移除上層 agent 工作階段的環境變數（見 [Native transport](#native-transport)），
   AgentAPI 還會設定 `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` 和
@@ -846,7 +843,7 @@ Claude Code 支援 `steer`（steer 的訊息會在 Claude 的下一步加入正�
 恢復工作階段會保留 Claude 的上下文；Claude Code 不會重播先前的訊息，所以聊天介面只能從
 `--state-db` 檔案顯示它們。工作階段在有過一個回合之後才能恢復；使用
 `--no-session-persistence` 時則無法恢復，`resume` 為 false。Claude Code 結束或重新啟動時
-仍未處理的 requests 就無法再回答。需要互動式介面的斜線指令無法運作。
+仍未處理的請求就無法再回答。需要互動式介面的斜線指令無法運作。
 
 ### Codex
 
@@ -880,18 +877,19 @@ Codex 支援 `steer`、`interrupt`、`resume` 和 `images`。指令、檔案編�
 權限請求、MCP 表單 elicitation，以及 `request_user_input` 問題都會變成請求（Codex 會在
 plan 模式提出這類問題；codex-cli 0.160 可以用 `--enable default_mode_request_user_input`
 讓 Codex 在預設模式也提出）。plan 模式就是 Codex 的 plan collaboration mode，這是
-app-server API 的實驗性功能，AgentAPI 會啟用它：Codex 會以一份計畫結束它的回合，AgentAPI
-接著像 Codex TUI 一樣詢問「Implement this plan?」。Yes 選項（`implement_bypass`、`implement_auto`
+app-server API 的實驗性功能，AgentAPI 會啟用它：Codex 以一份計畫結束回合，AgentAPI 接著像
+Codex TUI 一樣詢問「Implement this plan?」。Yes 選項（`implement_bypass`、`implement_auto`
 和 `implement_ask`，進入 plan 前的模式排在最前面）會離開 plan 模式、切換到該權限模式，讓 Codex
-在同一個回合裡實作；選 No（`keep_planning`）並附上回饋，會把回饋送回給 Codex 繼續規劃；只選 No
-則結束這個回合。其他請求的選項 ID 就是 Codex
-自己的決定值（`accept`、`acceptForSession`、`acceptWithExecpolicyAmendment`、`decline`、
-`cancel` 等），不會自動核准請求，AgentAPI 無法顯示的請求則會被拒絕。指令核准會顯示實際
-執行的指令（不含 shell 包裝），Codex 對它的解讀（讀取的檔案、搜尋）放在詳細資訊中。回合
-結束時仍未回覆的請求會被拒絕（MCP elicitation 會被取消），所以 Codex 和 MCP 伺服器都不會
-一直等待。steer 的訊息會在 Codex 下一次向模型發出請求時加入執行中的回合
-（目前的輸出會繼續串流），對它的回覆會歸在該則 steer 訊息底下。interrupt 會在幾毫秒內結束
-回合，被中斷的工具呼叫會顯示為失敗。
+在同一個回合裡實作。選 No（`keep_planning`）並附上回饋，會把回饋送回給 Codex 繼續規劃；只選 No
+則結束這個回合。
+
+其他請求的選項 ID 就是 Codex 自己的決定值（`accept`、`acceptForSession`、
+`acceptWithExecpolicyAmendment`、`decline`、`cancel` 等）。AgentAPI 不會自動核准請求，無法
+顯示的請求則會拒絕。指令核准會顯示實際執行的指令（不含 shell 包裝），Codex 對它的解讀（讀取的
+檔案、搜尋）放在詳細資訊中。回合結束時仍未回覆的請求會被拒絕（MCP elicitation 會被取消），
+所以 Codex 和 MCP 伺服器都不會一直等待。steer 的訊息會在 Codex 下一次向模型發出請求時加入
+執行中的回合（目前的輸出會繼續串流），對它的回覆會歸在該則 steer 訊息底下。interrupt 會在
+幾毫秒內結束回合，被中斷的工具呼叫會顯示為失敗。
 
 工作階段參照是 Codex 的 thread ID。接續時會保留該 thread 並保留上下文；行程結束時正在執行
 的回合還原後會標示為 interrupted，當時待處理的核准會消失，Codex 先前的回合也不會載入
@@ -915,10 +913,9 @@ AgentAPI 會以 Pi 的 RPC 模式執行它（`pi --mode rpc`，經由 stdin 與 
   `--version`/`-v`）、`@file` 參數、訊息（`--` 之後的，或是 RPC 模式會忽略的單純參數），以及
   子命令（`pi install`、`remove`、`uninstall`、`update`、`list`、`config`、`auth`、`mcp`）
   都會被拒絕，錯誤訊息會指出是哪個選項。只影響 TUI 的 `--tui-mode` 與 `--use-theme` 會連同
-  它們的值一起丟棄。其他參數都會原樣傳下去
-  （`--provider`、`--model`、`--thinking`、`--session-dir`、`-e`、`--approve`、擴充功能的
-  旗標）；Pi 內建選項的 `--flag=value` 會拆成兩個參數，因為 Pi 只認得這種寫法。思考等級請用
-  `--thinking` 設定。
+  它們的值一起丟棄。其他參數都會原樣傳下去（`--provider`、`--model`、`--thinking`、
+  `--session-dir`、`-e`、`--approve`、擴充功能的旗標）。Pi 內建選項的 `--flag=value` 會拆成
+  兩個參數，因為 Pi 只認得這種寫法。思考等級請用 `--thinking` 設定。
 - **能力。** 支援 steer（`dispatch_mode: "steer"` 會以帶 `streamingBehavior: "steer"` 的
   prompt 送出）、interrupt（`POST /interrupt` 會送出 `abort`；回合會以中斷結束，不會出現 Pi
   在工具執行中中止時多加的「This operation was aborted」錯誤；Pi 在 10 秒內沒有結束回合時，
@@ -933,9 +930,8 @@ AgentAPI 會以 Pi 的 RPC 模式執行它（`pi --mode rpc`，經由 stdin 與 
   `value`；選項 `cancel` 會關掉對話框）。Pi 逾時的對話框會被撤回。回合結束時仍開著的對話框
   會隨回合過期，和其他 agent 的請求一樣（提問之後仍可用訊息回答），擴充功能會收到 cancel；
   中斷正在等待對話框的擴充功能命令時，對話框會被撤回。沒有經過模型回合的擴充功能命令會以
-  停止原因 `handled` 結束。擴充功能以 error 等級發出的
-  `notify` 會顯示為錯誤，它的 `setTitle` 會在 Pi 還沒有名稱時暫代工作階段名稱；Pi 自己的名稱
-  （`--name`、重新命名）就是工作階段名稱。
+  停止原因 `handled` 結束。擴充功能以 error 等級發出的 `notify` 會顯示為錯誤，它的 `setTitle`
+  會在 Pi 還沒有名稱時暫代工作階段名稱；Pi 自己的名稱（`--name`、重新命名）就是工作階段名稱。
 - **續接。** Pi 的工作階段 ID 就是工作階段參照。續接時會用同一個 `--session-id` 啟動 Pi
   （請維持相同的目錄與 `--session-dir`），所以 Pi 會保留上下文；Pi 不會重播先前的訊息，所以
   聊天介面只能從 `--state-db` 檔案顯示它們。
@@ -950,8 +946,8 @@ AgentAPI 會以 Pi 的 RPC 模式執行它（`pi --mode rpc`，經由 stdin 與 
 ### 限制
 
 - agent 沒有自己的終端機。聊天介面會隱藏 TTY mode、終端機提示卡片、即時畫面尾端和
-  「Terminal output」（ACP 也是，而且 ACP 也不提供 Stop 和工具呼叫上的回答按鈕），`raw`
-  訊息（送給終端機的按鍵）會以 400 拒絕，需要 agent 互動式介面的斜線指令也無法運作，聊天介面
+  「Terminal output」（ACP 也是，而且 ACP 也不提供 Stop 和工具呼叫上的回答按鈕）。`raw`
+  訊息（送給終端機的按鍵）會以 400 拒絕。需要 agent 互動式介面的斜線指令無法運作，聊天介面
   自己處理的指令除外。[終端機](#終端機)是另一個獨立的 shell。
 - 重新啟動（Explorer → Restart 或 `DELETE /messages`）會換成新的 agent 並開始新的工作階段，
   同時清除對話和佇列；尚未回覆的請求會變成 `not_resumable`。`--initial-prompt` 會再送給新的
@@ -979,9 +975,9 @@ AgentAPI 會執行一個記憶體內的終端機模擬器。它把 API 呼叫轉
 
 AgentAPI 依照以下步驟，從終端機輸出中解析個別訊息：
 
-1. 在使用者送出任何訊息之前，初始的終端機輸出會被視為 agent 的第一則訊息。
+1. 在使用者送出任何訊息之前，初始的終端機輸出算作 agent 的第一則訊息。
 2. 當使用者透過 API 送出訊息時，會在送出任何按鍵之前，先擷取一次終端機快照。
-3. 將訊息送給 agent。此後每當終端機輸出改變，就擷取新快照並與初始快照比對。初始內容下方新增的文字，會被視為 agent 的下一則訊息。
+3. 將訊息送給 agent。此後每當終端機輸出改變，就擷取新快照並與初始快照比對。初始內容下方新增的文字，算作 agent 的下一則訊息。
 4. 如果在使用者送出新訊息之前，終端機輸出又有變化，就會更新這則 agent 訊息。
 
 #### 從 agent 訊息中移除 TUI 元素
@@ -1020,7 +1016,7 @@ AgentAPI 會從回覆移除兩種常見的 TUI 內容：
 ### 互動式提示支援
 
 聊天介面會偵測互動式終端機介面（TUI）的提示，例如 Claude Code 的計畫核准或權限確認、
-Codex 的核准請求，以及 Pi 的專案信任提示，並將提示以決策卡片（decision card）的形式
+Codex 的核准請求，以及 Pi 的專案信任提示，並把提示做成決策卡片（decision card），
 固定在輸入框上方。按數字鍵即可選擇選項。多選題（Claude Code 帶有 `multiSelect` 的
 AskUserQuestion）會顯示核取方塊和一個 Continue 按鈕，按下後會前往下一題或檢查步驟。
 agent 回答中的編號清單不會被誤判為選項。`GET /status` 會以 `terminal_prompt` 回報該提示。
@@ -1200,10 +1196,10 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 
 ![hub：所有實例、需要你處理的排最前面，以及在聊天介面中開啟的一個](docs/screenshots/hub-desktop.png)
 
-在桌面或手機開啟 `http://<hub>:3290/`，用 `--token` 登入。清單列出每個實例，需要你處理的排最前面：
-它在等什麼（核准或提問、登入、用量限制）、工作中、完成了你還沒看過的任務、閒置、連不到或已停止，
-並顯示標題、agent、機器、佇列和用量限制；分頁標題會顯示需要你處理的數量。點選一個就會在聊天介面
-中開啟。手機上清單和聊天介面輪流顯示。
+在桌面或手機開啟 `http://<hub>:3290/`，用 `--token` 登入。清單列出每個實例，需要你處理的排最前面。
+每個實例顯示它在等什麼（核准或提問、登入、用量限制）、工作中、完成了你還沒看過的任務、閒置、
+連不到或已停止，以及標題、agent、機器、佇列和用量限制。分頁標題會顯示需要你處理的數量。點選一個
+就會在聊天介面中開啟。手機上清單和聊天介面輪流顯示。
 
 - AgentAPI 用 [`agentapi hub join`](#加入-hub) 加入：它們有簽章的 `instance.*` 事件會新增它們，
   hub 再以一條連線追蹤每個實例的[摘要串流](#監看多個實例)。也可以用 `+` 輸入網址（和 token）手動
@@ -1289,11 +1285,10 @@ AgentAPI 會把 JSON 事件 POST 到 `--webhook-url`，例如同時監看多個 
 }
 ```
 
-instance 的 `id` 是 `--instance-id`，預設為 `<hostname>:<port>`，`name` 是 `--name`，預設為工作
-目錄的名稱；`url` 是 `--public-url`，
-接收端可以從這個網址開啟這個 AgentAPI 的聊天介面或呼叫它的 API；`workspace_url` 則是它所在的
-Coder workspace（如果有）。AgentAPI 啟動之前的訊息和工具呼叫，以及從 agent 歷史紀錄開啟的工作
-階段中的訊息，都不會再送一次。
+instance 的 `id` 是 `--instance-id`，預設為 `<hostname>:<port>`；`name` 是 `--name`，預設為工作
+目錄的名稱。`url` 是 `--public-url`，接收端可以從這個網址開啟這個 AgentAPI 的聊天介面或呼叫它的
+API；`workspace_url` 則是它所在的 Coder workspace（如果有）。AgentAPI 啟動之前的訊息和工具
+呼叫，以及從 agent 歷史紀錄開啟的工作階段中的訊息，都不會再送一次。
 
 ```bash
 agentapi server \
@@ -1373,7 +1368,7 @@ webhook，也能在這裡設定。
 [請求](#請求核准提問與計畫)一節所述回答該請求。終端機提示接受畫面上顯示的選項編號、
 `enter` 或 `esc`；提示有文字欄位時（例如 Claude Code 的計畫回饋），也可以輸入自由
 文字。`outcome` 為 `applied`、`superseded`（已不再開啟，例如已在網頁介面回覆）、
-`invalid`（回覆不符合，仍保持開啟）或 `uncertain`，而且不會被回覆兩次。搭配上面的
+`invalid`（回覆不符合，仍保持開啟）或 `uncertain`；同一個項目不會回覆兩次。搭配上面的
 webhook，整合服務就能在 agent 停下來時通知你，並把你的回覆傳回來。
 
 ### MCP 管理
@@ -1391,9 +1386,9 @@ API 和 Session Explorer 支援：
 - 可選擇重新啟動 agent，讓變更立即生效。
 
 重新啟動 agent 時，AgentAPI 本身和它的 HTTP/SSE 用戶端都會保持連線。PTY agent 會取得
-新的行程和工作階段紀錄監看器，但先前記憶體中的對話脈絡不會保留。套用 MCP 變更時，native agent 會接續
-同一個工作階段重新載入，對話會保留（無法接續工作階段、`resume` 為 false 的 agent 則會改為開始
-新的工作階段，並清除對話）；在回合進行中重新載入會回傳 409，因為那會中斷該回合。從
+新的行程和工作階段紀錄監看器，但先前記憶體中的對話脈絡不會保留。套用 MCP 變更時，native agent
+會接續同一個工作階段重新載入，對話會保留（無法接續工作階段、`resume` 為 false 的 agent 則會改為
+開始新的工作階段，並清除對話）。在回合進行中重新載入會回傳 409，因為那會中斷該回合。從
 Explorer 或 `DELETE /messages` 重新啟動前，AgentAPI 會先更新 Codex（`codex update`）和 Pi
 （`pi update --self`），限直接啟動這些 CLI 的情況。若更新失敗，仍會啟動已安裝的版本；
 Claude Code 則自行管理更新。
@@ -1514,10 +1509,10 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
 ### API 用戶端能做什麼
 
 - 讓 agent 執行它能執行的任何事。除非命令列指定了其他模式，或 Claude Code 在沙箱外以 root
-  執行（此時以 `default` 啟動），native agent 預設以 bypass 權限模式啟動，工具會直接執行、
-  不會詢問；Claude Code 會加上 `--allow-dangerously-skip-permissions`（在沙箱外以 root 執行時
-  除外），所以用戶端可以把任何工作階段切換到 bypass；除非命令列指定了政策，Codex 的預設值會覆蓋
-  `~/.codex/config.toml` 裡的政策；ACP transport 則會核准所有權限請求。
+  執行（此時以 `default` 啟動），native agent 預設以 bypass 權限模式啟動，工具直接執行、不詢問。
+  Claude Code 會加上 `--allow-dangerously-skip-permissions`（在沙箱外以 root 執行時除外），
+  所以用戶端可以把任何工作階段切換到 bypass。除非命令列指定了政策，Codex 的預設值會覆蓋
+  `~/.codex/config.toml` 裡的政策。ACP transport 則會核准所有權限請求。
 - 在[終端機](#終端機)裡執行指令（native transport，預設開啟；`--terminal=false` 可以關閉）。
 - 透過檔案檢視器的端點讀取 agent 工作目錄中的檔案；工作目錄以外的路徑（包括透過 symlink）
   會被拒絕，diff 也只會讀取 git 儲存庫。HTML 預覽的腳本在 sandbox 中執行，無法存取聊天介面或
@@ -1561,7 +1556,7 @@ codex-cli 0.163.0 和 Pi 1.3.0，在 Linux、4 核心的 Intel Xeon Silver 4210�
 - agent 自己的記憶體會在工作階段中變動：Claude Code 在啟動約一分半後成長到 314 MiB（它自己的
   背景工作，其餘時間閒置只用 0.1% CPU），Codex 在第一個回合後釋放了約 55 MiB。
 - AgentAPI 的程式碼（記憶體中約 17 MiB）由同一個執行檔啟動的實例共用：同時執行四個時，
-  每個約佔 13–24 MiB（PSS）。
+  每個約占 13–24 MiB（PSS）。
 - 沒有計入：agent 啟動的 MCP 伺服器、它執行的指令、shell 終端機（開啟時有一個 shell）以及
   瀏覽器分頁。
 

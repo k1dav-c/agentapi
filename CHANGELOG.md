@@ -4,18 +4,19 @@
 
 ### Features
 
-- `agentapi hub serve` runs a hub that watches the AgentAPIs of many machines, such as Coder
-  workspaces on a VPN of your own. AgentAPIs join it with `agentapi hub join`; their signed
-  `instance.*` events add them, and the hub follows each one's summary. Its page (`/chat/hub/`),
-  on a desktop or a phone, lists them, what needs you first, and opens any of them in the chat
-  through the hub, which sends the instance's API token: the browser never holds the instances'
-  tokens. Instances can also be added by URL; the hub keeps them across restarts.
-- `agentapi server` reads its flags from `~/.agentapi/config.yaml` (`--config`) as well, below
-  flags and `AGENTAPI_*` variables, so a setting outlives a restart that runs the same command
-  line, such as a Coder workspace's start script.
-- `agentapi hub join <url> --secret … --public-url …` connects a machine's AgentAPIs to a hub: it
-  writes the hub's webhook into that file and applies it to the ones running now; `agentapi hub
-  leave` and `status` remove and show it. `--public-url` fills in `{port}` and `{hostname}`.
+- Watch the AgentAPIs of many machines, such as Coder workspaces on a VPN of your own, with
+  `agentapi hub serve`. AgentAPIs join with `agentapi hub join`; their signed `instance.*` events
+  add them, and the hub follows each one's summary. Instances can also be added by URL; the hub
+  keeps them across restarts. Its page (`/chat/hub/`, desktop or phone) lists them, those that
+  need you first, and opens any of them in the chat through the hub. The hub sends the instance's
+  API token, so the browser never holds the instances' tokens.
+- Set `agentapi server` flags in `~/.agentapi/config.yaml` (`--config`); flags and `AGENTAPI_*`
+  variables override it. A setting there outlives a restart that runs the same command line, such
+  as a Coder workspace's start script.
+- Connect a machine's AgentAPIs to a hub with `agentapi hub join <url> --secret … --public-url …`.
+  It writes the hub's webhook into that file and applies it to the running AgentAPIs.
+  `--public-url` fills in `{port}` and `{hostname}`. `agentapi hub leave` and `status` remove and
+  show the webhook.
 - When `PUT /webhook` points the webhook at a new URL, the AgentAPI sends `instance.heartbeat` at
   once, so the receiver lists it without waiting for the next heartbeat.
 
@@ -23,13 +24,13 @@
 
 ### Features
 
-- The summary says whether the latest task is `unread`: it ended after a client last showed the
+- The summary marks the latest task `unread` when it ended after a client last showed the
   conversation. `POST /tasks/seen` marks the tasks seen for every client; the chat calls it while
-  it shows the conversation, and the state database keeps it.
-- While it serves, each AgentAPI keeps an entry in `~/.agentapi/instances` (`--registry-dir`;
-  `--registry=false` turns it off) with its ID, name, server ID, URL, PID, directory, agent and
-  whether it needs a token, never the token, so clients find the AgentAPIs running on a machine.
-  An entry whose process is gone is removed when the registry is listed.
+  it shows the conversation, and the state database keeps the seen state.
+- Find the AgentAPIs running on a machine in `~/.agentapi/instances` (`--registry-dir`). Each
+  AgentAPI keeps an entry there while it serves, with its ID, name, server ID, URL, PID,
+  directory, agent and whether it needs a token, but never the token. `--registry=false` turns it
+  off. Listing the registry removes entries whose process is gone.
 - `agentapi list` shows the registered AgentAPIs with what each summary says (idle, working, what
   it needs from you, an unread task); `--json` prints them as JSON.
 

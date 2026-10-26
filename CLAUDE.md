@@ -75,7 +75,7 @@ response messages over stdio. All three transports update the shared event emitt
 - **`x/acpio/`** — Experimental ACP (Agent Client Protocol) transport, alternative to PTY.
 - **`lib/native/`** — Native transport. `Conversation` (a `conv.Conversation`) turns the events of an `Adapter` (one per agent: `claude/`, `codex/`, `pi/`, plus the simulated `demo/`) into conversation state, requests (approvals, questions, plans) and login state. Shared pieces: `procutil/` (child process lifecycle), `IsAuthError`, `ReadImage`; `nativetest/` has a fake adapter. `lib/procenv` prepares the environment for agent processes on all transports.
 - **`lib/statedb/`** — SQLite persistence of conversations, native and PTY (`--state-db`; a deprecated `--state-file` is imported into it).
-- **`lib/hub/`** — `agentapi hub serve`: instances join with signed webhooks (`webhook.go`), the hub follows each one's `/events?only=summary` (`watch.go`), keeps them in a file (`store.go`), and serves a browser that signed in the list, their changes (`/api/events`) and a proxy that opens any instance in the chat with its token (`proxy.go`); the page is `chat/src/components/hub-view.tsx`.
+- **`lib/hub/`** — `agentapi hub serve`: instances join with signed webhooks (`webhook.go`), the hub follows each one's `/events?only=summary` (`watch.go`), keeps them in a file (`store.go`), and serves signed-in browsers the list, their changes (`/api/events`) and a proxy that opens any instance in the chat with its token (`proxy.go`); the page is `chat/src/components/hub-view.tsx`.
 - **`lib/userconfig/`** — The user's settings file, `~/.agentapi/config.yaml`: `agentapi server` flags by name, below flags and `AGENTAPI_*` variables (`cmd/server/userconfig.go`); `agentapi hub join` writes a hub's webhook into it.
 - **`lib/registry/`** — The registry of the AgentAPIs running on a machine (`~/.agentapi/instances`): each server writes its entry while it serves (`--registry`, `--registry-dir`); `agentapi list` and clients that watch many read it.
 - **`lib/shellterm/`** — The shared shell terminal of native sessions (`GET /terminal`).
@@ -101,8 +101,8 @@ value, update every switch and map literal over that type to pass lint.
 
 ## Conventions
 
-- Versioning: `internal/version.Version` stays `0.0.0-dev` in source; builds stamp the real version via `-ldflags -X` (`make build` uses the latest `vX.Y.Z` tag). Releases are cut by CI on push to `main` from Conventional Commit messages (`next-version.sh`), so use `feat:`/`fix:`/`feat!:` prefixes accordingly
-- OpenAPI schema is auto-generated: run `make gen` and commit `openapi.json`. Don't redirect `server --print-openapi` into the file yourself: it escapes `<`/`>` as `\u003c`/`\u003e`, `make gen` doesn't, and the Release workflow fails on the difference. Then run `bun run gen:api` in `chat/` and commit `chat/src/lib/api-schema.ts`, the chat's types of the API (a chat test fails until they match)
+- Versioning: `internal/version.Version` stays `0.0.0-dev` in source; builds stamp the real version via `-ldflags -X` (`make build` uses the latest `vX.Y.Z` tag). Releases are cut by CI on push to `main` from Conventional Commit messages (`next-version.sh`), so use `feat:`/`fix:`/`feat!:` prefixes
+- OpenAPI schema is auto-generated: run `make gen` and commit `openapi.json`. Don't redirect `server --print-openapi` into the file yourself: it escapes `<`/`>` as `\u003c`/`\u003e`, `make gen` doesn't, and the Release workflow fails on the difference. Then run `bun run gen:api` in `chat/` and commit `chat/src/lib/api-schema.ts`, the chat's API types (a chat test fails until they match)
 - The chat UI build output goes to `lib/httpapi/chat/` with a base-path placeholder that gets replaced at runtime
 - AgentAPI-specific environment variables use the `AGENTAPI_` prefix (e.g., `AGENTAPI_ALLOWED_HOSTS`)
 - Server defaults: port 3284, chat at `/chat`, docs at `/docs`

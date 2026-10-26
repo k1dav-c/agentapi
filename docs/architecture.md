@@ -70,9 +70,8 @@ flowchart TB
   proto -. "session logs" .-> sessions
 ```
 
-Each AgentAPI process runs one agent. Every transport implements `conv.Conversation`, the server's
-interface for sending messages and reading the conversation, and reports changes to the same event
-emitter.
+Every transport implements `conv.Conversation`, the server's interface for sending messages and
+reading the conversation, and reports changes to the same event emitter.
 
 The core HTTP API, event stream, queue and chat UI therefore work the same across transports.
 Native requests, settings and the shell terminal have separate endpoints. Handlers call the
@@ -120,11 +119,11 @@ answers write keys directly to the agent's terminal.
 
 `agentapi server [flags] -- <agent command>` (`cmd/server/server.go`):
 
-1. Flags come from the command line, from `AGENTAPI_*` environment
-   variables or from `~/.agentapi/config.yaml` (`--config`; viper, in that
-   order; `cmd/server/userconfig.go`, which reports names that aren't flags
-   and ignores a file it can't read). The agent type is `--type`, else the agent command when
-   it is a type name, else `custom`. The transport is `--transport`, else
+1. Flags come from the command line, `AGENTAPI_*` environment variables or
+   `~/.agentapi/config.yaml` (`--config`), in that order (viper).
+   `cmd/server/userconfig.go` reports names that aren't flags and ignores a
+   file it can't read. The agent type is `--type`, else the agent command
+   when it is a type name, else `custom`. The transport is `--transport`, else
    native for an agent `hasNativeAdapter` covers (Claude Code, Codex, Pi and
    `native-demo`) unless the deprecated `--state-file` is set, else PTY.
 2. The transport starts the agent:
@@ -146,11 +145,11 @@ answers write keys directly to the agent's terminal.
    `Start` listens, then writes the registry entry (unless `--registry=false`)
    and serves.
 5. On SIGINT, SIGTERM or SIGHUP, or when the agent exits, the webhook sends
-   `instance.stopped`, the registry entry is removed, a restart under way is cancelled, the HTTP server
-   shuts down, the queue loop and the session-log watcher stop, a native or
-   PTY agent that still runs and the shell terminal are closed, and the
-   state DB is flushed and closed. SIGUSR1 flushes the state DB without
-   stopping.
+   `instance.stopped` and the registry entry is removed. A restart under way
+   is cancelled, the HTTP server shuts down, and the queue loop and the
+   session-log watcher stop. A native or PTY agent that still runs and the
+   shell terminal are closed, and the state DB is flushed and closed. SIGUSR1
+   flushes the state DB without stopping.
 
 ## The HTTP server
 
@@ -314,8 +313,8 @@ type Factory func(resume Resume) (Adapter, error)
   changes by itself through `SettingsSink`; `Compacter` compacts the context
   on request; `UsageSink` takes the context and rate limit usage.
   `Capabilities` says which of steer, interrupt, resume, images, settings and
-  compact the agent supports. The API and chat use these capabilities
-  to determine which operations to offer, independently of the agent type.
+  compact the agent supports. The API and chat offer operations from these
+  capabilities, not from the agent type.
 - **Generations.** Every adapter belongs to a generation. Restarting or
   replacing the agent starts a new one, and events from an older adapter are
   ignored, so an agent that was replaced can't change the conversation.
@@ -325,14 +324,14 @@ type Factory func(resume Resume) (Adapter, error)
   launches it again every 5 seconds, or when `POST /login/retry` asks. Once
   the agent runs, the conversation gives it the settings chosen for the
   session, reports its capabilities and sends the initial prompt. `Restart`
-  replaces it with a new session; `Reload` resumes the same session, so a
-  changed MCP configuration is read again and the conversation stays;
+  replaces it with a new session. `Reload` resumes the same session, so a
+  changed MCP configuration is read again and the conversation stays.
   `Switch` opens another session, or a copy of it, with that session's
-  messages, which the server reads from the agent's session log
-  (`sessions.Store.ReadHistory`; `GET /sessions` lists them). The
+  messages. The server reads them from the agent's session log
+  (`sessions.Store.ReadHistory`; `GET /sessions` lists the sessions). The
   subagents the agent ran in the session are read the same way, from their
   own logs (`sessions.Store.Subagents`), for `GET /subagents` and the chat's
-  Lineage panel; their state comes from the Agent tool call that started
+  Lineage panel. Their state comes from the Agent tool call that started
   them.
 - **Costs.** `sessions.Store.Costs` reads the model calls of every session
   in the directory, its subagents' included, from the same logs (`GET
@@ -350,8 +349,8 @@ type Factory func(resume Resume) (Adapter, error)
   Records a parser doesn't know, and lines it can't decode, are logged once
   per log at Warn with the CLI version the log records, so a changed format
   shows in the server's log.
-- **Usage limits.** An adapter ends a turn the account's usage limit stopped
-  with the `limited` stop reason (Claude Code's limit messages and a
+- **Usage limits.** When the account's usage limit stops a turn, the adapter
+  ends it with the `limited` stop reason (Claude Code's limit messages and a
   `rejected` rate limit event, Codex's `usageLimitExceeded`, a quota error of
   Pi's provider). The conversation keeps it as a `LimitStop` with the reset
   time until a turn starts: the server's queue waits while it holds
@@ -429,18 +428,18 @@ usage limit stop, login, terminal prompt) and the latest screen.
   updates; its stream also sends heartbeats. `PUT /webhook` triggers another
   check, and rewrites the registry entry, because it can change the instance
   ID and URL.
-- The emitter also keeps when a client last showed the conversation
-  (`POST /tasks/seen`, which the chat calls while it shows it): the latest
-  task is `unread` when it ended after that. The state DB keeps it; a restore
-  without it takes the restored tasks as seen.
+- The emitter also records when a client last showed the conversation
+  (`POST /tasks/seen`, which the chat calls while it shows it). The latest
+  task is `unread` when it ended after that. The state DB keeps the time; a
+  restore without it marks the restored tasks as seen.
 - `/internal/screen` streams the screen as `screen` events for TTY mode.
 - A status change between `running` and `stable` triggers the
   `run.status_changed` webhook event. The webhook observer subscribes to the
   emitter like an `/events` client and turns its events into the other
   webhook events: the emitter's task updates into `task.*`, an agent message
-  once the next one starts or the turn ends; what the emitter held when the
-  observer subscribed, and messages older than AgentAPI's start (a resumed
-  session's), are not sent. The dispatcher delivers the events one at a time
+  once the next one starts or the turn ends. It doesn't send what the emitter
+  held when the observer subscribed, or messages older than AgentAPI's start
+  (a resumed session's). The dispatcher delivers the events one at a time
   from a queue, with retries, and signs them with `--webhook-secret`.
 - With a state DB, the emitter hands every change to its `Persister`, which
   encodes messages and rich messages on its writer goroutine from a copy, so
@@ -505,18 +504,18 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
   400, as the agent can't be restarted.
 - A replacement of the native agent (a restart, a reload, opening another
   session) has two steps. `BeginRestart`, `BeginReload` and `BeginSwitch`
-  retire the agent under `s.mu`: from then on its events are ignored, and
-  `BeginSwitch` refuses with `ErrTurnActive`, changing nothing, while a turn
-  runs or the context is compacted. `Replacement.Start` then closes the old
-  agent, updates the CLI and starts the new one without `s.mu`
-  (`runRestartLocked`): meanwhile `s.restarting` holds the queue, other
-  replacements, raw keys and the human-reply protocol get 409 or nothing,
-  and requests that don't take `s.mu` (`/status`, `/handoff`, `/queue`)
+  retire the agent under `s.mu`, and its events are ignored from then on.
+  While a turn runs or the context is compacted, `BeginSwitch` refuses with
+  `ErrTurnActive` and changes nothing. `Replacement.Start` then closes the
+  old agent, updates the CLI and starts the new one without `s.mu`
+  (`runRestartLocked`). Meanwhile `s.restarting` holds the queue, and other
+  replacements, raw keys and the human-reply protocol get 409 or nothing.
+  Requests that don't take `s.mu` (`/status`, `/handoff`, `/queue`)
   answer. Stop cancels a restart under way. A resumed session's history is
   read before `s.mu` is taken.
 - MCP changes with `?restart=true`: a native agent is reloaded on its session
-  (`Reload`), so the conversation stays. While a turn runs, the reload is
-  refused with 409, after the configuration was written. An agent that can't
+  (`Reload`), so the conversation stays. While a turn runs, the configuration
+  is written but the reload is refused with 409. An agent that can't
   resume its session is restarted instead.
 - `/status` reports the lifecycle: `starting`, `ready`, `running`,
   `restarting`, `exited` or `failed`.
@@ -536,13 +535,13 @@ process group after 2 seconds.
 
 `GET /files/content` and `GET /files/diff` serve the chat's file viewer. When a path isn't there,
 the viewer asks `GET /files/find` for the files below the working directory whose path ends with it,
-ignoring case: a breadth-first walk that leaves out hidden directories, dependencies and Go's module
-cache unless the path goes into them, and stops after 50,000 entries or 2 seconds. Paths resolve inside the
-agent's working directory, with symlinks followed and checked; only regular files are read, up to 1
-MiB. The diff runs git read-only in the repository (`rev-parse`, `ls-files`, `cat-file`, with
-fsmonitor off) and compares copies of the committed and current file with `git diff --no-index` in a
-temporary directory, without the user's or the system's git configuration, so repository-configured
-programs are not executed.
+ignoring case. The search walks breadth-first, leaves out hidden directories, dependencies and Go's
+module cache unless the path goes into them, and stops after 50,000 entries or 2 seconds. Paths
+resolve inside the agent's working directory, with symlinks followed and checked; only regular files
+are read, up to 1 MiB. The diff runs git read-only in the repository (`rev-parse`, `ls-files`,
+`cat-file`, with fsmonitor off) and compares copies of the committed and current file with
+`git diff --no-index` in a temporary directory, without the user's or the system's git
+configuration, so repository-configured programs are not executed.
 
 Previews use the same working-directory root. `GET /files/preview` (`lib/htmlpreview`) returns an
 HTML file with the stylesheets, scripts, images, fonts and media it references by relative path
@@ -559,16 +558,17 @@ proxy's cookie wouldn't reach either). `GET /files/image` serves raster images j
 
 `lib/mcpconfig` reads and writes each agent's MCP configuration (Claude Code's `.mcp.json` in the
 working directory, Codex's `$CODEX_HOME/config.toml`, Pi's `$PI_CODING_AGENT_DIR/mcp.json`, by
-default `~/.pi/agent/mcp.json`) and keeps unrelated settings. Profiles save reusable server configurations.
-Agents read configuration on startup, so changes require a restart, or a reload of the same session
-for native agents.
+default `~/.pi/agent/mcp.json`) and keeps unrelated settings. Profiles save reusable server
+configurations. Agents read configuration on startup, so changes require a restart, or a reload of
+the same session for native agents.
 
 ## Security model
 
-- There are no separate user accounts or roles. A client that passes token
-  authentication, when enabled, and the host and origin checks has the agent's capabilities: native agents start in
-  the bypass permission mode, the ACP transport approves every permission
-  request, and the shell terminal runs commands.
+- There are no separate user accounts or roles. A client that passes the
+  host and origin checks, and token authentication when enabled, has the
+  agent's capabilities: native agents start in the bypass permission mode,
+  the ACP transport approves every permission request, and the shell
+  terminal runs commands.
 - `--api-token`: compared in constant time. Browsers sign in with
   `POST /auth/session`, which sets an HttpOnly, SameSite=Strict cookie holding
   an HMAC of the token rather than the token, so changing the token signs
@@ -580,13 +580,13 @@ for native agents.
   browser.
 - Uploads go to a private directory, and only images are served back. Files
   outside the working directory can't be opened.
-- The webhook sends what it is configured to, the conversation included, to
+- The webhook sends its configured events, the conversation included, to
   its URL, which `PUT /webhook` can change; its HMAC secret is write-only.
 - The hub (`lib/hub`) holds the instances' API tokens and sends them only to
   instance URLs from events signed with its secret (HMAC of the timestamp and
   body, at most 10 minutes old, each delivery once) or added by someone signed
   in. Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
-  derived from it; the proxy drops their cookies and `Authorization`, `Origin`
+  derived from it. The proxy drops their cookies and `Authorization`, `Origin`
   and `Referer` headers and the instances' `Set-Cookie`, so neither side's
   credentials reach the other.
 - Agents, on every transport, don't inherit the variables (one of them a

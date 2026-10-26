@@ -133,10 +133,10 @@ flowchart TB
    工作目錄就拒絕使用）、建立對話、註冊路由，並啟動對話、佇列迴圈、webhook 傳送器，以及
    （PTY 的）工作階段紀錄監看器。`Start` 開始監聽後寫入登記檔（除非 `--registry=false`），
    再開始服務。
-5. 收到 SIGINT、SIGTERM 或 SIGHUP，或 agent 自行結束時，webhook 會送出 `instance.stopped`，登記檔會被刪除，進行中的
-   重新啟動會被取消，HTTP 伺服器關閉，佇列迴圈與工作階段紀錄監看器停止，仍在執行的 native 或 PTY
-   agent 以及 shell 終端機會被關閉，狀態資料庫會寫入並關閉。收到 SIGUSR1 時只寫入狀態資料庫，
-   不會停止。
+5. 收到 SIGINT、SIGTERM 或 SIGHUP，或 agent 自行結束時，AgentAPI 以 webhook 送出
+   `instance.stopped`、刪除登記檔、取消進行中的重新啟動、關閉 HTTP 伺服器、停止佇列迴圈與工作
+   階段紀錄監看器、關閉仍在執行的 native 或 PTY agent 與 shell 終端機，並寫入、關閉狀態資料庫。
+   收到 SIGUSR1 時只寫入狀態資料庫，不會停止。
 
 ## HTTP 伺服器
 
@@ -231,17 +231,16 @@ sequenceDiagram
 - `jsonlwatcher` 會找到屬於 agent 行程的 Claude Code、Codex 或 Pi 工作階段紀錄檔（依行程 ID
   和工作目錄）並持續追蹤。`lib/agentlog` 的解析器把每一行轉成結構化訊息（思考、工具呼叫與
   結果、用量）和時間軸事件，和從畫面解析出的訊息一起送進 emitter。
-- 終端機對話框（Claude Code 的計畫核准與權限提示、Codex 的核准、Pi 的信任提示）會在畫面上
-  被辨識出來，回報為 `terminal_prompt`。`handoff.go` 會把回答轉成對話框需要的按鍵，
+- 終端機對話框（Claude Code 的計畫核准與權限提示、Codex 的核准、Pi 的信任提示）從畫面辨識，
+  回報為 `terminal_prompt`。`handoff.go` 會把回答轉成對話框需要的按鍵，
   `dialog_reply.go` 則會打開對話框的文字輸入欄，讓聊天訊息可以作為回答。
 
 ### ACP
 
-`x/acpio` 透過 agent 的 stdio 使用 Agent Client Protocol。每則訊息會轉為一個 prompt，
-內容為訊息文字。回合開始後，`POST /message` 就會回傳；回合進行中送出的訊息則排入佇列。
-prompt 失敗時以 `agent_error` 回報。
-訊息片段會組成 agent 的回覆，工具呼叫以文字行附加在回覆中，權限請求則自動核准。
-此 transport 仍屬實驗性功能。
+`x/acpio` 透過 agent 的 stdio 使用 Agent Client Protocol。每則訊息轉為一個 prompt，內容為
+訊息文字。回合開始後 `POST /message` 就會回傳；回合進行中送出的訊息排入佇列，prompt 失敗時以
+`agent_error` 回報。訊息片段組成 agent 的回覆，工具呼叫以文字行附加在回覆中，權限請求則自動
+核准。此 transport 仍屬實驗性功能。
 
 ### Native
 
@@ -319,10 +318,10 @@ type Factory func(resume Resume) (Adapter, error)
 - **請求。** 核准、提問和計畫會成為 `RequestState`，帶有狀態（`pending`、`resolved`、
   `withdrawn`、`expired`）和 `response_capability`（`live`、`message`、`not_resumable`）。
   一個回答最多只會送到 adapter 一次，回合結束時仍待處理的請求會過期。祕密問題的答案除了送給
-  agent 的那份之外，一律會被遮蔽。
+  agent 的那份之外，一律遮蔽。
 - **Observer。** 訊息與狀態以外的變更（結構化訊息、請求、設定、用量、工作階段參照、登入）會
   送到 `Observer`，由伺服器實作，用來更新 emitter 和狀態資料庫。呼叫時仍持有對話的鎖，
-  因此 Observer 不能反向呼叫對話介面，以免造成死鎖。
+  因此 Observer 不能反向呼叫對話介面，以免死鎖。
 - **行程。** `procutil` 會在 agent 自己的 process group 中啟動它，使用 adapter 透過
   `lib/procenv` 建立的環境變數，其中不含上層 agent 工作階段的變數。停止時會先關閉它的輸入，
   3 秒後對整個 group 送出 SIGTERM，再過 2 秒送出 SIGKILL。在那之前，adapter 會先中斷進行中的
@@ -361,8 +360,8 @@ type Factory func(resume Resume) (Adapter, error)
   暫時閒置，計時器會先留 3 秒讓它恢復工作。結構化訊息抵達時，會取得目前任務的 `task_id`。
   還原或接續的訊息視為已完成的歷史紀錄。
 - emitter 維護對話摘要（`summary.go`），包含 instance、狀態、`attention`（需要使用者處理的
-  原因）、標題、最新任務、待處理請求、佇列和用量。有摘要訂閱者時，畫面以外的每次變更都會觸發
-  重新計算，摘要不同才送出 `summary_update`；因此回覆文字增長不會觸發摘要更新。
+  原因）、標題、最新任務、待處理請求、佇列和用量。有摘要訂閱者時，畫面以外的每次變更後都會重新
+  計算，摘要不同才送出 `summary_update`；回覆文字增長不會送出摘要更新。
   只有 `/events?only=summary` 訂閱這些更新，串流另會送出心跳。`PUT /webhook` 可修改
   instance 的 ID 與網址，因此也會觸發摘要檢查，並重寫登記檔。
 - emitter 也記錄用戶端上次顯示對話的時間（`POST /tasks/seen`，聊天介面顯示對話時會呼叫）：
@@ -372,7 +371,7 @@ type Factory func(resume Resume) (Adapter, error)
 - 狀態在 `running` 與 `stable` 之間切換時，會觸發 `run.status_changed` webhook 事件。webhook
   observer 像 `/events` 用戶端一樣訂閱 emitter，把它的事件轉成其他 webhook 事件：emitter 的任務
   更新轉成 `task.*`，agent 的訊息在下一則開始或回合結束時才送出；observer 訂閱時 emitter 已有的
-  內容，以及比 AgentAPI 啟動時間更早的訊息（接續的工作階段的訊息）都不會送出。傳送器從佇列依序
+  內容，以及比 AgentAPI 啟動時間更早的訊息（來自接續的工作階段）都不會送出。傳送器從佇列依序
   一次送一個事件，失敗會重試，並以 `--webhook-secret` 簽章。
 - 有狀態資料庫時，emitter 會把每次變更交給它的 `Persister`，它在自己的寫入 goroutine 上從副本
   編碼訊息與結構化訊息，所以串流中的長訊息不會拖慢 emitter。
@@ -413,16 +412,16 @@ native 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之
 
 `--state-file` 是較早的 PTY 機制（關閉時寫出 JSON），已棄用：`cmd/server` 會把它一次性匯入
 旁邊的狀態資料庫（`statedb.ImportStateFile`，只匯入空的資料庫），之後由資料庫保存對話。SIGUSR1
-會把狀態資料庫尚未寫入的變更寫入。
+會把排隊中的變更寫入狀態資料庫。
 
 ## 重新啟動與更新
 
 - `DELETE /messages` 會清除對話、請求和佇列並重新啟動 agent；新的 agent 啟動前，AgentAPI 會為
-  Codex 和 Pi 執行 `codex update` 或 `pi update --self`。native agent 會被關閉，再由 `Restart`
+  Codex 和 Pi 執行 `codex update` 或 `pi update --self`。native agent 關閉後，由 `Restart`
   開始新的工作階段；PTY agent 則會在可替換的終端機中取得新的行程，以及新的工作階段紀錄監看器。
   使用 ACP 時這個請求會以 400 失敗，因為 agent 無法重新啟動。
 - 替換 native agent（重新啟動、重新載入、開啟另一個工作階段）分成兩步。`BeginRestart`、
-  `BeginReload` 和 `BeginSwitch` 在 `s.mu` 底下讓舊 agent 退役：之後它的事件會被忽略；有回合在
+  `BeginReload` 和 `BeginSwitch` 在 `s.mu` 底下讓舊 agent 退役：之後忽略它的事件；有回合在
   執行或正在壓縮 context 時，`BeginSwitch` 會以 `ErrTurnActive` 拒絕，而且不改動任何東西。
   `Replacement.Start` 接著在不持有 `s.mu` 的情況下關閉舊 agent、更新 CLI 並啟動新的 agent
   （`runRestartLocked`）：這段期間 `s.restarting` 會暫停佇列，其他替換、原始按鍵和人工回覆協定會
@@ -446,12 +445,12 @@ native 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之
 ## 檔案
 
 `GET /files/content` 和 `GET /files/diff` 提供聊天介面的檔案檢視器。路徑不存在時，檢視器會向
-`GET /files/find` 查詢工作目錄底下路徑結尾相符的檔案（不分大小寫）：以廣度優先走訪，略過隱藏目錄、
-相依套件和 Go 的 module cache（除非路徑本身就在裡面），並在走過 50,000 筆或 2 秒後停止。路徑會在 agent 的工作目錄
-內解析，symlink 會被追蹤並檢查；只讀取一般檔案，最多 1 MiB。diff 在儲存庫中只以唯讀方式執行
-git（`rev-parse`、`ls-files`、`cat-file`，並關閉 fsmonitor），再在暫存目錄中以
-`git diff --no-index` 比對已 commit 和目前檔案的副本，不使用使用者或系統的 git 設定，所以
-儲存庫設定的任何程式都不會被執行。
+`GET /files/find` 查詢工作目錄底下路徑結尾相符的檔案（不分大小寫）：以廣度優先走訪，略過隱藏
+目錄、相依套件和 Go 的 module cache（除非路徑本身就在裡面），並在走過 50,000 筆或 2 秒後停止。
+路徑在 agent 的工作目錄內解析，並追蹤、檢查 symlink；只讀取一般檔案，最多 1 MiB。diff 在儲存庫
+中只以唯讀方式執行 git（`rev-parse`、`ls-files`、`cat-file`，並關閉 fsmonitor），再在暫存目錄中
+以 `git diff --no-index` 比對已 commit 和目前檔案的副本，不使用使用者或系統的 git 設定，所以不會
+執行儲存庫設定的任何程式。
 
 預覽同樣以 agent 的工作目錄為根目錄讀取檔案。`GET /files/preview`（`lib/htmlpreview`）回傳的 HTML 檔中，
 以相對路徑引用的樣式表、腳本、圖片、字型和影音都會轉成 data: URL：只收副檔名符合用途的檔案
@@ -483,15 +482,15 @@ agent 啟動時才讀取設定，因此變更需要重新啟動；native agent �
 - `--bind` 限制誰能連線，`--allowed-hosts` 決定接受哪些 `Host` 標頭（預設為 `localhost`、
   `127.0.0.1` 和 `[::1]`，用來防範 DNS rebinding），`--allowed-origins` 決定哪些來源可以從
   瀏覽器呼叫 API。
-- 上傳的檔案存放在私有目錄，只有圖片會被回傳。工作目錄以外的檔案無法開啟。
+- 上傳的檔案存放在私有目錄，只回傳圖片。工作目錄以外的檔案無法開啟。
 - webhook 會把設定要送的內容（包括對話）送到它的網址，而 `PUT /webhook` 可以修改網址；它的
   HMAC secret 只能寫入、無法讀回。
 - hub（`lib/hub`）持有實例的 API token，只會送到以它的 secret 簽章的事件（timestamp 和 body 的
   HMAC，不超過 10 分鐘，每次傳送只處理一次）或已登入者加入的實例網址。瀏覽器以 hub token 登入，換取
   由 token 推導出的 HttpOnly、SameSite=Lax cookie；代理會移除瀏覽器的 cookie 以及 `Authorization`、
   `Origin`、`Referer` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
-- 不論使用哪種 transport，agent 都不會繼承上層 agent 工作階段為它所執行的指令設定的環境變數
-  （包含機密資訊），也不會拿到 AgentAPI 的 API token（`lib/procenv`）。
+- 上層 agent 工作階段會為它執行的指令設定環境變數（包含機密資訊）；不論使用哪種 transport，
+  agent 都不會繼承這些變數，也不會拿到 AgentAPI 的 API token（`lib/procenv`）。
 
 ### 子行程環境
 
