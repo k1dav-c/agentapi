@@ -230,7 +230,7 @@ and a screen reader hears the same as it happens.
 
 On a narrow screen the list and the chat take turns; the back arrow at the top, or the phone's
 back gesture, goes back to the list. The chat keeps the screen for the conversation: one bar above
-it, and the composer one row until you tap into it. Answering
+it, and the composer one row. Answering
 an approval from the phone:
 
 ![Answering an approval from the hub on a phone](screenshots/demo-hub.gif)

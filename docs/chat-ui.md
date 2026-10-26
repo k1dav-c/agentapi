@@ -474,9 +474,10 @@ shows once per page.
 ![The chat on a phone](screenshots/chat-mobile.png)
 
 On a phone the transcript takes the full width and thinking folds into the task. The composer is
-one row, the message box with send and stop, until you tap into it: then the agent's settings, its
-usage and the attach button show, under the message box, and they fold away again on a tap outside
-it. While a card asks for you, the card alone says so (the status line above it is left to screen
+one row: the message box, `⋯` (attach, voice input and the agent's settings) and send, with stop
+while the agent works; it grows as the message wraps. The agent's mode, model, effort and usage take
+a second row when you ask for it from `⋯`, when a slash command such as `/model` opens one of their
+menus, or while the usage nears a limit. While a card asks for you, the card alone says so (the status line above it is left to screen
 readers), and its options leave out the number keys. A request card takes at most 60% of the screen and a title cut to two lines
 can be shown in full. The file viewer takes the whole screen, and the terminals have the key bar.
 While the keyboard is up, the page ends above it, so the composer and the key bar stay in view.

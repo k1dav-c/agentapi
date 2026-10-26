@@ -3,15 +3,15 @@
 import {useState, FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, ChangeEvent} from "react";
 import {Button} from "./ui/button";
 import {Tooltip, TooltipTrigger, TooltipContent} from "./ui/tooltip";
-import {Square, Paperclip, Mic, MicOff, LoaderCircle, MoreHorizontal} from "lucide-react";
+import {Square, Paperclip, Mic, MicOff, LoaderCircle, MoreHorizontal, SlidersHorizontal} from "lucide-react";
 import type {SendResult} from "./chat-provider";
 import type {ServerStatus} from "@/lib/agent-status";
 import TextareaAutosize from "react-textarea-autosize";
 import {useChatActions, useChatSelector} from "./chat-provider";
 import {SessionSettings} from "./session-settings";
 import {useSlashCommandRunner} from "./slash-command-runner";
-import {completion, matchingCommands, parseSlashCommand, runsHere} from "@/lib/slash-commands";
-import {UsageMeter} from "./usage-meter";
+import {OPEN_SETTINGS_EVENT, completion, matchingCommands, parseSlashCommand, runsHere} from "@/lib/slash-commands";
+import {UsageMeter, useUsageAlert} from "./usage-meter";
 import {DragDrop} from "./drag-drop";
 import {filesToUploadFromPaste, pastedFileName} from "@/lib/uploads";
 import {toast} from "sonner";
@@ -112,26 +112,23 @@ export default function MessageInput({
     textareaRef.current?.focus();
   };
 
-  // On a phone the composer is one row (the message, send and stop) until
-  // it is used: its settings, usage and attach buttons show once the
-  // message box is focused or has something in it, and fold away again on
-  // a tap outside it (not on its own menus and dialogs).
-  const composerRef = useRef<HTMLFormElement>(null);
-  const [composing, setComposing] = useState(false);
-  const compact = !composing && !message && attachments.attachments.length === 0 && queuedMessages.length === 0;
-  // One line there, with a placeholder that fits it.
-  const oneRow = useMediaQuery("(max-width: 639.98px)") && compact;
+  // On a phone the composer is one row: the message, ⋯ (attach, voice, the
+  // agent's settings) and send, with stop while the agent works. The
+  // message grows as it wraps. The agent's settings and usage take a second
+  // row when asked for from ⋯, when a slash command opens one of their
+  // menus, or while the usage nears a limit.
+  const phone = useMediaQuery("(max-width: 639.98px)");
+  const [settingsAsked, setSettingsAsked] = useState(false);
+  const usageAlert = useUsageAlert();
+  const hasSettings = useChatSelector(
+    (chat) => (chat.features.settings && chat.agentSettings !== null) || (chat.features.usage && Boolean(chat.agentUsage)),
+  );
   useEffect(() => {
-    if (!composing) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target instanceof Element ? event.target : null;
-      if (!target || composerRef.current?.contains(target)) return;
-      if (target.closest("[data-radix-popper-content-wrapper], [role=dialog], [role=menu], [role=listbox]")) return;
-      setComposing(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [composing]);
+    const show = () => setSettingsAsked(true);
+    window.addEventListener(OPEN_SETTINGS_EVENT, show);
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, show);
+  }, []);
+  const settingsShown = !phone || settingsAsked || usageAlert;
 
   const submit = async (mode: DispatchMode = "queue") => {
     if (sendBlocked || (serverStatus !== "running" && serverStatus !== "stable")) return;
@@ -230,12 +227,11 @@ export default function MessageInput({
             onChange={handleFileInputChange}
           />
           <form
-            ref={composerRef}
             onSubmit={handleSubmit}
-            data-compact={compact || undefined}
+            data-one-row={phone || undefined}
             className="overflow-hidden rounded-2xl border bg-card shadow-lg shadow-black/5 transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"
           >
-            <div className={cn("flex flex-col", compact && "max-sm:flex-row max-sm:items-center")}>
+            <div className="flex flex-col">
               {slashSuggestions.length > 0 && (
                 <div className="border-b bg-muted/30 px-2 py-1.5" role="group" aria-label="Chat commands" data-slash-suggestions>
                   {slashSuggestions.map((command) => (
@@ -254,15 +250,14 @@ export default function MessageInput({
                   <p className="px-2 pt-0.5 text-[11px] text-muted-foreground">Tab completes; other commands go to the agent.</p>
                 </div>
               )}
-              <div className="flex min-w-0 flex-1">
+              <div className={cn("flex min-w-0", phone && "items-end")}>
                   <TextareaAutosize
                     ref={textareaRef}
                     minRows={1}
-                    maxRows={oneRow ? 1 : 4}
+                    maxRows={4}
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    onFocus={() => setComposing(true)}
                     onPaste={(event) => {
                       // A pasted screenshot or image is uploaded like an
                       // attachment; pasted text pastes as usual.
@@ -274,8 +269,9 @@ export default function MessageInput({
                     }}
                     aria-label="Task message"
                     placeholder={
-                      oneRow && (serverStatus === "running" || serverStatus === "stable")
-                        ? serverStatus === "stable" && !waitingFor ? "Describe a task…" : "Queue a task…"
+                      // Short on a phone, to fit its one row.
+                      phone
+                        ? serverStatus === "stable" ? (waitingFor ? "Queue a task…" : "Describe a task…") : serverStatus === "running" ? "Queue a follow-up…" : "Reconnecting…"
                         : waitingForLogin
                         ? "Queue a task (runs after the agent is logged in)…"
                         : waitingForAnswer
@@ -288,13 +284,79 @@ export default function MessageInput({
                     }
                     className={cn(
                       "min-h-14 max-h-32 w-full resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-6 outline-none sm:min-h-16 sm:px-5",
-                      compact && "max-sm:min-h-12 max-sm:truncate max-sm:py-3",
+                      phone && "min-h-12 py-3 pr-1",
                     )}
                     disabled={
                       disabled ||
                       (serverStatus !== "stable" && serverStatus !== "running")
                     }
                   />
+                {phone && (
+                  <div className="flex shrink-0 items-center gap-1 py-1 pr-1">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant={speech.listening ? "secondary" : "ghost"}
+                          className="size-10 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+                          title="More input options"
+                        >
+                          <MoreHorizontal />
+                          <span className="sr-only">More input options</span>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="min-w-48">
+                        {phone && (
+                          <DropdownMenuItem onSelect={() => handleUploadClick()} disabled={disabled} className="min-h-10">
+                            <Paperclip /> Attach files
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem
+                          onSelect={speech.toggle}
+                          disabled={disabled || !speech.supported}
+                          className="min-h-10"
+                        >
+                          {speech.listening ? <MicOff /> : <Mic />}
+                          {speech.listening ? "Stop voice input" : "Start voice input"}
+                        </DropdownMenuItem>
+                        {phone && hasSettings && !usageAlert && (
+                          <DropdownMenuItem onSelect={() => setSettingsAsked((asked) => !asked)} className="min-h-10">
+                            <SlidersHorizontal /> {settingsAsked ? "Hide settings and usage" : "Settings and usage"}
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  {(serverStatus === "stable" || serverStatus === "running") && (
+                    <SendButtonGroup
+                      serverStatus={serverStatus}
+                      modes={modes}
+                      sendBlocked={sendBlocked}
+                      queuedCount={queuedMessages.length}
+                      modKey={modKey}
+                      onSubmit={(mode) => void submit(mode)}
+                    />
+                  )}
+                  {canStop && (
+                    <Button
+                      size="icon"
+                      type="button"
+                      variant="destructive"
+                      className="size-10 rounded-full shadow-sm"
+                      disabled={disabled || isStopping}
+                      onClick={handleStop}
+                      title={isStopping ? "Stopping agent" : "Stop agent"}
+                    >
+                      {isStopping
+                        ? <LoaderCircle className="animate-spin" />
+                        : <Square />}
+                      <span className="sr-only">
+                        {isStopping ? "Stopping" : "Stop"}
+                      </span>
+                    </Button>
+                  )}
+                  </div>
+                )}
               </div>
 
               {attachments.attachments.length > 0 && (
@@ -314,22 +376,23 @@ export default function MessageInput({
                 />
               )}
 
+              {/* The agent's settings and usage, with the buttons on a wider
+                  screen; on a phone a row of their own, when shown (they stay
+                  mounted, for the slash commands that open their menus). */}
               <div
                 className={cn(
                   "flex flex-wrap items-center justify-end gap-x-3 gap-y-1 border-t bg-muted/25 px-3 py-2",
-                  compact && "max-sm:shrink-0 max-sm:border-t-0 max-sm:bg-transparent max-sm:py-1 max-sm:pr-1 max-sm:pl-0",
+                  phone && "px-2 py-1.5",
+                  !settingsShown && "hidden",
                 )}
               >
-
-                {/* The agent's settings and usage: a row of their own on a
-                    phone, where they don't fit beside the buttons. */}
-                <div className={cn("mr-auto flex min-w-0 items-center gap-1 empty:hidden max-sm:w-full", compact && "max-sm:hidden")}>
+                <div className="mr-auto flex min-w-0 items-center gap-1 empty:hidden max-sm:w-full">
                   <SessionSettings />
                   <UsageMeter />
                 </div>
 
+                {!phone && (
                 <div className="flex min-w-0 flex-row items-center gap-2">
-                    <div className={cn("contents", compact && "max-sm:hidden")}>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -352,7 +415,7 @@ export default function MessageInput({
                           type="button"
                           size="icon"
                           variant={speech.listening ? "secondary" : "ghost"}
-                          className="size-10 rounded-full text-muted-foreground hover:text-foreground"
+                          className="size-10 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
                           title="More input options"
                         >
                           <MoreHorizontal />
@@ -360,6 +423,11 @@ export default function MessageInput({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="min-w-48">
+                        {phone && (
+                          <DropdownMenuItem onSelect={() => handleUploadClick()} disabled={disabled} className="min-h-10">
+                            <Paperclip /> Attach files
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem
                           onSelect={speech.toggle}
                           disabled={disabled || !speech.supported}
@@ -368,9 +436,13 @@ export default function MessageInput({
                           {speech.listening ? <MicOff /> : <Mic />}
                           {speech.listening ? "Stop voice input" : "Start voice input"}
                         </DropdownMenuItem>
+                        {phone && hasSettings && !usageAlert && (
+                          <DropdownMenuItem onSelect={() => setSettingsAsked((asked) => !asked)} className="min-h-10">
+                            <SlidersHorizontal /> {settingsAsked ? "Hide settings and usage" : "Settings and usage"}
+                          </DropdownMenuItem>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
-                    </div>
 
                   {(serverStatus === "stable" || serverStatus === "running") && (
                     <SendButtonGroup
@@ -403,7 +475,7 @@ export default function MessageInput({
                   )}
 
                 </div>
-
+                )}
               </div>
             </div>
           </form>
