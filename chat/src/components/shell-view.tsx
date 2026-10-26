@@ -31,7 +31,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
   // Whether the shell runs: keys typed after it exited go nowhere.
   const runningRef = useRef(false);
 
-  const {termRef, inputRef, link, modifier, setModifier, touch, keyboardOpen, inset} = useXterm({
+  const {termRef, inputRef, link, modifier, setModifier, touch, keyboardOpen} = useXterm({
     containerRef,
     key: `${storageScope}#${session}`,
     options: () => ({scrollback: 10000, cursorBlink: true}),
@@ -119,7 +119,7 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" style={inset ? {paddingBottom: inset} : undefined} data-shell-view>
+    <div className="flex min-h-0 flex-1 flex-col" data-shell-view>
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-background/95 px-3 py-2 text-xs sm:px-4">
         <TerminalSquare className="size-4 shrink-0 text-muted-foreground" />
         <span className="font-semibold">Terminal</span>

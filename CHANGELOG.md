@@ -32,6 +32,9 @@
 - On an iPhone, the end of the hub's list and the chat's composer no longer sit under a browser's
   bottom toolbar (Chrome's floats over the page): the pages are frames fixed to the visible area
   between the toolbars, not a screen-high box.
+- On an iPhone, the composer no longer sits under the keyboard: iOS doesn't shrink the page for it,
+  so the page's frame now ends at the keyboard's top (and its arrows-and-Done bar), also for a chat
+  the hub opens. The terminals' key bar keeps above it the same way.
 - A stopped or unreachable instance can be forgotten on a phone: **Forget** moved from a
   hover-only button to the row's `⋯` menu.
 

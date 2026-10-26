@@ -479,6 +479,7 @@ usage and the attach button show, under the message box, and they fold away agai
 it. While a card asks for you, the card alone says so (the status line above it is left to screen
 readers), and its options leave out the number keys. A request card takes at most 60% of the screen and a title cut to two lines
 can be shown in full. The file viewer takes the whole screen, and the terminals have the key bar.
+While the keyboard is up, the page ends above it, so the composer and the key bar stay in view.
 
 ![A question card on a phone](screenshots/mobile-question.png)
 

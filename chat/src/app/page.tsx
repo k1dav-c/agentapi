@@ -9,7 +9,7 @@ export default function Home() {
   return (
     <Suspense
       fallback={
-        <div className="fixed inset-0 flex flex-col overflow-hidden bg-background">
+        <div className="app-frame flex flex-col overflow-hidden bg-background">
           <div className="flex h-14 shrink-0 items-center justify-between border-b px-3 sm:h-16 sm:px-6">
             <div className="flex items-center gap-3">
               <div className="size-9 animate-pulse rounded-xl bg-muted" />
@@ -40,7 +40,7 @@ export default function Home() {
       <ChatErrorBoundary>
         <ChatProvider>
           <FileViewerProvider>
-            <main className="fixed inset-0 flex flex-col overflow-hidden bg-background">
+            <main className="app-frame flex flex-col overflow-hidden bg-background">
               <Header />
               <Chat />
             </main>

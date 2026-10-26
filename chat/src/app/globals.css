@@ -149,9 +149,10 @@
     @apply border-border outline-ring/50;
   }
   /* The pages scroll inside their own panes and their frames are fixed to
-     the screen (inset: 0), which iOS keeps between its toolbars, also where
-     a browser's bottom toolbar floats over the page (Chrome); the window
-     itself stays put, so a swipe on a header can't drag the page away. */
+     the screen (.app-frame), which iOS keeps between its toolbars, also
+     where a browser's bottom toolbar floats over the page (Chrome); the
+     window itself stays put, so a swipe on a header can't drag the page
+     away. */
   html,
   body {
     height: 100%;
@@ -233,6 +234,13 @@
 /* The hub. A halo breathes around what needs you; a working arc turns;
    the sign-in picture's links and nodes drift. All of it stops under
    reduced motion (below). */
+/* A page's frame: the visible part of the screen, above an on-screen
+   keyboard iOS doesn't shrink the page for (ViewportGuard sets both). */
+.app-frame {
+  position: fixed;
+  inset: var(--viewport-top, 0px) 0 var(--keyboard-inset, 0px);
+}
+
 .hub-halo { animation: hub-halo 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
 .hub-spin { animation: hub-spin 1.1s linear infinite; }
 .hub-spin-slow { animation: hub-spin 3s linear infinite; }

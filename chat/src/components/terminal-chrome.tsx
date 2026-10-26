@@ -3,7 +3,7 @@
 import {useEffect, useState, type RefObject} from "react";
 import {Keyboard, KeyboardOff} from "lucide-react";
 import type {Terminal} from "@xterm/xterm";
-import {IOS_FORM_BAR_HEIGHT, isIOS, keyboardInset, terminalShortcuts, type StickyModifier, type TerminalShortcut} from "@/lib/terminal-keys";
+import {terminalShortcuts, type StickyModifier, type TerminalShortcut} from "@/lib/terminal-keys";
 import {useMediaQuery} from "@/lib/use-media-query";
 
 // The look both terminals share.
@@ -17,29 +17,14 @@ export const TERMINAL_OPTIONS = {
 };
 
 // What the terminals (TTY mode, the native terminal) share about typing on
-// a phone: whether the on-screen keyboard is up, and how much of the page
-// it covers (iOS doesn't shrink the page for it), so the key bar can sit
-// above it.
+// a phone: whether the on-screen keyboard is up. The page's frame keeps
+// above the keyboard (ViewportGuard), and the key bar with it.
 export function useTerminalKeyboard() {
   // Touch screens type through an on-screen keyboard, which only opens
   // while the terminal's (hidden) input has focus.
   const touch = useMediaQuery("(pointer: coarse)");
   const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [inset, setInset] = useState(0);
-  useEffect(() => {
-    const viewport = window.visualViewport;
-    if (!viewport) return;
-    const formBar = isIOS(navigator.userAgent, navigator.platform, navigator.maxTouchPoints) ? IOS_FORM_BAR_HEIGHT : 0;
-    const update = () => setInset(keyboardInset(window.innerHeight, viewport, formBar));
-    update();
-    viewport.addEventListener("resize", update);
-    viewport.addEventListener("scroll", update);
-    return () => {
-      viewport.removeEventListener("resize", update);
-      viewport.removeEventListener("scroll", update);
-    };
-  }, []);
-  return {touch, keyboardOpen, setKeyboardOpen, inset};
+  return {touch, keyboardOpen, setKeyboardOpen};
 }
 
 // Sets up the input xterm types through: tells phone keyboards it is a
