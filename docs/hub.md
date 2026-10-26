@@ -131,6 +131,20 @@ agentapi hub status   # the hub in the config file, and where each running Agent
 agentapi list         # the AgentAPIs running here and what each one's summary says
 ```
 
+An agent on the machine can do this step for you. The
+[agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md) has Claude Code check the version
+and that the hub answers, ask you for the hub's URL, its secret and this machine's address, join,
+and check where each AgentAPI reports. It never restarts an AgentAPI or prints the secret. Install
+it on that machine:
+
+```bash
+mkdir -p ~/.claude/skills/agentapi-hub-join
+curl -fsSL https://raw.githubusercontent.com/k1dav-c/agentapi/main/skills/agentapi-hub-join/SKILL.md \
+  -o ~/.claude/skills/agentapi-hub-join/SKILL.md
+```
+
+Then ask the agent, for example: "Join this machine to the hub at http://hub.vpn:3290".
+
 ### 4. Open it
 
 Open `http://hub.vpn:3290/` on a desktop or a phone that is on the VPN, and sign in with

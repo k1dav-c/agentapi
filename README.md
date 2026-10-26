@@ -1466,7 +1466,9 @@ the file. `--public-url` is where the hub reaches them; `{port}` and `{hostname}
 each. AgentAPIs that started before 1.2 aren't registered: restart them once. `agentapi hub status`
 shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes it. `join`
 first sends the hub a signed test event and stops if the hub doesn't take it (not reached, a sign-in
-page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet.
+page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet. An agent can
+do it for you with the [agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.md); see the
+[hub guide](docs/hub.md#3-join-each-machines-agentapis) to install it.
 
 ### Webhooks
 
