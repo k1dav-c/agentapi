@@ -41,16 +41,37 @@ export function ViewportGuard() {
       fit();
       later();
     };
+    // The browser keeps adjusting after the keyboard is up (a toolbar that
+    // hides, the window scrolled to the field), not always with an event
+    // of the visual viewport: fit again a few times over the next second.
+    let settling: ReturnType<typeof setTimeout>[] = [];
+    const settle = () => {
+      settling.forEach(clearTimeout);
+      settling = [50, 150, 300, 600, 1000].map((delay) => setTimeout(fit, delay));
+    };
+    const onFocusOut = () => {
+      later();
+      settle();
+    };
     fit();
-    window.addEventListener("focusout", later);
-    window.addEventListener("scroll", later, {passive: true});
+    window.addEventListener("focusin", settle);
+    // A field in a frame (the chat the hub opens) takes the focus from the
+    // window instead.
+    window.addEventListener("blur", settle);
+    window.addEventListener("focusout", onFocusOut);
+    window.addEventListener("resize", onViewport);
+    window.addEventListener("scroll", onViewport, {passive: true});
     window.addEventListener("orientationchange", later);
     viewport?.addEventListener("resize", onViewport);
     viewport?.addEventListener("scroll", fit);
     return () => {
       clearTimeout(timer);
-      window.removeEventListener("focusout", later);
-      window.removeEventListener("scroll", later);
+      settling.forEach(clearTimeout);
+      window.removeEventListener("focusin", settle);
+      window.removeEventListener("blur", settle);
+      window.removeEventListener("focusout", onFocusOut);
+      window.removeEventListener("resize", onViewport);
+      window.removeEventListener("scroll", onViewport);
       window.removeEventListener("orientationchange", later);
       viewport?.removeEventListener("resize", onViewport);
       viewport?.removeEventListener("scroll", fit);
