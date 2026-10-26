@@ -148,8 +148,10 @@
   * {
     @apply border-border outline-ring/50;
   }
-  /* The pages scroll inside their own panes; the window stays put, so a
-     swipe on a header can't drag the page off the screen (iOS). */
+  /* The pages scroll inside their own panes and their frames are fixed to
+     the screen (inset: 0), which iOS keeps between its toolbars, also where
+     a browser's bottom toolbar floats over the page (Chrome); the window
+     itself stays put, so a swipe on a header can't drag the page away. */
   html,
   body {
     height: 100%;

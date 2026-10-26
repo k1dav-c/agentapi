@@ -291,7 +291,7 @@ export function HubView() {
 
   if (signedIn === undefined) {
     return (
-      <main className="flex h-svh items-center justify-center bg-background">
+      <main className="fixed inset-0 flex items-center justify-center bg-background">
         <HubMark className="size-10 animate-pulse" />
         <span className="sr-only">Loading the hub</span>
       </main>
@@ -302,7 +302,7 @@ export function HubView() {
   const current = selected ? instances.get(selected) : undefined;
   const filtered = filter !== "all" || query.trim() !== "";
   return (
-    <main className="flex h-svh overflow-hidden bg-background">
+    <main className="fixed inset-0 flex overflow-hidden bg-background">
       <aside className={cn("flex w-full flex-col border-r bg-background md:w-[360px] md:shrink-0", current ? "hidden md:flex" : "flex")}>
         <header className="space-y-3 border-b px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
           <div className="flex items-center gap-2.5">

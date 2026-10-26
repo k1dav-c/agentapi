@@ -38,7 +38,7 @@ export function ChatErrorScreen({error}: {error: unknown}) {
     window.location.reload();
   };
   return (
-    <main className="flex h-svh flex-col overflow-y-auto bg-background">
+    <main className="fixed inset-0 flex flex-col overflow-y-auto bg-background">
       <div role="alert" className="mx-auto flex min-h-full w-full max-w-[49rem] flex-col justify-center px-6 py-12" data-chat-error>
         <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">Error</p>
         <h2 className="mt-2 text-balance text-3xl font-semibold tracking-[-0.02em] sm:text-4xl">The chat stopped working</h2>

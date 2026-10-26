@@ -24,6 +24,9 @@
 - On an iPhone, the top of the chat and of the hub no longer stays cut off after the keyboard
   closes: the window stays put (the pages scroll in their own panes) and goes back to the top once
   nothing is being typed in.
+- On an iPhone, the end of the hub's list and the chat's composer no longer sit under a browser's
+  bottom toolbar (Chrome's floats over the page): the pages are frames fixed to the visible area
+  between the toolbars, not a screen-high box.
 - A stopped or unreachable instance can be forgotten on a phone: **Forget** moved from a
   hover-only button to the row's `⋯` menu.
 

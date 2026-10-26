@@ -15,7 +15,7 @@ export default function EmbedPage() {
       <ChatErrorBoundary>
         <ChatProvider>
           <FileViewerProvider>
-            <main className="flex h-svh flex-col overflow-hidden bg-background">
+            <main className="fixed inset-0 flex flex-col overflow-hidden bg-background">
               <EmbedBar />
               <Chat />
             </main>
