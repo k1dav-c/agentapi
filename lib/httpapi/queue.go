@@ -364,7 +364,7 @@ type QueueUpdateBody struct {
 // change reported late, after a newer one, is dropped.
 func (e *EventEmitter) SetQueue(queue []QueuedMessage, version uint64) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	if version <= e.queueVersion {
 		return
 	}

@@ -108,8 +108,8 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 		summary.Instance = e.instance()
 	}
 	summary.SeenAt = e.seenAt
-	if e.spend != nil {
-		spend := *e.spend
+	if e.summary.spend != nil {
+		spend := *e.summary.spend
 		summary.Spend = &spend
 	}
 	for _, r := range e.requests {
@@ -149,7 +149,7 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 // Summary returns the conversation's summary.
 func (e *EventEmitter) Summary() SummaryBody {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	return e.summaryLocked()
 }
 
@@ -157,12 +157,12 @@ func (e *EventEmitter) Summary() SummaryBody {
 // and returns the summary.
 func (e *EventEmitter) MarkSeen() SummaryBody {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	e.seenAt = e.clock.Now()
 	if e.persister != nil {
 		e.persister.SetSeenAt(e.seenAt)
 	}
-	e.summaryChangedLocked()
+	e.summary.changed = true
 	return e.summaryLocked()
 }
 
@@ -170,35 +170,52 @@ func (e *EventEmitter) MarkSeen() SummaryBody {
 // summary if that changed.
 func (e *EventEmitter) SetSpend(spend SummarySpend) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.spend != nil && *e.spend == spend {
+	defer e.unlock()
+	if e.summary.spend != nil && *e.summary.spend == spend {
 		return
 	}
-	e.spend = &spend
-	e.summaryChangedLocked()
+	e.summary.spend = &spend
+	e.summary.changed = true
 }
 
 // SummaryChanged sends the summary if it changed by something outside the
 // conversation (the instance's settings).
 func (e *EventEmitter) SummaryChanged() {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.summaryChangedLocked()
+	defer e.unlock()
+	e.summary.changed = true
 }
 
-// summaryChangedLocked sends the summary to the subscriptions that want it,
-// if it changed since it was last sent. Without any, it isn't worked out.
-// Caller holds e.mu.
-func (e *EventEmitter) summaryChangedLocked() {
+// summaryFeed sends the summary to the subscriptions that want it: once
+// for all the changes an emitter method made, when it releases the lock
+// (unlock), and only if it differs from the one sent last. e.mu guards it.
+type summaryFeed struct {
+	// changed: the state changed since the summary was last sent.
+	changed bool
+	// sent is the summary sent last, nil while no subscription wants it.
+	sent *SummaryBody
+	// spend is what the agent's sessions cost recently (startSpend); nil
+	// until it is worked out, and for agents whose logs aren't read.
+	spend *SummarySpend
+}
+
+// sendSummaryLocked sends the summary if the state changed since it was
+// last sent and it differs. Without a subscription that wants it, it isn't
+// worked out. Caller holds e.mu.
+func (e *EventEmitter) sendSummaryLocked() {
+	if !e.summary.changed {
+		return
+	}
+	e.summary.changed = false
 	if !e.anyWantsLocked(EventTypeSummaryUpdate) {
-		e.summary = nil
+		e.summary.sent = nil
 		return
 	}
 	summary := e.summaryLocked()
-	if e.summary != nil && reflect.DeepEqual(*e.summary, summary) {
+	if e.summary.sent != nil && reflect.DeepEqual(*e.summary.sent, summary) {
 		return
 	}
-	e.summary = &summary
+	e.summary.sent = &summary
 	e.notifyChannels(EventTypeSummaryUpdate, SummaryUpdateBody{SummaryBody: summary})
 }
 

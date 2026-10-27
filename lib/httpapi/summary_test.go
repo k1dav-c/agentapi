@@ -115,6 +115,33 @@ func TestSummaryEvents(t *testing.T) {
 	}
 }
 
+// The summary goes out once for all that one change of the conversation
+// changed: a turn's end sent the status first, which showed the agent idle
+// with its task still running, then the task's end.
+func TestSummaryOncePerChange(t *testing.T) {
+	t.Parallel()
+	e := NewEventEmitter()
+	e.EmitStatus(conv.StatusStable)
+	_, ch, _ := e.SubscribeTo(SummaryEvents, 0, "")
+	e.EmitMessages(taskMessages(time.Now(), ">Fix the bug", "Fixed"))
+	e.EmitStatus(conv.StatusChanging)
+	require.Len(t, summaries(t, drain(ch)), 2, "the task, then the agent running")
+
+	e.EmitStatus(conv.StatusStable)
+	got := summaries(t, drain(ch))
+	require.Len(t, got, 1)
+	assert.Equal(t, AgentStatusStable, got[0].Status)
+	require.NotNil(t, got[0].Task)
+	assert.Equal(t, TaskStatusCompleted, got[0].Task.Status)
+
+	// A request is a request update and a status change.
+	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1", Title: "Run make"}, Status: native.RequestStatusPending})
+	got = summaries(t, drain(ch))
+	require.Len(t, got, 1)
+	assert.Equal(t, AttentionRequest, got[0].Attention)
+	assert.Equal(t, "r1", got[0].Request.ID)
+}
+
 // A task that ends after a client last showed the conversation is unread
 // until one shows it again.
 func TestSummaryUnread(t *testing.T) {

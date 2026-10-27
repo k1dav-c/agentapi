@@ -448,7 +448,7 @@ func (e *EventEmitter) notifyStatusLocked() {
 		}
 		e.taskTimer = e.clock.AfterFunc(taskEndGrace, func() {
 			e.mu.Lock()
-			defer e.mu.Unlock()
+			defer e.unlock()
 			e.tasksChangedLocked(e.tasks.endIfIdle(e.clock.Now()))
 		}, "tasks", "end")
 	}
@@ -486,7 +486,7 @@ func (e *EventEmitter) tasksStoredLocked(changed []int) []TaskUpdateBody {
 // Tasks returns the conversation's tasks, the earliest first.
 func (e *EventEmitter) Tasks() []Task {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	tasks := make([]Task, len(e.tasks.tasks))
 	for i, task := range e.tasks.tasks {
 		tasks[i] = task.clone()

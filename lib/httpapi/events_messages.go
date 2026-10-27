@@ -17,7 +17,7 @@ import (
 // supported.
 func (e *EventEmitter) EmitMessages(newMessages []conv.Message) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 
 	// cut is where the IDs stop matching: the messages from there on were
 	// removed or replaced by others.
@@ -127,7 +127,7 @@ func (e *EventEmitter) EmitRichMessageSnapshot(msg transcript.RichMessage) {
 
 func (e *EventEmitter) emitRichMessage(msg transcript.RichMessage, replace bool) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	msg = e.upsertRichLocked(msg, replace)
 	if e.persister != nil {
 		e.persister.SetSeq(e.epoch, e.seq)
@@ -147,7 +147,7 @@ func (e *EventEmitter) LoadRichMessages(msgs []transcript.RichMessage) {
 		return
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	stream := len(msgs) <= int(e.subscriptionBufSize)/4
 	for _, msg := range msgs {
 		msg = e.upsertRichLocked(msg, true)
@@ -249,7 +249,7 @@ func richContentBlockKey(block transcript.RichContentBlock) string {
 // parses and emits, the emitter deduplicates, replays, and serves reads.
 func (e *EventEmitter) RichMessages() []transcript.RichMessage {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	return slices.Clone(e.richMessages)
 }
 
@@ -257,7 +257,7 @@ func (e *EventEmitter) RichMessages() []transcript.RichMessage {
 // JSONL records and assigns stable identifiers for the lifetime of this run.
 func (e *EventEmitter) EmitSessionEvents(events []transcript.SessionEvent) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	for _, event := range events {
 		event.EventID = e.nextSessionEventID
 		e.nextSessionEventID++
@@ -271,7 +271,7 @@ func (e *EventEmitter) EmitSessionEvents(events []transcript.SessionEvent) {
 
 func (e *EventEmitter) SessionEvents() []transcript.SessionEvent {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	return slices.Clone(e.sessionEvents)
 }
 

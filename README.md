@@ -1395,7 +1395,9 @@ instance:
 - `GET /events?only=summary` sends `summary_update` on connection and when the summary changes,
   plus heartbeats. It omits messages and screen updates, allowing a client to follow dozens of
   instances. Reply text growing doesn't change the summary; task starts and ends, requests, status
-  changes and queue changes do. Other `/events` clients don't receive `summary_update`.
+  changes and queue changes do. One change sends one `summary_update` with all it changed: a turn's
+  end sends the agent stable with its task done. Other `/events` clients don't receive
+  `summary_update`.
 - `unread` is true when the latest task ended after a client last showed the conversation, and
   `seen_at` says when that was. `POST /tasks/seen` marks the tasks seen for every client of the
   instance; the chat calls it while it shows the conversation. The

@@ -362,8 +362,9 @@ type Factory func(resume Resume) (Adapter, error)
   暫時閒置，計時器會先留 3 秒讓它恢復工作。結構化訊息抵達時，會取得目前任務的 `task_id`。
   還原或接續的訊息視為已完成的歷史紀錄。
 - emitter 維護對話摘要（`summary.go`），包含 instance、狀態、`attention`（需要使用者處理的
-  原因）、標題、最新任務、待處理請求、佇列和用量。有摘要訂閱者時，畫面以外的每次變更後都會重新
-  計算，摘要不同才送出 `summary_update`；回覆文字增長不會送出摘要更新。
+  原因）、標題、最新任務、待處理請求、佇列和用量。有摘要訂閱者時，emitter 的每次呼叫只要變更了
+  畫面以外的狀態，就會在這次呼叫的所有變更完成後重新計算一次（回合結束時，agent 停止和任務結束
+  在同一次呼叫裡），摘要不同才送出 `summary_update`；回覆文字增長不會送出摘要更新。
 - 對於會讀取 session log 的 agent，伺服器每分鐘計算一次摘要的 `spend`（`spend.go`）：
   `sessions.Store.Costs` 以增量方式讀取 log，再把總計中結束於最近 24 小時和 7 天內的各小時加總。
   `EventEmitter.SetSpend` 只在金額改變時才送出摘要。

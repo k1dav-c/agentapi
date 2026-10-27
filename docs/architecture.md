@@ -426,9 +426,10 @@ usage limit stop, login, terminal prompt) and the latest screen.
 - The emitter maintains a conversation summary (`summary.go`) with the
   instance, status, `attention` (why the agent needs the user), title, latest
   task, pending requests, queue and usage. While a summary subscriber exists,
-  it recalculates after every change except screen changes and sends
-  `summary_update` only if the summary differs. Growing reply text therefore
-  sends no summary update. Only `/events?only=summary` subscribes to these
+  it recalculates once per emitter call that changed more than the screen,
+  after all the call's changes (a turn's end stops the agent and ends its
+  task in one call), and sends `summary_update` only if the summary differs.
+  Growing reply text therefore sends no summary update. Only `/events?only=summary` subscribes to these
   updates; its stream also sends heartbeats. `PUT /webhook` triggers another
   check, and rewrites the registry entry, because it can change the instance
   ID and URL.
