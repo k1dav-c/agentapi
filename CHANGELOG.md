@@ -1,5 +1,73 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- A value a newer AgentAPI added no longer breaks the chat. An unknown task status reads as running,
+  then failed or completed; unknown subagent statuses, permission modes, request statuses and option
+  kinds fall back too. The hub opens every instance with its own chat build, so a newer instance
+  could crash it, and **Clear cache and reload** replayed the same event and crashed again.
+- The chat, the hub page and the terminals reopen their event streams after any failure. A proxy's
+  502 closed the hub's stream for good, and a stream that died without closing (a phone changing
+  networks) still showed connected while its tab stayed in front; it now reconnects once the
+  heartbeats stop. When the hub doesn't answer, its page says "Can't reach the hub" and retries,
+  instead of asking for the token.
+- A message steered into a running task shows inside that task, marked *steered*, so the chat
+  numbers tasks as `GET /tasks`, webhooks and the hub do. It showed as a task of its own, usually
+  empty.
+- A usage-limit stop counts as "Needs you" in the chat's header, tab title, notifications and status
+  strip, and in the hub's frame bar, as it already did in the hub's list.
+- The end of a turn sends one `summary_update`, with the agent idle and the task done. The first of
+  the two it sent said idle with the task still running, so the hub flickered. A client that follows
+  only the summary no longer makes AgentAPI build the whole replay.
+- An older AgentAPI keeps using a state database a newer one only added to. It refuses a file only
+  when a newer AgentAPI changed it in a way it can't write, and names the version it needs. 1.9.0
+  and earlier still refuse any newer schema. On restore, tasks whose message is missing or was
+  reused are dropped.
+- The webhook observer runs only while a webhook URL is set, and forgets finished tool calls, closed
+  requests, and everything on a restart. It kept every tool call's input (up to 4 KiB each) for as
+  long as the server ran, webhook or not.
+- The hub checks that the AgentAPI at an instance's URL is that instance. One with another ID (after
+  a DHCP change, or on a second machine with the same hostname) makes the row unreachable ("another
+  AgentAPI answers at this URL"), and the proxy doesn't forward to it. Another run with the same ID
+  can't move an instance the hub is following to its own URL.
+- An instance the hub can't reach that misses three heartbeats is stopped, and the hub stops
+  retrying until its next heartbeat. It stayed unreachable for good, retried every 30 seconds.
+  Instance events carry `heartbeat_seconds`; AgentAPI 1.9.0 and earlier don't send it and keep the
+  old behaviour. A late summary no longer makes a stopped instance unreachable.
+- `agentapi hub join` subscribes to `instance.*` events only: the hub shows what the summaries say,
+  and the task, request, login, limit and error events (up to 64 KiB each) only told it the instance
+  was there. Run `hub join` again on a machine that joined earlier. A heartbeat alone no longer sends
+  browsers an event or rewrites the hub's file.
+- Codex and Pi keep a record whose field changed type, instead of dropping it whole; Pi's finished
+  messages still go through its stricter session-log parser. A changed `turn/completed` left Codex's
+  turn running and the queue stalled. Unknown record types, changed fields and records that don't decode
+  are logged once per kind, with the CLI's version where it reports one (Claude Code, Codex).
+- An answer that may have reached the agent but wasn't confirmed stays in flight: the request takes
+  no other answer until the agent closes it or the turn ends (409, "request is being answered"), so
+  a retry can't send a contradicting approval. An unconfirmed message stays in the conversation with
+  its turn running, and an interrupt ends a turn the agent never started.
+
+### Performance
+
+- Tasks are worked out from the messages that changed only. An update at the end of a 1,000-task
+  session took 1.6 ms under the conversation's lock; it takes 37 µs.
+
+### Internal
+
+- `lib/instanceapi` holds the contract between an AgentAPI and the clients that watch many: the
+  summary, the webhook instance and envelope with `Sign` and `Verify`, and the state a hub shows.
+  `lib/httpapi` keeps aliases under the old names, so the OpenAPI schema is unchanged. The hub's
+  `GET /api/instances` adds each instance's `state`, `pid`, `agentapi_version`, `workspace_url` and
+  `transport`, and registry entries add `workspace_url`.
+- `agentio.Host` starts and stops the native agents' processes and runs their loops, with
+  `agentio.Throttle` and `InterruptDeadline`, the same for Claude Code, Codex and Pi. Codex and Pi
+  read their output unbuffered and stop their process when the start fails; a startup error reads
+  "<agent> exited during startup: …"; Codex no longer sends SIGTERM while it still reads output.
+- The chat's event streams share one connection class (`lib/event-source.ts`), and the chat's replay
+  logic moved to `lib/chat-stream.ts`, with tests.
+
 ## v1.9.0
 
 ### Features
