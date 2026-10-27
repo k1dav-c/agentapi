@@ -370,12 +370,18 @@ type Factory func(resume Resume) (Adapter, error)
   the queued messages.
 - **Turns.** A message starts a turn only while the agent is idle; otherwise
   `StartTurn` returns `ErrMessageValidationChanging` and the server queues the
-  message. Turns wait the same way while the agent compacts its context.
+  message. Turns wait the same way while the agent compacts its context. A
+  message whose write the agent didn't confirm (`ErrUnconfirmed`: a timeout,
+  a cancel, the agent's exit) may still reach it, so it stays in the
+  conversation and its turn stays active until the agent's events end it.
+  `Interrupt` ends such a turn if the agent never started it.
 - **Requests.** Approvals, questions and plans become `RequestState`s with a
   status (`pending`, `resolved`, `withdrawn`, `expired`) and a
   `response_capability` (`live`, `message`, `not_resumable`). An answer
   reaches the adapter at most once, and requests still open when a turn ends
-  expire. Secret answers are redacted everywhere except the input sent to the agent.
+  expire. An answer the agent didn't confirm may still reach it, so the
+  request takes no other answer: it stays pending until the agent closes it
+  or the turn ends. Secret answers are redacted everywhere except the input sent to the agent.
 - **Observer.** Changes besides messages and status (rich messages, requests,
   settings, usage, the session reference, logins) go to an `Observer`, which
   the server implements to update the emitter and the state DB. It is called

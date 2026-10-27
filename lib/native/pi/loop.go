@@ -256,6 +256,14 @@ func (a *Adapter) handlePromptResponse(p *pendingCmd, deliver bool, r response) 
 		switch {
 		case deliver:
 			// The caller gets the error ("No API key found for …").
+		case p.turn == 0 && p.kind == cmdTurn && !a.isTurnActive():
+			// The caller was told the prompt went out unconfirmed, so the
+			// conversation holds its turn: it ends with the error.
+			a.log.Warn("Pi rejected a prompt after its caller stopped waiting", "error", r.Error)
+			a.beginTurn()
+			a.loop.stopReason, a.loop.errMessage = "error", r.Error
+			a.endTurn()
+			return
 		case p.turn == 0:
 			a.log.Warn("Pi rejected a prompt after its caller stopped waiting", "error", r.Error)
 		case a.isCurrentTurn(p.turn) && !a.isRunActive():
@@ -485,13 +493,20 @@ func (a *Adapter) cancelTurnDialogs(withdraw bool) {
 	var cancel []string
 	a.mu.Lock()
 	for _, id := range ids {
-		// A dialog whose answer is being written gets that answer, not a
-		// cancel too; Respond removes it once it is written.
-		if d := a.dialogs[id]; d != nil && !d.answering {
+		d := a.dialogs[id]
+		switch {
+		case d == nil:
+		case d.unconfirmed:
+			// It may have its answer: no cancel contradicts it.
+			d.stopTimer()
+			delete(a.dialogs, id)
+		case !d.answering:
 			d.stopTimer()
 			delete(a.dialogs, id)
 			cancel = append(cancel, id)
 		}
+		// A dialog whose answer is being written gets that answer, not a
+		// cancel too; Respond removes it once it is written.
 	}
 	a.mu.Unlock()
 	for _, id := range cancel {

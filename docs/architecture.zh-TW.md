@@ -321,10 +321,13 @@ type Factory func(resume Resume) (Adapter, error)
   的派送迴圈中、排隊的訊息之前送出。
 - **回合。** 只有 agent 閒置時訊息才會開始新的回合；否則 `StartTurn` 會回傳
   `ErrMessageValidationChanging`，由伺服器把訊息排入佇列。agent 壓縮 context 期間，回合也會
-  以同樣的方式等待。
+  以同樣的方式等待。寫出後 agent 沒有確認的訊息（`ErrUnconfirmed`：逾時、取消或 agent 結束）
+  仍可能送達，所以它會留在對話中，回合也維持進行中，直到 agent 的事件結束它。如果 agent
+  始終沒有開始這個回合，`Interrupt` 會結束它。
 - **請求。** 核准、提問和計畫會成為 `RequestState`，帶有狀態（`pending`、`resolved`、
   `withdrawn`、`expired`）和 `response_capability`（`live`、`message`、`not_resumable`）。
-  一個回答最多只會送到 adapter 一次，回合結束時仍待處理的請求會過期。祕密問題的答案除了送給
+  一個回答最多只會送到 adapter 一次，回合結束時仍待處理的請求會過期。agent 沒有確認的回答仍可能
+  送達，所以這個請求不再接受其他回答，會維持待處理，直到 agent 關閉它或回合結束。祕密問題的答案除了送給
   agent 的那份之外，一律遮蔽。
 - **Observer。** 訊息與狀態以外的變更（結構化訊息、請求、設定、用量、工作階段參照、登入）會
   送到 `Observer`，由伺服器實作，用來更新 emitter 和狀態資料庫。呼叫時仍持有對話的鎖，

@@ -389,7 +389,13 @@ func (a *Adapter) request(ctx context.Context, kind cmdKind, cmd command) (cmdRe
 
 	if err := a.send(ctx, cmd.withID(id)); err != nil {
 		a.mu.Lock()
-		delete(a.pending, id)
+		if errors.Is(err, native.ErrUnconfirmed) {
+			// Pi may yet get it: the loop handles a late response
+			// without a caller.
+			p.detached = true
+		} else {
+			delete(a.pending, id)
+		}
 		a.mu.Unlock()
 		return cmdResult{}, err
 	}
@@ -502,10 +508,19 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 	a.mu.Unlock()
 	err = a.send(ctx, reply)
 	a.mu.Lock()
-	d.answering = false
-	if err == nil && a.dialogs[requestID] == d {
-		d.stopTimer()
-		delete(a.dialogs, requestID)
+	switch {
+	case err == nil:
+		d.answering = false
+		if a.dialogs[requestID] == d {
+			d.stopTimer()
+			delete(a.dialogs, requestID)
+		}
+	case errors.Is(err, native.ErrUnconfirmed):
+		// Pi may yet get the answer: the dialog stays answering until Pi
+		// closes it or the turn ends.
+		d.unconfirmed = true
+	default:
+		d.answering = false
 	}
 	a.mu.Unlock()
 	return err

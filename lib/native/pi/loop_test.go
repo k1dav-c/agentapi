@@ -310,6 +310,22 @@ func TestPromptWithoutAnswerIsUnconfirmed(t *testing.T) {
 		assert.ErrorIs(t, err, context.Canceled)
 	})
 
+	t.Run("refused late", func(t *testing.T) {
+		t.Parallel()
+		h := startedHarness(t)
+		ctx, cancel := context.WithCancel(h.ctx)
+		h.call("p", func() error { return h.a.StartTurn(ctx, native.Input{Text: "hi"}) })
+		cmd := h.pi.nextCmd()
+		cancel()
+		require.ErrorIs(t, h.result("p"), native.ErrUnconfirmed)
+		// The conversation keeps the turn of a message that may have gone
+		// out; Pi's refusal ends it.
+		h.refuse(cmd, "No API key found for openai")
+		h.settle()
+		assert.Equal(t, []string{"turn_started", "turn_completed:error"}, h.sink.TurnLog())
+		assert.Equal(t, "No API key found for openai", h.sink.State().Results[0].Error)
+	})
+
 	t.Run("exited", func(t *testing.T) {
 		t.Parallel()
 		h := startedHarness(t)

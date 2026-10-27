@@ -330,6 +330,24 @@ func TestNative_Requests(t *testing.T) {
 	assert.Equal(t, 0, after.PendingRequests)
 }
 
+// An answer the agent didn't confirm may have reached it, so the request
+// takes no other answer while it stays pending.
+func TestNative_UnconfirmedAnswer(t *testing.T) {
+	n := newNativeServer(t, func(a *nativetest.Adapter) { a.RespondErr = native.Unconfirmed(context.DeadlineExceeded) })
+	a := n.factory.Last()
+	n.send("do it", "")
+	a.Sink().RequestOpened(approval("perm-1"))
+
+	assert.Equal(t, http.StatusInternalServerError, n.do(http.MethodPost, "/requests/perm-1/respond", map[string]any{"option_id": "allow"}, nil))
+	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/requests/perm-1/respond", map[string]any{"option_id": "deny"}, nil))
+	var one native.RequestState
+	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/requests/perm-1", nil, &one))
+	assert.Equal(t, native.RequestStatusPending, one.Status)
+	var status httpapi.StatusChangeBody
+	n.do(http.MethodGet, "/status", nil, &status)
+	assert.Equal(t, httpapi.AgentStatusRunning, status.Status, "the answer is on its way")
+}
+
 // A message that is queued or steered into the turn doesn't answer the
 // request the agent waits on, so the handoff keeps offering it.
 func TestNative_HandoffOffersRequestUntilAnswered(t *testing.T) {

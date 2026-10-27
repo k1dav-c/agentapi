@@ -200,6 +200,7 @@ func (c *Conversation) signalExit(gen int, err error) {
 func (c *Conversation) exitLocked(err error) {
 	c.started = false
 	c.turnActive = false
+	c.unconfirmedTurn = false
 	c.compacting = false
 	c.expireRequestsLocked(true)
 	select {
@@ -399,6 +400,7 @@ func (c *Conversation) retireAdapterLocked() Adapter {
 	c.adapter = nil
 	c.started = false
 	c.turnActive = false
+	c.unconfirmedTurn = false
 	c.compacting = false
 	c.loginWaiting = false
 	c.startErrors = nil

@@ -30,29 +30,34 @@ func (s *sink) update(f func(c *Conversation)) {
 func (s *sink) TurnStarted() {
 	s.update(func(c *Conversation) {
 		c.turnActive = true
+		c.unconfirmedTurn = false
 		c.cfg.Emitter.EmitStatus(c.statusLocked())
 	})
 }
 
 func (s *sink) TurnCompleted(result TurnResult) {
-	s.update(func(c *Conversation) {
-		c.turnActive = false
-		c.messages.endAgentMessage()
-		c.expireRequestsLocked(false)
-		switch {
-		case result.StopReason == StopReasonLimited:
-			// The limit stop shows what the agent said.
-			c.limitStoppedLocked(result)
-		case result.Error != "":
-			c.cfg.Emitter.EmitError(result.Error, conv.ErrorLevelError)
-		}
-		c.continueAgain = false
-		if c.login != nil && provesLogin(result) {
-			c.login = nil
-			c.cfg.Observer.LoginRequired(nil)
-		}
-		c.cfg.Emitter.EmitStatus(c.statusLocked())
-	})
+	s.update(func(c *Conversation) { c.turnCompletedLocked(result) })
+}
+
+// turnCompletedLocked ends the turn with result.
+func (c *Conversation) turnCompletedLocked(result TurnResult) {
+	c.turnActive = false
+	c.unconfirmedTurn = false
+	c.messages.endAgentMessage()
+	c.expireRequestsLocked(false)
+	switch {
+	case result.StopReason == StopReasonLimited:
+		// The limit stop shows what the agent said.
+		c.limitStoppedLocked(result)
+	case result.Error != "":
+		c.cfg.Emitter.EmitError(result.Error, conv.ErrorLevelError)
+	}
+	c.continueAgain = false
+	if c.login != nil && provesLogin(result) {
+		c.login = nil
+		c.cfg.Observer.LoginRequired(nil)
+	}
+	c.cfg.Emitter.EmitStatus(c.statusLocked())
 }
 
 // provesLogin reports whether a turn that ended with result shows that the

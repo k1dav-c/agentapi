@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -78,9 +79,21 @@ type requestBook struct {
 	clock    quartz.Clock
 	requests []*RequestState
 	// answering holds the requests whose answer is being delivered, so a
-	// second answer can't be sent at the same time. A close that comes
-	// meanwhile is kept there and applies if the delivery fails.
-	answering map[string]requestClose
+	// second answer can't be sent at the same time, and those whose answer
+	// went out unconfirmed.
+	answering map[string]answer
+}
+
+// answer is the answer on its way to a request.
+type answer struct {
+	// closed is a close that came while it was being delivered, which
+	// applies if the delivery fails.
+	closed requestClose
+	// unconfirmed: the delivery ended without the agent confirming it
+	// (ErrUnconfirmed). The agent may have it, so no other answer may
+	// follow; the request stays pending until the agent closes it or the
+	// turn ends.
+	unconfirmed bool
 }
 
 // requestClose is how a request closes: its new status, and how it can
@@ -91,7 +104,7 @@ type requestClose struct {
 }
 
 func newRequestBook(clock quartz.Clock) requestBook {
-	return requestBook{clock: clock, answering: make(map[string]requestClose)}
+	return requestBook{clock: clock, answering: make(map[string]answer)}
 }
 
 // open adds a request the agent waits on, or replaces the one with its ID,
@@ -155,16 +168,20 @@ func (b *requestBook) waitingOnUser() bool {
 // close closes a pending request and reports whether it did. While an
 // answer to the request is being delivered, endAnswer closes it instead:
 // as resolved if the delivery works, otherwise as the first close asked
-// for meanwhile.
+// for meanwhile. A request whose answer went out unconfirmed closes now.
 func (b *requestBook) close(r *RequestState, status RequestStatus, capability ResponseCapability) bool {
 	if r.Status != RequestStatusPending {
 		return false
 	}
-	if pending, answering := b.answering[r.ID]; answering {
-		if pending.status == "" {
-			b.answering[r.ID] = requestClose{status: status, capability: capability}
+	if a, answering := b.answering[r.ID]; answering {
+		if !a.unconfirmed {
+			if a.closed.status == "" {
+				a.closed = requestClose{status: status, capability: capability}
+				b.answering[r.ID] = a
+			}
+			return false
 		}
-		return false
+		delete(b.answering, r.ID)
 	}
 	now := b.clock.Now()
 	r.Status = status
@@ -201,22 +218,26 @@ func (b *requestBook) answerable(r *RequestState) bool {
 
 // beginAnswer marks the request with id as being answered.
 func (b *requestBook) beginAnswer(id string) {
-	b.answering[id] = requestClose{}
+	b.answering[id] = answer{}
 }
 
 // endAnswer ends the delivery of an answer to r: it resolves r with
 // response if the delivery worked (response isn't nil), otherwise applies
-// a close that came meanwhile. It reports whether r closed.
-func (b *requestBook) endAnswer(r *RequestState, response *Response) bool {
-	closed := b.answering[r.ID]
+// a close that came meanwhile. Without one, an unconfirmed delivery keeps
+// r from taking another answer until it closes. It reports whether r
+// closed.
+func (b *requestBook) endAnswer(r *RequestState, response *Response, unconfirmed bool) bool {
+	a := b.answering[r.ID]
 	delete(b.answering, r.ID)
 	switch {
 	case response != nil:
 		r.Response = response
 		return b.close(r, RequestStatusResolved, r.Capability)
-	case closed.status != "":
+	case a.closed.status != "":
 		// The agent stopped waiting while the answer was on its way.
-		return b.close(r, closed.status, closed.capability)
+		return b.close(r, a.closed.status, a.closed.capability)
+	case unconfirmed:
+		b.answering[r.ID] = answer{unconfirmed: true}
 	}
 	return false
 }
@@ -257,7 +278,11 @@ func (c *Conversation) Request(id string) (RequestState, bool) {
 }
 
 // Respond answers a pending request. It returns ErrRequestNotFound if the
-// request is not pending and ErrInvalidResponse if the response doesn't fit.
+// request is not pending, or an answer to it is on its way, and
+// ErrInvalidResponse if the response doesn't fit. An answer the adapter
+// wrote but the agent didn't confirm (ErrUnconfirmed) may still reach the
+// agent, so the request takes no other: it stays pending until the agent
+// closes it or the turn ends.
 func (c *Conversation) Respond(ctx context.Context, id string, response Response) (RequestState, error) {
 	c.mu.Lock()
 	r := c.requests.find(id)
@@ -290,7 +315,7 @@ func (c *Conversation) Respond(ctx context.Context, id string, response Response
 		redacted := redactSecrets(r.Request, response)
 		resolved = &redacted
 	}
-	if c.requests.endAnswer(r, resolved) {
+	if c.requests.endAnswer(r, resolved, errors.Is(err, ErrUnconfirmed)) {
 		c.cfg.Observer.RequestUpdated(*r)
 	}
 	c.cfg.Emitter.EmitStatus(c.statusLocked())

@@ -263,6 +263,52 @@ func TestStartTurnFailureRemovesMessage(t *testing.T) {
 	assert.True(t, c.Idle())
 }
 
+// A message the agent didn't confirm may be under way: it stays, and the
+// agent's events end its turn.
+func TestUnconfirmedTurnStays(t *testing.T) {
+	c, factory, _ := start(t, func(a *nativetest.Adapter) {
+		a.TurnErr = native.Unconfirmed(context.DeadlineExceeded)
+	}, native.Config{})
+	a := factory.Last()
+	assert.ErrorIs(t, c.StartTurn(context.Background(), native.Input{Text: "one"}), native.ErrUnconfirmed)
+	require.Len(t, c.Messages(), 1)
+	assert.False(t, c.Idle())
+	assert.Equal(t, conversation.StatusChanging, c.Status())
+
+	a.Sink().TurnStarted()
+	a.Sink().RichMessage(text("m1", "done"))
+	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+	assert.True(t, c.Idle())
+	require.Len(t, c.Messages(), 2)
+	assert.Equal(t, "one", c.Messages()[0].Message)
+}
+
+// Interrupt ends the turn of a message the agent didn't confirm and never
+// started; one the agent started is the agent's to end.
+func TestInterruptEndsAnUnconfirmedTurn(t *testing.T) {
+	c, factory, _ := start(t, func(a *nativetest.Adapter) {
+		a.TurnErr = native.Unconfirmed(context.DeadlineExceeded)
+		a.InterruptErr = native.ErrNoActiveTurn
+	}, native.Config{})
+	a := factory.Last()
+	assert.ErrorIs(t, c.StartTurn(context.Background(), native.Input{Text: "one"}), native.ErrUnconfirmed)
+	require.NoError(t, c.Interrupt(context.Background()))
+	assert.True(t, c.Idle())
+	assert.Len(t, c.Messages(), 1, "the message stays")
+	assert.ErrorIs(t, c.Interrupt(context.Background()), native.ErrNoActiveTurn)
+
+	assert.ErrorIs(t, c.StartTurn(context.Background(), native.Input{Text: "two"}), native.ErrUnconfirmed)
+	a.Sink().TurnStarted()
+	assert.ErrorIs(t, c.Interrupt(context.Background()), native.ErrNoActiveTurn)
+	assert.False(t, c.Idle(), "the agent works on it")
+
+	a.TurnErr = nil
+	a.Sink().TurnCompleted(native.TurnResult{})
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "three"}))
+	assert.ErrorIs(t, c.Interrupt(context.Background()), native.ErrNoActiveTurn, "a confirmed turn is the agent's to end")
+	assert.False(t, c.Idle())
+}
+
 func TestSteerAndInterrupt(t *testing.T) {
 	c, factory, _ := start(t, nil, native.Config{})
 	a := factory.Last()

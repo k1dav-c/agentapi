@@ -170,7 +170,7 @@ func TestClose(t *testing.T) {
 
 // A CLI that stops reading can't hold StartTurn past its context: the
 // prompt may still reach the CLI if it reads again, so the error says it is
-// unconfirmed, and the turn can start again.
+// unconfirmed.
 func TestStartTurnGivesUpWithTheContext(t *testing.T) {
 	t.Parallel()
 	// The CLI reads the initialize and get_settings requests, then hangs.
@@ -182,6 +182,57 @@ func TestStartTurnGivesUpWithTheContext(t *testing.T) {
 	err := a.StartTurn(ctx, native.Input{Text: "hi"})
 	require.ErrorIs(t, err, native.ErrUnconfirmed)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NoError(t, a.Close())
+}
+
+// stdinFunc stands in for the CLI's stdin.
+type stdinFunc func([]byte) (int, error)
+
+func (f stdinFunc) Write(p []byte) (int, error) { return f(p) }
+
+// A message or an answer whose write didn't finish may yet reach the CLI.
+// The turn stays sent, for the CLI's frames to start and end, and the
+// request takes no other answer.
+func TestUnconfirmedWritesStayInFlight(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	proc := newFakeProcess("")
+	a, sink := started(t, Config{}, proc)
+	// The CLI stops reading its input until release.
+	hold := func() chan struct{} {
+		release := make(chan struct{})
+		a.writer.Attach(stdinFunc(func(p []byte) (int, error) {
+			<-release
+			return proc.Stdin().Write(p)
+		}))
+		return release
+	}
+	short := func() context.Context {
+		ctx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+		t.Cleanup(cancel)
+		return ctx
+	}
+
+	release := hold()
+	require.ErrorIs(t, a.StartTurn(short(), native.Input{Text: "hi"}), native.ErrUnconfirmed)
+	require.ErrorIs(t, a.StartTurn(ctx, native.Input{Text: "again"}), native.ErrTurnActive, "the CLI may work on the first")
+	close(release)
+	_, n := proc.waitRequest(t, 0, "initialize")
+	assert.Equal(t, "user", proc.waitWritten(t, n+1)["type"], "the CLI reads the message after all")
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
+	proc.send(t, []byte(`{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"t1"}}`))
+	proc.barrier(t)
+
+	release = hold()
+	require.ErrorIs(t, a.Respond(short(), "r1", native.Response{OptionID: optionAllow}), native.ErrUnconfirmed)
+	require.ErrorIs(t, a.Respond(ctx, "r1", native.Response{OptionID: optionDeny}), native.ErrRequestNotFound,
+		"a second answer could contradict the first")
+	close(release)
+	assert.Equal(t, "control_response:allow", signature(proc.waitWritten(t, n+2)))
+	proc.send(t, []byte(`{"type":"result","subtype":"success","is_error":false}`))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
+	proc.barrier(t)
+	assert.Equal(t, []string{"turn_started", "request_opened:r1", "turn_completed:end_turn"}, sink.State().Log)
 	require.NoError(t, a.Close())
 }
 

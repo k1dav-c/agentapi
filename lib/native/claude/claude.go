@@ -443,7 +443,9 @@ func (a *Adapter) userMessage(input native.Input) (map[string]any, error) {
 }
 
 // StartTurn implements native.Adapter. The CLI takes the message right
-// away; the turn starts when it reports running.
+// away; the turn starts when it reports running. A message whose write
+// went out unconfirmed may yet reach the CLI, so its turn stays sent: the
+// CLI's frames start and end it, and Interrupt can stop it.
 func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 	msg, err := a.userMessage(input)
 	if err != nil {
@@ -463,10 +465,12 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 	a.prompt = input.Text
 	a.mu.Unlock()
 	if err := a.write(ctx, msg); err != nil {
-		a.mu.Lock()
-		a.endTurnLocked()
-		a.prompt = ""
-		a.mu.Unlock()
+		if !errors.Is(err, native.ErrUnconfirmed) {
+			a.mu.Lock()
+			a.endTurnLocked()
+			a.prompt = ""
+			a.mu.Unlock()
+		}
 		return err
 	}
 	return nil
@@ -567,11 +571,17 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 	})
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	// If the CLI didn't get the answer, the request is still open.
-	p.answering = false
-	if err == nil && a.requests[requestID] == p {
-		delete(a.requests, requestID)
+	switch {
+	case err == nil:
+		if a.requests[requestID] == p {
+			delete(a.requests, requestID)
+		}
+	case !errors.Is(err, native.ErrUnconfirmed):
+		// The CLI didn't get the answer: the request is still open.
+		p.answering = false
 	}
+	// An unconfirmed answer may yet reach the CLI: the request takes no
+	// other until the CLI cancels it or the turn ends.
 	return err
 }
 

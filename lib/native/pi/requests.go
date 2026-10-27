@@ -40,6 +40,9 @@ type dialog struct {
 	// answering: Respond is writing the answer. The dialog stays open
 	// until the write succeeded, so a failed answer can be sent again.
 	answering bool
+	// unconfirmed: the answer's write didn't finish, so Pi may yet get it.
+	// The dialog takes no other answer, and isn't cancelled.
+	unconfirmed bool
 }
 
 func (d *dialog) stopTimer() {

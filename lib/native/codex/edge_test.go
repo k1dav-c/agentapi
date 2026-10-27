@@ -992,3 +992,57 @@ func TestDriftedNotificationsAreRead(t *testing.T) {
 	assert.Equal(t, 2, h.a.drift.Counts()["unknown turn/paused"])
 	assert.Empty(t, log.Matching("type=thread/settings/updated"))
 }
+
+// stdinFunc stands in for app-server's stdin.
+type stdinFunc func([]byte) (int, error)
+
+func (f stdinFunc) Write(p []byte) (int, error) { return f(p) }
+
+// An answer whose write didn't finish may yet reach app-server, so the
+// request takes no other answer, and no dismissal contradicts it at the
+// end of the turn. Once app-server has it, the request closes.
+func TestUnconfirmedAnswerIsNotSentTwice(t *testing.T) {
+	h := newHarness(t, "", nil)
+	h.boot()
+	h.beginTurn("turn-1")
+	h.feedJSON(`{"id":7,"method":"item/commandExecution/requestApproval","params":{"threadId":"` + testThread + `","turnId":"turn-1","itemId":"exec-1","command":"ls","cwd":"/work"}}`)
+	h.sync()
+	id := h.requestID(json.RawMessage("7"))
+	// app-server stops reading its input for a while.
+	release := make(chan struct{})
+	h.a.writer.Attach(stdinFunc(func(p []byte) (int, error) {
+		<-release
+		return h.proc.stdinW.Write(p)
+	}))
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := h.a.Respond(ctx, id, native.Response{OptionID: "accept"})
+	require.ErrorIs(t, err, native.ErrUnconfirmed)
+	require.ErrorIs(t, h.a.Respond(context.Background(), id, native.Response{OptionID: "decline"}), native.ErrRequestNotFound,
+		"a second answer could contradict the first")
+
+	close(release)
+	sent := h.expectSent("")
+	assert.JSONEq(t, `{"decision":"accept"}`, string(sent.Result))
+	h.feedJSON(`{"method":"serverRequest/resolved","params":{"threadId":"` + testThread + `","requestId":7}}`)
+	h.sync()
+	assert.Equal(t, []string{id}, snapshot(h.rec).closed, "the conversation didn't resolve it")
+
+	h.feedJSON(`{"id":8,"method":"item/commandExecution/requestApproval","params":{"threadId":"` + testThread + `","turnId":"turn-1","itemId":"exec-2","command":"ls","cwd":"/work"}}`)
+	h.sync()
+	id = h.requestID(json.RawMessage("8"))
+	blocked := make(chan struct{})
+	h.a.writer.Attach(stdinFunc(func([]byte) (int, error) {
+		<-blocked
+		return 0, io.ErrClosedPipe
+	}))
+	ctx, cancel = context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, h.a.Respond(ctx, id, native.Response{OptionID: "accept"}), native.ErrUnconfirmed)
+	// Whether that answer reached app-server, the adapter can't tell: the
+	// end of the turn sends no dismissal.
+	close(blocked)
+	h.a.writer.Attach(h.proc.stdinW)
+	h.completeTurn("turn-1", "completed", "")
+	h.expectNothingSent()
+}
