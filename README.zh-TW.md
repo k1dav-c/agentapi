@@ -232,8 +232,8 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 ## 聊天介面
 
 `/chat` 的聊天介面內建在執行檔裡，支援所有 transport，適用於桌面與手機。介面提供工具活動搜尋、
-精簡的工具呼叫卡片與連線狀態指示。標頭顯示 AgentAPI 版本與 agent 標誌，例如 Claude 的橘色方塊
-或 Pi 的 logo。截圖與動畫見[聊天介面導覽](docs/chat-ui.zh-TW.md)。
+精簡的工具呼叫卡片與連線狀態指示。標頭顯示 AgentAPI 版本與 agent 標誌：Claude、OpenAI（Codex）
+或 Pi 的 logo，其他 agent 則是一個色塊。截圖與動畫見[聊天介面導覽](docs/chat-ui.zh-TW.md)。
 
 ![在聊天介面中送出任務：agent 思考、執行工具，然後回覆](docs/screenshots/demo-task.gif)
 
