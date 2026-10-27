@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"slices"
 	"time"
 
@@ -63,6 +64,16 @@ func (t Task) final() bool { return t.Status != TaskStatusRunning }
 // the tasks it changed, to send as updates.
 type taskTracker struct {
 	tasks []Task
+	// owners has the position of the task each user message started or
+	// was added to, by the message's ID.
+	owners map[int]int
+	// ids are the IDs of the messages last taken. inOrder: they and the
+	// tasks' IDs increase, so a change goes through only the messages from
+	// where it starts. rederive: the tasks weren't derived from the messages
+	// (they were restored), so the next change goes through them all.
+	ids      []int
+	inOrder  bool
+	rederive bool
 	// open is the position of the running task, or -1.
 	open int
 	// ran: the agent was running since the open task started, so its being
@@ -75,18 +86,22 @@ type taskTracker struct {
 }
 
 func newTaskTracker(since time.Time) *taskTracker {
-	return &taskTracker{open: -1, since: since}
+	return &taskTracker{open: -1, since: since, owners: map[int]int{}, inOrder: true}
 }
 
 // reset forgets the tasks, for a new conversation that starts at now.
 func (t *taskTracker) reset(now time.Time) {
 	t.tasks, t.open, t.ran, t.since = nil, -1, false, now
+	t.ids, t.inOrder, t.rederive = t.ids[:0], true, false
+	clear(t.owners)
 }
 
 // restore takes back the tasks of a restored conversation; one that was
 // running when AgentAPI stopped can't go on.
 func (t *taskTracker) restore(tasks []Task, now time.Time) []int {
 	t.tasks, t.open, t.ran = tasks, -1, false
+	t.ids, t.rederive = t.ids[:0], true
+	t.index()
 	var changed []int
 	for i := range t.tasks {
 		if !t.tasks[i].final() {
@@ -97,19 +112,95 @@ func (t *taskTracker) restore(tasks []Task, now time.Time) []int {
 	return changed
 }
 
+// index works out owners, and whether the tasks are in order, from the
+// tasks.
+func (t *taskTracker) index() {
+	t.owners = make(map[int]int, len(t.tasks))
+	t.inOrder = true
+	for i, task := range t.tasks {
+		if i > 0 && t.tasks[i-1].ID >= task.ID {
+			t.inOrder = false
+		}
+		// The latest task that holds a message owns it.
+		t.owners[task.ID] = i
+		for _, id := range task.Steered {
+			t.owners[id] = i
+		}
+	}
+}
+
 // owner returns the position of the task a user message started or was
 // added to, or -1.
 func (t *taskTracker) owner(id int) int {
-	for i := len(t.tasks) - 1; i >= 0; i-- {
-		if t.tasks[i].ID == id || slices.Contains(t.tasks[i].Steered, id) {
-			return i
-		}
+	if i, ok := t.owners[id]; ok {
+		return i
 	}
 	return -1
 }
 
-// messages takes the conversation's messages after a change.
-func (t *taskTracker) messages(msgs []conv.Message) []int {
+// messages takes the conversation's messages after a change; msgs[:from]
+// are those of the last call, unchanged. Only the tasks of the messages
+// from there on change, which while a reply streams in is the latest: an
+// update costs as much in a long conversation as in a short one.
+func (t *taskTracker) messages(msgs []conv.Message, from int) []int {
+	if t.rederive || !t.inOrder {
+		return t.derive(msgs)
+	}
+	from = min(from, len(t.ids), len(msgs))
+	if from == len(msgs) && from == len(t.ids) {
+		return nil
+	}
+	last := math.MinInt // the ID of the last message before from
+	if from > 0 {
+		last = msgs[from-1].Id
+	}
+	// A change that removed messages, put others in their place, added
+	// them out of order or took a task's message from the user goes
+	// through them all.
+	if len(msgs) < len(t.ids) {
+		return t.derive(msgs)
+	}
+	for i := from; i < len(msgs); i++ {
+		id := msgs[i].Id
+		if i < len(t.ids) && id != t.ids[i] || i >= len(t.ids) && i > 0 && id <= msgs[i-1].Id {
+			return t.derive(msgs)
+		}
+		if p, ok := t.owners[id]; ok && t.tasks[p].ID == id && (msgs[i].Role != conv.RoleUser || !msgs[i].Time.Equal(t.tasks[p].StartedAt)) {
+			return t.derive(msgs)
+		}
+	}
+	at := make(map[int]int, len(msgs)-from+1)
+	for i := from; i < len(msgs); i++ {
+		at[msgs[i].Id] = i
+	}
+	// k is the task the messages before from end in, the first whose reply
+	// can change; the tasks after it started from there on.
+	k := len(t.tasks)
+	for k > 0 && t.tasks[k-1].ID > last {
+		k--
+	}
+	if k > 0 {
+		k--
+		j := from - 1
+		for j >= 0 && msgs[j].Id != t.tasks[k].ID {
+			j--
+		}
+		if j < 0 {
+			return t.derive(msgs)
+		}
+		at[t.tasks[k].ID] = j
+	}
+	changed := t.own(msgs[from:], nil)
+	changed = t.replies(msgs, k, at, changed)
+	for _, msg := range msgs[len(t.ids):] {
+		t.ids = append(t.ids, msg.Id)
+	}
+	return changed
+}
+
+// derive goes through all the messages: it drops the tasks whose message is
+// gone, and adds and updates the others.
+func (t *taskTracker) derive(msgs []conv.Message) []int {
 	at := make(map[int]int, len(msgs))
 	for i, msg := range msgs {
 		at[msg.Id] = i
@@ -142,6 +233,22 @@ func (t *taskTracker) messages(msgs []conv.Message) []int {
 			}
 		}
 	}
+	t.index()
+	t.ids = t.ids[:0]
+	for i, msg := range msgs {
+		if i > 0 && msg.Id <= msgs[i-1].Id {
+			t.inOrder = false
+		}
+		t.ids = append(t.ids, msg.Id)
+	}
+	t.rederive = false
+	changed = t.own(msgs, changed)
+	return t.replies(msgs, 0, at, changed)
+}
+
+// own gives the user's messages among msgs that no task holds a task: their
+// own, or the running one they steer.
+func (t *taskTracker) own(msgs []conv.Message, changed []int) []int {
 	for _, msg := range msgs {
 		if msg.Role != conv.RoleUser || t.owner(msg.Id) >= 0 {
 			continue
@@ -149,23 +256,38 @@ func (t *taskTracker) messages(msgs []conv.Message) []int {
 		if msg.Time.Before(t.since) {
 			// History: its turn is over.
 			ended := msg.Time
-			t.tasks = append(t.tasks, Task{ID: msg.Id, Status: TaskStatusCompleted, Prompt: cut(msg.Message, taskPromptLimit), StartedAt: msg.Time, EndedAt: &ended})
+			t.add(Task{ID: msg.Id, Status: TaskStatusCompleted, Prompt: cut(msg.Message, taskPromptLimit), StartedAt: msg.Time, EndedAt: &ended})
 			changed = append(changed, len(t.tasks)-1)
 			continue
 		}
 		if t.open >= 0 {
 			t.tasks[t.open].Steered = append(t.tasks[t.open].Steered, msg.Id)
+			t.owners[msg.Id] = t.open
 			changed = appendOnce(changed, t.open)
 			continue
 		}
-		t.tasks = append(t.tasks, Task{ID: msg.Id, Status: TaskStatusRunning, Prompt: cut(msg.Message, taskPromptLimit), StartedAt: msg.Time})
+		t.add(Task{ID: msg.Id, Status: TaskStatusRunning, Prompt: cut(msg.Message, taskPromptLimit), StartedAt: msg.Time})
 		t.open = len(t.tasks) - 1
 		t.ran = t.status.Status == AgentStatusRunning
 		changed = append(changed, t.open)
 	}
-	// Each task's reply is the agent's last message before the next task;
-	// a history task ends with it.
-	for i := range t.tasks {
+	return changed
+}
+
+// add adds a task.
+func (t *taskTracker) add(task Task) {
+	if n := len(t.tasks); n > 0 && t.tasks[n-1].ID >= task.ID {
+		t.inOrder = false
+	}
+	t.owners[task.ID] = len(t.tasks)
+	t.tasks = append(t.tasks, task)
+}
+
+// replies updates the replies of the tasks from position k on; at has the
+// positions of their messages in msgs. Each task's reply is the agent's
+// last message before the next task; a history task ends with it.
+func (t *taskTracker) replies(msgs []conv.Message, k int, at map[int]int, changed []int) []int {
+	for i := k; i < len(t.tasks); i++ {
 		from, ok := at[t.tasks[i].ID]
 		if !ok {
 			continue

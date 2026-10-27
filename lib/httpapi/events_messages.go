@@ -32,12 +32,18 @@ func (e *EventEmitter) EmitMessages(newMessages []conv.Message) {
 	if removed && e.persister != nil {
 		e.persister.TruncateMessages(e.messages[cut].Id)
 	}
-	seqs := make([]uint64, len(newMessages))
-	copy(seqs, e.messageSeq)
+	// from is the first message that changed: the tasks are derived again
+	// from there on.
+	from := len(newMessages)
+	seqs := e.messageSeq[:min(len(e.messageSeq), len(newMessages))]
+	for len(seqs) < len(newMessages) {
+		seqs = append(seqs, 0)
+	}
 	for i, msg := range newMessages {
 		if i < len(e.messages) && e.messages[i] == msg {
 			continue
 		}
+		from = min(from, i)
 		e.seq++
 		seqs[i] = e.seq
 		if e.persister != nil {
@@ -51,7 +57,7 @@ func (e *EventEmitter) EmitMessages(newMessages []conv.Message) {
 	}
 	e.messages = newMessages
 	e.messageSeq = seqs
-	changed := e.tasks.messages(e.messages)
+	changed := e.tasks.messages(e.messages, from)
 	if removed {
 		// A task whose message went was deleted with it (TruncateMessages);
 		// the clients get the tasks with the full state.
