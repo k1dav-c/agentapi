@@ -711,7 +711,7 @@ func TestAnswerJustBeforeExit(t *testing.T) {
 		require.NoError(t, err)
 		proc.exit(nil)
 		require.NoError(t, <-got)
-		<-a.readDone
+		<-a.host.LoopDone()
 		_, err = a.request(context.Background(), "mcp_status", nil, nil)
 		assert.ErrorIs(t, err, errExited, "the CLI is gone")
 	}

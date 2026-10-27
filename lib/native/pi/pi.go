@@ -127,14 +127,13 @@ type Adapter struct {
 	// the snapshot, dialog and interrupt timers; tests change them.
 	interruptTimeout time.Duration
 	interval         time.Duration
-	maxLine          int
 	clock            quartz.Clock
 	// lineHandled, if set, is called after each stdout record is handled.
 	lineHandled func()
 
 	// writer writes Pi's commands, once Start gave it the stdin.
 	writer *agentio.Writer
-	// host starts and stops Pi.
+	// host runs Pi and the event loop.
 	host *agentio.Host
 
 	mu         sync.Mutex
@@ -162,14 +161,8 @@ type Adapter struct {
 	// contextWindow is the context window of the session's model.
 	contextWindow int64
 
-	// posted carries functions to run on the event loop (see post).
-	posted chan func()
 	// loopDone is closed when the event loop has stopped.
-	loopDone chan struct{}
-	// procDone is closed when the process has exited and the loop handled
-	// its output, or OutputGrace after the exit.
-	procDone chan struct{}
-	doneOnce sync.Once
+	loopDone <-chan struct{}
 
 	// Loop state; only the event loop goroutine touches it.
 	loop loopState
@@ -202,15 +195,11 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 		resumeRef:        resumeRef,
 		interruptTimeout: interruptTimeout,
 		interval:         snapshotInterval,
-		maxLine:          agentio.MaxLine,
 		writer:           agentio.NewWriter("pi"),
 		clock:            cfg.Clock,
 		pending:          make(map[string]*pendingCmd),
 		dialogs:          make(map[string]*dialog),
 		caps:             native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true},
-		posted:           make(chan func()),
-		loopDone:         make(chan struct{}),
-		procDone:         make(chan struct{}),
 	}
 	a.host = agentio.NewHost(agentio.HostConfig{
 		Name:   "Pi",
@@ -219,6 +208,7 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 		Start:  cfg.StartProcess,
 		Writer: a.writer,
 	})
+	a.loopDone = a.host.LoopDone()
 	return a
 }
 
@@ -239,33 +229,18 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	a.log.Debug("Pi command line", "args", args)
 	// Before the loop runs, which owns it from then on.
 	a.loop = a.newLoopState(sink)
-	proc, err := a.host.Launch(procutil.Command{
+	// The event loop handles Pi's records and the functions posted to it
+	// (timers); it is the only goroutine that calls the sink.
+	_, err := a.host.Launch(procutil.Command{
 		Program: a.cfg.Program,
 		Args:    args,
 		Dir:     a.cfg.CWD,
 		Env:     procenv.ForAgent(a.cfg.Env),
 		Logger:  a.log,
-	})
+	}, agentio.Loop{Line: a.handleRecord, NextWake: a.nextWake, Wake: a.wake, Ended: a.handleExit})
 	if err != nil {
-		a.markDone()
 		return err
 	}
-
-	lines := make(chan []byte, 16)
-	go func() {
-		defer close(lines)
-		agentio.ReadLines(proc.Stdout(), "pi", a.maxLine, a.log, func(line []byte) { lines <- line })
-	}()
-	go a.eventLoop(lines)
-	go func() {
-		<-a.host.Exited()
-		// Let the loop handle what Pi wrote before it exited.
-		select {
-		case <-a.loopDone:
-		case <-time.After(procutil.OutputGrace):
-		}
-		a.markDone()
-	}()
 
 	res, err := a.request(ctx, cmdQuery, simpleCommand{Type: "get_state"})
 	if err == nil {
@@ -301,12 +276,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 // it exited, its exit error and stderr say why (a broken extension, a bad
 // option).
 func (a *Adapter) startError(err error) error {
-	return a.host.StartError(fmt.Errorf("pi didn't open its session: %w", err), errors.Is(err, errExited))
-}
-
-// markDone makes Wait return.
-func (a *Adapter) markDone() {
-	a.doneOnce.Do(func() { close(a.procDone) })
+	return a.host.StartError(fmt.Errorf("pi didn't open its session: %w", err))
 }
 
 // send writes one command line, unless ctx ends first (see
@@ -487,11 +457,10 @@ func (a *Adapter) Capabilities() native.Capabilities {
 	return a.caps
 }
 
-// Wait returns when Pi has exited and the loop handled its output, or
-// OutputGrace after the exit.
+// Wait returns when Pi has exited and the loop handled its output (see
+// agentio.Host).
 func (a *Adapter) Wait() error {
-	<-a.procDone
-	return a.host.ExitErr()
+	return a.host.Wait()
 }
 
 // Close stops Pi: it aborts a running turn (closing stdin mid-turn leaves
@@ -499,10 +468,6 @@ func (a *Adapter) Wait() error {
 // SIGTERM and SIGKILL to the process group if Pi doesn't exit.
 func (a *Adapter) Close() error {
 	a.host.Close(a.abortForClose)
-	if a.host.Process() == nil {
-		a.markDone()
-	}
-	<-a.procDone
 	return nil
 }
 

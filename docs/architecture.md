@@ -95,7 +95,7 @@ answers write keys directly to the agent's terminal.
 | `lib/pricing/` | Model prices per million tokens (built-in `prices.json` and a `--prices` file), and per-call cost calculation |
 | `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |
-| `lib/native/agentio` | The JSON-lines plumbing those adapters share: reading the agent's output line by line, writing to its stdin, matching its responses to the requests waiting for them |
+| `lib/native/agentio` | What those adapters share to run their agent: the process and its loop (`Host`), writing to its stdin, matching its responses to the requests waiting for them, lenient decoding with drift warnings, the snapshot throttle |
 | `lib/native/demo` | `native-demo`, a simulated agent for working on the chat |
 | `lib/native/nativetest` | A scriptable fake adapter for tests |
 | `lib/native/procutil` | Child process groups and graceful shutdown |
@@ -389,10 +389,19 @@ type Factory func(resume Resume) (Adapter, error)
   conversation.
 - **Processes.** `procutil` starts the agent in its own process group, with the
   environment the adapter builds with `lib/procenv`, which leaves out the
-  variables of a parent agent session. Stopping it closes its input, then
-  sends the group SIGTERM after 3 seconds and SIGKILL 2 seconds later. Before
-  that, the adapters interrupt a running turn and wait up to 3 seconds for it
-  to end, so the agent's session log doesn't end in a tool call without result.
+  variables of a parent agent session. `agentio.Host` runs the process for
+  the adapter. It doesn't start one once the adapter was closed, and hands
+  its output, line by line, to one loop goroutine, which also runs the
+  functions posted to it and one timer: for the snapshots the throttle held
+  back (`agentio.Throttle`, 100 ms) and the 10-second wait for an
+  interrupted turn to end (`agentio.InterruptDeadline`). That goroutine
+  calls the Sink. The agent has exited, for `Wait`, once the process is gone
+  and the loop has handled its output, or 2 seconds after the process is
+  gone: a process the agent started can keep the output open. Stopping it
+  closes its input, then sends the group SIGTERM after 3 seconds and SIGKILL
+  2 seconds later. Before that, the adapters interrupt a running turn and
+  wait up to 3 seconds for it to end, so the agent's session log doesn't end
+  in a tool call without result.
 
 The adapters:
 

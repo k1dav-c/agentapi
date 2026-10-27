@@ -1,7 +1,10 @@
-// Package agentio is the plumbing the native adapters share to talk to
-// their agent process over JSON lines: reading its output line by line,
-// writing records to its stdin, and matching its responses to the
-// requests waiting for them.
+// Package agentio is the plumbing the native adapters share to run their
+// agent process and talk to it over JSON lines. Host starts and stops the
+// process and runs the adapter's loop on its output; Writer writes records
+// to its stdin; Calls matches its responses to the requests waiting for
+// them. Decode and Drift read records leniently and warn when the protocol
+// changed; Throttle and InterruptDeadline time the loop's snapshots and
+// the end of an interrupted turn.
 package agentio
 
 import (

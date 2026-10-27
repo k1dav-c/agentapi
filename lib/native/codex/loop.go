@@ -182,7 +182,11 @@ func (s *loopState) nextWake() time.Time {
 
 func (s *loopState) wake() {
 	s.flush(false)
-	if t := s.turn; t != nil && s.interrupt.Due() {
+	if !s.interrupt.Due() {
+		return
+	}
+	s.interrupt.Stop()
+	if t := s.turn; t != nil {
 		s.a.log.Warn("Codex did not end the interrupted turn; ending it here", "turn", t.id)
 		s.completeTurn(turn{ID: t.id, Status: "interrupted"})
 	}

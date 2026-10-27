@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coder/quartz"
-
 	"github.com/coder/agentapi/lib/agentlog/pilog"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
@@ -40,11 +38,6 @@ type loopState struct {
 	throttle *agentio.Throttle[string]
 	// interrupt runs from when the adapter sent abort.
 	interrupt agentio.InterruptDeadline
-	// wakeTimer wakes the loop at wakeAt, for nextWake; wakeSeq tells its
-	// wake from that of a timer it replaced.
-	wakeTimer *quartz.Timer
-	wakeAt    time.Time
-	wakeSeq   int
 
 	// The outcome of the turn so far.
 	stopReason string
@@ -76,26 +69,11 @@ func (a *Adapter) newLoopState(sink native.Sink) loopState {
 	}
 }
 
-// eventLoop handles Pi's records and the functions posted to it (timers).
-// It is the only goroutine that calls the sink.
-func (a *Adapter) eventLoop(lines <-chan []byte) {
-	defer close(a.loopDone)
-	for {
-		select {
-		case line, ok := <-lines:
-			if !ok {
-				a.handleExit()
-				a.setWake(time.Time{})
-				return
-			}
-			a.handleLine(line)
-			if a.lineHandled != nil {
-				a.lineHandled()
-			}
-		case fn := <-a.posted:
-			fn()
-		}
-		a.setWake(a.nextWake())
+// handleRecord handles a line of Pi's output on the event loop.
+func (a *Adapter) handleRecord(line []byte) {
+	a.handleLine(line)
+	if a.lineHandled != nil {
+		a.lineHandled()
 	}
 }
 
@@ -106,38 +84,13 @@ func (a *Adapter) nextWake() time.Time {
 	return agentio.Earliest(a.loop.throttle.Next(), a.loop.interrupt.Next())
 }
 
-// setWake makes the wake timer wake the loop at next, or not at all if it
-// is zero. Loop only.
-func (a *Adapter) setWake(next time.Time) {
-	l := &a.loop
-	if next.Equal(l.wakeAt) {
-		return
-	}
-	if l.wakeTimer != nil {
-		l.wakeTimer.Stop()
-		l.wakeTimer = nil
-	}
-	l.wakeAt = next
-	l.wakeSeq++
-	if next.IsZero() {
-		return
-	}
-	seq := l.wakeSeq
-	l.wakeTimer = a.clock.AfterFunc(max(a.clock.Until(next), 0), func() {
-		a.post(func() { a.wake(seq) })
-	}, "pi", "wake")
-}
-
 // wake sends the snapshots the throttle held back, and ends an interrupted
 // turn Pi didn't end in time: an extension command that doesn't stop, or a
 // Pi that hangs.
-func (a *Adapter) wake(seq int) {
-	if seq == a.loop.wakeSeq {
-		// The timer fired; setWake sets it again.
-		a.loop.wakeTimer, a.loop.wakeAt = nil, time.Time{}
-	}
+func (a *Adapter) wake() {
 	a.flushThrottled(false)
 	if a.loop.interrupt.Due() {
+		a.loop.interrupt.Stop()
 		a.log.Warn("Pi didn't end the interrupted turn; ending it here")
 		a.endTurn()
 	}
@@ -145,32 +98,13 @@ func (a *Adapter) wake(seq int) {
 
 // post runs fn on the event loop, unless the loop has stopped.
 func (a *Adapter) post(fn func()) {
-	select {
-	case a.posted <- fn:
-	case <-a.loopDone:
-	}
+	_ = a.host.Post(context.Background(), fn)
 }
 
 // runOnLoop runs fn on the event loop and waits for it. It returns false
 // if the loop stopped without running it.
 func (a *Adapter) runOnLoop(fn func()) bool {
-	done := make(chan struct{})
-	a.post(func() {
-		fn()
-		close(done)
-	})
-	select {
-	case <-done:
-		return true
-	case <-a.loopDone:
-		// If the loop took fn, it ran it before it stopped.
-		select {
-		case <-done:
-			return true
-		default:
-			return false
-		}
-	}
+	return a.host.RunOnLoop(fn)
 }
 
 // handleExit fails what waits on Pi once its stdout closed, and sends what

@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -127,7 +126,6 @@ func newAdapter(cfg Config, args parsedArgs, resumeRef string) *Adapter {
 		writer:      agentio.NewWriter("claude"),
 		interrupt:   agentio.NewInterruptDeadline(cfg.Clock, cfg.InterruptTimeout),
 		requests:    make(map[string]*pendingRequest),
-		readDone:    make(chan struct{}),
 	}
 	a.host = agentio.NewHost(agentio.HostConfig{
 		Name:           "Claude Code",
@@ -165,7 +163,7 @@ type Adapter struct {
 	// sessionID is the id passed with --session-id for a new session.
 	sessionID string
 
-	// host starts and stops the CLI.
+	// host runs the CLI and the read loop.
 	host   *agentio.Host
 	sink   native.Sink
 	parser *streamParser
@@ -206,9 +204,6 @@ type Adapter struct {
 	// usage is the usage the CLI last reported (see usage.go). Read loop
 	// only.
 	usage native.AgentUsage
-
-	// readDone is closed once the read loop has ended.
-	readDone chan struct{}
 }
 
 var (
@@ -289,22 +284,21 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	// The arguments can hold secrets (inline --settings or --mcp-config).
 	a.log.Info("Starting Claude Code", "program", cmd.Program, "resume", a.resumeRef != "")
 	a.log.Debug("Claude Code command line", "args", cmd.Args)
-	proc, err := a.host.Launch(cmd)
+	// The read loop is the only caller of the sink after Start.
+	_, err := a.host.Launch(cmd, agentio.Loop{Line: a.handleLine, NextWake: a.nextWake, Wake: a.wake, Ended: a.outputClosed})
 	if err != nil {
 		return err
 	}
-	go a.readLoop(proc.Stdout())
 
 	response, err := a.request(ctx, "initialize", map[string]any{"hooks": nil}, nil)
 	if err != nil {
 		// Timed out, or the CLI answered with an error, or exited: it can
 		// exit cleanly after a fatal error (an unknown session to resume),
 		// and its stderr says why.
-		exited := errors.Is(err, errExited)
-		if !exited {
+		if !errors.Is(err, errExited) {
 			err = fmt.Errorf("initialize claude: %w", err)
 		}
-		return a.host.StartError(err, exited)
+		return a.host.StartError(err)
 	}
 	var info initializeInfo
 	_ = a.drift.Decode("initialize response", response, &info)
@@ -555,12 +549,7 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 
 // Wait implements native.Adapter.
 func (a *Adapter) Wait() error {
-	if a.host.Process() == nil {
-		return native.ErrNotStarted
-	}
-	<-a.host.Exited()
-	<-a.readDone
-	return a.host.ExitErr()
+	return a.host.Wait()
 }
 
 // Close implements native.Adapter: a turn that runs is interrupted first
@@ -593,46 +582,6 @@ func (a *Adapter) interruptForClose(ctx context.Context) <-chan struct{} {
 		}
 	}()
 	return ended
-}
-
-// readLoop handles the CLI's output until it closes, and wakes up when a
-// snapshot the throttle held back or the end of an interrupted turn is due.
-// It is the only caller of the sink after Start.
-func (a *Adapter) readLoop(stdout io.Reader) {
-	defer close(a.readDone)
-	lines := make(chan []byte)
-	go a.readLines(stdout, lines)
-	timer := a.cfg.Clock.NewTimer(time.Hour, "claude", "wake")
-	timer.Stop()
-	defer timer.Stop()
-	var wakeAt time.Time
-	for {
-		select {
-		case line, ok := <-lines:
-			if !ok {
-				a.outputClosed()
-				return
-			}
-			a.handleLine(line)
-		case <-timer.C:
-			wakeAt = time.Time{}
-			a.wake()
-		}
-		if next := a.nextWake(); !next.Equal(wakeAt) {
-			timer.Stop()
-			wakeAt = next
-			if !next.IsZero() {
-				timer.Reset(max(next.Sub(a.cfg.Clock.Now()), 0), "claude", "wake")
-			}
-		}
-	}
-}
-
-// readLines hands the CLI's output to the read loop line by line until it
-// closes.
-func (a *Adapter) readLines(stdout io.Reader, lines chan<- []byte) {
-	defer close(lines)
-	agentio.ReadLines(stdout, "claude", 0, a.log, func(line []byte) { lines <- line })
 }
 
 // outputClosed sends the snapshots the throttle held back, fails the

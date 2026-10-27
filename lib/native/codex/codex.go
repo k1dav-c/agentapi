@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -55,9 +54,6 @@ type Config struct {
 	Clock quartz.Clock
 }
 
-// inboxSize is how many messages from app-server wait for the read loop.
-const inboxSize = 256
-
 // NewFactory checks the command line and returns a factory for adapters
 // that run it. An empty resume ref starts a new thread; otherwise the
 // adapter resumes that thread, or with Fork, a copy of it.
@@ -100,20 +96,13 @@ type Adapter struct {
 	// its requests from 0 in every process.
 	prefix string
 
-	// host starts and stops app-server.
+	// host runs app-server and the read loop.
 	host   *agentio.Host
 	sink   native.Sink
 	writer *agentio.Writer
 	// calls are the requests waiting for app-server's response.
 	calls  agentio.Calls[int64, callResult]
 	nextID atomic.Int64
-
-	inbox chan rpcMessage
-	tasks chan func()
-	// loopDone is closed when the read loop has finished, or Close or a
-	// failed start made sure it never runs.
-	loopDone chan struct{}
-	loopOnce sync.Once
 
 	mu       sync.Mutex
 	started  bool
@@ -142,7 +131,7 @@ type Adapter struct {
 	collabStale bool
 	planWait    string
 
-	// handled counts the messages the read loop has handled.
+	// handled counts the lines the read loop has handled.
 	handled atomic.Int64
 
 	// loop is owned by the read loop.
@@ -183,16 +172,12 @@ func newAdapter(cfg Config, opts launchOptions, resumeRef string) *Adapter {
 	}
 	logger = logger.With("agent", "codex")
 	a := &Adapter{
-		cfg:       cfg,
-		opts:      opts,
-		resumeRef: resumeRef,
-		log:       logger,
-		drift:     agentio.NewDrift("Codex app-server", logger),
-		prefix:    native.RequestPrefix(),
-		inbox:     make(chan rpcMessage, inboxSize),
-		// Unbuffered: a task handed over is one the loop runs.
-		tasks:        make(chan func()),
-		loopDone:     make(chan struct{}),
+		cfg:          cfg,
+		opts:         opts,
+		resumeRef:    resumeRef,
+		log:          logger,
+		drift:        agentio.NewDrift("Codex app-server", logger),
+		prefix:       native.RequestPrefix(),
 		writer:       agentio.NewWriter("codex app-server"),
 		interrupting: make(map[string]bool),
 		requests:     make(map[string]*pendingRequest),
@@ -230,23 +215,23 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	a.mu.Lock()
 	a.sink = sink
 	a.mu.Unlock()
-	proc, err := a.host.Launch(procutil.Command{
+	// The read loop handles app-server's messages in order, and is the
+	// only goroutine that calls the sink.
+	_, err := a.host.Launch(procutil.Command{
 		Program: a.cfg.Program,
 		Args:    a.command(),
 		Dir:     a.cwd(),
 		Env:     procenv.ForAgent(a.cfg.Env),
 		Logger:  a.log,
-	})
+	}, agentio.Loop{Line: a.handleLine, NextWake: a.loop.nextWake, Wake: a.loop.wake, Ended: a.outputEnded})
 	if err != nil {
-		a.noLoop()
+		a.calls.Close(errExited)
 		return err
 	}
-	go a.read(proc.Stdout())
-	go a.run()
 
 	if err := a.handshake(ctx); err != nil {
 		// Once app-server exited, its stderr says why (a bad -c value, …).
-		return a.host.StartError(err, a.loopEnded())
+		return a.host.StartError(err)
 	}
 	a.mu.Lock()
 	a.started = true
@@ -348,13 +333,10 @@ func (a *Adapter) openThread(ctx context.Context, method string, params any, res
 	return nil
 }
 
+// loopEnded reports whether app-server's output ended, which ends the
+// read loop.
 func (a *Adapter) loopEnded() bool {
-	select {
-	case <-a.loopDone:
-		return true
-	default:
-		return false
-	}
+	return a.host.OutputEnded()
 }
 
 // session returns the thread and the turn app-server is working on.
@@ -553,11 +535,9 @@ func inputItems(input native.Input) []userInput {
 }
 
 // Wait implements native.Adapter: it returns once app-server exited and
-// the loop handled its output.
+// the loop handled its output (see agentio.Host).
 func (a *Adapter) Wait() error {
-	<-a.host.Exited()
-	<-a.loopDone
-	return a.host.ExitErr()
+	return a.host.Wait()
 }
 
 // Close implements native.Adapter: it interrupts the turn app-server works
@@ -567,20 +547,9 @@ func (a *Adapter) Wait() error {
 // exit (see Config.StopTimeout).
 func (a *Adapter) Close() error {
 	a.host.Close(a.interruptForClose)
-	if a.host.Process() == nil {
-		a.noLoop()
-	}
-	<-a.loopDone
+	// The loop does so when the output ends, if it ran.
+	a.calls.Close(errExited)
 	return nil
-}
-
-// noLoop marks the loop done for an adapter whose app-server never ran,
-// unless it ran.
-func (a *Adapter) noLoop() {
-	a.loopOnce.Do(func() {
-		a.calls.Close(errExited)
-		close(a.loopDone)
-	})
 }
 
 // --- JSON-RPC plumbing ---
@@ -633,64 +602,32 @@ func (a *Adapter) writeAsync(v any) {
 // inLoop runs f in the read loop, so it may call the sink. Unless it
 // returns an error, the loop runs f.
 func (a *Adapter) inLoop(ctx context.Context, f func()) error {
-	select {
-	case a.tasks <- f:
-		return nil
-	case <-a.loopDone:
+	err := a.host.Post(ctx, f)
+	if errors.Is(err, agentio.ErrLoopEnded) {
 		return errExited
-	case <-ctx.Done():
-		return ctx.Err()
 	}
+	return err
 }
 
-// read decodes app-server's stdout into the inbox until EOF.
-func (a *Adapter) read(r io.Reader) {
-	defer close(a.inbox)
-	agentio.ReadLines(r, "codex app-server", 0, a.log, func(line []byte) {
-		var msg rpcMessage
-		changed, err := agentio.Decode(line, &msg)
-		if err != nil {
-			// The line isn't logged: it can hold the user's prompt.
-			a.log.Warn("Ignoring a line from codex app-server that is not JSON", "error", err)
-			return
-		}
-		a.drift.Changed(msg.kind(), changed)
-		a.inbox <- msg
-	})
+// handleLine handles a line of app-server's output in the read loop.
+func (a *Adapter) handleLine(line []byte) {
+	defer a.handled.Add(1)
+	var msg rpcMessage
+	changed, err := agentio.Decode(line, &msg)
+	if err != nil {
+		// The line isn't logged: it can hold the user's prompt.
+		a.log.Warn("Ignoring a line from codex app-server that is not JSON", "error", err)
+		return
+	}
+	a.drift.Changed(msg.kind(), changed)
+	a.dispatch(msg)
 }
 
-// run is the read loop: it handles app-server's messages in order, and
-// is the only goroutine that calls the sink.
-func (a *Adapter) run() {
-	a.loopOnce.Do(func() {})
-	defer close(a.loopDone)
-	timer := a.cfg.Clock.NewTimer(time.Hour, "codex", "wake")
-	timer.Stop()
-	var wakeAt time.Time
-	for {
-		select {
-		case msg, ok := <-a.inbox:
-			if !ok {
-				a.loop.exited()
-				a.calls.Close(errExited)
-				return
-			}
-			a.dispatch(msg)
-			a.handled.Add(1)
-		case f := <-a.tasks:
-			f()
-		case <-timer.C:
-			wakeAt = time.Time{}
-			a.loop.wake()
-		}
-		if next := a.loop.nextWake(); !next.Equal(wakeAt) {
-			timer.Stop()
-			wakeAt = next
-			if !next.IsZero() {
-				timer.Reset(max(a.cfg.Clock.Until(next), time.Millisecond), "codex", "wake")
-			}
-		}
-	}
+// outputEnded handles the end of app-server's output, the read loop's last
+// call: the process is gone.
+func (a *Adapter) outputEnded() {
+	a.loop.exited()
+	a.calls.Close(errExited)
 }
 
 // dispatch routes one message from app-server.
