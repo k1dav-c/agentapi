@@ -3,9 +3,12 @@ package server
 import (
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -46,4 +49,28 @@ func TestReadUserConfigBroken(t *testing.T) {
 	require.NoError(t, v.BindPFlags(flags))
 	readUserConfig(v, flags, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	assert.Empty(t, v.GetString(FlagWebhookURL))
+}
+
+// Printing the schema doesn't read the config file: a hub in it would get
+// this short run's events (make gen runs it).
+func TestPrintOpenAPIIgnoresUserConfig(t *testing.T) {
+	isolateViper(t)
+	hits := make(chan string, 8)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits <- r.Header.Get("X-AgentAPI-Event")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer hub.Close()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("webhook-url: "+hub.URL+"/hooks\nwebhook-events: [instance.*]\n"), 0o600))
+
+	serverCmd := CreateServerCmd()
+	setupCommandOutput(t, serverCmd)
+	serverCmd.SetArgs([]string{"--print-openapi", "--config", path, "--registry-dir", t.TempDir(), "dummy-command"})
+	require.NoError(t, serverCmd.Execute())
+	select {
+	case event := <-hits:
+		t.Fatalf("the hub got %q from --print-openapi", event)
+	case <-time.After(500 * time.Millisecond):
+	}
 }

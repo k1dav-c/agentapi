@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/pprof"
 	"strconv"
 	"syscall"
 	"time"
@@ -21,6 +22,9 @@ import (
 
 // defaultHubPort is where agentapi hub serve listens by default.
 const defaultHubPort = 3290
+
+// stopTimeout is how long the hub waits for its watchers when it stops.
+const stopTimeout = 10 * time.Second
 
 func serveCmd() *cobra.Command {
 	var (
@@ -88,7 +92,15 @@ func serveCmd() *cobra.Command {
 			// Close, not Shutdown: the browsers' event streams don't end by
 			// themselves.
 			_ = srv.Close()
-			<-done
+			select {
+			case <-done:
+			case <-time.After(stopTimeout):
+				// The instances' watchers should end at once; one that
+				// doesn't must not keep the hub from stopping (a restart,
+				// an update). Its stack says where it waits.
+				logger.Error("The hub's watchers didn't stop; stopping anyway", "after", stopTimeout)
+				_ = pprof.Lookup("goroutine").WriteTo(os.Stderr, 1)
+			}
 			if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
 				return err
 			}

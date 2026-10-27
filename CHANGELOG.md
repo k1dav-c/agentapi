@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- `agentapi server --print-openapi` (which `make gen` runs) no longer reads the user's config file,
+  so a machine joined to a hub doesn't report that short run to it, where it stayed unreachable.
+- `agentapi hub serve` stops within 10 seconds of SIGTERM: a watcher that doesn't end no longer
+  keeps it running (a restart, an update); it logs the goroutines' stacks to say where it waited.
+
 ## v1.8.1
 
 ### Performance

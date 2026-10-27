@@ -470,7 +470,12 @@ func CreateServerCmd() *cobra.Command {
 				logger = slog.New(logctx.DiscardHandler)
 			}
 			ctx := logctx.WithLogger(context.Background(), logger)
-			readUserConfig(viper.GetViper(), cmd.Flags(), logger)
+			// The schema doesn't depend on the user's settings, and a
+			// webhook in them (agentapi hub join) would have this short
+			// run report to the hub (make gen runs it).
+			if !viper.GetBool(FlagPrintOpenAPI) {
+				readUserConfig(viper.GetViper(), cmd.Flags(), logger)
+			}
 			return runServer(ctx, logger, cmd.Flags().Args())
 		},
 	}
