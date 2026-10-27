@@ -134,9 +134,38 @@ func TestTaskTrackerHistory(t *testing.T) {
 	assert.Nil(t, tr.taskAt(now.Add(-2*time.Hour)))
 
 	// A task that was running when AgentAPI stopped is over after a restart.
-	restored := []Task{{ID: 1, Status: TaskStatusRunning, StartedAt: now}}
-	assert.Equal(t, []int{0}, tr.restore(restored, now.Add(time.Minute)))
+	restored := []Task{{ID: 1, Status: TaskStatusRunning, StartedAt: history[1].Time}}
+	assert.Equal(t, []int{0}, tr.restore(restored, history, now.Add(time.Minute)))
 	assert.Equal(t, TaskStatusCompleted, tr.tasks[0].Status)
+}
+
+// A restored task whose message is gone, or is another one now, goes: an
+// AgentAPI that doesn't know tasks leaves them when it resets or takes
+// messages back.
+func TestTaskTrackerRestoreChecksMessages(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC)
+	tr := newTaskTracker(now)
+	msgs := taskMessages(now.Add(-time.Hour), ">One", "Done one", ">Two")
+	reply := 1
+	restored := []Task{
+		{ID: 0, Status: TaskStatusCompleted, Prompt: "One", StartedAt: msgs[0].Time, ReplyID: &reply},
+		// The agent's message now.
+		{ID: 1, Status: TaskStatusCompleted, Prompt: "Old", StartedAt: msgs[1].Time},
+		// Another user message with its ID, sent after a reset.
+		{ID: 2, Status: TaskStatusRunning, Prompt: "Old", StartedAt: now.Add(-2 * time.Hour)},
+		// Taken back.
+		{ID: 3, Status: TaskStatusRunning, Prompt: "Gone", StartedAt: now.Add(-time.Hour)},
+	}
+	assert.Empty(t, tr.restore(restored, msgs, now))
+	require.Len(t, tr.tasks, 1)
+	assert.Equal(t, 0, tr.tasks[0].ID)
+	assert.Equal(t, -1, tr.owner(2))
+
+	// The message the stale task pointed at gets its own task.
+	assert.Equal(t, []int{1}, tr.messages(msgs, len(msgs)))
+	require.Len(t, tr.tasks, 2)
+	assert.Equal(t, Task{ID: 2, Status: TaskStatusCompleted, Prompt: "Two", StartedAt: msgs[2].Time, EndedAt: &msgs[2].Time}, tr.tasks[1])
 }
 
 // An answer to a request leaves the agent idle for a moment before it works

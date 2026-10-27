@@ -267,6 +267,8 @@ type Persister interface {
 	// PutTask stores the task the user's message id started, encoded as
 	// JSON.
 	PutTask(id int, data []byte, seq uint64)
+	// DeleteTask removes the task the user's message id started.
+	DeleteTask(id int)
 	// Reset removes the conversation; epoch is the new epoch.
 	Reset(epoch string)
 }
@@ -392,14 +394,20 @@ func (e *EventEmitter) Restore(state EmitterState) {
 	if e.seenAt.IsZero() {
 		e.seenAt = e.clock.Now()
 	}
-	e.taskSeq = map[int]uint64{}
-	for i, task := range state.Tasks {
-		e.taskSeq[task.ID] = state.TaskSeqs[i]
-	}
 	// A task that ran when AgentAPI stopped is over, and the restored
 	// messages are history: a database written before tasks were kept has
-	// none for them, which are derived as done.
-	e.tasksChangedLocked(e.tasks.restore(slices.Clone(state.Tasks), e.clock.Now()))
+	// none for them, which are derived as done. A task whose message is
+	// gone goes (taskTracker.restore).
+	changed := e.tasks.restore(slices.Clone(state.Tasks), e.messages, e.clock.Now())
+	e.taskSeq = map[int]uint64{}
+	for i, task := range state.Tasks {
+		if p := e.tasks.owner(task.ID); p >= 0 && e.tasks.tasks[p].ID == task.ID {
+			e.taskSeq[task.ID] = state.TaskSeqs[i]
+		} else if e.persister != nil {
+			e.persister.DeleteTask(task.ID)
+		}
+	}
+	e.tasksChangedLocked(changed)
 	if n := len(e.messages); n > 0 && !e.messages[n-1].Time.Before(e.tasks.since) {
 		e.tasks.since = e.messages[n-1].Time.Add(time.Nanosecond)
 	}

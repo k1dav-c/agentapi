@@ -704,6 +704,9 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
   工作目錄時，AgentAPI 會拒絕啟動。AgentAPI 執行期間會鎖住檔案，所以第二個 AgentAPI（或
   `sqlite3`）無法開啟它。
 - 新建立的檔案只有擁有者能讀寫（0600），缺少的目錄也會一併建立（0700）。
+- 較新的 AgentAPI 寫過的檔案，較舊的 AgentAPI 仍可繼續使用，除非較新的版本以舊版無法寫入的方式
+  改了檔案：這時舊版會拒絕啟動，並指出需要的版本。1.9.0 之後的版本才會這樣檢查；1.9.0 以前的
+  版本遇到結構比自己新的檔案一律拒絕（結構從 1.0 起就沒有改變）。
 - 重新啟動（Explorer → Restart 或 `DELETE /messages`）會清除保存的對話和佇列，並開始新的
   工作階段。MCP 端點加上 `?restart=true` 則會讓 agent 接續原本的工作階段重新啟動，對話會保留；
   無法接續工作階段的 agent（`resume` 為 false）則會開始新的工作階段，並清除對話。

@@ -499,6 +499,8 @@ func (p *recordingPersister) PutTask(id int, data []byte, _ uint64) {
 	p.tasks[id] = string(data)
 }
 
+func (p *recordingPersister) DeleteTask(id int) { delete(p.tasks, id) }
+
 func (p *recordingPersister) Reset(epoch string) {
 	p.epoch = epoch
 	clear(p.messages)

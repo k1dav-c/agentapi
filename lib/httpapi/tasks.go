@@ -96,10 +96,21 @@ func (t *taskTracker) reset(now time.Time) {
 	clear(t.owners)
 }
 
-// restore takes back the tasks of a restored conversation; one that was
-// running when AgentAPI stopped can't go on.
-func (t *taskTracker) restore(tasks []Task, now time.Time) []int {
-	t.tasks, t.open, t.ran = tasks, -1, false
+// restore takes back the tasks of a restored conversation, whose messages
+// are msgs. A task whose message is gone, or is another one now, goes: an
+// AgentAPI from before tasks were kept clears none when it resets or takes
+// messages back, and a message row the state database can't read is
+// skipped. One that was running when AgentAPI stopped can't go on.
+func (t *taskTracker) restore(tasks []Task, msgs []conv.Message, now time.Time) []int {
+	at := make(map[int]int, len(msgs))
+	for i, msg := range msgs {
+		at[msg.Id] = i
+	}
+	t.tasks = slices.DeleteFunc(tasks, func(task Task) bool {
+		i, ok := at[task.ID]
+		return !ok || msgs[i].Role != conv.RoleUser || !msgs[i].Time.Equal(task.StartedAt)
+	})
+	t.open, t.ran = -1, false
 	t.ids, t.rederive = t.ids[:0], true
 	t.index()
 	var changed []int

@@ -484,7 +484,8 @@ use persistence.
   settings chosen for the session, a usage limit stop, the webhook settings
   changed through the API (with a fingerprint of the startup flags, which win
   when they change), the initial prompt a PTY conversation got and when a
-  client last showed the conversation (`seen_at`).
+  client last showed the conversation (`seen_at`), and which AgentAPI may
+  write the file and last did (below).
 - Writes are queued and flushed every 200 ms in a transaction, so streaming
   never waits for the disk. A clean shutdown marks the file clean; after a
   crash the conversation gets a new epoch and clients load it again in full.
@@ -499,6 +500,18 @@ use persistence.
   expired.
 - Unreadable rows are logged and skipped so the server can start. Numbered
   migrations update the schema; `PRAGMA user_version` records its version.
+- Each migration names the oldest schema that may write the file once it
+  ran. One that only adds a table or a column keeps the value before it, so
+  an older AgentAPI goes on with a file a newer one migrated and leaves its
+  schema as it is. One that changes what an older AgentAPI writes raises it
+  and records it in `meta` (`min_writer_schema`, with the release that
+  brought it); an older AgentAPI then refuses the file and names the
+  version it needs. `meta` also records the AgentAPI that last closed the
+  file (`writer_version`). Releases up to 1.9.0 read neither and refuse any
+  schema newer than theirs; the schema hasn't changed since 1.0.
+- What an older AgentAPI doesn't know, its resets and truncations don't
+  clear. A restored task whose message is gone or is another one now is
+  dropped, as is one whose message row couldn't be read.
 
 `--state-file`, the older PTY mechanism (JSON written on shutdown), is deprecated: `cmd/server`
 imports it once into a state database next to it (`statedb.ImportStateFile`, only into an empty

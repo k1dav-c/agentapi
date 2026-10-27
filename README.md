@@ -834,6 +834,11 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
   so a second AgentAPI (or `sqlite3`) can't open it.
 - A new file is created readable and writable by its owner only (0600), and missing
   directories are created (0700).
+- An older AgentAPI keeps using a file a newer one wrote, unless the newer one
+  changed the file in a way the older can't write: then the older refuses to
+  start and names the version it needs. Releases after 1.9.0 check this;
+  1.9.0 and earlier refuse any file whose schema is newer than theirs (the
+  schema hasn't changed since 1.0).
 - Restart (Explorer → Restart or `DELETE /messages`) clears the stored
   conversation and the queue and starts a new session. `?restart=true` on the
   MCP endpoints restarts the agent on its session instead, so the conversation
