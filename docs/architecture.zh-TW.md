@@ -145,15 +145,17 @@ flowchart TB
 
 1. 主機授權：`Host` 標頭必須是允許的主機（忽略連接埠）。
 2. 請求紀錄，會略過靜態檔案、事件串流和終端機。
-3. 允許來源的 CORS，並允許憑證，讓聊天介面的 cookie 在其他來源也能使用。
-4. 使用 `--api-token` 時的 token 驗證：Bearer token 或聊天介面的 session cookie。它在 CORS
+3. 壓縮（`compress.go`）：對接受 gzip 的用戶端，文字、JSON、事件串流（每個事件都會 flush）和聊天介面
+   的檔案都會壓縮；圖片則照原樣傳送。hub 使用同一個中介層，它的代理會把實例已壓縮的回應原樣轉送。
+4. 允許來源的 CORS，並允許憑證，讓聊天介面的 cookie 在其他來源也能使用。
+5. 使用 `--api-token` 時的 token 驗證：Bearer token 或聊天介面的 session cookie。它在 CORS
    之後執行，所以 preflight 可以通過，401 回應也會帶有聊天介面讀取它所需的 CORS 標頭。
 
 處理常式依檔案分組：
 
 | 檔案 | 處理 |
 | --- | --- |
-| `server.go`、`routes.go`、`hosts.go`、`middleware.go` | 伺服器的設定、啟動與停止；各功能自行註冊的路由；允許的主機與來源；請求記錄 |
+| `server.go`、`routes.go`、`hosts.go`、`middleware.go`、`compress.go` | 伺服器的設定、啟動與停止；各功能自行註冊的路由；允許的主機與來源；請求記錄；壓縮 |
 | `conversation_api.go`、`queue.go`、`sse.go`、`jsonl_watcher.go` | 訊息、狀態與時間軸；佇列、派送與 `queue_update`；`GET /events` 與畫面串流；PTY 傳輸的工作階段紀錄監看 |
 | `tasks.go` | emitter 從對話推導出的任務（`taskTracker`）、`task_update` 與 `GET /tasks` |
 | `summary.go`、`spend.go`、`registry.go` | 給監看多個 AgentAPI 的用戶端的摘要（`attention`、標題、最新任務、`unread`、`spend`）、`summary_update`、`GET /summary` 與 `POST /tasks/seen`；每分鐘計算的花費；伺服器的登記檔（`instanceRegistry`） |
@@ -581,7 +583,8 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   `/internal/screen`）以及 native 終端機（`shell-view.tsx`，來自 `/terminal`）。
 - `lib/` 將邏輯封裝為獨立模組，並附有 Bun 測試：任務分組、工具格式化、檔案參照、diff、斜線
   指令、設定、用量、花費（`cost.ts`：任務在工作階段呼叫中的份額、各期間的加總）、終端機按鍵、
-  驗證。`use-session-cost.ts` 會在回合結束時和回合執行中讀取 `GET /cost`。
+  驗證。`use-session-cost.ts` 會在回合結束時和回合執行中讀取 `GET /cost`；第一次讀取之後會帶上
+`from` 和 `digest`，只取得之後新增的呼叫。
 
 ## 測試
 

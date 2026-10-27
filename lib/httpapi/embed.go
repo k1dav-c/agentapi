@@ -89,6 +89,14 @@ func FileServerWithIndexFallback(chatBasePath string) http.Handler {
 			defer func() {
 				_ = f.Close()
 			}()
+			// The build's assets are named by their content: a new build
+			// names them anew, so a browser keeps them for good. Pages are
+			// checked every time.
+			if strings.HasPrefix(trimmedPath, "_next/static/") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			} else {
+				w.Header().Set("Cache-Control", "no-cache")
+			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}

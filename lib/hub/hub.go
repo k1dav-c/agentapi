@@ -136,6 +136,8 @@ func (h *Hub) tokenFor(instance Instance) string {
 // instances through the proxy, and the chat UI.
 func (h *Hub) Handler() http.Handler {
 	r := chi.NewRouter()
+	// The instances' responses through the proxy come compressed already.
+	r.Use(httpapi.Compress())
 	r.Post("/hooks", h.receiveWebhook)
 	r.Get("/api/session", h.getSession)
 	r.Post("/api/session", h.createSession)

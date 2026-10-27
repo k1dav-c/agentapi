@@ -343,4 +343,26 @@ func TestNative_SessionCosts(t *testing.T) {
 	assert.InDelta(t, first, cost.Calls[0].USD, 1e-9)
 	assert.True(t, cost.Calls[0].Priced)
 	assert.InDelta(t, first+second, cost.Cost.USD, 1e-9)
+
+	// A client with the first call gets the second only; with a digest
+	// that isn't the first call's, all of them again.
+	var all, since, stale struct {
+		Calls      []sessions.ModelCall `json:"calls"`
+		From       int                  `json:"from"`
+		TotalCalls int                  `json:"total_calls"`
+		Digest     string               `json:"digest"`
+		Cost       sessions.SessionCost `json:"cost"`
+	}
+	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/cost", nil, &all))
+	assert.Equal(t, 2, all.TotalCalls)
+	assert.Equal(t, sessions.CallsDigest(all.Calls), all.Digest)
+	firstDigest := sessions.CallsDigest(all.Calls[:1])
+	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/cost?from=1&digest="+firstDigest, nil, &since))
+	assert.Equal(t, 1, since.From)
+	require.Len(t, since.Calls, 1)
+	assert.InDelta(t, second, since.Calls[0].USD, 1e-9)
+	assert.InDelta(t, first+second, since.Cost.USD, 1e-9, "the totals are whole")
+	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/cost?from=1&digest=0", nil, &stale))
+	assert.Equal(t, 0, stale.From)
+	assert.Len(t, stale.Calls, 2)
 }

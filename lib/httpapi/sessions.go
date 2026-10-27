@@ -38,8 +38,18 @@ type CostResponse struct {
 		// SessionID is empty before the agent opened a session.
 		AgentSessionID string               `json:"agent_session_id,omitempty" doc:"The agent's own session it has open."`
 		Cost           sessions.SessionCost `json:"cost" doc:"What the session spent, its subagents included (API-equivalent cost)."`
-		Calls          []sessions.ModelCall `json:"calls" nullable:"false" doc:"Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on."`
+		Calls          []sessions.ModelCall `json:"calls" nullable:"false" doc:"Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on. With from, the calls after the first from only."`
+		From           int                  `json:"from" doc:"The index of the first call in calls: the request's from when the calls before it are the ones the client has (digest), else 0, and calls holds them all."`
+		TotalCalls     int                  `json:"total_calls" doc:"How many model calls the session made."`
+		Digest         string               `json:"digest" doc:"Identifies all the calls; send it, with total_calls as from, to get only the calls made since."`
 	}
+}
+
+// CostRequest asks what the session spent, all its calls or the ones a
+// client doesn't have yet.
+type CostRequest struct {
+	From   int    `query:"from" minimum:"0" doc:"How many of the calls the client has: with their digest, only the calls after them are sent."`
+	Digest string `query:"digest" doc:"The digest the client got with those calls."`
 }
 
 // ResumeSessionRequest asks to open one of the agent's sessions.
@@ -84,21 +94,33 @@ func (s *Server) listSessions(_ context.Context, _ *struct{}) (*SessionsResponse
 }
 
 // getCost handles GET /cost: what the session the agent has open spent,
-// call by call. Without s.mu: it only reads the agent's session logs.
-func (s *Server) getCost(_ context.Context, _ *struct{}) (*CostResponse, error) {
+// call by call. A client that has the first calls (from, with their
+// digest) gets the ones after them only: a long session has thousands,
+// and a chat reads them again while a turn runs. Without s.mu: it only
+// reads the agent's session logs.
+func (s *Server) getCost(_ context.Context, input *CostRequest) (*CostResponse, error) {
 	resp := &CostResponse{}
 	resp.Body.AgentSessionID = s.native.SessionRef()
-	resp.Body.Calls = []sessions.ModelCall{}
+	calls := []sessions.ModelCall{}
 	if resp.Body.AgentSessionID != "" {
 		costs, err := s.sessions.Costs()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read what the session spent: %w", err)
 		}
-		if calls := costs.Sessions[resp.Body.AgentSessionID]; calls != nil {
-			resp.Body.Calls = calls
+		if found := costs.Sessions[resp.Body.AgentSessionID]; found != nil {
+			calls = found
 		}
 	}
-	resp.Body.Cost = sessions.CostOf(resp.Body.Calls)
+	resp.Body.Cost = sessions.CostOf(calls)
+	resp.Body.TotalCalls = len(calls)
+	resp.Body.Digest = sessions.CallsDigest(calls)
+	resp.Body.Calls = calls
+	// The client's calls are still the first ones (another session, or a
+	// call counted again, changes them): it gets the rest.
+	if input.From > 0 && input.From <= len(calls) && input.Digest != "" && sessions.CallsDigest(calls[:input.From]) == input.Digest {
+		resp.Body.From = input.From
+		resp.Body.Calls = calls[input.From:]
+	}
 	return resp, nil
 }
 

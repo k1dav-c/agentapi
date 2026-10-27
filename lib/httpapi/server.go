@@ -217,6 +217,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	router.Use(hostAuthorizationMiddleware(allowedHosts, badHostHandler))
 
 	router.Use(requestLogMiddleware(logger))
+	router.Use(Compress())
 
 	corsMiddleware := cors.New(cors.Options{
 		AllowedOrigins:   allowedOrigins,

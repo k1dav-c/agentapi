@@ -1087,10 +1087,22 @@ export interface components {
             readonly $schema?: string;
             /** @description The agent's own session it has open. */
             agent_session_id?: string;
-            /** @description Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on. */
+            /** @description Its model calls, the earliest first, for what each task spent: a task's calls are those made from its message on. With from, the calls after the first from only. */
             calls: components["schemas"]["ModelCall"][];
             /** @description What the session spent, its subagents included (API-equivalent cost). */
             cost: components["schemas"]["SessionCost"];
+            /** @description Identifies all the calls; send it, with total_calls as from, to get only the calls made since. */
+            digest: string;
+            /**
+             * Format: int64
+             * @description The index of the first call in calls: the request's from when the calls before it are the ones the client has (digest), else 0, and calls holds them all.
+             */
+            from: number;
+            /**
+             * Format: int64
+             * @description How many model calls the session made.
+             */
+            total_calls: number;
         };
         DeleteMessagesResponseBody: {
             /**
@@ -2898,7 +2910,12 @@ export interface operations {
     };
     "get-cost": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description How many of the calls the client has: with their digest, only the calls after them are sent. */
+                from?: number;
+                /** @description The digest the client got with those calls. */
+                digest?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2916,6 +2933,15 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

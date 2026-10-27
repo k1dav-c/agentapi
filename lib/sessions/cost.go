@@ -1,7 +1,11 @@
 package sessions
 
 import (
+	"fmt"
+	"hash/fnv"
+	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -341,4 +345,20 @@ func (s *Store) subagentIndex() func(id string) []Subagent {
 		}
 	}
 	return func(id string) []Subagent { return byParent[id] }
+}
+
+// CallsDigest identifies calls, in order, so a client that has them can
+// ask for the ones after them only: FNV-1a over each call's time, model,
+// tokens, cost and subagent. Empty for none.
+func CallsDigest(calls []ModelCall) string {
+	if len(calls) == 0 {
+		return ""
+	}
+	h := fnv.New64a()
+	for _, call := range calls {
+		t := call.Tokens
+		_, _ = fmt.Fprintf(h, "%d|%s|%d|%d|%d|%d|%d|%x|%s|%t\n", call.Time.UnixNano(), call.Model,
+			t.Input, t.CacheRead, t.CacheWrite, t.CacheWrite1h, t.Output, math.Float64bits(call.USD), call.SubagentID, call.Unitemized)
+	}
+	return strconv.FormatUint(h.Sum64(), 16)
 }

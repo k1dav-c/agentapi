@@ -160,9 +160,13 @@ in order:
 1. Host authorization: the `Host` header must name an allowed host (the port
    is ignored).
 2. Request logging, which skips static files, event streams and the terminal.
-3. CORS for the allowed origins, with credentials, so the chat's cookie works
+3. Compression (`compress.go`): text, JSON, the event streams (flushed event by
+   event) and the chat's files are gzipped for clients that take it; images
+   go as they are. The hub uses the same middleware, and its proxy passes an
+   instance's compressed responses on as they are.
+4. CORS for the allowed origins, with credentials, so the chat's cookie works
    from another origin.
-4. Token auth, with `--api-token`: a Bearer token or the chat's session
+5. Token auth, with `--api-token`: a Bearer token or the chat's session
    cookie. It runs after CORS, so preflights pass and a 401 carries the CORS
    headers the chat needs to read it.
 
@@ -170,7 +174,7 @@ The handlers are grouped by file:
 
 | File | Handles |
 | --- | --- |
-| `server.go`, `routes.go`, `hosts.go`, `middleware.go` | The server's setup, start and stop; the routes, which each feature registers; allowed hosts and origins; request logging |
+| `server.go`, `routes.go`, `hosts.go`, `middleware.go`, `compress.go` | The server's setup, start and stop; the routes, which each feature registers; allowed hosts and origins; request logging; compression |
 | `conversation_api.go`, `queue.go`, `sse.go`, `jsonl_watcher.go` | Messages, status and timeline; the queue, its dispatch and `queue_update`; `GET /events` and the screen stream; the PTY transport's session log watcher |
 | `tasks.go` | The tasks the emitter derives from the conversation (`taskTracker`), `task_update` and `GET /tasks` |
 | `summary.go`, `spend.go`, `registry.go` | The summary for clients that watch many AgentAPIs (`attention`, title, latest task, `unread`, `spend`), `summary_update`, `GET /summary` and `POST /tasks/seen`; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
@@ -703,7 +707,8 @@ is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, it
   formatting, file references, diffs, slash commands, settings, usage, costs
   (`cost.ts`: a task's share of the session's calls, totals by period),
   terminal keys, auth. `use-session-cost.ts` reads `GET /cost` when a turn
-  ends and while one runs.
+  ends and while one runs; after the first read it sends `from` and `digest`,
+  and gets only the calls made since.
 
 ## Testing
 

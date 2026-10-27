@@ -922,7 +922,10 @@ tokens but no cost (`priced: false`).
 - `GET /sessions` gives each session's `cost`: `usd`, `tokens`, `calls`, the cost per model
   (`models`) and per hour (`hourly`, in UTC), and `total_cost`, the sum of all of them.
 - `GET /cost` gives the open session's cost and its model `calls` (`time`, `model`, `tokens`, `usd`,
-  `subagent_id`), from which a task's cost is the calls made from its message until the next.
+  `subagent_id`), from which a task's cost is the calls made from its message until the next. A
+  client that has the first calls sends `from` (how many) and the `digest` it got with them, and
+  gets the calls after them only (`from` in the answer); the answer's `total_calls` and `digest`
+  are what to send next time. If those calls changed, it gets them all, with `from` 0.
 
 In the chat, each task shows what it cost under its start time and duration (in its header on narrow
 screens), with the tokens in the tooltip. The chat refreshes the cost when a turn ends, and every 15
