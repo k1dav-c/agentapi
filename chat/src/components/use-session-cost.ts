@@ -1,4 +1,4 @@
-import {useEffect, useState} from "react";
+import {useEffect, useRef, useState} from "react";
 import type {CostReport, createChatAPI} from "@/lib/chat-api";
 import type {ServerStatus} from "@/lib/agent-status";
 
@@ -18,12 +18,16 @@ export function useSessionCost(
   const running = serverStatus === "running";
   const stable = serverStatus === "stable";
 
+  // The last report, so a read asks for the calls made since only.
+  const known = useRef<CostReport | null>(null);
+
   useEffect(() => {
     if (!enabled || !ready || !(running || stable)) return;
     let cancelled = false;
     const read = async () => {
       try {
-        const next = await api.getCost();
+        const next = await api.getCost(known.current);
+        known.current = next;
         if (!cancelled) setReport(next);
       } catch {
         // The cost is a nicety: keep what was read before.
@@ -39,7 +43,9 @@ export function useSessionCost(
   }, [api, enabled, ready, running, stable]);
 
   useEffect(() => {
-    if (!enabled) setReport(null);
+    if (enabled) return;
+    known.current = null;
+    setReport(null);
   }, [enabled]);
 
   return report;

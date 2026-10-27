@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, test} from "bun:test";
-import {createChatAPI, httpURL} from "./chat-api";
+import {createChatAPI, httpURL, mergeCost, type CostReport} from "./chat-api";
 import {resetAuthState, setSignInHandler} from "./auth";
 import {ApiError} from "./error-utils";
 
@@ -197,5 +197,25 @@ describe("files", () => {
     const api = createChatAPI(BASE);
     expect(await failure(api.getFileContent("/etc/passwd"))).toMatchObject({status: 403, message: "/etc/passwd is outside the agent's working directory"});
     expect(await failure(api.getFileDiff("gone.txt"))).toMatchObject({status: 404, message: "no such file"});
+  });
+});
+
+const call = (usd: number) => ({time: "2026-10-27T00:00:00Z", model: "m", tokens: {input: 1, cache_read: 0, cache_write: 0, output: 1}, usd, priced: true});
+const report = (overrides: Partial<CostReport>): CostReport =>
+  ({agent_session_id: "s", cost: {usd: 0, tokens: {input: 0, cache_read: 0, cache_write: 0, output: 0}, calls: 0, models: [], hourly: []}, calls: [], from: 0, total_calls: 0, digest: "", ...overrides}) as CostReport;
+
+describe("mergeCost", () => {
+  test("puts the calls made since after the known ones", () => {
+    const known = report({calls: [call(1), call(2)], total_calls: 2, digest: "d2"});
+    const merged = mergeCost(known, report({calls: [call(3)], from: 2, total_calls: 3, digest: "d3"}));
+    expect(merged.calls.map((c) => c.usd)).toEqual([1, 2, 3]);
+    expect(merged.total_calls).toBe(3);
+    expect(merged.from).toBe(0);
+  });
+  test("takes a whole report as it is, or one of another session", () => {
+    const known = report({calls: [call(1)], total_calls: 1, digest: "d1"});
+    expect(mergeCost(known, report({calls: [call(5), call(6)], from: 0, total_calls: 2})).calls.map((c) => c.usd)).toEqual([5, 6]);
+    expect(mergeCost(known, report({agent_session_id: "other", calls: [call(7)], from: 1, total_calls: 2})).calls.map((c) => c.usd)).toEqual([7]);
+    expect(mergeCost(null, report({calls: [call(8)], total_calls: 1})).calls.map((c) => c.usd)).toEqual([8]);
   });
 });

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- AgentAPI and the hub gzip text, JSON, the event streams (flushed event by event) and the chat's
+  files for clients that take it. Opening a long conversation (91 tasks) without a cache sent 8.1
+  MB of events, 670 KB of costs and 1.3 MB of scripts; gzipped they are 2.4 MB, 84 KB and 396 KB.
+- `GET /cost` sends only the calls made since, to a client that sends `from` and the `digest` it
+  got: the chat read all 3,451 calls of that session (670 KB) when it opened and every 15 seconds
+  while a turn ran, and now reads a few new ones.
+- The chat's build files, named by their content, are kept by the browser for good
+  (`Cache-Control: immutable`); its pages are checked every time.
+
 ## v1.8.0
 
 ### Features

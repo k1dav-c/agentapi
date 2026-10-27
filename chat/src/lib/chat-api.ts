@@ -182,9 +182,13 @@ export function createChatAPI(baseURL: string) {
       return {sessions: list.sessions ?? [], current: list.current, total_cost: list.total_cost};
     },
 
-    async getCost(): Promise<CostReport> {
-      const report = await jsonRequest<CostReport>("/cost", {fallback: "Failed to read what the session spent"});
-      return {...report, calls: report.calls ?? []};
+    // What the open session spent. Given the report read before, it asks
+    // for the calls made since only, and puts them after the known ones;
+    // the server sends them all when the known ones changed.
+    async getCost(known?: CostReport | null): Promise<CostReport> {
+      const since = known && known.total_calls > 0 && known.digest ? `?from=${known.total_calls}&digest=${encodeURIComponent(known.digest)}` : "";
+      const report = await jsonRequest<CostReport>(`/cost${since}`, {fallback: "Failed to read what the session spent"});
+      return mergeCost(known, report);
     },
 
     // Opens one of the agent's sessions, or a copy of it, in place of this
@@ -511,4 +515,14 @@ export function createChatAPI(baseURL: string) {
       return data.events;
     },
   };
+}
+
+// mergeCost puts a cost report's calls after the known ones when it holds
+// the calls after them (from > 0), and stands alone otherwise.
+export function mergeCost(known: CostReport | null | undefined, report: CostReport): CostReport {
+  const calls = report.calls ?? [];
+  if (!known || report.from <= 0 || report.from !== known.total_calls || known.agent_session_id !== report.agent_session_id) {
+    return {...report, calls, from: 0};
+  }
+  return {...report, calls: [...(known.calls ?? []), ...calls], from: 0};
 }
