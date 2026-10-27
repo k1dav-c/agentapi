@@ -118,11 +118,8 @@ func (s *streamMessage) apply(ev *streamEvent) bool {
 
 func (a *Adapter) handleMessageEvent(kind string, ev messageEvent) {
 	var msg agentMessage
-	if len(ev.Message) > 0 {
-		if err := json.Unmarshal(ev.Message, &msg); err != nil {
-			a.log.Warn("Malformed Pi message", "error", err)
-			return
-		}
+	if len(ev.Message) > 0 && a.drift.Decode(kind+" message", ev.Message, &msg) != nil {
+		return
 	}
 	switch kind {
 	case "message_start":

@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -48,12 +49,13 @@ func (s *loopState) threadOpened(resumed bool) func(json.RawMessage, *rpcError) 
 			return
 		}
 		var resp threadStartResponse
-		if err := json.Unmarshal(result, &resp); err != nil || resp.Thread.ID == "" {
+		if err := s.a.drift.Decode("thread response", result, &resp); err != nil || resp.Thread.ID == "" {
 			// Without a thread, the start fails (see openThread).
 			s.a.log.Warn("Unexpected thread response from codex app-server", "error", err)
 			return
 		}
 		th := resp.Thread
+		s.a.drift.SetVersion(th.CLIVersion)
 		s.threadID = th.ID
 		s.model = resp.Model
 		s.a.threadSettings(resp)
@@ -216,57 +218,103 @@ func (s *loopState) wake() {
 func (s *loopState) notification(msg rpcMessage) {
 	switch msg.Method {
 	case "turn/started":
-		handle(msg, s.turnStarted)
+		handle(s, msg, s.turnStarted)
 	case "turn/completed":
-		handle(msg, s.turnCompleted)
+		handle(s, msg, s.turnCompleted)
 	case "item/started", "item/completed":
-		handle(msg, func(n itemNotification) { s.itemNotified(msg, n) })
+		handle(s, msg, func(n itemNotification) { s.itemNotified(msg, n) })
 	case "item/agentMessage/delta", "item/plan/delta":
-		handle(msg, s.textDelta)
+		handle(s, msg, s.textDelta)
 	case "item/reasoning/summaryPartAdded", "item/reasoning/summaryTextDelta":
-		handle(msg, func(d deltaNotification) { s.reasoningDelta(d, true) })
+		handle(s, msg, func(d deltaNotification) { s.reasoningDelta(d, true) })
 	case "item/reasoning/textDelta":
-		handle(msg, func(d deltaNotification) { s.reasoningDelta(d, false) })
+		handle(s, msg, func(d deltaNotification) { s.reasoningDelta(d, false) })
 	case "item/commandExecution/outputDelta":
-		handle(msg, s.outputDelta)
+		handle(s, msg, s.outputDelta)
 	case "thread/tokenUsage/updated":
-		handle(msg, s.tokenUsageUpdated)
+		handle(s, msg, s.tokenUsageUpdated)
 	case "turn/plan/updated":
-		handle(msg, s.planUpdated)
+		handle(s, msg, s.planUpdated)
 	case "error":
-		handle(msg, s.errorReported)
+		handle(s, msg, s.errorReported)
 	case "thread/name/updated":
-		handle(msg, s.threadNameUpdated)
+		handle(s, msg, s.threadNameUpdated)
 	case "thread/status/changed":
-		handle(msg, s.threadStatusChanged)
+		handle(s, msg, s.threadStatusChanged)
 	case "serverRequest/resolved":
-		handle(msg, func(n serverRequestResolvedNotification) { s.requestResolved(string(n.RequestID)) })
+		handle(s, msg, func(n serverRequestResolvedNotification) { s.requestResolved(string(n.RequestID)) })
 	case "warning":
-		handle(msg, s.warningReported)
+		handle(s, msg, s.warningReported)
 	case "configWarning":
-		handle(msg, s.configWarningReported)
+		handle(s, msg, s.configWarningReported)
 	case "mcpServer/startupStatus/updated":
-		handle(msg, s.mcpServerStatusUpdated)
+		handle(s, msg, s.mcpServerStatusUpdated)
 	case "model/rerouted":
-		handle(msg, s.modelRerouted)
+		handle(s, msg, s.modelRerouted)
 	case "account/rateLimits/updated":
-		handle(msg, s.rateLimitsUpdated)
+		handle(s, msg, s.rateLimitsUpdated)
 	default:
-		s.a.log.Debug("Codex notification", "method", msg.Method)
+		if ignoredNotification(msg.Method) {
+			s.a.log.Debug("Codex notification", "method", msg.Method)
+			return
+		}
+		s.a.drift.Unknown(msg.Method)
 	}
 }
 
-// handle passes the params of msg to f, unless they don't decode.
-func handle[T any](msg rpcMessage, f func(T)) {
+// ignoredNotifications are the notifications app-server sends that the
+// adapter has no use for, besides those it opts out of.
+var ignoredNotifications = map[string]bool{
+	"deprecationNotice":                         true,
+	"thread/archived":                           true,
+	"thread/unarchived":                         true,
+	"thread/closed":                             true,
+	"thread/compacted":                          true,
+	"thread/goal/updated":                       true,
+	"thread/goal/cleared":                       true,
+	"rawResponseItem/completed":                 true,
+	"item/commandExecution/terminalInteraction": true,
+	"item/fileChange/outputDelta":               true,
+	"item/mcpToolCall/progress":                 true,
+	"mcpServer/oauthLogin/completed":            true,
+	"account/updated":                           true,
+	"account/login/completed":                   true,
+	"authStatusChange":                          true,
+	"loginChatGptComplete":                      true,
+	"sessionConfigured":                         true,
+	"windows/worldWritableWarning":              true,
+	"hook/started":                              true,
+	"hook/completed":                            true,
+}
+
+// ignoredNotification reports whether the adapter knows to ignore a
+// notification: one it opts out of (an older app-server sends them
+// anyway), one in ignoredNotifications, or an event of the legacy
+// codex/event/ protocol.
+func ignoredNotification(method string) bool {
+	return ignoredNotifications[method] || slices.Contains(optOutNotifications, method) || strings.HasPrefix(method, "codex/event/")
+}
+
+// handle passes the params of msg to f, unless they don't decode. A field
+// of another type is left out, not the notification (see agentio.Decode):
+// a lost turn/completed would leave the turn running for good.
+func handle[T any](s *loopState, msg rpcMessage, f func(T)) {
 	var params T
-	if decode(msg, &params) {
+	if s.decode(msg, &params) {
 		f(params)
 	}
 }
 
-func decode(msg rpcMessage, v any) bool {
-	return len(msg.Params) > 0 && json.Unmarshal(msg.Params, v) == nil
+// decode decodes the params of msg into v, and reports whether it could.
+func (s *loopState) decode(msg rpcMessage, v any) bool {
+	if len(msg.Params) == 0 {
+		s.a.drift.Undecodable(msg.Method, errNoParams)
+		return false
+	}
+	return s.a.drift.Decode(msg.Method, msg.Params, v) == nil
 }
+
+var errNoParams = errors.New("no params")
 
 func (s *loopState) turnStarted(n turnNotification) {
 	if s.ours(n.ThreadID) && n.Turn.ID != "" {

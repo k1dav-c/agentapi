@@ -3,7 +3,6 @@ package claude
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/coder/quartz"
 
 	"github.com/coder/agentapi/lib/agentlog/claudelog"
+	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -77,20 +77,6 @@ func stringField(raw json.RawMessage) string {
 		return ""
 	}
 	return s
-}
-
-// decode is json.Unmarshal that keeps what it could read when a field has
-// an unexpected type: Unmarshal fills the other fields and reports only the
-// first mismatch. A frame isn't lost to one field that changed shape; a
-// lost result would never end the turn, a lost permission request never be
-// answered.
-func decode(data []byte, v any) error {
-	err := json.Unmarshal(data, v)
-	var typeErr *json.UnmarshalTypeError
-	if errors.As(err, &typeErr) {
-		return nil
-	}
-	return err
 }
 
 // apiMessage is the message of an assistant frame or message_start event.
@@ -172,6 +158,8 @@ type resultRef struct {
 type streamParser struct {
 	clock    quartz.Clock
 	throttle time.Duration
+	// drift counts the frames whose fields changed type; nil in tests.
+	drift *agentio.Drift
 	// sessionID labels timeline events.
 	sessionID string
 	events    *claudelog.EventParser
@@ -248,9 +236,9 @@ func (p *streamParser) startMessage(id string, msg *apiMessage) {
 
 // startBlock begins block index from a content_block_start event, unless
 // its final state arrived already, and reports whether it did.
-func (m *assistantMessage) startBlock(index int, raw json.RawMessage) bool {
+func (m *assistantMessage) startBlock(index int, raw json.RawMessage, drift *agentio.Drift) bool {
 	var block claudelog.ContentBlock
-	if json.Unmarshal(raw, &block) != nil {
+	if drift.Decode("content_block_start", raw, &block) != nil {
 		return false
 	}
 	for len(m.blocks) <= index {
@@ -338,7 +326,7 @@ func (p *streamParser) streamEvent(f *frame) []transcript.RichMessage {
 		return nil
 	}
 	var ev streamEvent
-	if json.Unmarshal(f.Event, &ev) != nil {
+	if p.drift.Decode("stream_event", f.Event, &ev) != nil {
 		return nil
 	}
 	id := f.APIMessageID
@@ -356,7 +344,7 @@ func (p *streamParser) streamEvent(f *frame) []transcript.RichMessage {
 	}
 	switch ev.Type {
 	case "content_block_start":
-		if !m.startBlock(ev.Index, ev.ContentBlock) {
+		if !m.startBlock(ev.Index, ev.ContentBlock, p.drift) {
 			return nil
 		}
 	case "content_block_delta":
@@ -389,7 +377,7 @@ func (p *streamParser) assistant(f *frame) ([]transcript.RichMessage, []transcri
 		return nil, nil
 	}
 	var msg apiMessage
-	if json.Unmarshal(f.Message, &msg) != nil || msg.ID == "" {
+	if p.drift.Decode("assistant", f.Message, &msg) != nil || msg.ID == "" {
 		return nil, nil
 	}
 	m := p.message(msg.ID, msg.Model)
@@ -484,7 +472,7 @@ func (p *streamParser) userBlock(raw json.RawMessage) (transcript.RichContentBlo
 // events with the session-log event parser.
 func (p *streamParser) sessionEvents(f *frame) []transcript.SessionEvent {
 	var msg claudelog.Message
-	if err := json.Unmarshal(f.Message, &msg); err != nil {
+	if err := p.drift.Decode(f.Type, f.Message, &msg); err != nil {
 		return nil
 	}
 	sessionID := f.SessionID

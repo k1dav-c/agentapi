@@ -10,6 +10,7 @@ import (
 	"github.com/coder/agentapi/lib/agentlog/pilog"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
 )
 
 // abortedRunMessage is the error of the extra assistant message Pi adds
@@ -140,20 +141,17 @@ func (a *Adapter) handleExit() {
 	a.log.Info("Pi closed its output")
 }
 
-// decodeRecord decodes a stdout record of type typ, or logs it as
-// malformed.
+// decodeRecord decodes a stdout record of type typ. A field of another
+// type is left out, not the record (see agentio.Decode); a record that
+// doesn't decode is counted as drift.
 func decodeRecord[T any](a *Adapter, line []byte, typ string) (T, bool) {
 	var v T
-	if err := json.Unmarshal(line, &v); err != nil {
-		a.log.Warn("Malformed Pi record", "type", typ, "error", err)
-		return v, false
-	}
-	return v, true
+	return v, a.drift.Decode(typ, line, &v) == nil
 }
 
 func (a *Adapter) handleLine(line []byte) {
 	var env envelope
-	if err := json.Unmarshal(line, &env); err != nil {
+	if _, err := agentio.Decode(line, &env); err != nil {
 		a.log.Warn("Pi wrote a line that is not JSON", "error", err)
 		return
 	}
@@ -199,11 +197,11 @@ func (a *Adapter) handleLine(line []byte) {
 			a.loop.sink.Error(ev.ErrorMessage, conv.ErrorLevelWarning)
 		}
 	case "extension_error":
-		if ev, ok := decodeRecord[extensionError](a, line, env.Type); ok {
+		if ev, ok := decodeRecord[extensionError](a, line, env.Type); ok && ev.Error != "" {
 			a.loop.sink.Error(fmt.Sprintf("Pi extension %s failed on %s: %s", ev.ExtensionPath, ev.Event, ev.Error), conv.ErrorLevelWarning)
 		}
 	default:
-		a.log.Debug("Unknown Pi record", "type", env.Type)
+		a.drift.Unknown(env.Type)
 	}
 }
 
@@ -277,9 +275,7 @@ func (a *Adapter) handlePromptResponse(p *pendingCmd, deliver bool, r response) 
 		return
 	}
 	var result promptResult
-	if err := json.Unmarshal(r.Data, &result); err != nil {
-		a.log.Warn("Malformed Pi prompt result", "error", err)
-	}
+	_ = a.drift.Decode("prompt response", r.Data, &result)
 	if result.Disposition != "handled" {
 		// A run started, or the message went into the running one.
 		a.beginTurn()

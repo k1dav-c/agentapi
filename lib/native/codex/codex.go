@@ -100,6 +100,8 @@ type Adapter struct {
 	// fork opens a copy of the thread resumeRef.
 	fork bool
 	log  *slog.Logger
+	// drift counts what app-server sends that the adapter doesn't read.
+	drift *agentio.Drift
 	// prefix makes request IDs unique across processes: app-server numbers
 	// its requests from 0 in every process.
 	prefix string
@@ -189,11 +191,13 @@ func newAdapter(cfg Config, opts launchOptions, resumeRef string) *Adapter {
 	if cfg.Clock == nil {
 		cfg.Clock = quartz.NewReal()
 	}
+	logger = logger.With("agent", "codex")
 	a := &Adapter{
 		cfg:       cfg,
 		opts:      opts,
 		resumeRef: resumeRef,
-		log:       logger.With("agent", "codex"),
+		log:       logger,
+		drift:     agentio.NewDrift("Codex app-server", logger),
 		prefix:    native.RequestPrefix(),
 		inbox:     make(chan rpcMessage, inboxSize),
 		// Unbuffered: a task handed over is one the loop runs.
@@ -312,8 +316,10 @@ func (a *Adapter) handshake(ctx context.Context) error {
 		return fmt.Errorf("initialize codex app-server: %w", err)
 	}
 	var info initializeResponse
-	if json.Unmarshal(result, &info) == nil && info.UserAgent != "" {
+	if a.drift.Decode("initialize response", result, &info) == nil && info.UserAgent != "" {
 		a.log.Debug("Connected to codex app-server", "userAgent", info.UserAgent)
+		// Until the thread says which version of the CLI runs.
+		a.drift.SetVersion(info.UserAgent)
 	}
 	if err := a.notify(ctx, "initialized", nil); err != nil {
 		return err
@@ -428,7 +434,7 @@ func (a *Adapter) startTurn(ctx context.Context, input native.Input, implement n
 			return
 		}
 		var resp turnResponse
-		if json.Unmarshal(result, &resp) == nil && resp.Turn.ID != "" {
+		if a.drift.Decode("turn/start response", result, &resp) == nil && resp.Turn.ID != "" {
 			a.loop.beginTurn(resp.Turn.ID)
 		}
 	})
@@ -714,11 +720,13 @@ func (a *Adapter) read(r io.Reader) {
 	defer close(a.inbox)
 	agentio.ReadLines(r, "codex app-server", 0, a.log, func(line []byte) {
 		var msg rpcMessage
-		if err := json.Unmarshal(line, &msg); err != nil {
+		changed, err := agentio.Decode(line, &msg)
+		if err != nil {
 			// The line isn't logged: it can hold the user's prompt.
 			a.log.Warn("Ignoring a line from codex app-server that is not JSON", "error", err)
 			return
 		}
+		a.drift.Changed(msg.kind(), changed)
 		a.inbox <- msg
 	})
 }

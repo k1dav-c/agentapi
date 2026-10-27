@@ -176,7 +176,7 @@ func (a *Adapter) SettingOptions(ctx context.Context) (native.SettingOptions, er
 		var data struct {
 			Models []piModel `json:"models"`
 		}
-		if err := json.Unmarshal(res.data, &data); err != nil {
+		if err := a.drift.Decode("get_available_models response", res.data, &data); err != nil {
 			return native.SettingOptions{}, fmt.Errorf("list the models: %w", err)
 		}
 		models = []native.ModelOption{}
@@ -246,7 +246,7 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 		return fmt.Errorf("read the settings: %w", err)
 	}
 	var state sessionState
-	if err := json.Unmarshal(res.data, &state); err != nil {
+	if err := a.drift.Decode("get_state response", res.data, &state); err != nil {
 		return fmt.Errorf("read the settings: %w", err)
 	}
 	a.setSettings(stateSettings(state))

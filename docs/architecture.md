@@ -354,6 +354,12 @@ type Factory func(resume Resume) (Adapter, error)
   Records a parser doesn't know, and lines it can't decode, are logged once
   per log at Warn with the CLI version the log records, so a changed format
   shows in the server's log.
+- **Protocol drift.** The adapters decode what the agent sends with
+  `agentio.Decode`: a field whose value changed type is left out, not the
+  record, as a lost turn end would leave the turn running for good. Record
+  types an adapter doesn't know, changed fields and records that don't
+  decode are counted per process (`agentio.Drift`) and logged once each at
+  Warn, with the CLI version from the handshake.
 - **Usage limits.** When the account's usage limit stops a turn, the adapter
   ends it with the `limited` stop reason (Claude Code's limit messages and a
   `rejected` rate limit event, Codex's `usageLimitExceeded`, a quota error of

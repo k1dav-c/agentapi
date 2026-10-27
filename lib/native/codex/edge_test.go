@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -962,4 +963,32 @@ func TestTurnStartWithoutAnswerIsUnconfirmed(t *testing.T) {
 	h.proc.exit(nil)
 	h.eventually(h.a.loopEnded, "the loop to end")
 	assert.NotErrorIs(t, h.a.StartTurn(context.Background(), native.Input{Text: "go"}), native.ErrUnconfirmed)
+}
+
+// A notification whose fields changed type is read all the same: a lost
+// turn/completed would leave the turn running for good. Each change, and
+// each notification the adapter doesn't know, is logged once, with the
+// CLI's version.
+func TestDriftedNotificationsAreRead(t *testing.T) {
+	logger, log := nativetest.NewLog()
+	h := newHarness(t, "", nil, func(c *Config) { c.Logger = logger })
+	h.boot()
+	h.beginTurn("turn-1")
+	for range 2 {
+		h.feedJSON(`{"method":"turn/paused","params":{"threadId":"` + testThread + `"}}`)
+	}
+	// Opted out of, which an older app-server sends anyway.
+	h.feedJSON(`{"method":"thread/settings/updated","params":{"threadId":"` + testThread + `"}}`)
+	h.feedJSON(`{"method":"turn/completed","emittedAtMs":"soon","params":{"threadId":"` + testThread + `","turn":{"id":"turn-1","items":[],"status":"completed","error":"none"}}}`)
+	h.sync()
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, snapshot(h.rec).completions)
+	h.beginTurn("turn-2")
+	h.completeTurn("turn-2", "completed", `,"error":"none"`)
+	assert.Len(t, snapshot(h.rec).completions, 2)
+
+	assert.Len(t, log.Matching("field=emittedAtMs", "version=0.160.0"), 1)
+	assert.Len(t, log.Matching("type=turn/completed", "field=turn.error", "value=string"), 1, "once per kind: %v", log.Warnings())
+	assert.Len(t, log.Matching("type=turn/paused", "version=0.160.0"), 1)
+	assert.Equal(t, 2, h.a.drift.Counts()["unknown turn/paused"])
+	assert.Empty(t, log.Matching("type=thread/settings/updated"))
 }

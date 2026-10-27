@@ -132,8 +132,10 @@ type pendingCmd struct {
 type Adapter struct {
 	cfg Config
 	// args are the user's arguments passed on to Pi.
-	args      []string
-	log       *slog.Logger
+	args []string
+	log  *slog.Logger
+	// drift counts what Pi sends that the adapter doesn't read.
+	drift     *agentio.Drift
 	resumeRef string
 	// fork opens a copy of resumeRef's session under a new ID.
 	fork  bool
@@ -212,10 +214,12 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 	if cfg.Clock == nil {
 		cfg.Clock = quartz.NewReal()
 	}
+	log := cfg.logger().With("agent", "pi")
 	return &Adapter{
 		cfg:              cfg,
 		args:             args,
-		log:              cfg.logger().With("agent", "pi"),
+		log:              log,
+		drift:            agentio.NewDrift("Pi", log),
 		resumeRef:        resumeRef,
 		start:            cfg.StartProcess,
 		abortGrace:       abortGrace,
@@ -306,7 +310,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		return a.startError(err, proc)
 	}
 	var state sessionState
-	if err := json.Unmarshal(res.data, &state); err != nil {
+	if err := a.drift.Decode("get_state response", res.data, &state); err != nil {
 		// Not ours to judge: the session opens without what it says.
 		a.log.Warn("Malformed Pi session state", "error", err)
 	} else if !state.hasModel() {

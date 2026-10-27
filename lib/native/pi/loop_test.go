@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/nativetest"
 )
 
 // startedHarness returns a harness whose adapter has started.
@@ -208,6 +209,39 @@ func TestInterruptWriteFails(t *testing.T) {
 	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.State().Results, "the turn wasn't interrupted")
 }
 
+// A record whose fields changed type is read all the same: a lost record
+// loses what it shows. Each change, and each record type the adapter
+// doesn't know, is logged once.
+func TestDriftedRecordsAreRead(t *testing.T) {
+	t.Parallel()
+	logger, log := nativetest.NewLog()
+	h := newHarness(t, Config{Logger: logger}, "")
+	h.answerState(noState)
+	h.started()
+	cmd := h.prompt("p", "hi")
+	h.answer(cmd, `{"disposition":"started"}`)
+	h.write(`{"type":"agent_start"}`)
+	h.write(`{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":"seq 2"}}`)
+	for range 2 {
+		h.write(`{"type":"agent_paused","reason":1}`)
+	}
+	h.write(`{"type":"tool_execution_update","toolCallId":"c1","toolName":"bash","partialResult":{"content":[{"type":"text","text":"1"}],"isError":"no"}}`)
+	h.settle()
+	h.advance(snapshotInterval)
+	h.write(`{"type":"tool_execution_update","toolCallId":"c1","toolName":"bash","partialResult":{"content":[{"type":"text","text":"1\n2"}],"isError":"no"}}`)
+	h.write(`{"type":"agent_settled"}`)
+	require.NoError(t, h.result("p"))
+	h.settle()
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.State().Results)
+	results := h.sink.Snapshots("result-c1")
+	require.Len(t, results, 2, "the output shows")
+	assert.Equal(t, "1\n2", results[1].Content[0].Text)
+
+	assert.Len(t, log.Matching("type=tool_execution_update", "field=partialResult.isError"), 1, "%v", log.Warnings())
+	assert.Len(t, log.Matching("type=agent_paused"), 1)
+	assert.Empty(t, log.Matching("type=agent_start"))
+}
+
 func TestRecords(t *testing.T) {
 	t.Parallel()
 
@@ -248,7 +282,8 @@ func TestRecords(t *testing.T) {
 		h.write(`{"type":"compaction_end","reason":"manual","aborted":true,"willRetry":false,"errorMessage":"Compaction cancelled"}`)
 		h.write(`{"type":"compaction_end","reason":"threshold","aborted":false,"willRetry":false}`)
 		h.write(`{"type":"extension_error","extensionPath":"/home/me/.pi/agent/extensions/guard.ts","event":"tool_call","error":"boom"}`)
-		// Malformed: logged, not reported.
+		// A field of another type is logged as drift; without an error
+		// there is nothing to report.
 		h.write(`{"type":"extension_error","extensionPath":7}`)
 		h.settle()
 		assert.Equal(t, []string{

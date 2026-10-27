@@ -34,7 +34,9 @@ func resumed(t *testing.T, cfg Config, resumeRef string, proc *fakeProcess) (*Ad
 	if cfg.AuthStatus == nil {
 		cfg.AuthStatus = loggedIn
 	}
-	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	if cfg.Logger == nil {
+		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
 	cfg.Env = []string{}
 	a := newTestAdapter(t, cfg, resumeRef)
 	sink := nativetest.NewSink(t)
@@ -468,6 +470,35 @@ func TestInterruptTimeout(t *testing.T) {
 		assert.Equal(t, []string{"turn_started", "turn_completed:interrupted", "turn_started"}, sink.TurnLog())
 		require.NoError(t, a.Close())
 	})
+}
+
+// A frame whose fields changed type is read all the same: a lost result
+// would never end the turn. Each change, and each frame type the adapter
+// doesn't know, is logged once, with the CLI's version.
+func TestDriftedFramesAreRead(t *testing.T) {
+	t.Parallel()
+	logger, log := nativetest.NewLog()
+	proc := newFakeProcess("")
+	a, sink := started(t, Config{Logger: logger}, proc)
+	ctx := context.Background()
+	for range 2 {
+		require.NoError(t, a.StartTurn(ctx, native.Input{Text: "hi"}))
+		proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1"}`))
+		proc.send(t, []byte(`{"type":"assistant","message":{"id":"msg_1","model":"m","content":[{"type":"text","text":"Hello"}],"usage":{"output_tokens":"many"}}}`))
+		proc.send(t, []byte(`{"type":"brand_new","detail":1}`))
+		proc.send(t, []byte(`{"type":"result","subtype":"success","is_error":"no","usage":{"cache_read_input_tokens":"many"}}`))
+		proc.barrier(t)
+	}
+	assert.Equal(t, []string{"turn_started", "turn_completed:end_turn", "turn_started", "turn_completed:end_turn"}, sink.TurnLog())
+	msg, ok := sink.Message("msg_1", "assistant")
+	require.True(t, ok, "the message is shown without its usage")
+	assert.Equal(t, "Hello", msg.Content[0].Text)
+
+	assert.Len(t, log.Matching("type=assistant", "field=usage.output_tokens", "version=2.1.299"), 1, "%v", log.Warnings())
+	assert.Len(t, log.Matching("type=result", "field=is_error"), 1)
+	assert.Len(t, log.Matching("type=brand_new", "version=2.1.299"), 1)
+	assert.Empty(t, log.Matching("type=keep_alive"), "the barrier's frames are known")
+	require.NoError(t, a.Close())
 }
 
 func TestHeldBackSnapshotIsSent(t *testing.T) {

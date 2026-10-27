@@ -310,6 +310,10 @@ type Factory func(resume Resume) (Adapter, error)
   結果只判斷一次，native adapter、歷史、花費和 PTY 監看器都用同一套。parser 不認得的紀錄和無法
   解碼的行，每個紀錄檔只會以 Warn 記錄一次，並附上紀錄中的 CLI 版本，所以格式改變時會出現在
   伺服器的 log 裡。
+- **協定變動。** Adapter 以 `agentio.Decode` 解碼 agent 送來的內容：值的型別變了的欄位會被略過，
+  整筆紀錄不會因此遺失，因為遺失回合結束的紀錄會讓回合一直停在進行中。adapter 不認得的紀錄類型、
+  型別變了的欄位和無法解碼的紀錄，會依行程分別計數（`agentio.Drift`），每一種只以 Warn 記錄一次，
+  並附上握手時取得的 CLI 版本。
 - **用量限制。** 帳號的用量限制讓回合停下時，adapter 會以 `limited` 停止原因結束回合（Claude Code
   的限制訊息與 `rejected` 的 rate limit 事件、Codex 的 `usageLimitExceeded`、Pi 模型供應商的
   額度錯誤）。對話會把它記成帶有重置時間的 `LimitStop`，直到下一個回合開始：期間伺服器的佇列

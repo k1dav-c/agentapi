@@ -20,6 +20,14 @@ type rpcMessage struct {
 	EmittedAtMs int64           `json:"emittedAtMs,omitempty"`
 }
 
+// kind names the message for drift warnings: its method, or "response".
+func (m *rpcMessage) kind() string {
+	if m.Method != "" {
+		return m.Method
+	}
+	return "response"
+}
+
 // rpcError is a JSON-RPC error. app-server uses -32600 for every error.
 type rpcError struct {
 	Code    int    `json:"code"`

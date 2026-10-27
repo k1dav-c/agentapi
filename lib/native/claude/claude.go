@@ -115,9 +115,11 @@ func newAdapter(cfg Config, args parsedArgs, resumeRef string) *Adapter {
 	if cfg.NewID == nil {
 		cfg.NewID = newUUID
 	}
+	log := cfg.Logger.With("agent", "claude")
 	a := &Adapter{
 		cfg:         cfg,
-		log:         cfg.Logger.With("agent", "claude"),
+		log:         log,
+		drift:       agentio.NewDrift("Claude Code", log),
 		args:        args,
 		resumeRef:   resumeRef,
 		parser:      newStreamParser(cfg.Clock, cfg.SnapshotInterval),
@@ -131,6 +133,7 @@ func newAdapter(cfg Config, args parsedArgs, resumeRef string) *Adapter {
 	if cfg.StopTimeout > 0 {
 		a.closeGrace = cfg.StopTimeout
 	}
+	a.parser.drift = a.drift
 	if resumeRef == "" {
 		a.sessionID = cfg.NewID()
 	}
@@ -160,6 +163,8 @@ type Adapter struct {
 	sink   native.Sink
 	parser *streamParser
 	log    *slog.Logger
+	// drift counts what the CLI sends that the adapter doesn't read.
+	drift *agentio.Drift
 	// closeGrace is how long Close waits for a turn it interrupted to end.
 	closeGrace time.Duration
 	// reportedRef is the session id last reported with SessionRef, at
@@ -331,7 +336,8 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		return fmt.Errorf("claude exited during startup: %w", exitErr)
 	}
 	var info initializeInfo
-	_ = json.Unmarshal(response, &info)
+	_ = a.drift.Decode("initialize response", response, &info)
+	a.drift.SetVersion(info.Version)
 	a.readSettings(ctx, info)
 	a.log.Info("Claude Code is ready", "version", info.Version, "permission_mode", info.PermissionMode)
 
@@ -731,11 +737,13 @@ func (a *Adapter) handleLine(line []byte) {
 		return
 	}
 	var f frame
-	if err := decode(line, &f); err != nil {
+	changed, err := agentio.Decode(line, &f)
+	if err != nil {
 		// The line isn't logged: it can hold the user's prompt.
 		a.log.Warn("Failed to parse Claude Code output", "error", err)
 		return
 	}
+	a.drift.Changed(f.Type, changed)
 	switch f.Type {
 	case "control_response":
 		a.handleControlResponse(&f)
@@ -771,7 +779,24 @@ func (a *Adapter) handleLine(line []byte) {
 		a.handleResult(&f)
 	case "rate_limit_event":
 		a.handleRateLimit(f.RateLimitInfo)
+	default:
+		if !ignoredFrames[f.Type] {
+			a.drift.Unknown(f.Type)
+		}
 	}
+}
+
+// ignoredFrames are the frames Claude Code sends that the adapter has no
+// use for.
+var ignoredFrames = map[string]bool{
+	"keep_alive":                   true,
+	"command_lifecycle":            true,
+	"tool_progress":                true,
+	"tool_use_summary":             true,
+	"auth_status":                  true,
+	"prompt_suggestion":            true,
+	"streamlined_text":             true,
+	"streamlined_tool_use_summary": true,
 }
 
 func (a *Adapter) sendRich(msgs []transcript.RichMessage) {
@@ -793,7 +818,7 @@ func (a *Adapter) handleControlResponse(f *frame) {
 		Response  json.RawMessage `json:"response"`
 		Error     string          `json:"error"`
 	}
-	if decode(f.Response, &r) != nil {
+	if a.drift.Decode("control_response", f.Response, &r) != nil {
 		return
 	}
 	var err error
@@ -815,7 +840,7 @@ func (a *Adapter) handleControlRequest(f *frame) {
 		return
 	}
 	var r canUseTool
-	if err := decode(f.Request, &r); err != nil || r.ToolName == "" {
+	if err := a.drift.Decode("can_use_tool", f.Request, &r); err != nil || r.ToolName == "" {
 		a.log.Warn("Refusing a permission request from Claude Code that AgentAPI can't read", "request_id", f.RequestID)
 		a.refuse(f.RequestID, "AgentAPI could not read the permission request")
 		return
