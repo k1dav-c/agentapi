@@ -151,10 +151,12 @@ export function toolRequestBadge(request: NativeRequest): {label: string; tone: 
           return {label: option?.label ?? "Answered", tone: "muted"};
       }
     }
-    case "withdrawn":
-      return {label: "No longer asked", tone: "muted"};
     case "expired":
       return {label: "Not answered", tone: "muted"};
+    // A status a newer server added isn't pending: the request is closed.
+    case "withdrawn":
+    default:
+      return {label: "No longer asked", tone: "muted"};
   }
 }
 
@@ -168,8 +170,10 @@ export function optionTone(kind: OptionKind): "primary" | "secondary" | "destruc
       return "secondary";
     case "deny":
       return "destructive";
+    // And a kind a newer server added.
     case "cancel":
     case "other":
+    default:
       return "neutral";
   }
 }

@@ -19,9 +19,21 @@ export type ServerTask = Omit<Schemas["Task"], "errors" | "steered"> & {
   seq?: number;
 };
 
-// normalizeTask returns task with empty lists for missing or null ones.
+// The statuses this chat knows. A newer server may send another: the hub
+// serves its own chat for instances of every version.
+const KNOWN_STATUSES: Record<ServerTaskStatus, true> = {running: true, completed: true, failed: true, limited: true};
+
+// normalizeTask returns task with empty lists for missing or null ones, and
+// a status this chat knows: one it doesn't is running until the task ends,
+// then failed if it has errors, else completed.
 export function normalizeTask<T extends Schemas["Task"] & {seq?: number}>(task: T): Omit<T, "errors" | "steered"> & ServerTask {
-  return {...task, errors: task.errors ?? [], steered: task.steered ?? []};
+  const errors = task.errors ?? [];
+  const status: ServerTaskStatus = Object.hasOwn(KNOWN_STATUSES, task.status)
+    ? task.status
+    : task.ended_at
+      ? errors.length > 0 ? "failed" : "completed"
+      : "running";
+  return {...task, status, errors, steered: task.steered ?? []};
 }
 
 // mergeTasks applies task updates: a task keeps its place, a new one comes

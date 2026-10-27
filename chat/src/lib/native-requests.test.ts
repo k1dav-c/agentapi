@@ -171,6 +171,10 @@ describe("toolRequestBadge", () => {
     expect(toolRequestBadge(question()).label).toBe("Waiting for your answer");
     expect(toolRequestBadge(approval({status: "expired"})).tone).toBe("muted");
   });
+
+  test("a status a newer server added reads as closed", () => {
+    expect(toolRequestBadge(approval({status: "cancelled" as NativeRequest["status"]}))).toEqual({label: "No longer asked", tone: "muted"});
+  });
 });
 
 describe("option responses", () => {
@@ -179,6 +183,7 @@ describe("option responses", () => {
     expect(optionTone("allow_always")).toBe("secondary");
     expect(optionTone("deny")).toBe("destructive");
     expect(optionTone("other")).toBe("neutral");
+    expect(optionTone("allow_once" as Parameters<typeof optionTone>[0])).toBe("neutral");
   });
 
   test("sends feedback only with a refusal, and only when the request takes it", () => {

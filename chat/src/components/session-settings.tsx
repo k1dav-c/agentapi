@@ -126,7 +126,7 @@ export function SessionSettings({ className }: { className?: string }) {
               className="h-9 min-w-0 shrink-0 gap-1 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground"
               title={`Permission mode: ${meta.label}. ${meta.description}`}
             >
-              {saving ? <LoaderCircle className="animate-spin" /> : mode ? MODE_ICONS[mode] : <Shield />}
+              {saving ? <LoaderCircle className="animate-spin" /> : (mode && MODE_ICONS[mode]) || <Shield />}
               <span className="max-[380px]:sr-only">{meta.label}</span>
               <ChevronDown className="size-3 opacity-60" />
             </Button>
@@ -141,7 +141,7 @@ export function SessionSettings({ className }: { className?: string }) {
                   return (
                     <DropdownMenuRadioItem key={value} value={value} className="min-h-11 items-start">
                       <span className="grid">
-                        <span className="flex items-center gap-1.5">{MODE_ICONS[value]}{item.label}</span>
+                        <span className="flex items-center gap-1.5">{MODE_ICONS[value] ?? <Shield />}{item.label}</span>
                         <span className="text-[11px] text-muted-foreground">{item.description}</span>
                       </span>
                     </DropdownMenuRadioItem>

@@ -676,7 +676,9 @@ is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, it
   for incremental replay; a stream the server closes is opened again at once,
   without a notice, unless that keeps failing. The payload types come from
   the generated schema (`lib/events.ts`), and null lists are made empty where
-  events arrive. IndexedDB keeps each server's conversation for the next
+  events arrive. A status the chat doesn't know, from a newer server (the hub
+  serves its own build to instances of every version), becomes one it does
+  there too: a task's, a subagent's. IndexedDB keeps each server's conversation for the next
   visit, one record per message, writing only what changed, with the sequence
   number of what it saved; a server's cache goes after 14 days without use,
   and only the 10 most recently used are kept (`lib/session-cache.ts`).

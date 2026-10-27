@@ -26,6 +26,16 @@ describe("server tasks", () => {
     expect(normalized.seq).toBe(9);
   });
 
+  test("a status a newer server added is one this chat knows", () => {
+    const parse = (fields: string) =>
+      normalizeTask(JSON.parse(`{"id":3,"status":"paused","prompt":"x","started_at":"2026-10-22T10:00:00Z",${fields}"seq":9}`)).status;
+    expect(parse("")).toBe("running");
+    expect(parse('"ended_at":"2026-10-22T10:01:00Z",')).toBe("completed");
+    expect(parse('"ended_at":"2026-10-22T10:01:00Z","errors":["the agent exited"],')).toBe("failed");
+    expect(parse('"errors":null,')).toBe("running");
+    expect(normalizeTask(task(1, "limited", 2)).status).toBe("limited");
+  });
+
   test("updates replace a task in place, a new one comes last, and an older seq doesn't win", () => {
     const merged = mergeTasks([task(0, "completed", 2), task(4, "running", 5)], [task(4, "completed", 7), task(8, "running", 8), task(0, "running", 1)]);
     expect(merged.map((t) => [t.id, t.status])).toEqual([[0, "completed"], [4, "completed"], [8, "running"]]);
