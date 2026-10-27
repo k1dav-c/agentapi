@@ -15,6 +15,7 @@ export function BackgroundAlerts() {
   const kind = useChatSelector((chat) => chat.agentState);
   const terminalPrompt = useChatSelector((chat) => chat.terminalPrompt);
   const loginRequired = useChatSelector((chat) => chat.loginRequired);
+  const limitStop = useChatSelector((chat) => chat.limitStop);
   const requests = useChatSelector((chat) => chat.requests);
   const agentType = useChatSelector((chat) => chat.agentType);
   const task = useChatSelector((chat) => chat.currentTask?.content ?? "");
@@ -43,7 +44,8 @@ export function BackgroundAlerts() {
           ? describeTerminalPrompt(terminalPrompt).title
           : loginRequired
             ? `${loginTitle(loginRequired)}: run ${loginRequired.command}`
-            : requests.find((request) => request.status === "pending")?.title ?? "The agent is waiting for your answer"
+            : requests.find((request) => request.status === "pending")?.title ??
+              (limitStop ? limitStop.message || "The account reached its usage limit" : "The agent is waiting for your answer")
         : task.replace(/\s+/g, " ").slice(0, 120),
       tag: `agentapi-${alert}`,
     });

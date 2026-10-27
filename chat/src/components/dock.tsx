@@ -21,6 +21,7 @@ export function StateStrip() {
   const serverStatus = useChatSelector((chat) => chat.serverStatus);
   const pendingRequestCount = useChatSelector((chat) => chat.pendingRequestCount);
   const loginRequired = useChatSelector((chat) => chat.loginRequired);
+  const waitingFor = useChatSelector((chat) => chat.waitingFor);
   const queuedCount = useChatSelector((chat) => chat.queuedMessages.length);
   // What the agent does in its task and the tokens it took, worked out from
   // the task's latest steps (useTranscript): the strip renders again when
@@ -41,7 +42,13 @@ export function StateStrip() {
         </span>
         <span className="min-w-0 flex-1 truncate font-mono text-[11.5px]">
           {needs
-            ? `${loginRequired ? loginTitle(loginRequired) : `The agent is waiting for your answer${pendingRequestCount > 1 ? ` · ${pendingRequestCount} requests` : ""}`}${queuedCount ? ` · ${queuedCount} queued ${queuedCount === 1 ? "task waits" : "tasks wait"}` : ""}`
+            ? `${
+                loginRequired
+                  ? loginTitle(loginRequired)
+                  : waitingFor === "limit"
+                    ? "A usage limit stopped the agent"
+                    : `The agent is waiting for your answer${pendingRequestCount > 1 ? ` · ${pendingRequestCount} requests` : ""}`
+              }${queuedCount ? ` · ${queuedCount} queued ${queuedCount === 1 ? "task waits" : "tasks wait"}` : ""}`
             : activity || "Working on the task"}
         </span>
         {!needs && elapsed && <span className="shrink-0">{elapsed}</span>}

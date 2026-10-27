@@ -26,6 +26,11 @@ describe("getAgentState", () => {
     expect(getAgentState({...connected, serverStatus: "stable", loginRequired: true})).toBe("needs-you");
   });
 
+  test("a usage limit that stopped the agent needs the user, as the server's summary says", () => {
+    expect(getAgentState({...connected, serverStatus: "stable", limitStop: true})).toBe("needs-you");
+    expect(getAgentState({...connected, serverStatus: "stable", limitStop: false})).toBe("ready");
+  });
+
   test("the connection still comes first", () => {
     expect(getAgentState({serverStatus: "running", connectionStatus: "reconnecting", loginRequired: true})).toBe("reconnecting");
     expect(getAgentState({serverStatus: "running", connectionStatus: "offline", pendingRequestCount: 1})).toBe("offline");
@@ -35,9 +40,11 @@ describe("getAgentState", () => {
 
 describe("getStatusMeta", () => {
   test("says what the agent waits for", () => {
-    expect(getStatusMeta("needs-you", true).detail).toBe("Agent is waiting for you to log in");
+    expect(getStatusMeta("needs-you", "login").detail).toBe("Agent is waiting for you to log in");
+    expect(getStatusMeta("needs-you", "answer").detail).toBe("Agent is waiting for your answer");
     expect(getStatusMeta("needs-you").detail).toBe("Agent is waiting for your answer");
-    expect(getStatusMeta("working", true)).toMatchObject({kind: "working", label: "Working", detail: "Agent is working"});
+    expect(getStatusMeta("needs-you", "limit")).toMatchObject({label: "Needs you", detail: "A usage limit stopped the agent"});
+    expect(getStatusMeta("working", "login")).toMatchObject({kind: "working", label: "Working", detail: "Agent is working"});
   });
 });
 
@@ -53,10 +60,12 @@ describe("formatTokenCount", () => {
 });
 
 describe("what the agent waits for", () => {
-  test("a login comes before an answer, and only while it needs you", () => {
-    expect(waitingFor("needs-you", true)).toBe("login");
-    expect(waitingFor("needs-you", false)).toBe("answer");
-    expect(waitingFor("working", true)).toBeNull();
+  test("a login comes before an answer, an answer before a usage limit, and only while it needs you", () => {
+    expect(waitingFor("needs-you", {loginRequired: true, pendingRequestCount: 1, limitStop: true})).toBe("login");
+    expect(waitingFor("needs-you", {pendingRequestCount: 1, limitStop: true})).toBe("answer");
+    expect(waitingFor("needs-you", {terminalPrompt: "Do you want to proceed?", limitStop: true})).toBe("answer");
+    expect(waitingFor("needs-you", {limitStop: true})).toBe("limit");
+    expect(waitingFor("working", {loginRequired: true})).toBeNull();
   });
 });
 

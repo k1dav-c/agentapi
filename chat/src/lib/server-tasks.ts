@@ -2,8 +2,9 @@
 // task_update event): a user's message and the agent's turn on it, until
 // the agent is done. Messages the user adds while one runs (steering)
 // belong to it. The chat groups the messages into tasks itself
-// (lib/task-timeline.ts) and takes from these what only the server knows:
-// whether a task is done, how it ended, and when.
+// (lib/task-timeline.ts), the steered ones into the task they joined, and
+// takes from these what only the server knows: whether a task is done,
+// how it ended, and when.
 
 import type {components} from "./api-schema";
 
@@ -71,6 +72,12 @@ export function tasksByMessage(tasks: ServerTask[]): Map<number, ServerTask> {
     for (const id of task.steered) byMessage.set(id, task);
   }
   return byMessage;
+}
+
+// steeredMessages returns the IDs of the user messages steered into a
+// task: the transcript shows them inside it (TimelineBuilder).
+export function steeredMessages(tasks: readonly ServerTask[]): ReadonlySet<number> {
+  return new Set(tasks.flatMap((task) => task.steered));
 }
 
 // latestTaskEnd returns when the latest task ended, undefined while it runs

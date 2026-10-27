@@ -49,8 +49,11 @@ agent 做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列�
 顯示它的編號和狀態（Queued、Working、Waiting for you、Done、Failed 或 Limit reached）、工作中時
 的 Stop 按鈕，以及它的 ⋯ 選單。狀態由伺服器的[任務](../README.zh-TW.md#任務)決定：agent 回報錯誤或結束時顯示 Failed，
 滑鼠移上去可看第一個錯誤；因用量限制停止時顯示 Limit reached，可看 agent 的訊息。
-工具呼叫與思考內容的任務歸屬也由伺服器指定。steer 進來的訊息會共用目前任務的狀態，
-之後的活動也會歸在同一任務。
+工具呼叫與思考內容的任務歸屬也由伺服器指定。
+
+*native* steer 進執行中任務的訊息會留在那個任務裡：它依送出的時間出現在 agent 的步驟之間，顯示為
+標示 *steered* 的你的訊息，任務的編號、狀態和花費都不變。編號與伺服器的任務一致，和 `GET /tasks`、
+webhook 及 hub 的計數相同。伺服器版本早於任務功能時，每則訊息都會開始一個任務。
 
 寬螢幕上，開始時間與耗時顯示在左側空白處；窄螢幕上則接在標頭的任務編號後。
 *native* Claude Code、Codex 和 Pi 另會顯示任務執行期間的模型呼叫花費，含 sub agent，
@@ -210,7 +213,8 @@ context 滿了時，agent 會壓縮它；`/compact` 則會立刻壓縮。
 *native* 帳號達到用量限制時，agent 會停下它的回合，輸入框上方的卡片會說明限制何時重置。排隊
 中的任務會等到那時，並標示 *held until the usage limit resets*，而不是一個接一個失敗。
 **Continue at reset** 會在重置一分鐘後送出一則請 agent 繼續任務的訊息，**Continue now** 則
-立刻送出，**Send queued tasks** 會讓佇列馬上送出。你自己送出的任務會立刻送出。
+立刻送出，**Send queued tasks** 會讓佇列馬上送出。你自己送出的任務會立刻送出。在那之前，agent
+和有請求時一樣需要你：標頭、分頁標題和分頁圖示都會顯示，開啟通知的背景分頁也會跳出通知。
 
 ## 請求與決策卡片
 

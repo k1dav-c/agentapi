@@ -1,5 +1,6 @@
 export type GroupableActivity<TMessage, TTool> =
   | {type: "message"; key: string; message: TMessage}
+  | {type: "prompt"; key: string; message: TMessage}
   | {type: "tool"; key: string; toolCall: TTool}
   | {type: "thinking"; key: string; content: string; timestamp: string};
 

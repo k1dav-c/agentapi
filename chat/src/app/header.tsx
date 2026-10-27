@@ -28,7 +28,7 @@ import {
 export function Header() {
   const serverStatus = useChatSelector((chat) => chat.serverStatus);
   const agentState = useChatSelector((chat) => chat.agentState);
-  const loginRequired = useChatSelector((chat) => chat.loginRequired);
+  const waitingFor = useChatSelector((chat) => chat.waitingFor);
   const agentType = useChatSelector((chat) => chat.agentType);
   const queuedCount = useChatSelector((chat) => chat.queuedMessages.length);
   const customTitle = useChatSelector((chat) => chat.customTitle);
@@ -73,7 +73,7 @@ export function Header() {
     toast.success("You'll be notified when the agent needs you or finishes");
   };
 
-  const status = getStatusMeta(agentState, loginRequired !== null);
+  const status = getStatusMeta(agentState, waitingFor);
   const StatusIcon = status.icon;
   const activityDetail =
     status.kind === "working"
@@ -192,7 +192,15 @@ export function Header() {
         {queuedCount > 0 && (
           <span
             className={`hidden h-7 items-center rounded-full border px-2.5 text-xs tabular-nums sm:flex ${held ? "text-state-needs" : "text-muted-foreground"}`}
-            title={held ? "Queued tasks run after you answer the agent" : "Tasks waiting to run"}
+            title={
+              !held
+                ? "Tasks waiting to run"
+                : waitingFor === "login"
+                  ? "Queued tasks run after the agent is logged in"
+                  : waitingFor === "limit"
+                    ? "Queued tasks wait for the usage limit to reset"
+                    : "Queued tasks run after you answer the agent"
+            }
           >
             {queuedCount} queued{held ? " · held" : ""}
           </span>

@@ -249,7 +249,9 @@ agentapi server --type=kimi --experimental-acp -- kimi acp
 
 顯示的狀態（Working、Done、Failed、Limit reached）和工具呼叫、思考內容的歸屬，都由伺服器的
 [任務](#任務)資料決定。輸入框上方的狀態列顯示 agent 目前的活動。等待回答時，標頭、分頁標題和
-狀態列會顯示「Needs you」，佇列中的任務會標示為暫緩（held）。較長的任務先顯示最近的 40 個步驟。
+狀態列會顯示「Needs you」，佇列中的任務會標示為暫緩（held）；等待登入，或用量限制讓它停下時也一樣。
+steer 進任務的訊息會顯示在該任務裡，所以聊天介面的任務編號和伺服器一致。較長的任務先顯示最近的
+40 個步驟。
 
 每則 agent 訊息都能個別切換 Markdown 或原始文字顯示，不會影響其他訊息。
 
@@ -636,7 +638,7 @@ Claude Code 也會回報它的 `prompt_cache`：`ttl_seconds` 是模型供應商
 
 使用 `--state-db` 時停止狀態會保留，所以 AgentAPI 重新啟動後，排定的繼續仍會送出。在聊天介面中，
 停止狀態是輸入框上方的一張卡片，顯示重置時間，以及 **Continue at reset**、**Continue now** 和
-**Send queued tasks**，佇列也會標示它在等用量限制。
+**Send queued tasks**，佇列也會標示它在等用量限制，標頭和分頁標題則顯示「Needs you」。
 
 ![因 5 小時限制而停下、標示為 Limit reached 的任務：卡片顯示重置時間，佇列中有一個被暫停的任務](docs/screenshots/limit-card.png)
 

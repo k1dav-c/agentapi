@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {latestTaskEnd, mergeTasks, normalizeTask, taskStatusDetail, tasksByMessage, type ServerTask} from "./server-tasks";
+import {latestTaskEnd, mergeTasks, normalizeTask, steeredMessages, taskStatusDetail, tasksByMessage, type ServerTask} from "./server-tasks";
 
 const task = (id: number, status: ServerTask["status"], seq: number, steered: number[] = []): ServerTask => ({
   id,
@@ -56,5 +56,10 @@ describe("server tasks", () => {
     expect(byMessage.get(4)).toBe(running);
     expect(byMessage.get(7)).toBe(running);
     expect(byMessage.get(5)).toBeUndefined();
+  });
+
+  test("the messages steered into a task", () => {
+    expect([...steeredMessages([task(0, "completed", 2, [1]), task(4, "running", 5, [6, 7])])]).toEqual([1, 6, 7]);
+    expect(steeredMessages([]).size).toBe(0);
   });
 });

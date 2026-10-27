@@ -61,7 +61,8 @@ export default function MessageInput({
   const modes = dispatchModes(dispatch);
   const steerable = canSteer(dispatch);
   const active = turnActive(dispatch);
-  // Nothing queued runs until the agent has its answer, or its login.
+  // Nothing queued runs until the agent has its answer, or its login. After
+  // a usage limit the queue waits too, but a task sent now goes out.
   const waitingForLogin = waitingFor === "login";
   const waitingForAnswer = waitingFor === "answer";
   // Shortcut labels: ⌘ on Apple devices, Ctrl elsewhere.
@@ -271,7 +272,7 @@ export default function MessageInput({
                     placeholder={
                       // Short on a phone, to fit its one row.
                       phone
-                        ? serverStatus === "stable" ? (waitingFor ? "Queue a task…" : "Describe a task…") : serverStatus === "running" ? "Queue a follow-up…" : "Reconnecting…"
+                        ? serverStatus === "stable" ? (waitingForLogin || waitingForAnswer ? "Queue a task…" : "Describe a task…") : serverStatus === "running" ? "Queue a follow-up…" : "Reconnecting…"
                         : waitingForLogin
                         ? "Queue a task (runs after the agent is logged in)…"
                         : waitingForAnswer

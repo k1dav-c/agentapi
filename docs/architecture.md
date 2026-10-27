@@ -689,9 +689,11 @@ is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, it
   and only the 10 most recently used are kept (`lib/session-cache.ts`).
 - `TimelineBuilder` in `lib/task-timeline.ts` groups messages into tasks.
   It rebuilds from the first change and preserves unchanged objects, so
-  memoized tasks and tool calls don't render again. A section takes
-  its state from the server's task (`task_update`, held and cached like the
-  requests), the one its prompt started or was steered into; rich activity
+  memoized tasks and tool calls don't render again. A section is one of
+  the server's tasks (`task_update`, held and cached like the requests):
+  the messages steered into it (`steered`) stay in it, among its steps by
+  time; a server that sends no tasks gets a section per user message. A
+  section takes its state from the server's task; rich activity
   goes to the task its `task_id` names, and only untagged activity is placed
   by time. A task's cost is the model calls made while it ran. The queue
   follows `queue_update` events; `GET /queue` is read on each connection,

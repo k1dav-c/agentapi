@@ -289,8 +289,10 @@ notes.
 
 The server's [task](#tasks) determines the displayed state (Working, Done, Failed, Limit reached)
 and which tool calls and thinking belong to it. A strip above the composer shows the agent's
-current activity. While the agent waits for an answer, the header, tab title and status strip show
-"Needs you", and queued tasks are marked as held. Long tasks show their latest 40 steps first.
+current activity. While the agent waits for an answer or a login, or a usage limit stopped it, the
+header, tab title and status strip show "Needs you", and queued tasks are marked as held. A message
+steered into a task shows inside it, so the chat numbers tasks as the server does. Long tasks show
+their latest 40 steps first.
 
 Each agent message has its own Markdown/raw toggle so you can switch display modes without
 affecting the rest of the conversation.
@@ -753,7 +755,8 @@ yourself goes out at once, ahead of them, and ends the stop.
 
 The stop is kept with `--state-db`, so a scheduled continuation still goes out after AgentAPI
 restarts. In the chat, the stop is a card above the composer with the reset time, **Continue at
-reset**, **Continue now**, and **Send queued tasks**, and the queue says it waits for the limit.
+reset**, **Continue now**, and **Send queued tasks**, the queue says it waits for the limit, and the
+header and tab title say "Needs you".
 
 ![A task stopped on the 5-hour limit, marked Limit reached: the card with the reset time, and a task held in the queue](docs/screenshots/limit-card.png)
 

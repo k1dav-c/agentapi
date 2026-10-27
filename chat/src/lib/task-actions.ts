@@ -1,5 +1,7 @@
 export interface SearchableTask {
   prompt: string;
+  // The messages steered into the task.
+  steered?: string[];
   responses: string[];
   tools: Array<{name: string; input?: string; result?: string; isError?: boolean}>;
 }
@@ -9,6 +11,7 @@ export function taskMatchesQuery(task: SearchableTask, query: string) {
   if (!normalized) return true;
   return [
     task.prompt,
+    ...(task.steered ?? []),
     ...task.responses,
     ...task.tools.flatMap((tool) => [
       tool.name,
@@ -20,6 +23,7 @@ export function taskMatchesQuery(task: SearchableTask, query: string) {
 
 export function taskToMarkdown(task: SearchableTask, number: number) {
   const sections = [`# Task ${number}`, "", "## Prompt", "", task.prompt];
+  for (const steered of task.steered ?? []) sections.push("", "## Steered", "", steered);
   if (task.responses.length > 0) {
     sections.push("", "## Agent output", "", ...task.responses);
   }

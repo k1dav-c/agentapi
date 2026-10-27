@@ -280,6 +280,8 @@ export const TaskGroup = React.memo(function TaskGroup({
                         ) : (
                           <MessageItem key={item.key} message={item.message} searchQuery={searchQuery} />
                         )
+                      ) : item.type === "prompt" ? (
+                        <MessageItem key={item.key} message={item.message} searchQuery={searchQuery} steered />
                       ) : item.type === "thinking" ? (
                         <ThinkingNote key={item.key} content={item.content} />
                       ) : item.type === "tool-group" ? (

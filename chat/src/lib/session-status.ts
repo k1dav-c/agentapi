@@ -147,38 +147,50 @@ export interface AgentStateInput {
   pendingRequestCount?: number;
   // The agent waits for someone to log it in (native transport).
   loginRequired?: boolean;
+  // A usage limit stopped the agent's turn, and holds the queue (native
+  // transport).
+  limitStop?: boolean;
 }
 
 // The agent needs you while its terminal shows a prompt, while it waits on
-// requests or while it waits for someone to log it in.
+// requests, while it waits for someone to log it in, and after a usage
+// limit stopped it, as the server's summary says (attention).
 export function getAgentState({
   serverStatus,
   connectionStatus,
   terminalPrompt = "",
   pendingRequestCount = 0,
   loginRequired = false,
+  limitStop = false,
 }: AgentStateInput): AgentStateKind {
   if (connectionStatus === "offline" || serverStatus === "offline") return "offline";
   if (connectionStatus === "reconnecting") return "reconnecting";
-  if (terminalPrompt || pendingRequestCount > 0 || loginRequired) return "needs-you";
+  if (terminalPrompt || pendingRequestCount > 0 || loginRequired || limitStop) return "needs-you";
   if (serverStatus === "running") return "working";
   if (serverStatus === "stable") return "ready";
   return "connecting";
 }
 
-// What the agent waits for while it needs you: a login comes before any
-// answer, since the agent can't run without it. null when it doesn't wait.
-export type WaitingFor = "login" | "answer" | null;
+// What the agent waits for while it needs you, in the server's order: a
+// login comes before any answer, since the agent can't run without it, and
+// an answer before a usage limit. null when it doesn't wait.
+export type WaitingFor = "login" | "answer" | "limit" | null;
 
-export function waitingFor(kind: AgentStateKind, loginRequired: boolean): WaitingFor {
+export function waitingFor(
+  kind: AgentStateKind,
+  {terminalPrompt = "", pendingRequestCount = 0, loginRequired = false, limitStop = false}: Omit<AgentStateInput, "serverStatus" | "connectionStatus">,
+): WaitingFor {
   if (kind !== "needs-you") return null;
-  return loginRequired ? "login" : "answer";
+  if (loginRequired) return "login";
+  if (terminalPrompt || pendingRequestCount > 0) return "answer";
+  return limitStop ? "limit" : "answer";
 }
 
 // How the header and the embed bar show a state.
-export function getStatusMeta(kind: AgentStateKind, loginRequired = false): StatusMeta {
+export function getStatusMeta(kind: AgentStateKind, waiting: WaitingFor = null): StatusMeta {
   const meta = { kind, ...STATE_META[kind] };
-  // A login comes before any answer: the agent can't run without it.
-  if (kind === "needs-you" && loginRequired) meta.detail = "Agent is waiting for you to log in";
+  if (kind !== "needs-you") return meta;
+  if (waiting === "login") meta.detail = "Agent is waiting for you to log in";
+  else if (waiting === "limit") meta.detail = "A usage limit stopped the agent";
   return meta;
 }
