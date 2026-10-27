@@ -16,6 +16,8 @@
 - A message steered into a running task shows inside that task, marked *steered*, so the chat
   numbers tasks as `GET /tasks`, webhooks and the hub do. It showed as a task of its own, usually
   empty.
+- A message sent in the 3 seconds after an interrupt or an answer, while the agent is idle, starts a
+  task. `GET /tasks`, webhooks and the hub counted it as steering the task that had just stopped.
 - A usage-limit stop counts as "Needs you" in the chat's header, tab title, notifications and status
   strip, and in the hub's frame bar, as it already did in the hub's list.
 - The end of a turn sends one `summary_update`, with the agent idle and the task done. The first of

@@ -203,6 +203,39 @@ func TestTaskTrackerWaitsAfterAnAnswer(t *testing.T) {
 	assert.Equal(t, TaskStatusCompleted, tr.tasks[1].Status)
 }
 
+// A message sent in the grace period after an answer or an interrupt, with
+// the agent idle, starts a task: only a message sent while the agent works
+// steers.
+func TestTaskTrackerMessageInGracePeriod(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC)
+	tr := newTaskTracker(start)
+	take := feed(tr)
+	tr.statusChanged(StatusChangeBody{Status: AgentStatusStable}, start)
+	take(taskMessages(start, ">Rebuild the release"))
+	tr.statusChanged(StatusChangeBody{Status: AgentStatusRunning}, start)
+	tr.statusChanged(StatusChangeBody{Status: AgentStatusStable, PendingRequests: 1}, start)
+	// Interrupted: the request is gone and the agent idle.
+	_, confirm := tr.statusChanged(StatusChangeBody{Status: AgentStatusStable}, start)
+	require.True(t, confirm)
+
+	changed := take(taskMessages(start, ">Rebuild the release", "Interrupted", ">Ask me which checks to run"))
+	assert.Equal(t, []int{0, 1}, changed)
+	require.Len(t, tr.tasks, 2)
+	assert.Equal(t, TaskStatusCompleted, tr.tasks[0].Status)
+	assert.Empty(t, tr.tasks[0].Steered)
+	assert.Equal(t, TaskStatusRunning, tr.tasks[1].Status)
+	assert.Equal(t, 2, tr.tasks[1].ID)
+	// The grace period's end doesn't end the new task.
+	assert.Empty(t, tr.endIfIdle(start.Add(taskEndGrace)))
+
+	// While the agent works on it, a message steers it.
+	tr.statusChanged(StatusChangeBody{Status: AgentStatusRunning}, start.Add(4*time.Second))
+	take(taskMessages(start, ">Rebuild the release", "Interrupted", ">Ask me which checks to run", ">Only the fast ones"))
+	require.Len(t, tr.tasks, 2)
+	assert.Equal(t, []int{3}, tr.tasks[1].Steered)
+}
+
 // Taking only the messages from the first that changed derives the same
 // tasks as going through them all, whatever the changes.
 func TestTaskTrackerIncremental(t *testing.T) {

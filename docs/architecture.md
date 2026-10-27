@@ -443,7 +443,8 @@ usage limit stop, login, terminal prompt) and the latest screen.
   starts a task; messages added during it steer the task. It ends when the
   agent is idle with no open request or terminal dialog. After an answer
   leaves the agent idle, a timer allows 3 seconds for work to resume before
-  ending the task. Rich messages get the running task's `task_id` on arrival.
+  ending the task; a message sent then starts a new task, since the agent
+  isn't working. Rich messages get the running task's `task_id` on arrival.
   Restored and resumed messages are treated as completed history.
 - The emitter maintains a conversation summary (`summary.go`) with the
   instance, status, `attention` (why the agent needs the user), title, latest

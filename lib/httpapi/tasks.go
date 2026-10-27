@@ -244,6 +244,13 @@ func (t *taskTracker) own(msgs []conv.Message, changed []int) []int {
 			changed = append(changed, len(t.tasks)-1)
 			continue
 		}
+		if t.open >= 0 && t.ran && t.idle() {
+			// Only the grace period after an answer (or an interrupt)
+			// keeps the task open; the agent isn't working, so the
+			// message starts a task rather than steering this one.
+			changed = appendOnce(changed, t.open)
+			t.end(t.open, msg.Time)
+		}
 		if t.open >= 0 {
 			t.tasks[t.open].Steered = append(t.tasks[t.open].Steered, msg.Id)
 			t.owners[msg.Id] = t.open
@@ -489,7 +496,7 @@ func (s *Server) registerTaskRoutes() {
 		o.Summary = "Get the conversation's tasks"
 		o.Description = "Returns the conversation's tasks: each message of the user's and the agent's turn on it, " +
 			"until the agent is done (stable again, with no request or terminal dialog open). Messages the user " +
-			"adds while a task runs belong to it (steered). A task is running, completed, failed (the agent reported " +
+			"adds while the agent works on a task belong to it (steered). A task is running, completed, failed (the agent reported " +
 			"an error or exited) or limited (a usage limit stopped it). /events sends task_update when one starts or changes."
 	})
 }

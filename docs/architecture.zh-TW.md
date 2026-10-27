@@ -372,7 +372,7 @@ type Factory func(resume Resume) (Adapter, error)
   緩衝四分之一的結構化訊息時，也會結束訂閱。
 - emitter 為所有 transport 推導任務（`tasks.go`）。使用者訊息開始任務，執行中加入的訊息會
   steer 該任務；agent 閒置且沒有待處理請求或終端機對話框時，任務結束。回答後若 agent
-  暫時閒置，計時器會先留 3 秒讓它恢復工作。結構化訊息抵達時，會取得目前任務的 `task_id`。
+  暫時閒置，計時器會先留 3 秒讓它恢復工作；這段時間送出的訊息會開始新任務，因為 agent 沒有在工作。結構化訊息抵達時，會取得目前任務的 `task_id`。
   還原或接續的訊息視為已完成的歷史紀錄。
 - emitter 維護對話摘要（`summary.go`），包含 instance、狀態、`attention`（需要使用者處理的
   原因）、標題、最新任務、待處理請求、佇列和用量。有摘要訂閱者時，emitter 的每次呼叫只要變更了
