@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
 	"github.com/coder/agentapi/lib/transcript"
@@ -644,7 +645,7 @@ func TestCloseDuringTheLoginCheck(t *testing.T) {
 	// A restart closes the adapter while its login is checked.
 	require.NoError(t, a.Close())
 	close(release)
-	require.ErrorIs(t, <-started, errClosed)
+	require.ErrorIs(t, <-started, agentio.ErrClosed)
 	select {
 	case <-spawned:
 		t.Fatal("the CLI was started after Close")
@@ -744,7 +745,7 @@ func TestCloseInterruptsTheTurn(t *testing.T) {
 	ctx := context.Background()
 	proc := newFakeProcess("")
 	a, sink := started(t, Config{}, proc)
-	a.closeGrace = 5 * time.Second
+	a.host.InterruptGrace = 5 * time.Second
 	require.NoError(t, a.StartTurn(ctx, native.Input{Text: "hi"}))
 	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
 	proc.barrier(t)
@@ -780,7 +781,7 @@ func TestCloseWithoutTheTurnEnding(t *testing.T) {
 		t.Parallel()
 		proc := newFakeProcess("")
 		a, _ := started(t, Config{}, proc)
-		a.closeGrace = 30 * time.Millisecond
+		a.host.InterruptGrace = 30 * time.Millisecond
 		require.NoError(t, a.StartTurn(ctx, native.Input{Text: "hi"}))
 		proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1"}`))
 		proc.barrier(t)
@@ -793,7 +794,7 @@ func TestCloseWithoutTheTurnEnding(t *testing.T) {
 		t.Parallel()
 		proc := newFakeProcess("")
 		a, _ := started(t, Config{}, proc)
-		a.closeGrace = 5 * time.Second
+		a.host.InterruptGrace = 5 * time.Second
 		start := time.Now()
 		require.NoError(t, a.Close())
 		assert.Less(t, time.Since(start), time.Second)

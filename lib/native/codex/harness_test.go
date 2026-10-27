@@ -164,7 +164,7 @@ func newHarness(t *testing.T, resumeRef string, args []string, opts ...harnessOp
 	}
 	// A turn a test leaves running is interrupted at its cleanup; nobody
 	// answers for the fake app-server.
-	h.a.closeGrace = 10 * time.Millisecond
+	h.a.host.InterruptGrace = 10 * time.Millisecond
 	h.rec.CheckUnlocked(func() { h.a.Settings() })
 	go func() {
 		br := bufio.NewReader(proc.stdinR)

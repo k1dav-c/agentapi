@@ -240,7 +240,7 @@ func newHarness(t *testing.T, cfg Config, resumeRef string, opts ...func(*harnes
 	cfg.StartProcess, cfg.Clock = h.pi.start, h.clock
 	a := newAdapter(cfg, cfg.Args, resumeRef)
 	a.lineHandled = func() { h.handled.Add(1) }
-	a.abortGrace, a.stdinGrace, a.termGrace = time.Second, time.Second, time.Second
+	a.host.InterruptGrace, a.host.StdinGrace, a.host.TermGrace = time.Second, time.Second, time.Second
 	h.a = a
 	h.sink.CheckUnlocked(func() { a.Settings() })
 	for _, opt := range opts {

@@ -187,7 +187,7 @@ func TestInterruptWriteFails(t *testing.T) {
 	t.Parallel()
 	h := startedHarness(t, func(h *harness) {
 		h.pi.exitOnStdinClose = false
-		h.a.stdinGrace = 10 * time.Millisecond
+		h.a.host.StdinGrace = 10 * time.Millisecond
 	})
 	cmd := h.prompt("p", "hi")
 	h.answer(cmd, `{"disposition":"started"}`)
@@ -207,6 +207,7 @@ func TestInterruptWriteFails(t *testing.T) {
 	h.write(`{"type":"agent_settled"}`)
 	h.settle()
 	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.State().Results, "the turn wasn't interrupted")
+	closeEscalating(t, h)
 }
 
 // A record whose fields changed type is read all the same: a lost record

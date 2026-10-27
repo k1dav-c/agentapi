@@ -67,21 +67,8 @@ func (cfg Config) logger() *slog.Logger {
 	return cfg.Logger
 }
 
-// Timeouts of the shutdown sequence.
+// Timeouts.
 const (
-	// abortGrace is how long Close waits for a running turn to stop
-	// before it closes stdin.
-	abortGrace = 3 * time.Second
-	// stdinGrace is how long Pi gets to exit after stdin closes.
-	stdinGrace = 3 * time.Second
-	// termGrace is how long Pi gets after SIGTERM before SIGKILL.
-	termGrace = 2 * time.Second
-)
-
-// Other timeouts and limits.
-const (
-	// exitInfoWait is how long a failed start waits for Pi's exit status.
-	exitInfoWait = 3 * time.Second
 	// interruptTimeout is how long an interrupted turn waits for Pi to end
 	// it before the adapter ends it.
 	interruptTimeout = agentio.InterruptTimeout
@@ -90,12 +77,8 @@ const (
 	snapshotInterval = agentio.SnapshotInterval
 )
 
-var (
-	// errExited is returned for operations after Pi exited.
-	errExited = errors.New("pi exited")
-	// errClosed is returned by Start after Close.
-	errClosed = errors.New("the adapter was closed")
-)
+// errExited is returned for operations after Pi exited.
+var errExited = errors.New("pi exited")
 
 // cmdKind is what a command waiting for its response was for.
 type cmdKind int
@@ -138,27 +121,25 @@ type Adapter struct {
 	drift     *agentio.Drift
 	resumeRef string
 	// fork opens a copy of resumeRef's session under a new ID.
-	fork  bool
-	start procutil.StartFunc
+	fork bool
 
 	// The timeouts and limits of the constants above, and the clock of
 	// the snapshot, dialog and interrupt timers; tests change them.
-	abortGrace, stdinGrace, termGrace time.Duration
-	interruptTimeout                  time.Duration
-	interval                          time.Duration
-	maxLine                           int
-	clock                             quartz.Clock
+	interruptTimeout time.Duration
+	interval         time.Duration
+	maxLine          int
+	clock            quartz.Clock
 	// lineHandled, if set, is called after each stdout record is handled.
 	lineHandled func()
 
 	// writer writes Pi's commands, once Start gave it the stdin.
 	writer *agentio.Writer
-	proc   procutil.Process
+	// host starts and stops Pi.
+	host *agentio.Host
 
 	mu         sync.Mutex
 	started    bool
 	exited     bool
-	closing    bool
 	nextID     int
 	pending    map[string]*pendingCmd
 	dialogs    map[string]*dialog
@@ -185,12 +166,10 @@ type Adapter struct {
 	posted chan func()
 	// loopDone is closed when the event loop has stopped.
 	loopDone chan struct{}
-	// procDone is closed when the process has exited.
+	// procDone is closed when the process has exited and the loop handled
+	// its output, or OutputGrace after the exit.
 	procDone chan struct{}
-	exitErr  error
-
-	closeOnce sync.Once
-	doneOnce  sync.Once
+	doneOnce sync.Once
 
 	// Loop state; only the event loop goroutine touches it.
 	loop loopState
@@ -215,16 +194,12 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 		cfg.Clock = quartz.NewReal()
 	}
 	log := cfg.logger().With("agent", "pi")
-	return &Adapter{
+	a := &Adapter{
 		cfg:              cfg,
 		args:             args,
 		log:              log,
 		drift:            agentio.NewDrift("Pi", log),
 		resumeRef:        resumeRef,
-		start:            cfg.StartProcess,
-		abortGrace:       abortGrace,
-		stdinGrace:       stdinGrace,
-		termGrace:        termGrace,
 		interruptTimeout: interruptTimeout,
 		interval:         snapshotInterval,
 		maxLine:          agentio.MaxLine,
@@ -237,6 +212,14 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 		loopDone:         make(chan struct{}),
 		procDone:         make(chan struct{}),
 	}
+	a.host = agentio.NewHost(agentio.HostConfig{
+		Name:   "Pi",
+		Logger: log,
+		Clock:  cfg.Clock,
+		Start:  cfg.StartProcess,
+		Writer: a.writer,
+	})
+	return a
 }
 
 // Start launches Pi and waits for its first get_state response, which
@@ -254,13 +237,9 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	// The arguments can hold secrets (--api-key).
 	a.log.Info("Starting Pi in RPC mode", "program", a.cfg.Program, "resume", a.resumeRef != "")
 	a.log.Debug("Pi command line", "args", args)
-	a.mu.Lock()
-	closing := a.closing
-	a.mu.Unlock()
-	if closing {
-		return errClosed
-	}
-	proc, err := a.start(procutil.Command{
+	// Before the loop runs, which owns it from then on.
+	a.loop = a.newLoopState(sink)
+	proc, err := a.host.Launch(procutil.Command{
 		Program: a.cfg.Program,
 		Args:    args,
 		Dir:     a.cfg.CWD,
@@ -268,23 +247,9 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		Logger:  a.log,
 	})
 	if err != nil {
-		a.markDone(err)
+		a.markDone()
 		return err
 	}
-	a.writer.Attach(proc.Stdin())
-	a.mu.Lock()
-	closing = a.closing
-	if !closing {
-		a.proc = proc
-	}
-	a.mu.Unlock()
-	if closing {
-		// Close ran while Pi was starting and found no process to stop.
-		_ = proc.Stdin().Close()
-		_ = proc.Kill()
-		return errClosed
-	}
-	a.loop = a.newLoopState(sink)
 
 	lines := make(chan []byte, 16)
 	go func() {
@@ -293,13 +258,13 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	}()
 	go a.eventLoop(lines)
 	go func() {
-		err := proc.Wait()
+		<-a.host.Exited()
 		// Let the loop handle what Pi wrote before it exited.
 		select {
 		case <-a.loopDone:
 		case <-time.After(procutil.OutputGrace):
 		}
-		a.markDone(procutil.WithStderr(err, proc.StderrTail()))
+		a.markDone()
 	}()
 
 	res, err := a.request(ctx, cmdQuery, simpleCommand{Type: "get_state"})
@@ -307,7 +272,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		err = res.err
 	}
 	if err != nil {
-		return a.startError(err, proc)
+		return a.startError(err)
 	}
 	var state sessionState
 	if err := a.drift.Decode("get_state response", res.data, &state); err != nil {
@@ -324,7 +289,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	// Before Start returns, so the conversation finds the session ref and
 	// capabilities.
 	if !a.runOnLoop(func() { a.handleState(state) }) {
-		return a.startError(errExited, proc)
+		return a.startError(errExited)
 	}
 	a.mu.Lock()
 	a.started = true
@@ -332,30 +297,16 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	return nil
 }
 
-// startError explains why Pi didn't open its session. When it exited, its
-// exit error and stderr say why (a broken extension, a bad option).
-func (a *Adapter) startError(err error, proc procutil.Process) error {
-	if errors.Is(err, errExited) {
-		select {
-		case <-a.procDone:
-			if a.exitErr != nil {
-				return fmt.Errorf("pi exited during startup: %w", a.exitErr)
-			}
-			if tail := proc.StderrTail(); tail != "" {
-				return fmt.Errorf("pi exited during startup: %w: %s", err, tail)
-			}
-		case <-time.After(exitInfoWait):
-		}
-	}
-	return fmt.Errorf("pi didn't open its session: %w", err)
+// startError stops Pi, which didn't open its session, and says why. When
+// it exited, its exit error and stderr say why (a broken extension, a bad
+// option).
+func (a *Adapter) startError(err error) error {
+	return a.host.StartError(fmt.Errorf("pi didn't open its session: %w", err), errors.Is(err, errExited))
 }
 
-// markDone records the exit and makes Wait return.
-func (a *Adapter) markDone(err error) {
-	a.doneOnce.Do(func() {
-		a.exitErr = err
-		close(a.procDone)
-	})
+// markDone makes Wait return.
+func (a *Adapter) markDone() {
+	a.doneOnce.Do(func() { close(a.procDone) })
 }
 
 // send writes one command line, unless ctx ends first (see
@@ -536,25 +487,29 @@ func (a *Adapter) Capabilities() native.Capabilities {
 	return a.caps
 }
 
-// Wait returns when Pi has exited.
+// Wait returns when Pi has exited and the loop handled its output, or
+// OutputGrace after the exit.
 func (a *Adapter) Wait() error {
 	<-a.procDone
-	return a.exitErr
+	return a.host.ExitErr()
 }
 
 // Close stops Pi: it aborts a running turn (closing stdin mid-turn leaves
 // the session with a tool call without result), closes stdin, then sends
 // SIGTERM and SIGKILL to the process group if Pi doesn't exit.
 func (a *Adapter) Close() error {
-	a.closeOnce.Do(a.shutdown)
+	a.host.Close(a.abortForClose)
+	if a.host.Process() == nil {
+		a.markDone()
+	}
 	<-a.procDone
 	return nil
 }
 
-func (a *Adapter) shutdown() {
+// abortForClose aborts a running turn, if any, and returns a channel
+// closed once Pi answered the abort.
+func (a *Adapter) abortForClose(ctx context.Context) <-chan struct{} {
 	a.mu.Lock()
-	a.closing = true
-	proc := a.proc
 	busy := (a.turnActive || a.runActive) && !a.exited
 	var abort *pendingCmd
 	var abortID string
@@ -563,35 +518,27 @@ func (a *Adapter) shutdown() {
 		abortID, abort = a.addPendingLocked(cmdAbort)
 	}
 	a.mu.Unlock()
-	if proc == nil {
-		a.markDone(nil)
-		return
+	if abort == nil {
+		return nil
 	}
-	if abort != nil {
-		// A write that is stuck (Pi stopped reading) must not keep Close
-		// from going on: the wait is bounded, and Stop's closing stdin
-		// makes the write fail.
-		go func() {
-			if err := a.send(context.Background(), simpleCommand{ID: abortID, Type: "abort"}); err != nil {
-				a.mu.Lock()
-				delete(a.pending, abortID)
-				a.mu.Unlock()
-				deliverResult(abort, cmdResult{err: err})
-			}
-		}()
-		select {
-		case <-abort.done:
-		case <-a.procDone:
-		case <-time.After(a.abortGrace):
-			a.log.Warn("Pi didn't stop its turn in time; closing it anyway")
+	// A write that is stuck (Pi stopped reading) must not keep Close from
+	// going on: the wait is bounded, and Stop's closing stdin makes the
+	// write fail.
+	go func() {
+		if err := a.send(ctx, simpleCommand{ID: abortID, Type: "abort"}); err != nil {
+			a.mu.Lock()
+			delete(a.pending, abortID)
+			a.mu.Unlock()
+			deliverResult(abort, cmdResult{err: err})
 		}
-	}
-	procutil.Stop(proc, a.procDone, procutil.StopOptions{
-		StdinGrace: a.stdinGrace,
-		TermGrace:  a.termGrace,
-		Logger:     a.log,
-		Name:       "Pi",
-	})
+	}()
+	answered := make(chan struct{})
+	go func() {
+		// The answer, a failed write, or errExited once Pi's output ended.
+		<-abort.done
+		close(answered)
+	}()
+	return answered
 }
 
 // ready returns an error until Start has completed, and after Pi exited.

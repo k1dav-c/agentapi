@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
 	"github.com/coder/agentapi/lib/transcript"
@@ -279,7 +280,7 @@ func TestCloseBeforeStart(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, a.Close())
 	require.NoError(t, a.Wait())
-	require.ErrorIs(t, a.Start(context.Background(), newRecorder(t)), errClosed)
+	require.ErrorIs(t, a.Start(context.Background(), newRecorder(t)), agentio.ErrClosed)
 }
 
 // A Close racing a failed Start used to close the adapter's channels twice.
@@ -499,7 +500,8 @@ func TestOfferedOptionsAnswerTheRequest(t *testing.T) {
 	proc := newFakeProc()
 	go func() { _, _ = io.Copy(io.Discard, proc.stdinR) }()
 	a := newAdapter(Config{Logger: slog.New(slog.DiscardHandler)}, launchOptions{}, "")
-	a.proc, a.sink = proc, newRecorder(t)
+	a.sink = newRecorder(t)
+	a.writer.Attach(proc.Stdin())
 	t.Cleanup(func() { proc.exit(nil) })
 	for i, tc := range []struct{ method, params string }{
 		{methodCommandApproval, `{"turnId":"t","itemId":"i","command":"make","proposedExecpolicyAmendment":["make"],
@@ -832,7 +834,7 @@ func TestCloseInterruptsTheTurn(t *testing.T) {
 	h := newHarness(t, "", nil)
 	h.boot()
 	h.beginTurn("turn-1")
-	h.a.closeGrace = waitTimeout
+	h.a.host.InterruptGrace = waitTimeout
 	closed := make(chan error, 1)
 	go func() { closed <- h.a.Close() }()
 
@@ -861,7 +863,7 @@ func TestCloseGivesUpOnTheTurn(t *testing.T) {
 	h := newHarness(t, "", nil)
 	h.boot()
 	h.beginTurn("turn-1")
-	h.a.closeGrace = 30 * time.Millisecond
+	h.a.host.InterruptGrace = 30 * time.Millisecond
 	start := time.Now()
 	require.NoError(t, h.a.Close())
 	h.expectSent("turn/interrupt")
@@ -873,7 +875,7 @@ func TestCloseGivesUpOnTheTurn(t *testing.T) {
 func TestCloseWithoutATurn(t *testing.T) {
 	h := newHarness(t, "", nil)
 	h.boot()
-	h.a.closeGrace = waitTimeout
+	h.a.host.InterruptGrace = waitTimeout
 	require.NoError(t, h.a.Close())
 	h.expectNothingSent()
 }

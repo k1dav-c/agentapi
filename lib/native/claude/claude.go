@@ -127,13 +127,18 @@ func newAdapter(cfg Config, args parsedArgs, resumeRef string) *Adapter {
 		writer:      agentio.NewWriter("claude"),
 		interrupt:   agentio.NewInterruptDeadline(cfg.Clock, cfg.InterruptTimeout),
 		requests:    make(map[string]*pendingRequest),
-		exited:      make(chan struct{}),
 		readDone:    make(chan struct{}),
-		closeGrace:  closeInterruptGrace,
 	}
-	if cfg.StopTimeout > 0 {
-		a.closeGrace = cfg.StopTimeout
-	}
+	a.host = agentio.NewHost(agentio.HostConfig{
+		Name:           "Claude Code",
+		Logger:         log,
+		Clock:          cfg.Clock,
+		Start:          cfg.StartProcess,
+		Writer:         a.writer,
+		StdinGrace:     cfg.StopTimeout,
+		TermGrace:      cfg.StopTimeout,
+		InterruptGrace: cfg.StopTimeout,
+	})
 	a.parser.drift = a.drift
 	if resumeRef == "" {
 		a.sessionID = cfg.NewID()
@@ -160,14 +165,13 @@ type Adapter struct {
 	// sessionID is the id passed with --session-id for a new session.
 	sessionID string
 
-	proc   procutil.Process
+	// host starts and stops the CLI.
+	host   *agentio.Host
 	sink   native.Sink
 	parser *streamParser
 	log    *slog.Logger
 	// drift counts what the CLI sends that the adapter doesn't read.
 	drift *agentio.Drift
-	// closeGrace is how long Close waits for a turn it interrupted to end.
-	closeGrace time.Duration
 	// reportedRef is the session id last reported with SessionRef, at
 	// first the session to resume. Read loop only.
 	reportedRef string
@@ -192,7 +196,6 @@ type Adapter struct {
 	prompt     string
 	controlSeq int
 	requests   map[string]*pendingRequest
-	closing    bool
 	// mode is Claude Code's permission mode, model the value of the model
 	// option it runs and effort its reasoning effort; models are the
 	// models it offers. See settings.go.
@@ -204,10 +207,8 @@ type Adapter struct {
 	// only.
 	usage native.AgentUsage
 
-	exited   chan struct{}
-	exitErr  error
+	// readDone is closed once the read loop has ended.
 	readDone chan struct{}
-	stopOnce sync.Once
 }
 
 var (
@@ -216,8 +217,6 @@ var (
 )
 
 var (
-	// errClosed is returned by Start after Close.
-	errClosed = errors.New("the adapter was closed")
 	// errExited fails the control requests the CLI didn't answer before
 	// its output ended.
 	errExited = errors.New("claude exited")
@@ -279,62 +278,33 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		Dir:     a.cfg.CWD,
 		Logger:  a.log,
 	}
+	// The login check takes up to 10 s; the host doesn't start the CLI if
+	// a restart closed the adapter meanwhile.
 	if err := a.checkLogin(ctx, cmd.Env); err != nil {
 		return err
 	}
-	// A restart may have closed the adapter while the login was checked
-	// (up to 10 s): starting the CLI now would run it next to the new one.
 	a.mu.Lock()
-	closing := a.closing
+	a.sink = sink
 	a.mu.Unlock()
-	if closing {
-		return errClosed
-	}
 	// The arguments can hold secrets (inline --settings or --mcp-config).
 	a.log.Info("Starting Claude Code", "program", cmd.Program, "resume", a.resumeRef != "")
 	a.log.Debug("Claude Code command line", "args", cmd.Args)
-	proc, err := a.cfg.StartProcess(cmd)
+	proc, err := a.host.Launch(cmd)
 	if err != nil {
 		return err
 	}
-	a.mu.Lock()
-	closing = a.closing
-	if !closing {
-		a.proc = proc
-		a.sink = sink
-	}
-	a.mu.Unlock()
-	if closing {
-		// Close ran while the CLI was starting and found no process to stop.
-		_ = proc.Stdin().Close()
-		_ = proc.Kill()
-		return errClosed
-	}
-	a.writer.Attach(proc.Stdin())
-
 	go a.readLoop(proc.Stdout())
-	go func() {
-		err := proc.Wait()
-		a.mu.Lock()
-		a.exitErr = procutil.WithStderr(err, proc.StderrTail())
-		a.mu.Unlock()
-		close(a.exited)
-	}()
 
 	response, err := a.request(ctx, "initialize", map[string]any{"hooks": nil}, nil)
 	if err != nil {
-		_ = a.Close()
-		if !errors.Is(err, errExited) {
-			// Timed out, or the CLI answered with an error.
-			return fmt.Errorf("initialize claude: %w", err)
+		// Timed out, or the CLI answered with an error, or exited: it can
+		// exit cleanly after a fatal error (an unknown session to resume),
+		// and its stderr says why.
+		exited := errors.Is(err, errExited)
+		if !exited {
+			err = fmt.Errorf("initialize claude: %w", err)
 		}
-		exitErr := a.waitErr()
-		if exitErr == nil {
-			// It can exit cleanly after a fatal error (an unknown session
-			// to resume); stderr says why.
-			exitErr = procutil.WithStderr(err, proc.StderrTail())
-		}
-		return fmt.Errorf("claude exited during startup: %w", exitErr)
+		return a.host.StartError(err, exited)
 	}
 	var info initializeInfo
 	_ = a.drift.Decode("initialize response", response, &info)
@@ -358,10 +328,7 @@ func (a *Adapter) write(ctx context.Context, v any) error {
 // successful answer in the read loop; the answer comes on the returned
 // call.
 func (a *Adapter) sendControl(ctx context.Context, subtype string, fields map[string]any, onResponse func(json.RawMessage)) (string, *agentio.Call[controlResult], error) {
-	a.mu.Lock()
-	closing := a.closing
-	a.mu.Unlock()
-	if closing {
+	if a.host.Closing() {
 		return "", nil, errors.New("claude is shutting down")
 	}
 	return a.issueControl(ctx, subtype, fields, onResponse)
@@ -588,21 +555,12 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 
 // Wait implements native.Adapter.
 func (a *Adapter) Wait() error {
-	a.mu.Lock()
-	proc := a.proc
-	a.mu.Unlock()
-	if proc == nil {
+	if a.host.Process() == nil {
 		return native.ErrNotStarted
 	}
-	<-a.exited
+	<-a.host.Exited()
 	<-a.readDone
-	return a.waitErr()
-}
-
-func (a *Adapter) waitErr() error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.exitErr
+	return a.host.ExitErr()
 }
 
 // Close implements native.Adapter: a turn that runs is interrupted first
@@ -610,58 +568,31 @@ func (a *Adapter) waitErr() error {
 // result, which a resumed session goes on from); closing stdin lets the CLI
 // finish and exit on its own; SIGTERM and SIGKILL follow if it doesn't.
 func (a *Adapter) Close() error {
-	a.mu.Lock()
-	proc := a.proc
-	ended := a.turn.ended
-	a.closing = true
-	a.mu.Unlock()
-	if proc == nil {
-		return nil
-	}
-	a.stopOnce.Do(func() {
-		if ended != nil {
-			a.interruptForClose(ended)
-		}
-		procutil.Stop(proc, a.exited, procutil.StopOptions{
-			StdinGrace: a.cfg.StopTimeout,
-			TermGrace:  a.cfg.StopTimeout,
-			Clock:      a.cfg.Clock,
-			Logger:     a.log,
-			Name:       "Claude Code",
-		})
-	})
-	<-a.exited
+	a.host.Close(a.interruptForClose)
 	return nil
 }
 
-// closeInterruptGrace is how long Close waits for a turn it interrupted to
-// end, unless Config.StopTimeout says otherwise (Adapter.closeGrace).
-const closeInterruptGrace = 3 * time.Second
-
-// interruptForClose interrupts the running turn, whose end closes ended,
-// and waits for it to end, for the CLI to exit, or for the grace to pass.
-func (a *Adapter) interruptForClose(ended <-chan struct{}) {
+// interruptForClose interrupts the running turn, if any, and returns the
+// channel its end closes.
+func (a *Adapter) interruptForClose(ctx context.Context) <-chan struct{} {
 	a.mu.Lock()
-	a.turn.interrupted = true
+	ended := a.turn.ended
+	if ended != nil {
+		a.turn.interrupted = true
+	}
 	a.mu.Unlock()
+	if ended == nil {
+		return nil
+	}
 	// Not waited for: a write the CLI doesn't read must not hold Close,
-	// whose closing stdin makes it fail. Sent although Close set closing,
-	// which refuses other requests.
+	// whose closing stdin makes it fail. Sent although the adapter is
+	// closing, which refuses other requests.
 	go func() {
-		if _, _, err := a.issueControl(context.Background(), "interrupt", nil, a.interruptAccepted); err != nil {
+		if _, _, err := a.issueControl(ctx, "interrupt", nil, a.interruptAccepted); err != nil {
 			a.log.Debug("Failed to interrupt the turn before closing", "error", err)
 		}
 	}()
-	// Real time, as the Clock could be one nobody advances once the
-	// adapter is retired.
-	timer := time.NewTimer(a.closeGrace)
-	defer timer.Stop()
-	select {
-	case <-ended:
-	case <-a.exited:
-	case <-timer.C:
-		a.log.Warn("Claude Code didn't end its turn in time; closing it anyway")
-	}
+	return ended
 }
 
 // readLoop handles the CLI's output until it closes, and wakes up when a
