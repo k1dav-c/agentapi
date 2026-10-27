@@ -156,7 +156,7 @@ flowchart TB
 | `server.go`、`routes.go`、`hosts.go`、`middleware.go` | 伺服器的設定、啟動與停止；各功能自行註冊的路由；允許的主機與來源；請求記錄 |
 | `conversation_api.go`、`queue.go`、`sse.go`、`jsonl_watcher.go` | 訊息、狀態與時間軸；佇列、派送與 `queue_update`；`GET /events` 與畫面串流；PTY 傳輸的工作階段紀錄監看 |
 | `tasks.go` | emitter 從對話推導出的任務（`taskTracker`）、`task_update` 與 `GET /tasks` |
-| `summary.go`、`registry.go` | 給監看多個 AgentAPI 的用戶端的摘要（`attention`、標題、最新任務、`unread`）、`summary_update`、`GET /summary` 與 `POST /tasks/seen`；伺服器的登記檔（`instanceRegistry`） |
+| `summary.go`、`spend.go`、`registry.go` | 給監看多個 AgentAPI 的用戶端的摘要（`attention`、標題、最新任務、`unread`、`spend`）、`summary_update`、`GET /summary` 與 `POST /tasks/seen`；每分鐘計算的花費；伺服器的登記檔（`instanceRegistry`） |
 | `backend.go`、`backend_pty.go`、`backend_native.go` | 依 transport 而不同的部分：派送佇列與每次檢查要做的事（`beforeQueue`：排定的繼續、Codex 的更新提示）、送出訊息、重新啟動（`beginRestart`、`beginReload`）、人工回覆協定（`handoffOffer`、`answerHandoff`） |
 | `setup.go` | 啟動 PTY 或 ACP agent 的行程 |
 | `native.go` | 請求、設定、中斷、壓縮、重試登入；native observer |
@@ -362,6 +362,9 @@ type Factory func(resume Resume) (Adapter, error)
 - emitter 維護對話摘要（`summary.go`），包含 instance、狀態、`attention`（需要使用者處理的
   原因）、標題、最新任務、待處理請求、佇列和用量。有摘要訂閱者時，畫面以外的每次變更後都會重新
   計算，摘要不同才送出 `summary_update`；回覆文字增長不會送出摘要更新。
+- 對於會讀取 session log 的 agent，伺服器每分鐘計算一次摘要的 `spend`（`spend.go`）：
+  `sessions.Store.Costs` 以增量方式讀取 log，再把總計中結束於最近 24 小時和 7 天內的各小時加總。
+  `EventEmitter.SetSpend` 只在金額改變時才送出摘要。
   只有 `/events?only=summary` 訂閱這些更新，串流另會送出心跳。`PUT /webhook` 可修改
   instance 的 ID 與網址，因此也會觸發摘要檢查，並重寫登記檔。
 - emitter 也記錄用戶端上次顯示對話的時間（`POST /tasks/seen`，聊天介面顯示對話時會呼叫）：

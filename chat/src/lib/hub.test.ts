@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {activity, attentionKey, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, groupInstances, groupNames, hubRoot, instanceState, needsYou, sortInstances, stateLabel, usagePercent, type HubInstance, type Summary} from "./hub";
+import {activity, attentionKey, formatUSD, spendTotals, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, groupInstances, groupNames, hubRoot, instanceState, needsYou, sortInstances, stateLabel, usagePercent, type HubInstance, type Summary} from "./hub";
 
 const summary = (overrides: Partial<Summary> = {}): Summary =>
   ({
@@ -153,5 +153,12 @@ describe("hub", () => {
     expect(instanceState(instance("a", {summary: summary({attention: "limit"}), muted: "login"}))).toBe("needs-you");
     // Sorted after the idle ones.
     expect(sortInstances([muted, instance("b")]).map((i) => i.id)).toEqual(["b", "a"]);
+  });
+
+  test("spend: totals of the instances that report one, and short amounts", () => {
+    const spending = (day_usd: number, week_usd: number) => summary({spend: {day_usd, week_usd}});
+    const totals = spendTotals([instance("a", {summary: spending(1.5, 10)}), instance("b", {summary: spending(100, 300)}), instance("c")]);
+    expect(totals).toEqual({day: 101.5, week: 310, counted: 2});
+    expect([0, 0.004, 4.2, 109.77, 452.31, 1234, 98_765, 1_500_000].map(formatUSD)).toEqual(["$0", "$0", "$4.20", "$110", "$452", "$1.2k", "$99k", "$1.5M"]);
   });
 });

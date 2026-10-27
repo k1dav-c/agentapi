@@ -1161,7 +1161,9 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
   `server_id`、主機、port、目錄、agent 與 `url`）、`status`、`lifecycle`，以及取自工作階段名稱
   或最新提示開頭的 `title`。另外包含最新[任務](#任務)、任務數、`pending_requests`、最早的待處理
   `request`（類型、標題和 agent 提出的時間）、`queued_messages`、開啟中的終端機對話框、
-  `login_required`、`limit_stop` 和 `usage`（context window 與帳號用量限制）。
+  `login_required`、`limit_stop`、`usage`（context window 與帳號用量限制），以及 native 模式的
+  Claude Code、Codex 和 Pi 才有的 `spend`：agent 在工作目錄裡所有 session 最近 24 小時（`day_usd`）
+  和 7 天（`week_usd`）換算成 API 的金額，每分鐘從 log 重新計算一次。
 - `attention` 依優先順序標示需要使用者處理的原因：`login`、`request`（核准、提問或計畫）、
   `dialog`（終端機對話框）、`limit`（用量限制使回合停止）、`exited`，或 `none`。
 - `GET /events?only=summary` 在連線時及摘要變動時送出 `summary_update`，另有心跳。

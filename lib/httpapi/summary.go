@@ -72,6 +72,8 @@ type SummaryBody struct {
 	// Request is the oldest pending request, what a client shows of what
 	// the agent waits for without opening it.
 	Request *SummaryRequest `json:"request,omitempty" doc:"The oldest request the agent waits on (see GET /requests); missing when none waits."`
+	// Spend is what the agent's sessions cost recently.
+	Spend *SummarySpend `json:"spend,omitempty" doc:"What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY, ACP) and until it is worked out."`
 }
 
 // SummaryRequest is what a summary says of a pending request.
@@ -106,6 +108,10 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 		summary.Instance = e.instance()
 	}
 	summary.SeenAt = e.seenAt
+	if e.spend != nil {
+		spend := *e.spend
+		summary.Spend = &spend
+	}
 	for _, r := range e.requests {
 		if r.Status != native.RequestStatusPending {
 			continue
@@ -158,6 +164,18 @@ func (e *EventEmitter) MarkSeen() SummaryBody {
 	}
 	e.summaryChangedLocked()
 	return e.summaryLocked()
+}
+
+// SetSpend records what the agent's sessions cost recently, and sends the
+// summary if that changed.
+func (e *EventEmitter) SetSpend(spend SummarySpend) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.spend != nil && *e.spend == spend {
+		return
+	}
+	e.spend = &spend
+	e.summaryChangedLocked()
 }
 
 // SummaryChanged sends the summary if it changed by something outside the

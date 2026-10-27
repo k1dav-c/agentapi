@@ -76,6 +76,8 @@ device scale factor of 1.
 | [hub-add.png](hub-add.png) | Adding an instance by its URL and token |
 | [hub-phone.png](hub-phone.png) | The hub's list on a phone, in groups |
 | [hub-phone-menu.png](hub-phone-menu.png) | A row's menu on a phone: its group, a new one, and Forget |
+| [hub-muted.png](hub-muted.png) | The list on a phone with an agent's login wait muted |
+| [hub-spend.png](hub-spend.png) | The overview's Spend card: the last 24 hours and 7 days, and the agents that spent the most |
 | [hub-phone-chat.png](hub-phone-chat.png) | An instance open from the hub on a phone, with the way back to the list |
 
 The GIFs use a 1100 × 720 window, or 390 × 844 for the phone view. A blue dot marks the pointer and

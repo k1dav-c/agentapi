@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- The hub shows what the agents spent, at list prices (API-equivalent; a subscription doesn't charge
+  it): a row its agent's last 24 hours, a group header its group's, the top of the list all of
+  them, and the overview a **Spend** card with the last 24 hours and 7 days and the agents that
+  spent the most. The summary carries it as `spend` (`day_usd`, `week_usd`): what the agent's
+  sessions in the working directory cost, worked out from their logs once a minute, for native
+  Claude Code, Codex and Pi.
+
 ## v1.7.0
 
 ### Features

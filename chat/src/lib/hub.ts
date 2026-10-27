@@ -309,3 +309,39 @@ export function formatElapsed(since: string | undefined, now: number): string {
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
   return `${Math.floor(seconds / 3600)}h ${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}m`;
 }
+
+// What the instances spent recently, as their summaries report it: the
+// API-equivalent cost of their sessions, at list prices.
+export interface SpendTotals {
+  day: number;
+  week: number;
+  // How many instances report a spend; the others (PTY, ACP, older
+  // AgentAPIs) don't count.
+  counted: number;
+}
+
+export function spendTotals(instances: Iterable<HubInstance>): SpendTotals {
+  const totals: SpendTotals = {day: 0, week: 0, counted: 0};
+  for (const instance of instances) {
+    const spend = instance.summary?.spend;
+    if (!spend) continue;
+    totals.day += spend.day_usd;
+    totals.week += spend.week_usd;
+    totals.counted++;
+  }
+  return totals;
+}
+
+// formatUSD is a short amount: "$0", "$4.20", "$110", "$1.2k".
+export function formatUSD(usd: number): string {
+  if (usd < 0.005) return "$0";
+  if (usd < 10) return `$${usd.toFixed(2)}`;
+  if (usd < 1000) return `$${Math.round(usd)}`;
+  if (usd < 999_500) return `$${(usd / 1000).toFixed(usd < 9_950 ? 1 : 0)}k`;
+  return `$${(usd / 1_000_000).toFixed(1)}M`;
+}
+
+// spendTitle says what a spend is, for a tooltip.
+export function spendTitle(day: number, week: number): string {
+  return `${formatUSD(day)} in the last 24 hours, ${formatUSD(week)} in the last 7 days (API-equivalent, at list prices; a subscription doesn't charge it)`;
+}
