@@ -560,10 +560,13 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 - `components/chat-provider.tsx` 組合用戶端狀態與 API 操作。動作與 API 呼叫來自
   `useChatActions()`，這個物件永遠不變，所以只做動作的元件不會重新 render；狀態則用
   `useChatSelector`（`lib/store.ts`）分片讀取，元件只在它讀的那一片改變時才重新 render。
-  `use-event-stream.ts`、`use-queue.ts` 與 `use-session-cache.ts` 分別處理事件串流與重新連線、
-  訊息佇列及對話快取。
-- 事件串流使用 `/events?sync=1`，並記錄最後序號以便增量重播；伺服器關閉的串流會立刻重新開啟、
-  不顯示提示，除非一直失敗。事件內容的型別來自產生的 schema（`lib/events.ts`），null 的清單在
+  `use-event-stream.ts`、`use-queue.ts` 與 `use-session-cache.ts` 分別把事件套用到狀態、追蹤
+  訊息佇列及快取對話。
+- 事件串流使用 `/events?sync=1`，並記錄最後序號以便增量重播（`lib/chat-stream.ts`）。
+  `EventSourceConnection`（`lib/event-source.ts`，以及 hook `use-event-source.ts`）讓它、hub 頁面
+  的串流和終端機的串流保持連線：結束的串流會立刻重新開啟、不顯示提示，除非一直失敗；失敗的串流
+  （401、proxy 的 502）在退避後重試；有心跳的串流沒了動靜，由 watchdog 重新連線；瀏覽器恢復連網
+  或回到分頁時也會重新連線。事件內容的型別來自產生的 schema（`lib/events.ts`），null 的清單在
   事件抵達時就換成空清單。chat 不認得的狀態值（來自較新的伺服器；hub 會用自己的建置開啟各版本的
   實例），例如任務或 sub agent 的狀態，也在這裡換成認得的值。IndexedDB 為每個伺服器保存對話供下次開啟時載入：每則訊息一筆紀錄，
   只寫入改變的部分，並記下所存內容的序號；超過 14 天沒用的伺服器快取會刪除，最多只保留最近使用

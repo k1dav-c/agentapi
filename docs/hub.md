@@ -164,6 +164,10 @@ A hub that only a sign-in of its own reaches, such as a Coder workspace app or a
 run without a token: `--no-token` (instead of `--token`) skips this page, and everyone who reaches
 the hub is in. The hub refuses to start with neither.
 
+When the hub doesn't answer (it stopped, or a proxy in front of it answers with an error page), the
+page says it can't reach the hub and tries again; only a hub that says the session ended asks for
+the token.
+
 ### The overview
 
 ![The overview: how many need you, a tile per state, and a card for each request](screenshots/hub-desktop.png)
@@ -214,7 +218,8 @@ Each state has a shape of its own, so it reads without its color:
 Search (**/**) matches any word of a name, group, title, machine or agent. The chips under it show
 all agents or only those that need you, work, finished unseen, or are offline, each with its count.
 The header says whether the hub's stream is live and how many agents there are; the tab's title and
-icon count the ones that need you, so a pinned tab shows it.
+icon count the ones that need you, so a pinned tab shows it. The stream reconnects as the chat's
+does, and a stream silent for 45 s (the hub sends a heartbeat every 15 s) counts as lost.
 
 "Finished" follows the agent's unread mark, which every client of that AgentAPI shares: opening it
 in the hub, or in its own chat, marks it read everywhere.

@@ -509,6 +509,11 @@ state in detail.
 
 ## Connection and caching
 
-The chat follows server-sent events, uses heartbeats to detect lost connections and reconnects
-automatically with incremental replay. The status and page title show the connection state.
-On reopening, it displays the IndexedDB-cached transcript immediately, then fetches changes.
+The chat follows the server's events and resumes from where it left off, so a reconnect only
+fetches what changed. A stream that ends is opened again at once, without a notice. One that fails,
+including an error page from a proxy in front of AgentAPI, is tried again after 1 s, then up to
+every 30 s; a bar says when, with **Reconnect now**. The server sends a heartbeat every 15 s, and a
+stream silent for 45 s counts as lost even while the tab is in front (a phone that switched
+networks). Going back online or back to the tab reconnects at once. The status and page title show
+the connection state. On reopening, the chat shows the IndexedDB-cached transcript immediately,
+then fetches changes. The terminals reconnect the same way.

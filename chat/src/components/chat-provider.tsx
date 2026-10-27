@@ -45,6 +45,7 @@ import {
   type RequestResponse,
 } from "@/lib/native-requests";
 import type {LoginRequired} from "@/lib/login";
+import type {ConnectionStatus} from "@/lib/event-source";
 import {getAgentState, waitingFor, type AgentStateKind, type TokenTotals, type WaitingFor} from "@/lib/session-status";
 import {SyncTracker} from "@/lib/session-sync";
 import {resolveAgentAPIUrl} from "@/lib/agentapi-url";
@@ -71,8 +72,6 @@ export interface SendResult {
   // The message was added to the turn the agent is working on.
   steered?: boolean;
 }
-
-export type ConnectionStatus = "connected" | "reconnecting" | "offline";
 
 export interface FileUploadResponse {
   ok: boolean;

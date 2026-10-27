@@ -10,6 +10,7 @@ import {LatestLinkChip} from "./terminal-links";
 import {useXterm} from "./use-xterm";
 import {fitTerminalFontSize, screenToTerminalOutput} from "@/lib/tty";
 import {withCredentials} from "@/lib/auth";
+import {EventSourceConnection} from "@/lib/event-source";
 import type {ScreenEvent} from "@/lib/events";
 
 // The mirror uses the width of the agent's terminal (80 columns unless
@@ -97,19 +98,24 @@ export function TtyView({onExit}: {onExit: () => void}) {
         });
       };
 
-      const eventSource = new EventSource(`${storageScope}/internal/screen`, {
+      // The stream has no heartbeats; it is opened again when it ends or
+      // fails, the browser comes back online or the tab comes back.
+      const connection = new EventSourceConnection({
+        url: () => `${storageScope}/internal/screen`,
         withCredentials: withCredentials(storageScope),
+        listeners: () => ({
+          screen: (event) => {
+            try {
+              latest = (JSON.parse(event.data) as Partial<ScreenEvent>).screen ?? "";
+            } catch {
+              return;
+            }
+            if (!frame) frame = window.requestAnimationFrame(render);
+          },
+        }),
+        onChange: ({status}) => setConnected(status === "connected"),
       });
-      eventSource.onopen = () => setConnected(true);
-      eventSource.onerror = () => setConnected(false);
-      eventSource.addEventListener("screen", (event) => {
-        try {
-          latest = (JSON.parse(event.data) as Partial<ScreenEvent>).screen ?? "";
-        } catch {
-          return;
-        }
-        if (!frame) frame = window.requestAnimationFrame(render);
-      });
+      connection.start();
 
       const resizeObserver = new ResizeObserver(() => fitRef.current());
       resizeObserver.observe(container);
@@ -117,7 +123,7 @@ export function TtyView({onExit}: {onExit: () => void}) {
       return () => {
         if (frame) window.cancelAnimationFrame(frame);
         resizeObserver.disconnect();
-        eventSource.close();
+        connection.stop();
         fitRef.current = () => {};
       };
     },
