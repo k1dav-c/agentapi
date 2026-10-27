@@ -297,6 +297,16 @@ export function HubView() {
       body: JSON.stringify({group}),
     });
   };
+  // Mutes what an instance waits for now, until that changes (the hub ends
+  // the mute then), or ends the mute.
+  const setMuted = async (id: string, muted: boolean) => {
+    await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({muted}),
+    });
+  };
   const renameGroup = async (from: string, to: string) => {
     // A folded group stays folded under its new name.
     changeCollapsed((next) => {
@@ -466,6 +476,7 @@ export function HubView() {
                         onForget={() => void forget(instance.id)}
                         onGroup={(name) => void setGroup(instance.id, name)}
                         onNewGroup={() => setNaming({mode: "new", id: instance.id})}
+                        onMute={(muted) => void setMuted(instance.id, muted)}
                       />
                     ))}
                   </ul>

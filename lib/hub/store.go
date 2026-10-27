@@ -51,6 +51,10 @@ type Instance struct {
 	// Group is the group someone put the instance in on the hub's page;
 	// empty is none. The instance's own events never change it.
 	Group string `json:"group,omitempty"`
+	// Muted is what the instance waited for when someone muted it on the
+	// hub's page (attentionKey); empty is not muted. It ends once that
+	// changes, so the next thing the instance needs counts again.
+	Muted string `json:"muted,omitempty"`
 	// Token, for a manual instance that has its own, is sent to it; it
 	// never leaves the hub.
 	Token string `json:"token,omitempty"`
@@ -64,6 +68,19 @@ type Instance struct {
 func (i Instance) public() Instance {
 	i.Token = ""
 	return i
+}
+
+// attentionKey is what an instance waits for, to mute: why it needs you
+// and, for a request, which one; empty when it needs nothing.
+func attentionKey(summary *httpapi.SummaryBody) string {
+	if summary == nil || summary.Attention == "" || summary.Attention == httpapi.AttentionNone || summary.Attention == httpapi.AttentionExited {
+		return ""
+	}
+	key := string(summary.Attention)
+	if summary.Request != nil {
+		key += ":" + summary.Request.ID
+	}
+	return key
 }
 
 // instanceURL is where the hub reaches the instance an event names: its
@@ -110,6 +127,7 @@ type storedInstance struct {
 	Token     string    `json:"token,omitempty"`
 	Stopped   bool      `json:"stopped,omitempty"`
 	Group     string    `json:"group,omitempty"`
+	Muted     string    `json:"muted,omitempty"`
 }
 
 func newStore(path string) (*store, error) {
@@ -136,7 +154,7 @@ func newStore(path string) (*store, error) {
 		s.instances[si.ID] = &Instance{
 			ID: si.ID, Name: si.Name, URL: si.URL, ServerID: si.ServerID, Hostname: si.Hostname,
 			Port: si.Port, CWD: si.CWD, AgentType: si.AgentType, Source: si.Source,
-			LastSeen: si.LastSeen, Token: si.Token, Connection: connection, Group: si.Group,
+			LastSeen: si.LastSeen, Token: si.Token, Connection: connection, Group: si.Group, Muted: si.Muted,
 		}
 	}
 	return s, nil
@@ -152,7 +170,7 @@ func (s *store) saveLocked() error {
 		stored = append(stored, storedInstance{
 			ID: i.ID, Name: i.Name, URL: i.URL, ServerID: i.ServerID, Hostname: i.Hostname,
 			Port: i.Port, CWD: i.CWD, AgentType: i.AgentType, Source: i.Source,
-			LastSeen: i.LastSeen, Token: i.Token, Stopped: i.Connection == ConnectionStopped, Group: i.Group,
+			LastSeen: i.LastSeen, Token: i.Token, Stopped: i.Connection == ConnectionStopped, Group: i.Group, Muted: i.Muted,
 		})
 	}
 	data, err := json.MarshalIndent(stored, "", "  ")

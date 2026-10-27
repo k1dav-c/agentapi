@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {activity, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, groupInstances, groupNames, hubRoot, instanceState, needsYou, sortInstances, stateLabel, usagePercent, type HubInstance, type Summary} from "./hub";
+import {activity, attentionKey, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, groupInstances, groupNames, hubRoot, instanceState, needsYou, sortInstances, stateLabel, usagePercent, type HubInstance, type Summary} from "./hub";
 
 const summary = (overrides: Partial<Summary> = {}): Summary =>
   ({
@@ -136,5 +136,22 @@ describe("hub", () => {
     expect(shortError('unreachable: Get "http://127.0.0.1:3308/events?only=summary": dial tcp 127.0.0.1:3308: connect: connection refused')).toBe("Connection refused");
     expect(shortError("the instance needs an API token (--instance-token)")).toBe("the instance needs an API token (--instance-token)");
     expect(shortError(undefined)).toBe("");
+  });
+
+  test("a muted instance waits out of the way until what it waits for changes", () => {
+    const login = summary({attention: "login", login_required: {message: "Codex is not logged in."} as Summary["login_required"]});
+    expect(attentionKey(login)).toBe("login");
+    expect(attentionKey(summary({attention: "request", request: {id: "r1", kind: "approval", title: "Run ls", created_at: "2026-10-27T00:00:00Z"}}))).toBe("request:r1");
+    expect(attentionKey(summary())).toBe("");
+
+    const muted = instance("a", {summary: login, muted: "login"});
+    expect(instanceState(muted)).toBe("muted");
+    expect(stateLabel(muted)).toBe("Muted · Needs login");
+    expect(activity(muted)).toMatchObject({label: "Muted", text: "Codex is not logged in.", tone: "muted"});
+    expect(countFilters([muted])["needs-you"]).toBe(0);
+    // Something else to wait for counts again, before the hub ends the mute.
+    expect(instanceState(instance("a", {summary: summary({attention: "limit"}), muted: "login"}))).toBe("needs-you");
+    // Sorted after the idle ones.
+    expect(sortInstances([muted, instance("b")]).map((i) => i.id)).toEqual(["b", "a"]);
   });
 });

@@ -22,30 +22,45 @@ export interface HubInstance {
   error?: string;
   // group is the group someone put it in on the hub's page; none when empty.
   group?: string;
+  // muted is what it waited for when someone muted it (attentionKey); the
+  // hub ends the mute once that changes.
+  muted?: string;
   summary?: Summary | null;
 }
 
 // InstanceState is what a row says of an instance, the most pressing
 // first: it needs you, works, finished a task you haven't seen, waits,
-// or can't be reached.
-export type InstanceState = "needs-you" | "working" | "unread" | "idle" | "connecting" | "unreachable" | "stopped";
+// waits for what you muted, or can't be reached.
+export type InstanceState = "needs-you" | "working" | "unread" | "idle" | "muted" | "connecting" | "unreachable" | "stopped";
 
 const stateRank: Record<InstanceState, number> = {
   "needs-you": 0,
   working: 1,
   unread: 2,
   idle: 3,
-  connecting: 4,
-  unreachable: 5,
-  stopped: 6,
+  muted: 4,
+  connecting: 5,
+  unreachable: 6,
+  stopped: 7,
 };
+
+// attentionKey is what an instance waits for, as the hub mutes it: why it
+// needs you and, for a request, which one; empty when it needs nothing.
+export function attentionKey(summary: Summary | null | undefined): string {
+  const attention = summary?.attention;
+  if (!attention || attention === "none" || attention === "exited") return "";
+  return summary.request ? `${attention}:${summary.request.id}` : attention;
+}
 
 export function instanceState(instance: HubInstance): InstanceState {
   if (instance.connection === "stopped") return "stopped";
   if (instance.connection === "unreachable") return "unreachable";
   const summary = instance.summary;
   if (!summary) return "connecting";
-  if (summary.attention !== "none" && summary.attention !== "exited") return "needs-you";
+  if (summary.attention !== "none" && summary.attention !== "exited") {
+    // Muted until what it waits for changes; the hub ends it then.
+    return instance.muted && instance.muted === attentionKey(summary) ? "muted" : "needs-you";
+  }
   if (summary.attention === "exited") return "stopped";
   if (summary.status === "running") return "working";
   if (summary.unread) return "unread";
@@ -73,6 +88,8 @@ export function stateLabel(instance: HubInstance): string {
       return "Finished";
     case "idle":
       return "Idle";
+    case "muted":
+      return `Muted · ${attentionLabel[instance.summary!.attention] || "Needs you"}`;
     case "connecting":
       return "Connecting";
     case "unreachable":
@@ -227,18 +244,25 @@ export interface Activity {
   since?: string;
 }
 
+// waitsFor is what an instance that needs you waits for.
+function waitsFor(summary: Summary | null | undefined): Activity {
+  if (summary?.attention === "login") return {label: "Login", text: summary.login_required?.message || "Log in to continue", tone: "needs"};
+  if (summary?.attention === "limit") return {label: "Usage limit", text: summary.limit_stop?.message || "The account reached its limit", tone: "needs", since: summary.limit_stop?.stopped_at};
+  if (summary?.attention === "dialog") return {label: "Dialog", text: "Answer it in the agent's terminal", tone: "needs"};
+  const request = summary?.request;
+  if (request) return {label: requestLabels[request.kind] ?? "Request", text: request.title, tone: "needs", since: request.created_at};
+  return {label: "Needs you", text: "Waiting for your answer", tone: "needs"};
+}
+
 export function activity(instance: HubInstance): Activity {
   const summary = instance.summary;
   const task = summary?.task;
   switch (instanceState(instance)) {
-    case "needs-you": {
-      if (summary?.attention === "login") return {label: "Login", text: summary.login_required?.message || "Log in to continue", tone: "needs"};
-      if (summary?.attention === "limit") return {label: "Usage limit", text: summary.limit_stop?.message || "The account reached its limit", tone: "needs", since: summary.limit_stop?.stopped_at};
-      if (summary?.attention === "dialog") return {label: "Dialog", text: "Answer it in the agent's terminal", tone: "needs"};
-      const request = summary?.request;
-      if (request) return {label: requestLabels[request.kind] ?? "Request", text: request.title, tone: "needs", since: request.created_at};
-      return {label: "Needs you", text: "Waiting for your answer", tone: "needs"};
-    }
+    case "needs-you":
+      return waitsFor(summary);
+    case "muted":
+      // What it waits for, out of the way.
+      return {...waitsFor(summary), label: "Muted", tone: "muted"};
     case "working":
       return {label: "Working", text: task?.prompt || summary?.title || "On a task", tone: "working", since: task?.started_at};
     case "unread":

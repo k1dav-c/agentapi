@@ -902,11 +902,12 @@ try {
   const hubHome = path.join(root, 'hub-home');
   await mkdir(hubHome, {recursive: true});
   const hubEnv = {...env, HOME: hubHome};
-  execFileSync(binary, ['hub', 'join', `http://127.0.0.1:${hubPort}/hooks`, '--secret', 'docs-secret',
-    '--public-url', 'http://127.0.0.1:{port}'], {env: hubEnv, stdio: 'ignore'});
   startProcess('hub', root, hubEnv, ['hub', 'serve', '--bind', '127.0.0.1', '--port', String(hubPort),
     '--token', 'docs-token', '--secret', 'docs-secret', '--state', path.join(hubHome, 'instances.json')]);
   await poll(async () => (await fetch(`http://127.0.0.1:${hubPort}/api/session`)).ok, 'the hub');
+  // After the hub runs: join checks that it takes the events.
+  execFileSync(binary, ['hub', 'join', `http://127.0.0.1:${hubPort}/hooks`, '--secret', 'docs-secret',
+    '--public-url', 'http://127.0.0.1:{port}'], {env: hubEnv, stdio: 'ignore'});
   // Nine demo instances, posing as the agents they'd be: one asks for an approval, one asks
   // questions, one needs a login, one hit its usage limit, one works, one finished a task nobody
   // saw, one is idle, one stopped and one was killed, so the hub can't reach it.
@@ -1042,6 +1043,15 @@ try {
   await hubPhonePage.getByRole('menuitem', {name: 'Forget'}).waitFor();
   await shot(hubPhonePage, 'hub-phone-menu.png');
   await hubPhonePage.keyboard.press('Escape');
+  // Muting the one that waits for a login nobody will do: out of Need you until that changes.
+  await tap(hubPhonePage, hubPhonePage.getByRole('button', {name: 'Actions for mobile-app'}));
+  await tap(hubPhonePage, hubPhonePage.getByRole('menuitem', {name: 'Mute until it changes'}));
+  await hubPhonePage.locator('[data-hub-row][aria-label^="mobile-app, Muted"]').waitFor();
+  await hubPhonePage.waitForTimeout(400);
+  await shot(hubPhonePage, 'hub-muted.png');
+  const mobileApp = (await hubList()).find(instance => instance.name === 'mobile-app');
+  await fetch(`${hubAPI}/api/instances/${encodeURIComponent(mobileApp.id)}`, {method: 'PATCH',
+    headers: {Authorization: 'Bearer docs-token', 'Content-Type': 'application/json'}, body: JSON.stringify({muted: false})});
   await tap(hubPhonePage, hubPhonePage.getByRole('list', {name: 'Instances'}).getByText('checkout-api'));
   await hubPhonePage.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first().waitFor();
   await hubPhonePage.waitForTimeout(800);
