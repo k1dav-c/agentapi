@@ -183,10 +183,10 @@ func newAdapter(cfg Config, opts launchOptions, resumeRef string) *Adapter {
 		logger = slog.Default()
 	}
 	if cfg.SnapshotInterval == 0 {
-		cfg.SnapshotInterval = 100 * time.Millisecond
+		cfg.SnapshotInterval = agentio.SnapshotInterval
 	}
 	if cfg.InterruptTimeout == 0 {
-		cfg.InterruptTimeout = 10 * time.Second
+		cfg.InterruptTimeout = agentio.InterruptTimeout
 	}
 	if cfg.Clock == nil {
 		cfg.Clock = quartz.NewReal()
@@ -213,6 +213,8 @@ func newAdapter(cfg Config, opts launchOptions, resumeRef string) *Adapter {
 		a.closeGrace = cfg.StopTimeout
 	}
 	a.loop.a = a
+	a.loop.throttle = agentio.NewThrottle[*msgState](cfg.Clock, cfg.SnapshotInterval)
+	a.loop.interrupt = agentio.NewInterruptDeadline(cfg.Clock, cfg.InterruptTimeout)
 	return a
 }
 

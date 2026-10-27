@@ -107,10 +107,10 @@ func newAdapter(cfg Config, args parsedArgs, resumeRef string) *Adapter {
 		cfg.Clock = quartz.NewReal()
 	}
 	if cfg.SnapshotInterval == 0 {
-		cfg.SnapshotInterval = 100 * time.Millisecond
+		cfg.SnapshotInterval = agentio.SnapshotInterval
 	}
 	if cfg.InterruptTimeout == 0 {
-		cfg.InterruptTimeout = 10 * time.Second
+		cfg.InterruptTimeout = agentio.InterruptTimeout
 	}
 	if cfg.NewID == nil {
 		cfg.NewID = newUUID
@@ -125,6 +125,7 @@ func newAdapter(cfg Config, args parsedArgs, resumeRef string) *Adapter {
 		parser:      newStreamParser(cfg.Clock, cfg.SnapshotInterval),
 		reportedRef: resumeRef,
 		writer:      agentio.NewWriter("claude"),
+		interrupt:   agentio.NewInterruptDeadline(cfg.Clock, cfg.InterruptTimeout),
 		requests:    make(map[string]*pendingRequest),
 		exited:      make(chan struct{}),
 		readDone:    make(chan struct{}),
@@ -170,9 +171,9 @@ type Adapter struct {
 	// reportedRef is the session id last reported with SessionRef, at
 	// first the session to resume. Read loop only.
 	reportedRef string
-	// interruptAt is when the CLI accepted the interrupt of the current
-	// turn, or zero. Read loop only.
-	interruptAt time.Time
+	// interrupt runs from when the CLI accepted the interrupt of the
+	// current turn. Read loop only.
+	interrupt agentio.InterruptDeadline
 
 	// writer writes frames to the CLI's stdin, once it started.
 	writer *agentio.Writer
@@ -543,8 +544,8 @@ func (a *Adapter) interruptAccepted(json.RawMessage) {
 	// The turn may have ended before the answer came.
 	interrupted := a.turn.interrupted
 	a.mu.Unlock()
-	if interrupted && a.interruptAt.IsZero() {
-		a.interruptAt = a.cfg.Clock.Now()
+	if interrupted {
+		a.interrupt.Start()
 	}
 }
 
@@ -717,13 +718,7 @@ func (a *Adapter) outputClosed() {
 // nextWake returns when the read loop has to act without output from the
 // CLI, or the zero time.
 func (a *Adapter) nextWake() time.Time {
-	next := a.parser.nextFlush()
-	if !a.interruptAt.IsZero() {
-		if at := a.interruptAt.Add(a.cfg.InterruptTimeout); next.IsZero() || at.Before(next) {
-			next = at
-		}
-	}
-	return next
+	return agentio.Earliest(a.parser.nextFlush(), a.interrupt.Next())
 }
 
 // wake sends the snapshots the throttle held back, and ends an interrupted
@@ -731,7 +726,7 @@ func (a *Adapter) nextWake() time.Time {
 // (no result, or no "idle").
 func (a *Adapter) wake() {
 	a.sendRich(a.parser.flush())
-	if a.interruptAt.IsZero() || a.cfg.Clock.Since(a.interruptAt) < a.cfg.InterruptTimeout {
+	if !a.interrupt.Due() {
 		return
 	}
 	a.log.Warn("Claude Code did not end the interrupted turn; ending it here")
@@ -1059,7 +1054,7 @@ func turnResult(f *frame, interrupted bool) native.TurnResult {
 // endTurn reports the end of the current turn, if one was sent or started.
 // It runs in the read loop.
 func (a *Adapter) endTurn() {
-	a.interruptAt = time.Time{}
+	a.interrupt.Stop()
 	a.mu.Lock()
 	turn := a.endTurnLocked()
 	active := turn.phase != turnIdle

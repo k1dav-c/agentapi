@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
-	"time"
-
-	"github.com/coder/quartz"
 
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
@@ -322,89 +319,35 @@ func (a *Adapter) toolResultMessage(callID, toolName string, content json.RawMes
 	return msg
 }
 
-// throttle limits how often one message is sent while it changes. A
-// message has one from its first snapshot to its final state.
-type throttle struct {
-	last time.Time
-	// pending builds the latest state, not sent yet.
-	pending func() (transcript.RichMessage, bool)
-	timer   *quartz.Timer
-}
-
-func (t *throttle) stop() {
-	if t.timer != nil {
-		t.timer.Stop()
-		t.timer = nil
-	}
-}
-
 // emitThrottled sends message id, which is still changing, at most once
-// per interval; its latest state is sent when the interval ends. build
-// makes the message when it is sent, so a fast stream isn't copied for
-// every change; it returns false while there is nothing to show.
+// per interval; its latest state is sent when the interval ends (see
+// wake). build makes the message when it is sent, so a fast stream isn't
+// copied for every change; it returns false while there is nothing to
+// show.
 func (a *Adapter) emitThrottled(id string, build func() (transcript.RichMessage, bool)) {
-	t := a.loop.throttles[id]
-	if t == nil {
-		// The first snapshot goes out at once.
-		t = &throttle{}
-		if a.sendThrottled(t, build) {
-			a.loop.throttles[id] = t
-		}
-		return
-	}
-	if t.timer != nil {
-		t.pending = build
-		return
-	}
-	wait := a.interval - a.clock.Since(t.last)
-	if wait <= 0 {
-		a.sendThrottled(t, build)
-		return
-	}
-	t.pending = build
-	t.timer = a.clock.AfterFunc(wait, func() {
-		a.post(func() { a.flushThrottle(id) })
-	})
-}
-
-// sendThrottled sends what build makes, if anything, and reports whether
-// it did.
-func (a *Adapter) sendThrottled(t *throttle, build func() (transcript.RichMessage, bool)) bool {
-	t.pending = nil
-	msg, ok := build()
-	if ok {
-		t.last = a.clock.Now()
+	if msg, ok := a.loop.throttle.Changed(id, build); ok {
 		a.loop.sink.RichMessage(msg)
 	}
-	return ok
 }
 
 // sent reports whether a snapshot of message id was sent and its final
 // state wasn't.
 func (a *Adapter) sent(id string) bool {
-	return a.loop.throttles[id] != nil
+	return a.loop.throttle.Sent(id)
 }
 
-// flushThrottle sends the state of message id that waited for the end of
-// the interval.
-func (a *Adapter) flushThrottle(id string) {
-	t := a.loop.throttles[id]
-	if t == nil {
-		return
-	}
-	t.timer = nil
-	if t.pending != nil {
-		a.sendThrottled(t, t.pending)
+// flushThrottled sends the states that waited for the end of their
+// interval: those whose interval is over, or all of them with force.
+func (a *Adapter) flushThrottled(force bool) {
+	for _, msg := range a.loop.throttle.Flush(force) {
+		a.loop.sink.RichMessage(msg)
 	}
 }
 
 // emitFinal sends the final state of a message, dropping any snapshot
 // still waiting.
 func (a *Adapter) emitFinal(msg transcript.RichMessage) {
-	if t := a.loop.throttles[msg.MessageID]; t != nil {
-		t.stop()
-		delete(a.loop.throttles, msg.MessageID)
-	}
+	a.loop.throttle.Forget(msg.MessageID)
 	a.loop.sink.RichMessage(msg)
 }
 

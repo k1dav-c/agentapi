@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/quartz"
+
 	"github.com/coder/agentapi/lib/agentlog/pilog"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
@@ -33,8 +35,16 @@ type loopState struct {
 	// usedIDs are the message IDs already given out.
 	usedIDs map[string]bool
 	// tools are the tool calls running, in start order.
-	tools     []runningTool
-	throttles map[string]*throttle
+	tools []runningTool
+	// throttle holds back the snapshots of messages that stream.
+	throttle *agentio.Throttle[string]
+	// interrupt runs from when the adapter sent abort.
+	interrupt agentio.InterruptDeadline
+	// wakeTimer wakes the loop at wakeAt, for nextWake; wakeSeq tells its
+	// wake from that of a timer it replaced.
+	wakeTimer *quartz.Timer
+	wakeAt    time.Time
+	wakeSeq   int
 
 	// The outcome of the turn so far.
 	stopReason string
@@ -54,14 +64,15 @@ type runningTool struct {
 	args json.RawMessage
 }
 
-func newLoopState(sink native.Sink, cwd string) loopState {
+func (a *Adapter) newLoopState(sink native.Sink) loopState {
 	return loopState{
 		sink:      sink,
-		cwd:       cwd,
+		cwd:       a.cfg.CWD,
 		events:    pilog.NewEventParser(),
 		parser:    pilog.NewParser(),
 		usedIDs:   make(map[string]bool),
-		throttles: make(map[string]*throttle),
+		throttle:  agentio.NewThrottle[string](a.clock, a.interval),
+		interrupt: agentio.NewInterruptDeadline(a.clock, a.interruptTimeout),
 	}
 }
 
@@ -74,6 +85,7 @@ func (a *Adapter) eventLoop(lines <-chan []byte) {
 		case line, ok := <-lines:
 			if !ok {
 				a.handleExit()
+				a.setWake(time.Time{})
 				return
 			}
 			a.handleLine(line)
@@ -83,6 +95,51 @@ func (a *Adapter) eventLoop(lines <-chan []byte) {
 		case fn := <-a.posted:
 			fn()
 		}
+		a.setWake(a.nextWake())
+	}
+}
+
+// nextWake returns when the loop has to act without a record from Pi: to
+// send a snapshot the throttle held back, or to end an interrupted turn
+// Pi didn't end. It is the zero time if there is nothing to do.
+func (a *Adapter) nextWake() time.Time {
+	return agentio.Earliest(a.loop.throttle.Next(), a.loop.interrupt.Next())
+}
+
+// setWake makes the wake timer wake the loop at next, or not at all if it
+// is zero. Loop only.
+func (a *Adapter) setWake(next time.Time) {
+	l := &a.loop
+	if next.Equal(l.wakeAt) {
+		return
+	}
+	if l.wakeTimer != nil {
+		l.wakeTimer.Stop()
+		l.wakeTimer = nil
+	}
+	l.wakeAt = next
+	l.wakeSeq++
+	if next.IsZero() {
+		return
+	}
+	seq := l.wakeSeq
+	l.wakeTimer = a.clock.AfterFunc(max(a.clock.Until(next), 0), func() {
+		a.post(func() { a.wake(seq) })
+	}, "pi", "wake")
+}
+
+// wake sends the snapshots the throttle held back, and ends an interrupted
+// turn Pi didn't end in time: an extension command that doesn't stop, or a
+// Pi that hangs.
+func (a *Adapter) wake(seq int) {
+	if seq == a.loop.wakeSeq {
+		// The timer fired; setWake sets it again.
+		a.loop.wakeTimer, a.loop.wakeAt = nil, time.Time{}
+	}
+	a.flushThrottled(false)
+	if a.loop.interrupt.Due() {
+		a.log.Warn("Pi didn't end the interrupted turn; ending it here")
+		a.endTurn()
 	}
 }
 
@@ -134,10 +191,7 @@ func (a *Adapter) handleExit() {
 		deliverResult(p, cmdResult{err: errExited})
 	}
 	a.flushStream()
-	for id, t := range a.loop.throttles {
-		t.stop()
-		a.flushThrottle(id)
-	}
+	a.flushThrottled(true)
 	a.log.Info("Pi closed its output")
 }
 
@@ -429,6 +483,7 @@ func (a *Adapter) endTurn() {
 	a.interrupted = false
 	a.mu.Unlock()
 
+	a.loop.interrupt.Stop()
 	a.flushStream()
 	// The conversation expires the requests of the turn.
 	a.cancelTurnDialogs(false)
@@ -456,17 +511,6 @@ func (a *Adapter) endTurn() {
 		result.StopReason = native.StopReasonLimited
 	}
 	a.loop.sink.TurnCompleted(result)
-}
-
-// endInterruptedTurn ends turn if it is still running interruptTimeout
-// after Interrupt: Pi didn't confirm the abort (an extension command that
-// doesn't stop, or a Pi that hangs).
-func (a *Adapter) endInterruptedTurn(turn int) {
-	if !a.isCurrentTurn(turn) {
-		return
-	}
-	a.log.Warn("Pi didn't end the interrupted turn; ending it here")
-	a.endTurn()
 }
 
 func (a *Adapter) handleAgentStart() {

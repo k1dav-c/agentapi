@@ -84,10 +84,10 @@ const (
 	exitInfoWait = 3 * time.Second
 	// interruptTimeout is how long an interrupted turn waits for Pi to end
 	// it before the adapter ends it.
-	interruptTimeout = 10 * time.Second
+	interruptTimeout = agentio.InterruptTimeout
 	// snapshotInterval is the shortest time between two snapshots of a
 	// message that is streaming.
-	snapshotInterval = 100 * time.Millisecond
+	snapshotInterval = agentio.SnapshotInterval
 )
 
 var (
@@ -284,7 +284,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		_ = proc.Kill()
 		return errClosed
 	}
-	a.loop = newLoopState(sink, a.cfg.CWD)
+	a.loop = a.newLoopState(sink)
 
 	lines := make(chan []byte, 16)
 	go func() {
@@ -485,8 +485,10 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 		a.mu.Unlock()
 		return err
 	}
-	a.clock.AfterFunc(a.interruptTimeout, func() {
-		a.post(func() { a.endInterruptedTurn(turn) })
+	a.runOnLoop(func() {
+		if a.isCurrentTurn(turn) {
+			a.loop.interrupt.Start()
+		}
 	})
 	return nil
 }

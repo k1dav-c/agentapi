@@ -31,11 +31,9 @@ import (
 // activity after the steer under the steering message.
 
 // msgState is a rich message being built, sent at most once per snapshot
-// interval while it streams.
+// interval while it streams (see loopState.touch).
 type msgState struct {
-	build    func() (transcript.RichMessage, bool)
-	dirty    bool
-	lastEmit time.Time
+	build func() (transcript.RichMessage, bool)
 }
 
 // block is one content block of an assistant message.
@@ -88,12 +86,11 @@ type itemState struct {
 
 // turnState is the turn app-server is working on.
 type turnState struct {
-	id          string
-	segments    []*segment
-	items       map[string]*itemState
-	order       []*itemState
-	promptSeen  bool
-	interrupted time.Time
+	id         string
+	segments   []*segment
+	items      map[string]*itemState
+	order      []*itemState
+	promptSeen bool
 	// lastError is the last error app-server reported for the turn without
 	// retrying: the turn's error if it fails, shown when it ends otherwise.
 	lastError string

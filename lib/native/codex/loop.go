@@ -11,6 +11,7 @@ import (
 	"github.com/coder/agentapi/lib/agentlog/codexlog"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -26,8 +27,10 @@ type loopState struct {
 	// ended lists the turns that ended last, so late notifications don't
 	// start them again.
 	ended []string
-	// dirty lists messages with changes not sent yet.
-	dirty []*msgState
+	// throttle holds back the snapshots of the messages that stream.
+	throttle *agentio.Throttle[*msgState]
+	// interrupt runs from when app-server took the interrupt of the turn.
+	interrupt agentio.InterruptDeadline
 	// usage is what app-server reported of the context and rate limits.
 	usage native.AgentUsage
 	// spawns holds the spawn_agent tool calls of the subagents still
@@ -135,78 +138,51 @@ func (s *loopState) newSegment(t *turnState, id string) *segment {
 }
 
 func (s *loopState) interruptSent(turnID string) {
-	if s.turn != nil && s.turn.id == turnID && s.turn.interrupted.IsZero() {
-		s.turn.interrupted = s.now()
+	if s.turn != nil && s.turn.id == turnID {
+		s.interrupt.Start()
 	}
 }
 
 // --- snapshots ---
 
-// touch sends m now, or marks it to be sent at the end of the snapshot
-// interval when it was sent recently and urgent is false.
+// touch sends m now, or at the end of the snapshot interval when it was
+// sent recently and urgent is false.
 func (s *loopState) touch(m *msgState, urgent bool) {
-	if urgent || s.now().Sub(m.lastEmit) >= s.a.cfg.SnapshotInterval {
+	if urgent {
 		s.emit(m)
 		return
 	}
-	if !m.dirty {
-		m.dirty = true
-		s.dirty = append(s.dirty, m)
-	}
+	s.send(s.throttle.Changed(m, m.build))
 }
 
+// emit sends m now.
 func (s *loopState) emit(m *msgState) {
-	m.dirty = false
-	msg, ok := m.build()
-	if !ok {
-		return
-	}
-	m.lastEmit = s.now()
-	s.sink().RichMessage(msg)
+	s.send(s.throttle.Send(m, m.build))
 }
 
-// flush sends the pending changes; all of them when force is set,
+func (s *loopState) send(msg transcript.RichMessage, ok bool) {
+	if ok {
+		s.sink().RichMessage(msg)
+	}
+}
+
+// flush sends the changes held back; all of them when force is set,
 // otherwise those whose interval is over.
 func (s *loopState) flush(force bool) {
-	kept := s.dirty[:0]
-	now := s.now()
-	for _, m := range s.dirty {
-		if !m.dirty {
-			continue
-		}
-		if force || now.Sub(m.lastEmit) >= s.a.cfg.SnapshotInterval {
-			s.emit(m)
-			continue
-		}
-		kept = append(kept, m)
+	for _, msg := range s.throttle.Flush(force) {
+		s.sink().RichMessage(msg)
 	}
-	s.dirty = kept
 }
 
-// nextWake is when the loop has to act without a message: send a pending
-// snapshot or give up waiting for an interrupted turn.
+// nextWake is when the loop has to act without a message: send a held
+// back snapshot or give up waiting for an interrupted turn.
 func (s *loopState) nextWake() time.Time {
-	var next time.Time
-	for _, m := range s.dirty {
-		if !m.dirty {
-			// Sent since (urgently); flush drops it.
-			continue
-		}
-		if t := m.lastEmit.Add(s.a.cfg.SnapshotInterval); next.IsZero() || t.Before(next) {
-			next = t
-		}
-	}
-	if s.turn != nil && !s.turn.interrupted.IsZero() {
-		if t := s.turn.interrupted.Add(s.a.cfg.InterruptTimeout); next.IsZero() || t.Before(next) {
-			next = t
-		}
-	}
-	return next
+	return agentio.Earliest(s.throttle.Next(), s.interrupt.Next())
 }
 
 func (s *loopState) wake() {
 	s.flush(false)
-	if t := s.turn; t != nil && !t.interrupted.IsZero() && s.now().Sub(t.interrupted) >= s.a.cfg.InterruptTimeout {
+	if t := s.turn; t != nil && s.interrupt.Due() {
 		s.a.log.Warn("Codex did not end the interrupted turn; ending it here", "turn", t.id)
 		s.completeTurn(turn{ID: t.id, Status: "interrupted"})
 	}
@@ -710,6 +686,7 @@ func (s *loopState) completeTurn(tr turn) {
 	if t == nil {
 		return
 	}
+	s.interrupt.Stop()
 	// From here on Steer and Interrupt see no turn; reading the interrupt
 	// mark in the same step means Interrupt can't add one after it.
 	s.a.mu.Lock()
@@ -751,6 +728,8 @@ func (s *loopState) completeTurn(tr turn) {
 	last.stop = result.StopReason
 	s.emit(&last.msgState)
 	s.flush(true)
+	// The turn's messages are final.
+	s.throttle.Reset()
 	switch status {
 	case "interrupted":
 		s.systemEvent("turn interrupted", s.now(), t.id)
@@ -809,6 +788,8 @@ func (s *loopState) exited() {
 		s.turn = nil
 	}
 	s.flush(true)
+	s.throttle.Reset()
+	s.interrupt.Stop()
 	s.a.mu.Lock()
 	s.a.endActiveTurnLocked()
 	clear(s.a.interrupting)
