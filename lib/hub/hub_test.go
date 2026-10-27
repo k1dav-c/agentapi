@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -557,4 +558,86 @@ func TestHubGroups(t *testing.T) {
 	var ungrouped hub.Instance
 	require.Equal(t, http.StatusOK, request(t, http.MethodPatch, again.URL+"/api/instances/"+url.PathEscape("dev-1:3284"), hubToken, map[string]string{"group": ""}, &ungrouped))
 	assert.Empty(t, ungrouped.Group)
+}
+
+// startHubClock runs a hub on clock and returns its URL; retry traps the
+// waits between its attempts to reach an instance, until the test ends.
+func startHubClock(t *testing.T, clock *quartz.Mock) (string, *quartz.Trap) {
+	t.Helper()
+	h, err := hub.New(hub.Config{Token: hubToken, Secret: hubSecret, ConnectGrace: 10 * time.Second, Clock: clock})
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		h.Run(ctx)
+		close(done)
+	}()
+	srv := httptest.NewServer(h.Handler())
+	t.Cleanup(func() {
+		srv.Close()
+		cancel()
+		<-done
+	})
+	retry := clock.Trap().NewTimer("hub", "retry")
+	// Closed first: a watch waits in it.
+	t.Cleanup(retry.Close)
+	return srv.URL, retry
+}
+
+// passRetries lets the hub's waits between attempts pass, until the clock
+// is at least until past start.
+func passRetries(t *testing.T, clock *quartz.Mock, retry *quartz.Trap, start time.Time, until time.Duration) {
+	t.Helper()
+	for clock.Now().Sub(start) < until {
+		call := retry.MustWait(t.Context())
+		call.Release()
+		clock.Advance(call.Duration).MustWait(t.Context())
+	}
+}
+
+// An instance killed without instance.stopped (with its workspace) stops
+// sending heartbeats: once it missed three while the hub couldn't reach
+// it, it counts as stopped and the hub stops trying. Its next heartbeat
+// follows it again.
+func TestHubMissedHeartbeats(t *testing.T) {
+	clock := quartz.NewMock(t)
+	hubURL, retry := startHubClock(t, clock)
+	heartbeat := func(id string) map[string]any {
+		return map[string]any{
+			"id": id, "type": "instance.heartbeat", "created_at": clock.Now(),
+			"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": "http://127.0.0.1:1", "agent_type": "claude"},
+			"data":     map[string]any{"status": "stable", "heartbeat_seconds": 60},
+		}
+	}
+	start := clock.Now()
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, heartbeat("h1"), hubSecret, start))
+	passRetries(t, clock, retry, start, 2*time.Minute)
+	gone := instances(t, hubURL)[0]
+	assert.Equal(t, hub.ConnectionUnreachable, gone.Connection, "two heartbeats missed")
+	assert.Equal(t, 60, gone.HeartbeatSeconds)
+
+	passRetries(t, clock, retry, start, 3*time.Minute)
+	require.Eventually(t, func() bool {
+		return instances(t, hubURL)[0].Connection == hub.ConnectionStopped
+	}, 5*time.Second, 10*time.Millisecond, "three missed")
+	assert.Equal(t, instanceapi.StateStopped, instances(t, hubURL)[0].State)
+
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, heartbeat("h2"), hubSecret, clock.Now()))
+	assert.Equal(t, hub.ConnectionConnecting, instances(t, hubURL)[0].Connection)
+	retry.MustWait(t.Context()).Release()
+}
+
+// An AgentAPI that doesn't say how often it sends a heartbeat (an older
+// one, or one with them off) isn't taken as stopped for missing them.
+func TestHubNoHeartbeats(t *testing.T) {
+	clock := quartz.NewMock(t)
+	hubURL, retry := startHubClock(t, clock)
+	started := map[string]any{
+		"id": "o1", "type": "instance.started", "created_at": clock.Now(),
+		"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": "http://127.0.0.1:1", "agent_type": "claude"},
+	}
+	start := clock.Now()
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, started, hubSecret, start))
+	passRetries(t, clock, retry, start, 10*time.Minute)
+	assert.Equal(t, hub.ConnectionUnreachable, instances(t, hubURL)[0].Connection)
 }

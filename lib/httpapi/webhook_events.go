@@ -152,7 +152,8 @@ func (s *Server) webhookInstanceState() WebhookInstanceState {
 		// The queue has a lock of its own. s.mu would hold up Stop, whose
 		// instance.stopped carries the queue's length, until a call into
 		// the agent it is about to cancel ended by itself.
-		QueuedMessages: s.queue.Len(),
+		QueuedMessages:   s.queue.Len(),
+		HeartbeatSeconds: max(0, int(s.webhook.configSnapshot().Heartbeat/time.Second)),
 	}
 }
 

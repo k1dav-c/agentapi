@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/coder/quartz"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/coder/agentapi/lib/httpapi"
@@ -52,8 +53,8 @@ type Config struct {
 	// Client reaches the instances; nil is a client that uses the proxy
 	// of the environment (HTTP_PROXY, ALL_PROXY for a VPN in userspace).
 	Client *http.Client
-	// Now is the clock; nil is time.Now.
-	Now func() time.Time
+	// Clock is the clock; nil is the real one.
+	Clock quartz.Clock
 	// ConnectGrace is how long the hub keeps trying an instance it can't
 	// reach before it calls it unreachable; zero is 10 seconds.
 	ConnectGrace time.Duration
@@ -66,7 +67,7 @@ type Hub struct {
 	store      *store
 	client     *http.Client
 	deliveries deliveries
-	now        func() time.Time
+	clock      quartz.Clock
 
 	ctx      context.Context
 	watchMu  sync.Mutex
@@ -91,8 +92,8 @@ func New(config Config) (*Hub, error) {
 	if config.Logger == nil {
 		config.Logger = slog.New(slog.DiscardHandler)
 	}
-	if config.Now == nil {
-		config.Now = time.Now
+	if config.Clock == nil {
+		config.Clock = quartz.NewReal()
 	}
 	if config.ConnectGrace == 0 {
 		config.ConnectGrace = defaultConnectGrace
@@ -106,7 +107,7 @@ func New(config Config) (*Hub, error) {
 		return nil, err
 	}
 	return &Hub{
-		config: config, logger: config.Logger, store: st, client: client, now: config.Now,
+		config: config, logger: config.Logger, store: st, client: client, clock: config.Clock,
 		watchers: map[string]context.CancelFunc{},
 	}, nil
 }
@@ -285,7 +286,7 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 		i.URL = base
 		i.Token = body.Token
 		i.Source = SourceManual
-		i.LastSeen = h.now()
+		i.LastSeen = h.clock.Now()
 		i.Summary = summary
 		i.Connection = ConnectionConnecting
 		i.Error = ""
@@ -426,14 +427,14 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 	if !send("instances", map[string]any{"instances": publicList(instances)}) {
 		return
 	}
-	heartbeat := time.NewTicker(hubHeartbeat)
+	heartbeat := h.clock.NewTicker(hubHeartbeat, "hub", "browser heartbeat")
 	defer heartbeat.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case <-heartbeat.C:
-			if !send("heartbeat", map[string]time.Time{"time": h.now()}) {
+			if !send("heartbeat", map[string]time.Time{"time": h.clock.Now()}) {
 				return
 			}
 		case event, ok := <-ch:

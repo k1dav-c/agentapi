@@ -34,8 +34,9 @@ hub 和各個 AgentAPI 透過你掌控的網路互連，例如你自己的 VPN�
 
 1. AgentAPI 用 webhook 加入。`agentapi hub join` 把 hub 的位址和 secret 寫進
    `~/.agentapi/config.yaml`，這個使用者的每個 `agentapi server` 啟動時都會讀取。之後每個
-   AgentAPI 都送出有簽章的 `instance.started`、`instance.heartbeat` 和 `instance.stopped`，
-   hub 據此新增、更新或停止實例。
+   AgentAPI 都送出有簽章的 `instance.started`、`instance.heartbeat`（每分鐘一次）和
+   `instance.stopped`，hub 據此新增、更新或停止實例。hub 連不到、又錯過三次 heartbeat 的實例，
+   例如 workspace 被強制關掉的，視為已停止，hub 不再嘗試連線，直到它下一次送 heartbeat。
 2. hub 追蹤每個實例的摘要（`GET /events?only=summary`）：狀態、在等什麼、標題、最新任務、佇列和
    用量限制。每個實例一條連線；斷線時 1 秒後重連，之後間隔逐次拉長，最多 30 秒。串流 45 秒沒有任何
    動靜就視為斷線。連線失敗的前 10 秒，實例仍顯示為連線中（剛啟動的實例送出第一個事件時，可能還沒
@@ -198,7 +199,7 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 | 灰色、劃掉的鈴鐺 | Muted | 它需要你處理，但你把這件事靜音到它改變為止（見[靜音](#靜音)） |
 | 轉動的虛線圓環 | Connecting | hub 正在開啟或重新開啟它的摘要串流 |
 | 斷開的紅色圓環 | Unreachable | hub 已經 10 秒連不到它；這一行會說明原因 |
-| 方塊 | Stopped、Exited | AgentAPI 已停止，或它的 agent 已結束 |
+| 方塊 | Stopped、Exited | AgentAPI 已停止（或連不到時錯過三次 heartbeat），或它的 agent 已結束 |
 
 搜尋（**/**）會比對名稱、群組、標題、機器或 agent 中的任何字詞。搜尋框下方的標籤可以顯示全部，或只
 顯示需要你、工作中、已完成未讀、離線的 agent，並附上數量。頁首顯示 hub 的串流是否連線中，以及共有

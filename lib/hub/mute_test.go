@@ -2,6 +2,7 @@ package hub
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -73,4 +74,40 @@ func TestMute(t *testing.T) {
 	code, instance = patch(`{"muted": false}`)
 	assert.Equal(t, http.StatusOK, code)
 	assert.Empty(t, instance.Muted, "unmuted by hand")
+}
+
+// A summary that comes after the instance stopped, from a URL it left, or
+// from a watch that ended, is from a watch on its way out: it changes
+// nothing.
+func TestSummaryFromAnEndingWatch(t *testing.T) {
+	h, err := New(Config{Token: "t", Secret: "s"})
+	require.NoError(t, err)
+	_, _, err = h.store.update("dev:1", true, func(i *Instance) {
+		i.URL = "http://dev:1"
+		i.Connection = ConnectionStopped
+	})
+	require.NoError(t, err)
+	summary := instanceapi.SummaryBody{Instance: instanceapi.WebhookInstance{ID: "dev:1", ServerID: "s1"}}
+	connection := func() Connection {
+		instance, _ := h.store.get("dev:1")
+		return instance.Connection
+	}
+	assert.False(t, h.applySummary(t.Context(), "dev:1", "http://dev:1", summary))
+	assert.Equal(t, ConnectionStopped, connection())
+
+	_, _, _ = h.store.update("dev:1", false, func(i *Instance) {
+		i.URL = "http://dev:2"
+		i.Connection = ConnectionConnecting
+	})
+	assert.False(t, h.applySummary(t.Context(), "dev:1", "http://dev:1", summary), "a URL it left")
+	ended, cancel := context.WithCancel(t.Context())
+	cancel()
+	assert.False(t, h.applySummary(ended, "dev:1", "http://dev:2", summary), "a watch that ended")
+	assert.Equal(t, ConnectionConnecting, connection())
+
+	assert.True(t, h.applySummary(t.Context(), "dev:1", "http://dev:2", summary))
+	instance, _ := h.store.get("dev:1")
+	assert.Equal(t, ConnectionConnected, instance.Connection)
+	assert.Equal(t, "http://dev:2", instance.URL)
+	assert.Equal(t, "s1", instance.ServerID)
 }

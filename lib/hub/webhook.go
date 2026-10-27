@@ -60,7 +60,7 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unreadable event", http.StatusBadRequest)
 		return
 	}
-	if err := instanceapi.Verify(h.config.Secret, r.Header, body, h.now()); err != nil {
+	if err := instanceapi.Verify(h.config.Secret, r.Header, body, h.clock.Now()); err != nil {
 		// A wrong --secret on the instance's side shows here.
 		h.logger.Warn("Refused an event with an invalid or missing signature, or more than 10 minutes off",
 			"reason", err, "from", r.RemoteAddr,
@@ -85,7 +85,10 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "the instance names no URL or host and port", http.StatusBadRequest)
 			return
 		}
-		h.upsertFromWebhook(instance, url)
+		// An older AgentAPI doesn't say how often it sends a heartbeat.
+		var state instanceapi.WebhookInstanceState
+		_ = json.Unmarshal(event.Data, &state)
+		h.upsertFromWebhook(instance, url, state.HeartbeatSeconds)
 	case instanceapi.EventInstanceStopped:
 		h.stopped(instance.ID, instance.ServerID)
 	default:
@@ -93,17 +96,27 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		// with its next heartbeat.
 		_, _, _ = h.store.update(instance.ID, false, func(i *Instance) {
 			if sameRun(i.ServerID, instance.ServerID) {
-				i.LastSeen = h.now()
+				i.LastSeen = h.clock.Now()
 			}
 		})
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// runSeenWithin is how recently the hub must have heard from the run of an
-// instance it follows for another run's URL to be refused: three of its
-// heartbeats.
-const runSeenWithin = 3 * time.Minute
+// defaultHeartbeat is how often an AgentAPI sends instance.heartbeat
+// unless told otherwise.
+const defaultHeartbeat = time.Minute
+
+// seenWithin is how recently the hub must have heard from the instance's
+// current run to take it as running: as long as it takes to miss
+// stoppedAfter heartbeats.
+func (i Instance) seenWithin() time.Duration {
+	heartbeat := defaultHeartbeat
+	if i.HeartbeatSeconds > 0 {
+		heartbeat = time.Duration(i.HeartbeatSeconds) * time.Second
+	}
+	return stoppedAfter * heartbeat
+}
 
 // sameRun reports whether an event of the run serverID is of the run the
 // hub knows, current; either unknown is.
@@ -116,12 +129,12 @@ func sameRun(current, serverID string) bool {
 // URL is refused while the hub follows the run it knows, which it heard
 // from recently: two machines with the same name (and so the same
 // instance ID) would take turns at every heartbeat.
-func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string) {
+func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string, heartbeatSeconds int) {
 	var restart bool
-	now := h.now()
+	now := h.clock.Now()
 	updated, _, err := h.store.update(instance.ID, true, func(i *Instance) {
 		if !sameRun(i.ServerID, instance.ServerID) && i.URL != url &&
-			i.Connection == ConnectionConnected && now.Sub(i.LastSeen) < runSeenWithin {
+			i.Connection == ConnectionConnected && now.Sub(i.LastSeen) < i.seenWithin() {
 			if i.refusedRun != instance.ServerID {
 				h.logger.Warn("Two AgentAPIs report the same instance ID; keeping the one the hub follows",
 					"instance", instance.ID, "url", i.URL, "refused_url", url, "refused_server_id", instance.ServerID)
@@ -132,6 +145,7 @@ func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string
 		restart = i.URL != url || i.ServerID != instance.ServerID || i.Connection == ConnectionStopped
 		i.WebhookInstance = instance
 		i.URL = url
+		i.HeartbeatSeconds = heartbeatSeconds
 		i.refusedRun = ""
 		if i.Source == "" {
 			i.Source = SourceWebhook
@@ -154,21 +168,22 @@ func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string
 // stopped marks an instance stopped and stops watching it, unless a newer
 // run of it (another server ID) already started.
 func (h *Hub) stopped(id, serverID string) {
-	_, ok, err := h.store.update(id, false, func(i *Instance) {
+	stopped := false
+	_, _, err := h.store.update(id, false, func(i *Instance) {
 		if !sameRun(i.ServerID, serverID) {
 			return
 		}
 		h.logger.Info("An instance stopped", "instance", id)
 		i.Connection = ConnectionStopped
 		i.Error = ""
-		i.LastSeen = h.now()
+		i.answeredBy = ""
+		i.LastSeen = h.clock.Now()
+		stopped = true
 	})
 	if err != nil {
 		h.logger.Warn("Failed to keep the hub's instances", "error", err)
 	}
-	if ok {
-		if current, found := h.store.get(id); found && current.Connection == ConnectionStopped {
-			h.unwatch(id)
-		}
+	if stopped {
+		h.unwatchStopped(id)
 	}
 }

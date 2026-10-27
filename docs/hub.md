@@ -36,8 +36,10 @@ hub never has to be on the public internet.
 
 1. An AgentAPI joins with its webhook. `agentapi hub join` writes the hub's address and secret into
    `~/.agentapi/config.yaml`, which every `agentapi server` of that user reads when it starts. Each
-   AgentAPI then sends signed `instance.started`, `instance.heartbeat` and `instance.stopped`
-   events, and the hub adds, updates or stops the instance.
+   AgentAPI then sends signed `instance.started`, `instance.heartbeat` (every minute) and
+   `instance.stopped` events, and the hub adds, updates or stops the instance. One the hub can't
+   reach that also missed three heartbeats, such as one whose workspace was killed, counts as
+   stopped, and the hub stops trying until its next heartbeat.
 2. The hub follows each instance's summary (`GET /events?only=summary`): its state, what it waits
    for, its title, latest task, queue and usage limits. One connection per instance, reopened after
    1 s, then up to every 30 s when it fails. A stream silent for 45 s counts as lost. An instance
@@ -215,7 +217,7 @@ Each state has a shape of its own, so it reads without its color:
 | Struck-through bell, grey | Muted | It needs you, and you muted that until it changes ([Muting](#muting)) |
 | Dashed ring, turning | Connecting | The hub is opening its summary stream, or opening it again |
 | Broken red ring | Unreachable | The hub hasn't reached it for 10 s; the line says why |
-| Square | Stopped, Exited | The AgentAPI stopped, or its agent exited |
+| Square | Stopped, Exited | The AgentAPI stopped (or missed three heartbeats while unreachable), or its agent exited |
 
 Search (**/**) matches any word of a name, group, title, machine or agent. The chips under it show
 all agents or only those that need you, work, finished unseen, or are offline, each with its count.

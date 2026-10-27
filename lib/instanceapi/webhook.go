@@ -62,6 +62,9 @@ type WebhookInstanceState struct {
 	LimitStop       *native.LimitStop     `json:"limit_stop,omitempty"`
 	Usage           *native.AgentUsage    `json:"usage,omitempty"`
 	Settings        *native.Settings      `json:"settings,omitempty"`
+	// HeartbeatSeconds is how often instance.heartbeat is sent; 0 when it
+	// is off. A receiver that misses a few takes the instance as stopped.
+	HeartbeatSeconds int `json:"heartbeat_seconds,omitempty"`
 }
 
 // Sign is the X-AgentAPI-Signature-256 of body sent at timestamp (Unix

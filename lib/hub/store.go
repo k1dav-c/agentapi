@@ -59,8 +59,14 @@ type record struct {
 	// (--instance-id) is what the hub's routes use; URL is where the hub
 	// reaches it.
 	instanceapi.WebhookInstance
-	Source   Source    `json:"source"`
+	Source Source `json:"source"`
+	// LastSeen is when the hub last heard from the instance's current run:
+	// its events and its summaries.
 	LastSeen time.Time `json:"last_seen"`
+	// HeartbeatSeconds is how often the current run sends
+	// instance.heartbeat, as its instance.* events say; 0 when unknown or
+	// off.
+	HeartbeatSeconds int `json:"heartbeat_seconds,omitempty"`
 	// Group is the group someone put the instance in on the hub's page;
 	// empty is none. The instance's own events never change it.
 	Group string `json:"group,omitempty"`

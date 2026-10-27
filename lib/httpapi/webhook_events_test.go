@@ -579,3 +579,19 @@ func TestWebhookTestEvent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "no webhook URL is set", response.Body.Error)
 }
+
+// The instance.* events say how often the heartbeat comes, so a receiver
+// knows when it missed some.
+func TestWebhookInstanceStateHeartbeat(t *testing.T) {
+	t.Parallel()
+	srv, _ := newQuietNativeServer(t, nil)
+	assert.Equal(t, 60, srv.webhookInstanceState().HeartbeatSeconds)
+	off := 0
+	request := &WebhookConfigRequest{}
+	request.Body.TimeoutSeconds = 1
+	request.Body.MaxAttempts = 1
+	request.Body.HeartbeatSeconds = &off
+	_, err := (&webhookAPI{webhook: srv.webhook}).updateWebhookConfig(t.Context(), request)
+	require.NoError(t, err)
+	assert.Zero(t, srv.webhookInstanceState().HeartbeatSeconds)
+}
