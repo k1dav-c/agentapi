@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.8.2
 
 ### Fixes
 
