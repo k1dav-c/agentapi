@@ -271,8 +271,8 @@ from then on.
 
 The chat UI at `/chat` is embedded in the binary and works with every transport on desktops and
 phones. It includes searchable tool activity, compact tool-call cards and connection indicators.
-The header shows the AgentAPI version and the agent's mark, such as Claude's orange square or Pi's
-logo. See the [chat UI guide](docs/chat-ui.md) for screenshots and animations.
+The header shows the AgentAPI version and the agent's mark: the logo of Claude, OpenAI (Codex) or
+Pi, or a square for other agents. See the [chat UI guide](docs/chat-ui.md) for screenshots and animations.
 
 ![Sending a task in the chat: the agent thinks, runs a tool and replies](docs/screenshots/demo-task.gif)
 

@@ -26,7 +26,10 @@ describe("faviconDataUrl", () => {
   });
 
   test("draws the agent's mark", () => {
-    expect(decodeURIComponent(faviconDataUrl(null, "claude"))).toContain('fill="#d97757"');
+    const claude = decodeURIComponent(faviconDataUrl(null, "claude"));
+    expect(claude).toContain('fill="#d97757"');
+    expect(claude).toContain('d="m4.7144 15.9555'); // the Claude logo, not a square
+    expect(claude).not.toMatch(/<rect[^>]*#d97757/);
     const pi = decodeURIComponent(faviconDataUrl("working", "pi"));
     for (const color of ["#F09082", "#4D9ABF", "#F1BE58"]) expect(pi).toContain(`fill="${color}"`);
     expect(pi).toContain('viewBox="0 0 469.43 469.43"');

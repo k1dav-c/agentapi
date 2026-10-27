@@ -1,4 +1,4 @@
-import { CODEX_MARK, PI_MARK, hasLogo, squareTint } from "@/lib/agent-mark";
+import { CLAUDE_MARK, CODEX_MARK, PI_MARK, squareTint } from "@/lib/agent-mark";
 
 // The agent's mark: its logo when it has one, otherwise a tinted square.
 // A logo has more detail than a square, so it is drawn a little larger.
@@ -10,7 +10,14 @@ export function AgentMark({ agentType, className }: { agentType: string; classNa
       </svg>
     );
   }
-  if (hasLogo(agentType)) {
+  if (agentType === "claude") {
+    return (
+      <svg aria-hidden="true" viewBox={CLAUDE_MARK.viewBox} className={`shrink-0 ${className ?? "size-3.5"}`} data-agent-mark={agentType}>
+        <path fill={squareTint(agentType).css} d={CLAUDE_MARK.d} />
+      </svg>
+    );
+  }
+  if (agentType === "pi") {
     return (
       <svg aria-hidden="true" viewBox={PI_MARK.viewBox} className={`shrink-0 ${className ?? "size-3.5"}`} data-agent-mark={agentType}>
         {PI_MARK.paths.map((path) => (

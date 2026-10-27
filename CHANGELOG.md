@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Claude Code's mark is the Claude logo, the starburst in Claude's orange, as Codex has OpenAI's and
+  Pi its own: in the chat's header and tasks, the hub's rows and cards, and the tab icon. It was an
+  orange square.
+
 ## v1.8.2
 
 ### Fixes
