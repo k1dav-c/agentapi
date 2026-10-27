@@ -233,6 +233,23 @@ const portFree = p => new Promise(resolve => {
 });
 
 const servers = [];
+// seedClaudeLog writes a Claude Code session log for cwd under home, with
+// calls model calls over the last week (more of them lately), so the
+// summary has a spend to show.
+async function seedClaudeLog(home, cwd, calls) {
+  const dir = path.join(home, '.claude', 'projects', cwd.replace(/[^A-Za-z0-9]/g, '-'));
+  await mkdir(dir, {recursive: true});
+  const session = '11111111-1111-4111-8111-' + String(calls).padStart(12, '0');
+  const at = (hoursAgo) => new Date(Date.now() - hoursAgo * 3600_000).toISOString();
+  const lines = [{type: 'user', uuid: 'u0', sessionId: session, cwd, timestamp: at(160), message: {role: 'user', content: 'Work on the service'}}];
+  for (let i = 0; i < calls; i++) {
+    lines.push({type: 'assistant', uuid: `a${i}`, requestId: `req_${i}`, sessionId: session, cwd, timestamp: at(160 * (i / calls) ** 2),
+      message: {model: 'claude-opus-5-5', id: `msg_${i}`, type: 'message', role: 'assistant', content: [{type: 'text', text: 'ok'}],
+        usage: {input_tokens: 2000, cache_read_input_tokens: 400000, cache_creation_input_tokens: 20000, output_tokens: 8000}}});
+  }
+  await writeFile(path.join(dir, `${session}.jsonl`), lines.map(line => JSON.stringify(line)).join('\n') + '\n');
+}
+
 const startServer = (name, cwd, env, args) => startProcess(name, cwd, env,
   ['server', '--bind', '127.0.0.1', '--allowed-hosts', 'localhost,127.0.0.1', ...args]);
 const startProcess = (name, cwd, env, args) => {
@@ -912,11 +929,11 @@ try {
   // questions, one needs a login, one hit its usage limit, one works, one finished a task nobody
   // saw, one is idle, one stopped and one was killed, so the hub can't reach it.
   const hubSetup = [
-    {name: 'checkout-api', type: 'claude', group: 'Client work', message: 'Deploy the release: approve', wait: 'approval'},
+    {name: 'checkout-api', type: 'claude', group: 'Client work', message: 'Deploy the release: approve', wait: 'approval', calls: 60},
     {name: 'marketing-site', type: 'codex', group: 'Client work', message: 'ask me about the launch copy', wait: 'question'},
     {name: 'mobile-app', type: 'codex', group: 'Client work', message: 'Check the login'},
-    {name: 'data-pipeline', type: 'claude', group: 'Internal', message: 'Rebuild the nightly aggregates; limit'},
-    {name: 'billing-service', type: 'claude', group: 'Internal'},
+    {name: 'data-pipeline', type: 'claude', group: 'Internal', message: 'Rebuild the nightly aggregates; limit', calls: 180},
+    {name: 'billing-service', type: 'claude', group: 'Internal', calls: 25},
     {name: 'design-system', type: 'pi', group: 'Internal', message: 'Refactor the button tokens and update the docs', idle: true},
     {name: 'docs', type: 'custom'},
     {name: 'legacy-cms', type: 'custom'},
@@ -926,6 +943,7 @@ try {
   for (const [i, instance] of hubSetup.entries()) {
     const dir = path.join(root, 'workspaces', instance.name);
     await mkdir(dir, {recursive: true});
+    if (instance.calls) await seedClaudeLog(hubHome, dir, instance.calls);
     startServer(instance.name, dir, hubEnv, ['--port', String(port + 4 + i), '--transport', 'native', '--type', instance.type, '--', 'native-demo']);
     hubInstances[instance.name] = client(`http://127.0.0.1:${port + 4 + i}`);
     await poll(async () => (await hubInstances[instance.name].status()).lifecycle === 'ready', `the ${instance.name} instance`);
@@ -1014,6 +1032,8 @@ try {
     await shot(page, theme === 'light' ? 'hub-desktop.png' : 'hub-desktop-dark.png');
     if (theme === 'light') {
       await elementShot(page, page.locator('aside'), 'hub-list.png');
+      // What the agents spent: the overview's card.
+      await elementShot(page, page.locator('section[aria-labelledby="hub-spend"]'), 'hub-spend.png');
       // Adding an instance by its URL.
       await page.getByRole('button', {name: 'Add an instance'}).click();
       const addDialog = page.getByRole('dialog');

@@ -8,7 +8,10 @@ import {
   displayName,
   formatAgo,
   formatElapsed,
+  formatUSD,
   instanceState,
+  spendTitle,
+  spendTotals,
   type HubFilter,
   type HubInstance,
   type InstanceState,
@@ -154,6 +157,72 @@ const stats: {filter: HubFilter; label: string; tone: string; tint: string; glyp
   {filter: "offline", label: "Offline", tone: "text-state-fault", tint: "bg-state-fault/5 border-state-fault/25", glyph: "unreachable"},
 ];
 
+// SpendCard is what the instances spent in the last 24 hours and 7 days,
+// all of them and the ones that spent the most this week.
+function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: string) => void}) {
+  const totals = spendTotals(instances);
+  if (totals.week <= 0) return null;
+  const top = instances
+    .filter((instance) => (instance.summary?.spend?.week_usd ?? 0) > 0)
+    .sort((a, b) => b.summary!.spend!.week_usd - a.summary!.spend!.week_usd)
+    .slice(0, 5);
+  return (
+    <section className="mt-10" aria-labelledby="hub-spend">
+      <h3 id="hub-spend" className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+        Spend
+        <span className="font-normal tracking-normal normal-case text-muted-foreground/70">API-equivalent, at list prices; a subscription doesn&apos;t charge it</span>
+      </h3>
+      <div className="mt-3 grid gap-6 rounded-2xl border bg-card p-5 shadow-xs md:grid-cols-[auto_minmax(0,1fr)]">
+        <div className="flex flex-wrap items-end gap-x-8 gap-y-3 md:flex-col md:items-start md:border-r md:pr-8">
+          <dl className="flex gap-8 md:flex-col md:gap-4">
+            <div>
+              <dt className="text-xs text-muted-foreground">Last 24 hours</dt>
+              <dd className="text-3xl font-semibold tracking-tight tabular-nums">{formatUSD(totals.day)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Last 7 days</dt>
+              <dd className="text-3xl font-semibold tracking-tight tabular-nums">{formatUSD(totals.week)}</dd>
+            </div>
+          </dl>
+          <p className="text-xs text-muted-foreground">
+            {totals.counted} of {instances.length} agents report it
+          </p>
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted-foreground">
+              <th className="pb-2 font-normal">Spent the most this week</th>
+              <th className="pb-2 text-right font-normal">24 hours</th>
+              <th className="pb-2 text-right font-normal">7 days</th>
+            </tr>
+          </thead>
+          <tbody>
+            {top.map((instance) => {
+              const spend = instance.summary!.spend!;
+              return (
+                <tr key={instance.id} className="border-t" title={spendTitle(spend.day_usd, spend.week_usd)}>
+                  <td className="max-w-0 py-2 pr-3">
+                    <button
+                      type="button"
+                      onClick={() => onOpen(instance.id)}
+                      className="flex w-full min-w-0 items-center gap-2 rounded text-left outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    >
+                      {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3.5 shrink-0" />}
+                      <span className="truncate font-medium">{displayName(instance)}</span>
+                    </button>
+                  </td>
+                  <td className="py-2 text-right tabular-nums">{formatUSD(spend.day_usd)}</td>
+                  <td className="py-2 pl-4 text-right tabular-nums">{formatUSD(spend.week_usd)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 // Overview is the main pane while no instance is open: what needs you,
 // what runs, and what finished since you last looked.
 export function Overview({
@@ -234,6 +303,8 @@ export function Overview({
             </button>
           ))}
         </div>
+
+        <SpendCard instances={instances} onOpen={onOpen} />
 
         {needs.length > 0 && (
           <Section title="Needs you" count={needs.length}>

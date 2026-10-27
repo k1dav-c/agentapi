@@ -237,7 +237,10 @@ type EventEmitter struct {
 	summary  *SummaryBody
 	// seenAt is when a client last showed the conversation to the user: a
 	// task that ended after it is unread.
-	seenAt         time.Time
+	seenAt time.Time
+	// spend is what the agent's sessions cost recently (startSpend); nil
+	// until it is worked out, and for agents whose logs aren't read.
+	spend          *SummarySpend
 	clock          quartz.Clock
 	onStatusChange func(previous, current AgentStatus)
 	// persister, if set, stores every change of the conversation state.

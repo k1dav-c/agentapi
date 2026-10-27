@@ -176,13 +176,26 @@ long they've run; finished ones you haven't seen show their title.
 
 ![The overview in the dark theme](screenshots/hub-desktop-dark.png)
 
+### Spend
+
+![What the agents spent: the last 24 hours and 7 days, and the agents that spent the most](screenshots/hub-spend.png)
+
+Each AgentAPI works out what its agent's sessions in its working directory cost over the last 24
+hours and the last 7 days, from the agent's session logs, once a minute, and puts it in its summary
+(`spend`). It is the API-equivalent cost: the tokens at the model providers' list prices, which a
+subscription doesn't charge. Only native Claude Code, Codex and Pi have it; other agents show none.
+
+A row shows its agent's last 24 hours (`$110/24h`), a group header its group's, and the top of the
+list all of them; hover for the 7 days too. On a desktop the overview has a **Spend** card: the 24
+hours and 7 days of every agent that reports it, and the five that spent the most this week.
+
 ### The list
 
 ![Every state the list shows](screenshots/hub-list.png)
 
 Each row shows the agent's name (`--name`, by default its working directory's name), what it waits
-for or does, how long ago, the agent and the machine; a queue that isn't empty and a usage limit
-above 60% join them. Within a [group](#groups), the rows sort by state in this order, then by name.
+for or does, how long ago, the agent and the machine; a queue that isn't empty, what the agent spent
+in the last 24 hours ([Spend](#spend)) and a usage limit above 60% join them. Within a [group](#groups), the rows sort by state in this order, then by name.
 Each state has a shape of its own, so it reads without its color:
 
 | Glyph | Second line starts with | Meaning |

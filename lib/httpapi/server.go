@@ -421,6 +421,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 	s.startWebhook(config)
 	s.registry = s.newInstanceRegistry(config.RegistryDir, bind)
+	s.startSpend()
 
 	// Register API routes
 	s.registerRoutes()

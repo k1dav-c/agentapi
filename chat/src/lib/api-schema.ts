@@ -2310,6 +2310,8 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY, ACP) and until it is worked out. */
+            spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];
             /** @description The latest task, as in GET /tasks; missing before the first. */
@@ -2340,6 +2342,18 @@ export interface components {
             kind: components["schemas"]["RequestKind"];
             /** @description One-line summary, such as the command to run. */
             title: string;
+        };
+        SummarySpend: {
+            /**
+             * Format: double
+             * @description API-equivalent cost in USD of the agent's sessions in this directory, subagents included, over the last 24 hours (the hours that end within them): the tokens at the model providers' list prices, which a subscription doesn't charge.
+             */
+            day_usd: number;
+            /**
+             * Format: double
+             * @description The same over the last 7 days.
+             */
+            week_usd: number;
         };
         SummaryUpdateBody: {
             /** @description The agent's own session, as in GET /status. */
@@ -2373,6 +2387,8 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY, ACP) and until it is worked out. */
+            spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];
             /** @description The latest task, as in GET /tasks; missing before the first. */

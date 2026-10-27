@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {agentDisplayName, parseAgentType} from "@/lib/agents";
-import {activity, displayName, formatAgo, instanceState, stateLabel, usagePercent, type HubGroup, type HubInstance} from "@/lib/hub";
+import {activity, displayName, formatAgo, formatUSD, instanceState, spendTitle, spendTotals, stateLabel, usagePercent, type HubGroup, type HubInstance} from "@/lib/hub";
 import {cn} from "@/lib/utils";
 import {StatusGlyph, stateTone} from "./status-glyph";
 
@@ -115,6 +115,15 @@ export function InstanceRow({
                   </span>
                 </>
               )}
+              {summary?.spend && summary.spend.week_usd > 0 && (
+                <span className="shrink-0 tabular-nums" title={spendTitle(summary.spend.day_usd, summary.spend.week_usd)}>
+                  <span className="sr-only">{spendTitle(summary.spend.day_usd, summary.spend.week_usd)}</span>
+                  <span aria-hidden="true">
+                    {formatUSD(summary.spend.day_usd)}
+                    <span className="text-muted-foreground/60">/24h</span>
+                  </span>
+                </span>
+              )}
               {summary && summary.queued_messages > 0 && (
                 <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-medium text-foreground/80">{summary.queued_messages} queued</span>
               )}
@@ -189,6 +198,7 @@ export function GroupHeader({group, folded, onToggle, onRename}: {group: HubGrou
           <ChevronRight aria-hidden="true" className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", !folded && "rotate-90")} />
           <span className="min-w-0 truncate text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">{group.name || "Ungrouped"}</span>
           <span className="shrink-0 text-[11px] text-muted-foreground/70 tabular-nums">{group.instances.length}</span>
+          <GroupSpend group={group} />
           {group.needsYou > 0 && (
             <span className="ml-1 inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-state-needs px-1.5 text-[10px] font-semibold text-background tabular-nums">
               <span className="sr-only">{`${group.needsYou} need you`}</span>
@@ -203,5 +213,18 @@ export function GroupHeader({group, folded, onToggle, onRename}: {group: HubGrou
         )}
       </div>
     </div>
+  );
+}
+
+// GroupSpend is what a group's instances spent in the last 24 hours.
+function GroupSpend({group}: {group: HubGroup}) {
+  const totals = spendTotals(group.instances);
+  if (totals.week <= 0) return null;
+  const title = spendTitle(totals.day, totals.week);
+  return (
+    <span className="shrink-0 text-[11px] text-muted-foreground/70 tabular-nums" title={title}>
+      <span className="sr-only">{title}</span>
+      <span aria-hidden="true">· {formatUSD(totals.day)}/24h</span>
+    </span>
   );
 }

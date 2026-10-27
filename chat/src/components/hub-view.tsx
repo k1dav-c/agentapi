@@ -11,12 +11,15 @@ import {
   chatURL,
   countFilters,
   displayName,
+  formatUSD,
   groupInstances,
   groupNames,
   hubRoot,
   instanceState,
   matchesFilter,
   matchesSearch,
+  spendTitle,
+  spendTotals,
   stateLabel,
   type HubEvent,
   type HubFilter,
@@ -148,6 +151,7 @@ export function HubView() {
   const waiting = counts["needs-you"];
   const now = useNow(counts.working > 0);
   const visible = useMemo(() => all.filter((i) => matchesFilter(i, filter) && matchesSearch(i, query)), [all, filter, query]);
+  const spend = useMemo(() => spendTotals(all), [all]);
   const groups = useMemo(() => groupInstances(visible), [visible]);
   const names = useMemo(() => groupNames(all), [all]);
   const showHeaders = names.length > 0;
@@ -336,12 +340,20 @@ export function HubView() {
             <HubMark className="size-8" />
             <div className="min-w-0 flex-1">
               <h1 className="text-[15px] leading-tight font-semibold tracking-tight">AgentAPI Hub</h1>
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+              <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                 <span
                   aria-hidden="true"
-                  className={cn("size-1.5 rounded-full", connected ? "bg-state-ready" : "animate-pulse bg-state-needs")}
+                  className={cn("size-1.5 shrink-0 rounded-full", connected ? "bg-state-ready" : "animate-pulse bg-state-needs")}
                 />
-                {connected ? `Live · ${counts.all} ${counts.all === 1 ? "agent" : "agents"}` : "Reconnecting…"}
+                <span aria-live="polite" className="shrink-0">
+                  {connected ? `Live · ${counts.all} ${counts.all === 1 ? "agent" : "agents"}` : "Reconnecting…"}
+                </span>
+                {/* Out of the live region: it changes every minute. */}
+                {connected && spend.week > 0 && (
+                  <span className="min-w-0 truncate tabular-nums" title={spendTitle(spend.day, spend.week)}>
+                    · {formatUSD(spend.day)}/24h
+                  </span>
+                )}
               </p>
             </div>
             <Button

@@ -173,7 +173,7 @@ The handlers are grouped by file:
 | `server.go`, `routes.go`, `hosts.go`, `middleware.go` | The server's setup, start and stop; the routes, which each feature registers; allowed hosts and origins; request logging |
 | `conversation_api.go`, `queue.go`, `sse.go`, `jsonl_watcher.go` | Messages, status and timeline; the queue, its dispatch and `queue_update`; `GET /events` and the screen stream; the PTY transport's session log watcher |
 | `tasks.go` | The tasks the emitter derives from the conversation (`taskTracker`), `task_update` and `GET /tasks` |
-| `summary.go`, `registry.go` | The summary for clients that watch many AgentAPIs (`attention`, title, latest task, `unread`), `summary_update`, `GET /summary` and `POST /tasks/seen`; the server's registry entry (`instanceRegistry`) |
+| `summary.go`, `spend.go`, `registry.go` | The summary for clients that watch many AgentAPIs (`attention`, title, latest task, `unread`, `spend`), `summary_update`, `GET /summary` and `POST /tasks/seen`; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
 | `backend.go`, `backend_pty.go`, `backend_native.go` | What depends on the transport: dispatching the queue and the work each tick (`beforeQueue`: a scheduled continuation, Codex's update prompt), delivering a message, restarts (`beginRestart`, `beginReload`), the human-reply protocol (`handoffOffer`, `answerHandoff`) |
 | `setup.go` | Starting the process of a PTY or ACP agent |
 | `native.go` | Requests, settings, interrupt, compaction, login retry; the native observer |
@@ -428,6 +428,11 @@ usage limit stop, login, terminal prompt) and the latest screen.
   updates; its stream also sends heartbeats. `PUT /webhook` triggers another
   check, and rewrites the registry entry, because it can change the instance
   ID and URL.
+- For an agent whose session logs it reads, the server works out the summary's
+  `spend` once a minute (`spend.go`): `sessions.Store.Costs` reads the logs
+  incrementally, and the hours of its total that end within the last 24 hours
+  and 7 days are added up. `EventEmitter.SetSpend` sends the summary only when
+  the amounts change.
 - The emitter also records when a client last showed the conversation
   (`POST /tasks/seen`, which the chat calls while it shows it). The latest
   task is `unread` when it ended after that. The state DB keeps the time; a
