@@ -12,24 +12,16 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
-// Entry is a running AgentAPI. It holds no secret: whether the API needs a
+// Entry is a running AgentAPI: who it is, as its webhook events and
+// summary say, with URL where a client reaches it (--public-url, else the
+// address it listens on). It holds no secret: whether the API needs a
 // token, not the token.
 type Entry struct {
-	ID       string `json:"id" doc:"The instance ID (--instance-id), as in GET /summary."`
-	Name     string `json:"name,omitempty"`
-	ServerID string `json:"server_id"`
-	// URL is where a client reaches it: --public-url, else the address it
-	// listens on.
-	URL          string    `json:"url"`
-	Hostname     string    `json:"hostname,omitempty"`
-	Port         int       `json:"port"`
-	PID          int       `json:"pid"`
-	CWD          string    `json:"cwd,omitempty"`
-	AgentType    string    `json:"agent_type"`
-	Transport    string    `json:"transport"`
-	Version      string    `json:"agentapi_version,omitempty"`
+	instanceapi.WebhookInstance
 	AuthRequired bool      `json:"auth_required"`
 	StartedAt    time.Time `json:"started_at"`
 }

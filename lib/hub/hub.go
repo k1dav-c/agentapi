@@ -27,6 +27,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 // Config is how the hub runs.
@@ -279,15 +280,11 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 		id = u.Host
 	}
 	instance, _, err := h.store.update(id, true, true, func(i *Instance) {
+		i.WebhookInstance = summary.Instance
+		i.ID = id
 		i.URL = base
 		i.Token = body.Token
 		i.Source = SourceManual
-		i.Name = summary.Instance.Name
-		i.ServerID = summary.Instance.ServerID
-		i.Hostname = summary.Instance.Hostname
-		i.Port = summary.Instance.Port
-		i.CWD = summary.Instance.CWD
-		i.AgentType = string(summary.Instance.AgentType)
 		i.LastSeen = h.now()
 		i.Summary = summary
 		i.Connection = ConnectionConnecting
@@ -300,7 +297,7 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, instance.public())
 }
 
-func (h *Hub) fetchSummary(ctx context.Context, base, token string) (*httpapi.SummaryBody, error) {
+func (h *Hub) fetchSummary(ctx context.Context, base, token string) (*instanceapi.SummaryBody, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/summary", nil)
@@ -324,7 +321,7 @@ func (h *Hub) fetchSummary(ctx context.Context, base, token string) (*httpapi.Su
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET /summary: %s (is it AgentAPI 1.1 or later?)", resp.Status)
 	}
-	var summary httpapi.SummaryBody
+	var summary instanceapi.SummaryBody
 	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
 		return nil, fmt.Errorf("GET /summary: %w", err)
 	}
@@ -360,7 +357,7 @@ func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 		if body.Muted != nil {
 			key := ""
 			if *body.Muted {
-				key = attentionKey(i.Summary)
+				key = instanceapi.AttentionKey(i.Summary)
 				nothingToMute = key == ""
 			}
 			if !nothingToMute {

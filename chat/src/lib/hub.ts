@@ -7,6 +7,13 @@ import type {components} from "./api-schema";
 export type Summary = components["schemas"]["SummaryBody"];
 export type HubConnection = "connecting" | "connected" | "unreachable" | "stopped";
 
+// InstanceState is what a row says of an instance, the most pressing
+// first: it needs you, works, finished a task you haven't seen, waits,
+// waits for what you muted, or can't be reached. The hub works it out
+// (instanceapi.StateOf); unknown is one this page doesn't know, from a
+// newer hub than the page a browser kept.
+export type InstanceState = "needs-you" | "working" | "unread" | "idle" | "muted" | "connecting" | "unreachable" | "stopped" | "unknown";
+
 export interface HubInstance {
   id: string;
   name?: string;
@@ -14,24 +21,25 @@ export interface HubInstance {
   server_id?: string;
   hostname?: string;
   port?: number;
+  pid?: number;
   cwd?: string;
   agent_type?: string;
+  transport?: string;
+  agentapi_version?: string;
+  workspace_url?: string;
   source: "webhook" | "manual";
   last_seen: string;
   connection: HubConnection;
   error?: string;
   // group is the group someone put it in on the hub's page; none when empty.
   group?: string;
-  // muted is what it waited for when someone muted it (attentionKey); the
-  // hub ends the mute once that changes.
+  // muted is what it waited for when someone muted it; the hub ends the
+  // mute once that changes.
   muted?: string;
   summary?: Summary | null;
+  // state is as the hub sends it; instanceState reads it.
+  state: string;
 }
-
-// InstanceState is what a row says of an instance, the most pressing
-// first: it needs you, works, finished a task you haven't seen, waits,
-// waits for what you muted, or can't be reached.
-export type InstanceState = "needs-you" | "working" | "unread" | "idle" | "muted" | "connecting" | "unreachable" | "stopped";
 
 const stateRank: Record<InstanceState, number> = {
   "needs-you": 0,
@@ -42,29 +50,12 @@ const stateRank: Record<InstanceState, number> = {
   connecting: 5,
   unreachable: 6,
   stopped: 7,
+  unknown: 8,
 };
 
-// attentionKey is what an instance waits for, as the hub mutes it: why it
-// needs you and, for a request, which one; empty when it needs nothing.
-export function attentionKey(summary: Summary | null | undefined): string {
-  const attention = summary?.attention;
-  if (!attention || attention === "none" || attention === "exited") return "";
-  return summary.request ? `${attention}:${summary.request.id}` : attention;
-}
-
 export function instanceState(instance: HubInstance): InstanceState {
-  if (instance.connection === "stopped") return "stopped";
-  if (instance.connection === "unreachable") return "unreachable";
-  const summary = instance.summary;
-  if (!summary) return "connecting";
-  if (summary.attention !== "none" && summary.attention !== "exited") {
-    // Muted until what it waits for changes; the hub ends it then.
-    return instance.muted && instance.muted === attentionKey(summary) ? "muted" : "needs-you";
-  }
-  if (summary.attention === "exited") return "stopped";
-  if (summary.status === "running") return "working";
-  if (summary.unread) return "unread";
-  return "idle";
+  const state = instance.state as InstanceState;
+  return state !== "unknown" && Object.hasOwn(stateRank, state) ? state : "unknown";
 }
 
 const attentionLabel: Record<Summary["attention"], string> = {
@@ -96,6 +87,8 @@ export function stateLabel(instance: HubInstance): string {
       return "Unreachable";
     case "stopped":
       return instance.summary?.attention === "exited" ? "Agent exited" : "Stopped";
+    case "unknown":
+      return "Unknown";
   }
 }
 
@@ -275,6 +268,8 @@ export function activity(instance: HubInstance): Activity {
       return {text: "Connecting…", tone: "muted"};
     case "idle":
       return {text: summary?.title || "No task yet", tone: "muted", since: task?.ended_at};
+    case "unknown":
+      return {text: "Reload the page to see what it does", tone: "muted"};
   }
 }
 

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 // Muting an instance silences what it waits for now, until that changes:
@@ -21,7 +21,7 @@ func TestMute(t *testing.T) {
 	require.NoError(t, err)
 	srv := httptest.NewServer(h.Handler())
 	defer srv.Close()
-	set := func(summary httpapi.SummaryBody) {
+	set := func(summary instanceapi.SummaryBody) {
 		_, _, err := h.store.update("dev:1", true, false, func(i *Instance) {
 			i.URL = "http://dev:1"
 			i.Summary = &summary
@@ -45,27 +45,27 @@ func TestMute(t *testing.T) {
 		return instance.Muted
 	}
 
-	set(httpapi.SummaryBody{Attention: httpapi.AttentionNone})
+	set(instanceapi.SummaryBody{Attention: instanceapi.AttentionNone})
 	code, _ := patch(`{"muted": true}`)
 	assert.Equal(t, http.StatusConflict, code, "nothing to mute")
 
-	login := httpapi.SummaryBody{Attention: httpapi.AttentionLogin}
+	login := instanceapi.SummaryBody{Attention: instanceapi.AttentionLogin}
 	set(login)
 	code, instance := patch(`{"muted": true}`)
 	require.Equal(t, http.StatusOK, code)
 	assert.Equal(t, "login", instance.Muted)
 	h.unmuteChanged("dev:1", &login)
 	assert.Equal(t, "login", muted(), "still waits for the login")
-	h.unmuteChanged("dev:1", &httpapi.SummaryBody{Attention: httpapi.AttentionNone})
+	h.unmuteChanged("dev:1", &instanceapi.SummaryBody{Attention: instanceapi.AttentionNone})
 	assert.Empty(t, muted(), "logged in")
 
-	first := httpapi.SummaryBody{Attention: httpapi.AttentionRequest, Request: &httpapi.SummaryRequest{ID: "r1"}}
+	first := instanceapi.SummaryBody{Attention: instanceapi.AttentionRequest, Request: &instanceapi.SummaryRequest{ID: "r1"}}
 	set(first)
 	_, instance = patch(`{"muted": true}`)
 	assert.Equal(t, "request:r1", instance.Muted)
 	h.unmuteChanged("dev:1", &first)
 	assert.Equal(t, "request:r1", muted())
-	h.unmuteChanged("dev:1", &httpapi.SummaryBody{Attention: httpapi.AttentionRequest, Request: &httpapi.SummaryRequest{ID: "r2"}})
+	h.unmuteChanged("dev:1", &instanceapi.SummaryBody{Attention: instanceapi.AttentionRequest, Request: &instanceapi.SummaryRequest{ID: "r2"}})
 	assert.Empty(t, muted(), "another request")
 
 	set(login)

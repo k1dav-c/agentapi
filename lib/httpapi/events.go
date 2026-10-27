@@ -11,13 +11,11 @@ import (
 
 	"github.com/coder/quartz"
 
-	"github.com/danielgtaylor/huma/v2"
-
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/instanceapi"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
-	"github.com/coder/agentapi/lib/util"
 )
 
 type EventType string
@@ -36,41 +34,29 @@ const (
 	EventTypeSummaryUpdate     EventType = "summary_update"
 )
 
-type AgentStatus string
-
-const (
-	AgentStatusRunning AgentStatus = "running"
-	AgentStatusStable  AgentStatus = "stable"
+// The agent's status and lifecycle are part of the summary's contract
+// (lib/instanceapi).
+type (
+	AgentStatus    = instanceapi.AgentStatus
+	LifecycleState = instanceapi.LifecycleState
 )
 
-var AgentStatusValues = []AgentStatus{
-	AgentStatusStable,
-	AgentStatusRunning,
-}
-
-func (a AgentStatus) Schema(r huma.Registry) *huma.Schema {
-	return util.OpenAPISchema(r, "AgentStatus", AgentStatusValues)
-}
-
-type LifecycleState string
-
 const (
-	LifecycleStarting   LifecycleState = "starting"
-	LifecycleReady      LifecycleState = "ready"
-	LifecycleRunning    LifecycleState = "running"
-	LifecycleRestarting LifecycleState = "restarting"
-	LifecycleExited     LifecycleState = "exited"
-	LifecycleFailed     LifecycleState = "failed"
+	AgentStatusRunning = instanceapi.AgentStatusRunning
+	AgentStatusStable  = instanceapi.AgentStatusStable
+
+	LifecycleStarting   = instanceapi.LifecycleStarting
+	LifecycleReady      = instanceapi.LifecycleReady
+	LifecycleRunning    = instanceapi.LifecycleRunning
+	LifecycleRestarting = instanceapi.LifecycleRestarting
+	LifecycleExited     = instanceapi.LifecycleExited
+	LifecycleFailed     = instanceapi.LifecycleFailed
 )
 
-var LifecycleStateValues = []LifecycleState{
-	LifecycleStarting, LifecycleReady, LifecycleRunning,
-	LifecycleRestarting, LifecycleExited, LifecycleFailed,
-}
-
-func (l LifecycleState) Schema(r huma.Registry) *huma.Schema {
-	return util.OpenAPISchema(r, "LifecycleState", LifecycleStateValues)
-}
+var (
+	AgentStatusValues    = instanceapi.AgentStatusValues
+	LifecycleStateValues = instanceapi.LifecycleStateValues
+)
 
 type MessageUpdateBody struct {
 	Id      int       `json:"id" doc:"Unique identifier for the message. This identifier also represents the order of the message in the conversation history."`
@@ -635,7 +621,7 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string, wants fu
 			replaySeq = max(replaySeq, seq)
 			events = append(events, Event{
 				Type:    EventTypeTaskUpdate,
-				Payload: TaskUpdateBody{Task: task.clone(), Seq: seq},
+				Payload: TaskUpdateBody{Task: task.Clone(), Seq: seq},
 			})
 		}
 	}

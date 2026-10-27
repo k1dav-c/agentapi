@@ -207,6 +207,9 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 「Finished」依據 agent 的未讀標記，這個標記由該 AgentAPI 的所有用戶端共用：在 hub 或它自己的聊天
 介面開啟，各處都會變成已讀。
 
+每一列的狀態由 hub 判斷。hub 更新後仍開著的舊頁面，遇到不認得的狀態會顯示 Unknown 和問號；重新整理
+頁面即可。
+
 ### 群組
 
 ![手機上一列的選單：群組、新群組和 Forget](screenshots/hub-phone-menu.png)
@@ -369,11 +372,11 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `GET /api/session` | 請求帶有 session 或 hub token 時回傳 `{"authenticated": true}` |
 | `POST /api/session` | `{"token": …}` 登入並設定 session cookie |
 | `DELETE /api/session` | 登出 |
-| `GET /api/instances` | 所有實例，含摘要和連線狀態 |
+| `GET /api/instances` | 所有實例：各自是誰、摘要、連線，以及列表上顯示的狀態（`state`：`needs-you`、`working`、`unread`、`idle`、`muted`、`connecting`、`unreachable` 或 `stopped`） |
 | `POST /api/instances` | `{"url": …, "token": …}` 以網址加入實例 |
 | `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音 |
 | `DELETE /api/instances/{id}` | 移除實例 |
-| `GET /api/events` | Server-sent events：先送 `instances`（全部），再送 `instance`（某個有變動）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
+| `GET /api/events` | Server-sent events：先送 `instances`（全部，格式同 `GET /api/instances`），再送 `instance`（某個有變動）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面 |
 
 除了 `/hooks` 和 `/api/session`，每個端點都需要 session cookie 或

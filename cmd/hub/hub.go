@@ -20,7 +20,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/registry"
 	"github.com/coder/agentapi/lib/userconfig"
 )
@@ -113,7 +113,7 @@ func joinCmd() *cobra.Command {
 				_, _ = fmt.Fprintln(out, "Warning: without --secret the hub can't tell the events are this machine's.")
 			}
 			if publicURL != "" {
-				if err := checkURL(httpapi.ExpandPublicURL(publicURL, 1)); err != nil {
+				if err := checkURL(instanceapi.ExpandPublicURL(publicURL, 1)); err != nil {
 					return fmt.Errorf("--public-url: %w", err)
 				}
 			}
@@ -303,7 +303,7 @@ func applyTo(ctx context.Context, entry registry.Entry, token string, change web
 		body["secret"] = *change.Secret
 	}
 	if change.PublicURL != "" {
-		body["public_url"] = httpapi.ExpandPublicURL(change.PublicURL, entry.Port)
+		body["public_url"] = instanceapi.ExpandPublicURL(change.PublicURL, entry.Port)
 	}
 	return call(ctx, entry, token, http.MethodPut, body, nil)
 }

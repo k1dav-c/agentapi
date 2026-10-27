@@ -62,6 +62,7 @@ to PTY mode, which parses terminal output. Experimental ACP mode uses the Agent 
 - `lib/jsonlwatcher/` - Tails a PTY agent's session log for rich messages
 - `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation
 - `lib/statedb/` - SQLite persistence of conversations, native and PTY (`--state-db`; a deprecated `--state-file` is imported into it)
+- `lib/instanceapi/` - The contract with clients that watch many AgentAPIs: who an instance is, its summary, the webhook envelope and signature, and the state a hub shows (aliased in `lib/httpapi` under the same names)
 - `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs (signed webhooks, summary streams, a proxy that opens any of them in the chat)
 - `lib/userconfig/` - The user's settings file (`~/.agentapi/config.yaml`), which agentapi server reads and agentapi hub join writes
 - `lib/registry/` - The registry of the AgentAPIs running on a machine (`~/.agentapi/instances`), which `agentapi list` reads

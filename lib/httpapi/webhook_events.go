@@ -13,15 +13,16 @@ import (
 
 	"github.com/coder/agentapi/internal/version"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/pricing"
 )
 
 // The events a webhook can be sent besides run.status_changed.
 const (
-	webhookEventInstanceStarted   = "instance.started"
-	webhookEventInstanceHeartbeat = "instance.heartbeat"
-	webhookEventInstanceStopped   = "instance.stopped"
+	webhookEventInstanceStarted   = instanceapi.EventInstanceStarted
+	webhookEventInstanceHeartbeat = instanceapi.EventInstanceHeartbeat
+	webhookEventInstanceStopped   = instanceapi.EventInstanceStopped
 	webhookEventTaskStarted       = "task.started"
 	webhookEventTaskCompleted     = "task.completed"
 	webhookEventTaskFailed        = "task.failed"
@@ -44,21 +45,9 @@ const (
 	webhookPromptLimit  = 4 << 10
 )
 
-// WebhookInstanceState is the data of instance.started, instance.heartbeat
-// and instance.stopped: what the agent is doing.
-type WebhookInstanceState struct {
-	Status          AgentStatus           `json:"status"`
-	Lifecycle       LifecycleState        `json:"lifecycle"`
-	AgentSessionID  string                `json:"agent_session_id,omitempty"`
-	SessionName     string                `json:"session_name,omitempty"`
-	PendingRequests int                   `json:"pending_requests"`
-	QueuedMessages  int                   `json:"queued_messages"`
-	TerminalPrompt  string                `json:"terminal_prompt,omitempty"`
-	LoginRequired   *native.LoginRequired `json:"login_required,omitempty"`
-	LimitStop       *native.LimitStop     `json:"limit_stop,omitempty"`
-	Usage           *native.AgentUsage    `json:"usage,omitempty"`
-	Settings        *native.Settings      `json:"settings,omitempty"`
-}
+// WebhookInstanceState is the data of the instance.* events
+// (lib/instanceapi).
+type WebhookInstanceState = instanceapi.WebhookInstanceState
 
 // WebhookTask is the data of task.started, task.completed and task.failed:
 // the task as GET /tasks has it, with the text of the agent's reply.
@@ -372,14 +361,14 @@ func (o *webhookObserver) taskUpdated(task Task, quiet bool) {
 	key := messageKey{task.ID, task.StartedAt}
 	if quiet || task.StartedAt.Before(o.since) {
 		o.started[key] = true
-		o.ended[key] = task.final()
+		o.ended[key] = task.Final()
 		return
 	}
 	if !o.started[key] {
 		o.started[key] = true
 		o.webhook.emit(webhookEventTaskStarted, o.webhookTask(task))
 	}
-	if !task.final() || o.ended[key] {
+	if !task.Final() || o.ended[key] {
 		return
 	}
 	o.ended[key] = true

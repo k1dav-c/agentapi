@@ -83,16 +83,12 @@ func (s *Server) newInstanceRegistry(dir string, bind string) *instanceRegistry 
 		logger: s.logger,
 		entry: func(port int) registry.Entry {
 			instance := s.webhook.instanceSnapshot()
-			url := instance.URL
-			if url == "" {
-				url = localURL(bind, port)
+			if instance.URL == "" {
+				instance.URL = localURL(bind, port)
 			}
-			return registry.Entry{
-				ID: instance.ID, Name: instance.Name, ServerID: instance.ServerID, URL: url,
-				Hostname: instance.Hostname, Port: port, PID: os.Getpid(), CWD: instance.CWD,
-				AgentType: string(instance.AgentType), Transport: string(instance.Transport),
-				Version: instance.Version, AuthRequired: s.auth != nil, StartedAt: started,
-			}
+			instance.Port = port
+			instance.PID = os.Getpid()
+			return registry.Entry{WebhookInstance: instance, AuthRequired: s.auth != nil, StartedAt: started}
 		},
 	}
 }

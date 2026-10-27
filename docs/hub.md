@@ -224,6 +224,9 @@ does, and a stream silent for 45 s (the hub sends a heartbeat every 15 s) counts
 "Finished" follows the agent's unread mark, which every client of that AgentAPI shares: opening it
 in the hub, or in its own chat, marks it read everywhere.
 
+The hub works out each row's state. A page older than the hub, kept open across an update, shows
+a state it doesn't know as Unknown, with a question mark; reload the page.
+
 ### Groups
 
 ![A row's menu on a phone: its group, a new one, and Forget](screenshots/hub-phone-menu.png)
@@ -401,11 +404,11 @@ be changed now applies the file when it restarts.
 | `GET /api/session` | `{"authenticated": true}` when the request carries the session or the hub token |
 | `POST /api/session` | `{"token": …}` signs in and sets the session cookie |
 | `DELETE /api/session` | Signs out |
-| `GET /api/instances` | The instances, with their summaries and connection state |
+| `GET /api/instances` | The instances: who each one is, its summary, its connection and the state its row shows (`state`: `needs-you`, `working`, `unread`, `idle`, `muted`, `connecting`, `unreachable` or `stopped`) |
 | `POST /api/instances` | `{"url": …, "token": …}` adds an instance by its URL |
 | `PATCH /api/instances/{id}` | `{"group": …}` puts an instance in a group, `""` in none; `{"muted": true}` mutes what it waits for now, until that changes (409 when it waits for nothing), `false` ends the mute |
 | `DELETE /api/instances/{id}` | Forgets an instance |
-| `GET /api/events` | Server-sent events: `instances` (all of them), then `instance` (one changed), `removed` (`{"id"}`) and a `heartbeat` every 15 s |
+| `GET /api/events` | Server-sent events: `instances` (all of them, as `GET /api/instances` has them), then `instance` (one changed), `removed` (`{"id"}`) and a `heartbeat` every 15 s |
 | `/i/{id}/…` | The instance's own API and chat, through the hub |
 
 Every endpoint but `/hooks` and `/api/session` needs the session cookie or

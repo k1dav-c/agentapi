@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -314,7 +313,7 @@ func TestWebhookRetries(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		dispatcher.deliver(t.Context(), WebhookEvent{ID: "e1", Type: webhookEventRunStatusChanged, CreatedAt: clock.Now()})
+		dispatcher.deliver(t.Context(), queuedEvent{WebhookEvent: WebhookEvent{ID: "e1", Type: webhookEventRunStatusChanged, CreatedAt: clock.Now()}})
 	}()
 	for _, wait := range []time.Duration{time.Second, 2 * time.Second} {
 		call := trap.MustWait(t.Context())
@@ -324,12 +323,4 @@ func TestWebhookRetries(t *testing.T) {
 	}
 	<-done
 	assert.EqualValues(t, 3, calls.Load())
-}
-
-func TestExpandPublicURL(t *testing.T) {
-	t.Parallel()
-	hostname, _ := os.Hostname()
-	assert.Equal(t, "http://dev-1.vpn:3286", ExpandPublicURL("http://dev-1.vpn:{port}", 3286))
-	assert.Equal(t, "http://"+hostname+":3284/", ExpandPublicURL("http://{hostname}:{port}/", 3284))
-	assert.Equal(t, "https://agent.example.com", ExpandPublicURL("https://agent.example.com", 3284))
 }

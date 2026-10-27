@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 // Source says how the hub learned of an instance.
@@ -25,43 +25,45 @@ const (
 )
 
 // Connection is how the hub's watch of an instance's summary goes.
-type Connection string
+type Connection = instanceapi.Connection
 
 const (
-	ConnectionConnecting  Connection = "connecting"
-	ConnectionConnected   Connection = "connected"
-	ConnectionUnreachable Connection = "unreachable"
-	// ConnectionStopped: the instance said it stopped (instance.stopped).
-	ConnectionStopped Connection = "stopped"
+	ConnectionConnecting  = instanceapi.ConnectionConnecting
+	ConnectionConnected   = instanceapi.ConnectionConnected
+	ConnectionUnreachable = instanceapi.ConnectionUnreachable
+	ConnectionStopped     = instanceapi.ConnectionStopped
 )
 
-// Instance is an AgentAPI the hub watches.
+// Instance is an AgentAPI the hub watches, as GET /api/instances has it.
 type Instance struct {
-	// ID is the instance's ID (--instance-id), which the hub's routes use.
-	ID        string    `json:"id"`
-	Name      string    `json:"name,omitempty"`
-	URL       string    `json:"url"`
-	ServerID  string    `json:"server_id,omitempty"`
-	Hostname  string    `json:"hostname,omitempty"`
-	Port      int       `json:"port,omitempty"`
-	CWD       string    `json:"cwd,omitempty"`
-	AgentType string    `json:"agent_type,omitempty"`
-	Source    Source    `json:"source"`
-	LastSeen  time.Time `json:"last_seen"`
+	record
+	Connection Connection               `json:"connection"`
+	Error      string                   `json:"error,omitempty"`
+	Summary    *instanceapi.SummaryBody `json:"summary,omitempty"`
+	// State is what the hub's page shows of it, from the three above and
+	// Muted.
+	State instanceapi.State `json:"state"`
+}
+
+// record is what the hub keeps of an instance in its file: not its
+// summary or connection, which the hub finds out again.
+type record struct {
+	// WebhookInstance is who it is, as its events and summary say. Its ID
+	// (--instance-id) is what the hub's routes use; URL is where the hub
+	// reaches it.
+	instanceapi.WebhookInstance
+	Source   Source    `json:"source"`
+	LastSeen time.Time `json:"last_seen"`
 	// Group is the group someone put the instance in on the hub's page;
 	// empty is none. The instance's own events never change it.
 	Group string `json:"group,omitempty"`
 	// Muted is what the instance waited for when someone muted it on the
-	// hub's page (attentionKey); empty is not muted. It ends once that
-	// changes, so the next thing the instance needs counts again.
+	// hub's page (instanceapi.AttentionKey); empty is not muted. It ends
+	// once that changes, so the next thing the instance needs counts again.
 	Muted string `json:"muted,omitempty"`
 	// Token, for a manual instance that has its own, is sent to it; it
 	// never leaves the hub.
 	Token string `json:"token,omitempty"`
-
-	Connection Connection           `json:"connection"`
-	Error      string               `json:"error,omitempty"`
-	Summary    *httpapi.SummaryBody `json:"summary,omitempty"`
 }
 
 // public is the instance as the browser sees it: without its token.
@@ -70,22 +72,14 @@ func (i Instance) public() Instance {
 	return i
 }
 
-// attentionKey is what an instance waits for, to mute: why it needs you
-// and, for a request, which one; empty when it needs nothing.
-func attentionKey(summary *httpapi.SummaryBody) string {
-	if summary == nil || summary.Attention == "" || summary.Attention == httpapi.AttentionNone || summary.Attention == httpapi.AttentionExited {
-		return ""
-	}
-	key := string(summary.Attention)
-	if summary.Request != nil {
-		key += ":" + summary.Request.ID
-	}
-	return key
+// state is what the hub's page shows of the instance.
+func (i Instance) state() instanceapi.State {
+	return instanceapi.StateOf(i.Connection, i.Summary, i.Muted)
 }
 
 // instanceURL is where the hub reaches the instance an event names: its
 // public URL, else its host and port.
-func instanceURL(instance httpapi.WebhookInstance) string {
+func instanceURL(instance instanceapi.WebhookInstance) string {
 	if instance.URL != "" {
 		return strings.TrimRight(instance.URL, "/")
 	}
@@ -111,23 +105,10 @@ type storeEvent struct {
 	Removed  string
 }
 
-// storedInstance is what the file keeps of an instance: not its summary or
-// connection, which the hub finds out again.
+// storedInstance is an instance in the file.
 type storedInstance struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name,omitempty"`
-	URL       string    `json:"url"`
-	ServerID  string    `json:"server_id,omitempty"`
-	Hostname  string    `json:"hostname,omitempty"`
-	Port      int       `json:"port,omitempty"`
-	CWD       string    `json:"cwd,omitempty"`
-	AgentType string    `json:"agent_type,omitempty"`
-	Source    Source    `json:"source"`
-	LastSeen  time.Time `json:"last_seen"`
-	Token     string    `json:"token,omitempty"`
-	Stopped   bool      `json:"stopped,omitempty"`
-	Group     string    `json:"group,omitempty"`
-	Muted     string    `json:"muted,omitempty"`
+	record
+	Stopped bool `json:"stopped,omitempty"`
 }
 
 func newStore(path string) (*store, error) {
@@ -151,11 +132,9 @@ func newStore(path string) (*store, error) {
 		if si.Stopped {
 			connection = ConnectionStopped
 		}
-		s.instances[si.ID] = &Instance{
-			ID: si.ID, Name: si.Name, URL: si.URL, ServerID: si.ServerID, Hostname: si.Hostname,
-			Port: si.Port, CWD: si.CWD, AgentType: si.AgentType, Source: si.Source,
-			LastSeen: si.LastSeen, Token: si.Token, Connection: connection, Group: si.Group, Muted: si.Muted,
-		}
+		i := &Instance{record: si.record, Connection: connection}
+		i.State = i.state()
+		s.instances[si.ID] = i
 	}
 	return s, nil
 }
@@ -167,11 +146,7 @@ func (s *store) saveLocked() error {
 	}
 	stored := make([]storedInstance, 0, len(s.instances))
 	for _, i := range s.sortedLocked() {
-		stored = append(stored, storedInstance{
-			ID: i.ID, Name: i.Name, URL: i.URL, ServerID: i.ServerID, Hostname: i.Hostname,
-			Port: i.Port, CWD: i.CWD, AgentType: i.AgentType, Source: i.Source,
-			LastSeen: i.LastSeen, Token: i.Token, Stopped: i.Connection == ConnectionStopped, Group: i.Group, Muted: i.Muted,
-		})
+		stored = append(stored, storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped})
 	}
 	data, err := json.MarshalIndent(stored, "", "  ")
 	if err != nil {
@@ -239,11 +214,13 @@ func (s *store) update(id string, create, persist bool, change func(*Instance)) 
 		if !create {
 			return Instance{}, false, nil
 		}
-		i = &Instance{ID: id, Connection: ConnectionConnecting}
+		i = &Instance{Connection: ConnectionConnecting}
+		i.ID = id
 		s.instances[id] = i
 		persist = true
 	}
 	change(i)
+	i.State = i.state()
 	var err error
 	if persist {
 		err = s.saveLocked()

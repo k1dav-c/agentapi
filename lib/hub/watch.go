@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 const (
@@ -71,7 +71,7 @@ func (h *Hub) follow(ctx context.Context, id string) {
 			return
 		}
 		connected := false
-		err := h.readSummaries(ctx, instance, func(summary httpapi.SummaryBody) {
+		err := h.readSummaries(ctx, instance, func(summary instanceapi.SummaryBody) {
 			connected = true
 			failing = time.Time{}
 			wait = watchRetryMin
@@ -80,9 +80,11 @@ func (h *Hub) follow(ctx context.Context, id string) {
 				i.Summary = &summary
 				i.Connection = ConnectionConnected
 				i.Error = ""
-				if summary.Instance.Name != "" {
-					i.Name = summary.Instance.Name
-				}
+				// Who it is, as it says; the hub keeps its ID and where it
+				// reaches it.
+				id, url := i.ID, i.URL
+				i.WebhookInstance = summary.Instance
+				i.ID, i.URL = id, url
 			})
 		})
 		if ctx.Err() != nil {
@@ -125,7 +127,7 @@ func (h *Hub) follow(ctx context.Context, id string) {
 
 // readSummaries opens GET /events?only=summary of instance and calls got
 // with every summary until the stream ends.
-func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(httpapi.SummaryBody)) error {
+func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(instanceapi.SummaryBody)) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, instance.URL+"/events?only=summary", nil)
@@ -166,7 +168,7 @@ func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(htt
 			data = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		case line == "":
 			if event == "summary_update" && data != "" {
-				var summary httpapi.SummaryBody
+				var summary instanceapi.SummaryBody
 				if err := json.Unmarshal([]byte(data), &summary); err == nil {
 					if instance.ServerID != "" && summary.Instance.ServerID != "" && summary.Instance.ServerID != instance.ServerID {
 						// Another run of it, which its next heartbeat
@@ -191,9 +193,9 @@ func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(htt
 
 // unmuteChanged ends the instance's mute once what it waits for changed
 // (it logged in, or asks something else): the next thing counts again.
-func (h *Hub) unmuteChanged(id string, summary *httpapi.SummaryBody) {
+func (h *Hub) unmuteChanged(id string, summary *instanceapi.SummaryBody) {
 	current, ok := h.store.get(id)
-	if !ok || current.Muted == "" || current.Muted == attentionKey(summary) {
+	if !ok || current.Muted == "" || current.Muted == instanceapi.AttentionKey(summary) {
 		return
 	}
 	_, _, err := h.store.update(id, false, true, func(i *Instance) {

@@ -4,9 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -26,6 +23,7 @@ import (
 
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/hub"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native/nativetest"
@@ -164,6 +162,11 @@ func TestHub(t *testing.T) {
 	assert.Equal(t, hub.SourceWebhook, joined.Source)
 	require.NotNil(t, joined.Summary)
 	assert.Empty(t, joined.Token, "the browser never gets a token")
+	assert.Equal(t, instanceapi.StateIdle, joined.State)
+	// Who it is, as it says: the hub keeps all of it.
+	assert.Equal(t, os.Getpid(), joined.PID)
+	assert.NotEmpty(t, joined.Version)
+	assert.Equal(t, instanceapi.TransportNative, joined.Transport)
 
 	// The browser reaches the instance through the hub, which sends the
 	// instance's token, not the browser's credentials.
@@ -198,6 +201,7 @@ func TestHub(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(e.data), &changed))
 		if changed.Summary != nil && changed.Summary.Task != nil {
 			assert.Equal(t, "hello", changed.Summary.Task.Prompt)
+			assert.Equal(t, instanceapi.StateOf(changed.Connection, changed.Summary, ""), changed.State, "the state comes with every change")
 			break
 		}
 	}
@@ -217,10 +221,7 @@ func TestHub(t *testing.T) {
 // sign signs body as an AgentAPI does at time at.
 func sign(body []byte, secret string, at time.Time) (string, string) {
 	timestamp := strconv.FormatInt(at.Unix(), 10)
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(timestamp + "."))
-	mac.Write(body)
-	return timestamp, "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	return timestamp, instanceapi.Sign(secret, timestamp, body)
 }
 
 func postEvent(t *testing.T, hubURL string, event map[string]any, secret string, at time.Time) int {

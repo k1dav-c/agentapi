@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/hub"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/registry"
 	"github.com/coder/agentapi/lib/userconfig"
 )
@@ -68,7 +69,7 @@ func TestJoinStatusLeave(t *testing.T) {
 	srv := httptest.NewServer(fake)
 	defer srv.Close()
 	hostname, _ := os.Hostname()
-	_, err := registry.Write(registryDir, registry.Entry{ID: "host:1", Name: "api", ServerID: "a1", URL: srv.URL, Hostname: hostname, Port: 3286, PID: os.Getpid(), AgentType: "claude", StartedAt: time.Now()})
+	_, err := registry.Write(registryDir, registry.Entry{WebhookInstance: instanceapi.WebhookInstance{ID: "host:1", Name: "api", ServerID: "a1", URL: srv.URL, Hostname: hostname, Port: 3286, PID: os.Getpid(), AgentType: "claude"}, StartedAt: time.Now()})
 	require.NoError(t, err)
 	flags := []string{"--config", configPath, "--registry-dir", registryDir}
 
@@ -119,7 +120,7 @@ func TestJoinNeedsToken(t *testing.T) {
 	t.Setenv("AGENTAPI_API_TOKEN", "")
 	t.Setenv("AGENTAPI_HUB_SECRET", "env-secret")
 	hostname, _ := os.Hostname()
-	_, err := registry.Write(registryDir, registry.Entry{ID: "host:1", ServerID: "a1", URL: "http://127.0.0.1:1", Hostname: hostname, PID: os.Getpid(), AuthRequired: true, StartedAt: time.Now()})
+	_, err := registry.Write(registryDir, registry.Entry{WebhookInstance: instanceapi.WebhookInstance{ID: "host:1", ServerID: "a1", URL: "http://127.0.0.1:1", Hostname: hostname, PID: os.Getpid()}, AuthRequired: true, StartedAt: time.Now()})
 	require.NoError(t, err)
 
 	out, err := run(t, "join", "http://hub/hooks", "--no-check", "--config", configPath, "--registry-dir", registryDir)

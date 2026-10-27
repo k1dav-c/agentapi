@@ -2700,7 +2700,7 @@
           },
           "spend": {
             "$ref": "#/components/schemas/SummarySpend",
-            "description": "What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY, ACP) and until it is worked out."
+            "description": "What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out."
           },
           "status": {
             "$ref": "#/components/schemas/AgentStatus",
@@ -2847,7 +2847,7 @@
           },
           "spend": {
             "$ref": "#/components/schemas/SummarySpend",
-            "description": "What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY, ACP) and until it is worked out."
+            "description": "What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out."
           },
           "status": {
             "$ref": "#/components/schemas/AgentStatus",

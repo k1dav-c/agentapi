@@ -3,7 +3,8 @@ import {cn} from "@/lib/utils";
 
 // StatusGlyph draws an instance's state with a shape of its own, so the
 // state reads without its color: an exclamation, a turning arc, a check, a
-// hollow ring, a struck-through bell, a broken ring, a stop square.
+// hollow ring, a struck-through bell, a broken ring, a stop square, and a
+// question mark for a state this page doesn't know.
 export function StatusGlyph({state, className}: {state: InstanceState; className?: string}) {
   const box = cn("size-5 shrink-0", className);
   switch (state) {
@@ -65,6 +66,14 @@ export function StatusGlyph({state, className}: {state: InstanceState; className
           <rect x="7.5" y="7.5" width="5" height="5" rx="1" className="fill-muted-foreground/55" />
         </svg>
       );
+    case "unknown":
+      return (
+        <svg viewBox="0 0 20 20" aria-hidden="true" className={box}>
+          <circle cx="10" cy="10" r="6.5" className="fill-none stroke-muted-foreground/45" strokeWidth="1.8" />
+          <path d="M8.2 8.4a1.9 1.9 0 1 1 2.6 1.7c-.5.2-.8.6-.8 1.1v.3" className="fill-none stroke-muted-foreground/60" strokeWidth="1.6" strokeLinecap="round" />
+          <circle cx="10" cy="13.6" r="0.95" className="fill-muted-foreground/60" />
+        </svg>
+      );
   }
 }
 
@@ -78,4 +87,5 @@ export const stateTone: Record<InstanceState, string> = {
   connecting: "text-muted-foreground",
   unreachable: "text-state-fault",
   stopped: "text-muted-foreground",
+  unknown: "text-muted-foreground",
 };

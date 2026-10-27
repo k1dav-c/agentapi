@@ -10,54 +10,27 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	conv "github.com/coder/agentapi/lib/conversation"
-	"github.com/coder/agentapi/lib/native"
-	"github.com/coder/agentapi/lib/util"
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
-// TaskStatus is where a task is in its life.
-type TaskStatus string
+// Tasks are part of the summary's contract (lib/instanceapi).
+type (
+	Task       = instanceapi.Task
+	TaskStatus = instanceapi.TaskStatus
+)
 
 const (
-	TaskStatusRunning   TaskStatus = "running"
-	TaskStatusCompleted TaskStatus = "completed"
-	// TaskStatusFailed: the agent reported an error during the task, or
-	// exited.
-	TaskStatusFailed TaskStatus = "failed"
-	// TaskStatusLimited: a usage limit stopped the task.
-	TaskStatusLimited TaskStatus = "limited"
+	TaskStatusRunning   = instanceapi.TaskStatusRunning
+	TaskStatusCompleted = instanceapi.TaskStatusCompleted
+	TaskStatusFailed    = instanceapi.TaskStatusFailed
+	TaskStatusLimited   = instanceapi.TaskStatusLimited
 )
 
-var TaskStatusValues = []TaskStatus{TaskStatusRunning, TaskStatusCompleted, TaskStatusFailed, TaskStatusLimited}
-
-func (s TaskStatus) Schema(r huma.Registry) *huma.Schema {
-	return util.OpenAPISchema(r, "TaskStatus", TaskStatusValues)
-}
+var TaskStatusValues = instanceapi.TaskStatusValues
 
 // taskPromptLimit is how much of the prompt a task carries; the message
 // has all of it.
 const taskPromptLimit = 1 << 10
-
-// Task is a message of the user's and the agent's turn on it, until the
-// agent is done: stable again, with no request or terminal dialog open.
-// Messages the user adds while it runs (steering) belong to it.
-type Task struct {
-	ID        int        `json:"id" doc:"The ID of the user's message that started the task, as in GET /messages."`
-	Status    TaskStatus `json:"status" doc:"running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it)."`
-	Prompt    string     `json:"prompt" doc:"The start of the user's message (up to 1 KiB); GET /messages has all of it."`
-	StartedAt time.Time  `json:"started_at" doc:"When the user's message was sent."`
-	EndedAt   *time.Time `json:"ended_at,omitempty" doc:"When the agent was done; missing while it runs."`
-	// ReplyID is the agent's last message of the task.
-	ReplyID *int `json:"reply_id,omitempty" doc:"The ID of the agent's last message of the task, as in GET /messages."`
-	// Steered are the user's messages added while it ran.
-	Steered []int `json:"steered,omitempty" doc:"The IDs of the user's messages added to the task while it ran (steering)."`
-	// Errors the agent reported during the task.
-	Errors []string `json:"errors,omitempty" doc:"Errors the agent reported during the task."`
-	// Limit is the usage limit that stopped a limited task.
-	Limit *native.LimitStop `json:"limit,omitempty" doc:"The usage limit stop of a limited task."`
-}
-
-// final reports whether the task ended.
-func (t Task) final() bool { return t.Status != TaskStatusRunning }
 
 // taskTracker derives the tasks from the changes of the conversation. The
 // emitter calls it with its lock held; each method returns the positions of
@@ -115,7 +88,7 @@ func (t *taskTracker) restore(tasks []Task, msgs []conv.Message, now time.Time) 
 	t.index()
 	var changed []int
 	for i := range t.tasks {
-		if !t.tasks[i].final() {
+		if !t.tasks[i].Final() {
 			t.end(i, now)
 			changed = append(changed, i)
 		}
@@ -238,7 +211,7 @@ func (t *taskTracker) derive(msgs []conv.Message) []int {
 			t.tasks = kept
 			t.open = -1
 			for i := range t.tasks {
-				if !t.tasks[i].final() {
+				if !t.tasks[i].Final() {
 					t.open = i
 				}
 			}
@@ -439,13 +412,6 @@ type TaskUpdateBody struct {
 	Seq uint64 `json:"seq" doc:"Sequence number of this change; see message_update."`
 }
 
-// clone returns a copy of t that shares nothing the tracker changes.
-func (t Task) clone() Task {
-	t.Errors = slices.Clone(t.Errors)
-	t.Steered = slices.Clone(t.Steered)
-	return t
-}
-
 // notifyStatusLocked sends the agent's status, and the tasks it ended.
 // Caller holds e.mu.
 func (e *EventEmitter) notifyStatusLocked() {
@@ -478,7 +444,7 @@ func (e *EventEmitter) tasksChangedLocked(changed []int) {
 func (e *EventEmitter) tasksStoredLocked(changed []int) []TaskUpdateBody {
 	updates := make([]TaskUpdateBody, 0, len(changed))
 	for _, i := range changed {
-		task := e.tasks.tasks[i].clone()
+		task := e.tasks.tasks[i].Clone()
 		e.seq++
 		e.taskSeq[task.ID] = e.seq
 		if e.persister != nil {
@@ -500,7 +466,7 @@ func (e *EventEmitter) Tasks() []Task {
 	defer e.unlock()
 	tasks := make([]Task, len(e.tasks.tasks))
 	for i, task := range e.tasks.tasks {
-		tasks[i] = task.clone()
+		tasks[i] = task.Clone()
 	}
 	return tasks
 }

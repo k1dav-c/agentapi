@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/instanceapi"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
@@ -37,7 +38,7 @@ func queued(d *webhookDispatcher) []WebhookEvent {
 	for {
 		select {
 		case event := <-d.queue:
-			events = append(events, event)
+			events = append(events, event.WebhookEvent)
 		default:
 			return events
 		}
@@ -343,7 +344,7 @@ func TestWebhookSignature(t *testing.T) {
 	d.deliver(t.Context(), <-d.queue)
 
 	timestamp := header.Get("X-AgentAPI-Timestamp")
-	assert.Equal(t, webhookSignature("s3cret", timestamp, body), header.Get("X-AgentAPI-Signature-256"))
+	assert.Equal(t, instanceapi.Sign("s3cret", timestamp, body), header.Get("X-AgentAPI-Signature-256"))
 	assert.True(t, strings.HasPrefix(header.Get("X-AgentAPI-Signature-256"), "sha256="))
 	assert.Equal(t, "host:3284", header.Get("X-AgentAPI-Instance"))
 	var event struct {
@@ -368,7 +369,7 @@ func TestWebhookPermanentFailure(t *testing.T) {
 	}))
 	defer server.Close()
 	d := testDispatcher(t, WebhookConfig{URL: server.URL, MaxAttempts: 5}, quartz.NewReal())
-	d.deliver(t.Context(), WebhookEvent{ID: "e1", Type: webhookEventRunStatusChanged, CreatedAt: time.Now()})
+	d.deliver(t.Context(), queuedEvent{WebhookEvent: WebhookEvent{ID: "e1", Type: webhookEventRunStatusChanged, CreatedAt: time.Now()}})
 	assert.EqualValues(t, 1, calls.Load())
 	assert.Equal(t, 30*time.Second, webhookRetryDelay(10))
 	assert.Equal(t, 4*time.Second, webhookRetryDelay(3))
@@ -379,7 +380,7 @@ func TestWebhookTemplateData(t *testing.T) {
 	d := testDispatcher(t, WebhookConfig{Events: []string{"*"}, PayloadTemplate: `{"text":"{{.Instance.ID}}: {{.Data.prompt}}"}`}, quartz.NewReal())
 	d.setInstance(WebhookInstance{ID: "box:1"})
 	require.True(t, d.emit(webhookEventTaskStarted, WebhookTask{Task: Task{Prompt: "Hi"}}))
-	body, err := d.renderBody(<-d.queue)
+	body, err := d.renderBody((<-d.queue).WebhookEvent)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"text":"box:1: Hi"}`, string(body))
 }

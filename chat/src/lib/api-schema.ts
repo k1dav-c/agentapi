@@ -2322,7 +2322,7 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
-            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY, ACP) and until it is worked out. */
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. */
             spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];
@@ -2399,7 +2399,7 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
-            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY, ACP) and until it is worked out. */
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. */
             spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];

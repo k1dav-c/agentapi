@@ -3,38 +3,32 @@ package httpapi
 import (
 	"context"
 	"reflect"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
-	"github.com/coder/agentapi/lib/util"
 )
 
-// Attention is why the agent waits for the user, if it does.
-type Attention string
+// The summary's types are the contract with the clients that watch many
+// AgentAPIs (lib/instanceapi); these names keep the OpenAPI schema's.
+type (
+	Attention      = instanceapi.Attention
+	SummaryBody    = instanceapi.SummaryBody
+	SummaryRequest = instanceapi.SummaryRequest
+	SummarySpend   = instanceapi.SummarySpend
+)
 
 const (
-	AttentionNone Attention = "none"
-	// AttentionLogin: the agent can't work until the user logs in.
-	AttentionLogin Attention = "login"
-	// AttentionRequest: an approval, question or plan waits for an answer.
-	AttentionRequest Attention = "request"
-	// AttentionDialog: the agent's terminal shows a dialog to answer.
-	AttentionDialog Attention = "dialog"
-	// AttentionLimit: a usage limit stopped the agent's turn.
-	AttentionLimit Attention = "limit"
-	// AttentionExited: the agent exited.
-	AttentionExited Attention = "exited"
+	AttentionNone    = instanceapi.AttentionNone
+	AttentionLogin   = instanceapi.AttentionLogin
+	AttentionRequest = instanceapi.AttentionRequest
+	AttentionDialog  = instanceapi.AttentionDialog
+	AttentionLimit   = instanceapi.AttentionLimit
+	AttentionExited  = instanceapi.AttentionExited
 )
 
-var AttentionValues = []Attention{
-	AttentionNone, AttentionLogin, AttentionRequest, AttentionDialog, AttentionLimit, AttentionExited,
-}
-
-func (a Attention) Schema(r huma.Registry) *huma.Schema {
-	return util.OpenAPISchema(r, "Attention", AttentionValues)
-}
+var AttentionValues = instanceapi.AttentionValues
 
 // summaryTitleLimit is how many characters of the prompt a title takes.
 const summaryTitleLimit = 60
@@ -42,47 +36,6 @@ const summaryTitleLimit = 60
 // summaryRequestTitleLimit is how many characters of a request's title a
 // summary carries.
 const summaryRequestTitleLimit = 120
-
-// SummaryBody is what a client that watches many AgentAPIs shows of one:
-// who it is, whether it works or waits for the user, and its latest task.
-type SummaryBody struct {
-	Instance WebhookInstance `json:"instance" doc:"Who this AgentAPI is: its ID (--instance-id), name (--name), server ID, host, port, directory, agent and URL, as in webhook events."`
-	Status   AgentStatus     `json:"status" doc:"Whether the agent works (running) or waits (stable)."`
-	// Lifecycle tells a failed or exited agent from one that waits.
-	Lifecycle LifecycleState `json:"lifecycle" doc:"The agent process's lifecycle state."`
-	Attention Attention      `json:"attention" doc:"Why the agent waits for the user: login, request (an approval, question or plan), dialog (in its terminal), limit (a usage limit stopped its turn), exited, or none."`
-	// Title is the session's name, else the start of the latest prompt.
-	Title          string `json:"title" doc:"The name the agent gave the session, else the start of the latest task's prompt; empty before the first task."`
-	SessionName    string `json:"session_name,omitempty" doc:"The name the agent gave the session, as in GET /status."`
-	AgentSessionID string `json:"agent_session_id,omitempty" doc:"The agent's own session, as in GET /status."`
-	// PendingRequests and QueuedMessages count what waits.
-	PendingRequests int    `json:"pending_requests" doc:"Requests (approvals, questions, plans) the agent waits on; see GET /requests."`
-	QueuedMessages  int    `json:"queued_messages" doc:"Messages waiting in the queue; see GET /queue."`
-	TerminalPrompt  string `json:"terminal_prompt,omitempty" doc:"The bottom of the agent's terminal while it shows a dialog to answer, as in GET /status."`
-	// Task is the latest task, nil before the first.
-	Task  *Task `json:"task,omitempty" doc:"The latest task, as in GET /tasks; missing before the first."`
-	Tasks int   `json:"tasks" doc:"How many tasks the conversation has."`
-	// Unread: the latest task ended after a client last showed the
-	// conversation (POST /tasks/seen).
-	Unread        bool                  `json:"unread" doc:"The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet."`
-	SeenAt        time.Time             `json:"seen_at" doc:"When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did."`
-	LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in, as in GET /status."`
-	LimitStop     *native.LimitStop     `json:"limit_stop,omitempty" doc:"Set while a usage limit holds the agent, as in GET /status."`
-	Usage         *native.AgentUsage    `json:"usage,omitempty" doc:"The context window and the account's usage limits, as in GET /status."`
-	// Request is the oldest pending request, what a client shows of what
-	// the agent waits for without opening it.
-	Request *SummaryRequest `json:"request,omitempty" doc:"The oldest request the agent waits on (see GET /requests); missing when none waits."`
-	// Spend is what the agent's sessions cost recently.
-	Spend *SummarySpend `json:"spend,omitempty" doc:"What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY, ACP) and until it is worked out."`
-}
-
-// SummaryRequest is what a summary says of a pending request.
-type SummaryRequest struct {
-	ID        string             `json:"id" doc:"The request's ID, as in GET /requests."`
-	Kind      native.RequestKind `json:"kind" doc:"approval, question or plan."`
-	Title     string             `json:"title" doc:"One-line summary, such as the command to run."`
-	CreatedAt time.Time          `json:"created_at" doc:"When the agent asked."`
-}
 
 // SummaryUpdateBody is the SSE payload of the summary after it changed.
 type SummaryUpdateBody struct {
@@ -122,7 +75,7 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 	}
 	summary.Title = summary.SessionName
 	if n := len(e.tasks.tasks); n > 0 {
-		task := e.tasks.tasks[n-1].clone()
+		task := e.tasks.tasks[n-1].Clone()
 		summary.Task = &task
 		summary.Unread = task.EndedAt != nil && task.EndedAt.After(e.seenAt)
 		if summary.Title == "" {
