@@ -279,7 +279,7 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		id = u.Host
 	}
-	instance, _, err := h.store.update(id, true, true, func(i *Instance) {
+	instance, _, err := h.store.update(id, true, func(i *Instance) {
 		i.WebhookInstance = summary.Instance
 		i.ID = id
 		i.URL = base
@@ -353,7 +353,7 @@ func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var nothingToMute bool
-	updated, ok, err := h.store.update(instanceParam(r), false, true, func(i *Instance) {
+	updated, ok, err := h.store.update(instanceParam(r), false, func(i *Instance) {
 		if body.Muted != nil {
 			key := ""
 			if *body.Muted {

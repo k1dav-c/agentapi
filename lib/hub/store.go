@@ -43,6 +43,13 @@ type Instance struct {
 	// State is what the hub's page shows of it, from the three above and
 	// Muted.
 	State instanceapi.State `json:"state"`
+
+	// answeredBy is the ID of another AgentAPI that answers at URL, while
+	// it does: the proxy doesn't send it this instance's requests.
+	answeredBy string
+	// refusedRun is the server ID of the last other run whose URL change
+	// the hub refused, to log it once.
+	refusedRun string
 }
 
 // record is what the hub keeps of an instance in its file: not its
@@ -111,6 +118,17 @@ type storedInstance struct {
 	Stopped bool `json:"stopped,omitempty"`
 }
 
+func (i Instance) stored() storedInstance {
+	return storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped}
+}
+
+// kept is what the file keeps of the instance, but when it was last seen.
+func (i Instance) kept() storedInstance {
+	stored := i.stored()
+	stored.LastSeen = time.Time{}
+	return stored
+}
+
 func newStore(path string) (*store, error) {
 	s := &store{path: path, instances: map[string]*Instance{}, subs: map[chan storeEvent]struct{}{}}
 	if path == "" {
@@ -146,7 +164,7 @@ func (s *store) saveLocked() error {
 	}
 	stored := make([]storedInstance, 0, len(s.instances))
 	for _, i := range s.sortedLocked() {
-		stored = append(stored, storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped})
+		stored = append(stored, i.stored())
 	}
 	data, err := json.MarshalIndent(stored, "", "  ")
 	if err != nil {
@@ -204,9 +222,10 @@ func (s *store) get(id string) (Instance, bool) {
 }
 
 // update changes the instance id with change, or adds it when create is
-// set, and reports whether it did. persist says whether what changed is
-// kept in the file (not the summary or the connection).
-func (s *store) update(id string, create, persist bool, change func(*Instance)) (Instance, bool, error) {
+// set, and reports whether it did. The file is written when what it keeps
+// changed; when the instance was last seen isn't worth a write of its own
+// and goes with the next one.
+func (s *store) update(id string, create bool, change func(*Instance)) (Instance, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	i, ok := s.instances[id]
@@ -217,12 +236,12 @@ func (s *store) update(id string, create, persist bool, change func(*Instance)) 
 		i = &Instance{Connection: ConnectionConnecting}
 		i.ID = id
 		s.instances[id] = i
-		persist = true
 	}
+	before := i.kept()
 	change(i)
 	i.State = i.state()
 	var err error
-	if persist {
+	if !ok || i.kept() != before {
 		err = s.saveLocked()
 	}
 	changed := *i

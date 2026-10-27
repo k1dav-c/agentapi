@@ -66,11 +66,12 @@ func startHubGrace(t *testing.T, statePath string, grace time.Duration) *httptes
 // instanceToken.
 func startInstance(t *testing.T) (*httptest.Server, *httpapi.Server) {
 	t.Helper()
-	return startInstanceOn(t, nil)
+	return startInstanceOn(t, nil, "")
 }
 
-// startInstanceOn runs it on listener; nil is a new one.
-func startInstanceOn(t *testing.T, listener net.Listener) (*httptest.Server, *httpapi.Server) {
+// startInstanceOn runs it on listener (nil is a new one) with the
+// instance ID id (empty is <hostname>:<port>).
+func startInstanceOn(t *testing.T, listener net.Listener, id string) (*httptest.Server, *httpapi.Server) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
 	factory := &nativetest.Factory{}
@@ -83,6 +84,7 @@ func startInstanceOn(t *testing.T, listener net.Listener) (*httptest.Server, *ht
 		AllowedOrigins: []string{"*"},
 		CWD:            "/work/api",
 		APIToken:       instanceToken,
+		Webhook:        httpapi.WebhookConfig{InstanceID: id},
 	})
 	require.NoError(t, err)
 	ts := httptest.NewUnstartedServer(srv.Handler())
@@ -293,7 +295,7 @@ func TestHubConnectGrace(t *testing.T) {
 	}
 	listener, err := net.Listen("tcp", addr)
 	require.NoError(t, err)
-	startInstanceOn(t, listener)
+	startInstanceOn(t, listener, "dev-1:3284")
 	// Stopped before the instance closes (cleanups run last first): its
 	// server waits for the hub's stream to end. No server ID: the hub took
 	// the instance's own from its summary.
@@ -324,6 +326,82 @@ func TestHubConnectGrace(t *testing.T) {
 	time.Sleep(time.Second)
 	assert.Equal(t, hub.ConnectionConnecting, connection(), "within the grace")
 	require.Eventually(t, func() bool { return connection() == hub.ConnectionUnreachable }, 20*time.Second, 100*time.Millisecond)
+}
+
+// joinInstance has a running AgentAPI join the hub, as agentapi hub join
+// does, and returns it once the hub follows it.
+func joinInstance(t *testing.T, hubURL, instanceURL string) hub.Instance {
+	t.Helper()
+	webhook := map[string]any{
+		"url": hubURL + "/hooks", "timeout_seconds": 5, "max_attempts": 3,
+		"events": []string{"instance.*"}, "secret": hubSecret, "public_url": instanceURL,
+	}
+	require.Equal(t, http.StatusOK, request(t, http.MethodPut, instanceURL+"/webhook", instanceToken, webhook, nil))
+	var joined hub.Instance
+	require.Eventually(t, func() bool {
+		list := instances(t, hubURL)
+		if len(list) == 1 && list[0].Connection == hub.ConnectionConnected {
+			joined = list[0]
+			return true
+		}
+		return false
+	}, 10*time.Second, 20*time.Millisecond)
+	return joined
+}
+
+// Another AgentAPI that answers at an instance's URL (the address went to
+// another machine) isn't taken for it: the hub shows why, and doesn't send
+// it the instance's requests.
+func TestHubOtherInstanceAnswers(t *testing.T) {
+	instSrv, _ := startInstance(t)
+	hubSrv := startHub(t, "")
+	started := map[string]any{
+		"id": "o1", "type": "instance.started", "created_at": time.Now(),
+		"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": instSrv.URL, "agent_type": "claude"},
+	}
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, started, hubSecret, time.Now()))
+	var shown hub.Instance
+	require.Eventually(t, func() bool {
+		shown = instances(t, hubSrv.URL)[0]
+		return shown.Connection == hub.ConnectionUnreachable
+	}, 10*time.Second, 20*time.Millisecond)
+	assert.Contains(t, shown.Error, "another AgentAPI answers at this URL")
+	assert.Nil(t, shown.Summary, "not the other one's summary")
+	assert.Equal(t, "s1", shown.ServerID)
+	assert.Equal(t, instanceapi.StateUnreachable, shown.State)
+	assert.Equal(t, http.StatusBadGateway, request(t, http.MethodGet, hubSrv.URL+"/i/dev-1:3284/status", hubToken, nil, nil))
+}
+
+// Two AgentAPIs with the same instance ID (machines with the same name):
+// the hub keeps the one it follows instead of switching at each heartbeat.
+func TestHubKeepsTheRunItFollows(t *testing.T) {
+	instSrv, _ := startInstance(t)
+	hubSrv := startHub(t, "")
+	joined := joinInstance(t, hubSrv.URL, instSrv.URL)
+
+	twin := func(id, typ string) map[string]any {
+		return map[string]any{
+			"id": id, "type": typ, "created_at": time.Now(),
+			"instance": map[string]any{"id": joined.ID, "server_id": "twin", "url": "http://127.0.0.1:1", "agent_type": "claude"},
+		}
+	}
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, twin("t1", "instance.heartbeat"), hubSecret, time.Now()))
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, twin("t2", "instance.stopped"), hubSecret, time.Now()))
+	kept := instances(t, hubSrv.URL)[0]
+	assert.Equal(t, instSrv.URL, kept.URL)
+	assert.Equal(t, joined.ServerID, kept.ServerID)
+	assert.Equal(t, hub.ConnectionConnected, kept.Connection)
+
+	// Once the one it follows stopped, the other is the instance.
+	stopped := map[string]any{
+		"id": "s1", "type": "instance.stopped", "created_at": time.Now(),
+		"instance": map[string]any{"id": joined.ID, "server_id": joined.ServerID, "url": instSrv.URL},
+	}
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, stopped, hubSecret, time.Now()))
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, twin("t3", "instance.heartbeat"), hubSecret, time.Now()))
+	moved := instances(t, hubSrv.URL)[0]
+	assert.Equal(t, "http://127.0.0.1:1", moved.URL)
+	assert.Equal(t, "twin", moved.ServerID)
 }
 
 // An instance added by its URL, with its own token.

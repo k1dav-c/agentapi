@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/coder/agentapi/lib/instanceapi"
 )
@@ -90,23 +91,52 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 	default:
 		// The instance is alive; one the hub doesn't know yet is added
 		// with its next heartbeat.
-		_, _, _ = h.store.update(instance.ID, false, false, func(i *Instance) { i.LastSeen = h.now() })
+		_, _, _ = h.store.update(instance.ID, false, func(i *Instance) {
+			if sameRun(i.ServerID, instance.ServerID) {
+				i.LastSeen = h.now()
+			}
+		})
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// runSeenWithin is how recently the hub must have heard from the run of an
+// instance it follows for another run's URL to be refused: three of its
+// heartbeats.
+const runSeenWithin = 3 * time.Minute
+
+// sameRun reports whether an event of the run serverID is of the run the
+// hub knows, current; either unknown is.
+func sameRun(current, serverID string) bool {
+	return current == "" || serverID == "" || current == serverID
+}
+
 // upsertFromWebhook adds or updates the instance an instance.* event
-// describes, and (re)starts watching it.
+// describes, and (re)starts watching it. Another run that names another
+// URL is refused while the hub follows the run it knows, which it heard
+// from recently: two machines with the same name (and so the same
+// instance ID) would take turns at every heartbeat.
 func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string) {
 	var restart bool
-	updated, _, err := h.store.update(instance.ID, true, true, func(i *Instance) {
+	now := h.now()
+	updated, _, err := h.store.update(instance.ID, true, func(i *Instance) {
+		if !sameRun(i.ServerID, instance.ServerID) && i.URL != url &&
+			i.Connection == ConnectionConnected && now.Sub(i.LastSeen) < runSeenWithin {
+			if i.refusedRun != instance.ServerID {
+				h.logger.Warn("Two AgentAPIs report the same instance ID; keeping the one the hub follows",
+					"instance", instance.ID, "url", i.URL, "refused_url", url, "refused_server_id", instance.ServerID)
+				i.refusedRun = instance.ServerID
+			}
+			return
+		}
 		restart = i.URL != url || i.ServerID != instance.ServerID || i.Connection == ConnectionStopped
 		i.WebhookInstance = instance
 		i.URL = url
+		i.refusedRun = ""
 		if i.Source == "" {
 			i.Source = SourceWebhook
 		}
-		i.LastSeen = h.now()
+		i.LastSeen = now
 		if restart {
 			h.logger.Info("Following an instance", "instance", instance.ID, "url", url, "server_id", instance.ServerID)
 			i.Connection = ConnectionConnecting
@@ -124,8 +154,8 @@ func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string
 // stopped marks an instance stopped and stops watching it, unless a newer
 // run of it (another server ID) already started.
 func (h *Hub) stopped(id, serverID string) {
-	_, ok, err := h.store.update(id, false, true, func(i *Instance) {
-		if serverID != "" && i.ServerID != "" && serverID != i.ServerID {
+	_, ok, err := h.store.update(id, false, func(i *Instance) {
+		if !sameRun(i.ServerID, serverID) {
 			return
 		}
 		h.logger.Info("An instance stopped", "instance", id)

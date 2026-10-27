@@ -612,7 +612,10 @@ the same session for native agents.
 - The hub (`lib/hub`) holds the instances' API tokens and sends them only to
   instance URLs from events signed with its secret (HMAC of the timestamp and
   body, at most 10 minutes old, each delivery once) or added by someone signed
-  in. Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
+  in. Its proxy refuses an instance whose URL another AgentAPI (another
+  instance ID in the summary) answers, and another run with the same ID can't
+  move an instance the hub still follows and heard from in the last 3
+  minutes. Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
   derived from it. The proxy drops their cookies and `Authorization`, `Origin`
   and `Referer` headers and the instances' `Set-Cookie`, so neither side's
   credentials reach the other.

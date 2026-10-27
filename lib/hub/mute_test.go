@@ -22,7 +22,7 @@ func TestMute(t *testing.T) {
 	srv := httptest.NewServer(h.Handler())
 	defer srv.Close()
 	set := func(summary instanceapi.SummaryBody) {
-		_, _, err := h.store.update("dev:1", true, false, func(i *Instance) {
+		_, _, err := h.store.update("dev:1", true, func(i *Instance) {
 			i.URL = "http://dev:1"
 			i.Summary = &summary
 		})

@@ -39,7 +39,8 @@ hub 和各個 AgentAPI 透過你掌控的網路互連，例如你自己的 VPN�
 2. hub 追蹤每個實例的摘要（`GET /events?only=summary`）：狀態、在等什麼、標題、最新任務、佇列和
    用量限制。每個實例一條連線；斷線時 1 秒後重連，之後間隔逐次拉長，最多 30 秒。串流 45 秒沒有任何
    動靜就視為斷線。連線失敗的前 10 秒，實例仍顯示為連線中（剛啟動的實例送出第一個事件時，可能還沒
-   開始接受連線）；超過 10 秒才算連不到。
+   開始接受連線）；超過 10 秒才算連不到。摘要會寫明回應的是哪個 AgentAPI：若是別的 AgentAPI
+   （位址換到了另一台機器），實例立刻顯示為連不到，hub 也不會把這個實例的請求轉給它。
 3. 瀏覽器用 hub token 登入，從一條串流取得所有實例和每次變更。
 4. 開啟實例時，聊天介面透過 hub 載入（`/i/<id>/…`）。hub 轉送每個請求時，用實例的 API token 取代
    瀏覽器的憑證。
@@ -295,6 +296,8 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 - hub 只接受具備有效 `X-AgentAPI-Signature-256`（`<timestamp>.<body>` 的 HMAC-SHA256）、
   timestamp 誤差不超過 10 分鐘、而且 delivery ID 沒處理過的事件。這很重要：事件裡的網址，就是
   hub 送出實例 token 的地方。
+- 只有在那個網址上的 AgentAPI 自稱是這個實例時，hub 才會轉送這個實例的請求；hub 還在追蹤某個實例時，
+  另一次以相同 ID 執行的 AgentAPI 也不能把它改到別的網址。
 - session cookie 是 HttpOnly、SameSite=Lax，由 hub token 推導而來，裡面沒有 token 本身。代理會
   移除瀏覽器的 cookie 以及 `Authorization`、`Origin`、`Referer` 標頭，也會移除實例的
   `Set-Cookie`，雙方的憑證都不會傳到另一邊。
@@ -318,6 +321,8 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 | Unreachable：`400 Bad Request` | AgentAPI 拒絕以 VPN 名稱作為 `Host` | 在 `--allowed-hosts` 允許它（步驟 3） |
 | Unreachable：`needs an API token` | AgentAPI 以 `--api-token` 執行，hub 給的 token 不同 | 給 hub `--instance-token`，或加入時輸入 token |
 | Unreachable：connection refused 或逾時 | `--public-url` 錯誤，或 hub 連不上 VPN | 在 hub 的機器上用 `curl <url>/summary` 檢查網址 |
+| Unreachable：`another AgentAPI answers at this URL` | 實例的位址現在屬於另一台機器（DHCP 換了位址），或 `--public-url` 指向別台機器 | 檢查 `--public-url`；搬走的實例會在下一次 heartbeat（一分鐘內）送出新位址 |
+| hub 的 log 有「Two AgentAPIs report the same instance ID」 | 兩台機器名稱相同，同一個 port 上的 AgentAPI 就有相同的 ID；hub 保留它正在追蹤的那個 | 把其中一台改名，或給它的 AgentAPI 設定 `--instance-id` |
 | Unreachable，而且 hub 的 VPN 用戶端以 userspace 模式執行 | hub 的連線沒有經過 VPN | 為 hub 設定 `ALL_PROXY`，指向 VPN 用戶端的 SOCKS5 proxy |
 | 加入時出現「is it AgentAPI 1.1 or later?」 | 這個實例沒有摘要 | 用 `agentapi update` 更新它 |
 | 頁面說 hub 沒有回應 | 位址錯誤，或 hub 沒有執行 | 開啟 `http://<hub>:3290/api/session`；hub 執行中會回傳 JSON |

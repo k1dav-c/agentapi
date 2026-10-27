@@ -502,7 +502,9 @@ agent 啟動時才讀取設定，因此變更需要重新啟動；native agent �
 - webhook 會把設定要送的內容（包括對話）送到它的網址，而 `PUT /webhook` 可以修改網址；它的
   HMAC secret 只能寫入、無法讀回。
 - hub（`lib/hub`）持有實例的 API token，只會送到以它的 secret 簽章的事件（timestamp 和 body 的
-  HMAC，不超過 10 分鐘，每次傳送只處理一次）或已登入者加入的實例網址。瀏覽器以 hub token 登入，換取
+  HMAC，不超過 10 分鐘，每次傳送只處理一次）或已登入者加入的實例網址。實例的網址由另一個 AgentAPI
+  回應時（摘要裡是別的實例 ID），代理拒絕轉送；hub 仍在追蹤、且 3 分鐘內有消息的實例，另一次以相同
+  ID 執行的 AgentAPI 也無法把它移到別處。瀏覽器以 hub token 登入，換取
   由 token 推導出的 HttpOnly、SameSite=Lax cookie；代理會移除瀏覽器的 cookie 以及 `Authorization`、
   `Origin`、`Referer` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
 - 上層 agent 工作階段會為它執行的指令設定環境變數（包含機密資訊）；不論使用哪種 transport，

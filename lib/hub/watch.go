@@ -76,12 +76,16 @@ func (h *Hub) follow(ctx context.Context, id string) {
 			failing = time.Time{}
 			wait = watchRetryMin
 			h.unmuteChanged(id, &summary)
-			_, _, _ = h.store.update(id, false, false, func(i *Instance) {
+			now := h.now()
+			_, _, _ = h.store.update(id, false, func(i *Instance) {
 				i.Summary = &summary
 				i.Connection = ConnectionConnected
 				i.Error = ""
-				// Who it is, as it says; the hub keeps its ID and where it
-				// reaches it.
+				i.answeredBy = ""
+				i.LastSeen = now
+				// Who it is, as it says: another run of it after a
+				// restart, which its next heartbeat would introduce. The
+				// hub keeps where it reaches it.
 				id, url := i.ID, i.URL
 				i.WebhookInstance = summary.Instance
 				i.ID, i.URL = id, url
@@ -98,10 +102,24 @@ func (h *Hub) follow(ctx context.Context, id string) {
 			failing = h.now()
 		}
 		grace := h.now().Sub(failing) < h.config.ConnectGrace
-		_, _, _ = h.store.update(id, false, false, func(i *Instance) {
+		var other *otherInstanceError
+		answered := errors.As(err, &other)
+		_, _, _ = h.store.update(id, false, func(i *Instance) {
 			if i.Connection == ConnectionStopped {
 				return
 			}
+			if answered {
+				// Not a failure to wait out: the hub would show, and send
+				// approvals to, another agent.
+				if i.answeredBy != other.id {
+					h.logger.Warn("Another AgentAPI answers at an instance's URL", "instance", id, "url", i.URL, "answers", other.id)
+				}
+				i.Connection = ConnectionUnreachable
+				i.Error = message
+				i.answeredBy = other.id
+				return
+			}
+			i.answeredBy = ""
 			if grace {
 				i.Connection = ConnectionConnecting
 				i.Error = message
@@ -125,8 +143,16 @@ func (h *Hub) follow(ctx context.Context, id string) {
 	}
 }
 
+// otherInstanceError: another AgentAPI answers at an instance's URL.
+type otherInstanceError struct{ id string }
+
+func (e *otherInstanceError) Error() string {
+	return fmt.Sprintf("another AgentAPI answers at this URL (%s)", e.id)
+}
+
 // readSummaries opens GET /events?only=summary of instance and calls got
-// with every summary until the stream ends.
+// with every summary until the stream ends, or until one comes from
+// another instance.
 func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(instanceapi.SummaryBody)) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -170,11 +196,10 @@ func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(ins
 			if event == "summary_update" && data != "" {
 				var summary instanceapi.SummaryBody
 				if err := json.Unmarshal([]byte(data), &summary); err == nil {
-					if instance.ServerID != "" && summary.Instance.ServerID != "" && summary.Instance.ServerID != instance.ServerID {
-						// Another run of it, which its next heartbeat
-						// introduces; until then the hub shows this one.
-						_, _, _ = h.store.update(instance.ID, false, true, func(i *Instance) { i.ServerID = summary.Instance.ServerID })
-						instance.ServerID = summary.Instance.ServerID
+					if summary.Instance.ID != "" && summary.Instance.ID != instance.ID {
+						// Its address went to another machine, or two
+						// machines have the same name.
+						return &otherInstanceError{id: summary.Instance.ID}
 					}
 					got(summary)
 				}
@@ -198,7 +223,7 @@ func (h *Hub) unmuteChanged(id string, summary *instanceapi.SummaryBody) {
 	if !ok || current.Muted == "" || current.Muted == instanceapi.AttentionKey(summary) {
 		return
 	}
-	_, _, err := h.store.update(id, false, true, func(i *Instance) {
+	_, _, err := h.store.update(id, false, func(i *Instance) {
 		if i.Muted == current.Muted {
 			i.Muted = ""
 		}

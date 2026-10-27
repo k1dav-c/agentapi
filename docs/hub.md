@@ -42,7 +42,9 @@ hub never has to be on the public internet.
    for, its title, latest task, queue and usage limits. One connection per instance, reopened after
    1 s, then up to every 30 s when it fails. A stream silent for 45 s counts as lost. An instance
    stays connecting for the first 10 s of failures (one that is starting isn't listening yet when
-   its first event comes); after that it is unreachable.
+   its first event comes); after that it is unreachable. The summary names the AgentAPI that
+   answers: when it is another one (the address went to another machine), the instance is
+   unreachable at once, and the hub sends it none of the instance's requests.
 3. A browser signs in with the hub token and gets every instance and each change from one stream.
 4. Opening an instance loads the chat through the hub (`/i/<id>/…`). The hub forwards each request
    with the instance's API token in place of the browser's credentials.
@@ -323,6 +325,9 @@ instance that joined with its webhook comes back the next time it starts.
 - The hub takes an event only with a valid `X-AgentAPI-Signature-256` (HMAC-SHA256 of
   `<timestamp>.<body>`), a timestamp at most 10 minutes off, and a delivery ID it hasn't taken yet.
   This matters because an event names the URL the hub sends an instance token to.
+- The hub sends an instance's requests only while the AgentAPI at its URL says it is that
+  instance, and doesn't let another run with the same ID move it elsewhere while it still follows
+  this one.
 - The session cookie is HttpOnly and SameSite=Lax, derived from the hub token rather than holding
   it. The proxy drops the browser's cookies and its `Authorization`, `Origin` and `Referer`
   headers, and drops the instance's `Set-Cookie`, so neither side's credentials reach the other.
@@ -347,6 +352,8 @@ instance that joined with its webhook comes back the next time it starts.
 | Unreachable: `400 Bad Request` | The AgentAPI refuses the VPN name as `Host` | Allow it in `--allowed-hosts` (step 3) |
 | Unreachable: `needs an API token` | The AgentAPI runs with `--api-token` and the hub has another | Give the hub `--instance-token`, or the token when adding |
 | Unreachable: connection refused or timed out | Wrong `--public-url`, or the hub can't reach the VPN | Check the URL from the hub's machine with `curl <url>/summary` |
+| Unreachable: `another AgentAPI answers at this URL` | The instance's address now belongs to another machine (a new DHCP lease), or `--public-url` names another machine | Check `--public-url`; an instance that moved sends its new address with its next heartbeat, within a minute |
+| The hub logs "Two AgentAPIs report the same instance ID" | Two machines have the same name, so their AgentAPIs on the same port have the same ID; the hub keeps the one it follows | Rename one machine, or give its AgentAPIs `--instance-id` |
 | Unreachable, and the hub's VPN client runs in userspace | The hub's connections don't go through the VPN | Set `ALL_PROXY` to the VPN client's SOCKS5 proxy for the hub |
 | "is it AgentAPI 1.1 or later?" when adding | The instance has no summary | Update it with `agentapi update` |
 | The page says the hub didn't answer | Wrong address, or the hub isn't running | Open `http://<hub>:3290/api/session`; it answers JSON when the hub runs |

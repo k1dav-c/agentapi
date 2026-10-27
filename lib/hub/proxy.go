@@ -30,6 +30,11 @@ func (h *Hub) proxy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such instance"})
 		return
 	}
+	if instance.answeredBy != "" {
+		// Its approvals would go to another agent.
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "another AgentAPI answers at this instance's URL (" + instance.answeredBy + ")"})
+		return
+	}
 	target, err := url.Parse(instance.URL)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "the instance's URL is invalid"})
