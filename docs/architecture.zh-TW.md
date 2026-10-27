@@ -376,10 +376,11 @@ type Factory func(resume Resume) (Adapter, error)
   視為已讀。
 - `/internal/screen` 以 `screen` 事件為 TTY mode 串流畫面。
 - 狀態在 `running` 與 `stable` 之間切換時，會觸發 `run.status_changed` webhook 事件。webhook
-  observer 像 `/events` 用戶端一樣訂閱 emitter，把它的事件轉成其他 webhook 事件：emitter 的任務
-  更新轉成 `task.*`，agent 的訊息在下一則開始或回合結束時才送出；observer 訂閱時 emitter 已有的
-  內容，以及比 AgentAPI 啟動時間更早的訊息（來自接續的工作階段）都不會送出。傳送器從佇列依序
-  一次送一個事件，失敗會重試，並以 `--webhook-secret` 簽章。
+  有網址時，webhook observer 像 `/events` 用戶端一樣訂閱 emitter，把它的事件轉成其他 webhook
+  事件：emitter 的任務更新轉成 `task.*`，agent 的訊息在下一則開始或回合結束時才送出；observer
+  訂閱時 emitter 已有的內容，以及比 AgentAPI 啟動時間更早的訊息（來自接續的工作階段）都不會送出。
+  它只記得訊息和任務處理到哪裡、還在等結果的工具呼叫（最多 64 個）和尚未關閉的請求，對話重設時
+  全部忘掉。傳送器從佇列依序一次送一個事件，失敗會重試，並以 `--webhook-secret` 簽章。
 - 有狀態資料庫時，emitter 會把每次變更交給它的 `Persister`，它在自己的寫入 goroutine 上從副本
   編碼訊息與結構化訊息，所以串流中的長訊息不會拖慢 emitter。
 

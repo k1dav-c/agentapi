@@ -191,6 +191,8 @@ type webhookDispatcher struct {
 	// snapshot, if set, gives the data of instance.started and
 	// instance.heartbeat.
 	snapshot func() any
+	// configured, if set, is called after the configuration changed.
+	configured func()
 	// configChanged wakes the heartbeat loop when the interval changes.
 	configChanged chan struct{}
 }
@@ -334,12 +336,15 @@ func (d *webhookDispatcher) updateConfig(config WebhookConfig) error {
 		return err
 	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.config = config
 	d.tmpl = tmpl
+	d.mu.Unlock()
 	select {
 	case d.configChanged <- struct{}{}:
 	default:
+	}
+	if d.configured != nil {
+		d.configured()
 	}
 	return nil
 }
