@@ -25,7 +25,7 @@ hub 在一個頁面上監看多台機器的 AgentAPI：列出每個實例，需�
 ```text
  手機／桌面瀏覽器 ──HTTPS──▶ hub（agentapi hub serve，放在常開的機器上）
                                ▲ 有簽章的 webhook 事件    │ 摘要串流和聊天介面，
-                               │ （instance.*、task.*…）  ▼ 帶著各實例的 token
+                               │ （instance.*）           ▼ 帶著各實例的 token
           ┌────────────────────┴───────────┬────────────────────────────────┐
    workspace A 上的 AgentAPI      workspace B 上的 AgentAPI       你筆電上的 AgentAPI
 ```
@@ -36,12 +36,13 @@ hub 和各個 AgentAPI 透過你掌控的網路互連，例如你自己的 VPN�
    `~/.agentapi/config.yaml`，這個使用者的每個 `agentapi server` 啟動時都會讀取。之後每個
    AgentAPI 都送出有簽章的 `instance.started`、`instance.heartbeat`（每分鐘一次）和
    `instance.stopped`，hub 據此新增、更新或停止實例。hub 連不到、又錯過三次 heartbeat 的實例，
-   例如 workspace 被強制關掉的，視為已停止，hub 不再嘗試連線，直到它下一次送 heartbeat。
-2. hub 追蹤每個實例的摘要（`GET /events?only=summary`）：狀態、在等什麼、標題、最新任務、佇列和
-   用量限制。每個實例一條連線；斷線時 1 秒後重連，之後間隔逐次拉長，最多 30 秒。串流 45 秒沒有任何
-   動靜就視為斷線。連線失敗的前 10 秒，實例仍顯示為連線中（剛啟動的實例送出第一個事件時，可能還沒
-   開始接受連線）；超過 10 秒才算連不到。摘要會寫明回應的是哪個 AgentAPI：若是別的 AgentAPI
-   （位址換到了另一台機器），實例立刻顯示為連不到，hub 也不會把這個實例的請求轉給它。
+   例如 workspace 被強制關掉的，視為已停止，hub 不再嘗試連線，直到它下一次送 heartbeat。這些事件
+   只用來新增實例、告訴 hub 它在哪裡；每個實例在做什麼，以它的摘要為準。
+2. hub 追蹤每個實例的摘要（`GET /events?only=summary`），以它為實例狀況的依據：狀態、在等什麼、
+   標題、最新任務、佇列和用量限制。每個實例一條連線；斷線時 1 秒後重連，之後間隔逐次拉長，最多 30 秒。
+   串流 45 秒沒有任何動靜就視為斷線。連線失敗的前 10 秒，實例仍顯示為連線中（剛啟動的實例送出第一個
+   事件時，可能還沒開始接受連線）；超過 10 秒才算連不到。摘要會寫明回應的是哪個 AgentAPI：若是別的
+   AgentAPI（位址換到了另一台機器），實例立刻顯示為連不到，hub 也不會把這個實例的請求轉給它。
 3. 瀏覽器用 hub token 登入，從一條串流取得所有實例和每次變更。
 4. 開啟實例時，聊天介面透過 hub 載入（`/i/<id>/…`）。hub 轉送每個請求時，用實例的 API token 取代
    瀏覽器的憑證。
@@ -355,7 +356,7 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | --- | --- | --- |
 | `--secret` | `AGENTAPI_HUB_SECRET` | 為事件簽章的 secret；沒有的話 hub 會拒絕事件 |
 | `--public-url` | | hub 連回 AgentAPI 的網址；`{port}` 和 `{hostname}` 會被填入 |
-| `--events` | `instance.*`、`task.*`、`request.*`、`login.*`、`limit.*`、`agent.error` | 送給 hub 的事件 |
+| `--events` | `instance.*` | 送給 hub 的事件；hub 只需要這些 |
 | `--api-token` | `AGENTAPI_API_TOKEN` | 給需要 token 的執行中 AgentAPI |
 | `--config` | `~/.agentapi/config.yaml` | 要寫入的設定檔 |
 | `--registry-dir` | `~/.agentapi/instances` | 執行中 AgentAPI 的登記目錄 |
@@ -370,6 +371,10 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 `PUT /webhook` 套用到執行中的 AgentAPI，保留各自的逾時和重試次數。`leave` 移除這些設定，並關掉執行中
 AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。
 
+用較早版本加入的機器，還會另外送出 `task.*`、`request.*`、`login.*`、`limit.*` 和 `agent.error`，
+每個最多 64 KiB；hub 只把它們當成實例還在的跡象。再執行一次同樣的 `agentapi hub join`，就只會送
+`instance.*`：它會改寫設定檔，也會套用到執行中的 AgentAPI。
+
 ### hub 的 HTTP API
 
 | 端點 | 說明 |
@@ -382,7 +387,7 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `POST /api/instances` | `{"url": …, "token": …}` 以網址加入實例 |
 | `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音 |
 | `DELETE /api/instances/{id}` | 移除實例 |
-| `GET /api/events` | Server-sent events：先送 `instances`（全部，格式同 `GET /api/instances`），再送 `instance`（某個有變動）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
+| `GET /api/events` | Server-sent events：先送 `instances`（全部，格式同 `GET /api/instances`），再送 `instance`（某個實例有頁面看得到的變動；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面 |
 
 除了 `/hooks` 和 `/api/session`，每個端點都需要 session cookie 或

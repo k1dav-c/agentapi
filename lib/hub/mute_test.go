@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -110,4 +111,39 @@ func TestSummaryFromAnEndingWatch(t *testing.T) {
 	assert.Equal(t, ConnectionConnected, instance.Connection)
 	assert.Equal(t, "http://dev:2", instance.URL)
 	assert.Equal(t, "s1", instance.ServerID)
+}
+
+// Browsers hear of a change they would see, not of a heartbeat that
+// changes nothing on the page; when an instance was last heard of shows
+// only while it is offline.
+func TestStoreTellsWhatBrowsersSee(t *testing.T) {
+	s, err := newStore("")
+	require.NoError(t, err)
+	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
+	_, _, err = s.update("dev:1", true, func(i *Instance) {
+		i.URL = "http://dev:1"
+		i.Connection = ConnectionConnected
+		i.Summary = &instanceapi.SummaryBody{Status: instanceapi.AgentStatusStable, Attention: instanceapi.AttentionNone}
+		i.LastSeen = now
+	})
+	require.NoError(t, err)
+	_, events := s.subscribe()
+	heard := func() bool {
+		select {
+		case <-events:
+			return true
+		default:
+			return false
+		}
+	}
+	_, _, _ = s.update("dev:1", false, func(i *Instance) { i.LastSeen = now.Add(time.Minute) })
+	_, _, _ = s.update("dev:1", false, func(i *Instance) { i.refusedRun = "twin" })
+	assert.False(t, heard(), "a heartbeat")
+	_, _, _ = s.update("dev:1", false, func(i *Instance) { i.Group = "Work" })
+	assert.True(t, heard())
+
+	_, _, _ = s.update("dev:1", false, func(i *Instance) { i.Connection = ConnectionUnreachable })
+	assert.True(t, heard())
+	_, _, _ = s.update("dev:1", false, func(i *Instance) { i.LastSeen = now.Add(2 * time.Minute) })
+	assert.True(t, heard(), "offline since then")
 }

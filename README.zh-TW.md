@@ -1721,8 +1721,8 @@ agentapi hub leave
 `--port` 和 `--bind` 設定監聽位置。
 
 `join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 AgentAPI。
-`--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`、
-`task.*`、`request.*`、`login.*`、`limit.*`、`agent.error`），`--public-url` 是 hub 連回它們的網址，
+`--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`，hub 只需要
+這些，其餘都從摘要得知），`--public-url` 是 hub 連回它們的網址，
 `--api-token`（或 `AGENTAPI_API_TOKEN`）會送給需要 token 的實例，`--config` 和 `--registry-dir`
 可指定其他檔案。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。
 

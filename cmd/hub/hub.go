@@ -34,9 +34,10 @@ const (
 	keyPublic = "public-url"
 )
 
-// defaultEvents are the events a hub gets: the instances, their tasks and
-// what they wait on.
-var defaultEvents = []string{"instance.*", "task.*", "request.*", "login.*", "limit.*", "agent.error"}
+// defaultEvents are the events a hub gets: the instances starting, their
+// heartbeats and their stopping, which add them and say where they are.
+// The hub follows what each one does from its summary stream.
+var defaultEvents = []string{"instance.*"}
 
 // requestTimeout is how long a running AgentAPI has to answer.
 const requestTimeout = 5 * time.Second
@@ -149,7 +150,7 @@ func joinCmd() *cobra.Command {
 	}
 	opts.addFlags(cmd)
 	cmd.Flags().StringVar(&secret, "secret", "", "Secret that signs the events, which the hub checks (default $AGENTAPI_HUB_SECRET)")
-	cmd.Flags().StringSliceVar(&events, "events", defaultEvents, "Events to send to the hub")
+	cmd.Flags().StringSliceVar(&events, "events", defaultEvents, "Events to send to the hub; it needs only instance.*, and follows the rest from each AgentAPI's summary")
 	cmd.Flags().BoolVar(&noCheck, "no-check", false, "Join without checking that the hub takes this machine's events (for a hub that doesn't run yet)")
 	cmd.Flags().StringVar(&publicURL, "public-url", "", "Where the hub reaches this machine's AgentAPIs, such as http://dev-1.vpn:{port} ({port} and {hostname} are filled in for each)")
 	return cmd

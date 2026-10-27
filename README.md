@@ -1997,7 +1997,7 @@ instances, and `--port` and `--bind` set where it listens.
 
 `join` writes the hub's webhook into `~/.agentapi/config.yaml` and applies it to the registered
 AgentAPIs running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `--events` picks them
-(default `instance.*`, `task.*`, `request.*`, `login.*`, `limit.*`, `agent.error`), `--public-url`
+(default `instance.*`, all the hub needs: it follows the rest from each summary), `--public-url`
 is where the hub reaches them, `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the ones that need
 a token, and `--config` and `--registry-dir` name other files. An AgentAPI that `join` can't
 update now applies the file when it restarts.

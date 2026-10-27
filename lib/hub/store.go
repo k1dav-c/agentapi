@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,6 +84,18 @@ type record struct {
 func (i Instance) public() Instance {
 	i.Token = ""
 	return i
+}
+
+// seen is the instance as browsers see it, to tell a change they would see
+// from one they wouldn't (a heartbeat): when it was last heard of shows
+// only while it is offline.
+func (i Instance) seen() []byte {
+	i = i.public()
+	if i.State != instanceapi.StateUnreachable && i.State != instanceapi.StateStopped {
+		i.LastSeen = time.Time{}
+	}
+	data, _ := json.Marshal(i)
+	return data
 }
 
 // state is what the hub's page shows of the instance.
@@ -243,7 +256,7 @@ func (s *store) update(id string, create bool, change func(*Instance)) (Instance
 		i.ID = id
 		s.instances[id] = i
 	}
-	before := i.kept()
+	before, seen := i.kept(), i.seen()
 	change(i)
 	i.State = i.state()
 	var err error
@@ -251,7 +264,9 @@ func (s *store) update(id string, create bool, change func(*Instance)) (Instance
 		err = s.saveLocked()
 	}
 	changed := *i
-	s.notifyLocked(storeEvent{Instance: &changed})
+	if !ok || !bytes.Equal(changed.seen(), seen) {
+		s.notifyLocked(storeEvent{Instance: &changed})
+	}
 	return changed, true, err
 }
 

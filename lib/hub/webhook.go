@@ -52,8 +52,9 @@ func (d *deliveries) add(id string) bool {
 }
 
 // receiveWebhook takes an AgentAPI's webhook event (POST /hooks): its
-// instance.* events add, update and stop the instance; any other event
-// says it is alive.
+// instance.* events add, update and stop the instance. Any other event,
+// which a machine that joined with an earlier version still sends, only
+// says it is alive: the summary stream says what the instance does.
 func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBody+1))
 	if err != nil || len(body) > maxWebhookBody {
