@@ -75,6 +75,7 @@ func (h *Hub) follow(ctx context.Context, id string) {
 			connected = true
 			failing = time.Time{}
 			wait = watchRetryMin
+			h.unmuteChanged(id, &summary)
 			_, _, _ = h.store.update(id, false, false, func(i *Instance) {
 				i.Summary = &summary
 				i.Connection = ConnectionConnected
@@ -186,4 +187,22 @@ func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(htt
 		return errors.New("the event stream went silent")
 	}
 	return nil
+}
+
+// unmuteChanged ends the instance's mute once what it waits for changed
+// (it logged in, or asks something else): the next thing counts again.
+func (h *Hub) unmuteChanged(id string, summary *httpapi.SummaryBody) {
+	current, ok := h.store.get(id)
+	if !ok || current.Muted == "" || current.Muted == attentionKey(summary) {
+		return
+	}
+	_, _, err := h.store.update(id, false, true, func(i *Instance) {
+		if i.Muted == current.Muted {
+			i.Muted = ""
+		}
+	})
+	if err != nil {
+		h.logger.Warn("Failed to keep the hub's instances", "error", err)
+	}
+	h.logger.Info("An instance's mute ended: what it waits for changed", "instance", id)
 }

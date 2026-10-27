@@ -333,26 +333,51 @@ func (h *Hub) fetchSummary(ctx context.Context, base, token string) (*httpapi.Su
 const maxGroupName = 40
 
 // updateInstance changes what the hub's page sets on an instance (PATCH
-// /api/instances/{id}): {"group": "..."} puts it in a group, "" in none.
+// /api/instances/{id}): {"group": "..."} puts it in a group, "" in none;
+// {"muted": true} mutes what it waits for now, until that changes, and
+// {"muted": false} ends the mute.
 func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Group *string `json:"group"`
+		Muted *bool   `json:"muted"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil || body.Group == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"group\": ...}"})
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil || (body.Group == nil && body.Muted == nil) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"group\": ...} or {\"muted\": ...}"})
 		return
 	}
-	group := strings.Join(strings.Fields(*body.Group), " ")
-	if utf8.RuneCountInString(group) > maxGroupName {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("a group name has at most %d characters", maxGroupName)})
-		return
+	var group string
+	if body.Group != nil {
+		group = strings.Join(strings.Fields(*body.Group), " ")
+		if utf8.RuneCountInString(group) > maxGroupName {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("a group name has at most %d characters", maxGroupName)})
+			return
+		}
 	}
-	updated, ok, err := h.store.update(instanceParam(r), false, true, func(i *Instance) { i.Group = group })
+	var nothingToMute bool
+	updated, ok, err := h.store.update(instanceParam(r), false, true, func(i *Instance) {
+		if body.Muted != nil {
+			key := ""
+			if *body.Muted {
+				key = attentionKey(i.Summary)
+				nothingToMute = key == ""
+			}
+			if !nothingToMute {
+				i.Muted = key
+			}
+		}
+		if body.Group != nil && !nothingToMute {
+			i.Group = group
+		}
+	})
 	if err != nil {
 		h.logger.Warn("Failed to keep the hub's instances", "error", err)
 	}
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such instance"})
+		return
+	}
+	if nothingToMute {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "it doesn't need you now: nothing to mute"})
 		return
 	}
 	writeJSON(w, http.StatusOK, updated.public())

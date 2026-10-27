@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Features
+
+- Mute an agent on the hub until what it waits for changes: **Mute until it changes** in a row's
+  menu takes a login (or a request, a usage limit) you won't attend to out of **Need you**, the
+  badges, the tab and the notifications. The row stays, grey, with a struck-through bell. Once the
+  agent logs in or waits for something else, it counts again; **Unmute** ends it sooner. Mutes are
+  kept on the hub (`PATCH /api/instances/{id}` with `{"muted": …}`).
+
 ### Documentation
 
 - An agent skill, `skills/agentapi-hub-join`, has Claude Code join its machine's AgentAPIs to a hub:

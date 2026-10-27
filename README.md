@@ -1432,7 +1432,8 @@ what needs you. Pick one to open it in the chat. On a phone the list and the cha
 - AgentAPIs join it with [`agentapi hub join`](#joining-a-hub): their signed `instance.*` events
   add them, and the hub follows each one's [summary stream](#watching-many-instances) from one
   connection. `+` adds one by its URL (and token) instead. Each row's `⋯` menu puts the
-  instance in a group of your own, or forgets a stopped or unreachable one.
+  instance in a group of your own, mutes what it waits for until that changes (a login you won't
+  do), or forgets a stopped or unreachable one.
 - The hub opens an instance through itself (`/i/<id>/...`), sending the instance's API token
   (`--instance-token`, or the one given when it was added) in place of your credentials. The
   browser never holds the instances' tokens or reaches them itself, so no instance needs CORS for

@@ -193,6 +193,7 @@ Each state has a shape of its own, so it reads without its color:
 | Turning blue arc | Working | The agent works on the task shown |
 | Green check | Finished | A task ended since anyone last looked at this agent |
 | Grey ring | (its title) | Idle |
+| Struck-through bell, grey | Muted | It needs you, and you muted that until it changes ([Muting](#muting)) |
 | Dashed ring, turning | Connecting | The hub is opening its summary stream, or opening it again |
 | Broken red ring | Unreachable | The hub hasn't reached it for 10 s; the line says why |
 | Square | Stopped, Exited | The AgentAPI stopped, or its agent exited |
@@ -219,6 +220,17 @@ last under **Ungrouped**. A header shows how many instances the group has and, i
 need you, so a folded group still tells you. Tap a header to fold or unfold it; each browser
 remembers which groups it folded. The pencil renames the group, moving all its instances. A group
 name has at most 40 characters, and a group with no instance left disappears.
+
+### Muting
+
+![A muted row: what it waits for, out of the way](screenshots/hub-muted.png)
+
+An agent may wait for something you won't do soon, such as a login on a machine you don't use it
+on. **Mute until it changes** in its **⋯** menu takes it out of what needs you: it stops counting
+in **Need you**, the group's badge, the tab and the overview, and sends no notification. The row
+stays, grey, with a struck-through bell and what it waits for. The mute lasts as long as that
+does: once the agent logs in, or asks something else (another request, a usage limit), it counts
+again. **Unmute** in the same menu ends it sooner. Mutes are kept on the hub, like groups.
 
 ### Opening an instance
 
@@ -373,7 +385,7 @@ be changed now applies the file when it restarts.
 | `DELETE /api/session` | Signs out |
 | `GET /api/instances` | The instances, with their summaries and connection state |
 | `POST /api/instances` | `{"url": …, "token": …}` adds an instance by its URL |
-| `PATCH /api/instances/{id}` | `{"group": …}` puts an instance in a group; `""` in none |
+| `PATCH /api/instances/{id}` | `{"group": …}` puts an instance in a group, `""` in none; `{"muted": true}` mutes what it waits for now, until that changes (409 when it waits for nothing), `false` ends the mute |
 | `DELETE /api/instances/{id}` | Forgets an instance |
 | `GET /api/events` | Server-sent events: `instances` (all of them), then `instance` (one changed), `removed` (`{"id"}`) and a `heartbeat` every 15 s |
 | `/i/{id}/…` | The instance's own API and chat, through the hub |

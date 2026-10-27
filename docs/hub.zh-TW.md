@@ -179,6 +179,7 @@ token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie�
 | 轉動的藍色弧線 | Working | agent 正在處理顯示的任務 |
 | 綠色勾勾 | Finished | 上次有人查看這個 agent 之後，有任務結束了 |
 | 灰色圓環 | （它的標題） | 閒置 |
+| 灰色、劃掉的鈴鐺 | Muted | 它需要你處理，但你把這件事靜音到它改變為止（見[靜音](#靜音)） |
 | 轉動的虛線圓環 | Connecting | hub 正在開啟或重新開啟它的摘要串流 |
 | 斷開的紅色圓環 | Unreachable | hub 已經 10 秒連不到它；這一行會說明原因 |
 | 方塊 | Stopped、Exited | AgentAPI 已停止，或它的 agent 已結束 |
@@ -202,6 +203,16 @@ token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie�
 顯示群組裡的實例數，並以琥珀色顯示需要你處理的數量，所以收合的群組仍然看得到。點標題可以收合或
 展開；每個瀏覽器各自記住收合了哪些群組。鉛筆圖示可以為群組改名，裡面的實例會一起移過去。群組名稱
 最多 40 個字元；群組裡沒有實例時就會消失。
+
+### 靜音
+
+![靜音的一列：它在等什麼，但不再打擾你](screenshots/hub-muted.png)
+
+agent 可能在等一件你短期內不會處理的事，例如在一台你不會用它的機器上等登入。在它的 **⋯** 選單選
+**Mute until it changes**，就會把它移出需要你處理的項目：不再計入 **Need you**、群組徽章、分頁標題
+和總覽，也不發通知。這一列仍然保留，以灰色和劃掉的鈴鐺顯示它在等什麼。靜音只維持到這件事改變為止：
+agent 登入了，或改為等別的事（另一個請求、用量上限），就會重新計入。同一個選單的 **Unmute** 可以
+提早結束靜音。和群組一樣，靜音保存在 hub 上。
 
 ### 開啟實例
 
@@ -344,7 +355,7 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `DELETE /api/session` | 登出 |
 | `GET /api/instances` | 所有實例，含摘要和連線狀態 |
 | `POST /api/instances` | `{"url": …, "token": …}` 以網址加入實例 |
-| `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組；`""` 為不分組 |
+| `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音 |
 | `DELETE /api/instances/{id}` | 移除實例 |
 | `GET /api/events` | Server-sent events：先送 `instances`（全部），再送 `instance`（某個有變動）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面 |

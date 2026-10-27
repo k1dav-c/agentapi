@@ -3,7 +3,7 @@ import {cn} from "@/lib/utils";
 
 // StatusGlyph draws an instance's state with a shape of its own, so the
 // state reads without its color: an exclamation, a turning arc, a check, a
-// hollow ring, a broken ring, a stop square.
+// hollow ring, a struck-through bell, a broken ring, a stop square.
 export function StatusGlyph({state, className}: {state: InstanceState; className?: string}) {
   const box = cn("size-5 shrink-0", className);
   switch (state) {
@@ -37,6 +37,14 @@ export function StatusGlyph({state, className}: {state: InstanceState; className
           <circle cx="10" cy="10" r="2" className="fill-muted-foreground/45" />
         </svg>
       );
+    case "muted":
+      return (
+        <svg viewBox="0 0 20 20" aria-hidden="true" className={box}>
+          <path d="M6 13.5V9.5a4 4 0 0 1 6.6-3M14 9.5v4l1.2 1.3H8" className="fill-none stroke-muted-foreground/60" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M8.8 16.3h2.4" className="stroke-muted-foreground/60" strokeWidth="1.6" strokeLinecap="round" />
+          <path d="M4.5 15.5l11-11" className="stroke-muted-foreground/60" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      );
     case "connecting":
       return (
         <svg viewBox="0 0 20 20" aria-hidden="true" className={box}>
@@ -66,6 +74,7 @@ export const stateTone: Record<InstanceState, string> = {
   working: "text-state-working",
   unread: "text-state-ready",
   idle: "text-muted-foreground",
+  muted: "text-muted-foreground",
   connecting: "text-muted-foreground",
   unreachable: "text-state-fault",
   stopped: "text-muted-foreground",

@@ -1,6 +1,6 @@
 "use client";
 
-import {ChevronRight, FolderPlus, MoreHorizontal, Pencil, Trash2} from "lucide-react";
+import {Bell, BellOff, ChevronRight, FolderPlus, MoreHorizontal, Pencil, Trash2} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {Button} from "@/components/ui/button";
 import {
@@ -52,6 +52,7 @@ export function InstanceRow({
   onForget,
   onGroup,
   onNewGroup,
+  onMute,
 }: {
   instance: HubInstance;
   groups: string[];
@@ -61,6 +62,8 @@ export function InstanceRow({
   onForget: () => void;
   onGroup: (name: string) => void;
   onNewGroup: () => void;
+  // Mutes what it waits for now, until that changes; false ends the mute.
+  onMute: (muted: boolean) => void;
 }) {
   const state = instanceState(instance);
   const summary = instance.summary;
@@ -137,6 +140,15 @@ export function InstanceRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60 max-w-[calc(100vw-1rem)]">
+            {(state === "needs-you" || state === "muted") && (
+              <>
+                <DropdownMenuItem onSelect={() => onMute(state === "needs-you")}>
+                  {state === "needs-you" ? <BellOff /> : <Bell />}
+                  {state === "needs-you" ? "Mute until it changes" : "Unmute"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
             <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Move to group</DropdownMenuLabel>
             <DropdownMenuRadioGroup value={instance.group?.trim() ?? ""} onValueChange={onGroup}>
               <DropdownMenuRadioItem value="">No group</DropdownMenuRadioItem>
