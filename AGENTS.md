@@ -43,9 +43,9 @@ Use these commands and conventions when changing AgentAPI.
 
 ## Architecture
 
-AgentAPI is a Go HTTP server with three transports for controlling coding agents. Claude Code,
+AgentAPI is a Go HTTP server with two transports for controlling coding agents. Claude Code,
 Codex and Pi default to native mode, which uses their structured protocols. Other agents default
-to PTY mode, which parses terminal output. Experimental ACP mode uses the Agent Client Protocol.
+to PTY mode, which parses terminal output.
 
 ### Core components
 
@@ -86,7 +86,7 @@ to PTY mode, which parses terminal output. Experimental ACP mode uses the Agent 
 6. SSE events stream updates to clients
 
 Native mode delivers messages through an adapter and receives structured events through its Sink.
-See [the architecture guide](docs/architecture.md) for all three transport flows.
+See [the architecture guide](docs/architecture.md) for both transport flows.
 
 ## Main API endpoints
 

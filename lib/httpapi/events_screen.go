@@ -17,8 +17,7 @@ func (e *EventEmitter) EmitScreen(newScreen string) {
 
 	e.notifyChannels(EventTypeScreenUpdate, ScreenUpdateBody{Screen: strings.TrimRight(newScreen, mf.WhiteSpaceChars)})
 	e.screen = newScreen
-	// What an ACP agent streams is no terminal.
-	e.screenQuestion = e.transport != TransportACP && isTerminalQuestionScreen(e.agentType, newScreen)
+	e.screenQuestion = isTerminalQuestionScreen(e.agentType, newScreen)
 
 	// Clients decide whether to offer prompt options from this rather than
 	// guessing from message text, where a numbered list in an answer looks

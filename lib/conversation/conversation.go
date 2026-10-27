@@ -1,9 +1,9 @@
 // Package conversation holds what the transports share: the conversation's
 // messages and status, the interface the server drives a transport
 // through, and the one a transport reports its changes to. The PTY engine
-// (lib/screentracker), the native transport (lib/native) and ACP (x/acpio)
-// implement it; the state database (lib/statedb) and the session logs
-// (lib/sessions) use its messages.
+// (lib/screentracker) and the native transport (lib/native) implement it;
+// the state database (lib/statedb) and the session logs (lib/sessions) use
+// its messages.
 package conversation
 
 import (

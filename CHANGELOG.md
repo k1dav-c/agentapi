@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- The experimental ACP transport is removed: it approved every permission request and couldn't
+  restart its agent or keep its conversation. `--transport acp` and `--experimental-acp` stop
+  AgentAPI with an error; run such an agent with `--transport pty`. `acp` is no longer a value of
+  `transport` in the API.
+
 ### Fixes
 
 - A value a newer AgentAPI added no longer breaks the chat. An unknown task status reads as running,

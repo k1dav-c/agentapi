@@ -232,7 +232,7 @@ func (s *Server) registerConversationRoutes() {
 
 	huma.Delete(s.api, "/messages", s.deleteMessages, func(o *huma.Operation) {
 		o.Summary = "Delete all messages and restart"
-		o.Description = "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue."
+		o.Description = "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if the agent can't be restarted (AgentAPI runs it without a process supervisor), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue."
 		o.Errors = []int{400, 409}
 	})
 

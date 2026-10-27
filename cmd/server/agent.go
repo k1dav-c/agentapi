@@ -21,8 +21,8 @@ import (
 // runningAgent is the agent of one transport, as runServer starts it,
 // waits for it and stops it.
 type runningAgent struct {
-	// io is the conversation's view of a PTY or ACP agent; nil for a
-	// native agent, which the server starts itself from factory.
+	// io is the conversation's view of a PTY agent; nil for a native
+	// agent, which the server starts itself from factory.
 	io      st.AgentIO
 	factory native.Factory
 	// updateNative updates a native agent's CLI before a restart.
@@ -30,7 +30,6 @@ type runningAgent struct {
 	// process and supervisor run a PTY agent, which a restart replaces.
 	process    *termexec.Process
 	supervisor *agentSupervisor
-	acp        *httpapi.SetupACPResult
 }
 
 // startAgent starts the agent of opts.transport in cwd. Nothing runs for
@@ -39,24 +38,11 @@ func startAgent(ctx context.Context, opts serverOptions, cwd string, logger *slo
 	switch {
 	case opts.printOpenAPI:
 		return &runningAgent{}, nil
-	case opts.transport == httpapi.TransportACP:
-		return startACPAgent(ctx, opts)
 	case opts.transport == httpapi.TransportNative:
 		return startNativeAgent(opts, cwd, logger)
 	default:
 		return startPTYAgent(ctx, opts, logger)
 	}
-}
-
-func startACPAgent(ctx context.Context, opts serverOptions) (*runningAgent, error) {
-	result, err := httpapi.SetupACP(ctx, httpapi.SetupACPConfig{
-		Program:     opts.agent,
-		ProgramArgs: opts.agentArgs,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to setup ACP: %w", err)
-	}
-	return &runningAgent{io: result.AgentIO, acp: result}, nil
 }
 
 // startNativeAgent prepares the adapter factory; the server starts the
@@ -156,13 +142,6 @@ func (a *runningAgent) waitForExit(ctx context.Context, srv *httpapi.Server) (bo
 				return true, fmt.Errorf("failed to wait for process: %w", err)
 			}
 		}
-	case a.acp != nil:
-		// The cleanup goroutine ends once Wait returned.
-		defer close(a.acp.Done)
-		if err := a.acp.Wait(); err != nil {
-			return true, fmt.Errorf("ACP process exited: %w", err)
-		}
-		return true, nil
 	default:
 		exited := srv.NativeExited()
 		if exited == nil {
@@ -180,8 +159,7 @@ func (a *runningAgent) waitForExit(ctx context.Context, srv *httpapi.Server) (bo
 	}
 }
 
-// close stops a PTY agent. The server stops a native agent, and an ACP
-// agent ends with runServer's ctx.
+// close stops a PTY agent. The server stops a native agent.
 func (a *runningAgent) close(logger *slog.Logger) {
 	if a.process == nil {
 		return

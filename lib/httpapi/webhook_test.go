@@ -101,7 +101,7 @@ func TestWebhookSend(t *testing.T) {
 		WebhookConfig{URL: server.URL},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeClaude,
-		TransportACP,
+		TransportPTY,
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestWebhookSend(t *testing.T) {
 			Status:         AgentStatusStable,
 			PreviousStatus: AgentStatusRunning,
 			AgentType:      mf.AgentTypeClaude,
-			Transport:      TransportACP,
+			Transport:      TransportPTY,
 		},
 	}
 	body, err := json.Marshal(event)

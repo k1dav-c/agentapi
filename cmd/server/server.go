@@ -193,10 +193,6 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 			AgentPID:        agent.pid(),
 			RestartAgent:    agent.restart(),
 		}
-	case httpapi.TransportACP:
-		if agent.acp != nil {
-			config.ACP.AgentIO = agent.acp.AgentIO
-		}
 	case httpapi.TransportNative:
 		config.Native = httpapi.NativeConfig{
 			Factory:      agent.factory,
@@ -496,9 +492,9 @@ func CreateServerCmd() *cobra.Command {
 		{FlagLoadState, "", false, "Deprecated: with --load-state=false the state file isn't imported", "bool"},
 		{FlagSaveState, "", false, "Deprecated and without effect: the state database keeps every change", "bool"},
 		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts", "string"},
-		{FlagExperimentalACP, "", false, "Use the experimental ACP transport (same as --transport acp)", "bool"},
-		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) when AgentAPI restarts; with the native transport the agent also resumes its session, with PTY it starts anew below the conversation. Not with ACP", "string"},
-		{FlagTransport, "", "native", "How to drive the agent: native (its own structured protocol; claude, codex and pi), pty (its terminal UI) or acp (same as --experimental-acp). Without it, claude, codex and pi use native, other agents and --state-file pty", "string"},
+		{FlagExperimentalACP, "", false, "Removed: the ACP transport is no longer available", "bool"},
+		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) when AgentAPI restarts; with the native transport the agent also resumes its session, with PTY it starts anew below the conversation", "string"},
+		{FlagTransport, "", "native", "How to drive the agent: native (its own structured protocol; claude, codex and pi) or pty (its terminal UI). Without it, claude, codex and pi use native, other agents and --state-file pty", "string"},
 		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal. Native transport only, where the agent has no terminal of its own", "bool"},
 		{FlagAutoContinue, "", false, "When a usage limit stops the agent's turn, continue it once the limit resets, if the agent says when. Native transport only", "bool"},
 		{FlagPrices, "", "", "JSON file of model prices per million tokens, which add to or replace the built-in ones for the sessions' API-equivalent cost (GET /sessions, GET /cost)", "string"},
@@ -545,6 +541,12 @@ func CreateServerCmd() *cobra.Command {
 	// --api-token without a value auto-generates a token; --api-token=VALUE
 	// uses the given value; omitting the flag entirely disables authentication.
 	serverCmd.Flags().Lookup(FlagAPIToken).NoOptDefVal = "generate"
+
+	// --experimental-acp says that ACP was removed rather than that the
+	// flag is unknown.
+	if err := serverCmd.Flags().MarkHidden(FlagExperimentalACP); err != nil {
+		panic(fmt.Sprintf("failed to mark flag %s as hidden: %v", FlagExperimentalACP, err))
+	}
 
 	serverCmd.Flags().Bool(FlagExit, false, "Exit immediately after parsing arguments")
 	if err := serverCmd.Flags().MarkHidden(FlagExit); err != nil {

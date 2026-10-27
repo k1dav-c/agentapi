@@ -2,7 +2,7 @@
 
 [English](architecture.md) | 繁體中文
 
-每個 AgentAPI 行程透過三種 transport 之一執行一個 coding agent，並提供 HTTP API、事件串流
+每個 AgentAPI 行程透過兩種 transport 之一執行一個 coding agent，並提供 HTTP API、事件串流
 與內建聊天介面。本指南說明這個 Go 執行檔的實作架構；功能與用法見 [README](../README.zh-TW.md)。
 
 ## 目錄
@@ -13,7 +13,6 @@
 - [HTTP 伺服器](#http-伺服器)
 - [對話與 transport](#對話與-transport)
   - [PTY](#pty)
-  - [ACP](#acp)
   - [Native](#native)
 - [事件與對話狀態](#事件與對話狀態)
 - [訊息佇列](#訊息佇列)
@@ -42,13 +41,11 @@ flowchart TB
     shell["Shell 終端機<br/>lib/shellterm"]
     conv{{"conv.Conversation"}}
     pty["PTY<br/>lib/screentracker"]
-    acp["ACP<br/>x/acpio"]
     native["Native<br/>lib/native"]
     jsonl["工作階段紀錄監看器<br/>lib/jsonlwatcher"]
     sessions["先前的工作階段、sub agent、花費<br/>lib/sessions"]
   end
   tui["PTY 中的 agent 終端機介面<br/>lib/termexec"]
-  acpagent["Agent 的 ACP 伺服器"]
   proto["claude -p, codex app-server,<br/>pi --mode rpc"]
   chat -- "HTTP、SSE" --> http
   tools -- "HTTP、SSE" --> http
@@ -58,11 +55,9 @@ flowchart TB
   http <-- "狀態、事件" --> emitter
   emitter --> db
   conv --> pty --> tui
-  conv --> acp --> acpagent
   conv --> native --> proto
   tui -. "工作階段紀錄" .-> jsonl
   pty -. "更新" .-> emitter
-  acp -. "更新" .-> emitter
   native -. "更新" .-> emitter
   jsonl -. "更新" .-> emitter
   http --> sessions
@@ -109,7 +104,6 @@ flowchart TB
 | `lib/agenthome/` | 各 agent 保存狀態的目錄（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`PI_CODING_AGENT_DIR`） |
 | `lib/handoff/` | 人工回覆 API 的型別 |
 | `lib/logctx/`、`lib/util/` | 透過 context 傳遞的 logger 與共用輔助函式 |
-| `x/acpio/` | 實驗性的 ACP transport |
 | `internal/version/` | 版本號，建置時寫入 |
 | `chat/` | 聊天介面（Next.js） |
 | `e2e/` | 以腳本化 echo agent 進行的端對端測試 |
@@ -125,7 +119,6 @@ flowchart TB
    `native-demo`）使用 native（除非設定了已棄用的 `--state-file`），其他 agent 使用 PTY。
 2. Transport 啟動 agent：
    - PTY：`termexec` 在 `--term-width` × `--term-height` 格的虛擬終端機中執行指令。
-   - ACP：`httpapi.SetupACP` 啟動指令，再由 `acpio` 透過它的 stdio 開啟 ACP 工作階段。
    - Native：`nativeFactory` 依 agent 類型建立 `native.Factory`（Claude Code、Codex、Pi 或
      `native-demo`）。每個 adapter 會先檢查 agent 的參數，拒絕和它的協定衝突的參數。
 3. 使用 `--state-db`（或 `--state-file` 旁的資料庫）時，`statedb.Open` 會開啟檔案、取得它的獨占鎖，
@@ -161,7 +154,7 @@ flowchart TB
 | `tasks.go` | emitter 從對話推導出的任務（`taskTracker`）、`task_update` 與 `GET /tasks` |
 | `summary.go`、`spend.go`、`registry.go` | 給監看多個 AgentAPI 的用戶端的摘要（`attention`、標題、最新任務、`unread`、`spend`）、`summary_update`、`GET /summary` 與 `POST /tasks/seen`；每分鐘計算的花費；伺服器的登記檔（`instanceRegistry`） |
 | `backend.go`、`backend_pty.go`、`backend_native.go` | 依 transport 而不同的部分：派送佇列與每次檢查要做的事（`beforeQueue`：排定的繼續、Codex 的更新提示）、送出訊息、重新啟動（`beginRestart`、`beginReload`）、人工回覆協定（`handoffOffer`、`answerHandoff`） |
-| `setup.go` | 啟動 PTY 或 ACP agent 的行程 |
+| `setup.go` | 啟動 PTY agent 的行程 |
 | `native.go` | 請求、設定、中斷、壓縮、重試登入；native observer |
 | `limit.go`、`sessions.go`、`subagents.go` | 因用量限制停下的回合（`/limit`）；agent 先前的工作階段和它們的花費（`/sessions`、`/cost`）；它的 sub agent（`/subagents`） |
 | `terminal.go`、`files.go`、`file_preview.go`、`files_find.go` | Shell 終端機（`terminalAPI`），以及檔案檢視器與搜尋 agent 用 repo 相對路徑提到的檔案（`fileAPI`） |
@@ -181,7 +174,7 @@ huma 以外的 chi 路由提供聊天介面（`/chat/*`，`/` 會重新導向到
 `terminalAPI` 持有 shell，`uploadAPI` 持有上傳儲存，`authAPI` 持有 token 檢查，
 `webhookAPI` 持有傳送器與狀態資料庫。
 
-依 transport 而異的操作由 `agentBackend` 處理：`ptyBackend` 驅動終端機或 ACP 對話，
+依 transport 而異的操作由 `agentBackend` 處理：`ptyBackend` 驅動終端機對話，
 `nativeBackend` 驅動 native 對話。
 
 ## 對話與 transport
@@ -237,13 +230,6 @@ sequenceDiagram
 - 終端機對話框（Claude Code 的計畫核准與權限提示、Codex 的核准、Pi 的信任提示）從畫面辨識，
   回報為 `terminal_prompt`。`handoff.go` 會把回答轉成對話框需要的按鍵，
   `dialog_reply.go` 則會打開對話框的文字輸入欄，讓聊天訊息可以作為回答。
-
-### ACP
-
-`x/acpio` 透過 agent 的 stdio 使用 Agent Client Protocol。每則訊息轉為一個 prompt，內容為
-訊息文字。回合開始後 `POST /message` 就會回傳；回合進行中送出的訊息排入佇列，prompt 失敗時以
-`agent_error` 回報。訊息片段組成 agent 的回覆，工具呼叫以文字行附加在回覆中，權限請求則自動
-核准。此 transport 仍屬實驗性功能。
 
 ### Native
 
@@ -412,7 +398,7 @@ native 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之
 ## 持久保存
 
 `lib/statedb` 使用純 Go 的 `modernc.org/sqlite`，把對話保存在 SQLite，支援 `CGO_ENABLED=0`
-建置。native 與 PTY transport 的 emitter 會交付每次變更；ACP 不使用持久保存。
+建置。兩種 transport 的 emitter 都會交付每次變更。
 
 - 資料表有 `messages`、`rich_messages`、`session_events`、`requests`、`queue`、`tasks`（每個
   任務以伺服器編碼後的形式、依開始它的訊息 ID 保存），以及
@@ -447,7 +433,6 @@ native 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之
 - `DELETE /messages` 會清除對話、請求和佇列並重新啟動 agent；新的 agent 啟動前，AgentAPI 會為
   Codex 和 Pi 執行 `codex update` 或 `pi update --self`。native agent 關閉後，由 `Restart`
   開始新的工作階段；PTY agent 則會在可替換的終端機中取得新的行程，以及新的工作階段紀錄監看器。
-  使用 ACP 時這個請求會以 400 失敗，因為 agent 無法重新啟動。
 - 替換 native agent（重新啟動、重新載入、開啟另一個工作階段）分成兩步。`BeginRestart`、
   `BeginReload` 和 `BeginSwitch` 在 `s.mu` 底下讓舊 agent 退役：之後忽略它的事件；有回合在
   執行或正在壓縮 context 時，`BeginSwitch` 會以 `ErrTurnActive` 拒絕，而且不改動任何東西。
@@ -501,8 +486,7 @@ agent 啟動時才讀取設定，因此變更需要重新啟動；native agent �
 
 - 系統沒有獨立的使用者帳號或角色。通過 token 驗證（若已啟用）及主機、來源檢查的用戶端，
   即可使用 agent 的能力：
-  native agent 以 bypass 權限模式啟動、ACP transport 會核准所有權限請求、shell 終端機可以
-  執行指令。
+  native agent 以 bypass 權限模式啟動，shell 終端機可以執行指令。
 - `--api-token`：以固定時間比對。瀏覽器透過 `POST /auth/session` 登入，它會設定一個
   HttpOnly、SameSite=Strict 的 cookie，裡面存的是 token 的 HMAC 而不是 token 本身，所以更換
   token 會讓所有瀏覽器登出。靜態的聊天介面檔案和 `/auth/session` 會略過 token 檢查；登入時

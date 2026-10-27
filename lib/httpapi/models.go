@@ -34,7 +34,6 @@ type Transport = instanceapi.Transport
 
 const (
 	TransportPTY    = instanceapi.TransportPTY
-	TransportACP    = instanceapi.TransportACP
 	TransportNative = instanceapi.TransportNative
 )
 

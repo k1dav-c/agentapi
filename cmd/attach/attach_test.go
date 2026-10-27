@@ -46,7 +46,7 @@ func TestClientSendsTheToken(t *testing.T) {
 func TestOnlyATerminalCanBeAttachedTo(t *testing.T) {
 	t.Parallel()
 	assert.NoError(t, errNoTerminal(httpapi.TransportPTY))
-	assert.ErrorContains(t, errNoTerminal(httpapi.TransportACP), "ACP")
+	assert.ErrorContains(t, errNoTerminal("acp"), "acp transport")
 	assert.ErrorContains(t, errNoTerminal(httpapi.TransportNative), "native transport")
 
 	// runAttach refuses before it takes over the terminal.

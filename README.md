@@ -66,8 +66,7 @@ has the complete commit history.
 - Control 13 coding agents through their terminal UI with the
   [PTY transport](#pty-transport), which turns the screen into messages.
 - Drive Claude Code, Codex and Pi through their own protocols with the
-  [native transport](#native-transport), which they use by default; agents with
-  an ACP server can use the experimental ACP transport (see
+  [native transport](#native-transport), which they use by default (see
   [Transports](#transports)).
 - Read structured activity (thinking, tool calls and their results, token
   usage) from `GET /rich-messages` and `GET /timeline`.
@@ -227,8 +226,6 @@ Full paths such as `-- /usr/local/bin/claude` need an explicit type; unrecognize
   and from its protocol on the native transport.
 - **MCP management**: the Explorer's MCP tab and the `/mcp` endpoints (see
   [MCP management](#mcp-management)).
-- Agents with an ACP server, such as Kimi Code (`kimi acp`), can also use the
-  experimental ACP transport.
 
 > [!NOTE]
 > AgentAPI detects the agent type from the agent command only when the command is a type name, such as `claude`, `codex`, `kimi` or `pi`. When you run the agent through a full path or a wrapper script, specify the type explicitly (e.g., `agentapi server --type=claude -- /usr/local/bin/claude`), or message formatting may break.
@@ -239,26 +236,29 @@ Full paths such as `-- /usr/local/bin/claude` need an explicit type; unrecognize
 native transport, and every other agent the PTY transport, as does a server started with the
 deprecated `--state-file`:
 
-| | PTY | Native | ACP (experimental) |
-| --- | --- | --- | --- |
-| Flag | `--transport pty` | `--transport native` | `--transport acp` or `--experimental-acp` |
-| Default for | every other agent, and with `--state-file` | Claude Code, Codex, Pi | |
-| Agents | all of the above | Claude Code, Codex, Pi | agents with an ACP server |
-| How | runs the agent's terminal UI in a terminal emulator and reads its screen | speaks the agent's own protocol: `claude -p` stream-json, `codex app-server`, `pi --mode rpc` | speaks the Agent Client Protocol over the agent's stdio |
-| Tool calls and thinking | from the session log (Claude Code, Codex, Pi) | streamed from the protocol | tool calls as `[Tool: …]` lines in the reply; no thinking |
-| Approvals, questions, plans | terminal dialogs, answered from decision cards or TTY mode | structured [requests](#requests-approvals-questions-and-plans) | approved automatically |
-| Steer and interrupt a turn | | ✓ | |
-| Settings, usage, compaction | | ✓ | |
-| Survives an AgentAPI restart | `--state-db`: the conversation; the agent starts anew | `--state-db`: the conversation and the agent's session | |
-| Terminal in the chat | TTY mode: the agent's own terminal | a shell in the working directory | |
+| | PTY | Native |
+| --- | --- | --- |
+| Flag | `--transport pty` | `--transport native` |
+| Default for | every other agent, and with `--state-file` | Claude Code, Codex, Pi |
+| Agents | all of the above | Claude Code, Codex, Pi |
+| How | runs the agent's terminal UI in a terminal emulator and reads its screen | speaks the agent's own protocol: `claude -p` stream-json, `codex app-server`, `pi --mode rpc` |
+| Tool calls and thinking | from the session log (Claude Code, Codex, Pi) | streamed from the protocol |
+| Approvals, questions, plans | terminal dialogs, answered from decision cards or TTY mode | structured [requests](#requests-approvals-questions-and-plans) |
+| Steer and interrupt a turn | | ✓ |
+| Settings, usage, compaction | | ✓ |
+| Survives an AgentAPI restart | `--state-db`: the conversation; the agent starts anew | `--state-db`: the conversation and the agent's session |
+| Terminal in the chat | TTY mode: the agent's own terminal | a shell in the working directory |
 
 ```bash
 agentapi server -- claude                    # native
 agentapi server --transport pty -- claude    # Claude Code's terminal UI
 agentapi server --state-db ~/.agentapi/myproject.db -- codex
 agentapi server -- aider                     # PTY
-agentapi server --type=kimi --experimental-acp -- kimi acp
 ```
+
+The experimental ACP transport (`--transport acp`, `--experimental-acp`) was removed: it approved
+every permission request and couldn't restart its agent or keep its conversation. Those flags now
+stop AgentAPI with an error; run such an agent with the PTY transport instead.
 
 `--state-db <file>` (native and PTY transports) keeps the conversation in a SQLite file, and a native
 agent resumes its session when AgentAPI starts again with the same file; see
@@ -410,7 +410,7 @@ the running turn or interrupt it. The toolbar controls permission mode, model an
 and shows context usage and rate limits. Slash commands include `/model` and `/compact`.
 
 The terminal button opens a shell in the agent's working directory. TTY mode requires the agent's
-own terminal, so screen views stay hidden for native and ACP sessions. See
+own terminal, so screen views stay hidden for native sessions. See
 [Native transport](#native-transport).
 
 ### Alerts, connection recovery and caching
@@ -455,8 +455,6 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 - A server started with the deprecated `--state-file` and no `--transport`
   keeps the PTY transport, so command lines written for it still start; see
   [Persistent sessions](#persistent-sessions).
-- ACP is a separate transport. `--transport acp` is equivalent to
-  `--experimental-acp` and cannot be enabled together with native mode.
 - For UI development, `--type custom -- native-demo` runs a simulated agent with
   the native transport; see the [development guide](chat/README.md). With
   `--type claude`, `codex` or `pi` instead, the demo poses as that agent, and
@@ -857,7 +855,6 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
 - The time a client last showed the conversation (`POST /tasks/seen`) is
   kept, so a task that ended unseen is still [unread](#watching-many-instances)
   after a restart. A database written before 1.2 treats its tasks as seen.
-- The ACP transport doesn't keep its conversation.
 - `--state-file <file>`, the PTY transport's former persistence, is
   deprecated. The conversation it holds is imported the first time into a
   state database next to it (the same name with `.db`, or `--state-db`), which
@@ -1144,9 +1141,8 @@ AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
 ### Limitations
 
 - The agent has no terminal of its own. The chat hides TTY mode, the terminal
-  prompt card, the live screen tail and "Terminal output" (for ACP too, where
-  Stop and the answer buttons on tool calls aren't offered either). `raw`
-  messages (keys for the terminal) are refused with 400. The agent's slash
+  prompt card, the live screen tail and "Terminal output". `raw` messages
+  (keys for the terminal) are refused with 400. The agent's slash
   commands that need its interactive UI don't work, apart from the ones the
   chat runs itself. The [terminal](#terminal) is a separate shell.
 - Restart (Explorer → Restart or `DELETE /messages`) replaces the agent with a
@@ -1243,12 +1239,6 @@ Kimi can use the regular interactive PTY transport:
 agentapi server -- kimi
 ```
 
-It can also use Kimi's native ACP server after completing `/login` once:
-
-```bash
-agentapi server --type=kimi --experimental-acp -- kimi acp
-```
-
 ### Pi coding agent
 
 With `--transport pty`, the `pi` agent type runs the [Pi coding agent](https://pi.dev/) (`npm
@@ -1296,8 +1286,7 @@ These endpoints work with every transport, except where noted; the
   but leaves the queue with an error.
 - `DELETE /messages` clears the conversation (messages, rich messages,
   requests, tasks, timeline, errors and the queue) and restarts the agent
-  (with the native transport, in a new session). With the ACP transport,
-  which can't restart its agent, it returns 400. While the agent restarts,
+  (with the native transport, in a new session). While the agent restarts,
   messages wait in the queue; raw keys, another restart and opening a
   session get 409, and so does a restart while AgentAPI stops.
 - `GET /status` returns the backward-compatible `stable`/`running` status,
@@ -1793,8 +1782,7 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
   starts in `default`). Claude Code gets `--allow-dangerously-skip-permissions`
   (except as root outside a sandbox), so a client can switch any session to
   bypass. Codex's default overrides the policies in `~/.codex/config.toml`
-  unless the command line picks one, and the ACP transport approves every
-  permission request.
+  unless the command line picks one.
 - Run commands in the [terminal](#terminal) (native transport, on by default;
   `--terminal=false` turns it off).
 - Read files in the agent's working directory with the file viewer endpoints;
@@ -1885,13 +1873,6 @@ Kimi Code can run through its interactive terminal UI:
 agentapi server -- kimi
 ```
 
-Kimi Code also provides a native ACP server. After logging in once with `kimi` and `/login`, you
-can use AgentAPI's ACP transport:
-
-```bash
-agentapi server --type=kimi --experimental-acp -- kimi acp
-```
-
 #### Flags
 
 Flags can also be set with environment variables: `AGENTAPI_` and the flag's name in capitals, with
@@ -1916,8 +1897,7 @@ public-url: http://dev-1.vpn:{port}
 | `-t`, `--type` | from the agent command | Agent type; see [Supported agents](#supported-agents) |
 | `-p`, `--port` | `3284` | Port to listen on |
 | `--bind` | all interfaces | Address to listen on; see [Bind address](#bind-address) |
-| `--transport` | `native` for Claude Code, Codex and Pi, else `pty` | `native`, `pty` or `acp`; see [Transports](#transports) |
-| `--experimental-acp` | `false` | The same as `--transport acp` |
+| `--transport` | `native` for Claude Code, Codex and Pi, else `pty` | `native` or `pty`; see [Transports](#transports) |
 | `--state-db` | | SQLite file that keeps the conversation (native and PTY) and resumes a native agent's session; see [Persistent sessions](#persistent-sessions) |
 | `--terminal` | `true` | Shell in the agent's working directory for the chat (native); see [Terminal](#terminal) |
 | `--auto-continue` | `false` | Continue a turn stopped by a usage limit once the limit resets (native); see [Usage limits](#usage-limits) |
@@ -2004,8 +1984,8 @@ update now applies the file when it restarts.
 
 ### `agentapi attach`
 
-Attach to a running agent's terminal session (PTY transport; ACP and native agents have no terminal
-to attach to).
+Attach to a running agent's terminal session (PTY transport; native agents have no terminal to
+attach to).
 
 ```bash
 agentapi attach --url localhost:3284
@@ -2026,7 +2006,7 @@ default. Endpoints marked *native* need the native transport.
 | --- | --- |
 | `GET /messages` | All messages of the conversation |
 | `POST /message` | Send a message, or queue it while the agent is busy; `dispatch_mode` is `queue` (default), `steer` or `interrupt` (*native*) |
-| `DELETE /messages` | Clear the conversation and the queue, and restart the agent (*native*: in a new session; 400 with ACP) |
+| `DELETE /messages` | Clear the conversation and the queue, and restart the agent (*native*: in a new session) |
 | `GET /rich-messages` | The structured conversation: thinking, tool calls with results, usage |
 | `GET /timeline` | Normalized session events, for export or another UI; `?subagents=true` adds the subagents' (*native*) |
 | `GET /status` | Status, lifecycle, server ID, turn, epoch, session name, version, open dialog; *native*: the agent's session ID, capabilities, pending requests, settings, usage, usage limit stop, terminal, login |
@@ -2089,7 +2069,7 @@ default. Endpoints marked *native* need the native transport.
 | `GET /handoff`, `POST /handoff/reply` | The [human-reply API](#human-reply-api): what the agent waits on, and an answer to it |
 | `GET /webhook`, `PUT /webhook` | Read or change the [webhook](#webhooks): its URL, events, secret, heartbeat and instance |
 | `POST /webhook/test` | Send a `webhook.test` event to the webhook URL once, and return the receiver's answer |
-| `GET /mcp`, `PUT /mcp` | The MCP servers and the managed config file; PUT replaces them, `?restart=true` restarts the agent (*native*: on its session if it can resume it; 400 with ACP) |
+| `GET /mcp`, `PUT /mcp` | The MCP servers and the managed config file; PUT replaces them, `?restart=true` restarts the agent (*native*: on its session if it can resume it) |
 | `POST /mcp/check` | Check remote HTTP servers and resolve stdio executables |
 | `POST /mcp/servers`, `PATCH /mcp/servers/{name}`, `DELETE /mcp/servers/{name}` | Create, update or remove one MCP server |
 | `GET /mcp/profiles` | Export the saved MCP profiles |
@@ -2111,7 +2091,7 @@ from `/internal/screen`, which isn't part of the public API.
 AgentAPI is a single Go binary: an HTTP server (chi, with huma generating the OpenAPI schema) that
 runs one agent process and serves the chat UI, a Next.js app embedded in the binary. Every transport
 implements the same conversation interface and reports to the same event emitter, so the HTTP API,
-the event stream, the queue and the chat work the same over all three. See
+the event stream, the queue and the chat work the same over both. See
 [docs/architecture.md](docs/architecture.md) for the packages, the data flow of each transport, the
 event stream, persistence and the security model.
 
@@ -2133,7 +2113,7 @@ without a real one.
 ## Runtime reliability
 
 The fork fixes wide-character cursor tracking, PTY lifecycle leaks, concurrent event delivery,
-message tracking races, ACP shutdown and TUI redraw artifacts. It also fixes JSONL watcher flushing,
+message tracking races and TUI redraw artifacts. It also fixes JSONL watcher flushing,
 content-block merging during Claude delta streaming, and switching the watched file when Claude
 Code parks a session in a new JSONL file. These fixes address long sessions, process replacement
 and temporary browser or network interruptions.

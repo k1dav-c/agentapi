@@ -182,13 +182,13 @@ func (c *client) transport(ctx context.Context) (httpapi.Transport, error) {
 // nil.
 func errNoTerminal(transport httpapi.Transport) error {
 	switch transport {
-	case httpapi.TransportACP:
-		return errors.New("attach is not yet supported in ACP mode")
 	case httpapi.TransportNative:
 		return errors.New("the native transport runs the agent without a terminal, so there is none to attach to; use the chat, whose Terminal button opens a shell")
-	case httpapi.TransportPTY:
+	case httpapi.TransportPTY, "":
+		return nil
 	}
-	return nil
+	// An older AgentAPI's ACP transport, for one.
+	return fmt.Errorf("the %s transport runs the agent without a terminal, so there is none to attach to", transport)
 }
 
 func runAttach(c *client) error {

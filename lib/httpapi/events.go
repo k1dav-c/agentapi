@@ -87,7 +87,7 @@ type StatusChangeBody struct {
 	// AgentSessionID is the agent's own session (native transport).
 	AgentSessionID string       `json:"agent_session_id,omitempty" doc:"The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it."`
 	AgentType      mf.AgentType `json:"agent_type" doc:"Type of the agent being used by the server."`
-	Transport      Transport    `json:"transport" doc:"Backend transport being used ('pty', 'acp' or 'native')."`
+	Transport      Transport    `json:"transport" doc:"Backend transport being used ('pty' or 'native')."`
 	Version        string       `json:"agentapi_version" doc:"Version of the AgentAPI server."`
 	// TerminalPrompt is the bottom of the screen while the agent shows an
 	// interactive prompt (selection list, confirmation) instead of its input

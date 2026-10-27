@@ -54,8 +54,7 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 - 用 [PTY transport](#pty-transport) 透過終端機介面控制 13 種 coding agent，把畫面轉成
   一則一則的訊息。
 - 用 [native transport](#native-transport) 透過 Claude Code、Codex 和 Pi 自己的協定驅動
-  它們，這也是它們的預設值；提供 ACP 伺服器的 agent 可以使用實驗性的 ACP transport
-  （見 [Transport](#transport)）。
+  這三個 agent，它們預設就用這個 transport（見 [Transport](#transport)）。
 - 從 `GET /rich-messages` 和 `GET /timeline` 讀取結構化的活動：思考內容、工具呼叫與結果、
   token 用量。
 - agent 工作中時送出的訊息會在可以編輯、重新排序的[佇列](#訊息佇列)中等待；使用 native
@@ -191,7 +190,6 @@ agent 類型決定畫面的整理方式與可用功能。可用 `--type` 指定�
   紀錄檔讀取（見 [Claude、Codex 與 Pi 的結構化活動](#claudecodex-與-pi-的結構化活動)），
   使用 native transport 時直接來自它的協定。
 - **MCP 管理**：Explorer 的 MCP 分頁和 `/mcp` 端點（見 [MCP 管理](#mcp-管理)）。
-- 提供 ACP 伺服器的 agent（例如 Kimi Code 的 `kimi acp`）也可以使用實驗性的 ACP transport。
 
 > [!NOTE]
 > 只有當 agent 指令剛好是類型名稱（例如 `claude`、`codex`、`kimi` 或 `pi`）時，AgentAPI 才會由指令判斷 agent 類型。透過完整路徑或包裝腳本執行 agent 時，請明確指定類型（例如：`agentapi server --type=claude -- /usr/local/bin/claude`），否則訊息格式可能會出錯。
@@ -202,26 +200,29 @@ agent 類型決定畫面的整理方式與可用功能。可用 `--type` 指定�
 transport，其他 agent 使用 PTY transport；以已棄用的 `--state-file` 啟動的伺服器也使用 PTY
 transport：
 
-| | PTY | Native | ACP（實驗性） |
-| --- | --- | --- | --- |
-| 旗標 | `--transport pty` | `--transport native` | `--transport acp` 或 `--experimental-acp` |
-| 預設用於 | 其他所有 agent，以及使用 `--state-file` 時 | Claude Code、Codex、Pi | |
-| Agent | 上表所有 agent | Claude Code、Codex、Pi | 提供 ACP 伺服器的 agent |
-| 方式 | 在終端機模擬器中執行 agent 的終端機介面，並讀取它的畫面 | 使用 agent 自己的協定：`claude -p` 的 stream-json、`codex app-server`、`pi --mode rpc` | 透過 agent 的 stdio 使用 Agent Client Protocol |
-| 工具呼叫與思考 | 來自工作階段紀錄檔（Claude Code、Codex、Pi） | 從協定即時串流 | 工具呼叫以回覆中的 `[Tool: …]` 文字行呈現；不顯示思考內容 |
-| 核准、提問、計畫 | 終端機對話框，從決策卡片或 TTY mode 回答 | 結構化的[請求](#請求核准提問與計畫) | 自動核准 |
-| 對回合 steer 和 interrupt | | ✓ | |
-| 設定、用量、壓縮 | | ✓ | |
-| AgentAPI 重新啟動後保留 | `--state-db`：對話；agent 重新開始 | `--state-db`：對話和 agent 的工作階段 | |
-| 聊天介面中的終端機 | TTY mode：agent 自己的終端機 | 工作目錄中的 shell | |
+| | PTY | Native |
+| --- | --- | --- |
+| 旗標 | `--transport pty` | `--transport native` |
+| 預設用於 | 其他所有 agent，以及使用 `--state-file` 時 | Claude Code、Codex、Pi |
+| Agent | 上表所有 agent | Claude Code、Codex、Pi |
+| 方式 | 在終端機模擬器中執行 agent 的終端機介面，並讀取它的畫面 | 使用 agent 自己的協定：`claude -p` 的 stream-json、`codex app-server`、`pi --mode rpc` |
+| 工具呼叫與思考 | 來自工作階段紀錄檔（Claude Code、Codex、Pi） | 從協定即時串流 |
+| 核准、提問、計畫 | 終端機對話框，從決策卡片或 TTY mode 回答 | 結構化的[請求](#請求核准提問與計畫) |
+| 對回合 steer 和 interrupt | | ✓ |
+| 設定、用量、壓縮 | | ✓ |
+| AgentAPI 重新啟動後保留 | `--state-db`：對話；agent 重新開始 | `--state-db`：對話和 agent 的工作階段 |
+| 聊天介面中的終端機 | TTY mode：agent 自己的終端機 | 工作目錄中的 shell |
 
 ```bash
 agentapi server -- claude                    # native
 agentapi server --transport pty -- claude    # Claude Code 的終端機介面
 agentapi server --state-db ~/.agentapi/myproject.db -- codex
 agentapi server -- aider                     # PTY
-agentapi server --type=kimi --experimental-acp -- kimi acp
 ```
+
+實驗性的 ACP transport（`--transport acp`、`--experimental-acp`）已移除：它會核准所有權限請求，
+也無法重新啟動 agent 或保存對話。現在使用這些旗標時，AgentAPI 會停止並顯示錯誤；這類 agent
+請改用 PTY transport 執行。
 
 `--state-db <檔案>`（native 與 PTY transport）會把對話保存在 SQLite 檔案裡，AgentAPI 用同一個
 檔案再次啟動時，native agent 會接續它的工作階段；見[持久保存的工作階段](#持久保存的工作階段)。
@@ -354,8 +355,8 @@ HTML、Markdown 和 SVG 檔案還有第三個分頁 Preview，圖片檔則直接
 60%。agent 工作中時，送出選單可以把訊息 steer 進目前回合，或中斷回合。工具列提供權限模式、
 模型和推理強度設定，並顯示 context 使用量與用量限制；輸入框也支援 `/model`、`/compact` 等斜線指令。
 
-終端機按鈕會開啟 agent 工作目錄中的 shell。TTY mode 需要 agent 自己的終端機，因此 native 與
-ACP 工作階段會隱藏畫面相關的檢視。詳見 [Native transport](#native-transport)。
+終端機按鈕會開啟 agent 工作目錄中的 shell。TTY mode 需要 agent 自己的終端機，因此 native
+工作階段會隱藏畫面相關的檢視。詳見 [Native transport](#native-transport)。
 
 ### 提醒、連線復原與快取
 
@@ -393,7 +394,6 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 
 - 支援 Claude Code、Codex 和 Pi。AgentAPI 依指令名稱選擇對應的 adapter；使用完整路徑或包裝腳本時，請用 `--type` 指定類型（沒有指定時，它們會被當成 `custom` agent，使用 PTY transport）。
 - 以已棄用的 `--state-file` 啟動、又沒有指定 `--transport` 的伺服器會維持使用 PTY transport，所以為它寫的命令列仍能啟動；見[持久保存的工作階段](#持久保存的工作階段)。
-- ACP 是另一種 transport。`--transport acp` 等同 `--experimental-acp`，不能與 native 模式一起啟用。
 - 開發聊天介面時，可用 `--type custom -- native-demo` 以 native transport 執行模擬 agent，詳見[開發指南](chat/README.md)。改用 `--type claude`、`codex` 或 `pi` 時，demo 會扮演那個 agent：AgentAPI 會替它讀取那個 agent 的紀錄，用於先前的工作階段和 sub agent。以 `--transport native` 指定其他 agent 類型時，會在啟動時被拒絕。
 
 **使用時會看到什麼**
@@ -719,7 +719,6 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
   webhook 參數啟動。
 - 用戶端上次顯示對話的時間（`POST /tasks/seen`）會保存下來，所以沒看過就結束的任務在重新啟動後
   仍是[未讀](#監看多個實例)。1.2 之前寫入的資料庫，任務會視為已讀。
-- ACP transport 不保存對話。
 - `--state-file <檔案>` 是 PTY transport 過去的保存方式，已棄用。它保存的對話會在第一次啟動時
   匯入旁邊的狀態資料庫（同名、副檔名改為 `.db`，或由 `--state-db` 指定），之後由資料庫保存對話；
   不會再寫入這個檔案。`--load-state=false` 會略過匯入，`--save-state` 已沒有作用。SIGUSR1 會
@@ -954,8 +953,7 @@ AgentAPI 會以 Pi 的 RPC 模式執行它（`pi --mode rpc`，經由 stdin 與 
 ### 限制
 
 - agent 沒有自己的終端機。聊天介面會隱藏 TTY mode、終端機提示卡片、即時畫面尾端和
-  「Terminal output」（ACP 也是，而且 ACP 也不提供 Stop 和工具呼叫上的回答按鈕）。`raw`
-  訊息（送給終端機的按鍵）會以 400 拒絕。需要 agent 互動式介面的斜線指令無法運作，聊天介面
+  「Terminal output」。`raw` 訊息（送給終端機的按鍵）會以 400 拒絕。需要 agent 互動式介面的斜線指令無法運作，聊天介面
   自己處理的指令除外。[終端機](#終端機)是另一個獨立的 shell。
 - 重新啟動（Explorer → Restart 或 `DELETE /messages`）會換成新的 agent 並開始新的工作階段，
   同時清除對話和佇列；尚未回覆的請求會變成 `not_resumable`。`--initial-prompt` 會再送給新的
@@ -1042,12 +1040,6 @@ Kimi 可以使用一般的互動式 PTY 傳輸方式：
 agentapi server -- kimi
 ```
 
-完成一次 `/login` 之後，也可以使用 Kimi 原生的 ACP 伺服器：
-
-```bash
-agentapi server --type=kimi --experimental-acp -- kimi acp
-```
-
 ### Pi coding agent
 
 使用 `--transport pty` 時，`pi` agent 類型會在互動式終端機介面中執行
@@ -1090,9 +1082,8 @@ AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新�
 - 已經送出、但沒有得到確認的訊息（呼叫逾時，或 AgentAPI 正在停止）可能已經送到 agent：它不會
   再送一次，而是以錯誤離開佇列。
 - `DELETE /messages` 清除對話（訊息、結構化訊息、請求、任務、時間軸、錯誤和佇列），並重新
-  啟動 agent（native transport 會開始新的工作階段）。ACP transport 無法重新啟動 agent，所以
-  會回傳 400。agent 重新啟動期間，訊息會在佇列中等待；原始按鍵、另一次重新啟動和開啟工作階段
-  會回傳 409，AgentAPI 停止期間的重新啟動也一樣。
+  啟動 agent（native transport 會開始新的工作階段）。agent 重新啟動期間，訊息會在佇列中等待；
+  原始按鍵、另一次重新啟動和開啟工作階段會回傳 409，AgentAPI 停止期間的重新啟動也一樣。
 - `GET /status` 回傳向下相容的 `stable`/`running` 狀態、詳細的生命週期（`starting`、
   `ready`、`running`、`restarting`、`exited` 或 `failed`）、transport、`server_id`（這次
   AgentAPI 執行的隨機識別碼，每次啟動都會不同）、`turn`（agent 開始工作的次數）、對話的
@@ -1532,7 +1523,7 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
   執行（此時以 `default` 啟動），native agent 預設以 bypass 權限模式啟動，工具直接執行、不詢問。
   Claude Code 會加上 `--allow-dangerously-skip-permissions`（在沙箱外以 root 執行時除外），
   所以用戶端可以把任何工作階段切換到 bypass。除非命令列指定了政策，Codex 的預設值會覆蓋
-  `~/.codex/config.toml` 裡的政策。ACP transport 則會核准所有權限請求。
+  `~/.codex/config.toml` 裡的政策。
 - 在[終端機](#終端機)裡執行指令（native transport，預設開啟；`--terminal=false` 可以關閉）。
 - 透過檔案檢視器的端點讀取 agent 工作目錄中的檔案；工作目錄以外的路徑（包括透過 symlink）
   會被拒絕，diff 也只會讀取 git 儲存庫。HTML 預覽的腳本在 sandbox 中執行，無法存取聊天介面或
@@ -1614,13 +1605,6 @@ Kimi Code 可以透過它的互動式終端機介面執行：
 agentapi server -- kimi
 ```
 
-Kimi Code 也提供原生的 ACP 伺服器。用 `kimi` 和 `/login` 登入一次之後，就可以使用
-AgentAPI 的 ACP 傳輸方式：
-
-```bash
-agentapi server --type=kimi --experimental-acp -- kimi acp
-```
-
 #### 旗標
 
 每個旗標都可以改用環境變數設定：`AGENTAPI_` 加上大寫的旗標名稱，並把 `-` 換成 `_`
@@ -1643,8 +1627,7 @@ public-url: http://dev-1.vpn:{port}
 | `-t`, `--type` | 由 agent 指令判斷 | agent 類型；見[支援的 agent](#支援的-agent) |
 | `-p`, `--port` | `3284` | 監聽的連接埠 |
 | `--bind` | 所有網路介面 | 監聽的位址；見[監聽位址](#監聽位址) |
-| `--transport` | Claude Code、Codex 和 Pi 為 `native`，其他為 `pty` | `native`、`pty` 或 `acp`；見 [Transport](#transport) |
-| `--experimental-acp` | `false` | 等同 `--transport acp` |
+| `--transport` | Claude Code、Codex 和 Pi 為 `native`，其他為 `pty` | `native` 或 `pty`；見 [Transport](#transport) |
 | `--state-db` | | 保存對話（native 與 PTY）、並接續 native agent 工作階段的 SQLite 檔案；見[持久保存的工作階段](#持久保存的工作階段) |
 | `--terminal` | `true` | 給聊天介面使用、位於 agent 工作目錄的 shell（native）；見[終端機](#終端機) |
 | `--auto-continue` | `false` | 回合因用量限制停下時，在限制重置後繼續（native）；見[達到用量限制時](#達到用量限制時) |
@@ -1728,8 +1711,7 @@ agentapi hub leave
 
 ### `agentapi attach`
 
-連接到執行中 agent 的終端機工作階段（PTY transport；ACP 和 native 的 agent 沒有可連接的
-終端機）。
+連接到執行中 agent 的終端機工作階段（PTY transport；native agent 沒有可連接的終端機）。
 
 ```bash
 agentapi attach --url localhost:3284
@@ -1750,7 +1732,7 @@ agentapi attach --url localhost:3284
 | --- | --- |
 | `GET /messages` | 對話中的所有訊息 |
 | `POST /message` | 傳送訊息，agent 忙碌時排入佇列；`dispatch_mode` 為 `queue`（預設）、`steer` 或 `interrupt`（*native*） |
-| `DELETE /messages` | 清除對話和佇列，並重新啟動 agent（*native*：開始新的工作階段；ACP 會回傳 400） |
+| `DELETE /messages` | 清除對話和佇列，並重新啟動 agent（*native*：開始新的工作階段） |
 | `GET /rich-messages` | 結構化的對話：思考內容、工具呼叫與結果、用量 |
 | `GET /timeline` | 正規化的工作階段事件，可用於匯出或其他介面；`?subagents=true` 會加上 sub agent 的事件（*native*） |
 | `GET /status` | 狀態、生命週期、server ID、回合數、epoch、工作階段名稱、版本、開啟的對話框；*native*：agent 的工作階段 ID、能力、待處理請求、設定、用量、用量限制停止、終端機、登入 |
@@ -1813,7 +1795,7 @@ agentapi attach --url localhost:3284
 | `GET /handoff`、`POST /handoff/reply` | [人工回覆 API](#人工回覆-api)：agent 在等什麼，以及對它的回覆 |
 | `GET /webhook`、`PUT /webhook` | 讀取或修改 [webhook](#webhook)：網址、事件、secret、心跳和 instance |
 | `POST /webhook/test` | 對 webhook 網址送一次 `webhook.test` 事件，並回傳接收端的回應 |
-| `GET /mcp`、`PUT /mcp` | MCP 伺服器與受管理的設定檔；PUT 會整組取代，`?restart=true` 會重新啟動 agent（*native*：可以接續時接續原本的工作階段；ACP 會回傳 400） |
+| `GET /mcp`、`PUT /mcp` | MCP 伺服器與受管理的設定檔；PUT 會整組取代，`?restart=true` 會重新啟動 agent（*native*：可以接續時接續原本的工作階段） |
 | `POST /mcp/check` | 檢查遠端 HTTP 伺服器，並解析 stdio 執行檔 |
 | `POST /mcp/servers`、`PATCH /mcp/servers/{name}`、`DELETE /mcp/servers/{name}` | 新增、更新或移除單一 MCP 伺服器 |
 | `GET /mcp/profiles` | 匯出已儲存的 MCP 設定檔 |
@@ -1834,7 +1816,7 @@ agentapi attach --url localhost:3284
 
 AgentAPI 是單一的 Go 執行檔：一個 HTTP 伺服器（chi，並由 huma 產生 OpenAPI schema），
 負責執行一個 agent 行程，並提供嵌入在執行檔裡的聊天介面（Next.js）。每種 transport 都實作
-同一個對話介面，並回報給同一個事件發送器，所以 HTTP API、事件串流、佇列和聊天介面在三種
+同一個對話介面，並回報給同一個事件發送器，所以 HTTP API、事件串流、佇列和聊天介面在兩種
 transport 下的行為都一樣。套件、各 transport 的資料流、事件串流、持久保存與安全模型，請參閱
 [docs/architecture.zh-TW.md](docs/architecture.zh-TW.md)。
 
@@ -1855,8 +1837,7 @@ agent 就能開發介面。
 
 ## 執行穩定性
 
-此 fork 修正了寬字元游標追蹤、PTY 資源洩漏、並行事件傳送、訊息追蹤的競爭條件、ACP 關閉流程
-與 TUI 重繪殘影。另修正 JSONL 監看器的緩衝寫出（flush）、Claude delta 串流期間的內容區塊合併，
+此 fork 修正了寬字元游標追蹤、PTY 資源洩漏、並行事件傳送、訊息追蹤的競爭條件與 TUI 重繪殘影。另修正 JSONL 監看器的緩衝寫出（flush）、Claude delta 串流期間的內容區塊合併，
 以及 Claude Code 將工作階段轉存到新 JSONL 檔案後的監看切換。這些修正處理長時間工作階段、
 行程替換，以及瀏覽器或網路暫時中斷時的問題。
 

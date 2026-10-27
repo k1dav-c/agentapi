@@ -2,7 +2,7 @@
 
 English | [繁體中文](architecture.zh-TW.md)
 
-Each AgentAPI process runs one coding agent through one of three transports and exposes it through
+Each AgentAPI process runs one coding agent through one of two transports and exposes it through
 an HTTP API, an event stream and an embedded chat UI. This guide covers the implementation of the
 single Go binary; see the [README](../README.md) for features and usage.
 
@@ -14,7 +14,6 @@ single Go binary; see the [README](../README.md) for features and usage.
 - [The HTTP server](#the-http-server)
 - [Conversations and transports](#conversations-and-transports)
   - [PTY](#pty)
-  - [ACP](#acp)
   - [Native](#native)
 - [Events and the conversation state](#events-and-the-conversation-state)
 - [The message queue](#the-message-queue)
@@ -43,13 +42,11 @@ flowchart TB
     shell["Shell terminal<br/>lib/shellterm"]
     conv{{"conv.Conversation"}}
     pty["PTY<br/>lib/screentracker"]
-    acp["ACP<br/>x/acpio"]
     native["Native<br/>lib/native"]
     jsonl["Session-log watcher<br/>lib/jsonlwatcher"]
     sessions["Earlier sessions, subagents, costs<br/>lib/sessions"]
   end
   tui["Agent's terminal UI in a PTY<br/>lib/termexec"]
-  acpagent["Agent's ACP server"]
   proto["claude -p, codex app-server,<br/>pi --mode rpc"]
   chat -- "HTTP, SSE" --> http
   tools -- "HTTP, SSE" --> http
@@ -59,11 +56,9 @@ flowchart TB
   http <-- "state, events" --> emitter
   emitter --> db
   conv --> pty --> tui
-  conv --> acp --> acpagent
   conv --> native --> proto
   tui -. "session log" .-> jsonl
   pty -. "updates" .-> emitter
-  acp -. "updates" .-> emitter
   native -. "updates" .-> emitter
   jsonl -. "updates" .-> emitter
   http --> sessions
@@ -111,7 +106,6 @@ answers write keys directly to the agent's terminal.
 | `lib/agenthome/` | Where the agents keep their state (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`) |
 | `lib/handoff/` | Types of the human-reply API |
 | `lib/logctx/`, `lib/util/` | Context-based logging and shared helpers |
-| `x/acpio/` | The experimental ACP transport |
 | `internal/version/` | The version, stamped at build time |
 | `chat/` | The chat UI (Next.js) |
 | `e2e/` | End-to-end tests against a scripted echo agent |
@@ -130,8 +124,6 @@ answers write keys directly to the agent's terminal.
 2. The transport starts the agent:
    - PTY: `termexec` runs the command in a pseudo-terminal of `--term-width`
      by `--term-height` cells.
-   - ACP: `httpapi.SetupACP` starts the command, and `acpio` opens an ACP
-     session over its stdio.
    - Native: `nativeFactory` builds a `native.Factory` for the agent type
      (Claude Code, Codex, Pi or `native-demo`). Each adapter checks the
      agent's arguments first and refuses the ones that conflict with its
@@ -180,7 +172,7 @@ The handlers are grouped by file:
 | `tasks.go` | The tasks the emitter derives from the conversation (`taskTracker`), `task_update` and `GET /tasks` |
 | `summary.go`, `spend.go`, `registry.go` | The summary for clients that watch many AgentAPIs (`attention`, title, latest task, `unread`, `spend`), `summary_update`, `GET /summary` and `POST /tasks/seen`; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
 | `backend.go`, `backend_pty.go`, `backend_native.go` | What depends on the transport: dispatching the queue and the work each tick (`beforeQueue`: a scheduled continuation, Codex's update prompt), delivering a message, restarts (`beginRestart`, `beginReload`), the human-reply protocol (`handoffOffer`, `answerHandoff`) |
-| `setup.go` | Starting the process of a PTY or ACP agent |
+| `setup.go` | Starting the process of a PTY agent |
 | `native.go` | Requests, settings, interrupt, compaction, login retry; the native observer |
 | `limit.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); the agent's earlier sessions and what they cost (`/sessions`, `/cost`); its subagents (`/subagents`) |
 | `terminal.go`, `files.go`, `file_preview.go`, `files_find.go` | The shell terminal (`terminalAPI`) and the file viewer and the search for a file the agent named relative to a repository (`fileAPI`) |
@@ -201,7 +193,7 @@ registration: `fileAPI` holds the working directory, `terminalAPI` the shell, `u
 store, `authAPI` the token check, and `webhookAPI` the dispatcher and state DB.
 
 For operations that differ by transport, handlers call `agentBackend`: `ptyBackend` drives terminal
-and ACP conversations; `nativeBackend` drives native conversations.
+conversations; `nativeBackend` drives native conversations.
 
 ## Conversations and transports
 
@@ -262,14 +254,6 @@ sequenceDiagram
   `terminal_prompt`. `handoff.go` turns an answer into the keys the dialog
   expects, and `dialog_reply.go` opens a dialog's free-text field so that a
   chat message can answer it.
-
-### ACP
-
-`x/acpio` speaks the Agent Client Protocol over the agent's stdio. A message is one prompt with the
-message's text. `POST /message` returns once the turn has started; messages sent during the turn
-wait in the queue, and a failed prompt is reported as an `agent_error`. Message chunks become the
-agent's reply, tool calls are appended to it as lines of text, and permission requests are approved
-automatically. The transport is experimental.
 
 ### Native
 
@@ -500,8 +484,7 @@ The queue is persisted with the conversation.
 ## Persistence
 
 `lib/statedb` stores conversations in SQLite using the pure-Go `modernc.org/sqlite`, which supports
-`CGO_ENABLED=0` builds. The emitter sends it every change on native and PTY transports. ACP doesn't
-use persistence.
+`CGO_ENABLED=0` builds. The emitter sends it every change, on both transports.
 
 - The tables are `messages`, `rich_messages`, `session_events`, `requests`,
   `queue`, `tasks` (each as the server encoded it, by the ID of the message
@@ -549,8 +532,7 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
   the agent; before the new agent starts, AgentAPI runs `codex update` or
   `pi update --self` for Codex and Pi. A native agent is closed and `Restart`
   starts a new session. A PTY agent gets a new process in the swappable
-  terminal and a new session-log watcher. Under ACP the request fails with
-  400, as the agent can't be restarted.
+  terminal and a new session-log watcher.
 - A replacement of the native agent (a restart, a reload, opening another
   session) has two steps. `BeginRestart`, `BeginReload` and `BeginSwitch`
   retire the agent under `s.mu`, and its events are ignored from then on.
@@ -616,8 +598,7 @@ the same session for native agents.
 - There are no separate user accounts or roles. A client that passes the
   host and origin checks, and token authentication when enabled, has the
   agent's capabilities: native agents start in the bypass permission mode,
-  the ACP transport approves every permission request, and the shell
-  terminal runs commands.
+  and the shell terminal runs commands.
 - `--api-token`: compared in constant time. Browsers sign in with
   `POST /auth/session`, which sets an HttpOnly, SameSite=Strict cookie holding
   an HMAC of the token rather than the token, so changing the token signs

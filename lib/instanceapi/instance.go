@@ -25,13 +25,11 @@ type Transport string
 
 const (
 	TransportPTY    Transport = "pty"
-	TransportACP    Transport = "acp"
 	TransportNative Transport = "native"
 )
 
 var TransportValues = []Transport{
 	TransportPTY,
-	TransportACP,
 	TransportNative,
 }
 

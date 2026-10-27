@@ -6,8 +6,7 @@ Use these commands and conventions when working on AgentAPI with Claude Code (cl
 
 AgentAPI is a Go HTTP server for coding agents. Native mode, the default for Claude Code, Codex and
 Pi, uses their structured protocols. PTY mode, the default for every other agent, translates API
-calls into terminal keystrokes and parses screen output; experimental ACP mode uses the Agent Client
-Protocol. The binary embeds a Next.js chat UI.
+calls into terminal keystrokes and parses screen output. The binary embeds a Next.js chat UI.
 
 ## Build & Run
 
@@ -57,8 +56,8 @@ persistence and the security model.
 4. New content below the baseline becomes the agent's response message
 5. SSE events (`GET /events`) stream message and status updates to clients
 
-Native mode passes messages to an adapter and receives structured Sink events. ACP uses prompt and
-response messages over stdio. All three transports update the shared event emitter.
+Native mode passes messages to an adapter and receives structured Sink events. Both transports
+update the shared event emitter.
 
 ### Key packages
 
@@ -72,7 +71,6 @@ response messages over stdio. All three transports update the shared event emitt
 - **`lib/sessions/`** — A server-held `Store` reads session logs incrementally for earlier sessions and history (`GET /sessions`, resume), subagents (`GET /subagents`, `GET /timeline?subagents=true`) and costs (`GET /sessions`, `GET /cost`).
 - **`lib/jsonlwatcher/`** — Tails the session log of a PTY agent's process for rich structured messages (tool calls, thinking, usage), alongside the PTY transport.
 - **`lib/pricing/`** — Model prices per million tokens, from the embedded `prices.json` and any additions or overrides in a `--prices` file. `Price.Cost` calculates a call's API-equivalent USD cost from its tokens.
-- **`x/acpio/`** — Experimental ACP (Agent Client Protocol) transport, alternative to PTY.
 - **`lib/native/`** — Native transport. `Conversation` (a `conv.Conversation`) turns the events of an `Adapter` (one per agent: `claude/`, `codex/`, `pi/`, plus the simulated `demo/`) into conversation state, requests (approvals, questions, plans) and login state. Shared pieces: `agentio/` (the agent process and its loop, stdin writes, response matching, lenient decoding with drift warnings, the snapshot throttle), `procutil/` (child process lifecycle), `IsAuthError`, `ReadImage`; `nativetest/` has a fake adapter. `lib/procenv` prepares the environment for agent processes on all transports.
 - **`lib/statedb/`** — SQLite persistence of conversations, native and PTY (`--state-db`; a deprecated `--state-file` is imported into it).
 - **`lib/instanceapi/`** — The contract between an AgentAPI and the clients that watch many: `WebhookInstance` (who it is, in its webhook events, summary and registry entry), `SummaryBody`, the webhook envelope with `Sign`/`Verify`, and `StateOf`, the state a hub shows of an instance. `lib/httpapi` keeps aliases under the same names (the OpenAPI schema's); `lib/hub`, `lib/registry`, `cmd/hub` and `cmd/list` use it instead of `lib/httpapi`.
@@ -83,10 +81,9 @@ response messages over stdio. All three transports update the shared event emitt
 - **`skills/`** — Agent skills for users of AgentAPI (`agentapi-hub-join`: an agent joins its machine to a hub, documented in `docs/hub.md`); they install into `~/.claude/skills/` and aren't for working on this repository.
 - **`cmd/`** — CLI commands via cobra/viper. Includes `server`, `attach`, `list` (the AgentAPIs in the registry, with their summaries), `hub` (`serve`: the hub; `join`, `leave`, `status`: connecting a machine's AgentAPIs to a hub), and `update` subcommands.
 
-### Three transport modes
+### Two transport modes
 
 - **PTY**: Runs the agent in a terminal emulator, parses screen output. The default for agents without a native adapter, and with `--state-file`.
-- **ACP (experimental)**: Uses the Agent Client Protocol for structured communication (`--experimental-acp`).
 - **Native** (the default for Claude Code, Codex and Pi; `--transport native`): Speaks Claude Code's stream-json, `codex app-server` JSON-RPC or `pi --mode rpc` directly. Adapters must follow the `Sink` contract in `lib/native/types.go` (no concurrent Sink calls; message IDs unique across adapters of one factory).
 
 ### Adding a new agent type

@@ -14,8 +14,8 @@ import (
 	"github.com/coder/agentapi/lib/native"
 )
 
-// ptyBackend drives an agent through a screentracker conversation: a
-// terminal (PTY) or ACP one.
+// ptyBackend drives an agent in a terminal through a screentracker
+// conversation.
 type ptyBackend struct{ s *Server }
 
 // readyForQueued: the conversation is stable, and a terminal agent's screen
@@ -25,7 +25,7 @@ func (b ptyBackend) readyForQueued() bool {
 	if s.conversation.Status() != conv.StatusStable {
 		return false
 	}
-	if s.emitter == nil || s.transport != TransportPTY {
+	if s.emitter == nil {
 		return true
 	}
 	_, question := s.emitter.Screen()
@@ -97,7 +97,7 @@ func (b ptyBackend) deliver(content string, _ DispatchMode, resp *MessageRespons
 	s := b.s
 	var screen string
 	var question bool
-	if s.transport == TransportPTY && s.emitter != nil {
+	if s.emitter != nil {
 		screen, question = s.emitter.Screen()
 	}
 	if keys, ok := freeTextReplyKeys(s.agentType, screen); question && ok {
@@ -131,7 +131,7 @@ func (b ptyBackend) beforeQueue() {
 
 // handoffOffer offers a dialog of the agent's terminal.
 func (b ptyBackend) handoffOffer(view handoffView) (string, string, native.RequestState, bool) {
-	if view.dialog && b.s.transport == TransportPTY {
+	if view.dialog {
 		return "terminal", view.screen, native.RequestState{}, true
 	}
 	return "", "", native.RequestState{}, false

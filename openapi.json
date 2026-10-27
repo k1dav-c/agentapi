@@ -2402,7 +2402,7 @@
           },
           "transport": {
             "$ref": "#/components/schemas/Transport",
-            "description": "Backend transport being used ('pty', 'acp' or 'native')."
+            "description": "Backend transport being used ('pty' or 'native')."
           },
           "turn": {
             "description": "How many times the agent started working since AgentAPI started.",
@@ -2506,7 +2506,7 @@
           },
           "transport": {
             "$ref": "#/components/schemas/Transport",
-            "description": "Backend transport being used ('pty', 'acp' or 'native')."
+            "description": "Backend transport being used ('pty' or 'native')."
           },
           "turn": {
             "description": "How many times the agent started working since AgentAPI started.",
@@ -3230,7 +3230,6 @@
       },
       "Transport": {
         "enum": [
-          "acp",
           "native",
           "pty"
         ],
@@ -4914,7 +4913,7 @@
         ]
       },
       "put": {
-        "description": "Replaces the agent's **complete** MCP server map while preserving unrelated config-file content.\n\nImportant behavior:\n\n- Servers omitted from `servers` are removed; send `{\"servers\": {}}` to clear all MCP servers.\n- Values use the target agent's native format and are not validated by AgentAPI.\n- Without `restart=true`, the new configuration is loaded by the next agent session.\n- With `restart=true`, AgentAPI replaces the agent process immediately. AgentAPI and its HTTP/SSE endpoints stay online. A PTY agent starts over with an empty conversation; a native agent resumes its session, so the conversation stays (409 while it works on a turn).\n- Restart is unavailable in ACP, schema-only, and other server modes without a process supervisor; those requests return `400`.\n- A missing or structurally invalid request body returns `422`.\n- Claude, Codex and Pi are supported; other agent types return `404`.",
+        "description": "Replaces the agent's **complete** MCP server map while preserving unrelated config-file content.\n\nImportant behavior:\n\n- Servers omitted from `servers` are removed; send `{\"servers\": {}}` to clear all MCP servers.\n- Values use the target agent's native format and are not validated by AgentAPI.\n- Without `restart=true`, the new configuration is loaded by the next agent session.\n- With `restart=true`, AgentAPI replaces the agent process immediately. AgentAPI and its HTTP/SSE endpoints stay online. A PTY agent starts over with an empty conversation; a native agent resumes its session, so the conversation stays (409 while it works on a turn).\n- Restart is unavailable in schema-only and other server modes without a process supervisor; those requests return `400`.\n- A missing or structurally invalid request body returns `422`.\n- Claude, Codex and Pi are supported; other agent types return `404`.",
         "operationId": "put-mcp",
         "parameters": [
           {
@@ -5511,7 +5510,7 @@
     },
     "/messages": {
       "delete": {
-        "description": "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue.",
+        "description": "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if the agent can't be restarted (AgentAPI runs it without a process supervisor), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue.",
         "operationId": "delete-messages",
         "responses": {
           "200": {
