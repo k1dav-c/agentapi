@@ -493,7 +493,9 @@ agent 啟動時才讀取設定，因此變更需要重新啟動；native agent �
   會自行檢查 token。
 - `--bind` 限制誰能連線，`--allowed-hosts` 決定接受哪些 `Host` 標頭（預設為 `localhost`、
   `127.0.0.1` 和 `[::1]`，用來防範 DNS rebinding），`--allowed-origins` 決定哪些來源可以從
-  瀏覽器呼叫 API。
+  瀏覽器呼叫 API。其他來源的網頁送出會造成改動的請求（GET、HEAD、OPTIONS 以外）時，除非那個來源
+  列在清單上，否則一律拒絕；`*` 不信任任何來源（`crossorigin.go`，規則同 Go 1.25 的
+  `http.CrossOriginProtection`）。
 - 上傳的檔案存放在私有目錄，只回傳圖片。工作目錄以外的檔案無法開啟。
 - webhook 會把設定要送的內容（包括對話）送到它的網址，而 `PUT /webhook` 可以修改網址；它的
   HMAC secret 只能寫入、無法讀回。
@@ -502,7 +504,9 @@ agent 啟動時才讀取設定，因此變更需要重新啟動；native agent �
   回應時（摘要裡是別的實例 ID），代理拒絕轉送；hub 仍在追蹤、且 3 分鐘內有消息的實例，另一次以相同
   ID 執行的 AgentAPI 也無法把它移到別處。瀏覽器以 hub token 登入，換取
   由 token 推導出的 HttpOnly、SameSite=Lax cookie；代理會移除瀏覽器的 cookie 以及 `Authorization`、
-  `Origin`、`Referer` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
+  `Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
+  hub 和 AgentAPI 一樣，拒絕其他來源的網頁送出會造成改動的請求。代理在每個回應加上 `Content-Security-Policy: sandbox`，實例送來的
+  內容不會以 hub 的網頁身分執行；代理也拒絕修改實例的 webhook，因為 webhook 決定 hub 把 token 送到哪裡。
 - 上層 agent 工作階段會為它執行的指令設定環境變數（包含機密資訊）；不論使用哪種 transport，
   agent 都不會繼承這些變數，也不會拿到 AgentAPI 的 API token（`lib/procenv`）。
 

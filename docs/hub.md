@@ -333,8 +333,16 @@ instance that joined with its webhook comes back the next time it starts.
   instance, and doesn't let another run with the same ID move it elsewhere while it still follows
   this one.
 - The session cookie is HttpOnly and SameSite=Lax, derived from the hub token rather than holding
-  it. The proxy drops the browser's cookies and its `Authorization`, `Origin` and `Referer`
-  headers, and drops the instance's `Set-Cookie`, so neither side's credentials reach the other.
+  it. The proxy drops the browser's cookies and its `Authorization`, `Origin`, `Referer` and
+  `Sec-Fetch-*` headers, and drops the instance's `Set-Cookie`, so neither side's credentials
+  reach the other.
+- A page of another site can't make the hub change anything or send an instance a task, with or
+  without a token: the hub refuses requests that change something unless the browser says they
+  come from the hub's own page.
+- Nothing an instance answers runs as a page of the hub's (`Content-Security-Policy: sandbox`),
+  so a workspace someone took over can't reach the others through your browser. Through the hub,
+  an instance's webhook can be read but not changed: it names where the hub sends the token.
+- Adding a URL never moves an instance the hub has; forget it first.
 - `~/.agentapi/hub/instances.json` holds the tokens of instances added by hand; it is created
   readable by its owner only. `~/.agentapi/config.yaml` holds the hub secret; `agentapi hub join`
   writes it the same way.

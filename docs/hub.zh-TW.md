@@ -301,8 +301,14 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 - 只有在那個網址上的 AgentAPI 自稱是這個實例時，hub 才會轉送這個實例的請求；hub 還在追蹤某個實例時，
   另一次以相同 ID 執行的 AgentAPI 也不能把它改到別的網址。
 - session cookie 是 HttpOnly、SameSite=Lax，由 hub token 推導而來，裡面沒有 token 本身。代理會
-  移除瀏覽器的 cookie 以及 `Authorization`、`Origin`、`Referer` 標頭，也會移除實例的
+  移除瀏覽器的 cookie 以及 `Authorization`、`Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的
   `Set-Cookie`，雙方的憑證都不會傳到另一邊。
+- 不論有沒有 token，其他網站的網頁都無法讓 hub 做任何改動，也無法替實例送任務：除非瀏覽器表明請求
+  來自 hub 自己的網頁，否則會造成改動的請求一律拒絕。
+- 實例回應的內容不會以 hub 的網頁身分執行（`Content-Security-Policy: sandbox`），所以就算某個
+  workspace 被人控制，也無法透過你的瀏覽器碰到其他 workspace。經由 hub 只能讀取實例的 webhook，
+  不能修改：webhook 決定 hub 把 token 送到哪裡。
+- 加入網址不會搬動 hub 已有的實例；要先把它移除。
 - `~/.agentapi/hub/instances.json` 保存手動加入的實例的 token，建立時只有擁有者能讀取。
   `~/.agentapi/config.yaml` 保存 hub secret，`agentapi hub join` 也以同樣的權限寫入。
 - 登入時會送出 hub token。hub 只開在 VPN 上，或放在 HTTPS 後面。

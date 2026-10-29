@@ -1774,6 +1774,14 @@ agentapi server --allowed-origins 'https://example.com,http://localhost:3000' --
 AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi server -- claude
 ```
 
+A page of another origin can't make the server change anything (any method but GET, HEAD and
+OPTIONS) unless its origin is listed. Browsers send such requests without asking first (a form, a
+`fetch` in `no-cors` mode); CORS only keeps the page from reading the answer, so without
+`--api-token` any site you open could send the agent a task or type into the terminal. `*` lets
+every page read the answers but trusts none to send these: list the origins that need to. The
+server tells pages apart by the `Sec-Fetch-Site` and `Origin` headers browsers add, so clients
+other than browsers (curl, SDKs, the hub) aren't affected.
+
 ### What an API client can do
 
 - Have the agent run anything it can. Native agents start in the bypass
