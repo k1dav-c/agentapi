@@ -505,7 +505,8 @@ agent 啟動時才讀取設定，因此變更需要重新啟動；native agent �
   ID 執行的 AgentAPI 也無法把它移到別處。瀏覽器以 hub token 登入，換取
   由 token 推導出的 HttpOnly、SameSite=Lax cookie；代理會移除瀏覽器的 cookie 以及 `Authorization`、
   `Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
-  hub 和 AgentAPI 一樣，拒絕其他來源的網頁送出會造成改動的請求。代理在每個回應加上 `Content-Security-Policy: sandbox`，實例送來的
+  hub 和 AgentAPI 一樣，拒絕其他來源的網頁送出會造成改動的請求；設定 `--allowed-hosts` 時，只回應
+  用這些名稱或 IP 位址連來的瀏覽器。代理在每個回應加上 `Content-Security-Policy: sandbox`，實例送來的
   內容不會以 hub 的網頁身分執行；代理也拒絕修改實例的 webhook，因為 webhook 決定 hub 把 token 送到哪裡。
 - 上層 agent 工作階段會為它執行的指令設定環境變數（包含機密資訊）；不論使用哪種 transport，
   agent 都不會繼承這些變數，也不會拿到 AgentAPI 的 API token（`lib/procenv`）。

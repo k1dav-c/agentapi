@@ -50,9 +50,9 @@ func (f *fakeInstance) last(t *testing.T) http.Header {
 	return f.headers[len(f.headers)-1]
 }
 
-func startNoTokenHub(t *testing.T) *httptest.Server {
+func startNoTokenHub(t *testing.T, allowedHosts ...string) *httptest.Server {
 	t.Helper()
-	h, err := hub.New(hub.Config{NoToken: true, Secret: hubSecret})
+	h, err := hub.New(hub.Config{NoToken: true, Secret: hubSecret, AllowedHosts: allowedHosts})
 	require.NoError(t, err)
 	srv := httptest.NewServer(h.Handler())
 	t.Cleanup(srv.Close)
@@ -138,4 +138,44 @@ func TestHubAddInstanceKeepsItsURL(t *testing.T) {
 	list := instances(t, hubSrv.URL)
 	require.Len(t, list, 1)
 	assert.Equal(t, first.URL, list[0].URL)
+}
+
+// With --allowed-hosts, the hub answers browsers only by those names and
+// by address; the instances' signed events come by any name.
+func TestHubAllowedHosts(t *testing.T) {
+	hubSrv := startNoTokenHub(t, "hub.example")
+	get := func(host, path string) int {
+		req, err := http.NewRequest(http.MethodGet, hubSrv.URL+path, nil)
+		require.NoError(t, err)
+		req.Host = host
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	assert.Equal(t, http.StatusMisdirectedRequest, get("rebound.evil.example:3290", "/api/instances"))
+	assert.Equal(t, http.StatusMisdirectedRequest, get("rebound.evil.example", "/chat/hub/"))
+	assert.Equal(t, http.StatusOK, get("hub.example:3290", "/api/instances"))
+	assert.Equal(t, http.StatusOK, get("HUB.example", "/api/instances"))
+	assert.Equal(t, http.StatusOK, get("192.168.9.210:3290", "/api/instances"))
+	assert.Equal(t, http.StatusOK, get("[::1]:3290", "/api/instances"))
+	assert.Equal(t, http.StatusOK, get("localhost:3290", "/api/instances"))
+
+	req, err := http.NewRequest(http.MethodPost, hubSrv.URL+"/hooks", strings.NewReader(`{}`))
+	require.NoError(t, err)
+	req.Host = "rebound.evil.example"
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.NotEqual(t, http.StatusMisdirectedRequest, resp.StatusCode, "the signature decides")
+
+	// Without --allowed-hosts, any name.
+	open := startNoTokenHub(t)
+	req, err = http.NewRequest(http.MethodGet, open.URL+"/api/instances", nil)
+	require.NoError(t, err)
+	req.Host = "any.example"
+	resp, err = http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }

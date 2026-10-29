@@ -62,6 +62,12 @@ func parseAllowedHosts(input []string) ([]string, error) {
 	return hostStrings, nil
 }
 
+// ParseAllowedHosts checks a list of hostnames, as --allowed-hosts takes
+// it: no schemes, ports or separators; "*" anywhere makes it ["*"].
+func ParseAllowedHosts(input []string) ([]string, error) {
+	return parseAllowedHosts(input)
+}
+
 // Validate allowed origins
 func parseAllowedOrigins(input []string) ([]string, error) {
 	if len(input) == 0 {

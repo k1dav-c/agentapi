@@ -9,6 +9,11 @@
   AgentAPI with an error; run such an agent with `--transport pty`. `acp` is no longer a value of
   `transport` in the API.
 
+### Features
+
+- `agentapi hub serve --allowed-hosts` lists the names browsers open the hub by, besides IP addresses
+  and `localhost`, against DNS rebinding; a hub with `--no-token` and without it warns when it starts.
+
 ### Fixes
 
 - A page of another site can no longer make AgentAPI or the hub change anything. Browsers send a

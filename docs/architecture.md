@@ -625,8 +625,9 @@ the same session for native agents.
   derived from it. The proxy drops their cookies and `Authorization`, `Origin`,
   `Referer` and `Sec-Fetch-*` headers and the instances' `Set-Cookie`, so
   neither side's credentials reach the other. The hub refuses requests that
-  change something from pages of other origins, as AgentAPI does. The proxy
-  marks every answer `Content-Security-Policy: sandbox`, so nothing an
+  change something from pages of other origins, as AgentAPI does, and with
+  `--allowed-hosts` answers browsers only by those names and by address. The
+  proxy marks every answer `Content-Security-Policy: sandbox`, so nothing an
   instance serves runs as a page of the hub's, and refuses changes to an
   instance's webhook, which names where the hub sends its token.
 - Agents, on every transport, don't inherit the variables (one of them a
