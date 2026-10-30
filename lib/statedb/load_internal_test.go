@@ -3,8 +3,11 @@ package statedb
 import (
 	"bytes"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -51,18 +54,65 @@ func TestMigrate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	sqlDB, err := sql.Open("sqlite", dataSourceName(path))
 	require.NoError(t, err)
-	version := func() int {
-		var v int
-		require.NoError(t, sqlDB.QueryRow("PRAGMA user_version").Scan(&v))
-		return v
-	}
+	defer func() { require.NoError(t, sqlDB.Close()) }()
 	require.NoError(t, migrate(sqlDB))
-	assert.Equal(t, len(migrations), version())
+	assert.Equal(t, len(migrations), schema(t, sqlDB))
 	require.NoError(t, migrate(sqlDB), "a migrated database is left as it is")
-	assert.Equal(t, len(migrations), version())
+	assert.Equal(t, len(migrations), schema(t, sqlDB))
+	assert.Empty(t, metaOf(t, sqlDB), "every migration so far only added")
+}
 
-	_, err = sqlDB.Exec("PRAGMA user_version = 99")
+// An older AgentAPI goes on with a database a newer one migrated, unless a
+// migration changed what the older writes.
+func TestMigrateNewerSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	sqlDB, err := sql.Open("sqlite", dataSourceName(path))
 	require.NoError(t, err)
-	assert.ErrorContains(t, migrate(sqlDB), "newer AgentAPI (schema 99")
-	require.NoError(t, sqlDB.Close())
+	defer func() { require.NoError(t, sqlDB.Close()) }()
+	known := migrations
+	defer func() { migrations = known }()
+	added := migration{since: "9.0.0", minWriter: 1, sql: "CREATE TABLE later (id INTEGER PRIMARY KEY)"}
+	changed := migration{since: "9.1.0", minWriter: len(known) + 2, sql: "ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT ''"}
+
+	// A newer AgentAPI only added a table.
+	migrations = append(slices.Clone(known), added)
+	require.NoError(t, migrate(sqlDB))
+	assert.Empty(t, metaOf(t, sqlDB))
+	migrations = known
+	require.NoError(t, migrate(sqlDB))
+	assert.Equal(t, len(known)+1, schema(t, sqlDB), "the older one leaves the schema as it is")
+
+	// A later one changed what the older ones write.
+	migrations = append(slices.Clone(known), added, changed)
+	require.NoError(t, migrate(sqlDB))
+	assert.Equal(t, map[string]string{metaMinWriterSchema: strconv.Itoa(len(known) + 2), metaMinWriterVersion: "9.1.0"}, metaOf(t, sqlDB))
+	migrations = append(slices.Clone(known), added)
+	assert.ErrorContains(t, migrate(sqlDB), fmt.Sprintf("needs AgentAPI 9.1.0 or later (schema %d;", len(known)+2))
+	_, err = sqlDB.Exec("INSERT INTO meta (key, value) VALUES (?, '9.1.3')", metaWriterVersion)
+	require.NoError(t, err)
+	assert.ErrorContains(t, migrate(sqlDB), "last written by AgentAPI 9.1.3")
+	migrations = append(slices.Clone(known), added, changed)
+	require.NoError(t, migrate(sqlDB))
+}
+
+func schema(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var v int
+	require.NoError(t, db.QueryRow("PRAGMA user_version").Scan(&v))
+	return v
+}
+
+// metaOf returns the meta values a migration records.
+func metaOf(t *testing.T, db *sql.DB) map[string]string {
+	t.Helper()
+	meta := map[string]string{}
+	rows, err := db.Query("SELECT key, value FROM meta WHERE key IN (?, ?)", metaMinWriterSchema, metaMinWriterVersion)
+	require.NoError(t, err)
+	for rows.Next() {
+		var k, v string
+		require.NoError(t, rows.Scan(&k, &v))
+		meta[k] = v
+	}
+	require.NoError(t, closeRows(rows))
+	return meta
 }

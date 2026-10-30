@@ -27,7 +27,10 @@ import {
   type InstanceState,
 } from "@/lib/hub";
 import {frameMessage, toFrame, type FromFrame} from "@/lib/hub-frame";
+import {checkHubSession, type HubSession} from "@/lib/hub-session";
+import {getReconnectDelay} from "@/lib/reconnect";
 import {cn} from "@/lib/utils";
+import {useEventSource} from "./use-event-source";
 import {HubMark} from "./hub/brand";
 import {AddInstance, GroupName, type Naming} from "./hub/dialogs";
 import {GroupHeader, InstanceRow, agentName} from "./hub/instance-row";
@@ -40,6 +43,8 @@ const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "/chat").replace(/\/$/, "
 // Where the browser keeps which groups are folded, and whether to notify.
 const collapsedKey = "agentapi.hub.collapsed";
 const notifyKey = "agentapi.hub.notify";
+// The hub sends a heartbeat every 15 s.
+const STALE_STREAM_MS = 45_000;
 
 const filters: {id: HubFilter; label: string}[] = [
   {id: "all", label: "All"},
@@ -96,9 +101,11 @@ function faviconUrl(waiting: number, working: boolean): string {
 // the one picked. On a narrow screen the list and the chat take turns.
 export function HubView() {
   const root = useMemo(() => (typeof window === "undefined" ? "" : hubRoot(basePath, window.location.origin)), []);
-  const [signedIn, setSignedIn] = useState<boolean | undefined>(undefined);
+  const [session, setSession] = useState<HubSession | undefined>(undefined);
   const [instances, setInstances] = useState<Map<string, HubInstance>>(new Map());
-  const [connected, setConnected] = useState(false);
+  // The last session check after the stream failed found the hub
+  // unreachable.
+  const [unreachable, setUnreachable] = useState(false);
   const [selected, setSelected] = useState<string | undefined>(() =>
     typeof window === "undefined" ? undefined : decodeURIComponent(window.location.hash.slice(1)) || undefined,
   );
@@ -111,40 +118,55 @@ export function HubView() {
   const [announcement, setAnnouncement] = useState("");
   const search = useRef<HTMLInputElement>(null);
 
+  // Signed in or not; a hub that doesn't answer is asked again, with a
+  // backoff, and at once when the browser comes back online.
+  const [sessionAttempt, setSessionAttempt] = useState(0);
   useEffect(() => {
     if (!root) return;
-    fetch(`${root}/api/session`, {credentials: "same-origin"})
-      .then((r) => r.json())
-      .then((body: {authenticated?: boolean}) => setSignedIn(Boolean(body.authenticated)))
-      .catch(() => setSignedIn(false));
-  }, [root]);
-
-  // The instances and their changes, from one stream.
+    let active = true;
+    void checkHubSession(root).then((result) => {
+      if (active) setSession(result);
+    });
+    return () => {
+      active = false;
+    };
+  }, [root, sessionAttempt]);
   useEffect(() => {
-    if (!signedIn || !root) return;
-    const source = new EventSource(`${root}/api/events`, {withCredentials: true});
-    const on = (type: HubEvent["type"]) => (message: MessageEvent<string>) => {
-      const data = JSON.parse(message.data);
-      const event: HubEvent =
-        type === "instances" ? {type, instances: data.instances ?? []} : type === "instance" ? {type, instance: data} : {type, id: data.id};
-      setInstances((previous) => applyHubEvent(previous, event));
+    if (session !== "unreachable") return;
+    const retry = () => setSessionAttempt((n) => n + 1);
+    const timer = setTimeout(retry, getReconnectDelay(sessionAttempt + 1));
+    window.addEventListener("online", retry);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("online", retry);
     };
-    source.addEventListener("instances", on("instances") as EventListener);
-    source.addEventListener("instance", on("instance") as EventListener);
-    source.addEventListener("removed", on("removed") as EventListener);
-    source.onopen = () => setConnected(true);
-    source.onerror = () => {
-      setConnected(false);
-      // A session that expired comes back as a sign-in.
-      fetch(`${root}/api/session`, {credentials: "same-origin"})
-        .then((r) => r.json())
-        .then((body: {authenticated?: boolean}) => {
-          if (!body.authenticated) setSignedIn(false);
-        })
-        .catch(() => undefined);
-    };
-    return () => source.close();
-  }, [signedIn, root]);
+  }, [session, sessionAttempt]);
+
+  // The instances and their changes, from one stream, kept open.
+  const stream = useEventSource({
+    url: session === "signed-in" && root ? `${root}/api/events` : null,
+    withCredentials: true,
+    staleAfter: STALE_STREAM_MS,
+    listeners: () => {
+      const on = (type: HubEvent["type"]) => (message: MessageEvent<string>) => {
+        const data = JSON.parse(message.data);
+        const event: HubEvent =
+          type === "instances" ? {type, instances: data.instances ?? []} : type === "instance" ? {type, instance: data} : {type, id: data.id};
+        setInstances((previous) => applyHubEvent(previous, event));
+      };
+      return {instances: on("instances"), instance: on("instance"), removed: on("removed")};
+    },
+    onOpen: () => setUnreachable(false),
+    // EventSource hides the status: a session that expired comes back as a
+    // sign-in, a hub that doesn't answer as unreachable.
+    onError: () => {
+      void checkHubSession(root).then((result) => {
+        if (result === "signed-out") setSession("signed-out");
+        setUnreachable(result === "unreachable");
+      });
+    },
+  });
+  const connected = stream.status === "connected";
 
   const all = useMemo(() => [...instances.values()], [instances]);
   const counts = useMemo(() => countFilters(all), [all]);
@@ -320,7 +342,7 @@ export function HubView() {
     await Promise.all(members.map((instance) => setGroup(instance.id, to)));
   };
 
-  if (signedIn === undefined) {
+  if (session === undefined) {
     return (
       <main className="app-frame flex items-center justify-center bg-background">
         <HubMark className="size-10 animate-pulse" />
@@ -328,7 +350,21 @@ export function HubView() {
       </main>
     );
   }
-  if (!signedIn) return <SignIn root={root} onSignedIn={() => setSignedIn(true)} />;
+  if (session === "unreachable") {
+    return (
+      <main className="app-frame flex flex-col items-center justify-center gap-4 bg-background px-6 text-center">
+        <HubMark className="size-10 opacity-60" />
+        <div role="status">
+          <h1 className="text-base font-semibold">Can&apos;t reach the hub</h1>
+          <p className="mt-1 text-sm text-muted-foreground">It didn&apos;t answer. Trying again…</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setSessionAttempt((n) => n + 1)}>
+          Try again
+        </Button>
+      </main>
+    );
+  }
+  if (session === "signed-out") return <SignIn root={root} onSignedIn={() => setSession("signed-in")} />;
 
   const current = selected ? instances.get(selected) : undefined;
   const filtered = filter !== "all" || query.trim() !== "";
@@ -346,7 +382,13 @@ export function HubView() {
                   className={cn("size-1.5 shrink-0 rounded-full", connected ? "bg-state-ready" : "animate-pulse bg-state-needs")}
                 />
                 <span aria-live="polite" className="shrink-0">
-                  {connected ? `Live · ${counts.all} ${counts.all === 1 ? "agent" : "agents"}` : "Reconnecting…"}
+                  {connected
+                    ? `Live · ${counts.all} ${counts.all === 1 ? "agent" : "agents"}`
+                    : stream.status === "offline"
+                      ? "Offline"
+                      : unreachable
+                        ? "Can't reach the hub · retrying"
+                        : "Reconnecting…"}
                 </span>
                 {/* Out of the live region: it changes every minute. */}
                 {connected && spend.week > 0 && (

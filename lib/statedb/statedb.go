@@ -23,6 +23,7 @@ import (
 	sqlite "modernc.org/sqlite" // SQLite driver without cgo.
 	sqlite3 "modernc.org/sqlite/lib"
 
+	"github.com/coder/agentapi/internal/version"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
@@ -43,18 +44,34 @@ const (
 	retryDelay    = 50 * time.Millisecond
 )
 
+// migration takes the schema from one version to the next.
+type migration struct {
+	// since is the AgentAPI release that brought it.
+	since string
+	// minWriter is the oldest schema an AgentAPI must know to write the
+	// database once the migration ran. One that only adds (a table, a
+	// column with a default) keeps the minWriter of the one before: an
+	// older AgentAPI goes on writing the file and leaves alone what it
+	// doesn't know, which its resets and truncations therefore don't
+	// clear (the server checks restored tasks against the messages). One
+	// that changes what an older AgentAPI writes raises it to its own
+	// version.
+	minWriter int
+	sql       string
+}
+
 // migrations take the schema from version i to i+1, so migrations[0]
 // creates it; PRAGMA user_version holds the version. A change to the
 // schema is a new migration at the end: one that ran never changes.
-var migrations = []string{
-	`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+var migrations = []migration{
+	{since: "0.24.0", minWriter: 1, sql: `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, seq INTEGER NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS rich_messages (pos INTEGER PRIMARY KEY, seq INTEGER NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS session_events (id INTEGER PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, pos INTEGER NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS queue (pos INTEGER PRIMARY KEY, data TEXT NOT NULL);`,
+CREATE TABLE IF NOT EXISTS queue (pos INTEGER PRIMARY KEY, data TEXT NOT NULL);`},
 	// The tasks: a user's message, by its ID, and the agent's turn on it.
-	`CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, seq INTEGER NOT NULL, data TEXT NOT NULL);`,
+	{since: "1.0.0", minWriter: 1, sql: `CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, seq INTEGER NOT NULL, data TEXT NOT NULL);`},
 }
 
 // Meta keys.
@@ -84,6 +101,15 @@ const (
 	metaNextQueueID = "next_queue_id"
 	// metaClean is set while the file is closed cleanly; see Snapshot.Clean.
 	metaClean = "clean"
+	// metaMinWriterSchema is the oldest schema that may write the file
+	// (see migration.minWriter), and metaMinWriterVersion the release that
+	// brought it; without them, any may. A migration that raises it
+	// records them. metaWriterVersion is the AgentAPI that last closed the
+	// file. AgentAPI 1.9.0 and earlier don't read them, and refuse any
+	// schema newer than theirs.
+	metaMinWriterSchema  = "min_writer_schema"
+	metaMinWriterVersion = "min_writer_version"
+	metaWriterVersion    = "writer_version"
 )
 
 // Keys of pending writes; see op.
@@ -225,7 +251,7 @@ func Open(path string, logger *slog.Logger) (*DB, error) {
 	}
 	if err := migrate(sqlDB); err != nil {
 		_ = sqlDB.Close()
-		return nil, err
+		return nil, fmt.Errorf("state database %s: %w", path, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &DB{
@@ -260,14 +286,15 @@ func isBusy(err error) bool {
 	return errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == sqlite3.SQLITE_BUSY
 }
 
-// migrate runs the migrations the database hasn't had.
+// migrate runs the migrations the database hasn't had. A database a newer
+// AgentAPI migrated further is left as it is, if this one may write it.
 func migrate(db *sql.DB) error {
 	var version int
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read state database version: %w", err)
 	}
 	if version > len(migrations) {
-		return fmt.Errorf("state database was written by a newer AgentAPI (schema %d, this one knows %d)", version, len(migrations))
+		return checkWriter(db, version)
 	}
 	for ; version < len(migrations); version++ {
 		if err := migrateTo(db, version+1); err != nil {
@@ -277,14 +304,54 @@ func migrate(db *sql.DB) error {
 	return nil
 }
 
-// migrateTo runs the migration to version, and records the version, in one
-// transaction.
+// checkWriter returns an error unless this AgentAPI may write the database
+// whose schema, newer than it knows, is schema.
+func checkWriter(db *sql.DB, schema int) error {
+	meta := map[string]string{}
+	rows, err := db.Query("SELECT key, value FROM meta WHERE key IN (?, ?, ?)", metaMinWriterSchema, metaMinWriterVersion, metaWriterVersion)
+	if err != nil {
+		return fmt.Errorf("read state database version: %w", err)
+	}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		meta[k] = v
+	}
+	if err := closeRows(rows); err != nil {
+		return err
+	}
+	minWriter := 1
+	if v, ok := meta[metaMinWriterSchema]; ok {
+		if minWriter, err = strconv.Atoi(v); err != nil {
+			minWriter = schema
+		}
+	}
+	if minWriter <= len(migrations) {
+		return nil
+	}
+	needs := "a newer AgentAPI"
+	if v := meta[metaMinWriterVersion]; v != "" {
+		needs = "AgentAPI " + v + " or later"
+	}
+	by := ""
+	if v := meta[metaWriterVersion]; v != "" {
+		by = ", last written by AgentAPI " + v
+	}
+	return fmt.Errorf("needs %s (schema %d%s; AgentAPI %s knows schema %d): update AgentAPI (agentapi update), or use another state database",
+		needs, schema, by, version.Version, len(migrations))
+}
+
+// migrateTo runs the migration to version, and records the version and the
+// oldest schema that may write the database, in one transaction.
 func migrateTo(db *sql.DB, version int) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(migrations[version-1]); err != nil {
+	if _, err := tx.Exec(migrations[version-1].sql); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -292,7 +359,28 @@ func migrateTo(db *sql.DB, version int) error {
 		_ = tx.Rollback()
 		return err
 	}
+	if minWriter := minWriterOf(version); minWriter > 1 {
+		for _, kv := range [][2]string{
+			{metaMinWriterSchema, strconv.Itoa(minWriter)},
+			{metaMinWriterVersion, migrations[minWriter-1].since},
+		} {
+			if err := metaWrite(kv[0], kv[1])(tx); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+	}
 	return tx.Commit()
+}
+
+// minWriterOf returns the oldest schema that may write a database of schema
+// version.
+func minWriterOf(version int) int {
+	minWriter := 1
+	for _, m := range migrations[:version] {
+		minWriter = max(minWriter, m.minWriter)
+	}
+	return minWriter
 }
 
 // Load reads everything stored. Call it before any writes. From then on
@@ -315,7 +403,10 @@ func (d *DB) Load() (Snapshot, error) {
 		return snap, err
 	}
 	_, snap.Clean = snap.Meta[metaClean]
-	delete(snap.Meta, metaClean)
+	// What the schema's versions take isn't the conversation's.
+	for _, key := range []string{metaClean, metaMinWriterSchema, metaMinWriterVersion, metaWriterVersion} {
+		delete(snap.Meta, key)
+	}
 
 	if err := d.scanJSON("messages", "SELECT seq, data FROM messages ORDER BY id", func(seq uint64, data []byte) error {
 		var m conv.Message
@@ -575,6 +666,14 @@ func (d *DB) TruncateMessages(fromID int) {
 	})
 }
 
+// DeleteTask removes the task the user's message id started.
+func (d *DB) DeleteTask(id int) {
+	d.enqueue("task:"+strconv.Itoa(id), func(tx *sql.Tx) error {
+		_, err := tx.Exec("DELETE FROM tasks WHERE id = ?", id)
+		return err
+	})
+}
+
 // PutTask stores the task the user's message id started, as data (JSON).
 func (d *DB) PutTask(id int, data []byte, seq uint64) {
 	d.enqueue("task:"+strconv.Itoa(id), func(tx *sql.Tx) error {
@@ -795,7 +894,7 @@ func (d *DB) Close() error {
 	var errs []error
 	if lost != nil {
 		errs = append(errs, fmt.Errorf("changes to the state database were lost: %w", lost))
-	} else if err := d.apply([]op{{run: metaWrite(metaClean, "1")}}); err != nil {
+	} else if err := d.apply([]op{{run: metaWrite(metaClean, "1")}, {run: metaWrite(metaWriterVersion, version.Version)}}); err != nil {
 		errs = append(errs, fmt.Errorf("mark the state database as closed: %w", err))
 	}
 	if err := d.db.Close(); err != nil {

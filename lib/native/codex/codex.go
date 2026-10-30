@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -55,15 +54,6 @@ type Config struct {
 	Clock quartz.Clock
 }
 
-const (
-	// inboxSize is how many messages from app-server wait for the read
-	// loop.
-	inboxSize = 256
-	// exitWait is how long a failed Start waits for app-server's exit
-	// status, which says why it failed.
-	exitWait = 3 * time.Second
-)
-
 // NewFactory checks the command line and returns a factory for adapters
 // that run it. An empty resume ref starts a new thread; otherwise the
 // adapter resumes that thread, or with Fork, a copy of it.
@@ -100,35 +90,27 @@ type Adapter struct {
 	// fork opens a copy of the thread resumeRef.
 	fork bool
 	log  *slog.Logger
+	// drift counts what app-server sends that the adapter doesn't read.
+	drift *agentio.Drift
 	// prefix makes request IDs unique across processes: app-server numbers
 	// its requests from 0 in every process.
 	prefix string
 
-	proc   procutil.Process
+	// host runs app-server and the read loop.
+	host   *agentio.Host
 	sink   native.Sink
 	writer *agentio.Writer
 	// calls are the requests waiting for app-server's response.
 	calls  agentio.Calls[int64, callResult]
 	nextID atomic.Int64
 
-	inbox chan rpcMessage
-	tasks chan func()
-	// loopDone is closed when the read loop has finished.
-	loopDone chan struct{}
-	// exited is closed when the process has exited and the loop finished.
-	exited  chan struct{}
-	exitErr error
-
 	mu       sync.Mutex
 	started  bool
-	closed   bool
 	threadID string
 	// activeTurn is the turn app-server is working on, or ""; turnDone is
 	// closed when it ends.
 	activeTurn string
 	turnDone   chan struct{}
-	// closeGrace is how long Close waits for a turn it interrupted to end.
-	closeGrace time.Duration
 	// interrupting marks the active turn while Interrupt asks app-server
 	// to stop it.
 	interrupting map[string]bool
@@ -149,8 +131,7 @@ type Adapter struct {
 	collabStale bool
 	planWait    string
 
-	closeOnce sync.Once
-	// handled counts the messages the read loop has handled.
+	// handled counts the lines the read loop has handled.
 	handled atomic.Int64
 
 	// loop is owned by the read loop.
@@ -181,34 +162,39 @@ func newAdapter(cfg Config, opts launchOptions, resumeRef string) *Adapter {
 		logger = slog.Default()
 	}
 	if cfg.SnapshotInterval == 0 {
-		cfg.SnapshotInterval = 100 * time.Millisecond
+		cfg.SnapshotInterval = agentio.SnapshotInterval
 	}
 	if cfg.InterruptTimeout == 0 {
-		cfg.InterruptTimeout = 10 * time.Second
+		cfg.InterruptTimeout = agentio.InterruptTimeout
 	}
 	if cfg.Clock == nil {
 		cfg.Clock = quartz.NewReal()
 	}
+	logger = logger.With("agent", "codex")
 	a := &Adapter{
-		cfg:       cfg,
-		opts:      opts,
-		resumeRef: resumeRef,
-		log:       logger.With("agent", "codex"),
-		prefix:    native.RequestPrefix(),
-		inbox:     make(chan rpcMessage, inboxSize),
-		// Unbuffered: a task handed over is one the loop runs.
-		tasks:        make(chan func()),
-		loopDone:     make(chan struct{}),
-		exited:       make(chan struct{}),
+		cfg:          cfg,
+		opts:         opts,
+		resumeRef:    resumeRef,
+		log:          logger,
+		drift:        agentio.NewDrift("Codex app-server", logger),
+		prefix:       native.RequestPrefix(),
 		writer:       agentio.NewWriter("codex app-server"),
 		interrupting: make(map[string]bool),
 		requests:     make(map[string]*pendingRequest),
-		closeGrace:   closeInterruptGrace,
 	}
-	if cfg.StopTimeout > 0 {
-		a.closeGrace = cfg.StopTimeout
-	}
+	a.host = agentio.NewHost(agentio.HostConfig{
+		Name:           "Codex app-server",
+		Logger:         a.log,
+		Clock:          cfg.Clock,
+		Start:          cfg.StartProcess,
+		Writer:         a.writer,
+		StdinGrace:     cfg.StopTimeout,
+		TermGrace:      cfg.StopTimeout,
+		InterruptGrace: cfg.StopTimeout,
+	})
 	a.loop.a = a
+	a.loop.throttle = agentio.NewThrottle[*msgState](cfg.Clock, cfg.SnapshotInterval)
+	a.loop.interrupt = agentio.NewInterruptDeadline(cfg.Clock, cfg.InterruptTimeout)
 	return a
 }
 
@@ -227,64 +213,25 @@ func (a *Adapter) command() []string {
 // a login it returns a native.LoginRequiredError.
 func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	a.mu.Lock()
-	if a.closed {
-		a.mu.Unlock()
-		return errClosed
-	}
-	if a.proc != nil {
-		a.mu.Unlock()
-		return errors.New("adapter already started")
-	}
-	launch := a.cfg.StartProcess
-	if launch == nil {
-		launch = procutil.Start
-	}
-	proc, err := launch(procutil.Command{
+	a.sink = sink
+	a.mu.Unlock()
+	// The read loop handles app-server's messages in order, and is the
+	// only goroutine that calls the sink.
+	_, err := a.host.Launch(procutil.Command{
 		Program: a.cfg.Program,
 		Args:    a.command(),
 		Dir:     a.cwd(),
 		Env:     procenv.ForAgent(a.cfg.Env),
 		Logger:  a.log,
-	})
+	}, agentio.Loop{Line: a.handleLine, NextWake: a.loop.nextWake, Wake: a.loop.wake, Ended: a.outputEnded})
 	if err != nil {
-		// The adapter is done: Close and another Start must not close the
-		// channels again.
-		a.closed = true
 		a.calls.Close(errExited)
-		close(a.loopDone)
-		close(a.exited)
-		a.mu.Unlock()
 		return err
 	}
-	a.proc = proc
-	a.sink = sink
-	a.writer.Attach(proc.Stdin())
-	a.mu.Unlock()
-
-	go a.read(proc.Stdout())
-	go a.run()
-	go func() {
-		err := proc.Wait()
-		<-a.loopDone
-		a.exitErr = procutil.WithStderr(err, proc.StderrTail())
-		close(a.exited)
-	}()
 
 	if err := a.handshake(ctx); err != nil {
-		if a.loopEnded() {
-			// app-server exited: its stderr says why (a bad -c value, …).
-			select {
-			case <-a.exited:
-				if a.exitErr != nil {
-					return fmt.Errorf("%w (%v)", err, a.exitErr)
-				}
-				if tail := proc.StderrTail(); tail != "" {
-					return fmt.Errorf("%w: %s", err, tail)
-				}
-			case <-time.After(exitWait):
-			}
-		}
-		return err
+		// Once app-server exited, its stderr says why (a bad -c value, …).
+		return a.host.StartError(err)
 	}
 	a.mu.Lock()
 	a.started = true
@@ -312,8 +259,10 @@ func (a *Adapter) handshake(ctx context.Context) error {
 		return fmt.Errorf("initialize codex app-server: %w", err)
 	}
 	var info initializeResponse
-	if json.Unmarshal(result, &info) == nil && info.UserAgent != "" {
+	if a.drift.Decode("initialize response", result, &info) == nil && info.UserAgent != "" {
 		a.log.Debug("Connected to codex app-server", "userAgent", info.UserAgent)
+		// Until the thread says which version of the CLI runs.
+		a.drift.SetVersion(info.UserAgent)
 	}
 	if err := a.notify(ctx, "initialized", nil); err != nil {
 		return err
@@ -384,13 +333,10 @@ func (a *Adapter) openThread(ctx context.Context, method string, params any, res
 	return nil
 }
 
+// loopEnded reports whether app-server's output ended, which ends the
+// read loop.
 func (a *Adapter) loopEnded() bool {
-	select {
-	case <-a.loopDone:
-		return true
-	default:
-		return false
-	}
+	return a.host.OutputEnded()
 }
 
 // session returns the thread and the turn app-server is working on.
@@ -428,7 +374,7 @@ func (a *Adapter) startTurn(ctx context.Context, input native.Input, implement n
 			return
 		}
 		var resp turnResponse
-		if json.Unmarshal(result, &resp) == nil && resp.Turn.ID != "" {
+		if a.drift.Decode("turn/start response", result, &resp) == nil && resp.Turn.ID != "" {
 			a.loop.beginTurn(resp.Turn.ID)
 		}
 	})
@@ -532,38 +478,23 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 	return turnCallError("interrupt turn", err)
 }
 
-// closeInterruptGrace is how long Close waits for a turn it interrupted to
-// end, unless Config.StopTimeout says otherwise (Adapter.closeGrace).
-const closeInterruptGrace = 3 * time.Second
-
 // interruptForClose interrupts the turn app-server works on, if any, and
-// waits for it to end, for app-server to exit, or for the grace to pass.
-func (a *Adapter) interruptForClose() {
+// returns the channel its end closes.
+func (a *Adapter) interruptForClose(ctx context.Context) <-chan struct{} {
 	a.mu.Lock()
 	done := a.turnDone
 	a.mu.Unlock()
 	if done == nil {
-		return
+		return nil
 	}
 	// Not waited for: a write app-server doesn't read must not hold Close,
 	// whose closing stdin makes it fail.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	go func() {
 		if err := a.Interrupt(ctx); err != nil && !errors.Is(err, native.ErrNoActiveTurn) && ctx.Err() == nil {
 			a.log.Debug("Failed to interrupt the turn before closing", "error", err)
 		}
 	}()
-	// Real time, as procutil.Stop's graces could be on a clock nobody
-	// advances once the adapter is retired.
-	timer := time.NewTimer(a.closeGrace)
-	defer timer.Stop()
-	select {
-	case <-done:
-	case <-a.exited:
-	case <-timer.C:
-		a.log.Warn("Codex app-server didn't end its turn in time; closing it anyway")
-	}
+	return done
 }
 
 // markInterrupting marks turnID as being interrupted, unless it ended. A
@@ -603,10 +534,10 @@ func inputItems(input native.Input) []userInput {
 	return items
 }
 
-// Wait implements native.Adapter.
+// Wait implements native.Adapter: it returns once app-server exited and
+// the loop handled its output (see agentio.Host).
 func (a *Adapter) Wait() error {
-	<-a.exited
-	return a.exitErr
+	return a.host.Wait()
 }
 
 // Close implements native.Adapter: it interrupts the turn app-server works
@@ -615,43 +546,15 @@ func (a *Adapter) Wait() error {
 // stdin (it exits on EOF), then sends SIGTERM and SIGKILL if it doesn't
 // exit (see Config.StopTimeout).
 func (a *Adapter) Close() error {
-	a.closeOnce.Do(func() {
-		a.mu.Lock()
-		proc := a.proc
-		if proc == nil && !a.closed {
-			// Never started, so nothing else closes them.
-			a.calls.Close(errExited)
-			close(a.loopDone)
-			close(a.exited)
-		}
-		a.closed = true
-		a.mu.Unlock()
-		if proc == nil {
-			return
-		}
-		a.interruptForClose()
-		procutil.Stop(proc, a.exited, procutil.StopOptions{
-			StdinGrace: a.cfg.StopTimeout,
-			TermGrace:  a.cfg.StopTimeout,
-			Clock:      a.cfg.Clock,
-			Logger:     a.log,
-			Name:       "Codex app-server",
-		})
-	})
-	// Stop returns after the kill without waiting for the exit; a Reload
-	// resumes the same thread at once, which the old process must not
-	// still hold.
-	<-a.exited
+	a.host.Close(a.interruptForClose)
+	// The loop does so when the output ends, if it ran.
+	a.calls.Close(errExited)
 	return nil
 }
 
 // --- JSON-RPC plumbing ---
 
-var (
-	errExited = errors.New("codex app-server exited")
-	// errClosed is returned by Start after Close.
-	errClosed = errors.New("the adapter was closed")
-)
+var errExited = errors.New("codex app-server exited")
 
 // call sends a request and waits for its response, bounded by ctx. Once
 // the loop has ended, waiting calls fail with errExited. A request that
@@ -699,61 +602,32 @@ func (a *Adapter) writeAsync(v any) {
 // inLoop runs f in the read loop, so it may call the sink. Unless it
 // returns an error, the loop runs f.
 func (a *Adapter) inLoop(ctx context.Context, f func()) error {
-	select {
-	case a.tasks <- f:
-		return nil
-	case <-a.loopDone:
+	err := a.host.Post(ctx, f)
+	if errors.Is(err, agentio.ErrLoopEnded) {
 		return errExited
-	case <-ctx.Done():
-		return ctx.Err()
 	}
+	return err
 }
 
-// read decodes app-server's stdout into the inbox until EOF.
-func (a *Adapter) read(r io.Reader) {
-	defer close(a.inbox)
-	agentio.ReadLines(r, "codex app-server", 0, a.log, func(line []byte) {
-		var msg rpcMessage
-		if err := json.Unmarshal(line, &msg); err != nil {
-			// The line isn't logged: it can hold the user's prompt.
-			a.log.Warn("Ignoring a line from codex app-server that is not JSON", "error", err)
-			return
-		}
-		a.inbox <- msg
-	})
+// handleLine handles a line of app-server's output in the read loop.
+func (a *Adapter) handleLine(line []byte) {
+	defer a.handled.Add(1)
+	var msg rpcMessage
+	changed, err := agentio.Decode(line, &msg)
+	if err != nil {
+		// The line isn't logged: it can hold the user's prompt.
+		a.log.Warn("Ignoring a line from codex app-server that is not JSON", "error", err)
+		return
+	}
+	a.drift.Changed(msg.kind(), changed)
+	a.dispatch(msg)
 }
 
-// run is the read loop: it handles app-server's messages in order, and
-// is the only goroutine that calls the sink.
-func (a *Adapter) run() {
-	defer close(a.loopDone)
-	timer := a.cfg.Clock.NewTimer(time.Hour, "codex", "wake")
-	timer.Stop()
-	var wakeAt time.Time
-	for {
-		select {
-		case msg, ok := <-a.inbox:
-			if !ok {
-				a.loop.exited()
-				a.calls.Close(errExited)
-				return
-			}
-			a.dispatch(msg)
-			a.handled.Add(1)
-		case f := <-a.tasks:
-			f()
-		case <-timer.C:
-			wakeAt = time.Time{}
-			a.loop.wake()
-		}
-		if next := a.loop.nextWake(); !next.Equal(wakeAt) {
-			timer.Stop()
-			wakeAt = next
-			if !next.IsZero() {
-				timer.Reset(max(a.cfg.Clock.Until(next), time.Millisecond), "codex", "wake")
-			}
-		}
-	}
+// outputEnded handles the end of app-server's output, the read loop's last
+// call: the process is gone.
+func (a *Adapter) outputEnded() {
+	a.loop.exited()
+	a.calls.Close(errExited)
 }
 
 // dispatch routes one message from app-server.

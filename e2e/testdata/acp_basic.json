@@ -1,6 +1,0 @@
-[
-  {
-    "expectMessage": "This is a test message.",
-    "responseMessage": "Echo: This is a test message."
-  }
-]

@@ -10,7 +10,7 @@ import (
 // A change in the number of pending requests is also a status change.
 func (e *EventEmitter) EmitRequest(state native.RequestState) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	before := e.statusChangeBody().PendingRequests
 	idx := slices.IndexFunc(e.requests, func(r native.RequestState) bool { return r.ID == state.ID })
 	if idx < 0 && state.Status != native.RequestStatusPending {
@@ -59,14 +59,14 @@ func (e *EventEmitter) trimRequestsLocked() {
 // Requests returns the stored structured requests, oldest first.
 func (e *EventEmitter) Requests() []native.RequestState {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	return slices.Clone(e.requests)
 }
 
 // Request returns the stored request with the given ID.
 func (e *EventEmitter) Request(id string) (native.RequestState, bool) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	if i := slices.IndexFunc(e.requests, func(r native.RequestState) bool { return r.ID == id }); i >= 0 {
 		return e.requests[i], true
 	}

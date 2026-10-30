@@ -93,6 +93,46 @@ func TestRespondFailureKeepsRequestPending(t *testing.T) {
 	assert.Len(t, c.PendingRequests(), 1)
 }
 
+// An answer the agent didn't confirm may have reached it: the request
+// takes no other answer until the agent closes it or the turn ends.
+func TestUnconfirmedAnswerHoldsTheRequest(t *testing.T) {
+	unconfirmed := native.Unconfirmed(context.DeadlineExceeded)
+	for _, tc := range []struct {
+		name   string
+		close  func(a *nativetest.Adapter)
+		status native.RequestStatus
+	}{
+		{"closed by the agent", func(a *nativetest.Adapter) { a.Sink().RequestClosed("r1") }, native.RequestStatusWithdrawn},
+		{"the turn ends", func(a *nativetest.Adapter) { a.Sink().TurnCompleted(native.TurnResult{}) }, native.RequestStatusExpired},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			c, factory, rec := start(t, func(a *nativetest.Adapter) {
+				a.RespondErr = unconfirmed
+				a.OnRespond = func(context.Context) { calls++ }
+			}, native.Config{})
+			a := factory.Last()
+			require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
+			a.Sink().RequestOpened(approval("r1"))
+
+			state, err := c.Respond(context.Background(), "r1", native.Response{OptionID: "allow"})
+			require.ErrorIs(t, err, native.ErrUnconfirmed)
+			assert.Equal(t, native.RequestStatusPending, state.Status)
+			assert.Equal(t, conv.StatusChanging, c.Status(), "the answer is on its way")
+			_, err = c.Respond(context.Background(), "r1", native.Response{OptionID: "deny"})
+			require.ErrorIs(t, err, native.ErrRequestNotFound)
+			assert.Equal(t, 1, calls, "the adapter got one answer")
+			assert.Len(t, rec.get().requests, 1, "nothing changed")
+
+			tc.close(a)
+			r1, _ := c.Request("r1")
+			assert.Equal(t, tc.status, r1.Status)
+			assert.Nil(t, r1.Response)
+			assert.Empty(t, c.PendingRequests())
+		})
+	}
+}
+
 func TestWithdrawnWhileRespondingFails(t *testing.T) {
 	boom := errors.New("boom")
 	c, factory, _ := start(t, func(a *nativetest.Adapter) {

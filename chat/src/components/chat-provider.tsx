@@ -45,13 +45,14 @@ import {
   type RequestResponse,
 } from "@/lib/native-requests";
 import type {LoginRequired} from "@/lib/login";
+import type {ConnectionStatus} from "@/lib/event-source";
 import {getAgentState, waitingFor, type AgentStateKind, type TokenTotals, type WaitingFor} from "@/lib/session-status";
 import {SyncTracker} from "@/lib/session-sync";
 import {resolveAgentAPIUrl} from "@/lib/agentapi-url";
 import {isDraftMessage, lastUserMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
 import type {Timeline, ToolCall} from "@/lib/task-timeline";
 import type {QueuedMessage} from "@/lib/queue";
-import {tasksByMessage, type ServerTask} from "@/lib/server-tasks";
+import {steeredMessages, tasksByMessage, type ServerTask} from "@/lib/server-tasks";
 import {useEventStream} from "./use-event-stream";
 import {useQueue} from "./use-queue";
 import {useSessionCache} from "./use-session-cache";
@@ -71,8 +72,6 @@ export interface SendResult {
   // The message was added to the turn the agent is working on.
   steered?: boolean;
 }
-
-export type ConnectionStatus = "connected" | "reconnecting" | "offline";
 
 export interface FileUploadResponse {
   ok: boolean;
@@ -365,13 +364,8 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   useSessionCache({agentAPIUrl, synced, messages, richMessages, requests, tasks: serverTasks, transport});
   const pendingRequestCount = useMemo(() => pendingRequests(requests).length, [requests]);
   const agentStarting = lifecycle === "starting";
-  const agentState = getAgentState({
-    serverStatus,
-    connectionStatus,
-    terminalPrompt,
-    pendingRequestCount,
-    loginRequired: loginRequired !== null,
-  });
+  const needs = {terminalPrompt, pendingRequestCount, loginRequired: loginRequired !== null, limitStop: limitStop !== null};
+  const agentState = getAgentState({serverStatus, connectionStatus, ...needs});
   const dispatch = useMemo<DispatchContext>(
     () => ({transport, capabilities: agentStarting ? null : capabilities, serverStatus, pendingRequestCount}),
     [agentStarting, capabilities, pendingRequestCount, serverStatus, transport],
@@ -383,7 +377,8 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const sessionCost = useSessionCost(api, chatFeatures.cost, serverStatus, lifecycle !== "starting" && lifecycle !== "restarting");
   const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
   const currentTask = useMemo(() => lastUserMessage(messages), [messages]);
-  const transcript = useTranscript(messages, richMessages);
+  const steered = useMemo(() => steeredMessages(serverTasks), [serverTasks]);
+  const transcript = useTranscript(messages, richMessages, steered);
   const taskByMessage = useMemo(() => tasksByMessage(serverTasks), [serverTasks]);
 
   // Rendered as <title> rather than set on document.title from an effect:
@@ -651,7 +646,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     limitStop,
     agentStarting,
     agentState,
-    waitingFor: waitingFor(agentState, loginRequired !== null),
+    waitingFor: waitingFor(agentState, needs),
     currentTask,
     dispatch,
     requests,

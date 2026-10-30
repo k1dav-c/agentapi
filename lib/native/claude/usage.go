@@ -49,7 +49,7 @@ func windowLabel(id string) string {
 // handleRateLimit records a rate_limit_event. Read loop only.
 func (a *Adapter) handleRateLimit(raw json.RawMessage) {
 	var info rateLimitInfo
-	if decode(raw, &info) != nil {
+	if a.drift.Decode("rate_limit_event", raw, &info) != nil {
 		return
 	}
 	limits := a.usage.RateLimits
@@ -164,7 +164,7 @@ func (a *Adapter) contextUsage(response json.RawMessage) {
 		TotalTokens int `json:"totalTokens"`
 		MaxTokens   int `json:"maxTokens"`
 	}
-	if decode(response, &usage) != nil || usage.MaxTokens <= 0 {
+	if a.drift.Decode("get_context_usage response", response, &usage) != nil || usage.MaxTokens <= 0 {
 		return
 	}
 	a.usage.Context = &native.ContextUsage{Used: usage.TotalTokens, Size: usage.MaxTokens}

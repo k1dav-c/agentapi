@@ -34,9 +34,6 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 	if db == nil {
 		return restoredState{}, nil
 	}
-	if config.Transport == TransportACP {
-		return restoredState{}, fmt.Errorf("a state database needs the native or PTY transport")
-	}
 	snap, err := db.Load()
 	if err != nil {
 		return restoredState{}, fmt.Errorf("load state database: %w", err)

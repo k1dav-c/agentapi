@@ -20,6 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
+	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -278,7 +280,7 @@ func TestCloseBeforeStart(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, a.Close())
 	require.NoError(t, a.Wait())
-	require.ErrorIs(t, a.Start(context.Background(), newRecorder(t)), errClosed)
+	require.ErrorIs(t, a.Start(context.Background(), newRecorder(t)), agentio.ErrClosed)
 }
 
 // A Close racing a failed Start used to close the adapter's channels twice.
@@ -498,7 +500,8 @@ func TestOfferedOptionsAnswerTheRequest(t *testing.T) {
 	proc := newFakeProc()
 	go func() { _, _ = io.Copy(io.Discard, proc.stdinR) }()
 	a := newAdapter(Config{Logger: slog.New(slog.DiscardHandler)}, launchOptions{}, "")
-	a.proc, a.sink = proc, newRecorder(t)
+	a.sink = newRecorder(t)
+	a.writer.Attach(proc.Stdin())
 	t.Cleanup(func() { proc.exit(nil) })
 	for i, tc := range []struct{ method, params string }{
 		{methodCommandApproval, `{"turnId":"t","itemId":"i","command":"make","proposedExecpolicyAmendment":["make"],
@@ -831,7 +834,7 @@ func TestCloseInterruptsTheTurn(t *testing.T) {
 	h := newHarness(t, "", nil)
 	h.boot()
 	h.beginTurn("turn-1")
-	h.a.closeGrace = waitTimeout
+	h.a.host.InterruptGrace = waitTimeout
 	closed := make(chan error, 1)
 	go func() { closed <- h.a.Close() }()
 
@@ -860,7 +863,7 @@ func TestCloseGivesUpOnTheTurn(t *testing.T) {
 	h := newHarness(t, "", nil)
 	h.boot()
 	h.beginTurn("turn-1")
-	h.a.closeGrace = 30 * time.Millisecond
+	h.a.host.InterruptGrace = 30 * time.Millisecond
 	start := time.Now()
 	require.NoError(t, h.a.Close())
 	h.expectSent("turn/interrupt")
@@ -872,7 +875,7 @@ func TestCloseGivesUpOnTheTurn(t *testing.T) {
 func TestCloseWithoutATurn(t *testing.T) {
 	h := newHarness(t, "", nil)
 	h.boot()
-	h.a.closeGrace = waitTimeout
+	h.a.host.InterruptGrace = waitTimeout
 	require.NoError(t, h.a.Close())
 	h.expectNothingSent()
 }
@@ -962,4 +965,86 @@ func TestTurnStartWithoutAnswerIsUnconfirmed(t *testing.T) {
 	h.proc.exit(nil)
 	h.eventually(h.a.loopEnded, "the loop to end")
 	assert.NotErrorIs(t, h.a.StartTurn(context.Background(), native.Input{Text: "go"}), native.ErrUnconfirmed)
+}
+
+// A notification whose fields changed type is read all the same: a lost
+// turn/completed would leave the turn running for good. Each change, and
+// each notification the adapter doesn't know, is logged once, with the
+// CLI's version.
+func TestDriftedNotificationsAreRead(t *testing.T) {
+	logger, log := nativetest.NewLog()
+	h := newHarness(t, "", nil, func(c *Config) { c.Logger = logger })
+	h.boot()
+	h.beginTurn("turn-1")
+	for range 2 {
+		h.feedJSON(`{"method":"turn/paused","params":{"threadId":"` + testThread + `"}}`)
+	}
+	// Opted out of, which an older app-server sends anyway.
+	h.feedJSON(`{"method":"thread/settings/updated","params":{"threadId":"` + testThread + `"}}`)
+	h.feedJSON(`{"method":"turn/completed","emittedAtMs":"soon","params":{"threadId":"` + testThread + `","turn":{"id":"turn-1","items":[],"status":"completed","error":"none"}}}`)
+	h.sync()
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, snapshot(h.rec).completions)
+	h.beginTurn("turn-2")
+	h.completeTurn("turn-2", "completed", `,"error":"none"`)
+	assert.Len(t, snapshot(h.rec).completions, 2)
+
+	assert.Len(t, log.Matching("field=emittedAtMs", "version=0.160.0"), 1)
+	assert.Len(t, log.Matching("type=turn/completed", "field=turn.error", "value=string"), 1, "once per kind: %v", log.Warnings())
+	assert.Len(t, log.Matching("type=turn/paused", "version=0.160.0"), 1)
+	assert.Equal(t, 2, h.a.drift.Counts()["unknown turn/paused"])
+	assert.Empty(t, log.Matching("type=thread/settings/updated"))
+}
+
+// stdinFunc stands in for app-server's stdin.
+type stdinFunc func([]byte) (int, error)
+
+func (f stdinFunc) Write(p []byte) (int, error) { return f(p) }
+
+// An answer whose write didn't finish may yet reach app-server, so the
+// request takes no other answer, and no dismissal contradicts it at the
+// end of the turn. Once app-server has it, the request closes.
+func TestUnconfirmedAnswerIsNotSentTwice(t *testing.T) {
+	h := newHarness(t, "", nil)
+	h.boot()
+	h.beginTurn("turn-1")
+	h.feedJSON(`{"id":7,"method":"item/commandExecution/requestApproval","params":{"threadId":"` + testThread + `","turnId":"turn-1","itemId":"exec-1","command":"ls","cwd":"/work"}}`)
+	h.sync()
+	id := h.requestID(json.RawMessage("7"))
+	// app-server stops reading its input for a while.
+	release := make(chan struct{})
+	h.a.writer.Attach(stdinFunc(func(p []byte) (int, error) {
+		<-release
+		return h.proc.stdinW.Write(p)
+	}))
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := h.a.Respond(ctx, id, native.Response{OptionID: "accept"})
+	require.ErrorIs(t, err, native.ErrUnconfirmed)
+	require.ErrorIs(t, h.a.Respond(context.Background(), id, native.Response{OptionID: "decline"}), native.ErrRequestNotFound,
+		"a second answer could contradict the first")
+
+	close(release)
+	sent := h.expectSent("")
+	assert.JSONEq(t, `{"decision":"accept"}`, string(sent.Result))
+	h.feedJSON(`{"method":"serverRequest/resolved","params":{"threadId":"` + testThread + `","requestId":7}}`)
+	h.sync()
+	assert.Equal(t, []string{id}, snapshot(h.rec).closed, "the conversation didn't resolve it")
+
+	h.feedJSON(`{"id":8,"method":"item/commandExecution/requestApproval","params":{"threadId":"` + testThread + `","turnId":"turn-1","itemId":"exec-2","command":"ls","cwd":"/work"}}`)
+	h.sync()
+	id = h.requestID(json.RawMessage("8"))
+	blocked := make(chan struct{})
+	h.a.writer.Attach(stdinFunc(func([]byte) (int, error) {
+		<-blocked
+		return 0, io.ErrClosedPipe
+	}))
+	ctx, cancel = context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, h.a.Respond(ctx, id, native.Response{OptionID: "accept"}), native.ErrUnconfirmed)
+	// Whether that answer reached app-server, the adapter can't tell: the
+	// end of the turn sends no dismissal.
+	close(blocked)
+	h.a.writer.Attach(h.proc.stdinW)
+	h.completeTurn("turn-1", "completed", "")
+	h.expectNothingSent()
 }

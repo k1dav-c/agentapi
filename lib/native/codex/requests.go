@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -50,6 +51,9 @@ type pendingRequest struct {
 	questions []native.Question
 	form      map[string]formField
 	answered  bool
+	// unconfirmed: the answer went out, but its write didn't finish, so
+	// app-server may not have it. The request takes no other answer.
+	unconfirmed bool
 	// answer is the result of the request_user_input tool call once it is
 	// answered, as the chat shows it.
 	answer string
@@ -128,7 +132,7 @@ func (s *loopState) toolItem(itemID string) *itemState {
 
 func (s *loopState) commandApproval(msg rpcMessage) (*pendingRequest, native.Request, bool) {
 	var p commandExecutionRequestApprovalParams
-	if !decode(msg, &p) {
+	if !s.decode(msg, &p) {
 		return nil, native.Request{}, false
 	}
 	// The command that runs, not Codex's reading of it: that may leave out
@@ -277,7 +281,7 @@ func sortOptions(options []native.RequestOption) {
 
 func (s *loopState) fileChangeApproval(msg rpcMessage) (*pendingRequest, native.Request, bool) {
 	var p fileChangeRequestApprovalParams
-	if !decode(msg, &p) {
+	if !s.decode(msg, &p) {
 		return nil, native.Request{}, false
 	}
 	req := native.Request{Kind: native.RequestKindApproval, Title: "Edit files", ToolName: "apply_patch", ToolUseID: p.ItemID}
@@ -342,7 +346,7 @@ func userInputQuestionsInput(questions []userInputQuestion) json.RawMessage {
 
 func (s *loopState) userInputRequest(msg rpcMessage) (*pendingRequest, native.Request, bool) {
 	var p toolRequestUserInputParams
-	if !decode(msg, &p) || len(p.Questions) == 0 {
+	if !s.decode(msg, &p) || len(p.Questions) == 0 {
 		return nil, native.Request{}, false
 	}
 	input := userInputQuestionsInput(p.Questions)
@@ -377,7 +381,7 @@ func (s *loopState) userInputRequest(msg rpcMessage) (*pendingRequest, native.Re
 
 func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.Request, bool) {
 	var p mcpServerElicitationRequestParams
-	if !decode(msg, &p) {
+	if !s.decode(msg, &p) {
 		return nil, native.Request{}, false
 	}
 	r := &pendingRequest{turnID: p.TurnID, results: map[string]any{}}
@@ -497,7 +501,7 @@ func formQuestion(name string, prop mcpElicitationProperty) (native.Question, fo
 
 func (s *loopState) permissionsRequest(msg rpcMessage) (*pendingRequest, native.Request, bool) {
 	var p permissionsRequestApprovalParams
-	if !decode(msg, &p) {
+	if !s.decode(msg, &p) {
 		return nil, native.Request{}, false
 	}
 	req := native.Request{
@@ -615,7 +619,11 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 
 	if err := a.write(ctx, rpcResponse{JSONRPC: "2.0", ID: r.rpcID, Result: result}); err != nil {
 		a.mu.Lock()
-		r.answered = false
+		if errors.Is(err, native.ErrUnconfirmed) {
+			r.unconfirmed = true
+		} else {
+			r.answered = false
+		}
 		a.mu.Unlock()
 		return err
 	}
@@ -636,15 +644,16 @@ func (s *loopState) requestResolved(rpcID string) {
 			break
 		}
 	}
-	answered, answer := false, ""
+	answered, unconfirmed, answer := false, false, ""
 	if r != nil {
-		answered, answer = r.answered, r.answer
+		answered, unconfirmed, answer = r.answered, r.unconfirmed, r.answer
 	}
 	s.a.mu.Unlock()
 	if r == nil {
 		return
 	}
-	if !answered {
+	if !answered || unconfirmed {
+		// The conversation resolved an answer app-server confirmed.
 		s.sink().RequestClosed(r.id)
 	}
 	if r.method != methodRequestUserInput || s.turn == nil {

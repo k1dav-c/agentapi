@@ -43,9 +43,9 @@ Use these commands and conventions when changing AgentAPI.
 
 ## Architecture
 
-AgentAPI is a Go HTTP server with three transports for controlling coding agents. Claude Code,
+AgentAPI is a Go HTTP server with two transports for controlling coding agents. Claude Code,
 Codex and Pi default to native mode, which uses their structured protocols. Other agents default
-to PTY mode, which parses terminal output. Experimental ACP mode uses the Agent Client Protocol.
+to PTY mode, which parses terminal output.
 
 ### Core components
 
@@ -56,12 +56,13 @@ to PTY mode, which parses terminal output. Experimental ACP mode uses the Agent 
 - `lib/screentracker/` - The PTY engine: terminal output parsing and message splitting
 - `lib/termexec/` - Terminal process execution and management
 - `lib/msgfmt/` - Message formatting for different agent types (claude, goose, aider, codex, gemini, copilot, amp, cursor, auggie, amazonq, opencode, kimi, pi, custom)
-- `lib/native/` - Native transport (the default for Claude Code, Codex and Pi): one adapter per agent (`claude/`, `codex/`, `pi/`) driving its structured protocol, `procutil/` for the child process, `nativetest/` for tests
+- `lib/native/` - Native transport (the default for Claude Code, Codex and Pi): one adapter per agent (`claude/`, `codex/`, `pi/`) driving its structured protocol, `agentio/` for the process, its loop and the JSON-lines plumbing they share, `procutil/` for the child process, `nativetest/` for tests
 - `lib/agentlog/` - The agents' session-log formats, one package per agent (`claudelog`, `codexlog`, `pilog`), shared by the native adapters, `lib/sessions` and the PTY watcher
 - `lib/sessions/` - Earlier sessions, subagents and their costs, read incrementally from the logs
 - `lib/jsonlwatcher/` - Tails a PTY agent's session log for rich messages
 - `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation
 - `lib/statedb/` - SQLite persistence of conversations, native and PTY (`--state-db`; a deprecated `--state-file` is imported into it)
+- `lib/instanceapi/` - The contract with clients that watch many AgentAPIs: who an instance is, its summary, the webhook envelope and signature, and the state a hub shows (aliased in `lib/httpapi` under the same names)
 - `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs (signed webhooks, summary streams, a proxy that opens any of them in the chat)
 - `lib/userconfig/` - The user's settings file (`~/.agentapi/config.yaml`), which agentapi server reads and agentapi hub join writes
 - `lib/registry/` - The registry of the AgentAPIs running on a machine (`~/.agentapi/instances`), which `agentapi list` reads
@@ -85,7 +86,7 @@ to PTY mode, which parses terminal output. Experimental ACP mode uses the Agent 
 6. SSE events stream updates to clients
 
 Native mode delivers messages through an adapter and receives structured events through its Sink.
-See [the architecture guide](docs/architecture.md) for all three transport flows.
+See [the architecture guide](docs/architecture.md) for both transport flows.
 
 ## Main API endpoints
 

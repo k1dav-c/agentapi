@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
 
@@ -121,6 +122,6 @@ func TestStartAfterClose(t *testing.T) {
 		return nil, errors.New("unexpected")
 	}}, nil, "")
 	require.NoError(t, a.Close())
-	assert.ErrorIs(t, a.Start(t.Context(), nativetest.NewSink(t)), errClosed)
+	assert.ErrorIs(t, a.Start(t.Context(), nativetest.NewSink(t)), agentio.ErrClosed)
 	assert.False(t, spawned)
 }

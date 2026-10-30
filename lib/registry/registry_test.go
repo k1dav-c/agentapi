@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 func TestWriteAndList(t *testing.T) {
@@ -16,8 +18,8 @@ func TestWriteAndList(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "instances")
 	hostname, _ := os.Hostname()
 	start := time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
-	later := Entry{ID: "host:3285", ServerID: "b2", URL: "http://localhost:3285", Hostname: hostname, Port: 3285, PID: os.Getpid(), StartedAt: start.Add(time.Minute)}
-	first := Entry{ID: "host:3284", Name: "api", ServerID: "a1", URL: "http://localhost:3284", Hostname: hostname, Port: 3284, PID: os.Getpid(), AuthRequired: true, StartedAt: start}
+	later := Entry{WebhookInstance: instanceapi.WebhookInstance{ID: "host:3285", ServerID: "b2", URL: "http://localhost:3285", Hostname: hostname, Port: 3285, PID: os.Getpid()}, StartedAt: start.Add(time.Minute)}
+	first := Entry{WebhookInstance: instanceapi.WebhookInstance{ID: "host:3284", Name: "api", ServerID: "a1", URL: "http://localhost:3284", Hostname: hostname, Port: 3284, PID: os.Getpid()}, AuthRequired: true, StartedAt: start}
 	path, err := Write(dir, later)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(dir, "b2.json"), path)
@@ -57,9 +59,9 @@ func TestListRemovesStale(t *testing.T) {
 	cmd := exec.Command("true")
 	require.NoError(t, cmd.Run())
 	gone := cmd.Process.Pid
-	_, err := Write(dir, Entry{ServerID: "gone", Hostname: hostname, PID: gone})
+	_, err := Write(dir, Entry{WebhookInstance: instanceapi.WebhookInstance{ServerID: "gone", Hostname: hostname, PID: gone}})
 	require.NoError(t, err)
-	_, err = Write(dir, Entry{ServerID: "remote", Hostname: "elsewhere", PID: gone})
+	_, err = Write(dir, Entry{WebhookInstance: instanceapi.WebhookInstance{ServerID: "remote", Hostname: "elsewhere", PID: gone}})
 	require.NoError(t, err)
 
 	entries, err := List(dir)

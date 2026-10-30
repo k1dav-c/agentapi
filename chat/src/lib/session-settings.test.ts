@@ -14,6 +14,8 @@ describe("session settings", () => {
   test("modes", () => {
     expect(modeMeta("bypass").label).toBe("Bypass");
     expect(modeMeta(undefined).label).toBe("Custom");
+    // A mode a newer server added shows by its name.
+    expect(modeMeta("dontAsk" as Parameters<typeof modeMeta>[0]).label).toBe("dontAsk");
   });
 
   test("model labels", () => {

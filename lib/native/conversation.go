@@ -121,6 +121,10 @@ type Conversation struct {
 	generation int
 	started    bool
 	turnActive bool
+	// unconfirmedTurn: the turn's message went out to the agent, which
+	// didn't confirm it (see deliverTurn). The agent's TurnStarted and
+	// TurnCompleted clear it.
+	unconfirmedTurn bool
 	// compacting is set while the agent compacts its context on request,
 	// which no turn may interrupt.
 	compacting bool
@@ -486,6 +490,7 @@ func (c *Conversation) beginTurnLocked(input Input) (pendingTurn, error) {
 		return pendingTurn{}, conv.ErrMessageValidationChanging
 	}
 	c.turnActive = true
+	c.unconfirmedTurn = false
 	c.setLimitStopLocked(nil)
 	turn := pendingTurn{
 		adapter: c.adapter,
@@ -499,14 +504,22 @@ func (c *Conversation) beginTurnLocked(input Input) (pendingTurn, error) {
 }
 
 // deliverTurn sends a turn that began to its adapter. If that fails, the
-// turn is taken back.
+// turn is taken back, unless the message went out unconfirmed: the agent
+// may be working on it, so the message stays and the turn stays active
+// until the agent's events end it (Interrupt ends it if the agent never
+// starts it).
 func (c *Conversation) deliverTurn(ctx context.Context, turn pendingTurn) error {
 	err := turn.adapter.StartTurn(ctx, turn.input)
 	if err == nil {
 		return nil
 	}
 	c.mu.Lock()
-	if turn.gen == c.generation {
+	switch {
+	case turn.gen != c.generation:
+	case errors.Is(err, ErrUnconfirmed):
+		// Unless the agent ended the turn meanwhile.
+		c.unconfirmedTurn = c.turnActive
+	default:
 		c.turnActive = false
 		c.messages.remove(turn.msg)
 		c.cfg.Emitter.EmitMessages(c.messages.snapshot())
@@ -569,7 +582,7 @@ func (c *Conversation) Steer(ctx context.Context, input Input) error {
 // Interrupt stops the running turn.
 func (c *Conversation) Interrupt(ctx context.Context) error {
 	c.mu.Lock()
-	adapter, caps, active := c.adapter, c.caps, c.turnActive
+	adapter, caps, active, gen := c.adapter, c.caps, c.turnActive, c.generation
 	c.mu.Unlock()
 	switch {
 	case adapter == nil:
@@ -579,5 +592,23 @@ func (c *Conversation) Interrupt(ctx context.Context) error {
 	case !active:
 		return ErrNoActiveTurn
 	}
-	return adapter.Interrupt(ctx)
+	err := adapter.Interrupt(ctx)
+	if errors.Is(err, ErrNoActiveTurn) && c.endUnconfirmedTurn(gen) {
+		return nil
+	}
+	return err
+}
+
+// endUnconfirmedTurn ends the turn of a message the agent didn't confirm
+// (see deliverTurn), if the agent of generation gen has no turn: nothing
+// else would end it. It reports whether it did.
+func (c *Conversation) endUnconfirmedTurn(gen int) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if gen != c.generation || !c.unconfirmedTurn {
+		return false
+	}
+	c.cfg.Logger.Warn("The agent never started the turn of a message it didn't confirm; ending it here")
+	c.turnCompletedLocked(TurnResult{StopReason: StopReasonInterrupted})
+	return true
 }

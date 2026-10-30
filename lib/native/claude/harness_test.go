@@ -349,7 +349,7 @@ func newTestAdapter(t *testing.T, cfg Config, resumeRef string) *Adapter {
 	a := newAdapter(cfg, args, resumeRef)
 	// A turn a test leaves running is interrupted when the adapter closes;
 	// nobody answers for the fake CLI.
-	a.closeGrace = 10 * time.Millisecond
+	a.host.InterruptGrace = 10 * time.Millisecond
 	return a
 }
 

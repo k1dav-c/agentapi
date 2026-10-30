@@ -16,7 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/registry"
 )
 
@@ -67,8 +67,8 @@ func init() {
 // instance is a registered AgentAPI and what its GET /summary said.
 type instance struct {
 	registry.Entry
-	Summary *httpapi.SummaryBody `json:"summary,omitempty"`
-	Error   string               `json:"error,omitempty"`
+	Summary *instanceapi.SummaryBody `json:"summary,omitempty"`
+	Error   string                   `json:"error,omitempty"`
 }
 
 // listInstances reads the registry in dir and asks each AgentAPI for its
@@ -97,7 +97,7 @@ func listInstances(ctx context.Context, dir, token string, client *http.Client) 
 	return instances, nil
 }
 
-func fetchSummary(ctx context.Context, client *http.Client, entry registry.Entry, token string) (*httpapi.SummaryBody, error) {
+func fetchSummary(ctx context.Context, client *http.Client, entry registry.Entry, token string) (*instanceapi.SummaryBody, error) {
 	if entry.AuthRequired && token == "" {
 		return nil, fmt.Errorf("needs an API token")
 	}
@@ -118,7 +118,7 @@ func fetchSummary(ctx context.Context, client *http.Client, entry registry.Entry
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET /summary: %s", resp.Status)
 	}
-	var summary httpapi.SummaryBody
+	var summary instanceapi.SummaryBody
 	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
 		return nil, fmt.Errorf("GET /summary: %w", err)
 	}
@@ -161,15 +161,15 @@ func writeTable(w io.Writer, instances []instance) error {
 
 // stateOf is what an AgentAPI's summary says in one word or two: why it
 // waits for the user, else whether it works, and an unread task.
-func stateOf(s httpapi.SummaryBody) string {
+func stateOf(s instanceapi.SummaryBody) string {
 	state := "idle"
 	switch {
-	case s.Attention != httpapi.AttentionNone:
+	case s.Attention != instanceapi.AttentionNone:
 		state = "needs " + string(s.Attention)
-		if s.Attention == httpapi.AttentionExited {
+		if s.Attention == instanceapi.AttentionExited {
 			state = "exited"
 		}
-	case s.Status == httpapi.AgentStatusRunning:
+	case s.Status == instanceapi.AgentStatusRunning:
 		state = "working"
 	}
 	if s.Unread {

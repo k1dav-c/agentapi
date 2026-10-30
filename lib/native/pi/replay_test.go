@@ -1,6 +1,7 @@
 package pi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -82,6 +84,44 @@ func closeAdapter(t *testing.T, h *harness) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("Close didn't return")
+	}
+}
+
+// closeEscalating closes the adapter of a Pi that doesn't exit when its
+// stdin closes: it moves the clock past the graces of procutil.Stop, for
+// SIGTERM and then, unless Pi exits, SIGKILL.
+func closeEscalating(t *testing.T, h *harness) {
+	t.Helper()
+	trap := h.clock.Trap().NewTimer("procutil", "stop")
+	defer trap.Close()
+	done := make(chan struct{})
+	go func() {
+		_ = h.a.Close()
+		close(done)
+	}()
+	ctx, cancel := context.WithTimeout(h.ctx, 10*time.Second)
+	defer cancel()
+	for {
+		calls := make(chan *quartz.Call, 1)
+		go func() {
+			if call, err := trap.Wait(ctx); err == nil {
+				calls <- call
+			}
+		}()
+		select {
+		case <-done:
+			return
+		case call := <-calls:
+			call.Release()
+			// Pi notices its stdin closed before the grace is over.
+			select {
+			case <-h.pi.stdinClosed:
+			case <-ctx.Done():
+			}
+			h.clock.Advance(call.Duration).MustWait(ctx)
+		case <-ctx.Done():
+			t.Fatal("Close didn't return")
+		}
 	}
 }
 
@@ -509,11 +549,11 @@ func TestCloseEscalates(t *testing.T) {
 	h := newHarness(t, Config{}, "", func(h *harness) {
 		h.pi.exitOnStdinClose = false
 		h.pi.ignoreTerminate = true
-		h.a.stdinGrace, h.a.termGrace = 20*time.Millisecond, 20*time.Millisecond
+		h.a.host.StdinGrace, h.a.host.TermGrace = 20*time.Millisecond, 20*time.Millisecond
 	})
 	h.answerState(noState)
 	h.started()
-	closeAdapter(t, h)
+	closeEscalating(t, h)
 	closeAdapter(t, h) // idempotent
 	assert.Equal(t, []string{"cmd:get_state", "stdin closed", "SIGTERM", "SIGKILL"}, h.pi.events())
 	assert.Error(t, h.a.Wait())

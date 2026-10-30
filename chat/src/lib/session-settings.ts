@@ -13,9 +13,11 @@ const MODES: Record<PermissionMode, ModeMeta> = {
 };
 
 // How to show a permission mode; a missing one is a mode of the agent's own
-// (e.g. Claude Code's acceptEdits after an approved plan).
+// (e.g. Claude Code's acceptEdits after an approved plan), and one a newer
+// server added shows by its name.
 export function modeMeta(mode: PermissionMode | undefined): ModeMeta {
-  return mode ? MODES[mode] : { label: "Custom", description: "The agent runs in a mode of its own." };
+  if (!mode) return { label: "Custom", description: "The agent runs in a mode of its own." };
+  return MODES[mode] ?? { label: mode, description: "A mode this chat doesn't know." };
 }
 
 // The name of model id, or the id itself until the options are known or

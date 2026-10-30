@@ -16,7 +16,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 // checkTimeout is how long the hub has to take the test event.
@@ -37,7 +37,7 @@ func checkReach(out io.Writer, hubURL, publicURL string) error {
 			"that name must resolve on the hub's machine.\n", host)
 		return nil
 	}
-	public, err := url.Parse(httpapi.ExpandPublicURL(publicURL, 1))
+	public, err := url.Parse(instanceapi.ExpandPublicURL(publicURL, 1))
 	if err == nil && loopbackHost(public.Hostname()) {
 		return fmt.Errorf("the hub at %s is on another machine, so it can't reach this one at %s: "+
 			"give --public-url the address the hub reaches this machine at, such as http://dev-1.vpn:{port}", hubURL, public.Hostname())
@@ -64,7 +64,7 @@ func checkHub(ctx context.Context, hubURL, secret string) error {
 	now := time.Now()
 	body, err := json.Marshal(map[string]any{
 		"id":         "hub-join-check-" + hex.EncodeToString(id),
-		"type":       "webhook.test",
+		"type":       instanceapi.EventWebhookTest,
 		"created_at": now.UTC(),
 		"instance":   map[string]any{"id": "agentapi-hub-join-check"},
 	})
@@ -78,10 +78,10 @@ func checkHub(ctx context.Context, hubURL, secret string) error {
 	timestamp := strconv.FormatInt(now.Unix(), 10)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "AgentAPI-Webhook/1.0")
-	req.Header.Set("X-AgentAPI-Event", "webhook.test")
-	req.Header.Set("X-AgentAPI-Timestamp", timestamp)
+	req.Header.Set(instanceapi.HeaderEvent, instanceapi.EventWebhookTest)
+	req.Header.Set(instanceapi.HeaderTimestamp, timestamp)
 	if secret != "" {
-		req.Header.Set("X-AgentAPI-Signature-256", httpapi.SignWebhook(secret, timestamp, body))
+		req.Header.Set(instanceapi.HeaderSignature, instanceapi.Sign(secret, timestamp, body))
 	}
 	client := &http.Client{
 		Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},

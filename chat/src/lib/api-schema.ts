@@ -324,7 +324,7 @@ export interface paths {
          *     - Values use the target agent's native format and are not validated by AgentAPI.
          *     - Without `restart=true`, the new configuration is loaded by the next agent session.
          *     - With `restart=true`, AgentAPI replaces the agent process immediately. AgentAPI and its HTTP/SSE endpoints stay online. A PTY agent starts over with an empty conversation; a native agent resumes its session, so the conversation stays (409 while it works on a turn).
-         *     - Restart is unavailable in ACP, schema-only, and other server modes without a process supervisor; those requests return `400`.
+         *     - Restart is unavailable in schema-only and other server modes without a process supervisor; those requests return `400`.
          *     - A missing or structurally invalid request body returns `422`.
          *     - Claude, Codex and Pi are supported; other agent types return `404`.
          */
@@ -476,7 +476,7 @@ export interface paths {
         post?: never;
         /**
          * Delete all messages and restart
-         * @description Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if restart is not supported (e.g. ACP transport), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue.
+         * @description Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if the agent can't be restarted (AgentAPI runs it without a process supervisor), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue.
          */
         delete: operations["delete-messages"];
         options?: never;
@@ -782,7 +782,7 @@ export interface paths {
         };
         /**
          * Get the conversation's tasks
-         * @description Returns the conversation's tasks: each message of the user's and the agent's turn on it, until the agent is done (stable again, with no request or terminal dialog open). Messages the user adds while a task runs belong to it (steered). A task is running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). /events sends task_update when one starts or changes.
+         * @description Returns the conversation's tasks: each message of the user's and the agent's turn on it, until the agent is done (stable again, with no request or terminal dialog open). Messages the user adds while the agent works on a task belong to it (steered). A task is running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). /events sends task_update when one starts or changes.
          */
         get: operations["get-tasks"];
         put?: never;
@@ -2167,7 +2167,7 @@ export interface components {
             terminal_columns?: number;
             /** @description Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise. */
             terminal_prompt: string;
-            /** @description Backend transport being used ('pty', 'acp' or 'native'). */
+            /** @description Backend transport being used ('pty' or 'native'). */
             transport: components["schemas"]["Transport"];
             /**
              * Format: int64
@@ -2222,7 +2222,7 @@ export interface components {
             terminal_columns?: number;
             /** @description Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise. */
             terminal_prompt: string;
-            /** @description Backend transport being used ('pty', 'acp' or 'native'). */
+            /** @description Backend transport being used ('pty' or 'native'). */
             transport: components["schemas"]["Transport"];
             /**
              * Format: int64
@@ -2322,7 +2322,7 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
-            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY, ACP) and until it is worked out. */
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. */
             spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];
@@ -2399,7 +2399,7 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
-            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY, ACP) and until it is worked out. */
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. */
             spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];
@@ -2598,7 +2598,7 @@ export interface components {
          * @example pty
          * @enum {string}
          */
-        Transport: "acp" | "native" | "pty";
+        Transport: "native" | "pty";
         UpdateQueuedMessageRequestBody: {
             /**
              * Format: uri

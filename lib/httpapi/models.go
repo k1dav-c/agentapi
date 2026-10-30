@@ -6,6 +6,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/instanceapi"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
@@ -28,19 +29,15 @@ func (m MessageType) Schema(r huma.Registry) *huma.Schema {
 	return util.OpenAPISchema(r, "MessageType", MessageTypeValues)
 }
 
-type Transport string
+// Transport is part of the instance's contract (lib/instanceapi).
+type Transport = instanceapi.Transport
 
 const (
-	TransportPTY    Transport = "pty"
-	TransportACP    Transport = "acp"
-	TransportNative Transport = "native"
+	TransportPTY    = instanceapi.TransportPTY
+	TransportNative = instanceapi.TransportNative
 )
 
-var TransportValues = []Transport{
-	TransportPTY,
-	TransportACP,
-	TransportNative,
-}
+var TransportValues = instanceapi.TransportValues
 
 // DispatchMode says what to do with a user message while the agent is busy.
 type DispatchMode string
@@ -61,10 +58,6 @@ var DispatchModeValues = []DispatchMode{DispatchQueue, DispatchSteer, DispatchIn
 
 func (d DispatchMode) Schema(r huma.Registry) *huma.Schema {
 	return util.OpenAPISchema(r, "DispatchMode", DispatchModeValues)
-}
-
-func (tr Transport) Schema(r huma.Registry) *huma.Schema {
-	return util.OpenAPISchema(r, "Transport", TransportValues)
 }
 
 // Message represents a message

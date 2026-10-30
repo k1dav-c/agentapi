@@ -9,7 +9,7 @@ import (
 
 func (e *EventEmitter) EmitScreen(newScreen string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 
 	if e.screen == newScreen {
 		return
@@ -17,8 +17,7 @@ func (e *EventEmitter) EmitScreen(newScreen string) {
 
 	e.notifyChannels(EventTypeScreenUpdate, ScreenUpdateBody{Screen: strings.TrimRight(newScreen, mf.WhiteSpaceChars)})
 	e.screen = newScreen
-	// What an ACP agent streams is no terminal.
-	e.screenQuestion = e.transport != TransportACP && isTerminalQuestionScreen(e.agentType, newScreen)
+	e.screenQuestion = isTerminalQuestionScreen(e.agentType, newScreen)
 
 	// Clients decide whether to offer prompt options from this rather than
 	// guessing from message text, where a numbered list in an answer looks
@@ -34,7 +33,7 @@ func (e *EventEmitter) EmitScreen(newScreen string) {
 // it shows a dialog that waits for an answer.
 func (e *EventEmitter) Screen() (screen string, question bool) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	return e.screen, e.screenQuestion
 }
 
@@ -69,7 +68,7 @@ func (e *EventEmitter) updateTerminalPromptLocked(prompt string) {
 	e.pendingPrompt = prompt
 	e.promptTimer = e.clock.AfterFunc(terminalPromptSettle, func() {
 		e.mu.Lock()
-		defer e.mu.Unlock()
+		defer e.unlock()
 		if e.pendingPrompt != prompt {
 			return
 		}

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
 	"github.com/coder/agentapi/lib/transcript"
@@ -34,7 +35,9 @@ func resumed(t *testing.T, cfg Config, resumeRef string, proc *fakeProcess) (*Ad
 	if cfg.AuthStatus == nil {
 		cfg.AuthStatus = loggedIn
 	}
-	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	if cfg.Logger == nil {
+		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
 	cfg.Env = []string{}
 	a := newTestAdapter(t, cfg, resumeRef)
 	sink := nativetest.NewSink(t)
@@ -168,7 +171,7 @@ func TestClose(t *testing.T) {
 
 // A CLI that stops reading can't hold StartTurn past its context: the
 // prompt may still reach the CLI if it reads again, so the error says it is
-// unconfirmed, and the turn can start again.
+// unconfirmed.
 func TestStartTurnGivesUpWithTheContext(t *testing.T) {
 	t.Parallel()
 	// The CLI reads the initialize and get_settings requests, then hangs.
@@ -180,6 +183,57 @@ func TestStartTurnGivesUpWithTheContext(t *testing.T) {
 	err := a.StartTurn(ctx, native.Input{Text: "hi"})
 	require.ErrorIs(t, err, native.ErrUnconfirmed)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NoError(t, a.Close())
+}
+
+// stdinFunc stands in for the CLI's stdin.
+type stdinFunc func([]byte) (int, error)
+
+func (f stdinFunc) Write(p []byte) (int, error) { return f(p) }
+
+// A message or an answer whose write didn't finish may yet reach the CLI.
+// The turn stays sent, for the CLI's frames to start and end, and the
+// request takes no other answer.
+func TestUnconfirmedWritesStayInFlight(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	proc := newFakeProcess("")
+	a, sink := started(t, Config{}, proc)
+	// The CLI stops reading its input until release.
+	hold := func() chan struct{} {
+		release := make(chan struct{})
+		a.writer.Attach(stdinFunc(func(p []byte) (int, error) {
+			<-release
+			return proc.Stdin().Write(p)
+		}))
+		return release
+	}
+	short := func() context.Context {
+		ctx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+		t.Cleanup(cancel)
+		return ctx
+	}
+
+	release := hold()
+	require.ErrorIs(t, a.StartTurn(short(), native.Input{Text: "hi"}), native.ErrUnconfirmed)
+	require.ErrorIs(t, a.StartTurn(ctx, native.Input{Text: "again"}), native.ErrTurnActive, "the CLI may work on the first")
+	close(release)
+	_, n := proc.waitRequest(t, 0, "initialize")
+	assert.Equal(t, "user", proc.waitWritten(t, n+1)["type"], "the CLI reads the message after all")
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
+	proc.send(t, []byte(`{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"t1"}}`))
+	proc.barrier(t)
+
+	release = hold()
+	require.ErrorIs(t, a.Respond(short(), "r1", native.Response{OptionID: optionAllow}), native.ErrUnconfirmed)
+	require.ErrorIs(t, a.Respond(ctx, "r1", native.Response{OptionID: optionDeny}), native.ErrRequestNotFound,
+		"a second answer could contradict the first")
+	close(release)
+	assert.Equal(t, "control_response:allow", signature(proc.waitWritten(t, n+2)))
+	proc.send(t, []byte(`{"type":"result","subtype":"success","is_error":false}`))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
+	proc.barrier(t)
+	assert.Equal(t, []string{"turn_started", "request_opened:r1", "turn_completed:end_turn"}, sink.State().Log)
 	require.NoError(t, a.Close())
 }
 
@@ -470,6 +524,35 @@ func TestInterruptTimeout(t *testing.T) {
 	})
 }
 
+// A frame whose fields changed type is read all the same: a lost result
+// would never end the turn. Each change, and each frame type the adapter
+// doesn't know, is logged once, with the CLI's version.
+func TestDriftedFramesAreRead(t *testing.T) {
+	t.Parallel()
+	logger, log := nativetest.NewLog()
+	proc := newFakeProcess("")
+	a, sink := started(t, Config{Logger: logger}, proc)
+	ctx := context.Background()
+	for range 2 {
+		require.NoError(t, a.StartTurn(ctx, native.Input{Text: "hi"}))
+		proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1"}`))
+		proc.send(t, []byte(`{"type":"assistant","message":{"id":"msg_1","model":"m","content":[{"type":"text","text":"Hello"}],"usage":{"output_tokens":"many"}}}`))
+		proc.send(t, []byte(`{"type":"brand_new","detail":1}`))
+		proc.send(t, []byte(`{"type":"result","subtype":"success","is_error":"no","usage":{"cache_read_input_tokens":"many"}}`))
+		proc.barrier(t)
+	}
+	assert.Equal(t, []string{"turn_started", "turn_completed:end_turn", "turn_started", "turn_completed:end_turn"}, sink.TurnLog())
+	msg, ok := sink.Message("msg_1", "assistant")
+	require.True(t, ok, "the message is shown without its usage")
+	assert.Equal(t, "Hello", msg.Content[0].Text)
+
+	assert.Len(t, log.Matching("type=assistant", "field=usage.output_tokens", "version=2.1.299"), 1, "%v", log.Warnings())
+	assert.Len(t, log.Matching("type=result", "field=is_error"), 1)
+	assert.Len(t, log.Matching("type=brand_new", "version=2.1.299"), 1)
+	assert.Empty(t, log.Matching("type=keep_alive"), "the barrier's frames are known")
+	require.NoError(t, a.Close())
+}
+
 func TestHeldBackSnapshotIsSent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -562,7 +645,7 @@ func TestCloseDuringTheLoginCheck(t *testing.T) {
 	// A restart closes the adapter while its login is checked.
 	require.NoError(t, a.Close())
 	close(release)
-	require.ErrorIs(t, <-started, errClosed)
+	require.ErrorIs(t, <-started, agentio.ErrClosed)
 	select {
 	case <-spawned:
 		t.Fatal("the CLI was started after Close")
@@ -628,7 +711,7 @@ func TestAnswerJustBeforeExit(t *testing.T) {
 		require.NoError(t, err)
 		proc.exit(nil)
 		require.NoError(t, <-got)
-		<-a.readDone
+		<-a.host.LoopDone()
 		_, err = a.request(context.Background(), "mcp_status", nil, nil)
 		assert.ErrorIs(t, err, errExited, "the CLI is gone")
 	}
@@ -662,7 +745,7 @@ func TestCloseInterruptsTheTurn(t *testing.T) {
 	ctx := context.Background()
 	proc := newFakeProcess("")
 	a, sink := started(t, Config{}, proc)
-	a.closeGrace = 5 * time.Second
+	a.host.InterruptGrace = 5 * time.Second
 	require.NoError(t, a.StartTurn(ctx, native.Input{Text: "hi"}))
 	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
 	proc.barrier(t)
@@ -698,7 +781,7 @@ func TestCloseWithoutTheTurnEnding(t *testing.T) {
 		t.Parallel()
 		proc := newFakeProcess("")
 		a, _ := started(t, Config{}, proc)
-		a.closeGrace = 30 * time.Millisecond
+		a.host.InterruptGrace = 30 * time.Millisecond
 		require.NoError(t, a.StartTurn(ctx, native.Input{Text: "hi"}))
 		proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1"}`))
 		proc.barrier(t)
@@ -711,7 +794,7 @@ func TestCloseWithoutTheTurnEnding(t *testing.T) {
 		t.Parallel()
 		proc := newFakeProcess("")
 		a, _ := started(t, Config{}, proc)
-		a.closeGrace = 5 * time.Second
+		a.host.InterruptGrace = 5 * time.Second
 		start := time.Now()
 		require.NoError(t, a.Close())
 		assert.Less(t, time.Since(start), time.Second)

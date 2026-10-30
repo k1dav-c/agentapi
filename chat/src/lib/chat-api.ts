@@ -70,6 +70,14 @@ export type CostReport = Body<Schemas["CostResponseBody"]>;
 // A subagent the agent ran in its session, and what it did (GET
 // /subagents, GET /subagents/{id}).
 export type Subagent = Schemas["SubagentState"];
+
+const SUBAGENT_STATUSES: Record<Subagent["status"], true> = {running: true, completed: true, failed: true, unknown: true};
+
+// normalizeSubagent returns subagent with a status this chat knows: one a
+// newer server added is unknown.
+export function normalizeSubagent(subagent: Subagent): Subagent {
+  return Object.hasOwn(SUBAGENT_STATUSES, subagent.status) ? subagent : {...subagent, status: "unknown"};
+}
 export type SubagentRun = Omit<Body<Schemas["SubagentResponseBody"]>, "messages"> & {messages: RichMessage[]};
 
 interface APIErrorDetail {
@@ -169,12 +177,12 @@ export function createChatAPI(baseURL: string) {
 
     async listSubagents(): Promise<Subagent[]> {
       const list = await jsonRequest<{subagents?: Subagent[]}>("/subagents", {fallback: "Failed to list the subagents"});
-      return list.subagents ?? [];
+      return (list.subagents ?? []).map(normalizeSubagent);
     },
 
     async getSubagent(id: string): Promise<SubagentRun> {
       const run = await jsonRequest<Body<Schemas["SubagentResponseBody"]>>(`/subagents/${encodeURIComponent(id)}`, {fallback: "Failed to read the subagent"});
-      return {...run, messages: (run.messages ?? []).map(normalizeRichMessage)};
+      return {...run, subagent: normalizeSubagent(run.subagent), messages: (run.messages ?? []).map(normalizeRichMessage)};
     },
 
     async listSessions(): Promise<SessionList> {

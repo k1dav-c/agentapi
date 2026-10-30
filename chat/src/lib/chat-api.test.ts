@@ -132,6 +132,19 @@ describe("retryLogin", () => {
   });
 });
 
+describe("subagents", () => {
+  test("a status a newer server added is unknown", async () => {
+    const subagent = (id: string, status: string) => ({id, status, started_at: "2026-10-18T10:00:00Z", updated_at: "2026-10-18T10:01:00Z"});
+    mockFetch(
+      json({subagents: [subagent("a", "running"), subagent("b", "paused")]}),
+      json({subagent: subagent("b", "paused"), prompt: "look", messages: null}),
+    );
+    const api = createChatAPI(BASE);
+    expect((await api.listSubagents()).map((s) => s.status)).toEqual(["running", "unknown"]);
+    expect((await api.getSubagent("b")).subagent.status).toBe("unknown");
+  });
+});
+
 describe("getWorkspaceUrl", () => {
   test("only http(s) links", async () => {
     mockFetch(json({url: "https://coder.example.com/@dave/dev"}), json({url: "javascript:alert(1)"}), json({}));

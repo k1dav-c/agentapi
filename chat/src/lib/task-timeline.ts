@@ -19,7 +19,10 @@ export interface ToolCall {
 export interface TaskSection {
   key: string;
   prompt: Message | DraftMessage;
+  // The agent's messages, and the user's messages steered into the task
+  // (see TimelineBuilder), in order.
   responses: (Message | DraftMessage)[];
+  steered: (Message | DraftMessage)[];
   toolCalls: ToolCall[];
   richActivity: TaskActivity[];
 }
@@ -41,6 +44,10 @@ export type TaskActivity =
       content: string;
       timestamp: string;
     };
+
+// What a task shows, in order (getTaskActivity): its activity, and the
+// messages the user steered into it while it ran.
+export type TaskStep = TaskActivity | {type: "prompt"; key: string; message: Message | DraftMessage};
 
 // A task's status: limited when a usage limit stopped it (the server says
 // so).
@@ -87,6 +94,9 @@ export function getTaskStatus(
   if (lastStep) return lastStep.type === "tool" && lastStep.toolCall.isError ? "failed" : "completed";
   return task.toolCalls.at(-1)?.isError ? "failed" : "completed";
 }
+
+// No message is steered: a server that doesn't derive tasks.
+const NONE_STEERED: ReadonlySet<number> = new Set();
 
 // A conversation as the transcript shows it: the messages before the first
 // task, and the tasks.
@@ -145,7 +155,10 @@ interface TaskItems {
 }
 
 // TimelineBuilder builds the transcript of a conversation as messages
-// stream in, and makes again only what changed. A rich message goes into
+// stream in, and makes again only what changed. A task starts at each
+// user's message, but those the server steered into a running task
+// (steered, from its tasks; none from a server that doesn't derive them):
+// those stay in the task they joined. A rich message goes into
 // the task the server says it began in (task_id), and one without (a
 // resumed session's, or from a server that doesn't say) into the last task
 // whose prompt is at or before it; a tool call goes where the message it
@@ -180,11 +193,11 @@ export class TimelineBuilder {
   private items: TaskItems[] = [];
   private last: Transcript = {toolCalls: [], timeline: {prelude: [], tasks: []}};
 
-  build(messages: (Message | DraftMessage)[], richMessages: RichMessage[]): Transcript {
+  build(messages: (Message | DraftMessage)[], richMessages: RichMessage[], steered: ReadonlySet<number> = NONE_STEERED): Transcript {
     const oldRich = this.richMessages;
     const unchanged = commonPrefix(oldRich, richMessages);
     const {changes, orderChanged} = this.collectToolCalls(richMessages, unchanged);
-    const timeline = this.buildTimeline(messages, richMessages, oldRich, unchanged, changes);
+    const timeline = this.buildTimeline(messages, richMessages, oldRich, unchanged, changes, steered);
     const toolCalls = changes.size > 0 || orderChanged ? this.order.map((id) => this.calls.get(id)!.call) : this.last.toolCalls;
     if (toolCalls !== this.last.toolCalls || timeline !== this.last.timeline) this.last = {toolCalls, timeline};
     return this.last;
@@ -281,19 +294,23 @@ export class TimelineBuilder {
   }
 
   // buildTimeline groups the messages into tasks, each a user's message and
-  // what followed it, with the tool calls and the agent's structured
-  // messages (text, thinking, tool use) put into the task they happened in:
-  // the last whose prompt is at or before them.
+  // what followed it (with the messages steered into it), with the tool
+  // calls and the agent's structured messages (text, thinking, tool use)
+  // put into the task they happened in: the last whose prompt is at or
+  // before them.
   private buildTimeline(
     messages: (Message | DraftMessage)[],
     richMessages: RichMessage[],
     oldRich: RichMessage[],
     unchanged: number,
     changes: Map<string, CallEntry | undefined>,
+    steered: ReadonlySet<number>,
   ): Timeline {
     const starts: number[] = [];
     messages.forEach((message, i) => {
-      if (message.role === "user") starts.push(i);
+      // A steered message before any task (the server's tasks were reset)
+      // starts one.
+      if (message.role === "user" && (message.id === undefined || !steered.has(message.id) || starts.length === 0)) starts.push(i);
     });
     const times = starts.map((start) => this.promptTime(messages[start]));
     const taskIndex = new Map<number, number>();
@@ -351,10 +368,13 @@ export class TimelineBuilder {
       if (from > 0) callEntries.sort((a, b) => a.position - b.position);
       items[j - from].calls = callEntries.map((entry) => entry.call.id);
       const prompt = messages[starts[j]];
+      const following = messages.slice(starts[j] + 1, starts[j + 1] ?? messages.length);
+      const prompts = following.filter((message) => message.role === "user");
       const task: TaskSection = {
         key: `task-${prompt.id ?? `draft-${j}`}`,
         prompt,
-        responses: messages.slice(starts[j] + 1, starts[j + 1] ?? messages.length),
+        responses: prompts.length > 0 ? following.filter((message) => message.role !== "user") : following,
+        steered: prompts,
         toolCalls: callEntries.map((entry) => entry.call),
         richActivity: this.activityOf(items[j - from].parts, richMessages),
       };
@@ -396,6 +416,11 @@ export class TimelineBuilder {
     if (changedMessage < Math.max(this.messages.length, messages.length)) {
       from = Math.min(from, lastAtOrBefore(starts, changedMessage), lastAtOrBefore(this.starts, changedMessage));
     }
+    // A task that starts elsewhere (a message steered into the task before,
+    // or no longer) changes that task.
+    let sameStart = 0;
+    while (sameStart < Math.min(starts.length, this.starts.length) && starts[sameStart] === this.starts[sameStart]) sameStart++;
+    if (sameStart < Math.max(starts.length, this.starts.length)) from = Math.min(from, sameStart - 1);
     // A new or changed prompt time moves what comes after it from the task
     // before.
     let same = 0;
@@ -453,8 +478,12 @@ export class TimelineBuilder {
 
 // buildTranscript builds the transcript of a conversation once, as for a
 // subagent's run.
-export function buildTranscript(messages: (Message | DraftMessage)[], richMessages: RichMessage[]): Transcript {
-  return new TimelineBuilder().build(messages, richMessages);
+export function buildTranscript(
+  messages: (Message | DraftMessage)[],
+  richMessages: RichMessage[],
+  steered: ReadonlySet<number> = NONE_STEERED,
+): Transcript {
+  return new TimelineBuilder().build(messages, richMessages, steered);
 }
 
 // A tool call's status as a block reports it; undefined when it doesn't, or
@@ -568,6 +597,7 @@ function sameTask(a: TaskSection, b: TaskSection): boolean {
   return (
     sameValue(a.prompt, b.prompt) &&
     sameItems(a.responses, b.responses, sameValue) &&
+    sameItems(a.steered, b.steered, sameValue) &&
     sameItems(a.toolCalls, b.toolCalls) &&
     sameItems(a.richActivity, b.richActivity, sameActivity)
   );
@@ -613,13 +643,13 @@ export function hasStructuredTranscript(task: TaskSection): boolean {
 // time order.
 //
 // transcriptOnly (the native transport) never shows the agent messages: they
-// are the transcript's text joined, so they would repeat it. A message
-// steered into a running turn starts a task whose reply belongs to the
-// transcript of the task before it.
+// are the transcript's text joined, so they would repeat it.
+//
+// The messages steered into the task show where they came, by their time.
 export function getTaskActivity(
   task: TaskSection,
   {live = false, transcriptOnly = false}: {live?: boolean; transcriptOnly?: boolean} = {},
-): TaskActivity[] {
+): TaskStep[] {
   const coveredToolIDs = new Set(
     task.richActivity
       .filter((item): item is Extract<TaskActivity, {type: "tool"}> => item.type === "tool")
@@ -628,28 +658,28 @@ export function getTaskActivity(
   const uncoveredTools: TaskActivity[] = task.toolCalls
     .filter((toolCall) => !coveredToolIDs.has(toolCall.id))
     .map((toolCall) => ({type: "tool" as const, key: `tool-${toolCall.id}`, toolCall}));
-  const screenText = (message: Message | DraftMessage, index: number): TaskActivity => ({
+  const screenText = (message: Message | DraftMessage, index: number): TaskStep => ({
     type: "message" as const,
     key: `response-${message.id ?? index}`,
     message,
   });
 
-  if (transcriptOnly) return [...task.richActivity, ...uncoveredTools];
+  const prompts = task.steered.map((message, index): TaskStep => ({type: "prompt", key: `steered-${message.id ?? index}`, message}));
+
+  if (transcriptOnly) return withPrompts([...task.richActivity, ...uncoveredTools], prompts);
   if (hasStructuredTranscript(task)) {
-    const result = [...task.richActivity, ...uncoveredTools];
+    const result = withPrompts([...task.richActivity, ...uncoveredTools], prompts);
     const latest = task.responses.at(-1);
     if (live && latest) result.push(screenText(latest, task.responses.length - 1));
     return result;
   }
 
-  const result: TaskActivity[] = [
+  const result: TaskStep[] = [
     ...task.responses.map(screenText),
+    ...prompts,
     ...task.richActivity.filter((item) => item.type === "tool"),
     ...uncoveredTools,
   ];
-  const timeOf = (item: TaskActivity) =>
-    item.type === "message" ? item.message.time :
-    item.type === "tool" ? item.toolCall.timestamp : item.timestamp;
   return result.sort((left, right) => {
     const leftTime = timeOf(left);
     const rightTime = timeOf(right);
@@ -659,13 +689,42 @@ export function getTaskActivity(
   });
 }
 
+// When a step happened.
+function timeOf(item: TaskStep): string | undefined {
+  switch (item.type) {
+    case "message":
+    case "prompt":
+      return item.message.time;
+    case "tool":
+      return item.toolCall.timestamp;
+    case "thinking":
+      return item.timestamp;
+  }
+}
+
+// withPrompts puts each steered prompt before the first activity that
+// came after it; the activity is in order already. A prompt nothing came
+// after goes last.
+function withPrompts(activity: TaskStep[], prompts: TaskStep[]): TaskStep[] {
+  if (prompts.length === 0) return activity;
+  const result: TaskStep[] = [];
+  let next = 0;
+  for (const item of activity) {
+    const time = Date.parse(timeOf(item) ?? "");
+    while (next < prompts.length && Date.parse(timeOf(prompts[next]) ?? "") <= time) result.push(prompts[next++]);
+    result.push(item);
+  }
+  return [...result, ...prompts.slice(next)];
+}
+
 export function toSearchableTask(task: TaskSection) {
   const activity = getTaskActivity(task);
   return {
     prompt: task.prompt.content,
+    steered: task.steered.map((message) => message.content),
     responses: activity
       .filter(
-        (item): item is Extract<TaskActivity, {type: "message"}> =>
+        (item): item is Extract<TaskStep, {type: "message"}> =>
           item.type === "message",
       )
       .map((item) => item.message.content),
@@ -684,6 +743,7 @@ export function countTaskMatches(task: TaskSection, query: string) {
   const searchable = toSearchableTask(task);
   return [
     searchable.prompt,
+    ...searchable.steered,
     ...searchable.responses,
     ...searchable.tools.flatMap((tool) => [
       tool.name,

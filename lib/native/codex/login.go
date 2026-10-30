@@ -33,7 +33,7 @@ func (a *Adapter) checkLogin(ctx context.Context) error {
 		return nil
 	}
 	var resp getAccountResponse
-	if err := json.Unmarshal(result, &resp); err != nil {
+	if err := a.drift.Decode("account/read response", result, &resp); err != nil {
 		a.log.Debug("Unexpected account/read result; starting anyway", "error", err)
 		return nil
 	}

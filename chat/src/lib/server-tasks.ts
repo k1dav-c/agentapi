@@ -2,8 +2,9 @@
 // task_update event): a user's message and the agent's turn on it, until
 // the agent is done. Messages the user adds while one runs (steering)
 // belong to it. The chat groups the messages into tasks itself
-// (lib/task-timeline.ts) and takes from these what only the server knows:
-// whether a task is done, how it ended, and when.
+// (lib/task-timeline.ts), the steered ones into the task they joined, and
+// takes from these what only the server knows: whether a task is done,
+// how it ended, and when.
 
 import type {components} from "./api-schema";
 
@@ -19,9 +20,21 @@ export type ServerTask = Omit<Schemas["Task"], "errors" | "steered"> & {
   seq?: number;
 };
 
-// normalizeTask returns task with empty lists for missing or null ones.
+// The statuses this chat knows. A newer server may send another: the hub
+// serves its own chat for instances of every version.
+const KNOWN_STATUSES: Record<ServerTaskStatus, true> = {running: true, completed: true, failed: true, limited: true};
+
+// normalizeTask returns task with empty lists for missing or null ones, and
+// a status this chat knows: one it doesn't is running until the task ends,
+// then failed if it has errors, else completed.
 export function normalizeTask<T extends Schemas["Task"] & {seq?: number}>(task: T): Omit<T, "errors" | "steered"> & ServerTask {
-  return {...task, errors: task.errors ?? [], steered: task.steered ?? []};
+  const errors = task.errors ?? [];
+  const status: ServerTaskStatus = Object.hasOwn(KNOWN_STATUSES, task.status)
+    ? task.status
+    : task.ended_at
+      ? errors.length > 0 ? "failed" : "completed"
+      : "running";
+  return {...task, status, errors, steered: task.steered ?? []};
 }
 
 // mergeTasks applies task updates: a task keeps its place, a new one comes
@@ -59,6 +72,12 @@ export function tasksByMessage(tasks: ServerTask[]): Map<number, ServerTask> {
     for (const id of task.steered) byMessage.set(id, task);
   }
   return byMessage;
+}
+
+// steeredMessages returns the IDs of the user messages steered into a
+// task: the transcript shows them inside it (TimelineBuilder).
+export function steeredMessages(tasks: readonly ServerTask[]): ReadonlySet<number> {
+  return new Set(tasks.flatMap((task) => task.steered));
 }
 
 // latestTaskEnd returns when the latest task ended, undefined while it runs

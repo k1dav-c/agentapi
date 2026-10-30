@@ -11,13 +11,11 @@ import (
 
 	"github.com/coder/quartz"
 
-	"github.com/danielgtaylor/huma/v2"
-
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/instanceapi"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
-	"github.com/coder/agentapi/lib/util"
 )
 
 type EventType string
@@ -36,41 +34,29 @@ const (
 	EventTypeSummaryUpdate     EventType = "summary_update"
 )
 
-type AgentStatus string
-
-const (
-	AgentStatusRunning AgentStatus = "running"
-	AgentStatusStable  AgentStatus = "stable"
+// The agent's status and lifecycle are part of the summary's contract
+// (lib/instanceapi).
+type (
+	AgentStatus    = instanceapi.AgentStatus
+	LifecycleState = instanceapi.LifecycleState
 )
 
-var AgentStatusValues = []AgentStatus{
-	AgentStatusStable,
-	AgentStatusRunning,
-}
-
-func (a AgentStatus) Schema(r huma.Registry) *huma.Schema {
-	return util.OpenAPISchema(r, "AgentStatus", AgentStatusValues)
-}
-
-type LifecycleState string
-
 const (
-	LifecycleStarting   LifecycleState = "starting"
-	LifecycleReady      LifecycleState = "ready"
-	LifecycleRunning    LifecycleState = "running"
-	LifecycleRestarting LifecycleState = "restarting"
-	LifecycleExited     LifecycleState = "exited"
-	LifecycleFailed     LifecycleState = "failed"
+	AgentStatusRunning = instanceapi.AgentStatusRunning
+	AgentStatusStable  = instanceapi.AgentStatusStable
+
+	LifecycleStarting   = instanceapi.LifecycleStarting
+	LifecycleReady      = instanceapi.LifecycleReady
+	LifecycleRunning    = instanceapi.LifecycleRunning
+	LifecycleRestarting = instanceapi.LifecycleRestarting
+	LifecycleExited     = instanceapi.LifecycleExited
+	LifecycleFailed     = instanceapi.LifecycleFailed
 )
 
-var LifecycleStateValues = []LifecycleState{
-	LifecycleStarting, LifecycleReady, LifecycleRunning,
-	LifecycleRestarting, LifecycleExited, LifecycleFailed,
-}
-
-func (l LifecycleState) Schema(r huma.Registry) *huma.Schema {
-	return util.OpenAPISchema(r, "LifecycleState", LifecycleStateValues)
-}
+var (
+	AgentStatusValues    = instanceapi.AgentStatusValues
+	LifecycleStateValues = instanceapi.LifecycleStateValues
+)
 
 type MessageUpdateBody struct {
 	Id      int       `json:"id" doc:"Unique identifier for the message. This identifier also represents the order of the message in the conversation history."`
@@ -101,7 +87,7 @@ type StatusChangeBody struct {
 	// AgentSessionID is the agent's own session (native transport).
 	AgentSessionID string       `json:"agent_session_id,omitempty" doc:"The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it."`
 	AgentType      mf.AgentType `json:"agent_type" doc:"Type of the agent being used by the server."`
-	Transport      Transport    `json:"transport" doc:"Backend transport being used ('pty', 'acp' or 'native')."`
+	Transport      Transport    `json:"transport" doc:"Backend transport being used ('pty' or 'native')."`
 	Version        string       `json:"agentapi_version" doc:"Version of the AgentAPI server."`
 	// TerminalPrompt is the bottom of the screen while the agent shows an
 	// interactive prompt (selection list, confirmation) instead of its input
@@ -231,16 +217,12 @@ type EventEmitter struct {
 	queue        []QueuedMessage
 	queueVersion uint64
 	queueSeq     uint64
-	// instance names the AgentAPI in summaries; summary is the summary
-	// last sent, nil while no subscription wants it.
+	// instance names the AgentAPI in summaries, which summary sends.
 	instance func() WebhookInstance
-	summary  *SummaryBody
+	summary  summaryFeed
 	// seenAt is when a client last showed the conversation to the user: a
 	// task that ended after it is unread.
-	seenAt time.Time
-	// spend is what the agent's sessions cost recently (startSpend); nil
-	// until it is worked out, and for agents whose logs aren't read.
-	spend          *SummarySpend
+	seenAt         time.Time
 	clock          quartz.Clock
 	onStatusChange func(previous, current AgentStatus)
 	// persister, if set, stores every change of the conversation state.
@@ -271,6 +253,8 @@ type Persister interface {
 	// PutTask stores the task the user's message id started, encoded as
 	// JSON.
 	PutTask(id int, data []byte, seq uint64)
+	// DeleteTask removes the task the user's message id started.
+	DeleteTask(id int)
 	// Reset removes the conversation; epoch is the new epoch.
 	Reset(epoch string)
 }
@@ -367,7 +351,7 @@ func WithPersister(p Persister) EventEmitterOption {
 // again. Call it before anyone subscribes.
 func (e *EventEmitter) Restore(state EmitterState) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	if state.Epoch != "" {
 		e.epoch = state.Epoch
 	}
@@ -396,14 +380,20 @@ func (e *EventEmitter) Restore(state EmitterState) {
 	if e.seenAt.IsZero() {
 		e.seenAt = e.clock.Now()
 	}
-	e.taskSeq = map[int]uint64{}
-	for i, task := range state.Tasks {
-		e.taskSeq[task.ID] = state.TaskSeqs[i]
-	}
 	// A task that ran when AgentAPI stopped is over, and the restored
 	// messages are history: a database written before tasks were kept has
-	// none for them, which are derived as done.
-	e.tasksChangedLocked(e.tasks.restore(slices.Clone(state.Tasks), e.clock.Now()))
+	// none for them, which are derived as done. A task whose message is
+	// gone goes (taskTracker.restore).
+	changed := e.tasks.restore(slices.Clone(state.Tasks), e.messages, e.clock.Now())
+	e.taskSeq = map[int]uint64{}
+	for i, task := range state.Tasks {
+		if p := e.tasks.owner(task.ID); p >= 0 && e.tasks.tasks[p].ID == task.ID {
+			e.taskSeq[task.ID] = state.TaskSeqs[i]
+		} else if e.persister != nil {
+			e.persister.DeleteTask(task.ID)
+		}
+	}
+	e.tasksChangedLocked(changed)
 	if n := len(e.messages); n > 0 && !e.messages[n-1].Time.Before(e.tasks.since) {
 		e.tasks.since = e.messages[n-1].Time.Add(time.Nanosecond)
 	}
@@ -412,7 +402,7 @@ func (e *EventEmitter) Restore(state EmitterState) {
 // Epoch identifies the current conversation state; see SessionSyncBody.
 func (e *EventEmitter) Epoch() string {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	return e.epoch
 }
 
@@ -461,6 +451,14 @@ func ConversationEvents(t EventType) bool {
 }
 func ScreenEvents(t EventType) bool { return t == EventTypeScreenUpdate }
 
+// unlock releases e.mu, which every method that holds it does through
+// unlock: what changed the conversation may have changed its summary,
+// which is sent once, with all the changes made.
+func (e *EventEmitter) unlock() {
+	e.sendSummaryLocked()
+	e.mu.Unlock()
+}
+
 // Assumes the caller holds the lock.
 func (e *EventEmitter) notifyChannels(eventType EventType, payload any) {
 	event := Event{Type: eventType, Payload: payload}
@@ -479,7 +477,7 @@ func (e *EventEmitter) notifyChannels(eventType EventType, payload any) {
 	// What changes the conversation's state may change its summary; the
 	// screen alone doesn't (a dialog on it comes with a status change).
 	if eventType != EventTypeSummaryUpdate && eventType != EventTypeScreenUpdate && eventType != EventTypeHeartbeat {
-		e.summaryChangedLocked()
+		e.summary.changed = true
 	}
 }
 
@@ -493,7 +491,7 @@ func newEpoch() string {
 // timeline, errors, and screen. Used when restarting with a clean slate.
 func (e *EventEmitter) Reset() {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	e.handoffRevision++
 	e.messages = nil
 	e.messageSeq = nil
@@ -522,98 +520,119 @@ func (e *EventEmitter) Reset() {
 		e.promptTimer.Stop()
 		e.promptTimer = nil
 	}
-	e.summaryChangedLocked()
 }
 
-// currentStateAsEvents returns the events that rebuild the current state for
-// a new subscriber. With a matching epoch, only messages, rich messages and
-// requests changed after since are included; otherwise everything is.
-// Caller holds e.mu.
-func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string) []Event {
+// currentStateAsEvents returns the events wants accepts that rebuild the
+// current state for a new subscriber. With a matching epoch, only messages,
+// rich messages and requests changed after since are included; otherwise
+// everything is. Caller holds e.mu.
+func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string, wants func(EventType) bool) []Event {
 	// since 0 asks for everything: the client must replace its state rather
 	// than merge into what it holds.
 	full := epoch != e.epoch || since == 0 || since > e.seq
 	if full {
 		since = 0
 	}
-	events := make([]Event, 0, len(e.messages)+3)
+	var events []Event
 	// The session sync goes first; its Seq is filled in below with the
 	// highest seq in the replay, so the client knows when the replay is
 	// complete and can apply it at once.
-	events = append(events, Event{Type: EventTypeSessionSync})
+	sync := wants(EventTypeSessionSync)
+	if sync {
+		events = append(events, Event{Type: EventTypeSessionSync})
+	}
 	replaySeq := since
-	for i, msg := range e.messages {
-		if e.messageSeq[i] <= since {
-			continue
+	if wants(EventTypeMessageUpdate) {
+		events = slices.Grow(events, len(e.messages)+3)
+		for i, msg := range e.messages {
+			if e.messageSeq[i] <= since {
+				continue
+			}
+			replaySeq = max(replaySeq, e.messageSeq[i])
+			events = append(events, Event{
+				Type:    EventTypeMessageUpdate,
+				Payload: MessageUpdateBody{Id: msg.Id, Role: msg.Role, Message: msg.Message, Time: msg.Time, Seq: e.messageSeq[i]},
+			})
 		}
-		replaySeq = max(replaySeq, e.messageSeq[i])
+	}
+	if wants(EventTypeStatusChange) {
 		events = append(events, Event{
-			Type:    EventTypeMessageUpdate,
-			Payload: MessageUpdateBody{Id: msg.Id, Role: msg.Role, Message: msg.Message, Time: msg.Time, Seq: e.messageSeq[i]},
+			Type:    EventTypeStatusChange,
+			Payload: e.statusChangeBody(),
 		})
 	}
-	events = append(events, Event{
-		Type:    EventTypeStatusChange,
-		Payload: e.statusChangeBody(),
-	})
-	events = append(events, Event{
-		Type:    EventTypeScreenUpdate,
-		Payload: ScreenUpdateBody{Screen: strings.TrimRight(e.screen, mf.WhiteSpaceChars)},
-	})
+	if wants(EventTypeScreenUpdate) {
+		events = append(events, Event{
+			Type:    EventTypeScreenUpdate,
+			Payload: ScreenUpdateBody{Screen: strings.TrimRight(e.screen, mf.WhiteSpaceChars)},
+		})
+	}
 
 	// Include all error events
-	for _, err := range e.errors {
-		events = append(events, Event{
-			Type:    EventTypeError,
-			Payload: err,
-		})
+	if wants(EventTypeError) {
+		for _, err := range e.errors {
+			events = append(events, Event{
+				Type:    EventTypeError,
+				Payload: err,
+			})
+		}
 	}
 
 	// Include rich message events for late subscriber replay
-	for i, msg := range e.richMessages {
-		if e.richSeq[i] <= since {
-			continue
+	if wants(EventTypeRichMessageUpdate) {
+		for i, msg := range e.richMessages {
+			if e.richSeq[i] <= since {
+				continue
+			}
+			replaySeq = max(replaySeq, e.richSeq[i])
+			events = append(events, Event{
+				Type:    EventTypeRichMessageUpdate,
+				Payload: RichMessageUpdateBody{RichMessage: msg, Seq: e.richSeq[i]},
+			})
 		}
-		replaySeq = max(replaySeq, e.richSeq[i])
-		events = append(events, Event{
-			Type:    EventTypeRichMessageUpdate,
-			Payload: RichMessageUpdateBody{RichMessage: msg, Seq: e.richSeq[i]},
-		})
 	}
 
-	for i, req := range e.requests {
-		if e.requestSeq[i] <= since {
-			continue
+	if wants(EventTypeRequestUpdate) {
+		for i, req := range e.requests {
+			if e.requestSeq[i] <= since {
+				continue
+			}
+			replaySeq = max(replaySeq, e.requestSeq[i])
+			events = append(events, Event{
+				Type:    EventTypeRequestUpdate,
+				Payload: RequestUpdateBody{RequestState: req, Seq: e.requestSeq[i]},
+			})
 		}
-		replaySeq = max(replaySeq, e.requestSeq[i])
-		events = append(events, Event{
-			Type:    EventTypeRequestUpdate,
-			Payload: RequestUpdateBody{RequestState: req, Seq: e.requestSeq[i]},
-		})
 	}
 
-	if e.queueSeq > since {
+	if wants(EventTypeQueueUpdate) && e.queueSeq > since {
 		replaySeq = max(replaySeq, e.queueSeq)
 		events = append(events, Event{
 			Type:    EventTypeQueueUpdate,
 			Payload: QueueUpdateBody{Queue: slices.Clone(e.queue), Seq: e.queueSeq},
 		})
 	}
-	for _, task := range e.tasks.tasks {
-		seq := e.taskSeq[task.ID]
-		if seq <= since {
-			continue
+	if wants(EventTypeTaskUpdate) {
+		for _, task := range e.tasks.tasks {
+			seq := e.taskSeq[task.ID]
+			if seq <= since {
+				continue
+			}
+			replaySeq = max(replaySeq, seq)
+			events = append(events, Event{
+				Type:    EventTypeTaskUpdate,
+				Payload: TaskUpdateBody{Task: task.Clone(), Seq: seq},
+			})
 		}
-		replaySeq = max(replaySeq, seq)
-		events = append(events, Event{
-			Type:    EventTypeTaskUpdate,
-			Payload: TaskUpdateBody{Task: task.clone(), Seq: seq},
-		})
 	}
 
-	events = append(events, Event{Type: EventTypeSummaryUpdate, Payload: SummaryUpdateBody{SummaryBody: e.summaryLocked()}})
+	if wants(EventTypeSummaryUpdate) {
+		events = append(events, Event{Type: EventTypeSummaryUpdate, Payload: SummaryUpdateBody{SummaryBody: e.summaryLocked()}})
+	}
 
-	events[0].Payload = SessionSyncBody{Epoch: e.epoch, Full: full, Seq: replaySeq}
+	if sync {
+		events[0].Payload = SessionSyncBody{Epoch: e.epoch, Full: full, Seq: replaySeq}
+	}
 	return events
 }
 
@@ -636,17 +655,17 @@ func (e *EventEmitter) SubscribeSince(since uint64, epoch string) (int, <-chan E
 // channel nor the replay holds others.
 func (e *EventEmitter) SubscribeTo(wants func(EventType) bool, since uint64, epoch string) (int, <-chan Event, []Event) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	stateEvents := slices.DeleteFunc(e.currentStateAsEvents(since, epoch), func(event Event) bool { return !wants(event.Type) })
+	defer e.unlock()
+	stateEvents := e.currentStateAsEvents(since, epoch, wants)
 
 	// Once a channel becomes full, it will be closed.
 	ch := make(chan Event, e.subscriptionBufSize)
 	e.chans[e.chanIdx] = subscriber{ch: ch, wants: wants}
 	e.chanIdx++
-	if wants(EventTypeSummaryUpdate) && e.summary == nil {
+	if wants(EventTypeSummaryUpdate) && e.summary.sent == nil {
 		// The replay holds the summary: what changes next is news.
 		summary := stateEvents[len(stateEvents)-1].Payload.(SummaryUpdateBody).SummaryBody
-		e.summary = &summary
+		e.summary.sent = &summary
 	}
 	return e.chanIdx - 1, ch, stateEvents
 }
@@ -663,6 +682,6 @@ func (e *EventEmitter) unsubscribeInner(chanId int) {
 
 func (e *EventEmitter) Unsubscribe(chanId int) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	e.unsubscribeInner(chanId)
 }

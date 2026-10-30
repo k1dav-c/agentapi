@@ -7,21 +7,25 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/coder/agentapi/internal/version"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/pricing"
+	"github.com/coder/agentapi/lib/transcript"
 )
 
 // The events a webhook can be sent besides run.status_changed.
 const (
-	webhookEventInstanceStarted   = "instance.started"
-	webhookEventInstanceHeartbeat = "instance.heartbeat"
-	webhookEventInstanceStopped   = "instance.stopped"
+	webhookEventInstanceStarted   = instanceapi.EventInstanceStarted
+	webhookEventInstanceHeartbeat = instanceapi.EventInstanceHeartbeat
+	webhookEventInstanceStopped   = instanceapi.EventInstanceStopped
 	webhookEventTaskStarted       = "task.started"
 	webhookEventTaskCompleted     = "task.completed"
 	webhookEventTaskFailed        = "task.failed"
@@ -44,21 +48,9 @@ const (
 	webhookPromptLimit  = 4 << 10
 )
 
-// WebhookInstanceState is the data of instance.started, instance.heartbeat
-// and instance.stopped: what the agent is doing.
-type WebhookInstanceState struct {
-	Status          AgentStatus           `json:"status"`
-	Lifecycle       LifecycleState        `json:"lifecycle"`
-	AgentSessionID  string                `json:"agent_session_id,omitempty"`
-	SessionName     string                `json:"session_name,omitempty"`
-	PendingRequests int                   `json:"pending_requests"`
-	QueuedMessages  int                   `json:"queued_messages"`
-	TerminalPrompt  string                `json:"terminal_prompt,omitempty"`
-	LoginRequired   *native.LoginRequired `json:"login_required,omitempty"`
-	LimitStop       *native.LimitStop     `json:"limit_stop,omitempty"`
-	Usage           *native.AgentUsage    `json:"usage,omitempty"`
-	Settings        *native.Settings      `json:"settings,omitempty"`
-}
+// WebhookInstanceState is the data of the instance.* events
+// (lib/instanceapi).
+type WebhookInstanceState = instanceapi.WebhookInstanceState
 
 // WebhookTask is the data of task.started, task.completed and task.failed:
 // the task as GET /tasks has it, with the text of the agent's reply.
@@ -111,9 +103,14 @@ type WebhookTerminalPrompt struct {
 	Prompt string `json:"prompt,omitempty"`
 }
 
+// maxOpenTools caps the tool calls the observer keeps until their result
+// comes: one whose result never comes (an interrupted turn) isn't kept for
+// good.
+const maxOpenTools = 64
+
 // startWebhook describes this AgentAPI to the webhook and starts sending
-// events: the conversation's, as the observer turns them into webhook
-// events, and the instance's.
+// events: the instance's, and while the webhook has a URL the
+// conversation's, as the observer turns them into webhook events.
 func (s *Server) startWebhook(config ServerConfig) {
 	hostname, _ := os.Hostname()
 	name := config.Name
@@ -130,17 +127,71 @@ func (s *Server) startWebhook(config ServerConfig) {
 		Version:      version.Version,
 		WorkspaceURL: coderWorkspaceURL(),
 	})
-	observer := newWebhookObserver(s.webhook, s.emitter, s.clock.Now())
-	// The queue has a lock of its own. s.mu would hold up Stop, whose
-	// instance.stopped carries the queue's length, until a call into the
-	// agent it is about to cancel ended by itself.
-	observer.queued = s.queue.Len
-	if s.sessions != nil {
-		observer.taskCost = s.webhookTaskCost
-	}
-	s.webhook.snapshot = func() any { return observer.state() }
-	go observer.run(s.shutdownCtx)
+	s.webhook.snapshot = func() any { return s.webhookInstanceState() }
+	since := s.clock.Now()
+	observing := &webhookObserving{ctx: s.shutdownCtx, webhook: s.webhook, run: func(ctx context.Context) {
+		observer := newWebhookObserver(s.webhook, s.emitter, since)
+		if s.sessions != nil {
+			observer.taskCost = s.webhookTaskCost
+		}
+		observer.run(ctx)
+	}}
+	s.webhook.configured = observing.sync
+	observing.sync()
 	s.webhook.start(s.shutdownCtx)
+}
+
+// webhookInstanceState is the data of the instance.* events.
+func (s *Server) webhookInstanceState() WebhookInstanceState {
+	status := s.emitter.StatusSnapshot()
+	return WebhookInstanceState{
+		Status: status.Status, Lifecycle: status.Lifecycle, AgentSessionID: status.AgentSessionID,
+		SessionName: status.SessionName, PendingRequests: status.PendingRequests,
+		TerminalPrompt: status.TerminalPrompt, LoginRequired: status.LoginRequired,
+		LimitStop: status.LimitStop, Usage: status.Usage, Settings: status.Settings,
+		// The queue has a lock of its own. s.mu would hold up Stop, whose
+		// instance.stopped carries the queue's length, until a call into
+		// the agent it is about to cancel ended by itself.
+		QueuedMessages:   s.queue.Len(),
+		HeartbeatSeconds: max(0, int(s.webhook.configSnapshot().Heartbeat/time.Second)),
+	}
+}
+
+// webhookObserving runs an observer while the webhook has a URL: without
+// one nobody hears of the conversation, and an observer would only keep
+// track of it.
+type webhookObserving struct {
+	ctx     context.Context
+	webhook *webhookDispatcher
+	// run runs an observer until its context ends.
+	run func(ctx context.Context)
+
+	mu sync.Mutex
+	// stop ends the running observer and waits for it; nil without one.
+	stop func()
+}
+
+// sync starts or stops the observer after the webhook's URL changed.
+func (w *webhookObserving) sync() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	wanted := w.webhook.configSnapshot().URL != ""
+	switch {
+	case wanted && w.stop == nil:
+		ctx, cancel := context.WithCancel(w.ctx)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			w.run(ctx)
+		}()
+		w.stop = func() {
+			cancel()
+			<-done
+		}
+	case !wanted && w.stop != nil:
+		w.stop()
+		w.stop = nil
+	}
 }
 
 // webhookTaskCost is what the open session's model calls since a time
@@ -178,8 +229,6 @@ type webhookObserver struct {
 	// taskCost, if set, gives what the session's model calls since a time
 	// cost.
 	taskCost func(since time.Time) *WebhookCost
-	// queued counts the messages waiting in the queue, for the heartbeat.
-	queued func() int
 
 	// since: messages and tool calls from before it are history (a
 	// restored or resumed conversation), not news.
@@ -188,20 +237,24 @@ type webhookObserver struct {
 	// agent is the agent's latest message, sent as message.created once
 	// it is final: when another follows or the turn ends.
 	agent *MessageUpdateBody
-	// sent are the messages already sent, by ID and time (IDs start over
-	// in a new conversation).
-	sent     map[messageKey]bool
-	tools    map[string]WebhookToolCall
+	// sent is the last message sent (or taken in as history).
+	sent mark
+	// tools are the calls waiting for their result, toolOrder their IDs
+	// as they came (and some that returned, until it is compacted).
+	tools     map[string]WebhookToolCall
+	toolOrder []string
+	// toolDone are the calls that returned: a rich message comes again,
+	// whole, as it grows, and tool IDs have no order to keep a mark by.
 	toolDone map[string]bool
-	requests map[string]native.RequestStatus
+	// openRequests are the requests seen pending, until they close.
+	openRequests map[string]bool
 	// prompts counts the terminal dialogs, for their IDs.
 	prompts int
 	// lastError is the number of the latest error taken in; a new
 	// subscription replays the ones before it.
 	lastError uint64
-	// started and ended are the tasks announced, by ID and start (IDs
-	// start over in a new conversation).
-	started, ended map[messageKey]bool
+	// started and ended are the last tasks announced.
+	started, ended mark
 	// replies are the texts of the agent's messages, for the replies of
 	// the tasks under way.
 	replies map[int]string
@@ -212,23 +265,39 @@ type messageKey struct {
 	time time.Time
 }
 
-func newWebhookObserver(webhook *webhookDispatcher, emitter *EventEmitter, now time.Time) *webhookObserver {
-	return &webhookObserver{
-		webhook:  webhook,
-		emitter:  emitter,
-		since:    now,
-		sent:     map[messageKey]bool{},
-		tools:    map[string]WebhookToolCall{},
-		toolDone: map[string]bool{},
-		requests: map[string]native.RequestStatus{},
-		started:  map[messageKey]bool{},
-		ended:    map[messageKey]bool{},
-		replies:  map[int]string{},
+// mark is how far through the messages, or the tasks, the observer got.
+// Their IDs grow; one is given out again only after the last was taken
+// back, and a new conversation starts over, both with later times. So an
+// item before the mark with a time not after it, or the mark itself, was
+// handled.
+type mark messageKey
+
+func (m mark) covers(k messageKey) bool {
+	return k == messageKey(m) || (k.id < m.id && !k.time.After(m.time))
+}
+
+func (m *mark) advance(k messageKey) {
+	if k.id >= m.id || k.time.After(m.time) {
+		*m = mark(k)
 	}
 }
 
+func newWebhookObserver(webhook *webhookDispatcher, emitter *EventEmitter, now time.Time) *webhookObserver {
+	return &webhookObserver{
+		webhook:      webhook,
+		emitter:      emitter,
+		since:        now,
+		tools:        map[string]WebhookToolCall{},
+		toolDone:     map[string]bool{},
+		openRequests: map[string]bool{},
+		replies:      map[int]string{},
+	}
+}
+
+// webhookObservedEvents are the events the observer reads: not the screen,
+// heartbeats or the summary, which the emitter would work out for it.
 func webhookObservedEvents(t EventType) bool {
-	return t != EventTypeScreenUpdate && t != EventTypeHeartbeat
+	return t != EventTypeScreenUpdate && t != EventTypeHeartbeat && t != EventTypeSummaryUpdate
 }
 
 // run reads the conversation's events until ctx ends. The state at the
@@ -241,6 +310,11 @@ func (o *webhookObserver) run(ctx context.Context) {
 	for ctx.Err() == nil {
 		id, events, replay := o.emitter.SubscribeTo(webhookObservedEvents, 0, "")
 		for _, event := range replay {
+			if _, ok := event.Payload.(SessionSyncBody); ok {
+				// A replay begins with one; only a reset sends one
+				// later.
+				continue
+			}
 			o.handle(event, first)
 		}
 		first = false
@@ -264,6 +338,8 @@ func (o *webhookObserver) run(ctx context.Context) {
 // anything.
 func (o *webhookObserver) handle(event Event, quiet bool) {
 	switch payload := event.Payload.(type) {
+	case SessionSyncBody:
+		o.newConversation()
 	case StatusChangeBody:
 		o.statusChanged(payload, quiet)
 	case MessageUpdateBody:
@@ -277,6 +353,18 @@ func (o *webhookObserver) handle(event Event, quiet bool) {
 	case TaskUpdateBody:
 		o.taskUpdated(payload.Task, quiet)
 	}
+}
+
+// newConversation forgets the conversation a reset (a restart, a session
+// switch) replaced; its last message goes out first, unless it did.
+func (o *webhookObserver) newConversation() {
+	o.flushAgent()
+	o.sent, o.started, o.ended = mark{}, mark{}, mark{}
+	clear(o.tools)
+	o.toolOrder = nil
+	clear(o.toolDone)
+	clear(o.openRequests)
+	clear(o.replies)
 }
 
 func (o *webhookObserver) statusChanged(next StatusChangeBody, quiet bool) {
@@ -327,10 +415,10 @@ func (o *webhookObserver) promptID() string {
 func (o *webhookObserver) messageUpdated(msg MessageUpdateBody, quiet bool) {
 	key := messageKey{msg.Id, msg.Time}
 	if quiet || msg.Time.Before(o.since) {
-		o.sent[key] = true
+		o.sent.advance(key)
 		return
 	}
-	if o.sent[key] {
+	if o.sent.covers(key) {
 		return
 	}
 	if msg.Role != conv.RoleUser {
@@ -351,14 +439,14 @@ func (o *webhookObserver) flushAgent() {
 	}
 	msg := *o.agent
 	o.agent = nil
-	if o.sent[messageKey{msg.Id, msg.Time}] || msg.Message == "" {
+	if o.sent.covers(messageKey{msg.Id, msg.Time}) || msg.Message == "" {
 		return
 	}
 	o.send(msg)
 }
 
 func (o *webhookObserver) send(msg MessageUpdateBody) {
-	o.sent[messageKey{msg.Id, msg.Time}] = true
+	o.sent.advance(messageKey{msg.Id, msg.Time})
 	o.webhook.emit(webhookEventMessageCreated, WebhookMessage{
 		ID: msg.Id, Role: msg.Role, Content: cut(msg.Message, webhookMessageLimit), Time: msg.Time,
 		Truncated: len(msg.Message) > webhookMessageLimit,
@@ -371,18 +459,20 @@ func (o *webhookObserver) send(msg MessageUpdateBody) {
 func (o *webhookObserver) taskUpdated(task Task, quiet bool) {
 	key := messageKey{task.ID, task.StartedAt}
 	if quiet || task.StartedAt.Before(o.since) {
-		o.started[key] = true
-		o.ended[key] = task.final()
+		o.started.advance(key)
+		if task.Final() {
+			o.ended.advance(key)
+		}
 		return
 	}
-	if !o.started[key] {
-		o.started[key] = true
+	if !o.started.covers(key) {
+		o.started.advance(key)
 		o.webhook.emit(webhookEventTaskStarted, o.webhookTask(task))
 	}
-	if !task.final() || o.ended[key] {
+	if !task.Final() || o.ended.covers(key) {
 		return
 	}
-	o.ended[key] = true
+	o.ended.advance(key)
 	eventType := webhookEventTaskCompleted
 	if task.Status != TaskStatusCompleted {
 		eventType = webhookEventTaskFailed
@@ -417,18 +507,17 @@ func (o *webhookObserver) richMessageUpdated(msg RichMessageUpdateBody, quiet bo
 	for _, block := range msg.Content {
 		switch block.Type {
 		case "tool_use":
-			if _, ok := o.tools[block.ToolUseID]; !ok {
-				o.tools[block.ToolUseID] = WebhookToolCall{ToolUseID: block.ToolUseID, Name: block.ToolName, Input: toolInput(block.ToolInput)}
-			}
+			o.toolStarted(block)
 		case "tool_result":
 			if o.toolDone[block.ToolUseID] || toolRunning(block.Status) {
 				continue
 			}
 			o.toolDone[block.ToolUseID] = true
+			call := o.tools[block.ToolUseID]
+			delete(o.tools, block.ToolUseID)
 			if history {
 				continue
 			}
-			call := o.tools[block.ToolUseID]
 			call.ToolUseID = block.ToolUseID
 			if call.Name == "" {
 				call.Name = block.ToolName
@@ -440,6 +529,26 @@ func (o *webhookObserver) richMessageUpdated(msg RichMessageUpdateBody, quiet bo
 			call.Truncated = inputCut || len(block.Text) > webhookToolLimit
 			o.webhook.emit(webhookEventToolCompleted, call)
 		}
+	}
+}
+
+// toolStarted keeps a call until its result comes, for its name and input.
+func (o *webhookObserver) toolStarted(block transcript.RichContentBlock) {
+	id := block.ToolUseID
+	if _, ok := o.tools[id]; ok || o.toolDone[id] {
+		return
+	}
+	o.tools[id] = WebhookToolCall{ToolUseID: id, Name: block.ToolName, Input: toolInput(block.ToolInput)}
+	o.toolOrder = append(o.toolOrder, id)
+	for len(o.tools) > maxOpenTools {
+		delete(o.tools, o.toolOrder[0])
+		o.toolOrder = o.toolOrder[1:]
+	}
+	if len(o.toolOrder) > 2*maxOpenTools {
+		o.toolOrder = slices.DeleteFunc(o.toolOrder, func(id string) bool {
+			_, open := o.tools[id]
+			return !open
+		})
 	}
 }
 
@@ -464,15 +573,20 @@ func toolInput(raw json.RawMessage) any {
 }
 
 func (o *webhookObserver) requestUpdated(state native.RequestState, quiet bool) {
-	previous, known := o.requests[state.ID]
-	o.requests[state.ID] = state.Status
-	if quiet || (known && previous == state.Status) {
+	wasOpen := o.openRequests[state.ID]
+	open := state.Status == native.RequestStatusPending
+	if open {
+		o.openRequests[state.ID] = true
+	} else {
+		// A request doesn't open again.
+		delete(o.openRequests, state.ID)
+	}
+	if quiet || open == wasOpen {
 		return
 	}
-	switch {
-	case state.Status == native.RequestStatusPending:
+	if open {
 		o.webhook.emit(webhookEventRequestOpened, state)
-	case known && previous == native.RequestStatusPending:
+	} else {
 		o.webhook.emit(webhookEventRequestClosed, state)
 	}
 }
@@ -487,21 +601,6 @@ func (o *webhookObserver) agentError(err ErrorBody, quiet bool) {
 		return
 	}
 	o.webhook.emit(webhookEventAgentError, err)
-}
-
-// state is the data of the instance.* events.
-func (o *webhookObserver) state() WebhookInstanceState {
-	status := o.emitter.StatusSnapshot()
-	state := WebhookInstanceState{
-		Status: status.Status, Lifecycle: status.Lifecycle, AgentSessionID: status.AgentSessionID,
-		SessionName: status.SessionName, PendingRequests: status.PendingRequests,
-		TerminalPrompt: status.TerminalPrompt, LoginRequired: status.LoginRequired,
-		LimitStop: status.LimitStop, Usage: status.Usage, Settings: status.Settings,
-	}
-	if o.queued != nil {
-		state.QueuedMessages = o.queued()
-	}
-	return state
 }
 
 // cut returns s cut to at most n bytes, on a character boundary, with an

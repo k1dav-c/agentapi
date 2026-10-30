@@ -20,7 +20,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/registry"
 	"github.com/coder/agentapi/lib/userconfig"
 )
@@ -34,9 +34,10 @@ const (
 	keyPublic = "public-url"
 )
 
-// defaultEvents are the events a hub gets: the instances, their tasks and
-// what they wait on.
-var defaultEvents = []string{"instance.*", "task.*", "request.*", "login.*", "limit.*", "agent.error"}
+// defaultEvents are the events a hub gets: the instances starting, their
+// heartbeats and their stopping, which add them and say where they are.
+// The hub follows what each one does from its summary stream.
+var defaultEvents = []string{"instance.*"}
 
 // requestTimeout is how long a running AgentAPI has to answer.
 const requestTimeout = 5 * time.Second
@@ -113,7 +114,7 @@ func joinCmd() *cobra.Command {
 				_, _ = fmt.Fprintln(out, "Warning: without --secret the hub can't tell the events are this machine's.")
 			}
 			if publicURL != "" {
-				if err := checkURL(httpapi.ExpandPublicURL(publicURL, 1)); err != nil {
+				if err := checkURL(instanceapi.ExpandPublicURL(publicURL, 1)); err != nil {
 					return fmt.Errorf("--public-url: %w", err)
 				}
 			}
@@ -149,7 +150,7 @@ func joinCmd() *cobra.Command {
 	}
 	opts.addFlags(cmd)
 	cmd.Flags().StringVar(&secret, "secret", "", "Secret that signs the events, which the hub checks (default $AGENTAPI_HUB_SECRET)")
-	cmd.Flags().StringSliceVar(&events, "events", defaultEvents, "Events to send to the hub")
+	cmd.Flags().StringSliceVar(&events, "events", defaultEvents, "Events to send to the hub; it needs only instance.*, and follows the rest from each AgentAPI's summary")
 	cmd.Flags().BoolVar(&noCheck, "no-check", false, "Join without checking that the hub takes this machine's events (for a hub that doesn't run yet)")
 	cmd.Flags().StringVar(&publicURL, "public-url", "", "Where the hub reaches this machine's AgentAPIs, such as http://dev-1.vpn:{port} ({port} and {hostname} are filled in for each)")
 	return cmd
@@ -303,7 +304,7 @@ func applyTo(ctx context.Context, entry registry.Entry, token string, change web
 		body["secret"] = *change.Secret
 	}
 	if change.PublicURL != "" {
-		body["public_url"] = httpapi.ExpandPublicURL(change.PublicURL, entry.Port)
+		body["public_url"] = instanceapi.ExpandPublicURL(change.PublicURL, entry.Port)
 	}
 	return call(ctx, entry, token, http.MethodPut, body, nil)
 }

@@ -3,7 +3,6 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,7 +13,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -26,6 +24,7 @@ import (
 
 	"github.com/coder/quartz"
 
+	"github.com/coder/agentapi/lib/instanceapi"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/statedb"
 )
@@ -34,7 +33,7 @@ const (
 	webhookEventRunStatusChanged = "run.status_changed"
 	// webhookEventTest is sent on request (POST /webhook/test), whatever
 	// the events chosen.
-	webhookEventTest          = "webhook.test"
+	webhookEventTest          = instanceapi.EventWebhookTest
 	defaultWebhookTimeout     = 10 * time.Second
 	defaultWebhookMaxAttempts = 3
 	defaultWebhookHeartbeat   = 60 * time.Second
@@ -137,16 +136,16 @@ func webhookEventMatches(pattern, event string) bool {
 	return ok && strings.HasPrefix(event, group+".")
 }
 
-// WebhookEvent is the body of a delivery, unless a payload template
-// reshapes it.
-type WebhookEvent struct {
-	ID        string    `json:"id" doc:"Unique delivery identifier."`
-	Type      string    `json:"type" doc:"Event type, such as run.status_changed or task.completed."`
-	CreatedAt time.Time `json:"created_at" doc:"Time the event was created."`
-	// Instance is the AgentAPI that sent the event.
-	Instance *WebhookInstance `json:"instance,omitempty"`
-	// Data depends on the type: WebhookEventData for run.status_changed.
-	Data any `json:"data"`
+// The webhook's envelope and the instance it names are the contract with
+// the receivers that watch many AgentAPIs (lib/instanceapi).
+type (
+	WebhookEvent    = instanceapi.WebhookEvent
+	WebhookInstance = instanceapi.WebhookInstance
+)
+
+// queuedEvent is an event waiting to be delivered.
+type queuedEvent struct {
+	WebhookEvent
 	// done, if set, is closed once the event was delivered or given up on.
 	done chan struct{}
 }
@@ -157,23 +156,6 @@ type WebhookEventData struct {
 	PreviousStatus AgentStatus  `json:"previous_status" doc:"Previous agent status."`
 	AgentType      mf.AgentType `json:"agent_type" doc:"Type of agent being used."`
 	Transport      Transport    `json:"transport" doc:"Backend transport being used."`
-}
-
-// WebhookInstance identifies the AgentAPI that sent an event, so that one
-// receiver can tell many apart.
-type WebhookInstance struct {
-	ID           string       `json:"id"`
-	Name         string       `json:"name,omitempty"`
-	ServerID     string       `json:"server_id"`
-	Hostname     string       `json:"hostname,omitempty"`
-	Port         int          `json:"port,omitempty"`
-	PID          int          `json:"pid,omitempty"`
-	CWD          string       `json:"cwd,omitempty"`
-	AgentType    mf.AgentType `json:"agent_type"`
-	Transport    Transport    `json:"transport"`
-	Version      string       `json:"agentapi_version,omitempty"`
-	URL          string       `json:"url,omitempty"`
-	WorkspaceURL string       `json:"workspace_url,omitempty"`
 }
 
 // WebhookTemplateData is the context available to custom payload templates.
@@ -205,23 +187,20 @@ type webhookDispatcher struct {
 	instance  WebhookInstance
 	// startup is the configuration AgentAPI started with.
 	startup WebhookConfig
-	queue   chan WebhookEvent
+	queue   chan queuedEvent
 	// snapshot, if set, gives the data of instance.started and
 	// instance.heartbeat.
 	snapshot func() any
+	// configured, if set, is called after the configuration changed.
+	configured func()
 	// configChanged wakes the heartbeat loop when the interval changes.
 	configChanged chan struct{}
 }
 
-// ExpandPublicURL fills in a public URL's placeholders: {port} is the port
-// AgentAPI listens on and {hostname} the machine's name. One setting then
-// serves every AgentAPI of a machine (the config file of agentapi hub join).
+// ExpandPublicURL fills in a public URL's placeholders; see
+// instanceapi.ExpandPublicURL.
 func ExpandPublicURL(publicURL string, port int) string {
-	if !strings.Contains(publicURL, "{") {
-		return publicURL
-	}
-	hostname, _ := os.Hostname()
-	return strings.NewReplacer("{port}", strconv.Itoa(port), "{hostname}", hostname).Replace(publicURL)
+	return instanceapi.ExpandPublicURL(publicURL, port)
 }
 
 func parseWebhookTemplate(templateStr string) (*template.Template, error) {
@@ -262,7 +241,7 @@ func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType m
 		transport:     transport,
 		instance:      WebhookInstance{ServerID: serverID, AgentType: agentType, Transport: transport},
 		startup:       config,
-		queue:         make(chan WebhookEvent, webhookQueueSize),
+		queue:         make(chan queuedEvent, webhookQueueSize),
 		configChanged: make(chan struct{}, 1),
 	}, nil
 }
@@ -357,12 +336,15 @@ func (d *webhookDispatcher) updateConfig(config WebhookConfig) error {
 		return err
 	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.config = config
 	d.tmpl = tmpl
+	d.mu.Unlock()
 	select {
 	case d.configChanged <- struct{}{}:
 	default:
+	}
+	if d.configured != nil {
+		d.configured()
 	}
 	return nil
 }
@@ -402,14 +384,13 @@ func (d *webhookDispatcher) enqueue(eventType string, data any, done chan struct
 		return false
 	}
 	instance := d.instanceSnapshot()
-	event := WebhookEvent{
+	event := queuedEvent{WebhookEvent: WebhookEvent{
 		ID:        randomWebhookID(),
 		Type:      eventType,
 		CreatedAt: d.clock.Now().UTC(),
 		Instance:  &instance,
 		Data:      data,
-		done:      done,
-	}
+	}, done: done}
 	select {
 	case d.queue <- event:
 		return true
@@ -529,11 +510,11 @@ func webhookRetryDelay(attempt int) time.Duration {
 	return min(delay, maxWebhookRetryDelay)
 }
 
-func (d *webhookDispatcher) deliver(ctx context.Context, event WebhookEvent) {
+func (d *webhookDispatcher) deliver(ctx context.Context, event queuedEvent) {
 	if event.done != nil {
 		defer close(event.done)
 	}
-	body, err := d.renderBody(event)
+	body, err := d.renderBody(event.WebhookEvent)
 	if err != nil {
 		d.logger.Error("Failed to render webhook body", "error", err)
 		return
@@ -541,7 +522,7 @@ func (d *webhookDispatcher) deliver(ctx context.Context, event WebhookEvent) {
 	config := d.configSnapshot()
 	client := &http.Client{Timeout: config.Timeout}
 	for attempt := 1; attempt <= config.MaxAttempts; attempt++ {
-		err := d.sendWithConfig(ctx, config, client, event, body)
+		err := d.sendWithConfig(ctx, config, client, event.WebhookEvent, body)
 		if err == nil {
 			return
 		}
@@ -569,22 +550,6 @@ func (e *permanentWebhookError) Error() string {
 	return fmt.Sprintf("unexpected HTTP status %s", e.status)
 }
 
-// SignWebhook is the X-AgentAPI-Signature-256 of body sent at timestamp
-// (Unix seconds) with secret, as an AgentAPI signs its webhook events.
-func SignWebhook(secret, timestamp string, body []byte) string {
-	return webhookSignature(secret, timestamp, body)
-}
-
-// webhookSignature is the X-AgentAPI-Signature-256 of body sent at
-// timestamp: the HMAC-SHA256, keyed with secret, of "<timestamp>.<body>".
-func webhookSignature(secret, timestamp string, body []byte) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(timestamp))
-	mac.Write([]byte("."))
-	mac.Write(body)
-	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
-}
-
 func (d *webhookDispatcher) sendWithConfig(ctx context.Context, config WebhookConfig, client *http.Client, event WebhookEvent, body []byte) error {
 	_, err := d.send(ctx, config, client, event, body)
 	return err
@@ -599,14 +564,14 @@ func (d *webhookDispatcher) send(ctx context.Context, config WebhookConfig, clie
 	timestamp := strconv.FormatInt(event.CreatedAt.Unix(), 10)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", "AgentAPI-Webhook/1.0")
-	request.Header.Set("X-AgentAPI-Delivery", event.ID)
-	request.Header.Set("X-AgentAPI-Event", event.Type)
-	request.Header.Set("X-AgentAPI-Timestamp", timestamp)
+	request.Header.Set(instanceapi.HeaderDelivery, event.ID)
+	request.Header.Set(instanceapi.HeaderEvent, event.Type)
+	request.Header.Set(instanceapi.HeaderTimestamp, timestamp)
 	if event.Instance != nil && event.Instance.ID != "" {
-		request.Header.Set("X-AgentAPI-Instance", event.Instance.ID)
+		request.Header.Set(instanceapi.HeaderInstance, event.Instance.ID)
 	}
 	if config.Secret != "" {
-		request.Header.Set("X-AgentAPI-Signature-256", webhookSignature(config.Secret, timestamp, body))
+		request.Header.Set(instanceapi.HeaderSignature, instanceapi.Sign(config.Secret, timestamp, body))
 	}
 
 	response, err := client.Do(request)

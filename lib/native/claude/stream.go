@@ -3,7 +3,6 @@ package claude
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/coder/quartz"
 
 	"github.com/coder/agentapi/lib/agentlog/claudelog"
+	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -79,20 +79,6 @@ func stringField(raw json.RawMessage) string {
 	return s
 }
 
-// decode is json.Unmarshal that keeps what it could read when a field has
-// an unexpected type: Unmarshal fills the other fields and reports only the
-// first mismatch. A frame isn't lost to one field that changed shape; a
-// lost result would never end the turn, a lost permission request never be
-// answered.
-func decode(data []byte, v any) error {
-	err := json.Unmarshal(data, v)
-	var typeErr *json.UnmarshalTypeError
-	if errors.As(err, &typeErr) {
-		return nil
-	}
-	return err
-}
-
 // apiMessage is the message of an assistant frame or message_start event.
 type apiMessage struct {
 	ID         string            `json:"id"`
@@ -147,9 +133,6 @@ type assistantMessage struct {
 	msg      transcript.RichMessage
 	blocks   []*liveBlock
 	streamed bool
-	sent     bool
-	dirty    bool
-	lastSent time.Time
 }
 
 // resultRef locates the tool_result of a tool call.
@@ -170,8 +153,12 @@ type resultRef struct {
 //
 // It is used by the read loop only.
 type streamParser struct {
-	clock    quartz.Clock
-	throttle time.Duration
+	clock quartz.Clock
+	// throttle holds back the snapshots of messages that stream, by
+	// message ID.
+	throttle *agentio.Throttle[string]
+	// drift counts the frames whose fields changed type; nil in tests.
+	drift *agentio.Drift
 	// sessionID labels timeline events.
 	sessionID string
 	events    *claudelog.EventParser
@@ -191,10 +178,10 @@ type streamParser struct {
 	userSeq    int
 }
 
-func newStreamParser(clock quartz.Clock, throttle time.Duration) *streamParser {
+func newStreamParser(clock quartz.Clock, interval time.Duration) *streamParser {
 	return &streamParser{
 		clock:      clock,
-		throttle:   throttle,
+		throttle:   agentio.NewThrottle[string](clock, interval),
 		events:     claudelog.NewEventParser(),
 		messages:   make(map[string]*assistantMessage),
 		results:    make(map[string]resultRef),
@@ -218,12 +205,21 @@ func (p *streamParser) message(id, model string) *assistantMessage {
 	return m
 }
 
-// snapshot returns the message's current state. It shares the parser's
-// values: the Sink copies what it keeps.
+// snapshot returns the message's current state to send now, in place of
+// a change the throttle held back.
 func (p *streamParser) snapshot(m *assistantMessage) transcript.RichMessage {
-	m.sent = true
-	m.dirty = false
-	m.lastSent = p.clock.Now()
+	msg, _ := p.throttle.Send(m.msg.MessageID, p.build(m))
+	return msg
+}
+
+// build snapshots m for the throttle.
+func (p *streamParser) build(m *assistantMessage) func() (transcript.RichMessage, bool) {
+	return func() (transcript.RichMessage, bool) { return p.render(m), true }
+}
+
+// render returns the message's current state. It shares the parser's
+// values: the Sink copies what it keeps.
+func (p *streamParser) render(m *assistantMessage) transcript.RichMessage {
 	out := m.msg
 	out.Content = make([]transcript.RichContentBlock, 0, len(m.blocks))
 	for _, b := range m.blocks {
@@ -248,9 +244,9 @@ func (p *streamParser) startMessage(id string, msg *apiMessage) {
 
 // startBlock begins block index from a content_block_start event, unless
 // its final state arrived already, and reports whether it did.
-func (m *assistantMessage) startBlock(index int, raw json.RawMessage) bool {
+func (m *assistantMessage) startBlock(index int, raw json.RawMessage, drift *agentio.Drift) bool {
 	var block claudelog.ContentBlock
-	if json.Unmarshal(raw, &block) != nil {
+	if drift.Decode("content_block_start", raw, &block) != nil {
 		return false
 	}
 	for len(m.blocks) <= index {
@@ -262,7 +258,6 @@ func (m *assistantMessage) startBlock(index int, raw json.RawMessage) bool {
 		b.text.WriteString(block.Text)
 		b.thinking.WriteString(block.Thinking)
 	}
-	m.dirty = true
 	return true
 }
 
@@ -282,54 +277,25 @@ func (m *assistantMessage) addDelta(index int, kind, text, thinking string) bool
 	default:
 		return false
 	}
-	m.dirty = true
 	return true
-}
-
-// due reports whether a throttled snapshot of m may be sent now.
-func (p *streamParser) due(m *assistantMessage) bool {
-	return !m.sent || p.clock.Since(m.lastSent) >= p.throttle
 }
 
 // nextFlush returns when the first change the throttle held back may be
 // sent, or the zero time if there is none.
 func (p *streamParser) nextFlush() time.Time {
-	var next time.Time
-	for _, m := range p.messages {
-		if !m.dirty || len(m.blocks) == 0 {
-			continue
-		}
-		if at := m.lastSent.Add(p.throttle); next.IsZero() || at.Before(next) {
-			next = at
-		}
-	}
-	return next
+	return p.throttle.Next()
 }
 
 // flush returns snapshots of the messages whose held-back changes may be
 // sent now, so a pause in the stream doesn't leave them unsent.
 func (p *streamParser) flush() []transcript.RichMessage {
-	var out []transcript.RichMessage
-	for _, id := range p.order {
-		m := p.messages[id]
-		if m.dirty && len(m.blocks) > 0 && p.due(m) {
-			out = append(out, p.snapshot(m))
-		}
-	}
-	return out
+	return p.throttle.Flush(false)
 }
 
 // flushAll returns snapshots of every message with changes the throttle
 // held back, due or not: the CLI's output ended.
 func (p *streamParser) flushAll() []transcript.RichMessage {
-	var out []transcript.RichMessage
-	for _, id := range p.order {
-		m := p.messages[id]
-		if m.dirty && len(m.blocks) > 0 {
-			out = append(out, p.snapshot(m))
-		}
-	}
-	return out
+	return p.throttle.Flush(true)
 }
 
 // streamEvent applies a partial-message event of the main thread.
@@ -338,7 +304,7 @@ func (p *streamParser) streamEvent(f *frame) []transcript.RichMessage {
 		return nil
 	}
 	var ev streamEvent
-	if json.Unmarshal(f.Event, &ev) != nil {
+	if p.drift.Decode("stream_event", f.Event, &ev) != nil {
 		return nil
 	}
 	id := f.APIMessageID
@@ -356,7 +322,7 @@ func (p *streamParser) streamEvent(f *frame) []transcript.RichMessage {
 	}
 	switch ev.Type {
 	case "content_block_start":
-		if !m.startBlock(ev.Index, ev.ContentBlock) {
+		if !m.startBlock(ev.Index, ev.ContentBlock, p.drift) {
 			return nil
 		}
 	case "content_block_delta":
@@ -370,17 +336,20 @@ func (p *streamParser) streamEvent(f *frame) []transcript.RichMessage {
 		if ev.Usage != nil {
 			m.msg.Usage = ev.Usage
 		}
-		if !m.sent {
+		if !p.throttle.Sent(id) {
 			return nil
 		}
 		return []transcript.RichMessage{p.snapshot(m)}
 	default:
 		return nil
 	}
-	if len(m.blocks) == 0 || !m.dirty || !p.due(m) {
+	if len(m.blocks) == 0 {
 		return nil
 	}
-	return []transcript.RichMessage{p.snapshot(m)}
+	if msg, ok := p.throttle.Changed(id, p.build(m)); ok {
+		return []transcript.RichMessage{msg}
+	}
+	return nil
 }
 
 // assistant applies a complete content block of the main thread.
@@ -389,7 +358,7 @@ func (p *streamParser) assistant(f *frame) ([]transcript.RichMessage, []transcri
 		return nil, nil
 	}
 	var msg apiMessage
-	if json.Unmarshal(f.Message, &msg) != nil || msg.ID == "" {
+	if p.drift.Decode("assistant", f.Message, &msg) != nil || msg.ID == "" {
 		return nil, nil
 	}
 	m := p.message(msg.ID, msg.Model)
@@ -484,7 +453,7 @@ func (p *streamParser) userBlock(raw json.RawMessage) (transcript.RichContentBlo
 // events with the session-log event parser.
 func (p *streamParser) sessionEvents(f *frame) []transcript.SessionEvent {
 	var msg claudelog.Message
-	if err := json.Unmarshal(f.Message, &msg); err != nil {
+	if err := p.drift.Decode(f.Type, f.Message, &msg); err != nil {
 		return nil
 	}
 	sessionID := f.SessionID
@@ -558,10 +527,11 @@ func (p *streamParser) endTurn() []transcript.RichMessage {
 	var out []transcript.RichMessage
 	for _, id := range p.order {
 		m := p.messages[id]
-		if len(m.blocks) > 0 && (m.dirty || !m.sent) {
+		if len(m.blocks) > 0 && (p.throttle.Held(id) || !p.throttle.Sent(id)) {
 			out = append(out, p.snapshot(m))
 		}
 	}
+	p.throttle.Reset()
 	p.messages = make(map[string]*assistantMessage)
 	p.order = nil
 	p.current = ""

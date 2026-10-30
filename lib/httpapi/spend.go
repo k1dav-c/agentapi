@@ -16,13 +16,6 @@ import (
 // spendInterval is how often the spend is worked out again.
 const spendInterval = time.Minute
 
-// SummarySpend is what the agent's sessions in its working directory cost
-// recently.
-type SummarySpend struct {
-	DayUSD  float64 `json:"day_usd" doc:"API-equivalent cost in USD of the agent's sessions in this directory, subagents included, over the last 24 hours (the hours that end within them): the tokens at the model providers' list prices, which a subscription doesn't charge."`
-	WeekUSD float64 `json:"week_usd" doc:"The same over the last 7 days."`
-}
-
 // spendOf adds up the hours of hourly that end within the last day and
 // week before now, to the cent.
 func spendOf(hourly []sessions.HourCost, now time.Time) SummarySpend {

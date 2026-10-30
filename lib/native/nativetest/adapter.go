@@ -40,6 +40,8 @@ type Adapter struct {
 	TurnErr    error
 	// SteerErr is returned by Steer.
 	SteerErr error
+	// InterruptErr is returned by Interrupt.
+	InterruptErr error
 	// RespondErr is returned by Respond.
 	RespondErr error
 	// AutoStartTurn reports TurnStarted when a turn is sent.
@@ -172,7 +174,7 @@ func (a *Adapter) Interrupt(context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.interrupts++
-	return nil
+	return a.InterruptErr
 }
 
 func (a *Adapter) Respond(ctx context.Context, requestID string, response native.Response) error {

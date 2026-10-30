@@ -96,7 +96,7 @@ func (a *Adapter) loadModels(ctx context.Context) ([]native.ModelOption, error) 
 			return nil, fmt.Errorf("list the models: %w", err)
 		}
 		var page modelListResponse
-		if err := json.Unmarshal(result, &page); err != nil {
+		if err := a.drift.Decode("model/list response", result, &page); err != nil {
 			return nil, fmt.Errorf("list the models: %w", err)
 		}
 		for _, m := range page.Data {

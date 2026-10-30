@@ -67,35 +67,18 @@ func (cfg Config) logger() *slog.Logger {
 	return cfg.Logger
 }
 
-// Timeouts of the shutdown sequence.
+// Timeouts.
 const (
-	// abortGrace is how long Close waits for a running turn to stop
-	// before it closes stdin.
-	abortGrace = 3 * time.Second
-	// stdinGrace is how long Pi gets to exit after stdin closes.
-	stdinGrace = 3 * time.Second
-	// termGrace is how long Pi gets after SIGTERM before SIGKILL.
-	termGrace = 2 * time.Second
-)
-
-// Other timeouts and limits.
-const (
-	// exitInfoWait is how long a failed start waits for Pi's exit status.
-	exitInfoWait = 3 * time.Second
 	// interruptTimeout is how long an interrupted turn waits for Pi to end
 	// it before the adapter ends it.
-	interruptTimeout = 10 * time.Second
+	interruptTimeout = agentio.InterruptTimeout
 	// snapshotInterval is the shortest time between two snapshots of a
 	// message that is streaming.
-	snapshotInterval = 100 * time.Millisecond
+	snapshotInterval = agentio.SnapshotInterval
 )
 
-var (
-	// errExited is returned for operations after Pi exited.
-	errExited = errors.New("pi exited")
-	// errClosed is returned by Start after Close.
-	errClosed = errors.New("the adapter was closed")
-)
+// errExited is returned for operations after Pi exited.
+var errExited = errors.New("pi exited")
 
 // cmdKind is what a command waiting for its response was for.
 type cmdKind int
@@ -132,31 +115,30 @@ type pendingCmd struct {
 type Adapter struct {
 	cfg Config
 	// args are the user's arguments passed on to Pi.
-	args      []string
-	log       *slog.Logger
+	args []string
+	log  *slog.Logger
+	// drift counts what Pi sends that the adapter doesn't read.
+	drift     *agentio.Drift
 	resumeRef string
 	// fork opens a copy of resumeRef's session under a new ID.
-	fork  bool
-	start procutil.StartFunc
+	fork bool
 
 	// The timeouts and limits of the constants above, and the clock of
 	// the snapshot, dialog and interrupt timers; tests change them.
-	abortGrace, stdinGrace, termGrace time.Duration
-	interruptTimeout                  time.Duration
-	interval                          time.Duration
-	maxLine                           int
-	clock                             quartz.Clock
+	interruptTimeout time.Duration
+	interval         time.Duration
+	clock            quartz.Clock
 	// lineHandled, if set, is called after each stdout record is handled.
 	lineHandled func()
 
 	// writer writes Pi's commands, once Start gave it the stdin.
 	writer *agentio.Writer
-	proc   procutil.Process
+	// host runs Pi and the event loop.
+	host *agentio.Host
 
 	mu         sync.Mutex
 	started    bool
 	exited     bool
-	closing    bool
 	nextID     int
 	pending    map[string]*pendingCmd
 	dialogs    map[string]*dialog
@@ -179,16 +161,8 @@ type Adapter struct {
 	// contextWindow is the context window of the session's model.
 	contextWindow int64
 
-	// posted carries functions to run on the event loop (see post).
-	posted chan func()
 	// loopDone is closed when the event loop has stopped.
-	loopDone chan struct{}
-	// procDone is closed when the process has exited.
-	procDone chan struct{}
-	exitErr  error
-
-	closeOnce sync.Once
-	doneOnce  sync.Once
+	loopDone <-chan struct{}
 
 	// Loop state; only the event loop goroutine touches it.
 	loop loopState
@@ -212,27 +186,30 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 	if cfg.Clock == nil {
 		cfg.Clock = quartz.NewReal()
 	}
-	return &Adapter{
+	log := cfg.logger().With("agent", "pi")
+	a := &Adapter{
 		cfg:              cfg,
 		args:             args,
-		log:              cfg.logger().With("agent", "pi"),
+		log:              log,
+		drift:            agentio.NewDrift("Pi", log),
 		resumeRef:        resumeRef,
-		start:            cfg.StartProcess,
-		abortGrace:       abortGrace,
-		stdinGrace:       stdinGrace,
-		termGrace:        termGrace,
 		interruptTimeout: interruptTimeout,
 		interval:         snapshotInterval,
-		maxLine:          agentio.MaxLine,
 		writer:           agentio.NewWriter("pi"),
 		clock:            cfg.Clock,
 		pending:          make(map[string]*pendingCmd),
 		dialogs:          make(map[string]*dialog),
 		caps:             native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true},
-		posted:           make(chan func()),
-		loopDone:         make(chan struct{}),
-		procDone:         make(chan struct{}),
 	}
+	a.host = agentio.NewHost(agentio.HostConfig{
+		Name:   "Pi",
+		Logger: log,
+		Clock:  cfg.Clock,
+		Start:  cfg.StartProcess,
+		Writer: a.writer,
+	})
+	a.loopDone = a.host.LoopDone()
+	return a
 }
 
 // Start launches Pi and waits for its first get_state response, which
@@ -250,63 +227,30 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	// The arguments can hold secrets (--api-key).
 	a.log.Info("Starting Pi in RPC mode", "program", a.cfg.Program, "resume", a.resumeRef != "")
 	a.log.Debug("Pi command line", "args", args)
-	a.mu.Lock()
-	closing := a.closing
-	a.mu.Unlock()
-	if closing {
-		return errClosed
-	}
-	proc, err := a.start(procutil.Command{
+	// Before the loop runs, which owns it from then on.
+	a.loop = a.newLoopState(sink)
+	// The event loop handles Pi's records and the functions posted to it
+	// (timers); it is the only goroutine that calls the sink.
+	_, err := a.host.Launch(procutil.Command{
 		Program: a.cfg.Program,
 		Args:    args,
 		Dir:     a.cfg.CWD,
 		Env:     procenv.ForAgent(a.cfg.Env),
 		Logger:  a.log,
-	})
+	}, agentio.Loop{Line: a.handleRecord, NextWake: a.nextWake, Wake: a.wake, Ended: a.handleExit})
 	if err != nil {
-		a.markDone(err)
 		return err
 	}
-	a.writer.Attach(proc.Stdin())
-	a.mu.Lock()
-	closing = a.closing
-	if !closing {
-		a.proc = proc
-	}
-	a.mu.Unlock()
-	if closing {
-		// Close ran while Pi was starting and found no process to stop.
-		_ = proc.Stdin().Close()
-		_ = proc.Kill()
-		return errClosed
-	}
-	a.loop = newLoopState(sink, a.cfg.CWD)
-
-	lines := make(chan []byte, 16)
-	go func() {
-		defer close(lines)
-		agentio.ReadLines(proc.Stdout(), "pi", a.maxLine, a.log, func(line []byte) { lines <- line })
-	}()
-	go a.eventLoop(lines)
-	go func() {
-		err := proc.Wait()
-		// Let the loop handle what Pi wrote before it exited.
-		select {
-		case <-a.loopDone:
-		case <-time.After(procutil.OutputGrace):
-		}
-		a.markDone(procutil.WithStderr(err, proc.StderrTail()))
-	}()
 
 	res, err := a.request(ctx, cmdQuery, simpleCommand{Type: "get_state"})
 	if err == nil {
 		err = res.err
 	}
 	if err != nil {
-		return a.startError(err, proc)
+		return a.startError(err)
 	}
 	var state sessionState
-	if err := json.Unmarshal(res.data, &state); err != nil {
+	if err := a.drift.Decode("get_state response", res.data, &state); err != nil {
 		// Not ours to judge: the session opens without what it says.
 		a.log.Warn("Malformed Pi session state", "error", err)
 	} else if !state.hasModel() {
@@ -320,7 +264,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	// Before Start returns, so the conversation finds the session ref and
 	// capabilities.
 	if !a.runOnLoop(func() { a.handleState(state) }) {
-		return a.startError(errExited, proc)
+		return a.startError(errExited)
 	}
 	a.mu.Lock()
 	a.started = true
@@ -328,30 +272,11 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	return nil
 }
 
-// startError explains why Pi didn't open its session. When it exited, its
-// exit error and stderr say why (a broken extension, a bad option).
-func (a *Adapter) startError(err error, proc procutil.Process) error {
-	if errors.Is(err, errExited) {
-		select {
-		case <-a.procDone:
-			if a.exitErr != nil {
-				return fmt.Errorf("pi exited during startup: %w", a.exitErr)
-			}
-			if tail := proc.StderrTail(); tail != "" {
-				return fmt.Errorf("pi exited during startup: %w: %s", err, tail)
-			}
-		case <-time.After(exitInfoWait):
-		}
-	}
-	return fmt.Errorf("pi didn't open its session: %w", err)
-}
-
-// markDone records the exit and makes Wait return.
-func (a *Adapter) markDone(err error) {
-	a.doneOnce.Do(func() {
-		a.exitErr = err
-		close(a.procDone)
-	})
+// startError stops Pi, which didn't open its session, and says why. When
+// it exited, its exit error and stderr say why (a broken extension, a bad
+// option).
+func (a *Adapter) startError(err error) error {
+	return a.host.StartError(fmt.Errorf("pi didn't open its session: %w", err))
 }
 
 // send writes one command line, unless ctx ends first (see
@@ -385,7 +310,13 @@ func (a *Adapter) request(ctx context.Context, kind cmdKind, cmd command) (cmdRe
 
 	if err := a.send(ctx, cmd.withID(id)); err != nil {
 		a.mu.Lock()
-		delete(a.pending, id)
+		if errors.Is(err, native.ErrUnconfirmed) {
+			// Pi may yet get it: the loop handles a late response
+			// without a caller.
+			p.detached = true
+		} else {
+			delete(a.pending, id)
+		}
 		a.mu.Unlock()
 		return cmdResult{}, err
 	}
@@ -475,8 +406,10 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 		a.mu.Unlock()
 		return err
 	}
-	a.clock.AfterFunc(a.interruptTimeout, func() {
-		a.post(func() { a.endInterruptedTurn(turn) })
+	a.runOnLoop(func() {
+		if a.isCurrentTurn(turn) {
+			a.loop.interrupt.Start()
+		}
 	})
 	return nil
 }
@@ -498,10 +431,19 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 	a.mu.Unlock()
 	err = a.send(ctx, reply)
 	a.mu.Lock()
-	d.answering = false
-	if err == nil && a.dialogs[requestID] == d {
-		d.stopTimer()
-		delete(a.dialogs, requestID)
+	switch {
+	case err == nil:
+		d.answering = false
+		if a.dialogs[requestID] == d {
+			d.stopTimer()
+			delete(a.dialogs, requestID)
+		}
+	case errors.Is(err, native.ErrUnconfirmed):
+		// Pi may yet get the answer: the dialog stays answering until Pi
+		// closes it or the turn ends.
+		d.unconfirmed = true
+	default:
+		d.answering = false
 	}
 	a.mu.Unlock()
 	return err
@@ -515,25 +457,24 @@ func (a *Adapter) Capabilities() native.Capabilities {
 	return a.caps
 }
 
-// Wait returns when Pi has exited.
+// Wait returns when Pi has exited and the loop handled its output (see
+// agentio.Host).
 func (a *Adapter) Wait() error {
-	<-a.procDone
-	return a.exitErr
+	return a.host.Wait()
 }
 
 // Close stops Pi: it aborts a running turn (closing stdin mid-turn leaves
 // the session with a tool call without result), closes stdin, then sends
 // SIGTERM and SIGKILL to the process group if Pi doesn't exit.
 func (a *Adapter) Close() error {
-	a.closeOnce.Do(a.shutdown)
-	<-a.procDone
+	a.host.Close(a.abortForClose)
 	return nil
 }
 
-func (a *Adapter) shutdown() {
+// abortForClose aborts a running turn, if any, and returns a channel
+// closed once Pi answered the abort.
+func (a *Adapter) abortForClose(ctx context.Context) <-chan struct{} {
 	a.mu.Lock()
-	a.closing = true
-	proc := a.proc
 	busy := (a.turnActive || a.runActive) && !a.exited
 	var abort *pendingCmd
 	var abortID string
@@ -542,35 +483,27 @@ func (a *Adapter) shutdown() {
 		abortID, abort = a.addPendingLocked(cmdAbort)
 	}
 	a.mu.Unlock()
-	if proc == nil {
-		a.markDone(nil)
-		return
+	if abort == nil {
+		return nil
 	}
-	if abort != nil {
-		// A write that is stuck (Pi stopped reading) must not keep Close
-		// from going on: the wait is bounded, and Stop's closing stdin
-		// makes the write fail.
-		go func() {
-			if err := a.send(context.Background(), simpleCommand{ID: abortID, Type: "abort"}); err != nil {
-				a.mu.Lock()
-				delete(a.pending, abortID)
-				a.mu.Unlock()
-				deliverResult(abort, cmdResult{err: err})
-			}
-		}()
-		select {
-		case <-abort.done:
-		case <-a.procDone:
-		case <-time.After(a.abortGrace):
-			a.log.Warn("Pi didn't stop its turn in time; closing it anyway")
+	// A write that is stuck (Pi stopped reading) must not keep Close from
+	// going on: the wait is bounded, and Stop's closing stdin makes the
+	// write fail.
+	go func() {
+		if err := a.send(ctx, simpleCommand{ID: abortID, Type: "abort"}); err != nil {
+			a.mu.Lock()
+			delete(a.pending, abortID)
+			a.mu.Unlock()
+			deliverResult(abort, cmdResult{err: err})
 		}
-	}
-	procutil.Stop(proc, a.procDone, procutil.StopOptions{
-		StdinGrace: a.stdinGrace,
-		TermGrace:  a.termGrace,
-		Logger:     a.log,
-		Name:       "Pi",
-	})
+	}()
+	answered := make(chan struct{})
+	go func() {
+		// The answer, a failed write, or errExited once Pi's output ended.
+		<-abort.done
+		close(answered)
+	}()
+	return answered
 }
 
 // ready returns an error until Start has completed, and after Pi exited.

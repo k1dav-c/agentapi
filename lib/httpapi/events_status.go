@@ -10,7 +10,7 @@ import (
 
 func (e *EventEmitter) EmitStatus(newStatus conv.Status) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 
 	newAgentStatus := convertStatus(newStatus)
 	newLifecycle := LifecycleRunning
@@ -38,7 +38,7 @@ func (e *EventEmitter) EmitStatus(newStatus conv.Status) {
 
 func (e *EventEmitter) SetLifecycle(lifecycle LifecycleState) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	if e.lifecycle == lifecycle {
 		return
 	}
@@ -50,7 +50,7 @@ func (e *EventEmitter) SetLifecycle(lifecycle LifecycleState) {
 // SetSessionName records the name the agent gave its session.
 func (e *EventEmitter) SetSessionName(name string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	if e.sessionName == name {
 		return
 	}
@@ -63,7 +63,7 @@ func (e *EventEmitter) SetSessionName(name string) {
 
 func (e *EventEmitter) StatusSnapshot() StatusChangeBody {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	return e.statusChangeBody()
 }
 
@@ -89,7 +89,7 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 // resume changes.
 func (e *EventEmitter) SetAgentSessionID(id string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	if e.agentSessionID == id {
 		return
 	}
@@ -100,7 +100,7 @@ func (e *EventEmitter) SetAgentSessionID(id string) {
 // SetCapabilities records the optional operations the agent supports.
 func (e *EventEmitter) SetCapabilities(caps native.Capabilities) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	if e.capabilities != nil && *e.capabilities == caps {
 		return
 	}
@@ -111,7 +111,7 @@ func (e *EventEmitter) SetCapabilities(caps native.Capabilities) {
 // SetSettings records the agent's settings.
 func (e *EventEmitter) SetSettings(settings native.Settings) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	if e.settings != nil && *e.settings == settings {
 		return
 	}
@@ -122,7 +122,7 @@ func (e *EventEmitter) SetSettings(settings native.Settings) {
 // SetUsage records the agent's usage of its limits.
 func (e *EventEmitter) SetUsage(usage native.AgentUsage) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	if e.usage != nil && reflect.DeepEqual(*e.usage, usage) {
 		return
 	}
@@ -133,7 +133,7 @@ func (e *EventEmitter) SetUsage(usage native.AgentUsage) {
 // SetLimitStop records the turn a usage limit stopped (nil: none).
 func (e *EventEmitter) SetLimitStop(ls *native.LimitStop) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	if reflect.DeepEqual(e.limitStop, ls) {
 		return
 	}
@@ -145,7 +145,7 @@ func (e *EventEmitter) SetLimitStop(ls *native.LimitStop) {
 // longer does).
 func (e *EventEmitter) SetLoginRequired(login *native.LoginRequired) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	if login == nil && e.loginRequired == nil {
 		return
 	}
@@ -160,7 +160,7 @@ func (e *EventEmitter) SetLoginRequired(login *native.LoginRequired) {
 
 func (e *EventEmitter) EmitError(message string, level conv.ErrorLevel) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 
 	e.errorCount++
 	errorBody := ErrorBody{

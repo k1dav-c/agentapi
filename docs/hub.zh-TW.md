@@ -25,7 +25,7 @@ hub 在一個頁面上監看多台機器的 AgentAPI：列出每個實例，需�
 ```text
  手機／桌面瀏覽器 ──HTTPS──▶ hub（agentapi hub serve，放在常開的機器上）
                                ▲ 有簽章的 webhook 事件    │ 摘要串流和聊天介面，
-                               │ （instance.*、task.*…）  ▼ 帶著各實例的 token
+                               │ （instance.*）           ▼ 帶著各實例的 token
           ┌────────────────────┴───────────┬────────────────────────────────┐
    workspace A 上的 AgentAPI      workspace B 上的 AgentAPI       你筆電上的 AgentAPI
 ```
@@ -34,12 +34,15 @@ hub 和各個 AgentAPI 透過你掌控的網路互連，例如你自己的 VPN�
 
 1. AgentAPI 用 webhook 加入。`agentapi hub join` 把 hub 的位址和 secret 寫進
    `~/.agentapi/config.yaml`，這個使用者的每個 `agentapi server` 啟動時都會讀取。之後每個
-   AgentAPI 都送出有簽章的 `instance.started`、`instance.heartbeat` 和 `instance.stopped`，
-   hub 據此新增、更新或停止實例。
-2. hub 追蹤每個實例的摘要（`GET /events?only=summary`）：狀態、在等什麼、標題、最新任務、佇列和
-   用量限制。每個實例一條連線；斷線時 1 秒後重連，之後間隔逐次拉長，最多 30 秒。串流 45 秒沒有任何
-   動靜就視為斷線。連線失敗的前 10 秒，實例仍顯示為連線中（剛啟動的實例送出第一個事件時，可能還沒
-   開始接受連線）；超過 10 秒才算連不到。
+   AgentAPI 都送出有簽章的 `instance.started`、`instance.heartbeat`（每分鐘一次）和
+   `instance.stopped`，hub 據此新增、更新或停止實例。hub 連不到、又錯過三次 heartbeat 的實例，
+   例如 workspace 被強制關掉的，視為已停止，hub 不再嘗試連線，直到它下一次送 heartbeat。這些事件
+   只用來新增實例、告訴 hub 它在哪裡；每個實例在做什麼，以它的摘要為準。
+2. hub 追蹤每個實例的摘要（`GET /events?only=summary`），以它為實例狀況的依據：狀態、在等什麼、
+   標題、最新任務、佇列和用量限制。每個實例一條連線；斷線時 1 秒後重連，之後間隔逐次拉長，最多 30 秒。
+   串流 45 秒沒有任何動靜就視為斷線。連線失敗的前 10 秒，實例仍顯示為連線中（剛啟動的實例送出第一個
+   事件時，可能還沒開始接受連線）；超過 10 秒才算連不到。摘要會寫明回應的是哪個 AgentAPI：若是別的
+   AgentAPI（位址換到了另一台機器），實例立刻顯示為連不到，hub 也不會把這個實例的請求轉給它。
 3. 瀏覽器用 hub token 登入，從一條串流取得所有實例和每次變更。
 4. 開啟實例時，聊天介面透過 hub 載入（`/i/<id>/…`）。hub 轉送每個請求時，用實例的 API token 取代
    瀏覽器的憑證。
@@ -152,6 +155,9 @@ token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie�
 `--no-token` 取代 `--token`，就不會出現這個頁面，連得到 hub 的人都能直接進入。兩個都沒給時，hub
 不會啟動。
 
+hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁面會說連不到 hub 並自動重試；只有 hub
+回答登入已失效時，才會要求輸入 token。
+
 ### 總覽
 
 ![總覽：需要你處理的數量、每種狀態一格，以及每個請求一張卡片](screenshots/hub-desktop.png)
@@ -194,14 +200,18 @@ token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie�
 | 灰色、劃掉的鈴鐺 | Muted | 它需要你處理，但你把這件事靜音到它改變為止（見[靜音](#靜音)） |
 | 轉動的虛線圓環 | Connecting | hub 正在開啟或重新開啟它的摘要串流 |
 | 斷開的紅色圓環 | Unreachable | hub 已經 10 秒連不到它；這一行會說明原因 |
-| 方塊 | Stopped、Exited | AgentAPI 已停止，或它的 agent 已結束 |
+| 方塊 | Stopped、Exited | AgentAPI 已停止（或連不到時錯過三次 heartbeat），或它的 agent 已結束 |
 
 搜尋（**/**）會比對名稱、群組、標題、機器或 agent 中的任何字詞。搜尋框下方的標籤可以顯示全部，或只
 顯示需要你、工作中、已完成未讀、離線的 agent，並附上數量。頁首顯示 hub 的串流是否連線中，以及共有
-幾個 agent；分頁的標題和圖示會顯示需要你處理的數量，釘選的分頁也看得到。
+幾個 agent；分頁的標題和圖示會顯示需要你處理的數量，釘選的分頁也看得到。這條串流和聊天介面一樣會
+重新連線，45 秒沒有動靜就視為斷線（hub 每 15 秒送一次心跳）。
 
 「Finished」依據 agent 的未讀標記，這個標記由該 AgentAPI 的所有用戶端共用：在 hub 或它自己的聊天
 介面開啟，各處都會變成已讀。
+
+每一列的狀態由 hub 判斷。hub 更新後仍開著的舊頁面，遇到不認得的狀態會顯示 Unknown 和問號；重新整理
+頁面即可。
 
 ### 群組
 
@@ -288,16 +298,31 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 - hub 只接受具備有效 `X-AgentAPI-Signature-256`（`<timestamp>.<body>` 的 HMAC-SHA256）、
   timestamp 誤差不超過 10 分鐘、而且 delivery ID 沒處理過的事件。這很重要：事件裡的網址，就是
   hub 送出實例 token 的地方。
+- 只有在那個網址上的 AgentAPI 自稱是這個實例時，hub 才會轉送這個實例的請求；hub 還在追蹤某個實例時，
+  另一次以相同 ID 執行的 AgentAPI 也不能把它改到別的網址。
 - session cookie 是 HttpOnly、SameSite=Lax，由 hub token 推導而來，裡面沒有 token 本身。代理會
-  移除瀏覽器的 cookie 以及 `Authorization`、`Origin`、`Referer` 標頭，也會移除實例的
+  移除瀏覽器的 cookie 以及 `Authorization`、`Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的
   `Set-Cookie`，雙方的憑證都不會傳到另一邊。
+- 不論有沒有 token，其他網站的網頁都無法讓 hub 做任何改動，也無法替實例送任務：除非瀏覽器表明請求
+  來自 hub 自己的網頁，否則會造成改動的請求一律拒絕。
+- 實例回應的內容不會以 hub 的網頁身分執行（`Content-Security-Policy: sandbox`），所以就算某個
+  workspace 被人控制，也無法透過你的瀏覽器碰到其他 workspace。經由 hub 只能讀取實例的 webhook，
+  不能修改：webhook 決定 hub 把 token 送到哪裡。
+- 加入網址不會搬動 hub 已有的實例；要先把它移除。
 - `~/.agentapi/hub/instances.json` 保存手動加入的實例的 token，建立時只有擁有者能讀取。
   `~/.agentapi/config.yaml` 保存 hub secret，`agentapi hub join` 也以同樣的權限寫入。
 - 登入時會送出 hub token。hub 只開在 VPN 上，或放在 HTTPS 後面。
 - 登入 hub 的人能做的事，等同各 AgentAPI 允許的事：送任務、回覆核准、使用終端機。hub token 只給
   你也願意給實例 token 的人。
 - 用 `--no-token` 時，這指的是所有連得到 hub port 的人：hub 一定要放在另一層登入後面，不能開在公開
-  位址上。
+  位址上。請用 `--allowed-hosts` 列出你開啟 hub 用的名稱（Coder port 網址的主機名、VPN 名稱）：
+  否則網站可以把自己的名稱指向 hub 的位址，讓它的網頁連到 hub（DNS rebinding）。IP 位址和
+  `localhost` 一律可用。
+
+  ```bash
+  agentapi hub serve --no-token --secret "$AGENTAPI_HUB_SECRET" \
+    --allowed-hosts 3290--app--dev--me.coder.example.com
+  ```
 
 ## 疑難排解
 
@@ -311,10 +336,13 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 | Unreachable：`400 Bad Request` | AgentAPI 拒絕以 VPN 名稱作為 `Host` | 在 `--allowed-hosts` 允許它（步驟 3） |
 | Unreachable：`needs an API token` | AgentAPI 以 `--api-token` 執行，hub 給的 token 不同 | 給 hub `--instance-token`，或加入時輸入 token |
 | Unreachable：connection refused 或逾時 | `--public-url` 錯誤，或 hub 連不上 VPN | 在 hub 的機器上用 `curl <url>/summary` 檢查網址 |
+| Unreachable：`another AgentAPI answers at this URL` | 實例的位址現在屬於另一台機器（DHCP 換了位址），或 `--public-url` 指向別台機器 | 檢查 `--public-url`；搬走的實例會在下一次 heartbeat（一分鐘內）送出新位址 |
+| hub 的 log 有「Two AgentAPIs report the same instance ID」 | 兩台機器名稱相同，同一個 port 上的 AgentAPI 就有相同的 ID；hub 保留它正在追蹤的那個 | 把其中一台改名，或給它的 AgentAPI 設定 `--instance-id` |
 | Unreachable，而且 hub 的 VPN 用戶端以 userspace 模式執行 | hub 的連線沒有經過 VPN | 為 hub 設定 `ALL_PROXY`，指向 VPN 用戶端的 SOCKS5 proxy |
 | 加入時出現「is it AgentAPI 1.1 or later?」 | 這個實例沒有摘要 | 用 `agentapi update` 更新它 |
 | 頁面說 hub 沒有回應 | 位址錯誤，或 hub 沒有執行 | 開啟 `http://<hub>:3290/api/session`；hub 執行中會回傳 JSON |
 | 透過 Coder 的 port 網址開啟時，先要求登入 Coder | Coder 的 port 網址需要登入 Coder | 在那個瀏覽器先登入 Coder，再登入 hub |
+| `the hub doesn't answer to <name>; add it to --allowed-hosts` | hub 設了 `--allowed-hosts`，而你用了別的名稱開啟 | 把這個名稱加進 `--allowed-hosts` |
 
 在實例所在的機器上執行 `agentapi hub status`，可以看到設定檔指向哪個 hub，以及每個執行中的
 AgentAPI 回報到哪裡。hub 的 log 會記下開始追蹤、已停止和連不到的實例（附上錯誤），以及拒絕的事件；
@@ -333,6 +361,7 @@ AgentAPI 的 log 會記下傳送失敗的 webhook。
 | `--state` | `~/.agentapi/hub/instances.json` | 保存實例的檔案 |
 | `--port` | `3290` | 監聽的 port |
 | `--bind` | 所有介面 | 監聽的位址，例如 VPN 位址 |
+| `--allowed-hosts` | 任何名稱 | 瀏覽器開啟 hub 用的名稱，IP 位址和 `localhost` 以外（以逗號分隔，`*` 表示任何名稱）；實例的事件不受限制 |
 
 hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`）連到實例。
 
@@ -342,7 +371,7 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | --- | --- | --- |
 | `--secret` | `AGENTAPI_HUB_SECRET` | 為事件簽章的 secret；沒有的話 hub 會拒絕事件 |
 | `--public-url` | | hub 連回 AgentAPI 的網址；`{port}` 和 `{hostname}` 會被填入 |
-| `--events` | `instance.*`、`task.*`、`request.*`、`login.*`、`limit.*`、`agent.error` | 送給 hub 的事件 |
+| `--events` | `instance.*` | 送給 hub 的事件；hub 只需要這些 |
 | `--api-token` | `AGENTAPI_API_TOKEN` | 給需要 token 的執行中 AgentAPI |
 | `--config` | `~/.agentapi/config.yaml` | 要寫入的設定檔 |
 | `--registry-dir` | `~/.agentapi/instances` | 執行中 AgentAPI 的登記目錄 |
@@ -357,6 +386,10 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 `PUT /webhook` 套用到執行中的 AgentAPI，保留各自的逾時和重試次數。`leave` 移除這些設定，並關掉執行中
 AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。
 
+用較早版本加入的機器，還會另外送出 `task.*`、`request.*`、`login.*`、`limit.*` 和 `agent.error`，
+每個最多 64 KiB；hub 只把它們當成實例還在的跡象。再執行一次同樣的 `agentapi hub join`，就只會送
+`instance.*`：它會改寫設定檔，也會套用到執行中的 AgentAPI。
+
 ### hub 的 HTTP API
 
 | 端點 | 說明 |
@@ -365,11 +398,11 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `GET /api/session` | 請求帶有 session 或 hub token 時回傳 `{"authenticated": true}` |
 | `POST /api/session` | `{"token": …}` 登入並設定 session cookie |
 | `DELETE /api/session` | 登出 |
-| `GET /api/instances` | 所有實例，含摘要和連線狀態 |
+| `GET /api/instances` | 所有實例：各自是誰、摘要、連線，以及列表上顯示的狀態（`state`：`needs-you`、`working`、`unread`、`idle`、`muted`、`connecting`、`unreachable` 或 `stopped`） |
 | `POST /api/instances` | `{"url": …, "token": …}` 以網址加入實例 |
 | `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音 |
 | `DELETE /api/instances/{id}` | 移除實例 |
-| `GET /api/events` | Server-sent events：先送 `instances`（全部），再送 `instance`（某個有變動）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
+| `GET /api/events` | Server-sent events：先送 `instances`（全部，格式同 `GET /api/instances`），再送 `instance`（某個實例有頁面看得到的變動；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面 |
 
 除了 `/hooks` 和 `/api/session`，每個端點都需要 session cookie 或

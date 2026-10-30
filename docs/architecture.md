@@ -2,7 +2,7 @@
 
 English | [繁體中文](architecture.zh-TW.md)
 
-Each AgentAPI process runs one coding agent through one of three transports and exposes it through
+Each AgentAPI process runs one coding agent through one of two transports and exposes it through
 an HTTP API, an event stream and an embedded chat UI. This guide covers the implementation of the
 single Go binary; see the [README](../README.md) for features and usage.
 
@@ -14,7 +14,6 @@ single Go binary; see the [README](../README.md) for features and usage.
 - [The HTTP server](#the-http-server)
 - [Conversations and transports](#conversations-and-transports)
   - [PTY](#pty)
-  - [ACP](#acp)
   - [Native](#native)
 - [Events and the conversation state](#events-and-the-conversation-state)
 - [The message queue](#the-message-queue)
@@ -43,13 +42,11 @@ flowchart TB
     shell["Shell terminal<br/>lib/shellterm"]
     conv{{"conv.Conversation"}}
     pty["PTY<br/>lib/screentracker"]
-    acp["ACP<br/>x/acpio"]
     native["Native<br/>lib/native"]
     jsonl["Session-log watcher<br/>lib/jsonlwatcher"]
     sessions["Earlier sessions, subagents, costs<br/>lib/sessions"]
   end
   tui["Agent's terminal UI in a PTY<br/>lib/termexec"]
-  acpagent["Agent's ACP server"]
   proto["claude -p, codex app-server,<br/>pi --mode rpc"]
   chat -- "HTTP, SSE" --> http
   tools -- "HTTP, SSE" --> http
@@ -59,11 +56,9 @@ flowchart TB
   http <-- "state, events" --> emitter
   emitter --> db
   conv --> pty --> tui
-  conv --> acp --> acpagent
   conv --> native --> proto
   tui -. "session log" .-> jsonl
   pty -. "updates" .-> emitter
-  acp -. "updates" .-> emitter
   native -. "updates" .-> emitter
   jsonl -. "updates" .-> emitter
   http --> sessions
@@ -95,11 +90,12 @@ answers write keys directly to the agent's terminal.
 | `lib/pricing/` | Model prices per million tokens (built-in `prices.json` and a `--prices` file), and per-call cost calculation |
 | `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |
-| `lib/native/agentio` | The JSON-lines plumbing those adapters share: reading the agent's output line by line, writing to its stdin, matching its responses to the requests waiting for them |
+| `lib/native/agentio` | What those adapters share to run their agent: the process and its loop (`Host`), writing to its stdin, matching its responses to the requests waiting for them, lenient decoding with drift warnings, the snapshot throttle |
 | `lib/native/demo` | `native-demo`, a simulated agent for working on the chat |
 | `lib/native/nativetest` | A scriptable fake adapter for tests |
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db` (native and PTY), and the import of a `--state-file` |
+| `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). `lib/httpapi` keeps aliases under the same names, which the OpenAPI schema uses |
 | `lib/hub/` | `agentapi hub serve`: the instances and the groups set on its page (`store.go`, kept in a file), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`); the user guide is [hub.md](hub.md) |
 | `lib/userconfig/` | The user's settings file, `~/.agentapi/config.yaml`: flags by name, read by `agentapi server`, written by `agentapi hub` |
 | `lib/registry/` | The entries of the AgentAPIs running on a machine (`~/.agentapi/instances`): writing one atomically, listing them and removing those whose process is gone |
@@ -110,7 +106,6 @@ answers write keys directly to the agent's terminal.
 | `lib/agenthome/` | Where the agents keep their state (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`) |
 | `lib/handoff/` | Types of the human-reply API |
 | `lib/logctx/`, `lib/util/` | Context-based logging and shared helpers |
-| `x/acpio/` | The experimental ACP transport |
 | `internal/version/` | The version, stamped at build time |
 | `chat/` | The chat UI (Next.js) |
 | `e2e/` | End-to-end tests against a scripted echo agent |
@@ -129,8 +124,6 @@ answers write keys directly to the agent's terminal.
 2. The transport starts the agent:
    - PTY: `termexec` runs the command in a pseudo-terminal of `--term-width`
      by `--term-height` cells.
-   - ACP: `httpapi.SetupACP` starts the command, and `acpio` opens an ACP
-     session over its stdio.
    - Native: `nativeFactory` builds a `native.Factory` for the agent type
      (Claude Code, Codex, Pi or `native-demo`). Each adapter checks the
      agent's arguments first and refuses the ones that conflict with its
@@ -179,7 +172,7 @@ The handlers are grouped by file:
 | `tasks.go` | The tasks the emitter derives from the conversation (`taskTracker`), `task_update` and `GET /tasks` |
 | `summary.go`, `spend.go`, `registry.go` | The summary for clients that watch many AgentAPIs (`attention`, title, latest task, `unread`, `spend`), `summary_update`, `GET /summary` and `POST /tasks/seen`; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
 | `backend.go`, `backend_pty.go`, `backend_native.go` | What depends on the transport: dispatching the queue and the work each tick (`beforeQueue`: a scheduled continuation, Codex's update prompt), delivering a message, restarts (`beginRestart`, `beginReload`), the human-reply protocol (`handoffOffer`, `answerHandoff`) |
-| `setup.go` | Starting the process of a PTY or ACP agent |
+| `setup.go` | Starting the process of a PTY agent |
 | `native.go` | Requests, settings, interrupt, compaction, login retry; the native observer |
 | `limit.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); the agent's earlier sessions and what they cost (`/sessions`, `/cost`); its subagents (`/subagents`) |
 | `terminal.go`, `files.go`, `file_preview.go`, `files_find.go` | The shell terminal (`terminalAPI`) and the file viewer and the search for a file the agent named relative to a repository (`fileAPI`) |
@@ -200,7 +193,7 @@ registration: `fileAPI` holds the working directory, `terminalAPI` the shell, `u
 store, `authAPI` the token check, and `webhookAPI` the dispatcher and state DB.
 
 For operations that differ by transport, handlers call `agentBackend`: `ptyBackend` drives terminal
-and ACP conversations; `nativeBackend` drives native conversations.
+conversations; `nativeBackend` drives native conversations.
 
 ## Conversations and transports
 
@@ -261,14 +254,6 @@ sequenceDiagram
   `terminal_prompt`. `handoff.go` turns an answer into the keys the dialog
   expects, and `dialog_reply.go` opens a dialog's free-text field so that a
   chat message can answer it.
-
-### ACP
-
-`x/acpio` speaks the Agent Client Protocol over the agent's stdio. A message is one prompt with the
-message's text. `POST /message` returns once the turn has started; messages sent during the turn
-wait in the queue, and a failed prompt is reported as an `agent_error`. Message chunks become the
-agent's reply, tool calls are appended to it as lines of text, and permission requests are approved
-automatically. The transport is experimental.
 
 ### Native
 
@@ -353,6 +338,12 @@ type Factory func(resume Resume) (Adapter, error)
   Records a parser doesn't know, and lines it can't decode, are logged once
   per log at Warn with the CLI version the log records, so a changed format
   shows in the server's log.
+- **Protocol drift.** The adapters decode what the agent sends with
+  `agentio.Decode`: a field whose value changed type is left out, not the
+  record, as a lost turn end would leave the turn running for good. Record
+  types an adapter doesn't know, changed fields and records that don't
+  decode are counted per process (`agentio.Drift`) and logged once each at
+  Warn, with the CLI version from the handshake.
 - **Usage limits.** When the account's usage limit stops a turn, the adapter
   ends it with the `limited` stop reason (Claude Code's limit messages and a
   `rejected` rate limit event, Codex's `usageLimitExceeded`, a quota error of
@@ -363,12 +354,18 @@ type Factory func(resume Resume) (Adapter, error)
   the queued messages.
 - **Turns.** A message starts a turn only while the agent is idle; otherwise
   `StartTurn` returns `ErrMessageValidationChanging` and the server queues the
-  message. Turns wait the same way while the agent compacts its context.
+  message. Turns wait the same way while the agent compacts its context. A
+  message whose write the agent didn't confirm (`ErrUnconfirmed`: a timeout,
+  a cancel, the agent's exit) may still reach it, so it stays in the
+  conversation and its turn stays active until the agent's events end it.
+  `Interrupt` ends such a turn if the agent never started it.
 - **Requests.** Approvals, questions and plans become `RequestState`s with a
   status (`pending`, `resolved`, `withdrawn`, `expired`) and a
   `response_capability` (`live`, `message`, `not_resumable`). An answer
   reaches the adapter at most once, and requests still open when a turn ends
-  expire. Secret answers are redacted everywhere except the input sent to the agent.
+  expire. An answer the agent didn't confirm may still reach it, so the
+  request takes no other answer: it stays pending until the agent closes it
+  or the turn ends. Secret answers are redacted everywhere except the input sent to the agent.
 - **Observer.** Changes besides messages and status (rich messages, requests,
   settings, usage, the session reference, logins) go to an `Observer`, which
   the server implements to update the emitter and the state DB. It is called
@@ -376,10 +373,19 @@ type Factory func(resume Resume) (Adapter, error)
   conversation.
 - **Processes.** `procutil` starts the agent in its own process group, with the
   environment the adapter builds with `lib/procenv`, which leaves out the
-  variables of a parent agent session. Stopping it closes its input, then
-  sends the group SIGTERM after 3 seconds and SIGKILL 2 seconds later. Before
-  that, the adapters interrupt a running turn and wait up to 3 seconds for it
-  to end, so the agent's session log doesn't end in a tool call without result.
+  variables of a parent agent session. `agentio.Host` runs the process for
+  the adapter. It doesn't start one once the adapter was closed, and hands
+  its output, line by line, to one loop goroutine, which also runs the
+  functions posted to it and one timer: for the snapshots the throttle held
+  back (`agentio.Throttle`, 100 ms) and the 10-second wait for an
+  interrupted turn to end (`agentio.InterruptDeadline`). That goroutine
+  calls the Sink. The agent has exited, for `Wait`, once the process is gone
+  and the loop has handled its output, or 2 seconds after the process is
+  gone: a process the agent started can keep the output open. Stopping it
+  closes its input, then sends the group SIGTERM after 3 seconds and SIGKILL
+  2 seconds later. Before that, the adapters interrupt a running turn and
+  wait up to 3 seconds for it to end, so the agent's session log doesn't end
+  in a tool call without result.
 
 The adapters:
 
@@ -421,14 +427,16 @@ usage limit stop, login, terminal prompt) and the latest screen.
   starts a task; messages added during it steer the task. It ends when the
   agent is idle with no open request or terminal dialog. After an answer
   leaves the agent idle, a timer allows 3 seconds for work to resume before
-  ending the task. Rich messages get the running task's `task_id` on arrival.
+  ending the task; a message sent then starts a new task, since the agent
+  isn't working. Rich messages get the running task's `task_id` on arrival.
   Restored and resumed messages are treated as completed history.
 - The emitter maintains a conversation summary (`summary.go`) with the
   instance, status, `attention` (why the agent needs the user), title, latest
   task, pending requests, queue and usage. While a summary subscriber exists,
-  it recalculates after every change except screen changes and sends
-  `summary_update` only if the summary differs. Growing reply text therefore
-  sends no summary update. Only `/events?only=summary` subscribes to these
+  it recalculates once per emitter call that changed more than the screen,
+  after all the call's changes (a turn's end stops the agent and ends its
+  task in one call), and sends `summary_update` only if the summary differs.
+  Growing reply text therefore sends no summary update. Only `/events?only=summary` subscribes to these
   updates; its stream also sends heartbeats. `PUT /webhook` triggers another
   check, and rewrites the registry entry, because it can change the instance
   ID and URL.
@@ -443,12 +451,15 @@ usage limit stop, login, terminal prompt) and the latest screen.
   restore without it marks the restored tasks as seen.
 - `/internal/screen` streams the screen as `screen` events for TTY mode.
 - A status change between `running` and `stable` triggers the
-  `run.status_changed` webhook event. The webhook observer subscribes to the
-  emitter like an `/events` client and turns its events into the other
-  webhook events: the emitter's task updates into `task.*`, an agent message
-  once the next one starts or the turn ends. It doesn't send what the emitter
-  held when the observer subscribed, or messages older than AgentAPI's start
-  (a resumed session's). The dispatcher delivers the events one at a time
+  `run.status_changed` webhook event. While the webhook has a URL, the
+  webhook observer subscribes to the emitter like an `/events` client and
+  turns its events into the other webhook events: the emitter's task updates
+  into `task.*`, an agent message once the next one starts or the turn ends.
+  It doesn't send what the emitter held when the observer subscribed, or
+  messages older than AgentAPI's start (a resumed session's). It keeps only
+  how far it got through the messages and tasks, the tool calls waiting for
+  their result (at most 64) and the open requests, and forgets the
+  conversation on a reset. The dispatcher delivers the events one at a time
   from a queue, with retries, and signs them with `--webhook-secret`.
 - With a state DB, the emitter hands every change to its `Persister`, which
   encodes messages and rich messages on its writer goroutine from a copy, so
@@ -473,8 +484,7 @@ The queue is persisted with the conversation.
 ## Persistence
 
 `lib/statedb` stores conversations in SQLite using the pure-Go `modernc.org/sqlite`, which supports
-`CGO_ENABLED=0` builds. The emitter sends it every change on native and PTY transports. ACP doesn't
-use persistence.
+`CGO_ENABLED=0` builds. The emitter sends it every change, on both transports.
 
 - The tables are `messages`, `rich_messages`, `session_events`, `requests`,
   `queue`, `tasks` (each as the server encoded it, by the ID of the message
@@ -483,7 +493,8 @@ use persistence.
   settings chosen for the session, a usage limit stop, the webhook settings
   changed through the API (with a fingerprint of the startup flags, which win
   when they change), the initial prompt a PTY conversation got and when a
-  client last showed the conversation (`seen_at`).
+  client last showed the conversation (`seen_at`), and which AgentAPI may
+  write the file and last did (below).
 - Writes are queued and flushed every 200 ms in a transaction, so streaming
   never waits for the disk. A clean shutdown marks the file clean; after a
   crash the conversation gets a new epoch and clients load it again in full.
@@ -498,6 +509,18 @@ use persistence.
   expired.
 - Unreadable rows are logged and skipped so the server can start. Numbered
   migrations update the schema; `PRAGMA user_version` records its version.
+- Each migration names the oldest schema that may write the file once it
+  ran. One that only adds a table or a column keeps the value before it, so
+  an older AgentAPI goes on with a file a newer one migrated and leaves its
+  schema as it is. One that changes what an older AgentAPI writes raises it
+  and records it in `meta` (`min_writer_schema`, with the release that
+  brought it); an older AgentAPI then refuses the file and names the
+  version it needs. `meta` also records the AgentAPI that last closed the
+  file (`writer_version`). Releases up to 1.9.0 read neither and refuse any
+  schema newer than theirs; the schema hasn't changed since 1.0.
+- What an older AgentAPI doesn't know, its resets and truncations don't
+  clear. A restored task whose message is gone or is another one now is
+  dropped, as is one whose message row couldn't be read.
 
 `--state-file`, the older PTY mechanism (JSON written on shutdown), is deprecated: `cmd/server`
 imports it once into a state database next to it (`statedb.ImportStateFile`, only into an empty
@@ -509,8 +532,7 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
   the agent; before the new agent starts, AgentAPI runs `codex update` or
   `pi update --self` for Codex and Pi. A native agent is closed and `Restart`
   starts a new session. A PTY agent gets a new process in the swappable
-  terminal and a new session-log watcher. Under ACP the request fails with
-  400, as the agent can't be restarted.
+  terminal and a new session-log watcher.
 - A replacement of the native agent (a restart, a reload, opening another
   session) has two steps. `BeginRestart`, `BeginReload` and `BeginSwitch`
   retire the agent under `s.mu`, and its events are ignored from then on.
@@ -576,8 +598,7 @@ the same session for native agents.
 - There are no separate user accounts or roles. A client that passes the
   host and origin checks, and token authentication when enabled, has the
   agent's capabilities: native agents start in the bypass permission mode,
-  the ACP transport approves every permission request, and the shell
-  terminal runs commands.
+  and the shell terminal runs commands.
 - `--api-token`: compared in constant time. Browsers sign in with
   `POST /auth/session`, which sets an HttpOnly, SameSite=Strict cookie holding
   an HMAC of the token rather than the token, so changing the token signs
@@ -586,7 +607,10 @@ the same session for native agents.
 - `--bind` limits who can connect, `--allowed-hosts` which `Host` headers are
   accepted (by default `localhost`, `127.0.0.1` and `[::1]`, against DNS
   rebinding), and `--allowed-origins` which origins may call the API from a
-  browser.
+  browser. A request that changes something (not GET, HEAD or OPTIONS) from
+  a page of another origin is refused unless that origin is listed; `*`
+  trusts none (`crossorigin.go`, the rules of Go 1.25's
+  `http.CrossOriginProtection`).
 - Uploads go to a private directory, and only images are served back. Files
   outside the working directory can't be opened.
 - The webhook sends its configured events, the conversation included, to
@@ -594,10 +618,18 @@ the same session for native agents.
 - The hub (`lib/hub`) holds the instances' API tokens and sends them only to
   instance URLs from events signed with its secret (HMAC of the timestamp and
   body, at most 10 minutes old, each delivery once) or added by someone signed
-  in. Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
-  derived from it. The proxy drops their cookies and `Authorization`, `Origin`
-  and `Referer` headers and the instances' `Set-Cookie`, so neither side's
-  credentials reach the other.
+  in. Its proxy refuses an instance whose URL another AgentAPI (another
+  instance ID in the summary) answers, and another run with the same ID can't
+  move an instance the hub still follows and heard from in the last 3
+  minutes. Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
+  derived from it. The proxy drops their cookies and `Authorization`, `Origin`,
+  `Referer` and `Sec-Fetch-*` headers and the instances' `Set-Cookie`, so
+  neither side's credentials reach the other. The hub refuses requests that
+  change something from pages of other origins, as AgentAPI does, and with
+  `--allowed-hosts` answers browsers only by those names and by address. The
+  proxy marks every answer `Content-Security-Policy: sandbox`, so nothing an
+  instance serves runs as a page of the hub's, and refuses changes to an
+  instance's webhook, which names where the hub sends its token.
 - Agents, on every transport, don't inherit the variables (one of them a
   secret) that a parent agent session sets for the commands it runs, nor
   AgentAPI's API token (`lib/procenv`).
@@ -670,21 +702,30 @@ is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, it
   changes, so components that only act don't render again; state is read in
   slices with `useChatSelector` (`lib/store.ts`), so a component renders again
   only when its slice changes. The hooks `use-event-stream.ts`, `use-queue.ts`
-  and `use-session-cache.ts` handle event delivery and reconnection, queued
-  messages, and transcript caching.
+  and `use-session-cache.ts` apply the events to the state, follow the queued
+  messages, and cache the transcript.
 - The event stream uses `/events?sync=1` and keeps the last sequence number
-  for incremental replay; a stream the server closes is opened again at once,
-  without a notice, unless that keeps failing. The payload types come from
+  for incremental replay (`lib/chat-stream.ts`). `EventSourceConnection`
+  (`lib/event-source.ts`, and the `use-event-source.ts` hook) keeps it, the
+  hub page's stream and the terminals' open: a stream that ends is opened
+  again at once, without a notice, unless that keeps failing; one that fails
+  (a 401, a proxy's 502), after a backoff; one with heartbeats that goes
+  quiet, by a watchdog; and any when the browser comes back online or to the
+  tab. The payload types come from
   the generated schema (`lib/events.ts`), and null lists are made empty where
-  events arrive. IndexedDB keeps each server's conversation for the next
+  events arrive. A status the chat doesn't know, from a newer server (the hub
+  serves its own build to instances of every version), becomes one it does
+  there too: a task's, a subagent's. IndexedDB keeps each server's conversation for the next
   visit, one record per message, writing only what changed, with the sequence
   number of what it saved; a server's cache goes after 14 days without use,
   and only the 10 most recently used are kept (`lib/session-cache.ts`).
 - `TimelineBuilder` in `lib/task-timeline.ts` groups messages into tasks.
   It rebuilds from the first change and preserves unchanged objects, so
-  memoized tasks and tool calls don't render again. A section takes
-  its state from the server's task (`task_update`, held and cached like the
-  requests), the one its prompt started or was steered into; rich activity
+  memoized tasks and tool calls don't render again. A section is one of
+  the server's tasks (`task_update`, held and cached like the requests):
+  the messages steered into it (`steered`) stay in it, among its steps by
+  time; a server that sends no tasks gets a section per user message. A
+  section takes its state from the server's task; rich activity
   goes to the task its `task_id` names, and only untagged activity is placed
   by time. A task's cost is the model calls made while it ran. The queue
   follows `queue_update` events; `GET /queue` is read on each connection,

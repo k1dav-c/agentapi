@@ -17,6 +17,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/hub"
 )
 
@@ -35,6 +36,7 @@ func serveCmd() *cobra.Command {
 		secret        string
 		instanceToken string
 		statePath     string
+		allowedHosts  []string
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -57,15 +59,25 @@ func serveCmd() *cobra.Command {
 				}
 				statePath = filepath.Join(home, ".agentapi", "hub", "instances.json")
 			}
+			if len(allowedHosts) > 0 {
+				var err error
+				if allowedHosts, err = httpapi.ParseAllowedHosts(allowedHosts); err != nil {
+					return fmt.Errorf("--allowed-hosts: %w", err)
+				}
+			}
 			logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 			h, err := hub.New(hub.Config{
-				Token: token, NoToken: noToken, Secret: secret, InstanceToken: instanceToken, StatePath: statePath, Logger: logger,
+				Token: token, NoToken: noToken, Secret: secret, InstanceToken: instanceToken, StatePath: statePath,
+				AllowedHosts: allowedHosts, Logger: logger,
 			})
 			if err != nil {
 				return err
 			}
 			if noToken {
 				logger.Warn("The hub has no token: everyone who reaches it sees the instances and opens them, with their API token")
+				if len(allowedHosts) == 0 && !loopback(bind) {
+					logger.Warn("The hub answers to any name: a site's page can reach it through a name of the site's that points at the hub's address (DNS rebinding); set --allowed-hosts to the names you open the hub by")
+				}
 			}
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -114,7 +126,18 @@ func serveCmd() *cobra.Command {
 	cmd.Flags().StringVar(&secret, "secret", "", "Secret the AgentAPIs sign their events with, as given to agentapi hub join (default $AGENTAPI_HUB_SECRET); required")
 	cmd.Flags().StringVar(&instanceToken, "instance-token", "", "API token sent to the AgentAPIs (default $AGENTAPI_HUB_INSTANCE_TOKEN, else $AGENTAPI_API_TOKEN)")
 	cmd.Flags().StringVar(&statePath, "state", "", "File that keeps the instances (default ~/.agentapi/hub/instances.json)")
+	cmd.Flags().StringSliceVar(&allowedHosts, "allowed-hosts", nil, "Names browsers open the hub by, besides IP addresses and localhost, which always work (hostnames only, comma-separated; '*' for any); without it the hub answers to any name")
 	return cmd
+}
+
+// loopback reports whether bind is a loopback address, which only this
+// machine reaches.
+func loopback(bind string) bool {
+	if bind == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(bind)
+	return ip != nil && ip.IsLoopback()
 }
 
 func firstSet(values ...string) string {

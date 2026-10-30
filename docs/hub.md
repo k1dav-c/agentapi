@@ -26,7 +26,7 @@ step, what each state means, the tokens, troubleshooting and the hub's API.
 ```text
  phone / desktop browser ──HTTPS──▶ hub (agentapi hub serve, an always-on machine)
                                       ▲ signed webhook events   │ summary streams and the chat,
-                                      │ (instance.*, task.*…)   ▼ with each instance's token
+                                      │ (instance.*)            ▼ with each instance's token
             ┌─────────────────────────┴────────┬────────────────────────────────┐
      AgentAPI on workspace A          AgentAPI on workspace B          AgentAPI on your laptop
 ```
@@ -36,13 +36,19 @@ hub never has to be on the public internet.
 
 1. An AgentAPI joins with its webhook. `agentapi hub join` writes the hub's address and secret into
    `~/.agentapi/config.yaml`, which every `agentapi server` of that user reads when it starts. Each
-   AgentAPI then sends signed `instance.started`, `instance.heartbeat` and `instance.stopped`
-   events, and the hub adds, updates or stops the instance.
-2. The hub follows each instance's summary (`GET /events?only=summary`): its state, what it waits
-   for, its title, latest task, queue and usage limits. One connection per instance, reopened after
-   1 s, then up to every 30 s when it fails. A stream silent for 45 s counts as lost. An instance
-   stays connecting for the first 10 s of failures (one that is starting isn't listening yet when
-   its first event comes); after that it is unreachable.
+   AgentAPI then sends signed `instance.started`, `instance.heartbeat` (every minute) and
+   `instance.stopped` events, and the hub adds, updates or stops the instance. One the hub can't
+   reach that also missed three heartbeats, such as one whose workspace was killed, counts as
+   stopped, and the hub stops trying until its next heartbeat. These events only add instances
+   and say where they are; what each one does comes from its summary.
+2. The hub follows each instance's summary (`GET /events?only=summary`), the source of truth for
+   what the instance does: its state, what it waits for, its title, latest task, queue and usage
+   limits. One connection per instance, reopened after 1 s, then up to every 30 s when it fails. A
+   stream silent for 45 s counts as lost. An instance stays connecting for the first 10 s of
+   failures (one that is starting isn't listening yet when its first event comes); after that it
+   is unreachable. The summary names the AgentAPI that answers: when it is another one (the address
+   went to another machine), the instance is unreachable at once, and the hub sends it none of the
+   instance's requests.
 3. A browser signs in with the hub token and gets every instance and each change from one stream.
 4. Opening an instance loads the chat through the hub (`/i/<id>/…`). The hub forwards each request
    with the instance's API token in place of the browser's credentials.
@@ -164,6 +170,10 @@ A hub that only a sign-in of its own reaches, such as a Coder workspace app or a
 run without a token: `--no-token` (instead of `--token`) skips this page, and everyone who reaches
 the hub is in. The hub refuses to start with neither.
 
+When the hub doesn't answer (it stopped, or a proxy in front of it answers with an error page), the
+page says it can't reach the hub and tries again; only a hub that says the session ended asks for
+the token.
+
 ### The overview
 
 ![The overview: how many need you, a tile per state, and a card for each request](screenshots/hub-desktop.png)
@@ -209,15 +219,19 @@ Each state has a shape of its own, so it reads without its color:
 | Struck-through bell, grey | Muted | It needs you, and you muted that until it changes ([Muting](#muting)) |
 | Dashed ring, turning | Connecting | The hub is opening its summary stream, or opening it again |
 | Broken red ring | Unreachable | The hub hasn't reached it for 10 s; the line says why |
-| Square | Stopped, Exited | The AgentAPI stopped, or its agent exited |
+| Square | Stopped, Exited | The AgentAPI stopped (or missed three heartbeats while unreachable), or its agent exited |
 
 Search (**/**) matches any word of a name, group, title, machine or agent. The chips under it show
 all agents or only those that need you, work, finished unseen, or are offline, each with its count.
 The header says whether the hub's stream is live and how many agents there are; the tab's title and
-icon count the ones that need you, so a pinned tab shows it.
+icon count the ones that need you, so a pinned tab shows it. The stream reconnects as the chat's
+does, and a stream silent for 45 s (the hub sends a heartbeat every 15 s) counts as lost.
 
 "Finished" follows the agent's unread mark, which every client of that AgentAPI shares: opening it
 in the hub, or in its own chat, marks it read everywhere.
+
+The hub works out each row's state. A page older than the hub, kept open across an update, shows
+a state it doesn't know as Unknown, with a question mark; reload the page.
 
 ### Groups
 
@@ -315,9 +329,20 @@ instance that joined with its webhook comes back the next time it starts.
 - The hub takes an event only with a valid `X-AgentAPI-Signature-256` (HMAC-SHA256 of
   `<timestamp>.<body>`), a timestamp at most 10 minutes off, and a delivery ID it hasn't taken yet.
   This matters because an event names the URL the hub sends an instance token to.
+- The hub sends an instance's requests only while the AgentAPI at its URL says it is that
+  instance, and doesn't let another run with the same ID move it elsewhere while it still follows
+  this one.
 - The session cookie is HttpOnly and SameSite=Lax, derived from the hub token rather than holding
-  it. The proxy drops the browser's cookies and its `Authorization`, `Origin` and `Referer`
-  headers, and drops the instance's `Set-Cookie`, so neither side's credentials reach the other.
+  it. The proxy drops the browser's cookies and its `Authorization`, `Origin`, `Referer` and
+  `Sec-Fetch-*` headers, and drops the instance's `Set-Cookie`, so neither side's credentials
+  reach the other.
+- A page of another site can't make the hub change anything or send an instance a task, with or
+  without a token: the hub refuses requests that change something unless the browser says they
+  come from the hub's own page.
+- Nothing an instance answers runs as a page of the hub's (`Content-Security-Policy: sandbox`),
+  so a workspace someone took over can't reach the others through your browser. Through the hub,
+  an instance's webhook can be read but not changed: it names where the hub sends the token.
+- Adding a URL never moves an instance the hub has; forget it first.
 - `~/.agentapi/hub/instances.json` holds the tokens of instances added by hand; it is created
   readable by its owner only. `~/.agentapi/config.yaml` holds the hub secret; `agentapi hub join`
   writes it the same way.
@@ -325,7 +350,15 @@ instance that joined with its webhook comes back the next time it starts.
 - Anyone signed in to the hub can do what the AgentAPIs allow: send tasks, answer approvals, use
   their terminals. Give the hub token only to people you would give the instance token.
 - With `--no-token`, that is everyone who reaches the hub's port: keep it behind a sign-in of its
-  own, and never on a public address.
+  own, and never on a public address. Set `--allowed-hosts` to the names you open it by (a Coder
+  port URL's host, a VPN name): a site's page can otherwise reach the hub through a name of the
+  site's that it points at the hub's address (DNS rebinding). IP addresses and `localhost` always
+  work.
+
+  ```bash
+  agentapi hub serve --no-token --secret "$AGENTAPI_HUB_SECRET" \
+    --allowed-hosts 3290--app--dev--me.coder.example.com
+  ```
 
 ## Troubleshooting
 
@@ -339,10 +372,13 @@ instance that joined with its webhook comes back the next time it starts.
 | Unreachable: `400 Bad Request` | The AgentAPI refuses the VPN name as `Host` | Allow it in `--allowed-hosts` (step 3) |
 | Unreachable: `needs an API token` | The AgentAPI runs with `--api-token` and the hub has another | Give the hub `--instance-token`, or the token when adding |
 | Unreachable: connection refused or timed out | Wrong `--public-url`, or the hub can't reach the VPN | Check the URL from the hub's machine with `curl <url>/summary` |
+| Unreachable: `another AgentAPI answers at this URL` | The instance's address now belongs to another machine (a new DHCP lease), or `--public-url` names another machine | Check `--public-url`; an instance that moved sends its new address with its next heartbeat, within a minute |
+| The hub logs "Two AgentAPIs report the same instance ID" | Two machines have the same name, so their AgentAPIs on the same port have the same ID; the hub keeps the one it follows | Rename one machine, or give its AgentAPIs `--instance-id` |
 | Unreachable, and the hub's VPN client runs in userspace | The hub's connections don't go through the VPN | Set `ALL_PROXY` to the VPN client's SOCKS5 proxy for the hub |
 | "is it AgentAPI 1.1 or later?" when adding | The instance has no summary | Update it with `agentapi update` |
 | The page says the hub didn't answer | Wrong address, or the hub isn't running | Open `http://<hub>:3290/api/session`; it answers JSON when the hub runs |
 | Behind Coder's port URL, the page asks for Coder first | Coder's port URLs need a Coder login | Sign in to Coder in that browser, then to the hub |
+| `the hub doesn't answer to <name>; add it to --allowed-hosts` | The hub runs with `--allowed-hosts` and you opened it by another name | Add the name to `--allowed-hosts` |
 
 `agentapi hub status` on an instance's machine shows which hub its config file names and where
 each running AgentAPI reports. The hub logs each instance it starts following, stops or can't
@@ -362,6 +398,7 @@ failed.
 | `--state` | `~/.agentapi/hub/instances.json` | File that keeps the instances |
 | `--port` | `3290` | Port to listen on |
 | `--bind` | all interfaces | Address to listen on, such as the VPN address |
+| `--allowed-hosts` | any | Names browsers open the hub by, besides IP addresses and `localhost` (comma-separated, `*` for any); instances' events come by any name |
 
 The hub reaches the instances through the proxy of the environment (`HTTP_PROXY`, `HTTPS_PROXY`,
 `ALL_PROXY`).
@@ -372,7 +409,7 @@ The hub reaches the instances through the proxy of the environment (`HTTP_PROXY`
 | --- | --- | --- |
 | `--secret` | `AGENTAPI_HUB_SECRET` | Secret that signs the events; without it the hub refuses them |
 | `--public-url` | | Where the hub reaches the AgentAPIs; `{port}` and `{hostname}` are filled in |
-| `--events` | `instance.*`, `task.*`, `request.*`, `login.*`, `limit.*`, `agent.error` | Events sent to the hub |
+| `--events` | `instance.*` | Events sent to the hub; it needs only these |
 | `--api-token` | `AGENTAPI_API_TOKEN` | Token for running AgentAPIs that need one |
 | `--config` | `~/.agentapi/config.yaml` | Config file to write |
 | `--registry-dir` | `~/.agentapi/instances` | Where the running AgentAPIs are registered |
@@ -388,6 +425,11 @@ file and applies them to the running AgentAPIs with `PUT /webhook`, keeping thei
 attempts. `leave` removes them and turns the running AgentAPIs' webhook off. An AgentAPI that can't
 be changed now applies the file when it restarts.
 
+A machine that joined with an earlier version still sends `task.*`, `request.*`, `login.*`,
+`limit.*` and `agent.error` as well, up to 64 KiB each; the hub only takes them as signs of life.
+Run the same `agentapi hub join` again to send only `instance.*`: it rewrites the file and the
+running AgentAPIs.
+
 ### The hub's HTTP API
 
 | Endpoint | Description |
@@ -396,11 +438,11 @@ be changed now applies the file when it restarts.
 | `GET /api/session` | `{"authenticated": true}` when the request carries the session or the hub token |
 | `POST /api/session` | `{"token": …}` signs in and sets the session cookie |
 | `DELETE /api/session` | Signs out |
-| `GET /api/instances` | The instances, with their summaries and connection state |
+| `GET /api/instances` | The instances: who each one is, its summary, its connection and the state its row shows (`state`: `needs-you`, `working`, `unread`, `idle`, `muted`, `connecting`, `unreachable` or `stopped`) |
 | `POST /api/instances` | `{"url": …, "token": …}` adds an instance by its URL |
 | `PATCH /api/instances/{id}` | `{"group": …}` puts an instance in a group, `""` in none; `{"muted": true}` mutes what it waits for now, until that changes (409 when it waits for nothing), `false` ends the mute |
 | `DELETE /api/instances/{id}` | Forgets an instance |
-| `GET /api/events` | Server-sent events: `instances` (all of them), then `instance` (one changed), `removed` (`{"id"}`) and a `heartbeat` every 15 s |
+| `GET /api/events` | Server-sent events: `instances` (all of them, as `GET /api/instances` has them), then `instance` (one changed what the page shows; when it was last heard of counts only while it is offline), `removed` (`{"id"}`) and a `heartbeat` every 15 s |
 | `/i/{id}/…` | The instance's own API and chat, through the hub |
 
 Every endpoint but `/hooks` and `/api/session` needs the session cookie or

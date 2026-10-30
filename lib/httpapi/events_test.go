@@ -499,6 +499,8 @@ func (p *recordingPersister) PutTask(id int, data []byte, _ uint64) {
 	p.tasks[id] = string(data)
 }
 
+func (p *recordingPersister) DeleteTask(id int) { delete(p.tasks, id) }
+
 func (p *recordingPersister) Reset(epoch string) {
 	p.epoch = epoch
 	clear(p.messages)
@@ -852,8 +854,7 @@ func TestEventEmitterSubscribeTo(t *testing.T) {
 	assert.Equal(t, EventTypeStatusChange, event.Type)
 }
 
-// The screen's dialog is worked out once per screen, for PTY agents: what
-// an ACP agent streams looks like a screen but isn't a terminal.
+// The screen's dialog is worked out once per screen.
 func TestEventEmitterScreenQuestion(t *testing.T) {
 	dialog := readScreenFixture(t, "claude_permission_dialog.txt")
 	pty := NewEventEmitter(WithAgentType(mf.AgentTypeClaude), WithTransport(TransportPTY))
@@ -864,14 +865,6 @@ func TestEventEmitterScreenQuestion(t *testing.T) {
 	pty.EmitScreen(readScreenFixture(t, "claude_numbered_answer.txt"))
 	_, question = pty.Screen()
 	assert.False(t, question)
-
-	clock := quartz.NewMock(t)
-	acp := NewEventEmitter(WithAgentType(mf.AgentTypeClaude), WithTransport(TransportACP), WithClock(clock))
-	acp.EmitScreen(dialog)
-	_, question = acp.Screen()
-	assert.False(t, question)
-	clock.Advance(terminalPromptSettle).MustWait(context.Background())
-	assert.Empty(t, acp.StatusSnapshot().TerminalPrompt)
 }
 
 // A rich message without content is sent with an empty list, never null:

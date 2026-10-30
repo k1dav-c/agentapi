@@ -74,6 +74,20 @@ func TestRoundTrip(t *testing.T) {
 	assert.Equal(t, []statedb.QueuedMessage{{ID: 3, Content: "later"}}, snap.Queue)
 }
 
+// The versions a file's schema takes aren't part of the conversation: a
+// file that holds none is empty.
+func TestVersionsArentTheConversation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db := open(t, path)
+	require.NoError(t, db.Close())
+	db = open(t, path)
+	defer func() { _ = db.Close() }()
+	snap, err := db.Load()
+	require.NoError(t, err)
+	assert.True(t, snap.Empty())
+	assert.True(t, snap.Clean)
+}
+
 func TestDeleteIsABarrier(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	db := open(t, path)

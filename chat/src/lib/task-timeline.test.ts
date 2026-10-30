@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {buildTranscript, getTaskActivity, getTaskStatus, TimelineBuilder, type TaskSection, type ToolCall} from "./task-timeline";
+import {buildTranscript, countTaskMatches, getTaskActivity, getTaskStatus, TimelineBuilder, type TaskSection, type ToolCall} from "./task-timeline";
 import type {DraftMessage, Message, RichMessage} from "./conversation";
 import type {ServerTask} from "./server-tasks";
 
@@ -9,6 +9,7 @@ const task = (overrides: Partial<TaskSection>): TaskSection => ({
   key: "task-1",
   prompt: {id: 0, role: "user", content: "List files", time: "2026-10-04T08:00:00Z"},
   responses: [{id: 1, role: "agent", content: "● Here are the files (cut off by the scre", time: "2026-10-04T08:00:09Z"}],
+  steered: [],
   toolCalls: [],
   richActivity: [],
   ...overrides,
@@ -50,9 +51,35 @@ describe("getTaskActivity", () => {
       richActivity: [{type: "thinking", key: "th", content: "…", timestamp: "2026-10-04T08:00:01Z"}],
     });
     expect(kinds(getTaskActivity(t, {live: true, transcriptOnly: true}))).toEqual(["thinking:th", "tool:tool-t2"]);
-    // A steered message's task holds only the agent text of the reply,
-    // which belongs to the task before it.
     expect(getTaskActivity(task({}), {transcriptOnly: true})).toEqual([]);
+  });
+
+  test("a message steered into the task shows where it came", () => {
+    const steer = {id: 5, role: "user" as const, content: "Use rg instead", time: "2026-10-04T08:00:04Z"};
+    const richActivity: TaskSection["richActivity"] = [
+      {type: "thinking", key: "th", content: "Listing", timestamp: "2026-10-04T08:00:01Z"},
+      {type: "tool", key: "rich-tool-t1", toolCall: tool("t1", "2026-10-04T08:00:02Z")},
+      {type: "message", key: "rm", message: {id: -1, role: "assistant", content: "Switching to rg.", time: "2026-10-04T08:00:06Z"}},
+    ];
+    expect(kinds(getTaskActivity(task({richActivity, steered: [steer]}), {transcriptOnly: true}))).toEqual([
+      "thinking:th",
+      "tool:rich-tool-t1",
+      "prompt:steered-5",
+      "message:rm",
+    ]);
+    // One nothing came after yet goes last.
+    expect(kinds(getTaskActivity(task({richActivity: richActivity.slice(0, 2), steered: [steer]}), {transcriptOnly: true})).at(-1)).toBe("prompt:steered-5");
+    // Without a session log, by time with the screen text.
+    expect(kinds(getTaskActivity(task({steered: [steer], toolCalls: [tool("t2", "2026-10-04T08:00:02Z")]})))).toEqual([
+      "tool:tool-t2",
+      "prompt:steered-5",
+      "message:response-1",
+    ]);
+  });
+
+  test("search finds a task by a message steered into it", () => {
+    const t = task({steered: [{id: 5, role: "user", content: "Use ripgrep instead", time: "2026-10-04T08:00:04Z"}]});
+    expect(countTaskMatches(t, "ripgrep")).toBe(1);
   });
 });
 
@@ -244,6 +271,47 @@ describe("rebuilding as messages stream", () => {
     expect(built.timeline.tasks[1].toolCalls.map((call) => call.id)).toEqual(["y", "x"]);
   });
 
+  test("with the server's tasks, a steered message stays in the task it joined", () => {
+    const messages = [
+      user(1, "2026-01-01T00:00:00Z"),
+      agent(2, "working", "2026-01-01T00:00:10Z"),
+      user(3, "2026-01-01T00:00:20Z"),
+      agent(4, "done", "2026-01-01T00:00:40Z"),
+      user(5, "2026-01-01T00:01:00Z"),
+    ];
+    const richMessages = [
+      {...rich("a", "2026-01-01T00:00:30Z", [{type: "text", text: "after the steer"}]), task_id: 1},
+      rich("b", "2026-01-01T00:00:35Z", [{type: "text", text: "untagged, by time"}]),
+    ];
+    const {timeline} = buildTranscript(messages, richMessages, new Set([3]));
+    expect(timeline.tasks.map((t) => t.prompt.id)).toEqual([1, 5]);
+    expect(timeline.tasks[0].steered.map((m) => m.id)).toEqual([3]);
+    expect(timeline.tasks[0].responses.map((m) => m.id)).toEqual([2, 4]);
+    expect(timeline.tasks[0].richActivity.map((item) => item.key)).toEqual(["rich-message-a-0", "rich-message-b-0"]);
+    // A server that derives no tasks: every message of the user's is a task.
+    const old = buildTranscript(messages, richMessages).timeline;
+    expect(old.tasks.map((t) => t.prompt.id)).toEqual([1, 3, 5]);
+    expect(old.tasks[1].richActivity.map((item) => item.key)).toEqual(["rich-message-b-0"]);
+  });
+
+  test("a message the server steers after it came moves into the task it joined", () => {
+    const messages = [user(1, "2026-01-01T00:00:00Z"), agent(2, "working", "2026-01-01T00:00:10Z"), user(3, "2026-01-01T00:00:20Z"), agent(4, "more", "2026-01-01T00:00:30Z")];
+    const builder = new TimelineBuilder();
+    const before = builder.build(messages, [], new Set()).timeline;
+    expect(before.tasks).toHaveLength(2);
+    const after = builder.build(messages, [], new Set([3]));
+    expect(after).toEqual(buildTranscript(messages, [], new Set([3])));
+    expect(after.timeline.tasks).toHaveLength(1);
+    // The same tasks again keep their objects.
+    expect(builder.build(messages, [], new Set([3])).timeline).toBe(after.timeline);
+  });
+
+  test("a steered message before any task starts one", () => {
+    const {timeline} = buildTranscript([agent(0, "Starting", "2026-01-01T00:00:00Z"), user(3, "2026-01-01T00:00:20Z")], [], new Set([3]));
+    expect(timeline.tasks.map((t) => t.prompt.id)).toEqual([3]);
+    expect(timeline.prelude.map((m) => m.id)).toEqual([0]);
+  });
+
   test("a tool call keeps its object until its result changes", () => {
     const use = rich("m1", "2026-01-01T00:00:01Z", [{type: "tool_use", tool_use_id: "t1", tool_name: "Bash", tool_input: {command: "ls"}}]);
     const builder = new TimelineBuilder();
@@ -289,11 +357,13 @@ function walk(seed: number, steps: number) {
     const taskId = pick < 3 ? ids.at(-1) : pick === 3 && ids.length > 0 ? ids[random(ids.length)] : pick === 4 ? 9999 : undefined;
     return taskId === undefined ? message : {...message, task_id: taskId};
   };
+  // The user's messages the server steered into the task before.
+  let steered = new Set<number>();
   const builder = new TimelineBuilder();
-  let previous = builder.build(messages, richMessages);
+  let previous = builder.build(messages, richMessages, steered);
   for (let step = 0; step < steps; step++) {
     clock += 1 + random(5);
-    switch (random(15)) {
+    switch (random(16)) {
       case 0:
         // A task the server confirmed; drafts still being sent go.
         messages = [...messages.filter((m) => m.id !== undefined || (m as DraftMessage).deliveryStatus === "failed"), user(nextId++, time(clock))];
@@ -368,6 +438,7 @@ function walk(seed: number, steps: number) {
         if (random(25) === 0) {
           messages = [];
           richMessages = [];
+          steered = new Set();
           open.length = 0;
         }
         break;
@@ -399,9 +470,19 @@ function walk(seed: number, steps: number) {
           richMessages = replaceAt(richMessages, index, tagged(message));
         }
         break;
+      case 15: {
+        // A message of the user's steered into the task before, or no
+        // longer (its task went); a new set, as each task_update makes.
+        const ids = messages.flatMap((m) => (m.role === "user" && m.id !== undefined ? [m.id] : []));
+        if (ids.length === 0) break;
+        const id = ids[random(ids.length)];
+        steered = new Set(steered);
+        if (!steered.delete(id)) steered.add(id);
+        break;
+      }
     }
-    const built = builder.build(messages, richMessages);
-    expect(built).toEqual(buildTranscript(messages, richMessages));
+    const built = builder.build(messages, richMessages, steered);
+    expect(built).toEqual(buildTranscript(messages, richMessages, steered));
     // What didn't change keeps its object.
     const previousTasks = new Map(previous.timeline.tasks.map((task) => [task.key, task]));
     for (const task of built.timeline.tasks) {

@@ -1,6 +1,7 @@
 package pi
 
 import (
+	"context"
 	"errors"
 	"io"
 	"sync"
@@ -101,6 +102,38 @@ func TestTurnEndWhileAnswering(t *testing.T) {
 
 	assert.Equal(t, map[string]any{"type": "extension_ui_response", "id": "d1", "value": "typed"}, h.pi.nextCmd())
 	assert.Never(t, func() bool { return len(h.pi.cmds) > 0 }, 200*time.Millisecond, 10*time.Millisecond, "no cancel follows the answer")
+}
+
+// An answer whose write didn't finish may yet reach Pi: the dialog takes
+// no other answer, and the end of the turn doesn't cancel it.
+func TestUnconfirmedAnswerIsNotSentTwice(t *testing.T) {
+	t.Parallel()
+	h := startedHarness(t)
+	cmd := h.prompt("p", "ask me something")
+	h.answer(cmd, `{"disposition":"started"}`)
+	h.write(`{"type":"agent_start"}`)
+	h.write(`{"type":"extension_ui_request","id":"d1","method":"input","title":"Enter a value"}`)
+	h.settle()
+
+	stdin := &heldStdin{WriteCloser: h.pi.Stdin(), writing: make(chan struct{}), release: make(chan struct{})}
+	h.a.writer.Attach(stdin)
+	ctx, cancel := context.WithTimeout(h.ctx, 20*time.Millisecond)
+	defer cancel()
+	answer := func(value string) native.Response {
+		return native.Response{Answers: map[string][]string{valueQuestion: {value}}}
+	}
+	require.ErrorIs(t, h.a.Respond(ctx, "d1", answer("typed")), native.ErrUnconfirmed)
+	require.ErrorIs(t, h.a.Respond(h.ctx, "d1", answer("other")), native.ErrRequestNotFound,
+		"a second answer could contradict the first")
+	h.write(`{"type":"agent_settled"}`)
+	h.settle()
+	close(stdin.release)
+
+	assert.Equal(t, map[string]any{"type": "extension_ui_response", "id": "d1", "value": "typed"}, h.pi.nextCmd())
+	assert.Never(t, func() bool { return len(h.pi.cmds) > 0 }, 200*time.Millisecond, 10*time.Millisecond, "no cancel follows the answer")
+	h.a.mu.Lock()
+	assert.Empty(t, h.a.dialogs, "the turn's end forgets the dialog")
+	h.a.mu.Unlock()
 }
 
 func TestDialogTimersStop(t *testing.T) {

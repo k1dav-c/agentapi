@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -630,6 +631,49 @@ func TestStateDB_KeepsTasks(t *testing.T) {
 		assert.Equal(t, before[i].Status, after[i].Status)
 		assert.True(t, before[i].StartedAt.Equal(after[i].StartedAt))
 	}
+}
+
+// A restored task whose message is gone goes, from the file too: an
+// AgentAPI that doesn't know tasks takes messages back without them.
+func TestStateDB_DropsTasksWithoutTheirMessage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	n, srv, db, err := persistentServer(t, path, "/work")
+	require.NoError(t, err)
+	tasks := func() []httpapi.Task {
+		var body struct {
+			Tasks []httpapi.Task `json:"tasks"`
+		}
+		require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/tasks", nil, &body))
+		return body.Tasks
+	}
+	for i, prompt := range []string{"Fix the bug", "And the tests"} {
+		n.send(prompt, "")
+		require.Eventually(t, func() bool { return len(tasks()) == i+1 }, 5*time.Second, 5*time.Millisecond)
+		n.factory.Last().Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+		require.Eventually(t, func() bool { return tasks()[i].Status == httpapi.TaskStatusCompleted }, 5*time.Second, 5*time.Millisecond)
+	}
+	before := tasks()
+	stop(t, srv, db)
+
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	_, err = raw.Exec("DELETE FROM messages WHERE id >= ?", before[1].ID)
+	require.NoError(t, err)
+	require.NoError(t, raw.Close())
+
+	n, srv, db, err = persistentServer(t, path, "/work")
+	require.NoError(t, err)
+	after := tasks()
+	require.Len(t, after, 1)
+	assert.Equal(t, before[0].ID, after[0].ID)
+	stop(t, srv, db)
+
+	db, err = statedb.Open(path, nil)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	snap, err := db.Load()
+	require.NoError(t, err)
+	assert.Len(t, snap.Tasks, 1)
 }
 
 // eventNames returns the names of the SSE events /events sends within a

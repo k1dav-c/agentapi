@@ -33,7 +33,6 @@ import (
 	"github.com/coder/agentapi/lib/shellterm"
 	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/lib/transcript"
-	"github.com/coder/agentapi/x/acpio"
 )
 
 // Server represents the HTTP server
@@ -107,10 +106,9 @@ type ServerConfig struct {
 	// Name is what clients call this AgentAPI (GET /summary, webhook
 	// events); empty is the working directory's name.
 	Name string
-	// PTY, ACP and Native configure the transport of the same name; the
-	// others are ignored.
+	// PTY and Native configure the transport of the same name; the other
+	// is ignored.
 	PTY    PTYConfig
-	ACP    ACPConfig
 	Native NativeConfig
 	// StateDB, if set, stores the conversation and restores it on start
 	// (the native and PTY transports).
@@ -146,11 +144,6 @@ type PTYConfig struct {
 	RestartAgent func(context.Context) (int, error)
 }
 
-// ACPConfig is what the ACP transport needs.
-type ACPConfig struct {
-	AgentIO *acpio.ACPAgentIO
-}
-
 // NativeConfig is what the native transport needs.
 type NativeConfig struct {
 	// Factory creates the agent's adapter.
@@ -172,16 +165,13 @@ type NativeConfig struct {
 	PiSessionDir string
 }
 
-// agentIO is the conversation's view of a PTY or ACP agent, nil for a
-// native one or when no agent runs.
+// agentIO is the conversation's view of a PTY agent, nil for a native one
+// or when no agent runs.
 func (c ServerConfig) agentIO() st.AgentIO {
-	switch {
-	case c.Transport == TransportACP && c.ACP.AgentIO != nil:
-		return c.ACP.AgentIO
-	case c.Transport != TransportACP && c.Transport != TransportNative:
-		return c.PTY.AgentIO
+	if c.Transport == TransportNative {
+		return nil
 	}
-	return nil
+	return c.PTY.AgentIO
 }
 
 // NewServer creates a new server instance
@@ -228,6 +218,12 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		MaxAge:           300, // Maximum value not ignored by any of major browsers
 	})
 	router.Use(corsMiddleware.Handler)
+
+	// After CORS, so that a refused request's 403 has the CORS headers.
+	router.Use(CrossOriginProtection(allowedOrigins, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Warn("Refused a request a page of another origin sent", "method", r.Method, "path", r.URL.Path, "origin", r.Header.Get("Origin"))
+		http.Error(w, "A page of another origin sent this request. To let it, add its origin to --allowed-origins.", http.StatusForbidden)
+	})))
 
 	// Token auth runs after CORS: preflight requests carry no credentials
 	// and are answered by the CORS middleware, and a 401 still gets the CORS
@@ -336,11 +332,6 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			},
 		})
 		conversation = nativeConversation
-	} else if config.Transport == TransportACP {
-		if config.ACP.AgentIO == nil {
-			return nil, fmt.Errorf("ACP transport requires ACPAgentIO")
-		}
-		conversation = acpio.NewACPConversation(ctx, config.ACP.AgentIO, logger, initialPrompt, emitter, config.Clock)
 	} else {
 		conversation = st.NewPTY(ctx, st.PTYConversationConfig{
 			AgentType:             config.AgentType,

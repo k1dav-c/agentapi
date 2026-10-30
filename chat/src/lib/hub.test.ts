@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {activity, attentionKey, formatUSD, spendTotals, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, groupInstances, groupNames, hubRoot, instanceState, needsYou, sortInstances, stateLabel, usagePercent, type HubInstance, type Summary} from "./hub";
+import {activity, formatUSD, spendTotals, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, groupInstances, groupNames, hubRoot, instanceState, needsYou, sortInstances, stateLabel, usagePercent, type HubInstance, type Summary} from "./hub";
 
 const summary = (overrides: Partial<Summary> = {}): Summary =>
   ({
@@ -23,28 +23,37 @@ const instance = (id: string, overrides: Partial<HubInstance> = {}): HubInstance
   last_seen: "2026-10-26T00:00:00Z",
   connection: "connected",
   summary: summary(),
+  state: "idle",
   ...overrides,
 });
 
 describe("hub", () => {
-  test("an instance's state, the most pressing first", () => {
-    expect(instanceState(instance("a", {summary: summary({attention: "request"})}))).toBe("needs-you");
-    expect(stateLabel(instance("a", {summary: summary({attention: "login"})}))).toBe("Needs login");
-    expect(instanceState(instance("a", {summary: summary({status: "running"})}))).toBe("working");
-    expect(instanceState(instance("a", {summary: summary({unread: true})}))).toBe("unread");
-    expect(instanceState(instance("a"))).toBe("idle");
-    expect(instanceState(instance("a", {summary: null, connection: "connecting"}))).toBe("connecting");
-    expect(instanceState(instance("a", {connection: "unreachable"}))).toBe("unreachable");
-    expect(instanceState(instance("a", {connection: "stopped"}))).toBe("stopped");
-    expect(stateLabel(instance("a", {summary: summary({attention: "exited"})}))).toBe("Agent exited");
+  test("a row shows the state the hub worked out", () => {
+    expect(instanceState(instance("a", {state: "needs-you"}))).toBe("needs-you");
+    expect(stateLabel(instance("a", {state: "needs-you", summary: summary({attention: "login"})}))).toBe("Needs login");
+    expect(stateLabel(instance("a", {state: "working"}))).toBe("Working");
+    expect(stateLabel(instance("a", {state: "unread"}))).toBe("Finished");
+    expect(stateLabel(instance("a", {state: "connecting", summary: null, connection: "connecting"}))).toBe("Connecting");
+    expect(stateLabel(instance("a", {state: "stopped", connection: "stopped"}))).toBe("Stopped");
+    expect(stateLabel(instance("a", {state: "stopped", summary: summary({attention: "exited"})}))).toBe("Agent exited");
+  });
+
+  test("a state from a newer hub is unknown, and waits at the end", () => {
+    const newer = instance("a", {state: "rebooting"});
+    expect(instanceState(newer)).toBe("unknown");
+    expect(instanceState(instance("b", {state: "toString"}))).toBe("unknown");
+    expect(stateLabel(newer)).toBe("Unknown");
+    expect(activity(newer)).toEqual({text: "Reload the page to see what it does", tone: "muted"});
+    expect(sortInstances([newer, instance("b", {state: "stopped", connection: "stopped"})]).map((i) => i.id)).toEqual(["b", "a"]);
+    expect(countFilters([newer])).toEqual({all: 1, "needs-you": 0, working: 0, unread: 0, offline: 0});
   });
 
   test("rows that need you come first, then by name", () => {
     const rows = sortInstances([
       instance("idle", {name: "b"}),
-      instance("gone", {connection: "stopped"}),
-      instance("asks", {summary: summary({attention: "request"})}),
-      instance("busy", {summary: summary({status: "running"})}),
+      instance("gone", {state: "stopped", connection: "stopped"}),
+      instance("asks", {state: "needs-you", summary: summary({attention: "request"})}),
+      instance("busy", {state: "working", summary: summary({status: "running"})}),
       instance("idle2", {name: "a"}),
     ]);
     expect(rows.map((row) => row.id)).toEqual(["asks", "busy", "idle2", "idle", "gone"]);
@@ -78,8 +87,8 @@ describe("hub", () => {
     const groups = groupInstances([
       instance("a", {group: "Work"}),
       instance("b"),
-      instance("c", {group: "Clients", summary: summary({attention: "request"})}),
-      instance("d", {group: "Work", summary: summary({status: "running"})}),
+      instance("c", {group: "Clients", state: "needs-you", summary: summary({attention: "request"})}),
+      instance("d", {group: "Work", state: "working", summary: summary({status: "running"})}),
     ]);
     expect(groups.map((g) => [g.name, g.instances.map((i) => i.id), g.needsYou])).toEqual([
       ["Clients", ["c"], 1],
@@ -92,11 +101,11 @@ describe("hub", () => {
 
   test("filters count what needs you, works, finished unseen and can't be reached", () => {
     const counts = countFilters([
-      instance("a", {summary: summary({attention: "request"})}),
-      instance("b", {summary: summary({status: "running"})}),
-      instance("c", {summary: summary({unread: true})}),
-      instance("d", {connection: "unreachable"}),
-      instance("e", {connection: "stopped"}),
+      instance("a", {state: "needs-you", summary: summary({attention: "request"})}),
+      instance("b", {state: "working", summary: summary({status: "running"})}),
+      instance("c", {state: "unread", summary: summary({unread: true})}),
+      instance("d", {state: "unreachable", connection: "unreachable"}),
+      instance("e", {state: "stopped", connection: "stopped"}),
       instance("f"),
     ]);
     expect(counts).toEqual({all: 6, "needs-you": 1, working: 1, unread: 1, offline: 2});
@@ -111,12 +120,12 @@ describe("hub", () => {
   });
 
   test("a row says what the instance waits for or does, and since when", () => {
-    const asked = instance("a", {summary: summary({attention: "request", pending_requests: 1, request: {id: "r1", kind: "approval", title: "Run: make release", created_at: "2026-10-26T10:00:00Z"}})});
+    const asked = instance("a", {state: "needs-you", summary: summary({attention: "request", pending_requests: 1, request: {id: "r1", kind: "approval", title: "Run: make release", created_at: "2026-10-26T10:00:00Z"}})});
     expect(activity(asked)).toEqual({label: "Approval", text: "Run: make release", tone: "needs", since: "2026-10-26T10:00:00Z"});
-    expect(activity(instance("b", {summary: summary({attention: "login"})}))).toMatchObject({label: "Login", text: "Log in to continue"});
-    const working = instance("c", {summary: summary({status: "running", task: {id: 1, status: "running", prompt: "Migrate invoices", started_at: "2026-10-26T10:00:00Z", errors: [], steered: []}})});
+    expect(activity(instance("b", {state: "needs-you", summary: summary({attention: "login"})}))).toMatchObject({label: "Login", text: "Log in to continue"});
+    const working = instance("c", {state: "working", summary: summary({status: "running", task: {id: 1, status: "running", prompt: "Migrate invoices", started_at: "2026-10-26T10:00:00Z", errors: [], steered: []}})});
     expect(activity(working)).toEqual({label: "Working", text: "Migrate invoices", tone: "working", since: "2026-10-26T10:00:00Z"});
-    expect(activity(instance("d", {connection: "unreachable", error: "connection refused"})).tone).toBe("fault");
+    expect(activity(instance("d", {state: "unreachable", connection: "unreachable", error: "connection refused"})).tone).toBe("fault");
     expect(activity(instance("e")).text).toBe("No task yet");
   });
 
@@ -140,17 +149,10 @@ describe("hub", () => {
 
   test("a muted instance waits out of the way until what it waits for changes", () => {
     const login = summary({attention: "login", login_required: {message: "Codex is not logged in."} as Summary["login_required"]});
-    expect(attentionKey(login)).toBe("login");
-    expect(attentionKey(summary({attention: "request", request: {id: "r1", kind: "approval", title: "Run ls", created_at: "2026-10-27T00:00:00Z"}}))).toBe("request:r1");
-    expect(attentionKey(summary())).toBe("");
-
-    const muted = instance("a", {summary: login, muted: "login"});
-    expect(instanceState(muted)).toBe("muted");
+    const muted = instance("a", {state: "muted", summary: login, muted: "login"});
     expect(stateLabel(muted)).toBe("Muted · Needs login");
     expect(activity(muted)).toMatchObject({label: "Muted", text: "Codex is not logged in.", tone: "muted"});
     expect(countFilters([muted])["needs-you"]).toBe(0);
-    // Something else to wait for counts again, before the hub ends the mute.
-    expect(instanceState(instance("a", {summary: summary({attention: "limit"}), muted: "login"}))).toBe("needs-you");
     // Sorted after the idle ones.
     expect(sortInstances([muted, instance("b")]).map((i) => i.id)).toEqual(["b", "a"]);
   });

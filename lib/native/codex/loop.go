@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/coder/agentapi/lib/agentlog/codexlog"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -25,8 +27,10 @@ type loopState struct {
 	// ended lists the turns that ended last, so late notifications don't
 	// start them again.
 	ended []string
-	// dirty lists messages with changes not sent yet.
-	dirty []*msgState
+	// throttle holds back the snapshots of the messages that stream.
+	throttle *agentio.Throttle[*msgState]
+	// interrupt runs from when app-server took the interrupt of the turn.
+	interrupt agentio.InterruptDeadline
 	// usage is what app-server reported of the context and rate limits.
 	usage native.AgentUsage
 	// spawns holds the spawn_agent tool calls of the subagents still
@@ -48,12 +52,13 @@ func (s *loopState) threadOpened(resumed bool) func(json.RawMessage, *rpcError) 
 			return
 		}
 		var resp threadStartResponse
-		if err := json.Unmarshal(result, &resp); err != nil || resp.Thread.ID == "" {
+		if err := s.a.drift.Decode("thread response", result, &resp); err != nil || resp.Thread.ID == "" {
 			// Without a thread, the start fails (see openThread).
 			s.a.log.Warn("Unexpected thread response from codex app-server", "error", err)
 			return
 		}
 		th := resp.Thread
+		s.a.drift.SetVersion(th.CLIVersion)
 		s.threadID = th.ID
 		s.model = resp.Model
 		s.a.threadSettings(resp)
@@ -133,78 +138,55 @@ func (s *loopState) newSegment(t *turnState, id string) *segment {
 }
 
 func (s *loopState) interruptSent(turnID string) {
-	if s.turn != nil && s.turn.id == turnID && s.turn.interrupted.IsZero() {
-		s.turn.interrupted = s.now()
+	if s.turn != nil && s.turn.id == turnID {
+		s.interrupt.Start()
 	}
 }
 
 // --- snapshots ---
 
-// touch sends m now, or marks it to be sent at the end of the snapshot
-// interval when it was sent recently and urgent is false.
+// touch sends m now, or at the end of the snapshot interval when it was
+// sent recently and urgent is false.
 func (s *loopState) touch(m *msgState, urgent bool) {
-	if urgent || s.now().Sub(m.lastEmit) >= s.a.cfg.SnapshotInterval {
+	if urgent {
 		s.emit(m)
 		return
 	}
-	if !m.dirty {
-		m.dirty = true
-		s.dirty = append(s.dirty, m)
-	}
+	s.send(s.throttle.Changed(m, m.build))
 }
 
+// emit sends m now.
 func (s *loopState) emit(m *msgState) {
-	m.dirty = false
-	msg, ok := m.build()
-	if !ok {
-		return
-	}
-	m.lastEmit = s.now()
-	s.sink().RichMessage(msg)
+	s.send(s.throttle.Send(m, m.build))
 }
 
-// flush sends the pending changes; all of them when force is set,
+func (s *loopState) send(msg transcript.RichMessage, ok bool) {
+	if ok {
+		s.sink().RichMessage(msg)
+	}
+}
+
+// flush sends the changes held back; all of them when force is set,
 // otherwise those whose interval is over.
 func (s *loopState) flush(force bool) {
-	kept := s.dirty[:0]
-	now := s.now()
-	for _, m := range s.dirty {
-		if !m.dirty {
-			continue
-		}
-		if force || now.Sub(m.lastEmit) >= s.a.cfg.SnapshotInterval {
-			s.emit(m)
-			continue
-		}
-		kept = append(kept, m)
+	for _, msg := range s.throttle.Flush(force) {
+		s.sink().RichMessage(msg)
 	}
-	s.dirty = kept
 }
 
-// nextWake is when the loop has to act without a message: send a pending
-// snapshot or give up waiting for an interrupted turn.
+// nextWake is when the loop has to act without a message: send a held
+// back snapshot or give up waiting for an interrupted turn.
 func (s *loopState) nextWake() time.Time {
-	var next time.Time
-	for _, m := range s.dirty {
-		if !m.dirty {
-			// Sent since (urgently); flush drops it.
-			continue
-		}
-		if t := m.lastEmit.Add(s.a.cfg.SnapshotInterval); next.IsZero() || t.Before(next) {
-			next = t
-		}
-	}
-	if s.turn != nil && !s.turn.interrupted.IsZero() {
-		if t := s.turn.interrupted.Add(s.a.cfg.InterruptTimeout); next.IsZero() || t.Before(next) {
-			next = t
-		}
-	}
-	return next
+	return agentio.Earliest(s.throttle.Next(), s.interrupt.Next())
 }
 
 func (s *loopState) wake() {
 	s.flush(false)
-	if t := s.turn; t != nil && !t.interrupted.IsZero() && s.now().Sub(t.interrupted) >= s.a.cfg.InterruptTimeout {
+	if !s.interrupt.Due() {
+		return
+	}
+	s.interrupt.Stop()
+	if t := s.turn; t != nil {
 		s.a.log.Warn("Codex did not end the interrupted turn; ending it here", "turn", t.id)
 		s.completeTurn(turn{ID: t.id, Status: "interrupted"})
 	}
@@ -216,57 +198,103 @@ func (s *loopState) wake() {
 func (s *loopState) notification(msg rpcMessage) {
 	switch msg.Method {
 	case "turn/started":
-		handle(msg, s.turnStarted)
+		handle(s, msg, s.turnStarted)
 	case "turn/completed":
-		handle(msg, s.turnCompleted)
+		handle(s, msg, s.turnCompleted)
 	case "item/started", "item/completed":
-		handle(msg, func(n itemNotification) { s.itemNotified(msg, n) })
+		handle(s, msg, func(n itemNotification) { s.itemNotified(msg, n) })
 	case "item/agentMessage/delta", "item/plan/delta":
-		handle(msg, s.textDelta)
+		handle(s, msg, s.textDelta)
 	case "item/reasoning/summaryPartAdded", "item/reasoning/summaryTextDelta":
-		handle(msg, func(d deltaNotification) { s.reasoningDelta(d, true) })
+		handle(s, msg, func(d deltaNotification) { s.reasoningDelta(d, true) })
 	case "item/reasoning/textDelta":
-		handle(msg, func(d deltaNotification) { s.reasoningDelta(d, false) })
+		handle(s, msg, func(d deltaNotification) { s.reasoningDelta(d, false) })
 	case "item/commandExecution/outputDelta":
-		handle(msg, s.outputDelta)
+		handle(s, msg, s.outputDelta)
 	case "thread/tokenUsage/updated":
-		handle(msg, s.tokenUsageUpdated)
+		handle(s, msg, s.tokenUsageUpdated)
 	case "turn/plan/updated":
-		handle(msg, s.planUpdated)
+		handle(s, msg, s.planUpdated)
 	case "error":
-		handle(msg, s.errorReported)
+		handle(s, msg, s.errorReported)
 	case "thread/name/updated":
-		handle(msg, s.threadNameUpdated)
+		handle(s, msg, s.threadNameUpdated)
 	case "thread/status/changed":
-		handle(msg, s.threadStatusChanged)
+		handle(s, msg, s.threadStatusChanged)
 	case "serverRequest/resolved":
-		handle(msg, func(n serverRequestResolvedNotification) { s.requestResolved(string(n.RequestID)) })
+		handle(s, msg, func(n serverRequestResolvedNotification) { s.requestResolved(string(n.RequestID)) })
 	case "warning":
-		handle(msg, s.warningReported)
+		handle(s, msg, s.warningReported)
 	case "configWarning":
-		handle(msg, s.configWarningReported)
+		handle(s, msg, s.configWarningReported)
 	case "mcpServer/startupStatus/updated":
-		handle(msg, s.mcpServerStatusUpdated)
+		handle(s, msg, s.mcpServerStatusUpdated)
 	case "model/rerouted":
-		handle(msg, s.modelRerouted)
+		handle(s, msg, s.modelRerouted)
 	case "account/rateLimits/updated":
-		handle(msg, s.rateLimitsUpdated)
+		handle(s, msg, s.rateLimitsUpdated)
 	default:
-		s.a.log.Debug("Codex notification", "method", msg.Method)
+		if ignoredNotification(msg.Method) {
+			s.a.log.Debug("Codex notification", "method", msg.Method)
+			return
+		}
+		s.a.drift.Unknown(msg.Method)
 	}
 }
 
-// handle passes the params of msg to f, unless they don't decode.
-func handle[T any](msg rpcMessage, f func(T)) {
+// ignoredNotifications are the notifications app-server sends that the
+// adapter has no use for, besides those it opts out of.
+var ignoredNotifications = map[string]bool{
+	"deprecationNotice":                         true,
+	"thread/archived":                           true,
+	"thread/unarchived":                         true,
+	"thread/closed":                             true,
+	"thread/compacted":                          true,
+	"thread/goal/updated":                       true,
+	"thread/goal/cleared":                       true,
+	"rawResponseItem/completed":                 true,
+	"item/commandExecution/terminalInteraction": true,
+	"item/fileChange/outputDelta":               true,
+	"item/mcpToolCall/progress":                 true,
+	"mcpServer/oauthLogin/completed":            true,
+	"account/updated":                           true,
+	"account/login/completed":                   true,
+	"authStatusChange":                          true,
+	"loginChatGptComplete":                      true,
+	"sessionConfigured":                         true,
+	"windows/worldWritableWarning":              true,
+	"hook/started":                              true,
+	"hook/completed":                            true,
+}
+
+// ignoredNotification reports whether the adapter knows to ignore a
+// notification: one it opts out of (an older app-server sends them
+// anyway), one in ignoredNotifications, or an event of the legacy
+// codex/event/ protocol.
+func ignoredNotification(method string) bool {
+	return ignoredNotifications[method] || slices.Contains(optOutNotifications, method) || strings.HasPrefix(method, "codex/event/")
+}
+
+// handle passes the params of msg to f, unless they don't decode. A field
+// of another type is left out, not the notification (see agentio.Decode):
+// a lost turn/completed would leave the turn running for good.
+func handle[T any](s *loopState, msg rpcMessage, f func(T)) {
 	var params T
-	if decode(msg, &params) {
+	if s.decode(msg, &params) {
 		f(params)
 	}
 }
 
-func decode(msg rpcMessage, v any) bool {
-	return len(msg.Params) > 0 && json.Unmarshal(msg.Params, v) == nil
+// decode decodes the params of msg into v, and reports whether it could.
+func (s *loopState) decode(msg rpcMessage, v any) bool {
+	if len(msg.Params) == 0 {
+		s.a.drift.Undecodable(msg.Method, errNoParams)
+		return false
+	}
+	return s.a.drift.Decode(msg.Method, msg.Params, v) == nil
 }
+
+var errNoParams = errors.New("no params")
 
 func (s *loopState) turnStarted(n turnNotification) {
 	if s.ours(n.ThreadID) && n.Turn.ID != "" {
@@ -662,6 +690,7 @@ func (s *loopState) completeTurn(tr turn) {
 	if t == nil {
 		return
 	}
+	s.interrupt.Stop()
 	// From here on Steer and Interrupt see no turn; reading the interrupt
 	// mark in the same step means Interrupt can't add one after it.
 	s.a.mu.Lock()
@@ -703,6 +732,8 @@ func (s *loopState) completeTurn(tr turn) {
 	last.stop = result.StopReason
 	s.emit(&last.msgState)
 	s.flush(true)
+	// The turn's messages are final.
+	s.throttle.Reset()
 	switch status {
 	case "interrupted":
 		s.systemEvent("turn interrupted", s.now(), t.id)
@@ -761,6 +792,8 @@ func (s *loopState) exited() {
 		s.turn = nil
 	}
 	s.flush(true)
+	s.throttle.Reset()
+	s.interrupt.Stop()
 	s.a.mu.Lock()
 	s.a.endActiveTurnLocked()
 	clear(s.a.interrupting)

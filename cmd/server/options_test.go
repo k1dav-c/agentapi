@@ -111,12 +111,6 @@ func TestLoadServerOptions(t *testing.T) {
 				assert.Equal(t, "/tmp/agent.db", opts.stateDB)
 			},
 		},
-		"--experimental-acp is --transport acp": {
-			values: map[string]any{FlagExperimentalACP: true},
-			check: func(t *testing.T, opts serverOptions) {
-				assert.Equal(t, httpapi.TransportACP, opts.transport)
-			},
-		},
 		"native with a state DB": {
 			values: map[string]any{FlagStateDB: "/tmp/agent.db"},
 			check: func(t *testing.T, opts serverOptions) {
@@ -185,11 +179,9 @@ func TestLoadServerOptionsRefuses(t *testing.T) {
 		"a short terminal":              {map[string]any{FlagTermHeight: uint16(9)}, "term height must be at least 10"},
 		"--load-state without a file":   {map[string]any{FlagLoadState: true}, "--load-state requires --state-file to be set"},
 		"--save-state without a file":   {map[string]any{FlagSaveState: true}, "--save-state requires --state-file to be set"},
-		"an unknown transport":          {map[string]any{FlagTransport: "ssh"}, `unknown --transport "ssh" (one of: pty, acp, native)`},
-		"ACP and native":                {map[string]any{FlagExperimentalACP: true, FlagTransport: "native"}, "--experimental-acp and --transport=native are mutually exclusive"},
-		"a state file with ACP":         {map[string]any{FlagTransport: "acp", FlagStateFile: "/tmp/s.json"}, "ACP mode doesn't support state persistence"},
-		"a state DB with ACP":           {map[string]any{FlagTransport: "acp", FlagStateDB: "/tmp/agent.db"}, "ACP mode doesn't support state persistence"},
-		"the OpenAPI schema with ACP":   {map[string]any{FlagPrintOpenAPI: true, FlagExperimentalACP: true}, "flags --print-openapi and --experimental-acp are mutually exclusive"},
+		"an unknown transport":          {map[string]any{FlagTransport: "ssh"}, `unknown --transport "ssh" (one of: pty, native)`},
+		"ACP, removed":                  {map[string]any{FlagTransport: "acp"}, "the experimental ACP transport was removed"},
+		"--experimental-acp, removed":   {map[string]any{FlagExperimentalACP: true}, "the experimental ACP transport was removed"},
 		"a bind address with a port":    {map[string]any{FlagBind: "127.0.0.1:3284"}, "invalid --bind: '127.0.0.1:3284' must not include a port; use --port"},
 		"a bind address that isn't one": {map[string]any{FlagBind: "not a host"}, "invalid --bind"},
 	} {

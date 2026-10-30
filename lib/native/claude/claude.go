@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -107,30 +106,38 @@ func newAdapter(cfg Config, args parsedArgs, resumeRef string) *Adapter {
 		cfg.Clock = quartz.NewReal()
 	}
 	if cfg.SnapshotInterval == 0 {
-		cfg.SnapshotInterval = 100 * time.Millisecond
+		cfg.SnapshotInterval = agentio.SnapshotInterval
 	}
 	if cfg.InterruptTimeout == 0 {
-		cfg.InterruptTimeout = 10 * time.Second
+		cfg.InterruptTimeout = agentio.InterruptTimeout
 	}
 	if cfg.NewID == nil {
 		cfg.NewID = newUUID
 	}
+	log := cfg.Logger.With("agent", "claude")
 	a := &Adapter{
 		cfg:         cfg,
-		log:         cfg.Logger.With("agent", "claude"),
+		log:         log,
+		drift:       agentio.NewDrift("Claude Code", log),
 		args:        args,
 		resumeRef:   resumeRef,
 		parser:      newStreamParser(cfg.Clock, cfg.SnapshotInterval),
 		reportedRef: resumeRef,
 		writer:      agentio.NewWriter("claude"),
+		interrupt:   agentio.NewInterruptDeadline(cfg.Clock, cfg.InterruptTimeout),
 		requests:    make(map[string]*pendingRequest),
-		exited:      make(chan struct{}),
-		readDone:    make(chan struct{}),
-		closeGrace:  closeInterruptGrace,
 	}
-	if cfg.StopTimeout > 0 {
-		a.closeGrace = cfg.StopTimeout
-	}
+	a.host = agentio.NewHost(agentio.HostConfig{
+		Name:           "Claude Code",
+		Logger:         log,
+		Clock:          cfg.Clock,
+		Start:          cfg.StartProcess,
+		Writer:         a.writer,
+		StdinGrace:     cfg.StopTimeout,
+		TermGrace:      cfg.StopTimeout,
+		InterruptGrace: cfg.StopTimeout,
+	})
+	a.parser.drift = a.drift
 	if resumeRef == "" {
 		a.sessionID = cfg.NewID()
 	}
@@ -156,18 +163,19 @@ type Adapter struct {
 	// sessionID is the id passed with --session-id for a new session.
 	sessionID string
 
-	proc   procutil.Process
+	// host runs the CLI and the read loop.
+	host   *agentio.Host
 	sink   native.Sink
 	parser *streamParser
 	log    *slog.Logger
-	// closeGrace is how long Close waits for a turn it interrupted to end.
-	closeGrace time.Duration
+	// drift counts what the CLI sends that the adapter doesn't read.
+	drift *agentio.Drift
 	// reportedRef is the session id last reported with SessionRef, at
 	// first the session to resume. Read loop only.
 	reportedRef string
-	// interruptAt is when the CLI accepted the interrupt of the current
-	// turn, or zero. Read loop only.
-	interruptAt time.Time
+	// interrupt runs from when the CLI accepted the interrupt of the
+	// current turn. Read loop only.
+	interrupt agentio.InterruptDeadline
 
 	// writer writes frames to the CLI's stdin, once it started.
 	writer *agentio.Writer
@@ -186,7 +194,6 @@ type Adapter struct {
 	prompt     string
 	controlSeq int
 	requests   map[string]*pendingRequest
-	closing    bool
 	// mode is Claude Code's permission mode, model the value of the model
 	// option it runs and effort its reasoning effort; models are the
 	// models it offers. See settings.go.
@@ -197,11 +204,6 @@ type Adapter struct {
 	// usage is the usage the CLI last reported (see usage.go). Read loop
 	// only.
 	usage native.AgentUsage
-
-	exited   chan struct{}
-	exitErr  error
-	readDone chan struct{}
-	stopOnce sync.Once
 }
 
 var (
@@ -210,8 +212,6 @@ var (
 )
 
 var (
-	// errClosed is returned by Start after Close.
-	errClosed = errors.New("the adapter was closed")
 	// errExited fails the control requests the CLI didn't answer before
 	// its output ended.
 	errExited = errors.New("claude exited")
@@ -273,65 +273,36 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		Dir:     a.cfg.CWD,
 		Logger:  a.log,
 	}
+	// The login check takes up to 10 s; the host doesn't start the CLI if
+	// a restart closed the adapter meanwhile.
 	if err := a.checkLogin(ctx, cmd.Env); err != nil {
 		return err
 	}
-	// A restart may have closed the adapter while the login was checked
-	// (up to 10 s): starting the CLI now would run it next to the new one.
 	a.mu.Lock()
-	closing := a.closing
+	a.sink = sink
 	a.mu.Unlock()
-	if closing {
-		return errClosed
-	}
 	// The arguments can hold secrets (inline --settings or --mcp-config).
 	a.log.Info("Starting Claude Code", "program", cmd.Program, "resume", a.resumeRef != "")
 	a.log.Debug("Claude Code command line", "args", cmd.Args)
-	proc, err := a.cfg.StartProcess(cmd)
+	// The read loop is the only caller of the sink after Start.
+	_, err := a.host.Launch(cmd, agentio.Loop{Line: a.handleLine, NextWake: a.nextWake, Wake: a.wake, Ended: a.outputClosed})
 	if err != nil {
 		return err
 	}
-	a.mu.Lock()
-	closing = a.closing
-	if !closing {
-		a.proc = proc
-		a.sink = sink
-	}
-	a.mu.Unlock()
-	if closing {
-		// Close ran while the CLI was starting and found no process to stop.
-		_ = proc.Stdin().Close()
-		_ = proc.Kill()
-		return errClosed
-	}
-	a.writer.Attach(proc.Stdin())
-
-	go a.readLoop(proc.Stdout())
-	go func() {
-		err := proc.Wait()
-		a.mu.Lock()
-		a.exitErr = procutil.WithStderr(err, proc.StderrTail())
-		a.mu.Unlock()
-		close(a.exited)
-	}()
 
 	response, err := a.request(ctx, "initialize", map[string]any{"hooks": nil}, nil)
 	if err != nil {
-		_ = a.Close()
+		// Timed out, or the CLI answered with an error, or exited: it can
+		// exit cleanly after a fatal error (an unknown session to resume),
+		// and its stderr says why.
 		if !errors.Is(err, errExited) {
-			// Timed out, or the CLI answered with an error.
-			return fmt.Errorf("initialize claude: %w", err)
+			err = fmt.Errorf("initialize claude: %w", err)
 		}
-		exitErr := a.waitErr()
-		if exitErr == nil {
-			// It can exit cleanly after a fatal error (an unknown session
-			// to resume); stderr says why.
-			exitErr = procutil.WithStderr(err, proc.StderrTail())
-		}
-		return fmt.Errorf("claude exited during startup: %w", exitErr)
+		return a.host.StartError(err)
 	}
 	var info initializeInfo
-	_ = json.Unmarshal(response, &info)
+	_ = a.drift.Decode("initialize response", response, &info)
+	a.drift.SetVersion(info.Version)
 	a.readSettings(ctx, info)
 	a.log.Info("Claude Code is ready", "version", info.Version, "permission_mode", info.PermissionMode)
 
@@ -351,10 +322,7 @@ func (a *Adapter) write(ctx context.Context, v any) error {
 // successful answer in the read loop; the answer comes on the returned
 // call.
 func (a *Adapter) sendControl(ctx context.Context, subtype string, fields map[string]any, onResponse func(json.RawMessage)) (string, *agentio.Call[controlResult], error) {
-	a.mu.Lock()
-	closing := a.closing
-	a.mu.Unlock()
-	if closing {
+	if a.host.Closing() {
 		return "", nil, errors.New("claude is shutting down")
 	}
 	return a.issueControl(ctx, subtype, fields, onResponse)
@@ -437,7 +405,9 @@ func (a *Adapter) userMessage(input native.Input) (map[string]any, error) {
 }
 
 // StartTurn implements native.Adapter. The CLI takes the message right
-// away; the turn starts when it reports running.
+// away; the turn starts when it reports running. A message whose write
+// went out unconfirmed may yet reach the CLI, so its turn stays sent: the
+// CLI's frames start and end it, and Interrupt can stop it.
 func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 	msg, err := a.userMessage(input)
 	if err != nil {
@@ -457,10 +427,12 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 	a.prompt = input.Text
 	a.mu.Unlock()
 	if err := a.write(ctx, msg); err != nil {
-		a.mu.Lock()
-		a.endTurnLocked()
-		a.prompt = ""
-		a.mu.Unlock()
+		if !errors.Is(err, native.ErrUnconfirmed) {
+			a.mu.Lock()
+			a.endTurnLocked()
+			a.prompt = ""
+			a.mu.Unlock()
+		}
 		return err
 	}
 	return nil
@@ -533,8 +505,8 @@ func (a *Adapter) interruptAccepted(json.RawMessage) {
 	// The turn may have ended before the answer came.
 	interrupted := a.turn.interrupted
 	a.mu.Unlock()
-	if interrupted && a.interruptAt.IsZero() {
-		a.interruptAt = a.cfg.Clock.Now()
+	if interrupted {
+		a.interrupt.Start()
 	}
 }
 
@@ -561,31 +533,23 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 	})
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	// If the CLI didn't get the answer, the request is still open.
-	p.answering = false
-	if err == nil && a.requests[requestID] == p {
-		delete(a.requests, requestID)
+	switch {
+	case err == nil:
+		if a.requests[requestID] == p {
+			delete(a.requests, requestID)
+		}
+	case !errors.Is(err, native.ErrUnconfirmed):
+		// The CLI didn't get the answer: the request is still open.
+		p.answering = false
 	}
+	// An unconfirmed answer may yet reach the CLI: the request takes no
+	// other until the CLI cancels it or the turn ends.
 	return err
 }
 
 // Wait implements native.Adapter.
 func (a *Adapter) Wait() error {
-	a.mu.Lock()
-	proc := a.proc
-	a.mu.Unlock()
-	if proc == nil {
-		return native.ErrNotStarted
-	}
-	<-a.exited
-	<-a.readDone
-	return a.waitErr()
-}
-
-func (a *Adapter) waitErr() error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.exitErr
+	return a.host.Wait()
 }
 
 // Close implements native.Adapter: a turn that runs is interrupted first
@@ -593,98 +557,31 @@ func (a *Adapter) waitErr() error {
 // result, which a resumed session goes on from); closing stdin lets the CLI
 // finish and exit on its own; SIGTERM and SIGKILL follow if it doesn't.
 func (a *Adapter) Close() error {
-	a.mu.Lock()
-	proc := a.proc
-	ended := a.turn.ended
-	a.closing = true
-	a.mu.Unlock()
-	if proc == nil {
-		return nil
-	}
-	a.stopOnce.Do(func() {
-		if ended != nil {
-			a.interruptForClose(ended)
-		}
-		procutil.Stop(proc, a.exited, procutil.StopOptions{
-			StdinGrace: a.cfg.StopTimeout,
-			TermGrace:  a.cfg.StopTimeout,
-			Clock:      a.cfg.Clock,
-			Logger:     a.log,
-			Name:       "Claude Code",
-		})
-	})
-	<-a.exited
+	a.host.Close(a.interruptForClose)
 	return nil
 }
 
-// closeInterruptGrace is how long Close waits for a turn it interrupted to
-// end, unless Config.StopTimeout says otherwise (Adapter.closeGrace).
-const closeInterruptGrace = 3 * time.Second
-
-// interruptForClose interrupts the running turn, whose end closes ended,
-// and waits for it to end, for the CLI to exit, or for the grace to pass.
-func (a *Adapter) interruptForClose(ended <-chan struct{}) {
+// interruptForClose interrupts the running turn, if any, and returns the
+// channel its end closes.
+func (a *Adapter) interruptForClose(ctx context.Context) <-chan struct{} {
 	a.mu.Lock()
-	a.turn.interrupted = true
+	ended := a.turn.ended
+	if ended != nil {
+		a.turn.interrupted = true
+	}
 	a.mu.Unlock()
+	if ended == nil {
+		return nil
+	}
 	// Not waited for: a write the CLI doesn't read must not hold Close,
-	// whose closing stdin makes it fail. Sent although Close set closing,
-	// which refuses other requests.
+	// whose closing stdin makes it fail. Sent although the adapter is
+	// closing, which refuses other requests.
 	go func() {
-		if _, _, err := a.issueControl(context.Background(), "interrupt", nil, a.interruptAccepted); err != nil {
+		if _, _, err := a.issueControl(ctx, "interrupt", nil, a.interruptAccepted); err != nil {
 			a.log.Debug("Failed to interrupt the turn before closing", "error", err)
 		}
 	}()
-	// Real time, as the Clock could be one nobody advances once the
-	// adapter is retired.
-	timer := time.NewTimer(a.closeGrace)
-	defer timer.Stop()
-	select {
-	case <-ended:
-	case <-a.exited:
-	case <-timer.C:
-		a.log.Warn("Claude Code didn't end its turn in time; closing it anyway")
-	}
-}
-
-// readLoop handles the CLI's output until it closes, and wakes up when a
-// snapshot the throttle held back or the end of an interrupted turn is due.
-// It is the only caller of the sink after Start.
-func (a *Adapter) readLoop(stdout io.Reader) {
-	defer close(a.readDone)
-	lines := make(chan []byte)
-	go a.readLines(stdout, lines)
-	timer := a.cfg.Clock.NewTimer(time.Hour, "claude", "wake")
-	timer.Stop()
-	defer timer.Stop()
-	var wakeAt time.Time
-	for {
-		select {
-		case line, ok := <-lines:
-			if !ok {
-				a.outputClosed()
-				return
-			}
-			a.handleLine(line)
-		case <-timer.C:
-			wakeAt = time.Time{}
-			a.wake()
-		}
-		if next := a.nextWake(); !next.Equal(wakeAt) {
-			timer.Stop()
-			wakeAt = next
-			if !next.IsZero() {
-				timer.Reset(max(next.Sub(a.cfg.Clock.Now()), 0), "claude", "wake")
-			}
-		}
-	}
-}
-
-// readLines hands the CLI's output to the read loop line by line until it
-// closes.
-func (a *Adapter) readLines(stdout io.Reader, lines chan<- []byte) {
-	defer close(lines)
-	agentio.ReadLines(stdout, "claude", 0, a.log, func(line []byte) { lines <- line })
+	return ended
 }
 
 // outputClosed sends the snapshots the throttle held back, fails the
@@ -701,13 +598,7 @@ func (a *Adapter) outputClosed() {
 // nextWake returns when the read loop has to act without output from the
 // CLI, or the zero time.
 func (a *Adapter) nextWake() time.Time {
-	next := a.parser.nextFlush()
-	if !a.interruptAt.IsZero() {
-		if at := a.interruptAt.Add(a.cfg.InterruptTimeout); next.IsZero() || at.Before(next) {
-			next = at
-		}
-	}
-	return next
+	return agentio.Earliest(a.parser.nextFlush(), a.interrupt.Next())
 }
 
 // wake sends the snapshots the throttle held back, and ends an interrupted
@@ -715,7 +606,7 @@ func (a *Adapter) nextWake() time.Time {
 // (no result, or no "idle").
 func (a *Adapter) wake() {
 	a.sendRich(a.parser.flush())
-	if a.interruptAt.IsZero() || a.cfg.Clock.Since(a.interruptAt) < a.cfg.InterruptTimeout {
+	if !a.interrupt.Due() {
 		return
 	}
 	a.log.Warn("Claude Code did not end the interrupted turn; ending it here")
@@ -731,11 +622,13 @@ func (a *Adapter) handleLine(line []byte) {
 		return
 	}
 	var f frame
-	if err := decode(line, &f); err != nil {
+	changed, err := agentio.Decode(line, &f)
+	if err != nil {
 		// The line isn't logged: it can hold the user's prompt.
 		a.log.Warn("Failed to parse Claude Code output", "error", err)
 		return
 	}
+	a.drift.Changed(f.Type, changed)
 	switch f.Type {
 	case "control_response":
 		a.handleControlResponse(&f)
@@ -771,7 +664,24 @@ func (a *Adapter) handleLine(line []byte) {
 		a.handleResult(&f)
 	case "rate_limit_event":
 		a.handleRateLimit(f.RateLimitInfo)
+	default:
+		if !ignoredFrames[f.Type] {
+			a.drift.Unknown(f.Type)
+		}
 	}
+}
+
+// ignoredFrames are the frames Claude Code sends that the adapter has no
+// use for.
+var ignoredFrames = map[string]bool{
+	"keep_alive":                   true,
+	"command_lifecycle":            true,
+	"tool_progress":                true,
+	"tool_use_summary":             true,
+	"auth_status":                  true,
+	"prompt_suggestion":            true,
+	"streamlined_text":             true,
+	"streamlined_tool_use_summary": true,
 }
 
 func (a *Adapter) sendRich(msgs []transcript.RichMessage) {
@@ -793,7 +703,7 @@ func (a *Adapter) handleControlResponse(f *frame) {
 		Response  json.RawMessage `json:"response"`
 		Error     string          `json:"error"`
 	}
-	if decode(f.Response, &r) != nil {
+	if a.drift.Decode("control_response", f.Response, &r) != nil {
 		return
 	}
 	var err error
@@ -815,7 +725,7 @@ func (a *Adapter) handleControlRequest(f *frame) {
 		return
 	}
 	var r canUseTool
-	if err := decode(f.Request, &r); err != nil || r.ToolName == "" {
+	if err := a.drift.Decode("can_use_tool", f.Request, &r); err != nil || r.ToolName == "" {
 		a.log.Warn("Refusing a permission request from Claude Code that AgentAPI can't read", "request_id", f.RequestID)
 		a.refuse(f.RequestID, "AgentAPI could not read the permission request")
 		return
@@ -1024,7 +934,7 @@ func turnResult(f *frame, interrupted bool) native.TurnResult {
 // endTurn reports the end of the current turn, if one was sent or started.
 // It runs in the read loop.
 func (a *Adapter) endTurn() {
-	a.interruptAt = time.Time{}
+	a.interrupt.Stop()
 	a.mu.Lock()
 	turn := a.endTurnLocked()
 	active := turn.phase != turnIdle

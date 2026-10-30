@@ -3,66 +3,50 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"slices"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	conv "github.com/coder/agentapi/lib/conversation"
-	"github.com/coder/agentapi/lib/native"
-	"github.com/coder/agentapi/lib/util"
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
-// TaskStatus is where a task is in its life.
-type TaskStatus string
+// Tasks are part of the summary's contract (lib/instanceapi).
+type (
+	Task       = instanceapi.Task
+	TaskStatus = instanceapi.TaskStatus
+)
 
 const (
-	TaskStatusRunning   TaskStatus = "running"
-	TaskStatusCompleted TaskStatus = "completed"
-	// TaskStatusFailed: the agent reported an error during the task, or
-	// exited.
-	TaskStatusFailed TaskStatus = "failed"
-	// TaskStatusLimited: a usage limit stopped the task.
-	TaskStatusLimited TaskStatus = "limited"
+	TaskStatusRunning   = instanceapi.TaskStatusRunning
+	TaskStatusCompleted = instanceapi.TaskStatusCompleted
+	TaskStatusFailed    = instanceapi.TaskStatusFailed
+	TaskStatusLimited   = instanceapi.TaskStatusLimited
 )
 
-var TaskStatusValues = []TaskStatus{TaskStatusRunning, TaskStatusCompleted, TaskStatusFailed, TaskStatusLimited}
-
-func (s TaskStatus) Schema(r huma.Registry) *huma.Schema {
-	return util.OpenAPISchema(r, "TaskStatus", TaskStatusValues)
-}
+var TaskStatusValues = instanceapi.TaskStatusValues
 
 // taskPromptLimit is how much of the prompt a task carries; the message
 // has all of it.
 const taskPromptLimit = 1 << 10
-
-// Task is a message of the user's and the agent's turn on it, until the
-// agent is done: stable again, with no request or terminal dialog open.
-// Messages the user adds while it runs (steering) belong to it.
-type Task struct {
-	ID        int        `json:"id" doc:"The ID of the user's message that started the task, as in GET /messages."`
-	Status    TaskStatus `json:"status" doc:"running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it)."`
-	Prompt    string     `json:"prompt" doc:"The start of the user's message (up to 1 KiB); GET /messages has all of it."`
-	StartedAt time.Time  `json:"started_at" doc:"When the user's message was sent."`
-	EndedAt   *time.Time `json:"ended_at,omitempty" doc:"When the agent was done; missing while it runs."`
-	// ReplyID is the agent's last message of the task.
-	ReplyID *int `json:"reply_id,omitempty" doc:"The ID of the agent's last message of the task, as in GET /messages."`
-	// Steered are the user's messages added while it ran.
-	Steered []int `json:"steered,omitempty" doc:"The IDs of the user's messages added to the task while it ran (steering)."`
-	// Errors the agent reported during the task.
-	Errors []string `json:"errors,omitempty" doc:"Errors the agent reported during the task."`
-	// Limit is the usage limit that stopped a limited task.
-	Limit *native.LimitStop `json:"limit,omitempty" doc:"The usage limit stop of a limited task."`
-}
-
-// final reports whether the task ended.
-func (t Task) final() bool { return t.Status != TaskStatusRunning }
 
 // taskTracker derives the tasks from the changes of the conversation. The
 // emitter calls it with its lock held; each method returns the positions of
 // the tasks it changed, to send as updates.
 type taskTracker struct {
 	tasks []Task
+	// owners has the position of the task each user message started or
+	// was added to, by the message's ID.
+	owners map[int]int
+	// ids are the IDs of the messages last taken. inOrder: they and the
+	// tasks' IDs increase, so a change goes through only the messages from
+	// where it starts. rederive: the tasks weren't derived from the messages
+	// (they were restored), so the next change goes through them all.
+	ids      []int
+	inOrder  bool
+	rederive bool
 	// open is the position of the running task, or -1.
 	open int
 	// ran: the agent was running since the open task started, so its being
@@ -75,21 +59,36 @@ type taskTracker struct {
 }
 
 func newTaskTracker(since time.Time) *taskTracker {
-	return &taskTracker{open: -1, since: since}
+	return &taskTracker{open: -1, since: since, owners: map[int]int{}, inOrder: true}
 }
 
 // reset forgets the tasks, for a new conversation that starts at now.
 func (t *taskTracker) reset(now time.Time) {
 	t.tasks, t.open, t.ran, t.since = nil, -1, false, now
+	t.ids, t.inOrder, t.rederive = t.ids[:0], true, false
+	clear(t.owners)
 }
 
-// restore takes back the tasks of a restored conversation; one that was
-// running when AgentAPI stopped can't go on.
-func (t *taskTracker) restore(tasks []Task, now time.Time) []int {
-	t.tasks, t.open, t.ran = tasks, -1, false
+// restore takes back the tasks of a restored conversation, whose messages
+// are msgs. A task whose message is gone, or is another one now, goes: an
+// AgentAPI from before tasks were kept clears none when it resets or takes
+// messages back, and a message row the state database can't read is
+// skipped. One that was running when AgentAPI stopped can't go on.
+func (t *taskTracker) restore(tasks []Task, msgs []conv.Message, now time.Time) []int {
+	at := make(map[int]int, len(msgs))
+	for i, msg := range msgs {
+		at[msg.Id] = i
+	}
+	t.tasks = slices.DeleteFunc(tasks, func(task Task) bool {
+		i, ok := at[task.ID]
+		return !ok || msgs[i].Role != conv.RoleUser || !msgs[i].Time.Equal(task.StartedAt)
+	})
+	t.open, t.ran = -1, false
+	t.ids, t.rederive = t.ids[:0], true
+	t.index()
 	var changed []int
 	for i := range t.tasks {
-		if !t.tasks[i].final() {
+		if !t.tasks[i].Final() {
 			t.end(i, now)
 			changed = append(changed, i)
 		}
@@ -97,19 +96,95 @@ func (t *taskTracker) restore(tasks []Task, now time.Time) []int {
 	return changed
 }
 
+// index works out owners, and whether the tasks are in order, from the
+// tasks.
+func (t *taskTracker) index() {
+	t.owners = make(map[int]int, len(t.tasks))
+	t.inOrder = true
+	for i, task := range t.tasks {
+		if i > 0 && t.tasks[i-1].ID >= task.ID {
+			t.inOrder = false
+		}
+		// The latest task that holds a message owns it.
+		t.owners[task.ID] = i
+		for _, id := range task.Steered {
+			t.owners[id] = i
+		}
+	}
+}
+
 // owner returns the position of the task a user message started or was
 // added to, or -1.
 func (t *taskTracker) owner(id int) int {
-	for i := len(t.tasks) - 1; i >= 0; i-- {
-		if t.tasks[i].ID == id || slices.Contains(t.tasks[i].Steered, id) {
-			return i
-		}
+	if i, ok := t.owners[id]; ok {
+		return i
 	}
 	return -1
 }
 
-// messages takes the conversation's messages after a change.
-func (t *taskTracker) messages(msgs []conv.Message) []int {
+// messages takes the conversation's messages after a change; msgs[:from]
+// are those of the last call, unchanged. Only the tasks of the messages
+// from there on change, which while a reply streams in is the latest: an
+// update costs as much in a long conversation as in a short one.
+func (t *taskTracker) messages(msgs []conv.Message, from int) []int {
+	if t.rederive || !t.inOrder {
+		return t.derive(msgs)
+	}
+	from = min(from, len(t.ids), len(msgs))
+	if from == len(msgs) && from == len(t.ids) {
+		return nil
+	}
+	last := math.MinInt // the ID of the last message before from
+	if from > 0 {
+		last = msgs[from-1].Id
+	}
+	// A change that removed messages, put others in their place, added
+	// them out of order or took a task's message from the user goes
+	// through them all.
+	if len(msgs) < len(t.ids) {
+		return t.derive(msgs)
+	}
+	for i := from; i < len(msgs); i++ {
+		id := msgs[i].Id
+		if i < len(t.ids) && id != t.ids[i] || i >= len(t.ids) && i > 0 && id <= msgs[i-1].Id {
+			return t.derive(msgs)
+		}
+		if p, ok := t.owners[id]; ok && t.tasks[p].ID == id && (msgs[i].Role != conv.RoleUser || !msgs[i].Time.Equal(t.tasks[p].StartedAt)) {
+			return t.derive(msgs)
+		}
+	}
+	at := make(map[int]int, len(msgs)-from+1)
+	for i := from; i < len(msgs); i++ {
+		at[msgs[i].Id] = i
+	}
+	// k is the task the messages before from end in, the first whose reply
+	// can change; the tasks after it started from there on.
+	k := len(t.tasks)
+	for k > 0 && t.tasks[k-1].ID > last {
+		k--
+	}
+	if k > 0 {
+		k--
+		j := from - 1
+		for j >= 0 && msgs[j].Id != t.tasks[k].ID {
+			j--
+		}
+		if j < 0 {
+			return t.derive(msgs)
+		}
+		at[t.tasks[k].ID] = j
+	}
+	changed := t.own(msgs[from:], nil)
+	changed = t.replies(msgs, k, at, changed)
+	for _, msg := range msgs[len(t.ids):] {
+		t.ids = append(t.ids, msg.Id)
+	}
+	return changed
+}
+
+// derive goes through all the messages: it drops the tasks whose message is
+// gone, and adds and updates the others.
+func (t *taskTracker) derive(msgs []conv.Message) []int {
 	at := make(map[int]int, len(msgs))
 	for i, msg := range msgs {
 		at[msg.Id] = i
@@ -136,12 +211,28 @@ func (t *taskTracker) messages(msgs []conv.Message) []int {
 			t.tasks = kept
 			t.open = -1
 			for i := range t.tasks {
-				if !t.tasks[i].final() {
+				if !t.tasks[i].Final() {
 					t.open = i
 				}
 			}
 		}
 	}
+	t.index()
+	t.ids = t.ids[:0]
+	for i, msg := range msgs {
+		if i > 0 && msg.Id <= msgs[i-1].Id {
+			t.inOrder = false
+		}
+		t.ids = append(t.ids, msg.Id)
+	}
+	t.rederive = false
+	changed = t.own(msgs, changed)
+	return t.replies(msgs, 0, at, changed)
+}
+
+// own gives the user's messages among msgs that no task holds a task: their
+// own, or the running one they steer.
+func (t *taskTracker) own(msgs []conv.Message, changed []int) []int {
 	for _, msg := range msgs {
 		if msg.Role != conv.RoleUser || t.owner(msg.Id) >= 0 {
 			continue
@@ -149,23 +240,45 @@ func (t *taskTracker) messages(msgs []conv.Message) []int {
 		if msg.Time.Before(t.since) {
 			// History: its turn is over.
 			ended := msg.Time
-			t.tasks = append(t.tasks, Task{ID: msg.Id, Status: TaskStatusCompleted, Prompt: cut(msg.Message, taskPromptLimit), StartedAt: msg.Time, EndedAt: &ended})
+			t.add(Task{ID: msg.Id, Status: TaskStatusCompleted, Prompt: cut(msg.Message, taskPromptLimit), StartedAt: msg.Time, EndedAt: &ended})
 			changed = append(changed, len(t.tasks)-1)
 			continue
 		}
+		if t.open >= 0 && t.ran && t.idle() {
+			// Only the grace period after an answer (or an interrupt)
+			// keeps the task open; the agent isn't working, so the
+			// message starts a task rather than steering this one.
+			changed = appendOnce(changed, t.open)
+			t.end(t.open, msg.Time)
+		}
 		if t.open >= 0 {
 			t.tasks[t.open].Steered = append(t.tasks[t.open].Steered, msg.Id)
+			t.owners[msg.Id] = t.open
 			changed = appendOnce(changed, t.open)
 			continue
 		}
-		t.tasks = append(t.tasks, Task{ID: msg.Id, Status: TaskStatusRunning, Prompt: cut(msg.Message, taskPromptLimit), StartedAt: msg.Time})
+		t.add(Task{ID: msg.Id, Status: TaskStatusRunning, Prompt: cut(msg.Message, taskPromptLimit), StartedAt: msg.Time})
 		t.open = len(t.tasks) - 1
 		t.ran = t.status.Status == AgentStatusRunning
 		changed = append(changed, t.open)
 	}
-	// Each task's reply is the agent's last message before the next task;
-	// a history task ends with it.
-	for i := range t.tasks {
+	return changed
+}
+
+// add adds a task.
+func (t *taskTracker) add(task Task) {
+	if n := len(t.tasks); n > 0 && t.tasks[n-1].ID >= task.ID {
+		t.inOrder = false
+	}
+	t.owners[task.ID] = len(t.tasks)
+	t.tasks = append(t.tasks, task)
+}
+
+// replies updates the replies of the tasks from position k on; at has the
+// positions of their messages in msgs. Each task's reply is the agent's
+// last message before the next task; a history task ends with it.
+func (t *taskTracker) replies(msgs []conv.Message, k int, at map[int]int, changed []int) []int {
+	for i := k; i < len(t.tasks); i++ {
 		from, ok := at[t.tasks[i].ID]
 		if !ok {
 			continue
@@ -306,13 +419,6 @@ type TaskUpdateBody struct {
 	Seq uint64 `json:"seq" doc:"Sequence number of this change; see message_update."`
 }
 
-// clone returns a copy of t that shares nothing the tracker changes.
-func (t Task) clone() Task {
-	t.Errors = slices.Clone(t.Errors)
-	t.Steered = slices.Clone(t.Steered)
-	return t
-}
-
 // notifyStatusLocked sends the agent's status, and the tasks it ended.
 // Caller holds e.mu.
 func (e *EventEmitter) notifyStatusLocked() {
@@ -326,7 +432,7 @@ func (e *EventEmitter) notifyStatusLocked() {
 		}
 		e.taskTimer = e.clock.AfterFunc(taskEndGrace, func() {
 			e.mu.Lock()
-			defer e.mu.Unlock()
+			defer e.unlock()
 			e.tasksChangedLocked(e.tasks.endIfIdle(e.clock.Now()))
 		}, "tasks", "end")
 	}
@@ -345,7 +451,7 @@ func (e *EventEmitter) tasksChangedLocked(changed []int) {
 func (e *EventEmitter) tasksStoredLocked(changed []int) []TaskUpdateBody {
 	updates := make([]TaskUpdateBody, 0, len(changed))
 	for _, i := range changed {
-		task := e.tasks.tasks[i].clone()
+		task := e.tasks.tasks[i].Clone()
 		e.seq++
 		e.taskSeq[task.ID] = e.seq
 		if e.persister != nil {
@@ -364,10 +470,10 @@ func (e *EventEmitter) tasksStoredLocked(changed []int) []TaskUpdateBody {
 // Tasks returns the conversation's tasks, the earliest first.
 func (e *EventEmitter) Tasks() []Task {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlock()
 	tasks := make([]Task, len(e.tasks.tasks))
 	for i, task := range e.tasks.tasks {
-		tasks[i] = task.clone()
+		tasks[i] = task.Clone()
 	}
 	return tasks
 }
@@ -390,7 +496,7 @@ func (s *Server) registerTaskRoutes() {
 		o.Summary = "Get the conversation's tasks"
 		o.Description = "Returns the conversation's tasks: each message of the user's and the agent's turn on it, " +
 			"until the agent is done (stable again, with no request or terminal dialog open). Messages the user " +
-			"adds while a task runs belong to it (steered). A task is running, completed, failed (the agent reported " +
+			"adds while the agent works on a task belong to it (steered). A task is running, completed, failed (the agent reported " +
 			"an error or exited) or limited (a usage limit stopped it). /events sends task_update when one starts or changes."
 	})
 }

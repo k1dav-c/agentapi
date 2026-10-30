@@ -189,9 +189,15 @@ func (s *Server) respondRequestLocked(id string, response native.Response) (*Req
 			}
 			state = stored
 		}
+		if state.Status == native.RequestStatusPending {
+			// An answer to it is on its way, or went out unconfirmed.
+			return nil, huma.Error409Conflict("request is being answered")
+		}
 		return nil, huma.Error409Conflict(fmt.Sprintf("request is %s, not pending", state.Status))
 	case errors.Is(err, native.ErrInvalidResponse):
 		return nil, huma.Error400BadRequest(err.Error())
+	case errors.Is(err, native.ErrUnconfirmed):
+		return nil, fmt.Errorf("the answer may have reached the agent, which didn't confirm it; the request takes no other answer until the agent closes it or the turn ends: %w", err)
 	default:
 		return nil, fmt.Errorf("failed to deliver the response: %w", err)
 	}

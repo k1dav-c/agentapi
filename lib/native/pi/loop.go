@@ -10,6 +10,7 @@ import (
 	"github.com/coder/agentapi/lib/agentlog/pilog"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
 )
 
 // abortedRunMessage is the error of the extra assistant message Pi adds
@@ -32,8 +33,11 @@ type loopState struct {
 	// usedIDs are the message IDs already given out.
 	usedIDs map[string]bool
 	// tools are the tool calls running, in start order.
-	tools     []runningTool
-	throttles map[string]*throttle
+	tools []runningTool
+	// throttle holds back the snapshots of messages that stream.
+	throttle *agentio.Throttle[string]
+	// interrupt runs from when the adapter sent abort.
+	interrupt agentio.InterruptDeadline
 
 	// The outcome of the turn so far.
 	stopReason string
@@ -53,66 +57,54 @@ type runningTool struct {
 	args json.RawMessage
 }
 
-func newLoopState(sink native.Sink, cwd string) loopState {
+func (a *Adapter) newLoopState(sink native.Sink) loopState {
 	return loopState{
 		sink:      sink,
-		cwd:       cwd,
+		cwd:       a.cfg.CWD,
 		events:    pilog.NewEventParser(),
 		parser:    pilog.NewParser(),
 		usedIDs:   make(map[string]bool),
-		throttles: make(map[string]*throttle),
+		throttle:  agentio.NewThrottle[string](a.clock, a.interval),
+		interrupt: agentio.NewInterruptDeadline(a.clock, a.interruptTimeout),
 	}
 }
 
-// eventLoop handles Pi's records and the functions posted to it (timers).
-// It is the only goroutine that calls the sink.
-func (a *Adapter) eventLoop(lines <-chan []byte) {
-	defer close(a.loopDone)
-	for {
-		select {
-		case line, ok := <-lines:
-			if !ok {
-				a.handleExit()
-				return
-			}
-			a.handleLine(line)
-			if a.lineHandled != nil {
-				a.lineHandled()
-			}
-		case fn := <-a.posted:
-			fn()
-		}
+// handleRecord handles a line of Pi's output on the event loop.
+func (a *Adapter) handleRecord(line []byte) {
+	a.handleLine(line)
+	if a.lineHandled != nil {
+		a.lineHandled()
+	}
+}
+
+// nextWake returns when the loop has to act without a record from Pi: to
+// send a snapshot the throttle held back, or to end an interrupted turn
+// Pi didn't end. It is the zero time if there is nothing to do.
+func (a *Adapter) nextWake() time.Time {
+	return agentio.Earliest(a.loop.throttle.Next(), a.loop.interrupt.Next())
+}
+
+// wake sends the snapshots the throttle held back, and ends an interrupted
+// turn Pi didn't end in time: an extension command that doesn't stop, or a
+// Pi that hangs.
+func (a *Adapter) wake() {
+	a.flushThrottled(false)
+	if a.loop.interrupt.Due() {
+		a.loop.interrupt.Stop()
+		a.log.Warn("Pi didn't end the interrupted turn; ending it here")
+		a.endTurn()
 	}
 }
 
 // post runs fn on the event loop, unless the loop has stopped.
 func (a *Adapter) post(fn func()) {
-	select {
-	case a.posted <- fn:
-	case <-a.loopDone:
-	}
+	_ = a.host.Post(context.Background(), fn)
 }
 
 // runOnLoop runs fn on the event loop and waits for it. It returns false
 // if the loop stopped without running it.
 func (a *Adapter) runOnLoop(fn func()) bool {
-	done := make(chan struct{})
-	a.post(func() {
-		fn()
-		close(done)
-	})
-	select {
-	case <-done:
-		return true
-	case <-a.loopDone:
-		// If the loop took fn, it ran it before it stopped.
-		select {
-		case <-done:
-			return true
-		default:
-			return false
-		}
-	}
+	return a.host.RunOnLoop(fn)
 }
 
 // handleExit fails what waits on Pi once its stdout closed, and sends what
@@ -133,27 +125,21 @@ func (a *Adapter) handleExit() {
 		deliverResult(p, cmdResult{err: errExited})
 	}
 	a.flushStream()
-	for id, t := range a.loop.throttles {
-		t.stop()
-		a.flushThrottle(id)
-	}
+	a.flushThrottled(true)
 	a.log.Info("Pi closed its output")
 }
 
-// decodeRecord decodes a stdout record of type typ, or logs it as
-// malformed.
+// decodeRecord decodes a stdout record of type typ. A field of another
+// type is left out, not the record (see agentio.Decode); a record that
+// doesn't decode is counted as drift.
 func decodeRecord[T any](a *Adapter, line []byte, typ string) (T, bool) {
 	var v T
-	if err := json.Unmarshal(line, &v); err != nil {
-		a.log.Warn("Malformed Pi record", "type", typ, "error", err)
-		return v, false
-	}
-	return v, true
+	return v, a.drift.Decode(typ, line, &v) == nil
 }
 
 func (a *Adapter) handleLine(line []byte) {
 	var env envelope
-	if err := json.Unmarshal(line, &env); err != nil {
+	if _, err := agentio.Decode(line, &env); err != nil {
 		a.log.Warn("Pi wrote a line that is not JSON", "error", err)
 		return
 	}
@@ -199,11 +185,11 @@ func (a *Adapter) handleLine(line []byte) {
 			a.loop.sink.Error(ev.ErrorMessage, conv.ErrorLevelWarning)
 		}
 	case "extension_error":
-		if ev, ok := decodeRecord[extensionError](a, line, env.Type); ok {
+		if ev, ok := decodeRecord[extensionError](a, line, env.Type); ok && ev.Error != "" {
 			a.loop.sink.Error(fmt.Sprintf("Pi extension %s failed on %s: %s", ev.ExtensionPath, ev.Event, ev.Error), conv.ErrorLevelWarning)
 		}
 	default:
-		a.log.Debug("Unknown Pi record", "type", env.Type)
+		a.drift.Unknown(env.Type)
 	}
 }
 
@@ -258,6 +244,14 @@ func (a *Adapter) handlePromptResponse(p *pendingCmd, deliver bool, r response) 
 		switch {
 		case deliver:
 			// The caller gets the error ("No API key found for …").
+		case p.turn == 0 && p.kind == cmdTurn && !a.isTurnActive():
+			// The caller was told the prompt went out unconfirmed, so the
+			// conversation holds its turn: it ends with the error.
+			a.log.Warn("Pi rejected a prompt after its caller stopped waiting", "error", r.Error)
+			a.beginTurn()
+			a.loop.stopReason, a.loop.errMessage = "error", r.Error
+			a.endTurn()
+			return
 		case p.turn == 0:
 			a.log.Warn("Pi rejected a prompt after its caller stopped waiting", "error", r.Error)
 		case a.isCurrentTurn(p.turn) && !a.isRunActive():
@@ -277,9 +271,7 @@ func (a *Adapter) handlePromptResponse(p *pendingCmd, deliver bool, r response) 
 		return
 	}
 	var result promptResult
-	if err := json.Unmarshal(r.Data, &result); err != nil {
-		a.log.Warn("Malformed Pi prompt result", "error", err)
-	}
+	_ = a.drift.Decode("prompt response", r.Data, &result)
 	if result.Disposition != "handled" {
 		// A run started, or the message went into the running one.
 		a.beginTurn()
@@ -425,6 +417,7 @@ func (a *Adapter) endTurn() {
 	a.interrupted = false
 	a.mu.Unlock()
 
+	a.loop.interrupt.Stop()
 	a.flushStream()
 	// The conversation expires the requests of the turn.
 	a.cancelTurnDialogs(false)
@@ -454,17 +447,6 @@ func (a *Adapter) endTurn() {
 	a.loop.sink.TurnCompleted(result)
 }
 
-// endInterruptedTurn ends turn if it is still running interruptTimeout
-// after Interrupt: Pi didn't confirm the abort (an extension command that
-// doesn't stop, or a Pi that hangs).
-func (a *Adapter) endInterruptedTurn(turn int) {
-	if !a.isCurrentTurn(turn) {
-		return
-	}
-	a.log.Warn("Pi didn't end the interrupted turn; ending it here")
-	a.endTurn()
-}
-
 func (a *Adapter) handleAgentStart() {
 	a.setRunActive(true)
 	a.beginTurn()
@@ -489,13 +471,20 @@ func (a *Adapter) cancelTurnDialogs(withdraw bool) {
 	var cancel []string
 	a.mu.Lock()
 	for _, id := range ids {
-		// A dialog whose answer is being written gets that answer, not a
-		// cancel too; Respond removes it once it is written.
-		if d := a.dialogs[id]; d != nil && !d.answering {
+		d := a.dialogs[id]
+		switch {
+		case d == nil:
+		case d.unconfirmed:
+			// It may have its answer: no cancel contradicts it.
+			d.stopTimer()
+			delete(a.dialogs, id)
+		case !d.answering:
 			d.stopTimer()
 			delete(a.dialogs, id)
 			cancel = append(cancel, id)
 		}
+		// A dialog whose answer is being written gets that answer, not a
+		// cancel too; Respond removes it once it is written.
 	}
 	a.mu.Unlock()
 	for _, id := range cancel {

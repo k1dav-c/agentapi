@@ -10,6 +10,7 @@ import {LatestLinkChip} from "./terminal-links";
 import {useXterm} from "./use-xterm";
 import {decodeBase64, terminalSize} from "@/lib/shell";
 import {withCredentials} from "@/lib/auth";
+import {EventSourceConnection} from "@/lib/event-source";
 import type {TerminalExitEvent, TerminalOutputEvent} from "@/lib/events";
 import {getErrorMessage} from "@/lib/error-utils";
 
@@ -64,50 +65,58 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
       const resizeObserver = new ResizeObserver(() => fit());
       resizeObserver.observe(container);
 
-      const eventSource = new EventSource(`${storageScope}/terminal`, {
+      // The stream has no heartbeats; it is opened again when it ends or
+      // fails, the browser comes back online or the tab comes back.
+      const connection = new EventSourceConnection({
+        url: () => `${storageScope}/terminal`,
         withCredentials: withCredentials(storageScope),
+        listeners: () => ({
+          output: (event) => {
+            try {
+              term.write(decodeBase64((JSON.parse(event.data) as TerminalOutputEvent).data));
+            } catch {
+              return;
+            }
+            // The shell is ready: type the command it was opened for.
+            const pending = commandRef.current;
+            if (pending) {
+              commandRef.current = undefined;
+              inputRef.current?.push(`${pending}\r`);
+            }
+          },
+          exit: (event) => {
+            let reason = "";
+            try {
+              reason = (JSON.parse(event.data) as Partial<TerminalExitEvent>).reason ?? "";
+            } catch {
+              // The reason is only shown.
+            }
+            // Don't reconnect: that would start a new shell right away.
+            connection.stop();
+            runningRef.current = false;
+            setExitReason(reason);
+            setState("exited");
+          },
+        }),
+        onOpen: () => {
+          // The stream starts with the recent output: replay it on a clean
+          // terminal, also after a reconnect.
+          term.reset();
+          runningRef.current = true;
+          setState("open");
+          fit();
+        },
+        onChange: ({status}) => {
+          if (status !== "connected") setState((current) => (current === "exited" ? current : "connecting"));
+        },
       });
-      eventSource.onopen = () => {
-        // The stream starts with the recent output: replay it on a clean
-        // terminal, also after a reconnect.
-        term.reset();
-        runningRef.current = true;
-        setState("open");
-        fit();
-      };
-      eventSource.onerror = () => setState((current) => (current === "exited" ? current : "connecting"));
-      eventSource.addEventListener("output", (event) => {
-        try {
-          term.write(decodeBase64((JSON.parse(event.data) as TerminalOutputEvent).data));
-        } catch {
-          return;
-        }
-        // The shell is ready: type the command it was opened for.
-        const pending = commandRef.current;
-        if (pending) {
-          commandRef.current = undefined;
-          inputRef.current?.push(`${pending}\r`);
-        }
-      });
-      eventSource.addEventListener("exit", (event) => {
-        let reason = "";
-        try {
-          reason = (JSON.parse(event.data) as Partial<TerminalExitEvent>).reason ?? "";
-        } catch {
-          // The reason is only shown.
-        }
-        // Don't reconnect: that would start a new shell right away.
-        eventSource.close();
-        runningRef.current = false;
-        setExitReason(reason);
-        setState("exited");
-      });
+      connection.start();
       return () => {
         runningRef.current = false;
         window.cancelAnimationFrame(frame);
         window.clearTimeout(resizeTimer);
         resizeObserver.disconnect();
-        eventSource.close();
+        connection.stop();
       };
     },
   });

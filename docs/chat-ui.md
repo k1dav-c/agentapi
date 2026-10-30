@@ -57,8 +57,12 @@ thinking. The task's header shows its number and state (Queued, Working, Waiting
 Failed or Limit reached), a Stop button while it works, and its ⋯ menu. The server's
 [task](../README.md#tasks) determines the state. Failed means the agent reported an error or
 exited; hover to see the first error. Limit reached means a usage limit stopped it; hover for the
-agent's message. The server also assigns tool calls and thinking to tasks. A steered message shares
-the running task's state, and subsequent activity stays in that task.
+agent's message. The server also assigns tool calls and thinking to tasks.
+
+*native* A message you steer into the running task stays in that task: it shows among the agent's
+steps where it came, as your message marked *steered*, and the task keeps its number, state and
+cost. The numbers are the server's, as `GET /tasks`, webhooks and the hub count them. With a server
+older than tasks, every message starts one.
 
 The task's start time and duration appear in the left margin on wide screens, or after its number
 in the header on narrower screens. *native* Claude Code, Codex and Pi also show the cost of model
@@ -229,7 +233,9 @@ above the composer says so, with **Compact**. A closed note stays away until the
 composer says when the limit resets. The queued tasks wait until then, marked *held until the usage
 limit resets*, instead of failing one by one. **Continue at reset** sends a message that has the
 agent go on with the task a minute after the reset, **Continue now** sends it now, and **Send queued
-tasks** lets the queue go at once. A task you send yourself goes out right away.
+tasks** lets the queue go at once. A task you send yourself goes out right away. Until then the
+agent needs you, as with a request: the header, the tab title and its icon say so, and a background
+tab with notifications on shows one.
 
 ## Requests and decision cards
 
@@ -509,6 +515,11 @@ state in detail.
 
 ## Connection and caching
 
-The chat follows server-sent events, uses heartbeats to detect lost connections and reconnects
-automatically with incremental replay. The status and page title show the connection state.
-On reopening, it displays the IndexedDB-cached transcript immediately, then fetches changes.
+The chat follows the server's events and resumes from where it left off, so a reconnect only
+fetches what changed. A stream that ends is opened again at once, without a notice. One that fails,
+including an error page from a proxy in front of AgentAPI, is tried again after 1 s, then up to
+every 30 s; a bar says when, with **Reconnect now**. The server sends a heartbeat every 15 s, and a
+stream silent for 45 s counts as lost even while the tab is in front (a phone that switched
+networks). Going back online or back to the tab reconnects at once. The status and page title show
+the connection state. On reopening, the chat shows the IndexedDB-cached transcript immediately,
+then fetches changes. The terminals reconnect the same way.

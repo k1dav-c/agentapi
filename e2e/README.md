@@ -16,8 +16,7 @@ go test ./e2e
 For each test, `echo_test.go`:
 
 1. Selects a JSON conversation script from `testdata/`.
-2. Starts AgentAPI with the fake agent (`echo.go`, or `acp_echo.go` for the ACP test), which
-   reads that script.
+2. Starts AgentAPI with the fake agent (`echo.go`), which reads that script.
 3. Sends messages through AgentAPI.
 4. Lets the fake agent check the messages and send predefined responses.
 5. Checks the responses against the expected results.

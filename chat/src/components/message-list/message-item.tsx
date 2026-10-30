@@ -79,6 +79,7 @@ export function MessageItem({
   onDismissMessage,
   searchQuery = "",
   author,
+  steered = false,
 }: {
   message: Message | DraftMessage;
   onRetryMessage?: (clientId: string) => Promise<boolean>;
@@ -87,6 +88,8 @@ export function MessageItem({
   searchQuery?: string;
   // Who wrote a user message when it isn't you: the agent, for a subagent.
   author?: string;
+  // A user message steered into the task while it ran.
+  steered?: boolean;
 }) {
   if (message.role !== "user") return <AgentMessage message={message} searchQuery={searchQuery} />;
   return (
@@ -97,6 +100,7 @@ export function MessageItem({
       onDismissMessage={onDismissMessage}
       searchQuery={searchQuery}
       author={author}
+      steered={steered}
     />
   );
 }
@@ -218,6 +222,7 @@ function UserMessage({
   onDismissMessage,
   searchQuery,
   author,
+  steered,
 }: {
   message: Message | DraftMessage;
   onRetryMessage?: (clientId: string) => Promise<boolean>;
@@ -225,16 +230,19 @@ function UserMessage({
   onDismissMessage?: (clientId: string) => void;
   searchQuery: string;
   author?: string;
+  steered?: boolean;
 }) {
   const draft = isDraftMessage(message) ? message : undefined;
   const isFailed = draft?.deliveryStatus === "failed";
+  const label = author ? `Message from ${author}` : steered ? "Your message, steered into the task" : "Your message";
   return (
-    <article className="group scroll-mt-16" data-user-message aria-label={author ? `Message from ${author}` : "Your message"}>
+    <article className="group scroll-mt-16" data-user-message data-steered={steered || undefined} aria-label={label}>
       <div className="rounded-xl border border-prompt-border bg-prompt px-4 pb-3 pt-2.5">
         <div className="mb-1 flex min-h-7 items-center gap-2">
           <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
             <UserRound aria-hidden="true" className="size-3.5 text-muted-foreground" />
             {author ?? "You"}
+            {steered && <span className="font-normal text-muted-foreground">· steered</span>}
           </span>
           {message.content && (
             <div className="ml-auto opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">

@@ -2,6 +2,7 @@ package server
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -139,12 +140,6 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 	if opts.transport, err = transportOption(flags, opts.agentType, opts.agent, opts.stateFile != ""); err != nil {
 		return serverOptions{}, err
 	}
-	switch {
-	case opts.transport == httpapi.TransportACP && opts.stateDB != "":
-		return serverOptions{}, fmt.Errorf("ACP mode doesn't support state persistence")
-	case opts.printOpenAPI && opts.transport == httpapi.TransportACP:
-		return serverOptions{}, fmt.Errorf("flags --%s and --%s are mutually exclusive", FlagPrintOpenAPI, FlagExperimentalACP)
-	}
 	if opts.bind, err = httpapi.ParseBindAddress(flags.GetString(FlagBind)); err != nil {
 		return serverOptions{}, fmt.Errorf("invalid --%s: %w", FlagBind, err)
 	}
@@ -179,38 +174,32 @@ func stateDBForFile(path string) string {
 	return db
 }
 
-// transportOption reads --transport, and --experimental-acp, the older
-// name of --transport acp. Without either, an agent the native transport can
-// drive uses it, unless a state file (written by the PTY transport, whose
-// command lines keep working) is given, and every other agent uses the PTY
-// transport.
+// errACPRemoved answers --transport acp and --experimental-acp.
+var errACPRemoved = errors.New("the experimental ACP transport was removed: run the agent with --transport native (Claude Code, Codex, Pi) or --transport pty")
+
+// transportOption reads --transport. Without it, an agent the native
+// transport can drive uses it, unless a state file (written by the PTY
+// transport, whose command lines keep working) is given, and every other
+// agent uses the PTY transport.
 func transportOption(flags flagSource, agentType AgentType, program string, stateFile bool) (httpapi.Transport, error) {
-	acp := flags.GetBool(FlagExperimentalACP)
+	if flags.GetBool(FlagExperimentalACP) {
+		return "", errACPRemoved
+	}
 	if !flags.IsSet(FlagTransport) {
-		switch {
-		case acp:
-			return httpapi.TransportACP, nil
-		case hasNativeAdapter(agentType, program) && !stateFile:
+		if hasNativeAdapter(agentType, program) && !stateFile {
 			return httpapi.TransportNative, nil
-		default:
-			return httpapi.TransportPTY, nil
 		}
+		return httpapi.TransportPTY, nil
 	}
 	switch value := flags.GetString(FlagTransport); value {
 	case "", "pty":
-		if acp {
-			return httpapi.TransportACP, nil
-		}
 		return httpapi.TransportPTY, nil
-	case "acp":
-		return httpapi.TransportACP, nil
 	case "native":
-		if acp {
-			return "", fmt.Errorf("--%s and --%s=native are mutually exclusive", FlagExperimentalACP, FlagTransport)
-		}
 		return httpapi.TransportNative, nil
+	case "acp":
+		return "", errACPRemoved
 	default:
-		return "", fmt.Errorf("unknown --%s %q (one of: pty, acp, native)", FlagTransport, value)
+		return "", fmt.Errorf("unknown --%s %q (one of: pty, native)", FlagTransport, value)
 	}
 }
 

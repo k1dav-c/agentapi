@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/registry"
 )
 
@@ -21,10 +21,10 @@ func TestListInstances(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	hostname, _ := os.Hostname()
-	summary := httpapi.SummaryBody{
-		Instance:  httpapi.WebhookInstance{ServerID: "a1"},
-		Status:    httpapi.AgentStatusStable,
-		Attention: httpapi.AttentionRequest,
+	summary := instanceapi.SummaryBody{
+		Instance:  instanceapi.WebhookInstance{ServerID: "a1"},
+		Status:    instanceapi.AgentStatusStable,
+		Attention: instanceapi.AttentionRequest,
 		Title:     "Fix the bug",
 		Unread:    true,
 	}
@@ -38,9 +38,9 @@ func TestListInstances(t *testing.T) {
 	defer srv.Close()
 	start := time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
 	for _, entry := range []registry.Entry{
-		{ID: "host:1", Name: "api", ServerID: "a1", URL: srv.URL, Hostname: hostname, PID: os.Getpid(), AgentType: "claude", AuthRequired: true, StartedAt: start},
-		{ID: "host:2", ServerID: "b2", URL: srv.URL, Hostname: hostname, PID: os.Getpid(), AgentType: "codex", StartedAt: start.Add(time.Second)},
-		{ID: "host:3", ServerID: "c3", URL: "http://127.0.0.1:1", Hostname: hostname, PID: os.Getpid(), AgentType: "pi", StartedAt: start.Add(2 * time.Second)},
+		{WebhookInstance: instanceapi.WebhookInstance{ID: "host:1", Name: "api", ServerID: "a1", URL: srv.URL, Hostname: hostname, PID: os.Getpid(), AgentType: "claude"}, AuthRequired: true, StartedAt: start},
+		{WebhookInstance: instanceapi.WebhookInstance{ID: "host:2", ServerID: "b2", URL: srv.URL, Hostname: hostname, PID: os.Getpid(), AgentType: "codex"}, StartedAt: start.Add(time.Second)},
+		{WebhookInstance: instanceapi.WebhookInstance{ID: "host:3", ServerID: "c3", URL: "http://127.0.0.1:1", Hostname: hostname, PID: os.Getpid(), AgentType: "pi"}, StartedAt: start.Add(2 * time.Second)},
 	} {
 		_, err := registry.Write(dir, entry)
 		require.NoError(t, err)
@@ -69,8 +69,8 @@ func TestListInstances(t *testing.T) {
 
 func TestStateOf(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "idle", stateOf(httpapi.SummaryBody{Attention: httpapi.AttentionNone, Status: httpapi.AgentStatusStable}))
-	assert.Equal(t, "working", stateOf(httpapi.SummaryBody{Attention: httpapi.AttentionNone, Status: httpapi.AgentStatusRunning}))
-	assert.Equal(t, "exited", stateOf(httpapi.SummaryBody{Attention: httpapi.AttentionExited}))
-	assert.Equal(t, "needs login", stateOf(httpapi.SummaryBody{Attention: httpapi.AttentionLogin}))
+	assert.Equal(t, "idle", stateOf(instanceapi.SummaryBody{Attention: instanceapi.AttentionNone, Status: instanceapi.AgentStatusStable}))
+	assert.Equal(t, "working", stateOf(instanceapi.SummaryBody{Attention: instanceapi.AttentionNone, Status: instanceapi.AgentStatusRunning}))
+	assert.Equal(t, "exited", stateOf(instanceapi.SummaryBody{Attention: instanceapi.AttentionExited}))
+	assert.Equal(t, "needs login", stateOf(instanceapi.SummaryBody{Attention: instanceapi.AttentionLogin}))
 }
