@@ -1517,6 +1517,12 @@ agentapi server --allowed-origins 'https://example.com,http://localhost:3000' --
 AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi server -- claude
 ```
 
+其他來源的網頁不能讓伺服器做任何改動（GET、HEAD、OPTIONS 以外的方法），除非它的來源列在清單上。
+瀏覽器送這類請求前不會先詢問（表單、`no-cors` 模式的 `fetch`）；CORS 只擋住網頁讀取回應，所以沒有
+`--api-token` 時，你開過的任何網站都能替 agent 送任務，或在終端機裡打字。`*` 讓每個網頁都能讀取
+回應，但不信任任何網頁送出這類請求：需要的來源要明確列出。伺服器依瀏覽器加上的 `Sec-Fetch-Site`
+和 `Origin` 標頭判斷來源，所以瀏覽器以外的用戶端（curl、SDK、hub）不受影響。
+
 ### API 用戶端能做什麼
 
 - 讓 agent 執行它能執行的任何事。除非命令列指定了其他模式，或 Claude Code 在沙箱外以 root

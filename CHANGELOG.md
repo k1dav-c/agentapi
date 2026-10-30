@@ -9,8 +9,22 @@
   AgentAPI with an error; run such an agent with `--transport pty`. `acp` is no longer a value of
   `transport` in the API.
 
+### Features
+
+- `agentapi hub serve --allowed-hosts` lists the names browsers open the hub by, besides IP addresses
+  and `localhost`, against DNS rebinding; a hub with `--no-token` and without it warns when it starts.
+
 ### Fixes
 
+- A page of another site can no longer make AgentAPI or the hub change anything. Browsers send a
+  form or a `no-cors` fetch without asking, and CORS only kept the page from reading the answer: any
+  site you opened could send an agent without `--api-token` a task or type into its terminal,
+  directly or through a hub with `--no-token`. Requests other than GET, HEAD and OPTIONS from a page
+  of another origin are refused unless `--allowed-origins` lists it; `*` lists none. Clients other
+  than browsers aren't affected.
+- The hub's proxy marks every answer `Content-Security-Policy: sandbox`, so a page an instance serves
+  doesn't run as the hub's, and refuses changes to an instance's webhook. Adding a URL no longer
+  moves an instance the hub already has.
 - A value a newer AgentAPI added no longer breaks the chat. An unknown task status reads as running,
   then failed or completed; unknown subagent statuses, permission modes, request statuses and option
   kinds fall back too. The hub opens every instance with its own chat build, so a newer instance

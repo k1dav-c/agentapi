@@ -17,8 +17,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +47,11 @@ type Config struct {
 	Secret string
 	// InstanceToken is sent to the instances that don't have their own.
 	InstanceToken string
+	// AllowedHosts, when set, are the names browsers may reach the hub by,
+	// besides IP addresses and localhost ("*" is any): another name points
+	// at it only to get around the browser's same-origin rule (DNS
+	// rebinding), which matters most with NoToken. Empty allows any.
+	AllowedHosts []string
 	// StatePath keeps the instances across restarts; empty keeps none.
 	StatePath string
 	// ChatBasePath is where the hub serves the chat UI, by default /chat.
@@ -140,7 +147,22 @@ func (h *Hub) Handler() http.Handler {
 	r := chi.NewRouter()
 	// The instances' responses through the proxy come compressed already.
 	r.Use(httpapi.Compress())
+	// Instances sign their webhook events, whatever name or origin they
+	// come by.
 	r.Post("/hooks", h.receiveWebhook)
+	r.Group(func(r chi.Router) {
+		r.Use(h.checkHost)
+		r.Use(httpapi.CrossOriginProtection(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h.logger.Warn("Refused a request a page of another origin sent", "method", r.Method, "path", r.URL.Path, "origin", r.Header.Get("Origin"))
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "a page of another origin sent this request"})
+		})))
+		h.routes(r)
+	})
+	return r
+}
+
+// routes are the hub's routes for browsers.
+func (h *Hub) routes(r chi.Router) {
 	r.Get("/api/session", h.getSession)
 	r.Post("/api/session", h.createSession)
 	r.Delete("/api/session", h.deleteSession)
@@ -160,7 +182,32 @@ func (h *Hub) Handler() http.Handler {
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, h.config.ChatBasePath+"/hub/", http.StatusTemporaryRedirect)
 	})
-	return r
+}
+
+// checkHost refuses a request for a name the hub doesn't answer to, when
+// AllowedHosts are set. IP addresses and localhost always pass: a page
+// can't take over an address the way it takes over a name it controls.
+func (h *Hub) checkHost(next http.Handler) http.Handler {
+	if len(h.config.AllowedHosts) == 0 || slices.Contains(h.config.AllowedHosts, "*") {
+		return next
+	}
+	allowed := make(map[string]bool, len(h.config.AllowedHosts))
+	for _, host := range h.config.AllowedHosts {
+		allowed[strings.ToLower(host)] = true
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if name, _, err := net.SplitHostPort(host); err == nil {
+			host = name
+		}
+		host = strings.ToLower(strings.Trim(host, "[]"))
+		if net.ParseIP(host) != nil || host == "localhost" || allowed[host] {
+			next.ServeHTTP(w, r)
+			return
+		}
+		h.logger.Warn("Refused a request for a name not in --allowed-hosts", "host", r.Host, "path", r.URL.Path)
+		writeJSON(w, http.StatusMisdirectedRequest, map[string]string{"error": "the hub doesn't answer to " + host + "; add it to --allowed-hosts"})
+	})
 }
 
 // The browser's session: a cookie derived from the hub token, which a
@@ -279,6 +326,12 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 	id := summary.Instance.ID
 	if id == "" {
 		id = u.Host
+	}
+	if existing, ok := h.store.get(id); ok && existing.URL != base {
+		// Adding a URL is no way to move an instance: the hub would send
+		// its token there.
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "the hub has " + id + " at " + existing.URL + " already; forget it first"})
+		return
 	}
 	instance, _, err := h.store.update(id, true, func(i *Instance) {
 		i.WebhookInstance = summary.Instance

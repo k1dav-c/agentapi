@@ -333,8 +333,16 @@ instance that joined with its webhook comes back the next time it starts.
   instance, and doesn't let another run with the same ID move it elsewhere while it still follows
   this one.
 - The session cookie is HttpOnly and SameSite=Lax, derived from the hub token rather than holding
-  it. The proxy drops the browser's cookies and its `Authorization`, `Origin` and `Referer`
-  headers, and drops the instance's `Set-Cookie`, so neither side's credentials reach the other.
+  it. The proxy drops the browser's cookies and its `Authorization`, `Origin`, `Referer` and
+  `Sec-Fetch-*` headers, and drops the instance's `Set-Cookie`, so neither side's credentials
+  reach the other.
+- A page of another site can't make the hub change anything or send an instance a task, with or
+  without a token: the hub refuses requests that change something unless the browser says they
+  come from the hub's own page.
+- Nothing an instance answers runs as a page of the hub's (`Content-Security-Policy: sandbox`),
+  so a workspace someone took over can't reach the others through your browser. Through the hub,
+  an instance's webhook can be read but not changed: it names where the hub sends the token.
+- Adding a URL never moves an instance the hub has; forget it first.
 - `~/.agentapi/hub/instances.json` holds the tokens of instances added by hand; it is created
   readable by its owner only. `~/.agentapi/config.yaml` holds the hub secret; `agentapi hub join`
   writes it the same way.
@@ -342,7 +350,15 @@ instance that joined with its webhook comes back the next time it starts.
 - Anyone signed in to the hub can do what the AgentAPIs allow: send tasks, answer approvals, use
   their terminals. Give the hub token only to people you would give the instance token.
 - With `--no-token`, that is everyone who reaches the hub's port: keep it behind a sign-in of its
-  own, and never on a public address.
+  own, and never on a public address. Set `--allowed-hosts` to the names you open it by (a Coder
+  port URL's host, a VPN name): a site's page can otherwise reach the hub through a name of the
+  site's that it points at the hub's address (DNS rebinding). IP addresses and `localhost` always
+  work.
+
+  ```bash
+  agentapi hub serve --no-token --secret "$AGENTAPI_HUB_SECRET" \
+    --allowed-hosts 3290--app--dev--me.coder.example.com
+  ```
 
 ## Troubleshooting
 
@@ -362,6 +378,7 @@ instance that joined with its webhook comes back the next time it starts.
 | "is it AgentAPI 1.1 or later?" when adding | The instance has no summary | Update it with `agentapi update` |
 | The page says the hub didn't answer | Wrong address, or the hub isn't running | Open `http://<hub>:3290/api/session`; it answers JSON when the hub runs |
 | Behind Coder's port URL, the page asks for Coder first | Coder's port URLs need a Coder login | Sign in to Coder in that browser, then to the hub |
+| `the hub doesn't answer to <name>; add it to --allowed-hosts` | The hub runs with `--allowed-hosts` and you opened it by another name | Add the name to `--allowed-hosts` |
 
 `agentapi hub status` on an instance's machine shows which hub its config file names and where
 each running AgentAPI reports. The hub logs each instance it starts following, stops or can't
@@ -381,6 +398,7 @@ failed.
 | `--state` | `~/.agentapi/hub/instances.json` | File that keeps the instances |
 | `--port` | `3290` | Port to listen on |
 | `--bind` | all interfaces | Address to listen on, such as the VPN address |
+| `--allowed-hosts` | any | Names browsers open the hub by, besides IP addresses and `localhost` (comma-separated, `*` for any); instances' events come by any name |
 
 The hub reaches the instances through the proxy of the environment (`HTTP_PROXY`, `HTTPS_PROXY`,
 `ALL_PROXY`).

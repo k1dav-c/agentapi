@@ -219,6 +219,12 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	})
 	router.Use(corsMiddleware.Handler)
 
+	// After CORS, so that a refused request's 403 has the CORS headers.
+	router.Use(CrossOriginProtection(allowedOrigins, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Warn("Refused a request a page of another origin sent", "method", r.Method, "path", r.URL.Path, "origin", r.Header.Get("Origin"))
+		http.Error(w, "A page of another origin sent this request. To let it, add its origin to --allowed-origins.", http.StatusForbidden)
+	})))
+
 	// Token auth runs after CORS: preflight requests carry no credentials
 	// and are answered by the CORS middleware, and a 401 still gets the CORS
 	// headers, so a chat UI on another origin can read it and ask for the

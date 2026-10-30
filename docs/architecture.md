@@ -607,7 +607,10 @@ the same session for native agents.
 - `--bind` limits who can connect, `--allowed-hosts` which `Host` headers are
   accepted (by default `localhost`, `127.0.0.1` and `[::1]`, against DNS
   rebinding), and `--allowed-origins` which origins may call the API from a
-  browser.
+  browser. A request that changes something (not GET, HEAD or OPTIONS) from
+  a page of another origin is refused unless that origin is listed; `*`
+  trusts none (`crossorigin.go`, the rules of Go 1.25's
+  `http.CrossOriginProtection`).
 - Uploads go to a private directory, and only images are served back. Files
   outside the working directory can't be opened.
 - The webhook sends its configured events, the conversation included, to
@@ -619,9 +622,14 @@ the same session for native agents.
   instance ID in the summary) answers, and another run with the same ID can't
   move an instance the hub still follows and heard from in the last 3
   minutes. Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
-  derived from it. The proxy drops their cookies and `Authorization`, `Origin`
-  and `Referer` headers and the instances' `Set-Cookie`, so neither side's
-  credentials reach the other.
+  derived from it. The proxy drops their cookies and `Authorization`, `Origin`,
+  `Referer` and `Sec-Fetch-*` headers and the instances' `Set-Cookie`, so
+  neither side's credentials reach the other. The hub refuses requests that
+  change something from pages of other origins, as AgentAPI does, and with
+  `--allowed-hosts` answers browsers only by those names and by address. The
+  proxy marks every answer `Content-Security-Policy: sandbox`, so nothing an
+  instance serves runs as a page of the hub's, and refuses changes to an
+  instance's webhook, which names where the hub sends its token.
 - Agents, on every transport, don't inherit the variables (one of them a
   secret) that a parent agent session sets for the commands it runs, nor
   AgentAPI's API token (`lib/procenv`).
