@@ -1565,10 +1565,12 @@ expected = "sha256=" + hmac.new(secret, f"{timestamp}.".encode() + body, hashlib
 valid = hmac.compare_digest(expected, signature) and abs(time.time() - int(timestamp)) < 300
 ```
 
-Events are delivered in order, one at a time. Network errors, timeouts and HTTP 5xx, 408 or 429
-responses trigger retries after 1, 2, 4… seconds, capped at 30 seconds. Other 4xx responses aren't
-retried. Each delivery allows `--webhook-max-attempts` (3) attempts, each with a
-`--webhook-timeout` (10s) timeout; exhausted deliveries are logged and discarded.
+Events are delivered in order, one at a time. Network errors, timeouts, redirects and HTTP 5xx,
+408 or 429 responses trigger retries after 1, 2, 4… seconds, capped at 30 seconds. Other 4xx
+responses aren't retried. A redirect isn't followed, so a sign-in page in front of the receiver
+doesn't count as a delivery; the log names where it pointed. Each delivery allows
+`--webhook-max-attempts` (3) attempts, each with a `--webhook-timeout` (10s) timeout; exhausted
+deliveries are logged and discarded.
 
 The queue holds 1,024 events and drops new ones when full. A receiver that misses events should
 read the current state from the API or the next heartbeat. On shutdown, AgentAPI waits up to

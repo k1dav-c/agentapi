@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -323,4 +325,61 @@ func TestWebhookRetries(t *testing.T) {
 	}
 	<-done
 	assert.EqualValues(t, 3, calls.Load())
+}
+
+// A receiver that redirects, such as a sign-in page in front of it, didn't
+// take the event. Followed, the POST would come back as a GET and the
+// sign-in page's 200 would count as delivered: a delivery doesn't follow
+// it, fails, is tried again, and the log names where it pointed.
+func TestWebhookRedirectIsNoDelivery(t *testing.T) {
+	t.Parallel()
+	var hooks, signIns atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/hooks", func(w http.ResponseWriter, r *http.Request) {
+		hooks.Add(1)
+		http.Redirect(w, r, "/login", http.StatusFound)
+	})
+	mux.HandleFunc("/login", func(w http.ResponseWriter, _ *http.Request) {
+		signIns.Add(1)
+		w.WriteHeader(http.StatusOK)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	var logs bytes.Buffer
+	clock := quartz.NewMock(t)
+	dispatcher, err := newWebhookDispatcher(
+		WebhookConfig{URL: server.URL + "/hooks", MaxAttempts: 2},
+		slog.New(slog.NewTextHandler(&logs, nil)),
+		mf.AgentTypeClaude,
+		TransportPTY,
+		clock,
+	)
+	require.NoError(t, err)
+	trap := clock.Trap().NewTimer("webhook", "retry")
+	defer trap.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		dispatcher.deliver(t.Context(), queuedEvent{WebhookEvent: WebhookEvent{ID: "e1", Type: webhookEventRunStatusChanged, CreatedAt: clock.Now()}})
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	call, err := trap.Wait(ctx)
+	require.NoError(t, err, "not tried again: the redirect counted as a delivery")
+	call.Release()
+	clock.Advance(call.Duration).MustWait(t.Context())
+	<-done
+	assert.EqualValues(t, 2, hooks.Load())
+	assert.Zero(t, signIns.Load(), "not followed")
+	assert.Contains(t, logs.String(), "Webhook delivery failed")
+	assert.Contains(t, logs.String(), server.URL+"/login")
+
+	// So does the test event.
+	response, err := (&webhookAPI{webhook: dispatcher}).testWebhook(t.Context(), nil)
+	require.NoError(t, err)
+	assert.False(t, response.Body.OK)
+	assert.Equal(t, "302 Found", response.Body.Status)
+	assert.Contains(t, response.Body.Error, server.URL+"/login")
+	assert.Zero(t, signIns.Load())
 }

@@ -1327,8 +1327,9 @@ expected = "sha256=" + hmac.new(secret, f"{timestamp}.".encode() + body, hashlib
 valid = hmac.compare_digest(expected, signature) and abs(time.time() - int(timestamp)) < 300
 ```
 
-事件依序傳送，一次一個。網路錯誤、逾時和 HTTP 5xx、408 或 429 回應會觸發重試，間隔為
-1、2、4…秒，最多 30 秒；其他 4xx 回應不重試。每次傳送總共允許 `--webhook-max-attempts`
+事件依序傳送，一次一個。網路錯誤、逾時、重新導向和 HTTP 5xx、408 或 429 回應會觸發重試，間隔為
+1、2、4…秒，最多 30 秒；其他 4xx 回應不重試。傳送不會跟著重新導向走，所以接收端前面的登入頁不算
+送達，log 會寫出它導向哪裡。每次傳送總共允許 `--webhook-max-attempts`
 （3）次嘗試，每次逾時為 `--webhook-timeout`（10 秒）；用完次數後會放棄並記錄在 log。
 
 佇列最多保存 1,024 個事件，滿了就丟棄新事件。漏收事件的接收端應透過 API 或下一次心跳取得目前
