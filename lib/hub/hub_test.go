@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -640,6 +641,69 @@ func TestHubGroups(t *testing.T) {
 	var ungrouped hub.Instance
 	require.Equal(t, http.StatusOK, request(t, http.MethodPatch, again.URL+"/api/instances/"+url.PathEscape("dev-1:3284"), hubToken, map[string]string{"group": ""}, &ungrouped))
 	assert.Empty(t, ungrouped.Group)
+}
+
+// lockedBuffer is a log the hub's goroutines write while a test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// A file of instances that doesn't parse (cut short by a crash or a full
+// disk) doesn't stop the hub, which would stop again at every restart: it
+// is moved aside, the hub says what is lost and starts empty, and the next
+// change writes the file again.
+func TestHubDamagedState(t *testing.T) {
+	for name, content := range map[string]string{
+		"cut":   `[{"id": "dev-1:3284", "url": "http://dev-1.vpn:3284", "token": "its-own", "gro`,
+		"empty": "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			statePath := filepath.Join(t.TempDir(), "instances.json")
+			require.NoError(t, os.WriteFile(statePath, []byte(content), 0o600))
+			var logs lockedBuffer
+			h, err := hub.New(hub.Config{Token: hubToken, Secret: hubSecret, StatePath: statePath, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+			require.NoError(t, err)
+			srv := httptest.NewServer(h.Handler())
+			t.Cleanup(srv.Close)
+			assert.Empty(t, instances(t, srv.URL))
+
+			aside, err := filepath.Glob(statePath + ".corrupt-*")
+			require.NoError(t, err)
+			require.Len(t, aside, 1)
+			kept, err := os.ReadFile(aside[0])
+			require.NoError(t, err)
+			assert.Equal(t, content, string(kept), "kept as it was")
+			info, err := os.Stat(aside[0])
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "it may hold tokens")
+			assert.Contains(t, logs.String(), "added by hand")
+			assert.Contains(t, logs.String(), aside[0])
+
+			started := map[string]any{
+				"id": "d1", "type": "instance.started", "created_at": time.Now(),
+				"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": "http://127.0.0.1:1", "agent_type": "claude"},
+			}
+			require.Equal(t, http.StatusNoContent, postEvent(t, srv.URL, started, hubSecret, time.Now()))
+			data, err := os.ReadFile(statePath)
+			require.NoError(t, err)
+			var stored []map[string]any
+			require.NoError(t, json.Unmarshal(data, &stored))
+			assert.Len(t, stored, 1)
+		})
+	}
 }
 
 // startHubClock runs a hub on clock and returns its URL; retry traps the

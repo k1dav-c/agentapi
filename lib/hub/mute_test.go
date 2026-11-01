@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -117,7 +118,7 @@ func TestSummaryFromAnEndingWatch(t *testing.T) {
 // changes nothing on the page; when an instance was last heard of shows
 // only while it is offline.
 func TestStoreTellsWhatBrowsersSee(t *testing.T) {
-	s, err := newStore("")
+	s, err := newStore("", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
 	_, _, err = s.update("dev:1", true, func(i *Instance) {

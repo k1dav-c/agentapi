@@ -109,7 +109,7 @@ func New(config Config) (*Hub, error) {
 	if client == nil {
 		client = &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, ResponseHeaderTimeout: 15 * time.Second}}
 	}
-	st, err := newStore(config.StatePath)
+	st, err := newStore(config.StatePath, config.Logger)
 	if err != nil {
 		return nil, err
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -148,7 +149,10 @@ func (i Instance) kept() storedInstance {
 	return stored
 }
 
-func newStore(path string) (*store, error) {
+// newStore returns the store that keeps the instances in path, with those
+// it kept. A file that doesn't parse is moved aside, and the store starts
+// empty: a hub that stopped on it would stop again at every restart.
+func newStore(path string, logger *slog.Logger) (*store, error) {
 	s := &store{path: path, instances: map[string]*Instance{}, subs: map[chan storeEvent]struct{}{}}
 	if path == "" {
 		return s, nil
@@ -162,7 +166,14 @@ func newStore(path string) (*store, error) {
 	}
 	var stored []storedInstance
 	if err := json.Unmarshal(data, &stored); err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		aside := path + ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
+		if renameErr := os.Rename(path, aside); renameErr != nil {
+			return nil, fmt.Errorf("read %s: %w; moving it aside failed: %w", path, err, renameErr)
+		}
+		logger.Warn("The hub's file of instances doesn't parse; moved it aside and starting empty. "+
+			"Lost: the instances added by hand, with their tokens, and every instance's group and mute; joined instances come back with their next heartbeat",
+			"file", path, "moved_to", aside, "error", err)
+		return s, nil
 	}
 	for _, si := range stored {
 		connection := ConnectionConnecting
@@ -201,13 +212,34 @@ func (s *store) saveLocked() error {
 		_ = tmp.Close()
 		return err
 	}
+	// On disk before it takes the file's name: after a crash, the name
+	// would otherwise point at an empty file.
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
 	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), s.path)
+	if err := os.Rename(tmp.Name(), s.path); err != nil {
+		return err
+	}
+	syncDir(filepath.Dir(s.path))
+	return nil
+}
+
+// syncDir puts the entries of dir, such as a file renamed in it, on disk,
+// where the system can sync a directory.
+func syncDir(dir string) {
+	d, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
 }
 
 func (s *store) sortedLocked() []*Instance {

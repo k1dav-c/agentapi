@@ -392,6 +392,7 @@ instance that joined with its webhook comes back the next time it starts.
 | The page says the hub didn't answer | Wrong address, or the hub isn't running | Open `http://<hub>:3290/api/session`; it answers JSON when the hub runs |
 | Behind Coder's port URL, the page asks for Coder first | Coder's port URLs need a Coder login | Sign in to Coder in that browser, then to the hub |
 | `the hub doesn't answer to <name>; add it to --allowed-hosts` | The hub runs with `--allowed-hosts` and you opened it by another name | Add the name to `--allowed-hosts` |
+| The hub logs "The hub's file of instances doesn't parse" | The file was cut short, such as by a crash or a full disk | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat; add the others again, and set groups and mutes again |
 
 `agentapi hub status` on an instance's machine shows which hub its config file names and where
 each running AgentAPI reports. The hub logs each instance it starts following, stops or can't
