@@ -1,5 +1,73 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- A native agent that crashes or fails to start is started again on its session after 2, 10 and 30
+  seconds, instead of AgentAPI stopping with it. The lifecycle reads `restarting` meanwhile and
+  `failed` after the last attempt, while the server keeps serving; **Restart** (`DELETE /messages`)
+  tries again. The count starts over once an agent has run for 5 minutes. An agent that lost its
+  login waits for the login instead. The PTY transport is unchanged. `native-demo` crashes on
+  `crash` and `crashloop`.
+- `agentapi restart [port…|--all]` restarts running servers in place: each stops as on SIGTERM,
+  then runs its program again with the same PID, arguments and environment, so its PID file and
+  the process that started it stay valid. `agentapi update --restart` restarts the servers running
+  the binary it replaced; under sudo, those of the user who ran it (`SUDO_USER`). SIGUSR2 restarts
+  one server; if the new program doesn't run (`--version` fails), the server keeps serving. With
+  `--state-db` the conversation and the agent's session carry over. Servers of 2.0.0 and earlier
+  don't take the signal: restart those yourself once.
+- `--state-db` and `--pid-file` fill in `{port}` and `{hostname}`, and paths may start with `~`, so
+  the config file every AgentAPI on a machine reads can keep each one's conversation:
+  `state-db: ~/.agentapi/state/{port}.db`. A `state-db` or `pid-file` in the config file without
+  `{port}` is ignored with a warning, since the second server would fail to start.
+- `--log-level` (`debug`, `info`, `warn` or `error`; `AGENTAPI_LOG_LEVEL`, or `log-level` in the
+  config file) for `agentapi server`, and for `agentapi hub serve` (`AGENTAPI_HUB_LOG_LEVEL`).
+
+### Fixes
+
+- A signed event can no longer move an instance the hub follows. An `instance.*` event without
+  `server_id` is refused (400); no event moves an instance the hub is connected to, or one added by
+  hand; moving one drops the token stored for its old URL. The hub also refuses events without a
+  delivery ID, which a copy could replay for 10 minutes. All joined machines still share the hub
+  secret, so any of them can announce an instance the hub isn't connected to.
+- Webhook deliveries, heartbeats and `POST /webhook/test` don't follow redirects: a 3xx is a failed
+  attempt, retried, and the log names where it pointed. Behind a sign-in page, every event counted
+  as delivered.
+- A hub whose `instances.json` doesn't parse moves it aside (`instances.json.corrupt-<time>`), says
+  what was lost and starts empty; joined instances come back with their next heartbeat. It refused
+  to start, and under systemd restarted forever. The file is synced to disk before it replaces the
+  old one.
+- The webhook observer runs only when the webhook takes events it makes (`task.*`, `request.*`,
+  `message.created`, `tool.completed`, `login.*`, `limit.*`, `agent.error`). A machine joined to a
+  hub sends only `instance.*`, yet kept a subscription to the whole conversation and replayed it on
+  every resubscribe. The observer now resumes where it stopped reading, and what it keeps of
+  returned tool calls is bounded.
+- A message sent in the 3 seconds after an answer or an interrupt starts a task on PTY too: the send
+  path says that a turn starts, instead of the order of the events.
+- A full replay that takes longer than 1.5 seconds keeps the tasks and requests on screen until its
+  own arrive. Steered messages showed as tasks of their own for a moment, and decision cards
+  disappeared.
+- A handoff reply to the agent's last message goes as `POST /message` would: it waits in the queue
+  while the agent works (outcome `queued`). It was sent at once, and dropped if a turn was running.
+- Reads that worked (`GET`, `HEAD` and `OPTIONS` below 400) log at Debug. A client polling
+  `GET /status` every 3 seconds filled the log: 19,961 of 20,000 lines.
+- A call record without a model or usage, or whose usage reads zero tokens, is logged as format
+  drift, once per log (Claude Code, Codex, Pi). A renamed usage field priced calls at $0 without a
+  word.
+- The hub counts each spend once. The summary's `spend` gains `scope` (host, agent, directory and
+  log root) and `updated_at`, and the hub page adds each scope once, at its latest figure. Instances
+  the hub isn't connected to are left out of the totals and show their last figure dimmed. Two
+  instances of one agent in one directory counted twice, and stopped ones kept counting.
+
+### Performance
+
+- A cost pass reads only the logs that changed, and only what is new in them; a pass with nothing
+  new returns the last result. Past the index's 128 MB bound, every pass read every log again: for
+  600 sessions an unchanged pass took 640–950 ms and now takes 6 ms; a call appended to a 111 MB log
+  costs 8 ms instead of 41 ms. Logs a pass reads are no longer evicted, so past that bound memory
+  grows with the logs.
+
 ## v2.0.0
 
 ### Breaking changes
