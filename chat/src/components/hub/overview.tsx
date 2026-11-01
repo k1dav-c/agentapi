@@ -3,7 +3,6 @@
 import {Fragment} from "react";
 import {ArrowRight, CircleCheck, ClipboardList, Gauge, KeyRound, MessageCircleQuestion, ShieldQuestion, SquareTerminal} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
-import {CopyCommand} from "@/components/copy-command";
 import {
   activity,
   countedSpends,
@@ -27,6 +26,7 @@ import {cn} from "@/lib/utils";
 import {Constellation} from "./brand";
 import {StatusGlyph} from "./status-glyph";
 import {agentName} from "./instance-row";
+import {JoinMachine} from "./join-machine";
 import {UpdateOlder} from "./update";
 import {OlderMark, VersionTag} from "./version-tag";
 
@@ -444,14 +444,13 @@ export function Overview({
 
 // Onboarding shows how to connect the first agents: once per machine.
 export function Onboarding({root, onAdd, compact = false}: {root: string; onAdd: () => void; compact?: boolean}) {
-  const steps = [
-    {title: "Update AgentAPI on each machine", body: "The hub needs AgentAPI 1.3 or later.", command: "sudo agentapi update"},
+  const steps: {title: string; body: string; join?: boolean}[] = [
     {
-      title: "Join this hub",
-      body: "Once per machine. It writes the hub into ~/.agentapi/config.yaml, so the agents join on every start.",
-      command: `agentapi hub join ${root}/hooks --secret "$HUB_SECRET" --public-url 'http://<this machine>:{port}'`,
+      title: "Join each machine",
+      body: "Once per machine: run the command there, or give the prompt to its agent. It writes the hub into ~/.agentapi/config.yaml, so the agents join on every start.",
+      join: true,
     },
-    {title: "Restart the agents once", body: "Agents running already show up within a second; ones started before 1.2 join on their next start.", command: ""},
+    {title: "Restart the agents once", body: "Agents running already show up within a second; ones started before 1.2 join on their next start."},
   ];
   return (
     <div className={cn("hub-rise", compact ? "px-4 py-6" : "")}>
@@ -468,7 +467,11 @@ export function Onboarding({root, onAdd, compact = false}: {root: string; onAdd:
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold">{step.title}</p>
               <p className="mt-0.5 text-sm text-muted-foreground">{step.body}</p>
-              {step.command && <CopyCommand text={step.command} />}
+              {step.join && (
+                <div className="mt-4">
+                  <JoinMachine root={root} />
+                </div>
+              )}
             </div>
           </li>
         ))}

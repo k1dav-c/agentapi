@@ -4,9 +4,11 @@ import {useEffect, useState} from "react";
 import {Plus, RefreshCw, TriangleAlert} from "lucide-react";
 import {Button} from "@/components/ui/button";
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from "@/components/ui/dialog";
+import {JoinMachine} from "./join-machine";
 
 const fieldClass =
   "h-11 w-full rounded-lg border bg-card px-3.5 text-sm shadow-xs outline-none transition-shadow placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40";
+const sectionClass = "text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase";
 
 // The longest group name the hub takes.
 export const maxGroupName = 40;
@@ -14,6 +16,8 @@ export const maxGroupName = 40;
 // A group being named: a new one for an instance, or a rename.
 export type Naming = {mode: "new"; id: string} | {mode: "rename"; from: string};
 
+// AddInstance is the Add dialog: how to join a machine to the hub, and an
+// AgentAPI added by its URL.
 export function AddInstance({root, open, onOpenChange, onAdded}: {root: string; open: boolean; onOpenChange: (open: boolean) => void; onAdded: (id: string) => void}) {
   const [url, setURL] = useState("");
   const [token, setToken] = useState("");
@@ -47,34 +51,49 @@ export function AddInstance({root, open, onOpenChange, onAdded}: {root: string; 
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <form onSubmit={submit} className="space-y-4">
-          <DialogHeader>
-            <DialogTitle>Add an instance</DialogTitle>
-            <DialogDescription>
-              For an AgentAPI that can&apos;t run <code className="font-mono text-[12px]">agentapi hub join</code>. Ones that join appear by themselves.
-            </DialogDescription>
-          </DialogHeader>
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">URL</span>
-            <input value={url} onChange={(e) => setURL(e.target.value)} placeholder="http://dev-1.vpn:3284" aria-label="URL" inputMode="url" className={fieldClass} />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">
-              API token <span className="font-normal text-muted-foreground">(if it needs one)</span>
-            </span>
-            <input type="password" value={token} onChange={(e) => setToken(e.target.value)} aria-label="API token" className={`${fieldClass} font-mono`} />
-          </label>
+      <DialogContent className="max-h-[90dvh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Add agents</DialogTitle>
+          <DialogDescription>Join a machine, and its AgentAPIs show up here by themselves, now and after restarts.</DialogDescription>
+        </DialogHeader>
+        <section aria-labelledby="hub-join-machine" className="space-y-3">
+          <h3 id="hub-join-machine" className={sectionClass}>
+            Join a machine
+          </h3>
+          <JoinMachine root={root} />
+        </section>
+        <form onSubmit={submit} className="space-y-3 border-t pt-5">
+          <div className="space-y-1">
+            <h3 className={sectionClass}>Add one by its URL</h3>
+            <p className="text-sm text-muted-foreground">
+              For an AgentAPI that can&apos;t run <code className="font-mono text-[12px]">agentapi hub join</code>.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_11rem_auto] sm:items-end">
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium">URL</span>
+              <input value={url} onChange={(e) => setURL(e.target.value)} placeholder="http://dev-1.vpn:3284" aria-label="URL" inputMode="url" className={fieldClass} />
+            </label>
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium">API token</span>
+              <input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="If it needs one"
+                aria-label="API token"
+                className={`${fieldClass} font-mono placeholder:font-sans`}
+              />
+            </label>
+            <Button type="submit" className="h-11" disabled={!url.trim() || busy}>
+              {busy ? <RefreshCw className="animate-spin" /> : <Plus />} {busy ? "Adding…" : "Add"}
+            </Button>
+          </div>
           {error && (
             <p role="alert" className="flex items-start gap-1.5 text-sm text-destructive">
               <TriangleAlert className="mt-0.5 size-4 shrink-0" /> {error}
             </p>
           )}
-          <DialogFooter>
-            <Button type="submit" className="h-10" disabled={!url.trim() || busy}>
-              {busy ? <RefreshCw className="animate-spin" /> : <Plus />} {busy ? "Adding…" : "Add"}
-            </Button>
-          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

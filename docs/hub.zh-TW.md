@@ -115,6 +115,9 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
   --public-url 'http://dev-1.vpn:{port}'
 ```
 
+hub 的頁面已經備好這行指令，填好 hub 的位址和 secret，另附一段給那台機器上 agent 的提示：
+見[從頁面讓機器加入](#從頁面讓機器加入)。
+
 - `join` 會先送給 hub 一個有簽章的測試事件，hub 沒收下就停止（連不到、被登入頁擋住，或 secret 不同），
   見[參考資料](#agentapi-hub-joinleavestatus)。
 - `join` 把 hub 寫進 `~/.agentapi/config.yaml`。這個使用者的每個 `agentapi server` 啟動時都會讀
@@ -143,8 +146,9 @@ agentapi list         # 這台機器上執行中的 AgentAPI，以及各自的�
 ```
 
 這一步也可以交給那台機器上的 agent。[agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md)
-會讓 Claude Code 檢查版本和 hub 是否有回應，向你詢問 hub 的網址、secret 和這台機器的位址，然後加入，
-並確認每個 AgentAPI 回報到哪裡。它不會重新啟動 AgentAPI，也不會印出 secret。在那台機器上安裝：
+會讓 Claude Code 檢查版本和 hub 是否有回應，向你詢問 hub 的網址、secret、這台機器的位址，以及要不要
+讓 hub 更新這台機器的 AgentAPI，然後加入，並確認每個 AgentAPI 回報到哪裡。它不會重新啟動 AgentAPI，
+也不會印出 secret；要用 `sudo` 執行的指令，都會先問過你。在那台機器上安裝：
 
 ```bash
 mkdir -p ~/.claude/skills/agentapi-hub-join
@@ -152,7 +156,8 @@ curl -fsSL https://raw.githubusercontent.com/k1dav-c/agentapi/main/skills/agenta
   -o ~/.claude/skills/agentapi-hub-join/SKILL.md
 ```
 
-然後跟 agent 說，例如：「把這台機器加入 http://hub.vpn:3290 的 hub」。
+然後把 hub 頁面新增對話框裡的提示貼給它，裡面已經有這些值；或直接跟它說，例如：「把這台機器加入
+http://hub.vpn:3290 的 hub」。
 
 ### 4. 開啟 hub
 
@@ -359,18 +364,40 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 
 ![空的 hub 顯示的步驟](screenshots/hub-empty.png)
 
-還沒有 agent 加入的 hub，會顯示[架設](#3-讓每台機器的-agentapi-加入)的三個步驟，附上可以複製的指令，
-並已填好 hub 自己的位址。AgentAPI 自己的聊天介面也有同樣的步驟，針對它所在的機器：標頭狀態選單裡的
+還沒有 agent 加入的 hub，會顯示怎麼讓機器加入，內容和[新增對話框](#從頁面讓機器加入)相同，接著提醒
+agent 要重新啟動一次。AgentAPI 自己的聊天介面也有針對它所在機器的步驟：標頭狀態選單裡的
 **Add to an AgentAPI hub…**（見[工作階段詳細資訊](chat-ui.zh-TW.md#工作階段詳細資訊與提醒)）。
+
+### 從頁面讓機器加入
+
+![新增對話框：hub 的位址、加入指令和給 agent 的提示，secret 已遮住](screenshots/hub-add.png)
+
+**+** 會開啟新增對話框，其中 **Join a machine** 一節備好了[第 3 步](#3-讓每台機器的-agentapi-加入)，
+可以直接複製：
+
+- **Hub address** 列出機器連到 hub 的位址：有 `--bind` 時是那個位址，否則是 hub 所在機器的各個位址
+  和所屬的網路介面，順序和啟動時的 log 相同。請選那台機器和 hub 共同所在網路上的位址。hub 一個位址都
+  找不到時，會改用頁面本身的位址；前面若有登入頁（例如 Coder 的 port 網址），這個位址就不能用。
+- **Allow updates from the hub** 會加上 `--allow-update`（見[從 hub 更新](#從-hub-更新)）。
+- **Run on the machine** 是 `agentapi hub join` 指令，secret 透過 `AGENTAPI_HUB_SECRET` 傳入。
+  把 `<this machine>` 換成那台機器的位址。
+- **Prompt for an agent on that machine** 讓那台機器上的 agent 替你加入：hub 的網址和連不到時可以改試的
+  其他網址、secret、怎麼找出這台機器的位址，以及各個步驟：檢查版本、確認 hub 有回應、`join`、
+  `agentapi hub status` 和 `allowed-hosts`。agent 不會重新啟動任何 AgentAPI，也不會顯示 secret。
+  勾選允許更新時，它還會說明 `join` 可能印出的一次性設定，並建議設定 state DB，兩件事都會先問過你。
+  裝了 [agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md) 的 agent 照 skill 做，沒裝的
+  照提示裡的步驟做。
+
+secret 預設遮住，按 **Show the secret** 才會顯示；複製按鈕複製的是真正的值。只有設了 token 的 hub
+會顯示 secret，而且只給登入的人看。用 `--no-token` 的 hub 一律不顯示，否則連得到它的人都看得到：
+指令裡改放 `<hub secret>`，提示則會讓 agent 向你詢問。
 
 ### 加入與移除實例
 
-![用網址加入實例](screenshots/hub-add.png)
-
-**+** 可以用網址加入 AgentAPI，適用於無法執行 `agentapi hub join` 的實例（舊版，或你不會登入的
-機器）。hub 會先向它要摘要，所以它必須連得到，而且是 AgentAPI 1.1 以上。在這裡輸入的 token 會為
-這個實例保存，取代 `--instance-token` 送出。這樣加入的實例不會回報啟動或停止；hub 只會發現它連得到
-或連不到。
+新增對話框最下方的 **Add one by its URL** 可以用網址加入 AgentAPI，適用於無法執行
+`agentapi hub join` 的實例（舊版，或你不會登入的機器）。hub 會先向它要摘要，所以它必須連得到，而且是
+AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代 `--instance-token` 送出。這樣加入的實例
+不會回報啟動或停止；hub 只會發現它連得到或連不到。
 
 已停止或連不到的那一列，**⋯** 選單裡有 **Forget**，可以把它從 hub 移除。用 webhook 加入的實例，
 下次啟動時會再出現。
@@ -411,8 +438,8 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 - 登入時會送出 hub token。hub 只開在 VPN 上，或放在 HTTPS 後面。
 - 登入 hub 的人能做的事，等同各 AgentAPI 允許的事：送任務、回覆核准、使用終端機，以及更新機器允許
   更新的 AgentAPI。hub token 只給你也願意給實例 token 的人。
-- 登入的人也拿得到讓機器加入用的 hub secret（`GET /api/join`）。用 `--no-token` 的 hub 一律不送，
-  否則連得到它的人都拿得到。
+- 登入的人也拿得到讓機器加入用的 hub secret（`GET /api/join`，供[新增對話框](#從頁面讓機器加入)
+  使用）。用 `--no-token` 的 hub 一律不送，否則連得到它的人都拿得到。
 - hub 要求更新時，AgentAPI 只會安裝最新的正式版，並用該版的 `checksums.txt` 驗證：hub 無法指定版本
   或網址。AgentAPI 從不執行 `sudo`，機器沒有允許（`allow-update: true`）時也不會更新。
 - 用 `--no-token` 時，這指的是所有連得到 hub port 的人：hub 一定要放在另一層登入後面，不能開在公開
@@ -432,6 +459,8 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 | 實例一直沒出現 | AgentAPI 在 `join` 之前、或 1.2 之前就啟動了 | 重新啟動它，或重開它的 workspace |
 | `join` 說 hub 前面有登入頁 | hub 的網址是 Coder 的 port 網址（或其他需要登入的網址） | 改用 hub 在你的網路或 VPN 上的位址；事件是由 AgentAPI 自己送出的 |
 | `join` 說 hub 在另一台機器上 | `--public-url` 寫的是 `localhost` | 改成 hub 連得到這台機器的位址 |
+| 新增對話框的指令裡是 `<hub secret>` | hub 以 `--no-token` 執行，頁面一律不顯示 secret | 填入 hub 的 `--secret` |
+| 新增對話框沒有列出機器所在網路的位址 | hub 只綁一個位址（`--bind`），或機器透過 hub 那台機器本身沒有的位址連到它（NAT、port forwarding） | 改用機器連到 hub 的位址，加上 `/hooks` |
 | 實例一直沒出現；hub 的 log 有「Refused an event」 | `join` 和 hub 的 `--secret` 不同，或兩邊時鐘差超過 10 分鐘 | 用 hub 的 secret 重新執行 `agentapi hub join`；檢查時鐘 |
 | 實例一直沒出現；`agentapi hub status` 顯示沒有 hub | `join` 寫入的設定檔，不是 AgentAPI 讀的那個 | 用同一個使用者，或兩邊傳同一個 `--config` |
 | Unreachable：`400 Bad Request` | AgentAPI 拒絕以 VPN 名稱作為 `Host` | 在 `--allowed-hosts` 允許它（步驟 3） |

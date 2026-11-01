@@ -126,6 +126,9 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
   --public-url 'http://dev-1.vpn:{port}'
 ```
 
+The hub's page has this command ready, with the hub's address and secret filled in, and a prompt
+for an agent on the machine: [Joining a machine from the page](#joining-a-machine-from-the-page).
+
 - `join` first sends the hub a signed test event and stops if the hub doesn't take it (unreached, a
   sign-in page in the way, or another secret); see the [reference](#agentapi-hub-join-leave-status).
 - `join` writes the hub into `~/.agentapi/config.yaml`. Every `agentapi server` of this user reads
@@ -159,9 +162,10 @@ agentapi list         # the AgentAPIs running here and what each one's summary s
 
 An agent on the machine can do this step for you. The
 [agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md) has Claude Code check the version
-and that the hub answers, ask you for the hub's URL, its secret and this machine's address, join,
-and check where each AgentAPI reports. It never restarts an AgentAPI or prints the secret. Install
-it on that machine:
+and that the hub answers, ask you for the hub's URL, its secret, this machine's address and whether
+the hub may update this machine's AgentAPIs, join, and check where each AgentAPI reports. It never
+restarts an AgentAPI or prints the secret, and asks before it runs anything with `sudo`. Install it
+on that machine:
 
 ```bash
 mkdir -p ~/.claude/skills/agentapi-hub-join
@@ -169,7 +173,8 @@ curl -fsSL https://raw.githubusercontent.com/k1dav-c/agentapi/main/skills/agenta
   -o ~/.claude/skills/agentapi-hub-join/SKILL.md
 ```
 
-Then ask the agent, for example: "Join this machine to the hub at http://hub.vpn:3290".
+Then give the agent the prompt from the hub page's Add dialog, which has these values, or ask it,
+for example: "Join this machine to the hub at http://hub.vpn:3290".
 
 ### 4. Open it
 
@@ -404,20 +409,45 @@ an approval from the phone:
 
 ![The guide an empty hub shows](screenshots/hub-empty.png)
 
-A hub no agent has joined yet shows the three steps of [Setting it up](#3-join-each-machines-agentapis)
-with commands to copy, its own address filled in. An AgentAPI's own chat has the same steps for
-its machine: **Add to an AgentAPI hub…** in the menu of the status in its header
-([Session details](chat-ui.md#session-details-and-alerts)).
+A hub no agent has joined yet shows how to join a machine, as the
+[Add dialog](#joining-a-machine-from-the-page) does, and then to restart the agents once. An
+AgentAPI's own chat has steps for its machine too: **Add to an AgentAPI hub…** in the menu of the
+status in its header ([Session details](chat-ui.md#session-details-and-alerts)).
+
+### Joining a machine from the page
+
+![The Add dialog: the hub's address, the join command and a prompt for an agent, the secret masked](screenshots/hub-add.png)
+
+**+** opens the Add dialog. Its **Join a machine** section has
+[step 3](#3-join-each-machines-agentapis) ready to copy:
+
+- **Hub address** lists where machines reach the hub: the `--bind` address, or each address of the
+  hub's machine with its interface, as the startup log has them. Pick the one on the network the
+  machine shares with the hub. A hub that found none offers the page's own address, which works only
+  without a sign-in page in front of it, unlike a Coder port URL.
+- **Allow updates from the hub** adds `--allow-update` ([Updating from the hub](#updating-from-the-hub)).
+- **Run on the machine** is the `agentapi hub join` command, with the secret in
+  `AGENTAPI_HUB_SECRET`. Put the machine's address in place of `<this machine>`.
+- **Prompt for an agent on that machine** has an agent there join it: the hub's URL and the others
+  to try, the secret, how to find the machine's address, and the steps: the version, a check that
+  the hub answers, `join`, `agentapi hub status` and `allowed-hosts`. The agent restarts no
+  AgentAPI and never shows the secret. With updates allowed, it explains the one-time setup `join`
+  may print and suggests a state DB, asking you before either. An agent with the
+  [agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md) follows the skill; one without
+  follows the steps.
+
+The secret shows masked until **Show the secret**; the copy buttons copy it as it is. Only a hub with
+a token shows its secret, to whoever signs in. A hub with `--no-token` never does, since everyone
+who reaches it would see it: the command has `<hub secret>` in its place, and the prompt has the
+agent ask you for it.
 
 ### Adding and forgetting instances
 
-![Adding an instance by its URL](screenshots/hub-add.png)
-
-**+** adds an AgentAPI by its URL, for one that can't run `agentapi hub join` (an older version, or
-one you don't log in to). The hub asks it for its summary first, so it must be reachable and run
-AgentAPI 1.1 or later. A token given here is kept for that instance and sent instead of
-`--instance-token`. An instance added this way doesn't report starting or stopping; the hub just
-finds it reachable or not.
+**Add one by its URL**, at the bottom of the Add dialog, adds an AgentAPI that can't run
+`agentapi hub join` (an older version, or one you don't log in to). The hub asks it for its summary
+first, so it must be reachable and run AgentAPI 1.1 or later. A token given here is kept for that
+instance and sent instead of `--instance-token`. An instance added this way doesn't report starting
+or stopping; the hub just finds it reachable or not.
 
 The **⋯** menu of a stopped or unreachable row has **Forget**, which removes it from the hub. An
 instance that joined with its webhook comes back the next time it starts.
@@ -466,8 +496,9 @@ instance that joined with its webhook comes back the next time it starts.
 - Anyone signed in to the hub can do what the AgentAPIs allow: send tasks, answer approvals, use
   their terminals, update those whose machine allows it. Give the hub token only to people you
   would give the instance token.
-- Anyone signed in also gets the hub secret, which joins a machine (`GET /api/join`). A hub with
-  `--no-token` never sends it, since everyone who reaches it would get it.
+- Anyone signed in also gets the hub secret, which joins a machine (`GET /api/join`, for the
+  [Add dialog](#joining-a-machine-from-the-page)). A hub with `--no-token` never sends it, since
+  everyone who reaches it would get it.
 - An AgentAPI the hub asks to update installs only the latest official release, checked against the
   release's `checksums.txt`: the hub can't choose a version or a URL. It never runs `sudo`, and
   does nothing unless its machine allows it (`allow-update: true`).
@@ -489,6 +520,8 @@ instance that joined with its webhook comes back the next time it starts.
 | An instance never appears | Its AgentAPI started before `join`, or before 1.2 | Restart it, or its workspace |
 | `join` says a sign-in page is in front of the hub | The hub's URL is a Coder port URL (or another behind a login) | Join with the hub's address on your network or VPN; the AgentAPIs send events themselves |
 | `join` says the hub is on another machine | `--public-url` names `localhost` | Give the address the hub reaches this machine at |
+| The Add dialog's command has `<hub secret>` | The hub runs with `--no-token`, so its page never shows the secret | Put in the hub's `--secret` |
+| The Add dialog lists no address of the network the machine is on | The hub binds one address (`--bind`), or machines reach it at an address its machine doesn't have (NAT, a port forward) | Use the address the machine reaches the hub at, plus `/hooks` |
 | An instance never appears; the hub logs "Refused an event" | `--secret` of `join` and of the hub differ, or the clocks are more than 10 minutes apart | Run `agentapi hub join` again with the hub's secret; check the clocks |
 | An instance never appears; `agentapi hub status` shows no hub | `join` wrote to another config file than the one the AgentAPI reads | Use the same user, or pass the same `--config` to both |
 | Unreachable: `400 Bad Request` | The AgentAPI refuses the VPN name as `Host` | Allow it in `--allowed-hosts` (step 3) |

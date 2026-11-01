@@ -1041,9 +1041,10 @@ try {
       await elementShot(page, page.locator('section[aria-labelledby="hub-spend"]'), 'hub-spend.png');
       // The AgentAPI versions they run: the overview's last card.
       await elementShot(page, page.locator('section[aria-labelledby="hub-versions"]'), 'hub-versions.png');
-      // Adding an instance by its URL.
-      await page.getByRole('button', {name: 'Add an instance'}).click();
+      // The Add dialog: joining a machine, the secret masked, and adding an instance by its URL.
+      await page.getByRole('button', {name: 'Add agents'}).click();
       const addDialog = page.getByRole('dialog');
+      await addDialog.getByText(/agentapi hub join http/).first().waitFor();
       await addDialog.getByLabel('URL').fill('http://dev-7.vpn:3284');
       await addDialog.getByLabel('API token').fill('instance-token');
       await elementShot(page, addDialog, 'hub-add.png');
@@ -1059,8 +1060,9 @@ try {
     await page.context().close();
   }
 
-  // A hub no agent has joined yet.
+  // A hub no agent has joined yet: how to join a machine, the secret masked.
   const empty = await openHub(desktop, {url: `http://127.0.0.1:${emptyPort}`});
+  await empty.getByText(/agentapi hub join http/).filter({visible: true}).first().waitFor();
   await empty.waitForTimeout(500);
   await shot(empty, 'hub-empty.png');
   await empty.context().close();

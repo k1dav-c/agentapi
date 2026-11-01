@@ -6,8 +6,10 @@ import {copyText} from "@/lib/clipboard";
 import {cn} from "@/lib/utils";
 
 // CopyCommand is a shell command to copy and run, with its copy button;
-// wrap shows a long one whole, such as one to run with sudo.
-export function CopyCommand({text, wrap = false}: {text: string; wrap?: boolean}) {
+// wrap shows a long one whole, such as one to run with sudo. copy is what
+// the button copies when it differs from what shows, such as a command
+// whose secret is masked on screen.
+export function CopyCommand({text, copy = text, wrap = false}: {text: string; copy?: string; wrap?: boolean}) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="mt-2 flex items-stretch overflow-hidden rounded-lg border bg-term text-term-foreground">
@@ -23,7 +25,7 @@ export function CopyCommand({text, wrap = false}: {text: string; wrap?: boolean}
         type="button"
         onClick={() => {
           // copyText works on a plain-http page too, as a hub on a VPN is.
-          copyText(text).then(
+          copyText(copy).then(
             () => {
               setCopied(true);
               setTimeout(() => setCopied(false), 1600);

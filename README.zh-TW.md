@@ -1240,8 +1240,9 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 數量。點選一個就會在聊天介面中開啟。手機上清單和聊天介面輪流顯示。
 
 - AgentAPI 用 [`agentapi hub join`](#加入-hub) 加入：它們有簽章的 `instance.*` 事件會新增它們，
-  hub 再以一條連線追蹤每個實例的[摘要串流](#監看多個實例)。也可以用 `+` 輸入網址（和 token）手動
-  加入；每一列的 `⋯` 選單可以把實例放進自己建立的群組、把它正在等的事
+  hub 再以一條連線追蹤每個實例的[摘要串流](#監看多個實例)。`+` 備有讓機器加入的指令，已填好 hub 的位址
+  和 secret，另附給那台機器上 agent 的提示；也可以在那裡輸入網址（和 token）手動加入。每一列的 `⋯`
+  選單可以把實例放進自己建立的群組、把它正在等的事
   靜音到改變為止（例如不打算處理的登入），或移除已停止、連不到的實例。
 - hub 透過自己開啟實例（`/i/<id>/...`），以實例的 API token（`--instance-token`，或加入時給的）
   取代你的憑證。瀏覽器不會拿到實例的 token，也不會直接連到實例，所以實例不必為它設定 CORS。
@@ -1276,6 +1277,8 @@ AgentAPI 會依設定檔送出 `instance.started`。`--public-url` 是 hub 連�
 加上 `--allow-update` 時，hub 也能[更新它們](#透過-api-更新)。
 `join` 會先送給 hub 一個有簽章的測試事件，hub 沒收下就停止（連不到、被登入頁擋住，或 secret 不同）；
 hub 還沒啟動時，可以用 `--no-check` 略過。
+hub 的頁面已經備好這行指令：`+` 會填好 hub 的位址，設了 token 的 hub 也會填好 secret，旁邊還有一段
+提示，讓那台機器上的 agent 替你加入。hub 啟動時也會在 log 裡為它的每個位址寫下這行指令，但不含 secret。
 也可以用 [agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.md) 交給 agent 處理，安裝方式見
 [hub 指南](docs/hub.zh-TW.md#3-讓每台機器的-agentapi-加入)。
 

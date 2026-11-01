@@ -72,10 +72,10 @@ device scale factor of 1.
 | [hub-desktop.png](hub-desktop.png) | The hub's overview: how many need you, a tile per state, a card per request, what runs and what finished |
 | [hub-desktop-dark.png](hub-desktop-dark.png) | The same overview in the dark theme |
 | [hub-instance.png](hub-instance.png) | An agent open beside the list, its approval ready to answer |
-| [hub-empty.png](hub-empty.png) | The guide an empty hub shows, with commands to copy |
+| [hub-empty.png](hub-empty.png) | The guide an empty hub shows: the hub's address, the join command and a prompt for an agent on the machine, the secret masked |
 | [hub-sign-in.png](hub-sign-in.png) | Signing in to the hub, beside its picture of agents in their states |
 | [hub-list.png](hub-list.png) | The hub's list in two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's AgentAPI version, one older than the hub |
-| [hub-add.png](hub-add.png) | Adding an instance by its URL and token |
+| [hub-add.png](hub-add.png) | The Add dialog: joining a machine (the hub's address, updates from the hub, the command and a prompt for an agent, the secret masked), or adding an instance by its URL and token |
 | [hub-phone.png](hub-phone.png) | The hub's list on a phone, in groups |
 | [hub-phone-menu.png](hub-phone-menu.png) | A row's menu on a phone: its group, a new one, and Forget |
 | [hub-muted.png](hub-muted.png) | The list on a phone with an agent's login wait muted |

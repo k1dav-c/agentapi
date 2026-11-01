@@ -429,7 +429,7 @@ export function HubView() {
               {notify ? <Bell className="size-4 text-foreground" /> : <BellOff className="size-4" />}
             </Button>
             <ModeToggle />
-            <Button variant="outline" size="icon" className="size-9 rounded-full" aria-label="Add an instance" title="Add an instance" onClick={() => setAdding(true)}>
+            <Button variant="outline" size="icon" className="size-9 rounded-full" aria-label="Add agents" title="Add agents" onClick={() => setAdding(true)}>
               <Plus className="size-4" />
             </Button>
           </div>

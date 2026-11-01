@@ -1480,9 +1480,10 @@ take turns.
 
 - AgentAPIs join it with [`agentapi hub join`](#joining-a-hub): their signed `instance.*` events
   add them, and the hub follows each one's [summary stream](#watching-many-instances) from one
-  connection. `+` adds one by its URL (and token) instead. Each row's `⋯` menu puts the
-  instance in a group of your own, mutes what it waits for until that changes (a login you won't
-  do), or forgets a stopped or unreachable one.
+  connection. `+` has the join command for a machine, with the hub's address and secret filled in,
+  and a prompt for an agent there; it also adds an instance by its URL (and token). Each row's `⋯`
+  menu puts the instance in a group of your own, mutes what it waits for until that changes (a login
+  you won't do), or forgets a stopped or unreachable one.
 - The hub opens an instance through itself (`/i/<id>/...`), sending the instance's API token
   (`--instance-token`, or the one given when it was added) in place of your credentials. The
   browser never holds the instances' tokens or reaches them itself, so no instance needs CORS for
@@ -1522,8 +1523,11 @@ each. AgentAPIs that started before 1.2 aren't registered: restart them once. `a
 shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes it. With
 `--allow-update`, the hub can also [update them](#updating-through-the-api). `join`
 first sends the hub a signed test event and stops if the hub doesn't take it (not reached, a sign-in
-page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet. An agent can
-do it for you with the [agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.md); see the
+page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet. The
+hub's page has the command ready: `+` fills in the hub's address and, on a hub with a token, its
+secret, next to a prompt that has an agent on the machine join it. The hub also logs the command for
+each of its addresses when it starts, without the secret. An agent can do it for you with the
+[agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.md); see the
 [hub guide](docs/hub.md#3-join-each-machines-agentapis) to install it.
 
 #### Updating through the API
