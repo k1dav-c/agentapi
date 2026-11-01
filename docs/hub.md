@@ -442,7 +442,7 @@ be changed now applies the file when it restarts.
 A machine that joined with an earlier version still sends `task.*`, `request.*`, `login.*`,
 `limit.*` and `agent.error` as well, up to 64 KiB each; the hub only takes them as signs of life.
 Run the same `agentapi hub join` again to send only `instance.*`: it rewrites the file and the
-running AgentAPIs.
+running AgentAPIs, which then no longer follow their conversation for the webhook.
 
 ### The hub's HTTP API
 

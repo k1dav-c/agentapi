@@ -457,16 +457,21 @@ usage limit stop, login, terminal prompt) and the latest screen.
   restore without it marks the restored tasks as seen.
 - `/internal/screen` streams the screen as `screen` events for TTY mode.
 - A status change between `running` and `stable` triggers the
-  `run.status_changed` webhook event. While the webhook has a URL, the
+  `run.status_changed` webhook event. While the webhook sends events of the
+  conversation (`task.*`, `request.*`, `message.*`, `tool.*`, `login.*`,
+  `limit.*`, `agent.error`; a hub's `instance.*` alone needs none), the
   webhook observer subscribes to the emitter like an `/events` client and
-  turns its events into the other webhook events: the emitter's task updates
-  into `task.*`, an agent message once the next one starts or the turn ends.
-  It doesn't send what the emitter held when the observer subscribed, or
-  messages older than AgentAPI's start (a resumed session's). It keeps only
+  turns its events into them: the emitter's task updates into `task.*`, an
+  agent message once the next one starts or the turn ends. `PUT /webhook`
+  starts and stops it. It doesn't send what the emitter held when the
+  observer subscribed, or messages older than AgentAPI's start (a resumed
+  session's). A subscription the emitter ended is taken up again from the
+  seq the observer got to, as a client resumes with `since`. It keeps only
   how far it got through the messages and tasks, the tool calls waiting for
-  their result (at most 64) and the open requests, and forgets the
-  conversation on a reset. The dispatcher delivers the events one at a time
-  from a queue, with retries, and signs them with `--webhook-secret`.
+  their result (at most 64), those that returned in the latest 64 messages
+  with results, and the open requests, and forgets the conversation on a
+  reset. The dispatcher delivers the events one at a time from a queue, with
+  retries, and signs them with `--webhook-secret`.
 - With a state DB, the emitter hands every change to its `Persister`, which
   encodes messages and rich messages on its writer goroutine from a copy, so
   a long message streaming in doesn't hold up the emitter.

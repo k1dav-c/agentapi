@@ -400,7 +400,7 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 
 用較早版本加入的機器，還會另外送出 `task.*`、`request.*`、`login.*`、`limit.*` 和 `agent.error`，
 每個最多 64 KiB；hub 只把它們當成實例還在的跡象。再執行一次同樣的 `agentapi hub join`，就只會送
-`instance.*`：它會改寫設定檔，也會套用到執行中的 AgentAPI。
+`instance.*`：它會改寫設定檔，也會套用到執行中的 AgentAPI，它們從此不必為 webhook 追蹤對話。
 
 ### hub 的 HTTP API
 

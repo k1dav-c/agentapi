@@ -378,11 +378,14 @@ type Factory func(resume Resume) (Adapter, error)
   視為已讀。
 - `/internal/screen` 以 `screen` 事件為 TTY mode 串流畫面。
 - 狀態在 `running` 與 `stable` 之間切換時，會觸發 `run.status_changed` webhook 事件。webhook
-  有網址時，webhook observer 像 `/events` 用戶端一樣訂閱 emitter，把它的事件轉成其他 webhook
-  事件：emitter 的任務更新轉成 `task.*`，agent 的訊息在下一則開始或回合結束時才送出；observer
-  訂閱時 emitter 已有的內容，以及比 AgentAPI 啟動時間更早的訊息（來自接續的工作階段）都不會送出。
-  它只記得訊息和任務處理到哪裡、還在等結果的工具呼叫（最多 64 個）和尚未關閉的請求，對話重設時
-  全部忘掉。傳送器從佇列依序一次送一個事件，失敗會重試，並以 `--webhook-secret` 簽章。
+  要送對話的事件時（`task.*`、`request.*`、`message.*`、`tool.*`、`login.*`、`limit.*`、
+  `agent.error`；hub 只要 `instance.*`，用不到），webhook observer 才會像 `/events` 用戶端一樣
+  訂閱 emitter，把它的事件轉成這些 webhook 事件：emitter 的任務更新轉成 `task.*`，agent 的訊息在
+  下一則開始或回合結束時才送出。`PUT /webhook` 會依設定啟動或停止它。observer 訂閱時 emitter 已有
+  的內容，以及比 AgentAPI 啟動時間更早的訊息（來自接續的工作階段）都不會送出。emitter 結束的訂閱，
+  observer 會像用戶端以 `since` 接續那樣，從它處理到的 seq 重新訂閱。它只記得訊息和任務處理到哪裡、
+  還在等結果的工具呼叫（最多 64 個）、最近 64 則帶有結果的訊息中已回傳的呼叫，以及尚未關閉的請求，
+  對話重設時全部忘掉。傳送器從佇列依序一次送一個事件，失敗會重試，並以 `--webhook-secret` 簽章。
 - 有狀態資料庫時，emitter 會把每次變更交給它的 `Persister`，它在自己的寫入 goroutine 上從副本
   編碼訊息與結構化訊息，所以串流中的長訊息不會拖慢 emitter。
 

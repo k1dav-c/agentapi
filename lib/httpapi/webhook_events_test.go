@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -88,10 +89,8 @@ func newObserved(t *testing.T, d *webhookDispatcher, clock quartz.Clock) *observ
 	t.Helper()
 	emitter := NewEventEmitter(WithClock(clock), WithSubscriptionBufSize(256))
 	o := newWebhookObserver(d, emitter, clock.Now())
-	_, events, replay := emitter.SubscribeTo(webhookObservedEvents, 0, "")
-	for _, event := range replay {
-		o.handle(event, true)
-	}
+	_, events, replay := o.subscribe()
+	o.replay(replay, true)
 	return &observed{emitter: emitter, o: o, events: events}
 }
 
@@ -99,8 +98,11 @@ func newObserved(t *testing.T, d *webhookDispatcher, clock quartz.Clock) *observ
 func (x *observed) pump() {
 	for {
 		select {
-		case event := <-x.events:
-			x.o.handle(event, false)
+		case event, ok := <-x.events:
+			if !ok {
+				return
+			}
+			x.o.take(event)
 		default:
 			return
 		}
@@ -330,7 +332,8 @@ func TestWebhookObserverResubscribes(t *testing.T) {
 }
 
 // What the observer keeps doesn't grow with the conversation: calls that
-// returned, requests that closed, and a conversation a reset replaced are
+// returned (but those of the latest messages, which may still grow),
+// requests that closed, and a conversation a reset replaced are
 // forgotten, and the calls waiting for a result are capped.
 func TestWebhookObserverForgets(t *testing.T) {
 	t.Parallel()
@@ -358,6 +361,8 @@ func TestWebhookObserverForgets(t *testing.T) {
 		x.pump()
 	}
 	assert.Empty(t, x.o.tools, "every call returned")
+	assert.LessOrEqual(t, len(x.o.toolDone), maxToolMessages, "those of the latest messages")
+	assert.LessOrEqual(t, len(x.o.toolMessages), maxToolMessages)
 	assert.Empty(t, x.o.openRequests, "every request closed")
 	// Calls whose result never comes.
 	for i := range 2 * maxOpenTools {
@@ -384,6 +389,7 @@ func TestWebhookObserverForgets(t *testing.T) {
 	x.pump()
 	assert.Empty(t, x.o.tools)
 	assert.Empty(t, x.o.toolDone)
+	assert.Empty(t, x.o.toolMessages)
 	assert.Empty(t, x.o.replies)
 	e.EmitMessages([]conv.Message{{Id: 0, Role: conv.RoleUser, Message: "Again", Time: clock.Now()}})
 	x.pump()
@@ -408,13 +414,9 @@ func TestWebhookObserverReusedID(t *testing.T) {
 	require.Len(t, queued(d), 2)
 
 	e.EmitMessages([]conv.Message{first})
-	_, events, replay := e.SubscribeTo(webhookObservedEvents, 0, "")
+	_, events, replay := x.o.subscribe()
 	x.events = events
-	for _, event := range replay {
-		if _, ok := event.Payload.(SessionSyncBody); !ok {
-			x.o.handle(event, false)
-		}
-	}
+	x.o.replay(replay, false)
 	clock.Advance(time.Second)
 	e.EmitMessages([]conv.Message{first, {Id: 1, Role: conv.RoleUser, Message: "Taken", Time: clock.Now()}})
 	x.pump()
@@ -423,10 +425,161 @@ func TestWebhookObserverReusedID(t *testing.T) {
 	assert.Equal(t, "Taken", sent[0].Data.(WebhookMessage).Content)
 }
 
-// The observer runs while the webhook has a URL; without one it doesn't
-// follow the conversation at all.
-func TestWebhookObserverRunsWithAWebhook(t *testing.T) {
+// toolsCompleted counts the tool.completed events by call.
+func toolsCompleted(events []WebhookEvent) map[string]int {
+	completed := map[string]int{}
+	for _, event := range events {
+		if event.Type == webhookEventToolCompleted {
+			completed[event.Data.(WebhookToolCall).ToolUseID]++
+		}
+	}
+	return completed
+}
+
+// A rich message comes again, whole, as it grows: a Codex turn holds every
+// call it made. Each result is sent once, also in a turn of more calls
+// than the observer keeps messages, while other messages come and go.
+func TestWebhookObserverGrowingMessage(t *testing.T) {
 	t.Parallel()
+	clock := quartz.NewMock(t)
+	d := testDispatcher(t, WebhookConfig{Events: []string{"tool.completed"}}, clock)
+	x := newObserved(t, d, clock)
+	e := x.emitter
+	start := clock.Now()
+	var turn []transcript.RichContentBlock
+	calls := 3 * maxToolMessages
+	for i := range calls {
+		id := fmt.Sprintf("turn%d", i)
+		turn = append(turn,
+			transcript.RichContentBlock{Type: "tool_use", ToolUseID: id, ToolName: "Bash"},
+			transcript.RichContentBlock{Type: "tool_result", ToolUseID: id, Text: "ok", Status: "completed"})
+		e.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: "turn", Role: "assistant", Timestamp: start, Content: slices.Clone(turn)})
+		other := fmt.Sprintf("other%d", i)
+		e.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: other, Role: "user", Timestamp: start, Content: []transcript.RichContentBlock{
+			{Type: "tool_result", ToolUseID: other, Text: "ok", Status: "completed"},
+		}})
+		x.pump()
+	}
+	completed := toolsCompleted(queued(d))
+	assert.Len(t, completed, 2*calls)
+	for id, n := range completed {
+		assert.Equal(t, 1, n, id)
+	}
+	assert.LessOrEqual(t, len(x.o.toolMessages), maxToolMessages)
+	assert.LessOrEqual(t, len(x.o.toolDone), calls+maxToolMessages, "the turn's and the latest others'")
+}
+
+// After the conversation was rebuilt (a message taken back), a new
+// subscription replays all of it: calls that returned long ago aren't sent
+// again, and one still running keeps its name and input.
+func TestWebhookObserverResubscribesWithoutRepeats(t *testing.T) {
+	t.Parallel()
+	clock := quartz.NewMock(t)
+	d := testDispatcher(t, WebhookConfig{Events: []string{"tool.completed"}}, clock)
+	emitter := NewEventEmitter(WithClock(clock))
+	emitter.EmitStatus(conv.StatusStable)
+	o := newWebhookObserver(d, emitter, clock.Now())
+	subscriptions := func() int {
+		emitter.mu.Lock()
+		defer emitter.mu.Unlock()
+		return emitter.chanIdx
+	}
+	go o.run(t.Context())
+	require.Eventually(t, func() bool { return subscriptions() == 1 }, 5*time.Second, 10*time.Millisecond)
+
+	start := clock.Now()
+	msgs := []conv.Message{{Id: 0, Role: conv.RoleUser, Message: "Go", Time: start}}
+	emitter.EmitMessages(msgs)
+	calls := 2 * maxToolMessages
+	for i := range calls {
+		id := fmt.Sprintf("t%d", i)
+		emitter.EmitRichMessage(transcript.RichMessage{MessageID: "a" + id, Role: "assistant", Timestamp: start, Content: []transcript.RichContentBlock{
+			{Type: "tool_use", ToolUseID: id, ToolName: "Bash"},
+		}})
+		emitter.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: "r" + id, Role: "user", Timestamp: start, Content: []transcript.RichContentBlock{
+			{Type: "tool_result", ToolUseID: id, Text: "ok", Status: "completed"},
+		}})
+	}
+	emitter.EmitRichMessage(transcript.RichMessage{MessageID: "a-open", Role: "assistant", Timestamp: start, Content: []transcript.RichContentBlock{
+		{Type: "tool_use", ToolUseID: "open", ToolName: "Edit", ToolInput: json.RawMessage(`{"file":"main.go"}`)},
+	}})
+	var events []WebhookEvent
+	require.Eventually(t, func() bool {
+		events = append(events, queued(d)...)
+		return len(events) >= calls
+	}, 5*time.Second, 10*time.Millisecond)
+
+	emitter.EmitMessages(append(msgs, conv.Message{Id: 1, Role: conv.RoleUser, Message: "Refused", Time: start}))
+	emitter.EmitMessages(msgs)
+	require.Eventually(t, func() bool { return subscriptions() == 2 }, 5*time.Second, 10*time.Millisecond, "subscribed again")
+	emitter.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: "r-open", Role: "user", Timestamp: start, Content: []transcript.RichContentBlock{
+		{Type: "tool_result", ToolUseID: "open", Text: "edited", Status: "completed"},
+	}})
+	require.Eventually(t, func() bool {
+		events = append(events, queued(d)...)
+		return len(events) >= calls+1
+	}, 5*time.Second, 10*time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+	events = append(events, queued(d)...)
+
+	completed := toolsCompleted(events)
+	assert.Len(t, completed, calls+1)
+	for id, n := range completed {
+		assert.Equal(t, 1, n, id)
+	}
+	open := events[len(events)-1].Data.(WebhookToolCall)
+	assert.Equal(t, "open", open.ToolUseID)
+	assert.Equal(t, "Edit", open.Name)
+	assert.JSONEq(t, `{"file":"main.go"}`, string(open.Input.(json.RawMessage)))
+}
+
+// A subscription taken up again replays what changed since the observer
+// last read, not the whole conversation.
+func TestWebhookObserverResumes(t *testing.T) {
+	t.Parallel()
+	clock := quartz.NewMock(t)
+	d := testDispatcher(t, WebhookConfig{Events: []string{"*"}}, clock)
+	x := newObserved(t, d, clock)
+	e := x.emitter
+	start := clock.Now()
+	e.EmitMessages([]conv.Message{{Id: 0, Role: conv.RoleUser, Message: "Go", Time: start}})
+	for i := range 10 {
+		e.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: fmt.Sprintf("m%d", i), Role: "assistant", Timestamp: start, Content: []transcript.RichContentBlock{
+			{Type: "text", Text: "working"},
+		}})
+	}
+	x.pump()
+	changes := func() []Event {
+		id, _, replay := x.o.subscribe()
+		e.Unsubscribe(id)
+		var changed []Event
+		for _, event := range replay {
+			if eventSeq(event) != 0 {
+				changed = append(changed, event)
+			}
+		}
+		return changed
+	}
+	assert.Empty(t, changes(), "nothing changed since")
+
+	e.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: "m3", Role: "assistant", Timestamp: start, Content: []transcript.RichContentBlock{
+		{Type: "text", Text: "done"},
+	}})
+	changed := changes()
+	require.Len(t, changed, 1)
+	assert.Equal(t, "m3", changed[0].Payload.(RichMessageUpdateBody).MessageID)
+}
+
+// The observer runs while the webhook sends events it makes. A hub's
+// webhook sends instance.* alone, which the dispatcher sends itself: the
+// observer would follow the conversation for nothing.
+func TestWebhookObserverRunsForItsEvents(t *testing.T) {
+	t.Parallel()
+	for _, event := range WebhookEventTypes {
+		dispatcher := event == webhookEventRunStatusChanged || strings.HasPrefix(event, "instance.")
+		assert.NotEqual(t, dispatcher, slices.Contains(webhookObserverEvents, event), "%s is the observer's or the dispatcher's", event)
+	}
+
 	srv, _ := newQuietNativeServer(t, nil)
 	subscriptions := func() int {
 		srv.emitter.mu.Lock()
@@ -435,20 +588,28 @@ func TestWebhookObserverRunsWithAWebhook(t *testing.T) {
 	}
 	assert.Zero(t, subscriptions())
 	w := &webhookAPI{webhook: srv.webhook}
-	put := func(url string) {
+	put := func(url string, events ...string) {
 		request := &WebhookConfigRequest{}
 		request.Body.URL = url
 		request.Body.TimeoutSeconds = 1
 		request.Body.MaxAttempts = 1
+		request.Body.Events = &events
 		_, err := w.updateWebhookConfig(t.Context(), request)
 		require.NoError(t, err)
 	}
-	put("http://127.0.0.1:1/hooks")
+	put("http://127.0.0.1:1/hooks", "instance.*")
+	put("http://127.0.0.1:1/hooks", "instance.*", "run.status_changed")
+	assert.Never(t, func() bool { return subscriptions() > 0 }, 200*time.Millisecond, 10*time.Millisecond, "nothing for it to send")
+	put("http://127.0.0.1:1/hooks", "instance.*", "task.*")
 	require.Eventually(t, func() bool { return subscriptions() == 1 }, 5*time.Second, 10*time.Millisecond)
 	assert.False(t, webhookObservedEvents(EventTypeSummaryUpdate), "the emitter needn't work out the summary for it")
-	put("http://127.0.0.1:2/hooks")
+	put("http://127.0.0.1:2/hooks", "instance.*", "task.*")
 	assert.Equal(t, 1, subscriptions(), "another URL keeps it")
-	put("")
+	put("http://127.0.0.1:2/hooks", "instance.*")
+	assert.Zero(t, subscriptions(), "stopped when its events went")
+	put("http://127.0.0.1:2/hooks", "*")
+	require.Eventually(t, func() bool { return subscriptions() == 1 }, 5*time.Second, 10*time.Millisecond)
+	put("", "*")
 	assert.Zero(t, subscriptions(), "stopped when the URL went")
 }
 
