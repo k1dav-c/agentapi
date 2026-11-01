@@ -43,6 +43,15 @@
 - The hub's row menu offers **Update AgentAPI…** (once idle, or now), with its progress in the row
   and the open instance's bar, and says what a machine needs when it can't; the Versions card
   updates every older instance that can at once.
+- The hub's **Add agents** dialog, and the guide of an empty hub, join a machine: pick the hub's
+  address (the hub lists its own: the `--bind` address, or its network interfaces, LAN first),
+  choose whether to allow updates from the hub, and copy the `agentapi hub join` command or a prompt
+  for an agent on that machine. A hub with a token fills in its secret, masked until shown; a hub
+  without one never shows it. `GET /api/join` returns the addresses, and the secret on a hub with a
+  token. `agentapi hub serve` logs the join command for each address when it starts, without the
+  secret.
+- The `agentapi-hub-join` skill covers updates from the hub: `--allow-update`, the one-time move of
+  a program in `/usr/local/bin`, and a state database to keep conversations across updates.
 
 ### Fixes
 
