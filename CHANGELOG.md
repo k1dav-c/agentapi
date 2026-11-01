@@ -23,6 +23,11 @@
   `{port}` is ignored with a warning, since the second server would fail to start.
 - `--log-level` (`debug`, `info`, `warn` or `error`; `AGENTAPI_LOG_LEVEL`, or `log-level` in the
   config file) for `agentapi server`, and for `agentapi hub serve` (`AGENTAPI_HUB_LOG_LEVEL`).
+- The hub shows the AgentAPI version of each instance: next to its name in the list, marked
+  `older` when it is older than the hub's, in the overview's cards and the open instance's bar, and
+  in a **Versions** card on the overview with how many connected instances are older and how to
+  update them. Search finds instances by version. `GET /api/instances` and the `instances` event
+  carry the hub's own `hub_version`.
 
 ### Fixes
 
