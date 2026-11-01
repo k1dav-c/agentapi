@@ -31,9 +31,22 @@
 - On a desktop, drag the edge of the hub's list to change its width (280 px up to 640 px or half the
   window), or focus the edge and use the arrow keys; double-click or Enter resets it to 360 px. The
   browser keeps the width.
+- Update an AgentAPI through its API, and from the hub. A machine opts in: `allow-update: true` in
+  `~/.agentapi/config.yaml`, `--allow-update`, or `agentapi hub join --allow-update`. `POST /update`
+  installs the latest release of k1dav-c/agentapi, checked against its `checksums.txt` and that it
+  runs as that version, and restarts in place once the agent is idle (`{"when": "now"}` doesn't
+  wait); `DELETE /update` cancels. The request can't choose a URL or version, and AgentAPI never runs
+  sudo: a program in a directory the user can't write, such as `/usr/local/bin`, reports in the
+  summary's `update.blocked` the one-time move to `~/.local/bin` behind a symlink. The AgentAPIs of
+  one machine take turns on a lock next to the program, and the second only restarts. The summary's
+  `update` reports how far an update got.
+- The hub's row menu offers **Update AgentAPI…** (once idle, or now), with its progress in the row
+  and the open instance's bar, and says what a machine needs when it can't; the Versions card
+  updates every older instance that can at once.
 
 ### Fixes
 
+- The hub's copy buttons work on a hub served over plain HTTP, where browsers offer no clipboard API.
 - A signed event can no longer move an instance the hub follows. An `instance.*` event without
   `server_id` is refused (400); no event moves an instance the hub is connected to, or one added by
   hand; moving one drops the token stored for its old URL. The hub also refuses events without a
