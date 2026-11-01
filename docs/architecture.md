@@ -428,8 +428,11 @@ usage limit stop, login, terminal prompt) and the latest screen.
   agent is idle with no open request or terminal dialog. After an answer
   leaves the agent idle, a timer allows 3 seconds for work to resume before
   ending the task; a message sent then starts a new task, since the agent
-  isn't working. Rich messages get the running task's `task_id` on arrival.
-  Restored and resumed messages are treated as completed history.
+  isn't working. The backend tells the emitter before it sends the message
+  (`SendingMessage`): the PTY transport reports the agent running as soon as
+  the message waits to be typed, before the message shows. Rich messages get
+  the running task's `task_id` on arrival. Restored and resumed messages are
+  treated as completed history.
 - The emitter maintains a conversation summary (`summary.go`) with the
   instance, status, `attention` (why the agent needs the user), title, latest
   task, pending requests, queue and usage. While a summary subscriber exists,

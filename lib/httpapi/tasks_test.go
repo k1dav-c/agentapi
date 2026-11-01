@@ -1,10 +1,14 @@
 package httpapi
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"math/rand/v2"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/logctx"
+	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -234,6 +240,129 @@ func TestTaskTrackerMessageInGracePeriod(t *testing.T) {
 	take(taskMessages(start, ">Rebuild the release", "Interrupted", ">Ask me which checks to run", ">Only the fast ones"))
 	require.Len(t, tr.tasks, 2)
 	assert.Equal(t, []int{3}, tr.tasks[1].Steered)
+}
+
+// A message sent in the grace period starts a task whatever the transport
+// reports first once it goes out: the PTY transport the agent running (it
+// is as soon as the message waits to be typed), the native one the message.
+// The server says it sends one (SendingMessage) before either.
+func TestEventEmitterMessageInGracePeriod(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		send func(e *EventEmitter, msgs []conv.Message)
+	}{
+		{"pty", func(e *EventEmitter, msgs []conv.Message) {
+			e.SendingMessage()
+			e.EmitStatus(conv.StatusChanging)
+			e.EmitMessages(msgs)
+		}},
+		{"native", func(e *EventEmitter, msgs []conv.Message) {
+			e.SendingMessage()
+			e.EmitMessages(msgs)
+			e.EmitStatus(conv.StatusChanging)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			clock := quartz.NewMock(t)
+			start := clock.Now()
+			e := NewEventEmitter(WithClock(clock))
+			e.EmitStatus(conv.StatusStable)
+			e.EmitMessages(taskMessages(start, ">Rebuild the release"))
+			e.EmitStatus(conv.StatusChanging)
+			// The agent waits on an approval and is interrupted: the
+			// request is withdrawn, and the agent idle.
+			approval := native.RequestState{Request: native.Request{ID: "perm-1", Kind: native.RequestKindApproval}, Status: native.RequestStatusPending}
+			e.EmitRequest(approval)
+			e.EmitStatus(conv.StatusStable)
+			approval.Status = native.RequestStatusWithdrawn
+			e.EmitRequest(approval)
+
+			tc.send(e, taskMessages(start, ">Rebuild the release", "Interrupted", ">Ask me which checks to run"))
+			tasks := e.Tasks()
+			require.Len(t, tasks, 2)
+			assert.Equal(t, TaskStatusCompleted, tasks[0].Status)
+			assert.Empty(t, tasks[0].Steered)
+			assert.Equal(t, 2, tasks[1].ID)
+			assert.Equal(t, TaskStatusRunning, tasks[1].Status)
+			// The grace period's end doesn't end the new task.
+			clock.Advance(taskEndGrace).MustWait(t.Context())
+			assert.Equal(t, TaskStatusRunning, e.Tasks()[1].Status)
+
+			// While the agent works on it, nothing ends, and a message
+			// steers it.
+			e.SendingMessage()
+			e.EmitMessages(taskMessages(start, ">Rebuild the release", "Interrupted", ">Ask me which checks to run", ">Only the fast ones"))
+			tasks = e.Tasks()
+			require.Len(t, tasks, 2)
+			assert.Equal(t, TaskStatusRunning, tasks[1].Status)
+			assert.Equal(t, []int{3}, tasks[1].Steered)
+		})
+	}
+}
+
+// echoTerminal is a terminal agent that shows what is typed and, on Enter,
+// starts on it.
+type echoTerminal struct {
+	mu     sync.Mutex
+	screen string
+}
+
+func (a *echoTerminal) ReadScreen() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.screen
+}
+
+func (a *echoTerminal) Write(data []byte) (int, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if text := string(data); text == "\r" {
+		a.screen += "\nOn it."
+	} else {
+		a.screen += strings.NewReplacer("\x1b[200~", "", "\x1b[201~", "").Replace(text)
+	}
+	return len(data), nil
+}
+
+// The PTY transport reports the agent running as soon as a message waits to
+// be typed, and the message once it was: one sent in the grace period
+// starts a task all the same.
+func TestPTYMessageInGracePeriod(t *testing.T) {
+	t.Parallel()
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := NewServer(ctx, ServerConfig{
+		AgentType:      mf.AgentTypeCustom,
+		Transport:      TransportPTY,
+		PTY:            PTYConfig{AgentIO: &echoTerminal{screen: "$ "}, TerminalColumns: 80},
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
+	stable := func() bool { return srv.emitter.StatusSnapshot().Status == AgentStatusStable }
+	// The screen counts as stable after 2 seconds.
+	require.Eventually(t, stable, 10*time.Second, 10*time.Millisecond)
+
+	sendUserMessage(t, srv, "Rebuild the release")
+	// The agent waits on an approval, and is interrupted. A terminal agent
+	// has no requests, and the screen changes as a dialog goes, so the
+	// grace period comes from a request here.
+	approval := native.RequestState{Request: native.Request{ID: "perm-1", Kind: native.RequestKindApproval}, Status: native.RequestStatusPending}
+	srv.emitter.EmitRequest(approval)
+	require.Eventually(t, stable, 10*time.Second, 10*time.Millisecond)
+	approval.Status = native.RequestStatusWithdrawn
+	srv.emitter.EmitRequest(approval)
+
+	require.False(t, sendUserMessage(t, srv, "Ask me which checks to run").Body.Queued)
+	require.Eventually(t, func() bool { return len(srv.emitter.Tasks()) == 2 }, 10*time.Second, 10*time.Millisecond, "the message starts a task")
+	tasks := srv.emitter.Tasks()
+	assert.Equal(t, TaskStatusCompleted, tasks[0].Status)
+	assert.Empty(t, tasks[0].Steered)
+	assert.Equal(t, "Ask me which checks to run", tasks[1].Prompt)
+	assert.Equal(t, TaskStatusRunning, tasks[1].Status)
 }
 
 // Taking only the messages from the first that changed derives the same

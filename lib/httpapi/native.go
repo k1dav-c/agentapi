@@ -135,6 +135,7 @@ func (s *Server) createNativeMessageLocked(content string, mode DispatchMode, re
 		s.queueMessageLocked(resp, content, false)
 		return nil
 	}
+	s.emitter.SendingMessage()
 	if err := s.native.StartTurn(ctx, input); err != nil {
 		switch {
 		case errors.Is(err, conv.ErrMessageValidationChanging):
