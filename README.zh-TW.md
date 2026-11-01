@@ -1706,8 +1706,9 @@ state-db: ~/.agentapi/state/{port}.db
 | `-P`, `--print-openapi` | | 印出 OpenAPI schema 後結束 |
 
 AgentAPI 把 log 寫到標準輸出，每筆一行 `time=… level=… msg=…`。`--log-level debug`（或
-`AGENTAPI_LOG_LEVEL`、設定檔中的 `log-level`）會加上排查問題用的內容，例如 agent 的命令列和登入
-檢查；`warn` 和 `error` 則略過例行的紀錄。層級不正確時，伺服器不會啟動。
+`AGENTAPI_LOG_LEVEL`、設定檔中的 `log-level`）會加上排查問題用的內容，例如 agent 的命令列、登入
+檢查，以及成功的讀取（狀態碼低於 400 的 `GET`、`HEAD`、`OPTIONS` 請求；用戶端會輪詢 `GET /status`，
+所以 Info 不記這些）；`warn` 和 `error` 則略過例行的紀錄。層級不正確時，伺服器不會啟動。
 
 ### `agentapi update`
 
