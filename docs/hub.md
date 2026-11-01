@@ -315,6 +315,9 @@ comes back to it.
 | `Enter` | Open the row |
 | `Esc` | Clear the search, or go back to the overview |
 
+On a desktop, drag the list's edge, or focus it and press ← or →, to change the list's width; each
+browser remembers it, and a double-click on the edge resets it.
+
 The keys work while the hub has the focus; inside an open chat, keys go to the chat. The bell asks
 the browser to notify you when an agent starts needing you while the hub's tab is in the background,
 and a screen reader hears the same as it happens.

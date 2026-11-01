@@ -35,6 +35,7 @@ import {useEventSource} from "./use-event-source";
 import {HubMark} from "./hub/brand";
 import {AddInstance, GroupName, type Naming} from "./hub/dialogs";
 import {GroupHeader, InstanceRow, agentName} from "./hub/instance-row";
+import {ListEdge, useListWidth} from "./hub/list-edge";
 import {Onboarding, Overview} from "./hub/overview";
 import {SignIn} from "./hub/sign-in";
 import {StatusGlyph, stateTone} from "./hub/status-glyph";
@@ -121,6 +122,7 @@ export function HubView() {
   const [notify, setNotify] = useState<boolean>(() => readStorage(notifyKey, false));
   const [announcement, setAnnouncement] = useState("");
   const search = useRef<HTMLInputElement>(null);
+  const listWidth = useListWidth();
 
   // Signed in or not; a hub that doesn't answer is asked again, with a
   // backoff, and at once when the browser comes back online.
@@ -379,7 +381,11 @@ export function HubView() {
   const filtered = filter !== "all" || query.trim() !== "";
   return (
     <main className="app-frame flex overflow-hidden bg-background">
-      <aside className={cn("flex w-full flex-col border-r bg-background md:w-[360px] md:shrink-0", current ? "hidden md:flex" : "flex")}>
+      <aside
+        id="hub-list"
+        style={{"--hub-list-width": `${listWidth.width}px`} as React.CSSProperties}
+        className={cn("relative flex w-full flex-col border-r bg-background md:w-(--hub-list-width) md:shrink-0", current ? "hidden md:flex" : "flex")}
+      >
         <header className="space-y-3 border-b px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
           <div className="flex items-center gap-2.5">
             <HubMark className="size-8" />
@@ -553,6 +559,7 @@ export function HubView() {
           <kbd className="font-mono">/</kbd> search · <kbd className="font-mono">j</kbd> <kbd className="font-mono">k</kbd> move ·{" "}
           <kbd className="font-mono">↵</kbd> open · <kbd className="font-mono">esc</kbd> overview
         </p>
+        <ListEdge controls="hub-list" {...listWidth} />
       </aside>
 
       <section className={cn("min-w-0 flex-1 flex-col bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]", current ? "flex" : "hidden md:flex")}>
