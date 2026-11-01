@@ -20,6 +20,12 @@ AgentAPI 可以用來：
 
 ## 關於這個 fork
 
+[`k1dav-c/agentapi`](https://github.com/k1dav-c/agentapi) 是獨立維護的
+[`coder/agentapi`](https://github.com/coder/agentapi) fork，使用自己的版本與發版流程。
+執行檔請從[此 fork 的 releases](https://github.com/k1dav-c/agentapi/releases) 下載，
+新增功能的問題請回報至[此 repo](https://github.com/k1dav-c/agentapi/issues)。
+整合上游變更前，應檢查並驗證 native transports、聊天介面與 hub；上游與此 fork 的版本號分開管理。
+
 此 fork 以上游 v0.12.2 為基礎，預設以 [native transport](#native-transport) 透過 Claude Code、
 Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬方式（[PTY transport](#pty-transport)）。
 工作階段管理與聊天功能支援不同的 transport，可用來處理長時間執行的任務；

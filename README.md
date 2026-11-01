@@ -30,6 +30,13 @@ Use AgentAPI to:
 
 ## About this fork
 
+[`k1dav-c/agentapi`](https://github.com/k1dav-c/agentapi) is an independently maintained fork of
+[`coder/agentapi`](https://github.com/coder/agentapi), with its own versioned releases. Download
+binaries from [this fork's releases](https://github.com/k1dav-c/agentapi/releases) and report
+issues involving its added features in [this repository](https://github.com/k1dav-c/agentapi/issues).
+Upstream changes should be reviewed and tested against the native transports, chat UI and hub
+before integration; upstream and fork version numbers are separate release lines.
+
 This fork builds on upstream v0.12.2. It drives Claude Code, Codex and Pi through their own
 protocols with the [native transport](#native-transport) by default, and keeps terminal emulation
 (the [PTY transport](#pty-transport)) for every other agent. Session management and chat features
