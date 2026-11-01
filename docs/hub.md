@@ -216,6 +216,8 @@ as last known, and the totals leave it out.
 
 ### Versions
 
+![The AgentAPI versions the agents run, on which machines, and how to update the older ones](screenshots/hub-versions.png)
+
 Each row shows the AgentAPI version its instance runs next to its name (`v2.0.0`), and on a desktop
 so does the bar above an open agent. A version older than the hub's says **older**: the hub serves
 its own chat to every instance ([Limits](#limits)), so those are the ones to update. Hover for both

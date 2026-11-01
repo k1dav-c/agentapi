@@ -195,6 +195,8 @@ scope 只算一次，取最新的數字（`updated_at`）。hub 目前沒在追�
 
 ### 版本
 
+![agent 執行的 AgentAPI 版本、所在的機器，以及怎麼更新較舊的](screenshots/hub-versions.png)
+
 每一列在名稱旁顯示實例執行的 AgentAPI 版本（`v2.0.0`），桌面上開啟的 agent 上方那一列也會顯示。
 比 hub 舊的版本會標上 **older**：hub 對所有實例都提供它自己版本的聊天介面（見[限制](#限制)），
 所以這些就是該更新的實例。滑鼠移上去可以看到兩邊的版本。開發版本（`0.0.0-dev`，或 release 之後用
