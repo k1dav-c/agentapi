@@ -1273,6 +1273,7 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 
 AgentAPI 會依設定檔送出 `instance.started`。`--public-url` 是 hub 連回它們的網址，`{port}` 和
 `{hostname}` 會替每個實例填入。1.2 之前啟動的 AgentAPI 沒有登記，需要重新啟動一次。
 `agentapi hub status` 顯示 hub 以及每個執行中的 AgentAPI 回報到哪裡；`agentapi hub leave` 會移除 hub。
+加上 `--allow-update` 時，hub 也能[更新它們](#透過-api-更新)。
 `join` 會先送給 hub 一個有簽章的測試事件，hub 沒收下就停止（連不到、被登入頁擋住，或 secret 不同）；
 hub 還沒啟動時，可以用 `--no-check` 略過。
 也可以用 [agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.md) 交給 agent 處理，安裝方式見
@@ -1282,7 +1283,8 @@ hub 還沒啟動時，可以用 `--no-check` 略過。
 
 監看多個 AgentAPI 的用戶端（例如 hub）可以把其中一個更新到最新發行版。只有選擇開放的機器才行：
 以 `--allow-update`（或 `AGENTAPI_ALLOW_UPDATE=true`）啟動 AgentAPI，或在 `~/.agentapi/config.yaml`
-加上 `allow-update: true`，讓這個使用者的每個 AgentAPI 都開放。
+加上 `allow-update: true`，讓這個使用者的每個 AgentAPI 都開放；`agentapi hub join --allow-update`
+會替你寫入。執行中的 AgentAPI 要重新啟動（`agentapi restart --all`）才會套用。
 
 ```bash
 curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"when": "idle"}'
@@ -1838,7 +1840,8 @@ agentapi hub leave
 `--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`，hub 只需要
 這些，其餘都從摘要得知），`--public-url` 是 hub 連回它們的網址，
 `--api-token`（或 `AGENTAPI_API_TOKEN`）會送給需要 token 的實例，`--config` 和 `--registry-dir`
-可指定其他檔案。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。
+可指定其他檔案。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。`--allow-update` 會另外寫入
+`allow-update: true`，AgentAPI 重新啟動後，hub 就能[透過 API 更新它們](#透過-api-更新)；`leave` 會保留這個設定。
 
 ### `agentapi attach`
 

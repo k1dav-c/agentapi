@@ -1519,7 +1519,8 @@ applies it to the registered AgentAPIs running now: each sends `instance.heartbe
 once. After a restart (of the workspace, for example), the AgentAPIs send `instance.started` from
 the file. `--public-url` is where the hub reaches them; `{port}` and `{hostname}` are filled in for
 each. AgentAPIs that started before 1.2 aren't registered: restart them once. `agentapi hub status`
-shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes it. `join`
+shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes it. With
+`--allow-update`, the hub can also [update them](#updating-through-the-api). `join`
 first sends the hub a signed test event and stops if the hub doesn't take it (not reached, a sign-in
 page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet. An agent can
 do it for you with the [agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.md); see the
@@ -1530,7 +1531,8 @@ do it for you with the [agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.
 A client that watches many AgentAPIs, such as the hub, can update one to the latest release. Only
 machines that opt in allow it: start AgentAPI with `--allow-update` (or set
 `AGENTAPI_ALLOW_UPDATE=true`), or add `allow-update: true` to `~/.agentapi/config.yaml` for every
-AgentAPI of the user.
+AgentAPI of the user, which `agentapi hub join --allow-update` does. AgentAPIs that run take the
+setting up when they restart (`agentapi restart --all`).
 
 ```bash
 curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"when": "idle"}'
@@ -2141,7 +2143,9 @@ AgentAPIs running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `
 (default `instance.*`, all the hub needs: it follows the rest from each summary), `--public-url`
 is where the hub reaches them, `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the ones that need
 a token, and `--config` and `--registry-dir` name other files. An AgentAPI that `join` can't
-update now applies the file when it restarts.
+update now applies the file when it restarts. `--allow-update` also writes `allow-update: true`, so
+the hub can [update the AgentAPIs through their API](#updating-through-the-api) once they restart;
+`leave` keeps it.
 
 ### `agentapi attach`
 

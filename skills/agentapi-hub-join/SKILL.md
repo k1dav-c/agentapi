@@ -59,6 +59,11 @@ send requests, not browsers.
    it. If this machine's AgentAPIs need an API token (`--api-token`), add `--api-token` (or set
    `AGENTAPI_API_TOKEN`); the hub then needs the same token as its `--instance-token`.
 
+   Add `--allow-update` only if the user wants the hub to update this machine's AgentAPIs to the
+   latest release: it writes `allow-update: true`, which they take up when they next start, and
+   prints the one-time step this machine needs first, if any. Show that step to the user; it may
+   need `sudo`, which you don't run.
+
    `join` first sends the hub a signed test event. `The hub at … took a signed test event` means the
    hub gets this machine's events. Otherwise it stops without writing anything, and says why:
    - `can't reach the hub` or `didn't answer`: wrong address, or no route to the hub.

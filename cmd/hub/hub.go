@@ -22,6 +22,7 @@ import (
 
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/registry"
+	"github.com/coder/agentapi/lib/selfupdate"
 	"github.com/coder/agentapi/lib/userconfig"
 )
 
@@ -32,6 +33,8 @@ const (
 	keySecret = "webhook-secret"
 	keyEvents = "webhook-events"
 	keyPublic = "public-url"
+	// keyAllowUpdate lets the hub update the AgentAPIs through their API.
+	keyAllowUpdate = "allow-update"
 )
 
 // defaultEvents are the events a hub gets: the instances starting, their
@@ -88,11 +91,12 @@ func HubCmd() *cobra.Command {
 
 func joinCmd() *cobra.Command {
 	var (
-		opts      options
-		secret    string
-		events    []string
-		publicURL string
-		noCheck   bool
+		opts        options
+		secret      string
+		events      []string
+		publicURL   string
+		noCheck     bool
+		allowUpdate bool
 	)
 	cmd := &cobra.Command{
 		Use:   "join <hub webhook URL>",
@@ -141,10 +145,16 @@ func joinCmd() *cobra.Command {
 			} else {
 				delete(config, keySecret)
 			}
+			if allowUpdate {
+				config[keyAllowUpdate] = true
+			}
 			if err := userconfig.Save(opts.configPath, config); err != nil {
 				return err
 			}
 			_, _ = fmt.Fprintf(out, "Wrote the hub to %s: AgentAPIs that start from now on report to %s.\n", opts.configPath, hubURL)
+			if allowUpdate {
+				reportUpdates(out)
+			}
 			return applyToRunning(cmd.Context(), out, opts, webhookChange{URL: hubURL, Events: &events, Secret: &secret, PublicURL: publicURL})
 		},
 	}
@@ -153,7 +163,25 @@ func joinCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&events, "events", defaultEvents, "Events to send to the hub; it needs only instance.*, and follows the rest from each AgentAPI's summary")
 	cmd.Flags().BoolVar(&noCheck, "no-check", false, "Join without checking that the hub takes this machine's events (for a hub that doesn't run yet)")
 	cmd.Flags().StringVar(&publicURL, "public-url", "", "Where the hub reaches this machine's AgentAPIs, such as http://dev-1.vpn:{port} ({port} and {hostname} are filled in for each)")
+	cmd.Flags().BoolVar(&allowUpdate, "allow-update", false, "Also let the hub update this machine's AgentAPIs to the latest release (allow-update: true in the config file, which leave keeps)")
 	return cmd
+}
+
+// reportUpdates says what allow-update: true does, and what this machine's
+// agentapi needs first if it can't replace itself.
+func reportUpdates(out io.Writer) {
+	_, _ = fmt.Fprintln(out, "The hub can update the AgentAPIs that start from now on; restart the running ones to let it update them too (agentapi restart --all).")
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	program, err := selfupdate.Locate(exe)
+	if err != nil {
+		return
+	}
+	if blocked := program.Blocked(); blocked != "" {
+		_, _ = fmt.Fprintf(out, "The hub can't update them yet: AgentAPI %s\n", blocked)
+	}
 }
 
 func leaveCmd() *cobra.Command {

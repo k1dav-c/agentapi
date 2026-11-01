@@ -113,6 +113,44 @@ func TestJoinStatusLeave(t *testing.T) {
 	assert.Equal(t, "", fake.puts[1]["url"])
 }
 
+// join --allow-update lets the hub update the AgentAPIs: it writes
+// allow-update: true, which a join without it and leave keep.
+func TestJoinAllowUpdate(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	t.Setenv("AGENTAPI_API_TOKEN", "")
+	t.Setenv("AGENTAPI_HUB_SECRET", "")
+	flags := []string{"--no-check", "--config", configPath, "--registry-dir", filepath.Join(dir, "instances")}
+
+	out, err := run(t, append([]string{"join", "http://hub.tailnet:3290/hooks"}, flags...)...)
+	require.NoError(t, err, out)
+	config, err := userconfig.Load(configPath)
+	require.NoError(t, err)
+	assert.Nil(t, config[keyAllowUpdate], "off unless asked")
+	assert.NotContains(t, out, "update")
+
+	out, err = run(t, append([]string{"join", "http://hub.tailnet:3290/hooks", "--allow-update"}, flags...)...)
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "The hub can update the AgentAPIs that start from now on")
+	config, err = userconfig.Load(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, true, config[keyAllowUpdate])
+	assert.Equal(t, "http://hub.tailnet:3290/hooks", config[keyURL])
+
+	_, err = run(t, append([]string{"join", "http://hub.tailnet:3290/hooks"}, flags...)...)
+	require.NoError(t, err)
+	config, err = userconfig.Load(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, true, config[keyAllowUpdate], "joining again keeps it")
+
+	_, err = run(t, append([]string{"leave"}, flags[1:]...)...)
+	require.NoError(t, err)
+	config, err = userconfig.Load(configPath)
+	require.NoError(t, err)
+	assert.Nil(t, config[keyURL])
+	assert.Equal(t, true, config[keyAllowUpdate], "leaving keeps it")
+}
+
 // An AgentAPI that needs a token and gets none keeps its webhook until it
 // restarts; joining still writes the file.
 func TestJoinNeedsToken(t *testing.T) {
