@@ -22,5 +22,5 @@ type Reply struct {
 }
 
 type Result struct {
-	Outcome string `json:"outcome"` // applied, superseded, invalid, uncertain
+	Outcome string `json:"outcome"` // applied, queued, superseded, invalid, uncertain
 }

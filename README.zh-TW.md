@@ -1381,12 +1381,14 @@ webhook，也能在這裡設定。
 （`request`）；否則回傳 `{"request": null}`。
 
 帶著該 `request_id`、一個唯一的回覆 `id` 和 `content` 呼叫 `POST /handoff/reply`，
-就能回覆它。對一般回應的回覆會當成一般的使用者訊息送出；對請求的回覆則依
+就能回覆它。對一般回應的回覆會當成一般的使用者訊息，像 `POST /message` 一樣送出：agent
+若在這段期間忙了起來，回覆會在[佇列](#訊息佇列)中等待。對請求的回覆則依
 [請求](#請求核准提問與計畫)一節所述回答該請求。終端機提示接受畫面上顯示的選項編號、
 `enter` 或 `esc`；提示有文字欄位時（例如 Claude Code 的計畫回饋），也可以輸入自由
-文字。`outcome` 為 `applied`、`superseded`（已不再開啟，例如已在網頁介面回覆）、
-`invalid`（回覆不符合，仍保持開啟）或 `uncertain`；同一個項目不會回覆兩次。搭配上面的
-webhook，整合服務就能在 agent 停下來時通知你，並把你的回覆傳回來。
+文字。`outcome` 為 `applied`、`queued`（回覆在佇列中等待，agent 能接收時就會送出）、
+`superseded`（已不再開啟，例如已在網頁介面回覆）、`invalid`（回覆不符合，仍保持開啟）
+或 `uncertain`；同一個項目不會回覆兩次。搭配上面的 webhook，整合服務就能在 agent 停下來
+時通知你，並把你的回覆傳回來。
 
 ### MCP 管理
 

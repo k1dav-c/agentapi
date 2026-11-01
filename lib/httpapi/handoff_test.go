@@ -8,10 +8,14 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/handoff"
 	mf "github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/nativetest"
+	"github.com/coder/agentapi/lib/transcript"
 	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -119,6 +123,116 @@ func TestHandoffReplyDeduplicatesAndInvalidates(t *testing.T) {
 	pending, err = s.getPendingHandoff(t.Context(), nil)
 	require.NoError(t, err)
 	require.Nil(t, pending.Body.Request)
+}
+
+// busyConversation is a terminal agent that got busy after the human-reply
+// protocol offered its last message: it takes no message.
+type busyConversation struct{ handoffConversation }
+
+func (c *busyConversation) Send(...conv.MessagePart) error {
+	c.sends++
+	return conv.ErrMessageValidationChanging
+}
+
+// A reply to the agent's last message goes out as POST /message sends a
+// message: one the agent can't take now waits in the queue.
+func TestHandoffReplyWaitsWhileTheAgentWorks(t *testing.T) {
+	s, _, _ := handoffServer()
+	c := &busyConversation{handoffConversation{status: conv.StatusStable}}
+	s.conversation = c
+	pending := pendingHandoff(s)
+	require.Equal(t, "message", pending.Kind)
+	reply := &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: "reply-1", Content: "continue"}}
+	for range 2 {
+		result, err := s.replyHandoff(t.Context(), reply)
+		require.NoError(t, err)
+		require.Equal(t, "queued", result.Body.Outcome)
+	}
+	assert.Equal(t, 1, c.sends)
+	queued := s.queue.Messages()
+	require.Len(t, queued, 1)
+	assert.Equal(t, "continue", queued[0].Content)
+	assert.Nil(t, pendingHandoff(s))
+}
+
+// offerLastMessage has the native agent say text and end its turn with
+// result, and returns what the human-reply protocol offers then: that
+// message.
+func offerLastMessage(t *testing.T, s *Server, a *nativetest.Adapter, text string, result native.TurnResult) *handoff.Request {
+	t.Helper()
+	a.Sink().RichMessage(transcript.RichMessage{MessageID: "m-" + text, Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: text}}})
+	a.Sink().TurnCompleted(result)
+	pending := pendingHandoff(s)
+	require.NotNil(t, pending)
+	require.Equal(t, "message", pending.Kind)
+	require.Equal(t, text, pending.Content)
+	return pending
+}
+
+func replyToHandoff(t *testing.T, s *Server, pending *handoff.Request, id, content string) string {
+	t.Helper()
+	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: id, Content: content}})
+	require.NoError(t, err)
+	return result.Body.Outcome
+}
+
+func turnTexts(a *nativetest.Adapter) []string {
+	var texts []string
+	for _, turn := range a.Turns() {
+		texts = append(texts, turn.Text)
+	}
+	return texts
+}
+
+// With the native transport a reply to the agent's last message goes as a
+// message the user sends: at once while the agent is idle, also past a
+// usage limit that holds the queue (it may be what continues the work),
+// and into the queue while the agent works, where a limit stop holds it.
+func TestNativeHandoffReplyGoesAsAMessage(t *testing.T) {
+	t.Run("idle", func(t *testing.T) {
+		s, factory := newQuietNativeServer(t, nil)
+		a := factory.Last()
+		sendUserMessage(t, s, "Check the build")
+		pending := offerLastMessage(t, s, a, "Shall I deploy?", native.TurnResult{StopReason: native.StopReasonEndTurn})
+		assert.Equal(t, "applied", replyToHandoff(t, s, pending, "reply-1", "Yes"))
+		assert.Equal(t, []string{"Check the build", "Yes"}, turnTexts(a))
+	})
+
+	t.Run("limit-held", func(t *testing.T) {
+		s, factory := newQuietNativeServer(t, nil)
+		a := factory.Last()
+		sendUserMessage(t, s, "Check the build")
+		resets := time.Now().Add(time.Hour)
+		pending := offerLastMessage(t, s, a, "You've hit your limit", native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your limit", ResetsAt: &resets})
+		require.True(t, s.native.HoldsQueue(time.Now()))
+		assert.Equal(t, "applied", replyToHandoff(t, s, pending, "reply-1", "Go on"))
+		assert.Equal(t, []string{"Check the build", "Go on"}, turnTexts(a))
+		assert.Nil(t, s.native.LimitStop())
+	})
+
+	t.Run("busy", func(t *testing.T) {
+		s, factory := newQuietNativeServer(t, nil)
+		a := factory.Last()
+		sendUserMessage(t, s, "Check the build")
+		pending := offerLastMessage(t, s, a, "Shall I deploy?", native.TurnResult{StopReason: native.StopReasonEndTurn})
+		// The agent started a turn of its own meanwhile, and says so.
+		a.TurnErr = native.ErrTurnActive
+		assert.Equal(t, "queued", replyToHandoff(t, s, pending, "reply-1", "Yes"))
+		assert.Equal(t, "queued", replyToHandoff(t, s, pending, "reply-1", "Yes"), "answered from the receipt")
+		require.Len(t, s.queue.Messages(), 1)
+		a.TurnErr = nil
+
+		// That turn stops on a usage limit, which holds the queue.
+		resets := time.Now().Add(time.Hour)
+		a.Sink().TurnStarted()
+		a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your limit", ResetsAt: &resets})
+		s.dispatchNextQueuedMessage()
+		assert.Equal(t, []string{"Check the build"}, turnTexts(a))
+		require.NoError(t, s.native.DismissLimitStop())
+		s.dispatchNextQueuedMessage()
+		assert.Equal(t, []string{"Check the build", "Yes"}, turnTexts(a))
+		assert.Empty(t, s.queue.Messages())
+	})
 }
 
 func TestHandoffBrowserReplyWins(t *testing.T) {

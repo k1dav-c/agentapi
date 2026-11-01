@@ -297,12 +297,17 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 	if pending.Kind != "message" {
 		return &HandoffReplyResponse{Body: s.backend().answerHandoff(pending, request, reply.ID, reply.Content)}, nil
 	}
-	// The reply to the agent's last message is the next message.
+	// The reply to the agent's last message is the next message, which goes
+	// out as POST /message sends one: queued if the agent got busy since.
 	result := handoff.Result{Outcome: "uncertain"}
 	s.handoff.record(pending.ID, reply.ID, result)
-	if err := s.conversation.Send(FormatMessage(s.agentType, reply.Content)...); err != nil {
+	var resp MessageResponse
+	switch err := s.backend().deliver(reply.Content, DispatchQueue, &resp); {
+	case err != nil:
 		s.logger.Error("Human reply delivery is uncertain; refusing automatic retry", "request_id", pending.ID, "error", err)
-	} else {
+	case resp.Body.Queued:
+		result.Outcome = "queued"
+	default:
 		result.Outcome = "applied"
 	}
 	s.handoff.record(pending.ID, reply.ID, result)

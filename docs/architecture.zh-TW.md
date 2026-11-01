@@ -386,7 +386,8 @@ type Factory func(resume Resume) (Adapter, error)
 
 ## 訊息佇列
 
-agent 忙碌時，訊息會在 `s.queue` 等待。佇列有獨立的鎖，讀取不必等待伺服器的鎖；變更時也會
+agent 忙碌時，訊息會在 `s.queue` 等待；對 agent 最後一則訊息的人工回覆（`POST /handoff/reply`）
+也經由同一個 `deliver` 送出，同樣會在這裡等待。佇列有獨立的鎖，讀取不必等待伺服器的鎖；變更時也會
 持有 `s.mu`。派送迴圈每 500 毫秒檢查第一則訊息：native agent 必須閒置，且沒有用量限制暫停
 佇列；PTY agent 的畫面必須穩定且沒有對話框。重新啟動期間，兩者都不派送訊息。
 

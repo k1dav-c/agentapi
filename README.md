@@ -1622,13 +1622,15 @@ for you, `GET /handoff` returns what it waits on, with an `id` and a `kind`: its
 oldest pending request (`request`). Otherwise it returns `{"request": null}`.
 
 `POST /handoff/reply` with that `request_id`, a unique reply `id` and the `content` answers it. A
-reply to a response is sent as a normal user message, and a reply to a request answers it as
-described under [Requests](#requests-approvals-questions-and-plans). A terminal prompt takes a
+reply to a response is sent as a normal user message, the way `POST /message` sends one: if the
+agent got busy meanwhile, it waits in the [queue](#message-queue). A reply to a request answers it
+as described under [Requests](#requests-approvals-questions-and-plans). A terminal prompt takes a
 displayed option number, `enter` or `esc`, or free text where the prompt has a text field (such as
-Claude Code's plan feedback). The `outcome` is `applied`, `superseded` (no longer open, for example
-because it was answered in the web UI), `invalid` (the reply doesn't fit; it stays open) or
-`uncertain`, and nothing is answered twice. Combined with the webhooks above, an
-integration can tell you when the agent stops and pass your answer back.
+Claude Code's plan feedback). The `outcome` is `applied`, `queued` (the reply waits in the queue
+and goes out once the agent can take it), `superseded` (no longer open, for example because it was
+answered in the web UI), `invalid` (the reply doesn't fit; it stays open) or `uncertain`, and
+nothing is answered twice. Combined with the webhooks above, an integration can tell you when the
+agent stops and pass your answer back.
 
 ### MCP management
 

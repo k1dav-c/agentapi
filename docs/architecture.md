@@ -470,10 +470,12 @@ usage limit stop, login, terminal prompt) and the latest screen.
 
 ## The message queue
 
-Messages sent while the agent is busy wait in `s.queue`. The queue has its own lock so reads don't
-wait on the server lock; mutations also hold `s.mu`. Every 500 ms, a loop checks whether the first
-message can be delivered. Native agents must be idle without a usage limit holding the queue.
-PTY agents need a stable screen with no dialog. Neither accepts queued messages during a restart.
+Messages sent while the agent is busy wait in `s.queue`, and so does a human reply to the agent's
+last message (`POST /handoff/reply`), which goes out through the same `deliver`. The queue has its
+own lock so reads don't wait on the server lock; mutations also hold `s.mu`. Every 500 ms, a loop
+checks whether the first message can be delivered. Native agents must be idle without a usage limit
+holding the queue. PTY agents need a stable screen with no dialog. Neither accepts queued messages
+during a restart.
 
 Rejected messages get up to 5 attempts. Messages that might be delivered twice are dropped
 immediately: a native write without confirmation (`native.ErrUnconfirmed`, caused by timeout,
