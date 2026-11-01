@@ -1,0 +1,155 @@
+package selfupdate
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/Masterminds/semver/v3"
+)
+
+// versionTimeout bounds a run of a program's --version.
+const versionTimeout = 10 * time.Second
+
+// Program is the program an update replaces.
+type Program struct {
+	// Path is the program as it is started. It may be a symlink, such as
+	// /usr/local/bin/agentapi to ~/.local/bin/agentapi: the update leaves
+	// it and replaces the file it names.
+	Path string
+	// Real is the file Path names, symlinks resolved. An update writes a
+	// new file in its directory and renames it over Real.
+	Real string
+}
+
+// Locate finds the file path names, following symlinks.
+func Locate(path string) (Program, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return Program{}, err
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return Program{}, fmt.Errorf("resolve %s: %w", path, err)
+	}
+	return Program{Path: abs, Real: real}, nil
+}
+
+// Blocked says why the user can't replace the program, and what to run
+// once so that they can; it returns "" when they can. Replacing the
+// program takes write access to its directory. One in a system directory,
+// such as /usr/local/bin, is copied to ~/.local/bin, and its path becomes
+// a symlink to the copy, which the user can replace without sudo.
+func (p Program) Blocked() string {
+	dir := filepath.Dir(p.Real)
+	if writable(dir) == nil {
+		return ""
+	}
+	what := p.Real
+	if p.Path != p.Real {
+		what = fmt.Sprintf("%s (which %s links to)", p.Real, p.Path)
+	}
+	bin := "~/.local/bin"
+	if home, err := os.UserHomeDir(); err == nil {
+		bin = filepath.Join(home, ".local", "bin")
+	}
+	copied := filepath.Join(bin, filepath.Base(p.Path))
+	if copied == p.Real {
+		return fmt.Sprintf("can't replace %s: %s isn't writable", what, dir)
+	}
+	sudo := "sudo "
+	if writable(filepath.Dir(p.Path)) == nil {
+		sudo = ""
+	}
+	return fmt.Sprintf("can't replace %s: %s isn't writable. Move it to a directory you own, once: mkdir -p %s && cp %s %s && %sln -sf %s %s",
+		what, dir, shellQuote(bin), shellQuote(p.Real), shellQuote(copied), sudo, shellQuote(copied), shellQuote(p.Path))
+}
+
+// shellSafe matches what a shell reads as one word as it is.
+var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./~-]+$`)
+
+// shellQuote quotes path for a shell, if it needs it.
+func shellQuote(path string) string {
+	if shellSafe.MatchString(path) {
+		return path
+	}
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
+}
+
+// lockPath is the lock file next to the program.
+func (p Program) lockPath() string {
+	return filepath.Join(filepath.Dir(p.Real), "."+filepath.Base(p.Real)+".lock")
+}
+
+// Lock takes the lock file next to the program (.agentapi.lock), waiting
+// while another update holds it until ctx ends: the AgentAPIs that share
+// the program replace it one at a time. The file stays.
+func (p Program) Lock(ctx context.Context) (unlock func(), err error) {
+	return lockFile(ctx, p.lockPath())
+}
+
+// ProgramVersion runs the program at path with --version and returns the
+// version it prints (agentapi version 1.2.3).
+func ProgramVersion(ctx context.Context, path string) (*semver.Version, error) {
+	ctx, cancel := context.WithTimeout(ctx, versionTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "--version").Output()
+	if err != nil {
+		return nil, fmt.Errorf("%s --version: %w", path, err)
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("%s --version printed nothing", path)
+	}
+	return ParseVersion(fields[len(fields)-1])
+}
+
+// Install puts the release's binary for this platform in place of the
+// program, holding the lock: it downloads it into the program's directory,
+// checks it against the release's checksums.txt and that it runs and is
+// the release's version, and renames it over the program. Unless force,
+// a program that is the release's version or newer by the time Install
+// holds the lock stays, as another AgentAPI installed it meanwhile, and
+// Install reports false.
+func (s Source) Install(ctx context.Context, r *Release, p Program, force bool) (bool, error) {
+	want, err := r.Version()
+	if err != nil {
+		return false, err
+	}
+	unlock, err := p.Lock(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	if !force {
+		if have, err := ProgramVersion(ctx, p.Real); err == nil && !have.LessThan(want) {
+			return false, nil
+		}
+	}
+	tmp, err := s.Download(ctx, r, PlatformAsset(), filepath.Dir(p.Real))
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		// Still there unless the rename took it.
+		if _, err := os.Lstat(tmp); err == nil {
+			_ = os.Remove(tmp)
+		}
+	}()
+	got, err := ProgramVersion(ctx, tmp)
+	if err != nil {
+		return false, fmt.Errorf("the downloaded binary doesn't run: %w", err)
+	}
+	if !got.Equal(want) {
+		return false, fmt.Errorf("the downloaded binary says it is %s, not %s", got, want)
+	}
+	if err := Replace(tmp, p.Real); err != nil {
+		return false, fmt.Errorf("replace binary: %w", err)
+	}
+	return true, nil
+}

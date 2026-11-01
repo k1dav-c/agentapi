@@ -1,7 +1,8 @@
 // Package selfupdate installs the latest official release of AgentAPI
 // (k1dav-c/agentapi on GitHub) in place of the program that runs: it looks
 // the release up, picks the binary for the platform, checks it against the
-// release's checksums.txt and replaces the program with it.
+// release's checksums.txt and replaces the program with it, under a lock
+// file that the AgentAPIs sharing the program take in turn.
 package selfupdate
 
 import (
@@ -31,8 +32,9 @@ const (
 	userAgent               = "agentapi-update"
 )
 
-// githubAPI is GitHub's API.
-const githubAPI = "https://api.github.com"
+// githubAPI is GitHub's API. Tests that build AgentAPI stamp a fake's
+// with -ldflags -X; nothing changes it at run time.
+var githubAPI = "https://api.github.com"
 
 // Source is where releases are looked up and downloaded from.
 type Source struct {

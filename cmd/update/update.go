@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/coder/agentapi/cmd/restart"
@@ -44,7 +43,7 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
 	}
-	exePath, err = filepath.EvalSymlinks(exePath)
+	program, err := selfupdate.Locate(exePath)
 	if err != nil {
 		return fmt.Errorf("resolve symlinks: %w", err)
 	}
@@ -97,32 +96,25 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Download the binary, verified against the release's checksums.
+	// Download the binary, verified against the release's checksums, and
+	// replace this one, under the lock that AgentAPIs updating through
+	// their API take too.
 	fmt.Printf("Downloading %s...\n", assetName)
-	tmpPath, err := source.Download(ctx, info, assetName, filepath.Dir(exePath))
+	installed, err := source.Install(ctx, info, program, forceFlag)
 	if err != nil {
 		return err
 	}
-	// Clean up temp file on failure.
-	defer func() {
-		// If the file still exists at tmpPath, something went wrong — remove it.
-		if _, statErr := os.Stat(tmpPath); statErr == nil {
-			_ = os.Remove(tmpPath)
-		}
-	}()
 
-	// Replace the binary.
-	if err := selfupdate.Replace(tmpPath, exePath); err != nil {
-		return fmt.Errorf("replace binary: %w", err)
-	}
-
-	if currentVer != nil {
+	switch {
+	case !installed:
+		fmt.Printf("Another process installed v%s meanwhile.\n", latestVer.String())
+	case currentVer != nil:
 		fmt.Printf("Successfully updated agentapi from v%s to v%s\n", currentVer.String(), latestVer.String())
-	} else {
+	default:
 		fmt.Printf("Successfully updated agentapi to v%s\n", latestVer.String())
 	}
 	if restartFlag {
-		return restart.Run(context.Background(), restart.Options{All: true, Executable: exePath, Out: os.Stdout})
+		return restart.Run(context.Background(), restart.Options{All: true, Executable: program.Real, Out: os.Stdout})
 	}
 	return nil
 }

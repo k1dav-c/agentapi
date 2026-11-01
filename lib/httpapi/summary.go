@@ -65,6 +65,10 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 		spend := *e.summary.spend
 		summary.Spend = &spend
 	}
+	if e.summary.update != nil {
+		update := *e.summary.update
+		summary.Update = &update
+	}
 	for _, r := range e.requests {
 		if r.Status != native.RequestStatusPending {
 			continue
@@ -131,6 +135,27 @@ func (e *EventEmitter) SetSpend(spend SummarySpend) {
 	e.summary.changed = true
 }
 
+// SetUpdate records how far an update through the API is, and sends the
+// summary if that changed.
+func (e *EventEmitter) SetUpdate(update UpdateStatus) {
+	e.mu.Lock()
+	defer e.unlock()
+	if e.summary.update != nil && *e.summary.update == update {
+		return
+	}
+	e.summary.update = &update
+	e.summary.changed = true
+}
+
+// agentIdle reports whether the agent waits with nothing open: it is
+// stable, and no request or dialog of its terminal waits for an answer.
+func (e *EventEmitter) agentIdle() bool {
+	e.mu.Lock()
+	defer e.unlock()
+	status := e.statusChangeBody()
+	return status.Status == AgentStatusStable && status.PendingRequests == 0 && status.TerminalPrompt == ""
+}
+
 // SummaryChanged sends the summary if it changed by something outside the
 // conversation (the instance's settings).
 func (e *EventEmitter) SummaryChanged() {
@@ -150,6 +175,9 @@ type summaryFeed struct {
 	// spend is what the agent's sessions cost recently (startSpend); nil
 	// until it is worked out, and for agents whose logs aren't read.
 	spend *SummarySpend
+	// update is how far an update through the API is (updater); nil
+	// until the server sets it.
+	update *UpdateStatus
 }
 
 // sendSummaryLocked sends the summary if the state changed since it was

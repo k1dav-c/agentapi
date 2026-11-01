@@ -97,7 +97,7 @@ flowchart TB
 | `lib/hub/` | `agentapi hub serve`：實例和頁面上設定的群組（`store.go`，保存在檔案中）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
 | `lib/userconfig/` | 使用者的設定檔 `~/.agentapi/config.yaml`：以旗標名稱設定，`agentapi server` 讀取、`agentapi hub` 寫入 |
 | `lib/registry/` | 一台機器上執行中 AgentAPI 的登記檔（`~/.agentapi/instances`）：以原子方式寫入、列出，並刪除行程已不在的登記檔 |
-| `lib/selfupdate/` | 把 k1dav-c/agentapi 的最新 release 安裝到程式的位置（`agentapi update`）：到 GitHub 查詢、挑出這個平台的執行檔、比對 release 的 `checksums.txt`，再改名取代 |
+| `lib/selfupdate/` | 把 k1dav-c/agentapi 的最新 release 安裝到程式的位置（`agentapi update`、`POST /update`）：到 GitHub 查詢、挑出這個平台的執行檔、比對 release 的 `checksums.txt` 並確認執行起來是那個版本，再在程式旁的鎖定檔保護下改名取代（`Install`）；判斷使用者能否取代程式，並提供一次性的修正方式（`Program.Blocked`）；`selfupdatetest` 為測試提供假的 release |
 | `lib/shellterm/` | Native 工作階段共用的 shell 終端機 |
 | `lib/htmlpreview/` | 為 `GET /files/preview` 將相對路徑引用的資源嵌入為 data: URL，產生可獨立顯示的 HTML 預覽 |
 | `lib/mcpconfig/` | 讀寫各 agent 的 MCP 設定檔 |
@@ -136,10 +136,10 @@ flowchart TB
    階段紀錄監看器、關閉仍在執行的 native 或 PTY agent 與 shell 終端機，並寫入、關閉狀態資料庫。
    收到 SIGUSR1 時只寫入狀態資料庫，不會停止。native agent 結束不會讓伺服器停止：對話會重新
    啟動 agent（見 Native）。
-6. 收到 SIGUSR2 時，伺服器會原地重新啟動（`cmd/server/reexec.go`）。`selfExec` 在啟動時記下參數、
+6. 收到 SIGUSR2，或透過 API 更新時，伺服器會原地重新啟動（`cmd/server/reexec.go`、`selfExec.restart`）。`selfExec` 在啟動時記下參數、
    環境變數和程式：argv[0] 若就是正在執行的檔案，就採用 shell 找到它的方式（路徑，或 `PATH` 上
    的名稱），這樣更新改指向新版本的 symlink 也會跟著走；否則採用 `os.Executable`。更新取代檔案之後，
-   `/proc/self/exe` 指向的是已刪除的檔案。收到 SIGUSR2 後，先以 `--version` 執行程式；失敗時記下
+   `/proc/self/exe` 指向的是已刪除的檔案。重新啟動前，先以 `--version` 執行程式；失敗時記下
    原因並繼續提供服務。成功時，伺服器依第 5 步停止，但保留 PID 檔（PID 不變），再以
    `syscall.Exec` 重新執行程式，沿用 stdin、stdout 和 stderr；Go 開啟的其他檔案都會在 exec 時關閉。
    停止期間收到關閉訊號時，以關閉為準。每個登記檔都會註明伺服器能原地重新啟動
@@ -177,6 +177,7 @@ flowchart TB
 | `webhook.go`、`webhook_events.go`、`handoff.go`、`dialog_reply.go` | Webhook 傳送（佇列、重試、簽章、心跳），以及把對話事件轉成 webhook 事件的 observer；人工回覆 API；終端機對話框的回答 |
 | `auth.go` | Token 驗證與聊天介面登入（`authAPI`） |
 | `restart.go`、`statedb.go` | 重新啟動；還原與保存狀態 |
+| `update.go` | 透過 API 更新 AgentAPI（`POST /update`、`DELETE /update`、`updater`）與摘要的 `update`；見[重新啟動與更新](#重新啟動與更新) |
 | `events.go`、`events_*.go`、`models.go` | Emitter（訂閱與重播；它保存的狀態、畫面、請求與訊息）與 API 的型別 |
 | `embed.go`、`uploads.go` | 嵌入的聊天介面；上傳的檔案（`uploadAPI`，它從操作的 middleware 處理 `POST /upload`：huma v2.32 每次處理 multipart 請求都會改動共用的操作） |
 
@@ -489,6 +490,16 @@ native 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之
   並等每個 AgentAPI 以新的 server ID 重新登記、在原連接埠回應 `GET /status`。`agentapi update
   --restart` 會對仍在執行舊執行檔的 AgentAPI 做同樣的事。hub 不會原地重新啟動，由服務管理工具
   重新啟動。
+- 開啟 `--allow-update` 時，`POST /update`（`update.go`）會把 AgentAPI 更新到最新發行版並原地重新
+  啟動，由一個跟著伺服器生命週期的 goroutine 執行。`checking` 查詢發行版，並以 `--version` 執行
+  磁碟上的程式。`downloading` 把發行版安裝到程式的位置（`lib/selfupdate`）；共用程式的另一個
+  AgentAPI 已經更新過、磁碟上的程式夠新時就略過。`waiting` 會暫停佇列，等到 agent 處於 stable、
+  沒有待回覆的請求或終端機對話框，每次狀態變化時檢查一次。`restarting` 在 `s.mu` 底下開始：從此
+  訊息留在佇列、不會開始重新啟動 agent，人工回覆協定也不提供內容。接著呼叫和 SIGUSR2 相同的
+  重新啟動。`"now"` 會略過等待，`DELETE /update` 在重新啟動前都能取消更新。失敗時狀態變成
+  `failed` 並附上錯誤，伺服器繼續提供服務。每一步都會改變摘要的 `update`，`summary_update` 會把
+  它帶給 hub。每次請求都會重新解析程式路徑，`blocked` 也每分鐘重新檢查，所以中途設好的 symlink
+  會馬上生效。
 - `/status` 會回報生命週期：`starting`、`ready`、`running`、`restarting`、`exited` 或
   `failed`。
 
@@ -545,6 +556,11 @@ agent 啟動時才讀取設定，因此變更需要重新啟動；native agent �
 - 上傳的檔案存放在私有目錄，只回傳圖片。工作目錄以外的檔案無法開啟。
 - webhook 會把設定要送的內容（包括對話）送到它的網址，而 `PUT /webhook` 可以修改網址；它的
   HMAC secret 只能寫入、無法讀回。
+- 透過 API 更新預設關閉，要用 `--allow-update`（或設定檔中的 `allow-update: true`）開啟。它只會從
+  GitHub 安裝 k1dav-c/agentapi 符合這個平台的最新正式發行版：下載的檔案必須符合發行版的
+  `checksums.txt`，執行起來也必須是那個版本，請求無法指定版本或網址。AgentAPI 從不執行 `sudo`，
+  只取代使用者能寫入其目錄的程式，否則回報一次性的修正方式（`blocked`）。`POST /update` 會造成
+  改動，所以其他來源的網頁送不出這個請求；它也和其他端點一樣需要 token。
 - hub（`lib/hub`）持有實例的 API token，只會送到以它的 secret 簽章的事件（timestamp 和 body 的
   HMAC，不超過 10 分鐘，每次傳送只處理一次）或已登入者加入的實例網址。實例的網址由另一個 AgentAPI
   回應時（摘要裡是別的實例 ID），代理拒絕轉送。事件必須寫明是哪一次執行（`server_id`），而且只能
