@@ -357,6 +357,8 @@ instance left disappears.
 
 ### Recent changes
 
+![The list by the agents' latest changes: one list without group headers, the most recent first](screenshots/hub-recent.png)
+
 The switch beside the search sets the list's order. **Groups**, the default, is the order above:
 what needs you first within each group. **Recent changes** is one list, the most recent change
 first, whatever the group or the state. Each row then shows how long ago it last changed and, where

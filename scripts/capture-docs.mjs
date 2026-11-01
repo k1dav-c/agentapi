@@ -1041,6 +1041,14 @@ try {
       await elementShot(page, page.locator('section[aria-labelledby="hub-spend"]'), 'hub-spend.png');
       // The AgentAPI versions they run: the overview's last card.
       await elementShot(page, page.locator('section[aria-labelledby="hub-versions"]'), 'hub-versions.png');
+      // The list by the agents' latest changes, without groups; then the groups again.
+      const order = page.getByRole('group', {name: 'Order the agents'});
+      const groupHeader = page.locator('aside button[aria-expanded]', {hasText: 'Client work'});
+      await order.getByRole('button', {name: 'Recent changes'}).click();
+      await groupHeader.waitFor({state: 'detached'});
+      await elementShot(page, page.locator('aside'), 'hub-recent.png');
+      await order.getByRole('button', {name: 'Groups'}).click();
+      await groupHeader.waitFor();
       // The Add dialog: joining a machine, the secret masked, and adding an instance by its URL.
       await page.getByRole('button', {name: 'Add agents'}).click();
       const addDialog = page.getByRole('dialog');

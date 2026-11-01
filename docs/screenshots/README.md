@@ -76,6 +76,7 @@ device scale factor of 1.
 | [hub-sign-in.png](hub-sign-in.png) | Signing in to the hub, beside its picture of agents in their states |
 | [hub-list.png](hub-list.png) | The hub's list in two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's AgentAPI version, one older than the hub |
 | [hub-add.png](hub-add.png) | The Add dialog: joining a machine (the hub's address, updates from the hub, the command and a prompt for an agent, the secret masked), or adding an instance by its URL and token |
+| [hub-recent.png](hub-recent.png) | The hub's list by the agents' latest changes: one list without group headers, the most recent first, and each row's group where it has room |
 | [hub-phone.png](hub-phone.png) | The hub's list on a phone, in groups |
 | [hub-phone-menu.png](hub-phone-menu.png) | A row's menu on a phone: its group, a new one, and Forget |
 | [hub-muted.png](hub-muted.png) | The list on a phone with an agent's login wait muted |
