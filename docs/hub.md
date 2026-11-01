@@ -327,8 +327,10 @@ instance that joined with its webhook comes back the next time it starts.
 | Instance token (`--instance-token`, or one per added instance) | The hub, and the AgentAPIs | Lets the hub call the AgentAPIs; browsers never get it |
 
 - The hub takes an event only with a valid `X-AgentAPI-Signature-256` (HMAC-SHA256 of
-  `<timestamp>.<body>`), a timestamp at most 10 minutes off, and a delivery ID it hasn't taken yet.
-  This matters because an event names the URL the hub sends an instance token to.
+  `<timestamp>.<body>`), a timestamp at most 10 minutes off, and a delivery ID (`id`) it hasn't
+  taken yet. AgentAPI always sends one; an event without it is refused, since a copy of it would
+  work again for those 10 minutes. This matters because an event names the URL the hub sends an
+  instance token to.
 - A signed event can add an instance the hub doesn't have, and move one the hub doesn't follow
   right now (stopped, or its summary stream isn't open) to the event's URL. It never moves an
   instance the hub follows, whatever run it names, or one added by hand. An `instance.*` event

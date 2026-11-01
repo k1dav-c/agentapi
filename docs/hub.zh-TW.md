@@ -296,8 +296,9 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 | 實例 token（`--instance-token`，或手動加入時各自的） | hub 和各 AgentAPI | 讓 hub 呼叫 AgentAPI；瀏覽器永遠拿不到 |
 
 - hub 只接受具備有效 `X-AgentAPI-Signature-256`（`<timestamp>.<body>` 的 HMAC-SHA256）、
-  timestamp 誤差不超過 10 分鐘、而且 delivery ID 沒處理過的事件。這很重要：事件裡的網址，就是
-  hub 送出實例 token 的地方。
+  timestamp 誤差不超過 10 分鐘、而且 delivery ID（`id`）沒處理過的事件。AgentAPI 一定會送
+  delivery ID；沒有的事件一律拒絕，否則同一份事件在這 10 分鐘內重送也會生效。這很重要：事件裡的
+  網址，就是 hub 送出實例 token 的地方。
 - 有簽章的事件可以新增 hub 還沒有的實例，也可以把 hub 目前沒在追蹤的實例（已停止，或摘要串流沒有
   連上）改到事件裡的網址。hub 正在追蹤的實例，不論事件寫的是哪一次執行，事件都改不了它的網址；手動
   加入的實例也一樣。`instance.*` 事件必須寫明是哪一次執行（`server_id`，AgentAPI 1.0 以後都會送）。

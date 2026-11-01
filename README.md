@@ -1449,9 +1449,9 @@ what needs you. Pick one to open it in the chat. On a phone the list and the cha
   (`--instance-token`, or the one given when it was added) in place of your credentials. The
   browser never holds the instances' tokens or reaches them itself, so no instance needs CORS for
   it.
-- It accepts only events signed with `--secret` and at most 10 minutes old, and ignores a delivery
-  it already received, because an event names the URL the hub sends an instance token to. An event
-  never moves an instance the hub follows, or one added by hand; see the
+- It accepts only events signed with `--secret`, at most 10 minutes old and with a delivery ID, and
+  ignores a delivery it already received, because an event names the URL the hub sends an instance
+  token to. An event never moves an instance the hub follows, or one added by hand; see the
   [hub guide](docs/hub.md#tokens-and-security) for what one can do.
 - An instance the hub can't reach that also missed three heartbeats (3 minutes by default), such
   as one whose workspace was killed, counts as stopped; its next heartbeat brings it back.

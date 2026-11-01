@@ -274,6 +274,30 @@ func TestHubWebhookSignature(t *testing.T) {
 	assert.Equal(t, hub.ConnectionStopped, instances(t, hubSrv.URL)[0].Connection)
 }
 
+// An event without a delivery ID can't be told from a copy of it, which
+// would work again for the 10 minutes its signature holds: the hub refuses
+// it, and every copy.
+func TestHubRefusesEventsWithoutDeliveryID(t *testing.T) {
+	var logs lockedBuffer
+	h, err := hub.New(hub.Config{Token: hubToken, Secret: hubSecret, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	require.NoError(t, err)
+	hubSrv := httptest.NewServer(h.Handler())
+	t.Cleanup(hubSrv.Close)
+
+	at := time.Now()
+	captured := map[string]any{
+		"type": "instance.started", "created_at": at,
+		"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": "http://127.0.0.1:1", "agent_type": "claude"},
+	}
+	for range 2 {
+		assert.Equal(t, http.StatusBadRequest, postEvent(t, hubSrv.URL, captured, hubSecret, at))
+	}
+	assert.Empty(t, instances(t, hubSrv.URL))
+	check := map[string]any{"type": "webhook.test", "created_at": at, "instance": map[string]any{"id": "agentapi-hub-join-check"}}
+	assert.Equal(t, http.StatusBadRequest, postEvent(t, hubSrv.URL, check, hubSecret, at))
+	assert.Equal(t, 3, strings.Count(logs.String(), "Refused an event without a delivery ID"))
+}
+
 // An instance that isn't listening yet when its first event comes (it is
 // starting) is connecting, not unreachable, until it does; one that never
 // does is unreachable once the connect grace is over.

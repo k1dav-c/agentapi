@@ -73,6 +73,14 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not an AgentAPI event", http.StatusBadRequest)
 		return
 	}
+	if event.ID == "" {
+		// Every AgentAPI delivery has one. Without it the hub couldn't tell
+		// the event from a copy of it, which would work again for as long
+		// as its signature holds.
+		h.logger.Warn("Refused an event without a delivery ID", "instance", event.Instance.ID, "event", event.Type, "from", r.RemoteAddr)
+		http.Error(w, "the event has no delivery ID (id): is it AgentAPI?", http.StatusBadRequest)
+		return
+	}
 	instance := *event.Instance
 	isInstanceEvent := event.Type == instanceapi.EventInstanceStarted || event.Type == instanceapi.EventInstanceHeartbeat ||
 		event.Type == instanceapi.EventInstanceStopped
@@ -83,7 +91,7 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the event names no server_id: is it AgentAPI 1.0 or later?", http.StatusBadRequest)
 		return
 	}
-	if event.ID != "" && !h.deliveries.add(event.ID) {
+	if !h.deliveries.add(event.ID) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
