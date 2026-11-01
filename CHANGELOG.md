@@ -52,6 +52,12 @@
   secret.
 - The `agentapi-hub-join` skill covers updates from the hub: `--allow-update`, the one-time move of
   a program in `/usr/local/bin`, and a state database to keep conversations across updates.
+- The hub's list can also show every agent in one list, the most recent change first, whatever its
+  group: a switch next to the search box picks **Groups** or **Recent changes**, and the browser
+  keeps the choice. A change is the hub losing, finding or stopping an agent, a new state, a task
+  that starts or ends, what the agent waits for, and its title, queue, version or update; opening an
+  agent, its messages, spend and edits to groups or mutes don't move it. The hub keeps each agent's
+  `changed_at` in its file and sends it with the instances.
 
 ### Fixes
 
