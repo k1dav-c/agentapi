@@ -5,27 +5,12 @@
 import type {components} from "./api-schema";
 
 // InstanceUpdate is the summary's update: whether the AgentAPI takes updates
-// through its API (POST /update) and how far one got. AgentAPIs that can't
-// update this way leave it out. Declared here until api-schema.ts has it.
-export interface InstanceUpdate {
-  // allowed: allow-update is on for its machine.
-  allowed: boolean;
-  // blocked: allowed, but it can't replace its binary; why, and the
-  // one-time fix.
-  blocked?: string;
-  // state: idle, checking, downloading, waiting (for the agent to be
-  // idle), restarting or failed; a newer AgentAPI may add others.
-  state: string;
-  // target is the version it updates to, once known.
-  target?: string;
-  // error is why the last attempt failed.
-  error?: string;
-  // keeps_conversation: it runs with a state DB, so the conversation
-  // carries over the restart.
-  keeps_conversation: boolean;
-}
+// through its API (POST /update) and how far one got; AgentAPIs that can't
+// update this way leave it out. Its state stays open, as a newer AgentAPI
+// may add states.
+export type InstanceUpdate = Omit<components["schemas"]["UpdateStatus"], "state"> & {state: string};
 
-export type Summary = components["schemas"]["SummaryBody"] & {update?: InstanceUpdate};
+export type Summary = Omit<components["schemas"]["SummaryBody"], "update"> & {update?: InstanceUpdate};
 export type HubConnection = "connecting" | "connected" | "unreachable" | "stopped";
 
 // InstanceState is what a row says of an instance, the most pressing

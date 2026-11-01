@@ -88,6 +88,19 @@ describe("the setup command in blocked", () => {
     expect(setupCommand(`/usr/local/bin isn't writable. Run once: \`${COMMAND}\`.`)).toEqual({reason: "/usr/local/bin isn't writable.", command: COMMAND});
   });
 
+  // The text lib/selfupdate's Program.Blocked writes, with a home of /home/me.
+  test("what an AgentAPI sends", () => {
+    const command = "mkdir -p /home/me/.local/bin && cp /usr/local/bin/agentapi /home/me/.local/bin/agentapi && sudo ln -sf /home/me/.local/bin/agentapi /usr/local/bin/agentapi";
+    expect(setupCommand(`can't replace /usr/local/bin/agentapi: /usr/local/bin isn't writable. Move it to a directory you own, once: ${command}`)).toEqual({
+      reason: "can't replace /usr/local/bin/agentapi: /usr/local/bin isn't writable. Move it to a directory you own, once",
+      command,
+    });
+    // A copy in ~/.local/bin that can't be replaced either: no command to offer.
+    expect(setupCommand("can't replace /home/me/.local/bin/agentapi (which /usr/local/bin/agentapi links to): /home/me/.local/bin isn't writable")).toEqual({
+      reason: "can't replace /home/me/.local/bin/agentapi (which /usr/local/bin/agentapi links to): /home/me/.local/bin isn't writable",
+    });
+  });
+
   test("else from its mkdir -p to the end of its sentence", () => {
     expect(setupCommand(`${BLOCKED}.`)).toEqual({reason: "can't replace /usr/local/bin/agentapi: /usr/local/bin isn't writable", command: COMMAND});
     expect(setupCommand(`Fix it once: ${COMMAND}. Then update again.`)).toEqual({reason: "Then update again.", command: COMMAND});
