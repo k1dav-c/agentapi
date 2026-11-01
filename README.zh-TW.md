@@ -1218,7 +1218,8 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 - hub 透過自己開啟實例（`/i/<id>/...`），以實例的 API token（`--instance-token`，或加入時給的）
   取代你的憑證。瀏覽器不會拿到實例的 token，也不會直接連到實例，所以實例不必為它設定 CORS。
 - 只接受以 `--secret` 簽章、而且不超過 10 分鐘的事件，已處理過的傳送會被忽略：事件裡的網址就是
-  hub 送出實例 token 的地方。
+  hub 送出實例 token 的地方。hub 正在追蹤的實例和手動加入的實例，事件都改不了它們的網址；事件能做
+  什麼，見 [hub 指南](docs/hub.zh-TW.md#token-與安全性)。
 - hub 連不到、又錯過三次 heartbeat（預設 3 分鐘）的實例，例如 workspace 被強制關掉的，視為已停止；
   它下一次送 heartbeat 時就會回來。
 - 實例會保存在 `~/.agentapi/hub/instances.json`（`--state`，只有擁有者能讀取），重新啟動後仍記得。

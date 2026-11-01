@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -298,10 +299,16 @@ func TestHubConnectGrace(t *testing.T) {
 	require.NoError(t, err)
 	startInstanceOn(t, listener, "dev-1:3284")
 	// Stopped before the instance closes (cleanups run last first): its
-	// server waits for the hub's stream to end. No server ID: the hub took
-	// the instance's own from its summary.
+	// server waits for the hub's stream to end. With the instance's own
+	// server ID, which the hub took from its summary.
 	t.Cleanup(func() {
-		stopped := map[string]any{"id": "e3", "type": "instance.stopped", "created_at": time.Now(), "instance": map[string]any{"id": "dev-1:3284", "url": "http://" + addr}}
+		serverID := ""
+		for _, instance := range instances(t, hubSrv.URL) {
+			if instance.ID == "dev-1:3284" {
+				serverID = instance.ServerID
+			}
+		}
+		stopped := map[string]any{"id": "e3", "type": "instance.stopped", "created_at": time.Now(), "instance": map[string]any{"id": "dev-1:3284", "server_id": serverID, "url": "http://" + addr}}
 		assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, stopped, hubSecret, time.Now()))
 	})
 	require.Eventually(t, func() bool {
@@ -403,6 +410,81 @@ func TestHubKeepsTheRunItFollows(t *testing.T) {
 	moved := instances(t, hubSrv.URL)[0]
 	assert.Equal(t, "http://127.0.0.1:1", moved.URL)
 	assert.Equal(t, "twin", moved.ServerID)
+}
+
+// elsewhere serves another URL and counts the requests it got: the hub
+// must send it nothing of an instance it doesn't move there.
+func elsewhere(t *testing.T) (string, *atomic.Int32) {
+	t.Helper()
+	var got atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		got.Add(1)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, &got
+}
+
+// A signed event moves no instance the hub follows, whatever run it names:
+// the hub would send that URL the instance's token, and the user's
+// messages and approvals. An instance.* event that names no run is
+// refused; AgentAPI has named it since 1.0.
+func TestHubEventsDontMoveAFollowedInstance(t *testing.T) {
+	instSrv, _ := startInstance(t)
+	hubSrv := startHub(t, "")
+	joined := joinInstance(t, hubSrv.URL, instSrv.URL)
+	otherURL, got := elsewhere(t)
+
+	event := func(id, typ, instanceID, serverID string) map[string]any {
+		instance := map[string]any{"id": instanceID, "url": otherURL, "agent_type": "claude"}
+		if serverID != "" {
+			instance["server_id"] = serverID
+		}
+		return map[string]any{"id": id, "type": typ, "created_at": time.Now(), "instance": instance}
+	}
+	for i, typ := range []string{"instance.heartbeat", "instance.started", "instance.stopped"} {
+		assert.Equal(t, http.StatusBadRequest, postEvent(t, hubSrv.URL, event("n"+strconv.Itoa(i), typ, joined.ID, ""), hubSecret, time.Now()), typ)
+	}
+	assert.Equal(t, http.StatusBadRequest, postEvent(t, hubSrv.URL, event("n9", "instance.started", "dev-9:3284", ""), hubSecret, time.Now()))
+	assert.Len(t, instances(t, hubSrv.URL), 1, "nor added")
+
+	// Its own run, or another, at another URL.
+	assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, event("r1", "instance.heartbeat", joined.ID, joined.ServerID), hubSecret, time.Now()))
+	assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, event("r2", "instance.started", joined.ID, "other"), hubSecret, time.Now()))
+
+	kept := instances(t, hubSrv.URL)[0]
+	assert.Equal(t, instSrv.URL, kept.URL)
+	assert.Equal(t, joined.ServerID, kept.ServerID)
+	assert.Equal(t, hub.ConnectionConnected, kept.Connection)
+	assert.Equal(t, http.StatusOK, request(t, http.MethodGet, hubSrv.URL+"/i/"+joined.ID+"/status", hubToken, nil, nil))
+	assert.Never(t, func() bool { return got.Load() > 0 }, 300*time.Millisecond, 20*time.Millisecond, "nothing went to the other URL")
+}
+
+// An instance added by hand stays at its URL: no event moves it, not even
+// while the hub can't reach it.
+func TestHubAddedInstanceStays(t *testing.T) {
+	instSrv, _ := startInstance(t)
+	hubSrv := startHub(t, "")
+	var added hub.Instance
+	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubSrv.URL+"/api/instances", hubToken, map[string]string{"url": instSrv.URL, "token": instanceToken}, &added))
+	otherURL, got := elsewhere(t)
+	// Gone, as far as the hub can tell (Close would wait for the hub's
+	// stream to end).
+	_ = instSrv.Listener.Close()
+	instSrv.CloseClientConnections()
+	require.Eventually(t, func() bool {
+		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionUnreachable
+	}, 10*time.Second, 20*time.Millisecond)
+
+	heartbeat := map[string]any{
+		"id": "m1", "type": "instance.heartbeat", "created_at": time.Now(),
+		"instance": map[string]any{"id": added.ID, "server_id": "another-run", "url": otherURL, "agent_type": "claude"},
+	}
+	assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, heartbeat, hubSecret, time.Now()))
+	kept := instances(t, hubSrv.URL)[0]
+	assert.Equal(t, instSrv.URL, kept.URL)
+	assert.Equal(t, hub.SourceManual, kept.Source)
+	assert.Never(t, func() bool { return got.Load() > 0 }, 300*time.Millisecond, 20*time.Millisecond, "nothing went to the other URL")
 }
 
 // An instance added by its URL, with its own token.

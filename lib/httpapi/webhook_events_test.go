@@ -537,6 +537,7 @@ func TestWebhookHeartbeat(t *testing.T) {
 	clock := quartz.NewMock(t)
 	d := testDispatcher(t, WebhookConfig{Events: []string{"instance.heartbeat"}, Heartbeat: time.Minute}, clock)
 	d.snapshot = func() any { return WebhookInstanceState{Status: AgentStatusRunning} }
+	d.setInstance(WebhookInstance{ID: "host:3284"})
 	trap := clock.Trap().NewTimer("webhook", "heartbeat")
 	defer trap.Close()
 	ctx := t.Context()
@@ -550,6 +551,9 @@ func TestWebhookHeartbeat(t *testing.T) {
 	require.Len(t, events, 1)
 	assert.Equal(t, webhookEventInstanceHeartbeat, events[0].Type)
 	assert.Equal(t, AgentStatusRunning, events[0].Data.(WebhookInstanceState).Status)
+	// A hub refuses an instance event that names no run.
+	assert.Equal(t, d.serverID, events[0].Instance.ServerID)
+	assert.NotEmpty(t, d.serverID)
 }
 
 // A test event goes out once, whatever the events chosen, and says how the

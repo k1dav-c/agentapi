@@ -48,8 +48,8 @@ type Instance struct {
 	// answeredBy is the ID of another AgentAPI that answers at URL, while
 	// it does: the proxy doesn't send it this instance's requests.
 	answeredBy string
-	// refusedRun is the server ID of the last other run whose URL change
-	// the hub refused, to log it once.
+	// refusedRun is the server ID of the last run whose URL change the hub
+	// refused, to log it once.
 	refusedRun string
 }
 

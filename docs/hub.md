@@ -329,9 +329,19 @@ instance that joined with its webhook comes back the next time it starts.
 - The hub takes an event only with a valid `X-AgentAPI-Signature-256` (HMAC-SHA256 of
   `<timestamp>.<body>`), a timestamp at most 10 minutes off, and a delivery ID it hasn't taken yet.
   This matters because an event names the URL the hub sends an instance token to.
+- A signed event can add an instance the hub doesn't have, and move one the hub doesn't follow
+  right now (stopped, or its summary stream isn't open) to the event's URL. It never moves an
+  instance the hub follows, whatever run it names, or one added by hand. An `instance.*` event
+  must name its run (`server_id`, which AgentAPI 1.0 and later send). An instance that moves leaves
+  the token given for its old URL behind; `--instance-token` still applies.
+- Every joined machine has the same secret, in a file any agent there can read (one in the bypass
+  permission mode reads files without asking). Such an agent, steered by something it read, can
+  still announce an instance ID the hub isn't following right now at an address of its own. The
+  hub then sends that address `--instance-token`, and the messages and approvals you send that
+  instance. Join only machines you would give the instance token, and add an instance by hand if
+  it must never move. A key per machine would close this; the hub doesn't have one yet.
 - The hub sends an instance's requests only while the AgentAPI at its URL says it is that
-  instance, and doesn't let another run with the same ID move it elsewhere while it still follows
-  this one.
+  instance.
 - The session cookie is HttpOnly and SameSite=Lax, derived from the hub token rather than holding
   it. The proxy drops the browser's cookies and its `Authorization`, `Origin`, `Referer` and
   `Sec-Fetch-*` headers, and drops the instance's `Set-Cookie`, so neither side's credentials
@@ -374,6 +384,9 @@ instance that joined with its webhook comes back the next time it starts.
 | Unreachable: connection refused or timed out | Wrong `--public-url`, or the hub can't reach the VPN | Check the URL from the hub's machine with `curl <url>/summary` |
 | Unreachable: `another AgentAPI answers at this URL` | The instance's address now belongs to another machine (a new DHCP lease), or `--public-url` names another machine | Check `--public-url`; an instance that moved sends its new address with its next heartbeat, within a minute |
 | The hub logs "Two AgentAPIs report the same instance ID" | Two machines have the same name, so their AgentAPIs on the same port have the same ID; the hub keeps the one it follows | Rename one machine, or give its AgentAPIs `--instance-id` |
+| The hub logs "An instance's event names another URL" | Its `--public-url` changed while the hub follows it at the old one | Nothing: the hub keeps the URL that works, and takes the new one once the old one stops answering |
+| The hub logs "An instance added by hand keeps its URL" | It was added by one URL, and its webhook names another | Make `--public-url` the URL it was added by, or forget it and let its webhook add it |
+| The hub logs "Refused an instance event that names no server ID" | Something that isn't AgentAPI 1.0 or later sent it, signed with the hub's secret | Update the sender; if you don't know it, find which machine with the secret sends it |
 | Unreachable, and the hub's VPN client runs in userspace | The hub's connections don't go through the VPN | Set `ALL_PROXY` to the VPN client's SOCKS5 proxy for the hub |
 | "is it AgentAPI 1.1 or later?" when adding | The instance has no summary | Update it with `agentapi update` |
 | The page says the hub didn't answer | Wrong address, or the hub isn't running | Open `http://<hub>:3290/api/session`; it answers JSON when the hub runs |

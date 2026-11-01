@@ -506,8 +506,10 @@ agent 啟動時才讀取設定，因此變更需要重新啟動；native agent �
   HMAC secret 只能寫入、無法讀回。
 - hub（`lib/hub`）持有實例的 API token，只會送到以它的 secret 簽章的事件（timestamp 和 body 的
   HMAC，不超過 10 分鐘，每次傳送只處理一次）或已登入者加入的實例網址。實例的網址由另一個 AgentAPI
-  回應時（摘要裡是別的實例 ID），代理拒絕轉送；hub 仍在追蹤、且 3 分鐘內有消息的實例，另一次以相同
-  ID 執行的 AgentAPI 也無法把它移到別處。瀏覽器以 hub token 登入，換取
+  回應時（摘要裡是別的實例 ID），代理拒絕轉送。事件必須寫明是哪一次執行（`server_id`），而且只能
+  搬動 hub 目前沒在追蹤的實例（摘要串流沒有連上），手動加入的實例一律不動；實例搬走後，hub 不再送出
+  它自己的 token。每台加入的機器都有同一個 secret，所以任何一台仍然可以把 hub 沒在追蹤的實例 ID
+  指向自己的位址，拿到 `--instance-token`；每台機器各用一把金鑰才能根除。瀏覽器以 hub token 登入，換取
   由 token 推導出的 HttpOnly、SameSite=Lax cookie；代理會移除瀏覽器的 cookie 以及 `Authorization`、
   `Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
   hub 和 AgentAPI 一樣，拒絕其他來源的網頁送出會造成改動的請求；設定 `--allowed-hosts` 時，只回應

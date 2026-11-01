@@ -298,8 +298,16 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 - hub 只接受具備有效 `X-AgentAPI-Signature-256`（`<timestamp>.<body>` 的 HMAC-SHA256）、
   timestamp 誤差不超過 10 分鐘、而且 delivery ID 沒處理過的事件。這很重要：事件裡的網址，就是
   hub 送出實例 token 的地方。
-- 只有在那個網址上的 AgentAPI 自稱是這個實例時，hub 才會轉送這個實例的請求；hub 還在追蹤某個實例時，
-  另一次以相同 ID 執行的 AgentAPI 也不能把它改到別的網址。
+- 有簽章的事件可以新增 hub 還沒有的實例，也可以把 hub 目前沒在追蹤的實例（已停止，或摘要串流沒有
+  連上）改到事件裡的網址。hub 正在追蹤的實例，不論事件寫的是哪一次執行，事件都改不了它的網址；手動
+  加入的實例也一樣。`instance.*` 事件必須寫明是哪一次執行（`server_id`，AgentAPI 1.0 以後都會送）。
+  實例換了網址後，hub 不再送出為舊網址設定的 token；`--instance-token` 照常適用。
+- 每台加入的機器都有同一個 secret，存在那台機器上任何 agent 都讀得到的檔案裡（bypass 權限模式的
+  agent 讀檔不會先問）。這樣的 agent 若受到讀到的內容誘導，仍然可以拿 hub 目前沒在追蹤的實例 ID，
+  宣告一個它自己的位址；hub 就會把 `--instance-token`，以及你送給那個實例的訊息和核准，送到那個
+  位址。只讓你願意交出實例 token 的機器加入；網址絕不能變的實例，請手動加入。每台機器各用一把金鑰
+  才能根除這個問題，hub 目前還沒有這個功能。
+- 只有在那個網址上的 AgentAPI 自稱是這個實例時，hub 才會轉送這個實例的請求。
 - session cookie 是 HttpOnly、SameSite=Lax，由 hub token 推導而來，裡面沒有 token 本身。代理會
   移除瀏覽器的 cookie 以及 `Authorization`、`Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的
   `Set-Cookie`，雙方的憑證都不會傳到另一邊。
@@ -338,6 +346,9 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 | Unreachable：connection refused 或逾時 | `--public-url` 錯誤，或 hub 連不上 VPN | 在 hub 的機器上用 `curl <url>/summary` 檢查網址 |
 | Unreachable：`another AgentAPI answers at this URL` | 實例的位址現在屬於另一台機器（DHCP 換了位址），或 `--public-url` 指向別台機器 | 檢查 `--public-url`；搬走的實例會在下一次 heartbeat（一分鐘內）送出新位址 |
 | hub 的 log 有「Two AgentAPIs report the same instance ID」 | 兩台機器名稱相同，同一個 port 上的 AgentAPI 就有相同的 ID；hub 保留它正在追蹤的那個 | 把其中一台改名，或給它的 AgentAPI 設定 `--instance-id` |
+| hub 的 log 有「An instance's event names another URL」 | hub 還在用舊網址追蹤它時，它的 `--public-url` 改了 | 不用處理：hub 繼續用連得上的網址，等舊網址不再回應才改用新的 |
+| hub 的 log 有「An instance added by hand keeps its URL」 | 它是用某個網址手動加入的，它的 webhook 卻寫了另一個網址 | 把 `--public-url` 改成加入時用的網址，或在 hub 移除它，讓它的 webhook 重新加入 |
+| hub 的 log 有「Refused an instance event that names no server ID」 | 送出事件的不是 AgentAPI 1.0 以後的版本，卻有 hub 的 secret 簽章 | 更新送出事件的程式；若不知道是誰，找出是哪台有 secret 的機器送的 |
 | Unreachable，而且 hub 的 VPN 用戶端以 userspace 模式執行 | hub 的連線沒有經過 VPN | 為 hub 設定 `ALL_PROXY`，指向 VPN 用戶端的 SOCKS5 proxy |
 | 加入時出現「is it AgentAPI 1.1 or later?」 | 這個實例沒有摘要 | 用 `agentapi update` 更新它 |
 | 頁面說 hub 沒有回應 | 位址錯誤，或 hub 沒有執行 | 開啟 `http://<hub>:3290/api/session`；hub 執行中會回傳 JSON |

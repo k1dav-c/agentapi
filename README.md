@@ -1450,7 +1450,9 @@ what needs you. Pick one to open it in the chat. On a phone the list and the cha
   browser never holds the instances' tokens or reaches them itself, so no instance needs CORS for
   it.
 - It accepts only events signed with `--secret` and at most 10 minutes old, and ignores a delivery
-  it already received, because an event names the URL the hub sends an instance token to.
+  it already received, because an event names the URL the hub sends an instance token to. An event
+  never moves an instance the hub follows, or one added by hand; see the
+  [hub guide](docs/hub.md#tokens-and-security) for what one can do.
 - An instance the hub can't reach that also missed three heartbeats (3 minutes by default), such
   as one whose workspace was killed, counts as stopped; its next heartbeat brings it back.
 - It keeps the instances in `~/.agentapi/hub/instances.json` (`--state`, readable by its owner
