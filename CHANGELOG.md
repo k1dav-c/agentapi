@@ -58,6 +58,11 @@
   that starts or ends, what the agent waits for, and its title, queue, version or update; opening an
   agent, its messages, spend and edits to groups or mutes don't move it. The hub keeps each agent's
   `changed_at` in its file and sends it with the instances.
+- Pin agents to the top of the hub's list, as on GitHub: **Pin to top** in a row's menu (or `p`)
+  puts it in a **Pinned** section above the rest, in either order, and **Move up** and **Move down**
+  arrange the pinned ones. The hub keeps the pins, so every browser and phone shows the same; they
+  don't count as changes. `PATCH /api/instances/{id}` takes `{"pinned": …}`, and `PUT /api/pins`
+  sets their order.
 
 ### Fixes
 
