@@ -32,7 +32,7 @@ const finished: HubInstance = {
   } as Summary,
 };
 
-const row = (order: ListOrder, target: HubInstance = finished) =>
+const row = (order: ListOrder, target: HubInstance = finished, pinned?: {first: boolean; last: boolean}) =>
   renderToStaticMarkup(
     <InstanceRow
       instance={target}
@@ -42,11 +42,14 @@ const row = (order: ListOrder, target: HubInstance = finished) =>
       order={order}
       selected={false}
       now={Date.parse("2026-11-01T10:00:00Z")}
+      pinned={pinned}
       onSelect={() => {}}
       onForget={() => {}}
       onGroup={() => {}}
       onNewGroup={() => {}}
       onMute={() => {}}
+      onPin={() => {}}
+      onMove={() => {}}
     />,
   );
 
@@ -68,5 +71,34 @@ describe("InstanceRow in the list's orders", () => {
   test("recent: an instance in no group names none", () => {
     const html = row("recent", {...finished, group: undefined});
     expect(html).not.toContain("Group:");
+  });
+});
+
+describe("InstanceRow among the pinned ones", () => {
+  const top = {first: true, last: false};
+
+  test("groups: its group and a pin, the age of what it does", () => {
+    const html = row("groups", {...finished, pin: 1}, top);
+    expect(html).toContain('title="Group: Client work"');
+    expect(html).toContain("lucide-pin");
+    expect(html).toContain(">20m</span>");
+    expect(html).toContain("checkout-api, Finished, 20m: Deploy the release. Pinned. Group: Client work");
+  });
+
+  test("recent: the age of its latest change", () => {
+    const html = row("recent", {...finished, pin: 1}, top);
+    expect(html).toContain("checkout-api, Finished, 19m: Deploy the release. Pinned. Group: Client work");
+  });
+
+  test("in no group: a pin, no group", () => {
+    const html = row("groups", {...finished, group: undefined, pin: 1}, top);
+    expect(html).toContain("lucide-pin");
+    expect(html).not.toContain("Group:");
+  });
+
+  test("a row that isn't pinned has no pin", () => {
+    const html = row("groups");
+    expect(html).not.toContain("lucide-pin");
+    expect(html).not.toContain("Pinned");
   });
 });

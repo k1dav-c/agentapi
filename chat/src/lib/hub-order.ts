@@ -1,8 +1,9 @@
 // The hub list's two orders: in its groups, what needs you first in each
 // (groupInstances), or one list by the latest change, the most recent
-// first, whatever the group. Each browser keeps its choice.
+// first, whatever the group. Each browser keeps its choice. The instances
+// pinned on the hub come first in both, in their own order.
 
-import {activity, displayName, groupInstances, matchesFilter, matchesSearch, needsYou, type HubFilter, type HubGroup, type HubInstance} from "./hub";
+import {activity, displayName, groupInstances, groupNames, matchesFilter, matchesSearch, needsYou, type HubFilter, type HubGroup, type HubInstance} from "./hub";
 
 export type ListOrder = "groups" | "recent";
 
@@ -50,6 +51,38 @@ export function sortRecent(instances: Iterable<HubInstance>): HubInstance[] {
     .map(({instance}) => instance);
 }
 
+// pinOf is an instance's place among the pinned ones, from 1; none when it
+// isn't pinned, or the hub sent something else.
+export function pinOf(instance: HubInstance): number | undefined {
+  const pin = instance.pin;
+  return typeof pin === "number" && Number.isInteger(pin) && pin > 0 ? pin : undefined;
+}
+
+// sortPinned returns the pinned instances in the hub's order: by place, ties
+// by ID, as the hub numbers them. Two share a place for a moment while the
+// hub's events of an order arrive one by one.
+export function sortPinned(instances: Iterable<HubInstance>): HubInstance[] {
+  return [...instances]
+    .filter((instance) => pinOf(instance) !== undefined)
+    .sort((a, b) => pinOf(a)! - pinOf(b)! || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+// movePin moves the pinned instance id one place up (step -1) or down (1)
+// past the next pinned one the list shows (shown: a filter or a search may
+// hide some), and returns the new order of all the pinned ones (order), for
+// the hub; none when it is at that end already, or isn't among them.
+export function movePin(order: readonly string[], shown: readonly string[], id: string, step: -1 | 1): string[] | undefined {
+  const visible = new Set(shown);
+  if (!visible.has(id) || !order.includes(id)) return undefined;
+  let neighbor = order.indexOf(id) + step;
+  while (neighbor >= 0 && neighbor < order.length && !visible.has(order[neighbor])) neighbor += step;
+  if (neighbor < 0 || neighbor >= order.length) return undefined;
+  const moved = order.filter((other) => other !== id);
+  const at = moved.indexOf(order[neighbor]);
+  moved.splice(step < 0 ? at : at + 1, 0, id);
+  return moved;
+}
+
 // ListView is how the list shows the instances: which ones (the filter and
 // the search) and in what order.
 export interface ListView {
@@ -58,13 +91,40 @@ export interface ListView {
   order: ListOrder;
 }
 
-// listGroups is what the list shows: the instances that pass the filter and
-// the search, in their groups, or in the recent order as one block with no
-// name, which gets no header; none when none passes.
-export function listGroups(instances: Iterable<HubInstance>, {filter, query, order}: ListView): HubGroup[] {
-  const visible = [...instances].filter((instance) => matchesFilter(instance, filter) && matchesSearch(instance, query));
-  if (order === "groups") return groupInstances(visible);
-  if (visible.length === 0) return [];
-  const rows = sortRecent(visible);
-  return [{name: "", instances: rows, needsYou: needsYou(rows)}];
+// The keys of the pinned section and of the recent order's rows, as the
+// browser keeps the sections it folded, beside the groups' names: a group's
+// name has no space at either end.
+export const pinnedKey = " pinned";
+export const recentKey = " recent";
+
+// A section of the list: the pinned instances, a group (name; "" for the
+// instances in no group), or the recent order's rows.
+export interface ListSection extends HubGroup {
+  // key tells it from the others, as the browser keeps it folded.
+  key: string;
+  // label is its header; "" when the list shows none.
+  label: string;
+  pinned?: true;
+}
+
+// listSections is what the list shows: the instances that pass the filter
+// and the search, the pinned ones first, then the others in their groups or
+// by their latest change; none when none passes. Once there is a group, the
+// groups get headers; below pinned ones every section does, so that the
+// pinned ones read apart from the rest.
+export function listSections(instances: Iterable<HubInstance>, {filter, query, order}: ListView): ListSection[] {
+  const all = [...instances];
+  const visible = all.filter((instance) => matchesFilter(instance, filter) && matchesSearch(instance, query));
+  const pinned = sortPinned(visible);
+  const rest = visible.filter((instance) => pinOf(instance) === undefined);
+  const headers = pinned.length > 0 || (order === "groups" && groupNames(all).length > 0);
+  const sections: ListSection[] = [];
+  if (pinned.length > 0) sections.push({key: pinnedKey, label: "Pinned", name: "", pinned: true, instances: pinned, needsYou: needsYou(pinned)});
+  if (order === "groups") {
+    for (const group of groupInstances(rest)) sections.push({...group, key: group.name, label: headers ? group.name || "Ungrouped" : ""});
+  } else if (rest.length > 0) {
+    const rows = sortRecent(rest);
+    sections.push({key: recentKey, label: headers ? "Recent changes" : "", name: "", instances: rows, needsYou: needsYou(rows)});
+  }
+  return sections;
 }

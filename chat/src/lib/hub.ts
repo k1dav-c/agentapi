@@ -46,6 +46,10 @@ export interface HubInstance {
   // muted is what it waited for when someone muted it; the hub ends the
   // mute once that changes.
   muted?: string;
+  // pin is its place among the instances pinned to the top of the list,
+  // from 1; none when it isn't pinned. The hub keeps them, numbered without
+  // gaps.
+  pin?: number;
   summary?: Summary | null;
   // state is as the hub sends it; instanceState reads it.
   state: string;

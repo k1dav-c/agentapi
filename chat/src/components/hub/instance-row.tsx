@@ -1,7 +1,7 @@
 "use client";
 
 import {useState} from "react";
-import {Bell, BellOff, ChevronRight, Folder, FolderPlus, MoreHorizontal, Pencil, Trash2} from "lucide-react";
+import {ArrowDown, ArrowUp, Bell, BellOff, ChevronRight, Folder, FolderPlus, MoreHorizontal, Pencil, Pin, PinOff, Trash2} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {Button} from "@/components/ui/button";
 import {
@@ -62,6 +62,9 @@ export function InstanceRow({
   onGroup,
   onNewGroup,
   onMute,
+  pinned,
+  onPin,
+  onMove,
 }: {
   instance: HubInstance;
   // hubVersion is the hub's own version, which marks the older instances.
@@ -80,6 +83,14 @@ export function InstanceRow({
   onNewGroup: () => void;
   // Mutes what it waits for now, until that changes; false ends the mute.
   onMute: (muted: boolean) => void;
+  // pinned is the row's place in the pinned section, when it is pinned:
+  // whether it is the first or the last there. The row names its group,
+  // as in the recent order.
+  pinned?: {first: boolean; last: boolean};
+  // Pins it below the pinned ones; false unpins it.
+  onPin: (pinned: boolean) => void;
+  // Moves it up (-1) or down (1) among the pinned ones.
+  onMove: (step: -1 | 1) => void;
 }) {
   const state = instanceState(instance);
   const summary = instance.summary;
@@ -88,7 +99,7 @@ export function InstanceRow({
   const doing = activity(instance);
   const recent = order === "recent";
   const ago = formatAgo(recent ? changedAt(instance) : doing.since, now);
-  const group = recent ? (instance.group?.trim() ?? "") : "";
+  const group = recent || pinned ? (instance.group?.trim() ?? "") : "";
   const gone = state === "stopped" || state === "unreachable";
   const spend = summary?.spend;
   // The last spend and version of an instance the hub doesn't follow now:
@@ -111,13 +122,14 @@ export function InstanceRow({
           data-hub-row={instance.id}
           onClick={onSelect}
           aria-current={selected ? "true" : undefined}
-          aria-label={`${displayName(instance)}, ${stateLabel(instance)}${ago ? `, ${ago}` : ""}: ${doing.text}${olderThanHub(instance, hubVersion) ? ". Older than the hub" : ""}${update ? `. ${updateBadge(update).title}` : ""}${group ? `. Group: ${group}` : ""}`}
+          aria-label={`${displayName(instance)}, ${stateLabel(instance)}${ago ? `, ${ago}` : ""}: ${doing.text}${olderThanHub(instance, hubVersion) ? ". Older than the hub" : ""}${update ? `. ${updateBadge(update).title}` : ""}${pinned ? ". Pinned" : ""}${group ? `. Group: ${group}` : ""}`}
           className="flex min-w-0 flex-1 items-start gap-3 rounded-xl py-3 pr-1 pl-3.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           <StatusGlyph state={state} className="mt-[3px]" />
           <span className="min-w-0 flex-1">
             <span className="flex items-baseline gap-2">
               <span className="min-w-0 truncate text-[15px] leading-6 font-medium">{displayName(instance)}</span>
+              {pinned && <Pin aria-hidden="true" className="size-3 shrink-0 self-center fill-current text-muted-foreground/70" />}
               {version && <VersionTag version={version} hubVersion={hubVersion} lastKnown={lastKnown} className="text-xs text-muted-foreground" />}
               {group && <GroupTag group={group} />}
               {ago && <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">{ago}</span>}
@@ -181,11 +193,30 @@ export function InstanceRow({
               size="icon"
               className="my-auto mr-1 size-9 shrink-0 rounded-lg text-muted-foreground transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100 data-[state=open]:opacity-100 [@media(hover:hover)]:opacity-0"
               aria-label={`Actions for ${displayName(instance)}`}
+              data-hub-row-menu={instance.id}
             >
               <MoreHorizontal />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60 max-w-[calc(100vw-1rem)]">
+            {pinned ? (
+              <>
+                <DropdownMenuItem onSelect={() => onPin(false)}>
+                  <PinOff /> Unpin
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={pinned.first} onSelect={() => onMove(-1)}>
+                  <ArrowUp /> Move up
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={pinned.last} onSelect={() => onMove(1)}>
+                  <ArrowDown /> Move down
+                </DropdownMenuItem>
+              </>
+            ) : (
+              <DropdownMenuItem onSelect={() => onPin(true)}>
+                <Pin /> Pin to top
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
             {(state === "needs-you" || state === "muted") && (
               <>
                 <DropdownMenuItem onSelect={() => onMute(state === "needs-you")}>
@@ -224,9 +255,10 @@ export function InstanceRow({
   );
 }
 
-// GroupTag names a row's group in the recent order, in the room its first
-// line leaves before the age: whole, cut short, or not at all where not even
-// its start fits (it wraps to a second line, which its height leaves out).
+// GroupTag names a row's group in the recent order and among the pinned
+// ones, in the room its first line leaves before the age: whole, cut short,
+// or not at all where not even its start fits (it wraps to a second line,
+// which its height leaves out).
 function GroupTag({group}: {group: string}) {
   return (
     // Its own padding is the gap before it, so that out of sight it takes
@@ -242,7 +274,9 @@ function GroupTag({group}: {group: string}) {
   );
 }
 
-export function GroupHeader({group, folded, onToggle, onRename}: {group: HubGroup; folded: boolean; onToggle: () => void; onRename: () => void}) {
+// GroupHeader heads a section of the list with its label: a group (its
+// pencil renames it), the pinned ones, Ungrouped or the recent order's rows.
+export function GroupHeader({group, label, folded, onToggle, onRename}: {group: HubGroup; label: string; folded: boolean; onToggle: () => void; onRename: () => void}) {
   return (
     <div className="sticky top-0 z-10 bg-background px-2 pt-3 pb-1">
       <div className="flex items-center">
@@ -253,7 +287,7 @@ export function GroupHeader({group, folded, onToggle, onRename}: {group: HubGrou
           className="flex h-9 min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 text-left outline-none hover:bg-accent/60 focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           <ChevronRight aria-hidden="true" className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", !folded && "rotate-90")} />
-          <span className="min-w-0 truncate text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">{group.name || "Ungrouped"}</span>
+          <span className="min-w-0 truncate text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">{label}</span>
           <span className="shrink-0 text-[11px] text-muted-foreground/70 tabular-nums">{group.instances.length}</span>
           <GroupSpend group={group} />
           {group.needsYou > 0 && (

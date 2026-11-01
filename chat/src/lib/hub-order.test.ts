@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
 import {groupInstances, type HubInstance, type Summary} from "./hub";
-import {changedAt, listGroups, parseListOrder, sortRecent} from "./hub-order";
+import {changedAt, listSections, movePin, parseListOrder, pinnedKey, pinOf, recentKey, sortPinned, sortRecent, type ListSection} from "./hub-order";
 
 const summary = (overrides: Partial<Summary> = {}): Summary =>
   ({
@@ -110,7 +110,7 @@ describe("sortRecent", () => {
   });
 });
 
-describe("listGroups", () => {
+describe("listSections", () => {
   const rows = [
     changed("checkout", 2, {group: "Clients", state: "needs-you", summary: summary({attention: "request", title: "Deploy"})}),
     changed("billing", 8, {group: "Internal", state: "working", summary: summary({status: "running", title: "Invoices"})}),
@@ -118,24 +118,155 @@ describe("listGroups", () => {
     changed("legacy", 9, {group: "Internal", state: "unreachable", connection: "unreachable"}),
     changed("site", 1, {group: "Clients"}),
   ];
+  // Pinned: billing on top, then docs.
+  const pinned = rows.map((row) => (row.id === "billing" ? {...row, pin: 1} : row.id === "docs" ? {...row, pin: 2} : row));
+  const shape = (sections: ListSection[]) => sections.map((section) => [section.label, ids(section.instances)]);
 
-  test("groups: what groupInstances makes of what passes", () => {
-    expect(listGroups(rows, {filter: "all", query: "", order: "groups"})).toEqual(groupInstances(rows));
+  test("groups: what groupInstances makes of what passes, each with a header once there is a group", () => {
+    const sections = listSections(rows, {filter: "all", query: "", order: "groups"});
+    expect(sections.map(({name, instances, needsYou}) => ({name, instances, needsYou}))).toEqual(groupInstances(rows));
+    expect(sections.map((section) => [section.key, section.label])).toEqual([
+      ["Clients", "Clients"],
+      ["Internal", "Internal"],
+      ["", "Ungrouped"],
+    ]);
   });
 
-  test("recent: one block with no name, by the latest change", () => {
-    const groups = listGroups(rows, {filter: "all", query: "", order: "recent"});
-    expect(groups.map((group) => [group.name, ids(group.instances), group.needsYou])).toEqual([["", ["legacy", "billing", "docs", "checkout", "site"], 1]]);
+  test("groups: no group, no headers", () => {
+    const ungrouped = rows.map((row) => ({...row, group: undefined}));
+    expect(shape(listSections(ungrouped, {filter: "all", query: "", order: "groups"}))).toEqual([["", ["checkout", "billing", "docs", "site", "legacy"]]]);
+  });
+
+  test("recent: one block with no header, by the latest change", () => {
+    const sections = listSections(rows, {filter: "all", query: "", order: "recent"});
+    expect(sections.map((section) => [section.key, section.label, section.name, ids(section.instances), section.needsYou])).toEqual([
+      [recentKey, "", "", ["legacy", "billing", "docs", "checkout", "site"], 1],
+    ]);
   });
 
   test("the filter and the search apply to both orders", () => {
-    expect(listGroups(rows, {filter: "offline", query: "", order: "recent"}).map((group) => ids(group.instances))).toEqual([["legacy"]]);
-    expect(listGroups(rows, {filter: "all", query: "deploy", order: "recent"}).map((group) => ids(group.instances))).toEqual([["docs", "checkout"]]);
-    expect(listGroups(rows, {filter: "all", query: "deploy", order: "groups"}).map((group) => [group.name, ids(group.instances)])).toEqual([
+    expect(listSections(rows, {filter: "offline", query: "", order: "recent"}).map((section) => ids(section.instances))).toEqual([["legacy"]]);
+    expect(listSections(rows, {filter: "all", query: "deploy", order: "recent"}).map((section) => ids(section.instances))).toEqual([["docs", "checkout"]]);
+    expect(shape(listSections(rows, {filter: "all", query: "deploy", order: "groups"}))).toEqual([
       ["Clients", ["checkout"]],
-      ["", ["docs"]],
+      ["Ungrouped", ["docs"]],
     ]);
-    expect(listGroups(rows, {filter: "working", query: "deploy", order: "recent"})).toEqual([]);
-    expect(listGroups(rows, {filter: "working", query: "deploy", order: "groups"})).toEqual([]);
+    expect(listSections(rows, {filter: "working", query: "deploy", order: "recent"})).toEqual([]);
+    expect(listSections(rows, {filter: "working", query: "deploy", order: "groups"})).toEqual([]);
+  });
+
+  test("groups: the pinned ones first, in their order, and not again in their groups", () => {
+    const sections = listSections(pinned, {filter: "all", query: "", order: "groups"});
+    expect(sections.map((section) => [section.key, section.label, ids(section.instances)])).toEqual([
+      [pinnedKey, "Pinned", ["billing", "docs"]],
+      ["Clients", "Clients", ["checkout", "site"]],
+      ["Internal", "Internal", ["legacy"]],
+    ]);
+    expect(sections[0]).toMatchObject({name: "", pinned: true, needsYou: 0});
+    expect(sections.slice(1).some((section) => section.pinned)).toBe(false);
+  });
+
+  test("recent: the pinned ones first, then the others by their latest change, under a header of their own", () => {
+    expect(shape(listSections(pinned, {filter: "all", query: "", order: "recent"}))).toEqual([
+      ["Pinned", ["billing", "docs"]],
+      ["Recent changes", ["legacy", "checkout", "site"]],
+    ]);
+  });
+
+  test("pinned ones and no group: the others under Ungrouped", () => {
+    const ungrouped = pinned.map((row) => ({...row, group: undefined}));
+    expect(shape(listSections(ungrouped, {filter: "all", query: "", order: "groups"}))).toEqual([
+      ["Pinned", ["billing", "docs"]],
+      ["Ungrouped", ["checkout", "site", "legacy"]],
+    ]);
+  });
+
+  test("the pinned ones' section counts what needs you there", () => {
+    const asks = pinned.map((row) => (row.id === "checkout" ? {...row, pin: 3} : row));
+    const [top] = listSections(asks, {filter: "all", query: "", order: "groups"});
+    expect([ids(top.instances), top.needsYou]).toEqual([["billing", "docs", "checkout"], 1]);
+  });
+
+  test("the filter and the search apply to the pinned ones too; a section none passes isn't there", () => {
+    expect(shape(listSections(pinned, {filter: "working", query: "", order: "groups"}))).toEqual([["Pinned", ["billing"]]]);
+    expect(shape(listSections(pinned, {filter: "all", query: "deploy", order: "recent"}))).toEqual([
+      ["Pinned", ["docs"]],
+      ["Recent changes", ["checkout"]],
+    ]);
+    // No pinned one passes: the list as it is without pins.
+    expect(shape(listSections(pinned, {filter: "offline", query: "", order: "recent"}))).toEqual([["", ["legacy"]]]);
+    expect(shape(listSections(pinned, {filter: "needs-you", query: "", order: "groups"}))).toEqual([["Clients", ["checkout"]]]);
+    expect(listSections(pinned, {filter: "all", query: "nothing like it", order: "groups"})).toEqual([]);
+  });
+});
+
+describe("pinOf", () => {
+  test("a place from 1; none for anything else", () => {
+    expect(pinOf(instance("a", {pin: 1}))).toBe(1);
+    expect(pinOf(instance("a", {pin: 12}))).toBe(12);
+    for (const pin of [undefined, 0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, "2" as unknown as number, null as unknown as number]) {
+      expect(pinOf(instance("a", {pin}))).toBeUndefined();
+    }
+  });
+});
+
+describe("sortPinned", () => {
+  test("the pinned ones by place, without the others", () => {
+    const rows = [instance("c", {pin: 3}), instance("free"), instance("a", {pin: 1}), instance("odd", {pin: 0}), instance("b", {pin: 2})];
+    expect(ids(sortPinned(rows))).toEqual(["a", "b", "c"]);
+  });
+
+  test("gaps and shared places, as while the hub's events arrive: by place, then by ID", () => {
+    const rows = [instance("z", {pin: 2}), instance("y", {pin: 7}), instance("x", {pin: 2}), instance("w", {pin: 5})];
+    expect(ids(sortPinned(rows))).toEqual(["x", "z", "w", "y"]);
+  });
+
+  test("one forgotten leaves no trace: the others keep their order", () => {
+    const rows = [instance("a", {pin: 1}), instance("b", {pin: 2}), instance("c", {pin: 3})];
+    expect(ids(sortPinned(rows.filter((row) => row.id !== "b")))).toEqual(["a", "c"]);
+  });
+});
+
+describe("movePin", () => {
+  const order = ["a", "b", "c"];
+
+  test("up and down past the next one", () => {
+    expect(movePin(order, order, "b", -1)).toEqual(["b", "a", "c"]);
+    expect(movePin(order, order, "b", 1)).toEqual(["a", "c", "b"]);
+    expect(movePin(order, order, "c", -1)).toEqual(["a", "c", "b"]);
+    expect(movePin(order, order, "a", 1)).toEqual(["b", "a", "c"]);
+  });
+
+  test("not past either end", () => {
+    expect(movePin(order, order, "a", -1)).toBeUndefined();
+    expect(movePin(order, order, "c", 1)).toBeUndefined();
+    expect(movePin(["a"], ["a"], "a", -1)).toBeUndefined();
+    expect(movePin(["a"], ["a"], "a", 1)).toBeUndefined();
+  });
+
+  test("past the next one the list shows; the hidden ones keep their places among the rest", () => {
+    // A filter hides b.
+    expect(movePin(order, ["a", "c"], "c", -1)).toEqual(["c", "a", "b"]);
+    expect(movePin(order, ["a", "c"], "a", 1)).toEqual(["b", "c", "a"]);
+    // Only hidden ones above it: the top of what shows.
+    expect(movePin(order, ["c"], "c", -1)).toBeUndefined();
+    expect(movePin(order, ["b", "c"], "b", -1)).toBeUndefined();
+  });
+
+  test("an instance that isn't pinned, or doesn't show, or a list with one gone: none, or around it", () => {
+    expect(movePin(order, order, "d", -1)).toBeUndefined();
+    expect(movePin(order, ["a", "c"], "b", 1)).toBeUndefined();
+    expect(movePin([], [], "a", 1)).toBeUndefined();
+    // One that left the list (forgotten) since: neither shown nor in the way.
+    expect(movePin(["a", "gone", "c"], ["a", "c"], "c", -1)).toEqual(["c", "a", "gone"]);
+  });
+
+  test("the order it returns has each pinned one once", () => {
+    for (const id of order) {
+      for (const step of [-1, 1] as const) {
+        const moved = movePin(order, order, id, step);
+        if (moved) expect([...moved].sort()).toEqual(order);
+      }
+    }
   });
 });

@@ -308,9 +308,10 @@ Each row shows the agent's name (`--name`, by default its working directory's na
 version ([Versions](#versions)), what it waits for or does, how long ago, the agent and the machine;
 a queue that isn't empty, what the agent spent in the last 24 hours ([Spend](#spend)) and a usage
 limit above 60% join them. An AgentAPI update under way, or one that failed, gets a line of its own
-([Updating from the hub](#updating-from-the-hub)). Within a [group](#groups), the rows sort by
-state in this order, then by name; [Recent changes](#recent-changes) sorts them by their latest
-change instead. Each state has a shape of its own, so it reads without its color:
+([Updating from the hub](#updating-from-the-hub)). [Pinned](#pinning) agents come first, in your
+order. Within a [group](#groups), the rows sort by state in this order, then by name;
+[Recent changes](#recent-changes) sorts them by their latest change instead. Each state has a shape
+of its own, so it reads without its color:
 
 | Glyph | Second line starts with | Meaning |
 | --- | --- | --- |
@@ -342,40 +343,57 @@ a state it doesn't know as Unknown, with a question mark; reload the page.
 ![A row's menu on a phone: its group, a new one, and Forget](screenshots/hub-phone-menu.png)
 
 Sort the instances into groups of your own, by client, project or machine. The **⋯** at the end of
-each row moves the instance to a group, to a **New group…**, or to **No group**. The same menu mutes
-it ([Muting](#muting)), updates its AgentAPI ([Updating from the hub](#updating-from-the-hub)) and
-forgets a stopped one ([Adding and forgetting instances](#adding-and-forgetting-instances)). Groups are kept on
-the hub, so the phone and the desktop show the same ones, and an instance's own events never move
-it.
+each row moves the instance to a group, to a **New group…**, or to **No group**. The same menu pins
+it ([Pinning](#pinning)), mutes it ([Muting](#muting)), updates its AgentAPI
+([Updating from the hub](#updating-from-the-hub)) and forgets a stopped one
+([Adding and forgetting instances](#adding-and-forgetting-instances)). Groups are kept on the hub,
+so the phone and the desktop show the same ones, and an instance's own events never move it.
 
 Once there is a group, the list gets a header per group, by name, with the instances in no group
-last under **Ungrouped**; [Recent changes](#recent-changes) shows no headers. A header shows how
-many instances the group has and, in amber, how many need you, so a folded group still tells you.
-Tap a header to fold or unfold it; each browser remembers which groups it folded. The pencil renames
-the group, moving all its instances. A group name has at most 40 characters, and a group with no
-instance left disappears.
+last under **Ungrouped**; [Recent changes](#recent-changes) shows no group headers. A header shows
+how many instances the group has and, in amber, how many need you, so a folded group still tells
+you. Tap a header to fold or unfold it; each browser remembers which groups it folded. The pencil
+renames the group, moving all its instances. A group name has at most 40 characters, and a group
+with no instance left disappears.
 
 ### Recent changes
 
 ![The list by the agents' latest changes: one list without group headers, the most recent first](screenshots/hub-recent.png)
 
 The switch beside the search sets the list's order. **Groups**, the default, is the order above:
-what needs you first within each group. **Recent changes** is one list, the most recent change
-first, whatever the group or the state. Each row then shows how long ago it last changed and, where
-there is room, its group. The filters and the search apply in both orders, and `j` and `k` follow
-the rows as they show. Rows move as the agents change; the open one stays selected. Each browser
-remembers its order.
+what needs you first within each group. **Recent changes** is one list below the
+[pinned](#pinning) agents, the most recent change first, whatever the group or the state. Each row
+then shows how long ago it last changed and, where there is room, its group. The filters and the
+search apply in both orders, and `j` and `k` follow the rows as they show. Rows move as the agents
+change; the open one stays selected. Each browser remembers its order.
 
 These count as changes: a new state (it needs you, works, finishes, waits, stops, or the hub loses
 or finds it), a new task, something new to wait for (a request, a login, a usage limit), a new
 title, a change in the queue, an update under way and a new version. These don't: heartbeats, what
-people do (a group, a mute, reading a finished task), the spend and usage figures, the agent's
-messages while it works, and a summary stream that drops and comes back within 10 s.
+people do (a group, a pin, a mute, reading a finished task), the spend and usage figures, the
+agent's messages while it works, and a summary stream that drops and comes back within 10 s.
 
 The hub records when each instance last changed (`changed_at`) and keeps it in its file, so
 restarting the hub doesn't reorder the list. For a new instance, that is when the hub first saw it.
 A hub updated from an earlier version has no record yet: until an instance changes, the list places
 it by the time its row shows, else by when the hub last heard of it.
+
+### Pinning
+
+**Pin to top** in a row's **⋯** menu keeps an agent at the top of the list, under **Pinned**, in
+both orders. A new pin goes last. **Move up** and **Move down** in the same menu move it past the
+next pinned agent the list shows, and **Unpin** takes it out. `p` pins or unpins the row with the
+focus.
+
+A pinned agent shows only there, not again in its group or below in the recent list. Its row has a
+pin after the name and, where there is room, names its group. The section's header counts its
+agents and those that need you, and folds like a group's. Below it, the rest of the list gets headers too: the groups and
+**Ungrouped**, or **Recent changes**. The filters and the search apply to pinned agents as well: one
+they leave out is hidden, and the section disappears once none is left.
+
+Pins are kept on the hub, like groups, so every browser shows the same ones in the same order.
+Pinning, unpinning and moving an agent aren't changes for [Recent changes](#recent-changes).
+Forgetting an agent drops its pin.
 
 ### Muting
 
@@ -407,6 +425,7 @@ for the task ([Updating from the hub](#updating-from-the-hub)).
 | `/` | Search |
 | `j`, `k` (or the arrows) | Move between the rows |
 | `Enter` | Open the row |
+| `p` | Pin or unpin the row ([Pinning](#pinning)) |
 | `Esc` | Clear the search, or go back to the overview |
 
 On a desktop, drag the list's edge, or focus it and press ← or →, to change the list's width; each
@@ -565,7 +584,7 @@ instance that joined with its webhook comes back the next time it starts.
 | **Update AgentAPI…** asks for a one-time setup | The AgentAPI can't write its binary's directory, such as a root-owned `/usr/local/bin` | Run the command it shows on that machine, once |
 | A row says **Update failed** | Checking or downloading the release failed | Hover it, or open **Update AgentAPI…**, for the error; then try again |
 | A connected agent's **⋯** menu has nothing about updating it | Its AgentAPI is too old to update from the hub | Update it by hand ([Updating by hand](#updating-by-hand)) |
-| The hub logs "The hub's file of instances doesn't parse" | The file was cut short, such as by a crash or a full disk | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat; add the others again, and set groups and mutes again |
+| The hub logs "The hub's file of instances doesn't parse" | The file was cut short, such as by a crash or a full disk | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat; add the others again, and set groups, pins and mutes again |
 
 `agentapi hub status` on an instance's machine shows which hub its config file names and where
 each running AgentAPI reports. The hub logs each instance it starts following, stops or can't
@@ -628,10 +647,11 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `GET /api/session` | `{"authenticated": true}` when the request carries the session or the hub token |
 | `POST /api/session` | `{"token": …}` signs in and sets the session cookie |
 | `DELETE /api/session` | Signs out |
-| `GET /api/instances` | The instances: who each one is, its summary, its connection, the state its row shows (`state`: `needs-you`, `working`, `unread`, `idle`, `muted`, `connecting`, `unreachable` or `stopped`) and when what its row shows last changed (`changed_at`, RFC 3339; see [Recent changes](#recent-changes)); and the hub's own version (`hub_version`) |
+| `GET /api/instances` | The instances: who each one is, its summary, its connection, the state its row shows (`state`: `needs-you`, `working`, `unread`, `idle`, `muted`, `connecting`, `unreachable` or `stopped`), when what its row shows last changed (`changed_at`, RFC 3339; see [Recent changes](#recent-changes)) and its place among the pinned ones (`pin`, from 1; none when it isn't pinned); and the hub's own version (`hub_version`) |
 | `POST /api/instances` | `{"url": …, "token": …}` adds an instance by its URL |
-| `PATCH /api/instances/{id}` | `{"group": …}` puts an instance in a group, `""` in none; `{"muted": true}` mutes what it waits for now, until that changes (409 when it waits for nothing), `false` ends the mute |
-| `DELETE /api/instances/{id}` | Forgets an instance |
+| `PATCH /api/instances/{id}` | `{"group": …}` puts an instance in a group, `""` in none; `{"muted": true}` mutes what it waits for now, until that changes (409 when it waits for nothing), `false` ends the mute; `{"pinned": true}` pins it below the pinned ones, `false` unpins it |
+| `DELETE /api/instances/{id}` | Forgets an instance, and its pin |
+| `PUT /api/pins` | `{"ids": […]}` orders the pinned instances, from the top. It lists each pinned instance once and no other; 409, with the pinned ones in their order (`ids`), when it doesn't, such as after one was pinned, unpinned or forgotten; 404 for an instance the hub doesn't have |
 | `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them), then `instance` (one changed what the page shows; when it was last heard of counts only while it is offline), `removed` (`{"id"}`) and a `heartbeat` every 15 s |
 | `GET /api/join` | Where machines join the hub: `urls`, each a webhook URL (`url`) with the interface of its address (`interface`; none for `--bind`'s), in the order the startup log has them; and the secret (`secret`, with `secret_shown: true`) only on a hub with a token |
 | `/i/{id}/…` | The instance's own API and chat, through the hub; the page updates an instance with `POST /i/{id}/update` and cancels with `DELETE` |
@@ -645,7 +665,7 @@ Every endpoint but `/hooks` and `/api/session` needs the session cookie or
 | --- | --- | --- |
 | `~/.agentapi/config.yaml` | `agentapi hub join` | The hub's webhook and `allow-update`, read by every `agentapi server` |
 | `~/.agentapi/instances/` | `agentapi server` | The AgentAPIs running on this machine, for `join` and `agentapi list` |
-| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups, when each last changed, and tokens of the ones added by hand |
+| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups and pins, when each last changed, and tokens of the ones added by hand |
 
 ## Limits
 

@@ -64,6 +64,8 @@ func TestChangedAt(t *testing.T) {
 	}{
 		{"a heartbeat", func(i *Instance) { i.LastSeen = clock.Now() }, false},
 		{"a group", func(i *Instance) { i.Group = "Work" }, false},
+		{"pinned", func(i *Instance) { i.Pin = pinLast }, false},
+		{"unpinned", func(i *Instance) { i.Pin = 0 }, false},
 		{"the stream drops", func(i *Instance) { i.Connection = ConnectionConnecting; i.Error = "the stream ended" }, false},
 		{"and comes back", connected(nil), false},
 		{"spend, usage and reading it", connected(func(s *instanceapi.SummaryBody) {
