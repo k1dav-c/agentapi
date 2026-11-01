@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -81,7 +82,9 @@ func parseAgentType(firstArg string, agentTypeVar string) (AgentType, error) {
 	return AgentTypeCustom, nil
 }
 
-func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
+// runServer runs the server for args until it stops. It returns errRestart
+// once SIGUSR2 stopped it to run self again.
+func runServer(ctx context.Context, logger *slog.Logger, args []string, self *selfExec) (err error) {
 	opts, err := loadServerOptions(viper.GetViper(), args)
 	if err != nil {
 		return err
@@ -98,7 +101,13 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
 		if err := writePIDFile(opts.pidFile, logger); err != nil {
 			return fmt.Errorf("failed to write PID file: %w", err)
 		}
-		defer cleanupPIDFile(opts.pidFile, logger)
+		defer func() {
+			// After a restart in place, the process goes on with the same
+			// ID.
+			if !errors.Is(err, errRestart) {
+				cleanupPIDFile(opts.pidFile, logger)
+			}
+		}()
 	}
 
 	prices := pricing.Builtin()
@@ -141,7 +150,7 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
 	if warning := exposureWarning(opts.bind, apiToken, opts.transport == httpapi.TransportNative && opts.terminal); warning != "" {
 		logger.Warn(warning)
 	}
-	return serve(ctx, logger, srv, agent)
+	return serve(ctx, logger, srv, agent, self)
 }
 
 // resolveAPIToken returns the token the API asks for: none, the given one,
@@ -184,6 +193,8 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 		Name:           opts.name,
 		StateDB:        stateDB,
 		RegistryDir:    opts.registryDir,
+		// SIGUSR2 (handleSignals).
+		RestartsInPlace: runtime.GOOS != "windows",
 	}
 	switch opts.transport {
 	case httpapi.TransportPTY:
@@ -215,12 +226,13 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 
 // serve runs the server until a signal, a PTY agent's exit or a failed
 // listener stops it, then stops the server and the agent. A native agent
-// that exits is started again, and the server goes on serving.
-func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, agent *runningAgent) error {
+// that exits is started again, and the server goes on serving. It returns
+// errRestart once SIGUSR2 stopped it to run self again; self may be nil.
+func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, agent *runningAgent, self *selfExec) error {
 	gracefulCtx, gracefulCancel := context.WithCancel(ctx)
 	defer gracefulCancel()
 	// Signals end gracefulCtx.
-	handleSignals(gracefulCtx, gracefulCancel, logger, srv)
+	handleSignals(gracefulCtx, gracefulCancel, logger, srv, self)
 	logger.Info("Starting server", "address", srv.ListenAddr())
 
 	// A monitor waits for a PTY agent: its exit stops the server.
@@ -272,6 +284,9 @@ func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, agent 
 		}
 	default:
 		agent.close(logger)
+	}
+	if self.restarting() {
+		return errRestart
 	}
 	return nil
 }
@@ -363,6 +378,11 @@ func writePIDFile(pidFile string, logger *slog.Logger) error {
 
 		existingPIDStr := strings.TrimSpace(string(existingPIDData))
 		existingPID, parseErr := strconv.Atoi(existingPIDStr)
+		if parseErr == nil && existingPID == pid {
+			// This process wrote it before it restarted in place.
+			logger.Info("The PID file holds this process already", "pidFile", pidFile, "pid", pid)
+			return nil
+		}
 		if parseErr == nil && isProcessRunning(existingPID) {
 			return fmt.Errorf("another instance is already running with PID %d (PID file: %s)", existingPID, pidFile)
 		}
@@ -472,7 +492,15 @@ func CreateServerCmd() *cobra.Command {
 			if !viper.GetBool(FlagPrintOpenAPI) {
 				readUserConfig(viper.GetViper(), cmd.Flags(), logger)
 			}
-			return runServer(ctx, logger, cmd.Flags().Args())
+			self := newSelfExec()
+			err := runServer(ctx, logger, cmd.Flags().Args(), self)
+			if errors.Is(err, errRestart) {
+				logger.Info("Running the program again", "program", self.path)
+				if err := self.exec(); err != nil {
+					return fmt.Errorf("failed to restart in place: %w", err)
+				}
+			}
+			return err
 		},
 	}
 

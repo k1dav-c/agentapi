@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/coder/agentapi/cmd/restart"
 	"github.com/coder/agentapi/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -42,14 +43,16 @@ type releaseInfo struct {
 }
 
 var (
-	forceFlag bool
-	checkFlag bool
+	forceFlag   bool
+	checkFlag   bool
+	restartFlag bool
 )
 
 var UpdateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update agentapi to the latest version",
-	Long:  `Check for the latest release on GitHub and update the agentapi binary in place.`,
+	Long: "Check for the latest release on GitHub and update the agentapi binary in place. " +
+		"With --restart, the AgentAPIs running the binary then restart in place into the new version (see agentapi restart).",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runUpdate(cmd, args)
 	},
@@ -58,6 +61,7 @@ var UpdateCmd = &cobra.Command{
 func init() {
 	UpdateCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Skip version comparison and update regardless")
 	UpdateCmd.Flags().BoolVarP(&checkFlag, "check", "c", false, "Only check if an update is available")
+	UpdateCmd.Flags().BoolVar(&restartFlag, "restart", false, "Then restart the AgentAPIs running this binary in place, the invoking user's under sudo")
 }
 
 func fetchLatestRelease(ctx context.Context) (*releaseInfo, error) {
@@ -314,6 +318,9 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 		fmt.Printf("Successfully updated agentapi from v%s to v%s\n", currentVer.String(), latestVer.String())
 	} else {
 		fmt.Printf("Successfully updated agentapi to v%s\n", latestVer.String())
+	}
+	if restartFlag {
+		return restart.Run(context.Background(), restart.Options{All: true, Executable: exePath, Out: os.Stdout})
 	}
 	return nil
 }

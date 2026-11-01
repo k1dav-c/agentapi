@@ -142,7 +142,8 @@ has the complete commit history.
   to many follows each through one [summary stream](#watching-many-instances).
   With the [human-reply API](#human-reply-api), a bot can tell you when the
   agent stops and pass your answer back.
-- [Self-update](#agentapi-update), verified against the release's checksums.
+- [Self-update](#agentapi-update), verified against the release's checksums,
+  and [restarts in place](#agentapi-restart) into the new binary.
 - [Security](#security): an API token (the chat signs in with a cookie), the
   listen address, and the allowed hosts and origins.
 
@@ -890,6 +891,9 @@ state-db: ~/.agentapi/state/{port}.db
   keeps the conversation from then on; the file isn't written anymore.
   `--load-state=false` skips the import, and `--save-state` has no effect.
   SIGUSR1 writes what the state database hasn't written yet.
+- [`agentapi restart`](#agentapi-restart) (SIGUSR2) and
+  `agentapi update --restart` keep the conversation, and the native agent's
+  session, of an AgentAPI with `--state-db`.
 
 ### Earlier sessions
 
@@ -1429,8 +1433,9 @@ instance:
 
 To find the instances on a machine, read the registry: while it serves, each AgentAPI keeps an
 entry in `~/.agentapi/instances` (`--registry-dir`; `--registry=false` turns it off) with its `id`,
-`name`, `server_id`, `url` (`--public-url`, else its listen address), PID, directory, agent and
-`auth_required`, never the token. It removes the entry when it stops; an entry whose process is
+`name`, `server_id`, `url` (`--public-url`, else its listen address), PID, directory, agent,
+`auth_required` (never the token) and `restarts_in_place` (it restarts in place on SIGUSR2, see
+[`agentapi restart`](#agentapi-restart)). It removes the entry when it stops; an entry whose process is
 gone (after a crash) is removed when the registry is listed. Check that `GET /summary` returns the
 entry's `server_id` before using one: another AgentAPI may have taken the port.
 [`agentapi list`](#agentapi-list) shows the registered instances with their summaries.
@@ -1978,14 +1983,53 @@ state-db: ~/.agentapi/state/{port}.db
 Update the AgentAPI binary to the latest release from GitHub.
 
 ```bash
-agentapi update          # download and install the latest version
-agentapi update --check  # only check if an update is available
-agentapi update --force  # update even if already at the latest version
+agentapi update            # download and install the latest version
+agentapi update --check    # only check if an update is available
+agentapi update --force    # update even if already at the latest version
+agentapi update --restart  # then restart the running AgentAPIs into it
 ```
 
 Release binaries are verified against the release's `checksums.txt` SHA-256 manifest before the
 running executable is replaced. An update is rejected if the manifest is missing, malformed, or does
 not match the download.
+
+Running AgentAPIs keep the old version until they restart. `--restart` restarts the ones that run
+the binary it replaced, as [`agentapi restart --all`](#agentapi-restart) does. Under `sudo` (an
+install in `/usr/local/bin`), it restarts the AgentAPIs of the user who ran `sudo`, from that user's
+registry. The hub isn't one of them: restart it with its service manager, such as
+`systemctl restart agentapi-hub`.
+
+### `agentapi restart`
+
+Restart running AgentAPIs in place, for example after an update replaced the binary:
+
+```bash
+agentapi restart 3285 3286  # the AgentAPIs on these ports
+agentapi restart --all      # every AgentAPI of yours on this machine
+```
+
+`agentapi restart` finds them in the [registry](#watching-many-instances) and sends each SIGUSR2.
+An AgentAPI first runs the program it was started from with `--version`; if that fails, it logs why
+and goes on serving. Otherwise it stops as for a shutdown (the agent is interrupted and closed, the
+state database written, the registry entry removed, and the webhook sends `instance.stopped`), then
+runs the same path again with the same arguments and environment, in the same process. Its PID
+stays, so a PID file and a parent shell that waits for it, such as a Coder workspace's start
+script, stay valid, and its output goes to the same place. The command waits until each AgentAPI
+answers on its port again with a new `server_id`, and prints its new version.
+
+- With `--state-db`, the conversation stays and a native agent resumes its
+  session. Without it, the AgentAPI starts a new conversation, as after any
+  restart.
+- Only your own AgentAPIs restart, and only when the registry entry names a
+  running `agentapi server`. Under `sudo`, they are those of the user who ran
+  `sudo`. An AgentAPI of an earlier release can't restart in place:
+  `agentapi restart` says so, and you restart that one yourself, once.
+- The AgentAPI this command runs under, if any (an agent that runs
+  `agentapi update --restart`), restarts last. Restarting it closes the
+  agent, which can end the command.
+- `--registry-dir` reads another registry, and `--timeout` (default `1m`)
+  bounds the wait for each one.
+- Not available on Windows.
 
 ### `agentapi list`
 

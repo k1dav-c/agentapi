@@ -79,7 +79,7 @@ update the shared event emitter.
 - **`lib/registry/`** — The registry of the AgentAPIs running on a machine (`~/.agentapi/instances`): each server writes its entry while it serves (`--registry`, `--registry-dir`); `agentapi list` and clients that watch many read it.
 - **`lib/shellterm/`** — The shared shell terminal of native sessions (`GET /terminal`).
 - **`skills/`** — Agent skills for users of AgentAPI (`agentapi-hub-join`: an agent joins its machine to a hub, documented in `docs/hub.md`); they install into `~/.claude/skills/` and aren't for working on this repository.
-- **`cmd/`** — CLI commands via cobra/viper. Includes `server`, `attach`, `list` (the AgentAPIs in the registry, with their summaries), `hub` (`serve`: the hub; `join`, `leave`, `status`: connecting a machine's AgentAPIs to a hub), and `update` subcommands.
+- **`cmd/`** — CLI commands via cobra/viper. Includes `server` (which restarts in place on SIGUSR2), `attach`, `list` (the AgentAPIs in the registry, with their summaries), `hub` (`serve`: the hub; `join`, `leave`, `status`: connecting a machine's AgentAPIs to a hub), `restart` (has the registered AgentAPIs restart in place, e.g. into an updated binary), and `update` (`--restart` restarts them after it) subcommands.
 
 ### Two transport modes
 

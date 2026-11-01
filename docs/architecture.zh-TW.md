@@ -75,7 +75,7 @@ flowchart TB
 
 | 路徑 | 內容 |
 | --- | --- |
-| `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、transport、啟動 agent、訊號）、`attach`、`list`（已登記的 AgentAPI 和它們的摘要）、`hub`（`serve`：hub；`join`、`leave`、`status`：設定檔和執行中 AgentAPI 的 hub webhook），以及 `update`（會驗證 checksum 的自我更新） |
+| `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、transport、啟動 agent、訊號、原地重新啟動）、`attach`、`list`（已登記的 AgentAPI 和它們的摘要）、`hub`（`serve`：hub；`join`、`leave`、`status`：設定檔和執行中 AgentAPI 的 hub webhook）、`restart`（讓已登記的 AgentAPI 原地重新啟動），以及 `update`（會驗證 checksum 的自我更新） |
 | `lib/httpapi/` | HTTP 伺服器：路由與處理常式、`EventEmitter`、佇列、token 驗證、webhook、MCP／檔案／終端機端點，以及嵌入的聊天介面 |
 | `lib/conversation/` | 共用型別（以 `conv` 匯入）：訊息、角色、狀態與錯誤等級。伺服器透過 `Conversation` 呼叫 transport，transport 透過 `Emitter` 回報變更 |
 | `lib/screentracker/` | PTY 對話：畫面快照、訊息切分、穩定狀態偵測，以及把訊息片段輸入 agent 的終端機（`AgentIO`、`TerminalPart`） |
@@ -135,6 +135,14 @@ flowchart TB
    階段紀錄監看器、關閉仍在執行的 native 或 PTY agent 與 shell 終端機，並寫入、關閉狀態資料庫。
    收到 SIGUSR1 時只寫入狀態資料庫，不會停止。native agent 結束不會讓伺服器停止：對話會重新
    啟動 agent（見 Native）。
+6. 收到 SIGUSR2 時，伺服器會原地重新啟動（`cmd/server/reexec.go`）。`selfExec` 在啟動時記下參數、
+   環境變數和程式：argv[0] 若就是正在執行的檔案，就採用 shell 找到它的方式（路徑，或 `PATH` 上
+   的名稱），這樣更新改指向新版本的 symlink 也會跟著走；否則採用 `os.Executable`。更新取代檔案之後，
+   `/proc/self/exe` 指向的是已刪除的檔案。收到 SIGUSR2 後，先以 `--version` 執行程式；失敗時記下
+   原因並繼續提供服務。成功時，伺服器依第 5 步停止，但保留 PID 檔（PID 不變），再以
+   `syscall.Exec` 重新執行程式，沿用 stdin、stdout 和 stderr；Go 開啟的其他檔案都會在 exec 時關閉。
+   停止期間收到關閉訊號時，以關閉為準。每個登記檔都會註明伺服器能原地重新啟動
+   （`restarts_in_place`），供 `agentapi restart` 判斷。
 
 ## HTTP 伺服器
 
@@ -464,6 +472,14 @@ native 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之
 - native agent 結束後由對話再啟動（見 Native），不使用 `s.mu` 或 `s.restarting`：沒有閒置的
   agent，所以訊息會在佇列中等待。最後一次嘗試失敗後，伺服器繼續提供服務，生命週期為 `failed`，
   直到重新啟動、重新載入或切換工作階段啟動新的 agent。PTY agent 結束則會讓 AgentAPI 停止。
+- AgentAPI 本身收到 SIGUSR2 時會原地重新啟動（見[啟動與關閉](#啟動與關閉)），改用更新放在原啟動
+  路徑上的執行檔。使用 `--state-db` 時會還原對話，native agent 也會接續原本的工作階段；沒有時對話會
+  重新開始。`agentapi restart [port…|--all]`（`cmd/restart`）讀取登記目錄（呼叫者的；透過 `sudo`
+  執行時是 `SUDO_USER` 的家目錄），挑出這台機器上、行程屬於該使用者、執行的是 `agentapi server`
+  （`/proc/<pid>`，其他系統用 `ps`）且能原地重新啟動的登記檔，逐一送出訊號（自己所在的那個最後），
+  並等每個 AgentAPI 以新的 server ID 重新登記、在原連接埠回應 `GET /status`。`agentapi update
+  --restart` 會對仍在執行舊執行檔的 AgentAPI 做同樣的事。hub 不會原地重新啟動，由服務管理工具
+  重新啟動。
 - `/status` 會回報生命週期：`starting`、`ready`、`running`、`restarting`、`exited` 或
   `failed`。
 

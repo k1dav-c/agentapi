@@ -50,7 +50,7 @@ to PTY mode, which parses terminal output.
 ### Core components
 
 - `main.go` - Entry point using the Cobra CLI framework
-- `cmd/` - CLI command definitions, including server, attach, list, hub, and update
+- `cmd/` - CLI command definitions, including server, attach, list, hub, restart (registered AgentAPIs restart in place, e.g. into an updated binary), and update
 - `lib/httpapi/` - HTTP server, routes, OpenAPI schema, instance summaries for monitoring multiple AgentAPIs (`GET /summary`, `/events?only=summary`), and webhooks that push events (tasks, requests, messages, heartbeats) to a receiver
 - `lib/conversation/` - Shared messages, status, and the `Conversation` and `Emitter` interfaces (imported as `conv`)
 - `lib/screentracker/` - The PTY engine: terminal output parsing and message splitting

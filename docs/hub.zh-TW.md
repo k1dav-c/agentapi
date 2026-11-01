@@ -92,6 +92,10 @@ WantedBy=default.target
 
 `agentapi-hub.env` 放三個 `AGENTAPI_HUB_*` 變數；只讓擁有者能讀取。
 
+更新之後，hub 也用同樣的方式重新啟動（`systemctl --user restart agentapi-hub`）。AgentAPI 可以用
+`agentapi update --restart` 或 [`agentapi restart`](../README.zh-TW.md#agentapi-restart) 原地重新
+啟動，hub 不在其中。
+
 ### 3. 讓每台機器的 AgentAPI 加入
 
 在每台要讓 hub 監看的機器上執行一次：

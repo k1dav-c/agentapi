@@ -127,6 +127,9 @@ type ServerConfig struct {
 	// RegistryDir, if set, is where the server writes an entry while it
 	// serves, for clients that find the AgentAPIs of a machine there.
 	RegistryDir string
+	// RestartsInPlace says in the registry entry that the process restarts
+	// in place on SIGUSR2 (see cmd/server).
+	RestartsInPlace bool
 }
 
 // PTYConfig is what the PTY transport needs.
@@ -416,7 +419,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		}
 	}
 	s.startWebhook(config)
-	s.registry = s.newInstanceRegistry(config.RegistryDir, bind)
+	s.registry = s.newInstanceRegistry(config.RegistryDir, bind, config.RestartsInPlace)
 	s.startSpend()
 
 	// Register API routes

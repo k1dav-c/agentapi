@@ -32,8 +32,8 @@ type servedNative struct {
 }
 
 // serveNative runs serve with a native server whose agents factory
-// creates, on a free port, until ctx ends.
-func serveNative(ctx context.Context, t *testing.T, factory *nativetest.Factory) *servedNative {
+// creates, on a free port, until ctx ends; self restarts it, if set.
+func serveNative(ctx context.Context, t *testing.T, factory *nativetest.Factory, self *selfExec) *servedNative {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	registryDir := t.TempDir()
@@ -49,7 +49,7 @@ func serveNative(ctx context.Context, t *testing.T, factory *nativetest.Factory)
 	})
 	require.NoError(t, err)
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, logger, srv, &runningAgent{factory: factory.New}) }()
+	go func() { served <- serve(ctx, logger, srv, &runningAgent{factory: factory.New}, self) }()
 	// The registry entry has the port the server listens on.
 	var url string
 	require.Eventually(t, func() bool {
@@ -100,7 +100,7 @@ func TestServeOutlivesTheNativeAgent(t *testing.T) {
 			return
 		}
 		a.StartErr = errors.New("the session can't be read")
-	}})
+	}}, nil)
 	s.awaitLifecycle(httpapi.LifecycleReady)
 
 	s.factory.Last().Exit(errors.New("exit status 1"))
@@ -140,7 +140,7 @@ func TestServeRestartsTheNativeAgent(t *testing.T) {
 			return
 		}
 		a.StartBlock = release
-	}})
+	}}, nil)
 	s.awaitLifecycle(httpapi.LifecycleReady)
 
 	s.factory.Last().Exit(errors.New("exit status 1"))

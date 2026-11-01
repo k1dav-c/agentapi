@@ -111,7 +111,8 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 - [Webhook](#webhook) 把任務、請求、訊息和心跳推送到監看多個 agent 的中控平台，並以 HMAC
   簽章。連到多個 AgentAPI 的用戶端，每個只要開一條[摘要串流](#監看多個實例)。搭配
   [人工回覆 API](#人工回覆-api)，機器人可以在 agent 停下來時通知你，並把你的回覆傳回去。
-- AgentAPI 的[自我更新](#agentapi-update)，會比對發行版的 checksum。
+- AgentAPI 的[自我更新](#agentapi-update)，會比對發行版的 checksum，並可[原地重新啟動](#agentapi-restart)
+  為新的執行檔。
 - [安全性](#安全性)：API token（聊天介面以 cookie 登入）、監聽位址，以及允許的主機與來源。
 
 ## 快速開始
@@ -746,6 +747,8 @@ state-db: ~/.agentapi/state/{port}.db
   匯入旁邊的狀態資料庫（同名、副檔名改為 `.db`，或由 `--state-db` 指定），之後由資料庫保存對話；
   不會再寫入這個檔案。`--load-state=false` 會略過匯入，`--save-state` 已沒有作用。SIGUSR1 會
   寫入狀態資料庫尚未寫入的變更。
+- 使用 `--state-db` 的 AgentAPI 經 [`agentapi restart`](#agentapi-restart)（SIGUSR2）或
+  `agentapi update --restart` 重新啟動後，對話和 native agent 的工作階段都會保留。
 
 ### 先前的工作階段
 
@@ -1199,7 +1202,8 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
 
 要找出一台機器上的實例，可以讀取登記目錄：每個 AgentAPI 執行期間會在 `~/.agentapi/instances`
 （`--registry-dir`；`--registry=false` 可關閉）保留一份登記檔，內容有 `id`、`name`、`server_id`、
-`url`（`--public-url`，沒有的話是監聽位址）、PID、目錄、agent 和 `auth_required`，不含 token。
+`url`（`--public-url`，沒有的話是監聽位址）、PID、目錄、agent、`auth_required`（不含 token）和
+`restarts_in_place`（收到 SIGUSR2 會原地重新啟動，見 [`agentapi restart`](#agentapi-restart)）。
 停止時會刪除登記檔；行程已經不在（當掉）的登記檔，會在列出登記目錄時刪除。使用前請先確認
 `GET /summary` 回傳的 `server_id` 與登記檔相同：該 port 可能已被另一個 AgentAPI 使用。
 [`agentapi list`](#agentapi-list) 會列出已登記的實例和它們的摘要。
@@ -1697,13 +1701,46 @@ state-db: ~/.agentapi/state/{port}.db
 將 AgentAPI 執行檔更新為 GitHub 上的最新發行版。
 
 ```bash
-agentapi update          # 下載並安裝最新版本
-agentapi update --check  # 僅檢查是否有可用更新
-agentapi update --force  # 即使已是最新版本也執行更新
+agentapi update            # 下載並安裝最新版本
+agentapi update --check    # 僅檢查是否有可用更新
+agentapi update --force    # 即使已是最新版本也執行更新
+agentapi update --restart  # 更新後讓執行中的 AgentAPI 改用新版本
 ```
 
 更新前，AgentAPI 會先依據該版本的 `checksums.txt` 清單，以 SHA-256 驗證下載的執行檔，
 通過後才取代目前的執行檔。若清單不存在、格式錯誤，或檢查碼與下載檔案不符，就會拒絕更新。
+
+執行中的 AgentAPI 在重新啟動前仍是舊版本。`--restart` 會像
+[`agentapi restart --all`](#agentapi-restart) 一樣，重新啟動仍在執行舊執行檔的 AgentAPI。
+透過 `sudo` 執行時（安裝在 `/usr/local/bin`），重新啟動的是執行 `sudo` 那位使用者的 AgentAPI，
+依據該使用者的登記目錄。hub 不在其中：請用服務管理工具重新啟動，例如
+`systemctl restart agentapi-hub`。
+
+### `agentapi restart`
+
+原地重新啟動執行中的 AgentAPI，例如在更新取代執行檔之後：
+
+```bash
+agentapi restart 3285 3286  # 這些連接埠上的 AgentAPI
+agentapi restart --all      # 你在這台機器上的所有 AgentAPI
+```
+
+`agentapi restart` 從[登記目錄](#監看多個實例)找到這些 AgentAPI，並送出 SIGUSR2。AgentAPI 會先以
+`--version` 執行啟動時的程式；失敗時記下原因並繼續提供服務。成功時就像關閉那樣停止（中斷並
+關閉 agent、寫入狀態資料庫、刪除登記檔，webhook 也會送出 `instance.stopped`），再在同一個行程中
+以相同的參數和環境變數執行同一個路徑。PID 不變，所以 PID 檔和等待它的上層 shell（例如 Coder
+工作區的啟動腳本）仍然有效，輸出也照舊寫到原本的地方。這個指令會等到每個 AgentAPI 以新的
+`server_id` 在原連接埠上回應，並印出新版本。
+
+- 使用 `--state-db` 時，對話會保留，native agent 也會接續原本的工作階段；沒有時，AgentAPI 會和
+  其他重新啟動一樣開始新的對話。
+- 只會重新啟動你自己的 AgentAPI，而且登記檔必須對應到執行中的 `agentapi server`。透過 `sudo`
+  執行時，指的是執行 `sudo` 那位使用者的 AgentAPI。較早的版本無法原地重新啟動，
+  `agentapi restart` 會指出來：這一次請自行重新啟動。
+- 這個指令若是在某個 AgentAPI 底下執行（例如 agent 執行 `agentapi update --restart`），那個
+  AgentAPI 會最後才重新啟動；重新啟動會關閉 agent，這個指令也可能隨之結束。
+- `--registry-dir` 可讀取其他登記目錄，`--timeout`（預設 `1m`）限制等待每個 AgentAPI 的時間。
+- Windows 不支援。
 
 ### `agentapi list`
 

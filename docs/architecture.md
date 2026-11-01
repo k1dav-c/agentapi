@@ -77,7 +77,7 @@ answers write keys directly to the agent's terminal.
 
 | Path | What it holds |
 | --- | --- |
-| `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, transport, starting the agent, signals), `attach`, `list` (the registered AgentAPIs and their summaries), `hub` (`serve`: the hub; `join`, `leave` and `status`: a hub's webhook in the config file and in the running AgentAPIs), and `update` (self-update with checksum verification) |
+| `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, transport, starting the agent, signals, restarting in place), `attach`, `list` (the registered AgentAPIs and their summaries), `hub` (`serve`: the hub; `join`, `leave` and `status`: a hub's webhook in the config file and in the running AgentAPIs), `restart` (has registered AgentAPIs restart in place) and `update` (self-update with checksum verification) |
 | `lib/httpapi/` | The HTTP server: routes and handlers, the `EventEmitter`, the queue, token auth, webhooks, the MCP, files and terminal endpoints, and the embedded chat UI |
 | `lib/conversation/` | Shared types (imported as `conv`): messages, roles, status and error levels. The server calls transports through `Conversation`; transports report changes through `Emitter` |
 | `lib/screentracker/` | The PTY conversation: screen snapshots, message splitting, stability detection, and typing parts into the agent's terminal (`AgentIO`, `TerminalPart`) |
@@ -148,6 +148,18 @@ answers write keys directly to the agent's terminal.
    shell terminal are closed, and the state DB is flushed and closed. SIGUSR1
    flushes the state DB without stopping. A native agent that exits doesn't
    stop the server: the conversation starts it again (see Native).
+6. SIGUSR2 restarts the server in place (`cmd/server/reexec.go`). At startup
+   `selfExec` takes the arguments, the environment and the program. The
+   program is argv[0] as the shell found it (a path, or a name on `PATH`) if
+   that is the running file, so a symlink an update repoints is followed;
+   else `os.Executable`. It is taken then because once an update replaced
+   the file, `/proc/self/exe` names a deleted one. On SIGUSR2 the program
+   first runs with `--version`; if it fails, the server logs why and goes
+   on. Otherwise the server stops as in step 5, keeps its PID file (the PID
+   stays), and `syscall.Exec` runs the program again with stdin, stdout and
+   stderr; every other file Go opened closes on exec. A shutdown signal
+   during the stop wins. Each registry entry says the server restarts in
+   place (`restarts_in_place`), for `agentapi restart`.
 
 ## The HTTP server
 
@@ -581,6 +593,20 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
   because no agent is idle. After the last failed attempt the server goes on
   serving, with the lifecycle `failed`, until a restart, a reload or a switch
   starts an agent. A PTY agent that exits stops AgentAPI.
+- AgentAPI itself restarts in place on SIGUSR2 (see
+  [Startup and shutdown](#startup-and-shutdown)), into the binary an update
+  put where it was started from. With `--state-db` the conversation is
+  restored and a native agent resumes its session; without it the
+  conversation starts anew. `agentapi restart [port…|--all]`
+  (`cmd/restart`) reads the registry (the invoking user's, also under
+  `sudo`: `SUDO_USER`'s home) and keeps the entries of this machine that
+  restart in place and whose process is the user's and runs
+  `agentapi server` (`/proc/<pid>`, `ps` elsewhere). It signals them one at
+  a time, the one it runs under last, and waits until each registers again
+  with a new server ID and answers `GET /status` on its port. `agentapi
+  update --restart` does that for the AgentAPIs that run the binary it
+  replaced.
+  The hub doesn't restart in place; its service manager restarts it.
 - `/status` reports the lifecycle: `starting`, `ready`, `running`,
   `restarting`, `exited` or `failed`.
 

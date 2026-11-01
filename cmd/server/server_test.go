@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -691,13 +692,31 @@ func TestPIDFileOperations(t *testing.T) {
 		tmpDir := t.TempDir()
 		pidFile := tmpDir + "/test.pid"
 
-		// Write the current process PID so isProcessRunning returns true.
-		err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o644)
+		// Another process of this program, so isProcessRunning returns
+		// true.
+		other := exec.Command(os.Args[0], "-test.run=^TestPIDFileHelperProcess$")
+		other.Env = append(os.Environ(), "PID_FILE_HELPER=1")
+		require.NoError(t, other.Start())
+		t.Cleanup(func() {
+			_ = other.Process.Kill()
+			_ = other.Wait()
+		})
+		err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", other.Process.Pid)), 0o644)
 		require.NoError(t, err)
 
 		err = writePIDFile(pidFile, discardLogger)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "another instance is already running")
+	})
+
+	t.Run("writePIDFile keeps the file of this process", func(t *testing.T) {
+		// It wrote the file before it restarted in place.
+		pidFile := t.TempDir() + "/test.pid"
+		require.NoError(t, os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o600))
+		require.NoError(t, writePIDFile(pidFile, discardLogger))
+		data, err := os.ReadFile(pidFile)
+		require.NoError(t, err)
+		assert.Equal(t, fmt.Sprintf("%d\n", os.Getpid()), string(data))
 	})
 
 	t.Run("writePIDFile replaces PID reused by another executable", func(t *testing.T) {
@@ -754,6 +773,15 @@ func TestPIDFileOperations(t *testing.T) {
 		// Should not panic
 		cleanupPIDFile(pidFile, discardLogger)
 	})
+}
+
+// TestPIDFileHelperProcess is another process of this program for the PID
+// file tests; it does nothing unless one runs it as that.
+func TestPIDFileHelperProcess(t *testing.T) {
+	if os.Getenv("PID_FILE_HELPER") != "1" {
+		t.Skip("a helper process of TestPIDFileOperations")
+	}
+	time.Sleep(30 * time.Second)
 }
 
 func TestServerCmd_AllowedOrigins(t *testing.T) {

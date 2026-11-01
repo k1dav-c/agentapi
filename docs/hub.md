@@ -101,6 +101,10 @@ WantedBy=default.target
 
 `agentapi-hub.env` holds the three `AGENTAPI_HUB_*` variables; make it readable by its owner only.
 
+After an update, restart the hub this way too (`systemctl --user restart agentapi-hub`). The
+AgentAPIs restart in place with `agentapi update --restart` or
+[`agentapi restart`](../README.md#agentapi-restart); the hub isn't one of them.
+
 ### 3. Join each machine's AgentAPIs
 
 On every machine whose AgentAPIs the hub should watch, once:
