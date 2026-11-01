@@ -28,6 +28,9 @@
   in a **Versions** card on the overview with how many connected instances are older and how to
   update them. Search finds instances by version. `GET /api/instances` and the `instances` event
   carry the hub's own `hub_version`.
+- On a desktop, drag the edge of the hub's list to change its width (280 px up to 640 px or half the
+  window), or focus the edge and use the arrow keys; double-click or Enter resets it to 360 px. The
+  browser keeps the width.
 
 ### Fixes
 
