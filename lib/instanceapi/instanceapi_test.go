@@ -85,4 +85,5 @@ func TestExpandPublicURL(t *testing.T) {
 	assert.Equal(t, "http://dev-1.vpn:3286", instanceapi.ExpandPublicURL("http://dev-1.vpn:{port}", 3286))
 	assert.Equal(t, "http://"+hostname+":3284/", instanceapi.ExpandPublicURL("http://{hostname}:{port}/", 3284))
 	assert.Equal(t, "https://agent.example.com", instanceapi.ExpandPublicURL("https://agent.example.com", 3284))
+	assert.Equal(t, "/home/me/.agentapi/state/"+hostname+"-3285.db", instanceapi.ExpandPlaceholders("/home/me/.agentapi/state/{hostname}-{port}.db", 3285))
 }

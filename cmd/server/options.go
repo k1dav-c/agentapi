@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/registry"
 )
 
@@ -81,25 +82,28 @@ var _ flagSource = (*viper.Viper)(nil)
 // loadServerOptions reads the options of the agent command args (the
 // program and its arguments) from flags, and checks them.
 func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
+	port := flags.GetInt(FlagPort)
 	opts := serverOptions{
 		agent:          args[0],
 		agentArgs:      args[1:],
 		printOpenAPI:   flags.GetBool(FlagPrintOpenAPI),
-		port:           flags.GetInt(FlagPort),
+		port:           port,
 		chatBasePath:   flags.GetString(FlagChatBasePath),
 		allowedHosts:   flags.GetStringSlice(FlagAllowedHosts),
 		allowedOrigins: flags.GetStringSlice(FlagAllowedOrigins),
 		apiToken:       flags.GetString(FlagAPIToken),
-		pidFile:        flags.GetString(FlagPidFile),
+		pidFile:        expandHome(flags.GetString(FlagPidFile)),
 		termWidth:      flags.GetUint16(FlagTermWidth),
 		termHeight:     flags.GetUint16(FlagTermHeight),
 		initialPrompt:  flags.GetString(FlagInitialPrompt),
-		stateDB:        flags.GetString(FlagStateDB),
-		terminal:       flags.GetBool(FlagTerminal),
-		autoContinue:   flags.GetBool(FlagAutoContinue),
-		prices:         flags.GetString(FlagPrices),
-		name:           flags.GetString(FlagName),
-		registryDir:    flags.GetString(FlagRegistryDir),
+		// One setting in the config file serves every server of the user,
+		// each with its own file.
+		stateDB:      expandHome(instanceapi.ExpandPlaceholders(flags.GetString(FlagStateDB), port)),
+		terminal:     flags.GetBool(FlagTerminal),
+		autoContinue: flags.GetBool(FlagAutoContinue),
+		prices:       expandHome(flags.GetString(FlagPrices)),
+		name:         flags.GetString(FlagName),
+		registryDir:  expandHome(flags.GetString(FlagRegistryDir)),
 		webhook: httpapi.WebhookConfig{
 			URL:             flags.GetString(FlagWebhookURL),
 			Timeout:         flags.GetDuration(FlagWebhookTimeout),
@@ -109,7 +113,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 			Secret:          flags.GetString(FlagWebhookSecret),
 			Heartbeat:       heartbeatOption(flags.GetDuration(FlagWebhookHeartbeat)),
 			InstanceID:      cmp.Or(flags.GetString(FlagInstanceID), flags.GetString(FlagWebhookInstanceID)),
-			PublicURL:       httpapi.ExpandPublicURL(flags.GetString(FlagPublicURL), flags.GetInt(FlagPort)),
+			PublicURL:       httpapi.ExpandPublicURL(flags.GetString(FlagPublicURL), port),
 		},
 	}
 	var err error
@@ -151,7 +155,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 // a state file; --save-state has no effect anymore, since the state
 // database keeps every change.
 func stateFileOptions(flags flagSource) (file string, importState bool, err error) {
-	file = flags.GetString(FlagStateFile)
+	file = expandHome(flags.GetString(FlagStateFile))
 	if file == "" {
 		if flags.IsSet(FlagLoadState) && flags.GetBool(FlagLoadState) {
 			return "", false, fmt.Errorf("--load-state requires --state-file to be set")
@@ -162,6 +166,20 @@ func stateFileOptions(flags flagSource) (file string, importState bool, err erro
 		return "", false, nil
 	}
 	return file, !flags.IsSet(FlagLoadState) || flags.GetBool(FlagLoadState), nil
+}
+
+// expandHome replaces a leading ~ of path, a path setting, with the home
+// directory. A shell does that for a flag, but not for the config file, a
+// variable or --flag=~/….
+func expandHome(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, path[1:])
 }
 
 // stateDBForFile is the state database that takes over from the state

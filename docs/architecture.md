@@ -117,7 +117,11 @@ answers write keys directly to the agent's terminal.
 1. Flags come from the command line, `AGENTAPI_*` environment variables or
    `~/.agentapi/config.yaml` (`--config`), in that order (viper).
    `cmd/server/userconfig.go` reports names that aren't flags and ignores a
-   file it can't read. The agent type is `--type`, else the agent command
+   file it can't read, and a `state-db` in it without `{port}`: every server
+   reads the file, and only one can lock the database. A leading `~` in a
+   path setting is the home directory, and `{port}` and `{hostname}` in
+   `--state-db` and `--public-url` are filled in
+   (`instanceapi.ExpandPlaceholders`). The agent type is `--type`, else the agent command
    when it is a type name, else `custom`. The transport is `--transport`, else
    native for an agent `hasNativeAdapter` covers (Claude Code, Codex, Pi and
    `native-demo`) unless the deprecated `--state-file` is set, else PTY.

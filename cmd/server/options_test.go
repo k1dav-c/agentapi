@@ -138,6 +138,29 @@ func TestLoadServerOptions(t *testing.T) {
 				assert.Empty(t, off.registryDir)
 			},
 		},
+		"--state-db fills in {port} and {hostname}; path settings expand ~": {
+			values: map[string]any{
+				FlagStateDB: "~/.agentapi/state/{hostname}-{port}.db", FlagPort: 3286,
+				FlagPidFile: "~/run/agentapi.pid", FlagPrices: "~/prices.json", FlagRegistryDir: "~/reg", FlagRegistry: true,
+			},
+			check: func(t *testing.T, opts serverOptions) {
+				home, err := os.UserHomeDir()
+				require.NoError(t, err)
+				hostname, err := os.Hostname()
+				require.NoError(t, err)
+				assert.Equal(t, filepath.Join(home, ".agentapi", "state", hostname+"-3286.db"), opts.stateDB)
+				assert.Equal(t, filepath.Join(home, "run", "agentapi.pid"), opts.pidFile)
+				assert.Equal(t, filepath.Join(home, "prices.json"), opts.prices)
+				assert.Equal(t, filepath.Join(home, "reg"), opts.registryDir)
+				other, err := loadServerOptions(flagsWith(map[string]any{FlagStateDB: "~/.agentapi/state/{port}.db", FlagPort: 3285}), []string{"codex"})
+				require.NoError(t, err)
+				assert.Equal(t, filepath.Join(home, ".agentapi", "state", "3285.db"), other.stateDB, "another port, another file")
+				file, err := loadServerOptions(flagsWith(map[string]any{FlagStateFile: "~/state.json"}), []string{"claude"})
+				require.NoError(t, err)
+				assert.Equal(t, filepath.Join(home, "state.json"), file.stateFile)
+				assert.Equal(t, filepath.Join(home, "state.db"), file.stateDB)
+			},
+		},
 		"--public-url fills in {port}": {
 			values: map[string]any{FlagPublicURL: "http://dev-1.vpn:{port}", FlagPort: 3290},
 			check: func(t *testing.T, opts serverOptions) {

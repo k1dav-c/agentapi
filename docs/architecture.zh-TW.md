@@ -113,7 +113,10 @@ flowchart TB
 `agentapi server [旗標] -- <agent 指令>`（`cmd/server/server.go`）：
 
 1. 旗標依序來自命令列、`AGENTAPI_*` 環境變數或 `~/.agentapi/config.yaml`（`--config`；viper；
-   `cmd/server/userconfig.go` 會記下不是旗標的名稱，讀不了的檔案則略過）。agent 類型取自 `--type`；沒有指定時，
+   `cmd/server/userconfig.go` 會記下不是旗標的名稱，讀不了的檔案則略過；檔案中沒有 `{port}` 的
+   `state-db` 也會略過，因為每個伺服器都會讀這個檔案，而資料庫只能由一個伺服器鎖住）。路徑設定
+   開頭的 `~` 代表家目錄，`--state-db` 和 `--public-url` 中的 `{port}` 和 `{hostname}` 會被填入
+   （`instanceapi.ExpandPlaceholders`）。agent 類型取自 `--type`；沒有指定時，
    若 agent 指令符合已知類型別名，就採用該類型；否則使用 `custom`。transport 取自
    `--transport`；沒有指定時，`hasNativeAdapter` 涵蓋的 agent（Claude Code、Codex、Pi 和
    `native-demo`）使用 native（除非設定了已棄用的 `--state-file`），其他 agent 使用 PTY。

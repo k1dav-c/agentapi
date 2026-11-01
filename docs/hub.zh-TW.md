@@ -109,6 +109,8 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
   加入。旗標和 `AGENTAPI_*` 環境變數仍然優先於這個檔案。
 - `--public-url` 是 hub 連回各 AgentAPI 的網址。`{port}` 會換成各自的 port，所以同一行設定可以
   同時用在 3286 的 Claude Code 和 3285 的 Codex。
+- 同一個檔案也能讓各 AgentAPI 重新啟動（更新、重新開機）後保留對話：加上
+  `state-db: ~/.agentapi/state/{port}.db`，見[持久保存的工作階段](../README.zh-TW.md#持久保存的工作階段)。
 - 正在執行的 AgentAPI 會立刻套用，一秒內就出現在 hub 上。1.2 之前啟動的 AgentAPI 沒有在這台機器
   上登記，`join` 找不到它們：重新啟動它們或整個 workspace 一次。
 - hub 轉送請求時，`Host` 標頭是實例的 VPN 名稱。AgentAPI 預設只接受 `localhost`、`127.0.0.1` 和

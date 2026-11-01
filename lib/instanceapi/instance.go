@@ -58,13 +58,20 @@ type WebhookInstance struct {
 	WorkspaceURL string `json:"workspace_url,omitempty"`
 }
 
-// ExpandPublicURL fills in a public URL's placeholders: {port} is the port
-// AgentAPI listens on and {hostname} the machine's name. One setting then
-// serves every AgentAPI of a machine (the config file of agentapi hub join).
+// ExpandPublicURL fills in a public URL's placeholders; see
+// ExpandPlaceholders.
 func ExpandPublicURL(publicURL string, port int) string {
-	if !strings.Contains(publicURL, "{") {
-		return publicURL
+	return ExpandPlaceholders(publicURL, port)
+}
+
+// ExpandPlaceholders fills in the placeholders of a setting such as
+// --public-url or --state-db: {port} is the port AgentAPI listens on and
+// {hostname} the machine's name. One setting then serves every AgentAPI of
+// a machine (the config file of agentapi hub join).
+func ExpandPlaceholders(s string, port int) string {
+	if !strings.Contains(s, "{") {
+		return s
 	}
 	hostname, _ := os.Hostname()
-	return strings.NewReplacer("{port}", strconv.Itoa(port), "{hostname}", hostname).Replace(publicURL)
+	return strings.NewReplacer("{port}", strconv.Itoa(port), "{hostname}", hostname).Replace(s)
 }

@@ -119,6 +119,9 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
   still win over the file.
 - `--public-url` is where the hub reaches each AgentAPI. `{port}` becomes each one's port, so one
   line serves the Claude Code AgentAPI on 3286 and the Codex one on 3285 alike.
+- The same file can keep each AgentAPI's conversation when it restarts (an update, a reboot): add
+  `state-db: ~/.agentapi/state/{port}.db` to it; see
+  [Persistent sessions](../README.md#persistent-sessions).
 - AgentAPIs that are running now get the change at once and appear in the hub within a second.
   Ones that started before 1.2 aren't registered on the machine, so `join` can't reach them:
   restart them, or the workspace, once.

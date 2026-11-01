@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -51,5 +52,28 @@ func readUserConfig(v *viper.Viper, flags *pflag.FlagSet, logger *slog.Logger) {
 		logger.Warn("Ignoring the AgentAPI config file", "path", path, "error", err)
 		return
 	}
+	if shared := sharedStateDB(config, flags); shared != "" {
+		logger.Warn("Ignoring state-db in the AgentAPI config file: every agentapi server reads the file, and only one can use a state database; put {port} in its path, e.g. ~/.agentapi/state/{port}.db",
+			"path", path, "state-db", shared)
+		v.Set(FlagStateDB, "")
+	}
 	logger.Info("Read the AgentAPI config file", "path", path)
+}
+
+// sharedStateDB returns the state-db of config if every server would use
+// that file: its path has no {port}, and neither --state-db nor
+// AGENTAPI_STATE_DB names another. The first server locks the file, so the
+// others couldn't start.
+func sharedStateDB(config userconfig.Config, flags *pflag.FlagSet) string {
+	path, ok := config[FlagStateDB].(string)
+	if !ok || path == "" || strings.Contains(path, "{port}") {
+		return ""
+	}
+	if flag := flags.Lookup(FlagStateDB); flag != nil && flag.Changed {
+		return ""
+	}
+	if os.Getenv("AGENTAPI_STATE_DB") != "" {
+		return ""
+	}
+	return path
 }

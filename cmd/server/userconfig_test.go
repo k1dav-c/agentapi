@@ -1,12 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,5 +74,43 @@ func TestPrintOpenAPIIgnoresUserConfig(t *testing.T) {
 	case event := <-hits:
 		t.Fatalf("the hub got %q from --print-openapi", event)
 	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+// A state-db in the config file without {port} would be every server's,
+// and the first one to start locks it: it is ignored, with a warning. A
+// flag or a variable still names one.
+func TestReadUserConfigSharedStateDB(t *testing.T) {
+	for name, tc := range map[string]struct {
+		file   string
+		args   []string
+		env    string
+		want   string
+		warned bool
+	}{
+		"without {port}": {file: "state-db: /data/agentapi.db\n", want: "", warned: true},
+		"with {port}":    {file: "state-db: ~/.agentapi/state/{port}.db\n", want: "~/.agentapi/state/{port}.db"},
+		"a flag":         {file: "state-db: /data/agentapi.db\n", args: []string{"--state-db=/data/mine.db"}, want: "/data/mine.db"},
+		"a variable":     {file: "state-db: /data/agentapi.db\n", env: "/data/env.db", want: "/data/env.db"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("AGENTAPI_STATE_DB", tc.env)
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(tc.file), 0o600))
+			flags := pflag.NewFlagSet("server", pflag.ContinueOnError)
+			flags.String(FlagStateDB, "", "")
+			flags.String(FlagConfig, "", "")
+			require.NoError(t, flags.Parse(append([]string{"--config=" + path}, tc.args...)))
+			v := viper.New()
+			require.NoError(t, v.BindPFlags(flags))
+			v.SetEnvPrefix("AGENTAPI")
+			v.AutomaticEnv()
+			v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+			var logs bytes.Buffer
+
+			readUserConfig(v, flags, slog.New(slog.NewTextHandler(&logs, nil)))
+			assert.Equal(t, tc.want, v.GetString(FlagStateDB))
+			assert.Equal(t, tc.warned, strings.Contains(logs.String(), "Ignoring state-db in the AgentAPI config file"), logs.String())
+		})
 	}
 }

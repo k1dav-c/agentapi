@@ -840,6 +840,18 @@ is a new conversation.
 agentapi server --state-db ~/.agentapi/myproject.db -- claude
 ```
 
+`{port}` and `{hostname}` in the path are filled in, so one line in the
+[config file](#flags) gives every AgentAPI of the user a file of its own, such as the Claude Code
+one on 3286 and the Codex one on 3285 that a Coder workspace starts:
+
+```yaml
+state-db: ~/.agentapi/state/{port}.db
+```
+
+- Every `agentapi server` reads the config file, and the first to start locks
+  the database, so a `state-db` there without `{port}` is ignored with a
+  warning rather than keep the others from starting. `--state-db` and
+  `AGENTAPI_STATE_DB` still set one.
 - Requests that were open when AgentAPI stopped are marked expired: the agent
   that asked is gone.
 - Uploads are kept next to the file (`<file>.uploads`), because messages refer
@@ -1915,13 +1927,15 @@ They can also be set by the flag's name in `~/.agentapi/config.yaml` (`--config`
 file) for every server the user starts; a flag or a variable overrides the file. A setting that
 names no flag is reported in the log, and a file AgentAPI can't read is reported and ignored, so the
 agent still starts. [`agentapi hub join`](#agentapi-hub) writes it; keep it readable by its owner
-only (`chmod 600`) when it holds a secret.
+only (`chmod 600`) when it holds a secret. A leading `~` in a file or directory setting is the home
+directory, wherever the setting comes from.
 
 ```yaml
 webhook-url: http://hub.vpn:3290/hooks
 webhook-secret: s3cret
 webhook-events: [instance.*, task.*, request.*]
 public-url: http://dev-1.vpn:{port}
+state-db: ~/.agentapi/state/{port}.db
 ```
 
 | Flag | Default | Description |
@@ -1930,7 +1944,7 @@ public-url: http://dev-1.vpn:{port}
 | `-p`, `--port` | `3284` | Port to listen on |
 | `--bind` | all interfaces | Address to listen on; see [Bind address](#bind-address) |
 | `--transport` | `native` for Claude Code, Codex and Pi, else `pty` | `native` or `pty`; see [Transports](#transports) |
-| `--state-db` | | SQLite file that keeps the conversation (native and PTY) and resumes a native agent's session; see [Persistent sessions](#persistent-sessions) |
+| `--state-db` | | SQLite file that keeps the conversation (native and PTY) and resumes a native agent's session; `{port}` and `{hostname}` are filled in; see [Persistent sessions](#persistent-sessions) |
 | `--terminal` | `true` | Shell in the agent's working directory for the chat (native); see [Terminal](#terminal) |
 | `--auto-continue` | `false` | Continue a turn stopped by a usage limit once the limit resets (native); see [Usage limits](#usage-limits) |
 | `--prices` | | JSON file of model prices per million tokens, which add to or replace the built-in ones; see [Session costs](#session-costs) |

@@ -711,6 +711,16 @@ Claude Code 則用 `/compact` 訊息壓縮，聊天介面會把這則訊息送�
 agentapi server --state-db ~/.agentapi/myproject.db -- claude
 ```
 
+路徑中的 `{port}` 和 `{hostname}` 會被填入，所以在[設定檔](#旗標)寫一行，就能讓這個使用者的
+每個 AgentAPI 各有自己的檔案，例如 Coder 工作區啟動的 Claude Code（3286）和 Codex（3285）：
+
+```yaml
+state-db: ~/.agentapi/state/{port}.db
+```
+
+- 每個 `agentapi server` 都會讀取設定檔，而第一個啟動的會鎖住資料庫檔案，所以設定檔中沒有
+  `{port}` 的 `state-db` 會略過並記下警告，否則其他伺服器都無法啟動。`--state-db` 和
+  `AGENTAPI_STATE_DB` 仍然有效。
 - AgentAPI 停止時尚未回覆的請求會標示為已過期：提出請求的 agent 已經不在了。
 - 上傳的檔案會保存在資料庫旁（`<檔案>.uploads`），因為訊息是用路徑引用它們。
 - 一個檔案只屬於一種 agent 類型、transport 和工作目錄；檔案屬於其他 agent 類型、transport 或
@@ -1637,13 +1647,14 @@ agentapi server -- kimi
 也可以寫在 `~/.agentapi/config.yaml`（`--config` 可指定其他檔案），以旗標名稱為 key，套用到這個
 使用者啟動的每個伺服器；旗標或環境變數會覆蓋它。不是旗標名稱的設定會記在 log 中；讀不了的檔案會
 記下並略過，agent 仍會啟動。[`agentapi hub join`](#agentapi-hub) 會寫入這個檔案；含有 secret 時
-請只讓擁有者讀取（`chmod 600`）。
+請只讓擁有者讀取（`chmod 600`）。檔案或目錄設定開頭的 `~` 代表家目錄，不論設定來自哪裡。
 
 ```yaml
 webhook-url: http://hub.vpn:3290/hooks
 webhook-secret: s3cret
 webhook-events: [instance.*, task.*, request.*]
 public-url: http://dev-1.vpn:{port}
+state-db: ~/.agentapi/state/{port}.db
 ```
 
 | 旗標 | 預設值 | 說明 |
@@ -1652,7 +1663,7 @@ public-url: http://dev-1.vpn:{port}
 | `-p`, `--port` | `3284` | 監聽的連接埠 |
 | `--bind` | 所有網路介面 | 監聽的位址；見[監聽位址](#監聽位址) |
 | `--transport` | Claude Code、Codex 和 Pi 為 `native`，其他為 `pty` | `native` 或 `pty`；見 [Transport](#transport) |
-| `--state-db` | | 保存對話（native 與 PTY）、並接續 native agent 工作階段的 SQLite 檔案；見[持久保存的工作階段](#持久保存的工作階段) |
+| `--state-db` | | 保存對話（native 與 PTY）、並接續 native agent 工作階段的 SQLite 檔案；`{port}` 和 `{hostname}` 會被填入；見[持久保存的工作階段](#持久保存的工作階段) |
 | `--terminal` | `true` | 給聊天介面使用、位於 agent 工作目錄的 shell（native）；見[終端機](#終端機) |
 | `--auto-continue` | `false` | 回合因用量限制停下時，在限制重置後繼續（native）；見[達到用量限制時](#達到用量限制時) |
 | `--prices` | | 每百萬 tokens 模型價格的 JSON 檔，新增或取代內建價格；見[工作階段花費](#工作階段花費) |
