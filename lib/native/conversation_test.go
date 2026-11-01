@@ -36,6 +36,7 @@ type recorded struct {
 	chosen       []native.Settings
 	usage        []native.AgentUsage
 	limitStops   []*native.LimitStop
+	exits        []native.AgentExit
 }
 
 // recorder records what a conversation emits and reports.
@@ -128,6 +129,12 @@ func (r *recorder) LimitStop(ls *native.LimitStop) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.limitStops = append(r.limitStops, ls)
+}
+
+func (r *recorder) AgentExited(exit native.AgentExit) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.exits = append(r.exits, exit)
 }
 
 // logRecorder is a slog.Handler that keeps the messages logged.

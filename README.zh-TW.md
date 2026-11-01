@@ -408,6 +408,11 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 - 需要你核准或回答時，輸入框上方會顯示決策卡片，詳見[請求處理](#請求核准提問與計畫)。
 - 關閉或重新啟動 agent 時，若它在輸入關閉後 3 秒內沒有自行結束，AgentAPI 會向它的整個行程
   群組送出訊號，它啟動的 MCP 伺服器和指令也會一併停止。
+- agent 自行結束或啟動失敗時，AgentAPI 會在 2、10、30 秒後接續原工作階段重新啟動。每次嘗試
+  都會以錯誤顯示在聊天介面，生命週期為 `restarting`。三次都失敗時，AgentAPI 仍繼續提供服務，
+  生命週期維持 `failed`，直到你重新啟動 agent（Explorer → Restart 或 `DELETE /messages`，會開始
+  新的工作階段；原本的工作階段可從 Session Explorer 重新開啟）。agent 執行滿 5 分鐘後，又有三次
+  機會。結束前已回報登入失效的 agent 則改為等待登入，見[登入](#登入)。
 
 AgentAPI 會清除上層 agent 工作階段留下的環境標記與機密資訊，保留登入與供應商設定。
 完整清單見[子行程環境](docs/architecture.zh-TW.md#子行程環境)。
@@ -490,6 +495,8 @@ Pi 的 `No API key found`，以及訂閱登入過期後的 `Authentication faile
 
 完成登入後，按下 **Check again**。AgentAPI 會接續原工作階段重新啟動 agent，並保留對話。
 模型成功完成一個回合時，也會清除登入錯誤；被中斷的回合或 agent 自行處理的訊息則不會。
+agent 回報登入失效後才結束時，不會像當掉那樣重新啟動，而是和啟動時找不到登入一樣等待登入；
+重新啟動時找不到登入也是如此。
 
 ### 請求：核准、提問與計畫
 
@@ -1091,7 +1098,8 @@ AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新�
   啟動 agent（native transport 會開始新的工作階段）。agent 重新啟動期間，訊息會在佇列中等待；
   原始按鍵、另一次重新啟動和開啟工作階段會回傳 409，AgentAPI 停止期間的重新啟動也一樣。
 - `GET /status` 回傳向下相容的 `stable`/`running` 狀態、詳細的生命週期（`starting`、
-  `ready`、`running`、`restarting`、`exited` 或 `failed`）、transport、`server_id`（這次
+  `ready`、`running`、`restarting`、`exited` 或 `failed`；native agent 結束後，AgentAPI 重新啟動
+  期間為 `restarting`，放棄後為 `failed`）、transport、`server_id`（這次
   AgentAPI 執行的隨機識別碼，每次啟動都會不同）、`turn`（agent 開始工作的次數）、對話的
   `epoch`、工作階段名稱、AgentAPI 版本、agent 目前開啟的對話框（`terminal_prompt`）以及終端機
   寬度（`terminal_columns`）。使用 native transport 時還會回報 `agent_session_id`（agent 自己的

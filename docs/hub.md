@@ -219,7 +219,7 @@ Each state has a shape of its own, so it reads without its color:
 | Struck-through bell, grey | Muted | It needs you, and you muted that until it changes ([Muting](#muting)) |
 | Dashed ring, turning | Connecting | The hub is opening its summary stream, or opening it again |
 | Broken red ring | Unreachable | The hub hasn't reached it for 10 s; the line says why |
-| Square | Stopped, Exited | The AgentAPI stopped (or missed three heartbeats while unreachable), or its agent exited |
+| Square | Stopped, Exited | The AgentAPI stopped (or missed three heartbeats while unreachable), or its agent exited (a native agent: AgentAPI gave up starting it again) |
 
 Search (**/**) matches any word of a name, group, title, machine or agent. The chips under it show
 all agents or only those that need you, work, finished unseen, or are offline, each with its count.

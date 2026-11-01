@@ -23,49 +23,19 @@ func (c *Conversation) awaitLogin(ctx context.Context, gen int, resume Resume, l
 	// generation of its own, so the closed one can't change the state.
 	c.generation++
 	c.adapter = nil
-	c.loginWaiting = true
 	if c.setLoginLocked(login) {
 		c.cfg.Logger.Warn("The agent needs a login", "agent", login.Agent, "command", login.Command)
 		c.cfg.Emitter.EmitError(loginErrorText(login), conv.ErrorLevelWarning)
 	}
-	wake := make(chan struct{})
-	c.loginWake = wake
-	go c.relaunchAfterWait(ctx, wake, c.generation, resume)
+	c.awaitLoginLocked(ctx, resume)
 }
 
-// relaunchAfterWait starts the agent again as generation gen once it waited
-// for a login (closing wake cuts the wait short), unless the agent was
-// replaced or closed meanwhile.
-func (c *Conversation) relaunchAfterWait(ctx context.Context, wake <-chan struct{}, gen int, resume Resume) {
-	if !c.waitForLogin(ctx, wake) {
-		return
-	}
-	c.mu.Lock()
-	current := gen == c.generation
-	if current {
-		c.loginWake = nil
-	}
-	c.mu.Unlock()
-	if !current {
-		return
-	}
-	if err := c.launch(ctx, gen, resume); err != nil {
-		c.failStart(gen, err)
-	}
-}
-
-// waitForLogin waits LoginRetryInterval or until wake is closed. It reports
-// false if ctx ended first.
-func (c *Conversation) waitForLogin(ctx context.Context, wake <-chan struct{}) bool {
-	timer := c.cfg.Clock.NewTimer(c.cfg.LoginRetryInterval, "Conversation", "loginRetry")
-	defer timer.Stop("Conversation", "loginRetry")
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-	case <-wake:
-	}
-	return true
+// awaitLoginLocked starts the agent again, on the session resume says,
+// after LoginRetryInterval, or sooner on RetryLogin; a start that finds no
+// login waits again.
+func (c *Conversation) awaitLoginLocked(ctx context.Context, resume Resume) {
+	c.loginWaiting = true
+	c.relaunchLocked(ctx, resume, c.cfg.LoginRetryInterval, "loginRetry")
 }
 
 // setLoginLocked records that the agent waits for login and reports whether
@@ -121,7 +91,7 @@ func (c *Conversation) LoginRequired() *LoginRequired {
 }
 
 // RetryLogin checks again whether the user logged in. While the agent waits
-// at startup it is started again now; a start that is under way already is
+// to start again it is started now; a start that is under way already is
 // that check. If the agent lost its login while running, it is replaced by
 // a new process that resumes the session.
 func (c *Conversation) RetryLogin(context.Context) error {
@@ -131,20 +101,21 @@ func (c *Conversation) RetryLogin(context.Context) error {
 		return ErrNoLoginRequired
 	}
 	if !c.started {
-		if c.loginWake != nil {
-			close(c.loginWake)
-			c.loginWake = nil
+		if c.relaunchWake != nil {
+			close(c.relaunchWake)
+			c.relaunchWake = nil
 		}
 		c.mu.Unlock()
 		return nil
 	}
 	old := c.retireAdapterLocked()
+	c.restarts = 0
 	gen, resume, runCtx := c.generation, c.resumeLocked(), c.ctx
 	c.cfg.Emitter.EmitStatus(conv.StatusInitializing)
 	c.mu.Unlock()
 	if old != nil {
 		_ = old.Close()
 	}
-	c.launchAsync(runCtx, gen, resume)
+	c.launchAsync(runCtx, gen, resume, true)
 	return nil
 }

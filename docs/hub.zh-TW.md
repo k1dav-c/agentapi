@@ -200,7 +200,7 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 | 灰色、劃掉的鈴鐺 | Muted | 它需要你處理，但你把這件事靜音到它改變為止（見[靜音](#靜音)） |
 | 轉動的虛線圓環 | Connecting | hub 正在開啟或重新開啟它的摘要串流 |
 | 斷開的紅色圓環 | Unreachable | hub 已經 10 秒連不到它；這一行會說明原因 |
-| 方塊 | Stopped、Exited | AgentAPI 已停止（或連不到時錯過三次 heartbeat），或它的 agent 已結束 |
+| 方塊 | Stopped、Exited | AgentAPI 已停止（或連不到時錯過三次 heartbeat），或它的 agent 已結束（native agent：AgentAPI 已放棄重新啟動） |
 
 搜尋（**/**）會比對名稱、群組、標題、機器或 agent 中的任何字詞。搜尋框下方的標籤可以顯示全部，或只
 顯示需要你、工作中、已完成未讀、離線的 agent，並附上數量。頁首顯示 hub 的串流是否連線中，以及共有

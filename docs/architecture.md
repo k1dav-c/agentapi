@@ -137,12 +137,13 @@ answers write keys directly to the agent's terminal.
    the queue loop, the webhook dispatcher and (PTY) the session-log watcher.
    `Start` listens, then writes the registry entry (unless `--registry=false`)
    and serves.
-5. On SIGINT, SIGTERM or SIGHUP, or when the agent exits, the webhook sends
+5. On SIGINT, SIGTERM or SIGHUP, or when a PTY agent exits, the webhook sends
    `instance.stopped` and the registry entry is removed. A restart under way
    is cancelled, the HTTP server shuts down, and the queue loop and the
    session-log watcher stop. A native or PTY agent that still runs and the
    shell terminal are closed, and the state DB is flushed and closed. SIGUSR1
-   flushes the state DB without stopping.
+   flushes the state DB without stopping. A native agent that exits doesn't
+   stop the server: the conversation starts it again (see Native).
 
 ## The HTTP server
 
@@ -325,6 +326,16 @@ type Factory func(resume Resume) (Adapter, error)
   own logs (`sessions.Store.Subagents`), for `GET /subagents` and the chat's
   Lineage panel. Their state comes from the Agent tool call that started
   them.
+- **Exits.** An agent that exits on its own, or fails a start the
+  conversation made by itself (the first, after an exit or a wait for a
+  login), is launched again on its session after the next of
+  `RestartDelays` (2, 10 and 30 seconds), in a new generation. The observer
+  hears of each attempt (`AgentExited`; the server shows the lifecycle
+  `restarting`) and of the conversation giving up after the last (`failed`);
+  no agent runs then until a replacement. Once an agent has run 5 minutes,
+  the count starts over. One that reported a lost login before it exited
+  waits for the login instead. A start a caller waits for (`Replacement.Start`)
+  isn't made again: the caller gets its error.
 - **Costs.** `sessions.Store.Costs` reads the model calls of every session
   in the directory, its subagents' included, from the same logs (`GET
   /sessions`, `GET /cost`): Claude Code's assistant messages (one per message
@@ -561,6 +572,11 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
   (`Reload`), so the conversation stays. While a turn runs, the configuration
   is written but the reload is refused with 409. An agent that can't
   resume its session is restarted instead.
+- A native agent that exits is started again by its conversation (see
+  Native), without `s.mu` or `s.restarting`: messages wait in the queue
+  because no agent is idle. After the last failed attempt the server goes on
+  serving, with the lifecycle `failed`, until a restart, a reload or a switch
+  starts an agent. A PTY agent that exits stops AgentAPI.
 - `/status` reports the lifecycle: `starting`, `ready`, `running`,
   `restarting`, `exited` or `failed`.
 

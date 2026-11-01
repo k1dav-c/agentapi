@@ -388,8 +388,8 @@ and queue and require a second click.
 ![The Explorer's Session tab asking for a second click to restart the agent](screenshots/explorer-session.png)
 
 **Restart agent** stops the agent, clears the conversation and starts it again in a new session; it
-asks for a second click. Codex and Pi, when AgentAPI starts their CLI directly, update to their
-latest release first. **Download conversation JSONL** saves every message, tool call and result of
+asks for a second click. After AgentAPI gave up on an agent that kept exiting, this starts it
+again. Codex and Pi, when AgentAPI starts their CLI directly, update to their latest release first. **Download conversation JSONL** saves every message, tool call and result of
 the session, one event per line, followed by those of the subagents the agent ran; the session
 details menu has it too.
 

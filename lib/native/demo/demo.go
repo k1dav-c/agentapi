@@ -24,6 +24,11 @@
 //     expired, as after an hour away
 //   - "delegate": the agent hands a task to a subagent with Claude Code's
 //     Agent tool
+//   - "crash": the agent's process exits with an error mid-turn. AgentAPI
+//     starts it again on its session.
+//   - "crashloop": the same, and the session can't be resumed any more:
+//     every start that resumes it fails, so AgentAPI gives up after its
+//     attempts. A restart starts a new session that works.
 //
 // With --type claude, codex or pi the demo poses as that agent, so
 // AgentAPI reads that agent's session logs for it: its earlier sessions
@@ -80,6 +85,25 @@ type loginState struct {
 	startsLeft int
 }
 
+// brokenSessions are the sessions of a factory's adapters that can't be
+// resumed any more ("crashloop").
+type brokenSessions struct {
+	mu   sync.Mutex
+	refs map[string]bool
+}
+
+func (b *brokenSessions) add(ref string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.refs[ref] = true
+}
+
+func (b *brokenSessions) has(ref string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.refs[ref]
+}
+
 // missing reports whether a start finds no login, and counts the start.
 func (l *loginState) missing() bool {
 	l.mu.Lock()
@@ -104,6 +128,7 @@ type Adapter struct {
 	now       func() time.Time
 	resumeRef string
 	login     *loginState
+	broken    *brokenSessions
 	// prefix starts the IDs of the adapter's messages, tool calls and
 	// requests, so they don't repeat those of an earlier adapter in the
 	// same conversation.
@@ -112,10 +137,14 @@ type Adapter struct {
 	// limit or an expired prompt cache.
 	limited, cold atomic.Bool
 
-	mu       sync.Mutex
-	sink     native.Sink
-	started  bool
-	closed   bool
+	mu      sync.Mutex
+	sink    native.Sink
+	started bool
+	closed  bool
+	// ref is the session's; exitErr is what Wait returns once the
+	// simulated process exited.
+	ref      string
+	exitErr  error
 	turns    int
 	active   *turn
 	nextReq  int
@@ -155,19 +184,21 @@ func Factory(opts Options) native.Factory {
 		opts.Now = time.Now
 	}
 	login := &loginState{}
+	broken := &brokenSessions{refs: map[string]bool{}}
 	return func(resume native.Resume) (native.Adapter, error) {
 		// A fork of the simulated session is a session like it.
-		return newAdapter(resume.Ref, opts, login), nil
+		return newAdapter(resume.Ref, opts, login, broken), nil
 	}
 }
 
 // newAdapter returns an adapter for a new session, or for resumeRef.
-func newAdapter(resumeRef string, opts Options, login *loginState) *Adapter {
+func newAdapter(resumeRef string, opts Options, login *loginState, broken *brokenSessions) *Adapter {
 	return &Adapter{
 		step:      opts.Step,
 		now:       opts.Now,
 		resumeRef: resumeRef,
 		login:     login,
+		broken:    broken,
 		prefix:    "demo-" + native.RequestPrefix(),
 		settings:  defaultSettings,
 		done:      make(chan struct{}),
@@ -196,16 +227,21 @@ func (a *Adapter) Start(_ context.Context, sink native.Sink) error {
 		a.mu.Unlock()
 		return &native.LoginRequiredError{Login: LoginHint}
 	}
+	if a.resumeRef != "" && a.broken.has(a.resumeRef) {
+		a.mu.Unlock()
+		return fmt.Errorf("native-demo exited during startup: session %s can't be read (simulated)", a.resumeRef)
+	}
+	ref := a.resumeRef
+	if ref == "" {
+		ref = fmt.Sprintf("demo-%d", a.now().UnixNano())
+	}
 	// The turns play on goroutines of their own, while Compact reports on
 	// its caller's.
 	sink = native.SerialSink(sink)
 	a.sink = sink
 	a.started = true
+	a.ref = ref
 	a.mu.Unlock()
-	ref := a.resumeRef
-	if ref == "" {
-		ref = fmt.Sprintf("demo-%d", a.now().UnixNano())
-	}
 	sink.SessionRef(ref)
 	sink.SessionName("Native demo")
 	return nil
@@ -315,18 +351,28 @@ func (a *Adapter) ApplySettings(_ context.Context, change native.Settings) error
 
 func (a *Adapter) Wait() error {
 	<-a.done
-	return nil
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.exitErr
 }
 
 func (a *Adapter) Close() error {
+	a.exit(nil)
+	return nil
+}
+
+// exit ends the simulated process; Wait returns err.
+func (a *Adapter) exit(err error) {
 	a.mu.Lock()
-	a.closed = true
+	if !a.closed {
+		a.closed = true
+		a.exitErr = err
+	}
 	if a.active != nil {
 		a.active.cancel()
 	}
 	a.mu.Unlock()
 	a.once.Do(func() { close(a.done) })
-	return nil
 }
 
 // takeSteers returns the messages steered into t since the last call.
@@ -416,6 +462,9 @@ var errInterrupted = errors.New("interrupted")
 // errLimited ends a turn the 5-hour limit stopped.
 var errLimited = errors.New("usage limit reached")
 
+// errCrashed ends a turn whose agent crashed: no turn end follows.
+var errCrashed = errors.New("crashed")
+
 func (a *Adapter) run(t *turn, n int, input native.Input) {
 	a.mu.Lock()
 	sink := a.sink
@@ -426,6 +475,9 @@ func (a *Adapter) run(t *turn, n int, input native.Input) {
 		s.outcomes = append(s.outcomes, fmt.Sprintf("Looked at %d attached image(s)", len(input.Images)))
 	}
 	if err := s.play(); err != nil {
+		if errors.Is(err, errCrashed) {
+			return
+		}
 		if errors.Is(err, errLoginLost) {
 			a.finish(t, native.TurnResult{StopReason: native.StopReasonError, Error: "Native demo: the API answered 401 Unauthorized (simulated)"})
 			return
@@ -457,6 +509,9 @@ func (s *script) play() error {
 	}
 	if words["login"] {
 		return s.loseLogin()
+	}
+	if words["crash"] || words["crashloop"] {
+		return s.crash(words["crashloop"])
 	}
 	if words["cold"] {
 		s.a.cold.Store(true)
@@ -509,6 +564,20 @@ func (s *script) loseLogin() error {
 	s.a.login.lose()
 	s.sink.LoginRequired(LoginHint)
 	return errLoginLost
+}
+
+// crash ends the simulated process mid-turn, the way a crash does: Wait
+// returns an exit error, and the turn never ends. With broken, the session
+// can't be resumed any more.
+func (s *script) crash(broken bool) error {
+	if broken {
+		s.a.mu.Lock()
+		ref := s.a.ref
+		s.a.mu.Unlock()
+		s.a.broken.add(ref)
+	}
+	s.a.exit(errors.New("exit status 1 (simulated crash)"))
+	return errCrashed
 }
 
 // id returns the ID of a rich message or tool call of the turn.

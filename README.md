@@ -476,6 +476,14 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 - When the agent is stopped or restarted and doesn't exit within 3 seconds of
   its input closing, AgentAPI signals its whole process group, which also stops
   its MCP servers and child commands.
+- An agent that exits on its own, or fails to start, is started again on its
+  session after 2, 10 and 30 seconds. Each attempt shows in the chat as an
+  error, and the lifecycle is `restarting`. If all three fail, AgentAPI keeps
+  serving with the lifecycle `failed` until you restart the agent (Explorer →
+  Restart or `DELETE /messages`, which starts a new session; the Session
+  Explorer reopens the old one). Once an agent has run 5 minutes, the count
+  starts over. One that lost its login before it exited waits for the login
+  instead; see [Logging in](#logging-in).
 
 AgentAPI removes environment markers and secrets inherited from a parent agent
 session while preserving login and provider configuration. See
@@ -575,7 +583,9 @@ Authentication can also expire during a session. A turn that fails with a login 
 
 After logging in, select **Check again**. AgentAPI restarts the agent on the same session and
 preserves the conversation. A completed model turn also clears the login error; interrupted turns
-and messages handled by the agent itself do not.
+and messages handled by the agent itself do not. An agent that exits after it reported a lost login
+isn't restarted as after a crash: it waits for the login like one that finds none at startup, and a
+restart that finds no login does too.
 
 ### Requests: approvals, questions and plans
 
@@ -1298,7 +1308,8 @@ These endpoints work with every transport, except where noted; the
   session get 409, and so does a restart while AgentAPI stops.
 - `GET /status` returns the backward-compatible `stable`/`running` status,
   the detailed lifecycle (`starting`, `ready`, `running`, `restarting`,
-  `exited` or `failed`), the transport, `server_id` (a random identifier of
+  `exited` or `failed`; a native agent that exits is `restarting` while
+  AgentAPI starts it again and `failed` once it gives up), the transport, `server_id` (a random identifier of
   this AgentAPI run, new at every start), `turn` (how many times the agent
   started working), the conversation's `epoch`, the session name, the
   AgentAPI version, the agent's open dialog (`terminal_prompt`) and the

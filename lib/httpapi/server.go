@@ -163,6 +163,9 @@ type NativeConfig struct {
 	// PiSessionDir is the --session-dir Pi runs with, where its session
 	// logs are; empty without one.
 	PiSessionDir string
+	// RestartDelays are native.Config.RestartDelays: the waits before an
+	// agent that exited is started again. Nil is the default.
+	RestartDelays []time.Duration
 }
 
 // agentIO is the conversation's view of a PTY agent, nil for a native one
@@ -327,6 +330,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			Observer:        observer,
 			Logger:          logger,
 			Clock:           config.Clock,
+			RestartDelays:   config.Native.RestartDelays,
 			PrepareRichMessage: func(msg *transcript.RichMessage) {
 				uploads.storeRichImages(msg, logger)
 			},
@@ -445,17 +449,10 @@ func (s *Server) Handler() http.Handler {
 	return s.router
 }
 
-// NativeExited delivers the agent's exit when it runs over the native
-// transport and exits on its own; it is nil for other transports.
-func (s *Server) NativeExited() <-chan error {
-	if s.native == nil {
-		return nil
-	}
-	return s.native.Exited()
-}
-
-// MarkAgentExited records the terminal lifecycle state before the HTTP server
-// shuts down. A nil error represents a clean process exit.
+// MarkAgentExited records the terminal lifecycle state of a PTY agent that
+// exited, before the HTTP server shuts down. A nil error represents a clean
+// process exit. A native agent that exits is started again (see
+// native.Config.RestartDelays).
 func (s *Server) MarkAgentExited(err error) {
 	if err != nil {
 		s.emitter.SetLifecycle(LifecycleFailed)

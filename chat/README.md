@@ -69,6 +69,11 @@ to try specific interactions:
 - `cold`: the turn leaves a large context whose prompt cache already expired,
   for the note that suggests compacting
 - `delegate`: the agent hands a task to a subagent with an Agent tool call
+- `crash`: the agent's process exits mid-turn. AgentAPI shows the error and
+  starts it again on its session 2 seconds later
+- `crashloop`: the same, and the session can't be resumed: each start fails,
+  so after the attempts at 2, 10 and 30 seconds AgentAPI gives up and shows the
+  agent failed. Restart starts a new session that works
 
 To try earlier sessions, costs and Lineage, run the demo as Claude Code with
 `--type claude -- native-demo`, or use the Codex or Pi type. AgentAPI reads that agent's log

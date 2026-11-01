@@ -127,10 +127,11 @@ flowchart TB
    工作目錄就拒絕使用）、建立對話、註冊路由，並啟動對話、佇列迴圈、webhook 傳送器，以及
    （PTY 的）工作階段紀錄監看器。`Start` 開始監聽後寫入登記檔（除非 `--registry=false`），
    再開始服務。
-5. 收到 SIGINT、SIGTERM 或 SIGHUP，或 agent 自行結束時，AgentAPI 以 webhook 送出
+5. 收到 SIGINT、SIGTERM 或 SIGHUP，或 PTY agent 自行結束時，AgentAPI 以 webhook 送出
    `instance.stopped`、刪除登記檔、取消進行中的重新啟動、關閉 HTTP 伺服器、停止佇列迴圈與工作
    階段紀錄監看器、關閉仍在執行的 native 或 PTY agent 與 shell 終端機，並寫入、關閉狀態資料庫。
-   收到 SIGUSR1 時只寫入狀態資料庫，不會停止。
+   收到 SIGUSR1 時只寫入狀態資料庫，不會停止。native agent 結束不會讓伺服器停止：對話會重新
+   啟動 agent（見 Native）。
 
 ## HTTP 伺服器
 
@@ -288,6 +289,12 @@ type Factory func(resume Resume) (Adapter, error)
   （`sessions.Store.ReadHistory`；`GET /sessions` 會列出它們）。agent 在工作階段中執行過的
   sub agent 也以同樣方式從它們自己的紀錄讀出（`sessions.Store.Subagents`），提供給
   `GET /subagents` 和聊天介面的 Lineage 面板；它們的狀態取自啟動它們的 Agent 工具呼叫。
+- **結束。** agent 自行結束，或對話自己發起的啟動（第一次、結束後、等待登入後）失敗時，對話會在
+  下一個 `RestartDelays`（2、10、30 秒）後接續原工作階段重新啟動，並使用新的世代。observer 會
+  得知每次嘗試（`AgentExited`；伺服器顯示生命週期 `restarting`），以及最後一次失敗後對話放棄
+  （`failed`）；之後直到替換 agent 前都沒有 agent 在執行。agent 執行滿 5 分鐘後，嘗試次數會重新
+  計算。結束前已回報登入失效的 agent 則改為等待登入。呼叫端等待的啟動
+  （`Replacement.Start`）失敗時不會重試：呼叫端會拿到錯誤。
 - **花費。** `sessions.Store.Costs` 從同樣的紀錄讀出目錄中每個工作階段（含 sub agent）的模型呼叫
   （`GET /sessions`、`GET /cost`）：Claude Code 的 assistant 訊息（每個 message id 一次）、Codex 的
   token 計數、Pi 回報的金額。`lib/pricing` 為每次呼叫計價；Claude Code 的 `cost-state` 紀錄會把
@@ -451,6 +458,9 @@ native 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之
 - 帶 `?restart=true` 的 MCP 變更：native agent 會接續它的工作階段重新載入（`Reload`），對話
   會保留。有回合在執行時，重新載入會以 409 拒絕，但設定檔已經寫入。無法接續工作階段的 agent
   則改為重新啟動。
+- native agent 結束後由對話再啟動（見 Native），不使用 `s.mu` 或 `s.restarting`：沒有閒置的
+  agent，所以訊息會在佇列中等待。最後一次嘗試失敗後，伺服器繼續提供服務，生命週期為 `failed`，
+  直到重新啟動、重新載入或切換工作階段啟動新的 agent。PTY agent 結束則會讓 AgentAPI 停止。
 - `/status` 會回報生命週期：`starting`、`ready`、`running`、`restarting`、`exited` 或
   `failed`。
 

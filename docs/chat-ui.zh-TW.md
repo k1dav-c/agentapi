@@ -356,6 +356,7 @@ API 請參閱 [MCP 管理](../README.zh-TW.md#mcp-管理)。
 ![Explorer 的 Session 分頁要求再點一次才會重新啟動 agent](screenshots/explorer-session.png)
 
 **Restart agent** 會停止 agent、清除對話，並在新的工作階段中重新啟動它；需要再點一次。
+agent 一再結束、AgentAPI 已放棄重新啟動時，也用這個按鈕重新啟動。
 AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的發行版。
 **Download conversation JSONL** 會儲存這個工作階段的每則訊息、工具呼叫和結果，每行一個事件，
 後面接著 agent 執行過的 sub agent 的事件；工作階段詳細資訊的選單裡也有。

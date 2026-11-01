@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	conv "github.com/coder/agentapi/lib/conversation"
 )
@@ -17,18 +19,18 @@ func (c *Conversation) Start(ctx context.Context) {
 	gen, resume := c.generation, c.resumeLocked()
 	c.cfg.Emitter.EmitStatus(conv.StatusInitializing)
 	c.mu.Unlock()
-	c.launchAsync(ctx, gen, resume)
+	c.launchAsync(ctx, gen, resume, true)
 }
 
 // launchAsync launches the adapter of generation gen in the background and
-// reports a failure to start. The returned channel receives launch's
-// result.
-func (c *Conversation) launchAsync(ctx context.Context, gen int, resume Resume) <-chan error {
+// reports a failure to start, which is tried again if retry is set (see
+// failStart). The returned channel receives launch's result.
+func (c *Conversation) launchAsync(ctx context.Context, gen int, resume Resume, retry bool) <-chan error {
 	done := make(chan error, 1)
 	go func() {
 		err := c.launch(ctx, gen, resume)
 		if err != nil {
-			c.failStart(gen, err)
+			c.failStart(gen, err, retry)
 		}
 		done <- err
 	}()
@@ -72,8 +74,9 @@ func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error
 	}
 	// Adapters know what they support once they started.
 	caps := adapter.Capabilities()
+	startedAt := c.cfg.Clock.Now()
+	go func() { c.signalExit(gen, adapter, startedAt, adapter.Wait()) }()
 	settings := c.applyChosen(ctx, gen, adapter, caps)
-	go func() { c.signalExit(gen, adapter.Wait()) }()
 	var prompt Input
 	if c.cfg.InitialPrompt != "" {
 		prompt = InputFromText(c.cfg.InitialPrompt)
@@ -85,6 +88,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error
 		return nil
 	}
 	c.started = true
+	c.ran = true
 	c.caps = caps
 	c.setSettingsLocked(settings)
 	c.loginWaiting = false
@@ -174,45 +178,177 @@ func (c *Conversation) current(gen int) bool {
 	return gen == c.generation
 }
 
-// failStart reports that the adapter of generation gen failed to start.
-func (c *Conversation) failStart(gen int, err error) {
+// AgentExit is an agent that exited on its own or failed to start, and
+// what the conversation does about it.
+type AgentExit struct {
+	// Err is why: the exit's error (nil for a clean exit), or the start's.
+	Err error
+	// Attempt is the start the conversation makes after Delay, from 1 to
+	// Attempts; 0 once it gave up: no agent runs until a restart (Restart,
+	// Reload, Switch).
+	Attempt  int
+	Attempts int
+	Delay    time.Duration
+}
+
+// failStart handles the failed start of the adapter of generation gen. A
+// start the conversation made by itself (retry) is made again after the
+// next restart delay; one a caller waits for (Replacement.Start) leaves no
+// agent running.
+func (c *Conversation) failStart(gen int, err error, retry bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if gen != c.generation {
 		return
 	}
 	c.cfg.Logger.Error("Failed to start the agent", "error", err)
-	c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to start the agent: %v", err), conv.ErrorLevelError)
-	c.exitLocked(err)
-}
-
-// signalExit reports that the adapter of generation gen exited. Exits of
-// replaced adapters are expected and ignored.
-func (c *Conversation) signalExit(gen int, err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if gen == c.generation {
-		c.exitLocked(err)
+	c.downLocked()
+	what := fmt.Sprintf("Failed to start the agent: %v", err)
+	if retry {
+		c.startAgainLocked(sentence(what), err)
+		return
 	}
+	c.cfg.Emitter.EmitError(what, conv.ErrorLevelError)
+	c.cfg.Observer.AgentExited(AgentExit{Err: err})
 }
 
-// exitLocked records that the agent is gone and delivers err on Exited.
-func (c *Conversation) exitLocked(err error) {
+// signalExit handles the exit of adapter, of generation gen, which started
+// at startedAt, with err (nil for a clean exit): the conversation starts
+// the agent again. One that lost its login before it exited waits for the
+// login instead, as when a start finds none. Exits of replaced adapters
+// are expected and ignored.
+func (c *Conversation) signalExit(gen int, adapter Adapter, startedAt time.Time, err error) {
+	c.mu.Lock()
+	if gen != c.generation {
+		c.mu.Unlock()
+		return
+	}
+	if c.cfg.Clock.Since(startedAt) >= restartReset {
+		c.restarts = 0
+	}
+	c.downLocked()
+	if c.login != nil {
+		c.cfg.Logger.Warn("The agent exited after it lost its login; waiting for the login", "error", err)
+		c.cfg.Emitter.EmitStatus(conv.StatusInitializing)
+		c.awaitLoginLocked(c.ctx, c.resumeLocked())
+	} else {
+		what := "The agent exited."
+		if err != nil {
+			what = sentence(fmt.Sprintf("The agent exited: %v", err))
+		}
+		c.startAgainLocked(what, err)
+	}
+	c.mu.Unlock()
+	// Gone already; closing lets go of what the adapter still holds.
+	_ = adapter.Close()
+}
+
+// sentence ends s with a full stop, unless it ends with one already.
+func sentence(s string) string {
+	if strings.HasSuffix(s, ".") || strings.HasSuffix(s, "!") || strings.HasSuffix(s, "?") {
+		return s
+	}
+	return s + "."
+}
+
+// downLocked records that the agent is gone, as it exited or failed to
+// start: no turn runs, and its requests expire. The next agent gets a
+// generation of its own, so the old one's events are ignored.
+func (c *Conversation) downLocked() {
+	c.generation++
+	c.adapter = nil
 	c.started = false
 	c.turnActive = false
 	c.unconfirmedTurn = false
 	c.compacting = false
 	c.expireRequestsLocked(true)
-	select {
-	case c.exited <- err:
-	default:
-	}
+	c.messages.forgetRich()
 }
 
-// Exited delivers the error (nil for a clean exit) when the agent exits on
-// its own or fails to start, also when Restart or RetryLogin started it.
-// The exits Restart and Close cause are not delivered.
-func (c *Conversation) Exited() <-chan error { return c.exited }
+// startAgainLocked starts the agent again after the next restart delay,
+// on its session, and reports it; what says what happened to it. Once the
+// delays are used up it gives up: no agent runs until a restart.
+func (c *Conversation) startAgainLocked(what string, err error) {
+	delays := c.cfg.RestartDelays
+	// A start that fails now isn't a check for a login.
+	c.loginWaiting = false
+	if c.restarts >= len(delays) {
+		c.cfg.Logger.Error("The agent is gone; not starting it again", "error", err, "attempts", c.restarts)
+		c.cfg.Emitter.EmitError(what+" "+gaveUpText(c.restarts), conv.ErrorLevelError)
+		// Nothing waits for a login now.
+		if c.login != nil {
+			c.login = nil
+			c.cfg.Observer.LoginRequired(nil)
+		}
+		c.cfg.Observer.AgentExited(AgentExit{Err: err})
+		return
+	}
+	delay := delays[c.restarts]
+	c.restarts++
+	resume := c.restartResumeLocked()
+	var how string
+	switch {
+	case resume.Ref != "":
+		how = " on its session"
+	case c.ran:
+		how = " in a new session"
+	}
+	c.cfg.Logger.Warn("Starting the agent again", "error", err, "in", delay, "attempt", c.restarts, "of", len(delays))
+	c.cfg.Emitter.EmitError(fmt.Sprintf("%s AgentAPI starts it again%s in %s (attempt %d of %d).", what, how, delay, c.restarts, len(delays)), conv.ErrorLevelError)
+	c.cfg.Observer.AgentExited(AgentExit{Err: err, Attempt: c.restarts, Attempts: len(delays), Delay: delay})
+	c.relaunchLocked(c.ctx, resume, delay, "restart")
+}
+
+// gaveUpText says that AgentAPI stopped starting the agent after attempts.
+func gaveUpText(attempts int) string {
+	if attempts == 0 {
+		return "Restart the agent to go on."
+	}
+	return fmt.Sprintf("AgentAPI gave up after %d attempts to start it again; restart the agent to go on.", attempts)
+}
+
+// restartResumeLocked is the session the agent opens when it is started
+// again after an exit: its own, unless the last agent couldn't resume it.
+func (c *Conversation) restartResumeLocked() Resume {
+	if !c.ran || c.caps.Resume {
+		return c.resumeLocked()
+	}
+	return Resume{}
+}
+
+// relaunchLocked starts the agent of a new generation, which opens the
+// session resume says, once delay passed (closing relaunchWake cuts the
+// wait short), unless it is replaced or closed meanwhile. tag names the
+// wait's timer. A start that fails is made again (see failStart).
+func (c *Conversation) relaunchLocked(ctx context.Context, resume Resume, delay time.Duration, tag string) {
+	wake := make(chan struct{})
+	c.relaunchWake = wake
+	go c.relaunchAfter(ctx, wake, c.generation, resume, delay, tag)
+}
+
+func (c *Conversation) relaunchAfter(ctx context.Context, wake <-chan struct{}, gen int, resume Resume, delay time.Duration, tag string) {
+	timer := c.cfg.Clock.NewTimer(delay, "Conversation", tag)
+	defer timer.Stop("Conversation", tag)
+	select {
+	case <-ctx.Done():
+		return
+	case <-timer.C:
+	case <-wake:
+	}
+	c.mu.Lock()
+	current := gen == c.generation
+	if current {
+		c.relaunchWake = nil
+		c.cfg.Emitter.EmitStatus(conv.StatusInitializing)
+	}
+	c.mu.Unlock()
+	if !current {
+		return
+	}
+	if err := c.launch(ctx, gen, resume); err != nil {
+		c.failStart(gen, err, true)
+	}
+}
 
 // Replacement replaces the conversation's agent with a new one, in two
 // steps, so that a caller can make the change at once and wait for the new
@@ -231,9 +367,10 @@ type Replacement struct {
 }
 
 // replaceLocked retires the agent for one that opens the session resume
-// says.
+// says. The new agent's exits count from the first restart delay.
 func (c *Conversation) replaceLocked(resume Resume) *Replacement {
 	old := c.retireAdapterLocked()
+	c.restarts = 0
 	return &Replacement{c: c, gen: c.generation, resume: resume, runCtx: c.ctx, old: old}
 }
 
@@ -251,7 +388,8 @@ func (r *Replacement) CloseOld() {
 // Start closes the retired agent and starts the new one, whose status is
 // initializing until it accepts turns. It returns once the new agent
 // accepts turns or waits for a login, or with the error it failed to start
-// with, which Exited delivers too. If ctx ends first, Start returns
+// with, which the Observer gets too (AgentExited): the conversation
+// doesn't start it again by itself. If ctx ends first, Start returns
 // ctx.Err() and the agent goes on starting in the background. A
 // conversation that was closed or replaced again meanwhile starts nothing.
 func (r *Replacement) Start(ctx context.Context) error {
@@ -262,7 +400,7 @@ func (r *Replacement) Start(ctx context.Context) error {
 	}
 	r.c.mu.Unlock()
 	select {
-	case err := <-r.c.launchAsync(r.runCtx, r.gen, r.resume):
+	case err := <-r.c.launchAsync(r.runCtx, r.gen, r.resume, false):
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
@@ -380,7 +518,7 @@ func (c *Conversation) BeginReload() (*Replacement, error) {
 	return c.replaceLocked(c.resumeLocked()), nil
 }
 
-// Close stops the agent. The exit is not reported on Exited.
+// Close stops the agent. Its exit isn't reported to the Observer.
 func (c *Conversation) Close() error {
 	c.mu.Lock()
 	old := c.retireAdapterLocked()
@@ -393,7 +531,8 @@ func (c *Conversation) Close() error {
 
 // retireAdapterLocked stops using the current adapter and returns it for the
 // caller to close once it unlocked. The adapter's events are ignored from now
-// on, its requests can't be answered any more, and a wait for a login ends.
+// on, its requests can't be answered any more, and a wait to start the agent
+// again (for a login, after an exit) ends.
 func (c *Conversation) retireAdapterLocked() Adapter {
 	c.generation++
 	old := c.adapter
@@ -404,9 +543,9 @@ func (c *Conversation) retireAdapterLocked() Adapter {
 	c.compacting = false
 	c.loginWaiting = false
 	c.startErrors = nil
-	if c.loginWake != nil {
-		close(c.loginWake)
-		c.loginWake = nil
+	if c.relaunchWake != nil {
+		close(c.relaunchWake)
+		c.relaunchWake = nil
 	}
 	c.expireRequestsLocked(true)
 	c.messages.forgetRich()

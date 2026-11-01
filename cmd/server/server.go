@@ -213,8 +213,9 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 	return config
 }
 
-// serve runs the server until a signal, the agent's exit or a failed
-// listener stops it, then stops the server and the agent.
+// serve runs the server until a signal, a PTY agent's exit or a failed
+// listener stops it, then stops the server and the agent. A native agent
+// that exits is started again, and the server goes on serving.
 func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, agent *runningAgent) error {
 	gracefulCtx, gracefulCancel := context.WithCancel(ctx)
 	defer gracefulCancel()
@@ -222,20 +223,19 @@ func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, agent 
 	handleSignals(gracefulCtx, gracefulCancel, logger, srv)
 	logger.Info("Starting server", "address", srv.ListenAddr())
 
-	// One monitor waits for the agent: its exit stops the server.
+	// A monitor waits for a PTY agent: its exit stops the server.
 	exitCh := make(chan error, 1)
-	go func() {
-		defer close(exitCh)
-		exited, err := agent.waitForExit(gracefulCtx, srv)
-		if !exited {
-			return
-		}
-		srv.MarkAgentExited(err)
-		if err != nil {
-			exitCh <- err
-		}
-		gracefulCancel()
-	}()
+	if agent.process != nil {
+		go func() {
+			defer close(exitCh)
+			err := agent.waitForExit()
+			srv.MarkAgentExited(err)
+			if err != nil {
+				exitCh <- err
+			}
+			gracefulCancel()
+		}()
+	}
 
 	serverErrCh := make(chan error, 1)
 	go func() {
