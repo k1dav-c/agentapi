@@ -2322,7 +2322,7 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
-            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. */
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once. */
             spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];
@@ -2361,6 +2361,13 @@ export interface components {
              * @description API-equivalent cost in USD of the agent's sessions in this directory, subagents included, over the last 24 hours (the hours that end within them): the tokens at the model providers' list prices, which a subscription doesn't charge.
              */
             day_usd: number;
+            /** @description Identifies the sessions the amounts add up: those of one agent in one directory, as the session logs of one machine hold them (a hash of the machine's host name and ID, the agent, the directory's real path and where the agent keeps its logs). AgentAPIs that report the same scope report the same sessions; a client that adds up many counts each scope once. */
+            scope: string;
+            /**
+             * Format: date-time
+             * @description When the amounts last changed: of AgentAPIs with one scope, the latest is the most recent.
+             */
+            updated_at: string;
             /**
              * Format: double
              * @description The same over the last 7 days.
@@ -2399,7 +2406,7 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
-            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. */
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once. */
             spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];

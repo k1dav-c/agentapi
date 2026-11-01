@@ -72,6 +72,10 @@ export function InstanceRow({
   const doing = activity(instance);
   const ago = formatAgo(doing.since, now);
   const gone = state === "stopped" || state === "unreachable";
+  const spend = summary?.spend;
+  // The last spend of an instance the hub doesn't follow now: shown, not
+  // counted.
+  const lastKnown = instance.connection !== "connected";
   return (
     <li className="group/row relative px-2">
       <div
@@ -115,11 +119,15 @@ export function InstanceRow({
                   </span>
                 </>
               )}
-              {summary?.spend && summary.spend.week_usd > 0 && (
-                <span className="shrink-0 tabular-nums" title={spendTitle(summary.spend.day_usd, summary.spend.week_usd)}>
-                  <span className="sr-only">{spendTitle(summary.spend.day_usd, summary.spend.week_usd)}</span>
+              {spend && spend.week_usd > 0 && (
+                <span
+                  className={cn("shrink-0 tabular-nums", lastKnown && "opacity-55")}
+                  title={spendTitle(spend.day_usd, spend.week_usd, lastKnown)}
+                  data-spend-last-known={lastKnown || undefined}
+                >
+                  <span className="sr-only">{spendTitle(spend.day_usd, spend.week_usd, lastKnown)}</span>
                   <span aria-hidden="true">
-                    {formatUSD(summary.spend.day_usd)}
+                    {formatUSD(spend.day_usd)}
                     <span className="text-muted-foreground/60">/24h</span>
                   </span>
                 </span>

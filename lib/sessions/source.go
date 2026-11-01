@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/agentapi/lib/agenthome"
 	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/agentlog/claudelog"
 	"github.com/coder/agentapi/lib/agentlog/codexlog"
@@ -42,6 +43,9 @@ type source struct {
 	// agentlog.ScanFile. It differs for a log that refers to another one's
 	// lines (a Codex fork).
 	scan func(path string, fn func(line []byte) bool) bool
+	// roots are where the agent keeps the logs: Claude Code's config
+	// directory, Codex's home, Pi's sessions directories.
+	roots func(s *Store) []string
 }
 
 func sourceFor(agentType string) (source, bool) {
@@ -55,6 +59,7 @@ func sourceFor(agentType string) (source, bool) {
 			linesRecordCWD: true,
 			header:         claudeHeader,
 			prompt:         claudelog.Prompt,
+			roots:          func(*Store) []string { return home(agenthome.ClaudeConfigDir()) },
 		}, true
 	case "codex":
 		return source{
@@ -64,6 +69,7 @@ func sourceFor(agentType string) (source, bool) {
 			header: codexlog.Header,
 			prompt: codexlog.Prompt,
 			scan:   codexlog.ScanLog,
+			roots:  func(*Store) []string { return home(agenthome.CodexHome()) },
 		}, true
 	case "pi":
 		return source{
@@ -73,9 +79,18 @@ func sourceFor(agentType string) (source, bool) {
 			byID:       piLogsByID,
 			header:     pilog.Header,
 			prompt:     pilog.Prompt,
+			roots:      piRoots,
 		}, true
 	}
 	return source{}, false
+}
+
+// home is the directory an agenthome function returns, if it finds one.
+func home(dir string, err error) []string {
+	if err != nil {
+		return nil
+	}
+	return []string{dir}
 }
 
 // lines calls fn with the lines of the session log at path.
@@ -279,6 +294,17 @@ func piFiles(s *Store) ([]string, error) {
 		files = append(files, logs...)
 	}
 	return files, nil
+}
+
+// piRoots are the directories Pi keeps the directory's sessions in.
+func piRoots(s *Store) []string {
+	var dirs []string
+	for _, path := range s.dir.Paths() {
+		if dir, err := pilog.SessionsDir(path, s.config.PiSessionDir); err == nil && !slices.Contains(dirs, dir) {
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
 }
 
 // piLogsByID lists the logs of session id: Pi names a session's log

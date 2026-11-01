@@ -206,6 +206,12 @@ A row shows its agent's last 24 hours (`$110/24h`), a group header its group's, 
 list all of them; hover for the 7 days too. On a desktop the overview has a **Spend** card: the 24
 hours and 7 days of every agent that reports it, and the five that spent the most this week.
 
+Two AgentAPIs of one agent in one directory of a machine read the same sessions and report the same
+amounts, with the same `scope` (a hash of the machine, the agent, the directory and where the agent
+keeps its logs). The totals count each scope once, with its latest figure (`updated_at`). An agent
+the hub doesn't follow right now (stopped, unreachable, connecting) shows its last figure dimmed,
+as last known, and the totals leave it out.
+
 ### The list
 
 ![Every state the list shows](screenshots/hub-list.png)

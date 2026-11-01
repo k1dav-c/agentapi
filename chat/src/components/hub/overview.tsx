@@ -5,6 +5,7 @@ import {AgentMark} from "@/components/agent-mark";
 import {CopyCommand} from "@/components/copy-command";
 import {
   activity,
+  countedSpends,
   displayName,
   formatAgo,
   formatElapsed,
@@ -162,9 +163,10 @@ const stats: {filter: HubFilter; label: string; tone: string; tint: string; glyp
 function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: string) => void}) {
   const totals = spendTotals(instances);
   if (totals.week <= 0) return null;
-  const top = instances
-    .filter((instance) => (instance.summary?.spend?.week_usd ?? 0) > 0)
-    .sort((a, b) => b.summary!.spend!.week_usd - a.summary!.spend!.week_usd)
+  // Each scope once, as the totals count them.
+  const top = countedSpends(instances)
+    .filter(({spend}) => spend.week_usd > 0)
+    .sort((a, b) => b.spend.week_usd - a.spend.week_usd)
     .slice(0, 5);
   return (
     <section className="mt-10" aria-labelledby="hub-spend">
@@ -197,25 +199,22 @@ function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: 
             </tr>
           </thead>
           <tbody>
-            {top.map((instance) => {
-              const spend = instance.summary!.spend!;
-              return (
-                <tr key={instance.id} className="border-t" title={spendTitle(spend.day_usd, spend.week_usd)}>
-                  <td className="max-w-0 py-2 pr-3">
-                    <button
-                      type="button"
-                      onClick={() => onOpen(instance.id)}
-                      className="flex w-full min-w-0 items-center gap-2 rounded text-left outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                    >
-                      {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3.5 shrink-0" />}
-                      <span className="truncate font-medium">{displayName(instance)}</span>
-                    </button>
-                  </td>
-                  <td className="py-2 text-right tabular-nums">{formatUSD(spend.day_usd)}</td>
-                  <td className="py-2 pl-4 text-right tabular-nums">{formatUSD(spend.week_usd)}</td>
-                </tr>
-              );
-            })}
+            {top.map(({instance, spend}) => (
+              <tr key={instance.id} className="border-t" title={spendTitle(spend.day_usd, spend.week_usd)}>
+                <td className="max-w-0 py-2 pr-3">
+                  <button
+                    type="button"
+                    onClick={() => onOpen(instance.id)}
+                    className="flex w-full min-w-0 items-center gap-2 rounded text-left outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  >
+                    {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3.5 shrink-0" />}
+                    <span className="truncate font-medium">{displayName(instance)}</span>
+                  </button>
+                </td>
+                <td className="py-2 text-right tabular-nums">{formatUSD(spend.day_usd)}</td>
+                <td className="py-2 pl-4 text-right tabular-nums">{formatUSD(spend.week_usd)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

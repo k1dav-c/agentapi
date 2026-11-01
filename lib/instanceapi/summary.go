@@ -151,7 +151,7 @@ type SummaryBody struct {
 	// the agent waits for without opening it.
 	Request *SummaryRequest `json:"request,omitempty" doc:"The oldest request the agent waits on (see GET /requests); missing when none waits."`
 	// Spend is what the agent's sessions cost recently.
-	Spend *SummarySpend `json:"spend,omitempty" doc:"What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out."`
+	Spend *SummarySpend `json:"spend,omitempty" doc:"What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once."`
 }
 
 // SummaryRequest is what a summary says of a pending request.
@@ -167,4 +167,9 @@ type SummaryRequest struct {
 type SummarySpend struct {
 	DayUSD  float64 `json:"day_usd" doc:"API-equivalent cost in USD of the agent's sessions in this directory, subagents included, over the last 24 hours (the hours that end within them): the tokens at the model providers' list prices, which a subscription doesn't charge."`
 	WeekUSD float64 `json:"week_usd" doc:"The same over the last 7 days."`
+	// Scope identifies what the amounts add up: two AgentAPIs of one agent
+	// in one directory of one machine read the same session logs.
+	Scope string `json:"scope" doc:"Identifies the sessions the amounts add up: those of one agent in one directory, as the session logs of one machine hold them (a hash of the machine's host name and ID, the agent, the directory's real path and where the agent keeps its logs). AgentAPIs that report the same scope report the same sessions; a client that adds up many counts each scope once."`
+	// UpdatedAt is when the amounts last changed.
+	UpdatedAt time.Time `json:"updated_at" doc:"When the amounts last changed: of AgentAPIs with one scope, the latest is the most recent."`
 }

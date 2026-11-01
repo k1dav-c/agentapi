@@ -394,7 +394,9 @@ type Factory func(resume Resume) (Adapter, error)
   在同一次呼叫裡），摘要不同才送出 `summary_update`；回覆文字增長不會送出摘要更新。
 - 對於會讀取 session log 的 agent，伺服器每分鐘計算一次摘要的 `spend`（`spend.go`）：
   `sessions.Store.Costs` 以增量方式讀取 log，再把總計中結束於最近 24 小時和 7 天內的各小時加總。
-  `EventEmitter.SetSpend` 只在金額改變時才送出摘要。
+  `EventEmitter.SetSpend` 只在金額改變時才送出摘要，`updated_at` 記錄改變的時間。`scope` 是機器的
+  主機名稱和 ID 加上 `sessions.Store.Scope`（agent、目錄的實際路徑、agent 存放 log 的位置）算出的
+  雜湊值，讓 hub 對讀同一批 log 的兩個 AgentAPI 只算一次。
   只有 `/events?only=summary` 訂閱這些更新，串流另會送出心跳。`PUT /webhook` 可修改
   instance 的 ID 與網址，因此也會觸發摘要檢查，並重寫登記檔。
 - emitter 也記錄用戶端上次顯示對話的時間（`POST /tasks/seen`，聊天介面顯示對話時會呼叫）：

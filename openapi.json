@@ -2700,7 +2700,7 @@
           },
           "spend": {
             "$ref": "#/components/schemas/SummarySpend",
-            "description": "What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out."
+            "description": "What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once."
           },
           "status": {
             "$ref": "#/components/schemas/AgentStatus",
@@ -2783,6 +2783,15 @@
             "format": "double",
             "type": "number"
           },
+          "scope": {
+            "description": "Identifies the sessions the amounts add up: those of one agent in one directory, as the session logs of one machine hold them (a hash of the machine's host name and ID, the agent, the directory's real path and where the agent keeps its logs). AgentAPIs that report the same scope report the same sessions; a client that adds up many counts each scope once.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When the amounts last changed: of AgentAPIs with one scope, the latest is the most recent.",
+            "format": "date-time",
+            "type": "string"
+          },
           "week_usd": {
             "description": "The same over the last 7 days.",
             "format": "double",
@@ -2791,6 +2800,8 @@
         },
         "required": [
           "day_usd",
+          "scope",
+          "updated_at",
           "week_usd"
         ],
         "type": "object"
@@ -2847,7 +2858,7 @@
           },
           "spend": {
             "$ref": "#/components/schemas/SummarySpend",
-            "description": "What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out."
+            "description": "What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once."
           },
           "status": {
             "$ref": "#/components/schemas/AgentStatus",

@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {activity, formatUSD, spendTotals, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, groupInstances, groupNames, hubRoot, instanceState, needsYou, sortInstances, stateLabel, usagePercent, type HubInstance, type Summary} from "./hub";
+import {activity, countedSpends, currentSpend, formatUSD, spendTitle, spendTotals, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, groupInstances, groupNames, hubRoot, instanceState, needsYou, sortInstances, stateLabel, usagePercent, type HubInstance, type Spend, type Summary} from "./hub";
 
 const summary = (overrides: Partial<Summary> = {}): Summary =>
   ({
@@ -157,10 +157,40 @@ describe("hub", () => {
     expect(sortInstances([muted, instance("b")]).map((i) => i.id)).toEqual(["b", "a"]);
   });
 
+  const spending = (day_usd: number, week_usd: number, scope: string, updated_at = "2026-10-26T00:00:00Z") =>
+    summary({spend: {day_usd, week_usd, scope, updated_at}});
+
   test("spend: totals of the instances that report one, and short amounts", () => {
-    const spending = (day_usd: number, week_usd: number) => summary({spend: {day_usd, week_usd}});
-    const totals = spendTotals([instance("a", {summary: spending(1.5, 10)}), instance("b", {summary: spending(100, 300)}), instance("c")]);
+    const totals = spendTotals([instance("a", {summary: spending(1.5, 10, "s1")}), instance("b", {summary: spending(100, 300, "s2")}), instance("c")]);
     expect(totals).toEqual({day: 101.5, week: 310, counted: 2});
     expect([0, 0.004, 4.2, 109.77, 452.31, 1234, 98_765, 1_500_000].map(formatUSD)).toEqual(["$0", "$0", "$4.20", "$110", "$452", "$1.2k", "$99k", "$1.5M"]);
+  });
+
+  test("spend: AgentAPIs that add up the same sessions count once, with the most recent figure", () => {
+    const rows = [
+      instance("a", {summary: spending(10, 50, "same", "2026-10-26T10:00:00Z")}),
+      instance("b", {summary: spending(11, 51, "same", "2026-10-26T10:01:00Z")}),
+      instance("c", {summary: spending(1, 2, "other")}),
+    ];
+    expect(spendTotals(rows)).toEqual({day: 12, week: 53, counted: 3});
+    expect(countedSpends(rows).map(({instance}) => instance.id)).toEqual(["b", "c"]);
+    // Older AgentAPIs say no scope: each counts on its own.
+    const older = summary({spend: {day_usd: 2, week_usd: 4} as Spend});
+    expect(spendTotals([instance("d", {summary: older}), instance("e", {summary: older})])).toEqual({day: 4, week: 8, counted: 2});
+  });
+
+  test("spend: an instance the hub doesn't follow now shows its last figure, which doesn't count", () => {
+    const rows = [
+      instance("a", {summary: spending(10, 50, "s1")}),
+      instance("b", {state: "stopped", connection: "stopped", summary: spending(20, 60, "s2")}),
+      instance("c", {state: "unreachable", connection: "unreachable", summary: spending(30, 70, "s3")}),
+      instance("d", {state: "connecting", connection: "connecting", summary: spending(40, 80, "s4")}),
+      // A stale figure doesn't stand in for a scope's current one either.
+      instance("e", {state: "stopped", connection: "stopped", summary: spending(99, 99, "s1", "2026-10-27T00:00:00Z")}),
+    ];
+    expect(spendTotals(rows)).toEqual({day: 10, week: 50, counted: 1});
+    expect(countedSpends(rows).map(({instance}) => instance.id)).toEqual(["a"]);
+    expect(currentSpend(rows[1])).toBeUndefined();
+    expect(spendTitle(20, 60, true)).toStartWith("Last known, not counted: $20 in the last 24 hours");
   });
 });

@@ -305,24 +305,53 @@ export function formatElapsed(since: string | undefined, now: number): string {
   return `${Math.floor(seconds / 3600)}h ${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}m`;
 }
 
+export type Spend = NonNullable<Summary["spend"]>;
+
+// currentSpend is what an instance the hub follows spent recently; none for
+// one it doesn't (stopped, unreachable, connecting), whose summary is the
+// last it had.
+export function currentSpend(instance: HubInstance): Spend | undefined {
+  return instance.connection === "connected" ? (instance.summary?.spend ?? undefined) : undefined;
+}
+
+// countedSpends are the spends that add up to what the instances spent:
+// AgentAPIs of one agent in one directory of a machine report the same
+// sessions, with one scope, which counts once, with its most recent figure.
+// An older AgentAPI reports no scope: it counts on its own.
+export function countedSpends(instances: Iterable<HubInstance>): {instance: HubInstance; spend: Spend}[] {
+  const scopes = new Map<string, {instance: HubInstance; spend: Spend}>();
+  for (const instance of instances) {
+    const spend = currentSpend(instance);
+    if (!spend) continue;
+    const key = spend.scope ? `scope ${spend.scope}` : `instance ${instance.id}`;
+    const counted = scopes.get(key);
+    if (!counted || updatedAt(spend) > updatedAt(counted.spend)) scopes.set(key, {instance, spend});
+  }
+  return [...scopes.values()];
+}
+
+// updatedAt is when a spend's amounts last changed; 0 when it doesn't say.
+function updatedAt(spend: Spend): number {
+  const at = Date.parse(spend.updated_at);
+  return Number.isNaN(at) ? 0 : at;
+}
+
 // What the instances spent recently, as their summaries report it: the
-// API-equivalent cost of their sessions, at list prices.
+// API-equivalent cost of their sessions, at list prices, each scope once.
 export interface SpendTotals {
   day: number;
   week: number;
-  // How many instances report a spend; the others (PTY, ACP, older
-  // AgentAPIs) don't count.
+  // How many connected instances report a spend; the others (PTY, older
+  // AgentAPIs, those the hub doesn't follow now) don't count.
   counted: number;
 }
 
 export function spendTotals(instances: Iterable<HubInstance>): SpendTotals {
-  const totals: SpendTotals = {day: 0, week: 0, counted: 0};
-  for (const instance of instances) {
-    const spend = instance.summary?.spend;
-    if (!spend) continue;
+  const all = [...instances];
+  const totals: SpendTotals = {day: 0, week: 0, counted: all.filter((instance) => currentSpend(instance)).length};
+  for (const {spend} of countedSpends(all)) {
     totals.day += spend.day_usd;
     totals.week += spend.week_usd;
-    totals.counted++;
   }
   return totals;
 }
@@ -336,7 +365,9 @@ export function formatUSD(usd: number): string {
   return `$${(usd / 1_000_000).toFixed(1)}M`;
 }
 
-// spendTitle says what a spend is, for a tooltip.
-export function spendTitle(day: number, week: number): string {
-  return `${formatUSD(day)} in the last 24 hours, ${formatUSD(week)} in the last 7 days (API-equivalent, at list prices; a subscription doesn't charge it)`;
+// spendTitle says what a spend is, for a tooltip; lastKnown, that it is an
+// instance's last, which doesn't count while the hub doesn't follow it.
+export function spendTitle(day: number, week: number, lastKnown = false): string {
+  const amounts = `${formatUSD(day)} in the last 24 hours, ${formatUSD(week)} in the last 7 days (API-equivalent, at list prices; a subscription doesn't charge it)`;
+  return lastKnown ? `Last known, not counted: ${amounts}` : amounts;
 }

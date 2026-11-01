@@ -1419,7 +1419,9 @@ instance:
   `queued_messages`, the open terminal dialog, `login_required`, `limit_stop`, `usage` (context
   window and account limits) and, for native Claude Code, Codex and Pi, `spend`: the API-equivalent
   cost of the agent's sessions in the working directory over the last 24 hours (`day_usd`) and 7
-  days (`week_usd`), worked out from its logs once a minute.
+  days (`week_usd`), worked out from its logs once a minute, with when the amounts last changed
+  (`updated_at`) and a `scope`. AgentAPIs of one agent in one directory of a machine report the
+  same sessions, with the same `scope`: a client that adds up many counts each scope once.
 - `attention` identifies why the agent needs you, in priority order: `login`, `request` (approval,
   question or plan), `dialog` (in the terminal), `limit` (a usage limit stopped the turn), `exited`,
   or `none`.

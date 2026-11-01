@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -110,6 +111,18 @@ func New(agentType, cwd string, config Config) (*Store, error) {
 	s.logs = agentlog.NewIndex(func(string) *sessionLog { return s.newSessionLog(false) }, maxLogs, maxLogBytes)
 	s.subs = agentlog.NewIndex(func(string) *sessionLog { return s.newSessionLog(true) }, maxLogs, maxLogBytes)
 	return s, nil
+}
+
+// Scope identifies the logs the Store reads, on its machine: its agent,
+// the directory's real path, and the real paths of where the agent keeps
+// its logs. Stores with one scope read the same sessions, and find that
+// they spent the same.
+func (s *Store) Scope() string {
+	parts := []string{s.agent, s.dir.Paths()[0]}
+	for _, root := range s.src.roots(s) {
+		parts = append(parts, agentlog.RealPath(root))
+	}
+	return strings.Join(parts, "\n")
 }
 
 // logReader reads logs through an index, or a pass over one.

@@ -1191,7 +1191,9 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
   `request`（類型、標題和 agent 提出的時間）、`queued_messages`、開啟中的終端機對話框、
   `login_required`、`limit_stop`、`usage`（context window 與帳號用量限制），以及 native 模式的
   Claude Code、Codex 和 Pi 才有的 `spend`：agent 在工作目錄裡所有 session 最近 24 小時（`day_usd`）
-  和 7 天（`week_usd`）換算成 API 的金額，每分鐘從 log 重新計算一次。
+  和 7 天（`week_usd`）換算成 API 的金額，每分鐘從 log 重新計算一次，並附上金額最後變動的時間
+  （`updated_at`）和 `scope`。同一台機器上，同一個 agent 在同一個目錄的 AgentAPI 回報的是同一批
+  session，`scope` 也相同：加總多個 AgentAPI 的用戶端每個 scope 只算一次。
 - `attention` 依優先順序標示需要使用者處理的原因：`login`、`request`（核准、提問或計畫）、
   `dialog`（終端機對話框）、`limit`（用量限制使回合停止）、`exited`，或 `none`。
 - `GET /events?only=summary` 在連線時及摘要變動時送出 `summary_update`，另有心跳。

@@ -488,7 +488,10 @@ usage limit stop, login, terminal prompt) and the latest screen.
   `spend` once a minute (`spend.go`): `sessions.Store.Costs` reads the logs
   incrementally, and the hours of its total that end within the last 24 hours
   and 7 days are added up. `EventEmitter.SetSpend` sends the summary only when
-  the amounts change.
+  the amounts change; `updated_at` says when they did. Its `scope` hashes the
+  machine's host name and ID with `sessions.Store.Scope` (the agent, the
+  directory's real path, where the agent keeps its logs), so a hub counts two
+  AgentAPIs that read the same logs once.
 - The emitter also records when a client last showed the conversation
   (`POST /tasks/seen`, which the chat calls while it shows it). The latest
   task is `unread` when it ended after that. The state DB keeps the time; a
