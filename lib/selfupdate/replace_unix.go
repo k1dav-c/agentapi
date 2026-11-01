@@ -1,6 +1,6 @@
 //go:build unix
 
-package update
+package selfupdate
 
 import "os"
 

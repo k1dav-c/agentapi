@@ -1,6 +1,6 @@
 //go:build windows
 
-package update
+package selfupdate
 
 import (
 	"fmt"
