@@ -428,6 +428,7 @@ failed.
 | `--port` | `3290` | Port to listen on |
 | `--bind` | all interfaces | Address to listen on, such as the VPN address |
 | `--allowed-hosts` | any | Names browsers open the hub by, besides IP addresses and `localhost` (comma-separated, `*` for any); instances' events come by any name |
+| `--log-level` | `AGENTAPI_HUB_LOG_LEVEL`, else `info` | Least important level to log: `debug`, `info`, `warn` or `error` |
 
 The hub reaches the instances through the proxy of the environment (`HTTP_PROXY`, `HTTPS_PROXY`,
 `ALL_PROXY`).

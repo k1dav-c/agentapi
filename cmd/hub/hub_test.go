@@ -3,6 +3,7 @@ package hub
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -186,4 +187,26 @@ func TestJoinChecksHub(t *testing.T) {
 	_, _, err = join("http://hub.tailnet:3290/hooks", "--secret", "s3cret", "--public-url", "http://localhost:{port}")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "on another machine")
+}
+
+// An unknown --log-level (or AGENTAPI_HUB_LOG_LEVEL) stops the hub before
+// it starts.
+func TestServeRefusesAnUnknownLogLevel(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args []string
+		env  string
+	}{
+		"a flag":     {args: []string{"--log-level", "verbose"}},
+		"a variable": {env: "loud"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("AGENTAPI_HUB_LOG_LEVEL", tc.env)
+			cmd := serveCmd()
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(append(tc.args, "--no-token", "--secret", "s", "--bind", "127.0.0.1", "--port", "0",
+				"--state", filepath.Join(t.TempDir(), "instances.json")))
+			assert.ErrorContains(t, cmd.Execute(), "invalid --log-level: unknown log level")
+		})
+	}
 }

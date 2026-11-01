@@ -19,6 +19,7 @@ import (
 
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/hub"
+	"github.com/coder/agentapi/lib/logctx"
 )
 
 // defaultHubPort is where agentapi hub serve listens by default.
@@ -37,6 +38,7 @@ func serveCmd() *cobra.Command {
 		instanceToken string
 		statePath     string
 		allowedHosts  []string
+		logLevel      string
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -65,7 +67,11 @@ func serveCmd() *cobra.Command {
 					return fmt.Errorf("--allowed-hosts: %w", err)
 				}
 			}
-			logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+			level, err := logctx.ParseLevel(firstSet(logLevel, os.Getenv("AGENTAPI_HUB_LOG_LEVEL")))
+			if err != nil {
+				return fmt.Errorf("invalid --log-level: %w", err)
+			}
+			logger := slog.New(slog.NewTextHandler(cmd.OutOrStdout(), &slog.HandlerOptions{Level: level}))
 			h, err := hub.New(hub.Config{
 				Token: token, NoToken: noToken, Secret: secret, InstanceToken: instanceToken, StatePath: statePath,
 				AllowedHosts: allowedHosts, Logger: logger,
@@ -126,6 +132,7 @@ func serveCmd() *cobra.Command {
 	cmd.Flags().StringVar(&secret, "secret", "", "Secret the AgentAPIs sign their events with, as given to agentapi hub join (default $AGENTAPI_HUB_SECRET); required")
 	cmd.Flags().StringVar(&instanceToken, "instance-token", "", "API token sent to the AgentAPIs (default $AGENTAPI_HUB_INSTANCE_TOKEN, else $AGENTAPI_API_TOKEN)")
 	cmd.Flags().StringVar(&statePath, "state", "", "File that keeps the instances (default ~/.agentapi/hub/instances.json)")
+	cmd.Flags().StringVar(&logLevel, "log-level", "", "Least important level to log: "+logctx.LevelNames+" (default $AGENTAPI_HUB_LOG_LEVEL, else info)")
 	cmd.Flags().StringSliceVar(&allowedHosts, "allowed-hosts", nil, "Names browsers open the hub by, besides IP addresses and localhost, which always work (hostnames only, comma-separated; '*' for any); without it the hub answers to any name")
 	return cmd
 }

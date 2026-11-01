@@ -1983,7 +1983,13 @@ state-db: ~/.agentapi/state/{port}.db
 | `--webhook-payload-template` | | Go `text/template` for the POST body |
 | `-c`, `--chat-base-path` | `/chat` | Base path of the chat UI |
 | `--pid-file` | | File to write the server's process ID to, for shutdown scripts; `{port}` and `{hostname}` are filled in |
+| `--log-level` | `info` | Least important level to log: `debug`, `info`, `warn` or `error` |
 | `-P`, `--print-openapi` | | Print the OpenAPI schema and exit |
+
+AgentAPI logs to standard output, one `time=… level=… msg=…` line per entry. `--log-level debug`
+(or `AGENTAPI_LOG_LEVEL`, or `log-level` in the config file) adds what it logs for troubleshooting,
+such as the agent's command line and its login checks; `warn` and `error` leave out the routine
+lines. An unknown level stops the server before it starts.
 
 ### `agentapi update`
 
@@ -2070,7 +2076,8 @@ agentapi hub leave
 instead skips signing in, for a hub behind a sign-in of its own such as a Coder workspace app),
 `--secret` (or `AGENTAPI_HUB_SECRET`) checks the AgentAPIs' events, `--instance-token` (or
 `AGENTAPI_HUB_INSTANCE_TOKEN`, else `AGENTAPI_API_TOKEN`) is sent to them, `--state` keeps the
-instances, and `--port` and `--bind` set where it listens.
+instances, `--port` and `--bind` set where it listens, and `--log-level` (or
+`AGENTAPI_HUB_LOG_LEVEL`) how much it logs.
 
 `join` writes the hub's webhook into `~/.agentapi/config.yaml` and applies it to the registered
 AgentAPIs running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `--events` picks them

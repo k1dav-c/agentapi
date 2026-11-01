@@ -464,6 +464,7 @@ const (
 	FlagPublicURL              = "public-url"
 	FlagAPIToken               = "api-token"
 	FlagBind                   = "bind"
+	FlagLogLevel               = "log-level"
 )
 
 func CreateServerCmd() *cobra.Command {
@@ -480,7 +481,8 @@ func CreateServerCmd() *cobra.Command {
 			if viper.GetBool(FlagExit) {
 				return nil
 			}
-			logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+			level := new(slog.LevelVar)
+			logger := slog.New(slog.NewTextHandler(cmd.OutOrStdout(), &slog.HandlerOptions{Level: level}))
 			if viper.GetBool(FlagPrintOpenAPI) {
 				// We don't want log output here.
 				logger = slog.New(logctx.DiscardHandler)
@@ -492,8 +494,16 @@ func CreateServerCmd() *cobra.Command {
 			if !viper.GetBool(FlagPrintOpenAPI) {
 				readUserConfig(viper.GetViper(), cmd.Flags(), logger)
 			}
+			// Once the config file, which can set it too, was read; what
+			// reading it logged went out at info.
+			logLevel, err := logctx.ParseLevel(viper.GetString(FlagLogLevel))
+			if err != nil {
+				return fmt.Errorf("invalid --%s: %w", FlagLogLevel, err)
+			}
+			level.Set(logLevel)
 			self := newSelfExec()
-			err := runServer(ctx, logger, cmd.Flags().Args(), self)
+			logger.Debug("Restarting in place runs this program", "program", self.path)
+			err = runServer(ctx, logger, cmd.Flags().Args(), self)
 			if errors.Is(err, errRestart) {
 				logger.Info("Running the program again", "program", self.path)
 				if err := self.exec(); err != nil {
@@ -542,6 +552,7 @@ func CreateServerCmd() *cobra.Command {
 		{FlagPublicURL, "", "", "URL this AgentAPI is reached at, in GET /summary and every webhook event so clients and receivers can link to its chat or call its API; {port} and {hostname} are filled in", "string"},
 		{FlagAPIToken, "", "", "API token for Bearer authentication. If set without a value, a random token is generated. Empty (default) disables authentication.", "string"},
 		{FlagBind, "", "", "Address to listen on: an IP address or hostname without a port (e.g. 127.0.0.1 or ::1). Empty (default) listens on all interfaces", "string"},
+		{FlagLogLevel, "", "info", "Least important level to log: " + logctx.LevelNames, "string"},
 	}
 
 	for _, spec := range flagSpecs {

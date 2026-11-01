@@ -386,6 +386,7 @@ AgentAPI 的 log 會記下傳送失敗的 webhook。
 | `--port` | `3290` | 監聽的 port |
 | `--bind` | 所有介面 | 監聽的位址，例如 VPN 位址 |
 | `--allowed-hosts` | 任何名稱 | 瀏覽器開啟 hub 用的名稱，IP 位址和 `localhost` 以外（以逗號分隔，`*` 表示任何名稱）；實例的事件不受限制 |
+| `--log-level` | `AGENTAPI_HUB_LOG_LEVEL`，否則 `info` | 記錄的最低層級：`debug`、`info`、`warn` 或 `error` |
 
 hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`）連到實例。
 

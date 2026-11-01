@@ -1,11 +1,13 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -901,4 +903,59 @@ func TestExposureWarning(t *testing.T) {
 		assert.Empty(t, exposureWarning(bind, "", true), bind)
 	}
 	assert.Empty(t, exposureWarning("", "secret", true), "with a token")
+}
+
+// --log-level sets the level of the server's log, from a flag, a variable
+// or the config file; it is checked before the server starts.
+func TestServerLogLevel(t *testing.T) {
+	const debugLine, infoLine = "Restarting in place runs this program", "Driving the agent"
+	run := func(t *testing.T, env map[string]string, config string, args ...string) (string, error) {
+		t.Helper()
+		isolateViper(t)
+		for key, value := range env {
+			t.Setenv(key, value)
+		}
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, "config.yaml")
+		if config != "" {
+			require.NoError(t, os.WriteFile(configPath, []byte(config), 0o600))
+		}
+		serverCmd := CreateServerCmd()
+		var out bytes.Buffer
+		serverCmd.SetOut(&out)
+		serverCmd.SetErr(io.Discard)
+		// The server stops at the missing prices file, after it logged
+		// what it drives; --initial-prompt keeps it from reading stdin.
+		serverCmd.SetArgs(append(args, "--config", configPath, "--registry-dir", dir,
+			"--initial-prompt", "hi", "--prices", filepath.Join(dir, "missing.json"), "--type", "custom", "--", "native-demo"))
+		err := serverCmd.Execute()
+		return out.String(), err
+	}
+	for name, tc := range map[string]struct {
+		env         map[string]string
+		config      string
+		args        []string
+		debug, info bool
+	}{
+		"info by default":      {info: true},
+		"debug":                {args: []string{"--log-level", "debug"}, debug: true, info: true},
+		"warn":                 {args: []string{"--log-level=warn"}},
+		"from AGENTAPI_*":      {env: map[string]string{"AGENTAPI_LOG_LEVEL": "debug"}, debug: true, info: true},
+		"from the config file": {config: "log-level: error\n"},
+		"a flag wins":          {config: "log-level: error\n", args: []string{"--log-level", "debug"}, debug: true, info: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := run(t, tc.env, tc.config, tc.args...)
+			require.ErrorContains(t, err, "--prices")
+			assert.Equal(t, tc.debug, strings.Contains(out, debugLine), out)
+			assert.Equal(t, tc.info, strings.Contains(out, infoLine), out)
+		})
+	}
+	t.Run("an unknown level", func(t *testing.T) {
+		out, err := run(t, nil, "", "--log-level", "verbose")
+		require.ErrorContains(t, err, `invalid --log-level: unknown log level "verbose" (one of: debug, info, warn, error)`)
+		assert.NotContains(t, out, infoLine, "refused before the server starts")
+		_, err = run(t, map[string]string{"AGENTAPI_LOG_LEVEL": "loud"}, "")
+		assert.ErrorContains(t, err, "invalid --log-level")
+	})
 }

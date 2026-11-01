@@ -1702,7 +1702,12 @@ state-db: ~/.agentapi/state/{port}.db
 | `--webhook-payload-template` | | POST 內容的 Go `text/template` 範本 |
 | `-c`, `--chat-base-path` | `/chat` | 聊天介面的基礎路徑 |
 | `--pid-file` | | 寫入伺服器行程 ID 的檔案，給關閉腳本使用；`{port}` 和 `{hostname}` 會被填入 |
+| `--log-level` | `info` | 記錄的最低層級：`debug`、`info`、`warn` 或 `error` |
 | `-P`, `--print-openapi` | | 印出 OpenAPI schema 後結束 |
+
+AgentAPI 把 log 寫到標準輸出，每筆一行 `time=… level=… msg=…`。`--log-level debug`（或
+`AGENTAPI_LOG_LEVEL`、設定檔中的 `log-level`）會加上排查問題用的內容，例如 agent 的命令列和登入
+檢查；`warn` 和 `error` 則略過例行的紀錄。層級不正確時，伺服器不會啟動。
 
 ### `agentapi update`
 
@@ -1781,7 +1786,7 @@ agentapi hub leave
 適合本身已在另一層登入後面的 hub，例如 Coder workspace app），`--secret`（或
 `AGENTAPI_HUB_SECRET`）用來檢查 AgentAPI 的事件，`--instance-token`（或
 `AGENTAPI_HUB_INSTANCE_TOKEN`，否則 `AGENTAPI_API_TOKEN`）會送給它們，`--state` 保存實例，
-`--port` 和 `--bind` 設定監聽位置。
+`--port` 和 `--bind` 設定監聽位置，`--log-level`（或 `AGENTAPI_HUB_LOG_LEVEL`）設定要記錄多少。
 
 `join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 AgentAPI。
 `--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`，hub 只需要
