@@ -85,6 +85,15 @@ knows them after a restart. `--bind` limits it to the VPN interface; leave it ou
 everywhere. The values can come from `AGENTAPI_HUB_TOKEN`, `AGENTAPI_HUB_SECRET` and
 `AGENTAPI_HUB_INSTANCE_TOKEN` instead of flags.
 
+Once it listens, the hub logs the `agentapi hub join` command for each address machines may reach
+it at: the `--bind` address, or else each address of the machine, private networks first, then
+CGNAT ones such as Tailscale's. Containers' and bridges' interfaces don't count. The log leaves out
+the secret: `join` takes it from `AGENTAPI_HUB_SECRET`.
+
+```text
+level=INFO msg="To join a machine, run this on it with AGENTAPI_HUB_SECRET set to the hub's secret" interface=eth0 command="agentapi hub join http://192.168.1.20:3290/hooks --public-url 'http://<its address>:{port}'"
+```
+
 To keep it running, start it the way the machine starts its other services. A systemd user unit,
 for example:
 
@@ -457,6 +466,8 @@ instance that joined with its webhook comes back the next time it starts.
 - Anyone signed in to the hub can do what the AgentAPIs allow: send tasks, answer approvals, use
   their terminals, update those whose machine allows it. Give the hub token only to people you
   would give the instance token.
+- Anyone signed in also gets the hub secret, which joins a machine (`GET /api/join`). A hub with
+  `--no-token` never sends it, since everyone who reaches it would get it.
 - An AgentAPI the hub asks to update installs only the latest official release, checked against the
   release's `checksums.txt`: the hub can't choose a version or a URL. It never runs `sudo`, and
   does nothing unless its machine allows it (`allow-update: true`).
@@ -565,6 +576,7 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `PATCH /api/instances/{id}` | `{"group": …}` puts an instance in a group, `""` in none; `{"muted": true}` mutes what it waits for now, until that changes (409 when it waits for nothing), `false` ends the mute |
 | `DELETE /api/instances/{id}` | Forgets an instance |
 | `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them), then `instance` (one changed what the page shows; when it was last heard of counts only while it is offline), `removed` (`{"id"}`) and a `heartbeat` every 15 s |
+| `GET /api/join` | Where machines join the hub: `urls`, each a webhook URL (`url`) with the interface of its address (`interface`; none for `--bind`'s), in the order the startup log has them; and the secret (`secret`, with `secret_shown: true`) only on a hub with a token |
 | `/i/{id}/…` | The instance's own API and chat, through the hub; the page updates an instance with `POST /i/{id}/update` and cancels with `DELETE` |
 
 Every endpoint but `/hooks` and `/api/session` needs the session cookie or

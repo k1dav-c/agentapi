@@ -96,7 +96,7 @@ answers write keys directly to the agent's terminal.
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db` (native and PTY), and the import of a `--state-file` |
 | `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). `lib/httpapi` keeps aliases under the same names, which the OpenAPI schema uses |
-| `lib/hub/` | `agentapi hub serve`: the instances and the groups set on its page (`store.go`, kept in a file), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`); the user guide is [hub.md](hub.md) |
+| `lib/hub/` | `agentapi hub serve`: the instances and the groups set on its page (`store.go`, kept in a file), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
 | `lib/userconfig/` | The user's settings file, `~/.agentapi/config.yaml`: flags by name, read by `agentapi server`, written by `agentapi hub` |
 | `lib/registry/` | The entries of the AgentAPIs running on a machine (`~/.agentapi/instances`): writing one atomically, listing them and removing those whose process is gone |
 | `lib/selfupdate/` | Installs the latest release of k1dav-c/agentapi in place of the program (`agentapi update`, `POST /update`): the lookup on GitHub, the binary for the platform, its check against the release's `checksums.txt` and that it runs as that version, and the rename under a lock file next to the program (`Install`); whether the user can replace the program, with the one-time fix (`Program.Blocked`); `selfupdatetest` serves a fake release for tests |
@@ -734,7 +734,9 @@ the same session for native agents.
   `--allowed-hosts` answers browsers only by those names and by address. The
   proxy marks every answer `Content-Security-Policy: sandbox`, so nothing an
   instance serves runs as a page of the hub's, and refuses changes to an
-  instance's webhook, which names where the hub sends its token.
+  instance's webhook, which names where the hub sends its token. A signed-in
+  browser gets the secret, for joining a machine (`GET /api/join`), only from
+  a hub with a token; the startup log never has it.
 - Agents, on every transport, don't inherit the variables (one of them a
   secret) that a parent agent session sets for the commands it runs, nor
   AgentAPI's API token (`lib/procenv`).

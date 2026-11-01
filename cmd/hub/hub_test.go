@@ -2,12 +2,14 @@ package hub
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -225,6 +227,50 @@ func TestJoinChecksHub(t *testing.T) {
 	_, _, err = join("http://hub.tailnet:3290/hooks", "--secret", "s3cret", "--public-url", "http://localhost:{port}")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "on another machine")
+}
+
+// lockedBuffer is the output a running hub writes while a test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// Once it listens, the hub logs the command that joins a machine, with the
+// port it got, and never the secret: others may read the log.
+func TestServeLogsHowToJoin(t *testing.T) {
+	t.Setenv("AGENTAPI_HUB_LOG_LEVEL", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var out lockedBuffer
+	cmd := serveCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"--token", "t", "--secret", "join-secret", "--bind", "127.0.0.1", "--port", "0",
+		"--state", filepath.Join(t.TempDir(), "instances.json"),
+	})
+	served := make(chan error, 1)
+	go func() { served <- cmd.ExecuteContext(ctx) }()
+	require.Eventually(t, func() bool { return strings.Contains(out.String(), "Add dialog") }, 10*time.Second, 10*time.Millisecond)
+	cancel()
+	require.NoError(t, <-served)
+
+	logged := out.String()
+	assert.Regexp(t, `command="agentapi hub join http://127\.0\.0\.1:[1-9][0-9]*/hooks --public-url 'http://<its address>:\{port\}'"`, logged)
+	assert.Contains(t, logged, "AGENTAPI_HUB_SECRET")
+	assert.NotContains(t, logged, "join-secret")
 }
 
 // An unknown --log-level (or AGENTAPI_HUB_LOG_LEVEL) stops the hub before

@@ -53,6 +53,10 @@ type Config struct {
 	// at it only to get around the browser's same-origin rule (DNS
 	// rebinding), which matters most with NoToken. Empty allows any.
 	AllowedHosts []string
+	// Bind and Port are where the hub listens (an empty Bind is every
+	// interface), which the URLs machines join it by name (GET /api/join).
+	Bind string
+	Port int
 	// StatePath keeps the instances across restarts; empty keeps none.
 	StatePath string
 	// ChatBasePath is where the hub serves the chat UI, by default /chat.
@@ -76,6 +80,8 @@ type Hub struct {
 	client     *http.Client
 	deliveries deliveries
 	clock      quartz.Clock
+	// interfaces lists the machine's network interfaces, for the join URLs.
+	interfaces func() ([]netInterface, error)
 
 	ctx      context.Context
 	watchMu  sync.Mutex
@@ -116,7 +122,7 @@ func New(config Config) (*Hub, error) {
 	}
 	return &Hub{
 		config: config, logger: config.Logger, store: st, client: client, clock: config.Clock,
-		watchers: map[string]context.CancelFunc{},
+		interfaces: machineInterfaces, watchers: map[string]context.CancelFunc{},
 	}, nil
 }
 
@@ -174,6 +180,7 @@ func (h *Hub) routes(r chi.Router) {
 		r.Patch("/api/instances/{id}", h.updateInstance)
 		r.Delete("/api/instances/{id}", h.removeInstance)
 		r.Get("/api/events", h.streamEvents)
+		r.Get("/api/join", h.getJoin)
 		r.Handle("/i/{id}", http.HandlerFunc(h.proxy))
 		r.Handle("/i/{id}/*", http.HandlerFunc(h.proxy))
 	})

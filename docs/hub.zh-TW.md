@@ -77,6 +77,14 @@ hub 監聽 port 3290，並把實例保存在 `~/.agentapi/hub/instances.json`，
 `--bind` 讓 hub 只聽 VPN 介面；不加的話監聽所有介面。這些值也可以改用 `AGENTAPI_HUB_TOKEN`、
 `AGENTAPI_HUB_SECRET` 和 `AGENTAPI_HUB_INSTANCE_TOKEN` 設定。
 
+hub 開始監聽後，會把加入用的 `agentapi hub join` 指令寫進 log，機器可能連到它的每個位址各一行：
+有 `--bind` 時是那個位址，否則是這台機器的各個位址，私有網路的排前面，接著是 Tailscale 這類 CGNAT
+位址；容器和 bridge 的介面不列。log 裡不會出現 secret，`join` 會從 `AGENTAPI_HUB_SECRET` 讀取。
+
+```text
+level=INFO msg="To join a machine, run this on it with AGENTAPI_HUB_SECRET set to the hub's secret" interface=eth0 command="agentapi hub join http://192.168.1.20:3290/hooks --public-url 'http://<its address>:{port}'"
+```
+
 要讓 hub 持續執行，就用這台機器啟動其他服務的方式啟動它。例如 systemd 的使用者 unit：
 
 ```ini
@@ -403,6 +411,8 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 - 登入時會送出 hub token。hub 只開在 VPN 上，或放在 HTTPS 後面。
 - 登入 hub 的人能做的事，等同各 AgentAPI 允許的事：送任務、回覆核准、使用終端機，以及更新機器允許
   更新的 AgentAPI。hub token 只給你也願意給實例 token 的人。
+- 登入的人也拿得到讓機器加入用的 hub secret（`GET /api/join`）。用 `--no-token` 的 hub 一律不送，
+  否則連得到它的人都拿得到。
 - hub 要求更新時，AgentAPI 只會安裝最新的正式版，並用該版的 `checksums.txt` 驗證：hub 無法指定版本
   或網址。AgentAPI 從不執行 `sudo`，機器沒有允許（`allow-update: true`）時也不會更新。
 - 用 `--no-token` 時，這指的是所有連得到 hub port 的人：hub 一定要放在另一層登入後面，不能開在公開
@@ -505,6 +515,7 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音 |
 | `DELETE /api/instances/{id}` | 移除實例 |
 | `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`），再送 `instance`（某個實例有頁面看得到的變動；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
+| `GET /api/join` | 機器加入 hub 用的資訊：`urls` 的每一項是一個 webhook 網址（`url`）和這個位址所在的網路介面（`interface`；`--bind` 的位址沒有），順序和啟動時的 log 相同；只有設了 token 的 hub 才會附上 secret（`secret`，並帶 `secret_shown: true`） |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面；頁面用 `POST /i/{id}/update` 更新實例，用 `DELETE` 取消 |
 
 除了 `/hooks` 和 `/api/session`，每個端點都需要 session cookie 或
