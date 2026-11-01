@@ -2,7 +2,8 @@ import {describe, expect, test} from "bun:test";
 import {ChatStream, EVENT_FLUSH_MS, REPLAY_FLUSH_MAX_MS, STALE_CONNECTION_MS, type ChatStreamHandlers} from "./chat-stream";
 import {QUIET_RECONNECT_MS, type ConnectionState} from "./event-source";
 import {fakeEnvironment} from "./fake-event-source";
-import type {EventBatch} from "./pending-events";
+import {tasksAfter, type EventBatch} from "./pending-events";
+import type {ServerTask} from "./server-tasks";
 import {SyncTracker} from "./session-sync";
 
 const BASE = "http://agentapi.test";
@@ -64,6 +65,58 @@ describe("ChatStream", () => {
     env.clock.advance(REPLAY_FLUSH_MAX_MS);
     expect(batches).toHaveLength(1);
     expect(batches[0].replace).toBe(true);
+  });
+
+  test("a long full replay keeps the tasks the chat has until its own replace them", () => {
+    // A cached conversation of another epoch: its first task has message 2
+    // steered into it.
+    const sync = new SyncTracker();
+    sync.restore("old", 40);
+    const {env, batches} = stream(sync);
+    const cached: ServerTask = {id: 0, status: "completed", prompt: "message 0", started_at: "2026-10-27T10:00:00Z", errors: [], steered: [2], seq: 30};
+    let tasks = [cached];
+    const apply = () => {
+      for (const batch of batches.splice(0)) tasks = tasksAfter(tasks, batch);
+    };
+    const source = env.latest();
+    source.open();
+    source.emit("session_sync", {epoch: "new", full: true, seq: 9});
+    source.emit("message_update", message(0, 1));
+    source.emit("message_update", message(1, 2));
+    source.emit("message_update", message(2, 3));
+    // The replay shows its progress before the tasks, which come last.
+    env.clock.advance(REPLAY_FLUSH_MAX_MS);
+    expect(batches).toHaveLength(1);
+    expect(batches[0].replace).toBe(true);
+    apply();
+    expect(tasks).toEqual([cached]);
+    source.emit("task_update", {id: 0, status: "completed", prompt: "message 0", started_at: "2026-10-27T10:00:00Z", steered: [2], seq: 8});
+    env.clock.advance(REPLAY_FLUSH_MAX_MS);
+    apply();
+    expect(tasks).toEqual([cached]);
+    // The replay's last event: its tasks replace the chat's.
+    source.emit("task_update", {id: 4, status: "running", prompt: "message 4", started_at: "2026-10-27T10:00:00Z", seq: 9}, "9");
+    env.clock.advance(0);
+    apply();
+    expect(tasks.map((task) => [task.id, task.seq])).toEqual([[0, 8], [4, 9]]);
+  });
+
+  test("an older server's full replay, without tasks, clears them once it is complete", () => {
+    const sync = new SyncTracker();
+    sync.restore("old", 40);
+    const {env, batches} = stream(sync);
+    let tasks: ServerTask[] = [{id: 0, status: "completed", prompt: "message 0", started_at: "2026-10-27T10:00:00Z", errors: [], steered: [], seq: 30}];
+    const source = env.latest();
+    source.open();
+    source.emit("session_sync", {epoch: "new", full: true, seq: 2});
+    source.emit("message_update", message(0, 1));
+    env.clock.advance(REPLAY_FLUSH_MAX_MS);
+    for (const batch of batches.splice(0)) tasks = tasksAfter(tasks, batch);
+    expect(tasks).toHaveLength(1);
+    source.emit("message_update", message(1, 2), "2");
+    env.clock.advance(0);
+    for (const batch of batches.splice(0)) tasks = tasksAfter(tasks, batch);
+    expect(tasks).toEqual([]);
   });
 
   test("a connection that resumes gets what changed, and says when it is applied", () => {

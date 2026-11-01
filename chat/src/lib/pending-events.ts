@@ -5,7 +5,7 @@
 import {richMessageKey, type Message, type RichMessage} from "./conversation";
 import type {NativeRequest} from "./native-requests";
 import type {QueuedMessage} from "./queue";
-import type {ServerTask} from "./server-tasks";
+import {mergeTasks, type ServerTask} from "./server-tasks";
 import type {SyncTracker} from "./session-sync";
 
 // Where a state of the conversation is: its epoch, and the highest change
@@ -22,6 +22,12 @@ export interface EventBatch {
   richMessages: (RichMessage & {seq?: number})[];
   requests: NativeRequest[];
   tasks: ServerTask[];
+  // replaceTasks: the tasks replace the state's (a full replay, once it is
+  // complete). holdTasks: a full replay is on its way, and its tasks, which
+  // the server sends last, wait for its end; the state's stay until then
+  // (see tasksAfter).
+  replaceTasks: boolean;
+  holdTasks: boolean;
   // The message queue, when an update said it: the latest.
   queue?: QueuedMessage[];
   // The point of the state once the batch is applied.
@@ -35,6 +41,7 @@ export class PendingEvents {
   private tasks = new Map<number, ServerTask>();
   private queue: {queue: QueuedMessage[]; seq: number} | undefined;
   private replace = false;
+  private replaceTasks = false;
 
   constructor(private readonly sync: SyncTracker) {}
 
@@ -68,6 +75,7 @@ export class PendingEvents {
     this.tasks.clear();
     this.queue = undefined;
     this.replace = true;
+    this.replaceTasks = true;
   }
 
   // take returns the updates received so far and marks them applied: the
@@ -77,24 +85,57 @@ export class PendingEvents {
   // claiming a change it doesn't hold: the watermark alone can run ahead of
   // the state, as the replay's last event moves it before the replay is
   // applied.
+  //
+  // A batch that shows the progress of a long full replay leaves its tasks
+  // pending: they replace the state's in the batch that completes it.
   take(): EventBatch {
+    const holdTasks = this.replaceTasks && this.sync.replaying;
     const batch = {
       replace: this.replace,
       messages: [...this.messages.values()],
       richMessages: [...this.richMessages.values()],
       requests: [...this.requests.values()],
-      tasks: [...this.tasks.values()],
+      tasks: holdTasks ? [] : [...this.tasks.values()],
+      replaceTasks: this.replaceTasks && !holdTasks,
+      holdTasks,
       queue: this.queue?.queue,
     };
     const queueSeq = this.queue?.seq;
     this.messages.clear();
     this.richMessages.clear();
     this.requests.clear();
-    this.tasks.clear();
+    if (!holdTasks) {
+      this.tasks.clear();
+      this.replaceTasks = false;
+    }
     this.queue = undefined;
     this.replace = false;
     for (const update of [...batch.messages, ...batch.richMessages, ...batch.requests, ...batch.tasks]) this.sync.applied(update.seq ?? 0);
     if (queueSeq !== undefined) this.sync.applied(queueSeq);
     return {...batch, point: {epoch: this.sync.epoch, seq: this.sync.watermark}};
   }
+}
+
+// tasksAfter returns the tasks once batch is applied to previous. While a
+// full replay is on its way they stay as they were: the transcript is
+// grouped by them, and without them a long replay's progress would show
+// each steered message as a task of its own, with a guessed status, until
+// they came. Those whose message the replay sends as another message
+// (another conversation's, after a restart without a state database) go.
+export function tasksAfter(previous: ServerTask[], batch: EventBatch): ServerTask[] {
+  if (batch.replaceTasks) return mergeTasks([], batch.tasks);
+  if (batch.holdTasks) return tasksStillOf(previous, batch.messages);
+  return batch.tasks.length > 0 ? mergeTasks(previous, batch.tasks) : previous;
+}
+
+// tasksStillOf returns the tasks but those whose user message messages has
+// as another message: not the user's, or sent at another time.
+function tasksStillOf(tasks: ServerTask[], messages: readonly Message[]): ServerTask[] {
+  if (tasks.length === 0 || messages.length === 0) return tasks;
+  const byId = new Map(messages.map((message) => [message.id, message]));
+  const kept = tasks.filter((task) => {
+    const message = byId.get(task.id);
+    return !message || (message.role === "user" && (message.time === undefined || Date.parse(message.time) === Date.parse(task.started_at)));
+  });
+  return kept.length === tasks.length ? tasks : kept;
 }
