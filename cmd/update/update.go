@@ -28,9 +28,9 @@ const (
 	maxChecksumManifestSize = 1 << 20
 )
 
-// apiBaseURL is the GitHub API base URL. It is a variable so tests can
-// override it with an httptest server.
-var apiBaseURL = "https://api.github.com"
+// apiBaseURL is the GitHub API base URL; tests pass an httptest server's to
+// fetchLatestRelease instead.
+const apiBaseURL = "https://api.github.com"
 
 type releaseAsset struct {
 	Name               string `json:"name"`
@@ -64,8 +64,8 @@ func init() {
 	UpdateCmd.Flags().BoolVar(&restartFlag, "restart", false, "Then restart the AgentAPIs running this binary in place, the invoking user's under sudo")
 }
 
-func fetchLatestRelease(ctx context.Context) (*releaseInfo, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", apiBaseURL, repoOwner, repoName)
+func fetchLatestRelease(ctx context.Context, baseURL string) (*releaseInfo, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", baseURL, repoOwner, repoName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -252,7 +252,7 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 	}
 
 	// Fetch latest release.
-	info, err := fetchLatestRelease(ctx)
+	info, err := fetchLatestRelease(ctx, apiBaseURL)
 	if err != nil {
 		return fmt.Errorf("fetch latest release: %w", err)
 	}

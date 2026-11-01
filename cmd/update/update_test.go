@@ -136,11 +136,7 @@ func TestFetchLatestRelease(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		origURL := apiBaseURL
-		apiBaseURL = srv.URL
-		defer func() { apiBaseURL = origURL }()
-
-		info, err := fetchLatestRelease(context.Background())
+		info, err := fetchLatestRelease(context.Background(), srv.URL)
 		require.NoError(t, err)
 		assert.Equal(t, "v0.13.0", info.TagName)
 		assert.Len(t, info.Assets, 1)
@@ -154,11 +150,7 @@ func TestFetchLatestRelease(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		origURL := apiBaseURL
-		apiBaseURL = srv.URL
-		defer func() { apiBaseURL = origURL }()
-
-		_, err := fetchLatestRelease(context.Background())
+		_, err := fetchLatestRelease(context.Background(), srv.URL)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "404")
 	})
