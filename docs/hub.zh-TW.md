@@ -270,7 +270,7 @@ hub 舊。
 
 ### 清單
 
-![清單會顯示的每種狀態](screenshots/hub-list.png)
+![清單會顯示的每種狀態，最上方是兩個釘選的 agent](screenshots/hub-list.png)
 
 每一列顯示 agent 的名稱（`--name`，預設為工作目錄名稱）和 AgentAPI 版本（見[版本](#版本)）、它在等
 什麼或在做什麼、多久以前、agent 和機器；佇列有訊息、最近 24 小時的花費（見[花費](#花費)），以及用量限制超過 60% 時也會顯示。AgentAPI 正在更新或更新失敗時，會另起一行顯示（見[從 hub 更新](#從-hub-更新)）。
@@ -304,7 +304,7 @@ hub 舊。
 
 ### 群組
 
-![手機上一列的選單：群組、新群組和 Forget](screenshots/hub-phone-menu.png)
+![手機上一列的選單：Pin to top、群組、新群組和 Forget](screenshots/hub-phone-menu.png)
 
 可以依客戶、專案或機器，把實例分成自己的群組。每一列最後的 **⋯** 可以把實例移到某個群組、
 **New group…**（新群組）或 **No group**（不分組）。同一個選單也能釘選（見[釘選](#釘選)）、靜音
@@ -320,7 +320,7 @@ hub 舊。
 
 ### 最近變動
 
-![依 agent 最近一次變動排序的清單：沒有群組標題，最近的排最前面](screenshots/hub-recent.png)
+![依 agent 最近一次變動排序的清單：釘選的在最上方，其他的沒有群組標題，最近的排最前面](screenshots/hub-recent.png)
 
 搜尋框旁的切換鈕決定清單的排序。**Groups** 是預設的排序，也就是上面說的：在每個群組內，需要你處理的
 排最前面。**Recent changes** 則把[釘選](#釘選)以外的實例排成一個清單，最近變動的排最前面，不管群組

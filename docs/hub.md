@@ -302,7 +302,7 @@ update them. On the machine:
 
 ### The list
 
-![Every state the list shows](screenshots/hub-list.png)
+![Every state the list shows, below two pinned agents](screenshots/hub-list.png)
 
 Each row shows the agent's name (`--name`, by default its working directory's name) and AgentAPI
 version ([Versions](#versions)), what it waits for or does, how long ago, the agent and the machine;
@@ -340,7 +340,7 @@ a state it doesn't know as Unknown, with a question mark; reload the page.
 
 ### Groups
 
-![A row's menu on a phone: its group, a new one, and Forget](screenshots/hub-phone-menu.png)
+![A row's menu on a phone: Pin to top, its group, a new one, and Forget](screenshots/hub-phone-menu.png)
 
 Sort the instances into groups of your own, by client, project or machine. The **⋯** at the end of
 each row moves the instance to a group, to a **New group…**, or to **No group**. The same menu pins
@@ -358,7 +358,7 @@ with no instance left disappears.
 
 ### Recent changes
 
-![The list by the agents' latest changes: one list without group headers, the most recent first](screenshots/hub-recent.png)
+![The list by the agents' latest changes: the pinned agents, then one list without group headers, the most recent first](screenshots/hub-recent.png)
 
 The switch beside the search sets the list's order. **Groups**, the default, is the order above:
 what needs you first within each group. **Recent changes** is one list below the

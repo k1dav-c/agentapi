@@ -959,12 +959,17 @@ try {
     return (await response.json()).instances;
   };
   await poll(async () => (await hubList()).filter(instance => instance.summary).length === hubSetup.length, 'the hub to follow the instances');
-  // Groups of one's own, as the rows' menus set them.
+  // Groups of one's own, and two agents pinned to the top, as the rows' menus set them.
   for (const instance of await hubList()) {
     const group = hubSetup.find(entry => entry.name === instance.name)?.group;
     if (!group) continue;
     await fetch(`${hubAPI}/api/instances/${encodeURIComponent(instance.id)}`, {method: 'PATCH',
       headers: {Authorization: 'Bearer docs-token', 'Content-Type': 'application/json'}, body: JSON.stringify({group})});
+  }
+  for (const name of ['checkout-api', 'billing-service']) {
+    const instance = (await hubList()).find(entry => entry.name === name);
+    await fetch(`${hubAPI}/api/instances/${encodeURIComponent(instance.id)}`, {method: 'PATCH',
+      headers: {Authorization: 'Bearer docs-token', 'Content-Type': 'application/json'}, body: JSON.stringify({pinned: true})});
   }
   const stopInstance = async (name, signal) => {
     const server = servers.find(entry => entry.name === name);
@@ -1082,7 +1087,12 @@ try {
   await hubPhonePage.getByRole('menuitem', {name: 'Forget'}).waitFor();
   await shot(hubPhonePage, 'hub-phone-menu.png');
   await hubPhonePage.keyboard.press('Escape');
-  // Muting the one that waits for a login nobody will do: out of Need you until that changes.
+  // Muting the one that waits for a login nobody will do: out of Need you until that changes. From
+  // the top of the list, where its row shows whole below the pinned ones, once the closed menu gave
+  // its button the focus back (which scrolls to it).
+  await hubPhonePage.getByRole('menu').waitFor({state: 'detached'});
+  await hubPhonePage.waitForTimeout(200);
+  await hubPhonePage.getByRole('list', {name: 'Instances'}).evaluate(list => list.scrollTo(0, 0));
   await tap(hubPhonePage, hubPhonePage.getByRole('button', {name: 'Actions for mobile-app'}));
   await tap(hubPhonePage, hubPhonePage.getByRole('menuitem', {name: 'Mute until it changes'}));
   await hubPhonePage.locator('[data-hub-row][aria-label^="mobile-app, Muted"]').waitFor();
