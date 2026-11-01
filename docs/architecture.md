@@ -713,7 +713,12 @@ is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, it
   and `use-session-cache.ts` apply the events to the state, follow the queued
   messages, and cache the transcript.
 - The event stream uses `/events?sync=1` and keeps the last sequence number
-  for incremental replay (`lib/chat-stream.ts`). `EventSourceConnection`
+  for incremental replay (`lib/chat-stream.ts`). A long replay shows its
+  progress every 1.5 seconds, but the requests and the tasks, which come
+  after the messages, keep what the chat had until the replay's own replace
+  them; those of another conversation go first: a task whose message the
+  replay sends as another one, a request made before the replay's first
+  message. `EventSourceConnection`
   (`lib/event-source.ts`, and the `use-event-source.ts` hook) keeps it, the
   hub page's stream and the terminals' open: a stream that ends is opened
   again at once, without a notice, unless that keeps failing; one that fails
@@ -733,13 +738,11 @@ is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, it
   the server's tasks (`task_update`, held and cached like the requests):
   the messages steered into it (`steered`) stay in it, among its steps by
   time; a server that sends no tasks gets a section per user message. A
-  full replay replaces the tasks once it is complete: the server sends them
-  last, and a long replay shows its progress every 1.5 seconds with the
-  tasks the chat had. A section takes its state from the server's task;
-  rich activity goes to the task its `task_id` names, and only untagged
-  activity is placed by time. A task's cost is the model calls made while
-  it ran. The queue follows `queue_update` events; `GET /queue` is read on
-  each connection, and every 60 seconds only while no event came. A render error
+  section takes its state from the server's task; rich activity
+  goes to the task its `task_id` names, and only untagged activity is placed
+  by time. A task's cost is the model calls made while it ran. The queue
+  follows `queue_update` events; `GET /queue` is read on each connection,
+  and every 60 seconds only while no event came. A render error
   shows `chat-error-boundary.tsx`, which offers to clear the cached
   conversation and reload.
 - `lib/chat-api.ts` is the typed HTTP client; `lib/api-schema.ts` contains

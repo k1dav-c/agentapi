@@ -581,7 +581,10 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   `useChatSelector`（`lib/store.ts`）分片讀取，元件只在它讀的那一片改變時才重新 render。
   `use-event-stream.ts`、`use-queue.ts` 與 `use-session-cache.ts` 分別把事件套用到狀態、追蹤
   訊息佇列及快取對話。
-- 事件串流使用 `/events?sync=1`，並記錄最後序號以便增量重播（`lib/chat-stream.ts`）。
+- 事件串流使用 `/events?sync=1`，並記錄最後序號以便增量重播（`lib/chat-stream.ts`）。很長的
+  重播每 1.5 秒先顯示一次進度，但排在訊息之後的請求和任務會沿用 chat 原有的，等重播自己的送到
+  才取代；屬於別的對話的會先拿掉：重播送來的同 ID 訊息已是另一則的任務，以及在重播第一則訊息
+  之前就提出的請求。
   `EventSourceConnection`（`lib/event-source.ts`，以及 hook `use-event-source.ts`）讓它、hub 頁面
   的串流和終端機的串流保持連線：結束的串流會立刻重新開啟、不顯示提示，除非一直失敗；失敗的串流
   （401、proxy 的 502）在退避後重試；有心跳的串流沒了動靜，由 watchdog 重新連線；瀏覽器恢復連網
@@ -593,8 +596,7 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 - `lib/task-timeline.ts` 的 `TimelineBuilder` 將訊息分組為任務，從第一個變更處重建並保留未變的
   物件，讓經過 memo 的任務與工具呼叫不必重新 render。每一段就是伺服器的一個任務（`task_update`，
   和請求一樣保存與快取）：steer 進去的訊息（`steered`）留在其中，依時間排在它的步驟之間；伺服器
-  不送任務時，每則使用者訊息各成一段。完整重播要全部收到才會取代任務：伺服器最後才送任務，
-  很長的重播每 1.5 秒先顯示一次進度，這時沿用 chat 原有的任務。每一段的狀態取自伺服器的任務；結構化
+  不送任務時，每則使用者訊息各成一段。每一段的狀態取自伺服器的任務；結構化
   的活動依 `task_id` 歸到所指的任務，只有沒有標記的活動才依時間放置。任務的花費是它執行期間的模型
   呼叫。佇列依 `queue_update` 事件更新；每次連線時讀取 `GET /queue`，只有一直沒收到事件時才每 60 秒
   讀取一次。render 出錯時會顯示
