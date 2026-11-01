@@ -16,8 +16,12 @@ const running = (id: string, version: string, hostname: string, overrides: Parti
   ...overrides,
 });
 
-// The text of html, without its tags.
-const text = (html: string) => html.replace(/<[^>]+>/g, " ").replaceAll("&#x27;", "'").replace(/\s+/g, " ");
+// The text of html, without its tags; a machine's name, in an element of
+// its own (data-hub-host), reads as part of its sentence.
+const text = (html: string) =>
+  html
+    .replace(/<span data-hub-host(="[^"]*")?>([^<]*)<\/span>/g, "$2")
+    .replace(/<[^>]+>/g, " ").replaceAll("&#x27;", "'").replace(/\s+/g, " ");
 
 describe("VersionsCard", () => {
   const instances = [
@@ -33,7 +37,7 @@ describe("VersionsCard", () => {
     const shown = text(html);
     expect(shown).toContain("the hub runs v2.1.0");
     expect(shown).toContain("Older than the hub 3 of 4 connected agents");
-    expect(shown).toContain("v2.1.0 the hub's dev-3 1 v2.0.0 older dev-3 1 v1.6.1 older dev-1 , dev-2 2");
+    expect(shown).toContain("v2.1.0 the hub's dev-3 1 v2.0.0 older dev-3 1 v1.6.1 older dev-1, dev-2 2");
     expect(shown).not.toContain("v1.2.0");
     expect(shown).toContain("sudo agentapi update --restart");
     expect(shown).toContain("before v2.1.0, update, then restart each AgentAPI once");

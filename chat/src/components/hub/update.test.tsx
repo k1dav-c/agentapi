@@ -35,8 +35,12 @@ const instance = (given: Partial<InstanceUpdate> | null, overrides: Partial<HubI
   ...overrides,
 });
 
-// The text of html, without its tags.
-const text = (html: string) => html.replace(/<[^>]+>/g, " ").replaceAll("&#x27;", "'").replaceAll("&quot;", '"').replaceAll("&amp;", "&").replace(/\s+/g, " ");
+// The text of html, without its tags; a machine's name, in an element of
+// its own (data-hub-host), reads as part of its sentence.
+const text = (html: string) =>
+  html
+    .replace(/<span data-hub-host(="[^"]*")?>([^<]*)<\/span>/g, "$2")
+    .replace(/<[^>]+>/g, " ").replaceAll("&#x27;", "'").replaceAll("&quot;", '"').replaceAll("&amp;", "&").replace(/\s+/g, " ");
 
 const COMMAND = "mkdir -p ~/.local/bin && cp /usr/local/bin/agentapi ~/.local/bin/agentapi && sudo ln -sf ~/.local/bin/agentapi /usr/local/bin/agentapi";
 
