@@ -21,6 +21,9 @@ type Calls struct {
 	// record has none of its own.
 	latest time.Time
 	drift  *agentlog.Drift
+	// from is the first call Changed returns: the first read or changed
+	// since it last returned.
+	from int
 }
 
 // NewCalls returns a Calls that counts the entries it can't read into
@@ -90,21 +93,7 @@ func (c *Calls) Line(line []byte) {
 		c.drift.Call(agentlog.NoModelOrUsage)
 		return
 	}
-	var u struct {
-		Input         int `json:"input_tokens"`
-		CacheRead     int `json:"cache_read_input_tokens"`
-		CacheCreation int `json:"cache_creation_input_tokens"`
-		Output        int `json:"output_tokens"`
-		Split         *struct {
-			FiveMinutes int `json:"ephemeral_5m_input_tokens"`
-			OneHour     int `json:"ephemeral_1h_input_tokens"`
-		} `json:"cache_creation"`
-	}
-	_ = agentlog.Unmarshal(usage, &u)
-	tokens := pricing.Tokens{Input: u.Input, CacheRead: u.CacheRead, CacheWrite: u.CacheCreation, Output: u.Output}
-	if u.Split != nil && u.Split.FiveMinutes+u.Split.OneHour == u.CacheCreation {
-		tokens.CacheWrite, tokens.CacheWrite1h = u.Split.FiveMinutes, u.Split.OneHour
-	}
+	tokens := readUsage(usage)
 	if tokens.IsZero() {
 		c.drift.Call(agentlog.NoTokens)
 		return
@@ -115,8 +104,9 @@ func (c *Calls) Line(line []byte) {
 	}
 	if i, ok := c.index[key]; ok && key != "" {
 		// A later line of the same call: its usage is the final one.
-		if tokens.Output >= c.calls[i].Tokens.Output {
+		if tokens.Output >= c.calls[i].Tokens.Output && tokens != c.calls[i].Tokens {
 			c.calls[i].Tokens = tokens
+			c.from = min(c.from, i)
 		}
 		return
 	}
@@ -126,14 +116,72 @@ func (c *Calls) Line(line []byte) {
 	c.calls = append(c.calls, agentlog.Call{Time: at, Model: model, Tokens: tokens, Key: "claude:" + key, Cost: -1})
 }
 
-// Calls returns the calls read so far.
-func (c *Calls) Calls() []agentlog.Call {
-	return slices.Clone(c.calls)
+// Changed returns the calls read or changed since it last returned. The
+// calls stay: a later line can change any of them.
+func (c *Calls) Changed() (int, []agentlog.Call) {
+	from := c.from
+	c.from = len(c.calls)
+	return from, slices.Clone(c.calls[from:])
 }
 
 // Size is about how many bytes of memory the reader holds.
 func (c *Calls) Size() int {
 	return len(c.calls)*agentlog.CallSize + len(c.index)*64
+}
+
+// readUsage reads the tokens of a call's usage, which has a dozen other
+// fields, without decoding them. A count that isn't an integer reads as 0.
+func readUsage(usage []byte) pricing.Tokens {
+	var t pricing.Tokens
+	var fiveMinutes, oneHour int
+	split := false
+	agentlog.Members(usage, func(key, value []byte) bool {
+		switch string(key) {
+		case "input_tokens":
+			t.Input = integer(value)
+		case "cache_read_input_tokens":
+			t.CacheRead = integer(value)
+		case "cache_creation_input_tokens":
+			t.CacheWrite = integer(value)
+		case "output_tokens":
+			t.Output = integer(value)
+		case "cache_creation":
+			// Split by how long the cache keeps them.
+			split = agentlog.Members(value, func(key, value []byte) bool {
+				switch string(key) {
+				case "ephemeral_5m_input_tokens":
+					fiveMinutes = integer(value)
+				case "ephemeral_1h_input_tokens":
+					oneHour = integer(value)
+				}
+				return true
+			})
+		}
+		return true
+	})
+	if split && fiveMinutes+oneHour == t.CacheWrite {
+		t.CacheWrite, t.CacheWrite1h = fiveMinutes, oneHour
+	}
+	return t
+}
+
+// integer reads a JSON integer, or returns 0 for another value.
+func integer(value []byte) int {
+	digits, sign := value, 1
+	if len(digits) > 0 && digits[0] == '-' {
+		digits, sign = digits[1:], -1
+	}
+	if len(digits) == 0 || len(digits) > 18 {
+		return 0
+	}
+	n := 0
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	return sign * n
 }
 
 // report reads a cost-state line: what Claude Code counted for each model

@@ -3,6 +3,7 @@ package sessions
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog"
@@ -37,6 +38,13 @@ type sessionLog struct {
 	firstAt time.Time
 
 	calls agentlog.CallReader
+	// priced are the log's calls at the store's prices, in its order: a
+	// reading of the costs prices only the calls read or changed since
+	// the last. reader identifies the reader among the store's, and
+	// version counts the changes to priced.
+	priced  []ModelCall
+	reader  uint64
+	version int
 	// drift counts what the log holds that its format doesn't know, its
 	// calls' included.
 	drift *agentlog.Drift
@@ -53,7 +61,7 @@ func (s *Store) newSessionLog(subagent bool) *sessionLog {
 	drift := agentlog.NewDrift(s.src.format)
 	l := &sessionLog{
 		store: s, src: &s.src, subagent: subagent, codex: s.agent == "codex",
-		calls: s.src.format.NewCalls(drift), drift: drift,
+		calls: s.src.format.NewCalls(drift), drift: drift, reader: s.readers.Add(1),
 	}
 	if s.src.namesInLog {
 		l.namer = s.src.format.NewNamer()
@@ -194,7 +202,26 @@ func (l *sessionLog) trackStatus(line []byte) {
 
 // Size is about how many bytes of memory the reader holds.
 func (l *sessionLog) Size() int {
-	return 256 + len(l.firstPrompt) + len(l.title) + l.calls.Size()
+	return 256 + len(l.firstPrompt) + len(l.title) + l.calls.Size() + len(l.priced)*agentlog.CallSize
+}
+
+// price prices the calls read or changed since it last ran.
+func (l *sessionLog) price() {
+	from, calls := l.calls.Changed()
+	if from == len(l.priced) && len(calls) == 0 {
+		return
+	}
+	priced := l.priced[:from]
+	if from < len(l.priced) {
+		// Calls priced before changed: the readings that hold them keep
+		// them as they were.
+		priced = slices.Clone(priced)
+	}
+	for _, c := range calls {
+		priced = append(priced, l.store.price(c))
+	}
+	l.priced = priced
+	l.version++
 }
 
 // logSnapshot is what was read of a log, which the reader's caller may
@@ -207,8 +234,21 @@ type logSnapshot struct {
 	// firstAt is the time of the first line that has one.
 	firstAt time.Time
 	status  string
-	calls   []agentlog.Call
-	info    agentlog.FileInfo
+	// calls are the log's calls, priced, which the caller must not
+	// change; read says which reading of the log they are.
+	calls []ModelCall
+	read  logRead
+	info  agentlog.FileInfo
+}
+
+// logRead says which reading of a log calls were made of: by which of the
+// store's readers, after how many changes to its calls, and how many there
+// were. A subagent's says which subagent's they are.
+type logRead struct {
+	reader   uint64
+	version  int
+	calls    int
+	subagent string
 }
 
 // reportDrift logs once what the log holds that its format doesn't know,
@@ -232,7 +272,9 @@ func (l *sessionLog) snapshot(path string, info agentlog.FileInfo, withCalls boo
 		info:    info,
 	}
 	if withCalls {
-		snap.calls = l.calls.Calls()
+		l.price()
+		snap.calls = slices.Clip(l.priced)
+		snap.read = logRead{reader: l.reader, version: l.version, calls: len(l.priced)}
 	}
 	return snap
 }

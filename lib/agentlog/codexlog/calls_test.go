@@ -37,7 +37,8 @@ func TestCallsCountDrift(t *testing.T) {
 	} {
 		c.Line([]byte(line))
 	}
-	calls := c.Calls()
+	from, calls := c.Changed()
+	assert.Zero(t, from)
 	assert.Len(t, calls, 2)
 	assert.Empty(t, calls[0].Model)
 	assert.Equal(t, "gpt-6.1-sol", calls[1].Model)
@@ -51,6 +52,12 @@ func TestCallsCountDrift(t *testing.T) {
 	c.Line([]byte(`{"timestamp":"2026-10-20T10:00:00Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}`))
 	c.Line([]byte(`{"timestamp":"2026-10-20T10:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"output_tokens":10},"last":{"input_tokens":1000,"output_tokens":10}}}}`))
 	c.Line([]byte(tokenCount("total_token_usage", 3000, 30, 2000, 20)))
-	assert.Len(t, c.Calls(), 1, "the next call is the total's change")
+	_, calls = c.Changed()
+	assert.Len(t, calls, 1, "the next call is the total's change")
 	assert.Equal(t, 1, drift.Calls(agentlog.NoTokens))
+
+	c.Line([]byte(tokenCount("total_token_usage", 4000, 40, 1000, 10)))
+	from, calls = c.Changed()
+	assert.Equal(t, 1, from, "the calls read since")
+	assert.Len(t, calls, 1)
 }

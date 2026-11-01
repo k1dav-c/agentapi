@@ -2,14 +2,24 @@ package sessions
 
 import (
 	"fmt"
+	"hash/fnv"
+	"maps"
+	"math"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
+	"slices"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/pricing"
 )
 
@@ -207,4 +217,375 @@ func TestPiCacheWarmingCosts(t *testing.T) {
 	c := d.Cost("p1")
 	assert.Equal(t, 2, c.Calls)
 	assert.InDelta(t, 0.14, c.USD, 1e-12)
+}
+
+// matchesAFreshReading checks that what store reads now is what a new
+// Store reads of the same logs, and returns it.
+func matchesAFreshReading(t *testing.T, store *Store, agentType, cwd, step string) DirectoryCost {
+	t.Helper()
+	got, err := store.Costs()
+	require.NoError(t, err, step)
+	want, err := newStore(t, agentType, cwd).Costs()
+	require.NoError(t, err, step)
+	require.Equal(t, want, got, step)
+	return got
+}
+
+// A Store that read the logs before reads only what changed since, and
+// finds what a new one finds, whatever changed.
+func TestClaudeCostsMatchAFreshReading(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	dir := filepath.Join(config, "projects", "-w")
+	report := func(session string, usd float64) string {
+		return fmt.Sprintf(`{"type":"cost-state","sessionId":%q,"modelUsage":{"claude-opus-5-5":{"inputTokens":9000,"outputTokens":900,"cacheReadInputTokens":50000,"cacheCreationInputTokens":0,"costUSD":%f},"claude-haiku-5-5":{"inputTokens":100,"outputTokens":10,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"costUSD":0.25}}}`, session, usd)
+	}
+	writeLog(t, filepath.Join(dir, "s1.jsonl"), time.Now(),
+		claudePromptLine("s1", "2026-10-20T10:00:00.000Z", "Fix the bug"),
+		claudeCall("s1", "2026-10-20T10:00:05.000Z", "msg_1", 10, 20000, 1000, 3000, 200),
+		claudeCall("s1", "2026-10-20T10:00:06.000Z", "msg_1", 10, 20000, 1000, 3000, 500),
+		claudeCall("s1", "2026-10-20T10:01:00.000Z", "msg_2", 5, 24000, 0, 0, 800),
+		report("s1", 2.5))
+	// A fork of s1: it copies msg_1.
+	writeLog(t, filepath.Join(dir, "s2.jsonl"), time.Now(),
+		claudePromptLine("s2", "2026-10-20T10:00:00.000Z", "Fix the bug"),
+		claudeCall("s2", "2026-10-20T10:00:05.000Z", "msg_1", 10, 20000, 1000, 3000, 500),
+		claudeCall("s2", "2026-10-20T12:00:00.000Z", "msg_3", 7, 21000, 0, 0, 300))
+	writeLog(t, filepath.Join(dir, "s3.jsonl"), time.Now(),
+		claudePromptLine("s3", "2026-10-21T09:00:00.000Z", "Look around"),
+		claudeCall("s3", "2026-10-21T09:00:05.000Z", "msg_4", 3, 1000, 0, 0, 100))
+	writeLog(t, filepath.Join(dir, "s3", "subagents", "agent-a1.jsonl"), time.Now(),
+		claudeCall("s3", "2026-10-21T09:00:07.000Z", "msg_sub1", 2, 500, 0, 0, 50))
+	s4 := filepath.Join(dir, "s4.jsonl")
+	writeLog(t, s4, time.Now(),
+		claudePromptLine("s4", "2026-10-22T09:00:00.000Z", "And the tests"),
+		claudeCall("s4", "2026-10-22T09:00:05.000Z", "msg_5", 3, 1000, 0, 0, 100))
+
+	store := newStore(t, "claude", "/w")
+	d := matchesAFreshReading(t, store, "claude", "/w", "first reading")
+	assert.Equal(t, 1, d.Cost("s2").Calls, "the copied call counts in s1")
+
+	steps := []struct {
+		name   string
+		change func()
+	}{
+		{"a call appended", func() {
+			appendLines(t, s4, claudeCall("s4", "2026-10-22T09:01:00.000Z", "msg_6", 3, 1100, 0, 0, 10)+"\n")
+		}},
+		{"the call's later line", func() {
+			appendLines(t, s4, claudeCall("s4", "2026-10-22T09:01:01.000Z", "msg_6", 3, 1100, 0, 0, 90)+"\n")
+		}},
+		{"a line being written", func() {
+			appendLines(t, s4, claudeCall("s4", "2026-10-22T09:02:00.000Z", "msg_7", 3, 1200, 0, 0, 40)[:50])
+		}},
+		{"the line written", func() {
+			appendLines(t, s4, claudeCall("s4", "2026-10-22T09:02:00.000Z", "msg_7", 3, 1200, 0, 0, 40)[50:]+"\n")
+		}},
+		{"an earlier session gets a call a later one has", func() {
+			appendLines(t, filepath.Join(dir, "s1.jsonl"), claudeCall("s1", "2026-10-20T12:00:00.000Z", "msg_3", 7, 21000, 0, 0, 300)+"\n")
+		}},
+		{"a subagent starts", func() {
+			writeLog(t, filepath.Join(dir, "s3", "subagents", "agent-a2.jsonl"), time.Now(),
+				claudeCall("s3", "2026-10-21T09:10:00.000Z", "msg_sub2", 2, 600, 0, 0, 60))
+		}},
+		{"the subagent goes on", func() {
+			appendLines(t, filepath.Join(dir, "s3", "subagents", "agent-a2.jsonl"), claudeCall("s3", "2026-10-21T09:11:00.000Z", "msg_sub3", 2, 700, 0, 0, 70)+"\n")
+		}},
+		{"Claude Code's own count, after a call later than the subagents' first", func() {
+			appendLines(t, filepath.Join(dir, "s3.jsonl"),
+				claudeCall("s3", "2026-10-21T09:05:00.000Z", "msg_10", 3, 1000, 0, 0, 30)+"\n",
+				report("s3", 1.5)+"\n")
+		}},
+		{"a later session gets a call an earlier one has", func() {
+			appendLines(t, filepath.Join(dir, "s3.jsonl"), claudeCall("s3", "2026-10-21T10:00:00.000Z", "msg_2", 5, 24000, 0, 0, 800)+"\n")
+		}},
+		{"a new session", func() {
+			writeLog(t, filepath.Join(dir, "s5.jsonl"), time.Now(),
+				claudePromptLine("s5", "2026-10-23T09:00:00.000Z", "Next"),
+				claudeCall("s5", "2026-10-23T09:00:05.000Z", "msg_8", 3, 1000, 0, 0, 100))
+		}},
+		{"a session gone", func() {
+			require.NoError(t, os.Remove(filepath.Join(dir, "s2.jsonl")))
+		}},
+		{"a log rewritten", func() {
+			writeLog(t, s4, time.Now(),
+				claudePromptLine("s4", "2026-10-22T09:00:00.000Z", "Again"),
+				claudeCall("s4", "2026-10-22T09:00:05.000Z", "msg_9", 3, 1000, 0, 0, 100))
+		}},
+		{"a subagent logs a call of its session's", func() {
+			writeLog(t, filepath.Join(dir, "s4", "subagents", "agent-a3.jsonl"), time.Now(),
+				claudeCall("s4", "2026-10-22T09:00:05.000Z", "msg_9", 3, 1000, 0, 0, 100),
+				claudeCall("s4", "2026-10-22T09:00:09.000Z", "msg_sub4", 1, 100, 0, 0, 10))
+		}},
+		{"nothing", func() {}},
+	}
+	for _, step := range steps {
+		step.change()
+		matchesAFreshReading(t, store, "claude", "/w", step.name)
+	}
+	d = matchesAFreshReading(t, store, "claude", "/w", "again")
+	assert.Equal(t, 2, d.Cost("s4").Calls, "the call logged twice counts once")
+	assert.Equal(t, int64(len(steps)+2), store.costPasses.Load())
+}
+
+func TestCodexCostsMatchAFreshReading(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	day := filepath.Join(home, "sessions", "2026", "10", "20")
+	count := func(at string, input, output int) string {
+		return fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d,"cached_input_tokens":0,"output_tokens":%d},"last_token_usage":{"input_tokens":%d,"cached_input_tokens":0,"output_tokens":%d}}}}`, at, input, output, input, output)
+	}
+	t1 := filepath.Join(day, "rollout-2026-10-20T10-00-00-t1.jsonl")
+	writeLog(t, t1, time.Now(),
+		`{"timestamp":"2026-10-20T10:00:00.000Z","type":"session_meta","payload":{"id":"t1","session_id":"t1","cwd":"/w"}}`,
+		`{"timestamp":"2026-10-20T10:00:01.000Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}`,
+		count("2026-10-20T10:00:02.000Z", 1000, 10))
+	store := newStore(t, "codex", "/w")
+	matchesAFreshReading(t, store, "codex", "/w", "first reading")
+	appendLines(t, t1, count("2026-10-20T10:01:00.000Z", 3000, 30)+"\n")
+	matchesAFreshReading(t, store, "codex", "/w", "a count appended")
+	sub := filepath.Join(day, "rollout-2026-10-20T10-02-00-t2.jsonl")
+	writeLog(t, sub, time.Now(),
+		`{"timestamp":"2026-10-20T10:02:00.000Z","type":"session_meta","payload":{"id":"t2","session_id":"t1","parent_thread_id":"t1","cwd":"/w","agent_nickname":"Sub"}}`,
+		`{"timestamp":"2026-10-20T10:02:01.000Z","type":"turn_context","payload":{"model":"gpt-6.1-sol-mini"}}`,
+		count("2026-10-20T10:02:02.000Z", 500, 5))
+	matchesAFreshReading(t, store, "codex", "/w", "a subagent")
+	appendLines(t, sub, count("2026-10-20T10:03:00.000Z", 900, 9)+"\n")
+	d := matchesAFreshReading(t, store, "codex", "/w", "the subagent goes on")
+	assert.Equal(t, 4, d.Cost("t1").Calls)
+}
+
+func TestPiCostsMatchAFreshReading(t *testing.T) {
+	agentDir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	dir := filepath.Join(agentDir, "sessions", "--w--")
+	call := func(id, at string, input int) string {
+		return fmt.Sprintf(`{"type":"message","id":%q,"timestamp":%q,"message":{"role":"assistant","model":"gpt-6.1-sol","content":[{"type":"text","text":"ok"}],"usage":{"input":%d,"output":10,"cacheRead":0,"cacheWrite":0,"cost":{"total":0.01}}}}`, id, at, input)
+	}
+	p1 := filepath.Join(dir, "2026-10-20T10-00-00-000Z_p1.jsonl")
+	writeLog(t, p1, time.Now(),
+		`{"type":"session","version":3,"id":"p1","timestamp":"2026-10-20T10:00:00.000Z","cwd":"/w"}`,
+		call("a1", "2026-10-20T10:00:02.000Z", 1000))
+	// A fork of p1: it copies a1.
+	p2 := filepath.Join(dir, "2026-10-20T11-00-00-000Z_p2.jsonl")
+	writeLog(t, p2, time.Now(),
+		`{"type":"session","version":3,"id":"p2","timestamp":"2026-10-20T11:00:00.000Z","cwd":"/w"}`,
+		call("a1", "2026-10-20T10:00:02.000Z", 1000),
+		call("a2", "2026-10-20T11:00:02.000Z", 2000))
+	store := newStore(t, "pi", "/w")
+	matchesAFreshReading(t, store, "pi", "/w", "first reading")
+	appendLines(t, p2, call("a3", "2026-10-20T11:01:00.000Z", 3000)+"\n")
+	matchesAFreshReading(t, store, "pi", "/w", "the fork goes on")
+	appendLines(t, p1, call("a4", "2026-10-20T11:02:00.000Z", 4000)+"\n")
+	d := matchesAFreshReading(t, store, "pi", "/w", "the session goes on")
+	assert.Equal(t, 2, d.Cost("p1").Calls)
+	assert.Equal(t, 2, d.Cost("p2").Calls)
+}
+
+// A reading that finds no log changed returns the last one's result.
+func TestCostsUnchangedAreTheLastReadings(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	path := filepath.Join(config, "projects", "-w", "s1.jsonl")
+	writeLog(t, path, time.Now(),
+		claudePromptLine("s1", "2026-10-20T10:00:00.000Z", "Fix the bug"),
+		claudeCall("s1", "2026-10-20T10:00:05.000Z", "msg_1", 10, 20000, 0, 0, 200))
+	store := newStore(t, "claude", "/w")
+	first, err := store.Costs()
+	require.NoError(t, err)
+	again, err := store.Costs()
+	require.NoError(t, err)
+	assert.Equal(t, reflect.ValueOf(first.Sessions).Pointer(), reflect.ValueOf(again.Sessions).Pointer(), "the same result")
+
+	// Lines that hold no call change the log, not its calls.
+	appendLines(t, path, claudePromptLine("s1", "2026-10-20T10:01:00.000Z", "And the tests")+"\n")
+	again, err = store.Costs()
+	require.NoError(t, err)
+	assert.Equal(t, reflect.ValueOf(first.Sessions).Pointer(), reflect.ValueOf(again.Sessions).Pointer())
+	appendLines(t, path, claudeCall("s1", "2026-10-20T10:01:05.000Z", "msg_2", 5, 21000, 0, 0, 100)+"\n")
+	again, err = store.Costs()
+	require.NoError(t, err)
+	assert.Equal(t, 2, again.Cost("s1").Calls)
+	assert.Equal(t, 1, first.Cost("s1").Calls, "an earlier result stays as it was")
+	assert.Len(t, first.Sessions["s1"], 1)
+
+	// The call's later line completes it.
+	appendLines(t, path, claudeCall("s1", "2026-10-20T10:01:06.000Z", "msg_2", 5, 21000, 0, 0, 900)+"\n")
+	last, err := store.Costs()
+	require.NoError(t, err)
+	assert.Equal(t, 900, last.Sessions["s1"][1].Tokens.Output)
+	assert.Equal(t, 100, again.Sessions["s1"][1].Tokens.Output, "an earlier result stays as it was")
+}
+
+// reconcileSorting is reconcile as it was, sorting all the calls twice.
+func reconcileSorting(calls []ModelCall) []ModelCall {
+	var reports []ModelCall
+	calls = slices.DeleteFunc(calls, func(c ModelCall) bool {
+		if c.report != nil {
+			reports = append(reports, c)
+			return true
+		}
+		return false
+	})
+	if len(reports) == 0 {
+		return calls
+	}
+	slices.SortStableFunc(calls, byTime)
+	counted := make(map[string]agentlog.ModelReport)
+	next := 0
+	var added []ModelCall
+	for _, r := range reports {
+		if r.Time.IsZero() {
+			continue
+		}
+		for ; next < len(calls) && !calls[next].Time.After(r.Time); next++ {
+			c := counted[calls[next].Model]
+			c.USD += calls[next].USD
+			c.Tokens = c.Tokens.Add(calls[next].Tokens)
+			counted[calls[next].Model] = c
+		}
+		for _, model := range slices.Sorted(maps.Keys(r.report)) {
+			reported := r.report[model]
+			c := counted[model]
+			missing := reported.USD - c.USD
+			if missing < unitemizedMin {
+				continue
+			}
+			tokens := pricing.Tokens{
+				Input:      max(0, reported.Tokens.Input-c.Tokens.Input),
+				CacheRead:  max(0, reported.Tokens.CacheRead-c.Tokens.CacheRead),
+				CacheWrite: max(0, reported.Tokens.CacheWrite-c.Tokens.CacheWrite-c.Tokens.CacheWrite1h),
+				Output:     max(0, reported.Tokens.Output-c.Tokens.Output),
+			}
+			call := ModelCall{Time: r.Time, Model: model, Tokens: tokens, USD: missing, Priced: true, Unitemized: true, cost: -1}
+			added = append(added, call)
+			c.USD += missing
+			c.Tokens = c.Tokens.Add(tokens)
+			counted[model] = c
+		}
+	}
+	calls = append(calls, added...)
+	slices.SortStableFunc(calls, byTime)
+	return calls
+}
+
+// reconcile sorts the calls only when they aren't in order, and merges
+// what it adds into them: as sorting all of them did.
+func TestReconcileAsSorting(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	start := time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)
+	models := []string{"claude-opus-5-5", "claude-haiku-5-5"}
+	for range 500 {
+		var calls []ModelCall
+		at := start
+		for i := range rng.IntN(40) {
+			if rng.IntN(4) > 0 {
+				at = at.Add(time.Duration(rng.IntN(3)) * time.Minute)
+			} else {
+				// Out of order, as a subagent's calls are after the
+				// session's.
+				at = start.Add(time.Duration(rng.IntN(60)) * time.Minute)
+			}
+			if rng.IntN(6) == 0 {
+				report := map[string]agentlog.ModelReport{}
+				for _, m := range models[:1+rng.IntN(2)] {
+					report[m] = agentlog.ModelReport{USD: rng.Float64() * float64(i), Tokens: pricing.Tokens{Input: rng.IntN(1000), Output: rng.IntN(100)}}
+				}
+				calls = append(calls, ModelCall{Time: at, report: report, cost: -1})
+				continue
+			}
+			calls = append(calls, ModelCall{Time: at, Model: models[rng.IntN(2)], Tokens: pricing.Tokens{Input: rng.IntN(1000), Output: rng.IntN(100)}, USD: rng.Float64(), Priced: true, key: fmt.Sprint(i), cost: -1})
+		}
+		want := reconcileSorting(slices.Clone(calls))
+		got := reconcile(slices.Clone(calls))
+		require.Equal(t, len(want), len(got))
+		for i := range want {
+			require.Equal(t, want[i], got[i], i)
+		}
+	}
+}
+
+// CallsDigest hashes what it did when it formatted each call with
+// Fprintf: the digests clients hold stay theirs.
+func TestCallsDigestAsFormatted(t *testing.T) {
+	rng := rand.New(rand.NewPCG(3, 4))
+	formatted := func(calls []ModelCall) string {
+		h := fnv.New64a()
+		for _, call := range calls {
+			tk := call.Tokens
+			_, _ = fmt.Fprintf(h, "%d|%s|%d|%d|%d|%d|%d|%x|%s|%t\n", call.Time.UnixNano(), call.Model,
+				tk.Input, tk.CacheRead, tk.CacheWrite, tk.CacheWrite1h, tk.Output, math.Float64bits(call.USD), call.SubagentID, call.Unitemized)
+		}
+		return strconv.FormatUint(h.Sum64(), 16)
+	}
+	var calls []ModelCall
+	for i := range 200 {
+		calls = append(calls, ModelCall{
+			Time:   time.Unix(rng.Int64N(4e9)-1e9, rng.Int64N(1e9)),
+			Model:  []string{"claude-opus-5-5", "gpt-6.1-sol", "", "ünïcode"}[rng.IntN(4)],
+			Tokens: pricing.Tokens{Input: rng.IntN(1e6), CacheRead: rng.IntN(1e6), CacheWrite: -rng.IntN(3), CacheWrite1h: rng.IntN(9), Output: rng.IntN(1e5)},
+			USD:    rng.NormFloat64(), SubagentID: []string{"", "a1"}[rng.IntN(2)], Unitemized: i%7 == 0,
+		})
+		require.Equal(t, formatted(calls), CallsDigest(calls))
+	}
+	assert.Empty(t, CallsDigest(nil))
+}
+
+// Readings of the costs, of the list and of the subagents can run while
+// the agent writes: each finds what a new Store finds of the logs then.
+func TestCostsWhileTheAgentWrites(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	dir := filepath.Join(config, "projects", "-w")
+	path := filepath.Join(dir, "s1.jsonl")
+	writeLog(t, path, time.Now(), claudePromptLine("s1", "2026-10-20T10:00:00.000Z", "Fix the bug"))
+	sub := filepath.Join(dir, "s1", "subagents", "agent-a1.jsonl")
+	writeLog(t, sub, time.Now(), claudeCall("s1", "2026-10-20T10:00:01.000Z", "msg_sub0", 1, 100, 0, 0, 10))
+	store := newStore(t, "claude", "/w")
+	var (
+		wg   sync.WaitGroup
+		done = make(chan struct{})
+	)
+	for i := range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				switch i {
+				case 0:
+					d, err := store.Costs()
+					assert.NoError(t, err)
+					// A result stays as it was.
+					calls := slices.Clone(d.Sessions["s1"])
+					runtime.Gosched()
+					assert.Equal(t, calls, d.Sessions["s1"])
+				case 1:
+					_, err := store.List(10)
+					assert.NoError(t, err)
+				case 2:
+					_, err := store.Subagents("s1")
+					assert.NoError(t, err)
+				}
+			}
+		}()
+	}
+	for i := range 200 {
+		at := time.Date(2026, 10, 20, 10, 1, 0, 0, time.UTC).Add(time.Duration(i) * time.Second).Format(time.RFC3339Nano)
+		id := fmt.Sprintf("msg_%d", i/2)
+		// A call's two lines, the second completing it.
+		appendLines(t, path, claudeCall("s1", at, id, 3, 1000, 0, 0, 10+i%2)+"\n")
+		if i%10 == 0 {
+			appendLines(t, sub, claudeCall("s1", at, fmt.Sprintf("msg_sub%d", i+1), 1, 100, 0, 0, 10)+"\n")
+		}
+	}
+	close(done)
+	wg.Wait()
+	d := matchesAFreshReading(t, store, "claude", "/w", "after the writes")
+	assert.Equal(t, 121, d.Cost("s1").Calls)
 }

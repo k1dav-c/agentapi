@@ -2,7 +2,6 @@ package codexlog
 
 import (
 	"bytes"
-	"slices"
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog"
@@ -13,7 +12,10 @@ import (
 // Calls reads Codex's token counts: the change of the thread's running
 // total since the last count is a call's usage. The model is the turn's.
 type Calls struct {
+	// calls are the calls read since Changed last returned, taken how
+	// many it returned.
 	calls []agentlog.Call
+	taken int
 	model string
 	last  *Totals
 	drift *agentlog.Drift
@@ -90,9 +92,13 @@ func (c *Calls) Line(line []byte) {
 	}
 }
 
-// Calls returns the calls read so far.
-func (c *Calls) Calls() []agentlog.Call {
-	return slices.Clone(c.calls)
+// Changed returns the calls read since it last returned, and forgets
+// them: a call is complete on its line.
+func (c *Calls) Changed() (int, []agentlog.Call) {
+	from, calls := c.taken, c.calls
+	c.taken += len(calls)
+	c.calls = nil
+	return from, calls
 }
 
 // Size is about how many bytes of memory the reader holds.

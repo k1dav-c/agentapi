@@ -2,7 +2,6 @@ package pilog
 
 import (
 	"bytes"
-	"slices"
 
 	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/pricing"
@@ -12,7 +11,10 @@ import (
 // they cost at Pi's prices, and the usage entries of the calls Pi makes
 // outside the conversation (to keep the prompt cache warm).
 type Calls struct {
+	// calls are the calls read since Changed last returned, taken how
+	// many it returned.
 	calls []agentlog.Call
+	taken int
 	drift *agentlog.Drift
 }
 
@@ -83,9 +85,13 @@ func (c *Calls) Line(line []byte) {
 	c.calls = append(c.calls, call)
 }
 
-// Calls returns the calls read so far.
-func (c *Calls) Calls() []agentlog.Call {
-	return slices.Clone(c.calls)
+// Changed returns the calls read since it last returned, and forgets
+// them: a call is complete on its line.
+func (c *Calls) Changed() (int, []agentlog.Call) {
+	from, calls := c.taken, c.calls
+	c.taken += len(calls)
+	c.calls = nil
+	return from, calls
 }
 
 // Size is about how many bytes of memory the reader holds.

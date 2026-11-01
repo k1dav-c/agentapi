@@ -27,7 +27,8 @@ func TestCallsCountDrift(t *testing.T) {
 	} {
 		c.Line([]byte(line))
 	}
-	calls := c.Calls()
+	from, calls := c.Changed()
+	assert.Zero(t, from)
 	assert.Len(t, calls, 1)
 	assert.InDelta(t, 0.01, calls[0].Cost, 1e-12)
 	assert.Equal(t, 1, drift.Calls(agentlog.NoTokens))

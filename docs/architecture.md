@@ -359,9 +359,16 @@ type Factory func(resume Resume) (Adapter, error)
   call; Claude Code's `cost-state` records add what its log doesn't list
   (compaction) as unitemized calls. Calls copied by a fork count once, in the
   earliest session. The Store indexes each log's size, read offset and reader
-  state. It reads only complete new lines from growing logs and rereads logs
-  that shrink or are replaced. Concurrent requests share the read. The index
-  has a size limit and removes logs that no longer exist.
+  state, with its calls priced. It reads only complete new lines from growing
+  logs, prices only the calls they add or complete, and rereads logs that
+  shrink or are replaced. A reading in which no log's calls changed returns
+  the last result; otherwise it works out again only the sessions whose logs
+  changed, and adds up the sessions' costs. Concurrent requests share the
+  read. The index's size limit doesn't apply to the logs a reading of the
+  costs read (`agentlog.Pass`): every reading reads all of them in the same
+  order, and a limit that forgot the log read longest ago would forget each
+  one just before it is read again. The index removes logs that no longer
+  exist.
 - **Log formats.** Each format is decoded in one place (`lib/agentlog`):
   what is a prompt, injected context or a tool result is decided once, for
   the native adapters, the history, the costs and the PTY watcher alike.

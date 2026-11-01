@@ -88,21 +88,28 @@ func (src source) lines(path string, fn func(line []byte) bool) bool {
 
 // logsIn lists the .jsonl files of dir.
 func logsIn(dir string) ([]string, error) {
+	files, _, err := entriesIn(dir)
+	return files, err
+}
+
+// entriesIn lists the .jsonl files of dir, and the directories in it.
+func entriesIn(dir string) (files, dirs []string, err error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var files []string
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
-			continue
+		switch {
+		case entry.IsDir():
+			dirs = append(dirs, filepath.Join(dir, entry.Name()))
+		case filepath.Ext(entry.Name()) == ".jsonl":
+			files = append(files, filepath.Join(dir, entry.Name()))
 		}
-		files = append(files, filepath.Join(dir, entry.Name()))
 	}
-	return files, nil
+	return files, dirs, nil
 }
 
 // --- Claude Code ---
@@ -131,19 +138,25 @@ func claudeProjectDirs(s *Store) ([]string, error) {
 }
 
 func claudeFiles(s *Store) ([]string, error) {
-	dirs, err := claudeProjectDirs(s)
+	files, _, err := claudeLogs(s)
+	return files, err
+}
+
+// claudeLogs lists the logs in the directory's project directories, and
+// the directories there: a session's subagents are in one named after it.
+func claudeLogs(s *Store) (files, dirs []string, err error) {
+	projects, err := claudeProjectDirs(s)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var files []string
-	for i, dir := range dirs {
-		logs, err := logsIn(dir)
+	for i, project := range projects {
+		logs, subdirs, err := entriesIn(project)
 		if err != nil && i == 0 {
-			return nil, err
+			return nil, nil, err
 		}
-		files = append(files, logs...)
+		files, dirs = append(files, logs...), append(dirs, subdirs...)
 	}
-	return files, nil
+	return files, dirs, nil
 }
 
 // claudeLogsByID lists the logs named after session id: in the
@@ -164,6 +177,21 @@ func claudeLogsByID(s *Store, id string) (own, elsewhere []string) {
 		}
 	}
 	return own, elsewhere
+}
+
+// claudeSubagentLogs lists the logs of the subagents of the session id
+// whose log is at path: <session>/subagents/agent-<id>.jsonl next to it.
+func claudeSubagentLogs(id, path string) []Subagent {
+	if id == "" || strings.ContainsAny(id, `/\`) || id == "." || id == ".." {
+		return nil
+	}
+	logs, _ := logsIn(filepath.Join(filepath.Dir(path), id, "subagents"))
+	subs := make([]Subagent, 0, len(logs))
+	for _, log := range logs {
+		name := strings.TrimSuffix(filepath.Base(log), ".jsonl")
+		subs = append(subs, Subagent{ID: strings.TrimPrefix(name, "agent-"), path: log, kind: "claude"})
+	}
+	return subs
 }
 
 // --- Codex ---
@@ -207,13 +235,19 @@ func codexFiles(s *Store) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return codexSessionLogs(s, threads), nil
+}
+
+// codexSessionLogs are the logs of threads that are sessions in the
+// directory.
+func codexSessionLogs(s *Store, threads []codexThread) []string {
 	var files []string
 	for _, t := range threads {
 		if !t.meta.IsSubAgent() && s.dir.Is(t.meta.Payload.CWD) {
 			files = append(files, t.path)
 		}
 	}
-	return files, nil
+	return files
 }
 
 // codexLogsByID lists the log of thread id: Codex names it after it.
