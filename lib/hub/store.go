@@ -2,6 +2,8 @@ package hub
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/coder/quartz"
 
 	"github.com/coder/agentapi/lib/instanceapi"
 )
@@ -52,6 +56,9 @@ type Instance struct {
 	// refusedRun is the server ID of the last run whose URL change the hub
 	// refused, to log it once.
 	refusedRun string
+	// activity is the last activityKey the hub knew of it, kept in the file:
+	// ChangedAt moves when that changes. Empty before the hub knew one.
+	activity string
 }
 
 // record is what the hub keeps of an instance in its file: not its
@@ -65,6 +72,10 @@ type record struct {
 	// LastSeen is when the hub last heard from the instance's current run:
 	// its events and its summaries.
 	LastSeen time.Time `json:"last_seen"`
+	// ChangedAt is when the hub last saw the instance change what its row
+	// shows it does (activityKey), or first saw it. Zero for one a hub
+	// kept before it recorded this, until its next change.
+	ChangedAt time.Time `json:"changed_at,omitzero"`
 	// HeartbeatSeconds is how often the current run sends
 	// instance.heartbeat, as its instance.* events say; 0 when unknown or
 	// off.
@@ -104,6 +115,62 @@ func (i Instance) state() instanceapi.State {
 	return instanceapi.StateOf(i.Connection, i.Summary, i.Muted)
 }
 
+// activityKey stands for what the instance's row shows it does, which
+// ChangedAt follows: whether the hub reaches it, its state, its latest
+// task starting or ending, what it waits for, its title, queue, update
+// and version. Not what someone did on the hub's page (a group, a mute,
+// reading a finished task), what moves on its own (spend, usage, the
+// agent's latest message), a stream that drops and comes back, or when it
+// was last heard of. Empty while the hub doesn't know what it does: it
+// hasn't read a summary of it since the hub started. A hash, so the file
+// keeps no titles or commands.
+func (i Instance) activityKey() string {
+	switch {
+	case i.Connection == ConnectionStopped || i.Connection == ConnectionUnreachable:
+		return string(i.Connection)
+	case i.Summary == nil:
+		return ""
+	}
+	s := i.Summary
+	activity := struct {
+		Status          instanceapi.AgentStatus    `json:"status"`
+		Lifecycle       instanceapi.LifecycleState `json:"lifecycle"`
+		Attention       instanceapi.Attention      `json:"attention"`
+		Title           string                     `json:"title"`
+		PendingRequests int                        `json:"pending_requests"`
+		Request         string                     `json:"request,omitempty"`
+		QueuedMessages  int                        `json:"queued_messages"`
+		Task            int                        `json:"task,omitempty"`
+		TaskStatus      instanceapi.TaskStatus     `json:"task_status,omitempty"`
+		Login           string                     `json:"login,omitempty"`
+		LimitStop       time.Time                  `json:"limit_stop,omitzero"`
+		Update          instanceapi.UpdateState    `json:"update,omitempty"`
+		UpdateError     string                     `json:"update_error,omitempty"`
+		Version         string                     `json:"version,omitempty"`
+	}{
+		Status: s.Status, Lifecycle: s.Lifecycle, Attention: s.Attention, Title: s.Title,
+		PendingRequests: s.PendingRequests, QueuedMessages: s.QueuedMessages, Version: s.Instance.Version,
+	}
+	if s.Request != nil {
+		activity.Request = s.Request.ID
+	}
+	if s.Task != nil {
+		activity.Task, activity.TaskStatus = s.Task.ID, s.Task.Status
+	}
+	if s.LoginRequired != nil {
+		activity.Login = s.LoginRequired.Message
+	}
+	if s.LimitStop != nil {
+		activity.LimitStop = s.LimitStop.StoppedAt
+	}
+	if s.Update != nil {
+		activity.Update, activity.UpdateError = s.Update.State, s.Update.Error
+	}
+	data, _ := json.Marshal(activity)
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:8])
+}
+
 // instanceURL is where the hub reaches the instance an event names: its
 // public URL, else its host and port.
 func instanceURL(instance instanceapi.WebhookInstance) string {
@@ -119,7 +186,8 @@ func instanceURL(instance instanceapi.WebhookInstance) string {
 // store holds the instances, keeps them in a file and tells subscribers
 // of changes.
 type store struct {
-	path string // where the instances are kept; empty keeps none
+	path  string // where the instances are kept; empty keeps none
+	clock quartz.Clock
 
 	mu        sync.Mutex
 	instances map[string]*Instance
@@ -136,10 +204,13 @@ type storeEvent struct {
 type storedInstance struct {
 	record
 	Stopped bool `json:"stopped,omitempty"`
+	// Activity is its activityKey: after a restart, a summary that says
+	// what the last one did isn't a change.
+	Activity string `json:"activity,omitempty"`
 }
 
 func (i Instance) stored() storedInstance {
-	return storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped}
+	return storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped, Activity: i.activity}
 }
 
 // kept is what the file keeps of the instance, but when it was last seen.
@@ -150,10 +221,11 @@ func (i Instance) kept() storedInstance {
 }
 
 // newStore returns the store that keeps the instances in path, with those
-// it kept. A file that doesn't parse is moved aside, and the store starts
-// empty: a hub that stopped on it would stop again at every restart.
-func newStore(path string, logger *slog.Logger) (*store, error) {
-	s := &store{path: path, instances: map[string]*Instance{}, subs: map[chan storeEvent]struct{}{}}
+// it kept, on clock. A file that doesn't parse is moved aside, and the
+// store starts empty: a hub that stopped on it would stop again at every
+// restart.
+func newStore(path string, logger *slog.Logger, clock quartz.Clock) (*store, error) {
+	s := &store{path: path, clock: clock, instances: map[string]*Instance{}, subs: map[chan storeEvent]struct{}{}}
 	if path == "" {
 		return s, nil
 	}
@@ -180,7 +252,7 @@ func newStore(path string, logger *slog.Logger) (*store, error) {
 		if si.Stopped {
 			connection = ConnectionStopped
 		}
-		i := &Instance{record: si.record, Connection: connection}
+		i := &Instance{record: si.record, Connection: connection, activity: si.Activity}
 		i.State = i.state()
 		s.instances[si.ID] = i
 	}
@@ -275,7 +347,8 @@ func (s *store) get(id string) (Instance, bool) {
 // update changes the instance id with change, or adds it when create is
 // set, and reports whether it did. The file is written when what it keeps
 // changed; when the instance was last seen isn't worth a write of its own
-// and goes with the next one.
+// and goes with the next one. ChangedAt moves when the change is one its
+// row shows of what it does (activityKey), and for a new instance.
 func (s *store) update(id string, create bool, change func(*Instance)) (Instance, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -291,6 +364,16 @@ func (s *store) update(id string, create bool, change func(*Instance)) (Instance
 	before, seen := i.kept(), i.seen()
 	change(i)
 	i.State = i.state()
+	activity := i.activityKey()
+	// One kept by a hub that didn't record changes has nothing to differ
+	// from until the hub knows what it does.
+	known := i.activity != "" || !i.ChangedAt.IsZero()
+	if !ok || (activity != "" && activity != i.activity && known) {
+		i.ChangedAt = s.clock.Now()
+	}
+	if activity != "" {
+		i.activity = activity
+	}
 	var err error
 	if !ok || i.kept() != before {
 		err = s.saveLocked()

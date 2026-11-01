@@ -35,6 +35,10 @@ export interface HubInstance {
   workspace_url?: string;
   source: "webhook" | "manual";
   last_seen: string;
+  // changed_at is when the hub last saw it change what its row shows it
+  // does, or first saw it; none from a hub that doesn't record it, or for
+  // one it kept before it did, until its next change.
+  changed_at?: string;
   connection: HubConnection;
   error?: string;
   // group is the group someone put it in on the hub's page; none when empty.

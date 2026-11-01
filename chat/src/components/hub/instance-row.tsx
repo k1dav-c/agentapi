@@ -1,7 +1,7 @@
 "use client";
 
 import {useState} from "react";
-import {Bell, BellOff, ChevronRight, FolderPlus, MoreHorizontal, Pencil, Trash2} from "lucide-react";
+import {Bell, BellOff, ChevronRight, Folder, FolderPlus, MoreHorizontal, Pencil, Trash2} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {Button} from "@/components/ui/button";
 import {
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {agentDisplayName, parseAgentType} from "@/lib/agents";
 import {activity, displayName, formatAgo, formatUSD, instanceState, instanceVersion, olderThanHub, spendTitle, spendTotals, stateLabel, usagePercent, type HubGroup, type HubInstance} from "@/lib/hub";
+import {changedAt, type ListOrder} from "@/lib/hub-order";
 import {shownUpdate, updateBadge} from "@/lib/hub-update";
 import {cn} from "@/lib/utils";
 import {StatusGlyph, stateTone} from "./status-glyph";
@@ -53,6 +54,7 @@ export function InstanceRow({
   hubVersion,
   root,
   groups,
+  order,
   selected,
   now,
   onSelect,
@@ -67,6 +69,9 @@ export function InstanceRow({
   // root is the hub's address, whose proxy takes the instance's update.
   root: string;
   groups: string[];
+  // order is the list's: in the recent order, with no group headers, the
+  // row names its group, and its age is that of its latest change.
+  order: ListOrder;
   selected: boolean;
   now: number;
   onSelect: () => void;
@@ -81,7 +86,9 @@ export function InstanceRow({
   const usage = usagePercent(summary);
   const agent = agentName(instance);
   const doing = activity(instance);
-  const ago = formatAgo(doing.since, now);
+  const recent = order === "recent";
+  const ago = formatAgo(recent ? changedAt(instance) : doing.since, now);
+  const group = recent ? (instance.group?.trim() ?? "") : "";
   const gone = state === "stopped" || state === "unreachable";
   const spend = summary?.spend;
   // The last spend and version of an instance the hub doesn't follow now:
@@ -104,7 +111,7 @@ export function InstanceRow({
           data-hub-row={instance.id}
           onClick={onSelect}
           aria-current={selected ? "true" : undefined}
-          aria-label={`${displayName(instance)}, ${stateLabel(instance)}${ago ? `, ${ago}` : ""}: ${doing.text}${olderThanHub(instance, hubVersion) ? ". Older than the hub" : ""}${update ? `. ${updateBadge(update).title}` : ""}`}
+          aria-label={`${displayName(instance)}, ${stateLabel(instance)}${ago ? `, ${ago}` : ""}: ${doing.text}${olderThanHub(instance, hubVersion) ? ". Older than the hub" : ""}${update ? `. ${updateBadge(update).title}` : ""}${group ? `. Group: ${group}` : ""}`}
           className="flex min-w-0 flex-1 items-start gap-3 rounded-xl py-3 pr-1 pl-3.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           <StatusGlyph state={state} className="mt-[3px]" />
@@ -112,6 +119,7 @@ export function InstanceRow({
             <span className="flex items-baseline gap-2">
               <span className="min-w-0 truncate text-[15px] leading-6 font-medium">{displayName(instance)}</span>
               {version && <VersionTag version={version} hubVersion={hubVersion} lastKnown={lastKnown} className="text-xs text-muted-foreground" />}
+              {group && <GroupTag group={group} />}
               {ago && <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">{ago}</span>}
             </span>
             <span className={cn("block truncate text-[13px] leading-5", activityTone[doing.tone])}>
@@ -213,6 +221,24 @@ export function InstanceRow({
       </div>
       <UpdateDialog instance={instance} hubVersion={hubVersion} root={root} open={updating} onOpenChange={setUpdating} />
     </li>
+  );
+}
+
+// GroupTag names a row's group in the recent order, in the room its first
+// line leaves before the age: whole, cut short, or not at all where not even
+// its start fits (it wraps to a second line, which its height leaves out).
+function GroupTag({group}: {group: string}) {
+  return (
+    // Its own padding is the gap before it, so that out of sight it takes
+    // no room from the name.
+    <span className="-ml-2 flex h-4 min-w-0 flex-1 flex-wrap items-baseline justify-end overflow-hidden text-xs leading-4 text-muted-foreground">
+      {/* What the tag wraps after; a zero-width space keeps the line's baseline. */}
+      <span aria-hidden="true">{"\u200b"}</span>
+      <span className="max-w-full min-w-18 truncate pl-2" title={`Group: ${group}`}>
+        <Folder className="mr-1 inline size-3 align-[-2px]" aria-hidden="true" />
+        {group}
+      </span>
+    </span>
   );
 }
 

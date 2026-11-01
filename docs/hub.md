@@ -308,8 +308,9 @@ Each row shows the agent's name (`--name`, by default its working directory's na
 version ([Versions](#versions)), what it waits for or does, how long ago, the agent and the machine;
 a queue that isn't empty, what the agent spent in the last 24 hours ([Spend](#spend)) and a usage
 limit above 60% join them. An AgentAPI update under way, or one that failed, gets a line of its own
-([Updating from the hub](#updating-from-the-hub)). Within a [group](#groups), the rows sort by state in this order, then by name.
-Each state has a shape of its own, so it reads without its color:
+([Updating from the hub](#updating-from-the-hub)). Within a [group](#groups), the rows sort by
+state in this order, then by name; [Recent changes](#recent-changes) sorts them by their latest
+change instead. Each state has a shape of its own, so it reads without its color:
 
 | Glyph | Second line starts with | Meaning |
 | --- | --- | --- |
@@ -348,10 +349,31 @@ the hub, so the phone and the desktop show the same ones, and an instance's own 
 it.
 
 Once there is a group, the list gets a header per group, by name, with the instances in no group
-last under **Ungrouped**. A header shows how many instances the group has and, in amber, how many
-need you, so a folded group still tells you. Tap a header to fold or unfold it; each browser
-remembers which groups it folded. The pencil renames the group, moving all its instances. A group
-name has at most 40 characters, and a group with no instance left disappears.
+last under **Ungrouped**; [Recent changes](#recent-changes) shows no headers. A header shows how
+many instances the group has and, in amber, how many need you, so a folded group still tells you.
+Tap a header to fold or unfold it; each browser remembers which groups it folded. The pencil renames
+the group, moving all its instances. A group name has at most 40 characters, and a group with no
+instance left disappears.
+
+### Recent changes
+
+The switch beside the search sets the list's order. **Groups**, the default, is the order above:
+what needs you first within each group. **Recent changes** is one list, the most recent change
+first, whatever the group or the state. Each row then shows how long ago it last changed and, where
+there is room, its group. The filters and the search apply in both orders, and `j` and `k` follow
+the rows as they show. Rows move as the agents change; the open one stays selected. Each browser
+remembers its order.
+
+These count as changes: a new state (it needs you, works, finishes, waits, stops, or the hub loses
+or finds it), a new task, something new to wait for (a request, a login, a usage limit), a new
+title, a change in the queue, an update under way and a new version. These don't: heartbeats, what
+people do (a group, a mute, reading a finished task), the spend and usage figures, the agent's
+messages while it works, and a summary stream that drops and comes back within 10 s.
+
+The hub records when each instance last changed (`changed_at`) and keeps it in its file, so
+restarting the hub doesn't reorder the list. For a new instance, that is when the hub first saw it.
+A hub updated from an earlier version has no record yet: until an instance changes, the list places
+it by the time its row shows, else by when the hub last heard of it.
 
 ### Muting
 
@@ -604,7 +626,7 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `GET /api/session` | `{"authenticated": true}` when the request carries the session or the hub token |
 | `POST /api/session` | `{"token": …}` signs in and sets the session cookie |
 | `DELETE /api/session` | Signs out |
-| `GET /api/instances` | The instances: who each one is, its summary, its connection and the state its row shows (`state`: `needs-you`, `working`, `unread`, `idle`, `muted`, `connecting`, `unreachable` or `stopped`); and the hub's own version (`hub_version`) |
+| `GET /api/instances` | The instances: who each one is, its summary, its connection, the state its row shows (`state`: `needs-you`, `working`, `unread`, `idle`, `muted`, `connecting`, `unreachable` or `stopped`) and when what its row shows last changed (`changed_at`, RFC 3339; see [Recent changes](#recent-changes)); and the hub's own version (`hub_version`) |
 | `POST /api/instances` | `{"url": …, "token": …}` adds an instance by its URL |
 | `PATCH /api/instances/{id}` | `{"group": …}` puts an instance in a group, `""` in none; `{"muted": true}` mutes what it waits for now, until that changes (409 when it waits for nothing), `false` ends the mute |
 | `DELETE /api/instances/{id}` | Forgets an instance |
@@ -621,7 +643,7 @@ Every endpoint but `/hooks` and `/api/session` needs the session cookie or
 | --- | --- | --- |
 | `~/.agentapi/config.yaml` | `agentapi hub join` | The hub's webhook and `allow-update`, read by every `agentapi server` |
 | `~/.agentapi/instances/` | `agentapi server` | The AgentAPIs running on this machine, for `join` and `agentapi list` |
-| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups, and tokens of the ones added by hand |
+| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups, when each last changed, and tokens of the ones added by hand |
 
 ## Limits
 

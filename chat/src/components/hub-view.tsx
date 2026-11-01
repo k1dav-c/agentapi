@@ -1,6 +1,6 @@
 "use client";
 
-import {useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from "react";
 import {ArrowLeft, Bell, BellOff, ExternalLink, Plus, Search, X} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {ModeToggle} from "@/components/mode-toggle";
@@ -12,13 +12,10 @@ import {
   countFilters,
   displayName,
   formatUSD,
-  groupInstances,
   groupNames,
   hubRoot,
   instanceState,
   instanceVersion,
-  matchesFilter,
-  matchesSearch,
   spendTitle,
   spendTotals,
   stateLabel,
@@ -28,6 +25,7 @@ import {
   type InstanceState,
 } from "@/lib/hub";
 import {frameMessage, toFrame, type FromFrame} from "@/lib/hub-frame";
+import {listGroups} from "@/lib/hub-order";
 import {shownUpdate} from "@/lib/hub-update";
 import {checkHubSession, type HubSession} from "@/lib/hub-session";
 import {getReconnectDelay} from "@/lib/reconnect";
@@ -37,6 +35,7 @@ import {HubMark} from "./hub/brand";
 import {AddInstance, GroupName, type Naming} from "./hub/dialogs";
 import {GroupHeader, InstanceRow, agentName} from "./hub/instance-row";
 import {ListEdge, useListWidth} from "./hub/list-edge";
+import {ListOrderSwitch, useListOrder} from "./hub/list-order";
 import {Onboarding, Overview} from "./hub/overview";
 import {SignIn} from "./hub/sign-in";
 import {StatusGlyph, stateTone} from "./hub/status-glyph";
@@ -126,6 +125,7 @@ export function HubView() {
   const [announcement, setAnnouncement] = useState("");
   const search = useRef<HTMLInputElement>(null);
   const listWidth = useListWidth();
+  const [order, setOrder] = useListOrder();
 
   // Signed in or not; a hub that doesn't answer is asked again, with a
   // backoff, and at once when the browser comes back online.
@@ -186,11 +186,21 @@ export function HubView() {
   const counts = useMemo(() => countFilters(all), [all]);
   const waiting = counts["needs-you"];
   const now = useNow(counts.working > 0);
-  const visible = useMemo(() => all.filter((i) => matchesFilter(i, filter) && matchesSearch(i, query)), [all, filter, query]);
   const spend = useMemo(() => spendTotals(all), [all]);
-  const groups = useMemo(() => groupInstances(visible), [visible]);
+  const groups = useMemo(() => listGroups(all, {filter, query, order}), [all, filter, query, order]);
   const names = useMemo(() => groupNames(all), [all]);
-  const showHeaders = names.length > 0;
+  const showHeaders = order === "groups" && names.length > 0;
+
+  // The row with the focus, by instance. React moves rows in the page when
+  // their order changes, and a row that moves loses the focus: it gets it
+  // back, unless something else took it.
+  const focusedRow = useRef<string | undefined>(undefined);
+  const rowOrder = groups.map((group) => group.instances.map((instance) => instance.id).join(" ")).join("\n");
+  useLayoutEffect(() => {
+    const id = focusedRow.current;
+    if (!id || (document.activeElement && document.activeElement !== document.body)) return;
+    document.querySelector<HTMLElement>(`[data-hub-row="${CSS.escape(id)}"]`)?.focus({preventScroll: true});
+  }, [rowOrder]);
 
   // Opening an agent from the list is a page of its own in the browser's
   // history, so Back (a phone's back gesture) returns to the list; going
@@ -433,29 +443,32 @@ export function HubView() {
               <Plus className="size-4" />
             </Button>
           </div>
-          <div className="relative">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <input
-              ref={search}
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search agents"
-              aria-label="Search agents"
-              className="h-10 w-full rounded-xl border bg-muted/50 pr-10 pl-9 text-sm outline-none transition-colors placeholder:text-muted-foreground/80 focus-visible:border-ring focus-visible:bg-card focus-visible:ring-[3px] focus-visible:ring-ring/40 [&::-webkit-search-cancel-button]:hidden"
-            />
-            {query ? (
-              <button
-                type="button"
-                onClick={() => setQuery("")}
-                aria-label="Clear the search"
-                className="absolute top-1/2 right-1 flex size-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
-              >
-                <X className="size-4" />
-              </button>
-            ) : (
-              <kbd className="pointer-events-none absolute top-1/2 right-2.5 hidden -translate-y-1/2 rounded border bg-background px-1.5 font-mono text-[11px] text-muted-foreground md:block">/</kbd>
-            )}
+          <div className="flex gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <input
+                ref={search}
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search agents"
+                aria-label="Search agents"
+                className="h-10 w-full rounded-xl border bg-muted/50 pr-10 pl-9 text-sm outline-none transition-colors placeholder:text-muted-foreground/80 focus-visible:border-ring focus-visible:bg-card focus-visible:ring-[3px] focus-visible:ring-ring/40 [&::-webkit-search-cancel-button]:hidden"
+              />
+              {query ? (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear the search"
+                  className="absolute top-1/2 right-1 flex size-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-4" />
+                </button>
+              ) : (
+                <kbd className="pointer-events-none absolute top-1/2 right-2.5 hidden -translate-y-1/2 rounded border bg-background px-1.5 font-mono text-[11px] text-muted-foreground md:block">/</kbd>
+              )}
+            </div>
+            <ListOrderSwitch order={order} onChange={setOrder} />
           </div>
           <div
             role="group"
@@ -485,7 +498,18 @@ export function HubView() {
           </div>
         </header>
 
-        <ul className="flex-1 overflow-y-auto overscroll-contain pb-[max(0.75rem,env(safe-area-inset-bottom))]" aria-label="Instances">
+        <ul
+          className="flex-1 overflow-y-auto overscroll-contain pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+          aria-label="Instances"
+          onFocus={(event) => {
+            focusedRow.current = (event.target as HTMLElement).dataset.hubRow;
+          }}
+          onBlur={(event) => {
+            // Not when the row left the page with the focus (relatedTarget is
+            // none then): it gets it back.
+            if (event.relatedTarget) focusedRow.current = undefined;
+          }}
+        >
           {counts.all === 0 && (
             <li>
               <div className="md:hidden">
@@ -498,7 +522,7 @@ export function HubView() {
               </div>
             </li>
           )}
-          {counts.all > 0 && visible.length === 0 && (
+          {counts.all > 0 && groups.length === 0 && (
             <li className="px-6 py-12 text-center">
               <p className="text-sm font-medium">Nothing matches</p>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -545,6 +569,7 @@ export function HubView() {
                         hubVersion={hubVersion}
                         root={root}
                         groups={names}
+                        order={order}
                         now={now}
                         selected={instance.id === selected}
                         onSelect={() => select(instance.id)}

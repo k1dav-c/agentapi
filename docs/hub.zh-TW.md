@@ -274,7 +274,8 @@ hub 舊。
 
 每一列顯示 agent 的名稱（`--name`，預設為工作目錄名稱）和 AgentAPI 版本（見[版本](#版本)）、它在等
 什麼或在做什麼、多久以前、agent 和機器；佇列有訊息、最近 24 小時的花費（見[花費](#花費)），以及用量限制超過 60% 時也會顯示。AgentAPI 正在更新或更新失敗時，會另起一行顯示（見[從 hub 更新](#從-hub-更新)）。同一個[群組](#群組)內，各列依下表的狀態順序排列，
-同狀態再依名稱排序。每種狀態都有自己的形狀，不靠顏色也看得出來：
+同狀態再依名稱排序；改用[最近變動](#最近變動)時，則依各列最近一次變動排序。每種狀態都有自己的形狀，
+不靠顏色也看得出來：
 
 | 圖示 | 第二行開頭 | 意思 |
 | --- | --- | --- |
@@ -310,10 +311,26 @@ AgentAPI（見[從 hub 更新](#從-hub-更新)），以及移除已停止的實
 群組保存在 hub 上，所以手機和桌面看到的一樣；
 實例自己的事件不會改動它所屬的群組。
 
-有了群組之後，清單會依名稱為每個群組加上標題，沒有分組的實例排在最後的 **Ungrouped** 底下。標題會
-顯示群組裡的實例數，並以琥珀色顯示需要你處理的數量，所以收合的群組仍然看得到。點標題可以收合或
+有了群組之後，清單會依名稱為每個群組加上標題，沒有分組的實例排在最後的 **Ungrouped** 底下；
+[最近變動](#最近變動)的排序不顯示標題。標題會顯示群組裡的實例數，並以琥珀色顯示需要你處理的數量，所以收合的群組仍然看得到。點標題可以收合或
 展開；每個瀏覽器各自記住收合了哪些群組。鉛筆圖示可以為群組改名，裡面的實例會一起移過去。群組名稱
 最多 40 個字元；群組裡沒有實例時就會消失。
+
+### 最近變動
+
+搜尋框旁的切換鈕決定清單的排序。**Groups** 是預設的排序，也就是上面說的：在每個群組內，需要你處理的
+排最前面。**Recent changes** 則把所有實例排成一個清單，最近變動的排最前面，不管群組或狀態。這時每一列
+顯示的是它多久以前變動，有空間時也會標出所屬的群組。篩選和搜尋在兩種排序下都有效，`j`、`k` 也依畫面上
+的順序移動。agent 有變動時，各列會跟著換位置，開啟中的那一個仍保持選取。每個瀏覽器各自記住排序。
+
+下列情況算是變動：狀態改變（需要你、開始工作、完成、閒置、停止，或 hub 連不到、又連上它）、新的任務、
+開始等新的事（請求、登入、用量限制）、標題改變，以及佇列、更新和版本的變化。下列則不算：heartbeat、
+有人做的操作（群組、靜音、讀過已完成的任務）、花費和用量數字、agent 工作中送出的訊息，以及斷線後
+10 秒內又接回的摘要串流。
+
+hub 會記錄每個實例最近一次變動的時間（`changed_at`）並保存在檔案中，所以重新啟動 hub 不會打亂清單的
+順序。新實例的這個時間，就是 hub 第一次看到它的時候。從舊版更新上來的 hub 還沒有這項紀錄：實例下一次
+變動之前，清單依這一列顯示的時間排列，沒有的話就依 hub 最後一次聽到它的時間。
 
 ### 靜音
 
@@ -539,7 +556,7 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `GET /api/session` | 請求帶有 session 或 hub token 時回傳 `{"authenticated": true}` |
 | `POST /api/session` | `{"token": …}` 登入並設定 session cookie |
 | `DELETE /api/session` | 登出 |
-| `GET /api/instances` | 所有實例：各自是誰、摘要、連線，以及列表上顯示的狀態（`state`：`needs-you`、`working`、`unread`、`idle`、`muted`、`connecting`、`unreachable` 或 `stopped`）；另外附上 hub 自己的版本（`hub_version`） |
+| `GET /api/instances` | 所有實例：各自是誰、摘要、連線、列表上顯示的狀態（`state`：`needs-you`、`working`、`unread`、`idle`、`muted`、`connecting`、`unreachable` 或 `stopped`），以及這一列顯示的內容最近一次變動的時間（`changed_at`，RFC 3339；見[最近變動](#最近變動)）；另外附上 hub 自己的版本（`hub_version`） |
 | `POST /api/instances` | `{"url": …, "token": …}` 以網址加入實例 |
 | `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音 |
 | `DELETE /api/instances/{id}` | 移除實例 |
@@ -556,7 +573,7 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | --- | --- | --- |
 | `~/.agentapi/config.yaml` | `agentapi hub join` | hub 的 webhook 和 `allow-update`，每個 `agentapi server` 都會讀取 |
 | `~/.agentapi/instances/` | `agentapi server` | 這台機器上執行中的 AgentAPI，供 `join` 和 `agentapi list` 使用 |
-| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組，以及手動加入的實例的 token |
+| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組、各自最近一次變動的時間，以及手動加入的實例的 token |
 
 ## 限制
 
