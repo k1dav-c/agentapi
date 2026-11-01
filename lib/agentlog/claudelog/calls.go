@@ -20,12 +20,19 @@ type Calls struct {
 	// latest is the time of the latest line that has one: a cost-state
 	// record has none of its own.
 	latest time.Time
+	drift  *agentlog.Drift
 }
 
-// NewCalls returns a Calls.
-func NewCalls() *Calls {
-	return &Calls{index: make(map[string]int)}
+// NewCalls returns a Calls that counts the entries it can't read into
+// drift.
+func NewCalls(drift *agentlog.Drift) *Calls {
+	return &Calls{index: make(map[string]int), drift: drift}
 }
+
+// synthetic is the model of the messages Claude Code writes itself (an
+// API error, a turn the user interrupted), with no call behind them and no
+// usage.
+const synthetic = "<synthetic>"
 
 // Line reads a line of the log. Most of a line is the message's content,
 // which a call's usage doesn't need: the line's fields are found without
@@ -74,7 +81,13 @@ func (c *Calls) Line(line []byte) {
 		}
 		return true
 	})
-	if usage == nil || model == "" || model == "<synthetic>" {
+	if model == synthetic {
+		return
+	}
+	// Every call has its model and usage, and uses tokens: an entry
+	// without them is one whose fields were renamed.
+	if usage == nil || model == "" {
+		c.drift.Call(agentlog.NoModelOrUsage)
 		return
 	}
 	var u struct {
@@ -87,12 +100,14 @@ func (c *Calls) Line(line []byte) {
 			OneHour     int `json:"ephemeral_1h_input_tokens"`
 		} `json:"cache_creation"`
 	}
-	if json.Unmarshal(usage, &u) != nil {
-		return
-	}
+	_ = agentlog.Unmarshal(usage, &u)
 	tokens := pricing.Tokens{Input: u.Input, CacheRead: u.CacheRead, CacheWrite: u.CacheCreation, Output: u.Output}
 	if u.Split != nil && u.Split.FiveMinutes+u.Split.OneHour == u.CacheCreation {
 		tokens.CacheWrite, tokens.CacheWrite1h = u.Split.FiveMinutes, u.Split.OneHour
+	}
+	if tokens.IsZero() {
+		c.drift.Call(agentlog.NoTokens)
+		return
 	}
 	key := id
 	if key == "" {
@@ -113,7 +128,7 @@ func (c *Calls) Line(line []byte) {
 
 // Calls returns the calls read so far.
 func (c *Calls) Calls() []agentlog.Call {
-	return slices.DeleteFunc(slices.Clone(c.calls), func(call agentlog.Call) bool { return call.Report == nil && call.Tokens.IsZero() })
+	return slices.Clone(c.calls)
 }
 
 // Size is about how many bytes of memory the reader holds.

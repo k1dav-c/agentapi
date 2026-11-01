@@ -7,11 +7,11 @@ var Format agentlog.Format = format{}
 
 type format struct{}
 
-func (format) Agent() string                               { return "claude" }
-func (format) NewParser() agentlog.LineParser              { return NewParser() }
-func (format) NewEventParser() agentlog.SessionEventParser { return NewEventParser() }
-func (format) NewNamer() agentlog.SessionNamer             { return NewNamer() }
-func (format) NewCalls() agentlog.CallReader               { return NewCalls() }
+func (format) Agent() string                                  { return "claude" }
+func (format) NewParser() agentlog.LineParser                 { return NewParser() }
+func (format) NewEventParser() agentlog.SessionEventParser    { return NewEventParser() }
+func (format) NewNamer() agentlog.SessionNamer                { return NewNamer() }
+func (format) NewCalls(d *agentlog.Drift) agentlog.CallReader { return NewCalls(d) }
 
 // recordTypes are the types of the records Claude Code 2.1 logs: those the
 // parsers read, and those they know to skip (what it sent the API, its

@@ -939,6 +939,9 @@ charge per token, so it estimates what the same work would cost with an API key.
   cache read, and the rest as input.
 - Pi: the cost Pi reports for each call.
 
+A call whose record has no model or usage, or usage that reads as no tokens, counts no cost, and the
+server's log warns of it once per log: the agent may have changed its log format, renaming a field.
+
 A call that a fork copied from another session counts in the session it came from, so totals don't
 count it twice. The built-in prices cover Anthropic's and OpenAI's models; `--prices <file>` adds
 models or replaces their prices, in USD per million tokens:

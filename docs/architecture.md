@@ -365,9 +365,13 @@ type Factory func(resume Resume) (Adapter, error)
 - **Log formats.** Each format is decoded in one place (`lib/agentlog`):
   what is a prompt, injected context or a tool result is decided once, for
   the native adapters, the history, the costs and the PTY watcher alike.
-  Records a parser doesn't know, and lines it can't decode, are logged once
-  per log at Warn with the CLI version the log records, so a changed format
-  shows in the server's log.
+  Records a parser doesn't know, lines it can't decode, and model calls
+  without a model or usage, or whose usage reads as no tokens (a renamed
+  field, which would cost $0 without a word), are logged once per log and
+  kind at Warn with the CLI version the log records, so a changed format
+  shows in the server's log. Claude Code's own messages (`<synthetic>`),
+  Codex's counts of the rate limits alone and Pi's failed and aborted calls
+  use no tokens, and don't count.
 - **Protocol drift.** The adapters decode what the agent sends with
   `agentio.Decode`: a field whose value changed type is left out, not the
   record, as a lost turn end would leave the turn running for good. Record

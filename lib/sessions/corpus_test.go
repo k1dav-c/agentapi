@@ -1,7 +1,9 @@
 package sessions
 
 import (
+	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -90,7 +92,7 @@ func TestCorpusClaude(t *testing.T) {
 	}
 	assert.Equal(t, 2, subCalls)
 	assert.True(t, c.Models[0].Priced)
-	assert.Empty(t, logs.String(), "the format knows every record")
+	assert.Empty(t, logs.String(), "the format knows every record, and reads every call")
 }
 
 func TestCorpusCodex(t *testing.T) {
@@ -122,7 +124,7 @@ func TestCorpusCodex(t *testing.T) {
 	assert.Equal(t, 4, c.Calls)
 	assert.Equal(t, pricing.Tokens{Input: 9530, CacheRead: 51968, Output: 68}, c.Tokens)
 	assert.Equal(t, "gpt-6.1-sol", c.Models[0].Model)
-	assert.Empty(t, logs.String(), "the format knows every record")
+	assert.Empty(t, logs.String(), "the format knows every record, and reads every call")
 }
 
 func TestCorpusPi(t *testing.T) {
@@ -149,5 +151,87 @@ func TestCorpusPi(t *testing.T) {
 	assert.Equal(t, 5, c.Calls)
 	assert.InDelta(t, 0.0127324, c.USD, 1e-12)
 	assert.Equal(t, pricing.Tokens{Input: 5105, CacheRead: 1024, Output: 242}, c.Tokens)
-	assert.Empty(t, logs.String(), "the format knows every record")
+	assert.Empty(t, logs.String(), "the format knows every record, and reads every call")
+}
+
+// copyCorpus copies the corpus's dir to a new directory, with replace
+// applied to its logs, and returns the copy.
+func copyCorpus(t *testing.T, dir string, replace *strings.Replacer) string {
+	t.Helper()
+	root := t.TempDir()
+	require.NoError(t, filepath.WalkDir(corpusDir(dir), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(corpusDir(dir), path)
+		if err != nil {
+			return err
+		}
+		if filepath.Ext(path) == ".jsonl" {
+			data = []byte(replace.Replace(string(data)))
+		}
+		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(rel)), 0o700); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(root, rel), data, 0o600)
+	}))
+	return root
+}
+
+// The corpus with the fields of its calls renamed, as an agent's next
+// version might name them: the calls, which would cost $0 without a word,
+// are left out with a warning for each log.
+func TestCorpusRenamedUsageWarns(t *testing.T) {
+	for _, tc := range []struct {
+		agent, dir string
+		env        map[string]string
+		replace    *strings.Replacer
+		warning    string
+		logs       int
+	}{
+		{
+			agent: "claude", dir: "claude", env: map[string]string{"CLAUDE_CONFIG_DIR": ""},
+			replace: strings.NewReplacer(`"input_tokens":`, `"inputTokens":`, `"output_tokens":`, `"outputTokens":`,
+				`"cache_read_input_tokens":`, `"cacheReadInputTokens":`, `"cache_creation_input_tokens":`, `"cacheCreationInputTokens":`),
+			warning: "model calls whose usage reads as no tokens", logs: 2,
+		},
+		{
+			agent: "codex", dir: "codex", env: map[string]string{"CODEX_HOME": ""},
+			replace: strings.NewReplacer(`"total_token_usage":`, `"total_usage":`, `"last_token_usage":`, `"last_usage":`),
+			warning: "model calls whose usage reads as no tokens", logs: 1,
+		},
+		{
+			agent: "pi", dir: filepath.Join("pi", "agent"), env: map[string]string{"PI_CODING_AGENT_DIR": "", "PI_CODING_AGENT_SESSION_DIR": "-"},
+			replace: strings.NewReplacer(`"usage":{`, `"tokens":{`),
+			warning: "model calls without a model or usage", logs: 1,
+		},
+	} {
+		t.Run(tc.agent, func(t *testing.T) {
+			root := copyCorpus(t, tc.dir, tc.replace)
+			for name, value := range tc.env {
+				switch value {
+				case "":
+					value = root
+				case "-":
+					value = ""
+				}
+				t.Setenv(name, value)
+			}
+			store, logs := corpusStore(t, tc.agent)
+			d, err := store.Costs()
+			require.NoError(t, err)
+			assert.Zero(t, d.Cost(corpusID).Calls, "the calls are left out")
+			assert.Equal(t, tc.logs, strings.Count(logs.String(), "level=WARN"), logs.String())
+			assert.Equal(t, tc.logs, strings.Count(logs.String(), tc.warning), logs.String())
+			assert.Contains(t, logs.String(), "agent="+tc.agent)
+
+			_, err = store.Costs()
+			require.NoError(t, err)
+			assert.Equal(t, tc.logs, strings.Count(logs.String(), "level=WARN"), "once per log")
+		})
+	}
 }

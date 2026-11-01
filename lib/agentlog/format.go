@@ -1,6 +1,8 @@
 package agentlog
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -16,7 +18,9 @@ type Format interface {
 	NewParser() LineParser
 	NewEventParser() SessionEventParser
 	NewNamer() SessionNamer
-	NewCalls() CallReader
+	// NewCalls returns a reader of a log's model calls, which counts the
+	// call records it can't read into drift (nil counts nothing).
+	NewCalls(drift *Drift) CallReader
 	// Record says what record a line holds.
 	Record(line []byte) Record
 }
@@ -50,16 +54,39 @@ func RecordOf(line []byte, version string) (typ string, versionValue []byte, val
 	return typ, versionValue, valid
 }
 
-// Drift counts what a log holds that its format doesn't know: records of
-// types it doesn't read, and lines that are no records at all. Agents add
-// record types as they change, and a parser that falls behind loses what
-// they hold without a word: the counts tell. A Drift counts one log.
+// Drift counts what a log holds that its format doesn't know: records
+// of types it doesn't read, lines that are no records at all, and records
+// of model calls without the model or the usage the format gives them.
+// Agents add record types and rename fields as they change, and a parser
+// that falls behind loses what they hold without a word: a call would
+// cost nothing. The counts tell. A Drift counts one log.
 type Drift struct {
 	format      Format
 	unknown     map[string]int
 	undecodable int
+	calls       [callDrifts]int
 	version     string
-	reported    bool
+	// reported says what was reported: the records, and each CallDrift.
+	reported      bool
+	callsReported [callDrifts]bool
+}
+
+// CallDrift is what a CallReader found wrong with the record of a model
+// call: the call is left out, or has no model to price it by.
+type CallDrift int
+
+const (
+	// NoModelOrUsage: the record names no model, or has no usage.
+	NoModelOrUsage CallDrift = iota
+	// NoTokens: its usage reads as no tokens at all.
+	NoTokens
+	callDrifts
+)
+
+// callDriftWarnings say what each CallDrift means.
+var callDriftWarnings = [callDrifts]string{
+	NoModelOrUsage: "Session log has model calls without a model or usage; the agent may have changed its format, and they count no cost",
+	NoTokens:       "Session log has model calls whose usage reads as no tokens; the agent may have changed its format, and they count no cost",
 }
 
 // NewDrift returns a Drift of a log of format.
@@ -84,20 +111,57 @@ func (d *Drift) Line(line []byte) {
 	}
 }
 
+// Call counts the record of a model call that reads wrong as kind says.
+// A nil Drift counts nothing.
+func (d *Drift) Call(kind CallDrift) {
+	if d != nil {
+		d.calls[kind]++
+	}
+}
+
+// Calls is how many records of model calls read wrong as kind says.
+func (d *Drift) Calls(kind CallDrift) int {
+	if d == nil {
+		return 0
+	}
+	return d.calls[kind]
+}
+
 // Report logs what the log holds that its format doesn't know, at Warn
-// level, the first time there is any: once per log, not once per line. It
-// reports whether it logged.
+// level: each kind (the records, and each CallDrift) the first time there
+// is any, once per log and not once per line. It reports whether it
+// logged.
 func (d *Drift) Report(logger *slog.Logger, path string) bool {
-	if d.reported || (len(d.unknown) == 0 && d.undecodable == 0) {
-		return false
+	logged := false
+	if !d.reported && (len(d.unknown) > 0 || d.undecodable > 0) {
+		d.reported, logged = true, true
+		var unknown []string
+		for _, typ := range slices.Sorted(maps.Keys(d.unknown)) {
+			unknown = append(unknown, fmt.Sprintf("%q: %d", typ, d.unknown[typ]))
+		}
+		logger.Warn("Session log has records its parser doesn't know; the agent may have changed its format",
+			"agent", d.format.Agent(), "version", d.version, "path", path,
+			"unknown_record_types", strings.Join(unknown, ", "), "undecodable_lines", d.undecodable)
 	}
-	d.reported = true
-	var unknown []string
-	for _, typ := range slices.Sorted(maps.Keys(d.unknown)) {
-		unknown = append(unknown, fmt.Sprintf("%q: %d", typ, d.unknown[typ]))
+	for kind, n := range d.calls {
+		if n == 0 || d.callsReported[kind] {
+			continue
+		}
+		d.callsReported[kind], logged = true, true
+		logger.Warn(callDriftWarnings[kind], "agent", d.format.Agent(), "version", d.version, "path", path, "calls", n)
 	}
-	logger.Warn("Session log has records its parser doesn't know; the agent may have changed its format",
-		"agent", d.format.Agent(), "version", d.version, "path", path,
-		"unknown_record_types", strings.Join(unknown, ", "), "undecodable_lines", d.undecodable)
-	return true
+	return logged
+}
+
+// Unmarshal is json.Unmarshal that keeps what it read of a value with a
+// field of another type than v's: it leaves that field zero rather than
+// failing, so a record isn't lost to one changed field, and its reader
+// can tell what is missing (Drift).
+func Unmarshal(data []byte, v any) error {
+	err := json.Unmarshal(data, v)
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		return nil
+	}
+	return err
 }

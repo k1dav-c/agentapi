@@ -37,7 +37,8 @@ type sessionLog struct {
 	firstAt time.Time
 
 	calls agentlog.CallReader
-	// drift counts what the log holds that its format doesn't know.
+	// drift counts what the log holds that its format doesn't know, its
+	// calls' included.
 	drift *agentlog.Drift
 
 	// from is the first line of a Codex subagent's log that is its own:
@@ -49,9 +50,10 @@ type sessionLog struct {
 }
 
 func (s *Store) newSessionLog(subagent bool) *sessionLog {
+	drift := agentlog.NewDrift(s.src.format)
 	l := &sessionLog{
 		store: s, src: &s.src, subagent: subagent, codex: s.agent == "codex",
-		calls: s.src.format.NewCalls(), drift: agentlog.NewDrift(s.src.format),
+		calls: s.src.format.NewCalls(drift), drift: drift,
 	}
 	if s.src.namesInLog {
 		l.namer = s.src.format.NewNamer()
