@@ -153,6 +153,9 @@ in order:
 1. Host authorization: the `Host` header must name an allowed host (the port
    is ignored).
 2. Request logging, which skips static files, event streams and the terminal.
+   A read that worked (`GET`, `HEAD` or `OPTIONS` below 400) logs at Debug,
+   which AgentAPI's log leaves out: a client that polls `GET /status` would
+   fill it. Changes and refused requests log at Info, server errors at Warn.
 3. Compression (`compress.go`): text, JSON, the event streams (flushed event by
    event) and the chat's files are gzipped for clients that take it; images
    go as they are. The hub uses the same middleware, and its proxy passes an

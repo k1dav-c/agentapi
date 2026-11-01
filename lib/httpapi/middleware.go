@@ -14,8 +14,9 @@ type responseWriter struct {
 	statusCode int
 }
 
-// requestLogMiddleware logs every HTTP request with method, path, and response status.
-// SSE and static file routes are excluded to avoid noise.
+// requestLogMiddleware logs HTTP requests with method, path, and response
+// status, at requestLogLevel. SSE and static file routes are excluded to
+// avoid noise.
 func requestLogMiddleware(logger *slog.Logger) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -31,13 +32,29 @@ func requestLogMiddleware(logger *slog.Logger) func(next http.Handler) http.Hand
 
 			rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 			next.ServeHTTP(rw, r)
-			logger.Info("request",
+			logger.Log(r.Context(), requestLogLevel(r.Method, rw.statusCode), "request",
 				"method", r.Method,
 				"path", path,
 				"status", rw.statusCode,
 			)
 		})
 	}
+}
+
+// requestLogLevel is the level a request is logged at. A read that worked
+// is Debug: a client that polls (GET /status every few seconds) would
+// otherwise fill the log, which nothing rotates. Changes and refused
+// requests are Info, server errors Warn.
+func requestLogLevel(method string, status int) slog.Level {
+	switch {
+	case status >= http.StatusInternalServerError:
+		return slog.LevelWarn
+	case status >= http.StatusBadRequest:
+		return slog.LevelInfo
+	case method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions:
+		return slog.LevelDebug
+	}
+	return slog.LevelInfo
 }
 
 // sseMiddleware creates middleware that prevents proxy buffering for SSE endpoints
