@@ -1,6 +1,6 @@
 "use client";
 
-import {useEffect, useState} from "react";
+import {Fragment, useEffect, useState} from "react";
 import {CircleArrowUp, CircleX, Hourglass, LoaderCircle, TriangleAlert} from "lucide-react";
 import {toast} from "sonner";
 import {CopyCommand} from "@/components/copy-command";
@@ -12,7 +12,7 @@ import {
   ALLOW_UPDATE_LINE,
   STATE_DB_LINE,
   cancelUpdate,
-  cantUpdateText,
+  cantUpdate,
   confirmText,
   requestUpdate,
   requestUpdates,
@@ -113,7 +113,8 @@ export function UpdateDialogBody({
 }) {
   const action = updateAction(instance);
   const name = displayName(instance);
-  const host = instance.hostname || "its machine";
+  // The machine, in an element of its own, as the rows name it.
+  const host = instance.hostname ? <span data-hub-host>{instance.hostname}</span> : "its machine";
   switch (action?.kind) {
     case "update": {
       const version = instanceVersion(instance);
@@ -161,7 +162,7 @@ export function UpdateDialogBody({
       return (
         <>
           <DialogHeader>
-            <DialogTitle>{instance.hostname || "Its machine"} needs a one-time setup</DialogTitle>
+            <DialogTitle>{instance.hostname ? <span data-hub-host>{instance.hostname}</span> : "Its machine"} needs a one-time setup</DialogTitle>
             <DialogDescription className="[overflow-wrap:anywhere]">{action.reason || "This AgentAPI can't replace its binary."}</DialogDescription>
           </DialogHeader>
           {action.command && (
@@ -294,7 +295,7 @@ export function UpdateOlder({root, older}: {root: string; older: OlderUpdates}) 
   const [results, setResults] = useState<UpdateResults>();
   const targets = older.targets;
   const total = targets.length + older.updating.length + older.blocked.length + older.off.length + older.unsupported.length;
-  const cant = cantUpdateText(older);
+  const cant = cantUpdate(older);
   const send = async () => {
     setSending(true);
     setResults(await requestUpdates(root, targets));
@@ -354,7 +355,30 @@ export function UpdateOlder({root, older}: {root: string; older: OlderUpdates}) 
           )}
         </div>
       )}
-      {cant && <p>{cant}</p>}
+      {cant.reasons.length > 0 && (
+        <p>
+          Can&apos;t update from here:{" "}
+          {cant.reasons.map(({text, hosts}, i) => (
+            <Fragment key={text}>
+              {i > 0 && "; "}
+              {text}
+              {hosts.length > 0 && (
+                <>
+                  {" ("}
+                  {hosts.map((host, j) => (
+                    <Fragment key={host}>
+                      {j > 0 && ", "}
+                      <span data-hub-host>{host}</span>
+                    </Fragment>
+                  ))}
+                  {")"}
+                </>
+              )}
+            </Fragment>
+          ))}
+          .{cant.fix && ` ${cant.fix}`}
+        </p>
+      )}
     </>
   );
 }

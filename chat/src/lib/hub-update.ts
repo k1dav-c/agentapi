@@ -248,10 +248,9 @@ export async function requestUpdates(root: string, instances: HubInstance[], fet
   return results;
 }
 
-// machines names the hosts of instances, each once: " (dev-1, dev-2)".
-function machines(instances: HubInstance[]): string {
-  const names = [...new Set(instances.map((instance) => instance.hostname ?? "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  return names.length > 0 ? ` (${names.join(", ")})` : "";
+// machines names the hosts of instances, each once, sorted.
+function machines(instances: HubInstance[]): string[] {
+  return [...new Set(instances.map((instance) => instance.hostname ?? "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
 
 // count is n with the verb that goes with it: "1 needs", "2 need".
@@ -259,17 +258,33 @@ function count(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-// cantUpdateText says which older instances the hub can't update, and why;
-// "" when it can update them all.
-export function cantUpdateText(older: OlderUpdates): string {
+export interface CantUpdate {
+  // reasons: why some can't, each with the machines it names.
+  reasons: {text: string; hosts: string[]}[];
+  // fix: where to look for the fix, or "".
+  fix: string;
+}
+
+// cantUpdate says which older instances the hub can't update, and why; no
+// reasons when it can update them all. The page names the machines in
+// elements of their own.
+export function cantUpdate(older: OlderUpdates): CantUpdate {
   const reasons = [
-    older.blocked.length > 0 && `${count(older.blocked.length, "needs", "need")} a one-time setup${machines(older.blocked)}`,
-    older.off.length > 0 && `${count(older.off.length, "has", "have")} updates from the hub off${machines(older.off)}`,
-    older.unsupported.length > 0 && `${count(older.unsupported.length, "runs", "run")} an AgentAPI from before updates from the hub`,
-  ].filter(Boolean);
+    older.blocked.length > 0 && {text: `${count(older.blocked.length, "needs", "need")} a one-time setup`, hosts: machines(older.blocked)},
+    older.off.length > 0 && {text: `${count(older.off.length, "has", "have")} updates from the hub off`, hosts: machines(older.off)},
+    older.unsupported.length > 0 && {text: `${count(older.unsupported.length, "runs", "run")} an AgentAPI from before updates from the hub`, hosts: []},
+  ].filter((reason) => reason !== false);
+  const fix = older.blocked.length + older.off.length > 0 ? "The ⋯ menu of each agent says how to fix its machine." : "";
+  return {reasons, fix};
+}
+
+// cantUpdateText is cantUpdate as one sentence; "" when the hub can update
+// them all.
+export function cantUpdateText(older: OlderUpdates): string {
+  const {reasons, fix} = cantUpdate(older);
   if (reasons.length === 0) return "";
-  const fix = older.blocked.length + older.off.length > 0 ? " The ⋯ menu of each agent says how to fix its machine." : "";
-  return `Can't update from here: ${reasons.join("; ")}.${fix}`;
+  const named = reasons.map(({text, hosts}) => (hosts.length > 0 ? `${text} (${hosts.join(", ")})` : text));
+  return `Can't update from here: ${named.join("; ")}.${fix ? ` ${fix}` : ""}`;
 }
 
 // confirmText asks before the hub asks targets to update.
