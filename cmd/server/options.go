@@ -92,12 +92,12 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 		allowedHosts:   flags.GetStringSlice(FlagAllowedHosts),
 		allowedOrigins: flags.GetStringSlice(FlagAllowedOrigins),
 		apiToken:       flags.GetString(FlagAPIToken),
-		pidFile:        expandHome(flags.GetString(FlagPidFile)),
+		pidFile:        expandHome(instanceapi.ExpandPlaceholders(flags.GetString(FlagPidFile), port)),
 		termWidth:      flags.GetUint16(FlagTermWidth),
 		termHeight:     flags.GetUint16(FlagTermHeight),
 		initialPrompt:  flags.GetString(FlagInitialPrompt),
 		// One setting in the config file serves every server of the user,
-		// each with its own file.
+		// each with its own file (also pidFile).
 		stateDB:      expandHome(instanceapi.ExpandPlaceholders(flags.GetString(FlagStateDB), port)),
 		terminal:     flags.GetBool(FlagTerminal),
 		autoContinue: flags.GetBool(FlagAutoContinue),

@@ -1938,7 +1938,9 @@ file) for every server the user starts; a flag or a variable overrides the file.
 names no flag is reported in the log, and a file AgentAPI can't read is reported and ignored, so the
 agent still starts. [`agentapi hub join`](#agentapi-hub) writes it; keep it readable by its owner
 only (`chmod 600`) when it holds a secret. A leading `~` in a file or directory setting is the home
-directory, wherever the setting comes from.
+directory, wherever the setting comes from. `state-db` and `pid-file` name a file that only one
+server can use, so in the file each needs `{port}` in its path (`{hostname}` is filled in too);
+without it, every server ignores the setting with a warning, and a flag or a variable still sets it.
 
 ```yaml
 webhook-url: http://hub.vpn:3290/hooks
@@ -1980,7 +1982,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--webhook-max-attempts` | `3` | Delivery attempts |
 | `--webhook-payload-template` | | Go `text/template` for the POST body |
 | `-c`, `--chat-base-path` | `/chat` | Base path of the chat UI |
-| `--pid-file` | | File to write the server's process ID to, for shutdown scripts |
+| `--pid-file` | | File to write the server's process ID to, for shutdown scripts; `{port}` and `{hostname}` are filled in |
 | `-P`, `--print-openapi` | | Print the OpenAPI schema and exit |
 
 ### `agentapi update`

@@ -77,40 +77,46 @@ func TestPrintOpenAPIIgnoresUserConfig(t *testing.T) {
 	}
 }
 
-// A state-db in the config file without {port} would be every server's,
-// and the first one to start locks it: it is ignored, with a warning. A
-// flag or a variable still names one.
-func TestReadUserConfigSharedStateDB(t *testing.T) {
-	for name, tc := range map[string]struct {
-		file   string
-		args   []string
-		env    string
-		want   string
-		warned bool
-	}{
-		"without {port}": {file: "state-db: /data/agentapi.db\n", want: "", warned: true},
-		"with {port}":    {file: "state-db: ~/.agentapi/state/{port}.db\n", want: "~/.agentapi/state/{port}.db"},
-		"a flag":         {file: "state-db: /data/agentapi.db\n", args: []string{"--state-db=/data/mine.db"}, want: "/data/mine.db"},
-		"a variable":     {file: "state-db: /data/agentapi.db\n", env: "/data/env.db", want: "/data/env.db"},
+// A state-db or pid-file in the config file without {port} would be every
+// server's, and the first one to start takes it: it is ignored, with a
+// warning. A flag or a variable still names one.
+func TestReadUserConfigPerServerFiles(t *testing.T) {
+	for _, setting := range []struct{ name, env, file string }{
+		{FlagStateDB, "AGENTAPI_STATE_DB", "~/.agentapi/state/{port}.db"},
+		{FlagPidFile, "AGENTAPI_PID_FILE", "~/.agentapi/run/{port}.pid"},
 	} {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv("AGENTAPI_STATE_DB", tc.env)
-			path := filepath.Join(t.TempDir(), "config.yaml")
-			require.NoError(t, os.WriteFile(path, []byte(tc.file), 0o600))
-			flags := pflag.NewFlagSet("server", pflag.ContinueOnError)
-			flags.String(FlagStateDB, "", "")
-			flags.String(FlagConfig, "", "")
-			require.NoError(t, flags.Parse(append([]string{"--config=" + path}, tc.args...)))
-			v := viper.New()
-			require.NoError(t, v.BindPFlags(flags))
-			v.SetEnvPrefix("AGENTAPI")
-			v.AutomaticEnv()
-			v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
-			var logs bytes.Buffer
+		for name, tc := range map[string]struct {
+			file   string
+			args   []string
+			env    string
+			want   string
+			warned bool
+		}{
+			"without {port}": {file: "/data/agentapi", want: "", warned: true},
+			"with {port}":    {file: setting.file, want: setting.file},
+			"a flag":         {file: "/data/agentapi", args: []string{"--" + setting.name + "=/data/mine"}, want: "/data/mine"},
+			"a variable":     {file: "/data/agentapi", env: "/data/env", want: "/data/env"},
+		} {
+			t.Run(setting.name+" "+name, func(t *testing.T) {
+				t.Setenv(setting.env, tc.env)
+				path := filepath.Join(t.TempDir(), "config.yaml")
+				require.NoError(t, os.WriteFile(path, []byte(setting.name+": "+tc.file+"\n"), 0o600))
+				flags := pflag.NewFlagSet("server", pflag.ContinueOnError)
+				flags.String(FlagStateDB, "", "")
+				flags.String(FlagPidFile, "", "")
+				flags.String(FlagConfig, "", "")
+				require.NoError(t, flags.Parse(append([]string{"--config=" + path}, tc.args...)))
+				v := viper.New()
+				require.NoError(t, v.BindPFlags(flags))
+				v.SetEnvPrefix("AGENTAPI")
+				v.AutomaticEnv()
+				v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+				var logs bytes.Buffer
 
-			readUserConfig(v, flags, slog.New(slog.NewTextHandler(&logs, nil)))
-			assert.Equal(t, tc.want, v.GetString(FlagStateDB))
-			assert.Equal(t, tc.warned, strings.Contains(logs.String(), "Ignoring state-db in the AgentAPI config file"), logs.String())
-		})
+				readUserConfig(v, flags, slog.New(slog.NewTextHandler(&logs, nil)))
+				assert.Equal(t, tc.want, v.GetString(setting.name))
+				assert.Equal(t, tc.warned, strings.Contains(logs.String(), "Ignoring "+setting.name+" in the AgentAPI config file"), logs.String())
+			})
+		}
 	}
 }

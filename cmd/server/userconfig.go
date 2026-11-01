@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"slices"
@@ -52,27 +53,36 @@ func readUserConfig(v *viper.Viper, flags *pflag.FlagSet, logger *slog.Logger) {
 		logger.Warn("Ignoring the AgentAPI config file", "path", path, "error", err)
 		return
 	}
-	if shared := sharedStateDB(config, flags); shared != "" {
-		logger.Warn("Ignoring state-db in the AgentAPI config file: every agentapi server reads the file, and only one can use a state database; put {port} in its path, e.g. ~/.agentapi/state/{port}.db",
-			"path", path, "state-db", shared)
-		v.Set(FlagStateDB, "")
+	for _, setting := range perServerFiles {
+		if shared := sharedFile(config, flags, setting.name); shared != "" {
+			logger.Warn(fmt.Sprintf("Ignoring %s in the AgentAPI config file: every agentapi server reads the file, and only one can %s; put {port} in its path, e.g. %s",
+				setting.name, setting.use, setting.example), "path", path, setting.name, shared)
+			v.Set(setting.name, "")
+		}
 	}
 	logger.Info("Read the AgentAPI config file", "path", path)
 }
 
-// sharedStateDB returns the state-db of config if every server would use
-// that file: its path has no {port}, and neither --state-db nor
-// AGENTAPI_STATE_DB names another. The first server locks the file, so the
-// others couldn't start.
-func sharedStateDB(config userconfig.Config, flags *pflag.FlagSet) string {
-	path, ok := config[FlagStateDB].(string)
+// perServerFiles are the settings that name a file only one server can
+// use: the first locks a state database, and the others refuse a PID file
+// a running server wrote.
+var perServerFiles = []struct{ name, use, example string }{
+	{FlagStateDB, "use a state database", "~/.agentapi/state/{port}.db"},
+	{FlagPidFile, "write a PID file", "~/.agentapi/run/{port}.pid"},
+}
+
+// sharedFile returns the file setting name of config if every server would
+// use that file: its path has no {port}, and neither the flag nor its
+// AGENTAPI_* variable names another.
+func sharedFile(config userconfig.Config, flags *pflag.FlagSet, name string) string {
+	path, ok := config[name].(string)
 	if !ok || path == "" || strings.Contains(path, "{port}") {
 		return ""
 	}
-	if flag := flags.Lookup(FlagStateDB); flag != nil && flag.Changed {
+	if flag := flags.Lookup(name); flag != nil && flag.Changed {
 		return ""
 	}
-	if os.Getenv("AGENTAPI_STATE_DB") != "" {
+	if os.Getenv("AGENTAPI_"+strings.ToUpper(strings.ReplaceAll(name, "-", "_"))) != "" {
 		return ""
 	}
 	return path

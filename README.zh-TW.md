@@ -1657,6 +1657,9 @@ agentapi server -- kimi
 使用者啟動的每個伺服器；旗標或環境變數會覆蓋它。不是旗標名稱的設定會記在 log 中；讀不了的檔案會
 記下並略過，agent 仍會啟動。[`agentapi hub join`](#agentapi-hub) 會寫入這個檔案；含有 secret 時
 請只讓擁有者讀取（`chmod 600`）。檔案或目錄設定開頭的 `~` 代表家目錄，不論設定來自哪裡。
+`state-db` 和 `pid-file` 指的檔案只能給一個伺服器使用，所以寫在設定檔時，路徑中都要有 `{port}`
+（`{hostname}` 也會被填入）；沒有的話，每個伺服器都會略過這個設定並記下警告，旗標或環境變數則照常
+有效。
 
 ```yaml
 webhook-url: http://hub.vpn:3290/hooks
@@ -1698,7 +1701,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--webhook-max-attempts` | `3` | 傳送的嘗試次數 |
 | `--webhook-payload-template` | | POST 內容的 Go `text/template` 範本 |
 | `-c`, `--chat-base-path` | `/chat` | 聊天介面的基礎路徑 |
-| `--pid-file` | | 寫入伺服器行程 ID 的檔案，給關閉腳本使用 |
+| `--pid-file` | | 寫入伺服器行程 ID 的檔案，給關閉腳本使用；`{port}` 和 `{hostname}` 會被填入 |
 | `-P`, `--print-openapi` | | 印出 OpenAPI schema 後結束 |
 
 ### `agentapi update`

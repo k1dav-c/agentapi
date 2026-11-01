@@ -519,7 +519,7 @@ func CreateServerCmd() *cobra.Command {
 		{FlagStateFile, "s", "", "Deprecated: use --state-db. A state file written by an earlier AgentAPI, whose conversation is imported into a state database next to it (the same name with .db, or --state-db) the first time; that database keeps the conversation from then on", "string"},
 		{FlagLoadState, "", false, "Deprecated: with --load-state=false the state file isn't imported", "bool"},
 		{FlagSaveState, "", false, "Deprecated and without effect: the state database keeps every change", "bool"},
-		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts", "string"},
+		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts; {port} and {hostname} are filled in", "string"},
 		{FlagExperimentalACP, "", false, "Removed: the ACP transport is no longer available", "bool"},
 		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) when AgentAPI restarts; with the native transport the agent also resumes its session, with PTY it starts anew below the conversation. {port} and {hostname} are filled in", "string"},
 		{FlagTransport, "", "native", "How to drive the agent: native (its own structured protocol; claude, codex and pi) or pty (its terminal UI). Without it, claude, codex and pi use native, other agents and --state-file pty", "string"},
