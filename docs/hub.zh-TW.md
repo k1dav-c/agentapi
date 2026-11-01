@@ -94,7 +94,7 @@ WantedBy=default.target
 
 更新之後，hub 也用同樣的方式重新啟動（`systemctl --user restart agentapi-hub`）。AgentAPI 可以用
 `agentapi update --restart` 或 [`agentapi restart`](../README.zh-TW.md#agentapi-restart) 原地重新
-啟動，hub 不在其中。
+啟動，hub 不在其中。哪些 AgentAPI 還停在舊版，總覽的[版本](#版本)卡片會列出來。
 
 ### 3. 讓每台機器的 AgentAPI 加入
 
@@ -171,7 +171,8 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 沒有開啟任何 agent 時，右側會顯示有幾個 agent 需要你、各自為了什麼。每種狀態一格（需要你、工作中、
 已完成未讀、離線），點一下就會篩選清單。下方每個需要你的 agent 各有一張卡片，寫出它在等什麼（核准
 的指令、提問、登入、用量限制）和等了多久，並有 **Answer** 或 **Open** 按鈕。工作中的 agent 會顯示
-提示和已經跑了多久；你還沒看過的已完成 agent 會顯示標題。
+提示和已經跑了多久；你還沒看過的已完成 agent 會顯示標題。最下方的[版本](#版本)卡片統計各 agent
+執行的 AgentAPI 版本。
 
 ![深色主題的總覽](screenshots/hub-desktop-dark.png)
 
@@ -192,12 +193,29 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 scope 只算一次，取最新的數字（`updated_at`）。hub 目前沒在追蹤的 agent（已停止、連不到或連線中）
 會以淡色顯示最後一次的數字，標示為最後已知的金額，不算進合計。
 
+### 版本
+
+每一列在名稱旁顯示實例執行的 AgentAPI 版本（`v2.0.0`），桌面上開啟的 agent 上方那一列也會顯示。
+比 hub 舊的版本會標上 **older**：hub 對所有實例都提供它自己版本的聊天介面（見[限制](#限制)），
+所以這些就是該更新的實例。滑鼠移上去可以看到兩邊的版本。開發版本（`0.0.0-dev`，或 release 之後用
+`make build` 建置出的版本，例如 `2.0.0-21-g61be34f`）無從比較：不會標上 older；hub 本身是開發版本
+時，也不會標記任何實例。hub 目前沒在追蹤的 agent（已停止、連不到或連線中）以淡色顯示它最後一次
+執行的版本，不加標記。更新並重新啟動之後，AgentAPI 一回來，那一列就會顯示新版本。
+
+總覽最下方的 **Versions** 卡片依版本統計 hub 正在追蹤的 agent 和它們所在的機器，並寫出有幾個比
+hub 舊。更新這些實例的方式：
+
+- 2.1.0 以後的 AgentAPI 能原地重新啟動：在那台機器上執行 `sudo agentapi update --restart`，更新
+  binary 後，它的 AgentAPI 會原地重新啟動到新版（binary 屬於你自己時不必加 `sudo`）。
+- 2.1.0 之前的版本：先執行 `sudo agentapi update`，再把每個 AgentAPI（或它的 workspace）重新啟動
+  一次。
+
 ### 清單
 
 ![清單會顯示的每種狀態](screenshots/hub-list.png)
 
-每一列顯示 agent 的名稱（`--name`，預設為工作目錄名稱）、它在等什麼或在做什麼、多久以前、agent 和
-機器；佇列有訊息、最近 24 小時的花費（見[花費](#花費)），以及用量限制超過 60% 時也會顯示。同一個[群組](#群組)內，各列依下表的狀態順序排列，
+每一列顯示 agent 的名稱（`--name`，預設為工作目錄名稱）和 AgentAPI 版本（見[版本](#版本)）、它在等
+什麼或在做什麼、多久以前、agent 和機器；佇列有訊息、最近 24 小時的花費（見[花費](#花費)），以及用量限制超過 60% 時也會顯示。同一個[群組](#群組)內，各列依下表的狀態順序排列，
 同狀態再依名稱排序。每種狀態都有自己的形狀，不靠顏色也看得出來：
 
 | 圖示 | 第二行開頭 | 意思 |
@@ -213,7 +231,7 @@ scope 只算一次，取最新的數字（`updated_at`）。hub 目前沒在追�
 | 斷開的紅色圓環 | Unreachable | hub 已經 10 秒連不到它；這一行會說明原因 |
 | 方塊 | Stopped、Exited | AgentAPI 已停止（或連不到時錯過三次 heartbeat），或它的 agent 已結束（native agent：AgentAPI 已放棄重新啟動） |
 
-搜尋（**/**）會比對名稱、群組、標題、機器或 agent 中的任何字詞。搜尋框下方的標籤可以顯示全部，或只
+搜尋（**/**）會比對名稱、群組、標題、機器、agent 或版本中的任何字詞。搜尋框下方的標籤可以顯示全部，或只
 顯示需要你、工作中、已完成未讀、離線的 agent，並附上數量。頁首顯示 hub 的串流是否連線中，以及共有
 幾個 agent；分頁的標題和圖示會顯示需要你處理的數量，釘選的分頁也看得到。這條串流和聊天介面一樣會
 重新連線，45 秒沒有動靜就視為斷線（hub 每 15 秒送一次心跳）。
@@ -252,7 +270,7 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 ![在清單旁開啟的 agent，核准正等著回覆](screenshots/hub-instance.png)
 
 點選一列或一張卡片，就會在清單旁開啟這個 agent 的聊天介面：聊天介面的功能在這裡都能用，包括回覆
-請求。上方的列顯示 agent 的狀態、agent 和機器，也放著聊天介面自己的搜尋、終端機和 Explorer 按鈕；**New tab** 會單獨開啟聊天介面，**×**（或
+請求。上方的列顯示 agent 的狀態、agent、機器和 AgentAPI 版本，也放著聊天介面自己的搜尋、終端機和 Explorer 按鈕；**New tab** 會單獨開啟聊天介面，**×**（或
 **Esc**）會回到總覽。開啟 agent 會在瀏覽紀錄新增一頁，所以「上一頁」會回到清單或總覽；從一個 agent
 換到另一個則不會再新增。網址會記住目前的 agent（`#<id>`），重新整理或從書籤開啟都會回到同一個。
 
@@ -423,11 +441,11 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `GET /api/session` | 請求帶有 session 或 hub token 時回傳 `{"authenticated": true}` |
 | `POST /api/session` | `{"token": …}` 登入並設定 session cookie |
 | `DELETE /api/session` | 登出 |
-| `GET /api/instances` | 所有實例：各自是誰、摘要、連線，以及列表上顯示的狀態（`state`：`needs-you`、`working`、`unread`、`idle`、`muted`、`connecting`、`unreachable` 或 `stopped`） |
+| `GET /api/instances` | 所有實例：各自是誰、摘要、連線，以及列表上顯示的狀態（`state`：`needs-you`、`working`、`unread`、`idle`、`muted`、`connecting`、`unreachable` 或 `stopped`）；另外附上 hub 自己的版本（`hub_version`） |
 | `POST /api/instances` | `{"url": …, "token": …}` 以網址加入實例 |
 | `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音 |
 | `DELETE /api/instances/{id}` | 移除實例 |
-| `GET /api/events` | Server-sent events：先送 `instances`（全部，格式同 `GET /api/instances`），再送 `instance`（某個實例有頁面看得到的變動；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
+| `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`），再送 `instance`（某個實例有頁面看得到的變動；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面 |
 
 除了 `/hooks` 和 `/api/session`，每個端點都需要 session cookie 或
@@ -443,7 +461,8 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 
 ## 限制
 
-- hub 對所有實例都提供它自己版本的聊天介面。hub 和各實例請使用相同的 AgentAPI 版本。
+- hub 對所有實例都提供它自己版本的聊天介面。hub 和各實例請使用相同的 AgentAPI 版本；哪些不同，
+  見[版本](#版本)。
 - 所有人共用一個 hub token：沒有個別帳號或權限。
 - hub 只監看和開啟 AgentAPI，不會啟動或停止它們。
 - 關掉 hub 的頁面後，手機就收不到任何通知：hub 還不會送推播。每個 AgentAPI 只有一個 webhook，而

@@ -16,6 +16,7 @@ import {
   groupNames,
   hubRoot,
   instanceState,
+  instanceVersion,
   matchesFilter,
   matchesSearch,
   spendTitle,
@@ -37,6 +38,7 @@ import {GroupHeader, InstanceRow, agentName} from "./hub/instance-row";
 import {Onboarding, Overview} from "./hub/overview";
 import {SignIn} from "./hub/sign-in";
 import {StatusGlyph, stateTone} from "./hub/status-glyph";
+import {VersionTag} from "./hub/version-tag";
 
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "/chat").replace(/\/$/, "");
 
@@ -103,6 +105,8 @@ export function HubView() {
   const root = useMemo(() => (typeof window === "undefined" ? "" : hubRoot(basePath, window.location.origin)), []);
   const [session, setSession] = useState<HubSession | undefined>(undefined);
   const [instances, setInstances] = useState<Map<string, HubInstance>>(new Map());
+  // The hub's own version, which the older instances are marked against.
+  const [hubVersion, setHubVersion] = useState("");
   // The last session check after the stream failed found the hub
   // unreachable.
   const [unreachable, setUnreachable] = useState(false);
@@ -151,7 +155,12 @@ export function HubView() {
       const on = (type: HubEvent["type"]) => (message: MessageEvent<string>) => {
         const data = JSON.parse(message.data);
         const event: HubEvent =
-          type === "instances" ? {type, instances: data.instances ?? []} : type === "instance" ? {type, instance: data} : {type, id: data.id};
+          type === "instances"
+            ? {type, instances: data.instances ?? [], hubVersion: data.hub_version ?? ""}
+            : type === "instance"
+              ? {type, instance: data}
+              : {type, id: data.id};
+        if (event.type === "instances") setHubVersion(event.hubVersion ?? "");
         setInstances((previous) => applyHubEvent(previous, event));
       };
       return {instances: on("instances"), instance: on("instance"), removed: on("removed")};
@@ -523,6 +532,7 @@ export function HubView() {
                       <InstanceRow
                         key={instance.id}
                         instance={instance}
+                        hubVersion={hubVersion}
                         groups={names}
                         now={now}
                         selected={instance.id === selected}
@@ -548,7 +558,11 @@ export function HubView() {
       <section className={cn("min-w-0 flex-1 flex-col bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]", current ? "flex" : "hidden md:flex")}>
         {current ? (
           <>
-            {framed === current.id ? <FrameInfo frame={frame} instance={current} root={root} /> : <InstanceBar instance={current} root={root} onBack={() => select(undefined)} />}
+            {framed === current.id ? (
+              <FrameInfo frame={frame} instance={current} hubVersion={hubVersion} root={root} />
+            ) : (
+              <InstanceBar instance={current} hubVersion={hubVersion} root={root} onBack={() => select(undefined)} />
+            )}
             <iframe
               ref={frame}
               key={current.id}
@@ -559,7 +573,16 @@ export function HubView() {
             />
           </>
         ) : (
-          <Overview root={root} instances={all} counts={counts} now={now} onOpen={select} onFilter={setFilter} onAdd={() => setAdding(true)} />
+          <Overview
+            root={root}
+            instances={all}
+            hubVersion={hubVersion}
+            counts={counts}
+            now={now}
+            onOpen={select}
+            onFilter={setFilter}
+            onAdd={() => setAdding(true)}
+          />
         )}
       </section>
 
@@ -582,7 +605,7 @@ export function HubView() {
 
 // FrameInfo tells the open instance's chat what its bar shows, whenever
 // that changes.
-function FrameInfo({frame, instance, root}: {frame: React.RefObject<HTMLIFrameElement | null>; instance: HubInstance; root: string}) {
+function FrameInfo({frame, instance, hubVersion, root}: {frame: React.RefObject<HTMLIFrameElement | null>; instance: HubInstance; hubVersion: string; root: string}) {
   const info = JSON.stringify(
     toFrame({
       name: displayName(instance),
@@ -591,6 +614,9 @@ function FrameInfo({frame, instance, root}: {frame: React.RefObject<HTMLIFrameEl
       agentType: instance.agent_type || undefined,
       agent: agentName(instance) || undefined,
       hostname: instance.hostname || undefined,
+      version: instanceVersion(instance) || undefined,
+      hubVersion: hubVersion || undefined,
+      lastKnown: instance.connection !== "connected",
       tab: chatURL(basePath, root, instance.id),
     }),
   );
@@ -602,9 +628,10 @@ function FrameInfo({frame, instance, root}: {frame: React.RefObject<HTMLIFrameEl
 
 // InstanceBar heads the open instance: back to the list or overview, what
 // it is and does, and its own chat in a tab of its own.
-function InstanceBar({instance, root, onBack}: {instance: HubInstance; root: string; onBack: () => void}) {
+function InstanceBar({instance, hubVersion, root, onBack}: {instance: HubInstance; hubVersion: string; root: string; onBack: () => void}) {
   const state = instanceState(instance);
   const agent = agentName(instance);
+  const version = instanceVersion(instance);
   return (
     <div className="box-content flex h-12 shrink-0 items-center gap-1 border-b bg-background px-1.5 pt-[env(safe-area-inset-top)] sm:h-14 md:gap-2 md:px-3">
       <Button variant="ghost" size="icon" className="size-10 shrink-0 rounded-full md:hidden" onClick={onBack} aria-label="Back to Agents">
@@ -631,6 +658,12 @@ function InstanceBar({instance, root, onBack}: {instance: HubInstance; root: str
               <span className="hidden min-w-0 truncate sm:inline" data-hub-host>
                 {instance.hostname}
               </span>
+            </>
+          )}
+          {version && (
+            <>
+              <span aria-hidden="true" className="hidden text-muted-foreground/40 sm:inline">·</span>
+              <VersionTag version={version} hubVersion={hubVersion} lastKnown={instance.connection !== "connected"} className="hidden sm:flex" />
             </>
           )}
         </p>

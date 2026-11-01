@@ -8,6 +8,7 @@ import {HEADER_ACTIONS_ID} from "@/app/header";
 import {frameMessage, fromFrame, type FrameInstance, type ToFrame} from "@/lib/hub-frame";
 import {cn} from "@/lib/utils";
 import {StatusGlyph, stateTone} from "./status-glyph";
+import {VersionTag} from "./version-tag";
 
 // FrameBar heads a chat the hub opens: back to the hub's list or overview,
 // what the instance is and does (the hub tells it), and the chat's own
@@ -52,6 +53,12 @@ export function FrameBar() {
               <span className="hidden min-w-0 truncate lg:inline" data-hub-host>
                 {instance.hostname}
               </span>
+            </>
+          )}
+          {instance?.version && (
+            <>
+              <span aria-hidden="true" className="hidden text-muted-foreground/40 lg:inline">·</span>
+              <VersionTag version={instance.version} hubVersion={instance.hubVersion} lastKnown={instance.lastKnown} className="hidden lg:flex" />
             </>
           )}
         </p>

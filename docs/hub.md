@@ -103,7 +103,8 @@ WantedBy=default.target
 
 After an update, restart the hub this way too (`systemctl --user restart agentapi-hub`). The
 AgentAPIs restart in place with `agentapi update --restart` or
-[`agentapi restart`](../README.md#agentapi-restart); the hub isn't one of them.
+[`agentapi restart`](../README.md#agentapi-restart); the hub isn't one of them. The overview's
+[Versions](#versions) card shows the AgentAPIs still on an older version.
 
 ### 3. Join each machine's AgentAPIs
 
@@ -189,7 +190,8 @@ With no agent open, the right side says how many agents need you and why. A tile
 you, working, finished unseen, offline) counts them; pick one to filter the list. Below, a card per
 agent that needs you names what it waits for (the approval's command, the question, the login, the
 usage limit) and since when, with **Answer** or **Open**. Running agents show their prompt and how
-long they've run; finished ones you haven't seen show their title.
+long they've run; finished ones you haven't seen show their title. At the bottom, the
+[Versions](#versions) card counts the AgentAPI versions the agents run.
 
 ![The overview in the dark theme](screenshots/hub-desktop-dark.png)
 
@@ -212,13 +214,32 @@ keeps its logs). The totals count each scope once, with its latest figure (`upda
 the hub doesn't follow right now (stopped, unreachable, connecting) shows its last figure dimmed,
 as last known, and the totals leave it out.
 
+### Versions
+
+Each row shows the AgentAPI version its instance runs next to its name (`v2.0.0`), and on a desktop
+so does the bar above an open agent. A version older than the hub's says **older**: the hub serves
+its own chat to every instance ([Limits](#limits)), so those are the ones to update. Hover for both
+versions. A development build (`0.0.0-dev`, or what `make build` stamps after a release, such as
+`2.0.0-21-g61be34f`) compares with nothing: it gets no mark, and a hub that runs one marks none. An
+agent the hub doesn't follow right now (stopped, unreachable, connecting) shows the version it ran
+last, dimmed and unmarked. After an update and a restart, the row shows the new version as soon as
+the AgentAPI is back.
+
+At the bottom of the overview, the **Versions** card counts the agents the hub follows by version,
+with their machines, and says how many run an older version than the hub. To update those:
+
+- From 2.1.0 on, AgentAPI restarts in place: `sudo agentapi update --restart` on the machine
+  updates the binary and restarts its AgentAPIs into it (without `sudo` when the binary is yours).
+- Before 2.1.0, run `sudo agentapi update`, then restart each AgentAPI once, or its workspace.
+
 ### The list
 
 ![Every state the list shows](screenshots/hub-list.png)
 
-Each row shows the agent's name (`--name`, by default its working directory's name), what it waits
-for or does, how long ago, the agent and the machine; a queue that isn't empty, what the agent spent
-in the last 24 hours ([Spend](#spend)) and a usage limit above 60% join them. Within a [group](#groups), the rows sort by state in this order, then by name.
+Each row shows the agent's name (`--name`, by default its working directory's name) and AgentAPI
+version ([Versions](#versions)), what it waits for or does, how long ago, the agent and the machine;
+a queue that isn't empty, what the agent spent in the last 24 hours ([Spend](#spend)) and a usage
+limit above 60% join them. Within a [group](#groups), the rows sort by state in this order, then by name.
 Each state has a shape of its own, so it reads without its color:
 
 | Glyph | Second line starts with | Meaning |
@@ -234,7 +255,7 @@ Each state has a shape of its own, so it reads without its color:
 | Broken red ring | Unreachable | The hub hasn't reached it for 10 s; the line says why |
 | Square | Stopped, Exited | The AgentAPI stopped (or missed three heartbeats while unreachable), or its agent exited (a native agent: AgentAPI gave up starting it again) |
 
-Search (**/**) matches any word of a name, group, title, machine or agent. The chips under it show
+Search (**/**) matches any word of a name, group, title, machine, agent or version. The chips under it show
 all agents or only those that need you, work, finished unseen, or are offline, each with its count.
 The header says whether the hub's stream is live and how many agents there are; the tab's title and
 icon count the ones that need you, so a pinned tab shows it. The stream reconnects as the chat's
@@ -277,8 +298,8 @@ again. **Unmute** in the same menu ends it sooner. Mutes are kept on the hub, li
 ![An agent open beside the list, its approval ready to answer](screenshots/hub-instance.png)
 
 Pick a row or a card to open the agent's chat beside the list: everything the chat does works here,
-answering requests included. The bar above it shows the agent's state, agent and machine, with the
-chat's own search, terminal and Explorer buttons; **New tab** opens the chat on its own, and **×** (or **Esc**) goes back to the overview. Opening an agent
+answering requests included. The bar above it shows the agent's state, agent, machine and AgentAPI
+version, with the chat's own search, terminal and Explorer buttons; **New tab** opens the chat on its own, and **×** (or **Esc**) goes back to the overview. Opening an agent
 is a page in the browser's history, so Back returns to the list or the overview; moving from one
 agent to another doesn't add one. The URL keeps the agent (`#<id>`), so a reload or a bookmark
 comes back to it.
@@ -468,11 +489,11 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `GET /api/session` | `{"authenticated": true}` when the request carries the session or the hub token |
 | `POST /api/session` | `{"token": …}` signs in and sets the session cookie |
 | `DELETE /api/session` | Signs out |
-| `GET /api/instances` | The instances: who each one is, its summary, its connection and the state its row shows (`state`: `needs-you`, `working`, `unread`, `idle`, `muted`, `connecting`, `unreachable` or `stopped`) |
+| `GET /api/instances` | The instances: who each one is, its summary, its connection and the state its row shows (`state`: `needs-you`, `working`, `unread`, `idle`, `muted`, `connecting`, `unreachable` or `stopped`); and the hub's own version (`hub_version`) |
 | `POST /api/instances` | `{"url": …, "token": …}` adds an instance by its URL |
 | `PATCH /api/instances/{id}` | `{"group": …}` puts an instance in a group, `""` in none; `{"muted": true}` mutes what it waits for now, until that changes (409 when it waits for nothing), `false` ends the mute |
 | `DELETE /api/instances/{id}` | Forgets an instance |
-| `GET /api/events` | Server-sent events: `instances` (all of them, as `GET /api/instances` has them), then `instance` (one changed what the page shows; when it was last heard of counts only while it is offline), `removed` (`{"id"}`) and a `heartbeat` every 15 s |
+| `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them), then `instance` (one changed what the page shows; when it was last heard of counts only while it is offline), `removed` (`{"id"}`) and a `heartbeat` every 15 s |
 | `/i/{id}/…` | The instance's own API and chat, through the hub |
 
 Every endpoint but `/hooks` and `/api/session` needs the session cookie or
@@ -489,7 +510,7 @@ Every endpoint but `/hooks` and `/api/session` needs the session cookie or
 ## Limits
 
 - The hub serves the chat of its own version to every instance. Run the same AgentAPI version on
-  the hub and the instances.
+  the hub and the instances; [Versions](#versions) shows the ones that differ.
 - One hub token for everyone: there are no per-user accounts or permissions.
 - The hub watches and opens AgentAPIs; it doesn't start or stop them.
 - Nothing reaches your phone while the hub's page is closed: the hub doesn't send push

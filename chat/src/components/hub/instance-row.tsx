@@ -14,9 +14,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {agentDisplayName, parseAgentType} from "@/lib/agents";
-import {activity, displayName, formatAgo, formatUSD, instanceState, spendTitle, spendTotals, stateLabel, usagePercent, type HubGroup, type HubInstance} from "@/lib/hub";
+import {activity, displayName, formatAgo, formatUSD, instanceState, instanceVersion, olderThanHub, spendTitle, spendTotals, stateLabel, usagePercent, type HubGroup, type HubInstance} from "@/lib/hub";
 import {cn} from "@/lib/utils";
 import {StatusGlyph, stateTone} from "./status-glyph";
+import {VersionTag} from "./version-tag";
 
 const activityTone = {
   needs: "text-state-needs",
@@ -45,6 +46,7 @@ export function agentName(instance: HubInstance): string {
 
 export function InstanceRow({
   instance,
+  hubVersion,
   groups,
   selected,
   now,
@@ -55,6 +57,8 @@ export function InstanceRow({
   onMute,
 }: {
   instance: HubInstance;
+  // hubVersion is the hub's own version, which marks the older instances.
+  hubVersion: string;
   groups: string[];
   selected: boolean;
   now: number;
@@ -73,9 +77,10 @@ export function InstanceRow({
   const ago = formatAgo(doing.since, now);
   const gone = state === "stopped" || state === "unreachable";
   const spend = summary?.spend;
-  // The last spend of an instance the hub doesn't follow now: shown, not
-  // counted.
+  // The last spend and version of an instance the hub doesn't follow now:
+  // shown, not counted.
   const lastKnown = instance.connection !== "connected";
+  const version = instanceVersion(instance);
   return (
     <li className="group/row relative px-2">
       <div
@@ -90,14 +95,15 @@ export function InstanceRow({
           data-hub-row={instance.id}
           onClick={onSelect}
           aria-current={selected ? "true" : undefined}
-          aria-label={`${displayName(instance)}, ${stateLabel(instance)}${ago ? `, ${ago}` : ""}: ${doing.text}`}
+          aria-label={`${displayName(instance)}, ${stateLabel(instance)}${ago ? `, ${ago}` : ""}: ${doing.text}${olderThanHub(instance, hubVersion) ? ". Older than the hub" : ""}`}
           className="flex min-w-0 flex-1 items-start gap-3 rounded-xl py-3 pr-1 pl-3.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           <StatusGlyph state={state} className="mt-[3px]" />
           <span className="min-w-0 flex-1">
             <span className="flex items-baseline gap-2">
-              <span className="min-w-0 flex-1 truncate text-[15px] leading-6 font-medium">{displayName(instance)}</span>
-              {ago && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{ago}</span>}
+              <span className="min-w-0 truncate text-[15px] leading-6 font-medium">{displayName(instance)}</span>
+              {version && <VersionTag version={version} hubVersion={hubVersion} lastKnown={lastKnown} className="text-xs text-muted-foreground" />}
+              {ago && <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">{ago}</span>}
             </span>
             <span className={cn("block truncate text-[13px] leading-5", activityTone[doing.tone])}>
               {doing.label && (

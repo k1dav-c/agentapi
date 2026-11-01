@@ -13,6 +13,11 @@ export type FrameInstance = {
   agentType?: string;
   agent?: string;
   hostname?: string;
+  // The AgentAPI version it runs, and the hub's, which marks an older one;
+  // lastKnown: the hub doesn't follow it now, so it is the one it ran last.
+  version?: string;
+  hubVersion?: string;
+  lastKnown?: boolean;
   // The chat without the hub, for a tab of its own.
   tab: string;
 };

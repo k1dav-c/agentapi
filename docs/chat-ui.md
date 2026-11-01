@@ -510,8 +510,9 @@ this chat beside the list (or instead of it on a phone, with a back button), und
 hub's, with the chat's own buttons in it. It opens through the hub, which sends the instance's token. `+` adds an instance by its URL and token. Each row's
 `⋯` menu puts the instance in a group of your own (the list then shows a folding header per group),
 mutes what it waits for until that changes, or forgets a stopped or unreachable one. Rows, group
-headers and a card of the overview show what the agents spent in the last 24 hours and 7 days. The [hub guide](hub.md) covers setup, groups and every
-state in detail.
+headers and a card of the overview show what the agents spent in the last 24 hours and 7 days. Each
+row shows its AgentAPI version, marked when it is older than the hub's, and another card counts the
+versions. The [hub guide](hub.md) covers setup, groups and every state in detail.
 
 ## Connection and caching
 

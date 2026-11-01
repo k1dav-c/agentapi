@@ -1235,8 +1235,8 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 
 在桌面或手機開啟 `http://<hub>:3290/`，用 `--token` 登入。清單列出每個實例，需要你處理的排最前面。
 每個實例顯示它在等什麼（核准或提問、登入、用量限制）、工作中、完成了你還沒看過的任務、閒置、
-連不到或已停止，以及標題、agent、機器、佇列和用量限制。分頁標題會顯示需要你處理的數量。點選一個
-就會在聊天介面中開啟。手機上清單和聊天介面輪流顯示。
+連不到或已停止，以及標題、agent、機器、AgentAPI 版本、佇列和用量限制。分頁標題會顯示需要你處理的
+數量。點選一個就會在聊天介面中開啟。手機上清單和聊天介面輪流顯示。
 
 - AgentAPI 用 [`agentapi hub join`](#加入-hub) 加入：它們有簽章的 `instance.*` 事件會新增它們，
   hub 再以一條連線追蹤每個實例的[摘要串流](#監看多個實例)。也可以用 `+` 輸入網址（和 token）手動
@@ -1253,7 +1253,8 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 - `--port`（預設 3290）和 `--bind`（例如 VPN 位址）設定監聽位置。請用 HTTPS 提供，或只開在私有
   網路上：登入時會送出 token。若 VPN 用戶端以 userspace 模式執行，把 `ALL_PROXY` 設成它的 SOCKS5
   proxy，hub 才連得到實例。
-- hub 提供的是它自己版本的聊天介面：hub 和實例請使用相同的 AgentAPI 版本。
+- hub 提供的是它自己版本的聊天介面：hub 和實例請使用相同的 AgentAPI 版本。比 hub 舊的實例會在清單上
+  標出來，總覽也會依版本統計，並說明怎麼更新。
 
 #### 加入 hub
 

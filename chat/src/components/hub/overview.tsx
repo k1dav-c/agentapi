@@ -1,5 +1,6 @@
 "use client";
 
+import {Fragment} from "react";
 import {ArrowRight, CircleCheck, ClipboardList, Gauge, KeyRound, MessageCircleQuestion, ShieldQuestion, SquareTerminal} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {CopyCommand} from "@/components/copy-command";
@@ -11,16 +12,21 @@ import {
   formatElapsed,
   formatUSD,
   instanceState,
+  instanceVersion,
+  parseVersion,
   spendTitle,
   spendTotals,
+  versionTotals,
   type HubFilter,
   type HubInstance,
   type InstanceState,
+  type VersionRelation,
 } from "@/lib/hub";
 import {cn} from "@/lib/utils";
 import {Constellation} from "./brand";
 import {StatusGlyph} from "./status-glyph";
 import {agentName} from "./instance-row";
+import {OlderMark, VersionTag} from "./version-tag";
 
 // What a waiting instance asks for: its icon and the word for it.
 function ask(instance: HubInstance): {icon: typeof ShieldQuestion; label: string} {
@@ -54,8 +60,9 @@ function greeting(now: number): string {
   return hour < 5 ? "Working late" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 }
 
-function Meta({instance}: {instance: HubInstance}) {
+function Meta({instance, hubVersion}: {instance: HubInstance; hubVersion: string}) {
   const agent = agentName(instance);
+  const version = instanceVersion(instance);
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
       {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3" />}
@@ -66,6 +73,12 @@ function Meta({instance}: {instance: HubInstance}) {
           <span className="min-w-0 truncate" data-hub-host>
             {instance.hostname}
           </span>
+        </>
+      )}
+      {version && (
+        <>
+          <span aria-hidden="true" className="text-muted-foreground/40">·</span>
+          <VersionTag version={version} hubVersion={hubVersion} lastKnown={instance.connection !== "connected"} />
         </>
       )}
     </span>
@@ -87,7 +100,7 @@ function Section({title, count, children}: {title: string; count: number; childr
 const cardClass =
   "group/card hub-rise flex min-w-0 flex-col rounded-2xl border bg-card p-4 text-left shadow-xs outline-none transition-[box-shadow,transform,border-color] hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
-function NeedsCard({instance, now, onOpen}: {instance: HubInstance; now: number; onOpen: () => void}) {
+function NeedsCard({instance, hubVersion, now, onOpen}: {instance: HubInstance; hubVersion: string; now: number; onOpen: () => void}) {
   const {icon: Icon, label} = ask(instance);
   const since = activity(instance).since;
   return (
@@ -107,7 +120,7 @@ function NeedsCard({instance, now, onOpen}: {instance: HubInstance; now: number;
       <span className="mt-auto flex items-end justify-between gap-3 pt-4">
         <span className="min-w-0">
           <span className="block truncate text-sm font-medium">{displayName(instance)}</span>
-          <Meta instance={instance} />
+          <Meta instance={instance} hubVersion={hubVersion} />
         </span>
         <span className="flex shrink-0 items-center gap-1 rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-background transition-transform group-hover/card:translate-x-0.5">
           {action(instance)} <ArrowRight className="size-3.5" aria-hidden="true" />
@@ -117,7 +130,7 @@ function NeedsCard({instance, now, onOpen}: {instance: HubInstance; now: number;
   );
 }
 
-function WorkingCard({instance, now, onOpen}: {instance: HubInstance; now: number; onOpen: () => void}) {
+function WorkingCard({instance, hubVersion, now, onOpen}: {instance: HubInstance; hubVersion: string; now: number; onOpen: () => void}) {
   const doing = activity(instance);
   return (
     <button type="button" onClick={onOpen} className={cardClass}>
@@ -128,13 +141,13 @@ function WorkingCard({instance, now, onOpen}: {instance: HubInstance; now: numbe
       <span className="mt-1.5 line-clamp-2 text-sm text-muted-foreground">{doing.text}</span>
       <span className="hub-shimmer mt-4 block h-1 rounded-full bg-state-working/12" aria-hidden="true" />
       <span className="mt-3">
-        <Meta instance={instance} />
+        <Meta instance={instance} hubVersion={hubVersion} />
       </span>
     </button>
   );
 }
 
-function FinishedCard({instance, now, onOpen}: {instance: HubInstance; now: number; onOpen: () => void}) {
+function FinishedCard({instance, hubVersion, now, onOpen}: {instance: HubInstance; hubVersion: string; now: number; onOpen: () => void}) {
   const doing = activity(instance);
   return (
     <button type="button" onClick={onOpen} className={cardClass}>
@@ -145,7 +158,7 @@ function FinishedCard({instance, now, onOpen}: {instance: HubInstance; now: numb
       </span>
       <span className="mt-2 line-clamp-2 text-sm text-muted-foreground">{doing.text}</span>
       <span className="mt-3">
-        <Meta instance={instance} />
+        <Meta instance={instance} hubVersion={hubVersion} />
       </span>
     </button>
   );
@@ -222,11 +235,89 @@ function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: 
   );
 }
 
+// What a version that isn't older is to the hub's, next to it in the
+// Versions card.
+const relationNote: Partial<Record<VersionRelation, string>> = {same: "the hub's", newer: "newer than the hub"};
+
+// The first release whose AgentAPIs restart in place, which
+// agentapi update --restart needs.
+const RESTARTS_IN_PLACE = "v2.1.0";
+
+// VersionsCard is the AgentAPI versions of the agents the hub follows: how
+// many run each, on which machines, and how many run an older one than the
+// hub, with how to update those.
+export function VersionsCard({instances, hubVersion}: {instances: HubInstance[]; hubVersion: string}) {
+  const totals = versionTotals(instances, hubVersion);
+  if (totals.counted === 0) return null;
+  const release = parseVersion(hubVersion) !== undefined;
+  return (
+    <section className="mt-10" aria-labelledby="hub-versions">
+      <h3 id="hub-versions" className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+        Versions
+        <span className="font-normal tracking-normal normal-case text-muted-foreground/70">
+          {release ? `The AgentAPI version of each agent; the hub runs v${hubVersion}` : "The hub is a development build, so no version counts as older"}
+        </span>
+      </h3>
+      <div className={cn("mt-3 grid gap-6 rounded-2xl border bg-card p-5 shadow-xs", release && "md:grid-cols-[auto_minmax(0,1fr)]")}>
+        {release && (
+          <div className="flex flex-wrap items-end gap-x-8 gap-y-3 md:flex-col md:items-start md:border-r md:pr-8">
+            <div>
+              <p className="text-xs text-muted-foreground">Older than the hub</p>
+              <p className={cn("text-3xl font-semibold tracking-tight tabular-nums", totals.older === 0 && "text-muted-foreground/50")}>{totals.older}</p>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              of {totals.counted} connected {totals.counted === 1 ? "agent" : "agents"}
+            </p>
+          </div>
+        )}
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted-foreground">
+              <th className="pb-2 font-normal">Version</th>
+              <th className="pb-2 font-normal">Machines</th>
+              <th className="pb-2 text-right font-normal">Agents</th>
+            </tr>
+          </thead>
+          <tbody>
+            {totals.versions.map((count) => (
+              <tr key={count.version} className="border-t">
+                <td className="py-2 pr-4 whitespace-nowrap">
+                  <span className="font-medium tabular-nums">{count.version ? `v${count.version}` : "Not reported"}</span>
+                  {count.relation === "older" && <OlderMark className="ml-2 text-xs" />}
+                  {relationNote[count.relation] && <span className="ml-2 text-xs text-muted-foreground">{relationNote[count.relation]}</span>}
+                </td>
+                <td className="max-w-0 py-2 pr-4 text-xs text-muted-foreground">
+                  <span className="block truncate" title={count.machines.join(", ")}>
+                    {count.machines.map((name, i) => (
+                      <Fragment key={name}>
+                        {i > 0 && ", "}
+                        <span data-hub-host>{name}</span>
+                      </Fragment>
+                    ))}
+                  </span>
+                </td>
+                <td className="py-2 text-right tabular-nums">{count.instances}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {totals.older > 0 && (
+          <p className="text-xs leading-5 text-muted-foreground md:col-span-2 md:border-t md:pt-4">
+            To update: <code className="font-mono text-[12px] text-foreground">sudo agentapi update --restart</code> on machines with {RESTARTS_IN_PLACE} or later (no{" "}
+            <code className="font-mono text-[12px] text-foreground">sudo</code> if the binary is yours); before {RESTARTS_IN_PLACE}, update, then restart each AgentAPI once.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 // Overview is the main pane while no instance is open: what needs you,
 // what runs, and what finished since you last looked.
 export function Overview({
   root,
   instances,
+  hubVersion,
   counts,
   now,
   onOpen,
@@ -235,6 +326,7 @@ export function Overview({
 }: {
   root: string;
   instances: HubInstance[];
+  hubVersion: string;
   counts: Record<HubFilter, number>;
   now: number;
   onOpen: (id: string) => void;
@@ -308,21 +400,21 @@ export function Overview({
         {needs.length > 0 && (
           <Section title="Needs you" count={needs.length}>
             {needs.map((instance) => (
-              <NeedsCard key={instance.id} instance={instance} now={now} onOpen={() => onOpen(instance.id)} />
+              <NeedsCard key={instance.id} instance={instance} hubVersion={hubVersion} now={now} onOpen={() => onOpen(instance.id)} />
             ))}
           </Section>
         )}
         {working.length > 0 && (
           <Section title="Working" count={working.length}>
             {working.map((instance) => (
-              <WorkingCard key={instance.id} instance={instance} now={now} onOpen={() => onOpen(instance.id)} />
+              <WorkingCard key={instance.id} instance={instance} hubVersion={hubVersion} now={now} onOpen={() => onOpen(instance.id)} />
             ))}
           </Section>
         )}
         {unread.length > 0 && (
           <Section title="Finished since you looked" count={unread.length}>
             {unread.map((instance) => (
-              <FinishedCard key={instance.id} instance={instance} now={now} onOpen={() => onOpen(instance.id)} />
+              <FinishedCard key={instance.id} instance={instance} hubVersion={hubVersion} now={now} onOpen={() => onOpen(instance.id)} />
             ))}
           </Section>
         )}
@@ -332,6 +424,8 @@ export function Overview({
             <p className="mt-6 text-sm text-muted-foreground">Nothing waits for you. Pick an agent to look in on it.</p>
           </div>
         )}
+
+        <VersionsCard instances={instances} hubVersion={hubVersion} />
       </div>
     </div>
   );

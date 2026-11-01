@@ -29,6 +29,7 @@ import (
 	"github.com/coder/quartz"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 )
@@ -288,17 +289,24 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// publicList is the instances without their tokens.
-func publicList(instances []Instance) []Instance {
+// instanceList is GET /api/instances, and the first event of the browser's
+// stream: the instances, without their tokens, and the hub's own version,
+// which the page tells the older instances by.
+type instanceList struct {
+	Instances  []Instance `json:"instances"`
+	HubVersion string     `json:"hub_version"`
+}
+
+func newInstanceList(instances []Instance) instanceList {
 	list := make([]Instance, len(instances))
 	for i, instance := range instances {
 		list[i] = instance.public()
 	}
-	return list
+	return instanceList{Instances: list, HubVersion: version.Version}
 }
 
 func (h *Hub) listInstances(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"instances": publicList(h.store.list())})
+	writeJSON(w, http.StatusOK, newInstanceList(h.store.list()))
 }
 
 // addInstance adds an instance by its URL (POST /api/instances): the hub
@@ -453,8 +461,9 @@ func (h *Hub) removeInstance(w http.ResponseWriter, r *http.Request) {
 // hubHeartbeat is how often the browser's stream gets a heartbeat.
 const hubHeartbeat = 15 * time.Second
 
-// streamEvents sends the browser the instances (instances) and then each
-// change: instance, with the instance, or removed, with its ID.
+// streamEvents sends the browser the instances and the hub's version
+// (instances), and then each change: instance, with the instance, or
+// removed, with its ID.
 func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -477,7 +486,7 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return true
 	}
-	if !send("instances", map[string]any{"instances": publicList(instances)}) {
+	if !send("instances", newInstanceList(instances)) {
 		return
 	}
 	heartbeat := h.clock.NewTicker(hubHeartbeat, "hub", "browser heartbeat")

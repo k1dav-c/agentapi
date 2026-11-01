@@ -1470,8 +1470,9 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 Open `http://<hub>:3290/` on a desktop or a phone and sign in with `--token`. The list shows every
 instance, those that need you first. Each shows its state (the reason it waits, such as an
 approval or question, a login or a usage limit; or working, finished a task you haven't seen, idle,
-unreachable or stopped) with its title, agent, machine, queue and usage limit. The tab title counts
-what needs you. Pick one to open it in the chat. On a phone the list and the chat take turns.
+unreachable or stopped) with its title, agent, machine, AgentAPI version, queue and usage limit. The
+tab title counts what needs you. Pick one to open it in the chat. On a phone the list and the chat
+take turns.
 
 - AgentAPIs join it with [`agentapi hub join`](#joining-a-hub): their signed `instance.*` events
   add them, and the hub follows each one's [summary stream](#watching-many-instances) from one
@@ -1494,7 +1495,8 @@ what needs you. Pick one to open it in the chat. On a phone the list and the cha
   over HTTPS, or only on the private network: signing in sends the token. To reach the instances
   through a VPN client running in userspace, set `ALL_PROXY` to its SOCKS5 proxy.
 - The hub serves the chat of its own version: run the same AgentAPI version on the hub and the
-  instances.
+  instances. A row marks an instance older than the hub, and the overview counts the versions and
+  says how to update the older ones.
 
 #### Joining a hub
 
