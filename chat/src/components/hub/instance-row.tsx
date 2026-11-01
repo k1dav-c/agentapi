@@ -1,5 +1,6 @@
 "use client";
 
+import {useState} from "react";
 import {Bell, BellOff, ChevronRight, FolderPlus, MoreHorizontal, Pencil, Trash2} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {Button} from "@/components/ui/button";
@@ -15,8 +16,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {agentDisplayName, parseAgentType} from "@/lib/agents";
 import {activity, displayName, formatAgo, formatUSD, instanceState, instanceVersion, olderThanHub, spendTitle, spendTotals, stateLabel, usagePercent, type HubGroup, type HubInstance} from "@/lib/hub";
+import {shownUpdate, updateBadge} from "@/lib/hub-update";
 import {cn} from "@/lib/utils";
 import {StatusGlyph, stateTone} from "./status-glyph";
+import {UpdateDialog, UpdateMenuItems, cancelFromHub} from "./update";
+import {UpdateChip} from "./update-chip";
 import {VersionTag} from "./version-tag";
 
 const activityTone = {
@@ -47,6 +51,7 @@ export function agentName(instance: HubInstance): string {
 export function InstanceRow({
   instance,
   hubVersion,
+  root,
   groups,
   selected,
   now,
@@ -59,6 +64,8 @@ export function InstanceRow({
   instance: HubInstance;
   // hubVersion is the hub's own version, which marks the older instances.
   hubVersion: string;
+  // root is the hub's address, whose proxy takes the instance's update.
+  root: string;
   groups: string[];
   selected: boolean;
   now: number;
@@ -81,6 +88,8 @@ export function InstanceRow({
   // shown, not counted.
   const lastKnown = instance.connection !== "connected";
   const version = instanceVersion(instance);
+  const update = shownUpdate(instance);
+  const [updating, setUpdating] = useState(false);
   return (
     <li className="group/row relative px-2">
       <div
@@ -95,7 +104,7 @@ export function InstanceRow({
           data-hub-row={instance.id}
           onClick={onSelect}
           aria-current={selected ? "true" : undefined}
-          aria-label={`${displayName(instance)}, ${stateLabel(instance)}${ago ? `, ${ago}` : ""}: ${doing.text}${olderThanHub(instance, hubVersion) ? ". Older than the hub" : ""}`}
+          aria-label={`${displayName(instance)}, ${stateLabel(instance)}${ago ? `, ${ago}` : ""}: ${doing.text}${olderThanHub(instance, hubVersion) ? ". Older than the hub" : ""}${update ? `. ${updateBadge(update).title}` : ""}`}
           className="flex min-w-0 flex-1 items-start gap-3 rounded-xl py-3 pr-1 pl-3.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           <StatusGlyph state={state} className="mt-[3px]" />
@@ -147,6 +156,12 @@ export function InstanceRow({
                 </span>
               )}
             </span>
+            {/* A line of its own, so the line above keeps the machine's name. */}
+            {update && (
+              <span className="mt-1.5 flex text-xs">
+                <UpdateChip update={update} />
+              </span>
+            )}
           </span>
         </button>
         {/* Not modal: a modal menu that opens the naming dialog leaves the page
@@ -184,6 +199,7 @@ export function InstanceRow({
             <DropdownMenuItem onSelect={onNewGroup}>
               <FolderPlus /> New group…
             </DropdownMenuItem>
+            <UpdateMenuItems instance={instance} onOpen={() => setUpdating(true)} onCancel={() => void cancelFromHub(root, instance.id)} />
             {gone && (
               <>
                 <DropdownMenuSeparator />
@@ -195,6 +211,7 @@ export function InstanceRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <UpdateDialog instance={instance} hubVersion={hubVersion} root={root} open={updating} onOpenChange={setUpdating} />
     </li>
   );
 }

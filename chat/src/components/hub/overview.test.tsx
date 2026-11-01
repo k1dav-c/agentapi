@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
-import type {HubInstance} from "@/lib/hub";
+import type {HubInstance, InstanceUpdate, Summary} from "@/lib/hub";
 import {VersionsCard} from "./overview";
 
 const running = (id: string, version: string, hostname: string, overrides: Partial<HubInstance> = {}): HubInstance => ({
@@ -29,7 +29,7 @@ describe("VersionsCard", () => {
   ];
 
   test("counts each version and those older than the hub, and says how to update them", () => {
-    const html = renderToStaticMarkup(<VersionsCard instances={instances} hubVersion="2.1.0" />);
+    const html = renderToStaticMarkup(<VersionsCard root="" instances={instances} hubVersion="2.1.0" />);
     const shown = text(html);
     expect(shown).toContain("the hub runs v2.1.0");
     expect(shown).toContain("Older than the hub 3 of 4 connected agents");
@@ -40,13 +40,13 @@ describe("VersionsCard", () => {
   });
 
   test("with every agent on the hub's version, there is nothing to update", () => {
-    const html = renderToStaticMarkup(<VersionsCard instances={[running("c", "2.1.0", "dev-3")]} hubVersion="2.1.0" />);
+    const html = renderToStaticMarkup(<VersionsCard root="" instances={[running("c", "2.1.0", "dev-3")]} hubVersion="2.1.0" />);
     expect(text(html)).toContain("Older than the hub 0 of 1 connected agent");
     expect(html).not.toContain("sudo agentapi update");
   });
 
   test("a development build of the hub tells no version older", () => {
-    const html = renderToStaticMarkup(<VersionsCard instances={instances} hubVersion="0.0.0-dev" />);
+    const html = renderToStaticMarkup(<VersionsCard root="" instances={instances} hubVersion="0.0.0-dev" />);
     expect(text(html)).toContain("The hub is a development build");
     expect(html).not.toContain("Older than the hub");
     expect(html).not.toContain(">older</span>");
@@ -54,6 +54,62 @@ describe("VersionsCard", () => {
   });
 
   test("nothing to show without a connected agent", () => {
-    expect(renderToStaticMarkup(<VersionsCard instances={[instances[4]]} hubVersion="2.1.0" />)).toBe("");
+    expect(renderToStaticMarkup(<VersionsCard root="" instances={[instances[4]]} hubVersion="2.1.0" />)).toBe("");
+  });
+
+  // An instance whose summary says how it updates through its API.
+  const updating = (id: string, version: string, hostname: string, update: Partial<InstanceUpdate>): HubInstance =>
+    running(id, version, hostname, {
+      summary: {
+        instance: {id, server_id: "s", agent_type: "claude", transport: "native", agentapi_version: version},
+        status: "stable",
+        lifecycle: "ready",
+        attention: "none",
+        title: "",
+        pending_requests: 0,
+        queued_messages: 0,
+        tasks: 0,
+        unread: false,
+        seen_at: "2026-11-01T00:00:00Z",
+        update: {allowed: true, state: "idle", keeps_conversation: true, ...update},
+      } as Summary,
+    });
+
+  test("the older agents it can update get a button; the others, why, and how to update them by hand", () => {
+    const html = renderToStaticMarkup(
+      <VersionsCard
+        root=""
+        instances={[
+          updating("a", "2.0.0", "dev-1", {}),
+          updating("b", "2.0.0", "dev-2", {blocked: "can't replace /usr/local/bin/agentapi"}),
+          updating("c", "2.0.0", "dev-3", {allowed: false}),
+          running("d", "1.6.1", "dev-4"),
+          updating("e", "2.1.0", "dev-5", {}),
+        ]}
+        hubVersion="2.1.0"
+      />,
+    );
+    const shown = text(html);
+    expect(shown).toContain("Update the older ones");
+    expect(shown).toContain("1 of 4 can update from here; each waits for its task to finish.");
+    expect(shown).toContain(
+      "Can't update from here: 1 needs a one-time setup (dev-2); 1 has updates from the hub off (dev-3); 1 runs an AgentAPI from before updates from the hub.",
+    );
+    expect(shown).toContain("sudo agentapi update --restart");
+  });
+
+  test("with every older agent updating from here, no hint", () => {
+    const html = renderToStaticMarkup(<VersionsCard root="" instances={[updating("a", "2.0.0", "dev-1", {}), updating("b", "1.6.1", "dev-1", {state: "failed"})]} hubVersion="2.1.0" />);
+    expect(text(html)).toContain("2 of 2 can update from here");
+    expect(html).not.toContain("Can't update from here");
+    expect(html).not.toContain("sudo agentapi update");
+  });
+
+  test("updates under way count, without a button once none is left to ask", () => {
+    const html = renderToStaticMarkup(
+      <VersionsCard root="" instances={[updating("a", "2.0.0", "dev-1", {state: "waiting"}), updating("b", "2.0.0", "dev-1", {state: "downloading"})]} hubVersion="2.1.0" />,
+    );
+    expect(text(html)).toContain("2 updating now.");
+    expect(html).not.toContain("Update the older ones");
   });
 });

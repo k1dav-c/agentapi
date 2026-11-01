@@ -8,6 +8,7 @@ import {HEADER_ACTIONS_ID} from "@/app/header";
 import {frameMessage, fromFrame, type FrameInstance, type ToFrame} from "@/lib/hub-frame";
 import {cn} from "@/lib/utils";
 import {StatusGlyph, stateTone} from "./status-glyph";
+import {UpdateStatus} from "./update-chip";
 import {VersionTag} from "./version-tag";
 
 // FrameBar heads a chat the hub opens: back to the hub's list or overview,
@@ -40,6 +41,7 @@ export function FrameBar() {
         <p className="truncate text-sm leading-tight font-semibold">{instance?.name ?? " "}</p>
         <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
           {instance && <span className={cn("min-w-0 truncate font-medium", stateTone[instance.state])}>{instance.label}</span>}
+          {instance?.update && <UpdateStatus update={instance.update} onCancel={() => window.parent.postMessage(fromFrame("cancel-update"), window.location.origin)} />}
           {instance?.agent && (
             <>
               <span aria-hidden="true" className="text-muted-foreground/40 max-[400px]:hidden">·</span>

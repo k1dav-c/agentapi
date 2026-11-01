@@ -22,10 +22,12 @@ import {
   type InstanceState,
   type VersionRelation,
 } from "@/lib/hub";
+import {olderUpdates} from "@/lib/hub-update";
 import {cn} from "@/lib/utils";
 import {Constellation} from "./brand";
 import {StatusGlyph} from "./status-glyph";
 import {agentName} from "./instance-row";
+import {UpdateOlder} from "./update";
 import {OlderMark, VersionTag} from "./version-tag";
 
 // What a waiting instance asks for: its icon and the word for it.
@@ -245,11 +247,14 @@ const RESTARTS_IN_PLACE = "v2.1.0";
 
 // VersionsCard is the AgentAPI versions of the agents the hub follows: how
 // many run each, on which machines, and how many run an older one than the
-// hub, with how to update those.
-export function VersionsCard({instances, hubVersion}: {instances: HubInstance[]; hubVersion: string}) {
+// hub, with a button that updates those it can and how to update the
+// others.
+export function VersionsCard({root, instances, hubVersion}: {root: string; instances: HubInstance[]; hubVersion: string}) {
   const totals = versionTotals(instances, hubVersion);
   if (totals.counted === 0) return null;
   const release = parseVersion(hubVersion) !== undefined;
+  const older = olderUpdates(instances, hubVersion);
+  const byHand = older.blocked.length + older.off.length + older.unsupported.length;
   return (
     <section className="mt-10" aria-labelledby="hub-versions">
       <h3 id="hub-versions" className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
@@ -302,10 +307,15 @@ export function VersionsCard({instances, hubVersion}: {instances: HubInstance[];
           </tbody>
         </table>
         {totals.older > 0 && (
-          <p className="text-xs leading-5 text-muted-foreground md:col-span-2 md:border-t md:pt-4">
-            To update: <code className="font-mono text-[12px] text-foreground">sudo agentapi update --restart</code> on machines with {RESTARTS_IN_PLACE} or later (no{" "}
-            <code className="font-mono text-[12px] text-foreground">sudo</code> if the binary is yours); before {RESTARTS_IN_PLACE}, update, then restart each AgentAPI once.
-          </p>
+          <div className="space-y-2 text-xs leading-5 text-muted-foreground md:col-span-2 md:border-t md:pt-4">
+            <UpdateOlder root={root} older={older} />
+            {byHand > 0 && (
+              <p>
+                To update: <code className="font-mono text-[12px] text-foreground">sudo agentapi update --restart</code> on machines with {RESTARTS_IN_PLACE} or later (no{" "}
+                <code className="font-mono text-[12px] text-foreground">sudo</code> if the binary is yours); before {RESTARTS_IN_PLACE}, update, then restart each AgentAPI once.
+              </p>
+            )}
+          </div>
         )}
       </div>
     </section>
@@ -425,7 +435,7 @@ export function Overview({
           </div>
         )}
 
-        <VersionsCard instances={instances} hubVersion={hubVersion} />
+        <VersionsCard root={root} instances={instances} hubVersion={hubVersion} />
       </div>
     </div>
   );

@@ -4,7 +4,28 @@
 
 import type {components} from "./api-schema";
 
-export type Summary = components["schemas"]["SummaryBody"];
+// InstanceUpdate is the summary's update: whether the AgentAPI takes updates
+// through its API (POST /update) and how far one got. AgentAPIs that can't
+// update this way leave it out. Declared here until api-schema.ts has it.
+export interface InstanceUpdate {
+  // allowed: allow-update is on for its machine.
+  allowed: boolean;
+  // blocked: allowed, but it can't replace its binary; why, and the
+  // one-time fix.
+  blocked?: string;
+  // state: idle, checking, downloading, waiting (for the agent to be
+  // idle), restarting or failed; a newer AgentAPI may add others.
+  state: string;
+  // target is the version it updates to, once known.
+  target?: string;
+  // error is why the last attempt failed.
+  error?: string;
+  // keeps_conversation: it runs with a state DB, so the conversation
+  // carries over the restart.
+  keeps_conversation: boolean;
+}
+
+export type Summary = components["schemas"]["SummaryBody"] & {update?: InstanceUpdate};
 export type HubConnection = "connecting" | "connected" | "unreachable" | "stopped";
 
 // InstanceState is what a row says of an instance, the most pressing
@@ -400,15 +421,19 @@ export function compareVersions(a: string | undefined, b: string | undefined): n
   return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
 }
 
+// currentSummary reports whether an instance's summary is of the run the
+// hub knows: one that restarted keeps its last summary until the new run's
+// first arrives, and the new run's event already named the new run.
+export function currentSummary(instance: HubInstance): boolean {
+  const reported = instance.summary?.instance;
+  return !instance.server_id || !reported?.server_id || reported.server_id === instance.server_id;
+}
+
 // instanceVersion is the AgentAPI version an instance runs, "" when it
 // doesn't say. Its summary's is the instance's own latest word, unless the
-// summary is of an earlier run: one that restarted keeps its last summary
-// until the new run's first arrives, and the new run's event already said
-// its version.
+// summary is of an earlier run, whose version the new run's event replaced.
 export function instanceVersion(instance: HubInstance): string {
-  const reported = instance.summary?.instance;
-  const sameRun = !instance.server_id || !reported?.server_id || reported.server_id === instance.server_id;
-  return ((sameRun && reported?.agentapi_version) || instance.agentapi_version || "").trim();
+  return ((currentSummary(instance) && instance.summary?.instance?.agentapi_version) || instance.agentapi_version || "").trim();
 }
 
 // VersionRelation is how a version compares with the hub's: unknown when

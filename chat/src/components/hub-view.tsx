@@ -28,6 +28,7 @@ import {
   type InstanceState,
 } from "@/lib/hub";
 import {frameMessage, toFrame, type FromFrame} from "@/lib/hub-frame";
+import {shownUpdate} from "@/lib/hub-update";
 import {checkHubSession, type HubSession} from "@/lib/hub-session";
 import {getReconnectDelay} from "@/lib/reconnect";
 import {cn} from "@/lib/utils";
@@ -39,6 +40,8 @@ import {ListEdge, useListWidth} from "./hub/list-edge";
 import {Onboarding, Overview} from "./hub/overview";
 import {SignIn} from "./hub/sign-in";
 import {StatusGlyph, stateTone} from "./hub/status-glyph";
+import {cancelFromHub} from "./hub/update";
+import {UpdateStatus} from "./hub/update-chip";
 import {VersionTag} from "./hub/version-tag";
 
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "/chat").replace(/\/$/, "");
@@ -218,10 +221,11 @@ export function HubView() {
       const message = frameMessage<FromFrame>(event);
       if (message?.type === "ready") setFramed(chat.dataset.instance);
       else if (message?.type === "back") select(undefined);
+      else if (message?.type === "cancel-update" && chat.dataset.instance) void cancelFromHub(root, chat.dataset.instance);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [select]);
+  }, [select, root]);
 
   // Back and forward show what the URL names.
   useEffect(() => {
@@ -539,6 +543,7 @@ export function HubView() {
                         key={instance.id}
                         instance={instance}
                         hubVersion={hubVersion}
+                        root={root}
                         groups={names}
                         now={now}
                         selected={instance.id === selected}
@@ -624,6 +629,7 @@ function FrameInfo({frame, instance, hubVersion, root}: {frame: React.RefObject<
       version: instanceVersion(instance) || undefined,
       hubVersion: hubVersion || undefined,
       lastKnown: instance.connection !== "connected",
+      update: shownUpdate(instance),
       tab: chatURL(basePath, root, instance.id),
     }),
   );
@@ -639,6 +645,7 @@ function InstanceBar({instance, hubVersion, root, onBack}: {instance: HubInstanc
   const state = instanceState(instance);
   const agent = agentName(instance);
   const version = instanceVersion(instance);
+  const update = shownUpdate(instance);
   return (
     <div className="box-content flex h-12 shrink-0 items-center gap-1 border-b bg-background px-1.5 pt-[env(safe-area-inset-top)] sm:h-14 md:gap-2 md:px-3">
       <Button variant="ghost" size="icon" className="size-10 shrink-0 rounded-full md:hidden" onClick={onBack} aria-label="Back to Agents">
@@ -652,6 +659,7 @@ function InstanceBar({instance, hubVersion, root, onBack}: {instance: HubInstanc
         <p className="truncate text-sm leading-tight font-semibold">{displayName(instance)}</p>
         <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
           <span className={cn("shrink-0 font-medium", stateTone[state])}>{stateLabel(instance)}</span>
+          {update && <UpdateStatus update={update} onCancel={() => void cancelFromHub(root, instance.id)} />}
           {agent && (
             <>
               <span aria-hidden="true" className="text-muted-foreground/40">·</span>

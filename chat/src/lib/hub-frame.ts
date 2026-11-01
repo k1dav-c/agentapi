@@ -1,9 +1,10 @@
-import type {InstanceState} from "./hub";
+import type {InstanceState, InstanceUpdate} from "./hub";
 
 // The hub's page and the chat of the instance it opens in a frame talk with
 // window messages. The chat draws the bar above itself (one bar, with its
 // own actions in it, instead of the hub's bar and a row of the chat's), the
-// hub tells it what to show there, and the chat asks the hub to go back.
+// hub tells it what to show there, and the chat asks the hub to go back or
+// to cancel the instance's update.
 
 // What the hub tells the chat about the instance.
 export type FrameInstance = {
@@ -18,12 +19,14 @@ export type FrameInstance = {
   version?: string;
   hubVersion?: string;
   lastKnown?: boolean;
+  // An update under way, or one that failed, for its chip.
+  update?: InstanceUpdate;
   // The chat without the hub, for a tab of its own.
   tab: string;
 };
 
 export type ToFrame = {source: "agentapi.hub"; type: "instance"; instance: FrameInstance};
-export type FromFrame = {source: "agentapi.hub"; type: "ready" | "back"};
+export type FromFrame = {source: "agentapi.hub"; type: "ready" | "back" | "cancel-update"};
 
 const SOURCE = "agentapi.hub";
 

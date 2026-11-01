@@ -94,7 +94,8 @@ WantedBy=default.target
 
 更新之後，hub 也用同樣的方式重新啟動（`systemctl --user restart agentapi-hub`）。AgentAPI 可以用
 `agentapi update --restart` 或 [`agentapi restart`](../README.zh-TW.md#agentapi-restart) 原地重新
-啟動，hub 不在其中。哪些 AgentAPI 還停在舊版，總覽的[版本](#版本)卡片會列出來。
+啟動，hub 不在其中。哪些 AgentAPI 還停在舊版，總覽的[版本](#版本)卡片會列出來；機器允許的話，
+也能從那裡直接更新。
 
 ### 3. 讓每台機器的 AgentAPI 加入
 
@@ -115,6 +116,7 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
   同時用在 3286 的 Claude Code 和 3285 的 Codex。
 - 同一個檔案也能讓各 AgentAPI 重新啟動（更新、重新開機）後保留對話：加上
   `state-db: ~/.agentapi/state/{port}.db`，見[持久保存的工作階段](../README.zh-TW.md#持久保存的工作階段)。
+- 想讓 hub 更新這台機器的 AgentAPI，加入時再加上 `--allow-update`（見[從 hub 更新](#從-hub-更新)）。
 - 正在執行的 AgentAPI 會立刻套用，一秒內就出現在 hub 上。1.2 之前啟動的 AgentAPI 沒有在這台機器
   上登記，`join` 找不到它們：重新啟動它們或整個 workspace 一次。
 - hub 轉送請求時，`Host` 標頭是實例的 VPN 名稱。AgentAPI 預設只接受 `localhost`、`127.0.0.1` 和
@@ -205,7 +207,48 @@ scope 只算一次，取最新的數字（`updated_at`）。hub 目前沒在追�
 執行的版本，不加標記。更新並重新啟動之後，AgentAPI 一回來，那一列就會顯示新版本。
 
 總覽最下方的 **Versions** 卡片依版本統計 hub 正在追蹤的 agent 和它們所在的機器，並寫出有幾個比
-hub 舊。更新這些實例的方式：
+hub 舊。
+
+#### 從 hub 更新
+
+機器允許的話，AgentAPI 會在 hub 要求時自行更新。在那一列的 **⋯** 選單選 **Update AgentAPI…**，
+會先請你確認。預設會等 agent 閒置才更新：手上的任務做完，也沒有核准、提問、計畫或終端機對話框在等
+回覆。**Update now** 不等，會直接中斷正在跑的任務。接著 AgentAPI 下載符合機器作業系統和架構的最新
+正式版，用該版的 `checksums.txt` 驗證後安裝，再像 [`agentapi restart`](../README.zh-TW.md#agentapi-restart)
+一樣原地重新啟動。同一台機器上的 AgentAPI 共用一個 binary：第一個負責替換，其他的只要重新啟動。
+
+更新期間，那一列會顯示進度：檢查中、下載中、等任務結束、重新啟動中。還在等任務結束時，可以用
+**⋯** 選單的 **Cancel the update**，或開啟的 agent 上方那一列的 **Cancel** 取消。更新失敗時會標示
+出來；滑鼠移上去可以看到錯誤，或再開一次 **Update AgentAPI…** 查看並重試。AgentAPI 回來之後，那一列
+就會顯示新版本。
+
+**Versions** 卡片上的 **Update the older ones**，會一次替所有比 hub 舊、又能這樣更新的已連線 agent
+送出更新；同一台機器上的 AgentAPI 會自己輪流。送出前會先確認，並寫出有幾個會從新的對話開始。之後
+卡片會寫出送出了幾個，以及哪些 agent 無法更新、原因是什麼。
+
+每台機器需要：
+
+- **允許更新。** 預設不接受 hub 的更新，每台機器要開啟一次：在 `~/.agentapi/config.yaml` 加上
+  `allow-update: true`，或加入 hub 時用 `agentapi hub join … --allow-update`。AgentAPI 啟動時才會讀
+  這個設定，所以要重新啟動一次（`agentapi restart --all`）。在那之前，選單項目會註明這台機器關閉了
+  更新，點開的對話框附有要加的那一行。
+- **binary 所在目錄的寫入權限。** AgentAPI 替換的是自己的 binary（會先解析 symlink），而且從不執行
+  `sudo`。binary 放在 root 擁有的目錄（例如 `/usr/local/bin`）時就無法替換，選單項目會註明需要一次性
+  設定，點開的對話框附有指令：把 binary 搬到你的 `~/.local/bin`，原處改放 symlink。binary 在
+  `/usr/local/bin` 時：
+
+  ```bash
+  mkdir -p ~/.local/bin && cp /usr/local/bin/agentapi ~/.local/bin/agentapi \
+    && sudo ln -sf ~/.local/bin/agentapi /usr/local/bin/agentapi
+  ```
+
+- **狀態資料庫，才能保留對話。** 只有使用狀態資料庫的 AgentAPI，重新啟動後才會保留對話和 agent 的
+  工作階段，並在重新啟動後送出佇列中的訊息。沒有的話，對話會從頭開始，確認時也會提醒。在設定檔加上
+  `state-db: ~/.agentapi/state/{port}.db`（見[步驟 3](#3-讓每台機器的-agentapi-加入)）。
+
+#### 手動更新
+
+還不支援從 hub 更新的舊版 AgentAPI，選單裡不會多出這個項目；卡片會說明怎麼更新。在那台機器上：
 
 - 2.1.0 以後的 AgentAPI 能原地重新啟動：在那台機器上執行 `sudo agentapi update --restart`，更新
   binary 後，它的 AgentAPI 會原地重新啟動到新版（binary 屬於你自己時不必加 `sudo`）。
@@ -217,7 +260,7 @@ hub 舊。更新這些實例的方式：
 ![清單會顯示的每種狀態](screenshots/hub-list.png)
 
 每一列顯示 agent 的名稱（`--name`，預設為工作目錄名稱）和 AgentAPI 版本（見[版本](#版本)）、它在等
-什麼或在做什麼、多久以前、agent 和機器；佇列有訊息、最近 24 小時的花費（見[花費](#花費)），以及用量限制超過 60% 時也會顯示。同一個[群組](#群組)內，各列依下表的狀態順序排列，
+什麼或在做什麼、多久以前、agent 和機器；佇列有訊息、最近 24 小時的花費（見[花費](#花費)），以及用量限制超過 60% 時也會顯示。AgentAPI 正在更新或更新失敗時，會另起一行顯示（見[從 hub 更新](#從-hub-更新)）。同一個[群組](#群組)內，各列依下表的狀態順序排列，
 同狀態再依名稱排序。每種狀態都有自己的形狀，不靠顏色也看得出來：
 
 | 圖示 | 第二行開頭 | 意思 |
@@ -249,7 +292,9 @@ hub 舊。更新這些實例的方式：
 ![手機上一列的選單：群組、新群組和 Forget](screenshots/hub-phone-menu.png)
 
 可以依客戶、專案或機器，把實例分成自己的群組。每一列最後的 **⋯** 可以把實例移到某個群組、
-**New group…**（新群組）或 **No group**（不分組）。群組保存在 hub 上，所以手機和桌面看到的一樣；
+**New group…**（新群組）或 **No group**（不分組）。同一個選單也能靜音（見[靜音](#靜音)）、更新
+AgentAPI（見[從 hub 更新](#從-hub-更新)），以及移除已停止的實例（見[加入與移除實例](#加入與移除實例)）。
+群組保存在 hub 上，所以手機和桌面看到的一樣；
 實例自己的事件不會改動它所屬的群組。
 
 有了群組之後，清單會依名稱為每個群組加上標題，沒有分組的實例排在最後的 **Ungrouped** 底下。標題會
@@ -275,6 +320,7 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 請求。上方的列顯示 agent 的狀態、agent、機器和 AgentAPI 版本，也放著聊天介面自己的搜尋、終端機和 Explorer 按鈕；**New tab** 會單獨開啟聊天介面，**×**（或
 **Esc**）會回到總覽。開啟 agent 會在瀏覽紀錄新增一頁，所以「上一頁」會回到清單或總覽；從一個 agent
 換到另一個則不會再新增。網址會記住目前的 agent（`#<id>`），重新整理或從書籤開啟都會回到同一個。
+AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務結束時附有 **Cancel**（見[從 hub 更新](#從-hub-更新)）。
 
 ### 快捷鍵與通知
 
@@ -355,8 +401,10 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 - `~/.agentapi/hub/instances.json` 保存手動加入的實例的 token，建立時只有擁有者能讀取。
   `~/.agentapi/config.yaml` 保存 hub secret，`agentapi hub join` 也以同樣的權限寫入。
 - 登入時會送出 hub token。hub 只開在 VPN 上，或放在 HTTPS 後面。
-- 登入 hub 的人能做的事，等同各 AgentAPI 允許的事：送任務、回覆核准、使用終端機。hub token 只給
-  你也願意給實例 token 的人。
+- 登入 hub 的人能做的事，等同各 AgentAPI 允許的事：送任務、回覆核准、使用終端機，以及更新機器允許
+  更新的 AgentAPI。hub token 只給你也願意給實例 token 的人。
+- hub 要求更新時，AgentAPI 只會安裝最新的正式版，並用該版的 `checksums.txt` 驗證：hub 無法指定版本
+  或網址。AgentAPI 從不執行 `sudo`，機器沒有允許（`allow-update: true`）時也不會更新。
 - 用 `--no-token` 時，這指的是所有連得到 hub port 的人：hub 一定要放在另一層登入後面，不能開在公開
   位址上。請用 `--allowed-hosts` 列出你開啟 hub 用的名稱（Coder port 網址的主機名、VPN 名稱）：
   否則網站可以把自己的名稱指向 hub 的位址，讓它的網頁連到 hub（DNS rebinding）。IP 位址和
@@ -389,6 +437,10 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 | 頁面說 hub 沒有回應 | 位址錯誤，或 hub 沒有執行 | 開啟 `http://<hub>:3290/api/session`；hub 執行中會回傳 JSON |
 | 透過 Coder 的 port 網址開啟時，先要求登入 Coder | Coder 的 port 網址需要登入 Coder | 在那個瀏覽器先登入 Coder，再登入 hub |
 | `the hub doesn't answer to <name>; add it to --allowed-hosts` | hub 設了 `--allowed-hosts`，而你用了別的名稱開啟 | 把這個名稱加進 `--allowed-hosts` |
+| **Update AgentAPI…** 說更新已關閉 | 這台機器不接受 hub 的更新 | 在那台機器的 `~/.agentapi/config.yaml` 加上 `allow-update: true`，再執行 `agentapi restart --all` |
+| **Update AgentAPI…** 要求一次性設定 | AgentAPI 無法寫入 binary 所在的目錄，例如 root 擁有的 `/usr/local/bin` | 在那台機器上執行一次畫面上的指令 |
+| 那一列顯示 **Update failed** | 檢查或下載新版時出錯 | 滑鼠移上去，或開啟 **Update AgentAPI…** 查看錯誤，再試一次 |
+| 已連線的 agent，**⋯** 選單裡沒有任何更新項目 | 它的 AgentAPI 太舊，還不支援從 hub 更新 | 手動更新（見[手動更新](#手動更新)） |
 | hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案不完整，例如寫到一半當機，或磁碟滿了 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來；其他實例要重新加入，群組和靜音也要重新設定 |
 
 在實例所在的機器上執行 `agentapi hub status`，可以看到設定檔指向哪個 hub，以及每個執行中的
@@ -424,6 +476,7 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | `--config` | `~/.agentapi/config.yaml` | 要寫入的設定檔 |
 | `--registry-dir` | `~/.agentapi/instances` | 執行中 AgentAPI 的登記目錄 |
 | `--no-check` | `false` | 不檢查 hub 是否收得到事件就加入（用於還沒啟動的 hub） |
+| `--allow-update` | `false` | 讓 hub 可以更新這台機器的 AgentAPI（在設定檔寫入 `allow-update: true`）；見[從 hub 更新](#從-hub-更新) |
 
 `join` 在寫入任何東西之前，會先確認 hub 收得到這台機器的事件：它送給 hub 一個有簽章的
 `webhook.test` 事件。hub 連不到、前面有登入頁（Coder 的 port 網址會導向 Coder 登入），或 secret
@@ -432,7 +485,8 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 
 `join` 把 `webhook-url`、`webhook-secret`、`webhook-events` 和 `public-url` 寫進設定檔，並用
 `PUT /webhook` 套用到執行中的 AgentAPI，保留各自的逾時和重試次數。`leave` 移除這些設定，並關掉執行中
-AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。
+AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。加上 `--allow-update` 時，
+`join` 還會寫入 `allow-update: true`，AgentAPI 啟動時才會讀取。
 
 用較早版本加入的機器，還會另外送出 `task.*`、`request.*`、`login.*`、`limit.*` 和 `agent.error`，
 每個最多 64 KiB；hub 只把它們當成實例還在的跡象。再執行一次同樣的 `agentapi hub join`，就只會送
@@ -451,7 +505,7 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音 |
 | `DELETE /api/instances/{id}` | 移除實例 |
 | `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`），再送 `instance`（某個實例有頁面看得到的變動；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
-| `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面 |
+| `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面；頁面用 `POST /i/{id}/update` 更新實例，用 `DELETE` 取消 |
 
 除了 `/hooks` 和 `/api/session`，每個端點都需要 session cookie 或
 `Authorization: Bearer <hub token>`。任何回應裡都不會出現實例 token。
@@ -460,7 +514,7 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 
 | 檔案 | 寫入者 | 內容 |
 | --- | --- | --- |
-| `~/.agentapi/config.yaml` | `agentapi hub join` | hub 的 webhook，每個 `agentapi server` 都會讀取 |
+| `~/.agentapi/config.yaml` | `agentapi hub join` | hub 的 webhook 和 `allow-update`，每個 `agentapi server` 都會讀取 |
 | `~/.agentapi/instances/` | `agentapi server` | 這台機器上執行中的 AgentAPI，供 `join` 和 `agentapi list` 使用 |
 | `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組，以及手動加入的實例的 token |
 
@@ -469,6 +523,6 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 - hub 對所有實例都提供它自己版本的聊天介面。hub 和各實例請使用相同的 AgentAPI 版本；哪些不同，
   見[版本](#版本)。
 - 所有人共用一個 hub token：沒有個別帳號或權限。
-- hub 只監看和開啟 AgentAPI，不會啟動或停止它們。
+- hub 監看和開啟 AgentAPI，也能更新機器允許更新的 AgentAPI，但不會啟動或停止它們。
 - 關掉 hub 的頁面後，手機就收不到任何通知：hub 還不會送推播。每個 AgentAPI 只有一個 webhook，而
   hub 已經用掉了。
