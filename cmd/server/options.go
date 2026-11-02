@@ -63,6 +63,8 @@ type serverOptions struct {
 	// registryDir is where the server keeps its entry while it serves;
 	// empty without --registry.
 	registryDir string
+	// allowUpdate lets API clients update AgentAPI (POST /update).
+	allowUpdate bool
 }
 
 // flagSource is where the options are read from: the viper the flags are
@@ -104,6 +106,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 		prices:       expandHome(flags.GetString(FlagPrices)),
 		name:         flags.GetString(FlagName),
 		registryDir:  expandHome(flags.GetString(FlagRegistryDir)),
+		allowUpdate:  flags.GetBool(FlagAllowUpdate),
 		webhook: httpapi.WebhookConfig{
 			URL:             flags.GetString(FlagWebhookURL),
 			Timeout:         flags.GetDuration(FlagWebhookTimeout),

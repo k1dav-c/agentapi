@@ -2727,6 +2727,10 @@
             "description": "The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet.",
             "type": "boolean"
           },
+          "update": {
+            "$ref": "#/components/schemas/UpdateStatus",
+            "description": "Whether a client can update this AgentAPI to the latest release through its API (POST /update), and how far an update is. Missing from AgentAPIs that can't update through their API: earlier releases."
+          },
           "usage": {
             "$ref": "#/components/schemas/AgentUsage",
             "description": "The context window and the account's usage limits, as in GET /status."
@@ -2884,6 +2888,10 @@
           "unread": {
             "description": "The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet.",
             "type": "boolean"
+          },
+          "update": {
+            "$ref": "#/components/schemas/UpdateStatus",
+            "description": "Whether a client can update this AgentAPI to the latest release through its API (POST /update), and how far an update is. Missing from AgentAPIs that can't update through their API: earlier releases."
           },
           "usage": {
             "$ref": "#/components/schemas/AgentUsage",
@@ -3266,6 +3274,103 @@
         },
         "required": [
           "content"
+        ],
+        "type": "object"
+      },
+      "UpdateRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/UpdateRequestBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "when": {
+            "description": "When AgentAPI restarts into the new version. idle (the default): once the agent is idle, that is stable with no request (approval, question, plan) or terminal dialog open; queued messages stay queued and go out after the restart. now: at once, interrupting the agent.",
+            "enum": [
+              "idle",
+              "now"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "example": "https://example.com/schemas/UpdateResponseBody.json",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/UpdateState",
+            "description": "Where the update is, as the summary's update.state."
+          },
+          "target": {
+            "description": "The version it updates to, once known.",
+            "type": "string"
+          },
+          "up_to_date": {
+            "description": "AgentAPI runs the latest release (or a newer version) already, and the program on disk is no newer: there is nothing to update.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
+      "UpdateState": {
+        "enum": [
+          "checking",
+          "downloading",
+          "failed",
+          "idle",
+          "restarting",
+          "waiting"
+        ],
+        "example": "idle",
+        "title": "UpdateState",
+        "type": "string"
+      },
+      "UpdateStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Updates through the API are on: --allow-update, AGENTAPI_ALLOW_UPDATE, or allow-update: true in ~/.agentapi/config.yaml. Off by default.",
+            "type": "boolean"
+          },
+          "blocked": {
+            "description": "Set when updates are on but this AgentAPI can't replace its program: why, and the command to run once to fix it (the program's directory must be writable by the user AgentAPI runs as).",
+            "type": "string"
+          },
+          "error": {
+            "description": "Why the last update failed (state failed).",
+            "type": "string"
+          },
+          "keeps_conversation": {
+            "description": "It runs with --state-db, so the conversation and the agent's session carry over the restart; without it the conversation starts anew.",
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/UpdateState",
+            "description": "idle, checking (looks up the latest release), downloading, waiting (for the agent to be idle), restarting (into the new version) or failed."
+          },
+          "target": {
+            "description": "The version it updates to, once known.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "allowed",
+          "keeps_conversation",
+          "state"
         ],
         "type": "object"
       },
@@ -6848,6 +6953,141 @@
           }
         },
         "summary": "Get title"
+      }
+    },
+    "/update": {
+      "delete": {
+        "description": "Cancels the update under way while it hasn't begun to restart AgentAPI (it looks up the release, downloads it or waits for the agent to be idle), and forgets a failed one. A program it installed already stays. 409 once AgentAPI restarts; 403 unless it runs with --allow-update.",
+        "operationId": "delete-update",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Cancel an update"
+      },
+      "post": {
+        "description": "Installs the latest official release of AgentAPI (k1dav-c/agentapi on GitHub) for this machine's OS and architecture, checked against the release's checksums.txt, in place of the program AgentAPI runs, and restarts AgentAPI in place into it: the same process, a new server_id and version. The request can't choose a version or a URL. AgentAPIs that share the program replace it under a lock file next to it, and one that finds the program on disk newer than the one it runs only restarts. `when` is `idle` (the default: once the agent is stable, with no request or terminal dialog open) or `now`. Returns 200 with `up_to_date` when AgentAPI runs the latest release already, else 202 with the state and the version it updates to; while an update is under way it returns its state, and `now` has it restart without waiting. 403 unless AgentAPI runs with --allow-update; 409 when it can't replace its program (the message and the summary's update.blocked say why and how to fix it) or stops; 502 when the latest release can't be looked up. Every change of the state sends summary_update. With --state-db the conversation and the agent's session carry over the restart; without it the conversation starts anew.",
+        "operationId": "post-update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRequestBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateResponseBody"
+                }
+              }
+            },
+            "description": "AgentAPI runs the latest release already."
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateResponseBody"
+                }
+              }
+            },
+            "description": "The update is under way."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "Update AgentAPI"
       }
     },
     "/upload": {

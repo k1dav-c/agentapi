@@ -258,6 +258,7 @@ func TestServerCmd_AllArgs_Defaults(t *testing.T) {
 		{"allowed-hosts default", FlagAllowedHosts, []string{"localhost", "127.0.0.1", "[::1]"}, func() any { return viper.GetStringSlice(FlagAllowedHosts) }},
 		{"allowed-origins default", FlagAllowedOrigins, []string{"http://localhost:3284", "http://localhost:3000", "http://localhost:3001"}, func() any { return viper.GetStringSlice(FlagAllowedOrigins) }},
 		{"bind default", FlagBind, "", func() any { return viper.GetString(FlagBind) }},
+		{"allow-update default", FlagAllowUpdate, false, func() any { return viper.GetBool(FlagAllowUpdate) }},
 	}
 
 	for _, tt := range tests {
@@ -293,6 +294,7 @@ func TestServerCmd_AllEnvVars(t *testing.T) {
 		{"AGENTAPI_ALLOWED_HOSTS", "AGENTAPI_ALLOWED_HOSTS", "localhost example.com", []string{"localhost", "example.com"}, func() any { return viper.GetStringSlice(FlagAllowedHosts) }},
 		{"AGENTAPI_ALLOWED_ORIGINS", "AGENTAPI_ALLOWED_ORIGINS", "https://example.com http://localhost:3000", []string{"https://example.com", "http://localhost:3000"}, func() any { return viper.GetStringSlice(FlagAllowedOrigins) }},
 		{"AGENTAPI_BIND", "AGENTAPI_BIND", "127.0.0.1", "127.0.0.1", func() any { return viper.GetString(FlagBind) }},
+		{"AGENTAPI_ALLOW_UPDATE", "AGENTAPI_ALLOW_UPDATE", "true", true, func() any { return viper.GetBool(FlagAllowUpdate) }},
 	}
 
 	for _, tt := range tests {

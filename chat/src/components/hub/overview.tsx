@@ -3,7 +3,6 @@
 import {Fragment} from "react";
 import {ArrowRight, CircleCheck, ClipboardList, Gauge, KeyRound, MessageCircleQuestion, ShieldQuestion, SquareTerminal} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
-import {CopyCommand} from "@/components/copy-command";
 import {
   activity,
   countedSpends,
@@ -22,10 +21,13 @@ import {
   type InstanceState,
   type VersionRelation,
 } from "@/lib/hub";
+import {olderUpdates} from "@/lib/hub-update";
 import {cn} from "@/lib/utils";
 import {Constellation} from "./brand";
 import {StatusGlyph} from "./status-glyph";
 import {agentName} from "./instance-row";
+import {JoinMachine} from "./join-machine";
+import {UpdateOlder} from "./update";
 import {OlderMark, VersionTag} from "./version-tag";
 
 // What a waiting instance asks for: its icon and the word for it.
@@ -245,11 +247,14 @@ const RESTARTS_IN_PLACE = "v2.1.0";
 
 // VersionsCard is the AgentAPI versions of the agents the hub follows: how
 // many run each, on which machines, and how many run an older one than the
-// hub, with how to update those.
-export function VersionsCard({instances, hubVersion}: {instances: HubInstance[]; hubVersion: string}) {
+// hub, with a button that updates those it can and how to update the
+// others.
+export function VersionsCard({root, instances, hubVersion}: {root: string; instances: HubInstance[]; hubVersion: string}) {
   const totals = versionTotals(instances, hubVersion);
   if (totals.counted === 0) return null;
   const release = parseVersion(hubVersion) !== undefined;
+  const older = olderUpdates(instances, hubVersion);
+  const byHand = older.blocked.length + older.off.length + older.unsupported.length;
   return (
     <section className="mt-10" aria-labelledby="hub-versions">
       <h3 id="hub-versions" className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
@@ -302,10 +307,15 @@ export function VersionsCard({instances, hubVersion}: {instances: HubInstance[];
           </tbody>
         </table>
         {totals.older > 0 && (
-          <p className="text-xs leading-5 text-muted-foreground md:col-span-2 md:border-t md:pt-4">
-            To update: <code className="font-mono text-[12px] text-foreground">sudo agentapi update --restart</code> on machines with {RESTARTS_IN_PLACE} or later (no{" "}
-            <code className="font-mono text-[12px] text-foreground">sudo</code> if the binary is yours); before {RESTARTS_IN_PLACE}, update, then restart each AgentAPI once.
-          </p>
+          <div className="space-y-2 text-xs leading-5 text-muted-foreground md:col-span-2 md:border-t md:pt-4">
+            <UpdateOlder root={root} older={older} />
+            {byHand > 0 && (
+              <p>
+                To update: <code className="font-mono text-[12px] text-foreground">sudo agentapi update --restart</code> on machines with {RESTARTS_IN_PLACE} or later (no{" "}
+                <code className="font-mono text-[12px] text-foreground">sudo</code> if the binary is yours); before {RESTARTS_IN_PLACE}, update, then restart each AgentAPI once.
+              </p>
+            )}
+          </div>
         )}
       </div>
     </section>
@@ -425,7 +435,7 @@ export function Overview({
           </div>
         )}
 
-        <VersionsCard instances={instances} hubVersion={hubVersion} />
+        <VersionsCard root={root} instances={instances} hubVersion={hubVersion} />
       </div>
     </div>
   );
@@ -434,14 +444,13 @@ export function Overview({
 
 // Onboarding shows how to connect the first agents: once per machine.
 export function Onboarding({root, onAdd, compact = false}: {root: string; onAdd: () => void; compact?: boolean}) {
-  const steps = [
-    {title: "Update AgentAPI on each machine", body: "The hub needs AgentAPI 1.3 or later.", command: "sudo agentapi update"},
+  const steps: {title: string; body: string; join?: boolean}[] = [
     {
-      title: "Join this hub",
-      body: "Once per machine. It writes the hub into ~/.agentapi/config.yaml, so the agents join on every start.",
-      command: `agentapi hub join ${root}/hooks --secret "$HUB_SECRET" --public-url 'http://<this machine>:{port}'`,
+      title: "Join each machine",
+      body: "Once per machine: run the command there, or give the prompt to its agent. It writes the hub into ~/.agentapi/config.yaml, so the agents join on every start.",
+      join: true,
     },
-    {title: "Restart the agents once", body: "Agents running already show up within a second; ones started before 1.2 join on their next start.", command: ""},
+    {title: "Restart the agents once", body: "Agents running already show up within a second; ones started before 1.2 join on their next start."},
   ];
   return (
     <div className={cn("hub-rise", compact ? "px-4 py-6" : "")}>
@@ -458,7 +467,11 @@ export function Onboarding({root, onAdd, compact = false}: {root: string; onAdd:
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold">{step.title}</p>
               <p className="mt-0.5 text-sm text-muted-foreground">{step.body}</p>
-              {step.command && <CopyCommand text={step.command} />}
+              {step.join && (
+                <div className="mt-4">
+                  <JoinMachine root={root} />
+                </div>
+              )}
             </div>
           </li>
         ))}

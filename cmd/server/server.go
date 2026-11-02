@@ -139,7 +139,7 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 	if err != nil {
 		return err
 	}
-	srv, err := httpapi.NewServer(ctx, serverConfig(opts, agent, stateDB, apiToken, cwd, prices))
+	srv, err := httpapi.NewServer(ctx, serverConfig(opts, agent, stateDB, apiToken, cwd, prices, self))
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}
@@ -176,8 +176,9 @@ func resolveAPIToken(opts serverOptions, logger *slog.Logger) (string, error) {
 	}
 }
 
-// serverConfig is the configuration of the server for opts and agent.
-func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, apiToken, cwd string, prices *pricing.Table) httpapi.ServerConfig {
+// serverConfig is the configuration of the server for opts and agent;
+// self, if set, restarts it in place.
+func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, apiToken, cwd string, prices *pricing.Table, self *selfExec) httpapi.ServerConfig {
 	config := httpapi.ServerConfig{
 		AgentType:      opts.agentType,
 		Transport:      opts.transport,
@@ -195,6 +196,13 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 		RegistryDir:    opts.registryDir,
 		// SIGUSR2 (handleSignals).
 		RestartsInPlace: runtime.GOOS != "windows",
+		Update:          httpapi.UpdateConfig{Allowed: opts.allowUpdate},
+	}
+	if self != nil {
+		config.Update.Program = self.path
+		if config.RestartsInPlace {
+			config.Update.Restart = func(ctx context.Context) error { return self.restart(ctx, "update") }
+		}
 	}
 	switch opts.transport {
 	case httpapi.TransportPTY:
@@ -231,7 +239,8 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, agent *runningAgent, self *selfExec) error {
 	gracefulCtx, gracefulCancel := context.WithCancel(ctx)
 	defer gracefulCancel()
-	// Signals end gracefulCtx.
+	// Signals and restarts in place end gracefulCtx.
+	self.arm(gracefulCtx, gracefulCancel, logger)
 	handleSignals(gracefulCtx, gracefulCancel, logger, srv, self)
 	logger.Info("Starting server", "address", srv.ListenAddr())
 
@@ -465,6 +474,7 @@ const (
 	FlagAPIToken               = "api-token"
 	FlagBind                   = "bind"
 	FlagLogLevel               = "log-level"
+	FlagAllowUpdate            = "allow-update"
 )
 
 func CreateServerCmd() *cobra.Command {
@@ -553,6 +563,7 @@ func CreateServerCmd() *cobra.Command {
 		{FlagAPIToken, "", "", "API token for Bearer authentication. If set without a value, a random token is generated. Empty (default) disables authentication.", "string"},
 		{FlagBind, "", "", "Address to listen on: an IP address or hostname without a port (e.g. 127.0.0.1 or ::1). Empty (default) listens on all interfaces", "string"},
 		{FlagLogLevel, "", "info", "Least important level to log: " + logctx.LevelNames, "string"},
+		{FlagAllowUpdate, "", false, "Let API clients, such as a hub, update AgentAPI to the latest release (POST /update), which then restarts in place; the program's directory must be writable by the user AgentAPI runs as", "bool"},
 	}
 
 	for _, spec := range flagSpecs {

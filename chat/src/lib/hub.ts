@@ -4,7 +4,13 @@
 
 import type {components} from "./api-schema";
 
-export type Summary = components["schemas"]["SummaryBody"];
+// InstanceUpdate is the summary's update: whether the AgentAPI takes updates
+// through its API (POST /update) and how far one got; AgentAPIs that can't
+// update this way leave it out. Its state stays open, as a newer AgentAPI
+// may add states.
+export type InstanceUpdate = Omit<components["schemas"]["UpdateStatus"], "state"> & {state: string};
+
+export type Summary = Omit<components["schemas"]["SummaryBody"], "update"> & {update?: InstanceUpdate};
 export type HubConnection = "connecting" | "connected" | "unreachable" | "stopped";
 
 // InstanceState is what a row says of an instance, the most pressing
@@ -29,6 +35,10 @@ export interface HubInstance {
   workspace_url?: string;
   source: "webhook" | "manual";
   last_seen: string;
+  // changed_at is when the hub last saw it change what its row shows it
+  // does, or first saw it; none from a hub that doesn't record it, or for
+  // one it kept before it did, until its next change.
+  changed_at?: string;
   connection: HubConnection;
   error?: string;
   // group is the group someone put it in on the hub's page; none when empty.
@@ -36,6 +46,10 @@ export interface HubInstance {
   // muted is what it waited for when someone muted it; the hub ends the
   // mute once that changes.
   muted?: string;
+  // pin is its place among the instances pinned to the top of the list,
+  // from 1; none when it isn't pinned. The hub keeps them, numbered without
+  // gaps.
+  pin?: number;
   summary?: Summary | null;
   // state is as the hub sends it; instanceState reads it.
   state: string;
@@ -400,15 +414,19 @@ export function compareVersions(a: string | undefined, b: string | undefined): n
   return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
 }
 
+// currentSummary reports whether an instance's summary is of the run the
+// hub knows: one that restarted keeps its last summary until the new run's
+// first arrives, and the new run's event already named the new run.
+export function currentSummary(instance: HubInstance): boolean {
+  const reported = instance.summary?.instance;
+  return !instance.server_id || !reported?.server_id || reported.server_id === instance.server_id;
+}
+
 // instanceVersion is the AgentAPI version an instance runs, "" when it
 // doesn't say. Its summary's is the instance's own latest word, unless the
-// summary is of an earlier run: one that restarted keeps its last summary
-// until the new run's first arrives, and the new run's event already said
-// its version.
+// summary is of an earlier run, whose version the new run's event replaced.
 export function instanceVersion(instance: HubInstance): string {
-  const reported = instance.summary?.instance;
-  const sameRun = !instance.server_id || !reported?.server_id || reported.server_id === instance.server_id;
-  return ((sameRun && reported?.agentapi_version) || instance.agentapi_version || "").trim();
+  return ((currentSummary(instance) && instance.summary?.instance?.agentapi_version) || instance.agentapi_version || "").trim();
 }
 
 // VersionRelation is how a version compares with the hub's: unknown when

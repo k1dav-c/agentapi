@@ -167,8 +167,9 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 		if strings.TrimSpace(input.Body.Content) == "" {
 			return nil, huma.Error400BadRequest("message must not be empty")
 		}
-		if s.restarting.Load() {
-			// The new agent gets it once it runs.
+		if s.restarting.Load() || s.updating.Load() {
+			// The new agent, or AgentAPI's new program, gets it once it
+			// runs.
 			s.queueMessageLocked(resp, input.Body.Content, false)
 			return resp, nil
 		}
@@ -184,8 +185,11 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 		if s.agentio == nil {
 			return nil, huma.Error400BadRequest("raw messages need a terminal; the native transport has none")
 		}
-		if s.restarting.Load() {
+		switch {
+		case s.restarting.Load():
 			return nil, huma.Error409Conflict(errRestarting.Error())
+		case s.updating.Load():
+			return nil, huma.Error409Conflict(errStopping.Error())
 		}
 		if _, err := s.agentio.Write([]byte(input.Body.Content)); err != nil {
 			return nil, fmt.Errorf("failed to send message: %w", err)

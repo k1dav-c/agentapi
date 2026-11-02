@@ -96,9 +96,10 @@ answers write keys directly to the agent's terminal.
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db` (native and PTY), and the import of a `--state-file` |
 | `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). `lib/httpapi` keeps aliases under the same names, which the OpenAPI schema uses |
-| `lib/hub/` | `agentapi hub serve`: the instances and the groups set on its page (`store.go`, kept in a file), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`); the user guide is [hub.md](hub.md) |
+| `lib/hub/` | `agentapi hub serve`: the instances, the groups and pins set on its page and when each last changed what its row shows (`store.go`, kept in a file), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
 | `lib/userconfig/` | The user's settings file, `~/.agentapi/config.yaml`: flags by name, read by `agentapi server`, written by `agentapi hub` |
 | `lib/registry/` | The entries of the AgentAPIs running on a machine (`~/.agentapi/instances`): writing one atomically, listing them and removing those whose process is gone |
+| `lib/selfupdate/` | Installs the latest release of k1dav-c/agentapi in place of the program (`agentapi update`, `POST /update`): the lookup on GitHub, the binary for the platform, its check against the release's `checksums.txt` and that it runs as that version, and the rename under a lock file next to the program (`Install`); whether the user can replace the program, with the one-time fix (`Program.Blocked`); `selfupdatetest` serves a fake release for tests |
 | `lib/shellterm/` | The shared shell terminal of native sessions |
 | `lib/htmlpreview/` | Makes HTML previews self-contained for `GET /files/preview` by embedding resources referenced by relative paths as data: URLs |
 | `lib/mcpconfig/` | Reads and writes the agents' MCP configuration files |
@@ -148,14 +149,14 @@ answers write keys directly to the agent's terminal.
    shell terminal are closed, and the state DB is flushed and closed. SIGUSR1
    flushes the state DB without stopping. A native agent that exits doesn't
    stop the server: the conversation starts it again (see Native).
-6. SIGUSR2 restarts the server in place (`cmd/server/reexec.go`). At startup
+6. SIGUSR2, or an update through the API, restarts the server in place
+   (`cmd/server/reexec.go`, `selfExec.restart`). At startup
    `selfExec` takes the arguments, the environment and the program. The
    program is argv[0] as the shell found it (a path, or a name on `PATH`) if
    that is the running file, so a symlink an update repoints is followed;
    else `os.Executable`. It is taken then because once an update replaced
-   the file, `/proc/self/exe` names a deleted one. On SIGUSR2 the program
-   first runs with `--version`; if it fails, the server logs why and goes
-   on. Otherwise the server stops as in step 5, keeps its PID file (the PID
+   the file, `/proc/self/exe` names a deleted one. The program first runs
+   with `--version`; if it fails, the server logs why and goes on. Otherwise the server stops as in step 5, keeps its PID file (the PID
    stays), and `syscall.Exec` runs the program again with stdin, stdout and
    stderr; every other file Go opened closes on exec. A shutdown signal
    during the stop wins. Each registry entry says the server restarts in
@@ -201,6 +202,7 @@ The handlers are grouped by file:
 | `webhook.go`, `webhook_events.go`, `handoff.go`, `dialog_reply.go` | Webhook delivery (queue, retries, signatures, heartbeats) and the observer that turns the conversation's events into webhook events; the human-reply API; answers to terminal dialogs |
 | `auth.go` | Token auth and the chat's sign-in (`authAPI`) |
 | `restart.go`, `statedb.go` | Restarts; restoring and persisting the state |
+| `update.go` | Updating AgentAPI through its API (`POST /update`, `DELETE /update`, the `updater`) and the summary's `update`; see [Restarts and updates](#restarts-and-updates) |
 | `events.go`, `events_*.go`, `models.go` | The emitter (subscriptions and replay; the status, screen, requests and messages it keeps) and the API's types |
 | `embed.go`, `uploads.go` | The embedded chat UI; uploaded files (`uploadAPI`, which serves `POST /upload` from the operation's middleware: huma v2.32 changes the shared operation on every multipart request) |
 
@@ -622,6 +624,22 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
   update --restart` does that for the AgentAPIs that run the binary it
   replaced.
   The hub doesn't restart in place; its service manager restarts it.
+- With `--allow-update`, `POST /update` (`update.go`) updates AgentAPI to the
+  latest release and restarts it in place. A goroutine bound to the server's
+  life drives it. `checking` looks up the release and runs the program on
+  disk with `--version`. `downloading` installs the release in the
+  program's place (`lib/selfupdate`), unless the program on disk is that
+  new already because another AgentAPI that shares it updated it.
+  `waiting` holds the queue until the agent is stable with no request or
+  terminal dialog open, checked at each status change. `restarting` begins
+  under `s.mu`: from then on messages wait in the queue, no agent restart
+  begins and the human-reply protocol offers nothing. It calls the restart
+  SIGUSR2 uses. `"now"` skips the wait, and `DELETE /update` cancels the
+  update until it restarts. A failure leaves the state `failed` with the
+  error, and the server serving. Every step changes the summary's `update`,
+  so `summary_update` carries it to a hub. The program's path is resolved
+  again on each request, and once a minute for `blocked`, so a symlink set
+  up meanwhile counts at once.
 - `/status` reports the lifecycle: `starting`, `ready`, `running`,
   `restarting`, `exited` or `failed`.
 
@@ -689,6 +707,15 @@ the same session for native agents.
   outside the working directory can't be opened.
 - The webhook sends its configured events, the conversation included, to
   its URL, which `PUT /webhook` can change; its HMAC secret is write-only.
+- Updates through the API are off unless `--allow-update` (or
+  `allow-update: true` in the config file) turns them on. They install only
+  the latest official release of k1dav-c/agentapi for the platform, from
+  GitHub: the download must match the release's `checksums.txt` and run as
+  that version, and a request can't name a version or a URL. AgentAPI never
+  runs `sudo`. It replaces only a program whose directory its user can write
+  to, and otherwise reports the one-time fix (`blocked`). `POST /update`
+  changes something, so a page of another origin can't send it, and it needs
+  the token like every endpoint.
 - The hub (`lib/hub`) holds the instances' API tokens and sends them only to
   instance URLs from events signed with its secret (HMAC of the timestamp and
   body, at most 10 minutes old, each delivery once) or added by someone signed
@@ -707,7 +734,9 @@ the same session for native agents.
   `--allowed-hosts` answers browsers only by those names and by address. The
   proxy marks every answer `Content-Security-Policy: sandbox`, so nothing an
   instance serves runs as a page of the hub's, and refuses changes to an
-  instance's webhook, which names where the hub sends its token.
+  instance's webhook, which names where the hub sends its token. A signed-in
+  browser gets the secret, for joining a machine (`GET /api/join`), only from
+  a hub with a token; the startup log never has it.
 - Agents, on every transport, don't inherit the variables (one of them a
   secret) that a parent agent session sets for the commands it runs, nor
   AgentAPI's API token (`lib/procenv`).

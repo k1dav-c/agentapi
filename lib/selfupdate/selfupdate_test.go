@@ -1,4 +1,4 @@
-package update
+package selfupdate
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildAssetName(t *testing.T) {
+func TestAssetName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		goos   string
@@ -32,34 +32,34 @@ func TestBuildAssetName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
 			t.Parallel()
-			got := buildAssetName(tt.goos, tt.goarch)
+			got := AssetName(tt.goos, tt.goarch)
 			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-func TestFindAssetURL(t *testing.T) {
+func TestReleaseAsset(t *testing.T) {
 	t.Parallel()
 
-	info := &releaseInfo{
-		TagName: "v0.13.0",
-		Assets: []releaseAsset{
-			{Name: "agentapi-linux-amd64", BrowserDownloadURL: "https://example.com/linux-amd64"},
-			{Name: "agentapi-darwin-arm64", BrowserDownloadURL: "https://example.com/darwin-arm64"},
-			{Name: "agentapi-windows-amd64.exe", BrowserDownloadURL: "https://example.com/windows-amd64.exe"},
+	info := &Release{
+		Tag: "v0.13.0",
+		Assets: []Asset{
+			{Name: "agentapi-linux-amd64", URL: "https://example.com/linux-amd64"},
+			{Name: "agentapi-darwin-arm64", URL: "https://example.com/darwin-arm64"},
+			{Name: "agentapi-windows-amd64.exe", URL: "https://example.com/windows-amd64.exe"},
 		},
 	}
 
 	t.Run("found", func(t *testing.T) {
 		t.Parallel()
-		url, err := findAssetURL(info, "agentapi-linux-amd64")
+		asset, err := info.Asset("agentapi-linux-amd64")
 		require.NoError(t, err)
-		assert.Equal(t, "https://example.com/linux-amd64", url)
+		assert.Equal(t, "https://example.com/linux-amd64", asset.URL)
 	})
 
 	t.Run("not found", func(t *testing.T) {
 		t.Parallel()
-		_, err := findAssetURL(info, "agentapi-freebsd-amd64")
+		_, err := info.Asset("agentapi-freebsd-amd64")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no release binary")
 		assert.Contains(t, err.Error(), "agentapi-freebsd-amd64")
@@ -71,21 +71,21 @@ func TestParseVersion(t *testing.T) {
 
 	t.Run("valid without v prefix", func(t *testing.T) {
 		t.Parallel()
-		v, err := parseVersion("0.12.2")
+		v, err := ParseVersion("0.12.2")
 		require.NoError(t, err)
 		assert.Equal(t, "0.12.2", v.String())
 	})
 
 	t.Run("valid with v prefix", func(t *testing.T) {
 		t.Parallel()
-		v, err := parseVersion("v0.13.0")
+		v, err := ParseVersion("v0.13.0")
 		require.NoError(t, err)
 		assert.Equal(t, "0.13.0", v.String())
 	})
 
 	t.Run("invalid", func(t *testing.T) {
 		t.Parallel()
-		_, err := parseVersion("dev")
+		_, err := ParseVersion("dev")
 		require.Error(t, err)
 	})
 }
@@ -108,24 +108,24 @@ func TestVersionComparison(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			current, err := parseVersion(tt.current)
+			current, err := ParseVersion(tt.current)
 			require.NoError(t, err)
-			latest, err := parseVersion(tt.latest)
+			latest, err := ParseVersion(tt.latest)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantNewer, latest.GreaterThan(current))
 		})
 	}
 }
 
-func TestFetchLatestRelease(t *testing.T) {
+func TestLatest(t *testing.T) {
 	t.Parallel()
 
 	t.Run("success", func(t *testing.T) {
 		t.Parallel()
-		release := releaseInfo{
-			TagName: "v0.13.0",
-			Assets: []releaseAsset{
-				{Name: "agentapi-linux-amd64", BrowserDownloadURL: "https://example.com/dl"},
+		release := Release{
+			Tag: "v0.13.0",
+			Assets: []Asset{
+				{Name: "agentapi-linux-amd64", URL: "https://example.com/dl"},
 			},
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,10 +136,13 @@ func TestFetchLatestRelease(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		info, err := fetchLatestRelease(context.Background(), srv.URL)
+		info, err := Source{BaseURL: srv.URL}.Latest(context.Background())
 		require.NoError(t, err)
-		assert.Equal(t, "v0.13.0", info.TagName)
+		assert.Equal(t, "v0.13.0", info.Tag)
 		assert.Len(t, info.Assets, 1)
+		version, err := info.Version()
+		require.NoError(t, err)
+		assert.Equal(t, "0.13.0", version.String())
 	})
 
 	t.Run("non-200 response", func(t *testing.T) {
@@ -150,7 +153,7 @@ func TestFetchLatestRelease(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		_, err := fetchLatestRelease(context.Background(), srv.URL)
+		_, err := Source{BaseURL: srv.URL}.Latest(context.Background())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "404")
 	})
@@ -208,7 +211,7 @@ func TestParseChecksumManifest(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestReplaceBinary(t *testing.T) {
+func TestReplace(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -220,7 +223,7 @@ func TestReplaceBinary(t *testing.T) {
 	// Write the "new" binary.
 	require.NoError(t, os.WriteFile(newPath, []byte("new"), 0o755))
 
-	require.NoError(t, replaceBinary(newPath, currentPath))
+	require.NoError(t, Replace(newPath, currentPath))
 
 	// Verify the current binary has the new content.
 	got, err := os.ReadFile(currentPath)

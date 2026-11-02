@@ -20,11 +20,11 @@ uncommitted changes):
 - `agentapi hub serve` with nine `native-demo` instances that join it with `agentapi hub join`,
   posing as Claude Code, Codex and Pi, for the hub: one asks for an approval, one asks questions,
   one needs a login, one hit its usage limit, one works, one finished a task, one is idle, one
-  stopped and one was killed, so the hub can't reach it. Six are in two groups. The one that asks
-  questions can run a binary stamped with an older version (`AGENTAPI_OLDER_BINARY`), so that it
-  shows as older than the hub: 2.0.0 beside the hub's 2.1.0 in the screenshots. A second, empty hub
-  shows the guide for the first agents. The rows name the machine; the screenshots show
-  placeholders (`dev-1` and so on).
+  stopped and one was killed, so the hub can't reach it. Six are in two groups, and two of those
+  are pinned to the top. The one that asks questions can run a binary stamped with an older
+  version (`AGENTAPI_OLDER_BINARY`), so that it shows as older than the hub: 2.0.0 beside the
+  hub's 2.1.0 in the screenshots. A second, empty hub shows the guide for the first agents. The
+  rows name the machine; the screenshots show placeholders (`dev-1` and so on).
 
 ## Gallery
 
@@ -72,12 +72,13 @@ device scale factor of 1.
 | [hub-desktop.png](hub-desktop.png) | The hub's overview: how many need you, a tile per state, a card per request, what runs and what finished |
 | [hub-desktop-dark.png](hub-desktop-dark.png) | The same overview in the dark theme |
 | [hub-instance.png](hub-instance.png) | An agent open beside the list, its approval ready to answer |
-| [hub-empty.png](hub-empty.png) | The guide an empty hub shows, with commands to copy |
+| [hub-empty.png](hub-empty.png) | The guide an empty hub shows: the hub's address, the join command and a prompt for an agent on the machine, the secret masked |
 | [hub-sign-in.png](hub-sign-in.png) | Signing in to the hub, beside its picture of agents in their states |
-| [hub-list.png](hub-list.png) | The hub's list in two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's AgentAPI version, one older than the hub |
-| [hub-add.png](hub-add.png) | Adding an instance by its URL and token |
-| [hub-phone.png](hub-phone.png) | The hub's list on a phone, in groups |
-| [hub-phone-menu.png](hub-phone-menu.png) | A row's menu on a phone: its group, a new one, and Forget |
+| [hub-list.png](hub-list.png) | The hub's list: two pinned agents, then two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's AgentAPI version, one older than the hub |
+| [hub-add.png](hub-add.png) | The Add dialog: joining a machine (the hub's address, updates from the hub, the command and a prompt for an agent, the secret masked), or adding an instance by its URL and token |
+| [hub-recent.png](hub-recent.png) | The hub's list by the agents' latest changes: the pinned agents, then one list without group headers, the most recent first, and each row's group where it has room |
+| [hub-phone.png](hub-phone.png) | The hub's list on a phone: the pinned agents, then the groups |
+| [hub-phone-menu.png](hub-phone-menu.png) | A row's menu on a phone: Pin to top, its group, a new one, and Forget |
 | [hub-muted.png](hub-muted.png) | The list on a phone with an agent's login wait muted |
 | [hub-spend.png](hub-spend.png) | The overview's Spend card: the last 24 hours and 7 days, and the agents that spent the most |
 | [hub-versions.png](hub-versions.png) | The overview's Versions card: how many agents run each AgentAPI version, on which machines, and how to update the older ones |

@@ -811,3 +811,76 @@ func TestHubNoHeartbeats(t *testing.T) {
 	passRetries(t, clock, retry, start, 10*time.Minute)
 	assert.Equal(t, hub.ConnectionUnreachable, instances(t, hubURL)[0].Connection)
 }
+
+// The API and the browser's stream say when each instance last changed what
+// its row shows (changed_at, RFC 3339): when the hub first saw it, not again
+// for a heartbeat, and when the hub can't reach it any more.
+func TestHubChangedAt(t *testing.T) {
+	clock := quartz.NewMock(t)
+	hubURL, retry := startHubClock(t, clock)
+	heartbeat := func(id string) map[string]any {
+		return map[string]any{
+			"id": id, "type": "instance.heartbeat", "created_at": clock.Now(),
+			"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": "http://127.0.0.1:1", "agent_type": "claude"},
+		}
+	}
+	start := clock.Now()
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, heartbeat("c1"), hubSecret, start))
+	firstSeen := `"changed_at":"` + start.Format(time.RFC3339Nano) + `"`
+	req, err := http.NewRequest(http.MethodGet, hubURL+"/api/instances", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+hubToken)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	require.NoError(t, err)
+	assert.Contains(t, string(body), firstSeen)
+	events := openEvents(t, hubURL+"/api/events")
+	first := next(t, events)
+	require.Equal(t, "instances", first.event)
+	assert.Contains(t, first.data, firstSeen)
+
+	// advance moves the clock d on, stopping at each timer and ticker on
+	// the way, such as the browser's heartbeats.
+	advance := func(d time.Duration) {
+		for d > 0 {
+			step := d
+			if next, ok := clock.Peek(); ok && next < step {
+				step = next
+			}
+			clock.Advance(step).MustWait(t.Context())
+			d -= step
+		}
+	}
+
+	// Its first attempt to reach it failed; a heartbeat changes nothing.
+	call := retry.MustWait(t.Context())
+	advance(5 * time.Second)
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, heartbeat("c2"), hubSecret, clock.Now()))
+	assert.True(t, instances(t, hubURL)[0].ChangedAt.Equal(start), "a heartbeat")
+	call.Release()
+	advance(call.Duration)
+
+	// Unreachable once the grace is over.
+	for clock.Now().Sub(start) < 15*time.Second {
+		call := retry.MustWait(t.Context())
+		call.Release()
+		advance(call.Duration)
+	}
+	retry.MustWait(t.Context()).Release()
+	gone := instances(t, hubURL)[0]
+	require.Equal(t, hub.ConnectionUnreachable, gone.Connection)
+	assert.True(t, gone.ChangedAt.After(start))
+	for {
+		e := next(t, events)
+		var changed hub.Instance
+		if e.event != "instance" || json.Unmarshal([]byte(e.data), &changed) != nil || changed.Connection != hub.ConnectionUnreachable {
+			continue
+		}
+		assert.True(t, changed.ChangedAt.Equal(gone.ChangedAt))
+		break
+	}
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, heartbeat("c3"), hubSecret, clock.Now()))
+	assert.True(t, instances(t, hubURL)[0].ChangedAt.Equal(gone.ChangedAt), "heard of while unreachable")
+}

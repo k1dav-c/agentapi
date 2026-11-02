@@ -51,7 +51,7 @@ to PTY mode, which parses terminal output.
 
 - `main.go` - Entry point using the Cobra CLI framework
 - `cmd/` - CLI command definitions, including server, attach, list, hub, restart (registered AgentAPIs restart in place, e.g. into an updated binary), and update
-- `lib/httpapi/` - HTTP server, routes, OpenAPI schema, instance summaries for monitoring multiple AgentAPIs (`GET /summary`, `/events?only=summary`), and webhooks that push events (tasks, requests, messages, heartbeats) to a receiver
+- `lib/httpapi/` - HTTP server, routes, OpenAPI schema, instance summaries for monitoring multiple AgentAPIs (`GET /summary`, `/events?only=summary`), webhooks that push events (tasks, requests, messages, heartbeats) to a receiver, and updates through the API (`POST /update`, with `--allow-update`)
 - `lib/conversation/` - Shared messages, status, and the `Conversation` and `Emitter` interfaces (imported as `conv`)
 - `lib/screentracker/` - The PTY engine: terminal output parsing and message splitting
 - `lib/termexec/` - Terminal process execution and management
@@ -63,9 +63,10 @@ to PTY mode, which parses terminal output.
 - `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation
 - `lib/statedb/` - SQLite persistence of conversations, native and PTY (`--state-db`; a deprecated `--state-file` is imported into it)
 - `lib/instanceapi/` - The contract with clients that watch many AgentAPIs: who an instance is, its summary, the webhook envelope and signature, and the state a hub shows (aliased in `lib/httpapi` under the same names)
-- `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs (signed webhooks, summary streams, a proxy that opens any of them in the chat)
+- `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs (signed webhooks, summary streams, a proxy that opens any of them in the chat, the addresses machines join it by)
 - `lib/userconfig/` - The user's settings file (`~/.agentapi/config.yaml`), which agentapi server reads and agentapi hub join writes
 - `lib/registry/` - The registry of the AgentAPIs running on a machine (`~/.agentapi/instances`), which `agentapi list` reads
+- `lib/selfupdate/` - Installs the latest release in place of the program (`agentapi update`, `POST /update`): the GitHub lookup, the binary for the platform, checksum verification and the rename under a lock file; whether the user can replace the program (`Program.Blocked`)
 - `chat/` - Next.js web UI (embedded into Go binary)
 - `skills/` - Agent skills for users of AgentAPI, such as `agentapi-hub-join` (an agent joins its machine to a hub); installed into `~/.claude/skills/`, not used to work on this repository
 

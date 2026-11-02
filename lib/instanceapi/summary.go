@@ -152,6 +152,45 @@ type SummaryBody struct {
 	Request *SummaryRequest `json:"request,omitempty" doc:"The oldest request the agent waits on (see GET /requests); missing when none waits."`
 	// Spend is what the agent's sessions cost recently.
 	Spend *SummarySpend `json:"spend,omitempty" doc:"What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once."`
+	// Update is nil from AgentAPIs that can't update through their API.
+	Update *UpdateStatus `json:"update,omitempty" doc:"Whether a client can update this AgentAPI to the latest release through its API (POST /update), and how far an update is. Missing from AgentAPIs that can't update through their API: earlier releases."`
+}
+
+// UpdateState is where an update through the API (POST /update) is.
+type UpdateState string
+
+const (
+	UpdateStateIdle UpdateState = "idle"
+	// UpdateStateChecking: it looks up the latest release.
+	UpdateStateChecking    UpdateState = "checking"
+	UpdateStateDownloading UpdateState = "downloading"
+	// UpdateStateWaiting: it waits for the agent to be idle to restart.
+	UpdateStateWaiting    UpdateState = "waiting"
+	UpdateStateRestarting UpdateState = "restarting"
+	UpdateStateFailed     UpdateState = "failed"
+)
+
+var UpdateStateValues = []UpdateState{
+	UpdateStateIdle, UpdateStateChecking, UpdateStateDownloading,
+	UpdateStateWaiting, UpdateStateRestarting, UpdateStateFailed,
+}
+
+func (u UpdateState) Schema(r huma.Registry) *huma.Schema {
+	return util.OpenAPISchema(r, "UpdateState", UpdateStateValues)
+}
+
+// UpdateStatus says whether a client can update an AgentAPI through its
+// API, and how far an update is.
+type UpdateStatus struct {
+	Allowed bool `json:"allowed" doc:"Updates through the API are on: --allow-update, AGENTAPI_ALLOW_UPDATE, or allow-update: true in ~/.agentapi/config.yaml. Off by default."`
+	// Blocked is why an AgentAPI that may update can't replace its program.
+	Blocked string      `json:"blocked,omitempty" doc:"Set when updates are on but this AgentAPI can't replace its program: why, and the command to run once to fix it (the program's directory must be writable by the user AgentAPI runs as)."`
+	State   UpdateState `json:"state" doc:"idle, checking (looks up the latest release), downloading, waiting (for the agent to be idle), restarting (into the new version) or failed."`
+	Target  string      `json:"target,omitempty" doc:"The version it updates to, once known."`
+	Error   string      `json:"error,omitempty" doc:"Why the last update failed (state failed)."`
+	// KeepsConversation: the state database carries the conversation over
+	// the restart.
+	KeepsConversation bool `json:"keeps_conversation" doc:"It runs with --state-db, so the conversation and the agent's session carry over the restart; without it the conversation starts anew."`
 }
 
 // SummaryRequest is what a summary says of a pending request.

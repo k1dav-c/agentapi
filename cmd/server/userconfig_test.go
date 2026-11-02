@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,30 @@ func TestReadUserConfig(t *testing.T) {
 	assert.Equal(t, "http://hub:8080/hooks", v.GetString(FlagWebhookURL))
 	assert.Equal(t, []string{"instance.*", "task.*"}, v.GetStringSlice(FlagWebhookEvents))
 	assert.Equal(t, 3285, v.GetInt(FlagPort), "a flag wins")
+}
+
+// allow-update: true in the config file lets clients update every server
+// of the user through its API (agentapi hub join --allow-update writes it).
+func TestReadUserConfigAllowUpdate(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("allow-update: true\n"), 0o600))
+	flags := pflag.NewFlagSet("server", pflag.ContinueOnError)
+	flags.Bool(FlagAllowUpdate, false, "")
+	flags.String(FlagConfig, "", "")
+	require.NoError(t, flags.Parse([]string{"--config=" + path}))
+	v := flagsWith(nil)
+	require.NoError(t, v.BindPFlags(flags))
+
+	readUserConfig(v, flags, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	opts, err := loadServerOptions(v, []string{"claude"})
+	require.NoError(t, err)
+	assert.True(t, opts.allowUpdate)
+	self := &selfExec{path: "/usr/local/bin/agentapi"}
+	update := serverConfig(opts, &runningAgent{}, nil, "", t.TempDir(), nil, self).Update
+	assert.True(t, update.Allowed)
+	assert.Equal(t, self.path, update.Program, "the program it restarts into")
+	assert.Equal(t, runtime.GOOS != "windows", update.Restart != nil, "restarts in place")
 }
 
 // A file AgentAPI can't read doesn't keep the server from starting.

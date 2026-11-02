@@ -4,34 +4,51 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
-// errRestart is what serve returns once SIGUSR2 stopped the server to run
-// it again in place (see selfExec).
+// errRestart is what serve returns once a restart in place (SIGUSR2, an
+// update through the API) stopped the server to run it again (see
+// selfExec).
 var errRestart = errors.New("restarting in place")
+
+// errNotServing answers a restart in place asked for before the server
+// serves or once it stops.
+var errNotServing = errors.New("AgentAPI isn't serving")
 
 // versionCheckTimeout bounds the run of the new program's --version.
 const versionCheckTimeout = 10 * time.Second
 
-// selfExec runs the server again in place (SIGUSR2): in the same process,
-// so its PID, a PID file and a parent that waits for it stay valid, with
-// the program it was started as, its arguments and its environment. After
-// an update replaced the program, the new one runs.
+// selfExec runs the server again in place (SIGUSR2, an update through the
+// API): in the same process, so its PID, a PID file and a parent that
+// waits for it stay valid, with the program it was started as, its
+// arguments and its environment. After an update replaced the program,
+// the new one runs.
 type selfExec struct {
 	// path is the program, found at startup; empty if it wasn't.
 	path string
 	argv []string
 	env  []string
-	// requested is set once SIGUSR2 stopped the server to run it again;
+	// requested is set once a restart stopped the server to run it again;
 	// a shutdown signal clears it.
 	requested atomic.Bool
+
+	// mu makes a restart and a shutdown one after the other, so that the
+	// second sees what the first did.
+	mu sync.Mutex
+	// served ends once the server stops, which stop does; both are nil
+	// until serve arms the restart.
+	served context.Context
+	stop   context.CancelFunc
+	logger *slog.Logger
 }
 
 // newSelfExec takes how the server was started, at startup: once an update
@@ -98,7 +115,51 @@ func (s *selfExec) check(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// restarting reports whether SIGUSR2 asked to run the server again.
+// arm has restart stop the server, whose context is served, with stop.
+// serve calls it before it serves.
+func (s *selfExec) arm(served context.Context, stop context.CancelFunc, logger *slog.Logger) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.served, s.stop, s.logger = served, stop, logger
+}
+
+// restart restarts the server in place: once its program runs (check),
+// the server stops as for a shutdown, after which serve returns errRestart
+// and the program runs again. It returns why it can't; the server goes on
+// serving then. why says who asked, for the log.
+func (s *selfExec) restart(ctx context.Context, why string) error {
+	version, err := s.check(ctx)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stop == nil || s.served.Err() != nil || ctx.Err() != nil {
+		return errNotServing
+	}
+	s.logger.Info("Restarting in place", "reason", why, "program", s.path, "version", version)
+	s.requested.Store(true)
+	s.stop()
+	return nil
+}
+
+// shutdown stops the server with cancel for good: it wins over a restart
+// under way.
+func (s *selfExec) shutdown(cancel context.CancelFunc) {
+	if s == nil {
+		cancel()
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requested.Store(false)
+	cancel()
+}
+
+// restarting reports whether a restart asked to run the server again.
 func (s *selfExec) restarting() bool {
 	return s != nil && s.requested.Load()
 }

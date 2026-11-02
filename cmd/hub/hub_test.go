@@ -2,12 +2,14 @@ package hub
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -113,6 +115,44 @@ func TestJoinStatusLeave(t *testing.T) {
 	assert.Equal(t, "", fake.puts[1]["url"])
 }
 
+// join --allow-update lets the hub update the AgentAPIs: it writes
+// allow-update: true, which a join without it and leave keep.
+func TestJoinAllowUpdate(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	t.Setenv("AGENTAPI_API_TOKEN", "")
+	t.Setenv("AGENTAPI_HUB_SECRET", "")
+	flags := []string{"--no-check", "--config", configPath, "--registry-dir", filepath.Join(dir, "instances")}
+
+	out, err := run(t, append([]string{"join", "http://hub.tailnet:3290/hooks"}, flags...)...)
+	require.NoError(t, err, out)
+	config, err := userconfig.Load(configPath)
+	require.NoError(t, err)
+	assert.Nil(t, config[keyAllowUpdate], "off unless asked")
+	assert.NotContains(t, out, "update")
+
+	out, err = run(t, append([]string{"join", "http://hub.tailnet:3290/hooks", "--allow-update"}, flags...)...)
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "The hub can update the AgentAPIs that start from now on")
+	config, err = userconfig.Load(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, true, config[keyAllowUpdate])
+	assert.Equal(t, "http://hub.tailnet:3290/hooks", config[keyURL])
+
+	_, err = run(t, append([]string{"join", "http://hub.tailnet:3290/hooks"}, flags...)...)
+	require.NoError(t, err)
+	config, err = userconfig.Load(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, true, config[keyAllowUpdate], "joining again keeps it")
+
+	_, err = run(t, append([]string{"leave"}, flags[1:]...)...)
+	require.NoError(t, err)
+	config, err = userconfig.Load(configPath)
+	require.NoError(t, err)
+	assert.Nil(t, config[keyURL])
+	assert.Equal(t, true, config[keyAllowUpdate], "leaving keeps it")
+}
+
 // An AgentAPI that needs a token and gets none keeps its webhook until it
 // restarts; joining still writes the file.
 func TestJoinNeedsToken(t *testing.T) {
@@ -187,6 +227,50 @@ func TestJoinChecksHub(t *testing.T) {
 	_, _, err = join("http://hub.tailnet:3290/hooks", "--secret", "s3cret", "--public-url", "http://localhost:{port}")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "on another machine")
+}
+
+// lockedBuffer is the output a running hub writes while a test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// Once it listens, the hub logs the command that joins a machine, with the
+// port it got, and never the secret: others may read the log.
+func TestServeLogsHowToJoin(t *testing.T) {
+	t.Setenv("AGENTAPI_HUB_LOG_LEVEL", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var out lockedBuffer
+	cmd := serveCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"--token", "t", "--secret", "join-secret", "--bind", "127.0.0.1", "--port", "0",
+		"--state", filepath.Join(t.TempDir(), "instances.json"),
+	})
+	served := make(chan error, 1)
+	go func() { served <- cmd.ExecuteContext(ctx) }()
+	require.Eventually(t, func() bool { return strings.Contains(out.String(), "Add dialog") }, 10*time.Second, 10*time.Millisecond)
+	cancel()
+	require.NoError(t, <-served)
+
+	logged := out.String()
+	assert.Regexp(t, `command="agentapi hub join http://127\.0\.0\.1:[1-9][0-9]*/hooks --public-url 'http://<its address>:\{port\}'"`, logged)
+	assert.Contains(t, logged, "AGENTAPI_HUB_SECRET")
+	assert.NotContains(t, logged, "join-secret")
 }
 
 // An unknown --log-level (or AGENTAPI_HUB_LOG_LEVEL) stops the hub before

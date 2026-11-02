@@ -35,9 +35,16 @@ type servedNative struct {
 // creates, on a free port, until ctx ends; self restarts it, if set.
 func serveNative(ctx context.Context, t *testing.T, factory *nativetest.Factory, self *selfExec) *servedNative {
 	t.Helper()
+	return serveNativeWith(ctx, t, factory, self, nil)
+}
+
+// serveNativeWith is serveNative with configure adjusting the server's
+// configuration.
+func serveNativeWith(ctx context.Context, t *testing.T, factory *nativetest.Factory, self *selfExec, configure func(*httpapi.ServerConfig)) *servedNative {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	registryDir := t.TempDir()
-	srv, err := httpapi.NewServer(logctx.WithLogger(ctx, logger), httpapi.ServerConfig{
+	config := httpapi.ServerConfig{
 		AgentType:      msgfmt.AgentTypeClaude,
 		Transport:      httpapi.TransportNative,
 		Native:         httpapi.NativeConfig{Factory: factory.New, RestartDelays: []time.Duration{time.Millisecond, time.Millisecond}},
@@ -46,7 +53,11 @@ func serveNative(ctx context.Context, t *testing.T, factory *nativetest.Factory,
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
 		RegistryDir:    registryDir,
-	})
+	}
+	if configure != nil {
+		configure(&config)
+	}
+	srv, err := httpapi.NewServer(logctx.WithLogger(ctx, logger), config)
 	require.NoError(t, err)
 	served := make(chan error, 1)
 	go func() { served <- serve(ctx, logger, srv, &runningAgent{factory: factory.New}, self) }()

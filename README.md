@@ -143,7 +143,9 @@ has the complete commit history.
   With the [human-reply API](#human-reply-api), a bot can tell you when the
   agent stops and pass your answer back.
 - [Self-update](#agentapi-update), verified against the release's checksums,
-  and [restarts in place](#agentapi-restart) into the new binary.
+  and [restarts in place](#agentapi-restart) into the new binary. Machines
+  that opt in can also be [updated through the API](#updating-through-the-api),
+  such as from the hub.
 - [Security](#security): an API token (the chat signs in with a cookie), the
   listen address, and the allowed hosts and origins.
 
@@ -1421,7 +1423,9 @@ instance:
   cost of the agent's sessions in the working directory over the last 24 hours (`day_usd`) and 7
   days (`week_usd`), worked out from its logs once a minute, with when the amounts last changed
   (`updated_at`) and a `scope`. AgentAPIs of one agent in one directory of a machine report the
-  same sessions, with the same `scope`: a client that adds up many counts each scope once.
+  same sessions, with the same `scope`: a client that adds up many counts each scope once. Its
+  `update` says whether a client can [update the AgentAPI](#updating-through-the-api), and how far
+  an update is.
 - `attention` identifies why the agent needs you, in priority order: `login`, `request` (approval,
   question or plan), `dialog` (in the terminal), `limit` (a usage limit stopped the turn), `exited`,
   or `none`.
@@ -1468,17 +1472,18 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 ![The hub: every agent on the left, and an overview of what needs you, with a card per request](docs/screenshots/hub-desktop.png)
 
 Open `http://<hub>:3290/` on a desktop or a phone and sign in with `--token`. The list shows every
-instance, those that need you first. Each shows its state (the reason it waits, such as an
-approval or question, a login or a usage limit; or working, finished a task you haven't seen, idle,
-unreachable or stopped) with its title, agent, machine, AgentAPI version, queue and usage limit. The
-tab title counts what needs you. Pick one to open it in the chat. On a phone the list and the chat
-take turns.
+instance: the ones you pinned on top, then those that need you first, or the latest change first.
+Each shows its state (the reason it waits, such as an approval or question, a login or a usage
+limit; or working, finished a task you haven't seen, idle, unreachable or stopped) with its title,
+agent, machine, AgentAPI version, queue and usage limit. The tab title counts what needs you. Pick
+one to open it in the chat. On a phone the list and the chat take turns.
 
 - AgentAPIs join it with [`agentapi hub join`](#joining-a-hub): their signed `instance.*` events
   add them, and the hub follows each one's [summary stream](#watching-many-instances) from one
-  connection. `+` adds one by its URL (and token) instead. Each row's `⋯` menu puts the
-  instance in a group of your own, mutes what it waits for until that changes (a login you won't
-  do), or forgets a stopped or unreachable one.
+  connection. `+` has the join command for a machine, with the hub's address and secret filled in,
+  and a prompt for an agent there; it also adds an instance by its URL (and token). Each row's `⋯`
+  menu pins the instance to the top, puts it in a group of your own, mutes what it waits for until
+  that changes (a login you won't do), or forgets a stopped or unreachable one.
 - The hub opens an instance through itself (`/i/<id>/...`), sending the instance's API token
   (`--instance-token`, or the one given when it was added) in place of your credentials. The
   browser never holds the instances' tokens or reaches them itself, so no instance needs CORS for
@@ -1515,11 +1520,62 @@ applies it to the registered AgentAPIs running now: each sends `instance.heartbe
 once. After a restart (of the workspace, for example), the AgentAPIs send `instance.started` from
 the file. `--public-url` is where the hub reaches them; `{port}` and `{hostname}` are filled in for
 each. AgentAPIs that started before 1.2 aren't registered: restart them once. `agentapi hub status`
-shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes it. `join`
+shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes it. With
+`--allow-update`, the hub can also [update them](#updating-through-the-api). `join`
 first sends the hub a signed test event and stops if the hub doesn't take it (not reached, a sign-in
-page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet. An agent can
-do it for you with the [agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.md); see the
+page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet. The
+hub's page has the command ready: `+` fills in the hub's address and, on a hub with a token, its
+secret, next to a prompt that has an agent on the machine join it. The hub also logs the command for
+each of its addresses when it starts, without the secret. An agent can do it for you with the
+[agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.md); see the
 [hub guide](docs/hub.md#3-join-each-machines-agentapis) to install it.
+
+#### Updating through the API
+
+A client that watches many AgentAPIs, such as the hub, can update one to the latest release. Only
+machines that opt in allow it: start AgentAPI with `--allow-update` (or set
+`AGENTAPI_ALLOW_UPDATE=true`), or add `allow-update: true` to `~/.agentapi/config.yaml` for every
+AgentAPI of the user, which `agentapi hub join --allow-update` does. AgentAPIs that run take the
+setting up when they restart (`agentapi restart --all`).
+
+```bash
+curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"when": "idle"}'
+```
+
+- `POST /update` installs the latest official release of k1dav-c/agentapi for the machine's OS and
+  architecture, then restarts AgentAPI in place into it, as [`agentapi restart`](#agentapi-restart)
+  does: the same PID, a new `server_id` and version. The download must match the release's
+  `checksums.txt` and run as that version. The request can't choose a version or a URL.
+- `"when": "idle"`, the default, installs at once and restarts once the agent is idle: stable, with
+  no request (approval, question or plan) or terminal dialog open. Queued messages stay queued and
+  go out after the restart. `"now"` restarts at once and interrupts the agent.
+- With [`--state-db`](#persistent-sessions), the conversation and the native agent's session carry
+  over the restart. Without it, the conversation starts anew.
+- It answers 200 with `"up_to_date": true` when AgentAPI runs the latest release already, else 202
+  with the `state` and the `target` version. While an update is under way it answers its state,
+  and `"now"` hurries it. `DELETE /update` cancels it until it restarts; what it installed stays.
+  403 means updates are off, 409 that AgentAPI can't replace its program (see below) or stops, and
+  502 that GitHub didn't answer.
+- The [summary](#watching-many-instances)'s `update` follows it: `allowed`, `blocked`, the `state`
+  (`idle`, `checking`, `downloading`, `waiting`, `restarting`, or `failed` with an `error`), the
+  `target`, and `keeps_conversation` (it runs with `--state-db`). Every change sends
+  `summary_update`. Earlier releases have no `update`.
+- AgentAPIs that share a binary replace it one at a time, under a lock file next to it
+  (`.agentapi.lock`). One that finds the binary on disk newer than the one it runs, because another
+  updated it, only restarts.
+
+AgentAPI never runs `sudo`. It writes the new binary next to the real file behind any symlinks and
+renames it over that file, so the user it runs as must be able to write to that directory. Move a
+binary in a system directory such as `/usr/local/bin` once to a directory of yours, and leave a
+symlink behind:
+
+```bash
+mkdir -p ~/.local/bin && cp /usr/local/bin/agentapi ~/.local/bin/agentapi && sudo ln -sf ~/.local/bin/agentapi /usr/local/bin/agentapi
+```
+
+Until then the summary's `blocked` says why and gives this command with the actual paths. Running
+AgentAPIs notice the move within a minute, without a restart, and `agentapi update` no longer needs
+`sudo`.
 
 ### Webhooks
 
@@ -1853,6 +1909,8 @@ other than browsers (curl, SDKs, the hub) aren't affected.
 - Change the MCP servers and the webhook, and restart the agent. The webhook can send the
   conversation (`message.created`, `tool.completed`) to any URL; `GET /webhook` never returns its
   secret.
+- With `--allow-update`, [update AgentAPI](#updating-through-the-api) to the latest official
+  release and restart it. A client can't choose the version or where it comes from.
 
 Use `--api-token` together with `--bind` or a reverse proxy whenever someone else can reach the
 server.
@@ -1980,6 +2038,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--registry-dir` | `~/.agentapi/instances` | Registry directory |
 | `--public-url` | | URL this AgentAPI is reached at, in `GET /summary` and every webhook event; `{port}` and `{hostname}` are filled in |
 | `--config` | `~/.agentapi/config.yaml` | Settings file: flags by name, below flags and variables |
+| `--allow-update` | `false` | Let API clients, such as the hub, update AgentAPI to the latest release, which then restarts in place; see [Updating through the API](#updating-through-the-api) |
 | `--webhook-timeout` | `10s` | Timeout of each delivery attempt |
 | `--webhook-max-attempts` | `3` | Delivery attempts |
 | `--webhook-payload-template` | | Go `text/template` for the POST body |
@@ -2007,7 +2066,8 @@ agentapi update --restart  # then restart the running AgentAPIs into it
 
 Release binaries are verified against the release's `checksums.txt` SHA-256 manifest before the
 running executable is replaced. An update is rejected if the manifest is missing, malformed, or does
-not match the download.
+not match the download, or if the download doesn't run as the release's version. The binary is
+replaced under the lock file that [updates through the API](#updating-through-the-api) take too.
 
 Running AgentAPIs keep the old version until they restart. `--restart` restarts the ones that run
 the binary it replaced, as [`agentapi restart --all`](#agentapi-restart) does. Under `sudo` (an
@@ -2087,7 +2147,9 @@ AgentAPIs running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `
 (default `instance.*`, all the hub needs: it follows the rest from each summary), `--public-url`
 is where the hub reaches them, `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the ones that need
 a token, and `--config` and `--registry-dir` name other files. An AgentAPI that `join` can't
-update now applies the file when it restarts.
+update now applies the file when it restarts. `--allow-update` also writes `allow-update: true`, so
+the hub can [update the AgentAPIs through their API](#updating-through-the-api) once they restart;
+`leave` keeps it.
 
 ### `agentapi attach`
 
@@ -2176,6 +2238,7 @@ default. Endpoints marked *native* need the native transport.
 | `GET /handoff`, `POST /handoff/reply` | The [human-reply API](#human-reply-api): what the agent waits on, and an answer to it |
 | `GET /webhook`, `PUT /webhook` | Read or change the [webhook](#webhooks): its URL, events, secret, heartbeat and instance |
 | `POST /webhook/test` | Send a `webhook.test` event to the webhook URL once, and return the receiver's answer |
+| `POST /update`, `DELETE /update` | [Update AgentAPI](#updating-through-the-api) to the latest release and restart it in place, once the agent is idle or now (`--allow-update`); cancel an update until it restarts |
 | `GET /mcp`, `PUT /mcp` | The MCP servers and the managed config file; PUT replaces them, `?restart=true` restarts the agent (*native*: on its session if it can resume it) |
 | `POST /mcp/check` | Check remote HTTP servers and resolve stdio executables |
 | `POST /mcp/servers`, `PATCH /mcp/servers/{name}`, `DELETE /mcp/servers/{name}` | Create, update or remove one MCP server |

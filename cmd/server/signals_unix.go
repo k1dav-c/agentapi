@@ -16,7 +16,7 @@ import (
 // - SIGTERM, SIGINT, SIGHUP: trigger graceful shutdown by canceling the context
 // - SIGUSR1: write what the state database hasn't written yet, without exiting
 // - SIGUSR2: restart in place: once self's program runs, stop as for a
-// shutdown, after which the server runs it again (see selfExec)
+// shutdown, after which the server runs it again (see selfExec.restart)
 func handleSignals(ctx context.Context, cancel context.CancelFunc, logger *slog.Logger, srv *httpapi.Server, self *selfExec) {
 	// Handle shutdown signals (SIGTERM, SIGINT, SIGHUP)
 	shutdownCh := make(chan os.Signal, 1)
@@ -25,11 +25,8 @@ func handleSignals(ctx context.Context, cancel context.CancelFunc, logger *slog.
 		defer signal.Stop(shutdownCh)
 		sig := <-shutdownCh
 		logger.Info("Received shutdown signal", "signal", sig)
-		if self.restarting() {
-			// It wins over a restart under way.
-			self.requested.Store(false)
-		}
-		cancel()
+		// It wins over a restart under way.
+		self.shutdown(cancel)
 	}()
 
 	if self != nil {
@@ -40,19 +37,14 @@ func handleSignals(ctx context.Context, cancel context.CancelFunc, logger *slog.
 			for {
 				select {
 				case <-restartCh:
-					version, err := self.check(ctx)
+					err := self.restart(ctx, "SIGUSR2")
 					if ctx.Err() != nil {
-						// Stopping already.
+						// Restarting, or stopping already.
 						return
 					}
 					if err != nil {
 						logger.Error("Received SIGUSR2, but can't restart in place; still serving", "error", err)
-						continue
 					}
-					logger.Info("Received SIGUSR2, restarting in place", "program", self.path, "version", version)
-					self.requested.Store(true)
-					cancel()
-					return
 				case <-ctx.Done():
 					return
 				}

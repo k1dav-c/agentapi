@@ -119,11 +119,12 @@ func TestRestartInPlace(t *testing.T) {
 	}
 }
 
-// build builds AgentAPI from root into path, stamped with version.
-func build(ctx context.Context, t *testing.T, root, path, version string) {
+// build builds AgentAPI from root into path, stamped with version and
+// the -X flags of stamps.
+func build(ctx context.Context, t *testing.T, root, path, version string, stamps ...string) {
 	t.Helper()
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", path,
-		"-ldflags", "-X github.com/coder/agentapi/internal/version.Version="+version, ".")
+	ldflags := append([]string{"-X github.com/coder/agentapi/internal/version.Version=" + version}, stamps...)
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", path, "-ldflags", strings.Join(ldflags, " "), ".")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	out, err := cmd.CombinedOutput()

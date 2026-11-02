@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -118,7 +119,7 @@ func TestSummaryFromAnEndingWatch(t *testing.T) {
 // changes nothing on the page; when an instance was last heard of shows
 // only while it is offline.
 func TestStoreTellsWhatBrowsersSee(t *testing.T) {
-	s, err := newStore("", slog.New(slog.DiscardHandler))
+	s, err := newStore("", slog.New(slog.DiscardHandler), quartz.NewMock(t))
 	require.NoError(t, err)
 	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
 	_, _, err = s.update("dev:1", true, func(i *Instance) {

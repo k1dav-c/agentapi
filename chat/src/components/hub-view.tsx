@@ -1,6 +1,6 @@
 "use client";
 
-import {useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from "react";
 import {ArrowLeft, Bell, BellOff, ExternalLink, Plus, Search, X} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {ModeToggle} from "@/components/mode-toggle";
@@ -12,13 +12,10 @@ import {
   countFilters,
   displayName,
   formatUSD,
-  groupInstances,
   groupNames,
   hubRoot,
   instanceState,
   instanceVersion,
-  matchesFilter,
-  matchesSearch,
   spendTitle,
   spendTotals,
   stateLabel,
@@ -28,6 +25,8 @@ import {
   type InstanceState,
 } from "@/lib/hub";
 import {frameMessage, toFrame, type FromFrame} from "@/lib/hub-frame";
+import {listSections, movePin, pinOf, sortPinned} from "@/lib/hub-order";
+import {shownUpdate} from "@/lib/hub-update";
 import {checkHubSession, type HubSession} from "@/lib/hub-session";
 import {getReconnectDelay} from "@/lib/reconnect";
 import {cn} from "@/lib/utils";
@@ -36,9 +35,12 @@ import {HubMark} from "./hub/brand";
 import {AddInstance, GroupName, type Naming} from "./hub/dialogs";
 import {GroupHeader, InstanceRow, agentName} from "./hub/instance-row";
 import {ListEdge, useListWidth} from "./hub/list-edge";
+import {ListOrderSwitch, useListOrder} from "./hub/list-order";
 import {Onboarding, Overview} from "./hub/overview";
 import {SignIn} from "./hub/sign-in";
 import {StatusGlyph, stateTone} from "./hub/status-glyph";
+import {cancelFromHub} from "./hub/update";
+import {UpdateStatus} from "./hub/update-chip";
 import {VersionTag} from "./hub/version-tag";
 
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "/chat").replace(/\/$/, "");
@@ -123,6 +125,7 @@ export function HubView() {
   const [announcement, setAnnouncement] = useState("");
   const search = useRef<HTMLInputElement>(null);
   const listWidth = useListWidth();
+  const [order, setOrder] = useListOrder();
 
   // Signed in or not; a hub that doesn't answer is asked again, with a
   // backoff, and at once when the browser comes back online.
@@ -183,11 +186,23 @@ export function HubView() {
   const counts = useMemo(() => countFilters(all), [all]);
   const waiting = counts["needs-you"];
   const now = useNow(counts.working > 0);
-  const visible = useMemo(() => all.filter((i) => matchesFilter(i, filter) && matchesSearch(i, query)), [all, filter, query]);
   const spend = useMemo(() => spendTotals(all), [all]);
-  const groups = useMemo(() => groupInstances(visible), [visible]);
+  const sections = useMemo(() => listSections(all, {filter, query, order}), [all, filter, query, order]);
   const names = useMemo(() => groupNames(all), [all]);
-  const showHeaders = names.length > 0;
+  // The pinned rows the list shows, which Move up and Move down step past.
+  const shownPins = sections[0]?.pinned ? sections[0].instances.map((instance) => instance.id) : [];
+
+  // The row with the focus, by instance, or its menu's button. React moves
+  // rows in the page when their order changes, and a row that moves loses
+  // the focus: it gets it back, unless something else took it.
+  const focusedRow = useRef<{id: string; menu: boolean} | undefined>(undefined);
+  const rowOrder = sections.map((section) => section.instances.map((instance) => instance.id).join(" ")).join("\n");
+  useLayoutEffect(() => {
+    const focused = focusedRow.current;
+    if (!focused || (document.activeElement && document.activeElement !== document.body)) return;
+    const attribute = focused.menu ? "data-hub-row-menu" : "data-hub-row";
+    document.querySelector<HTMLElement>(`[${attribute}="${CSS.escape(focused.id)}"]`)?.focus({preventScroll: true});
+  }, [rowOrder]);
 
   // Opening an agent from the list is a page of its own in the browser's
   // history, so Back (a phone's back gesture) returns to the list; going
@@ -218,10 +233,11 @@ export function HubView() {
       const message = frameMessage<FromFrame>(event);
       if (message?.type === "ready") setFramed(chat.dataset.instance);
       else if (message?.type === "back") select(undefined);
+      else if (message?.type === "cancel-update" && chat.dataset.instance) void cancelFromHub(root, chat.dataset.instance);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [select]);
+  }, [select, root]);
 
   // Back and forward show what the URL names.
   useEffect(() => {
@@ -268,8 +284,22 @@ export function HubView() {
     link.href = faviconUrl(waiting, counts.working > 0);
   }, [waiting, counts.working]);
 
-  // Keys: / searches, j and k (or the arrows) move between rows, Esc goes
-  // back to the overview.
+  // Pins an instance below the pinned ones on the hub, or unpins it; the
+  // change comes back on the event stream.
+  const setPinned = useCallback(
+    async (id: string, pinned: boolean) => {
+      await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({pinned}),
+      });
+    },
+    [root],
+  );
+
+  // Keys: / searches, j and k (or the arrows) move between rows, p pins or
+  // unpins the row with the focus, Esc goes back to the overview.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -284,7 +314,16 @@ export function HubView() {
         else if (!document.querySelector("[role=dialog], [role=menu]")) select(undefined);
         return;
       }
-      if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
+      // A row's menu and a dialog take their own keys: the arrows move
+      // between a menu's items.
+      if (typing || target?.closest("[role=menu], [role=dialog]") || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "p") {
+        const instance = instances.get((document.activeElement as HTMLElement | null)?.dataset.hubRow ?? "");
+        if (!instance) return;
+        event.preventDefault();
+        void setPinned(instance.id, pinOf(instance) === undefined);
+        return;
+      }
       const step = event.key === "j" || event.key === "ArrowDown" ? 1 : event.key === "k" || event.key === "ArrowUp" ? -1 : 0;
       if (!step) return;
       const rows = [...document.querySelectorAll<HTMLButtonElement>("[data-hub-row]")];
@@ -297,7 +336,7 @@ export function HubView() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [query, select]);
+  }, [query, select, instances, setPinned]);
 
   const changeCollapsed = useCallback((change: (next: Set<string>) => void) => {
     setCollapsed((previous) => {
@@ -342,6 +381,18 @@ export function HubView() {
       credentials: "same-origin",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({muted}),
+    });
+  };
+  // Moves a pinned instance past the next pinned row the list shows; the hub
+  // keeps the order of all of them.
+  const movePinned = async (id: string, step: -1 | 1) => {
+    const ids = movePin(sortPinned(all).map((instance) => instance.id), shownPins, id, step);
+    if (!ids) return;
+    await fetch(`${root}/api/pins`, {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ids}),
     });
   };
   const renameGroup = async (from: string, to: string) => {
@@ -425,33 +476,36 @@ export function HubView() {
               {notify ? <Bell className="size-4 text-foreground" /> : <BellOff className="size-4" />}
             </Button>
             <ModeToggle />
-            <Button variant="outline" size="icon" className="size-9 rounded-full" aria-label="Add an instance" title="Add an instance" onClick={() => setAdding(true)}>
+            <Button variant="outline" size="icon" className="size-9 rounded-full" aria-label="Add agents" title="Add agents" onClick={() => setAdding(true)}>
               <Plus className="size-4" />
             </Button>
           </div>
-          <div className="relative">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <input
-              ref={search}
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search agents"
-              aria-label="Search agents"
-              className="h-10 w-full rounded-xl border bg-muted/50 pr-10 pl-9 text-sm outline-none transition-colors placeholder:text-muted-foreground/80 focus-visible:border-ring focus-visible:bg-card focus-visible:ring-[3px] focus-visible:ring-ring/40 [&::-webkit-search-cancel-button]:hidden"
-            />
-            {query ? (
-              <button
-                type="button"
-                onClick={() => setQuery("")}
-                aria-label="Clear the search"
-                className="absolute top-1/2 right-1 flex size-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
-              >
-                <X className="size-4" />
-              </button>
-            ) : (
-              <kbd className="pointer-events-none absolute top-1/2 right-2.5 hidden -translate-y-1/2 rounded border bg-background px-1.5 font-mono text-[11px] text-muted-foreground md:block">/</kbd>
-            )}
+          <div className="flex gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <input
+                ref={search}
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search agents"
+                aria-label="Search agents"
+                className="h-10 w-full rounded-xl border bg-muted/50 pr-10 pl-9 text-sm outline-none transition-colors placeholder:text-muted-foreground/80 focus-visible:border-ring focus-visible:bg-card focus-visible:ring-[3px] focus-visible:ring-ring/40 [&::-webkit-search-cancel-button]:hidden"
+              />
+              {query ? (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear the search"
+                  className="absolute top-1/2 right-1 flex size-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-4" />
+                </button>
+              ) : (
+                <kbd className="pointer-events-none absolute top-1/2 right-2.5 hidden -translate-y-1/2 rounded border bg-background px-1.5 font-mono text-[11px] text-muted-foreground md:block">/</kbd>
+              )}
+            </div>
+            <ListOrderSwitch order={order} onChange={setOrder} />
           </div>
           <div
             role="group"
@@ -481,7 +535,19 @@ export function HubView() {
           </div>
         </header>
 
-        <ul className="flex-1 overflow-y-auto overscroll-contain pb-[max(0.75rem,env(safe-area-inset-bottom))]" aria-label="Instances">
+        <ul
+          className="flex-1 overflow-y-auto overscroll-contain pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+          aria-label="Instances"
+          onFocus={(event) => {
+            const {hubRow, hubRowMenu} = (event.target as HTMLElement).dataset;
+            focusedRow.current = hubRow ? {id: hubRow, menu: false} : hubRowMenu ? {id: hubRowMenu, menu: true} : undefined;
+          }}
+          onBlur={(event) => {
+            // Not when the row left the page with the focus (relatedTarget is
+            // none then): it gets it back.
+            if (event.relatedTarget) focusedRow.current = undefined;
+          }}
+        >
           {counts.all === 0 && (
             <li>
               <div className="md:hidden">
@@ -494,7 +560,7 @@ export function HubView() {
               </div>
             </li>
           )}
-          {counts.all > 0 && visible.length === 0 && (
+          {counts.all > 0 && sections.length === 0 && (
             <li className="px-6 py-12 text-center">
               <p className="text-sm font-medium">Nothing matches</p>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -513,40 +579,46 @@ export function HubView() {
               </Button>
             </li>
           )}
-          {groups.map((group) => {
+          {sections.map((section) => {
             // A search or a filter shows every match, folded or not.
-            const folded = showHeaders && !filtered && collapsed.has(group.name);
-            // Each group is a block of its own, so its header sticks only
+            const folded = !!section.label && !filtered && collapsed.has(section.key);
+            // Each section is a block of its own, so its header sticks only
             // while its rows scroll by, and the next header pushes it off.
             return (
-              <li key={group.name || "\u0000"}>
-                {showHeaders && (
+              <li key={`section:${section.key}`}>
+                {section.label && (
                   <GroupHeader
-                    group={group}
+                    group={section}
+                    label={section.label}
                     folded={folded}
                     onToggle={() =>
                       changeCollapsed((next) => {
-                        if (!next.delete(group.name)) next.add(group.name);
+                        if (!next.delete(section.key)) next.add(section.key);
                       })
                     }
-                    onRename={() => setNaming({mode: "rename", from: group.name})}
+                    onRename={() => setNaming({mode: "rename", from: section.name})}
                   />
                 )}
                 {!folded && (
-                  <ul aria-label={group.name || (showHeaders ? "Ungrouped" : undefined)}>
-                    {group.instances.map((instance) => (
+                  <ul aria-label={section.label || undefined}>
+                    {section.instances.map((instance, index) => (
                       <InstanceRow
                         key={instance.id}
                         instance={instance}
                         hubVersion={hubVersion}
+                        root={root}
                         groups={names}
+                        order={order}
                         now={now}
                         selected={instance.id === selected}
+                        pinned={section.pinned && {first: index === 0, last: index === section.instances.length - 1}}
                         onSelect={() => select(instance.id)}
                         onForget={() => void forget(instance.id)}
                         onGroup={(name) => void setGroup(instance.id, name)}
                         onNewGroup={() => setNaming({mode: "new", id: instance.id})}
                         onMute={(muted) => void setMuted(instance.id, muted)}
+                        onPin={(pinned) => void setPinned(instance.id, pinned)}
+                        onMove={(step) => void movePinned(instance.id, step)}
                       />
                     ))}
                   </ul>
@@ -557,7 +629,7 @@ export function HubView() {
         </ul>
         <p className="hidden border-t px-4 py-2 text-[11px] text-muted-foreground md:block" aria-hidden="true">
           <kbd className="font-mono">/</kbd> search · <kbd className="font-mono">j</kbd> <kbd className="font-mono">k</kbd> move ·{" "}
-          <kbd className="font-mono">↵</kbd> open · <kbd className="font-mono">esc</kbd> overview
+          <kbd className="font-mono">↵</kbd> open · <kbd className="font-mono">p</kbd> pin · <kbd className="font-mono">esc</kbd> overview
         </p>
         <ListEdge controls="hub-list" {...listWidth} />
       </aside>
@@ -624,6 +696,7 @@ function FrameInfo({frame, instance, hubVersion, root}: {frame: React.RefObject<
       version: instanceVersion(instance) || undefined,
       hubVersion: hubVersion || undefined,
       lastKnown: instance.connection !== "connected",
+      update: shownUpdate(instance),
       tab: chatURL(basePath, root, instance.id),
     }),
   );
@@ -639,6 +712,7 @@ function InstanceBar({instance, hubVersion, root, onBack}: {instance: HubInstanc
   const state = instanceState(instance);
   const agent = agentName(instance);
   const version = instanceVersion(instance);
+  const update = shownUpdate(instance);
   return (
     <div className="box-content flex h-12 shrink-0 items-center gap-1 border-b bg-background px-1.5 pt-[env(safe-area-inset-top)] sm:h-14 md:gap-2 md:px-3">
       <Button variant="ghost" size="icon" className="size-10 shrink-0 rounded-full md:hidden" onClick={onBack} aria-label="Back to Agents">
@@ -652,6 +726,7 @@ function InstanceBar({instance, hubVersion, root, onBack}: {instance: HubInstanc
         <p className="truncate text-sm leading-tight font-semibold">{displayName(instance)}</p>
         <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
           <span className={cn("shrink-0 font-medium", stateTone[state])}>{stateLabel(instance)}</span>
+          {update && <UpdateStatus update={update} onCancel={() => void cancelFromHub(root, instance.id)} />}
           {agent && (
             <>
               <span aria-hidden="true" className="text-muted-foreground/40">·</span>

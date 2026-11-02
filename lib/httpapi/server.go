@@ -46,12 +46,13 @@ type Server struct {
 	// mu serializes what changes the agent or acts on its state: messages
 	// and their queue, answers, settings, restarts. Reads that only need a
 	// snapshot don't take it. Locks are taken in this order, never the
-	// other way round: mu, the conversation's, the emitter's, then the
-	// webhook dispatcher's and the state DB's.
+	// other way round: mu, the conversation's, the updater's, the
+	// emitter's, then the webhook dispatcher's and the state DB's.
 	mu                 sync.Mutex
 	stopOnce           sync.Once
 	stopping           bool        // set under mu once Stop closed the agent: no more restarts
 	restarting         atomic.Bool // set under mu while a restart runs without it (runRestartLocked)
+	updating           atomic.Bool // set under mu once an update restarts AgentAPI: messages wait in the queue, and no agent restart begins
 	logger             *slog.Logger
 	conversation       conv.Conversation
 	native             *native.Conversation // nil unless the transport is native
@@ -75,6 +76,7 @@ type Server struct {
 	mcpMu              sync.Mutex
 	webhook            *webhookDispatcher
 	registry           *instanceRegistry // nil without a registry directory
+	updater            *updater
 	handoff            handoffState
 	restartAgent       func(context.Context) (int, error)
 	updateAgent        func(context.Context)
@@ -130,6 +132,9 @@ type ServerConfig struct {
 	// RestartsInPlace says in the registry entry that the process restarts
 	// in place on SIGUSR2 (see cmd/server).
 	RestartsInPlace bool
+	// Update is how the server updates itself through its API (POST
+	// /update); the zero value doesn't.
+	Update UpdateConfig
 }
 
 // PTYConfig is what the PTY transport needs.
@@ -421,6 +426,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	s.startWebhook(config)
 	s.registry = s.newInstanceRegistry(config.RegistryDir, bind, config.RestartsInPlace)
 	s.startSpend()
+	s.updater = newUpdater(config.Update, logger, emitter, stateDB != nil)
+	s.updater.watchBlocked(s)
 
 	// Register API routes
 	s.registerRoutes()

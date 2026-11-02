@@ -77,6 +77,14 @@ hub 監聽 port 3290，並把實例保存在 `~/.agentapi/hub/instances.json`，
 `--bind` 讓 hub 只聽 VPN 介面；不加的話監聽所有介面。這些值也可以改用 `AGENTAPI_HUB_TOKEN`、
 `AGENTAPI_HUB_SECRET` 和 `AGENTAPI_HUB_INSTANCE_TOKEN` 設定。
 
+hub 開始監聽後，會把加入用的 `agentapi hub join` 指令寫進 log，機器可能連到它的每個位址各一行：
+有 `--bind` 時是那個位址，否則是這台機器的各個位址，私有網路的排前面，接著是 Tailscale 這類 CGNAT
+位址；容器和 bridge 的介面不列。log 裡不會出現 secret，`join` 會從 `AGENTAPI_HUB_SECRET` 讀取。
+
+```text
+level=INFO msg="To join a machine, run this on it with AGENTAPI_HUB_SECRET set to the hub's secret" interface=eth0 command="agentapi hub join http://192.168.1.20:3290/hooks --public-url 'http://<its address>:{port}'"
+```
+
 要讓 hub 持續執行，就用這台機器啟動其他服務的方式啟動它。例如 systemd 的使用者 unit：
 
 ```ini
@@ -94,7 +102,8 @@ WantedBy=default.target
 
 更新之後，hub 也用同樣的方式重新啟動（`systemctl --user restart agentapi-hub`）。AgentAPI 可以用
 `agentapi update --restart` 或 [`agentapi restart`](../README.zh-TW.md#agentapi-restart) 原地重新
-啟動，hub 不在其中。哪些 AgentAPI 還停在舊版，總覽的[版本](#版本)卡片會列出來。
+啟動，hub 不在其中。哪些 AgentAPI 還停在舊版，總覽的[版本](#版本)卡片會列出來；機器允許的話，
+也能從那裡直接更新。
 
 ### 3. 讓每台機器的 AgentAPI 加入
 
@@ -106,6 +115,9 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
   --public-url 'http://dev-1.vpn:{port}'
 ```
 
+hub 的頁面已經備好這行指令，填好 hub 的位址和 secret，另附一段給那台機器上 agent 的提示：
+見[從頁面讓機器加入](#從頁面讓機器加入)。
+
 - `join` 會先送給 hub 一個有簽章的測試事件，hub 沒收下就停止（連不到、被登入頁擋住，或 secret 不同），
   見[參考資料](#agentapi-hub-joinleavestatus)。
 - `join` 把 hub 寫進 `~/.agentapi/config.yaml`。這個使用者的每個 `agentapi server` 啟動時都會讀
@@ -115,6 +127,7 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
   同時用在 3286 的 Claude Code 和 3285 的 Codex。
 - 同一個檔案也能讓各 AgentAPI 重新啟動（更新、重新開機）後保留對話：加上
   `state-db: ~/.agentapi/state/{port}.db`，見[持久保存的工作階段](../README.zh-TW.md#持久保存的工作階段)。
+- 想讓 hub 更新這台機器的 AgentAPI，加入時再加上 `--allow-update`（見[從 hub 更新](#從-hub-更新)）。
 - 正在執行的 AgentAPI 會立刻套用，一秒內就出現在 hub 上。1.2 之前啟動的 AgentAPI 沒有在這台機器
   上登記，`join` 找不到它們：重新啟動它們或整個 workspace 一次。
 - hub 轉送請求時，`Host` 標頭是實例的 VPN 名稱。AgentAPI 預設只接受 `localhost`、`127.0.0.1` 和
@@ -133,8 +146,9 @@ agentapi list         # 這台機器上執行中的 AgentAPI，以及各自的�
 ```
 
 這一步也可以交給那台機器上的 agent。[agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md)
-會讓 Claude Code 檢查版本和 hub 是否有回應，向你詢問 hub 的網址、secret 和這台機器的位址，然後加入，
-並確認每個 AgentAPI 回報到哪裡。它不會重新啟動 AgentAPI，也不會印出 secret。在那台機器上安裝：
+會讓 Claude Code 檢查版本和 hub 是否有回應，向你詢問 hub 的網址、secret、這台機器的位址，以及要不要
+讓 hub 更新這台機器的 AgentAPI，然後加入，並確認每個 AgentAPI 回報到哪裡。它不會重新啟動 AgentAPI，
+也不會印出 secret；要用 `sudo` 執行的指令，都會先問過你。在那台機器上安裝：
 
 ```bash
 mkdir -p ~/.claude/skills/agentapi-hub-join
@@ -142,7 +156,8 @@ curl -fsSL https://raw.githubusercontent.com/k1dav-c/agentapi/main/skills/agenta
   -o ~/.claude/skills/agentapi-hub-join/SKILL.md
 ```
 
-然後跟 agent 說，例如：「把這台機器加入 http://hub.vpn:3290 的 hub」。
+然後把 hub 頁面新增對話框裡的提示貼給它，裡面已經有這些值；或直接跟它說，例如：「把這台機器加入
+http://hub.vpn:3290 的 hub」。
 
 ### 4. 開啟 hub
 
@@ -205,7 +220,48 @@ scope 只算一次，取最新的數字（`updated_at`）。hub 目前沒在追�
 執行的版本，不加標記。更新並重新啟動之後，AgentAPI 一回來，那一列就會顯示新版本。
 
 總覽最下方的 **Versions** 卡片依版本統計 hub 正在追蹤的 agent 和它們所在的機器，並寫出有幾個比
-hub 舊。更新這些實例的方式：
+hub 舊。
+
+#### 從 hub 更新
+
+機器允許的話，AgentAPI 會在 hub 要求時自行更新。在那一列的 **⋯** 選單選 **Update AgentAPI…**，
+會先請你確認。預設會等 agent 閒置才更新：手上的任務做完，也沒有核准、提問、計畫或終端機對話框在等
+回覆。**Update now** 不等，會直接中斷正在跑的任務。接著 AgentAPI 下載符合機器作業系統和架構的最新
+正式版，用該版的 `checksums.txt` 驗證後安裝，再像 [`agentapi restart`](../README.zh-TW.md#agentapi-restart)
+一樣原地重新啟動。同一台機器上的 AgentAPI 共用一個 binary：第一個負責替換，其他的只要重新啟動。
+
+更新期間，那一列會顯示進度：檢查中、下載中、等任務結束、重新啟動中。還在等任務結束時，可以用
+**⋯** 選單的 **Cancel the update**，或開啟的 agent 上方那一列的 **Cancel** 取消。更新失敗時會標示
+出來；滑鼠移上去可以看到錯誤，或再開一次 **Update AgentAPI…** 查看並重試。AgentAPI 回來之後，那一列
+就會顯示新版本。
+
+**Versions** 卡片上的 **Update the older ones**，會一次替所有比 hub 舊、又能這樣更新的已連線 agent
+送出更新；同一台機器上的 AgentAPI 會自己輪流。送出前會先確認，並寫出有幾個會從新的對話開始。之後
+卡片會寫出送出了幾個，以及哪些 agent 無法更新、原因是什麼。
+
+每台機器需要：
+
+- **允許更新。** 預設不接受 hub 的更新，每台機器要開啟一次：在 `~/.agentapi/config.yaml` 加上
+  `allow-update: true`，或加入 hub 時用 `agentapi hub join … --allow-update`。AgentAPI 啟動時才會讀
+  這個設定，所以要重新啟動一次（`agentapi restart --all`）。在那之前，選單項目會註明這台機器關閉了
+  更新，點開的對話框附有要加的那一行。
+- **binary 所在目錄的寫入權限。** AgentAPI 替換的是自己的 binary（會先解析 symlink），而且從不執行
+  `sudo`。binary 放在 root 擁有的目錄（例如 `/usr/local/bin`）時就無法替換，選單項目會註明需要一次性
+  設定，點開的對話框附有指令：把 binary 搬到你的 `~/.local/bin`，原處改放 symlink。binary 在
+  `/usr/local/bin` 時：
+
+  ```bash
+  mkdir -p ~/.local/bin && cp /usr/local/bin/agentapi ~/.local/bin/agentapi \
+    && sudo ln -sf ~/.local/bin/agentapi /usr/local/bin/agentapi
+  ```
+
+- **狀態資料庫，才能保留對話。** 只有使用狀態資料庫的 AgentAPI，重新啟動後才會保留對話和 agent 的
+  工作階段，並在重新啟動後送出佇列中的訊息。沒有的話，對話會從頭開始，確認時也會提醒。在設定檔加上
+  `state-db: ~/.agentapi/state/{port}.db`（見[步驟 3](#3-讓每台機器的-agentapi-加入)）。
+
+#### 手動更新
+
+還不支援從 hub 更新的舊版 AgentAPI，選單裡不會多出這個項目；卡片會說明怎麼更新。在那台機器上：
 
 - 2.1.0 以後的 AgentAPI 能原地重新啟動：在那台機器上執行 `sudo agentapi update --restart`，更新
   binary 後，它的 AgentAPI 會原地重新啟動到新版（binary 屬於你自己時不必加 `sudo`）。
@@ -214,11 +270,13 @@ hub 舊。更新這些實例的方式：
 
 ### 清單
 
-![清單會顯示的每種狀態](screenshots/hub-list.png)
+![清單會顯示的每種狀態，最上方是兩個釘選的 agent](screenshots/hub-list.png)
 
 每一列顯示 agent 的名稱（`--name`，預設為工作目錄名稱）和 AgentAPI 版本（見[版本](#版本)）、它在等
-什麼或在做什麼、多久以前、agent 和機器；佇列有訊息、最近 24 小時的花費（見[花費](#花費)），以及用量限制超過 60% 時也會顯示。同一個[群組](#群組)內，各列依下表的狀態順序排列，
-同狀態再依名稱排序。每種狀態都有自己的形狀，不靠顏色也看得出來：
+什麼或在做什麼、多久以前、agent 和機器；佇列有訊息、最近 24 小時的花費（見[花費](#花費)），以及用量限制超過 60% 時也會顯示。AgentAPI 正在更新或更新失敗時，會另起一行顯示（見[從 hub 更新](#從-hub-更新)）。
+[釘選](#釘選)的 agent 排在最前面，順序由你決定。同一個[群組](#群組)內，各列依下表的狀態順序排列，
+同狀態再依名稱排序；改用[最近變動](#最近變動)時，則依各列最近一次變動排序。每種狀態都有自己的形狀，
+不靠顏色也看得出來：
 
 | 圖示 | 第二行開頭 | 意思 |
 | --- | --- | --- |
@@ -246,16 +304,52 @@ hub 舊。更新這些實例的方式：
 
 ### 群組
 
-![手機上一列的選單：群組、新群組和 Forget](screenshots/hub-phone-menu.png)
+![手機上一列的選單：Pin to top、群組、新群組和 Forget](screenshots/hub-phone-menu.png)
 
 可以依客戶、專案或機器，把實例分成自己的群組。每一列最後的 **⋯** 可以把實例移到某個群組、
-**New group…**（新群組）或 **No group**（不分組）。群組保存在 hub 上，所以手機和桌面看到的一樣；
+**New group…**（新群組）或 **No group**（不分組）。同一個選單也能釘選（見[釘選](#釘選)）、靜音
+（見[靜音](#靜音)）、更新 AgentAPI（見[從 hub 更新](#從-hub-更新)），以及移除已停止的實例
+（見[加入與移除實例](#加入與移除實例)）。
+群組保存在 hub 上，所以手機和桌面看到的一樣；
 實例自己的事件不會改動它所屬的群組。
 
-有了群組之後，清單會依名稱為每個群組加上標題，沒有分組的實例排在最後的 **Ungrouped** 底下。標題會
-顯示群組裡的實例數，並以琥珀色顯示需要你處理的數量，所以收合的群組仍然看得到。點標題可以收合或
+有了群組之後，清單會依名稱為每個群組加上標題，沒有分組的實例排在最後的 **Ungrouped** 底下；
+[最近變動](#最近變動)的排序不顯示群組標題。標題會顯示群組裡的實例數，並以琥珀色顯示需要你處理的數量，所以收合的群組仍然看得到。點標題可以收合或
 展開；每個瀏覽器各自記住收合了哪些群組。鉛筆圖示可以為群組改名，裡面的實例會一起移過去。群組名稱
 最多 40 個字元；群組裡沒有實例時就會消失。
+
+### 最近變動
+
+![依 agent 最近一次變動排序的清單：釘選的在最上方，其他的沒有群組標題，最近的排最前面](screenshots/hub-recent.png)
+
+搜尋框旁的切換鈕決定清單的排序。**Groups** 是預設的排序，也就是上面說的：在每個群組內，需要你處理的
+排最前面。**Recent changes** 則把[釘選](#釘選)以外的實例排成一個清單，最近變動的排最前面，不管群組
+或狀態。這時每一列顯示的是它多久以前變動，有空間時也會標出所屬的群組。篩選和搜尋在兩種排序下都有效，
+`j`、`k` 也依畫面上的順序移動。agent 有變動時，各列會跟著換位置，開啟中的那一個仍保持選取。每個瀏覽器
+各自記住排序。
+
+下列情況算是變動：狀態改變（需要你、開始工作、完成、閒置、停止，或 hub 連不到、又連上它）、新的任務、
+開始等新的事（請求、登入、用量限制）、標題改變，以及佇列、更新和版本的變化。下列則不算：heartbeat、
+有人做的操作（群組、釘選、靜音、讀過已完成的任務）、花費和用量數字、agent 工作中送出的訊息，以及斷線後
+10 秒內又接回的摘要串流。
+
+hub 會記錄每個實例最近一次變動的時間（`changed_at`）並保存在檔案中，所以重新啟動 hub 不會打亂清單的
+順序。新實例的這個時間，就是 hub 第一次看到它的時候。從舊版更新上來的 hub 還沒有這項紀錄：實例下一次
+變動之前，清單依這一列顯示的時間排列，沒有的話就依 hub 最後一次聽到它的時間。
+
+### 釘選
+
+在一列的 **⋯** 選單選 **Pin to top**，就會把這個 agent 固定在清單最上方的 **Pinned** 區，兩種排序
+都一樣。新釘選的排在最後。同一個選單的 **Move up**、**Move down** 會讓它越過清單上顯示的上一個或
+下一個釘選 agent，**Unpin** 則取消釘選。按 `p` 可以釘選或取消釘選焦點所在的那一列。
+
+釘選的 agent 只出現在這一區，不會在它的群組或下方最近變動的清單裡重複出現。這一列的名稱後面有圖釘
+圖示，有空間時也會標出所屬的群組。這一區的標題顯示 agent 數量和需要你處理的數量，也能像群組一樣收合。下方
+其餘的部分也會加上標題：各個群組和 **Ungrouped**，或是 **Recent changes**。篩選和搜尋對釘選的 agent
+同樣有效：不符合的會隱藏，一個都不剩時，這一區就會消失。
+
+釘選和群組一樣保存在 hub 上，所以每個瀏覽器看到的釘選和順序都相同。釘選、取消釘選和調整順序都不算
+[最近變動](#最近變動)。移除 agent 時，釘選會一起刪除。
 
 ### 靜音
 
@@ -275,6 +369,7 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 請求。上方的列顯示 agent 的狀態、agent、機器和 AgentAPI 版本，也放著聊天介面自己的搜尋、終端機和 Explorer 按鈕；**New tab** 會單獨開啟聊天介面，**×**（或
 **Esc**）會回到總覽。開啟 agent 會在瀏覽紀錄新增一頁，所以「上一頁」會回到清單或總覽；從一個 agent
 換到另一個則不會再新增。網址會記住目前的 agent（`#<id>`），重新整理或從書籤開啟都會回到同一個。
+AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務結束時附有 **Cancel**（見[從 hub 更新](#從-hub-更新)）。
 
 ### 快捷鍵與通知
 
@@ -283,6 +378,7 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 | `/` | 搜尋 |
 | `j`、`k`（或方向鍵） | 在各列之間移動 |
 | `Enter` | 開啟該列 |
+| `p` | 釘選或取消釘選該列（見[釘選](#釘選)） |
 | `Esc` | 清除搜尋，或回到總覽 |
 
 在桌面上，拖曳清單的邊緣，或把焦點移到邊緣再按 ← 或 →，可以調整清單的寬度；每個瀏覽器各自記住
@@ -305,18 +401,40 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 
 ![空的 hub 顯示的步驟](screenshots/hub-empty.png)
 
-還沒有 agent 加入的 hub，會顯示[架設](#3-讓每台機器的-agentapi-加入)的三個步驟，附上可以複製的指令，
-並已填好 hub 自己的位址。AgentAPI 自己的聊天介面也有同樣的步驟，針對它所在的機器：標頭狀態選單裡的
+還沒有 agent 加入的 hub，會顯示怎麼讓機器加入，內容和[新增對話框](#從頁面讓機器加入)相同，接著提醒
+agent 要重新啟動一次。AgentAPI 自己的聊天介面也有針對它所在機器的步驟：標頭狀態選單裡的
 **Add to an AgentAPI hub…**（見[工作階段詳細資訊](chat-ui.zh-TW.md#工作階段詳細資訊與提醒)）。
+
+### 從頁面讓機器加入
+
+![新增對話框：hub 的位址、加入指令和給 agent 的提示，secret 已遮住](screenshots/hub-add.png)
+
+**+** 會開啟新增對話框，其中 **Join a machine** 一節備好了[第 3 步](#3-讓每台機器的-agentapi-加入)，
+可以直接複製：
+
+- **Hub address** 列出機器連到 hub 的位址：有 `--bind` 時是那個位址，否則是 hub 所在機器的各個位址
+  和所屬的網路介面，順序和啟動時的 log 相同。請選那台機器和 hub 共同所在網路上的位址。hub 一個位址都
+  找不到時，會改用頁面本身的位址；前面若有登入頁（例如 Coder 的 port 網址），這個位址就不能用。
+- **Allow updates from the hub** 會加上 `--allow-update`（見[從 hub 更新](#從-hub-更新)）。
+- **Run on the machine** 是 `agentapi hub join` 指令，secret 透過 `AGENTAPI_HUB_SECRET` 傳入。
+  把 `<this machine>` 換成那台機器的位址。
+- **Prompt for an agent on that machine** 讓那台機器上的 agent 替你加入：hub 的網址和連不到時可以改試的
+  其他網址、secret、怎麼找出這台機器的位址，以及各個步驟：檢查版本、確認 hub 有回應、`join`、
+  `agentapi hub status` 和 `allowed-hosts`。agent 不會重新啟動任何 AgentAPI，也不會顯示 secret。
+  勾選允許更新時，它還會說明 `join` 可能印出的一次性設定，並建議設定 state DB，兩件事都會先問過你。
+  裝了 [agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md) 的 agent 照 skill 做，沒裝的
+  照提示裡的步驟做。
+
+secret 預設遮住，按 **Show the secret** 才會顯示；複製按鈕複製的是真正的值。只有設了 token 的 hub
+會顯示 secret，而且只給登入的人看。用 `--no-token` 的 hub 一律不顯示，否則連得到它的人都看得到：
+指令裡改放 `<hub secret>`，提示則會讓 agent 向你詢問。
 
 ### 加入與移除實例
 
-![用網址加入實例](screenshots/hub-add.png)
-
-**+** 可以用網址加入 AgentAPI，適用於無法執行 `agentapi hub join` 的實例（舊版，或你不會登入的
-機器）。hub 會先向它要摘要，所以它必須連得到，而且是 AgentAPI 1.1 以上。在這裡輸入的 token 會為
-這個實例保存，取代 `--instance-token` 送出。這樣加入的實例不會回報啟動或停止；hub 只會發現它連得到
-或連不到。
+新增對話框最下方的 **Add one by its URL** 可以用網址加入 AgentAPI，適用於無法執行
+`agentapi hub join` 的實例（舊版，或你不會登入的機器）。hub 會先向它要摘要，所以它必須連得到，而且是
+AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代 `--instance-token` 送出。這樣加入的實例
+不會回報啟動或停止；hub 只會發現它連得到或連不到。
 
 已停止或連不到的那一列，**⋯** 選單裡有 **Forget**，可以把它從 hub 移除。用 webhook 加入的實例，
 下次啟動時會再出現。
@@ -355,8 +473,12 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 - `~/.agentapi/hub/instances.json` 保存手動加入的實例的 token，建立時只有擁有者能讀取。
   `~/.agentapi/config.yaml` 保存 hub secret，`agentapi hub join` 也以同樣的權限寫入。
 - 登入時會送出 hub token。hub 只開在 VPN 上，或放在 HTTPS 後面。
-- 登入 hub 的人能做的事，等同各 AgentAPI 允許的事：送任務、回覆核准、使用終端機。hub token 只給
-  你也願意給實例 token 的人。
+- 登入 hub 的人能做的事，等同各 AgentAPI 允許的事：送任務、回覆核准、使用終端機，以及更新機器允許
+  更新的 AgentAPI。hub token 只給你也願意給實例 token 的人。
+- 登入的人也拿得到讓機器加入用的 hub secret（`GET /api/join`，供[新增對話框](#從頁面讓機器加入)
+  使用）。用 `--no-token` 的 hub 一律不送，否則連得到它的人都拿得到。
+- hub 要求更新時，AgentAPI 只會安裝最新的正式版，並用該版的 `checksums.txt` 驗證：hub 無法指定版本
+  或網址。AgentAPI 從不執行 `sudo`，機器沒有允許（`allow-update: true`）時也不會更新。
 - 用 `--no-token` 時，這指的是所有連得到 hub port 的人：hub 一定要放在另一層登入後面，不能開在公開
   位址上。請用 `--allowed-hosts` 列出你開啟 hub 用的名稱（Coder port 網址的主機名、VPN 名稱）：
   否則網站可以把自己的名稱指向 hub 的位址，讓它的網頁連到 hub（DNS rebinding）。IP 位址和
@@ -374,6 +496,8 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 | 實例一直沒出現 | AgentAPI 在 `join` 之前、或 1.2 之前就啟動了 | 重新啟動它，或重開它的 workspace |
 | `join` 說 hub 前面有登入頁 | hub 的網址是 Coder 的 port 網址（或其他需要登入的網址） | 改用 hub 在你的網路或 VPN 上的位址；事件是由 AgentAPI 自己送出的 |
 | `join` 說 hub 在另一台機器上 | `--public-url` 寫的是 `localhost` | 改成 hub 連得到這台機器的位址 |
+| 新增對話框的指令裡是 `<hub secret>` | hub 以 `--no-token` 執行，頁面一律不顯示 secret | 填入 hub 的 `--secret` |
+| 新增對話框沒有列出機器所在網路的位址 | hub 只綁一個位址（`--bind`），或機器透過 hub 那台機器本身沒有的位址連到它（NAT、port forwarding） | 改用機器連到 hub 的位址，加上 `/hooks` |
 | 實例一直沒出現；hub 的 log 有「Refused an event」 | `join` 和 hub 的 `--secret` 不同，或兩邊時鐘差超過 10 分鐘 | 用 hub 的 secret 重新執行 `agentapi hub join`；檢查時鐘 |
 | 實例一直沒出現；`agentapi hub status` 顯示沒有 hub | `join` 寫入的設定檔，不是 AgentAPI 讀的那個 | 用同一個使用者，或兩邊傳同一個 `--config` |
 | Unreachable：`400 Bad Request` | AgentAPI 拒絕以 VPN 名稱作為 `Host` | 在 `--allowed-hosts` 允許它（步驟 3） |
@@ -389,7 +513,11 @@ agent 登入了，或改為等別的事（另一個請求、用量上限），�
 | 頁面說 hub 沒有回應 | 位址錯誤，或 hub 沒有執行 | 開啟 `http://<hub>:3290/api/session`；hub 執行中會回傳 JSON |
 | 透過 Coder 的 port 網址開啟時，先要求登入 Coder | Coder 的 port 網址需要登入 Coder | 在那個瀏覽器先登入 Coder，再登入 hub |
 | `the hub doesn't answer to <name>; add it to --allowed-hosts` | hub 設了 `--allowed-hosts`，而你用了別的名稱開啟 | 把這個名稱加進 `--allowed-hosts` |
-| hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案不完整，例如寫到一半當機，或磁碟滿了 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來；其他實例要重新加入，群組和靜音也要重新設定 |
+| **Update AgentAPI…** 說更新已關閉 | 這台機器不接受 hub 的更新 | 在那台機器的 `~/.agentapi/config.yaml` 加上 `allow-update: true`，再執行 `agentapi restart --all` |
+| **Update AgentAPI…** 要求一次性設定 | AgentAPI 無法寫入 binary 所在的目錄，例如 root 擁有的 `/usr/local/bin` | 在那台機器上執行一次畫面上的指令 |
+| 那一列顯示 **Update failed** | 檢查或下載新版時出錯 | 滑鼠移上去，或開啟 **Update AgentAPI…** 查看錯誤，再試一次 |
+| 已連線的 agent，**⋯** 選單裡沒有任何更新項目 | 它的 AgentAPI 太舊，還不支援從 hub 更新 | 手動更新（見[手動更新](#手動更新)） |
+| hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案不完整，例如寫到一半當機，或磁碟滿了 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來；其他實例要重新加入，群組、釘選和靜音也要重新設定 |
 
 在實例所在的機器上執行 `agentapi hub status`，可以看到設定檔指向哪個 hub，以及每個執行中的
 AgentAPI 回報到哪裡。hub 的 log 會記下開始追蹤、已停止和連不到的實例（附上錯誤），以及拒絕的事件；
@@ -424,6 +552,7 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | `--config` | `~/.agentapi/config.yaml` | 要寫入的設定檔 |
 | `--registry-dir` | `~/.agentapi/instances` | 執行中 AgentAPI 的登記目錄 |
 | `--no-check` | `false` | 不檢查 hub 是否收得到事件就加入（用於還沒啟動的 hub） |
+| `--allow-update` | `false` | 讓 hub 可以更新這台機器的 AgentAPI（在設定檔寫入 `allow-update: true`）；見[從 hub 更新](#從-hub-更新) |
 
 `join` 在寫入任何東西之前，會先確認 hub 收得到這台機器的事件：它送給 hub 一個有簽章的
 `webhook.test` 事件。hub 連不到、前面有登入頁（Coder 的 port 網址會導向 Coder 登入），或 secret
@@ -432,7 +561,8 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 
 `join` 把 `webhook-url`、`webhook-secret`、`webhook-events` 和 `public-url` 寫進設定檔，並用
 `PUT /webhook` 套用到執行中的 AgentAPI，保留各自的逾時和重試次數。`leave` 移除這些設定，並關掉執行中
-AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。
+AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。加上 `--allow-update` 時，
+`join` 還會寫入 `allow-update: true`，AgentAPI 啟動時才會讀取。
 
 用較早版本加入的機器，還會另外送出 `task.*`、`request.*`、`login.*`、`limit.*` 和 `agent.error`，
 每個最多 64 KiB；hub 只把它們當成實例還在的跡象。再執行一次同樣的 `agentapi hub join`，就只會送
@@ -446,12 +576,14 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `GET /api/session` | 請求帶有 session 或 hub token 時回傳 `{"authenticated": true}` |
 | `POST /api/session` | `{"token": …}` 登入並設定 session cookie |
 | `DELETE /api/session` | 登出 |
-| `GET /api/instances` | 所有實例：各自是誰、摘要、連線，以及列表上顯示的狀態（`state`：`needs-you`、`working`、`unread`、`idle`、`muted`、`connecting`、`unreachable` 或 `stopped`）；另外附上 hub 自己的版本（`hub_version`） |
+| `GET /api/instances` | 所有實例：各自是誰、摘要、連線、列表上顯示的狀態（`state`：`needs-you`、`working`、`unread`、`idle`、`muted`、`connecting`、`unreachable` 或 `stopped`）、這一列顯示的內容最近一次變動的時間（`changed_at`，RFC 3339；見[最近變動](#最近變動)），以及在釘選的實例中排第幾（`pin`，從 1 開始；沒有釘選就沒有這個欄位）；另外附上 hub 自己的版本（`hub_version`） |
 | `POST /api/instances` | `{"url": …, "token": …}` 以網址加入實例 |
-| `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音 |
-| `DELETE /api/instances/{id}` | 移除實例 |
+| `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音；`{"pinned": true}` 把它釘選在已釘選的實例後面，`false` 取消釘選 |
+| `DELETE /api/instances/{id}` | 移除實例，釘選也一併刪除 |
+| `PUT /api/pins` | `{"ids": […]}` 由上而下排定釘選實例的順序。必須列出每個釘選的實例各一次，不能有其他實例；不符合時回 409，並在 `ids` 附上目前釘選實例的順序，例如這段期間有人釘選、取消釘選或移除了實例；hub 沒有的實例回 404 |
 | `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`），再送 `instance`（某個實例有頁面看得到的變動；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
-| `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面 |
+| `GET /api/join` | 機器加入 hub 用的資訊：`urls` 的每一項是一個 webhook 網址（`url`）和這個位址所在的網路介面（`interface`；`--bind` 的位址沒有），順序和啟動時的 log 相同；只有設了 token 的 hub 才會附上 secret（`secret`，並帶 `secret_shown: true`） |
+| `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面；頁面用 `POST /i/{id}/update` 更新實例，用 `DELETE` 取消 |
 
 除了 `/hooks` 和 `/api/session`，每個端點都需要 session cookie 或
 `Authorization: Bearer <hub token>`。任何回應裡都不會出現實例 token。
@@ -460,15 +592,15 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 
 | 檔案 | 寫入者 | 內容 |
 | --- | --- | --- |
-| `~/.agentapi/config.yaml` | `agentapi hub join` | hub 的 webhook，每個 `agentapi server` 都會讀取 |
+| `~/.agentapi/config.yaml` | `agentapi hub join` | hub 的 webhook 和 `allow-update`，每個 `agentapi server` 都會讀取 |
 | `~/.agentapi/instances/` | `agentapi server` | 這台機器上執行中的 AgentAPI，供 `join` 和 `agentapi list` 使用 |
-| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組，以及手動加入的實例的 token |
+| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組和釘選、各自最近一次變動的時間，以及手動加入的實例的 token |
 
 ## 限制
 
 - hub 對所有實例都提供它自己版本的聊天介面。hub 和各實例請使用相同的 AgentAPI 版本；哪些不同，
   見[版本](#版本)。
 - 所有人共用一個 hub token：沒有個別帳號或權限。
-- hub 只監看和開啟 AgentAPI，不會啟動或停止它們。
+- hub 監看和開啟 AgentAPI，也能更新機器允許更新的 AgentAPI，但不會啟動或停止它們。
 - 關掉 hub 的頁面後，手機就收不到任何通知：hub 還不會送推播。每個 AgentAPI 只有一個 webhook，而
   hub 已經用掉了。

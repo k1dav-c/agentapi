@@ -31,9 +31,42 @@
 - On a desktop, drag the edge of the hub's list to change its width (280 px up to 640 px or half the
   window), or focus the edge and use the arrow keys; double-click or Enter resets it to 360 px. The
   browser keeps the width.
+- Update an AgentAPI through its API, and from the hub. A machine opts in: `allow-update: true` in
+  `~/.agentapi/config.yaml`, `--allow-update`, or `agentapi hub join --allow-update`. `POST /update`
+  installs the latest release of k1dav-c/agentapi, checked against its `checksums.txt` and that it
+  runs as that version, and restarts in place once the agent is idle (`{"when": "now"}` doesn't
+  wait); `DELETE /update` cancels. The request can't choose a URL or version, and AgentAPI never runs
+  sudo: a program in a directory the user can't write, such as `/usr/local/bin`, reports in the
+  summary's `update.blocked` the one-time move to `~/.local/bin` behind a symlink. The AgentAPIs of
+  one machine take turns on a lock next to the program, and the second only restarts. The summary's
+  `update` reports how far an update got.
+- The hub's row menu offers **Update AgentAPI…** (once idle, or now), with its progress in the row
+  and the open instance's bar, and says what a machine needs when it can't; the Versions card
+  updates every older instance that can at once.
+- The hub's **Add agents** dialog, and the guide of an empty hub, join a machine: pick the hub's
+  address (the hub lists its own: the `--bind` address, or its network interfaces, LAN first),
+  choose whether to allow updates from the hub, and copy the `agentapi hub join` command or a prompt
+  for an agent on that machine. A hub with a token fills in its secret, masked until shown; a hub
+  without one never shows it. `GET /api/join` returns the addresses, and the secret on a hub with a
+  token. `agentapi hub serve` logs the join command for each address when it starts, without the
+  secret.
+- The `agentapi-hub-join` skill covers updates from the hub: `--allow-update`, the one-time move of
+  a program in `/usr/local/bin`, and a state database to keep conversations across updates.
+- The hub's list can also show every agent in one list, the most recent change first, whatever its
+  group: a switch next to the search box picks **Groups** or **Recent changes**, and the browser
+  keeps the choice. A change is the hub losing, finding or stopping an agent, a new state, a task
+  that starts or ends, what the agent waits for, and its title, queue, version or update; opening an
+  agent, its messages, spend and edits to groups or mutes don't move it. The hub keeps each agent's
+  `changed_at` in its file and sends it with the instances.
+- Pin agents to the top of the hub's list, as on GitHub: **Pin to top** in a row's menu (or `p`)
+  puts it in a **Pinned** section above the rest, in either order, and **Move up** and **Move down**
+  arrange the pinned ones. The hub keeps the pins, so every browser and phone shows the same; they
+  don't count as changes. `PATCH /api/instances/{id}` takes `{"pinned": …}`, and `PUT /api/pins`
+  sets their order.
 
 ### Fixes
 
+- The hub's copy buttons work on a hub served over plain HTTP, where browsers offer no clipboard API.
 - A signed event can no longer move an instance the hub follows. An `instance.*` event without
   `server_id` is refused (400); no event moves an instance the hub is connected to, or one added by
   hand; moving one drops the token stored for its old URL. The hub also refuses events without a

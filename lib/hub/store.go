@@ -2,16 +2,22 @@ package hub
 
 import (
 	"bytes"
+	"cmp"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/coder/quartz"
 
 	"github.com/coder/agentapi/lib/instanceapi"
 )
@@ -52,6 +58,9 @@ type Instance struct {
 	// refusedRun is the server ID of the last run whose URL change the hub
 	// refused, to log it once.
 	refusedRun string
+	// activity is the last activityKey the hub knew of it, kept in the file:
+	// ChangedAt moves when that changes. Empty before the hub knew one.
+	activity string
 }
 
 // record is what the hub keeps of an instance in its file: not its
@@ -65,6 +74,10 @@ type record struct {
 	// LastSeen is when the hub last heard from the instance's current run:
 	// its events and its summaries.
 	LastSeen time.Time `json:"last_seen"`
+	// ChangedAt is when the hub last saw the instance change what its row
+	// shows it does (activityKey), or first saw it. Zero for one a hub
+	// kept before it recorded this, until its next change.
+	ChangedAt time.Time `json:"changed_at,omitzero"`
 	// HeartbeatSeconds is how often the current run sends
 	// instance.heartbeat, as its instance.* events say; 0 when unknown or
 	// off.
@@ -76,6 +89,10 @@ type record struct {
 	// hub's page (instanceapi.AttentionKey); empty is not muted. It ends
 	// once that changes, so the next thing the instance needs counts again.
 	Muted string `json:"muted,omitempty"`
+	// Pin is the instance's place among those pinned to the top of the
+	// hub's page, from 1; 0 is not pinned. The store numbers the pinned
+	// ones 1, 2, … without gaps.
+	Pin int `json:"pin,omitempty"`
 	// Token, for a manual instance that has its own, is sent to it; it
 	// never leaves the hub.
 	Token string `json:"token,omitempty"`
@@ -104,6 +121,62 @@ func (i Instance) state() instanceapi.State {
 	return instanceapi.StateOf(i.Connection, i.Summary, i.Muted)
 }
 
+// activityKey stands for what the instance's row shows it does, which
+// ChangedAt follows: whether the hub reaches it, its state, its latest
+// task starting or ending, what it waits for, its title, queue, update
+// and version. Not what someone did on the hub's page (a group, a mute,
+// reading a finished task), what moves on its own (spend, usage, the
+// agent's latest message), a stream that drops and comes back, or when it
+// was last heard of. Empty while the hub doesn't know what it does: it
+// hasn't read a summary of it since the hub started. A hash, so the file
+// keeps no titles or commands.
+func (i Instance) activityKey() string {
+	switch {
+	case i.Connection == ConnectionStopped || i.Connection == ConnectionUnreachable:
+		return string(i.Connection)
+	case i.Summary == nil:
+		return ""
+	}
+	s := i.Summary
+	activity := struct {
+		Status          instanceapi.AgentStatus    `json:"status"`
+		Lifecycle       instanceapi.LifecycleState `json:"lifecycle"`
+		Attention       instanceapi.Attention      `json:"attention"`
+		Title           string                     `json:"title"`
+		PendingRequests int                        `json:"pending_requests"`
+		Request         string                     `json:"request,omitempty"`
+		QueuedMessages  int                        `json:"queued_messages"`
+		Task            int                        `json:"task,omitempty"`
+		TaskStatus      instanceapi.TaskStatus     `json:"task_status,omitempty"`
+		Login           string                     `json:"login,omitempty"`
+		LimitStop       time.Time                  `json:"limit_stop,omitzero"`
+		Update          instanceapi.UpdateState    `json:"update,omitempty"`
+		UpdateError     string                     `json:"update_error,omitempty"`
+		Version         string                     `json:"version,omitempty"`
+	}{
+		Status: s.Status, Lifecycle: s.Lifecycle, Attention: s.Attention, Title: s.Title,
+		PendingRequests: s.PendingRequests, QueuedMessages: s.QueuedMessages, Version: s.Instance.Version,
+	}
+	if s.Request != nil {
+		activity.Request = s.Request.ID
+	}
+	if s.Task != nil {
+		activity.Task, activity.TaskStatus = s.Task.ID, s.Task.Status
+	}
+	if s.LoginRequired != nil {
+		activity.Login = s.LoginRequired.Message
+	}
+	if s.LimitStop != nil {
+		activity.LimitStop = s.LimitStop.StoppedAt
+	}
+	if s.Update != nil {
+		activity.Update, activity.UpdateError = s.Update.State, s.Update.Error
+	}
+	data, _ := json.Marshal(activity)
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:8])
+}
+
 // instanceURL is where the hub reaches the instance an event names: its
 // public URL, else its host and port.
 func instanceURL(instance instanceapi.WebhookInstance) string {
@@ -119,7 +192,8 @@ func instanceURL(instance instanceapi.WebhookInstance) string {
 // store holds the instances, keeps them in a file and tells subscribers
 // of changes.
 type store struct {
-	path string // where the instances are kept; empty keeps none
+	path  string // where the instances are kept; empty keeps none
+	clock quartz.Clock
 
 	mu        sync.Mutex
 	instances map[string]*Instance
@@ -136,10 +210,13 @@ type storeEvent struct {
 type storedInstance struct {
 	record
 	Stopped bool `json:"stopped,omitempty"`
+	// Activity is its activityKey: after a restart, a summary that says
+	// what the last one did isn't a change.
+	Activity string `json:"activity,omitempty"`
 }
 
 func (i Instance) stored() storedInstance {
-	return storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped}
+	return storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped, Activity: i.activity}
 }
 
 // kept is what the file keeps of the instance, but when it was last seen.
@@ -150,10 +227,11 @@ func (i Instance) kept() storedInstance {
 }
 
 // newStore returns the store that keeps the instances in path, with those
-// it kept. A file that doesn't parse is moved aside, and the store starts
-// empty: a hub that stopped on it would stop again at every restart.
-func newStore(path string, logger *slog.Logger) (*store, error) {
-	s := &store{path: path, instances: map[string]*Instance{}, subs: map[chan storeEvent]struct{}{}}
+// it kept, on clock. A file that doesn't parse is moved aside, and the
+// store starts empty: a hub that stopped on it would stop again at every
+// restart.
+func newStore(path string, logger *slog.Logger, clock quartz.Clock) (*store, error) {
+	s := &store{path: path, clock: clock, instances: map[string]*Instance{}, subs: map[chan storeEvent]struct{}{}}
 	if path == "" {
 		return s, nil
 	}
@@ -171,7 +249,7 @@ func newStore(path string, logger *slog.Logger) (*store, error) {
 			return nil, fmt.Errorf("read %s: %w; moving it aside failed: %w", path, err, renameErr)
 		}
 		logger.Warn("The hub's file of instances doesn't parse; moved it aside and starting empty. "+
-			"Lost: the instances added by hand, with their tokens, and every instance's group and mute; joined instances come back with their next heartbeat",
+			"Lost: the instances added by hand, with their tokens, and every instance's group, pin and mute; joined instances come back with their next heartbeat",
 			"file", path, "moved_to", aside, "error", err)
 		return s, nil
 	}
@@ -180,10 +258,13 @@ func newStore(path string, logger *slog.Logger) (*store, error) {
 		if si.Stopped {
 			connection = ConnectionStopped
 		}
-		i := &Instance{record: si.record, Connection: connection}
+		i := &Instance{record: si.record, Connection: connection, activity: si.Activity}
+		i.Pin = max(i.Pin, 0)
 		i.State = i.state()
 		s.instances[si.ID] = i
 	}
+	// A file edited by hand may have gaps or twins.
+	s.numberPinsLocked()
 	return s, nil
 }
 
@@ -272,10 +353,16 @@ func (s *store) get(id string) (Instance, bool) {
 	return *i, true
 }
 
+// pinLast, as a change sets an instance's Pin, pins it below the pinned
+// ones: the store numbers it after them.
+const pinLast = math.MaxInt
+
 // update changes the instance id with change, or adds it when create is
 // set, and reports whether it did. The file is written when what it keeps
 // changed; when the instance was last seen isn't worth a write of its own
-// and goes with the next one.
+// and goes with the next one. ChangedAt moves when the change is one its
+// row shows of what it does (activityKey), and for a new instance. A
+// change of its Pin numbers the pinned ones again.
 func (s *store) update(id string, create bool, change func(*Instance)) (Instance, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -288,9 +375,23 @@ func (s *store) update(id string, create bool, change func(*Instance)) (Instance
 		i.ID = id
 		s.instances[id] = i
 	}
-	before, seen := i.kept(), i.seen()
+	before, seen, pin := i.kept(), i.seen(), i.Pin
 	change(i)
+	var renumbered []*Instance
+	if i.Pin != pin {
+		renumbered = s.numberPinsLocked()
+	}
 	i.State = i.state()
+	activity := i.activityKey()
+	// One kept by a hub that didn't record changes has nothing to differ
+	// from until the hub knows what it does.
+	known := i.activity != "" || !i.ChangedAt.IsZero()
+	if !ok || (activity != "" && activity != i.activity && known) {
+		i.ChangedAt = s.clock.Now()
+	}
+	if activity != "" {
+		i.activity = activity
+	}
 	var err error
 	if !ok || i.kept() != before {
 		err = s.saveLocked()
@@ -299,19 +400,100 @@ func (s *store) update(id string, create bool, change func(*Instance)) (Instance
 	if !ok || !bytes.Equal(changed.seen(), seen) {
 		s.notifyLocked(storeEvent{Instance: &changed})
 	}
+	s.notifyEachLocked(renumbered, i)
 	return changed, true, err
 }
 
+// remove forgets the instance id, and its pin: the pinned ones below it
+// move up.
 func (s *store) remove(id string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.instances[id]; !ok {
+	i, ok := s.instances[id]
+	if !ok {
 		return false, nil
 	}
 	delete(s.instances, id)
+	var renumbered []*Instance
+	if i.Pin > 0 {
+		renumbered = s.numberPinsLocked()
+	}
 	err := s.saveLocked()
 	s.notifyLocked(storeEvent{Removed: id})
+	s.notifyEachLocked(renumbered, nil)
 	return true, err
+}
+
+// pinnedLocked returns the pinned instances from the top: by Pin, then by
+// ID. Caller holds s.mu.
+func (s *store) pinnedLocked() []*Instance {
+	var pinned []*Instance
+	for _, i := range s.instances {
+		if i.Pin > 0 {
+			pinned = append(pinned, i)
+		}
+	}
+	slices.SortFunc(pinned, func(a, b *Instance) int { return cmp.Or(cmp.Compare(a.Pin, b.Pin), strings.Compare(a.ID, b.ID)) })
+	return pinned
+}
+
+// numberPinsLocked numbers the pinned instances 1, 2, … in their order and
+// returns those whose Pin it changed. Caller holds s.mu.
+func (s *store) numberPinsLocked() []*Instance {
+	var renumbered []*Instance
+	for n, i := range s.pinnedLocked() {
+		if i.Pin != n+1 {
+			i.Pin = n + 1
+			renumbered = append(renumbered, i)
+		}
+	}
+	return renumbered
+}
+
+// errPinsDiffer: the IDs to order the pinned instances by aren't exactly
+// the pinned ones, such as when one was pinned or unpinned since.
+var errPinsDiffer = errors.New("list each pinned instance once, and only those")
+
+// unknownInstanceError is an ID the hub doesn't have.
+type unknownInstanceError string
+
+func (e unknownInstanceError) Error() string { return "no such instance: " + string(e) }
+
+// setPins orders the pinned instances as ids, from the top, and returns
+// the pinned ones' IDs in their order. ids must list each pinned instance
+// once and nothing else: an ID the hub doesn't have is an
+// unknownInstanceError, any other difference errPinsDiffer, and neither
+// changes anything. Any other error is the file's, after the change.
+func (s *store) setPins(ids []string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pinned := s.pinnedLocked()
+	current := make([]string, len(pinned))
+	for n, i := range pinned {
+		current[n] = i.ID
+	}
+	for _, id := range ids {
+		if _, ok := s.instances[id]; !ok {
+			return current, unknownInstanceError(id)
+		}
+	}
+	// The pinned IDs are unique: equal once sorted, ids lists each once.
+	if !slices.Equal(slices.Sorted(slices.Values(ids)), slices.Sorted(slices.Values(current))) {
+		return current, errPinsDiffer
+	}
+	var renumbered []*Instance
+	for n, id := range ids {
+		if i := s.instances[id]; i.Pin != n+1 {
+			i.Pin = n + 1
+			renumbered = append(renumbered, i)
+		}
+	}
+	if len(renumbered) == 0 {
+		return current, nil
+	}
+	err := s.saveLocked()
+	s.notifyEachLocked(renumbered, nil)
+	return slices.Clone(ids), err
 }
 
 // subscribe returns the instances and a channel of the changes after them.
@@ -333,6 +515,17 @@ func (s *store) unsubscribe(ch chan storeEvent) {
 	if _, ok := s.subs[ch]; ok {
 		delete(s.subs, ch)
 		close(ch)
+	}
+}
+
+// notifyEachLocked tells the subscribers of each instance in changed but
+// except, which they hear of on its own. Caller holds s.mu.
+func (s *store) notifyEachLocked(changed []*Instance, except *Instance) {
+	for _, i := range changed {
+		if i != except {
+			instance := *i
+			s.notifyLocked(storeEvent{Instance: &instance})
+		}
 	}
 }
 
