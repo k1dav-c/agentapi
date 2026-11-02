@@ -2748,7 +2748,7 @@ export interface components {
             max_attempts: number;
             /** @description Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .ServerID, .Status, .PreviousStatus, .AgentType, .Transport. */
             payload_template?: string;
-            /** @description Where this AgentAPI can be reached, in every event. Omit to preserve; set to empty string to clear. */
+            /** @description Where this AgentAPI can be reached, in every event. {port} and {hostname} are filled in, and {ip} with the machine's IPv4 address on the route to the webhook URL, looked up again while AgentAPI runs. Omit to preserve; set to empty string to clear. */
             public_url?: string;
             /** @description Secret that signs every delivery with HMAC-SHA256. Omit to preserve; set to empty string to stop signing. */
             secret?: string;
@@ -2783,7 +2783,7 @@ export interface components {
             max_attempts: number;
             /** @description Go text/template for the webhook POST body. Empty means the default JSON payload is used. */
             payload_template: string;
-            /** @description Where this AgentAPI can be reached, in every event; empty when not set. */
+            /** @description Where this AgentAPI can be reached, in every event, as set: {port}, {hostname} and {ip} stay unfilled; empty when not set. */
             public_url: string;
             /** @description Deliveries are signed (X-AgentAPI-Signature-256). The secret itself is never returned. */
             secret_set: boolean;

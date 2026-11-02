@@ -26,6 +26,7 @@ import (
 
 	"github.com/coder/agentapi/lib/instanceapi"
 	mf "github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/netaddr"
 	"github.com/coder/agentapi/lib/statedb"
 )
 
@@ -79,7 +80,8 @@ type WebhookConfig struct {
 	// <hostname>:<port>.
 	InstanceID string
 	// PublicURL is where this AgentAPI can be reached, for the receiver to
-	// link to its chat or call its API.
+	// link to its chat or call its API. It may hold {port}, {hostname} and
+	// {ip}, which every event and summary fill in (publicURL).
 	PublicURL string
 }
 
@@ -90,7 +92,9 @@ func (c WebhookConfig) validate() error {
 		}
 	}
 	if c.PublicURL != "" {
-		if err := validateHTTPURL(c.PublicURL, "public URL"); err != nil {
+		// With sample values for the placeholders: a port must be a number.
+		sample := instanceapi.ExpandIP(instanceapi.ExpandPlaceholders(c.PublicURL, 1), "192.0.2.1")
+		if err := validateHTTPURL(sample, "public URL"); err != nil {
 			return err
 		}
 	}
@@ -195,6 +199,14 @@ type webhookDispatcher struct {
 	configured func()
 	// configChanged wakes the heartbeat loop when the interval changes.
 	configChanged chan struct{}
+	// ip finds the address {ip} in the public URL stands for.
+	ip *netaddr.Resolver
+	// urlMu guards lastURL, the public URL the last snapshot had.
+	urlMu   sync.Mutex
+	lastURL string
+	// urlChanged, if set, is called (in a goroutine of its own) once the
+	// public URL changed because {ip} did.
+	urlChanged func()
 }
 
 // ExpandPublicURL fills in a public URL's placeholders; see
@@ -243,6 +255,7 @@ func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType m
 		startup:       config,
 		queue:         make(chan queuedEvent, webhookQueueSize),
 		configChanged: make(chan struct{}, 1),
+		ip:            &netaddr.Resolver{Now: func() time.Time { return clock.Now() }, Logger: logger},
 	}, nil
 }
 
@@ -309,15 +322,57 @@ func (d *webhookDispatcher) setInstance(instance WebhookInstance) {
 
 func (d *webhookDispatcher) instanceSnapshot() WebhookInstance {
 	d.mu.RLock()
-	defer d.mu.RUnlock()
 	instance := d.instance
-	if d.config.InstanceID != "" {
-		instance.ID = d.config.InstanceID
+	config := d.config
+	d.mu.RUnlock()
+	if config.InstanceID != "" {
+		instance.ID = config.InstanceID
 	}
-	if d.config.PublicURL != "" {
-		instance.URL = d.config.PublicURL
+	if config.PublicURL != "" {
+		if expanded := d.publicURL(config, instance.Port); expanded != "" {
+			instance.URL = expanded
+		}
 	}
 	return instance
+}
+
+// publicURL is the public URL with its placeholders filled in. {ip} is
+// the address this machine reaches the webhook's receiver from, looked up
+// at most every 30 seconds: after DHCP gives the machine another address,
+// the next heartbeat names it. When no address is found it stays the last
+// one found; empty (no URL) when none was.
+func (d *webhookDispatcher) publicURL(config WebhookConfig, port int) string {
+	expanded := instanceapi.ExpandPlaceholders(config.PublicURL, port)
+	if !instanceapi.HasIP(expanded) {
+		return expanded
+	}
+	ip, _ := d.ip.Resolve(netaddr.Target(config.URL))
+	if ip == "" {
+		return ""
+	}
+	expanded = instanceapi.ExpandIP(expanded, ip)
+	d.urlMu.Lock()
+	changed := d.lastURL != "" && d.lastURL != expanded
+	d.lastURL = expanded
+	d.urlMu.Unlock()
+	if changed {
+		d.logger.Info("The public URL changed with this machine's address", "url", expanded)
+		if d.urlChanged != nil {
+			go d.urlChanged()
+		}
+	}
+	return expanded
+}
+
+// publicIP is the address {ip} in the public URL stands for now; empty
+// when it holds no {ip}.
+func (d *webhookDispatcher) publicIP() string {
+	config := d.configSnapshot()
+	if !instanceapi.HasIP(config.PublicURL) {
+		return ""
+	}
+	ip, _ := d.ip.Resolve(netaddr.Target(config.URL))
+	return ip
 }
 
 func (d *webhookDispatcher) configSnapshot() WebhookConfig {
@@ -616,7 +671,7 @@ type WebhookConfigResponse struct {
 		SecretSet        bool     `json:"secret_set" doc:"Deliveries are signed (X-AgentAPI-Signature-256). The secret itself is never returned."`
 		HeartbeatSeconds int      `json:"heartbeat_seconds" doc:"How often instance.heartbeat is sent, in seconds; 0 when it is off."`
 		InstanceID       string   `json:"instance_id" doc:"The instance ID in every event."`
-		PublicURL        string   `json:"public_url" doc:"Where this AgentAPI can be reached, in every event; empty when not set."`
+		PublicURL        string   `json:"public_url" doc:"Where this AgentAPI can be reached, in every event, as set: {port}, {hostname} and {ip} stay unfilled; empty when not set."`
 	}
 }
 
@@ -630,7 +685,7 @@ type WebhookConfigRequest struct {
 		Secret           *string   `json:"secret,omitempty" doc:"Secret that signs every delivery with HMAC-SHA256. Omit to preserve; set to empty string to stop signing."`
 		HeartbeatSeconds *int      `json:"heartbeat_seconds,omitempty" minimum:"0" maximum:"86400" doc:"How often instance.heartbeat is sent, in seconds; 0 turns it off. Omit to preserve."`
 		InstanceID       *string   `json:"instance_id,omitempty" doc:"The instance ID in every event. Omit to preserve; set to empty string for <hostname>:<port>."`
-		PublicURL        *string   `json:"public_url,omitempty" doc:"Where this AgentAPI can be reached, in every event. Omit to preserve; set to empty string to clear."`
+		PublicURL        *string   `json:"public_url,omitempty" doc:"Where this AgentAPI can be reached, in every event. {port} and {hostname} are filled in, and {ip} with the machine's IPv4 address on the route to the webhook URL, looked up again while AgentAPI runs. Omit to preserve; set to empty string to clear."`
 	}
 }
 

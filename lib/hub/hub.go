@@ -32,6 +32,7 @@ import (
 	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
+	"github.com/coder/agentapi/lib/netaddr"
 )
 
 // Config is how the hub runs.
@@ -81,7 +82,7 @@ type Hub struct {
 	deliveries deliveries
 	clock      quartz.Clock
 	// interfaces lists the machine's network interfaces, for the join URLs.
-	interfaces func() ([]netInterface, error)
+	interfaces func() ([]netaddr.Interface, error)
 
 	ctx      context.Context
 	watchMu  sync.Mutex
@@ -122,7 +123,7 @@ func New(config Config) (*Hub, error) {
 	}
 	return &Hub{
 		config: config, logger: config.Logger, store: st, client: client, clock: config.Clock,
-		interfaces: machineInterfaces, watchers: map[string]context.CancelFunc{},
+		interfaces: netaddr.Interfaces, watchers: map[string]context.CancelFunc{},
 	}, nil
 }
 

@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -171,6 +174,100 @@ func TestJoinNeedsToken(t *testing.T) {
 	config, err := userconfig.Load(configPath)
 	require.NoError(t, err)
 	assert.Equal(t, "env-secret", config[keySecret], "the secret from the environment")
+}
+
+// join --public-url 'http://{ip}:{port}': the config file keeps the
+// template; an AgentAPI that fills in {ip} itself gets it too, and follows
+// the machine's address; an older one gets the address now. join reaches
+// an AgentAPI whose registry URL names an address the machine no longer
+// has at its port on localhost.
+func TestJoinIP(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	registryDir := filepath.Join(dir, "instances")
+	t.Setenv("AGENTAPI_API_TOKEN", "")
+	t.Setenv("AGENTAPI_HUB_SECRET", "")
+	var resolvedFor []string
+	defaultResolve := resolveIP
+	resolveIP = func(hubURL string) (string, error) {
+		resolvedFor = append(resolvedFor, hubURL)
+		return "192.168.9.49", nil
+	}
+	t.Cleanup(func() { resolveIP = defaultResolve })
+
+	hostname, _ := os.Hostname()
+	fakes := map[string]*fakeAgentAPI{}
+	for i, v := range []string{"2.1.2", "2.2.0", "0.0.0-dev", ""} {
+		fake := &fakeAgentAPI{current: map[string]any{"url": "", "timeout_seconds": 5, "max_attempts": 3}}
+		srv := httptest.NewServer(fake)
+		t.Cleanup(srv.Close)
+		port := srv.Listener.Addr().(*net.TCPAddr).Port
+		url := srv.URL
+		if v == "2.2.0" {
+			// Its public URL, from before DHCP gave the machine another
+			// address.
+			url = "http://127.0.0.2:1"
+		}
+		fakes[v] = fake
+		_, err := registry.Write(registryDir, registry.Entry{WebhookInstance: instanceapi.WebhookInstance{
+			ID: fmt.Sprintf("host:%d", port), ServerID: fmt.Sprintf("s%d", i), URL: url, Hostname: hostname, Port: port, PID: os.Getpid(), AgentType: "claude", Version: v,
+		}, StartedAt: time.Now()})
+		require.NoError(t, err)
+	}
+
+	out, err := run(t, "join", "http://192.168.9.210:3290/hooks", "--secret", "s", "--public-url", "http://{ip}:{port}", "--no-check", "--config", configPath, "--registry-dir", registryDir)
+	require.NoError(t, err, out)
+	assert.Equal(t, []string{"http://192.168.9.210:3290/hooks"}, resolvedFor, "toward the hub")
+	assert.Contains(t, out, "{ip} is 192.168.9.49 now")
+	assert.Equal(t, 2, strings.Count(out, "too old for {ip}, it reports http://192.168.9.49:"), out)
+	config, err := userconfig.Load(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, "http://{ip}:{port}", config[keyPublic], "the file keeps the template")
+
+	publicURL := func(v string) any {
+		t.Helper()
+		fake := fakes[v]
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		require.Len(t, fake.puts, 1, v)
+		return fake.puts[0]["public_url"]
+	}
+	assert.Regexp(t, `^http://192\.168\.9\.49:\d+$`, publicURL("2.1.2"), "too old for {ip}")
+	assert.Regexp(t, `^http://192\.168\.9\.49:\d+$`, publicURL(""), "too old to say its version")
+	assert.Regexp(t, `^http://\{ip\}:\d+$`, publicURL("2.2.0"), "fills it in itself; reached on localhost")
+	assert.Regexp(t, `^http://\{ip\}:\d+$`, publicURL("0.0.0-dev"), "a development build")
+
+	// No address for {ip}: nothing is written.
+	resolveIP = func(string) (string, error) { return "", errors.New("no interface has an IPv4 address") }
+	other := filepath.Join(dir, "other.yaml")
+	_, err = run(t, "join", "http://192.168.9.210:3290/hooks", "--public-url", "http://{ip}:{port}", "--no-check", "--config", other, "--registry-dir", filepath.Join(dir, "none"))
+	require.ErrorContains(t, err, "no address of this machine for {ip}")
+	_, statErr := os.Stat(other)
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+// The AgentAPIs that fill in {ip} themselves: those of a release after
+// 2.1.2, development builds, and those at least as new as this agentapi.
+func TestSupportsIP(t *testing.T) {
+	for _, tc := range []struct {
+		version, own string
+		want         bool
+	}{
+		{"2.1.2", "2.2.0", false},
+		{"2.1.1", "0.0.0-dev", false},
+		{"1.4.0", "2.2.0", false},
+		{"", "2.2.0", false},
+		{"not a version", "2.2.0", false},
+		{"2.1.3", "2.1.3", true},
+		{"2.2.0", "2.2.0", true},
+		{"3.0.0", "2.2.0", true},
+		{"0.0.0-dev", "2.2.0", true},
+		{"2.1.2-4-g3e48afc", "2.1.2-4-g3e48afc", true},
+		{"2.1.2-9-gabcdef0", "2.1.2-4-g3e48afc", true},
+		{"2.1.2-1-gabcdef0", "2.1.2-4-g3e48afc", false},
+	} {
+		assert.Equal(t, tc.want, supportsIP(tc.version, tc.own), "%s with agentapi %s", tc.version, tc.own)
+	}
 }
 
 // join first checks that the hub takes this machine's events, and says why

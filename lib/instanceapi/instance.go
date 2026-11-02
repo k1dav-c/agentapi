@@ -59,7 +59,7 @@ type WebhookInstance struct {
 }
 
 // ExpandPublicURL fills in a public URL's placeholders; see
-// ExpandPlaceholders.
+// ExpandPlaceholders. It leaves {ip} (ExpandIP).
 func ExpandPublicURL(publicURL string, port int) string {
 	return ExpandPlaceholders(publicURL, port)
 }
@@ -74,4 +74,20 @@ func ExpandPlaceholders(s string, port int) string {
 	}
 	hostname, _ := os.Hostname()
 	return strings.NewReplacer("{port}", strconv.Itoa(port), "{hostname}", hostname).Replace(s)
+}
+
+// IPPlaceholder in a public URL is the machine's IPv4 address on the route
+// to the webhook's receiver. Unlike {port} and {hostname} it changes while
+// AgentAPI runs (DHCP), so AgentAPI fills it in anew for each event and
+// summary.
+const IPPlaceholder = "{ip}"
+
+// HasIP reports whether s holds {ip}.
+func HasIP(s string) bool {
+	return strings.Contains(s, IPPlaceholder)
+}
+
+// ExpandIP fills in {ip} with ip.
+func ExpandIP(s, ip string) string {
+	return strings.ReplaceAll(s, IPPlaceholder, ip)
 }
