@@ -35,6 +35,8 @@ func newConvFixture(t *testing.T) *convFixture {
 			return newAdapter(Config{Logger: logger, StartProcess: pi.start}, nil, ref.Ref), nil
 		},
 		Logger: logger,
+		// The fake Pi runs once.
+		RestartDelays: []time.Duration{},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() {
@@ -99,12 +101,10 @@ func TestConversation(t *testing.T) {
 	assert.Equal(t, "hello", msgs[1].Message)
 
 	f.pi.exit(errors.New("exit status 1"))
-	select {
-	case err := <-conv.Exited():
-		require.Error(t, err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("the conversation didn't report the exit")
-	}
+	require.Eventually(t, func() bool {
+		state, _ := conv.Request("d1")
+		return state.Status == native.RequestStatusExpired
+	}, 5*time.Second, time.Millisecond, "the conversation didn't handle the exit")
 	state, ok := conv.Request("d1")
 	require.True(t, ok)
 	assert.Equal(t, native.RequestStatusExpired, state.Status)
@@ -164,6 +164,7 @@ func (*settingsObserver) RequestUpdated(native.RequestState)      {}
 func (*settingsObserver) SettingsChosen(native.Settings)          {}
 func (*settingsObserver) Usage(native.AgentUsage)                 {}
 func (*settingsObserver) LimitStop(*native.LimitStop)             {}
+func (*settingsObserver) AgentExited(native.AgentExit)            {}
 
 func TestModelSwitchReportsNoMixedSettings(t *testing.T) {
 	t.Parallel()

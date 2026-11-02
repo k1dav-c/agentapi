@@ -236,9 +236,10 @@ func (e *EventEmitter) handoffView() handoffView {
 // reply holds s.mu, so that what it answers stays offered until it is
 // delivered.
 func (s *Server) pendingHandoff() (*handoff.Request, native.RequestState) {
-	if s.emitter == nil || s.conversation == nil || s.restarting.Load() {
+	if s.emitter == nil || s.conversation == nil || s.restarting.Load() || s.updating.Load() {
 		// While the agent restarts, what it showed belongs to the old
-		// one, and a reply would reach no agent.
+		// one, and a reply would reach no agent; AgentAPI restarting for
+		// an update would cut it short.
 		return nil, native.RequestState{}
 	}
 	view := s.emitter.handoffView()
@@ -297,12 +298,17 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 	if pending.Kind != "message" {
 		return &HandoffReplyResponse{Body: s.backend().answerHandoff(pending, request, reply.ID, reply.Content)}, nil
 	}
-	// The reply to the agent's last message is the next message.
+	// The reply to the agent's last message is the next message, which goes
+	// out as POST /message sends one: queued if the agent got busy since.
 	result := handoff.Result{Outcome: "uncertain"}
 	s.handoff.record(pending.ID, reply.ID, result)
-	if err := s.conversation.Send(FormatMessage(s.agentType, reply.Content)...); err != nil {
+	var resp MessageResponse
+	switch err := s.backend().deliver(reply.Content, DispatchQueue, &resp); {
+	case err != nil:
 		s.logger.Error("Human reply delivery is uncertain; refusing automatic retry", "request_id", pending.ID, "error", err)
-	} else {
+	case resp.Body.Queued:
+		result.Outcome = "queued"
+	default:
 		result.Outcome = "applied"
 	}
 	s.handoff.record(pending.ID, reply.ID, result)

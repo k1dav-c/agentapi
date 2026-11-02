@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -81,7 +82,9 @@ func parseAgentType(firstArg string, agentTypeVar string) (AgentType, error) {
 	return AgentTypeCustom, nil
 }
 
-func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
+// runServer runs the server for args until it stops. It returns errRestart
+// once SIGUSR2 stopped it to run self again.
+func runServer(ctx context.Context, logger *slog.Logger, args []string, self *selfExec) (err error) {
 	opts, err := loadServerOptions(viper.GetViper(), args)
 	if err != nil {
 		return err
@@ -98,7 +101,13 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
 		if err := writePIDFile(opts.pidFile, logger); err != nil {
 			return fmt.Errorf("failed to write PID file: %w", err)
 		}
-		defer cleanupPIDFile(opts.pidFile, logger)
+		defer func() {
+			// After a restart in place, the process goes on with the same
+			// ID.
+			if !errors.Is(err, errRestart) {
+				cleanupPIDFile(opts.pidFile, logger)
+			}
+		}()
 	}
 
 	prices := pricing.Builtin()
@@ -130,7 +139,7 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
 	if err != nil {
 		return err
 	}
-	srv, err := httpapi.NewServer(ctx, serverConfig(opts, agent, stateDB, apiToken, cwd, prices))
+	srv, err := httpapi.NewServer(ctx, serverConfig(opts, agent, stateDB, apiToken, cwd, prices, self))
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}
@@ -141,7 +150,7 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string) error {
 	if warning := exposureWarning(opts.bind, apiToken, opts.transport == httpapi.TransportNative && opts.terminal); warning != "" {
 		logger.Warn(warning)
 	}
-	return serve(ctx, logger, srv, agent)
+	return serve(ctx, logger, srv, agent, self)
 }
 
 // resolveAPIToken returns the token the API asks for: none, the given one,
@@ -167,8 +176,9 @@ func resolveAPIToken(opts serverOptions, logger *slog.Logger) (string, error) {
 	}
 }
 
-// serverConfig is the configuration of the server for opts and agent.
-func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, apiToken, cwd string, prices *pricing.Table) httpapi.ServerConfig {
+// serverConfig is the configuration of the server for opts and agent;
+// self, if set, restarts it in place.
+func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, apiToken, cwd string, prices *pricing.Table, self *selfExec) httpapi.ServerConfig {
 	config := httpapi.ServerConfig{
 		AgentType:      opts.agentType,
 		Transport:      opts.transport,
@@ -184,6 +194,15 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 		Name:           opts.name,
 		StateDB:        stateDB,
 		RegistryDir:    opts.registryDir,
+		// SIGUSR2 (handleSignals).
+		RestartsInPlace: runtime.GOOS != "windows",
+		Update:          httpapi.UpdateConfig{Allowed: opts.allowUpdate},
+	}
+	if self != nil {
+		config.Update.Program = self.path
+		if config.RestartsInPlace {
+			config.Update.Restart = func(ctx context.Context) error { return self.restart(ctx, "update") }
+		}
 	}
 	switch opts.transport {
 	case httpapi.TransportPTY:
@@ -213,29 +232,31 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 	return config
 }
 
-// serve runs the server until a signal, the agent's exit or a failed
-// listener stops it, then stops the server and the agent.
-func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, agent *runningAgent) error {
+// serve runs the server until a signal, a PTY agent's exit or a failed
+// listener stops it, then stops the server and the agent. A native agent
+// that exits is started again, and the server goes on serving. It returns
+// errRestart once SIGUSR2 stopped it to run self again; self may be nil.
+func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, agent *runningAgent, self *selfExec) error {
 	gracefulCtx, gracefulCancel := context.WithCancel(ctx)
 	defer gracefulCancel()
-	// Signals end gracefulCtx.
-	handleSignals(gracefulCtx, gracefulCancel, logger, srv)
+	// Signals and restarts in place end gracefulCtx.
+	self.arm(gracefulCtx, gracefulCancel, logger)
+	handleSignals(gracefulCtx, gracefulCancel, logger, srv, self)
 	logger.Info("Starting server", "address", srv.ListenAddr())
 
-	// One monitor waits for the agent: its exit stops the server.
+	// A monitor waits for a PTY agent: its exit stops the server.
 	exitCh := make(chan error, 1)
-	go func() {
-		defer close(exitCh)
-		exited, err := agent.waitForExit(gracefulCtx, srv)
-		if !exited {
-			return
-		}
-		srv.MarkAgentExited(err)
-		if err != nil {
-			exitCh <- err
-		}
-		gracefulCancel()
-	}()
+	if agent.process != nil {
+		go func() {
+			defer close(exitCh)
+			err := agent.waitForExit()
+			srv.MarkAgentExited(err)
+			if err != nil {
+				exitCh <- err
+			}
+			gracefulCancel()
+		}()
+	}
 
 	serverErrCh := make(chan error, 1)
 	go func() {
@@ -272,6 +293,9 @@ func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, agent 
 		}
 	default:
 		agent.close(logger)
+	}
+	if self.restarting() {
+		return errRestart
 	}
 	return nil
 }
@@ -363,6 +387,11 @@ func writePIDFile(pidFile string, logger *slog.Logger) error {
 
 		existingPIDStr := strings.TrimSpace(string(existingPIDData))
 		existingPID, parseErr := strconv.Atoi(existingPIDStr)
+		if parseErr == nil && existingPID == pid {
+			// This process wrote it before it restarted in place.
+			logger.Info("The PID file holds this process already", "pidFile", pidFile, "pid", pid)
+			return nil
+		}
 		if parseErr == nil && isProcessRunning(existingPID) {
 			return fmt.Errorf("another instance is already running with PID %d (PID file: %s)", existingPID, pidFile)
 		}
@@ -444,6 +473,8 @@ const (
 	FlagPublicURL              = "public-url"
 	FlagAPIToken               = "api-token"
 	FlagBind                   = "bind"
+	FlagLogLevel               = "log-level"
+	FlagAllowUpdate            = "allow-update"
 )
 
 func CreateServerCmd() *cobra.Command {
@@ -460,7 +491,8 @@ func CreateServerCmd() *cobra.Command {
 			if viper.GetBool(FlagExit) {
 				return nil
 			}
-			logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+			level := new(slog.LevelVar)
+			logger := slog.New(slog.NewTextHandler(cmd.OutOrStdout(), &slog.HandlerOptions{Level: level}))
 			if viper.GetBool(FlagPrintOpenAPI) {
 				// We don't want log output here.
 				logger = slog.New(logctx.DiscardHandler)
@@ -472,7 +504,23 @@ func CreateServerCmd() *cobra.Command {
 			if !viper.GetBool(FlagPrintOpenAPI) {
 				readUserConfig(viper.GetViper(), cmd.Flags(), logger)
 			}
-			return runServer(ctx, logger, cmd.Flags().Args())
+			// Once the config file, which can set it too, was read; what
+			// reading it logged went out at info.
+			logLevel, err := logctx.ParseLevel(viper.GetString(FlagLogLevel))
+			if err != nil {
+				return fmt.Errorf("invalid --%s: %w", FlagLogLevel, err)
+			}
+			level.Set(logLevel)
+			self := newSelfExec()
+			logger.Debug("Restarting in place runs this program", "program", self.path)
+			err = runServer(ctx, logger, cmd.Flags().Args(), self)
+			if errors.Is(err, errRestart) {
+				logger.Info("Running the program again", "program", self.path)
+				if err := self.exec(); err != nil {
+					return fmt.Errorf("failed to restart in place: %w", err)
+				}
+			}
+			return err
 		},
 	}
 
@@ -491,9 +539,9 @@ func CreateServerCmd() *cobra.Command {
 		{FlagStateFile, "s", "", "Deprecated: use --state-db. A state file written by an earlier AgentAPI, whose conversation is imported into a state database next to it (the same name with .db, or --state-db) the first time; that database keeps the conversation from then on", "string"},
 		{FlagLoadState, "", false, "Deprecated: with --load-state=false the state file isn't imported", "bool"},
 		{FlagSaveState, "", false, "Deprecated and without effect: the state database keeps every change", "bool"},
-		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts", "string"},
+		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts; {port} and {hostname} are filled in", "string"},
 		{FlagExperimentalACP, "", false, "Removed: the ACP transport is no longer available", "bool"},
-		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) when AgentAPI restarts; with the native transport the agent also resumes its session, with PTY it starts anew below the conversation", "string"},
+		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) when AgentAPI restarts; with the native transport the agent also resumes its session, with PTY it starts anew below the conversation. {port} and {hostname} are filled in", "string"},
 		{FlagTransport, "", "native", "How to drive the agent: native (its own structured protocol; claude, codex and pi) or pty (its terminal UI). Without it, claude, codex and pi use native, other agents and --state-file pty", "string"},
 		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal. Native transport only, where the agent has no terminal of its own", "bool"},
 		{FlagAutoContinue, "", false, "When a usage limit stops the agent's turn, continue it once the limit resets, if the agent says when. Native transport only", "bool"},
@@ -514,6 +562,8 @@ func CreateServerCmd() *cobra.Command {
 		{FlagPublicURL, "", "", "URL this AgentAPI is reached at, in GET /summary and every webhook event so clients and receivers can link to its chat or call its API; {port} and {hostname} are filled in", "string"},
 		{FlagAPIToken, "", "", "API token for Bearer authentication. If set without a value, a random token is generated. Empty (default) disables authentication.", "string"},
 		{FlagBind, "", "", "Address to listen on: an IP address or hostname without a port (e.g. 127.0.0.1 or ::1). Empty (default) listens on all interfaces", "string"},
+		{FlagLogLevel, "", "info", "Least important level to log: " + logctx.LevelNames, "string"},
+		{FlagAllowUpdate, "", false, "Let API clients, such as a hub, update AgentAPI to the latest release (POST /update), which then restarts in place; the program's directory must be writable by the user AgentAPI runs as", "bool"},
 	}
 
 	for _, spec := range flagSpecs {

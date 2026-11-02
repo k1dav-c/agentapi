@@ -75,7 +75,7 @@ flowchart TB
 
 | 路徑 | 內容 |
 | --- | --- |
-| `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、transport、啟動 agent、訊號）、`attach`、`list`（已登記的 AgentAPI 和它們的摘要）、`hub`（`serve`：hub；`join`、`leave`、`status`：設定檔和執行中 AgentAPI 的 hub webhook），以及 `update`（會驗證 checksum 的自我更新） |
+| `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、transport、啟動 agent、訊號、原地重新啟動）、`attach`、`list`（已登記的 AgentAPI 和它們的摘要）、`hub`（`serve`：hub；`join`、`leave`、`status`：設定檔和執行中 AgentAPI 的 hub webhook）、`restart`（讓已登記的 AgentAPI 原地重新啟動），以及 `update`（會驗證 checksum 的自我更新） |
 | `lib/httpapi/` | HTTP 伺服器：路由與處理常式、`EventEmitter`、佇列、token 驗證、webhook、MCP／檔案／終端機端點，以及嵌入的聊天介面 |
 | `lib/conversation/` | 共用型別（以 `conv` 匯入）：訊息、角色、狀態與錯誤等級。伺服器透過 `Conversation` 呼叫 transport，transport 透過 `Emitter` 回報變更 |
 | `lib/screentracker/` | PTY 對話：畫面快照、訊息切分、穩定狀態偵測，以及把訊息片段輸入 agent 的終端機（`AgentIO`、`TerminalPart`） |
@@ -94,9 +94,10 @@ flowchart TB
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
 | `lib/statedb/` | `--state-db` 的 SQLite 持久保存（native 與 PTY），以及 `--state-file` 的匯入 |
 | `lib/instanceapi/` | AgentAPI 和同時監看多個 AgentAPI 的客戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。`lib/httpapi` 以同樣的名稱保留別名，OpenAPI schema 用的就是這些名稱 |
-| `lib/hub/` | `agentapi hub serve`：實例和頁面上設定的群組（`store.go`，保存在檔案中）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
+| `lib/hub/` | `agentapi hub serve`：實例、頁面上設定的群組和釘選，以及每個實例這一列顯示的內容最近一次變動的時間（`store.go`，保存在檔案中）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有機器怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
 | `lib/userconfig/` | 使用者的設定檔 `~/.agentapi/config.yaml`：以旗標名稱設定，`agentapi server` 讀取、`agentapi hub` 寫入 |
 | `lib/registry/` | 一台機器上執行中 AgentAPI 的登記檔（`~/.agentapi/instances`）：以原子方式寫入、列出，並刪除行程已不在的登記檔 |
+| `lib/selfupdate/` | 把 k1dav-c/agentapi 的最新 release 安裝到程式的位置（`agentapi update`、`POST /update`）：到 GitHub 查詢、挑出這個平台的執行檔、比對 release 的 `checksums.txt` 並確認執行起來是那個版本，再在程式旁的鎖定檔保護下改名取代（`Install`）；判斷使用者能否取代程式，並提供一次性的修正方式（`Program.Blocked`）；`selfupdatetest` 為測試提供假的 release |
 | `lib/shellterm/` | Native 工作階段共用的 shell 終端機 |
 | `lib/htmlpreview/` | 為 `GET /files/preview` 將相對路徑引用的資源嵌入為 data: URL，產生可獨立顯示的 HTML 預覽 |
 | `lib/mcpconfig/` | 讀寫各 agent 的 MCP 設定檔 |
@@ -113,7 +114,10 @@ flowchart TB
 `agentapi server [旗標] -- <agent 指令>`（`cmd/server/server.go`）：
 
 1. 旗標依序來自命令列、`AGENTAPI_*` 環境變數或 `~/.agentapi/config.yaml`（`--config`；viper；
-   `cmd/server/userconfig.go` 會記下不是旗標的名稱，讀不了的檔案則略過）。agent 類型取自 `--type`；沒有指定時，
+   `cmd/server/userconfig.go` 會記下不是旗標的名稱，讀不了的檔案則略過；檔案中沒有 `{port}` 的
+   `state-db` 或 `pid-file` 也會略過，因為每個伺服器都會讀這個檔案，而資料庫只能由一個伺服器鎖住，
+   PID 檔也只能由一個伺服器寫入）。路徑設定開頭的 `~` 代表家目錄，`--state-db`、`--pid-file` 和
+   `--public-url` 中的 `{port}` 和 `{hostname}` 會被填入（`instanceapi.ExpandPlaceholders`）。agent 類型取自 `--type`；沒有指定時，
    若 agent 指令符合已知類型別名，就採用該類型；否則使用 `custom`。transport 取自
    `--transport`；沒有指定時，`hasNativeAdapter` 涵蓋的 agent（Claude Code、Codex、Pi 和
    `native-demo`）使用 native（除非設定了已棄用的 `--state-file`），其他 agent 使用 PTY。
@@ -127,10 +131,19 @@ flowchart TB
    工作目錄就拒絕使用）、建立對話、註冊路由，並啟動對話、佇列迴圈、webhook 傳送器，以及
    （PTY 的）工作階段紀錄監看器。`Start` 開始監聽後寫入登記檔（除非 `--registry=false`），
    再開始服務。
-5. 收到 SIGINT、SIGTERM 或 SIGHUP，或 agent 自行結束時，AgentAPI 以 webhook 送出
+5. 收到 SIGINT、SIGTERM 或 SIGHUP，或 PTY agent 自行結束時，AgentAPI 以 webhook 送出
    `instance.stopped`、刪除登記檔、取消進行中的重新啟動、關閉 HTTP 伺服器、停止佇列迴圈與工作
    階段紀錄監看器、關閉仍在執行的 native 或 PTY agent 與 shell 終端機，並寫入、關閉狀態資料庫。
-   收到 SIGUSR1 時只寫入狀態資料庫，不會停止。
+   收到 SIGUSR1 時只寫入狀態資料庫，不會停止。native agent 結束不會讓伺服器停止：對話會重新
+   啟動 agent（見 Native）。
+6. 收到 SIGUSR2，或透過 API 更新時，伺服器會原地重新啟動（`cmd/server/reexec.go`、`selfExec.restart`）。`selfExec` 在啟動時記下參數、
+   環境變數和程式：argv[0] 若就是正在執行的檔案，就採用 shell 找到它的方式（路徑，或 `PATH` 上
+   的名稱），這樣更新改指向新版本的 symlink 也會跟著走；否則採用 `os.Executable`。更新取代檔案之後，
+   `/proc/self/exe` 指向的是已刪除的檔案。重新啟動前，先以 `--version` 執行程式；失敗時記下
+   原因並繼續提供服務。成功時，伺服器依第 5 步停止，但保留 PID 檔（PID 不變），再以
+   `syscall.Exec` 重新執行程式，沿用 stdin、stdout 和 stderr；Go 開啟的其他檔案都會在 exec 時關閉。
+   停止期間收到關閉訊號時，以關閉為準。每個登記檔都會註明伺服器能原地重新啟動
+   （`restarts_in_place`），供 `agentapi restart` 判斷。
 
 ## HTTP 伺服器
 
@@ -138,7 +151,9 @@ flowchart TB
 `make gen` 會將結果寫入 `openapi.json`。請求依序經過下列中介層（middleware）：
 
 1. 主機授權：`Host` 標頭必須是允許的主機（忽略連接埠）。
-2. 請求紀錄，會略過靜態檔案、事件串流和終端機。
+2. 請求紀錄，會略過靜態檔案、事件串流和終端機。成功的讀取（狀態碼低於 400 的 `GET`、`HEAD`、
+   `OPTIONS`）記為 Debug，只有 `--log-level debug` 才會輸出：不然每幾秒輪詢一次 `GET /status` 的
+   用戶端會塞滿紀錄。變更和被拒絕的請求記為 Info，伺服器錯誤記為 Warn。
 3. 壓縮（`compress.go`）：對接受 gzip 的用戶端，文字、JSON、事件串流（每個事件都會 flush）和聊天介面
    的檔案都會壓縮；圖片則照原樣傳送。hub 使用同一個中介層，它的代理會把實例已壓縮的回應原樣轉送。
 4. 允許來源的 CORS，並允許憑證，讓聊天介面的 cookie 在其他來源也能使用。
@@ -162,6 +177,7 @@ flowchart TB
 | `webhook.go`、`webhook_events.go`、`handoff.go`、`dialog_reply.go` | Webhook 傳送（佇列、重試、簽章、心跳），以及把對話事件轉成 webhook 事件的 observer；人工回覆 API；終端機對話框的回答 |
 | `auth.go` | Token 驗證與聊天介面登入（`authAPI`） |
 | `restart.go`、`statedb.go` | 重新啟動；還原與保存狀態 |
+| `update.go` | 透過 API 更新 AgentAPI（`POST /update`、`DELETE /update`、`updater`）與摘要的 `update`；見[重新啟動與更新](#重新啟動與更新) |
 | `events.go`、`events_*.go`、`models.go` | Emitter（訂閱與重播；它保存的狀態、畫面、請求與訊息）與 API 的型別 |
 | `embed.go`、`uploads.go` | 嵌入的聊天介面；上傳的檔案（`uploadAPI`，它從操作的 middleware 處理 `POST /upload`：huma v2.32 每次處理 multipart 請求都會改動共用的操作） |
 
@@ -286,16 +302,28 @@ type Factory func(resume Resume) (Adapter, error)
   （`sessions.Store.ReadHistory`；`GET /sessions` 會列出它們）。agent 在工作階段中執行過的
   sub agent 也以同樣方式從它們自己的紀錄讀出（`sessions.Store.Subagents`），提供給
   `GET /subagents` 和聊天介面的 Lineage 面板；它們的狀態取自啟動它們的 Agent 工具呼叫。
+- **結束。** agent 自行結束，或對話自己發起的啟動（第一次、結束後、等待登入後）失敗時，對話會在
+  下一個 `RestartDelays`（2、10、30 秒）後接續原工作階段重新啟動，並使用新的世代。observer 會
+  得知每次嘗試（`AgentExited`；伺服器顯示生命週期 `restarting`），以及最後一次失敗後對話放棄
+  （`failed`）；之後直到替換 agent 前都沒有 agent 在執行。agent 執行滿 5 分鐘後，嘗試次數會重新
+  計算。結束前已回報登入失效的 agent 則改為等待登入。呼叫端等待的啟動
+  （`Replacement.Start`）失敗時不會重試：呼叫端會拿到錯誤。
 - **花費。** `sessions.Store.Costs` 從同樣的紀錄讀出目錄中每個工作階段（含 sub agent）的模型呼叫
   （`GET /sessions`、`GET /cost`）：Claude Code 的 assistant 訊息（每個 message id 一次）、Codex 的
   token 計數、Pi 回報的金額。`lib/pricing` 為每次呼叫計價；Claude Code 的 `cost-state` 紀錄會把
   紀錄檔沒有列出的部分（壓縮）補成未逐筆列出的呼叫。分支複製的呼叫只算一次，算在最先建立的
-  工作階段。Store 索引每個紀錄檔的大小、讀取位置與讀取器狀態，只讀取新增的完整行；
-  檔案縮小或被替換時重新讀取。同時發出的請求共用一次讀取。索引有大小上限，會移除已不存在的紀錄檔。
+  工作階段。Store 索引每個紀錄檔的大小、讀取位置、讀取器狀態和已計價的呼叫：只讀取新增的完整行，
+  也只替這些行新增或補完的呼叫計價；檔案縮小或被替換時重新讀取。如果沒有任何紀錄檔的呼叫改變，
+  就直接回傳上一次的結果；否則只重算紀錄檔有變動的工作階段，再把各工作階段的花費加總。同時發出的
+  請求共用一次讀取。索引的大小上限不適用於計算花費時讀到的紀錄檔（`agentlog.Pass`）：每次計算都
+  以同樣的順序讀過全部紀錄檔，如果上限淘汰的是最久沒讀的檔案，被淘汰的每次都正好是下一個要讀的。
+  索引會移除已不存在的紀錄檔。
 - **紀錄格式。** 每種格式只在一個地方解碼（`lib/agentlog`）：什麼是 prompt、注入的內容或工具
-  結果只判斷一次，native adapter、歷史、花費和 PTY 監看器都用同一套。parser 不認得的紀錄和無法
-  解碼的行，每個紀錄檔只會以 Warn 記錄一次，並附上紀錄中的 CLI 版本，所以格式改變時會出現在
-  伺服器的 log 裡。
+  結果只判斷一次，native adapter、歷史、花費和 PTY 監看器都用同一套。parser 不認得的紀錄、無法
+  解碼的行，以及沒有模型或用量、或讀出的用量是 0 的模型呼叫（欄位改了名，不然會默默算成 $0），
+  每個紀錄檔的每一種只會以 Warn 記錄一次，並附上紀錄中的 CLI 版本，所以格式改變時會出現在
+  伺服器的 log 裡。Claude Code 自己寫的訊息（`<synthetic>`）、Codex 只有用量上限的計數，以及 Pi
+  失敗或中止的呼叫本來就不用 token，不算在內。
 - **協定變動。** Adapter 以 `agentio.Decode` 解碼 agent 送來的內容：值的型別變了的欄位會被略過，
   整筆紀錄不會因此遺失，因為遺失回合結束的紀錄會讓回合一直停在進行中。adapter 不認得的紀錄類型、
   型別變了的欄位和無法解碼的紀錄，會依行程分別計數（`agentio.Drift`），每一種只以 Warn 記錄一次，
@@ -358,7 +386,9 @@ type Factory func(resume Resume) (Adapter, error)
   緩衝四分之一的結構化訊息時，也會結束訂閱。
 - emitter 為所有 transport 推導任務（`tasks.go`）。使用者訊息開始任務，執行中加入的訊息會
   steer 該任務；agent 閒置且沒有待處理請求或終端機對話框時，任務結束。回答後若 agent
-  暫時閒置，計時器會先留 3 秒讓它恢復工作；這段時間送出的訊息會開始新任務，因為 agent 沒有在工作。結構化訊息抵達時，會取得目前任務的 `task_id`。
+  暫時閒置，計時器會先留 3 秒讓它恢復工作；這段時間送出的訊息會開始新任務，因為 agent 沒有在工作。
+  backend 送出訊息前會先通知 emitter（`SendingMessage`）：PTY transport 在訊息等待鍵入時就回報
+  agent 執行中，訊息本身晚一點才出現。結構化訊息抵達時，會取得目前任務的 `task_id`。
   還原或接續的訊息視為已完成的歷史紀錄。
 - emitter 維護對話摘要（`summary.go`），包含 instance、狀態、`attention`（需要使用者處理的
   原因）、標題、最新任務、待處理請求、佇列和用量。有摘要訂閱者時，emitter 的每次呼叫只要變更了
@@ -366,7 +396,9 @@ type Factory func(resume Resume) (Adapter, error)
   在同一次呼叫裡），摘要不同才送出 `summary_update`；回覆文字增長不會送出摘要更新。
 - 對於會讀取 session log 的 agent，伺服器每分鐘計算一次摘要的 `spend`（`spend.go`）：
   `sessions.Store.Costs` 以增量方式讀取 log，再把總計中結束於最近 24 小時和 7 天內的各小時加總。
-  `EventEmitter.SetSpend` 只在金額改變時才送出摘要。
+  `EventEmitter.SetSpend` 只在金額改變時才送出摘要，`updated_at` 記錄改變的時間。`scope` 是機器的
+  主機名稱和 ID 加上 `sessions.Store.Scope`（agent、目錄的實際路徑、agent 存放 log 的位置）算出的
+  雜湊值，讓 hub 對讀同一批 log 的兩個 AgentAPI 只算一次。
   只有 `/events?only=summary` 訂閱這些更新，串流另會送出心跳。`PUT /webhook` 可修改
   instance 的 ID 與網址，因此也會觸發摘要檢查，並重寫登記檔。
 - emitter 也記錄用戶端上次顯示對話的時間（`POST /tasks/seen`，聊天介面顯示對話時會呼叫）：
@@ -374,17 +406,21 @@ type Factory func(resume Resume) (Adapter, error)
   視為已讀。
 - `/internal/screen` 以 `screen` 事件為 TTY mode 串流畫面。
 - 狀態在 `running` 與 `stable` 之間切換時，會觸發 `run.status_changed` webhook 事件。webhook
-  有網址時，webhook observer 像 `/events` 用戶端一樣訂閱 emitter，把它的事件轉成其他 webhook
-  事件：emitter 的任務更新轉成 `task.*`，agent 的訊息在下一則開始或回合結束時才送出；observer
-  訂閱時 emitter 已有的內容，以及比 AgentAPI 啟動時間更早的訊息（來自接續的工作階段）都不會送出。
-  它只記得訊息和任務處理到哪裡、還在等結果的工具呼叫（最多 64 個）和尚未關閉的請求，對話重設時
-  全部忘掉。傳送器從佇列依序一次送一個事件，失敗會重試，並以 `--webhook-secret` 簽章。
+  要送對話的事件時（`task.*`、`request.*`、`message.*`、`tool.*`、`login.*`、`limit.*`、
+  `agent.error`；hub 只要 `instance.*`，用不到），webhook observer 才會像 `/events` 用戶端一樣
+  訂閱 emitter，把它的事件轉成這些 webhook 事件：emitter 的任務更新轉成 `task.*`，agent 的訊息在
+  下一則開始或回合結束時才送出。`PUT /webhook` 會依設定啟動或停止它。observer 訂閱時 emitter 已有
+  的內容，以及比 AgentAPI 啟動時間更早的訊息（來自接續的工作階段）都不會送出。emitter 結束的訂閱，
+  observer 會像用戶端以 `since` 接續那樣，從它處理到的 seq 重新訂閱。它只記得訊息和任務處理到哪裡、
+  還在等結果的工具呼叫（最多 64 個）、最近 64 則帶有結果的訊息中已回傳的呼叫，以及尚未關閉的請求，
+  對話重設時全部忘掉。傳送器從佇列依序一次送一個事件，失敗會重試，並以 `--webhook-secret` 簽章。
 - 有狀態資料庫時，emitter 會把每次變更交給它的 `Persister`，它在自己的寫入 goroutine 上從副本
   編碼訊息與結構化訊息，所以串流中的長訊息不會拖慢 emitter。
 
 ## 訊息佇列
 
-agent 忙碌時，訊息會在 `s.queue` 等待。佇列有獨立的鎖，讀取不必等待伺服器的鎖；變更時也會
+agent 忙碌時，訊息會在 `s.queue` 等待；對 agent 最後一則訊息的人工回覆（`POST /handoff/reply`）
+也經由同一個 `deliver` 送出，同樣會在這裡等待。佇列有獨立的鎖，讀取不必等待伺服器的鎖；變更時也會
 持有 `s.mu`。派送迴圈每 500 毫秒檢查第一則訊息：native agent 必須閒置，且沒有用量限制暫停
 佇列；PTY agent 的畫面必須穩定且沒有對話框。重新啟動期間，兩者都不派送訊息。
 
@@ -443,6 +479,27 @@ native 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之
 - 帶 `?restart=true` 的 MCP 變更：native agent 會接續它的工作階段重新載入（`Reload`），對話
   會保留。有回合在執行時，重新載入會以 409 拒絕，但設定檔已經寫入。無法接續工作階段的 agent
   則改為重新啟動。
+- native agent 結束後由對話再啟動（見 Native），不使用 `s.mu` 或 `s.restarting`：沒有閒置的
+  agent，所以訊息會在佇列中等待。最後一次嘗試失敗後，伺服器繼續提供服務，生命週期為 `failed`，
+  直到重新啟動、重新載入或切換工作階段啟動新的 agent。PTY agent 結束則會讓 AgentAPI 停止。
+- AgentAPI 本身收到 SIGUSR2 時會原地重新啟動（見[啟動與關閉](#啟動與關閉)），改用更新放在原啟動
+  路徑上的執行檔。使用 `--state-db` 時會還原對話，native agent 也會接續原本的工作階段；沒有時對話會
+  重新開始。`agentapi restart [port…|--all]`（`cmd/restart`）讀取登記目錄（呼叫者的；透過 `sudo`
+  執行時是 `SUDO_USER` 的家目錄），挑出這台機器上、行程屬於該使用者、執行的是 `agentapi server`
+  （`/proc/<pid>`，其他系統用 `ps`）且能原地重新啟動的登記檔，逐一送出訊號（自己所在的那個最後），
+  並等每個 AgentAPI 以新的 server ID 重新登記、在原連接埠回應 `GET /status`。`agentapi update
+  --restart` 會對仍在執行舊執行檔的 AgentAPI 做同樣的事。hub 不會原地重新啟動，由服務管理工具
+  重新啟動。
+- 開啟 `--allow-update` 時，`POST /update`（`update.go`）會把 AgentAPI 更新到最新發行版並原地重新
+  啟動，由一個跟著伺服器生命週期的 goroutine 執行。`checking` 查詢發行版，並以 `--version` 執行
+  磁碟上的程式。`downloading` 把發行版安裝到程式的位置（`lib/selfupdate`）；共用程式的另一個
+  AgentAPI 已經更新過、磁碟上的程式夠新時就略過。`waiting` 會暫停佇列，等到 agent 處於 stable、
+  沒有待回覆的請求或終端機對話框，每次狀態變化時檢查一次。`restarting` 在 `s.mu` 底下開始：從此
+  訊息留在佇列、不會開始重新啟動 agent，人工回覆協定也不提供內容。接著呼叫和 SIGUSR2 相同的
+  重新啟動。`"now"` 會略過等待，`DELETE /update` 在重新啟動前都能取消更新。失敗時狀態變成
+  `failed` 並附上錯誤，伺服器繼續提供服務。每一步都會改變摘要的 `update`，`summary_update` 會把
+  它帶給 hub。每次請求都會重新解析程式路徑，`blocked` 也每分鐘重新檢查，所以中途設好的 symlink
+  會馬上生效。
 - `/status` 會回報生命週期：`starting`、`ready`、`running`、`restarting`、`exited` 或
   `failed`。
 
@@ -499,15 +556,24 @@ agent 啟動時才讀取設定，因此變更需要重新啟動；native agent �
 - 上傳的檔案存放在私有目錄，只回傳圖片。工作目錄以外的檔案無法開啟。
 - webhook 會把設定要送的內容（包括對話）送到它的網址，而 `PUT /webhook` 可以修改網址；它的
   HMAC secret 只能寫入、無法讀回。
+- 透過 API 更新預設關閉，要用 `--allow-update`（或設定檔中的 `allow-update: true`）開啟。它只會從
+  GitHub 安裝 k1dav-c/agentapi 符合這個平台的最新正式發行版：下載的檔案必須符合發行版的
+  `checksums.txt`，執行起來也必須是那個版本，請求無法指定版本或網址。AgentAPI 從不執行 `sudo`，
+  只取代使用者能寫入其目錄的程式，否則回報一次性的修正方式（`blocked`）。`POST /update` 會造成
+  改動，所以其他來源的網頁送不出這個請求；它也和其他端點一樣需要 token。
 - hub（`lib/hub`）持有實例的 API token，只會送到以它的 secret 簽章的事件（timestamp 和 body 的
   HMAC，不超過 10 分鐘，每次傳送只處理一次）或已登入者加入的實例網址。實例的網址由另一個 AgentAPI
-  回應時（摘要裡是別的實例 ID），代理拒絕轉送；hub 仍在追蹤、且 3 分鐘內有消息的實例，另一次以相同
-  ID 執行的 AgentAPI 也無法把它移到別處。瀏覽器以 hub token 登入，換取
+  回應時（摘要裡是別的實例 ID），代理拒絕轉送。事件必須寫明是哪一次執行（`server_id`），而且只能
+  搬動 hub 目前沒在追蹤的實例（摘要串流沒有連上），手動加入的實例一律不動；實例搬走後，hub 不再送出
+  它自己的 token。每台加入的機器都有同一個 secret，所以任何一台仍然可以把 hub 沒在追蹤的實例 ID
+  指向自己的位址，拿到 `--instance-token`；每台機器各用一把金鑰才能根除。瀏覽器以 hub token 登入，換取
   由 token 推導出的 HttpOnly、SameSite=Lax cookie；代理會移除瀏覽器的 cookie 以及 `Authorization`、
   `Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
   hub 和 AgentAPI 一樣，拒絕其他來源的網頁送出會造成改動的請求；設定 `--allowed-hosts` 時，只回應
   用這些名稱或 IP 位址連來的瀏覽器。代理在每個回應加上 `Content-Security-Policy: sandbox`，實例送來的
   內容不會以 hub 的網頁身分執行；代理也拒絕修改實例的 webhook，因為 webhook 決定 hub 把 token 送到哪裡。
+  讓機器加入用的 secret，只有設了 token 的 hub 才會交給已登入的瀏覽器（`GET /api/join`）；啟動時的
+  log 一律不寫。
 - 上層 agent 工作階段會為它執行的指令設定環境變數（包含機密資訊）；不論使用哪種 transport，
   agent 都不會繼承這些變數，也不會拿到 AgentAPI 的 API token（`lib/procenv`）。
 
@@ -576,7 +642,10 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   `useChatSelector`（`lib/store.ts`）分片讀取，元件只在它讀的那一片改變時才重新 render。
   `use-event-stream.ts`、`use-queue.ts` 與 `use-session-cache.ts` 分別把事件套用到狀態、追蹤
   訊息佇列及快取對話。
-- 事件串流使用 `/events?sync=1`，並記錄最後序號以便增量重播（`lib/chat-stream.ts`）。
+- 事件串流使用 `/events?sync=1`，並記錄最後序號以便增量重播（`lib/chat-stream.ts`）。很長的
+  重播每 1.5 秒先顯示一次進度，但排在訊息之後的請求和任務會沿用 chat 原有的，等重播自己的送到
+  才取代；屬於別的對話的會先拿掉：重播送來的同 ID 訊息已是另一則的任務，以及在重播第一則訊息
+  之前就提出的請求。
   `EventSourceConnection`（`lib/event-source.ts`，以及 hook `use-event-source.ts`）讓它、hub 頁面
   的串流和終端機的串流保持連線：結束的串流會立刻重新開啟、不顯示提示，除非一直失敗；失敗的串流
   （401、proxy 的 502）在退避後重試；有心跳的串流沒了動靜，由 watchdog 重新連線；瀏覽器恢復連網

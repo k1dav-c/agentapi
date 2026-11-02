@@ -185,16 +185,18 @@ export class ChatStream {
         this.schedule(event);
       },
       // A request the agent waits on (native transport) opened or changed.
-      // Requests are part of the replay, like messages. Outside a replay
-      // one applies at once: the status_change the server sends right
-      // after it (now "stable", waiting) must not show before it.
+      // Requests are part of the replay, like messages; a full replay's
+      // replace the chat's once it is complete (PendingEvents). Outside a
+      // replay one applies at once: the status_change the server sends
+      // right after it (now "stable", waiting) must not show before it.
       request_update: (event) => {
         assumeFullReplay();
         pending.addRequest(requestFromEvent(JSON.parse(event.data) as RequestUpdateEvent));
         this.schedule(event, true);
       },
       // A task the server derives started or changed (sync clients). Tasks
-      // are part of the replay, like requests, and come last in it.
+      // are part of the replay, like requests, and come last in it: a full
+      // replay's replace the chat's once it is complete (PendingEvents).
       task_update: (event) => {
         pending.addTask(taskFromEvent(JSON.parse(event.data) as TaskUpdateEvent));
         this.schedule(event);

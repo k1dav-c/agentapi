@@ -20,6 +20,7 @@ func (b nativeBackend) readyForQueued() bool {
 func (b nativeBackend) sendQueued(content string) error {
 	ctx, cancel := b.s.agentCtx(nativeCallTimeout)
 	defer cancel()
+	b.s.emitter.SendingMessage()
 	return b.s.native.StartTurn(ctx, native.InputFromText(content))
 }
 

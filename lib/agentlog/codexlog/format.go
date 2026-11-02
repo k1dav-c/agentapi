@@ -7,11 +7,11 @@ var Format agentlog.Format = format{}
 
 type format struct{}
 
-func (format) Agent() string                               { return "codex" }
-func (format) NewParser() agentlog.LineParser              { return NewParser() }
-func (format) NewEventParser() agentlog.SessionEventParser { return NewEventParser() }
-func (format) NewNamer() agentlog.SessionNamer             { return NewNamer() }
-func (format) NewCalls() agentlog.CallReader               { return NewCalls() }
+func (format) Agent() string                                  { return "codex" }
+func (format) NewParser() agentlog.LineParser                 { return NewParser() }
+func (format) NewEventParser() agentlog.SessionEventParser    { return NewEventParser() }
+func (format) NewNamer() agentlog.SessionNamer                { return NewNamer() }
+func (format) NewCalls(d *agentlog.Drift) agentlog.CallReader { return NewCalls(d) }
 
 // recordTypes are the types of the records Codex 0.163 logs: those the
 // parsers read, and those they know to skip (its world state, compactions,

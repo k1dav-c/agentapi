@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/coder/agentapi/lib/instanceapi"
 )
@@ -74,11 +73,28 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not an AgentAPI event", http.StatusBadRequest)
 		return
 	}
-	if event.ID != "" && !h.deliveries.add(event.ID) {
-		w.WriteHeader(http.StatusNoContent)
+	if event.ID == "" {
+		// Every AgentAPI delivery has one. Without it the hub couldn't tell
+		// the event from a copy of it, which would work again for as long
+		// as its signature holds.
+		h.logger.Warn("Refused an event without a delivery ID", "instance", event.Instance.ID, "event", event.Type, "from", r.RemoteAddr)
+		http.Error(w, "the event has no delivery ID (id): is it AgentAPI?", http.StatusBadRequest)
 		return
 	}
 	instance := *event.Instance
+	isInstanceEvent := event.Type == instanceapi.EventInstanceStarted || event.Type == instanceapi.EventInstanceHeartbeat ||
+		event.Type == instanceapi.EventInstanceStopped
+	if isInstanceEvent && instance.ServerID == "" {
+		// Every AgentAPI since 1.0 names its run. An event without one
+		// would pass for the run the hub follows, and move it.
+		h.logger.Warn("Refused an instance event that names no server ID", "instance", instance.ID, "event", event.Type, "from", r.RemoteAddr)
+		http.Error(w, "the event names no server_id: is it AgentAPI 1.0 or later?", http.StatusBadRequest)
+		return
+	}
+	if !h.deliveries.add(event.ID) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	switch event.Type {
 	case instanceapi.EventInstanceStarted, instanceapi.EventInstanceHeartbeat:
 		url := instanceURL(instance)
@@ -91,7 +107,7 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(event.Data, &state)
 		h.upsertFromWebhook(instance, url, state.HeartbeatSeconds)
 	case instanceapi.EventInstanceStopped:
-		h.stopped(instance.ID, instance.ServerID)
+		h.stopped(instance.ID, instance.ServerID, instanceURL(instance))
 	default:
 		// The instance is alive; one the hub doesn't know yet is added
 		// with its next heartbeat.
@@ -104,46 +120,31 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// defaultHeartbeat is how often an AgentAPI sends instance.heartbeat
-// unless told otherwise.
-const defaultHeartbeat = time.Minute
-
-// seenWithin is how recently the hub must have heard from the instance's
-// current run to take it as running: as long as it takes to miss
-// stoppedAfter heartbeats.
-func (i Instance) seenWithin() time.Duration {
-	heartbeat := defaultHeartbeat
-	if i.HeartbeatSeconds > 0 {
-		heartbeat = time.Duration(i.HeartbeatSeconds) * time.Second
-	}
-	return stoppedAfter * heartbeat
-}
-
 // sameRun reports whether an event of the run serverID is of the run the
-// hub knows, current; either unknown is.
+// hub knows, current. An unknown current run (the hub's first sighting) is
+// no conflict; an event that names no run is of none.
 func sameRun(current, serverID string) bool {
-	return current == "" || serverID == "" || current == serverID
+	return current == "" || (serverID != "" && current == serverID)
 }
 
 // upsertFromWebhook adds or updates the instance an instance.* event
-// describes, and (re)starts watching it. Another run that names another
-// URL is refused while the hub follows the run it knows, which it heard
-// from recently: two machines with the same name (and so the same
-// instance ID) would take turns at every heartbeat.
+// describes, and (re)starts watching it. An event that names another URL
+// moves the instance there only when the hub doesn't follow it now, and
+// never one added by hand (refuseMove): the hub sends the instance's token,
+// and the user's messages, where it is.
 func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string, heartbeatSeconds int) {
 	var restart bool
 	now := h.clock.Now()
 	updated, _, err := h.store.update(instance.ID, true, func(i *Instance) {
-		if !sameRun(i.ServerID, instance.ServerID) && i.URL != url &&
-			i.Connection == ConnectionConnected && now.Sub(i.LastSeen) < i.seenWithin() {
-			if i.refusedRun != instance.ServerID {
-				h.logger.Warn("Two AgentAPIs report the same instance ID; keeping the one the hub follows",
-					"instance", instance.ID, "url", i.URL, "refused_url", url, "refused_server_id", instance.ServerID)
-				i.refusedRun = instance.ServerID
-			}
+		moved := i.URL != "" && i.URL != url
+		if moved && h.refuseMove(i, instance, url) {
 			return
 		}
 		restart = i.URL != url || i.ServerID != instance.ServerID || i.Connection == ConnectionStopped
+		if moved {
+			// A token given for the old URL is for the AgentAPI there.
+			i.Token = ""
+		}
 		i.WebhookInstance = instance
 		i.URL = url
 		i.HeartbeatSeconds = heartbeatSeconds
@@ -166,12 +167,38 @@ func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string
 	}
 }
 
+// refuseMove reports whether an event of instance must not move i to url,
+// and logs why once per run. An instance added by hand stays where it was
+// added. One the hub follows stays where the hub reaches it, whatever run
+// the event names: two machines with the same name (and so the same
+// instance ID) would take turns at every heartbeat, and an event of
+// another machine that has the secret would take it over.
+func (h *Hub) refuseMove(i *Instance, instance instanceapi.WebhookInstance, url string) bool {
+	var reason string
+	switch {
+	case i.Source == SourceManual:
+		reason = "An instance added by hand keeps its URL; refused an event that names another"
+	case i.Connection != ConnectionConnected:
+		return false
+	case sameRun(i.ServerID, instance.ServerID):
+		reason = "An instance's event names another URL; the hub keeps following it where it reaches it"
+	default:
+		reason = "Two AgentAPIs report the same instance ID; keeping the one the hub follows"
+	}
+	if i.refusedRun != instance.ServerID {
+		h.logger.Warn(reason, "instance", instance.ID, "url", i.URL, "refused_url", url, "refused_server_id", instance.ServerID)
+		i.refusedRun = instance.ServerID
+	}
+	return true
+}
+
 // stopped marks an instance stopped and stops watching it, unless a newer
-// run of it (another server ID) already started.
-func (h *Hub) stopped(id, serverID string) {
+// run of it (another server ID) already started, or it was added by hand
+// at another URL than the event names.
+func (h *Hub) stopped(id, serverID, url string) {
 	stopped := false
 	_, _, err := h.store.update(id, false, func(i *Instance) {
-		if !sameRun(i.ServerID, serverID) {
+		if !sameRun(i.ServerID, serverID) || (i.Source == SourceManual && i.URL != url) {
 			return
 		}
 		h.logger.Info("An instance stopped", "instance", id)

@@ -128,8 +128,48 @@ func TestIndexIsBounded(t *testing.T) {
 		require.NoError(t, x.Read(path, nil))
 	}
 	assert.Equal(t, 2, x.Len())
+}
 
-	x.Retain(func(path string) bool { return path == paths[3] })
+// What a pass reads stays past the bounds, until a pass ends without
+// reading it: a pass that reads more files than the bounds keep, in the
+// same order each time, reads none of them again.
+func TestIndexKeepsWhatAPassRead(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	opened := 0
+	x := NewIndex(func(string) *lineList { opened++; return &lineList{} }, 3, 250)
+	var paths []string
+	for _, name := range []string{"a", "b", "c", "d", "e"} {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, []byte("line\n"), 0o600))
+		paths = append(paths, path)
+	}
+	for range 3 {
+		pass := x.Pass()
+		for _, path := range paths {
+			require.NoError(t, pass.Read(path, nil))
+		}
+		pass.End()
+	}
+	assert.Equal(t, 5, x.Len())
+	assert.Equal(t, 5, opened, "each file read once")
+
+	// Past the bounds, the files no pass read are forgotten, the oldest
+	// first.
+	for _, name := range []string{"f", "g"} {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, []byte("line\n"), 0o600))
+		require.NoError(t, x.Read(path, nil))
+		assert.Equal(t, 6, x.Len(), "f is forgotten for g")
+	}
+	require.NoError(t, x.Read(filepath.Join(dir, "f"), nil))
+	assert.Equal(t, 8, opened, "f was read again")
+
+	// A pass forgets the files it didn't read once it ends.
+	pass := x.Pass()
+	require.NoError(t, pass.Read(paths[1], nil))
+	assert.Equal(t, 5, x.Len(), "f is forgotten for b")
+	pass.End()
 	assert.Equal(t, 1, x.Len())
 }
 

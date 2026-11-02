@@ -9,13 +9,13 @@ import {bootstrapSession, ensureSession, withCredentials} from "@/lib/auth";
 import type {createChatAPI} from "@/lib/chat-api";
 import {parseTransport, type Transport} from "@/lib/dispatch";
 import {isLoginNotice} from "@/lib/login";
-import {mergeRequests, type NativeRequest} from "@/lib/native-requests";
-import {mergeTasks, type ServerTask} from "@/lib/server-tasks";
+import type {NativeRequest} from "@/lib/native-requests";
+import type {ServerTask} from "@/lib/server-tasks";
 import type {QueuedMessage} from "@/lib/queue";
 import type {SyncTracker} from "@/lib/session-sync";
 import {applyStatusChange, update, type AgentStatus} from "@/lib/agent-status";
 import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
-import type {EventBatch, SyncPoint} from "@/lib/pending-events";
+import {requestsAfter, tasksAfter, type EventBatch, type SyncPoint} from "@/lib/pending-events";
 import {agentErrorKey, dismissedErrors, rememberDismissed} from "@/lib/agent-errors";
 
 // How long to wait for the cache before connecting without it.
@@ -116,13 +116,14 @@ export function useEventStream({
         );
       }
       // Tasks keep their seq, as requests do, so an update never replaces
-      // a later one.
-      if (replace || taskUpdates.length > 0) setTasks((previous) => mergeTasks(replace ? [] : previous, taskUpdates));
+      // a later one. A full replay replaces them once it is complete.
+      if (batch.replaceHeld || batch.held || taskUpdates.length > 0) setTasks((previous) => tasksAfter(previous, batch));
     });
-    if (replace || requestUpdates.length > 0) {
+    if (batch.replaceHeld || batch.held || requestUpdates.length > 0) {
       // Requests keep their seq: it decides between an event and a state
-      // read from the REST API (see mergeRequests).
-      setRequests((previous) => mergeRequests(replace ? [] : previous, requestUpdates));
+      // read from the REST API (see mergeRequests). A full replay replaces
+      // them once it is complete.
+      setRequests((previous) => requestsAfter(previous, batch));
     }
     if (batch.queue) applyQueue(batch.queue);
   }, [applyQueue, setMessages, setRequests, setRichMessages, setTasks]);

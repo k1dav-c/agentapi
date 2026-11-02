@@ -1,12 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,6 +37,30 @@ func TestReadUserConfig(t *testing.T) {
 	assert.Equal(t, "http://hub:8080/hooks", v.GetString(FlagWebhookURL))
 	assert.Equal(t, []string{"instance.*", "task.*"}, v.GetStringSlice(FlagWebhookEvents))
 	assert.Equal(t, 3285, v.GetInt(FlagPort), "a flag wins")
+}
+
+// allow-update: true in the config file lets clients update every server
+// of the user through its API (agentapi hub join --allow-update writes it).
+func TestReadUserConfigAllowUpdate(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("allow-update: true\n"), 0o600))
+	flags := pflag.NewFlagSet("server", pflag.ContinueOnError)
+	flags.Bool(FlagAllowUpdate, false, "")
+	flags.String(FlagConfig, "", "")
+	require.NoError(t, flags.Parse([]string{"--config=" + path}))
+	v := flagsWith(nil)
+	require.NoError(t, v.BindPFlags(flags))
+
+	readUserConfig(v, flags, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	opts, err := loadServerOptions(v, []string{"claude"})
+	require.NoError(t, err)
+	assert.True(t, opts.allowUpdate)
+	self := &selfExec{path: "/usr/local/bin/agentapi"}
+	update := serverConfig(opts, &runningAgent{}, nil, "", t.TempDir(), nil, self).Update
+	assert.True(t, update.Allowed)
+	assert.Equal(t, self.path, update.Program, "the program it restarts into")
+	assert.Equal(t, runtime.GOOS != "windows", update.Restart != nil, "restarts in place")
 }
 
 // A file AgentAPI can't read doesn't keep the server from starting.
@@ -72,5 +99,49 @@ func TestPrintOpenAPIIgnoresUserConfig(t *testing.T) {
 	case event := <-hits:
 		t.Fatalf("the hub got %q from --print-openapi", event)
 	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+// A state-db or pid-file in the config file without {port} would be every
+// server's, and the first one to start takes it: it is ignored, with a
+// warning. A flag or a variable still names one.
+func TestReadUserConfigPerServerFiles(t *testing.T) {
+	for _, setting := range []struct{ name, env, file string }{
+		{FlagStateDB, "AGENTAPI_STATE_DB", "~/.agentapi/state/{port}.db"},
+		{FlagPidFile, "AGENTAPI_PID_FILE", "~/.agentapi/run/{port}.pid"},
+	} {
+		for name, tc := range map[string]struct {
+			file   string
+			args   []string
+			env    string
+			want   string
+			warned bool
+		}{
+			"without {port}": {file: "/data/agentapi", want: "", warned: true},
+			"with {port}":    {file: setting.file, want: setting.file},
+			"a flag":         {file: "/data/agentapi", args: []string{"--" + setting.name + "=/data/mine"}, want: "/data/mine"},
+			"a variable":     {file: "/data/agentapi", env: "/data/env", want: "/data/env"},
+		} {
+			t.Run(setting.name+" "+name, func(t *testing.T) {
+				t.Setenv(setting.env, tc.env)
+				path := filepath.Join(t.TempDir(), "config.yaml")
+				require.NoError(t, os.WriteFile(path, []byte(setting.name+": "+tc.file+"\n"), 0o600))
+				flags := pflag.NewFlagSet("server", pflag.ContinueOnError)
+				flags.String(FlagStateDB, "", "")
+				flags.String(FlagPidFile, "", "")
+				flags.String(FlagConfig, "", "")
+				require.NoError(t, flags.Parse(append([]string{"--config=" + path}, tc.args...)))
+				v := viper.New()
+				require.NoError(t, v.BindPFlags(flags))
+				v.SetEnvPrefix("AGENTAPI")
+				v.AutomaticEnv()
+				v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+				var logs bytes.Buffer
+
+				readUserConfig(v, flags, slog.New(slog.NewTextHandler(&logs, nil)))
+				assert.Equal(t, tc.want, v.GetString(setting.name))
+				assert.Equal(t, tc.warned, strings.Contains(logs.String(), "Ignoring "+setting.name+" in the AgentAPI config file"), logs.String())
+			})
+		}
 	}
 }

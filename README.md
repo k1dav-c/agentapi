@@ -142,7 +142,10 @@ has the complete commit history.
   to many follows each through one [summary stream](#watching-many-instances).
   With the [human-reply API](#human-reply-api), a bot can tell you when the
   agent stops and pass your answer back.
-- [Self-update](#agentapi-update), verified against the release's checksums.
+- [Self-update](#agentapi-update), verified against the release's checksums,
+  and [restarts in place](#agentapi-restart) into the new binary. Machines
+  that opt in can also be [updated through the API](#updating-through-the-api),
+  such as from the hub.
 - [Security](#security): an API token (the chat signs in with a cookie), the
   listen address, and the allowed hosts and origins.
 
@@ -476,6 +479,14 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 - When the agent is stopped or restarted and doesn't exit within 3 seconds of
   its input closing, AgentAPI signals its whole process group, which also stops
   its MCP servers and child commands.
+- An agent that exits on its own, or fails to start, is started again on its
+  session after 2, 10 and 30 seconds. Each attempt shows in the chat as an
+  error, and the lifecycle is `restarting`. If all three fail, AgentAPI keeps
+  serving with the lifecycle `failed` until you restart the agent (Explorer →
+  Restart or `DELETE /messages`, which starts a new session; the Session
+  Explorer reopens the old one). Once an agent has run 5 minutes, the count
+  starts over. One that lost its login before it exited waits for the login
+  instead; see [Logging in](#logging-in).
 
 AgentAPI removes environment markers and secrets inherited from a parent agent
 session while preserving login and provider configuration. See
@@ -575,7 +586,9 @@ Authentication can also expire during a session. A turn that fails with a login 
 
 After logging in, select **Check again**. AgentAPI restarts the agent on the same session and
 preserves the conversation. A completed model turn also clears the login error; interrupted turns
-and messages handled by the agent itself do not.
+and messages handled by the agent itself do not. An agent that exits after it reported a lost login
+isn't restarted as after a crash: it waits for the login like one that finds none at startup, and a
+restart that finds no login does too.
 
 ### Requests: approvals, questions and plans
 
@@ -830,6 +843,18 @@ is a new conversation.
 agentapi server --state-db ~/.agentapi/myproject.db -- claude
 ```
 
+`{port}` and `{hostname}` in the path are filled in, so one line in the
+[config file](#flags) gives every AgentAPI of the user a file of its own, such as the Claude Code
+one on 3286 and the Codex one on 3285 that a Coder workspace starts:
+
+```yaml
+state-db: ~/.agentapi/state/{port}.db
+```
+
+- Every `agentapi server` reads the config file, and the first to start locks
+  the database, so a `state-db` there without `{port}` is ignored with a
+  warning rather than keep the others from starting. `--state-db` and
+  `AGENTAPI_STATE_DB` still set one.
 - Requests that were open when AgentAPI stopped are marked expired: the agent
   that asked is gone.
 - Uploads are kept next to the file (`<file>.uploads`), because messages refer
@@ -868,6 +893,9 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
   keeps the conversation from then on; the file isn't written anymore.
   `--load-state=false` skips the import, and `--save-state` has no effect.
   SIGUSR1 writes what the state database hasn't written yet.
+- [`agentapi restart`](#agentapi-restart) (SIGUSR2) and
+  `agentapi update --restart` keep the conversation, and the native agent's
+  session, of an AgentAPI with `--state-db`.
 
 ### Earlier sessions
 
@@ -912,6 +940,9 @@ charge per token, so it estimates what the same work would cost with an API key.
 - Codex: each turn's token counts, its subagents' included; input read from the cache is priced as a
   cache read, and the rest as input.
 - Pi: the cost Pi reports for each call.
+
+A call whose record has no model or usage, or usage that reads as no tokens, counts no cost, and the
+server's log warns of it once per log: the agent may have changed its log format, renaming a field.
 
 A call that a fork copied from another session counts in the session it came from, so totals don't
 count it twice. The built-in prices cover Anthropic's and OpenAI's models; `--prices <file>` adds
@@ -1298,7 +1329,8 @@ These endpoints work with every transport, except where noted; the
   session get 409, and so does a restart while AgentAPI stops.
 - `GET /status` returns the backward-compatible `stable`/`running` status,
   the detailed lifecycle (`starting`, `ready`, `running`, `restarting`,
-  `exited` or `failed`), the transport, `server_id` (a random identifier of
+  `exited` or `failed`; a native agent that exits is `restarting` while
+  AgentAPI starts it again and `failed` once it gives up), the transport, `server_id` (a random identifier of
   this AgentAPI run, new at every start), `turn` (how many times the agent
   started working), the conversation's `epoch`, the session name, the
   AgentAPI version, the agent's open dialog (`terminal_prompt`) and the
@@ -1389,7 +1421,11 @@ instance:
   `queued_messages`, the open terminal dialog, `login_required`, `limit_stop`, `usage` (context
   window and account limits) and, for native Claude Code, Codex and Pi, `spend`: the API-equivalent
   cost of the agent's sessions in the working directory over the last 24 hours (`day_usd`) and 7
-  days (`week_usd`), worked out from its logs once a minute.
+  days (`week_usd`), worked out from its logs once a minute, with when the amounts last changed
+  (`updated_at`) and a `scope`. AgentAPIs of one agent in one directory of a machine report the
+  same sessions, with the same `scope`: a client that adds up many counts each scope once. Its
+  `update` says whether a client can [update the AgentAPI](#updating-through-the-api), and how far
+  an update is.
 - `attention` identifies why the agent needs you, in priority order: `login`, `request` (approval,
   question or plan), `dialog` (in the terminal), `limit` (a usage limit stopped the turn), `exited`,
   or `none`.
@@ -1406,8 +1442,9 @@ instance:
 
 To find the instances on a machine, read the registry: while it serves, each AgentAPI keeps an
 entry in `~/.agentapi/instances` (`--registry-dir`; `--registry=false` turns it off) with its `id`,
-`name`, `server_id`, `url` (`--public-url`, else its listen address), PID, directory, agent and
-`auth_required`, never the token. It removes the entry when it stops; an entry whose process is
+`name`, `server_id`, `url` (`--public-url`, else its listen address), PID, directory, agent,
+`auth_required` (never the token) and `restarts_in_place` (it restarts in place on SIGUSR2, see
+[`agentapi restart`](#agentapi-restart)). It removes the entry when it stops; an entry whose process is
 gone (after a crash) is removed when the registry is listed. Check that `GET /summary` returns the
 entry's `server_id` before using one: another AgentAPI may have taken the port.
 [`agentapi list`](#agentapi-list) shows the registered instances with their summaries.
@@ -1435,22 +1472,26 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 ![The hub: every agent on the left, and an overview of what needs you, with a card per request](docs/screenshots/hub-desktop.png)
 
 Open `http://<hub>:3290/` on a desktop or a phone and sign in with `--token`. The list shows every
-instance, those that need you first. Each shows its state (the reason it waits, such as an
-approval or question, a login or a usage limit; or working, finished a task you haven't seen, idle,
-unreachable or stopped) with its title, agent, machine, queue and usage limit. The tab title counts
-what needs you. Pick one to open it in the chat. On a phone the list and the chat take turns.
+instance: the ones you pinned on top, then those that need you first, or the latest change first.
+Each shows its state (the reason it waits, such as an approval or question, a login or a usage
+limit; or working, finished a task you haven't seen, idle, unreachable or stopped) with its title,
+agent, machine, AgentAPI version, queue and usage limit. The tab title counts what needs you. Pick
+one to open it in the chat. On a phone the list and the chat take turns.
 
 - AgentAPIs join it with [`agentapi hub join`](#joining-a-hub): their signed `instance.*` events
   add them, and the hub follows each one's [summary stream](#watching-many-instances) from one
-  connection. `+` adds one by its URL (and token) instead. Each row's `⋯` menu puts the
-  instance in a group of your own, mutes what it waits for until that changes (a login you won't
-  do), or forgets a stopped or unreachable one.
+  connection. `+` has the join command for a machine, with the hub's address and secret filled in,
+  and a prompt for an agent there; it also adds an instance by its URL (and token). Each row's `⋯`
+  menu pins the instance to the top, puts it in a group of your own, mutes what it waits for until
+  that changes (a login you won't do), or forgets a stopped or unreachable one.
 - The hub opens an instance through itself (`/i/<id>/...`), sending the instance's API token
   (`--instance-token`, or the one given when it was added) in place of your credentials. The
   browser never holds the instances' tokens or reaches them itself, so no instance needs CORS for
   it.
-- It accepts only events signed with `--secret` and at most 10 minutes old, and ignores a delivery
-  it already received, because an event names the URL the hub sends an instance token to.
+- It accepts only events signed with `--secret`, at most 10 minutes old and with a delivery ID, and
+  ignores a delivery it already received, because an event names the URL the hub sends an instance
+  token to. An event never moves an instance the hub follows, or one added by hand; see the
+  [hub guide](docs/hub.md#tokens-and-security) for what one can do.
 - An instance the hub can't reach that also missed three heartbeats (3 minutes by default), such
   as one whose workspace was killed, counts as stopped; its next heartbeat brings it back.
 - It keeps the instances in `~/.agentapi/hub/instances.json` (`--state`, readable by its owner
@@ -1459,7 +1500,8 @@ what needs you. Pick one to open it in the chat. On a phone the list and the cha
   over HTTPS, or only on the private network: signing in sends the token. To reach the instances
   through a VPN client running in userspace, set `ALL_PROXY` to its SOCKS5 proxy.
 - The hub serves the chat of its own version: run the same AgentAPI version on the hub and the
-  instances.
+  instances. A row marks an instance older than the hub, and the overview counts the versions and
+  says how to update the older ones.
 
 #### Joining a hub
 
@@ -1478,11 +1520,62 @@ applies it to the registered AgentAPIs running now: each sends `instance.heartbe
 once. After a restart (of the workspace, for example), the AgentAPIs send `instance.started` from
 the file. `--public-url` is where the hub reaches them; `{port}` and `{hostname}` are filled in for
 each. AgentAPIs that started before 1.2 aren't registered: restart them once. `agentapi hub status`
-shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes it. `join`
+shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes it. With
+`--allow-update`, the hub can also [update them](#updating-through-the-api). `join`
 first sends the hub a signed test event and stops if the hub doesn't take it (not reached, a sign-in
-page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet. An agent can
-do it for you with the [agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.md); see the
+page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet. The
+hub's page has the command ready: `+` fills in the hub's address and, on a hub with a token, its
+secret, next to a prompt that has an agent on the machine join it. The hub also logs the command for
+each of its addresses when it starts, without the secret. An agent can do it for you with the
+[agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.md); see the
 [hub guide](docs/hub.md#3-join-each-machines-agentapis) to install it.
+
+#### Updating through the API
+
+A client that watches many AgentAPIs, such as the hub, can update one to the latest release. Only
+machines that opt in allow it: start AgentAPI with `--allow-update` (or set
+`AGENTAPI_ALLOW_UPDATE=true`), or add `allow-update: true` to `~/.agentapi/config.yaml` for every
+AgentAPI of the user, which `agentapi hub join --allow-update` does. AgentAPIs that run take the
+setting up when they restart (`agentapi restart --all`).
+
+```bash
+curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"when": "idle"}'
+```
+
+- `POST /update` installs the latest official release of k1dav-c/agentapi for the machine's OS and
+  architecture, then restarts AgentAPI in place into it, as [`agentapi restart`](#agentapi-restart)
+  does: the same PID, a new `server_id` and version. The download must match the release's
+  `checksums.txt` and run as that version. The request can't choose a version or a URL.
+- `"when": "idle"`, the default, installs at once and restarts once the agent is idle: stable, with
+  no request (approval, question or plan) or terminal dialog open. Queued messages stay queued and
+  go out after the restart. `"now"` restarts at once and interrupts the agent.
+- With [`--state-db`](#persistent-sessions), the conversation and the native agent's session carry
+  over the restart. Without it, the conversation starts anew.
+- It answers 200 with `"up_to_date": true` when AgentAPI runs the latest release already, else 202
+  with the `state` and the `target` version. While an update is under way it answers its state,
+  and `"now"` hurries it. `DELETE /update` cancels it until it restarts; what it installed stays.
+  403 means updates are off, 409 that AgentAPI can't replace its program (see below) or stops, and
+  502 that GitHub didn't answer.
+- The [summary](#watching-many-instances)'s `update` follows it: `allowed`, `blocked`, the `state`
+  (`idle`, `checking`, `downloading`, `waiting`, `restarting`, or `failed` with an `error`), the
+  `target`, and `keeps_conversation` (it runs with `--state-db`). Every change sends
+  `summary_update`. Earlier releases have no `update`.
+- AgentAPIs that share a binary replace it one at a time, under a lock file next to it
+  (`.agentapi.lock`). One that finds the binary on disk newer than the one it runs, because another
+  updated it, only restarts.
+
+AgentAPI never runs `sudo`. It writes the new binary next to the real file behind any symlinks and
+renames it over that file, so the user it runs as must be able to write to that directory. Move a
+binary in a system directory such as `/usr/local/bin` once to a directory of yours, and leave a
+symlink behind:
+
+```bash
+mkdir -p ~/.local/bin && cp /usr/local/bin/agentapi ~/.local/bin/agentapi && sudo ln -sf ~/.local/bin/agentapi /usr/local/bin/agentapi
+```
+
+Until then the summary's `blocked` says why and gives this command with the actual paths. Running
+AgentAPIs notice the move within a minute, without a restart, and `agentapi update` no longer needs
+`sudo`.
 
 ### Webhooks
 
@@ -1563,10 +1656,12 @@ expected = "sha256=" + hmac.new(secret, f"{timestamp}.".encode() + body, hashlib
 valid = hmac.compare_digest(expected, signature) and abs(time.time() - int(timestamp)) < 300
 ```
 
-Events are delivered in order, one at a time. Network errors, timeouts and HTTP 5xx, 408 or 429
-responses trigger retries after 1, 2, 4… seconds, capped at 30 seconds. Other 4xx responses aren't
-retried. Each delivery allows `--webhook-max-attempts` (3) attempts, each with a
-`--webhook-timeout` (10s) timeout; exhausted deliveries are logged and discarded.
+Events are delivered in order, one at a time. Network errors, timeouts, redirects and HTTP 5xx,
+408 or 429 responses trigger retries after 1, 2, 4… seconds, capped at 30 seconds. Other 4xx
+responses aren't retried. A redirect isn't followed, so a sign-in page in front of the receiver
+doesn't count as a delivery; the log names where it pointed. Each delivery allows
+`--webhook-max-attempts` (3) attempts, each with a `--webhook-timeout` (10s) timeout; exhausted
+deliveries are logged and discarded.
 
 The queue holds 1,024 events and drops new ones when full. A receiver that misses events should
 read the current state from the API or the next heartbeat. On shutdown, AgentAPI waits up to
@@ -1622,13 +1717,15 @@ for you, `GET /handoff` returns what it waits on, with an `id` and a `kind`: its
 oldest pending request (`request`). Otherwise it returns `{"request": null}`.
 
 `POST /handoff/reply` with that `request_id`, a unique reply `id` and the `content` answers it. A
-reply to a response is sent as a normal user message, and a reply to a request answers it as
-described under [Requests](#requests-approvals-questions-and-plans). A terminal prompt takes a
+reply to a response is sent as a normal user message, the way `POST /message` sends one: if the
+agent got busy meanwhile, it waits in the [queue](#message-queue). A reply to a request answers it
+as described under [Requests](#requests-approvals-questions-and-plans). A terminal prompt takes a
 displayed option number, `enter` or `esc`, or free text where the prompt has a text field (such as
-Claude Code's plan feedback). The `outcome` is `applied`, `superseded` (no longer open, for example
-because it was answered in the web UI), `invalid` (the reply doesn't fit; it stays open) or
-`uncertain`, and nothing is answered twice. Combined with the webhooks above, an
-integration can tell you when the agent stops and pass your answer back.
+Claude Code's plan feedback). The `outcome` is `applied`, `queued` (the reply waits in the queue
+and goes out once the agent can take it), `superseded` (no longer open, for example because it was
+answered in the web UI), `invalid` (the reply doesn't fit; it stays open) or `uncertain`, and
+nothing is answered twice. Combined with the webhooks above, an integration can tell you when the
+agent stops and pass your answer back.
 
 ### MCP management
 
@@ -1812,6 +1909,8 @@ other than browsers (curl, SDKs, the hub) aren't affected.
 - Change the MCP servers and the webhook, and restart the agent. The webhook can send the
   conversation (`message.created`, `tool.completed`) to any URL; `GET /webhook` never returns its
   secret.
+- With `--allow-update`, [update AgentAPI](#updating-through-the-api) to the latest official
+  release and restart it. A client can't choose the version or where it comes from.
 
 Use `--api-token` together with `--bind` or a reverse proxy whenever someone else can reach the
 server.
@@ -1898,13 +1997,17 @@ They can also be set by the flag's name in `~/.agentapi/config.yaml` (`--config`
 file) for every server the user starts; a flag or a variable overrides the file. A setting that
 names no flag is reported in the log, and a file AgentAPI can't read is reported and ignored, so the
 agent still starts. [`agentapi hub join`](#agentapi-hub) writes it; keep it readable by its owner
-only (`chmod 600`) when it holds a secret.
+only (`chmod 600`) when it holds a secret. A leading `~` in a file or directory setting is the home
+directory, wherever the setting comes from. `state-db` and `pid-file` name a file that only one
+server can use, so in the file each needs `{port}` in its path (`{hostname}` is filled in too);
+without it, every server ignores the setting with a warning, and a flag or a variable still sets it.
 
 ```yaml
 webhook-url: http://hub.vpn:3290/hooks
 webhook-secret: s3cret
 webhook-events: [instance.*, task.*, request.*]
 public-url: http://dev-1.vpn:{port}
+state-db: ~/.agentapi/state/{port}.db
 ```
 
 | Flag | Default | Description |
@@ -1913,7 +2016,7 @@ public-url: http://dev-1.vpn:{port}
 | `-p`, `--port` | `3284` | Port to listen on |
 | `--bind` | all interfaces | Address to listen on; see [Bind address](#bind-address) |
 | `--transport` | `native` for Claude Code, Codex and Pi, else `pty` | `native` or `pty`; see [Transports](#transports) |
-| `--state-db` | | SQLite file that keeps the conversation (native and PTY) and resumes a native agent's session; see [Persistent sessions](#persistent-sessions) |
+| `--state-db` | | SQLite file that keeps the conversation (native and PTY) and resumes a native agent's session; `{port}` and `{hostname}` are filled in; see [Persistent sessions](#persistent-sessions) |
 | `--terminal` | `true` | Shell in the agent's working directory for the chat (native); see [Terminal](#terminal) |
 | `--auto-continue` | `false` | Continue a turn stopped by a usage limit once the limit resets (native); see [Usage limits](#usage-limits) |
 | `--prices` | | JSON file of model prices per million tokens, which add to or replace the built-in ones; see [Session costs](#session-costs) |
@@ -1935,26 +2038,74 @@ public-url: http://dev-1.vpn:{port}
 | `--registry-dir` | `~/.agentapi/instances` | Registry directory |
 | `--public-url` | | URL this AgentAPI is reached at, in `GET /summary` and every webhook event; `{port}` and `{hostname}` are filled in |
 | `--config` | `~/.agentapi/config.yaml` | Settings file: flags by name, below flags and variables |
+| `--allow-update` | `false` | Let API clients, such as the hub, update AgentAPI to the latest release, which then restarts in place; see [Updating through the API](#updating-through-the-api) |
 | `--webhook-timeout` | `10s` | Timeout of each delivery attempt |
 | `--webhook-max-attempts` | `3` | Delivery attempts |
 | `--webhook-payload-template` | | Go `text/template` for the POST body |
 | `-c`, `--chat-base-path` | `/chat` | Base path of the chat UI |
-| `--pid-file` | | File to write the server's process ID to, for shutdown scripts |
+| `--pid-file` | | File to write the server's process ID to, for shutdown scripts; `{port}` and `{hostname}` are filled in |
+| `--log-level` | `info` | Least important level to log: `debug`, `info`, `warn` or `error` |
 | `-P`, `--print-openapi` | | Print the OpenAPI schema and exit |
+
+AgentAPI logs to standard output, one `time=… level=… msg=…` line per entry. `--log-level debug`
+(or `AGENTAPI_LOG_LEVEL`, or `log-level` in the config file) adds what it logs for troubleshooting,
+such as the agent's command line, its login checks and the reads that worked (`GET`, `HEAD` and
+`OPTIONS` requests below 400, which Info leaves out because clients poll `GET /status`); `warn` and
+`error` leave out the routine lines. An unknown level stops the server before it starts.
 
 ### `agentapi update`
 
 Update the AgentAPI binary to the latest release from GitHub.
 
 ```bash
-agentapi update          # download and install the latest version
-agentapi update --check  # only check if an update is available
-agentapi update --force  # update even if already at the latest version
+agentapi update            # download and install the latest version
+agentapi update --check    # only check if an update is available
+agentapi update --force    # update even if already at the latest version
+agentapi update --restart  # then restart the running AgentAPIs into it
 ```
 
 Release binaries are verified against the release's `checksums.txt` SHA-256 manifest before the
 running executable is replaced. An update is rejected if the manifest is missing, malformed, or does
-not match the download.
+not match the download, or if the download doesn't run as the release's version. The binary is
+replaced under the lock file that [updates through the API](#updating-through-the-api) take too.
+
+Running AgentAPIs keep the old version until they restart. `--restart` restarts the ones that run
+the binary it replaced, as [`agentapi restart --all`](#agentapi-restart) does. Under `sudo` (an
+install in `/usr/local/bin`), it restarts the AgentAPIs of the user who ran `sudo`, from that user's
+registry. The hub isn't one of them: restart it with its service manager, such as
+`systemctl restart agentapi-hub`.
+
+### `agentapi restart`
+
+Restart running AgentAPIs in place, for example after an update replaced the binary:
+
+```bash
+agentapi restart 3285 3286  # the AgentAPIs on these ports
+agentapi restart --all      # every AgentAPI of yours on this machine
+```
+
+`agentapi restart` finds them in the [registry](#watching-many-instances) and sends each SIGUSR2.
+An AgentAPI first runs the program it was started from with `--version`; if that fails, it logs why
+and goes on serving. Otherwise it stops as for a shutdown (the agent is interrupted and closed, the
+state database written, the registry entry removed, and the webhook sends `instance.stopped`), then
+runs the same path again with the same arguments and environment, in the same process. Its PID
+stays, so a PID file and a parent shell that waits for it, such as a Coder workspace's start
+script, stay valid, and its output goes to the same place. The command waits until each AgentAPI
+answers on its port again with a new `server_id`, and prints its new version.
+
+- With `--state-db`, the conversation stays and a native agent resumes its
+  session. Without it, the AgentAPI starts a new conversation, as after any
+  restart.
+- Only your own AgentAPIs restart, and only when the registry entry names a
+  running `agentapi server`. Under `sudo`, they are those of the user who ran
+  `sudo`. An AgentAPI of an earlier release can't restart in place:
+  `agentapi restart` says so, and you restart that one yourself, once.
+- The AgentAPI this command runs under, if any (an agent that runs
+  `agentapi update --restart`), restarts last. Restarting it closes the
+  agent, which can end the command.
+- `--registry-dir` reads another registry, and `--timeout` (default `1m`)
+  bounds the wait for each one.
+- Not available on Windows.
 
 ### `agentapi list`
 
@@ -1988,14 +2139,17 @@ agentapi hub leave
 instead skips signing in, for a hub behind a sign-in of its own such as a Coder workspace app),
 `--secret` (or `AGENTAPI_HUB_SECRET`) checks the AgentAPIs' events, `--instance-token` (or
 `AGENTAPI_HUB_INSTANCE_TOKEN`, else `AGENTAPI_API_TOKEN`) is sent to them, `--state` keeps the
-instances, and `--port` and `--bind` set where it listens.
+instances, `--port` and `--bind` set where it listens, and `--log-level` (or
+`AGENTAPI_HUB_LOG_LEVEL`) how much it logs.
 
 `join` writes the hub's webhook into `~/.agentapi/config.yaml` and applies it to the registered
 AgentAPIs running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `--events` picks them
 (default `instance.*`, all the hub needs: it follows the rest from each summary), `--public-url`
 is where the hub reaches them, `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the ones that need
 a token, and `--config` and `--registry-dir` name other files. An AgentAPI that `join` can't
-update now applies the file when it restarts.
+update now applies the file when it restarts. `--allow-update` also writes `allow-update: true`, so
+the hub can [update the AgentAPIs through their API](#updating-through-the-api) once they restart;
+`leave` keeps it.
 
 ### `agentapi attach`
 
@@ -2084,6 +2238,7 @@ default. Endpoints marked *native* need the native transport.
 | `GET /handoff`, `POST /handoff/reply` | The [human-reply API](#human-reply-api): what the agent waits on, and an answer to it |
 | `GET /webhook`, `PUT /webhook` | Read or change the [webhook](#webhooks): its URL, events, secret, heartbeat and instance |
 | `POST /webhook/test` | Send a `webhook.test` event to the webhook URL once, and return the receiver's answer |
+| `POST /update`, `DELETE /update` | [Update AgentAPI](#updating-through-the-api) to the latest release and restart it in place, once the agent is idle or now (`--allow-update`); cancel an update until it restarts |
 | `GET /mcp`, `PUT /mcp` | The MCP servers and the managed config file; PUT replaces them, `?restart=true` restarts the agent (*native*: on its session if it can resume it) |
 | `POST /mcp/check` | Check remote HTTP servers and resolve stdio executables |
 | `POST /mcp/servers`, `PATCH /mcp/servers/{name}`, `DELETE /mcp/servers/{name}` | Create, update or remove one MCP server |

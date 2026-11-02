@@ -1,9 +1,11 @@
 package server
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -51,5 +53,37 @@ func readUserConfig(v *viper.Viper, flags *pflag.FlagSet, logger *slog.Logger) {
 		logger.Warn("Ignoring the AgentAPI config file", "path", path, "error", err)
 		return
 	}
+	for _, setting := range perServerFiles {
+		if shared := sharedFile(config, flags, setting.name); shared != "" {
+			logger.Warn(fmt.Sprintf("Ignoring %s in the AgentAPI config file: every agentapi server reads the file, and only one can %s; put {port} in its path, e.g. %s",
+				setting.name, setting.use, setting.example), "path", path, setting.name, shared)
+			v.Set(setting.name, "")
+		}
+	}
 	logger.Info("Read the AgentAPI config file", "path", path)
+}
+
+// perServerFiles are the settings that name a file only one server can
+// use: the first locks a state database, and the others refuse a PID file
+// a running server wrote.
+var perServerFiles = []struct{ name, use, example string }{
+	{FlagStateDB, "use a state database", "~/.agentapi/state/{port}.db"},
+	{FlagPidFile, "write a PID file", "~/.agentapi/run/{port}.pid"},
+}
+
+// sharedFile returns the file setting name of config if every server would
+// use that file: its path has no {port}, and neither the flag nor its
+// AGENTAPI_* variable names another.
+func sharedFile(config userconfig.Config, flags *pflag.FlagSet, name string) string {
+	path, ok := config[name].(string)
+	if !ok || path == "" || strings.Contains(path, "{port}") {
+		return ""
+	}
+	if flag := flags.Lookup(name); flag != nil && flag.Changed {
+		return ""
+	}
+	if os.Getenv("AGENTAPI_"+strings.ToUpper(strings.ReplaceAll(name, "-", "_"))) != "" {
+		return ""
+	}
+	return path
 }

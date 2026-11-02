@@ -31,6 +31,9 @@ try {
 }
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const binary = path.resolve(process.env.AGENTAPI_BINARY || path.join(repo, 'out', 'agentapi'));
+// An optional binary stamped with an older version, for one of the hub's instances, so that the hub
+// shows one older than itself.
+const olderBinary = process.env.AGENTAPI_OLDER_BINARY ? path.resolve(process.env.AGENTAPI_OLDER_BINARY) : binary;
 const port = Number(process.env.AGENTAPI_SCREENSHOT_PORT || 3311);
 const output = path.join(repo, 'docs', 'screenshots');
 const images = [];
@@ -250,10 +253,10 @@ async function seedClaudeLog(home, cwd, calls) {
   await writeFile(path.join(dir, `${session}.jsonl`), lines.map(line => JSON.stringify(line)).join('\n') + '\n');
 }
 
-const startServer = (name, cwd, env, args) => startProcess(name, cwd, env,
-  ['server', '--bind', '127.0.0.1', '--allowed-hosts', 'localhost,127.0.0.1', ...args]);
-const startProcess = (name, cwd, env, args) => {
-  const child = spawn(binary, args, {
+const startServer = (name, cwd, env, args, program = binary) => startProcess(name, cwd, env,
+  ['server', '--bind', '127.0.0.1', '--allowed-hosts', 'localhost,127.0.0.1', ...args], program);
+const startProcess = (name, cwd, env, args, program = binary) => {
+  const child = spawn(program, args, {
     cwd, env, stdio: ['ignore', 'ignore', 'pipe'],
   });
   let log = '';
@@ -927,10 +930,11 @@ try {
     '--public-url', 'http://127.0.0.1:{port}'], {env: hubEnv, stdio: 'ignore'});
   // Nine demo instances, posing as the agents they'd be: one asks for an approval, one asks
   // questions, one needs a login, one hit its usage limit, one works, one finished a task nobody
-  // saw, one is idle, one stopped and one was killed, so the hub can't reach it.
+  // saw, one is idle, one stopped and one was killed, so the hub can't reach it. The one that asks
+  // questions runs the older binary, if there is one.
   const hubSetup = [
     {name: 'checkout-api', type: 'claude', group: 'Client work', message: 'Deploy the release: approve', wait: 'approval', calls: 60},
-    {name: 'marketing-site', type: 'codex', group: 'Client work', message: 'ask me about the launch copy', wait: 'question'},
+    {name: 'marketing-site', type: 'codex', group: 'Client work', message: 'ask me about the launch copy', wait: 'question', older: true},
     {name: 'mobile-app', type: 'codex', group: 'Client work', message: 'Check the login'},
     {name: 'data-pipeline', type: 'claude', group: 'Internal', message: 'Rebuild the nightly aggregates; limit', calls: 180},
     {name: 'billing-service', type: 'claude', group: 'Internal', calls: 25},
@@ -944,7 +948,8 @@ try {
     const dir = path.join(root, 'workspaces', instance.name);
     await mkdir(dir, {recursive: true});
     if (instance.calls) await seedClaudeLog(hubHome, dir, instance.calls);
-    startServer(instance.name, dir, hubEnv, ['--port', String(port + 4 + i), '--transport', 'native', '--type', instance.type, '--', 'native-demo']);
+    startServer(instance.name, dir, hubEnv, ['--port', String(port + 4 + i), '--transport', 'native', '--type', instance.type, '--', 'native-demo'],
+      instance.older ? olderBinary : binary);
     hubInstances[instance.name] = client(`http://127.0.0.1:${port + 4 + i}`);
     await poll(async () => (await hubInstances[instance.name].status()).lifecycle === 'ready', `the ${instance.name} instance`);
   }
@@ -954,12 +959,17 @@ try {
     return (await response.json()).instances;
   };
   await poll(async () => (await hubList()).filter(instance => instance.summary).length === hubSetup.length, 'the hub to follow the instances');
-  // Groups of one's own, as the rows' menus set them.
+  // Groups of one's own, and two agents pinned to the top, as the rows' menus set them.
   for (const instance of await hubList()) {
     const group = hubSetup.find(entry => entry.name === instance.name)?.group;
     if (!group) continue;
     await fetch(`${hubAPI}/api/instances/${encodeURIComponent(instance.id)}`, {method: 'PATCH',
       headers: {Authorization: 'Bearer docs-token', 'Content-Type': 'application/json'}, body: JSON.stringify({group})});
+  }
+  for (const name of ['checkout-api', 'billing-service']) {
+    const instance = (await hubList()).find(entry => entry.name === name);
+    await fetch(`${hubAPI}/api/instances/${encodeURIComponent(instance.id)}`, {method: 'PATCH',
+      headers: {Authorization: 'Bearer docs-token', 'Content-Type': 'application/json'}, body: JSON.stringify({pinned: true})});
   }
   const stopInstance = async (name, signal) => {
     const server = servers.find(entry => entry.name === name);
@@ -1034,9 +1044,20 @@ try {
       await elementShot(page, page.locator('aside'), 'hub-list.png');
       // What the agents spent: the overview's card.
       await elementShot(page, page.locator('section[aria-labelledby="hub-spend"]'), 'hub-spend.png');
-      // Adding an instance by its URL.
-      await page.getByRole('button', {name: 'Add an instance'}).click();
+      // The AgentAPI versions they run: the overview's last card.
+      await elementShot(page, page.locator('section[aria-labelledby="hub-versions"]'), 'hub-versions.png');
+      // The list by the agents' latest changes, without groups; then the groups again.
+      const order = page.getByRole('group', {name: 'Order the agents'});
+      const groupHeader = page.locator('aside button[aria-expanded]', {hasText: 'Client work'});
+      await order.getByRole('button', {name: 'Recent changes'}).click();
+      await groupHeader.waitFor({state: 'detached'});
+      await elementShot(page, page.locator('aside'), 'hub-recent.png');
+      await order.getByRole('button', {name: 'Groups'}).click();
+      await groupHeader.waitFor();
+      // The Add dialog: joining a machine, the secret masked, and adding an instance by its URL.
+      await page.getByRole('button', {name: 'Add agents'}).click();
       const addDialog = page.getByRole('dialog');
+      await addDialog.getByText(/agentapi hub join http/).first().waitFor();
       await addDialog.getByLabel('URL').fill('http://dev-7.vpn:3284');
       await addDialog.getByLabel('API token').fill('instance-token');
       await elementShot(page, addDialog, 'hub-add.png');
@@ -1044,14 +1065,17 @@ try {
       // An instance that waits for an approval, open in the chat.
       await page.getByRole('list', {name: 'Instances'}).getByText('checkout-api').click();
       await page.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first().waitFor();
+      // The bar the chat draws names the machine too.
+      await page.frame({url: /\/embed/}).addStyleTag({content: hubHostStyle});
       await page.waitForTimeout(800);
       await shot(page, 'hub-instance.png');
     }
     await page.context().close();
   }
 
-  // A hub no agent has joined yet.
+  // A hub no agent has joined yet: how to join a machine, the secret masked.
   const empty = await openHub(desktop, {url: `http://127.0.0.1:${emptyPort}`});
+  await empty.getByText(/agentapi hub join http/).filter({visible: true}).first().waitFor();
   await empty.waitForTimeout(500);
   await shot(empty, 'hub-empty.png');
   await empty.context().close();
@@ -1063,7 +1087,12 @@ try {
   await hubPhonePage.getByRole('menuitem', {name: 'Forget'}).waitFor();
   await shot(hubPhonePage, 'hub-phone-menu.png');
   await hubPhonePage.keyboard.press('Escape');
-  // Muting the one that waits for a login nobody will do: out of Need you until that changes.
+  // Muting the one that waits for a login nobody will do: out of Need you until that changes. From
+  // the top of the list, where its row shows whole below the pinned ones, once the closed menu gave
+  // its button the focus back (which scrolls to it).
+  await hubPhonePage.getByRole('menu').waitFor({state: 'detached'});
+  await hubPhonePage.waitForTimeout(200);
+  await hubPhonePage.getByRole('list', {name: 'Instances'}).evaluate(list => list.scrollTo(0, 0));
   await tap(hubPhonePage, hubPhonePage.getByRole('button', {name: 'Actions for mobile-app'}));
   await tap(hubPhonePage, hubPhonePage.getByRole('menuitem', {name: 'Mute until it changes'}));
   await hubPhonePage.locator('[data-hub-row][aria-label^="mobile-app, Muted"]').waitFor();

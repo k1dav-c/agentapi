@@ -247,7 +247,11 @@ func (t *taskTracker) own(msgs []conv.Message, changed []int) []int {
 		if t.open >= 0 && t.ran && t.idle() {
 			// Only the grace period after an answer (or an interrupt)
 			// keeps the task open; the agent isn't working, so the
-			// message starts a task rather than steering this one.
+			// message starts a task rather than steering this one. The
+			// server ends the task before it sends the message
+			// (SendingMessage), as the PTY transport reports the agent
+			// running before the message shows; this catches a message
+			// sent another way.
 			changed = appendOnce(changed, t.open)
 			t.end(t.open, msg.Time)
 		}
@@ -349,8 +353,9 @@ func (t *taskTracker) idle() bool {
 	return t.status.Status == AgentStatusStable && t.status.PendingRequests == 0 && t.status.TerminalPrompt == ""
 }
 
-// endIfIdle ends the running task if the agent is still idle, taskEndGrace
-// after it stopped waiting on an answer.
+// endIfIdle ends the running task if the agent is idle in the grace period
+// after an answer (or an interrupt): taskEndGrace after it stopped waiting,
+// or when a user message goes to it then (see EventEmitter.SendingMessage).
 func (t *taskTracker) endIfIdle(now time.Time) []int {
 	if t.open < 0 || !t.ran || !t.idle() {
 		return nil
@@ -436,6 +441,18 @@ func (e *EventEmitter) notifyStatusLocked() {
 			e.tasksChangedLocked(e.tasks.endIfIdle(e.clock.Now()))
 		}, "tasks", "end")
 	}
+}
+
+// SendingMessage tells the emitter that a user message goes to the agent
+// now, as a new turn. If the agent is idle in the grace period after an
+// answer or an interrupt, its task ends here and the message starts one.
+// The emitter can't tell when the message shows: the PTY transport reports
+// the agent running as soon as the message waits to be typed. While the
+// agent works nothing ends, and a message steers its task.
+func (e *EventEmitter) SendingMessage() {
+	e.mu.Lock()
+	defer e.unlock()
+	e.tasksChangedLocked(e.tasks.endIfIdle(e.clock.Now()))
 }
 
 // tasksChangedLocked stores and sends the tasks at the positions changed.

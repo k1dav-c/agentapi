@@ -224,7 +224,7 @@ func (s *Store) claudeSubagents(sessionID string) (subs []Subagent, err error) {
 		files = append(files, logs...)
 	}
 	for _, path := range files {
-		snap, err := s.readSubagentLog(path, false)
+		snap, err := s.readSubagentLog(s.subs, path, false)
 		if err != nil {
 			continue
 		}
@@ -267,7 +267,7 @@ func (s *Store) codexSubagents(threadID string) ([]Subagent, error) {
 		if meta.Payload.ParentThreadID != threadID && meta.Payload.SessionID != threadID {
 			continue
 		}
-		snap, err := s.readSubagentLog(t.path, false)
+		snap, err := s.readSubagentLog(s.subs, t.path, false)
 		if err != nil {
 			continue
 		}

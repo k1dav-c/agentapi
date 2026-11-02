@@ -25,6 +25,7 @@ type observer struct {
 	requests map[string]native.RequestState
 	logins   []*native.LoginRequired
 	usage    []native.AgentUsage
+	exits    []native.AgentExit
 }
 
 func (o *observer) Usage(u native.AgentUsage) {
@@ -35,6 +36,12 @@ func (o *observer) Usage(u native.AgentUsage) {
 
 func (o *observer) Started(native.Capabilities) {}
 func (o *observer) LimitStop(*native.LimitStop) {}
+func (o *observer) AgentExited(exit native.AgentExit) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.exits = append(o.exits, exit)
+}
+
 func (o *observer) RichMessage(m transcript.RichMessage) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -384,4 +391,45 @@ func TestDelegate(t *testing.T) {
 		}
 	}
 	assert.Equal(t, "The 1.1.0 notes miss the release date and the download links.", result)
+}
+
+// "crash" ends the agent mid-turn, and AgentAPI starts it again on its
+// session; after "crashloop" the session can't be resumed, so AgentAPI
+// gives up, and a restart starts a new session.
+func TestCrash(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	clock := quartz.NewMock(t)
+	restart := clock.Trap().NewTimer("Conversation", "restart")
+	defer restart.Close()
+	c, obs := start(t, clock)
+	ref := c.SessionRef()
+
+	require.NoError(t, c.StartTurn(ctx, native.Input{Text: "crash now"}))
+	restart.MustWait(ctx).Release()
+	_, w := clock.AdvanceNext()
+	w.MustWait(ctx)
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	assert.Equal(t, ref, c.SessionRef(), "the same session")
+	assert.Equal(t, "crash now", c.Messages()[0].Message, "the conversation is kept")
+
+	// The two attempts left: the agent hasn't run five minutes.
+	require.NoError(t, c.StartTurn(ctx, native.Input{Text: "crashloop"}))
+	for range 2 {
+		restart.MustWait(ctx).Release()
+		_, w := clock.AdvanceNext()
+		w.MustWait(ctx)
+	}
+	require.Eventually(t, func() bool {
+		obs.mu.Lock()
+		defer obs.mu.Unlock()
+		return len(obs.exits) > 0 && obs.exits[len(obs.exits)-1].Attempt == 0
+	}, 5*time.Second, time.Millisecond, "AgentAPI gave up")
+	obs.mu.Lock()
+	assert.ErrorContains(t, obs.exits[len(obs.exits)-1].Err, "can't be read (simulated)")
+	obs.mu.Unlock()
+
+	require.NoError(t, c.Restart(ctx))
+	assert.True(t, c.Idle())
+	assert.NotEqual(t, ref, c.SessionRef(), "a new session")
 }

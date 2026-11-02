@@ -119,42 +119,25 @@ func (a *runningAgent) restart() func(context.Context) (int, error) {
 	return a.supervisor.Restart
 }
 
-// waitForExit waits until the agent exits by itself, which the server
-// reports, and returns why; or, for a native agent, until ctx ends, which
-// returns false. A PTY agent's process that a restart replaced isn't an
-// exit.
-func (a *runningAgent) waitForExit(ctx context.Context, srv *httpapi.Server) (bool, error) {
-	switch {
-	case a.process != nil:
-		current := a.process
-		for {
-			err := current.Wait()
-			if settled := a.supervisor.currentSettled(); settled != nil && settled != current {
-				current = settled
-				continue
-			}
-			switch {
-			case err == nil:
-				return true, nil
-			case errors.Is(err, termexec.ErrNonZeroExitCode):
-				return true, fmt.Errorf("========\n%s\n========\n: %w", strings.TrimSpace(current.ReadScreen()), err)
-			default:
-				return true, fmt.Errorf("failed to wait for process: %w", err)
-			}
+// waitForExit waits until a PTY agent exits by itself, and returns why. A
+// process that a restart replaced isn't an exit. A native agent that exits
+// is started again by its conversation instead (see
+// native.Config.RestartDelays).
+func (a *runningAgent) waitForExit() error {
+	current := a.process
+	for {
+		err := current.Wait()
+		if settled := a.supervisor.currentSettled(); settled != nil && settled != current {
+			current = settled
+			continue
 		}
-	default:
-		exited := srv.NativeExited()
-		if exited == nil {
-			return false, nil
-		}
-		select {
-		case err := <-exited:
-			if err != nil {
-				return true, fmt.Errorf("agent exited: %w", err)
-			}
-			return true, nil
-		case <-ctx.Done():
-			return false, nil
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, termexec.ErrNonZeroExitCode):
+			return fmt.Errorf("========\n%s\n========\n: %w", strings.TrimSpace(current.ReadScreen()), err)
+		default:
+			return fmt.Errorf("failed to wait for process: %w", err)
 		}
 	}
 }

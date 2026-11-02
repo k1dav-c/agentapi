@@ -1,14 +1,17 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -255,6 +258,7 @@ func TestServerCmd_AllArgs_Defaults(t *testing.T) {
 		{"allowed-hosts default", FlagAllowedHosts, []string{"localhost", "127.0.0.1", "[::1]"}, func() any { return viper.GetStringSlice(FlagAllowedHosts) }},
 		{"allowed-origins default", FlagAllowedOrigins, []string{"http://localhost:3284", "http://localhost:3000", "http://localhost:3001"}, func() any { return viper.GetStringSlice(FlagAllowedOrigins) }},
 		{"bind default", FlagBind, "", func() any { return viper.GetString(FlagBind) }},
+		{"allow-update default", FlagAllowUpdate, false, func() any { return viper.GetBool(FlagAllowUpdate) }},
 	}
 
 	for _, tt := range tests {
@@ -290,6 +294,7 @@ func TestServerCmd_AllEnvVars(t *testing.T) {
 		{"AGENTAPI_ALLOWED_HOSTS", "AGENTAPI_ALLOWED_HOSTS", "localhost example.com", []string{"localhost", "example.com"}, func() any { return viper.GetStringSlice(FlagAllowedHosts) }},
 		{"AGENTAPI_ALLOWED_ORIGINS", "AGENTAPI_ALLOWED_ORIGINS", "https://example.com http://localhost:3000", []string{"https://example.com", "http://localhost:3000"}, func() any { return viper.GetStringSlice(FlagAllowedOrigins) }},
 		{"AGENTAPI_BIND", "AGENTAPI_BIND", "127.0.0.1", "127.0.0.1", func() any { return viper.GetString(FlagBind) }},
+		{"AGENTAPI_ALLOW_UPDATE", "AGENTAPI_ALLOW_UPDATE", "true", true, func() any { return viper.GetBool(FlagAllowUpdate) }},
 	}
 
 	for _, tt := range tests {
@@ -691,13 +696,31 @@ func TestPIDFileOperations(t *testing.T) {
 		tmpDir := t.TempDir()
 		pidFile := tmpDir + "/test.pid"
 
-		// Write the current process PID so isProcessRunning returns true.
-		err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o644)
+		// Another process of this program, so isProcessRunning returns
+		// true.
+		other := exec.Command(os.Args[0], "-test.run=^TestPIDFileHelperProcess$")
+		other.Env = append(os.Environ(), "PID_FILE_HELPER=1")
+		require.NoError(t, other.Start())
+		t.Cleanup(func() {
+			_ = other.Process.Kill()
+			_ = other.Wait()
+		})
+		err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", other.Process.Pid)), 0o644)
 		require.NoError(t, err)
 
 		err = writePIDFile(pidFile, discardLogger)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "another instance is already running")
+	})
+
+	t.Run("writePIDFile keeps the file of this process", func(t *testing.T) {
+		// It wrote the file before it restarted in place.
+		pidFile := t.TempDir() + "/test.pid"
+		require.NoError(t, os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o600))
+		require.NoError(t, writePIDFile(pidFile, discardLogger))
+		data, err := os.ReadFile(pidFile)
+		require.NoError(t, err)
+		assert.Equal(t, fmt.Sprintf("%d\n", os.Getpid()), string(data))
 	})
 
 	t.Run("writePIDFile replaces PID reused by another executable", func(t *testing.T) {
@@ -754,6 +777,15 @@ func TestPIDFileOperations(t *testing.T) {
 		// Should not panic
 		cleanupPIDFile(pidFile, discardLogger)
 	})
+}
+
+// TestPIDFileHelperProcess is another process of this program for the PID
+// file tests; it does nothing unless one runs it as that.
+func TestPIDFileHelperProcess(t *testing.T) {
+	if os.Getenv("PID_FILE_HELPER") != "1" {
+		t.Skip("a helper process of TestPIDFileOperations")
+	}
+	time.Sleep(30 * time.Second)
 }
 
 func TestServerCmd_AllowedOrigins(t *testing.T) {
@@ -873,4 +905,59 @@ func TestExposureWarning(t *testing.T) {
 		assert.Empty(t, exposureWarning(bind, "", true), bind)
 	}
 	assert.Empty(t, exposureWarning("", "secret", true), "with a token")
+}
+
+// --log-level sets the level of the server's log, from a flag, a variable
+// or the config file; it is checked before the server starts.
+func TestServerLogLevel(t *testing.T) {
+	const debugLine, infoLine = "Restarting in place runs this program", "Driving the agent"
+	run := func(t *testing.T, env map[string]string, config string, args ...string) (string, error) {
+		t.Helper()
+		isolateViper(t)
+		for key, value := range env {
+			t.Setenv(key, value)
+		}
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, "config.yaml")
+		if config != "" {
+			require.NoError(t, os.WriteFile(configPath, []byte(config), 0o600))
+		}
+		serverCmd := CreateServerCmd()
+		var out bytes.Buffer
+		serverCmd.SetOut(&out)
+		serverCmd.SetErr(io.Discard)
+		// The server stops at the missing prices file, after it logged
+		// what it drives; --initial-prompt keeps it from reading stdin.
+		serverCmd.SetArgs(append(args, "--config", configPath, "--registry-dir", dir,
+			"--initial-prompt", "hi", "--prices", filepath.Join(dir, "missing.json"), "--type", "custom", "--", "native-demo"))
+		err := serverCmd.Execute()
+		return out.String(), err
+	}
+	for name, tc := range map[string]struct {
+		env         map[string]string
+		config      string
+		args        []string
+		debug, info bool
+	}{
+		"info by default":      {info: true},
+		"debug":                {args: []string{"--log-level", "debug"}, debug: true, info: true},
+		"warn":                 {args: []string{"--log-level=warn"}},
+		"from AGENTAPI_*":      {env: map[string]string{"AGENTAPI_LOG_LEVEL": "debug"}, debug: true, info: true},
+		"from the config file": {config: "log-level: error\n"},
+		"a flag wins":          {config: "log-level: error\n", args: []string{"--log-level", "debug"}, debug: true, info: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := run(t, tc.env, tc.config, tc.args...)
+			require.ErrorContains(t, err, "--prices")
+			assert.Equal(t, tc.debug, strings.Contains(out, debugLine), out)
+			assert.Equal(t, tc.info, strings.Contains(out, infoLine), out)
+		})
+	}
+	t.Run("an unknown level", func(t *testing.T) {
+		out, err := run(t, nil, "", "--log-level", "verbose")
+		require.ErrorContains(t, err, `invalid --log-level: unknown log level "verbose" (one of: debug, info, warn, error)`)
+		assert.NotContains(t, out, infoLine, "refused before the server starts")
+		_, err = run(t, map[string]string{"AGENTAPI_LOG_LEVEL": "loud"}, "")
+		assert.ErrorContains(t, err, "invalid --log-level")
+	})
 }

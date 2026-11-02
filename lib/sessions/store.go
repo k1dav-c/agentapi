@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -40,11 +41,15 @@ type Store struct {
 	metas codexlog.Metas
 	// costs makes concurrent Costs calls share one reading: GET /sessions,
 	// GET /cost and the webhook ask at once, as the chat does on every
-	// turn, and a long log takes a while.
+	// turn, and a long log takes a while. cost is what the last reading
+	// leaves the next, which only it uses.
 	costs singleflight.Group
+	cost  costCache
 	// costPasses counts the readings, and costPass runs in each (tests).
 	costPasses atomic.Int64
 	costPass   func()
+	// readers numbers the logs' readers.
+	readers atomic.Uint64
 
 	mu sync.Mutex
 	// paths finds the log of a session by its ID, as the logs read so far
@@ -108,11 +113,29 @@ func New(agentType, cwd string, config Config) (*Store, error) {
 	return s, nil
 }
 
+// Scope identifies the logs the Store reads, on its machine: its agent,
+// the directory's real path, and the real paths of where the agent keeps
+// its logs. Stores with one scope read the same sessions, and find that
+// they spent the same.
+func (s *Store) Scope() string {
+	parts := []string{s.agent, s.dir.Paths()[0]}
+	for _, root := range s.src.roots(s) {
+		parts = append(parts, agentlog.RealPath(root))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// logReader reads logs through an index, or a pass over one.
+type logReader interface {
+	Read(path string, fn func(*sessionLog, agentlog.FileInfo)) error
+}
+
 // readLog reads what was appended to a session's log since it was last
-// read, and returns what was read of it, with its calls if withCalls.
-func (s *Store) readLog(path string, withCalls bool) (logSnapshot, error) {
+// read, through r (s.logs or a pass over it), and returns what was read of
+// it, with its calls if withCalls.
+func (s *Store) readLog(r logReader, path string, withCalls bool) (logSnapshot, error) {
 	var snap logSnapshot
-	err := s.logs.Read(path, func(l *sessionLog, info agentlog.FileInfo) {
+	err := r.Read(path, func(l *sessionLog, info agentlog.FileInfo) {
 		l.reportDrift(path)
 		snap = l.snapshot(path, info, withCalls)
 	})
@@ -120,9 +143,6 @@ func (s *Store) readLog(path string, withCalls bool) (logSnapshot, error) {
 		return logSnapshot{}, err
 	}
 	if snap.session {
-		if s.agent == "codex" {
-			snap.summary.Title = s.threadName(snap.summary.ID)
-		}
 		s.mu.Lock()
 		s.paths[snap.summary.ID] = path
 		s.mu.Unlock()
@@ -137,10 +157,11 @@ func (s *Store) readLog(path string, withCalls bool) (logSnapshot, error) {
 	return snap, nil
 }
 
-// readSubagentLog is readLog for a subagent's log.
-func (s *Store) readSubagentLog(path string, withCalls bool) (logSnapshot, error) {
+// readSubagentLog is readLog for a subagent's log, through s.subs or a
+// pass over it.
+func (s *Store) readSubagentLog(r logReader, path string, withCalls bool) (logSnapshot, error) {
 	var snap logSnapshot
-	err := s.subs.Read(path, func(l *sessionLog, info agentlog.FileInfo) {
+	err := r.Read(path, func(l *sessionLog, info agentlog.FileInfo) {
 		l.reportDrift(path)
 		snap = l.snapshot(path, info, withCalls)
 	})
@@ -155,8 +176,11 @@ func (s *Store) summaries() ([]SessionSummary, error) {
 	}
 	var list []SessionSummary
 	for _, path := range files {
-		snap, err := s.readLog(path, false)
+		snap, err := s.readLog(s.logs, path, false)
 		if err == nil && snap.session {
+			if s.agent == "codex" {
+				snap.summary.Title = s.threadName(snap.summary.ID)
+			}
 			list = append(list, snap.summary)
 		}
 	}

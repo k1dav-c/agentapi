@@ -33,8 +33,11 @@ type ModelReport struct {
 // to it later.
 type CallReader interface {
 	Line(line []byte)
-	// Calls returns the calls read so far, which the caller may keep.
-	Calls() []Call
+	// Changed returns the calls read or changed since it last returned:
+	// the log's calls from the first of those on, from being its position
+	// among them (a later line can complete a call). The caller may keep
+	// them.
+	Changed() (from int, calls []Call)
 	// Size is about how many bytes of memory the reader holds.
 	Size() int
 }

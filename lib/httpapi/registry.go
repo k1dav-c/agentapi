@@ -73,7 +73,7 @@ func (r *instanceRegistry) stop() {
 }
 
 // newInstanceRegistry returns the registry of s in dir, nil without one.
-func (s *Server) newInstanceRegistry(dir string, bind string) *instanceRegistry {
+func (s *Server) newInstanceRegistry(dir string, bind string, restartsInPlace bool) *instanceRegistry {
 	if dir == "" {
 		return nil
 	}
@@ -88,7 +88,7 @@ func (s *Server) newInstanceRegistry(dir string, bind string) *instanceRegistry 
 			}
 			instance.Port = port
 			instance.PID = os.Getpid()
-			return registry.Entry{WebhookInstance: instance, AuthRequired: s.auth != nil, StartedAt: started}
+			return registry.Entry{WebhookInstance: instance, AuthRequired: s.auth != nil, StartedAt: started, RestartsInPlace: restartsInPlace}
 		},
 	}
 }

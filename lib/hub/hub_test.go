@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -272,6 +274,30 @@ func TestHubWebhookSignature(t *testing.T) {
 	assert.Equal(t, hub.ConnectionStopped, instances(t, hubSrv.URL)[0].Connection)
 }
 
+// An event without a delivery ID can't be told from a copy of it, which
+// would work again for the 10 minutes its signature holds: the hub refuses
+// it, and every copy.
+func TestHubRefusesEventsWithoutDeliveryID(t *testing.T) {
+	var logs lockedBuffer
+	h, err := hub.New(hub.Config{Token: hubToken, Secret: hubSecret, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	require.NoError(t, err)
+	hubSrv := httptest.NewServer(h.Handler())
+	t.Cleanup(hubSrv.Close)
+
+	at := time.Now()
+	captured := map[string]any{
+		"type": "instance.started", "created_at": at,
+		"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": "http://127.0.0.1:1", "agent_type": "claude"},
+	}
+	for range 2 {
+		assert.Equal(t, http.StatusBadRequest, postEvent(t, hubSrv.URL, captured, hubSecret, at))
+	}
+	assert.Empty(t, instances(t, hubSrv.URL))
+	check := map[string]any{"type": "webhook.test", "created_at": at, "instance": map[string]any{"id": "agentapi-hub-join-check"}}
+	assert.Equal(t, http.StatusBadRequest, postEvent(t, hubSrv.URL, check, hubSecret, at))
+	assert.Equal(t, 3, strings.Count(logs.String(), "Refused an event without a delivery ID"))
+}
+
 // An instance that isn't listening yet when its first event comes (it is
 // starting) is connecting, not unreachable, until it does; one that never
 // does is unreachable once the connect grace is over.
@@ -298,10 +324,16 @@ func TestHubConnectGrace(t *testing.T) {
 	require.NoError(t, err)
 	startInstanceOn(t, listener, "dev-1:3284")
 	// Stopped before the instance closes (cleanups run last first): its
-	// server waits for the hub's stream to end. No server ID: the hub took
-	// the instance's own from its summary.
+	// server waits for the hub's stream to end. With the instance's own
+	// server ID, which the hub took from its summary.
 	t.Cleanup(func() {
-		stopped := map[string]any{"id": "e3", "type": "instance.stopped", "created_at": time.Now(), "instance": map[string]any{"id": "dev-1:3284", "url": "http://" + addr}}
+		serverID := ""
+		for _, instance := range instances(t, hubSrv.URL) {
+			if instance.ID == "dev-1:3284" {
+				serverID = instance.ServerID
+			}
+		}
+		stopped := map[string]any{"id": "e3", "type": "instance.stopped", "created_at": time.Now(), "instance": map[string]any{"id": "dev-1:3284", "server_id": serverID, "url": "http://" + addr}}
 		assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, stopped, hubSecret, time.Now()))
 	})
 	require.Eventually(t, func() bool {
@@ -403,6 +435,81 @@ func TestHubKeepsTheRunItFollows(t *testing.T) {
 	moved := instances(t, hubSrv.URL)[0]
 	assert.Equal(t, "http://127.0.0.1:1", moved.URL)
 	assert.Equal(t, "twin", moved.ServerID)
+}
+
+// elsewhere serves another URL and counts the requests it got: the hub
+// must send it nothing of an instance it doesn't move there.
+func elsewhere(t *testing.T) (string, *atomic.Int32) {
+	t.Helper()
+	var got atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		got.Add(1)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, &got
+}
+
+// A signed event moves no instance the hub follows, whatever run it names:
+// the hub would send that URL the instance's token, and the user's
+// messages and approvals. An instance.* event that names no run is
+// refused; AgentAPI has named it since 1.0.
+func TestHubEventsDontMoveAFollowedInstance(t *testing.T) {
+	instSrv, _ := startInstance(t)
+	hubSrv := startHub(t, "")
+	joined := joinInstance(t, hubSrv.URL, instSrv.URL)
+	otherURL, got := elsewhere(t)
+
+	event := func(id, typ, instanceID, serverID string) map[string]any {
+		instance := map[string]any{"id": instanceID, "url": otherURL, "agent_type": "claude"}
+		if serverID != "" {
+			instance["server_id"] = serverID
+		}
+		return map[string]any{"id": id, "type": typ, "created_at": time.Now(), "instance": instance}
+	}
+	for i, typ := range []string{"instance.heartbeat", "instance.started", "instance.stopped"} {
+		assert.Equal(t, http.StatusBadRequest, postEvent(t, hubSrv.URL, event("n"+strconv.Itoa(i), typ, joined.ID, ""), hubSecret, time.Now()), typ)
+	}
+	assert.Equal(t, http.StatusBadRequest, postEvent(t, hubSrv.URL, event("n9", "instance.started", "dev-9:3284", ""), hubSecret, time.Now()))
+	assert.Len(t, instances(t, hubSrv.URL), 1, "nor added")
+
+	// Its own run, or another, at another URL.
+	assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, event("r1", "instance.heartbeat", joined.ID, joined.ServerID), hubSecret, time.Now()))
+	assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, event("r2", "instance.started", joined.ID, "other"), hubSecret, time.Now()))
+
+	kept := instances(t, hubSrv.URL)[0]
+	assert.Equal(t, instSrv.URL, kept.URL)
+	assert.Equal(t, joined.ServerID, kept.ServerID)
+	assert.Equal(t, hub.ConnectionConnected, kept.Connection)
+	assert.Equal(t, http.StatusOK, request(t, http.MethodGet, hubSrv.URL+"/i/"+joined.ID+"/status", hubToken, nil, nil))
+	assert.Never(t, func() bool { return got.Load() > 0 }, 300*time.Millisecond, 20*time.Millisecond, "nothing went to the other URL")
+}
+
+// An instance added by hand stays at its URL: no event moves it, not even
+// while the hub can't reach it.
+func TestHubAddedInstanceStays(t *testing.T) {
+	instSrv, _ := startInstance(t)
+	hubSrv := startHub(t, "")
+	var added hub.Instance
+	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubSrv.URL+"/api/instances", hubToken, map[string]string{"url": instSrv.URL, "token": instanceToken}, &added))
+	otherURL, got := elsewhere(t)
+	// Gone, as far as the hub can tell (Close would wait for the hub's
+	// stream to end).
+	_ = instSrv.Listener.Close()
+	instSrv.CloseClientConnections()
+	require.Eventually(t, func() bool {
+		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionUnreachable
+	}, 10*time.Second, 20*time.Millisecond)
+
+	heartbeat := map[string]any{
+		"id": "m1", "type": "instance.heartbeat", "created_at": time.Now(),
+		"instance": map[string]any{"id": added.ID, "server_id": "another-run", "url": otherURL, "agent_type": "claude"},
+	}
+	assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, heartbeat, hubSecret, time.Now()))
+	kept := instances(t, hubSrv.URL)[0]
+	assert.Equal(t, instSrv.URL, kept.URL)
+	assert.Equal(t, hub.SourceManual, kept.Source)
+	assert.Never(t, func() bool { return got.Load() > 0 }, 300*time.Millisecond, 20*time.Millisecond, "nothing went to the other URL")
 }
 
 // An instance added by its URL, with its own token.
@@ -560,6 +667,69 @@ func TestHubGroups(t *testing.T) {
 	assert.Empty(t, ungrouped.Group)
 }
 
+// lockedBuffer is a log the hub's goroutines write while a test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// A file of instances that doesn't parse (cut short by a crash or a full
+// disk) doesn't stop the hub, which would stop again at every restart: it
+// is moved aside, the hub says what is lost and starts empty, and the next
+// change writes the file again.
+func TestHubDamagedState(t *testing.T) {
+	for name, content := range map[string]string{
+		"cut":   `[{"id": "dev-1:3284", "url": "http://dev-1.vpn:3284", "token": "its-own", "gro`,
+		"empty": "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			statePath := filepath.Join(t.TempDir(), "instances.json")
+			require.NoError(t, os.WriteFile(statePath, []byte(content), 0o600))
+			var logs lockedBuffer
+			h, err := hub.New(hub.Config{Token: hubToken, Secret: hubSecret, StatePath: statePath, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+			require.NoError(t, err)
+			srv := httptest.NewServer(h.Handler())
+			t.Cleanup(srv.Close)
+			assert.Empty(t, instances(t, srv.URL))
+
+			aside, err := filepath.Glob(statePath + ".corrupt-*")
+			require.NoError(t, err)
+			require.Len(t, aside, 1)
+			kept, err := os.ReadFile(aside[0])
+			require.NoError(t, err)
+			assert.Equal(t, content, string(kept), "kept as it was")
+			info, err := os.Stat(aside[0])
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "it may hold tokens")
+			assert.Contains(t, logs.String(), "added by hand")
+			assert.Contains(t, logs.String(), aside[0])
+
+			started := map[string]any{
+				"id": "d1", "type": "instance.started", "created_at": time.Now(),
+				"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": "http://127.0.0.1:1", "agent_type": "claude"},
+			}
+			require.Equal(t, http.StatusNoContent, postEvent(t, srv.URL, started, hubSecret, time.Now()))
+			data, err := os.ReadFile(statePath)
+			require.NoError(t, err)
+			var stored []map[string]any
+			require.NoError(t, json.Unmarshal(data, &stored))
+			assert.Len(t, stored, 1)
+		})
+	}
+}
+
 // startHubClock runs a hub on clock and returns its URL; retry traps the
 // waits between its attempts to reach an instance, until the test ends.
 func startHubClock(t *testing.T, clock *quartz.Mock) (string, *quartz.Trap) {
@@ -640,4 +810,77 @@ func TestHubNoHeartbeats(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, started, hubSecret, start))
 	passRetries(t, clock, retry, start, 10*time.Minute)
 	assert.Equal(t, hub.ConnectionUnreachable, instances(t, hubURL)[0].Connection)
+}
+
+// The API and the browser's stream say when each instance last changed what
+// its row shows (changed_at, RFC 3339): when the hub first saw it, not again
+// for a heartbeat, and when the hub can't reach it any more.
+func TestHubChangedAt(t *testing.T) {
+	clock := quartz.NewMock(t)
+	hubURL, retry := startHubClock(t, clock)
+	heartbeat := func(id string) map[string]any {
+		return map[string]any{
+			"id": id, "type": "instance.heartbeat", "created_at": clock.Now(),
+			"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": "http://127.0.0.1:1", "agent_type": "claude"},
+		}
+	}
+	start := clock.Now()
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, heartbeat("c1"), hubSecret, start))
+	firstSeen := `"changed_at":"` + start.Format(time.RFC3339Nano) + `"`
+	req, err := http.NewRequest(http.MethodGet, hubURL+"/api/instances", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+hubToken)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	require.NoError(t, err)
+	assert.Contains(t, string(body), firstSeen)
+	events := openEvents(t, hubURL+"/api/events")
+	first := next(t, events)
+	require.Equal(t, "instances", first.event)
+	assert.Contains(t, first.data, firstSeen)
+
+	// advance moves the clock d on, stopping at each timer and ticker on
+	// the way, such as the browser's heartbeats.
+	advance := func(d time.Duration) {
+		for d > 0 {
+			step := d
+			if next, ok := clock.Peek(); ok && next < step {
+				step = next
+			}
+			clock.Advance(step).MustWait(t.Context())
+			d -= step
+		}
+	}
+
+	// Its first attempt to reach it failed; a heartbeat changes nothing.
+	call := retry.MustWait(t.Context())
+	advance(5 * time.Second)
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, heartbeat("c2"), hubSecret, clock.Now()))
+	assert.True(t, instances(t, hubURL)[0].ChangedAt.Equal(start), "a heartbeat")
+	call.Release()
+	advance(call.Duration)
+
+	// Unreachable once the grace is over.
+	for clock.Now().Sub(start) < 15*time.Second {
+		call := retry.MustWait(t.Context())
+		call.Release()
+		advance(call.Duration)
+	}
+	retry.MustWait(t.Context()).Release()
+	gone := instances(t, hubURL)[0]
+	require.Equal(t, hub.ConnectionUnreachable, gone.Connection)
+	assert.True(t, gone.ChangedAt.After(start))
+	for {
+		e := next(t, events)
+		var changed hub.Instance
+		if e.event != "instance" || json.Unmarshal([]byte(e.data), &changed) != nil || changed.Connection != hub.ConnectionUnreachable {
+			continue
+		}
+		assert.True(t, changed.ChangedAt.Equal(gone.ChangedAt))
+		break
+	}
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, heartbeat("c3"), hubSecret, clock.Now()))
+	assert.True(t, instances(t, hubURL)[0].ChangedAt.Equal(gone.ChangedAt), "heard of while unreachable")
 }

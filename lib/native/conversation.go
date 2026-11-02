@@ -42,6 +42,11 @@ type Observer interface {
 	// LimitStop reports the turn a usage limit stopped when that changes,
 	// or with nil that a turn started since or the stop was dismissed.
 	LimitStop(*LimitStop)
+	// AgentExited reports that the agent exited on its own or failed to
+	// start, and whether the conversation starts it again. An agent that
+	// lost its login before it exited waits for the login instead
+	// (LoginRequired).
+	AgentExited(AgentExit)
 }
 
 type nopObserver struct{}
@@ -57,6 +62,7 @@ func (nopObserver) Settings(Settings)                       {}
 func (nopObserver) SettingsChosen(Settings)                 {}
 func (nopObserver) Usage(AgentUsage)                        {}
 func (nopObserver) LimitStop(*LimitStop)                    {}
+func (nopObserver) AgentExited(AgentExit)                   {}
 
 // Config configures a Conversation.
 type Config struct {
@@ -91,6 +97,13 @@ type Config struct {
 	// lock: work that can be slow (storing the images of a tool result)
 	// holds up nothing else. It gets the conversation's own copy.
 	PrepareRichMessage func(*transcript.RichMessage)
+	// RestartDelays are the waits before the conversation starts the agent
+	// again after it exited on its own, or failed a start the conversation
+	// made by itself: one per attempt, after which it gives up and no agent
+	// runs until a restart. Once an agent ran five minutes, its exit starts
+	// with the first again. Nil means 2, 10 and 30 seconds; empty means
+	// none.
+	RestartDelays []time.Duration
 }
 
 const (
@@ -100,7 +113,13 @@ const (
 	// deadline: the initial prompt, and Send's, which the server calls
 	// while it holds its lock.
 	sendTimeout = 30 * time.Second
+	// restartReset is how long an agent runs before its exit counts as the
+	// first of the restart delays again.
+	restartReset = 5 * time.Minute
 )
+
+// defaultRestartDelays are Config.RestartDelays' default.
+var defaultRestartDelays = []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second}
 
 // Conversation is an conv.Conversation backed by an Adapter.
 type Conversation struct {
@@ -140,16 +159,21 @@ type Conversation struct {
 	messages messageLog
 	requests requestBook
 
-	exited chan error
 	// login is set while the agent waits for the user to log in.
 	login *LoginRequired
 	// loginWaiting: a start found no login, so the agent is being started
 	// again until one works.
 	loginWaiting bool
-	// loginWake is closed to cut short the wait before the agent is started
-	// again for a login: by RetryLogin, to start it now, and when the agent
-	// is replaced or closed. It is nil while no wait runs.
-	loginWake chan struct{}
+	// relaunchWake is closed to cut short the wait before the agent is
+	// started again, for a login or after an exit: by RetryLogin, to start
+	// it now, and when the agent is replaced or closed. It is nil while no
+	// wait runs.
+	relaunchWake chan struct{}
+	// restarts counts the starts the conversation made after exits since
+	// an agent last ran restartReset.
+	restarts int
+	// ran: an agent started once, so caps is what the agent supports.
+	ran bool
 	// startErrors holds what the agent reported while starting since it
 	// last started, so that while it waits for a login, a start doesn't show
 	// again what an earlier one showed.
@@ -191,13 +215,15 @@ func NewConversation(cfg Config) *Conversation {
 	if cfg.LoginRetryInterval == 0 {
 		cfg.LoginRetryInterval = defaultLoginRetryInterval
 	}
+	if cfg.RestartDelays == nil {
+		cfg.RestartDelays = defaultRestartDelays
+	}
 	return &Conversation{
 		cfg:        cfg,
 		ctx:        context.Background(),
 		messages:   newMessageLog(cfg.Clock, cfg.InitialMessages),
 		requests:   newRequestBook(cfg.Clock),
 		sessionRef: cfg.ResumeRef,
-		exited:     make(chan error, 1),
 		promptSent: len(cfg.InitialMessages) > 0,
 		chosen:     cfg.Settings,
 		limitStop:  cfg.LimitStop.clone(),

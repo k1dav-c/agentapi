@@ -170,3 +170,37 @@ func TestStoreReportsFormatDrift(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, strings.Count(out.String(), "level=WARN"), "once per log")
 }
+
+// Stores of one agent in one directory, through a link to it or not, read
+// the same logs, and have one scope; another agent, directory or place the
+// agent keeps its logs in has another.
+func TestScope(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	work := t.TempDir()
+	link := filepath.Join(t.TempDir(), "work")
+	require.NoError(t, os.Symlink(work, link))
+	scope := func(agentType, cwd string) string { return newStore(t, agentType, cwd).Scope() }
+
+	claude := scope("claude", work)
+	assert.Equal(t, claude, scope("claude", link))
+	assert.NotEqual(t, claude, scope("codex", work))
+	assert.NotEqual(t, claude, scope("pi", work))
+	assert.NotEqual(t, claude, scope("claude", t.TempDir()))
+	assert.NotEqual(t, scope("codex", work), scope("codex", t.TempDir()))
+
+	configLink := filepath.Join(t.TempDir(), "claude")
+	require.NoError(t, os.Symlink(config, configLink))
+	t.Setenv("CLAUDE_CONFIG_DIR", configLink)
+	assert.Equal(t, claude, scope("claude", work), "a link to the same config directory")
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	assert.NotEqual(t, claude, scope("claude", work))
+
+	pi := scope("pi", work)
+	s, err := New("pi", work, Config{PiSessionDir: t.TempDir()})
+	require.NoError(t, err)
+	assert.NotEqual(t, pi, s.Scope(), "Pi's --session-dir")
+}

@@ -29,6 +29,7 @@ import (
 	"github.com/coder/quartz"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 )
@@ -52,6 +53,10 @@ type Config struct {
 	// at it only to get around the browser's same-origin rule (DNS
 	// rebinding), which matters most with NoToken. Empty allows any.
 	AllowedHosts []string
+	// Bind and Port are where the hub listens (an empty Bind is every
+	// interface), which the URLs machines join it by name (GET /api/join).
+	Bind string
+	Port int
 	// StatePath keeps the instances across restarts; empty keeps none.
 	StatePath string
 	// ChatBasePath is where the hub serves the chat UI, by default /chat.
@@ -75,6 +80,8 @@ type Hub struct {
 	client     *http.Client
 	deliveries deliveries
 	clock      quartz.Clock
+	// interfaces lists the machine's network interfaces, for the join URLs.
+	interfaces func() ([]netInterface, error)
 
 	ctx      context.Context
 	watchMu  sync.Mutex
@@ -109,13 +116,13 @@ func New(config Config) (*Hub, error) {
 	if client == nil {
 		client = &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, ResponseHeaderTimeout: 15 * time.Second}}
 	}
-	st, err := newStore(config.StatePath)
+	st, err := newStore(config.StatePath, config.Logger, config.Clock)
 	if err != nil {
 		return nil, err
 	}
 	return &Hub{
 		config: config, logger: config.Logger, store: st, client: client, clock: config.Clock,
-		watchers: map[string]context.CancelFunc{},
+		interfaces: machineInterfaces, watchers: map[string]context.CancelFunc{},
 	}, nil
 }
 
@@ -172,7 +179,9 @@ func (h *Hub) routes(r chi.Router) {
 		r.Post("/api/instances", h.addInstance)
 		r.Patch("/api/instances/{id}", h.updateInstance)
 		r.Delete("/api/instances/{id}", h.removeInstance)
+		r.Put("/api/pins", h.setPins)
 		r.Get("/api/events", h.streamEvents)
+		r.Get("/api/join", h.getJoin)
 		r.Handle("/i/{id}", http.HandlerFunc(h.proxy))
 		r.Handle("/i/{id}/*", http.HandlerFunc(h.proxy))
 	})
@@ -288,17 +297,24 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// publicList is the instances without their tokens.
-func publicList(instances []Instance) []Instance {
+// instanceList is GET /api/instances, and the first event of the browser's
+// stream: the instances, without their tokens, and the hub's own version,
+// which the page tells the older instances by.
+type instanceList struct {
+	Instances  []Instance `json:"instances"`
+	HubVersion string     `json:"hub_version"`
+}
+
+func newInstanceList(instances []Instance) instanceList {
 	list := make([]Instance, len(instances))
 	for i, instance := range instances {
 		list[i] = instance.public()
 	}
-	return list
+	return instanceList{Instances: list, HubVersion: version.Version}
 }
 
 func (h *Hub) listInstances(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"instances": publicList(h.store.list())})
+	writeJSON(w, http.StatusOK, newInstanceList(h.store.list()))
 }
 
 // addInstance adds an instance by its URL (POST /api/instances): the hub
@@ -388,14 +404,16 @@ const maxGroupName = 40
 // updateInstance changes what the hub's page sets on an instance (PATCH
 // /api/instances/{id}): {"group": "..."} puts it in a group, "" in none;
 // {"muted": true} mutes what it waits for now, until that changes, and
-// {"muted": false} ends the mute.
+// {"muted": false} ends the mute; {"pinned": true} pins it below the
+// pinned ones, and {"pinned": false} unpins it.
 func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Group *string `json:"group"`
-		Muted *bool   `json:"muted"`
+		Group  *string `json:"group"`
+		Muted  *bool   `json:"muted"`
+		Pinned *bool   `json:"pinned"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil || (body.Group == nil && body.Muted == nil) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"group\": ...} or {\"muted\": ...}"})
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil || (body.Group == nil && body.Muted == nil && body.Pinned == nil) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"group\": ...}, {\"muted\": ...} or {\"pinned\": ...}"})
 		return
 	}
 	var group string
@@ -414,12 +432,20 @@ func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 				key = instanceapi.AttentionKey(i.Summary)
 				nothingToMute = key == ""
 			}
-			if !nothingToMute {
-				i.Muted = key
+			if nothingToMute {
+				return
 			}
+			i.Muted = key
 		}
-		if body.Group != nil && !nothingToMute {
+		if body.Group != nil {
 			i.Group = group
+		}
+		switch {
+		case body.Pinned == nil:
+		case !*body.Pinned:
+			i.Pin = 0
+		case i.Pin == 0:
+			i.Pin = pinLast
 		}
 	})
 	if err != nil {
@@ -434,6 +460,42 @@ func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, updated.public())
+}
+
+// setPins orders the instances pinned to the top of the hub's page (PUT
+// /api/pins): {"ids": [...]} lists each of them once, from the top. One
+// the hub doesn't have is 404; a list that isn't exactly the pinned ones
+// (one was pinned, unpinned or forgotten since) is 409, with the pinned
+// ones in their order.
+func (h *Hub) setPins(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil || body.IDs == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"ids\": [...]}: the pinned instances, from the top"})
+		return
+	}
+	listed := make(map[string]bool, len(body.IDs))
+	for _, id := range body.IDs {
+		if listed[id] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": id + " is listed twice"})
+			return
+		}
+		listed[id] = true
+	}
+	pins, err := h.store.setPins(body.IDs)
+	var unknown unknownInstanceError
+	switch {
+	case errors.As(err, &unknown):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	case errors.Is(err, errPinsDiffer):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "ids": pins})
+		return
+	case err != nil:
+		h.logger.Warn("Failed to keep the hub's instances", "error", err)
+	}
+	writeJSON(w, http.StatusOK, map[string][]string{"ids": pins})
 }
 
 func (h *Hub) removeInstance(w http.ResponseWriter, r *http.Request) {
@@ -453,8 +515,9 @@ func (h *Hub) removeInstance(w http.ResponseWriter, r *http.Request) {
 // hubHeartbeat is how often the browser's stream gets a heartbeat.
 const hubHeartbeat = 15 * time.Second
 
-// streamEvents sends the browser the instances (instances) and then each
-// change: instance, with the instance, or removed, with its ID.
+// streamEvents sends the browser the instances and the hub's version
+// (instances), and then each change: instance, with the instance, or
+// removed, with its ID.
 func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -477,7 +540,7 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return true
 	}
-	if !send("instances", map[string]any{"instances": publicList(instances)}) {
+	if !send("instances", newInstanceList(instances)) {
 		return
 	}
 	heartbeat := h.clock.NewTicker(hubHeartbeat, "hub", "browser heartbeat")

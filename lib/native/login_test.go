@@ -55,11 +55,7 @@ func TestLoginRequiredAtStartWaitsAndRetries(t *testing.T) {
 	assert.NotEmpty(t, got.Host)
 	assert.NotEmpty(t, got.User)
 	assert.Equal(t, conv.StatusInitializing, c.Status())
-	select {
-	case err := <-c.Exited():
-		t.Fatalf("a missing login is not an exit: %v", err)
-	default:
-	}
+	assert.Empty(t, rec.get().exits, "a missing login is not an exit")
 	// Messages wait in the caller's queue.
 	assert.ErrorIs(t, c.StartTurn(context.Background(), native.Input{Text: "hi"}), conv.ErrMessageValidationChanging)
 	errs := rec.get().errors

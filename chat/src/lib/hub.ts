@@ -4,7 +4,13 @@
 
 import type {components} from "./api-schema";
 
-export type Summary = components["schemas"]["SummaryBody"];
+// InstanceUpdate is the summary's update: whether the AgentAPI takes updates
+// through its API (POST /update) and how far one got; AgentAPIs that can't
+// update this way leave it out. Its state stays open, as a newer AgentAPI
+// may add states.
+export type InstanceUpdate = Omit<components["schemas"]["UpdateStatus"], "state"> & {state: string};
+
+export type Summary = Omit<components["schemas"]["SummaryBody"], "update"> & {update?: InstanceUpdate};
 export type HubConnection = "connecting" | "connected" | "unreachable" | "stopped";
 
 // InstanceState is what a row says of an instance, the most pressing
@@ -29,6 +35,10 @@ export interface HubInstance {
   workspace_url?: string;
   source: "webhook" | "manual";
   last_seen: string;
+  // changed_at is when the hub last saw it change what its row shows it
+  // does, or first saw it; none from a hub that doesn't record it, or for
+  // one it kept before it did, until its next change.
+  changed_at?: string;
   connection: HubConnection;
   error?: string;
   // group is the group someone put it in on the hub's page; none when empty.
@@ -36,6 +46,10 @@ export interface HubInstance {
   // muted is what it waited for when someone muted it; the hub ends the
   // mute once that changes.
   muted?: string;
+  // pin is its place among the instances pinned to the top of the list,
+  // from 1; none when it isn't pinned. The hub keeps them, numbered without
+  // gaps.
+  pin?: number;
   summary?: Summary | null;
   // state is as the hub sends it; instanceState reads it.
   state: string;
@@ -113,8 +127,10 @@ export function needsYou(instances: Iterable<HubInstance>): number {
   return count;
 }
 
+// The first event, instances, also has the hub's own version (hubVersion),
+// which the page compares the instances' with.
 export type HubEvent =
-  | {type: "instances"; instances: HubInstance[]}
+  | {type: "instances"; instances: HubInstance[]; hubVersion?: string}
   | {type: "instance"; instance: HubInstance}
   | {type: "removed"; id: string};
 
@@ -212,11 +228,12 @@ export function countFilters(instances: Iterable<HubInstance>): Record<HubFilter
 }
 
 // matchesSearch finds an instance by any word of its name, ID, group,
-// title, machine or agent.
+// title, machine, agent or version.
 export function matchesSearch(instance: HubInstance, query: string): boolean {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return true;
-  const haystack = [instance.name, instance.id, instance.group, instance.summary?.title, instance.hostname, instance.agent_type]
+  const version = instanceVersion(instance);
+  const haystack = [instance.name, instance.id, instance.group, instance.summary?.title, instance.hostname, instance.agent_type, version && `v${version}`]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -305,24 +322,53 @@ export function formatElapsed(since: string | undefined, now: number): string {
   return `${Math.floor(seconds / 3600)}h ${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}m`;
 }
 
+export type Spend = NonNullable<Summary["spend"]>;
+
+// currentSpend is what an instance the hub follows spent recently; none for
+// one it doesn't (stopped, unreachable, connecting), whose summary is the
+// last it had.
+export function currentSpend(instance: HubInstance): Spend | undefined {
+  return instance.connection === "connected" ? (instance.summary?.spend ?? undefined) : undefined;
+}
+
+// countedSpends are the spends that add up to what the instances spent:
+// AgentAPIs of one agent in one directory of a machine report the same
+// sessions, with one scope, which counts once, with its most recent figure.
+// An older AgentAPI reports no scope: it counts on its own.
+export function countedSpends(instances: Iterable<HubInstance>): {instance: HubInstance; spend: Spend}[] {
+  const scopes = new Map<string, {instance: HubInstance; spend: Spend}>();
+  for (const instance of instances) {
+    const spend = currentSpend(instance);
+    if (!spend) continue;
+    const key = spend.scope ? `scope ${spend.scope}` : `instance ${instance.id}`;
+    const counted = scopes.get(key);
+    if (!counted || updatedAt(spend) > updatedAt(counted.spend)) scopes.set(key, {instance, spend});
+  }
+  return [...scopes.values()];
+}
+
+// updatedAt is when a spend's amounts last changed; 0 when it doesn't say.
+function updatedAt(spend: Spend): number {
+  const at = Date.parse(spend.updated_at);
+  return Number.isNaN(at) ? 0 : at;
+}
+
 // What the instances spent recently, as their summaries report it: the
-// API-equivalent cost of their sessions, at list prices.
+// API-equivalent cost of their sessions, at list prices, each scope once.
 export interface SpendTotals {
   day: number;
   week: number;
-  // How many instances report a spend; the others (PTY, ACP, older
-  // AgentAPIs) don't count.
+  // How many connected instances report a spend; the others (PTY, older
+  // AgentAPIs, those the hub doesn't follow now) don't count.
   counted: number;
 }
 
 export function spendTotals(instances: Iterable<HubInstance>): SpendTotals {
-  const totals: SpendTotals = {day: 0, week: 0, counted: 0};
-  for (const instance of instances) {
-    const spend = instance.summary?.spend;
-    if (!spend) continue;
+  const all = [...instances];
+  const totals: SpendTotals = {day: 0, week: 0, counted: all.filter((instance) => currentSpend(instance)).length};
+  for (const {spend} of countedSpends(all)) {
     totals.day += spend.day_usd;
     totals.week += spend.week_usd;
-    totals.counted++;
   }
   return totals;
 }
@@ -336,7 +382,136 @@ export function formatUSD(usd: number): string {
   return `$${(usd / 1_000_000).toFixed(1)}M`;
 }
 
-// spendTitle says what a spend is, for a tooltip.
-export function spendTitle(day: number, week: number): string {
-  return `${formatUSD(day)} in the last 24 hours, ${formatUSD(week)} in the last 7 days (API-equivalent, at list prices; a subscription doesn't charge it)`;
+// spendTitle says what a spend is, for a tooltip; lastKnown, that it is an
+// instance's last, which doesn't count while the hub doesn't follow it.
+export function spendTitle(day: number, week: number, lastKnown = false): string {
+  const amounts = `${formatUSD(day)} in the last 24 hours, ${formatUSD(week)} in the last 7 days (API-equivalent, at list prices; a subscription doesn't charge it)`;
+  return lastKnown ? `Last known, not counted: ${amounts}` : amounts;
+}
+
+// The AgentAPI versions: the hub's own and each instance's, to tell the
+// instances that run an older release than the hub, whose machines need
+// an update.
+
+// parseVersion reads a release's version: major, minor and patch, with or
+// without a leading v. A development build (0.0.0-dev, or
+// 2.0.0-21-g61be34f from a commit after a release) and anything else read
+// as none, and compare with nothing.
+export function parseVersion(version: string | undefined): [number, number, number] | undefined {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version?.trim() ?? "");
+  if (!match) return undefined;
+  const parts: [number, number, number] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  return parts.some((part) => part > 0) ? parts : undefined;
+}
+
+// compareVersions is below 0 when release a is older than release b, above
+// 0 when it is newer and 0 when they are the same; undefined when either
+// isn't a release.
+export function compareVersions(a: string | undefined, b: string | undefined): number | undefined {
+  const x = parseVersion(a);
+  const y = parseVersion(b);
+  if (!x || !y) return undefined;
+  return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+}
+
+// currentSummary reports whether an instance's summary is of the run the
+// hub knows: one that restarted keeps its last summary until the new run's
+// first arrives, and the new run's event already named the new run.
+export function currentSummary(instance: HubInstance): boolean {
+  const reported = instance.summary?.instance;
+  return !instance.server_id || !reported?.server_id || reported.server_id === instance.server_id;
+}
+
+// instanceVersion is the AgentAPI version an instance runs, "" when it
+// doesn't say. Its summary's is the instance's own latest word, unless the
+// summary is of an earlier run, whose version the new run's event replaced.
+export function instanceVersion(instance: HubInstance): string {
+  return ((currentSummary(instance) && instance.summary?.instance?.agentapi_version) || instance.agentapi_version || "").trim();
+}
+
+// VersionRelation is how a version compares with the hub's: unknown when
+// either is a development build, or the instance doesn't say.
+export type VersionRelation = "older" | "same" | "newer" | "unknown";
+
+export function versionRelation(version: string | undefined, hubVersion: string | undefined): VersionRelation {
+  const order = compareVersions(version, hubVersion);
+  return order === undefined ? "unknown" : order < 0 ? "older" : order > 0 ? "newer" : "same";
+}
+
+// olderThanHub reports whether an instance the hub follows runs an older
+// release than the hub. One it doesn't follow now (stopped, unreachable,
+// connecting) shows the version it ran last, which says nothing of the one
+// it runs next.
+export function olderThanHub(instance: HubInstance, hubVersion: string | undefined): boolean {
+  return instance.connection === "connected" && versionRelation(instanceVersion(instance), hubVersion) === "older";
+}
+
+// versionTitle says what an instance's version is, for a tooltip;
+// lastKnown, that it is the one an instance the hub doesn't follow now ran
+// last.
+export function versionTitle(version: string, hubVersion: string | undefined, lastKnown = false): string {
+  const name = `AgentAPI v${version}`;
+  if (lastKnown) return `Last known: ${name}`;
+  switch (versionRelation(version, hubVersion)) {
+    case "older":
+      return `${name}, older than the hub (v${hubVersion})`;
+    case "newer":
+      return `${name}, newer than the hub (v${hubVersion})`;
+    case "same":
+      return `${name}, as the hub`;
+    case "unknown":
+      return parseVersion(version) ? name : `${name}, a development build`;
+  }
+}
+
+// A version the instances run, as the overview counts them.
+export interface VersionCount {
+  // version is as the instances say it; "" for those that don't.
+  version: string;
+  relation: VersionRelation;
+  instances: number;
+  // machines are the hosts that run it, by name.
+  machines: string[];
+}
+
+export interface VersionTotals {
+  // versions has the newest release first, then the development builds,
+  // then the instances that don't say.
+  versions: VersionCount[];
+  // older counts the instances that run an older release than the hub.
+  older: number;
+  // counted is how many instances count: those the hub follows now.
+  counted: number;
+}
+
+export function versionTotals(instances: Iterable<HubInstance>, hubVersion: string | undefined): VersionTotals {
+  const byVersion = new Map<string, {instances: number; machines: Set<string>}>();
+  let counted = 0;
+  for (const instance of instances) {
+    if (instance.connection !== "connected") continue;
+    counted++;
+    const version = instanceVersion(instance);
+    const entry = byVersion.get(version) ?? {instances: 0, machines: new Set<string>()};
+    entry.instances++;
+    if (instance.hostname) entry.machines.add(instance.hostname);
+    byVersion.set(version, entry);
+  }
+  const versions: VersionCount[] = [...byVersion].map(([version, entry]) => ({
+    version,
+    relation: versionRelation(version, hubVersion),
+    instances: entry.instances,
+    machines: [...entry.machines].sort((a, b) => a.localeCompare(b)),
+  }));
+  versions.sort((a, b) => newestFirst(a.version, b.version));
+  const older = versions.reduce((sum, count) => sum + (count.relation === "older" ? count.instances : 0), 0);
+  return {versions, older, counted};
+}
+
+// newestFirst orders versions: releases from the newest, then the others
+// by name, then none.
+function newestFirst(a: string, b: string): number {
+  const order = compareVersions(b, a);
+  if (order !== undefined) return order;
+  const release = Number(!!parseVersion(b)) - Number(!!parseVersion(a));
+  return release || Number(!a) - Number(!b) || a.localeCompare(b);
 }

@@ -74,12 +74,12 @@ func (s *Server) resetConversationLocked() {
 }
 
 // restartRefusedLocked returns why the agent can't be replaced now, or
-// nil: AgentAPI stops, or another replacement is under way. Caller holds
-// s.mu.
+// nil: AgentAPI stops (or restarts for an update), or another replacement
+// is under way. Caller holds s.mu.
 func (s *Server) restartRefusedLocked() error {
 	switch {
-	case s.stopping:
-		// Stop closed the agent: don't start another one.
+	case s.stopping, s.updating.Load():
+		// Stop closed the agent, or will: don't start another one.
 		return errStopping
 	case s.restarting.Load():
 		return errRestarting

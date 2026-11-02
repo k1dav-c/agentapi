@@ -103,13 +103,30 @@ type WebhookTerminalPrompt struct {
 	Prompt string `json:"prompt,omitempty"`
 }
 
-// maxOpenTools caps the tool calls the observer keeps until their result
-// comes: one whose result never comes (an interrupted turn) isn't kept for
-// good.
-const maxOpenTools = 64
+// webhookObserverEvents are the events the observer makes of the
+// conversation's; the dispatcher sends run.status_changed and the
+// instance.* events itself.
+var webhookObserverEvents = []string{
+	webhookEventTaskStarted, webhookEventTaskCompleted, webhookEventTaskFailed,
+	webhookEventRequestOpened, webhookEventRequestClosed,
+	webhookEventLoginRequired, webhookEventLoginCompleted,
+	webhookEventLimitStopped, webhookEventLimitCleared,
+	webhookEventAgentError,
+	webhookEventMessageCreated, webhookEventToolCompleted,
+}
+
+const (
+	// maxOpenTools caps the tool calls the observer keeps until their
+	// result comes: one whose result never comes (an interrupted turn)
+	// isn't kept for good.
+	maxOpenTools = 64
+	// maxToolMessages caps the rich messages whose returned calls the
+	// observer remembers: only the latest still grow.
+	maxToolMessages = 64
+)
 
 // startWebhook describes this AgentAPI to the webhook and starts sending
-// events: the instance's, and while the webhook has a URL the
+// events: the instance's, and while the webhook sends any of them the
 // conversation's, as the observer turns them into webhook events.
 func (s *Server) startWebhook(config ServerConfig) {
 	hostname, _ := os.Hostname()
@@ -157,9 +174,10 @@ func (s *Server) webhookInstanceState() WebhookInstanceState {
 	}
 }
 
-// webhookObserving runs an observer while the webhook has a URL: without
-// one nobody hears of the conversation, and an observer would only keep
-// track of it.
+// webhookObserving runs an observer while the webhook sends events it
+// makes (webhookObserverEvents): otherwise nobody hears of the
+// conversation, and an observer would only keep track of it. A hub's
+// webhook sends instance.* alone.
 type webhookObserving struct {
 	ctx     context.Context
 	webhook *webhookDispatcher
@@ -171,11 +189,12 @@ type webhookObserving struct {
 	stop func()
 }
 
-// sync starts or stops the observer after the webhook's URL changed.
+// sync starts or stops the observer after the webhook's configuration
+// changed: its URL or its events.
 func (w *webhookObserving) sync() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	wanted := w.webhook.configSnapshot().URL != ""
+	wanted := slices.ContainsFunc(webhookObserverEvents, w.webhook.wants)
 	switch {
 	case wanted && w.stop == nil:
 		ctx, cancel := context.WithCancel(w.ctx)
@@ -232,7 +251,11 @@ type webhookObserver struct {
 
 	// since: messages and tool calls from before it are history (a
 	// restored or resumed conversation), not news.
-	since  time.Time
+	since time.Time
+	// epoch and seq are how far through the emitter's changes the observer
+	// read: a subscription taken up again starts from there.
+	epoch  string
+	seq    uint64
 	status StatusChangeBody
 	// agent is the agent's latest message, sent as message.created once
 	// it is final: when another follows or the turn ends.
@@ -243,9 +266,13 @@ type webhookObserver struct {
 	// as they came (and some that returned, until it is compacted).
 	tools     map[string]WebhookToolCall
 	toolOrder []string
-	// toolDone are the calls that returned: a rich message comes again,
-	// whole, as it grows, and tool IDs have no order to keep a mark by.
-	toolDone map[string]bool
+	// toolDone are the calls that returned, and toolMessages the rich
+	// messages that hold their results, the latest last, with those calls:
+	// a rich message comes again, whole, as it grows, and tool IDs have no
+	// order to keep a mark by. Only the latest maxToolMessages are kept;
+	// an older message doesn't grow, and a replay holds only what changed.
+	toolDone     map[string]bool
+	toolMessages []toolMessage
 	// openRequests are the requests seen pending, until they close.
 	openRequests map[string]bool
 	// prompts counts the terminal dialogs, for their IDs.
@@ -258,6 +285,13 @@ type webhookObserver struct {
 	// replies are the texts of the agent's messages, for the replies of
 	// the tasks under way.
 	replies map[int]string
+}
+
+// toolMessage is a rich message that holds results of tool calls, and the
+// calls whose result it brought.
+type toolMessage struct {
+	key   richKey
+	calls []string
 }
 
 type messageKey struct {
@@ -301,22 +335,14 @@ func webhookObservedEvents(t EventType) bool {
 }
 
 // run reads the conversation's events until ctx ends. The state at the
-// start is history; a subscription the emitter ended (its buffer filled, or
-// the conversation was rebuilt) is taken up again, and what changed
-// meanwhile is sent then: the replay holds what was sent already too,
-// which the handlers recognize.
+// start is history. A subscription the emitter ended (its buffer filled, or
+// the conversation was rebuilt) is taken up again from where the observer
+// got, and what changed meanwhile is sent then.
 func (o *webhookObserver) run(ctx context.Context) {
 	first := true
 	for ctx.Err() == nil {
-		id, events, replay := o.emitter.SubscribeTo(webhookObservedEvents, 0, "")
-		for _, event := range replay {
-			if _, ok := event.Payload.(SessionSyncBody); ok {
-				// A replay begins with one; only a reset sends one
-				// later.
-				continue
-			}
-			o.handle(event, first)
-		}
+		id, events, replay := o.subscribe()
+		o.replay(replay, first)
 		first = false
 	read:
 		for {
@@ -328,10 +354,45 @@ func (o *webhookObserver) run(ctx context.Context) {
 				if !ok {
 					break read
 				}
-				o.handle(event, false)
+				o.take(event)
 			}
 		}
 	}
+}
+
+// subscribe subscribes to the emitter from where the observer got: the
+// replay holds the changes since, unless the conversation got a new epoch.
+func (o *webhookObserver) subscribe() (int, <-chan Event, []Event) {
+	return o.emitter.SubscribeTo(webhookObservedEvents, o.seq, o.epoch)
+}
+
+// replay takes the events a subscription begins with; quiet takes in the
+// state without sending anything. After a new epoch (a message was taken
+// back) the replay holds the whole conversation, whose changes up to the
+// seq the observer got to it read already.
+func (o *webhookObserver) replay(events []Event, quiet bool) {
+	last := o.seq
+	for _, event := range events {
+		if sync, ok := event.Payload.(SessionSyncBody); ok {
+			// A replay begins with one; only a reset sends one later.
+			o.epoch = sync.Epoch
+			o.seq = max(o.seq, sync.Seq)
+			continue
+		}
+		if seq := eventSeq(event); seq != 0 && seq <= last {
+			continue
+		}
+		o.handle(event, quiet)
+	}
+}
+
+// take takes an event that came after the replay.
+func (o *webhookObserver) take(event Event) {
+	if sync, ok := event.Payload.(SessionSyncBody); ok {
+		o.epoch = sync.Epoch
+	}
+	o.seq = max(o.seq, eventSeq(event))
+	o.handle(event, false)
 }
 
 // handle takes one event; quiet takes in the state without sending
@@ -363,6 +424,7 @@ func (o *webhookObserver) newConversation() {
 	clear(o.tools)
 	o.toolOrder = nil
 	clear(o.toolDone)
+	o.toolMessages = nil
 	clear(o.openRequests)
 	clear(o.replies)
 }
@@ -504,15 +566,19 @@ func (o *webhookObserver) webhookTask(task Task) WebhookTask {
 
 func (o *webhookObserver) richMessageUpdated(msg RichMessageUpdateBody, quiet bool) {
 	history := quiet || msg.Timestamp.Before(o.since)
+	results := false
+	var returned []string
 	for _, block := range msg.Content {
 		switch block.Type {
 		case "tool_use":
 			o.toolStarted(block)
 		case "tool_result":
+			results = true
 			if o.toolDone[block.ToolUseID] || toolRunning(block.Status) {
 				continue
 			}
 			o.toolDone[block.ToolUseID] = true
+			returned = append(returned, block.ToolUseID)
 			call := o.tools[block.ToolUseID]
 			delete(o.tools, block.ToolUseID)
 			if history {
@@ -529,6 +595,28 @@ func (o *webhookObserver) richMessageUpdated(msg RichMessageUpdateBody, quiet bo
 			call.Truncated = inputCut || len(block.Text) > webhookToolLimit
 			o.webhook.emit(webhookEventToolCompleted, call)
 		}
+	}
+	if results {
+		o.keepToolMessage(richKey{msg.MessageID, msg.Role}, returned)
+	}
+}
+
+// keepToolMessage takes the rich message key, which holds results, as the
+// latest, with the calls whose result it brought now. The earliest beyond
+// maxToolMessages is forgotten, with its calls.
+func (o *webhookObserver) keepToolMessage(key richKey, returned []string) {
+	m := toolMessage{key: key}
+	if i := slices.IndexFunc(o.toolMessages, func(m toolMessage) bool { return m.key == key }); i >= 0 {
+		m = o.toolMessages[i]
+		o.toolMessages = slices.Delete(o.toolMessages, i, i+1)
+	}
+	m.calls = append(m.calls, returned...)
+	o.toolMessages = append(o.toolMessages, m)
+	if len(o.toolMessages) > maxToolMessages {
+		for _, id := range o.toolMessages[0].calls {
+			delete(o.toolDone, id)
+		}
+		o.toolMessages = slices.Delete(o.toolMessages, 0, 1)
 	}
 }
 

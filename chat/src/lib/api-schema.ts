@@ -910,6 +910,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update AgentAPI
+         * @description Installs the latest official release of AgentAPI (k1dav-c/agentapi on GitHub) for this machine's OS and architecture, checked against the release's checksums.txt, in place of the program AgentAPI runs, and restarts AgentAPI in place into it: the same process, a new server_id and version. The request can't choose a version or a URL. AgentAPIs that share the program replace it under a lock file next to it, and one that finds the program on disk newer than the one it runs only restarts. `when` is `idle` (the default: once the agent is stable, with no request or terminal dialog open) or `now`. Returns 200 with `up_to_date` when AgentAPI runs the latest release already, else 202 with the state and the version it updates to; while an update is under way it returns its state, and `now` has it restart without waiting. 403 unless AgentAPI runs with --allow-update; 409 when it can't replace its program (the message and the summary's update.blocked say why and how to fix it) or stops; 502 when the latest release can't be looked up. Every change of the state sends summary_update. With --state-db the conversation and the agent's session carry over the restart; without it the conversation starts anew.
+         */
+        post: operations["post-update"];
+        /**
+         * Cancel an update
+         * @description Cancels the update under way while it hasn't begun to restart AgentAPI (it looks up the release, downloads it or waits for the agent to be idle), and forgets a failed one. A program it installed already stays. 409 once AgentAPI restarts; 403 unless it runs with --allow-update.
+         */
+        delete: operations["delete-update"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/upload": {
         parameters: {
             query?: never;
@@ -2322,7 +2346,7 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
-            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. */
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once. */
             spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];
@@ -2339,6 +2363,8 @@ export interface components {
             title: string;
             /** @description The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet. */
             unread: boolean;
+            /** @description Whether a client can update this AgentAPI to the latest release through its API (POST /update), and how far an update is. Missing from AgentAPIs that can't update through their API: earlier releases. */
+            update?: components["schemas"]["UpdateStatus"];
             /** @description The context window and the account's usage limits, as in GET /status. */
             usage?: components["schemas"]["AgentUsage"];
         };
@@ -2361,6 +2387,13 @@ export interface components {
              * @description API-equivalent cost in USD of the agent's sessions in this directory, subagents included, over the last 24 hours (the hours that end within them): the tokens at the model providers' list prices, which a subscription doesn't charge.
              */
             day_usd: number;
+            /** @description Identifies the sessions the amounts add up: those of one agent in one directory, as the session logs of one machine hold them (a hash of the machine's host name and ID, the agent, the directory's real path and where the agent keeps its logs). AgentAPIs that report the same scope report the same sessions; a client that adds up many counts each scope once. */
+            scope: string;
+            /**
+             * Format: date-time
+             * @description When the amounts last changed: of AgentAPIs with one scope, the latest is the most recent.
+             */
+            updated_at: string;
             /**
              * Format: double
              * @description The same over the last 7 days.
@@ -2399,7 +2432,7 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
-            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. */
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once. */
             spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];
@@ -2416,6 +2449,8 @@ export interface components {
             title: string;
             /** @description The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet. */
             unread: boolean;
+            /** @description Whether a client can update this AgentAPI to the latest release through its API (POST /update), and how far an update is. Missing from AgentAPIs that can't update through their API: earlier releases. */
+            update?: components["schemas"]["UpdateStatus"];
             /** @description The context window and the account's usage limits, as in GET /status. */
             usage?: components["schemas"]["AgentUsage"];
         };
@@ -2608,6 +2643,53 @@ export interface components {
             readonly $schema?: string;
             /** @description Updated message content. */
             content: string;
+        };
+        UpdateRequestBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/UpdateRequestBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * @description When AgentAPI restarts into the new version. idle (the default): once the agent is idle, that is stable with no request (approval, question, plan) or terminal dialog open; queued messages stay queued and go out after the restart. now: at once, interrupting the agent.
+             * @enum {string}
+             */
+            when?: "idle" | "now";
+        };
+        UpdateResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/UpdateResponseBody.json
+             */
+            readonly $schema?: string;
+            /** @description Where the update is, as the summary's update.state. */
+            state: components["schemas"]["UpdateState"];
+            /** @description The version it updates to, once known. */
+            target?: string;
+            /** @description AgentAPI runs the latest release (or a newer version) already, and the program on disk is no newer: there is nothing to update. */
+            up_to_date?: boolean;
+        };
+        /**
+         * UpdateState
+         * @example idle
+         * @enum {string}
+         */
+        UpdateState: "checking" | "downloading" | "failed" | "idle" | "restarting" | "waiting";
+        UpdateStatus: {
+            /** @description Updates through the API are on: --allow-update, AGENTAPI_ALLOW_UPDATE, or allow-update: true in ~/.agentapi/config.yaml. Off by default. */
+            allowed: boolean;
+            /** @description Set when updates are on but this AgentAPI can't replace its program: why, and the command to run once to fix it (the program's directory must be writable by the user AgentAPI runs as). */
+            blocked?: string;
+            /** @description Why the last update failed (state failed). */
+            error?: string;
+            /** @description It runs with --state-db, so the conversation and the agent's session carry over the restart; without it the conversation starts anew. */
+            keeps_conversation: boolean;
+            /** @description idle, checking (looks up the latest release), downloading, waiting (for the agent to be idle), restarting (into the new version) or failed. */
+            state: components["schemas"]["UpdateState"];
+            /** @description The version it updates to, once known. */
+            target?: string;
         };
         UploadResponseBody: {
             /**
@@ -5200,6 +5282,131 @@ export interface operations {
             };
             /** @description Error */
             default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "post-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["UpdateRequestBody"];
+            };
+        };
+        responses: {
+            /** @description AgentAPI runs the latest release already. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateResponseBody"];
+                };
+            };
+            /** @description The update is under way. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateResponseBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateResponseBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

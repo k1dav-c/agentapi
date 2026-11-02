@@ -33,6 +33,7 @@ func (b ptyBackend) readyForQueued() bool {
 }
 
 func (b ptyBackend) sendQueued(content string) error {
+	b.s.emitter.SendingMessage()
 	return b.s.conversation.Send(FormatMessage(b.s.agentType, content)...)
 }
 
@@ -113,6 +114,7 @@ func (b ptyBackend) deliver(content string, _ DispatchMode, resp *MessageRespons
 		s.queueMessageLocked(resp, content, false)
 		return nil
 	}
+	s.emitter.SendingMessage()
 	if err := s.conversation.Send(FormatMessage(s.agentType, content)...); err != nil {
 		if errors.Is(err, conv.ErrMessageValidationChanging) {
 			s.queueMessageLocked(resp, content, false)

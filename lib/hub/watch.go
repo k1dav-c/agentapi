@@ -182,9 +182,10 @@ func (h *Hub) applySummary(ctx context.Context, id, url string, summary instance
 		i.Error = ""
 		i.answeredBy = ""
 		i.LastSeen = now
-		// Who it is, as it says: another run of it after a restart, which
-		// its next heartbeat would introduce. The hub keeps where it
-		// reaches it.
+		// Who it is, as it says: after a restart in place, another run
+		// with its own server ID and version, also before its events say
+		// so (an instance added by hand sends none). The hub keeps where
+		// it reaches it.
 		id := i.ID
 		i.WebhookInstance = summary.Instance
 		i.ID, i.URL = id, url

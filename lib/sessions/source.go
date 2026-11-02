@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/agentapi/lib/agenthome"
 	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/agentlog/claudelog"
 	"github.com/coder/agentapi/lib/agentlog/codexlog"
@@ -42,6 +43,9 @@ type source struct {
 	// agentlog.ScanFile. It differs for a log that refers to another one's
 	// lines (a Codex fork).
 	scan func(path string, fn func(line []byte) bool) bool
+	// roots are where the agent keeps the logs: Claude Code's config
+	// directory, Codex's home, Pi's sessions directories.
+	roots func(s *Store) []string
 }
 
 func sourceFor(agentType string) (source, bool) {
@@ -55,6 +59,7 @@ func sourceFor(agentType string) (source, bool) {
 			linesRecordCWD: true,
 			header:         claudeHeader,
 			prompt:         claudelog.Prompt,
+			roots:          func(*Store) []string { return home(agenthome.ClaudeConfigDir()) },
 		}, true
 	case "codex":
 		return source{
@@ -64,6 +69,7 @@ func sourceFor(agentType string) (source, bool) {
 			header: codexlog.Header,
 			prompt: codexlog.Prompt,
 			scan:   codexlog.ScanLog,
+			roots:  func(*Store) []string { return home(agenthome.CodexHome()) },
 		}, true
 	case "pi":
 		return source{
@@ -73,9 +79,18 @@ func sourceFor(agentType string) (source, bool) {
 			byID:       piLogsByID,
 			header:     pilog.Header,
 			prompt:     pilog.Prompt,
+			roots:      piRoots,
 		}, true
 	}
 	return source{}, false
+}
+
+// home is the directory an agenthome function returns, if it finds one.
+func home(dir string, err error) []string {
+	if err != nil {
+		return nil
+	}
+	return []string{dir}
 }
 
 // lines calls fn with the lines of the session log at path.
@@ -88,21 +103,28 @@ func (src source) lines(path string, fn func(line []byte) bool) bool {
 
 // logsIn lists the .jsonl files of dir.
 func logsIn(dir string) ([]string, error) {
+	files, _, err := entriesIn(dir)
+	return files, err
+}
+
+// entriesIn lists the .jsonl files of dir, and the directories in it.
+func entriesIn(dir string) (files, dirs []string, err error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var files []string
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
-			continue
+		switch {
+		case entry.IsDir():
+			dirs = append(dirs, filepath.Join(dir, entry.Name()))
+		case filepath.Ext(entry.Name()) == ".jsonl":
+			files = append(files, filepath.Join(dir, entry.Name()))
 		}
-		files = append(files, filepath.Join(dir, entry.Name()))
 	}
-	return files, nil
+	return files, dirs, nil
 }
 
 // --- Claude Code ---
@@ -131,19 +153,25 @@ func claudeProjectDirs(s *Store) ([]string, error) {
 }
 
 func claudeFiles(s *Store) ([]string, error) {
-	dirs, err := claudeProjectDirs(s)
+	files, _, err := claudeLogs(s)
+	return files, err
+}
+
+// claudeLogs lists the logs in the directory's project directories, and
+// the directories there: a session's subagents are in one named after it.
+func claudeLogs(s *Store) (files, dirs []string, err error) {
+	projects, err := claudeProjectDirs(s)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var files []string
-	for i, dir := range dirs {
-		logs, err := logsIn(dir)
+	for i, project := range projects {
+		logs, subdirs, err := entriesIn(project)
 		if err != nil && i == 0 {
-			return nil, err
+			return nil, nil, err
 		}
-		files = append(files, logs...)
+		files, dirs = append(files, logs...), append(dirs, subdirs...)
 	}
-	return files, nil
+	return files, dirs, nil
 }
 
 // claudeLogsByID lists the logs named after session id: in the
@@ -164,6 +192,21 @@ func claudeLogsByID(s *Store, id string) (own, elsewhere []string) {
 		}
 	}
 	return own, elsewhere
+}
+
+// claudeSubagentLogs lists the logs of the subagents of the session id
+// whose log is at path: <session>/subagents/agent-<id>.jsonl next to it.
+func claudeSubagentLogs(id, path string) []Subagent {
+	if id == "" || strings.ContainsAny(id, `/\`) || id == "." || id == ".." {
+		return nil
+	}
+	logs, _ := logsIn(filepath.Join(filepath.Dir(path), id, "subagents"))
+	subs := make([]Subagent, 0, len(logs))
+	for _, log := range logs {
+		name := strings.TrimSuffix(filepath.Base(log), ".jsonl")
+		subs = append(subs, Subagent{ID: strings.TrimPrefix(name, "agent-"), path: log, kind: "claude"})
+	}
+	return subs
 }
 
 // --- Codex ---
@@ -207,13 +250,19 @@ func codexFiles(s *Store) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return codexSessionLogs(s, threads), nil
+}
+
+// codexSessionLogs are the logs of threads that are sessions in the
+// directory.
+func codexSessionLogs(s *Store, threads []codexThread) []string {
 	var files []string
 	for _, t := range threads {
 		if !t.meta.IsSubAgent() && s.dir.Is(t.meta.Payload.CWD) {
 			files = append(files, t.path)
 		}
 	}
-	return files, nil
+	return files
 }
 
 // codexLogsByID lists the log of thread id: Codex names it after it.
@@ -245,6 +294,17 @@ func piFiles(s *Store) ([]string, error) {
 		files = append(files, logs...)
 	}
 	return files, nil
+}
+
+// piRoots are the directories Pi keeps the directory's sessions in.
+func piRoots(s *Store) []string {
+	var dirs []string
+	for _, path := range s.dir.Paths() {
+		if dir, err := pilog.SessionsDir(path, s.config.PiSessionDir); err == nil && !slices.Contains(dirs, dir) {
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
 }
 
 // piLogsByID lists the logs of session id: Pi names a session's log

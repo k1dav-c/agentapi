@@ -78,6 +78,17 @@ func (o *nativeObserver) SettingsChosen(settings native.Settings) {
 	}
 }
 
+// AgentExited: the agent restarts while the conversation starts it again,
+// and has failed once it gave up. The server goes on serving either way; a
+// restart (DELETE /messages) starts the agent again.
+func (o *nativeObserver) AgentExited(exit native.AgentExit) {
+	if exit.Attempt > 0 {
+		o.emitter.SetLifecycle(LifecycleRestarting)
+		return
+	}
+	o.emitter.SetLifecycle(LifecycleFailed)
+}
+
 // requireNative returns an error for transports other than native.
 func (s *Server) requireNative() error {
 	if s.native == nil {
@@ -135,6 +146,7 @@ func (s *Server) createNativeMessageLocked(content string, mode DispatchMode, re
 		s.queueMessageLocked(resp, content, false)
 		return nil
 	}
+	s.emitter.SendingMessage()
 	if err := s.native.StartTurn(ctx, input); err != nil {
 		switch {
 		case errors.Is(err, conv.ErrMessageValidationChanging):

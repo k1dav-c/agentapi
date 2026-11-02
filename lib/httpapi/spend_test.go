@@ -39,3 +39,38 @@ func TestSummarySpend(t *testing.T) {
 	spend.DayUSD = 99
 	assert.Equal(t, 1.5, e.Summary().Spend.DayUSD, "a copy")
 }
+
+// Two AgentAPIs of one agent in one directory add up the same sessions:
+// one scope. Another agent or directory has another.
+func TestSpendScope(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
+	work := t.TempDir()
+	scope := func(agentType, cwd string) string {
+		store, err := sessions.New(agentType, cwd, sessions.Config{})
+		require.NoError(t, err)
+		return spendScope(store)
+	}
+	claude := scope("claude", work)
+	assert.Regexp(t, `^[0-9a-f]{16}$`, claude)
+	assert.Equal(t, claude, scope("claude", work))
+	assert.NotEqual(t, claude, scope("codex", work))
+	assert.NotEqual(t, claude, scope("claude", t.TempDir()))
+}
+
+// The spend says when its amounts last changed: worked out again to the
+// same amounts, it is the same, and the summary doesn't change.
+func TestNextSpend(t *testing.T) {
+	at := time.Date(2026, 10, 27, 12, 0, 0, 500, time.UTC)
+	first := nextSpend(SummarySpend{}, SummarySpend{DayUSD: 1, WeekUSD: 2}, "s1", at)
+	assert.Equal(t, SummarySpend{DayUSD: 1, WeekUSD: 2, Scope: "s1", UpdatedAt: at.Truncate(time.Second)}, first)
+	same := nextSpend(first, SummarySpend{DayUSD: 1, WeekUSD: 2}, "s1", at.Add(time.Minute))
+	assert.Equal(t, first, same)
+	more := nextSpend(same, SummarySpend{DayUSD: 1.5, WeekUSD: 2}, "s1", at.Add(2*time.Minute))
+	assert.Equal(t, at.Add(2*time.Minute).Truncate(time.Second), more.UpdatedAt)
+
+	e := NewEventEmitter()
+	e.SetSpend(first)
+	e.SetSpend(same)
+	assert.Equal(t, first, *e.Summary().Spend)
+}

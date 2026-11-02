@@ -2,7 +2,9 @@ package logctx
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strings"
 )
 
 type contextKey int
@@ -22,6 +24,25 @@ func From(ctx context.Context) *slog.Logger {
 		return logger
 	}
 	panic("no logger found in context")
+}
+
+// LevelNames are the levels ParseLevel takes, for flag help and errors.
+const LevelNames = "debug, info, warn, error"
+
+// ParseLevel returns the level a --log-level names: debug, info, warn or
+// error, in any case. Empty is info.
+func ParseLevel(name string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "info", "":
+		return slog.LevelInfo, nil
+	case "warn":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	}
+	return 0, fmt.Errorf("unknown log level %q (one of: %s)", name, LevelNames)
 }
 
 // plucked from log/slog

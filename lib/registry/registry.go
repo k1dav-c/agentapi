@@ -24,6 +24,9 @@ type Entry struct {
 	instanceapi.WebhookInstance
 	AuthRequired bool      `json:"auth_required"`
 	StartedAt    time.Time `json:"started_at"`
+	// RestartsInPlace: the server restarts in place on SIGUSR2 (agentapi
+	// restart); earlier releases ignore the signal.
+	RestartsInPlace bool `json:"restarts_in_place,omitempty"`
 }
 
 // DefaultDir is the directory entries go to unless told otherwise:
@@ -33,7 +36,12 @@ func DefaultDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("find the home directory: %w", err)
 	}
-	return filepath.Join(home, ".agentapi", "instances"), nil
+	return DirIn(home), nil
+}
+
+// DirIn is the default directory of the user whose home directory is home.
+func DirIn(home string) string {
+	return filepath.Join(home, ".agentapi", "instances")
 }
 
 // fileName is the file of the AgentAPI run serverID.

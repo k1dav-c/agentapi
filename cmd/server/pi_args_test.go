@@ -49,9 +49,9 @@ func TestPiSessionOptions(t *testing.T) {
 func TestServerConfigPiSessionDir(t *testing.T) {
 	agent := &runningAgent{}
 	opts := serverOptions{agentType: AgentTypePi, transport: httpapi.TransportNative, agentArgs: []string{"--model", "x", "--session-dir=/data/pi"}}
-	assert.Equal(t, "/data/pi", serverConfig(opts, agent, nil, "", "/work", nil).Native.PiSessionDir, "where history and costs read Pi's sessions")
+	assert.Equal(t, "/data/pi", serverConfig(opts, agent, nil, "", "/work", nil, nil).Native.PiSessionDir, "where history and costs read Pi's sessions")
 	opts.agentArgs = []string{"--session-dir", "/data/pi"}
-	assert.Equal(t, "/data/pi", serverConfig(opts, agent, nil, "", "/work", nil).Native.PiSessionDir)
+	assert.Equal(t, "/data/pi", serverConfig(opts, agent, nil, "", "/work", nil, nil).Native.PiSessionDir)
 	opts.agentType, opts.agentArgs = AgentTypeClaude, []string{"--session-dir", "/data/pi"}
-	assert.Empty(t, serverConfig(opts, agent, nil, "", "/work", nil).Native.PiSessionDir)
+	assert.Empty(t, serverConfig(opts, agent, nil, "", "/work", nil, nil).Native.PiSessionDir)
 }

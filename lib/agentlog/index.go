@@ -34,8 +34,9 @@ type LogReader interface {
 // time can't tell: it is coarse, and most appends keep it.
 //
 // The index keeps at most maxFiles files, and readers of about maxBytes:
-// past either, it forgets the files read longest ago. It forgets a file
-// that is gone when it reads it, and the files Retain doesn't keep.
+// past either, it forgets the files read longest ago, but not those a pass
+// read (Pass). It forgets a file that is gone when it reads it, and the
+// files a pass didn't read once it ends.
 type Index[R LogReader] struct {
 	newReader func(path string) R
 	maxFiles  int
@@ -45,6 +46,10 @@ type Index[R LogReader] struct {
 	files map[string]*indexed[R]
 	bytes int
 	clock uint64
+	// passes counts the passes started; loose counts the files no pass
+	// read, which the bounds may forget.
+	passes uint64
+	loose  int
 }
 
 // indexed is what an Index keeps of one file.
@@ -61,10 +66,12 @@ type indexed[R LogReader] struct {
 	offset int64
 	tail   []byte
 
-	// size is the reader's Size and used when the file was last read,
-	// both guarded by the index's mu.
+	// size is the reader's Size, used when the file was last read and
+	// pass the latest pass that read it (0 for none), all guarded by the
+	// index's mu.
 	size int
 	used uint64
+	pass uint64
 }
 
 // tailLength is how many bytes before the offset are compared to notice
@@ -87,7 +94,50 @@ func NewIndex[R LogReader](newReader func(path string) R, maxFiles, maxBytes int
 // Read uses the reader. It returns the error of a file that can't be read,
 // which it forgets.
 func (x *Index[R]) Read(path string, fn func(R, FileInfo)) error {
-	e := x.entry(path)
+	return x.read(path, 0, fn)
+}
+
+// Pass is a reading of a set of files that is done again and again: every
+// log of a directory, each time what they spent is asked for. The files a
+// pass reads stay past the index's bounds until a later pass ends without
+// reading them. The bounds would forget the files read longest ago, and a
+// pass reads its files in the same order every time: past them, every pass
+// would forget the very file it reads next, and read every file from its
+// start.
+type Pass[R LogReader] struct {
+	x *Index[R]
+	n uint64
+}
+
+// Pass starts a pass over the index's files.
+func (x *Index[R]) Pass() *Pass[R] {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.passes++
+	return &Pass[R]{x: x, n: x.passes}
+}
+
+// Read is Index.Read, as part of the pass.
+func (p *Pass[R]) Read(path string, fn func(R, FileInfo)) error {
+	return p.x.read(path, p.n, fn)
+}
+
+// End ends the pass: the index forgets the files that neither it nor a
+// pass started since read, which are gone.
+func (p *Pass[R]) End() {
+	x := p.x
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	for path, e := range x.files {
+		if e.pass < p.n {
+			x.forget(path, e)
+		}
+	}
+}
+
+// read is Read, as part of the pass numbered pass if it isn't 0.
+func (x *Index[R]) read(path string, pass uint64, fn func(R, FileInfo)) error {
+	e := x.entry(path, pass)
 	e.mu.Lock()
 	err := e.update(path, x.newReader)
 	size := 0
@@ -102,18 +152,6 @@ func (x *Index[R]) Read(path string, fn func(R, FileInfo)) error {
 	return err
 }
 
-// Retain forgets the files keep doesn't want.
-func (x *Index[R]) Retain(keep func(path string) bool) {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	for path, e := range x.files {
-		if !keep(path) {
-			delete(x.files, path)
-			x.bytes -= e.size
-		}
-	}
-}
-
 // Len is how many files the index keeps.
 func (x *Index[R]) Len() int {
 	x.mu.Lock()
@@ -121,22 +159,40 @@ func (x *Index[R]) Len() int {
 	return len(x.files)
 }
 
-// entry returns what the index keeps of path, new if it keeps nothing.
-func (x *Index[R]) entry(path string) *indexed[R] {
+// entry returns what the index keeps of path, new if it keeps nothing,
+// read by the pass numbered pass if it isn't 0.
+func (x *Index[R]) entry(path string, pass uint64) *indexed[R] {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	e, ok := x.files[path]
 	if !ok {
 		e = &indexed[R]{}
 		x.files[path] = e
+		x.loose++
 	}
 	x.clock++
 	e.used = x.clock
+	if pass > e.pass {
+		if e.pass == 0 {
+			x.loose--
+		}
+		e.pass = pass
+	}
 	return e
 }
 
+// forget forgets path, whose entry is e. Caller holds x.mu.
+func (x *Index[R]) forget(path string, e *indexed[R]) {
+	delete(x.files, path)
+	x.bytes -= e.size
+	if e.pass == 0 {
+		x.loose--
+	}
+}
+
 // settle accounts for what reading e took, or forgets e when it failed,
-// and forgets the files read longest ago while the index holds too much.
+// and forgets the files read longest ago while the index holds too much,
+// of those no pass read.
 func (x *Index[R]) settle(path string, e *indexed[R], size int, err error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
@@ -145,24 +201,23 @@ func (x *Index[R]) settle(path string, e *indexed[R], size int, err error) {
 		return
 	}
 	if err != nil {
-		delete(x.files, path)
-		x.bytes -= e.size
+		x.forget(path, e)
 		return
 	}
 	x.bytes += size - e.size
 	e.size = size
-	for len(x.files) > 1 && (len(x.files) > x.maxFiles || x.bytes > x.maxBytes) {
-		oldest, oldestPath := e, path
+	for x.loose > 0 && len(x.files) > 1 && (len(x.files) > x.maxFiles || x.bytes > x.maxBytes) {
+		var oldest *indexed[R]
+		var oldestPath string
 		for p, o := range x.files {
-			if o.used < oldest.used {
+			if o != e && o.pass == 0 && (oldest == nil || o.used < oldest.used) {
 				oldest, oldestPath = o, p
 			}
 		}
-		if oldest == e {
+		if oldest == nil {
 			return
 		}
-		delete(x.files, oldestPath)
-		x.bytes -= oldest.size
+		x.forget(oldestPath, oldest)
 	}
 }
 

@@ -3,9 +3,11 @@ package agentlog_test
 import (
 	"bytes"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/agentlog/claudelog"
@@ -53,4 +55,46 @@ func TestDriftIsReportedOncePerLog(t *testing.T) {
 	d.Line([]byte(`{"type":"x-third"}`))
 	assert.False(t, d.Report(logger, "/logs/s1.jsonl"), "once per log")
 	assert.Empty(t, out.String())
+}
+
+// Each kind of drift is reported once per log: the records, and each way
+// the record of a model call reads wrong.
+func TestDriftReportsEachKindOnce(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&out, nil))
+	d := agentlog.NewDrift(claudelog.Format)
+	d.Line([]byte(`{"type":"user","message":{"role":"user","content":"hi"},"version":"2.9.0"}`))
+	d.Call(agentlog.NoTokens)
+	d.Call(agentlog.NoTokens)
+	assert.True(t, d.Report(logger, "/logs/s1.jsonl"))
+	assert.Equal(t, 1, strings.Count(out.String(), "level=WARN"))
+	assert.Contains(t, out.String(), `msg="Session log has model calls whose usage reads as no tokens; the agent may have changed its format, and they count no cost" agent=claude version=2.9.0 path=/logs/s1.jsonl calls=2`)
+	assert.Equal(t, 2, d.Calls(agentlog.NoTokens))
+
+	out.Reset()
+	d.Call(agentlog.NoTokens)
+	assert.False(t, d.Report(logger, "/logs/s1.jsonl"), "once per kind")
+	d.Call(agentlog.NoModelOrUsage)
+	d.Line([]byte(`{"type":"x-new-record"}`))
+	assert.True(t, d.Report(logger, "/logs/s1.jsonl"))
+	assert.Equal(t, 2, strings.Count(out.String(), "level=WARN"), "the records, and calls without a model or usage")
+	assert.Contains(t, out.String(), `msg="Session log has model calls without a model or usage; the agent may have changed its format, and they count no cost" agent=claude version=2.9.0 path=/logs/s1.jsonl calls=1`)
+
+	var none *agentlog.Drift
+	none.Call(agentlog.NoTokens)
+	assert.Zero(t, none.Calls(agentlog.NoTokens), "a nil Drift counts nothing")
+}
+
+// A field of another type is left zero; the rest is read.
+func TestUnmarshalKeepsTheRest(t *testing.T) {
+	t.Parallel()
+	var v struct {
+		Input  int `json:"input"`
+		Output int `json:"output"`
+	}
+	require.NoError(t, agentlog.Unmarshal([]byte(`{"input":{"total":5},"output":7}`), &v))
+	assert.Equal(t, 0, v.Input)
+	assert.Equal(t, 7, v.Output)
+	assert.Error(t, agentlog.Unmarshal([]byte(`{"input":`), &v))
 }

@@ -111,7 +111,8 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 - [Webhook](#webhook) 把任務、請求、訊息和心跳推送到監看多個 agent 的中控平台，並以 HMAC
   簽章。連到多個 AgentAPI 的用戶端，每個只要開一條[摘要串流](#監看多個實例)。搭配
   [人工回覆 API](#人工回覆-api)，機器人可以在 agent 停下來時通知你，並把你的回覆傳回去。
-- AgentAPI 的[自我更新](#agentapi-update)，會比對發行版的 checksum。
+- AgentAPI 的[自我更新](#agentapi-update)，會比對發行版的 checksum，並可[原地重新啟動](#agentapi-restart)
+  為新的執行檔。選擇開放的機器也能[透過 API 更新](#透過-api-更新)，例如從 hub 更新。
 - [安全性](#安全性)：API token（聊天介面以 cookie 登入）、監聽位址，以及允許的主機與來源。
 
 ## 快速開始
@@ -408,6 +409,11 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 - 需要你核准或回答時，輸入框上方會顯示決策卡片，詳見[請求處理](#請求核准提問與計畫)。
 - 關閉或重新啟動 agent 時，若它在輸入關閉後 3 秒內沒有自行結束，AgentAPI 會向它的整個行程
   群組送出訊號，它啟動的 MCP 伺服器和指令也會一併停止。
+- agent 自行結束或啟動失敗時，AgentAPI 會在 2、10、30 秒後接續原工作階段重新啟動。每次嘗試
+  都會以錯誤顯示在聊天介面，生命週期為 `restarting`。三次都失敗時，AgentAPI 仍繼續提供服務，
+  生命週期維持 `failed`，直到你重新啟動 agent（Explorer → Restart 或 `DELETE /messages`，會開始
+  新的工作階段；原本的工作階段可從 Session Explorer 重新開啟）。agent 執行滿 5 分鐘後，又有三次
+  機會。結束前已回報登入失效的 agent 則改為等待登入，見[登入](#登入)。
 
 AgentAPI 會清除上層 agent 工作階段留下的環境標記與機密資訊，保留登入與供應商設定。
 完整清單見[子行程環境](docs/architecture.zh-TW.md#子行程環境)。
@@ -490,6 +496,8 @@ Pi 的 `No API key found`，以及訂閱登入過期後的 `Authentication faile
 
 完成登入後，按下 **Check again**。AgentAPI 會接續原工作階段重新啟動 agent，並保留對話。
 模型成功完成一個回合時，也會清除登入錯誤；被中斷的回合或 agent 自行處理的訊息則不會。
+agent 回報登入失效後才結束時，不會像當掉那樣重新啟動，而是和啟動時找不到登入一樣等待登入；
+重新啟動時找不到登入也是如此。
 
 ### 請求：核准、提問與計畫
 
@@ -704,6 +712,16 @@ Claude Code 則用 `/compact` 訊息壓縮，聊天介面會把這則訊息送�
 agentapi server --state-db ~/.agentapi/myproject.db -- claude
 ```
 
+路徑中的 `{port}` 和 `{hostname}` 會被填入，所以在[設定檔](#旗標)寫一行，就能讓這個使用者的
+每個 AgentAPI 各有自己的檔案，例如 Coder 工作區啟動的 Claude Code（3286）和 Codex（3285）：
+
+```yaml
+state-db: ~/.agentapi/state/{port}.db
+```
+
+- 每個 `agentapi server` 都會讀取設定檔，而第一個啟動的會鎖住資料庫檔案，所以設定檔中沒有
+  `{port}` 的 `state-db` 會略過並記下警告，否則其他伺服器都無法啟動。`--state-db` 和
+  `AGENTAPI_STATE_DB` 仍然有效。
 - AgentAPI 停止時尚未回覆的請求會標示為已過期：提出請求的 agent 已經不在了。
 - 上傳的檔案會保存在資料庫旁（`<檔案>.uploads`），因為訊息是用路徑引用它們。
 - 一個檔案只屬於一種 agent 類型、transport 和工作目錄；檔案屬於其他 agent 類型、transport 或
@@ -729,6 +747,8 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
   匯入旁邊的狀態資料庫（同名、副檔名改為 `.db`，或由 `--state-db` 指定），之後由資料庫保存對話；
   不會再寫入這個檔案。`--load-state=false` 會略過匯入，`--save-state` 已沒有作用。SIGUSR1 會
   寫入狀態資料庫尚未寫入的變更。
+- 使用 `--state-db` 的 AgentAPI 經 [`agentapi restart`](#agentapi-restart)（SIGUSR2）或
+  `agentapi update --restart` 重新啟動後，對話和 native agent 的工作階段都會保留。
 
 ### 先前的工作階段
 
@@ -765,6 +785,9 @@ key 做同樣的工作要花多少錢。
 - Codex：每個回合的 token 計數，含它的 sub agent；從 cache 讀取的輸入以 cache 讀取計價，其餘以
   輸入計價。
 - Pi：Pi 為每次呼叫回報的金額。
+
+紀錄中沒有模型或用量、或讀出的用量是 0 的呼叫不計花費，伺服器的 log 會對每個紀錄檔警告一次：
+agent 可能改了紀錄格式，例如把欄位改了名。
 
 分支（fork）從另一個工作階段複製來的呼叫，算在原本的工作階段，所以加總時不會重複計算。內建
 價格涵蓋 Anthropic 和 OpenAI 的模型；`--prices <檔案>` 可以新增模型或取代它們的價格，單位是
@@ -1091,7 +1114,8 @@ AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新�
   啟動 agent（native transport 會開始新的工作階段）。agent 重新啟動期間，訊息會在佇列中等待；
   原始按鍵、另一次重新啟動和開啟工作階段會回傳 409，AgentAPI 停止期間的重新啟動也一樣。
 - `GET /status` 回傳向下相容的 `stable`/`running` 狀態、詳細的生命週期（`starting`、
-  `ready`、`running`、`restarting`、`exited` 或 `failed`）、transport、`server_id`（這次
+  `ready`、`running`、`restarting`、`exited` 或 `failed`；native agent 結束後，AgentAPI 重新啟動
+  期間為 `restarting`，放棄後為 `failed`）、transport、`server_id`（這次
   AgentAPI 執行的隨機識別碼，每次啟動都會不同）、`turn`（agent 開始工作的次數）、對話的
   `epoch`、工作階段名稱、AgentAPI 版本、agent 目前開啟的對話框（`terminal_prompt`）以及終端機
   寬度（`terminal_columns`）。使用 native transport 時還會回報 `agent_session_id`（agent 自己的
@@ -1167,7 +1191,10 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
   `request`（類型、標題和 agent 提出的時間）、`queued_messages`、開啟中的終端機對話框、
   `login_required`、`limit_stop`、`usage`（context window 與帳號用量限制），以及 native 模式的
   Claude Code、Codex 和 Pi 才有的 `spend`：agent 在工作目錄裡所有 session 最近 24 小時（`day_usd`）
-  和 7 天（`week_usd`）換算成 API 的金額，每分鐘從 log 重新計算一次。
+  和 7 天（`week_usd`）換算成 API 的金額，每分鐘從 log 重新計算一次，並附上金額最後變動的時間
+  （`updated_at`）和 `scope`。同一台機器上，同一個 agent 在同一個目錄的 AgentAPI 回報的是同一批
+  session，`scope` 也相同：加總多個 AgentAPI 的用戶端每個 scope 只算一次。`update` 則說明用戶端
+  能不能[更新這個 AgentAPI](#透過-api-更新)，以及更新進行到哪裡。
 - `attention` 依優先順序標示需要使用者處理的原因：`login`、`request`（核准、提問或計畫）、
   `dialog`（終端機對話框）、`limit`（用量限制使回合停止）、`exited`，或 `none`。
 - `GET /events?only=summary` 在連線時及摘要變動時送出 `summary_update`，另有心跳。
@@ -1181,7 +1208,8 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
 
 要找出一台機器上的實例，可以讀取登記目錄：每個 AgentAPI 執行期間會在 `~/.agentapi/instances`
 （`--registry-dir`；`--registry=false` 可關閉）保留一份登記檔，內容有 `id`、`name`、`server_id`、
-`url`（`--public-url`，沒有的話是監聽位址）、PID、目錄、agent 和 `auth_required`，不含 token。
+`url`（`--public-url`，沒有的話是監聽位址）、PID、目錄、agent、`auth_required`（不含 token）和
+`restarts_in_place`（收到 SIGUSR2 會原地重新啟動，見 [`agentapi restart`](#agentapi-restart)）。
 停止時會刪除登記檔；行程已經不在（當掉）的登記檔，會在列出登記目錄時刪除。使用前請先確認
 `GET /summary` 回傳的 `server_id` 與登記檔相同：該 port 可能已被另一個 AgentAPI 使用。
 [`agentapi list`](#agentapi-list) 會列出已登記的實例和它們的摘要。
@@ -1206,26 +1234,30 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 
 ![hub：左側是所有 agent，右側是需要你處理的總覽，每個請求一張卡片](docs/screenshots/hub-desktop.png)
 
-在桌面或手機開啟 `http://<hub>:3290/`，用 `--token` 登入。清單列出每個實例，需要你處理的排最前面。
+在桌面或手機開啟 `http://<hub>:3290/`，用 `--token` 登入。清單列出每個實例：釘選的排在最上方，
+其他的則把需要你處理的排前面，也可以改依最近一次變動排序。
 每個實例顯示它在等什麼（核准或提問、登入、用量限制）、工作中、完成了你還沒看過的任務、閒置、
-連不到或已停止，以及標題、agent、機器、佇列和用量限制。分頁標題會顯示需要你處理的數量。點選一個
-就會在聊天介面中開啟。手機上清單和聊天介面輪流顯示。
+連不到或已停止，以及標題、agent、機器、AgentAPI 版本、佇列和用量限制。分頁標題會顯示需要你處理的
+數量。點選一個就會在聊天介面中開啟。手機上清單和聊天介面輪流顯示。
 
 - AgentAPI 用 [`agentapi hub join`](#加入-hub) 加入：它們有簽章的 `instance.*` 事件會新增它們，
-  hub 再以一條連線追蹤每個實例的[摘要串流](#監看多個實例)。也可以用 `+` 輸入網址（和 token）手動
-  加入；每一列的 `⋯` 選單可以把實例放進自己建立的群組、把它正在等的事
+  hub 再以一條連線追蹤每個實例的[摘要串流](#監看多個實例)。`+` 備有讓機器加入的指令，已填好 hub 的位址
+  和 secret，另附給那台機器上 agent 的提示；也可以在那裡輸入網址（和 token）手動加入。每一列的 `⋯`
+  選單可以把實例釘選在最上方、放進自己建立的群組、把它正在等的事
   靜音到改變為止（例如不打算處理的登入），或移除已停止、連不到的實例。
 - hub 透過自己開啟實例（`/i/<id>/...`），以實例的 API token（`--instance-token`，或加入時給的）
   取代你的憑證。瀏覽器不會拿到實例的 token，也不會直接連到實例，所以實例不必為它設定 CORS。
-- 只接受以 `--secret` 簽章、而且不超過 10 分鐘的事件，已處理過的傳送會被忽略：事件裡的網址就是
-  hub 送出實例 token 的地方。
+- 只接受以 `--secret` 簽章、不超過 10 分鐘而且帶有 delivery ID 的事件，已處理過的傳送會被忽略：
+  事件裡的網址就是 hub 送出實例 token 的地方。hub 正在追蹤的實例和手動加入的實例，事件都改不了
+  它們的網址；事件能做什麼，見 [hub 指南](docs/hub.zh-TW.md#token-與安全性)。
 - hub 連不到、又錯過三次 heartbeat（預設 3 分鐘）的實例，例如 workspace 被強制關掉的，視為已停止；
   它下一次送 heartbeat 時就會回來。
 - 實例會保存在 `~/.agentapi/hub/instances.json`（`--state`，只有擁有者能讀取），重新啟動後仍記得。
 - `--port`（預設 3290）和 `--bind`（例如 VPN 位址）設定監聽位置。請用 HTTPS 提供，或只開在私有
   網路上：登入時會送出 token。若 VPN 用戶端以 userspace 模式執行，把 `ALL_PROXY` 設成它的 SOCKS5
   proxy，hub 才連得到實例。
-- hub 提供的是它自己版本的聊天介面：hub 和實例請使用相同的 AgentAPI 版本。
+- hub 提供的是它自己版本的聊天介面：hub 和實例請使用相同的 AgentAPI 版本。比 hub 舊的實例會在清單上
+  標出來，總覽也會依版本統計，並說明怎麼更新。
 
 #### 加入 hub
 
@@ -1243,10 +1275,53 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 
 AgentAPI 會依設定檔送出 `instance.started`。`--public-url` 是 hub 連回它們的網址，`{port}` 和
 `{hostname}` 會替每個實例填入。1.2 之前啟動的 AgentAPI 沒有登記，需要重新啟動一次。
 `agentapi hub status` 顯示 hub 以及每個執行中的 AgentAPI 回報到哪裡；`agentapi hub leave` 會移除 hub。
+加上 `--allow-update` 時，hub 也能[更新它們](#透過-api-更新)。
 `join` 會先送給 hub 一個有簽章的測試事件，hub 沒收下就停止（連不到、被登入頁擋住，或 secret 不同）；
 hub 還沒啟動時，可以用 `--no-check` 略過。
+hub 的頁面已經備好這行指令：`+` 會填好 hub 的位址，設了 token 的 hub 也會填好 secret，旁邊還有一段
+提示，讓那台機器上的 agent 替你加入。hub 啟動時也會在 log 裡為它的每個位址寫下這行指令，但不含 secret。
 也可以用 [agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.md) 交給 agent 處理，安裝方式見
 [hub 指南](docs/hub.zh-TW.md#3-讓每台機器的-agentapi-加入)。
+
+#### 透過 API 更新
+
+監看多個 AgentAPI 的用戶端（例如 hub）可以把其中一個更新到最新發行版。只有選擇開放的機器才行：
+以 `--allow-update`（或 `AGENTAPI_ALLOW_UPDATE=true`）啟動 AgentAPI，或在 `~/.agentapi/config.yaml`
+加上 `allow-update: true`，讓這個使用者的每個 AgentAPI 都開放；`agentapi hub join --allow-update`
+會替你寫入。執行中的 AgentAPI 要重新啟動（`agentapi restart --all`）才會套用。
+
+```bash
+curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"when": "idle"}'
+```
+
+- `POST /update` 安裝 k1dav-c/agentapi 符合這台機器作業系統與架構的最新正式發行版，再像
+  [`agentapi restart`](#agentapi-restart) 一樣原地重新啟動成新版本：PID 不變，`server_id` 和版本
+  換新。下載的檔案必須符合發行版的 `checksums.txt`，執行起來也必須是那個版本。請求無法指定版本或網址。
+- 預設的 `"when": "idle"` 會立刻安裝，等 agent 閒置再重新啟動，也就是 agent 處於 stable，沒有待回覆的
+  請求（核准、提問或計畫）或終端機對話框。佇列中的訊息會留在佇列，重新啟動後再送出。`"now"` 會立刻
+  重新啟動，中斷 agent 手上的工作。
+- 使用 [`--state-db`](#持久保存的工作階段) 時，對話和 native agent 的工作階段會延續到重新啟動之後；
+  沒有的話，對話會重新開始。
+- 已經是最新發行版時回應 200 和 `"up_to_date": true`，否則回應 202，附上 `state` 和目標版本 `target`。
+  更新進行中再送一次，會回應目前的狀態，`"now"` 則讓它不再等待。`DELETE /update` 在重新啟動前都能
+  取消更新，已經安裝的執行檔會留著。403 表示沒有開放更新；409 表示 AgentAPI 無法取代自己的程式
+  （見下方）或正在關閉；502 表示 GitHub 沒有回應。
+- [摘要](#監看多個實例)的 `update` 會跟著更新變化：`allowed`、`blocked`、`state`（`idle`、`checking`、
+  `downloading`、`waiting`、`restarting`，或附上 `error` 的 `failed`）、`target`，以及
+  `keeps_conversation`（有使用 `--state-db`）。每次變化都會送出 `summary_update`。較早的版本沒有 `update`。
+- 共用同一個執行檔的多個 AgentAPI，會以執行檔旁的鎖定檔（`.agentapi.lock`）輪流取代它。發現磁碟上的
+  執行檔比自己正在執行的版本新（另一個 AgentAPI 已經更新過）時，就只重新啟動。
+
+AgentAPI 從不執行 `sudo`。它把新的執行檔寫在實際檔案（symlink 最終指向的檔案）旁邊，再改名蓋過去，
+所以執行 AgentAPI 的使用者必須能寫入那個目錄。執行檔放在 `/usr/local/bin` 這類系統目錄時，請把它
+搬到自己的目錄一次，原處留下 symlink：
+
+```bash
+mkdir -p ~/.local/bin && cp /usr/local/bin/agentapi ~/.local/bin/agentapi && sudo ln -sf ~/.local/bin/agentapi /usr/local/bin/agentapi
+```
+
+搬好之前，摘要的 `blocked` 會說明原因，並以實際路徑列出這行指令。執行中的 AgentAPI 不必重新啟動，
+一分鐘內就會發現；之後 `agentapi update` 也不再需要 `sudo`。
 
 ### Webhook
 
@@ -1326,8 +1401,9 @@ expected = "sha256=" + hmac.new(secret, f"{timestamp}.".encode() + body, hashlib
 valid = hmac.compare_digest(expected, signature) and abs(time.time() - int(timestamp)) < 300
 ```
 
-事件依序傳送，一次一個。網路錯誤、逾時和 HTTP 5xx、408 或 429 回應會觸發重試，間隔為
-1、2、4…秒，最多 30 秒；其他 4xx 回應不重試。每次傳送總共允許 `--webhook-max-attempts`
+事件依序傳送，一次一個。網路錯誤、逾時、重新導向和 HTTP 5xx、408 或 429 回應會觸發重試，間隔為
+1、2、4…秒，最多 30 秒；其他 4xx 回應不重試。傳送不會跟著重新導向走，所以接收端前面的登入頁不算
+送達，log 會寫出它導向哪裡。每次傳送總共允許 `--webhook-max-attempts`
 （3）次嘗試，每次逾時為 `--webhook-timeout`（10 秒）；用完次數後會放棄並記錄在 log。
 
 佇列最多保存 1,024 個事件，滿了就丟棄新事件。漏收事件的接收端應透過 API 或下一次心跳取得目前
@@ -1381,12 +1457,14 @@ webhook，也能在這裡設定。
 （`request`）；否則回傳 `{"request": null}`。
 
 帶著該 `request_id`、一個唯一的回覆 `id` 和 `content` 呼叫 `POST /handoff/reply`，
-就能回覆它。對一般回應的回覆會當成一般的使用者訊息送出；對請求的回覆則依
+就能回覆它。對一般回應的回覆會當成一般的使用者訊息，像 `POST /message` 一樣送出：agent
+若在這段期間忙了起來，回覆會在[佇列](#訊息佇列)中等待。對請求的回覆則依
 [請求](#請求核准提問與計畫)一節所述回答該請求。終端機提示接受畫面上顯示的選項編號、
 `enter` 或 `esc`；提示有文字欄位時（例如 Claude Code 的計畫回饋），也可以輸入自由
-文字。`outcome` 為 `applied`、`superseded`（已不再開啟，例如已在網頁介面回覆）、
-`invalid`（回覆不符合，仍保持開啟）或 `uncertain`；同一個項目不會回覆兩次。搭配上面的
-webhook，整合服務就能在 agent 停下來時通知你，並把你的回覆傳回來。
+文字。`outcome` 為 `applied`、`queued`（回覆在佇列中等待，agent 能接收時就會送出）、
+`superseded`（已不再開啟，例如已在網頁介面回覆）、`invalid`（回覆不符合，仍保持開啟）
+或 `uncertain`；同一個項目不會回覆兩次。搭配上面的 webhook，整合服務就能在 agent 停下來
+時通知你，並把你的回覆傳回來。
 
 ### MCP 管理
 
@@ -1545,6 +1623,8 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
 - 上傳最大 10 MB 的檔案；只有圖片會被回傳。
 - 修改 MCP 伺服器和 webhook，以及重新啟動 agent。webhook 可以把對話（`message.created`、
   `tool.completed`）送到任何網址；`GET /webhook` 不會回傳它的 secret。
+- 開啟 `--allow-update` 時，把 AgentAPI [更新](#透過-api-更新)到最新正式發行版並重新啟動。用戶端
+  無法指定版本或來源。
 
 只要有其他人連得到伺服器，就請使用 `--api-token`，並搭配 `--bind` 或反向代理。
 
@@ -1625,13 +1705,17 @@ agentapi server -- kimi
 也可以寫在 `~/.agentapi/config.yaml`（`--config` 可指定其他檔案），以旗標名稱為 key，套用到這個
 使用者啟動的每個伺服器；旗標或環境變數會覆蓋它。不是旗標名稱的設定會記在 log 中；讀不了的檔案會
 記下並略過，agent 仍會啟動。[`agentapi hub join`](#agentapi-hub) 會寫入這個檔案；含有 secret 時
-請只讓擁有者讀取（`chmod 600`）。
+請只讓擁有者讀取（`chmod 600`）。檔案或目錄設定開頭的 `~` 代表家目錄，不論設定來自哪裡。
+`state-db` 和 `pid-file` 指的檔案只能給一個伺服器使用，所以寫在設定檔時，路徑中都要有 `{port}`
+（`{hostname}` 也會被填入）；沒有的話，每個伺服器都會略過這個設定並記下警告，旗標或環境變數則照常
+有效。
 
 ```yaml
 webhook-url: http://hub.vpn:3290/hooks
 webhook-secret: s3cret
 webhook-events: [instance.*, task.*, request.*]
 public-url: http://dev-1.vpn:{port}
+state-db: ~/.agentapi/state/{port}.db
 ```
 
 | 旗標 | 預設值 | 說明 |
@@ -1640,7 +1724,7 @@ public-url: http://dev-1.vpn:{port}
 | `-p`, `--port` | `3284` | 監聽的連接埠 |
 | `--bind` | 所有網路介面 | 監聽的位址；見[監聽位址](#監聽位址) |
 | `--transport` | Claude Code、Codex 和 Pi 為 `native`，其他為 `pty` | `native` 或 `pty`；見 [Transport](#transport) |
-| `--state-db` | | 保存對話（native 與 PTY）、並接續 native agent 工作階段的 SQLite 檔案；見[持久保存的工作階段](#持久保存的工作階段) |
+| `--state-db` | | 保存對話（native 與 PTY）、並接續 native agent 工作階段的 SQLite 檔案；`{port}` 和 `{hostname}` 會被填入；見[持久保存的工作階段](#持久保存的工作階段) |
 | `--terminal` | `true` | 給聊天介面使用、位於 agent 工作目錄的 shell（native）；見[終端機](#終端機) |
 | `--auto-continue` | `false` | 回合因用量限制停下時，在限制重置後繼續（native）；見[達到用量限制時](#達到用量限制時) |
 | `--prices` | | 每百萬 tokens 模型價格的 JSON 檔，新增或取代內建價格；見[工作階段花費](#工作階段花費) |
@@ -1662,25 +1746,66 @@ public-url: http://dev-1.vpn:{port}
 | `--registry-dir` | `~/.agentapi/instances` | 登記目錄 |
 | `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會被填入 |
 | `--config` | `~/.agentapi/config.yaml` | 設定檔：以旗標名稱設定，優先順序低於旗標和環境變數 |
+| `--allow-update` | `false` | 讓 API 用戶端（例如 hub）把 AgentAPI 更新到最新發行版，再原地重新啟動；見[透過 API 更新](#透過-api-更新) |
 | `--webhook-timeout` | `10s` | 每次傳送的逾時時間 |
 | `--webhook-max-attempts` | `3` | 傳送的嘗試次數 |
 | `--webhook-payload-template` | | POST 內容的 Go `text/template` 範本 |
 | `-c`, `--chat-base-path` | `/chat` | 聊天介面的基礎路徑 |
-| `--pid-file` | | 寫入伺服器行程 ID 的檔案，給關閉腳本使用 |
+| `--pid-file` | | 寫入伺服器行程 ID 的檔案，給關閉腳本使用；`{port}` 和 `{hostname}` 會被填入 |
+| `--log-level` | `info` | 記錄的最低層級：`debug`、`info`、`warn` 或 `error` |
 | `-P`, `--print-openapi` | | 印出 OpenAPI schema 後結束 |
+
+AgentAPI 把 log 寫到標準輸出，每筆一行 `time=… level=… msg=…`。`--log-level debug`（或
+`AGENTAPI_LOG_LEVEL`、設定檔中的 `log-level`）會加上排查問題用的內容，例如 agent 的命令列、登入
+檢查，以及成功的讀取（狀態碼低於 400 的 `GET`、`HEAD`、`OPTIONS` 請求；用戶端會輪詢 `GET /status`，
+所以 Info 不記這些）；`warn` 和 `error` 則略過例行的紀錄。層級不正確時，伺服器不會啟動。
 
 ### `agentapi update`
 
 將 AgentAPI 執行檔更新為 GitHub 上的最新發行版。
 
 ```bash
-agentapi update          # 下載並安裝最新版本
-agentapi update --check  # 僅檢查是否有可用更新
-agentapi update --force  # 即使已是最新版本也執行更新
+agentapi update            # 下載並安裝最新版本
+agentapi update --check    # 僅檢查是否有可用更新
+agentapi update --force    # 即使已是最新版本也執行更新
+agentapi update --restart  # 更新後讓執行中的 AgentAPI 改用新版本
 ```
 
 更新前，AgentAPI 會先依據該版本的 `checksums.txt` 清單，以 SHA-256 驗證下載的執行檔，
-通過後才取代目前的執行檔。若清單不存在、格式錯誤，或檢查碼與下載檔案不符，就會拒絕更新。
+通過後才取代目前的執行檔。若清單不存在、格式錯誤、檢查碼與下載檔案不符，或下載的執行檔執行起來
+不是該版本，就會拒絕更新。取代執行檔時，使用的鎖定檔和[透過 API 更新](#透過-api-更新)相同。
+
+執行中的 AgentAPI 在重新啟動前仍是舊版本。`--restart` 會像
+[`agentapi restart --all`](#agentapi-restart) 一樣，重新啟動仍在執行舊執行檔的 AgentAPI。
+透過 `sudo` 執行時（安裝在 `/usr/local/bin`），重新啟動的是執行 `sudo` 那位使用者的 AgentAPI，
+依據該使用者的登記目錄。hub 不在其中：請用服務管理工具重新啟動，例如
+`systemctl restart agentapi-hub`。
+
+### `agentapi restart`
+
+原地重新啟動執行中的 AgentAPI，例如在更新取代執行檔之後：
+
+```bash
+agentapi restart 3285 3286  # 這些連接埠上的 AgentAPI
+agentapi restart --all      # 你在這台機器上的所有 AgentAPI
+```
+
+`agentapi restart` 從[登記目錄](#監看多個實例)找到這些 AgentAPI，並送出 SIGUSR2。AgentAPI 會先以
+`--version` 執行啟動時的程式；失敗時記下原因並繼續提供服務。成功時就像關閉那樣停止（中斷並
+關閉 agent、寫入狀態資料庫、刪除登記檔，webhook 也會送出 `instance.stopped`），再在同一個行程中
+以相同的參數和環境變數執行同一個路徑。PID 不變，所以 PID 檔和等待它的上層 shell（例如 Coder
+工作區的啟動腳本）仍然有效，輸出也照舊寫到原本的地方。這個指令會等到每個 AgentAPI 以新的
+`server_id` 在原連接埠上回應，並印出新版本。
+
+- 使用 `--state-db` 時，對話會保留，native agent 也會接續原本的工作階段；沒有時，AgentAPI 會和
+  其他重新啟動一樣開始新的對話。
+- 只會重新啟動你自己的 AgentAPI，而且登記檔必須對應到執行中的 `agentapi server`。透過 `sudo`
+  執行時，指的是執行 `sudo` 那位使用者的 AgentAPI。較早的版本無法原地重新啟動，
+  `agentapi restart` 會指出來：這一次請自行重新啟動。
+- 這個指令若是在某個 AgentAPI 底下執行（例如 agent 執行 `agentapi update --restart`），那個
+  AgentAPI 會最後才重新啟動；重新啟動會關閉 agent，這個指令也可能隨之結束。
+- `--registry-dir` 可讀取其他登記目錄，`--timeout`（預設 `1m`）限制等待每個 AgentAPI 的時間。
+- Windows 不支援。
 
 ### `agentapi list`
 
@@ -1713,13 +1838,14 @@ agentapi hub leave
 適合本身已在另一層登入後面的 hub，例如 Coder workspace app），`--secret`（或
 `AGENTAPI_HUB_SECRET`）用來檢查 AgentAPI 的事件，`--instance-token`（或
 `AGENTAPI_HUB_INSTANCE_TOKEN`，否則 `AGENTAPI_API_TOKEN`）會送給它們，`--state` 保存實例，
-`--port` 和 `--bind` 設定監聽位置。
+`--port` 和 `--bind` 設定監聽位置，`--log-level`（或 `AGENTAPI_HUB_LOG_LEVEL`）設定要記錄多少。
 
 `join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 AgentAPI。
 `--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`，hub 只需要
 這些，其餘都從摘要得知），`--public-url` 是 hub 連回它們的網址，
 `--api-token`（或 `AGENTAPI_API_TOKEN`）會送給需要 token 的實例，`--config` 和 `--registry-dir`
-可指定其他檔案。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。
+可指定其他檔案。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。`--allow-update` 會另外寫入
+`allow-update: true`，AgentAPI 重新啟動後，hub 就能[透過 API 更新它們](#透過-api-更新)；`leave` 會保留這個設定。
 
 ### `agentapi attach`
 
@@ -1807,6 +1933,7 @@ agentapi attach --url localhost:3284
 | `GET /handoff`、`POST /handoff/reply` | [人工回覆 API](#人工回覆-api)：agent 在等什麼，以及對它的回覆 |
 | `GET /webhook`、`PUT /webhook` | 讀取或修改 [webhook](#webhook)：網址、事件、secret、心跳和 instance |
 | `POST /webhook/test` | 對 webhook 網址送一次 `webhook.test` 事件，並回傳接收端的回應 |
+| `POST /update`、`DELETE /update` | 把 AgentAPI [更新](#透過-api-更新)到最新發行版並原地重新啟動，等 agent 閒置或立刻進行（需要 `--allow-update`）；在重新啟動前取消更新 |
 | `GET /mcp`、`PUT /mcp` | MCP 伺服器與受管理的設定檔；PUT 會整組取代，`?restart=true` 會重新啟動 agent（*native*：可以接續時接續原本的工作階段） |
 | `POST /mcp/check` | 檢查遠端 HTTP 伺服器，並解析 stdio 執行檔 |
 | `POST /mcp/servers`、`PATCH /mcp/servers/{name}`、`DELETE /mcp/servers/{name}` | 新增、更新或移除單一 MCP 伺服器 |

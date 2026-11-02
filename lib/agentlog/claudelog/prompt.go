@@ -1,6 +1,7 @@
 package claudelog
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"time"
@@ -45,6 +46,11 @@ func Prompt(line []byte) (string, time.Time, bool) {
 // or what Claude Code adds. With sidechain, it is also one of a subagent's
 // log, where the agent wrote the "user" messages.
 func UserText(line []byte, sidechain bool) (string, time.Time, bool) {
+	// An assistant entry names its type after its message, which finding
+	// the type would read through: few of them hold "user".
+	if !bytes.Contains(line, []byte(`"user"`)) {
+		return "", time.Time{}, false
+	}
 	// Most user entries are tool results, some megabytes long: tell them
 	// apart without decoding them.
 	if typ, _ := agentlog.StringField(line, "type"); typ != "user" {

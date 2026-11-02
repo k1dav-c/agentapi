@@ -520,7 +520,7 @@ func (d *webhookDispatcher) deliver(ctx context.Context, event queuedEvent) {
 		return
 	}
 	config := d.configSnapshot()
-	client := &http.Client{Timeout: config.Timeout}
+	client := webhookClient(config.Timeout)
 	for attempt := 1; attempt <= config.MaxAttempts; attempt++ {
 		err := d.sendWithConfig(ctx, config, client, event.WebhookEvent, body)
 		if err == nil {
@@ -539,6 +539,16 @@ func (d *webhookDispatcher) deliver(ctx context.Context, event queuedEvent) {
 			return
 		case <-timer.C:
 		}
+	}
+}
+
+// webhookClient sends deliveries, each within timeout. A redirect is the
+// receiver's answer, not a hop: followed, the POST comes back as a GET on
+// 302 and 303, and a sign-in page that answers 200 passes for a delivery.
+func webhookClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:       timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 }
 
@@ -581,6 +591,13 @@ func (d *webhookDispatcher) send(ctx context.Context, config WebhookConfig, clie
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		return response.Status, nil
+	}
+	if response.StatusCode >= 300 && response.StatusCode < 400 {
+		target := response.Header.Get("Location")
+		if location, err := response.Location(); err == nil {
+			target = location.String()
+		}
+		return response.Status, fmt.Errorf("unexpected HTTP status %s: a redirect to %s, which webhooks don't follow (a sign-in page in front of the receiver?)", response.Status, target)
 	}
 	if response.StatusCode >= 400 && response.StatusCode < 500 &&
 		response.StatusCode != http.StatusRequestTimeout && response.StatusCode != http.StatusTooManyRequests {
@@ -704,7 +721,7 @@ func (d *webhookDispatcher) test(ctx context.Context) (status string, err error)
 	if err != nil {
 		return "", err
 	}
-	return d.send(ctx, config, &http.Client{Timeout: config.Timeout}, event, body)
+	return d.send(ctx, config, webhookClient(config.Timeout), event, body)
 }
 
 func (w *webhookAPI) testWebhook(ctx context.Context, _ *struct{}) (*WebhookTestResponse, error) {

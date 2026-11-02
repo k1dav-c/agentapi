@@ -1,7 +1,6 @@
 package hub
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/hub"
+	"github.com/coder/agentapi/lib/logctx"
 )
 
 // defaultHubPort is where agentapi hub serve listens by default.
@@ -37,6 +37,7 @@ func serveCmd() *cobra.Command {
 		instanceToken string
 		statePath     string
 		allowedHosts  []string
+		logLevel      string
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -65,12 +66,23 @@ func serveCmd() *cobra.Command {
 					return fmt.Errorf("--allowed-hosts: %w", err)
 				}
 			}
-			logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+			level, err := logctx.ParseLevel(firstSet(logLevel, os.Getenv("AGENTAPI_HUB_LOG_LEVEL")))
+			if err != nil {
+				return fmt.Errorf("invalid --log-level: %w", err)
+			}
+			logger := slog.New(slog.NewTextHandler(cmd.OutOrStdout(), &slog.HandlerOptions{Level: level}))
+			// Listening first, the join URLs name the port it got (--port 0).
+			listener, err := net.Listen("tcp", net.JoinHostPort(bind, strconv.Itoa(port)))
+			if err != nil {
+				return err
+			}
+			port = listener.Addr().(*net.TCPAddr).Port
 			h, err := hub.New(hub.Config{
-				Token: token, NoToken: noToken, Secret: secret, InstanceToken: instanceToken, StatePath: statePath,
-				AllowedHosts: allowedHosts, Logger: logger,
+				Token: token, NoToken: noToken, Secret: secret, InstanceToken: instanceToken, Bind: bind, Port: port,
+				StatePath: statePath, AllowedHosts: allowedHosts, Logger: logger,
 			})
 			if err != nil {
+				_ = listener.Close()
 				return err
 			}
 			if noToken {
@@ -79,7 +91,7 @@ func serveCmd() *cobra.Command {
 					logger.Warn("The hub answers to any name: a site's page can reach it through a name of the site's that points at the hub's address (DNS rebinding); set --allowed-hosts to the names you open the hub by")
 				}
 			}
-			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			srv := &http.Server{
 				Addr:              net.JoinHostPort(bind, strconv.Itoa(port)),
@@ -92,8 +104,9 @@ func serveCmd() *cobra.Command {
 				close(done)
 			}()
 			serveErr := make(chan error, 1)
-			go func() { serveErr <- srv.ListenAndServe() }()
+			go func() { serveErr <- srv.Serve(listener) }()
 			logger.Info("Hub listening", "address", srv.Addr, "webhook", "/hooks", "state", statePath)
+			logJoin(logger, h.JoinURLs(), port)
 			select {
 			case err := <-serveErr:
 				stop()
@@ -126,8 +139,27 @@ func serveCmd() *cobra.Command {
 	cmd.Flags().StringVar(&secret, "secret", "", "Secret the AgentAPIs sign their events with, as given to agentapi hub join (default $AGENTAPI_HUB_SECRET); required")
 	cmd.Flags().StringVar(&instanceToken, "instance-token", "", "API token sent to the AgentAPIs (default $AGENTAPI_HUB_INSTANCE_TOKEN, else $AGENTAPI_API_TOKEN)")
 	cmd.Flags().StringVar(&statePath, "state", "", "File that keeps the instances (default ~/.agentapi/hub/instances.json)")
+	cmd.Flags().StringVar(&logLevel, "log-level", "", "Least important level to log: "+logctx.LevelNames+" (default $AGENTAPI_HUB_LOG_LEVEL, else info)")
 	cmd.Flags().StringSliceVar(&allowedHosts, "allowed-hosts", nil, "Names browsers open the hub by, besides IP addresses and localhost, which always work (hostnames only, comma-separated; '*' for any); without it the hub answers to any name")
 	return cmd
+}
+
+// logJoin logs the command that joins a machine to the hub, for each URL
+// machines may reach it by. It leaves the secret out, since others may read
+// the log: join takes it from AGENTAPI_HUB_SECRET.
+func logJoin(logger *slog.Logger, urls []hub.JoinURL, port int) {
+	if len(urls) == 0 {
+		urls = []hub.JoinURL{{URL: fmt.Sprintf("http://<this machine>:%d/hooks", port)}}
+	}
+	for _, u := range urls {
+		var args []any
+		if u.Interface != "" {
+			args = append(args, "interface", u.Interface)
+		}
+		args = append(args, "command", "agentapi hub join "+u.URL+" --public-url 'http://<its address>:{port}'")
+		logger.Info("To join a machine, run this on it with AGENTAPI_HUB_SECRET set to the hub's secret", args...)
+	}
+	logger.Info("The Add dialog (+) of the hub's page has the command, and a prompt for an agent on the machine")
 }
 
 // loopback reports whether bind is a loopback address, which only this

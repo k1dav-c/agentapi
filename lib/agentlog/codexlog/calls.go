@@ -2,8 +2,6 @@ package codexlog
 
 import (
 	"bytes"
-	"encoding/json"
-	"slices"
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog"
@@ -14,14 +12,19 @@ import (
 // Calls reads Codex's token counts: the change of the thread's running
 // total since the last count is a call's usage. The model is the turn's.
 type Calls struct {
+	// calls are the calls read since Changed last returned, taken how
+	// many it returned.
 	calls []agentlog.Call
+	taken int
 	model string
 	last  *Totals
+	drift *agentlog.Drift
 }
 
-// NewCalls returns a Calls.
-func NewCalls() *Calls {
-	return &Calls{}
+// NewCalls returns a Calls that counts the records it can't read into
+// drift.
+func NewCalls(drift *agentlog.Drift) *Calls {
+	return &Calls{drift: drift}
 }
 
 // Line reads a line of the log.
@@ -34,9 +37,14 @@ func (c *Calls) Line(line []byte) {
 				Model string `json:"model"`
 			} `json:"payload"`
 		}
-		if json.Unmarshal(line, &entry) == nil && entry.Type == "turn_context" && entry.Payload.Model != "" {
-			c.model = entry.Payload.Model
+		if agentlog.Unmarshal(line, &entry) != nil || entry.Type != "turn_context" {
+			return
 		}
+		if entry.Payload.Model == "" {
+			c.drift.Call(agentlog.NoModelOrUsage)
+			return
+		}
+		c.model = entry.Payload.Model
 	case bytes.Contains(line, []byte(`"token_count"`)):
 		var entry struct {
 			Timestamp string `json:"timestamp"`
@@ -49,10 +57,21 @@ func (c *Calls) Line(line []byte) {
 				} `json:"info"`
 			} `json:"payload"`
 		}
-		if json.Unmarshal(line, &entry) != nil || entry.Payload.Type != "token_count" || entry.Payload.Info == nil {
+		if agentlog.Unmarshal(line, &entry) != nil || entry.Payload.Type != "token_count" || entry.Payload.Info == nil {
+			// Before the first call, a count has only the rate limits.
 			return
 		}
 		info := entry.Payload.Info
+		if info.Total.none() || (c.last == nil && info.Last.none()) {
+			// A running total is never empty, nor is the first call:
+			// their fields were renamed.
+			c.drift.Call(agentlog.NoTokens)
+			if !info.Total.none() {
+				total := info.Total
+				c.last = &total
+			}
+			return
+		}
 		used := info.Last
 		if c.last != nil {
 			// The total can start from a thread this one continues;
@@ -61,17 +80,25 @@ func (c *Calls) Line(line []byte) {
 		}
 		total := info.Total
 		c.last = &total
-		if used.InputTokens <= 0 && used.OutputTokens <= 0 {
+		if used.none() {
+			// The same count again, sent with the rate limits.
 			return
+		}
+		if c.model == "" {
+			c.drift.Call(agentlog.NoModelOrUsage)
 		}
 		at, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
 		c.calls = append(c.calls, agentlog.Call{Time: at, Model: c.model, Tokens: used.Tokens(), Cost: -1})
 	}
 }
 
-// Calls returns the calls read so far.
-func (c *Calls) Calls() []agentlog.Call {
-	return slices.Clone(c.calls)
+// Changed returns the calls read since it last returned, and forgets
+// them: a call is complete on its line.
+func (c *Calls) Changed() (int, []agentlog.Call) {
+	from, calls := c.taken, c.calls
+	c.taken += len(calls)
+	c.calls = nil
+	return from, calls
 }
 
 // Size is about how many bytes of memory the reader holds.
@@ -87,6 +114,9 @@ type Totals struct {
 	CacheWriteTokens  int `json:"cache_write_input_tokens"`
 	OutputTokens      int `json:"output_tokens"`
 }
+
+// none reports whether t counts no tokens.
+func (t Totals) none() bool { return t.InputTokens <= 0 && t.OutputTokens <= 0 }
 
 func (t Totals) minus(o Totals) Totals {
 	return Totals{
