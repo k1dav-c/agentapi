@@ -17,10 +17,12 @@ describe("JoinSteps", () => {
     expect(html).not.toContain(SECRET);
     expect(shown).toContain("http://192.168.9.210:3290/hooks · eth0");
     expect(shown).toContain("http://100.116.90.98:3290/hooks · tailscale0");
-    expect(shown).toContain(`AGENTAPI_HUB_SECRET='${SECRET_MASK}' agentapi hub join http://192.168.9.210:3290/hooks --public-url 'http://<this machine>:{port}'`);
+    expect(shown).toContain(`AGENTAPI_HUB_SECRET='${SECRET_MASK}' agentapi hub join http://192.168.9.210:3290/hooks --public-url 'http://{ip}:{port}'`);
     expect(shown).toContain(`The hub secret: \`${SECRET_MASK}\``);
     expect(shown).toContain("Show the secret");
-    expect(shown).toContain("It needs AgentAPI 1.6.1 or later there");
+    expect(shown).toContain("{ip} is the machine's address on the route to the hub");
+    expect(shown).toContain("so the hub follows the machine when it gets another address");
+    expect(shown).toContain("It needs AgentAPI 2.1.3 or later there");
     expect(shown).not.toContain("{port}' --allow-update");
     expect(shown).not.toContain("never shows its secret");
   });

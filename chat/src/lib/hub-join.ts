@@ -28,10 +28,16 @@ export function joinChoices(info: JoinInfo | undefined, root: string): JoinURL[]
   return info?.urls.length ? info.urls : [{url: `${root}/hooks`}];
 }
 
-// The first release whose join checks that the hub takes its events, and
-// the first whose join takes --allow-update.
-export const JOIN_CHECKS_SINCE = "1.6.1";
-export const ALLOW_UPDATE_SINCE = "2.1.0";
+// JOIN_SINCE is the first release whose join takes {ip} in --public-url
+// (the release after 2.1.2); it also checks that the hub takes its events
+// and takes --allow-update.
+export const JOIN_SINCE = "2.1.3";
+
+// PUBLIC_URL is where the hub reaches the machine's AgentAPIs: {ip} is the
+// machine's address on the route to the hub, which each AgentAPI looks up
+// again while it runs, so the hub follows it when DHCP gives the machine
+// another; {port} is each AgentAPI's port.
+export const PUBLIC_URL = "http://{ip}:{port}";
 
 // What shows in place of the secret, and what stands for one the hub
 // doesn't show.
@@ -65,7 +71,7 @@ function secretText({secret, masked}: JoinOptions): string | undefined {
 export function joinCommand(options: JoinOptions): string {
   const secret = shellQuote(secretText(options) ?? SECRET_PLACEHOLDER);
   const update = options.allowUpdate ? " --allow-update" : "";
-  return `AGENTAPI_HUB_SECRET=${secret} agentapi hub join ${shellWord(options.hub.url)} --public-url 'http://<this machine>:{port}'${update}`;
+  return `AGENTAPI_HUB_SECRET=${secret} agentapi hub join ${shellWord(options.hub.url)} --public-url ${shellQuote(PUBLIC_URL)}${update}`;
 }
 
 const named = (url: JoinURL) => (url.interface ? `${url.url} (${url.interface})` : url.url);
@@ -79,7 +85,6 @@ export function joinPrompt(options: JoinOptions): string {
   const url = shellWord(hub.url);
   const secret = secretText(options);
   const alternatives = others.map(named);
-  const since = allowUpdate ? ALLOW_UPDATE_SINCE : JOIN_CHECKS_SINCE;
   const otherURL = alternatives.length === 1 ? alternatives[0] : `the one it reaches of ${alternatives.join(", ")}`;
   const lines = [
     "Join this machine's AgentAPIs to my AgentAPI hub (agentapi hub join). If the agentapi-hub-join skill is available, follow it; here are the values it asks for:",
@@ -88,21 +93,20 @@ export function joinPrompt(options: JoinOptions): string {
     secret === undefined
       ? "- The hub secret: ask me for it (the one given to agentapi hub serve). Pass it to agentapi hub join only through the environment; never print it, or write it to a file or a commit."
       : `- The hub secret: \`${secret}\`. Pass it to agentapi hub join only through the environment; never print it, or write it to a file or a commit.`,
-    "- Where the hub reaches this machine: http://<this machine's IP>:{port}, with the IP this machine has on the network it shares with the hub (hostname -I or ip -4 addr; ifconfig on macOS). Keep {port} as it is.",
+    `- Where the hub reaches this machine: --public-url '${PUBLIC_URL}', exactly as written. Don't look up the IP: each AgentAPI fills in {ip} with this machine's address on the route to the hub, and follows it when the address changes, and {port} with its port.`,
     allowUpdate ? "- Updates from the hub: yes, join with --allow-update (see Updates below)." : "- Updates from the hub: no, join without --allow-update.",
     "",
     "Steps:",
-    `1. agentapi --version: below ${since}, run sudo agentapi update first.`,
+    `1. agentapi --version: below ${JOIN_SINCE}, run sudo agentapi update first.`,
     "2. Check that this machine reaches the hub; it must answer 401:",
     `   curl -s -o /dev/null -w '%{http_code}\\n' -X POST ${url}`,
     alternatives.length > 0
       ? "   000 or a timeout: no route to the hub, so try the other URL above. 302, 303 or an HTML page: a sign-in page is in the way. If none answers 401, stop and tell me."
       : "   000 or a timeout: no route to the hub. 302, 303 or an HTML page: a sign-in page is in the way. Then stop and tell me.",
     "3. Join. It sends the hub a signed test event first; if that fails, follow its message, and don't use --no-check:",
-    `   AGENTAPI_HUB_SECRET=${shellQuote(secret ?? SECRET_PLACEHOLDER)} agentapi hub join ${url} --public-url 'http://<IP>:{port}'${allowUpdate ? " --allow-update" : ""}`,
+    `   AGENTAPI_HUB_SECRET=${shellQuote(secret ?? SECRET_PLACEHOLDER)} agentapi hub join ${url} --public-url ${shellQuote(PUBLIC_URL)}${allowUpdate ? " --allow-update" : ""}`,
+    "   It prints the address {ip} stands for now. A running AgentAPI it calls too old for {ip} reports that address until it restarts.",
     `4. agentapi hub status: each running AgentAPI should report to ${hub.url}.`,
-    "5. If the AgentAPIs weren't started with --allowed-hosts '*' (the Coder module's are), add the IP to ~/.agentapi/config.yaml; it takes effect when they next start:",
-    '   allowed-hosts: [localhost, 127.0.0.1, "[::1]", <IP>]',
   ];
   if (allowUpdate) {
     lines.push(
@@ -115,7 +119,7 @@ export function joinPrompt(options: JoinOptions): string {
     "",
     "Rules: don't restart or stop any AgentAPI (one of them runs this conversation); list the ones that need a restart and let me decide. Don't print, log or commit the secret.",
     "",
-    `Report: the hub URL and the IP you used, agentapi --version, each AgentAPI's join result, ${allowUpdate ? "whether the hub can update them, " : ""}and which ones need a restart.`,
+    `Report: the hub URL you used, the address join printed for {ip}, agentapi --version, each AgentAPI's join result, ${allowUpdate ? "whether the hub can update them, " : ""}and which ones need a restart (those too old for {ip}).`,
   );
   return lines.join("\n");
 }
