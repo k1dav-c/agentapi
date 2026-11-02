@@ -20,7 +20,7 @@ ask the user for them; never guess or make them up:
 | --- | --- | --- |
 | The hub's webhook URL | `http://192.168.1.20:3290/hooks` | The hub's address on the network this machine shares with it, plus `/hooks`. The Add dialog lists the hub's addresses, and the hub logs them when it starts |
 | The hub secret | (a hex string) | `AGENTAPI_HUB_SECRET` on the hub's machine; it signs this machine's events. The Add dialog shows it only on a hub with a token |
-| Where the hub reaches this machine | `http://192.168.1.31:{port}` | This machine's address on that network; `{port}` stays as it is |
+| Where the hub reaches this machine | `http://{ip}:{port}` | Use it as written: each AgentAPI fills in `{ip}` with this machine's address on the route to the hub, and follows it when DHCP changes it, and `{port}` with its port. Take another address or name only if the user gives one |
 | Updates from the hub | yes or no | Whether the hub may update this machine's AgentAPIs to the latest release (`--allow-update`). Ask; the default is no |
 
 ### Picking the addresses
@@ -30,23 +30,24 @@ machine (`http://127.0.0.1:3290/hooks` and `http://127.0.0.1:{port}`). A URL beh
 page, such as a Coder port URL, doesn't work for either direction: the hub and the AgentAPI
 send requests, not browsers.
 
-List this machine's addresses with `hostname -I` or `ip -4 addr` (`ifconfig` on macOS) and take the
-one on the hub's network: for a hub at `192.168.1.20`, this machine's `192.168.1.x`; for a hub at a
-Tailscale address (`100.64.0.0/10`), this machine's (`tailscale ip -4`). Container and bridge
-interfaces (`docker0`, `br-…`, `veth…`) never are. If the user gave several hub URLs, use the one
-whose check in step 2 answers 401.
+Don't look up this machine's address: `{ip}` is the address it sends to the hub from, which is the
+one the hub reaches it at on a shared network or VPN. Only when the hub reaches it at another
+address (NAT, a port forward) does `--public-url` need that address or a name instead, and the
+user has to say which. If the user gave several hub URLs, use the one whose check in step 2
+answers 401.
 
 ## Steps
 
-1. **Check the version.** The hub needs AgentAPI 1.3 or later here. From 1.6.1 `join` checks that
-   the hub takes this machine's events before it writes anything, and `--allow-update` needs 2.1.0:
+1. **Check the version.** `{ip}` in `--public-url` needs a release after 2.1.2 (2.1.3 or later),
+   whose `join` also checks that the hub takes this machine's events before it writes anything and
+   takes `--allow-update`:
 
    ```bash
    agentapi --version
    ```
 
-   If it is older than 1.6.1, or than 2.1.0 to allow updates, it needs `sudo agentapi update`
-   first. Run that only if the user asked for it (the hub page's prompt does); otherwise ask.
+   If it is 2.1.2 or older, it needs `sudo agentapi update` first. Run that only if the user asked
+   for it (the hub page's prompt does); otherwise ask.
 
 2. **Check that this machine reaches the hub.** An unsigned event is refused with 401, which shows
    the hub is there:
@@ -64,7 +65,7 @@ whose check in step 2 answers 401.
 
    ```bash
    read -rsp 'Hub secret: ' AGENTAPI_HUB_SECRET && export AGENTAPI_HUB_SECRET && echo
-   agentapi hub join http://192.168.1.20:3290/hooks --public-url 'http://192.168.1.31:{port}'
+   agentapi hub join http://192.168.1.20:3290/hooks --public-url 'http://{ip}:{port}'
    ```
 
    If you can't type into a prompt, have the user export `AGENTAPI_HUB_SECRET` in their own shell,
@@ -73,7 +74,8 @@ whose check in step 2 answers 401.
    `AGENTAPI_API_TOKEN`); the hub then needs the same token as its `--instance-token`. Add
    `--allow-update` only if the user said yes to updates from the hub (step 4).
 
-   `join` first sends the hub a signed test event. `The hub at … took a signed test event` means the
+   `join` prints the address `{ip}` stands for now (`{ip} is 192.168.1.31 now`), then sends the hub
+   a signed test event. `The hub at … took a signed test event` means the
    hub gets this machine's events. Otherwise it stops without writing anything, and says why:
    - `can't reach the hub` or `didn't answer`: wrong address, or no route to the hub.
    - `a sign-in page is in front of it`: the URL is behind a login, such as a Coder port URL. Ask for
@@ -82,12 +84,17 @@ whose check in step 2 answers 401.
      minutes apart.
    - `is on another machine, so it can't reach this one at localhost`: give the address the hub
      reaches this machine at as `--public-url`.
+   - `no address of this machine for {ip}`: this machine has no IPv4 route to the hub, nor an
+     address other machines may reach. Ask the user for the address the hub reaches it at.
 
    Don't work around these with `--no-check`; that is only for a hub that doesn't run yet, and
    only when the user says so.
 
    Then it prints one line per running AgentAPI:
    - `applied`: it reports to the hub now.
+   - `applied; too old for {ip}, it reports http://… until it restarts`: an AgentAPI of 2.1.2 or
+     older got today's address, and follows the machine's address only after a restart. Tell the
+     user; don't restart it.
    - `needs an API token`: give `--api-token` and run `join` again.
    - Any AgentAPI that isn't listed started before 1.2: it joins when it next starts.
 
@@ -125,17 +132,25 @@ whose check in step 2 answers 401.
    should report to the hub's `/hooks` URL. Then ask the user to look at the hub's page: the
    agents appear within a second, as Connecting and then in their state.
 
-6. **Make sure the hub can open them.** The hub sends this machine's name or address as the `Host`
-   header. An AgentAPI accepts only `localhost`, `127.0.0.1` and `[::1]` unless it runs with
-   `--allowed-hosts '*'` (as the Coder module starts it) or lists the name. If the hub shows the
-   instance as unreachable with `400 Bad Request`, add the address from `--public-url` to
-   `~/.agentapi/config.yaml`:
+6. **Make sure the hub can open them.** The hub sends the host of `--public-url` as the `Host`
+   header. An AgentAPI accepts `localhost`, `127.0.0.1`, `[::1]` and the address `{ip}` stands for,
+   unless it runs with `--allowed-hosts '*'` (as the Coder module starts it) or lists more. With a
+   name or a fixed address in `--public-url`, if the hub shows the instance as unreachable with
+   `400 Bad Request`, add it to `~/.agentapi/config.yaml`:
 
    ```yaml
    allowed-hosts: [localhost, 127.0.0.1, "[::1]", 192.168.1.31]
    ```
 
    That takes effect when the AgentAPI next starts.
+
+## A machine joined with a fixed IP
+
+A machine joined with a fixed address in `--public-url`, such as `http://192.168.1.31:{port}`,
+keeps reporting it after DHCP gives the machine another one (a Coder workspace that restarted, for
+example), and the hub shows its agents as unreachable (`no route to host`). Run `join` again with
+the same hub URL and `--public-url 'http://{ip}:{port}'` (steps 1 to 5). The hub moves each
+instance to the new address with its next heartbeat, within a minute, and after every later change.
 
 ## Rules
 
@@ -157,9 +172,10 @@ whose check in step 2 answers 401.
 | --- | --- | --- |
 | The instance never appears; the hub logs "Refused an event" | The secret differs from the hub's, or the clocks are more than 10 minutes apart | Join again with the hub's secret; check `date` on both machines |
 | The instance never appears; `agentapi hub status` shows no hub | `join` ran as another user, or with another `--config`, than the AgentAPI | Run `join` as the user the AgentAPI runs as |
+| Unreachable (`no route to host`, or timed out) after the machine got a new IP address | It joined with a fixed IP, which DHCP changed | Join again with `--public-url 'http://{ip}:{port}'` ([A machine joined with a fixed IP](#a-machine-joined-with-a-fixed-ip)) |
 | Unreachable: connection refused or timed out | The hub can't reach the `--public-url` | Have the user run `curl <public-url>/summary` on the hub's machine; join again with an address that answers |
 | Unreachable: `400 Bad Request` | The AgentAPI refuses the name as `Host` | Step 6 |
 | Unreachable: `needs an API token` | The AgentAPI requires a token the hub doesn't send | The hub needs `--instance-token` with the AgentAPI's token |
-| `unknown flag: --allow-update` | AgentAPI is older than 2.1.0 | Update it first (step 1) |
+| `unknown flag: --allow-update`, or `--public-url: … not "http://{ip}:1"` | AgentAPI is 2.1.2 or older | Update it first (step 1) |
 | `The hub can't update them yet: AgentAPI can't replace …` | The binary is in a directory this user can't write, such as `/usr/local/bin` | The one-time setup it prints, once the user agrees (step 4) |
 | The hub's page says updates are off on this machine | No `allow-update: true`, or the AgentAPI started before it was written | Join with `--allow-update`; the AgentAPIs take it up when they restart |
