@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- The hub's **Recent changes** order puts the agents that have had a task (one runs, finished, or
+  ran before) first, and those with no task yet and the muted ones last, each part by its latest
+  change. In 2.1.1 an idle or stopped agent that had done work fell below the ones that needed you or
+  worked, and an unused one that needed a login came first.
+
 ## v2.1.1
 
 ### Fixes

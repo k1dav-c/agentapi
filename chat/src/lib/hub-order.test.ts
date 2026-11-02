@@ -70,15 +70,16 @@ describe("changedAt", () => {
 });
 
 describe("sortRecent", () => {
-  test("the active ones first, then the rest, each by its latest change, whatever the group", () => {
+  test("those with tasks first, then those with none or muted, each by its latest change, whatever the group", () => {
     const rows = sortRecent([
-      changed("asks", 1, {state: "needs-you", group: "Clients", summary: summary({attention: "request"})}),
-      changed("idle", 7),
-      changed("gone", 9, {state: "stopped", connection: "stopped"}),
-      changed("busy", 3, {state: "working", group: "Internal", summary: summary({status: "running"})}),
+      changed("asks", 1, {state: "needs-you", group: "Clients", summary: summary({attention: "request", tasks: 2})}),
+      changed("fresh", 7),
+      changed("gone", 9, {state: "stopped", connection: "stopped", summary: summary({tasks: 4})}),
+      changed("busy", 3, {state: "working", group: "Internal", summary: summary({status: "running", tasks: 1})}),
+      changed("quiet", 8, {state: "muted", summary: summary({attention: "login", tasks: 3})}),
     ]);
-    // A stopped or idle one that changed last waits below the ones with something going on.
-    expect(ids(rows)).toEqual(["busy", "asks", "gone", "idle"]);
+    // gone ran tasks before it stopped, so it stays on top; fresh has none and quiet is muted.
+    expect(ids(rows)).toEqual(["gone", "busy", "asks", "quiet", "fresh"]);
   });
 
   test("an instance with no record of a change falls in by its since, or when it was last heard of", () => {
@@ -114,9 +115,9 @@ describe("sortRecent", () => {
 
 describe("listSections", () => {
   const rows = [
-    changed("checkout", 2, {group: "Clients", state: "needs-you", summary: summary({attention: "request", title: "Deploy"})}),
-    changed("billing", 8, {group: "Internal", state: "working", summary: summary({status: "running", title: "Invoices"})}),
-    changed("docs", 5, {state: "unread", summary: summary({unread: true, title: "Deploy notes"})}),
+    changed("checkout", 2, {group: "Clients", state: "needs-you", summary: summary({attention: "request", title: "Deploy", tasks: 1})}),
+    changed("billing", 8, {group: "Internal", state: "working", summary: summary({status: "running", title: "Invoices", tasks: 1})}),
+    changed("docs", 5, {state: "unread", summary: summary({unread: true, title: "Deploy notes", tasks: 1})}),
     changed("legacy", 9, {group: "Internal", state: "unreachable", connection: "unreachable"}),
     changed("site", 1, {group: "Clients"}),
   ];
@@ -139,7 +140,7 @@ describe("listSections", () => {
     expect(shape(listSections(ungrouped, {filter: "all", query: "", order: "groups"}))).toEqual([["", ["checkout", "billing", "docs", "site", "legacy"]]]);
   });
 
-  test("recent: one block with no header, the active ones first, each part by the latest change", () => {
+  test("recent: one block with no header, those with tasks first, each part by the latest change", () => {
     const sections = listSections(rows, {filter: "all", query: "", order: "recent"});
     expect(sections.map((section) => [section.key, section.label, section.name, ids(section.instances), section.needsYou])).toEqual([
       [recentKey, "", "", ["billing", "docs", "checkout", "legacy", "site"], 1],
