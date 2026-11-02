@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- The hub's **Recent changes** order puts the agents with something going on first (they need you,
+  work, or finished a task you haven't seen), then the idle, muted, stopped and unreachable ones,
+  each part by its latest change. An idle agent that reconnected or stopped came before the busy
+  ones.
+
 ## v2.1.0
 
 ### Features

@@ -70,14 +70,15 @@ describe("changedAt", () => {
 });
 
 describe("sortRecent", () => {
-  test("the latest change first, whatever the state or the group", () => {
+  test("the active ones first, then the rest, each by its latest change, whatever the group", () => {
     const rows = sortRecent([
       changed("asks", 1, {state: "needs-you", group: "Clients", summary: summary({attention: "request"})}),
       changed("idle", 7),
       changed("gone", 9, {state: "stopped", connection: "stopped"}),
       changed("busy", 3, {state: "working", group: "Internal", summary: summary({status: "running"})}),
     ]);
-    expect(ids(rows)).toEqual(["gone", "idle", "busy", "asks"]);
+    // A stopped or idle one that changed last waits below the ones with something going on.
+    expect(ids(rows)).toEqual(["busy", "asks", "gone", "idle"]);
   });
 
   test("an instance with no record of a change falls in by its since, or when it was last heard of", () => {
@@ -86,7 +87,8 @@ describe("sortRecent", () => {
       summary: summary({unread: true, task: {id: 2, status: "completed", prompt: "Fix", started_at: "2026-11-01T09:00:00Z", ended_at: "2026-11-01T09:04:00Z", errors: [], steered: []}}),
     });
     const heard = instance("heard", {last_seen: "2026-11-01T09:06:00Z"});
-    expect(ids(sortRecent([changed("a", 2), finished, changed("b", 5), heard, changed("c", 8)]))).toEqual(["c", "heard", "b", "finished", "a"]);
+    // The finished, unseen one is active, so it leads.
+    expect(ids(sortRecent([changed("a", 2), finished, changed("b", 5), heard, changed("c", 8)]))).toEqual(["finished", "c", "heard", "b", "a"]);
   });
 
   test("ties go by name, then ID; those with no time at all come last", () => {
@@ -137,10 +139,10 @@ describe("listSections", () => {
     expect(shape(listSections(ungrouped, {filter: "all", query: "", order: "groups"}))).toEqual([["", ["checkout", "billing", "docs", "site", "legacy"]]]);
   });
 
-  test("recent: one block with no header, by the latest change", () => {
+  test("recent: one block with no header, the active ones first, each part by the latest change", () => {
     const sections = listSections(rows, {filter: "all", query: "", order: "recent"});
     expect(sections.map((section) => [section.key, section.label, section.name, ids(section.instances), section.needsYou])).toEqual([
-      [recentKey, "", "", ["legacy", "billing", "docs", "checkout", "site"], 1],
+      [recentKey, "", "", ["billing", "docs", "checkout", "legacy", "site"], 1],
     ]);
   });
 
@@ -169,7 +171,7 @@ describe("listSections", () => {
   test("recent: the pinned ones first, then the others by their latest change, under a header of their own", () => {
     expect(shape(listSections(pinned, {filter: "all", query: "", order: "recent"}))).toEqual([
       ["Pinned", ["billing", "docs"]],
-      ["Recent changes", ["legacy", "checkout", "site"]],
+      ["Recent changes", ["checkout", "legacy", "site"]],
     ]);
   });
 
