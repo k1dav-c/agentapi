@@ -42,18 +42,19 @@ function recentFirst(a: number | undefined, b: number | undefined): number {
   return b - a;
 }
 
-// active reports whether an instance has something going on: it needs you,
-// works, or finished a task you haven't seen. An idle, muted, stopped or
-// unreachable one may still change (it reconnects, it stops), but that is
-// nothing to look at.
+// active reports whether an instance belongs at the top of the recent
+// order: it has had a task (one runs, finished, or ran before), and isn't
+// muted. One with no task yet, or muted, has nothing to look at, however
+// recently it changed (it reconnected, it stopped).
 function active(instance: HubInstance): boolean {
-  const state = instanceState(instance);
-  return state === "needs-you" || state === "working" || state === "unread";
+  if (instanceState(instance) === "muted") return false;
+  const summary = instance.summary;
+  return (summary?.tasks ?? 0) > 0 || summary?.task != null;
 }
 
-// sortRecent orders the rows: the active ones first, then the rest, each by
-// changedAt, the most recent first, those with none last; ties by name,
-// then ID.
+// sortRecent orders the rows: those with tasks first, then those with none
+// or muted, each by changedAt, the most recent first, those with none last;
+// ties by name, then ID.
 export function sortRecent(instances: Iterable<HubInstance>): HubInstance[] {
   return [...instances]
     .map((instance) => ({instance, active: active(instance), at: timeOf(changedAt(instance))}))

@@ -310,7 +310,8 @@ a queue that isn't empty, what the agent spent in the last 24 hours ([Spend](#sp
 limit above 60% join them. An AgentAPI update under way, or one that failed, gets a line of its own
 ([Updating from the hub](#updating-from-the-hub)). [Pinned](#pinning) agents come first, in your
 order. Within a [group](#groups), the rows sort by state in this order, then by name;
-[Recent changes](#recent-changes) puts the busy ones first and sorts by the latest change instead. Each state has a shape
+[Recent changes](#recent-changes) puts the agents with tasks first and sorts by the latest change
+instead. Each state has a shape
 of its own, so it reads without its color:
 
 | Glyph | Second line starts with | Meaning |
@@ -362,10 +363,9 @@ with no instance left disappears.
 
 The switch beside the search sets the list's order. **Groups**, the default, is the order above:
 what needs you first within each group. **Recent changes** is one list below the
-[pinned](#pinning) agents, whatever the group: first the agents with something going on (they need
-you, work, or finished a task you haven't seen), then the rest (idle, muted, stopped, unreachable),
-each part with the most recent change first, so an idle agent that just reconnected doesn't push
-the busy ones down. Each row
+[pinned](#pinning) agents, whatever the group: first the agents that have had a task (one runs,
+finished, or ran before), then those with no task yet and the muted ones, each part with the most
+recent change first, so an unused agent that just reconnected doesn't push the others down. Each row
 then shows how long ago it last changed and, where there is room, its group. The filters and the
 search apply in both orders, and `j` and `k` follow the rows as they show. Rows move as the agents
 change; the open one stays selected. Each browser remembers its order.
