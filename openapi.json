@@ -3471,7 +3471,7 @@
             "type": "string"
           },
           "public_url": {
-            "description": "Where this AgentAPI can be reached, in every event. Omit to preserve; set to empty string to clear.",
+            "description": "Where this AgentAPI can be reached, in every event. {port} and {hostname} are filled in, and {ip} with the machine's IPv4 address on the route to the webhook URL, looked up again while AgentAPI runs. Omit to preserve; set to empty string to clear.",
             "type": "string"
           },
           "secret": {
@@ -3534,7 +3534,7 @@
             "type": "string"
           },
           "public_url": {
-            "description": "Where this AgentAPI can be reached, in every event; empty when not set.",
+            "description": "Where this AgentAPI can be reached, in every event, as set: {port}, {hostname} and {ip} stay unfilled; empty when not set.",
             "type": "string"
           },
           "secret_set": {

@@ -1511,7 +1511,7 @@ flags, such as a Coder workspace's:
 
 ```bash
 sudo agentapi update   # the latest release reads the config file
-agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://dev-1.vpn:{port}'
+agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
 ```
 
 `join` writes the hub's webhook (`webhook-url`, `webhook-secret`, `webhook-events`, `public-url`)
@@ -1519,7 +1519,9 @@ into `~/.agentapi/config.yaml`, which every `agentapi server` of the user reads 
 applies it to the registered AgentAPIs running now: each sends `instance.heartbeat` to the hub at
 once. After a restart (of the workspace, for example), the AgentAPIs send `instance.started` from
 the file. `--public-url` is where the hub reaches them; `{port}` and `{hostname}` are filled in for
-each. AgentAPIs that started before 1.2 aren't registered: restart them once. `agentapi hub status`
+each, and `{ip}` with the machine's IPv4 address on the route to the hub, which each AgentAPI looks
+up again while it runs: when DHCP gives the machine another address, the next heartbeat names it and
+the hub follows. AgentAPIs that started before 1.2 aren't registered: restart them once. `agentapi hub status`
 shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes it. With
 `--allow-update`, the hub can also [update them](#updating-through-the-api). `join`
 first sends the hub a signed test event and stops if the hub doesn't take it (not reached, a sign-in
@@ -1678,7 +1680,8 @@ All flags have `AGENTAPI_` environment variables (`AGENTAPI_WEBHOOK_URL`, `AGENT
 with the events separated by spaces, `AGENTAPI_WEBHOOK_SECRET`, and so on). `GET /webhook` shows the
 configuration (whether a secret is set, never the secret) and `PUT /webhook` changes it without a
 restart; its `events`, `secret`, `heartbeat_seconds`, `instance_id` and `public_url` are kept when
-left out.
+left out. Its `public_url` may hold `{port}`, `{hostname}` and `{ip}`, and `GET /webhook` returns it as set; the
+events and the summary fill them in.
 
 The Explorer's Webhook tab configures the receiver URL, event groups, signing secret, instance ID,
 heartbeat and public URL. **Delivery and payload** contains the timeout, attempt count and template.
@@ -2036,7 +2039,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--name` | the working directory's name | What clients that watch many AgentAPIs call this one |
 | `--registry` | `true` | Keep an entry in the registry directory while serving; see [Watching many instances](#watching-many-instances) |
 | `--registry-dir` | `~/.agentapi/instances` | Registry directory |
-| `--public-url` | | URL this AgentAPI is reached at, in `GET /summary` and every webhook event; `{port}` and `{hostname}` are filled in |
+| `--public-url` | | URL this AgentAPI is reached at, in `GET /summary` and every webhook event; `{port}` and `{hostname}` are filled in, and `{ip}` with the machine's IPv4 address on the route to the webhook URL (without one, its first private, then CGNAT, address), looked up again at most every 30 seconds while it runs; when none is found the last one stays. The address `{ip}` stands for is an allowed host |
 | `--config` | `~/.agentapi/config.yaml` | Settings file: flags by name, below flags and variables |
 | `--allow-update` | `false` | Let API clients, such as the hub, update AgentAPI to the latest release, which then restarts in place; see [Updating through the API](#updating-through-the-api) |
 | `--webhook-timeout` | `10s` | Timeout of each delivery attempt |
@@ -2130,7 +2133,7 @@ Run a hub that watches many AgentAPIs, or connect this machine's AgentAPIs to on
 
 ```bash
 agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token "$AGENTAPI_TOKEN"
-agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://dev-1.vpn:{port}'
+agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
 agentapi hub status
 agentapi hub leave
 ```
@@ -2145,7 +2148,8 @@ instances, `--port` and `--bind` set where it listens, and `--log-level` (or
 `join` writes the hub's webhook into `~/.agentapi/config.yaml` and applies it to the registered
 AgentAPIs running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `--events` picks them
 (default `instance.*`, all the hub needs: it follows the rest from each summary), `--public-url`
-is where the hub reaches them, `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the ones that need
+is where the hub reaches them (`{ip}` follows the machine's address; the config file and the
+AgentAPIs newer than 2.1.2 keep it, older ones get the address now), `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the ones that need
 a token, and `--config` and `--registry-dir` name other files. An AgentAPI that `join` can't
 update now applies the file when it restarts. `--allow-update` also writes `allow-update: true`, so
 the hub can [update the AgentAPIs through their API](#updating-through-the-api) once they restart;

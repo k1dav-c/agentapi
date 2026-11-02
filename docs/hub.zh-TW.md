@@ -37,7 +37,9 @@ hub 和各個 AgentAPI 透過你掌控的網路互連，例如你自己的 VPN�
    AgentAPI 都送出有簽章的 `instance.started`、`instance.heartbeat`（每分鐘一次）和
    `instance.stopped`，hub 據此新增、更新或停止實例。hub 連不到、又錯過三次 heartbeat 的實例，
    例如 workspace 被強制關掉的，視為已停止，hub 不再嘗試連線，直到它下一次送 heartbeat。這些事件
-   只用來新增實例、告訴 hub 它在哪裡；每個實例在做什麼，以它的摘要為準。
+   只用來新增實例、告訴 hub 它在哪裡；每個實例在做什麼，以它的摘要為準。事件寫了另一個網址時，
+   只有 hub 沒連上這個實例才會改用新網址，手動加入的實例則一律不改：機器換了位址的 AgentAPI
+   （`--public-url` 裡用 `{ip}`），會在舊位址不再回應後的第一次 heartbeat 搬到新位址。
 2. hub 追蹤每個實例的摘要（`GET /events?only=summary`），以它為實例狀況的依據：狀態、在等什麼、
    標題、最新任務、佇列和用量限制。每個實例一條連線；斷線時 1 秒後重連，之後間隔逐次拉長，最多 30 秒。
    串流 45 秒沒有任何動靜就視為斷線。連線失敗的前 10 秒，實例仍顯示為連線中（剛啟動的實例送出第一個
@@ -82,7 +84,7 @@ hub 開始監聽後，會把加入用的 `agentapi hub join` 指令寫進 log，
 位址；容器和 bridge 的介面不列。log 裡不會出現 secret，`join` 會從 `AGENTAPI_HUB_SECRET` 讀取。
 
 ```text
-level=INFO msg="To join a machine, run this on it with AGENTAPI_HUB_SECRET set to the hub's secret" interface=eth0 command="agentapi hub join http://192.168.1.20:3290/hooks --public-url 'http://<its address>:{port}'"
+level=INFO msg="To join a machine, run this on it with AGENTAPI_HUB_SECRET set to the hub's secret" interface=eth0 command="agentapi hub join http://192.168.1.20:3290/hooks --public-url 'http://{ip}:{port}'"
 ```
 
 要讓 hub 持續執行，就用這台機器啟動其他服務的方式啟動它。例如 systemd 的使用者 unit：
@@ -110,9 +112,9 @@ WantedBy=default.target
 在每台要讓 hub 監看的機器上執行一次：
 
 ```bash
-sudo agentapi update   # 每台機器都需要 AgentAPI 1.3 以上
+sudo agentapi update   # 每台機器的 AgentAPI 都要在 2.1.2 之後才有 {ip}
 agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
-  --public-url 'http://dev-1.vpn:{port}'
+  --public-url 'http://{ip}:{port}'
 ```
 
 hub 的頁面已經備好這行指令，填好 hub 的位址和 secret，另附一段給那台機器上 agent 的提示：
@@ -124,15 +126,19 @@ hub 的頁面已經備好這行指令，填好 hub 的位址和 secret，另附�
   這個檔案，所以由腳本以固定參數啟動的 AgentAPI（例如 Coder workspace 的啟動腳本）不必改腳本也能
   加入。旗標和 `AGENTAPI_*` 環境變數仍然優先於這個檔案。
 - `--public-url` 是 hub 連回各 AgentAPI 的網址。`{port}` 會換成各自的 port，所以同一行設定可以
-  同時用在 3286 的 Claude Code 和 3285 的 Codex。
+  同時用在 3286 的 Claude Code 和 3285 的 Codex。`{ip}` 會換成這台機器通往 hub 那條路由上的 IPv4
+  位址。每個 AgentAPI 執行期間會重新查詢（最多每 30 秒一次），所以 DHCP 給了機器新位址時（例如
+  Coder workspace 重新啟動後），下一次 heartbeat 就會帶著新位址，hub 也會跟著改用
+  （見[運作方式](#運作方式)）。`{ip}` 需要 2.1.2 之後的 AgentAPI；固定能解析的名稱，例如
+  `http://dev-1.vpn:{port}`，也可以用。
 - 同一個檔案也能讓各 AgentAPI 重新啟動（更新、重新開機）後保留對話：加上
   `state-db: ~/.agentapi/state/{port}.db`，見[持久保存的工作階段](../README.zh-TW.md#持久保存的工作階段)。
 - 想讓 hub 更新這台機器的 AgentAPI，加入時再加上 `--allow-update`（見[從 hub 更新](#從-hub-更新)）。
 - 正在執行的 AgentAPI 會立刻套用，一秒內就出現在 hub 上。1.2 之前啟動的 AgentAPI 沒有在這台機器
   上登記，`join` 找不到它們：重新啟動它們或整個 workspace 一次。
-- hub 轉送請求時，`Host` 標頭是實例的 VPN 名稱。AgentAPI 預設只接受 `localhost`、`127.0.0.1` 和
-  `[::1]`，所以要允許它的 VPN 名稱：用 `--allowed-hosts '*'` 啟動（Coder module 就是這樣做），
-  或把名稱加進設定檔：
+- hub 轉送請求時，`Host` 標頭是實例網址裡的主機。AgentAPI 預設只接受 `localhost`、`127.0.0.1`、
+  `[::1]`，以及 `{ip}` 目前代表的位址。用 VPN 名稱時要允許它：用 `--allowed-hosts '*'` 啟動
+  （Coder module 就是這樣做），或把名稱加進設定檔：
 
   ```yaml
   allowed-hosts: [localhost, 127.0.0.1, "[::1]", dev-1.vpn]
@@ -417,11 +423,11 @@ agent 要重新啟動一次。AgentAPI 自己的聊天介面也有針對它所�
   和所屬的網路介面，順序和啟動時的 log 相同。請選那台機器和 hub 共同所在網路上的位址。hub 一個位址都
   找不到時，會改用頁面本身的位址；前面若有登入頁（例如 Coder 的 port 網址），這個位址就不能用。
 - **Allow updates from the hub** 會加上 `--allow-update`（見[從 hub 更新](#從-hub-更新)）。
-- **Run on the machine** 是 `agentapi hub join` 指令，secret 透過 `AGENTAPI_HUB_SECRET` 傳入。
-  把 `<this machine>` 換成那台機器的位址。
+- **Run on the machine** 是 `agentapi hub join` 指令，secret 透過 `AGENTAPI_HUB_SECRET` 傳入，
+  並帶 `--public-url 'http://{ip}:{port}'`：`{ip}` 會跟著機器的位址走，不必另外填。
 - **Prompt for an agent on that machine** 讓那台機器上的 agent 替你加入：hub 的網址和連不到時可以改試的
-  其他網址、secret、怎麼找出這台機器的位址，以及各個步驟：檢查版本、確認 hub 有回應、`join`、
-  `agentapi hub status` 和 `allowed-hosts`。agent 不會重新啟動任何 AgentAPI，也不會顯示 secret。
+  其他網址、secret、`--public-url`（`{ip}` 原樣保留），以及各個步驟：檢查版本、確認 hub 有回應、`join`
+  和 `agentapi hub status`。agent 不會重新啟動任何 AgentAPI，也不會顯示 secret。
   勾選允許更新時，它還會說明 `join` 可能印出的一次性設定，並建議設定 state DB，兩件事都會先問過你。
   裝了 [agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md) 的 agent 照 skill 做，沒裝的
   照提示裡的步驟做。
@@ -504,6 +510,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | Unreachable：`400 Bad Request` | AgentAPI 拒絕以 VPN 名稱作為 `Host` | 在 `--allowed-hosts` 允許它（步驟 3） |
 | Unreachable：`needs an API token` | AgentAPI 以 `--api-token` 執行，hub 給的 token 不同 | 給 hub `--instance-token`，或加入時輸入 token |
 | Unreachable：connection refused 或逾時 | `--public-url` 錯誤，或 hub 連不上 VPN | 在 hub 的機器上用 `curl <url>/summary` 檢查網址 |
+| 機器換了 IP 位址後，實例顯示 Unreachable（`no route to host` 或逾時） | 加入時 `--public-url` 寫的是固定 IP，DHCP 換掉了它，例如 Coder workspace 重新啟動後 | 用 `--public-url 'http://{ip}:{port}'` 重新執行 `agentapi hub join`；hub 會在下一次 heartbeat 跟上，之後每次換位址也一樣 |
 | Unreachable：`another AgentAPI answers at this URL` | 實例的位址現在屬於另一台機器（DHCP 換了位址），或 `--public-url` 指向別台機器 | 檢查 `--public-url`；搬走的實例會在下一次 heartbeat（一分鐘內）送出新位址 |
 | hub 的 log 有「Two AgentAPIs report the same instance ID」 | 兩台機器名稱相同，同一個 port 上的 AgentAPI 就有相同的 ID；hub 保留它正在追蹤的那個 | 把其中一台改名，或給它的 AgentAPI 設定 `--instance-id` |
 | hub 的 log 有「An instance's event names another URL」 | hub 還在用舊網址追蹤它時，它的 `--public-url` 改了 | 不用處理：hub 繼續用連得上的網址，等舊網址不再回應才改用新的 |
@@ -547,7 +554,7 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | 旗標 | 預設值 | 說明 |
 | --- | --- | --- |
 | `--secret` | `AGENTAPI_HUB_SECRET` | 為事件簽章的 secret；沒有的話 hub 會拒絕事件 |
-| `--public-url` | | hub 連回 AgentAPI 的網址；`{port}` 和 `{hostname}` 會被填入 |
+| `--public-url` | | hub 連回 AgentAPI 的網址，例如 `http://{ip}:{port}`；`{port}` 和 `{hostname}` 會被填入，`{ip}` 則是這台機器通往 hub 那條路由上的 IPv4 位址，每個 AgentAPI 執行期間會重新查詢 |
 | `--events` | `instance.*` | 送給 hub 的事件；hub 只需要這些 |
 | `--api-token` | `AGENTAPI_API_TOKEN` | 給需要 token 的執行中 AgentAPI |
 | `--config` | `~/.agentapi/config.yaml` | 要寫入的設定檔 |
@@ -558,10 +565,13 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 `join` 在寫入任何東西之前，會先確認 hub 收得到這台機器的事件：它送給 hub 一個有簽章的
 `webhook.test` 事件。hub 連不到、前面有登入頁（Coder 的 port 網址會導向 Coder 登入），或 secret
 不一樣時，它會停下來並說明原因。hub 在另一台機器上、`--public-url` 卻寫 `localhost`（hub 連不到）
-時，它也會停下來。
+時，它也會停下來。做這些檢查時，它會以通往 hub 的路由填入 `{ip}`，並印出這個位址。
 
 `join` 把 `webhook-url`、`webhook-secret`、`webhook-events` 和 `public-url` 寫進設定檔，並用
-`PUT /webhook` 套用到執行中的 AgentAPI，保留各自的逾時和重試次數。`leave` 移除這些設定，並關掉執行中
+`PUT /webhook` 套用到執行中的 AgentAPI，保留各自的逾時和重試次數。設定檔保留 `{ip}`，會自己填入
+`{ip}` 的執行中 AgentAPI（依登記資料，版本在 2.1.2 之後）也拿到原樣的 `{ip}`；較舊的則拿到當下的
+位址，在重新啟動前都用這個位址，`join` 也會註明。`join` 透過登記的網址連到各個 AgentAPI，連不到時改用
+localhost 上它的 port。`leave` 移除這些設定，並關掉執行中
 AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。加上 `--allow-update` 時，
 `join` 還會寫入 `allow-update: true`，AgentAPI 啟動時才會讀取。
 

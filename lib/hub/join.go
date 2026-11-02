@@ -4,9 +4,9 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"slices"
 	"strconv"
-	"strings"
+
+	"github.com/coder/agentapi/lib/netaddr"
 )
 
 // JoinURL is a URL machines join the hub by (agentapi hub join <URL>),
@@ -16,72 +16,20 @@ type JoinURL struct {
 	Interface string `json:"interface,omitempty"`
 }
 
-// netInterface is a network interface of the hub's machine, as the join
-// URLs are picked from.
-type netInterface struct {
-	name     string
-	up       bool
-	loopback bool
-	addrs    []netip.Addr
-}
-
-// containerPrefixes start the names of the interfaces of the containers
-// and VMs on the hub's machine, which other machines don't reach it by.
-var containerPrefixes = []string{
-	"docker", "br-", "veth", "virbr", "cni", "flannel", "cali", "cilium", "weave", "kube",
-	"podman", "lxc", "lxd", "vmnet", "vboxnet",
-}
-
-// cgnat is the shared address space (RFC 6598), which Tailscale and other
-// VPNs give their machines.
-var cgnat = netip.MustParsePrefix("100.64.0.0/10")
-
 // joinURLs are the webhook URLs of a hub that listens on bind and port:
-// bind's, when it listens on one address; otherwise one for each IPv4
-// address of interfaces that other machines may reach, private networks
-// (RFC 1918) first, then CGNAT, then the rest.
-func joinURLs(bind string, port int, interfaces []netInterface) []JoinURL {
+// bind's, when it listens on one address; otherwise one for each address
+// netaddr.Reachable finds, private networks (RFC 1918) first, then CGNAT,
+// then the rest.
+func joinURLs(bind string, port int, interfaces []netaddr.Interface) []JoinURL {
 	if !allInterfaces(bind) {
 		return []JoinURL{{URL: hooksURL(bind, port)}}
 	}
-	type ranked struct {
-		JoinURL
-		rank int
-	}
-	var found []ranked
-	seen := map[netip.Addr]bool{}
-	for _, iface := range interfaces {
-		if !iface.up || iface.loopback || slices.ContainsFunc(containerPrefixes, func(prefix string) bool { return strings.HasPrefix(iface.name, prefix) }) {
-			continue
-		}
-		for _, addr := range iface.addrs {
-			addr = addr.Unmap()
-			if !addr.Is4() || !addr.IsGlobalUnicast() || seen[addr] {
-				continue
-			}
-			seen[addr] = true
-			found = append(found, ranked{JoinURL{URL: hooksURL(addr.String(), port), Interface: iface.name}, rank(addr)})
-		}
-	}
-	slices.SortStableFunc(found, func(a, b ranked) int { return a.rank - b.rank })
+	found := netaddr.Reachable(interfaces)
 	urls := make([]JoinURL, len(found))
 	for i, f := range found {
-		urls[i] = f.JoinURL
+		urls[i] = JoinURL{URL: hooksURL(f.Addr.String(), port), Interface: f.Interface}
 	}
 	return urls
-}
-
-// rank orders the addresses by how likely machines reach the hub at them:
-// a private network, then CGNAT, then the rest.
-func rank(addr netip.Addr) int {
-	switch {
-	case addr.IsPrivate():
-		return 0
-	case cgnat.Contains(addr):
-		return 1
-	default:
-		return 2
-	}
 }
 
 // allInterfaces reports whether a hub that binds bind listens on every
@@ -98,40 +46,10 @@ func hooksURL(host string, port int) string {
 	return "http://" + net.JoinHostPort(host, strconv.Itoa(port)) + "/hooks"
 }
 
-// machineInterfaces are this machine's network interfaces.
-func machineInterfaces() ([]netInterface, error) {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil, err
-	}
-	list := make([]netInterface, 0, len(ifaces))
-	for _, iface := range ifaces {
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		found := netInterface{name: iface.Name, up: iface.Flags&net.FlagUp != 0, loopback: iface.Flags&net.FlagLoopback != 0}
-		for _, a := range addrs {
-			var ip net.IP
-			switch a := a.(type) {
-			case *net.IPNet:
-				ip = a.IP
-			case *net.IPAddr:
-				ip = a.IP
-			}
-			if addr, ok := netip.AddrFromSlice(ip); ok {
-				found.addrs = append(found.addrs, addr)
-			}
-		}
-		list = append(list, found)
-	}
-	return list, nil
-}
-
 // JoinURLs are the webhook URLs machines join the hub by, the likeliest
 // first; none when it finds no address other machines may reach.
 func (h *Hub) JoinURLs() []JoinURL {
-	var interfaces []netInterface
+	var interfaces []netaddr.Interface
 	if allInterfaces(h.config.Bind) {
 		var err error
 		if interfaces, err = h.interfaces(); err != nil {

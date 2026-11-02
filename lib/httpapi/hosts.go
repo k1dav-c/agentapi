@@ -149,7 +149,8 @@ func isValidHostname(name string) bool {
 // hostAuthorizationMiddleware enforces that the request Host header matches one of the allowed
 // hosts, ignoring any port in the comparison. If allowedHosts is empty, all hosts are allowed.
 // Always uses url.Parse("http://" + r.Host) to robustly extract the hostname (handles IPv6).
-func hostAuthorizationMiddleware(allowedHosts []string, badHostHandler http.Handler) func(next http.Handler) http.Handler {
+// also, if set, allows a host the list doesn't name.
+func hostAuthorizationMiddleware(allowedHosts []string, also func(hostname string) bool, badHostHandler http.Handler) func(next http.Handler) http.Handler {
 	// Copy for safety; also build a map for O(1) lookups with case-insensitive keys.
 	allowed := make(map[string]struct{}, len(allowedHosts))
 	for _, h := range allowedHosts {
@@ -170,7 +171,7 @@ func hostAuthorizationMiddleware(allowedHosts []string, badHostHandler http.Hand
 			}
 			if u, err := url.Parse("http://" + hostHeader); err == nil {
 				hostname := u.Hostname()
-				if _, ok := allowed[strings.ToLower(hostname)]; ok {
+				if _, ok := allowed[strings.ToLower(hostname)]; ok || (also != nil && also(hostname)) {
 					next.ServeHTTP(w, r)
 					return
 				}

@@ -40,7 +40,10 @@ hub never has to be on the public internet.
    `instance.stopped` events, and the hub adds, updates or stops the instance. One the hub can't
    reach that also missed three heartbeats, such as one whose workspace was killed, counts as
    stopped, and the hub stops trying until its next heartbeat. These events only add instances
-   and say where they are; what each one does comes from its summary.
+   and say where they are; what each one does comes from its summary. An event that names another
+   URL moves the instance there only while the hub isn't connected to it, and never one added by
+   hand: an AgentAPI whose machine got another address (`{ip}` in its `--public-url`) moves with
+   its first heartbeat after the old address stopped answering.
 2. The hub follows each instance's summary (`GET /events?only=summary`), the source of truth for
    what the instance does: its state, what it waits for, its title, latest task, queue and usage
    limits. One connection per instance, reopened after 1 s, then up to every 30 s when it fails. A
@@ -91,7 +94,7 @@ CGNAT ones such as Tailscale's. Containers' and bridges' interfaces don't count.
 the secret: `join` takes it from `AGENTAPI_HUB_SECRET`.
 
 ```text
-level=INFO msg="To join a machine, run this on it with AGENTAPI_HUB_SECRET set to the hub's secret" interface=eth0 command="agentapi hub join http://192.168.1.20:3290/hooks --public-url 'http://<its address>:{port}'"
+level=INFO msg="To join a machine, run this on it with AGENTAPI_HUB_SECRET set to the hub's secret" interface=eth0 command="agentapi hub join http://192.168.1.20:3290/hooks --public-url 'http://{ip}:{port}'"
 ```
 
 To keep it running, start it the way the machine starts its other services. A systemd user unit,
@@ -121,9 +124,9 @@ machine allows it.
 On every machine whose AgentAPIs the hub should watch, once:
 
 ```bash
-sudo agentapi update   # the hub needs AgentAPI 1.3 or later on each machine
+sudo agentapi update   # {ip} needs AgentAPI newer than 2.1.2 on each machine
 agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
-  --public-url 'http://dev-1.vpn:{port}'
+  --public-url 'http://{ip}:{port}'
 ```
 
 The hub's page has this command ready, with the hub's address and secret filled in, and a prompt
@@ -136,7 +139,12 @@ for an agent on the machine: [Joining a machine from the page](#joining-a-machin
   workspace's start script, join without a change to the script. Flags and `AGENTAPI_*` variables
   still win over the file.
 - `--public-url` is where the hub reaches each AgentAPI. `{port}` becomes each one's port, so one
-  line serves the Claude Code AgentAPI on 3286 and the Codex one on 3285 alike.
+  line serves the Claude Code AgentAPI on 3286 and the Codex one on 3285 alike. `{ip}` becomes the
+  machine's IPv4 address on the route to the hub. Each AgentAPI looks it up again while it runs (at
+  most every 30 seconds), so when DHCP gives the machine another address, as after a Coder
+  workspace restarts, its next heartbeat names the new one and the hub follows it
+  ([How it works](#how-it-works)). `{ip}` needs AgentAPI newer than 2.1.2; a name that
+  always resolves, such as `http://dev-1.vpn:{port}`, works too.
 - The same file can keep each AgentAPI's conversation when it restarts (an update, a reboot): add
   `state-db: ~/.agentapi/state/{port}.db` to it; see
   [Persistent sessions](../README.md#persistent-sessions).
@@ -145,9 +153,10 @@ for an agent on the machine: [Joining a machine from the page](#joining-a-machin
 - AgentAPIs that are running now get the change at once and appear in the hub within a second.
   Ones that started before 1.2 aren't registered on the machine, so `join` can't reach them:
   restart them, or the workspace, once.
-- The hub forwards requests with the instance's VPN name as the `Host` header. An AgentAPI accepts
-  only `localhost`, `127.0.0.1` and `[::1]` by default, so allow its VPN name: start it with
-  `--allowed-hosts '*'` (the Coder module does), or add the name to the config file:
+- The hub forwards requests with the host of the instance's URL as the `Host` header. By default an
+  AgentAPI accepts `localhost`, `127.0.0.1`, `[::1]` and the address `{ip}` stands for now. For a
+  VPN name, start it with `--allowed-hosts '*'` (the Coder module does), or add the name
+  to the config file:
 
   ```yaml
   allowed-hosts: [localhost, 127.0.0.1, "[::1]", dev-1.vpn]
@@ -473,10 +482,11 @@ status in its header ([Session details](chat-ui.md#session-details-and-alerts)).
   without a sign-in page in front of it, unlike a Coder port URL.
 - **Allow updates from the hub** adds `--allow-update` ([Updating from the hub](#updating-from-the-hub)).
 - **Run on the machine** is the `agentapi hub join` command, with the secret in
-  `AGENTAPI_HUB_SECRET`. Put the machine's address in place of `<this machine>`.
+  `AGENTAPI_HUB_SECRET` and `--public-url 'http://{ip}:{port}'`: `{ip}` follows the machine's
+  address, so there is nothing to fill in.
 - **Prompt for an agent on that machine** has an agent there join it: the hub's URL and the others
-  to try, the secret, how to find the machine's address, and the steps: the version, a check that
-  the hub answers, `join`, `agentapi hub status` and `allowed-hosts`. The agent restarts no
+  to try, the secret, `--public-url` with `{ip}` as it is, and the steps: the version, a check that
+  the hub answers, `join` and `agentapi hub status`. The agent restarts no
   AgentAPI and never shows the secret. With updates allowed, it explains the one-time setup `join`
   may print and suggests a state DB, asking you before either. An agent with the
   [agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md) follows the skill; one without
@@ -573,6 +583,7 @@ instance that joined with its webhook comes back the next time it starts.
 | Unreachable: `400 Bad Request` | The AgentAPI refuses the VPN name as `Host` | Allow it in `--allowed-hosts` (step 3) |
 | Unreachable: `needs an API token` | The AgentAPI runs with `--api-token` and the hub has another | Give the hub `--instance-token`, or the token when adding |
 | Unreachable: connection refused or timed out | Wrong `--public-url`, or the hub can't reach the VPN | Check the URL from the hub's machine with `curl <url>/summary` |
+| Unreachable (`no route to host`, or timed out) after the machine got a new IP address | It joined with a fixed IP in `--public-url`, which DHCP changed, as after a Coder workspace restarts | Run `agentapi hub join` again with `--public-url 'http://{ip}:{port}'`; the hub follows it with its next heartbeat, and after every later change |
 | Unreachable: `another AgentAPI answers at this URL` | The instance's address now belongs to another machine (a new DHCP lease), or `--public-url` names another machine | Check `--public-url`; an instance that moved sends its new address with its next heartbeat, within a minute |
 | The hub logs "Two AgentAPIs report the same instance ID" | Two machines have the same name, so their AgentAPIs on the same port have the same ID; the hub keeps the one it follows | Rename one machine, or give its AgentAPIs `--instance-id` |
 | The hub logs "An instance's event names another URL" | Its `--public-url` changed while the hub follows it at the old one | Nothing: the hub keeps the URL that works, and takes the new one once the old one stops answering |
@@ -618,7 +629,7 @@ The hub reaches the instances through the proxy of the environment (`HTTP_PROXY`
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--secret` | `AGENTAPI_HUB_SECRET` | Secret that signs the events; without it the hub refuses them |
-| `--public-url` | | Where the hub reaches the AgentAPIs; `{port}` and `{hostname}` are filled in |
+| `--public-url` | | Where the hub reaches the AgentAPIs, such as `http://{ip}:{port}`; `{port}` and `{hostname}` are filled in, and `{ip}` with the machine's IPv4 address on the route to the hub, which each AgentAPI looks up again while it runs |
 | `--events` | `instance.*` | Events sent to the hub; it needs only these |
 | `--api-token` | `AGENTAPI_API_TOKEN` | Token for running AgentAPIs that need one |
 | `--config` | `~/.agentapi/config.yaml` | Config file to write |
@@ -630,11 +641,15 @@ Before it writes anything, `join` checks that the hub takes this machine's event
 a signed `webhook.test` event and stops, saying why, when the hub isn't reached, a sign-in page is
 in front of it (a Coder port URL redirects to Coder's login), or the secret differs. It also stops
 when the hub is on another machine and `--public-url` names `localhost`, which the hub can't reach.
+For these checks it fills in `{ip}` toward the hub, and prints the address.
 
 `join` writes `webhook-url`, `webhook-secret`, `webhook-events` and `public-url` into the config
 file and applies them to the running AgentAPIs with `PUT /webhook`, keeping their timeout and
-attempts. `leave` removes them and turns the running AgentAPIs' webhook off. An AgentAPI that can't
-be changed now applies the file when it restarts. With `--allow-update`, `join` also writes
+attempts. The file keeps `{ip}`, and so do the running AgentAPIs that fill it in themselves (newer
+than 2.1.2, by their registry entry); an older one gets the address now, keeps it until it restarts,
+and `join` says so. `join` reaches each one at its registry URL, or else at its port on localhost.
+`leave` removes them and turns the running AgentAPIs' webhook off. An AgentAPI that can't be changed
+now applies the file when it restarts. With `--allow-update`, `join` also writes
 `allow-update: true`, which AgentAPIs read when they start.
 
 A machine that joined with an earlier version still sends `task.*`, `request.*`, `login.*`,

@@ -4,7 +4,7 @@ import {useEffect, useId, useState} from "react";
 import {Check, Copy, Eye, EyeOff} from "lucide-react";
 import {CopyCommand} from "@/components/copy-command";
 import {copyText} from "@/lib/clipboard";
-import {ALLOW_UPDATE_SINCE, JOIN_CHECKS_SINCE, fetchJoinInfo, joinChoices, joinCommand, joinPrompt, type JoinInfo} from "@/lib/hub-join";
+import {JOIN_SINCE, fetchJoinInfo, joinChoices, joinCommand, joinPrompt, type JoinInfo} from "@/lib/hub-join";
 
 const selectClass =
   "h-10 w-full min-w-0 rounded-lg border bg-card px-3 font-mono text-[13px] shadow-xs outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40";
@@ -147,7 +147,8 @@ export function JoinSteps({root, info}: {root: string; info: JoinInfo | "failed"
         </div>
         <CopyCommand text={joinCommand(onScreen)} copy={joinCommand(asIs)} wrap />
         <p className="mt-1.5 text-xs text-muted-foreground">
-          It needs AgentAPI {allowUpdate ? ALLOW_UPDATE_SINCE : JOIN_CHECKS_SINCE} or later there: <Code>sudo agentapi update</Code>.{secretNote}
+          <Code>{"{ip}"}</Code> is the machine&apos;s address on the route to the hub: its AgentAPIs look it up again while they run, so the hub follows the machine
+          when it gets another address. It needs AgentAPI {JOIN_SINCE} or later there: <Code>sudo agentapi update</Code>.{secretNote}
         </p>
       </div>
       <div>

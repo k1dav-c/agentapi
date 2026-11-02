@@ -6,6 +6,7 @@ package hub
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,9 +19,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/spf13/cobra"
 
+	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/instanceapi"
+	"github.com/coder/agentapi/lib/netaddr"
 	"github.com/coder/agentapi/lib/registry"
 	"github.com/coder/agentapi/lib/selfupdate"
 	"github.com/coder/agentapi/lib/userconfig"
@@ -117,13 +121,24 @@ func joinCmd() *cobra.Command {
 			if secret == "" {
 				_, _ = fmt.Fprintln(out, "Warning: without --secret the hub can't tell the events are this machine's.")
 			}
+			// The public URL with {ip} filled in as the AgentAPIs fill it
+			// in now, for the checks and for those too old to fill it in.
+			expandedURL := publicURL
+			if instanceapi.HasIP(publicURL) {
+				ip, err := resolveIP(hubURL)
+				if err != nil {
+					return fmt.Errorf("--public-url: no address of this machine for {ip}: %w", err)
+				}
+				expandedURL = instanceapi.ExpandIP(publicURL, ip)
+				_, _ = fmt.Fprintf(out, "{ip} is %s now, the address this machine reaches the hub from; the AgentAPIs look it up again when it changes.\n", ip)
+			}
 			if publicURL != "" {
-				if err := checkURL(instanceapi.ExpandPublicURL(publicURL, 1)); err != nil {
+				if err := checkURL(instanceapi.ExpandPublicURL(expandedURL, 1)); err != nil {
 					return fmt.Errorf("--public-url: %w", err)
 				}
 			}
 			if !noCheck {
-				if err := checkReach(out, hubURL, publicURL); err != nil {
+				if err := checkReach(out, hubURL, expandedURL); err != nil {
 					return err
 				}
 				if err := checkHub(cmd.Context(), hubURL, secret); err != nil {
@@ -155,14 +170,14 @@ func joinCmd() *cobra.Command {
 			if allowUpdate {
 				reportUpdates(out)
 			}
-			return applyToRunning(cmd.Context(), out, opts, webhookChange{URL: hubURL, Events: &events, Secret: &secret, PublicURL: publicURL})
+			return applyToRunning(cmd.Context(), out, opts, webhookChange{URL: hubURL, Events: &events, Secret: &secret, PublicURL: publicURL, ExpandedURL: expandedURL})
 		},
 	}
 	opts.addFlags(cmd)
 	cmd.Flags().StringVar(&secret, "secret", "", "Secret that signs the events, which the hub checks (default $AGENTAPI_HUB_SECRET)")
 	cmd.Flags().StringSliceVar(&events, "events", defaultEvents, "Events to send to the hub; it needs only instance.*, and follows the rest from each AgentAPI's summary")
 	cmd.Flags().BoolVar(&noCheck, "no-check", false, "Join without checking that the hub takes this machine's events (for a hub that doesn't run yet)")
-	cmd.Flags().StringVar(&publicURL, "public-url", "", "Where the hub reaches this machine's AgentAPIs, such as http://dev-1.vpn:{port} ({port} and {hostname} are filled in for each)")
+	cmd.Flags().StringVar(&publicURL, "public-url", "", "Where the hub reaches this machine's AgentAPIs, such as http://{ip}:{port} or http://dev-1.vpn:{port}: {port} and {hostname} are filled in for each, and {ip} with this machine's IPv4 address on the route to the hub, which follows it when DHCP gives the machine another")
 	cmd.Flags().BoolVar(&allowUpdate, "allow-update", false, "Also let the hub update this machine's AgentAPIs to the latest release (allow-update: true in the config file, which leave keeps)")
 	return cmd
 }
@@ -284,8 +299,47 @@ type webhookChange struct {
 	URL    string
 	Events *[]string
 	Secret *string
-	// PublicURL, if set, may hold {port} and {hostname}.
+	// PublicURL, if set, may hold {port}, {hostname} and {ip}.
 	PublicURL string
+	// ExpandedURL is PublicURL with {ip} filled in, for the AgentAPIs that
+	// can't fill it in themselves (supportsIP).
+	ExpandedURL string
+}
+
+// resolveIP is the address {ip} stands for on the route to the hub.
+var resolveIP = func(hubURL string) (string, error) {
+	return (&netaddr.Resolver{}).Resolve(netaddr.Target(hubURL))
+}
+
+// ipSince is the last release whose AgentAPIs can't fill in {ip}
+// themselves.
+var ipSince = semver.MustParse("2.1.2")
+
+// supportsIP reports whether an AgentAPI of version fills in {ip} in its
+// public URL itself: one of a release after 2.1.2, a development build,
+// or one at least as new as this agentapi.
+func supportsIP(agentapiVersion, own string) bool {
+	if agentapiVersion == "" {
+		return false
+	}
+	if agentapiVersion == own {
+		return true
+	}
+	v, err := semver.NewVersion(agentapiVersion)
+	if err != nil {
+		return false
+	}
+	if unreleased(v) || v.GreaterThan(ipSince) {
+		return true
+	}
+	ownVersion, err := semver.NewVersion(own)
+	return err == nil && !unreleased(ownVersion) && !v.LessThan(ownVersion)
+}
+
+// unreleased reports whether v is of a build without a release version
+// (0.0.0-dev).
+func unreleased(v *semver.Version) bool {
+	return v.Major() == 0 && v.Minor() == 0 && v.Patch() == 0
 }
 
 // applyToRunning changes the webhook of the AgentAPIs running on this
@@ -301,13 +355,13 @@ func applyToRunning(ctx context.Context, out io.Writer, opts options, change web
 	}
 	var failed []string
 	for _, entry := range entries {
-		err := applyTo(ctx, entry, opts.apiToken, change)
+		note, err := applyTo(ctx, entry, opts.apiToken, change)
 		if err != nil {
 			failed = append(failed, displayName(entry))
 			_, _ = fmt.Fprintf(out, "  %s (%s): %v\n", displayName(entry), entry.URL, err)
 			continue
 		}
-		_, _ = fmt.Fprintf(out, "  %s (%s): applied\n", displayName(entry), entry.URL)
+		_, _ = fmt.Fprintf(out, "  %s (%s): applied%s\n", displayName(entry), entry.URL, note)
 	}
 	if len(failed) > 0 {
 		return fmt.Errorf("couldn't change %s now; they apply the config file when they restart", strings.Join(failed, ", "))
@@ -315,10 +369,11 @@ func applyToRunning(ctx context.Context, out io.Writer, opts options, change web
 	return nil
 }
 
-func applyTo(ctx context.Context, entry registry.Entry, token string, change webhookChange) error {
+// applyTo changes entry's webhook, and returns a note on how it applied.
+func applyTo(ctx context.Context, entry registry.Entry, token string, change webhookChange) (string, error) {
 	var current webhookConfig
 	if err := call(ctx, entry, token, http.MethodGet, nil, &current); err != nil {
-		return err
+		return "", err
 	}
 	body := map[string]any{
 		"url":             change.URL,
@@ -331,17 +386,46 @@ func applyTo(ctx context.Context, entry registry.Entry, token string, change web
 	if change.Secret != nil {
 		body["secret"] = *change.Secret
 	}
+	note := ""
 	if change.PublicURL != "" {
-		body["public_url"] = instanceapi.ExpandPublicURL(change.PublicURL, entry.Port)
+		// The template, for an AgentAPI that fills in {ip} again whenever
+		// the machine's address changes; for an older one, the address now.
+		publicURL := change.PublicURL
+		if instanceapi.HasIP(publicURL) && !supportsIP(entry.Version, version.Version) {
+			publicURL = cmp.Or(change.ExpandedURL, publicURL)
+			note = fmt.Sprintf("; too old for {ip}, it reports %s until it restarts", instanceapi.ExpandPublicURL(publicURL, entry.Port))
+		}
+		body["public_url"] = instanceapi.ExpandPublicURL(publicURL, entry.Port)
 	}
-	return call(ctx, entry, token, http.MethodPut, body, nil)
+	return note, call(ctx, entry, token, http.MethodPut, body, nil)
 }
 
-// call sends a request to /webhook of the AgentAPI entry names.
+// call sends a request to /webhook of the AgentAPI entry names: at its
+// URL, or else at its port on localhost. Its URL may be its public URL,
+// with an address the machine no longer has (DHCP gave it another).
 func call(ctx context.Context, entry registry.Entry, token, method string, body, out any) error {
 	if entry.AuthRequired && token == "" {
 		return errors.New("needs an API token (--api-token)")
 	}
+	base := strings.TrimRight(entry.URL, "/")
+	err := callAt(ctx, base, token, method, body, out)
+	var unreachable *unreachableError
+	if local := fmt.Sprintf("http://127.0.0.1:%d", entry.Port); errors.As(err, &unreachable) && entry.Port > 0 && local != base {
+		if callAt(ctx, local, token, method, body, out) == nil {
+			return nil
+		}
+	}
+	return err
+}
+
+// unreachableError: no answer came.
+type unreachableError struct{ err error }
+
+func (e *unreachableError) Error() string { return "unreachable: " + e.err.Error() }
+func (e *unreachableError) Unwrap() error { return e.err }
+
+// callAt sends a request to base's /webhook.
+func callAt(ctx context.Context, base, token, method string, body, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	var reader io.Reader
@@ -352,7 +436,7 @@ func call(ctx context.Context, entry registry.Entry, token, method string, body,
 		}
 		reader = bytes.NewReader(data)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(entry.URL, "/")+"/webhook", reader)
+	req, err := http.NewRequestWithContext(ctx, method, base+"/webhook", reader)
 	if err != nil {
 		return err
 	}
@@ -364,7 +448,7 @@ func call(ctx context.Context, entry registry.Entry, token, method string, body,
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("unreachable: %w", err)
+		return &unreachableError{err: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {

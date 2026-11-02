@@ -485,6 +485,57 @@ func TestHubEventsDontMoveAFollowedInstance(t *testing.T) {
 	assert.Never(t, func() bool { return got.Load() > 0 }, 300*time.Millisecond, 20*time.Millisecond, "nothing went to the other URL")
 }
 
+// An AgentAPI whose machine got another address (DHCP, after its
+// workspace restarted) names it in its next heartbeat ({ip} in its public
+// URL). The hub keeps the URL it reaches while that answers; once it
+// stopped answering, the heartbeat moves the instance to the new one.
+func TestHubFollowsANewAddress(t *testing.T) {
+	oldSrv, inst := startInstanceOn(t, nil, "dev-1:3285")
+	hubSrv := startHub(t, "")
+	joined := joinInstance(t, hubSrv.URL, oldSrv.URL)
+	// The same AgentAPI at its new address.
+	newSrv := httptest.NewServer(inst.Handler())
+	t.Cleanup(newSrv.Close)
+	// Stopped before newSrv closes (cleanups run last first): its server
+	// waits for the hub's stream to end.
+	t.Cleanup(func() {
+		stopped := map[string]any{"id": "d9", "type": "instance.stopped", "created_at": time.Now(), "instance": map[string]any{"id": joined.ID, "server_id": joined.ServerID, "url": newSrv.URL}}
+		assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, stopped, hubSecret, time.Now()))
+	})
+	heartbeat := func(id string) map[string]any {
+		return map[string]any{
+			"id": id, "type": "instance.heartbeat", "created_at": time.Now(),
+			"instance": map[string]any{"id": joined.ID, "server_id": joined.ServerID, "url": newSrv.URL, "agent_type": "claude"},
+			"data":     map[string]any{"heartbeat_seconds": 60},
+		}
+	}
+
+	// While the old address answers, the hub stays there.
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, heartbeat("d1"), hubSecret, time.Now()))
+	kept := instances(t, hubSrv.URL)[0]
+	assert.Equal(t, oldSrv.URL, kept.URL)
+	assert.Equal(t, hub.ConnectionConnected, kept.Connection)
+
+	// The old address is gone.
+	_ = oldSrv.Listener.Close()
+	oldSrv.CloseClientConnections()
+	require.Eventually(t, func() bool {
+		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionUnreachable
+	}, 10*time.Second, 20*time.Millisecond)
+
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, heartbeat("d2"), hubSecret, time.Now()))
+	var moved hub.Instance
+	require.Eventually(t, func() bool {
+		moved = instances(t, hubSrv.URL)[0]
+		return moved.Connection == hub.ConnectionConnected
+	}, 10*time.Second, 20*time.Millisecond)
+	assert.Equal(t, newSrv.URL, moved.URL)
+	assert.Equal(t, joined.ServerID, moved.ServerID, "the same run")
+	assert.Empty(t, moved.Error)
+	assert.Len(t, instances(t, hubSrv.URL), 1, "moved, not added")
+	assert.Equal(t, http.StatusOK, request(t, http.MethodGet, hubSrv.URL+"/i/"+joined.ID+"/status", hubToken, nil, nil), "requests go to the new address")
+}
+
 // An instance added by hand stays at its URL: no event moves it, not even
 // while the hub can't reach it.
 func TestHubAddedInstanceStays(t *testing.T) {

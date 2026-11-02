@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/netaddr"
 )
 
 func addrs(list ...string) []netip.Addr {
@@ -22,18 +24,18 @@ func addrs(list ...string) []netip.Addr {
 
 // A machine's interfaces, as a workstation with Docker and Tailscale has
 // them.
-var workstation = []netInterface{
-	{name: "lo", up: true, loopback: true, addrs: addrs("127.0.0.1", "::1")},
-	{name: "eth0", up: true, addrs: addrs("192.168.9.210", "fe80::1")},
-	{name: "tailscale0", up: true, addrs: addrs("100.116.90.98", "fd7a:115c:a1e0::1")},
-	{name: "docker0", up: false, addrs: addrs("172.17.0.1")},
-	{name: "br-8d0a10b426d8", up: true, addrs: addrs("172.18.0.1")},
-	{name: "veth1a2b3c", up: true, addrs: addrs("169.254.10.1")},
-	{name: "virbr0", up: true, addrs: addrs("192.168.122.1")},
-	{name: "ens5", up: true, addrs: addrs("203.0.113.7")},
-	{name: "wlan0", up: true, addrs: addrs("::ffff:10.0.0.5", "169.254.3.3")},
-	{name: "wlan1", up: false, addrs: addrs("10.0.0.6")},
-	{name: "eth1", up: true, addrs: addrs("192.168.9.210")},
+var workstation = []netaddr.Interface{
+	{Name: "lo", Up: true, Loopback: true, Addrs: addrs("127.0.0.1", "::1")},
+	{Name: "eth0", Up: true, Addrs: addrs("192.168.9.210", "fe80::1")},
+	{Name: "tailscale0", Up: true, Addrs: addrs("100.116.90.98", "fd7a:115c:a1e0::1")},
+	{Name: "docker0", Up: false, Addrs: addrs("172.17.0.1")},
+	{Name: "br-8d0a10b426d8", Up: true, Addrs: addrs("172.18.0.1")},
+	{Name: "veth1a2b3c", Up: true, Addrs: addrs("169.254.10.1")},
+	{Name: "virbr0", Up: true, Addrs: addrs("192.168.122.1")},
+	{Name: "ens5", Up: true, Addrs: addrs("203.0.113.7")},
+	{Name: "wlan0", Up: true, Addrs: addrs("::ffff:10.0.0.5", "169.254.3.3")},
+	{Name: "wlan1", Up: false, Addrs: addrs("10.0.0.6")},
+	{Name: "eth1", Up: true, Addrs: addrs("192.168.9.210")},
 }
 
 // The join URLs are the --bind address's, or the machine's IPv4
@@ -111,7 +113,7 @@ func TestJoinAPI(t *testing.T) {
 	t.Run("no token", func(t *testing.T) {
 		h, err := New(Config{NoToken: true, Secret: "join-secret", Port: 3290})
 		require.NoError(t, err)
-		h.interfaces = func() ([]netInterface, error) { return workstation, nil }
+		h.interfaces = func() ([]netaddr.Interface, error) { return workstation, nil }
 		srv := httptest.NewServer(h.Handler())
 		defer srv.Close()
 

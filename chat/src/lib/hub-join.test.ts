@@ -49,13 +49,13 @@ describe("joinChoices", () => {
 describe("joinCommand", () => {
   test("the URL picked, with the secret through the environment", () => {
     expect(joinCommand(options())).toBe(
-      `AGENTAPI_HUB_SECRET='${SECRET}' agentapi hub join http://192.168.9.210:3290/hooks --public-url 'http://<this machine>:{port}'`,
+      `AGENTAPI_HUB_SECRET='${SECRET}' agentapi hub join http://192.168.9.210:3290/hooks --public-url 'http://{ip}:{port}'`,
     );
     expect(joinCommand(options({hub: vpn, others: [lan]}))).toContain("agentapi hub join http://100.116.90.98:3290/hooks ");
   });
 
   test("--allow-update, when the hub may update the machine", () => {
-    expect(joinCommand(options({allowUpdate: true}))).toEndWith("--public-url 'http://<this machine>:{port}' --allow-update");
+    expect(joinCommand(options({allowUpdate: true}))).toEndWith("--public-url 'http://{ip}:{port}' --allow-update");
     expect(joinCommand(options())).not.toContain("--allow-update");
   });
 
@@ -82,13 +82,17 @@ describe("joinPrompt", () => {
       "- The hub's webhook URL: http://192.168.9.210:3290/hooks (the hub's eth0). If this machine isn't on that network, use http://100.116.90.98:3290/hooks (tailscale0) instead",
     );
     expect(prompt).toContain(`- The hub secret: \`${SECRET}\`. Pass it to agentapi hub join only through the environment`);
-    expect(prompt).toContain("- Where the hub reaches this machine: http://<this machine's IP>:{port}");
-    expect(prompt).toContain("1. agentapi --version: below 1.6.1, run sudo agentapi update first.");
+    expect(prompt).toContain("- Where the hub reaches this machine: --public-url 'http://{ip}:{port}', exactly as written. Don't look up the IP:");
+    expect(prompt).toContain("follows it when the address changes");
+    expect(prompt).not.toContain("hostname -I");
+    expect(prompt).not.toContain("<IP>");
+    expect(prompt).toContain("1. agentapi --version: below 2.2.0, run sudo agentapi update first.");
     expect(prompt).toContain("curl -s -o /dev/null -w '%{http_code}\\n' -X POST http://192.168.9.210:3290/hooks\n");
-    expect(prompt).toContain(`AGENTAPI_HUB_SECRET='${SECRET}' agentapi hub join http://192.168.9.210:3290/hooks --public-url 'http://<IP>:{port}'\n`);
+    expect(prompt).toContain(`AGENTAPI_HUB_SECRET='${SECRET}' agentapi hub join http://192.168.9.210:3290/hooks --public-url 'http://{ip}:{port}'\n`);
+    expect(prompt).toContain("It prints the address {ip} stands for now.");
     expect(prompt).toContain("4. agentapi hub status: each running AgentAPI should report to http://192.168.9.210:3290/hooks.");
-    expect(prompt).toContain("--allowed-hosts '*'");
-    expect(prompt).toContain('allowed-hosts: [localhost, 127.0.0.1, "[::1]", <IP>]');
+    expect(prompt).not.toContain("allowed-hosts");
+    expect(prompt).toContain("the address join printed for {ip}");
     expect(prompt).toContain("Rules: don't restart or stop any AgentAPI");
     expect(prompt).toContain("Don't print, log or commit the secret.");
   });
@@ -107,11 +111,11 @@ describe("joinPrompt", () => {
     );
   });
 
-  test("updates from the hub: --allow-update, 2.1.0, the one-time setup and the state DB, each asked first", () => {
+  test("updates from the hub: --allow-update, the one-time setup and the state DB, each asked first", () => {
     const prompt = joinPrompt(options({allowUpdate: true}));
     expect(prompt).toContain("- Updates from the hub: yes, join with --allow-update");
-    expect(prompt).toContain("1. agentapi --version: below 2.1.0, run sudo agentapi update first.");
-    expect(prompt).toContain("--public-url 'http://<IP>:{port}' --allow-update\n");
+    expect(prompt).toContain("1. agentapi --version: below 2.2.0, run sudo agentapi update first.");
+    expect(prompt).toContain("--public-url 'http://{ip}:{port}' --allow-update\n");
     expect(prompt).toContain("explain the one-time setup it prints");
     expect(prompt).toContain("ask me before you run it");
     expect(prompt).toContain("   state-db: ~/.agentapi/state/{port}.db");

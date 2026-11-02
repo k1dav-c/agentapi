@@ -156,7 +156,7 @@ func logJoin(logger *slog.Logger, urls []hub.JoinURL, port int) {
 		if u.Interface != "" {
 			args = append(args, "interface", u.Interface)
 		}
-		args = append(args, "command", "agentapi hub join "+u.URL+" --public-url 'http://<its address>:{port}'")
+		args = append(args, "command", "agentapi hub join "+u.URL+" --public-url 'http://{ip}:{port}'")
 		logger.Info("To join a machine, run this on it with AGENTAPI_HUB_SECRET set to the hub's secret", args...)
 	}
 	logger.Info("The Add dialog (+) of the hub's page has the command, and a prompt for an agent on the machine")

@@ -1266,14 +1266,15 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 
 ```bash
 sudo agentapi update   # 最新版才會讀設定檔
-agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://dev-1.vpn:{port}'
+agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
 ```
 
 `join` 會把 hub 的 webhook（`webhook-url`、`webhook-secret`、`webhook-events`、`public-url`）寫進
 `~/.agentapi/config.yaml`，這個使用者的每個 `agentapi server` 啟動時都會讀取；同時套用到正在執行、
 已登記的 AgentAPI：它們會立刻送 `instance.heartbeat` 給 hub。重新啟動（例如 workspace 重開）後，
 AgentAPI 會依設定檔送出 `instance.started`。`--public-url` 是 hub 連回它們的網址，`{port}` 和
-`{hostname}` 會替每個實例填入。1.2 之前啟動的 AgentAPI 沒有登記，需要重新啟動一次。
+`{hostname}` 會替每個實例填入；`{ip}` 則是這台機器通往 hub 那條路由上的 IPv4 位址，每個 AgentAPI
+執行期間會重新查詢：DHCP 給了機器新位址時，下一次 heartbeat 就會帶著它，hub 也會跟著改用。1.2 之前啟動的 AgentAPI 沒有登記，需要重新啟動一次。
 `agentapi hub status` 顯示 hub 以及每個執行中的 AgentAPI 回報到哪裡；`agentapi hub leave` 會移除 hub。
 加上 `--allow-update` 時，hub 也能[更新它們](#透過-api-更新)。
 `join` 會先送給 hub 一個有簽章的測試事件，hub 沒收下就停止（連不到、被登入頁擋住，或 secret 不同）；
@@ -1418,7 +1419,8 @@ data，欄位名稱同 JSON，例如 `{{.Data.prompt}}`），`run.status_changed
 每個參數都有對應的 `AGENTAPI_` 環境變數（`AGENTAPI_WEBHOOK_URL`、以空白分隔事件的
 `AGENTAPI_WEBHOOK_EVENTS`、`AGENTAPI_WEBHOOK_SECRET` 等）。`GET /webhook` 顯示目前設定（只顯示
 是否設定了 secret，不會回傳 secret 本身），`PUT /webhook` 不需重新啟動就能修改；省略的
-`events`、`secret`、`heartbeat_seconds`、`instance_id` 和 `public_url` 會維持原值。
+`events`、`secret`、`heartbeat_seconds`、`instance_id` 和 `public_url` 會維持原值。`public_url`
+可以含有 `{port}`、`{hostname}` 和 `{ip}`，`GET /webhook` 照原樣回傳；事件和摘要裡才會填入。
 
 Explorer 的 Webhook 分頁可設定接收端網址、事件群組、簽章 secret、instance ID、心跳間隔與
 公開網址；**Delivery and payload** 提供逾時、嘗試次數與範本。即使 AgentAPI 啟動時沒有設定
@@ -1744,7 +1746,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--name` | 工作目錄的名稱 | 監看多個 AgentAPI 的用戶端顯示的名稱 |
 | `--registry` | `true` | 執行期間在登記目錄保留登記檔；見[監看多個實例](#監看多個實例) |
 | `--registry-dir` | `~/.agentapi/instances` | 登記目錄 |
-| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會被填入 |
+| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會被填入，`{ip}` 則填入這台機器通往 webhook 網址那條路由上的 IPv4 位址（沒有 webhook 網址時，取第一個私有網路位址，其次是 CGNAT 位址），執行期間最多每 30 秒重新查詢一次；查不到時沿用上一個位址。`{ip}` 代表的位址一律是允許的主機 |
 | `--config` | `~/.agentapi/config.yaml` | 設定檔：以旗標名稱設定，優先順序低於旗標和環境變數 |
 | `--allow-update` | `false` | 讓 API 用戶端（例如 hub）把 AgentAPI 更新到最新發行版，再原地重新啟動；見[透過 API 更新](#透過-api-更新) |
 | `--webhook-timeout` | `10s` | 每次傳送的逾時時間 |
@@ -1829,7 +1831,7 @@ frontend  codex   working                http://localhost:3285  Add the settings
 
 ```bash
 agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token "$AGENTAPI_TOKEN"
-agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://dev-1.vpn:{port}'
+agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
 agentapi hub status
 agentapi hub leave
 ```
@@ -1842,7 +1844,8 @@ agentapi hub leave
 
 `join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 AgentAPI。
 `--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`，hub 只需要
-這些，其餘都從摘要得知），`--public-url` 是 hub 連回它們的網址，
+這些，其餘都從摘要得知），`--public-url` 是 hub 連回它們的網址（`{ip}` 會跟著機器的位址走；
+設定檔和 2.1.2 之後的 AgentAPI 保留 `{ip}`，較舊的則拿到當下的位址），
 `--api-token`（或 `AGENTAPI_API_TOKEN`）會送給需要 token 的實例，`--config` 和 `--registry-dir`
 可指定其他檔案。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。`--allow-update` 會另外寫入
 `allow-update: true`，AgentAPI 重新啟動後，hub 就能[透過 API 更新它們](#透過-api-更新)；`leave` 會保留這個設定。

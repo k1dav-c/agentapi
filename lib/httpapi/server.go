@@ -215,7 +215,11 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	badHostHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid host header. Allowed hosts: "+strings.Join(allowedHosts, ", "), http.StatusBadRequest)
 	})
-	router.Use(hostAuthorizationMiddleware(allowedHosts, badHostHandler))
+	// The address {ip} in the public URL stands for now, which DHCP may
+	// change: the list can't name it.
+	var webhook *webhookDispatcher
+	publicIP := func(hostname string) bool { return webhook != nil && webhook.publicIP() == hostname }
+	router.Use(hostAuthorizationMiddleware(allowedHosts, publicIP, badHostHandler))
 
 	router.Use(requestLogMiddleware(logger))
 	router.Use(Compress())
@@ -266,7 +270,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		return mf.FormatToolCall(config.AgentType, message)
 	}
 
-	webhook, err := newWebhookDispatcher(config.Webhook, logger, config.AgentType, config.Transport, config.Clock)
+	webhook, err = newWebhookDispatcher(config.Webhook, logger, config.AgentType, config.Transport, config.Clock)
 	if err != nil {
 		return nil, fmt.Errorf("configure webhook: %w", err)
 	}
@@ -392,6 +396,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 	// Clients follow the queue through queue_update events.
 	s.queue.onChange = emitter.SetQueue
+	// The summary and the registry entry name the new address.
+	webhook.urlChanged = s.instanceChanged
 	if stateDB != nil {
 		s.restoreQueue(restored.snapshot)
 		if stored := restored.snapshot.Meta[statedb.MetaWebhook]; stored != "" {
