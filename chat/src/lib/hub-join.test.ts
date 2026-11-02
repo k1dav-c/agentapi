@@ -86,7 +86,7 @@ describe("joinPrompt", () => {
     expect(prompt).toContain("follows it when the address changes");
     expect(prompt).not.toContain("hostname -I");
     expect(prompt).not.toContain("<IP>");
-    expect(prompt).toContain("1. agentapi --version: below 2.1.3, run sudo agentapi update first.");
+    expect(prompt).toContain("1. agentapi --version: below 2.2.0, run sudo agentapi update first.");
     expect(prompt).toContain("curl -s -o /dev/null -w '%{http_code}\\n' -X POST http://192.168.9.210:3290/hooks\n");
     expect(prompt).toContain(`AGENTAPI_HUB_SECRET='${SECRET}' agentapi hub join http://192.168.9.210:3290/hooks --public-url 'http://{ip}:{port}'\n`);
     expect(prompt).toContain("It prints the address {ip} stands for now.");
@@ -114,7 +114,7 @@ describe("joinPrompt", () => {
   test("updates from the hub: --allow-update, the one-time setup and the state DB, each asked first", () => {
     const prompt = joinPrompt(options({allowUpdate: true}));
     expect(prompt).toContain("- Updates from the hub: yes, join with --allow-update");
-    expect(prompt).toContain("1. agentapi --version: below 2.1.3, run sudo agentapi update first.");
+    expect(prompt).toContain("1. agentapi --version: below 2.2.0, run sudo agentapi update first.");
     expect(prompt).toContain("--public-url 'http://{ip}:{port}' --allow-update\n");
     expect(prompt).toContain("explain the one-time setup it prints");
     expect(prompt).toContain("ask me before you run it");

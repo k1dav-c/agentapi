@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- `{ip}` in `--public-url` is this machine's address on the route to the hub, looked up again at
+  most every 30 seconds while AgentAPI runs, so a machine that got a new address from DHCP reports
+  it with its next heartbeat and the hub follows once the old one stops answering. A machine joined
+  with a fixed address showed as unreachable after its workspace restarted. `agentapi hub join` and
+  the hub's join command and prompt now use `--public-url 'http://{ip}:{port}'`; join again with it
+  to fix a machine joined with a fixed address. An AgentAPI accepts the address `{ip}` stands for as
+  a `Host`.
+
 ## v2.1.2
 
 ### Fixes

@@ -31,7 +31,7 @@ export function joinChoices(info: JoinInfo | undefined, root: string): JoinURL[]
 // JOIN_SINCE is the first release whose join takes {ip} in --public-url
 // (the release after 2.1.2); it also checks that the hub takes its events
 // and takes --allow-update.
-export const JOIN_SINCE = "2.1.3";
+export const JOIN_SINCE = "2.2.0";
 
 // PUBLIC_URL is where the hub reaches the machine's AgentAPIs: {ip} is the
 // machine's address on the route to the hub, which each AgentAPI looks up

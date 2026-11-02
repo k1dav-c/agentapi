@@ -38,7 +38,7 @@ answers 401.
 
 ## Steps
 
-1. **Check the version.** `{ip}` in `--public-url` needs a release after 2.1.2 (2.1.3 or later),
+1. **Check the version.** `{ip}` in `--public-url` needs AgentAPI 2.2.0 or later,
    whose `join` also checks that the hub takes this machine's events before it writes anything and
    takes `--allow-update`:
 

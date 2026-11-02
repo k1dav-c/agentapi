@@ -22,7 +22,7 @@ describe("JoinSteps", () => {
     expect(shown).toContain("Show the secret");
     expect(shown).toContain("{ip} is the machine's address on the route to the hub");
     expect(shown).toContain("so the hub follows the machine when it gets another address");
-    expect(shown).toContain("It needs AgentAPI 2.1.3 or later there");
+    expect(shown).toContain("It needs AgentAPI 2.2.0 or later there");
     expect(shown).not.toContain("{port}' --allow-update");
     expect(shown).not.toContain("never shows its secret");
   });
