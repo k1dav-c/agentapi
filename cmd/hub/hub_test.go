@@ -365,7 +365,7 @@ func TestServeLogsHowToJoin(t *testing.T) {
 	require.NoError(t, <-served)
 
 	logged := out.String()
-	assert.Regexp(t, `command="agentapi hub join http://127\.0\.0\.1:[1-9][0-9]*/hooks --public-url 'http://<its address>:\{port\}'"`, logged)
+	assert.Regexp(t, `command="agentapi hub join http://127\.0\.0\.1:[1-9][0-9]*/hooks --public-url 'http://\{ip\}:\{port\}'"`, logged)
 	assert.Contains(t, logged, "AGENTAPI_HUB_SECRET")
 	assert.NotContains(t, logged, "join-secret")
 }
