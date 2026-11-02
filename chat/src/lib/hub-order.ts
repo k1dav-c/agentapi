@@ -3,7 +3,7 @@
 // first, whatever the group. Each browser keeps its choice. The instances
 // pinned on the hub come first in both, in their own order.
 
-import {activity, displayName, groupInstances, groupNames, matchesFilter, matchesSearch, needsYou, type HubFilter, type HubGroup, type HubInstance} from "./hub";
+import {activity, displayName, instanceState, groupInstances, groupNames, matchesFilter, matchesSearch, needsYou, type HubFilter, type HubGroup, type HubInstance} from "./hub";
 
 export type ListOrder = "groups" | "recent";
 
@@ -42,12 +42,28 @@ function recentFirst(a: number | undefined, b: number | undefined): number {
   return b - a;
 }
 
-// sortRecent orders the rows by changedAt, the most recent first, those
-// with none last; ties by name, then ID.
+// active reports whether an instance has something going on: it needs you,
+// works, or finished a task you haven't seen. An idle, muted, stopped or
+// unreachable one may still change (it reconnects, it stops), but that is
+// nothing to look at.
+function active(instance: HubInstance): boolean {
+  const state = instanceState(instance);
+  return state === "needs-you" || state === "working" || state === "unread";
+}
+
+// sortRecent orders the rows: the active ones first, then the rest, each by
+// changedAt, the most recent first, those with none last; ties by name,
+// then ID.
 export function sortRecent(instances: Iterable<HubInstance>): HubInstance[] {
   return [...instances]
-    .map((instance) => ({instance, at: timeOf(changedAt(instance))}))
-    .sort((a, b) => recentFirst(a.at, b.at) || displayName(a.instance).localeCompare(displayName(b.instance)) || a.instance.id.localeCompare(b.instance.id))
+    .map((instance) => ({instance, active: active(instance), at: timeOf(changedAt(instance))}))
+    .sort(
+      (a, b) =>
+        Number(b.active) - Number(a.active) ||
+        recentFirst(a.at, b.at) ||
+        displayName(a.instance).localeCompare(displayName(b.instance)) ||
+        a.instance.id.localeCompare(b.instance.id),
+    )
     .map(({instance}) => instance);
 }
 
