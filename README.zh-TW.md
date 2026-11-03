@@ -408,7 +408,8 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 - 回覆、工具結果和思考內容會即時更新，不必等待整個回合結束。
 - 需要你核准或回答時，輸入框上方會顯示決策卡片，詳見[請求處理](#請求核准提問與計畫)。
 - 關閉或重新啟動 agent 時，若它在輸入關閉後 3 秒內沒有自行結束，AgentAPI 會向它的整個行程
-  群組送出訊號，它啟動的 MCP 伺服器和指令也會一併停止。
+  群組送出訊號，它啟動的 MCP 伺服器和指令也會一併停止。agent 結束後（不論如何結束），它啟動
+  而仍在執行的行程會收到 SIGTERM，2 秒後再收到 SIGKILL。
 - agent 自行結束或啟動失敗時，AgentAPI 會在 2、10、30 秒後接續原工作階段重新啟動。每次嘗試
   都會以錯誤顯示在聊天介面，生命週期為 `restarting`。三次都失敗時，AgentAPI 仍繼續提供服務，
   生命週期維持 `failed`，直到你重新啟動 agent（Explorer → Restart 或 `DELETE /messages`，會開始
@@ -451,7 +452,9 @@ agent 只是在等待請求回覆（沒有其他工作）時，`status` 為 `sta
 
 agent 在獨立的行程群組中執行。停止時先中斷進行中的回合，最多等 3 秒讓它結束，工作階段紀錄
 才不會停在沒有結果的工具呼叫；接著關閉輸入，讓 agent 自行結束；3 秒後若仍在執行，才向行程
-群組送出 SIGTERM，再過 2 秒送出 SIGKILL。
+群組送出 SIGTERM，再過 2 秒送出 SIGKILL。只要群組裡還有行程在執行，群組就會比 agent 活得久，
+所以 agent 結束後（自行結束或重新啟動時），AgentAPI 也會向群組送出 SIGTERM，2 秒後再送出
+SIGKILL。
 
 </details>
 

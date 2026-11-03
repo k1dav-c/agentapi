@@ -436,7 +436,10 @@ type Factory func(resume Resume) (Adapter, error)
   closes its input, then sends the group SIGTERM after 3 seconds and SIGKILL
   2 seconds later. Before that, the adapters interrupt a running turn and
   wait up to 3 seconds for it to end, so the agent's session log doesn't end
-  in a tool call without result.
+  in a tool call without result. The group outlives the agent while a
+  process in it runs, so however the agent exits (on its own, stopped, in a
+  reload), `procutil` then sends the group SIGTERM and 2 seconds later
+  SIGKILL (`GroupGrace`), and stops signaling it once it is gone.
 
 The adapters:
 

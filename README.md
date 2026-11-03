@@ -478,7 +478,8 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
   [request handling](#requests-approvals-questions-and-plans).
 - When the agent is stopped or restarted and doesn't exit within 3 seconds of
   its input closing, AgentAPI signals its whole process group, which also stops
-  its MCP servers and child commands.
+  its MCP servers and child commands. Once the agent exits, however it exits,
+  what it started and left running gets SIGTERM, then SIGKILL 2 seconds later.
 - An agent that exits on its own, or fails to start, is started again on its
   session after 2, 10 and 30 seconds. Each attempt shows in the chat as an
   error, and the lifecycle is `restarting`. If all three fail, AgentAPI keeps
@@ -531,7 +532,9 @@ The agent runs in its own process group. Shutdown first interrupts a running
 turn and waits up to 3 seconds for it to end, so the session log doesn't end in
 a tool call without result. Then it closes the agent's input so it can exit; if
 it is still running 3 seconds later, AgentAPI sends SIGTERM to the group, then
-SIGKILL 2 seconds after that.
+SIGKILL 2 seconds after that. The group outlives the agent while a process in
+it runs, so AgentAPI signals it after the agent exited too, on its own or in a
+restart: SIGTERM, then SIGKILL 2 seconds later.
 
 </details>
 

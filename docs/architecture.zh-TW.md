@@ -359,7 +359,9 @@ type Factory func(resume Resume) (Adapter, error)
   迴圈也處理完它的輸出後，`Wait` 才視為 agent 已結束；行程結束 2 秒後則一律視為結束，因為 agent
   啟動的行程可能讓輸出一直開著。停止時會先關閉它的輸入，3 秒後對整個 group 送出 SIGTERM，
   再過 2 秒送出 SIGKILL。在那之前，adapter 會先中斷進行中的回合，最多等 3 秒讓它結束，agent
-  的工作階段紀錄才不會停在沒有結果的工具呼叫。
+  的工作階段紀錄才不會停在沒有結果的工具呼叫。只要群組裡還有行程，群組就比 agent 活得久，所以
+  不論 agent 怎麼結束（自行結束、被停止、reload），`procutil` 都會接著對群組送出 SIGTERM，2 秒後
+  送出 SIGKILL（`GroupGrace`），群組消失後就不再送訊號。
 
 各個 adapter：
 
