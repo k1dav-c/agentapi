@@ -11,6 +11,9 @@ import (
 	"github.com/coder/agentapi/lib/httpapi"
 )
 
+// listenForRestart does nothing: Windows has no SIGUSR2.
+func (s *selfExec) listenForRestart() {}
+
 // handleSignals sets up signal handlers for Windows, which has no signal
 // to save the state or restart in place.
 func handleSignals(ctx context.Context, cancel context.CancelFunc, logger *slog.Logger, srv *httpapi.Server, self *selfExec) {

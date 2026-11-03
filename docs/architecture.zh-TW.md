@@ -142,8 +142,9 @@ flowchart TB
    階段紀錄監看器、關閉仍在執行的 native 或 PTY agent 與 shell 終端機，並寫入、關閉狀態資料庫。
    收到 SIGUSR1 時只寫入狀態資料庫，不會停止。native agent 結束不會讓伺服器停止：對話會重新
    啟動 agent（見 Native）。
-6. 收到 SIGUSR2，或透過 API 更新時，伺服器會原地重新啟動（`cmd/server/reexec.go`、`selfExec.restart`）。`selfExec` 在啟動時記下參數、
-   環境變數和程式：argv[0] 若就是正在執行的檔案，就採用 shell 找到它的方式（路徑，或 `PATH` 上
+6. 收到 SIGUSR2，或透過 API 更新時，伺服器會原地重新啟動（`cmd/server/reexec.go`、`selfExec.restart`）。`selfExec` 在啟動時最先接管
+   SIGUSR2（它的預設動作會結束行程），所以伺服器啟動或停止期間收到的 SIGUSR2 不會結束行程（服務前
+   收到的，會在開始服務後重新啟動），接著記下參數、環境變數和程式：argv[0] 若就是正在執行的檔案，就採用 shell 找到它的方式（路徑，或 `PATH` 上
    的名稱），這樣更新改指向新版本的 symlink 也會跟著走；否則採用 `os.Executable`。更新取代檔案之後，
    `/proc/self/exe` 指向的是已刪除的檔案。重新啟動前，先以 `--version` 執行程式；失敗時記下
    原因並繼續提供服務。成功時，伺服器依第 5 步停止，但保留 PID 檔（PID 不變），再以

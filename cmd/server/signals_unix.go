@@ -12,6 +12,16 @@ import (
 	"github.com/coder/agentapi/lib/httpapi"
 )
 
+// listenForRestart catches SIGUSR2 from startup on, until the process ends
+// or runs its program again: its default action ends the process, and
+// agentapi restart, or a second SIGUSR2, can send it while the server
+// starts or stops. One caught before serve handles it restarts the server
+// once it serves; one caught while it stops is dropped.
+func (s *selfExec) listenForRestart() {
+	s.restartSignals = make(chan os.Signal, 1)
+	signal.Notify(s.restartSignals, syscall.SIGUSR2)
+}
+
 // handleSignals sets up signal handlers for:
 // - SIGTERM, SIGINT, SIGHUP: trigger graceful shutdown by canceling the context
 // - SIGUSR1: write what the state database hasn't written yet, without exiting
@@ -30,10 +40,17 @@ func handleSignals(ctx context.Context, cancel context.CancelFunc, logger *slog.
 	}()
 
 	if self != nil {
-		restartCh := make(chan os.Signal, 1)
-		signal.Notify(restartCh, syscall.SIGUSR2)
+		// Without listenForRestart (tests), SIGUSR2 is caught while the
+		// server serves.
+		restartCh, owned := self.restartSignals, false
+		if restartCh == nil {
+			restartCh, owned = make(chan os.Signal, 1), true
+			signal.Notify(restartCh, syscall.SIGUSR2)
+		}
 		go func() {
-			defer signal.Stop(restartCh)
+			if owned {
+				defer signal.Stop(restartCh)
+			}
 			for {
 				select {
 				case <-restartCh:

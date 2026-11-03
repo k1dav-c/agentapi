@@ -511,6 +511,9 @@ func CreateServerCmd() *cobra.Command {
 			// The arguments are fine: an error from here on isn't a usage
 			// error.
 			cmd.SilenceUsage = true
+			// First, so that a SIGUSR2 while the server starts doesn't end
+			// it (listenForRestart).
+			self := newSelfExec()
 			// The --exit flag is used for testing validation of flags in the test suite
 			if viper.GetBool(FlagExit) {
 				return nil
@@ -535,7 +538,6 @@ func CreateServerCmd() *cobra.Command {
 				return fmt.Errorf("invalid --%s: %w", FlagLogLevel, err)
 			}
 			level.Set(logLevel)
-			self := newSelfExec()
 			logger.Debug("Restarting in place runs this program", "program", self.path)
 			err = runServer(ctx, logger, cmd.Flags().Args(), self)
 			if errors.Is(err, errRestart) {

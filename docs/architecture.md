@@ -158,8 +158,11 @@ answers write keys directly to the agent's terminal.
    flushes the state DB without stopping. A native agent that exits doesn't
    stop the server: the conversation starts it again (see Native).
 6. SIGUSR2, or an update through the API, restarts the server in place
-   (`cmd/server/reexec.go`, `selfExec.restart`). At startup
-   `selfExec` takes the arguments, the environment and the program. The
+   (`cmd/server/reexec.go`, `selfExec.restart`). At startup, first,
+   `selfExec` catches SIGUSR2, whose default action ends the process, so
+   one that comes while the server starts or stops doesn't (one before
+   serving restarts it once it serves), and takes the arguments, the
+   environment and the program. The
    program is argv[0] as the shell found it (a path, or a name on `PATH`) if
    that is the running file, so a symlink an update repoints is followed;
    else `os.Executable`. It is taken then because once an update replaced

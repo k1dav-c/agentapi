@@ -49,13 +49,19 @@ type selfExec struct {
 	served context.Context
 	stop   context.CancelFunc
 	logger *slog.Logger
+
+	// restartSignals catches SIGUSR2 from startup on (listenForRestart),
+	// nil until then.
+	restartSignals chan os.Signal
 }
 
 // newSelfExec takes how the server was started, at startup: once an update
 // replaced the program, /proc/self/exe names a deleted file.
 func newSelfExec() *selfExec {
 	path, _ := resolveExecutable(os.Args[0], exec.LookPath, os.Executable)
-	return &selfExec{path: path, argv: slices.Clone(os.Args), env: os.Environ()}
+	s := &selfExec{path: path, argv: slices.Clone(os.Args), env: os.Environ()}
+	s.listenForRestart()
+	return s
 }
 
 // resolveExecutable returns the program to run again: argv0 as the shell
