@@ -283,6 +283,9 @@ func (h *harness) writeLine(m map[string]any) {
 // prompt command Pi got.
 func (h *harness) prompt(id, text string) map[string]any {
 	h.t.Helper()
+	// Pi's lines written so far are handled first, as a caller sees them
+	// before its next prompt: StartTurn refuses one while a turn runs.
+	h.settle()
 	h.call(id, func() error { return h.a.StartTurn(h.ctx, native.Input{Text: text}) })
 	cmd := h.pi.nextCmd()
 	require.Equal(h.t, "prompt", cmd["type"])
