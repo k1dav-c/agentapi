@@ -164,8 +164,8 @@ func syncDir(dir string) {
 }
 
 // stateVersion is the version of the file of instances this hub writes.
-// A hub of 2.2 or earlier wrote a bare array of instances, which this one reads
-// too; it reads the envelope as damaged (see readState).
+// A hub of 2.2 or earlier wrote a bare array of instances, which this one
+// reads too; such a hub takes the envelope for damaged (see readState).
 const stateVersion = 1
 
 // stateFile is the file of instances.
