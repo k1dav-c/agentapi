@@ -129,14 +129,15 @@ answers write keys directly to the agent's terminal.
    the PID file. A leading `~` in a path setting is the home directory, and
    `{port}` and `{hostname}` in `--state-db`, `--pid-file` and `--public-url`
    are filled in (`instanceapi.ExpandPlaceholders`). `{ip}` in `--public-url`
-   stays: it changes while the server runs (DHCP), so the webhook dispatcher
+   stays: it changes while the server runs (DHCP). The webhook dispatcher
    fills it in whenever it builds the instance for an event, the summary or
    the registry entry (`publicURL` in `lib/webhook/dispatcher.go`), with the
-   source address of the route to the webhook URL. `refreshIP` looks it up
-   through `netaddr.Resolver` (kept 30 s, each lookup bounded by
-   `netaddr.DialTimeout`) before `instance.started`, after a configuration
-   change, before each heartbeat and every 30 s, outside the emitter's lock;
-   the events only read the last address found. The agent type is `--type`, else the agent command
+   source address of the route to the webhook URL. `refreshIP` looks that
+   address up through `netaddr.Resolver` (kept 30 s, each lookup bounded by
+   `netaddr.DialTimeout`), outside the emitter's lock: before
+   `instance.started`, after a configuration change, before each heartbeat
+   and every 30 s. The events only read the last address found.
+   The agent type is `--type`, else the agent command
    when it is a type name, else `custom`. The transport is `--transport`, else
    native for an agent `hasNativeAdapter` covers (Claude Code, Codex, Pi and
    `native-demo`) unless the deprecated `--state-file` is set, else PTY.
@@ -157,25 +158,25 @@ answers write keys directly to the agent's terminal.
    `Start` listens, then writes the registry entry (unless `--registry=false`)
    and serves.
 5. On SIGINT, SIGTERM or SIGHUP, or when a PTY agent exits, the webhook sends
-   `instance.stopped` (waiting at most 2 s, and half of `Stop`'s 5 s, for
-   it) and the registry entry is removed. A restart under way
-   is cancelled, the HTTP server shuts down, and the queue loop and the
+   `instance.stopped` (waiting for it at most 2 s, and no more than half of
+   `Stop`'s 5 s) and the registry entry is removed. A restart under way is
+   cancelled, the HTTP server shuts down, and the queue loop and the
    session-log watcher stop. A native or PTY agent that still runs and the
    shell terminal are closed, and the state DB is flushed and closed. SIGUSR1
    flushes the state DB without stopping. A native agent that exits doesn't
    stop the server: the conversation starts it again (see Native).
 6. SIGUSR2, or an update through the API, restarts the server in place
-   (`cmd/server/reexec.go`, `selfExec.restart`). At startup, first,
-   `selfExec` catches SIGUSR2, whose default action ends the process, so
-   one that comes while the server starts or stops doesn't (one before
-   serving restarts it once it serves), and takes the arguments, the
-   environment and the program. The
-   program is argv[0] as the shell found it (a path, or a name on `PATH`) if
-   that is the running file, so a symlink an update repoints is followed;
-   else `os.Executable`. It is taken then because once an update replaced
-   the file, `/proc/self/exe` names a deleted one. The program first runs
-   with `--version`, then with the arguments and environment it will run
-   with plus the hidden `--validate` (`cmd/server/validate.go`), 10 s each.
+   (`cmd/server/reexec.go`, `selfExec.restart`). `selfExec` is the first
+   thing the server sets up. It catches SIGUSR2, whose default action ends
+   the process, so one that comes while the server starts or stops doesn't
+   end it (one that comes before serving restarts the server once it
+   serves). It also takes the arguments, the environment and the program
+   then: once an update replaced the file, `/proc/self/exe` names a deleted
+   one. The program is argv[0] as the shell found it (a path, or a name on
+   `PATH`) if that is the running file, so a symlink an update repoints is
+   followed; else `os.Executable`. Before it stops, the server runs the
+   program with `--version`, then with the arguments and environment it will
+   run with plus the hidden `--validate` (`cmd/server/validate.go`), 10 s each.
    `--validate` resolves the flags, variables and config file as a start
    does and checks what it can without starting anything: values,
    placeholders, the port, agent type and transport, the native agent's
@@ -258,7 +259,7 @@ store, `authAPI` the token check, and `webhookAPI` the dispatcher and state DB.
   state DB queues the writes), the status change handler
   (`webhook.Dispatcher.StatusChanged`, which queues without waiting) and
   the instance in the summary (`Dispatcher.Instance`, which reads the last
-  `{ip}` found). The lock order stays the emitter's, then the
+  `{ip}` found). The lock order is the emitter's, then the
   dispatcher's and the state DB's.
 - `lib/webhook` reads the emitter only through subscriptions (`Source`),
   like an `/events` client, on goroutines of its own.
@@ -267,7 +268,7 @@ store, `authAPI` the token check, and `webhookAPI` the dispatcher and state DB.
 
 Huma names the OpenAPI schemas after the Go types, so `lib/httpapi` keeps
 aliases of the types that moved (`convstate.go`, `FileMatch`,
-`WebhookConfig`): the schema and the package's API stay as they were.
+`WebhookConfig`), so the schema and the package's API keep their names.
 
 For operations that differ by transport, handlers call `agentBackend`: `ptyBackend` drives terminal
 conversations; `nativeBackend` drives native conversations.
@@ -549,8 +550,9 @@ usage limit stop, login, terminal prompt) and the latest screen.
   it recalculates once per emitter call that changed more than the screen,
   after all the call's changes (a turn's end stops the agent and ends its
   task in one call), and sends `summary_update` only if the summary differs.
-  Growing reply text therefore sends no summary update. Only `/events?only=summary` subscribes to these
-  updates; its stream also sends heartbeats. `PUT /webhook` triggers another
+  Growing reply text therefore sends no summary update. Only
+  `/events?only=summary` subscribes to these updates; its stream also sends
+  heartbeats. `PUT /webhook` triggers another
   check, and rewrites the registry entry, because it can change the instance
   ID and URL.
 - For an agent whose session logs it reads, the server works out the summary's
@@ -569,7 +571,8 @@ usage limit stop, login, terminal prompt) and the latest screen.
 - A status change between `running` and `stable` triggers the
   `run.status_changed` webhook event. While the webhook sends events of the
   conversation (`task.*`, `request.*`, `message.*`, `tool.*`, `login.*`,
-  `limit.*`, `agent.error`; a hub's `instance.*` alone needs none), the
+  `limit.*`, `agent.error`; one of `instance.*` alone, a hub's default,
+  doesn't), the
   webhook observer subscribes to the emitter like an `/events` client and
   turns its events into them: the emitter's task updates into `task.*`, an
   agent message once the next one starts or the turn ends. `PUT /webhook`
@@ -654,9 +657,10 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   `upload_prune.go` removes the checksum directories that nothing in the
   conversation refers to (messages, rich messages, timeline, requests,
   queue: any run of hex digits holding the checksum counts, which covers
-  paths, `/uploads` URLs and JSON) and that are more than 7 days old, by
-  modification time and by when this run last stored them: a browser keeps
-  the attachments of a draft, which aren't in the conversation yet. Only a
+  paths, `/uploads` URLs and JSON) and that are more than 7 days old, both
+  by modification time and since this server last stored them. The 7 days
+  cover a browser's drafts, whose attachments aren't in the conversation
+  yet. Only a
   real directory named by a checksum and holding regular files is removed,
   through `os.Root`; symlinks and anything else are left alone. A prune that
   removed something logs the count and bytes at Info.
@@ -732,10 +736,11 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
   under `s.mu`: from then on messages wait in the queue, no agent restart
   begins and the human-reply protocol offers nothing. It calls the restart
   SIGUSR2 uses. `"now"` skips the wait, and `DELETE /update` cancels the
-  update until it restarts. A failure, also one of the restart's checks
-  (a new release that wouldn't start with these settings or this state
-  DB), leaves the state `failed` with the error, and the server serving. Every step changes the summary's `update`,
-  so `summary_update` carries it to a hub. The program's path is resolved
+  update until it restarts. A failure, a failed restart check included (a
+  new release that wouldn't start with these settings or this state DB),
+  leaves the state `failed` with the error, and the server serving. Every
+  step changes the summary's `update`, so `summary_update` carries it to a
+  hub. The program's path is resolved
   again on each request, and once a minute for `blocked`, so a symlink set
   up meanwhile counts at once.
 - `/status` reports the lifecycle: `starting`, `ready`, `running`,
@@ -751,7 +756,8 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
 `lib/shellterm` runs one login shell in a pseudo-terminal (`creack/pty`) in the agent's working
 directory, with the agent's environment minus AgentAPI's own variables. It starts when the first
 client subscribes and keeps running after all clients disconnect. Its output goes to a 256 KiB
-scrollback (a ring, so a chunk costs its size), trimmed at a line start, and to each watcher's buffer; a watcher that falls 512 chunks
+scrollback, trimmed at a line start, and to each watcher's buffer. The scrollback is a ring, so adding
+output takes time in proportion to the output, not to the scrollback. A watcher that falls 512 chunks
 behind is dropped and reconnects for the scrollback. `GET /terminal` streams base64-encoded `output`
 and `exit` events. `POST /terminal/input` sends input, and `/terminal/resize` changes the
 dimensions; the most recent resize applies. Closing hangs up the terminal and kills the shell's
@@ -908,8 +914,9 @@ AgentAPI's own `AGENTAPI_*` variables.
 build into `lib/httpapi/chat/`, which `embed.go` embeds with `go:embed`. The build uses a
 placeholder base path that the server rewrites to `--chat-base-path` (default `/chat`). The UI also
 runs as a standalone development server (`bun run dev`, with `?url=<server>`), and `/chat/embed` is
-a variant for embedding in other pages (`hub=1`: in the hub's frame it draws the hub's bar for the instance, from what the hub sends it in window messages, `lib/hub-frame.ts`). `/chat/hub/`
-is the hub's page (`components/hub-view.tsx`, its parts and hooks in `components/hub/`, its logic in
+a variant for embedding in other pages (`hub=1`: in the hub's frame it draws the hub's bar for the
+instance, from what the hub sends it in window messages, `lib/hub-frame.ts`). `/chat/hub/` is the
+hub's page (`components/hub-view.tsx`, its parts and hooks in `components/hub/`, its logic in
 `lib/hub.ts`, the changes it makes through `lib/hub-api.ts`), which `agentapi hub serve` serves with
 the same build.
 
@@ -924,10 +931,10 @@ the same build.
 - The event stream uses `/events?sync=1` and keeps the last sequence number
   for incremental replay (`lib/chat-stream.ts`). A long replay shows its
   progress every 1.5 seconds, but the requests and the tasks, which come
-  after the messages, keep what the chat had until the replay's own replace
-  them; those of another conversation go first: a task whose message the
-  replay sends as another one, a request made before the replay's first
-  message. `EventSourceConnection`
+  after the messages, keep the chat's earlier ones until the replay's own
+  replace them. Those of another conversation go at once: a task whose
+  message the replay sends as another one, a request made before the
+  replay's first message. `EventSourceConnection`
   (`lib/event-source.ts`, and the `use-event-source.ts` hook) keeps it, the
   hub page's stream and the terminals' open: a stream that ends is opened
   again at once, without a notice, unless that keeps failing; one that fails
@@ -935,11 +942,11 @@ the same build.
   quiet, by a watchdog; and any when the browser comes back online or to the
   tab. The payload types come from
   the generated schema (`lib/events.ts`), and null lists are made empty where
-  events arrive. A status the chat doesn't know, from a newer server (the hub
-  serves its own build to instances of every version), becomes one it does
-  there too: a task's, a subagent's. IndexedDB keeps each server's conversation for the next
-  visit, one record per message, writing only what changed, with the sequence
-  number of what it saved; a server's cache goes after 14 days without use,
+  events arrive. A task or subagent status the chat doesn't know, from a
+  newer server (the hub serves its own build to instances of every
+  version), becomes one it knows there too. IndexedDB keeps each server's
+  conversation for the next visit, one record per message, writing only
+  what changed, with the sequence number of what it saved; a server's cache goes after 14 days without use,
   and the least recently used go beyond 100 servers or 50,000 records in
   all; a hub opens each instance as a server of its own
   (`lib/session-cache.ts`).
