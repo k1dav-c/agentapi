@@ -190,6 +190,7 @@ export default function MessageList({
                   {formatDateLabel(currentDate)}
                 </div>
               )}
+              <div className="task-view">
               <TaskGroup
                 task={task}
                 agentType={agentType}
@@ -216,6 +217,7 @@ export default function MessageList({
                 }
                 waitingForUser={isLatest && waitingFor === "answer"}
               />
+              </div>
               </React.Fragment>
               );
             })}
