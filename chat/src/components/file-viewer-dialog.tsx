@@ -12,7 +12,7 @@ import {PathLabel} from "./file-path";
 import {MarkdownDocument} from "./processed-message";
 import {useFileViewer, type FileViewerRequest, type FileViewerTab} from "./file-viewer-context";
 import type {FileContent, FileDiff as FileChanges, FileDiffStatus, FileMatches, FilePreview} from "@/lib/chat-api";
-import {isRelativeRef, previewKind, resolveRelativeRef, type PreviewKind} from "@/lib/file-preview";
+import {isRelativeRef, previewKind, resolveRelativeRef, withPreviewCSP, type PreviewKind} from "@/lib/file-preview";
 import {highlightCode, languageForPath, type CodeToken} from "@/lib/code-highlight";
 import {ApiError, getErrorMessage} from "@/lib/error-utils";
 import {cn} from "@/lib/utils";
@@ -315,7 +315,8 @@ function PreviewPane({
 
 // An HTML page with what it refers to inlined, in an iframe sandboxed
 // without allow-same-origin: its scripts run without an origin, so they
-// can't reach the chat, its cookie or the API with them.
+// can't reach the chat, its cookie or the API with them; and under a
+// policy that sends nothing out (withPreviewCSP).
 const HTMLPreview = memo(function HTMLPreview({page}: {page: FilePreview}) {
   return (
     <>
@@ -331,7 +332,7 @@ const HTMLPreview = memo(function HTMLPreview({page}: {page: FilePreview}) {
       )}
       <iframe
         title={`Preview of ${page.relative}`}
-        srcDoc={page.html}
+        srcDoc={withPreviewCSP(page.html)}
         sandbox="allow-scripts allow-forms allow-modals"
         referrerPolicy="no-referrer"
         className="min-h-0 w-full flex-1 border-0 bg-white"

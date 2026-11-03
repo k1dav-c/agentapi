@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {isRelativeRef, previewKind, resolveRelativeRef} from "./file-preview";
+import {isRelativeRef, PREVIEW_CSP, previewKind, resolveRelativeRef, withPreviewCSP} from "./file-preview";
 
 describe("previewKind", () => {
   test("by the file's extension", () => {
@@ -51,5 +51,22 @@ describe("resolveRelativeRef", () => {
     expect(resolveRelativeRef("README.md", "https://example.com/a.png")).toBeUndefined();
     expect(resolveRelativeRef("README.md", "#usage")).toBeUndefined();
     expect(resolveRelativeRef("README.md", "?raw=1")).toBeUndefined();
+  });
+});
+
+describe("withPreviewCSP", () => {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">`;
+
+  test("comes first, after the doctype", () => {
+    expect(withPreviewCSP("<!DOCTYPE html>\n<html><head><script>1</script></head></html>")).toBe(`<!DOCTYPE html>${meta}\n<html><head><script>1</script></head></html>`);
+    expect(withPreviewCSP("<p>hi</p>")).toBe(`${meta}<p>hi</p>`);
+    expect(withPreviewCSP("  <!doctype html><p>")).toBe(`  <!doctype html>${meta}<p>`);
+  });
+
+  test("blocks sending, not running", () => {
+    expect(PREVIEW_CSP).toContain("connect-src 'none'");
+    expect(PREVIEW_CSP).toContain("form-action 'none'");
+    expect(PREVIEW_CSP).toContain("'unsafe-inline'");
+    expect(PREVIEW_CSP).not.toContain('"');
   });
 });
