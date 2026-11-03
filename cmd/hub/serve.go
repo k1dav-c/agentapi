@@ -87,7 +87,7 @@ func serveCmd() *cobra.Command {
 			}
 			if noToken {
 				logger.Warn("The hub has no token: everyone who reaches it sees the instances and opens them, with their API token")
-				if len(allowedHosts) == 0 && !loopback(bind) {
+				if len(allowedHosts) == 0 && !loopbackHost(bind) {
 					logger.Warn("The hub answers to any name: a site's page can reach it through a name of the site's that points at the hub's address (DNS rebinding); set --allowed-hosts to the names you open the hub by")
 				}
 			}
@@ -166,16 +166,6 @@ func logJoin(logger *slog.Logger, urls []hub.JoinURL, port int) {
 		logger.Info("To join a machine, run this on it with AGENTAPI_HUB_SECRET set to the hub's secret", args...)
 	}
 	logger.Info("The Add dialog (+) of the hub's page has the command, and a prompt for an agent on the machine")
-}
-
-// loopback reports whether bind is a loopback address, which only this
-// machine reaches.
-func loopback(bind string) bool {
-	if bind == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(bind)
-	return ip != nil && ip.IsLoopback()
 }
 
 func firstSet(values ...string) string {
