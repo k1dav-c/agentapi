@@ -48,8 +48,6 @@ export function createHubAPI(root: string, fetcher: Fetcher = (url, init) => fet
   };
 }
 
-export type HubAPI = ReturnType<typeof createHubAPI>;
-
 // hubErrorText is what a toast says of error.
 export function hubErrorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

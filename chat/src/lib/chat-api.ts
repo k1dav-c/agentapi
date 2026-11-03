@@ -262,29 +262,6 @@ export function createChatAPI(baseURL: string) {
       return result.results;
     },
 
-    async createMCPServer(name: string, config: unknown, restart = false) {
-      await jsonRequest(`/mcp/servers${restart ? "?restart=true" : ""}`, {
-        method: "POST",
-        body: {name, config},
-        fallback: "Failed to create MCP server",
-      });
-    },
-
-    async updateMCPServer(name: string, config: unknown, restart = false) {
-      await jsonRequest(`/mcp/servers/${encodeURIComponent(name)}${restart ? "?restart=true" : ""}`, {
-        method: "PATCH",
-        body: {config},
-        fallback: "Failed to update MCP server",
-      });
-    },
-
-    async deleteMCPServer(name: string, restart = false) {
-      await jsonRequest(`/mcp/servers/${encodeURIComponent(name)}${restart ? "?restart=true" : ""}`, {
-        method: "DELETE",
-        fallback: "Failed to delete MCP server",
-      });
-    },
-
     getMCPProfiles(): Promise<MCPProfiles> {
       return jsonRequest("/mcp/profiles", {fallback: "Failed to load MCP profiles"});
     },
