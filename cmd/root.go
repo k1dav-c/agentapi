@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/coder/agentapi/cmd/attach"
 	"github.com/coder/agentapi/cmd/hub"
 	"github.com/coder/agentapi/cmd/list"
 	"github.com/coder/agentapi/cmd/restart"
@@ -33,7 +32,6 @@ func Execute() {
 
 func init() {
 	rootCmd.AddCommand(server.CreateServerCmd())
-	rootCmd.AddCommand(attach.AttachCmd)
 	rootCmd.AddCommand(update.UpdateCmd)
 	rootCmd.AddCommand(list.ListCmd)
 	rootCmd.AddCommand(restart.RestartCmd)
