@@ -1118,7 +1118,8 @@ AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新�
   原始按鍵、另一次重新啟動和開啟工作階段會回傳 409，AgentAPI 停止期間的重新啟動也一樣。
 - `GET /status` 回傳向下相容的 `stable`/`running` 狀態、詳細的生命週期（`starting`、
   `ready`、`running`、`restarting`、`exited` 或 `failed`；native agent 結束後，AgentAPI 重新啟動
-  期間為 `restarting`，放棄後為 `failed`）、transport、`server_id`（這次
+  期間為 `restarting`（直到新的 agent 可以接受回合），放棄後為 `failed`；`restarting`、`exited` 和
+  `failed` 在 agent 回來之前不會隨 agent 的狀態改變）、transport、`server_id`（這次
   AgentAPI 執行的隨機識別碼，每次啟動都會不同）、`turn`（agent 開始工作的次數）、對話的
   `epoch`、工作階段名稱、AgentAPI 版本、agent 目前開啟的對話框（`terminal_prompt`）以及終端機
   寬度（`terminal_columns`）。使用 native transport 時還會回報 `agent_session_id`（agent 自己的

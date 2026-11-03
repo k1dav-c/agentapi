@@ -1333,7 +1333,9 @@ These endpoints work with every transport, except where noted; the
 - `GET /status` returns the backward-compatible `stable`/`running` status,
   the detailed lifecycle (`starting`, `ready`, `running`, `restarting`,
   `exited` or `failed`; a native agent that exits is `restarting` while
-  AgentAPI starts it again and `failed` once it gives up), the transport, `server_id` (a random identifier of
+  AgentAPI starts it again, until the new agent accepts turns, and `failed`
+  once it gives up; `restarting`, `exited` and `failed` don't change with
+  the agent's status until the agent is back), the transport, `server_id` (a random identifier of
   this AgentAPI run, new at every start), `turn` (how many times the agent
   started working), the conversation's `epoch`, the session name, the
   AgentAPI version, the agent's open dialog (`terminal_prompt`) and the

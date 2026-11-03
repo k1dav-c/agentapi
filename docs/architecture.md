@@ -678,7 +678,12 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
   again on each request, and once a minute for `blocked`, so a symlink set
   up meanwhile counts at once.
 - `/status` reports the lifecycle: `starting`, `ready`, `running`,
-  `restarting`, `exited` or `failed`.
+  `restarting`, `exited` or `failed`. `EmitStatus` derives the first three
+  from the conversation's status; the server sets the others
+  (`SetLifecycle`), which the status doesn't replace (a PTY agent's screen
+  goes on changing while it restarts or after it exited) until
+  `ReleaseLifecycle`: when a restart is done, or a native agent the
+  conversation started again accepts turns or waits for a login.
 
 ## The shell terminal
 

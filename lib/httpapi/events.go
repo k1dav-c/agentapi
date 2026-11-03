@@ -164,24 +164,30 @@ type EventEmitter struct {
 	// message, rich message and request change so a reconnecting client can
 	// ask for only what it hasn't seen. messageSeq, richSeq and requestSeq
 	// hold the seq of each entry's latest change.
-	epoch               string
-	seq                 uint64
-	messageSeq          []uint64
-	richSeq             []uint64
-	richMessages        []transcript.RichMessage
-	richIndex           map[richKey]int // a rich message's position, by its key
-	requests            []native.RequestState
-	requestSeq          []uint64
-	capabilities        *native.Capabilities
-	loginRequired       *native.LoginRequired
-	settings            *native.Settings
-	usage               *native.AgentUsage
-	limitStop           *native.LimitStop
-	terminal            bool
-	sessionEvents       []transcript.SessionEvent
-	nextSessionEventID  int
-	status              AgentStatus
-	lifecycle           LifecycleState
+	epoch              string
+	seq                uint64
+	messageSeq         []uint64
+	richSeq            []uint64
+	richMessages       []transcript.RichMessage
+	richIndex          map[richKey]int // a rich message's position, by its key
+	requests           []native.RequestState
+	requestSeq         []uint64
+	capabilities       *native.Capabilities
+	loginRequired      *native.LoginRequired
+	settings           *native.Settings
+	usage              *native.AgentUsage
+	limitStop          *native.LimitStop
+	terminal           bool
+	sessionEvents      []transcript.SessionEvent
+	nextSessionEventID int
+	status             AgentStatus
+	lifecycle          LifecycleState
+	// lifecycleHeld: the server set lifecycle to restarting, exited or
+	// failed, which the conversation's status doesn't change until the
+	// server releases it (ReleaseLifecycle); reported is the lifecycle the
+	// conversation's status gives meanwhile.
+	lifecycleHeld       bool
+	reported            LifecycleState
 	serverID            string
 	turn                uint64
 	agentSessionID      string
@@ -419,6 +425,7 @@ func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 		nextSessionEventID:  1,
 		status:              AgentStatusRunning,
 		lifecycle:           LifecycleStarting,
+		reported:            LifecycleStarting,
 		chans:               make(map[int]subscriber),
 		subscriptionBufSize: defaultSubscriptionBufSize,
 		epoch:               newEpoch(),

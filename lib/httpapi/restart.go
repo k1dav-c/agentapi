@@ -126,6 +126,8 @@ func (s *Server) runRestartLocked(r agentRestart) error {
 	if r.done != nil {
 		r.done()
 	}
+	// The new agent's status is the lifecycle again.
+	s.emitter.ReleaseLifecycle()
 	return nil
 }
 

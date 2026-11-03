@@ -253,6 +253,8 @@ func TestHandoffRestartInvalidatesEvenIdenticalPrompt(t *testing.T) {
 	s.emitter.SetLifecycle(LifecycleRestarting)
 	require.Nil(t, pendingHandoff(s))
 	s.emitter.EmitStatus(conv.StatusStable)
+	require.Nil(t, pendingHandoff(s), "restarting until the restart is done")
+	s.emitter.ReleaseLifecycle()
 	require.NotEqual(t, pending.ID, pendingHandoff(s).ID)
 	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: "late", Content: "continue"}})
 	require.NoError(t, err)

@@ -8,6 +8,10 @@ import (
 	"github.com/coder/agentapi/lib/native"
 )
 
+// EmitStatus records the conversation's status. Its lifecycle (starting,
+// running, ready) doesn't replace one the server set and holds (see
+// SetLifecycle): a PTY agent's screen goes on changing while it restarts
+// or after it exited.
 func (e *EventEmitter) EmitStatus(newStatus conv.Status) {
 	e.mu.Lock()
 	defer e.unlock()
@@ -18,6 +22,10 @@ func (e *EventEmitter) EmitStatus(newStatus conv.Status) {
 		newLifecycle = LifecycleStarting
 	} else if newStatus == conv.StatusStable {
 		newLifecycle = LifecycleReady
+	}
+	e.reported = newLifecycle
+	if e.lifecycleHeld {
+		newLifecycle = e.lifecycle
 	}
 	if e.status == newAgentStatus && e.lifecycle == newLifecycle {
 		return
@@ -36,13 +44,36 @@ func (e *EventEmitter) EmitStatus(newStatus conv.Status) {
 	}
 }
 
+// SetLifecycle sets the lifecycle. Restarting, exited and failed are held
+// until ReleaseLifecycle, or another SetLifecycle: the conversation's
+// status doesn't replace them.
 func (e *EventEmitter) SetLifecycle(lifecycle LifecycleState) {
 	e.mu.Lock()
 	defer e.unlock()
+	e.lifecycleHeld = lifecycle == LifecycleRestarting || lifecycle == LifecycleExited || lifecycle == LifecycleFailed
 	if e.lifecycle == lifecycle {
 		return
 	}
 	e.lifecycle = lifecycle
+	e.handoffRevision++
+	e.notifyStatusLocked()
+}
+
+// ReleaseLifecycle ends the hold of a lifecycle SetLifecycle set: the
+// lifecycle is the conversation's again, as its last status gives it. It
+// is called once the agent is back: a restart finished, or a native agent
+// the conversation started again accepts turns.
+func (e *EventEmitter) ReleaseLifecycle() {
+	e.mu.Lock()
+	defer e.unlock()
+	if !e.lifecycleHeld {
+		return
+	}
+	e.lifecycleHeld = false
+	if e.lifecycle == e.reported {
+		return
+	}
+	e.lifecycle = e.reported
 	e.handoffRevision++
 	e.notifyStatusLocked()
 }

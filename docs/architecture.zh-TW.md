@@ -527,7 +527,9 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
   它帶給 hub。每次請求都會重新解析程式路徑，`blocked` 也每分鐘重新檢查，所以中途設好的 symlink
   會馬上生效。
 - `/status` 會回報生命週期：`starting`、`ready`、`running`、`restarting`、`exited` 或
-  `failed`。
+  `failed`。前三種由 `EmitStatus` 依對話的狀態推得；其他的由伺服器設定（`SetLifecycle`），
+  狀態不會取代它們（PTY agent 重新啟動期間或結束後，畫面仍會變動），直到 `ReleaseLifecycle`：
+  重新啟動完成時，或對話自行重新啟動的 native agent 可以接受回合或等待登入時。
 
 ## Shell 終端機
 

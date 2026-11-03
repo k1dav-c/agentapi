@@ -925,3 +925,37 @@ func TestEmitterQueueUpdates(t *testing.T) {
 	require.Len(t, replayed.Queue, 1)
 	assert.Equal(t, "two", replayed.Queue[0].Content)
 }
+
+// Restarting, exited and failed stay while the conversation's status
+// changes (a PTY agent's screen goes on changing while it restarts, or
+// after it exited), until the server releases them.
+func TestEventEmitterHoldsServerLifecycle(t *testing.T) {
+	emitter := NewEventEmitter()
+	emitter.EmitStatus(conv.StatusStable)
+	require.Equal(t, LifecycleReady, emitter.StatusSnapshot().Lifecycle)
+
+	emitter.SetLifecycle(LifecycleRestarting)
+	emitter.EmitStatus(conv.StatusChanging)
+	status := emitter.StatusSnapshot()
+	assert.Equal(t, LifecycleRestarting, status.Lifecycle, "held")
+	assert.Equal(t, AgentStatusRunning, status.Status, "the agent status still follows")
+	emitter.EmitStatus(conv.StatusStable)
+	assert.Equal(t, LifecycleRestarting, emitter.StatusSnapshot().Lifecycle)
+
+	emitter.ReleaseLifecycle()
+	assert.Equal(t, LifecycleReady, emitter.StatusSnapshot().Lifecycle, "the conversation's again")
+	emitter.EmitStatus(conv.StatusChanging)
+	assert.Equal(t, LifecycleRunning, emitter.StatusSnapshot().Lifecycle)
+
+	for _, lifecycle := range []LifecycleState{LifecycleExited, LifecycleFailed} {
+		emitter.SetLifecycle(lifecycle)
+		emitter.EmitStatus(conv.StatusStable)
+		emitter.EmitStatus(conv.StatusChanging)
+		assert.Equal(t, lifecycle, emitter.StatusSnapshot().Lifecycle)
+	}
+
+	// Another lifecycle the server sets ends the hold.
+	emitter.SetLifecycle(LifecycleStarting)
+	emitter.EmitStatus(conv.StatusStable)
+	assert.Equal(t, LifecycleReady, emitter.StatusSnapshot().Lifecycle)
+}
