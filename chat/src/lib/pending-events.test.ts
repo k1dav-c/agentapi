@@ -1,6 +1,7 @@
 import {describe, expect, test} from "bun:test";
 import type {NativeRequest} from "./native-requests";
-import {PendingEvents, requestsAfter, tasksAfter, type EventBatch} from "./pending-events";
+import type {DraftMessage} from "./conversation";
+import {PendingEvents, messagesAfter, requestsAfter, tasksAfter, type EventBatch} from "./pending-events";
 import type {ServerTask} from "./server-tasks";
 import {SyncTracker} from "./session-sync";
 
@@ -187,5 +188,40 @@ describe("PendingEvents", () => {
     expect(batch.messages.map((m) => m.id)).toEqual([0]);
     expect(batch.point).toEqual({epoch: "new", seq: 3});
     expect(pending.take().replace).toBe(false);
+  });
+});
+
+describe("messagesAfter", () => {
+  const draft = (clientId: string, content: string, deliveryStatus: DraftMessage["deliveryStatus"] = "sending"): DraftMessage => ({
+    role: "user",
+    content,
+    clientId,
+    deliveryStatus,
+  });
+  const sent = (id: number, content: string, seq: number) => ({id, role: "user", content, time: "2026-10-22T10:00:00Z", seq});
+
+  test("a draft still being sent stays through other updates, so a failed send can mark it", () => {
+    // The agent streams its turn while a message waits for POST /message.
+    const next = messagesAfter([prompt(0, 1), draft("c1", "next one")], batch({messages: [message(1, 2)]}));
+    expect(next.map((item) => ("clientId" in item ? item.clientId : item.id))).toEqual([0, "c1", 1]);
+  });
+
+  test("the server's message with its content takes the draft's place", () => {
+    const next = messagesAfter([prompt(0, 1), draft("c1", "next one ")], batch({messages: [sent(2, "next one", 3)]}));
+    expect(next).toEqual([prompt(0, 1), {id: 2, role: "user", content: "next one", time: "2026-10-22T10:00:00Z"}]);
+  });
+
+  test("one message takes the place of one draft; an update of a message held already of none", () => {
+    const drafts = [draft("c1", "yes"), draft("c2", "yes")];
+    const next = messagesAfter([sent(4, "yes", 1), ...drafts], batch({messages: [sent(4, "yes", 5), sent(6, "yes", 6)]}));
+    expect(next.filter((item) => "clientId" in item)).toEqual([drafts[1]]);
+  });
+
+  test("failed drafts stay, through a full replay too", () => {
+    const failed = draft("c1", "lost", "failed");
+    const sending = draft("c2", "on its way");
+    const next = messagesAfter([prompt(0, 1), failed, sending], batch({replace: true, messages: [message(1, 2), sent(2, "lost", 3)]}));
+    expect(next.slice(0, 2)).toEqual([failed, sending]);
+    expect(next).toHaveLength(4);
   });
 });

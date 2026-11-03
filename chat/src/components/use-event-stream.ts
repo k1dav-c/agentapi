@@ -15,7 +15,7 @@ import type {QueuedMessage} from "@/lib/queue";
 import type {SyncTracker} from "@/lib/session-sync";
 import {applyStatusChange, update, type AgentStatus} from "@/lib/agent-status";
 import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
-import {requestsAfter, tasksAfter, type EventBatch, type SyncPoint} from "@/lib/pending-events";
+import {messagesAfter, requestsAfter, tasksAfter, type EventBatch, type SyncPoint} from "@/lib/pending-events";
 import {agentErrorKey, dismissedErrors, rememberDismissed} from "@/lib/agent-errors";
 
 // How long to wait for the cache before connecting without it.
@@ -95,20 +95,7 @@ export function useEventStream({
     startTransition(() => {
       setSynced((previous) => (previous.epoch === point.epoch && previous.seq === point.seq ? previous : point));
       if (replace || messageUpdates.length > 0) {
-        setMessages((previous) => {
-          // A server message supersedes drafts that are still being sent;
-          // failed drafts stay until they are retried or dismissed.
-          const kept = previous.filter(
-            (message) =>
-              (replace ? isDraftMessage(message) : true) &&
-              (!isDraftMessage(message) || message.deliveryStatus === "failed"),
-          );
-          return mergeByKey(
-            kept,
-            messageUpdates.map(withoutSeq),
-            (message) => (isDraftMessage(message) ? undefined : String(message.id)),
-          );
-        });
+        setMessages((previous) => messagesAfter(previous, batch));
       }
       if (replace || richUpdates.length > 0) {
         setRichMessages((previous) =>
