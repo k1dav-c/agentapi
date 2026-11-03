@@ -3,6 +3,7 @@ package agentlog
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -205,7 +206,8 @@ func TestFollower(t *testing.T) {
 	appendTo(t, path, `{"n":1}`+"\n")
 	require.NoError(t, f.Read())
 	appendTo(t, path, `{"n":2}`+"\n")
-	if os.Geteuid() != 0 {
+	// Windows has no mode that makes a file unreadable; root reads any.
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
 		require.NoError(t, os.Chmod(path, 0o200))
 		assert.Error(t, f.Read(), "unreadable")
 		require.NoError(t, os.Chmod(path, 0o600))

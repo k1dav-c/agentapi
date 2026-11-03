@@ -31,8 +31,10 @@ func TestBirthTime(t *testing.T) {
 	assert.False(t, born.Before(before), born)
 	assert.False(t, born.After(time.Now().Add(time.Second)), born)
 
-	old := time.Now().Add(-time.Hour)
-	require.NoError(t, os.Chtimes(path, old, old))
+	// Later, not earlier: macOS moves the creation time back to a
+	// modification time set before it.
+	later := time.Now().Add(time.Hour)
+	require.NoError(t, os.Chtimes(path, later, later))
 	again, ok := BirthTime(path)
 	require.True(t, ok)
 	assert.True(t, born.Equal(again), "changing the modification time keeps the creation time")
