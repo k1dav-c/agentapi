@@ -425,10 +425,7 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 	// Nobody waits for the response, which the loop handles.
 	id, _, err := a.register(cmdAbort)
 	if err == nil {
-		err = a.send(ctx, simpleCommand{ID: id, Type: "abort"})
-		if err != nil {
-			a.forget(id)
-		}
+		err = a.sendAbort(ctx, id)
 	}
 	if err != nil {
 		a.mu.Lock()
@@ -527,14 +524,23 @@ func (a *Adapter) abortForClose(ctx context.Context) <-chan struct{} {
 	// stdin makes the write fail.
 	go func() {
 		defer close(answered)
-		if err := a.send(ctx, simpleCommand{ID: id, Type: "abort"}); err != nil {
-			a.forget(id)
+		if a.sendAbort(ctx, id) != nil {
 			return
 		}
 		// The answer, or errExited once Pi's output ended.
 		_, _ = call.Wait(ctx)
 	}()
 	return answered
+}
+
+// sendAbort sends the abort registered as id, which is forgotten if the
+// write fails.
+func (a *Adapter) sendAbort(ctx context.Context, id string) error {
+	err := a.send(ctx, simpleCommand{ID: id, Type: "abort"})
+	if err != nil {
+		a.forget(id)
+	}
+	return err
 }
 
 // ready returns an error until Start has completed, and after Pi exited.
