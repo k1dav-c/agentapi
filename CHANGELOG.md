@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- A Codex fork of a fork reads every thread it continues, up to 16 forks back: its history, first
+  prompt and prompt count start with the first thread's. Only the thread it forked was read.
+
 ## v2.5.0
 
 ### Features

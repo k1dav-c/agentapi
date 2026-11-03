@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -56,9 +57,10 @@ const maxForkDepth = 16
 // since: its session_meta names the thread it forked (forked_from_id) and
 // how much of that thread's log it continues
 // (forked_from_ordinal_exclusive), so those lines come first, after the
-// fork's own session_meta line.
+// fork's own session_meta line. A forked thread that is a fork itself is
+// read the same way, up to maxForkDepth forks back.
 func ScanLog(path string, fn func(line []byte) bool) bool {
-	return scanFork(path, -1, 0, fn)
+	return scanFork(path, -1, &forkChain{}, fn)
 }
 
 // ScanForked reads the lines of the thread a fork continues: those of
@@ -70,13 +72,22 @@ func ScanForked(id string, before int64, fn func(line []byte) bool) bool {
 	if !found {
 		return true
 	}
-	return scanUntilStopped(parent, before, 1, fn)
+	return scanUntilStopped(parent, before, &forkChain{depth: 1}, fn)
+}
+
+// forkChain is what a scan followed: depth counts the forks, and seen
+// holds the logs read, so that threads naming each other are read once.
+type forkChain struct {
+	depth int
+	seen  []string
 }
 
 // scanFork reads the log at path up to the line numbered before (every
-// line when negative); depth counts the forks followed. Only the first
-// log's session_meta line is passed on.
-func scanFork(path string, before int64, depth int, fn func(line []byte) bool) bool {
+// line when negative), after the lines of the thread it forked. Only the
+// first log's session_meta line is passed on.
+func scanFork(path string, before int64, chain *forkChain, fn func(line []byte) bool) bool {
+	depth := chain.depth
+	chain.seen = append(chain.seen, path)
 	first := true
 	return agentlog.ScanFile(path, func(line []byte) bool {
 		var entry struct {
@@ -96,31 +107,31 @@ func scanFork(path string, before int64, depth int, fn func(line []byte) bool) b
 		switch {
 		case !isMeta:
 			return fn(line)
-		case depth > 0:
-			// The forked thread's meta: the fork's own came first.
-			return true
-		case !fn(line):
+		case depth == 0 && !fn(line):
+			// A forked thread's meta isn't passed on: the fork's own
+			// came first.
 			return false
 		case entry.Payload.ForkedFromID == "" || depth >= maxForkDepth:
 			return true
 		}
 		parent, found := LogOf(entry.Payload.ForkedFromID)
-		if !found {
+		if !found || slices.Contains(chain.seen, parent) {
 			return true
 		}
 		limit := int64(-1)
 		if entry.Payload.ForkedBefore != nil {
 			limit = *entry.Payload.ForkedBefore
 		}
-		return scanUntilStopped(parent, limit, depth+1, fn)
+		chain.depth = depth + 1
+		return scanUntilStopped(parent, limit, chain, fn)
 	})
 }
 
 // scanUntilStopped is scanFork that reports false when fn did, rather
 // than whether the log could be read.
-func scanUntilStopped(path string, before int64, depth int, fn func(line []byte) bool) bool {
+func scanUntilStopped(path string, before int64, chain *forkChain, fn func(line []byte) bool) bool {
 	stopped := false
-	scanFork(path, before, depth, func(line []byte) bool {
+	scanFork(path, before, chain, func(line []byte) bool {
 		stopped = !fn(line)
 		return !stopped
 	})
