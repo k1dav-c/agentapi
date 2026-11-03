@@ -94,7 +94,8 @@ Steering appends to the reply, and Stop ends the turn as interrupted. The adapte
 
 The chat stores one conversation per server in IndexedDB. Reopening shows the cached transcript
 immediately, then fetches changes; saves write only changed messages. Caches expire after 14 days
-without use, and only the 10 most recently used servers keep one.
+without use, and beyond 100 servers or 50,000 records in all the least recently used go; a hub
+opens each instance as a server of its own.
 
 Drafts, failed messages and dismissed notices stay in localStorage. If the chat crashes, the error
 screen shows the error and offers to clear that server's cached conversation and reload.

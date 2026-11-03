@@ -648,14 +648,14 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 結果複製到 `lib/httpapi/chat/`，再由 `embed.go` 以 `go:embed` 嵌入。建置時使用一個佔位的基礎
 路徑，由伺服器改寫成 `--chat-base-path`（預設為 `/chat`）。聊天介面也能以開發伺服器獨立執行
 （`bun run dev`，加上 `?url=<伺服器>`），`/chat/embed` 則是嵌入其他頁面用的版本（`hub=1`：在 hub 的框架裡，它依 hub 用視窗訊息送來的內容畫出 hub 的實例列，見 `lib/hub-frame.ts`）。`/chat/hub/`
-是 hub 的頁面（`components/hub-view.tsx`，各部分在 `components/hub/`，邏輯在 `lib/hub.ts`），由
-`agentapi hub serve` 以同一份建置提供。
+是 hub 的頁面（`components/hub-view.tsx`，各部分與 hook 在 `components/hub/`，邏輯在 `lib/hub.ts`，
+所做的變更經由 `lib/hub-api.ts`），由 `agentapi hub serve` 以同一份建置提供。
 
 - `components/chat-provider.tsx` 組合用戶端狀態與 API 操作。動作與 API 呼叫來自
   `useChatActions()`，這個物件永遠不變，所以只做動作的元件不會重新 render；狀態則用
   `useChatSelector`（`lib/store.ts`）分片讀取，元件只在它讀的那一片改變時才重新 render。
-  `use-event-stream.ts`、`use-queue.ts` 與 `use-session-cache.ts` 分別把事件套用到狀態、追蹤
-  訊息佇列及快取對話。
+  `use-event-stream.ts`、`use-queue.ts`、`use-drafts.ts` 與 `use-session-cache.ts` 分別把事件套用
+  到狀態、追蹤訊息佇列、送出訊息並保留草稿直到伺服器收到，以及快取對話。
 - 事件串流使用 `/events?sync=1`，並記錄最後序號以便增量重播（`lib/chat-stream.ts`）。很長的
   重播每 1.5 秒先顯示一次進度，但排在訊息之後的請求和任務會沿用 chat 原有的，等重播自己的送到
   才取代；屬於別的對話的會先拿掉：重播送來的同 ID 訊息已是另一則的任務，以及在重播第一則訊息

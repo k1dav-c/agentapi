@@ -323,7 +323,9 @@ HTML, Markdown and SVG files have a **Preview** tab, and an image file shows as 
 An HTML page renders with the stylesheets, scripts, images, fonts and media it refers to by
 relative path inlined (up to 4 MiB each, 16 MiB in all; a note lists what was left out). It runs in
 a sandboxed frame without an origin of its own: its scripts run, but they can't reach the chat, its
-session or the API, and storage and cookies last only while the preview is open.
+session or the API, and storage and cookies last only while the preview is open. Its
+Content-Security-Policy lets it load what it refers to but send nothing: no requests, sockets or
+form submissions.
 
 ![The preview of a Markdown file with a heading, an image, a list, a table and code](screenshots/file-markdown.png)
 
@@ -525,4 +527,5 @@ every 30 s; a bar says when, with **Reconnect now**. The server sends a heartbea
 stream silent for 45 s counts as lost even while the tab is in front (a phone that switched
 networks). Going back online or back to the tab reconnects at once. The status and page title show
 the connection state. On reopening, the chat shows the IndexedDB-cached transcript immediately,
-then fetches changes. The terminals reconnect the same way.
+then fetches changes. The terminals reconnect the same way, and like the chat, a terminal whose
+sign-in ended asks for the token again.

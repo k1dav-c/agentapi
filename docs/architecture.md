@@ -818,16 +818,18 @@ build into `lib/httpapi/chat/`, which `embed.go` embeds with `go:embed`. The bui
 placeholder base path that the server rewrites to `--chat-base-path` (default `/chat`). The UI also
 runs as a standalone development server (`bun run dev`, with `?url=<server>`), and `/chat/embed` is
 a variant for embedding in other pages (`hub=1`: in the hub's frame it draws the hub's bar for the instance, from what the hub sends it in window messages, `lib/hub-frame.ts`). `/chat/hub/`
-is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, its logic in
-`lib/hub.ts`), which `agentapi hub serve` serves with the same build.
+is the hub's page (`components/hub-view.tsx`, its parts and hooks in `components/hub/`, its logic in
+`lib/hub.ts`, the changes it makes through `lib/hub-api.ts`), which `agentapi hub serve` serves with
+the same build.
 
 - `components/chat-provider.tsx` composes the client state and API operations.
   Actions and API calls come from `useChatActions()`, an object that never
   changes, so components that only act don't render again; state is read in
   slices with `useChatSelector` (`lib/store.ts`), so a component renders again
-  only when its slice changes. The hooks `use-event-stream.ts`, `use-queue.ts`
-  and `use-session-cache.ts` apply the events to the state, follow the queued
-  messages, and cache the transcript.
+  only when its slice changes. The hooks `use-event-stream.ts`, `use-queue.ts`,
+  `use-drafts.ts` and `use-session-cache.ts` apply the events to the state,
+  follow the queued messages, send messages and keep their drafts until the
+  server has them, and cache the transcript.
 - The event stream uses `/events?sync=1` and keeps the last sequence number
   for incremental replay (`lib/chat-stream.ts`). A long replay shows its
   progress every 1.5 seconds, but the requests and the tasks, which come

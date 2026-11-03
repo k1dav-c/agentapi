@@ -358,7 +358,9 @@ each row moves the instance to a group, to a **New group…**, or to **No group*
 it ([Pinning](#pinning)), mutes it ([Muting](#muting)), updates its AgentAPI
 ([Updating from the hub](#updating-from-the-hub)) and forgets a stopped one
 ([Adding and forgetting instances](#adding-and-forgetting-instances)). Groups are kept on the hub,
-so the phone and the desktop show the same ones, and an instance's own events never move it.
+so the phone and the desktop show the same ones, and an instance's own events never move it. A
+change the hub refuses or doesn't get (a group, a pin, a mute, a forget) changes nothing and says
+why in a notice.
 
 Once there is a group, the list gets a header per group, by name, with the instances in no group
 last under **Ungrouped**; [Recent changes](#recent-changes) shows no group headers. A header shows
@@ -444,7 +446,9 @@ for the task ([Updating from the hub](#updating-from-the-hub)).
 On a desktop, drag the list's edge, or focus it and press ← or →, to change the list's width; each
 browser remembers it, and a double-click on the edge resets it.
 
-The keys work while the hub has the focus; inside an open chat, keys go to the chat. The bell asks
+`/` and `Esc` work anywhere on the hub's page; `j`, `k`, the arrows and `p` work with the focus in
+the list or on nothing, so elsewhere the arrows scroll the overview as usual. Inside an open chat,
+keys go to the chat. The bell asks
 the browser to notify you when an agent starts needing you while the hub's tab is in the background,
 and a screen reader hears the same as it happens.
 
