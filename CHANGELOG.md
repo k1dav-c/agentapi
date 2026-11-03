@@ -24,6 +24,12 @@
   summary schema, `pty` the `Transport` enum; AgentAPI 3 never sent them. The hub still follows a
   2.x instance and shows the rest of its summary.
 
+### Internal
+
+- A release waits only for the Linux tests (test, race, lint). macOS and Windows still run on every
+  push to `main` and every PR, but no longer hold a release up: a macOS job that got no runner
+  skipped the v3.0.0 release twice.
+
 ## v3.0.0
 
 ### Breaking changes
