@@ -310,14 +310,13 @@ func (t *taskTracker) replies(msgs []conv.Message, k int, at map[int]int, change
 }
 
 // taskEndGrace is how long the agent may take to work again once a request
-// or terminal dialog it waited on is answered, before its task counts as
-// done.
+// it waited on is answered, before its task counts as done.
 const taskEndGrace = 3 * time.Second
 
 // statusChanged takes the agent's status after a change; now is when. A
-// task ends when the agent stops working, unless it waits on a request or a
-// terminal dialog. When the agent was idle already and only stopped
-// waiting, as an answer was given, it likely works again: confirm reports
+// task ends when the agent stops working, unless it waits on a request.
+// When the agent was idle already and only stopped waiting, as an answer
+// was given, it likely works again: confirm reports
 // that the task ends if the agent is still idle after taskEndGrace
 // (endIfIdle).
 func (t *taskTracker) statusChanged(next StatusChangeBody, now time.Time) (changed []int, confirm bool) {

@@ -68,7 +68,7 @@ func (s TaskStatus) Schema(r huma.Registry) *huma.Schema {
 }
 
 // Task is a message of the user's and the agent's turn on it, until the
-// agent is done: stable again, with no request or terminal dialog open.
+// agent is done: stable again, with no request open.
 // Messages the user adds while it runs (steering) belong to it.
 type Task struct {
 	ID        int        `json:"id" doc:"The ID of the user's message that started the task, as in GET /messages."`

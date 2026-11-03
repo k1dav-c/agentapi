@@ -16,7 +16,7 @@ import (
 var rootCmd = &cobra.Command{
 	Use:     "agentapi",
 	Short:   "AgentAPI CLI",
-	Long:    `AgentAPI - HTTP API for Claude Code, Goose, Aider, Gemini and Codex`,
+	Long:    `AgentAPI - HTTP API for Claude Code, Codex and Pi`,
 	Version: version.Version,
 	// Execute prints the error, once.
 	SilenceErrors: true,

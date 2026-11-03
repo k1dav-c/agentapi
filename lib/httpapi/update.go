@@ -80,7 +80,7 @@ const (
 
 // UpdateRequestBody is the body of POST /update.
 type UpdateRequestBody struct {
-	When UpdateWhen `json:"when,omitempty" enum:"idle,now" doc:"When AgentAPI restarts into the new version. idle (the default): once the agent is idle, that is stable with no request (approval, question, plan) or terminal dialog open; queued messages stay queued and go out after the restart. now: at once, interrupting the agent."`
+	When UpdateWhen `json:"when,omitempty" enum:"idle,now" doc:"When AgentAPI restarts into the new version. idle (the default): once the agent is idle, that is stable with no request (approval, question, plan) open; queued messages stay queued and go out after the restart. now: at once, interrupting the agent."`
 }
 
 // UpdateRequest asks to update AgentAPI; the body is optional.
@@ -511,7 +511,7 @@ func (s *Server) registerUpdateRoutes() {
 			"AgentAPI runs, and restarts AgentAPI in place into it: the same process, a new server_id and version. " +
 			"The request can't choose a version or a URL. AgentAPIs that share the program replace it under a lock " +
 			"file next to it, and one that finds the program on disk newer than the one it runs only restarts. " +
-			"`when` is `idle` (the default: once the agent is stable, with no request or terminal dialog open) or " +
+			"`when` is `idle` (the default: once the agent is stable, with no request open) or " +
 			"`now`. Returns 200 with `up_to_date` when AgentAPI runs the latest release already, else 202 with " +
 			"the state and the version it updates to; while an update is under way it returns its state, and " +
 			"`now` has it restart without waiting. 403 unless AgentAPI runs with --allow-update; 409 when it " +
