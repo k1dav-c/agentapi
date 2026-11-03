@@ -304,19 +304,18 @@ header, tab title and status strip show "Needs you", and queued tasks are marked
 steered into a task shows inside it, so the chat numbers tasks as the server does. Long tasks show
 their latest 40 steps first.
 
-Each agent message has its own Markdown/raw toggle so you can switch display modes without
-affecting the rest of the conversation.
+Each agent message has its own Markdown/raw toggle.
 
 ### Session Explorer
 
-The Session Explorer provides:
+The Session Explorer (⌘K / Ctrl+K) provides:
 
 - links and file paths discovered in the current conversation;
 - an index for jumping directly to earlier tasks;
 - MCP server configuration without leaving the chat UI;
 - a Session tab with the agent's [earlier sessions](#earlier-sessions) to open or copy, what they
   [cost](#session-costs), and a two-step restart confirmation;
-- a Webhook tab that sets up the [webhook](#webhooks) (open the Explorer with ⌘K / Ctrl+K).
+- a Webhook tab that sets up the [webhook](#webhooks).
 
 ![The Session Explorer's Index tab listing the session's tasks](docs/screenshots/explorer-index.png)
 
@@ -348,8 +347,8 @@ agent receives the file path.
 
 ### Decision cards
 
-Items awaiting your response appear above the composer as decision cards: its terminal dialogs on
-the PTY transport (see [Interactive prompt support](#interactive-prompt-support)), its
+Items awaiting your response appear above the composer as decision cards: the agent's terminal
+dialogs on the PTY transport (see [Interactive prompt support](#interactive-prompt-support)), its
 [requests](#requests-approvals-questions-and-plans) on the native transport, and the
 [login card](#logging-in) while it waits for a login. Number keys pick options. On a phone a card
 takes at most 60% of the screen, and a title cut to two lines can be shown in full.
@@ -414,8 +413,8 @@ the window (11–20px); the mirror uses the agent's real terminal width, so star
 
 ### With the native transport
 
-Native requests for tool approval, answers or plan approval appear as cards above the composer,
-using at most 60% of a phone's screen. While the agent works, the send menu can steer a message into
+Native requests for tool approval, answers or plan approval appear as cards above the composer.
+While the agent works, the send menu can steer a message into
 the running turn or interrupt it. The toolbar controls permission mode, model and reasoning effort,
 and shows context usage and rate limits. Slash commands include `/model` and `/compact`.
 
@@ -683,9 +682,9 @@ approving it does not change files.
 `GET /status` reports the supported `capabilities`: `steer`, `interrupt`, `resume` (the session
 can be resumed when AgentAPI starts again, see [Persistent sessions](#persistent-sessions)),
 `settings` (see [Settings](#settings-permission-mode-model-and-effort)), `compact` (see
-[Slash commands](#slash-commands-and-compaction)) and `images` (image attachments, `@"<path>"`
-references to PNG, JPEG, GIF or WebP files up to 10 MB, are sent to the agent as images as well as
-paths; to an agent without it, only the paths are sent). While no agent runs (a restart, a wait for
+[Slash commands](#slash-commands-and-compaction)) and `images`. With `images`, image attachments
+(`@"<path>"` references to PNG, JPEG, GIF or WebP files up to 10 MB) go to the agent as images as
+well as paths; without it, only the paths are sent. While no agent runs (a restart, a wait for
 a login), it reports what the last one supported.
 
 In the chat, while the agent works, the send button's menu adds **Steer** (⌘/Ctrl+Enter) and
@@ -730,9 +729,7 @@ phone in a row of their own above the buttons).
 
 ![The model menu with three models and the reasoning efforts of the chosen one](docs/screenshots/model-settings.png)
 
-The permission control in the composer's toolbar changes how the agent handles approvals, and the
-model control chooses a model and its reasoning effort. Swift, Deep, and Plain are demonstration
-models supplied by `native-demo`.
+Swift, Deep, and Plain are demonstration models supplied by `native-demo`.
 
 ### Context and rate limits
 
@@ -993,10 +990,7 @@ usage.
 
 The permission mode, model and effort switch with Claude Code's control requests
 (`set_permission_mode`, `set_model`, `apply_flag_settings`); its models and their efforts come
-from its initialize response, and the model and effort it runs with from `get_settings`. AgentAPI
-adds `--allow-dangerously-skip-permissions`, without which Claude Code ignores a switch to
-`bypassPermissions`, except where Claude Code refuses that mode (as root outside a sandbox).
-Approving a plan offers "Yes, and bypass permissions" whenever the session can switch to it.
+from its initialize response, and the model and effort it runs with from `get_settings`.
 
 - Approvals offer Allow, Deny (with optional feedback for Claude) and, when
   Claude Code suggests a permission rule, "Allow always", which applies the
