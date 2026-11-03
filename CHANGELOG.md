@@ -83,6 +83,9 @@
 - `lib/sse` reads and writes server-sent events for the hub; `lib/filelock`; Pi matches responses
   with `agentio.Calls`; `agentlog.Follower` tails a log for the PTY watcher; the hub page and the
   chat provider are split into hooks.
+- `lib/httpapi` is split: the conversation state (`EventEmitter`, tasks, summary) is
+  `lib/convstate`, webhook delivery and its observer `lib/webhook`, and the file API's reads,
+  diffs and search `lib/workspacefs`. The HTTP API and its schema are unchanged.
 
 ## v2.2.0
 
