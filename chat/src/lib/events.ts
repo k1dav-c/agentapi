@@ -28,10 +28,10 @@ export type TerminalExitEvent = Schemas["TerminalExitBody"];
 
 // A server older than the chat (the chat in development, or served apart
 // from it) leaves out what it didn't have yet: the transport (GET /status
-// says then), the lifecycle, the version, the terminal prompt and some
-// capabilities.
-type Missing = "transport" | "lifecycle" | "agentapi_version" | "terminal_prompt";
-export type StatusChangeEvent = Omit<Schemas["StatusChangeBody"], Missing | "capabilities"> &
+// says then), the lifecycle, the version and some capabilities.
+type Missing = "transport" | "lifecycle" | "agentapi_version";
+// TODO(v3 regen): drop "terminal_prompt" once api-schema.ts no longer has it.
+export type StatusChangeEvent = Omit<Schemas["StatusChangeBody"], Missing | "capabilities" | "terminal_prompt"> &
   Partial<Pick<Schemas["StatusChangeBody"], Missing>> & {capabilities?: Capabilities};
 
 // A message_update as a message of the chat's, with the change's seq.

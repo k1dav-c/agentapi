@@ -166,9 +166,6 @@ export interface ChatState {
   latestTool: string | null;
   // How many subagents the agent ran, and how many still run.
   subagents: {total: number; running: number};
-  // Bottom of the terminal while the agent shows an interactive prompt
-  // (selection list, confirmation) that must be answered; empty otherwise.
-  terminalPrompt: string;
   loading: boolean;
   serverStatus: ServerStatus;
   connectionStatus: ConnectionStatus;
@@ -291,7 +288,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     agentapiVersion,
     sessionName,
     agentSessionId,
-    terminalPrompt,
     capabilities,
     settings: agentSettings,
     usage: agentUsage,
@@ -344,7 +340,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   useSessionCache({agentAPIUrl, synced, messages, richMessages, requests, tasks: serverTasks, transport});
   const pendingRequestCount = useMemo(() => pendingRequests(requests).length, [requests]);
   const agentStarting = lifecycle === "starting";
-  const needs = {terminalPrompt, pendingRequestCount, loginRequired: loginRequired !== null, limitStop: limitStop !== null};
+  const needs = {pendingRequestCount, loginRequired: loginRequired !== null, limitStop: limitStop !== null};
   const agentState = getAgentState({serverStatus, connectionStatus, ...needs});
   const dispatch = useMemo<DispatchContext>(
     () => ({transport, capabilities: agentStarting ? null : capabilities, serverStatus, pendingRequestCount}),
@@ -491,7 +487,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     ...transcript,
     messages,
     richMessages,
-    terminalPrompt,
     loading,
     transport,
     capabilities,

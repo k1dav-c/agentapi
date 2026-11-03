@@ -12,10 +12,6 @@ describe("getAgentState", () => {
     expect(getAgentState({...connected, serverStatus: "unknown"})).toBe("connecting");
   });
 
-  test("an open terminal prompt needs the user, even while stable", () => {
-    expect(getAgentState({...connected, serverStatus: "stable", terminalPrompt: "Do you want to proceed?\n❯ 1. Yes"})).toBe("needs-you");
-  });
-
   test("a request the agent waits on (native transport) needs the user", () => {
     expect(getAgentState({...connected, serverStatus: "stable", pendingRequestCount: 1})).toBe("needs-you");
   });
@@ -63,7 +59,6 @@ describe("what the agent waits for", () => {
   test("a login comes before an answer, an answer before a usage limit, and only while it needs you", () => {
     expect(waitingFor("needs-you", {loginRequired: true, pendingRequestCount: 1, limitStop: true})).toBe("login");
     expect(waitingFor("needs-you", {pendingRequestCount: 1, limitStop: true})).toBe("answer");
-    expect(waitingFor("needs-you", {terminalPrompt: "Do you want to proceed?", limitStop: true})).toBe("answer");
     expect(waitingFor("needs-you", {limitStop: true})).toBe("limit");
     expect(waitingFor("working", {loginRequired: true})).toBeNull();
   });

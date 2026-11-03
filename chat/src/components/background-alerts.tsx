@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import {useChatSelector} from "./chat-provider";
 import {agentDisplayName} from "@/lib/agents";
-import { describeTerminalPrompt } from "@/lib/terminal-option";
 import { loginTitle } from "@/lib/login";
 import { alertForTransition, faviconDataUrl, notificationsEnabled, type FaviconBadge } from "@/lib/background-alerts";
 
@@ -13,7 +12,6 @@ import { alertForTransition, faviconDataUrl, notificationsEnabled, type FaviconB
 // the background.
 export function BackgroundAlerts() {
   const kind = useChatSelector((chat) => chat.agentState);
-  const terminalPrompt = useChatSelector((chat) => chat.terminalPrompt);
   const loginRequired = useChatSelector((chat) => chat.loginRequired);
   const limitStop = useChatSelector((chat) => chat.limitStop);
   const requests = useChatSelector((chat) => chat.requests);
@@ -40,12 +38,10 @@ export function BackgroundAlerts() {
     if (!notificationsEnabled() || typeof Notification === "undefined" || Notification.permission !== "granted") return;
     const notification = new Notification(alert === "needs-you" ? `${name} needs you` : `${name} finished`, {
       body: alert === "needs-you"
-        ? terminalPrompt
-          ? describeTerminalPrompt(terminalPrompt).title
-          : loginRequired
-            ? `${loginTitle(loginRequired)}: run ${loginRequired.command}`
-            : requests.find((request) => request.status === "pending")?.title ??
-              (limitStop ? limitStop.message || "The account reached its usage limit" : "The agent is waiting for your answer")
+        ? loginRequired
+          ? `${loginTitle(loginRequired)}: run ${loginRequired.command}`
+          : requests.find((request) => request.status === "pending")?.title ??
+            (limitStop ? limitStop.message || "The account reached its usage limit" : "The agent is waiting for your answer")
         : task.replace(/\s+/g, " ").slice(0, 120),
       tag: `agentapi-${alert}`,
     });
@@ -53,8 +49,8 @@ export function BackgroundAlerts() {
       window.focus();
       notification.close();
     };
-    // Only state transitions should notify; name, task and prompt are read
-    // at that moment.
+    // Only state transitions should notify; name, task and requests are
+    // read at that moment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind]);
 

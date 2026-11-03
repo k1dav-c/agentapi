@@ -9,7 +9,7 @@ import MessageList from "./message-list";
 import dynamic from "next/dynamic";
 import {ShellView} from "./shell-view";
 import {OPEN_TERMINAL_EVENT} from "@/lib/slash-commands";
-import {DecisionCard, StateStrip} from "./dock";
+import {StateStrip} from "./dock";
 import {RequestCard} from "./request-card";
 import {LoginCard} from "./login-card";
 import {LimitCard} from "./limit-card";
@@ -185,7 +185,6 @@ export function Chat() {
             dock={
               <>
                 <StateStrip />
-                {hasTerminal && <DecisionCard onOpenTerminal={() => setTerminalOpen(true)} />}
                 {features.requests && <LoginCard onRunInTerminal={hasShell ? openShell : undefined} />}
                 {features.requests && <RequestCard />}
                 {features.requests && <LimitCard />}
