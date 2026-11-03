@@ -53,7 +53,10 @@ to PTY mode, which parses terminal output.
 
 - `main.go` - Entry point using the Cobra CLI framework
 - `cmd/` - CLI command definitions, including server, attach, list, hub, restart (registered AgentAPIs restart in place, e.g. into an updated binary), and update
-- `lib/httpapi/` - HTTP server, routes, OpenAPI schema, instance summaries for monitoring multiple AgentAPIs (`GET /summary`, `/events?only=summary`), webhooks that push events (tasks, requests, messages, heartbeats) to a receiver, and updates through the API (`POST /update`, with `--allow-update`)
+- `lib/httpapi/` - HTTP server: routes, OpenAPI schema, auth, event streams, instance summaries for monitoring multiple AgentAPIs (`GET /summary`, `/events?only=summary`), the webhook's configuration, and updates through the API (`POST /update`, with `--allow-update`); it wires the three packages below and aliases their types under the schema's names
+- `lib/convstate/` - The conversation state clients read, without HTTP: the `EventEmitter`, the tasks and summary it derives, the queue it reports, the `Persister` interface
+- `lib/webhook/` - Webhooks that push events (tasks, requests, messages, heartbeats) to a receiver: delivery, and the observer that reads the emitter
+- `lib/workspacefs/` - The file viewer's reads of the working directory: content, diff through git, HTML preview, images, find
 - `lib/conversation/` - Shared messages, status, and the `Conversation` and `Emitter` interfaces (imported as `conv`)
 - `lib/screentracker/` - The PTY engine: terminal output parsing and message splitting
 - `lib/termexec/` - Terminal process execution and management

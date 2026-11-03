@@ -36,7 +36,7 @@ flowchart TB
   subgraph server["agentapi server"]
     http["HTTP 伺服器<br/>lib/httpapi"]
     queue["訊息佇列"]
-    emitter["EventEmitter<br/>對話狀態、SSE"]
+    emitter["EventEmitter<br/>lib/convstate"]
     db[("狀態資料庫<br/>lib/statedb")]
     shell["Shell 終端機<br/>lib/shellterm"]
     conv{{"conv.Conversation"}}
@@ -76,11 +76,14 @@ flowchart TB
 | 路徑 | 內容 |
 | --- | --- |
 | `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、transport、啟動 agent、訊號、原地重新啟動）、`attach`、`list`（已登記的 AgentAPI 和它們的摘要）、`hub`（`serve`：hub；`join`、`leave`、`status`：設定檔和執行中 AgentAPI 的 hub webhook）、`restart`（讓已登記的 AgentAPI 原地重新啟動），以及 `update`（會驗證 checksum 的自我更新） |
-| `lib/httpapi/` | HTTP 伺服器：路由與處理常式、`EventEmitter`、佇列、token 驗證、webhook、MCP／檔案／終端機端點，以及嵌入的聊天介面 |
+| `lib/httpapi/` | HTTP 伺服器：路由與處理常式、佇列、token 驗證、CORS 與跨來源檢查、事件串流、MCP／檔案／終端機／webhook 端點，以及嵌入的聊天介面；由它把下面三個套件接起來 |
+| `lib/convstate/` | 用戶端讀取的對話狀態，不碰 HTTP：`EventEmitter`（變更以 epoch 和 seq 編號、訂閱與重播）、它推導出的任務和摘要、伺服器最後回報的佇列，以及它把每個變更交給的 `Persister` |
+| `lib/webhook/` | Webhook 傳送（`Dispatcher`：佇列、重試、簽章、心跳、public URL 中的 `{ip}`），以及把 emitter 的事件轉成 webhook 事件的 observer（`Observe`，透過 `Source`） |
+| `lib/workspacefs/` | 檔案檢視器從工作目錄讀取的內容（`Dir`）：檔案文字、透過 git 取得的 diff、HTML 預覽、要提供的檔案、路徑搜尋；拒絕的請求是 `Error`，由 `lib/httpapi` 依它的種類轉成狀態碼 |
 | `lib/conversation/` | 共用型別（以 `conv` 匯入）：訊息、角色、狀態與錯誤等級。伺服器透過 `Conversation` 呼叫 transport，transport 透過 `Emitter` 回報變更 |
 | `lib/screentracker/` | PTY 對話：畫面快照、訊息切分、穩定狀態偵測，以及把訊息片段輸入 agent 的終端機（`AgentIO`、`TerminalPart`） |
 | `lib/termexec/` | 在虛擬終端機中執行 agent，搭配記憶體內的 VT100 模擬器（`xpty`、`vt10x`）；重新啟動時可以替換行程 |
-| `lib/msgfmt/` | 各 agent 專屬的畫面輸出整理：回顯的輸入、輸入框、狀態列、工具呼叫，以及判斷何時可以送出第一個提示 |
+| `lib/msgfmt/` | 各 agent 專屬的畫面輸出整理：回顯的輸入、輸入框、狀態列、工具呼叫、判斷何時可以送出第一個提示，以及 agent 在終端機中顯示的對話框（`IsTerminalQuestionScreen`） |
 | `lib/transcript/` | 各傳輸共用的結構化對話型別：結構化訊息與其內容區塊、時間軸事件 |
 | `lib/agentlog/` | 各 agent 工作階段紀錄的格式，一種 agent 一個套件（`claudelog`、`codexlog`、`pilog`）：紀錄型別、解析成結構化訊息與時間軸事件的 parser（native adapter 也使用）、prompt 與注入內容的辨識、模型呼叫、檔案配置與 resolver；另有逐行讀取、增量檔案索引和格式變動警告 |
 | `lib/sessions/` | 伺服器持有的 `Store` 讀取目錄中先前的工作階段與對話（`history.go`）、sub agent（`subagents.go`）及花費（`cost.go`） |
@@ -122,7 +125,7 @@ flowchart TB
    PID 檔也只能由一個伺服器寫入）。路徑設定開頭的 `~` 代表家目錄，`--state-db`、`--pid-file` 和
    `--public-url` 中的 `{port}` 和 `{hostname}` 會被填入（`instanceapi.ExpandPlaceholders`）。`--public-url` 中的 `{ip}`
    保留不填：它在伺服器執行期間會變（DHCP），所以 webhook dispatcher 每次為事件、摘要或登記檔組出實例
-   資料時才填入（`lib/httpapi/webhook.go` 的 `publicURL`），填的是通往 webhook 網址那條路由的來源位址，
+   資料時才填入（`lib/webhook/dispatcher.go` 的 `publicURL`），填的是通往 webhook 網址那條路由的來源位址，
    由 `refreshIP` 透過 `netaddr.Resolver` 查詢（結果保留 30 秒，每次查詢最多等 `netaddr.DialTimeout`）：
    在 `instance.started` 之前、設定變更後、每次 heartbeat 之前，以及每 30 秒一次，都在 emitter 的鎖之外進行；
    事件只讀取最後查到的位址。agent 類型取自 `--type`；沒有指定時，
@@ -177,19 +180,19 @@ flowchart TB
 | --- | --- |
 | `server.go`、`routes.go`、`hosts.go`、`middleware.go`、`compress.go` | 伺服器的設定、啟動與停止；各功能自行註冊的路由；允許的主機與來源；請求記錄；壓縮 |
 | `conversation_api.go`、`queue.go`、`sse.go`、`jsonl_watcher.go` | 訊息、狀態與時間軸；佇列、派送與 `queue_update`；`GET /events` 與畫面串流；PTY 傳輸的工作階段紀錄監看 |
-| `tasks.go` | emitter 從對話推導出的任務（`taskTracker`）、`task_update` 與 `GET /tasks` |
-| `summary.go`、`spend.go`、`registry.go` | 給監看多個 AgentAPI 的用戶端的摘要（`attention`、標題、最新任務、`unread`、`spend`）、`summary_update`、`GET /summary` 與 `POST /tasks/seen`；每分鐘計算的花費；伺服器的登記檔（`instanceRegistry`） |
+| `tasks_api.go` | `GET /tasks`：emitter 推導出的任務（`lib/convstate`） |
+| `summary_api.go`、`spend.go`、`registry.go` | `GET /summary` 與 `POST /tasks/seen`，也就是 emitter 為監看多個 AgentAPI 的用戶端保存的摘要；每分鐘計算的花費；伺服器的登記檔（`instanceRegistry`） |
 | `backend.go`、`backend_pty.go`、`backend_native.go` | 依 transport 而不同的部分：派送佇列與每次檢查要做的事（`beforeQueue`：排定的繼續、Codex 的更新提示）、送出訊息、重新啟動（`beginRestart`、`beginReload`）、人工回覆協定（`handoffOffer`、`answerHandoff`） |
 | `setup.go` | 啟動 PTY agent 的行程 |
 | `native.go` | 請求、設定、中斷、壓縮、重試登入；native observer |
 | `limit.go`、`sessions.go`、`subagents.go` | 因用量限制停下的回合（`/limit`）；agent 先前的工作階段和它們的花費（`/sessions`、`/cost`）；它的 sub agent（`/subagents`） |
-| `terminal.go`、`files.go`、`file_preview.go`、`files_find.go` | Shell 終端機（`terminalAPI`），以及檔案檢視器與搜尋 agent 用 repo 相對路徑提到的檔案（`fileAPI`） |
+| `terminal.go`、`files_api.go` | Shell 終端機（`terminalAPI`）；檔案檢視器與搜尋 agent 用 repo 相對路徑提到的檔案（`fileAPI`，底層是 `lib/workspacefs`） |
 | `mcp.go`、`mcp_management.go` | MCP 伺服器與設定檔 |
-| `webhook.go`、`webhook_events.go`、`handoff.go`、`dialog_reply.go` | Webhook 傳送（佇列、重試、簽章、心跳），以及把對話事件轉成 webhook 事件的 observer；人工回覆 API；終端機對話框的回答 |
+| `webhook_api.go`、`handoff.go`、`dialog_reply.go` | Webhook 設定（`GET`／`PUT /webhook`、`POST /webhook/test`）、它描述的實例與啟動（由 `lib/webhook` 傳送）；人工回覆 API；終端機對話框的回答 |
 | `auth.go` | Token 驗證與聊天介面登入（`authAPI`） |
 | `restart.go`、`statedb.go` | 重新啟動；還原與保存狀態 |
 | `update.go` | 透過 API 更新 AgentAPI（`POST /update`、`DELETE /update`、`updater`）與摘要的 `update`；見[重新啟動與更新](#重新啟動與更新) |
-| `events.go`、`events_*.go`、`models.go` | Emitter（訂閱與重播；它保存的狀態、畫面、請求與訊息）與 API 的型別 |
+| `convstate.go`、`models.go` | `lib/convstate` 型別的別名；API 的型別 |
 | `embed.go`、`uploads.go` | 嵌入的聊天介面；上傳的檔案（`uploadAPI`，它從操作的 middleware 處理 `POST /upload`：huma v2.32 每次處理 multipart 請求都會改動共用的操作） |
 
 huma 以外的 chi 路由提供聊天介面（`/chat/*`，`/` 會重新導向到這裡）、上傳圖片
@@ -200,6 +203,19 @@ huma 以外的 chi 路由提供聊天介面（`/chat/*`，`/` 會重新導向到
 狀態資料庫。對話變更以外的功能交給註冊路由時建立的小模組：`fileAPI` 持有工作目錄，
 `terminalAPI` 持有 shell，`uploadAPI` 持有上傳儲存，`authAPI` 持有 token 檢查，
 `webhookAPI` 持有傳送器與狀態資料庫。
+
+`lib/httpapi` 接起三個不認識 HTTP 的套件：
+
+- `lib/convstate` 保存對話狀態。emitter 持有自己的鎖時，只呼叫不會阻塞、也不會回頭拿這把鎖的
+  東西：`Persister`（狀態資料庫把寫入排進佇列）、狀態變更處理器（`webhook.Dispatcher.StatusChanged`，
+  只排入佇列、不等待），以及摘要中的實例（`Dispatcher.Instance`，讀取最後查到的 `{ip}`）。
+  鎖的順序不變：先 emitter，再傳送器和狀態資料庫。
+- `lib/webhook` 只透過訂閱（`Source`）讀取 emitter，就像 `/events` 用戶端，並在自己的
+  goroutine 上執行。
+- `lib/workspacefs` 讀取工作目錄；`fileAPI` 把它拒絕的請求轉成 400、403 和 404。
+
+huma 依 Go 型別名稱為 OpenAPI schema 命名，所以 `lib/httpapi` 為搬走的型別保留別名
+（`convstate.go`、`FileMatch`、`WebhookConfig`），schema 和這個套件的 API 都維持原樣。
 
 依 transport 而異的操作由 `agentBackend` 處理：`ptyBackend` 驅動終端機對話，
 `nativeBackend` 驅動 native 對話。
@@ -386,7 +402,7 @@ type Factory func(resume Resume) (Adapter, error)
 
 ## 事件與對話狀態
 
-`EventEmitter`（`lib/httpapi/events.go`）保存用戶端讀取的內容：訊息、結構化訊息、時間軸、
+`EventEmitter`（`lib/convstate`）保存用戶端讀取的內容：訊息、結構化訊息、時間軸、
 請求、任務、佇列、狀態快照（狀態、生命週期、server ID、回合數、agent 的工作階段 ID、能力、設定、
 含 prompt cache 的用量、用量限制造成的停止、登入、終端機提示）以及最新的畫面。
 

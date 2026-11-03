@@ -37,7 +37,7 @@ flowchart TB
   subgraph server["agentapi server"]
     http["HTTP server<br/>lib/httpapi"]
     queue["Message queue"]
-    emitter["EventEmitter<br/>conversation state, SSE"]
+    emitter["EventEmitter<br/>lib/convstate"]
     db[("State DB<br/>lib/statedb")]
     shell["Shell terminal<br/>lib/shellterm"]
     conv{{"conv.Conversation"}}
@@ -78,11 +78,14 @@ answers write keys directly to the agent's terminal.
 | Path | What it holds |
 | --- | --- |
 | `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, transport, starting the agent, signals, restarting in place), `attach`, `list` (the registered AgentAPIs and their summaries), `hub` (`serve`: the hub; `join`, `leave` and `status`: a hub's webhook in the config file and in the running AgentAPIs), `restart` (has registered AgentAPIs restart in place) and `update` (self-update with checksum verification) |
-| `lib/httpapi/` | The HTTP server: routes and handlers, the `EventEmitter`, the queue, token auth, webhooks, the MCP, files and terminal endpoints, and the embedded chat UI |
+| `lib/httpapi/` | The HTTP server: routes and handlers, the queue, token auth, CORS and cross-origin checks, the event streams, the MCP, files, terminal and webhook endpoints, and the embedded chat UI; it wires the three packages below |
+| `lib/convstate/` | The conversation state clients read, without HTTP: the `EventEmitter` (its changes numbered by epoch and seq, subscriptions and replay), the tasks and the summary it derives, the queue as the server reported it, and the `Persister` it hands every change to |
+| `lib/webhook/` | Webhook delivery (`Dispatcher`: queue, retries, signatures, heartbeats, `{ip}` in the public URL) and the observer that turns the emitter's events into webhook events (`Observe`, through `Source`) |
+| `lib/workspacefs/` | What the file viewer reads of the working directory (`Dir`): a file's text, its diff through git, an HTML preview, a file to serve, the search for a path; a refusal is an `Error` whose kind `lib/httpapi` turns into a status |
 | `lib/conversation/` | Shared types (imported as `conv`): messages, roles, status and error levels. The server calls transports through `Conversation`; transports report changes through `Emitter` |
 | `lib/screentracker/` | The PTY conversation: screen snapshots, message splitting, stability detection, and typing parts into the agent's terminal (`AgentIO`, `TerminalPart`) |
 | `lib/termexec/` | Runs the agent in a pseudo-terminal with an in-memory VT100 emulator (`xpty`, `vt10x`); the process can be swapped for a restart |
-| `lib/msgfmt/` | Per-agent formatting of screen output: echoed input, input boxes, status lines, tool calls, readiness for the first prompt |
+| `lib/msgfmt/` | Per-agent formatting of screen output: echoed input, input boxes, status lines, tool calls, readiness for the first prompt, the dialogs an agent shows in its terminal (`IsTerminalQuestionScreen`) |
 | `lib/transcript/` | The structured transcript's types, which the transports share: rich messages with their content blocks, and timeline events |
 | `lib/agentlog/` | The agents' session-log formats, one package each (`claudelog`, `codexlog`, `pilog`): their records, the parsers into rich messages and timeline events (the native adapters use them too), prompts and injected context, model calls, file layout and resolvers; plus line reading, the incremental file index and format-drift warnings |
 | `lib/sessions/` | A server-held `Store` reads earlier sessions and their conversations (`history.go`), subagents (`subagents.go`) and costs (`cost.go`) for a directory |
@@ -128,7 +131,7 @@ answers write keys directly to the agent's terminal.
    are filled in (`instanceapi.ExpandPlaceholders`). `{ip}` in `--public-url`
    stays: it changes while the server runs (DHCP), so the webhook dispatcher
    fills it in whenever it builds the instance for an event, the summary or
-   the registry entry (`publicURL` in `lib/httpapi/webhook.go`), with the
+   the registry entry (`publicURL` in `lib/webhook/dispatcher.go`), with the
    source address of the route to the webhook URL. `refreshIP` looks it up
    through `netaddr.Resolver` (kept 30 s, each lookup bounded by
    `netaddr.DialTimeout`) before `instance.started`, after a configuration
@@ -209,19 +212,19 @@ The handlers are grouped by file:
 | --- | --- |
 | `server.go`, `routes.go`, `hosts.go`, `middleware.go`, `compress.go` | The server's setup, start and stop; the routes, which each feature registers; allowed hosts and origins; request logging; compression |
 | `conversation_api.go`, `queue.go`, `sse.go`, `jsonl_watcher.go` | Messages, status and timeline; the queue, its dispatch and `queue_update`; `GET /events` and the screen stream; the PTY transport's session log watcher |
-| `tasks.go` | The tasks the emitter derives from the conversation (`taskTracker`), `task_update` and `GET /tasks` |
-| `summary.go`, `spend.go`, `registry.go` | The summary for clients that watch many AgentAPIs (`attention`, title, latest task, `unread`, `spend`), `summary_update`, `GET /summary` and `POST /tasks/seen`; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
+| `tasks_api.go` | `GET /tasks`: the tasks the emitter derives (`lib/convstate`) |
+| `summary_api.go`, `spend.go`, `registry.go` | `GET /summary` and `POST /tasks/seen`, the summary the emitter keeps for clients that watch many AgentAPIs; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
 | `backend.go`, `backend_pty.go`, `backend_native.go` | What depends on the transport: dispatching the queue and the work each tick (`beforeQueue`: a scheduled continuation, Codex's update prompt), delivering a message, restarts (`beginRestart`, `beginReload`), the human-reply protocol (`handoffOffer`, `answerHandoff`) |
 | `setup.go` | Starting the process of a PTY agent |
 | `native.go` | Requests, settings, interrupt, compaction, login retry; the native observer |
 | `limit.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); the agent's earlier sessions and what they cost (`/sessions`, `/cost`); its subagents (`/subagents`) |
-| `terminal.go`, `files.go`, `file_preview.go`, `files_find.go` | The shell terminal (`terminalAPI`) and the file viewer and the search for a file the agent named relative to a repository (`fileAPI`) |
+| `terminal.go`, `files_api.go` | The shell terminal (`terminalAPI`); the file viewer and the search for a file the agent named relative to a repository (`fileAPI`, over `lib/workspacefs`) |
 | `mcp.go`, `mcp_management.go` | MCP servers and profiles |
-| `webhook.go`, `webhook_events.go`, `handoff.go`, `dialog_reply.go` | Webhook delivery (queue, retries, signatures, heartbeats) and the observer that turns the conversation's events into webhook events; the human-reply API; answers to terminal dialogs |
+| `webhook_api.go`, `handoff.go`, `dialog_reply.go` | The webhook's configuration (`GET`/`PUT /webhook`, `POST /webhook/test`), the instance it describes and its start (`lib/webhook` delivers); the human-reply API; answers to terminal dialogs |
 | `auth.go` | Token auth and the chat's sign-in (`authAPI`) |
 | `restart.go`, `statedb.go` | Restarts; restoring and persisting the state |
 | `update.go` | Updating AgentAPI through its API (`POST /update`, `DELETE /update`, the `updater`) and the summary's `update`; see [Restarts and updates](#restarts-and-updates) |
-| `events.go`, `events_*.go`, `models.go` | The emitter (subscriptions and replay; the status, screen, requests and messages it keeps) and the API's types |
+| `convstate.go`, `models.go` | Aliases of `lib/convstate`'s types; the API's types |
 | `embed.go`, `uploads.go` | The embedded chat UI; uploaded files (`uploadAPI`, which serves `POST /upload` from the operation's middleware: huma v2.32 changes the shared operation on every multipart request) |
 
 Chi routes outside huma serve the chat (`/chat/*`, with `/` redirecting there), uploaded images
@@ -232,6 +235,24 @@ Chi routes outside huma serve the chat (`/chat/*`, with `/` redirecting there), 
 shell terminal and state DB. Features outside conversation changes use modules created during route
 registration: `fileAPI` holds the working directory, `terminalAPI` the shell, `uploadAPI` the upload
 store, `authAPI` the token check, and `webhookAPI` the dispatcher and state DB.
+
+`lib/httpapi` wires three packages that don't know HTTP:
+
+- `lib/convstate` holds the conversation's state. Under its lock the
+  emitter calls only what doesn't block or take it: the `Persister` (the
+  state DB queues the writes), the status change handler
+  (`webhook.Dispatcher.StatusChanged`, which queues without waiting) and
+  the instance in the summary (`Dispatcher.Instance`, which reads the last
+  `{ip}` found). The lock order stays the emitter's, then the
+  dispatcher's and the state DB's.
+- `lib/webhook` reads the emitter only through subscriptions (`Source`),
+  like an `/events` client, on goroutines of its own.
+- `lib/workspacefs` reads the working directory; `fileAPI` turns its
+  refusals into 400, 403 and 404.
+
+Huma names the OpenAPI schemas after the Go types, so `lib/httpapi` keeps
+aliases of the types that moved (`convstate.go`, `FileMatch`,
+`WebhookConfig`): the schema and the package's API stay as they were.
 
 For operations that differ by transport, handlers call `agentBackend`: `ptyBackend` drives terminal
 conversations; `nativeBackend` drives native conversations.
@@ -472,7 +493,7 @@ The adapters:
 
 ## Events and the conversation state
 
-The `EventEmitter` (`lib/httpapi/events.go`) stores the state clients read: the messages, rich
+The `EventEmitter` (`lib/convstate`) stores the state clients read: the messages, rich
 messages, the timeline, requests, the tasks, the queue, the status snapshot (status, lifecycle,
 server ID, turn, the agent's session ID, capabilities, settings, usage with the prompt cache, a
 usage limit stop, login, terminal prompt) and the latest screen.
