@@ -115,7 +115,7 @@ func (p keyPressPart) String() string { return "" }
 
 // formatFreeTextReply opens the prompt's free-text field with keys and pastes
 // the message into it. The conversation's carriage return then submits it.
-func formatFreeTextReply(agentType mf.AgentType, keys string, message string) []conv.MessagePart {
+func formatFreeTextReply(keys string, message string) []conv.MessagePart {
 	var parts []conv.MessagePart
 	if keys != "" {
 		parts = append(parts, keyPressPart{keys: keys, delay: freeTextFocusDelay})
