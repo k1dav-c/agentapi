@@ -248,7 +248,6 @@ func TestCompactHoldsTurns(t *testing.T) {
 	assert.Equal(t, conv.StatusChanging, c.Status())
 	assert.ErrorIs(t, c.StartTurn(context.Background(), native.InputFromText("hi")), conv.ErrMessageValidationChanging)
 	assert.ErrorIs(t, c.Compact(context.Background()), native.ErrTurnActive, "one at a time")
-	assert.ErrorIs(t, c.Reload(context.Background()), native.ErrTurnActive)
 	release <- struct{}{}
 	require.NoError(t, <-done)
 	assert.True(t, c.Idle())

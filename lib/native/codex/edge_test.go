@@ -805,7 +805,8 @@ func (p slowExit) Kill() error {
 }
 
 // Close returns once app-server has exited, not when SIGKILL is sent: a
-// Reload resumes the thread at once, which the old process must not hold.
+// restart on the same session resumes the thread at once, which the old
+// process must not hold.
 func TestCloseWaitsForTheExit(t *testing.T) {
 	h := newHarness(t, "", nil, func(c *Config) {
 		c.StopTimeout = 10 * time.Millisecond
