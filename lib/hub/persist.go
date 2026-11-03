@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/coder/agentapi/lib/atomicfile"
 )
 
 // persistInterval is how long the hub gathers changes before it writes a
@@ -124,43 +126,7 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	// On disk before it takes the file's name: after a crash, the name
-	// would otherwise point at an empty file.
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		return err
-	}
-	syncDir(filepath.Dir(path))
-	return nil
-}
-
-// syncDir puts the entries of dir, such as a file renamed in it, on disk,
-// where the system can sync a directory.
-func syncDir(dir string) {
-	d, err := os.Open(dir)
-	if err != nil {
-		return
-	}
-	_ = d.Sync()
-	_ = d.Close()
+	return atomicfile.Write(path, "."+filepath.Base(path)+"-*", data)
 }
 
 // stateVersion is the version of the file of instances this hub writes.

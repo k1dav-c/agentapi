@@ -6,6 +6,9 @@
 
 - A Codex fork of a fork reads every thread it continues, up to 16 forks back: its history, first
   prompt and prompt count start with the first thread's. Only the thread it forked was read.
+- `~/.agentapi/config.yaml` (which holds the webhook secret) and the registry entries are synced to
+  disk before and after they are renamed into place, as the hub's file is: a crash or power loss
+  could leave them empty.
 
 ## v2.5.0
 

@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/coder/agentapi/lib/atomicfile"
 )
 
 // DefaultPath is ~/.agentapi/config.yaml.
@@ -46,7 +48,8 @@ func Load(path string) (Config, error) {
 }
 
 // Save writes config to path, readable by its owner only (it may hold a
-// webhook secret), creating the directory. The file is replaced at once.
+// webhook secret), creating the directory. The file is replaced at once,
+// and a crash leaves the old settings or the new.
 // Comments in the file are not kept.
 func Save(path string, config Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -57,20 +60,5 @@ func Save(path string, config Config) error {
 		return err
 	}
 	header := []byte("# AgentAPI settings: agentapi server flags by name. A flag or an AGENTAPI_*\n# variable overrides them. agentapi hub join and leave write this file.\n")
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(append(header, data...)); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return atomicfile.Write(path, ".config-*", append(header, data...))
 }
