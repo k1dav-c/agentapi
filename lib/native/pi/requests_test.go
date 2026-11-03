@@ -212,3 +212,45 @@ func TestInterruptCancelsCommandDialogs(t *testing.T) {
 	h.settle()
 	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonInterrupted}}, h.sink.State().Results)
 }
+
+// TestUnconfirmedInterrupt: an abort whose write didn't finish may yet
+// reach Pi. Its late response still cancels the command's dialog, and a
+// Pi that never answers it has the turn ended at the deadline.
+func TestUnconfirmedInterrupt(t *testing.T) {
+	t.Parallel()
+	interrupt := func(t *testing.T) (*harness, map[string]any, *heldStdin) {
+		h := startedHarness(t)
+		cmd := h.prompt("p", "/rpc-input")
+		h.write(`{"type":"extension_ui_request","id":"d1","method":"input","title":"Enter a value","placeholder":"type something..."}`)
+		require.NoError(t, h.result("p"))
+		h.settle()
+		stdin := &heldStdin{WriteCloser: h.pi.Stdin(), writing: make(chan struct{}), release: make(chan struct{})}
+		h.a.writer.Attach(stdin)
+		ctx, cancel := context.WithTimeout(h.ctx, 20*time.Millisecond)
+		defer cancel()
+		require.NoError(t, h.a.Interrupt(ctx), "the adapter ends the turn either way")
+		return h, cmd, stdin
+	}
+
+	t.Run("late response", func(t *testing.T) {
+		t.Parallel()
+		h, cmd, stdin := interrupt(t)
+		close(stdin.release)
+		abort := h.pi.nextCmd()
+		assert.Equal(t, "abort", abort["type"])
+		h.answer(abort, "")
+		h.settle()
+		assert.Equal(t, map[string]any{"type": "extension_ui_response", "id": "d1", "cancelled": true}, h.pi.nextCmd())
+		h.answer(cmd, `{"disposition":"handled"}`)
+		h.settle()
+		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonInterrupted}}, h.sink.State().Results)
+	})
+
+	t.Run("no response", func(t *testing.T) {
+		t.Parallel()
+		h, _, stdin := interrupt(t)
+		defer close(stdin.release)
+		h.advance(h.a.interruptTimeout)
+		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonInterrupted}}, h.sink.State().Results)
+	})
+}

@@ -407,8 +407,8 @@ func (a *Adapter) Steer(ctx context.Context, input native.Input) error {
 
 // Interrupt sends abort. The turn ends once Pi has settled; the loop then
 // reports it with StopReason "interrupted". If Pi doesn't end the turn
-// within interruptTimeout (an extension command that doesn't stop), the
-// adapter ends it.
+// within interruptTimeout (an extension command that doesn't stop, or an
+// abort whose write Pi didn't confirm), the adapter ends it.
 func (a *Adapter) Interrupt(ctx context.Context) error {
 	if err := a.ready(); err != nil {
 		return err
@@ -426,6 +426,13 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 	id, _, err := a.register(cmdAbort)
 	if err == nil {
 		err = a.sendAbort(ctx, id)
+	}
+	if errors.Is(err, native.ErrUnconfirmed) {
+		// Pi may yet get the abort: its response still cancels a
+		// command's dialogs, and the deadline ends the turn if it
+		// doesn't.
+		a.log.Warn("Pi didn't confirm the abort; the turn ends by the deadline if Pi doesn't end it", "error", err)
+		err = nil
 	}
 	if err != nil {
 		a.mu.Lock()
@@ -534,10 +541,11 @@ func (a *Adapter) abortForClose(ctx context.Context) <-chan struct{} {
 }
 
 // sendAbort sends the abort registered as id, which is forgotten if the
-// write fails.
+// write fails before it went out. One that went out unconfirmed is kept,
+// as request keeps a command: the loop handles a late response.
 func (a *Adapter) sendAbort(ctx context.Context, id string) error {
 	err := a.send(ctx, simpleCommand{ID: id, Type: "abort"})
-	if err != nil {
+	if err != nil && !errors.Is(err, native.ErrUnconfirmed) {
 		a.forget(id)
 	}
 	return err

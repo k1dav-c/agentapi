@@ -9,6 +9,9 @@
 - `~/.agentapi/config.yaml` (which holds the webhook secret) and the registry entries are synced to
   disk before and after they are renamed into place, as the hub's file is: a crash or power loss
   could leave them empty.
+- Pi: an interrupt whose abort Pi didn't confirm in time still ends the turn. The adapter forgot the
+  abort, so a late answer didn't cancel an extension command's dialog and the 10-second deadline
+  never started: a turn waiting on a dialog could hang.
 
 ## v2.5.0
 
