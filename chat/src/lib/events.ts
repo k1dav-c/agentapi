@@ -30,8 +30,7 @@ export type TerminalExitEvent = Schemas["TerminalExitBody"];
 // from it) leaves out what it didn't have yet: the transport (GET /status
 // says then), the lifecycle, the version and some capabilities.
 type Missing = "transport" | "lifecycle" | "agentapi_version";
-// TODO(v3 regen): drop "terminal_prompt" once api-schema.ts no longer has it.
-export type StatusChangeEvent = Omit<Schemas["StatusChangeBody"], Missing | "capabilities" | "terminal_prompt"> &
+export type StatusChangeEvent = Omit<Schemas["StatusChangeBody"], Missing | "capabilities"> &
   Partial<Pick<Schemas["StatusChangeBody"], Missing>> & {capabilities?: Capabilities};
 
 // A message_update as a message of the chat's, with the change's seq.

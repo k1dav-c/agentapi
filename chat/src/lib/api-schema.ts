@@ -43,7 +43,7 @@ export interface paths {
         put?: never;
         /**
          * Compact the agent's context
-         * @description Has the agent summarize the conversation so far to free its context window (Codex: in a turn of its own; Pi: answered once done). Native transport only, for agents with the compact capability. Messages sent meanwhile wait in the queue. Returns 409 while the agent works on a turn or compacts, and when it refuses (Pi with nothing to compact yet).
+         * @description Has the agent summarize the conversation so far to free its context window (Codex: in a turn of its own; Pi: answered once done). For agents with the compact capability. Messages sent meanwhile wait in the queue. Returns 409 while the agent works on a turn or compacts, and when it refuses (Pi with nothing to compact yet).
          */
         post: operations["post-compact"];
         delete?: never;
@@ -61,7 +61,7 @@ export interface paths {
         };
         /**
          * What the session spent
-         * @description Returns what the session the agent has open spent, its subagents included, and its model calls one by one, read from the agent's logs: the tokens of each call priced at the model providers' list prices (the API-equivalent cost, which a subscription doesn't charge), or at Pi's own prices for Pi. A model without a known price counts its tokens and no cost; --prices adds prices. For Claude Code, what it counted but didn't log call by call (compacting the context) comes as unitemized calls. Native transport of Claude Code, Codex and Pi only.
+         * @description Returns what the session the agent has open spent, its subagents included, and its model calls one by one, read from the agent's logs: the tokens of each call priced at the model providers' list prices (the API-equivalent cost, which a subscription doesn't charge), or at Pi's own prices for Pi. A model without a known price counts its tokens and no cost; --prices adds prices. For Claude Code, what it counted but didn't log call by call (compacting the context) comes as unitemized calls. Claude Code, Codex and Pi only.
          */
         get: operations["get-cost"];
         put?: never;
@@ -221,7 +221,7 @@ export interface paths {
         put?: never;
         /**
          * Interrupt the agent
-         * @description Stops the turn the agent is working on. Native transport only, for agents with the interrupt capability.
+         * @description Stops the turn the agent is working on. For agents with the interrupt capability.
          */
         post: operations["post-interrupt"];
         delete?: never;
@@ -242,7 +242,7 @@ export interface paths {
         post?: never;
         /**
          * Dismiss a usage limit stop
-         * @description Forgets the turn a usage limit stopped, with its scheduled continuation, so the queued messages go out as soon as the agent can take them. Native transport only; returns 409 when no turn stopped on a limit.
+         * @description Forgets the turn a usage limit stopped, with its scheduled continuation, so the queued messages go out as soon as the agent can take them. Returns 409 when no turn stopped on a limit.
          */
         delete: operations["delete-limit"];
         options?: never;
@@ -261,12 +261,12 @@ export interface paths {
         put?: never;
         /**
          * Continue after a usage limit
-         * @description Continues the turn a usage limit stopped (`limit_stop` in GET /status) with a message asking the agent to go on: now, or once the limit resets (`at: reset`, which needs the reset time). While a continuation is scheduled the queued messages wait for it; sending a message yourself cancels it. Native transport only; returns 409 when no turn stopped on a limit.
+         * @description Continues the turn a usage limit stopped (`limit_stop` in GET /status) with a message asking the agent to go on: now, or once the limit resets (`at: reset`, which needs the reset time). While a continuation is scheduled the queued messages wait for it; sending a message yourself cancels it. Returns 409 when no turn stopped on a limit.
          */
         post: operations["post-limit-continue"];
         /**
          * Cancel a scheduled continuation
-         * @description Cancels the continuation POST /limit/continue or --auto-continue scheduled. The queued messages still wait until the limit resets. Native transport only; returns 409 when no turn stopped on a limit.
+         * @description Cancels the continuation POST /limit/continue or --auto-continue scheduled. The queued messages still wait until the limit resets. Returns 409 when no turn stopped on a limit.
          */
         delete: operations["delete-limit-continue"];
         options?: never;
@@ -285,7 +285,7 @@ export interface paths {
         put?: never;
         /**
          * Check the agent's login again
-         * @description While `login_required` is reported in GET /status, checks again now whether the user logged in (AgentAPI also checks every few seconds while the agent waits at startup). If the agent lost its login while running, it is restarted and resumes its session. Native transport only; returns 409 if no login is needed.
+         * @description While `login_required` is reported in GET /status, checks again now whether the user logged in (AgentAPI also checks every few seconds while the agent waits at startup). If the agent lost its login while running, it is restarted and resumes its session. Returns 409 if no login is needed.
          */
         post: operations["post-login-retry"];
         delete?: never;
@@ -330,7 +330,7 @@ export interface paths {
         post?: never;
         /**
          * Delete all messages and restart
-         * @description Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if the agent can't be restarted (AgentAPI runs it without a process supervisor), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue.
+         * @description Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session. Returns 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue.
          */
         delete: operations["delete-messages"];
         options?: never;
@@ -397,7 +397,7 @@ export interface paths {
         put?: never;
         /**
          * Post queue by ID steer
-         * @description Adds a queued message to the turn the agent is working on instead of waiting for it to end. Native transport only, for agents with the steer capability.
+         * @description Adds a queued message to the turn the agent is working on instead of waiting for it to end. For agents with the steer capability.
          */
         post: operations["post-queue-by-id-steer"];
         delete?: never;
@@ -415,7 +415,7 @@ export interface paths {
         };
         /**
          * List requests
-         * @description Returns the requests the agent is waiting on (tool approvals, questions, plans) and the most recently closed ones. Native transport only; other transports return an empty list. Changes are also sent as `request_update` events on /events.
+         * @description Returns the requests the agent is waiting on (tool approvals, questions, plans) and the most recently closed ones. Changes are also sent as `request_update` events on /events.
          */
         get: operations["get-requests"];
         put?: never;
@@ -472,7 +472,7 @@ export interface paths {
         };
         /**
          * Get rich messages
-         * @description Returns a list of rich structured messages. Each message contains structured content blocks (text, thinking, tool_use, tool_result), model information, and token usage data. With the PTY transport they are parsed from the session log of agents that have one (claude, codex and pi); with the native transport they come from the agent's protocol.
+         * @description Returns a list of rich structured messages. Each message contains structured content blocks (text, thinking, tool_use, tool_result), model information, and token usage data, from the agent's protocol.
          */
         get: operations["get-rich-messages"];
         put?: never;
@@ -492,7 +492,7 @@ export interface paths {
         };
         /**
          * List the agent's sessions
-         * @description Lists the sessions the agent had in the working directory, read from its session logs (Claude Code's projects directory, Codex's sessions, Pi's session directory), the latest first, with the one it has open. Sessions in which the user sent nothing are left out. Native transport of Claude Code, Codex and Pi only.
+         * @description Lists the sessions the agent had in the working directory, read from its session logs (Claude Code's projects directory, Codex's sessions, Pi's session directory), the latest first, with the one it has open. Sessions in which the user sent nothing are left out. Claude Code, Codex and Pi only.
          */
         get: operations["get-sessions"];
         put?: never;
@@ -514,7 +514,7 @@ export interface paths {
         put?: never;
         /**
          * Open another session
-         * @description Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Native transport of Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here, and 409 while the agent works on a turn or compacts its context (nothing changes then) or another restart is under way.
+         * @description Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here, and 409 while the agent works on a turn or compacts its context (nothing changes then) or another restart is under way.
          */
         post: operations["post-sessions-by-id-resume"];
         delete?: never;
@@ -532,12 +532,12 @@ export interface paths {
         };
         /**
          * Get the agent's settings
-         * @description Returns the agent's permission mode, model and reasoning effort, and the values they can take. The current settings are also part of GET /status and `status_change` events. Native transport only, for agents with the settings capability; returns 409 while the agent restarts or waits for a login.
+         * @description Returns the agent's permission mode, model and reasoning effort, and the values they can take. The current settings are also part of GET /status and `status_change` events. For agents with the settings capability; returns 409 while the agent restarts or waits for a login.
          */
         get: operations["get-settings"];
         /**
          * Change the agent's settings
-         * @description Changes the settings that are set in the body and leaves the others: `permission_mode` (bypass, auto, ask or plan, as the agent offers), `model` (one of the model ids GET /settings lists) and `effort` (one of the model's efforts). A change made during a turn may apply from the next one (Codex). The agent that replaces this one after a restart, a new login or an AgentAPI restart (with --state-db) gets the chosen settings too. Native transport only; returns 400 for a value a setting can't take and 409 while the agent restarts or waits for a login.
+         * @description Changes the settings that are set in the body and leaves the others: `permission_mode` (bypass, auto, ask or plan, as the agent offers), `model` (one of the model ids GET /settings lists) and `effort` (one of the model's efforts). A change made during a turn may apply from the next one (Codex). The agent that replaces this one after a restart, a new login or an AgentAPI restart (with --state-db) gets the chosen settings too. Returns 400 for a value a setting can't take and 409 while the agent restarts or waits for a login.
          */
         put: operations["put-settings"];
         post?: never;
@@ -576,7 +576,7 @@ export interface paths {
         };
         /**
          * List the agent's subagents
-         * @description Lists the subagents the agent ran in the session it has open, read from their own logs, in the order they started: each with what it was asked to do, the tool call that started it and whether it still runs (Claude Code). Native transport of Claude Code and Codex; Pi runs no subagents, and returns an empty list.
+         * @description Lists the subagents the agent ran in the session it has open, read from their own logs, in the order they started: each with what it was asked to do, the tool call that started it and whether it still runs (Claude Code). Claude Code and Codex; Pi runs no subagents, and returns an empty list.
          */
         get: operations["get-subagents"];
         put?: never;
@@ -596,7 +596,7 @@ export interface paths {
         };
         /**
          * Get what a subagent did
-         * @description Returns a subagent's task and what it did so far, as rich messages, read from its log; ask again for a running one. Native transport of Claude Code and Codex; returns 404 for a subagent the session has no log of.
+         * @description Returns a subagent's task and what it did so far, as rich messages, read from its log; ask again for a running one. Claude Code and Codex; returns 404 for a subagent the session has no log of.
          */
         get: operations["get-subagents-by-id"];
         put?: never;
@@ -676,7 +676,7 @@ export interface paths {
         };
         /**
          * Watch the terminal
-         * @description Streams a shell in the agent's working directory, for a terminal emulator: `output` events carry what it writes (the first one the recent output), and an `exit` event ends the stream when the shell exits; a connection that falls too far behind ends without one, and connects again for the recent output. Connecting starts the shell if it doesn't run; it keeps running while nobody watches, and every connection shares it. Native transport only (on by default; --terminal=false turns it off).
+         * @description Streams a shell in the agent's working directory, for a terminal emulator: `output` events carry what it writes (the first one the recent output), and an `exit` event ends the stream when the shell exits; a connection that falls too far behind ends without one, and connects again for the recent output. Connecting starts the shell if it doesn't run; it keeps running while nobody watches, and every connection shares it. On by default; --terminal=false turns it off.
          */
         get: operations["subscribeTerminal"];
         put?: never;
@@ -1248,9 +1248,9 @@ export interface components {
              * @example Hello, agent!
              */
             content: string;
-            /** @description What to do with a user message while the agent is busy. 'queue' (default) sends it once the agent is idle. 'steer' adds it to the turn the agent is working on; 'interrupt' stops that turn and sends the message next. Without a running turn, both send the message as usual. 'steer' and 'interrupt' need the native transport, and while a turn runs an agent with the matching capability (see GET /status); otherwise they return 400. */
+            /** @description What to do with a user message while the agent is busy. 'queue' (default) sends it once the agent is idle. 'steer' adds it to the turn the agent is working on; 'interrupt' stops that turn and sends the message next. Without a running turn, both send the message as usual. 'steer' and 'interrupt' need, while a turn runs, an agent with the matching capability (see GET /status); otherwise they return 400. */
             dispatch_mode?: components["schemas"]["DispatchMode"];
-            /** @description A 'user' type message will be logged as a user message in the conversation history and submitted to the agent. AgentAPI will wait until the agent starts carrying out the task described in the message before responding. A 'raw' type message will be written directly to the agent's terminal session as keystrokes and will not be saved in the conversation history. 'raw' messages are useful for sending escape sequences to the terminal. */
+            /** @description Always 'user': the message is logged as a user message in the conversation history and submitted to the agent. AgentAPI 2 also took 'raw', keystrokes for the agent's terminal. */
             type: components["schemas"]["MessageType"];
         };
         MessageResponseBody: {
@@ -1272,14 +1272,14 @@ export interface components {
          * @example user
          * @enum {string}
          */
-        MessageType: "raw" | "user";
+        MessageType: "user";
         MessageUpdateBody: {
             /**
              * Format: int64
              * @description Unique identifier for the message. This identifier also represents the order of the message in the conversation history.
              */
             id: number;
-            /** @description Message content. The message is formatted as it appears in the agent's terminal session, meaning that, by default, it consists of lines of text with 80 characters per line. */
+            /** @description Message content: the user's message, or the agent's reply as text. */
             message: string;
             /** @description Role of the message author */
             role: components["schemas"]["ConversationRole"];
@@ -1757,9 +1757,6 @@ export interface components {
             /** @description List of rich messages with structured content blocks, model info, and usage */
             messages: components["schemas"]["RichMessage"][];
         };
-        ScreenUpdateBody: {
-            screen: string;
-        };
         SessionCost: {
             /**
              * Format: int64
@@ -1893,50 +1890,43 @@ export interface components {
             settings: components["schemas"]["Settings"];
         };
         StatusChangeBody: {
-            /** @description The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it. */
+            /** @description The agent's own session ID, which GET /sessions lists and resuming opens, once the agent reports it. */
             agent_session_id?: string;
             /** @description Type of the agent being used by the server. */
             agent_type: string;
             /** @description Version of the AgentAPI server. */
             agentapi_version: string;
-            /** @description Optional operations the agent supports. Native transport only. */
+            /** @description Optional operations the agent supports. */
             capabilities?: components["schemas"]["Capabilities"];
             /** @description Detailed process lifecycle state. */
             lifecycle: components["schemas"]["LifecycleState"];
-            /** @description Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). Native transport only. */
+            /** @description Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). */
             limit_stop?: components["schemas"]["LimitStop"];
-            /** @description Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only. */
+            /** @description Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. */
             login_required?: components["schemas"]["LoginRequired"];
             /**
              * Format: int64
-             * @description Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests.
+             * @description Number of requests (approvals, questions, plans) the agent is waiting on; see GET /requests.
              */
             pending_requests?: number;
             /** @description Random identifier of this AgentAPI run: it changes every time AgentAPI starts. */
             server_id: string;
             /** @description Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it. */
             session_name?: string;
-            /** @description The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only. */
+            /** @description The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. */
             settings?: components["schemas"]["Settings"];
             /** @description Backward-compatible agent activity status. */
             status: components["schemas"]["AgentStatus"];
-            /** @description A shell terminal in the agent's working directory is available at GET /terminal. Native transport only. */
+            /** @description A shell terminal in the agent's working directory is available at GET /terminal. */
             terminal?: boolean;
-            /**
-             * Format: int32
-             * @description Width of the emulated terminal the agent runs in, in columns (PTY transport only).
-             */
-            terminal_columns?: number;
-            /** @description Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise. */
-            terminal_prompt: string;
-            /** @description Backend transport being used ('pty' or 'native'). */
+            /** @description How AgentAPI drives the agent: native. AgentAPI 2 also had pty. */
             transport: components["schemas"]["Transport"];
             /**
              * Format: int64
              * @description How many times the agent started working since AgentAPI started.
              */
             turn: number;
-            /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only. */
+            /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. */
             usage?: components["schemas"]["AgentUsage"];
         };
         StatusResponseBody: {
@@ -1946,52 +1936,45 @@ export interface components {
              * @example https://example.com/schemas/StatusResponseBody.json
              */
             readonly $schema?: string;
-            /** @description The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it. */
+            /** @description The agent's own session ID, which GET /sessions lists and resuming opens, once the agent reports it. */
             agent_session_id?: string;
             /** @description Type of the agent being used by the server. */
             agent_type: string;
             /** @description Version of the AgentAPI server. */
             agentapi_version: string;
-            /** @description Optional operations the agent supports. Native transport only. */
+            /** @description Optional operations the agent supports. */
             capabilities?: components["schemas"]["Capabilities"];
             /** @description Identifies the current conversation state; pass it as epoch to /events?sync=1 (see session_sync). */
             epoch: string;
             /** @description Detailed process lifecycle state. */
             lifecycle: components["schemas"]["LifecycleState"];
-            /** @description Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). Native transport only. */
+            /** @description Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). */
             limit_stop?: components["schemas"]["LimitStop"];
-            /** @description Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only. */
+            /** @description Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. */
             login_required?: components["schemas"]["LoginRequired"];
             /**
              * Format: int64
-             * @description Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests.
+             * @description Number of requests (approvals, questions, plans) the agent is waiting on; see GET /requests.
              */
             pending_requests?: number;
             /** @description Random identifier of this AgentAPI run: it changes every time AgentAPI starts. */
             server_id: string;
             /** @description Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it. */
             session_name?: string;
-            /** @description The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only. */
+            /** @description The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. */
             settings?: components["schemas"]["Settings"];
             /** @description Backward-compatible agent activity status. */
             status: components["schemas"]["AgentStatus"];
-            /** @description A shell terminal in the agent's working directory is available at GET /terminal. Native transport only. */
+            /** @description A shell terminal in the agent's working directory is available at GET /terminal. */
             terminal?: boolean;
-            /**
-             * Format: int32
-             * @description Width of the emulated terminal the agent runs in, in columns (PTY transport only).
-             */
-            terminal_columns?: number;
-            /** @description Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise. */
-            terminal_prompt: string;
-            /** @description Backend transport being used ('pty' or 'native'). */
+            /** @description How AgentAPI drives the agent: native. AgentAPI 2 also had pty. */
             transport: components["schemas"]["Transport"];
             /**
              * Format: int64
              * @description How many times the agent started working since AgentAPI started.
              */
             turn: number;
-            /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only. */
+            /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. */
             usage?: components["schemas"]["AgentUsage"];
         };
         SubagentResponseBody: {
@@ -2055,7 +2038,7 @@ export interface components {
             readonly $schema?: string;
             /** @description The agent's own session, as in GET /status. */
             agent_session_id?: string;
-            /** @description Why the agent waits for the user: login, request (an approval, question or plan), dialog (in its terminal), limit (a usage limit stopped its turn), exited, or none. */
+            /** @description Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none; an AgentAPI 2 with the PTY transport also reports dialog (in the agent's terminal). */
             attention: components["schemas"]["Attention"];
             /** @description Who this AgentAPI is: its ID (--instance-id), name (--name), server ID, host, port, directory, agent and URL, as in webhook events. */
             instance: components["schemas"]["WebhookInstance"];
@@ -2084,7 +2067,7 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
-            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once. */
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once. */
             spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];
@@ -2095,7 +2078,7 @@ export interface components {
              * @description How many tasks the conversation has.
              */
             tasks: number;
-            /** @description The bottom of the agent's terminal while it shows a dialog to answer, as in GET /status. */
+            /** @description The bottom of the agent's terminal while it shows a dialog to answer; only from an AgentAPI 2 with the PTY transport. */
             terminal_prompt?: string;
             /** @description The name the agent gave the session, else the start of the latest task's prompt; empty before the first task. */
             title: string;
@@ -2172,7 +2155,7 @@ export interface components {
         SummaryUpdateBody: {
             /** @description The agent's own session, as in GET /status. */
             agent_session_id?: string;
-            /** @description Why the agent waits for the user: login, request (an approval, question or plan), dialog (in its terminal), limit (a usage limit stopped its turn), exited, or none. */
+            /** @description Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none; an AgentAPI 2 with the PTY transport also reports dialog (in the agent's terminal). */
             attention: components["schemas"]["Attention"];
             /** @description Who this AgentAPI is: its ID (--instance-id), name (--name), server ID, host, port, directory, agent and URL, as in webhook events. */
             instance: components["schemas"]["WebhookInstance"];
@@ -2201,7 +2184,7 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
-            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once. */
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once. */
             spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];
@@ -2212,7 +2195,7 @@ export interface components {
              * @description How many tasks the conversation has.
              */
             tasks: number;
-            /** @description The bottom of the agent's terminal while it shows a dialog to answer, as in GET /status. */
+            /** @description The bottom of the agent's terminal while it shows a dialog to answer; only from an AgentAPI 2 with the PTY transport. */
             terminal_prompt?: string;
             /** @description The name the agent gave the session, else the start of the latest task's prompt; empty before the first task. */
             title: string;
@@ -3613,15 +3596,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeleteMessagesResponseBody"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
                 };
             };
             /** @description Conflict */

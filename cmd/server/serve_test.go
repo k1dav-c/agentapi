@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/registry"
 )
@@ -45,8 +45,7 @@ func serveNativeWith(ctx context.Context, t *testing.T, factory *nativetest.Fact
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	registryDir := t.TempDir()
 	config := httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeClaude,
-		Transport:      httpapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         httpapi.NativeConfig{Factory: factory.New, RestartDelays: []time.Duration{time.Millisecond, time.Millisecond}},
 		Bind:           "127.0.0.1",
 		ChatBasePath:   "/chat",

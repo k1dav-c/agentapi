@@ -93,7 +93,7 @@ func (e *EventEmitter) resyncLocked() {
 }
 
 // endConversationSubscriptionsLocked ends the subscriptions that get the
-// conversation's changes; screen streams go on. Caller holds e.mu.
+// conversation's changes; summary streams go on. Caller holds e.mu.
 func (e *EventEmitter) endConversationSubscriptionsLocked() {
 	for id, sub := range e.chans {
 		if wantsConversation(sub.wants) {
@@ -103,13 +103,13 @@ func (e *EventEmitter) endConversationSubscriptionsLocked() {
 }
 
 // wantsConversation reports whether a subscription that gets the events
-// wants accepts gets changes of the conversation; a screen stream doesn't.
+// wants accepts gets changes of the conversation; a summary stream doesn't.
 func wantsConversation(wants func(EventType) bool) bool {
 	return wants(EventTypeMessageUpdate) || wants(EventTypeRichMessageUpdate) || wants(EventTypeRequestUpdate) ||
 		wants(EventTypeTaskUpdate) || wants(EventTypeQueueUpdate)
 }
 
-// EmitRichMessage emits a rich structured message from the JSONL watcher.
+// EmitRichMessage emits a rich structured message.
 // It stores the message for late subscriber replay. Messages are upserted
 // by (MessageID, Role) because parsers re-emit a message as its content
 // accumulates (e.g. Codex turn updates). The emitter keeps msg and hands
@@ -249,16 +249,17 @@ func richContentBlockKey(block transcript.RichContentBlock) string {
 }
 
 // RichMessages returns a snapshot of all rich messages received so far.
-// The emitter is the single store for rich messages: the JSONL watcher
-// parses and emits, the emitter deduplicates, replays, and serves reads.
+// The emitter is the single store for rich messages: the agent's
+// conversation emits them, the emitter deduplicates, replays, and serves
+// reads.
 func (e *EventEmitter) RichMessages() []transcript.RichMessage {
 	e.mu.Lock()
 	defer e.unlock()
 	return slices.Clone(e.richMessages)
 }
 
-// EmitSessionEvents stores normalized events in the same order as the source
-// JSONL records and assigns stable identifiers for the lifetime of this run.
+// EmitSessionEvents stores normalized events in the order the agent
+// reported them and assigns stable identifiers for the lifetime of this run.
 func (e *EventEmitter) EmitSessionEvents(events []transcript.SessionEvent) {
 	e.mu.Lock()
 	defer e.unlock()

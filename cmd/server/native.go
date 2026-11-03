@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/coder/agentapi/lib/native"
@@ -20,12 +19,12 @@ type nativeAdapterConfig struct {
 	Logger  *slog.Logger
 }
 
-// nativeFactory returns the adapter factory for agents that have a native
-// transport.
+// nativeFactory returns the factory of the agent's adapter. native-demo, a
+// simulated agent for developing clients (lib/native/demo), runs as any
+// type: posing as Claude Code, Codex or Pi, AgentAPI reads that agent's
+// session logs for it (its earlier sessions and subagents).
 func nativeFactory(agentType AgentType, cfg nativeAdapterConfig) (native.Factory, error) {
-	if cfg.Program == demo.Program && (agentType == AgentTypeClaude || agentType == AgentTypeCodex || agentType == AgentTypePi) {
-		// The demo poses as the agent: AgentAPI reads that agent's session
-		// logs for it (its earlier sessions and subagents).
+	if cfg.Program == demo.Program {
 		return demo.Factory(demo.Options{}), nil
 	}
 	switch agentType {
@@ -51,12 +50,6 @@ func nativeFactory(agentType AgentType, cfg nativeAdapterConfig) (native.Factory
 			Logger:  cfg.Logger,
 		})
 	case AgentTypeCustom:
-		// A simulated agent for developing clients; see lib/native/demo.
-		if cfg.Program == demo.Program {
-			return demo.Factory(demo.Options{}), nil
-		}
-	case AgentTypeGoose, AgentTypeAider, AgentTypeGemini, AgentTypeCopilot, AgentTypeAmp,
-		AgentTypeCursor, AgentTypeAuggie, AgentTypeAmazonQ, AgentTypeOpencode, AgentTypeKimi:
 	}
-	return nil, fmt.Errorf("the native transport supports claude, codex and pi, not %s", agentType)
+	return nil, unsupportedAgent("a custom agent")
 }

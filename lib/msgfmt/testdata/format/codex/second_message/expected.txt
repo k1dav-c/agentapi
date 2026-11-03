@@ -1,8 +1,0 @@
-⚡ Ran command git status --porcelain
-  ⎿  M cmd/server/server.go
-     M lib/msgfmt/message_box.go
-     M lib/msgfmt/msgfmt.go
-    ... +2 lines
-
-codex
-There are 2 untracked files (`.env` and `forge.yaml`).

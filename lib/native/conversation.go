@@ -14,8 +14,6 @@ import (
 	"github.com/coder/agentapi/lib/transcript"
 )
 
-var _ conv.Conversation = (*Conversation)(nil)
-
 // Observer receives the structured state a Conversation produces beyond
 // what conv.Emitter carries. Its methods are called with the conversation's
 // lock held and must not call back into the conversation. A RichMessage
@@ -110,8 +108,7 @@ const (
 	defaultStartTimeout       = 2 * time.Minute
 	defaultLoginRetryInterval = 5 * time.Second
 	// sendTimeout bounds the delivery of a message no caller gives a
-	// deadline (the initial prompt), and Send's, which the server calls
-	// while it holds its lock.
+	// deadline (the initial prompt).
 	sendTimeout = 30 * time.Second
 	// restartReset is how long an agent runs before its exit counts as the
 	// first of the restart delays again.
@@ -121,7 +118,7 @@ const (
 // defaultRestartDelays are Config.RestartDelays' default.
 var defaultRestartDelays = []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second}
 
-// Conversation is an conv.Conversation backed by an Adapter.
+// Conversation is the conversation with an agent, through its Adapter.
 type Conversation struct {
 	cfg Config
 
@@ -432,15 +429,15 @@ func (c *Conversation) TurnActive() bool {
 	return c.turnActive
 }
 
-// Messages implements conv.Conversation.
+// Messages returns the conversation's messages.
 func (c *Conversation) Messages() []conv.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.messages.snapshot()
 }
 
-// Status implements conv.Conversation. A turn waiting only on the user's
-// answer to a request counts as stable, like a terminal dialog.
+// Status reports whether the agent works. A turn waiting only on the
+// user's answer to a request counts as stable.
 func (c *Conversation) Status() conv.Status {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -458,36 +455,6 @@ func (c *Conversation) statusLocked() conv.Status {
 		return conv.StatusStable
 	}
 	return conv.StatusChanging
-}
-
-// Reset implements conv.Conversation by clearing the messages. Use Restart to
-// also replace the agent. forget runs under the lock the conversation
-// reports to its Emitter under.
-func (c *Conversation) Reset(forget func()) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if forget != nil {
-		forget()
-	}
-	c.messages.reset()
-}
-
-// Send implements conv.Conversation by sending the parts' text as a turn,
-// within sendTimeout, until ctx or the conversation ends.
-func (c *Conversation) Send(ctx context.Context, parts ...conv.MessagePart) error {
-	var sb strings.Builder
-	for _, part := range parts {
-		sb.WriteString(part.String())
-	}
-	c.mu.Lock()
-	runCtx := c.ctx
-	c.mu.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
-	defer cancel()
-	if runCtx != nil {
-		defer context.AfterFunc(runCtx, cancel)()
-	}
-	return c.StartTurn(ctx, InputFromText(sb.String()))
 }
 
 // StartTurn sends a message as a new turn. It returns

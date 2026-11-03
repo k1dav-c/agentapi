@@ -1,90 +1,11 @@
 package util
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"reflect"
-	"time"
 
-	"github.com/coder/quartz"
 	"github.com/danielgtaylor/huma/v2"
 )
-
-type WaitTimeout struct {
-	Timeout     time.Duration
-	MinInterval time.Duration
-	MaxInterval time.Duration
-	InitialWait bool
-	Clock       quartz.Clock
-}
-
-var WaitTimedOut = errors.New("timeout waiting for condition")
-
-// WaitFor waits for a condition to be true or the timeout to expire.
-// It will wait for the condition to be true with exponential backoff.
-// A single sleep timer is reused across iterations via Reset so that
-// mock-clock tests always have a pending timer to advance.
-func WaitFor(ctx context.Context, timeout WaitTimeout, condition func() (bool, error)) error {
-	clock := timeout.Clock
-	if clock == nil {
-		clock = quartz.NewReal()
-	}
-
-	minInterval := timeout.MinInterval
-	maxInterval := timeout.MaxInterval
-	timeoutDuration := timeout.Timeout
-	if minInterval == 0 {
-		minInterval = 10 * time.Millisecond
-	}
-	if maxInterval == 0 {
-		maxInterval = 500 * time.Millisecond
-	}
-	if timeoutDuration == 0 {
-		timeoutDuration = 10 * time.Second
-	}
-	if minInterval > maxInterval {
-		return fmt.Errorf("minInterval is greater than maxInterval")
-	}
-
-	timeoutTimer := clock.NewTimer(timeoutDuration)
-	defer timeoutTimer.Stop()
-
-	interval := minInterval
-	sleepTimer := clock.NewTimer(interval)
-	defer sleepTimer.Stop()
-
-	waitForTimer := timeout.InitialWait
-	for {
-		if waitForTimer {
-			select {
-			case <-sleepTimer.C:
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-timeoutTimer.C:
-				return WaitTimedOut
-			}
-		}
-		waitForTimer = true
-
-		ok, err := condition()
-		if err != nil {
-			return err
-		}
-		if ok {
-			return nil
-		}
-
-		interval = min(interval*2, maxInterval)
-		if !sleepTimer.Stop() {
-			select {
-			case <-sleepTimer.C:
-			default:
-			}
-		}
-		sleepTimer.Reset(interval)
-	}
-}
 
 // based on https://github.com/danielgtaylor/huma/issues/621#issuecomment-2456588788
 func OpenAPISchema[T ~string](r huma.Registry, enumName string, values []T) *huma.Schema {

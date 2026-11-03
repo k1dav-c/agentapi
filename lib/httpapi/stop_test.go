@@ -4,17 +4,13 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"os"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/coder/quartz"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
-	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native/nativetest"
 )
 
@@ -29,8 +25,7 @@ func TestStopWaitsForTheQueueLoop(t *testing.T) {
 	trap := clock.Trap().TickerFuncWait("messageQueueDispatch")
 	defer trap.Close()
 	srv, err := NewServer(quietContext(), ServerConfig{
-		AgentType:      mf.AgentTypeClaude,
-		Transport:      TransportNative,
+		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         NativeConfig{Factory: (&nativetest.Factory{}).New},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -48,40 +43,4 @@ func TestStopWaitsForTheQueueLoop(t *testing.T) {
 	}
 	call.Release()
 	require.NoError(t, <-stopped)
-}
-
-// Stop stops the session-log watcher of a terminal agent, which would
-// otherwise go on changing the conversation of a stopped server.
-func TestStopStopsTheSessionLogWatcher(t *testing.T) {
-	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
-	srv, err := NewServer(quietContext(), ServerConfig{
-		AgentType:      mf.AgentTypeClaude,
-		Transport:      TransportPTY,
-		PTY:            PTYConfig{AgentPID: os.Getpid()},
-		ChatBasePath:   "/chat",
-		AllowedHosts:   []string{"*"},
-		AllowedOrigins: []string{"*"},
-		Clock:          quartz.NewMock(t),
-	})
-	require.NoError(t, err)
-	require.NotNil(t, srv.jsonlWatcherCancel, "the watcher runs")
-	watcher := srv.jsonlWatcherDone
-	require.NoError(t, srv.Stop(context.Background()))
-	assert.Nil(t, srv.jsonlWatcherCancel)
-	assert.True(t, waitsFor(watcher, 5*time.Second), "the watcher still runs")
-}
-
-// waitsFor reports whether wg is done within timeout.
-func waitsFor(wg *sync.WaitGroup, timeout time.Duration) bool {
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return true
-	case <-time.After(timeout):
-		return false
-	}
 }

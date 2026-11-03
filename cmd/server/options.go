@@ -26,7 +26,6 @@ type serverOptions struct {
 	agent     string
 	agentArgs []string
 	agentType AgentType
-	transport httpapi.Transport
 	// printOpenAPI prints the API's schema instead of running an agent.
 	printOpenAPI bool
 
@@ -141,7 +140,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 			return serverOptions{}, fmt.Errorf("%w; set --registry-dir or --registry=false", err)
 		}
 	}
-	if opts.transport, err = transportOption(flags); err != nil {
+	if err := checkTransport(flags); err != nil {
 		return serverOptions{}, err
 	}
 	if opts.bind, err = httpapi.ParseBindAddress(flags.GetString(FlagBind)); err != nil {
@@ -198,21 +197,21 @@ var errACPRemoved = errors.New("the experimental ACP transport was removed: Agen
 // errPTYRemoved answers --transport pty.
 var errPTYRemoved = fmt.Errorf("AgentAPI 3 has no PTY transport: it runs Claude Code, Codex and Pi natively; drop --transport pty (or AGENTAPI_TRANSPORT=pty), or use AgentAPI %s, the last release with the PTY transport", lastPTYRelease)
 
-// transportOption reads the deprecated --transport, which only takes
+// checkTransport checks the deprecated --transport, which only takes
 // native, the one transport.
-func transportOption(flags flagSource) (httpapi.Transport, error) {
+func checkTransport(flags flagSource) error {
 	if flags.GetBool(FlagExperimentalACP) {
-		return "", errACPRemoved
+		return errACPRemoved
 	}
 	switch value := flags.GetString(FlagTransport); value {
-	case "", "native":
-		return httpapi.TransportNative, nil
+	case "", string(httpapi.TransportNative):
+		return nil
 	case "pty":
-		return "", errPTYRemoved
+		return errPTYRemoved
 	case "acp":
-		return "", errACPRemoved
+		return errACPRemoved
 	default:
-		return "", fmt.Errorf("unknown --%s %q: AgentAPI 3 drives every agent natively", FlagTransport, value)
+		return fmt.Errorf("unknown --%s %q: AgentAPI 3 drives every agent natively", FlagTransport, value)
 	}
 }
 

@@ -19,11 +19,9 @@ func TestNativeFactoryDemo(t *testing.T) {
 	assert.True(t, adapter.Capabilities().Steer)
 	require.NoError(t, adapter.Close())
 
-	// Only the exact program name with the custom type selects the demo.
+	// Only the exact program name selects the demo.
 	_, err = nativeFactory(AgentTypeCustom, nativeAdapterConfig{Program: "/usr/bin/native-demo"})
-	assert.Error(t, err)
-	_, err = nativeFactory(AgentTypeGoose, nativeAdapterConfig{Program: "native-demo"})
-	assert.Error(t, err)
+	assert.ErrorContains(t, err, "not a custom agent")
 }
 
 func TestDemoPosesAsAnAgent(t *testing.T) {

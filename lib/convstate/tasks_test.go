@@ -236,22 +236,21 @@ func TestTaskTrackerMessageInGracePeriod(t *testing.T) {
 	assert.Equal(t, []int{3}, tr.tasks[1].Steered)
 }
 
-// A message sent in the grace period starts a task whatever the transport
-// reports first once it goes out: the PTY transport the agent running (it
-// is as soon as the message waits to be typed), the native one the message.
-// The server says it sends one (SendingMessage) before either.
+// A message sent in the grace period starts a task whatever the agent
+// reports first once it goes out: that it runs, or the message. The server
+// says it sends one (SendingMessage) before either.
 func TestEventEmitterMessageInGracePeriod(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		send func(e *EventEmitter, msgs []conv.Message)
 	}{
-		{"pty", func(e *EventEmitter, msgs []conv.Message) {
+		{"status first", func(e *EventEmitter, msgs []conv.Message) {
 			e.SendingMessage()
 			e.EmitStatus(conv.StatusChanging)
 			e.EmitMessages(msgs)
 		}},
-		{"native", func(e *EventEmitter, msgs []conv.Message) {
+		{"message first", func(e *EventEmitter, msgs []conv.Message) {
 			e.SendingMessage()
 			e.EmitMessages(msgs)
 			e.EmitStatus(conv.StatusChanging)
@@ -305,7 +304,6 @@ func TestTaskTrackerIncremental(t *testing.T) {
 		{Status: AgentStatusRunning, Lifecycle: LifecycleRunning},
 		{Status: AgentStatusStable, Lifecycle: LifecycleReady},
 		{Status: AgentStatusStable, Lifecycle: LifecycleReady, PendingRequests: 1},
-		{Status: AgentStatusStable, Lifecycle: LifecycleReady, TerminalPrompt: "1. Yes"},
 		{Status: AgentStatusStable, Lifecycle: LifecycleExited},
 	}
 	for seed := range uint64(200) {

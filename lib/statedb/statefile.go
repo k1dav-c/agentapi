@@ -14,11 +14,11 @@ import (
 
 // StateFile is what --state-file kept, the PTY transport's persistence
 // before the state database: the messages, written when AgentAPI stopped.
+// The initial prompt it also kept isn't read: once there are messages, the
+// agent got it.
 type StateFile struct {
-	Version           int            `json:"version"`
-	Messages          []conv.Message `json:"messages"`
-	InitialPrompt     string         `json:"initial_prompt"`
-	InitialPromptSent bool           `json:"initial_prompt_sent"`
+	Version  int            `json:"version"`
+	Messages []conv.Message `json:"messages"`
 }
 
 // ErrNotEmpty is returned by ImportStateFile when the database already
@@ -53,9 +53,6 @@ func (d *DB) ImportStateFile(path string, meta map[string]string) (int, error) {
 	}
 	for key, value := range meta {
 		d.SetMeta(key, value)
-	}
-	if state.InitialPromptSent {
-		d.SetMeta(MetaInitialPrompt, state.InitialPrompt)
 	}
 	for i, m := range state.Messages {
 		// The conversation's IDs are its positions.

@@ -14,7 +14,6 @@ type (
 	MessageUpdateBody     = convstate.MessageUpdateBody
 	SessionSyncBody       = convstate.SessionSyncBody
 	StatusChangeBody      = convstate.StatusChangeBody
-	ScreenUpdateBody      = convstate.ScreenUpdateBody
 	ErrorBody             = convstate.ErrorBody
 	RichMessageUpdateBody = convstate.RichMessageUpdateBody
 	RequestUpdateBody     = convstate.RequestUpdateBody
@@ -37,7 +36,6 @@ type (
 const (
 	EventTypeMessageUpdate     = convstate.EventTypeMessageUpdate
 	EventTypeStatusChange      = convstate.EventTypeStatusChange
-	EventTypeScreenUpdate      = convstate.EventTypeScreenUpdate
 	EventTypeError             = convstate.EventTypeError
 	EventTypeRichMessageUpdate = convstate.EventTypeRichMessageUpdate
 	EventTypeHeartbeat         = convstate.EventTypeHeartbeat

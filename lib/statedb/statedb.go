@@ -89,9 +89,8 @@ const (
 	// MetaWebhook holds the webhook settings changed through the API, as
 	// JSON. A reset keeps them.
 	MetaWebhook = "webhook"
-	// MetaInitialPrompt is the initial prompt the conversation got (PTY):
-	// after a restart it goes out again only if it changed.
-	MetaInitialPrompt = "initial_prompt"
+	// AgentAPI 2's PTY transport also kept initial_prompt, the initial
+	// prompt the conversation got, which nothing reads anymore.
 	// MetaSeenAt is when a client last showed the conversation to the
 	// user (RFC 3339), which tells a task that ended since as unread. A
 	// reset keeps it.

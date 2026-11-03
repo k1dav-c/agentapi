@@ -19,7 +19,6 @@ import (
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
-	mf "github.com/coder/agentapi/lib/msgfmt"
 )
 
 func TestWebhookConfigValidation(t *testing.T) {
@@ -59,8 +58,7 @@ func TestWebhookStatusChangesOnly(t *testing.T) {
 	dispatcher, err := New(
 		Config{URL: "https://example.com/hook"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mf.AgentTypeCodex,
-		instanceapi.TransportPTY,
+		instanceapi.AgentTypeCodex,
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
@@ -77,8 +75,8 @@ func TestWebhookStatusChangesOnly(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, convstate.AgentStatusRunning, data.PreviousStatus)
 	assert.Equal(t, convstate.AgentStatusStable, data.Status)
-	assert.Equal(t, mf.AgentTypeCodex, data.AgentType)
-	assert.Equal(t, instanceapi.TransportPTY, data.Transport)
+	assert.Equal(t, instanceapi.AgentTypeCodex, data.AgentType)
+	assert.Equal(t, instanceapi.TransportNative, data.Transport)
 	assert.NotEmpty(t, event.ID)
 	assert.NotEmpty(t, data.ServerID)
 	assert.Equal(t, data.ServerID, event.Instance.ServerID)
@@ -104,8 +102,7 @@ func TestWebhookSend(t *testing.T) {
 	dispatcher, err := New(
 		Config{URL: server.URL},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mf.AgentTypeClaude,
-		instanceapi.TransportPTY,
+		instanceapi.AgentTypeClaude,
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
@@ -117,8 +114,8 @@ func TestWebhookSend(t *testing.T) {
 			ServerID:       "run-1",
 			Status:         convstate.AgentStatusStable,
 			PreviousStatus: convstate.AgentStatusRunning,
-			AgentType:      mf.AgentTypeClaude,
-			Transport:      instanceapi.TransportPTY,
+			AgentType:      instanceapi.AgentTypeClaude,
+			Transport:      instanceapi.TransportNative,
 		},
 	}
 	body, err := json.Marshal(event)
@@ -145,8 +142,7 @@ func TestWebhookSendRejectsNonSuccessfulResponse(t *testing.T) {
 	dispatcher, err := New(
 		Config{URL: server.URL},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mf.AgentTypeClaude,
-		instanceapi.TransportPTY,
+		instanceapi.AgentTypeClaude,
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
@@ -171,8 +167,7 @@ func TestWebhookCustomPayloadTemplate(t *testing.T) {
 	dispatcher, err := New(
 		Config{URL: server.URL, PayloadTemplate: tmpl},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mf.AgentTypeClaude,
-		instanceapi.TransportPTY,
+		instanceapi.AgentTypeClaude,
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
@@ -185,8 +180,8 @@ func TestWebhookCustomPayloadTemplate(t *testing.T) {
 			ServerID:       "run-1",
 			Status:         convstate.AgentStatusStable,
 			PreviousStatus: convstate.AgentStatusRunning,
-			AgentType:      mf.AgentTypeClaude,
-			Transport:      instanceapi.TransportPTY,
+			AgentType:      instanceapi.AgentTypeClaude,
+			Transport:      instanceapi.TransportNative,
 		},
 	}
 	body, err := dispatcher.renderBody(event)
@@ -203,8 +198,7 @@ func TestWebhookInvalidPayloadTemplate(t *testing.T) {
 	_, err := New(
 		Config{URL: "https://example.com/hook", PayloadTemplate: "{{.Invalid"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mf.AgentTypeClaude,
-		instanceapi.TransportPTY,
+		instanceapi.AgentTypeClaude,
 		quartz.NewReal(),
 	)
 	require.ErrorContains(t, err, "invalid webhook payload template")
@@ -217,8 +211,7 @@ func TestWebhookPayloadTemplateUnknownField(t *testing.T) {
 		_, err := New(
 			Config{URL: "https://example.com/hook", PayloadTemplate: tmpl},
 			slog.New(slog.NewTextHandler(io.Discard, nil)),
-			mf.AgentTypeClaude,
-			instanceapi.TransportPTY,
+			instanceapi.AgentTypeClaude,
 			quartz.NewReal(),
 		)
 		return err
@@ -249,8 +242,7 @@ func TestWebhookRetries(t *testing.T) {
 	dispatcher, err := New(
 		Config{URL: server.URL, MaxAttempts: 3},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mf.AgentTypeClaude,
-		instanceapi.TransportPTY,
+		instanceapi.AgentTypeClaude,
 		clock,
 	)
 	require.NoError(t, err)
@@ -295,8 +287,7 @@ func TestWebhookRedirectIsNoDelivery(t *testing.T) {
 	dispatcher, err := New(
 		Config{URL: server.URL + "/hooks", MaxAttempts: 2},
 		slog.New(slog.NewTextHandler(&logs, nil)),
-		mf.AgentTypeClaude,
-		instanceapi.TransportPTY,
+		instanceapi.AgentTypeClaude,
 		clock,
 	)
 	require.NoError(t, err)

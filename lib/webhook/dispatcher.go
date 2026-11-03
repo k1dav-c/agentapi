@@ -24,7 +24,6 @@ import (
 
 	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
-	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/netaddr"
 )
 
@@ -160,8 +159,8 @@ type WebhookEventData struct {
 	ServerID       string                `json:"server_id" doc:"Random identifier of this AgentAPI run, as server_id in GET /status."`
 	Status         convstate.AgentStatus `json:"status" doc:"Current agent status."`
 	PreviousStatus convstate.AgentStatus `json:"previous_status" doc:"Previous agent status."`
-	AgentType      mf.AgentType          `json:"agent_type" doc:"Type of agent being used."`
-	Transport      instanceapi.Transport `json:"transport" doc:"Backend transport being used."`
+	AgentType      instanceapi.AgentType `json:"agent_type" doc:"Type of agent being used."`
+	Transport      instanceapi.Transport `json:"transport" doc:"How AgentAPI drives the agent: native."`
 }
 
 // WebhookTemplateData is the context available to custom payload templates.
@@ -192,8 +191,7 @@ type Dispatcher struct {
 	logger    *slog.Logger
 	clock     quartz.Clock
 	serverID  string
-	agentType mf.AgentType
-	transport instanceapi.Transport
+	agentType instanceapi.AgentType
 	instance  WebhookInstance
 	// startup is the configuration AgentAPI started with.
 	startup Config
@@ -279,9 +277,9 @@ func checkedTemplate(config Config) (*template.Template, error) {
 	return parseWebhookTemplate(config.PayloadTemplate)
 }
 
-// New returns a dispatcher of the events of an AgentAPI of agentType on
-// transport, which Start starts sending.
-func New(config Config, logger *slog.Logger, agentType mf.AgentType, transport instanceapi.Transport, clock quartz.Clock) (*Dispatcher, error) {
+// New returns a dispatcher of the events of an AgentAPI of agentType,
+// which Start starts sending.
+func New(config Config, logger *slog.Logger, agentType instanceapi.AgentType, clock quartz.Clock) (*Dispatcher, error) {
 	tmpl, err := checkedTemplate(config)
 	if err != nil {
 		return nil, err
@@ -295,8 +293,7 @@ func New(config Config, logger *slog.Logger, agentType mf.AgentType, transport i
 		clock:         clock,
 		serverID:      serverID,
 		agentType:     agentType,
-		transport:     transport,
-		instance:      WebhookInstance{ServerID: serverID, AgentType: agentType, Transport: transport},
+		instance:      WebhookInstance{ServerID: serverID, AgentType: agentType, Transport: instanceapi.TransportNative},
 		startup:       config,
 		queue:         make(chan queuedEvent, webhookQueueSize),
 		configChanged: make(chan struct{}, 1),
@@ -361,7 +358,7 @@ func (d *Dispatcher) SetInstance(instance WebhookInstance) {
 	defer d.mu.Unlock()
 	instance.ServerID = d.serverID
 	instance.AgentType = d.agentType
-	instance.Transport = d.transport
+	instance.Transport = instanceapi.TransportNative
 	d.instance = instance
 }
 
@@ -514,7 +511,7 @@ func (d *Dispatcher) StatusChanged(previous, current convstate.AgentStatus) {
 		Status:         current,
 		PreviousStatus: previous,
 		AgentType:      d.agentType,
-		Transport:      d.transport,
+		Transport:      instanceapi.TransportNative,
 	})
 }
 

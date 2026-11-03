@@ -105,19 +105,19 @@ func (s *Server) continueIfDueLocked() {
 }
 
 func (s *Server) registerLimitRoutes() {
-	huma.Post(s.api, "/limit/continue", guard(s.requireNative, s.continueLimited), func(o *huma.Operation) {
+	huma.Post(s.api, "/limit/continue", s.continueLimited, func(o *huma.Operation) {
 		o.Summary = "Continue after a usage limit"
-		o.Description = "Continues the turn a usage limit stopped (`limit_stop` in GET /status) with a message asking the agent to go on: now, or once the limit resets (`at: reset`, which needs the reset time). While a continuation is scheduled the queued messages wait for it; sending a message yourself cancels it. Native transport only; returns 409 when no turn stopped on a limit."
+		o.Description = "Continues the turn a usage limit stopped (`limit_stop` in GET /status) with a message asking the agent to go on: now, or once the limit resets (`at: reset`, which needs the reset time). While a continuation is scheduled the queued messages wait for it; sending a message yourself cancels it. Returns 409 when no turn stopped on a limit."
 		o.Errors = []int{400, 409}
 	})
-	huma.Delete(s.api, "/limit/continue", guard(s.requireNative, s.cancelContinue), func(o *huma.Operation) {
+	huma.Delete(s.api, "/limit/continue", s.cancelContinue, func(o *huma.Operation) {
 		o.Summary = "Cancel a scheduled continuation"
-		o.Description = "Cancels the continuation POST /limit/continue or --auto-continue scheduled. The queued messages still wait until the limit resets. Native transport only; returns 409 when no turn stopped on a limit."
+		o.Description = "Cancels the continuation POST /limit/continue or --auto-continue scheduled. The queued messages still wait until the limit resets. Returns 409 when no turn stopped on a limit."
 		o.Errors = []int{400, 409}
 	})
-	huma.Delete(s.api, "/limit", guard(s.requireNative, s.dismissLimitStop), func(o *huma.Operation) {
+	huma.Delete(s.api, "/limit", s.dismissLimitStop, func(o *huma.Operation) {
 		o.Summary = "Dismiss a usage limit stop"
-		o.Description = "Forgets the turn a usage limit stopped, with its scheduled continuation, so the queued messages go out as soon as the agent can take them. Native transport only; returns 409 when no turn stopped on a limit."
+		o.Description = "Forgets the turn a usage limit stopped, with its scheduled continuation, so the queued messages go out as soon as the agent can take them. Returns 409 when no turn stopped on a limit."
 		o.Errors = []int{400, 409}
 	})
 }

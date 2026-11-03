@@ -3,7 +3,6 @@ package webhook
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -87,16 +86,6 @@ type WebhookToolCall struct {
 	IsError   bool      `json:"is_error"`
 	Time      time.Time `json:"time"`
 	Truncated bool      `json:"truncated,omitempty"`
-}
-
-// WebhookTerminalPrompt is the data of request.opened and request.closed
-// for a dialog the agent shows in its terminal (PTY transport): answer it
-// with POST /message, type raw.
-type WebhookTerminalPrompt struct {
-	ID     string `json:"id"`
-	Kind   string `json:"kind"`
-	Status string `json:"status"`
-	Prompt string `json:"prompt,omitempty"`
 }
 
 // webhookObserverEvents are the events the observer makes of the
@@ -218,8 +207,6 @@ type webhookObserver struct {
 	toolMessages []toolMessage
 	// openRequests are the requests seen pending, until they close.
 	openRequests map[string]bool
-	// prompts counts the terminal dialogs, for their IDs.
-	prompts int
 	// lastError is the number of the latest error taken in; a new
 	// subscription replays the ones before it.
 	lastError uint64
@@ -274,10 +261,10 @@ func newWebhookObserver(webhook *Dispatcher, emitter Source, now time.Time) *web
 	}
 }
 
-// webhookObservedEvents are the events the observer reads: not the screen,
-// heartbeats or the summary, which the emitter would work out for it.
+// webhookObservedEvents are the events the observer reads: not heartbeats
+// or the summary, which the emitter would work out for it.
 func webhookObservedEvents(t convstate.EventType) bool {
-	return t != convstate.EventTypeScreenUpdate && t != convstate.EventTypeHeartbeat && t != convstate.EventTypeSummaryUpdate
+	return t != convstate.EventTypeHeartbeat && t != convstate.EventTypeSummaryUpdate
 }
 
 // run reads the conversation's events until ctx ends. The state at the
@@ -395,29 +382,12 @@ func (o *webhookObserver) statusChanged(next convstate.StatusChangeBody, quiet b
 			o.webhook.emit(webhookEventLimitCleared, previous.LimitStop)
 		}
 	}
-	if previous.TerminalPrompt != next.TerminalPrompt {
-		if previous.TerminalPrompt != "" {
-			o.webhook.emit(webhookEventRequestClosed, WebhookTerminalPrompt{
-				ID: o.promptID(), Kind: "terminal_prompt", Status: string(native.RequestStatusResolved),
-			})
-		}
-		if next.TerminalPrompt != "" {
-			o.prompts++
-			o.webhook.emit(webhookEventRequestOpened, WebhookTerminalPrompt{
-				ID: o.promptID(), Kind: "terminal_prompt", Status: string(native.RequestStatusPending), Prompt: next.TerminalPrompt,
-			})
-		}
-	}
 	// The agent's message is final once it is done; the task's end, which
 	// the emitter sends next, carries it as the reply.
 	if (previous.Status == convstate.AgentStatusRunning && next.Status == convstate.AgentStatusStable) ||
 		next.Lifecycle == convstate.LifecycleExited || next.Lifecycle == convstate.LifecycleFailed {
 		o.flushAgent()
 	}
-}
-
-func (o *webhookObserver) promptID() string {
-	return fmt.Sprintf("terminal-%d", o.prompts)
 }
 
 func (o *webhookObserver) messageUpdated(msg convstate.MessageUpdateBody, quiet bool) {

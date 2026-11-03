@@ -235,7 +235,7 @@ func (s *Server) scanUploadRefs(refs *uploadRefs) bool {
 	// The queue before the messages: a message that leaves the queue in
 	// between is in the messages then.
 	ok := refs.scanJSON(s.queue.Messages())
-	for _, msg := range s.conversation.Messages() {
+	for _, msg := range s.native.Messages() {
 		refs.scan(msg.Message)
 	}
 	ok = refs.scanJSON(s.emitter.RichMessages()) && ok

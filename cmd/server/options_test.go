@@ -8,8 +8,6 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/coder/agentapi/lib/httpapi"
 )
 
 // flagsWith returns flags with values.
@@ -34,7 +32,6 @@ func TestLoadServerOptions(t *testing.T) {
 				assert.Equal(t, AgentTypeClaude, opts.agentType)
 				assert.Equal(t, "claude", opts.agent)
 				assert.Equal(t, []string{"--model", "opus"}, opts.agentArgs)
-				assert.Equal(t, httpapi.TransportNative, opts.transport)
 				assert.Empty(t, opts.stateFile)
 				assert.Empty(t, opts.stateDB)
 			},
@@ -44,7 +41,6 @@ func TestLoadServerOptions(t *testing.T) {
 			values: map[string]any{FlagType: "custom"},
 			check: func(t *testing.T, opts serverOptions) {
 				assert.Equal(t, AgentTypeCustom, opts.agentType)
-				assert.Equal(t, httpapi.TransportNative, opts.transport)
 				for _, agent := range []AgentType{AgentTypeCodex, AgentTypePi} {
 					other, err := loadServerOptions(flagsWith(nil), []string{string(agent)})
 					require.NoError(t, err)
@@ -54,9 +50,7 @@ func TestLoadServerOptions(t *testing.T) {
 		},
 		"--transport native, deprecated, and --term-width, without effect, are accepted": {
 			values: map[string]any{FlagTransport: "native", FlagTermWidth: uint16(5)},
-			check: func(t *testing.T, opts serverOptions) {
-				assert.Equal(t, httpapi.TransportNative, opts.transport)
-			},
+			check:  func(*testing.T, serverOptions) {},
 		},
 		"--type names a wrapper's agent": {
 			args:   []string{"my-wrapper"},
@@ -71,7 +65,6 @@ func TestLoadServerOptions(t *testing.T) {
 				assert.Equal(t, "/tmp/state.json", opts.stateFile)
 				assert.True(t, opts.importState)
 				assert.Equal(t, "/tmp/state.db", opts.stateDB)
-				assert.Equal(t, httpapi.TransportNative, opts.transport)
 			},
 		},
 		"--load-state=false skips the import; --state-db names the database": {
@@ -87,7 +80,6 @@ func TestLoadServerOptions(t *testing.T) {
 		"native with a state DB": {
 			values: map[string]any{FlagStateDB: "/tmp/agent.db"},
 			check: func(t *testing.T, opts serverOptions) {
-				assert.Equal(t, httpapi.TransportNative, opts.transport)
 				assert.Equal(t, "/tmp/agent.db", opts.stateDB)
 			},
 		},

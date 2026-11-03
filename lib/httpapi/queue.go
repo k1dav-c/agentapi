@@ -12,6 +12,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/native"
 )
 
 // messageQueue holds the messages waiting for the agent, in the order they
@@ -282,15 +283,15 @@ func (s *Server) startMessageQueue() {
 	}, "messageQueueDispatch")
 }
 
-// beforeQueue gives the transport's backend its turn on the queue's tick,
-// before the queue (see agentBackend.beforeQueue).
+// beforeQueue sends the continuation of a turn a usage limit stopped once
+// it is due, on the queue's tick: the queued messages go after it.
 func (s *Server) beforeQueue() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.restarting.Load() || s.updating.Load() || s.shutdownCtx.Err() != nil {
 		return
 	}
-	s.backend().beforeQueue()
+	s.continueIfDueLocked()
 }
 
 // dispatchNextQueuedMessage sends the head of the queue once the agent can
@@ -314,11 +315,12 @@ func (s *Server) dispatchNextQueuedMessage() {
 		return
 	}
 	next, ok := s.queue.Head()
-	backend := s.backend()
-	if !ok || !backend.readyForQueued() {
+	// Queued messages also wait while a usage limit holds them (see
+	// native.Conversation.HoldsQueue).
+	if !ok || !s.native.Idle() || s.native.HoldsQueue(s.clock.Now()) {
 		return
 	}
-	err := backend.sendQueued(next.Content)
+	err := s.sendQueued(next.Content)
 	switch {
 	case err == nil:
 		s.queue.Remove(next.ID)
@@ -329,7 +331,7 @@ func (s *Server) dispatchNextQueuedMessage() {
 	}
 	attempts := s.queue.Failed(next.ID)
 	s.logger.Error("Failed to send queued message", "queueId", next.ID, "attempt", attempts, "error", err)
-	if reason := backend.notResent(err); reason != "" {
+	if reason := notResent(err); reason != "" {
 		s.queue.Remove(next.ID)
 		s.emitter.EmitError(fmt.Sprintf("Queued message %q %s: %v", shortText(next.Content, 40), reason, err), conv.ErrorLevelError)
 		return
@@ -339,6 +341,29 @@ func (s *Server) dispatchNextQueuedMessage() {
 		s.queue.Remove(next.ID)
 		s.emitter.EmitError(fmt.Sprintf("Dropped queued message %q after %d failed attempts: %v", shortText(next.Content, 40), attempts, err), conv.ErrorLevelError)
 	}
+}
+
+// sendQueued sends a queued message to the agent as a new turn.
+func (s *Server) sendQueued(content string) error {
+	ctx, cancel := s.agentCtx(nativeCallTimeout)
+	defer cancel()
+	s.emitter.SendingMessage()
+	return s.native.StartTurn(ctx, native.InputFromText(content))
+}
+
+// notResent says why a queued message whose send failed with err must not
+// be sent again, or "" when it can be. A message the agent may have taken
+// could run its task twice if it were sent again. The adapters mark one
+// that went out but wasn't confirmed with native.ErrUnconfirmed: the call
+// timed out, AgentAPI stopped meanwhile (which would otherwise keep it
+// queued and, with --state-db, send it again after the restart), or the
+// agent exited. A message whose call ended before it went out stays
+// queued.
+func notResent(err error) string {
+	if errors.Is(err, native.ErrUnconfirmed) {
+		return "may have reached the agent, which didn't confirm it"
+	}
+	return ""
 }
 
 func (s *Server) registerQueueRoutes() {

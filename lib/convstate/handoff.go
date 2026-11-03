@@ -11,9 +11,6 @@ type HandoffView struct {
 	// Revision changes on every lifecycle transition and reset, which
 	// invalidates the replies to what was offered before.
 	Revision uint64
-	Screen   string
-	// Dialog: the screen shows a dialog of the agent's terminal.
-	Dialog bool
 	// Question is the user's last message, and Reply the agent's last
 	// message after it; both are empty without one.
 	Question, Reply string
@@ -25,7 +22,6 @@ func (e *EventEmitter) HandoffView() HandoffView {
 	defer e.mu.Unlock()
 	view := HandoffView{
 		Status: e.statusChangeBody(), Revision: e.handoffRevision,
-		Screen: e.screen, Dialog: e.screenQuestion,
 	}
 	reply, replied := "", false
 	for i := len(e.messages) - 1; i >= 0; i-- {

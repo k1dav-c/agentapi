@@ -49,9 +49,11 @@ func TestMessageQueue(t *testing.T) {
 // new message.
 func TestQueueIDsGoOnAfterARestart(t *testing.T) {
 	t.Parallel()
-	s, _, _ := handoffServer()
+	s, _ := newQuietNativeServer(t, nil)
 	old := s.queue.Push("old", s.clock.Now(), false)
-	s.resetConversationLocked()
+	s.mu.Lock()
+	require.NoError(t, s.restartLocked())
+	s.mu.Unlock()
 	assert.Zero(t, s.queue.Len())
 	fresh := s.queue.Push("new", s.clock.Now(), false)
 	assert.Greater(t, fresh.ID, old.ID)
@@ -83,7 +85,7 @@ func ids(messages []QueuedMessage) []int {
 // a restart that updates the agent CLI.
 func TestReadsDontWaitForTheServerLock(t *testing.T) {
 	t.Parallel()
-	s, _, _ := handoffServer()
+	s, _ := newQuietNativeServer(t, nil)
 	s.queue.Push("queued", s.clock.Now(), false)
 	s.mu.Lock()
 	defer s.mu.Unlock()

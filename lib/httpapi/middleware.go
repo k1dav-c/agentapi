@@ -24,7 +24,7 @@ func requestLogMiddleware(logger *slog.Logger) func(next http.Handler) http.Hand
 			// Skip noisy routes: static files, SSE streams, the terminal
 			// (a request per keystroke), and docs.
 			if path == "/" || strings.HasPrefix(path, "/chat") ||
-				path == "/events" || path == "/internal/screen" || strings.HasPrefix(path, "/terminal") ||
+				path == "/events" || strings.HasPrefix(path, "/terminal") ||
 				path == "/docs" || path == "/openapi.json" {
 				next.ServeHTTP(w, r)
 				return

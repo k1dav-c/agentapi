@@ -7,7 +7,6 @@ import (
 
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/instanceapi"
-	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 	"github.com/coder/agentapi/lib/util"
@@ -15,25 +14,30 @@ import (
 
 type MessageType string
 
-const (
-	MessageTypeUser MessageType = "user"
-	MessageTypeRaw  MessageType = "raw"
-)
+// MessageTypeUser is the one message type; AgentAPI 2 also had raw,
+// keystrokes for the agent's terminal.
+const MessageTypeUser MessageType = "user"
 
 var MessageTypeValues = []MessageType{
 	MessageTypeUser,
-	MessageTypeRaw,
 }
 
 func (m MessageType) Schema(r huma.Registry) *huma.Schema {
 	return util.OpenAPISchema(r, "MessageType", MessageTypeValues)
 }
 
-// Transport is part of the instance's contract (lib/instanceapi).
-type Transport = instanceapi.Transport
+// AgentType and Transport are part of the instance's contract
+// (lib/instanceapi).
+type (
+	AgentType = instanceapi.AgentType
+	Transport = instanceapi.Transport
+)
 
 const (
-	TransportPTY    = instanceapi.TransportPTY
+	AgentTypeClaude = instanceapi.AgentTypeClaude
+	AgentTypeCodex  = instanceapi.AgentTypeCodex
+	AgentTypePi     = instanceapi.AgentTypePi
+	AgentTypeCustom = instanceapi.AgentTypeCustom
 	TransportNative = instanceapi.TransportNative
 )
 
@@ -83,10 +87,10 @@ type StatusResponse struct {
 // intentionally not represented because they are client-local.
 type TitleResponse struct {
 	Body struct {
-		Title     string       `json:"title" doc:"Current human-readable session title derived from the latest user task and agent status."`
-		Task      string       `json:"task" doc:"Latest user task used to derive the title. Empty before the first task."`
-		Status    AgentStatus  `json:"status" doc:"Current agent status."`
-		AgentType mf.AgentType `json:"agent_type" doc:"Type of the agent being used by the server."`
+		Title     string                `json:"title" doc:"Current human-readable session title derived from the latest user task and agent status."`
+		Task      string                `json:"task" doc:"Latest user task used to derive the title. Empty before the first task."`
+		Status    AgentStatus           `json:"status" doc:"Current agent status."`
+		AgentType instanceapi.AgentType `json:"agent_type" doc:"Type of the agent being used by the server."`
 	}
 }
 
@@ -107,8 +111,8 @@ type MessagesResponse struct {
 
 type MessageRequestBody struct {
 	Content      string       `json:"content" example:"Hello, agent!" doc:"Message content"`
-	DispatchMode DispatchMode `json:"dispatch_mode,omitempty" doc:"What to do with a user message while the agent is busy. 'queue' (default) sends it once the agent is idle. 'steer' adds it to the turn the agent is working on; 'interrupt' stops that turn and sends the message next. Without a running turn, both send the message as usual. 'steer' and 'interrupt' need the native transport, and while a turn runs an agent with the matching capability (see GET /status); otherwise they return 400."`
-	Type         MessageType  `json:"type" doc:"A 'user' type message will be logged as a user message in the conversation history and submitted to the agent. AgentAPI will wait until the agent starts carrying out the task described in the message before responding. A 'raw' type message will be written directly to the agent's terminal session as keystrokes and will not be saved in the conversation history. 'raw' messages are useful for sending escape sequences to the terminal."`
+	DispatchMode DispatchMode `json:"dispatch_mode,omitempty" doc:"What to do with a user message while the agent is busy. 'queue' (default) sends it once the agent is idle. 'steer' adds it to the turn the agent is working on; 'interrupt' stops that turn and sends the message next. Without a running turn, both send the message as usual. 'steer' and 'interrupt' need, while a turn runs, an agent with the matching capability (see GET /status); otherwise they return 400."`
+	Type         MessageType  `json:"type" doc:"Always 'user': the message is logged as a user message in the conversation history and submitted to the agent. AgentAPI 2 also took 'raw', keystrokes for the agent's terminal."`
 }
 
 // MessageRequest represents a request to create a new message

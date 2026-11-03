@@ -22,29 +22,18 @@ import (
 
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native/demo"
 	"github.com/coder/agentapi/lib/pricing"
 	"github.com/coder/agentapi/lib/statedb"
 )
 
-type AgentType = msgfmt.AgentType
+type AgentType = httpapi.AgentType
 
 const (
-	AgentTypeClaude   AgentType = msgfmt.AgentTypeClaude
-	AgentTypeGoose    AgentType = msgfmt.AgentTypeGoose
-	AgentTypeAider    AgentType = msgfmt.AgentTypeAider
-	AgentTypeCodex    AgentType = msgfmt.AgentTypeCodex
-	AgentTypeGemini   AgentType = msgfmt.AgentTypeGemini
-	AgentTypeCopilot  AgentType = msgfmt.AgentTypeCopilot
-	AgentTypeAmp      AgentType = msgfmt.AgentTypeAmp
-	AgentTypeCursor   AgentType = msgfmt.AgentTypeCursor
-	AgentTypeAuggie   AgentType = msgfmt.AgentTypeAuggie
-	AgentTypeAmazonQ  AgentType = msgfmt.AgentTypeAmazonQ
-	AgentTypeOpencode AgentType = msgfmt.AgentTypeOpencode
-	AgentTypeKimi     AgentType = msgfmt.AgentTypeKimi
-	AgentTypePi       AgentType = msgfmt.AgentTypePi
-	AgentTypeCustom   AgentType = msgfmt.AgentTypeCustom
+	AgentTypeClaude = httpapi.AgentTypeClaude
+	AgentTypeCodex  = httpapi.AgentTypeCodex
+	AgentTypePi     = httpapi.AgentTypePi
+	AgentTypeCustom = httpapi.AgentTypeCustom
 )
 
 // agentTypeAliases are the agent types --type takes, and the programs
@@ -84,7 +73,7 @@ func parseAgentType(program, typeFlag string) (AgentType, error) {
 		return "", fmt.Errorf("unknown agent %s: set --type (%s); AgentAPI 3 runs Claude Code, Codex and Pi natively, and for other agents AgentAPI %s is the last release with the PTY transport", program, agentNames, lastPTYRelease)
 	case !ok:
 		return "", unsupportedAgent(name)
-	case agentType == AgentTypeCustom && filepath.Base(program) != demo.Program:
+	case agentType == AgentTypeCustom && program != demo.Program:
 		return "", unsupportedAgent("a custom agent")
 	}
 	return agentType, nil
@@ -98,7 +87,7 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 		return err
 	}
 	if !opts.printOpenAPI {
-		logger.Info("Driving the agent", "transport", opts.transport, "agentType", opts.agentType)
+		logger.Info("Driving the agent", "agentType", opts.agentType)
 	}
 	if opts.initialPrompt == "" {
 		if opts.initialPrompt, err = readPipedPrompt(logger); err != nil {
@@ -216,7 +205,6 @@ func isGeneratedAPIToken(token string) bool {
 func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, apiToken, cwd string, prices *pricing.Table, self *selfExec) httpapi.ServerConfig {
 	config := httpapi.ServerConfig{
 		AgentType:      opts.agentType,
-		Transport:      opts.transport,
 		Port:           opts.port,
 		ChatBasePath:   opts.chatBasePath,
 		AllowedHosts:   opts.allowedHosts,

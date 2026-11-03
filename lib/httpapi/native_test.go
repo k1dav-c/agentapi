@@ -21,8 +21,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/transcript"
@@ -52,8 +52,7 @@ func startNativeServer(t *testing.T, configure func(*nativetest.Adapter)) *nativ
 	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
 	factory := &nativetest.Factory{Configure: configure}
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeClaude,
-		Transport:      httpapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         httpapi.NativeConfig{Factory: factory.New},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -195,8 +194,8 @@ func TestNative_StatusAndMessages(t *testing.T) {
 	require.Len(t, rich.Messages[0].Content, 1)
 	assert.Equal(t, "Hi there", rich.Messages[0].Content[0].Text)
 
-	// Raw keystrokes need a terminal.
-	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodPost, "/message", map[string]any{"content": "x", "type": "raw"}, nil))
+	// AgentAPI 2's raw keystrokes, for the agent's terminal, are gone.
+	assert.Equal(t, http.StatusUnprocessableEntity, n.do(http.MethodPost, "/message", map[string]any{"content": "x", "type": "raw"}, nil))
 }
 
 func TestNative_QueueSteerInterrupt(t *testing.T) {
@@ -524,26 +523,6 @@ func nextEvent(t *testing.T, events <-chan sseEvent) sseEvent {
 	}
 }
 
-func TestPTY_DispatchModesRejected(t *testing.T) {
-	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType: msgfmt.AgentTypeClaude, ChatBasePath: "/chat",
-		AllowedHosts: []string{"*"}, AllowedOrigins: []string{"*"},
-	})
-	require.NoError(t, err)
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	n := &nativeServer{t: t, url: ts.URL}
-	code, _ := n.send("x", httpapi.DispatchSteer)
-	assert.Equal(t, http.StatusBadRequest, code)
-	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodPost, "/interrupt", nil, nil))
-	var list struct {
-		Requests []native.RequestState `json:"requests"`
-	}
-	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/requests", nil, &list))
-	assert.Empty(t, list.Requests)
-}
-
 func inputTexts(inputs []native.Input) []string {
 	out := make([]string, len(inputs))
 	for i, in := range inputs {
@@ -660,8 +639,7 @@ func TestNative_RestartUpdatesTheAgentFirst(t *testing.T) {
 		mu.Unlock()
 	}}
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeCodex,
-		Transport:      httpapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeCodex,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
@@ -698,8 +676,7 @@ func TestNative_RestartOutlivesTheRequest(t *testing.T) {
 	updating, release := make(chan struct{}), make(chan struct{})
 	cut := make(chan bool, 1)
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeCodex,
-		Transport:      httpapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeCodex,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
@@ -753,8 +730,7 @@ func newUpdatingServer(t *testing.T, update func(context.Context)) (*nativeServe
 	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
 	factory := &nativetest.Factory{}
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeClaude,
-		Transport:      httpapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeClaude,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
@@ -898,8 +874,7 @@ func TestStopBeforeStart(t *testing.T) {
 	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
 	t.Cleanup(cancel)
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeCodex,
-		Transport:      httpapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeCodex,
 		Native:         httpapi.NativeConfig{Factory: (&nativetest.Factory{}).New},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},

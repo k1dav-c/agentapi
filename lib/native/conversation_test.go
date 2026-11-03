@@ -65,8 +65,6 @@ func (r *recorder) EmitStatus(s conversation.Status) {
 	r.statuses = append(r.statuses, s)
 }
 
-func (r *recorder) EmitScreen(string) {}
-
 func (r *recorder) EmitError(m string, _ conversation.ErrorLevel) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

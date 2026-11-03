@@ -246,9 +246,8 @@ func (t *taskTracker) own(msgs []conv.Message, changed []int) []int {
 			// keeps the task open; the agent isn't working, so the
 			// message starts a task rather than steering this one. The
 			// server ends the task before it sends the message
-			// (SendingMessage), as the PTY transport reports the agent
-			// running before the message shows; this catches a message
-			// sent another way.
+			// (SendingMessage); this catches a message sent another
+			// way.
 			changed = appendOnce(changed, t.open)
 			t.end(t.open, msg.Time)
 		}
@@ -347,7 +346,7 @@ func (t *taskTracker) statusChanged(next StatusChangeBody, now time.Time) (chang
 
 // idle reports whether the agent neither works nor waits on an answer.
 func (t *taskTracker) idle() bool {
-	return t.status.Status == AgentStatusStable && t.status.PendingRequests == 0 && t.status.TerminalPrompt == ""
+	return t.status.Status == AgentStatusStable && t.status.PendingRequests == 0
 }
 
 // endIfIdle ends the running task if the agent is idle in the grace period
@@ -443,9 +442,7 @@ func (e *EventEmitter) notifyStatusLocked() {
 // SendingMessage tells the emitter that a user message goes to the agent
 // now, as a new turn. If the agent is idle in the grace period after an
 // answer or an interrupt, its task ends here and the message starts one.
-// The emitter can't tell when the message shows: the PTY transport reports
-// the agent running as soon as the message waits to be typed. While the
-// agent works nothing ends, and a message steers its task.
+// While the agent works nothing ends, and a message steers its task.
 func (e *EventEmitter) SendingMessage() {
 	e.mu.Lock()
 	defer e.unlock()

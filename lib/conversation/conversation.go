@@ -1,13 +1,10 @@
-// Package conversation holds what the transports share: the conversation's
-// messages and status, the interface the server drives a transport
-// through, and the one a transport reports its changes to. The PTY engine
-// (lib/screentracker) and the native transport (lib/native) implement it;
-// the state database (lib/statedb) and the session logs (lib/sessions) use
-// its messages.
+// Package conversation holds the conversation's messages and status, and
+// the interface the agent's conversation (lib/native) reports its changes
+// to; the state database (lib/statedb) and the session logs (lib/sessions)
+// use its messages.
 package conversation
 
 import (
-	"context"
 	"errors"
 	"time"
 
@@ -60,16 +57,8 @@ var ErrorLevelValues = []ErrorLevel{
 }
 
 var (
-	ErrMessageValidationWhitespace = errors.New("message must be trimmed of leading and trailing whitespace")
-	ErrMessageValidationEmpty      = errors.New("message must not be empty")
-	ErrMessageValidationChanging   = errors.New("message can only be sent when the agent is waiting for user input")
-	// ErrMessageNotSubmitted means the message was typed into the agent but
-	// the agent never reacted to the carriage return. The text may still be
-	// sitting in the agent's input box, so resending it would duplicate it.
-	ErrMessageNotSubmitted = errors.New("agent did not react to the submitted message")
-	// ErrConversationReset means the conversation was reset before the
-	// message reached the agent; it isn't part of the new conversation.
-	ErrConversationReset = errors.New("the conversation was reset before the message was sent")
+	ErrMessageValidationEmpty    = errors.New("message must not be empty")
+	ErrMessageValidationChanging = errors.New("message can only be sent when the agent is waiting for user input")
 )
 
 // Message is a message of the conversation. Its ID is its position.
@@ -80,54 +69,10 @@ type Message struct {
 	Time    time.Time `json:"time"`
 }
 
-// MessagePart is a part of a message the user sends, as the agent reads
-// it. The PTY transport types parts that know how to (screentracker's
-// TerminalPart) its own way; the others send the text.
-type MessagePart interface {
-	String() string
-}
-
-// MessagePartText is text. A hidden part is typed into the agent's terminal
-// (bracketed paste markers, say) but isn't part of the message's text.
-type MessagePartText struct {
-	Content string
-	Hidden  bool
-}
-
-var _ MessagePart = MessagePartText{}
-
-func (p MessagePartText) String() string {
-	if p.Hidden {
-		return ""
-	}
-	return p.Content
-}
-
-// Conversation is a conversation between a user and an agent, as the
-// server drives it: it lists the messages, sends one, runs whatever keeps
-// the state up to date, and reports the agent's status. What the agent's
-// screen shows goes to the Emitter (EmitScreen).
-type Conversation interface {
-	Messages() []Message
-	// Send sends a message and returns once it went out, or ctx ended: a
-	// message still waiting is withdrawn (ErrMessageValidationChanging),
-	// and one on its way is cut short.
-	Send(ctx context.Context, parts ...MessagePart) error
-	Start(context.Context)
-	Status() Status
-	// Reset clears all conversation state back to the initial empty state.
-	// forget, if set, runs first, once no state of the old conversation
-	// can still reach the Emitter: what the caller keeps of it (the
-	// Emitter's own state) can be cleared there, and no snapshot taken
-	// before the reset arrives after.
-	Reset(forget func())
-}
-
 // Emitter receives conversation state updates.
 type Emitter interface {
 	EmitMessages([]Message)
 	EmitStatus(Status)
-	EmitScreen(string)
 	EmitError(message string, level ErrorLevel)
 }
 
@@ -137,5 +82,4 @@ type NopEmitter struct{}
 
 func (NopEmitter) EmitMessages([]Message)       {}
 func (NopEmitter) EmitStatus(Status)            {}
-func (NopEmitter) EmitScreen(string)            {}
 func (NopEmitter) EmitError(string, ErrorLevel) {}

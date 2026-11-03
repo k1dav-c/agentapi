@@ -160,10 +160,10 @@ func TestRestartSendsInitialPromptAgain(t *testing.T) {
 	assert.Equal(t, 0, msgs[0].Id)
 }
 
-func TestSendAndInitialPromptHaveDeadlines(t *testing.T) {
+func TestInitialPromptHasADeadline(t *testing.T) {
 	var mu sync.Mutex
 	var deadlines []bool
-	c, factory, _ := start(t, func(a *nativetest.Adapter) {
+	_, factory, _ := start(t, func(a *nativetest.Adapter) {
 		a.AutoStartTurn = false
 		a.OnStartTurn = func(ctx context.Context) {
 			_, ok := ctx.Deadline()
@@ -176,10 +176,9 @@ func TestSendAndInitialPromptHaveDeadlines(t *testing.T) {
 	require.Eventually(t, func() bool { return len(a.Turns()) == 1 }, 5*time.Second, time.Millisecond)
 	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
 
-	require.NoError(t, c.Send(context.Background(), conv.MessagePartText{Content: "hi"}))
 	mu.Lock()
 	defer mu.Unlock()
-	assert.Equal(t, []bool{true, true}, deadlines, "an agent that hangs can't hold its caller forever")
+	assert.Equal(t, []bool{true}, deadlines, "an agent that hangs can't hold its caller forever")
 }
 
 func TestSwitchOpensAnotherSession(t *testing.T) {

@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/msgfmt"
 )
 
 func TestCrossOriginProtection(t *testing.T) {
@@ -75,7 +75,7 @@ func TestServer_RefusesCrossOriginRequests(t *testing.T) {
 	for _, origins := range [][]string{{"*"}, {"http://localhost:3000"}} {
 		ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 		s, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-			AgentType:      msgfmt.AgentTypeClaude,
+			AgentType:      instanceapi.AgentTypeClaude,
 			ChatBasePath:   "/chat",
 			AllowedHosts:   []string{"*"},
 			AllowedOrigins: origins,

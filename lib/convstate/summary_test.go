@@ -71,7 +71,7 @@ func TestSummaryEvents(t *testing.T) {
 	t.Parallel()
 	e := NewEventEmitter()
 	e.EmitStatus(conv.StatusStable)
-	_, others, _ := e.SubscribeTo(ConversationEvents, 0, "")
+	_, others, _ := e.SubscribeTo(AllEvents, 0, "")
 	_, ch, replay := e.SubscribeTo(SummaryEvents, 0, "")
 	require.Len(t, summaries(t, replay), 1)
 	assert.Equal(t, AgentStatusStable, summaries(t, replay)[0].Status)
@@ -92,7 +92,6 @@ func TestSummaryEvents(t *testing.T) {
 	require.NotEmpty(t, got, "the task has a reply")
 	require.NotNil(t, got[len(got)-1].Task.ReplyID)
 	e.EmitMessages(taskMessages(start, "", ">Fix the bug", "Looking at it"))
-	e.EmitScreen("Looking at it")
 	assert.Empty(t, drain(ch))
 
 	// A reset leaves nothing: the summary says so.

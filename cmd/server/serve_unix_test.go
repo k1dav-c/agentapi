@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/selfupdate"
 	"github.com/coder/agentapi/lib/selfupdate/selfupdatetest"
@@ -68,8 +68,7 @@ func TestSIGUSR2BeforeServing(t *testing.T) {
 	factory := &nativetest.Factory{}
 	logger := slog.New(slog.DiscardHandler)
 	srv, err := httpapi.NewServer(logctx.WithLogger(ctx, logger), httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeClaude,
-		Transport:      httpapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         httpapi.NativeConfig{Factory: factory.New},
 		Bind:           "127.0.0.1",
 		ChatBasePath:   "/chat",

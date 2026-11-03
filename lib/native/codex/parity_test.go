@@ -18,8 +18,8 @@ import (
 	"github.com/coder/agentapi/lib/transcript"
 )
 
-// parseRollout runs the existing rollout parser (the PTY transport's
-// sidecar) over a rollout file and returns the final state of each message
+// parseRollout runs the rollout parser (lib/agentlog/codexlog) over a
+// rollout file and returns the final state of each message
 // in first-seen order, as the event emitter stores them.
 func parseRollout(t *testing.T, name string) []transcript.RichMessage {
 	t.Helper()
