@@ -77,6 +77,20 @@ func TestProgramVersion(t *testing.T) {
 	assert.ErrorContains(t, err, "printed nothing")
 }
 
+// A program another process still holds open for writing runs once it is
+// let go: Linux refuses to run it until then (ETXTBSY).
+func TestProgramVersionWaitsForAWriter(t *testing.T) {
+	skipWithoutShell(t)
+	t.Parallel()
+	path := selfupdatetest.WriteProgram(t, filepath.Join(t.TempDir(), "agentapi"), "2.1.0")
+	writer, err := os.OpenFile(path, os.O_WRONLY, 0)
+	require.NoError(t, err)
+	time.AfterFunc(100*time.Millisecond, func() { _ = writer.Close() })
+	version, err := selfupdate.ProgramVersion(context.Background(), path)
+	require.NoError(t, err)
+	assert.Equal(t, "2.1.0", version.String())
+}
+
 // Locate follows a symlink to the file an update replaces.
 func TestLocate(t *testing.T) {
 	skipWithoutShell(t)
