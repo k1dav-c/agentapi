@@ -1,4 +1,4 @@
-package httpapi
+package workspacefs
 
 import (
 	"bytes"
@@ -11,119 +11,95 @@ import (
 	"hash"
 	"io"
 	"io/fs"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/danielgtaylor/huma/v2"
-
-	"github.com/coder/agentapi/lib/util"
 )
 
-// maxViewedBytes is how much of a file GET /files/content returns, and of
-// a diff GET /files/diff returns.
-const maxViewedBytes = 1 << 20
+// MaxViewedBytes is how much of a file Content returns, and of a diff Diff
+// returns.
+const MaxViewedBytes = 1 << 20
 
-// gitTimeout bounds the git commands of GET /files/diff.
+// gitTimeout bounds the git commands of Diff.
 const gitTimeout = 10 * time.Second
 
-// FilePathQuery names a file the chat shows.
-type FilePathQuery struct {
-	Path string `query:"path" required:"true" doc:"The file: an absolute path inside the agent's working directory, or a path relative to it."`
-}
+// Dir is the agent's working directory, whose files the chat shows: their
+// text, their diff, a preview of an HTML file, an image, and the search for
+// a path the agent named. Paths outside it are refused, and symlinks inside
+// it can't lead out. An empty Dir is unknown, and refuses every path.
+type Dir string
 
-type FileContentResponse struct {
-	Body struct {
-		Path      string `json:"path" doc:"The path as given."`
-		Relative  string `json:"relative" doc:"The path relative to the agent's working directory."`
-		Size      int64  `json:"size" doc:"Size of the file in bytes."`
-		Content   string `json:"content" doc:"The file's text, up to 1 MiB; empty for a binary file."`
-		Truncated bool   `json:"truncated" doc:"The content was cut at 1 MiB."`
-		Binary    bool   `json:"binary" doc:"The file isn't UTF-8 text, so it has no content here."`
-	}
-}
-
-// FileDiffStatus is how a file differs from the last commit.
-type FileDiffStatus string
+// ErrorKind is why a Dir refused a request.
+type ErrorKind int
 
 const (
-	FileDiffModified  FileDiffStatus = "modified"
-	FileDiffAdded     FileDiffStatus = "added"
-	FileDiffDeleted   FileDiffStatus = "deleted"
-	FileDiffUntracked FileDiffStatus = "untracked"
-	FileDiffUnchanged FileDiffStatus = "unchanged"
-	// FileDiffNotInRepo: the file isn't in a git repository, so there is
-	// nothing to compare it with.
-	FileDiffNotInRepo FileDiffStatus = "not_in_repo"
+	// Invalid: the path is empty, isn't a file, or the file doesn't fit
+	// the request.
+	Invalid ErrorKind = iota + 1
+	// Forbidden: the path is outside the directory, or can't be read.
+	Forbidden
+	// NotFound: the file, or the directory itself, is unknown.
+	NotFound
 )
 
-var FileDiffStatusValues = []FileDiffStatus{
-	FileDiffModified, FileDiffAdded, FileDiffDeleted, FileDiffUntracked, FileDiffUnchanged, FileDiffNotInRepo,
+// Error is a request a Dir refused, with the message to show.
+type Error struct {
+	Kind    ErrorKind
+	Message string
 }
 
-func (s FileDiffStatus) Schema(r huma.Registry) *huma.Schema {
-	return util.OpenAPISchema(r, "FileDiffStatus", FileDiffStatusValues)
-}
+func (e *Error) Error() string { return e.Message }
 
-type FileDiffResponse struct {
-	Body struct {
-		Path      string         `json:"path" doc:"The path as given."`
-		Relative  string         `json:"relative" doc:"The path relative to the agent's working directory."`
-		Status    FileDiffStatus `json:"status" doc:"modified, added (staged but not committed), deleted, untracked, unchanged, or not_in_repo when the file isn't in a git repository."`
-		Diff      string         `json:"diff" doc:"Unified diff of the working tree against HEAD (an untracked file shows as added), up to 1 MiB; empty when unchanged or not in a repository."`
-		Truncated bool           `json:"truncated" doc:"The diff was cut at 1 MiB."`
+func refuse(kind ErrorKind, message string) error { return &Error{Kind: kind, Message: message} }
+
+// errorKind is the kind of a refusal, or 0 for another error.
+func errorKind(err error) ErrorKind {
+	var refused *Error
+	if errors.As(err, &refused) {
+		return refused.Kind
 	}
+	return 0
 }
 
-// fileAPI serves the files of the agent's working directory to the chat's
-// file viewer: their text, their diff, a preview of an HTML file, an image,
-// and the search for a path the agent named.
-type fileAPI struct {
-	cwd string
-}
+// DiffStatus is how a file differs from the last commit.
+type DiffStatus string
 
-func (s *Server) registerFileRoutes() {
-	f := &fileAPI{cwd: s.cwd}
-	huma.Get(s.api, "/files/content", f.getFileContent, func(o *huma.Operation) {
-		o.Description = "Returns a file the chat shows, for the file paths in tool calls and messages: its text, up to 1 MiB. Only files in the agent's working directory can be read; a binary file comes back without content."
-		o.Errors = []int{400, 403, 404}
-	})
-	huma.Get(s.api, "/files/find", f.findFile, func(o *huma.Operation) {
-		o.Description = "Finds the files under the agent's working directory whose path ends with the one given, ignoring case: for a path the agent wrote relative to a repository below the working directory, or in the wrong case. Hidden directories and dependencies (node_modules, vendor, build output) are searched only when the path goes into them, and the search stops after 50,000 entries or 2 seconds. Returns up to 10 matches, those with the same case first, then the latest changed."
-		o.Errors = []int{400, 404}
-	})
-	huma.Get(s.api, "/files/diff", f.getFileDiff, func(o *huma.Operation) {
-		o.Description = "Returns the uncommitted changes of a file in the agent's working directory: git's unified diff of the working tree against HEAD, where an untracked file shows as added. Outside a git repository the status is not_in_repo."
-		o.Errors = []int{400, 403, 404}
-	})
-}
+const (
+	DiffModified  DiffStatus = "modified"
+	DiffAdded     DiffStatus = "added"
+	DiffDeleted   DiffStatus = "deleted"
+	DiffUntracked DiffStatus = "untracked"
+	DiffUnchanged DiffStatus = "unchanged"
+	// DiffNotInRepo: the file isn't in a git repository, so there is
+	// nothing to compare it with.
+	DiffNotInRepo DiffStatus = "not_in_repo"
+)
 
-// workspacePath resolves path, absolute or relative to the agent's working
+// Resolve resolves path, absolute or relative to the agent's working
 // directory, to a path relative to that directory. Paths outside it are
-// refused: these endpoints show the agent's work, not the machine.
-func (f *fileAPI) workspacePath(path string) (string, error) {
+// refused: the chat shows the agent's work, not the machine.
+func (d Dir) Resolve(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
-		return "", huma.Error400BadRequest("path is empty")
+		return "", refuse(Invalid, "path is empty")
 	}
-	if f.cwd == "" {
-		return "", huma.Error404NotFound("the agent's working directory is unknown")
+	if d == "" {
+		return "", refuse(NotFound, "the agent's working directory is unknown")
 	}
 	rel := filepath.Clean(path)
 	if filepath.IsAbs(rel) {
-		rel = relativeTo(f.cwd, rel)
+		rel = relativeTo(string(d), rel)
 		if rel == "" {
 			// The agent may report the path with symlinks resolved.
-			if real, err := filepath.EvalSymlinks(f.cwd); err == nil {
+			if real, err := filepath.EvalSymlinks(string(d)); err == nil {
 				rel = relativeTo(real, filepath.Clean(path))
 			}
 		}
 	}
 	if rel == "" || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", huma.Error403Forbidden(fmt.Sprintf("%s is outside the agent's working directory", path))
+		return "", refuse(Forbidden, fmt.Sprintf("%s is outside the agent's working directory", path))
 	}
 	return rel, nil
 }
@@ -137,36 +113,46 @@ func relativeTo(base, path string) string {
 	return rel
 }
 
-func (f *fileAPI) getFileContent(_ context.Context, input *FilePathQuery) (*FileContentResponse, error) {
-	rel, err := f.workspacePath(input.Path)
+// Content is a file's text, as Dir.Content returns it.
+type Content struct {
+	// Relative is the path relative to the directory, with slashes.
+	Relative string
+	Size     int64
+	// Text is up to MaxViewedBytes of the file; empty for a binary file.
+	Text      string
+	Truncated bool
+	// Binary: the file isn't UTF-8 text, so it has no Text.
+	Binary bool
+}
+
+// Content reads the file at path: up to MaxViewedBytes of its text.
+func (d Dir) Content(path string) (Content, error) {
+	rel, err := d.Resolve(path)
 	if err != nil {
-		return nil, err
+		return Content{}, err
 	}
 	// The root keeps symlinks inside the working directory from leading out.
-	root, err := os.OpenRoot(f.cwd)
+	root, err := os.OpenRoot(string(d))
 	if err != nil {
-		return nil, fmt.Errorf("open the agent's working directory: %w", err)
+		return Content{}, fmt.Errorf("open the agent's working directory: %w", err)
 	}
 	defer func() { _ = root.Close() }()
-	data, info, err := readRegular(root, rel, input.Path, maxViewedBytes)
+	data, info, err := readRegular(root, rel, path, MaxViewedBytes)
 	if err != nil {
-		return nil, err
+		return Content{}, err
 	}
 
-	resp := &FileContentResponse{}
-	resp.Body.Path = input.Path
-	resp.Body.Relative = filepath.ToSlash(rel)
-	resp.Body.Size = info.Size()
-	if len(data) > maxViewedBytes {
-		data = trimPartialRune(data[:maxViewedBytes])
-		resp.Body.Truncated = true
+	content := Content{Relative: filepath.ToSlash(rel), Size: info.Size()}
+	if len(data) > MaxViewedBytes {
+		data = trimPartialRune(data[:MaxViewedBytes])
+		content.Truncated = true
 	}
 	if bytes.IndexByte(data, 0) >= 0 || !utf8.Valid(data) {
-		resp.Body.Binary = true
-		return resp, nil
+		content.Binary = true
+		return content, nil
 	}
-	resp.Body.Content = string(data)
-	return resp, nil
+	content.Text = string(data)
+	return content, nil
 }
 
 // readRegular reads up to limit+1 bytes of a regular file in root: one more
@@ -178,7 +164,7 @@ func readRegular(root *os.Root, rel, path string, limit int) ([]byte, fs.FileInf
 		return nil, nil, fileError(path, err)
 	}
 	if !info.Mode().IsRegular() {
-		return nil, nil, huma.Error400BadRequest(fmt.Sprintf("%s is not a file", path))
+		return nil, nil, refuse(Invalid, fmt.Sprintf("%s is not a file", path))
 	}
 	f, err := root.Open(rel)
 	if err != nil {
@@ -192,23 +178,14 @@ func readRegular(root *os.Root, rel, path string, limit int) ([]byte, fs.FileInf
 	return data, info, nil
 }
 
-// httpStatus is the status of an error made with huma, or 0.
-func httpStatus(err error) int {
-	var status huma.StatusError
-	if errors.As(err, &status) {
-		return status.GetStatus()
-	}
-	return 0
-}
-
 // fileError maps an error opening a file in the working directory to the
-// response the chat shows.
+// refusal the chat shows.
 func fileError(path string, err error) error {
 	if errors.Is(err, fs.ErrNotExist) {
-		return huma.Error404NotFound(fmt.Sprintf("%s doesn't exist", path))
+		return refuse(NotFound, fmt.Sprintf("%s doesn't exist", path))
 	}
 	// A symlink leading out of the working directory, or no permission.
-	return huma.Error403Forbidden(fmt.Sprintf("%s can't be read: %v", path, err))
+	return refuse(Forbidden, fmt.Sprintf("%s can't be read: %v", path, err))
 }
 
 // trimPartialRune drops an incomplete UTF-8 sequence that cutting data left
@@ -223,32 +200,41 @@ func trimPartialRune(data []byte) []byte {
 	return data
 }
 
-// getFileDiff serves a file's uncommitted changes against HEAD. In the
+// Diff is a file's uncommitted changes, as Dir.Diff returns them.
+type Diff struct {
+	// Relative is the path relative to the directory, with slashes.
+	Relative string
+	Status   DiffStatus
+	// Text is git's unified diff of the working tree against HEAD, up to
+	// MaxViewedBytes; empty when unchanged or not in a repository.
+	Text      string
+	Truncated bool
+}
+
+// Diff returns the uncommitted changes of the file at path against HEAD. In the
 // repository git only reads objects and the index (rev-parse, ls-files,
 // cat-file), which runs none of the programs a repository can configure,
 // such as clean filters (an agent that can write .git/config could run a
 // command when the user looks at a diff). The diff compares two copies in a
 // directory of its own; the working copy is read through the root, so a
 // symlink can't lead out.
-func (f *fileAPI) getFileDiff(ctx context.Context, input *FilePathQuery) (*FileDiffResponse, error) {
-	rel, err := f.workspacePath(input.Path)
+func (d Dir) Diff(ctx context.Context, path string) (Diff, error) {
+	rel, err := d.Resolve(path)
 	if err != nil {
-		return nil, err
+		return Diff{}, err
 	}
-	resp := &FileDiffResponse{}
-	resp.Body.Path = input.Path
-	resp.Body.Relative = filepath.ToSlash(rel)
-	root, err := os.OpenRoot(f.cwd)
+	diff := Diff{Relative: filepath.ToSlash(rel)}
+	root, err := os.OpenRoot(string(d))
 	if err != nil {
-		return nil, fmt.Errorf("open the agent's working directory: %w", err)
+		return Diff{}, fmt.Errorf("open the agent's working directory: %w", err)
 	}
 	defer func() { _ = root.Close() }()
 
 	// The working copy, unless it is gone.
-	current, _, err := readRegular(root, rel, input.Path, maxDiffInput)
+	current, _, err := readRegular(root, rel, path, maxDiffInput)
 	exists := err == nil
-	if err != nil && httpStatus(err) != http.StatusNotFound {
-		return nil, err
+	if err != nil && errorKind(err) != NotFound {
+		return Diff{}, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
@@ -264,23 +250,23 @@ func (f *fileAPI) getFileDiff(ctx context.Context, input *FilePathQuery) (*FileD
 		dirRel = filepath.Dir(dirRel)
 	}
 	if info, err := root.Lstat(dirRel); err != nil || !info.IsDir() {
-		return nil, huma.Error403Forbidden(fmt.Sprintf("%s is outside the agent's working directory", input.Path))
+		return Diff{}, refuse(Forbidden, fmt.Sprintf("%s is outside the agent's working directory", path))
 	}
-	dir := filepath.Join(f.cwd, dirRel)
-	spec, err := filepath.Rel(dir, filepath.Join(f.cwd, rel))
+	dir := filepath.Join(string(d), dirRel)
+	spec, err := filepath.Rel(dir, filepath.Join(string(d), rel))
 	if err != nil {
-		return nil, fmt.Errorf("resolve %s: %w", input.Path, err)
+		return Diff{}, fmt.Errorf("resolve %s: %w", path, err)
 	}
 	// The directory's path in the repository, e.g. "app/".
-	prefix, err := runGit(ctx, dir, maxViewedBytes, "rev-parse", "--show-prefix")
+	prefix, err := runGit(ctx, dir, MaxViewedBytes, "rev-parse", "--show-prefix")
 	if err != nil {
-		resp.Body.Status = FileDiffNotInRepo
-		return resp, nil
+		diff.Status = DiffNotInRepo
+		return diff, nil
 	}
 	repoPath := strings.TrimSpace(prefix.text) + filepath.ToSlash(spec)
 	head, headErr := runGit(ctx, dir, maxDiffInput, "cat-file", "blob", "HEAD:"+repoPath)
 	inHead := headErr == nil
-	_, trackedErr := runGit(ctx, dir, maxViewedBytes, "ls-files", "--error-unmatch", "--", ":(literal)"+spec)
+	_, trackedErr := runGit(ctx, dir, MaxViewedBytes, "ls-files", "--error-unmatch", "--", ":(literal)"+spec)
 
 	var old *string
 	if inHead {
@@ -293,48 +279,48 @@ func (f *fileAPI) getFileDiff(ctx context.Context, input *FilePathQuery) (*FileD
 	}
 	switch {
 	case inHead && exists:
-		resp.Body.Status = FileDiffModified
+		diff.Status = DiffModified
 		same := *old == *cur
 		if head.truncated || len(current) > maxDiffInput {
 			// Too large to compare here: compare git's object ids.
 			same, _ = sameAsHead(ctx, dir, root, rel, repoPath)
 		}
 		if same {
-			resp.Body.Status = FileDiffUnchanged
-			return resp, nil
+			diff.Status = DiffUnchanged
+			return diff, nil
 		}
 	case inHead:
-		resp.Body.Status = FileDiffDeleted
+		diff.Status = DiffDeleted
 	case exists && trackedErr == nil:
 		// Staged, in a repository without commits too.
-		resp.Body.Status = FileDiffAdded
+		diff.Status = DiffAdded
 	case exists:
-		resp.Body.Status = FileDiffUntracked
+		diff.Status = DiffUntracked
 	default:
-		return nil, huma.Error404NotFound(fmt.Sprintf("%s doesn't exist", input.Path))
+		return Diff{}, refuse(NotFound, fmt.Sprintf("%s doesn't exist", path))
 	}
 	if head.truncated || len(current) > maxDiffInput {
 		// Too large to diff here.
-		resp.Body.Truncated = true
-		return resp, nil
+		diff.Truncated = true
+		return diff, nil
 	}
 	out, err := diffCopies(ctx, repoPath, old, cur)
 	if err != nil {
-		return nil, fmt.Errorf("git diff %s: %w", input.Path, err)
+		return Diff{}, fmt.Errorf("git diff %s: %w", path, err)
 	}
-	resp.Body.Diff = out.text
-	resp.Body.Truncated = out.truncated
-	return resp, nil
+	diff.Text = out.text
+	diff.Truncated = out.truncated
+	return diff, nil
 }
 
-// maxDiffInput is how large a file GET /files/diff compares.
+// maxDiffInput is how large a file Diff compares.
 const maxDiffInput = 4 << 20
 
 // sameAsHead reports whether the working file rel is, byte for byte, the
 // blob HEAD has at repoPath. It compares git's object ids, computed here,
 // for files too large to compare by content; git only reads the id.
 func sameAsHead(ctx context.Context, dir string, root *os.Root, rel, repoPath string) (bool, error) {
-	out, err := runGit(ctx, dir, maxViewedBytes, "rev-parse", "--verify", "--quiet", "HEAD:"+repoPath)
+	out, err := runGit(ctx, dir, MaxViewedBytes, "rev-parse", "--verify", "--quiet", "HEAD:"+repoPath)
 	if err != nil {
 		return false, err
 	}
@@ -413,7 +399,7 @@ func diffCopies(ctx context.Context, repoPath string, old, cur *string) (gitOutp
 		// Not the user's configuration, nor a repository the temporary
 		// directory may be in.
 		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_CEILING_DIRECTORIES="+filepath.Dir(tmp))
-	stdout := &cappedBuffer{max: maxViewedBytes}
+	stdout := &cappedBuffer{max: MaxViewedBytes}
 	var stderr bytes.Buffer
 	cmd.Stdout = stdout
 	cmd.Stderr = &stderr

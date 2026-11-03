@@ -1,4 +1,4 @@
-package httpapi
+package workspacefs
 
 import (
 	"context"
@@ -7,8 +7,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/danielgtaylor/huma/v2"
 )
 
 // Bounds of a search for a file by path: the agent's working directory can
@@ -25,14 +23,7 @@ var findSkippedDirs = map[string]bool{
 	"node_modules": true, "vendor": true, "__pycache__": true, "site-packages": true, "target": true, "dist": true, "build": true,
 }
 
-type FileFindResponse struct {
-	Body struct {
-		Matches []FileMatch `json:"matches" nullable:"false" doc:"Files whose path ends with the one asked for, the likeliest first."`
-		// Complete is false when the search stopped at its bounds.
-		Complete bool `json:"complete" doc:"The whole working directory was searched; false when the search stopped at its bounds (50,000 entries or 2 seconds)."`
-	}
-}
-
+// FileMatch is a file Find found.
 type FileMatch struct {
 	Relative string    `json:"relative" doc:"The file's path relative to the agent's working directory."`
 	Modified time.Time `json:"modified" doc:"When the file last changed."`
@@ -40,33 +31,30 @@ type FileMatch struct {
 	ExactCase bool `json:"exact_case" doc:"The path matches with the same case."`
 }
 
-// findFile handles GET /files/find: the files under the agent's working
-// directory whose path ends with the one given. The chat asks when a path
-// the agent wrote isn't there: an agent working in a repository below the
-// working directory names files relative to the repository, and sometimes
-// in the wrong case.
-func (f *fileAPI) findFile(ctx context.Context, input *FilePathQuery) (*FileFindResponse, error) {
-	if strings.TrimSpace(input.Path) == "" {
-		return nil, huma.Error400BadRequest("path is empty")
+// Find returns the files under the agent's working directory whose path
+// ends with path, the likeliest first, and whether the whole directory was
+// searched. The chat asks when a path the agent wrote isn't there: an
+// agent working in a repository below the working directory names files
+// relative to the repository, and sometimes in the wrong case.
+func (d Dir) Find(ctx context.Context, path string) ([]FileMatch, bool, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, false, refuse(Invalid, "path is empty")
 	}
-	if f.cwd == "" {
-		return nil, huma.Error404NotFound("the agent's working directory is unknown")
+	if d == "" {
+		return nil, false, refuse(NotFound, "the agent's working directory is unknown")
 	}
-	want := filepath.ToSlash(filepath.Clean(input.Path))
-	if filepath.IsAbs(input.Path) {
+	want := filepath.ToSlash(filepath.Clean(path))
+	if filepath.IsAbs(path) {
 		// An absolute path outside the working directory: look for its
 		// tail, as far as the last two parts go.
 		parts := strings.Split(strings.TrimPrefix(want, "/"), "/")
 		want = strings.Join(parts[max(0, len(parts)-2):], "/")
 	}
 	if want == "." || want == ".." || strings.HasPrefix(want, "../") {
-		return nil, huma.Error400BadRequest("not a file path")
+		return nil, false, refuse(Invalid, "not a file path")
 	}
-	matches, complete := findBySuffix(ctx, f.cwd, want)
-	resp := &FileFindResponse{}
-	resp.Body.Matches = matches
-	resp.Body.Complete = complete
-	return resp, nil
+	matches, complete := findBySuffix(ctx, string(d), want)
+	return matches, complete, nil
 }
 
 // findBySuffix searches root for the files whose path relative to it ends
