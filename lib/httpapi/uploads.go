@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -37,11 +38,18 @@ func (s *Server) storeRichImages(msg *transcript.RichMessage) {
 // storeRichImages is Server.storeRichImages; logger notes the images that
 // can't be stored.
 func (u *uploadStore) storeRichImages(msg *transcript.RichMessage, logger *slog.Logger) {
+	cloned := false
 	for i := range msg.Content {
-		block := &msg.Content[i]
-		if len(block.Images) == 0 {
+		if len(msg.Content[i].Images) == 0 {
 			continue
 		}
+		// The parser may share the content with a message it sent before,
+		// which the emitter keeps and others read: change a copy.
+		if !cloned {
+			msg.Content = slices.Clone(msg.Content)
+			cloned = true
+		}
+		block := &msg.Content[i]
 		var stored []transcript.RichImage
 		for _, image := range block.Images {
 			url, err := u.saveImage(image.Data)
