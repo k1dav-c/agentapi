@@ -95,3 +95,19 @@ func TestCodexSubagentEvents(t *testing.T) {
 	require.Len(t, run.Messages, 1)
 	assert.Equal(t, "Checked.", run.Messages[0].Content[0].Text)
 }
+
+func TestCodexOwnLine(t *testing.T) {
+	t.Parallel()
+	for line, want := range map[string]bool{
+		`{"ordinal":2,"type":"response_item","payload":{}}`:   false,
+		`{"type":"response_item","ordinal":3,"payload":{}}`:   true,
+		`{"ordinal":7,"type":"event_msg"}`:                    true,
+		`{"ordinal":9,"type":"session_meta","payload":{}}`:    false,
+		`{"type":"response_item","payload":{"ordinal":1}}`:    true,
+		`{"ordinal":"1","type":"response_item"}`:              true,
+		`{"ordinal":null,"type":"response_item"}`:             true,
+		`{"ordinal":1,"type":"response_item","payload":{"a":`: true,
+	} {
+		assert.Equal(t, want, codexOwnLine([]byte(line), 3), line)
+	}
+}

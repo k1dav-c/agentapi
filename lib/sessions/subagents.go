@@ -43,14 +43,8 @@ type Subagent struct {
 // lines calls fn with the subagent's own lines of its log.
 func (s Subagent) lines(fn func(line []byte) bool) {
 	agentlog.ScanFile(s.path, func(line []byte) bool {
-		if s.from > 0 {
-			var entry struct {
-				Ordinal *int64 `json:"ordinal"`
-				Type    string `json:"type"`
-			}
-			if json.Unmarshal(line, &entry) == nil && (entry.Type == "session_meta" || (entry.Ordinal != nil && *entry.Ordinal < s.from)) {
-				return true
-			}
+		if s.from > 0 && !codexOwnLine(line, s.from) {
+			return true
 		}
 		return fn(line)
 	})

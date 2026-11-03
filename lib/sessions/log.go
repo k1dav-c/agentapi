@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog"
@@ -163,11 +164,27 @@ func (l *sessionLog) identified() bool {
 // own reports whether a line of a Codex subagent's log is its own rather
 // than one copied from its parent.
 func (l *sessionLog) own(line []byte) bool {
-	var entry struct {
-		Ordinal *int64 `json:"ordinal"`
-		Type    string `json:"type"`
+	return codexOwnLine(line, l.from)
+}
+
+// codexOwnLine reports whether a line of a Codex subagent's log is its own,
+// its first own line being from: not its parent's, which the log starts
+// with a copy of, nor a session_meta line. A line without an ordinal is
+// its own. The line's fields are found without decoding it: the copy is of
+// the parent's whole log.
+func codexOwnLine(line []byte, from int64) bool {
+	if !agentlog.Members(line, func(_, _ []byte) bool { return true }) {
+		return true
 	}
-	return json.Unmarshal(line, &entry) != nil || (entry.Type != "session_meta" && (entry.Ordinal == nil || *entry.Ordinal >= l.from))
+	if typ, _ := agentlog.StringField(line, "type"); typ == "session_meta" {
+		return false
+	}
+	raw, ok := agentlog.Field(line, "ordinal")
+	if !ok {
+		return true
+	}
+	ordinal, err := strconv.ParseInt(string(raw), 10, 64)
+	return err != nil || ordinal >= from
 }
 
 // summarize reads the session's name and the user's prompts.
