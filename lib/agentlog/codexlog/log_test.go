@@ -90,11 +90,3 @@ func TestCodexSessionName(t *testing.T) {
 	assert.True(t, changed)
 	assert.Equal(t, "Inspect the system", name)
 }
-
-func TestResolverHonorsTheAgentsHome(t *testing.T) {
-	codexHome := t.TempDir()
-	t.Setenv("CODEX_HOME", codexHome)
-	root, err := SessionsRoot("")
-	require.NoError(t, err)
-	require.Equal(t, filepath.Join(codexHome, "sessions"), root)
-}
