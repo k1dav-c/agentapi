@@ -53,9 +53,8 @@ func (c *Conversation) turnCompletedLocked(result TurnResult) {
 		c.cfg.Emitter.EmitError(result.Error, conv.ErrorLevelError)
 	}
 	c.continueAgain = false
-	if c.login != nil && provesLogin(result) {
-		c.login = nil
-		c.cfg.Observer.LoginRequired(nil)
+	if provesLogin(result) {
+		c.clearLoginLocked()
 	}
 	c.cfg.Emitter.EmitStatus(c.statusLocked())
 }
