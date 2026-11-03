@@ -62,7 +62,7 @@ to PTY mode, which parses terminal output.
 - `lib/agentlog/` - The agents' session-log formats, one package per agent (`claudelog`, `codexlog`, `pilog`), shared by the native adapters, `lib/sessions` and the PTY watcher
 - `lib/sessions/` - Earlier sessions, subagents and their costs, read incrementally from the logs
 - `lib/jsonlwatcher/` - Tails a PTY agent's session log for rich messages
-- `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation
+- `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation; `scripts/prices.mjs` compares `prices.json` with Pi's model registry
 - `lib/statedb/` - SQLite persistence of conversations, native and PTY (`--state-db`; a deprecated `--state-file` is imported into it)
 - `lib/instanceapi/` - The contract with clients that watch many AgentAPIs: who an instance is, its summary, the webhook envelope and signature, and the state a hub shows (aliased in `lib/httpapi` under the same names)
 - `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs (signed webhooks, summary streams, a proxy that opens any of them in the chat, the addresses machines join it by)
