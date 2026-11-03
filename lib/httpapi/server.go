@@ -34,6 +34,7 @@ import (
 	"github.com/coder/agentapi/lib/shellterm"
 	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/lib/transcript"
+	"github.com/coder/agentapi/lib/webhook"
 )
 
 // Server represents the HTTP server
@@ -79,7 +80,7 @@ type Server struct {
 	queueLoop          quartz.Waiter // the queue's loop, nil until it starts
 	mcpStore           mcpconfig.Store
 	mcpMu              sync.Mutex
-	webhook            *webhookDispatcher
+	webhook            *webhook.Dispatcher
 	registry           *instanceRegistry // nil without a registry directory
 	updater            *updater
 	handoff            handoffState
@@ -222,8 +223,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	})
 	// The address {ip} in the public URL stands for now, which DHCP may
 	// change: the list can't name it.
-	var webhook *webhookDispatcher
-	publicIP := func(hostname string) bool { return webhook != nil && webhook.publicIP() == hostname }
+	var dispatcher *webhook.Dispatcher
+	publicIP := func(hostname string) bool { return dispatcher != nil && dispatcher.PublicIP() == hostname }
 	router.Use(hostAuthorizationMiddleware(allowedHosts, publicIP, badHostHandler))
 
 	router.Use(requestLogMiddleware(logger))
@@ -275,7 +276,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		return mf.FormatToolCall(config.AgentType, message)
 	}
 
-	webhook, err = newWebhookDispatcher(config.Webhook, logger, config.AgentType, config.Transport, config.Clock)
+	dispatcher, err = webhook.New(config.Webhook, logger, config.AgentType, config.Transport, config.Clock)
 	if err != nil {
 		return nil, fmt.Errorf("configure webhook: %w", err)
 	}
@@ -285,15 +286,15 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 	// The status and the webhook name this run the same.
 	serverID := hex.EncodeToString(serverBytes[:])
-	webhook.serverID = serverID
+	dispatcher.SetServerID(serverID)
 	emitterOptions := []convstate.EventEmitterOption{
 		convstate.WithAgentType(config.AgentType),
 		convstate.WithTransport(config.Transport),
 		convstate.WithServerID(serverID),
 		convstate.WithTerminalColumns(config.PTY.TerminalColumns),
 		convstate.WithClock(config.Clock),
-		convstate.WithStatusChangeHandler(webhook.statusChanged),
-		convstate.WithInstance(webhook.instanceSnapshot),
+		convstate.WithStatusChangeHandler(dispatcher.StatusChanged),
+		convstate.WithInstance(dispatcher.Instance),
 	}
 	stateDB := config.StateDB
 	if stateDB != nil {
@@ -392,7 +393,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		shutdownCtx:    shutdownCtx,
 		shutdown:       shutdownCancel,
 		transport:      config.Transport,
-		webhook:        webhook,
+		webhook:        dispatcher,
 		restartAgent:   config.PTY.RestartAgent,
 		updateAgent:    config.Native.UpdateAgent,
 		terminal:       terminal,
@@ -407,11 +408,11 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		s.storeQueue(queue, lastID, version)
 	}
 	// The summary and the registry entry name the new address.
-	webhook.urlChanged = s.instanceChanged
+	dispatcher.OnURLChange(s.instanceChanged)
 	if stateDB != nil {
 		s.restoreQueue(restored.snapshot)
 		if stored := restored.snapshot.Meta[statedb.MetaWebhook]; stored != "" {
-			switch ok, err := webhook.restore(stored); {
+			switch ok, err := dispatcher.Restore(stored); {
 			case err != nil:
 				logger.Warn("Ignoring the stored webhook settings", "error", err)
 			case ok:
@@ -527,7 +528,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	var err error
 	s.stopOnce.Do(func() {
 		// Tells the webhook's receiver, while it can still be sent.
-		s.webhook.stop(ctx)
+		s.webhook.Stop(ctx)
 		if s.registry != nil {
 			s.registry.stop()
 		}

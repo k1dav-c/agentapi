@@ -1,20 +1,16 @@
-package httpapi
+package webhook
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"os"
-	"path/filepath"
 	"slices"
-	"strconv"
 	"sync"
 	"time"
 	"unicode/utf8"
 
-	"github.com/coder/agentapi/internal/version"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/pricing"
@@ -55,7 +51,7 @@ type WebhookInstanceState = instanceapi.WebhookInstanceState
 // WebhookTask is the data of task.started, task.completed and task.failed:
 // the task as GET /tasks has it, with the text of the agent's reply.
 type WebhookTask struct {
-	Task
+	convstate.Task
 	DurationSeconds float64 `json:"duration_seconds,omitempty"`
 	// Reply is the text of the agent's last message of the task.
 	Reply string `json:"reply,omitempty"`
@@ -125,53 +121,20 @@ const (
 	maxToolMessages = 64
 )
 
-// startWebhook describes this AgentAPI to the webhook and starts sending
-// events: the instance's, and while the webhook sends any of them the
-// conversation's, as the observer turns them into webhook events.
-func (s *Server) startWebhook(config ServerConfig) {
-	hostname, _ := os.Hostname()
-	name := config.Name
-	if name == "" && config.CWD != "" {
-		name = filepath.Base(config.CWD)
-	}
-	s.webhook.setInstance(WebhookInstance{
-		ID:           net.JoinHostPort(hostname, strconv.Itoa(config.Port)),
-		Name:         name,
-		Hostname:     hostname,
-		Port:         config.Port,
-		PID:          os.Getpid(),
-		CWD:          config.CWD,
-		Version:      version.Version,
-		WorkspaceURL: coderWorkspaceURL(),
-	})
-	s.webhook.snapshot = func() any { return s.webhookInstanceState() }
-	since := s.clock.Now()
-	observing := &webhookObserving{ctx: s.shutdownCtx, webhook: s.webhook, run: func(ctx context.Context) {
-		observer := newWebhookObserver(s.webhook, s.emitter, since)
-		if s.sessions != nil {
-			observer.taskCost = s.webhookTaskCost
-		}
+// Observe turns the conversation's events, read from source, into webhook
+// events (task.*, request.*, message.*, tool.*, login.*, limit.*,
+// agent.error) while the webhook sends any of them, until ctx ends. What
+// came before since is history and isn't sent. taskCost, if set, gives
+// what the session's model calls since a time cost, for task.completed and
+// task.failed. Call it once, before Start.
+func (d *Dispatcher) Observe(ctx context.Context, source Source, since time.Time, taskCost func(since time.Time) *WebhookCost) {
+	observing := &webhookObserving{ctx: ctx, webhook: d, run: func(ctx context.Context) {
+		observer := newWebhookObserver(d, source, since)
+		observer.taskCost = taskCost
 		observer.run(ctx)
 	}}
-	s.webhook.configured = observing.sync
+	d.configured = observing.sync
 	observing.sync()
-	s.webhook.start(s.shutdownCtx)
-}
-
-// webhookInstanceState is the data of the instance.* events.
-func (s *Server) webhookInstanceState() WebhookInstanceState {
-	status := s.emitter.StatusSnapshot()
-	return WebhookInstanceState{
-		Status: status.Status, Lifecycle: status.Lifecycle, AgentSessionID: status.AgentSessionID,
-		SessionName: status.SessionName, PendingRequests: status.PendingRequests,
-		TerminalPrompt: status.TerminalPrompt, LoginRequired: status.LoginRequired,
-		LimitStop: status.LimitStop, Usage: status.Usage, Settings: status.Settings,
-		// The queue has a lock of its own. s.mu would hold up Stop, whose
-		// instance.stopped carries the queue's length, until a call into
-		// the agent it is about to cancel ended by itself.
-		QueuedMessages:   s.queue.Len(),
-		HeartbeatSeconds: max(0, int(s.webhook.configSnapshot().Heartbeat/time.Second)),
-	}
 }
 
 // webhookObserving runs an observer while the webhook sends events it
@@ -180,7 +143,7 @@ func (s *Server) webhookInstanceState() WebhookInstanceState {
 // webhook sends instance.* alone.
 type webhookObserving struct {
 	ctx     context.Context
-	webhook *webhookDispatcher
+	webhook *Dispatcher
 	// run runs an observer until its context ends.
 	run func(ctx context.Context)
 
@@ -213,45 +176,18 @@ func (w *webhookObserving) sync() {
 	}
 }
 
-// webhookTaskCost is what the open session's model calls since a time
-// cost, or nil when none are known.
-func (s *Server) webhookTaskCost(since time.Time) *WebhookCost {
-	id := s.native.SessionRef()
-	if id == "" {
-		return nil
-	}
-	costs, err := s.sessions.Costs()
-	if err != nil {
-		s.logger.Warn("Failed to read what the task cost", "error", err)
-		return nil
-	}
-	var cost WebhookCost
-	for _, call := range costs.Sessions[id] {
-		if call.Time.Before(since) {
-			continue
-		}
-		cost.USD += call.USD
-		cost.Tokens = cost.Tokens.Add(call.Tokens)
-		cost.Calls++
-	}
-	if cost.Calls == 0 {
-		return nil
-	}
-	return &cost
-}
-
-// eventSource is what the observer reads of the emitter: its events, which
-// it subscribes to like an /events client.
-type eventSource interface {
-	SubscribeTo(wants func(EventType) bool, since uint64, epoch string) (int, <-chan Event, []Event)
+// Source is what the observer reads of the conversation: the events of a
+// convstate.EventEmitter, which it subscribes to like an /events client.
+type Source interface {
+	SubscribeTo(wants func(convstate.EventType) bool, since uint64, epoch string) (int, <-chan convstate.Event, []convstate.Event)
 	Unsubscribe(id int)
 }
 
 // webhookObserver turns the conversation's events into webhook events. It
 // reads the emitter like an /events client.
 type webhookObserver struct {
-	webhook *webhookDispatcher
-	emitter eventSource
+	webhook *Dispatcher
+	emitter Source
 	// taskCost, if set, gives what the session's model calls since a time
 	// cost.
 	taskCost func(since time.Time) *WebhookCost
@@ -263,10 +199,10 @@ type webhookObserver struct {
 	// read: a subscription taken up again starts from there.
 	epoch  string
 	seq    uint64
-	status StatusChangeBody
+	status convstate.StatusChangeBody
 	// agent is the agent's latest message, sent as message.created once
 	// it is final: when another follows or the turn ends.
-	agent *MessageUpdateBody
+	agent *convstate.MessageUpdateBody
 	// sent is the last message sent (or taken in as history).
 	sent mark
 	// tools are the calls waiting for their result, toolOrder their IDs
@@ -326,7 +262,7 @@ func (m *mark) advance(k messageKey) {
 	}
 }
 
-func newWebhookObserver(webhook *webhookDispatcher, emitter eventSource, now time.Time) *webhookObserver {
+func newWebhookObserver(webhook *Dispatcher, emitter Source, now time.Time) *webhookObserver {
 	return &webhookObserver{
 		webhook:      webhook,
 		emitter:      emitter,
@@ -340,8 +276,8 @@ func newWebhookObserver(webhook *webhookDispatcher, emitter eventSource, now tim
 
 // webhookObservedEvents are the events the observer reads: not the screen,
 // heartbeats or the summary, which the emitter would work out for it.
-func webhookObservedEvents(t EventType) bool {
-	return t != EventTypeScreenUpdate && t != EventTypeHeartbeat && t != EventTypeSummaryUpdate
+func webhookObservedEvents(t convstate.EventType) bool {
+	return t != convstate.EventTypeScreenUpdate && t != convstate.EventTypeHeartbeat && t != convstate.EventTypeSummaryUpdate
 }
 
 // run reads the conversation's events until ctx ends. The state at the
@@ -372,7 +308,7 @@ func (o *webhookObserver) run(ctx context.Context) {
 
 // subscribe subscribes to the emitter from where the observer got: the
 // replay holds the changes since, unless the conversation got a new epoch.
-func (o *webhookObserver) subscribe() (int, <-chan Event, []Event) {
+func (o *webhookObserver) subscribe() (int, <-chan convstate.Event, []convstate.Event) {
 	return o.emitter.SubscribeTo(webhookObservedEvents, o.seq, o.epoch)
 }
 
@@ -380,10 +316,10 @@ func (o *webhookObserver) subscribe() (int, <-chan Event, []Event) {
 // state without sending anything. After a new epoch (a message was taken
 // back) the replay holds the whole conversation, whose changes up to the
 // seq the observer got to it read already.
-func (o *webhookObserver) replay(events []Event, quiet bool) {
+func (o *webhookObserver) replay(events []convstate.Event, quiet bool) {
 	last := o.seq
 	for _, event := range events {
-		if sync, ok := event.Payload.(SessionSyncBody); ok {
+		if sync, ok := event.Payload.(convstate.SessionSyncBody); ok {
 			// A replay begins with one; only a reset sends one later.
 			o.epoch = sync.Epoch
 			o.seq = max(o.seq, sync.Seq)
@@ -397,8 +333,8 @@ func (o *webhookObserver) replay(events []Event, quiet bool) {
 }
 
 // take takes an event that came after the replay.
-func (o *webhookObserver) take(event Event) {
-	if sync, ok := event.Payload.(SessionSyncBody); ok {
+func (o *webhookObserver) take(event convstate.Event) {
+	if sync, ok := event.Payload.(convstate.SessionSyncBody); ok {
 		o.epoch = sync.Epoch
 	}
 	o.seq = max(o.seq, event.Seq())
@@ -407,21 +343,21 @@ func (o *webhookObserver) take(event Event) {
 
 // handle takes one event; quiet takes in the state without sending
 // anything.
-func (o *webhookObserver) handle(event Event, quiet bool) {
+func (o *webhookObserver) handle(event convstate.Event, quiet bool) {
 	switch payload := event.Payload.(type) {
-	case SessionSyncBody:
+	case convstate.SessionSyncBody:
 		o.newConversation()
-	case StatusChangeBody:
+	case convstate.StatusChangeBody:
 		o.statusChanged(payload, quiet)
-	case MessageUpdateBody:
+	case convstate.MessageUpdateBody:
 		o.messageUpdated(payload, quiet)
-	case RichMessageUpdateBody:
+	case convstate.RichMessageUpdateBody:
 		o.richMessageUpdated(payload, quiet)
-	case RequestUpdateBody:
+	case convstate.RequestUpdateBody:
 		o.requestUpdated(payload.RequestState, quiet)
-	case ErrorBody:
+	case convstate.ErrorBody:
 		o.agentError(payload, quiet)
-	case TaskUpdateBody:
+	case convstate.TaskUpdateBody:
 		o.taskUpdated(payload.Task, quiet)
 	}
 }
@@ -439,7 +375,7 @@ func (o *webhookObserver) newConversation() {
 	clear(o.replies)
 }
 
-func (o *webhookObserver) statusChanged(next StatusChangeBody, quiet bool) {
+func (o *webhookObserver) statusChanged(next convstate.StatusChangeBody, quiet bool) {
 	previous := o.status
 	o.status = next
 	if quiet {
@@ -474,8 +410,8 @@ func (o *webhookObserver) statusChanged(next StatusChangeBody, quiet bool) {
 	}
 	// The agent's message is final once it is done; the task's end, which
 	// the emitter sends next, carries it as the reply.
-	if (previous.Status == AgentStatusRunning && next.Status == AgentStatusStable) ||
-		next.Lifecycle == LifecycleExited || next.Lifecycle == LifecycleFailed {
+	if (previous.Status == convstate.AgentStatusRunning && next.Status == convstate.AgentStatusStable) ||
+		next.Lifecycle == convstate.LifecycleExited || next.Lifecycle == convstate.LifecycleFailed {
 		o.flushAgent()
 	}
 }
@@ -484,7 +420,7 @@ func (o *webhookObserver) promptID() string {
 	return fmt.Sprintf("terminal-%d", o.prompts)
 }
 
-func (o *webhookObserver) messageUpdated(msg MessageUpdateBody, quiet bool) {
+func (o *webhookObserver) messageUpdated(msg convstate.MessageUpdateBody, quiet bool) {
 	key := messageKey{msg.Id, msg.Time}
 	if quiet || msg.Time.Before(o.since) {
 		o.sent.advance(key)
@@ -517,7 +453,7 @@ func (o *webhookObserver) flushAgent() {
 	o.send(msg)
 }
 
-func (o *webhookObserver) send(msg MessageUpdateBody) {
+func (o *webhookObserver) send(msg convstate.MessageUpdateBody) {
 	o.sent.advance(messageKey{msg.Id, msg.Time})
 	o.webhook.emit(webhookEventMessageCreated, WebhookMessage{
 		ID: msg.Id, Role: msg.Role, Content: cut(msg.Message, webhookMessageLimit), Time: msg.Time,
@@ -528,7 +464,7 @@ func (o *webhookObserver) send(msg MessageUpdateBody) {
 // taskUpdated sends task.started when a task starts, and task.completed or
 // task.failed when it ends. A task from before (history) or seen in the
 // first replay isn't news.
-func (o *webhookObserver) taskUpdated(task Task, quiet bool) {
+func (o *webhookObserver) taskUpdated(task convstate.Task, quiet bool) {
 	key := messageKey{task.ID, task.StartedAt}
 	if quiet || task.StartedAt.Before(o.since) {
 		o.started.advance(key)
@@ -546,7 +482,7 @@ func (o *webhookObserver) taskUpdated(task Task, quiet bool) {
 	}
 	o.ended.advance(key)
 	eventType := webhookEventTaskCompleted
-	if task.Status != TaskStatusCompleted {
+	if task.Status != convstate.TaskStatusCompleted {
 		eventType = webhookEventTaskFailed
 	}
 	data := o.webhookTask(task)
@@ -563,7 +499,7 @@ func (o *webhookObserver) taskUpdated(task Task, quiet bool) {
 }
 
 // webhookTask is the webhook data of task.
-func (o *webhookObserver) webhookTask(task Task) WebhookTask {
+func (o *webhookObserver) webhookTask(task convstate.Task) WebhookTask {
 	data := WebhookTask{Task: task, SessionName: o.status.SessionName}
 	if task.EndedAt != nil {
 		data.DurationSeconds = task.EndedAt.Sub(task.StartedAt).Seconds()
@@ -574,7 +510,7 @@ func (o *webhookObserver) webhookTask(task Task) WebhookTask {
 	return data
 }
 
-func (o *webhookObserver) richMessageUpdated(msg RichMessageUpdateBody, quiet bool) {
+func (o *webhookObserver) richMessageUpdated(msg convstate.RichMessageUpdateBody, quiet bool) {
 	history := quiet || msg.Timestamp.Before(o.since)
 	results := false
 	var returned []string
@@ -689,7 +625,7 @@ func (o *webhookObserver) requestUpdated(state native.RequestState, quiet bool) 
 	}
 }
 
-func (o *webhookObserver) agentError(err ErrorBody, quiet bool) {
+func (o *webhookObserver) agentError(err convstate.ErrorBody, quiet bool) {
 	if err.Number() != 0 && err.Number() <= o.lastError {
 		// Replayed by a new subscription.
 		return

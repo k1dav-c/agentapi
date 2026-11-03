@@ -1,4 +1,4 @@
-package httpapi
+package webhook
 
 import (
 	"context"
@@ -26,18 +26,18 @@ import (
 	"github.com/coder/agentapi/lib/transcript"
 )
 
-func testDispatcher(t *testing.T, config WebhookConfig, clock quartz.Clock) *webhookDispatcher {
+func testDispatcher(t *testing.T, config Config, clock quartz.Clock) *Dispatcher {
 	t.Helper()
 	if config.URL == "" {
 		config.URL = "https://example.com/hook"
 	}
-	d, err := newWebhookDispatcher(config, slog.New(slog.NewTextHandler(io.Discard, nil)), mf.AgentTypeClaude, TransportNative, clock)
+	d, err := New(config, slog.New(slog.NewTextHandler(io.Discard, nil)), mf.AgentTypeClaude, instanceapi.TransportNative, clock)
 	require.NoError(t, err)
 	return d
 }
 
 // queued takes the events queued so far.
-func queued(d *webhookDispatcher) []WebhookEvent {
+func queued(d *Dispatcher) []WebhookEvent {
 	var events []WebhookEvent
 	for {
 		select {
@@ -65,15 +65,15 @@ func TestWebhookEventPatterns(t *testing.T) {
 	assert.False(t, webhookEventMatches("task.*", "tool.completed"))
 	assert.False(t, webhookEventMatches("task", "task.completed"))
 
-	require.NoError(t, WebhookConfig{Events: []string{"task.*", "request.opened", "*"}}.validate())
-	require.ErrorContains(t, WebhookConfig{Events: []string{"task.done"}}.validate(), `unknown webhook event "task.done"`)
-	require.ErrorContains(t, WebhookConfig{PublicURL: "ftp://x"}.validate(), "public URL must use http or https")
+	require.NoError(t, Config{Events: []string{"task.*", "request.opened", "*"}}.validate())
+	require.ErrorContains(t, Config{Events: []string{"task.done"}}.validate(), `unknown webhook event "task.done"`)
+	require.ErrorContains(t, Config{PublicURL: "ftp://x"}.validate(), "public URL must use http or https")
 
 	// Without events chosen only run.status_changed is sent, as before.
-	d := testDispatcher(t, WebhookConfig{}, quartz.NewReal())
+	d := testDispatcher(t, Config{}, quartz.NewReal())
 	assert.True(t, d.wants(webhookEventRunStatusChanged))
 	assert.False(t, d.wants(webhookEventTaskCompleted))
-	d = testDispatcher(t, WebhookConfig{Events: []string{"task.*"}}, quartz.NewReal())
+	d = testDispatcher(t, Config{Events: []string{"task.*"}}, quartz.NewReal())
 	assert.False(t, d.wants(webhookEventRunStatusChanged))
 	assert.True(t, d.wants(webhookEventTaskFailed))
 }
@@ -82,12 +82,12 @@ func TestWebhookEventPatterns(t *testing.T) {
 // agent is stable again.
 // observed is an emitter, and an observer that takes in what it sends.
 type observed struct {
-	emitter *EventEmitter
+	emitter *convstate.EventEmitter
 	o       *webhookObserver
-	events  <-chan Event
+	events  <-chan convstate.Event
 }
 
-func newObserved(t *testing.T, d *webhookDispatcher, clock quartz.Clock) *observed {
+func newObserved(t *testing.T, d *Dispatcher, clock quartz.Clock) *observed {
 	t.Helper()
 	emitter := convstate.NewEventEmitter(convstate.WithClock(clock), convstate.WithSubscriptionBufSize(256))
 	o := newWebhookObserver(d, emitter, clock.Now())
@@ -99,11 +99,11 @@ func newObserved(t *testing.T, d *webhookDispatcher, clock quartz.Clock) *observ
 // countingSource counts the subscriptions an observer took, once each is
 // open.
 type countingSource struct {
-	*EventEmitter
+	*convstate.EventEmitter
 	count atomic.Int32
 }
 
-func (s *countingSource) SubscribeTo(wants func(EventType) bool, since uint64, epoch string) (int, <-chan Event, []Event) {
+func (s *countingSource) SubscribeTo(wants func(convstate.EventType) bool, since uint64, epoch string) (int, <-chan convstate.Event, []convstate.Event) {
 	id, events, replay := s.EventEmitter.SubscribeTo(wants, since, epoch)
 	s.count.Add(1)
 	return id, events, replay
@@ -130,7 +130,7 @@ func TestWebhookObserverTask(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
 	start := clock.Now()
-	d := testDispatcher(t, WebhookConfig{Events: []string{"*"}}, clock)
+	d := testDispatcher(t, Config{Events: []string{"*"}}, clock)
 	x := newObserved(t, d, clock)
 	x.o.taskCost = func(since time.Time) *WebhookCost {
 		assert.Equal(t, start, since)
@@ -171,7 +171,7 @@ func TestWebhookObserverTask(t *testing.T) {
 
 	started := events[1].Data.(WebhookTask)
 	assert.Equal(t, "Fix the bug", started.Prompt)
-	assert.Equal(t, TaskStatusRunning, started.Status)
+	assert.Equal(t, convstate.TaskStatusRunning, started.Status)
 
 	tool := events[2].Data.(WebhookToolCall)
 	assert.Equal(t, "Bash", tool.Name)
@@ -182,7 +182,7 @@ func TestWebhookObserverTask(t *testing.T) {
 	assert.Equal(t, "Fixed it.", reply.Content)
 
 	done := events[4].Data.(WebhookTask)
-	assert.Equal(t, TaskStatusCompleted, done.Status)
+	assert.Equal(t, convstate.TaskStatusCompleted, done.Status)
 	assert.Equal(t, "Fixed it.", done.Reply)
 	assert.Equal(t, 1, *done.ReplyID)
 	assert.Equal(t, 90.0, done.DurationSeconds)
@@ -197,7 +197,7 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
 	start := clock.Now()
-	d := testDispatcher(t, WebhookConfig{Events: []string{"request.*", "login.*", "limit.*", "task.completed", "task.failed", "agent.error"}}, clock)
+	d := testDispatcher(t, Config{Events: []string{"request.*", "login.*", "limit.*", "task.completed", "task.failed", "agent.error"}}, clock)
 	x := newObserved(t, d, clock)
 	e := x.emitter
 	e.EmitStatus(conv.StatusStable)
@@ -251,7 +251,7 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 	assert.Equal(t, "Allow this?\n1. Yes\n2. No", prompt.Prompt)
 	assert.Equal(t, prompt.ID, events[8].Data.(WebhookTerminalPrompt).ID)
 	task := events[11].Data.(WebhookTask)
-	assert.Equal(t, TaskStatusLimited, task.Status)
+	assert.Equal(t, convstate.TaskStatusLimited, task.Status)
 	assert.Empty(t, task.Errors, "a warning doesn't fail a task")
 }
 
@@ -260,7 +260,7 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 func TestWebhookObserverHistory(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
-	d := testDispatcher(t, WebhookConfig{Events: []string{"*"}}, clock)
+	d := testDispatcher(t, Config{Events: []string{"*"}}, clock)
 	emitter := convstate.NewEventEmitter(convstate.WithClock(clock))
 	old := clock.Now().Add(-time.Hour)
 	emitter.EmitMessages([]conv.Message{
@@ -301,7 +301,7 @@ func TestWebhookObserverHistory(t *testing.T) {
 func TestWebhookObserverResubscribes(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
-	d := testDispatcher(t, WebhookConfig{Events: []string{"message.created", "task.started", "agent.error"}}, clock)
+	d := testDispatcher(t, Config{Events: []string{"message.created", "task.started", "agent.error"}}, clock)
 	emitter := convstate.NewEventEmitter(convstate.WithClock(clock))
 	emitter.EmitStatus(conv.StatusStable)
 	source := &countingSource{EventEmitter: emitter}
@@ -332,7 +332,7 @@ func TestWebhookObserverResubscribes(t *testing.T) {
 		webhookEventMessageCreated, webhookEventTaskStarted, webhookEventAgentError, webhookEventMessageCreated,
 		webhookEventAgentError,
 	}, eventTypes(events))
-	assert.Equal(t, "the agent failed", events[4].Data.(ErrorBody).Message)
+	assert.Equal(t, "the agent failed", events[4].Data.(convstate.ErrorBody).Message)
 	time.Sleep(50 * time.Millisecond)
 	assert.Empty(t, queued(d), "nothing was sent twice")
 }
@@ -344,7 +344,7 @@ func TestWebhookObserverResubscribes(t *testing.T) {
 func TestWebhookObserverForgets(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
-	d := testDispatcher(t, WebhookConfig{Events: []string{"*"}}, clock)
+	d := testDispatcher(t, Config{Events: []string{"*"}}, clock)
 	x := newObserved(t, d, clock)
 	e := x.emitter
 	e.EmitStatus(conv.StatusStable)
@@ -409,7 +409,7 @@ func TestWebhookObserverForgets(t *testing.T) {
 func TestWebhookObserverReusedID(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
-	d := testDispatcher(t, WebhookConfig{Events: []string{"message.created"}}, clock)
+	d := testDispatcher(t, Config{Events: []string{"message.created"}}, clock)
 	x := newObserved(t, d, clock)
 	e := x.emitter
 	first := conv.Message{Id: 0, Role: conv.RoleUser, Message: "Fix the bug", Time: clock.Now()}
@@ -448,7 +448,7 @@ func toolsCompleted(events []WebhookEvent) map[string]int {
 func TestWebhookObserverGrowingMessage(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
-	d := testDispatcher(t, WebhookConfig{Events: []string{"tool.completed"}}, clock)
+	d := testDispatcher(t, Config{Events: []string{"tool.completed"}}, clock)
 	x := newObserved(t, d, clock)
 	e := x.emitter
 	start := clock.Now()
@@ -481,7 +481,7 @@ func TestWebhookObserverGrowingMessage(t *testing.T) {
 func TestWebhookObserverResubscribesWithoutRepeats(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
-	d := testDispatcher(t, WebhookConfig{Events: []string{"tool.completed"}}, clock)
+	d := testDispatcher(t, Config{Events: []string{"tool.completed"}}, clock)
 	emitter := convstate.NewEventEmitter(convstate.WithClock(clock))
 	emitter.EmitStatus(conv.StatusStable)
 	source := &countingSource{EventEmitter: emitter}
@@ -541,7 +541,7 @@ func TestWebhookObserverResubscribesWithoutRepeats(t *testing.T) {
 func TestWebhookObserverResumes(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
-	d := testDispatcher(t, WebhookConfig{Events: []string{"*"}}, clock)
+	d := testDispatcher(t, Config{Events: []string{"*"}}, clock)
 	x := newObserved(t, d, clock)
 	e := x.emitter
 	start := clock.Now()
@@ -552,10 +552,10 @@ func TestWebhookObserverResumes(t *testing.T) {
 		}})
 	}
 	x.pump()
-	changes := func() []Event {
+	changes := func() []convstate.Event {
 		id, _, replay := x.o.subscribe()
 		e.Unsubscribe(id)
-		var changed []Event
+		var changed []convstate.Event
 		for _, event := range replay {
 			if event.Seq() != 0 {
 				changed = append(changed, event)
@@ -570,7 +570,7 @@ func TestWebhookObserverResumes(t *testing.T) {
 	}})
 	changed := changes()
 	require.Len(t, changed, 1)
-	assert.Equal(t, "m3", changed[0].Payload.(RichMessageUpdateBody).MessageID)
+	assert.Equal(t, "m3", changed[0].Payload.(convstate.RichMessageUpdateBody).MessageID)
 }
 
 // The observer runs while the webhook sends events it makes. A hub's
@@ -578,38 +578,11 @@ func TestWebhookObserverResumes(t *testing.T) {
 // observer would follow the conversation for nothing.
 func TestWebhookObserverRunsForItsEvents(t *testing.T) {
 	t.Parallel()
-	for _, event := range WebhookEventTypes {
+	for _, event := range EventTypes {
 		dispatcher := event == webhookEventRunStatusChanged || strings.HasPrefix(event, "instance.")
 		assert.NotEqual(t, dispatcher, slices.Contains(webhookObserverEvents, event), "%s is the observer's or the dispatcher's", event)
 	}
-
-	srv, _ := newQuietNativeServer(t, nil)
-	subscriptions := srv.emitter.Subscribers
-	assert.Zero(t, subscriptions())
-	w := &webhookAPI{webhook: srv.webhook}
-	put := func(url string, events ...string) {
-		request := &WebhookConfigRequest{}
-		request.Body.URL = url
-		request.Body.TimeoutSeconds = 1
-		request.Body.MaxAttempts = 1
-		request.Body.Events = &events
-		_, err := w.updateWebhookConfig(t.Context(), request)
-		require.NoError(t, err)
-	}
-	put("http://127.0.0.1:1/hooks", "instance.*")
-	put("http://127.0.0.1:1/hooks", "instance.*", "run.status_changed")
-	assert.Never(t, func() bool { return subscriptions() > 0 }, 200*time.Millisecond, 10*time.Millisecond, "nothing for it to send")
-	put("http://127.0.0.1:1/hooks", "instance.*", "task.*")
-	require.Eventually(t, func() bool { return subscriptions() == 1 }, 5*time.Second, 10*time.Millisecond)
-	assert.False(t, webhookObservedEvents(EventTypeSummaryUpdate), "the emitter needn't work out the summary for it")
-	put("http://127.0.0.1:2/hooks", "instance.*", "task.*")
-	assert.Equal(t, 1, subscriptions(), "another URL keeps it")
-	put("http://127.0.0.1:2/hooks", "instance.*")
-	assert.Zero(t, subscriptions(), "stopped when its events went")
-	put("http://127.0.0.1:2/hooks", "*")
-	require.Eventually(t, func() bool { return subscriptions() == 1 }, 5*time.Second, 10*time.Millisecond)
-	put("", "*")
-	assert.Zero(t, subscriptions(), "stopped when the URL went")
+	assert.False(t, webhookObservedEvents(convstate.EventTypeSummaryUpdate), "the emitter needn't work out the summary for it")
 }
 
 func TestWebhookSignature(t *testing.T) {
@@ -622,9 +595,9 @@ func TestWebhookSignature(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
-	d := testDispatcher(t, WebhookConfig{URL: server.URL, Secret: "s3cret", Events: []string{"*"}}, quartz.NewReal())
-	d.setInstance(WebhookInstance{ID: "host:3284"})
-	require.True(t, d.emit(webhookEventTaskStarted, WebhookTask{Task: Task{ID: 1, Prompt: "Hi"}}))
+	d := testDispatcher(t, Config{URL: server.URL, Secret: "s3cret", Events: []string{"*"}}, quartz.NewReal())
+	d.SetInstance(WebhookInstance{ID: "host:3284"})
+	require.True(t, d.emit(webhookEventTaskStarted, WebhookTask{Task: convstate.Task{ID: 1, Prompt: "Hi"}}))
 	d.deliver(t.Context(), <-d.queue)
 
 	timestamp := header.Get("X-AgentAPI-Timestamp")
@@ -652,7 +625,7 @@ func TestWebhookPermanentFailure(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer server.Close()
-	d := testDispatcher(t, WebhookConfig{URL: server.URL, MaxAttempts: 5}, quartz.NewReal())
+	d := testDispatcher(t, Config{URL: server.URL, MaxAttempts: 5}, quartz.NewReal())
 	d.deliver(t.Context(), queuedEvent{WebhookEvent: WebhookEvent{ID: "e1", Type: webhookEventRunStatusChanged, CreatedAt: time.Now()}})
 	assert.EqualValues(t, 1, calls.Load())
 	assert.Equal(t, 30*time.Second, webhookRetryDelay(10))
@@ -661,9 +634,9 @@ func TestWebhookPermanentFailure(t *testing.T) {
 
 func TestWebhookTemplateData(t *testing.T) {
 	t.Parallel()
-	d := testDispatcher(t, WebhookConfig{Events: []string{"*"}, PayloadTemplate: `{"text":"{{.Instance.ID}}: {{.Data.prompt}}"}`}, quartz.NewReal())
-	d.setInstance(WebhookInstance{ID: "box:1"})
-	require.True(t, d.emit(webhookEventTaskStarted, WebhookTask{Task: Task{Prompt: "Hi"}}))
+	d := testDispatcher(t, Config{Events: []string{"*"}, PayloadTemplate: `{"text":"{{.Instance.ID}}: {{.Data.prompt}}"}`}, quartz.NewReal())
+	d.SetInstance(WebhookInstance{ID: "box:1"})
+	require.True(t, d.emit(webhookEventTaskStarted, WebhookTask{Task: convstate.Task{Prompt: "Hi"}}))
 	body, err := d.renderBody((<-d.queue).WebhookEvent)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"text":"box:1: Hi"}`, string(body))
@@ -678,11 +651,11 @@ func TestWebhookStop(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
-	d := testDispatcher(t, WebhookConfig{URL: server.URL, Events: []string{"instance.*"}, Heartbeat: -1}, quartz.NewReal())
-	d.snapshot = func() any { return WebhookInstanceState{Status: AgentStatusStable} }
+	d := testDispatcher(t, Config{URL: server.URL, Events: []string{"instance.*"}, Heartbeat: -1}, quartz.NewReal())
+	d.snapshot = func() any { return WebhookInstanceState{Status: convstate.AgentStatusStable} }
 	ctx := t.Context()
-	d.start(ctx)
-	d.stop(ctx)
+	d.Start(ctx)
+	d.Stop(ctx)
 	assert.Equal(t, webhookEventInstanceStarted, <-got)
 	select {
 	case event := <-got:
@@ -701,14 +674,14 @@ func TestWebhookStopLeavesTimeForTheRest(t *testing.T) {
 	defer server.Close()
 	defer close(hang)
 	// The mock clock's webhookStopTimeout never passes.
-	d := testDispatcher(t, WebhookConfig{URL: server.URL, Events: []string{"instance.stopped"}, Heartbeat: -1}, quartz.NewMock(t))
+	d := testDispatcher(t, Config{URL: server.URL, Events: []string{"instance.stopped"}, Heartbeat: -1}, quartz.NewMock(t))
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	d.start(ctx)
+	d.Start(ctx)
 	stopCtx, stopCancel := context.WithTimeout(t.Context(), time.Second)
 	defer stopCancel()
 	start := time.Now()
-	d.stop(stopCtx)
+	d.Stop(stopCtx)
 	assert.Less(t, time.Since(start), 900*time.Millisecond)
 	assert.NoError(t, stopCtx.Err(), "time left for the rest")
 }
@@ -716,9 +689,9 @@ func TestWebhookStopLeavesTimeForTheRest(t *testing.T) {
 func TestWebhookHeartbeat(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
-	d := testDispatcher(t, WebhookConfig{Events: []string{"instance.heartbeat"}, Heartbeat: time.Minute}, clock)
-	d.snapshot = func() any { return WebhookInstanceState{Status: AgentStatusRunning} }
-	d.setInstance(WebhookInstance{ID: "host:3284"})
+	d := testDispatcher(t, Config{Events: []string{"instance.heartbeat"}, Heartbeat: time.Minute}, clock)
+	d.snapshot = func() any { return WebhookInstanceState{Status: convstate.AgentStatusRunning} }
+	d.SetInstance(WebhookInstance{ID: "host:3284"})
 	trap := clock.Trap().NewTimer("webhook", "heartbeat")
 	defer trap.Close()
 	ctx := t.Context()
@@ -731,52 +704,8 @@ func TestWebhookHeartbeat(t *testing.T) {
 	events := queued(d)
 	require.Len(t, events, 1)
 	assert.Equal(t, webhookEventInstanceHeartbeat, events[0].Type)
-	assert.Equal(t, AgentStatusRunning, events[0].Data.(WebhookInstanceState).Status)
+	assert.Equal(t, convstate.AgentStatusRunning, events[0].Data.(WebhookInstanceState).Status)
 	// A hub refuses an instance event that names no run.
 	assert.Equal(t, d.serverID, events[0].Instance.ServerID)
 	assert.NotEmpty(t, d.serverID)
-}
-
-// A test event goes out once, whatever the events chosen, and says how the
-// receiver answered.
-func TestWebhookTestEvent(t *testing.T) {
-	t.Parallel()
-	var calls atomic.Int32
-	var event string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		event = r.Header.Get("X-AgentAPI-Event")
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	defer server.Close()
-	d := testDispatcher(t, WebhookConfig{URL: server.URL, Events: []string{"task.*"}}, quartz.NewReal())
-	s := &webhookAPI{webhook: d}
-	response, err := s.testWebhook(t.Context(), nil)
-	require.NoError(t, err)
-	assert.False(t, response.Body.OK)
-	assert.Equal(t, "503 Service Unavailable", response.Body.Status)
-	assert.Contains(t, response.Body.Error, "503")
-	assert.EqualValues(t, 1, calls.Load(), "not retried")
-	assert.Equal(t, webhookEventTest, event)
-
-	require.NoError(t, d.updateConfig(WebhookConfig{}))
-	response, err = s.testWebhook(t.Context(), nil)
-	require.NoError(t, err)
-	assert.Equal(t, "no webhook URL is set", response.Body.Error)
-}
-
-// The instance.* events say how often the heartbeat comes, so a receiver
-// knows when it missed some.
-func TestWebhookInstanceStateHeartbeat(t *testing.T) {
-	t.Parallel()
-	srv, _ := newQuietNativeServer(t, nil)
-	assert.Equal(t, 60, srv.webhookInstanceState().HeartbeatSeconds)
-	off := 0
-	request := &WebhookConfigRequest{}
-	request.Body.TimeoutSeconds = 1
-	request.Body.MaxAttempts = 1
-	request.Body.HeartbeatSeconds = &off
-	_, err := (&webhookAPI{webhook: srv.webhook}).updateWebhookConfig(t.Context(), request)
-	require.NoError(t, err)
-	assert.Zero(t, srv.webhookInstanceState().HeartbeatSeconds)
 }

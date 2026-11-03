@@ -1,4 +1,4 @@
-package httpapi
+package webhook
 
 import (
 	"bytes"
@@ -20,14 +20,12 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/danielgtaylor/huma/v2"
-
 	"github.com/coder/quartz"
 
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/netaddr"
-	"github.com/coder/agentapi/lib/statedb"
 )
 
 const (
@@ -47,9 +45,9 @@ const (
 	webhookQueueSize   = 1024
 )
 
-// WebhookEventTypes are the events a webhook can be sent, for
+// EventTypes are the events a webhook can be sent, for
 // --webhook-events. A pattern ending in .* selects a group, * all of them.
-var WebhookEventTypes = []string{
+var EventTypes = []string{
 	webhookEventRunStatusChanged,
 	webhookEventInstanceStarted, webhookEventInstanceHeartbeat, webhookEventInstanceStopped,
 	webhookEventTaskStarted, webhookEventTaskCompleted, webhookEventTaskFailed,
@@ -64,7 +62,9 @@ var WebhookEventTypes = []string{
 // AgentAPI sent before the others existed.
 var defaultWebhookEvents = []string{webhookEventRunStatusChanged}
 
-type WebhookConfig struct {
+// Config is the webhook's configuration: the startup flags, and PUT
+// /webhook's changes.
+type Config struct {
 	URL             string
 	Timeout         time.Duration
 	MaxAttempts     int
@@ -87,7 +87,7 @@ type WebhookConfig struct {
 	PublicURL string
 }
 
-func (c WebhookConfig) validate() error {
+func (c Config) validate() error {
 	if c.URL != "" {
 		if err := validateHTTPURL(c.URL, "webhook URL"); err != nil {
 			return err
@@ -108,7 +108,7 @@ func (c WebhookConfig) validate() error {
 	}
 	for _, pattern := range c.Events {
 		if !validWebhookEventPattern(pattern) {
-			return fmt.Errorf("unknown webhook event %q; the events are %s, a group such as task.*, or *", pattern, strings.Join(WebhookEventTypes, ", "))
+			return fmt.Errorf("unknown webhook event %q; the events are %s, a group such as task.*, or *", pattern, strings.Join(EventTypes, ", "))
 		}
 	}
 	return nil
@@ -129,7 +129,7 @@ func validateHTTPURL(raw, what string) error {
 }
 
 func validWebhookEventPattern(pattern string) bool {
-	return slices.ContainsFunc(WebhookEventTypes, func(event string) bool { return webhookEventMatches(pattern, event) })
+	return slices.ContainsFunc(EventTypes, func(event string) bool { return webhookEventMatches(pattern, event) })
 }
 
 // webhookEventMatches reports whether pattern (an event type, a group such
@@ -157,11 +157,11 @@ type queuedEvent struct {
 }
 
 type WebhookEventData struct {
-	ServerID       string       `json:"server_id" doc:"Random identifier of this AgentAPI run, as server_id in GET /status."`
-	Status         AgentStatus  `json:"status" doc:"Current agent status."`
-	PreviousStatus AgentStatus  `json:"previous_status" doc:"Previous agent status."`
-	AgentType      mf.AgentType `json:"agent_type" doc:"Type of agent being used."`
-	Transport      Transport    `json:"transport" doc:"Backend transport being used."`
+	ServerID       string                `json:"server_id" doc:"Random identifier of this AgentAPI run, as server_id in GET /status."`
+	Status         convstate.AgentStatus `json:"status" doc:"Current agent status."`
+	PreviousStatus convstate.AgentStatus `json:"previous_status" doc:"Previous agent status."`
+	AgentType      mf.AgentType          `json:"agent_type" doc:"Type of agent being used."`
+	Transport      instanceapi.Transport `json:"transport" doc:"Backend transport being used."`
 }
 
 // WebhookTemplateData is the context available to custom payload templates.
@@ -181,18 +181,22 @@ type WebhookTemplateData struct {
 	Data     any
 }
 
-type webhookDispatcher struct {
+// Dispatcher delivers an AgentAPI's webhook events: one at a time from a
+// queue, with retries, signed, and with instance.started, the heartbeats
+// and instance.stopped. Queuing never blocks, so the emitter queues events
+// under its lock.
+type Dispatcher struct {
 	mu        sync.RWMutex
-	config    WebhookConfig
+	config    Config
 	tmpl      *template.Template // nil when using the default JSON payload
 	logger    *slog.Logger
 	clock     quartz.Clock
 	serverID  string
 	agentType mf.AgentType
-	transport Transport
+	transport instanceapi.Transport
 	instance  WebhookInstance
 	// startup is the configuration AgentAPI started with.
-	startup WebhookConfig
+	startup Config
 	queue   chan queuedEvent
 	// snapshot, if set, gives the data of instance.started and
 	// instance.heartbeat.
@@ -202,7 +206,7 @@ type webhookDispatcher struct {
 	// configChanged wakes the heartbeat loop when the interval changes.
 	configChanged chan struct{}
 	// ip finds the address {ip} in the public URL stands for. Only
-	// refreshIP asks it, outside any lock: a lookup may wait on DNS, and
+	// RefreshIP asks it, outside any lock: a lookup may wait on DNS, and
 	// the events are built under the emitter's lock.
 	ip *netaddr.Resolver
 	// refreshMu makes the lookups take turns, so an older answer can't
@@ -217,10 +221,29 @@ type webhookDispatcher struct {
 	urlChanged func()
 }
 
-// ExpandPublicURL fills in a public URL's placeholders; see
-// instanceapi.ExpandPublicURL.
-func ExpandPublicURL(publicURL string, port int) string {
-	return instanceapi.ExpandPublicURL(publicURL, port)
+// SetServerID sets the identifier of this AgentAPI run the events carry,
+// the one the status reports. Call it before Start.
+func (d *Dispatcher) SetServerID(id string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.serverID = id
+}
+
+// SetSnapshot has f give the data of instance.started, instance.heartbeat
+// and instance.stopped. Call it before Start.
+func (d *Dispatcher) SetSnapshot(f func() any) { d.snapshot = f }
+
+// OnURLChange has f called, in a goroutine of its own, once the public URL
+// changed because the address {ip} stands for did. Call it before Start.
+func (d *Dispatcher) OnURLChange(f func()) { d.urlChanged = f }
+
+// SetResolver replaces the lookup of the address {ip} stands for, for
+// tests. It isn't synchronized with RefreshIP: set it while no lookup runs.
+func (d *Dispatcher) SetResolver(r *netaddr.Resolver) { d.ip = r }
+
+// SendHeartbeat queues an instance.heartbeat now, if the webhook sends it.
+func (d *Dispatcher) SendHeartbeat() {
+	d.emit(webhookEventInstanceHeartbeat, d.snapshotData())
 }
 
 func parseWebhookTemplate(templateStr string) (*template.Template, error) {
@@ -241,7 +264,9 @@ func parseWebhookTemplate(templateStr string) (*template.Template, error) {
 	return tmpl, nil
 }
 
-func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType mf.AgentType, transport Transport, clock quartz.Clock) (*webhookDispatcher, error) {
+// New returns a dispatcher of the events of an AgentAPI of agentType on
+// transport, which Start starts sending.
+func New(config Config, logger *slog.Logger, agentType mf.AgentType, transport instanceapi.Transport, clock quartz.Clock) (*Dispatcher, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
@@ -251,7 +276,7 @@ func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType m
 		return nil, err
 	}
 	serverID := randomWebhookID()
-	return &webhookDispatcher{
+	return &Dispatcher{
 		config:        config,
 		tmpl:          tmpl,
 		logger:        logger,
@@ -267,7 +292,7 @@ func newWebhookDispatcher(config WebhookConfig, logger *slog.Logger, agentType m
 	}, nil
 }
 
-func webhookConfigWithDefaults(config WebhookConfig) WebhookConfig {
+func webhookConfigWithDefaults(config Config) Config {
 	if config.Timeout == 0 {
 		config.Timeout = defaultWebhookTimeout
 	}
@@ -287,27 +312,27 @@ func webhookConfigWithDefaults(config WebhookConfig) WebhookConfig {
 // database with the startup configuration it replaced: it applies again
 // after a restart, unless AgentAPI starts with another configuration.
 type storedWebhook struct {
-	Startup string        `json:"startup"`
-	Config  WebhookConfig `json:"config"`
+	Startup string `json:"startup"`
+	Config  Config `json:"config"`
 }
 
 // webhookFingerprint identifies a startup configuration.
-func webhookFingerprint(config WebhookConfig) string {
+func webhookFingerprint(config Config) string {
 	data, _ := json.Marshal(config)
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
 
-// stored is the configuration to keep in the state database.
-func (d *webhookDispatcher) stored() string {
-	data, _ := json.Marshal(storedWebhook{Startup: webhookFingerprint(d.startup), Config: d.configSnapshot()})
+// Stored is the configuration to keep in the state database.
+func (d *Dispatcher) Stored() string {
+	data, _ := json.Marshal(storedWebhook{Startup: webhookFingerprint(d.startup), Config: d.Config()})
 	return string(data)
 }
 
-// restore applies the configuration kept in the state database, unless
+// Restore applies the configuration kept in the state database, unless
 // AgentAPI started with another one than it replaced. It reports whether it
 // did.
-func (d *webhookDispatcher) restore(stored string) (bool, error) {
+func (d *Dispatcher) Restore(stored string) (bool, error) {
 	var s storedWebhook
 	if err := json.Unmarshal([]byte(stored), &s); err != nil {
 		return false, err
@@ -315,11 +340,11 @@ func (d *webhookDispatcher) restore(stored string) (bool, error) {
 	if s.Startup != webhookFingerprint(d.startup) {
 		return false, nil
 	}
-	return true, d.updateConfig(s.Config)
+	return true, d.UpdateConfig(s.Config)
 }
 
-// setInstance describes the AgentAPI that sends the events.
-func (d *webhookDispatcher) setInstance(instance WebhookInstance) {
+// SetInstance describes the AgentAPI that sends the events.
+func (d *Dispatcher) SetInstance(instance WebhookInstance) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	instance.ServerID = d.serverID
@@ -328,7 +353,9 @@ func (d *webhookDispatcher) setInstance(instance WebhookInstance) {
 	d.instance = instance
 }
 
-func (d *webhookDispatcher) instanceSnapshot() WebhookInstance {
+// Instance is the AgentAPI the events name, with the instance ID and the
+// public URL the configuration sets.
+func (d *Dispatcher) Instance() WebhookInstance {
 	d.mu.RLock()
 	instance := d.instance
 	config := d.config
@@ -345,8 +372,8 @@ func (d *webhookDispatcher) instanceSnapshot() WebhookInstance {
 }
 
 // publicURL is the public URL with its placeholders filled in. {ip} is
-// the address refreshIP last found: empty (no URL) until it found one.
-func (d *webhookDispatcher) publicURL(config WebhookConfig, port int) string {
+// the address RefreshIP last found: empty (no URL) until it found one.
+func (d *Dispatcher) publicURL(config Config, port int) string {
 	expanded := instanceapi.ExpandPlaceholders(config.PublicURL, port)
 	if !instanceapi.HasIP(expanded) {
 		return expanded
@@ -358,13 +385,13 @@ func (d *webhookDispatcher) publicURL(config WebhookConfig, port int) string {
 	return instanceapi.ExpandIP(expanded, ip)
 }
 
-func (d *webhookDispatcher) cachedIP() string {
+func (d *Dispatcher) cachedIP() string {
 	d.ipMu.Lock()
 	defer d.ipMu.Unlock()
 	return d.publicAddr
 }
 
-// refreshIP looks up the address {ip} in the public URL stands for: the
+// RefreshIP looks up the address {ip} in the public URL stands for: the
 // one this machine reaches the webhook's receiver from, looked up again
 // once the last answer is 30 seconds old, so after DHCP gives the machine
 // another address the next heartbeat names it. When no address is found
@@ -372,8 +399,8 @@ func (d *webhookDispatcher) cachedIP() string {
 // netaddr.DialTimeout), so it runs before the first event, when the
 // configuration changes, before every heartbeat and on a loop of its own,
 // never under a lock the events are built under.
-func (d *webhookDispatcher) refreshIP(ctx context.Context) {
-	config := d.configSnapshot()
+func (d *Dispatcher) RefreshIP(ctx context.Context) {
+	config := d.Config()
 	if !instanceapi.HasIP(config.PublicURL) {
 		return
 	}
@@ -397,7 +424,7 @@ func (d *webhookDispatcher) refreshIP(ctx context.Context) {
 
 // refreshIPs keeps {ip} current between heartbeats, for the summary, the
 // registry and the allowed hosts, until ctx ends.
-func (d *webhookDispatcher) refreshIPs(ctx context.Context) {
+func (d *Dispatcher) refreshIPs(ctx context.Context) {
 	ticker := d.clock.NewTicker(netaddr.DefaultTTL, "webhook", "ip")
 	defer ticker.Stop()
 	for {
@@ -405,27 +432,30 @@ func (d *webhookDispatcher) refreshIPs(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			d.refreshIP(ctx)
+			d.RefreshIP(ctx)
 		}
 	}
 }
 
-// publicIP is the address {ip} in the public URL stands for now; empty
+// PublicIP is the address {ip} in the public URL stands for now; empty
 // when it holds no {ip}.
-func (d *webhookDispatcher) publicIP() string {
-	if !instanceapi.HasIP(d.configSnapshot().PublicURL) {
+func (d *Dispatcher) PublicIP() string {
+	if !instanceapi.HasIP(d.Config().PublicURL) {
 		return ""
 	}
 	return d.cachedIP()
 }
 
-func (d *webhookDispatcher) configSnapshot() WebhookConfig {
+// Config is the configuration in use.
+func (d *Dispatcher) Config() Config {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.config
 }
 
-func (d *webhookDispatcher) updateConfig(config WebhookConfig) error {
+// UpdateConfig replaces the configuration, for the events queued from now
+// on.
+func (d *Dispatcher) UpdateConfig(config Config) error {
 	config = webhookConfigWithDefaults(config)
 	if err := config.validate(); err != nil {
 		return err
@@ -439,7 +469,7 @@ func (d *webhookDispatcher) updateConfig(config WebhookConfig) error {
 	d.tmpl = tmpl
 	d.mu.Unlock()
 	// The next events name the receiver's route.
-	d.refreshIP(context.Background())
+	d.RefreshIP(context.Background())
 	select {
 	case d.configChanged <- struct{}{}:
 	default:
@@ -451,8 +481,8 @@ func (d *webhookDispatcher) updateConfig(config WebhookConfig) error {
 }
 
 // wants reports whether events of type eventType are sent.
-func (d *webhookDispatcher) wants(eventType string) bool {
-	config := d.configSnapshot()
+func (d *Dispatcher) wants(eventType string) bool {
+	config := d.Config()
 	return config.URL != "" && slices.ContainsFunc(config.Events, func(pattern string) bool { return webhookEventMatches(pattern, eventType) })
 }
 
@@ -464,7 +494,9 @@ func randomWebhookID() string {
 	return hex.EncodeToString(value[:])
 }
 
-func (d *webhookDispatcher) statusChanged(previous, current AgentStatus) {
+// StatusChanged queues run.status_changed, for the emitter's status change
+// handler.
+func (d *Dispatcher) StatusChanged(previous, current convstate.AgentStatus) {
 	d.emit(webhookEventRunStatusChanged, WebhookEventData{
 		ServerID:       d.serverID,
 		Status:         current,
@@ -476,15 +508,15 @@ func (d *webhookDispatcher) statusChanged(previous, current AgentStatus) {
 
 // emit queues an event of type eventType with data, if such events are
 // sent. It never blocks: when the queue is full the event is dropped.
-func (d *webhookDispatcher) emit(eventType string, data any) bool {
+func (d *Dispatcher) emit(eventType string, data any) bool {
 	return d.enqueue(eventType, data, nil)
 }
 
-func (d *webhookDispatcher) enqueue(eventType string, data any, done chan struct{}) bool {
+func (d *Dispatcher) enqueue(eventType string, data any, done chan struct{}) bool {
 	if !d.wants(eventType) {
 		return false
 	}
-	instance := d.instanceSnapshot()
+	instance := d.Instance()
 	event := queuedEvent{WebhookEvent: WebhookEvent{
 		ID:        randomWebhookID(),
 		Type:      eventType,
@@ -501,11 +533,11 @@ func (d *webhookDispatcher) enqueue(eventType string, data any, done chan struct
 	}
 }
 
-// start delivers the queued events, in order, until ctx ends, and sends
+// Start delivers the queued events, in order, until ctx ends, and sends
 // instance.started and the heartbeats.
-func (d *webhookDispatcher) start(ctx context.Context) {
+func (d *Dispatcher) Start(ctx context.Context) {
 	// instance.started names the address.
-	d.refreshIP(ctx)
+	d.RefreshIP(ctx)
 	d.emit(webhookEventInstanceStarted, d.snapshotData())
 	go func() {
 		for {
@@ -521,16 +553,16 @@ func (d *webhookDispatcher) start(ctx context.Context) {
 	go d.refreshIPs(ctx)
 }
 
-func (d *webhookDispatcher) snapshotData() any {
+func (d *Dispatcher) snapshotData() any {
 	if d.snapshot == nil {
 		return struct{}{}
 	}
 	return d.snapshot()
 }
 
-func (d *webhookDispatcher) heartbeats(ctx context.Context) {
+func (d *Dispatcher) heartbeats(ctx context.Context) {
 	for {
-		interval := d.configSnapshot().Heartbeat
+		interval := d.Config().Heartbeat
 		var timer *quartz.Timer
 		var tick <-chan time.Time
 		if interval > 0 {
@@ -541,7 +573,7 @@ func (d *webhookDispatcher) heartbeats(ctx context.Context) {
 		case <-ctx.Done():
 		case <-d.configChanged:
 		case <-tick:
-			d.refreshIP(ctx)
+			d.RefreshIP(ctx)
 			d.emit(webhookEventInstanceHeartbeat, d.snapshotData())
 		}
 		if timer != nil {
@@ -553,10 +585,10 @@ func (d *webhookDispatcher) heartbeats(ctx context.Context) {
 	}
 }
 
-// stop sends instance.stopped and waits for it to be delivered, for at
+// Stop sends instance.stopped and waits for it to be delivered, for at
 // most webhookStopTimeout and half the time ctx has left: the rest is for
-// what Stop does after. Call it before ending the context start was given.
-func (d *webhookDispatcher) stop(ctx context.Context) {
+// what Stop does after. Call it before ending the context Start was given.
+func (d *Dispatcher) Stop(ctx context.Context) {
 	if deadline, ok := ctx.Deadline(); ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Until(deadline)/2)
@@ -576,7 +608,7 @@ func (d *webhookDispatcher) stop(ctx context.Context) {
 	}
 }
 
-func (d *webhookDispatcher) renderBody(event WebhookEvent) ([]byte, error) {
+func (d *Dispatcher) renderBody(event WebhookEvent) ([]byte, error) {
 	d.mu.RLock()
 	tmpl := d.tmpl
 	d.mu.RUnlock()
@@ -620,7 +652,7 @@ func webhookRetryDelay(attempt int) time.Duration {
 	return min(delay, maxWebhookRetryDelay)
 }
 
-func (d *webhookDispatcher) deliver(ctx context.Context, event queuedEvent) {
+func (d *Dispatcher) deliver(ctx context.Context, event queuedEvent) {
 	if event.done != nil {
 		defer close(event.done)
 	}
@@ -629,7 +661,7 @@ func (d *webhookDispatcher) deliver(ctx context.Context, event queuedEvent) {
 		d.logger.Error("Failed to render webhook body", "error", err)
 		return
 	}
-	config := d.configSnapshot()
+	config := d.Config()
 	client := webhookClient(config.Timeout)
 	for attempt := 1; attempt <= config.MaxAttempts; attempt++ {
 		err := d.sendWithConfig(ctx, config, client, event.WebhookEvent, body)
@@ -670,13 +702,13 @@ func (e *permanentWebhookError) Error() string {
 	return fmt.Sprintf("unexpected HTTP status %s", e.status)
 }
 
-func (d *webhookDispatcher) sendWithConfig(ctx context.Context, config WebhookConfig, client *http.Client, event WebhookEvent, body []byte) error {
+func (d *Dispatcher) sendWithConfig(ctx context.Context, config Config, client *http.Client, event WebhookEvent, body []byte) error {
 	_, err := d.send(ctx, config, client, event, body)
 	return err
 }
 
 // send POSTs one delivery of event and returns the receiver's status.
-func (d *webhookDispatcher) send(ctx context.Context, config WebhookConfig, client *http.Client, event WebhookEvent, body []byte) (string, error) {
+func (d *Dispatcher) send(ctx context.Context, config Config, client *http.Client, event WebhookEvent, body []byte) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, config.URL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -716,110 +748,13 @@ func (d *webhookDispatcher) send(ctx context.Context, config WebhookConfig, clie
 	return response.Status, fmt.Errorf("unexpected HTTP status %s", response.Status)
 }
 
-type WebhookConfigResponse struct {
-	Body struct {
-		URL              string   `json:"url" doc:"Webhook destination. Empty means webhook delivery is disabled."`
-		TimeoutSeconds   int      `json:"timeout_seconds" doc:"Timeout for each delivery attempt, in seconds."`
-		MaxAttempts      int      `json:"max_attempts" doc:"Maximum number of delivery attempts."`
-		PayloadTemplate  string   `json:"payload_template" doc:"Go text/template for the webhook POST body. Empty means the default JSON payload is used."`
-		Events           []string `json:"events" doc:"The event types sent, or patterns of them (task.*, *)."`
-		SecretSet        bool     `json:"secret_set" doc:"Deliveries are signed (X-AgentAPI-Signature-256). The secret itself is never returned."`
-		HeartbeatSeconds int      `json:"heartbeat_seconds" doc:"How often instance.heartbeat is sent, in seconds; 0 when it is off."`
-		InstanceID       string   `json:"instance_id" doc:"The instance ID in every event."`
-		PublicURL        string   `json:"public_url" doc:"Where this AgentAPI can be reached, in every event, as set: {port}, {hostname} and {ip} stay unfilled; empty when not set."`
-	}
-}
-
-type WebhookConfigRequest struct {
-	Body struct {
-		URL              string    `json:"url" doc:"Webhook destination. Set to an empty string to disable delivery."`
-		TimeoutSeconds   int       `json:"timeout_seconds" minimum:"1" maximum:"3600" doc:"Timeout for each delivery attempt, in seconds."`
-		MaxAttempts      int       `json:"max_attempts" minimum:"1" maximum:"10" doc:"Maximum number of delivery attempts."`
-		PayloadTemplate  *string   `json:"payload_template,omitempty" doc:"Go text/template for custom webhook payload body. Omit to preserve; set to empty string to clear. Available fields: .ID, .Type, .CreatedAt, .Instance, .Data (the event's data), and for run.status_changed .ServerID, .Status, .PreviousStatus, .AgentType, .Transport."`
-		Events           *[]string `json:"events,omitempty" doc:"The event types to send, or patterns of them (task.*, *). Omit to preserve; an empty list sends run.status_changed alone."`
-		Secret           *string   `json:"secret,omitempty" doc:"Secret that signs every delivery with HMAC-SHA256. Omit to preserve; set to empty string to stop signing."`
-		HeartbeatSeconds *int      `json:"heartbeat_seconds,omitempty" minimum:"0" maximum:"86400" doc:"How often instance.heartbeat is sent, in seconds; 0 turns it off. Omit to preserve."`
-		InstanceID       *string   `json:"instance_id,omitempty" doc:"The instance ID in every event. Omit to preserve; set to empty string for <hostname>:<port>."`
-		PublicURL        *string   `json:"public_url,omitempty" doc:"Where this AgentAPI can be reached, in every event. {port} and {hostname} are filled in, and {ip} with the machine's IPv4 address on the route to the webhook URL, looked up again while AgentAPI runs. Omit to preserve; set to empty string to clear."`
-	}
-}
-
-func (w *webhookAPI) getWebhookConfig(_ context.Context, _ *struct{}) (*WebhookConfigResponse, error) {
-	config := w.webhook.configSnapshot()
-	response := &WebhookConfigResponse{}
-	response.Body.URL = config.URL
-	response.Body.TimeoutSeconds = int(config.Timeout / time.Second)
-	response.Body.MaxAttempts = config.MaxAttempts
-	response.Body.PayloadTemplate = config.PayloadTemplate
-	response.Body.Events = config.Events
-	response.Body.SecretSet = config.Secret != ""
-	response.Body.HeartbeatSeconds = max(0, int(config.Heartbeat/time.Second))
-	response.Body.InstanceID = w.webhook.instanceSnapshot().ID
-	response.Body.PublicURL = config.PublicURL
-	return response, nil
-}
-
-func (w *webhookAPI) updateWebhookConfig(_ context.Context, request *WebhookConfigRequest) (*WebhookConfigResponse, error) {
-	config := w.webhook.configSnapshot()
-	previousURL := config.URL
-	config.URL = request.Body.URL
-	config.Timeout = time.Duration(request.Body.TimeoutSeconds) * time.Second
-	config.MaxAttempts = request.Body.MaxAttempts
-	if request.Body.PayloadTemplate != nil {
-		config.PayloadTemplate = *request.Body.PayloadTemplate
-	}
-	if request.Body.Events != nil {
-		config.Events = *request.Body.Events
-	}
-	if request.Body.Secret != nil {
-		config.Secret = *request.Body.Secret
-	}
-	if request.Body.HeartbeatSeconds != nil {
-		config.Heartbeat = time.Duration(*request.Body.HeartbeatSeconds) * time.Second
-		if config.Heartbeat == 0 {
-			config.Heartbeat = -1
-		}
-	}
-	if request.Body.InstanceID != nil {
-		config.InstanceID = *request.Body.InstanceID
-	}
-	if request.Body.PublicURL != nil {
-		config.PublicURL = *request.Body.PublicURL
-	}
-	if err := w.webhook.updateConfig(config); err != nil {
-		return nil, huma.Error400BadRequest(err.Error())
-	}
-	if w.stateDB != nil {
-		w.stateDB.SetMeta(statedb.MetaWebhook, w.webhook.stored())
-	}
-	if w.instanceChanged != nil {
-		w.instanceChanged()
-	}
-	// A new receiver (agentapi hub join) learns of this AgentAPI now
-	// rather than at the next heartbeat.
-	if config.URL != "" && config.URL != previousURL {
-		w.webhook.emit(webhookEventInstanceHeartbeat, w.webhook.snapshotData())
-	}
-	return w.getWebhookConfig(context.Background(), nil)
-}
-
-// WebhookTestResponse is the outcome of POST /webhook/test.
-type WebhookTestResponse struct {
-	Body struct {
-		OK bool `json:"ok" doc:"The receiver answered with a 2xx status."`
-		// Status is empty when no response came.
-		Status string `json:"status,omitempty" doc:"The receiver's HTTP status, such as 204 No Content."`
-		Error  string `json:"error,omitempty" doc:"Why the delivery failed."`
-	}
-}
-
-// test delivers a webhook.test event once, now, and reports the outcome.
-func (d *webhookDispatcher) test(ctx context.Context) (status string, err error) {
-	config := d.configSnapshot()
+// Test delivers a webhook.test event once, now, and reports the outcome.
+func (d *Dispatcher) Test(ctx context.Context) (status string, err error) {
+	config := d.Config()
 	if config.URL == "" {
 		return "", errors.New("no webhook URL is set")
 	}
-	instance := d.instanceSnapshot()
+	instance := d.Instance()
 	event := WebhookEvent{
 		ID:        randomWebhookID(),
 		Type:      webhookEventTest,
@@ -832,45 +767,4 @@ func (d *webhookDispatcher) test(ctx context.Context) (status string, err error)
 		return "", err
 	}
 	return d.send(ctx, config, webhookClient(config.Timeout), event, body)
-}
-
-func (w *webhookAPI) testWebhook(ctx context.Context, _ *struct{}) (*WebhookTestResponse, error) {
-	response := &WebhookTestResponse{}
-	status, err := w.webhook.test(ctx)
-	response.Body.OK = err == nil
-	response.Body.Status = status
-	if err != nil {
-		response.Body.Error = err.Error()
-	}
-	return response, nil
-}
-
-// webhookAPI reads and changes the webhook, and keeps a change in the
-// state database (nil without one).
-type webhookAPI struct {
-	webhook *webhookDispatcher
-	stateDB *statedb.DB
-	// instanceChanged tells the summary's subscribers and the registry the
-	// instance's ID or URL may have changed.
-	instanceChanged func()
-}
-
-func (s *Server) registerWebhookRoutes() {
-	w := &webhookAPI{webhook: s.webhook, stateDB: s.stateDB, instanceChanged: s.instanceChanged}
-	huma.Get(s.api, "/webhook", w.getWebhookConfig, func(o *huma.Operation) {
-		o.Tags = []string{"Webhook"}
-		o.Summary = "Get webhook configuration"
-		o.Description = "Returns the mutable webhook configuration. The secret is never returned, only whether one is set."
-	})
-	huma.Put(s.api, "/webhook", w.updateWebhookConfig, func(o *huma.Operation) {
-		o.Tags = []string{"Webhook"}
-		o.Summary = "Update webhook configuration"
-		o.Description = "Updates webhook delivery immediately. Startup flags provide the initial values; this endpoint can replace or disable them without restarting the agent."
-		o.Errors = []int{400}
-	})
-	huma.Post(s.api, "/webhook/test", w.testWebhook, func(o *huma.Operation) {
-		o.Tags = []string{"Webhook"}
-		o.Summary = "Send a test webhook event"
-		o.Description = "Sends a webhook.test event to the webhook URL once, signed like every event, and reports the receiver's answer."
-	})
 }

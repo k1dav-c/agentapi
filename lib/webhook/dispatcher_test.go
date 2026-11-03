@@ -1,4 +1,4 @@
-package httpapi
+package webhook
 
 import (
 	"bytes"
@@ -18,6 +18,7 @@ import (
 
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/convstate"
+	"github.com/coder/agentapi/lib/instanceapi"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 )
 
@@ -26,16 +27,16 @@ func TestWebhookConfigValidation(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		config  WebhookConfig
+		config  Config
 		wantErr string
 	}{
 		{name: "disabled"},
-		{name: "valid", config: WebhookConfig{URL: "https://example.com/hook"}},
-		{name: "invalid URL", config: WebhookConfig{URL: "://bad"}, wantErr: "invalid webhook URL"},
-		{name: "unsupported scheme", config: WebhookConfig{URL: "ftp://example.com/hook"}, wantErr: "must use http or https"},
-		{name: "missing host", config: WebhookConfig{URL: "https:///hook"}, wantErr: "must include a host"},
-		{name: "negative timeout", config: WebhookConfig{URL: "https://example.com", Timeout: -time.Second}, wantErr: "timeout must not be negative"},
-		{name: "negative attempts", config: WebhookConfig{URL: "https://example.com", MaxAttempts: -1}, wantErr: "max attempts must not be negative"},
+		{name: "valid", config: Config{URL: "https://example.com/hook"}},
+		{name: "invalid URL", config: Config{URL: "://bad"}, wantErr: "invalid webhook URL"},
+		{name: "unsupported scheme", config: Config{URL: "ftp://example.com/hook"}, wantErr: "must use http or https"},
+		{name: "missing host", config: Config{URL: "https:///hook"}, wantErr: "must include a host"},
+		{name: "negative timeout", config: Config{URL: "https://example.com", Timeout: -time.Second}, wantErr: "timeout must not be negative"},
+		{name: "negative attempts", config: Config{URL: "https://example.com", MaxAttempts: -1}, wantErr: "max attempts must not be negative"},
 	}
 
 	for _, tc := range tests {
@@ -55,16 +56,16 @@ func TestWebhookConfigValidation(t *testing.T) {
 func TestWebhookStatusChangesOnly(t *testing.T) {
 	t.Parallel()
 
-	dispatcher, err := newWebhookDispatcher(
-		WebhookConfig{URL: "https://example.com/hook"},
+	dispatcher, err := New(
+		Config{URL: "https://example.com/hook"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeCodex,
-		TransportPTY,
+		instanceapi.TransportPTY,
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
 
-	emitter := convstate.NewEventEmitter(convstate.WithStatusChangeHandler(dispatcher.statusChanged))
+	emitter := convstate.NewEventEmitter(convstate.WithStatusChangeHandler(dispatcher.StatusChanged))
 	emitter.EmitStatus(conv.StatusChanging)
 	assert.Empty(t, dispatcher.queue)
 
@@ -74,10 +75,10 @@ func TestWebhookStatusChangesOnly(t *testing.T) {
 	assert.Equal(t, webhookEventRunStatusChanged, event.Type)
 	data, ok := event.Data.(WebhookEventData)
 	require.True(t, ok)
-	assert.Equal(t, AgentStatusRunning, data.PreviousStatus)
-	assert.Equal(t, AgentStatusStable, data.Status)
+	assert.Equal(t, convstate.AgentStatusRunning, data.PreviousStatus)
+	assert.Equal(t, convstate.AgentStatusStable, data.Status)
 	assert.Equal(t, mf.AgentTypeCodex, data.AgentType)
-	assert.Equal(t, TransportPTY, data.Transport)
+	assert.Equal(t, instanceapi.TransportPTY, data.Transport)
 	assert.NotEmpty(t, event.ID)
 	assert.NotEmpty(t, data.ServerID)
 	assert.Equal(t, data.ServerID, event.Instance.ServerID)
@@ -100,11 +101,11 @@ func TestWebhookSend(t *testing.T) {
 	}))
 	defer server.Close()
 
-	dispatcher, err := newWebhookDispatcher(
-		WebhookConfig{URL: server.URL},
+	dispatcher, err := New(
+		Config{URL: server.URL},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeClaude,
-		TransportPTY,
+		instanceapi.TransportPTY,
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
@@ -114,10 +115,10 @@ func TestWebhookSend(t *testing.T) {
 		CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
 		Data: WebhookEventData{
 			ServerID:       "run-1",
-			Status:         AgentStatusStable,
-			PreviousStatus: AgentStatusRunning,
+			Status:         convstate.AgentStatusStable,
+			PreviousStatus: convstate.AgentStatusRunning,
 			AgentType:      mf.AgentTypeClaude,
-			Transport:      TransportPTY,
+			Transport:      instanceapi.TransportPTY,
 		},
 	}
 	body, err := json.Marshal(event)
@@ -140,11 +141,11 @@ func TestWebhookSendRejectsNonSuccessfulResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	dispatcher, err := newWebhookDispatcher(
-		WebhookConfig{URL: server.URL},
+	dispatcher, err := New(
+		Config{URL: server.URL},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeClaude,
-		TransportPTY,
+		instanceapi.TransportPTY,
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
@@ -166,11 +167,11 @@ func TestWebhookCustomPayloadTemplate(t *testing.T) {
 	defer server.Close()
 
 	tmpl := `{"event":"{{.Type}}","status":"{{.Status}}","prev":"{{.PreviousStatus}}","agent":"{{.AgentType}}"}`
-	dispatcher, err := newWebhookDispatcher(
-		WebhookConfig{URL: server.URL, PayloadTemplate: tmpl},
+	dispatcher, err := New(
+		Config{URL: server.URL, PayloadTemplate: tmpl},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeClaude,
-		TransportPTY,
+		instanceapi.TransportPTY,
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
@@ -181,10 +182,10 @@ func TestWebhookCustomPayloadTemplate(t *testing.T) {
 		CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
 		Data: WebhookEventData{
 			ServerID:       "run-1",
-			Status:         AgentStatusStable,
-			PreviousStatus: AgentStatusRunning,
+			Status:         convstate.AgentStatusStable,
+			PreviousStatus: convstate.AgentStatusRunning,
 			AgentType:      mf.AgentTypeClaude,
-			Transport:      TransportPTY,
+			Transport:      instanceapi.TransportPTY,
 		},
 	}
 	body, err := dispatcher.renderBody(event)
@@ -197,11 +198,11 @@ func TestWebhookCustomPayloadTemplate(t *testing.T) {
 func TestWebhookInvalidPayloadTemplate(t *testing.T) {
 	t.Parallel()
 
-	_, err := newWebhookDispatcher(
-		WebhookConfig{URL: "https://example.com/hook", PayloadTemplate: "{{.Invalid"},
+	_, err := New(
+		Config{URL: "https://example.com/hook", PayloadTemplate: "{{.Invalid"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeClaude,
-		TransportPTY,
+		instanceapi.TransportPTY,
 		quartz.NewReal(),
 	)
 	require.ErrorContains(t, err, "invalid webhook payload template")
@@ -211,11 +212,11 @@ func TestWebhookPayloadTemplateUnknownField(t *testing.T) {
 	t.Parallel()
 
 	newDispatcher := func(tmpl string) error {
-		_, err := newWebhookDispatcher(
-			WebhookConfig{URL: "https://example.com/hook", PayloadTemplate: tmpl},
+		_, err := New(
+			Config{URL: "https://example.com/hook", PayloadTemplate: tmpl},
 			slog.New(slog.NewTextHandler(io.Discard, nil)),
 			mf.AgentTypeClaude,
-			TransportPTY,
+			instanceapi.TransportPTY,
 			quartz.NewReal(),
 		)
 		return err
@@ -227,65 +228,6 @@ func TestWebhookPayloadTemplateUnknownField(t *testing.T) {
 	// on empty data don't reject the template.
 	require.NoError(t, newDispatcher(`{"server":"{{.ServerID}}","host":"{{.Instance.Hostname}}","prompt":"{{.Data.prompt}}"}`))
 	require.NoError(t, newDispatcher(`{{index .Data.items 0}}`))
-}
-
-func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
-	t.Parallel()
-
-	dispatcher, err := newWebhookDispatcher(
-		WebhookConfig{
-			URL:         "https://initial.example.com/hook",
-			Timeout:     5 * time.Second,
-			MaxAttempts: 2,
-		},
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mf.AgentTypeClaude,
-		TransportPTY,
-		quartz.NewReal(),
-	)
-	require.NoError(t, err)
-	server := &webhookAPI{webhook: dispatcher}
-
-	// Update URL, timeout, and max attempts.
-	request := &WebhookConfigRequest{}
-	request.Body.URL = "https://updated.example.com/hook"
-	request.Body.TimeoutSeconds = 12
-	request.Body.MaxAttempts = 4
-	response, err := server.updateWebhookConfig(t.Context(), request)
-	require.NoError(t, err)
-	assert.Equal(t, request.Body.URL, response.Body.URL)
-	assert.Equal(t, 12, response.Body.TimeoutSeconds)
-	assert.Equal(t, 4, response.Body.MaxAttempts)
-	assert.Empty(t, response.Body.PayloadTemplate)
-
-	// Set a payload template.
-	tmpl := `{"s":"{{.Status}}"}`
-	request.Body.PayloadTemplate = &tmpl
-	response, err = server.updateWebhookConfig(t.Context(), request)
-	require.NoError(t, err)
-	assert.Equal(t, tmpl, response.Body.PayloadTemplate)
-
-	// Omit PayloadTemplate (nil) — should preserve existing.
-	request.Body.PayloadTemplate = nil
-	response, err = server.updateWebhookConfig(t.Context(), request)
-	require.NoError(t, err)
-	assert.Equal(t, tmpl, response.Body.PayloadTemplate)
-
-	// Clear PayloadTemplate with empty string.
-	clearTmpl := ""
-	request.Body.PayloadTemplate = &clearTmpl
-	response, err = server.updateWebhookConfig(t.Context(), request)
-	require.NoError(t, err)
-	assert.Empty(t, response.Body.PayloadTemplate)
-
-	// Disable webhook by clearing URL.
-	request.Body.URL = ""
-	response, err = server.updateWebhookConfig(t.Context(), request)
-	require.NoError(t, err)
-	assert.Empty(t, response.Body.URL)
-
-	dispatcher.statusChanged(AgentStatusRunning, AgentStatusStable)
-	assert.Empty(t, dispatcher.queue)
 }
 
 // A delivery that fails is tried again after a second, then after two, on
@@ -302,11 +244,11 @@ func TestWebhookRetries(t *testing.T) {
 	}))
 	defer server.Close()
 	clock := quartz.NewMock(t)
-	dispatcher, err := newWebhookDispatcher(
-		WebhookConfig{URL: server.URL, MaxAttempts: 3},
+	dispatcher, err := New(
+		Config{URL: server.URL, MaxAttempts: 3},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		mf.AgentTypeClaude,
-		TransportPTY,
+		instanceapi.TransportPTY,
 		clock,
 	)
 	require.NoError(t, err)
@@ -348,11 +290,11 @@ func TestWebhookRedirectIsNoDelivery(t *testing.T) {
 	defer server.Close()
 	var logs bytes.Buffer
 	clock := quartz.NewMock(t)
-	dispatcher, err := newWebhookDispatcher(
-		WebhookConfig{URL: server.URL + "/hooks", MaxAttempts: 2},
+	dispatcher, err := New(
+		Config{URL: server.URL + "/hooks", MaxAttempts: 2},
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		mf.AgentTypeClaude,
-		TransportPTY,
+		instanceapi.TransportPTY,
 		clock,
 	)
 	require.NoError(t, err)
@@ -377,10 +319,18 @@ func TestWebhookRedirectIsNoDelivery(t *testing.T) {
 	assert.Contains(t, logs.String(), server.URL+"/login")
 
 	// So does the test event.
-	response, err := (&webhookAPI{webhook: dispatcher}).testWebhook(t.Context(), nil)
-	require.NoError(t, err)
-	assert.False(t, response.Body.OK)
-	assert.Equal(t, "302 Found", response.Body.Status)
-	assert.Contains(t, response.Body.Error, server.URL+"/login")
+	status, err := dispatcher.Test(t.Context())
+	require.Error(t, err)
+	assert.Equal(t, "302 Found", status)
+	assert.Contains(t, err.Error(), server.URL+"/login")
 	assert.Zero(t, signIns.Load())
+}
+
+// A webhook whose URL was cleared at runtime queues nothing.
+func TestWebhookDisabledAtRuntime(t *testing.T) {
+	t.Parallel()
+	dispatcher := testDispatcher(t, Config{URL: "https://initial.example.com/hook"}, quartz.NewReal())
+	require.NoError(t, dispatcher.UpdateConfig(Config{}))
+	dispatcher.StatusChanged(convstate.AgentStatusRunning, convstate.AgentStatusStable)
+	assert.Empty(t, dispatcher.queue)
 }
