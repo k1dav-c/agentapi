@@ -310,6 +310,10 @@ func (a *Adapter) Capabilities() native.Capabilities {
 // Compact implements native.Compacter: the simulated context empties.
 func (a *Adapter) Compact(context.Context) error {
 	a.mu.Lock()
+	if !a.started || a.closed {
+		a.mu.Unlock()
+		return native.ErrNotStarted
+	}
 	if a.active != nil {
 		a.mu.Unlock()
 		return native.ErrTurnActive

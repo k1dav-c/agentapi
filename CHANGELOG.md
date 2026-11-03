@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Fixes
+
+- A Codex fork of a fork reads every thread it continues, up to 16 forks back: its history, first
+  prompt and prompt count start with the first thread's. Only the thread it forked was read.
+- `~/.agentapi/config.yaml` (which holds the webhook secret) and the registry entries are synced to
+  disk before and after they are renamed into place, as the hub's file is: a crash or power loss
+  could leave them empty.
+- Pi: an interrupt whose abort Pi didn't confirm in time still ends the turn. The adapter forgot the
+  abort, so a late answer didn't cancel an extension command's dialog and the 10-second deadline
+  never started: a turn waiting on a dialog could hang.
+- `agentapi update --force --check` says `Already up to date.` when it is; it said an update was
+  available. `--check` only reports, with or without `--force`.
+- The check of the new program before a restart in place retries for about a second while Linux
+  says the program is busy (`text file busy`), as the update's own check does: a process forked
+  while the program was written holds it until it execs, and the restart failed.
+
+## v2.5.0
+
 ### Features
 
 - The hub shows how long the agents worked: a **Work time** card on the overview with the last 24

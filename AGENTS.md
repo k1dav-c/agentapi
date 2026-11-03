@@ -75,6 +75,7 @@ to PTY mode, which parses terminal output.
 - `lib/netaddr/` - The machine's IPv4 addresses: those other machines may reach (the hub's join URLs), and the one on the route to a host (`{ip}` in `--public-url`)
 - `lib/userconfig/` - The user's settings file (`~/.agentapi/config.yaml`), which `agentapi server` reads and `agentapi hub join` writes
 - `lib/registry/` - The registry of the AgentAPIs running on a machine (`~/.agentapi/instances`), which `agentapi list` reads
+- `lib/atomicfile/` - Replaces a file at once, synced so a crash leaves the old data or the new (settings, registry entries, the hub's file)
 - `lib/selfupdate/` - Installs the latest release in place of the program (`agentapi update`, `POST /update`): the GitHub lookup, the binary for the platform, checksum verification and the rename under a lock file; whether the user can replace the program (`Program.Blocked`)
 - `chat/` - Next.js web UI (embedded into Go binary)
 - `skills/` - Agent skills for users of AgentAPI, such as `agentapi-hub-join` (an agent joins its machine to a hub); installed into `~/.claude/skills/`, not used to work on this repository

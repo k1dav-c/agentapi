@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/agentapi/lib/atomicfile"
 	"github.com/coder/agentapi/lib/instanceapi"
 )
 
@@ -56,7 +57,8 @@ func fileName(serverID string) string {
 }
 
 // Write writes entry into dir, creating it, and returns the file's path. The
-// file is replaced at once, so a reader never sees half of it.
+// file is replaced at once, so a reader never sees half of it, and a crash
+// leaves the old entry or the new.
 func Write(dir string, entry Entry) (string, error) {
 	if entry.ServerID == "" {
 		return "", errors.New("an entry needs a server ID")
@@ -69,22 +71,7 @@ func Write(dir string, entry Entry) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, fileName(entry.ServerID))
-	tmp, err := os.CreateTemp(dir, ".entry-*")
-	if err != nil {
-		return "", fmt.Errorf("write the registry entry: %w", err)
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		_ = tmp.Close()
-		return "", fmt.Errorf("write the registry entry: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return "", fmt.Errorf("write the registry entry: %w", err)
-	}
-	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
-		return "", err
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
+	if err := atomicfile.Write(path, ".entry-*", append(data, '\n')); err != nil {
 		return "", fmt.Errorf("write the registry entry: %w", err)
 	}
 	return path, nil

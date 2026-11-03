@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/coder/agentapi/lib/selfupdate"
 )
 
 // errRestart is what serve returns once a restart in place (SIGUSR2, an
@@ -168,13 +170,20 @@ func (s *selfExec) check(ctx context.Context) (checked, error) {
 func (s *selfExec) run(ctx context.Context, args ...string) (stdout, stderr []byte, err error) {
 	ctx, cancel := context.WithTimeout(ctx, checkTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, s.path, args...)
-	cmd.Env = s.env
 	var errBuf bytes.Buffer
-	cmd.Stderr = &errBuf
-	// Output waits for what the program started, which keeps its stdout.
-	cmd.WaitDelay = time.Second
-	stdout, err = cmd.Output()
+	// The program may have just been written (by an update).
+	err = selfupdate.RetryTextBusy(ctx, func() error {
+		cmd := exec.CommandContext(ctx, s.path, args...)
+		cmd.Env = s.env
+		errBuf.Reset()
+		cmd.Stderr = &errBuf
+		// Output waits for what the program started, which keeps its
+		// stdout.
+		cmd.WaitDelay = time.Second
+		var err error
+		stdout, err = cmd.Output()
+		return err
+	})
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		err = fmt.Errorf("no answer within %s", checkTimeout)
 	}
