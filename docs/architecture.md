@@ -401,7 +401,11 @@ type Factory func(resume Resume) (Adapter, error)
   record, as a lost turn end would leave the turn running for good. Record
   types an adapter doesn't know, changed fields and records that don't
   decode are counted per process (`agentio.Drift`) and logged once each at
-  Warn, with the CLI version from the handshake.
+  Warn, with the CLI version from the handshake, as is behavior an adapter
+  works around (`Drift.Unexpected`): Pi refusing a prompt as busy while no
+  run was reported, or a Pi run that ends with `agent_end` (`willRetry`
+  false) and no `agent_settled`, whose turn the adapter ends once Pi has
+  been quiet for 10 seconds (not while it compacts or retries).
 - **Usage limits.** When the account's usage limit stops a turn, the adapter
   ends it with the `limited` stop reason (Claude Code's limit messages and a
   `rejected` rate limit event, Codex's `usageLimitExceeded`, a quota error of

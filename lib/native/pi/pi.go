@@ -75,6 +75,10 @@ const (
 	// snapshotInterval is the shortest time between two snapshots of a
 	// message that is streaming.
 	snapshotInterval = agentio.SnapshotInterval
+	// settleGrace is how long a turn waits for agent_settled once
+	// agent_end said the run won't be retried and Pi went quiet. Pi sends
+	// it within milliseconds; without it the adapter ends the turn.
+	settleGrace = 10 * time.Second
 )
 
 // errExited is returned for operations after Pi exited.
@@ -133,6 +137,7 @@ type Adapter struct {
 	// the snapshot, dialog and interrupt timers; tests change them.
 	interruptTimeout time.Duration
 	interval         time.Duration
+	settleGrace      time.Duration
 	clock            quartz.Clock
 	// lineHandled, if set, is called after each stdout record is handled.
 	lineHandled func()
@@ -207,6 +212,7 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 		resumeRef:        resumeRef,
 		interruptTimeout: interruptTimeout,
 		interval:         snapshotInterval,
+		settleGrace:      settleGrace,
 		writer:           agentio.NewWriter("pi"),
 		clock:            cfg.Clock,
 		cmds:             make(map[string]*sentCmd),
@@ -363,6 +369,13 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
+	a.mu.Lock()
+	busy := a.turnActive || a.runActive
+	a.mu.Unlock()
+	if busy {
+		// Pi would refuse it.
+		return native.ErrTurnActive
+	}
 	images, err := readImages(input.Images)
 	if err != nil {
 		return err
@@ -373,6 +386,9 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 	}
 	if res.err != nil {
 		if strings.Contains(res.err.Error(), "already processing") {
+			// Pi works on something it didn't report starting (a run
+			// begins with agent_start, which accepts the prompt).
+			a.drift.Unexpected("busy without a run", "error", res.err)
 			return native.ErrTurnActive
 		}
 		return res.err

@@ -338,3 +338,101 @@ func TestPromptWithoutAnswerIsUnconfirmed(t *testing.T) {
 		assert.NotErrorIs(t, h.a.StartTurn(h.ctx, native.Input{Text: "again"}), native.ErrUnconfirmed, "never sent")
 	})
 }
+
+// StartTurn refuses a prompt while a turn runs, before Pi does; a refusal
+// for being busy that Pi sends while the adapter saw nothing run is drift.
+func TestStartTurnWhileBusy(t *testing.T) {
+	t.Parallel()
+	h := startedHarness(t)
+	cmd := h.prompt("p1", "hi")
+	h.answer(cmd, `{"disposition":"started"}`)
+	h.write(`{"type":"agent_start"}`)
+	require.NoError(t, h.result("p1"))
+	h.settle()
+	assert.ErrorIs(t, h.a.StartTurn(h.ctx, native.Input{Text: "again"}), native.ErrTurnActive)
+	assert.Empty(t, pendingCommands(h), "Pi doesn't get it")
+	h.write(`{"type":"agent_settled"}`)
+	h.settle()
+	assert.Len(t, h.sink.State().Results, 1)
+
+	cmd = h.prompt("p2", "hi")
+	h.refuse(cmd, "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.")
+	assert.ErrorIs(t, h.result("p2"), native.ErrTurnActive)
+	assert.Equal(t, 1, h.a.drift.Counts()["unexpected busy without a run"])
+}
+
+// pendingCommands returns the commands the adapter wrote that the test
+// hasn't read.
+func pendingCommands(h *harness) []map[string]any {
+	out := []map[string]any{}
+	for {
+		select {
+		case cmd := <-h.pi.cmds:
+			out = append(out, cmd)
+		default:
+			return out
+		}
+	}
+}
+
+// A run that ends with agent_end and no agent_settled ends its turn
+// settleGrace after Pi went quiet; the agent_settled that comes late is
+// ignored. A follow-up run, compaction or retry after agent_end keep the
+// turn going.
+func TestMissingSettle(t *testing.T) {
+	t.Parallel()
+	h := startedHarness(t, func(h *harness) { h.a.settleGrace = time.Second })
+	runTurn := func(id string) {
+		cmd := h.prompt(id, "hi")
+		h.answer(cmd, `{"disposition":"started"}`)
+		h.write(`{"type":"agent_start"}`)
+		require.NoError(t, h.result(id))
+		h.settle()
+	}
+
+	runTurn("p1")
+	h.write(`{"type":"agent_end","messages":[],"willRetry":false}`)
+	h.settle()
+	h.advance(500 * time.Millisecond)
+	h.write(`{"type":"queue_update","steering":[],"followUp":[]}`)
+	h.settle()
+	h.advance(700 * time.Millisecond)
+	assert.Empty(t, h.sink.State().Results, "Pi still sends records")
+	h.advance(300 * time.Millisecond)
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonEndTurn}}, h.sink.State().Results)
+	assert.Equal(t, 1, h.a.drift.Counts()["unexpected missing agent_settled"])
+	h.write(`{"type":"agent_settled"}`)
+	h.settle()
+	assert.Len(t, h.sink.State().Results, 1, "the late agent_settled is ignored")
+
+	// A follow-up run starts after agent_end.
+	runTurn("p2")
+	h.write(`{"type":"agent_end","messages":[],"willRetry":false}`)
+	h.write(`{"type":"agent_start"}`)
+	h.settle()
+	h.advance(2 * time.Second)
+	assert.Len(t, h.sink.State().Results, 1, "the follow-up runs")
+	// Compaction after the run takes long without a record.
+	h.write(`{"type":"agent_end","messages":[],"willRetry":false}`)
+	h.write(`{"type":"compaction_start","reason":"threshold"}`)
+	h.settle()
+	h.advance(5 * time.Second)
+	assert.Len(t, h.sink.State().Results, 1, "compaction runs")
+	h.write(`{"type":"compaction_end","reason":"threshold","aborted":false,"willRetry":false}`)
+	h.write(`{"type":"agent_settled"}`)
+	h.settle()
+	assert.Len(t, h.sink.State().Results, 2)
+	h.advance(2 * time.Second)
+	assert.Len(t, h.sink.State().Results, 2)
+
+	// A retried run doesn't wait for agent_settled.
+	runTurn("p3")
+	h.write(`{"type":"agent_end","messages":[],"willRetry":true}`)
+	h.settle()
+	h.advance(2 * time.Second)
+	assert.Len(t, h.sink.State().Results, 2)
+	h.write(`{"type":"agent_settled"}`)
+	h.settle()
+	assert.Len(t, h.sink.State().Results, 3)
+	assert.Equal(t, 1, h.a.drift.Counts()["unexpected missing agent_settled"])
+}
