@@ -633,11 +633,8 @@ export function hasStructuredTranscript(task: TaskSection): boolean {
 //
 // With a structured transcript, that transcript is the content: it keeps
 // the real order of text, thinking and tools, and its Markdown renders
-// properly. The text parsed from the terminal screen repeats the same
-// answer (often cut off), so it is left out; TaskGroup offers it as
-// "Terminal output". While the task is still running (live), the latest
-// screen text is kept at the end, because the agent only writes a text
-// block to its log once the block is finished.
+// properly. The agent messages repeat the same answer, so they are left
+// out.
 //
 // Without a transcript, the screen text and the tool calls are shown in
 // time order.
@@ -648,7 +645,7 @@ export function hasStructuredTranscript(task: TaskSection): boolean {
 // The messages steered into the task show where they came, by their time.
 export function getTaskActivity(
   task: TaskSection,
-  {live = false, transcriptOnly = false}: {live?: boolean; transcriptOnly?: boolean} = {},
+  {transcriptOnly = false}: {transcriptOnly?: boolean} = {},
 ): TaskStep[] {
   const coveredToolIDs = new Set(
     task.richActivity
@@ -667,12 +664,7 @@ export function getTaskActivity(
   const prompts = task.steered.map((message, index): TaskStep => ({type: "prompt", key: `steered-${message.id ?? index}`, message}));
 
   if (transcriptOnly) return withPrompts([...task.richActivity, ...uncoveredTools], prompts);
-  if (hasStructuredTranscript(task)) {
-    const result = withPrompts([...task.richActivity, ...uncoveredTools], prompts);
-    const latest = task.responses.at(-1);
-    if (live && latest) result.push(screenText(latest, task.responses.length - 1));
-    return result;
-  }
+  if (hasStructuredTranscript(task)) return withPrompts([...task.richActivity, ...uncoveredTools], prompts);
 
   const result: TaskStep[] = [
     ...task.responses.map(screenText),

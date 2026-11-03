@@ -4,17 +4,11 @@ import {features} from "./features";
 const all = {steer: true, interrupt: true, resume: true, images: true, settings: true, compact: true};
 
 describe("features", () => {
-  test("a terminal agent has its terminal, and nothing native", () => {
-    const pty = features("pty", null, false);
-    expect(pty.agentTerminal).toBe(true);
-    expect(Object.entries(pty).filter(([, on]) => on).map(([name]) => name)).toEqual(["agentTerminal"]);
-  });
   test("ACP has neither", () => {
     expect(Object.values(features("acp", all, true)).some(Boolean)).toBe(false);
   });
   test("a native agent's features follow its capabilities and the shell", () => {
     const full = features("native", all, true);
-    expect(full.agentTerminal).toBe(false);
     expect(full.shell && full.requests && full.settings && full.steer && full.interrupt).toBe(true);
     const bare = features("native", {steer: false, interrupt: false, resume: false, images: false}, false);
     expect(bare.shell || bare.settings || bare.steer || bare.interrupt).toBe(false);

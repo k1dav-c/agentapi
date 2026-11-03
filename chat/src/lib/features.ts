@@ -11,9 +11,6 @@ const SESSION_HISTORY_AGENTS: readonly AgentType[] = ["claude", "codex", "pi"];
 const SUBAGENT_AGENTS: readonly AgentType[] = ["claude", "codex"];
 
 export interface Features {
-  // The agent's own terminal: TTY mode, terminal keys and the live screen
-  // of a running task (PTY).
-  agentTerminal: boolean;
   // A shell in the agent's working directory: the terminal panel and the
   // login card's "Run in terminal" (native, unless --terminal=false).
   shell: boolean;
@@ -47,7 +44,6 @@ export interface Features {
 export function features(transport: Transport, capabilities: Capabilities | null, shellAvailable: boolean, agentType?: AgentType): Features {
   const native = transport === "native";
   return {
-    agentTerminal: transport === "pty",
     shell: native && shellAvailable,
     requests: native,
     structuredTranscript: native,

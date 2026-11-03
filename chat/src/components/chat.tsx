@@ -56,10 +56,7 @@ export function Chat() {
   const features = useChatSelector((chat) => chat.features);
   const canStop = useChatSelector((chat) => chat.canStop);
   const {sendMessage, retryFailedMessage, dismissFailedMessage, reconnectNow, stop} = useChatActions();
-  // Only the PTY transport has the agent's terminal: TTY mode, raw keys and
-  // the terminal prompt card need it. A native agent has none; the server
-  // offers a shell in its working directory instead.
-  const hasTerminal = features.agentTerminal;
+  // The server offers a shell in the agent's working directory.
   const hasShell = features.shell;
   // The transcript's tasks are memoized: their handlers keep their identity.
   const editFailedMessage = useStableCallback((clientId: string, content: string) => {
@@ -68,8 +65,8 @@ export function Chat() {
   });
   const stopTask = useStableCallback(() => void stop());
   useEffect(() => {
-    if (!hasTerminal && !hasShell) setTerminalOpen(false);
-  }, [hasTerminal, hasShell]);
+    if (!hasShell) setTerminalOpen(false);
+  }, [hasShell]);
   const openShell = (command?: string) => {
     setShellCommand(command);
     setTerminalOpen(true);
