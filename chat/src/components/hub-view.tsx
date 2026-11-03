@@ -2,6 +2,7 @@
 
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from "react";
 import {ArrowLeft, Bell, BellOff, ExternalLink, Plus, Search, X} from "lucide-react";
+import {toast} from "sonner";
 import {AgentMark} from "@/components/agent-mark";
 import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
@@ -24,6 +25,7 @@ import {
   type HubInstance,
   type InstanceState,
 } from "@/lib/hub";
+import {createHubAPI, hubErrorText} from "@/lib/hub-api";
 import {frameInstance, frameMessage, onFrameMessage, toFrame, type Framed, type FromFrame} from "@/lib/hub-frame";
 import {listSections, movePin, pinOf, sortPinned} from "@/lib/hub-order";
 import {shownUpdate} from "@/lib/hub-update";
@@ -292,18 +294,26 @@ export function HubView() {
     link.href = faviconUrl(waiting, counts.working > 0);
   }, [waiting, counts.working]);
 
-  // Pins an instance below the pinned ones on the hub, or unpins it; the
-  // change comes back on the event stream.
+  // The changes the page makes come back on the event stream, like any
+  // other; one the hub refuses, or doesn't get, says so in a toast.
+  const api = useMemo(() => createHubAPI(root), [root]);
+  const instancesRef = useRef(instances);
+  instancesRef.current = instances;
+  const attempt = useCallback(async (failure: (name: string) => string, id: string, change: () => Promise<void>): Promise<boolean> => {
+    try {
+      await change();
+      return true;
+    } catch (error) {
+      const instance = instancesRef.current.get(id);
+      toast.error(failure(instance ? displayName(instance) : id), {description: hubErrorText(error)});
+      return false;
+    }
+  }, []);
+
+  // Pins an instance below the pinned ones on the hub, or unpins it.
   const setPinned = useCallback(
-    async (id: string, pinned: boolean) => {
-      await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        credentials: "same-origin",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({pinned}),
-      });
-    },
-    [root],
+    (id: string, pinned: boolean) => attempt((name) => `Couldn't ${pinned ? "pin" : "unpin"} ${name}`, id, () => api.changeInstance(id, {pinned})),
+    [api, attempt],
   );
 
   // Keys: / searches, j and k (or the arrows) move between rows, p pins or
@@ -369,39 +379,21 @@ export function HubView() {
   };
 
   const forget = async (id: string) => {
-    await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {method: "DELETE", credentials: "same-origin"});
+    if (!(await attempt((name) => `Couldn't forget ${name}`, id, () => api.forgetInstance(id)))) return;
     if (selected === id) select(undefined);
   };
-  // The change comes back on the event stream, like any other.
-  const setGroup = async (id: string, group: string) => {
-    await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      credentials: "same-origin",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({group}),
-    });
-  };
+  const setGroup = (id: string, group: string) =>
+    attempt((name) => (group ? `Couldn't move ${name} to ${group}` : `Couldn't take ${name} out of its group`), id, () => api.changeInstance(id, {group}));
   // Mutes what an instance waits for now, until that changes (the hub ends
   // the mute then), or ends the mute.
-  const setMuted = async (id: string, muted: boolean) => {
-    await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      credentials: "same-origin",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({muted}),
-    });
-  };
+  const setMuted = (id: string, muted: boolean) =>
+    attempt((name) => `Couldn't ${muted ? "mute" : "unmute"} ${name}`, id, () => api.changeInstance(id, {muted}));
   // Moves a pinned instance past the next pinned row the list shows; the hub
   // keeps the order of all of them.
   const movePinned = async (id: string, step: -1 | 1) => {
     const ids = movePin(sortPinned(all).map((instance) => instance.id), shownPins, id, step);
     if (!ids) return;
-    await fetch(`${root}/api/pins`, {
-      method: "PUT",
-      credentials: "same-origin",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ids}),
-    });
+    await attempt((name) => `Couldn't move ${name}`, id, () => api.setPins(ids));
   };
   const renameGroup = async (from: string, to: string) => {
     // A folded group stays folded under its new name.
@@ -409,7 +401,11 @@ export function HubView() {
       if (next.delete(from)) next.add(to);
     });
     const members = all.filter((instance) => (instance.group?.trim() ?? "") === from);
-    await Promise.all(members.map((instance) => setGroup(instance.id, to)));
+    const results = await Promise.allSettled(members.map((instance) => api.changeInstance(instance.id, {group: to})));
+    const failed = results.flatMap((result) => (result.status === "rejected" ? [result.reason as unknown] : []));
+    if (failed.length > 0) {
+      toast.error(`Couldn't move ${failed.length} of ${members.length} ${members.length === 1 ? "agent" : "agents"} to ${to}`, {description: hubErrorText(failed[0])});
+    }
   };
 
   if (session === undefined) {
