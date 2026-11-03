@@ -3,7 +3,7 @@
 English | [繁體中文](chat-ui.zh-TW.md)
 
 Open `/chat` to use the chat UI embedded in the `agentapi` binary. It works with every transport
-on desktops and phones, communicating with the server through the
+on desktops and phones, and talks to the server through the
 [HTTP API](../README.md#http-api-reference).
 
 Screenshots and animations show AgentAPI v0.28.0 running `native-demo` on a sample site. The demo's
@@ -60,7 +60,7 @@ exited; hover to see the first error. Limit reached means a usage limit stopped 
 agent's message. The server also assigns tool calls and thinking to tasks.
 
 *native* A message you steer into the running task stays in that task: it shows among the agent's
-steps where it came, as your message marked *steered*, and the task keeps its number, state and
+steps where it arrived, as your message marked *steered*, and the task keeps its number, state and
 cost. The numbers are the server's, as `GET /tasks`, webhooks and the hub count them. With a server
 older than tasks, every message starts one.
 
@@ -69,7 +69,7 @@ in the header on narrower screens. *native* Claude Code, Codex and Pi also show 
 calls made during the task, including subagents, at provider list prices. Calls between tasks,
 such as compaction, don't count toward a task.
 
-This API-equivalent cost isn't charged by subscriptions. Hover for calls and tokens. Costs refresh
+Subscriptions aren't billed this API-equivalent cost. Hover for calls and tokens. Costs refresh
 at the end of a turn and every 15 seconds during it. See [Session costs](../README.md#session-costs)
 for the calculation and price configuration.
 
@@ -168,7 +168,7 @@ commands go directly to the agent, including Claude Code's `/code-review`.
 | `/effort [effort]` | Changes the reasoning effort |
 | `/mode [bypass\|auto\|ask\|plan]` | Changes the permission mode |
 | `/plan` | Switches to the plan mode |
-| `/compact` | Summarizes the conversation to free the context (Claude Code compacts on its own `/compact`, which the chat sends it) |
+| `/compact` | Summarizes the conversation to free the context (for Claude Code, the chat sends Claude Code's own `/compact`) |
 | `/clear` | Starts a new conversation: restarts the agent in a new session |
 | `/terminal` | Opens the shell terminal |
 | `/login` | Runs the agent's login command in the shell terminal |
@@ -233,15 +233,15 @@ above the composer says so, with **Compact**. A closed note stays away until the
 composer says when the limit resets. The queued tasks wait until then, marked *held until the usage
 limit resets*, instead of failing one by one. **Continue at reset** sends a message that has the
 agent go on with the task a minute after the reset, **Continue now** sends it now, and **Send queued
-tasks** lets the queue go at once. A task you send yourself goes out right away. Until then the
-agent needs you, as with a request: the header, the tab title and its icon say so, and a background
+tasks** lets the queue go at once. A task you send yourself goes out right away. Until the reset
+the agent needs you, as with a request: the header, the tab title and its icon say so, and a background
 tab with notifications on shows one.
 
 ## Requests and decision cards
 
 What the agent asks you appears above the composer as a card, and the agent waits. The status line
-above the card (not on a phone, where the card says it), the header and the tab title say "Needs you", the task shows "Waiting for you", and
-its tool row shows what it waits for. Number keys pick an option. A request is answered once, from
+above the card (on a phone, the card itself), the header and the tab title say "Needs you", the
+task shows "Waiting for you", and its tool row shows what it waits for. Number keys pick an option. A request is answered once, from
 any open chat; one that can no longer be answered says so.
 
 ### Approvals
@@ -385,14 +385,14 @@ your time zone), and all time. These are API-equivalent costs at list prices; ho
 
 **Open** restarts the agent on a session and displays its conversation. **Start a copy** opens a
 copy under a new id, leaving the original session unchanged. Both replace the current conversation
-and queue and require a second click.
+and queue, and require a second click.
 
 ![The Explorer's Session tab asking for a second click to restart the agent](screenshots/explorer-session.png)
 
 **Restart agent** stops the agent, clears the conversation and starts it again in a new session; it
-asks for a second click. After AgentAPI gave up on an agent that kept exiting, this starts it
-again. Codex and Pi, when AgentAPI starts their CLI directly, update to their latest release first. **Download conversation JSONL** saves every message, tool call and result of
-the session, one event per line, followed by those of the subagents the agent ran; the session
+asks for a second click. When AgentAPI has given up on an agent that kept exiting, this starts it
+again. Codex and Pi, when AgentAPI starts their CLI directly, update to their latest release first.
+**Download conversation JSONL** saves every message, tool call and result of the session, one event per line, followed by those of the subagents the agent ran; the session
 details menu has it too.
 
 ### Webhook
@@ -460,7 +460,8 @@ Clicking the status in the header opens the session details: the status, agent, 
 *native* the agent's session ID (its first characters, with a copy button), AgentAPI version, what
 the agent is doing, the queue and the tokens in and out. Its menu downloads the conversation as
 JSONL (as the Explorer's Session tab does), turns on browser notifications, shows the keyboard
-shortcuts, and shows how to add this AgentAPI to a [hub](hub.md). (How full the context is and the usage limits are in the composer's toolbar; see
+shortcuts, and shows how to add this AgentAPI to a [hub](hub.md). (How full the context is and
+the usage limits are in the composer's toolbar; see
 [Context and usage limits](#context-and-usage-limits).)
 
 While the tab is in the background, its icon shows an amber dot when the agent needs you, a blue dot
@@ -473,7 +474,7 @@ it says which.
 
 ![Adding this AgentAPI to a hub: the hub's address, and the commands to copy](screenshots/join-hub.png)
 
-When a task ends while the chat is visible, or the chat becomes visible after one ended, it tells
+When a task ends while the chat is visible, or the chat becomes visible after one ended, the chat tells
 the server you saw it (`POST /tasks/seen`), so a dashboard that watches many AgentAPIs, `agentapi
 list` and other tabs stop showing the task as unread (see the README's
 [Watching many instances](../README.md#watching-many-instances)).
@@ -491,9 +492,10 @@ On a phone the transcript takes the full width and thinking folds into the task.
 one row: the message box, `⋯` (attach, voice input and the agent's settings) and send, with stop
 while the agent works; it grows as the message wraps. The agent's mode, model, effort and usage take
 a second row when you ask for it from `⋯`, when a slash command such as `/model` opens one of their
-menus, or while the usage nears a limit. While a card asks for you, the card alone says so (the status line above it is left to screen
-readers), and its options leave out the number keys. A request card takes at most 60% of the screen and a title cut to two lines
-can be shown in full. The file viewer takes the whole screen, and the terminals have the key bar.
+menus, or while the usage nears a limit. While a card asks for you, the card alone says so (the
+status line above it is left to screen readers), and its options leave out the number keys. A
+request card takes at most 60% of the screen and a title cut to two lines can be shown in full. The
+file viewer takes the whole screen, and the terminals have the key bar.
 While the keyboard is up, the page ends above it, so the composer and the key bar stay in view.
 
 ![A question card on a phone](screenshots/mobile-question.png)
@@ -506,11 +508,13 @@ While the keyboard is up, the page ends above it, so the composer and the key ba
 
 A [hub](../README.md#running-a-hub) (`agentapi hub serve`) serves this chat for every AgentAPI it
 watches. Its list puts the agents you pin on top, then what needs you first or the latest change
-first, each state with a glyph of its own, and says what each agent waits for (the approval's
-command, the question) or does; search and chips filter it. On a desktop, an overview counts each
+first. Each state has a glyph of its own, and each row says what the agent waits for (the
+approval's command, the question) or does; search and chips filter the list. On a desktop, an overview counts each
 state and has a card per request. Picking an agent opens it in this chat beside the list (or instead
 of it on a phone, with a back button), under one bar: the hub's, with the chat's own buttons in it.
-It opens through the hub, which sends the instance's token. `+` adds an instance by its URL and
+It opens through the hub, which sends the instance's token.
+
+`+` adds an instance by its URL and
 token. Each row's `⋯` menu pins the instance to the top, puts it in a group of your own (the list
 then shows a folding header per group), mutes what it waits for until that changes, or forgets a
 stopped or unreachable one. Rows, group headers and a card of the overview show what the agents
