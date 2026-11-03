@@ -1412,7 +1412,7 @@ valid = hmac.compare_digest(expected, signature) and abs(time.time() - int(times
 （3）次嘗試，每次逾時為 `--webhook-timeout`（10 秒）；用完次數後會放棄並記錄在 log。
 
 佇列最多保存 1,024 個事件，滿了就丟棄新事件。漏收事件的接收端應透過 API 或下一次心跳取得目前
-狀態。關閉時，AgentAPI 最多等 5 秒讓 `instance.stopped` 送達。
+狀態。關閉時，AgentAPI 最多等 2 秒讓 `instance.stopped` 送達。
 
 可以用 Go `text/template`（`--webhook-payload-template`）改寫 body 的格式以符合接收端，例如聊天
 服務的 incoming webhook。可用欄位有 `.ID`、`.Type`、`.CreatedAt`、`.Instance` 和 `.Data`（事件的

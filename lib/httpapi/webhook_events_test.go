@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -691,6 +692,27 @@ func TestWebhookStop(t *testing.T) {
 	default:
 		t.Fatal("instance.stopped wasn't delivered before stop returned")
 	}
+}
+
+// Waiting for instance.stopped takes at most half the time shutting down
+// has: the HTTP server's drain and the state database get the rest.
+func TestWebhookStopLeavesTimeForTheRest(t *testing.T) {
+	t.Parallel()
+	hang := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-hang }))
+	defer server.Close()
+	defer close(hang)
+	// The mock clock's webhookStopTimeout never passes.
+	d := testDispatcher(t, WebhookConfig{URL: server.URL, Events: []string{"instance.stopped"}, Heartbeat: -1}, quartz.NewMock(t))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	d.start(ctx)
+	stopCtx, stopCancel := context.WithTimeout(t.Context(), time.Second)
+	defer stopCancel()
+	start := time.Now()
+	d.stop(stopCtx)
+	assert.Less(t, time.Since(start), 900*time.Millisecond)
+	assert.NoError(t, stopCtx.Err(), "time left for the rest")
 }
 
 func TestWebhookHeartbeat(t *testing.T) {

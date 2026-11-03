@@ -154,7 +154,8 @@ answers write keys directly to the agent's terminal.
    `Start` listens, then writes the registry entry (unless `--registry=false`)
    and serves.
 5. On SIGINT, SIGTERM or SIGHUP, or when a PTY agent exits, the webhook sends
-   `instance.stopped` and the registry entry is removed. A restart under way
+   `instance.stopped` (waiting at most 2 s, and half of `Stop`'s 5 s, for
+   it) and the registry entry is removed. A restart under way
    is cancelled, the HTTP server shuts down, and the queue loop and the
    session-log watcher stop. A native or PTY agent that still runs and the
    shell terminal are closed, and the state DB is flushed and closed. SIGUSR1

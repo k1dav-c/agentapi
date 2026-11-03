@@ -1672,7 +1672,7 @@ deliveries are logged and discarded.
 
 The queue holds 1,024 events and drops new ones when full. A receiver that misses events should
 read the current state from the API or the next heartbeat. On shutdown, AgentAPI waits up to
-5 seconds to deliver `instance.stopped`.
+2 seconds to deliver `instance.stopped`.
 
 An optional Go `text/template` (`--webhook-payload-template`) reshapes the body for the receiver,
 such as a chat service's incoming webhook. Available fields are `.ID`, `.Type`, `.CreatedAt`,

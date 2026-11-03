@@ -40,8 +40,10 @@ const (
 	defaultWebhookHeartbeat   = 60 * time.Second
 	// The longest wait between two attempts of a delivery.
 	maxWebhookRetryDelay = 30 * time.Second
-	// How long shutting down waits for instance.stopped to be delivered.
-	webhookStopTimeout = 5 * time.Second
+	// How long shutting down waits for instance.stopped to be delivered,
+	// at most: no more than half the time Stop has left, which the HTTP
+	// server's drain and the state database need too.
+	webhookStopTimeout = 2 * time.Second
 	webhookQueueSize   = 1024
 )
 
@@ -551,10 +553,15 @@ func (d *webhookDispatcher) heartbeats(ctx context.Context) {
 	}
 }
 
-// stop sends instance.stopped and waits, until ctx ends or for at most
-// webhookStopTimeout, for it to be delivered. Call it before ending the
-// context start was given.
+// stop sends instance.stopped and waits for it to be delivered, for at
+// most webhookStopTimeout and half the time ctx has left: the rest is for
+// what Stop does after. Call it before ending the context start was given.
 func (d *webhookDispatcher) stop(ctx context.Context) {
+	if deadline, ok := ctx.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Until(deadline)/2)
+		defer cancel()
+	}
 	done := make(chan struct{})
 	if !d.enqueue(webhookEventInstanceStopped, d.snapshotData(), done) {
 		return
