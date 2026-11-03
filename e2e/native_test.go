@@ -150,15 +150,7 @@ func startNative(ctx context.Context, t *testing.T, flags ...string) *nativeServ
 		}
 	}()
 	t.Cleanup(func() {
-		_ = cmd.Process.Signal(os.Interrupt)
-		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			_ = cmd.Process.Kill()
-			<-done
-		}
+		stopServer(cmd)
 		wg.Wait()
 	})
 	return s
@@ -177,23 +169,6 @@ func cleanEnv() []string {
 		env = append(env, kv)
 	}
 	return env
-}
-
-// agentapiBinary is $AGENTAPI_BINARY_PATH, or the binary built from the
-// repository.
-func agentapiBinary(ctx context.Context, t *testing.T) string {
-	t.Helper()
-	if path := os.Getenv("AGENTAPI_BINARY_PATH"); path != "" {
-		return path
-	}
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-	path := filepath.Join(cwd, "..", "out", "agentapi")
-	build := exec.CommandContext(ctx, "go", "build", "-o", path, ".")
-	build.Dir = filepath.Join(cwd, "..")
-	out, err := build.CombinedOutput()
-	require.NoError(t, err, "build agentapi: %s", out)
-	return path
 }
 
 // do sends a request with the server's token, and returns the response's
