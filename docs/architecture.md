@@ -365,7 +365,8 @@ type Factory func(resume Resume) (Adapter, error)
   subagents the agent ran in the session are read the same way, from their
   own logs (`sessions.Store.Subagents`), for `GET /subagents` and the chat's
   Lineage panel. Their state comes from the Agent tool call that started
-  them.
+  them. A subagent's timeline events and messages (`GET /timeline?subagents`,
+  `GET /subagents/{id}`) are kept until its log changes.
 - **Exits.** An agent that exits on its own, or fails a start the
   conversation made by itself (the first, after an exit or a wait for a
   login), is launched again on its session after the next of

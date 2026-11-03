@@ -35,6 +35,9 @@ type Store struct {
 	// subagents'.
 	logs *agentlog.Index[*sessionLog]
 	subs *agentlog.Index[*sessionLog]
+	// views holds what was read of subagents' logs for their timeline
+	// events and runs.
+	views *agentlog.Index[*subagentView]
 	// names reads Codex's session index, which holds its threads' names.
 	names *agentlog.Index[*codexlog.ThreadNames]
 	// metas holds the first lines of Codex's session logs.
@@ -79,6 +82,9 @@ type Config struct {
 const (
 	maxLogs     = 20_000
 	maxLogBytes = 128 << 20
+	// A subagent's view holds about twice its log.
+	maxViews     = 1000
+	maxViewBytes = 64 << 20
 )
 
 // Supported reports whether a Store reads the sessions of an agent of
@@ -115,6 +121,7 @@ func New(agentType, cwd string, config Config) (*Store, error) {
 	}
 	s.logs = agentlog.NewIndex(func(string) *sessionLog { return s.newSessionLog(false) }, maxLogs, maxLogBytes)
 	s.subs = agentlog.NewIndex(func(string) *sessionLog { return s.newSessionLog(true) }, maxLogs, maxLogBytes)
+	s.views = agentlog.NewIndex(func(string) *subagentView { return &subagentView{} }, maxViews, maxViewBytes)
 	return s, nil
 }
 

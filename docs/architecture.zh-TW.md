@@ -314,7 +314,8 @@ type Factory func(resume Resume) (Adapter, error)
   帶入該工作階段的訊息，這些訊息由伺服器從 agent 的工作階段紀錄讀出
   （`sessions.Store.ReadHistory`；`GET /sessions` 會列出它們）。agent 在工作階段中執行過的
   sub agent 也以同樣方式從它們自己的紀錄讀出（`sessions.Store.Subagents`），提供給
-  `GET /subagents` 和聊天介面的 Lineage 面板；它們的狀態取自啟動它們的 Agent 工具呼叫。
+  `GET /subagents` 和聊天介面的 Lineage 面板；它們的狀態取自啟動它們的 Agent 工具呼叫。sub agent
+  的時間軸事件和訊息（`GET /timeline?subagents`、`GET /subagents/{id}`）會保留到它的紀錄改變為止。
 - **結束。** agent 自行結束，或對話自己發起的啟動（第一次、結束後、等待登入後）失敗時，對話會在
   下一個 `RestartDelays`（2、10、30 秒）後接續原工作階段重新啟動，並使用新的世代。observer 會
   得知每次嘗試（`AgentExited`；伺服器顯示生命週期 `restarting`），以及最後一次失敗後對話放棄

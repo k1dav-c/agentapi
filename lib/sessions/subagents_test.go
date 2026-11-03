@@ -111,3 +111,39 @@ func TestCodexOwnLine(t *testing.T) {
 		assert.Equal(t, want, codexOwnLine([]byte(line), 3), line)
 	}
 }
+
+// A subagent's events and run are read once, and again once its log
+// changed; what a caller does to them leaves the next caller's alone.
+func TestSubagentViewsFollowTheLog(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	path := filepath.Join(config, "projects", "-w", "s1", "subagents", "agent-a.jsonl")
+	writeLog(t, path, time.Now().Add(-time.Minute),
+		`{"isSidechain":true,"agentId":"a","type":"user","timestamp":"2026-10-18T10:00:01.000Z","sessionId":"s1","message":{"role":"user","content":"Find the bug"}}`,
+		`{"isSidechain":true,"agentId":"a","type":"assistant","timestamp":"2026-10-18T10:00:02.000Z","sessionId":"s1","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"Looking."}],"stop_reason":"end_turn"}}`)
+	store := newStore(t, "claude", "/w")
+	events, err := store.SubagentEvents("s1")
+	require.NoError(t, err)
+	require.Len(t, events, 3)
+	events[1].Content = nil
+	_, run, err := store.ReadSubagent("s1", "a")
+	require.NoError(t, err)
+	require.Len(t, run.Messages, 1)
+	run.Messages[0].Content[0].Text = "changed"
+
+	again, err := store.SubagentEvents("s1")
+	require.NoError(t, err)
+	require.Len(t, again, 3)
+	assert.Equal(t, "Find the bug", *again[1].Content)
+	_, run, err = store.ReadSubagent("s1", "a")
+	require.NoError(t, err)
+	assert.Equal(t, "Looking.", run.Messages[0].Content[0].Text)
+
+	appendLines(t, path, `{"isSidechain":true,"agentId":"a","type":"assistant","timestamp":"2026-10-18T10:00:03.000Z","sessionId":"s1","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"Found it."}],"stop_reason":"end_turn"}}`+"\n")
+	events, err = store.SubagentEvents("s1")
+	require.NoError(t, err)
+	assert.Len(t, events, 4)
+	_, run, err = store.ReadSubagent("s1", "a")
+	require.NoError(t, err)
+	assert.Len(t, run.Messages, 2)
+}

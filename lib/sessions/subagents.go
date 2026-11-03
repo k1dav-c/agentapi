@@ -93,7 +93,7 @@ func (s *Store) SubagentEvents(sessionID string) ([]transcript.SessionEvent, err
 	}
 	var all []transcript.SessionEvent
 	for _, sub := range subs {
-		all = append(all, sub.events()...)
+		all = append(all, sub.tagged(s.subagentEvents(sub))...)
 	}
 	return all, nil
 }
@@ -109,7 +109,80 @@ func (s *Store) ReadSubagent(sessionID, id string) (Subagent, SubagentRun, error
 	if i < 0 {
 		return Subagent{}, SubagentRun{}, ErrSubagentNotFound
 	}
-	return subs[i], subs[i].run(), nil
+	return subs[i], s.subagentRun(subs[i]), nil
+}
+
+// subagentView is what was read of a subagent's log for its timeline
+// events and its run, as the log was at size and modified: the timeline
+// and the subagent are asked for on every turn, of logs that are mostly
+// done growing. It is read again once the log changed.
+type subagentView struct {
+	size      int64
+	modified  time.Time
+	events    []transcript.SessionEvent
+	hasEvents bool
+	run       SubagentRun
+	hasRun    bool
+}
+
+// Line reads none of the log: the view reads it whole when asked for it.
+func (v *subagentView) Line([]byte) bool { return false }
+
+// Size is about how many bytes of memory the view holds: about as many
+// as the log has, for each of the events and the run.
+func (v *subagentView) Size() int {
+	n := 256
+	if v.hasEvents {
+		n += int(v.size)
+	}
+	if v.hasRun {
+		n += int(v.size)
+	}
+	return n
+}
+
+// withView calls fn with the view of sub's log, up to date with it, while
+// no other caller uses it; false if the log can't be read.
+func (s *Store) withView(sub Subagent, fn func(*subagentView)) bool {
+	return s.views.Read(sub.path, func(v *subagentView, info agentlog.FileInfo) {
+		if v.size != info.Size || !v.modified.Equal(info.ModTime) {
+			*v = subagentView{size: info.Size, modified: info.ModTime}
+		}
+		fn(v)
+	}) == nil
+}
+
+// subagentEvents returns the timeline events of sub's log, untagged; the
+// caller may change them, not what they point to.
+func (s *Store) subagentEvents(sub Subagent) []transcript.SessionEvent {
+	var events []transcript.SessionEvent
+	if !s.withView(sub, func(v *subagentView) {
+		if !v.hasEvents {
+			v.events, v.hasEvents = slices.Clip(sub.events()), true
+		}
+		events = slices.Clone(v.events)
+	}) {
+		return sub.events()
+	}
+	return events
+}
+
+// subagentRun returns what sub did, which the caller may change: its
+// messages and their content blocks are copies.
+func (s *Store) subagentRun(sub Subagent) SubagentRun {
+	var run SubagentRun
+	if !s.withView(sub, func(v *subagentView) {
+		if !v.hasRun {
+			v.run, v.hasRun = sub.run(), true
+		}
+		run = SubagentRun{Prompt: v.run.Prompt, Messages: slices.Clone(v.run.Messages)}
+	}) {
+		return sub.run()
+	}
+	for i := range run.Messages {
+		run.Messages[i].Content = slices.Clone(run.Messages[i].Content)
+	}
+	return run
 }
 
 // parser returns the line parsers of the subagent's log.
@@ -160,7 +233,7 @@ func (s Subagent) run() SubagentRun {
 	return run
 }
 
-// events reads the subagent's log into timeline events tagged with it.
+// events reads the subagent's log into timeline events.
 func (s Subagent) events() []transcript.SessionEvent {
 	_, parser, _ := s.parser()
 	var events []transcript.SessionEvent
@@ -170,6 +243,12 @@ func (s Subagent) events() []transcript.SessionEvent {
 		}
 		return true
 	})
+	return events
+}
+
+// tagged returns events, the subagent's, tagged with it after a system
+// event that says it started.
+func (s Subagent) tagged(events []transcript.SessionEvent) []transcript.SessionEvent {
 	if len(events) == 0 {
 		return nil
 	}
