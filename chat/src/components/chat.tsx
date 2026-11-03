@@ -19,8 +19,8 @@ import {Lineage} from "./lineage";
 import {BackgroundAlerts} from "./background-alerts";
 import {SeenMarker} from "./seen-marker";
 
-// The Explorer (task index, MCP settings) isn't needed for the
-// first paint, so it loads right after, keeping the initial bundle small.
+// The Explorer (task index, agent settings) isn't needed for the first
+// paint, so it loads right after, keeping the initial bundle small.
 // The placeholder matches its trigger button.
 const Explorer = dynamic(() => import("./explorer").then((module) => module.Explorer), {
   ssr: false,

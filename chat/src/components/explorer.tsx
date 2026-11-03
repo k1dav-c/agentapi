@@ -2,7 +2,7 @@
 
 import {useEffect, useMemo, useState} from "react";
 import {discoverFiles, discoverLinks} from "@/lib/explorer-index";
-import {Download, ExternalLink, FileText, FolderSearch, Link as LinkIcon, ListTree, LoaderCircle, RotateCw, Server, Webhook as WebhookIcon} from "lucide-react";
+import {Download, ExternalLink, FileText, FolderSearch, Link as LinkIcon, ListTree, LoaderCircle, RotateCw, Webhook as WebhookIcon} from "lucide-react";
 import {toast} from "sonner";
 import {agentDisplayName, updatesOnRestart} from "@/lib/agents";
 import {useChatActions, useChatSelector} from "./chat-provider";
@@ -10,7 +10,6 @@ import type {DraftMessage, Message} from "@/lib/conversation";
 import type {ServerTask} from "@/lib/server-tasks";
 import {filterTasks} from "@/lib/task-filter";
 import {TASK_STATUS_META, type Timeline} from "@/lib/task-timeline";
-import {MCPSettings, useMCPSettings} from "./explorer-mcp";
 import {useFileViewer} from "./file-viewer-context";
 import {Button} from "./ui/button";
 import {
@@ -41,7 +40,6 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
   const agentType = useChatSelector((chat) => chat.agentType);
   const {deleteMessages, downloadSession} = useChatActions();
   const [downloading, setDownloading] = useState(false);
-  const {restartKeepsConversation} = features;
   const fileViewer = useFileViewer();
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("index");
@@ -69,9 +67,6 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
     return () => window.clearTimeout(timer);
   }, [confirmRestart]);
   const [restartingAgent, setRestartingAgent] = useState(false);
-  // The MCP tab keeps what it shows while the Explorer is closed or on
-  // another tab.
-  const mcp = useMCPSettings(open && activeTab === "mcp");
   // Every list is newest first; items keep their task number. Only the
   // tab that shows is listed, while the Explorer is open: the messages
   // change many times a second while the agent works.
@@ -131,7 +126,7 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
         <DialogHeader className="border-b px-5 py-4 pr-12">
           <DialogTitle>Explorer</DialogTitle>
           <DialogDescription>
-            Jump to a task or link, or open a file. Agent settings are under MCP, Session and Webhook.
+            Jump to a task or link, or open a file. Agent settings are under Session and Webhook.
           </DialogDescription>
         </DialogHeader>
         <Tabs
@@ -140,11 +135,10 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
           className="min-h-0 flex-1 gap-0"
         >
           <div className="border-b px-3 py-2">
-            <TabsList className="grid w-full grid-cols-6">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="index"><ListTree /><span className="max-sm:sr-only">Index</span></TabsTrigger>
               <TabsTrigger value="files"><FileText /><span className="max-sm:sr-only">Files</span></TabsTrigger>
               <TabsTrigger value="links"><LinkIcon /><span className="max-sm:sr-only">Links</span></TabsTrigger>
-              <TabsTrigger value="mcp"><Server /><span className="max-sm:sr-only">MCP</span></TabsTrigger>
               <TabsTrigger value="session"><RotateCw /><span className="max-sm:sr-only">Session</span></TabsTrigger>
               <TabsTrigger value="webhook"><WebhookIcon /><span className="max-sm:sr-only">Webhook</span></TabsTrigger>
             </TabsList>
@@ -238,9 +232,6 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
                 </button>
               ))}
             </div>
-          </TabsContent>
-          <TabsContent value="mcp" className="min-h-0 overflow-y-auto overscroll-contain p-4">
-            <MCPSettings mcp={mcp} restartKeepsConversation={restartKeepsConversation} />
           </TabsContent>
           <TabsContent value="session" className="min-h-0 overflow-y-auto overscroll-contain p-4">
             {features.sessionHistory && (

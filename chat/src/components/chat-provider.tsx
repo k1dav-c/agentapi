@@ -104,13 +104,6 @@ const API_CALLS = [
   "getWebhook",
   "updateWebhook",
   "testWebhook",
-  "getMCP",
-  "updateMCP",
-  "checkMCP",
-  "getMCPProfiles",
-  "saveMCPProfile",
-  "deleteMCPProfile",
-  "applyMCPProfile",
   // A file in the agent's working directory and its uncommitted changes,
   // for the file viewer (GET /files/content, GET /files/diff); the files
   // whose path ends with one the agent named that isn't there (GET

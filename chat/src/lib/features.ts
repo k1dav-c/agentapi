@@ -33,9 +33,6 @@ export interface Features {
   interrupt: boolean;
   // The context and rate limits meter (native).
   usage: boolean;
-  // A restart for an MCP change keeps the conversation: the agent resumes
-  // its session (native).
-  restartKeepsConversation: boolean;
   // The agent's earlier sessions, to open one or a copy of it (native
   // Claude Code, Codex and Pi).
   sessionHistory: boolean;
@@ -59,7 +56,6 @@ export function features(transport: Transport, capabilities: Capabilities | null
     steer: native && Boolean(capabilities?.steer),
     interrupt: native && Boolean(capabilities?.interrupt),
     usage: native,
-    restartKeepsConversation: native,
     sessionHistory: native && agentType !== undefined && SESSION_HISTORY_AGENTS.includes(agentType),
     subagents: native && agentType !== undefined && SUBAGENT_AGENTS.includes(agentType),
     cost: native && agentType !== undefined && SESSION_HISTORY_AGENTS.includes(agentType),
