@@ -204,7 +204,7 @@ func claudeLogsByID(s *Store, id string) (own, elsewhere []string) {
 // claudeSubagentLogs lists the logs of the subagents of the session id
 // whose log is at path: <session>/subagents/agent-<id>.jsonl next to it.
 func claudeSubagentLogs(id, path string) []Subagent {
-	if id == "" || strings.ContainsAny(id, `/\`) || id == "." || id == ".." {
+	if !ValidID(id) {
 		return nil
 	}
 	logs, _ := logsIn(filepath.Join(filepath.Dir(path), id, "subagents"))

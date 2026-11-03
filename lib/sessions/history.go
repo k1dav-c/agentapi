@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/coder/agentapi/lib/agentlog"
 	conv "github.com/coder/agentapi/lib/conversation"
@@ -18,6 +20,22 @@ import (
 // ErrSessionNotFound is returned for a session the agent has no log of in
 // the working directory.
 var ErrSessionNotFound = errors.New("no such session in this directory")
+
+// ErrInvalidID is returned for a session ID that can't be one: the logs
+// are named after their sessions, and it would name another file.
+var ErrInvalidID = errors.New("invalid session id")
+
+// ValidID reports whether id can be a session's: one name of a file, of
+// printable characters. Claude Code, Codex and Pi name their sessions with
+// UUIDs.
+func ValidID(id string) bool {
+	if id == "" || id == "." || id == ".." || len(id) > 256 {
+		return false
+	}
+	return !strings.ContainsFunc(id, func(r rune) bool {
+		return r == '/' || r == '\\' || unicode.IsControl(r) || r == utf8.RuneError
+	})
+}
 
 // SessionSummary describes one of an agent's sessions in a working
 // directory, as its log has it.
@@ -70,8 +88,12 @@ func (s *Store) List(limit int) ([]SessionSummary, error) {
 }
 
 // ReadHistory reads the conversation of the session id. It returns
-// ErrSessionNotFound for a session it has no log of.
+// ErrInvalidID for an id that can't be a session's, and ErrSessionNotFound
+// for a session it has no log of.
 func (s *Store) ReadHistory(id string) (SessionHistory, error) {
+	if !ValidID(id) {
+		return SessionHistory{}, ErrInvalidID
+	}
 	path, ok := s.find(id)
 	if !ok {
 		return SessionHistory{}, ErrSessionNotFound

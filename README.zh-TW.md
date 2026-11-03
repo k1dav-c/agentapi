@@ -769,7 +769,8 @@ AgentAPI 讀取 Claude Code、Codex 和 Pi 的紀錄，列出並開啟工作目�
   內容。帶 `{"fork": true}` 時，agent 會以新的 id 開啟它的副本（Claude Code 的
   `--fork-session`、Codex 的 `thread/fork`、Pi 的 `--fork`），原本的工作階段維持不變。佇列和尚未
   回覆的請求會像重新啟動時一樣清除；agent 正在執行回合、壓縮 context 或重新啟動時回傳 409，
-  被拒絕的開啟不會改動目前的對話。
+  被拒絕的開啟不會改動目前的對話。id 不是單一檔名（含 `/` 或 `\`、是 `.` 或 `..`、含控制字元）時
+  回傳 400。
 
 在聊天介面中，Explorer 的 Session 分頁會列出這些工作階段，並提供 **Open** 和
 **Start a copy**，兩者都要點第二次確認。

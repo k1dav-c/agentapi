@@ -129,6 +129,11 @@ func (s *Server) getCost(_ context.Context, input *CostRequest) (*CostResponse, 
 // The session's log is read, and its images stored, before s.mu is taken:
 // a long session takes a while.
 func (s *Server) resumeSession(_ context.Context, input *ResumeSessionRequest) (*InterruptResponse, error) {
+	if !sessions.ValidID(input.ID) {
+		// It names the session's log: another file's name never reaches
+		// the file system.
+		return nil, huma.Error400BadRequest(sessions.ErrInvalidID.Error())
+	}
 	if input.ID == s.native.SessionRef() && !input.Body.Fork {
 		return okResponse(), nil
 	}

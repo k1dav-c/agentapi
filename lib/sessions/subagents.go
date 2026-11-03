@@ -71,6 +71,9 @@ func (s *Store) Subagents(sessionID string) ([]Subagent, error) {
 	if sessionID == "" {
 		return nil, nil
 	}
+	if !ValidID(sessionID) {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidID, sessionID)
+	}
 	var (
 		subs []Subagent
 		err  error
@@ -202,9 +205,6 @@ func (s Subagent) label() string {
 // (<session>.jsonl): an agent-<id>.jsonl log per subagent, with
 // agent-<id>.meta.json saying what it is and which tool call started it.
 func (s *Store) claudeSubagents(sessionID string) (subs []Subagent, err error) {
-	if strings.ContainsAny(sessionID, `/\`) || sessionID == ".." {
-		return nil, fmt.Errorf("invalid session id %q", sessionID)
-	}
 	// Next to the session's log; before Claude Code wrote it, where it
 	// would. Another directory's session has none here.
 	var dirs []string

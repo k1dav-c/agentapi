@@ -923,7 +923,8 @@ working directory. This works without `--state-db`:
   itself stays as it was. The queue and open requests are cleared, as on a
   restart. It returns 409 while the agent works on a turn, compacts its
   context or restarts, and the refused resume leaves the conversation as it
-  was.
+  was. An id that isn't one file name (a `/` or `\`, `.` or `..`, a control
+  character) gets 400.
 
 In the chat, the Explorer's Session tab lists the sessions with **Open** and **Start a copy**, which
 ask for a second click.

@@ -479,3 +479,22 @@ func TestClaudeSessionAfterLinesOfNoSession(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, history.Messages)
 }
+
+func TestValidID(t *testing.T) {
+	for id, want := range map[string]bool{
+		"0199a2b4-7c1e-7d42-9f3b-2a6c1d8e4f50": true,
+		"earlier":                              true,
+		"":                                     false,
+		".":                                    false,
+		"..":                                   false,
+		"../s1":                                false,
+		`..\s1`:                                false,
+		"a\x00b":                               false,
+		"a\nb":                                 false,
+		"\xff":                                 false,
+	} {
+		assert.Equal(t, want, ValidID(id), "%q", id)
+	}
+	_, err := newStore(t, "claude", "/w").ReadHistory("../w/s1")
+	assert.ErrorIs(t, err, ErrInvalidID)
+}
