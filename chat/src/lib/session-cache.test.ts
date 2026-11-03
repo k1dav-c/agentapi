@@ -1,6 +1,7 @@
 import {describe, expect, test} from "bun:test";
 import {
   CACHE_TTL_MS,
+  MAX_CACHED_RECORDS,
   MAX_CACHED_SERVERS,
   SessionCache,
   cachesToEvict,
@@ -273,5 +274,24 @@ describe("cachesToEvict", () => {
     const open = `s${MAX_CACHED_SERVERS + 1}`;
     expect(cachesToEvict(caches, now, open)).toEqual([`s${MAX_CACHED_SERVERS - 1}`, `s${MAX_CACHED_SERVERS}`]);
     expect(cachesToEvict(caches.slice(0, MAX_CACHED_SERVERS), now, "s0")).toEqual([]);
+  });
+
+  test("keeps a hub's instances: many small caches fit", () => {
+    // A hub opens each instance as a server of its own.
+    const caches = Array.from({length: 40}, (_, i) => ({scope: `https://hub.test/i/dev-${i}%3A3284`, usedAt: now - i * 1000, records: 200}));
+    expect(cachesToEvict(caches, now, caches[0].scope)).toEqual([]);
+  });
+
+  test("lets go of the least recently used past the records' budget, never the open one", () => {
+    const big = MAX_CACHED_RECORDS / 2;
+    const caches = [
+      {scope: "open", usedAt: now - 9000, records: big},
+      {scope: "newest", usedAt: now - 1000, records: big},
+      {scope: "newer", usedAt: now - 2000, records: 10},
+      {scope: "older", usedAt: now - 3000, records: 1},
+    ];
+    expect(cachesToEvict(caches, now, "open")).toEqual(["newer", "older"]);
+    // Bigger than the budget on its own: the open one still stays.
+    expect(cachesToEvict([{scope: "open", usedAt: now, records: MAX_CACHED_RECORDS * 2}, {scope: "s", usedAt: now, records: 1}], now, "open")).toEqual(["s"]);
   });
 });

@@ -847,7 +847,9 @@ is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, it
   there too: a task's, a subagent's. IndexedDB keeps each server's conversation for the next
   visit, one record per message, writing only what changed, with the sequence
   number of what it saved; a server's cache goes after 14 days without use,
-  and only the 10 most recently used are kept (`lib/session-cache.ts`).
+  and the least recently used go beyond 100 servers or 50,000 records in
+  all; a hub opens each instance as a server of its own
+  (`lib/session-cache.ts`).
 - `TimelineBuilder` in `lib/task-timeline.ts` groups messages into tasks.
   It rebuilds from the first change and preserves unchanged objects, so
   memoized tasks and tool calls don't render again. A section is one of
