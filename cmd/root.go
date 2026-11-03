@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/coder/agentapi/cmd/attach"
 	"github.com/coder/agentapi/cmd/hub"
 	"github.com/coder/agentapi/cmd/list"
 	"github.com/coder/agentapi/cmd/restart"
@@ -17,7 +16,7 @@ import (
 var rootCmd = &cobra.Command{
 	Use:     "agentapi",
 	Short:   "AgentAPI CLI",
-	Long:    `AgentAPI - HTTP API for Claude Code, Goose, Aider, Gemini and Codex`,
+	Long:    `AgentAPI - HTTP API for Claude Code, Codex and Pi`,
 	Version: version.Version,
 	// Execute prints the error, once.
 	SilenceErrors: true,
@@ -33,7 +32,6 @@ func Execute() {
 
 func init() {
 	rootCmd.AddCommand(server.CreateServerCmd())
-	rootCmd.AddCommand(attach.AttachCmd)
 	rootCmd.AddCommand(update.UpdateCmd)
 	rootCmd.AddCommand(list.ListCmd)
 	rootCmd.AddCommand(restart.RestartCmd)

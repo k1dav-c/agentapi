@@ -140,8 +140,6 @@ const STATE_META: Record<AgentStateKind, Omit<StatusMeta, "kind">> = {
 export interface AgentStateInput {
   serverStatus: ServerStatus;
   connectionStatus: string;
-  // Bottom of the terminal while it shows a prompt to answer (PTY).
-  terminalPrompt?: string;
   // Requests the agent waits on (native transport: approvals, questions,
   // plans).
   pendingRequestCount?: number;
@@ -152,20 +150,18 @@ export interface AgentStateInput {
   limitStop?: boolean;
 }
 
-// The agent needs you while its terminal shows a prompt, while it waits on
-// requests, while it waits for someone to log it in, and after a usage
+// The agent needs you while it waits on requests, while it waits for someone to log it in, and after a usage
 // limit stopped it, as the server's summary says (attention).
 export function getAgentState({
   serverStatus,
   connectionStatus,
-  terminalPrompt = "",
   pendingRequestCount = 0,
   loginRequired = false,
   limitStop = false,
 }: AgentStateInput): AgentStateKind {
   if (connectionStatus === "offline" || serverStatus === "offline") return "offline";
   if (connectionStatus === "reconnecting") return "reconnecting";
-  if (terminalPrompt || pendingRequestCount > 0 || loginRequired || limitStop) return "needs-you";
+  if (pendingRequestCount > 0 || loginRequired || limitStop) return "needs-you";
   if (serverStatus === "running") return "working";
   if (serverStatus === "stable") return "ready";
   return "connecting";
@@ -178,11 +174,11 @@ export type WaitingFor = "login" | "answer" | "limit" | null;
 
 export function waitingFor(
   kind: AgentStateKind,
-  {terminalPrompt = "", pendingRequestCount = 0, loginRequired = false, limitStop = false}: Omit<AgentStateInput, "serverStatus" | "connectionStatus">,
+  {pendingRequestCount = 0, loginRequired = false, limitStop = false}: Omit<AgentStateInput, "serverStatus" | "connectionStatus">,
 ): WaitingFor {
   if (kind !== "needs-you") return null;
   if (loginRequired) return "login";
-  if (terminalPrompt || pendingRequestCount > 0) return "answer";
+  if (pendingRequestCount > 0) return "answer";
   return limitStop ? "limit" : "answer";
 }
 

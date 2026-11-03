@@ -30,11 +30,6 @@ describe("getTaskActivity", () => {
     expect(kinds(getTaskActivity(t))).toEqual(["thinking:th", "tool:rich-tool-t1", "message:rm"]);
   });
 
-  test("while running, the live screen text stays at the end", () => {
-    const t = task({richActivity: [{type: "thinking", key: "th", content: "…", timestamp: "2026-10-04T08:00:01Z"}]});
-    expect(kinds(getTaskActivity(t, {live: true}))).toEqual(["thinking:th", "message:response-1"]);
-  });
-
   test("tools only in the session log (no text yet) still show the screen text", () => {
     const t = task({richActivity: [{type: "tool", key: "rich-tool-t1", toolCall: tool("t1", "2026-10-04T08:00:02Z")}]});
     expect(kinds(getTaskActivity(t))).toEqual(["tool:rich-tool-t1", "message:response-1"]);
@@ -50,7 +45,7 @@ describe("getTaskActivity", () => {
       toolCalls: [tool("t2", "2026-10-04T08:00:05Z")],
       richActivity: [{type: "thinking", key: "th", content: "…", timestamp: "2026-10-04T08:00:01Z"}],
     });
-    expect(kinds(getTaskActivity(t, {live: true, transcriptOnly: true}))).toEqual(["thinking:th", "tool:tool-t2"]);
+    expect(kinds(getTaskActivity(t, {transcriptOnly: true}))).toEqual(["thinking:th", "tool:tool-t2"]);
     expect(getTaskActivity(task({}), {transcriptOnly: true})).toEqual([]);
   });
 

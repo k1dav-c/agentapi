@@ -52,9 +52,8 @@ func (s *Server) GetOpenAPI() string {
 }
 
 // guard wraps an endpoint's handler so that check, when it fails, answers
-// instead: endpoints of one transport (requireNative), or of agents whose
-// MCP configuration AgentAPI manages (requireMCP), say so in the route
-// table.
+// instead: endpoints of the agents whose session logs AgentAPI reads
+// (requireSessionHistory) say so in the route table.
 func guard[I, O any](check func() error, handler func(context.Context, *I) (*O, error)) func(context.Context, *I) (*O, error) {
 	return func(ctx context.Context, input *I) (*O, error) {
 		if err := check(); err != nil {
@@ -80,7 +79,6 @@ func (s *Server) registerRoutes() {
 	s.registerSummaryRoutes()
 	s.registerUpdateRoutes()
 	s.registerWebhookRoutes()
-	s.registerMCPRoutes()
 	s.registerQueueRoutes()
 	s.registerUploadRoutes()
 	s.registerEventRoutes()

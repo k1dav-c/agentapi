@@ -1,8 +1,7 @@
 /**
  * Captures the documentation screenshots in docs/screenshots/. The script starts its own AgentAPI
- * servers on a small sample project (the native demo agent, the demo posing as Claude Code for its
- * earlier sessions and subagents, and bash as a PTY agent for TTY mode),
- * walks the chat UI with Chromium, taking screenshots and recording GIFs of the main flows, and stops
+ * servers on a small sample project (the native demo agent, and the demo posing as Claude Code for
+ * its earlier sessions and subagents), walks the chat UI with Chromium, taking screenshots and recording GIFs of the main flows, and stops
  * the servers again. See docs/screenshots/README.md.
  */
 import path from 'node:path';
@@ -452,8 +451,8 @@ const home = path.join(root, 'home');
 const project = path.join(root, 'my-app');
 let browser;
 try {
-  for (let p = port; p < port + 14; p++) {
-    if (!await portFree(p)) throw new Error(`Port ${p} is in use; set AGENTAPI_SCREENSHOT_PORT to the first of fourteen free ports.`);
+  for (let p = port; p < port + 13; p++) {
+    if (!await portFree(p)) throw new Error(`Port ${p} is in use; set AGENTAPI_SCREENSHOT_PORT to the first of thirteen free ports.`);
   }
   // A clean environment: no tokens or workspace links of the shell the script runs in, and a
   // neutral prompt in the terminal.
@@ -462,17 +461,14 @@ try {
   await writeFile(path.join(home, '.hushlogin'), '');
   await createProject(project, home);
   const env = {HOME: home, PATH: '/usr/local/bin:/usr/bin:/bin', SHELL: '/bin/bash', LANG: 'C.UTF-8', TERM: 'xterm-256color'};
-  startServer('native demo', project, env, ['--port', String(port), '--transport', 'native', '--type', 'custom', '--', 'native-demo']);
-  startServer('PTY bash', project, {...env, PS1: 'my-app $ '}, ['--port', String(port + 1), '--type', 'custom', '--term-width', '100', '--', 'bash', '--norc', '--noprofile']);
+  startServer('native demo', project, env, ['--port', String(port), '--', 'native-demo']);
   // The demo posing as Claude Code, one directory above the project: its earlier sessions and
   // subagents come from the Claude Code logs written into the script's home.
   await writeClaudeSessions(home, root);
-  startServer('demo as Claude Code', root, env, ['--port', String(port + 2), '--transport', 'native', '--type', 'claude', '--', 'native-demo']);
+  startServer('demo as Claude Code', root, env, ['--port', String(port + 1), '--type', 'claude', '--', 'native-demo']);
   const demo = client(`http://127.0.0.1:${port}`);
-  const pty = client(`http://127.0.0.1:${port + 1}`);
-  const posing = client(`http://127.0.0.1:${port + 2}`);
+  const posing = client(`http://127.0.0.1:${port + 1}`);
   await poll(async () => (await demo.status()).lifecycle === 'ready', 'the native demo server');
-  await poll(async () => !!(await pty.status()), 'the PTY server');
   await poll(async () => (await posing.status()).lifecycle === 'ready', 'the demo posing as Claude Code');
   const {agentapi_version: version} = await demo.status();
 
@@ -901,24 +897,10 @@ try {
   await shot(page, 'login-card.png');
   await page.context().close();
 
-  // TTY mode, on bash run as a PTY agent. Keys typed in TTY mode go straight to bash. (Without an
-  // input box on its screen, bash never counts as ready for messages, so none are sent to it.)
-  const tty = await openPage(browser, pty.base);
-  await tty.getByRole('button', {name: 'Switch to TTY mode'}).click();
-  const ttyRows = tty.locator('.xterm-rows');
-  await ttyRows.waitFor();
-  await poll(async () => (await ttyRows.innerText()).includes('my-app $'), 'the bash prompt in TTY mode');
-  await tty.keyboard.type('git log --oneline\n');
-  await tty.waitForTimeout(400);
-  await tty.keyboard.type('git status --short\n');
-  await poll(async () => (await ttyRows.innerText()).includes('styles.css'), 'git status in TTY mode');
-  await tty.waitForTimeout(500);
-  await shot(tty, 'tty-mode.png');
-
   // A hub watching six demo instances, which join it as agentapi hub join has them do: one waits
   // for an approval, one works, one finished a task nobody saw, one is idle, one stopped and one
   // can't be reached (it was killed, so it never said it stopped).
-  const hubPort = port + 3;
+  const hubPort = port + 2;
   const hubHome = path.join(root, 'hub-home');
   await mkdir(hubHome, {recursive: true});
   const hubEnv = {...env, HOME: hubHome};
@@ -951,7 +933,7 @@ try {
     const spans = [];
     if (before > 0) spans.push([ago(72 + before), ago(72)]);
     if (day > 0) spans.push([ago(3 + day), ago(3)]);
-    return {id: `${os.hostname()}:${port + 4 + i}`, url: `http://127.0.0.1:${port + 4 + i}`, source: 'webhook',
+    return {id: `${os.hostname()}:${port + 3 + i}`, url: `http://127.0.0.1:${port + 3 + i}`, source: 'webhook',
       last_seen: new Date(seededAt * 1000).toISOString(), changed_at: new Date(seededAt * 1000).toISOString(), work: {spans}};
   })}), {mode: 0o600});
   startProcess('hub', root, hubEnv, ['hub', 'serve', '--bind', '127.0.0.1', '--port', String(hubPort),
@@ -965,9 +947,9 @@ try {
     const dir = path.join(root, 'workspaces', instance.name);
     await mkdir(dir, {recursive: true});
     if (instance.calls) await seedClaudeLog(hubHome, dir, instance.calls);
-    startServer(instance.name, dir, hubEnv, ['--port', String(port + 4 + i), '--transport', 'native', '--type', instance.type, '--', 'native-demo'],
+    startServer(instance.name, dir, hubEnv, ['--port', String(port + 3 + i), '--type', instance.type, '--', 'native-demo'],
       instance.older ? olderBinary : binary);
-    hubInstances[instance.name] = client(`http://127.0.0.1:${port + 4 + i}`);
+    hubInstances[instance.name] = client(`http://127.0.0.1:${port + 3 + i}`);
     await poll(async () => (await hubInstances[instance.name].status()).lifecycle === 'ready', `the ${instance.name} instance`);
   }
   const hubAPI = `http://127.0.0.1:${hubPort}`;
@@ -1015,7 +997,7 @@ try {
   const startWork = () => hubInstances['billing-service'].request('/message', 'POST', {content: 'long migration of the invoices table', type: 'user'});
 
   // An empty hub, for the guide that connects the first agents.
-  const emptyPort = port + 13;
+  const emptyPort = port + 12;
   startProcess('empty hub', root, hubEnv, ['hub', 'serve', '--bind', '127.0.0.1', '--port', String(emptyPort),
     '--token', 'docs-token', '--secret', 'docs-secret', '--state', path.join(hubHome, 'empty.json')]);
   await poll(async () => (await fetch(`http://127.0.0.1:${emptyPort}/api/session`)).ok, 'the empty hub');
@@ -1149,7 +1131,7 @@ try {
   await writeFile(path.join(output, 'capture.json'), JSON.stringify({
     captured_at: new Date().toISOString(),
     agentapi_version: version,
-    agents: ['native-demo', 'native-demo posing as Claude Code', 'bash (PTY)', 'nine native-demo instances behind agentapi hub serve, posing as Claude Code, Codex and Pi'],
+    agents: ['native-demo', 'native-demo posing as Claude Code', 'nine native-demo instances behind agentapi hub serve, posing as Claude Code, Codex and Pi'],
     browser: browser.version(),
     desktop_viewport: {width: 1440, height: 1000},
     mobile_viewport: {width: 390, height: 844},

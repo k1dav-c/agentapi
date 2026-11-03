@@ -6,7 +6,7 @@ type Request struct {
 	ServerID  string `json:"server_id"`
 	Turn      uint64 `json:"turn"`
 	AgentType string `json:"agent_type"`
-	Kind      string `json:"kind"` // message or terminal
+	Kind      string `json:"kind"` // message or request
 	Question  string `json:"question,omitempty"`
 	Content   string `json:"content"`
 }

@@ -21,8 +21,8 @@ describe("alertForTransition", () => {
 
 describe("faviconDataUrl", () => {
   test("adds a state dot only when there is a badge", () => {
-    expect(decodeURIComponent(faviconDataUrl(null, "aider"))).not.toContain("<circle");
-    expect(decodeURIComponent(faviconDataUrl("needs-you", "aider"))).toContain('fill="#c27c0e"');
+    expect(decodeURIComponent(faviconDataUrl(null, "custom"))).not.toContain("<circle");
+    expect(decodeURIComponent(faviconDataUrl("needs-you", "custom"))).toContain('fill="#c27c0e"');
   });
 
   test("draws the agent's mark", () => {

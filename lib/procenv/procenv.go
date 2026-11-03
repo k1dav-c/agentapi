@@ -1,6 +1,5 @@
 // Package procenv is the environment AgentAPI gives the processes it
-// starts: the agent, whichever transport drives it, and the terminal's
-// shell.
+// starts: the agent and the terminal's shell.
 package procenv
 
 import (

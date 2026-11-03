@@ -217,7 +217,8 @@ With no agent open, the right side says how many agents need you and why. A tile
 you, working, finished unseen, offline) counts them; pick one to filter the list. Below, a card per
 agent that needs you names what it waits for (the approval's command, the question, the login, the
 usage limit) and since when, with **Answer** or **Open**. Running agents show their prompt and how
-long they've run; finished ones you haven't seen show their title. At the bottom, the
+long they've run; finished ones you haven't seen show their title. Between the tiles and these cards
+are the [Spend](#spend), [Tokens](#token-usage) and [Work time](#work-time) cards; at the bottom, the
 [Versions](#versions) card counts the AgentAPI versions the agents run.
 
 ![The overview in the dark theme](screenshots/hub-desktop-dark.png)
@@ -229,7 +230,8 @@ long they've run; finished ones you haven't seen show their title. At the bottom
 Once a minute, each AgentAPI works out from its agent's session logs what the agent's sessions in
 its working directory cost over the last 24 hours and the last 7 days, and puts it in its summary
 (`spend`). It is the API-equivalent cost: the tokens at the model providers' list prices, which a
-subscription doesn't charge. Only native Claude Code, Codex and Pi have it; other agents show none.
+subscription doesn't charge. Claude Code, Codex and Pi have it; `native-demo` and an AgentAPI 2's
+PTY agents show none.
 
 A row shows its agent's last 24 hours (`$110/24h`), a group header its group's, and the top of the
 list all of them; hover for the 7 days too. On a desktop the overview has a **Spend** card: the 24
@@ -272,10 +274,10 @@ again from its next summary.
 
 A row shows its agent's last 24 hours after the spend, with a timer (`2.3h`), unless it shows a
 usage limit; hover for the 7 days too. Below Tokens, the overview's **Work time** card has the 24
-hours and 7 days of all the agents, each group's when there are groups, and the five that worked the most this week. Figures are
-rounded down: minutes under an hour (`45m`), tenths of an hour under ten (`2.3h`), then hours
-(`31h`). Unlike spend, every agent counts, stopped ones too: the time is the hub's own record,
-per instance.
+hours and 7 days of all the agents, each group's when there are groups, and the five that worked the
+most this week. Figures are rounded down: minutes under an hour (`45m`), tenths of an hour under
+ten (`2.3h`), then hours (`31h`). Unlike spend, every agent counts, stopped ones too: the time is
+the hub's own record, per instance.
 
 The hub keeps the spans of the last 7 days in its file and sends what they add up to (`work`); the
 page adds the span going on.
@@ -300,11 +302,18 @@ with their machines, and says how many run an older version than the hub.
 
 An AgentAPI updates itself when the hub asks, if its machine allows it. **Update AgentAPI…** in the
 row's **⋯** menu asks you first. By default the update waits until the agent is idle: its task
-finished, and no approval, question, plan or terminal dialog waits for an answer. **Update now**
-doesn't wait: it interrupts the task. The AgentAPI then installs the latest official release for
-its OS and architecture, checked against the release's `checksums.txt`, and restarts in place, as
+finished, and no approval, question or plan waits for an answer. **Update now** doesn't wait: it
+interrupts the task. The AgentAPI installs the latest official release for its OS and architecture,
+checked against the release's `checksums.txt`, waits as asked, and restarts in place, as
 [`agentapi restart`](../README.md#agentapi-restart) does. The AgentAPIs of one machine share the
 binary: the first one replaces it, the others only restart.
+
+Before it restarts, the AgentAPI runs the new program with its own settings under
+`agentapi server --validate`. If the new program wouldn't start with them (a flag or an agent it
+doesn't take), the AgentAPI keeps serving and the update fails, saying why. AgentAPI 3 runs only
+Claude Code, Codex and Pi: an AgentAPI 2 that runs another agent, or any agent with
+`--transport pty`, fails this way, but its machine already has AgentAPI 3 on disk. Put v2.5.1 back
+there before that AgentAPI restarts.
 
 The row shows how far the update got: checking, downloading, waiting for the task, restarting.
 While it waits for the task, **Cancel the update** in the **⋯** menu, or **Cancel** in the bar above
@@ -365,7 +374,8 @@ instead. Each state has a shape of its own, so it reads without its color:
 
 | Glyph | Second line starts with | Meaning |
 | --- | --- | --- |
-| Amber ! | Approval, Question, Plan, Dialog | A request waits for your answer; the line shows it |
+| Amber ! | Approval, Question, Plan | A request waits for your answer; the line shows it |
+| Amber ! | Dialog | An AgentAPI 2's PTY agent shows a dialog in its terminal, which the hub's chat can't show ([Limits](#limits)) |
 | Amber ! | Login | The agent can't work until you log in on its machine |
 | Amber ! | Usage limit | A usage limit stopped its turn; queued messages wait for the reset |
 | Turning blue arc | Working | The agent works on the task shown |
@@ -374,7 +384,7 @@ instead. Each state has a shape of its own, so it reads without its color:
 | Struck-through bell, grey | Muted | It needs you, and you muted that until it changes ([Muting](#muting)) |
 | Dashed ring, turning | Connecting | The hub is opening its summary stream, or opening it again |
 | Broken red ring | Unreachable | The hub hasn't reached it for 10 s; the line says why |
-| Square | Stopped, Exited | The AgentAPI stopped (or missed three heartbeats while unreachable), or its agent exited (a native agent: AgentAPI gave up starting it again) |
+| Square | Stopped, Exited | The AgentAPI stopped (or missed three heartbeats while unreachable), or its agent exited and AgentAPI gave up starting it again |
 
 Search (**/**) matches any word of a name, group, title, machine, agent or version. The chips under
 it show all agents or only those that need you, work, finished unseen, or are offline, each with its
@@ -644,9 +654,9 @@ instance that joined with its webhook comes back the next time it starts.
 | `the hub doesn't answer to <name>; add it to --allowed-hosts` | The hub runs with `--allowed-hosts` and you opened it by another name | Add the name to `--allowed-hosts` |
 | **Update AgentAPI…** says updates are off | The machine doesn't allow updates from the hub | Add `allow-update: true` to `~/.agentapi/config.yaml` there, then run `agentapi restart --all` |
 | **Update AgentAPI…** asks for a one-time setup | The AgentAPI can't write its binary's directory, such as a root-owned `/usr/local/bin` | Run the command it shows on that machine, once |
-| A row says **Update failed** | Checking or downloading the release failed | Hover it, or open **Update AgentAPI…**, for the error; then try again |
+| A row says **Update failed** | Checking or downloading the release failed, or the new version wouldn't start with this AgentAPI's settings, such as an AgentAPI 2 that runs a PTY agent | Hover it, or open **Update AgentAPI…**, for the error; then try again. For an AgentAPI 2 that must keep its agent, put v2.5.1 back on its machine ([Updating from the hub](#updating-from-the-hub)) |
 | A connected agent's **⋯** menu has nothing about updating it | Its AgentAPI is too old to update from the hub | Update it by hand ([Updating by hand](#updating-by-hand)) |
-| The hub logs "The hub's file of instances doesn't parse" | The file was cut short, such as by a crash or a full disk, or a hub of 2.2 or earlier started on a newer hub's file | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat. To get the rest back, stop the hub and copy `instances.json.bak` (the file as the hub's previous start found it) over `instances.json`; for a hub of 2.2 or earlier, see [Files](#files) |
+| The hub logs "The hub's file of instances doesn't parse" | The file was damaged, such as by an edit by hand, or a hub of 2.2 or earlier started on a newer hub's file | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat. To get the rest back, stop the hub and copy `instances.json.bak` (the file as the hub's previous start found it) over `instances.json`; for a hub of 2.2 or earlier, see [Files](#files) |
 | The hub doesn't start: `instances.json is of a newer hub` | A newer hub wrote the file | Run the newer hub, or start from `instances.json.bak` |
 
 `agentapi hub status` on an instance's machine shows which hub its config file names and where
@@ -751,7 +761,9 @@ ignores it, and drops it the next time it writes the file.
 ## Limits
 
 - The hub serves the chat of its own version to every instance. Run the same AgentAPI version on
-  the hub and the instances; [Versions](#versions) shows the ones that differ.
+  the hub and the instances; [Versions](#versions) shows the ones that differ. AgentAPI 3's chat
+  doesn't show an agent's terminal: answer an AgentAPI 2's terminal dialog in that AgentAPI's own
+  chat, at its URL.
 - One hub token for everyone: there are no per-user accounts or permissions.
 - [Work time](#work-time) is what the hub saw: not before it had the feature, nor while it was down
   or couldn't reach an agent. One hub doesn't know what another counted.

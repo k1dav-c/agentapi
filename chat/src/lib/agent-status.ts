@@ -13,13 +13,10 @@ export interface AgentStatus {
   serverStatus: ServerStatus;
   agentType: AgentType;
   agentapiVersion: string;
-  terminalColumns: number;
   sessionName: string;
   // The agent's own session (status_change's agent_session_id, native
   // transport); empty until the agent reports it.
   agentSessionId: string;
-  // Bottom of the terminal while the agent shows an interactive prompt.
-  terminalPrompt: string;
   capabilities: Capabilities | null;
   settings: AgentSettings | null;
   usage: AgentUsage | null;
@@ -33,10 +30,8 @@ export const initialAgentStatus: AgentStatus = {
   serverStatus: "unknown",
   agentType: "custom",
   agentapiVersion: "",
-  terminalColumns: 0,
   sessionName: "",
   agentSessionId: "",
-  terminalPrompt: "",
   capabilities: null,
   settings: null,
   usage: null,
@@ -55,10 +50,8 @@ export function applyStatusChange(status: AgentStatus, event: StatusChangeEvent)
     serverStatus: event.status === "stable" || event.status === "running" ? event.status : "unknown",
     agentType: parseAgentType(event.agent_type),
     agentapiVersion: event.agentapi_version ?? "",
-    terminalColumns: event.terminal_columns ?? 0,
     sessionName: event.session_name ?? "",
     agentSessionId: event.agent_session_id ?? "",
-    terminalPrompt: event.terminal_prompt ?? "",
     capabilities: event.capabilities ?? null,
     settings: event.settings ?? null,
     usage: event.usage ?? null,

@@ -11,9 +11,6 @@ const SESSION_HISTORY_AGENTS: readonly AgentType[] = ["claude", "codex", "pi"];
 const SUBAGENT_AGENTS: readonly AgentType[] = ["claude", "codex"];
 
 export interface Features {
-  // The agent's own terminal: TTY mode, terminal keys and the live screen
-  // of a running task (PTY).
-  agentTerminal: boolean;
   // A shell in the agent's working directory: the terminal panel and the
   // login card's "Run in terminal" (native, unless --terminal=false).
   shell: boolean;
@@ -33,9 +30,6 @@ export interface Features {
   interrupt: boolean;
   // The context and rate limits meter (native).
   usage: boolean;
-  // A restart for an MCP change keeps the conversation: the agent resumes
-  // its session (native).
-  restartKeepsConversation: boolean;
   // The agent's earlier sessions, to open one or a copy of it (native
   // Claude Code, Codex and Pi).
   sessionHistory: boolean;
@@ -50,7 +44,6 @@ export interface Features {
 export function features(transport: Transport, capabilities: Capabilities | null, shellAvailable: boolean, agentType?: AgentType): Features {
   const native = transport === "native";
   return {
-    agentTerminal: transport === "pty",
     shell: native && shellAvailable,
     requests: native,
     structuredTranscript: native,
@@ -59,7 +52,6 @@ export function features(transport: Transport, capabilities: Capabilities | null
     steer: native && Boolean(capabilities?.steer),
     interrupt: native && Boolean(capabilities?.interrupt),
     usage: native,
-    restartKeepsConversation: native,
     sessionHistory: native && agentType !== undefined && SESSION_HISTORY_AGENTS.includes(agentType),
     subagents: native && agentType !== undefined && SUBAGENT_AGENTS.includes(agentType),
     cost: native && agentType !== undefined && SESSION_HISTORY_AGENTS.includes(agentType),

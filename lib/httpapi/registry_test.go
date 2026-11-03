@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/registry"
 )
@@ -30,8 +30,7 @@ func TestRegistry(t *testing.T) {
 	defer cancel()
 	factory := &nativetest.Factory{}
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeClaude,
-		Transport:      httpapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         httpapi.NativeConfig{Factory: factory.New},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},

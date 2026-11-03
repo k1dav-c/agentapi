@@ -7,10 +7,9 @@ import {useStableCallback} from "@/lib/use-stable-callback";
 import MessageInput from "./message-input";
 import MessageList from "./message-list";
 import dynamic from "next/dynamic";
-import {TtyView} from "./tty-view";
 import {ShellView} from "./shell-view";
 import {OPEN_TERMINAL_EVENT} from "@/lib/slash-commands";
-import {DecisionCard, StateStrip} from "./dock";
+import {StateStrip} from "./dock";
 import {RequestCard} from "./request-card";
 import {LoginCard} from "./login-card";
 import {LimitCard} from "./limit-card";
@@ -19,8 +18,8 @@ import {Lineage} from "./lineage";
 import {BackgroundAlerts} from "./background-alerts";
 import {SeenMarker} from "./seen-marker";
 
-// The Explorer (task index, MCP settings) isn't needed for the
-// first paint, so it loads right after, keeping the initial bundle small.
+// The Explorer (task index, agent settings) isn't needed for the first
+// paint, so it loads right after, keeping the initial bundle small.
 // The placeholder matches its trigger button.
 const Explorer = dynamic(() => import("./explorer").then((module) => module.Explorer), {
   ssr: false,
@@ -57,10 +56,7 @@ export function Chat() {
   const features = useChatSelector((chat) => chat.features);
   const canStop = useChatSelector((chat) => chat.canStop);
   const {sendMessage, retryFailedMessage, dismissFailedMessage, reconnectNow, stop} = useChatActions();
-  // Only the PTY transport has the agent's terminal: TTY mode, raw keys and
-  // the terminal prompt card need it. A native agent has none; the server
-  // offers a shell in its working directory instead.
-  const hasTerminal = features.agentTerminal;
+  // The server offers a shell in the agent's working directory.
   const hasShell = features.shell;
   // The transcript's tasks are memoized: their handlers keep their identity.
   const editFailedMessage = useStableCallback((clientId: string, content: string) => {
@@ -68,10 +64,9 @@ export function Chat() {
     setSuggestedPrompt(content);
   });
   const stopTask = useStableCallback(() => void stop());
-  const sendRaw = useStableCallback((data: string) => void sendMessage(data, "raw"));
   useEffect(() => {
-    if (!hasTerminal && !hasShell) setTerminalOpen(false);
-  }, [hasTerminal, hasShell]);
+    if (!hasShell) setTerminalOpen(false);
+  }, [hasShell]);
   const openShell = (command?: string) => {
     setShellCommand(command);
     setTerminalOpen(true);
@@ -130,9 +125,7 @@ export function Chat() {
           </Button>
         </div>
       )}
-      {terminalOpen && hasTerminal ? (
-        <TtyView onExit={() => setTerminalOpen(false)} />
-      ) : terminalOpen && hasShell ? (
+      {terminalOpen && hasShell ? (
         <ShellView onExit={() => setTerminalOpen(false)} command={shellCommand} />
       ) : (
         <>
@@ -141,22 +134,8 @@ export function Chat() {
             onEditMessage={editFailedMessage}
             onDismissMessage={dismissFailedMessage}
             onStopTask={canStop ? stopTask : undefined}
-            onSendRaw={hasTerminal ? sendRaw : undefined}
             headerAction={
               <div className="flex items-center gap-0.5">
-                {hasTerminal && (
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="size-8 rounded-full text-muted-foreground"
-                    title="TTY mode: use the agent's terminal directly"
-                    aria-label="Switch to TTY mode"
-                    onClick={() => setTerminalOpen(true)}
-                  >
-                    <TerminalSquare className="size-4" />
-                  </Button>
-                )}
                 {hasShell && (
                   <Button
                     type="button"
@@ -201,7 +180,6 @@ export function Chat() {
             dock={
               <>
                 <StateStrip />
-                {hasTerminal && <DecisionCard onOpenTerminal={() => setTerminalOpen(true)} />}
                 {features.requests && <LoginCard onRunInTerminal={hasShell ? openShell : undefined} />}
                 {features.requests && <RequestCard />}
                 {features.requests && <LimitCard />}

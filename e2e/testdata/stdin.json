@@ -1,6 +1,0 @@
-[
-  {
-    "expectMessage": "hello agent",
-    "responseMessage": "Hello! I'm ready to help you. Please send me a message to echo back."
-  }
-]

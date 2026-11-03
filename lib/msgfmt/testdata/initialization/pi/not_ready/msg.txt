@@ -1,3 +1,0 @@
- pi v1.0.2
- escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o
- more

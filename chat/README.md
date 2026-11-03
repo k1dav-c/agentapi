@@ -35,19 +35,18 @@ and join a demo instance to it:
 go run main.go hub serve --token dev --secret dev --state /tmp/hub-dev.json &
 # A config file of its own: hub join would otherwise change ~/.agentapi/config.yaml.
 go run main.go hub join http://localhost:3290/hooks --secret dev --public-url 'http://localhost:{port}' --config /tmp/hub-dev.yaml
-go run main.go server --config /tmp/hub-dev.yaml --type custom -- native-demo
+go run main.go server --config /tmp/hub-dev.yaml -- native-demo
 ```
 
 Then open <http://localhost:3290/> and sign in with `dev`.
 
-### Developing against the native transport without an agent
+### Developing without an agent
 
 `native-demo` simulates an agent for developing request cards, steering, interrupts, and queue
-controls without installing or paying for a real agent. Select it with this exact program name and
-`--type custom`:
+controls without installing or paying for a real agent. Select it with this exact program name:
 
 ```bash
-go run main.go server --type custom -- native-demo
+go run main.go server -- native-demo
 ```
 
 Each turn streams thinking, a simulated tool call, and a reply. Include these keywords in a message
@@ -85,7 +84,7 @@ Its settings can change from the composer's menus or slash commands: models Swif
 needs approval; in plan mode every turn ends with a plan, whose approval switches back to
 bypass. Every turn reports simulated context and rate-limit usage that grows with each turn, and
 `/compact` empties the context. The terminal button opens a real shell in the working directory, as
-for any native agent.
+for any agent.
 
 Steering appends to the reply, and Stop ends the turn as interrupted. The adapter lives in
 `lib/native/demo`.
@@ -108,8 +107,8 @@ agent replies and tool results are simulated.
 
 ![Native desktop chat with structured tool activity and session controls](../docs/screenshots/chat-desktop.png)
 
-The task groups the prompt, tool activity, and reply. Native session controls appear in the
-composer, and wide screens show thinking alongside the transcript.
+The task groups the prompt, tool activity, and reply. Session controls appear in the composer,
+and wide screens show thinking alongside the transcript.
 
 ![Expanded tool call with its command input and full result](../docs/screenshots/tool-call.png)
 
@@ -118,8 +117,8 @@ does not run the displayed command.
 
 ![Explorer Index tab with task navigation and settings tabs](../docs/screenshots/explorer-index.png)
 
-Open Explorer with ⌘K / Ctrl+K to jump to a task, open a discovered file, or reach MCP and Session
-settings.
+Open Explorer with ⌘K / Ctrl+K to jump to a task, open a discovered file, or reach Session and
+Webhook settings.
 
 ![Mobile native chat with the prompt, tool output, reply, and session controls](../docs/screenshots/chat-mobile.png)
 

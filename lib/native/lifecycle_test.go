@@ -160,10 +160,10 @@ func TestRestartSendsInitialPromptAgain(t *testing.T) {
 	assert.Equal(t, 0, msgs[0].Id)
 }
 
-func TestSendAndInitialPromptHaveDeadlines(t *testing.T) {
+func TestInitialPromptHasADeadline(t *testing.T) {
 	var mu sync.Mutex
 	var deadlines []bool
-	c, factory, _ := start(t, func(a *nativetest.Adapter) {
+	_, factory, _ := start(t, func(a *nativetest.Adapter) {
 		a.AutoStartTurn = false
 		a.OnStartTurn = func(ctx context.Context) {
 			_, ok := ctx.Deadline()
@@ -176,36 +176,9 @@ func TestSendAndInitialPromptHaveDeadlines(t *testing.T) {
 	require.Eventually(t, func() bool { return len(a.Turns()) == 1 }, 5*time.Second, time.Millisecond)
 	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
 
-	require.NoError(t, c.Send(context.Background(), conv.MessagePartText{Content: "hi"}))
 	mu.Lock()
 	defer mu.Unlock()
-	assert.Equal(t, []bool{true, true}, deadlines, "an agent that hangs can't hold its caller forever")
-}
-
-func TestReloadResumesTheSession(t *testing.T) {
-	c, factory, _ := start(t, func(a *nativetest.Adapter) {
-		if a.ResumeRef == "" {
-			a.Ref = "session-1"
-		}
-	}, native.Config{})
-	first := factory.Last()
-	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
-	assert.ErrorIs(t, c.Reload(context.Background()), native.ErrTurnActive, "a reload would stop the turn")
-	first.Sink().RichMessage(text("m1", "reply"))
-	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
-
-	require.NoError(t, c.Reload(context.Background()))
-	second := factory.Last()
-	assert.NotSame(t, first, second)
-	assert.True(t, first.Closed())
-	assert.Equal(t, "session-1", second.ResumeRef, "the new agent resumes the session")
-	assert.Len(t, c.Messages(), 2, "the conversation stays")
-	assert.True(t, c.Idle())
-}
-
-func TestReloadNeedsResume(t *testing.T) {
-	c, _, _ := start(t, func(a *nativetest.Adapter) { a.Caps.Resume = false }, native.Config{})
-	assert.ErrorIs(t, c.Reload(context.Background()), native.ErrUnsupported)
+	assert.Equal(t, []bool{true}, deadlines, "an agent that hangs can't hold its caller forever")
 }
 
 func TestSwitchOpensAnotherSession(t *testing.T) {
@@ -237,22 +210,34 @@ func TestSwitchOpensAnotherSession(t *testing.T) {
 }
 
 func TestSwitchToAFork(t *testing.T) {
-	c, factory, _ := start(t, nil, native.Config{})
+	ctx := waitCtx(t)
+	clock, restart := restartClock(t)
+	c, factory, _ := start(t, nil, native.Config{Clock: clock})
 	require.NoError(t, c.Switch(context.Background(), native.Resume{Ref: "original", Fork: true}, nil))
 	fork := factory.Last()
 	assert.Equal(t, "original", fork.ResumeRef)
 	assert.True(t, fork.Fork)
 
-	// A reload before the agent reported the copy forks again, rather than
-	// go on in the original.
-	require.NoError(t, c.Reload(context.Background()))
-	assert.True(t, factory.Last().Fork)
+	// exit has the agent exit and waits for the one started after it.
+	exit := func() *nativetest.Adapter {
+		last := factory.Last()
+		last.Exit(errors.New("crash"))
+		call := restart.MustWait(ctx)
+		call.Release()
+		clock.Advance(call.Duration).MustWait(ctx)
+		require.Eventually(t, func() bool { return factory.Last() != last }, 5*time.Second, time.Millisecond)
+		return factory.Last()
+	}
+
+	// An agent that exits before it reported the copy forks again, rather
+	// than go on in the original.
+	assert.True(t, exit().Fork)
 
 	// Once the agent reports the copy, it is the session to resume.
 	factory.Last().Sink().SessionRef("copy")
-	require.NoError(t, c.Reload(context.Background()))
-	assert.Equal(t, "copy", factory.Last().ResumeRef)
-	assert.False(t, factory.Last().Fork)
+	next := exit()
+	assert.Equal(t, "copy", next.ResumeRef)
+	assert.False(t, next.Fork)
 }
 
 func TestSwitchWhileATurnRuns(t *testing.T) {
@@ -288,8 +273,6 @@ func TestBeginSwitchWhileCompactingChangesNothing(t *testing.T) {
 	assert.Equal(t, before, c.Messages())
 	assert.False(t, first.Closed())
 	assert.Len(t, factory.Adapters(), 1)
-	_, err = c.BeginReload()
-	assert.ErrorIs(t, err, native.ErrTurnActive)
 
 	close(release)
 	require.NoError(t, <-compacted)

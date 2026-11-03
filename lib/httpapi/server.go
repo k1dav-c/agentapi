@@ -22,14 +22,11 @@ import (
 	"github.com/go-chi/cors"
 
 	"github.com/coder/agentapi/internal/version"
-	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/convstate"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/mcpconfig"
-	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/pricing"
-	st "github.com/coder/agentapi/lib/screentracker"
 	"github.com/coder/agentapi/lib/sessions"
 	"github.com/coder/agentapi/lib/shellterm"
 	"github.com/coder/agentapi/lib/statedb"
@@ -50,60 +47,43 @@ type Server struct {
 	// snapshot don't take it. Locks are taken in this order, never the
 	// other way round: mu, the conversation's, the updater's, the
 	// emitter's, then the webhook dispatcher's and the state DB's.
-	mu           sync.Mutex
-	stopOnce     sync.Once
-	stopping     bool        // set under mu once Stop closed the agent: no more restarts
-	restarting   atomic.Bool // set under mu while a restart runs without it (runRestartLocked)
-	updating     atomic.Bool // set under mu once an update restarts AgentAPI: messages wait in the queue, and no agent restart begins
-	logger       *slog.Logger
-	conversation conv.Conversation
-	native       *native.Conversation // nil unless the transport is native
-	sessions     *sessions.Store      // the agent's sessions; nil unless native and it keeps logs
-	stateDB      *statedb.DB          // nil unless the conversation is kept
+	mu         sync.Mutex
+	stopOnce   sync.Once
+	stopping   bool        // set under mu once Stop closed the agent: no more restarts
+	restarting atomic.Bool // set under mu while a restart runs without it (runRestartLocked)
+	updating   atomic.Bool // set under mu once an update restarts AgentAPI: messages wait in the queue, and no agent restart begins
+	logger     *slog.Logger
+	native     *native.Conversation
+	sessions   *sessions.Store // the agent's sessions; nil unless it keeps logs
+	stateDB    *statedb.DB     // nil unless the conversation is kept
 	// queueStoreMu guards what storeQueue last stored in stateDB: the
 	// queue, its last ID and the version of the queue they are.
-	queueStoreMu       sync.Mutex
-	savedQueue         []QueuedMessage
-	savedNextQueueID   int
-	savedQueueVersion  uint64
-	agentio            st.AgentIO
-	agentType          mf.AgentType
-	emitter            *EventEmitter
-	chatBasePath       string
-	uploads            *uploadStore
-	uploadPruneNow     chan struct{} // nil until startUploadPruning
-	uploadPruneDone    chan struct{} // closed once pruning stopped; nil until it starts
-	cwd                string
-	clock              quartz.Clock
-	shutdownCtx        context.Context
-	shutdown           context.CancelFunc
-	transport          Transport
-	queue              messageQueue  // guarded by mu
-	queueLoop          quartz.Waiter // the queue's loop, nil until it starts
-	mcpStore           mcpconfig.Store
-	mcpMu              sync.Mutex
-	webhook            *webhook.Dispatcher
-	registry           *instanceRegistry // nil without a registry directory
-	updater            *updater
-	handoff            handoffState
-	restartAgent       func(context.Context) (int, error)
-	updateAgent        func(context.Context)
-	terminal           *shellterm.Terminal // nil without a terminal
-	jsonlWatcherCancel context.CancelFunc
-	jsonlWatcherDone   *sync.WaitGroup
-	jsonlParentCtx     context.Context // parent context for spawning new JSONL watchers
-
-	// When the Codex update dialog was last dismissed. Guarded by s.mu.
-	codexUpdateDismissedAt time.Time
+	queueStoreMu      sync.Mutex
+	savedQueue        []QueuedMessage
+	savedNextQueueID  int
+	savedQueueVersion uint64
+	agentType         instanceapi.AgentType
+	emitter           *EventEmitter
+	chatBasePath      string
+	uploads           *uploadStore
+	uploadPruneNow    chan struct{} // nil until startUploadPruning
+	uploadPruneDone   chan struct{} // closed once pruning stopped; nil until it starts
+	cwd               string
+	clock             quartz.Clock
+	shutdownCtx       context.Context
+	shutdown          context.CancelFunc
+	queue             messageQueue  // guarded by mu
+	queueLoop         quartz.Waiter // the queue's loop, nil until it starts
+	webhook           *webhook.Dispatcher
+	registry          *instanceRegistry // nil without a registry directory
+	updater           *updater
+	handoff           handoffState
+	updateAgent       func(context.Context)
+	terminal          *shellterm.Terminal // nil without a terminal
 }
 
-// That's about 40 frames per second. It's slightly less
-// because the action of taking a snapshot takes time too.
-const snapshotInterval = 25 * time.Millisecond
-
 type ServerConfig struct {
-	AgentType      mf.AgentType
-	Transport      Transport
+	AgentType      instanceapi.AgentType
 	Port           int
 	ChatBasePath   string
 	AllowedHosts   []string
@@ -116,12 +96,10 @@ type ServerConfig struct {
 	// Name is what clients call this AgentAPI (GET /summary, webhook
 	// events); empty is the working directory's name.
 	Name string
-	// PTY and Native configure the transport of the same name; the other
-	// is ignored.
-	PTY    PTYConfig
+	// Native configures the agent; without a Factory none runs
+	// (--print-openapi).
 	Native NativeConfig
-	// StateDB, if set, stores the conversation and restores it on start
-	// (the native and PTY transports).
+	// StateDB, if set, stores the conversation and restores it on start.
 	StateDB *statedb.DB
 	// UploadDir is where uploads and tool result images are kept. Empty
 	// means a temporary directory that is removed on stop. Either way the
@@ -147,24 +125,9 @@ type ServerConfig struct {
 	Update UpdateConfig
 }
 
-// PTYConfig is what the PTY transport needs.
-type PTYConfig struct {
-	// AgentIO is the agent's terminal; nil runs no agent (--print-openapi).
-	AgentIO st.AgentIO
-	// TerminalColumns is the width of the agent's emulated terminal.
-	TerminalColumns uint16
-	// AgentPID is the agent's process, whose session log the JSONL watcher
-	// reads; 0 runs no watcher.
-	AgentPID int
-	// RestartAgent replaces the agent process while keeping AgentAPI
-	// alive. It returns the new process PID so the JSONL watcher can be
-	// restarted. It is nil when the agent can't be restarted.
-	RestartAgent func(context.Context) (int, error)
-}
-
-// NativeConfig is what the native transport needs.
+// NativeConfig is how the server runs the agent.
 type NativeConfig struct {
-	// Factory creates the agent's adapter.
+	// Factory creates the agent's adapter; nil runs no agent.
 	Factory native.Factory
 	// Terminal offers a shell in the agent's working directory (GET
 	// /terminal).
@@ -184,15 +147,6 @@ type NativeConfig struct {
 	// RestartDelays are native.Config.RestartDelays: the waits before an
 	// agent that exited is started again. Nil is the default.
 	RestartDelays []time.Duration
-}
-
-// agentIO is the conversation's view of a PTY agent, nil for a native one
-// or when no agent runs.
-func (c ServerConfig) agentIO() st.AgentIO {
-	if c.Transport == TransportNative {
-		return nil
-	}
-	return c.PTY.AgentIO
 }
 
 // CheckConfig returns an error NewServer would return for config before it
@@ -246,10 +200,10 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	router, auth := newRouter(config, logger, allowedHosts, allowedOrigins, publicIP)
 
 	humaConfig := huma.DefaultConfig("AgentAPI", version.Version)
-	humaConfig.Info.Description = "HTTP API for Claude Code, Goose, and Aider.\n\nhttps://github.com/coder/agentapi"
+	humaConfig.Info.Description = "HTTP API for Claude Code, Codex and Pi.\n\nhttps://github.com/coder/agentapi"
 	api := humachi.New(router, humaConfig)
 
-	dispatcher, err = webhook.New(config.Webhook, logger, config.AgentType, config.Transport, config.Clock)
+	dispatcher, err = webhook.New(config.Webhook, logger, config.AgentType, config.Clock)
 	if err != nil {
 		return nil, fmt.Errorf("configure webhook: %w", err)
 	}
@@ -261,19 +215,13 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	dispatcher.SetServerID(serverID)
 	stateDB := config.StateDB
 	var terminal *shellterm.Terminal
-	if config.Native.Terminal && config.Transport == TransportNative {
+	if config.Native.Terminal {
 		terminal = shellterm.New(shellterm.Config{Dir: config.CWD, Env: terminalEnv(), Logger: logger.With("component", "terminal")})
 	}
 	emitter := newEventEmitter(config, serverID, dispatcher, terminal != nil)
 	restored, err := restoreState(config, stateDB, emitter, logger)
 	if err != nil {
 		return nil, err
-	}
-
-	// Format initial prompt into message parts if provided
-	var initialPrompt []conv.MessagePart
-	if config.InitialPrompt != "" {
-		initialPrompt = FormatMessage(config.AgentType, config.InitialPrompt)
 	}
 
 	// The directory for uploads: a temporary one unless the conversation
@@ -284,45 +232,28 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 	logger.Info("Using upload directory", "uploadDir", uploads.dir)
 
-	var conversation conv.Conversation
-	var nativeConversation *native.Conversation
-	if config.Transport == TransportNative {
-		if config.Native.Factory == nil {
-			return nil, fmt.Errorf("native transport requires an adapter factory")
-		}
-		nativeConversation = newNativeConversation(config, restored, emitter, uploads, logger)
-		conversation = nativeConversation
-	} else {
-		conversation = newPTYConversation(ctx, config, ptyInitialPrompt(initialPrompt, config, stateDB, restored), restored, emitter, logger)
-	}
-
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
 	s := &Server{
-		router:         router,
-		api:            api,
-		port:           config.Port,
-		bind:           bind,
-		auth:           auth,
-		conversation:   conversation,
-		native:         nativeConversation,
-		logger:         logger,
-		agentio:        config.agentIO(),
-		agentType:      config.AgentType,
-		emitter:        emitter,
-		chatBasePath:   strings.TrimSuffix(config.ChatBasePath, "/"),
-		uploads:        uploads,
-		cwd:            config.CWD,
-		clock:          config.Clock,
-		shutdownCtx:    shutdownCtx,
-		shutdown:       shutdownCancel,
-		transport:      config.Transport,
-		webhook:        dispatcher,
-		restartAgent:   config.PTY.RestartAgent,
-		updateAgent:    config.Native.UpdateAgent,
-		terminal:       terminal,
-		jsonlParentCtx: ctx,
-		stateDB:        stateDB,
+		router:       router,
+		api:          api,
+		port:         config.Port,
+		bind:         bind,
+		auth:         auth,
+		native:       newNativeConversation(config, restored, emitter, uploads, logger),
+		logger:       logger,
+		agentType:    config.AgentType,
+		emitter:      emitter,
+		chatBasePath: strings.TrimSuffix(config.ChatBasePath, "/"),
+		uploads:      uploads,
+		cwd:          config.CWD,
+		clock:        config.Clock,
+		shutdownCtx:  shutdownCtx,
+		shutdown:     shutdownCancel,
+		webhook:      dispatcher,
+		updateAgent:  config.Native.UpdateAgent,
+		terminal:     terminal,
+		stateDB:      stateDB,
 	}
 	// Clients follow the queue through queue_update events, and the state
 	// database has every change: a message that went out isn't sent again
@@ -337,15 +268,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		s.restoreQueue(restored.snapshot)
 		restoreWebhook(dispatcher, restored.snapshot, logger)
 	}
-	if mcpconfig.SupportedAgent(config.AgentType) {
-		store, err := mcpconfig.NewStore(config.AgentType, config.CWD)
-		if err != nil {
-			return nil, fmt.Errorf("create MCP config store: %w", err)
-		}
-		s.mcpStore = store
-	}
 
-	if config.Transport == TransportNative && sessions.Supported(string(config.AgentType)) {
+	if sessions.Supported(string(config.AgentType)) {
 		s.sessions, err = sessions.New(string(config.AgentType), config.CWD, sessions.Config{
 			Prices:       config.Native.Prices,
 			PiSessionDir: config.Native.PiSessionDir,
@@ -367,23 +291,12 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	// runs first.
 	s.srv = &http.Server{Addr: s.ListenAddr(), Handler: s.router}
 
-	// Start the conversation polling loop if we have an agent IO.
-	// AgentIO is nil only when --print-openapi is used (no agent runs).
-	// For PTY transport, the process is already running at this point -
-	// termexec.StartProcess() blocks until the PTY is created and the process
-	// is active. Agent readiness (waiting for the prompt) is handled
-	// asynchronously inside conversation.Start() via ReadyForInitialPrompt.
-	if s.agentio != nil || s.native != nil {
-		s.conversation.Start(ctx)
+	// Without a factory (--print-openapi) no agent runs.
+	if config.Native.Factory != nil {
+		s.native.Start(ctx)
 		s.startMessageQueue()
 		s.startUploadPruning()
 	}
-
-	// Start the JSONL watcher to capture rich structured messages.
-	// This runs alongside the PTY conversation as a sidecar, providing
-	// structured content blocks, tool calls, thinking, and usage data.
-	s.startJSONLWatcher(config.PTY.AgentPID)
-
 	return s, nil
 }
 
@@ -403,9 +316,7 @@ func newServerID() (string, error) {
 func newEventEmitter(config ServerConfig, serverID string, dispatcher *webhook.Dispatcher, withTerminal bool) *EventEmitter {
 	options := []convstate.EventEmitterOption{
 		convstate.WithAgentType(config.AgentType),
-		convstate.WithTransport(config.Transport),
 		convstate.WithServerID(serverID),
-		convstate.WithTerminalColumns(config.PTY.TerminalColumns),
 		convstate.WithClock(config.Clock),
 		convstate.WithStatusChangeHandler(dispatcher.StatusChanged),
 		convstate.WithInstance(dispatcher.Instance),
@@ -490,36 +401,6 @@ func newNativeConversation(config ServerConfig, restored restoredState, emitter 
 	})
 }
 
-// newPTYConversation returns the conversation of an agent in a terminal,
-// which starts anew below the restored messages and sends initialPrompt
-// once the agent is ready for it.
-func newPTYConversation(ctx context.Context, config ServerConfig, initialPrompt []conv.MessagePart, restored restoredState, emitter *EventEmitter, logger *slog.Logger) conv.Conversation {
-	agentType := config.AgentType
-	return st.NewPTY(ctx, st.PTYConversationConfig{
-		AgentType:             agentType,
-		AgentIO:               config.PTY.AgentIO,
-		Clock:                 config.Clock,
-		SnapshotInterval:      snapshotInterval,
-		ScreenStabilityLength: 2 * time.Second,
-		FormatMessage: func(message string, userInput string) string {
-			return mf.FormatAgentMessage(agentType, message, userInput)
-		},
-		ReadyForInitialPrompt: func(message string) bool {
-			return mf.IsAgentReadyForInitialPrompt(agentType, message)
-		},
-		ReadyWhenStable: mf.ReadyWhenStable(agentType),
-		StabilityScreen: func(screen string) string {
-			return mf.StabilityRegion(agentType, screen)
-		},
-		FormatToolCall: func(message string) (string, []string) {
-			return mf.FormatToolCall(agentType, message)
-		},
-		InitialPrompt:   initialPrompt,
-		Logger:          logger,
-		InitialMessages: restored.messages,
-	}, emitter)
-}
-
 // restoreWebhook restores the webhook settings stored in snap, which were
 // changed through the API, unless its flags changed since.
 func restoreWebhook(dispatcher *webhook.Dispatcher, snap statedb.Snapshot, logger *slog.Logger) {
@@ -540,18 +421,6 @@ func restoreWebhook(dispatcher *webhook.Dispatcher, snap statedb.Snapshot, logge
 // Handler returns the underlying chi.Router for testing purposes.
 func (s *Server) Handler() http.Handler {
 	return s.router
-}
-
-// MarkAgentExited records the terminal lifecycle state of a PTY agent that
-// exited, before the HTTP server shuts down. A nil error represents a clean
-// process exit. A native agent that exits is started again (see
-// native.Config.RestartDelays).
-func (s *Server) MarkAgentExited(err error) {
-	if err != nil {
-		s.emitter.SetLifecycle(LifecycleFailed)
-		return
-	}
-	s.emitter.SetLifecycle(LifecycleExited)
 }
 
 func (w *responseWriter) WriteHeader(code int) {
@@ -615,12 +484,11 @@ func (s *Server) Stop(ctx context.Context) error {
 		}
 		// A restart under way was cancelled with shutdownCtx, and lets go
 		// of mu while it waits for its agent; from now on none can start
-		// another one, or another session-log watcher.
+		// another one.
 		s.mu.Lock()
 		s.stopping = true
-		s.stopJSONLWatcher()
 		s.mu.Unlock()
-		if closeErr := s.backend().close(); closeErr != nil {
+		if closeErr := s.native.Close(); closeErr != nil {
 			s.logger.Error("Failed to stop the agent", "error", closeErr)
 		}
 		if s.terminal != nil {

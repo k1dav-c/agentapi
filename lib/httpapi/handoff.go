@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -13,44 +13,8 @@ import (
 
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/handoff"
-	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 )
-
-// Only expose deliberate, bounded terminal actions. Reply text never becomes
-// arbitrary terminal escape sequences. The browser's terminal remains available
-// for unsupported prompts.
-//
-// Claude Code and Codex select a numbered option as soon as its digit is
-// typed, so no carriage return follows it there: a trailing Enter would
-// submit an empty feedback field (plan dialog "Tell Claude what to change"),
-// answer the next question with its default, or land on the next prompt and
-// approve it.
-func terminalReply(agentType mf.AgentType, content, answer string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(answer)) {
-	case "enter":
-		return "\r", true
-	case "esc":
-		return "\x1b", true
-	}
-	answer = strings.TrimSpace(answer)
-	options := mf.TerminalOptions(content)
-	if len(options) < 2 {
-		return answer + "\r", answer != ""
-	}
-	if _, err := strconv.Atoi(answer); err != nil || len(answer) != 1 {
-		return "", false
-	}
-	for _, option := range options {
-		if option == answer {
-			if agentType == mf.AgentTypeClaude || agentType == mf.AgentTypeCodex {
-				return answer, true
-			}
-			return answer + "\r", true
-		}
-	}
-	return "", false
-}
 
 type handoffReceipt struct {
 	replyID string
@@ -109,24 +73,26 @@ type (
 	HandoffReplyResponse   struct{ Body handoff.Result }
 )
 
-// pendingHandoff returns what the human reply protocol offers now, or nil.
-// For kind "request" it also returns the native request offered, which a
+// pendingHandoff returns what the human reply protocol offers now, or nil:
+// the agent's oldest pending request (kind "request"), else its last
+// message. For a request it also returns the request offered, which a
 // reply must answer even if other requests opened since. It doesn't need
 // s.mu, so GET /handoff answers while a call into the agent holds it; a
 // reply holds s.mu, so that what it answers stays offered until it is
 // delivered.
 func (s *Server) pendingHandoff() (*handoff.Request, native.RequestState) {
-	if s.emitter == nil || s.conversation == nil || s.restarting.Load() || s.updating.Load() {
+	if s.emitter == nil || s.native == nil || s.restarting.Load() || s.updating.Load() {
 		// While the agent restarts, what it showed belongs to the old
 		// one, and a reply would reach no agent; AgentAPI restarting for
 		// an update would cut it short.
 		return nil, native.RequestState{}
 	}
 	view := s.emitter.HandoffView()
-	if view.Status.Lifecycle != LifecycleReady || s.conversation.Status() != conv.StatusStable {
+	if view.Status.Lifecycle != LifecycleReady || s.native.Status() != conv.StatusStable {
 		return nil, native.RequestState{}
 	}
-	kind, content, request, ok := s.backend().handoffOffer(view)
+	kind := "request"
+	request, content, ok := s.pendingNativeHandoff()
 	if !ok {
 		if s.queue.Len() > 0 {
 			// The agent's last message isn't its last word.
@@ -176,14 +142,14 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 		return &HandoffReplyResponse{Body: handoff.Result{Outcome: "superseded"}}, nil
 	}
 	if pending.Kind != "message" {
-		return &HandoffReplyResponse{Body: s.backend().answerHandoff(pending, request, reply.ID, reply.Content)}, nil
+		return &HandoffReplyResponse{Body: s.answerHandoff(pending, request, reply.ID, reply.Content)}, nil
 	}
 	// The reply to the agent's last message is the next message, which goes
 	// out as POST /message sends one: queued if the agent got busy since.
 	result := handoff.Result{Outcome: "uncertain"}
 	s.handoff.record(pending.ID, reply.ID, result)
 	var resp MessageResponse
-	switch err := s.backend().deliver(reply.Content, DispatchQueue, &resp); {
+	switch err := s.createNativeMessageLocked(reply.Content, DispatchQueue, &resp); {
 	case err != nil:
 		s.logger.Error("Human reply delivery is uncertain; refusing automatic retry", "request_id", pending.ID, "error", err)
 	case resp.Body.Queued:
@@ -193,6 +159,32 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 	}
 	s.handoff.record(pending.ID, reply.ID, result)
 	return &HandoffReplyResponse{Body: result}, nil
+}
+
+// answerHandoff answers r, the request the handoff pending offered, with
+// content, records the outcome for the reply replyID, and returns it.
+// Caller holds s.mu, so no other reply is delivered meanwhile.
+func (s *Server) answerHandoff(pending *handoff.Request, r native.RequestState, replyID, content string) handoff.Result {
+	response, ok := nativeHandoffResponse(r, content)
+	if !ok {
+		return handoff.Result{Outcome: "invalid"}
+	}
+	ctx, cancel := s.agentCtx(nativeCallTimeout)
+	defer cancel()
+	result := handoff.Result{Outcome: "applied"}
+	switch _, err := s.native.Respond(ctx, r.ID, response); {
+	case errors.Is(err, native.ErrInvalidResponse):
+		// Nothing was sent, so a corrected reply may follow.
+		return handoff.Result{Outcome: "invalid"}
+	case errors.Is(err, native.ErrRequestNotFound), errors.Is(err, native.ErrNotStarted):
+		// Answered elsewhere, withdrawn or expired; nothing was sent.
+		result.Outcome = "superseded"
+	case err != nil:
+		s.logger.Error("Human reply delivery is uncertain; refusing automatic retry", "request_id", r.ID, "error", err)
+		result.Outcome = "uncertain"
+	}
+	s.handoff.record(pending.ID, replyID, result)
+	return result
 }
 
 func (s *Server) registerHandoffRoutes() {

@@ -18,11 +18,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/coder/agentapi/lib/httpapi"
-	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
+	"github.com/coder/agentapi/lib/logctx"
 )
 
 // uploadForPreview posts a file to /upload and returns the stored path.
@@ -56,7 +57,7 @@ func TestServeUpload(t *testing.T) {
 	t.Parallel()
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeClaude,
+		AgentType:      instanceapi.AgentTypeClaude,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
@@ -133,7 +134,7 @@ func TestUploadNames(t *testing.T) {
 	t.Parallel()
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeClaude,
+		AgentType:      instanceapi.AgentTypeClaude,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},

@@ -20,7 +20,7 @@ import (
 	"github.com/coder/agentapi/lib/transcript"
 )
 
-// sessionLogMessages parses a session log the way the JSONL watcher does.
+// sessionLogMessages parses a session log the way lib/sessions does.
 func sessionLogMessages(t *testing.T, name string) []transcript.RichMessage {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testdata", name+".session.jsonl"))

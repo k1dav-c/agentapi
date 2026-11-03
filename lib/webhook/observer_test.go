@@ -21,7 +21,6 @@ import (
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
-	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -31,7 +30,7 @@ func testDispatcher(t *testing.T, config Config, clock quartz.Clock) *Dispatcher
 	if config.URL == "" {
 		config.URL = "https://example.com/hook"
 	}
-	d, err := New(config, slog.New(slog.NewTextHandler(io.Discard, nil)), mf.AgentTypeClaude, instanceapi.TransportNative, clock)
+	d, err := New(config, slog.New(slog.NewTextHandler(io.Discard, nil)), instanceapi.AgentTypeClaude, clock)
 	require.NoError(t, err)
 	return d
 }
@@ -224,11 +223,6 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 	e.SetLoginRequired(&native.LoginRequired{Agent: "Claude Code", Command: "claude auth login"})
 	e.SetLoginRequired(nil)
 
-	// A terminal dialog is published once it settled on the screen.
-	e.EmitScreen("Allow this?\n1. Yes\n2. No")
-	clock.Advance(time.Second).MustWait(t.Context()) // the prompt settles
-	e.EmitScreen("$ ")
-
 	goOn := conv.Message{Id: 1, Role: conv.RoleUser, Message: "Go on", Time: start}
 	e.EmitMessages([]conv.Message{deploy, goOn})
 	e.EmitStatus(conv.StatusChanging)
@@ -242,15 +236,10 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 		webhookEventRequestOpened, webhookEventRequestClosed,
 		webhookEventRequestOpened, webhookEventRequestClosed, webhookEventTaskCompleted,
 		webhookEventLoginRequired, webhookEventLoginCompleted,
-		webhookEventRequestOpened, webhookEventRequestClosed,
 		webhookEventAgentError,
 		webhookEventLimitStopped, webhookEventTaskFailed,
 	}, eventTypes(events))
-	prompt := events[7].Data.(WebhookTerminalPrompt)
-	assert.Equal(t, "terminal_prompt", prompt.Kind)
-	assert.Equal(t, "Allow this?\n1. Yes\n2. No", prompt.Prompt)
-	assert.Equal(t, prompt.ID, events[8].Data.(WebhookTerminalPrompt).ID)
-	task := events[11].Data.(WebhookTask)
+	task := events[9].Data.(WebhookTask)
 	assert.Equal(t, convstate.TaskStatusLimited, task.Status)
 	assert.Empty(t, task.Errors, "a warning doesn't fail a task")
 }
@@ -612,7 +601,7 @@ func TestWebhookSignature(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &event))
 	assert.Equal(t, webhookEventTaskStarted, event.Type)
 	assert.Equal(t, "host:3284", event.Instance.ID)
-	assert.Equal(t, mf.AgentTypeClaude, event.Instance.AgentType)
+	assert.Equal(t, instanceapi.AgentTypeClaude, event.Instance.AgentType)
 	assert.Equal(t, "Hi", event.Data.Prompt)
 }
 

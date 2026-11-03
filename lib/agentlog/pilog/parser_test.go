@@ -1,7 +1,6 @@
 package pilog
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -122,57 +121,6 @@ func TestSessionDirName(t *testing.T) {
 	assert.Equal(t, "--home-k1dave6412--", SessionDirName("/home/k1dave6412"))
 	assert.Equal(t, "--home-me-my.proj--", SessionDirName("/home/me/my.proj"))
 	assert.Equal(t, "--C--Users-me--", SessionDirName(`C:\Users\me`))
-}
-
-func TestResolver(t *testing.T) {
-	dir := t.TempDir()
-	start := time.Date(2026, 10, 4, 15, 0, 0, 0, time.UTC)
-	write := func(name, cwd string, startedAt time.Time) string {
-		path := filepath.Join(dir, name)
-		header, _ := json.Marshal(map[string]any{"type": "session", "version": 3, "id": name, "timestamp": startedAt.Format(time.RFC3339Nano), "cwd": cwd})
-		require.NoError(t, os.WriteFile(path, append(header, '\n'), 0o600))
-		require.NoError(t, os.Chtimes(path, startedAt, startedAt))
-		return path
-	}
-	write("old.jsonl", "/proj", start.Add(-time.Hour))
-	ours := write("ours.jsonl", "/proj", start.Add(2*time.Second))
-	write("other-dir.jsonl", "/elsewhere", start.Add(3*time.Second))
-	// A second Pi process started later in the same directory.
-	write("later.jsonl", "/proj", start.Add(10*time.Second))
-
-	r := &Resolver{CWD: "/proj", NotBefore: start, SessionsDir: dir}
-	got, err := r.Resolve()
-	require.NoError(t, err)
-	assert.Equal(t, ours, got)
-
-	// Another process's older session that is still being written to is
-	// not ours, however recent the write.
-	r = &Resolver{CWD: "/proj", NotBefore: start.Add(time.Minute), SessionsDir: dir}
-	busy := filepath.Join(dir, "old.jsonl")
-	require.NoError(t, os.Chtimes(busy, start.Add(2*time.Minute), start.Add(2*time.Minute)))
-	_, err = r.Resolve()
-	assert.Error(t, err)
-}
-
-func TestResolverRegisteredSession(t *testing.T) {
-	dir := t.TempDir()
-	start := time.Now()
-	// A session for the same directory that started after ours, written by
-	// a Pi process started without our ID.
-	other := filepath.Join(dir, "2026-10-04T15-00-01-000Z_other.jsonl")
-	require.NoError(t, os.WriteFile(other, []byte(`{"type":"session","version":3,"id":"other","timestamp":"`+start.Add(time.Second).UTC().Format(time.RFC3339Nano)+`","cwd":"/proj"}`+"\n"), 0o600))
-
-	const pid = 1 << 30
-	RegisterSession(pid, Session{ID: "agentapi-abc123", Dir: dir})
-	r := &Resolver{PID: pid, CWD: "/proj", NotBefore: start}
-	_, err := r.Resolve()
-	assert.Error(t, err, "our session file doesn't exist until the first message")
-
-	ours := filepath.Join(dir, "2026-10-04T15-00-00-000Z_agentapi-abc123.jsonl")
-	require.NoError(t, os.WriteFile(ours, []byte(`{"type":"session","version":3,"id":"agentapi-abc123","timestamp":"`+start.UTC().Format(time.RFC3339Nano)+`","cwd":"/proj"}`+"\n"), 0o600))
-	got, err := r.Resolve()
-	require.NoError(t, err)
-	assert.Equal(t, ours, got)
 }
 
 func TestPiSessionName(t *testing.T) {

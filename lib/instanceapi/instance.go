@@ -16,14 +16,29 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/util"
 )
 
-// Transport is how AgentAPI talks to its agent.
+// AgentType is the agent an AgentAPI runs. A new one needs a native
+// adapter (lib/native, cmd/server/native.go) and a display name in
+// chat/src/lib/agents.ts. An AgentAPI 2 may report others (aider, goose,
+// ...), which ran on the PTY transport.
+type AgentType string
+
+const (
+	AgentTypeClaude AgentType = "claude"
+	AgentTypeCodex  AgentType = "codex"
+	AgentTypePi     AgentType = "pi"
+	// AgentTypeCustom is native-demo's (lib/native/demo).
+	AgentTypeCustom AgentType = "custom"
+)
+
+// Transport is how AgentAPI talks to its agent: natively since AgentAPI 3.
 type Transport string
 
 const (
+	// TransportPTY is what an AgentAPI 2 that drove the agent's terminal
+	// UI reports.
 	TransportPTY    Transport = "pty"
 	TransportNative Transport = "native"
 )
@@ -49,9 +64,9 @@ type WebhookInstance struct {
 	PID      int    `json:"pid,omitempty"`
 	CWD      string `json:"cwd,omitempty"`
 	// AgentType and Transport say which agent it runs, and how.
-	AgentType mf.AgentType `json:"agent_type"`
-	Transport Transport    `json:"transport"`
-	Version   string       `json:"agentapi_version,omitempty"`
+	AgentType AgentType `json:"agent_type"`
+	Transport Transport `json:"transport"`
+	Version   string    `json:"agentapi_version,omitempty"`
 	// URL is where it can be reached (--public-url); a client that finds
 	// it elsewhere keeps where it reaches it here.
 	URL          string `json:"url,omitempty"`

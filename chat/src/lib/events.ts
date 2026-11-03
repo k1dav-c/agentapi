@@ -22,17 +22,14 @@ export type AgentErrorEvent = Schemas["ErrorBody"];
 // (?sync=1) only.
 export type TaskUpdateEvent = Schemas["TaskUpdateBody"];
 export type QueueUpdateEvent = Schemas["QueueUpdateBody"];
-// The screen of TTY mode (GET /internal/screen), and the shell terminal's
-// output and end (GET /terminal).
-export type ScreenEvent = Schemas["ScreenUpdateBody"];
+// The shell terminal's output and end (GET /terminal).
 export type TerminalOutputEvent = Schemas["TerminalOutputBody"];
 export type TerminalExitEvent = Schemas["TerminalExitBody"];
 
 // A server older than the chat (the chat in development, or served apart
 // from it) leaves out what it didn't have yet: the transport (GET /status
-// says then), the lifecycle, the version, the terminal prompt and some
-// capabilities.
-type Missing = "transport" | "lifecycle" | "agentapi_version" | "terminal_prompt";
+// says then), the lifecycle, the version and some capabilities.
+type Missing = "transport" | "lifecycle" | "agentapi_version";
 export type StatusChangeEvent = Omit<Schemas["StatusChangeBody"], Missing | "capabilities"> &
   Partial<Pick<Schemas["StatusChangeBody"], Missing>> & {capabilities?: Capabilities};
 

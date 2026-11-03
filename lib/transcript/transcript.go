@@ -1,7 +1,6 @@
 // Package transcript has the types of a conversation's structured
-// transcript that the transports share: rich messages with their content
-// blocks, as an agent's protocol (native) or its session log (PTY) reports
-// them, and the timeline's events.
+// transcript: rich messages with their content blocks, as an agent's
+// protocol or its session log reports them, and the timeline's events.
 package transcript
 
 import (

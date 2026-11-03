@@ -65,8 +65,12 @@ export function UsageBar({percent}: {percent: number}) {
   );
 }
 
+// agentName names the instance's agent; an agent this build doesn't know
+// (one an AgentAPI 2 ran, e.g. "aider") by its type.
 export function agentName(instance: HubInstance): string {
-  return instance.agent_type ? agentDisplayName(parseAgentType(instance.agent_type), instance.agent_type) : "";
+  if (!instance.agent_type) return "";
+  const type = parseAgentType(instance.agent_type);
+  return type === "custom" && instance.agent_type !== "custom" ? instance.agent_type : agentDisplayName(type, instance.agent_type);
 }
 
 // RowActions are what a row does to its instance; the hub keeps the same

@@ -3,7 +3,7 @@ import {renderToStaticMarkup} from "react-dom/server";
 import type {HubInstance, Summary} from "@/lib/hub";
 import type {ListOrder} from "@/lib/hub-order";
 import {FixedHubClock} from "./clock";
-import {InstanceRow} from "./instance-row";
+import {InstanceRow, agentName} from "./instance-row";
 
 // Finished at 9:40, which the hub saw at 9:41; in the group Client work.
 const finished: HubInstance = {
@@ -124,5 +124,14 @@ describe("InstanceRow's spend", () => {
 
   test("from an AgentAPI that doesn't say its tokens, none", () => {
     expect(row("groups", spending(spend))).not.toContain("tokens");
+  });
+});
+
+describe("agentName", () => {
+  test("names the agents AgentAPI 3 runs, and an older AgentAPI's others by their type", () => {
+    expect(agentName(finished)).toBe("Claude Code");
+    expect(agentName({...finished, agent_type: "aider"})).toBe("aider");
+    expect(agentName({...finished, agent_type: "custom"})).toBe("Custom");
+    expect(agentName({...finished, agent_type: ""})).toBe("");
   });
 });

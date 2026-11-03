@@ -343,19 +343,6 @@ func TestClaudeSessionName(t *testing.T) {
 	assert.Equal(t, "Release prep", name)
 }
 
-func TestResolverHonorsTheAgentsHome(t *testing.T) {
-	configDir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
-	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "sessions"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(configDir, "sessions", "4242.json"), []byte(`{"cwd":"/work/app","sessionId":"s-1"}`), 0o644))
-	project := filepath.Join(configDir, "projects", EncodeCWD("/work/app"))
-	require.NoError(t, os.MkdirAll(project, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(project, "s-1.jsonl"), nil, 0o644))
-	path, err := (&Resolver{PID: 4242}).Resolve()
-	require.NoError(t, err)
-	require.Equal(t, filepath.Join(project, "s-1.jsonl"), path)
-}
-
 // The names Claude Code 2.1.302 gives these directories' project
 // directories, from its own code.
 func TestProjectDirName(t *testing.T) {

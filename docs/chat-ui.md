@@ -2,18 +2,13 @@
 
 English | [繁體中文](chat-ui.zh-TW.md)
 
-Open `/chat` to use the chat UI embedded in the `agentapi` binary. It works with every transport
-on desktops and phones, and talks to the server through the
-[HTTP API](../README.md#http-api-reference).
+Open `/chat` to use the chat UI embedded in the `agentapi` binary. It works on desktops and phones,
+and talks to the server through the [HTTP API](../README.md#http-api-reference).
 
-Screenshots and animations show AgentAPI v0.28.0 running `native-demo` on a sample site. The demo's
-replies, tool results, models and usage are simulated; TTY mode runs bash as a PTY agent. A blue dot
-marks the pointer and clicks. To reproduce the captures, use
-[scripts/capture-docs.mjs](../scripts/capture-docs.mjs) as described in the
+Screenshots and animations show AgentAPI v3.0.0 running `native-demo` on a sample site. The demo's
+replies, tool results, models and usage are simulated. A blue dot marks the pointer and clicks. To
+reproduce the captures, use [scripts/capture-docs.mjs](../scripts/capture-docs.mjs) as described in the
 [screenshot guide](screenshots/README.md).
-
-Features marked *native* require the [native transport](../README.md#native-transport), the default
-for Claude Code, Codex and Pi.
 
 ## Contents
 
@@ -25,7 +20,7 @@ for Claude Code, Codex and Pi.
 - [Files](#files)
 - [Session Explorer](#session-explorer)
 - [Lineage](#lineage)
-- [Terminals](#terminals)
+- [Shell terminal](#shell-terminal)
 - [Session details and alerts](#session-details-and-alerts)
 - [Phones](#phones)
 - [The hub](#the-hub)
@@ -38,11 +33,11 @@ for Claude Code, Codex and Pi.
 - **Header.** The agent's mark and type, the session name and the AgentAPI version. On the right:
   the status (Ready, Working with a timer, or Needs you; click it for the
   [session details](#session-details-and-alerts)), the tokens used so far, and buttons for
-  [search](#search), the [terminal](#terminals) (the shell terminal with the native transport,
-  TTY mode with PTY), the [Session Explorer](#session-explorer) and the light or dark theme.
+  [search](#search), the [shell terminal](#shell-terminal), the [Session Explorer](#session-explorer)
+  and the light or dark theme.
 - **Transcript.** One block per task, oldest first. The left column shows when each task started
   and how long it took.
-- **Composer.** The message box and its toolbar: *native* the permission mode, the model and
+- **Composer.** The message box and its toolbar: the permission mode, the model and
   reasoning effort, and how full the context is; then the attachment button, more input options
   and the send button. The line under it lists the keys.
 - The ↑ and ↓ buttons at the bottom right jump to the previous and the next task.
@@ -59,13 +54,13 @@ Failed or Limit reached), a Stop button while it works, and its ⋯ menu. The se
 exited; hover to see the first error. Limit reached means a usage limit stopped it; hover for the
 agent's message. The server also assigns tool calls and thinking to tasks.
 
-*native* A message you steer into the running task stays in that task: it shows among the agent's
+A message you steer into the running task stays in that task: it shows among the agent's
 steps where it arrived, as your message marked *steered*, and the task keeps its number, state and
 cost. The numbers are the server's, as `GET /tasks`, webhooks and the hub count them. With a server
 older than tasks, every message starts one.
 
 The task's start time and duration appear in the left margin on wide screens, or after its number
-in the header on narrower screens. *native* Claude Code, Codex and Pi also show the cost of model
+in the header on narrower screens. Claude Code, Codex and Pi also show the cost of model
 calls made during the task, including subagents, at provider list prices. Calls between tasks,
 such as compaction, don't count toward a task.
 
@@ -129,10 +124,10 @@ as thumbnails that open in full size, and can be removed before you send.
 
 ![The composer with an image attached](screenshots/attachments.png)
 
-The agent gets the path of each attachment. *native* An agent that takes images (Claude Code, Codex
-and Pi) also gets PNG, JPEG, GIF and WebP attachments as images. **More input options** (⋯) has
-voice input where the browser supports speech recognition: it dictates into the composer in the
-browser's language.
+The agent gets the path of each attachment, and PNG, JPEG, GIF and WebP attachments as images too.
+AgentAPI removes an upload once it is 7 days old and the conversation no longer refers to it.
+**More input options** (⋯) has voice input where the browser supports speech recognition: it
+dictates into the composer in the browser's language.
 
 The draft and its attachments survive a reload. A message that didn't reach the server stays in the
 chat marked as not sent, even after a reload, with buttons to retry or dismiss it.
@@ -143,8 +138,8 @@ chat marked as not sent, even after a reload, with buttons to retry or dismiss i
 
 Messages sent while the agent works wait in a server queue, shown below the message box. They run
 in order after the turn ends, and every open chat follows queue changes live. You can edit, move
-or remove queued tasks. *native* The ↳ button steers a queued task into the running turn.
-*native* The send menu offers three modes:
+or remove queued tasks. The ↳ button steers a queued task into the running turn.
+The send menu offers three modes:
 
 - **Queue** (Enter): send it once this turn ends.
 - **Steer** (⌘/Ctrl+Enter): add it to the turn the agent is working on.
@@ -159,7 +154,7 @@ agent waits for an answer to a request, a new message queues behind it.
 
 ![The slash commands listed after typing a slash](screenshots/slash-commands.png)
 
-*native* Type `/` to list commands handled by the chat; Tab completes a suggestion. Other slash
+Type `/` to list commands handled by the chat; Tab completes a suggestion. Other slash
 commands go directly to the agent, including Claude Code's `/code-review`.
 
 | Command | What it does |
@@ -174,8 +169,7 @@ commands go directly to the agent, including Claude Code's `/code-review`.
 | `/login` | Runs the agent's login command in the shell terminal |
 | `/help` | Lists these commands |
 
-`/model`, `/effort`, `/mode` and `/plan` appear for an agent with settings, `/terminal` and `/login`
-when the shell terminal is on.
+`/terminal` and `/login` appear when the shell terminal is on.
 
 ### Keyboard shortcuts
 
@@ -185,7 +179,7 @@ when the shell terminal is on.
 
 ## Agent settings
 
-*native* The composer's toolbar changes the agent's settings while it runs (`PUT /settings`). They
+The composer's toolbar changes the agent's settings while it runs (`PUT /settings`). They
 stay for the session: AgentAPI gives them to the agent again after it restarts or logs in again and,
 with `--state-db`, after AgentAPI restarts.
 
@@ -219,7 +213,7 @@ windows. The agent compacts a full context automatically; use `/compact` to requ
 
 ![A note above the composer: the prompt cache expired and the next message reads 120k tokens again, with Compact](screenshots/cold-cache.png)
 
-*native* Claude Code keeps the conversation in the model provider's prompt cache for an hour after
+Claude Code keeps the conversation in the model provider's prompt cache for an hour after
 its last use on a subscription, five minutes with an API key. Once the cache has expired, the next
 message has the model read the whole context again, at the full price and against the usage
 limits. While the agent is idle with an expired cache and at least 50k tokens of context, a note
@@ -229,7 +223,7 @@ above the composer says so, with **Compact**. A closed note stays away until the
 
 ![A task stopped on the 5-hour limit, marked Limit reached: a card with the reset time and Continue at reset, Continue now and Send queued tasks, and a task held in the queue](screenshots/limit-card.png)
 
-*native* When the account reaches a usage limit, the agent stops its turn, and a card above the
+When the account reaches a usage limit, the agent stops its turn, and a card above the
 composer says when the limit resets. The queued tasks wait until then, marked *held until the usage
 limit resets*, instead of failing one by one. **Continue at reset** sends a message that has the
 agent go on with the task a minute after the reset, **Continue now** sends it now, and **Send queued
@@ -248,7 +242,7 @@ any open chat; one that can no longer be answered says so.
 
 ![An approval card for a command: Allow, Always allow Bash in this session, and Deny with a note](screenshots/native-approval.png)
 
-*native* A command or file change that needs your approval (in the ask mode, or when the agent's
+A command or file change that needs your approval (in the ask mode, or when the agent's
 own policy asks) shows what would run and why. **Allow** runs it once, **Always allow** allows the
 tool for the rest of the session, and **Deny** refuses it; the optional note tells the agent what to
 do instead.
@@ -259,7 +253,7 @@ do instead.
 
 ![A question card on the first of three steps: Package manager, Checks and Notes](screenshots/native-question.png)
 
-*native* The agent's questions come one step at a time: single choice, several choices or free
+The agent's questions come one step at a time: single choice, several choices or free
 text. **Next** moves to the next step and the last one sends every answer together. Secret answers
 are masked while you type and stored as `[redacted]`.
 
@@ -269,16 +263,10 @@ are masked while you type and stored as `[redacted]`.
 
 ![A plan card with the plan in Markdown, Approve the plan, Keep planning and a feedback field](screenshots/native-plan.png)
 
-*native* A plan shows in Markdown. Approve it, or keep planning and tell the agent what to change.
+A plan shows in Markdown. Approve it, or keep planning and tell the agent what to change.
 Claude Code and Codex also let you choose how the agent then implements the plan: Claude Code with
 bypassed permissions, auto-accepted edits or edits you approve, Codex in the bypass, auto review or
 ask mode.
-
-### Terminal dialogs
-
-With the PTY transport, the agent's own terminal dialogs (Claude Code's "Do you want to proceed?",
-for example) become the same kind of card, and the chat answers them with the keys the dialog
-expects. A dialog with a free-text field can also be answered with a normal message.
 
 ### Logging in
 
@@ -343,7 +331,7 @@ textconv or fsmonitor of the repository or the user runs.
 
 ## Session Explorer
 
-The Explorer (⌘K / Ctrl+K, or the folder button) has six tabs. The Index, Files and Links lists
+The Explorer (⌘K / Ctrl+K, or the folder button) has five tabs. The Index, Files and Links lists
 have a filter box.
 
 ### Index
@@ -360,25 +348,11 @@ The tasks of the session, newest first, each with its state; click one to jump t
 lists the web links, each with the task it came from, including links a terminal wrapped onto the
 next line.
 
-### MCP
-
-For Claude Code, Codex and Pi, the MCP tab edits the agent's MCP servers in AgentAPI's managed
-config file (`.mcp.json` in the working directory for Claude Code, `$CODEX_HOME/config.toml` for
-Codex, `$PI_CODING_AGENT_DIR/mcp.json` for Pi):
-
-- **MCP servers**: the servers as JSON in the agent's own format, with import and export. Saving
-  writes the file atomically and, unless you turn it off, restarts the agent to load it. With the
-  native transport, an agent that can resume its session resumes it, so the conversation stays.
-- **Connectivity**: checks that each server starts or answers.
-- **Profiles**: saves, applies, imports and exports whole sets of servers.
-
-See [MCP management](../README.md#mcp-management) for the API.
-
 ### Session
 
 ![The Explorer's Session tab: what the sessions cost today, in 7 and 30 days and in all, and Claude Code's sessions in the directory with Open and Start a copy, one asking for a second click](screenshots/explorer-sessions.png)
 
-*native* For Claude Code, Codex and Pi, this tab lists sessions in the working directory from the
+For Claude Code, Codex and Pi, this tab lists sessions in the working directory from the
 agent's logs, with names, first messages, message counts, last-change times and costs. A card above
 the list totals session and subagent costs for today, the last 7 and 30 days (including today, in
 your time zone), and all time. These are API-equivalent costs at list prices; hover for tokens.
@@ -401,7 +375,7 @@ details menu has it too.
 
 Configure a webhook here even if AgentAPI started without one. Set the receiver URL, signing
 secret, instance ID, public URL and heartbeat interval, then choose event groups: **Tasks**,
-**Needs you** (approvals, questions, plans, terminal dialogs, logins and usage limits), **Heartbeats**,
+**Needs you** (approvals, questions, plans, logins and usage limits), **Heartbeats**,
 **Run status**, **Agent errors**, **Messages** and **Tool calls**. The secret can be replaced or
 removed but never read back. **Delivery and payload** contains the timeout, attempt count and template.
 
@@ -415,20 +389,18 @@ whole group. See [Webhooks](../README.md#webhooks) for events and payloads.
 
 ![The Lineage panel on a subagent: the task Claude Code gave it, a file it read, a command it ran and its answer](screenshots/lineage.png)
 
-*native* When Claude Code or Codex hands work to subagents, a button in the header shows how many
+When Claude Code or Codex hands work to subagents, a button in the header shows how many
 there are and how many still work. It opens the Lineage panel, which lists each subagent with its
 task, kind, state and time. Choosing one shows what it did the way the transcript shows a task: its
 thinking, tool calls and answer, updated while it works. The **Steps** button on the Agent (or
 spawn_agent) tool call that started a subagent opens it directly. The steps come from the
 subagents' own logs, so a session opened from the Session tab shows its subagents too.
 
-## Terminals
-
-### Shell terminal
+## Shell terminal
 
 ![The shell terminal: git status and git log in the agent's working directory, and the key bar](screenshots/terminal.png)
 
-*native* The terminal button (or `/terminal`) opens a shell in the agent's working directory, for
+The terminal button (or `/terminal`) opens a shell in the agent's working directory, for
 logins and quick commands. It is a real terminal sized to the window. Everyone who opens it shares
 the same shell, which keeps running while nobody watches. The key bar sends the keys a phone
 keyboard lacks: arrows, Enter, Esc, Tab, Shift+Tab, Ctrl+C, a shell's Ctrl+R, Ctrl+A, Ctrl+E, Ctrl+U
@@ -442,22 +414,12 @@ one tap. Start AgentAPI with `--terminal=false` to turn the terminal off.
 
 ![The terminal: git status, a link that shows above the terminal, and a held Ctrl clearing the screen](screenshots/demo-terminal.gif)
 
-### TTY mode
-
-![TTY mode: bash's screen with a column ruler, at 100 columns](screenshots/tty-mode.png)
-
-With the PTY transport, the terminal button switches the conversation for the agent's own terminal
-screen, for when the chat view looks wrong. Every key goes straight to the agent: arrows, Ctrl and
-Alt keys, pastes and IME input. The ruler shows the agent's real terminal width (here
-`--term-width 100`); the font grows with the window (11–20px). Links open on a click and the last
-one shows above the screen, as in the shell terminal. **Back to chat** returns.
-
 ## Session details and alerts
 
 ![The session details menu: status, agent, session, session ID with a copy button, version, activity, queue and tokens](screenshots/session-details.png)
 
 Clicking the status in the header opens the session details: the status, agent, session name,
-*native* the agent's session ID (its first characters, with a copy button), AgentAPI version, what
+the agent's session ID (its first characters, with a copy button), AgentAPI version, what
 the agent is doing, the queue and the tokens in and out. Its menu downloads the conversation as
 JSONL (as the Explorer's Session tab does), turns on browser notifications, shows the keyboard
 shortcuts, and shows how to add this AgentAPI to a [hub](hub.md). (How full the context is and
@@ -495,7 +457,7 @@ a second row when you ask for it from `⋯`, when a slash command such as `/mode
 menus, or while the usage nears a limit. While a card asks for you, the card alone says so (the
 status line above it is left to screen readers), and its options leave out the number keys. A
 request card takes at most 60% of the screen and a title cut to two lines can be shown in full. The
-file viewer takes the whole screen, and the terminals have the key bar.
+file viewer takes the whole screen, and the terminal has the key bar.
 While the keyboard is up, the page ends above it, so the composer and the key bar stay in view.
 
 ![A question card on a phone](screenshots/mobile-question.png)
@@ -509,17 +471,17 @@ While the keyboard is up, the page ends above it, so the composer and the key ba
 A [hub](../README.md#running-a-hub) (`agentapi hub serve`) serves this chat for every AgentAPI it
 watches. Its list puts the agents you pin on top, then what needs you first or the latest change
 first. Each state has a glyph of its own, and each row says what the agent waits for (the
-approval's command, the question) or does; search and chips filter the list. On a desktop, an overview counts each
-state and has a card per request. Picking an agent opens it in this chat beside the list (or instead
-of it on a phone, with a back button), under one bar: the hub's, with the chat's own buttons in it.
-It opens through the hub, which sends the instance's token.
+approval's command, the question) or does; search and chips filter the list. On a desktop, an
+overview counts each state, shows what needs you, works or finished since you looked, and totals the
+spend, tokens and work time of the last 24 hours and 7 days. Picking an agent opens it in this chat
+beside the list (or instead of it on a phone, with a back button), under one bar: the hub's, with
+the chat's own buttons in it. It opens through the hub, which sends the instance's token.
 
-`+` adds an instance by its URL and
-token. Each row's `⋯` menu pins the instance to the top, puts it in a group of your own (the list
+`+` adds an instance by its URL and token. Each row's `⋯` menu pins the instance to the top, puts it in a group of your own (the list
 then shows a folding header per group), mutes what it waits for until that changes, or forgets a
-stopped or unreachable one. Rows, group headers and a card of the overview show what the agents
-spent in the last 24 hours and 7 days. Each row shows its AgentAPI version, marked when it is older
-than the hub's, and another card counts the versions. The [hub guide](hub.md) covers setup, groups
+stopped or unreachable one. Rows and group headers show what the agents spent in the last 24 hours
+(hover for 7 days), and rows how long they worked. Each row shows its AgentAPI version, marked when
+it is older than the hub's, and a card of the overview counts the versions. The [hub guide](hub.md) covers setup, groups
 and every state in detail.
 
 ## Connection and caching
@@ -531,5 +493,5 @@ every 30 s; a bar says when, with **Reconnect now**. The server sends a heartbea
 stream silent for 45 s counts as lost even while the tab is in front (a phone that switched
 networks). Going back online or back to the tab reconnects at once. The status and page title show
 the connection state. On reopening, the chat shows the IndexedDB-cached transcript immediately,
-then fetches changes. The terminals reconnect the same way, and like the chat, a terminal whose
+then fetches changes. The terminal reconnects the same way, and like the chat, a terminal whose
 sign-in ended asks for the token again.

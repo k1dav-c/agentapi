@@ -21,7 +21,6 @@ import (
 	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
-	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/netaddr"
 	"github.com/coder/agentapi/lib/webhook"
@@ -32,7 +31,7 @@ func testDispatcher(t *testing.T, config WebhookConfig, clock quartz.Clock) *web
 	if config.URL == "" {
 		config.URL = "https://example.com/hook"
 	}
-	d, err := webhook.New(config, slog.New(slog.NewTextHandler(io.Discard, nil)), mf.AgentTypeClaude, TransportNative, clock)
+	d, err := webhook.New(config, slog.New(slog.NewTextHandler(io.Discard, nil)), instanceapi.AgentTypeClaude, clock)
 	require.NoError(t, err)
 	return d
 }
@@ -80,8 +79,7 @@ func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
 			MaxAttempts: 2,
 		},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mf.AgentTypeClaude,
-		instanceapi.TransportPTY,
+		instanceapi.AgentTypeClaude,
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
@@ -166,8 +164,7 @@ func TestPublicIPIsAnAllowedHost(t *testing.T) {
 	factory := &nativetest.Factory{}
 	clock := quartz.NewMock(t)
 	srv, err := NewServer(ctx, ServerConfig{
-		AgentType:      mf.AgentTypeClaude,
-		Transport:      instanceapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         NativeConfig{Factory: factory.New},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"localhost"},
@@ -203,8 +200,7 @@ func TestSlowPublicIPLookupBlocksNoEvent(t *testing.T) {
 	factory := &nativetest.Factory{}
 	clock := quartz.NewMock(t)
 	srv, err := NewServer(ctx, ServerConfig{
-		AgentType:      mf.AgentTypeClaude,
-		Transport:      instanceapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         NativeConfig{Factory: factory.New},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},

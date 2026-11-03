@@ -51,7 +51,7 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 		Status: status.Status, Lifecycle: status.Lifecycle,
 		SessionName: status.SessionName, AgentSessionID: status.AgentSessionID,
 		PendingRequests: status.PendingRequests, QueuedMessages: len(e.queue),
-		TerminalPrompt: status.TerminalPrompt, Tasks: len(e.tasks.tasks),
+		Tasks:         len(e.tasks.tasks),
 		LoginRequired: status.LoginRequired, LimitStop: status.LimitStop, Usage: status.Usage,
 	}
 	if e.instance != nil {
@@ -88,8 +88,6 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 		summary.Attention = AttentionLogin
 	case status.PendingRequests > 0:
 		summary.Attention = AttentionRequest
-	case status.TerminalPrompt != "":
-		summary.Attention = AttentionDialog
 	case status.LimitStop != nil:
 		summary.Attention = AttentionLimit
 	case status.Lifecycle == LifecycleExited || status.Lifecycle == LifecycleFailed:
@@ -146,12 +144,12 @@ func (e *EventEmitter) SetUpdate(update instanceapi.UpdateStatus) {
 }
 
 // AgentIdle reports whether the agent waits with nothing open: it is
-// stable, and no request or dialog of its terminal waits for an answer.
+// stable, and no request waits for an answer.
 func (e *EventEmitter) AgentIdle() bool {
 	e.mu.Lock()
 	defer e.unlock()
 	status := e.statusChangeBody()
-	return status.Status == AgentStatusStable && status.PendingRequests == 0 && status.TerminalPrompt == ""
+	return status.Status == AgentStatusStable && status.PendingRequests == 0
 }
 
 // SummaryChanged sends the summary if it changed by something outside the

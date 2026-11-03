@@ -20,7 +20,6 @@ const sseHeartbeatInterval = 15 * time.Second
 var optInEvents = map[EventType]bool{
 	EventTypeMessageUpdate:     false,
 	EventTypeStatusChange:      false,
-	EventTypeScreenUpdate:      false,
 	EventTypeError:             false,
 	EventTypeRichMessageUpdate: false,
 	EventTypeHeartbeat:         false,
@@ -56,7 +55,7 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 		since, epoch = 0, ""
 	}
 	wants := func(t EventType) bool {
-		return convstate.ConversationEvents(t) && (sync || !optInEvents[t])
+		return convstate.AllEvents(t) && (sync || !optInEvents[t])
 	}
 	if input.Only == "summary" {
 		sync, since, epoch = false, 0, ""
@@ -118,37 +117,6 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 	}
 }
 
-func (s *Server) subscribeScreen(ctx context.Context, input *struct{}, send sse.Sender) {
-	subscriberId, ch, stateEvents := s.emitter.SubscribeTo(convstate.ScreenEvents, 0, "")
-	defer s.emitter.Unsubscribe(subscriberId)
-	s.logger.Info("New screen subscriber", "subscriberId", subscriberId)
-	for _, event := range stateEvents {
-		if err := send.Data(event.Payload); err != nil {
-			s.logger.Error("Failed to send screen event", "subscriberId", subscriberId, "error", err)
-			return
-		}
-	}
-	for {
-		select {
-		case event, ok := <-ch:
-			if !ok {
-				s.logger.Info("Screen channel closed", "subscriberId", subscriberId)
-				return
-			}
-			if err := send.Data(event.Payload); err != nil {
-				s.logger.Error("Failed to send screen event", "subscriberId", subscriberId, "error", err)
-				return
-			}
-		case <-s.shutdownCtx.Done():
-			s.logger.Info("Server stop initiated, unsubscribing.", "subscriberId", subscriberId)
-			return
-		case <-ctx.Done():
-			s.logger.Info("Screen context done", "subscriberId", subscriberId)
-			return
-		}
-	}
-}
-
 func (s *Server) registerEventRoutes() {
 	// GET /events endpoint
 	sse.Register(s.api, huma.Operation{
@@ -171,15 +139,4 @@ func (s *Server) registerEventRoutes() {
 		"queue_update":        QueueUpdateBody{},
 		"summary_update":      SummaryUpdateBody{},
 	}, s.subscribeEvents)
-
-	sse.Register(s.api, huma.Operation{
-		OperationID: "subscribeScreen",
-		Method:      http.MethodGet,
-		Path:        "/internal/screen",
-		Summary:     "Subscribe to screen",
-		Hidden:      true,
-		Middlewares: []func(huma.Context, func(huma.Context)){sseMiddleware},
-	}, map[string]any{
-		"screen": ScreenUpdateBody{},
-	}, s.subscribeScreen)
 }

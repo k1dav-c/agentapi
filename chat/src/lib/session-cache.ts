@@ -30,8 +30,9 @@ export interface CachedSession {
   requests: NativeRequest[];
   // The tasks as the server derives them; none from servers that don't.
   tasks: ServerTask[];
-  // How the server drives the agent ("pty", "acp", "native"), so the cached
-  // transcript renders for the right transport before the server says.
+  // How the server drives the agent ("native"; older servers also "pty"),
+  // so the cached transcript renders for the right transport before the
+  // server says.
   transport?: string;
 }
 

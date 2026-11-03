@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { formatDuration, formatTimeOfDay, secondsBetween } from "@/lib/clock";
 import { useNow } from "@/lib/use-elapsed";
-import { ChevronRight, Clipboard, Download, Eye, MoreHorizontal, TerminalSquare } from "lucide-react";
+import { ChevronRight, Clipboard, Download, Eye, MoreHorizontal } from "lucide-react";
 import { Button } from "../ui/button";
 import { ProcessedMessage } from "../processed-message";
 import { toast } from "sonner";
@@ -16,10 +16,9 @@ import { AgentMark } from "../agent-mark";
 import {useChatSelector} from "../chat-provider";
 import {AgentType} from "@/lib/agents";
 import type { TaskSection, TaskStatus } from "@/lib/task-timeline";
-import { TASK_STATUS_META, getTaskActivity, hasStructuredTranscript, toSearchableTask } from "@/lib/task-timeline";
+import { TASK_STATUS_META, getTaskActivity, toSearchableTask } from "@/lib/task-timeline";
 import { splitThinking } from "@/lib/thinking";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { useThrottledValue } from "@/lib/use-throttled";
 import { copyText } from "@/lib/clipboard";
 import { useDialogFromMenu } from "@/lib/menu-dialog";
 import {
@@ -47,7 +46,6 @@ export const TaskGroup = React.memo(function TaskGroup({
   onEditMessage,
   onDismissMessage,
   onStopTask,
-  onSendRaw,
   searchQuery,
   searchResultIndex,
   isCurrentSearchResult,
@@ -66,7 +64,6 @@ export const TaskGroup = React.memo(function TaskGroup({
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
   onStopTask?: () => void;
-  onSendRaw?: (data: string) => void;
   searchQuery: string;
   searchResultIndex: number;
   isCurrentSearchResult: boolean;
@@ -90,31 +87,25 @@ export const TaskGroup = React.memo(function TaskGroup({
   const agentName = AgentType[agentType as keyof typeof AgentType]?.displayName ?? "Agent";
   const statusMeta = waitingForUser ? {label: "Waiting for you", className: "text-state-needs"} : TASK_STATUS_META[status];
   const live = status === "running";
-  // Only a terminal has a live screen to show at the end of a running task
-  // and screen text to offer as "Terminal output"; the native transport
-  // streams its transcript instead.
   const features = useChatSelector((chat) => chat.features);
-  const hasScreen = features.agentTerminal;
   const activity = useMemo(() => {
     if (deferred) return [];
-    const raw = getTaskActivity(task, {live: live && hasScreen, transcriptOnly: features.structuredTranscript});
+    const raw = getTaskActivity(task, {transcriptOnly: features.structuredTranscript});
     // When rich activity provides real interleaving (text + tool entries),
     // tools are already positioned where they occurred in the conversation.
-    // Only group consecutive tools in the fallback path (PTY-only), where
+    // Only group consecutive tools in the fallback path, where
     // all tools are clustered together without interleaving context.
     const hasRichInterleaving =
       task.richActivity.some(item => item.type === "message" || item.type === "thinking") &&
       task.richActivity.some(item => item.type === "tool");
     return hasRichInterleaving ? raw : groupConsecutiveTools(raw);
-  }, [task, deferred, live, hasScreen, features.structuredTranscript]);
-  const structured = hasStructuredTranscript(task);
+  }, [task, deferred, features.structuredTranscript]);
   // A long task shows its latest steps; earlier ones load on request.
   // Rendering hundreds of steps (Markdown, highlighted code) at once froze
   // slower devices. Search shows every step so matches can be found.
   const [showAllSteps, setShowAllSteps] = useState(false);
   const hiddenSteps = searchQuery || showAllSteps ? 0 : Math.max(0, activity.length - STEP_WINDOW);
   const visibleActivity = hiddenSteps > 0 ? activity.slice(hiddenSteps) : activity;
-  const [terminalOpen, setTerminalOpen] = useState(false);
   const startedAt = task.prompt.time;
   const finishedAt = useMemo(() => {
     const times = [
@@ -266,28 +257,17 @@ export const TaskGroup = React.memo(function TaskGroup({
                 )}
                 {steps.length > 0 && (
                   <div className="min-w-0 space-y-4 min-[84rem]:col-start-1 min-[84rem]:row-start-1">
-                    {steps.map(({item, index}) =>
+                    {steps.map(({item}) =>
                       item.type === "message" ? (
-                        live && hasScreen && index === visibleActivity.length - 1 ? (
-                          // While a task runs, the last item is the live terminal
-                          // screen. With a transcript, only its tail is shown (the
-                          // rest is in the transcript). Either way it is redrawn at
-                          // most once a second and doesn't shrink, from the first
-                          // screen on, so the switch to a transcript doesn't remount it.
-                          <GrowOnly key={item.key} resetKey={structured ? "tail" : "screen"}>
-                            <LiveTail message={structured ? withLastLines(item.message, 10) : item.message} searchQuery={searchQuery} />
-                          </GrowOnly>
-                        ) : (
-                          <MessageItem key={item.key} message={item.message} searchQuery={searchQuery} />
-                        )
+                        <MessageItem key={item.key} message={item.message} searchQuery={searchQuery} />
                       ) : item.type === "prompt" ? (
                         <MessageItem key={item.key} message={item.message} searchQuery={searchQuery} steered />
                       ) : item.type === "thinking" ? (
                         <ThinkingNote key={item.key} content={item.content} />
                       ) : item.type === "tool-group" ? (
-                        <ToolCallGroup key={item.key} toolCalls={item.toolCalls} searchQuery={searchQuery} onSendRaw={onSendRaw} />
+                        <ToolCallGroup key={item.key} toolCalls={item.toolCalls} searchQuery={searchQuery} />
                       ) : (
-                        <ToolCallCard key={item.key} toolCall={item.toolCall} searchQuery={searchQuery} onSendRaw={onSendRaw} />
+                        <ToolCallCard key={item.key} toolCall={item.toolCall} searchQuery={searchQuery} />
                       )
                     )}
                   </div>
@@ -295,26 +275,6 @@ export const TaskGroup = React.memo(function TaskGroup({
               </div>
             );
           })}
-          {!deferred && hasScreen && structured && !live && task.responses.length > 0 && (
-            <div>
-              <button
-                type="button"
-                onClick={() => setTerminalOpen((open) => !open)}
-                aria-expanded={terminalOpen}
-                className="flex items-center gap-1.5 rounded text-xs text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <TerminalSquare className="size-3.5" />
-                {terminalOpen ? "Hide terminal output" : "Terminal output"}
-              </button>
-              {terminalOpen && (
-                <div className="mt-2 space-y-2">
-                  {task.responses.map((message, index) => (
-                    <MessageItem key={`terminal-${message.id ?? index}`} message={message} searchQuery={searchQuery} />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
@@ -392,47 +352,6 @@ function ThinkingNote({content}: {content: string}) {
 }
 
 const STEP_WINDOW = 40;
-
-// The live screen tail, redrawn at most once a second. Agents animate
-// parts of their screen several times a second (Claude Code blinks the
-// bullet of a running tool); the latest screen still shows within a second.
-function LiveTail({message, searchQuery}: {message: React.ComponentProps<typeof MessageItem>["message"]; searchQuery: string}) {
-  const shown = useThrottledValue(message, 1000);
-  return <MessageItem message={shown} searchQuery={searchQuery} />;
-}
-
-// Keeps the tallest height its content has had. The live screen tail
-// grows and shrinks as the agent redraws; holding its height keeps the
-// rest of the task from jumping up and down while it runs. A new resetKey
-// drops the held height: the whole first screen (hundreds of rows) must
-// not hold the space once only the tail of a transcript is shown.
-function GrowOnly({resetKey, children}: {resetKey: string; children: React.ReactNode}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [held, setHeld] = useState({resetKey, height: 0});
-  const minHeight = held.resetKey === resetKey ? held.height : 0;
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const observer = new ResizeObserver(() => {
-      setHeld((current) => {
-        const height = Math.max(current.resetKey === resetKey ? current.height : 0, element.offsetHeight);
-        return current.resetKey === resetKey && current.height === height ? current : {resetKey, height};
-      });
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [resetKey]);
-  return (
-    <div ref={ref} style={minHeight ? {minHeight} : undefined} data-live-tail>
-      {children}
-    </div>
-  );
-}
-
-function withLastLines<T extends {content: string}>(message: T, count: number): T {
-  const lines = message.content.replace(/\s+$/, "").split("\n");
-  return lines.length <= count ? message : {...message, content: lines.slice(-count).join("\n")};
-}
 
 // How long a task took, or has taken so far while it runs. A component of
 // its own, so that the clock of the running task renders every second

@@ -17,10 +17,6 @@ type Schemas = components["schemas"];
 // A response body without huma's link to its JSON schema.
 type Body<T> = Omit<T, "$schema">;
 
-// GET and PUT /mcp. restarted is set by a change that restarted the agent.
-export type MCPConfig = Body<Schemas["MCPGetResponseBody"]> & {restarted?: boolean};
-export type MCPCheckResult = Schemas["MCPCheckResult"];
-export type MCPProfiles = Body<Schemas["MCPProfilesResponseBody"]>;
 // GET and PUT /webhook: where the events go, which, and how they're signed.
 export type WebhookConfig = Body<Schemas["WebhookConfigResponseBody"]>;
 export type WebhookChange = Body<Schemas["WebhookConfigRequestBody"]>;
@@ -237,54 +233,6 @@ export function createChatAPI(baseURL: string) {
       return jsonRequest("/webhook/test", {method: "POST", fallback: "Failed to send the test event"});
     },
 
-    getMCP(): Promise<MCPConfig> {
-      return jsonRequest("/mcp", {fallback: "MCP config management is unavailable"});
-    },
-
-    async updateMCP(
-      servers: Record<string, unknown>,
-      restart = false,
-    ): Promise<MCPConfig> {
-      const result = await jsonRequest<{path: string; restarted?: boolean}>(`/mcp${restart ? "?restart=true" : ""}`, {
-        method: "PUT",
-        body: {servers},
-        fallback: "Failed to update MCP servers",
-      });
-      return {servers, path: result.path, restarted: result.restarted};
-    },
-
-    async checkMCP(servers?: Record<string, unknown>): Promise<MCPCheckResult[]> {
-      const result = await jsonRequest<{results: MCPCheckResult[]}>("/mcp/check", {
-        method: "POST",
-        body: servers ? {servers} : {},
-        fallback: "Failed to check MCP servers",
-      });
-      return result.results;
-    },
-
-    getMCPProfiles(): Promise<MCPProfiles> {
-      return jsonRequest("/mcp/profiles", {fallback: "Failed to load MCP profiles"});
-    },
-
-    saveMCPProfile(name: string, servers: Record<string, unknown>): Promise<MCPProfiles> {
-      return jsonRequest(`/mcp/profiles/${encodeURIComponent(name)}`, {
-        method: "PUT",
-        body: {servers},
-        fallback: "Failed to save MCP profile",
-      });
-    },
-
-    deleteMCPProfile(name: string): Promise<MCPProfiles> {
-      return jsonRequest(`/mcp/profiles/${encodeURIComponent(name)}`, {method: "DELETE", fallback: "Failed to delete MCP profile"});
-    },
-
-    async applyMCPProfile(name: string, restart = false) {
-      await jsonRequest(`/mcp/profiles/${encodeURIComponent(name)}/apply${restart ? "?restart=true" : ""}`, {
-        method: "POST",
-        fallback: "Failed to apply MCP profile",
-      });
-    },
-
     // An empty queue when the server can't say.
     async getQueue(): Promise<QueuedMessage[]> {
       const response = await authFetch(baseURL, `${baseURL}/queue`);
@@ -320,16 +268,12 @@ export function createChatAPI(baseURL: string) {
       }
     },
 
-    async sendMessage(
-      content: string,
-      type: "user" | "raw",
-      mode: DispatchMode = "queue",
-    ): Promise<SendResult> {
+    async sendMessage(content: string, mode: DispatchMode = "queue"): Promise<SendResult> {
       const result = await jsonRequest<{ok?: boolean; queued?: boolean; steered?: boolean}>("/message", {
         method: "POST",
         // Only send dispatch_mode when it isn't the default, so older
         // servers that don't know the field keep accepting messages.
-        body: mode === "queue" ? {content, type} : {content, type, dispatch_mode: mode},
+        body: mode === "queue" ? {content, type: "user"} : {content, type: "user", dispatch_mode: mode},
         fallback: "Failed to send the message",
       });
       return {ok: result.ok === true, queued: result.queued === true, steered: result.steered === true};

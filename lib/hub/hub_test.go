@@ -28,7 +28,6 @@ import (
 	"github.com/coder/agentapi/lib/hub"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native/nativetest"
 )
 
@@ -93,8 +92,7 @@ func startInstanceOn(t *testing.T, listener net.Listener, id string) (*httptest.
 	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
 	factory := &nativetest.Factory{}
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeClaude,
-		Transport:      httpapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         httpapi.NativeConfig{Factory: factory.New},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},

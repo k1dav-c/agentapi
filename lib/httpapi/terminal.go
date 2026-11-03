@@ -43,7 +43,7 @@ func terminalEnv() []string {
 	return procenv.WithoutAgentAPI(procenv.ForAgent(nil))
 }
 
-const noTerminal = "There is no terminal: it needs the native transport, and --terminal."
+const noTerminal = "There is no terminal: AgentAPI runs with --terminal=false."
 
 // subscribeTerminal streams the terminal's output, starting its shell if it
 // doesn't run.
@@ -125,7 +125,7 @@ func (s *Server) registerTerminalRoutes() {
 		Path:        "/terminal",
 		Tags:        []string{"Terminal"},
 		Summary:     "Watch the terminal",
-		Description: "Streams a shell in the agent's working directory, for a terminal emulator: `output` events carry what it writes (the first one the recent output), and an `exit` event ends the stream when the shell exits; a connection that falls too far behind ends without one, and connects again for the recent output. Connecting starts the shell if it doesn't run; it keeps running while nobody watches, and every connection shares it. Native transport only (on by default; --terminal=false turns it off).",
+		Description: "Streams a shell in the agent's working directory, for a terminal emulator: `output` events carry what it writes (the first one the recent output), and an `exit` event ends the stream when the shell exits; a connection that falls too far behind ends without one, and connects again for the recent output. Connecting starts the shell if it doesn't run; it keeps running while nobody watches, and every connection shares it. On by default; --terminal=false turns it off.",
 	}, map[string]any{
 		"output": TerminalOutputBody{},
 		"exit":   TerminalExitBody{},

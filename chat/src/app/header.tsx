@@ -221,7 +221,7 @@ export function Header() {
   );
 }
 
-// The page's own actions (search, TTY, Explorer) render into this slot so
+// The page's own actions (search, terminal, Explorer) render into this slot so
 // the app has a single top bar; see MessageList.
 export const HEADER_ACTIONS_ID = "header-actions";
 

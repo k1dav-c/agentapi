@@ -36,15 +36,3 @@ type SessionNamer interface {
 	// whether it changed.
 	Name(line []byte) (string, bool)
 }
-
-// PolledSessionNamer is a SessionNamer whose name can also change outside
-// the session log, so it needs checking now and then.
-type PolledSessionNamer interface {
-	SessionNamer
-	Poll() (string, bool)
-}
-
-// SessionResolver finds the session log of a running agent process.
-type SessionResolver interface {
-	Resolve() (string, error)
-}

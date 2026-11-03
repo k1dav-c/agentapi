@@ -68,7 +68,7 @@ func (s TaskStatus) Schema(r huma.Registry) *huma.Schema {
 }
 
 // Task is a message of the user's and the agent's turn on it, until the
-// agent is done: stable again, with no request or terminal dialog open.
+// agent is done: stable again, with no request open.
 // Messages the user adds while it runs (steering) belong to it.
 type Task struct {
 	ID        int        `json:"id" doc:"The ID of the user's message that started the task, as in GET /messages."`
@@ -105,7 +105,8 @@ const (
 	AttentionLogin Attention = "login"
 	// AttentionRequest: an approval, question or plan waits for an answer.
 	AttentionRequest Attention = "request"
-	// AttentionDialog: the agent's terminal shows a dialog to answer.
+	// AttentionDialog: the agent's terminal shows a dialog to answer
+	// (AgentAPI 2's PTY transport).
 	AttentionDialog Attention = "dialog"
 	// AttentionLimit: a usage limit stopped the agent's turn.
 	AttentionLimit Attention = "limit"
@@ -128,15 +129,17 @@ type SummaryBody struct {
 	Status   AgentStatus     `json:"status" doc:"Whether the agent works (running) or waits (stable)."`
 	// Lifecycle tells a failed or exited agent from one that waits.
 	Lifecycle LifecycleState `json:"lifecycle" doc:"The agent process's lifecycle state."`
-	Attention Attention      `json:"attention" doc:"Why the agent waits for the user: login, request (an approval, question or plan), dialog (in its terminal), limit (a usage limit stopped its turn), exited, or none."`
+	Attention Attention      `json:"attention" doc:"Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none; an AgentAPI 2 with the PTY transport also reports dialog (in the agent's terminal)."`
 	// Title is the session's name, else the start of the latest prompt.
 	Title          string `json:"title" doc:"The name the agent gave the session, else the start of the latest task's prompt; empty before the first task."`
 	SessionName    string `json:"session_name,omitempty" doc:"The name the agent gave the session, as in GET /status."`
 	AgentSessionID string `json:"agent_session_id,omitempty" doc:"The agent's own session, as in GET /status."`
 	// PendingRequests and QueuedMessages count what waits.
-	PendingRequests int    `json:"pending_requests" doc:"Requests (approvals, questions, plans) the agent waits on; see GET /requests."`
-	QueuedMessages  int    `json:"queued_messages" doc:"Messages waiting in the queue; see GET /queue."`
-	TerminalPrompt  string `json:"terminal_prompt,omitempty" doc:"The bottom of the agent's terminal while it shows a dialog to answer, as in GET /status."`
+	PendingRequests int `json:"pending_requests" doc:"Requests (approvals, questions, plans) the agent waits on; see GET /requests."`
+	QueuedMessages  int `json:"queued_messages" doc:"Messages waiting in the queue; see GET /queue."`
+	// TerminalPrompt is only reported by an AgentAPI 2 with the PTY
+	// transport.
+	TerminalPrompt string `json:"terminal_prompt,omitempty" doc:"The bottom of the agent's terminal while it shows a dialog to answer; only from an AgentAPI 2 with the PTY transport."`
 	// Task is the latest task, nil before the first.
 	Task  *Task `json:"task,omitempty" doc:"The latest task, as in GET /tasks; missing before the first."`
 	Tasks int   `json:"tasks" doc:"How many tasks the conversation has."`
@@ -151,7 +154,7 @@ type SummaryBody struct {
 	// the agent waits for without opening it.
 	Request *SummaryRequest `json:"request,omitempty" doc:"The oldest request the agent waits on (see GET /requests); missing when none waits."`
 	// Spend is what the agent's sessions cost recently.
-	Spend *SummarySpend `json:"spend,omitempty" doc:"What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once."`
+	Spend *SummarySpend `json:"spend,omitempty" doc:"What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once."`
 	// Update is nil from AgentAPIs that can't update through their API.
 	Update *UpdateStatus `json:"update,omitempty" doc:"Whether a client can update this AgentAPI to the latest release through its API (POST /update), and how far an update is. Missing from AgentAPIs that can't update through their API: earlier releases."`
 }

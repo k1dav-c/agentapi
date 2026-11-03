@@ -16,8 +16,7 @@ export const TERMINAL_OPTIONS = {
   theme: {background: "#0b0d10", foreground: "#e6e6e6"},
 };
 
-// What the terminals (TTY mode, the native terminal) share about typing on
-// a phone: whether the on-screen keyboard is up. The page's frame keeps
+// What the shell terminal needs for typing on a phone: whether the on-screen keyboard is up. The page's frame keeps
 // above the keyboard (ViewportGuard), and the key bar with it.
 export function useTerminalKeyboard() {
   // Touch screens type through an on-screen keyboard, which only opens

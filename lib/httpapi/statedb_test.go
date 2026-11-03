@@ -24,8 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/statedb"
@@ -56,8 +56,7 @@ func persistentServerWith(t *testing.T, path, cwd string, configure func(*native
 		}
 	}}
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeClaude,
-		Transport:      httpapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         httpapi.NativeConfig{Factory: factory.New},
 		StateDB:        db,
 		ChatBasePath:   "/chat",
@@ -191,45 +190,6 @@ func TestStateDB_RestartStartsFresh(t *testing.T) {
 	assert.Empty(t, n.requests(), "the old session's request was not stored again")
 }
 
-// Restarting the agent to apply an MCP change resumes its session: the
-// conversation stays, also across an AgentAPI restart.
-func TestStateDB_MCPRestartResumes(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.db")
-	n, srv, db, err := persistentServer(t, path, dir)
-	require.NoError(t, err)
-	a := n.factory.Last()
-	n.send("hello", "")
-	a.Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "Hi"}}})
-	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
-	epoch := n.epoch()
-
-	var res struct {
-		Restarted bool `json:"restarted"`
-	}
-	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/mcp?restart=true", map[string]any{"servers": map[string]any{}}, &res))
-	require.True(t, res.Restarted)
-	assert.Equal(t, "session-1", n.factory.Last().ResumeRef)
-	assert.Equal(t, epoch, n.epoch(), "clients keep the conversation")
-	assertMessages(t, n, 2)
-	stop(t, srv, db)
-
-	n, srv, db, err = persistentServer(t, path, dir)
-	require.NoError(t, err)
-	defer stop(t, srv, db)
-	assert.Equal(t, "session-1", n.factory.Last().ResumeRef)
-	assertMessages(t, n, 2)
-}
-
-func assertMessages(t *testing.T, n *nativeServer, count int) {
-	t.Helper()
-	var msgs struct {
-		Messages []httpapi.Message `json:"messages"`
-	}
-	n.do(http.MethodGet, "/messages", nil, &msgs)
-	assert.Len(t, msgs.Messages, count)
-}
-
 // After a crash the changes of the last moments may be missing from the
 // file. Clients that saw them must not resume their cache, so the restored
 // conversation has a new epoch.
@@ -309,8 +269,7 @@ func TestStateDB_StopStoresTheQueueLast(t *testing.T) {
 	factory := &nativetest.Factory{}
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType: msgfmt.AgentTypeClaude,
-		Transport: httpapi.TransportNative,
+		AgentType: instanceapi.AgentTypeClaude,
 		Native: httpapi.NativeConfig{
 			Factory: func(ref native.Resume) (native.Adapter, error) {
 				a, err := factory.New(ref)
@@ -445,80 +404,52 @@ func TestStateDB_RestoresSettings(t *testing.T) {
 	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "plain"}, *status.Settings)
 }
 
-// ptyScreen is a terminal agent that shows one screen and takes what is
-// typed.
-type ptyScreen struct{ screen string }
-
-func (p *ptyScreen) ReadScreen() string             { return p.screen }
-func (p *ptyScreen) Write(data []byte) (int, error) { return len(data), nil }
-
-// The PTY transport keeps its conversation in the state database too: a
-// conversation imported from a --state-file comes back, and the new agent's
-// screen neither replaces nor removes it.
-func TestStateDB_PTYRestoresConversation(t *testing.T) {
+// A conversation AgentAPI 2's PTY transport kept (here imported from a
+// --state-file) comes back: the agent starts a new session below it, and
+// the database says native from then on. One of another transport, or of
+// another agent, is refused.
+func TestStateDB_ContinuesAPTYConversation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path, cwd := filepath.Join(dir, "state.db"), "/work"
 	file := filepath.Join(dir, "state.json")
 	require.NoError(t, os.WriteFile(file, []byte(`{"version":1,"messages":[
-		{"id":0,"message":"Ready","role":"agent","time":"2026-10-20T10:00:00Z"},
-		{"id":1,"message":"Fix the bug","role":"user","time":"2026-10-20T10:00:01Z"},
-		{"id":2,"message":"Fixed.","role":"agent","time":"2026-10-20T10:00:02Z"}
+		{"id":0,"message":"Fix the bug","role":"user","time":"2026-10-20T10:00:01Z"},
+		{"id":1,"message":"Fixed.","role":"agent","time":"2026-10-20T10:00:02Z"}
 	]}`), 0o600))
 	db, err := statedb.Open(path, nil)
 	require.NoError(t, err)
 	n, err := db.ImportStateFile(file, map[string]string{
-		statedb.MetaAgentType: string(msgfmt.AgentTypeCustom),
-		statedb.MetaTransport: string(httpapi.TransportPTY),
+		statedb.MetaAgentType: string(instanceapi.AgentTypeClaude),
+		statedb.MetaTransport: "pty",
 		statedb.MetaCWD:       cwd,
 	})
 	require.NoError(t, err)
-	require.Equal(t, 3, n)
-
-	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeCustom,
-		Transport:      httpapi.TransportPTY,
-		PTY:            httpapi.PTYConfig{AgentIO: &ptyScreen{screen: "$ "}, TerminalColumns: 80},
-		StateDB:        db,
-		ChatBasePath:   "/chat",
-		AllowedHosts:   []string{"*"},
-		AllowedOrigins: []string{"*"},
-		CWD:            cwd,
-		UploadDir:      path + ".uploads",
-	})
-	require.NoError(t, err)
-	messages := func() []string {
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/messages", nil))
-		require.Equal(t, http.StatusOK, rec.Code)
-		var body struct {
-			Messages []struct {
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-		var texts []string
-		for _, m := range body.Messages {
-			texts = append(texts, m.Content)
-		}
-		return texts
-	}
-	want := []string{"Ready", "Fix the bug", "Fixed."}
-	assert.Equal(t, want, messages())
-	// Snapshots of the new agent's screen come every 25 ms.
-	time.Sleep(300 * time.Millisecond)
-	assert.Equal(t, want, messages())
-	require.NoError(t, srv.Stop(ctx))
+	require.Equal(t, 2, n)
 	require.NoError(t, db.Close())
+
+	ns, srv, db, err := persistentServer(t, path, cwd)
+	require.NoError(t, err)
+	var body struct {
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	require.Equal(t, http.StatusOK, ns.do(http.MethodGet, "/messages", nil, &body))
+	require.Len(t, body.Messages, 2)
+	assert.Equal(t, "Fixed.", body.Messages[1].Content)
+	assert.Empty(t, ns.factory.Last().ResumeRef, "a new session")
+	stop(t, srv, db)
 
 	db, err = statedb.Open(path, nil)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
 	snap, err := db.Load()
 	require.NoError(t, err)
-	require.Len(t, snap.Messages, 3, "still in the database")
-	assert.Equal(t, "Fixed.", snap.Messages[2].Message.Message)
+	assert.Equal(t, string(httpapi.TransportNative), snap.Meta[statedb.MetaTransport])
+	db.SetMeta(statedb.MetaTransport, "acp")
+	require.NoError(t, db.Close())
+	_, _, _, err = persistentServer(t, path, cwd)
+	require.ErrorContains(t, err, `the state database belongs to another session (transport is "acp", not "native")`)
 }
 
 // Webhook settings changed through the API survive a restart with a state
@@ -531,9 +462,8 @@ func TestStateDB_KeepsWebhookSettings(t *testing.T) {
 		db, err := statedb.Open(path, nil)
 		require.NoError(t, err)
 		srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-			AgentType:      msgfmt.AgentTypeCustom,
-			Transport:      httpapi.TransportPTY,
-			PTY:            httpapi.PTYConfig{AgentIO: &ptyScreen{screen: "$ "}, TerminalColumns: 80},
+			AgentType:      instanceapi.AgentTypeClaude,
+			Native:         httpapi.NativeConfig{Factory: (&nativetest.Factory{}).New},
 			StateDB:        db,
 			Webhook:        flags,
 			ChatBasePath:   "/chat",
@@ -762,8 +692,7 @@ func TestStateDB_StoresEveryQueueChange(t *testing.T) {
 	factory := &nativetest.Factory{}
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeClaude,
-		Transport:      httpapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         httpapi.NativeConfig{Factory: factory.New},
 		StateDB:        db,
 		ChatBasePath:   "/chat",

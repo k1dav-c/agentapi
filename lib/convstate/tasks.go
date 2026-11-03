@@ -246,9 +246,8 @@ func (t *taskTracker) own(msgs []conv.Message, changed []int) []int {
 			// keeps the task open; the agent isn't working, so the
 			// message starts a task rather than steering this one. The
 			// server ends the task before it sends the message
-			// (SendingMessage), as the PTY transport reports the agent
-			// running before the message shows; this catches a message
-			// sent another way.
+			// (SendingMessage); this catches a message sent another
+			// way.
 			changed = appendOnce(changed, t.open)
 			t.end(t.open, msg.Time)
 		}
@@ -311,14 +310,13 @@ func (t *taskTracker) replies(msgs []conv.Message, k int, at map[int]int, change
 }
 
 // taskEndGrace is how long the agent may take to work again once a request
-// or terminal dialog it waited on is answered, before its task counts as
-// done.
+// it waited on is answered, before its task counts as done.
 const taskEndGrace = 3 * time.Second
 
 // statusChanged takes the agent's status after a change; now is when. A
-// task ends when the agent stops working, unless it waits on a request or a
-// terminal dialog. When the agent was idle already and only stopped
-// waiting, as an answer was given, it likely works again: confirm reports
+// task ends when the agent stops working, unless it waits on a request.
+// When the agent was idle already and only stopped waiting, as an answer
+// was given, it likely works again: confirm reports
 // that the task ends if the agent is still idle after taskEndGrace
 // (endIfIdle).
 func (t *taskTracker) statusChanged(next StatusChangeBody, now time.Time) (changed []int, confirm bool) {
@@ -347,7 +345,7 @@ func (t *taskTracker) statusChanged(next StatusChangeBody, now time.Time) (chang
 
 // idle reports whether the agent neither works nor waits on an answer.
 func (t *taskTracker) idle() bool {
-	return t.status.Status == AgentStatusStable && t.status.PendingRequests == 0 && t.status.TerminalPrompt == ""
+	return t.status.Status == AgentStatusStable && t.status.PendingRequests == 0
 }
 
 // endIfIdle ends the running task if the agent is idle in the grace period
@@ -443,9 +441,7 @@ func (e *EventEmitter) notifyStatusLocked() {
 // SendingMessage tells the emitter that a user message goes to the agent
 // now, as a new turn. If the agent is idle in the grace period after an
 // answer or an interrupt, its task ends here and the message starts one.
-// The emitter can't tell when the message shows: the PTY transport reports
-// the agent running as soon as the message waits to be typed. While the
-// agent works nothing ends, and a message steers its task.
+// While the agent works nothing ends, and a message steers its task.
 func (e *EventEmitter) SendingMessage() {
 	e.mu.Lock()
 	defer e.unlock()

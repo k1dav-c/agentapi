@@ -98,14 +98,6 @@ func (o *nativeObserver) AgentExited(exit native.AgentExit) {
 	o.emitter.SetLifecycle(LifecycleFailed)
 }
 
-// requireNative returns an error for transports other than native.
-func (s *Server) requireNative() error {
-	if s.native == nil {
-		return huma.Error400BadRequest("this endpoint needs the native transport (--transport native)")
-	}
-	return nil
-}
-
 // createNativeMessageLocked delivers a user message over the native
 // transport according to mode. Steer and interrupt only apply to a running
 // turn; without one the message is sent as usual. Caller holds s.mu.
@@ -412,46 +404,46 @@ func (s *Server) registerNativeRoutes() {
 	huma.Get(s.api, "/requests", s.getRequests, func(o *huma.Operation) {
 		o.Tags = []string{"Requests"}
 		o.Summary = "List requests"
-		o.Description = "Returns the requests the agent is waiting on (tool approvals, questions, plans) and the most recently closed ones. Native transport only; other transports return an empty list. Changes are also sent as `request_update` events on /events."
+		o.Description = "Returns the requests the agent is waiting on (tool approvals, questions, plans) and the most recently closed ones. Changes are also sent as `request_update` events on /events."
 	})
 	huma.Get(s.api, "/requests/{id}", s.getRequest, func(o *huma.Operation) {
 		o.Tags = []string{"Requests"}
 		o.Summary = "Get a request"
 		o.Errors = []int{404}
 	})
-	huma.Post(s.api, "/requests/{id}/respond", guard(s.requireNative, s.respondRequest), func(o *huma.Operation) {
+	huma.Post(s.api, "/requests/{id}/respond", s.respondRequest, func(o *huma.Operation) {
 		o.Tags = []string{"Requests"}
 		o.Summary = "Answer a request"
 		o.Description = "Answers a pending request. Approvals and plans take `option_id` (one of the request's options, optionally with `text` as feedback); questions take `answers` keyed by question id. Returns 409 if the request is no longer pending (already answered, withdrawn or expired) and 400 if the answer doesn't fit the request. A request is answered at most once."
 		o.Errors = []int{400, 404, 409}
 	})
-	huma.Post(s.api, "/login/retry", guard(s.requireNative, s.retryLogin), func(o *huma.Operation) {
+	huma.Post(s.api, "/login/retry", s.retryLogin, func(o *huma.Operation) {
 		o.Summary = "Check the agent's login again"
-		o.Description = "While `login_required` is reported in GET /status, checks again now whether the user logged in (AgentAPI also checks every few seconds while the agent waits at startup). If the agent lost its login while running, it is restarted and resumes its session. Native transport only; returns 409 if no login is needed."
+		o.Description = "While `login_required` is reported in GET /status, checks again now whether the user logged in (AgentAPI also checks every few seconds while the agent waits at startup). If the agent lost its login while running, it is restarted and resumes its session. Returns 409 if no login is needed."
 		o.Errors = []int{400, 409}
 	})
-	huma.Post(s.api, "/interrupt", guard(s.requireNative, s.interrupt), func(o *huma.Operation) {
+	huma.Post(s.api, "/interrupt", s.interrupt, func(o *huma.Operation) {
 		o.Summary = "Interrupt the agent"
-		o.Description = "Stops the turn the agent is working on. Native transport only, for agents with the interrupt capability."
+		o.Description = "Stops the turn the agent is working on. For agents with the interrupt capability."
 		o.Errors = []int{400, 409}
 	})
-	huma.Get(s.api, "/settings", guard(s.requireNative, s.getSettings), func(o *huma.Operation) {
+	huma.Get(s.api, "/settings", s.getSettings, func(o *huma.Operation) {
 		o.Summary = "Get the agent's settings"
-		o.Description = "Returns the agent's permission mode, model and reasoning effort, and the values they can take. The current settings are also part of GET /status and `status_change` events. Native transport only, for agents with the settings capability; returns 409 while the agent restarts or waits for a login."
+		o.Description = "Returns the agent's permission mode, model and reasoning effort, and the values they can take. The current settings are also part of GET /status and `status_change` events. For agents with the settings capability; returns 409 while the agent restarts or waits for a login."
 		o.Errors = []int{400, 409}
 	})
-	huma.Put(s.api, "/settings", guard(s.requireNative, s.updateSettings), func(o *huma.Operation) {
+	huma.Put(s.api, "/settings", s.updateSettings, func(o *huma.Operation) {
 		o.Summary = "Change the agent's settings"
-		o.Description = "Changes the settings that are set in the body and leaves the others: `permission_mode` (bypass, auto, ask or plan, as the agent offers), `model` (one of the model ids GET /settings lists) and `effort` (one of the model's efforts). A change made during a turn may apply from the next one (Codex). The agent that replaces this one after a restart, a new login or an AgentAPI restart (with --state-db) gets the chosen settings too. Native transport only; returns 400 for a value a setting can't take and 409 while the agent restarts or waits for a login."
+		o.Description = "Changes the settings that are set in the body and leaves the others: `permission_mode` (bypass, auto, ask or plan, as the agent offers), `model` (one of the model ids GET /settings lists) and `effort` (one of the model's efforts). A change made during a turn may apply from the next one (Codex). The agent that replaces this one after a restart, a new login or an AgentAPI restart (with --state-db) gets the chosen settings too. Returns 400 for a value a setting can't take and 409 while the agent restarts or waits for a login."
 		o.Errors = []int{400, 409}
 	})
-	huma.Post(s.api, "/compact", guard(s.requireNative, s.compact), func(o *huma.Operation) {
+	huma.Post(s.api, "/compact", s.compact, func(o *huma.Operation) {
 		o.Summary = "Compact the agent's context"
-		o.Description = "Has the agent summarize the conversation so far to free its context window (Codex: in a turn of its own; Pi: answered once done). Native transport only, for agents with the compact capability. Messages sent meanwhile wait in the queue. Returns 409 while the agent works on a turn or compacts, and when it refuses (Pi with nothing to compact yet)."
+		o.Description = "Has the agent summarize the conversation so far to free its context window (Codex: in a turn of its own; Pi: answered once done). For agents with the compact capability. Messages sent meanwhile wait in the queue. Returns 409 while the agent works on a turn or compacts, and when it refuses (Pi with nothing to compact yet)."
 		o.Errors = []int{400, 409}
 	})
-	huma.Post(s.api, "/queue/{id}/steer", guard(s.requireNative, s.steerQueuedMessage), func(o *huma.Operation) {
-		o.Description = "Adds a queued message to the turn the agent is working on instead of waiting for it to end. Native transport only, for agents with the steer capability."
+	huma.Post(s.api, "/queue/{id}/steer", s.steerQueuedMessage, func(o *huma.Operation) {
+		o.Description = "Adds a queued message to the turn the agent is working on instead of waiting for it to end. For agents with the steer capability."
 		o.Errors = []int{400, 404, 409}
 	})
 }

@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 
 	"github.com/spf13/viper"
 
@@ -25,7 +24,7 @@ const validateOK = "ok state-db-schema="
 
 // validateServer checks what runServer would refuse for the agent command
 // args, as far as it can without starting anything: the settings, the
-// prices file, the agent's arguments (native) or program (PTY), the state
+// prices file, the agent's arguments, the state
 // database's schema and the server's configuration. It doesn't listen,
 // start the agent, or write a file: the PID file, the registry entry and
 // the state database stay as they are. A state database another AgentAPI
@@ -58,21 +57,14 @@ func validateServer(out io.Writer, args []string) error {
 	return err
 }
 
-// checkAgent returns what would keep startAgent from starting the agent:
-// arguments the native adapter refuses, or a PTY agent's program that
-// isn't found.
+// checkAgent returns what would keep startAgent from preparing the agent:
+// arguments its adapter refuses.
 func checkAgent(opts serverOptions, cwd string) error {
-	if opts.transport == httpapi.TransportNative {
-		_, err := nativeFactory(opts.agentType, nativeAdapterConfig{
-			Program: opts.agent,
-			Args:    opts.agentArgs,
-			CWD:     cwd,
-			Logger:  slog.New(slog.DiscardHandler),
-		})
-		return err
-	}
-	if _, err := exec.LookPath(opts.agent); err != nil {
-		return fmt.Errorf("failed to setup process: %w", err)
-	}
-	return nil
+	_, err := nativeFactory(opts.agentType, nativeAdapterConfig{
+		Program: opts.agent,
+		Args:    opts.agentArgs,
+		CWD:     cwd,
+		Logger:  slog.New(slog.DiscardHandler),
+	})
+	return err
 }

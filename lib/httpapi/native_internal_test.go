@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/handoff"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
-	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 )
@@ -26,8 +26,7 @@ func newQuietNativeServer(t *testing.T, configure func(*nativetest.Adapter)) (*S
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	factory := &nativetest.Factory{Configure: configure}
 	srv, err := NewServer(ctx, ServerConfig{
-		AgentType:      mf.AgentTypeClaude,
-		Transport:      TransportNative,
+		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         NativeConfig{Factory: factory.New},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
@@ -140,13 +139,12 @@ func TestNativeQueueDropsAMessageStopCutShort(t *testing.T) {
 // Only a message that went out unconfirmed isn't sent again: a call that
 // ended before it went out (its write waited behind another) left nothing
 // with the agent.
-func TestNativeBackendResendsWhatNeverWentOut(t *testing.T) {
-	b := nativeBackend{}
-	assert.NotEmpty(t, b.notResent(native.Unconfirmed(context.Canceled)))
-	assert.NotEmpty(t, b.notResent(native.Unconfirmed(errors.New("codex app-server exited"))))
-	assert.Empty(t, b.notResent(context.Canceled))
-	assert.Empty(t, b.notResent(context.DeadlineExceeded))
-	assert.Empty(t, b.notResent(errors.New("connection reset")))
+func TestQueueResendsWhatNeverWentOut(t *testing.T) {
+	assert.NotEmpty(t, notResent(native.Unconfirmed(context.Canceled)))
+	assert.NotEmpty(t, notResent(native.Unconfirmed(errors.New("codex app-server exited"))))
+	assert.Empty(t, notResent(context.Canceled))
+	assert.Empty(t, notResent(context.DeadlineExceeded))
+	assert.Empty(t, notResent(errors.New("connection reset")))
 }
 
 // A tick that got s.mu after Stop began sends nothing: the queue is stored
@@ -209,7 +207,7 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	// arrives. The reply must not approve the next request instead, and
 	// nothing was sent.
 	sink.RequestClosed("r1")
-	result := nativeBackend{srv}.answerHandoff(pending, offered, "reply-1", "1")
+	result := srv.answerHandoff(pending, offered, "reply-1", "1")
 	assert.Equal(t, "superseded", result.Outcome)
 	assert.Empty(t, a.Responses())
 
@@ -222,7 +220,7 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	})
 	r3, ok := srv.native.Request("r3")
 	require.True(t, ok)
-	result = nativeBackend{srv}.answerHandoff(&handoff.Request{ID: "handoff-r3"}, r3, "reply-2", "1")
+	result = srv.answerHandoff(&handoff.Request{ID: "handoff-r3"}, r3, "reply-2", "1")
 	assert.Equal(t, "invalid", result.Outcome)
 	_, recorded := srv.handoff.receipt("handoff-r3")
 	assert.False(t, recorded)

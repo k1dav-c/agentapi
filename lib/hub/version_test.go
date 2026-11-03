@@ -15,7 +15,6 @@ import (
 	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/hub"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/msgfmt"
 )
 
 // The page tells the instances older than the hub by the hub's own
@@ -63,7 +62,7 @@ func startFakeAgentAPI(t *testing.T, id, serverID, agentapiVersion string) *fake
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	f.run = instanceapi.WebhookInstance{
 		ID: id, ServerID: serverID, Version: agentapiVersion, URL: f.URL,
-		AgentType: msgfmt.AgentTypeClaude, Transport: instanceapi.TransportNative,
+		AgentType: instanceapi.AgentTypeClaude, Transport: instanceapi.TransportNative,
 	}
 	t.Cleanup(f.Close)
 	return f

@@ -1,10 +1,8 @@
 package convstate
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,7 +16,6 @@ import (
 	"github.com/coder/agentapi/internal/version"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/instanceapi"
-	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -126,11 +123,7 @@ func TestEventEmitter(t *testing.T) {
 			},
 			{
 				Type:    EventTypeStatusChange,
-				Payload: StatusChangeBody{Status: AgentStatusRunning, Lifecycle: LifecycleStarting, Version: version.Version},
-			},
-			{
-				Type:    EventTypeScreenUpdate,
-				Payload: ScreenUpdateBody{Screen: ""},
+				Payload: StatusChangeBody{Status: AgentStatusRunning, Lifecycle: LifecycleStarting, Transport: instanceapi.TransportNative, Version: version.Version},
 			},
 		}, stateEvents)
 
@@ -171,7 +164,7 @@ func TestEventEmitter(t *testing.T) {
 		newEvent = <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeStatusChange,
-			Payload: StatusChangeBody{Status: AgentStatusStable, Lifecycle: LifecycleReady, AgentType: "", Version: version.Version},
+			Payload: StatusChangeBody{Status: AgentStatusStable, Lifecycle: LifecycleReady, AgentType: "", Transport: instanceapi.TransportNative, Version: version.Version},
 		}, newEvent)
 	})
 
@@ -286,8 +279,8 @@ func TestEventEmitter(t *testing.T) {
 		emitter := NewEventEmitter(WithClock(mockClock), WithSubscriptionBufSize(10))
 		_, ch, stateEvents := emitter.Subscribe()
 
-		// Verify initial state events: session sync, status, screen
-		assert.Len(t, stateEvents, 3)
+		// Verify initial state events: session sync, status
+		assert.Len(t, stateEvents, 2)
 
 		// Emit an error and verify it uses the mock clock time
 		emitter.EmitError("test error", conv.ErrorLevelError)
@@ -313,66 +306,6 @@ func TestEventEmitter(t *testing.T) {
 		assert.Equal(t, conv.ErrorLevelWarning, errorBody.Level)
 		assert.Equal(t, newTime, errorBody.Time)
 	})
-}
-
-func TestEventEmitterTerminalPrompt(t *testing.T) {
-	clock := quartz.NewMock(t)
-	emitter := NewEventEmitter(WithAgentType(mf.AgentTypeClaude), WithClock(clock))
-	_, ch, _ := emitter.Subscribe()
-	statusEvents := func() []StatusChangeBody {
-		var bodies []StatusChangeBody
-		for {
-			select {
-			case event := <-ch:
-				if event.Type == EventTypeStatusChange {
-					bodies = append(bodies, event.Payload.(StatusChangeBody))
-				}
-			default:
-				return bodies
-			}
-		}
-	}
-
-	// A numbered list in an answer, with the input box below it, is not a
-	// prompt, even when it mentions words like "select", "allow" or "approve".
-	emitter.EmitScreen(readScreenFixture(t, "claude_numbered_answer.txt"))
-	require.Empty(t, emitter.StatusSnapshot().TerminalPrompt)
-	require.Empty(t, statusEvents())
-
-	for _, fixture := range []string{"claude_permission_dialog.txt", "claude_trust_dialog.txt"} {
-		hadPrompt := emitter.StatusSnapshot().TerminalPrompt != ""
-		emitter.EmitScreen(readScreenFixture(t, fixture))
-		// A previous prompt is cleared at once; the new one is published
-		// only once it has stayed on screen for a while.
-		require.Empty(t, emitter.StatusSnapshot().TerminalPrompt, fixture)
-		require.Len(t, statusEvents(), map[bool]int{true: 1, false: 0}[hadPrompt], fixture)
-		clock.Advance(terminalPromptSettle).MustWait(context.Background())
-		prompt := emitter.StatusSnapshot().TerminalPrompt
-		require.Contains(t, prompt, "❯", fixture)
-		events := statusEvents()
-		require.Len(t, events, 1, fixture)
-		require.Equal(t, prompt, events[0].TerminalPrompt)
-	}
-
-	// A prompt that disappears before it settles is never published.
-	emitter.EmitScreen(readScreenFixture(t, "claude_numbered_answer.txt"))
-	statusEvents()
-	emitter.EmitScreen(readScreenFixture(t, "claude_trust_dialog.txt"))
-	emitter.EmitScreen(readScreenFixture(t, "claude_numbered_answer.txt"))
-	clock.Advance(terminalPromptSettle).MustWait(context.Background())
-	require.Empty(t, emitter.StatusSnapshot().TerminalPrompt)
-	require.Empty(t, statusEvents())
-
-	emitter.EmitScreen(readScreenFixture(t, "claude_trust_dialog.txt"))
-	clock.Advance(terminalPromptSettle).MustWait(context.Background())
-	require.NotEmpty(t, statusEvents())
-
-	// Back at the input box: the prompt is cleared at once and clients are told.
-	emitter.EmitScreen(readScreenFixture(t, "claude_numbered_answer.txt"))
-	require.Empty(t, emitter.StatusSnapshot().TerminalPrompt)
-	events := statusEvents()
-	require.Len(t, events, 1)
-	require.Empty(t, events[0].TerminalPrompt)
 }
 
 func TestEventEmitterIncrementalReplay(t *testing.T) {
@@ -571,7 +504,7 @@ func TestEventEmitterRemovedMessageResyncs(t *testing.T) {
 	_, _, state := emitter.Subscribe()
 	cached := state[0].Payload.(SessionSyncBody)
 	_, ch, _ := emitter.Subscribe()
-	_, screen, _ := emitter.SubscribeTo(ScreenEvents, 0, "")
+	_, summary, _ := emitter.SubscribeTo(SummaryEvents, 0, "")
 
 	// The agent refused the last message, and it was taken back. Updates
 	// can't say so: the conversation gets a new epoch, and the
@@ -580,8 +513,8 @@ func TestEventEmitterRemovedMessageResyncs(t *testing.T) {
 	events, closed := drainClosed(ch)
 	assert.True(t, closed, "the subscription ended")
 	assert.Empty(t, events, "nothing is streamed")
-	_, closed = drainClosed(screen)
-	assert.False(t, closed, "the screen stream goes on")
+	_, closed = drainClosed(summary)
+	assert.False(t, closed, "the summary stream goes on")
 	assert.Equal(t, []int{2}, persister.truncated)
 	assert.NotEqual(t, cached.Epoch, emitter.Epoch())
 	assert.Equal(t, emitter.Epoch(), persister.epoch, "the new epoch is stored")
@@ -699,13 +632,13 @@ func TestEventEmitterLoadRichMessages(t *testing.T) {
 
 	emitter = NewEventEmitter(WithSubscriptionBufSize(40))
 	_, ch, _ = emitter.Subscribe()
-	_, screen, _ := emitter.SubscribeTo(ScreenEvents, 0, "")
+	_, summary, _ := emitter.SubscribeTo(SummaryEvents, 0, "")
 	long, want := history(11)
 	emitter.LoadRichMessages(long)
 	events, closed = drainClosed(ch)
 	assert.True(t, closed)
 	assert.Empty(t, events)
-	_, closed = drainClosed(screen)
+	_, closed = drainClosed(summary)
 	assert.False(t, closed)
 	_, _, state := emitter.SubscribeSince(0, "")
 	assert.Equal(t, want, replayed(state))
@@ -832,43 +765,6 @@ func TestEventEmitterKeepsTheMostRecentlyClosedRequests(t *testing.T) {
 	assert.False(t, ok, "the first to close is dropped")
 }
 
-// A subscription gets only the events it picked: GET /events no screen
-// updates, which a busy terminal sends many times a second, and GET
-// /internal/screen only those.
-func TestEventEmitterSubscribeTo(t *testing.T) {
-	emitter := NewEventEmitter(WithSubscriptionBufSize(2))
-	emitter.EmitScreen("before")
-	_, conversation, replay := emitter.SubscribeTo(ConversationEvents, 0, "")
-	for _, event := range replay {
-		assert.NotEqual(t, EventTypeScreenUpdate, event.Type)
-	}
-	_, screen, replay := emitter.SubscribeTo(ScreenEvents, 0, "")
-	require.Len(t, replay, 1)
-	assert.Equal(t, ScreenUpdateBody{Screen: "before"}, replay[0].Payload)
-
-	for i := range 10 {
-		emitter.EmitScreen(fmt.Sprintf("screen %d", i))
-		<-screen
-	}
-	emitter.EmitStatus(conv.StatusChanging)
-	event, open := <-conversation
-	require.True(t, open, "screen updates didn't fill the channel of /events")
-	assert.Equal(t, EventTypeStatusChange, event.Type)
-}
-
-// The screen's dialog is worked out once per screen.
-func TestEventEmitterScreenQuestion(t *testing.T) {
-	dialog := readScreenFixture(t, "claude_permission_dialog.txt")
-	pty := NewEventEmitter(WithAgentType(mf.AgentTypeClaude), WithTransport(instanceapi.TransportPTY))
-	pty.EmitScreen(dialog)
-	screen, question := pty.Screen()
-	assert.Equal(t, dialog, screen)
-	assert.True(t, question)
-	pty.EmitScreen(readScreenFixture(t, "claude_numbered_answer.txt"))
-	_, question = pty.Screen()
-	assert.False(t, question)
-}
-
 // A rich message without content is sent with an empty list, never null:
 // clients iterate it.
 func TestEmitter_RichMessageContentIsNeverNull(t *testing.T) {
@@ -888,8 +784,8 @@ func TestEmitter_RichMessageContentIsNeverNull(t *testing.T) {
 }
 
 // Restarting, exited and failed stay while the conversation's status
-// changes (a PTY agent's screen goes on changing while it restarts, or
-// after it exited), until the server releases them.
+// changes (the old agent may still report while it restarts), until the
+// server releases them.
 func TestEventEmitterHoldsServerLifecycle(t *testing.T) {
 	emitter := NewEventEmitter()
 	emitter.EmitStatus(conv.StatusStable)
@@ -919,12 +815,4 @@ func TestEventEmitterHoldsServerLifecycle(t *testing.T) {
 	emitter.SetLifecycle(LifecycleStarting)
 	emitter.EmitStatus(conv.StatusStable)
 	assert.Equal(t, LifecycleReady, emitter.StatusSnapshot().Lifecycle)
-}
-
-// readScreenFixture reads a screen of an agent's terminal from testdata.
-func readScreenFixture(t *testing.T, name string) string {
-	t.Helper()
-	b, err := os.ReadFile("testdata/" + name)
-	require.NoError(t, err)
-	return string(b)
 }

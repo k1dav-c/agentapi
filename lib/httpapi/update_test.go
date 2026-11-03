@@ -20,8 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/selfupdate"
@@ -72,8 +72,7 @@ func newUpdateServer(t *testing.T, opts updateOptions) *updateServer {
 	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
 	factory := &nativetest.Factory{}
 	config := httpapi.ServerConfig{
-		AgentType:      msgfmt.AgentTypeClaude,
-		Transport:      httpapi.TransportNative,
+		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         httpapi.NativeConfig{Factory: factory.New},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},

@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/instanceapi"
-	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -23,7 +21,6 @@ type EventType string
 const (
 	EventTypeMessageUpdate     EventType = "message_update"
 	EventTypeStatusChange      EventType = "status_change"
-	EventTypeScreenUpdate      EventType = "screen_update"
 	EventTypeError             EventType = "agent_error"
 	EventTypeRichMessageUpdate EventType = "rich_message_update"
 	EventTypeHeartbeat         EventType = "heartbeat"
@@ -61,7 +58,7 @@ var (
 type MessageUpdateBody struct {
 	Id      int       `json:"id" doc:"Unique identifier for the message. This identifier also represents the order of the message in the conversation history."`
 	Role    conv.Role `json:"role" doc:"Role of the message author"`
-	Message string    `json:"message" doc:"Message content. The message is formatted as it appears in the agent's terminal session, meaning that, by default, it consists of lines of text with 80 characters per line."`
+	Message string    `json:"message" doc:"Message content: the user's message, or the agent's reply as text."`
 	Time    time.Time `json:"time" doc:"Timestamp of the message"`
 	Seq     uint64    `json:"seq" doc:"Sequence number of this change. Pass the highest one seen as ?since= when reconnecting to /events to receive only later changes."`
 }
@@ -84,42 +81,29 @@ type StatusChangeBody struct {
 	Lifecycle LifecycleState `json:"lifecycle" doc:"Detailed process lifecycle state."`
 	ServerID  string         `json:"server_id" doc:"Random identifier of this AgentAPI run: it changes every time AgentAPI starts."`
 	Turn      uint64         `json:"turn" doc:"How many times the agent started working since AgentAPI started."`
-	// AgentSessionID is the agent's own session (native transport).
-	AgentSessionID string                `json:"agent_session_id,omitempty" doc:"The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it."`
-	AgentType      mf.AgentType          `json:"agent_type" doc:"Type of the agent being used by the server."`
-	Transport      instanceapi.Transport `json:"transport" doc:"Backend transport being used ('pty' or 'native')."`
+	// AgentSessionID is the agent's own session.
+	AgentSessionID string                `json:"agent_session_id,omitempty" doc:"The agent's own session ID, which GET /sessions lists and resuming opens, once the agent reports it."`
+	AgentType      instanceapi.AgentType `json:"agent_type" doc:"Type of the agent being used by the server."`
+	Transport      instanceapi.Transport `json:"transport" doc:"How AgentAPI drives the agent: native. AgentAPI 2 also had pty."`
 	Version        string                `json:"agentapi_version" doc:"Version of the AgentAPI server."`
-	// TerminalPrompt is the bottom of the screen while the agent shows an
-	// interactive prompt (selection list, confirmation) instead of its input
-	// box, and empty otherwise.
-	TerminalPrompt string `json:"terminal_prompt" doc:"Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise."`
 	// SessionName is what the agent calls the session, for telling
 	// sessions apart.
 	SessionName string `json:"session_name,omitempty" doc:"Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it."`
-	// TerminalColumns lets a terminal mirror wrap lines where the agent's
-	// terminal does.
-	TerminalColumns uint16 `json:"terminal_columns,omitempty" doc:"Width of the emulated terminal the agent runs in, in columns (PTY transport only)."`
-	// PendingRequests counts the structured requests (native transport)
-	// the agent is waiting on.
-	PendingRequests int `json:"pending_requests,omitempty" doc:"Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests."`
-	// Capabilities is set for the native transport.
-	Capabilities *native.Capabilities `json:"capabilities,omitempty" doc:"Optional operations the agent supports. Native transport only."`
+	// PendingRequests counts the structured requests the agent is
+	// waiting on.
+	PendingRequests int                  `json:"pending_requests,omitempty" doc:"Number of requests (approvals, questions, plans) the agent is waiting on; see GET /requests."`
+	Capabilities    *native.Capabilities `json:"capabilities,omitempty" doc:"Optional operations the agent supports."`
 	// LoginRequired is set while the agent can't work until the user logs
-	// in (native transport).
-	LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only."`
-	// Settings is set for agents whose settings can change (native
-	// transport).
-	Settings *native.Settings `json:"settings,omitempty" doc:"The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only."`
-	// Usage is set once the agent reports it (native transport).
-	Usage *native.AgentUsage `json:"usage,omitempty" doc:"How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only."`
+	// in.
+	LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on."`
+	// Settings is set for agents whose settings can change.
+	Settings *native.Settings `json:"settings,omitempty" doc:"The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings."`
+	// Usage is set once the agent reports it.
+	Usage *native.AgentUsage `json:"usage,omitempty" doc:"How full the agent's context window is and the account's rate limits, as the agent last reported them."`
 	// LimitStop is set while a turn a usage limit stopped holds the queue.
-	LimitStop *native.LimitStop `json:"limit_stop,omitempty" doc:"Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). Native transport only."`
+	LimitStop *native.LimitStop `json:"limit_stop,omitempty" doc:"Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit)."`
 	// Terminal says whether GET /terminal has a shell.
-	Terminal bool `json:"terminal,omitempty" doc:"A shell terminal in the agent's working directory is available at GET /terminal. Native transport only."`
-}
-
-type ScreenUpdateBody struct {
-	Screen string `json:"screen"`
+	Terminal bool `json:"terminal,omitempty" doc:"A shell terminal in the agent's working directory is available at GET /terminal."`
 }
 
 type ErrorBody struct {
@@ -162,7 +146,7 @@ type Event struct {
 }
 
 // Seq is the sequence number of the change the event carries, or 0 for an
-// event without one (the status, an error, the screen, the summary).
+// event without one (the status, an error, the summary).
 func (event Event) Seq() uint64 {
 	switch body := event.Payload.(type) {
 	case MessageUpdateBody:
@@ -214,25 +198,13 @@ type EventEmitter struct {
 	turn                uint64
 	agentSessionID      string
 	handoffRevision     uint64
-	agentType           mf.AgentType
-	transport           instanceapi.Transport
-	terminalColumns     uint16
+	agentType           instanceapi.AgentType
 	sessionName         string
 	chans               map[int]subscriber
 	chanIdx             int
 	subscriptionBufSize uint
-	screen              string
-	// screenQuestion: the screen shows a dialog of the agent's terminal
-	// that waits for an answer (msgfmt.IsTerminalQuestionScreen), worked out once
-	// per screen.
-	screenQuestion bool
-	terminalPrompt string
-	// pendingPrompt is a prompt seen on screen that hasn't been shown long
-	// enough to be published; promptTimer publishes it.
-	pendingPrompt string
-	promptTimer   *quartz.Timer
-	errors        []ErrorBody
-	errorCount    uint64 // the errors emitted, also before a reset
+	errors              []ErrorBody
+	errorCount          uint64 // the errors emitted, also before a reset
 	// tasks derives the tasks from the changes; taskSeq holds the seq of
 	// each task's latest change, by its ID.
 	tasks   *taskTracker
@@ -339,26 +311,15 @@ func WithSubscriptionBufSize(size uint) EventEmitterOption {
 	}
 }
 
-func WithAgentType(agentType mf.AgentType) EventEmitterOption {
+func WithAgentType(agentType instanceapi.AgentType) EventEmitterOption {
 	return func(e *EventEmitter) {
 		e.agentType = agentType
 	}
 }
 
-// WithTransport sets the transport reported in status updates.
-func WithTransport(transport instanceapi.Transport) EventEmitterOption {
-	return func(e *EventEmitter) { e.transport = transport }
-}
-
 // WithTerminal reports in status updates that GET /terminal has a shell.
 func WithTerminal() EventEmitterOption {
 	return func(e *EventEmitter) { e.terminal = true }
-}
-
-// WithTerminalColumns sets the width of the agent's terminal reported in
-// status updates.
-func WithTerminalColumns(columns uint16) EventEmitterOption {
-	return func(e *EventEmitter) { e.terminalColumns = columns }
 }
 
 // WithServerID sets the identifier of this AgentAPI run reported in status
@@ -472,16 +433,10 @@ type subscriber struct {
 	wants func(EventType) bool
 }
 
-// AllEvents, ConversationEvents and ScreenEvents pick the events a
-// subscription gets: all, all but the screen (GET /events), or only the
-// screen (GET /internal/screen). The summary, a view of the others, goes
-// only to subscriptions that ask for it (SummaryEvents).
+// AllEvents picks the events a subscription gets (GET /events): all but
+// the summary, a view of the others, which goes only to subscriptions that
+// ask for it (SummaryEvents).
 func AllEvents(t EventType) bool { return t != EventTypeSummaryUpdate }
-
-func ConversationEvents(t EventType) bool {
-	return t != EventTypeScreenUpdate && t != EventTypeSummaryUpdate
-}
-func ScreenEvents(t EventType) bool { return t == EventTypeScreenUpdate }
 
 // unlock releases e.mu, which every method that holds it does through
 // unlock: what changed the conversation may have changed its summary,
@@ -506,9 +461,8 @@ func (e *EventEmitter) notifyChannels(eventType EventType, payload any) {
 			e.unsubscribeInner(chanId)
 		}
 	}
-	// What changes the conversation's state may change its summary; the
-	// screen alone doesn't (a dialog on it comes with a status change).
-	if eventType != EventTypeSummaryUpdate && eventType != EventTypeScreenUpdate && eventType != EventTypeHeartbeat {
+	// What changes the conversation's state may change its summary.
+	if eventType != EventTypeSummaryUpdate && eventType != EventTypeHeartbeat {
 		e.summary.changed = true
 	}
 }
@@ -521,7 +475,7 @@ func NewEpoch() string {
 }
 
 // Reset clears all conversation state — messages, rich messages, requests,
-// timeline, errors, and screen. Used when restarting with a clean slate.
+// timeline and errors. Used when restarting with a clean slate.
 func (e *EventEmitter) Reset() {
 	e.mu.Lock()
 	defer e.unlock()
@@ -545,14 +499,7 @@ func (e *EventEmitter) Reset() {
 	e.sessionEvents = nil
 	e.nextSessionEventID = 1
 	e.errors = nil
-	e.screen = ""
-	e.terminalPrompt = ""
 	e.sessionName = ""
-	e.pendingPrompt = ""
-	if e.promptTimer != nil {
-		e.promptTimer.Stop()
-		e.promptTimer = nil
-	}
 }
 
 // currentStateAsEvents returns the events wants accepts that rebuild the
@@ -592,12 +539,6 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string, wants fu
 		events = append(events, Event{
 			Type:    EventTypeStatusChange,
 			Payload: e.statusChangeBody(),
-		})
-	}
-	if wants(EventTypeScreenUpdate) {
-		events = append(events, Event{
-			Type:    EventTypeScreenUpdate,
-			Payload: ScreenUpdateBody{Screen: strings.TrimRight(e.screen, mf.WhiteSpaceChars)},
 		})
 	}
 

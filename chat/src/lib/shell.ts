@@ -1,4 +1,4 @@
-// Helpers for the native transport's terminal, a shell streamed to xterm.
+// Helpers for the shell terminal (GET /terminal), streamed to xterm.
 
 // The bytes of a base64 string, as the terminal stream sends its output.
 export function decodeBase64(data: string): Uint8Array {
@@ -16,4 +16,37 @@ export function terminalSize(width: number, height: number, cellWidth: number, c
     cols: Math.max(20, Math.floor(width / cellWidth)),
     rows: Math.max(5, Math.floor(height / cellHeight)),
   };
+}
+
+// Sends keystrokes one request at a time so they reach the terminal in the
+// order they were typed. Keys typed while a request is in flight are
+// batched into the next one.
+export class OrderedInput {
+  private pending = "";
+  private sending = false;
+
+  constructor(
+    private readonly send: (data: string) => Promise<void>,
+    private readonly onError: (error: unknown) => void = () => {},
+  ) {}
+
+  push(data: string): void {
+    this.pending += data;
+    void this.flush();
+  }
+
+  private async flush(): Promise<void> {
+    if (this.sending || this.pending === "") return;
+    const chunk = this.pending;
+    this.pending = "";
+    this.sending = true;
+    try {
+      await this.send(chunk);
+    } catch (error) {
+      this.onError(error);
+    } finally {
+      this.sending = false;
+    }
+    await this.flush();
+  }
 }

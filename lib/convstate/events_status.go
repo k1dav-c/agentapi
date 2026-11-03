@@ -5,13 +5,13 @@ import (
 
 	"github.com/coder/agentapi/internal/version"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 )
 
 // EmitStatus records the conversation's status. Its lifecycle (starting,
 // running, ready) doesn't replace one the server set and holds (see
-// SetLifecycle): a PTY agent's screen goes on changing while it restarts
-// or after it exited.
+// SetLifecycle): the old agent may still report while it restarts.
 func (e *EventEmitter) EmitStatus(newStatus conv.Status) {
 	e.mu.Lock()
 	defer e.unlock()
@@ -107,8 +107,7 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 	}
 	return StatusChangeBody{
 		Status: e.status, Lifecycle: e.lifecycle, ServerID: e.serverID, Turn: e.turn,
-		AgentSessionID: e.agentSessionID, AgentType: e.agentType, Transport: e.transport, Version: version.Version,
-		TerminalPrompt: e.terminalPrompt, TerminalColumns: e.terminalColumns,
+		AgentSessionID: e.agentSessionID, AgentType: e.agentType, Transport: instanceapi.TransportNative, Version: version.Version,
 		SessionName: e.sessionName, PendingRequests: pending, Capabilities: e.capabilities,
 		LoginRequired: e.loginRequired, Settings: e.settings, Usage: e.usage,
 		LimitStop: e.limitStop,

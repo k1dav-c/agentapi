@@ -4,6 +4,8 @@
 import { isImeComposing, type ImeKeyEvent } from "./keys";
 
 export type DispatchMode = "queue" | "steer" | "interrupt";
+// AgentAPI 3 only has "native"; older servers also report "pty" (and
+// "acp"), where the chat offers none of the native features.
 export type Transport = "pty" | "acp" | "native";
 
 // The transport a status_change event, GET /status or the cache reports, or
@@ -45,11 +47,10 @@ export function canInterrupt(context: DispatchContext): boolean {
   return context.transport === "native" && Boolean(context.capabilities?.interrupt) && turnActive(context);
 }
 
-// Whether Stop can stop what the agent is doing: Esc on the terminal while
-// a PTY agent works, POST /interrupt on the native transport. ACP has
-// neither.
+// Whether Stop can stop what the agent is doing: POST /interrupt on the
+// native transport. An older server's other transports can't.
 export function canStop(context: DispatchContext): boolean {
-  return context.transport === "pty" ? context.serverStatus === "running" : canInterrupt(context);
+  return canInterrupt(context);
 }
 
 // Whether a message can be added to the turn the agent is working on. Not

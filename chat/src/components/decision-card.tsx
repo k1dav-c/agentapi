@@ -19,8 +19,7 @@ import { CopyButton } from "./message-list/message-item";
 import { cn } from "@/lib/utils";
 
 // The pieces of the cards docked above the composer while the agent needs
-// you: its requests (native transport), its terminal prompts (PTY) and the
-// login card.
+// you: its requests, the login card and the usage limit card.
 
 // An option row on a card, styled by what the option does. It may be
 // narrower than its text (min-w-0), so a long path in a label wraps instead

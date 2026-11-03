@@ -63,8 +63,6 @@ import {useStableCallback} from "@/lib/use-stable-callback";
 
 export type {DraftMessage, Message, RichContentBlock, RichMessage, Usage} from "@/lib/conversation";
 
-type MessageType = "user" | "raw";
-
 export type {SendResult} from "./use-drafts";
 
 export interface FileUploadResponse {
@@ -104,13 +102,6 @@ const API_CALLS = [
   "getWebhook",
   "updateWebhook",
   "testWebhook",
-  "getMCP",
-  "updateMCP",
-  "checkMCP",
-  "getMCPProfiles",
-  "saveMCPProfile",
-  "deleteMCPProfile",
-  "applyMCPProfile",
   // A file in the agent's working directory and its uncommitted changes,
   // for the file viewer (GET /files/content, GET /files/diff); the files
   // whose path ends with one the agent named that isn't there (GET
@@ -134,15 +125,13 @@ export interface ChatActions extends Pick<ChatAPI, (typeof API_CALLS)[number]> {
   // Checks the login again now (POST /login/retry).
   retryLogin: () => Promise<void>;
   respondToRequest: (id: string, response: RequestResponse) => Promise<NativeRequest>;
-  // Stops what the agent is doing now (Esc on a PTY agent's terminal, POST
-  // /interrupt on the native transport); see ChatState.canStop. It reports
+  // Stops what the agent is doing now (POST /interrupt); see
+  // ChatState.canStop. It reports
   // a failure itself and resolves to false.
   stop: () => Promise<boolean>;
   steerQueuedMessage: (id: number) => Promise<void>;
   reorderQueue: (ids: number[]) => Promise<void>;
-  sendMessage: (message: string, type?: MessageType, mode?: DispatchMode) => Promise<SendResult>;
-  // Sends keystrokes to the agent's terminal as-is (TTY mode).
-  sendTerminalInput: (data: string) => Promise<void>;
+  sendMessage: (message: string, mode?: DispatchMode) => Promise<SendResult>;
   retryFailedMessage: (clientId: string) => Promise<boolean>;
   dismissFailedMessage: (clientId: string) => void;
   updateQueuedMessage: (id: number, content: string) => Promise<void>;
@@ -173,14 +162,12 @@ export interface ChatState {
   latestTool: string | null;
   // How many subagents the agent ran, and how many still run.
   subagents: {total: number; running: number};
-  // Bottom of the terminal while the agent shows an interactive prompt
-  // (selection list, confirmation) that must be answered; empty otherwise.
-  terminalPrompt: string;
   loading: boolean;
   serverStatus: ServerStatus;
   connectionStatus: ConnectionStatus;
   queuedMessages: QueuedMessage[];
-  // How the server drives the agent; "pty" until the server says otherwise.
+  // How the server drives the agent: "native" (AgentAPI 3 has no other
+  // transport) until the server says otherwise.
   transport: Transport;
   // Optional operations of a native agent; null for other transports.
   capabilities: Capabilities | null;
@@ -236,8 +223,6 @@ export interface ChatState {
   // AgentAPI server version (e.g. "0.14.0"); empty until the first status
   // event or when talking to a server that predates version reporting.
   agentapiVersion: string;
-  // Width of the agent's terminal; 0 until the server reports it.
-  terminalColumns: number;
   // What the agent calls the session (Claude Code's title, Codex's thread
   // name, Pi's /name); empty until it names it.
   sessionName: string;
@@ -282,7 +267,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const [serverWorkspaceUrl, setServerWorkspaceUrl] = useState<string>();
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
-  const [transport, setTransport] = useState<Transport>("pty");
+  const [transport, setTransport] = useState<Transport>("native");
   // The agent's status, from status_change events (lib/agent-status). An
   // event that changes nothing leaves it as it is; the ref has the latest,
   // for the event handlers.
@@ -298,10 +283,8 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     serverStatus,
     agentType,
     agentapiVersion,
-    terminalColumns,
     sessionName,
     agentSessionId,
-    terminalPrompt,
     capabilities,
     settings: agentSettings,
     usage: agentUsage,
@@ -354,7 +337,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   useSessionCache({agentAPIUrl, synced, messages, richMessages, requests, tasks: serverTasks, transport});
   const pendingRequestCount = useMemo(() => pendingRequests(requests).length, [requests]);
   const agentStarting = lifecycle === "starting";
-  const needs = {terminalPrompt, pendingRequestCount, loginRequired: loginRequired !== null, limitStop: limitStop !== null};
+  const needs = {pendingRequestCount, loginRequired: loginRequired !== null, limitStop: limitStop !== null};
   const agentState = getAgentState({serverStatus, connectionStatus, ...needs});
   const dispatch = useMemo<DispatchContext>(
     () => ({transport, capabilities: agentStarting ? null : capabilities, serverStatus, pendingRequestCount}),
@@ -409,13 +392,8 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const stop = async () => {
     if (!stoppable) return false;
     try {
-      if (dispatch.transport === "native") {
-        await api.interrupt();
-        toast.info("Stopping the agent");
-      } else {
-        await api.sendMessage("\x1b", "raw");
-        toast.info("Stop signal sent");
-      }
+      await api.interrupt();
+      toast.info("Stopping the agent");
       return true;
     } catch (error) {
       toast.error("Failed to stop the agent", {description: getErrorMessage(error)});
@@ -470,9 +448,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   // component that takes it never renders again for it.
   const callbacks = {
     sendMessage: useStableCallback(sendMessage),
-    sendTerminalInput: useStableCallback(async (data: string) => {
-      await api.sendMessage(data, "raw");
-    }),
     updateSettings: useStableCallback(async (change: AgentSettings) => {
       const result = await api.updateSettings(change);
       // Shown at once; the status_change event that follows says the same.
@@ -501,7 +476,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     ...transcript,
     messages,
     richMessages,
-    terminalPrompt,
     loading,
     transport,
     capabilities,
@@ -530,7 +504,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     storageScope: agentAPIUrl,
     agentType,
     agentapiVersion,
-    terminalColumns,
     sessionName,
     agentSessionId: agentSessionId || sessionCost?.agent_session_id || "",
     customTitle,

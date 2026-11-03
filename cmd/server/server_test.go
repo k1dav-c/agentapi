@@ -34,175 +34,40 @@ func setupCommandOutput(t *testing.T, cmd *cobra.Command) {
 }
 
 func TestParseAgentType(t *testing.T) {
-	tests := []struct {
-		firstArg     string
-		agentTypeVar string
-		want         AgentType
+	t.Parallel()
+	for _, test := range []struct {
+		program, typeFlag string
+		want              AgentType
 	}{
-		{
-			firstArg:     "",
-			agentTypeVar: "",
-			want:         AgentTypeCustom,
-		},
-		{
-			firstArg:     "claude",
-			agentTypeVar: "",
-			want:         AgentTypeClaude,
-		},
-		{
-			firstArg:     "gemini",
-			agentTypeVar: "",
-			want:         AgentTypeGemini,
-		},
-		{
-			firstArg:     "copilot",
-			agentTypeVar: "",
-			want:         AgentTypeCopilot,
-		},
-		{
-			firstArg:     "cursor-agent",
-			agentTypeVar: "",
-			want:         AgentTypeCursor,
-		},
-		{
-			firstArg:     "cursor",
-			agentTypeVar: "",
-			want:         AgentTypeCursor,
-		},
-		{
-			firstArg:     "amazonq",
-			agentTypeVar: "",
-			want:         AgentTypeAmazonQ,
-		},
-		{
-			firstArg:     "q",
-			agentTypeVar: "",
-			want:         AgentTypeAmazonQ,
-		},
-		{
-			firstArg:     "opencode",
-			agentTypeVar: "",
-			want:         AgentTypeOpencode,
-		},
-		{
-			firstArg:     "kimi",
-			agentTypeVar: "",
-			want:         AgentTypeKimi,
-		},
-		{
-			firstArg:     "pi",
-			agentTypeVar: "",
-			want:         AgentTypePi,
-		},
-		{
-			firstArg:     "auggie",
-			agentTypeVar: "",
-			want:         AgentTypeAuggie,
-		},
-		{
-			firstArg:     "amp",
-			agentTypeVar: "",
-			want:         AgentTypeAmp,
-		},
-		{
-			firstArg:     "goose",
-			agentTypeVar: "",
-			want:         AgentTypeGoose,
-		},
-		{
-			firstArg:     "aider",
-			agentTypeVar: "",
-			want:         AgentTypeAider,
-		},
-		{
-			firstArg:     "whatever",
-			agentTypeVar: "",
-			want:         AgentTypeCustom,
-		},
-		{
-			firstArg:     "claude",
-			agentTypeVar: "goose",
-			want:         AgentTypeGoose,
-		},
-		{
-			firstArg:     "claude",
-			agentTypeVar: "copilot",
-			want:         AgentTypeCopilot,
-		},
-		{
-			firstArg:     "goose",
-			agentTypeVar: "claude",
-			want:         AgentTypeClaude,
-		},
-		{
-			firstArg:     "claude",
-			agentTypeVar: "gemini",
-			want:         AgentTypeGemini,
-		},
-		{
-			firstArg:     "claude",
-			agentTypeVar: "amazonq",
-			want:         AgentTypeAmazonQ,
-		},
-		{
-			firstArg:     "claude",
-			agentTypeVar: "q",
-			want:         AgentTypeAmazonQ,
-		},
-		{
-			firstArg:     "claude",
-			agentTypeVar: "opencode",
-			want:         AgentTypeOpencode,
-		},
-		{
-			firstArg:     "claude",
-			agentTypeVar: "kimi",
-			want:         AgentTypeKimi,
-		},
-		{
-			firstArg:     "claude",
-			agentTypeVar: "pi",
-			want:         AgentTypePi,
-		},
-		{
-			firstArg:     "claude",
-			agentTypeVar: "cursor-agent",
-			want:         AgentTypeCursor,
-		},
-		{
-			firstArg:     "claude",
-			agentTypeVar: "cursor",
-			want:         AgentTypeCursor,
-		},
-		{
-			firstArg:     "claude",
-			agentTypeVar: "auggie",
-			want:         AgentTypeAuggie,
-		},
-		{
-			firstArg:     "aider",
-			agentTypeVar: "claude",
-			want:         AgentTypeClaude,
-		},
-		{
-			firstArg:     "aider",
-			agentTypeVar: "custom",
-			want:         AgentTypeCustom,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(fmt.Sprintf("%s-%s-%s", test.firstArg, test.agentTypeVar, test.want), func(t *testing.T) {
-			got, err := parseAgentType(test.firstArg, test.agentTypeVar)
+		{"claude", "", AgentTypeClaude},
+		{"/usr/local/bin/codex", "", AgentTypeCodex},
+		{"pi", "", AgentTypePi},
+		{"native-demo", "", AgentTypeCustom},
+		{"claude-wrapper", "claude", AgentTypeClaude},
+		{"native-demo", "codex", AgentTypeCodex},
+		{"native-demo", "native-demo", AgentTypeCustom},
+		{"native-demo", "custom", AgentTypeCustom},
+	} {
+		t.Run(test.program+"-"+test.typeFlag, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseAgentType(test.program, test.typeFlag)
 			require.NoError(t, err)
 			require.Equal(t, test.want, got)
 		})
 	}
 
-	t.Run("invalid agent type", func(t *testing.T) {
-		_, err := parseAgentType("claude", "invalid")
-		require.Error(t, err)
-	})
+	// AgentAPI 3 runs only native agents; the others need v2.5.1.
+	for _, test := range []struct{ program, typeFlag, want string }{
+		{"claude", "aider", "AgentAPI 3 runs Claude Code, Codex and Pi natively, not aider (--type claude, codex, pi, native-demo); for other agents, use AgentAPI v2.5.1, the last release with the PTY transport"},
+		{"goose", "", "unknown agent goose: set --type (claude, codex, pi, native-demo); AgentAPI 3 runs Claude Code, Codex and Pi natively, and for other agents AgentAPI v2.5.1 is the last release with the PTY transport"},
+		{"bash", "custom", "not a custom agent"},
+	} {
+		t.Run("refuses "+test.program+"-"+test.typeFlag, func(t *testing.T) {
+			t.Parallel()
+			_, err := parseAgentType(test.program, test.typeFlag)
+			require.ErrorContains(t, err, test.want)
+		})
+	}
 }
 
 // Test helper to isolate viper config between tests

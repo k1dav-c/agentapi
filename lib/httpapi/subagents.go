@@ -57,11 +57,8 @@ type SubagentResponse struct {
 }
 
 // requireSubagents fails for a server whose agent's subagents can't be
-// read: the native transport of Claude Code and Codex.
+// read: Claude Code's and Codex's.
 func (s *Server) requireSubagents() error {
-	if err := s.requireNative(); err != nil {
-		return err
-	}
 	if s.sessions == nil {
 		return huma.Error400BadRequest("this agent's subagents can't be read")
 	}
@@ -175,13 +172,13 @@ func (s *Server) registerSubagentRoutes() {
 	huma.Get(s.api, "/subagents", guard(s.requireSubagents, s.listSubagents), func(o *huma.Operation) {
 		o.Tags = []string{"Sessions"}
 		o.Summary = "List the agent's subagents"
-		o.Description = "Lists the subagents the agent ran in the session it has open, read from their own logs, in the order they started: each with what it was asked to do, the tool call that started it and whether it still runs (Claude Code). Native transport of Claude Code and Codex; Pi runs no subagents, and returns an empty list."
+		o.Description = "Lists the subagents the agent ran in the session it has open, read from their own logs, in the order they started: each with what it was asked to do, the tool call that started it and whether it still runs (Claude Code). Claude Code and Codex; Pi runs no subagents, and returns an empty list."
 		o.Errors = []int{400}
 	})
 	huma.Get(s.api, "/subagents/{id}", guard(s.requireSubagents, s.getSubagent), func(o *huma.Operation) {
 		o.Tags = []string{"Sessions"}
 		o.Summary = "Get what a subagent did"
-		o.Description = "Returns a subagent's task and what it did so far, as rich messages, read from its log; ask again for a running one. Native transport of Claude Code and Codex; returns 404 for a subagent the session has no log of."
+		o.Description = "Returns a subagent's task and what it did so far, as rich messages, read from its log; ask again for a running one. Claude Code and Codex; returns 404 for a subagent the session has no log of."
 		o.Errors = []int{400, 404}
 	})
 }

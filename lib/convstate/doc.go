@@ -2,7 +2,7 @@
 // clients read, apart from how they read it (lib/httpapi):
 //
 //   - EventEmitter stores the messages, rich messages, timeline, requests,
-//     status, screen and errors the transports report, numbers every
+//     status and errors the agent's conversation reports, numbers every
 //     change (epoch and seq), and replays and streams them to subscribers.
 //   - It derives the tasks (tasks.go) and the summary (summary.go) from
 //     them, and keeps the message queue as the server last reported it

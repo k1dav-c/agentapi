@@ -1,10 +1,9 @@
 {
-  "captured_at": "2026-11-03T09:00:43.296Z",
-  "agentapi_version": "2.4.0",
+  "captured_at": "2026-11-03T15:43:47.910Z",
+  "agentapi_version": "3.0.0",
   "agents": [
     "native-demo",
     "native-demo posing as Claude Code",
-    "bash (PTY)",
     "nine native-demo instances behind agentapi hub serve, posing as Claude Code, Codex and Pi"
   ],
   "browser": "153.0.8010.12",
@@ -60,7 +59,6 @@
     "lineage.png",
     "file-find.png",
     "login-card.png",
-    "tty-mode.png",
     "hub-sign-in.png",
     "hub-desktop.png",
     "hub-list.png",

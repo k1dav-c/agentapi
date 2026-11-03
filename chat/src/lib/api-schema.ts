@@ -43,7 +43,7 @@ export interface paths {
         put?: never;
         /**
          * Compact the agent's context
-         * @description Has the agent summarize the conversation so far to free its context window (Codex: in a turn of its own; Pi: answered once done). Native transport only, for agents with the compact capability. Messages sent meanwhile wait in the queue. Returns 409 while the agent works on a turn or compacts, and when it refuses (Pi with nothing to compact yet).
+         * @description Has the agent summarize the conversation so far to free its context window (Codex: in a turn of its own; Pi: answered once done). For agents with the compact capability. Messages sent meanwhile wait in the queue. Returns 409 while the agent works on a turn or compacts, and when it refuses (Pi with nothing to compact yet).
          */
         post: operations["post-compact"];
         delete?: never;
@@ -61,7 +61,7 @@ export interface paths {
         };
         /**
          * What the session spent
-         * @description Returns what the session the agent has open spent, its subagents included, and its model calls one by one, read from the agent's logs: the tokens of each call priced at the model providers' list prices (the API-equivalent cost, which a subscription doesn't charge), or at Pi's own prices for Pi. A model without a known price counts its tokens and no cost; --prices adds prices. For Claude Code, what it counted but didn't log call by call (compacting the context) comes as unitemized calls. Native transport of Claude Code, Codex and Pi only.
+         * @description Returns what the session the agent has open spent, its subagents included, and its model calls one by one, read from the agent's logs: the tokens of each call priced at the model providers' list prices (the API-equivalent cost, which a subscription doesn't charge), or at Pi's own prices for Pi. A model without a known price counts its tokens and no cost; --prices adds prices. For Claude Code, what it counted but didn't log call by call (compacting the context) comes as unitemized calls. Claude Code, Codex and Pi only.
          */
         get: operations["get-cost"];
         put?: never;
@@ -221,7 +221,7 @@ export interface paths {
         put?: never;
         /**
          * Interrupt the agent
-         * @description Stops the turn the agent is working on. Native transport only, for agents with the interrupt capability.
+         * @description Stops the turn the agent is working on. For agents with the interrupt capability.
          */
         post: operations["post-interrupt"];
         delete?: never;
@@ -242,7 +242,7 @@ export interface paths {
         post?: never;
         /**
          * Dismiss a usage limit stop
-         * @description Forgets the turn a usage limit stopped, with its scheduled continuation, so the queued messages go out as soon as the agent can take them. Native transport only; returns 409 when no turn stopped on a limit.
+         * @description Forgets the turn a usage limit stopped, with its scheduled continuation, so the queued messages go out as soon as the agent can take them. Returns 409 when no turn stopped on a limit.
          */
         delete: operations["delete-limit"];
         options?: never;
@@ -261,12 +261,12 @@ export interface paths {
         put?: never;
         /**
          * Continue after a usage limit
-         * @description Continues the turn a usage limit stopped (`limit_stop` in GET /status) with a message asking the agent to go on: now, or once the limit resets (`at: reset`, which needs the reset time). While a continuation is scheduled the queued messages wait for it; sending a message yourself cancels it. Native transport only; returns 409 when no turn stopped on a limit.
+         * @description Continues the turn a usage limit stopped (`limit_stop` in GET /status) with a message asking the agent to go on: now, or once the limit resets (`at: reset`, which needs the reset time). While a continuation is scheduled the queued messages wait for it; sending a message yourself cancels it. Returns 409 when no turn stopped on a limit.
          */
         post: operations["post-limit-continue"];
         /**
          * Cancel a scheduled continuation
-         * @description Cancels the continuation POST /limit/continue or --auto-continue scheduled. The queued messages still wait until the limit resets. Native transport only; returns 409 when no turn stopped on a limit.
+         * @description Cancels the continuation POST /limit/continue or --auto-continue scheduled. The queued messages still wait until the limit resets. Returns 409 when no turn stopped on a limit.
          */
         delete: operations["delete-limit-continue"];
         options?: never;
@@ -285,159 +285,13 @@ export interface paths {
         put?: never;
         /**
          * Check the agent's login again
-         * @description While `login_required` is reported in GET /status, checks again now whether the user logged in (AgentAPI also checks every few seconds while the agent waits at startup). If the agent lost its login while running, it is restarted and resumes its session. Native transport only; returns 409 if no login is needed.
+         * @description While `login_required` is reported in GET /status, checks again now whether the user logged in (AgentAPI also checks every few seconds while the agent waits at startup). If the agent lost its login while running, it is restarted and resumes its session. Returns 409 if no login is needed.
          */
         post: operations["post-login-retry"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/mcp": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get MCP server configuration
-         * @description Returns the complete MCP server configuration used by the running agent.
-         *
-         *     Supported agents and files:
-         *
-         *     - **Claude:** project-scoped `.mcp.json` in the agent working directory (`mcpServers` object).
-         *     - **Codex:** `$CODEX_HOME/config.toml`, falling back to `~/.codex/config.toml` (`[mcp_servers.*]` tables).
-         *     - **Pi:** user-level `$PI_CODING_AGENT_DIR/mcp.json`, falling back to `~/.pi/agent/mcp.json` (`mcpServers` object).
-         *
-         *     Server values are agent-native and passed through without transport-specific validation. The response can contain environment values or HTTP headers, so treat it as sensitive. Other agent types return `404`.
-         */
-        get: operations["get-mcp"];
-        /**
-         * Replace MCP server configuration
-         * @description Replaces the agent's **complete** MCP server map while preserving unrelated config-file content.
-         *
-         *     Important behavior:
-         *
-         *     - Servers omitted from `servers` are removed; send `{"servers": {}}` to clear all MCP servers.
-         *     - Values use the target agent's native format and are not validated by AgentAPI.
-         *     - Without `restart=true`, the new configuration is loaded by the next agent session.
-         *     - With `restart=true`, AgentAPI replaces the agent process immediately. AgentAPI and its HTTP/SSE endpoints stay online. A PTY agent starts over with an empty conversation; a native agent resumes its session, so the conversation stays (409 while it works on a turn).
-         *     - Restart is unavailable in schema-only and other server modes without a process supervisor; those requests return `400`.
-         *     - A missing or structurally invalid request body returns `422`.
-         *     - Claude, Codex and Pi are supported; other agent types return `404`.
-         */
-        put: operations["put-mcp"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/mcp/check": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Check MCP server connectivity */
-        post: operations["post-mcp-check"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/mcp/profiles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List MCP profiles */
-        get: operations["get-mcp-profiles"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/mcp/profiles/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Import or replace an MCP profile */
-        put: operations["put-mcp-profiles-by-name"];
-        post?: never;
-        /** Delete an MCP profile */
-        delete: operations["delete-mcp-profiles-by-name"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/mcp/profiles/{name}/apply": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Apply an MCP profile */
-        post: operations["post-mcp-profiles-by-name-apply"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/mcp/servers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create an MCP server */
-        post: operations["post-mcp-servers"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/mcp/servers/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Delete an MCP server */
-        delete: operations["delete-mcp-servers-by-name"];
-        options?: never;
-        head?: never;
-        /** Update an MCP server */
-        patch: operations["patch-mcp-servers-by-name"];
         trace?: never;
     };
     "/message": {
@@ -476,7 +330,7 @@ export interface paths {
         post?: never;
         /**
          * Delete all messages and restart
-         * @description Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if the agent can't be restarted (AgentAPI runs it without a process supervisor), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue.
+         * @description Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session. Returns 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue.
          */
         delete: operations["delete-messages"];
         options?: never;
@@ -543,7 +397,7 @@ export interface paths {
         put?: never;
         /**
          * Post queue by ID steer
-         * @description Adds a queued message to the turn the agent is working on instead of waiting for it to end. Native transport only, for agents with the steer capability.
+         * @description Adds a queued message to the turn the agent is working on instead of waiting for it to end. For agents with the steer capability.
          */
         post: operations["post-queue-by-id-steer"];
         delete?: never;
@@ -561,7 +415,7 @@ export interface paths {
         };
         /**
          * List requests
-         * @description Returns the requests the agent is waiting on (tool approvals, questions, plans) and the most recently closed ones. Native transport only; other transports return an empty list. Changes are also sent as `request_update` events on /events.
+         * @description Returns the requests the agent is waiting on (tool approvals, questions, plans) and the most recently closed ones. Changes are also sent as `request_update` events on /events.
          */
         get: operations["get-requests"];
         put?: never;
@@ -618,7 +472,7 @@ export interface paths {
         };
         /**
          * Get rich messages
-         * @description Returns a list of rich structured messages. Each message contains structured content blocks (text, thinking, tool_use, tool_result), model information, and token usage data. With the PTY transport they are parsed from the session log of agents that have one (claude, codex and pi); with the native transport they come from the agent's protocol.
+         * @description Returns a list of rich structured messages. Each message contains structured content blocks (text, thinking, tool_use, tool_result), model information, and token usage data, from the agent's protocol.
          */
         get: operations["get-rich-messages"];
         put?: never;
@@ -638,7 +492,7 @@ export interface paths {
         };
         /**
          * List the agent's sessions
-         * @description Lists the sessions the agent had in the working directory, read from its session logs (Claude Code's projects directory, Codex's sessions, Pi's session directory), the latest first, with the one it has open. Sessions in which the user sent nothing are left out. Native transport of Claude Code, Codex and Pi only.
+         * @description Lists the sessions the agent had in the working directory, read from its session logs (Claude Code's projects directory, Codex's sessions, Pi's session directory), the latest first, with the one it has open. Sessions in which the user sent nothing are left out. Claude Code, Codex and Pi only.
          */
         get: operations["get-sessions"];
         put?: never;
@@ -660,7 +514,7 @@ export interface paths {
         put?: never;
         /**
          * Open another session
-         * @description Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Native transport of Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here, and 409 while the agent works on a turn or compacts its context (nothing changes then) or another restart is under way.
+         * @description Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here, and 409 while the agent works on a turn or compacts its context (nothing changes then) or another restart is under way.
          */
         post: operations["post-sessions-by-id-resume"];
         delete?: never;
@@ -678,12 +532,12 @@ export interface paths {
         };
         /**
          * Get the agent's settings
-         * @description Returns the agent's permission mode, model and reasoning effort, and the values they can take. The current settings are also part of GET /status and `status_change` events. Native transport only, for agents with the settings capability; returns 409 while the agent restarts or waits for a login.
+         * @description Returns the agent's permission mode, model and reasoning effort, and the values they can take. The current settings are also part of GET /status and `status_change` events. For agents with the settings capability; returns 409 while the agent restarts or waits for a login.
          */
         get: operations["get-settings"];
         /**
          * Change the agent's settings
-         * @description Changes the settings that are set in the body and leaves the others: `permission_mode` (bypass, auto, ask or plan, as the agent offers), `model` (one of the model ids GET /settings lists) and `effort` (one of the model's efforts). A change made during a turn may apply from the next one (Codex). The agent that replaces this one after a restart, a new login or an AgentAPI restart (with --state-db) gets the chosen settings too. Native transport only; returns 400 for a value a setting can't take and 409 while the agent restarts or waits for a login.
+         * @description Changes the settings that are set in the body and leaves the others: `permission_mode` (bypass, auto, ask or plan, as the agent offers), `model` (one of the model ids GET /settings lists) and `effort` (one of the model's efforts). A change made during a turn may apply from the next one (Codex). The agent that replaces this one after a restart, a new login or an AgentAPI restart (with --state-db) gets the chosen settings too. Returns 400 for a value a setting can't take and 409 while the agent restarts or waits for a login.
          */
         put: operations["put-settings"];
         post?: never;
@@ -722,7 +576,7 @@ export interface paths {
         };
         /**
          * List the agent's subagents
-         * @description Lists the subagents the agent ran in the session it has open, read from their own logs, in the order they started: each with what it was asked to do, the tool call that started it and whether it still runs (Claude Code). Native transport of Claude Code and Codex; Pi runs no subagents, and returns an empty list.
+         * @description Lists the subagents the agent ran in the session it has open, read from their own logs, in the order they started: each with what it was asked to do, the tool call that started it and whether it still runs (Claude Code). Claude Code and Codex; Pi runs no subagents, and returns an empty list.
          */
         get: operations["get-subagents"];
         put?: never;
@@ -742,7 +596,7 @@ export interface paths {
         };
         /**
          * Get what a subagent did
-         * @description Returns a subagent's task and what it did so far, as rich messages, read from its log; ask again for a running one. Native transport of Claude Code and Codex; returns 404 for a subagent the session has no log of.
+         * @description Returns a subagent's task and what it did so far, as rich messages, read from its log; ask again for a running one. Claude Code and Codex; returns 404 for a subagent the session has no log of.
          */
         get: operations["get-subagents-by-id"];
         put?: never;
@@ -782,7 +636,7 @@ export interface paths {
         };
         /**
          * Get the conversation's tasks
-         * @description Returns the conversation's tasks: each message of the user's and the agent's turn on it, until the agent is done (stable again, with no request or terminal dialog open). Messages the user adds while the agent works on a task belong to it (steered). A task is running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). /events sends task_update when one starts or changes.
+         * @description Returns the conversation's tasks: each message of the user's and the agent's turn on it, until the agent is done (stable again, with no request open). Messages the user adds while the agent works on a task belong to it (steered). A task is running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). /events sends task_update when one starts or changes.
          */
         get: operations["get-tasks"];
         put?: never;
@@ -822,7 +676,7 @@ export interface paths {
         };
         /**
          * Watch the terminal
-         * @description Streams a shell in the agent's working directory, for a terminal emulator: `output` events carry what it writes (the first one the recent output), and an `exit` event ends the stream when the shell exits; a connection that falls too far behind ends without one, and connects again for the recent output. Connecting starts the shell if it doesn't run; it keeps running while nobody watches, and every connection shares it. Native transport only (on by default; --terminal=false turns it off).
+         * @description Streams a shell in the agent's working directory, for a terminal emulator: `output` events carry what it writes (the first one the recent output), and an `exit` event ends the stream when the shell exits; a connection that falls too far behind ends without one, and connects again for the recent output. Connecting starts the shell if it doesn't run; it keeps running while nobody watches, and every connection shares it. On by default; --terminal=false turns it off.
          */
         get: operations["subscribeTerminal"];
         put?: never;
@@ -921,7 +775,7 @@ export interface paths {
         put?: never;
         /**
          * Update AgentAPI
-         * @description Installs the latest official release of AgentAPI (k1dav-c/agentapi on GitHub) for this machine's OS and architecture, checked against the release's checksums.txt, in place of the program AgentAPI runs, and restarts AgentAPI in place into it: the same process, a new server_id and version. The request can't choose a version or a URL. AgentAPIs that share the program replace it under a lock file next to it, and one that finds the program on disk newer than the one it runs only restarts. `when` is `idle` (the default: once the agent is stable, with no request or terminal dialog open) or `now`. Returns 200 with `up_to_date` when AgentAPI runs the latest release already, else 202 with the state and the version it updates to; while an update is under way it returns its state, and `now` has it restart without waiting. 403 unless AgentAPI runs with --allow-update; 409 when it can't replace its program (the message and the summary's update.blocked say why and how to fix it) or stops; 502 when the latest release can't be looked up. Every change of the state sends summary_update. With --state-db the conversation and the agent's session carry over the restart; without it the conversation starts anew.
+         * @description Installs the latest official release of AgentAPI (k1dav-c/agentapi on GitHub) for this machine's OS and architecture, checked against the release's checksums.txt, in place of the program AgentAPI runs, and restarts AgentAPI in place into it: the same process, a new server_id and version. The request can't choose a version or a URL. AgentAPIs that share the program replace it under a lock file next to it, and one that finds the program on disk newer than the one it runs only restarts. `when` is `idle` (the default: once the agent is stable, with no request open) or `now`. Returns 200 with `up_to_date` when AgentAPI runs the latest release already, else 202 with the state and the version it updates to; while an update is under way it returns its state, and `now` has it restart without waiting. 403 unless AgentAPI runs with --allow-update; 409 when it can't replace its program (the message and the summary's update.blocked say why and how to fix it) or stops; 502 when the latest release can't be looked up. Every change of the state sends summary_update. With --state-db the conversation and the agent's session carry over the restart; without it the conversation starts anew.
          */
         post: operations["post-update"];
         /**
@@ -1363,124 +1217,6 @@ export interface components {
             /** @description User to run the command as: the one AgentAPI runs as. */
             user?: string;
         };
-        MCPCheckBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/schemas/MCPCheckBody.json
-             */
-            readonly $schema?: string;
-            /** @description Servers to check. When omitted, the saved configuration is checked. */
-            servers?: {
-                [key: string]: unknown;
-            };
-        };
-        MCPCheckResponseBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/schemas/MCPCheckResponseBody.json
-             */
-            readonly $schema?: string;
-            results: components["schemas"]["MCPCheckResult"][];
-        };
-        MCPCheckResult: {
-            detail: string;
-            /** @enum {string} */
-            kind: "http" | "stdio" | "unknown";
-            /** Format: int64 */
-            latency_ms?: number;
-            name: string;
-            /** @enum {string} */
-            status: "invalid" | "ready" | "unreachable";
-        };
-        MCPGetResponseBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/schemas/MCPGetResponseBody.json
-             */
-            readonly $schema?: string;
-            /** @description Absolute path of the managed config file: <working-directory>/.mcp.json for Claude, $CODEX_HOME/config.toml (default ~/.codex/config.toml) for Codex, or $PI_CODING_AGENT_DIR/mcp.json (default ~/.pi/agent/mcp.json) for Pi. */
-            path: string;
-            /** @description Agent-native MCP server objects keyed by unique server name. Values are returned verbatim and may contain commands, arguments, environment variables, URLs, or headers. */
-            servers: {
-                [key: string]: unknown;
-            };
-        };
-        MCPProfileBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/schemas/MCPProfileBody.json
-             */
-            readonly $schema?: string;
-            servers: {
-                [key: string]: unknown;
-            };
-        };
-        MCPProfilesResponseBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/schemas/MCPProfilesResponseBody.json
-             */
-            readonly $schema?: string;
-            path: string;
-            profiles: {
-                [key: string]: {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        MCPServerConfigBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/schemas/MCPServerConfigBody.json
-             */
-            readonly $schema?: string;
-            /** @description Agent-native MCP server configuration. */
-            config: unknown;
-        };
-        MCPServerMutationBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/schemas/MCPServerMutationBody.json
-             */
-            readonly $schema?: string;
-            /** @description Agent-native MCP server configuration. */
-            config: unknown;
-            /** @description Unique MCP server name. */
-            name: string;
-        };
-        MCPUpdateRequestBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/schemas/MCPUpdateRequestBody.json
-             */
-            readonly $schema?: string;
-            /** @description Complete agent-native MCP server map. This is replacement semantics: existing MCP servers omitted from this map are removed. An empty object removes every MCP server. Unrelated settings in the config file are preserved. */
-            servers: {
-                [key: string]: unknown;
-            };
-        };
-        MCPUpdateResponseBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/schemas/MCPUpdateResponseBody.json
-             */
-            readonly $schema?: string;
-            /** @description True when the complete MCP server map was written successfully. */
-            ok: boolean;
-            /** @description Absolute path of the config file that was written. */
-            path: string;
-            /** @description True when restart=true was requested and the PTY agent process was replaced successfully. */
-            restarted: boolean;
-        };
         Message: {
             /**
              * @description Message content. The message is formatted as it appears in the agent's terminal session, meaning that, by default, it consists of lines of text with 80 characters per line.
@@ -1512,9 +1248,9 @@ export interface components {
              * @example Hello, agent!
              */
             content: string;
-            /** @description What to do with a user message while the agent is busy. 'queue' (default) sends it once the agent is idle. 'steer' adds it to the turn the agent is working on; 'interrupt' stops that turn and sends the message next. Without a running turn, both send the message as usual. 'steer' and 'interrupt' need the native transport, and while a turn runs an agent with the matching capability (see GET /status); otherwise they return 400. */
+            /** @description What to do with a user message while the agent is busy. 'queue' (default) sends it once the agent is idle. 'steer' adds it to the turn the agent is working on; 'interrupt' stops that turn and sends the message next. Without a running turn, both send the message as usual. 'steer' and 'interrupt' need, while a turn runs, an agent with the matching capability (see GET /status); otherwise they return 400. */
             dispatch_mode?: components["schemas"]["DispatchMode"];
-            /** @description A 'user' type message will be logged as a user message in the conversation history and submitted to the agent. AgentAPI will wait until the agent starts carrying out the task described in the message before responding. A 'raw' type message will be written directly to the agent's terminal session as keystrokes and will not be saved in the conversation history. 'raw' messages are useful for sending escape sequences to the terminal. */
+            /** @description Always 'user': the message is logged as a user message in the conversation history and submitted to the agent. AgentAPI 2 also took 'raw', keystrokes for the agent's terminal. */
             type: components["schemas"]["MessageType"];
         };
         MessageResponseBody: {
@@ -1536,14 +1272,14 @@ export interface components {
          * @example user
          * @enum {string}
          */
-        MessageType: "raw" | "user";
+        MessageType: "user";
         MessageUpdateBody: {
             /**
              * Format: int64
              * @description Unique identifier for the message. This identifier also represents the order of the message in the conversation history.
              */
             id: number;
-            /** @description Message content. The message is formatted as it appears in the agent's terminal session, meaning that, by default, it consists of lines of text with 80 characters per line. */
+            /** @description Message content: the user's message, or the agent's reply as text. */
             message: string;
             /** @description Role of the message author */
             role: components["schemas"]["ConversationRole"];
@@ -2021,9 +1757,6 @@ export interface components {
             /** @description List of rich messages with structured content blocks, model info, and usage */
             messages: components["schemas"]["RichMessage"][];
         };
-        ScreenUpdateBody: {
-            screen: string;
-        };
         SessionCost: {
             /**
              * Format: int64
@@ -2157,50 +1890,43 @@ export interface components {
             settings: components["schemas"]["Settings"];
         };
         StatusChangeBody: {
-            /** @description The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it. */
+            /** @description The agent's own session ID, which GET /sessions lists and resuming opens, once the agent reports it. */
             agent_session_id?: string;
             /** @description Type of the agent being used by the server. */
             agent_type: string;
             /** @description Version of the AgentAPI server. */
             agentapi_version: string;
-            /** @description Optional operations the agent supports. Native transport only. */
+            /** @description Optional operations the agent supports. */
             capabilities?: components["schemas"]["Capabilities"];
             /** @description Detailed process lifecycle state. */
             lifecycle: components["schemas"]["LifecycleState"];
-            /** @description Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). Native transport only. */
+            /** @description Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). */
             limit_stop?: components["schemas"]["LimitStop"];
-            /** @description Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only. */
+            /** @description Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. */
             login_required?: components["schemas"]["LoginRequired"];
             /**
              * Format: int64
-             * @description Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests.
+             * @description Number of requests (approvals, questions, plans) the agent is waiting on; see GET /requests.
              */
             pending_requests?: number;
             /** @description Random identifier of this AgentAPI run: it changes every time AgentAPI starts. */
             server_id: string;
             /** @description Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it. */
             session_name?: string;
-            /** @description The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only. */
+            /** @description The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. */
             settings?: components["schemas"]["Settings"];
             /** @description Backward-compatible agent activity status. */
             status: components["schemas"]["AgentStatus"];
-            /** @description A shell terminal in the agent's working directory is available at GET /terminal. Native transport only. */
+            /** @description A shell terminal in the agent's working directory is available at GET /terminal. */
             terminal?: boolean;
-            /**
-             * Format: int32
-             * @description Width of the emulated terminal the agent runs in, in columns (PTY transport only).
-             */
-            terminal_columns?: number;
-            /** @description Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise. */
-            terminal_prompt: string;
-            /** @description Backend transport being used ('pty' or 'native'). */
+            /** @description How AgentAPI drives the agent: native. AgentAPI 2 also had pty. */
             transport: components["schemas"]["Transport"];
             /**
              * Format: int64
              * @description How many times the agent started working since AgentAPI started.
              */
             turn: number;
-            /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only. */
+            /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. */
             usage?: components["schemas"]["AgentUsage"];
         };
         StatusResponseBody: {
@@ -2210,52 +1936,45 @@ export interface components {
              * @example https://example.com/schemas/StatusResponseBody.json
              */
             readonly $schema?: string;
-            /** @description The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it. */
+            /** @description The agent's own session ID, which GET /sessions lists and resuming opens, once the agent reports it. */
             agent_session_id?: string;
             /** @description Type of the agent being used by the server. */
             agent_type: string;
             /** @description Version of the AgentAPI server. */
             agentapi_version: string;
-            /** @description Optional operations the agent supports. Native transport only. */
+            /** @description Optional operations the agent supports. */
             capabilities?: components["schemas"]["Capabilities"];
             /** @description Identifies the current conversation state; pass it as epoch to /events?sync=1 (see session_sync). */
             epoch: string;
             /** @description Detailed process lifecycle state. */
             lifecycle: components["schemas"]["LifecycleState"];
-            /** @description Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). Native transport only. */
+            /** @description Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit). */
             limit_stop?: components["schemas"]["LimitStop"];
-            /** @description Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. Native transport only. */
+            /** @description Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on. */
             login_required?: components["schemas"]["LoginRequired"];
             /**
              * Format: int64
-             * @description Number of requests (approvals, questions, plans) the agent is waiting on. Native transport only; see GET /requests.
+             * @description Number of requests (approvals, questions, plans) the agent is waiting on; see GET /requests.
              */
             pending_requests?: number;
             /** @description Random identifier of this AgentAPI run: it changes every time AgentAPI starts. */
             server_id: string;
             /** @description Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it. */
             session_name?: string;
-            /** @description The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. Native transport only. */
+            /** @description The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings. */
             settings?: components["schemas"]["Settings"];
             /** @description Backward-compatible agent activity status. */
             status: components["schemas"]["AgentStatus"];
-            /** @description A shell terminal in the agent's working directory is available at GET /terminal. Native transport only. */
+            /** @description A shell terminal in the agent's working directory is available at GET /terminal. */
             terminal?: boolean;
-            /**
-             * Format: int32
-             * @description Width of the emulated terminal the agent runs in, in columns (PTY transport only).
-             */
-            terminal_columns?: number;
-            /** @description Bottom of the terminal while the agent is showing an interactive prompt (selection list, confirmation dialog) that must be answered; empty otherwise. */
-            terminal_prompt: string;
-            /** @description Backend transport being used ('pty' or 'native'). */
+            /** @description How AgentAPI drives the agent: native. AgentAPI 2 also had pty. */
             transport: components["schemas"]["Transport"];
             /**
              * Format: int64
              * @description How many times the agent started working since AgentAPI started.
              */
             turn: number;
-            /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. Native transport only. */
+            /** @description How full the agent's context window is and the account's rate limits, as the agent last reported them. */
             usage?: components["schemas"]["AgentUsage"];
         };
         SubagentResponseBody: {
@@ -2319,7 +2038,7 @@ export interface components {
             readonly $schema?: string;
             /** @description The agent's own session, as in GET /status. */
             agent_session_id?: string;
-            /** @description Why the agent waits for the user: login, request (an approval, question or plan), dialog (in its terminal), limit (a usage limit stopped its turn), exited, or none. */
+            /** @description Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none; an AgentAPI 2 with the PTY transport also reports dialog (in the agent's terminal). */
             attention: components["schemas"]["Attention"];
             /** @description Who this AgentAPI is: its ID (--instance-id), name (--name), server ID, host, port, directory, agent and URL, as in webhook events. */
             instance: components["schemas"]["WebhookInstance"];
@@ -2348,7 +2067,7 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
-            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once. */
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once. */
             spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];
@@ -2359,7 +2078,7 @@ export interface components {
              * @description How many tasks the conversation has.
              */
             tasks: number;
-            /** @description The bottom of the agent's terminal while it shows a dialog to answer, as in GET /status. */
+            /** @description The bottom of the agent's terminal while it shows a dialog to answer; only from an AgentAPI 2 with the PTY transport. */
             terminal_prompt?: string;
             /** @description The name the agent gave the session, else the start of the latest task's prompt; empty before the first task. */
             title: string;
@@ -2436,7 +2155,7 @@ export interface components {
         SummaryUpdateBody: {
             /** @description The agent's own session, as in GET /status. */
             agent_session_id?: string;
-            /** @description Why the agent waits for the user: login, request (an approval, question or plan), dialog (in its terminal), limit (a usage limit stopped its turn), exited, or none. */
+            /** @description Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none; an AgentAPI 2 with the PTY transport also reports dialog (in the agent's terminal). */
             attention: components["schemas"]["Attention"];
             /** @description Who this AgentAPI is: its ID (--instance-id), name (--name), server ID, host, port, directory, agent and URL, as in webhook events. */
             instance: components["schemas"]["WebhookInstance"];
@@ -2465,7 +2184,7 @@ export interface components {
             seen_at: string;
             /** @description The name the agent gave the session, as in GET /status. */
             session_name?: string;
-            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read (PTY) and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once. */
+            /** @description What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once. */
             spend?: components["schemas"]["SummarySpend"];
             /** @description Whether the agent works (running) or waits (stable). */
             status: components["schemas"]["AgentStatus"];
@@ -2476,7 +2195,7 @@ export interface components {
              * @description How many tasks the conversation has.
              */
             tasks: number;
-            /** @description The bottom of the agent's terminal while it shows a dialog to answer, as in GET /status. */
+            /** @description The bottom of the agent's terminal while it shows a dialog to answer; only from an AgentAPI 2 with the PTY transport. */
             terminal_prompt?: string;
             /** @description The name the agent gave the session, else the start of the latest task's prompt; empty before the first task. */
             title: string;
@@ -2685,7 +2404,7 @@ export interface components {
              */
             readonly $schema?: string;
             /**
-             * @description When AgentAPI restarts into the new version. idle (the default): once the agent is idle, that is stable with no request (approval, question, plan) or terminal dialog open; queued messages stay queued and go out after the restart. now: at once, interrupting the agent.
+             * @description When AgentAPI restarts into the new version. idle (the default): once the agent is idle, that is stable with no request (approval, question, plan) open; queued messages stay queued and go out after the restart. now: at once, interrupting the agent.
              * @enum {string}
              */
             when?: "idle" | "now";
@@ -3799,373 +3518,6 @@ export interface operations {
             };
         };
     };
-    "get-mcp": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MCPGetResponseBody"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "put-mcp": {
-        parameters: {
-            query?: {
-                /** @description Restart the agent after writing the config so changes apply immediately; AgentAPI stays online. A PTY agent's conversation is reset; a native agent resumes its session (409 while it works on a turn). Supported for supervised PTY sessions and the native transport. */
-                restart?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MCPUpdateRequestBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MCPUpdateResponseBody"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "post-mcp-check": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MCPCheckBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MCPCheckResponseBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "get-mcp-profiles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MCPProfilesResponseBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "put-mcp-profiles-by-name": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MCPProfileBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MCPProfilesResponseBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "delete-mcp-profiles-by-name": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MCPProfilesResponseBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "post-mcp-profiles-by-name-apply": {
-        parameters: {
-            query?: {
-                restart?: boolean;
-            };
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MCPUpdateResponseBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "post-mcp-servers": {
-        parameters: {
-            query?: {
-                restart?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MCPServerMutationBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MCPUpdateResponseBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "delete-mcp-servers-by-name": {
-        parameters: {
-            query?: {
-                restart?: boolean;
-            };
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MCPUpdateResponseBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "patch-mcp-servers-by-name": {
-        parameters: {
-            query?: {
-                restart?: boolean;
-            };
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MCPServerConfigBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MCPUpdateResponseBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
     "post-message": {
         parameters: {
             query?: never;
@@ -4244,15 +3596,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeleteMessagesResponseBody"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
                 };
             };
             /** @description Conflict */

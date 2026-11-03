@@ -202,7 +202,7 @@ type AgentExit struct {
 	Err error
 	// Attempt is the start the conversation makes after Delay, from 1 to
 	// Attempts; 0 once it gave up: no agent runs until a restart (Restart,
-	// Reload, Switch).
+	// Switch).
 	Attempt  int
 	Attempts int
 	Delay    time.Duration
@@ -367,10 +367,10 @@ func (c *Conversation) relaunchAfter(ctx context.Context, wake <-chan struct{}, 
 // Replacement replaces the conversation's agent with a new one, in two
 // steps, so that a caller can make the change at once and wait for the new
 // agent without holding up anything else. The first step (BeginRestart,
-// BeginSwitch, BeginReload) retires the agent: from then on its events are
-// ignored, its requests can't be answered and no turn starts. Start, the
-// second, closes the retired agent and starts the new one. A Replacement
-// must be started, or the retired agent stays open.
+// BeginSwitch) retires the agent: from then on its events are ignored, its
+// requests can't be answered and no turn starts. Start, the second, closes
+// the retired agent and starts the new one. A Replacement must be started,
+// or the retired agent stays open.
 type Replacement struct {
 	c      *Conversation
 	gen    int
@@ -501,35 +501,6 @@ func (c *Conversation) clearSessionUsageLocked() {
 		usage.PromptCache = nil
 		c.setUsageLocked(usage)
 	}
-}
-
-// Reload replaces the agent with a new one that resumes the session, so the
-// conversation goes on while what the agent reads when it starts (its MCP
-// servers, its settings files) is read again. It returns like
-// Replacement.Start. It returns ErrTurnActive while the agent works on a
-// turn, which a reload would stop (or compacts its context), and
-// ErrUnsupported for an agent whose session can't be resumed (Claude Code
-// with --no-session-persistence).
-func (c *Conversation) Reload(ctx context.Context) error {
-	r, err := c.BeginReload()
-	if err != nil {
-		return err
-	}
-	return r.Start(ctx)
-}
-
-// BeginReload is the first step of Reload. Like BeginSwitch, it changes
-// nothing when it returns an error.
-func (c *Conversation) BeginReload() (*Replacement, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.turnActive || c.compacting {
-		return nil, ErrTurnActive
-	}
-	if c.started && !c.caps.Resume {
-		return nil, ErrUnsupported
-	}
-	return c.replaceLocked(c.resumeLocked()), nil
 }
 
 // Close stops the agent. Its exit isn't reported to the Observer.

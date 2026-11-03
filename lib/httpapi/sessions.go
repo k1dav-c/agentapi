@@ -61,11 +61,8 @@ type ResumeSessionRequest struct {
 }
 
 // requireSessionHistory fails for a server whose agent's sessions can't be
-// listed: the native transport of Claude Code, Codex and Pi only.
+// listed: Claude Code's, Codex's and Pi's only.
 func (s *Server) requireSessionHistory() error {
-	if err := s.requireNative(); err != nil {
-		return err
-	}
 	if s.sessions == nil {
 		return huma.Error400BadRequest("this agent's sessions can't be listed")
 	}
@@ -187,19 +184,19 @@ func (s *Server) registerSessionRoutes() {
 	huma.Get(s.api, "/sessions", guard(s.requireSessionHistory, s.listSessions), func(o *huma.Operation) {
 		o.Tags = []string{"Sessions"}
 		o.Summary = "List the agent's sessions"
-		o.Description = "Lists the sessions the agent had in the working directory, read from its session logs (Claude Code's projects directory, Codex's sessions, Pi's session directory), the latest first, with the one it has open. Sessions in which the user sent nothing are left out. Native transport of Claude Code, Codex and Pi only."
+		o.Description = "Lists the sessions the agent had in the working directory, read from its session logs (Claude Code's projects directory, Codex's sessions, Pi's session directory), the latest first, with the one it has open. Sessions in which the user sent nothing are left out. Claude Code, Codex and Pi only."
 		o.Errors = []int{400}
 	})
 	huma.Get(s.api, "/cost", guard(s.requireSessionHistory, s.getCost), func(o *huma.Operation) {
 		o.Tags = []string{"Sessions"}
 		o.Summary = "What the session spent"
-		o.Description = "Returns what the session the agent has open spent, its subagents included, and its model calls one by one, read from the agent's logs: the tokens of each call priced at the model providers' list prices (the API-equivalent cost, which a subscription doesn't charge), or at Pi's own prices for Pi. A model without a known price counts its tokens and no cost; --prices adds prices. For Claude Code, what it counted but didn't log call by call (compacting the context) comes as unitemized calls. Native transport of Claude Code, Codex and Pi only."
+		o.Description = "Returns what the session the agent has open spent, its subagents included, and its model calls one by one, read from the agent's logs: the tokens of each call priced at the model providers' list prices (the API-equivalent cost, which a subscription doesn't charge), or at Pi's own prices for Pi. A model without a known price counts its tokens and no cost; --prices adds prices. For Claude Code, what it counted but didn't log call by call (compacting the context) comes as unitemized calls. Claude Code, Codex and Pi only."
 		o.Errors = []int{400}
 	})
 	huma.Post(s.api, "/sessions/{id}/resume", guard(s.requireSessionHistory, s.resumeSession), func(o *huma.Operation) {
 		o.Tags = []string{"Sessions"}
 		o.Summary = "Open another session"
-		o.Description = "Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Native transport of Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here, and 409 while the agent works on a turn or compacts its context (nothing changes then) or another restart is under way."
+		o.Description = "Restarts the agent on one of its sessions from GET /sessions, or with `fork` on a copy of it under a new id, and replaces the conversation with that session's, read from its log. The queue and the open requests are cleared, as on a restart. Claude Code, Codex and Pi only; returns 404 for a session the agent has no log of here, and 409 while the agent works on a turn or compacts its context (nothing changes then) or another restart is under way."
 		o.Errors = []int{400, 404, 409}
 	})
 }

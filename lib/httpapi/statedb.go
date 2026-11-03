@@ -9,6 +9,7 @@ import (
 
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/convstate"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/statedb"
 )
@@ -16,8 +17,8 @@ import (
 // restoredState is what the state database gave back on start.
 type restoredState struct {
 	snapshot statedb.Snapshot
-	// messages continue the restored conversation: the native agent
-	// resumes its session, a PTY agent starts anew below them.
+	// messages continue the restored conversation, whose session the
+	// agent resumes.
 	messages []conv.Message
 	// resumeRef resumes the native agent's session.
 	resumeRef string
@@ -42,12 +43,19 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 	if err := checkRestoredIdentity(snap, config); err != nil {
 		return restoredState{}, err
 	}
+	if snap.Meta[statedb.MetaTransport] == string(instanceapi.TransportPTY) {
+		// AgentAPI 2 kept it for the agent's terminal UI, which has no
+		// session to resume: the agent starts a new one below it, and the
+		// conversation goes on natively from now on.
+		logger.Info("The state database holds a conversation of the PTY transport; the agent starts a new session below it")
+		db.SetMeta(statedb.MetaTransport, string(instanceapi.TransportNative))
+	}
 	db.OnWriteError(func(err error) {
 		emitter.EmitError(fmt.Sprintf("Failed to save the conversation in the state database; the latest changes won't survive a restart: %v", err), conv.ErrorLevelError)
 	})
 	if snap.Empty() {
 		db.SetMeta(statedb.MetaAgentType, string(config.AgentType))
-		db.SetMeta(statedb.MetaTransport, string(config.Transport))
+		db.SetMeta(statedb.MetaTransport, string(instanceapi.TransportNative))
 		db.SetMeta(statedb.MetaCWD, config.CWD)
 		db.SetSeq(emitter.Epoch(), 0)
 		return restoredState{snapshot: snap}, nil
@@ -89,14 +97,17 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 }
 
 // checkRestoredIdentity refuses a state database written for another agent
-// or directory: resuming its session would continue the wrong work.
+// or directory: resuming its session would continue the wrong work. One
+// AgentAPI 2 wrote for the same agent with the PTY transport is fine.
 func checkRestoredIdentity(snap statedb.Snapshot, config ServerConfig) error {
 	if snap.Empty() {
 		return nil
 	}
+	if transport := snap.Meta[statedb.MetaTransport]; transport != string(instanceapi.TransportNative) && transport != string(instanceapi.TransportPTY) {
+		return fmt.Errorf("the state database belongs to another session (%s is %q, not %q); use another --state-db or remove it", statedb.MetaTransport, transport, instanceapi.TransportNative)
+	}
 	for key, want := range map[string]string{
 		statedb.MetaAgentType: string(config.AgentType),
-		statedb.MetaTransport: string(config.Transport),
 		statedb.MetaCWD:       config.CWD,
 	} {
 		if got := snap.Meta[key]; got != want {
@@ -190,20 +201,4 @@ func (s *Server) storeQueue(queued []QueuedMessage, lastID int, version uint64) 
 // more.
 func (s *Server) persistQueue() {
 	s.storeQueue(s.queue.state())
-}
-
-// ptyInitialPrompt is the initial prompt the PTY conversation sends: none
-// when the restored conversation got this prompt already, or when there is
-// none. A prompt that goes out is recorded, so the next restart knows.
-func ptyInitialPrompt(prompt []conv.MessagePart, config ServerConfig, db *statedb.DB, restored restoredState) []conv.MessagePart {
-	if db == nil || config.InitialPrompt == "" {
-		return prompt
-	}
-	if len(restored.messages) > 0 && restored.snapshot.Meta[statedb.MetaInitialPrompt] == config.InitialPrompt {
-		return nil
-	}
-	// Recorded before the agent is ready for it: after a crash in between
-	// it isn't sent again.
-	db.SetMeta(statedb.MetaInitialPrompt, config.InitialPrompt)
-	return prompt
 }

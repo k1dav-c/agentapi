@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -28,9 +27,9 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 // the conversation has a lock of its own, and the read answers while s.mu
 // is held for a slow call into the agent (a restart can take minutes).
 func (s *Server) getTitle(ctx context.Context, input *struct{}) (*TitleResponse, error) {
-	status := convstate.ConvertStatus(s.conversation.Status())
+	status := convstate.ConvertStatus(s.native.Status())
 	task := ""
-	messages := s.conversation.Messages()
+	messages := s.native.Messages()
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == conv.RoleUser {
 			task = shortText(messages[i].Message, 60)
@@ -85,7 +84,7 @@ func coderWorkspaceURL() string {
 // getMessages handles GET /messages, without s.mu (see getTitle).
 func (s *Server) getMessages(ctx context.Context, input *struct{}) (*MessagesResponse, error) {
 	resp := &MessagesResponse{}
-	msgs := s.conversation.Messages()
+	msgs := s.native.Messages()
 	resp.Body.Messages = make([]Message, len(msgs))
 	for i, msg := range msgs {
 		resp.Body.Messages[i] = Message{
@@ -159,42 +158,21 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 	if mode == "" {
 		mode = DispatchQueue
 	}
-	backend := s.backend()
-	if mode != DispatchQueue && (!backend.dispatchModes() || input.Body.Type != MessageTypeUser) {
-		return nil, huma.Error400BadRequest("dispatch_mode steer and interrupt need the native transport and a user message")
+	if strings.TrimSpace(input.Body.Content) == "" {
+		return nil, huma.Error400BadRequest("message must not be empty")
 	}
-	switch input.Body.Type {
-	case MessageTypeUser:
-		if strings.TrimSpace(input.Body.Content) == "" {
-			return nil, huma.Error400BadRequest("message must not be empty")
-		}
-		if s.restarting.Load() || s.updating.Load() {
-			// The new agent, or AgentAPI's new program, gets it once it
-			// runs.
-			s.queueMessageLocked(resp, input.Body.Content, false)
-			return resp, nil
-		}
-		if err := backend.deliver(input.Body.Content, mode, resp); err != nil {
-			return nil, err
-		}
-		if resp.Body.Queued || resp.Body.Steered {
-			// The message doesn't answer what the handoff offers, so it
-			// goes on offering it.
-			return resp, nil
-		}
-	case MessageTypeRaw:
-		if s.agentio == nil {
-			return nil, huma.Error400BadRequest("raw messages need a terminal; the native transport has none")
-		}
-		switch {
-		case s.restarting.Load():
-			return nil, huma.Error409Conflict(errRestarting.Error())
-		case s.updating.Load():
-			return nil, huma.Error409Conflict(errStopping.Error())
-		}
-		if _, err := s.agentio.Write([]byte(input.Body.Content)); err != nil {
-			return nil, fmt.Errorf("failed to send message: %w", err)
-		}
+	if s.restarting.Load() || s.updating.Load() {
+		// The new agent, or AgentAPI's new program, gets it once it runs.
+		s.queueMessageLocked(resp, input.Body.Content, false)
+		return resp, nil
+	}
+	if err := s.createNativeMessageLocked(input.Body.Content, mode, resp); err != nil {
+		return nil, err
+	}
+	if resp.Body.Queued || resp.Body.Steered {
+		// The message doesn't answer what the handoff offers, so it goes
+		// on offering it.
+		return resp, nil
 	}
 
 	resp.Body.Ok = true
@@ -226,9 +204,7 @@ func (s *Server) registerConversationRoutes() {
 	huma.Get(s.api, "/rich-messages", s.getRichMessages, func(o *huma.Operation) {
 		o.Description = "Returns a list of rich structured messages. " +
 			"Each message contains structured content blocks (text, thinking, tool_use, tool_result), " +
-			"model information, and token usage data. With the PTY transport they are parsed from the " +
-			"session log of agents that have one (claude, codex and pi); with the native transport they " +
-			"come from the agent's protocol."
+			"model information, and token usage data, from the agent's protocol."
 	})
 
 	huma.Get(s.api, "/timeline", s.getTimeline, func(o *huma.Operation) {
@@ -237,8 +213,8 @@ func (s *Server) registerConversationRoutes() {
 
 	huma.Delete(s.api, "/messages", s.deleteMessages, func(o *huma.Operation) {
 		o.Summary = "Delete all messages and restart"
-		o.Description = "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session (PTY or native transport). Returns 400 if the agent can't be restarted (AgentAPI runs it without a process supervisor), and 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue."
-		o.Errors = []int{400, 409}
+		o.Description = "Clears all conversation state (messages, rich messages, timeline, errors) and restarts the agent in a new session. Returns 409 while another restart is under way or AgentAPI stops. While the agent restarts, messages sent wait in the queue."
+		o.Errors = []int{409}
 	})
 
 	// POST /message endpoint

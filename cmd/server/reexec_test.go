@@ -150,7 +150,7 @@ printf 'token=%s\n' "$`+generatedAPITokenEnv+`" >> `+record+`
 case "$ANSWER" in
 ok) echo "ok state-db-schema=7" ;;
 old) echo "unknown flag: --validate" >&2; exit 1 ;;
-refuse) echo "some log line" >&2; echo 'unknown --transport "bogus" (one of: pty, native)' >&2; exit 1 ;;
+refuse) echo "some log line" >&2; echo 'unknown --transport "bogus": AgentAPI 3 drives every agent natively' >&2; exit 1 ;;
 silent) exit 3 ;;
 esac`)
 	argv := []string{"agentapi", "server", "--port", "3600", "--", "claude", "--model", "x"}
@@ -176,7 +176,7 @@ esac`)
 
 	self = &selfExec{path: prog, argv: argv, env: env("refuse")}
 	_, err = self.check(context.Background())
-	assert.EqualError(t, err, prog+` wouldn't start: unknown --transport "bogus" (one of: pty, native)`, "the last line it wrote")
+	assert.EqualError(t, err, prog+` wouldn't start: unknown --transport "bogus": AgentAPI 3 drives every agent natively`, "the last line it wrote")
 
 	self = &selfExec{path: prog, argv: argv, env: env("silent")}
 	_, err = self.check(context.Background())

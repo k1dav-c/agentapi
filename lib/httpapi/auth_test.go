@@ -10,10 +10,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/instanceapi"
+	"github.com/coder/agentapi/lib/logctx"
 )
 
 func TestTokenAuthMiddleware(t *testing.T) {
@@ -86,7 +87,7 @@ func TestTokenAuthMiddleware(t *testing.T) {
 		middleware := newTokenAuth("secret-token").middleware
 		handler := middleware(okHandler)
 
-		for _, path := range []string{"/status", "/messages", "/message", "/events", "/internal/screen", "/uploads/0123456789abcdef/a.png", "/webhook", "/mcp", "/handoff", "/handoff/reply", "/openapi.json", "/docs"} {
+		for _, path := range []string{"/status", "/messages", "/message", "/events", "/uploads/0123456789abcdef/a.png", "/webhook", "/handoff", "/handoff/reply", "/openapi.json", "/docs"} {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
@@ -99,7 +100,7 @@ func newAuthTestServer(t *testing.T, token string) *httptest.Server {
 	t.Helper()
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv, err := NewServer(ctx, ServerConfig{
-		AgentType:      msgfmt.AgentTypeClaude,
+		AgentType:      instanceapi.AgentTypeClaude,
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"http://localhost:3000"},
@@ -300,7 +301,7 @@ func TestAuthSession(t *testing.T) {
 	t.Run("SSE endpoints accept the cookie", func(t *testing.T) {
 		t.Parallel()
 		ts := newAuthTestServer(t, token)
-		for _, path := range []string{"/events", "/internal/screen"} {
+		for _, path := range []string{"/events", "/events?only=summary"} {
 			for _, tc := range []struct {
 				name   string
 				mutate func(*http.Request)
