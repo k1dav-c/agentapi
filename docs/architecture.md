@@ -648,6 +648,18 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
 - What an older AgentAPI doesn't know, its resets and truncations don't
   clear. A restored task whose message is gone or is another one now is
   dropped, as is one whose message row couldn't be read.
+- Uploads go to `<state-db>.uploads`, kept with the file (without a state
+  database, to a temporary directory removed on stop). On start, every hour
+  and after a restart or a switch of sessions cleared the conversation,
+  `upload_prune.go` removes the checksum directories that nothing in the
+  conversation refers to (messages, rich messages, timeline, requests,
+  queue: any run of hex digits holding the checksum counts, which covers
+  paths, `/uploads` URLs and JSON) and that are more than 7 days old, by
+  modification time and by when this run last stored them: a browser keeps
+  the attachments of a draft, which aren't in the conversation yet. Only a
+  real directory named by a checksum and holding regular files is removed,
+  through `os.Root`; symlinks and anything else are left alone. A prune that
+  removed something logs the count and bytes at Info.
 
 The hub (`lib/hub`, `persist.go`) keeps its instances in a JSON file,
 `{"version": 1, "instances": [...]}`; it also reads the bare array of hubs of 2.2 and earlier. A
@@ -739,7 +751,7 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
 `lib/shellterm` runs one login shell in a pseudo-terminal (`creack/pty`) in the agent's working
 directory, with the agent's environment minus AgentAPI's own variables. It starts when the first
 client subscribes and keeps running after all clients disconnect. Its output goes to a 256 KiB
-scrollback, trimmed at a line start, and to each watcher's buffer; a watcher that falls 512 chunks
+scrollback (a ring, so a chunk costs its size), trimmed at a line start, and to each watcher's buffer; a watcher that falls 512 chunks
 behind is dropped and reconnects for the scrollback. `GET /terminal` streams base64-encoded `output`
 and `exit` events. `POST /terminal/input` sends input, and `/terminal/resize` changes the
 dimensions; the most recent resize applies. Closing hangs up the terminal and kills the shell's
@@ -767,6 +779,10 @@ session cookie or call the API with it, and nothing it refers to is loaded from 
 proxy's cookie wouldn't reach either). `GET /files/image` serves raster images judged by content, as
 `GET /uploads` does, and SVG judged by extension, which `GET /uploads` never serves; both send
 `nosniff` and a sandboxing Content-Security-Policy.
+
+Uploads are stored as `<checksum>/<name>` (`upload_store.go`), the checksum being the first 8 bytes
+of the content's SHA-256, so a path never changes; unused ones are removed after 7 days
+([Persistence](#persistence)).
 
 ## MCP management
 

@@ -861,7 +861,9 @@ state-db: ~/.agentapi/state/{port}.db
 - Requests that were open when AgentAPI stopped are marked expired: the agent
   that asked is gone.
 - Uploads are kept next to the file (`<file>.uploads`), because messages refer
-  to them by path.
+  to them by path. One that nothing in the conversation (or the queue) refers
+  to is removed once it is 7 days old, which leaves time for a draft's
+  attachments; this is checked on start, hourly and after a restart.
 - A file belongs to one agent type, transport and working directory; AgentAPI
   refuses to start with another one's file. It is locked while AgentAPI runs,
   so a second AgentAPI (or `sqlite3`) can't open it.
@@ -1351,7 +1353,8 @@ These endpoints work with every transport, except where noted; the
 - `POST /upload` stores a file (up to 10 MB; a body over 11 MiB is refused
   before it is read) and returns its path, which a message references as
   `@"<path>"`. The file keeps the base name it was sent with, without control
-  characters and cut to 255 bytes; a name of `.` or `..` gets 400.
+  characters and cut to 255 bytes; a name of `.` or `..` gets 400. A file
+  the conversation doesn't refer to is removed after 7 days.
 
 ### Tasks
 

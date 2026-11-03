@@ -505,6 +505,13 @@ native 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之
   檔案一律拒絕；結構從 1.0 起就沒有改變。
 - 較舊的 AgentAPI 不認得的資料，它重設或移除訊息時也不會清掉。還原時，訊息已不存在或已換成
   另一則的任務會被丟棄；訊息資料列無法讀取的任務也一樣。
+- 上傳的檔案放在 `<state-db>.uploads`，與資料庫一起保留（沒有狀態資料庫時放在暫存目錄，停止時
+  刪除）。啟動時、每小時，以及重新啟動或切換工作階段清空對話後，`upload_prune.go` 會刪除對話
+  （訊息、rich message、時間軸、請求、佇列）完全沒有引用、而且超過 7 天的 checksum 目錄：只要
+  有一串十六進位字元包含該 checksum 就算引用，路徑、`/uploads` URL 和 JSON 都涵蓋在內；是否超過
+  7 天看修改時間，以及這次執行最後一次存入它的時間。瀏覽器會保留草稿的附件，而草稿還不在對話裡。
+  只有以 checksum 命名、裡面只有一般檔案的真實目錄會經由 `os.Root` 刪除；symlink 和其他東西
+  都不會動。有刪除檔案時，會以 Info 記錄刪除的數量和 bytes。
 
 hub（`lib/hub`，`persist.go`）把實例保存在 JSON 檔案裡，格式是
 `{"version": 1, "instances": [...]}`；2.2 以前的 hub 寫的純陣列也讀得懂。有變動時只標記檔案落後，
@@ -568,7 +575,7 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
 
 `lib/shellterm` 會在 agent 的工作目錄、以虛擬終端機（`creack/pty`）執行一個 login shell，
 環境變數和 agent 相同，但不含 AgentAPI 自己的變數。第一個用戶端開始觀看時它才啟動，沒有人
-觀看時也會繼續執行。它的輸出會寫進 256 KiB 的捲動緩衝區（從行首截斷）和每個觀看者的緩衝區；
+觀看時也會繼續執行。它的輸出會寫進 256 KiB 的捲動緩衝區（環狀緩衝區，每個區塊的成本只和它的大小有關；從行首截斷）和每個觀看者的緩衝區；
 落後 512 個區塊的觀看者會被斷開，重新連線後再取得捲動緩衝區。`GET /terminal` 串流 `output`
 （base64）和 `exit` 事件，`POST /terminal/input` 與 `/terminal/resize` 則輸入按鍵和調整大小，
 以最後一次調整為準。關閉時會掛斷終端機，2 秒後終止 shell 的 process group。
@@ -592,6 +599,9 @@ sandbox iframe 中：頁面沒有 origin，所以它的腳本讀不到聊天介�
 去）。`GET /files/image` 和 `GET /uploads` 一樣依內容判斷點陣圖，另外也依副檔名提供 SVG
 （`GET /uploads` 從不提供 SVG）；兩者都會加上 `nosniff` 和會開啟 sandbox 的
 Content-Security-Policy。
+
+上傳的檔案存成 `<checksum>/<name>`（`upload_store.go`），checksum 是內容 SHA-256 的前 8 bytes，
+所以路徑不會改變；沒有被引用的檔案在 7 天後刪除（見[持久保存](#持久保存)）。
 
 ## MCP 管理
 
