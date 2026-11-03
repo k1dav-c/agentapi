@@ -43,6 +43,7 @@ import {SignIn} from "./hub/sign-in";
 import {StatusGlyph, stateTone} from "./hub/status-glyph";
 import {cancelFromHub} from "./hub/update";
 import {UpdateStatus} from "./hub/update-chip";
+import {useHubKeys} from "./hub/use-hub-keys";
 import {VersionTag} from "./hub/version-tag";
 
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "/chat").replace(/\/$/, "");
@@ -316,45 +317,16 @@ export function HubView() {
     [api, attempt],
   );
 
-  // Keys: / searches, j and k (or the arrows) move between rows, p pins or
-  // unpins the row with the focus, Esc goes back to the overview.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const typing = target?.closest("input, textarea, [contenteditable=true]");
-      if (event.key === "/" && !typing) {
-        event.preventDefault();
-        search.current?.focus();
-        return;
-      }
-      if (event.key === "Escape") {
-        if (typing === search.current && query) setQuery("");
-        else if (!document.querySelector("[role=dialog], [role=menu]")) select(undefined);
-        return;
-      }
-      // A row's menu and a dialog take their own keys: the arrows move
-      // between a menu's items.
-      if (typing || target?.closest("[role=menu], [role=dialog]") || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.key === "p") {
-        const instance = instances.get((document.activeElement as HTMLElement | null)?.dataset.hubRow ?? "");
-        if (!instance) return;
-        event.preventDefault();
-        void setPinned(instance.id, pinOf(instance) === undefined);
-        return;
-      }
-      const step = event.key === "j" || event.key === "ArrowDown" ? 1 : event.key === "k" || event.key === "ArrowUp" ? -1 : 0;
-      if (!step) return;
-      const rows = [...document.querySelectorAll<HTMLButtonElement>("[data-hub-row]")];
-      if (rows.length === 0) return;
-      event.preventDefault();
-      const at = rows.indexOf(document.activeElement as HTMLButtonElement);
-      const next = rows[at === -1 ? (step > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + step))];
-      next.focus();
-      next.scrollIntoView({block: "nearest"});
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [query, select, instances, setPinned]);
+  useHubKeys({
+    search,
+    query,
+    onClearSearch: () => setQuery(""),
+    onOverview: () => select(undefined),
+    onPin: (id) => {
+      const instance = instancesRef.current.get(id);
+      if (instance) void setPinned(id, pinOf(instance) === undefined);
+    },
+  });
 
   const changeCollapsed = useCallback((change: (next: Set<string>) => void) => {
     setCollapsed((previous) => {
@@ -542,6 +514,7 @@ export function HubView() {
         <ul
           className="flex-1 overflow-y-auto overscroll-contain pb-[max(0.75rem,env(safe-area-inset-bottom))]"
           aria-label="Instances"
+          data-hub-list
           onFocus={(event) => {
             const {hubRow, hubRowMenu} = (event.target as HTMLElement).dataset;
             focusedRow.current = hubRow ? {id: hubRow, menu: false} : hubRowMenu ? {id: hubRowMenu, menu: true} : undefined;
