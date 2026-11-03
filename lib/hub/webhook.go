@@ -2,9 +2,15 @@ package hub
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/coder/agentapi/lib/instanceapi"
 )
@@ -12,10 +18,40 @@ import (
 const (
 	// maxWebhookBody is the largest event the hub reads.
 	maxWebhookBody = 1 << 20
-	// seenDeliveries is how many delivery IDs the hub remembers, to drop an
-	// event sent again (a retry, or a replay of one it got).
+	// seenDeliveries is the most delivery IDs the hub remembers, to drop
+	// an event sent again (a retry, or a replay of one it got).
 	seenDeliveries = 4096
+	// badSignatureLogEvery is how often the hub logs the events it refuses
+	// for their signature: a sender with a wrong --secret, or one probing
+	// the hub, would fill the log.
+	badSignatureLogEvery = time.Minute
 )
+
+// webhookReadTimeout bounds reading an event's body: a sender that trickles
+// one in doesn't hold a connection and its handler. Only /hooks has one; a
+// server-wide ReadTimeout would end the browsers' event streams.
+var webhookReadTimeout = 10 * time.Second
+
+// logLimiter lets a log line through at most once per interval.
+type logLimiter struct {
+	mu         sync.Mutex
+	next       time.Time
+	suppressed int
+}
+
+// allow reports whether to log now, and how many lines it held back since
+// the last.
+func (l *logLimiter) allow(now time.Time, every time.Duration) (bool, int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if now.Before(l.next) {
+		l.suppressed++
+		return false, 0
+	}
+	suppressed := l.suppressed
+	l.next, l.suppressed = now.Add(every), 0
+	return true, suppressed
+}
 
 // webhookEvent is an AgentAPI webhook event as the hub reads it: the data
 // is left as it came.
@@ -24,30 +60,109 @@ type webhookEvent struct {
 	Data json.RawMessage `json:"data"`
 }
 
-// deliveries remembers the IDs of the events the hub took.
+// deliveries remembers the IDs of the events the hub took, each until its
+// signature no longer holds: a copy of one is refused until then. It keeps
+// them in a file next to the instances', so a hub that restarts still
+// refuses a copy of an event it took just before.
 type deliveries struct {
-	mu    sync.Mutex
-	seen  map[string]struct{}
+	mu sync.Mutex
+	// seen is when each ID's signature stops holding.
+	seen  map[string]time.Time
 	order []string
+	// persist writes the file; nil keeps none.
+	persist *persister
 }
 
-// add reports whether id is new, and remembers it.
-func (d *deliveries) add(id string) bool {
+// deliveriesFile is the file of delivery IDs.
+type deliveriesFile struct {
+	Version    int              `json:"version"`
+	Deliveries []storedDelivery `json:"deliveries"`
+}
+
+type storedDelivery struct {
+	ID      string    `json:"id"`
+	Expires time.Time `json:"expires"`
+}
+
+// deliveriesPath is the file of delivery IDs next to the instances' file
+// statePath: instances.deliveries.json for instances.json.
+func deliveriesPath(statePath string) string {
+	return strings.TrimSuffix(statePath, ".json") + ".deliveries.json"
+}
+
+// newDeliveries returns the delivery IDs kept in path (empty keeps none)
+// whose signature still holds at now. A file that doesn't parse is
+// dropped: it holds nothing the hub can't lose but copies it would refuse.
+func newDeliveries(path string, logger *slog.Logger, now time.Time) *deliveries {
+	d := &deliveries{seen: map[string]time.Time{}}
+	if path == "" {
+		return d
+	}
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		logger.Warn("Failed to read the delivery IDs the hub took", "file", path, "error", err)
+	}
+	if err == nil {
+		var file deliveriesFile
+		if err := json.Unmarshal(data, &file); err != nil {
+			logger.Warn("The file of delivery IDs the hub took doesn't parse; starting without them", "file", path, "error", err)
+		}
+		for _, delivery := range file.Deliveries {
+			if _, ok := d.seen[delivery.ID]; !ok && delivery.Expires.After(now) {
+				d.seen[delivery.ID] = delivery.Expires
+				d.order = append(d.order, delivery.ID)
+			}
+		}
+	}
+	d.persist = newPersister(path, "delivery IDs", logger, d.snapshot)
+	return d
+}
+
+// add reports whether id is new at now, and remembers it until expires.
+func (d *deliveries) add(id string, expires, now time.Time) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.seen == nil {
-		d.seen = map[string]struct{}{}
-	}
-	if _, ok := d.seen[id]; ok {
+	if until, ok := d.seen[id]; ok && until.After(now) {
 		return false
 	}
-	d.seen[id] = struct{}{}
-	d.order = append(d.order, id)
-	if len(d.order) > seenDeliveries {
+	if _, ok := d.seen[id]; !ok {
+		d.order = append(d.order, id)
+	}
+	d.seen[id] = expires
+	// The oldest go first: once their signature no longer holds, and
+	// beyond seenDeliveries.
+	for len(d.order) > 0 && (len(d.order) > seenDeliveries || !d.seen[d.order[0]].After(now)) {
 		delete(d.seen, d.order[0])
 		d.order = d.order[1:]
 	}
+	if d.persist != nil {
+		d.persist.mark()
+	}
 	return true
+}
+
+func (d *deliveries) snapshot() ([]byte, error) {
+	d.mu.Lock()
+	file := deliveriesFile{Version: 1, Deliveries: make([]storedDelivery, 0, len(d.order))}
+	for _, id := range d.order {
+		file.Deliveries = append(file.Deliveries, storedDelivery{ID: id, Expires: d.seen[id]})
+	}
+	d.mu.Unlock()
+	return json.Marshal(file)
+}
+
+func (d *deliveries) flush() error {
+	if d.persist == nil {
+		return nil
+	}
+	return d.persist.flush()
+}
+
+func (d *deliveries) close() error {
+	if d.persist == nil {
+		return nil
+	}
+	return d.persist.close()
 }
 
 // receiveWebhook takes an AgentAPI's webhook event (POST /hooks): its
@@ -55,16 +170,26 @@ func (d *deliveries) add(id string) bool {
 // which a machine that joined with an earlier version still sends, only
 // says it is alive: the summary stream says what the instance does.
 func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Now().Add(webhookReadTimeout))
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBody+1))
+	if err == nil && len(body) <= maxWebhookBody {
+		// Read whole. After a failure, or a body too large, the deadline
+		// stays: the server would wait for the rest before it answers.
+		_ = rc.SetReadDeadline(time.Time{})
+	}
 	if err != nil || len(body) > maxWebhookBody {
 		http.Error(w, "unreadable event", http.StatusBadRequest)
 		return
 	}
 	if err := instanceapi.Verify(h.config.Secret, r.Header, body, h.clock.Now()); err != nil {
 		// A wrong --secret on the instance's side shows here.
-		h.logger.Warn("Refused an event with an invalid or missing signature, or more than 10 minutes off",
-			"reason", err, "from", r.RemoteAddr,
-			"instance", r.Header.Get(instanceapi.HeaderInstance), "event", r.Header.Get(instanceapi.HeaderEvent))
+		if ok, suppressed := h.badSignatures.allow(h.clock.Now(), badSignatureLogEvery); ok {
+			h.logger.Warn("Refused an event with an invalid or missing signature, or more than 10 minutes off",
+				"reason", err, "from", r.RemoteAddr,
+				"instance", r.Header.Get(instanceapi.HeaderInstance), "event", r.Header.Get(instanceapi.HeaderEvent),
+				"refused_since_last_logged", suppressed)
+		}
 		http.Error(w, "invalid or missing signature", http.StatusUnauthorized)
 		return
 	}
@@ -91,7 +216,10 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the event names no server_id: is it AgentAPI 1.0 or later?", http.StatusBadRequest)
 		return
 	}
-	if !h.deliveries.add(event.ID) {
+	// Verify read the timestamp; a copy is refused for as long as it
+	// would pass.
+	signedAt, _ := strconv.ParseInt(r.Header.Get(instanceapi.HeaderTimestamp), 10, 64)
+	if !h.deliveries.add(event.ID, time.Unix(signedAt, 0).Add(instanceapi.MaxSkew), h.clock.Now()) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -107,11 +235,11 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(event.Data, &state)
 		h.upsertFromWebhook(instance, url, state.HeartbeatSeconds)
 	case instanceapi.EventInstanceStopped:
-		h.stopped(instance.ID, instance.ServerID, instanceURL(instance))
+		h.stopped(instance.ID, instance.ServerID)
 	default:
 		// The instance is alive; one the hub doesn't know yet is added
 		// with its next heartbeat.
-		_, _, _ = h.store.update(instance.ID, false, func(i *Instance) {
+		_, _ = h.store.update(instance.ID, false, func(i *Instance) {
 			if sameRun(i.ServerID, instance.ServerID) {
 				i.LastSeen = h.clock.Now()
 			}
@@ -135,7 +263,7 @@ func sameRun(current, serverID string) bool {
 func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string, heartbeatSeconds int) {
 	var restart bool
 	now := h.clock.Now()
-	updated, _, err := h.store.update(instance.ID, true, func(i *Instance) {
+	updated, _ := h.store.update(instance.ID, true, func(i *Instance) {
 		moved := i.URL != "" && i.URL != url
 		if moved && h.refuseMove(i, instance, url) {
 			return
@@ -159,9 +287,6 @@ func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string
 			i.Error = ""
 		}
 	})
-	if err != nil {
-		h.logger.Warn("Failed to keep the hub's instances", "error", err)
-	}
 	if restart {
 		h.watch(updated)
 	}
@@ -193,12 +318,14 @@ func (h *Hub) refuseMove(i *Instance, instance instanceapi.WebhookInstance, url 
 }
 
 // stopped marks an instance stopped and stops watching it, unless a newer
-// run of it (another server ID) already started, or it was added by hand
-// at another URL than the event names.
-func (h *Hub) stopped(id, serverID, url string) {
+// run of it (another server ID) already started, or it was added by hand.
+// The hub watches one added by hand directly and keeps trying it: a
+// forged instance.stopped would otherwise stop it for good, since no
+// heartbeat of its own follows it again.
+func (h *Hub) stopped(id, serverID string) {
 	stopped := false
-	_, _, err := h.store.update(id, false, func(i *Instance) {
-		if !sameRun(i.ServerID, serverID) || (i.Source == SourceManual && i.URL != url) {
+	_, _ = h.store.update(id, false, func(i *Instance) {
+		if !sameRun(i.ServerID, serverID) || i.Source == SourceManual {
 			return
 		}
 		h.logger.Info("An instance stopped", "instance", id)
@@ -208,9 +335,6 @@ func (h *Hub) stopped(id, serverID, url string) {
 		i.LastSeen = h.clock.Now()
 		stopped = true
 	})
-	if err != nil {
-		h.logger.Warn("Failed to keep the hub's instances", "error", err)
-	}
 	if stopped {
 		h.unwatchStopped(id)
 	}

@@ -2,15 +2,20 @@ package selfupdate
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Masterminds/semver/v3"
+
+	"github.com/coder/agentapi/lib/filelock"
 )
 
 // versionTimeout bounds a run of a program's --version.
@@ -51,7 +56,9 @@ func (p Program) Blocked() string {
 		return ""
 	}
 	what := p.Real
-	if p.Path != p.Real {
+	// A path that differs from Real only by a symlinked directory (macOS's
+	// /var, which is /private/var) isn't a link to it.
+	if info, err := os.Lstat(p.Path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
 		what = fmt.Sprintf("%s (which %s links to)", p.Real, p.Path)
 	}
 	bin := "~/.local/bin"
@@ -90,7 +97,7 @@ func (p Program) lockPath() string {
 // while another update holds it until ctx ends: the AgentAPIs that share
 // the program replace it one at a time. The file stays.
 func (p Program) Lock(ctx context.Context) (unlock func(), err error) {
-	return lockFile(ctx, p.lockPath())
+	return filelock.Lock(ctx, p.lockPath())
 }
 
 // ProgramVersion runs the program at path with --version and returns the
@@ -99,6 +106,18 @@ func ProgramVersion(ctx context.Context, path string) (*semver.Version, error) {
 	ctx, cancel := context.WithTimeout(ctx, versionTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, "--version").Output()
+	// A program just written can't run while a process forked at the
+	// same time still holds the file open for writing, until that one
+	// execs (Linux's ETXTBSY, golang.org/issue/22315). It is let go
+	// within moments.
+	for wait := 10 * time.Millisecond; errors.Is(err, syscall.ETXTBSY) && wait < time.Second; wait *= 2 {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("%s --version: %w", path, err)
+		case <-time.After(wait):
+		}
+		out, err = exec.CommandContext(ctx, path, "--version").Output()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%s --version: %w", path, err)
 	}

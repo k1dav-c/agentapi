@@ -11,6 +11,7 @@ import (
 	"time"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/handoff"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
@@ -28,7 +29,7 @@ type handoffConversation struct {
 }
 
 func (c *handoffConversation) Messages() []conv.Message { return nil }
-func (c *handoffConversation) Send(p ...conv.MessagePart) error {
+func (c *handoffConversation) Send(_ context.Context, p ...conv.MessagePart) error {
 	c.sends++
 	c.parts = append(c.parts, p)
 	return nil
@@ -36,7 +37,11 @@ func (c *handoffConversation) Send(p ...conv.MessagePart) error {
 func (c *handoffConversation) Start(context.Context) {}
 func (c *handoffConversation) Status() conv.Status   { return c.status }
 func (c *handoffConversation) Text() string          { return "" }
-func (c *handoffConversation) Reset()                {}
+func (c *handoffConversation) Reset(forget func()) {
+	if forget != nil {
+		forget()
+	}
+}
 
 type handoffIO struct {
 	writes []string
@@ -55,7 +60,7 @@ func (i *handoffIO) ReadScreen() string { return "" }
 func handoffServer() (*Server, *handoffConversation, *handoffIO) {
 	c := &handoffConversation{status: conv.StatusStable}
 	i := &handoffIO{}
-	e := NewEventEmitter(WithServerID("session"), WithAgentType(mf.AgentTypeClaude))
+	e := convstate.NewEventEmitter(convstate.WithServerID("session"), convstate.WithAgentType(mf.AgentTypeClaude))
 	e.EmitStatus(conv.StatusStable)
 	e.EmitMessages([]conv.Message{
 		{Id: 1, Role: conv.RoleUser, Message: "work"},
@@ -90,16 +95,16 @@ func TestHandoffView(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			e := NewEventEmitter()
+			e := convstate.NewEventEmitter()
 			var msgs []conv.Message
 			for i, m := range tc.messages {
 				role, text, _ := strings.Cut(m, ":")
 				msgs = append(msgs, conv.Message{Id: i, Role: conv.Role(role), Message: text})
 			}
 			e.EmitMessages(msgs)
-			view := e.handoffView()
-			assert.Equal(t, tc.question, view.question)
-			assert.Equal(t, tc.reply, view.reply)
+			view := e.HandoffView()
+			assert.Equal(t, tc.question, view.Question)
+			assert.Equal(t, tc.reply, view.Reply)
 		})
 	}
 }
@@ -129,7 +134,7 @@ func TestHandoffReplyDeduplicatesAndInvalidates(t *testing.T) {
 // protocol offered its last message: it takes no message.
 type busyConversation struct{ handoffConversation }
 
-func (c *busyConversation) Send(...conv.MessagePart) error {
+func (c *busyConversation) Send(context.Context, ...conv.MessagePart) error {
 	c.sends++
 	return conv.ErrMessageValidationChanging
 }
@@ -253,6 +258,8 @@ func TestHandoffRestartInvalidatesEvenIdenticalPrompt(t *testing.T) {
 	s.emitter.SetLifecycle(LifecycleRestarting)
 	require.Nil(t, pendingHandoff(s))
 	s.emitter.EmitStatus(conv.StatusStable)
+	require.Nil(t, pendingHandoff(s), "restarting until the restart is done")
+	s.emitter.ReleaseLifecycle()
 	require.NotEqual(t, pending.ID, pendingHandoff(s).ID)
 	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: "late", Content: "continue"}})
 	require.NoError(t, err)
@@ -346,7 +353,7 @@ func TestQueueNotBlockedByQuestionFarUpInScrollback(t *testing.T) {
 	s, c, _ := handoffServer()
 	s.agentType = mf.AgentTypeAider
 	lines := []string{"Do you want to proceed?", "❯ 1. Yes", "  2. No", "Enter to confirm"}
-	for range terminalQuestionTailLines {
+	for range mf.TerminalQuestionTailLines {
 		lines = append(lines, "later output")
 	}
 	s.emitter.EmitScreen(strings.Join(lines, "\n"))
@@ -357,7 +364,7 @@ func TestQueueNotBlockedByQuestionFarUpInScrollback(t *testing.T) {
 
 type notSubmittedConversation struct{ handoffConversation }
 
-func (c *notSubmittedConversation) Send(...conv.MessagePart) error {
+func (c *notSubmittedConversation) Send(context.Context, ...conv.MessagePart) error {
 	c.sends++
 	return fmt.Errorf("failed to send message: %w", conv.ErrMessageNotSubmitted)
 }
@@ -390,7 +397,7 @@ func TestPlanFeedbackKey(t *testing.T) {
 	_, ok = freeTextReplyKeys(mf.AgentTypeCodex, readScreenFixture(t, "claude_plan_dialog.txt"))
 	require.False(t, ok)
 	// The dialog text wraps "Would you like to / proceed?" across lines.
-	require.True(t, isTerminalQuestion(readScreenFixture(t, "claude_plan_dialog.txt")))
+	require.True(t, mf.IsTerminalQuestionScreen(mf.AgentTypeClaude, readScreenFixture(t, "claude_plan_dialog.txt")))
 }
 
 func TestCreateMessageDuringPlanDialogSendsFeedback(t *testing.T) {
@@ -436,7 +443,7 @@ func TestCodexPromptsQueueChatMessages(t *testing.T) {
 			s.agentType = mf.AgentTypeCodex
 			screen := readScreenFixture(t, fixture)
 			s.emitter.EmitScreen(screen)
-			require.True(t, isTerminalQuestionScreen(mf.AgentTypeCodex, screen))
+			require.True(t, mf.IsTerminalQuestionScreen(mf.AgentTypeCodex, screen))
 			_, ok := freeTextReplyKeys(mf.AgentTypeCodex, screen)
 			require.False(t, ok, "approval and plan prompts have no free-text field")
 			resp, err := s.createMessage(t.Context(), &MessageRequest{Body: MessageRequestBody{Type: MessageTypeUser, Content: "hello"}})
@@ -459,7 +466,7 @@ func TestCodexQuestionFreeTextReply(t *testing.T) {
 	screen := readScreenFixture(t, "codex_question.txt")
 	// The user message just above the dialog must not be mistaken for the
 	// composer, or chat messages would be typed into the dialog.
-	require.True(t, isTerminalQuestionScreen(mf.AgentTypeCodex, screen))
+	require.True(t, mf.IsTerminalQuestionScreen(mf.AgentTypeCodex, screen))
 	keys, ok := freeTextReplyKeys(mf.AgentTypeCodex, screen)
 	require.True(t, ok)
 	require.Equal(t, "\x1b[B\x1b[B\x1b[B\t", keys, "arrow from option 1 to 4, then open notes")
@@ -499,21 +506,6 @@ func TestFormatMessageClearsCodexComposer(t *testing.T) {
 	require.Equal(t, "note", reply[2].String())
 }
 
-func TestScreenTail(t *testing.T) {
-	naive := func(screen string, n int) string {
-		lines := strings.Split(strings.TrimRight(screen, " \t\r\n"), "\n")
-		if len(lines) > n {
-			lines = lines[len(lines)-n:]
-		}
-		return strings.Join(lines, "\n")
-	}
-	for _, screen := range []string{"", "one", "a\nb\nc", "a\nb\nc\n\n  \n", "\n\na\n", strings.Repeat("x\n", 100) + "end  \n \n"} {
-		for _, n := range []int{1, 2, 3, 40, 200} {
-			require.Equal(t, naive(screen, n), screenTail(screen, n), "screen %q n %d", screen, n)
-		}
-	}
-}
-
 // Detection only looks at the bottom of the screen, so a fixture must be
 // classified the same when it sits under a long transcript and above the
 // blank padding of AgentAPI's 1000-row terminal.
@@ -529,7 +521,7 @@ func TestTerminalQuestionScreenOnFullHeightScreen(t *testing.T) {
 		}
 		screen := readScreenFixture(t, entry.Name())
 		full := above + screen + "\n" + padding
-		require.Equal(t, isTerminalQuestionScreen(agent, screen), isTerminalQuestionScreen(agent, full), entry.Name())
+		require.Equal(t, mf.IsTerminalQuestionScreen(agent, screen), mf.IsTerminalQuestionScreen(agent, full), entry.Name())
 		require.Equal(t, isCodexUpdatePrompt(screen), isCodexUpdatePrompt(full), entry.Name())
 	}
 }
@@ -571,6 +563,45 @@ func TestFormatMessageClosesClaudeFileSuggestions(t *testing.T) {
 	}
 }
 
-func isTerminalQuestion(content string) bool {
-	return isTerminalQuestionText(content, strings.ToLower(content))
+// hangingConversation is a terminal agent whose screen never settles: a
+// message waits until the Send's context ends.
+type hangingConversation struct {
+	handoffConversation
+	sending  chan struct{}
+	deadline time.Time
+}
+
+func (c *hangingConversation) Send(ctx context.Context, _ ...conv.MessagePart) error {
+	c.deadline, _ = ctx.Deadline()
+	close(c.sending)
+	<-ctx.Done()
+	return fmt.Errorf("%w: %w", conv.ErrMessageValidationChanging, ctx.Err())
+}
+
+// A message to a terminal agent, sent holding s.mu, ends with AgentAPI
+// (and within ptySendTimeout): Stop can take s.mu.
+func TestPTYSendEndsWithTheServer(t *testing.T) {
+	s, _, _ := handoffServer()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.shutdownCtx = ctx
+	c := &hangingConversation{handoffConversation: handoffConversation{status: conv.StatusStable}, sending: make(chan struct{})}
+	s.conversation = c
+	s.queue.Push("go on", time.Now(), false)
+	done := make(chan struct{})
+	go func() {
+		s.dispatchNextQueuedMessage()
+		close(done)
+	}()
+	<-c.sending
+	assert.WithinDuration(t, time.Now().Add(ptySendTimeout), c.deadline, 5*time.Second)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the send didn't end with the server")
+	}
+	require.True(t, s.mu.TryLock())
+	s.mu.Unlock()
+	assert.Len(t, s.queue.Messages(), 1, "it goes out after the restart")
 }

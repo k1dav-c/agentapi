@@ -23,8 +23,7 @@ func TestChangedAt(t *testing.T) {
 	st, err := newStore("", slog.New(slog.DiscardHandler), clock)
 	require.NoError(t, err)
 	first := clock.Now()
-	instance, _, err := st.update("dev:1", true, func(i *Instance) { i.URL = "http://dev:1" })
-	require.NoError(t, err)
+	instance, _ := st.update("dev:1", true, func(i *Instance) { i.URL = "http://dev:1" })
 	assert.Equal(t, first, instance.ChangedAt, "first seen")
 
 	summary := instanceapi.SummaryBody{
@@ -38,8 +37,7 @@ func TestChangedAt(t *testing.T) {
 	at := func(change func(*Instance)) time.Time {
 		t.Helper()
 		clock.Advance(time.Minute)
-		instance, _, err := st.update("dev:1", false, change)
-		require.NoError(t, err)
+		instance, _ := st.update("dev:1", false, change)
 		return instance.ChangedAt
 	}
 	connected := func(change func(*instanceapi.SummaryBody)) func(*Instance) {
@@ -141,12 +139,11 @@ func TestChangedAtAfterARestart(t *testing.T) {
 	working.Status = instanceapi.AgentStatusRunning
 	follow := func(s *store, id string, summary instanceapi.SummaryBody) Instance {
 		t.Helper()
-		instance, ok, err := s.update(id, false, func(i *Instance) {
+		instance, ok := s.update(id, false, func(i *Instance) {
 			i.Connection = ConnectionConnected
 			i.Summary = &summary
 			i.LastSeen = clock.Now()
 		})
-		require.NoError(t, err)
 		require.True(t, ok)
 		return instance
 	}
@@ -155,16 +152,15 @@ func TestChangedAtAfterARestart(t *testing.T) {
 	require.NoError(t, err)
 	first := clock.Now()
 	for _, id := range []string{"dev:1", "dev:2"} {
-		_, _, err = s.update(id, true, func(i *Instance) { i.URL = "http://" + id })
-		require.NoError(t, err)
+		_, _ = s.update(id, true, func(i *Instance) { i.URL = "http://" + id })
 		follow(s, id, idle)
 	}
 	clock.Advance(time.Hour)
-	_, _, err = s.update("dev:2", false, func(i *Instance) { i.Connection = ConnectionStopped })
-	require.NoError(t, err)
+	_, _ = s.update("dev:2", false, func(i *Instance) { i.Connection = ConnectionStopped })
 	stopped := clock.Now()
 
 	clock.Advance(time.Hour)
+	require.NoError(t, s.close())
 	again, err := newStore(path, logger, clock)
 	require.NoError(t, err)
 	kept, _ := again.get("dev:1")
@@ -176,9 +172,11 @@ func TestChangedAtAfterARestart(t *testing.T) {
 	assert.Equal(t, clock.Now(), follow(again, "dev:1", working).ChangedAt)
 
 	// A file of an earlier hub.
+	require.NoError(t, again.close())
 	require.NoError(t, os.WriteFile(path, []byte(`[{"id": "dev:3", "url": "http://dev:3", "source": "webhook", "last_seen": "2026-10-30T09:00:00Z"}]`), 0o600))
 	earlier, err := newStore(path, logger, clock)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = earlier.close() })
 	assert.True(t, follow(earlier, "dev:3", idle).ChangedAt.IsZero(), "nothing to differ from")
 	clock.Advance(time.Minute)
 	assert.Equal(t, clock.Now(), follow(earlier, "dev:3", working).ChangedAt)

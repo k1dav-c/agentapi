@@ -35,7 +35,8 @@ hub 和各個 AgentAPI 透過你掌控的網路互連，例如你自己的 VPN�
 1. AgentAPI 用 webhook 加入。`agentapi hub join` 把 hub 的位址和 secret 寫進
    `~/.agentapi/config.yaml`，這個使用者的每個 `agentapi server` 啟動時都會讀取。之後每個
    AgentAPI 都送出有簽章的 `instance.started`、`instance.heartbeat`（每分鐘一次）和
-   `instance.stopped`，hub 據此新增、更新或停止實例。hub 連不到、又錯過三次 heartbeat 的實例，
+   `instance.stopped`，hub 據此新增、更新或停止實例（手動加入的實例不會因 `instance.stopped`
+   停止，hub 會持續嘗試連線）。hub 連不到、又錯過三次 heartbeat 的實例，
    例如 workspace 被強制關掉的，視為已停止，hub 不再嘗試連線，直到它下一次送 heartbeat。這些事件
    只用來新增實例、告訴 hub 它在哪裡；每個實例在做什麼，以它的摘要為準。事件寫了另一個網址時，
    只有 hub 沒連上這個實例才會改用新網址，手動加入的實例則一律不改：機器換了位址的 AgentAPI
@@ -76,6 +77,7 @@ agentapi hub serve --bind hub.vpn --token "$HUB_TOKEN" --secret "$HUB_SECRET" \
 ```
 
 hub 監聽 port 3290，並把實例保存在 `~/.agentapi/hub/instances.json`，重新啟動後仍然記得。
+有變動時，hub 會在一秒內寫入這個檔案，停止時也會寫一次。
 `--bind` 讓 hub 只聽 VPN 介面；不加的話監聽所有介面。這些值也可以改用 `AGENTAPI_HUB_TOKEN`、
 `AGENTAPI_HUB_SECRET` 和 `AGENTAPI_HUB_INSTANCE_TOKEN` 設定。
 
@@ -317,7 +319,8 @@ hub 舊。
 （見[靜音](#靜音)）、更新 AgentAPI（見[從 hub 更新](#從-hub-更新)），以及移除已停止的實例
 （見[加入與移除實例](#加入與移除實例)）。
 群組保存在 hub 上，所以手機和桌面看到的一樣；
-實例自己的事件不會改動它所屬的群組。
+實例自己的事件不會改動它所屬的群組。hub 拒絕或沒收到的變更（群組、釘選、靜音、移除）不會生效，
+並以通知說明原因。
 
 有了群組之後，清單會依名稱為每個群組加上標題，沒有分組的實例排在最後的 **Ungrouped** 底下；
 [最近變動](#最近變動)的排序不顯示群組標題。標題會顯示群組裡的實例數，並以琥珀色顯示需要你處理的數量，所以收合的群組仍然看得到。點標題可以收合或
@@ -391,7 +394,8 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 在桌面上，拖曳清單的邊緣，或把焦點移到邊緣再按 ← 或 →，可以調整清單的寬度；每個瀏覽器各自記住
 調整後的寬度，在邊緣按兩下則恢復預設。
 
-快捷鍵在焦點位於 hub 時有效；在開啟的聊天介面裡，按鍵會交給聊天介面。鈴鐺按鈕會請瀏覽器在 hub 分頁
+`/` 和 `Esc` 在 hub 頁面的任何地方都有效；`j`、`k`、方向鍵和 `p` 只在焦點位於清單或沒有焦點時有效，
+所以在其他地方，方向鍵照常捲動總覽。在開啟的聊天介面裡，按鍵會交給聊天介面。鈴鐺按鈕會請瀏覽器在 hub 分頁
 位於背景、有 agent 開始需要你時通知你；螢幕閱讀器也會即時讀出同樣的訊息。
 
 ### 在手機上
@@ -457,7 +461,9 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 - hub 只接受具備有效 `X-AgentAPI-Signature-256`（`<timestamp>.<body>` 的 HMAC-SHA256）、
   timestamp 誤差不超過 10 分鐘、而且 delivery ID（`id`）沒處理過的事件。AgentAPI 一定會送
   delivery ID；沒有的事件一律拒絕，否則同一份事件在這 10 分鐘內重送也會生效。這很重要：事件裡的
-  網址，就是 hub 送出實例 token 的地方。
+  網址，就是 hub 送出實例 token 的地方。hub 會把 delivery ID 保存在
+  `instances.deliveries.json`，直到事件的簽章失效，所以重新啟動後也照樣拒絕重送的事件。hub 讀一個
+  事件最多花 10 秒、最多讀 1 MiB。
 - 有簽章的事件可以新增 hub 還沒有的實例，也可以把 hub 目前沒在追蹤的實例（已停止，或摘要串流沒有
   連上）改到事件裡的網址。hub 正在追蹤的實例，不論事件寫的是哪一次執行，事件都改不了它的網址；手動
   加入的實例也一樣。`instance.*` 事件必須寫明是哪一次執行（`server_id`，AgentAPI 1.0 以後都會送）。
@@ -477,7 +483,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
   workspace 被人控制，也無法透過你的瀏覽器碰到其他 workspace。經由 hub 只能讀取實例的 webhook，
   不能修改：webhook 決定 hub 把 token 送到哪裡。
 - 加入網址不會搬動 hub 已有的實例；要先把它移除。
-- `~/.agentapi/hub/instances.json` 保存手動加入的實例的 token，建立時只有擁有者能讀取。
+- `~/.agentapi/hub/instances.json` 和它的 `.bak` 保存手動加入的實例的 token，建立時只有擁有者能讀取。
   `~/.agentapi/config.yaml` 保存 hub secret，`agentapi hub join` 也以同樣的權限寫入。
 - 登入時會送出 hub token。hub 只開在 VPN 上，或放在 HTTPS 後面。
 - 登入 hub 的人能做的事，等同各 AgentAPI 允許的事：送任務、回覆核准、使用終端機，以及更新機器允許
@@ -505,7 +511,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | `join` 說 hub 在另一台機器上 | `--public-url` 寫的是 `localhost` | 改成 hub 連得到這台機器的位址 |
 | 新增對話框的指令裡是 `<hub secret>` | hub 以 `--no-token` 執行，頁面一律不顯示 secret | 填入 hub 的 `--secret` |
 | 新增對話框沒有列出機器所在網路的位址 | hub 只綁一個位址（`--bind`），或機器透過 hub 那台機器本身沒有的位址連到它（NAT、port forwarding） | 改用機器連到 hub 的位址，加上 `/hooks` |
-| 實例一直沒出現；hub 的 log 有「Refused an event」 | `join` 和 hub 的 `--secret` 不同，或兩邊時鐘差超過 10 分鐘 | 用 hub 的 secret 重新執行 `agentapi hub join`；檢查時鐘 |
+| 實例一直沒出現；hub 的 log 有「Refused an event」（簽章不對的事件每分鐘最多記一次，`refused_since_last_logged` 是中間拒絕的次數） | `join` 和 hub 的 `--secret` 不同，或兩邊時鐘差超過 10 分鐘 | 用 hub 的 secret 重新執行 `agentapi hub join`；檢查時鐘 |
 | 實例一直沒出現；`agentapi hub status` 顯示沒有 hub | `join` 寫入的設定檔，不是 AgentAPI 讀的那個 | 用同一個使用者，或兩邊傳同一個 `--config` |
 | Unreachable：`400 Bad Request` | AgentAPI 拒絕以 VPN 名稱作為 `Host` | 在 `--allowed-hosts` 允許它（步驟 3） |
 | Unreachable：`needs an API token` | AgentAPI 以 `--api-token` 執行，hub 給的 token 不同 | 給 hub `--instance-token`，或加入時輸入 token |
@@ -525,7 +531,8 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | **Update AgentAPI…** 要求一次性設定 | AgentAPI 無法寫入 binary 所在的目錄，例如 root 擁有的 `/usr/local/bin` | 在那台機器上執行一次畫面上的指令 |
 | 那一列顯示 **Update failed** | 檢查或下載新版時出錯 | 滑鼠移上去，或開啟 **Update AgentAPI…** 查看錯誤，再試一次 |
 | 已連線的 agent，**⋯** 選單裡沒有任何更新項目 | 它的 AgentAPI 太舊，還不支援從 hub 更新 | 手動更新（見[手動更新](#手動更新)） |
-| hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案不完整，例如寫到一半當機，或磁碟滿了 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來；其他實例要重新加入，群組、釘選和靜音也要重新設定 |
+| hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案不完整，例如寫到一半當機，或磁碟滿了；或是 2.2 以前的 hub 讀到較新 hub 寫的檔案 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來。其餘的要找回來，先停掉 hub，再用 `instances.json.bak`（hub 上次啟動時看到的檔案）覆蓋 `instances.json`；2.2 以前的 hub 請見[檔案](#檔案) |
+| hub 無法啟動：`instances.json is of a newer hub` | 檔案是較新的 hub 寫的 | 改用較新的 hub，或從 `instances.json.bak` 開始 |
 
 在實例所在的機器上執行 `agentapi hub status`，可以看到設定檔指向哪個 hub，以及每個執行中的
 AgentAPI 回報到哪裡。hub 的 log 會記下開始追蹤、已停止和連不到的實例（附上錯誤），以及拒絕的事件；
@@ -547,7 +554,8 @@ AgentAPI 的 log 會記下傳送失敗的 webhook。
 | `--allowed-hosts` | 任何名稱 | 瀏覽器開啟 hub 用的名稱，IP 位址和 `localhost` 以外（以逗號分隔，`*` 表示任何名稱）；實例的事件不受限制 |
 | `--log-level` | `AGENTAPI_HUB_LOG_LEVEL`，否則 `info` | 記錄的最低層級：`debug`、`info`、`warn` 或 `error` |
 
-hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`）連到實例。
+hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`）連到實例。連線 30 秒內沒建立（TLS
+交握 10 秒）、回應的標頭 15 秒內沒來，就放棄；摘要串流和經 proxy 開啟的頁面則一直保持連線。
 
 ### `agentapi hub join`、`leave`、`status`
 
@@ -606,6 +614,16 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `~/.agentapi/config.yaml` | `agentapi hub join` | hub 的 webhook 和 `allow-update`，每個 `agentapi server` 都會讀取 |
 | `~/.agentapi/instances/` | `agentapi server` | 這台機器上執行中的 AgentAPI，供 `join` 和 `agentapi list` 使用 |
 | `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組和釘選、各自最近一次變動的時間，以及手動加入的實例的 token |
+| `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | hub 上次啟動時看到的實例檔案 |
+| `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | hub 處理過、簽章仍有效的事件的 delivery ID，用來拒絕重送的事件 |
+
+`instances.json` 的格式是 `{"version": 1, "instances": [...]}`。2.2 以前的 hub 只寫、也只讀陣列：
+現在的 hub 讀得懂舊格式，但舊 hub 會把新格式當成損壞的檔案放到一旁，從空的清單開始。要改回舊
+hub，先停掉 hub，只留下陣列：
+
+```sh
+cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv instances.json.new instances.json
+```
 
 ## 限制
 

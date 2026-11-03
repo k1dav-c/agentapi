@@ -3,6 +3,7 @@ package claudelog
 import (
 	"strconv"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -78,4 +79,59 @@ func TestInteger(t *testing.T) {
 	for value, want := range map[string]int{"0": 0, "12345": 12345, "-3": -3, "1.5": 0, `"7"`: 0, "": 0, "null": 0, "1e3": 0} {
 		assert.Equal(t, want, integer([]byte(value)), value)
 	}
+}
+
+// A call with neither a message ID nor a request ID has no key: every one
+// counts, rather than all of them as one.
+func TestCallsWithoutIDsHaveNoKey(t *testing.T) {
+	t.Parallel()
+	c := NewCalls(nil)
+	for range 3 {
+		c.Line([]byte(`{"type":"assistant","timestamp":"2026-10-20T10:00:00Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":3,"output_tokens":5}}}`))
+	}
+	_, calls := c.Changed()
+	require.Len(t, calls, 3)
+	for _, call := range calls {
+		assert.Empty(t, call.Key)
+	}
+}
+
+func TestPreamble(t *testing.T) {
+	t.Parallel()
+	for line, want := range map[string]bool{
+		`{"type":"file-history-snapshot","messageId":"m0","snapshot":{}}`:           true,
+		`{"type":"summary","summary":"Earlier work","leafUuid":"u0"}`:               true,
+		`{"type":"user","sessionId":"s1","message":{"role":"user","content":"Hi"}}`: false,
+		`{"type":"user","isSidechain":true,"message":{"role":"user"}}`:              false,
+		`{"type":"file-history-snapshot"`:                                           false,
+		`not json`:                                                                  false,
+	} {
+		assert.Equal(t, want, Preamble([]byte(line)), line)
+	}
+}
+
+// Calls keeps only the calls a later line can change, the recent ones,
+// once Changed returned them, and shares the model name between calls.
+func TestCallsKeepTheRecentOnes(t *testing.T) {
+	t.Parallel()
+	c := NewCalls(nil)
+	call := func(id string, output int) []byte {
+		return []byte(`{"type":"assistant","timestamp":"2026-10-20T10:00:00Z","message":{"id":"` + id + `","model":"claude-opus-5-5","usage":{"input_tokens":3,"output_tokens":` + strconv.Itoa(output) + `}}}`)
+	}
+	for i := range 1000 {
+		c.Line(call("m"+strconv.Itoa(i), 5))
+	}
+	from, calls := c.Changed()
+	assert.Zero(t, from)
+	require.Len(t, calls, 1000)
+	assert.Equal(t, unsafe.StringData(calls[0].Model), unsafe.StringData(calls[999].Model), "one model name")
+	assert.LessOrEqual(t, c.Size(), 512+recentCalls*agentlog.CallSize)
+
+	// A recent call's later line changes it.
+	c.Line(call("m990", 9))
+	from, calls = c.Changed()
+	assert.Equal(t, 990, from)
+	require.Len(t, calls, 10)
+	assert.Equal(t, 9, calls[0].Tokens.Output)
+	assert.Equal(t, "claude:m999", calls[9].Key)
 }

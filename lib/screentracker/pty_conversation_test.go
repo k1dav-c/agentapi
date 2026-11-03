@@ -90,7 +90,7 @@ func sendAndAdvance(ctx context.Context, t *testing.T, c *st.PTYConversation, mC
 	t.Helper()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- c.Send(parts...)
+		errCh <- c.Send(context.Background(), parts...)
 	}()
 	advanceUntil(ctx, t, mClock, func() bool {
 		select {
@@ -272,7 +272,7 @@ func TestMessages(t *testing.T) {
 	t.Run("whitespace-padding", func(t *testing.T) {
 		c, _, _ := newConversation(context.Background(), t)
 		for _, msg := range []string{"123 ", " 123", "123\t\t", "\n123", "123\n\t", " \t123\n\t"} {
-			err := c.Send(conv.MessagePartText{Content: msg})
+			err := c.Send(context.Background(), conv.MessagePartText{Content: msg})
 			assert.ErrorIs(t, err, conv.ErrMessageValidationWhitespace)
 		}
 	})
@@ -425,7 +425,7 @@ func TestMessages(t *testing.T) {
 		c, agent, mClock := newConversation(ctx, t)
 
 		sendMsg := func(msg string) error {
-			return c.Send(conv.MessagePartText{Content: msg})
+			return c.Send(context.Background(), conv.MessagePartText{Content: msg})
 		}
 
 		// Status is initializing, send should fail.
@@ -448,7 +448,7 @@ func TestMessages(t *testing.T) {
 
 	t.Run("send-message-empty-message", func(t *testing.T) {
 		c, _, _ := newConversation(context.Background(), t)
-		assert.ErrorIs(t, c.Send(conv.MessagePartText{Content: ""}), conv.ErrMessageValidationEmpty)
+		assert.ErrorIs(t, c.Send(context.Background(), conv.MessagePartText{Content: ""}), conv.ErrMessageValidationEmpty)
 	})
 
 	t.Run("send-message-no-echo-agent-reacts", func(t *testing.T) {
@@ -500,7 +500,7 @@ func TestMessages(t *testing.T) {
 		var sendErr error
 		var sendDone atomic.Bool
 		go func() {
-			sendErr = c.Send(conv.MessagePartText{Content: "hello"})
+			sendErr = c.Send(context.Background(), conv.MessagePartText{Content: "hello"})
 			sendDone.Store(true)
 		}()
 		advanceUntil(ctx, t, mClock, func() bool { return sendDone.Load() })
@@ -537,7 +537,7 @@ func TestMessages(t *testing.T) {
 		var sendErr error
 		var sendDone atomic.Bool
 		go func() {
-			sendErr = c.Send(conv.MessagePartText{Content: "hello"})
+			sendErr = c.Send(context.Background(), conv.MessagePartText{Content: "hello"})
 			sendDone.Store(true)
 		}()
 
@@ -856,7 +856,7 @@ func TestSendRejectsWhenInitialPromptNotReady(t *testing.T) {
 	assert.Equal(t, conv.StatusChanging, c.Status())
 
 	// Send() rejects immediately instead of blocking forever.
-	err := c.Send(conv.MessagePartText{Content: "hello"})
+	err := c.Send(context.Background(), conv.MessagePartText{Content: "hello"})
 	assert.ErrorIs(t, err, conv.ErrMessageValidationChanging)
 }
 
@@ -951,7 +951,7 @@ func TestStabilityScreen(t *testing.T) {
 		var sendErr error
 		var sendDone atomic.Bool
 		go func() {
-			sendErr = c.Send(conv.MessagePartText{Content: "hello"})
+			sendErr = c.Send(context.Background(), conv.MessagePartText{Content: "hello"})
 			sendDone.Store(true)
 		}()
 		advanceUntil(ctx, t, mClock, func() bool { return sendDone.Load() })
@@ -1027,7 +1027,7 @@ func TestResetWhileTheInitialPromptWaits(t *testing.T) {
 	w.MustWait(ctx)
 	// A restart now (DELETE /messages) drops it; the next snapshot queues
 	// it again for the new agent, without blocking.
-	c.Reset()
+	c.Reset(nil)
 	agent.setScreen("ready-1")
 	_, w = mClock.AdvanceNext()
 	tickCtx, tickCancel := context.WithTimeout(ctx, 2*time.Second)
@@ -1121,6 +1121,126 @@ func TestSendAfterStopFails(t *testing.T) {
 	require.Equal(t, conv.StatusStable, c.Status())
 	cancel()
 	require.Eventually(t, func() bool {
-		return errors.Is(c.Send(conv.MessagePartText{Content: "late"}), context.Canceled)
+		return errors.Is(c.Send(context.Background(), conv.MessagePartText{Content: "late"}), context.Canceled)
 	}, testTimeout, 10*time.Millisecond, "Send blocks or succeeds after the conversation stopped")
+}
+
+// blockingEmitter records what reaches it, and holds EmitStatus while
+// block is set, as an emit under way that a reset overtakes.
+type blockingEmitter struct {
+	mu      sync.Mutex
+	events  []string
+	block   chan struct{}
+	blocked chan struct{}
+}
+
+func (e *blockingEmitter) record(event string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, event)
+}
+
+func (e *blockingEmitter) recorded() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.events)
+}
+
+func (e *blockingEmitter) EmitMessages(messages []conv.Message) {
+	e.record("messages:" + messages[0].Message)
+}
+
+func (e *blockingEmitter) EmitStatus(conv.Status) {
+	e.mu.Lock()
+	block, blocked := e.block, e.blocked
+	e.block = nil
+	e.mu.Unlock()
+	if block != nil {
+		close(blocked)
+		<-block
+	}
+}
+func (e *blockingEmitter) EmitScreen(string)                     {}
+func (e *blockingEmitter) EmitError(_ string, _ conv.ErrorLevel) {}
+
+// A snapshot taken before a reset reaches the emitter before the reset's
+// forget, which clears what the emitter keeps: never after, where the old
+// conversation would land in the new one.
+func TestResetWaitsForTheSnapshotUnderWay(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	t.Cleanup(cancel)
+
+	agent := &testAgent{screen: "old"}
+	mClock := quartz.NewMock(t)
+	emitter := &blockingEmitter{}
+	c := st.NewPTY(ctx, st.PTYConversationConfig{
+		Clock:                 mClock,
+		AgentIO:               agent,
+		SnapshotInterval:      100 * time.Millisecond,
+		ScreenStabilityLength: 200 * time.Millisecond,
+		Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}, emitter)
+	c.Start(ctx)
+	advanceFor(ctx, t, mClock, 300*time.Millisecond)
+	require.Equal(t, "old", c.Messages()[0].Message)
+
+	agent.setScreen("old, changed")
+	release, blocked := make(chan struct{}), make(chan struct{})
+	emitter.mu.Lock()
+	emitter.block, emitter.blocked = release, blocked
+	emitter.mu.Unlock()
+	_, w := mClock.AdvanceNext()
+	<-blocked
+
+	reset := make(chan struct{})
+	go func() {
+		c.Reset(func() { emitter.record("forget") })
+		close(reset)
+	}()
+	select {
+	case <-reset:
+		t.Fatal("the reset didn't wait for the snapshot under way")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	w.MustWait(ctx)
+	<-reset
+
+	events := emitter.recorded()
+	require.NotEmpty(t, events)
+	assert.Equal(t, "forget", events[len(events)-1], "nothing of the old conversation after forget: %q", events)
+	assert.Equal(t, "messages:old, changed", events[len(events)-2])
+}
+
+// A Send whose context ends while its message waits for the screen to
+// settle withdraws the message, never typed: the caller can queue it.
+func TestSendWithdrawsTheMessageWhenItsContextEnds(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	t.Cleanup(cancel)
+
+	var writes atomic.Int32
+	agent := &testAgent{screen: "ready", onWrite: func([]byte) { writes.Add(1) }}
+	mClock := quartz.NewMock(t)
+	c := st.NewPTY(ctx, st.PTYConversationConfig{
+		Clock:                 mClock,
+		AgentIO:               agent,
+		SnapshotInterval:      100 * time.Millisecond,
+		ScreenStabilityLength: 200 * time.Millisecond,
+		Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}, &testEmitter{})
+	c.Start(ctx)
+	advanceFor(ctx, t, mClock, 300*time.Millisecond)
+	require.Equal(t, conv.StatusStable, c.Status())
+
+	// No snapshot comes (the mock clock stands still), so the message
+	// waits until its context ends.
+	sendCtx, sendCancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer sendCancel()
+	err := c.Send(sendCtx, conv.MessagePartText{Content: "hello"})
+	require.ErrorIs(t, err, conv.ErrMessageValidationChanging)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	advanceFor(ctx, t, mClock, time.Second)
+	assert.Zero(t, writes.Load(), "never typed")
+	assert.Equal(t, conv.StatusStable, c.Status(), "nothing waits")
 }

@@ -73,9 +73,10 @@ func (c *Calls) Line(line []byte) {
 			return
 		}
 		used := info.Last
-		if c.last != nil {
+		if c.last != nil && !info.Total.below(*c.last) {
 			// The total can start from a thread this one continues;
-			// within the log, its change is what was used.
+			// within the log, its change is what was used. A total that
+			// went down started over: the call is the last one.
 			used = info.Total.minus(*c.last)
 		}
 		total := info.Total
@@ -117,6 +118,13 @@ type Totals struct {
 
 // none reports whether t counts no tokens.
 func (t Totals) none() bool { return t.InputTokens <= 0 && t.OutputTokens <= 0 }
+
+// below reports whether a count of t is less than o's: a running total
+// that started over.
+func (t Totals) below(o Totals) bool {
+	return t.InputTokens < o.InputTokens || t.CachedInputTokens < o.CachedInputTokens ||
+		t.CacheWriteTokens < o.CacheWriteTokens || t.OutputTokens < o.OutputTokens
+}
 
 func (t Totals) minus(o Totals) Totals {
 	return Totals{

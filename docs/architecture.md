@@ -37,7 +37,7 @@ flowchart TB
   subgraph server["agentapi server"]
     http["HTTP server<br/>lib/httpapi"]
     queue["Message queue"]
-    emitter["EventEmitter<br/>conversation state, SSE"]
+    emitter["EventEmitter<br/>lib/convstate"]
     db[("State DB<br/>lib/statedb")]
     shell["Shell terminal<br/>lib/shellterm"]
     conv{{"conv.Conversation"}}
@@ -78,11 +78,14 @@ answers write keys directly to the agent's terminal.
 | Path | What it holds |
 | --- | --- |
 | `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, transport, starting the agent, signals, restarting in place), `attach`, `list` (the registered AgentAPIs and their summaries), `hub` (`serve`: the hub; `join`, `leave` and `status`: a hub's webhook in the config file and in the running AgentAPIs), `restart` (has registered AgentAPIs restart in place) and `update` (self-update with checksum verification) |
-| `lib/httpapi/` | The HTTP server: routes and handlers, the `EventEmitter`, the queue, token auth, webhooks, the MCP, files and terminal endpoints, and the embedded chat UI |
+| `lib/httpapi/` | The HTTP server: routes and handlers, the queue, token auth, CORS and cross-origin checks, the event streams, the MCP, files, terminal and webhook endpoints, and the embedded chat UI; it wires the three packages below |
+| `lib/convstate/` | The conversation state clients read, without HTTP: the `EventEmitter` (its changes numbered by epoch and seq, subscriptions and replay), the tasks and the summary it derives, the queue as the server reported it, and the `Persister` it hands every change to |
+| `lib/webhook/` | Webhook delivery (`Dispatcher`: queue, retries, signatures, heartbeats, `{ip}` in the public URL) and the observer that turns the emitter's events into webhook events (`Observe`, through `Source`) |
+| `lib/workspacefs/` | What the file viewer reads of the working directory (`Dir`): a file's text, its diff through git, an HTML preview, a file to serve, the search for a path; a refusal is an `Error` whose kind `lib/httpapi` turns into a status |
 | `lib/conversation/` | Shared types (imported as `conv`): messages, roles, status and error levels. The server calls transports through `Conversation`; transports report changes through `Emitter` |
 | `lib/screentracker/` | The PTY conversation: screen snapshots, message splitting, stability detection, and typing parts into the agent's terminal (`AgentIO`, `TerminalPart`) |
 | `lib/termexec/` | Runs the agent in a pseudo-terminal with an in-memory VT100 emulator (`xpty`, `vt10x`); the process can be swapped for a restart |
-| `lib/msgfmt/` | Per-agent formatting of screen output: echoed input, input boxes, status lines, tool calls, readiness for the first prompt |
+| `lib/msgfmt/` | Per-agent formatting of screen output: echoed input, input boxes, status lines, tool calls, readiness for the first prompt, the dialogs an agent shows in its terminal (`IsTerminalQuestionScreen`) |
 | `lib/transcript/` | The structured transcript's types, which the transports share: rich messages with their content blocks, and timeline events |
 | `lib/agentlog/` | The agents' session-log formats, one package each (`claudelog`, `codexlog`, `pilog`): their records, the parsers into rich messages and timeline events (the native adapters use them too), prompts and injected context, model calls, file layout and resolvers; plus line reading, the incremental file index and format-drift warnings |
 | `lib/sessions/` | A server-held `Store` reads earlier sessions and their conversations (`history.go`), subagents (`subagents.go`) and costs (`cost.go`) for a directory |
@@ -96,21 +99,23 @@ answers write keys directly to the agent's terminal.
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db` (native and PTY), and the import of a `--state-file` |
 | `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). `lib/httpapi` keeps aliases under the same names, which the OpenAPI schema uses |
-| `lib/hub/` | `agentapi hub serve`: the instances, the groups and pins set on its page and when each last changed what its row shows (`store.go`, kept in a file), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
+| `lib/hub/` | `agentapi hub serve`: the instances, the groups and pins set on its page and when each last changed what its row shows (`store.go`, kept in a file by `persist.go`), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
+| `lib/sse/` | Server-sent events as the HTML standard defines them: a reader (data: lines joined, comments skipped, CR, LF or CRLF line ends) and a writer, used by the hub for the instances' summary streams and the browser's stream. `lib/httpapi` writes its streams with huma's `sse` |
 | `lib/netaddr/` | The machine's IPv4 addresses: those other machines may reach it at (the hub's join URLs), and the one it reaches a host from (`Resolver`, for `{ip}` in `--public-url`) |
 | `lib/userconfig/` | The user's settings file, `~/.agentapi/config.yaml`: flags by name, read by `agentapi server`, written by `agentapi hub` |
 | `lib/registry/` | The entries of the AgentAPIs running on a machine (`~/.agentapi/instances`): writing one atomically, listing them and removing those whose process is gone |
-| `lib/selfupdate/` | Installs the latest release of k1dav-c/agentapi in place of the program (`agentapi update`, `POST /update`): the lookup on GitHub, the binary for the platform, its check against the release's `checksums.txt` and that it runs as that version, and the rename under a lock file next to the program (`Install`); whether the user can replace the program, with the one-time fix (`Program.Blocked`); `selfupdatetest` serves a fake release for tests |
+| `lib/selfupdate/` | Installs the latest release of k1dav-c/agentapi in place of the program (`agentapi update`, `POST /update`): the lookup on GitHub, the binary for the platform, its check against the release's `checksums.txt` and that it runs as that version, and the rename under a lock file next to the program, the file and then the directory synced to disk (`Install`); whether the user can replace the program, with the one-time fix (`Program.Blocked`); `selfupdatetest` serves a fake release for tests |
 | `lib/shellterm/` | The shared shell terminal of native sessions |
 | `lib/htmlpreview/` | Makes HTML previews self-contained for `GET /files/preview` by embedding resources referenced by relative paths as data: URLs |
 | `lib/mcpconfig/` | Reads and writes the agents' MCP configuration files |
+| `lib/filelock/` | The flock that AgentAPIs on one machine take in turn: replacing the program (`selfupdate`), an agent CLI updating itself before a restart |
 | `lib/procenv/` | The environment of the processes AgentAPI starts: agents on every transport, the terminal's shell |
 | `lib/agenthome/` | Where the agents keep their state (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`) |
 | `lib/handoff/` | Types of the human-reply API |
 | `lib/logctx/`, `lib/util/` | Context-based logging and shared helpers |
 | `internal/version/` | The version, stamped at build time |
 | `chat/` | The chat UI (Next.js) |
-| `e2e/` | End-to-end tests against a scripted echo agent |
+| `e2e/` | End-to-end tests against a scripted echo agent (PTY) and a scripted Claude Code (native) |
 
 ## Startup and shutdown
 
@@ -126,9 +131,12 @@ answers write keys directly to the agent's terminal.
    are filled in (`instanceapi.ExpandPlaceholders`). `{ip}` in `--public-url`
    stays: it changes while the server runs (DHCP), so the webhook dispatcher
    fills it in whenever it builds the instance for an event, the summary or
-   the registry entry (`publicURL` in `lib/httpapi/webhook.go`), with the
-   source address of the route to the webhook URL, which `netaddr.Resolver`
-   looks up at most every 30 s. The agent type is `--type`, else the agent command
+   the registry entry (`publicURL` in `lib/webhook/dispatcher.go`), with the
+   source address of the route to the webhook URL. `refreshIP` looks it up
+   through `netaddr.Resolver` (kept 30 s, each lookup bounded by
+   `netaddr.DialTimeout`) before `instance.started`, after a configuration
+   change, before each heartbeat and every 30 s, outside the emitter's lock;
+   the events only read the last address found. The agent type is `--type`, else the agent command
    when it is a type name, else `custom`. The transport is `--transport`, else
    native for an agent `hasNativeAdapter` covers (Claude Code, Codex, Pi and
    `native-demo`) unless the deprecated `--state-file` is set, else PTY.
@@ -149,22 +157,29 @@ answers write keys directly to the agent's terminal.
    `Start` listens, then writes the registry entry (unless `--registry=false`)
    and serves.
 5. On SIGINT, SIGTERM or SIGHUP, or when a PTY agent exits, the webhook sends
-   `instance.stopped` and the registry entry is removed. A restart under way
+   `instance.stopped` (waiting at most 2 s, and half of `Stop`'s 5 s, for
+   it) and the registry entry is removed. A restart under way
    is cancelled, the HTTP server shuts down, and the queue loop and the
    session-log watcher stop. A native or PTY agent that still runs and the
    shell terminal are closed, and the state DB is flushed and closed. SIGUSR1
    flushes the state DB without stopping. A native agent that exits doesn't
    stop the server: the conversation starts it again (see Native).
 6. SIGUSR2, or an update through the API, restarts the server in place
-   (`cmd/server/reexec.go`, `selfExec.restart`). At startup
-   `selfExec` takes the arguments, the environment and the program. The
+   (`cmd/server/reexec.go`, `selfExec.restart`). At startup, first,
+   `selfExec` catches SIGUSR2, whose default action ends the process, so
+   one that comes while the server starts or stops doesn't (one before
+   serving restarts it once it serves), and takes the arguments, the
+   environment and the program. The
    program is argv[0] as the shell found it (a path, or a name on `PATH`) if
    that is the running file, so a symlink an update repoints is followed;
    else `os.Executable`. It is taken then because once an update replaced
    the file, `/proc/self/exe` names a deleted one. The program first runs
    with `--version`; if it fails, the server logs why and goes on. Otherwise the server stops as in step 5, keeps its PID file (the PID
    stays), and `syscall.Exec` runs the program again with stdin, stdout and
-   stderr; every other file Go opened closes on exec. A shutdown signal
+   stderr; every other file Go opened closes on exec. A token a bare
+   `--api-token` generated goes along in `AGENTAPI_GENERATED_API_TOKEN`,
+   which the new program takes instead of generating one and removes from
+   its environment, so clients stay signed in. A shutdown signal
    during the stop wins. Each registry entry says the server restarts in
    place (`restarts_in_place`), for `agentapi restart`.
 
@@ -197,19 +212,19 @@ The handlers are grouped by file:
 | --- | --- |
 | `server.go`, `routes.go`, `hosts.go`, `middleware.go`, `compress.go` | The server's setup, start and stop; the routes, which each feature registers; allowed hosts and origins; request logging; compression |
 | `conversation_api.go`, `queue.go`, `sse.go`, `jsonl_watcher.go` | Messages, status and timeline; the queue, its dispatch and `queue_update`; `GET /events` and the screen stream; the PTY transport's session log watcher |
-| `tasks.go` | The tasks the emitter derives from the conversation (`taskTracker`), `task_update` and `GET /tasks` |
-| `summary.go`, `spend.go`, `registry.go` | The summary for clients that watch many AgentAPIs (`attention`, title, latest task, `unread`, `spend`), `summary_update`, `GET /summary` and `POST /tasks/seen`; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
+| `tasks_api.go` | `GET /tasks`: the tasks the emitter derives (`lib/convstate`) |
+| `summary_api.go`, `spend.go`, `registry.go` | `GET /summary` and `POST /tasks/seen`, the summary the emitter keeps for clients that watch many AgentAPIs; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
 | `backend.go`, `backend_pty.go`, `backend_native.go` | What depends on the transport: dispatching the queue and the work each tick (`beforeQueue`: a scheduled continuation, Codex's update prompt), delivering a message, restarts (`beginRestart`, `beginReload`), the human-reply protocol (`handoffOffer`, `answerHandoff`) |
 | `setup.go` | Starting the process of a PTY agent |
 | `native.go` | Requests, settings, interrupt, compaction, login retry; the native observer |
 | `limit.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); the agent's earlier sessions and what they cost (`/sessions`, `/cost`); its subagents (`/subagents`) |
-| `terminal.go`, `files.go`, `file_preview.go`, `files_find.go` | The shell terminal (`terminalAPI`) and the file viewer and the search for a file the agent named relative to a repository (`fileAPI`) |
+| `terminal.go`, `files_api.go` | The shell terminal (`terminalAPI`); the file viewer and the search for a file the agent named relative to a repository (`fileAPI`, over `lib/workspacefs`) |
 | `mcp.go`, `mcp_management.go` | MCP servers and profiles |
-| `webhook.go`, `webhook_events.go`, `handoff.go`, `dialog_reply.go` | Webhook delivery (queue, retries, signatures, heartbeats) and the observer that turns the conversation's events into webhook events; the human-reply API; answers to terminal dialogs |
+| `webhook_api.go`, `handoff.go`, `dialog_reply.go` | The webhook's configuration (`GET`/`PUT /webhook`, `POST /webhook/test`), the instance it describes and its start (`lib/webhook` delivers); the human-reply API; answers to terminal dialogs |
 | `auth.go` | Token auth and the chat's sign-in (`authAPI`) |
 | `restart.go`, `statedb.go` | Restarts; restoring and persisting the state |
 | `update.go` | Updating AgentAPI through its API (`POST /update`, `DELETE /update`, the `updater`) and the summary's `update`; see [Restarts and updates](#restarts-and-updates) |
-| `events.go`, `events_*.go`, `models.go` | The emitter (subscriptions and replay; the status, screen, requests and messages it keeps) and the API's types |
+| `convstate.go`, `models.go` | Aliases of `lib/convstate`'s types; the API's types |
 | `embed.go`, `uploads.go` | The embedded chat UI; uploaded files (`uploadAPI`, which serves `POST /upload` from the operation's middleware: huma v2.32 changes the shared operation on every multipart request) |
 
 Chi routes outside huma serve the chat (`/chat/*`, with `/` redirecting there), uploaded images
@@ -221,6 +236,24 @@ shell terminal and state DB. Features outside conversation changes use modules c
 registration: `fileAPI` holds the working directory, `terminalAPI` the shell, `uploadAPI` the upload
 store, `authAPI` the token check, and `webhookAPI` the dispatcher and state DB.
 
+`lib/httpapi` wires three packages that don't know HTTP:
+
+- `lib/convstate` holds the conversation's state. Under its lock the
+  emitter calls only what doesn't block or take it: the `Persister` (the
+  state DB queues the writes), the status change handler
+  (`webhook.Dispatcher.StatusChanged`, which queues without waiting) and
+  the instance in the summary (`Dispatcher.Instance`, which reads the last
+  `{ip}` found). The lock order stays the emitter's, then the
+  dispatcher's and the state DB's.
+- `lib/webhook` reads the emitter only through subscriptions (`Source`),
+  like an `/events` client, on goroutines of its own.
+- `lib/workspacefs` reads the working directory; `fileAPI` turns its
+  refusals into 400, 403 and 404.
+
+Huma names the OpenAPI schemas after the Go types, so `lib/httpapi` keeps
+aliases of the types that moved (`convstate.go`, `FileMatch`,
+`WebhookConfig`): the schema and the package's API stay as they were.
+
 For operations that differ by transport, handlers call `agentBackend`: `ptyBackend` drives terminal
 conversations; `nativeBackend` drives native conversations.
 
@@ -230,10 +263,10 @@ conversations; `nativeBackend` drives native conversations.
 // lib/conversation (imported as conv)
 type Conversation interface {
 	Messages() []Message
-	Send(...MessagePart) error
+	Send(ctx context.Context, parts ...MessagePart) error
 	Start(context.Context)
 	Status() Status // initializing, changing or stable
-	Reset()
+	Reset(forget func()) // forget runs once no snapshot of the old conversation can reach the Emitter
 }
 
 type Emitter interface {
@@ -275,7 +308,10 @@ sequenceDiagram
   none (a shell, a REPL), also once its screen is stable.
 - `jsonlwatcher` finds the Claude Code, Codex or Pi session log that belongs
   to the agent's process (by its process ID and working directory) and tails
-  it. The parsers of `lib/agentlog` turn its lines into rich messages
+  it through `agentlog.Follower`, as the Store reads logs: complete lines only,
+  a line too long skipped, the file from its start again once it shrank or
+  was replaced (its lines read before reach the timeline once), and a failed
+  read tried again. The parsers of `lib/agentlog` turn its lines into rich messages
   (thinking, tool calls with their results, usage) and timeline events, which
   reach the emitter next to the screen-derived messages.
 - Terminal dialogs (Claude Code's plan approval and permission prompts, Codex
@@ -350,7 +386,8 @@ type Factory func(resume Resume) (Adapter, error)
   subagents the agent ran in the session are read the same way, from their
   own logs (`sessions.Store.Subagents`), for `GET /subagents` and the chat's
   Lineage panel. Their state comes from the Agent tool call that started
-  them.
+  them. A subagent's timeline events and messages (`GET /timeline?subagents`,
+  `GET /subagents/{id}`) are kept until its log changes.
 - **Exits.** An agent that exits on its own, or fails a start the
   conversation made by itself (the first, after an exit or a wait for a
   login), is launched again on its session after the next of
@@ -361,23 +398,24 @@ type Factory func(resume Resume) (Adapter, error)
   the count starts over. One that reported a lost login before it exited
   waits for the login instead. A start a caller waits for (`Replacement.Start`)
   isn't made again: the caller gets its error.
-- **Costs.** `sessions.Store.Costs` reads the model calls of every session
-  in the directory, its subagents' included, from the same logs (`GET
-  /sessions`, `GET /cost`): Claude Code's assistant messages (one per message
-  id), Codex's token counts, Pi's reported costs. `lib/pricing` prices each
-  call; Claude Code's `cost-state` records add what its log doesn't list
-  (compaction) as unitemized calls. Calls copied by a fork count once, in the
-  earliest session. The Store indexes each log's size, read offset and reader
-  state, with its calls priced. It reads only complete new lines from growing
-  logs, prices only the calls they add or complete, and rereads logs that
-  shrink or are replaced. A reading in which no log's calls changed returns
-  the last result; otherwise it works out again only the sessions whose logs
-  changed, and adds up the sessions' costs. Concurrent requests share the
-  read. The index's size limit doesn't apply to the logs a reading of the
-  costs read (`agentlog.Pass`): every reading reads all of them in the same
-  order, and a limit that forgot the log read longest ago would forget each
-  one just before it is read again. The index removes logs that no longer
-  exist.
+- **Costs.** `sessions.Store.Costs` reads the model calls of every session in
+  the directory, its subagents' included, from the same logs (`GET /sessions`,
+  `GET /cost`): Claude Code's assistant messages (one per message id), Codex's
+  token counts, Pi's reported costs. `lib/pricing` prices each call; Claude
+  Code's `cost-state` records add what its log doesn't list (compaction) as
+  unitemized calls. Calls copied by a fork count once, in the earliest
+  session, by the logs' creation times (statx on Linux, stat on macOS;
+  elsewhere their first lines'). The Store indexes each log's size, read
+  offset and reader state, with its calls priced. It reads only complete new
+  lines from growing logs, prices only the calls they add or complete, and
+  rereads logs that shrink or are replaced. A reading in which no log's calls
+  changed returns the last result; otherwise it works out again only the
+  sessions whose logs changed, and adds up the sessions' costs. Concurrent
+  requests share the read. The index's size limit doesn't apply to the logs a
+  reading of the costs read (`agentlog.Pass`): every reading reads all of them
+  in the same order, and a limit that forgot the log read longest ago would
+  forget each one just before it is read again. The index removes logs that no
+  longer exist.
 - **Log formats.** Each format is decoded in one place (`lib/agentlog`):
   what is a prompt, injected context or a tool result is decided once, for
   the native adapters, the history, the costs and the PTY watcher alike.
@@ -393,7 +431,11 @@ type Factory func(resume Resume) (Adapter, error)
   record, as a lost turn end would leave the turn running for good. Record
   types an adapter doesn't know, changed fields and records that don't
   decode are counted per process (`agentio.Drift`) and logged once each at
-  Warn, with the CLI version from the handshake.
+  Warn, with the CLI version from the handshake, as is behavior an adapter
+  works around (`Drift.Unexpected`): Pi refusing a prompt as busy while no
+  run was reported, or a Pi run that ends with `agent_end` (`willRetry`
+  false) and no `agent_settled`, whose turn the adapter ends once Pi has
+  been quiet for 10 seconds (not while it compacts or retries).
 - **Usage limits.** When the account's usage limit stops a turn, the adapter
   ends it with the `limited` stop reason (Claude Code's limit messages and a
   `rejected` rate limit event, Codex's `usageLimitExceeded`, a quota error of
@@ -435,7 +477,10 @@ type Factory func(resume Resume) (Adapter, error)
   closes its input, then sends the group SIGTERM after 3 seconds and SIGKILL
   2 seconds later. Before that, the adapters interrupt a running turn and
   wait up to 3 seconds for it to end, so the agent's session log doesn't end
-  in a tool call without result.
+  in a tool call without result. The group outlives the agent while a
+  process in it runs, so however the agent exits (on its own, stopped, in a
+  reload), `procutil` then sends the group SIGTERM and 2 seconds later
+  SIGKILL (`GroupGrace`), and stops signaling it once it is gone.
 
 The adapters:
 
@@ -448,7 +493,7 @@ The adapters:
 
 ## Events and the conversation state
 
-The `EventEmitter` (`lib/httpapi/events.go`) stores the state clients read: the messages, rich
+The `EventEmitter` (`lib/convstate`) stores the state clients read: the messages, rich
 messages, the timeline, requests, the tasks, the queue, the status snapshot (status, lifecycle,
 server ID, turn, the agent's session ID, capabilities, settings, usage with the prompt cache, a
 usage limit stop, login, terminal prompt) and the latest screen.
@@ -538,11 +583,15 @@ during a restart.
 Rejected messages get up to 5 attempts. Messages that might be delivered twice are dropped
 immediately: a native write without confirmation (`native.ErrUnconfirmed`, caused by timeout,
 cancellation or agent exit), or a PTY message typed but not submitted. Native stdin writes end with
-the call's context, so an agent that stops reading can't hold `s.mu`.
+the call's context, so an agent that stops reading can't hold `s.mu`. A PTY `Send` ends within
+`ptySendTimeout` (1 minute) or when AgentAPI stops: a message still waiting for a stable screen is
+withdrawn untyped (`ErrMessageValidationChanging`, so it stays queued), and one being typed is cut
+short.
 
 Native messages can also steer or interrupt a running turn. Queue changes reach the emitter as
 `queue_update` events outside the queue lock, with versions to discard late reports of older changes.
-The queue is persisted with the conversation.
+The queue is persisted with the conversation, on every change (`storeQueue`, from the queue's
+`onChange`): a message that went out or was deleted isn't sent again after a crash.
 
 ## Persistence
 
@@ -585,6 +634,16 @@ The queue is persisted with the conversation.
   clear. A restored task whose message is gone or is another one now is
   dropped, as is one whose message row couldn't be read.
 
+The hub (`lib/hub`, `persist.go`) keeps its instances in a JSON file,
+`{"version": 1, "instances": [...]}`; it also reads the bare array of hubs of 2.2 and earlier. A
+change marks the file behind, and a background writer writes it at most once a second, and on
+`Hub.Close`, through a temporary file it syncs and renames. On startup the hub copies the file it
+read to `instances.json.bak`. A file that doesn't parse is moved aside (`.corrupt-<time>`) and the
+hub starts empty; one of a newer version stops the hub instead. An older hub moves the envelope aside
+as damaged, so going back to one takes `jq .instances` first ([hub.md](hub.md#files)). The delivery
+IDs of the webhook events it took, each until its signature no longer holds, go the same way into
+`instances.deliveries.json`, so a copy replayed after a restart is refused too.
+
 `--state-file`, the older PTY mechanism (JSON written on shutdown), is deprecated: `cmd/server`
 imports it once into a state database next to it (`statedb.ImportStateFile`, only into an empty
 one), which keeps the conversation from then on. SIGUSR1 flushes the state database.
@@ -593,7 +652,10 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
 
 - `DELETE /messages` clears the conversation, requests and queue and restarts
   the agent; before the new agent starts, AgentAPI runs `codex update` or
-  `pi update --self` for Codex and Pi. A native agent is closed and `Restart`
+  `pi update --self` for Codex and Pi, for up to 3 minutes, in its own
+  process group, and under a lock in the user's cache directory
+  (`~/.cache/agentapi/codex-update.lock` on Linux), so the AgentAPIs that
+  run one CLI update it one at a time. A native agent is closed and `Restart`
   starts a new session. A PTY agent gets a new process in the swappable
   terminal and a new session-log watcher.
 - A replacement of the native agent (a restart, a reload, opening another
@@ -647,7 +709,12 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
   again on each request, and once a minute for `blocked`, so a symlink set
   up meanwhile counts at once.
 - `/status` reports the lifecycle: `starting`, `ready`, `running`,
-  `restarting`, `exited` or `failed`.
+  `restarting`, `exited` or `failed`. `EmitStatus` derives the first three
+  from the conversation's status; the server sets the others
+  (`SetLifecycle`), which the status doesn't replace (a PTY agent's screen
+  goes on changing while it restarts or after it exited) until
+  `ReleaseLifecycle`: when a restart is done, or a native agent the
+  conversation started again accepts turns or waits for a login.
 
 ## The shell terminal
 
@@ -745,7 +812,8 @@ the same session for native agents.
   a hub with a token; the startup log never has it.
 - Agents, on every transport, don't inherit the variables (one of them a
   secret) that a parent agent session sets for the commands it runs, nor
-  AgentAPI's API token (`lib/procenv`).
+  AgentAPI's secrets: its API token, the webhook and hub secrets and tokens
+  (`lib/procenv`).
 
 ### Child process environment
 
@@ -792,7 +860,7 @@ markers. The filtering is implemented in [lib/procenv/procenv.go](../lib/procenv
 | --- |
 | `PI_CODING_AGENT` |
 | `AI_AGENT` |
-| `AGENTAPI_API_TOKEN` |
+| AgentAPI's secrets: `AGENTAPI_*_TOKEN` and `AGENTAPI_*_SECRET` (`AGENTAPI_API_TOKEN`, `AGENTAPI_WEBHOOK_SECRET`, `AGENTAPI_HUB_SECRET`, `AGENTAPI_HUB_TOKEN`, `AGENTAPI_HUB_INSTANCE_TOKEN`, `AGENTAPI_GENERATED_API_TOKEN`) |
 
 Configuration such as `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`,
 and `ANTHROPIC_*` is preserved. After filtering, the native Claude Code adapter
@@ -807,16 +875,18 @@ build into `lib/httpapi/chat/`, which `embed.go` embeds with `go:embed`. The bui
 placeholder base path that the server rewrites to `--chat-base-path` (default `/chat`). The UI also
 runs as a standalone development server (`bun run dev`, with `?url=<server>`), and `/chat/embed` is
 a variant for embedding in other pages (`hub=1`: in the hub's frame it draws the hub's bar for the instance, from what the hub sends it in window messages, `lib/hub-frame.ts`). `/chat/hub/`
-is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, its logic in
-`lib/hub.ts`), which `agentapi hub serve` serves with the same build.
+is the hub's page (`components/hub-view.tsx`, its parts and hooks in `components/hub/`, its logic in
+`lib/hub.ts`, the changes it makes through `lib/hub-api.ts`), which `agentapi hub serve` serves with
+the same build.
 
 - `components/chat-provider.tsx` composes the client state and API operations.
   Actions and API calls come from `useChatActions()`, an object that never
   changes, so components that only act don't render again; state is read in
   slices with `useChatSelector` (`lib/store.ts`), so a component renders again
-  only when its slice changes. The hooks `use-event-stream.ts`, `use-queue.ts`
-  and `use-session-cache.ts` apply the events to the state, follow the queued
-  messages, and cache the transcript.
+  only when its slice changes. The hooks `use-event-stream.ts`, `use-queue.ts`,
+  `use-drafts.ts` and `use-session-cache.ts` apply the events to the state,
+  follow the queued messages, send messages and keep their drafts until the
+  server has them, and cache the transcript.
 - The event stream uses `/events?sync=1` and keeps the last sequence number
   for incremental replay (`lib/chat-stream.ts`). A long replay shows its
   progress every 1.5 seconds, but the requests and the tasks, which come
@@ -836,7 +906,9 @@ is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, it
   there too: a task's, a subagent's. IndexedDB keeps each server's conversation for the next
   visit, one record per message, writing only what changed, with the sequence
   number of what it saved; a server's cache goes after 14 days without use,
-  and only the 10 most recently used are kept (`lib/session-cache.ts`).
+  and the least recently used go beyond 100 servers or 50,000 records in
+  all; a hub opens each instance as a server of its own
+  (`lib/session-cache.ts`).
 - `TimelineBuilder` in `lib/task-timeline.ts` groups messages into tasks.
   It rebuilds from the first change and preserves unchanged objects, so
   memoized tasks and tool calls don't render again. A section is one of
@@ -878,10 +950,16 @@ is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, it
   parity tests that compare their rich messages with what the session-log
   parsers produce. `nativetest` provides a fake adapter for the conversation
   and HTTP tests.
-- `e2e/` runs the server against a scripted echo agent.
+- `e2e/` runs the server binary against a scripted echo agent (PTY) and
+  `e2e/fakeclaude`, a scripted Claude Code (native), through a restart in
+  place.
 - `golangci-lint` (including the exhaustive check over enums),
   `paralleltestctx` and `make gen` (the OpenAPI schema must match the code)
-  run in CI; the chat has eslint, `bun test` and `tsc`.
+  run in CI; the chat has eslint, `bun test` and `tsc`. CI also runs the
+  tests of `lib/` and `cmd/` with the race detector, every test on macOS,
+  and on Windows builds every test and runs those of the packages with
+  Windows code. The release checks that each binary is built for its
+  platform.
 
 ## Design principles
 

@@ -21,7 +21,15 @@ func TestForAgent(t *testing.T) {
 		"AI_AGENT=claude-code",
 		"ANTHROPIC_API_KEY=key",
 		"AGENTAPI_API_TOKEN=secret",
+		"AGENTAPI_WEBHOOK_SECRET=secret",
+		"AGENTAPI_HUB_SECRET=secret",
+		"AGENTAPI_HUB_TOKEN=secret",
+		"AGENTAPI_HUB_INSTANCE_TOKEN=secret",
+		"AGENTAPI_GENERATED_API_TOKEN=secret",
+		"AGENTAPI_TOKEN=secret",
 		"AGENTAPI_PORT=3284",
+		"AGENTAPI_WEBHOOK_URL=http://hub",
+		"GITHUB_TOKEN=kept",
 	}
 	assert.Equal(t, []string{
 		"PATH=/usr/bin",
@@ -29,6 +37,8 @@ func TestForAgent(t *testing.T) {
 		"CODEX_HOME=/home/u/.codex",
 		"ANTHROPIC_API_KEY=key",
 		"AGENTAPI_PORT=3284",
+		"AGENTAPI_WEBHOOK_URL=http://hub",
+		"GITHUB_TOKEN=kept",
 		"CLAUDE_CODE_ENTRYPOINT=sdk-cli",
 	}, procenv.ForAgent(env, "CLAUDE_CODE_ENTRYPOINT=sdk-cli"))
 	assert.NotEmpty(t, procenv.ForAgent(nil), "nil means the process environment")

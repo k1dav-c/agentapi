@@ -26,6 +26,8 @@ Use these commands and conventions when changing AgentAPI.
 ## Testing
 
 - `CGO_ENABLED=0 go test ./...` - Run all Go tests (CI runs them with `CGO_ENABLED=0`)
+- `CGO_ENABLED=1 go test -race ./lib/... ./cmd/...` - Run them with the race detector, as CI does
+- `go test ./e2e` - Run the end-to-end tests: the server binary with a scripted echo agent (PTY) and `e2e/fakeclaude`, a scripted Claude Code (native)
 - `cd chat && bun test` - Run the chat UI tests
 - Tests are located alongside source files (e.g., `lib/httpapi/server_test.go`)
 
@@ -51,7 +53,10 @@ to PTY mode, which parses terminal output.
 
 - `main.go` - Entry point using the Cobra CLI framework
 - `cmd/` - CLI command definitions, including server, attach, list, hub, restart (registered AgentAPIs restart in place, e.g. into an updated binary), and update
-- `lib/httpapi/` - HTTP server, routes, OpenAPI schema, instance summaries for monitoring multiple AgentAPIs (`GET /summary`, `/events?only=summary`), webhooks that push events (tasks, requests, messages, heartbeats) to a receiver, and updates through the API (`POST /update`, with `--allow-update`)
+- `lib/httpapi/` - HTTP server: routes, OpenAPI schema, auth, event streams, instance summaries for monitoring multiple AgentAPIs (`GET /summary`, `/events?only=summary`), the webhook's configuration, and updates through the API (`POST /update`, with `--allow-update`); it wires the three packages below and aliases their types under the schema's names
+- `lib/convstate/` - The conversation state clients read, without HTTP: the `EventEmitter`, the tasks and summary it derives, the queue it reports, the `Persister` interface
+- `lib/webhook/` - Webhooks that push events (tasks, requests, messages, heartbeats) to a receiver: delivery, and the observer that reads the emitter
+- `lib/workspacefs/` - The file viewer's reads of the working directory: content, diff through git, HTML preview, images, find
 - `lib/conversation/` - Shared messages, status, and the `Conversation` and `Emitter` interfaces (imported as `conv`)
 - `lib/screentracker/` - The PTY engine: terminal output parsing and message splitting
 - `lib/termexec/` - Terminal process execution and management
@@ -60,10 +65,11 @@ to PTY mode, which parses terminal output.
 - `lib/agentlog/` - The agents' session-log formats, one package per agent (`claudelog`, `codexlog`, `pilog`), shared by the native adapters, `lib/sessions` and the PTY watcher
 - `lib/sessions/` - Earlier sessions, subagents and their costs, read incrementally from the logs
 - `lib/jsonlwatcher/` - Tails a PTY agent's session log for rich messages
-- `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation
+- `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation; `scripts/prices.mjs` compares `prices.json` with Pi's model registry
 - `lib/statedb/` - SQLite persistence of conversations, native and PTY (`--state-db`; a deprecated `--state-file` is imported into it)
 - `lib/instanceapi/` - The contract with clients that watch many AgentAPIs: who an instance is, its summary, the webhook envelope and signature, and the state a hub shows (aliased in `lib/httpapi` under the same names)
 - `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs (signed webhooks, summary streams, a proxy that opens any of them in the chat, the addresses machines join it by)
+- `lib/sse/` - Server-sent events as the HTML standard defines them (`Reader`, `Write`), for the hub's streams
 - `lib/netaddr/` - The machine's IPv4 addresses: those other machines may reach (the hub's join URLs), and the one on the route to a host (`{ip}` in `--public-url`)
 - `lib/userconfig/` - The user's settings file (`~/.agentapi/config.yaml`), which agentapi server reads and agentapi hub join writes
 - `lib/registry/` - The registry of the AgentAPIs running on a machine (`~/.agentapi/instances`), which `agentapi list` reads

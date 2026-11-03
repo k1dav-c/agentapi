@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -192,8 +190,9 @@ func instanceURL(instance instanceapi.WebhookInstance) string {
 // store holds the instances, keeps them in a file and tells subscribers
 // of changes.
 type store struct {
-	path  string // where the instances are kept; empty keeps none
-	clock quartz.Clock
+	// persist writes the file of instances; nil keeps none.
+	persist *persister
+	clock   quartz.Clock
 
 	mu        sync.Mutex
 	instances map[string]*Instance
@@ -226,32 +225,16 @@ func (i Instance) kept() storedInstance {
 	return stored
 }
 
-// newStore returns the store that keeps the instances in path, with those
-// it kept, on clock. A file that doesn't parse is moved aside, and the
-// store starts empty: a hub that stopped on it would stop again at every
-// restart.
+// newStore returns the store that keeps the instances in path (empty keeps
+// none), with those it kept, on clock.
 func newStore(path string, logger *slog.Logger, clock quartz.Clock) (*store, error) {
-	s := &store{path: path, clock: clock, instances: map[string]*Instance{}, subs: map[chan storeEvent]struct{}{}}
+	s := &store{clock: clock, instances: map[string]*Instance{}, subs: map[chan storeEvent]struct{}{}}
 	if path == "" {
 		return s, nil
 	}
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return s, nil
-	}
+	stored, err := readState(path, logger)
 	if err != nil {
 		return nil, err
-	}
-	var stored []storedInstance
-	if err := json.Unmarshal(data, &stored); err != nil {
-		aside := path + ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
-		if renameErr := os.Rename(path, aside); renameErr != nil {
-			return nil, fmt.Errorf("read %s: %w; moving it aside failed: %w", path, err, renameErr)
-		}
-		logger.Warn("The hub's file of instances doesn't parse; moved it aside and starting empty. "+
-			"Lost: the instances added by hand, with their tokens, and every instance's group, pin and mute; joined instances come back with their next heartbeat",
-			"file", path, "moved_to", aside, "error", err)
-		return s, nil
 	}
 	for _, si := range stored {
 		connection := ConnectionConnecting
@@ -265,62 +248,43 @@ func newStore(path string, logger *slog.Logger, clock quartz.Clock) (*store, err
 	}
 	// A file edited by hand may have gaps or twins.
 	s.numberPinsLocked()
+	s.persist = newPersister(path, "instances", logger, s.snapshot)
 	return s, nil
 }
 
-// saveLocked writes the instances to the file. Caller holds s.mu.
-func (s *store) saveLocked() error {
-	if s.path == "" {
-		return nil
-	}
+// snapshot is the file of the instances as they are.
+func (s *store) snapshot() ([]byte, error) {
+	s.mu.Lock()
 	stored := make([]storedInstance, 0, len(s.instances))
 	for _, i := range s.sortedLocked() {
 		stored = append(stored, i.stored())
 	}
-	data, err := json.MarshalIndent(stored, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".instances-*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	// On disk before it takes the file's name: after a crash, the name
-	// would otherwise point at an empty file.
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp.Name(), s.path); err != nil {
-		return err
-	}
-	syncDir(filepath.Dir(s.path))
-	return nil
+	s.mu.Unlock()
+	return encodeState(stored)
 }
 
-// syncDir puts the entries of dir, such as a file renamed in it, on disk,
-// where the system can sync a directory.
-func syncDir(dir string) {
-	d, err := os.Open(dir)
-	if err != nil {
-		return
+// changedLocked says the file is behind; it is written soon after. Caller
+// holds s.mu.
+func (s *store) changedLocked() {
+	if s.persist != nil {
+		s.persist.mark()
 	}
-	_ = d.Sync()
-	_ = d.Close()
+}
+
+// close writes what the file is behind on, and stops writing it.
+func (s *store) close() error {
+	if s.persist == nil {
+		return nil
+	}
+	return s.persist.close()
+}
+
+// flush writes what the file is behind on now.
+func (s *store) flush() error {
+	if s.persist == nil {
+		return nil
+	}
+	return s.persist.flush()
 }
 
 func (s *store) sortedLocked() []*Instance {
@@ -358,18 +322,18 @@ func (s *store) get(id string) (Instance, bool) {
 const pinLast = math.MaxInt
 
 // update changes the instance id with change, or adds it when create is
-// set, and reports whether it did. The file is written when what it keeps
-// changed; when the instance was last seen isn't worth a write of its own
+// set, and reports whether it did. The file is written (soon after) when
+// what it keeps changed; when the instance was last seen isn't worth a write of its own
 // and goes with the next one. ChangedAt moves when the change is one its
 // row shows of what it does (activityKey), and for a new instance. A
 // change of its Pin numbers the pinned ones again.
-func (s *store) update(id string, create bool, change func(*Instance)) (Instance, bool, error) {
+func (s *store) update(id string, create bool, change func(*Instance)) (Instance, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	i, ok := s.instances[id]
 	if !ok {
 		if !create {
-			return Instance{}, false, nil
+			return Instance{}, false
 		}
 		i = &Instance{Connection: ConnectionConnecting}
 		i.ID = id
@@ -392,36 +356,35 @@ func (s *store) update(id string, create bool, change func(*Instance)) (Instance
 	if activity != "" {
 		i.activity = activity
 	}
-	var err error
 	if !ok || i.kept() != before {
-		err = s.saveLocked()
+		s.changedLocked()
 	}
 	changed := *i
 	if !ok || !bytes.Equal(changed.seen(), seen) {
 		s.notifyLocked(storeEvent{Instance: &changed})
 	}
 	s.notifyEachLocked(renumbered, i)
-	return changed, true, err
+	return changed, true
 }
 
 // remove forgets the instance id, and its pin: the pinned ones below it
 // move up.
-func (s *store) remove(id string) (bool, error) {
+func (s *store) remove(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	i, ok := s.instances[id]
 	if !ok {
-		return false, nil
+		return false
 	}
 	delete(s.instances, id)
 	var renumbered []*Instance
 	if i.Pin > 0 {
 		renumbered = s.numberPinsLocked()
 	}
-	err := s.saveLocked()
+	s.changedLocked()
 	s.notifyLocked(storeEvent{Removed: id})
 	s.notifyEachLocked(renumbered, nil)
-	return true, err
+	return true
 }
 
 // pinnedLocked returns the pinned instances from the top: by Pin, then by
@@ -463,7 +426,7 @@ func (e unknownInstanceError) Error() string { return "no such instance: " + str
 // the pinned ones' IDs in their order. ids must list each pinned instance
 // once and nothing else: an ID the hub doesn't have is an
 // unknownInstanceError, any other difference errPinsDiffer, and neither
-// changes anything. Any other error is the file's, after the change.
+// changes anything.
 func (s *store) setPins(ids []string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -491,9 +454,9 @@ func (s *store) setPins(ids []string) ([]string, error) {
 	if len(renumbered) == 0 {
 		return current, nil
 	}
-	err := s.saveLocked()
+	s.changedLocked()
 	s.notifyEachLocked(renumbered, nil)
-	return slices.Clone(ids), err
+	return slices.Clone(ids), nil
 }
 
 // subscribe returns the instances and a channel of the changes after them.

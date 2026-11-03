@@ -478,7 +478,8 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
   [request handling](#requests-approvals-questions-and-plans).
 - When the agent is stopped or restarted and doesn't exit within 3 seconds of
   its input closing, AgentAPI signals its whole process group, which also stops
-  its MCP servers and child commands.
+  its MCP servers and child commands. Once the agent exits, however it exits,
+  what it started and left running gets SIGTERM, then SIGKILL 2 seconds later.
 - An agent that exits on its own, or fails to start, is started again on its
   session after 2, 10 and 30 seconds. Each attempt shows in the chat as an
   error, and the lifecycle is `restarting`. If all three fail, AgentAPI keeps
@@ -531,7 +532,9 @@ The agent runs in its own process group. Shutdown first interrupts a running
 turn and waits up to 3 seconds for it to end, so the session log doesn't end in
 a tool call without result. Then it closes the agent's input so it can exit; if
 it is still running 3 seconds later, AgentAPI sends SIGTERM to the group, then
-SIGKILL 2 seconds after that.
+SIGKILL 2 seconds after that. The group outlives the agent while a process in
+it runs, so AgentAPI signals it after the agent exited too, on its own or in a
+restart: SIGTERM, then SIGKILL 2 seconds later.
 
 </details>
 
@@ -920,7 +923,8 @@ working directory. This works without `--state-db`:
   itself stays as it was. The queue and open requests are cleared, as on a
   restart. It returns 409 while the agent works on a turn, compacts its
   context or restarts, and the refused resume leaves the conversation as it
-  was.
+  was. An id that isn't one file name (a `/` or `\`, `.` or `..`, a control
+  character) gets 400.
 
 In the chat, the Explorer's Session tab lists the sessions with **Open** and **Start a copy**, which
 ask for a second click.
@@ -959,8 +963,10 @@ models or replaces their prices, in USD per million tokens:
 A tier applies to a call whose input (uncached, read from and written to the cache) is above
 `input_tokens_above`. Model IDs are matched ignoring case, a provider prefix (`anthropic/`), a
 context suffix (`[1m]`) and a release date, else by the longest known prefix
-(`claude-opus-5-5-x` is priced as `claude-opus-5-5`). A call to a model without a price counts its
-tokens but no cost (`priced: false`).
+(`claude-opus-5-5-x` is priced as `claude-opus-5-5`), but not across a `-mini`, `-nano` or `-pro`
+variant (`gpt-5.1-codex-mini` isn't a `gpt-5.1`). A call to a model without a price counts its
+tokens but no cost (`priced: false`), and the server's log warns of the model once.
+`scripts/prices.mjs` compares the built-in prices with Pi's model registry.
 
 - `GET /sessions` gives each session's `cost`: `usd`, `tokens`, `calls`, the cost per model
   (`models`) and per hour (`hourly`, in UTC), and `total_cost`, the sum of all of them.
@@ -1330,7 +1336,9 @@ These endpoints work with every transport, except where noted; the
 - `GET /status` returns the backward-compatible `stable`/`running` status,
   the detailed lifecycle (`starting`, `ready`, `running`, `restarting`,
   `exited` or `failed`; a native agent that exits is `restarting` while
-  AgentAPI starts it again and `failed` once it gives up), the transport, `server_id` (a random identifier of
+  AgentAPI starts it again, until the new agent accepts turns, and `failed`
+  once it gives up; `restarting`, `exited` and `failed` don't change with
+  the agent's status until the agent is back), the transport, `server_id` (a random identifier of
   this AgentAPI run, new at every start), `turn` (how many times the agent
   started working), the conversation's `epoch`, the session name, the
   AgentAPI version, the agent's open dialog (`terminal_prompt`) and the
@@ -1342,7 +1350,8 @@ These endpoints work with every transport, except where noted; the
 - `GET /title` returns the session's human-readable title.
 - `POST /upload` stores a file (up to 10 MB; a body over 11 MiB is refused
   before it is read) and returns its path, which a message references as
-  `@"<path>"`.
+  `@"<path>"`. The file keeps the base name it was sent with, without control
+  characters and cut to 255 bytes; a name of `.` or `..` gets 400.
 
 ### Tasks
 
@@ -1667,7 +1676,7 @@ deliveries are logged and discarded.
 
 The queue holds 1,024 events and drops new ones when full. A receiver that misses events should
 read the current state from the API or the next heartbeat. On shutdown, AgentAPI waits up to
-5 seconds to deliver `instance.stopped`.
+2 seconds to deliver `instance.stopped`.
 
 An optional Go `text/template` (`--webhook-payload-template`) reshapes the body for the receiver,
 such as a chat service's incoming webhook. Available fields are `.ID`, `.Type`, `.CreatedAt`,
@@ -1750,8 +1759,8 @@ retained. For MCP changes, a native agent reloads the same session and preserves
 (an agent that can't resume its session, with `resume` false, starts a new session instead, and the
 conversation is cleared). A reload during an active turn returns 409 because it would interrupt that
 turn. Before a restart from the Explorer or `DELETE /messages`, AgentAPI updates Codex
-(`codex update`) and Pi (`pi update --self`) when launching those CLIs directly. If an update
-fails, AgentAPI restarts the installed version. Claude Code manages its own updates.
+(`codex update`) and Pi (`pi update --self`) when launching those CLIs directly, one AgentAPI at a
+time. If an update fails or takes more than 3 minutes, AgentAPI restarts the installed version. Claude Code manages its own updates.
 
 ## Security
 
@@ -1777,6 +1786,9 @@ agentapi server --api-token=my-secret -- claude
 # Via environment variable
 AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
 ```
+
+A generated token stays the same across a restart in place (SIGUSR2, `POST /update`,
+`agentapi restart`), so clients stay signed in; a new `agentapi server` generates a new one.
 
 When enabled, every API request must include `Authorization: Bearer <token>` or the chat UI's
 session cookie. Static file routes (`/`, `/chat/*`) are exempt so browsers can open the chat UI
@@ -2071,9 +2083,11 @@ Release binaries are verified against the release's `checksums.txt` SHA-256 mani
 running executable is replaced. An update is rejected if the manifest is missing, malformed, or does
 not match the download, or if the download doesn't run as the release's version. The binary is
 replaced under the lock file that [updates through the API](#updating-through-the-api) take too.
+The release lookup gets 1 minute; waiting for the lock, the download and the replacement get 10.
 
 Running AgentAPIs keep the old version until they restart. `--restart` restarts the ones that run
-the binary it replaced, as [`agentapi restart --all`](#agentapi-restart) does. Under `sudo` (an
+the binary it replaced, as [`agentapi restart --all`](#agentapi-restart) does, and restarts them
+when the binary is already up to date too: another update may have replaced it. Under `sudo` (an
 install in `/usr/local/bin`), it restarts the AgentAPIs of the user who ran `sudo`, from that user's
 registry. The hub isn't one of them: restart it with its service manager, such as
 `systemctl restart agentapi-hub`.

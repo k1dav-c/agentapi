@@ -7,13 +7,14 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/sse"
+
+	"github.com/coder/agentapi/lib/convstate"
 )
 
 // sseHeartbeatInterval is how often a heartbeat event is sent to each
 // /events subscriber so clients can detect silently dead connections.
 const sseHeartbeatInterval = 15 * time.Second
 
-// eventSeq is the seq of a change event, 0 for other events.
 // optInEvents are the events a client gets only with sync: those added
 // after clients that reject event types they don't know were written.
 var optInEvents = map[EventType]bool{
@@ -29,22 +30,6 @@ var optInEvents = map[EventType]bool{
 	EventTypeQueueUpdate:       true,
 	// Only ?only=summary gets it, and nothing else.
 	EventTypeSummaryUpdate: true,
-}
-
-func eventSeq(event Event) uint64 {
-	switch body := event.Payload.(type) {
-	case MessageUpdateBody:
-		return body.Seq
-	case RichMessageUpdateBody:
-		return body.Seq
-	case RequestUpdateBody:
-		return body.Seq
-	case TaskUpdateBody:
-		return body.Seq
-	case QueueUpdateBody:
-		return body.Seq
-	}
-	return 0
 }
 
 // SubscribeEventsInput lets a client that cached the conversation resume
@@ -71,11 +56,11 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 		since, epoch = 0, ""
 	}
 	wants := func(t EventType) bool {
-		return ConversationEvents(t) && (sync || !optInEvents[t])
+		return convstate.ConversationEvents(t) && (sync || !optInEvents[t])
 	}
 	if input.Only == "summary" {
 		sync, since, epoch = false, 0, ""
-		wants = SummaryEvents
+		wants = convstate.SummaryEvents
 	}
 	subscriberId, ch, replay := s.emitter.SubscribeTo(wants, since, epoch)
 	defer s.emitter.Unsubscribe(subscriberId)
@@ -112,7 +97,7 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 			}
 			msg := sse.Message{Data: event.Payload}
 			if sync {
-				msg.ID = int(eventSeq(event))
+				msg.ID = int(event.Seq())
 			}
 			if err := send(msg); err != nil {
 				s.logger.Error("Failed to send event", "subscriberId", subscriberId, "error", err)
@@ -134,7 +119,7 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 }
 
 func (s *Server) subscribeScreen(ctx context.Context, input *struct{}, send sse.Sender) {
-	subscriberId, ch, stateEvents := s.emitter.SubscribeTo(ScreenEvents, 0, "")
+	subscriberId, ch, stateEvents := s.emitter.SubscribeTo(convstate.ScreenEvents, 0, "")
 	defer s.emitter.Unsubscribe(subscriberId)
 	s.logger.Info("New screen subscriber", "subscriberId", subscriberId)
 	for _, event := range stateEvents {

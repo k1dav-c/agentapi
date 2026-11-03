@@ -13,10 +13,20 @@ import (
 // can be logged on several lines (one per content block), each with the
 // call's usage. It reads Claude Code's cost-state records too, what it
 // counted itself, as calls with a Report.
+//
+// The lines of a call follow each other: a call is found again among the
+// latest recentCalls calls only, and it keeps the calls before them only
+// until Changed returned them.
 type Calls struct {
+	// calls are the log's calls from the base-th on.
 	calls []agentlog.Call
-	// index finds a call by its message ID, or its request ID.
-	index map[string]int
+	base  int
+	// recent are the latest calls with a message or request ID, by it,
+	// next the one written over next.
+	recent [recentCalls]recentCall
+	next   int
+	// model is the latest call's model, which the next ones share.
+	model string
 	// latest is the time of the latest line that has one: a cost-state
 	// record has none of its own.
 	latest time.Time
@@ -26,10 +36,21 @@ type Calls struct {
 	from int
 }
 
+// recentCalls is how many calls back a line of a call is looked for. Its
+// lines follow each other in every log seen; parallel tool calls are one
+// call, and their results come after it.
+const recentCalls = 16
+
+// recentCall is the position among the log's calls of the call with key.
+type recentCall struct {
+	key string
+	i   int
+}
+
 // NewCalls returns a Calls that counts the entries it can't read into
 // drift.
 func NewCalls(drift *agentlog.Drift) *Calls {
-	return &Calls{index: make(map[string]int), drift: drift}
+	return &Calls{drift: drift}
 }
 
 // synthetic is the model of the messages Claude Code writes itself (an
@@ -78,7 +99,11 @@ func (c *Calls) Line(line []byte) {
 		case "id":
 			id, _ = agentlog.Unquote(value)
 		case "model":
-			model, _ = agentlog.Unquote(value)
+			if len(value) >= 2 && string(value[1:len(value)-1]) == c.model {
+				model = c.model
+			} else {
+				model, _ = agentlog.Unquote(value)
+			}
 		case "usage":
 			usage = value
 		}
@@ -98,35 +123,66 @@ func (c *Calls) Line(line []byte) {
 		c.drift.Call(agentlog.NoTokens)
 		return
 	}
+	c.model = model
 	key := id
 	if key == "" {
 		key = requestID
 	}
-	if i, ok := c.index[key]; ok && key != "" {
+	if i, ok := c.find(key); ok {
 		// A later line of the same call: its usage is the final one.
-		if tokens.Output >= c.calls[i].Tokens.Output && tokens != c.calls[i].Tokens {
-			c.calls[i].Tokens = tokens
+		call := &c.calls[i-c.base]
+		if tokens.Output >= call.Tokens.Output && tokens != call.Tokens {
+			call.Tokens = tokens
 			c.from = min(c.from, i)
 		}
 		return
 	}
+	call := agentlog.Call{Time: at, Model: model, Tokens: tokens, Cost: -1}
 	if key != "" {
-		c.index[key] = len(c.calls)
+		// Without an ID nothing tells the call apart from another: it
+		// counts, keyless, in the log it is in.
+		c.recent[c.next] = recentCall{key: key, i: c.base + len(c.calls)}
+		c.next = (c.next + 1) % recentCalls
+		call.Key = "claude:" + key
 	}
-	c.calls = append(c.calls, agentlog.Call{Time: at, Model: model, Tokens: tokens, Key: "claude:" + key, Cost: -1})
+	c.calls = append(c.calls, call)
 }
 
-// Changed returns the calls read or changed since it last returned. The
-// calls stay: a later line can change any of them.
+// find returns the position of the recent call with key.
+func (c *Calls) find(key string) (int, bool) {
+	if key == "" {
+		return 0, false
+	}
+	for _, r := range c.recent {
+		if r.key == key {
+			return r.i, true
+		}
+	}
+	return 0, false
+}
+
+// Changed returns the calls read or changed since it last returned. It
+// keeps those a later line can change: the recent ones.
 func (c *Calls) Changed() (int, []agentlog.Call) {
 	from := c.from
-	c.from = len(c.calls)
-	return from, slices.Clone(c.calls[from:])
+	changed := slices.Clone(c.calls[from-c.base:])
+	c.from = c.base + len(c.calls)
+	keep := c.from
+	for _, r := range c.recent {
+		if r.key != "" {
+			keep = min(keep, r.i)
+		}
+	}
+	if keep > c.base {
+		c.calls = slices.Clone(c.calls[keep-c.base:])
+		c.base = keep
+	}
+	return from, changed
 }
 
 // Size is about how many bytes of memory the reader holds.
 func (c *Calls) Size() int {
-	return len(c.calls)*agentlog.CallSize + len(c.index)*64
+	return 512 + len(c.calls)*agentlog.CallSize
 }
 
 // readUsage reads the tokens of a call's usage, which has a dozen other

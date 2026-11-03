@@ -9,8 +9,10 @@
 // (the chat keeps a message's object until it changes): a streaming turn
 // rewrites its last messages, not the whole transcript. A cache not used
 // for CACHE_TTL_MS goes, and so do the least recently used beyond
-// MAX_CACHED_SERVERS; each server has one cached conversation, which a new
-// one (another epoch) replaces.
+// MAX_CACHED_SERVERS or MAX_CACHED_RECORDS records in all; each server has
+// one cached conversation, which a new one (another epoch) replaces. A hub
+// opens each of its instances as a server of its own (/i/<id>), so the cap
+// on servers is high, and the records keep the total bounded.
 
 import {normalizeRichMessage, type Message, type RichMessage, type RichMessagePayload} from "./conversation";
 import {normalizeRequest, type NativeRequest, type RequestPayload} from "./native-requests";
@@ -35,8 +37,11 @@ export interface CachedSession {
 
 // How long a cache is kept after it was last used (loaded or saved).
 export const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
-// How many servers' conversations are kept, the most recently used.
-export const MAX_CACHED_SERVERS = 10;
+// How many servers' conversations are kept, the most recently used, and
+// how many records (messages, rich messages, requests, tasks) all of them
+// may hold.
+export const MAX_CACHED_SERVERS = 100;
+export const MAX_CACHED_RECORDS = 50_000;
 
 const KINDS = ["messages", "richMessages", "requests", "tasks"] as const;
 type Kind = (typeof KINDS)[number];
@@ -156,22 +161,40 @@ export class SessionCache {
   }
 
   private async evict(current: string): Promise<void> {
-    const gone = cachesToEvict((await this.storage.list()).map(({scope, meta}) => ({scope, usedAt: meta.usedAt})), this.now(), current);
+    const caches = (await this.storage.list()).map(({scope, meta}) => ({scope, usedAt: meta.usedAt, records: recordCount(meta)}));
+    const gone = cachesToEvict(caches, this.now(), current);
     if (gone.length === 0) return;
     for (const scope of gone) this.saved.delete(scope);
     await this.storage.remove(gone);
   }
 }
 
+// recordCount is how many records meta's cache holds.
+function recordCount(meta: CacheMeta): number {
+  return KINDS.reduce((sum, kind) => sum + (Number(meta.counts?.[kind]) || 0), 0);
+}
+
 // cachesToEvict returns the caches to let go of: those not used for
-// CACHE_TTL_MS, and the least recently used beyond MAX_CACHED_SERVERS. The
-// cache of current, the server open now, stays.
-export function cachesToEvict(caches: {scope: string; usedAt: number}[], now: number, current: string): string[] {
+// CACHE_TTL_MS, and the least recently used beyond MAX_CACHED_SERVERS or
+// past MAX_CACHED_RECORDS records in all. The cache of current, the server
+// open now, stays, and counts first.
+export function cachesToEvict(caches: {scope: string; usedAt: number; records?: number}[], now: number, current: string): string[] {
   const fresh = (usedAt: number) => now - usedAt < CACHE_TTL_MS;
+  const open = caches.filter(({scope}) => scope === current);
   const others = caches.filter(({scope}) => scope !== current);
-  const kept = others.filter(({usedAt}) => fresh(usedAt)).sort((a, b) => b.usedAt - a.usedAt);
-  const room = MAX_CACHED_SERVERS - (others.length < caches.length ? 1 : 0);
-  return [...others.filter(({usedAt}) => !fresh(usedAt)), ...kept.slice(Math.max(0, room))].map(({scope}) => scope);
+  let servers = open.length;
+  let records = open.reduce((sum, cache) => sum + (cache.records ?? 0), 0);
+  const gone: string[] = others.filter(({usedAt}) => !fresh(usedAt)).map(({scope}) => scope);
+  for (const cache of others.filter(({usedAt}) => fresh(usedAt)).sort((a, b) => b.usedAt - a.usedAt)) {
+    const size = cache.records ?? 0;
+    if (servers < MAX_CACHED_SERVERS && records + size <= MAX_CACHED_RECORDS) {
+      servers++;
+      records += size;
+    } else {
+      gone.push(cache.scope);
+    }
+  }
+  return gone;
 }
 
 // parseCachedSession checks what the cache held, and normalizes it as the

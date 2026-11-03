@@ -23,6 +23,7 @@ import (
 
 	"github.com/coder/agentapi/internal/version"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/mcpconfig"
 	mf "github.com/coder/agentapi/lib/msgfmt"
@@ -33,6 +34,7 @@ import (
 	"github.com/coder/agentapi/lib/shellterm"
 	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/lib/transcript"
+	"github.com/coder/agentapi/lib/webhook"
 )
 
 // Server represents the HTTP server
@@ -48,18 +50,22 @@ type Server struct {
 	// snapshot don't take it. Locks are taken in this order, never the
 	// other way round: mu, the conversation's, the updater's, the
 	// emitter's, then the webhook dispatcher's and the state DB's.
-	mu                 sync.Mutex
-	stopOnce           sync.Once
-	stopping           bool        // set under mu once Stop closed the agent: no more restarts
-	restarting         atomic.Bool // set under mu while a restart runs without it (runRestartLocked)
-	updating           atomic.Bool // set under mu once an update restarts AgentAPI: messages wait in the queue, and no agent restart begins
-	logger             *slog.Logger
-	conversation       conv.Conversation
-	native             *native.Conversation // nil unless the transport is native
-	sessions           *sessions.Store      // the agent's sessions; nil unless native and it keeps logs
-	stateDB            *statedb.DB          // nil unless the conversation is kept
-	savedQueue         []QueuedMessage      // the queue as last stored in stateDB
+	mu           sync.Mutex
+	stopOnce     sync.Once
+	stopping     bool        // set under mu once Stop closed the agent: no more restarts
+	restarting   atomic.Bool // set under mu while a restart runs without it (runRestartLocked)
+	updating     atomic.Bool // set under mu once an update restarts AgentAPI: messages wait in the queue, and no agent restart begins
+	logger       *slog.Logger
+	conversation conv.Conversation
+	native       *native.Conversation // nil unless the transport is native
+	sessions     *sessions.Store      // the agent's sessions; nil unless native and it keeps logs
+	stateDB      *statedb.DB          // nil unless the conversation is kept
+	// queueStoreMu guards what storeQueue last stored in stateDB: the
+	// queue, its last ID and the version of the queue they are.
+	queueStoreMu       sync.Mutex
+	savedQueue         []QueuedMessage
 	savedNextQueueID   int
+	savedQueueVersion  uint64
 	agentio            st.AgentIO
 	agentType          mf.AgentType
 	emitter            *EventEmitter
@@ -74,7 +80,7 @@ type Server struct {
 	queueLoop          quartz.Waiter // the queue's loop, nil until it starts
 	mcpStore           mcpconfig.Store
 	mcpMu              sync.Mutex
-	webhook            *webhookDispatcher
+	webhook            *webhook.Dispatcher
 	registry           *instanceRegistry // nil without a registry directory
 	updater            *updater
 	handoff            handoffState
@@ -217,8 +223,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	})
 	// The address {ip} in the public URL stands for now, which DHCP may
 	// change: the list can't name it.
-	var webhook *webhookDispatcher
-	publicIP := func(hostname string) bool { return webhook != nil && webhook.publicIP() == hostname }
+	var dispatcher *webhook.Dispatcher
+	publicIP := func(hostname string) bool { return dispatcher != nil && dispatcher.PublicIP() == hostname }
 	router.Use(hostAuthorizationMiddleware(allowedHosts, publicIP, badHostHandler))
 
 	router.Use(requestLogMiddleware(logger))
@@ -270,7 +276,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		return mf.FormatToolCall(config.AgentType, message)
 	}
 
-	webhook, err = newWebhookDispatcher(config.Webhook, logger, config.AgentType, config.Transport, config.Clock)
+	dispatcher, err = webhook.New(config.Webhook, logger, config.AgentType, config.Transport, config.Clock)
 	if err != nil {
 		return nil, fmt.Errorf("configure webhook: %w", err)
 	}
@@ -280,26 +286,26 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 	// The status and the webhook name this run the same.
 	serverID := hex.EncodeToString(serverBytes[:])
-	webhook.serverID = serverID
-	emitterOptions := []EventEmitterOption{
-		WithAgentType(config.AgentType),
-		WithTransport(config.Transport),
-		WithServerID(serverID),
-		WithTerminalColumns(config.PTY.TerminalColumns),
-		WithClock(config.Clock),
-		WithStatusChangeHandler(webhook.statusChanged),
-		WithInstance(webhook.instanceSnapshot),
+	dispatcher.SetServerID(serverID)
+	emitterOptions := []convstate.EventEmitterOption{
+		convstate.WithAgentType(config.AgentType),
+		convstate.WithTransport(config.Transport),
+		convstate.WithServerID(serverID),
+		convstate.WithTerminalColumns(config.PTY.TerminalColumns),
+		convstate.WithClock(config.Clock),
+		convstate.WithStatusChangeHandler(dispatcher.StatusChanged),
+		convstate.WithInstance(dispatcher.Instance),
 	}
 	stateDB := config.StateDB
 	if stateDB != nil {
-		emitterOptions = append(emitterOptions, WithPersister(stateDB))
+		emitterOptions = append(emitterOptions, convstate.WithPersister(stateDB))
 	}
 	var terminal *shellterm.Terminal
 	if config.Native.Terminal && config.Transport == TransportNative {
 		terminal = shellterm.New(shellterm.Config{Dir: config.CWD, Env: terminalEnv(), Logger: logger.With("component", "terminal")})
-		emitterOptions = append(emitterOptions, WithTerminal())
+		emitterOptions = append(emitterOptions, convstate.WithTerminal())
 	}
-	emitter := NewEventEmitter(emitterOptions...)
+	emitter := convstate.NewEventEmitter(emitterOptions...)
 	restored, err := restoreState(config, stateDB, emitter, logger)
 	if err != nil {
 		return nil, err
@@ -387,21 +393,26 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		shutdownCtx:    shutdownCtx,
 		shutdown:       shutdownCancel,
 		transport:      config.Transport,
-		webhook:        webhook,
+		webhook:        dispatcher,
 		restartAgent:   config.PTY.RestartAgent,
 		updateAgent:    config.Native.UpdateAgent,
 		terminal:       terminal,
 		jsonlParentCtx: ctx,
 		stateDB:        stateDB,
 	}
-	// Clients follow the queue through queue_update events.
-	s.queue.onChange = emitter.SetQueue
+	// Clients follow the queue through queue_update events, and the state
+	// database has every change: a message that went out isn't sent again
+	// after a crash.
+	s.queue.onChange = func(queue []QueuedMessage, lastID int, version uint64) {
+		emitter.SetQueue(queue, version)
+		s.storeQueue(queue, lastID, version)
+	}
 	// The summary and the registry entry name the new address.
-	webhook.urlChanged = s.instanceChanged
+	dispatcher.OnURLChange(s.instanceChanged)
 	if stateDB != nil {
 		s.restoreQueue(restored.snapshot)
 		if stored := restored.snapshot.Meta[statedb.MetaWebhook]; stored != "" {
-			switch ok, err := webhook.restore(stored); {
+			switch ok, err := dispatcher.Restore(stored); {
 			case err != nil:
 				logger.Warn("Ignoring the stored webhook settings", "error", err)
 			case ok:
@@ -517,7 +528,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	var err error
 	s.stopOnce.Do(func() {
 		// Tells the webhook's receiver, while it can still be sent.
-		s.webhook.stop(ctx)
+		s.webhook.Stop(ctx)
 		if s.registry != nil {
 			s.registry.stop()
 		}

@@ -61,3 +61,19 @@ func TestCallsCountDrift(t *testing.T) {
 	assert.Equal(t, 1, from, "the calls read since")
 	assert.Len(t, calls, 1)
 }
+
+// A running total that went down started over: its call is the last one,
+// not a difference clamped to nothing.
+func TestCallsAfterTheTotalStartedOver(t *testing.T) {
+	t.Parallel()
+	c := NewCalls(nil)
+	c.Line([]byte(`{"timestamp":"2026-10-20T10:00:00Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}`))
+	c.Line([]byte(tokenCount("total_token_usage", 50000, 500, 2000, 20)))
+	c.Line([]byte(tokenCount("total_token_usage", 3000, 30, 3000, 30)))
+	c.Line([]byte(tokenCount("total_token_usage", 4000, 40, 1000, 10)))
+	_, calls := c.Changed()
+	if assert.Len(t, calls, 3) {
+		assert.Equal(t, pricing.Tokens{Input: 3000, Output: 30}, calls[1].Tokens)
+		assert.Equal(t, pricing.Tokens{Input: 1000, Output: 10}, calls[2].Tokens, "the change of the new total")
+	}
+}

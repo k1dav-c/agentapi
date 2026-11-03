@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog"
@@ -21,9 +22,12 @@ type sessionLog struct {
 	subagent bool
 	codex    bool
 
-	lines int
-	// session says the log is one of the directory's sessions: its first
-	// line said so, and the working directory its lines record (Claude
+	// lines counts the lines read, skipped those before the header; headed
+	// says the header was read.
+	lines, skipped int
+	headed         bool
+	// session says the log is one of the directory's sessions: its header
+	// said so, and the working directory its lines record (Claude
 	// Code) is the directory.
 	session     bool
 	recordedCWD bool
@@ -71,12 +75,18 @@ func (s *Store) newSessionLog(subagent bool) *sessionLog {
 
 // Line reads the log's next line.
 func (l *sessionLog) Line(line []byte) bool {
-	first := l.lines == 0
 	l.lines++
 	l.drift.Line(line)
-	if first && !l.head(line) {
-		// Not a session of the directory: nothing of it counts.
-		return false
+	if !l.headed {
+		if !l.subagent && l.src.preamble != nil && l.skipped < l.src.maxPreamble && l.src.preamble(line) {
+			l.skipped++
+			return true
+		}
+		l.headed = true
+		if !l.head(line) {
+			// Not a session of the directory: nothing of it counts.
+			return false
+		}
 	}
 	if l.src.linesRecordCWD && !l.subagent && !l.recordedCWD {
 		// The directory's name doesn't say whose log it is: Claude Code
@@ -108,7 +118,8 @@ func (l *sessionLog) Line(line []byte) bool {
 	return true
 }
 
-// head reads the log's first line, and reports whether the log is to be
+// head reads the log's header, its first line but those that can come
+// before it (Claude Code's), and reports whether the log is to be
 // read on.
 func (l *sessionLog) head(line []byte) bool {
 	if l.subagent {
@@ -144,20 +155,36 @@ func (l *sessionLog) head(line []byte) bool {
 }
 
 // identified reports whether the log said whose session it holds: its
-// first line did, and the first working directory its lines record
+// header did, and the first working directory its lines record
 // (Claude Code).
 func (l *sessionLog) identified() bool {
-	return l.lines > 0 && (!l.src.linesRecordCWD || l.recordedCWD)
+	return l.headed && (!l.src.linesRecordCWD || l.recordedCWD)
 }
 
 // own reports whether a line of a Codex subagent's log is its own rather
 // than one copied from its parent.
 func (l *sessionLog) own(line []byte) bool {
-	var entry struct {
-		Ordinal *int64 `json:"ordinal"`
-		Type    string `json:"type"`
+	return codexOwnLine(line, l.from)
+}
+
+// codexOwnLine reports whether a line of a Codex subagent's log is its own,
+// its first own line being from: not its parent's, which the log starts
+// with a copy of, nor a session_meta line. A line without an ordinal is
+// its own. The line's fields are found without decoding it: the copy is of
+// the parent's whole log.
+func codexOwnLine(line []byte, from int64) bool {
+	if !agentlog.Members(line, func(_, _ []byte) bool { return true }) {
+		return true
 	}
-	return json.Unmarshal(line, &entry) != nil || (entry.Type != "session_meta" && (entry.Ordinal == nil || *entry.Ordinal >= l.from))
+	if typ, _ := agentlog.StringField(line, "type"); typ == "session_meta" {
+		return false
+	}
+	raw, ok := agentlog.Field(line, "ordinal")
+	if !ok {
+		return true
+	}
+	ordinal, err := strconv.ParseInt(string(raw), 10, 64)
+	return err != nil || ordinal >= from
 }
 
 // summarize reads the session's name and the user's prompts.

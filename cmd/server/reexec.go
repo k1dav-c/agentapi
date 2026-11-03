@@ -49,13 +49,19 @@ type selfExec struct {
 	served context.Context
 	stop   context.CancelFunc
 	logger *slog.Logger
+
+	// restartSignals catches SIGUSR2 from startup on (listenForRestart),
+	// nil until then.
+	restartSignals chan os.Signal
 }
 
 // newSelfExec takes how the server was started, at startup: once an update
 // replaced the program, /proc/self/exe names a deleted file.
 func newSelfExec() *selfExec {
 	path, _ := resolveExecutable(os.Args[0], exec.LookPath, os.Executable)
-	return &selfExec{path: path, argv: slices.Clone(os.Args), env: os.Environ()}
+	s := &selfExec{path: path, argv: slices.Clone(os.Args), env: os.Environ()}
+	s.listenForRestart()
+	return s
 }
 
 // resolveExecutable returns the program to run again: argv0 as the shell
@@ -162,6 +168,18 @@ func (s *selfExec) shutdown(cancel context.CancelFunc) {
 // restarting reports whether a restart asked to run the server again.
 func (s *selfExec) restarting() bool {
 	return s != nil && s.requested.Load()
+}
+
+// setEnv sets name to value in the environment the program runs again
+// with, or removes it if value is empty.
+func (s *selfExec) setEnv(name, value string) {
+	if s == nil {
+		return
+	}
+	s.env = slices.DeleteFunc(s.env, func(kv string) bool { return strings.HasPrefix(kv, name+"=") })
+	if value != "" {
+		s.env = append(s.env, name+"="+value)
+	}
 }
 
 // exec runs the program again in this process. It returns only if it

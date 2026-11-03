@@ -23,6 +23,7 @@ import {
 } from "@/lib/hub";
 import {olderUpdates} from "@/lib/hub-update";
 import {cn} from "@/lib/utils";
+import {useHubTime} from "./clock";
 import {Constellation} from "./brand";
 import {StatusGlyph} from "./status-glyph";
 import {agentName} from "./instance-row";
@@ -60,6 +61,14 @@ function action(instance: HubInstance): string {
 function greeting(now: number): string {
   const hour = new Date(now).getHours();
   return hour < 5 ? "Working late" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+}
+
+// Greeting greets by the time of day, and with date, says the day; it
+// renders again when that changes.
+function Greeting({date = false}: {date?: boolean}) {
+  return useHubTime((now) =>
+    date ? `${greeting(now)} · ${new Date(now).toLocaleDateString(undefined, {weekday: "long", month: "long", day: "numeric"})}` : greeting(now),
+  );
 }
 
 function Meta({instance, hubVersion}: {instance: HubInstance; hubVersion: string}) {
@@ -102,9 +111,10 @@ function Section({title, count, children}: {title: string; count: number; childr
 const cardClass =
   "group/card hub-rise flex min-w-0 flex-col rounded-2xl border bg-card p-4 text-left shadow-xs outline-none transition-[box-shadow,transform,border-color] hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
-function NeedsCard({instance, hubVersion, now, onOpen}: {instance: HubInstance; hubVersion: string; now: number; onOpen: () => void}) {
+function NeedsCard({instance, hubVersion, onOpen}: {instance: HubInstance; hubVersion: string; onOpen: () => void}) {
   const {icon: Icon, label} = ask(instance);
   const since = activity(instance).since;
+  const ago = useHubTime((now) => formatAgo(since, now));
   return (
     <button type="button" onClick={onOpen} className={cn(cardClass, "border-state-needs/35 hover:border-state-needs/60")}>
       <span className="flex items-center gap-2">
@@ -114,7 +124,7 @@ function NeedsCard({instance, hubVersion, now, onOpen}: {instance: HubInstance; 
         <span className="text-xs font-semibold tracking-wide text-state-needs uppercase">{label}</span>
         {since && (
           <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-            {formatAgo(since, now) === "now" ? "just now" : `waiting ${formatAgo(since, now)}`}
+            {ago === "now" ? "just now" : `waiting ${ago}`}
           </span>
         )}
       </span>
@@ -132,13 +142,14 @@ function NeedsCard({instance, hubVersion, now, onOpen}: {instance: HubInstance; 
   );
 }
 
-function WorkingCard({instance, hubVersion, now, onOpen}: {instance: HubInstance; hubVersion: string; now: number; onOpen: () => void}) {
+function WorkingCard({instance, hubVersion, onOpen}: {instance: HubInstance; hubVersion: string; onOpen: () => void}) {
   const doing = activity(instance);
+  const elapsed = useHubTime((now) => formatElapsed(doing.since, now));
   return (
     <button type="button" onClick={onOpen} className={cardClass}>
       <span className="flex items-baseline justify-between gap-3">
         <span className="min-w-0 truncate text-sm font-medium">{displayName(instance)}</span>
-        <span className="shrink-0 font-mono text-sm text-state-working tabular-nums">{formatElapsed(doing.since, now)}</span>
+        <span className="shrink-0 font-mono text-sm text-state-working tabular-nums">{elapsed}</span>
       </span>
       <span className="mt-1.5 line-clamp-2 text-sm text-muted-foreground">{doing.text}</span>
       <span className="hub-shimmer mt-4 block h-1 rounded-full bg-state-working/12" aria-hidden="true" />
@@ -149,14 +160,15 @@ function WorkingCard({instance, hubVersion, now, onOpen}: {instance: HubInstance
   );
 }
 
-function FinishedCard({instance, hubVersion, now, onOpen}: {instance: HubInstance; hubVersion: string; now: number; onOpen: () => void}) {
+function FinishedCard({instance, hubVersion, onOpen}: {instance: HubInstance; hubVersion: string; onOpen: () => void}) {
   const doing = activity(instance);
+  const ago = useHubTime((now) => formatAgo(doing.since, now));
   return (
     <button type="button" onClick={onOpen} className={cardClass}>
       <span className="flex items-center gap-2">
         <CircleCheck className="size-4 text-state-ready" aria-hidden="true" />
         <span className="min-w-0 truncate text-sm font-medium">{displayName(instance)}</span>
-        <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">{formatAgo(doing.since, now)}</span>
+        <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">{ago}</span>
       </span>
       <span className="mt-2 line-clamp-2 text-sm text-muted-foreground">{doing.text}</span>
       <span className="mt-3">
@@ -329,7 +341,6 @@ export function Overview({
   instances,
   hubVersion,
   counts,
-  now,
   onOpen,
   onFilter,
   onAdd,
@@ -338,7 +349,6 @@ export function Overview({
   instances: HubInstance[];
   hubVersion: string;
   counts: Record<HubFilter, number>;
-  now: number;
   onOpen: (id: string) => void;
   onFilter: (filter: HubFilter) => void;
   onAdd: () => void;
@@ -351,7 +361,9 @@ export function Overview({
     return (
       <div className="h-full overflow-y-auto">
         <div className="mx-auto max-w-2xl px-10 pt-12 pb-16">
-          <p className="text-sm text-muted-foreground">{greeting(now)}</p>
+          <p className="text-sm text-muted-foreground">
+            <Greeting />
+          </p>
           <h2 className="mt-2 text-4xl font-semibold tracking-tight">Connect your first agent</h2>
           <p className="mt-3 text-[15px] text-muted-foreground">Each machine joins once. Its agents show up here and stay after restarts.</p>
           <Onboarding root={root} onAdd={onAdd} />
@@ -377,7 +389,7 @@ export function Overview({
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-6xl px-10 pt-12 pb-16">
         <p className="text-sm text-muted-foreground">
-          {greeting(now)} · {new Date(now).toLocaleDateString(undefined, {weekday: "long", month: "long", day: "numeric"})}
+          <Greeting date />
         </p>
         <h2 className={cn("mt-2 text-4xl font-semibold tracking-tight text-balance", needs.length > 0 && "text-state-needs")}>{headline}</h2>
         <p className="mt-3 text-[15px] text-muted-foreground">{sub}</p>
@@ -410,21 +422,21 @@ export function Overview({
         {needs.length > 0 && (
           <Section title="Needs you" count={needs.length}>
             {needs.map((instance) => (
-              <NeedsCard key={instance.id} instance={instance} hubVersion={hubVersion} now={now} onOpen={() => onOpen(instance.id)} />
+              <NeedsCard key={instance.id} instance={instance} hubVersion={hubVersion} onOpen={() => onOpen(instance.id)} />
             ))}
           </Section>
         )}
         {working.length > 0 && (
           <Section title="Working" count={working.length}>
             {working.map((instance) => (
-              <WorkingCard key={instance.id} instance={instance} hubVersion={hubVersion} now={now} onOpen={() => onOpen(instance.id)} />
+              <WorkingCard key={instance.id} instance={instance} hubVersion={hubVersion} onOpen={() => onOpen(instance.id)} />
             ))}
           </Section>
         )}
         {unread.length > 0 && (
           <Section title="Finished since you looked" count={unread.length}>
             {unread.map((instance) => (
-              <FinishedCard key={instance.id} instance={instance} hubVersion={hubVersion} now={now} onOpen={() => onOpen(instance.id)} />
+              <FinishedCard key={instance.id} instance={instance} hubVersion={hubVersion} onOpen={() => onOpen(instance.id)} />
             ))}
           </Section>
         )}

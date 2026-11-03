@@ -7,6 +7,7 @@ import {
   isAuthRequired,
   isCrossOrigin,
   markAuthRequired,
+  reconnectWhenSignedIn,
   requestCredentials,
   requestSignIn,
   resetAuthState,
@@ -232,6 +233,38 @@ describe("requestSignIn", () => {
     // Something the user did still asks.
     expect(await requestSignIn(BASE)).toBe(false);
     expect(prompts).toHaveLength(2);
+  });
+});
+
+describe("reconnectWhenSignedIn", () => {
+  test("a stream that failed for a sign-in asks for the token, and reconnects once signed in", async () => {
+    const prompts = dialog(true);
+    mockFetch(json({auth_required: true, authenticated: false}));
+    let reconnects = 0;
+    await reconnectWhenSignedIn(BASE, () => reconnects++);
+    expect(prompts).toEqual([BASE]);
+    expect(reconnects).toBe(1);
+  });
+
+  test("any other failure leaves the stream to its backoff", async () => {
+    const prompts = dialog(true);
+    mockFetch(json({auth_required: true, authenticated: true}), new Response("down", {status: 502}));
+    let reconnects = 0;
+    await reconnectWhenSignedIn(BASE, () => reconnects++);
+    await reconnectWhenSignedIn(BASE, () => reconnects++);
+    expect(prompts).toEqual([]);
+    expect(reconnects).toBe(0);
+  });
+
+  test("in the background: a dialog the user closed stays closed", async () => {
+    const prompts = dialog(false);
+    const locked = () => json({auth_required: true, authenticated: false});
+    mockFetch(locked(), locked());
+    expect(await ensureSession(BASE)).toBe(false);
+    let reconnects = 0;
+    await reconnectWhenSignedIn(BASE, () => reconnects++);
+    expect(prompts).toHaveLength(1);
+    expect(reconnects).toBe(0);
   });
 });
 

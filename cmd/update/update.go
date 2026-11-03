@@ -34,8 +34,17 @@ func init() {
 	UpdateCmd.Flags().BoolVar(&restartFlag, "restart", false, "Then restart the AgentAPIs running this binary in place, the invoking user's under sudo")
 }
 
+const (
+	// checkTimeout bounds the lookup of the latest release.
+	checkTimeout = time.Minute
+	// installTimeout bounds the install: waiting for the lock another
+	// update holds (bounded by the same timeout), the download, its check
+	// and the rename. As POST /update's.
+	installTimeout = 10 * time.Minute
+)
+
 func runUpdate(_ *cobra.Command, _ []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	checkCtx, cancel := context.WithTimeout(context.Background(), checkTimeout)
 	defer cancel()
 
 	// Resolve current executable path.
@@ -59,7 +68,7 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 
 	// Fetch latest release.
 	var source selfupdate.Source
-	info, err := source.Latest(ctx)
+	info, err := source.Latest(checkCtx)
 	if err != nil {
 		return fmt.Errorf("fetch latest release: %w", err)
 	}
@@ -82,6 +91,11 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 
 	if !needsUpdate {
 		fmt.Println("Already up to date.")
+		if restartFlag && !checkFlag {
+			// The AgentAPIs running may be older than the program: another
+			// update replaced it without restarting them.
+			return restartAll(program)
+		}
 		return nil
 	}
 
@@ -100,7 +114,9 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 	// replace this one, under the lock that AgentAPIs updating through
 	// their API take too.
 	fmt.Printf("Downloading %s...\n", assetName)
-	installed, err := source.Install(ctx, info, program, forceFlag)
+	installCtx, cancelInstall := context.WithTimeout(context.Background(), installTimeout)
+	defer cancelInstall()
+	installed, err := source.Install(installCtx, info, program, forceFlag)
 	if err != nil {
 		return err
 	}
@@ -114,7 +130,12 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 		fmt.Printf("Successfully updated agentapi to v%s\n", latestVer.String())
 	}
 	if restartFlag {
-		return restart.Run(context.Background(), restart.Options{All: true, Executable: program.Real, Out: os.Stdout})
+		return restartAll(program)
 	}
 	return nil
+}
+
+// restartAll restarts the AgentAPIs running program in place.
+func restartAll(program selfupdate.Program) error {
+	return restart.Run(context.Background(), restart.Options{All: true, Executable: program.Real, Out: os.Stdout})
 }

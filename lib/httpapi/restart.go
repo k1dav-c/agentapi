@@ -66,11 +66,11 @@ func (s *Server) forgetConversationLocked() {
 }
 
 // resetConversationLocked clears all conversation state: the
-// conversation's messages, and what forgetConversationLocked clears.
-// Caller holds s.mu.
+// conversation's messages, and what forgetConversationLocked clears, which
+// the conversation runs once no snapshot of the old conversation can
+// reach the emitter's new epoch. Caller holds s.mu.
 func (s *Server) resetConversationLocked() {
-	s.forgetConversationLocked()
-	s.conversation.Reset()
+	s.conversation.Reset(s.forgetConversationLocked)
 }
 
 // restartRefusedLocked returns why the agent can't be replaced now, or
@@ -126,6 +126,8 @@ func (s *Server) runRestartLocked(r agentRestart) error {
 	if r.done != nil {
 		r.done()
 	}
+	// The new agent's status is the lifecycle again.
+	s.emitter.ReleaseLifecycle()
 	return nil
 }
 

@@ -3,6 +3,7 @@ package sessions
 import (
 	"fmt"
 	"hash/fnv"
+	"log/slog"
 	"maps"
 	"math"
 	"math/rand/v2"
@@ -12,6 +13,7 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -165,10 +167,22 @@ func TestPiCostsAndUnknownPrices(t *testing.T) {
 		// A model without a price, which Pi didn't price either.
 		`{"type":"message","id":"a2","timestamp":"2026-10-20T10:00:03.000Z","message":{"role":"assistant","model":"local-llama","content":[{"type":"text","text":"Hi"}],"usage":{"input":500,"output":5,"cacheRead":0,"cacheWrite":0}}}`,
 	)
-	d, err := newStore(t, "pi", "/w").Costs()
+	var logs strings.Builder
+	store, err := New("pi", "/w", Config{Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	require.NoError(t, err)
+	d, err := store.Costs()
 	require.NoError(t, err)
 	c := d.Cost("p1")
 	assert.Equal(t, 2, c.Calls)
+	// The model without a price is logged once, however many calls it has.
+	assert.Equal(t, 1, strings.Count(logs.String(), "model=local-llama"), logs.String())
+	writeLog(t, filepath.Join(dir, "2026-10-20T11-00-00-000Z_p2.jsonl"), time.Now(),
+		`{"type":"session","version":3,"id":"p2","timestamp":"2026-10-20T11:00:00.000Z","cwd":"/w"}`,
+		`{"type":"message","id":"a3","timestamp":"2026-10-20T11:00:03.000Z","message":{"role":"assistant","model":"local-llama","content":[{"type":"text","text":"Hi"}],"usage":{"input":500,"output":5,"cacheRead":0,"cacheWrite":0}}}`,
+	)
+	_, err = store.Costs()
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(logs.String(), "model=local-llama"), logs.String())
 	assert.InDelta(t, 0.0123, c.USD, 1e-12)
 	require.Len(t, c.Models, 2)
 	assert.Equal(t, "gpt-6.1-sol", c.Models[0].Model, "the most expensive first")
@@ -588,4 +602,71 @@ func TestCostsWhileTheAgentWrites(t *testing.T) {
 	wg.Wait()
 	d := matchesAFreshReading(t, store, "claude", "/w", "after the writes")
 	assert.Equal(t, 121, d.Cost("s1").Calls)
+}
+
+// Calls a log doesn't identify all count in the session's cost.
+func TestClaudeCostsOfCallsWithoutIDs(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	dir := filepath.Join(config, "projects", "-w")
+	call := func(at string) string {
+		return fmt.Sprintf(`{"type":"assistant","timestamp":%q,"sessionId":"s1","message":{"role":"assistant","model":"claude-opus-5-5","content":[],"usage":{"input_tokens":10,"output_tokens":20}}}`, at)
+	}
+	writeLog(t, filepath.Join(dir, "s1.jsonl"), time.Now(),
+		claudePromptLine("s1", "2026-10-20T10:00:00.000Z", "Go"),
+		call("2026-10-20T10:00:01.000Z"),
+		call("2026-10-20T10:00:02.000Z"),
+		call("2026-10-20T10:00:03.000Z"),
+	)
+	d, err := newStore(t, "claude", "/w").Costs()
+	require.NoError(t, err)
+	assert.Equal(t, 3, d.Cost("s1").Calls)
+}
+
+// A model's cost is priced only when all its calls are: Pi prices some
+// calls of a model itself, and not others.
+func TestModelPricedByAllItsCalls(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)
+	calls := []ModelCall{
+		{Time: at, Model: "local-llama", USD: 0.01, Priced: true},
+		{Time: at.Add(time.Second), Model: "local-llama"},
+		{Time: at.Add(2 * time.Second), Model: "claude-opus-5-5", USD: 0.02, Priced: true},
+	}
+	c := CostOf(calls)
+	require.Len(t, c.Models, 2)
+	assert.Equal(t, "claude-opus-5-5", c.Models[0].Model)
+	assert.True(t, c.Models[0].Priced)
+	assert.False(t, c.Models[1].Priced, "a call of it had no price")
+
+	// Summed over sessions, the one with the priced call first.
+	slices.Reverse(calls)
+	assert.False(t, CostOf(calls).Models[1].Priced)
+	sum := newCostSum()
+	sum.merge(CostOf(calls[2:]))
+	sum.merge(CostOf(calls[1:2]))
+	sum.merge(CostOf(calls[:1]))
+	total := sum.c.sorted()
+	require.Len(t, total.Models, 2)
+	assert.False(t, total.Models[1].Priced)
+}
+
+// A fork's own calls follow those it copied: they are a part of its calls,
+// not a copy; calls of another session among them make a copy.
+func TestOwnCallsShareTheCalls(t *testing.T) {
+	t.Parallel()
+	parent, fork := &sessionCost{}, &sessionCost{}
+	call := func(key string) ModelCall { return ModelCall{Model: "m", key: key} }
+	fork.calls = []ModelCall{call("a"), call("b"), call("c"), call(""), call("d")}
+	owner := map[string]*sessionCost{"a": parent, "b": parent, "c": fork, "d": fork}
+	own := fork.ownCalls(owner)
+	require.Len(t, own, 3)
+	assert.Same(t, &fork.calls[2], &own[0], "shared")
+	assert.Equal(t, 3, cap(own), "appending to it leaves the calls alone")
+
+	owner["c"] = parent
+	owner["b"] = fork
+	own = fork.ownCalls(owner)
+	assert.Equal(t, []string{"b", "", "d"}, []string{own[0].key, own[1].key, own[2].key})
+	assert.NotSame(t, &fork.calls[1], &own[0], "a copy")
 }

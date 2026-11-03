@@ -174,6 +174,11 @@ func (w *Writer) WriteAsync(v any, logger *slog.Logger) {
 // ended, every request still waiting gets Close's error, and new ones are
 // refused with it: a response either arrives first or the error does,
 // and nothing waits forever.
+//
+// A caller can stop waiting while the request stays registered (Detach):
+// the agent reported it under way before its response, or the caller gave
+// up on a request the agent may still carry out. Its response, once it
+// comes, is then the adapter's alone.
 type Calls[K comparable, R any] struct {
 	mu     sync.Mutex
 	calls  map[K]*Call[R]
@@ -184,6 +189,9 @@ type Calls[K comparable, R any] struct {
 type Call[R any] struct {
 	onResult func(R, error)
 	done     chan result[R]
+	// waiting is set while a caller waits for done; cleared by the one
+	// hand-over done gets.
+	waiting atomic.Bool
 }
 
 type result[R any] struct {
@@ -204,6 +212,7 @@ func (c *Calls[K, R]) Add(id K, onResult func(R, error)) (*Call[R], error) {
 		c.calls = make(map[K]*Call[R])
 	}
 	call := &Call[R]{onResult: onResult, done: make(chan result[R], 1)}
+	call.waiting.Store(true)
 	c.calls[id] = call
 	return call, nil
 }
@@ -212,18 +221,44 @@ func (c *Calls[K, R]) Add(id K, onResult func(R, error)) (*Call[R], error) {
 // reports false for a request nobody waits for (it timed out, or was never
 // made).
 func (c *Calls[K, R]) Resolve(id K, value R, err error) bool {
-	c.mu.Lock()
-	call := c.calls[id]
-	delete(c.calls, id)
-	c.mu.Unlock()
+	call, _ := c.Take(id)
 	if call == nil {
 		return false
 	}
 	if call.onResult != nil {
 		call.onResult(value, err)
 	}
-	call.done <- result[R]{value, err}
+	call.Deliver(value, err)
 	return true
+}
+
+// Take removes request id, for an adapter that handles its response
+// itself, and reports whether a caller still waits for it, which Deliver
+// then hands the response to. call is nil for a request that isn't
+// registered.
+func (c *Calls[K, R]) Take(id K) (call *Call[R], waiting bool) {
+	c.mu.Lock()
+	call = c.calls[id]
+	delete(c.calls, id)
+	c.mu.Unlock()
+	if call == nil {
+		return nil, false
+	}
+	return call, call.waiting.Load()
+}
+
+// Detach hands value and err to the caller waiting for request id now,
+// and keeps the request registered: its response, once it comes, goes to
+// Take or onResult only. It reports false if id isn't registered or its
+// caller was handed something already.
+func (c *Calls[K, R]) Detach(id K, value R, err error) bool {
+	c.mu.Lock()
+	call := c.calls[id]
+	c.mu.Unlock()
+	if call == nil {
+		return false
+	}
+	return call.Deliver(value, err)
 }
 
 // Drop forgets request id, whose caller stopped waiting.
@@ -244,17 +279,34 @@ func (c *Calls[K, R]) Close(err error) {
 	}
 	c.mu.Unlock()
 	for _, call := range calls {
-		call.done <- result[R]{err: err}
+		var zero R
+		call.Deliver(zero, err)
 	}
 }
 
-// Wait waits for the response, or for ctx to end. A caller that gives up
-// drops the request.
+// Deliver hands value and err to the caller waiting for call, unless it
+// was handed something already. It reports whether it handed them over.
+func (call *Call[R]) Deliver(value R, err error) bool {
+	if !call.waiting.CompareAndSwap(true, false) {
+		return false
+	}
+	call.done <- result[R]{value, err}
+	return true
+}
+
+// Wait waits for the response, or for ctx to end; a response already
+// handed over wins over ctx. A caller that gives up drops the request, or
+// detaches it if the agent may still answer.
 func (call *Call[R]) Wait(ctx context.Context) (R, error) {
 	select {
 	case r := <-call.done:
 		return r.value, r.err
 	case <-ctx.Done():
+		select {
+		case r := <-call.done:
+			return r.value, r.err
+		default:
+		}
 		var zero R
 		return zero, ctx.Err()
 	}

@@ -62,3 +62,17 @@ export function resolveRelativeRef(fromPath: string, ref: string): {path: string
   const line = fragment.match(/^L(\d+)/)?.[1];
   return line ? {path: segments.join("/"), line: Number(line)} : {path: segments.join("/")};
 }
+
+// The policy an HTML preview runs under: its scripts, styles and assets
+// load and run as the page has them, but it can't send anything anywhere
+// (fetch, XHR, WebSocket, EventSource, beacons) or submit a form.
+export const PREVIEW_CSP = "default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'none'; form-action 'none'; base-uri 'none'";
+
+// withPreviewCSP puts PREVIEW_CSP first in html, before anything the page
+// runs: after its doctype, so the page keeps its mode. The parser opens the
+// head for it; the page's own <html> and <head> tags join those.
+export function withPreviewCSP(html: string): string {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">`;
+  const doctype = html.match(/^\uFEFF?\s*<!doctype[^>]*>/i)?.[0] ?? "";
+  return doctype + meta + html.slice(doctype.length);
+}

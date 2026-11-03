@@ -140,7 +140,8 @@ func TestServeOutlivesTheNativeAgent(t *testing.T) {
 }
 
 // While the agent is started again after an exit, the lifecycle says it
-// restarts; then the agent is ready on its session.
+// restarts, until the new agent accepts turns; then the agent is ready on
+// its session.
 func TestServeRestartsTheNativeAgent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -159,7 +160,7 @@ func TestServeRestartsTheNativeAgent(t *testing.T) {
 		a := s.factory.Last()
 		return a.ResumeRef == "session-1" && a.Sink() != nil
 	}, 5*time.Second, 5*time.Millisecond)
-	assert.Equal(t, httpapi.LifecycleStarting, s.lifecycle())
+	assert.Equal(t, httpapi.LifecycleRestarting, s.lifecycle(), "until the new agent accepts turns")
 	close(release)
 	s.awaitLifecycle(httpapi.LifecycleReady)
 }

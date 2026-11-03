@@ -109,11 +109,18 @@ func (p MessagePartText) String() string {
 // screen shows goes to the Emitter (EmitScreen).
 type Conversation interface {
 	Messages() []Message
-	Send(...MessagePart) error
+	// Send sends a message and returns once it went out, or ctx ended: a
+	// message still waiting is withdrawn (ErrMessageValidationChanging),
+	// and one on its way is cut short.
+	Send(ctx context.Context, parts ...MessagePart) error
 	Start(context.Context)
 	Status() Status
 	// Reset clears all conversation state back to the initial empty state.
-	Reset()
+	// forget, if set, runs first, once no state of the old conversation
+	// can still reach the Emitter: what the caller keeps of it (the
+	// Emitter's own state) can be cleared there, and no snapshot taken
+	// before the reset arrives after.
+	Reset(forget func())
 }
 
 // Emitter receives conversation state updates.

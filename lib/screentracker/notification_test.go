@@ -71,7 +71,7 @@ func TestNotificationSnapshots(t *testing.T) {
 	idle()
 	// Send must wake a sleeping snapshot loop even when Write emits no event.
 	sent := make(chan error, 1)
-	go func() { sent <- c.Send(conv.MessagePartText{Content: "hello"}) }()
+	go func() { sent <- c.Send(context.Background(), conv.MessagePartText{Content: "hello"}) }()
 	select {
 	case err := <-sent:
 		require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestNotificationSnapshots(t *testing.T) {
 	}
 	stable()
 	idle()
-	c.Reset()
+	c.Reset(nil)
 	stable()
 	idle()
 	cancel()

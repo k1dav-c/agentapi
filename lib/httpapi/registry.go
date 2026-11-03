@@ -82,7 +82,7 @@ func (s *Server) newInstanceRegistry(dir string, bind string, restartsInPlace bo
 		dir:    dir,
 		logger: s.logger,
 		entry: func(port int) registry.Entry {
-			instance := s.webhook.instanceSnapshot()
+			instance := s.webhook.Instance()
 			if instance.URL == "" {
 				instance.URL = localURL(bind, port)
 			}

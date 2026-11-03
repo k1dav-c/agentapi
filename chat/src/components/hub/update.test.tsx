@@ -134,7 +134,7 @@ describe("UpdateDialogBody", () => {
 describe("InstanceRow", () => {
   const row = (target: HubInstance) =>
     renderToStaticMarkup(
-      <InstanceRow instance={target} hubVersion="2.1.0" root="" groups={[]} order="groups" selected={false} now={0} onSelect={() => {}} onForget={() => {}} onGroup={() => {}} onNewGroup={() => {}} onMute={() => {}} onPin={() => {}} onMove={() => {}} />,
+      <InstanceRow instance={target} hubVersion="2.1.0" root="" groups={[]} order="groups" selected={false} actions={{select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}}} />,
     );
 
   test("shows an update under way, and says it to a screen reader", () => {

@@ -38,6 +38,16 @@ type loopState struct {
 	throttle *agentio.Throttle[string]
 	// interrupt runs from when the adapter sent abort.
 	interrupt agentio.InterruptDeadline
+	// settleSince is when Pi last sent something after an agent_end
+	// that won't be retried, zero otherwise: agent_settled ends the turn
+	// right after, or the loop does settleGrace later (missingSettle).
+	// settlePaused holds that while Pi compacts or retries, which take
+	// long without a record.
+	settleSince  time.Time
+	settlePaused bool
+	// settleMissed: the loop ended the turn without agent_settled, so
+	// one that comes late, before the next run, is ignored.
+	settleMissed bool
 
 	// The outcome of the turn so far.
 	stopReason string
@@ -81,7 +91,56 @@ func (a *Adapter) handleRecord(line []byte) {
 // send a snapshot the throttle held back, or to end an interrupted turn
 // Pi didn't end. It is the zero time if there is nothing to do.
 func (a *Adapter) nextWake() time.Time {
-	return agentio.Earliest(a.loop.throttle.Next(), a.loop.interrupt.Next())
+	return agentio.Earliest(a.loop.throttle.Next(), a.loop.interrupt.Next(), a.settleDeadline())
+}
+
+// settleDeadline is when the loop ends a turn whose agent_settled didn't
+// come, or the zero time.
+func (a *Adapter) settleDeadline() time.Time {
+	if a.loop.settleSince.IsZero() || a.loop.settlePaused {
+		return time.Time{}
+	}
+	return a.loop.settleSince.Add(a.settleGrace)
+}
+
+// watchSettle follows the wait for agent_settled through the record of
+// type typ.
+func (a *Adapter) watchSettle(typ string, line []byte) {
+	switch typ {
+	case "agent_end":
+		ev, _ := decodeRecord[agentEnd](a, line, typ)
+		a.loop.settlePaused = false
+		if ev.WillRetry {
+			a.loop.settleSince = time.Time{}
+		} else {
+			a.loop.settleSince = a.clock.Now()
+		}
+	case "agent_start":
+		a.loop.settleSince, a.loop.settlePaused, a.loop.settleMissed = time.Time{}, false, false
+	case "agent_settled":
+		a.loop.settleSince, a.loop.settlePaused = time.Time{}, false
+	case "compaction_start", "auto_retry_start":
+		a.loop.settlePaused = true
+	case "compaction_end", "auto_retry_end":
+		a.loop.settlePaused = false
+		fallthrough
+	default:
+		if !a.loop.settleSince.IsZero() {
+			// Pi is still at it.
+			a.loop.settleSince = a.clock.Now()
+		}
+	}
+}
+
+// missingSettle ends a turn whose run ended without agent_settled.
+func (a *Adapter) missingSettle() {
+	a.loop.settleSince = time.Time{}
+	a.drift.Unexpected("missing agent_settled", "after", a.settleGrace)
+	a.setRunActive(false)
+	if a.isTurnActive() {
+		a.loop.settleMissed = true
+		a.endTurn()
+	}
 }
 
 // wake sends the snapshots the throttle held back, and ends an interrupted
@@ -93,6 +152,9 @@ func (a *Adapter) wake() {
 		a.loop.interrupt.Stop()
 		a.log.Warn("Pi didn't end the interrupted turn; ending it here")
 		a.endTurn()
+	}
+	if d := a.settleDeadline(); !d.IsZero() && !a.clock.Now().Before(d) {
+		a.missingSettle()
 	}
 }
 
@@ -113,17 +175,13 @@ func (a *Adapter) handleExit() {
 	a.mu.Lock()
 	a.exited = true
 	a.runActive = false
-	pending := a.pending
-	a.pending = make(map[string]*pendingCmd)
+	a.cmds = make(map[string]*sentCmd)
 	for _, d := range a.dialogs {
 		d.stopTimer()
 	}
 	a.dialogs = make(map[string]*dialog)
 	a.mu.Unlock()
-	for _, p := range pending {
-		// A caller that stopped waiting doesn't read it.
-		deliverResult(p, cmdResult{err: errExited})
-	}
+	a.calls.Close(errExited)
 	a.flushStream()
 	a.flushThrottled(true)
 	a.log.Info("Pi closed its output")
@@ -143,6 +201,7 @@ func (a *Adapter) handleLine(line []byte) {
 		a.log.Warn("Pi wrote a line that is not JSON", "error", err)
 		return
 	}
+	a.watchSettle(env.Type, line)
 	switch env.Type {
 	case "response":
 		if r, ok := decodeRecord[response](a, line, env.Type); ok {
@@ -193,30 +252,27 @@ func (a *Adapter) handleLine(line []byte) {
 	}
 }
 
-// takePending removes the command waiting for response id. deliver says
+// takeSent removes the command waiting for response id. deliver says
 // whether its caller still waits.
-func (a *Adapter) takePending(id string) (p *pendingCmd, deliver bool) {
+func (a *Adapter) takeSent(id string) (p *sentCmd, call *agentio.Call[response], deliver bool) {
+	call, deliver = a.calls.Take(id)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	p = a.pending[id]
-	if p == nil {
-		return nil, false
+	p = a.cmds[id]
+	delete(a.cmds, id)
+	if p == nil || call == nil {
+		return nil, nil, false
 	}
-	delete(a.pending, id)
-	return p, !p.detached
+	return p, call, deliver
 }
 
 func (a *Adapter) handleResponse(r response) {
-	p, deliver := a.takePending(r.ID)
+	p, call, deliver := a.takeSent(r.ID)
 	if p == nil {
 		if !r.Success {
 			a.log.Warn("Pi rejected a command", "command", r.Command, "error", r.Error)
 		}
 		return
-	}
-	res := cmdResult{data: r.Data}
-	if !r.Success {
-		res = cmdResult{err: &native.RefusedError{Reason: r.Error}}
 	}
 	switch p.kind {
 	case cmdTurn, cmdSteer:
@@ -233,13 +289,13 @@ func (a *Adapter) handleResponse(r response) {
 	case cmdQuery:
 	}
 	if deliver {
-		deliverResult(p, res)
+		call.Deliver(r, nil)
 	}
 }
 
 // handlePromptResponse follows the turn from the response to a prompt.
 // deliver says whether its caller still waits for it.
-func (a *Adapter) handlePromptResponse(p *pendingCmd, deliver bool, r response) {
+func (a *Adapter) handlePromptResponse(p *sentCmd, deliver bool, r response) {
 	if !r.Success {
 		switch {
 		case deliver:
@@ -291,14 +347,6 @@ func (a *Adapter) handlePromptResponse(p *pendingCmd, deliver bool, r response) 
 	if !a.isRunActive() {
 		// Unless it started a run that goes on, the turn ends.
 		a.endTurn()
-	}
-}
-
-// deliverResult hands a result to the caller waiting on p.
-func deliverResult(p *pendingCmd, res cmdResult) {
-	select {
-	case p.done <- res:
-	default:
 	}
 }
 
@@ -370,20 +418,18 @@ func (a *Adapter) setRunActive(v bool) {
 // waiting for their response belong to the running turn.
 func (a *Adapter) acceptPrompt() {
 	a.mu.Lock()
-	var accepted []*pendingCmd
-	for _, p := range a.pending {
+	var accepted []string
+	for id, p := range a.cmds {
 		if p.kind != cmdTurn {
 			continue
 		}
 		p.turn = a.turnSeq
-		if !p.detached {
-			p.detached = true
-			accepted = append(accepted, p)
-		}
+		accepted = append(accepted, id)
 	}
 	a.mu.Unlock()
-	for _, p := range accepted {
-		deliverResult(p, cmdResult{})
+	for _, id := range accepted {
+		// A caller still waiting returns; the response is the loop's.
+		a.calls.Detach(id, response{Success: true}, nil)
 	}
 }
 
@@ -418,6 +464,7 @@ func (a *Adapter) endTurn() {
 	a.mu.Unlock()
 
 	a.loop.interrupt.Stop()
+	a.loop.settleSince, a.loop.settlePaused = time.Time{}, false
 	a.flushStream()
 	// The conversation expires the requests of the turn.
 	a.cancelTurnDialogs(false)
@@ -455,8 +502,14 @@ func (a *Adapter) handleAgentStart() {
 }
 
 // handleSettled ends the turn: agent_settled comes once per prompt, after
-// retries, queued messages and aborts.
+// retries, queued messages and aborts. One that comes after the loop ended
+// the turn without it (missingSettle), before another run, is ignored.
 func (a *Adapter) handleSettled() {
+	if a.loop.settleMissed {
+		a.loop.settleMissed = false
+		a.log.Debug("Pi settled a turn the adapter ended already")
+		return
+	}
 	a.setRunActive(false)
 	a.endTurn()
 }

@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,4 +125,47 @@ func TestServeUpload(t *testing.T) {
 			assert.False(t, strings.HasPrefix(resp.Header.Get("Content-Type"), "image/"), path)
 		}
 	})
+}
+
+// A file whose name names no file is refused; control characters are
+// dropped from the name.
+func TestUploadNames(t *testing.T) {
+	t.Parallel()
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeClaude,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+	})
+	require.NoError(t, err)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	post := func(name string) (int, string) {
+		var buf bytes.Buffer
+		writer := multipart.NewWriter(&buf)
+		part, err := writer.CreatePart(textproto.MIMEHeader{
+			"Content-Disposition": {`form-data; name="file"; filename="` + name + `"`},
+			"Content-Type":        {"application/octet-stream"},
+		})
+		require.NoError(t, err)
+		_, err = part.Write([]byte("x"))
+		require.NoError(t, err)
+		require.NoError(t, writer.Close())
+		resp, err := http.Post(ts.URL+"/upload", writer.FormDataContentType(), &buf)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		var body struct {
+			FilePath string `json:"filePath"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		return resp.StatusCode, body.FilePath
+	}
+	for _, name := range []string{".", ".."} {
+		status, _ := post(name)
+		assert.Equal(t, http.StatusBadRequest, status, name)
+	}
+	status, stored := post("a\tb.txt")
+	require.Equal(t, http.StatusOK, status)
+	assert.Equal(t, "ab.txt", filepath.Base(stored))
 }

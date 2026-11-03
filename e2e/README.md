@@ -21,6 +21,15 @@ For each test, `echo_test.go`:
 4. Lets the fake agent check the messages and send predefined responses.
 5. Checks the responses against the expected results.
 
+## Native transport
+
+`native_test.go` runs `agentapi server -- claude` with a state database, with `fakeclaude/` first on
+`PATH` as Claude Code. `fakeclaude` reports a login for `claude auth status`, answers the control
+requests AgentAPI sends, and answers each user message with one turn, `Echo: <message>`, in the
+stream-json frames a real CLI writes. The tests take a turn, restart the server in place with
+`SIGUSR2`, and check that a new run (`server_id`) keeps the conversation and the API token. They
+need a Unix system.
+
 ## Adding a new test
 
 1. Create a new JSON file in `testdata/` with a unique name.

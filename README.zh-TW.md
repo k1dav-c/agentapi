@@ -408,7 +408,8 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 - 回覆、工具結果和思考內容會即時更新，不必等待整個回合結束。
 - 需要你核准或回答時，輸入框上方會顯示決策卡片，詳見[請求處理](#請求核准提問與計畫)。
 - 關閉或重新啟動 agent 時，若它在輸入關閉後 3 秒內沒有自行結束，AgentAPI 會向它的整個行程
-  群組送出訊號，它啟動的 MCP 伺服器和指令也會一併停止。
+  群組送出訊號，它啟動的 MCP 伺服器和指令也會一併停止。agent 結束後（不論如何結束），它啟動
+  而仍在執行的行程會收到 SIGTERM，2 秒後再收到 SIGKILL。
 - agent 自行結束或啟動失敗時，AgentAPI 會在 2、10、30 秒後接續原工作階段重新啟動。每次嘗試
   都會以錯誤顯示在聊天介面，生命週期為 `restarting`。三次都失敗時，AgentAPI 仍繼續提供服務，
   生命週期維持 `failed`，直到你重新啟動 agent（Explorer → Restart 或 `DELETE /messages`，會開始
@@ -451,7 +452,9 @@ agent 只是在等待請求回覆（沒有其他工作）時，`status` 為 `sta
 
 agent 在獨立的行程群組中執行。停止時先中斷進行中的回合，最多等 3 秒讓它結束，工作階段紀錄
 才不會停在沒有結果的工具呼叫；接著關閉輸入，讓 agent 自行結束；3 秒後若仍在執行，才向行程
-群組送出 SIGTERM，再過 2 秒送出 SIGKILL。
+群組送出 SIGTERM，再過 2 秒送出 SIGKILL。只要群組裡還有行程在執行，群組就會比 agent 活得久，
+所以 agent 結束後（自行結束或重新啟動時），AgentAPI 也會向群組送出 SIGTERM，2 秒後再送出
+SIGKILL。
 
 </details>
 
@@ -766,7 +769,8 @@ AgentAPI 讀取 Claude Code、Codex 和 Pi 的紀錄，列出並開啟工作目�
   內容。帶 `{"fork": true}` 時，agent 會以新的 id 開啟它的副本（Claude Code 的
   `--fork-session`、Codex 的 `thread/fork`、Pi 的 `--fork`），原本的工作階段維持不變。佇列和尚未
   回覆的請求會像重新啟動時一樣清除；agent 正在執行回合、壓縮 context 或重新啟動時回傳 409，
-  被拒絕的開啟不會改動目前的對話。
+  被拒絕的開啟不會改動目前的對話。id 不是單一檔名（含 `/` 或 `\`、是 `.` 或 `..`、含控制字元）時
+  回傳 400。
 
 在聊天介面中，Explorer 的 Session 分頁會列出這些工作階段，並提供 **Open** 和
 **Start a copy**，兩者都要點第二次確認。
@@ -804,7 +808,9 @@ agent 可能改了紀錄格式，例如把欄位改了名。
 當一次呼叫的輸入（未快取的、從 cache 讀取的和寫入 cache 的）超過 `input_tokens_above` 時，
 套用該級距（tier）的價格。比對模型 ID 時不分大小寫，並忽略供應商前綴（`anthropic/`）、
 context 後綴（`[1m]`）和發布日期；找不到時取最長的已知前綴（`claude-opus-5-5-x` 以
-`claude-opus-5-5` 計價）。沒有價格的模型只計 tokens、不計金額（`priced: false`）。
+`claude-opus-5-5` 計價），但不跨過 `-mini`、`-nano` 或 `-pro` 這類變體（`gpt-5.1-codex-mini`
+不算 `gpt-5.1`）。沒有價格的模型只計 tokens、不計金額（`priced: false`），伺服器的 log 會對
+每個這種模型警告一次。`scripts/prices.mjs` 會比對內建價格和 Pi 的模型清單。
 
 - `GET /sessions` 為每個工作階段提供 `cost`：`usd`、`tokens`、`calls`、每個模型的花費
   （`models`）和每小時的花費（`hourly`，UTC），以及全部加總的 `total_cost`。
@@ -1115,7 +1121,8 @@ AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新�
   原始按鍵、另一次重新啟動和開啟工作階段會回傳 409，AgentAPI 停止期間的重新啟動也一樣。
 - `GET /status` 回傳向下相容的 `stable`/`running` 狀態、詳細的生命週期（`starting`、
   `ready`、`running`、`restarting`、`exited` 或 `failed`；native agent 結束後，AgentAPI 重新啟動
-  期間為 `restarting`，放棄後為 `failed`）、transport、`server_id`（這次
+  期間為 `restarting`（直到新的 agent 可以接受回合），放棄後為 `failed`；`restarting`、`exited` 和
+  `failed` 在 agent 回來之前不會隨 agent 的狀態改變）、transport、`server_id`（這次
   AgentAPI 執行的隨機識別碼，每次啟動都會不同）、`turn`（agent 開始工作的次數）、對話的
   `epoch`、工作階段名稱、AgentAPI 版本、agent 目前開啟的對話框（`terminal_prompt`）以及終端機
   寬度（`terminal_columns`）。使用 native transport 時還會回報 `agent_session_id`（agent 自己的
@@ -1124,7 +1131,8 @@ AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新�
 - `GET /tasks` 回傳對話的[任務](#任務)。
 - `GET /title` 回傳工作階段的可讀標題。
 - `POST /upload` 儲存檔案（最大 10 MB；超過 11 MiB 的內容會在讀取前就被拒絕）並回傳路徑，
-  訊息以 `@"<路徑>"` 引用它。
+  訊息以 `@"<路徑>"` 引用它。檔案沿用上傳時的檔名（不含路徑），去掉控制字元並截到 255 bytes；
+  檔名是 `.` 或 `..` 時回傳 400。
 
 ### 任務
 
@@ -1408,7 +1416,7 @@ valid = hmac.compare_digest(expected, signature) and abs(time.time() - int(times
 （3）次嘗試，每次逾時為 `--webhook-timeout`（10 秒）；用完次數後會放棄並記錄在 log。
 
 佇列最多保存 1,024 個事件，滿了就丟棄新事件。漏收事件的接收端應透過 API 或下一次心跳取得目前
-狀態。關閉時，AgentAPI 最多等 5 秒讓 `instance.stopped` 送達。
+狀態。關閉時，AgentAPI 最多等 2 秒讓 `instance.stopped` 送達。
 
 可以用 Go `text/template`（`--webhook-payload-template`）改寫 body 的格式以符合接收端，例如聊天
 服務的 incoming webhook。可用欄位有 `.ID`、`.Type`、`.CreatedAt`、`.Instance` 和 `.Data`（事件的
@@ -1487,8 +1495,8 @@ API 和 Session Explorer 支援：
 會接續同一個工作階段重新載入，對話會保留（無法接續工作階段、`resume` 為 false 的 agent 則會改為
 開始新的工作階段，並清除對話）。在回合進行中重新載入會回傳 409，因為那會中斷該回合。從
 Explorer 或 `DELETE /messages` 重新啟動前，AgentAPI 會先更新 Codex（`codex update`）和 Pi
-（`pi update --self`），限直接啟動這些 CLI 的情況。若更新失敗，仍會啟動已安裝的版本；
-Claude Code 則自行管理更新。
+（`pi update --self`），限直接啟動這些 CLI 的情況，多個 AgentAPI 會輪流更新。若更新失敗或超過
+3 分鐘，仍會啟動已安裝的版本；Claude Code 則自行管理更新。
 
 ## 安全性
 
@@ -1512,6 +1520,9 @@ agentapi server --api-token=my-secret -- claude
 # 透過環境變數設定
 AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
 ```
+
+自動產生的 token 在原地重新啟動（SIGUSR2、`POST /update`、`agentapi restart`）後仍然相同，
+用戶端不必重新登入；重新執行 `agentapi server` 才會產生新的 token。
 
 啟用後，每個 API 請求都必須帶上 `Authorization: Bearer <token>` 或聊天介面的
 session cookie。靜態檔案路由（`/`、`/chat/*`）不受限制，讓瀏覽器不需要 token 也能
@@ -1776,9 +1787,11 @@ agentapi update --restart  # 更新後讓執行中的 AgentAPI 改用新版本
 更新前，AgentAPI 會先依據該版本的 `checksums.txt` 清單，以 SHA-256 驗證下載的執行檔，
 通過後才取代目前的執行檔。若清單不存在、格式錯誤、檢查碼與下載檔案不符，或下載的執行檔執行起來
 不是該版本，就會拒絕更新。取代執行檔時，使用的鎖定檔和[透過 API 更新](#透過-api-更新)相同。
+查詢發行版最多 1 分鐘；等待鎖定檔、下載與取代執行檔則最多 10 分鐘。
 
 執行中的 AgentAPI 在重新啟動前仍是舊版本。`--restart` 會像
-[`agentapi restart --all`](#agentapi-restart) 一樣，重新啟動仍在執行舊執行檔的 AgentAPI。
+[`agentapi restart --all`](#agentapi-restart) 一樣，重新啟動仍在執行舊執行檔的 AgentAPI；
+執行檔已是最新版本時也會重新啟動，因為可能是其他更新取代了它。
 透過 `sudo` 執行時（安裝在 `/usr/local/bin`），重新啟動的是執行 `sudo` 那位使用者的 AgentAPI，
 依據該使用者的登記目錄。hub 不在其中：請用服務管理工具重新啟動，例如
 `systemctl restart agentapi-hub`。

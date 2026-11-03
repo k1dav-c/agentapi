@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,89 +16,6 @@ import (
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 )
-
-var (
-	terminalSelection    = regexp.MustCompile(`(?m)^\s*[❯›>]\s*(\d+)\.\s+`)
-	terminalConfirmation = regexp.MustCompile(`(?i)(enter\s+to\s+confirm|enter\s+to\s+submit|press\s+enter|esc\s+to\s+cancel|enter\s+select|would\s+you\s+like\s+to\s+proceed|do\s+you\s+want\s+to\s+proceed)`)
-	terminalOption       = regexp.MustCompile(`(?m)^\s*[❯›>]?\s*(\d+)\.\s+`)
-)
-
-// terminalQuestionKeywords must appear (case-insensitively) next to a
-// numbered list for it to count as a prompt.
-var terminalQuestionKeywords = []string{"choose", "select", "option", "continue", "cancel", "allow", "deny", "approve", "permission"}
-
-// Prompt detection runs on every screen change. Go's regexps are slow on
-// the case-insensitive alternations above, and agent output almost never
-// contains these words, so each regexp is only tried once a plain substring
-// check shows it could match.
-var terminalConfirmationWords = []string{"enter", "esc", "proceed"}
-
-func containsAny(s string, words []string) bool {
-	for _, word := range words {
-		if strings.Contains(s, word) {
-			return true
-		}
-	}
-	return false
-}
-
-// hasConfirmationHint reports whether content (lower is its lowercase form)
-// shows a confirmation hint such as "Enter to confirm · Esc to cancel".
-func hasConfirmationHint(content, lower string) bool {
-	return containsAny(lower, terminalConfirmationWords) && terminalConfirmation.MatchString(content)
-}
-
-// terminalQuestionTailLines bounds how much of the bottom of the screen is
-// inspected for an interactive prompt. The PTY screen includes scrollback, so
-// scanning all of it would match numbered lists in earlier agent output and
-// block the message queue indefinitely.
-const terminalQuestionTailLines = 40
-
-// isTerminalQuestionScreen reports whether the agent is currently showing an
-// interactive terminal prompt (selection list, confirmation) that a queued
-// message must not be typed into.
-func isTerminalQuestionScreen(agentType mf.AgentType, screen string) bool {
-	// Only the bottom of the screen matters, and the screen can be a
-	// thousand lines; this runs on every screen change.
-	screen = screenTail(screen, max(mf.InputBoxScanLines, terminalQuestionTailLines))
-	visible, ok := mf.HasInputBox(agentType, screen)
-	if ok && visible {
-		// The agent's own input box is showing, so it's waiting for a
-		// message rather than an answer to a dialog.
-		return false
-	}
-	tail := screenTail(screen, terminalQuestionTailLines)
-	lower := strings.ToLower(tail)
-	if ok && hasConfirmationHint(tail, lower) {
-		// The input box is gone and a confirmation hint is showing, e.g.
-		// Claude Code's folder trust dialog, whose options aren't numbered.
-		return true
-	}
-	return isTerminalQuestionText(tail, lower)
-}
-
-// screenTail returns the last n lines of screen, ignoring trailing blank lines.
-// It scans back from the end instead of splitting the whole screen.
-func screenTail(screen string, n int) string {
-	screen = strings.TrimRight(screen, " \t\r\n")
-	start := len(screen)
-	for range n {
-		i := strings.LastIndexByte(screen[:start], '\n')
-		if i < 0 {
-			return screen
-		}
-		start = i
-	}
-	return screen[start+1:]
-}
-
-func isTerminalQuestionText(content, lower string) bool {
-	if hasConfirmationHint(content, lower) && strings.ContainsAny(content, "❯›>") &&
-		terminalSelection.MatchString(content) {
-		return true
-	}
-	return containsAny(lower, terminalQuestionKeywords) && len(terminalOption.FindAllString(content, -1)) >= 2
-}
 
 // Only expose deliberate, bounded terminal actions. Reply text never becomes
 // arbitrary terminal escape sequences. The browser's terminal remains available
@@ -118,14 +34,15 @@ func terminalReply(agentType mf.AgentType, content, answer string) (string, bool
 		return "\x1b", true
 	}
 	answer = strings.TrimSpace(answer)
-	if len(terminalOption.FindAllString(content, -1)) < 2 {
+	options := mf.TerminalOptions(content)
+	if len(options) < 2 {
 		return answer + "\r", answer != ""
 	}
 	if _, err := strconv.Atoi(answer); err != nil || len(answer) != 1 {
 		return "", false
 	}
-	for _, match := range terminalOption.FindAllStringSubmatch(content, -1) {
-		if match[1] == answer {
+	for _, option := range options {
+		if option == answer {
 			if agentType == mf.AgentTypeClaude || agentType == mf.AgentTypeCodex {
 				return answer, true
 			}
@@ -192,43 +109,6 @@ type (
 	HandoffReplyResponse   struct{ Body handoff.Result }
 )
 
-// handoffView is what the human reply protocol reads of the emitter, as of
-// one moment.
-type handoffView struct {
-	status StatusChangeBody
-	// revision changes on every lifecycle transition and reset, which
-	// invalidates the replies to what was offered before.
-	revision uint64
-	screen   string
-	// dialog: the screen shows a dialog of the agent's terminal.
-	dialog bool
-	// question is the user's last message, and reply the agent's last
-	// message after it; both are empty without one.
-	question, reply string
-}
-
-// handoffView returns what the human reply protocol reads of the emitter.
-func (e *EventEmitter) handoffView() handoffView {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	view := handoffView{
-		status: e.statusChangeBody(), revision: e.handoffRevision,
-		screen: e.screen, dialog: e.screenQuestion,
-	}
-	reply, replied := "", false
-	for i := len(e.messages) - 1; i >= 0; i-- {
-		msg := e.messages[i]
-		if msg.Role == conv.RoleUser {
-			view.question, view.reply = msg.Message, reply
-			break
-		}
-		if msg.Role == conv.RoleAgent && !replied {
-			reply, replied = msg.Message, true
-		}
-	}
-	return view
-}
-
 // pendingHandoff returns what the human reply protocol offers now, or nil.
 // For kind "request" it also returns the native request offered, which a
 // reply must answer even if other requests opened since. It doesn't need
@@ -242,8 +122,8 @@ func (s *Server) pendingHandoff() (*handoff.Request, native.RequestState) {
 		// an update would cut it short.
 		return nil, native.RequestState{}
 	}
-	view := s.emitter.handoffView()
-	if view.status.Lifecycle != LifecycleReady || s.conversation.Status() != conv.StatusStable {
+	view := s.emitter.HandoffView()
+	if view.Status.Lifecycle != LifecycleReady || s.conversation.Status() != conv.StatusStable {
 		return nil, native.RequestState{}
 	}
 	kind, content, request, ok := s.backend().handoffOffer(view)
@@ -252,22 +132,22 @@ func (s *Server) pendingHandoff() (*handoff.Request, native.RequestState) {
 			// The agent's last message isn't its last word.
 			return nil, native.RequestState{}
 		}
-		kind, content = "message", view.reply
+		kind, content = "message", view.Reply
 	}
 	if strings.TrimSpace(content) == "" {
 		return nil, native.RequestState{}
 	}
-	status := view.status
+	status := view.Status
 	// The request ID is part of the hash: two identical approvals are
 	// different requests.
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%s:%q:%s", status.ServerID, view.revision, status.Turn, kind, request.ID, content)))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%s:%q:%s", status.ServerID, view.Revision, status.Turn, kind, request.ID, content)))
 	id := hex.EncodeToString(sum[:])
 	if s.handoff.isSuppressed(id) {
 		return nil, native.RequestState{}
 	}
 	return &handoff.Request{
 		ID: id, ServerID: status.ServerID, Turn: status.Turn,
-		AgentType: string(status.AgentType), Kind: kind, Question: view.question, Content: content,
+		AgentType: string(status.AgentType), Kind: kind, Question: view.Question, Content: content,
 	}, request
 }
 

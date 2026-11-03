@@ -438,3 +438,63 @@ func TestPiSessionDir(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, none, "without it, Pi's default directory")
 }
+
+// Claude Code can start a log with lines of no session (a file-history
+// snapshot, an earlier version's summary of a resumed session): the header
+// is the first line that has one.
+func TestClaudeSessionAfterLinesOfNoSession(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	dir := filepath.Join(config, "projects", "-w")
+	writeLog(t, filepath.Join(dir, "s1.jsonl"), time.Now(),
+		`{"type":"summary","summary":"Earlier work","leafUuid":"u0"}`,
+		`{"type":"file-history-snapshot","messageId":"m0","snapshot":{"trackedFileBackups":{}},"isSnapshotUpdate":false}`,
+		`{"type":"user","cwd":"/w","timestamp":"2026-10-20T10:00:00.000Z","sessionId":"s1","message":{"role":"user","content":"Go on"}}`,
+		claudeCall("s1", "2026-10-20T10:00:05.000Z", "msg_1", 10, 0, 0, 0, 20),
+	)
+	// Too many lines before it: not read as a session.
+	lines := make([]string, 0, 60)
+	for range 60 {
+		lines = append(lines, `{"type":"file-history-snapshot","messageId":"m0","snapshot":{}}`)
+	}
+	lines = append(lines, `{"type":"user","cwd":"/w","timestamp":"2026-10-20T11:00:00.000Z","sessionId":"s2","message":{"role":"user","content":"Hi"}}`)
+	writeLog(t, filepath.Join(dir, "s2.jsonl"), time.Now(), lines...)
+	// A subagent's log isn't a session's, whatever comes first.
+	writeLog(t, filepath.Join(dir, "s3.jsonl"), time.Now(),
+		`{"type":"file-history-snapshot","messageId":"m0","snapshot":{}}`,
+		`{"type":"user","isSidechain":true,"cwd":"/w","timestamp":"2026-10-20T12:00:00.000Z","sessionId":"s3","message":{"role":"user","content":"Look"}}`,
+	)
+
+	store := newStore(t, "claude", "/w")
+	list, err := store.List(10)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, "s1", list[0].ID)
+	assert.Equal(t, "Go on", list[0].FirstPrompt)
+	assert.Equal(t, time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC), list[0].CreatedAt.UTC())
+	costs, err := store.Costs()
+	require.NoError(t, err)
+	assert.Equal(t, 1, costs.Cost("s1").Calls)
+	history, err := store.ReadHistory("s1")
+	require.NoError(t, err)
+	assert.NotEmpty(t, history.Messages)
+}
+
+func TestValidID(t *testing.T) {
+	for id, want := range map[string]bool{
+		"0199a2b4-7c1e-7d42-9f3b-2a6c1d8e4f50": true,
+		"earlier":                              true,
+		"":                                     false,
+		".":                                    false,
+		"..":                                   false,
+		"../s1":                                false,
+		`..\s1`:                                false,
+		"a\x00b":                               false,
+		"a\nb":                                 false,
+		"\xff":                                 false,
+	} {
+		assert.Equal(t, want, ValidID(id), "%q", id)
+	}
+	_, err := newStore(t, "claude", "/w").ReadHistory("../w/s1")
+	assert.ErrorIs(t, err, ErrInvalidID)
+}

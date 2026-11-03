@@ -37,7 +37,8 @@ type ModelCall struct {
 	cost float64
 }
 
-// ModelCost is what a session spent on one model.
+// ModelCost is what a session spent on one model. Priced is false when
+// any of its calls had no price.
 type ModelCost struct {
 	Model  string         `json:"model" doc:"The model."`
 	USD    float64        `json:"usd" doc:"API-equivalent cost in USD."`
@@ -94,6 +95,7 @@ func (s *costSum) add(call ModelCall) {
 		s.model = i
 	}
 	m := &c.Models[s.model]
+	m.Priced = m.Priced && call.Priced
 	m.USD += call.USD
 	m.Tokens = m.Tokens.Add(call.Tokens)
 	m.Calls++
@@ -144,6 +146,7 @@ func (s *costSum) merge(c SessionCost) {
 			s.models[m.Model] = i
 		}
 		sm := &s.c.Models[i]
+		sm.Priced = sm.Priced && m.Priced
 		sm.USD += m.USD
 		sm.Tokens = sm.Tokens.Add(m.Tokens)
 		sm.Calls += m.Calls
@@ -459,15 +462,32 @@ func (sc *sessionCost) ownCalls(owner map[string]*sessionCost) []ModelCall {
 		return sc.calls
 	}
 	var own []ModelCall
+	// first and last are the calls own holds while they follow each other
+	// in calls, as a fork's own calls follow those it copied: own is then
+	// a part of calls rather than a copy.
+	first, last := -1, -1
 	counted := make(map[string]bool)
-	for _, call := range sc.calls {
+	for i, call := range sc.calls {
 		if call.key != "" {
 			if owner[call.key] != sc || counted[call.key] {
 				continue
 			}
 			counted[call.key] = true
 		}
-		own = append(own, call)
+		switch {
+		case first < 0:
+			first, last = i, i+1
+		case own == nil && i == last:
+			last++
+		default:
+			if own == nil {
+				own = slices.Clone(sc.calls[first:last])
+			}
+			own = append(own, call)
+		}
+	}
+	if own == nil && first >= 0 {
+		return sc.calls[first:last:last]
 	}
 	return own
 }
@@ -544,12 +564,35 @@ func (s *Store) costLogs() ([]string, func(id, path string) []Subagent, error) {
 	return files, func(string, string) []Subagent { return nil }, err
 }
 
-// price returns call at the store's prices, or at what the agent said.
+// price returns call at the store's prices, or at what the agent said. A
+// model without a price is logged once, the first time a call of it is.
 func (s *Store) price(c agentlog.Call) ModelCall {
-	return priced(ModelCall{
-		Time: c.Time, Model: c.Model, Tokens: c.Tokens,
+	call := priced(ModelCall{
+		Time: c.Time, Model: s.intern(c.Model), Tokens: c.Tokens,
 		report: c.Report, key: c.Key, cost: c.Cost,
 	}, s.prices)
+	if !call.Priced && call.report == nil && call.Model != "" {
+		if _, warned := s.unpriced.LoadOrStore(call.Model, true); !warned {
+			s.logger.Warn("Session log has calls to a model without a known price; they count no cost (--prices adds one)",
+				"agent", s.agent, "model", call.Model)
+		}
+	}
+	return call
+}
+
+// intern returns model, the one copy of the name the store keeps: a long
+// session makes tens of thousands of calls, to a few models.
+func (s *Store) intern(model string) string {
+	s.modelsMu.Lock()
+	defer s.modelsMu.Unlock()
+	if name, ok := s.models[model]; ok {
+		return name
+	}
+	if s.models == nil {
+		s.models = make(map[string]string)
+	}
+	s.models[model] = model
+	return model
 }
 
 // priced returns call with its cost at prices, or at what the agent said.

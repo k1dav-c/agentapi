@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/handoff"
 	"github.com/coder/agentapi/lib/native"
 )
@@ -55,7 +56,7 @@ type agentBackend interface {
 	// terminal (PTY, kind "terminal"), as text, and for a request the
 	// request that a reply answers. It reports false when the agent waits
 	// on neither.
-	handoffOffer(view handoffView) (kind, content string, request native.RequestState, ok bool)
+	handoffOffer(view convstate.HandoffView) (kind, content string, request native.RequestState, ok bool)
 	// answerHandoff delivers content, a human reply, to what handoffOffer
 	// offered as pending (with request, for a native request), records
 	// its outcome for the reply replyID, and returns it.

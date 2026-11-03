@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -141,8 +140,12 @@ func (u *uploadAPI) writeHumaResponse(ctx huma.Context, status int, body any) {
 }
 
 // saveUpload stores an uploaded file under the base name of the one the
-// browser sent.
-func (u *uploadAPI) saveUpload(name string, file io.Reader) (*UploadResponse, error) {
+// browser sent (uploadName).
+func (u *uploadAPI) saveUpload(sent string, file io.Reader) (*UploadResponse, error) {
+	name, ok := uploadName(sent)
+	if !ok {
+		return nil, huma.Error400BadRequest("the file has no name")
+	}
 	buf, err := io.ReadAll(io.LimitReader(file, maxUploadSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to upload file: %w", err)
@@ -150,7 +153,7 @@ func (u *uploadAPI) saveUpload(name string, file io.Reader) (*UploadResponse, er
 	if len(buf) > maxUploadSize {
 		return nil, huma.Error400BadRequest("file size exceeds 10MB limit")
 	}
-	outPath, _, err := u.uploads.save(filepath.Base(name), buf)
+	outPath, _, err := u.uploads.save(name, buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}

@@ -34,7 +34,8 @@ func TestDirThroughASymlink(t *testing.T) {
 	assert.Equal(t, []string{real}, d.Paths())
 	assert.True(t, d.Is(link), "a path an agent recorded through a link")
 
-	gone := NewDir("/no/such/dir")
-	assert.Equal(t, []string{"/no/such/dir"}, gone.Paths())
-	assert.True(t, gone.Is("/no/such/dir/"))
+	missing := filepath.FromSlash("/no/such/dir")
+	gone := NewDir(missing)
+	assert.Equal(t, []string{missing}, gone.Paths())
+	assert.True(t, gone.Is(missing+string(filepath.Separator)))
 }

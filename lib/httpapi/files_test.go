@@ -12,6 +12,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/workspacefs"
 )
 
 func statusOf(t *testing.T, err error) int {
@@ -34,7 +36,7 @@ func TestFileContent(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "sub", "b.go"), "package b\n")
 	writeFile(t, filepath.Join(dir, "bin.dat"), "PNG\x00\x01\x02")
 	// The cut at 1 MiB falls inside the three bytes of the last 世.
-	big := strings.Repeat("a", maxViewedBytes-1) + strings.Repeat("世", 10)
+	big := strings.Repeat("a", workspacefs.MaxViewedBytes-1) + strings.Repeat("世", 10)
 	writeFile(t, filepath.Join(dir, "big.txt"), big)
 	outside := filepath.Join(t.TempDir(), "secret.txt")
 	writeFile(t, outside, "secret")
@@ -65,7 +67,7 @@ func TestFileContent(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, resp.Body.Truncated)
 	assert.False(t, resp.Body.Binary, "a cut multi-byte character doesn't make the file binary")
-	assert.LessOrEqual(t, len(resp.Body.Content), maxViewedBytes)
+	assert.LessOrEqual(t, len(resp.Body.Content), workspacefs.MaxViewedBytes)
 	assert.True(t, utf8.ValidString(resp.Body.Content))
 	assert.Equal(t, int64(len(big)), resp.Body.Size)
 

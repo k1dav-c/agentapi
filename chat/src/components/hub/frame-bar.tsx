@@ -5,7 +5,7 @@ import {ArrowLeft, ExternalLink, X} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {Button} from "@/components/ui/button";
 import {HEADER_ACTIONS_ID} from "@/app/header";
-import {frameMessage, fromFrame, type FrameInstance, type ToFrame} from "@/lib/hub-frame";
+import {fromFrame, instanceFromHub, type FrameInstance} from "@/lib/hub-frame";
 import {cn} from "@/lib/utils";
 import {StatusGlyph, stateTone} from "./status-glyph";
 import {UpdateStatus} from "./update-chip";
@@ -19,11 +19,11 @@ export function FrameBar() {
   const [instance, setInstance] = useState<FrameInstance>();
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      if (event.source !== window.parent) return;
-      const message = frameMessage<ToFrame>(event);
-      if (message?.type === "instance") setInstance(message.instance);
+      const told = instanceFromHub(event, window.parent);
+      if (told) setInstance(told);
     };
     window.addEventListener("message", onMessage);
+    // On every load of the chat, a reload too: the hub answers each.
     window.parent.postMessage(fromFrame("ready"), window.location.origin);
     return () => window.removeEventListener("message", onMessage);
   }, []);

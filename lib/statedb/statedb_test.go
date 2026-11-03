@@ -21,6 +21,9 @@ func open(t *testing.T, path string) *statedb.DB {
 	t.Helper()
 	db, err := statedb.Open(path, nil)
 	require.NoError(t, err)
+	// Windows can't remove the temporary directory of an open file. Close
+	// may run twice.
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 

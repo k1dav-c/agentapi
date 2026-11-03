@@ -8,6 +8,7 @@ import (
 	"time"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/statedb"
 )
@@ -56,7 +57,7 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 		// The changes AgentAPI made just before it crashed may be missing,
 		// and the next ones would reuse their seqs: clients that saw them
 		// must not resume their cache, so the conversation gets a new epoch.
-		state.Epoch = newEpoch()
+		state.Epoch = convstate.NewEpoch()
 		db.SetSeq(state.Epoch, state.Seq)
 		logger.Warn("The state database was not closed cleanly; clients reload the conversation")
 	}
@@ -146,24 +147,32 @@ func emitterStateFromSnapshot(snap statedb.Snapshot) EmitterState {
 // restoreQueue puts the stored queue back. Called before the server runs.
 func (s *Server) restoreQueue(snap statedb.Snapshot) {
 	queued := make([]QueuedMessage, len(snap.Queue))
+	lastID := snap.NextQueueID()
 	for i, q := range snap.Queue {
 		queued[i] = QueuedMessage{ID: q.ID, Content: q.Content, Time: q.Time}
+		lastID = max(lastID, q.ID)
 	}
+	// Stored already: the restore isn't written back.
+	s.queueStoreMu.Lock()
+	s.savedQueue, s.savedNextQueueID = slices.Clone(queued), lastID
+	s.queueStoreMu.Unlock()
 	s.queue.Restore(queued, snap.NextQueueID())
-	s.savedQueue, s.savedNextQueueID = s.queue.Snapshot()
 }
 
-// persistQueue stores the queue if it changed since it was last stored. The
-// queue changes in many places; checking on the dispatch tick covers them
-// while the server runs, and Stop stores it once the HTTP server and the
-// agent stopped, when nothing can change it anymore.
-func (s *Server) persistQueue() {
+// storeQueue stores the queue, as of its version-th change, unless it is
+// stored already or a later change was. The queue's onChange calls it
+// after every change: the state database's write of the queue replaces
+// the one still pending, so changes in quick succession are written once.
+func (s *Server) storeQueue(queued []QueuedMessage, lastID int, version uint64) {
 	if s.stateDB == nil {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	queued, lastID := s.queue.Snapshot()
+	s.queueStoreMu.Lock()
+	defer s.queueStoreMu.Unlock()
+	if version < s.savedQueueVersion {
+		return
+	}
+	s.savedQueueVersion = version
 	if lastID == s.savedNextQueueID && slices.Equal(queued, s.savedQueue) {
 		return
 	}
@@ -174,6 +183,13 @@ func (s *Server) persistQueue() {
 	s.stateDB.PutQueue(stored, lastID)
 	s.savedQueue = queued
 	s.savedNextQueueID = lastID
+}
+
+// persistQueue stores the queue if it changed since it was last stored:
+// storeQueue does after every change, and Stop and SaveState check once
+// more.
+func (s *Server) persistQueue() {
+	s.storeQueue(s.queue.state())
 }
 
 // ptyInitialPrompt is the initial prompt the PTY conversation sends: none

@@ -33,6 +33,7 @@ import (
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/netaddr"
+	"github.com/coder/agentapi/lib/sse"
 )
 
 // Config is how the hub runs.
@@ -79,8 +80,10 @@ type Hub struct {
 	logger     *slog.Logger
 	store      *store
 	client     *http.Client
-	deliveries deliveries
-	clock      quartz.Clock
+	deliveries *deliveries
+	// badSignatures limits the log of events refused for their signature.
+	badSignatures logLimiter
+	clock         quartz.Clock
 	// interfaces lists the machine's network interfaces, for the join URLs.
 	interfaces func() ([]netaddr.Interface, error)
 
@@ -115,16 +118,35 @@ func New(config Config) (*Hub, error) {
 	}
 	client := config.Client
 	if client == nil {
-		client = &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, ResponseHeaderTimeout: 15 * time.Second}}
+		client = &http.Client{Transport: newTransport()}
 	}
 	st, err := newStore(config.StatePath, config.Logger, config.Clock)
 	if err != nil {
 		return nil, err
 	}
+	var deliveriesFile string
+	if config.StatePath != "" {
+		deliveriesFile = deliveriesPath(config.StatePath)
+	}
 	return &Hub{
 		config: config, logger: config.Logger, store: st, client: client, clock: config.Clock,
+		deliveries: newDeliveries(deliveriesFile, config.Logger, config.Clock.Now()),
 		interfaces: netaddr.Interfaces, watchers: map[string]context.CancelFunc{},
 	}, nil
+}
+
+// newTransport is how the hub reaches the instances by default: the
+// environment's proxy, and http.DefaultTransport's limits on connecting (a
+// dial and TLS handshake that time out, keep-alives, idle connections), so
+// an instance that doesn't answer a SYN doesn't keep a watch or a proxied
+// request waiting for the system's TCP timeout. A response's headers must
+// come within 15 seconds; its body has no limit, since the summary streams
+// and the proxy's event streams stay open.
+func newTransport() *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = http.ProxyFromEnvironment
+	transport.ResponseHeaderTimeout = 15 * time.Second
+	return transport
 }
 
 // Run follows the instances' summaries until ctx ends.
@@ -139,6 +161,13 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 	<-ctx.Done()
 	h.watchWG.Wait()
+}
+
+// Close writes the changes the hub's files haven't kept yet, and stops
+// writing them: it writes a change within a second, and on Close. Call it
+// once the hub stops, after Run returned.
+func (h *Hub) Close() error {
+	return errors.Join(h.store.close(), h.deliveries.close())
 }
 
 // tokenFor is the API token the hub sends to instance.
@@ -350,7 +379,7 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "the hub has " + id + " at " + existing.URL + " already; forget it first"})
 		return
 	}
-	instance, _, err := h.store.update(id, true, func(i *Instance) {
+	instance, _ := h.store.update(id, true, func(i *Instance) {
 		i.WebhookInstance = summary.Instance
 		i.ID = id
 		i.URL = base
@@ -361,9 +390,6 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 		i.Connection = ConnectionConnecting
 		i.Error = ""
 	})
-	if err != nil {
-		h.logger.Warn("Failed to keep the hub's instances", "error", err)
-	}
 	h.watch(instance)
 	writeJSON(w, http.StatusOK, instance.public())
 }
@@ -426,7 +452,7 @@ func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var nothingToMute bool
-	updated, ok, err := h.store.update(instanceParam(r), false, func(i *Instance) {
+	updated, ok := h.store.update(instanceParam(r), false, func(i *Instance) {
 		if body.Muted != nil {
 			key := ""
 			if *body.Muted {
@@ -449,9 +475,6 @@ func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 			i.Pin = pinLast
 		}
 	})
-	if err != nil {
-		h.logger.Warn("Failed to keep the hub's instances", "error", err)
-	}
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such instance"})
 		return
@@ -493,8 +516,6 @@ func (h *Hub) setPins(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errPinsDiffer):
 		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "ids": pins})
 		return
-	case err != nil:
-		h.logger.Warn("Failed to keep the hub's instances", "error", err)
 	}
 	writeJSON(w, http.StatusOK, map[string][]string{"ids": pins})
 }
@@ -502,10 +523,7 @@ func (h *Hub) setPins(w http.ResponseWriter, r *http.Request) {
 func (h *Hub) removeInstance(w http.ResponseWriter, r *http.Request) {
 	id := instanceParam(r)
 	h.unwatch(id)
-	removed, err := h.store.remove(id)
-	if err != nil {
-		h.logger.Warn("Failed to keep the hub's instances", "error", err)
-	}
+	removed := h.store.remove(id)
 	if !removed {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such instance"})
 		return
@@ -535,7 +553,7 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return false
 		}
-		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, encoded); err != nil {
+		if err := sse.Write(w, event, encoded); err != nil {
 			return false
 		}
 		flusher.Flush()

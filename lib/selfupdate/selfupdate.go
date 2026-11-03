@@ -253,14 +253,21 @@ func downloadBinary(ctx context.Context, url, destDir, expectedChecksum string) 
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, actualChecksum)
 	}
+	if err := tmpFile.Chmod(0o755); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("set executable permission: %w", err)
+	}
+	// On disk before the rename makes it the program: after a crash the
+	// program is the old file or the whole new one, not an empty one.
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("sync temp file: %w", err)
+	}
 	if err := tmpFile.Close(); err != nil {
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("close temp file: %w", err)
-	}
-
-	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("set executable permission: %w", err)
 	}
 
 	return tmpPath, nil

@@ -181,8 +181,32 @@
 }
 
 /* Tasks are separated by a rule, except right after a date label. */
-.task-entry + .task-entry {
+.task-view + .task-view > .task-entry {
   border-top: 1px solid var(--border);
+}
+
+/* A long transcript: the browser skips the layout and paint of the tasks
+   out of sight, and keeps the height each had when it was last shown.
+   That contains a task's paint, so its box reaches over what hangs out of
+   the task: the search result's ring, the time rail in the left margin
+   (lg), the side column in the right one (84rem). */
+.task-view {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 480px;
+  margin-inline: -0.25rem;
+  padding-inline: 0.25rem;
+}
+@media (width >= 64rem) {
+  .task-view {
+    margin-left: -5.25rem;
+    padding-left: 5.25rem;
+  }
+}
+@media (width >= 84rem) {
+  .task-view {
+    margin-right: -17.25rem;
+    padding-right: 17.25rem;
+  }
 }
 
 /* A task's prompt reads as its heading. */

@@ -212,6 +212,21 @@ export async function ensureSession(baseURL: string, {background = false} = {}):
   return requestSignIn(baseURL, {background});
 }
 
+// reconnectWhenSignedIn is what a stream of baseURL does when it fails
+// (EventSourceConnection's onError): EventSource hides the status code, so
+// a 401 (no session cookie, or the token changed) looks like any other
+// failure. It asks the server, signs in if it must, and then reconnects
+// right away. Nobody asked for this reconnect, so a closed dialog stays
+// closed.
+export function reconnectWhenSignedIn(baseURL: string, reconnect: () => void): Promise<void> {
+  return ensureSession(baseURL, {background: true}).then(
+    (signedIn) => {
+      if (signedIn) reconnect();
+    },
+    () => undefined,
+  );
+}
+
 // Forgets the servers, the dialog and the sign-ins above; for tests.
 export function resetAuthState() {
   authRequired.clear();

@@ -1,7 +1,7 @@
 // Package procutil starts and stops the agent processes the native adapters
 // drive. Each process runs in its own process group, so stopping it also
-// stops what it started (MCP servers, the commands its tools run); the
-// adapter owns the pipes; stderr is logged and its end kept for error
+// stops what it started (MCP servers, the commands its tools run), and so
+// does its exit, however it came; the adapter owns the pipes; stderr is logged and its end kept for error
 // messages; and Stop shuts the process down politely before it kills it.
 package procutil
 
@@ -26,6 +26,10 @@ import (
 // it; their pipes are closed after this long without output, so readers
 // see EOF instead of waiting for them.
 const OutputGrace = 2 * time.Second
+
+// GroupGrace is how long the processes an agent started get, once it
+// exited, between SIGTERM and SIGKILL.
+const GroupGrace = 2 * time.Second
 
 // StderrTailBytes is how much of stderr a process keeps for error messages.
 const StderrTailBytes = 4 << 10
@@ -115,19 +119,78 @@ func WithStderr(err error, tail string) error {
 }
 
 // Output runs c to completion and returns the first max bytes of its
-// stdout. When ctx ends, c and the processes it started are killed.
+// stdout. When ctx ends, c and the processes it started are killed; once
+// c exits, what it started that still runs gets SIGTERM, and its output
+// isn't waited for longer than a second.
 func Output(ctx context.Context, c Command, max int) ([]byte, error) {
+	var out bytes.Buffer
+	err := run(ctx, c, &limitedWriter{w: &out, n: max}, nil)
+	return out.Bytes(), err
+}
+
+// CombinedOutput runs c as Output does and returns the last max bytes of
+// its stdout and stderr, interleaved: the end of a log explains a failure.
+func CombinedOutput(ctx context.Context, c Command, max int) ([]byte, error) {
+	out := &tailWriter{n: max}
+	err := run(ctx, c, out, out)
+	return out.Bytes(), err
+}
+
+func run(ctx context.Context, c Command, stdout, stderr io.Writer) error {
 	cmd := exec.CommandContext(ctx, c.Program, c.Args...)
 	cmd.Dir = c.Dir
 	cmd.Env = c.Env
 	setProcessGroup(cmd)
 	cmd.Cancel = func() error { return signalGroup(cmd.Process, true) }
 	cmd.WaitDelay = time.Second
-	var out bytes.Buffer
-	cmd.Stdout = &limitedWriter{w: &out, n: max}
-	err := cmd.Run()
-	return out.Bytes(), err
+	// The pipe is the caller's, not exec.Cmd's: Wait would wait for a
+	// process c started that holds it before the group is signaled.
+	r, w, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stdout = w
+	if stderr != nil {
+		cmd.Stderr = w
+	}
+	if err := cmd.Start(); err != nil {
+		closeAll(r, w)
+		return err
+	}
+	_ = w.Close()
+	copied := make(chan struct{})
+	go func() {
+		defer close(copied)
+		_, _ = io.Copy(stdout, r)
+	}()
+	err = cmd.Wait()
+	_ = signalExitedGroup(cmd.Process.Pid, false)
+	timer := time.NewTimer(cmd.WaitDelay)
+	defer timer.Stop()
+	select {
+	case <-copied:
+	case <-timer.C:
+	}
+	_ = r.Close()
+	<-copied
+	return err
 }
+
+// tailWriter keeps the last n bytes written to it. One goroutine writes.
+type tailWriter struct {
+	buf []byte
+	n   int
+}
+
+func (t *tailWriter) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > t.n {
+		t.buf = append(t.buf[:0], t.buf[len(t.buf)-t.n:]...)
+	}
+	return len(p), nil
+}
+
+func (t *tailWriter) Bytes() []byte { return t.buf }
 
 // limitedWriter keeps the first n bytes and drops the rest.
 type limitedWriter struct {
@@ -153,8 +216,14 @@ type process struct {
 	stdout  *outputReader
 	stderr  *os.File
 
-	mu   sync.Mutex
-	tail []byte
+	// pgid is the process group, which outlives the process while what
+	// it started runs; groupGone is set once it is gone, after which its
+	// id could name another group.
+	pgid int
+
+	mu        sync.Mutex
+	tail      []byte
+	groupGone bool
 
 	stderrDone chan struct{}
 	exited     chan struct{}
@@ -173,6 +242,7 @@ func newProcess(cmd *exec.Cmd, c Command, stdin, stdout, stderr *os.File) *proce
 		stdin:      stdin,
 		stdout:     &outputReader{f: stdout},
 		stderr:     stderr,
+		pgid:       cmd.Process.Pid,
 		stderrDone: make(chan struct{}),
 		exited:     make(chan struct{}),
 	}
@@ -194,10 +264,17 @@ func (p *process) Kill() error      { return p.signal(true) }
 
 func (p *process) signal(kill bool) error {
 	err := signalGroup(p.cmd.Process, kill)
-	if errors.Is(err, os.ErrProcessDone) {
+	if !errors.Is(err, os.ErrProcessDone) {
+		return err
+	}
+	// The process exited; what it started may still run.
+	p.mu.Lock()
+	gone := p.groupGone
+	p.mu.Unlock()
+	if gone {
 		return nil
 	}
-	return err
+	return signalExitedGroup(p.pgid, kill)
 }
 
 func (p *process) StderrTail() string {
@@ -206,11 +283,12 @@ func (p *process) StderrTail() string {
 	return strings.TrimSpace(string(p.tail))
 }
 
-// wait reaps the process. Wait returns once stderr is read too, so the
-// tail explains the exit; a process the agent started may hold stderr
-// open, so that wait is bounded.
+// wait reaps the process and stops what it started (stopGroup). Wait
+// returns once stderr is read too, so the tail explains the exit; a
+// process the agent started may hold stderr open, so that wait is bounded.
 func (p *process) wait() {
 	err := p.cmd.Wait()
+	p.stopGroup()
 	p.stdout.processExited()
 	select {
 	case <-p.stderrDone:
@@ -220,6 +298,32 @@ func (p *process) wait() {
 	}
 	p.err = err
 	close(p.exited)
+}
+
+// stopGroup stops the processes the agent started that outlive it,
+// however it exited (on its own, closed, killed): MCP servers and the
+// commands its tools ran would run on without it, and a reload would start
+// a second set. They get SIGTERM, and SIGKILL GroupGrace later.
+func (p *process) stopGroup() {
+	if !groupAlive(p.pgid) {
+		p.markGroupGone()
+		return
+	}
+	_ = signalExitedGroup(p.pgid, false)
+	go func() {
+		time.Sleep(GroupGrace)
+		if groupAlive(p.pgid) {
+			p.logger.Info("Processes the agent started outlived it; killing them", "program", p.program)
+			_ = signalExitedGroup(p.pgid, true)
+		}
+		p.markGroupGone()
+	}()
+}
+
+func (p *process) markGroupGone() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.groupGone = true
 }
 
 var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)

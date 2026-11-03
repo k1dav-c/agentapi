@@ -23,6 +23,11 @@ export class SyncTracker {
     }
     this.replayEnd = sync.seq > this.watermark ? sync.seq : null;
     this.replayId = lastEventId;
+    // The session_sync is the replay's last event when it carries the
+    // replay's id: nothing else follows (what changed since was nothing the
+    // client gets), and no later event would carry another id until the
+    // conversation changes.
+    if (this.replayEnd !== null && lastEventId !== "" && lastEventId === String(sync.seq)) this.noteEvent("");
     return full;
   }
 

@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -95,4 +97,57 @@ func TestSelfExecCheck(t *testing.T) {
 
 	_, err = (&selfExec{}).check(context.Background())
 	assert.ErrorContains(t, err, "didn't find its program")
+}
+
+// envValue returns name's value in env.
+func envValue(env []string, name string) (string, bool) {
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, name+"="); ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// A bare --api-token generates a token once: the restart in place runs
+// the same arguments, and gets the token in its environment.
+func TestGeneratedAPITokenSurvivesRestart(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+	opts := serverOptions{apiToken: "generate", port: 3510}
+	t.Setenv(generatedAPITokenEnv, "")
+
+	self := &selfExec{env: []string{"PATH=/usr/bin", generatedAPITokenEnv + "=stale"}}
+	token, err := resolveAPIToken(opts, logger, self)
+	require.NoError(t, err)
+	require.True(t, isGeneratedAPIToken(token))
+	kept, ok := envValue(self.env, generatedAPITokenEnv)
+	require.True(t, ok)
+	assert.Equal(t, token, kept)
+	assert.Len(t, self.env, 2)
+
+	// The program runs again with self.env.
+	t.Setenv(generatedAPITokenEnv, kept)
+	again := &selfExec{env: self.env}
+	token2, err := resolveAPIToken(opts, logger, again)
+	require.NoError(t, err)
+	assert.Equal(t, token, token2)
+	_, set := os.LookupEnv(generatedAPITokenEnv)
+	assert.False(t, set, "the agent's environment doesn't get it")
+
+	// A value that isn't a generated token isn't taken.
+	t.Setenv(generatedAPITokenEnv, "short")
+	token3, err := resolveAPIToken(opts, logger, &selfExec{})
+	require.NoError(t, err)
+	assert.NotEqual(t, "short", token3)
+
+	// A given token, or none, isn't carried.
+	for _, given := range []string{"", "mine"} {
+		t.Setenv(generatedAPITokenEnv, kept)
+		self := &selfExec{env: []string{generatedAPITokenEnv + "=" + kept}}
+		got, err := resolveAPIToken(serverOptions{apiToken: given}, logger, self)
+		require.NoError(t, err)
+		assert.Equal(t, given, got)
+		_, ok := envValue(self.env, generatedAPITokenEnv)
+		assert.False(t, ok, given)
+	}
 }

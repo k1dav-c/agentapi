@@ -39,6 +39,9 @@ type outboundMessage struct {
 	errCh chan error
 	// initial marks the initial prompt, whose failure is reported here.
 	initial bool
+	// ctx is the Send's: its end cuts the message short on its way. nil
+	// for the initial prompt.
+	ctx context.Context
 	// gen is the reset generation it was queued in.
 	gen uint64
 }
@@ -74,13 +77,18 @@ func (c *PTYConversation) sendLoop(ctx context.Context) {
 		msg := c.pending
 		c.pending = nil
 		var sendCtx context.Context
+		stopAfter := func() bool { return false }
 		if msg != nil {
 			sendCtx, c.cancelSend = context.WithCancel(ctx)
+			if msg.ctx != nil {
+				stopAfter = context.AfterFunc(msg.ctx, c.cancelSend)
+			}
 		}
 		c.lock.Unlock()
 		var err error
 		if msg != nil {
 			err = c.sendMessage(sendCtx, msg.gen, msg.parts...)
+			stopAfter()
 		}
 		c.lock.Lock()
 		c.sendingMessage = false
@@ -102,7 +110,11 @@ func (c *PTYConversation) sendLoop(ctx context.Context) {
 	}
 }
 
-func (c *PTYConversation) Send(messageParts ...conv.MessagePart) error {
+// Send queues the message for the send loop, which types it once the
+// screen is stable, and waits for the outcome. When ctx ends first, a
+// message still waiting is withdrawn, never typed, and one on its way is
+// cut short.
+func (c *PTYConversation) Send(ctx context.Context, messageParts ...conv.MessagePart) error {
 	// Validate message content before enqueueing
 	message := buildStringFromMessageParts(messageParts)
 	if message != msgfmt.TrimWhitespace(message) {
@@ -125,9 +137,24 @@ func (c *PTYConversation) Send(messageParts ...conv.MessagePart) error {
 		return conv.ErrMessageValidationChanging
 	}
 	errCh := make(chan error, 1)
-	c.pending = &outboundMessage{parts: messageParts, errCh: errCh, gen: c.sendGen}
+	msg := &outboundMessage{parts: messageParts, errCh: errCh, gen: c.sendGen, ctx: ctx}
+	c.pending = msg
 	c.lock.Unlock()
 	c.wakeSnapshot()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+	}
+	c.lock.Lock()
+	if c.pending == msg {
+		c.pending = nil
+		c.lock.Unlock()
+		// The screen never settled: the message can wait in a queue.
+		return fmt.Errorf("%w: %w", conv.ErrMessageValidationChanging, ctx.Err())
+	}
+	c.lock.Unlock()
+	// On its way: ctx's end cuts it short.
 	return <-errCh
 }
 

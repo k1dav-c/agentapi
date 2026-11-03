@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -27,7 +28,7 @@ func (s *Server) getStatus(ctx context.Context, input *struct{}) (*StatusRespons
 // the conversation has a lock of its own, and the read answers while s.mu
 // is held for a slow call into the agent (a restart can take minutes).
 func (s *Server) getTitle(ctx context.Context, input *struct{}) (*TitleResponse, error) {
-	status := convertStatus(s.conversation.Status())
+	status := convstate.ConvertStatus(s.conversation.Status())
 	task := ""
 	messages := s.conversation.Messages()
 	for i := len(messages) - 1; i >= 0; i-- {

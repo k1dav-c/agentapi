@@ -24,7 +24,9 @@ func startQuietHub(t *testing.T, statePath string) string {
 	t.Helper()
 	h, err := hub.New(hub.Config{Token: hubToken, Secret: hubSecret, StatePath: statePath})
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = h.Close() })
 	srv := httptest.NewServer(h.Handler())
+	hubs.Store(srv.URL, h)
 	t.Cleanup(srv.Close)
 	return srv.URL
 }
@@ -132,6 +134,7 @@ func TestHubPins(t *testing.T) {
 	// The instance's events don't touch it; a hub that starts again knows it.
 	heartbeat(t, hubURL, "dev-1:3284", "p9")
 	assert.Equal(t, reordered, pins(t, hubURL))
+	flushHub(t, hubURL)
 	again := startQuietHub(t, statePath)
 	assert.Equal(t, reordered, pins(t, again))
 

@@ -135,7 +135,7 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 			importStateFile(stateDB, opts, cwd, logger)
 		}
 	}
-	apiToken, err := resolveAPIToken(opts, logger)
+	apiToken, err := resolveAPIToken(opts, logger, self)
 	if err != nil {
 		return err
 	}
@@ -153,18 +153,35 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 	return serve(ctx, logger, srv, agent, self)
 }
 
+// generatedAPITokenEnv carries a generated API token to the program a
+// restart in place runs: it gets the same arguments, and --api-token
+// without a value would generate another token, signing every client out.
+// procenv keeps it from the agent, as every AGENTAPI_*_TOKEN.
+const generatedAPITokenEnv = "AGENTAPI_GENERATED_API_TOKEN"
+
 // resolveAPIToken returns the token the API asks for: none, the given one,
-// or a random one, which it prints with the chat's sign-in URL.
-func resolveAPIToken(opts serverOptions, logger *slog.Logger) (string, error) {
+// or a random one, which it prints with the chat's sign-in URL. A random
+// one is kept for self to run again with (generatedAPITokenEnv); after a
+// restart in place, it is the one generated before.
+func resolveAPIToken(opts serverOptions, logger *slog.Logger, self *selfExec) (string, error) {
+	kept := os.Getenv(generatedAPITokenEnv)
+	_ = os.Unsetenv(generatedAPITokenEnv)
+	self.setEnv(generatedAPITokenEnv, "")
 	switch opts.apiToken {
 	case "":
 		return "", nil
 	case "generate":
-		var tokenBytes [32]byte
-		if _, err := rand.Read(tokenBytes[:]); err != nil {
-			return "", fmt.Errorf("generate API token: %w", err)
+		token := kept
+		if isGeneratedAPIToken(token) {
+			logger.Info("Kept the generated API token across the restart in place")
+		} else {
+			var tokenBytes [32]byte
+			if _, err := rand.Read(tokenBytes[:]); err != nil {
+				return "", fmt.Errorf("generate API token: %w", err)
+			}
+			token = hex.EncodeToString(tokenBytes[:])
 		}
-		token := hex.EncodeToString(tokenBytes[:])
+		self.setEnv(generatedAPITokenEnv, token)
 		fmt.Fprintf(os.Stderr, "API token: %s\n", token)
 		// The token goes in the URL fragment, which the browser never sends
 		// to a server or proxy; the chat UI trades it for a session cookie.
@@ -174,6 +191,13 @@ func resolveAPIToken(opts serverOptions, logger *slog.Logger) (string, error) {
 		logger.Info("API token authentication enabled")
 		return opts.apiToken, nil
 	}
+}
+
+// isGeneratedAPIToken reports whether token is one resolveAPIToken
+// generates: 32 random bytes in hex.
+func isGeneratedAPIToken(token string) bool {
+	decoded, err := hex.DecodeString(token)
+	return err == nil && len(decoded) == 32
 }
 
 // serverConfig is the configuration of the server for opts and agent;
@@ -487,6 +511,9 @@ func CreateServerCmd() *cobra.Command {
 			// The arguments are fine: an error from here on isn't a usage
 			// error.
 			cmd.SilenceUsage = true
+			// First, so that a SIGUSR2 while the server starts doesn't end
+			// it (listenForRestart).
+			self := newSelfExec()
 			// The --exit flag is used for testing validation of flags in the test suite
 			if viper.GetBool(FlagExit) {
 				return nil
@@ -511,7 +538,6 @@ func CreateServerCmd() *cobra.Command {
 				return fmt.Errorf("invalid --%s: %w", FlagLogLevel, err)
 			}
 			level.Set(logLevel)
-			self := newSelfExec()
 			logger.Debug("Restarting in place runs this program", "program", self.path)
 			err = runServer(ctx, logger, cmd.Flags().Args(), self)
 			if errors.Is(err, errRestart) {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 )
 
 // LogReader is the state of reading one session log: it reads the log's
@@ -253,6 +254,11 @@ func (e *indexed[R]) update(path string, newReader func(string) R) error {
 	e.offset += consumed
 	e.done = !more
 	e.info = info
+	if err != nil {
+		// Read on from the offset next time, though the file may not
+		// have changed (Follower).
+		e.info.ModTime = time.Time{}
+	}
 	e.tail = nil
 	if e.offset > 0 {
 		start := max(0, e.offset-tailLength)
@@ -336,4 +342,29 @@ func feed[R LogReader](r *bufio.Reader, reader R) (int64, bool, error) {
 			return consumed, true, nil
 		}
 	}
+}
+
+// Follower reads one log as it grows, as an Index reads each of its
+// files: only complete lines, from where it stopped, and from the start
+// again, by a new reader, once the file shrank, was replaced or rewritten.
+// Unlike an Index it keeps its place when a read fails, for the next one
+// to go on from. It isn't safe for concurrent use.
+type Follower[R LogReader] struct {
+	path      string
+	newReader func(path string) R
+	e         indexed[R]
+}
+
+// NewFollower returns a Follower of the log at path whose readers
+// newReader makes: the first when the log is first read, another each
+// time it is read again from its start.
+func NewFollower[R LogReader](path string, newReader func(path string) R) *Follower[R] {
+	return &Follower[R]{path: path, newReader: newReader}
+}
+
+// Read reads the lines appended to the log since it last read it, into
+// its reader. It returns the error of a log that can't be read (one that
+// is gone, among others): the next Read tries again.
+func (f *Follower[R]) Read() error {
+	return f.e.update(f.path, f.newReader)
 }

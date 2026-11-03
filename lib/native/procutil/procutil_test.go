@@ -7,6 +7,8 @@ import (
 	"context"
 	"io"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -152,5 +154,86 @@ func TestOutput(t *testing.T) {
 		_, err := Output(ctx, Command{Program: "sh", Args: []string{"-c", "sleep 30 & sleep 30"}}, 10)
 		assert.Error(t, err)
 		assert.Less(t, time.Since(start), 5*time.Second)
+	})
+
+	t.Run("a child holding the output", func(t *testing.T) {
+		t.Parallel()
+		start := time.Now()
+		out, err := Output(context.Background(), Command{Program: "sh", Args: []string{"-c", "echo $$; sleep 30 & exit 0"}}, 100)
+		require.NoError(t, err)
+		assert.Less(t, time.Since(start), 5*time.Second)
+		pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+		require.NoError(t, err)
+		assert.Eventually(t, func() bool { return !groupAlive(pid) }, time.Second, 20*time.Millisecond, "the child got SIGTERM")
+	})
+}
+
+func TestCombinedOutput(t *testing.T) {
+	t.Parallel()
+	out, err := CombinedOutput(context.Background(), Command{Program: "sh", Args: []string{"-c", "echo 12345; echo 6789 >&2; exit 2"}}, 7)
+	assert.Error(t, err)
+	assert.Equal(t, "5\n6789\n", string(out), "the end is kept")
+}
+
+// gone reports whether pid exited: it no longer exists, or is a zombie
+// nobody reaped yet.
+func gone(pid int) bool {
+	if syscall.Kill(pid, 0) != nil {
+		return true
+	}
+	if runtime.GOOS != "linux" {
+		// macOS has no /proc; ps prints nothing for a pid that's gone.
+		out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+		state := strings.TrimSpace(string(out))
+		return err != nil || state == "" || strings.HasPrefix(state, "Z")
+	}
+	stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return true
+	}
+	fields := strings.Fields(string(stat))
+	return len(fields) > 2 && fields[2] == "Z"
+}
+
+// readPid reads the pid the script prints first.
+func readPid(t *testing.T, r *bufio.Reader) int {
+	t.Helper()
+	line, err := r.ReadString('\n')
+	require.NoError(t, err)
+	pid, err := strconv.Atoi(strings.TrimSpace(line))
+	require.NoError(t, err)
+	return pid
+}
+
+// The processes the agent started don't outlive it when it exits on its
+// own: they get SIGTERM, and SIGKILL GroupGrace later.
+func TestExitStopsGroup(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sigterm", func(t *testing.T) {
+		t.Parallel()
+		p := startSh(t, `sleep 30 & echo $!; read line; exit 0`)
+		reader := bufio.NewReader(p.Stdout())
+		child := readPid(t, reader)
+		_, err := p.Stdin().Write([]byte("exit\n"))
+		require.NoError(t, err)
+		require.NoError(t, p.Wait())
+		assert.Eventually(t, func() bool { return gone(child) }, GroupGrace-500*time.Millisecond, 20*time.Millisecond)
+	})
+
+	t.Run("sigkill", func(t *testing.T) {
+		t.Parallel()
+		p := startSh(t, `sh -c 'trap "" TERM; echo $$; while :; do sleep 0.1; done' & read line; exit 0`)
+		reader := bufio.NewReader(p.Stdout())
+		child := readPid(t, reader)
+		_, err := p.Stdin().Write([]byte("exit\n"))
+		require.NoError(t, err)
+		// Wait waits for stderr, which the child holds, up to OutputGrace.
+		leader := p.cmd.Process.Pid
+		require.Eventually(t, func() bool { return gone(leader) }, time.Second, 10*time.Millisecond)
+		time.Sleep(GroupGrace / 2)
+		assert.False(t, gone(child), "SIGTERM is ignored")
+		assert.Eventually(t, func() bool { return gone(child) }, GroupGrace+2*time.Second, 20*time.Millisecond)
+		assert.NoError(t, p.Kill(), "signals after the group is gone are no-ops")
 	})
 }

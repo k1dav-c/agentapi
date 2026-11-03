@@ -30,10 +30,19 @@ type nativeObserver struct {
 
 var _ native.Observer = (*nativeObserver)(nil)
 
-func (o *nativeObserver) Started(caps native.Capabilities) { o.emitter.SetCapabilities(caps) }
+// Started: an agent the conversation started again by itself after it
+// exited (AgentExited) is back.
+func (o *nativeObserver) Started(caps native.Capabilities) {
+	o.emitter.SetCapabilities(caps)
+	o.emitter.ReleaseLifecycle()
+}
 
+// LoginRequired: an agent waiting for a login is up too.
 func (o *nativeObserver) LoginRequired(login *native.LoginRequired) {
 	o.emitter.SetLoginRequired(login)
+	if login != nil {
+		o.emitter.ReleaseLifecycle()
+	}
 }
 
 func (o *nativeObserver) RichMessage(msg transcript.RichMessage) {

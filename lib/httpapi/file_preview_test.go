@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/htmlpreview"
+	"github.com/coder/agentapi/lib/workspacefs"
 )
 
 // pngHeader starts every PNG file.
@@ -26,7 +27,7 @@ func TestFilePreview(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "site", "style.css"), "body { color: red }")
 	writeFile(t, filepath.Join(dir, "site", "logo.png"), pngHeader)
 	writeFile(t, filepath.Join(dir, "notes.txt"), "notes")
-	writeFile(t, filepath.Join(dir, "big.html"), strings.Repeat("x", maxPreviewPage+1))
+	writeFile(t, filepath.Join(dir, "big.html"), strings.Repeat("x", workspacefs.MaxPreviewPage+1))
 	outside := filepath.Join(t.TempDir(), "secret.js")
 	writeFile(t, outside, "secret")
 	// A symlink in the working directory can't lead the preview out of it.

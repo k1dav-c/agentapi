@@ -110,7 +110,7 @@ const (
 	defaultStartTimeout       = 2 * time.Minute
 	defaultLoginRetryInterval = 5 * time.Second
 	// sendTimeout bounds the delivery of a message no caller gives a
-	// deadline: the initial prompt, and Send's, which the server calls
+	// deadline (the initial prompt), and Send's, which the server calls
 	// while it holds its lock.
 	sendTimeout = 30 * time.Second
 	// restartReset is how long an agent runs before its exit counts as the
@@ -461,15 +461,20 @@ func (c *Conversation) statusLocked() conv.Status {
 }
 
 // Reset implements conv.Conversation by clearing the messages. Use Restart to
-// also replace the agent.
-func (c *Conversation) Reset() {
+// also replace the agent. forget runs under the lock the conversation
+// reports to its Emitter under.
+func (c *Conversation) Reset(forget func()) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if forget != nil {
+		forget()
+	}
 	c.messages.reset()
-	c.mu.Unlock()
 }
 
-// Send implements conv.Conversation by sending the parts' text as a turn.
-func (c *Conversation) Send(parts ...conv.MessagePart) error {
+// Send implements conv.Conversation by sending the parts' text as a turn,
+// within sendTimeout, until ctx or the conversation ends.
+func (c *Conversation) Send(ctx context.Context, parts ...conv.MessagePart) error {
 	var sb strings.Builder
 	for _, part := range parts {
 		sb.WriteString(part.String())
@@ -477,8 +482,11 @@ func (c *Conversation) Send(parts ...conv.MessagePart) error {
 	c.mu.Lock()
 	runCtx := c.ctx
 	c.mu.Unlock()
-	ctx, cancel := context.WithTimeout(runCtx, sendTimeout)
+	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
+	if runCtx != nil {
+		defer context.AfterFunc(runCtx, cancel)()
+	}
 	return c.StartTurn(ctx, InputFromText(sb.String()))
 }
 

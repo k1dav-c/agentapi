@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -26,12 +27,15 @@ func TestWriteAndList(t *testing.T) {
 	_, err = Write(dir, first)
 	require.NoError(t, err)
 
-	info, err := os.Stat(path)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
-	dirInfo, err := os.Stat(dir)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o700), dirInfo.Mode().Perm())
+	// Windows has no permission bits; the user's profile is private.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+		dirInfo, err := os.Stat(dir)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o700), dirInfo.Mode().Perm())
+	}
 
 	// Files that aren't entries are left alone.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hi"), 0o600))
@@ -56,7 +60,9 @@ func TestListRemovesStale(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	hostname, _ := os.Hostname()
-	cmd := exec.Command("true")
+	// The test binary itself, which runs no test: a program every
+	// platform has.
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
 	require.NoError(t, cmd.Run())
 	gone := cmd.Process.Pid
 	_, err := Write(dir, Entry{WebhookInstance: instanceapi.WebhookInstance{ServerID: "gone", Hostname: hostname, PID: gone}})

@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/handoff"
 	"github.com/coder/agentapi/lib/native"
 )
@@ -32,9 +34,22 @@ func (b ptyBackend) readyForQueued() bool {
 	return !question
 }
 
+// ptySendTimeout bounds a message to the terminal agent, which the server
+// sends holding s.mu: waiting for its screen to settle, typing it and
+// seeing it submitted take seconds.
+const ptySendTimeout = time.Minute
+
+// sendToPTY sends parts to the terminal agent, within ptySendTimeout and
+// until AgentAPI stops, so Stop can take s.mu. Caller holds s.mu.
+func (s *Server) sendToPTY(parts ...conv.MessagePart) error {
+	ctx, cancel := s.agentCtx(ptySendTimeout)
+	defer cancel()
+	return s.conversation.Send(ctx, parts...)
+}
+
 func (b ptyBackend) sendQueued(content string) error {
 	b.s.emitter.SendingMessage()
-	return b.s.conversation.Send(FormatMessage(b.s.agentType, content)...)
+	return b.s.sendToPTY(FormatMessage(b.s.agentType, content)...)
 }
 
 // notResent: a message the agent didn't submit is still in its input box,
@@ -102,7 +117,7 @@ func (b ptyBackend) deliver(content string, _ DispatchMode, resp *MessageRespons
 		screen, question = s.emitter.Screen()
 	}
 	if keys, ok := freeTextReplyKeys(s.agentType, screen); question && ok {
-		if err := s.conversation.Send(formatFreeTextReply(s.agentType, keys, content)...); err != nil {
+		if err := s.sendToPTY(formatFreeTextReply(s.agentType, keys, content)...); err != nil {
 			if errors.Is(err, conv.ErrMessageValidationChanging) {
 				return huma.Error409Conflict("the agent's prompt is still updating; try again in a moment")
 			}
@@ -115,7 +130,7 @@ func (b ptyBackend) deliver(content string, _ DispatchMode, resp *MessageRespons
 		return nil
 	}
 	s.emitter.SendingMessage()
-	if err := s.conversation.Send(FormatMessage(s.agentType, content)...); err != nil {
+	if err := s.sendToPTY(FormatMessage(s.agentType, content)...); err != nil {
 		if errors.Is(err, conv.ErrMessageValidationChanging) {
 			s.queueMessageLocked(resp, content, false)
 			return nil
@@ -132,9 +147,9 @@ func (b ptyBackend) beforeQueue() {
 }
 
 // handoffOffer offers a dialog of the agent's terminal.
-func (b ptyBackend) handoffOffer(view handoffView) (string, string, native.RequestState, bool) {
-	if view.dialog {
-		return "terminal", view.screen, native.RequestState{}, true
+func (b ptyBackend) handoffOffer(view convstate.HandoffView) (string, string, native.RequestState, bool) {
+	if view.Dialog {
+		return "terminal", view.Screen, native.RequestState{}, true
 	}
 	return "", "", native.RequestState{}, false
 }
@@ -162,7 +177,7 @@ func (b ptyBackend) answerHandoff(pending *handoff.Request, _ native.RequestStat
 	s.handoff.record(pending.ID, replyID, result)
 	var err error
 	if freeText {
-		err = s.conversation.Send(formatFreeTextReply(s.agentType, freeTextKeys, strings.TrimSpace(content))...)
+		err = s.sendToPTY(formatFreeTextReply(s.agentType, freeTextKeys, strings.TrimSpace(content))...)
 	} else {
 		var n int
 		n, err = s.agentio.Write([]byte(content))

@@ -26,11 +26,10 @@ func TestMute(t *testing.T) {
 	srv := httptest.NewServer(h.Handler())
 	defer srv.Close()
 	set := func(summary instanceapi.SummaryBody) {
-		_, _, err := h.store.update("dev:1", true, func(i *Instance) {
+		_, _ = h.store.update("dev:1", true, func(i *Instance) {
 			i.URL = "http://dev:1"
 			i.Summary = &summary
 		})
-		require.NoError(t, err)
 	}
 	patch := func(body string) (int, Instance) {
 		req, err := http.NewRequest(http.MethodPatch, srv.URL+"/api/instances/dev:1", bytes.NewBufferString(body))
@@ -58,18 +57,18 @@ func TestMute(t *testing.T) {
 	code, instance := patch(`{"muted": true}`)
 	require.Equal(t, http.StatusOK, code)
 	assert.Equal(t, "login", instance.Muted)
-	h.unmuteChanged("dev:1", &login)
+	h.applySummary(t.Context(), "dev:1", "http://dev:1", login)
 	assert.Equal(t, "login", muted(), "still waits for the login")
-	h.unmuteChanged("dev:1", &instanceapi.SummaryBody{Attention: instanceapi.AttentionNone})
+	h.applySummary(t.Context(), "dev:1", "http://dev:1", instanceapi.SummaryBody{Attention: instanceapi.AttentionNone})
 	assert.Empty(t, muted(), "logged in")
 
 	first := instanceapi.SummaryBody{Attention: instanceapi.AttentionRequest, Request: &instanceapi.SummaryRequest{ID: "r1"}}
 	set(first)
 	_, instance = patch(`{"muted": true}`)
 	assert.Equal(t, "request:r1", instance.Muted)
-	h.unmuteChanged("dev:1", &first)
+	h.applySummary(t.Context(), "dev:1", "http://dev:1", first)
 	assert.Equal(t, "request:r1", muted())
-	h.unmuteChanged("dev:1", &instanceapi.SummaryBody{Attention: instanceapi.AttentionRequest, Request: &instanceapi.SummaryRequest{ID: "r2"}})
+	h.applySummary(t.Context(), "dev:1", "http://dev:1", instanceapi.SummaryBody{Attention: instanceapi.AttentionRequest, Request: &instanceapi.SummaryRequest{ID: "r2"}})
 	assert.Empty(t, muted(), "another request")
 
 	set(login)
@@ -85,11 +84,10 @@ func TestMute(t *testing.T) {
 func TestSummaryFromAnEndingWatch(t *testing.T) {
 	h, err := New(Config{Token: "t", Secret: "s"})
 	require.NoError(t, err)
-	_, _, err = h.store.update("dev:1", true, func(i *Instance) {
+	_, _ = h.store.update("dev:1", true, func(i *Instance) {
 		i.URL = "http://dev:1"
 		i.Connection = ConnectionStopped
 	})
-	require.NoError(t, err)
 	summary := instanceapi.SummaryBody{Instance: instanceapi.WebhookInstance{ID: "dev:1", ServerID: "s1"}}
 	connection := func() Connection {
 		instance, _ := h.store.get("dev:1")
@@ -98,7 +96,7 @@ func TestSummaryFromAnEndingWatch(t *testing.T) {
 	assert.False(t, h.applySummary(t.Context(), "dev:1", "http://dev:1", summary))
 	assert.Equal(t, ConnectionStopped, connection())
 
-	_, _, _ = h.store.update("dev:1", false, func(i *Instance) {
+	_, _ = h.store.update("dev:1", false, func(i *Instance) {
 		i.URL = "http://dev:2"
 		i.Connection = ConnectionConnecting
 	})
@@ -122,13 +120,12 @@ func TestStoreTellsWhatBrowsersSee(t *testing.T) {
 	s, err := newStore("", slog.New(slog.DiscardHandler), quartz.NewMock(t))
 	require.NoError(t, err)
 	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
-	_, _, err = s.update("dev:1", true, func(i *Instance) {
+	_, _ = s.update("dev:1", true, func(i *Instance) {
 		i.URL = "http://dev:1"
 		i.Connection = ConnectionConnected
 		i.Summary = &instanceapi.SummaryBody{Status: instanceapi.AgentStatusStable, Attention: instanceapi.AttentionNone}
 		i.LastSeen = now
 	})
-	require.NoError(t, err)
 	_, events := s.subscribe()
 	heard := func() bool {
 		select {
@@ -138,14 +135,32 @@ func TestStoreTellsWhatBrowsersSee(t *testing.T) {
 			return false
 		}
 	}
-	_, _, _ = s.update("dev:1", false, func(i *Instance) { i.LastSeen = now.Add(time.Minute) })
-	_, _, _ = s.update("dev:1", false, func(i *Instance) { i.refusedRun = "twin" })
+	_, _ = s.update("dev:1", false, func(i *Instance) { i.LastSeen = now.Add(time.Minute) })
+	_, _ = s.update("dev:1", false, func(i *Instance) { i.refusedRun = "twin" })
 	assert.False(t, heard(), "a heartbeat")
-	_, _, _ = s.update("dev:1", false, func(i *Instance) { i.Group = "Work" })
+	_, _ = s.update("dev:1", false, func(i *Instance) { i.Group = "Work" })
 	assert.True(t, heard())
 
-	_, _, _ = s.update("dev:1", false, func(i *Instance) { i.Connection = ConnectionUnreachable })
+	_, _ = s.update("dev:1", false, func(i *Instance) { i.Connection = ConnectionUnreachable })
 	assert.True(t, heard())
-	_, _, _ = s.update("dev:1", false, func(i *Instance) { i.LastSeen = now.Add(2 * time.Minute) })
+	_, _ = s.update("dev:1", false, func(i *Instance) { i.LastSeen = now.Add(2 * time.Minute) })
 	assert.True(t, heard(), "offline since then")
+}
+
+// A summary that ends a mute is one change: browsers hear of it once.
+func TestSummaryThatEndsAMuteIsOneEvent(t *testing.T) {
+	h, err := New(Config{Token: "t", Secret: "s"})
+	require.NoError(t, err)
+	login := instanceapi.SummaryBody{Attention: instanceapi.AttentionLogin}
+	_, _ = h.store.update("dev:1", true, func(i *Instance) {
+		i.URL = "http://dev:1"
+		i.Summary = &login
+		i.Muted = instanceapi.AttentionKey(&login)
+	})
+	_, events := h.store.subscribe()
+	require.True(t, h.applySummary(t.Context(), "dev:1", "http://dev:1", instanceapi.SummaryBody{Attention: instanceapi.AttentionNone}))
+	require.Len(t, events, 1)
+	event := <-events
+	assert.Empty(t, event.Instance.Muted)
+	assert.Equal(t, ConnectionConnected, event.Instance.Connection)
 }

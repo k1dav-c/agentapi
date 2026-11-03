@@ -465,7 +465,12 @@ func (h *harness) defaultDrive(m map[string]any) bool {
 		case "steer":
 			h.call(id, func() error { return h.a.Steer(h.ctx, input) })
 		case nil:
+			busy := h.a.isTurnActive()
 			h.call(id, func() error { return h.a.StartTurn(h.ctx, input) })
+			if busy {
+				// AgentAPI refuses it, before Pi does.
+				return false
+			}
 		default:
 			return false
 		}

@@ -1,55 +1,34 @@
 "use client";
 
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from "react";
-import {ArrowLeft, Bell, BellOff, ExternalLink, Plus, Search, X} from "lucide-react";
-import {AgentMark} from "@/components/agent-mark";
+import {Bell, BellOff, Plus, Search, X} from "lucide-react";
 import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
-import {
-  activity,
-  applyHubEvent,
-  chatURL,
-  countFilters,
-  displayName,
-  formatUSD,
-  groupNames,
-  hubRoot,
-  instanceState,
-  instanceVersion,
-  spendTitle,
-  spendTotals,
-  stateLabel,
-  type HubEvent,
-  type HubFilter,
-  type HubInstance,
-  type InstanceState,
-} from "@/lib/hub";
-import {frameMessage, toFrame, type FromFrame} from "@/lib/hub-frame";
+import {chatURL, countFilters, displayName, formatUSD, groupNames, hubRoot, spendTitle, spendTotals, type HubFilter} from "@/lib/hub";
 import {listSections, movePin, pinOf, sortPinned} from "@/lib/hub-order";
-import {shownUpdate} from "@/lib/hub-update";
-import {checkHubSession, type HubSession} from "@/lib/hub-session";
-import {getReconnectDelay} from "@/lib/reconnect";
+import {useStableCallback} from "@/lib/use-stable-callback";
 import {cn} from "@/lib/utils";
-import {useEventSource} from "./use-event-source";
 import {HubMark} from "./hub/brand";
 import {AddInstance, GroupName, type Naming} from "./hub/dialogs";
-import {GroupHeader, InstanceRow, agentName} from "./hub/instance-row";
+import {HubClock} from "./hub/clock";
+import {basePath, FrameInfo, InstanceBar} from "./hub/instance-bar";
+import {GroupHeader, InstanceRow, type RowActions} from "./hub/instance-row";
 import {ListEdge, useListWidth} from "./hub/list-edge";
 import {ListOrderSwitch, useListOrder} from "./hub/list-order";
 import {Onboarding, Overview} from "./hub/overview";
 import {SignIn} from "./hub/sign-in";
-import {StatusGlyph, stateTone} from "./hub/status-glyph";
+import {readStorage, writeStorage} from "./hub/storage";
+import {useHubTab} from "./hub/tab-icon";
 import {cancelFromHub} from "./hub/update";
-import {UpdateStatus} from "./hub/update-chip";
-import {VersionTag} from "./hub/version-tag";
-
-const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "/chat").replace(/\/$/, "");
+import {useHubActions} from "./hub/use-hub-actions";
+import {useHubFrame} from "./hub/use-hub-frame";
+import {useHubKeys} from "./hub/use-hub-keys";
+import {useHubStream} from "./hub/use-hub-stream";
+import {useNeedsYou} from "./hub/use-needs-you";
 
 // Where the browser keeps which groups are folded, and whether to notify.
 const collapsedKey = "agentapi.hub.collapsed";
 const notifyKey = "agentapi.hub.notify";
-// The hub sends a heartbeat every 15 s.
-const STALE_STREAM_MS = 45_000;
 
 const filters: {id: HubFilter; label: string}[] = [
   {id: "all", label: "All"},
@@ -59,60 +38,12 @@ const filters: {id: HubFilter; label: string}[] = [
   {id: "offline", label: "Offline"},
 ];
 
-function readStorage<T>(key: string, fallback: T): T {
-  try {
-    const value = localStorage.getItem(key);
-    return value === null ? fallback : (JSON.parse(value) as T);
-  } catch {
-    return fallback;
-  }
-}
-
-function writeStorage(key: string, value: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
-}
-
-// useNow ticks: every second while something runs (for the running
-// times), else every half minute (for the ages).
-function useNow(fast: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), fast ? 1000 : 30_000);
-    return () => clearInterval(timer);
-  }, [fast]);
-  return now;
-}
-
-// The tab icon: the hub's mark, with a dot in the most pressing state and
-// the number that need you.
-function faviconUrl(waiting: number, working: boolean): string {
-  const dot = waiting > 0 ? "#c27c0e" : working ? "#4f6bed" : "";
-  const badge = dot
-    ? `<circle cx="24" cy="8" r="7.5" fill="${dot}" stroke="#ffffff" stroke-width="1.5"/>` +
-      (waiting > 0 ? `<text x="24" y="11.4" font-family="system-ui,sans-serif" font-size="10" font-weight="700" fill="#ffffff" text-anchor="middle">${waiting > 9 ? "9+" : waiting}</text>` : "")
-    : "";
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#232733"/>` +
-    `<circle cx="16" cy="16" r="3.6" fill="#ffffff"/><circle cx="9.3" cy="9.3" r="2.2" fill="#c27c0e"/><circle cx="24.6" cy="20" r="2.2" fill="#4f6bed"/><circle cx="12" cy="25" r="2.2" fill="#16a07a"/>` +
-    badge +
-    `</svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
-
 // HubView is the hub's page: sign in, the instances in a sidebar (what
 // needs you first), and on the right either the overview or the chat of
 // the one picked. On a narrow screen the list and the chat take turns.
 export function HubView() {
   const root = useMemo(() => (typeof window === "undefined" ? "" : hubRoot(basePath, window.location.origin)), []);
-  const [session, setSession] = useState<HubSession | undefined>(undefined);
-  const [instances, setInstances] = useState<Map<string, HubInstance>>(new Map());
-  // The hub's own version, which the older instances are marked against.
-  const [hubVersion, setHubVersion] = useState("");
-  // The last session check after the stream failed found the hub
-  // unreachable.
-  const [unreachable, setUnreachable] = useState(false);
+  const {session, signedIn, retrySession, instances, hubVersion, unreachable, status} = useHubStream(root);
   const [selected, setSelected] = useState<string | undefined>(() =>
     typeof window === "undefined" ? undefined : decodeURIComponent(window.location.hash.slice(1)) || undefined,
   );
@@ -122,73 +53,20 @@ export function HubView() {
   const [naming, setNaming] = useState<Naming | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(readStorage<string[]>(collapsedKey, [])));
   const [notify, setNotify] = useState<boolean>(() => readStorage(notifyKey, false));
-  const [announcement, setAnnouncement] = useState("");
   const search = useRef<HTMLInputElement>(null);
   const listWidth = useListWidth();
   const [order, setOrder] = useListOrder();
-
-  // Signed in or not; a hub that doesn't answer is asked again, with a
-  // backoff, and at once when the browser comes back online.
-  const [sessionAttempt, setSessionAttempt] = useState(0);
-  useEffect(() => {
-    if (!root) return;
-    let active = true;
-    void checkHubSession(root).then((result) => {
-      if (active) setSession(result);
-    });
-    return () => {
-      active = false;
-    };
-  }, [root, sessionAttempt]);
-  useEffect(() => {
-    if (session !== "unreachable") return;
-    const retry = () => setSessionAttempt((n) => n + 1);
-    const timer = setTimeout(retry, getReconnectDelay(sessionAttempt + 1));
-    window.addEventListener("online", retry);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener("online", retry);
-    };
-  }, [session, sessionAttempt]);
-
-  // The instances and their changes, from one stream, kept open.
-  const stream = useEventSource({
-    url: session === "signed-in" && root ? `${root}/api/events` : null,
-    withCredentials: true,
-    staleAfter: STALE_STREAM_MS,
-    listeners: () => {
-      const on = (type: HubEvent["type"]) => (message: MessageEvent<string>) => {
-        const data = JSON.parse(message.data);
-        const event: HubEvent =
-          type === "instances"
-            ? {type, instances: data.instances ?? [], hubVersion: data.hub_version ?? ""}
-            : type === "instance"
-              ? {type, instance: data}
-              : {type, id: data.id};
-        if (event.type === "instances") setHubVersion(event.hubVersion ?? "");
-        setInstances((previous) => applyHubEvent(previous, event));
-      };
-      return {instances: on("instances"), instance: on("instance"), removed: on("removed")};
-    },
-    onOpen: () => setUnreachable(false),
-    // EventSource hides the status: a session that expired comes back as a
-    // sign-in, a hub that doesn't answer as unreachable.
-    onError: () => {
-      void checkHubSession(root).then((result) => {
-        if (result === "signed-out") setSession("signed-out");
-        setUnreachable(result === "unreachable");
-      });
-    },
-  });
-  const connected = stream.status === "connected";
+  const connected = status === "connected";
 
   const all = useMemo(() => [...instances.values()], [instances]);
   const counts = useMemo(() => countFilters(all), [all]);
   const waiting = counts["needs-you"];
-  const now = useNow(counts.working > 0);
   const spend = useMemo(() => spendTotals(all), [all]);
   const sections = useMemo(() => listSections(all, {filter, query, order}), [all, filter, query, order]);
-  const names = useMemo(() => groupNames(all), [all]);
+  // The same list while the names are the same, so the rows don't render
+  // again for it.
+  const nameList = groupNames(all).join("\n");
+  const names = useMemo(() => (nameList ? nameList.split("\n") : []), [nameList]);
   // The pinned rows the list shows, which Move up and Move down step past.
   const shownPins = sections[0]?.pinned ? sections[0].instances.map((instance) => instance.id) : [];
 
@@ -222,22 +100,7 @@ export function HubView() {
     setSelected(id);
   }, []);
 
-  // The open instance's chat draws the bar above itself once it is ready
-  // (FrameBar), with its own actions in it; until then the hub's bar shows.
-  const frame = useRef<HTMLIFrameElement>(null);
-  const [framed, setFramed] = useState<string>();
-  useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      const chat = frame.current;
-      if (!chat || event.source !== chat.contentWindow) return;
-      const message = frameMessage<FromFrame>(event);
-      if (message?.type === "ready") setFramed(chat.dataset.instance);
-      else if (message?.type === "back") select(undefined);
-      else if (message?.type === "cancel-update" && chat.dataset.instance) void cancelFromHub(root, chat.dataset.instance);
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [select, root]);
+  const {frame, framed} = useHubFrame({onBack: () => select(undefined), onCancelUpdate: (id) => void cancelFromHub(root, id)});
 
   // Back and forward show what the URL names.
   useEffect(() => {
@@ -247,96 +110,20 @@ export function HubView() {
   }, []);
 
   // Tell people who aren't looking: a screen reader, the tab, a notification.
-  const previousStates = useRef<Map<string, InstanceState>>(new Map());
-  useEffect(() => {
-    const before = previousStates.current;
-    const next = new Map<string, InstanceState>();
-    for (const instance of all) {
-      const state = instanceState(instance);
-      next.set(instance.id, state);
-      if (state === "needs-you" && before.size > 0 && before.get(instance.id) !== "needs-you") {
-        const text = `${displayName(instance)}: ${activity(instance).text}`;
-        setAnnouncement(`${displayName(instance)} needs you. ${activity(instance).text}`);
-        if (notify && document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") {
-          const notification = new Notification(`${displayName(instance)} needs you`, {body: text, tag: `agentapi-hub-${instance.id}`});
-          notification.onclick = () => {
-            window.focus();
-            select(instance.id);
-            notification.close();
-          };
-        }
-      }
-    }
-    previousStates.current = next;
-  }, [all, notify, select]);
+  const announcement = useNeedsYou(all, notify, select);
+  useHubTab(waiting, counts.working > 0);
 
-  useEffect(() => {
-    document.title = waiting > 0 ? `(${waiting}) AgentAPI Hub` : "AgentAPI Hub";
-    let link = document.querySelector<HTMLLinkElement>("link[data-hub-icon]");
-    if (!link) {
-      document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]').forEach((icon) => icon.remove());
-      link = document.createElement("link");
-      link.rel = "icon";
-      link.type = "image/svg+xml";
-      link.setAttribute("data-hub-icon", "");
-      document.head.appendChild(link);
-    }
-    link.href = faviconUrl(waiting, counts.working > 0);
-  }, [waiting, counts.working]);
-
-  // Pins an instance below the pinned ones on the hub, or unpins it; the
-  // change comes back on the event stream.
-  const setPinned = useCallback(
-    async (id: string, pinned: boolean) => {
-      await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        credentials: "same-origin",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({pinned}),
-      });
+  const actions = useHubActions(root, instances);
+  useHubKeys({
+    search,
+    query,
+    onClearSearch: () => setQuery(""),
+    onOverview: () => select(undefined),
+    onPin: (id) => {
+      const instance = actions.instance(id);
+      if (instance) void actions.setPinned(id, pinOf(instance) === undefined);
     },
-    [root],
-  );
-
-  // Keys: / searches, j and k (or the arrows) move between rows, p pins or
-  // unpins the row with the focus, Esc goes back to the overview.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const typing = target?.closest("input, textarea, [contenteditable=true]");
-      if (event.key === "/" && !typing) {
-        event.preventDefault();
-        search.current?.focus();
-        return;
-      }
-      if (event.key === "Escape") {
-        if (typing === search.current && query) setQuery("");
-        else if (!document.querySelector("[role=dialog], [role=menu]")) select(undefined);
-        return;
-      }
-      // A row's menu and a dialog take their own keys: the arrows move
-      // between a menu's items.
-      if (typing || target?.closest("[role=menu], [role=dialog]") || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.key === "p") {
-        const instance = instances.get((document.activeElement as HTMLElement | null)?.dataset.hubRow ?? "");
-        if (!instance) return;
-        event.preventDefault();
-        void setPinned(instance.id, pinOf(instance) === undefined);
-        return;
-      }
-      const step = event.key === "j" || event.key === "ArrowDown" ? 1 : event.key === "k" || event.key === "ArrowUp" ? -1 : 0;
-      if (!step) return;
-      const rows = [...document.querySelectorAll<HTMLButtonElement>("[data-hub-row]")];
-      if (rows.length === 0) return;
-      event.preventDefault();
-      const at = rows.indexOf(document.activeElement as HTMLButtonElement);
-      const next = rows[at === -1 ? (step > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + step))];
-      next.focus();
-      next.scrollIntoView({block: "nearest"});
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [query, select, instances, setPinned]);
+  });
 
   const changeCollapsed = useCallback((change: (next: Set<string>) => void) => {
     setCollapsed((previous) => {
@@ -360,48 +147,38 @@ export function HubView() {
     writeStorage(notifyKey, on);
   };
 
-  const forget = async (id: string) => {
-    await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {method: "DELETE", credentials: "same-origin"});
-    if (selected === id) select(undefined);
-  };
-  // The change comes back on the event stream, like any other.
-  const setGroup = async (id: string, group: string) => {
-    await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      credentials: "same-origin",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({group}),
-    });
-  };
-  // Mutes what an instance waits for now, until that changes (the hub ends
-  // the mute then), or ends the mute.
-  const setMuted = async (id: string, muted: boolean) => {
-    await fetch(`${root}/api/instances/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      credentials: "same-origin",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({muted}),
-    });
-  };
+  // Forget closes the agent once the hub forgot it.
+  const forget = useStableCallback(async (id: string) => {
+    if ((await actions.forget(id)) && selected === id) select(undefined);
+  });
   // Moves a pinned instance past the next pinned row the list shows; the hub
   // keeps the order of all of them.
-  const movePinned = async (id: string, step: -1 | 1) => {
+  const movePinned = useStableCallback(async (id: string, step: -1 | 1) => {
     const ids = movePin(sortPinned(all).map((instance) => instance.id), shownPins, id, step);
-    if (!ids) return;
-    await fetch(`${root}/api/pins`, {
-      method: "PUT",
-      credentials: "same-origin",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ids}),
-    });
-  };
+    if (ids) await actions.setPins(ids, id);
+  });
+  // What the rows do: one object for as long as the page is open.
+  const rowActions = useMemo<RowActions>(
+    () => ({
+      select,
+      forget: (id) => void forget(id),
+      group: (id, name) => void actions.setGroup(id, name),
+      newGroup: (id) => setNaming({mode: "new", id}),
+      mute: (id, muted) => void actions.setMuted(id, muted),
+      pin: (id, pinned) => void actions.setPinned(id, pinned),
+      move: (id, step) => void movePinned(id, step),
+    }),
+    [select, forget, actions, movePinned],
+  );
   const renameGroup = async (from: string, to: string) => {
     // A folded group stays folded under its new name.
     changeCollapsed((next) => {
       if (next.delete(from)) next.add(to);
     });
-    const members = all.filter((instance) => (instance.group?.trim() ?? "") === from);
-    await Promise.all(members.map((instance) => setGroup(instance.id, to)));
+    await actions.moveGroup(
+      all.filter((instance) => (instance.group?.trim() ?? "") === from),
+      to,
+    );
   };
 
   if (session === undefined) {
@@ -420,342 +197,260 @@ export function HubView() {
           <h1 className="text-base font-semibold">Can&apos;t reach the hub</h1>
           <p className="mt-1 text-sm text-muted-foreground">It didn&apos;t answer. Trying again…</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setSessionAttempt((n) => n + 1)}>
+        <Button variant="outline" size="sm" onClick={retrySession}>
           Try again
         </Button>
       </main>
     );
   }
-  if (session === "signed-out") return <SignIn root={root} onSignedIn={() => setSession("signed-in")} />;
+  if (session === "signed-out") return <SignIn root={root} onSignedIn={signedIn} />;
 
   const current = selected ? instances.get(selected) : undefined;
   const filtered = filter !== "all" || query.trim() !== "";
   return (
-    <main className="app-frame flex overflow-hidden bg-background">
-      <aside
-        id="hub-list"
-        style={{"--hub-list-width": `${listWidth.width}px`} as React.CSSProperties}
-        className={cn("relative flex w-full flex-col border-r bg-background md:w-(--hub-list-width) md:shrink-0", current ? "hidden md:flex" : "flex")}
-      >
-        <header className="space-y-3 border-b px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
-          <div className="flex items-center gap-2.5">
-            <HubMark className="size-8" />
-            <div className="min-w-0 flex-1">
-              <h1 className="text-[15px] leading-tight font-semibold tracking-tight">AgentAPI Hub</h1>
-              <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                <span
-                  aria-hidden="true"
-                  className={cn("size-1.5 shrink-0 rounded-full", connected ? "bg-state-ready" : "animate-pulse bg-state-needs")}
-                />
-                <span aria-live="polite" className="shrink-0">
-                  {connected
-                    ? `Live · ${counts.all} ${counts.all === 1 ? "agent" : "agents"}`
-                    : stream.status === "offline"
-                      ? "Offline"
-                      : unreachable
-                        ? "Can't reach the hub · retrying"
-                        : "Reconnecting…"}
-                </span>
-                {/* Out of the live region: it changes every minute. */}
-                {connected && spend.week > 0 && (
-                  <span className="min-w-0 truncate tabular-nums" title={spendTitle(spend.day, spend.week)}>
-                    · {formatUSD(spend.day)}/24h
+    <HubClock fast={counts.working > 0}>
+      <main className="app-frame flex overflow-hidden bg-background">
+        <aside
+          id="hub-list"
+          style={{"--hub-list-width": `${listWidth.width}px`} as React.CSSProperties}
+          className={cn("relative flex w-full flex-col border-r bg-background md:w-(--hub-list-width) md:shrink-0", current ? "hidden md:flex" : "flex")}
+        >
+          <header className="space-y-3 border-b px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
+            <div className="flex items-center gap-2.5">
+              <HubMark className="size-8" />
+              <div className="min-w-0 flex-1">
+                <h1 className="text-[15px] leading-tight font-semibold tracking-tight">AgentAPI Hub</h1>
+                <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                  <span
+                    aria-hidden="true"
+                    className={cn("size-1.5 shrink-0 rounded-full", connected ? "bg-state-ready" : "animate-pulse bg-state-needs")}
+                  />
+                  <span aria-live="polite" className="shrink-0">
+                    {connected
+                      ? `Live · ${counts.all} ${counts.all === 1 ? "agent" : "agents"}`
+                      : status === "offline"
+                        ? "Offline"
+                        : unreachable
+                          ? "Can't reach the hub · retrying"
+                          : "Reconnecting…"}
                   </span>
-                )}
-              </p>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-9 rounded-full text-muted-foreground"
-              onClick={() => void toggleNotify()}
-              aria-pressed={notify}
-              aria-label={notify ? "Stop notifying me" : "Notify me when an agent needs me"}
-              title={notify ? "Notifications on" : "Notify me when an agent needs me"}
-            >
-              {notify ? <Bell className="size-4 text-foreground" /> : <BellOff className="size-4" />}
-            </Button>
-            <ModeToggle />
-            <Button variant="outline" size="icon" className="size-9 rounded-full" aria-label="Add agents" title="Add agents" onClick={() => setAdding(true)}>
-              <Plus className="size-4" />
-            </Button>
-          </div>
-          <div className="flex gap-2">
-            <div className="relative min-w-0 flex-1">
-              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-              <input
-                ref={search}
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search agents"
-                aria-label="Search agents"
-                className="h-10 w-full rounded-xl border bg-muted/50 pr-10 pl-9 text-sm outline-none transition-colors placeholder:text-muted-foreground/80 focus-visible:border-ring focus-visible:bg-card focus-visible:ring-[3px] focus-visible:ring-ring/40 [&::-webkit-search-cancel-button]:hidden"
-              />
-              {query ? (
-                <button
-                  type="button"
-                  onClick={() => setQuery("")}
-                  aria-label="Clear the search"
-                  className="absolute top-1/2 right-1 flex size-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
-                >
-                  <X className="size-4" />
-                </button>
-              ) : (
-                <kbd className="pointer-events-none absolute top-1/2 right-2.5 hidden -translate-y-1/2 rounded border bg-background px-1.5 font-mono text-[11px] text-muted-foreground md:block">/</kbd>
-              )}
-            </div>
-            <ListOrderSwitch order={order} onChange={setOrder} />
-          </div>
-          <div
-            role="group"
-            aria-label="Filter the agents"
-            className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-0.5 [mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          >
-            {filters.map((f) => {
-              const active = filter === f.id;
-              const count = counts[f.id];
-              return (
-                <button
-                  key={f.id}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => setFilter(active && f.id !== "all" ? "all" : f.id)}
-                  className={cn(
-                    "flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                    active ? "border-foreground bg-foreground text-background" : "bg-background text-muted-foreground hover:text-foreground",
-                    !active && f.id === "needs-you" && count > 0 && "border-state-needs/40 text-state-needs",
+                  {/* Out of the live region: it changes every minute. */}
+                  {connected && spend.week > 0 && (
+                    <span className="min-w-0 truncate tabular-nums" title={spendTitle(spend.day, spend.week)}>
+                      · {formatUSD(spend.day)}/24h
+                    </span>
                   )}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-9 rounded-full text-muted-foreground"
+                onClick={() => void toggleNotify()}
+                aria-pressed={notify}
+                aria-label={notify ? "Stop notifying me" : "Notify me when an agent needs me"}
+                title={notify ? "Notifications on" : "Notify me when an agent needs me"}
+              >
+                {notify ? <Bell className="size-4 text-foreground" /> : <BellOff className="size-4" />}
+              </Button>
+              <ModeToggle />
+              <Button variant="outline" size="icon" className="size-9 rounded-full" aria-label="Add agents" title="Add agents" onClick={() => setAdding(true)}>
+                <Plus className="size-4" />
+              </Button>
+            </div>
+            <div className="flex gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                <input
+                  ref={search}
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search agents"
+                  aria-label="Search agents"
+                  className="h-10 w-full rounded-xl border bg-muted/50 pr-10 pl-9 text-sm outline-none transition-colors placeholder:text-muted-foreground/80 focus-visible:border-ring focus-visible:bg-card focus-visible:ring-[3px] focus-visible:ring-ring/40 [&::-webkit-search-cancel-button]:hidden"
+                />
+                {query ? (
+                  <button
+                    type="button"
+                    onClick={() => setQuery("")}
+                    aria-label="Clear the search"
+                    className="absolute top-1/2 right-1 flex size-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="size-4" />
+                  </button>
+                ) : (
+                  <kbd className="pointer-events-none absolute top-1/2 right-2.5 hidden -translate-y-1/2 rounded border bg-background px-1.5 font-mono text-[11px] text-muted-foreground md:block">/</kbd>
+                )}
+              </div>
+              <ListOrderSwitch order={order} onChange={setOrder} />
+            </div>
+            <div
+              role="group"
+              aria-label="Filter the agents"
+              className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-0.5 [mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
+              {filters.map((f) => {
+                const active = filter === f.id;
+                const count = counts[f.id];
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setFilter(active && f.id !== "all" ? "all" : f.id)}
+                    className={cn(
+                      "flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                      active ? "border-foreground bg-foreground text-background" : "bg-background text-muted-foreground hover:text-foreground",
+                      !active && f.id === "needs-you" && count > 0 && "border-state-needs/40 text-state-needs",
+                    )}
+                  >
+                    {f.label}
+                    <span className={cn("tabular-nums", active ? "text-background/70" : "text-muted-foreground/70")}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </header>
+
+          <ul
+            className="flex-1 overflow-y-auto overscroll-contain pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+            aria-label="Instances"
+            data-hub-list
+            onFocus={(event) => {
+              const {hubRow, hubRowMenu} = (event.target as HTMLElement).dataset;
+              focusedRow.current = hubRow ? {id: hubRow, menu: false} : hubRowMenu ? {id: hubRowMenu, menu: true} : undefined;
+            }}
+            onBlur={(event) => {
+              // Not when the row left the page with the focus (relatedTarget is
+              // none then): it gets it back.
+              if (event.relatedTarget) focusedRow.current = undefined;
+            }}
+          >
+            {counts.all === 0 && (
+              <li>
+                <div className="md:hidden">
+                  <Onboarding root={root} onAdd={() => setAdding(true)} compact />
+                </div>
+                <div className="hidden px-6 py-12 text-center md:block">
+                  <HubMark className="mx-auto size-10 opacity-60" />
+                  <p className="mt-4 text-sm font-medium">No agents yet</p>
+                  <p className="mt-1 text-sm text-muted-foreground">The steps on the right connect them.</p>
+                </div>
+              </li>
+            )}
+            {counts.all > 0 && sections.length === 0 && (
+              <li className="px-6 py-12 text-center">
+                <p className="text-sm font-medium">Nothing matches</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {query ? `No agent matches “${query.trim()}”` : "No agent is in this state right now"}.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => {
+                    setFilter("all");
+                    setQuery("");
+                  }}
                 >
-                  {f.label}
-                  <span className={cn("tabular-nums", active ? "text-background/70" : "text-muted-foreground/70")}>{count}</span>
-                </button>
+                  Show all
+                </Button>
+              </li>
+            )}
+            {sections.map((section) => {
+              // A search or a filter shows every match, folded or not.
+              const folded = !!section.label && !filtered && collapsed.has(section.key);
+              // Each section is a block of its own, so its header sticks only
+              // while its rows scroll by, and the next header pushes it off.
+              return (
+                <li key={`section:${section.key}`}>
+                  {section.label && (
+                    <GroupHeader
+                      group={section}
+                      label={section.label}
+                      folded={folded}
+                      onToggle={() =>
+                        changeCollapsed((next) => {
+                          if (!next.delete(section.key)) next.add(section.key);
+                        })
+                      }
+                      onRename={() => setNaming({mode: "rename", from: section.name})}
+                    />
+                  )}
+                  {!folded && (
+                    <ul aria-label={section.label || undefined}>
+                      {section.instances.map((instance, index) => (
+                        <InstanceRow
+                          key={instance.id}
+                          instance={instance}
+                          hubVersion={hubVersion}
+                          root={root}
+                          groups={names}
+                          order={order}
+                          selected={instance.id === selected}
+                          pinned={section.pinned ? {first: index === 0, last: index === section.instances.length - 1} : undefined}
+                          actions={rowActions}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                </li>
               );
             })}
-          </div>
-        </header>
+          </ul>
+          <p className="hidden border-t px-4 py-2 text-[11px] text-muted-foreground md:block" aria-hidden="true">
+            <kbd className="font-mono">/</kbd> search · <kbd className="font-mono">j</kbd> <kbd className="font-mono">k</kbd> move ·{" "}
+            <kbd className="font-mono">↵</kbd> open · <kbd className="font-mono">p</kbd> pin · <kbd className="font-mono">esc</kbd> overview
+          </p>
+          <ListEdge controls="hub-list" {...listWidth} />
+        </aside>
 
-        <ul
-          className="flex-1 overflow-y-auto overscroll-contain pb-[max(0.75rem,env(safe-area-inset-bottom))]"
-          aria-label="Instances"
-          onFocus={(event) => {
-            const {hubRow, hubRowMenu} = (event.target as HTMLElement).dataset;
-            focusedRow.current = hubRow ? {id: hubRow, menu: false} : hubRowMenu ? {id: hubRowMenu, menu: true} : undefined;
-          }}
-          onBlur={(event) => {
-            // Not when the row left the page with the focus (relatedTarget is
-            // none then): it gets it back.
-            if (event.relatedTarget) focusedRow.current = undefined;
-          }}
-        >
-          {counts.all === 0 && (
-            <li>
-              <div className="md:hidden">
-                <Onboarding root={root} onAdd={() => setAdding(true)} compact />
-              </div>
-              <div className="hidden px-6 py-12 text-center md:block">
-                <HubMark className="mx-auto size-10 opacity-60" />
-                <p className="mt-4 text-sm font-medium">No agents yet</p>
-                <p className="mt-1 text-sm text-muted-foreground">The steps on the right connect them.</p>
-              </div>
-            </li>
-          )}
-          {counts.all > 0 && sections.length === 0 && (
-            <li className="px-6 py-12 text-center">
-              <p className="text-sm font-medium">Nothing matches</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {query ? `No agent matches “${query.trim()}”` : "No agent is in this state right now"}.
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-4"
-                onClick={() => {
-                  setFilter("all");
-                  setQuery("");
-                }}
-              >
-                Show all
-              </Button>
-            </li>
-          )}
-          {sections.map((section) => {
-            // A search or a filter shows every match, folded or not.
-            const folded = !!section.label && !filtered && collapsed.has(section.key);
-            // Each section is a block of its own, so its header sticks only
-            // while its rows scroll by, and the next header pushes it off.
-            return (
-              <li key={`section:${section.key}`}>
-                {section.label && (
-                  <GroupHeader
-                    group={section}
-                    label={section.label}
-                    folded={folded}
-                    onToggle={() =>
-                      changeCollapsed((next) => {
-                        if (!next.delete(section.key)) next.add(section.key);
-                      })
-                    }
-                    onRename={() => setNaming({mode: "rename", from: section.name})}
-                  />
-                )}
-                {!folded && (
-                  <ul aria-label={section.label || undefined}>
-                    {section.instances.map((instance, index) => (
-                      <InstanceRow
-                        key={instance.id}
-                        instance={instance}
-                        hubVersion={hubVersion}
-                        root={root}
-                        groups={names}
-                        order={order}
-                        now={now}
-                        selected={instance.id === selected}
-                        pinned={section.pinned && {first: index === 0, last: index === section.instances.length - 1}}
-                        onSelect={() => select(instance.id)}
-                        onForget={() => void forget(instance.id)}
-                        onGroup={(name) => void setGroup(instance.id, name)}
-                        onNewGroup={() => setNaming({mode: "new", id: instance.id})}
-                        onMute={(muted) => void setMuted(instance.id, muted)}
-                        onPin={(pinned) => void setPinned(instance.id, pinned)}
-                        onMove={(step) => void movePinned(instance.id, step)}
-                      />
-                    ))}
-                  </ul>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-        <p className="hidden border-t px-4 py-2 text-[11px] text-muted-foreground md:block" aria-hidden="true">
-          <kbd className="font-mono">/</kbd> search · <kbd className="font-mono">j</kbd> <kbd className="font-mono">k</kbd> move ·{" "}
-          <kbd className="font-mono">↵</kbd> open · <kbd className="font-mono">p</kbd> pin · <kbd className="font-mono">esc</kbd> overview
-        </p>
-        <ListEdge controls="hub-list" {...listWidth} />
-      </aside>
-
-      <section className={cn("min-w-0 flex-1 flex-col bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]", current ? "flex" : "hidden md:flex")}>
-        {current ? (
-          <>
-            {framed === current.id ? (
-              <FrameInfo frame={frame} instance={current} hubVersion={hubVersion} root={root} />
-            ) : (
-              <InstanceBar instance={current} hubVersion={hubVersion} root={root} onBack={() => select(undefined)} />
-            )}
-            <iframe
-              ref={frame}
-              key={current.id}
-              data-instance={current.id}
-              title={`${displayName(current)} chat`}
-              src={chatURL(basePath, root, current.id, true)}
-              className={cn("min-h-0 w-full flex-1 border-0 bg-background", framed === current.id && "pt-[env(safe-area-inset-top)]")}
+        <section className={cn("min-w-0 flex-1 flex-col bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]", current ? "flex" : "hidden md:flex")}>
+          {current ? (
+            <>
+              {framed?.instance === current.id ? (
+                <FrameInfo frame={frame} ready={framed.ready} instance={current} hubVersion={hubVersion} root={root} />
+              ) : (
+                <InstanceBar instance={current} hubVersion={hubVersion} root={root} onBack={() => select(undefined)} />
+              )}
+              <iframe
+                ref={frame}
+                key={current.id}
+                data-instance={current.id}
+                title={`${displayName(current)} chat`}
+                src={chatURL(basePath, root, current.id, true)}
+                className={cn("min-h-0 w-full flex-1 border-0 bg-background", framed?.instance === current.id && "pt-[env(safe-area-inset-top)]")}
+              />
+            </>
+          ) : (
+            <Overview
+              root={root}
+              instances={all}
+              hubVersion={hubVersion}
+              counts={counts}
+              onOpen={select}
+              onFilter={setFilter}
+              onAdd={() => setAdding(true)}
             />
-          </>
-        ) : (
-          <Overview
-            root={root}
-            instances={all}
-            hubVersion={hubVersion}
-            counts={counts}
-            now={now}
-            onOpen={select}
-            onFilter={setFilter}
-            onAdd={() => setAdding(true)}
-          />
-        )}
-      </section>
-
-      <div className="sr-only" aria-live="assertive" role="status">
-        {announcement}
-      </div>
-      <AddInstance root={root} open={adding} onOpenChange={setAdding} onAdded={(id) => select(id)} />
-      <GroupName
-        naming={naming}
-        onClose={() => setNaming(null)}
-        onSave={(name) => {
-          if (naming?.mode === "new") void setGroup(naming.id, name);
-          else if (naming?.mode === "rename") void renameGroup(naming.from, name);
-          setNaming(null);
-        }}
-      />
-    </main>
-  );
-}
-
-// FrameInfo tells the open instance's chat what its bar shows, whenever
-// that changes.
-function FrameInfo({frame, instance, hubVersion, root}: {frame: React.RefObject<HTMLIFrameElement | null>; instance: HubInstance; hubVersion: string; root: string}) {
-  const info = JSON.stringify(
-    toFrame({
-      name: displayName(instance),
-      state: instanceState(instance),
-      label: stateLabel(instance),
-      agentType: instance.agent_type || undefined,
-      agent: agentName(instance) || undefined,
-      hostname: instance.hostname || undefined,
-      version: instanceVersion(instance) || undefined,
-      hubVersion: hubVersion || undefined,
-      lastKnown: instance.connection !== "connected",
-      update: shownUpdate(instance),
-      tab: chatURL(basePath, root, instance.id),
-    }),
-  );
-  useEffect(() => {
-    frame.current?.contentWindow?.postMessage(JSON.parse(info), window.location.origin);
-  }, [frame, info]);
-  return null;
-}
-
-// InstanceBar heads the open instance: back to the list or overview, what
-// it is and does, and its own chat in a tab of its own.
-function InstanceBar({instance, hubVersion, root, onBack}: {instance: HubInstance; hubVersion: string; root: string; onBack: () => void}) {
-  const state = instanceState(instance);
-  const agent = agentName(instance);
-  const version = instanceVersion(instance);
-  const update = shownUpdate(instance);
-  return (
-    <div className="box-content flex h-12 shrink-0 items-center gap-1 border-b bg-background px-1.5 pt-[env(safe-area-inset-top)] sm:h-14 md:gap-2 md:px-3">
-      <Button variant="ghost" size="icon" className="size-10 shrink-0 rounded-full md:hidden" onClick={onBack} aria-label="Back to Agents">
-        <ArrowLeft className="size-5" />
-      </Button>
-      <Button variant="ghost" size="icon" className="hidden size-9 rounded-full md:inline-flex" onClick={onBack} aria-label="Back to the overview" title="Back to the overview (esc)">
-        <X className="size-4" />
-      </Button>
-      <StatusGlyph state={state} className="ml-1 hidden sm:block" />
-      <div className="min-w-0 flex-1 pl-0.5 md:pl-1">
-        <p className="truncate text-sm leading-tight font-semibold">{displayName(instance)}</p>
-        <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-          <span className={cn("shrink-0 font-medium", stateTone[state])}>{stateLabel(instance)}</span>
-          {update && <UpdateStatus update={update} onCancel={() => void cancelFromHub(root, instance.id)} />}
-          {agent && (
-            <>
-              <span aria-hidden="true" className="text-muted-foreground/40">·</span>
-              {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3" />}
-              <span className="shrink-0">{agent}</span>
-            </>
           )}
-          {instance.hostname && (
-            <>
-              <span aria-hidden="true" className="hidden text-muted-foreground/40 sm:inline">·</span>
-              <span className="hidden min-w-0 truncate sm:inline" data-hub-host>
-                {instance.hostname}
-              </span>
-            </>
-          )}
-          {version && (
-            <>
-              <span aria-hidden="true" className="hidden text-muted-foreground/40 sm:inline">·</span>
-              <VersionTag version={version} hubVersion={hubVersion} lastKnown={instance.connection !== "connected"} className="hidden sm:flex" />
-            </>
-          )}
-        </p>
-      </div>
-      <Button variant="ghost" size="sm" className="hidden h-9 shrink-0 gap-1.5 text-muted-foreground sm:inline-flex" asChild>
-        <a href={chatURL(basePath, root, instance.id)} target="_blank" rel="noreferrer" aria-label={`Open ${displayName(instance)} in a new tab`}>
-          <ExternalLink className="size-4" />
-          <span className="hidden lg:inline">New tab</span>
-        </a>
-      </Button>
-    </div>
+        </section>
+
+        {/* Assertive: an agent that needs you. role="status" would make it polite. */}
+        <div className="sr-only" aria-live="assertive" aria-atomic="true">
+          {announcement}
+        </div>
+        <AddInstance root={root} open={adding} onOpenChange={setAdding} onAdded={(id) => select(id)} />
+        <GroupName
+          naming={naming}
+          onClose={() => setNaming(null)}
+          onSave={(name) => {
+            if (naming?.mode === "new") void actions.setGroup(naming.id, name);
+            else if (naming?.mode === "rename") void renameGroup(naming.from, name);
+            setNaming(null);
+          }}
+        />
+      </main>
+    </HubClock>
   );
 }

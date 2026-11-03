@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -749,4 +750,59 @@ func TestStateDB_KeepsSeen(t *testing.T) {
 	defer stop(t, srv, db)
 	assert.False(t, summary().Unread)
 	assert.True(t, seen.SeenAt.Equal(summary().SeenAt))
+}
+
+// Every change of the queue is stored as it happens, not on the queue's
+// next tick: after a crash, a message that went out or was deleted isn't
+// sent again.
+func TestStateDB_StoresEveryQueueChange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db, err := statedb.Open(path, nil)
+	require.NoError(t, err)
+	factory := &nativetest.Factory{}
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeClaude,
+		Transport:      httpapi.TransportNative,
+		Native:         httpapi.NativeConfig{Factory: factory.New},
+		StateDB:        db,
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		CWD:            "/work",
+		UploadDir:      path + ".uploads",
+		// The queue's tick never comes.
+		Clock: quartz.NewMock(t),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { stop(t, srv, db) })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	n := &nativeServer{t: t, url: ts.URL, factory: factory}
+	require.Eventually(t, func() bool {
+		var status httpapi.StatusChangeBody
+		n.do(http.MethodGet, "/status", nil, &status)
+		return status.Capabilities != nil
+	}, 5*time.Second, 5*time.Millisecond)
+
+	stored := func() []string {
+		db.Flush()
+		snap, err := db.Load()
+		require.NoError(t, err)
+		var contents []string
+		for _, q := range snap.Queue {
+			contents = append(contents, q.Content)
+		}
+		return contents
+	}
+	n.send("first", "")
+	_, res := n.send("second", "")
+	require.True(t, res.Queued)
+	assert.Equal(t, []string{"second"}, stored())
+
+	var queue httpapi.QueueResponse
+	n.do(http.MethodGet, "/queue", nil, &queue.Body)
+	require.Len(t, queue.Body.Messages, 1)
+	n.do(http.MethodDelete, fmt.Sprintf("/queue/%d", queue.Body.Messages[0].ID), nil, nil)
+	assert.Empty(t, stored())
 }

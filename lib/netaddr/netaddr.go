@@ -4,6 +4,7 @@
 package netaddr
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -128,6 +129,10 @@ func Target(rawURL string) string {
 // DefaultTTL is how long Resolver keeps an answer.
 const DefaultTTL = 30 * time.Second
 
+// DialTimeout bounds a lookup of the route: a hostname target is resolved
+// by DNS first, which may hang.
+const DialTimeout = 3 * time.Second
+
 // Resolver finds the IPv4 address this machine reaches a target (host and
 // port) from, as the routing table picks it, and keeps the answer for a
 // while: it changes when DHCP gives the machine another address. Without
@@ -137,8 +142,9 @@ const DefaultTTL = 30 * time.Second
 // It sends no packet: it only "connects" a UDP socket, which picks the
 // route and the source address.
 type Resolver struct {
-	// Dial opens the UDP socket; nil is net.Dial.
-	Dial func(network, address string) (net.Conn, error)
+	// Dial opens the UDP socket; nil is a net.Dialer's DialContext. It is
+	// given a context that ends within DialTimeout.
+	Dial func(ctx context.Context, network, address string) (net.Conn, error)
 	// Interfaces lists the machine's interfaces; nil is Interfaces.
 	Interfaces func() ([]Interface, error)
 	// Now is the time; nil is time.Now.
@@ -159,6 +165,13 @@ type Resolver struct {
 // Resolve returns the address this machine reaches target from. On a
 // failure it returns its last answer, if any, with the error.
 func (r *Resolver) Resolve(target string) (string, error) {
+	return r.ResolveContext(context.Background(), target)
+}
+
+// ResolveContext is Resolve, giving up on the route when ctx ends or after
+// DialTimeout. It may take that long when the answer is stale: callers
+// that hold a lock others wait for should keep its last answer instead.
+func (r *Resolver) ResolveContext(ctx context.Context, target string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
@@ -169,7 +182,7 @@ func (r *Resolver) Resolve(target string) (string, error) {
 	if !r.at.IsZero() && r.target == target && now.Sub(r.at) < ttl {
 		return r.ip, r.err
 	}
-	ip, err := r.lookup(target)
+	ip, err := r.lookup(ctx, target)
 	r.target, r.at = target, now
 	if err != nil {
 		if r.err == nil && r.Logger != nil {
@@ -192,10 +205,10 @@ func (r *Resolver) now() time.Time {
 	return time.Now()
 }
 
-func (r *Resolver) lookup(target string) (string, error) {
+func (r *Resolver) lookup(ctx context.Context, target string) (string, error) {
 	var routeErr error
 	if target != "" {
-		addr, err := r.route(target)
+		addr, err := r.route(ctx, target)
 		if err == nil {
 			return addr.String(), nil
 		}
@@ -216,12 +229,14 @@ func (r *Resolver) lookup(target string) (string, error) {
 }
 
 // route is the local address of a UDP socket connected to target.
-func (r *Resolver) route(target string) (netip.Addr, error) {
-	dial := net.Dial
+func (r *Resolver) route(ctx context.Context, target string) (netip.Addr, error) {
+	dial := (&net.Dialer{}).DialContext
 	if r.Dial != nil {
 		dial = r.Dial
 	}
-	conn, err := dial("udp4", target)
+	ctx, cancel := context.WithTimeout(ctx, DialTimeout)
+	defer cancel()
+	conn, err := dial(ctx, "udp4", target)
 	if err != nil {
 		return netip.Addr{}, fmt.Errorf("find the route to %s: %w", target, err)
 	}

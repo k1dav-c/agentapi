@@ -125,12 +125,6 @@ type MessageResponse struct {
 	}
 }
 
-type QueuedMessage struct {
-	ID      int       `json:"id" doc:"Unique identifier for the queued message."`
-	Content string    `json:"content" doc:"Message content."`
-	Time    time.Time `json:"time" doc:"Timestamp when the message was queued."`
-}
-
 type QueueResponse struct {
 	Body struct {
 		Messages []QueuedMessage `json:"messages" nullable:"false" doc:"Messages waiting to be sent to the agent."`

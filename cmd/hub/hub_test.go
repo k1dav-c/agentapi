@@ -391,3 +391,46 @@ func TestServeRefusesAnUnknownLogLevel(t *testing.T) {
 		})
 	}
 }
+
+// The hub writes its file a moment after a change, and once more when it
+// stops: a change just before it stops is kept.
+func TestServeKeepsTheLastChangeOnStop(t *testing.T) {
+	t.Setenv("AGENTAPI_HUB_LOG_LEVEL", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statePath := filepath.Join(t.TempDir(), "instances.json")
+	var out lockedBuffer
+	cmd := serveCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--token", "t", "--secret", "s3cret", "--bind", "127.0.0.1", "--port", "0", "--state", statePath})
+	served := make(chan error, 1)
+	go func() { served <- cmd.ExecuteContext(ctx) }()
+	var address string
+	require.Eventually(t, func() bool {
+		_, rest, ok := strings.Cut(out.String(), `msg="Hub listening" address=`)
+		address, _, _ = strings.Cut(rest, " ")
+		return ok && address != ""
+	}, 10*time.Second, 10*time.Millisecond)
+
+	body, err := json.Marshal(map[string]any{
+		"id": "d1", "type": "instance.heartbeat", "created_at": time.Now(),
+		"instance": map[string]any{"id": "dev:1", "server_id": "s1", "url": "http://127.0.0.1:1"},
+	})
+	require.NoError(t, err)
+	req, err := http.NewRequest(http.MethodPost, "http://"+address+"/hooks", bytes.NewReader(body))
+	require.NoError(t, err)
+	timestamp := fmt.Sprint(time.Now().Unix())
+	req.Header.Set(instanceapi.HeaderTimestamp, timestamp)
+	req.Header.Set(instanceapi.HeaderSignature, instanceapi.Sign("s3cret", timestamp, body))
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	cancel()
+	require.NoError(t, <-served)
+
+	data, err := os.ReadFile(statePath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"dev:1"`)
+}

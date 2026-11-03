@@ -2,10 +2,11 @@
 // together (see use-event-stream.ts), and with them the point of the
 // conversation they bring its state to.
 
-import {richMessageKey, type Message, type RichMessage} from "./conversation";
+import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage} from "./conversation";
 import {mergeRequests, type NativeRequest} from "./native-requests";
 import type {QueuedMessage} from "./queue";
 import {mergeTasks, type ServerTask} from "./server-tasks";
+import {mergeByKey} from "./session-cache";
 import type {SyncTracker} from "./session-sync";
 
 // Where a state of the conversation is: its epoch, and the highest change
@@ -124,6 +125,34 @@ export class PendingEvents {
     if (queueSeq !== undefined) this.sync.applied(queueSeq);
     return {...batch, point: {epoch: this.sync.epoch, seq: this.sync.watermark}};
   }
+}
+
+// messagesAfter returns the messages once batch is applied to previous.
+// The server's messages replace their own; of the drafts, the failed ones
+// stay until they are retried or dismissed, and those still being sent
+// until the server has them: a new user message of the batch with their
+// content takes the place of one, and sendMessage drops the others once the
+// server answered. A draft dropped before that, by any update, would leave
+// a send that fails nothing to mark failed.
+export function messagesAfter(previous: (Message | DraftMessage)[], batch: EventBatch): (Message | DraftMessage)[] {
+  const known = new Set(previous.flatMap((message) => (isDraftMessage(message) ? [] : [message.id])));
+  // The content of the new user messages, as many times as each came.
+  const arrived = new Map<string, number>();
+  for (const message of batch.messages) {
+    if (message.role !== "user" || known.has(message.id)) continue;
+    const content = message.content.trim();
+    arrived.set(content, (arrived.get(content) ?? 0) + 1);
+  }
+  const kept = previous.filter((message) => {
+    if (!isDraftMessage(message)) return !batch.replace;
+    if (message.deliveryStatus === "failed") return true;
+    const content = message.content.trim();
+    const count = arrived.get(content) ?? 0;
+    if (count === 0) return true;
+    arrived.set(content, count - 1);
+    return false;
+  });
+  return mergeByKey(kept, batch.messages.map(withoutSeq), (message) => (isDraftMessage(message) ? undefined : String(message.id)));
 }
 
 // tasksAfter returns the tasks once batch is applied to previous. While a

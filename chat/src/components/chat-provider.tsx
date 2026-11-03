@@ -16,7 +16,6 @@ import {toast} from "sonner";
 import {getErrorMessage} from "@/lib/error-utils";
 import {getDocumentTitle} from "@/lib/document-title";
 import {downloadFile} from "@/lib/download";
-import {parseFailedMessages} from "@/lib/failed-messages";
 import {clearSession} from "@/lib/session-cache";
 import {AuthDialog} from "@/components/auth-dialog";
 import {
@@ -49,10 +48,11 @@ import type {ConnectionStatus} from "@/lib/event-source";
 import {getAgentState, waitingFor, type AgentStateKind, type TokenTotals, type WaitingFor} from "@/lib/session-status";
 import {SyncTracker} from "@/lib/session-sync";
 import {resolveAgentAPIUrl} from "@/lib/agentapi-url";
-import {isDraftMessage, lastUserMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
+import {lastUserMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
 import type {Timeline, ToolCall} from "@/lib/task-timeline";
 import type {QueuedMessage} from "@/lib/queue";
 import {steeredMessages, tasksByMessage, type ServerTask} from "@/lib/server-tasks";
+import {useDrafts, type SendResult} from "./use-drafts";
 import {useEventStream} from "./use-event-stream";
 import {useQueue} from "./use-queue";
 import {useSessionCache} from "./use-session-cache";
@@ -60,18 +60,12 @@ import {useSessionCost} from "./use-session-cost";
 import {useTranscript} from "./use-transcript";
 import {Store, useStoreSelector} from "@/lib/store";
 import {useStableCallback} from "@/lib/use-stable-callback";
-import {usePersisted} from "@/lib/use-persisted";
 
 export type {DraftMessage, Message, RichContentBlock, RichMessage, Usage} from "@/lib/conversation";
 
 type MessageType = "user" | "raw";
 
-export interface SendResult {
-  ok: boolean;
-  queued: boolean;
-  // The message was added to the turn the agent is working on.
-  steered?: boolean;
-}
+export type {SendResult} from "./use-drafts";
 
 export interface FileUploadResponse {
   ok: boolean;
@@ -291,7 +285,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const [serverWorkspaceUrl, setServerWorkspaceUrl] = useState<string>();
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
   const [transport, setTransport] = useState<Transport>("pty");
   // The agent's status, from status_change events (lib/agent-status). An
   // event that changes nothing leaves it as it is; the ref has the latest,
@@ -375,7 +368,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     [agentType, capabilities, terminalAvailable, transport],
   );
   const sessionCost = useSessionCost(api, chatFeatures.cost, serverStatus, lifecycle !== "starting" && lifecycle !== "restarting");
-  const failedMessagesStorageKey = `agentapi.chat.failed-messages:${agentAPIUrl}`;
   const currentTask = useMemo(() => lastUserMessage(messages), [messages]);
   const steered = useMemo(() => steeredMessages(serverTasks), [serverTasks]);
   const transcript = useTranscript(messages, richMessages, steered);
@@ -402,117 +394,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     };
   }, [api, connectionStatus, workspaceParam]);
 
-  // Messages that failed to send survive a reload, to be retried.
-  usePersisted(
-    failedMessagesStorageKey,
-    messages,
-    (current) => {
-      const failed = current.filter(
-        (message): message is DraftMessage => isDraftMessage(message) && message.deliveryStatus === "failed",
-      );
-      return failed.length > 0 ? JSON.stringify(failed) : null;
-    },
-    (stored) => {
-      if (!stored) return;
-      const failed = parseFailedMessages(stored) as DraftMessage[];
-      setMessages((previous) => {
-        const existing = new Set(previous.filter(isDraftMessage).map((message) => message.clientId));
-        return [...previous, ...failed.filter((message) => !existing.has(message.clientId))];
-      });
-    },
-  );
-
-  // Send a new message
-  const sendMessage = async (
-    content: string,
-    type: "user" | "raw" = "user",
-    mode: DispatchMode = "queue",
-  ): Promise<SendResult> => {
-    // For user messages, require non-empty content
-    if (type === "user" && !content.trim()) return {ok: false, queued: false};
-    const clientId = crypto.randomUUID();
-
-    // For raw messages, don't set loading state as it's usually fast
-    if (type === "user") {
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        {
-          role: "user",
-          content,
-          clientId,
-          deliveryStatus: "sending",
-        },
-      ]);
-      setLoading(true);
-    }
-
-    try {
-      const result = await api.sendMessage(content, type, mode);
-      await queueChanged();
-      if (type === "user") {
-        setMessages((previous) =>
-          previous.filter(
-            (message) =>
-              !isDraftMessage(message) ||
-              message.clientId !== clientId,
-          ),
-        );
-      }
-      return {
-        ok: result.ok,
-        queued: result.queued,
-        steered: result.steered,
-      };
-    } catch (error) {
-      console.error("Error sending message:", error);
-      const message = getErrorMessage(error)
-
-      toast.error(`Error sending message`, {
-        description: message,
-      });
-      if (type === "user") {
-        setMessages((previous) =>
-          previous.map((item) =>
-            isDraftMessage(item) && item.clientId === clientId
-              ? {
-                  ...item,
-                  deliveryStatus: "failed",
-                  error: message,
-                }
-              : item,
-          ),
-        );
-      }
-      return {ok: false, queued: false};
-    } finally {
-      if (type === "user") {
-        setLoading(false);
-      }
-    }
-  };
-
-  const dismissFailedMessage = (clientId: string) => {
-    setMessages((previous) =>
-      previous.filter(
-        (message) =>
-          !isDraftMessage(message) ||
-          message.clientId !== clientId,
-      ),
-    );
-  };
-
-  const retryFailedMessage = async (clientId: string) => {
-    const failedMessage = messages.find(
-      (message) =>
-        isDraftMessage(message) &&
-        message.clientId === clientId,
-    );
-    if (!failedMessage) return false;
-    dismissFailedMessage(clientId);
-    const result = await sendMessage(failedMessage.content, "user");
-    return result.ok;
-  };
-
+  const {loading, sendMessage, retryFailedMessage, dismissFailedMessage} = useDrafts({agentAPIUrl, api, messages, setMessages, queueChanged});
 
   const respondToRequest = async (id: string, response: RequestResponse) => {
     try {
@@ -568,6 +450,24 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     }
   };
 
+  // Starts the conversation over after change (DELETE /messages, resuming
+  // a session). The server's reset arrives as a session_sync of a new
+  // epoch, with what the new session sent since (a restart can take
+  // minutes): clearing then would drop both. Only a server that doesn't
+  // send it needs clearing here.
+  const startOver = async (change: () => Promise<unknown>) => {
+    const epoch = syncRef.current.epoch;
+    await change();
+    if (syncRef.current.epoch !== epoch) return;
+    syncRef.current.reset();
+    markSynced();
+    void clearSession(agentAPIUrl);
+    setMessages([]);
+    setRichMessages([]);
+    setRequests([]);
+    setServerTasks([]);
+  };
+
   // The actions keep their identity from render to render, and each calls
   // what the latest render made of it: the object is made once, and a
   // component that takes it never renders again for it.
@@ -593,36 +493,8 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     deleteQueuedMessage: useStableCallback(deleteQueuedMessage),
     reconnectNow: useStableCallback(reconnectByUser),
     downloadSession: useStableCallback(downloadSession),
-    deleteMessages: useStableCallback(async () => {
-      const epoch = syncRef.current.epoch;
-      await api.deleteMessages();
-      // The server's reset arrived as a session_sync of a new epoch,
-      // with what the new session sent since (a restart can take
-      // minutes): clearing now would drop both. Only a server that
-      // doesn't send it needs clearing here.
-      if (syncRef.current.epoch !== epoch) return;
-      syncRef.current.reset();
-      markSynced();
-      void clearSession(agentAPIUrl);
-      setMessages([]);
-      setRichMessages([]);
-      setRequests([]);
-      setServerTasks([]);
-    }),
-    resumeSession: useStableCallback(async (id: string, fork: boolean) => {
-      const epoch = syncRef.current.epoch;
-      await api.resumeSession(id, fork);
-      // As for deleteMessages: the server sent the session's conversation
-      // under a new epoch.
-      if (syncRef.current.epoch !== epoch) return;
-      syncRef.current.reset();
-      markSynced();
-      void clearSession(agentAPIUrl);
-      setMessages([]);
-      setRichMessages([]);
-      setRequests([]);
-      setServerTasks([]);
-    }),
+    deleteMessages: useStableCallback(() => startOver(() => api.deleteMessages())),
+    resumeSession: useStableCallback((id: string, fork: boolean) => startOver(() => api.resumeSession(id, fork))),
   };
   const [actions] = useState<ChatActions>(() => ({
     ...(Object.fromEntries(API_CALLS.map((name) => [name, api[name]])) as Pick<ChatAPI, (typeof API_CALLS)[number]>),

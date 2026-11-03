@@ -183,6 +183,12 @@ type sessionInfoChanged struct {
 	Name string `json:"name"`
 }
 
+// agentEnd is agent_end: a run ended. agent_settled follows unless Pi
+// retries it.
+type agentEnd struct {
+	WillRetry bool `json:"willRetry"`
+}
+
 // autoRetryEnd is auto_retry_end.
 type autoRetryEnd struct {
 	Success    bool   `json:"success"`

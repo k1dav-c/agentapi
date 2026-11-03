@@ -4,7 +4,9 @@ package server
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -15,6 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/logctx"
+	"github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/selfupdate"
 	"github.com/coder/agentapi/lib/selfupdate/selfupdatetest"
@@ -47,6 +51,43 @@ func TestServeStopsToRestartOnSIGUSR2(t *testing.T) {
 	assert.True(t, s.factory.Last().Closed(), "the agent was closed")
 	_, err := s.do("GET", "/status")
 	assert.Error(t, err, "the listener is closed")
+}
+
+// A SIGUSR2 that comes while the server starts doesn't end the process
+// (its default action): newSelfExec catches it from startup on, and the
+// server restarts once it serves.
+func TestSIGUSR2BeforeServing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	self := &selfExec{path: program(t, t.TempDir(), "agentapi", `echo "agentapi version 2.1.0"`)}
+	self.listenForRestart()
+	t.Cleanup(func() { signal.Stop(self.restartSignals) })
+	require.NoError(t, syscall.Kill(syscall.Getpid(), syscall.SIGUSR2))
+	time.Sleep(100 * time.Millisecond)
+
+	factory := &nativetest.Factory{}
+	logger := slog.New(slog.DiscardHandler)
+	srv, err := httpapi.NewServer(logctx.WithLogger(ctx, logger), httpapi.ServerConfig{
+		AgentType:      msgfmt.AgentTypeClaude,
+		Transport:      httpapi.TransportNative,
+		Native:         httpapi.NativeConfig{Factory: factory.New},
+		Bind:           "127.0.0.1",
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		RegistryDir:    t.TempDir(),
+	})
+	require.NoError(t, err)
+	served := make(chan error, 1)
+	go func() {
+		served <- serve(ctx, logger, srv, &runningAgent{factory: factory.New}, self)
+	}()
+	select {
+	case err := <-served:
+		require.ErrorIs(t, err, errRestart)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the server didn't restart")
+	}
 }
 
 // An update through the API restarts the server as SIGUSR2 does, once it

@@ -69,9 +69,10 @@ func TestRestartPanicKeepsTheLock(t *testing.T) {
 	s.mu.Unlock()
 }
 
-// While the agent restarts, the human reply protocol offers nothing, even
-// once the terminal's screen settles and reads as ready: what it shows is
-// the old process's, and a reply would reach no agent.
+// While the agent restarts, the lifecycle stays restarting and the human
+// reply protocol offers nothing, even once the terminal's screen settles
+// and reads as ready: what it shows is the old process's, and a reply
+// would reach no agent.
 func TestPTYRestartOffersNoHandoff(t *testing.T) {
 	s, c, keys := handoffServer()
 	restarting, release := make(chan struct{}), make(chan struct{})
@@ -89,7 +90,7 @@ func TestPTYRestartOffersNoHandoff(t *testing.T) {
 	<-restarting
 
 	s.emitter.EmitStatus(conv.StatusStable)
-	require.Equal(t, LifecycleReady, s.emitter.StatusSnapshot().Lifecycle)
+	require.Equal(t, LifecycleRestarting, s.emitter.StatusSnapshot().Lifecycle)
 	assert.Nil(t, pendingHandoff(s))
 	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: "any", ID: "r1", Content: "go on"}})
 	require.NoError(t, err)
@@ -99,4 +100,5 @@ func TestPTYRestartOffersNoHandoff(t *testing.T) {
 
 	close(release)
 	require.NoError(t, <-restarted)
+	assert.Equal(t, LifecycleStarting, s.emitter.StatusSnapshot().Lifecycle, "the new process starts")
 }

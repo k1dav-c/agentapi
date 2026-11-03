@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -182,10 +183,12 @@ func TestDownloadBinary(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, content, got)
 
-	// Verify executable permission.
-	info, err := os.Stat(tmpPath)
-	require.NoError(t, err)
-	assert.NotZero(t, info.Mode()&0o111, "file should be executable")
+	// Verify executable permission: Windows has no mode bits for it.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(tmpPath)
+		require.NoError(t, err)
+		assert.NotZero(t, info.Mode()&0o111, "file should be executable")
+	}
 }
 
 func TestDownloadBinaryRejectsChecksumMismatch(t *testing.T) {

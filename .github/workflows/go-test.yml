@@ -19,6 +19,57 @@ jobs:
             - name: Test
               run: CGO_ENABLED=0 go test -count=1 -v ./...
 
+    race:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version-file: go.mod
+
+            # The race detector needs cgo; the SQLite driver is pure Go.
+            - name: Test with the race detector
+              run: CGO_ENABLED=1 go test -race -count=1 ./lib/... ./cmd/...
+
+    # macOS runs every test. Windows builds every test and runs those of the
+    # packages with Windows code whose tests don't need a Unix shell or
+    # signals; the rest skip themselves there or are Unix-only files.
+    platforms:
+        name: test (${{ matrix.os }})
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [macos-latest, windows-latest]
+        runs-on: ${{ matrix.os }}
+        env:
+            CGO_ENABLED: "0"
+        defaults:
+            run:
+                shell: bash
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version-file: go.mod
+
+            - name: Vet
+              run: go vet ./...
+
+            - name: Build every test
+              run: go test -count=1 -run '^$' ./...
+
+            - name: Test
+              if: runner.os == 'macOS'
+              run: go test -count=1 ./...
+
+            - name: Test
+              if: runner.os == 'Windows'
+              run: go test -count=1 ./lib/selfupdate/... ./lib/registry/... ./lib/agentlog ./lib/statedb/...
+
     lint:
         runs-on: ubuntu-latest
         steps:

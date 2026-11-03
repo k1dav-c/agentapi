@@ -59,6 +59,13 @@ func (d *Drift) Unknown(typ string) {
 		"type", typ)
 }
 
+// Unexpected counts behavior the adapter doesn't expect of the agent,
+// named what ("missing agent_settled"), which it works around.
+func (d *Drift) Unexpected(what string, args ...any) {
+	d.report("unexpected "+what, " did something AgentAPI doesn't expect; the agent may have changed its protocol",
+		append([]any{"what", what}, args...)...)
+}
+
 // Changed counts a record of type typ with a field of another type than
 // the adapter expects, which Decode left out. changed may be nil.
 func (d *Drift) Changed(typ string, changed *json.UnmarshalTypeError) {
