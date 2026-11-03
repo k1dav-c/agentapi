@@ -1,27 +1,17 @@
-// The agents AgentAPI can run, as servers report them, and their names.
+// The agents AgentAPI runs, as servers report them, and their names.
 
-export type AgentType = "claude" | "goose" | "aider" | "gemini" | "amp" | "codex" | "cursor" | "cursor-agent" | "copilot" | "auggie" | "amazonq" | "opencode" | "kimi" | "pi" | "custom" | "unknown";
+export type AgentType = "claude" | "codex" | "pi" | "custom" | "unknown";
 
 export type AgentColorDisplayNamePair = {
   displayName: string;
 }
 
+// AgentAPI 3 runs Claude Code, Codex and Pi; "custom" is native-demo.
 export const AgentType: Record<Exclude<AgentType, "unknown">, AgentColorDisplayNamePair> = {
   claude: {displayName: "Claude Code"},
-  goose: {displayName: "Goose"},
-  aider: {displayName: "Aider"},
-  gemini: { displayName: "Gemini"},
-  amp: {displayName: "Amp"},
   codex: {displayName: "Codex"},
-  cursor: { displayName: "Cursor Agent"},
-  "cursor-agent": { displayName: "Cursor Agent"},
-  copilot: {displayName: "Copilot"},
-  auggie: {displayName: "Auggie"},
-  amazonq: {displayName: "Amazon Q"},
-  opencode: {displayName: "Opencode"},
-  kimi: {displayName: "Kimi Code"},
   pi: {displayName: "Pi"},
-  custom: { displayName: "Custom"}
+  custom: {displayName: "Custom"},
 }
 
 // parseAgentType is the agent type a server reports: "unknown" for none,
