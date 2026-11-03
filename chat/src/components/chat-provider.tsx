@@ -229,8 +229,6 @@ export interface ChatState {
   // AgentAPI server version (e.g. "0.14.0"); empty until the first status
   // event or when talking to a server that predates version reporting.
   agentapiVersion: string;
-  // Width of the agent's terminal; 0 until the server reports it.
-  terminalColumns: number;
   // What the agent calls the session (Claude Code's title, Codex's thread
   // name, Pi's /name); empty until it names it.
   sessionName: string;
@@ -291,7 +289,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     serverStatus,
     agentType,
     agentapiVersion,
-    terminalColumns,
     sessionName,
     agentSessionId,
     terminalPrompt,
@@ -523,7 +520,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     storageScope: agentAPIUrl,
     agentType,
     agentapiVersion,
-    terminalColumns,
     sessionName,
     agentSessionId: agentSessionId || sessionCost?.agent_session_id || "",
     customTitle,

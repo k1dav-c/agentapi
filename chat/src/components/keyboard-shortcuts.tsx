@@ -16,8 +16,6 @@ interface KeyboardShortcutsDialogProps {
 
 const shortcuts: {
   section: string;
-  // Only with a terminal (PTY transport).
-  terminal?: boolean;
   // Only for a native agent with this capability.
   items: {keys: string[]; label: string; needs?: "steer" | "interrupt"}[];
 }[] = [
@@ -38,16 +36,6 @@ const shortcuts: {
       { keys: ["⌘", "Enter"], label: "Steer: add to the agent's current turn", needs: "steer" },
       { keys: ["⌘", "Shift", "Enter"], label: "Interrupt the agent and send", needs: "interrupt" },
       { keys: ["Esc"], label: "Cancel edit" },
-    ],
-  },
-  {
-    section: "TTY mode (terminal button in the header)",
-    terminal: true,
-    items: [
-      { keys: ["Any key"], label: "Sent straight to the agent" },
-      { keys: ["Ctrl", "C"], label: "Interrupt (also on the key bar)" },
-      { keys: ["Ctrl", "D"], label: "End of input (key bar: press twice)" },
-      { keys: ["Esc"], label: "Cancel or go back in the agent" },
     ],
   },
 ];
@@ -81,12 +69,10 @@ export function useKeyboardShortcutsKey(onOpen: () => void) {
 
 export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcutsDialogProps) {
   const features = useChatSelector((chat) => chat.features);
-  const shown = shortcuts
-    .filter((group) => !group.terminal || features.agentTerminal)
-    .map((group) => ({
-      ...group,
-      items: group.items.filter((item) => !item.needs || features[item.needs]),
-    }));
+  const shown = shortcuts.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => !item.needs || features[item.needs]),
+  }));
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">

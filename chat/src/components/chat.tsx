@@ -7,7 +7,6 @@ import {useStableCallback} from "@/lib/use-stable-callback";
 import MessageInput from "./message-input";
 import MessageList from "./message-list";
 import dynamic from "next/dynamic";
-import {TtyView} from "./tty-view";
 import {ShellView} from "./shell-view";
 import {OPEN_TERMINAL_EVENT} from "@/lib/slash-commands";
 import {DecisionCard, StateStrip} from "./dock";
@@ -130,9 +129,7 @@ export function Chat() {
           </Button>
         </div>
       )}
-      {terminalOpen && hasTerminal ? (
-        <TtyView onExit={() => setTerminalOpen(false)} />
-      ) : terminalOpen && hasShell ? (
+      {terminalOpen && hasShell ? (
         <ShellView onExit={() => setTerminalOpen(false)} command={shellCommand} />
       ) : (
         <>
@@ -144,19 +141,6 @@ export function Chat() {
             onSendRaw={hasTerminal ? sendRaw : undefined}
             headerAction={
               <div className="flex items-center gap-0.5">
-                {hasTerminal && (
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="size-8 rounded-full text-muted-foreground"
-                    title="TTY mode: use the agent's terminal directly"
-                    aria-label="Switch to TTY mode"
-                    onClick={() => setTerminalOpen(true)}
-                  >
-                    <TerminalSquare className="size-4" />
-                  </Button>
-                )}
                 {hasShell && (
                   <Button
                     type="button"

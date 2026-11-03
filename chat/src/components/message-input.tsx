@@ -484,14 +484,12 @@ export default function MessageInput({
         </div>
 
         <p className="hidden shrink-0 text-center text-[11px] text-muted-foreground sm:block">
-          {features.agentTerminal
-            ? "Enter to send · Shift+Enter for a new line · Keys for the terminal itself: TTY mode"
-            : [
-                "Enter to send",
-                features.steer ? `${modKey}+Enter to steer while it works` : "",
-                features.interrupt ? `${modKey}+Shift+Enter to interrupt & send` : "",
-                "Shift+Enter for a new line",
-              ].filter(Boolean).join(" · ")}
+          {[
+            "Enter to send",
+            features.steer ? `${modKey}+Enter to steer while it works` : "",
+            features.interrupt ? `${modKey}+Shift+Enter to interrupt & send` : "",
+            "Shift+Enter for a new line",
+          ].filter(Boolean).join(" · ")}
         </p>
        </div>
       </div>

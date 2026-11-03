@@ -22,9 +22,7 @@ export type AgentErrorEvent = Schemas["ErrorBody"];
 // (?sync=1) only.
 export type TaskUpdateEvent = Schemas["TaskUpdateBody"];
 export type QueueUpdateEvent = Schemas["QueueUpdateBody"];
-// The screen of TTY mode (GET /internal/screen), and the shell terminal's
-// output and end (GET /terminal).
-export type ScreenEvent = Schemas["ScreenUpdateBody"];
+// The shell terminal's output and end (GET /terminal).
 export type TerminalOutputEvent = Schemas["TerminalOutputBody"];
 export type TerminalExitEvent = Schemas["TerminalExitBody"];
 

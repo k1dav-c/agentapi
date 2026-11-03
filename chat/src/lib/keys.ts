@@ -15,8 +15,8 @@ export function isImeComposing(event: ImeKeyEvent): boolean {
   return Boolean(event.nativeEvent?.isComposing ?? event.isComposing) || event.keyCode === 229;
 }
 
-// Where a number key means something else: text fields, the terminal (TTY
-// mode), and dialogs, menus and lists (the Explorer, the shortcuts dialog,
+// Where a number key means something else: text fields, the shell
+// terminal, and dialogs, menus and lists (the Explorer, the shortcuts dialog,
 // the send menu), which take keys for themselves.
 const OWN_KEYS = '[role="dialog"],[role="alertdialog"],[role="menu"],[role="listbox"],.xterm';
 
