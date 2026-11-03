@@ -996,8 +996,8 @@ AgentAPI 會以 RPC 模式執行 Pi（`pi --mode rpc`，經由 stdin 與 stdout 
 ## PTY transport
 
 PTY transport 適用於所有有終端機介面的 agent，也是 Claude Code、Codex 和 Pi 以外所有 agent 的
-預設值；這三種 agent 要加上 `--transport pty` 才會使用它。對這三種 agent，它也會追蹤它們的
-工作階段紀錄檔來取得結構化活動，聊天介面也能回答它們的終端機對話框。
+預設值；這三種 agent 要加上 `--transport pty` 才會使用它。對這三種 agent，PTY transport 也會追蹤
+它們的工作階段紀錄檔來取得結構化活動，聊天介面也能回答它們的終端機對話框。
 
 ### 運作原理
 
@@ -1032,14 +1032,14 @@ AgentAPI 會從回覆移除兩種常見的 TUI 內容：
 ### Claude、Codex 與 Pi 的結構化活動
 
 除了解析終端機快照之外，這個 fork 也能監看 Claude、Codex 和 Pi 的工作階段紀錄檔。
-這些紀錄提供結構化的思考區塊、工具呼叫、工具結果、用量資訊和穩定的訊息識別碼。
-單靠終端機輸出，未必能可靠地還原這些資訊。
+這些紀錄提供結構化的思考區塊、工具呼叫、工具結果、用量資訊和穩定的訊息識別碼，
+單靠終端機輸出未必還原得出來。
 
 - `GET /rich-messages` 回傳結構化的對話。
 - `GET /timeline` 回傳正規化後的工作階段事件，適合用來匯出、稽核或打造其他介面。加上
-  `?subagents=true`（native 的 Claude Code 和 Codex）時，agent 執行過的 sub agent 的事件會接在
-  後面，從它們各自的紀錄讀出：一個 sub agent 接一個，各自以一筆 system 事件開頭，每筆事件都帶有
-  `subagent_id`，Claude Code 另有啟動它的 Agent 工具呼叫的 `parent_tool_use_id`。agent 自己的
+  `?subagents=true`（native 的 Claude Code 和 Codex）時，agent 執行過的每個 sub agent，事件都會
+  接在後面，從各自的紀錄讀出：一個 sub agent 接一個，各自以一筆 system 事件開頭，每筆事件都帶有
+  `subagent_id`，Claude Code 另有 `parent_tool_use_id`，指向啟動它的 Agent 工具呼叫。agent 自己的
   事件裡只有交給 sub agent 的任務和它最後的回答。
 - 背景任務和委派出去的任務會持續顯示，並標示執行中、已完成或失敗的狀態與輸出細節。
 - Claude 的思考區塊會以可收合的區段，直接顯示在任務時間軸中。
@@ -1056,16 +1056,16 @@ AgentAPI 會從回覆移除兩種常見的 TUI 內容：
 Codex 的核准請求，以及 Pi 的專案信任提示，並把提示做成決策卡片（decision card），
 固定在輸入框上方。按數字鍵即可選擇選項。多選題（Claude Code 帶有 `multiSelect` 的
 AskUserQuestion）會顯示核取方塊和一個 Continue 按鈕，按下後會前往下一題或檢查步驟。
-agent 回答中的編號清單不會被誤判為選項。`GET /status` 會以 `terminal_prompt` 回報該提示。
+agent 回答中的編號清單不會誤當成選項。`GET /status` 會以 `terminal_prompt` 回報該提示。
 使用 [native transport](#native-transport) 時沒有終端機提示；核准、提問和計畫會改以結構化
 的請求送達。
 
 ### Kimi Code CLI
 
 這個 fork 新增了 `kimi` agent 類型、`kimi` 執行檔的自動偵測、聊天介面標示、終端機訊息
-格式化、就緒狀態偵測，以及其啟動狀態的測試。
+格式化和就緒狀態偵測。
 
-Kimi 可以使用一般的互動式 PTY 傳輸方式：
+Kimi 可以使用一般的互動式 PTY transport：
 
 ```bash
 agentapi server -- kimi
@@ -1115,15 +1115,15 @@ AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新�
 - `DELETE /messages` 清除對話（訊息、結構化訊息、請求、任務、時間軸、錯誤和佇列），並重新
   啟動 agent（native transport 會開始新的工作階段）。agent 重新啟動期間，訊息會在佇列中等待；
   原始按鍵、另一次重新啟動和開啟工作階段會回傳 409，AgentAPI 停止期間的重新啟動也一樣。
-- `GET /status` 回傳向下相容的 `stable`/`running` 狀態、詳細的生命週期（`starting`、
-  `ready`、`running`、`restarting`、`exited` 或 `failed`；native agent 結束後，AgentAPI 重新啟動
-  期間為 `restarting`（直到新的 agent 可以接受回合），放棄後為 `failed`；`restarting`、`exited` 和
-  `failed` 在 agent 回來之前不會隨 agent 的狀態改變）、transport、`server_id`（這次
+- `GET /status` 回傳向下相容的 `stable`/`running` 狀態、詳細的生命週期、transport、`server_id`（這次
   AgentAPI 執行的隨機識別碼，每次啟動都會不同）、`turn`（agent 開始工作的次數）、對話的
   `epoch`、工作階段名稱、AgentAPI 版本、agent 目前開啟的對話框（`terminal_prompt`）以及終端機
   寬度（`terminal_columns`）。使用 native transport 時還會回報 `agent_session_id`（agent 自己的
   工作階段，即 [`GET /sessions`](#先前的工作階段) 列出的那些）、`capabilities`、
-  `pending_requests`、`settings`、`usage`、`terminal` 和 `login_required`。
+  `pending_requests`、`settings`、`usage`、`terminal` 和 `login_required`。生命週期為 `starting`、
+  `ready`、`running`、`restarting`、`exited` 或 `failed`。native agent 結束後，AgentAPI 重新啟動
+  期間為 `restarting`（直到新的 agent 可以接受回合），放棄後為 `failed`。`restarting`、`exited` 和
+  `failed` 在 agent 回來之前不會隨 agent 的狀態改變。
 - `GET /tasks` 回傳對話的[任務](#任務)。
 - `GET /title` 回傳工作階段的可讀標題。
 - `POST /upload` 儲存檔案（最大 10 MB；超過 11 MiB 的內容會在讀取前就被拒絕）並回傳路徑，
@@ -1194,10 +1194,10 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
   或最新提示開頭的 `title`。另外包含最新[任務](#任務)、任務數、`pending_requests`、最早的待處理
   `request`（類型、標題和 agent 提出的時間）、`queued_messages`、開啟中的終端機對話框、
   `login_required`、`limit_stop`、`usage`（context window 與帳號用量限制），以及 native 模式的
-  Claude Code、Codex 和 Pi 才有的 `spend`：agent 在工作目錄裡所有 session 最近 24 小時（`day_usd`）
-  和 7 天（`week_usd`）換算成 API 的金額，每分鐘從 log 重新計算一次，並附上金額最後變動的時間
+  Claude Code、Codex 和 Pi 才有的 `spend`：agent 在工作目錄裡所有工作階段最近 24 小時（`day_usd`）
+  和 7 天（`week_usd`）換算成 API 價格的金額，每分鐘從紀錄檔重新計算一次，並附上金額最後變動的時間
   （`updated_at`）和 `scope`。同一台機器上，同一個 agent 在同一個目錄的 AgentAPI 回報的是同一批
-  session，`scope` 也相同：加總多個 AgentAPI 的用戶端每個 scope 只算一次。`update` 則說明用戶端
+  工作階段，`scope` 也相同：加總多個 AgentAPI 的用戶端每個 scope 只算一次。`update` 則說明用戶端
   能不能[更新這個 AgentAPI](#透過-api-更新)，以及更新進行到哪裡。
 - `attention` 依優先順序標示需要使用者處理的原因：`login`、`request`（核准、提問或計畫）、
   `dialog`（終端機對話框）、`limit`（用量限制使回合停止）、`exited`，或 `none`。
@@ -1220,7 +1220,6 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
 
 用 `--instance-id` 指定實例識別碼（預設 `<hostname>:<port>`），`--name` 指定顯示名稱
 （預設為工作目錄名稱），`--public-url` 指定連線網址。執行中可透過 `PUT /webhook` 修改 ID 與網址。
-webhook 事件使用同一份 `instance` 身分資訊，方便接收 webhook 或直接連線的用戶端一致地識別實例。
 
 瀏覽器用戶端若來自其他來源，需將該來源加入 [`--allowed-origins`](#允許的來源)。
 使用 [API token](#api-token-驗證) 時，以 `fetch` 加上 `Authorization` 標頭讀取串流；
@@ -1244,7 +1243,7 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 連不到或已停止，以及標題、agent、機器、AgentAPI 版本、佇列和用量限制。分頁標題會顯示需要你處理的
 數量。點選一個就會在聊天介面中開啟。手機上清單和聊天介面輪流顯示。
 
-- AgentAPI 用 [`agentapi hub join`](#加入-hub) 加入：它們有簽章的 `instance.*` 事件會新增它們，
+- AgentAPI 用 [`agentapi hub join`](#加入-hub) 加入：hub 收到它們有簽章的 `instance.*` 事件就會新增實例，
   hub 再以一條連線追蹤每個實例的[摘要串流](#監看多個實例)。`+` 備有讓機器加入的指令，已填好 hub 的位址
   和 secret，另附給那台機器上 agent 的提示；也可以在那裡輸入網址（和 token）手動加入。每一列的 `⋯`
   選單可以把實例釘選在最上方、放進自己建立的群組、把它正在等的事
@@ -1348,7 +1347,7 @@ AgentAPI 會把 JSON 事件 POST 到 `--webhook-url`，例如同時監看多個 
 | `message.created` | 你的訊息，或 agent 的最終訊息 | `id`、`role`、`content`（超過 64 KiB 會截斷並標示 `truncated`）、`time` |
 | `tool.completed` | 工具呼叫回傳結果 | `tool_use_id`、`name`、`input`、`result` 和 `is_error`，各截斷至 4 KiB |
 
-每個事件都會註明它來自哪一個 AgentAPI，讓一個接收端可以分辨多個 instance：
+每個事件都會註明它來自哪一個 AgentAPI，讓一個接收端可以分辨多個實例：
 
 ```json
 {
@@ -1383,7 +1382,7 @@ AgentAPI 會把 JSON 事件 POST 到 `--webhook-url`，例如同時監看多個 
 }
 ```
 
-instance 的 `id` 是 `--instance-id`，預設為 `<hostname>:<port>`；`name` 是 `--name`，預設為工作
+`instance` 的 `id` 是 `--instance-id`，預設為 `<hostname>:<port>`；`name` 是 `--name`，預設為工作
 目錄的名稱。`url` 是 `--public-url`，接收端可以從這個網址開啟這個 AgentAPI 的聊天介面或呼叫它的
 API；`workspace_url` 則是它所在的 Coder workspace（如果有）。AgentAPI 啟動之前的訊息和工具
 呼叫，以及從 agent 歷史紀錄開啟的工作階段中的訊息，都不會再送一次。
@@ -1475,7 +1474,7 @@ webhook，也能在這裡設定。
 
 ### MCP 管理
 
-AgentAPI 執行期間可以管理 Claude、Codex 和 Pi 的 MCP 伺服器。實作上會保留
+AgentAPI 執行期間可以管理 Claude、Codex 和 Pi 的 MCP 伺服器，並會保留
 `.mcp.json`（Claude）、`$CODEX_HOME/config.toml`（Codex）或 `~/.pi/agent/mcp.json`（Pi）
 中不相關的設定。
 
@@ -1539,7 +1538,7 @@ cookie 來登入：
 帶著 `Authorization: Bearer <token>` 呼叫 `POST /auth/session` 會設定 cookie
 （`agentapi_session_<hash>`，HttpOnly、SameSite=Strict、`Path=/`，透過 HTTPS 或經由送出
 `X-Forwarded-Proto: https` 的 proxy 連線時加上 Secure）。cookie 裡存的是 token 的
-HMAC 而不是 token 本身，所以更換 token 會讓所有瀏覽器登出；cookie 名稱也由它而來，所以
+HMAC 而不是 token 本身，所以更換 token 會讓所有瀏覽器登出；cookie 名稱也由 token 而來，所以
 同一台主機上使用不同 token 的伺服器，各自維持獨立的登入狀態。`DELETE /auth/session` 登出，
 `GET /auth/session`（不需要憑證）回報 `auth_required` 與 `authenticated`。cookie 是
 SameSite=Strict，其他網站的頁面無法帶著它發出請求。從其他 origin 提供的聊天介面（例如在
@@ -1603,7 +1602,7 @@ agentapi server --allowed-origins '*' -- claude
 agentapi server --allowed-origins 'https://example.com' -- claude
 ```
 
-要指定多個來源時，使用 `--allowed-origins` 旗標請以逗號分隔，使用 `AGENTAPI_ALLOWED_ORIGINS` 環境變數則以空白分隔。來源必須包含通訊協定（`http://` 或 `https://`），並支援萬用字元（例如 `https://*.example.com`）：
+要指定多個來源時，使用 `--allowed-origins` 旗標請以逗號分隔，使用 `AGENTAPI_ALLOWED_ORIGINS` 環境變數則以空白分隔。來源必須包含通訊協定（`http://` 或 `https://`），也可以使用萬用字元（例如 `https://*.example.com`）：
 
 ```bash
 agentapi server --allowed-origins 'https://example.com,http://localhost:3000' -- claude
@@ -1645,7 +1644,7 @@ AgentAPI 本身很輕量：一個大約 30 MiB 的 Go 行程，agent 閒置時�
 
 以下數字是 2026-10-18 量測的：AgentAPI v0.24.0（執行檔 29.5 MiB）、Claude Code 2.1.302、
 codex-cli 0.163.0 和 Pi 1.3.0，在 Linux、4 核心的 Intel Xeon Silver 4210（2.2 GHz）上執行，
-並連著一個聊天介面（一個 SSE 用戶端）。每個情境跑一個簡短的回合：回覆約 200 字、不使用工具。
+並連著一個聊天介面（一個 SSE 用戶端）。每個情境跑一個簡短的回合：回覆約 200 個單字、不使用工具。
 記憶體是常駐記憶體（RSS）；CPU 在閒置時是單一核心的使用比例，回合則是整個回合用掉的 CPU 秒數。
 
 | Transport | Agent | AgentAPI 記憶體 | AgentAPI CPU（閒置） | AgentAPI 每回合 CPU | Agent 記憶體 | Agent 每回合 CPU |
@@ -1664,8 +1663,8 @@ codex-cli 0.163.0 和 Pi 1.3.0，在 Linux、4 核心的 Intel Xeon Silver 4210�
   之前讀得更多。現在每個檔案只讀一次，AgentAPI 搭配使用 PTY transport 的 Codex 時，閒置 CPU
   也只有 0.1%（修正後量測）。
 - 使用 PTY transport 時，一個回合讓 AgentAPI 多用 3–6 倍的 CPU（輸入訊息、讀取畫面、追蹤
-  工作階段紀錄檔），agent 本身也是：Codex 的終端機介面用了 6.3 CPU 秒的回合，它的 app-server
-  只用了 0.4 秒。
+  工作階段紀錄檔），agent 本身也是：同一個回合，Codex 的終端機介面用了 6.3 CPU 秒，它的
+  app-server 只用了 0.4 秒。
 - agent 自己的記憶體會在工作階段中變動：Claude Code 在啟動約一分半後成長到 314 MiB（它自己的
   背景工作，其餘時間閒置只用 0.1% CPU），Codex 在第一個回合後釋放了約 55 MiB。
 - AgentAPI 的程式碼（記憶體中約 17 MiB）由同一個執行檔啟動的實例共用：同時執行四個時，
@@ -1806,10 +1805,10 @@ agentapi restart --all      # 你在這台機器上的所有 AgentAPI
 `--version` 執行啟動時的程式，再以之後要用的參數和環境變數執行一次，確認它能以這些設定啟動：
 旗標、`AGENTAPI_*` 環境變數和設定檔、agent 的參數，以及它能寫入的狀態資料庫。任一項失敗時（例如
 更新帶來的發行版不接受某個設定），記下原因並繼續提供服務，`agentapi restart` 也會回報它仍照原樣
-執行。成功時就像關閉那樣停止（中斷並
-關閉 agent、寫入狀態資料庫、刪除登記檔，webhook 也會送出 `instance.stopped`），再在同一個行程中
+執行。成功時就像關閉那樣停止（中斷並關閉 agent、寫入狀態資料庫、刪除登記檔，webhook 也會送出
+`instance.stopped`），再在同一個行程中
 以相同的參數和環境變數執行同一個路徑。PID 不變，所以 PID 檔和等待它的上層 shell（例如 Coder
-工作區的啟動腳本）仍然有效，輸出也照舊寫到原本的地方。這個指令會等到每個 AgentAPI 以新的
+workspace 的啟動腳本）仍然有效，輸出也照舊寫到原本的地方。這個指令會等到每個 AgentAPI 以新的
 `server_id` 在原連接埠上回應，並印出新版本。
 
 - 使用 `--state-db` 時，對話會保留，native agent 也會接續原本的工作階段；沒有時，AgentAPI 會和
@@ -2008,5 +2007,5 @@ agent 就能開發介面。
 AgentAPI 目前讓開發者能以程式控制 coding agent。我們期待主要的 agent 未來都能提供正式的 SDK。
 屆時是否仍需要 AgentAPI，將取決於各家廠商是採用共同的 API，還是繼續使用各自的格式。
 
-若各家採用共同 API，我們會停止維護 AgentAPI，改為推薦官方 SDK。若協定仍各不相同，
+若各家採用共同 API，我們會停止維護 AgentAPI，改為推薦官方 SDK。若格式仍各不相同，
 我們會繼續朝通用轉接層的方向開發，讓開發者不必修改程式碼就能切換 agent。

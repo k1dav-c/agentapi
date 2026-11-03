@@ -1202,7 +1202,7 @@ their session logs for structured activity, and the chat answers their terminal 
 
 ### How it works
 
-AgentAPI runs an in-memory terminal emulator. It translates API calls into appropriate terminal
+AgentAPI runs an in-memory terminal emulator. It translates API calls into terminal
 keystrokes and parses the agent's outputs into individual messages.
 
 #### Splitting terminal output into messages
@@ -1212,7 +1212,7 @@ There are two types of messages:
 - User messages: sent by the user to the agent
 - Agent messages: sent by the agent to the user
 
-To parse individual messages from the terminal output, we take the following steps:
+AgentAPI splits the terminal output into messages in these steps:
 
 1. The initial terminal output, before any user messages are sent, is treated as the agent's first message.
 2. When the user sends a message through the API, a snapshot of the terminal is taken before any keystrokes are sent.
@@ -1234,8 +1234,8 @@ elements may need an update; until then, replies may include extra interface tex
 ### Structured Claude, Codex and Pi activity
 
 In addition to parsing terminal snapshots, this fork can watch Claude, Codex and Pi session logs.
-This provides structured thinking blocks, tool invocations, tool results, usage information, and
-stable message identifiers that cannot always be reconstructed reliably from terminal output alone.
+The logs give structured thinking blocks, tool invocations, tool results, usage information, and
+stable message identifiers, which terminal output alone can't always reconstruct.
 
 - `GET /rich-messages` returns the structured conversation.
 - `GET /timeline` returns normalized session events suitable for export,
@@ -1271,7 +1271,7 @@ arrive as structured requests instead.
 ### Kimi Code CLI
 
 This fork adds the `kimi` agent type, automatic detection for the `kimi` executable, chat UI
-labeling, terminal message formatting, readiness detection, and tests for its startup state.
+labeling, terminal message formatting and readiness detection.
 
 Kimi can use the regular interactive PTY transport:
 
@@ -1330,11 +1330,7 @@ These endpoints work with every transport, except where noted; the
   messages wait in the queue; raw keys, another restart and opening a
   session get 409, and so does a restart while AgentAPI stops.
 - `GET /status` returns the backward-compatible `stable`/`running` status,
-  the detailed lifecycle (`starting`, `ready`, `running`, `restarting`,
-  `exited` or `failed`; a native agent that exits is `restarting` while
-  AgentAPI starts it again, until the new agent accepts turns, and `failed`
-  once it gives up; `restarting`, `exited` and `failed` don't change with
-  the agent's status until the agent is back), the transport, `server_id` (a random identifier of
+  the detailed lifecycle, the transport, `server_id` (a random identifier of
   this AgentAPI run, new at every start), `turn` (how many times the agent
   started working), the conversation's `epoch`, the session name, the
   AgentAPI version, the agent's open dialog (`terminal_prompt`) and the
@@ -1342,6 +1338,11 @@ These endpoints work with every transport, except where noted; the
   reports `agent_session_id` (the agent's own session, which
   [`GET /sessions`](#earlier-sessions) lists), `capabilities`,
   `pending_requests`, `settings`, `usage`, `terminal` and `login_required`.
+  The lifecycle is `starting`, `ready`, `running`, `restarting`, `exited` or
+  `failed`. A native agent that exits is `restarting` while AgentAPI starts
+  it again, until the new agent accepts turns, and `failed` once it gives
+  up. `restarting`, `exited` and `failed` don't change with the agent's
+  status until the agent is back.
 - `GET /tasks` returns the conversation's [tasks](#tasks).
 - `GET /title` returns the session's human-readable title.
 - `POST /upload` stores a file (up to 10 MB; a body over 11 MiB is refused
@@ -1378,8 +1379,7 @@ chat and the [webhook](#webhooks)'s `task.*` events use the same tasks.
 ### Message queue
 
 Messages submitted while an agent is busy are placed in a FIFO queue instead of being rejected.
-Queued messages can be inspected, edited, or deleted before delivery through both the API and chat
-UI.
+The API and the chat UI can show, edit or delete a queued message before it goes out.
 
 - `GET /queue` lists the queued messages.
 - `PUT /queue/{id}` edits a queued message and `DELETE /queue/{id}` removes
@@ -1436,7 +1436,7 @@ instance:
   question or plan), `dialog` (in the terminal), `limit` (a usage limit stopped the turn), `exited`,
   or `none`.
 - `GET /events?only=summary` sends `summary_update` on connection and when the summary changes,
-  plus heartbeats. It omits messages and screen updates, allowing a client to follow dozens of
+  plus heartbeats. It omits messages and screen updates, so a client can follow dozens of
   instances. Reply text growing doesn't change the summary; task starts and ends, requests, status
   changes and queue changes do. One change sends one `summary_update` with all it changed: a turn's
   end sends the agent stable with its task done. Other `/events` clients don't receive
@@ -1457,8 +1457,7 @@ entry's `server_id` before using one: another AgentAPI may have taken the port.
 
 Set `--instance-id` to identify the instance (default `<hostname>:<port>`), `--name` for its display
 name (default the working directory's name), and `--public-url` for its address. `PUT /webhook` can
-change the ID and URL at runtime. Webhook events carry the same `instance` identity, so clients
-using webhooks or direct connections can identify instances consistently.
+change the ID and URL at runtime.
 
 For a browser client on another origin, add that origin to
 [`--allowed-origins`](#allowed-origins). To send an [API token](#api-token-authentication), read the
@@ -1644,8 +1643,8 @@ Every event names the AgentAPI it comes from, so one receiver can tell many apar
 The instance `id` is `--instance-id`, by default `<hostname>:<port>`, and `name` is `--name`, by
 default the working directory's name. `url` is `--public-url`, where the receiver can reach this
 AgentAPI to open its chat or call its API, and `workspace_url` the Coder workspace it runs in, if
-any. Messages and tool calls from before AgentAPI
-started, or of a session it opened from the agent's history, are not sent again.
+any. Messages and tool calls from before AgentAPI started, or of a session it opened from the
+agent's history, are not sent again.
 
 ```bash
 agentapi server \
@@ -1753,8 +1752,7 @@ The API and Session Explorer support:
 - optionally restarting the agent to apply changes immediately.
 
 When an agent is restarted, AgentAPI and its HTTP/SSE clients remain online. A PTY agent receives a
-new process and session-log watcher, although its previous in-memory conversation context is not
-retained. For MCP changes, a native agent reloads the same session and preserves the conversation
+new process and session-log watcher, but loses its in-memory conversation context. For MCP changes, a native agent reloads the same session and preserves the conversation
 (an agent that can't resume its session, with `resume` false, starts a new session instead, and the
 conversation is cleared). A reload during an active turn returns 409 because it would interrupt that
 turn. Before a restart from the Explorer or `DELETE /messages`, AgentAPI updates Codex
@@ -1883,7 +1881,7 @@ agentapi server --allowed-origins 'https://example.com' -- claude
 
 To specify multiple origins, use a comma-separated list when using the `--allowed-origins` flag, or
 a space-separated list when using the `AGENTAPI_ALLOWED_ORIGINS` environment variable. Origins must
-include the protocol (`http://` or `https://`) and support wildcards (e.g.,
+include the protocol (`http://` or `https://`) and may use wildcards (e.g.,
 `https://*.example.com`):
 
 ```bash
