@@ -113,17 +113,13 @@ func (a *Adapter) handleExit() {
 	a.mu.Lock()
 	a.exited = true
 	a.runActive = false
-	pending := a.pending
-	a.pending = make(map[string]*pendingCmd)
+	a.cmds = make(map[string]*sentCmd)
 	for _, d := range a.dialogs {
 		d.stopTimer()
 	}
 	a.dialogs = make(map[string]*dialog)
 	a.mu.Unlock()
-	for _, p := range pending {
-		// A caller that stopped waiting doesn't read it.
-		deliverResult(p, cmdResult{err: errExited})
-	}
+	a.calls.Close(errExited)
 	a.flushStream()
 	a.flushThrottled(true)
 	a.log.Info("Pi closed its output")
@@ -193,30 +189,27 @@ func (a *Adapter) handleLine(line []byte) {
 	}
 }
 
-// takePending removes the command waiting for response id. deliver says
+// takeSent removes the command waiting for response id. deliver says
 // whether its caller still waits.
-func (a *Adapter) takePending(id string) (p *pendingCmd, deliver bool) {
+func (a *Adapter) takeSent(id string) (p *sentCmd, call *agentio.Call[response], deliver bool) {
+	call, deliver = a.calls.Take(id)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	p = a.pending[id]
-	if p == nil {
-		return nil, false
+	p = a.cmds[id]
+	delete(a.cmds, id)
+	if p == nil || call == nil {
+		return nil, nil, false
 	}
-	delete(a.pending, id)
-	return p, !p.detached
+	return p, call, deliver
 }
 
 func (a *Adapter) handleResponse(r response) {
-	p, deliver := a.takePending(r.ID)
+	p, call, deliver := a.takeSent(r.ID)
 	if p == nil {
 		if !r.Success {
 			a.log.Warn("Pi rejected a command", "command", r.Command, "error", r.Error)
 		}
 		return
-	}
-	res := cmdResult{data: r.Data}
-	if !r.Success {
-		res = cmdResult{err: &native.RefusedError{Reason: r.Error}}
 	}
 	switch p.kind {
 	case cmdTurn, cmdSteer:
@@ -233,13 +226,13 @@ func (a *Adapter) handleResponse(r response) {
 	case cmdQuery:
 	}
 	if deliver {
-		deliverResult(p, res)
+		call.Deliver(r, nil)
 	}
 }
 
 // handlePromptResponse follows the turn from the response to a prompt.
 // deliver says whether its caller still waits for it.
-func (a *Adapter) handlePromptResponse(p *pendingCmd, deliver bool, r response) {
+func (a *Adapter) handlePromptResponse(p *sentCmd, deliver bool, r response) {
 	if !r.Success {
 		switch {
 		case deliver:
@@ -291,14 +284,6 @@ func (a *Adapter) handlePromptResponse(p *pendingCmd, deliver bool, r response) 
 	if !a.isRunActive() {
 		// Unless it started a run that goes on, the turn ends.
 		a.endTurn()
-	}
-}
-
-// deliverResult hands a result to the caller waiting on p.
-func deliverResult(p *pendingCmd, res cmdResult) {
-	select {
-	case p.done <- res:
-	default:
 	}
 }
 
@@ -370,20 +355,18 @@ func (a *Adapter) setRunActive(v bool) {
 // waiting for their response belong to the running turn.
 func (a *Adapter) acceptPrompt() {
 	a.mu.Lock()
-	var accepted []*pendingCmd
-	for _, p := range a.pending {
+	var accepted []string
+	for id, p := range a.cmds {
 		if p.kind != cmdTurn {
 			continue
 		}
 		p.turn = a.turnSeq
-		if !p.detached {
-			p.detached = true
-			accepted = append(accepted, p)
-		}
+		accepted = append(accepted, id)
 	}
 	a.mu.Unlock()
-	for _, p := range accepted {
-		deliverResult(p, cmdResult{})
+	for _, id := range accepted {
+		// A caller still waiting returns; the response is the loop's.
+		a.calls.Detach(id, response{Success: true}, nil)
 	}
 }
 

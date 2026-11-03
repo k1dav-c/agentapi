@@ -226,7 +226,7 @@ func (a *Adapter) openDialog(req uiRequest) {
 func (a *Adapter) hasPendingTurn() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for _, p := range a.pending {
+	for _, p := range a.cmds {
 		if p.kind == cmdTurn {
 			return true
 		}

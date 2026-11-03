@@ -149,6 +149,44 @@ func TestCalls(t *testing.T) {
 	assert.False(t, calls.Resolve("b", 1, nil))
 }
 
+// A detached request stays registered: its caller got its answer
+// already, and the response goes to the adapter alone.
+func TestCallsDetach(t *testing.T) {
+	t.Parallel()
+	var calls agentio.Calls[string, int]
+	call, err := calls.Add("a", nil)
+	require.NoError(t, err)
+	assert.True(t, calls.Detach("a", 1, nil))
+	assert.False(t, calls.Detach("a", 2, nil), "the caller is handed one answer")
+	v, err := call.Wait(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, 1, v)
+	late, waiting := calls.Take("a")
+	require.NotNil(t, late, "the response still finds the request")
+	assert.False(t, waiting, "nobody waits for it")
+	assert.False(t, late.Deliver(3, nil))
+	gone, _ := calls.Take("a")
+	assert.Nil(t, gone)
+
+	// A caller that gives up on a request the agent may still carry out.
+	abandoned, err := calls.Add("b", nil)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = abandoned.Wait(ctx)
+	assert.ErrorIs(t, err, context.Canceled)
+	calls.Detach("b", 0, nil)
+	b, waiting := calls.Take("b")
+	assert.NotNil(t, b)
+	assert.False(t, waiting)
+
+	// Close doesn't block on a request whose caller was answered.
+	_, err = calls.Add("c", nil)
+	require.NoError(t, err)
+	calls.Detach("c", 1, nil)
+	calls.Close(errors.New("exited"))
+}
+
 func TestCallsClose(t *testing.T) {
 	t.Parallel()
 	var calls agentio.Calls[int, string]

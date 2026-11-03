@@ -199,7 +199,7 @@ func TestInterruptWriteFails(t *testing.T) {
 	require.NoError(t, h.pi.stdinR.Close())
 	assert.ErrorIs(t, h.a.Interrupt(h.ctx), io.ErrClosedPipe)
 	h.a.mu.Lock()
-	assert.Empty(t, h.a.pending, "nothing waits for the abort's response")
+	assert.Empty(t, h.a.cmds, "nothing waits for the abort's response")
 	h.a.mu.Unlock()
 	_, timer := h.clock.Peek()
 	assert.False(t, timer, "no interrupt timeout runs")

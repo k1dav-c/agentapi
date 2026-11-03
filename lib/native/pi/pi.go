@@ -97,15 +97,21 @@ type cmdResult struct {
 	data json.RawMessage
 }
 
-// pendingCmd is a command waiting for its response.
-type pendingCmd struct {
+// result is the outcome r reports.
+func (r response) result() cmdResult {
+	if !r.Success {
+		return cmdResult{err: &native.RefusedError{Reason: r.Error}}
+	}
+	return cmdResult{data: r.Data}
+}
+
+// sentCmd is what the loop needs to know of a command waiting for its
+// response; its caller waits in Adapter.calls. A caller stops waiting
+// (Calls.Detach) when the loop reports the prompt accepted (a run or a
+// dialog started), or when it gives up on a command Pi may still carry
+// out; the loop then handles the response alone.
+type sentCmd struct {
 	kind cmdKind
-	// done receives the result once; buffered.
-	done chan cmdResult
-	// detached: the caller no longer waits for the response, because the
-	// loop reported the prompt accepted (a run or a dialog started) or the
-	// caller gave up. The loop then handles the response alone.
-	detached bool
 	// turn is the turn the loop last found the prompt under way in (see
 	// acceptPrompt), or 0.
 	turn int
@@ -136,11 +142,17 @@ type Adapter struct {
 	// host runs Pi and the event loop.
 	host *agentio.Host
 
-	mu         sync.Mutex
-	started    bool
-	exited     bool
-	nextID     int
-	pending    map[string]*pendingCmd
+	// calls are the callers waiting for responses, by command id; Close
+	// fails them with errExited once Pi's output ended.
+	calls agentio.Calls[string, response]
+
+	mu      sync.Mutex
+	started bool
+	exited  bool
+	nextID  int
+	// cmds are the commands waiting for their responses, by id, which
+	// calls has too.
+	cmds       map[string]*sentCmd
 	dialogs    map[string]*dialog
 	turnActive bool
 	runActive  bool
@@ -197,7 +209,7 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 		interval:         snapshotInterval,
 		writer:           agentio.NewWriter("pi"),
 		clock:            cfg.Clock,
-		pending:          make(map[string]*pendingCmd),
+		cmds:             make(map[string]*sentCmd),
 		dialogs:          make(map[string]*dialog),
 		caps:             native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true},
 	}
@@ -285,14 +297,30 @@ func (a *Adapter) send(ctx context.Context, cmd any) error {
 	return a.writer.Write(ctx, cmd)
 }
 
-// addPendingLocked registers a command that waits for its response under
-// a new id.
-func (a *Adapter) addPendingLocked(kind cmdKind) (string, *pendingCmd) {
+// register registers a command that waits for its response under a new
+// id. It fails with errExited once Pi exited.
+func (a *Adapter) register(kind cmdKind) (string, *agentio.Call[response], error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.exited {
+		return "", nil, errExited
+	}
 	a.nextID++
 	id := fmt.Sprintf("agentapi-%d", a.nextID)
-	p := &pendingCmd{kind: kind, done: make(chan cmdResult, 1)}
-	a.pending[id] = p
-	return id, p
+	call, err := a.calls.Add(id, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	a.cmds[id] = &sentCmd{kind: kind}
+	return id, call, nil
+}
+
+// forget forgets command id, which Pi didn't get.
+func (a *Adapter) forget(id string) {
+	a.calls.Drop(id)
+	a.mu.Lock()
+	delete(a.cmds, id)
+	a.mu.Unlock()
 }
 
 // request sends a command and waits for its response, or for the loop to
@@ -300,39 +328,31 @@ func (a *Adapter) addPendingLocked(kind cmdKind) (string, *pendingCmd) {
 // native.ErrUnconfirmed (as the error or the result's): Pi may carry it out
 // all the same.
 func (a *Adapter) request(ctx context.Context, kind cmdKind, cmd command) (cmdResult, error) {
-	a.mu.Lock()
-	if a.exited {
-		a.mu.Unlock()
-		return cmdResult{}, errExited
+	id, call, err := a.register(kind)
+	if err != nil {
+		return cmdResult{}, err
 	}
-	id, p := a.addPendingLocked(kind)
-	a.mu.Unlock()
-
 	if err := a.send(ctx, cmd.withID(id)); err != nil {
-		a.mu.Lock()
 		if errors.Is(err, native.ErrUnconfirmed) {
 			// Pi may yet get it: the loop handles a late response
 			// without a caller.
-			p.detached = true
+			a.calls.Detach(id, response{}, nil)
 		} else {
-			delete(a.pending, id)
+			a.forget(id)
 		}
-		a.mu.Unlock()
 		return cmdResult{}, err
 	}
-	select {
-	case res := <-p.done:
-		if errors.Is(res.err, errExited) {
-			// Pi exited before it answered.
-			res.err = native.Unconfirmed(res.err)
-		}
-		return res, nil
-	case <-ctx.Done():
+	r, err := call.Wait(ctx)
+	switch {
+	case err == nil:
+		return r.result(), nil
+	case errors.Is(err, errExited):
+		// Pi exited before it answered.
+		return cmdResult{err: native.Unconfirmed(err)}, nil
+	default:
 		// A late response is handled by the loop without a caller.
-		a.mu.Lock()
-		p.detached = true
-		a.mu.Unlock()
-		return cmdResult{}, native.Unconfirmed(ctx.Err())
+		a.calls.Detach(id, response{}, nil)
+		return cmdResult{}, native.Unconfirmed(err)
 	}
 }
 
@@ -394,11 +414,17 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 	first := !a.interrupted
 	a.interrupted = true
 	turn := a.turnSeq
-	id, _ := a.addPendingLocked(cmdAbort)
 	a.mu.Unlock()
-	if err := a.send(ctx, simpleCommand{ID: id, Type: "abort"}); err != nil {
+	// Nobody waits for the response, which the loop handles.
+	id, _, err := a.register(cmdAbort)
+	if err == nil {
+		err = a.send(ctx, simpleCommand{ID: id, Type: "abort"})
+		if err != nil {
+			a.forget(id)
+		}
+	}
+	if err != nil {
 		a.mu.Lock()
-		delete(a.pending, id)
 		if first && a.turnSeq == turn {
 			// The turn wasn't interrupted after all.
 			a.interrupted = false
@@ -476,32 +502,29 @@ func (a *Adapter) Close() error {
 func (a *Adapter) abortForClose(ctx context.Context) <-chan struct{} {
 	a.mu.Lock()
 	busy := (a.turnActive || a.runActive) && !a.exited
-	var abort *pendingCmd
-	var abortID string
 	if busy {
 		a.interrupted = true
-		abortID, abort = a.addPendingLocked(cmdAbort)
 	}
 	a.mu.Unlock()
-	if abort == nil {
+	if !busy {
 		return nil
 	}
-	// A write that is stuck (Pi stopped reading) must not keep Close from
-	// going on: the wait is bounded, and Stop's closing stdin makes the
-	// write fail.
-	go func() {
-		if err := a.send(ctx, simpleCommand{ID: abortID, Type: "abort"}); err != nil {
-			a.mu.Lock()
-			delete(a.pending, abortID)
-			a.mu.Unlock()
-			deliverResult(abort, cmdResult{err: err})
-		}
-	}()
+	id, call, err := a.register(cmdAbort)
+	if err != nil {
+		return nil
+	}
 	answered := make(chan struct{})
+	// A write that is stuck (Pi stopped reading) must not keep Close from
+	// going on: the wait is bounded, ctx ends with it, and Stop's closing
+	// stdin makes the write fail.
 	go func() {
-		// The answer, a failed write, or errExited once Pi's output ended.
-		<-abort.done
-		close(answered)
+		defer close(answered)
+		if err := a.send(ctx, simpleCommand{ID: id, Type: "abort"}); err != nil {
+			a.forget(id)
+			return
+		}
+		// The answer, or errExited once Pi's output ended.
+		_, _ = call.Wait(ctx)
 	}()
 	return answered
 }
