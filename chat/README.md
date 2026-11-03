@@ -118,8 +118,8 @@ does not run the displayed command.
 
 ![Explorer Index tab with task navigation and settings tabs](../docs/screenshots/explorer-index.png)
 
-Open Explorer with ⌘K / Ctrl+K to jump to a task, open a discovered file, or reach MCP and Session
-settings.
+Open Explorer with ⌘K / Ctrl+K to jump to a task, open a discovered file, or reach Session and
+Webhook settings.
 
 ![Mobile native chat with the prompt, tool output, reply, and session controls](../docs/screenshots/chat-mobile.png)
 

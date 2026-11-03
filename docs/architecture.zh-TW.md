@@ -20,7 +20,6 @@
 - [重新啟動與更新](#重新啟動與更新)
 - [Shell 終端機](#shell-終端機)
 - [檔案](#檔案)
-- [MCP 管理](#mcp-管理)
 - [安全模型](#安全模型)
   - [子行程環境](#子行程環境)
 - [聊天介面](#聊天介面)
@@ -76,7 +75,7 @@ flowchart TB
 | 路徑 | 內容 |
 | --- | --- |
 | `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、transport、啟動 agent、訊號、原地重新啟動）、`attach`、`list`（已登記的 AgentAPI 和它們的摘要）、`hub`（`serve`：hub；`join`、`leave`、`status`：設定檔和執行中 AgentAPI 的 hub webhook）、`restart`（讓已登記的 AgentAPI 原地重新啟動），以及 `update`（會驗證 checksum 的自我更新） |
-| `lib/httpapi/` | HTTP 伺服器：路由與處理常式、佇列、token 驗證、CORS 與跨來源檢查、事件串流、MCP／檔案／終端機／webhook 端點，以及嵌入的聊天介面；由它把下面三個套件接起來 |
+| `lib/httpapi/` | HTTP 伺服器：路由與處理常式、佇列、token 驗證、CORS 與跨來源檢查、事件串流、檔案／終端機／webhook 端點，以及嵌入的聊天介面；由它把下面三個套件接起來 |
 | `lib/convstate/` | 用戶端讀取的對話狀態，不碰 HTTP：`EventEmitter`（變更以 epoch 和 seq 編號、訂閱與重播）、它推導出的任務和摘要、伺服器最後回報的佇列，以及它把每個變更交給的 `Persister` |
 | `lib/webhook/` | Webhook 傳送（`Dispatcher`：佇列、重試、簽章、心跳、public URL 中的 `{ip}`），以及把 emitter 的事件轉成 webhook 事件的 observer（`Observe`，透過 `Source`） |
 | `lib/workspacefs/` | 檔案檢視器從工作目錄讀取的內容（`Dir`）：檔案文字、透過 git 取得的 diff、HTML 預覽、要提供的檔案、路徑搜尋；拒絕的請求是 `Error`，由 `lib/httpapi` 依它的種類轉成狀態碼 |
@@ -106,7 +105,6 @@ flowchart TB
 | `lib/selfupdate/` | 把 k1dav-c/agentapi 的最新 release 安裝到程式的位置（`agentapi update`、`POST /update`）：到 GitHub 查詢、挑出這個平台的執行檔、比對 release 的 `checksums.txt` 並確認執行起來是那個版本，再在程式旁的鎖定檔保護下改名取代，檔案與目錄都會寫入磁碟（`Install`）；判斷使用者能否取代程式，並提供一次性的修正方式（`Program.Blocked`）；`selfupdatetest` 為測試提供假的 release |
 | `lib/shellterm/` | Native 工作階段共用的 shell 終端機 |
 | `lib/htmlpreview/` | 為 `GET /files/preview` 將相對路徑引用的資源嵌入為 data: URL，產生可獨立顯示的 HTML 預覽 |
-| `lib/mcpconfig/` | 讀寫各 agent 的 MCP 設定檔 |
 | `lib/filelock/` | 同一台機器上的 AgentAPI 輪流取得的 flock：取代程式（`selfupdate`），以及重新啟動前 agent CLI 的自我更新 |
 | `lib/procenv/` | AgentAPI 啟動的行程的環境變數：各種 transport 的 agent，以及終端機的 shell |
 | `lib/agenthome/` | 各 agent 保存狀態的目錄（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`PI_CODING_AGENT_DIR`） |
@@ -193,12 +191,11 @@ flowchart TB
 | `conversation_api.go`、`queue.go`、`sse.go`、`jsonl_watcher.go` | 訊息、狀態與時間軸；佇列、派送與 `queue_update`；`GET /events` 與畫面串流；PTY 傳輸的工作階段紀錄監看 |
 | `tasks_api.go` | `GET /tasks`：emitter 推導出的任務（`lib/convstate`） |
 | `summary_api.go`、`spend.go`、`registry.go` | `GET /summary` 與 `POST /tasks/seen`，也就是 emitter 為監看多個 AgentAPI 的用戶端保存的摘要；每分鐘計算的花費；伺服器的登記檔（`instanceRegistry`） |
-| `backend.go`、`backend_pty.go`、`backend_native.go` | 依 transport 而不同的部分：派送佇列與每次檢查要做的事（`beforeQueue`：排定的繼續、Codex 的更新提示）、送出訊息、重新啟動（`beginRestart`、`beginReload`）、人工回覆協定（`handoffOffer`、`answerHandoff`） |
+| `backend.go`、`backend_pty.go`、`backend_native.go` | 依 transport 而不同的部分：派送佇列與每次檢查要做的事（`beforeQueue`：排定的繼續、Codex 的更新提示）、送出訊息、重新啟動（`beginRestart`）、人工回覆協定（`handoffOffer`、`answerHandoff`） |
 | `setup.go` | 啟動 PTY agent 的行程 |
 | `native.go` | 請求、設定、中斷、壓縮、重試登入；native observer |
 | `limit.go`、`sessions.go`、`subagents.go` | 因用量限制停下的回合（`/limit`）；agent 先前的工作階段和它們的花費（`/sessions`、`/cost`）；它的 sub agent（`/subagents`） |
 | `terminal.go`、`files_api.go` | Shell 終端機（`terminalAPI`）；檔案檢視器與搜尋 agent 用 repo 相對路徑提到的檔案（`fileAPI`，底層是 `lib/workspacefs`） |
-| `mcp.go`、`mcp_management.go` | MCP 伺服器與設定檔 |
 | `webhook_api.go`、`handoff.go`、`dialog_reply.go` | Webhook 設定（`GET`／`PUT /webhook`、`POST /webhook/test`）、它描述的實例與啟動（由 `lib/webhook` 傳送）；人工回覆 API；終端機對話框的回答 |
 | `auth.go` | Token 驗證與聊天介面登入（`authAPI`） |
 | `restart.go`、`statedb.go` | 重新啟動；還原與保存狀態 |
@@ -210,7 +207,7 @@ huma 以外的 chi 路由提供聊天介面（`/chat/*`，`/` 會重新導向到
 （`/uploads/{checksum}/{name}`）與工作目錄圖片（`/files/image`）。TTY mode 的畫面串流
 （`/internal/screen`）是隱藏於 OpenAPI schema 的 huma 操作。
 
-`Server` 持有對話、emitter、佇列與鎖（`s.mu`）、webhook 傳送器、MCP 儲存、shell 終端機和
+`Server` 持有對話、emitter、佇列與鎖（`s.mu`）、webhook 傳送器、shell 終端機和
 狀態資料庫。對話變更以外的功能交給註冊路由時建立的小模組：`fileAPI` 持有工作目錄，
 `terminalAPI` 持有 shell，`uploadAPI` 持有上傳儲存，`authAPI` 持有 token 檢查，
 `webhookAPI` 持有傳送器與狀態資料庫。
@@ -336,9 +333,8 @@ type Factory func(resume Resume) (Adapter, error)
 - **生命週期。** 啟動 adapter 時會啟動行程和它的工作階段（新的，或依工作階段參照接續）。找不到
   有效登入資訊的 adapter 會回傳 `LoginRequiredError`：對話會回報 `login_required`，每 5 秒重新啟動它
   一次，或在 `POST /login/retry` 要求時立刻啟動。agent 執行之後，對話會套用為這個工作階段
-  選擇的設定、回報它的能力，並送出初始提示。`Restart` 會換成新的工作階段；`Reload` 則接續
-  同一個工作階段，重新讀取 MCP 設定並保留對話；`Switch` 會開啟另一個工作階段或它的副本，並
-  帶入該工作階段的訊息，這些訊息由伺服器從 agent 的工作階段紀錄讀出
+  選擇的設定、回報它的能力，並送出初始提示。`Restart` 會換成新的工作階段；`Switch` 會開啟
+  另一個工作階段或它的副本，並帶入該工作階段的訊息，這些訊息由伺服器從 agent 的工作階段紀錄讀出
   （`sessions.Store.ReadHistory`；`GET /sessions` 會列出它們）。agent 在工作階段中執行過的
   sub agent 也以同樣方式從它們自己的紀錄讀出（`sessions.Store.Subagents`），提供給
   `GET /subagents` 和聊天介面的 Lineage 面板；它們的狀態取自啟動它們的 Agent 工具呼叫。sub agent
@@ -399,7 +395,7 @@ type Factory func(resume Resume) (Adapter, error)
   啟動的行程可能讓輸出一直開著。停止時會先關閉它的輸入，3 秒後對整個 group 送出 SIGTERM，
   再過 2 秒送出 SIGKILL。在那之前，adapter 會先中斷進行中的回合，最多等 3 秒讓它結束，agent
   的工作階段紀錄才不會停在沒有結果的工具呼叫。只要群組裡還有行程，群組就比 agent 活得久，所以
-  不論 agent 怎麼結束（自行結束、被停止、reload），`procutil` 都會接著對群組送出 SIGTERM，2 秒後
+  不論 agent 怎麼結束（自行結束、被停止、重新啟動），`procutil` 都會接著對群組送出 SIGTERM，2 秒後
   送出 SIGKILL（`GroupGrace`），群組消失後就不再送訊號。
 
 各個 adapter：
@@ -539,19 +535,16 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
   中執行，並持有使用者快取目錄裡的鎖（Linux 為 `~/.cache/agentapi/codex-update.lock`），所以
   執行同一個 CLI 的多個 AgentAPI 會輪流更新。native agent 關閉後，由 `Restart`
   開始新的工作階段；PTY agent 則會在可替換的終端機中取得新的行程，以及新的工作階段紀錄監看器。
-- 替換 native agent（重新啟動、重新載入、開啟另一個工作階段）分成兩步。`BeginRestart`、
-  `BeginReload` 和 `BeginSwitch` 在 `s.mu` 底下讓舊 agent 退役：之後忽略它的事件；有回合在
+- 替換 native agent（重新啟動、開啟另一個工作階段）分成兩步。`BeginRestart` 和
+  `BeginSwitch` 在 `s.mu` 底下讓舊 agent 退役：之後忽略它的事件；有回合在
   執行或正在壓縮 context 時，`BeginSwitch` 會以 `ErrTurnActive` 拒絕，而且不改動任何東西。
   `Replacement.Start` 接著在不持有 `s.mu` 的情況下關閉舊 agent、更新 CLI 並啟動新的 agent
   （`runRestartLocked`）：這段期間 `s.restarting` 會暫停佇列，其他替換、原始按鍵和人工回覆協定會
   得到 409 或沒有內容，不需要 `s.mu` 的請求（`/status`、`/handoff`、`/queue`）照常回應。Stop 會
   取消進行中的重新啟動。接續工作階段的歷史會在取得 `s.mu` 之前讀取。
-- 帶 `?restart=true` 的 MCP 變更：native agent 會接續它的工作階段重新載入（`Reload`），對話
-  會保留。有回合在執行時，重新載入會以 409 拒絕，但設定檔已經寫入。無法接續工作階段的 agent
-  則改為重新啟動。
 - native agent 結束後由對話再啟動（見 Native），不使用 `s.mu` 或 `s.restarting`：沒有閒置的
   agent，所以訊息會在佇列中等待。最後一次嘗試失敗後，伺服器繼續提供服務，生命週期為 `failed`，
-  直到重新啟動、重新載入或切換工作階段啟動新的 agent。PTY agent 結束則會讓 AgentAPI 停止。
+  直到重新啟動或切換工作階段啟動新的 agent。PTY agent 結束則會讓 AgentAPI 停止。
 - AgentAPI 本身收到 SIGUSR2 時會原地重新啟動（見[啟動與關閉](#啟動與關閉)），改用更新放在原啟動
   路徑上的執行檔。使用 `--state-db` 時會還原對話，native agent 也會接續原本的工作階段；沒有時對話會
   重新開始。`agentapi restart [port…|--all]`（`cmd/restart`）讀取登記目錄（呼叫者的；透過 `sudo`
@@ -608,13 +601,6 @@ Content-Security-Policy。
 
 上傳的檔案存成 `<checksum>/<name>`（`upload_store.go`），checksum 是內容 SHA-256 的前 8 bytes，
 所以路徑不會改變；沒有被引用的檔案在 7 天後刪除（見[持久保存](#持久保存)）。
-
-## MCP 管理
-
-`lib/mcpconfig` 讀寫各 agent 的 MCP 設定（Claude Code 工作目錄中的 `.mcp.json`、Codex 的
-`$CODEX_HOME/config.toml`、Pi 的 `$PI_CODING_AGENT_DIR/mcp.json`，預設為
-`~/.pi/agent/mcp.json`），並保留不相關的設定。設定檔（profile）可儲存整組伺服器供重複套用。
-agent 啟動時才讀取設定，因此變更需要重新啟動；native agent 則可重新載入同一個工作階段。
 
 ## 安全模型
 

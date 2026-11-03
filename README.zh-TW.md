@@ -91,7 +91,7 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 **聊天介面**（`/chat`）
 
 - [任務](#任務與對話紀錄)以對話紀錄呈現：工具呼叫一行一列，思考內容是旁註，每個任務標出花費，
-  可匯出成 Markdown。[工作階段瀏覽器](#工作階段瀏覽器)提供連結、檔案、任務索引、MCP 伺服器、
+  可匯出成 Markdown。[工作階段瀏覽器](#工作階段瀏覽器)提供連結、檔案、任務索引、
   agent [先前的工作階段](#先前的工作階段)、重新啟動和 [webhook](#webhook)。
 - [Lineage](#lineage)：agent 執行過的 sub agent，以及每一個做了什麼，一步一步呈現，執行中也能看。
 - 終端機對話框和 native 請求的[決策卡片](#決策卡片)、agent 設定的選單、顯示 context 的圓環，
@@ -103,8 +103,6 @@ Codex 和 Pi 自己的協定驅動它們，其他 agent 則保留終端機模擬
 
 **維運與整合**
 
-- Claude Code、Codex 和 Pi 的 [MCP 管理](#mcp-管理)，可以使用可重複套用的設定檔；重新啟動
-  agent 前會先更新 Codex 和 Pi。
 - [hub](#執行-hub)（`agentapi hub serve`）監看多台機器上的 AgentAPI，需要你處理的排最前面，並能在
   聊天介面中開啟任何一個，桌面和手機都能用；[`agentapi hub join`](#加入-hub) 把一台機器上的
   AgentAPI 接到 hub，重新啟動後也一樣。
@@ -176,27 +174,26 @@ agent 類型決定畫面的整理方式與可用功能。可用 `--type` 指定�
 已知類型名稱的指令判斷，例如 `agentapi server -- claude`。使用 `-- /usr/local/bin/claude`
 這類完整路徑時，需明確指定類型；無法辨識的指令會以 `custom` 執行。
 
-| Agent | 類型 | PTY | Native | 結構化活動 | MCP 管理 |
-| --- | --- | :-: | :-: | :-: | :-: |
-| [Claude Code](https://github.com/anthropics/claude-code) | `claude` | ✓ | ✓ | ✓ | ✓ |
-| [Codex](https://github.com/openai/codex) | `codex` | ✓ | ✓ | ✓ | ✓ |
-| [Pi](https://pi.dev/) | `pi` | ✓ | ✓ | ✓ | ✓ |
-| [Kimi Code](https://www.kimi.com/zh-tw/help/kimi-code/cli-getting-started) | `kimi` | ✓ | | | |
-| [Goose](https://github.com/block/goose) | `goose` | ✓ | | | |
-| [Aider](https://github.com/Aider-AI/aider) | `aider` | ✓ | | | |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | ✓ | | | |
-| [GitHub Copilot](https://github.com/github/copilot-cli) | `copilot` | ✓ | | | |
-| [Sourcegraph Amp](https://ampcode.com/) | `amp` | ✓ | | | |
-| [Auggie](https://docs.augmentcode.com/cli/overview) | `auggie` | ✓ | | | |
-| [Cursor CLI](https://cursor.com/en/cli) | `cursor`（`cursor-agent`） | ✓ | | | |
-| [Amazon Q](https://aws.amazon.com/developer/learning/q-developer-cli/) | `amazonq`（`q`） | ✓ | | | |
-| [Opencode](https://opencode.ai/) | `opencode` | ✓ | | | |
-| 其他終端機程式 | `custom` | ✓ | | | |
+| Agent | 類型 | PTY | Native | 結構化活動 |
+| --- | --- | :-: | :-: | :-: |
+| [Claude Code](https://github.com/anthropics/claude-code) | `claude` | ✓ | ✓ | ✓ |
+| [Codex](https://github.com/openai/codex) | `codex` | ✓ | ✓ | ✓ |
+| [Pi](https://pi.dev/) | `pi` | ✓ | ✓ | ✓ |
+| [Kimi Code](https://www.kimi.com/zh-tw/help/kimi-code/cli-getting-started) | `kimi` | ✓ | | |
+| [Goose](https://github.com/block/goose) | `goose` | ✓ | | |
+| [Aider](https://github.com/Aider-AI/aider) | `aider` | ✓ | | |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | ✓ | | |
+| [GitHub Copilot](https://github.com/github/copilot-cli) | `copilot` | ✓ | | |
+| [Sourcegraph Amp](https://ampcode.com/) | `amp` | ✓ | | |
+| [Auggie](https://docs.augmentcode.com/cli/overview) | `auggie` | ✓ | | |
+| [Cursor CLI](https://cursor.com/en/cli) | `cursor`（`cursor-agent`） | ✓ | | |
+| [Amazon Q](https://aws.amazon.com/developer/learning/q-developer-cli/) | `amazonq`（`q`） | ✓ | | |
+| [Opencode](https://opencode.ai/) | `opencode` | ✓ | | |
+| 其他終端機程式 | `custom` | ✓ | | |
 
 - **結構化活動**：思考內容、工具呼叫和 token 用量。使用 PTY transport 時從 agent 的工作階段
   紀錄檔讀取（見 [Claude、Codex 與 Pi 的結構化活動](#claudecodex-與-pi-的結構化活動)），
   使用 native transport 時直接來自它的協定。
-- **MCP 管理**：Explorer 的 MCP 分頁和 `/mcp` 端點（見 [MCP 管理](#mcp-管理)）。
 
 > [!NOTE]
 > 只有當 agent 指令剛好是類型名稱（例如 `claude`、`codex`、`kimi` 或 `pi`）時，AgentAPI 才會由指令判斷 agent 類型。透過完整路徑或包裝腳本執行 agent 時，請明確指定類型（例如：`agentapi server --type=claude -- /usr/local/bin/claude`），否則訊息格式可能會出錯。
@@ -269,7 +266,6 @@ steer 進任務的訊息會顯示在該任務裡，所以聊天介面的任務�
 
 - 目前對話中出現的連結與檔案路徑；
 - 可直接跳到先前任務的索引；
-- 不必離開聊天介面就能設定 MCP 伺服器；
 - Session 分頁：可以開啟或複製 agent [先前的工作階段](#先前的工作階段)、查看它們的
   [花費](#工作階段花費)，並提供兩步驟重新啟動（Restart）；
 - Webhook 分頁：設定 [webhook](#webhook)。
@@ -734,9 +730,7 @@ state-db: ~/.agentapi/state/{port}.db
   改了檔案：這時舊版會拒絕啟動，並指出需要的版本。1.9.0 之後的版本才會這樣檢查；1.9.0 以前的
   版本遇到結構比自己新的檔案一律拒絕（結構從 1.0 起就沒有改變）。
 - 重新啟動（Explorer → Restart 或 `DELETE /messages`）會清除保存的對話和佇列，並開始新的
-  工作階段。MCP 端點加上 `?restart=true` 則會讓 agent 接續原本的工作階段重新啟動，對話會保留；
-  無法接續工作階段的 agent（`resume` 為 false）則會開始新的工作階段，並清除對話。
-  不論哪一種，為工作階段選擇的設定都會保留。
+  工作階段。為工作階段選擇的設定會保留。
 - 寫入會每 200 毫秒批次處理一次，所以串流不必等待磁碟。當機後最後一批寫入可能遺失，對話因此會
   換成新的 epoch，用戶端會重新載入完整的對話。持續失敗的寫入會以錯誤回報。
 - 還原的 native 對話不會再收到 `--initial-prompt`。PTY 對話會記錄它收到的 prompt，重新啟動後
@@ -933,8 +927,7 @@ Codex TUI 一樣詢問「Implement this plan?」。Yes 選項（`implement_bypas
 的回合還原後會標示為 interrupted，當時待處理的核准會消失，Codex 先前的回合也不會載入
 AgentAPI 的對話（聊天介面只能從 `--state-db` 檔案顯示它們）。無法恢復的 thread 會換成新的
 thread，並顯示警告。Codex 不會自己替 thread 命名；在別處設定的名稱（`thread/name/updated`）
-會成為工作階段名稱。Explorer 管理的 MCP 伺服器寫在 `$CODEX_HOME/config.toml`，app-server
-啟動時才會讀取；儲存時選擇重新啟動，Codex 會接續它的 thread 重新啟動。
+會成為工作階段名稱。
 
 Codex 自己的斜線指令是 TUI 功能；`/model`、`/compact` 以及[斜線指令與壓縮](#斜線指令與壓縮)
 中的其他指令由聊天介面自己處理，`/review` 則無法使用。指令輸出串流時只是預覽，Codex 可能
@@ -1087,8 +1080,7 @@ agentapi server --transport pty -- pi
 介面會像處理 Claude Code 和 Codex 一樣，顯示 Pi 的工具呼叫、思考內容和 token 用量。
 
 Pi 的對話框（例如專案信任提示）可以直接在聊天介面中回答，標頭和分頁圖示也會顯示 Pi 的
-logo。Explorer 的 MCP 分頁會管理 `~/.pi/agent/mcp.json` 中 Pi 使用者層級的伺服器，
-重新啟動 agent 時也會先執行 `pi update --self`。
+logo。重新啟動 agent 時會先執行 `pi update --self`。
 
 AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新啟動都會換一個新的），
 即使多個 Pi 行程共用同一個目錄，也能追蹤正確的工作階段紀錄檔。若你自行傳入
@@ -1115,6 +1107,9 @@ AgentAPI 啟動 Pi 時會指定自己的 `--session-id`（每次啟動或重新�
 - `DELETE /messages` 清除對話（訊息、結構化訊息、請求、任務、時間軸、錯誤和佇列），並重新
   啟動 agent（native transport 會開始新的工作階段）。agent 重新啟動期間，訊息會在佇列中等待；
   原始按鍵、另一次重新啟動和開啟工作階段會回傳 409，AgentAPI 停止期間的重新啟動也一樣。
+  重新啟動前，AgentAPI 會先更新 Codex（`codex update`）和 Pi（`pi update --self`），限直接
+  啟動這些 CLI 的情況，多個 AgentAPI 會輪流更新；更新失敗或超過 3 分鐘時，仍會啟動已安裝的
+  版本。Claude Code 會自行更新。
 - `GET /status` 回傳向下相容的 `stable`/`running` 狀態、詳細的生命週期、transport、`server_id`（這次
   AgentAPI 執行的隨機識別碼，每次啟動都會不同）、`turn`（agent 開始工作的次數）、對話的
   `epoch`、工作階段名稱、AgentAPI 版本、agent 目前開啟的對話框（`terminal_prompt`）以及終端機
@@ -1182,8 +1177,7 @@ agent 忙碌時收到的訊息不會被拒絕，而是依先進先出（FIFO）�
 ## 整合
 
 用 [webhook](#webhook) 向接收端推送任務、請求、訊息和心跳，用[摘要](#監看多個實例)監看多個
-AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agent，並透過
-[MCP 管理](#mcp-管理)設定 agent 的工具。
+AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agent。
 
 ### 監看多個實例
 
@@ -1473,28 +1467,6 @@ webhook，也能在這裡設定。
 或 `uncertain`；同一個項目不會回覆兩次。搭配上面的 webhook，整合服務就能在 agent 停下來
 時通知你，並把你的回覆傳回來。
 
-### MCP 管理
-
-AgentAPI 執行期間可以管理 Claude、Codex 和 Pi 的 MCP 伺服器，並會保留
-`.mcp.json`（Claude）、`$CODEX_HOME/config.toml`（Codex）或 `~/.pi/agent/mcp.json`（Pi）
-中不相關的設定。
-
-API 和 Session Explorer 支援：
-
-- 讀取或完整取代 MCP 伺服器對照表；
-- 新增、更新和刪除個別伺服器；
-- 檢查遠端 HTTP 連線狀況，並解析本機 stdio 執行檔；
-- 儲存、匯入、匯出和套用可重複使用的 MCP 設定檔（profile）；
-- 可選擇重新啟動 agent，讓變更立即生效。
-
-重新啟動 agent 時，AgentAPI 本身和它的 HTTP/SSE 用戶端都會保持連線。PTY agent 會取得
-新的行程和工作階段紀錄監看器，但先前記憶體中的對話脈絡不會保留。套用 MCP 變更時，native agent
-會接續同一個工作階段重新載入，對話會保留（無法接續工作階段、`resume` 為 false 的 agent 則會改為
-開始新的工作階段，並清除對話）。在回合進行中重新載入會回傳 409，因為那會中斷該回合。從
-Explorer 或 `DELETE /messages` 重新啟動前，AgentAPI 會先更新 Codex（`codex update`）和 Pi
-（`pi update --self`），限直接啟動這些 CLI 的情況，多個 AgentAPI 會輪流更新。若更新失敗或超過
-3 分鐘，仍會啟動已安裝的版本；Claude Code 則自行管理更新。
-
 ## 安全性
 
 AgentAPI 沒有使用者或角色的概念：連得到 API 的人，就能做 agent 能做的任何事。預設不需要
@@ -1631,7 +1603,7 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
 - 從 agent 自己的紀錄（`~/.claude`、`~/.codex`、`~/.pi`）讀取它在工作目錄中先前工作階段的對話，
   它執行過的 sub agent 的步驟，以及它們的花費，並開啟其中任何一個工作階段。
 - 上傳最大 10 MB 的檔案；只有圖片會被回傳。
-- 修改 MCP 伺服器和 webhook，以及重新啟動 agent。webhook 可以把對話（`message.created`、
+- 修改 webhook，以及重新啟動 agent。webhook 可以把對話（`message.created`、
   `tool.completed`）送到任何網址；`GET /webhook` 不會回傳它的 secret。
 - 開啟 `--allow-update` 時，把 AgentAPI [更新](#透過-api-更新)到最新正式發行版並重新啟動。用戶端
   無法指定版本或來源。
@@ -1950,12 +1922,6 @@ agentapi attach --url localhost:3284
 | `GET /webhook`、`PUT /webhook` | 讀取或修改 [webhook](#webhook)：網址、事件、secret、心跳和 instance |
 | `POST /webhook/test` | 對 webhook 網址送一次 `webhook.test` 事件，並回傳接收端的回應 |
 | `POST /update`、`DELETE /update` | 把 AgentAPI [更新](#透過-api-更新)到最新發行版並原地重新啟動，等 agent 閒置或立刻進行（需要 `--allow-update`）；在重新啟動前取消更新 |
-| `GET /mcp`、`PUT /mcp` | MCP 伺服器與受管理的設定檔；PUT 會整組取代，`?restart=true` 會重新啟動 agent（*native*：可以接續時接續原本的工作階段） |
-| `POST /mcp/check` | 檢查遠端 HTTP 伺服器，並解析 stdio 執行檔 |
-| `POST /mcp/servers`、`PATCH /mcp/servers/{name}`、`DELETE /mcp/servers/{name}` | 新增、更新或移除單一 MCP 伺服器 |
-| `GET /mcp/profiles` | 匯出已儲存的 MCP 設定檔 |
-| `PUT /mcp/profiles/{name}`、`DELETE /mcp/profiles/{name}` | 匯入、取代或移除設定檔 |
-| `POST /mcp/profiles/{name}/apply` | 用設定檔取代目前的 MCP 設定 |
 
 ### 驗證
 

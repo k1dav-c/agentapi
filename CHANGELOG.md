@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Breaking changes
+
+- MCP management is removed: the Explorer's MCP tab and the `/mcp` endpoints (`GET`/`PUT /mcp`,
+  `POST /mcp/check`, `POST /mcp/servers`, `PATCH`/`DELETE /mcp/servers/{name}`,
+  `GET /mcp/profiles`, `PUT`/`DELETE /mcp/profiles/{name}`, `POST /mcp/profiles/{name}/apply`),
+  which now answer 404. Configure MCP servers in the agent: `claude mcp` or `.mcp.json` for Claude
+  Code, `codex mcp` or `$CODEX_HOME/config.toml` for Codex, `~/.pi/agent/mcp.json` for Pi; then
+  restart the agent (Explorer → Session → Restart, which starts a new session). The servers
+  AgentAPI wrote stay in those files, and the agents keep loading them; the saved profiles stay in
+  `.agentapi/mcp-profiles.json` in the working directory, unread. MCP tool calls and Codex's MCP
+  elicitations still show in the chat.
+
 ## v2.5.1
 
 ### Fixes

@@ -115,8 +115,8 @@ has the complete commit history.
 - [Tasks](#tasks-and-the-transcript) read as a transcript, with tool calls as
   rows, thinking as margin notes and what each task cost, and can be exported
   as Markdown; the
-  [Session Explorer](#session-explorer) has links, files, a task index, MCP
-  servers, the agent's [earlier sessions](#earlier-sessions), Restart and the
+  [Session Explorer](#session-explorer) has links, files, a task index, the
+  agent's [earlier sessions](#earlier-sessions), Restart and the
   [webhook](#webhooks).
 - [Lineage](#lineage): the subagents the agent ran, and what each did, step by
   step, even while it works.
@@ -131,8 +131,6 @@ has the complete commit history.
 
 **Operations and integrations**
 
-- [MCP management](#mcp-management) for Claude Code, Codex and Pi, with
-  reusable profiles; restarting the agent updates Codex and Pi first.
 - [A hub](#running-a-hub) (`agentapi hub serve`) watches the AgentAPIs of many
   machines, lists what needs you first, and opens any of them in the chat on a
   desktop or a phone. [`agentapi hub join`](#joining-a-hub) connects a
@@ -213,29 +211,27 @@ The agent type determines screen formatting and available features. Set it with 
 AgentAPI detect it from a command that matches a known type name, such as `agentapi server -- claude`.
 Full paths such as `-- /usr/local/bin/claude` need an explicit type; unrecognized commands use `custom`.
 
-| Agent | Type | PTY | Native | Structured activity | MCP management |
-| --- | --- | :-: | :-: | :-: | :-: |
-| [Claude Code](https://github.com/anthropics/claude-code) | `claude` | ✓ | ✓ | ✓ | ✓ |
-| [Codex](https://github.com/openai/codex) | `codex` | ✓ | ✓ | ✓ | ✓ |
-| [Pi](https://pi.dev/) | `pi` | ✓ | ✓ | ✓ | ✓ |
-| [Kimi Code](https://www.kimi.com/zh-tw/help/kimi-code/cli-getting-started) | `kimi` | ✓ | | | |
-| [Goose](https://github.com/block/goose) | `goose` | ✓ | | | |
-| [Aider](https://github.com/Aider-AI/aider) | `aider` | ✓ | | | |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | ✓ | | | |
-| [GitHub Copilot](https://github.com/github/copilot-cli) | `copilot` | ✓ | | | |
-| [Sourcegraph Amp](https://ampcode.com/) | `amp` | ✓ | | | |
-| [Auggie](https://docs.augmentcode.com/cli/overview) | `auggie` | ✓ | | | |
-| [Cursor CLI](https://cursor.com/en/cli) | `cursor` (`cursor-agent`) | ✓ | | | |
-| [Amazon Q](https://aws.amazon.com/developer/learning/q-developer-cli/) | `amazonq` (`q`) | ✓ | | | |
-| [Opencode](https://opencode.ai/) | `opencode` | ✓ | | | |
-| Any other terminal program | `custom` | ✓ | | | |
+| Agent | Type | PTY | Native | Structured activity |
+| --- | --- | :-: | :-: | :-: |
+| [Claude Code](https://github.com/anthropics/claude-code) | `claude` | ✓ | ✓ | ✓ |
+| [Codex](https://github.com/openai/codex) | `codex` | ✓ | ✓ | ✓ |
+| [Pi](https://pi.dev/) | `pi` | ✓ | ✓ | ✓ |
+| [Kimi Code](https://www.kimi.com/zh-tw/help/kimi-code/cli-getting-started) | `kimi` | ✓ | | |
+| [Goose](https://github.com/block/goose) | `goose` | ✓ | | |
+| [Aider](https://github.com/Aider-AI/aider) | `aider` | ✓ | | |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | ✓ | | |
+| [GitHub Copilot](https://github.com/github/copilot-cli) | `copilot` | ✓ | | |
+| [Sourcegraph Amp](https://ampcode.com/) | `amp` | ✓ | | |
+| [Auggie](https://docs.augmentcode.com/cli/overview) | `auggie` | ✓ | | |
+| [Cursor CLI](https://cursor.com/en/cli) | `cursor` (`cursor-agent`) | ✓ | | |
+| [Amazon Q](https://aws.amazon.com/developer/learning/q-developer-cli/) | `amazonq` (`q`) | ✓ | | |
+| [Opencode](https://opencode.ai/) | `opencode` | ✓ | | |
+| Any other terminal program | `custom` | ✓ | | |
 
 - **Structured activity**: thinking, tool calls and token usage, read from
   the agent's session log on the PTY transport (see
   [Structured Claude, Codex and Pi activity](#structured-claude-codex-and-pi-activity))
   and from its protocol on the native transport.
-- **MCP management**: the Explorer's MCP tab and the `/mcp` endpoints (see
-  [MCP management](#mcp-management)).
 
 > [!NOTE]
 > AgentAPI detects the agent type from the agent command only when the command is a type name, such as `claude`, `codex`, `kimi` or `pi`. When you run the agent through a full path or a wrapper script, specify the type explicitly (e.g., `agentapi server --type=claude -- /usr/local/bin/claude`), or message formatting may break.
@@ -312,7 +308,6 @@ The Session Explorer (⌘K / Ctrl+K) provides:
 
 - links and file paths discovered in the current conversation;
 - an index for jumping directly to earlier tasks;
-- MCP server configuration without leaving the chat UI;
 - a Session tab with the agent's [earlier sessions](#earlier-sessions) to open or copy, what they
   [cost](#session-costs), and a two-step restart confirmation;
 - a Webhook tab that sets up the [webhook](#webhooks).
@@ -872,11 +867,8 @@ state-db: ~/.agentapi/state/{port}.db
   1.9.0 and earlier refuse any file whose schema is newer than theirs (the
   schema hasn't changed since 1.0).
 - Restart (Explorer → Restart or `DELETE /messages`) clears the stored
-  conversation and the queue and starts a new session. `?restart=true` on the
-  MCP endpoints restarts the agent on its session instead, so the conversation
-  stays; an agent that can't resume its session (`resume` is false) starts a
-  new one, and the conversation is cleared. The settings chosen for the session
-  are kept either way.
+  conversation and the queue and starts a new session. The settings chosen for
+  the session are kept.
 - Writes are batched every 200 ms, so streaming doesn't wait for the disk.
   After a crash the last of them may be missing, so the conversation gets a
   new epoch and clients load it again in full. Writes that keep failing are
@@ -1114,8 +1106,7 @@ turn that was running when the process died comes back as interrupted, approvals
 are gone, and Codex's earlier turns are not loaded into AgentAPI's conversation (the chat shows them
 only from the `--state-db` file). A thread that can't be resumed is replaced by a new one, with a
 warning. Codex doesn't name threads itself; a name set elsewhere (`thread/name/updated`) becomes the
-session name. MCP servers managed from the Explorer live in `$CODEX_HOME/config.toml`, which
-app-server reads when it starts; saving them with restart restarts Codex on its thread.
+session name.
 
 Codex's own slash commands are TUI features; the chat runs `/model`, `/compact` and the others in
 [Slash commands](#slash-commands-and-compaction) itself, and `/review` isn't available. Command
@@ -1296,8 +1287,7 @@ Log in once with `/login` in Pi (TTY mode in the chat UI works), or set a provid
 Pi's tool calls, thinking and token usage like it does for Claude Code and Codex.
 
 Pi's dialogs (such as the project trust prompt) can be answered from the chat, and the header and
-tab icon show Pi's logo. The Explorer's MCP tab manages Pi's user-level servers in
-`~/.pi/agent/mcp.json`, and restarting the agent runs `pi update --self` first.
+tab icon show Pi's logo. Restarting the agent runs `pi update --self` first.
 
 AgentAPI starts Pi with its own `--session-id` (a new one on every start or restart) so it follows
 the right session log even when several Pi processes share a directory. If you pass `--session`,
@@ -1329,7 +1319,11 @@ These endpoints work with every transport, except where noted; the
   requests, tasks, timeline, errors and the queue) and restarts the agent
   (with the native transport, in a new session). While the agent restarts,
   messages wait in the queue; raw keys, another restart and opening a
-  session get 409, and so does a restart while AgentAPI stops.
+  session get 409, and so does a restart while AgentAPI stops. Before the
+  restart AgentAPI updates Codex (`codex update`) and Pi (`pi update --self`)
+  when it launches those CLIs directly, one AgentAPI at a time; an update that
+  fails or takes over 3 minutes leaves the installed version. Claude Code
+  updates itself.
 - `GET /status` returns the backward-compatible `stable`/`running` status,
   the detailed lifecycle, the transport, `server_id` (a random identifier of
   this AgentAPI run, new at every start), `turn` (how many times the agent
@@ -1412,9 +1406,8 @@ again. Opening a session with more than 256 rich messages ends them too, rather 
 ## Integrations
 
 Use [webhooks](#webhooks) to send tasks, requests, messages and heartbeats to a receiver,
-the [summary](#watching-many-instances) to monitor several AgentAPIs,
-the [human-reply API](#human-reply-api) to answer the agent through a bot, and
-[MCP management](#mcp-management) to configure the agent's tools.
+the [summary](#watching-many-instances) to monitor several AgentAPIs, and
+the [human-reply API](#human-reply-api) to answer the agent through a bot.
 
 ### Watching many instances
 
@@ -1739,28 +1732,6 @@ answered in the web UI), `invalid` (the reply doesn't fit; it stays open) or `un
 nothing is answered twice. Combined with the webhooks above, an integration can tell you when the
 agent stops and pass your answer back.
 
-### MCP management
-
-You can manage Claude, Codex and Pi MCP servers while AgentAPI is running. AgentAPI preserves
-unrelated settings in `.mcp.json` (Claude), `$CODEX_HOME/config.toml` (Codex) or
-`~/.pi/agent/mcp.json` (Pi).
-
-The API and Session Explorer support:
-
-- reading or replacing the complete MCP server map;
-- creating, updating, and deleting individual servers;
-- checking remote HTTP connectivity and resolving local stdio executables;
-- saving, importing, exporting, and applying reusable MCP profiles;
-- optionally restarting the agent to apply changes immediately.
-
-When an agent is restarted, AgentAPI and its HTTP/SSE clients remain online. A PTY agent receives a
-new process and session-log watcher, but loses its in-memory conversation context. For MCP changes, a native agent reloads the same session and preserves the conversation
-(an agent that can't resume its session, with `resume` false, starts a new session instead, and the
-conversation is cleared). A reload during an active turn returns 409 because it would interrupt that
-turn. Before a restart from the Explorer or `DELETE /messages`, AgentAPI updates Codex
-(`codex update`) and Pi (`pi update --self`) when launching those CLIs directly, one AgentAPI at a
-time. If an update fails or takes more than 3 minutes, AgentAPI restarts the installed version. Claude Code manages its own updates.
-
 ## Security
 
 AgentAPI has no users or roles: whoever can reach the API can do what the agent can. Out of the box
@@ -1920,7 +1891,7 @@ other than browsers (curl, SDKs, the hub) aren't affected.
   sessions in its working directory from the agent's own logs (`~/.claude`,
   `~/.codex`, `~/.pi`), and open any of those sessions.
 - Upload files of up to 10 MB; only images are served back.
-- Change the MCP servers and the webhook, and restart the agent. The webhook can send the
+- Change the webhook and restart the agent. The webhook can send the
   conversation (`message.created`, `tool.completed`) to any URL; `GET /webhook` never returns its
   secret.
 - With `--allow-update`, [update AgentAPI](#updating-through-the-api) to the latest official
@@ -2259,12 +2230,6 @@ default. Endpoints marked *native* need the native transport.
 | `GET /webhook`, `PUT /webhook` | Read or change the [webhook](#webhooks): its URL, events, secret, heartbeat and instance |
 | `POST /webhook/test` | Send a `webhook.test` event to the webhook URL once, and return the receiver's answer |
 | `POST /update`, `DELETE /update` | [Update AgentAPI](#updating-through-the-api) to the latest release and restart it in place, once the agent is idle or now (`--allow-update`); cancel an update until it restarts |
-| `GET /mcp`, `PUT /mcp` | The MCP servers and the managed config file; PUT replaces them, `?restart=true` restarts the agent (*native*: on its session if it can resume it) |
-| `POST /mcp/check` | Check remote HTTP servers and resolve stdio executables |
-| `POST /mcp/servers`, `PATCH /mcp/servers/{name}`, `DELETE /mcp/servers/{name}` | Create, update or remove one MCP server |
-| `GET /mcp/profiles` | Export the saved MCP profiles |
-| `PUT /mcp/profiles/{name}`, `DELETE /mcp/profiles/{name}` | Import, replace or remove a profile |
-| `POST /mcp/profiles/{name}/apply` | Replace the MCP configuration with a profile |
 
 ### Authentication
 

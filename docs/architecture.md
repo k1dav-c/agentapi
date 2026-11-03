@@ -21,7 +21,6 @@ single Go binary; see the [README](../README.md) for features and usage.
 - [Restarts and updates](#restarts-and-updates)
 - [The shell terminal](#the-shell-terminal)
 - [Files](#files)
-- [MCP management](#mcp-management)
 - [Security model](#security-model)
   - [Child process environment](#child-process-environment)
 - [The chat UI](#the-chat-ui)
@@ -78,7 +77,7 @@ answers write keys directly to the agent's terminal.
 | Path | What it holds |
 | --- | --- |
 | `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, transport, starting the agent, signals, restarting in place), `attach`, `list` (the registered AgentAPIs and their summaries), `hub` (`serve`: the hub; `join`, `leave` and `status`: a hub's webhook in the config file and in the running AgentAPIs), `restart` (has registered AgentAPIs restart in place) and `update` (self-update with checksum verification) |
-| `lib/httpapi/` | The HTTP server: routes and handlers, the queue, token auth, CORS and cross-origin checks, the event streams, the MCP, files, terminal and webhook endpoints, and the embedded chat UI; it wires the three packages below |
+| `lib/httpapi/` | The HTTP server: routes and handlers, the queue, token auth, CORS and cross-origin checks, the event streams, the files, terminal and webhook endpoints, and the embedded chat UI; it wires the three packages below |
 | `lib/convstate/` | The conversation state clients read, without HTTP: the `EventEmitter` (its changes numbered by epoch and seq, subscriptions and replay), the tasks and the summary it derives, the queue as the server reported it, and the `Persister` it hands every change to |
 | `lib/webhook/` | Webhook delivery (`Dispatcher`: queue, retries, signatures, heartbeats, `{ip}` in the public URL) and the observer that turns the emitter's events into webhook events (`Observe`, through `Source`) |
 | `lib/workspacefs/` | What the file viewer reads of the working directory (`Dir`): a file's text, its diff through git, an HTML preview, a file to serve, the search for a path; a refusal is an `Error` whose kind `lib/httpapi` turns into a status |
@@ -108,7 +107,6 @@ answers write keys directly to the agent's terminal.
 | `lib/selfupdate/` | Installs the latest release of k1dav-c/agentapi in place of the program (`agentapi update`, `POST /update`): the lookup on GitHub, the binary for the platform, its check against the release's `checksums.txt` and that it runs as that version, and the rename under a lock file next to the program, the file and then the directory synced to disk (`Install`); whether the user can replace the program, with the one-time fix (`Program.Blocked`); `selfupdatetest` serves a fake release for tests |
 | `lib/shellterm/` | The shared shell terminal of native sessions |
 | `lib/htmlpreview/` | Makes HTML previews self-contained for `GET /files/preview` by embedding resources referenced by relative paths as data: URLs |
-| `lib/mcpconfig/` | Reads and writes the agents' MCP configuration files |
 | `lib/filelock/` | The flock that AgentAPIs on one machine take in turn: replacing the program (`selfupdate`), an agent CLI updating itself before a restart |
 | `lib/procenv/` | The environment of the processes AgentAPI starts: agents on every transport, the terminal's shell |
 | `lib/agenthome/` | Where the agents keep their state (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`) |
@@ -231,12 +229,11 @@ The handlers are grouped by file:
 | `conversation_api.go`, `queue.go`, `sse.go`, `jsonl_watcher.go` | Messages, status and timeline; the queue, its dispatch and `queue_update`; `GET /events` and the screen stream; the PTY transport's session log watcher |
 | `tasks_api.go` | `GET /tasks`: the tasks the emitter derives (`lib/convstate`) |
 | `summary_api.go`, `spend.go`, `registry.go` | `GET /summary` and `POST /tasks/seen`, the summary the emitter keeps for clients that watch many AgentAPIs; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
-| `backend.go`, `backend_pty.go`, `backend_native.go` | What depends on the transport: dispatching the queue and the work each tick (`beforeQueue`: a scheduled continuation, Codex's update prompt), delivering a message, restarts (`beginRestart`, `beginReload`), the human-reply protocol (`handoffOffer`, `answerHandoff`) |
+| `backend.go`, `backend_pty.go`, `backend_native.go` | What depends on the transport: dispatching the queue and the work each tick (`beforeQueue`: a scheduled continuation, Codex's update prompt), delivering a message, restarts (`beginRestart`), the human-reply protocol (`handoffOffer`, `answerHandoff`) |
 | `setup.go` | Starting the process of a PTY agent |
 | `native.go` | Requests, settings, interrupt, compaction, login retry; the native observer |
 | `limit.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); the agent's earlier sessions and what they cost (`/sessions`, `/cost`); its subagents (`/subagents`) |
 | `terminal.go`, `files_api.go` | The shell terminal (`terminalAPI`); the file viewer and the search for a file the agent named relative to a repository (`fileAPI`, over `lib/workspacefs`) |
-| `mcp.go`, `mcp_management.go` | MCP servers and profiles |
 | `webhook_api.go`, `handoff.go`, `dialog_reply.go` | The webhook's configuration (`GET`/`PUT /webhook`, `POST /webhook/test`), the instance it describes and its start (`lib/webhook` delivers); the human-reply API; answers to terminal dialogs |
 | `auth.go` | Token auth and the chat's sign-in (`authAPI`) |
 | `restart.go`, `statedb.go` | Restarts; restoring and persisting the state |
@@ -248,8 +245,8 @@ Chi routes outside huma serve the chat (`/chat/*`, with `/` redirecting there), 
 (`/uploads/{checksum}/{name}`) and workspace images (`/files/image`). TTY mode's screen stream
 (`/internal/screen`) is a huma operation hidden from the OpenAPI schema.
 
-`Server` holds the conversation, emitter, queue and its lock (`s.mu`), webhook dispatcher, MCP store,
-shell terminal and state DB. Features outside conversation changes use modules created during route
+`Server` holds the conversation, emitter, queue and its lock (`s.mu`), webhook dispatcher, shell
+terminal and state DB. Features outside conversation changes use modules created during route
 registration: `fileAPI` holds the working directory, `terminalAPI` the shell, `uploadAPI` the upload
 store, `authAPI` the token check, and `webhookAPI` the dispatcher and state DB.
 
@@ -395,10 +392,8 @@ type Factory func(resume Resume) (Adapter, error)
   launches it again every 5 seconds, or when `POST /login/retry` asks. Once
   the agent runs, the conversation gives it the settings chosen for the
   session, reports its capabilities and sends the initial prompt. `Restart`
-  replaces it with a new session. `Reload` resumes the same session, so a
-  changed MCP configuration is read again and the conversation stays.
-  `Switch` opens another session, or a copy of it, with that session's
-  messages. The server reads them from the agent's session log
+  replaces it with a new session. `Switch` opens another session, or a copy
+  of it, with that session's messages. The server reads them from the agent's session log
   (`sessions.Store.ReadHistory`; `GET /sessions` lists the sessions). The
   subagents the agent ran in the session are read the same way, from their
   own logs (`sessions.Store.Subagents`), for `GET /subagents` and the chat's
@@ -496,7 +491,7 @@ type Factory func(resume Resume) (Adapter, error)
   wait up to 3 seconds for it to end, so the agent's session log doesn't end
   in a tool call without result. The group outlives the agent while a
   process in it runs, so however the agent exits (on its own, stopped, in a
-  reload), `procutil` then sends the group SIGTERM and 2 seconds later
+  restart), `procutil` then sends the group SIGTERM and 2 seconds later
   SIGKILL (`GroupGrace`), and stops signaling it once it is gone.
 
 The adapters:
@@ -694,9 +689,8 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
   run one CLI update it one at a time. A native agent is closed and `Restart`
   starts a new session. A PTY agent gets a new process in the swappable
   terminal and a new session-log watcher.
-- A replacement of the native agent (a restart, a reload, opening another
-  session) has two steps. `BeginRestart`, `BeginReload` and `BeginSwitch`
-  retire the agent under `s.mu`, and its events are ignored from then on.
+- A replacement of the native agent (a restart, opening another session)
+  has two steps. `BeginRestart` and `BeginSwitch` retire the agent under `s.mu`, and its events are ignored from then on.
   While a turn runs or the context is compacted, `BeginSwitch` refuses with
   `ErrTurnActive` and changes nothing. `Replacement.Start` then closes the
   old agent, updates the CLI and starts the new one without `s.mu`
@@ -705,15 +699,11 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
   Requests that don't take `s.mu` (`/status`, `/handoff`, `/queue`)
   answer. Stop cancels a restart under way. A resumed session's history is
   read before `s.mu` is taken.
-- MCP changes with `?restart=true`: a native agent is reloaded on its session
-  (`Reload`), so the conversation stays. While a turn runs, the configuration
-  is written but the reload is refused with 409. An agent that can't
-  resume its session is restarted instead.
 - A native agent that exits is started again by its conversation (see
   Native), without `s.mu` or `s.restarting`: messages wait in the queue
   because no agent is idle. After the last failed attempt the server goes on
-  serving, with the lifecycle `failed`, until a restart, a reload or a switch
-  starts an agent. A PTY agent that exits stops AgentAPI.
+  serving, with the lifecycle `failed`, until a restart or a switch starts an
+  agent. A PTY agent that exits stops AgentAPI.
 - AgentAPI itself restarts in place on SIGUSR2 (see
   [Startup and shutdown](#startup-and-shutdown)), into the binary an update
   put where it was started from. With `--state-db` the conversation is
@@ -794,14 +784,6 @@ proxy's cookie wouldn't reach either). `GET /files/image` serves raster images j
 Uploads are stored as `<checksum>/<name>` (`upload_store.go`), the checksum being the first 8 bytes
 of the content's SHA-256, so a path never changes; unused ones are removed after 7 days
 ([Persistence](#persistence)).
-
-## MCP management
-
-`lib/mcpconfig` reads and writes each agent's MCP configuration (Claude Code's `.mcp.json` in the
-working directory, Codex's `$CODEX_HOME/config.toml`, Pi's `$PI_CODING_AGENT_DIR/mcp.json`, by
-default `~/.pi/agent/mcp.json`) and keeps unrelated settings. Profiles save reusable server
-configurations. Agents read configuration on startup, so changes require a restart, or a reload of
-the same session for native agents.
 
 ## Security model
 

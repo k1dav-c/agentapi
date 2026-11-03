@@ -343,7 +343,7 @@ textconv or fsmonitor of the repository or the user runs.
 
 ## Session Explorer
 
-The Explorer (⌘K / Ctrl+K, or the folder button) has six tabs. The Index, Files and Links lists
+The Explorer (⌘K / Ctrl+K, or the folder button) has five tabs. The Index, Files and Links lists
 have a filter box.
 
 ### Index
@@ -359,20 +359,6 @@ The tasks of the session, newest first, each with its state; click one to jump t
 **Files** lists the absolute file paths the session mentions, to open in the file viewer. **Links**
 lists the web links, each with the task it came from, including links a terminal wrapped onto the
 next line.
-
-### MCP
-
-For Claude Code, Codex and Pi, the MCP tab edits the agent's MCP servers in AgentAPI's managed
-config file (`.mcp.json` in the working directory for Claude Code, `$CODEX_HOME/config.toml` for
-Codex, `$PI_CODING_AGENT_DIR/mcp.json` for Pi):
-
-- **MCP servers**: the servers as JSON in the agent's own format, with import and export. Saving
-  writes the file atomically and, unless you turn it off, restarts the agent to load it. With the
-  native transport, an agent that can resume its session resumes it, so the conversation stays.
-- **Connectivity**: checks that each server starts or answers.
-- **Profiles**: saves, applies, imports and exports whole sets of servers.
-
-See [MCP management](../README.md#mcp-management) for the API.
 
 ### Session
 

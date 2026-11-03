@@ -315,7 +315,7 @@ diff driver、textconv 或 fsmonitor。
 
 ## 工作階段瀏覽器
 
-Explorer（⌘K / Ctrl+K，或資料夾按鈕）有六個分頁。Index、Files 和 Links 清單有篩選框。
+Explorer（⌘K / Ctrl+K，或資料夾按鈕）有五個分頁。Index、Files 和 Links 清單有篩選框。
 
 ### Index 分頁
 
@@ -329,20 +329,6 @@ Explorer（⌘K / Ctrl+K，或資料夾按鈕）有六個分頁。Index、Files 
 
 **Files** 列出工作階段中提到的絕對檔案路徑，可以在檔案檢視器中開啟。
 **Links** 列出網頁連結，每個都附上它出自的任務，終端機折到下一行的連結也包括在內。
-
-### MCP 分頁
-
-使用 Claude Code、Codex 和 Pi 時，MCP 分頁會在 AgentAPI 管理的設定檔中編輯 agent 的 MCP
-伺服器（Claude Code 是工作目錄中的 `.mcp.json`，Codex 是 `$CODEX_HOME/config.toml`，Pi 是
-`$PI_CODING_AGENT_DIR/mcp.json`）：
-
-- **MCP servers**：以 agent 自己格式的 JSON 呈現伺服器，可以匯入和匯出。儲存時會以原子方式
-  寫入檔案，除非你關閉這個選項，否則會重新啟動 agent 來載入它。使用 native transport 時，
-  能接續工作階段的 agent 會接續原本的工作階段，所以對話會保留。
-- **Connectivity**：檢查每個伺服器能否啟動或回應。
-- **Profiles**：儲存、套用、匯入和匯出整組伺服器。
-
-API 請參閱 [MCP 管理](../README.zh-TW.md#mcp-管理)。
 
 ### Session 分頁
 
