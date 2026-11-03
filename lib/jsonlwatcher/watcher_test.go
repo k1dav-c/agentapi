@@ -30,9 +30,13 @@ func pump(t *testing.T, clock *quartz.Mock, cond func() bool) {
 		if time.Now().After(deadline) {
 			t.Fatal("timed out waiting for the watcher")
 		}
-		if _, ok := clock.Peek(); ok {
-			_, w := clock.AdvanceNext()
-			w.MustWait(context.Background())
+		// Peek and the advance aren't one step: the watcher may stop its
+		// tickers and start others in between. AdvanceNext without a
+		// ticker breaks the clock, and advancing past a new ticker fails;
+		// a ticker the watcher starts is due no sooner than pollInterval
+		// from now.
+		if d, ok := clock.Peek(); ok {
+			clock.Advance(min(d, pollInterval)).MustWait(context.Background())
 		}
 		time.Sleep(time.Millisecond)
 	}
