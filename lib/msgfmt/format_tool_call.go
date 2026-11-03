@@ -4,10 +4,26 @@ import (
 	"strings"
 )
 
+// toolCallRange is the lines [start, end) of a tool call in a message. A
+// malformed one, only partly on the screen, is removed but not returned.
 type toolCallRange struct {
 	start     int
 	end       int
 	malformed bool
+}
+
+// cutToolCalls removes the tool calls, in order and not overlapping, from
+// lines, and returns what is left and the tool calls, last first.
+func cutToolCalls(lines []string, calls []toolCallRange) ([]string, []string) {
+	removed := make([]string, 0)
+	for i := len(calls) - 1; i >= 0; i-- {
+		start, end := calls[i].start, calls[i].end
+		if !calls[i].malformed {
+			removed = append(removed, strings.Join(lines[start:end], "\n"))
+		}
+		lines = append(lines[:start], lines[end:]...)
+	}
+	return lines, removed
 }
 
 func removeClaudeReportTaskToolCall(msg string) (string, []string) {
@@ -19,7 +35,6 @@ func removeClaudeReportTaskToolCall(msg string) (string, []string) {
 	toolCallStartIdx := -1
 	newLineAfterToolCall := -1
 
-	// Store all tool call start and end indices [[start, end], ...]
 	var toolCallIdxs []toolCallRange
 
 	for i := 1; i < len(lines)-1; i++ {
@@ -57,19 +72,7 @@ func removeClaudeReportTaskToolCall(msg string) (string, []string) {
 		return strings.TrimLeft(msg, "\n"), []string{}
 	}
 
-	toolCallMessages := make([]string, 0)
-
-	// Remove tool calls from the message
-	for i := len(toolCallIdxs) - 1; i >= 0; i-- {
-		start, end := toolCallIdxs[i].start, toolCallIdxs[i].end
-
-		// If the toolCall is malformed, we don't want to log it
-		if !toolCallIdxs[i].malformed {
-			toolCallMessages = append(toolCallMessages, strings.Join(lines[start:end], "\n"))
-		}
-
-		lines = append(lines[:start], lines[end:]...)
-	}
+	lines, toolCallMessages := cutToolCalls(lines, toolCallIdxs)
 	return strings.TrimLeft(strings.Join(lines, "\n"), "\n"), toolCallMessages
 }
 
@@ -78,8 +81,7 @@ func removeCodexReportTaskToolCall(msg string) (string, []string) {
 
 	toolCallStartIdx := -1
 
-	// Store all tool call start and end indices [[start, end], ...]
-	var toolCallIdxs [][]int
+	var toolCallIdxs []toolCallRange
 
 	for idx := 0; idx < len(lines); idx++ {
 		line := strings.TrimSpace(lines[idx])
@@ -87,7 +89,7 @@ func removeCodexReportTaskToolCall(msg string) (string, []string) {
 		// Check for tool call start (requires looking at next line)
 		if idx+1 < len(lines) {
 			nextLine := strings.TrimSpace(lines[idx+1])
-			if strings.Replace(line, " ", "", -1) == "•Called" && strings.Contains(nextLine, "Coder.coder_report_task") {
+			if strings.ReplaceAll(line, " ", "") == "•Called" && strings.Contains(nextLine, "Coder.coder_report_task") {
 				toolCallStartIdx = idx
 			}
 		}
@@ -99,7 +101,7 @@ func removeCodexReportTaskToolCall(msg string) (string, []string) {
 			for endIdx < len(lines) && strings.TrimSpace(lines[endIdx]) == "" {
 				endIdx++
 			}
-			toolCallIdxs = append(toolCallIdxs, []int{toolCallStartIdx, endIdx})
+			toolCallIdxs = append(toolCallIdxs, toolCallRange{start: toolCallStartIdx, end: endIdx})
 
 			// Reset to find the next tool call
 			toolCallStartIdx = -1
@@ -111,17 +113,7 @@ func removeCodexReportTaskToolCall(msg string) (string, []string) {
 		return strings.TrimRight(msg, "\n"), []string{}
 	}
 
-	toolCallMessages := make([]string, 0)
-
-	// Remove tool calls from the message
-	for i := len(toolCallIdxs) - 1; i >= 0; i-- {
-		idxPair := toolCallIdxs[i]
-		start, end := idxPair[0], idxPair[1]
-
-		toolCallMessages = append(toolCallMessages, strings.Join(lines[start:end], "\n"))
-
-		lines = append(lines[:start], lines[end:]...)
-	}
+	lines, toolCallMessages := cutToolCalls(lines, toolCallIdxs)
 	return strings.TrimRight(strings.Join(lines, "\n"), "\n"), toolCallMessages
 }
 
