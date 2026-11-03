@@ -8,8 +8,7 @@ same binary: `agentapi hub serve`.
 
 ![The hub: its instances, what needs you first, and one open in the chat](screenshots/hub-desktop.png)
 
-The [README](../README.md#running-a-hub) has the short version. This guide covers setup step by
-step, what each state means, the tokens, troubleshooting and the hub's API.
+The [README](../README.md#running-a-hub) has the short version.
 
 ## Contents
 
@@ -38,13 +37,13 @@ hub never has to be on the public internet.
    `~/.agentapi/config.yaml`, which every `agentapi server` of that user reads when it starts. Each
    AgentAPI then sends signed `instance.started`, `instance.heartbeat` (every minute) and
    `instance.stopped` events, and the hub adds, updates or stops the instance (`instance.stopped`
-   doesn't stop one added by hand: the hub keeps trying it). One the hub can't
-   reach that also missed three heartbeats, such as one whose workspace was killed, counts as
-   stopped, and the hub stops trying until its next heartbeat. These events only add instances
-   and say where they are; what each one does comes from its summary. An event that names another
-   URL moves the instance there only while the hub isn't connected to it, and never one added by
-   hand: an AgentAPI whose machine got another address (`{ip}` in its `--public-url`) moves with
-   its first heartbeat after the old address stopped answering.
+   doesn't stop one added by hand: the hub keeps trying it). One the hub can't reach that also
+   missed three heartbeats, such as one whose workspace was killed, counts as stopped, and the hub
+   stops trying until its next heartbeat. These events only add instances and say where they are;
+   what each one does comes from its summary. An event that names another URL moves the instance
+   there only while the hub isn't connected to it, and never one added by hand: an AgentAPI whose
+   machine got another address (`{ip}` in its `--public-url`) moves with its first heartbeat after
+   the old address stopped answering.
 2. The hub follows each instance's summary (`GET /events?only=summary`), the source of truth for
    what the instance does: its state, what it waits for, its title, latest task, queue and usage
    limits. One connection per instance, reopened after 1 s, then up to every 30 s when it fails. A
@@ -85,9 +84,10 @@ agentapi hub serve --bind hub.vpn --token "$HUB_TOKEN" --secret "$HUB_SECRET" \
 ```
 
 It listens on port 3290 and keeps the instances in `~/.agentapi/hub/instances.json`, so it still
-knows them after a restart. It writes the file within a second of a change, and when it stops. `--bind` limits it to the VPN interface; leave it out to listen
-everywhere. The values can come from `AGENTAPI_HUB_TOKEN`, `AGENTAPI_HUB_SECRET` and
-`AGENTAPI_HUB_INSTANCE_TOKEN` instead of flags.
+knows them after a restart. It writes the file within a second of a change, and when it stops.
+`--bind` limits it to the VPN interface; leave it out to listen everywhere. The values can come
+from `AGENTAPI_HUB_TOKEN`, `AGENTAPI_HUB_SECRET` and `AGENTAPI_HUB_INSTANCE_TOKEN` instead of
+flags.
 
 Once it listens, the hub logs the `agentapi hub join` command for each address machines may reach
 it at: the `--bind` address, or else each address of the machine, private networks first, then
@@ -201,8 +201,8 @@ The token goes to the hub once and comes back as an HttpOnly cookie derived from
 stores the token. Changing `--token` signs every browser out. A wrong token is refused on the spot,
 and the eye button shows what you pasted.
 
-A hub that only a sign-in of its own reaches, such as a Coder workspace app or a private VPN, can
-run without a token: `--no-token` (instead of `--token`) skips this page, and everyone who reaches
+A hub behind a sign-in of its own, such as a Coder workspace app or a private VPN, can run
+without a token: `--no-token` (instead of `--token`) skips this page, and everyone who reaches
 the hub is in. The hub refuses to start with neither.
 
 When the hub doesn't answer (it stopped, or a proxy in front of it answers with an error page), the
@@ -226,8 +226,8 @@ long they've run; finished ones you haven't seen show their title. At the bottom
 
 ![What the agents spent: the last 24 hours and 7 days, and the agents that spent the most](screenshots/hub-spend.png)
 
-Each AgentAPI works out what its agent's sessions in its working directory cost over the last 24
-hours and the last 7 days, from the agent's session logs, once a minute, and puts it in its summary
+Once a minute, each AgentAPI works out from its agent's session logs what the agent's sessions in
+its working directory cost over the last 24 hours and the last 7 days, and puts it in its summary
 (`spend`). It is the API-equivalent cost: the tokens at the model providers' list prices, which a
 subscription doesn't charge. Only native Claude Code, Codex and Pi have it; other agents show none.
 
@@ -306,8 +306,8 @@ Each machine needs:
 Older AgentAPIs that can't update from the hub show nothing new in the menu; the card says how to
 update them. On the machine:
 
-- From 2.1.0 on, AgentAPI restarts in place: `sudo agentapi update --restart` on the machine
-  updates the binary and restarts its AgentAPIs into it (without `sudo` when the binary is yours).
+- From 2.1.0 on, AgentAPI restarts in place: `sudo agentapi update --restart` updates the binary
+  and restarts the machine's AgentAPIs into it (without `sudo` when the binary is yours).
 - Before 2.1.0, run `sudo agentapi update`, then restart each AgentAPI once, or its workspace.
 
 ### The list
@@ -321,8 +321,7 @@ limit above 60% join them. An AgentAPI update under way, or one that failed, get
 ([Updating from the hub](#updating-from-the-hub)). [Pinned](#pinning) agents come first, in your
 order. Within a [group](#groups), the rows sort by state in this order, then by name;
 [Recent changes](#recent-changes) puts the agents with tasks first and sorts by the latest change
-instead. Each state has a shape
-of its own, so it reads without its color:
+instead. Each state has a shape of its own, so it reads without its color:
 
 | Glyph | Second line starts with | Meaning |
 | --- | --- | --- |
@@ -337,8 +336,9 @@ of its own, so it reads without its color:
 | Broken red ring | Unreachable | The hub hasn't reached it for 10 s; the line says why |
 | Square | Stopped, Exited | The AgentAPI stopped (or missed three heartbeats while unreachable), or its agent exited (a native agent: AgentAPI gave up starting it again) |
 
-Search (**/**) matches any word of a name, group, title, machine, agent or version. The chips under it show
-all agents or only those that need you, work, finished unseen, or are offline, each with its count.
+Search (**/**) matches any word of a name, group, title, machine, agent or version. The chips under
+it show all agents or only those that need you, work, finished unseen, or are offline, each with its
+count.
 The header says whether the hub's stream is live and how many agents there are; the tab's title and
 icon count the ones that need you, so a pinned tab shows it. The stream reconnects as the chat's
 does, and a stream silent for 45 s (the hub sends a heartbeat every 15 s) counts as lost.
@@ -402,9 +402,10 @@ focus.
 
 A pinned agent shows only there, not again in its group or below in the recent list. Its row has a
 pin after the name and, where there is room, names its group. The section's header counts its
-agents and those that need you, and folds like a group's. Below it, the rest of the list gets headers too: the groups and
-**Ungrouped**, or **Recent changes**. The filters and the search apply to pinned agents as well: one
-they leave out is hidden, and the section disappears once none is left.
+agents and those that need you, and folds like a group's. Below it, the rest of the list gets
+headers too: the groups and **Ungrouped**, or **Recent changes**. The filters and the search apply
+to pinned agents as well: one they leave out is hidden, and the section disappears once none is
+left.
 
 Pins are kept on the hub, like groups, so every browser shows the same ones in the same order.
 Pinning, unpinning and moving an agent aren't changes for [Recent changes](#recent-changes).
@@ -427,8 +428,9 @@ again. **Unmute** in the same menu ends it sooner. Mutes are kept on the hub, li
 
 Pick a row or a card to open the agent's chat beside the list: everything the chat does works here,
 answering requests included. The bar above it shows the agent's state, agent, machine and AgentAPI
-version, with the chat's own search, terminal and Explorer buttons; **New tab** opens the chat on its own, and **×** (or **Esc**) goes back to the overview. Opening an agent
-is a page in the browser's history, so Back returns to the list or the overview; moving from one
+version, with the chat's own search, terminal and Explorer buttons; **New tab** opens the chat on
+its own, and **×** (or **Esc**) goes back to the overview. Opening an agent is a page in the
+browser's history, so Back returns to the list or the overview; moving from one
 agent to another doesn't add one. The URL keeps the agent (`#<id>`), so a reload or a bookmark
 comes back to it. An AgentAPI update under way shows in the bar too, with **Cancel** while it waits
 for the task ([Updating from the hub](#updating-from-the-hub)).
@@ -448,9 +450,8 @@ browser remembers it, and a double-click on the edge resets it.
 
 `/` and `Esc` work anywhere on the hub's page; `j`, `k`, the arrows and `p` work with the focus in
 the list or on nothing, so elsewhere the arrows scroll the overview as usual. Inside an open chat,
-keys go to the chat. The bell asks
-the browser to notify you when an agent starts needing you while the hub's tab is in the background,
-and a screen reader hears the same as it happens.
+keys go to the chat. The bell asks the browser to notify you when an agent starts needing you while
+the hub's tab is in the background, and a screen reader hears the same as it happens.
 
 ### On a phone
 
@@ -460,8 +461,7 @@ and a screen reader hears the same as it happens.
 
 On a narrow screen the list and the chat take turns; the back arrow at the top, or the phone's
 back gesture, goes back to the list. The chat keeps the screen for the conversation: one bar above
-it, and the composer one row. Answering
-an approval from the phone:
+it, and the composer one row. Answering an approval from the phone:
 
 ![Answering an approval from the hub on a phone](screenshots/demo-hub.gif)
 
@@ -491,9 +491,9 @@ status in its header ([Session details](chat-ui.md#session-details-and-alerts)).
   address, so there is nothing to fill in.
 - **Prompt for an agent on that machine** has an agent there join it: the hub's URL and the others
   to try, the secret, `--public-url` with `{ip}` as it is, and the steps: the version, a check that
-  the hub answers, `join` and `agentapi hub status`. The agent restarts no
-  AgentAPI and never shows the secret. With updates allowed, it explains the one-time setup `join`
-  may print and suggests a state DB, asking you before either. An agent with the
+  the hub answers, `join` and `agentapi hub status`. The agent restarts no AgentAPI and never shows
+  the secret. With updates allowed, it explains the one-time setup `join` may print and suggests a
+  state DB, asking you before either. An agent with the
   [agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md) follows the skill; one without
   follows the steps.
 
@@ -553,8 +553,8 @@ instance that joined with its webhook comes back the next time it starts.
   an instance's webhook can be read but not changed: it names where the hub sends the token.
 - Adding a URL never moves an instance the hub has; forget it first.
 - `~/.agentapi/hub/instances.json` and its `.bak` hold the tokens of instances added by hand; they
-  are created readable by their owner only. `~/.agentapi/config.yaml` holds the hub secret; `agentapi hub join`
-  writes it the same way.
+  are created readable by their owner only. `~/.agentapi/config.yaml` holds the hub secret;
+  `agentapi hub join` writes it the same way.
 - Signing in sends the hub token. Serve the hub only on the VPN, or behind HTTPS.
 - Anyone signed in to the hub can do what the AgentAPIs allow: send tasks, answer approvals, use
   their terminals, update those whose machine allows it. Give the hub token only to people you
@@ -565,11 +565,11 @@ instance that joined with its webhook comes back the next time it starts.
 - An AgentAPI the hub asks to update installs only the latest official release, checked against the
   release's `checksums.txt`: the hub can't choose a version or a URL. It never runs `sudo`, and
   does nothing unless its machine allows it (`allow-update: true`).
-- With `--no-token`, that is everyone who reaches the hub's port: keep it behind a sign-in of its
-  own, and never on a public address. Set `--allowed-hosts` to the names you open it by (a Coder
-  port URL's host, a VPN name): a site's page can otherwise reach the hub through a name of the
-  site's that it points at the hub's address (DNS rebinding). IP addresses and `localhost` always
-  work.
+- With `--no-token`, everyone who reaches the hub's port is signed in: keep it behind a sign-in
+  of its own, and never on a public address. Set `--allowed-hosts` to the names you open it by (a
+  Coder port URL's host, a VPN name): a site's page can otherwise reach the hub through a name of
+  the site's that it points at the hub's address (DNS rebinding). IP addresses and `localhost`
+  always work.
 
   ```bash
   agentapi hub serve --no-token --secret "$AGENTAPI_HUB_SECRET" \
