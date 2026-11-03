@@ -99,7 +99,7 @@ func (s *Store) ReadHistory(id string) (SessionHistory, error) {
 		return SessionHistory{}, ErrSessionNotFound
 	}
 	history := s.read(path)
-	if s.agent == "codex" {
+	if !s.src.namesInLog {
 		history.Title = s.threadName(id)
 	}
 	return history, nil

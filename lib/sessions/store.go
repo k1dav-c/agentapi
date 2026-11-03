@@ -186,7 +186,7 @@ func (s *Store) summaries() ([]SessionSummary, error) {
 	for _, path := range files {
 		snap, err := s.readLog(s.logs, path, false)
 		if err == nil && snap.session {
-			if s.agent == "codex" {
+			if !s.src.namesInLog {
 				snap.summary.Title = s.threadName(snap.summary.ID)
 			}
 			list = append(list, snap.summary)

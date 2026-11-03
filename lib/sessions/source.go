@@ -20,7 +20,7 @@ import (
 type source struct {
 	format agentlog.Format
 	// namesInLog says the log holds the session's name; Codex keeps it in
-	// its session index.
+	// its session index (Store.threadName).
 	namesInLog bool
 	// files lists the logs that may be the directory's sessions.
 	files func(s *Store) ([]string, error)
@@ -51,32 +51,51 @@ type source struct {
 	// roots are where the agent keeps the logs: Claude Code's config
 	// directory, Codex's home, Pi's sessions directories.
 	roots func(s *Store) []string
+	// threads says the logs are Codex's threads: a subagent's log starts
+	// with a copy of its parent's and its turn events say how far it got,
+	// and a fork's log refers to the lines of the thread it forked.
+	threads bool
+	// subagents lists the subagents the session id ran, in no order; nil
+	// for an agent that runs none.
+	subagents func(s *Store, id string) ([]Subagent, error)
+	// costLogs lists the logs a reading of the costs reads, as
+	// Store.costLogs; nil when they are the sessions' alone.
+	costLogs func(s *Store) ([]string, func(id, path string) []Subagent, error)
+	// subagentsUnordered says the subagents costLogs lists are in no order
+	// of their start (Claude Code's, by their files' names).
+	subagentsUnordered bool
 }
 
 func sourceFor(agentType string) (source, bool) {
 	switch agentType {
 	case "claude":
 		return source{
-			format:         claudelog.Format,
-			namesInLog:     true,
-			files:          claudeFiles,
-			byID:           claudeLogsByID,
-			linesRecordCWD: true,
-			header:         claudeHeader,
-			preamble:       claudelog.Preamble,
-			maxPreamble:    claudelog.MaxPreambleLines,
-			prompt:         claudelog.Prompt,
-			roots:          func(*Store) []string { return home(agenthome.ClaudeConfigDir()) },
+			format:             claudelog.Format,
+			namesInLog:         true,
+			files:              claudeFiles,
+			byID:               claudeLogsByID,
+			linesRecordCWD:     true,
+			header:             claudeHeader,
+			preamble:           claudelog.Preamble,
+			maxPreamble:        claudelog.MaxPreambleLines,
+			prompt:             claudelog.Prompt,
+			roots:              func(*Store) []string { return home(agenthome.ClaudeConfigDir()) },
+			subagents:          (*Store).claudeSubagents,
+			costLogs:           (*Store).claudeCostLogs,
+			subagentsUnordered: true,
 		}, true
 	case "codex":
 		return source{
-			format: codexlog.Format,
-			files:  codexFiles,
-			byID:   codexLogsByID,
-			header: codexlog.Header,
-			prompt: codexlog.Prompt,
-			scan:   codexlog.ScanLog,
-			roots:  func(*Store) []string { return home(agenthome.CodexHome()) },
+			format:    codexlog.Format,
+			files:     codexFiles,
+			byID:      codexLogsByID,
+			header:    codexlog.Header,
+			prompt:    codexlog.Prompt,
+			scan:      codexlog.ScanLog,
+			roots:     func(*Store) []string { return home(agenthome.CodexHome()) },
+			threads:   true,
+			subagents: (*Store).codexSubagents,
+			costLogs:  (*Store).codexCostLogs,
 		}, true
 	case "pi":
 		return source{

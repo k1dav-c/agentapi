@@ -72,11 +72,8 @@ func (s *Store) Subagents(sessionID string) ([]Subagent, error) {
 		subs []Subagent
 		err  error
 	)
-	switch s.agent {
-	case "claude":
-		subs, err = s.claudeSubagents(sessionID)
-	case "codex":
-		subs, err = s.codexSubagents(sessionID)
+	if s.src.subagents != nil {
+		subs, err = s.src.subagents(s, sessionID)
 	}
 	slices.SortStableFunc(subs, func(a, b Subagent) int { return a.StartedAt.Compare(b.StartedAt) })
 	return subs, err

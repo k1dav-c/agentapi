@@ -296,7 +296,7 @@ func (s *Store) readCosts() (DirectoryCost, error) {
 			subSnap.read.subagent = sub.ID
 			subCalls = append(subCalls, subagentCalls{firstAt: subSnap.firstAt, calls: subSnap.calls, read: subSnap.read})
 		}
-		if s.agent == "claude" {
+		if s.src.subagentsUnordered {
 			// In the order they started, as Subagents has them.
 			slices.SortStableFunc(subCalls, func(a, b subagentCalls) int { return a.firstAt.Compare(b.firstAt) })
 		}
@@ -525,48 +525,57 @@ func assemble(own []ModelCall, subs []subagentCalls) []ModelCall {
 
 // costLogs lists the logs a reading of the costs reads: the sessions', and
 // a function that lists the subagents of the session id whose log is at
-// path. Codex keeps every thread in one tree, so one walk finds both.
+// path.
 func (s *Store) costLogs() ([]string, func(id, path string) []Subagent, error) {
-	switch s.agent {
-	case "codex":
-		threads, err := s.codexThreads()
-		if err != nil {
-			return nil, nil, err
-		}
-		byParent := make(map[string][]Subagent)
-		for _, t := range threads {
-			if !t.meta.IsSubAgent() {
-				continue
-			}
-			// As Subagents finds them: those of the thread, and those of
-			// the subagents its session ran.
-			sub := Subagent{ID: t.meta.Payload.ID, path: t.path, kind: "codex", from: t.meta.Payload.HistoryStart}
-			for _, parent := range slices.Compact([]string{t.meta.Payload.ParentThreadID, t.meta.Payload.SessionID}) {
-				if parent != "" && parent != sub.ID {
-					byParent[parent] = append(byParent[parent], sub)
-				}
-			}
-		}
-		return codexSessionLogs(s, threads), func(id, _ string) []Subagent { return byParent[id] }, nil
-	case "claude":
-		files, dirs, err := claudeLogs(s)
-		if err != nil {
-			return nil, nil, err
-		}
-		sessionDirs := make(map[string]bool, len(dirs))
-		for _, dir := range dirs {
-			sessionDirs[dir] = true
-		}
-		return files, func(id, path string) []Subagent {
-			// Most sessions ran none, and have no directory.
-			if !sessionDirs[filepath.Join(filepath.Dir(path), id)] {
-				return nil
-			}
-			return claudeSubagentLogs(id, path)
-		}, nil
+	if s.src.costLogs != nil {
+		return s.src.costLogs(s)
 	}
 	files, err := s.src.files(s)
 	return files, func(string, string) []Subagent { return nil }, err
+}
+
+// codexCostLogs is costLogs for Codex, which keeps every thread in one
+// tree: one walk finds the sessions and their subagents.
+func (s *Store) codexCostLogs() ([]string, func(id, path string) []Subagent, error) {
+	threads, err := s.codexThreads()
+	if err != nil {
+		return nil, nil, err
+	}
+	byParent := make(map[string][]Subagent)
+	for _, t := range threads {
+		if !t.meta.IsSubAgent() {
+			continue
+		}
+		// As Subagents finds them: those of the thread, and those of the
+		// subagents its session ran.
+		sub := Subagent{ID: t.meta.Payload.ID, path: t.path, kind: "codex", from: t.meta.Payload.HistoryStart}
+		for _, parent := range slices.Compact([]string{t.meta.Payload.ParentThreadID, t.meta.Payload.SessionID}) {
+			if parent != "" && parent != sub.ID {
+				byParent[parent] = append(byParent[parent], sub)
+			}
+		}
+	}
+	return codexSessionLogs(s, threads), func(id, _ string) []Subagent { return byParent[id] }, nil
+}
+
+// claudeCostLogs is costLogs for Claude Code, which keeps a session's
+// subagents in a directory named after it next to its log.
+func (s *Store) claudeCostLogs() ([]string, func(id, path string) []Subagent, error) {
+	files, dirs, err := claudeLogs(s)
+	if err != nil {
+		return nil, nil, err
+	}
+	sessionDirs := make(map[string]bool, len(dirs))
+	for _, dir := range dirs {
+		sessionDirs[dir] = true
+	}
+	return files, func(id, path string) []Subagent {
+		// Most sessions ran none, and have no directory.
+		if !sessionDirs[filepath.Join(filepath.Dir(path), id)] {
+			return nil
+		}
+		return claudeSubagentLogs(id, path)
+	}, nil
 }
 
 // price returns call at the store's prices, or at what the agent said. A
