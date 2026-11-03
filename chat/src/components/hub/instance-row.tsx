@@ -1,6 +1,6 @@
 "use client";
 
-import {useState} from "react";
+import {memo, useState} from "react";
 import {ArrowDown, ArrowUp, Bell, BellOff, ChevronRight, Folder, FolderPlus, MoreHorizontal, Pencil, Pin, PinOff, Trash2} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {Button} from "@/components/ui/button";
@@ -22,6 +22,7 @@ import {cn} from "@/lib/utils";
 import {StatusGlyph, stateTone} from "./status-glyph";
 import {UpdateDialog, UpdateMenuItems, cancelFromHub} from "./update";
 import {UpdateChip} from "./update-chip";
+import {useHubTime} from "./clock";
 import {VersionTag} from "./version-tag";
 
 const activityTone = {
@@ -49,23 +50,23 @@ export function agentName(instance: HubInstance): string {
   return instance.agent_type ? agentDisplayName(parseAgentType(instance.agent_type), instance.agent_type) : "";
 }
 
-export function InstanceRow({
-  instance,
-  hubVersion,
-  root,
-  groups,
-  order,
-  selected,
-  now,
-  onSelect,
-  onForget,
-  onGroup,
-  onNewGroup,
-  onMute,
-  pinned,
-  onPin,
-  onMove,
-}: {
+// RowActions are what a row does to its instance; the hub keeps the same
+// object from render to render, so a row renders again only when its own
+// props change (InstanceRow is memoized).
+export interface RowActions {
+  select: (id: string) => void;
+  forget: (id: string) => void;
+  group: (id: string, name: string) => void;
+  newGroup: (id: string) => void;
+  // Mutes what it waits for now, until that changes; false ends the mute.
+  mute: (id: string, muted: boolean) => void;
+  // Pins it below the pinned ones; false unpins it.
+  pin: (id: string, pinned: boolean) => void;
+  // Moves it up (-1) or down (1) among the pinned ones.
+  move: (id: string, step: -1 | 1) => void;
+}
+
+export interface InstanceRowProps {
   instance: HubInstance;
   // hubVersion is the hub's own version, which marks the older instances.
   hubVersion: string;
@@ -76,29 +77,27 @@ export function InstanceRow({
   // row names its group, and its age is that of its latest change.
   order: ListOrder;
   selected: boolean;
-  now: number;
-  onSelect: () => void;
-  onForget: () => void;
-  onGroup: (name: string) => void;
-  onNewGroup: () => void;
-  // Mutes what it waits for now, until that changes; false ends the mute.
-  onMute: (muted: boolean) => void;
   // pinned is the row's place in the pinned section, when it is pinned:
   // whether it is the first or the last there. The row names its group,
   // as in the recent order.
   pinned?: {first: boolean; last: boolean};
-  // Pins it below the pinned ones; false unpins it.
-  onPin: (pinned: boolean) => void;
-  // Moves it up (-1) or down (1) among the pinned ones.
-  onMove: (step: -1 | 1) => void;
-}) {
+  actions: RowActions;
+}
+
+const samePlace = (a: InstanceRowProps["pinned"], b: InstanceRowProps["pinned"]) => a === b || (!!a && !!b && a.first === b.first && a.last === b.last);
+
+// InstanceRow is an instance in the hub's list. Its age reads the hub's
+// clock (useHubTime): the row renders again when the age it shows changes,
+// not on every tick.
+export const InstanceRow = memo(function InstanceRow({instance, hubVersion, root, groups, order, selected, pinned, actions}: InstanceRowProps) {
   const state = instanceState(instance);
   const summary = instance.summary;
   const usage = usagePercent(summary);
   const agent = agentName(instance);
   const doing = activity(instance);
   const recent = order === "recent";
-  const ago = formatAgo(recent ? changedAt(instance) : doing.since, now);
+  const since = recent ? changedAt(instance) : doing.since;
+  const ago = useHubTime((now) => formatAgo(since, now));
   const group = recent || pinned ? (instance.group?.trim() ?? "") : "";
   const gone = state === "stopped" || state === "unreachable";
   const spend = summary?.spend;
@@ -107,6 +106,7 @@ export function InstanceRow({
   const lastKnown = instance.connection !== "connected";
   const version = instanceVersion(instance);
   const update = shownUpdate(instance);
+  const id = instance.id;
   const [updating, setUpdating] = useState(false);
   return (
     <li className="group/row relative px-2">
@@ -120,7 +120,7 @@ export function InstanceRow({
         <button
           type="button"
           data-hub-row={instance.id}
-          onClick={onSelect}
+          onClick={() => actions.select(id)}
           aria-current={selected ? "true" : undefined}
           aria-label={`${displayName(instance)}, ${stateLabel(instance)}${ago ? `, ${ago}` : ""}: ${doing.text}${olderThanHub(instance, hubVersion) ? ". Older than the hub" : ""}${update ? `. ${updateBadge(update).title}` : ""}${pinned ? ". Pinned" : ""}${group ? `. Group: ${group}` : ""}`}
           className="flex min-w-0 flex-1 items-start gap-3 rounded-xl py-3 pr-1 pl-3.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
@@ -201,25 +201,25 @@ export function InstanceRow({
           <DropdownMenuContent align="end" className="w-60 max-w-[calc(100vw-1rem)]">
             {pinned ? (
               <>
-                <DropdownMenuItem onSelect={() => onPin(false)}>
+                <DropdownMenuItem onSelect={() => actions.pin(id, false)}>
                   <PinOff /> Unpin
                 </DropdownMenuItem>
-                <DropdownMenuItem disabled={pinned.first} onSelect={() => onMove(-1)}>
+                <DropdownMenuItem disabled={pinned.first} onSelect={() => actions.move(id, -1)}>
                   <ArrowUp /> Move up
                 </DropdownMenuItem>
-                <DropdownMenuItem disabled={pinned.last} onSelect={() => onMove(1)}>
+                <DropdownMenuItem disabled={pinned.last} onSelect={() => actions.move(id, 1)}>
                   <ArrowDown /> Move down
                 </DropdownMenuItem>
               </>
             ) : (
-              <DropdownMenuItem onSelect={() => onPin(true)}>
+              <DropdownMenuItem onSelect={() => actions.pin(id, true)}>
                 <Pin /> Pin to top
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
             {(state === "needs-you" || state === "muted") && (
               <>
-                <DropdownMenuItem onSelect={() => onMute(state === "needs-you")}>
+                <DropdownMenuItem onSelect={() => actions.mute(id, state === "needs-you")}>
                   {state === "needs-you" ? <BellOff /> : <Bell />}
                   {state === "needs-you" ? "Mute until it changes" : "Unmute"}
                 </DropdownMenuItem>
@@ -227,7 +227,7 @@ export function InstanceRow({
               </>
             )}
             <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Move to group</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={instance.group?.trim() ?? ""} onValueChange={onGroup}>
+            <DropdownMenuRadioGroup value={instance.group?.trim() ?? ""} onValueChange={(name) => actions.group(id, name)}>
               <DropdownMenuRadioItem value="">No group</DropdownMenuRadioItem>
               {groups.map((name) => (
                 <DropdownMenuRadioItem key={name} value={name}>
@@ -235,14 +235,14 @@ export function InstanceRow({
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
-            <DropdownMenuItem onSelect={onNewGroup}>
+            <DropdownMenuItem onSelect={() => actions.newGroup(id)}>
               <FolderPlus /> New group…
             </DropdownMenuItem>
             <UpdateMenuItems instance={instance} onOpen={() => setUpdating(true)} onCancel={() => void cancelFromHub(root, instance.id)} />
             {gone && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onSelect={onForget}>
+                <DropdownMenuItem variant="destructive" onSelect={() => actions.forget(id)}>
                   <Trash2 /> Forget
                 </DropdownMenuItem>
               </>
@@ -253,7 +253,16 @@ export function InstanceRow({
       <UpdateDialog instance={instance} hubVersion={hubVersion} root={root} open={updating} onOpenChange={setUpdating} />
     </li>
   );
-}
+}, (a, b) =>
+  a.instance === b.instance &&
+  a.hubVersion === b.hubVersion &&
+  a.root === b.root &&
+  a.groups === b.groups &&
+  a.order === b.order &&
+  a.selected === b.selected &&
+  a.actions === b.actions &&
+  samePlace(a.pinned, b.pinned),
+);
 
 // GroupTag names a row's group in the recent order and among the pinned
 // ones, in the room its first line leaves before the age: whole, cut short,

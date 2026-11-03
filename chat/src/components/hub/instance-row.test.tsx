@@ -2,6 +2,7 @@ import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
 import type {HubInstance, Summary} from "@/lib/hub";
 import type {ListOrder} from "@/lib/hub-order";
+import {FixedHubClock} from "./clock";
 import {InstanceRow} from "./instance-row";
 
 // Finished at 9:40, which the hub saw at 9:41; in the group Client work.
@@ -32,25 +33,13 @@ const finished: HubInstance = {
   } as Summary,
 };
 
+const actions = {select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}};
+
 const row = (order: ListOrder, target: HubInstance = finished, pinned?: {first: boolean; last: boolean}) =>
   renderToStaticMarkup(
-    <InstanceRow
-      instance={target}
-      hubVersion="2.1.0"
-      root=""
-      groups={["Client work"]}
-      order={order}
-      selected={false}
-      now={Date.parse("2026-11-01T10:00:00Z")}
-      pinned={pinned}
-      onSelect={() => {}}
-      onForget={() => {}}
-      onGroup={() => {}}
-      onNewGroup={() => {}}
-      onMute={() => {}}
-      onPin={() => {}}
-      onMove={() => {}}
-    />,
+    <FixedHubClock now={Date.parse("2026-11-01T10:00:00Z")}>
+      <InstanceRow instance={target} hubVersion="2.1.0" root="" groups={["Client work"]} order={order} selected={false} pinned={pinned} actions={actions} />
+    </FixedHubClock>,
   );
 
 describe("InstanceRow in the list's orders", () => {
