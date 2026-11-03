@@ -9,6 +9,7 @@
 package hub
 
 import (
+	"cmp"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -406,10 +407,7 @@ func (h *Hub) fetchSummary(ctx context.Context, base, token string) (*instanceap
 	if err != nil {
 		return nil, err
 	}
-	if token == "" {
-		token = h.config.InstanceToken
-	}
-	if token != "" {
+	if token = cmp.Or(token, h.config.InstanceToken); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := h.client.Do(req)
@@ -528,8 +526,7 @@ func (h *Hub) setPins(w http.ResponseWriter, r *http.Request) {
 func (h *Hub) removeInstance(w http.ResponseWriter, r *http.Request) {
 	id := instanceParam(r)
 	h.unwatch(id)
-	removed := h.store.remove(id)
-	if !removed {
+	if !h.store.remove(id) {
 		writeError(w, http.StatusNotFound, "no such instance")
 		return
 	}
