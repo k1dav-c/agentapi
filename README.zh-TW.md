@@ -66,7 +66,7 @@ AgentAPI 可以用來：
 - 透過 [server-sent events](#事件與增量同步) 即時追蹤一切，有 heartbeat，重新連線後只重播
   有變動的部分。
 
-**Native agent**
+**Agent**
 
 - agent 提出的需求（工具核准、提問、計畫）會以[請求](#請求核准提問與計畫)送達，可以透過
   HTTP 或在聊天介面中回覆。
@@ -306,7 +306,7 @@ HTML、Markdown 和 SVG 檔案還有第三個分頁 Preview，圖片檔則直接
 
 分頁在背景時，圖示會以圓點顯示狀態：琥珀色表示 agent 需要你回應，藍色表示工作中，綠色表示
 任務完成。瀏覽器通知可以從狀態選單開啟，這個選單也能把對話下載成 JSONL（Explorer 的 Session
-分頁也可以）；native 的 Claude Code 或 Codex 執行過的 sub agent，其步驟會接在 agent 自己的事件之後。
+分頁也可以）；Claude Code 或 Codex 執行過的 sub agent，其步驟會接在 agent 自己的事件之後。
 
 ![從標頭的狀態開啟的工作階段詳細資訊選單](docs/screenshots/session-details.png)
 
@@ -363,7 +363,7 @@ AgentAPI 會清除上層 agent 工作階段留下的環境標記與機密資訊�
 | Codex | `codex app-server`，透過 stdio 傳送 JSON-RPC | 每個回合要求詳細的推理摘要 |
 | Pi | `pi --mode rpc` | 隨 Pi 的輸出串流顯示 |
 
-訊息直接來自協定，不需解析終端機畫面或監看工作階段紀錄檔。串流期間，每次更新會取代整則
+訊息直接來自協定。串流期間，每次更新會取代整則
 rich message；每則訊息每秒最多送出 10 次快照，串流暫停後的最新狀態會在 100 毫秒內送達。
 
 **API 狀態**
@@ -393,7 +393,7 @@ SIGKILL。
 
 ### 登入
 
-Native 模式使用 agent CLI 儲存的登入資訊。請以執行 AgentAPI 的同一個作業系統帳號登入，
+AgentAPI 使用 agent CLI 儲存的登入資訊。請以執行 AgentAPI 的同一個作業系統帳號登入，
 可以使用聊天介面的[終端機](#終端機)或同一台機器上的其他終端機。
 登入卡片的 **Run in terminal** 按鈕與 `/login` 指令，都會在聊天介面的終端機執行登入指令。
 
@@ -442,7 +442,7 @@ agent 回報登入失效後才結束時，不會像當掉那樣重新啟動，�
 
 - `GET /requests` 列出待處理的請求，以及最近關閉的 50 個請求；`GET /requests/{id}` 回傳
   單一請求。每當有請求開啟或關閉，`/events` 都會送出 `request_update` 事件；
-  `GET /status` 的 `pending_requests` 是待處理請求的數量。其他 transport 會回傳空清單。
+  `GET /status` 的 `pending_requests` 是待處理請求的數量。
 - `POST /requests/{id}/respond` 回覆一個請求：核准和計畫用 `option_id`（請求帶有
   `feedback` 時，可以另外用 `text` 附上回饋），提問則用以問題 ID 為鍵的 `answers`。每個
   請求最多只能回覆一次：請求已不再待處理（已回覆、已撤回或已過期，從 `--state-db` 還原的
@@ -590,7 +590,7 @@ Claude Code 也會回報 `prompt_cache`：`ttl_seconds` 是模型供應商在最
 
 ### 終端機
 
-AgentAPI 在 native agent 的工作目錄中提供 shell，可用來登入、執行 git 指令或處理其他工作。
+AgentAPI 在 agent 的工作目錄中提供 shell，可用來登入、執行 git 指令或處理其他工作。
 終端機支援顏色、游標移動與全螢幕程式，大小會配合桌面或手機視窗。所有人共用同一個 shell，
 就像 tmux 視窗；沒有人觀看時仍會執行，結束後再次開啟則啟動新的 shell。環境變數與 agent 相同，
 但會移除 AgentAPI 自己的變數。
@@ -613,7 +613,7 @@ Ctrl 和 Alt 按鈕會按住修飾鍵，套用到下一個輸入的按鍵。
 
 ### 斜線指令與壓縮
 
-Native agent 不會執行互動式終端機介面，因此下列斜線指令由聊天介面處理：
+agent 不會執行自己的互動式終端機介面，因此下列斜線指令由聊天介面處理：
 
 - `/model [模型]`、`/effort [強度]`（`/think`）和 `/mode [模式]`（`/permissions`）依 id 或
   名稱切換設定，不帶參數則開啟對應的選單；`/plan` 切換到 plan 模式；
@@ -943,7 +943,7 @@ AgentAPI 會以 RPC 模式執行 Pi（`pi --mode rpc`，經由 stdin 與 stdout 
   `epoch`、工作階段名稱、AgentAPI 版本、`agent_session_id`（agent 自己的
   工作階段，即 [`GET /sessions`](#先前的工作階段) 列出的那些）、`capabilities`、
   `pending_requests`、`settings`、`usage`、`terminal` 和 `login_required`。生命週期為 `starting`、
-  `ready`、`running`、`restarting`、`exited` 或 `failed`。native agent 結束後，AgentAPI 重新啟動
+  `ready`、`running`、`restarting`、`exited` 或 `failed`。agent 結束後，AgentAPI 重新啟動
   期間為 `restarting`（直到新的 agent 可以接受回合），放棄後為 `failed`。`restarting`、`exited` 和
   `failed` 在 agent 回來之前不會隨 agent 的狀態改變。
 - `GET /tasks` 回傳對話的[任務](#任務)。
@@ -1023,8 +1023,8 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
 - `GET /summary` 回傳實例身分 `instance`（與 [webhook](#webhook) 事件相同：`id`、`name`、
   `server_id`、主機、port、目錄、agent 與 `url`）、`status`、`lifecycle`，以及取自工作階段名稱
   或最新提示開頭的 `title`。另外包含最新[任務](#任務)、任務數、`pending_requests`、最早的待處理
-  `request`（類型、標題和 agent 提出的時間）、`queued_messages`、開啟中的終端機對話框、
-  `login_required`、`limit_stop`、`usage`（context window 與帳號用量限制），以及 native 模式的
+  `request`（類型、標題和 agent 提出的時間）、`queued_messages`、
+  `login_required`、`limit_stop`、`usage`（context window 與帳號用量限制），以及
   Claude Code、Codex 和 Pi 才有的 `spend`：agent 在工作目錄裡所有工作階段最近 24 小時（`day_usd`）
   和 7 天（`week_usd`）換算成 API 價格的金額，每分鐘從紀錄檔重新計算一次，並附上同一批呼叫的 token
   （`day_tokens` 和 `week_tokens`：`input`、`output`、`cache_write`、`cache_read` 和合計 `total`）、
@@ -1033,7 +1033,7 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
   能不能[更新這個 AgentAPI](#透過-api-更新)，以及更新進行到哪裡。
 - `attention` 依優先順序標示需要使用者處理的原因：`login`、`request`（核准、提問或計畫）、
   `limit`（用量限制使回合停止）、`exited`，或 `none`。使用 PTY transport 的 AgentAPI 2 另會回報
-  `dialog`（agent 終端機中的對話框）。
+  `dialog`（agent 終端機中的對話框），並在 `terminal_prompt` 附上終端機底部的內容。
 - `GET /events?only=summary` 在連線時及摘要變動時送出 `summary_update`，另有心跳。
   串流省略訊息，讓用戶端能同時追蹤幾十個實例。回覆文字增長不會改變摘要；
   任務開始或結束、請求、狀態與佇列的變更才會。一次變更只送出一個包含所有改動的
@@ -1136,9 +1136,9 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
   換新。下載的檔案必須符合發行版的 `checksums.txt`，執行起來也必須是那個版本。請求無法指定版本或網址。
   新發行版若無法以這個 AgentAPI 的設定或狀態資料庫啟動，更新會在重新啟動前失敗，AgentAPI 繼續提供服務。
 - 預設的 `"when": "idle"` 會立刻安裝，等 agent 閒置再重新啟動，也就是 agent 處於 stable，沒有待回覆的
-  請求（核准、提問或計畫）或終端機對話框。佇列中的訊息會留在佇列，重新啟動後再送出。`"now"` 會立刻
+  請求（核准、提問或計畫）。佇列中的訊息會留在佇列，重新啟動後再送出。`"now"` 會立刻
   重新啟動，中斷 agent 手上的工作。
-- 使用 [`--state-db`](#持久保存的工作階段) 時，對話和 native agent 的工作階段會延續到重新啟動之後；
+- 使用 [`--state-db`](#持久保存的工作階段) 時，對話和 agent 的工作階段會延續到重新啟動之後；
   沒有的話，對話會重新開始。
 - 已經是最新發行版時回應 200 和 `"up_to_date": true`，否則回應 202，附上 `state` 和目標版本 `target`。
   更新進行中再送一次，會回應目前的狀態，`"now"` 則讓它不再等待。`DELETE /update` 在重新啟動前都能
@@ -1172,9 +1172,9 @@ AgentAPI 會把 JSON 事件 POST 到 `--webhook-url`，例如同時監看多個 
 | `run.status_changed` | agent 在 `running` 與 `stable` 之間切換 | `status`、`previous_status`、`server_id`、`agent_type`、`transport` |
 | `instance.started`、`instance.heartbeat`、`instance.stopped` | AgentAPI 啟動時、每隔 `--webhook-heartbeat`（60 秒）、`PUT /webhook` 把 webhook 指向新網址時，以及關閉時 | agent 的狀況：`status`、`lifecycle`、`session_name`、`pending_requests`、`queued_messages`，以及有值時的 `agent_session_id`、`login_required`、`limit_stop`、`usage`、`settings`；`heartbeat_seconds` 是 heartbeat 的間隔（關閉時沒有這個欄位） |
 | `task.started` | [任務](#任務)開始：你的一則訊息送到 agent | 任務，同 `GET /tasks`：`id`（那則訊息的 ID）、`status`、`prompt`、`started_at` |
-| `task.completed`、`task.failed` | [任務](#任務)結束：`completed`，或 `failed` 與 `limited`（`task.failed`） | 任務加上 `status`、`ended_at`、`duration_seconds`、agent 最後一則訊息（`reply`、`reply_id`）、`steered`、`errors`、`limit`、`session_name`，以及 native Claude Code、Codex 和 Pi 的 API 等價花費 `cost`（見[工作階段花費](#工作階段花費)） |
+| `task.completed`、`task.failed` | [任務](#任務)結束：`completed`，或 `failed` 與 `limited`（`task.failed`） | 任務加上 `status`、`ended_at`、`duration_seconds`、agent 最後一則訊息（`reply`、`reply_id`）、`steered`、`errors`、`limit`、`session_name`，以及 Claude Code、Codex 和 Pi 的 API 等價花費 `cost`（見[工作階段花費](#工作階段花費)） |
 | `request.opened`、`request.closed` | 核准、提問或計畫（請求內容同 `GET /requests`）開啟或關閉 | 請求 |
-| `login.required`、`login.completed` | native agent 需要登入，或不再需要 | `agent`、`message`、要執行的 `command` |
+| `login.required`、`login.completed` | agent 需要登入，或不再需要 | `agent`、`message`、要執行的 `command` |
 | `limit.stopped`、`limit.cleared` | 用量限制讓回合停下，或停止狀態結束 | `message`、`stopped_at`、`resets_at` |
 | `agent.error` | agent 回報錯誤或警告 | `message`、`level`、`time` |
 | `message.created` | 你的訊息，或 agent 的最終訊息 | `id`、`role`、`content`（超過 64 KiB 會截斷並標示 `truncated`）、`time` |
@@ -1427,7 +1427,7 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
 ### API 用戶端能做什麼
 
 - 讓 agent 執行它能執行的任何事。除非命令列指定了其他模式，或 Claude Code 在沙箱外以 root
-  執行（此時以 `default` 啟動），native agent 預設以 bypass 權限模式啟動，工具直接執行、不詢問。
+  執行（此時以 `default` 啟動），agent 預設以 bypass 權限模式啟動，工具直接執行、不詢問。
   Claude Code 會加上 `--allow-dangerously-skip-permissions`（在沙箱外以 root 執行時除外），
   所以用戶端可以把任何工作階段切換到 bypass。除非命令列指定了政策，Codex 的預設值會覆蓋
   `~/.codex/config.toml` 裡的政策。
@@ -1593,7 +1593,7 @@ agentapi restart --all      # 你在這台機器上的所有 AgentAPI
 workspace 的啟動腳本）仍然有效，輸出也照舊寫到原本的地方。這個指令會等到每個 AgentAPI 以新的
 `server_id` 在原連接埠上回應，並印出新版本。
 
-- 使用 `--state-db` 時，對話會保留，native agent 也會接續原本的工作階段；沒有時，AgentAPI 會和
+- 使用 `--state-db` 時，對話會保留，agent 也會接續原本的工作階段；沒有時，AgentAPI 會和
   其他重新啟動一樣開始新的對話。
 - 只會重新啟動你自己的 AgentAPI，而且登記檔必須對應到執行中的 `agentapi server`。透過 `sudo`
   執行時，指的是執行 `sudo` 那位使用者的 AgentAPI。較早的版本無法原地重新啟動，
@@ -1634,7 +1634,7 @@ agentapi hub leave
 適合本身已在另一層登入後面的 hub，例如 Coder workspace app），`--secret`（或
 `AGENTAPI_HUB_SECRET`）用來檢查 AgentAPI 的事件，`--instance-token`（或
 `AGENTAPI_HUB_INSTANCE_TOKEN`，否則 `AGENTAPI_API_TOKEN`）會送給它們，`--state` 保存實例，
-`--port` 和 `--bind` 設定監聽位置，`--log-level`（或 `AGENTAPI_HUB_LOG_LEVEL`）設定要記錄多少。
+`--port` 和 `--bind` 設定監聽位置，`--allowed-hosts` 是瀏覽器可以用來開啟 hub 的名稱（不設定時任何名稱都可以），`--log-level`（或 `AGENTAPI_HUB_LOG_LEVEL`）設定要記錄多少。
 
 `join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 AgentAPI。
 `--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`，hub 只需要
@@ -1749,7 +1749,7 @@ go test ./...   # 執行 Go 測試，包含端對端冒煙測試
 測試以 `CGO_ENABLED=0` 執行。每次修改 API 都要一併 commit `openapi.json`，而且只能用
 `make gen` 重新產生（見 [AGENTS.md](AGENTS.md)）。聊天介面在 [chat/](chat/README.md)：
 `bun run dev` 會連到執行中的 AgentAPI 提供介面，
-`agentapi server -- native-demo` 則會執行一個模擬的 native agent，不需要真正的
+`agentapi server -- native-demo` 則會執行一個模擬的 agent，不需要真正的
 agent 就能開發介面。
 
 ## 執行穩定性

@@ -74,7 +74,7 @@ has the complete commit history.
 - Follow everything live over [server-sent events](#events-and-incremental-sync),
   with heartbeats and an incremental replay after a reconnect.
 
-**Native agents**
+**Agents**
 
 - Tool approvals, questions, and plans arrive as
   [requests](#requests-approvals-questions-and-plans), answered over HTTP or
@@ -352,8 +352,8 @@ working directory. See [Native transport](#native-transport).
 
 While the tab is in the background, its icon shows an amber dot when the agent needs you, a blue dot
 while it works, and a green dot when a task finishes. Turn on browser notifications from the status
-menu. The menu also downloads the conversation as JSONL, as does the Explorer's Session tab; for a
-native Claude Code or Codex, its subagents' steps follow the agent's own.
+menu. The menu also downloads the conversation as JSONL, as does the Explorer's Session tab; for
+Claude Code or Codex, its subagents' steps follow the agent's own.
 
 ![The session details menu opened from the status in the header](docs/screenshots/session-details.png)
 
@@ -422,10 +422,9 @@ the complete list.
 | Codex | `codex app-server`, using JSON-RPC over stdio | Detailed reasoning summaries requested each turn |
 | Pi | `pi --mode rpc` | Streamed as Pi writes it |
 
-Messages come directly from the protocol, without screen parsing or a session-log
-watcher. Each streaming update replaces the entire rich message, at most 10
-snapshots per second per message. The latest state arrives within 100 ms after
-the stream pauses.
+Messages come directly from the protocol. Each streaming update replaces the
+entire rich message, at most 10 snapshots per second per message. The latest
+state arrives within 100 ms after the stream pauses.
 
 **API status**
 
@@ -456,7 +455,7 @@ restart: SIGTERM, then SIGKILL 2 seconds later.
 
 ### Logging in
 
-Native mode uses the agent CLI's stored login. Log in as the same operating-system user that runs
+AgentAPI uses the agent CLI's stored login. Log in as the same operating-system user that runs
 AgentAPI. You can use the chat's [terminal](#terminal) or any terminal on the same machine. The login card's **Run in terminal** button and the `/login` command both run the login
 command in the chat terminal.
 
@@ -719,7 +718,7 @@ press. The Ctrl and Alt buttons hold the modifier for the next key.
 
 ### Slash commands and compaction
 
-Native agents do not run their interactive terminal UI. The chat handles these slash commands for
+The agents don't run their interactive terminal UI. The chat handles these slash commands for
 them:
 
 - `/model [model]`, `/effort [effort]` (`/think`) and `/mode [mode]`
@@ -1134,7 +1133,7 @@ The [HTTP API reference](#http-api-reference) lists all the endpoints.
   [`GET /sessions`](#earlier-sessions) lists), `capabilities`,
   `pending_requests`, `settings`, `usage`, `terminal` and `login_required`.
   The lifecycle is `starting`, `ready`, `running`, `restarting`, `exited` or
-  `failed`. A native agent that exits is `restarting` while AgentAPI starts
+  `failed`. An agent that exits is `restarting` while AgentAPI starts
   it again, until the new agent accepts turns, and `failed` once it gives
   up. `restarting`, `exited` and `failed` don't change with the agent's
   status until the agent is back.
@@ -1230,19 +1229,20 @@ instance:
 - `GET /summary` returns the `instance` identity (as in [webhook](#webhooks) events: `id`, `name`,
   `server_id`, host, port, directory, agent and `url`), `status`, `lifecycle` and a `title` from the
   session name or the start of the latest prompt. It also includes the latest [task](#tasks), task
-  count, `pending_requests`, the oldest pending `request` (its kind, title and when the agent asked),
-  `queued_messages`, the open terminal dialog, `login_required`, `limit_stop`, `usage` (context
-  window and account limits) and, for native Claude Code, Codex and Pi, `spend`: the API-equivalent
-  cost of the agent's sessions in the working directory over the last 24 hours (`day_usd`) and 7
-  days (`week_usd`), worked out from its logs once a minute, the tokens of the same calls
-  (`day_tokens` and `week_tokens`: `input`, `output`, `cache_write`, `cache_read` and their
-  `total`), when the amounts last changed (`updated_at`) and a `scope`. AgentAPIs of one agent in one directory of a machine report the
-  same sessions, with the same `scope`: a client that adds up many counts each scope once. Its
-  `update` says whether a client can [update the AgentAPI](#updating-through-the-api), and how far
-  an update is.
+  count, `pending_requests`, the oldest pending `request` (its kind, title and when the agent
+  asked), `queued_messages`, `login_required`, `limit_stop`, `usage` (context window and account
+  limits) and, for Claude Code, Codex and Pi, `spend`: the API-equivalent cost of the agent's
+  sessions in the working directory over the last 24 hours (`day_usd`) and 7 days (`week_usd`),
+  worked out from its logs once a minute, the tokens of the same calls (`day_tokens` and
+  `week_tokens`: `input`, `output`, `cache_write`, `cache_read` and their `total`), when the amounts
+  last changed (`updated_at`) and a `scope`. AgentAPIs of one agent in one directory of a machine
+  report the same sessions, with the same `scope`: a client that adds up many counts each scope
+  once. Its `update` says whether a client can [update the AgentAPI](#updating-through-the-api), and
+  how far an update is.
 - `attention` identifies why the agent needs you, in priority order: `login`, `request` (approval,
   question or plan), `limit` (a usage limit stopped the turn), `exited`, or `none`. An AgentAPI 2
-  with the PTY transport also reports `dialog` (in the agent's terminal).
+  with the PTY transport also reports `dialog` (in the agent's terminal), with the terminal's bottom
+  in `terminal_prompt`.
 - `GET /events?only=summary` sends `summary_update` on connection and when the summary changes,
   plus heartbeats. It omits messages, so a client can follow dozens of
   instances. Reply text growing doesn't change the summary; task starts and ends, requests, status
@@ -1364,10 +1364,10 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
   that wouldn't start with this AgentAPI's settings or state database fails the update before the
   restart, and AgentAPI goes on serving.
 - `"when": "idle"`, the default, installs at once and restarts once the agent is idle: stable, with
-  no request (approval, question or plan) or terminal dialog open. Queued messages stay queued and
+  no request (approval, question or plan) open. Queued messages stay queued and
   go out after the restart. `"now"` restarts at once and interrupts the agent.
-- With [`--state-db`](#persistent-sessions), the conversation and the native agent's session carry
-  over the restart. Without it, the conversation starts anew.
+- With [`--state-db`](#persistent-sessions), the conversation and the agent's session carry over
+  the restart. Without it, the conversation starts anew.
 - It answers 200 with `"up_to_date": true` when AgentAPI runs the latest release already, else 202
   with the `state` and the `target` version. While an update is under way it answers its state,
   and `"now"` hurries it. `DELETE /update` cancels it until it restarts; what it installed stays.
@@ -1405,9 +1405,9 @@ It sends only `run.status_changed` by default. Select events with `--webhook-eve
 | `run.status_changed` | The agent changes between `running` and `stable` | `status`, `previous_status`, `server_id`, `agent_type`, `transport` |
 | `instance.started`, `instance.heartbeat`, `instance.stopped` | AgentAPI starts, every `--webhook-heartbeat` (60s) and when `PUT /webhook` points the webhook at a new URL, and shuts down | What the agent does: `status`, `lifecycle`, `session_name`, `pending_requests`, `queued_messages`, and `agent_session_id`, `login_required`, `limit_stop`, `usage`, `settings` when set; `heartbeat_seconds`, how often the heartbeat comes (missing when it is off) |
 | `task.started` | A [task](#tasks) starts: a message of yours reaches the agent | The task as `GET /tasks` has it: `id` (the message's), `status`, `prompt`, `started_at` |
-| `task.completed`, `task.failed` | The [task](#tasks) ends: `completed`, or `failed` and `limited` (`task.failed`) | The task with `status`, `ended_at`, `duration_seconds`, the agent's last message (`reply`, `reply_id`), `steered`, `errors`, `limit`, `session_name`, and for native Claude Code, Codex and Pi its API-equivalent `cost` (see [Session costs](#session-costs)) |
+| `task.completed`, `task.failed` | The [task](#tasks) ends: `completed`, or `failed` and `limited` (`task.failed`) | The task with `status`, `ended_at`, `duration_seconds`, the agent's last message (`reply`, `reply_id`), `steered`, `errors`, `limit`, `session_name`, and for Claude Code, Codex and Pi its API-equivalent `cost` (see [Session costs](#session-costs)) |
 | `request.opened`, `request.closed` | An approval, question or plan (the request as `GET /requests` has it) opens or closes | The request |
-| `login.required`, `login.completed` | The native agent needs a login, or no longer does | `agent`, `message`, `command` to run |
+| `login.required`, `login.completed` | The agent needs a login, or no longer does | `agent`, `message`, `command` to run |
 | `limit.stopped`, `limit.cleared` | A usage limit stopped a turn, or the stop is over | `message`, `stopped_at`, `resets_at` |
 | `agent.error` | The agent reported an error or a warning | `message`, `level`, `time` |
 | `message.created` | A message of yours or a final message of the agent's | `id`, `role`, `content` (cut at 64 KiB, with `truncated`), `time` |
@@ -1683,7 +1683,7 @@ other than browsers (curl, SDKs, the hub) aren't affected.
 
 ### What an API client can do
 
-- Have the agent run anything it can. Native agents start in the bypass
+- Have the agent run anything it can. Agents start in the bypass
   permission mode, where tools run without asking, unless the command line
   picks another mode or Claude Code runs as root outside a sandbox (it then
   starts in `default`). Claude Code gets `--allow-dangerously-skip-permissions`
@@ -1867,7 +1867,7 @@ stays, so a PID file and a parent shell that waits for it, such as a Coder works
 script, stay valid, and its output goes to the same place. The command waits until each AgentAPI
 answers on its port again with a new `server_id`, and prints its new version.
 
-- With `--state-db`, the conversation stays and a native agent resumes its
+- With `--state-db`, the conversation stays and the agent resumes its
   session. Without it, the AgentAPI starts a new conversation, as after any
   restart.
 - Only your own AgentAPIs restart, and only when the registry entry names a
@@ -1913,7 +1913,8 @@ agentapi hub leave
 instead skips signing in, for a hub behind a sign-in of its own such as a Coder workspace app),
 `--secret` (or `AGENTAPI_HUB_SECRET`) checks the AgentAPIs' events, `--instance-token` (or
 `AGENTAPI_HUB_INSTANCE_TOKEN`, else `AGENTAPI_API_TOKEN`) is sent to them, `--state` keeps the
-instances, `--port` and `--bind` set where it listens, and `--log-level` (or
+instances, `--port` and `--bind` set where it listens, `--allowed-hosts` the names browsers may
+open it by (any without it), and `--log-level` (or
 `AGENTAPI_HUB_LOG_LEVEL`) how much it logs.
 
 `join` writes the hub's webhook into `~/.agentapi/config.yaml` and applies it to the registered
@@ -2032,7 +2033,7 @@ go test ./...   # Go tests, including the e2e smoke test
 Tests run with `CGO_ENABLED=0`. Commit `openapi.json` with every API change, and regenerate it only
 with `make gen` (see [AGENTS.md](AGENTS.md)). The chat UI lives in [chat/](chat/README.md):
 `bun run dev` serves it against a running AgentAPI, and
-`agentapi server -- native-demo` runs a simulated native agent for working on it
+`agentapi server -- native-demo` runs a simulated agent for working on it
 without a real one.
 
 ## Runtime reliability
