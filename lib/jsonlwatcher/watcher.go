@@ -123,36 +123,9 @@ func (w *Watcher) waitForSessionFile(ctx context.Context) (string, error) {
 // the path to follow next when the resolver moves to another file, or ""
 // once ctx is canceled.
 func (w *Watcher) tailFile(ctx context.Context, path string) string {
-	// Wait for the file to exist
-	ticker := w.clock.NewTicker(sessionPollInterval, "Watcher", "open")
-	defer ticker.Stop()
-	var failed string
-	for {
-		_, err := os.Stat(path)
-		if err == nil {
-			break
-		}
-		if !errors.Is(err, fs.ErrNotExist) && err.Error() != failed {
-			// It may go away: keep trying.
-			w.logger.Error("Failed to open JSONL file", "path", path, "error", err)
-			failed = err.Error()
-		}
-		select {
-		case <-ctx.Done():
-			return ""
-		case <-ticker.C:
-			// The file may never appear: Claude Code can switch to another
-			// session (e.g. /clear, or a session id that is replaced before
-			// anything is written) without ever creating the one it
-			// advertised first. Follow the resolver instead of waiting on
-			// a path that is no longer current.
-			if resolvedPath, err := w.resolver.Resolve(); err == nil && resolvedPath != path {
-				w.logger.Info("JSONL session path changed before the file was created", "old_path", path, "new_path", resolvedPath)
-				return resolvedPath
-			}
-		}
+	if next, ok := w.waitForFile(ctx, path); !ok {
+		return next
 	}
-	ticker.Stop()
 
 	w.logger.Info("Opened JSONL file for tailing", "path", path)
 
@@ -177,7 +150,7 @@ func (w *Watcher) tailFile(ctx context.Context, path string) string {
 	resolveTicker := w.clock.NewTicker(sessionPollInterval, "Watcher", "resolve")
 	defer resolveTicker.Stop()
 
-	failed = ""
+	failed := ""
 	for {
 		if err := follower.Read(); err != nil {
 			// Logged once until a read succeeds; the next poll tries again.
@@ -213,6 +186,40 @@ func (w *Watcher) tailFile(ctx context.Context, path string) string {
 			if err == nil && resolvedPath != path {
 				w.logger.Info("JSONL session path changed", "old_path", path, "new_path", resolvedPath)
 				return resolvedPath
+			}
+		}
+	}
+}
+
+// waitForFile polls until the file at path exists, and reports whether it
+// does. It doesn't when ctx is canceled (next is "") or the resolver moved
+// to another file before this one was created (next is that file).
+func (w *Watcher) waitForFile(ctx context.Context, path string) (next string, ok bool) {
+	ticker := w.clock.NewTicker(sessionPollInterval, "Watcher", "open")
+	defer ticker.Stop()
+	var failed string
+	for {
+		_, err := os.Stat(path)
+		if err == nil {
+			return "", true
+		}
+		if !errors.Is(err, fs.ErrNotExist) && err.Error() != failed {
+			// It may go away: keep trying.
+			w.logger.Error("Failed to open JSONL file", "path", path, "error", err)
+			failed = err.Error()
+		}
+		select {
+		case <-ctx.Done():
+			return "", false
+		case <-ticker.C:
+			// The file may never appear: Claude Code can switch to another
+			// session (e.g. /clear, or a session id that is replaced before
+			// anything is written) without ever creating the one it
+			// advertised first. Follow the resolver instead of waiting on
+			// a path that is no longer current.
+			if resolvedPath, err := w.resolver.Resolve(); err == nil && resolvedPath != path {
+				w.logger.Info("JSONL session path changed before the file was created", "old_path", path, "new_path", resolvedPath)
+				return resolvedPath, false
 			}
 		}
 	}
