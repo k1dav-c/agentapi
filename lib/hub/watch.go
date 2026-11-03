@@ -1,16 +1,17 @@
 package hub
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/coder/agentapi/lib/instanceapi"
+	"github.com/coder/agentapi/lib/sse"
 )
 
 const (
@@ -231,34 +232,29 @@ func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(ins
 	// A stream that stays silent past its heartbeats is dead.
 	idle := h.clock.AfterFunc(watchIdle, cancel, "hub", "idle")
 	defer idle.Stop()
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64<<10), 4<<20)
-	var event, data string
-	for scanner.Scan() {
-		idle.Reset(watchIdle, "hub", "idle")
-		line := scanner.Text()
-		switch {
-		case strings.HasPrefix(line, "event:"):
-			event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		case strings.HasPrefix(line, "data:"):
-			data = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		case line == "":
-			if event == "summary_update" && data != "" {
-				var summary instanceapi.SummaryBody
-				if err := json.Unmarshal([]byte(data), &summary); err == nil {
-					if summary.Instance.ID != "" && summary.Instance.ID != instance.ID {
-						// Its address went to another machine, or two
-						// machines have the same name.
-						return &otherInstanceError{id: summary.Instance.ID}
-					}
-					got(summary)
-				}
+	events := sse.NewReader(resp.Body, 4<<20)
+	for {
+		event, err := events.Next()
+		if err != nil {
+			if !errors.Is(err, io.EOF) && ctx.Err() == nil {
+				return err
 			}
-			event, data = "", ""
+			break
 		}
-	}
-	if err := scanner.Err(); err != nil && ctx.Err() == nil {
-		return err
+		idle.Reset(watchIdle, "hub", "idle")
+		if event.Type != "summary_update" {
+			continue
+		}
+		var summary instanceapi.SummaryBody
+		if err := json.Unmarshal([]byte(event.Data), &summary); err != nil {
+			continue
+		}
+		if summary.Instance.ID != "" && summary.Instance.ID != instance.ID {
+			// Its address went to another machine, or two machines have
+			// the same name.
+			return &otherInstanceError{id: summary.Instance.ID}
+		}
+		got(summary)
 	}
 	if ctx.Err() != nil && h.ctx.Err() == nil {
 		return errors.New("the event stream went silent")

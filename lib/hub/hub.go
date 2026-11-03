@@ -33,6 +33,7 @@ import (
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/netaddr"
+	"github.com/coder/agentapi/lib/sse"
 )
 
 // Config is how the hub runs.
@@ -549,7 +550,7 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return false
 		}
-		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, encoded); err != nil {
+		if err := sse.Write(w, event, encoded); err != nil {
 			return false
 		}
 		flusher.Flush()
