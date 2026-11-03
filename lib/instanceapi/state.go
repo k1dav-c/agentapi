@@ -61,9 +61,19 @@ func StateOf(connection Connection, summary *SummaryBody, muted string) State {
 }
 
 // AttentionKey is what an instance waits for, to mute: why it needs you
-// and, for a request, which one; empty when it needs nothing.
+// and, for a request, which one; empty when it needs nothing. An
+// attention it doesn't know, such as the dialog an AgentAPI 2 reported
+// for a PTY agent, is none.
 func AttentionKey(summary *SummaryBody) string {
-	if summary == nil || summary.Attention == "" || summary.Attention == AttentionNone || summary.Attention == AttentionExited {
+	if summary == nil {
+		return ""
+	}
+	switch summary.Attention {
+	case AttentionLogin, AttentionRequest, AttentionLimit:
+	case AttentionNone, AttentionExited:
+		return ""
+	default:
+		// "" from a summary without one, or a value it doesn't know.
 		return ""
 	}
 	key := string(summary.Attention)

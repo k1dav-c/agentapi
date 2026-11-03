@@ -20,7 +20,6 @@ const (
 	AttentionNone    = instanceapi.AttentionNone
 	AttentionLogin   = instanceapi.AttentionLogin
 	AttentionRequest = instanceapi.AttentionRequest
-	AttentionDialog  = instanceapi.AttentionDialog
 	AttentionLimit   = instanceapi.AttentionLimit
 	AttentionExited  = instanceapi.AttentionExited
 )

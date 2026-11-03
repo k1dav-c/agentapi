@@ -1,6 +1,7 @@
 package instanceapi_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"strconv"
@@ -86,4 +87,37 @@ func TestExpandPublicURL(t *testing.T) {
 	assert.Equal(t, "http://"+hostname+":3284/", instanceapi.ExpandPublicURL("http://{hostname}:{port}/", 3284))
 	assert.Equal(t, "https://agent.example.com", instanceapi.ExpandPublicURL("https://agent.example.com", 3284))
 	assert.Equal(t, "/home/me/.agentapi/state/"+hostname+"-3285.db", instanceapi.ExpandPlaceholders("/home/me/.agentapi/state/{hostname}-{port}.db", 3285))
+}
+
+// agentapi2Summary is a summary as an AgentAPI 2 with the PTY transport
+// sent it while its agent showed a dialog in its terminal.
+const agentapi2Summary = `{
+  "instance": {"id": "dev-2:3284", "name": "api", "server_id": "s2", "hostname": "dev-2", "port": 3284,
+    "pid": 4242, "cwd": "/work/api", "agent_type": "aider", "transport": "pty",
+    "agentapi_version": "2.5.1", "url": "http://dev-2:3284"},
+  "status": "stable", "lifecycle": "running", "attention": "dialog", "title": "Fix the build",
+  "pending_requests": 0, "queued_messages": 1,
+  "terminal_prompt": "Allow edits to main.go? (Y)es/(N)o",
+  "task": {"id": 3, "prompt": "Fix the build", "status": "running", "started_at": "2026-11-01T09:00:00Z"},
+  "tasks": 3, "unread": false
+}`
+
+// An AgentAPI 2's summary reads with the fields AgentAPI 3 dropped
+// ignored, and the rest of it kept. Its terminal dialog is no attention a
+// client knows: it doesn't need you, and nothing to mute.
+func TestAgentAPI2Summary(t *testing.T) {
+	var summary instanceapi.SummaryBody
+	require.NoError(t, json.Unmarshal([]byte(agentapi2Summary), &summary))
+	assert.Equal(t, "dev-2:3284", summary.Instance.ID)
+	assert.Equal(t, instanceapi.Transport("pty"), summary.Instance.Transport, "shown as it came")
+	assert.Equal(t, instanceapi.AgentType("aider"), summary.Instance.AgentType)
+	assert.Equal(t, "2.5.1", summary.Instance.Version)
+	assert.Equal(t, "Fix the build", summary.Title)
+	assert.Equal(t, 1, summary.QueuedMessages)
+	require.NotNil(t, summary.Task)
+	assert.Equal(t, 3, summary.Task.ID)
+	assert.Empty(t, instanceapi.AttentionKey(&summary))
+	assert.Equal(t, instanceapi.StateIdle, instanceapi.StateOf(instanceapi.ConnectionConnected, &summary, ""))
+	summary.Status = instanceapi.AgentStatusRunning
+	assert.Equal(t, instanceapi.StateWorking, instanceapi.StateOf(instanceapi.ConnectionConnected, &summary, ""))
 }

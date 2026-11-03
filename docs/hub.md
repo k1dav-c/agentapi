@@ -380,7 +380,6 @@ instead. Each state has a shape of its own, so it reads without its color:
 | Glyph | Second line starts with | Meaning |
 | --- | --- | --- |
 | Amber ! | Approval, Question, Plan | A request waits for your answer; the line shows it |
-| Amber ! | Dialog | An AgentAPI 2's PTY agent shows a dialog in its terminal, which the hub's chat can't show ([Limits](#limits)) |
 | Amber ! | Login | The agent can't work until you log in on its machine |
 | Amber ! | Usage limit | A usage limit stopped its turn; queued messages wait for the reset |
 | Turning blue arc | Working | The agent works on the task shown |
@@ -775,9 +774,9 @@ ignores it, and drops it the next time it writes the file. So does a hub before 
 ## Limits
 
 - The hub serves the chat of its own version to every instance. Run the same AgentAPI version on
-  the hub and the instances; [Versions](#versions) shows the ones that differ. AgentAPI 3's chat
-  doesn't show an agent's terminal: answer an AgentAPI 2's terminal dialog in that AgentAPI's own
-  chat, at its URL.
+  the hub and the instances; [Versions](#versions) shows the ones that differ. The hub doesn't
+  show an AgentAPI 2's PTY agent waiting on a dialog in its terminal: the row shows it idle or
+  working. Answer the dialog in that AgentAPI's own chat, at its URL.
 - One hub token for everyone: there are no per-user accounts or permissions.
 - [Work time](#work-time) is what the hub saw: not before it had the feature, nor while it was down
   or couldn't reach an agent. One hub doesn't know what another counted.

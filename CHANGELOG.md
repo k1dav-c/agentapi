@@ -16,6 +16,14 @@
   (`confirmed_url`); a restarted hub follows the instance there first. A hub before 3.0.1 ignores
   the field.
 
+### Changes
+
+- The hub no longer reads the PTY-era fields of an AgentAPI 2: a 2.x PTY agent's terminal dialog
+  no longer shows as needing you on a 3.0.1 hub (its row shows it idle or working; answer the
+  dialog in that AgentAPI's own chat). `terminal_prompt` and the `dialog` attention leave the
+  summary schema, `pty` the `Transport` enum; AgentAPI 3 never sent them. The hub still follows a
+  2.x instance and shows the rest of its summary.
+
 ## v3.0.0
 
 ### Breaking changes

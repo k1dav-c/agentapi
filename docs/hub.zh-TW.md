@@ -335,7 +335,6 @@ hub 舊。
 | 圖示 | 第二行開頭 | 意思 |
 | --- | --- | --- |
 | 琥珀色 ! | Approval、Question、Plan | 有請求在等你回覆；這一行會顯示內容 |
-| 琥珀色 ! | Dialog | AgentAPI 2 的 PTY agent 在終端機裡顯示對話框，hub 的聊天介面無法顯示（見[限制](#限制)） |
 | 琥珀色 ! | Login | 要先在它的機器上登入，agent 才能工作 |
 | 琥珀色 ! | Usage limit | 用量限制停下了回合；佇列中的訊息等重置後才送出 |
 | 轉動的藍色弧線 | Working | agent 正在處理顯示的任務 |
@@ -686,8 +685,8 @@ cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv in
 ## 限制
 
 - hub 對所有實例都提供它自己版本的聊天介面。hub 和各實例請使用相同的 AgentAPI 版本；哪些不同，
-  見[版本](#版本)。AgentAPI 3 的聊天介面不顯示 agent 的終端機：AgentAPI 2 的終端機對話框，請到那個
-  AgentAPI 自己的聊天介面（它的網址）回覆。
+  見[版本](#版本)。AgentAPI 2 的 PTY agent 在終端機裡等你回覆對話框時，hub 不會標示出來，那一列
+  只顯示閒置或工作中。請到那個 AgentAPI 自己的聊天介面（它的網址）回覆。
 - 所有人共用一個 hub token：沒有個別帳號或權限。
 - [工作時間](#工作時間)只有 hub 看到的部分：hub 還沒有這項功能之前、hub 停機或連不到 agent 的期間都
   不算。一個 hub 也不知道另一個 hub 算了多少。

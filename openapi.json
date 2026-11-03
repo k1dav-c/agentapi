@@ -33,7 +33,6 @@
       },
       "Attention": {
         "enum": [
-          "dialog",
           "exited",
           "limit",
           "login",
@@ -2381,7 +2380,7 @@
           },
           "attention": {
             "$ref": "#/components/schemas/Attention",
-            "description": "Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none; an AgentAPI 2 with the PTY transport also reports dialog (in the agent's terminal)."
+            "description": "Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none."
           },
           "instance": {
             "$ref": "#/components/schemas/WebhookInstance",
@@ -2438,10 +2437,6 @@
             "description": "How many tasks the conversation has.",
             "format": "int64",
             "type": "integer"
-          },
-          "terminal_prompt": {
-            "description": "The bottom of the agent's terminal while it shows a dialog to answer; only from an AgentAPI 2 with the PTY transport.",
-            "type": "string"
           },
           "title": {
             "description": "The name the agent gave the session, else the start of the latest task's prompt; empty before the first task.",
@@ -2589,7 +2584,7 @@
           },
           "attention": {
             "$ref": "#/components/schemas/Attention",
-            "description": "Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none; an AgentAPI 2 with the PTY transport also reports dialog (in the agent's terminal)."
+            "description": "Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none."
           },
           "instance": {
             "$ref": "#/components/schemas/WebhookInstance",
@@ -2646,10 +2641,6 @@
             "description": "How many tasks the conversation has.",
             "format": "int64",
             "type": "integer"
-          },
-          "terminal_prompt": {
-            "description": "The bottom of the agent's terminal while it shows a dialog to answer; only from an AgentAPI 2 with the PTY transport.",
-            "type": "string"
           },
           "title": {
             "description": "The name the agent gave the session, else the start of the latest task's prompt; empty before the first task.",
@@ -3019,10 +3010,9 @@
       },
       "Transport": {
         "enum": [
-          "native",
-          "pty"
+          "native"
         ],
-        "example": "pty",
+        "example": "native",
         "title": "Transport",
         "type": "string"
       },

@@ -1,6 +1,6 @@
 "use client";
 
-import {ArrowRight, CircleCheck, ClipboardList, Gauge, KeyRound, MessageCircleQuestion, ShieldQuestion, SquareTerminal} from "lucide-react";
+import {ArrowRight, CircleCheck, ClipboardList, Gauge, KeyRound, MessageCircleQuestion, ShieldQuestion} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {activity, displayName, formatAgo, formatElapsed, instanceState, instanceVersion, type HubFilter, type HubInstance, type InstanceState} from "@/lib/hub";
 import {cn} from "@/lib/utils";
@@ -20,8 +20,6 @@ function ask(instance: HubInstance): {icon: typeof ShieldQuestion; label: string
       return {icon: KeyRound, label: "Login"};
     case "limit":
       return {icon: Gauge, label: "Usage limit"};
-    case "dialog":
-      return {icon: SquareTerminal, label: "Terminal dialog"};
   }
   switch (summary?.request?.kind) {
     case "question":
@@ -36,7 +34,7 @@ function ask(instance: HubInstance): {icon: typeof ShieldQuestion; label: string
 // What the card's button says: a request is answered, anything else is
 // looked at.
 function action(instance: HubInstance): string {
-  return instance.summary?.attention === "request" || instance.summary?.attention === "dialog" ? "Answer" : "Open";
+  return instance.summary?.attention === "request" ? "Answer" : "Open";
 }
 
 function greeting(now: number): string {

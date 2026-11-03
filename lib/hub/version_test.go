@@ -162,3 +162,48 @@ func TestHubVersionFollowsRestartInPlace(t *testing.T) {
 	assert.Equal(t, "run-3", again.ServerID)
 	assert.Equal(t, "2.1.1", again.Version)
 }
+
+// The hub follows an AgentAPI 2 with the PTY transport and shows it with
+// the rest of its state: the fields AgentAPI 3 dropped (its terminal's
+// dialog and prompt) are ignored, so the dialog doesn't make it need you.
+func TestHubShowsAnAgentAPI2(t *testing.T) {
+	summary := `{"instance": {"id": "dev-2:3284", "server_id": "s2", "agent_type": "aider", "transport": "pty", "agentapi_version": "2.5.1"},` +
+		`"status": "stable", "lifecycle": "running", "attention": "dialog", "title": "Fix the build",` +
+		`"pending_requests": 0, "queued_messages": 0, "terminal_prompt": "Allow edits? (Y)es/(N)o", "tasks": 1}`
+	instance := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/events" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "event: summary_update\ndata: %s\n\n", summary)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	t.Cleanup(instance.Close)
+	hubSrv := startHub(t, "")
+	started := map[string]any{
+		"id": "a2", "type": "instance.started", "created_at": time.Now(),
+		"instance": map[string]any{"id": "dev-2:3284", "server_id": "s2", "url": instance.URL, "agent_type": "aider", "transport": "pty"},
+	}
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, started, hubSecret, time.Now()))
+	var shown hub.Instance
+	require.Eventually(t, func() bool {
+		shown = instances(t, hubSrv.URL)[0]
+		return shown.Connection == hub.ConnectionConnected
+	}, 10*time.Second, 20*time.Millisecond)
+	assert.Equal(t, instanceapi.StateIdle, shown.State)
+	assert.Equal(t, instanceapi.Transport("pty"), shown.Transport)
+	assert.Equal(t, instanceapi.AgentType("aider"), shown.AgentType)
+	assert.Equal(t, "2.5.1", shown.Version)
+	require.NotNil(t, shown.Summary)
+	assert.Equal(t, "Fix the build", shown.Summary.Title)
+	assert.Equal(t, http.StatusConflict, request(t, http.MethodPatch, hubSrv.URL+"/api/instances/dev-2:3284", hubToken, map[string]bool{"muted": true}, nil), "nothing to mute")
+
+	var raw struct {
+		Instances []map[string]any `json:"instances"`
+	}
+	require.Equal(t, http.StatusOK, request(t, http.MethodGet, hubSrv.URL+"/api/instances", hubToken, nil, &raw))
+	require.Len(t, raw.Instances, 1)
+	assert.NotContains(t, raw.Instances[0]["summary"], "terminal_prompt")
+}

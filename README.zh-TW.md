@@ -1032,8 +1032,7 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
   工作階段，`scope` 也相同：加總多個 AgentAPI 的用戶端每個 scope 只算一次。`update` 則說明用戶端
   能不能[更新這個 AgentAPI](#透過-api-更新)，以及更新進行到哪裡。
 - `attention` 依優先順序標示需要使用者處理的原因：`login`、`request`（核准、提問或計畫）、
-  `limit`（用量限制使回合停止）、`exited`，或 `none`。使用 PTY transport 的 AgentAPI 2 另會回報
-  `dialog`（agent 終端機中的對話框），並在 `terminal_prompt` 附上終端機底部的內容。
+  `limit`（用量限制使回合停止）、`exited`，或 `none`。
 - `GET /events?only=summary` 在連線時及摘要變動時送出 `summary_update`，另有心跳。
   串流省略訊息，讓用戶端能同時追蹤幾十個實例。回覆文字增長不會改變摘要；
   任務開始或結束、請求、狀態與佇列的變更才會。一次變更只送出一個包含所有改動的

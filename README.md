@@ -1240,9 +1240,7 @@ instance:
   once. Its `update` says whether a client can [update the AgentAPI](#updating-through-the-api), and
   how far an update is.
 - `attention` identifies why the agent needs you, in priority order: `login`, `request` (approval,
-  question or plan), `limit` (a usage limit stopped the turn), `exited`, or `none`. An AgentAPI 2
-  with the PTY transport also reports `dialog` (in the agent's terminal), with the terminal's bottom
-  in `terminal_prompt`.
+  question or plan), `limit` (a usage limit stopped the turn), `exited`, or `none`.
 - `GET /events?only=summary` sends `summary_update` on connection and when the summary changes,
   plus heartbeats. It omits messages, so a client can follow dozens of
   instances. Reply text growing doesn't change the summary; task starts and ends, requests, status
