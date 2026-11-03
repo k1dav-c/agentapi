@@ -1350,7 +1350,8 @@ These endpoints work with every transport, except where noted; the
 - `GET /title` returns the session's human-readable title.
 - `POST /upload` stores a file (up to 10 MB; a body over 11 MiB is refused
   before it is read) and returns its path, which a message references as
-  `@"<path>"`.
+  `@"<path>"`. The file keeps the base name it was sent with, without control
+  characters and cut to 255 bytes; a name of `.` or `..` gets 400.
 
 ### Tasks
 

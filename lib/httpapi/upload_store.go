@@ -12,6 +12,9 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // uploadStore is the directory uploads and tool result images are kept
@@ -45,6 +48,41 @@ var imageExtensions = map[string]string{
 	"image/gif":  "gif",
 	"image/webp": "webp",
 	"image/bmp":  "bmp",
+}
+
+// maxUploadNameLength is the longest name a file is stored under, in
+// bytes: most file systems take 255.
+const maxUploadNameLength = 255
+
+// uploadName is the name an uploaded file is stored under: the base name
+// of the one the browser sent, without control characters (a newline
+// would break the path the agent is given), cut to maxUploadNameLength
+// with its extension kept. It reports false for a name that names no file
+// ("", ".", "..").
+func uploadName(sent string) (string, bool) {
+	name := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == utf8.RuneError {
+			return -1
+		}
+		return r
+	}, sent)
+	name = filepath.Base(name)
+	name = strings.TrimSpace(name)
+	if len(name) > maxUploadNameLength {
+		ext := path.Ext(name)
+		if len(ext) > maxUploadNameLength/2 {
+			ext = ""
+		}
+		stem := name[:maxUploadNameLength-len(ext)]
+		for !utf8.ValidString(stem) {
+			stem = stem[:len(stem)-1]
+		}
+		name = stem + ext
+	}
+	if name == "" || name == "." || name == ".." || name == "/" {
+		return "", false
+	}
+	return name, true
 }
 
 // newUploadStore uses dir, created if needed and kept, or a temporary

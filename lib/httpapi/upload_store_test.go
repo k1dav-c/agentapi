@@ -62,3 +62,29 @@ func TestUploadStore(t *testing.T) {
 	assert.True(t, removed)
 	assert.NoDirExists(t, temp.dir)
 }
+
+func TestUploadName(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("あ", 100) + ".png" // 300 bytes, then the extension
+	for sent, want := range map[string]string{
+		"notes.txt":              "notes.txt",
+		"/tmp/notes.txt":         "notes.txt",
+		"no\ttes\n.txt":          "notes.txt",
+		"\x1b[31mred\x1b[0m.txt": "[31mred[0m.txt",
+		"  spaced.txt ":          "spaced.txt",
+		"bad\xffutf8.txt":        "badutf8.txt",
+		long:                     strings.Repeat("あ", 83) + ".png",
+		"":                       "",
+		".":                      "",
+		"..":                     "",
+		"/":                      "",
+		"dir/..":                 "",
+		"\x00":                   "",
+		" ":                      "",
+	} {
+		got, ok := uploadName(sent)
+		assert.Equal(t, want, got, "%q", sent)
+		assert.Equal(t, want != "", ok, "%q", sent)
+		assert.LessOrEqual(t, len(got), maxUploadNameLength)
+	}
+}
