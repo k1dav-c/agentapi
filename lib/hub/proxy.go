@@ -28,17 +28,17 @@ func (h *Hub) proxy(w http.ResponseWriter, r *http.Request) {
 	id := instanceParam(r)
 	instance, ok := h.store.get(id)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such instance"})
+		writeError(w, http.StatusNotFound, "no such instance")
 		return
 	}
 	if instance.answeredBy != "" {
 		// Its approvals would go to another agent.
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "another AgentAPI answers at this instance's URL (" + instance.answeredBy + ")"})
+		writeError(w, http.StatusBadGateway, "another AgentAPI answers at this instance's URL ("+instance.answeredBy+")")
 		return
 	}
 	target, err := url.Parse(instance.URL)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "the instance's URL is invalid"})
+		writeError(w, http.StatusBadGateway, "the instance's URL is invalid")
 		return
 	}
 	// The path after /i/<id>, as the browser escaped it.
@@ -48,7 +48,7 @@ func (h *Hub) proxy(w http.ResponseWriter, r *http.Request) {
 		// The instance's webhook is how it reaches the hub; changed from
 		// here, it could send the hub's events, and the token the hub
 		// sends to the URL they name, elsewhere.
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "change an instance's webhook on its machine (agentapi hub join or leave), not through the hub"})
+		writeError(w, http.StatusForbidden, "change an instance's webhook on its machine (agentapi hub join or leave), not through the hub")
 		return
 	}
 	token := h.tokenFor(instance)
@@ -85,7 +85,7 @@ func (h *Hub) proxy(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "the instance is unreachable: " + err.Error()})
+			writeError(w, http.StatusBadGateway, "the instance is unreachable: "+err.Error())
 		},
 	}
 	rp.ServeHTTP(w, r)

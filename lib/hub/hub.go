@@ -191,7 +191,7 @@ func (h *Hub) Handler() http.Handler {
 		r.Use(h.checkHost)
 		r.Use(httpapi.CrossOriginProtection(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("Refused a request a page of another origin sent", "method", r.Method, "path", r.URL.Path, "origin", r.Header.Get("Origin"))
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "a page of another origin sent this request"})
+			writeError(w, http.StatusForbidden, "a page of another origin sent this request")
 		})))
 		h.routes(r)
 	})
@@ -245,7 +245,7 @@ func (h *Hub) checkHost(next http.Handler) http.Handler {
 			return
 		}
 		h.logger.Warn("Refused a request for a name not in --allowed-hosts", "host", r.Host, "path", r.URL.Path)
-		writeJSON(w, http.StatusMisdirectedRequest, map[string]string{"error": "the hub doesn't answer to " + host + "; add it to --allowed-hosts"})
+		writeError(w, http.StatusMisdirectedRequest, "the hub doesn't answer to "+host+"; add it to --allowed-hosts")
 	})
 }
 
@@ -282,7 +282,7 @@ func (h *Hub) signedIn(r *http.Request) bool {
 func (h *Hub) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !h.signedIn(r) {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "sign in to the hub"})
+			writeError(w, http.StatusUnauthorized, "sign in to the hub")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -298,7 +298,7 @@ func (h *Hub) createSession(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"token\": ...}"})
+		writeError(w, http.StatusBadRequest, "send {\"token\": ...}")
 		return
 	}
 	if h.config.NoToken {
@@ -306,7 +306,7 @@ func (h *Hub) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !hmac.Equal([]byte(body.Token), []byte(h.config.Token)) {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "wrong token"})
+		writeError(w, http.StatusUnauthorized, "wrong token")
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -325,6 +325,11 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// writeError answers {"error": message}.
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
 }
 
 // instanceList is GET /api/instances, and the first event of the browser's
@@ -355,18 +360,18 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"url\": ..., \"token\": ...}"})
+		writeError(w, http.StatusBadRequest, "send {\"url\": ..., \"token\": ...}")
 		return
 	}
 	u, err := url.Parse(body.URL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url must be an http or https URL"})
+		writeError(w, http.StatusBadRequest, "url must be an http or https URL")
 		return
 	}
 	base := strings.TrimRight(body.URL, "/")
 	summary, err := h.fetchSummary(r.Context(), base, body.Token)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	id := summary.Instance.ID
@@ -376,7 +381,7 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 	if existing, ok := h.store.get(id); ok && existing.URL != base {
 		// Adding a URL is no way to move an instance: the hub would send
 		// its token there.
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "the hub has " + id + " at " + existing.URL + " already; forget it first"})
+		writeError(w, http.StatusConflict, "the hub has "+id+" at "+existing.URL+" already; forget it first")
 		return
 	}
 	instance, _ := h.store.update(id, true, func(i *Instance) {
@@ -440,14 +445,14 @@ func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 		Pinned *bool   `json:"pinned"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil || (body.Group == nil && body.Muted == nil && body.Pinned == nil) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"group\": ...}, {\"muted\": ...} or {\"pinned\": ...}"})
+		writeError(w, http.StatusBadRequest, "send {\"group\": ...}, {\"muted\": ...} or {\"pinned\": ...}")
 		return
 	}
 	var group string
 	if body.Group != nil {
 		group = strings.Join(strings.Fields(*body.Group), " ")
 		if utf8.RuneCountInString(group) > maxGroupName {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("a group name has at most %d characters", maxGroupName)})
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("a group name has at most %d characters", maxGroupName))
 			return
 		}
 	}
@@ -476,11 +481,11 @@ func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such instance"})
+		writeError(w, http.StatusNotFound, "no such instance")
 		return
 	}
 	if nothingToMute {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "it doesn't need you now: nothing to mute"})
+		writeError(w, http.StatusConflict, "it doesn't need you now: nothing to mute")
 		return
 	}
 	writeJSON(w, http.StatusOK, updated.sent(h.clock.Now()))
@@ -496,13 +501,13 @@ func (h *Hub) setPins(w http.ResponseWriter, r *http.Request) {
 		IDs []string `json:"ids"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil || body.IDs == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"ids\": [...]}: the pinned instances, from the top"})
+		writeError(w, http.StatusBadRequest, "send {\"ids\": [...]}: the pinned instances, from the top")
 		return
 	}
 	listed := make(map[string]bool, len(body.IDs))
 	for _, id := range body.IDs {
 		if listed[id] {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": id + " is listed twice"})
+			writeError(w, http.StatusBadRequest, id+" is listed twice")
 			return
 		}
 		listed[id] = true
@@ -511,7 +516,7 @@ func (h *Hub) setPins(w http.ResponseWriter, r *http.Request) {
 	var unknown unknownInstanceError
 	switch {
 	case errors.As(err, &unknown):
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		writeError(w, http.StatusNotFound, err.Error())
 		return
 	case errors.Is(err, errPinsDiffer):
 		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "ids": pins})
@@ -525,7 +530,7 @@ func (h *Hub) removeInstance(w http.ResponseWriter, r *http.Request) {
 	h.unwatch(id)
 	removed := h.store.remove(id)
 	if !removed {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such instance"})
+		writeError(w, http.StatusNotFound, "no such instance")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
