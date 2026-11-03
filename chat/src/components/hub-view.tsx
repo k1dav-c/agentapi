@@ -4,7 +4,7 @@ import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from
 import {Bell, BellOff, Plus, Search, X} from "lucide-react";
 import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
-import {chatURL, countFilters, displayName, formatUSD, groupNames, hubRoot, spendTitle, spendTotals, type HubFilter} from "@/lib/hub";
+import {chatURL, countFilters, displayName, formatUSD, groupNames, groupOf, hubRoot, spendTitle, spendTotals, type HubFilter} from "@/lib/hub";
 import {listSections, movePin, pinOf, sortPinned} from "@/lib/hub-order";
 import {useStableCallback} from "@/lib/use-stable-callback";
 import {cn} from "@/lib/utils";
@@ -176,7 +176,7 @@ export function HubView() {
       if (next.delete(from)) next.add(to);
     });
     await actions.moveGroup(
-      all.filter((instance) => (instance.group?.trim() ?? "") === from),
+      all.filter((instance) => groupOf(instance) === from),
       to,
     );
   };

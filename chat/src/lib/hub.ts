@@ -188,6 +188,11 @@ export function usagePercent(summary: Summary | null | undefined): number | unde
   return fullest;
 }
 
+// groupOf is the group an instance is in, "" for none.
+export function groupOf(instance: HubInstance): string {
+  return instance.group?.trim() ?? "";
+}
+
 // A group of rows: name is "" for the instances in no group.
 export interface HubGroup {
   name: string;
@@ -200,7 +205,7 @@ export interface HubGroup {
 export function groupInstances(instances: Iterable<HubInstance>): HubGroup[] {
   const byName = new Map<string, HubInstance[]>();
   for (const instance of sortInstances(instances)) {
-    const name = instance.group?.trim() ?? "";
+    const name = groupOf(instance);
     byName.set(name, [...(byName.get(name) ?? []), instance]);
   }
   return [...byName.entries()]
@@ -227,7 +232,7 @@ export interface GroupSubtotal {
 export function groupSubtotals(rows: Iterable<{instance: HubInstance; day: number; week: number}>): GroupSubtotal[] {
   const byName = new Map<string, GroupSubtotal>();
   for (const {instance, day, week} of rows) {
-    const name = instance.group?.trim() ?? "";
+    const name = groupOf(instance);
     const group = byName.get(name) ?? {name, day: 0, week: 0};
     group.day += day;
     group.week += week;
@@ -240,7 +245,10 @@ export function groupSubtotals(rows: Iterable<{instance: HubInstance; day: numbe
 // groupNames lists the groups in use, by name.
 export function groupNames(instances: Iterable<HubInstance>): string[] {
   const names = new Set<string>();
-  for (const instance of instances) if (instance.group?.trim()) names.add(instance.group.trim());
+  for (const instance of instances) {
+    const name = groupOf(instance);
+    if (name) names.add(name);
+  }
   return [...names].sort((a, b) => a.localeCompare(b));
 }
 

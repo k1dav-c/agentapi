@@ -21,6 +21,7 @@ import {
   formatAgo,
   formatUSD,
   formatWork,
+  groupOf,
   instanceState,
   instanceVersion,
   olderThanHub,
@@ -117,7 +118,7 @@ export const InstanceRow = memo(function InstanceRow({instance, hubVersion, root
   const recent = order === "recent";
   const since = recent ? changedAt(instance) : doing.since;
   const ago = useHubTime((now) => formatAgo(since, now));
-  const group = recent || pinned ? (instance.group?.trim() ?? "") : "";
+  const group = recent || pinned ? groupOf(instance) : "";
   const gone = state === "stopped" || state === "unreachable";
   const spend = summary?.spend;
   // The last spend and version of an instance the hub doesn't follow now:
@@ -248,7 +249,7 @@ export const InstanceRow = memo(function InstanceRow({instance, hubVersion, root
               </>
             )}
             <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Move to group</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={instance.group?.trim() ?? ""} onValueChange={(name) => actions.group(id, name)}>
+            <DropdownMenuRadioGroup value={groupOf(instance)} onValueChange={(name) => actions.group(id, name)}>
               <DropdownMenuRadioItem value="">No group</DropdownMenuRadioItem>
               {groups.map((name) => (
                 <DropdownMenuRadioItem key={name} value={name}>
