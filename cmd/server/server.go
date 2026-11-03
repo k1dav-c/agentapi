@@ -510,57 +510,116 @@ func CreateServerCmd() *cobra.Command {
 		Short: "Run the server",
 		Long:  fmt.Sprintf("Run the server with the specified agent (one of: %s)", strings.Join(agentNames, ", ")),
 		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// The arguments are fine: an error from here on isn't a usage
-			// error.
-			cmd.SilenceUsage = true
-			// First, so that a SIGUSR2 while the server starts doesn't end
-			// it (listenForRestart).
-			self := newSelfExec()
-			// The --exit flag is used for testing validation of flags in the test suite
-			if viper.GetBool(FlagExit) {
-				return nil
-			}
-			// Not bound to viper: a variable or the config file doesn't
-			// turn the server into a check.
-			validate, _ := cmd.Flags().GetBool(FlagValidate)
-			level := new(slog.LevelVar)
-			logger := slog.New(slog.NewTextHandler(cmd.OutOrStdout(), &slog.HandlerOptions{Level: level}))
-			if viper.GetBool(FlagPrintOpenAPI) || validate {
-				// We don't want log output here: --validate prints one
-				// line.
-				logger = slog.New(logctx.DiscardHandler)
-			}
-			ctx := logctx.WithLogger(context.Background(), logger)
-			// The schema doesn't depend on the user's settings, and a
-			// webhook in them (agentapi hub join) would have this short
-			// run report to the hub (make gen runs it).
-			if !viper.GetBool(FlagPrintOpenAPI) {
-				readUserConfig(viper.GetViper(), cmd.Flags(), logger)
-			}
-			// Once the config file, which can set it too, was read; what
-			// reading it logged went out at info.
-			logLevel, err := logctx.ParseLevel(viper.GetString(FlagLogLevel))
-			if err != nil {
-				return fmt.Errorf("invalid --%s: %w", FlagLogLevel, err)
-			}
-			level.Set(logLevel)
-			if validate {
-				return validateServer(cmd.OutOrStdout(), cmd.Flags().Args())
-			}
-			logger.Debug("Restarting in place runs this program", "program", self.path)
-			err = runServer(ctx, logger, cmd.Flags().Args(), self)
-			if errors.Is(err, errRestart) {
-				logger.Info("Running the program again", "program", self.path)
-				if err := self.exec(); err != nil {
-					return fmt.Errorf("failed to restart in place: %w", err)
-				}
-			}
-			return err
-		},
+		RunE:  runServerCmd,
 	}
 
-	flagSpecs := []flagSpec{
+	for _, spec := range serverFlagSpecs() {
+		switch spec.flagType {
+		case "string":
+			serverCmd.Flags().StringP(spec.name, spec.shorthand, spec.defaultValue.(string), spec.usage)
+		case "int":
+			serverCmd.Flags().IntP(spec.name, spec.shorthand, spec.defaultValue.(int), spec.usage)
+		case "bool":
+			serverCmd.Flags().BoolP(spec.name, spec.shorthand, spec.defaultValue.(bool), spec.usage)
+		case "uint16":
+			serverCmd.Flags().Uint16P(spec.name, spec.shorthand, spec.defaultValue.(uint16), spec.usage)
+		case "stringSlice":
+			serverCmd.Flags().StringSliceP(spec.name, spec.shorthand, spec.defaultValue.([]string), spec.usage)
+		case "duration":
+			serverCmd.Flags().DurationP(spec.name, spec.shorthand, spec.defaultValue.(time.Duration), spec.usage)
+		default:
+			panic(fmt.Sprintf("unknown flag type: %s", spec.flagType))
+		}
+		if err := viper.BindPFlag(spec.name, serverCmd.Flags().Lookup(spec.name)); err != nil {
+			panic(fmt.Sprintf("failed to bind flag %s: %v", spec.name, err))
+		}
+	}
+
+	// --api-token without a value auto-generates a token; --api-token=VALUE
+	// uses the given value; omitting the flag entirely disables authentication.
+	serverCmd.Flags().Lookup(FlagAPIToken).NoOptDefVal = "generate"
+
+	// --experimental-acp says that ACP was removed rather than that the
+	// flag is unknown.
+	markHidden(serverCmd, FlagExperimentalACP)
+
+	serverCmd.Flags().Bool(FlagValidate, false, "Check the settings as a start would, without starting anything, print ok or why it wouldn't start, and exit")
+	markHidden(serverCmd, FlagValidate)
+
+	serverCmd.Flags().Bool(FlagExit, false, "Exit immediately after parsing arguments")
+	markHidden(serverCmd, FlagExit)
+	if err := viper.BindPFlag(FlagExit, serverCmd.Flags().Lookup(FlagExit)); err != nil {
+		panic(fmt.Sprintf("failed to bind flag %s: %v", FlagExit, err))
+	}
+
+	viper.SetEnvPrefix("AGENTAPI")
+	viper.AutomaticEnv()
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+
+	return serverCmd
+}
+
+// markHidden hides the flag name of cmd from its help.
+func markHidden(cmd *cobra.Command, name string) {
+	if err := cmd.Flags().MarkHidden(name); err != nil {
+		panic(fmt.Sprintf("failed to mark flag %s as hidden: %v", name, err))
+	}
+}
+
+// runServerCmd runs agentapi server: it checks the settings (--validate),
+// or runs the server and, once SIGUSR2 stopped it, the program again.
+func runServerCmd(cmd *cobra.Command, _ []string) error {
+	// The arguments are fine: an error from here on isn't a usage
+	// error.
+	cmd.SilenceUsage = true
+	// First, so that a SIGUSR2 while the server starts doesn't end
+	// it (listenForRestart).
+	self := newSelfExec()
+	// The --exit flag is used for testing validation of flags in the test suite
+	if viper.GetBool(FlagExit) {
+		return nil
+	}
+	// Not bound to viper: a variable or the config file doesn't
+	// turn the server into a check.
+	validate, _ := cmd.Flags().GetBool(FlagValidate)
+	level := new(slog.LevelVar)
+	logger := slog.New(slog.NewTextHandler(cmd.OutOrStdout(), &slog.HandlerOptions{Level: level}))
+	if viper.GetBool(FlagPrintOpenAPI) || validate {
+		// We don't want log output here: --validate prints one
+		// line.
+		logger = slog.New(logctx.DiscardHandler)
+	}
+	ctx := logctx.WithLogger(context.Background(), logger)
+	// The schema doesn't depend on the user's settings, and a
+	// webhook in them (agentapi hub join) would have this short
+	// run report to the hub (make gen runs it).
+	if !viper.GetBool(FlagPrintOpenAPI) {
+		readUserConfig(viper.GetViper(), cmd.Flags(), logger)
+	}
+	// Once the config file, which can set it too, was read; what
+	// reading it logged went out at info.
+	logLevel, err := logctx.ParseLevel(viper.GetString(FlagLogLevel))
+	if err != nil {
+		return fmt.Errorf("invalid --%s: %w", FlagLogLevel, err)
+	}
+	level.Set(logLevel)
+	if validate {
+		return validateServer(cmd.OutOrStdout(), cmd.Flags().Args())
+	}
+	logger.Debug("Restarting in place runs this program", "program", self.path)
+	err = runServer(ctx, logger, cmd.Flags().Args(), self)
+	if errors.Is(err, errRestart) {
+		logger.Info("Running the program again", "program", self.path)
+		if err := self.exec(); err != nil {
+			return fmt.Errorf("failed to restart in place: %w", err)
+		}
+	}
+	return err
+}
+
+// serverFlagSpecs are the flags of agentapi server that viper binds.
+func serverFlagSpecs() []flagSpec {
+	return []flagSpec{
 		{FlagType, "t", "", fmt.Sprintf("Override the agent type (one of: %s, custom)", strings.Join(agentNames, ", ")), "string"},
 		{FlagPort, "p", 3284, "Port to run the server on", "int"},
 		{FlagPrintOpenAPI, "P", false, "Print the OpenAPI schema to stdout and exit", "bool"},
@@ -601,55 +660,4 @@ func CreateServerCmd() *cobra.Command {
 		{FlagLogLevel, "", "info", "Least important level to log: " + logctx.LevelNames, "string"},
 		{FlagAllowUpdate, "", false, "Let API clients, such as a hub, update AgentAPI to the latest release (POST /update), which then restarts in place; the program's directory must be writable by the user AgentAPI runs as", "bool"},
 	}
-
-	for _, spec := range flagSpecs {
-		switch spec.flagType {
-		case "string":
-			serverCmd.Flags().StringP(spec.name, spec.shorthand, spec.defaultValue.(string), spec.usage)
-		case "int":
-			serverCmd.Flags().IntP(spec.name, spec.shorthand, spec.defaultValue.(int), spec.usage)
-		case "bool":
-			serverCmd.Flags().BoolP(spec.name, spec.shorthand, spec.defaultValue.(bool), spec.usage)
-		case "uint16":
-			serverCmd.Flags().Uint16P(spec.name, spec.shorthand, spec.defaultValue.(uint16), spec.usage)
-		case "stringSlice":
-			serverCmd.Flags().StringSliceP(spec.name, spec.shorthand, spec.defaultValue.([]string), spec.usage)
-		case "duration":
-			serverCmd.Flags().DurationP(spec.name, spec.shorthand, spec.defaultValue.(time.Duration), spec.usage)
-		default:
-			panic(fmt.Sprintf("unknown flag type: %s", spec.flagType))
-		}
-		if err := viper.BindPFlag(spec.name, serverCmd.Flags().Lookup(spec.name)); err != nil {
-			panic(fmt.Sprintf("failed to bind flag %s: %v", spec.name, err))
-		}
-	}
-
-	// --api-token without a value auto-generates a token; --api-token=VALUE
-	// uses the given value; omitting the flag entirely disables authentication.
-	serverCmd.Flags().Lookup(FlagAPIToken).NoOptDefVal = "generate"
-
-	// --experimental-acp says that ACP was removed rather than that the
-	// flag is unknown.
-	if err := serverCmd.Flags().MarkHidden(FlagExperimentalACP); err != nil {
-		panic(fmt.Sprintf("failed to mark flag %s as hidden: %v", FlagExperimentalACP, err))
-	}
-
-	serverCmd.Flags().Bool(FlagValidate, false, "Check the settings as a start would, without starting anything, print ok or why it wouldn't start, and exit")
-	if err := serverCmd.Flags().MarkHidden(FlagValidate); err != nil {
-		panic(fmt.Sprintf("failed to mark flag %s as hidden: %v", FlagValidate, err))
-	}
-
-	serverCmd.Flags().Bool(FlagExit, false, "Exit immediately after parsing arguments")
-	if err := serverCmd.Flags().MarkHidden(FlagExit); err != nil {
-		panic(fmt.Sprintf("failed to mark flag %s as hidden: %v", FlagExit, err))
-	}
-	if err := viper.BindPFlag(FlagExit, serverCmd.Flags().Lookup(FlagExit)); err != nil {
-		panic(fmt.Sprintf("failed to bind flag %s: %v", FlagExit, err))
-	}
-
-	viper.SetEnvPrefix("AGENTAPI")
-	viper.AutomaticEnv()
-	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
-
-	return serverCmd
 }
