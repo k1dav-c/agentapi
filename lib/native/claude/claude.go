@@ -211,11 +211,9 @@ var (
 	_ native.Configurable = (*Adapter)(nil)
 )
 
-var (
-	// errExited fails the control requests the CLI didn't answer before
-	// its output ended.
-	errExited = errors.New("claude exited")
-)
+// errExited fails the control requests the CLI didn't answer before
+// its output ended.
+var errExited = errors.New("claude exited")
 
 // turnPhase is where the current turn is.
 type turnPhase int
