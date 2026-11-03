@@ -189,6 +189,24 @@ describe("ChatStream", () => {
     expect(calls.at(-1)).toBe("replayed");
   });
 
+  test("a resumed replay that is only its session_sync is complete at once", () => {
+    // The seq moved on, but nothing this client gets changed: the
+    // session_sync is the replay's last event, with its id.
+    const sync = new SyncTracker();
+    sync.restore("e1", 5);
+    const {env, batches, calls} = stream(sync);
+    const source = env.latest();
+    source.open();
+    source.emit("session_sync", {epoch: "e1", seq: 8}, "8");
+    // A heartbeat keeps that id; it mustn't be what the replay waits for.
+    source.emit("heartbeat", {time: "2026-10-27T10:00:00Z"}, "8");
+    env.clock.advance(EVENT_FLUSH_MS);
+    expect(sync.replaying).toBe(false);
+    expect(sync.watermark).toBe(8);
+    expect(batches.at(-1)?.point).toEqual({epoch: "e1", seq: 8});
+    expect(calls.at(-1)).toBe("replayed");
+  });
+
   test("an older server's replay, without session_sync, replaces the state", () => {
     const sync = new SyncTracker();
     sync.restore("e1", 5);

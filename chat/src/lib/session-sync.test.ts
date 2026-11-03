@@ -49,6 +49,23 @@ describe("SyncTracker", () => {
     expect(sync.watermark).toBe(31);
   });
 
+  test("a replay of only the session_sync is complete at once", () => {
+    // The seq moved past the watermark, but nothing the client gets
+    // changed: the session_sync is the replay, with its id.
+    const sync = new SyncTracker();
+    sync.restore("e1", 30);
+    expect(sync.begin({epoch: "e1", seq: 42}, "42")).toBe(false);
+    expect(sync.replaying).toBe(false);
+    expect(sync.watermark).toBe(42);
+    // Heartbeats carry the same last id.
+    expect(sync.noteEvent("42")).toBe(false);
+    // Without the id, the replay goes on.
+    const other = new SyncTracker();
+    other.restore("e1", 30);
+    other.begin({epoch: "e1", seq: 42}, "");
+    expect(other.replaying).toBe(true);
+  });
+
   test("a connection dropped mid-replay resumes from the old watermark", () => {
     const sync = new SyncTracker();
     sync.restore("e1", 100);
