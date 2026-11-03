@@ -2,7 +2,7 @@ import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
 import type {HubInstance, InstanceUpdate, Summary} from "@/lib/hub";
 import {FixedHubClock} from "./clock";
-import {TokensCard, VersionsCard, WorkCard} from "./overview";
+import {TokensCard, VersionsCard, WorkCard} from "./overview-cards";
 
 const running = (id: string, version: string, hostname: string, overrides: Partial<HubInstance> = {}): HubInstance => ({
   id,
