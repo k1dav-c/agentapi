@@ -385,7 +385,7 @@ func (a *Adapter) startTurn(ctx context.Context, input native.Input, implement n
 		}
 		return fmt.Errorf("start turn: %w", err)
 	}
-	a.turnStarted(changes)
+	a.commitChanges(changes)
 	return nil
 }
 
