@@ -41,7 +41,6 @@ type pendingRequest struct {
 	id     string
 	rpcID  json.RawMessage
 	method string
-	turnID string
 	// toolUseID is the tool call the request is about.
 	toolUseID string
 	// results maps option IDs to the response to send.
@@ -162,7 +161,7 @@ func (s *loopState) commandApproval(msg rpcMessage) (*pendingRequest, native.Req
 		req.Title = "Run a command"
 	}
 
-	r := &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, results: map[string]any{}}
+	r := &pendingRequest{toolUseID: p.ItemID, results: map[string]any{}}
 	for _, decision := range commandDecisions(p) {
 		addCommandDecision(&req, r, decision)
 	}
@@ -306,7 +305,7 @@ func (s *loopState) fileChangeApproval(msg rpcMessage) (*pendingRequest, native.
 	if p.GrantRoot != "" {
 		sessionDesc = "Also allows writes under " + p.GrantRoot + " for the rest of the session."
 	}
-	r := &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, results: map[string]any{}}
+	r := &pendingRequest{toolUseID: p.ItemID, results: map[string]any{}}
 	for _, opt := range []native.RequestOption{
 		{ID: "accept", Label: "Allow", Kind: native.OptionKindAllow},
 		{ID: "acceptForSession", Label: "Allow for this session", Description: sessionDesc, Kind: native.OptionKindAllowAlways},
@@ -376,7 +375,7 @@ func (s *loopState) userInputRequest(msg rpcMessage) (*pendingRequest, native.Re
 			s.toolCallEvent(state.blk, s.now(), p.ItemID)
 		}
 	}
-	return &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, questions: req.Questions}, req, true
+	return &pendingRequest{toolUseID: p.ItemID, questions: req.Questions}, req, true
 }
 
 func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.Request, bool) {
@@ -384,7 +383,7 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 	if !s.decode(msg, &p) {
 		return nil, native.Request{}, false
 	}
-	r := &pendingRequest{turnID: p.TurnID, results: map[string]any{}}
+	r := &pendingRequest{results: map[string]any{}}
 	req := native.Request{Kind: native.RequestKindApproval, Title: native.OneLine(p.Message, native.MaxTitleRunes)}
 	if req.Title == "" {
 		req.Title = fmt.Sprintf("The %s MCP server asks for input", p.ServerName)
@@ -515,7 +514,7 @@ func (s *loopState) permissionsRequest(msg rpcMessage) (*pendingRequest, native.
 	detail = append(detail, "Requested: "+string(p.Permissions))
 	req.Detail = strings.Join(detail, "\n")
 	granted := rawOrEmpty(p.Permissions)
-	r := &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, results: map[string]any{}}
+	r := &pendingRequest{toolUseID: p.ItemID, results: map[string]any{}}
 	addOption(&req, r, native.RequestOption{ID: "turn", Label: "Allow for this turn", Kind: native.OptionKindAllow},
 		permissionsRequestApprovalResponse{Permissions: granted, Scope: "turn"})
 	addOption(&req, r, native.RequestOption{ID: "session", Label: "Allow for this session", Kind: native.OptionKindAllowAlways},

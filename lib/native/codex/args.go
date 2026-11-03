@@ -13,8 +13,9 @@ import (
 type launchOptions struct {
 	// appServerArgs follow `app-server` on the command line.
 	appServerArgs []string
-	// Thread settings translated from top-level codex flags. Empty means
-	// Codex's config decides.
+	// Thread settings translated from top-level codex flags. An empty
+	// model or cwd means Codex's config decides; the policies default to
+	// the bypass mode (see policyFromUser).
 	model          string
 	sandbox        string
 	approvalPolicy string

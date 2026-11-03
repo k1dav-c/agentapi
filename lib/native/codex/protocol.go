@@ -84,8 +84,9 @@ type getAccountResponse struct {
 
 // --- threads ---
 
-// threadStartParams is ThreadStartParams. Policies are only sent when the
-// user chose them on the command line; otherwise Codex's config decides.
+// threadStartParams is ThreadStartParams. The model and directory are
+// only sent when the user chose them; the policies always are (see
+// parseArgs).
 type threadStartParams struct {
 	CWD            string `json:"cwd,omitempty"`
 	Model          string `json:"model,omitempty"`
@@ -297,13 +298,13 @@ type mcpToolCallResult struct {
 	Content []json.RawMessage `json:"content"`
 }
 
-// threadItem is a ThreadItem; Type says which fields are set.
 // collabAgentState is CollabAgentState: how far an agent got.
 type collabAgentState struct {
 	Status  string  `json:"status"`
 	Message *string `json:"message"`
 }
 
+// threadItem is a ThreadItem; Type says which fields are set.
 type threadItem struct {
 	Type string `json:"type"`
 	ID   string `json:"id"`
