@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -245,7 +246,7 @@ func Open(path string, logger *slog.Logger) (*DB, error) {
 	if _, err := sqlDB.Exec("BEGIN IMMEDIATE; COMMIT"); err != nil {
 		_ = sqlDB.Close()
 		if isBusy(err) {
-			return nil, fmt.Errorf("state database %s is in use by another AgentAPI", path)
+			return nil, fmt.Errorf("state database %s is %w", path, ErrInUse)
 		}
 		return nil, fmt.Errorf("open state database: %w", err)
 	}
@@ -272,12 +273,16 @@ func Open(path string, logger *slog.Logger) (*DB, error) {
 // WAL index is then kept in memory rather than in a -shm file other
 // processes could open.
 func dataSourceName(path string) string {
+	return fileURI(path) + "?_pragma=busy_timeout(1000)&_pragma=locking_mode(EXCLUSIVE)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+}
+
+// fileURI returns the SQLite URI of the file at path, without parameters.
+func fileURI(path string) string {
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
 	// ?, # and % have a meaning in a URI.
-	path = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23").Replace(path)
-	return "file:" + path + "?_pragma=busy_timeout(1000)&_pragma=locking_mode(EXCLUSIVE)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+	return "file:" + strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23").Replace(path)
 }
 
 // isBusy reports whether err says that another connection holds the lock.
@@ -289,24 +294,25 @@ func isBusy(err error) bool {
 // migrate runs the migrations the database hasn't had. A database a newer
 // AgentAPI migrated further is left as it is, if this one may write it.
 func migrate(db *sql.DB) error {
-	var version int
-	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+	var schema int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil {
 		return fmt.Errorf("read state database version: %w", err)
 	}
-	if version > len(migrations) {
-		return checkWriter(db, version)
+	if schema > len(migrations) {
+		return checkWriter(db, schema, len(migrations), version.Version)
 	}
-	for ; version < len(migrations); version++ {
-		if err := migrateTo(db, version+1); err != nil {
-			return fmt.Errorf("migrate the state database to schema %d: %w", version+1, err)
+	for ; schema < len(migrations); schema++ {
+		if err := migrateTo(db, schema+1); err != nil {
+			return fmt.Errorf("migrate the state database to schema %d: %w", schema+1, err)
 		}
 	}
 	return nil
 }
 
-// checkWriter returns an error unless this AgentAPI may write the database
-// whose schema, newer than it knows, is schema.
-func checkWriter(db *sql.DB, schema int) error {
+// checkWriter returns an error unless an AgentAPI, release program, that
+// knows schemas up to knows may write the database whose schema, newer than
+// that, is schema.
+func checkWriter(db *sql.DB, schema, knows int, program string) error {
 	meta := map[string]string{}
 	rows, err := db.Query("SELECT key, value FROM meta WHERE key IN (?, ?, ?)", metaMinWriterSchema, metaMinWriterVersion, metaWriterVersion)
 	if err != nil {
@@ -329,7 +335,7 @@ func checkWriter(db *sql.DB, schema int) error {
 			minWriter = schema
 		}
 	}
-	if minWriter <= len(migrations) {
+	if minWriter <= knows {
 		return nil
 	}
 	needs := "a newer AgentAPI"
@@ -341,7 +347,64 @@ func checkWriter(db *sql.DB, schema int) error {
 		by = ", last written by AgentAPI " + v
 	}
 	return fmt.Errorf("needs %s (schema %d%s; AgentAPI %s knows schema %d): update AgentAPI (agentapi update), or use another state database",
-		needs, schema, by, version.Version, len(migrations))
+		needs, schema, by, program, knows)
+}
+
+// ErrInUse says that another AgentAPI has the database open.
+var ErrInUse = errors.New("in use by another AgentAPI")
+
+// Schema returns the newest schema this AgentAPI knows: it migrates an
+// older database to it.
+func Schema() int { return len(migrations) }
+
+// Check reports why this AgentAPI couldn't open the database at path,
+// without changing it or making a file: it reads it as it is, and doesn't
+// migrate it. A missing file is fine, since Open creates it. A file with a
+// write-ahead log is open in another AgentAPI, or one that didn't close it:
+// what it holds is only known once opened, so the error wraps ErrInUse.
+func Check(path string) error {
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("state database: %w", err)
+	}
+	// An AgentAPI that has the file open keeps a -wal file next to it,
+	// which closing it removes.
+	if _, err := os.Stat(path + "-wal"); err == nil {
+		return fmt.Errorf("state database %s has a write-ahead log: it is %w, or wasn't closed", path, ErrInUse)
+	}
+	// immutable: without locks, a -wal or a -shm file.
+	sqlDB, err := sql.Open("sqlite", fileURI(path)+"?mode=ro&immutable=1")
+	if err != nil {
+		return fmt.Errorf("state database %s: %w", path, err)
+	}
+	defer func() { _ = sqlDB.Close() }()
+	var schema int
+	if err := sqlDB.QueryRow("PRAGMA user_version").Scan(&schema); err != nil {
+		return fmt.Errorf("state database %s: %w", path, err)
+	}
+	if schema <= len(migrations) {
+		return nil
+	}
+	if err := checkWriter(sqlDB, schema, len(migrations), version.Version); err != nil {
+		return fmt.Errorf("state database %s: %w", path, err)
+	}
+	return nil
+}
+
+// CheckWriter returns an error unless an AgentAPI, release program, that
+// knows schemas up to knows may write the open database (see Schema): one
+// that would start with it, as a restart in place into another program
+// does.
+func (d *DB) CheckWriter(knows int, program string) error {
+	var schema int
+	if err := d.db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil {
+		return fmt.Errorf("read state database version: %w", err)
+	}
+	if schema <= knows {
+		return nil
+	}
+	return checkWriter(d.db, schema, knows, program)
 }
 
 // migrateTo runs the migration to version, and records the version and the
