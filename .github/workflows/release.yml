@@ -106,6 +106,21 @@ jobs:
 
           ./out/agentapi-linux-amd64 --version
 
+          # Each asset is built for its platform: the build settings Go
+          # records in it name the GOOS and GOARCH.
+          for variant in "${build_variants[@]}"; do
+            read -r goos goarch artifact_name <<< "$variant"
+            file "out/$artifact_name"
+            settings=$(go version -m "out/$artifact_name")
+            for want in "GOOS=$goos" "GOARCH=$goarch"; do
+              if ! grep -qxF $'\tbuild\t'"$want" <<< "$settings"; then
+                echo "::error::out/$artifact_name isn't built with $want"
+                echo "$settings"
+                exit 1
+              fi
+            done
+          done
+
           (
             cd out
             sha256sum agentapi-* > checksums.txt
