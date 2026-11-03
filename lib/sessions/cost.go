@@ -462,15 +462,32 @@ func (sc *sessionCost) ownCalls(owner map[string]*sessionCost) []ModelCall {
 		return sc.calls
 	}
 	var own []ModelCall
+	// first and last are the calls own holds while they follow each other
+	// in calls, as a fork's own calls follow those it copied: own is then
+	// a part of calls rather than a copy.
+	first, last := -1, -1
 	counted := make(map[string]bool)
-	for _, call := range sc.calls {
+	for i, call := range sc.calls {
 		if call.key != "" {
 			if owner[call.key] != sc || counted[call.key] {
 				continue
 			}
 			counted[call.key] = true
 		}
-		own = append(own, call)
+		switch {
+		case first < 0:
+			first, last = i, i+1
+		case own == nil && i == last:
+			last++
+		default:
+			if own == nil {
+				own = slices.Clone(sc.calls[first:last])
+			}
+			own = append(own, call)
+		}
+	}
+	if own == nil && first >= 0 {
+		return sc.calls[first:last:last]
 	}
 	return own
 }
@@ -551,7 +568,7 @@ func (s *Store) costLogs() ([]string, func(id, path string) []Subagent, error) {
 // model without a price is logged once, the first time a call of it is.
 func (s *Store) price(c agentlog.Call) ModelCall {
 	call := priced(ModelCall{
-		Time: c.Time, Model: c.Model, Tokens: c.Tokens,
+		Time: c.Time, Model: s.intern(c.Model), Tokens: c.Tokens,
 		report: c.Report, key: c.Key, cost: c.Cost,
 	}, s.prices)
 	if !call.Priced && call.report == nil && call.Model != "" {
@@ -561,6 +578,21 @@ func (s *Store) price(c agentlog.Call) ModelCall {
 		}
 	}
 	return call
+}
+
+// intern returns model, the one copy of the name the store keeps: a long
+// session makes tens of thousands of calls, to a few models.
+func (s *Store) intern(model string) string {
+	s.modelsMu.Lock()
+	defer s.modelsMu.Unlock()
+	if name, ok := s.models[model]; ok {
+		return name
+	}
+	if s.models == nil {
+		s.models = make(map[string]string)
+	}
+	s.models[model] = model
+	return model
 }
 
 // priced returns call with its cost at prices, or at what the agent said.

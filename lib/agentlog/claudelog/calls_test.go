@@ -3,6 +3,7 @@ package claudelog
 import (
 	"strconv"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -107,4 +108,30 @@ func TestPreamble(t *testing.T) {
 	} {
 		assert.Equal(t, want, Preamble([]byte(line)), line)
 	}
+}
+
+// Calls keeps only the calls a later line can change, the recent ones,
+// once Changed returned them, and shares the model name between calls.
+func TestCallsKeepTheRecentOnes(t *testing.T) {
+	t.Parallel()
+	c := NewCalls(nil)
+	call := func(id string, output int) []byte {
+		return []byte(`{"type":"assistant","timestamp":"2026-10-20T10:00:00Z","message":{"id":"` + id + `","model":"claude-opus-5-5","usage":{"input_tokens":3,"output_tokens":` + strconv.Itoa(output) + `}}}`)
+	}
+	for i := range 1000 {
+		c.Line(call("m"+strconv.Itoa(i), 5))
+	}
+	from, calls := c.Changed()
+	assert.Zero(t, from)
+	require.Len(t, calls, 1000)
+	assert.Equal(t, unsafe.StringData(calls[0].Model), unsafe.StringData(calls[999].Model), "one model name")
+	assert.LessOrEqual(t, c.Size(), 512+recentCalls*agentlog.CallSize)
+
+	// A recent call's later line changes it.
+	c.Line(call("m990", 9))
+	from, calls = c.Changed()
+	assert.Equal(t, 990, from)
+	require.Len(t, calls, 10)
+	assert.Equal(t, 9, calls[0].Tokens.Output)
+	assert.Equal(t, "claude:m999", calls[9].Key)
 }

@@ -650,3 +650,23 @@ func TestModelPricedByAllItsCalls(t *testing.T) {
 	require.Len(t, total.Models, 2)
 	assert.False(t, total.Models[1].Priced)
 }
+
+// A fork's own calls follow those it copied: they are a part of its calls,
+// not a copy; calls of another session among them make a copy.
+func TestOwnCallsShareTheCalls(t *testing.T) {
+	t.Parallel()
+	parent, fork := &sessionCost{}, &sessionCost{}
+	call := func(key string) ModelCall { return ModelCall{Model: "m", key: key} }
+	fork.calls = []ModelCall{call("a"), call("b"), call("c"), call(""), call("d")}
+	owner := map[string]*sessionCost{"a": parent, "b": parent, "c": fork, "d": fork}
+	own := fork.ownCalls(owner)
+	require.Len(t, own, 3)
+	assert.Same(t, &fork.calls[2], &own[0], "shared")
+	assert.Equal(t, 3, cap(own), "appending to it leaves the calls alone")
+
+	owner["c"] = parent
+	owner["b"] = fork
+	own = fork.ownCalls(owner)
+	assert.Equal(t, []string{"b", "", "d"}, []string{own[0].key, own[1].key, own[2].key})
+	assert.NotSame(t, &fork.calls[1], &own[0], "a copy")
+}

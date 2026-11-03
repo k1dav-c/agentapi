@@ -52,6 +52,9 @@ type Store struct {
 	readers atomic.Uint64
 	// unpriced holds the models without a price that were logged.
 	unpriced sync.Map
+	// models holds the names of the models called, by themselves (intern).
+	modelsMu sync.Mutex
+	models   map[string]string
 
 	mu sync.Mutex
 	// paths finds the log of a session by its ID, as the logs read so far
