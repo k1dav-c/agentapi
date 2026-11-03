@@ -7,6 +7,8 @@ import (
 	"context"
 	"io"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -178,6 +180,12 @@ func TestCombinedOutput(t *testing.T) {
 func gone(pid int) bool {
 	if syscall.Kill(pid, 0) != nil {
 		return true
+	}
+	if runtime.GOOS != "linux" {
+		// macOS has no /proc; ps prints nothing for a pid that's gone.
+		out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+		state := strings.TrimSpace(string(out))
+		return err != nil || state == "" || strings.HasPrefix(state, "Z")
 	}
 	stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if err != nil {
