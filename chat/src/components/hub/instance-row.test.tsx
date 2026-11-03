@@ -91,3 +91,19 @@ describe("InstanceRow among the pinned ones", () => {
     expect(html).not.toContain("Pinned");
   });
 });
+
+describe("InstanceRow's work time", () => {
+  test("the last 24 hours, with the span going on, while it worked this week", () => {
+    const working: HubInstance = {...finished, state: "working", work: {last_24h_seconds: 1800, last_7d_seconds: 7200, working_since: "2026-11-01T09:30:00Z"}};
+    const html = row("groups", working);
+    expect(html).toContain("Worked 1h in the last 24 hours, 2.5h in the last 7 days (as the hub saw it)");
+    expect(html).toContain('<span aria-hidden="true">1h</span>');
+    expect(row("groups")).not.toContain("data-hub-work");
+    expect(row("groups", {...finished, work: {last_24h_seconds: 0, last_7d_seconds: 0}})).not.toContain("data-hub-work");
+    // A usage limit's bar takes the room.
+    const limited = {...working, summary: {...finished.summary, usage: {rate_limits: [{used_percent: 80}]}} as Summary};
+    const limitedRow = row("groups", limited);
+    expect(limitedRow).toContain("Usage limit 80% used");
+    expect(limitedRow).not.toContain("data-hub-work");
+  });
+});

@@ -1,7 +1,7 @@
 "use client";
 
 import {memo, useState} from "react";
-import {ArrowDown, ArrowUp, Bell, BellOff, ChevronRight, Folder, FolderPlus, MoreHorizontal, Pencil, Pin, PinOff, Trash2} from "lucide-react";
+import {ArrowDown, ArrowUp, Bell, BellOff, ChevronRight, Folder, FolderPlus, MoreHorizontal, Pencil, Pin, PinOff, Timer, Trash2} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {Button} from "@/components/ui/button";
 import {
@@ -15,7 +15,24 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {agentDisplayName, parseAgentType} from "@/lib/agents";
-import {activity, displayName, formatAgo, formatUSD, instanceState, instanceVersion, olderThanHub, spendTitle, spendTotals, stateLabel, usagePercent, type HubGroup, type HubInstance} from "@/lib/hub";
+import {
+  activity,
+  displayName,
+  formatAgo,
+  formatUSD,
+  formatWork,
+  instanceState,
+  instanceVersion,
+  olderThanHub,
+  spendTitle,
+  spendTotals,
+  stateLabel,
+  usagePercent,
+  workSeconds,
+  workTitle,
+  type HubGroup,
+  type HubInstance,
+} from "@/lib/hub";
 import {changedAt, type ListOrder} from "@/lib/hub-order";
 import {shownUpdate, updateBadge} from "@/lib/hub-update";
 import {cn} from "@/lib/utils";
@@ -93,6 +110,7 @@ export const InstanceRow = memo(function InstanceRow({instance, hubVersion, root
   const state = instanceState(instance);
   const summary = instance.summary;
   const usage = usagePercent(summary);
+  const usageShown = usage !== undefined && usage >= 60;
   const agent = agentName(instance);
   const doing = activity(instance);
   const recent = order === "recent";
@@ -167,10 +185,12 @@ export const InstanceRow = memo(function InstanceRow({instance, hubVersion, root
                   </span>
                 </span>
               )}
+              {/* The usage limit's bar needs the room more. */}
+              {!usageShown && <RowWork instance={instance} />}
               {summary && summary.queued_messages > 0 && (
                 <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-medium text-foreground/80">{summary.queued_messages} queued</span>
               )}
-              {usage !== undefined && usage >= 60 && (
+              {usageShown && (
                 <span className="ml-auto pl-1">
                   <UsageBar percent={usage} />
                 </span>
@@ -313,6 +333,27 @@ export function GroupHeader({group, label, folded, onToggle, onRename}: {group: 
         )}
       </div>
     </div>
+  );
+}
+
+// RowWork is how long the instance worked in the last 24 hours, as the hub
+// saw it, while it worked in the last 7 days: a timer and the figure. The
+// machine's name gives way to it. It reads the hub's clock for
+// the span going on: it renders again when its figure changes, the row
+// doesn't.
+function RowWork({instance}: {instance: HubInstance}) {
+  const title = useHubTime((now) => {
+    const seconds = workSeconds(instance, now);
+    return seconds.week > 0 ? workTitle(seconds.day, seconds.week) : "";
+  });
+  const day = useHubTime((now) => formatWork(workSeconds(instance, now).day));
+  if (!title) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 tabular-nums" title={title} data-hub-work>
+      <span className="sr-only">{title}</span>
+      <Timer aria-hidden="true" className="size-3 text-muted-foreground/70" />
+      <span aria-hidden="true">{day}</span>
+    </span>
   );
 }
 

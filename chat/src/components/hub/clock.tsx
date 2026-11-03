@@ -28,7 +28,7 @@ export function FixedHubClock({now, children}: {now: number; children: ReactNode
 const stopped = new Store(0);
 
 // useHubTime returns select of the time now; the component renders again
-// only when what it returns changes. Outside a clock the time is 0.
-export function useHubTime<S>(select: (now: number) => S): S {
-  return useStoreSelector(useContext(HubClockContext) ?? stopped, select);
+// only when what it returns changes (isEqual). Outside a clock the time is 0.
+export function useHubTime<S>(select: (now: number) => S, isEqual?: (a: S, b: S) => boolean): S {
+  return useStoreSelector(useContext(HubClockContext) ?? stopped, select, isEqual);
 }

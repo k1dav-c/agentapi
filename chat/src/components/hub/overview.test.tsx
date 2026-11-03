@@ -1,7 +1,8 @@
 import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
 import type {HubInstance, InstanceUpdate, Summary} from "@/lib/hub";
-import {VersionsCard} from "./overview";
+import {FixedHubClock} from "./clock";
+import {VersionsCard, WorkCard} from "./overview";
 
 const running = (id: string, version: string, hostname: string, overrides: Partial<HubInstance> = {}): HubInstance => ({
   id,
@@ -115,5 +116,36 @@ describe("VersionsCard", () => {
     );
     expect(text(html)).toContain("2 updating now.");
     expect(html).not.toContain("Update the older ones");
+  });
+});
+
+describe("WorkCard", () => {
+  const now = Date.parse("2026-11-03T12:00:00Z");
+  const card = (instances: HubInstance[]) =>
+    renderToStaticMarkup(
+      <FixedHubClock now={now}>
+        <WorkCard instances={instances} onOpen={() => {}} />
+      </FixedHubClock>,
+    );
+
+  test("totals, the agents that worked the most and each group, with the span going on", () => {
+    const shown = text(
+      card([
+        running("a", "2.5.0", "dev-1", {name: "checkout-api", group: "Client work", work: {last_24h_seconds: 1800, last_7d_seconds: 4 * 3600}}),
+        running("b", "2.5.0", "dev-2", {name: "billing", state: "working", work: {last_24h_seconds: 0, last_7d_seconds: 3600, working_since: "2026-11-03T11:00:00Z"}}),
+        running("c", "2.5.0", "dev-3", {name: "docs", connection: "stopped", state: "stopped", group: "Client work", work: {last_24h_seconds: 0, last_7d_seconds: 600}}),
+        running("d", "2.4.0", "dev-4", {name: "older hub"}),
+      ]),
+    );
+    expect(shown).toContain("Last 24 hours 1.5h Last 7 days 6.1h");
+    expect(shown).toContain("3 of 4 agents worked this week");
+    expect(shown).toContain("Worked the most this week 24 hours 7 days checkout-api 30m 4h billing 1h 2h docs 0m 10m");
+    expect(shown).toContain("By group 24 hours 7 days Client work 30m 4.1h Ungrouped 1h 2h");
+  });
+
+  test("nothing without work time, and no groups when none is named", () => {
+    expect(card([running("a", "2.4.0", "dev-1")])).toBe("");
+    const shown = text(card([running("a", "2.5.0", "dev-1", {work: {last_24h_seconds: 60, last_7d_seconds: 60}})]));
+    expect(shown).not.toContain("By group");
   });
 });
