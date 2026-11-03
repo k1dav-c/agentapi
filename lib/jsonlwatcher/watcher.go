@@ -257,9 +257,6 @@ func (t *tailReader) Line(line []byte) bool {
 	return true
 }
 
-// Size is about how many bytes of memory the reader holds.
-func (t *tailReader) Size() int { return 8*len(t.read) + 32*len(t.before) }
-
 // processLine delegates parsing to the LineParser and handles completed messages.
 func (w *Watcher) processLine(line []byte) {
 	if w.onLine != nil {
