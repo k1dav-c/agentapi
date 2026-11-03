@@ -317,16 +317,30 @@ func (h *harness) write(record string) {
 	require.NoError(h.t, err)
 }
 
-// settle waits until the adapter handled every line written.
+// settle waits until the adapter handled every line written and the event
+// loop set its timer after the last one.
 func (h *harness) settle() {
 	h.t.Helper()
 	require.Eventually(h.t, func() bool { return h.handled.Load() >= h.written.Load() }, 5*time.Second, time.Millisecond)
+	h.syncLoop()
+}
+
+// syncLoop waits until the event loop finished what it was doing, setting
+// its timer included. The host sets the timer from NextWake after each line
+// or posted function, and the test sees lineHandled, a runOnLoop function
+// or a call that posts (Interrupt) return before that: a clock advanced in
+// between would schedule the timer from the advanced time, past the
+// deadline the loop asked for. A function the loop runs comes after the
+// iteration before it, timer included. A loop that stopped has no timer.
+func (h *harness) syncLoop() {
+	_ = h.a.runOnLoop(func() {})
 }
 
 // advance moves the clock on by d and waits until the event loop ran what
-// the timers that fired posted to it.
+// the timers that fired posted to it, and set its timer again.
 func (h *harness) advance(d time.Duration) {
 	h.t.Helper()
+	h.syncLoop()
 	ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
 	defer cancel()
 	h.clock.Advance(d).MustWait(ctx)
