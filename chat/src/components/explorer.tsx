@@ -24,6 +24,7 @@ import {
 import {Tabs, TabsContent, TabsList, TabsTrigger} from "./ui/tabs";
 import {WebhookSettings} from "./webhook-settings";
 import {SessionHistory} from "./session-history";
+import {Empty} from "./explorer-empty";
 
 interface ExplorerProps {
   onNavigateTask: (number: number) => void;
@@ -289,8 +290,4 @@ export function Explorer({onNavigateTask}: ExplorerProps) {
       </DialogContent>
     </Dialog>
   );
-}
-
-export function Empty({text}: {text: string}) {
-  return <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">{text}</p>;
 }

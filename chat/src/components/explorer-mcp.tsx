@@ -6,7 +6,7 @@ import {toast} from "sonner";
 import {downloadFile} from "@/lib/download";
 import {editableMCPServers} from "@/lib/mcp-sample";
 import {useChatActions} from "./chat-provider";
-import {Empty} from "./explorer";
+import {Empty} from "./explorer-empty";
 import {Button} from "./ui/button";
 
 // useMCPSettings is the state of the Explorer's MCP tab: the server map
