@@ -390,17 +390,10 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 	} else if req.Title != strings.TrimSpace(p.Message) {
 		req.Detail = p.Message
 	}
-	// An MCP tool call waiting for approval: the latest open call of that
-	// server in the turn.
-	if s.turn != nil {
-		for i := len(s.turn.order) - 1; i >= 0; i-- {
-			state := s.turn.order[i]
-			if state.kind == "mcpToolCall" && !state.done && state.server == p.ServerName {
-				req.ToolUseID, req.ToolName, req.Input = state.id, state.blk.ToolName, state.blk.ToolInput
-				r.toolUseID = state.id
-				break
-			}
-		}
+	// An MCP tool call waiting for approval.
+	if state := s.openMCPCall(p.ServerName); state != nil {
+		req.ToolUseID, req.ToolName, req.Input = state.id, state.blk.ToolName, state.blk.ToolInput
+		r.toolUseID = state.id
 	}
 
 	var properties map[string]mcpElicitationProperty
@@ -431,17 +424,7 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 	default:
 		// A form: one question per field, answered with accept + content.
 		req.Kind = native.RequestKindQuestion
-		r.form = map[string]formField{}
-		names := make([]string, 0, len(properties))
-		for name := range properties {
-			names = append(names, name)
-		}
-		slices.Sort(names)
-		for _, name := range names {
-			q, field := formQuestion(name, properties[name])
-			req.Questions = append(req.Questions, q)
-			r.form[name] = field
-		}
+		req.Questions, r.form = formQuestions(properties)
 		r.questions = req.Questions
 	}
 	addOption(&req, r, native.RequestOption{ID: "decline", Label: "Deny", Kind: native.OptionKindDeny},
@@ -449,6 +432,38 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 	addOption(&req, r, native.RequestOption{ID: "cancel", Label: "Cancel", Kind: native.OptionKindCancel},
 		mcpServerElicitationResponse{Action: "cancel"})
 	return r, req, true
+}
+
+// openMCPCall returns the latest MCP tool call of server in the turn that
+// is still open, or nil.
+func (s *loopState) openMCPCall(server string) *itemState {
+	if s.turn == nil {
+		return nil
+	}
+	for i := len(s.turn.order) - 1; i >= 0; i-- {
+		state := s.turn.order[i]
+		if state.kind == "mcpToolCall" && !state.done && state.server == server {
+			return state
+		}
+	}
+	return nil
+}
+
+// formQuestions asks one question per field of a form, by field name.
+func formQuestions(properties map[string]mcpElicitationProperty) ([]native.Question, map[string]formField) {
+	form := map[string]formField{}
+	names := make([]string, 0, len(properties))
+	for name := range properties {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	var questions []native.Question
+	for _, name := range names {
+		q, field := formQuestion(name, properties[name])
+		questions = append(questions, q)
+		form[name] = field
+	}
+	return questions, form
 }
 
 func formQuestion(name string, prop mcpElicitationProperty) (native.Question, formField) {
