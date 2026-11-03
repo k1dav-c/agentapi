@@ -705,26 +705,7 @@ func (s *loopState) completeTurn(tr turn) {
 	if interrupting && status == "completed" {
 		status = "interrupted"
 	}
-	result := native.TurnResult{StopReason: native.StopReasonEndTurn}
-	switch status {
-	case "interrupted":
-		result.StopReason = native.StopReasonInterrupted
-	case "failed":
-		result.StopReason = native.StopReasonError
-		result.Error = t.lastError
-		if tr.Error != nil {
-			result.Error = turnErrorText(tr.Error)
-			if isAuthError(tr.Error) {
-				s.reportLogin(t)
-			}
-		}
-		if result.Error == "" {
-			result.Error = "The Codex turn failed"
-		}
-		if isLimitError(tr.Error) || (tr.Error == nil && native.IsLimitError(result.Error)) {
-			result.StopReason = native.StopReasonLimited
-		}
-	}
+	result := s.turnResult(t, tr, status)
 	s.closeOpenItems(t, status)
 	s.closeTurnRequests()
 
@@ -746,16 +727,47 @@ func (s *loopState) completeTurn(tr turn) {
 	}
 
 	s.turn = nil
-	s.ended = append(s.ended, t.id)
-	if len(s.ended) > endedTurns {
-		s.ended = s.ended[1:]
-	}
+	s.rememberEnded(t.id)
 	if status == "completed" && strings.TrimSpace(t.plan) != "" {
 		// The turn goes on once the user decides about the plan.
 		s.awaitPlanDecision(t)
 		return
 	}
 	s.sink().TurnCompleted(result)
+}
+
+// turnResult is how turn t ended, with status. A login failure is
+// reported on the way.
+func (s *loopState) turnResult(t *turnState, tr turn, status string) native.TurnResult {
+	result := native.TurnResult{StopReason: native.StopReasonEndTurn}
+	switch status {
+	case "interrupted":
+		result.StopReason = native.StopReasonInterrupted
+	case "failed":
+		result.StopReason = native.StopReasonError
+		result.Error = t.lastError
+		if tr.Error != nil {
+			result.Error = turnErrorText(tr.Error)
+			if isAuthError(tr.Error) {
+				s.reportLogin(t)
+			}
+		}
+		if result.Error == "" {
+			result.Error = "The Codex turn failed"
+		}
+		if isLimitError(tr.Error) || (tr.Error == nil && native.IsLimitError(result.Error)) {
+			result.StopReason = native.StopReasonLimited
+		}
+	}
+	return result
+}
+
+// rememberEnded remembers the turn id ended, of the last endedTurns.
+func (s *loopState) rememberEnded(id string) {
+	s.ended = append(s.ended, id)
+	if len(s.ended) > endedTurns {
+		s.ended = s.ended[1:]
+	}
 }
 
 // closeOpenItems finalizes the items of t that never completed: text keeps
