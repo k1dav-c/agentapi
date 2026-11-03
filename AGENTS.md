@@ -46,8 +46,7 @@ Use these commands and conventions when changing AgentAPI.
 ## Architecture
 
 AgentAPI is a Go HTTP server for controlling Claude Code, Codex and Pi through their structured
-protocols (the native transport). AgentAPI 2's PTY transport, which parsed other agents' terminal
-output, is gone; v2.5.1 is its last release.
+protocols (the native transport).
 
 ### Core components
 
@@ -58,7 +57,10 @@ output, is gone; v2.5.1 is its last release.
 - `lib/webhook/` - Webhooks that push events (tasks, requests, messages, heartbeats) to a receiver: delivery, and the observer that reads the emitter
 - `lib/workspacefs/` - The file viewer's reads of the working directory: content, diff through git, HTML preview, images, find
 - `lib/conversation/` - Shared messages, status, and the `Emitter` interface (imported as `conv`)
-- `lib/native/` - Native transport: one adapter per agent (`claude/`, `codex/`, `pi/`) driving its structured protocol, a conversation that starts an agent that exits on its own again, `agentio/` for the process, its loop and the JSON-lines plumbing they share, `procutil/` for the child process, `nativetest/` for tests
+- `lib/native/` - Native transport: one adapter per agent (`claude/`, `codex/`, `pi/`, and the simulated `demo/`) driving its structured protocol, a conversation that starts an agent that exits on its own again, `agentio/` for the process, its loop and the JSON-lines plumbing they share, `procutil/` for the child process, `nativetest/` for tests
+- `lib/procenv/` - The environment of the agent and the terminal's shell, without the variables of an agent session AgentAPI runs in and AgentAPI's secrets
+- `lib/transcript/` - The types of the structured transcript: rich messages and timeline events
+- `lib/agenthome/` - The directories the agents keep their state in (`$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$PI_CODING_AGENT_DIR` or their defaults)
 - `lib/agentlog/` - The agents' session-log formats, one package per agent (`claudelog`, `codexlog`, `pilog`), shared by the native adapters and `lib/sessions`
 - `lib/sessions/` - Earlier sessions, subagents and their costs, read incrementally from the logs
 - `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation; `scripts/prices.mjs` compares `prices.json` with Pi's model registry
@@ -71,6 +73,12 @@ output, is gone; v2.5.1 is its last release.
 - `lib/registry/` - The registry of the AgentAPIs running on a machine (`~/.agentapi/instances`), which `agentapi list` reads
 - `lib/atomicfile/` - Replaces a file at once, synced so a crash leaves the old data or the new (settings, registry entries, the hub's file)
 - `lib/selfupdate/` - Installs the latest release in place of the program (`agentapi update`, `POST /update`): the GitHub lookup, the binary for the platform, checksum verification and the rename under a lock file; whether the user can replace the program (`Program.Blocked`)
+- `lib/shellterm/` - The shared shell terminal (`GET /terminal`)
+- `lib/htmlpreview/` - An HTML file as a page that shows by itself, for the file viewer's preview
+- `lib/handoff/` - The types of the human reply protocol (`GET /handoff`, `POST /handoff/reply`)
+- `lib/filelock/` - An exclusive file lock, taken in turn by AgentAPIs on one machine that update the program or an agent CLI
+- `lib/logctx/` - The logger in a `context.Context`, and `--log-level` parsing
+- `lib/util/` - `OpenAPISchema`, which registers a string type's values as an enum in the OpenAPI schema
 - `chat/` - Next.js web UI (embedded into Go binary)
 - `skills/` - Agent skills for users of AgentAPI, such as `agentapi-hub-join` (an agent joins its machine to a hub); installed into `~/.claude/skills/`, not used to work on this repository
 
