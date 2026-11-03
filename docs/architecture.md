@@ -242,7 +242,7 @@ conversations; `nativeBackend` drives native conversations.
 // lib/conversation (imported as conv)
 type Conversation interface {
 	Messages() []Message
-	Send(...MessagePart) error
+	Send(ctx context.Context, parts ...MessagePart) error
 	Start(context.Context)
 	Status() Status // initializing, changing or stable
 	Reset(forget func()) // forget runs once no snapshot of the old conversation can reach the Emitter
@@ -557,7 +557,10 @@ during a restart.
 Rejected messages get up to 5 attempts. Messages that might be delivered twice are dropped
 immediately: a native write without confirmation (`native.ErrUnconfirmed`, caused by timeout,
 cancellation or agent exit), or a PTY message typed but not submitted. Native stdin writes end with
-the call's context, so an agent that stops reading can't hold `s.mu`.
+the call's context, so an agent that stops reading can't hold `s.mu`. A PTY `Send` ends within
+`ptySendTimeout` (1 minute) or when AgentAPI stops: a message still waiting for a stable screen is
+withdrawn untyped (`ErrMessageValidationChanging`, so it stays queued), and one being typed is cut
+short.
 
 Native messages can also steer or interrupt a running turn. Queue changes reach the emitter as
 `queue_update` events outside the queue lock, with versions to discard late reports of older changes.

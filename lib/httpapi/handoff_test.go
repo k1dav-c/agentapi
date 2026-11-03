@@ -28,7 +28,7 @@ type handoffConversation struct {
 }
 
 func (c *handoffConversation) Messages() []conv.Message { return nil }
-func (c *handoffConversation) Send(p ...conv.MessagePart) error {
+func (c *handoffConversation) Send(_ context.Context, p ...conv.MessagePart) error {
 	c.sends++
 	c.parts = append(c.parts, p)
 	return nil
@@ -133,7 +133,7 @@ func TestHandoffReplyDeduplicatesAndInvalidates(t *testing.T) {
 // protocol offered its last message: it takes no message.
 type busyConversation struct{ handoffConversation }
 
-func (c *busyConversation) Send(...conv.MessagePart) error {
+func (c *busyConversation) Send(context.Context, ...conv.MessagePart) error {
 	c.sends++
 	return conv.ErrMessageValidationChanging
 }
@@ -363,7 +363,7 @@ func TestQueueNotBlockedByQuestionFarUpInScrollback(t *testing.T) {
 
 type notSubmittedConversation struct{ handoffConversation }
 
-func (c *notSubmittedConversation) Send(...conv.MessagePart) error {
+func (c *notSubmittedConversation) Send(context.Context, ...conv.MessagePart) error {
 	c.sends++
 	return fmt.Errorf("failed to send message: %w", conv.ErrMessageNotSubmitted)
 }
@@ -579,4 +579,47 @@ func TestFormatMessageClosesClaudeFileSuggestions(t *testing.T) {
 
 func isTerminalQuestion(content string) bool {
 	return isTerminalQuestionText(content, strings.ToLower(content))
+}
+
+// hangingConversation is a terminal agent whose screen never settles: a
+// message waits until the Send's context ends.
+type hangingConversation struct {
+	handoffConversation
+	sending  chan struct{}
+	deadline time.Time
+}
+
+func (c *hangingConversation) Send(ctx context.Context, _ ...conv.MessagePart) error {
+	c.deadline, _ = ctx.Deadline()
+	close(c.sending)
+	<-ctx.Done()
+	return fmt.Errorf("%w: %w", conv.ErrMessageValidationChanging, ctx.Err())
+}
+
+// A message to a terminal agent, sent holding s.mu, ends with AgentAPI
+// (and within ptySendTimeout): Stop can take s.mu.
+func TestPTYSendEndsWithTheServer(t *testing.T) {
+	s, _, _ := handoffServer()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.shutdownCtx = ctx
+	c := &hangingConversation{handoffConversation: handoffConversation{status: conv.StatusStable}, sending: make(chan struct{})}
+	s.conversation = c
+	s.queue.Push("go on", time.Now(), false)
+	done := make(chan struct{})
+	go func() {
+		s.dispatchNextQueuedMessage()
+		close(done)
+	}()
+	<-c.sending
+	assert.WithinDuration(t, time.Now().Add(ptySendTimeout), c.deadline, 5*time.Second)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the send didn't end with the server")
+	}
+	require.True(t, s.mu.TryLock())
+	s.mu.Unlock()
+	assert.Len(t, s.queue.Messages(), 1, "it goes out after the restart")
 }
