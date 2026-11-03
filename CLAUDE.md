@@ -41,7 +41,10 @@ cd chat && bun test                     # Run the chat UI tests
 
 Use `CGO_ENABLED=0` for tests. The project uses `testify` (assert/require) and `coder/quartz` for
 deterministic time mocking. Tests are colocated with source files. E2E tests in `e2e/` use a
-scripted echo agent that simulates real agent behavior.
+scripted echo agent that simulates real agent behavior on the PTY transport, and `e2e/fakeclaude`, a
+scripted Claude Code, on the native transport. CI also runs `CGO_ENABLED=1 go test -race ./lib/...
+./cmd/...`, every test on macOS, and on Windows builds every test and runs those of the packages with
+Windows code.
 
 ## Architecture
 

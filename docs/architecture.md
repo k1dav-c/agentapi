@@ -110,7 +110,7 @@ answers write keys directly to the agent's terminal.
 | `lib/logctx/`, `lib/util/` | Context-based logging and shared helpers |
 | `internal/version/` | The version, stamped at build time |
 | `chat/` | The chat UI (Next.js) |
-| `e2e/` | End-to-end tests against a scripted echo agent |
+| `e2e/` | End-to-end tests against a scripted echo agent (PTY) and a scripted Claude Code (native) |
 
 ## Startup and shutdown
 
@@ -878,10 +878,16 @@ is the hub's page (`components/hub-view.tsx`, its parts in `components/hub/`, it
   parity tests that compare their rich messages with what the session-log
   parsers produce. `nativetest` provides a fake adapter for the conversation
   and HTTP tests.
-- `e2e/` runs the server against a scripted echo agent.
+- `e2e/` runs the server binary against a scripted echo agent (PTY) and
+  `e2e/fakeclaude`, a scripted Claude Code (native), through a restart in
+  place.
 - `golangci-lint` (including the exhaustive check over enums),
   `paralleltestctx` and `make gen` (the OpenAPI schema must match the code)
-  run in CI; the chat has eslint, `bun test` and `tsc`.
+  run in CI; the chat has eslint, `bun test` and `tsc`. CI also runs the
+  tests of `lib/` and `cmd/` with the race detector, every test on macOS,
+  and on Windows builds every test and runs those of the packages with
+  Windows code. The release checks that each binary is built for its
+  platform.
 
 ## Design principles
 

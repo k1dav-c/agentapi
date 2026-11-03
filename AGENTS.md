@@ -26,6 +26,8 @@ Use these commands and conventions when changing AgentAPI.
 ## Testing
 
 - `CGO_ENABLED=0 go test ./...` - Run all Go tests (CI runs them with `CGO_ENABLED=0`)
+- `CGO_ENABLED=1 go test -race ./lib/... ./cmd/...` - Run them with the race detector, as CI does
+- `go test ./e2e` - Run the end-to-end tests: the server binary with a scripted echo agent (PTY) and `e2e/fakeclaude`, a scripted Claude Code (native)
 - `cd chat && bun test` - Run the chat UI tests
 - Tests are located alongside source files (e.g., `lib/httpapi/server_test.go`)
 

@@ -108,7 +108,7 @@ flowchart TB
 | `lib/logctx/`、`lib/util/` | 透過 context 傳遞的 logger 與共用輔助函式 |
 | `internal/version/` | 版本號，建置時寫入 |
 | `chat/` | 聊天介面（Next.js） |
-| `e2e/` | 以腳本化 echo agent 進行的端對端測試 |
+| `e2e/` | 以腳本化 echo agent（PTY）和腳本化 Claude Code（native）進行的端對端測試 |
 
 ## 啟動與關閉
 
@@ -685,9 +685,12 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 - Native adapter 有模擬 agent 行程的測試骨架、以真實 CLI 的去識別化擷取資料建立的重播測試
   （`testdata/`），以及把它們的結構化訊息和工作階段紀錄解析器的結果相比對的一致性測試。
   `nativetest` 為對話與 HTTP 測試提供假 adapter。
-- `e2e/` 以腳本化的 echo agent 測試伺服器。
+- `e2e/` 以腳本化的 echo agent（PTY）和腳本化的 Claude Code `e2e/fakeclaude`（native）測試
+  伺服器執行檔，包括原地重新啟動。
 - CI 執行 `golangci-lint`（包含對列舉的 exhaustive 檢查）、`paralleltestctx` 和 `make gen`
-  （OpenAPI schema 必須和程式碼一致）；聊天介面有 eslint、`bun test` 和 `tsc`。
+  （OpenAPI schema 必須和程式碼一致）；聊天介面有 eslint、`bun test` 和 `tsc`。CI 也以 race
+  detector 執行 `lib/` 和 `cmd/` 的測試，在 macOS 上執行所有測試，在 Windows 上建置所有測試，
+  並執行含 Windows 程式碼的套件的測試。發行時會檢查每個執行檔都是為對應平台建置的。
 
 ## 設計原則
 
