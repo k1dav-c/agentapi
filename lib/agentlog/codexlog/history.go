@@ -70,23 +70,15 @@ func ScanForked(id string, before int64, fn func(line []byte) bool) bool {
 	if !found {
 		return true
 	}
-	stopped := false
-	scanFork(parent, before, 1, func(line []byte) bool {
-		if !fn(line) {
-			stopped = true
-			return false
-		}
-		return true
-	})
-	return !stopped
+	return scanUntilStopped(parent, before, 1, fn)
 }
 
 // scanFork reads the log at path up to the line numbered before (every
 // line when negative); depth counts the forks followed. Only the first
 // log's session_meta line is passed on.
 func scanFork(path string, before int64, depth int, fn func(line []byte) bool) bool {
-	first, stopped := true, false
-	ok := agentlog.ScanFile(path, func(line []byte) bool {
+	first := true
+	return agentlog.ScanFile(path, func(line []byte) bool {
 		var entry struct {
 			Ordinal *int64 `json:"ordinal"`
 			Type    string `json:"type"`
@@ -101,45 +93,38 @@ func scanFork(path string, before int64, depth int, fn func(line []byte) bool) b
 		}
 		isMeta := first && entry.Type == "session_meta"
 		first = false
-		if isMeta && depth > 0 {
+		switch {
+		case !isMeta:
+			return fn(line)
+		case depth > 0:
 			// The forked thread's meta: the fork's own came first.
 			return true
-		}
-		if isMeta {
-			if !fn(line) {
-				stopped = true
-				return false
-			}
-		}
-		if isMeta && entry.Payload.ForkedFromID != "" && depth < maxForkDepth {
-			if parent, found := LogOf(entry.Payload.ForkedFromID); found {
-				limit := int64(-1)
-				if entry.Payload.ForkedBefore != nil {
-					limit = *entry.Payload.ForkedBefore
-				}
-				scanFork(parent, limit, depth+1, func(line []byte) bool {
-					if !fn(line) {
-						stopped = true
-						return false
-					}
-					return true
-				})
-				if stopped {
-					return false
-				}
-			}
-			return true
-		}
-		if isMeta {
-			return true
-		}
-		if !fn(line) {
-			stopped = true
+		case !fn(line):
 			return false
+		case entry.Payload.ForkedFromID == "" || depth >= maxForkDepth:
+			return true
 		}
-		return true
+		parent, found := LogOf(entry.Payload.ForkedFromID)
+		if !found {
+			return true
+		}
+		limit := int64(-1)
+		if entry.Payload.ForkedBefore != nil {
+			limit = *entry.Payload.ForkedBefore
+		}
+		return scanUntilStopped(parent, limit, depth+1, fn)
 	})
-	return ok
+}
+
+// scanUntilStopped is scanFork that reports false when fn did, rather
+// than whether the log could be read.
+func scanUntilStopped(path string, before int64, depth int, fn func(line []byte) bool) bool {
+	stopped := false
+	scanFork(path, before, depth, func(line []byte) bool {
+		stopped = !fn(line)
+		return !stopped
+	})
+	return !stopped
 }
 
 // LogOf finds the log of a Codex thread: its file is named after it
