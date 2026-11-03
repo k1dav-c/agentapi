@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/coder/agentapi/lib/instanceapi"
 )
@@ -15,7 +16,37 @@ const (
 	// seenDeliveries is how many delivery IDs the hub remembers, to drop an
 	// event sent again (a retry, or a replay of one it got).
 	seenDeliveries = 4096
+	// badSignatureLogEvery is how often the hub logs the events it refuses
+	// for their signature: a sender with a wrong --secret, or one probing
+	// the hub, would fill the log.
+	badSignatureLogEvery = time.Minute
 )
+
+// webhookReadTimeout bounds reading an event's body: a sender that trickles
+// one in doesn't hold a connection and its handler. Only /hooks has one; a
+// server-wide ReadTimeout would end the browsers' event streams.
+var webhookReadTimeout = 10 * time.Second
+
+// logLimiter lets a log line through at most once per interval.
+type logLimiter struct {
+	mu         sync.Mutex
+	next       time.Time
+	suppressed int
+}
+
+// allow reports whether to log now, and how many lines it held back since
+// the last.
+func (l *logLimiter) allow(now time.Time, every time.Duration) (bool, int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if now.Before(l.next) {
+		l.suppressed++
+		return false, 0
+	}
+	suppressed := l.suppressed
+	l.next, l.suppressed = now.Add(every), 0
+	return true, suppressed
+}
 
 // webhookEvent is an AgentAPI webhook event as the hub reads it: the data
 // is left as it came.
@@ -55,16 +86,26 @@ func (d *deliveries) add(id string) bool {
 // which a machine that joined with an earlier version still sends, only
 // says it is alive: the summary stream says what the instance does.
 func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Now().Add(webhookReadTimeout))
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBody+1))
+	if err == nil && len(body) <= maxWebhookBody {
+		// Read whole. After a failure, or a body too large, the deadline
+		// stays: the server would wait for the rest before it answers.
+		_ = rc.SetReadDeadline(time.Time{})
+	}
 	if err != nil || len(body) > maxWebhookBody {
 		http.Error(w, "unreadable event", http.StatusBadRequest)
 		return
 	}
 	if err := instanceapi.Verify(h.config.Secret, r.Header, body, h.clock.Now()); err != nil {
 		// A wrong --secret on the instance's side shows here.
-		h.logger.Warn("Refused an event with an invalid or missing signature, or more than 10 minutes off",
-			"reason", err, "from", r.RemoteAddr,
-			"instance", r.Header.Get(instanceapi.HeaderInstance), "event", r.Header.Get(instanceapi.HeaderEvent))
+		if ok, suppressed := h.badSignatures.allow(h.clock.Now(), badSignatureLogEvery); ok {
+			h.logger.Warn("Refused an event with an invalid or missing signature, or more than 10 minutes off",
+				"reason", err, "from", r.RemoteAddr,
+				"instance", r.Header.Get(instanceapi.HeaderInstance), "event", r.Header.Get(instanceapi.HeaderEvent),
+				"refused_since_last_logged", suppressed)
+		}
 		http.Error(w, "invalid or missing signature", http.StatusUnauthorized)
 		return
 	}

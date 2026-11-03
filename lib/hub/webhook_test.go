@@ -1,13 +1,17 @@
 package hub
 
 import (
+	"bufio"
 	"bytes"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -104,4 +108,50 @@ func TestDefaultClientTimeouts(t *testing.T) {
 	assert.Positive(t, transport.IdleConnTimeout)
 	assert.Positive(t, transport.MaxIdleConns)
 	assert.Equal(t, 15*time.Second, transport.ResponseHeaderTimeout)
+}
+
+// Events refused for their signature are logged at most once a minute,
+// with how many were refused in between.
+func TestBadSignaturesLogOnceAMinute(t *testing.T) {
+	var logs bytes.Buffer
+	clock := quartz.NewMock(t)
+	h, err := New(Config{Token: "t", Secret: "s", Clock: clock, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	require.NoError(t, err)
+	post := func() {
+		req := httptest.NewRequest(http.MethodPost, "/hooks", strings.NewReader("{}"))
+		w := httptest.NewRecorder()
+		h.receiveWebhook(w, req)
+		require.Equal(t, http.StatusUnauthorized, w.Code)
+	}
+	for range 5 {
+		post()
+	}
+	assert.Equal(t, 1, strings.Count(logs.String(), "invalid or missing signature"))
+	clock.Advance(time.Minute)
+	post()
+	assert.Equal(t, 2, strings.Count(logs.String(), "invalid or missing signature"))
+	assert.Contains(t, logs.String(), "refused_since_last_logged=4")
+}
+
+// A sender that trickles in an event's body is cut off: it can't hold the
+// connection and its handler.
+func TestWebhookBodyReadTimeout(t *testing.T) {
+	defer func(d time.Duration) { webhookReadTimeout = d }(webhookReadTimeout)
+	webhookReadTimeout = 200 * time.Millisecond
+	h, err := New(Config{Token: "t", Secret: "s"})
+	require.NoError(t, err)
+	srv := httptest.NewServer(h.Handler())
+	defer srv.Close()
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	_, err = conn.Write([]byte("POST /hooks HTTP/1.1\r\nHost: hub\r\nContent-Length: 100\r\n\r\n{"))
+	require.NoError(t, err)
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
+	start := time.Now()
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	require.NoError(t, err, "the hub answers before the client's deadline")
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Less(t, time.Since(start), 4*time.Second)
 }

@@ -81,6 +81,8 @@ type Hub struct {
 	store      *store
 	client     *http.Client
 	deliveries deliveries
+	// badSignatures limits the log of events refused for their signature.
+	badSignatures logLimiter
 	clock      quartz.Clock
 	// interfaces lists the machine's network interfaces, for the join URLs.
 	interfaces func() ([]netaddr.Interface, error)

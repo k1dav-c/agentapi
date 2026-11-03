@@ -521,7 +521,7 @@ instance that joined with its webhook comes back the next time it starts.
   `<timestamp>.<body>`), a timestamp at most 10 minutes off, and a delivery ID (`id`) it hasn't
   taken yet. AgentAPI always sends one; an event without it is refused, since a copy of it would
   work again for those 10 minutes. This matters because an event names the URL the hub sends an
-  instance token to.
+  instance token to. The hub reads an event for at most 10 seconds, and 1 MiB.
 - A signed event can add an instance the hub doesn't have, and move one the hub doesn't follow
   right now (stopped, or its summary stream isn't open) to the event's URL. It never moves an
   instance the hub follows, whatever run it names, or one added by hand. An `instance.*` event
@@ -579,7 +579,7 @@ instance that joined with its webhook comes back the next time it starts.
 | `join` says the hub is on another machine | `--public-url` names `localhost` | Give the address the hub reaches this machine at |
 | The Add dialog's command has `<hub secret>` | The hub runs with `--no-token`, so its page never shows the secret | Put in the hub's `--secret` |
 | The Add dialog lists no address of the network the machine is on | The hub binds one address (`--bind`), or machines reach it at an address its machine doesn't have (NAT, a port forward) | Use the address the machine reaches the hub at, plus `/hooks` |
-| An instance never appears; the hub logs "Refused an event" | `--secret` of `join` and of the hub differ, or the clocks are more than 10 minutes apart | Run `agentapi hub join` again with the hub's secret; check the clocks |
+| An instance never appears; the hub logs "Refused an event" (at most once a minute for a bad signature, with `refused_since_last_logged`) | `--secret` of `join` and of the hub differ, or the clocks are more than 10 minutes apart | Run `agentapi hub join` again with the hub's secret; check the clocks |
 | An instance never appears; `agentapi hub status` shows no hub | `join` wrote to another config file than the one the AgentAPI reads | Use the same user, or pass the same `--config` to both |
 | Unreachable: `400 Bad Request` | The AgentAPI refuses the VPN name as `Host` | Allow it in `--allowed-hosts` (step 3) |
 | Unreachable: `needs an API token` | The AgentAPI runs with `--api-token` and the hub has another | Give the hub `--instance-token`, or the token when adding |
