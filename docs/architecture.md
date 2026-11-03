@@ -166,7 +166,10 @@ answers write keys directly to the agent's terminal.
    the file, `/proc/self/exe` names a deleted one. The program first runs
    with `--version`; if it fails, the server logs why and goes on. Otherwise the server stops as in step 5, keeps its PID file (the PID
    stays), and `syscall.Exec` runs the program again with stdin, stdout and
-   stderr; every other file Go opened closes on exec. A shutdown signal
+   stderr; every other file Go opened closes on exec. A token a bare
+   `--api-token` generated goes along in `AGENTAPI_GENERATED_API_TOKEN`,
+   which the new program takes instead of generating one and removes from
+   its environment, so clients stay signed in. A shutdown signal
    during the stop wins. Each registry entry says the server restarts in
    place (`restarts_in_place`), for `agentapi restart`.
 

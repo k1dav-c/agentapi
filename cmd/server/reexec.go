@@ -164,6 +164,18 @@ func (s *selfExec) restarting() bool {
 	return s != nil && s.requested.Load()
 }
 
+// setEnv sets name to value in the environment the program runs again
+// with, or removes it if value is empty.
+func (s *selfExec) setEnv(name, value string) {
+	if s == nil {
+		return
+	}
+	s.env = slices.DeleteFunc(s.env, func(kv string) bool { return strings.HasPrefix(kv, name+"=") })
+	if value != "" {
+		s.env = append(s.env, name+"="+value)
+	}
+}
+
 // exec runs the program again in this process. It returns only if it
 // couldn't.
 func (s *selfExec) exec() error {

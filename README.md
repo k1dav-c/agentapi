@@ -1781,6 +1781,9 @@ agentapi server --api-token=my-secret -- claude
 AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
 ```
 
+A generated token stays the same across a restart in place (SIGUSR2, `POST /update`,
+`agentapi restart`), so clients stay signed in; a new `agentapi server` generates a new one.
+
 When enabled, every API request must include `Authorization: Bearer <token>` or the chat UI's
 session cookie. Static file routes (`/`, `/chat/*`) are exempt so browsers can open the chat UI
 without a token. Tokens are compared in constant time.

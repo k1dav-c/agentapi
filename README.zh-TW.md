@@ -1516,6 +1516,9 @@ agentapi server --api-token=my-secret -- claude
 AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
 ```
 
+自動產生的 token 在原地重新啟動（SIGUSR2、`POST /update`、`agentapi restart`）後仍然相同，
+用戶端不必重新登入；重新執行 `agentapi server` 才會產生新的 token。
+
 啟用後，每個 API 請求都必須帶上 `Authorization: Bearer <token>` 或聊天介面的
 session cookie。靜態檔案路由（`/`、`/chat/*`）不受限制，讓瀏覽器不需要 token 也能
 開啟聊天介面。token 以固定時間（constant time）比對。
