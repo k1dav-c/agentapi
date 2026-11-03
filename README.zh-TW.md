@@ -1490,8 +1490,8 @@ API 和 Session Explorer 支援：
 會接續同一個工作階段重新載入，對話會保留（無法接續工作階段、`resume` 為 false 的 agent 則會改為
 開始新的工作階段，並清除對話）。在回合進行中重新載入會回傳 409，因為那會中斷該回合。從
 Explorer 或 `DELETE /messages` 重新啟動前，AgentAPI 會先更新 Codex（`codex update`）和 Pi
-（`pi update --self`），限直接啟動這些 CLI 的情況。若更新失敗，仍會啟動已安裝的版本；
-Claude Code 則自行管理更新。
+（`pi update --self`），限直接啟動這些 CLI 的情況，多個 AgentAPI 會輪流更新。若更新失敗或超過
+3 分鐘，仍會啟動已安裝的版本；Claude Code 則自行管理更新。
 
 ## 安全性
 

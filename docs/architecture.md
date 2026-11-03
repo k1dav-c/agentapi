@@ -105,6 +105,7 @@ answers write keys directly to the agent's terminal.
 | `lib/shellterm/` | The shared shell terminal of native sessions |
 | `lib/htmlpreview/` | Makes HTML previews self-contained for `GET /files/preview` by embedding resources referenced by relative paths as data: URLs |
 | `lib/mcpconfig/` | Reads and writes the agents' MCP configuration files |
+| `lib/filelock/` | The flock that AgentAPIs on one machine take in turn: replacing the program (`selfupdate`), an agent CLI updating itself before a restart |
 | `lib/procenv/` | The environment of the processes AgentAPI starts: agents on every transport, the terminal's shell |
 | `lib/agenthome/` | Where the agents keep their state (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`) |
 | `lib/handoff/` | Types of the human-reply API |
@@ -607,7 +608,10 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
 
 - `DELETE /messages` clears the conversation, requests and queue and restarts
   the agent; before the new agent starts, AgentAPI runs `codex update` or
-  `pi update --self` for Codex and Pi. A native agent is closed and `Restart`
+  `pi update --self` for Codex and Pi, for up to 3 minutes, in its own
+  process group, and under a lock in the user's cache directory
+  (`~/.cache/agentapi/codex-update.lock` on Linux), so the AgentAPIs that
+  run one CLI update it one at a time. A native agent is closed and `Restart`
   starts a new session. A PTY agent gets a new process in the swappable
   terminal and a new session-log watcher.
 - A replacement of the native agent (a restart, a reload, opening another

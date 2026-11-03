@@ -1753,8 +1753,8 @@ retained. For MCP changes, a native agent reloads the same session and preserves
 (an agent that can't resume its session, with `resume` false, starts a new session instead, and the
 conversation is cleared). A reload during an active turn returns 409 because it would interrupt that
 turn. Before a restart from the Explorer or `DELETE /messages`, AgentAPI updates Codex
-(`codex update`) and Pi (`pi update --self`) when launching those CLIs directly. If an update
-fails, AgentAPI restarts the installed version. Claude Code manages its own updates.
+(`codex update`) and Pi (`pi update --self`) when launching those CLIs directly, one AgentAPI at a
+time. If an update fails or takes more than 3 minutes, AgentAPI restarts the installed version. Claude Code manages its own updates.
 
 ## Security
 

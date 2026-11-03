@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
+
+	"github.com/coder/agentapi/lib/filelock"
 )
 
 // versionTimeout bounds a run of a program's --version.
@@ -90,7 +92,7 @@ func (p Program) lockPath() string {
 // while another update holds it until ctx ends: the AgentAPIs that share
 // the program replace it one at a time. The file stays.
 func (p Program) Lock(ctx context.Context) (unlock func(), err error) {
-	return lockFile(ctx, p.lockPath())
+	return filelock.Lock(ctx, p.lockPath())
 }
 
 // ProgramVersion runs the program at path with --version and returns the

@@ -1,6 +1,9 @@
 //go:build unix && !aix
 
-package selfupdate
+// Package filelock takes an exclusive lock on a file, which AgentAPI
+// processes sharing a machine take in turn: updating the program, an agent
+// CLI updating itself.
+package filelock
 
 import (
 	"context"
@@ -12,12 +15,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// lockPoll is how often a lock another process holds is tried again.
-const lockPoll = 100 * time.Millisecond
+// poll is how often a lock another process holds is tried again.
+const poll = 100 * time.Millisecond
 
-// lockFile takes an exclusive flock of path, which it creates, trying
-// again while another process holds it until ctx ends.
-func lockFile(ctx context.Context, path string) (func(), error) {
+// Lock takes an exclusive flock of path, which it creates, trying again
+// while another process holds it until ctx ends. The file stays.
+func Lock(ctx context.Context, path string) (unlock func(), err error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open the lock file: %w", err)
@@ -39,7 +42,7 @@ func lockFile(ctx context.Context, path string) (func(), error) {
 		case <-ctx.Done():
 			_ = f.Close()
 			return nil, ctx.Err()
-		case <-time.After(lockPoll):
+		case <-time.After(poll):
 		}
 	}
 }
