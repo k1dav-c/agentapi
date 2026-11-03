@@ -23,8 +23,10 @@ uncommitted changes):
   stopped and one was killed, so the hub can't reach it. Six are in two groups, and two of those
   are pinned to the top. The one that asks questions can run a binary stamped with an older
   version (`AGENTAPI_OLDER_BINARY`), so that it shows as older than the hub: 2.0.0 beside the
-  hub's 2.1.0 in the screenshots. A second, empty hub shows the guide for the first agents. The
-  rows name the machine; the screenshots show placeholders (`dev-1` and so on).
+  hub's 2.1.0 in the screenshots. The hub starts on a file that says how long each instance
+  worked over the last week, as a hub that watched them would keep it, since a demo doesn't run
+  for hours. A second, empty hub shows the guide for the first agents. The rows name the machine;
+  the screenshots show placeholders (`dev-1` and so on).
 
 ## Gallery
 
@@ -81,6 +83,7 @@ device scale factor of 1.
 | [hub-phone-menu.png](hub-phone-menu.png) | A row's menu on a phone: Pin to top, its group, a new one, and Forget |
 | [hub-muted.png](hub-muted.png) | The list on a phone with an agent's login wait muted |
 | [hub-spend.png](hub-spend.png) | The overview's Spend card: the last 24 hours and 7 days, and the agents that spent the most |
+| [hub-work.png](hub-work.png) | The overview's Work time card: the last 24 hours and 7 days, the agents that worked the most, and each group |
 | [hub-versions.png](hub-versions.png) | The overview's Versions card: how many agents run each AgentAPI version, on which machines, and how to update the older ones |
 | [hub-phone-chat.png](hub-phone-chat.png) | An instance open from the hub on a phone, with the way back to the list |
 
