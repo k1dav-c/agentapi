@@ -24,7 +24,7 @@ import {
   type HubInstance,
   type InstanceState,
 } from "@/lib/hub";
-import {frameMessage, toFrame, type FromFrame} from "@/lib/hub-frame";
+import {frameInstance, frameMessage, onFrameMessage, toFrame, type Framed, type FromFrame} from "@/lib/hub-frame";
 import {listSections, movePin, pinOf, sortPinned} from "@/lib/hub-order";
 import {shownUpdate} from "@/lib/hub-update";
 import {checkHubSession, type HubSession} from "@/lib/hub-session";
@@ -224,16 +224,24 @@ export function HubView() {
 
   // The open instance's chat draws the bar above itself once it is ready
   // (FrameBar), with its own actions in it; until then the hub's bar shows.
+  // A chat that loads again in the frame says it is ready again, and is
+  // told the instance again (Framed.ready).
   const frame = useRef<HTMLIFrameElement>(null);
-  const [framed, setFramed] = useState<string>();
+  const [framed, setFramed] = useState<Framed>();
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const chat = frame.current;
-      if (!chat || event.source !== chat.contentWindow) return;
+      const instance = chat?.dataset.instance;
+      if (!chat || !instance || event.source !== chat.contentWindow) return;
       const message = frameMessage<FromFrame>(event);
-      if (message?.type === "ready") setFramed(chat.dataset.instance);
-      else if (message?.type === "back") select(undefined);
-      else if (message?.type === "cancel-update" && chat.dataset.instance) void cancelFromHub(root, chat.dataset.instance);
+      if (!message) return;
+      if (message.type === "ready") {
+        setFramed((previous) => onFrameMessage(previous, message, instance).framed);
+        return;
+      }
+      const {ask} = onFrameMessage(undefined, message, instance);
+      if (ask === "back") select(undefined);
+      else if (ask === "cancel-update") void cancelFromHub(root, instance);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -637,8 +645,8 @@ export function HubView() {
       <section className={cn("min-w-0 flex-1 flex-col bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]", current ? "flex" : "hidden md:flex")}>
         {current ? (
           <>
-            {framed === current.id ? (
-              <FrameInfo frame={frame} instance={current} hubVersion={hubVersion} root={root} />
+            {framed?.instance === current.id ? (
+              <FrameInfo frame={frame} ready={framed.ready} instance={current} hubVersion={hubVersion} root={root} />
             ) : (
               <InstanceBar instance={current} hubVersion={hubVersion} root={root} onBack={() => select(undefined)} />
             )}
@@ -648,7 +656,7 @@ export function HubView() {
               data-instance={current.id}
               title={`${displayName(current)} chat`}
               src={chatURL(basePath, root, current.id, true)}
-              className={cn("min-h-0 w-full flex-1 border-0 bg-background", framed === current.id && "pt-[env(safe-area-inset-top)]")}
+              className={cn("min-h-0 w-full flex-1 border-0 bg-background", framed?.instance === current.id && "pt-[env(safe-area-inset-top)]")}
             />
           </>
         ) : (
@@ -683,26 +691,24 @@ export function HubView() {
 }
 
 // FrameInfo tells the open instance's chat what its bar shows, whenever
-// that changes.
-function FrameInfo({frame, instance, hubVersion, root}: {frame: React.RefObject<HTMLIFrameElement | null>; instance: HubInstance; hubVersion: string; root: string}) {
-  const info = JSON.stringify(
-    toFrame({
-      name: displayName(instance),
-      state: instanceState(instance),
-      label: stateLabel(instance),
-      agentType: instance.agent_type || undefined,
-      agent: agentName(instance) || undefined,
-      hostname: instance.hostname || undefined,
-      version: instanceVersion(instance) || undefined,
-      hubVersion: hubVersion || undefined,
-      lastKnown: instance.connection !== "connected",
-      update: shownUpdate(instance),
-      tab: chatURL(basePath, root, instance.id),
-    }),
-  );
+// that changes and whenever the chat says it is ready (ready counts it).
+function FrameInfo({
+  frame,
+  ready,
+  instance,
+  hubVersion,
+  root,
+}: {
+  frame: React.RefObject<HTMLIFrameElement | null>;
+  ready: number;
+  instance: HubInstance;
+  hubVersion: string;
+  root: string;
+}) {
+  const info = JSON.stringify(toFrame(frameInstance(instance, {hubVersion, agent: agentName(instance), tab: chatURL(basePath, root, instance.id)})));
   useEffect(() => {
     frame.current?.contentWindow?.postMessage(JSON.parse(info), window.location.origin);
-  }, [frame, info]);
+  }, [frame, info, ready]);
   return null;
 }
 
