@@ -214,8 +214,7 @@ export class ChatStream {
         // The replay's last event may be its status.
         if (sync.replaying) this.schedule(event);
         handlers.statusChange(data);
-        // The transport decides whether the terminal (TTY mode, raw keys)
-        // exists at all.
+        // The transport decides what the chat offers (lib/features).
         const reported = parseTransport(data.transport);
         if (reported) {
           handlers.transport(reported);

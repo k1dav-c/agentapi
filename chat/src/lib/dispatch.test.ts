@@ -76,11 +76,6 @@ describe("dispatchModes", () => {
 });
 
 describe("canStop", () => {
-  test("a PTY agent stops with Esc while it works", () => {
-    expect(canStop(native({transport: "pty", capabilities: null}))).toBe(true);
-    expect(canStop(native({transport: "pty", capabilities: null, serverStatus: "stable"}))).toBe(false);
-  });
-
   test("a native agent stops with POST /interrupt during a turn", () => {
     expect(canStop(native())).toBe(true);
     expect(canStop(native({serverStatus: "stable", pendingRequestCount: 1}))).toBe(true);
@@ -90,7 +85,8 @@ describe("canStop", () => {
     expect(canStop(native({capabilities: null}))).toBe(false);
   });
 
-  test("ACP has no terminal and no interrupt", () => {
+  test("an older server's other transports can't stop the agent", () => {
+    expect(canStop(native({transport: "pty", capabilities: null}))).toBe(false);
     expect(canStop(native({transport: "acp", capabilities: null}))).toBe(false);
   });
 });

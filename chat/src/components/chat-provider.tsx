@@ -166,7 +166,8 @@ export interface ChatState {
   serverStatus: ServerStatus;
   connectionStatus: ConnectionStatus;
   queuedMessages: QueuedMessage[];
-  // How the server drives the agent; "pty" until the server says otherwise.
+  // How the server drives the agent: "native" (AgentAPI 3 has no other
+  // transport) until the server says otherwise.
   transport: Transport;
   // Optional operations of a native agent; null for other transports.
   capabilities: Capabilities | null;
@@ -266,7 +267,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const [serverWorkspaceUrl, setServerWorkspaceUrl] = useState<string>();
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
-  const [transport, setTransport] = useState<Transport>("pty");
+  const [transport, setTransport] = useState<Transport>("native");
   // The agent's status, from status_change events (lib/agent-status). An
   // event that changes nothing leaves it as it is; the ref has the latest,
   // for the event handlers.
