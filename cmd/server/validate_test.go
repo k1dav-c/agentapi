@@ -33,8 +33,10 @@ func TestValidate(t *testing.T) {
 		var out bytes.Buffer
 		serverCmd.SetOut(&out)
 		serverCmd.SetErr(io.Discard)
-		serverCmd.SetArgs(append([]string{"--validate", "--config", configPath, "--registry-dir", filepath.Join(dir, "instances"),
-			"--pid-file", filepath.Join(dir, "agentapi.pid"), "--state-db", filepath.Join(dir, "state.db")}, args...))
+		serverCmd.SetArgs(append([]string{
+			"--validate", "--config", configPath, "--registry-dir", filepath.Join(dir, "instances"),
+			"--pid-file", filepath.Join(dir, "agentapi.pid"), "--state-db", filepath.Join(dir, "state.db"),
+		}, args...))
 		err := serverCmd.Execute()
 		return out.String(), err
 	}
