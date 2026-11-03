@@ -10,7 +10,8 @@ import (
 // SerialSink returns a Sink that passes calls on to sink one at a time, as
 // the Sink contract asks, for an adapter that calls its Sink from more than
 // one goroutine (the demo: the turn it plays, and Start and Compact on the
-// caller's). It is a SettingsSink and a UsageSink when sink is.
+// caller's). It passes SettingsChanged and UsageChanged on when sink takes
+// them.
 func SerialSink(sink Sink) Sink {
 	return &serialSink{sink: sink}
 }
