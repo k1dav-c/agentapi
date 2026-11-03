@@ -22,6 +22,14 @@ func TestLookup(t *testing.T) {
 		"gpt-6.1-sol":                2,
 		"gpt-6.1-sol-2026-09-01":     2,
 		"gpt-5.4-mini":               0.75, // not gpt-5.4's
+		"gpt-5.1-codex-mini":         0.25, // not gpt-5.1's
+		"gpt-5.4-mini-x":             0.75, // gpt-5.4-mini's
+		"gpt-6.1-sol-x":              2,
+		"claude-opus-4-1-20250805":   15,
+		"claude-opus-4-20250514":     15,
+		"claude-sonnet-4-20250514":   3,
+		"claude-3-5-haiku-20241022":  0.8,
+		"codex-mini-latest":          1.5,
 	} {
 		p, ok := table.Lookup(model)
 		require.True(t, ok, model)
@@ -31,6 +39,24 @@ func TestLookup(t *testing.T) {
 	assert.False(t, ok)
 	_, ok = table.Lookup("kimi-k2")
 	assert.False(t, ok)
+	// The prefix of a model doesn't price its variants, which cost less
+	// (mini, nano) or more (pro).
+	for _, model := range []string{"gpt-6.1-sol-mini", "gpt-6.1-sol-mini-x", "gpt-5.3-codex-mini", "gpt-6-sol-nano", "gpt-6-sol-pro"} {
+		_, ok := table.Lookup(model)
+		assert.False(t, ok, model)
+	}
+}
+
+// Claude Sonnet 4 and 4.5 cost more above 200K input tokens (the 1M
+// context beta).
+func TestSonnet4LongContext(t *testing.T) {
+	t.Parallel()
+	for _, model := range []string{"claude-sonnet-4-20250514", "claude-sonnet-4-5-20250929", "claude-sonnet-4-5[1m]"} {
+		p, ok := Builtin().Lookup(model)
+		require.True(t, ok, model)
+		assert.InDelta(t, (200_000*3+1000*15)/1e6, p.Cost(Tokens{Input: 200_000, Output: 1000}), 1e-9, model)
+		assert.InDelta(t, (1000*6+200_000*0.6+1000*22.5)/1e6, p.Cost(Tokens{Input: 1000, CacheRead: 200_000, Output: 1000}), 1e-9, model)
+	}
 }
 
 func TestCost(t *testing.T) {

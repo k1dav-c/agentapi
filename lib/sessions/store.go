@@ -50,6 +50,8 @@ type Store struct {
 	costPass   func()
 	// readers numbers the logs' readers.
 	readers atomic.Uint64
+	// unpriced holds the models without a price that were logged.
+	unpriced sync.Map
 
 	mu sync.Mutex
 	// paths finds the log of a session by its ID, as the logs read so far

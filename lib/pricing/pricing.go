@@ -3,8 +3,10 @@
 // subscription doesn't charge.
 //
 // The built-in prices (prices.json) are Anthropic's and OpenAI's list prices
-// per million tokens as Pi 1.3.0's model registry has them (October 2026).
-// A prices file (--prices) adds models or replaces their prices.
+// per million tokens as Pi 1.3.0's model registry has them (October 2026),
+// with retired models and long-context tiers from the providers' pricing
+// pages; scripts/prices.mjs compares them with Pi's registry. A prices file
+// (--prices) adds models or replaces their prices.
 package pricing
 
 import (
@@ -129,10 +131,15 @@ func (t *Table) WithFile(path string) (*Table, error) {
 // dateSuffix ends a model ID pinned to a release: -20251001, -2026-09-01.
 var dateSuffix = regexp.MustCompile(`-(\d{8}|\d{4}-\d{2}-\d{2})$`)
 
+// variants are the parts of a model ID that make it another model, priced
+// apart: gpt-5.1-codex-mini isn't a gpt-5.1, nor gpt-6-sol-pro a gpt-6-sol.
+var variants = []string{"mini", "nano", "pro"}
+
 // Lookup returns the price of model: its own, else that of the model it
 // pins or extends (claude-opus-4-5-20251101 is claude-opus-4-5,
-// gpt-6.1-sol-mini-x a gpt-6.1-sol if nothing closer is known). A provider
-// prefix (anthropic/) and a context suffix ([1m]) are ignored.
+// gpt-6.1-sol-x a gpt-6.1-sol if nothing closer is known), but not across a
+// variant (gpt-6.1-sol-mini-x isn't a gpt-6.1-sol). A provider prefix
+// (anthropic/) and a context suffix ([1m]) are ignored.
 func (t *Table) Lookup(model string) (Price, bool) {
 	id := strings.ToLower(strings.TrimSpace(model))
 	if i := strings.LastIndex(id, "/"); i >= 0 {
@@ -149,7 +156,7 @@ func (t *Table) Lookup(model string) (Price, bool) {
 	}
 	best := ""
 	for known := range t.prices {
-		if strings.HasPrefix(id, known+"-") && len(known) > len(best) {
+		if strings.HasPrefix(id, known+"-") && len(known) > len(best) && !namesVariant(id[len(known)+1:]) {
 			best = known
 		}
 	}
@@ -157,4 +164,15 @@ func (t *Table) Lookup(model string) (Price, bool) {
 		return Price{}, false
 	}
 	return t.prices[best], true
+}
+
+// namesVariant reports whether rest, what a model ID adds to a known one,
+// names a variant of it.
+func namesVariant(rest string) bool {
+	for _, part := range strings.Split(rest, "-") {
+		if slices.Contains(variants, part) {
+			return true
+		}
+	}
+	return false
 }

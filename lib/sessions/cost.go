@@ -544,12 +544,20 @@ func (s *Store) costLogs() ([]string, func(id, path string) []Subagent, error) {
 	return files, func(string, string) []Subagent { return nil }, err
 }
 
-// price returns call at the store's prices, or at what the agent said.
+// price returns call at the store's prices, or at what the agent said. A
+// model without a price is logged once, the first time a call of it is.
 func (s *Store) price(c agentlog.Call) ModelCall {
-	return priced(ModelCall{
+	call := priced(ModelCall{
 		Time: c.Time, Model: c.Model, Tokens: c.Tokens,
 		report: c.Report, key: c.Key, cost: c.Cost,
 	}, s.prices)
+	if !call.Priced && call.report == nil && call.Model != "" {
+		if _, warned := s.unpriced.LoadOrStore(call.Model, true); !warned {
+			s.logger.Warn("Session log has calls to a model without a known price; they count no cost (--prices adds one)",
+				"agent", s.agent, "model", call.Model)
+		}
+	}
+	return call
 }
 
 // priced returns call with its cost at prices, or at what the agent said.

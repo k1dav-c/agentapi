@@ -807,7 +807,9 @@ agent 可能改了紀錄格式，例如把欄位改了名。
 當一次呼叫的輸入（未快取的、從 cache 讀取的和寫入 cache 的）超過 `input_tokens_above` 時，
 套用該級距（tier）的價格。比對模型 ID 時不分大小寫，並忽略供應商前綴（`anthropic/`）、
 context 後綴（`[1m]`）和發布日期；找不到時取最長的已知前綴（`claude-opus-5-5-x` 以
-`claude-opus-5-5` 計價）。沒有價格的模型只計 tokens、不計金額（`priced: false`）。
+`claude-opus-5-5` 計價），但不跨過 `-mini`、`-nano` 或 `-pro` 這類變體（`gpt-5.1-codex-mini`
+不算 `gpt-5.1`）。沒有價格的模型只計 tokens、不計金額（`priced: false`），伺服器的 log 會對
+每個這種模型警告一次。`scripts/prices.mjs` 會比對內建價格和 Pi 的模型清單。
 
 - `GET /sessions` 為每個工作階段提供 `cost`：`usd`、`tokens`、`calls`、每個模型的花費
   （`models`）和每小時的花費（`hourly`，UTC），以及全部加總的 `total_cost`。

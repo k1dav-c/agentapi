@@ -962,8 +962,10 @@ models or replaces their prices, in USD per million tokens:
 A tier applies to a call whose input (uncached, read from and written to the cache) is above
 `input_tokens_above`. Model IDs are matched ignoring case, a provider prefix (`anthropic/`), a
 context suffix (`[1m]`) and a release date, else by the longest known prefix
-(`claude-opus-5-5-x` is priced as `claude-opus-5-5`). A call to a model without a price counts its
-tokens but no cost (`priced: false`).
+(`claude-opus-5-5-x` is priced as `claude-opus-5-5`), but not across a `-mini`, `-nano` or `-pro`
+variant (`gpt-5.1-codex-mini` isn't a `gpt-5.1`). A call to a model without a price counts its
+tokens but no cost (`priced: false`), and the server's log warns of the model once.
+`scripts/prices.mjs` compares the built-in prices with Pi's model registry.
 
 - `GET /sessions` gives each session's `cost`: `usd`, `tokens`, `calls`, the cost per model
   (`models`) and per hour (`hourly`, in UTC), and `total_cost`, the sum of all of them.

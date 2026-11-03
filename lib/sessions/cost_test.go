@@ -3,6 +3,7 @@ package sessions
 import (
 	"fmt"
 	"hash/fnv"
+	"log/slog"
 	"maps"
 	"math"
 	"math/rand/v2"
@@ -12,6 +13,7 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -165,10 +167,22 @@ func TestPiCostsAndUnknownPrices(t *testing.T) {
 		// A model without a price, which Pi didn't price either.
 		`{"type":"message","id":"a2","timestamp":"2026-10-20T10:00:03.000Z","message":{"role":"assistant","model":"local-llama","content":[{"type":"text","text":"Hi"}],"usage":{"input":500,"output":5,"cacheRead":0,"cacheWrite":0}}}`,
 	)
-	d, err := newStore(t, "pi", "/w").Costs()
+	var logs strings.Builder
+	store, err := New("pi", "/w", Config{Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	require.NoError(t, err)
+	d, err := store.Costs()
 	require.NoError(t, err)
 	c := d.Cost("p1")
 	assert.Equal(t, 2, c.Calls)
+	// The model without a price is logged once, however many calls it has.
+	assert.Equal(t, 1, strings.Count(logs.String(), "model=local-llama"), logs.String())
+	writeLog(t, filepath.Join(dir, "2026-10-20T11-00-00-000Z_p2.jsonl"), time.Now(),
+		`{"type":"session","version":3,"id":"p2","timestamp":"2026-10-20T11:00:00.000Z","cwd":"/w"}`,
+		`{"type":"message","id":"a3","timestamp":"2026-10-20T11:00:03.000Z","message":{"role":"assistant","model":"local-llama","content":[{"type":"text","text":"Hi"}],"usage":{"input":500,"output":5,"cacheRead":0,"cacheWrite":0}}}`,
+	)
+	_, err = store.Costs()
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(logs.String(), "model=local-llama"), logs.String())
 	assert.InDelta(t, 0.0123, c.USD, 1e-12)
 	require.Len(t, c.Models, 2)
 	assert.Equal(t, "gpt-6.1-sol", c.Models[0].Model, "the most expensive first")
