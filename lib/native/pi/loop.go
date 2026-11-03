@@ -74,7 +74,7 @@ func (a *Adapter) newLoopState(sink native.Sink) loopState {
 		events:    pilog.NewEventParser(),
 		parser:    pilog.NewParser(),
 		usedIDs:   make(map[string]bool),
-		throttle:  agentio.NewThrottle[string](a.clock, a.interval),
+		throttle:  agentio.NewThrottle[string](a.clock, snapshotInterval),
 		interrupt: agentio.NewInterruptDeadline(a.clock, a.interruptTimeout),
 	}
 }

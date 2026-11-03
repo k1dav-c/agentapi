@@ -22,6 +22,12 @@ type LogReader interface {
 	Size() int
 }
 
+// lineReader is the part of a LogReader that reading a file uses: a
+// Follower keeps one reader, and needs no Size.
+type lineReader interface {
+	Line(line []byte) bool
+}
+
 // Index keeps what was read of a set of session logs, file by file, so
 // that a log is read again only from where it was left: an agent appends
 // to its log as it works, and the log of a long session runs to hundreds
@@ -54,7 +60,7 @@ type Index[R LogReader] struct {
 }
 
 // indexed is what an Index keeps of one file.
-type indexed[R LogReader] struct {
+type indexed[R lineReader] struct {
 	// mu is held while the file is read and its reader used.
 	mu     sync.Mutex
 	reader R
@@ -292,7 +298,7 @@ func (e *indexed[R]) sameTail(f *os.File) bool {
 // feed reads the complete lines of r into reader, and returns how many
 // bytes they took and whether the reader wants more. A line longer than
 // MaxLineLength is skipped.
-func feed[R LogReader](r *bufio.Reader, reader R) (int64, bool, error) {
+func feed[R lineReader](r *bufio.Reader, reader R) (int64, bool, error) {
 	var (
 		consumed int64
 		// long holds the start of a line longer than the buffer, n counts
@@ -349,7 +355,7 @@ func feed[R LogReader](r *bufio.Reader, reader R) (int64, bool, error) {
 // again, by a new reader, once the file shrank, was replaced or rewritten.
 // Unlike an Index it keeps its place when a read fails, for the next one
 // to go on from. It isn't safe for concurrent use.
-type Follower[R LogReader] struct {
+type Follower[R lineReader] struct {
 	path      string
 	newReader func(path string) R
 	e         indexed[R]
@@ -358,7 +364,7 @@ type Follower[R LogReader] struct {
 // NewFollower returns a Follower of the log at path whose readers
 // newReader makes: the first when the log is first read, another each
 // time it is read again from its start.
-func NewFollower[R LogReader](path string, newReader func(path string) R) *Follower[R] {
+func NewFollower[R lineReader](path string, newReader func(path string) R) *Follower[R] {
 	return &Follower[R]{path: path, newReader: newReader}
 }
 

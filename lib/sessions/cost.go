@@ -283,44 +283,11 @@ func (s *Store) readCosts() (DirectoryCost, error) {
 	byPath := make(map[string]*sessionCost, len(c.order))
 	changed := false
 	for _, path := range files {
-		snap, err := s.readLog(logs, path, true)
-		if err != nil || !snap.session {
+		sc := s.readSessionCost(logs, subs, path, subagents)
+		if sc == nil {
 			continue
 		}
-		var subCalls []subagentCalls
-		for _, sub := range subagents(snap.summary.ID, path) {
-			subSnap, err := s.readSubagentLog(subs, sub.path, true)
-			if err != nil {
-				continue
-			}
-			subSnap.read.subagent = sub.ID
-			subCalls = append(subCalls, subagentCalls{firstAt: subSnap.firstAt, calls: subSnap.calls, read: subSnap.read})
-		}
-		if s.agent == "claude" {
-			// In the order they started, as Subagents has them.
-			slices.SortStableFunc(subCalls, func(a, b subagentCalls) int { return a.firstAt.Compare(b.firstAt) })
-		}
-		reads := make([]logRead, 0, 1+len(subCalls))
-		reads = append(reads, snap.read)
-		for _, sub := range subCalls {
-			reads = append(reads, sub.read)
-		}
-		sc := c.sessions[path]
-		if sc == nil || sc.id != snap.summary.ID {
-			sc = &sessionCost{id: snap.summary.ID}
-		}
-		sc.fresh = sc.reads == nil || !slices.Equal(sc.reads, reads)
-		if sc.fresh {
-			changed = true
-			sc.grown = grown(sc.reads, reads)
-			sc.before, sc.reads = sc.reads, reads
-			sc.calls = assemble(snap.calls, subCalls)
-			sc.logCalls = append(make([][]ModelCall, 0, len(reads)), snap.calls)
-			for _, sub := range subCalls {
-				sc.logCalls = append(sc.logCalls, sub.calls)
-			}
-		}
-		sc.born, sc.started, sc.changed = snap.info.Birth, snap.summary.CreatedAt, snap.info.ModTime
+		changed = changed || sc.fresh
 		byPath[path] = sc
 		sessions = append(sessions, sc)
 	}
@@ -342,6 +309,64 @@ func (s *Store) readCosts() (DirectoryCost, error) {
 	if same && !changed {
 		return c.result, nil
 	}
+	c.count(sessions, same)
+	d := directoryCost(sessions)
+	c.result = d
+	for _, sc := range sessions {
+		sc.logCalls, sc.before = nil, nil
+	}
+	return d, nil
+}
+
+// readSessionCost reads the calls of the session whose log is at path,
+// and its subagents' (those subagents lists), through logs and subs:
+// what the last reading found of it, fresh if they changed. It returns
+// nil for a log that isn't one of the directory's sessions.
+func (s *Store) readSessionCost(logs, subs logReader, path string, subagents func(id, path string) []Subagent) *sessionCost {
+	snap, err := s.readLog(logs, path, true)
+	if err != nil || !snap.session {
+		return nil
+	}
+	var subCalls []subagentCalls
+	for _, sub := range subagents(snap.summary.ID, path) {
+		subSnap, err := s.readSubagentLog(subs, sub.path, true)
+		if err != nil {
+			continue
+		}
+		subSnap.read.subagent = sub.ID
+		subCalls = append(subCalls, subagentCalls{firstAt: subSnap.firstAt, calls: subSnap.calls, read: subSnap.read})
+	}
+	if s.src.subagentsUnordered {
+		// In the order they started, as Subagents has them.
+		slices.SortStableFunc(subCalls, func(a, b subagentCalls) int { return a.firstAt.Compare(b.firstAt) })
+	}
+	reads := make([]logRead, 0, 1+len(subCalls))
+	reads = append(reads, snap.read)
+	for _, sub := range subCalls {
+		reads = append(reads, sub.read)
+	}
+	sc := s.cost.sessions[path]
+	if sc == nil || sc.id != snap.summary.ID {
+		sc = &sessionCost{id: snap.summary.ID}
+	}
+	sc.fresh = sc.reads == nil || !slices.Equal(sc.reads, reads)
+	if sc.fresh {
+		sc.grown = grown(sc.reads, reads)
+		sc.before, sc.reads = sc.reads, reads
+		sc.calls = assemble(snap.calls, subCalls)
+		sc.logCalls = append(make([][]ModelCall, 0, len(reads)), snap.calls)
+		for _, sub := range subCalls {
+			sc.logCalls = append(sc.logCalls, sub.calls)
+		}
+	}
+	sc.born, sc.started, sc.changed = snap.info.Birth, snap.summary.CreatedAt, snap.info.ModTime
+	return sc
+}
+
+// count works out which calls count in each of sessions, in order, and
+// what they add up to. same says they are the sessions of the reading
+// before, in its order.
+func (c *costCache) count(sessions []*sessionCost, same bool) {
 	for i, sc := range sessions {
 		sc.pos = i
 	}
@@ -364,16 +389,20 @@ func (s *Store) readCosts() (DirectoryCost, error) {
 			}
 			sc.cost = CostOf(sc.own)
 		}
-	} else {
-		c.owner = make(map[string]*sessionCost, len(c.owner))
-		for _, sc := range sessions {
-			c.claim(sc)
-		}
-		for _, sc := range sessions {
-			sc.own = sc.ownCalls(c.owner)
-			sc.cost = CostOf(sc.own)
-		}
+		return
 	}
+	c.owner = make(map[string]*sessionCost, len(c.owner))
+	for _, sc := range sessions {
+		c.claim(sc)
+	}
+	for _, sc := range sessions {
+		sc.own = sc.ownCalls(c.owner)
+		sc.cost = CostOf(sc.own)
+	}
+}
+
+// directoryCost is what sessions spent, each and all of them.
+func directoryCost(sessions []*sessionCost) DirectoryCost {
 	d := DirectoryCost{
 		Sessions: make(map[string][]ModelCall, len(sessions)),
 		costs:    make(map[string]SessionCost, len(sessions)),
@@ -385,11 +414,7 @@ func (s *Store) readCosts() (DirectoryCost, error) {
 		total.merge(sc.cost)
 	}
 	d.Total = total.c.sorted()
-	c.result = d
-	for _, sc := range sessions {
-		sc.logCalls, sc.before = nil, nil
-	}
-	return d, nil
+	return d
 }
 
 // grown reports whether reads read on from where old stopped: the same
@@ -525,48 +550,57 @@ func assemble(own []ModelCall, subs []subagentCalls) []ModelCall {
 
 // costLogs lists the logs a reading of the costs reads: the sessions', and
 // a function that lists the subagents of the session id whose log is at
-// path. Codex keeps every thread in one tree, so one walk finds both.
+// path.
 func (s *Store) costLogs() ([]string, func(id, path string) []Subagent, error) {
-	switch s.agent {
-	case "codex":
-		threads, err := s.codexThreads()
-		if err != nil {
-			return nil, nil, err
-		}
-		byParent := make(map[string][]Subagent)
-		for _, t := range threads {
-			if !t.meta.IsSubAgent() {
-				continue
-			}
-			// As Subagents finds them: those of the thread, and those of
-			// the subagents its session ran.
-			sub := Subagent{ID: t.meta.Payload.ID, path: t.path, kind: "codex", from: t.meta.Payload.HistoryStart}
-			for _, parent := range slices.Compact([]string{t.meta.Payload.ParentThreadID, t.meta.Payload.SessionID}) {
-				if parent != "" && parent != sub.ID {
-					byParent[parent] = append(byParent[parent], sub)
-				}
-			}
-		}
-		return codexSessionLogs(s, threads), func(id, _ string) []Subagent { return byParent[id] }, nil
-	case "claude":
-		files, dirs, err := claudeLogs(s)
-		if err != nil {
-			return nil, nil, err
-		}
-		sessionDirs := make(map[string]bool, len(dirs))
-		for _, dir := range dirs {
-			sessionDirs[dir] = true
-		}
-		return files, func(id, path string) []Subagent {
-			// Most sessions ran none, and have no directory.
-			if !sessionDirs[filepath.Join(filepath.Dir(path), id)] {
-				return nil
-			}
-			return claudeSubagentLogs(id, path)
-		}, nil
+	if s.src.costLogs != nil {
+		return s.src.costLogs(s)
 	}
 	files, err := s.src.files(s)
 	return files, func(string, string) []Subagent { return nil }, err
+}
+
+// codexCostLogs is costLogs for Codex, which keeps every thread in one
+// tree: one walk finds the sessions and their subagents.
+func (s *Store) codexCostLogs() ([]string, func(id, path string) []Subagent, error) {
+	threads, err := s.codexThreads()
+	if err != nil {
+		return nil, nil, err
+	}
+	byParent := make(map[string][]Subagent)
+	for _, t := range threads {
+		if !t.meta.IsSubAgent() {
+			continue
+		}
+		// As Subagents finds them: those of the thread, and those of the
+		// subagents its session ran.
+		sub := Subagent{ID: t.meta.Payload.ID, path: t.path, kind: "codex", from: t.meta.Payload.HistoryStart}
+		for _, parent := range slices.Compact([]string{t.meta.Payload.ParentThreadID, t.meta.Payload.SessionID}) {
+			if parent != "" && parent != sub.ID {
+				byParent[parent] = append(byParent[parent], sub)
+			}
+		}
+	}
+	return codexSessionLogs(s, threads), func(id, _ string) []Subagent { return byParent[id] }, nil
+}
+
+// claudeCostLogs is costLogs for Claude Code, which keeps a session's
+// subagents in a directory named after it next to its log.
+func (s *Store) claudeCostLogs() ([]string, func(id, path string) []Subagent, error) {
+	files, dirs, err := claudeLogs(s)
+	if err != nil {
+		return nil, nil, err
+	}
+	sessionDirs := make(map[string]bool, len(dirs))
+	for _, dir := range dirs {
+		sessionDirs[dir] = true
+	}
+	return files, func(id, path string) []Subagent {
+		// Most sessions ran none, and have no directory.
+		if !sessionDirs[filepath.Join(filepath.Dir(path), id)] {
+			return nil
+		}
+		return claudeSubagentLogs(id, path)
+	}, nil
 }
 
 // price returns call at the store's prices, or at what the agent said. A

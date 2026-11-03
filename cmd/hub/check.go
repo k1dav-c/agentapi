@@ -45,6 +45,8 @@ func checkReach(out io.Writer, hubURL, publicURL string) error {
 	return nil
 }
 
+// loopbackHost reports whether host is localhost or a loopback address,
+// which only this machine reaches.
 func loopbackHost(host string) bool {
 	if host == "localhost" {
 		return true

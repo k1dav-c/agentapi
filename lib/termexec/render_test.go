@@ -29,7 +29,7 @@ func TestRenderScreenContentBelowCursor(t *testing.T) {
 	// at row 0.
 	feed("top line")
 	feed("\x1b[6;1Hbottom line") // move to row 6, col 1
-	feed("\x1b[1;1H")             // move cursor back to row 1, col 1
+	feed("\x1b[1;1H")            // move cursor back to row 1, col 1
 
 	got := renderScreen(state)
 	require.Contains(t, got, "top line", "should include content at cursor row")

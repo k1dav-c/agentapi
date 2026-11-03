@@ -501,7 +501,7 @@ func TestFormatMessageClearsCodexComposer(t *testing.T) {
 	require.Len(t, FormatMessage(mf.AgentTypeClaude, "hello"), 3)
 
 	// Replies into a Codex prompt's free-text field never send Backspace.
-	reply := formatFreeTextReply(mf.AgentTypeCodex, "\t", "note")
+	reply := formatFreeTextReply("\t", "note")
 	require.Len(t, reply, 4)
 	require.Equal(t, "note", reply[2].String())
 }

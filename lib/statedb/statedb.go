@@ -450,64 +450,26 @@ func minWriterOf(version int) int {
 // the file doesn't count as closed cleanly until Close.
 func (d *DB) Load() (Snapshot, error) {
 	snap := Snapshot{Meta: map[string]string{}}
-	rows, err := d.db.Query("SELECT key, value FROM meta")
-	if err != nil {
-		return snap, fmt.Errorf("read meta: %w", err)
-	}
-	for rows.Next() {
-		var k, v string
-		if err := rows.Scan(&k, &v); err != nil {
-			_ = rows.Close()
-			return snap, err
-		}
-		snap.Meta[k] = v
-	}
-	if err := closeRows(rows); err != nil {
+	if err := d.loadMeta(&snap); err != nil {
 		return snap, err
 	}
-	_, snap.Clean = snap.Meta[metaClean]
-	// What the schema's versions take isn't the conversation's.
-	for _, key := range []string{metaClean, metaMinWriterSchema, metaMinWriterVersion, metaWriterVersion} {
-		delete(snap.Meta, key)
-	}
-
-	if err := d.scanJSON("messages", "SELECT seq, data FROM messages ORDER BY id", func(seq uint64, data []byte) error {
-		var m conv.Message
-		if err := json.Unmarshal(data, &m); err != nil {
-			return err
-		}
+	if err := scanRows(d, "messages", "SELECT seq, data FROM messages ORDER BY id", func(m conv.Message, seq uint64) {
 		snap.Messages = append(snap.Messages, Message{Message: m, Seq: seq})
-		return nil
 	}); err != nil {
 		return snap, fmt.Errorf("read messages: %w", err)
 	}
-	if err := d.scanJSON("rich_messages", "SELECT seq, data FROM rich_messages ORDER BY pos", func(seq uint64, data []byte) error {
-		var m transcript.RichMessage
-		if err := json.Unmarshal(data, &m); err != nil {
-			return err
-		}
+	if err := scanRows(d, "rich_messages", "SELECT seq, data FROM rich_messages ORDER BY pos", func(m transcript.RichMessage, seq uint64) {
 		snap.RichMessages = append(snap.RichMessages, RichMessage{Message: m, Seq: seq})
-		return nil
 	}); err != nil {
 		return snap, fmt.Errorf("read rich messages: %w", err)
 	}
-	if err := d.scanJSON("session_events", "SELECT 0, data FROM session_events ORDER BY id", func(_ uint64, data []byte) error {
-		var e transcript.SessionEvent
-		if err := json.Unmarshal(data, &e); err != nil {
-			return err
-		}
+	if err := scanRows(d, "session_events", "SELECT 0, data FROM session_events ORDER BY id", func(e transcript.SessionEvent, _ uint64) {
 		snap.Events = append(snap.Events, e)
-		return nil
 	}); err != nil {
 		return snap, fmt.Errorf("read timeline: %w", err)
 	}
-	if err := d.scanJSON("requests", "SELECT seq, data FROM requests ORDER BY pos", func(seq uint64, data []byte) error {
-		var r native.RequestState
-		if err := json.Unmarshal(data, &r); err != nil {
-			return err
-		}
+	if err := scanRows(d, "requests", "SELECT seq, data FROM requests ORDER BY pos", func(r native.RequestState, seq uint64) {
 		snap.Requests = append(snap.Requests, Request{State: r, Seq: seq})
-		return nil
 	}); err != nil {
 		return snap, fmt.Errorf("read requests: %w", err)
 	}
@@ -517,13 +479,8 @@ func (d *DB) Load() (Snapshot, error) {
 	}); err != nil {
 		return snap, fmt.Errorf("read tasks: %w", err)
 	}
-	if err := d.scanJSON("queue", "SELECT 0, data FROM queue ORDER BY pos", func(_ uint64, data []byte) error {
-		var q QueuedMessage
-		if err := json.Unmarshal(data, &q); err != nil {
-			return err
-		}
+	if err := scanRows(d, "queue", "SELECT 0, data FROM queue ORDER BY pos", func(q QueuedMessage, _ uint64) {
 		snap.Queue = append(snap.Queue, q)
-		return nil
 	}); err != nil {
 		return snap, fmt.Errorf("read queue: %w", err)
 	}
@@ -531,6 +488,45 @@ func (d *DB) Load() (Snapshot, error) {
 		return snap, fmt.Errorf("mark the state database as open: %w", err)
 	}
 	return snap, nil
+}
+
+// loadMeta reads the meta table into snap: whether the file was closed
+// cleanly, and the conversation's values.
+func (d *DB) loadMeta(snap *Snapshot) error {
+	rows, err := d.db.Query("SELECT key, value FROM meta")
+	if err != nil {
+		return fmt.Errorf("read meta: %w", err)
+	}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		snap.Meta[k] = v
+	}
+	if err := closeRows(rows); err != nil {
+		return err
+	}
+	_, snap.Clean = snap.Meta[metaClean]
+	// What the schema's versions take isn't the conversation's.
+	for _, key := range []string{metaClean, metaMinWriterSchema, metaMinWriterVersion, metaWriterVersion} {
+		delete(snap.Meta, key)
+	}
+	return nil
+}
+
+// scanRows is scanJSON for rows whose data is a T in JSON, which it passes
+// to add with the row's seq.
+func scanRows[T any](d *DB, table, query string, add func(v T, seq uint64)) error {
+	return d.scanJSON(table, query, func(seq uint64, data []byte) error {
+		var v T
+		if err := json.Unmarshal(data, &v); err != nil {
+			return err
+		}
+		add(v, seq)
+		return nil
+	})
 }
 
 // scanJSON calls decode with every row query returns from table. A row

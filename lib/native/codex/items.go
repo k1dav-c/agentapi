@@ -135,8 +135,9 @@ func (s *segment) snapshot(model string) (transcript.RichMessage, bool) {
 	}, true
 }
 
-// joinReasoning joins reasoning texts like codexParser does for a rollout
-// reasoning record: trimmed, blank ones dropped, separated by a blank line.
+// joinReasoning joins reasoning texts like codexlog.Parser does for a
+// rollout reasoning record: trimmed, blank ones dropped, separated by a
+// blank line.
 func joinReasoning(summary, content []string) string {
 	var parts []string
 	for _, text := range append(append([]string(nil), summary...), content...) {
@@ -430,8 +431,8 @@ func toolResult(it *threadItem) transcript.RichContentBlock {
 			status = "failed"
 		}
 		if it.ExitCode != nil && *it.ExitCode != 0 {
-			// The same suffix codexParser writes; the chat reads the exit
-			// code from it.
+			// The same suffix codexlog.Parser writes; the chat reads the
+			// exit code from it.
 			status = "failed"
 			text = strings.TrimLeft(fmt.Sprintf("%s\nExit code: %d", text, *it.ExitCode), "\n")
 		}

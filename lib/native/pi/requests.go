@@ -161,15 +161,35 @@ func (a *Adapter) openDialog(req uiRequest) {
 		a.loop.turnDialogs = append(a.loop.turnDialogs, req.ID)
 	}
 
-	d := &dialog{id: req.ID, method: req.Method, options: req.Options}
-	r := native.Request{ID: req.ID, Title: req.Title}
 	var tool *runningTool
 	if n := len(a.loop.tools); n > 0 {
 		tool = &a.loop.tools[n-1]
 	}
+	r, approval := dialogRequest(req, tool)
+	d := &dialog{id: req.ID, method: req.Method, options: req.Options, approval: approval}
+	if req.Timeout > 0 {
+		// Pi answers with the default itself once the timeout passes.
+		id := req.ID
+		d.timer = a.clock.AfterFunc(time.Duration(req.Timeout)*time.Millisecond, func() {
+			a.post(func() { a.expireDialog(id) })
+		})
+	}
+	a.mu.Lock()
+	a.dialogs[req.ID] = d
+	a.mu.Unlock()
+	a.loop.sink.RequestOpened(r)
+	// The prompt that ran an extension command is under way. Its
+	// StartTurn returns once the dialog can be answered.
+	a.acceptPrompt()
+}
+
+// dialogRequest is the request a dialog shows, and whether it is the
+// approval of tool, the tool call that runs, if any.
+func dialogRequest(req uiRequest, tool *runningTool) (r native.Request, approval bool) {
+	r = native.Request{ID: req.ID, Title: req.Title}
 	switch req.Method {
 	case "confirm":
-		d.approval = true
+		approval = true
 		r.Kind = native.RequestKindApproval
 		r.Detail = req.Message
 		r.Options = []native.RequestOption{
@@ -178,7 +198,7 @@ func (a *Adapter) openDialog(req uiRequest) {
 		}
 	case "select":
 		if tool != nil {
-			d.approval = true
+			approval = true
 			r.Kind = native.RequestKindApproval
 			for _, o := range req.Options {
 				r.Options = append(r.Options, native.RequestOption{ID: o, Label: o, Kind: optionKind(o)})
@@ -202,23 +222,10 @@ func (a *Adapter) openDialog(req uiRequest) {
 	if r.Kind == native.RequestKindQuestion {
 		r.Options = []native.RequestOption{{ID: optionCancel, Label: "Cancel", Kind: native.OptionKindCancel}}
 	}
-	if d.approval && tool != nil {
+	if approval && tool != nil {
 		r.ToolName, r.ToolUseID, r.Input = tool.name, tool.id, tool.args
 	}
-	if req.Timeout > 0 {
-		// Pi answers with the default itself once the timeout passes.
-		id := req.ID
-		d.timer = a.clock.AfterFunc(time.Duration(req.Timeout)*time.Millisecond, func() {
-			a.post(func() { a.expireDialog(id) })
-		})
-	}
-	a.mu.Lock()
-	a.dialogs[req.ID] = d
-	a.mu.Unlock()
-	a.loop.sink.RequestOpened(r)
-	// The prompt that ran an extension command is under way. Its
-	// StartTurn returns once the dialog can be answered.
-	a.acceptPrompt()
+	return r, approval
 }
 
 // hasPendingTurn reports whether a prompt that starts a turn awaits its

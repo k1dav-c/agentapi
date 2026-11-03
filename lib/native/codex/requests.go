@@ -41,7 +41,6 @@ type pendingRequest struct {
 	id     string
 	rpcID  json.RawMessage
 	method string
-	turnID string
 	// toolUseID is the tool call the request is about.
 	toolUseID string
 	// results maps option IDs to the response to send.
@@ -162,7 +161,7 @@ func (s *loopState) commandApproval(msg rpcMessage) (*pendingRequest, native.Req
 		req.Title = "Run a command"
 	}
 
-	r := &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, results: map[string]any{}}
+	r := &pendingRequest{toolUseID: p.ItemID, results: map[string]any{}}
 	for _, decision := range commandDecisions(p) {
 		addCommandDecision(&req, r, decision)
 	}
@@ -306,7 +305,7 @@ func (s *loopState) fileChangeApproval(msg rpcMessage) (*pendingRequest, native.
 	if p.GrantRoot != "" {
 		sessionDesc = "Also allows writes under " + p.GrantRoot + " for the rest of the session."
 	}
-	r := &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, results: map[string]any{}}
+	r := &pendingRequest{toolUseID: p.ItemID, results: map[string]any{}}
 	for _, opt := range []native.RequestOption{
 		{ID: "accept", Label: "Allow", Kind: native.OptionKindAllow},
 		{ID: "acceptForSession", Label: "Allow for this session", Description: sessionDesc, Kind: native.OptionKindAllowAlways},
@@ -376,7 +375,7 @@ func (s *loopState) userInputRequest(msg rpcMessage) (*pendingRequest, native.Re
 			s.toolCallEvent(state.blk, s.now(), p.ItemID)
 		}
 	}
-	return &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, questions: req.Questions}, req, true
+	return &pendingRequest{toolUseID: p.ItemID, questions: req.Questions}, req, true
 }
 
 func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.Request, bool) {
@@ -384,24 +383,17 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 	if !s.decode(msg, &p) {
 		return nil, native.Request{}, false
 	}
-	r := &pendingRequest{turnID: p.TurnID, results: map[string]any{}}
+	r := &pendingRequest{results: map[string]any{}}
 	req := native.Request{Kind: native.RequestKindApproval, Title: native.OneLine(p.Message, native.MaxTitleRunes)}
 	if req.Title == "" {
 		req.Title = fmt.Sprintf("The %s MCP server asks for input", p.ServerName)
 	} else if req.Title != strings.TrimSpace(p.Message) {
 		req.Detail = p.Message
 	}
-	// An MCP tool call waiting for approval: the latest open call of that
-	// server in the turn.
-	if s.turn != nil {
-		for i := len(s.turn.order) - 1; i >= 0; i-- {
-			state := s.turn.order[i]
-			if state.kind == "mcpToolCall" && !state.done && state.server == p.ServerName {
-				req.ToolUseID, req.ToolName, req.Input = state.id, state.blk.ToolName, state.blk.ToolInput
-				r.toolUseID = state.id
-				break
-			}
-		}
+	// An MCP tool call waiting for approval.
+	if state := s.openMCPCall(p.ServerName); state != nil {
+		req.ToolUseID, req.ToolName, req.Input = state.id, state.blk.ToolName, state.blk.ToolInput
+		r.toolUseID = state.id
 	}
 
 	var properties map[string]mcpElicitationProperty
@@ -432,17 +424,7 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 	default:
 		// A form: one question per field, answered with accept + content.
 		req.Kind = native.RequestKindQuestion
-		r.form = map[string]formField{}
-		names := make([]string, 0, len(properties))
-		for name := range properties {
-			names = append(names, name)
-		}
-		slices.Sort(names)
-		for _, name := range names {
-			q, field := formQuestion(name, properties[name])
-			req.Questions = append(req.Questions, q)
-			r.form[name] = field
-		}
+		req.Questions, r.form = formQuestions(properties)
 		r.questions = req.Questions
 	}
 	addOption(&req, r, native.RequestOption{ID: "decline", Label: "Deny", Kind: native.OptionKindDeny},
@@ -450,6 +432,38 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 	addOption(&req, r, native.RequestOption{ID: "cancel", Label: "Cancel", Kind: native.OptionKindCancel},
 		mcpServerElicitationResponse{Action: "cancel"})
 	return r, req, true
+}
+
+// openMCPCall returns the latest MCP tool call of server in the turn that
+// is still open, or nil.
+func (s *loopState) openMCPCall(server string) *itemState {
+	if s.turn == nil {
+		return nil
+	}
+	for i := len(s.turn.order) - 1; i >= 0; i-- {
+		state := s.turn.order[i]
+		if state.kind == "mcpToolCall" && !state.done && state.server == server {
+			return state
+		}
+	}
+	return nil
+}
+
+// formQuestions asks one question per field of a form, by field name.
+func formQuestions(properties map[string]mcpElicitationProperty) ([]native.Question, map[string]formField) {
+	form := map[string]formField{}
+	names := make([]string, 0, len(properties))
+	for name := range properties {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	var questions []native.Question
+	for _, name := range names {
+		q, field := formQuestion(name, properties[name])
+		questions = append(questions, q)
+		form[name] = field
+	}
+	return questions, form
 }
 
 func formQuestion(name string, prop mcpElicitationProperty) (native.Question, formField) {
@@ -515,7 +529,7 @@ func (s *loopState) permissionsRequest(msg rpcMessage) (*pendingRequest, native.
 	detail = append(detail, "Requested: "+string(p.Permissions))
 	req.Detail = strings.Join(detail, "\n")
 	granted := rawOrEmpty(p.Permissions)
-	r := &pendingRequest{turnID: p.TurnID, toolUseID: p.ItemID, results: map[string]any{}}
+	r := &pendingRequest{toolUseID: p.ItemID, results: map[string]any{}}
 	addOption(&req, r, native.RequestOption{ID: "turn", Label: "Allow for this turn", Kind: native.OptionKindAllow},
 		permissionsRequestApprovalResponse{Permissions: granted, Scope: "turn"})
 	addOption(&req, r, native.RequestOption{ID: "session", Label: "Allow for this session", Kind: native.OptionKindAllowAlways},

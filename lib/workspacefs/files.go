@@ -239,23 +239,9 @@ func (d Dir) Diff(ctx context.Context, path string) (Diff, error) {
 
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
-	// git runs in the closest directory that exists (a deleted file's
-	// directory may be gone too), which must be inside the working
-	// directory itself, not reached through a symlink.
-	dirRel := filepath.Dir(rel)
-	for dirRel != "." {
-		if info, err := root.Stat(dirRel); err == nil && info.IsDir() {
-			break
-		}
-		dirRel = filepath.Dir(dirRel)
-	}
-	if info, err := root.Lstat(dirRel); err != nil || !info.IsDir() {
-		return Diff{}, refuse(Forbidden, fmt.Sprintf("%s is outside the agent's working directory", path))
-	}
-	dir := filepath.Join(string(d), dirRel)
-	spec, err := filepath.Rel(dir, filepath.Join(string(d), rel))
+	dir, spec, err := d.gitDir(root, rel, path)
 	if err != nil {
-		return Diff{}, fmt.Errorf("resolve %s: %w", path, err)
+		return Diff{}, err
 	}
 	// The directory's path in the repository, e.g. "app/".
 	prefix, err := runGit(ctx, dir, MaxViewedBytes, "rev-parse", "--show-prefix")
@@ -311,6 +297,30 @@ func (d Dir) Diff(ctx context.Context, path string) (Diff, error) {
 	diff.Text = out.text
 	diff.Truncated = out.truncated
 	return diff, nil
+}
+
+// gitDir returns the directory git runs in for the file rel (path as the
+// client named it) and the file's path relative to it. That is the closest
+// directory that exists (a deleted file's directory may be gone too), which
+// must be inside the working directory itself, not reached through a
+// symlink.
+func (d Dir) gitDir(root *os.Root, rel, path string) (dir, spec string, err error) {
+	dirRel := filepath.Dir(rel)
+	for dirRel != "." {
+		if info, err := root.Stat(dirRel); err == nil && info.IsDir() {
+			break
+		}
+		dirRel = filepath.Dir(dirRel)
+	}
+	if info, err := root.Lstat(dirRel); err != nil || !info.IsDir() {
+		return "", "", refuse(Forbidden, fmt.Sprintf("%s is outside the agent's working directory", path))
+	}
+	dir = filepath.Join(string(d), dirRel)
+	spec, err = filepath.Rel(dir, filepath.Join(string(d), rel))
+	if err != nil {
+		return "", "", fmt.Errorf("resolve %s: %w", path, err)
+	}
+	return dir, spec, nil
 }
 
 // maxDiffInput is how large a file Diff compares.

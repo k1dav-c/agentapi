@@ -89,8 +89,8 @@ func TestE2E(t *testing.T) {
 		defer cancel()
 
 		script, apiClient, cleanup := setup(ctx, t, &params{
-			cmdFn: func(ctx context.Context, t testing.TB, serverPort int, binaryPath, cwd, scriptFilePath string) (string, []string) {
-				defCmd, defArgs := defaultCmdFn(ctx, t, serverPort, binaryPath, cwd, scriptFilePath)
+			cmdFn: func(serverPort int, binaryPath, cwd, scriptFilePath string) (string, []string) {
+				defCmd, defArgs := serverCmdFn("", "")(serverPort, binaryPath, cwd, scriptFilePath)
 				script := fmt.Sprintf(`echo "hello agent" | %s %s`, defCmd, strings.Join(defArgs, " "))
 				return "/bin/sh", []string{"-c", script}
 			},
@@ -278,23 +278,23 @@ func TestE2E(t *testing.T) {
 	})
 }
 
+// cmdFn returns the command that runs the server, with the echo agent.
+type cmdFn func(serverPort int, binaryPath, cwd, scriptFilePath string) (string, []string)
+
 type params struct {
-	cmdFn          func(ctx context.Context, t testing.TB, serverPort int, binaryPath, cwd, scriptFilePath string) (string, []string)
+	cmdFn          cmdFn
 	stateFile      string
 	scriptFilePath string
 	initialPrompt  string
 }
 
-func defaultCmdFn(ctx context.Context, t testing.TB, serverPort int, binaryPath, cwd, scriptFilePath string) (string, []string) {
-	return binaryPath, []string{"server", fmt.Sprintf("--port=%d", serverPort), "--", "go", "run", filepath.Join(cwd, "echo.go"), scriptFilePath}
-}
-
-func stateCmdFn(stateFile, initialPrompt string) func(ctx context.Context, t testing.TB, serverPort int, binaryPath, cwd, scriptFilePath string) (string, []string) {
-	return func(ctx context.Context, t testing.TB, serverPort int, binaryPath, cwd, scriptFilePath string) (string, []string) {
-		args := []string{
-			"server",
-			fmt.Sprintf("--port=%d", serverPort),
-			fmt.Sprintf("--state-file=%s", stateFile),
+// serverCmdFn runs the server with a state file and an initial prompt,
+// each if not empty.
+func serverCmdFn(stateFile, initialPrompt string) cmdFn {
+	return func(serverPort int, binaryPath, cwd, scriptFilePath string) (string, []string) {
+		args := []string{"server", fmt.Sprintf("--port=%d", serverPort)}
+		if stateFile != "" {
+			args = append(args, fmt.Sprintf("--state-file=%s", stateFile))
 		}
 		if initialPrompt != "" {
 			args = append(args, fmt.Sprintf("--initial-prompt=%s", initialPrompt))
@@ -311,11 +311,7 @@ func setup(ctx context.Context, t testing.TB, p *params, waitForStable bool) ([]
 		p = &params{}
 	}
 	if p.cmdFn == nil {
-		if p.stateFile != "" {
-			p.cmdFn = stateCmdFn(p.stateFile, p.initialPrompt)
-		} else {
-			p.cmdFn = defaultCmdFn
-		}
+		p.cmdFn = serverCmdFn(p.stateFile, p.initialPrompt)
 	}
 
 	scriptFilePath := p.scriptFilePath
@@ -329,17 +325,7 @@ func setup(ctx context.Context, t testing.TB, p *params, waitForStable bool) ([]
 	err = json.Unmarshal(data, &script)
 	require.NoError(t, err, "Failed to unmarshal script from %s", scriptFilePath)
 
-	binaryPath := os.Getenv("AGENTAPI_BINARY_PATH")
-	if binaryPath == "" {
-		cwd, err := os.Getwd()
-		require.NoError(t, err, "Failed to get current working directory")
-		binaryPath = filepath.Join(cwd, "..", "out", "agentapi")
-		t.Logf("Building binary at %s", binaryPath)
-		buildCmd := exec.CommandContext(ctx, "go", "build", "-o", binaryPath, ".")
-		buildCmd.Dir = filepath.Join(cwd, "..")
-		t.Logf("run: %s", buildCmd.String())
-		require.NoError(t, buildCmd.Run(), "Failed to build binary")
-	}
+	binaryPath := agentapiBinary(ctx, t)
 
 	serverPort, err := getFreePort()
 	require.NoError(t, err, "Failed to get free port for server")
@@ -347,7 +333,7 @@ func setup(ctx context.Context, t testing.TB, p *params, waitForStable bool) ([]
 	cwd, err := os.Getwd()
 	require.NoError(t, err, "Failed to get current working directory")
 
-	bin, args := p.cmdFn(ctx, t, serverPort, binaryPath, cwd, scriptFilePath)
+	bin, args := p.cmdFn(serverPort, binaryPath, cwd, scriptFilePath)
 	t.Logf("Running command: %s %s", bin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, bin, args...)
 	// The test's servers don't register in the user's registry, nor read
@@ -382,23 +368,7 @@ func setup(ctx context.Context, t testing.TB, p *params, waitForStable bool) ([]
 
 	// Create cleanup function
 	cleanup := func() {
-		if cmd.Process != nil {
-			// Send SIGINT to allow graceful shutdown and state save
-			_ = cmd.Process.Signal(os.Interrupt)
-			// Wait for process to exit gracefully (with timeout)
-			done := make(chan error, 1)
-			go func() {
-				done <- cmd.Wait()
-			}()
-			select {
-			case <-done:
-				// Process exited gracefully
-			case <-time.After(10 * time.Second):
-				// Timeout, force kill
-				_ = cmd.Process.Kill()
-				<-done
-			}
-		}
+		stopServer(cmd)
 		wg.Wait()
 	}
 
@@ -411,6 +381,41 @@ func setup(ctx context.Context, t testing.TB, p *params, waitForStable bool) ([]
 		require.NoError(t, waitAgentAPIStable(ctx, t, apiClient, operationTimeout, "setup"))
 	}
 	return script, apiClient, cleanup
+}
+
+// agentapiBinary is $AGENTAPI_BINARY_PATH, or the binary built from the
+// repository.
+func agentapiBinary(ctx context.Context, t testing.TB) string {
+	t.Helper()
+	if path := os.Getenv("AGENTAPI_BINARY_PATH"); path != "" {
+		return path
+	}
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	path := filepath.Join(cwd, "..", "out", "agentapi")
+	t.Logf("Building binary at %s", path)
+	build := exec.CommandContext(ctx, "go", "build", "-o", path, ".")
+	build.Dir = filepath.Join(cwd, "..")
+	out, err := build.CombinedOutput()
+	require.NoError(t, err, "build agentapi: %s", out)
+	return path
+}
+
+// stopServer interrupts the server, which saves its state as it shuts
+// down, and kills it if it hasn't exited after 10 seconds.
+func stopServer(cmd *exec.Cmd) {
+	if cmd.Process == nil {
+		return
+	}
+	_ = cmd.Process.Signal(os.Interrupt)
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+	}
 }
 
 // logOutput logs process output with prefix
@@ -435,7 +440,7 @@ func waitForServer(ctx context.Context, t testing.TB, url string, timeout time.D
 	for {
 		select {
 		case <-healthCtx.Done():
-			require.Failf(t, "failed to start server", "server at %s not ready within timeout: %w", url, healthCtx.Err())
+			require.Failf(t, "failed to start server", "server at %s not ready within timeout: %v", url, healthCtx.Err())
 		case <-ticker.C:
 			resp, err := client.Get(url)
 			if err == nil {

@@ -55,10 +55,7 @@ func (h *Hub) watch(instance Instance) {
 func (h *Hub) unwatch(id string) {
 	h.watchMu.Lock()
 	defer h.watchMu.Unlock()
-	if cancel, ok := h.watchers[id]; ok {
-		cancel()
-		delete(h.watchers, id)
-	}
+	h.cancelWatchLocked(id)
 }
 
 // unwatchStopped stops following the instance id if it is still stopped:
@@ -69,6 +66,12 @@ func (h *Hub) unwatchStopped(id string) {
 	if current, ok := h.store.get(id); ok && current.Connection != ConnectionStopped {
 		return
 	}
+	h.cancelWatchLocked(id)
+}
+
+// cancelWatchLocked ends the watch of the instance id, if there is one.
+// Caller holds h.watchMu.
+func (h *Hub) cancelWatchLocked(id string) {
 	if cancel, ok := h.watchers[id]; ok {
 		cancel()
 		delete(h.watchers, id)
@@ -89,9 +92,7 @@ func (h *Hub) follow(ctx context.Context, id string) {
 		if !ok || instance.Connection == ConnectionStopped {
 			return
 		}
-		connected := false
 		heard, err := h.readSummaries(ctx, instance, func(summary instanceapi.SummaryBody) {
-			connected = true
 			failing = time.Time{}
 			wait = watchRetryMin
 			h.applySummary(ctx, id, instance.URL, summary)
@@ -99,64 +100,13 @@ func (h *Hub) follow(ctx context.Context, id string) {
 		if ctx.Err() != nil {
 			return
 		}
-		message := "the stream ended"
-		if err != nil {
-			message = err.Error()
-		}
 		now := h.clock.Now()
 		if failing.IsZero() {
 			failing = now
 		}
 		grace := now.Sub(failing) < h.config.ConnectGrace
-		var other *otherInstanceError
-		answered := errors.As(err, &other)
-		stopped := false
-		_, _ = h.store.update(id, false, func(i *Instance) {
-			if ctx.Err() != nil || i.Connection == ConnectionStopped {
-				return
-			}
-			// What the hub saw of the instance working ends with what
-			// the stream last said.
-			i.heard = heard
-			if !grace && i.Source == SourceWebhook && i.HeartbeatSeconds > 0 &&
-				now.Sub(i.LastSeen) >= stoppedAfter*time.Duration(i.HeartbeatSeconds)*time.Second {
-				// Killed without instance.stopped, such as with its
-				// workspace; its next heartbeat follows it again.
-				h.logger.Info("An instance stopped sending heartbeats; it counts as stopped", "instance", id, "last_seen", i.LastSeen)
-				i.Connection = ConnectionStopped
-				i.Error = ""
-				i.answeredBy = ""
-				stopped = true
-				return
-			}
-			if answered {
-				// Not a failure to wait out: the hub would show, and send
-				// approvals to, another agent.
-				if i.answeredBy != other.id {
-					h.logger.Warn("Another AgentAPI answers at an instance's URL", "instance", id, "url", i.URL, "answers", other.id)
-				}
-				i.Connection = ConnectionUnreachable
-				i.Error = message
-				i.answeredBy = other.id
-				return
-			}
-			i.answeredBy = ""
-			if grace {
-				i.Connection = ConnectionConnecting
-				i.Error = message
-				return
-			}
-			if i.Connection != ConnectionUnreachable || i.Error != message {
-				h.logger.Warn("An instance is unreachable", "instance", id, "url", i.URL, "error", message)
-			}
-			i.Connection = ConnectionUnreachable
-			i.Error = message
-		})
-		if stopped {
+		if h.streamFailed(ctx, id, err, heard, now, grace) {
 			return
-		}
-		if connected {
-			wait = watchRetryMin
 		}
 		timer := h.clock.NewTimer(wait, "hub", "retry")
 		select {
@@ -167,6 +117,62 @@ func (h *Hub) follow(ctx context.Context, id string) {
 		}
 		wait = min(wait*2, watchRetryMax)
 	}
+}
+
+// streamFailed records that the summary stream of id ended at now, with
+// err (nil when it just ended), after it last said anything at heard; grace
+// is whether the failures began within the connect grace. It reports
+// whether the instance counts as stopped, which ends its watch.
+func (h *Hub) streamFailed(ctx context.Context, id string, err error, heard, now time.Time, grace bool) bool {
+	message := "the stream ended"
+	if err != nil {
+		message = err.Error()
+	}
+	var other *otherInstanceError
+	answered := errors.As(err, &other)
+	stopped := false
+	_, _ = h.store.update(id, false, func(i *Instance) {
+		if ctx.Err() != nil || i.Connection == ConnectionStopped {
+			return
+		}
+		// What the hub saw of the instance working ends with what the
+		// stream last said.
+		i.heard = heard
+		if !grace && i.Source == SourceWebhook && i.HeartbeatSeconds > 0 &&
+			now.Sub(i.LastSeen) >= stoppedAfter*time.Duration(i.HeartbeatSeconds)*time.Second {
+			// Killed without instance.stopped, such as with its workspace;
+			// its next heartbeat follows it again.
+			h.logger.Info("An instance stopped sending heartbeats; it counts as stopped", "instance", id, "last_seen", i.LastSeen)
+			i.Connection = ConnectionStopped
+			i.Error = ""
+			i.answeredBy = ""
+			stopped = true
+			return
+		}
+		if answered {
+			// Not a failure to wait out: the hub would show, and send
+			// approvals to, another agent.
+			if i.answeredBy != other.id {
+				h.logger.Warn("Another AgentAPI answers at an instance's URL", "instance", id, "url", i.URL, "answers", other.id)
+			}
+			i.Connection = ConnectionUnreachable
+			i.Error = message
+			i.answeredBy = other.id
+			return
+		}
+		i.answeredBy = ""
+		if grace {
+			i.Connection = ConnectionConnecting
+			i.Error = message
+			return
+		}
+		if i.Connection != ConnectionUnreachable || i.Error != message {
+			h.logger.Warn("An instance is unreachable", "instance", id, "url", i.URL, "error", message)
+		}
+		i.Connection = ConnectionUnreachable
+		i.Error = message
+	})
+	return stopped
 }
 
 // applySummary takes a summary that the watch of url read, and reports

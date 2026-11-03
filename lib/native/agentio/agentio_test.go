@@ -187,6 +187,35 @@ func TestCallsDetach(t *testing.T) {
 	calls.Close(errors.New("exited"))
 }
 
+// A request sent and not answered may yet be carried out.
+func TestCallsAwait(t *testing.T) {
+	t.Parallel()
+	var calls agentio.Calls[string, int]
+	answered, err := calls.Add("a", nil)
+	require.NoError(t, err)
+	calls.Resolve("a", 7, nil)
+	v, err := calls.Await(t.Context(), "a", answered)
+	require.NoError(t, err)
+	assert.Equal(t, 7, v)
+
+	abandoned, err := calls.Add("b", nil)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = calls.Await(ctx, "b", abandoned)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.ErrorIs(t, err, native.ErrUnconfirmed)
+	assert.False(t, calls.Resolve("b", 1, nil), "the request is dropped")
+
+	exited := errors.New("the agent exited")
+	waiting, err := calls.Add("c", nil)
+	require.NoError(t, err)
+	calls.Close(exited)
+	_, err = calls.Await(t.Context(), "c", waiting)
+	require.ErrorIs(t, err, exited)
+	assert.ErrorIs(t, err, native.ErrUnconfirmed)
+}
+
 func TestCallsClose(t *testing.T) {
 	t.Parallel()
 	var calls agentio.Calls[int, string]

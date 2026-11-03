@@ -1,7 +1,6 @@
 package termexec
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -19,7 +18,6 @@ import (
 	"github.com/ActiveState/termtest/xpty"
 	"github.com/ActiveState/vt10x"
 	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/util"
 	"github.com/coder/quartz"
 )
 
@@ -101,13 +99,9 @@ func StartProcess(ctx context.Context, args StartProcessConfig) (*Process, error
 		// and 40 MB of allocations). The reader reads the output from the
 		// bufio.Reader xpty reads it from, in chunks, and writes each chunk
 		// to the terminal under one lock, which ReadScreen callers don't
-		// wait for while the reader waits for output.
-		//
-		// Warning: this depends on xpty internals (the unexported "pp" and
-		// "rdr" fields), pinned to v0.6.0.
-		pp := util.GetUnexportedField(xp, "pp").(*xpty.PassthroughPipe)
-		output := util.GetUnexportedField(pp, "rdr").(*bufio.Reader)
-		err := process.readOutput(output)
+		// wait for while the reader waits for output. That reader is xpty's
+		// own (see xptyOutput).
+		err := process.readOutput(xptyOutput(xp))
 		if errors.Is(err, io.EOF) || errors.Is(err, os.ErrClosed) || errors.Is(err, syscall.EIO) {
 			// Normal shutdown: PTY closed or process exited.
 			logger.Debug("PTY reader stopped", "error", err)
@@ -245,23 +239,7 @@ func renderScreen(state *vt10x.State) string {
 	defer state.Unlock()
 	rows, cols := state.Size()
 	_, cursorY := state.Cursor()
-	// Scan backwards from the bottom to find the last row with content.
-	// This handles TUI agents that write below the cursor position.
-	lastContent := cursorY
-	for y := rows - 1; y > cursorY; y-- {
-		for x := 0; x < cols; x++ {
-			r, _, _ := state.Cell(x, y)
-			if r != 0 && r != ' ' && r != widePadRune {
-				lastContent = y
-				goto found
-			}
-		}
-	}
-found:
-	renderRows := lastContent + 1
-	if renderRows > rows {
-		renderRows = rows
-	}
+	renderRows := min(lastContentRow(state, rows, cols, cursorY)+1, rows)
 	var screen strings.Builder
 	screen.Grow(renderRows * (cols + 1))
 	for y := 0; y < renderRows; y++ {
@@ -279,6 +257,21 @@ found:
 		screen.WriteByte('\n')
 	}
 	return screen.String()
+}
+
+// lastContentRow returns the last row below cursorY with content, or
+// cursorY. It scans backwards from the bottom, for TUI agents that write
+// below the cursor. Caller holds state's lock.
+func lastContentRow(state *vt10x.State, rows, cols, cursorY int) int {
+	for y := rows - 1; y > cursorY; y-- {
+		for x := 0; x < cols; x++ {
+			r, _, _ := state.Cell(x, y)
+			if r != 0 && r != ' ' && r != widePadRune {
+				return y
+			}
+		}
+	}
+	return cursorY
 }
 
 // Write sends input to the process via the pseudo terminal.

@@ -51,8 +51,8 @@ func policyMode(p policies) native.PermissionMode {
 	return ""
 }
 
-// threadSettings records the settings a thread/start or thread/resume
-// result reports.
+// threadSettings records the settings a thread/start, thread/resume or
+// thread/fork result reports.
 func (a *Adapter) threadSettings(resp threadStartResponse) {
 	var approval string
 	// A granular policy is an object: a combination of the user's own.
@@ -214,8 +214,8 @@ type turnChanges struct {
 
 // takeChanges puts the changes the next turn/start carries in params and
 // clears them. With implement set, the turn leaves the plan mode, in the
-// policies of implement. turnStarted applies what the turn changed once it
-// started; restoreChanges puts the changes back if it didn't.
+// policies of implement. commitChanges applies what the turn changed once
+// it started; restoreChanges puts the changes back if it didn't.
 func (a *Adapter) takeChanges(params *turnStartParams, implement native.PermissionMode) turnChanges {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -255,9 +255,9 @@ func (a *Adapter) nextCollabLocked(plan, stale bool) string {
 	return ""
 }
 
-// turnStarted applies what a turn that started changed. A change made
+// commitChanges applies what a turn that started changed. A change made
 // meanwhile wins.
-func (a *Adapter) turnStarted(c turnChanges) {
+func (a *Adapter) commitChanges(c turnChanges) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if c.collab != "" {

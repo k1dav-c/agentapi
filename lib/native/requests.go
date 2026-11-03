@@ -157,12 +157,7 @@ func (b *requestBook) pending() []RequestState {
 // waitingOnUser reports whether a request waits for an answer that isn't
 // on its way.
 func (b *requestBook) waitingOnUser() bool {
-	for _, r := range b.requests {
-		if _, answering := b.answering[r.ID]; r.Status == RequestStatusPending && !answering {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(b.requests, b.answerable)
 }
 
 // close closes a pending request and reports whether it did. While an

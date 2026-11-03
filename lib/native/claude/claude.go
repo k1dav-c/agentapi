@@ -211,11 +211,9 @@ var (
 	_ native.Configurable = (*Adapter)(nil)
 )
 
-var (
-	// errExited fails the control requests the CLI didn't answer before
-	// its output ended.
-	errExited = errors.New("claude exited")
-)
+// errExited fails the control requests the CLI didn't answer before
+// its output ended.
+var errExited = errors.New("claude exited")
 
 // turnPhase is where the current turn is.
 type turnPhase int
@@ -366,10 +364,9 @@ func (a *Adapter) request(ctx context.Context, subtype string, fields map[string
 	if err != nil {
 		return nil, err
 	}
-	res, err := call.Wait(ctx)
+	res, err := a.calls.Await(ctx, id, call)
 	if err != nil {
-		a.calls.Drop(id)
-		return nil, native.Unconfirmed(err)
+		return nil, err
 	}
 	return res.response, res.err
 }

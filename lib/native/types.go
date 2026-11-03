@@ -25,7 +25,9 @@ var (
 	// ErrNoActiveTurn is returned by Steer and Interrupt when the agent is
 	// not working on a turn.
 	ErrNoActiveTurn = errors.New("the agent is not working on a turn")
-	// ErrTurnActive is returned by StartTurn while a turn is running.
+	// ErrTurnActive is returned by StartTurn and Compact while a turn is
+	// running, and by the conversation's Compact, BeginSwitch and
+	// BeginReload.
 	ErrTurnActive = errors.New("the agent is already working on a turn")
 	// ErrRequestNotFound is returned by Respond for a request that is not
 	// pending, for example one the agent already withdrew.

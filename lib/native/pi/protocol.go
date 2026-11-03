@@ -167,7 +167,8 @@ func (c promptCommand) withID(id string) any {
 	return c
 }
 
-// simpleCommand is a command without arguments (get_state, abort).
+// simpleCommand is a command without arguments (get_state, abort,
+// compact, get_available_models).
 type simpleCommand struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`

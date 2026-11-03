@@ -166,17 +166,14 @@ func (a *Adapter) SettingOptions(ctx context.Context) (native.SettingOptions, er
 	models := a.models
 	a.mu.Unlock()
 	if models == nil {
-		res, err := a.request(ctx, cmdQuery, simpleCommand{Type: "get_available_models"})
-		if err == nil {
-			err = res.err
-		}
+		res, err := a.query(ctx, simpleCommand{Type: "get_available_models"})
 		if err != nil {
 			return native.SettingOptions{}, fmt.Errorf("list the models: %w", err)
 		}
 		var data struct {
 			Models []piModel `json:"models"`
 		}
-		if err := a.drift.Decode("get_available_models response", res.data, &data); err != nil {
+		if err := a.drift.Decode("get_available_models response", res, &data); err != nil {
 			return native.SettingOptions{}, fmt.Errorf("list the models: %w", err)
 		}
 		models = []native.ModelOption{}
@@ -212,25 +209,8 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 		a.mu.Unlock()
 	}()
 	if s.Model != "" {
-		provider, id, _ := strings.Cut(s.Model, "/")
-		res, err := a.request(ctx, cmdQuery, setModelCommand{Type: "set_model", Provider: provider, ModelID: id})
-		if err == nil {
-			err = res.err
-		}
-		if err != nil {
-			return fmt.Errorf("switch the model: %w", err)
-		}
-		// The answer is the new model: the settings say so from now on,
-		// also if what follows fails.
-		var model piModel
-		if json.Unmarshal(res.data, &model) == nil && model.ID != "" {
-			a.updateSettings(func(settings *native.Settings) {
-				settings.Model = model.modelID()
-				if !model.Reasoning {
-					settings.Effort = ""
-				}
-			})
-			a.setModelInfo(&model)
+		if err := a.applyModel(ctx, s.Model); err != nil {
+			return err
 		}
 	}
 	if s.Effort != "" {
@@ -238,19 +218,38 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 			return fmt.Errorf("change the thinking level: %w", err)
 		}
 	}
-	res, err := a.request(ctx, cmdQuery, simpleCommand{Type: "get_state"})
-	if err == nil {
-		err = res.err
-	}
+	res, err := a.query(ctx, simpleCommand{Type: "get_state"})
 	if err != nil {
 		return fmt.Errorf("read the settings: %w", err)
 	}
 	var state sessionState
-	if err := a.drift.Decode("get_state response", res.data, &state); err != nil {
+	if err := a.drift.Decode("get_state response", res, &state); err != nil {
 		return fmt.Errorf("read the settings: %w", err)
 	}
 	a.setSettings(stateSettings(state))
 	a.setModelInfo(state.Model)
+	return nil
+}
+
+// applyModel switches to model, a provider/id.
+func (a *Adapter) applyModel(ctx context.Context, model string) error {
+	provider, id, _ := strings.Cut(model, "/")
+	res, err := a.query(ctx, setModelCommand{Type: "set_model", Provider: provider, ModelID: id})
+	if err != nil {
+		return fmt.Errorf("switch the model: %w", err)
+	}
+	// The answer is the new model: the settings say so from now on, also
+	// if what follows fails.
+	var m piModel
+	if json.Unmarshal(res, &m) == nil && m.ID != "" {
+		a.updateSettings(func(settings *native.Settings) {
+			settings.Model = m.modelID()
+			if !m.Reasoning {
+				settings.Effort = ""
+			}
+		})
+		a.setModelInfo(&m)
+	}
 	return nil
 }
 
@@ -271,9 +270,16 @@ func (a *Adapter) Compact(ctx context.Context) error {
 
 // command sends a command and waits for its success.
 func (a *Adapter) command(ctx context.Context, cmd command) error {
+	_, err := a.query(ctx, cmd)
+	return err
+}
+
+// query sends a command and waits for its data, or the error of the
+// command or of Pi's answer.
+func (a *Adapter) query(ctx context.Context, cmd command) (json.RawMessage, error) {
 	res, err := a.request(ctx, cmdQuery, cmd)
 	if err == nil {
 		err = res.err
 	}
-	return err
+	return res.data, err
 }

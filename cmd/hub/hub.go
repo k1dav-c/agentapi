@@ -121,16 +121,9 @@ func joinCmd() *cobra.Command {
 			if secret == "" {
 				_, _ = fmt.Fprintln(out, "Warning: without --secret the hub can't tell the events are this machine's.")
 			}
-			// The public URL with {ip} filled in as the AgentAPIs fill it
-			// in now, for the checks and for those too old to fill it in.
-			expandedURL := publicURL
-			if instanceapi.HasIP(publicURL) {
-				ip, err := resolveIP(hubURL)
-				if err != nil {
-					return fmt.Errorf("--public-url: no address of this machine for {ip}: %w", err)
-				}
-				expandedURL = instanceapi.ExpandIP(publicURL, ip)
-				_, _ = fmt.Fprintf(out, "{ip} is %s now, the address this machine reaches the hub from; the AgentAPIs look it up again when it changes.\n", ip)
+			expandedURL, err := expandIP(out, hubURL, publicURL)
+			if err != nil {
+				return err
 			}
 			if publicURL != "" {
 				if err := checkURL(instanceapi.ExpandPublicURL(expandedURL, 1)); err != nil {
@@ -146,24 +139,7 @@ func joinCmd() *cobra.Command {
 				}
 				_, _ = fmt.Fprintf(out, "The hub at %s took a signed test event.\n", hubURL)
 			}
-			config, err := userconfig.Load(opts.configPath)
-			if err != nil {
-				return err
-			}
-			config[keyURL] = hubURL
-			config[keyEvents] = events
-			if publicURL != "" {
-				config[keyPublic] = publicURL
-			}
-			if secret != "" {
-				config[keySecret] = secret
-			} else {
-				delete(config, keySecret)
-			}
-			if allowUpdate {
-				config[keyAllowUpdate] = true
-			}
-			if err := userconfig.Save(opts.configPath, config); err != nil {
+			if err := saveJoin(opts.configPath, hubURL, secret, events, publicURL, allowUpdate); err != nil {
 				return err
 			}
 			_, _ = fmt.Fprintf(out, "Wrote the hub to %s: AgentAPIs that start from now on report to %s.\n", opts.configPath, hubURL)
@@ -180,6 +156,45 @@ func joinCmd() *cobra.Command {
 	cmd.Flags().StringVar(&publicURL, "public-url", "", "Where the hub reaches this machine's AgentAPIs, such as http://{ip}:{port} or http://dev-1.vpn:{port}: {port} and {hostname} are filled in for each, and {ip} with this machine's IPv4 address on the route to the hub, which follows it when DHCP gives the machine another")
 	cmd.Flags().BoolVar(&allowUpdate, "allow-update", false, "Also let the hub update this machine's AgentAPIs to the latest release (allow-update: true in the config file, which leave keeps)")
 	return cmd
+}
+
+// expandIP is publicURL with {ip} filled in as the AgentAPIs fill it in
+// now, for the checks and for those too old to fill it in; it says what
+// {ip} is.
+func expandIP(out io.Writer, hubURL, publicURL string) (string, error) {
+	if !instanceapi.HasIP(publicURL) {
+		return publicURL, nil
+	}
+	ip, err := resolveIP(hubURL)
+	if err != nil {
+		return "", fmt.Errorf("--public-url: no address of this machine for {ip}: %w", err)
+	}
+	_, _ = fmt.Fprintf(out, "{ip} is %s now, the address this machine reaches the hub from; the AgentAPIs look it up again when it changes.\n", ip)
+	return instanceapi.ExpandIP(publicURL, ip), nil
+}
+
+// saveJoin writes the hub into the config file at path: its URL, events
+// and secret (none removes it), and the public URL and allow-update when
+// set.
+func saveJoin(path, hubURL, secret string, events []string, publicURL string, allowUpdate bool) error {
+	config, err := userconfig.Load(path)
+	if err != nil {
+		return err
+	}
+	config[keyURL] = hubURL
+	config[keyEvents] = events
+	if publicURL != "" {
+		config[keyPublic] = publicURL
+	}
+	if secret != "" {
+		config[keySecret] = secret
+	} else {
+		delete(config, keySecret)
+	}
+	if allowUpdate {
+		config[keyAllowUpdate] = true
+	}
+	return userconfig.Save(path, config)
 }
 
 // reportUpdates says what allow-update: true does, and what this machine's

@@ -310,6 +310,10 @@ func (a *Adapter) Capabilities() native.Capabilities {
 // Compact implements native.Compacter: the simulated context empties.
 func (a *Adapter) Compact(context.Context) error {
 	a.mu.Lock()
+	if !a.started || a.closed {
+		a.mu.Unlock()
+		return native.ErrNotStarted
+	}
 	if a.active != nil {
 		a.mu.Unlock()
 		return native.ErrTurnActive
@@ -846,46 +850,51 @@ func (s *script) reply(long bool) error {
 	for _, o := range s.outcomes {
 		sb.WriteString("- " + o + "\n")
 	}
-	stream := func(text string) error {
-		for _, chunk := range chunks(text, 6) {
-			m.blocks[0].Text += chunk
-			s.send(m)
-			if err := s.pause(1); err != nil {
-				return err
-			}
-		}
-		// Steered messages are taken up between paragraphs.
-		s.steer(m)
-		return nil
-	}
 	finish := func(stop string) {
 		m.stop = stop
 		m.usage = &transcript.Usage{InputTokens: 1200 + 40*len(s.text), OutputTokens: 4 * len(m.blocks[0].Text) / 3}
 		s.send(m)
 	}
-	if err := stream(sb.String()); err != nil {
-		finish(native.StopReasonInterrupted)
-		return err
-	}
-	if long {
-		for i := 1; i <= 25; i++ {
-			if err := stream(fmt.Sprintf("\nStep %d of 25: still working…", i)); err != nil {
-				finish(native.StopReasonInterrupted)
-				return err
-			}
-			if err := s.pause(8); err != nil {
-				finish(native.StopReasonInterrupted)
-				return err
-			}
-			s.steer(m)
-		}
-	}
-	if err := stream("\n\nThis is the native demo agent. Say *approve*, *ask*, *plan* or *long* to see more."); err != nil {
+	if err := s.streamReply(m, sb.String(), long); err != nil {
 		finish(native.StopReasonInterrupted)
 		return err
 	}
 	s.steer(m)
 	finish(native.StopReasonEndTurn)
+	return nil
+}
+
+// streamReply streams the reply m: the summary, the steps of a long one,
+// and the hint. It returns the error of a pause the turn's end cut short.
+func (s *script) streamReply(m *message, summary string, long bool) error {
+	if err := s.stream(m, summary); err != nil {
+		return err
+	}
+	if long {
+		for i := 1; i <= 25; i++ {
+			if err := s.stream(m, fmt.Sprintf("\nStep %d of 25: still working…", i)); err != nil {
+				return err
+			}
+			if err := s.pause(8); err != nil {
+				return err
+			}
+			s.steer(m)
+		}
+	}
+	return s.stream(m, "\n\nThis is the native demo agent. Say *approve*, *ask*, *plan* or *long* to see more.")
+}
+
+// stream adds text to the reply m a few words at a time.
+func (s *script) stream(m *message, text string) error {
+	for _, chunk := range chunks(text, 6) {
+		m.blocks[0].Text += chunk
+		s.send(m)
+		if err := s.pause(1); err != nil {
+			return err
+		}
+	}
+	// Steered messages are taken up between paragraphs.
+	s.steer(m)
 	return nil
 }
 

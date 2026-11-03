@@ -68,7 +68,7 @@ func (c *PTYConversation) updateLastAgentMessageLocked(screen string, timestamp 
 		}
 	}
 	for _, toolCall := range toolCalls {
-		if c.toolCallMessageSet[toolCall] == false {
+		if !c.toolCallMessageSet[toolCall] {
 			c.toolCallMessageSet[toolCall] = true
 			c.cfg.Logger.Info("Tool call detected", "toolCall", toolCall)
 		}

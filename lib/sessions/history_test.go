@@ -498,3 +498,63 @@ func TestValidID(t *testing.T) {
 	_, err := newStore(t, "claude", "/w").ReadHistory("../w/s1")
 	assert.ErrorIs(t, err, ErrInvalidID)
 }
+
+// A fork of a fork continues both threads: its prompts and history
+// start with the first thread's, and each call counts once, in the
+// thread that made it.
+func TestCodexForkOfAFork(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	cwd := "/work/app"
+	day := filepath.Join(home, "sessions", "2026", "10", "18")
+	user := func(ord int, at, text string) string {
+		return fmt.Sprintf(`{"timestamp":"2026-10-18T%s.000Z","ordinal":%d,"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":%q}]}}`, at, ord, text)
+	}
+	reply := func(ord int, at, id, text string) string {
+		return fmt.Sprintf(`{"timestamp":"2026-10-18T%s.000Z","ordinal":%d,"type":"response_item","payload":{"type":"message","id":%q,"role":"assistant","content":[{"type":"output_text","text":%q}]}}`, at, ord, id, text)
+	}
+	count := func(ord int, at string, input int) string {
+		return fmt.Sprintf(`{"timestamp":"2026-10-18T%s.000Z","ordinal":%d,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d,"cached_input_tokens":0,"output_tokens":10},"last_token_usage":{"input_tokens":%d,"cached_input_tokens":0,"output_tokens":10}}}}`, at, ord, input, input)
+	}
+	meta := func(id, at, forked string, before int) string {
+		fork := ""
+		if forked != "" {
+			fork = fmt.Sprintf(`,"forked_from_id":%q,"forked_from_ordinal_exclusive":%d`, forked, before)
+		}
+		return fmt.Sprintf(`{"timestamp":"2026-10-18T%s.000Z","ordinal":0,"type":"session_meta","payload":{"id":%q,"session_id":%q%s,"cwd":%q}}`, at, id, id, fork, cwd)
+	}
+	model := func(ord int, at string) string {
+		return fmt.Sprintf(`{"timestamp":"2026-10-18T%s.000Z","ordinal":%d,"type":"turn_context","payload":{"model":"gpt-6.1-sol"}}`, at, ord)
+	}
+	writeLog(t, filepath.Join(day, "rollout-2026-10-18T10-00-00-t1.jsonl"), time.Now().Add(-2*time.Hour),
+		meta("t1", "10:00:00", "", 0), model(1, "10:00:00"),
+		user(2, "10:00:01", "first"), reply(3, "10:00:02", "m1", "one"), count(4, "10:00:02", 1000),
+		user(5, "10:05:00", "after the fork"))
+	writeLog(t, filepath.Join(day, "rollout-2026-10-18T10-01-00-t2.jsonl"), time.Now().Add(-time.Hour),
+		meta("t2", "10:01:00", "t1", 5), model(1, "10:01:00"),
+		user(2, "10:01:01", "second"), reply(3, "10:01:02", "m2", "two"), count(4, "10:01:02", 2000),
+		user(5, "10:06:00", "after the second fork"))
+	writeLog(t, filepath.Join(day, "rollout-2026-10-18T10-02-00-t3.jsonl"), time.Now(),
+		meta("t3", "10:02:00", "t2", 5), model(1, "10:02:00"),
+		user(2, "10:02:01", "third"), reply(3, "10:02:02", "m3", "three"), count(4, "10:02:02", 3000))
+
+	store := newStore(t, "codex", cwd)
+	sessions, err := store.List(10)
+	require.NoError(t, err)
+	require.Len(t, sessions, 3)
+	assert.Equal(t, "t3", sessions[0].ID)
+	assert.Equal(t, "first", sessions[0].FirstPrompt)
+	assert.Equal(t, 3, sessions[0].Prompts, "t1's, t2's and its own")
+
+	h, err := store.ReadHistory("t3")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"user: first", "agent: one", "user: second", "agent: two", "user: third", "agent: three"}, roles(h.Messages))
+
+	d, err := store.Costs()
+	require.NoError(t, err)
+	for _, id := range []string{"t1", "t2", "t3"} {
+		assert.Equal(t, 1, d.Cost(id).Calls, id)
+	}
+	assert.Equal(t, 3, d.Total.Calls)
+	assert.Equal(t, 6000, d.Total.Tokens.Input)
+}

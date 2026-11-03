@@ -87,7 +87,8 @@ var (
 	_ native.Configurable = (*Adapter)(nil)
 )
 
-// New returns an adapter that supports everything.
+// New returns an adapter that supports steering, interrupting, resuming
+// and images.
 func New() *Adapter {
 	return &Adapter{
 		Caps:          native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true},

@@ -49,6 +49,15 @@ func (c *Conversation) setLoginLocked(login LoginRequired) bool {
 	return true
 }
 
+// clearLoginLocked records that the agent no longer waits for a login,
+// and tells the observer if it did.
+func (c *Conversation) clearLoginLocked() {
+	if c.login != nil {
+		c.login = nil
+		c.cfg.Observer.LoginRequired(nil)
+	}
+}
+
 // localAccount returns the machine AgentAPI runs on and the user it runs
 // as, which is where the user has to log the agent in.
 var localAccount = sync.OnceValues(func() (host, username string) {
@@ -101,10 +110,7 @@ func (c *Conversation) RetryLogin(context.Context) error {
 		return ErrNoLoginRequired
 	}
 	if !c.started {
-		if c.relaunchWake != nil {
-			close(c.relaunchWake)
-			c.relaunchWake = nil
-		}
+		c.wakeRelaunchLocked()
 		c.mu.Unlock()
 		return nil
 	}

@@ -117,7 +117,7 @@ func (b ptyBackend) deliver(content string, _ DispatchMode, resp *MessageRespons
 		screen, question = s.emitter.Screen()
 	}
 	if keys, ok := freeTextReplyKeys(s.agentType, screen); question && ok {
-		if err := s.sendToPTY(formatFreeTextReply(s.agentType, keys, content)...); err != nil {
+		if err := s.sendToPTY(formatFreeTextReply(keys, content)...); err != nil {
 			if errors.Is(err, conv.ErrMessageValidationChanging) {
 				return huma.Error409Conflict("the agent's prompt is still updating; try again in a moment")
 			}
@@ -177,7 +177,7 @@ func (b ptyBackend) answerHandoff(pending *handoff.Request, _ native.RequestStat
 	s.handoff.record(pending.ID, replyID, result)
 	var err error
 	if freeText {
-		err = s.sendToPTY(formatFreeTextReply(s.agentType, freeTextKeys, strings.TrimSpace(content))...)
+		err = s.sendToPTY(formatFreeTextReply(freeTextKeys, strings.TrimSpace(content))...)
 	} else {
 		var n int
 		n, err = s.agentio.Write([]byte(content))

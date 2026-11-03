@@ -51,8 +51,7 @@ func isLimitError(e *turnError) bool {
 	if e == nil {
 		return false
 	}
-	var code string
-	if json.Unmarshal(e.CodexErrorInfo, &code) == nil && code == "usageLimitExceeded" {
+	if code, ok := errorCode(e); ok && code == "usageLimitExceeded" {
 		return true
 	}
 	return native.IsLimitError(turnErrorText(e))
@@ -65,26 +64,38 @@ func isAuthError(e *turnError) bool {
 	if e == nil {
 		return false
 	}
-	if len(e.CodexErrorInfo) > 0 {
-		var code string
-		if json.Unmarshal(e.CodexErrorInfo, &code) == nil {
-			if code == "unauthorized" {
-				return true
-			}
-		} else {
-			var kinds map[string]struct {
-				HTTPStatusCode *int `json:"httpStatusCode"`
-			}
-			if json.Unmarshal(e.CodexErrorInfo, &kinds) == nil {
-				for _, kind := range kinds {
-					if kind.HTTPStatusCode != nil && *kind.HTTPStatusCode == 401 {
-						return true
-					}
-				}
-			}
-		}
+	code, ok := errorCode(e)
+	if (ok && code == "unauthorized") || (!ok && unauthorizedKind(e.CodexErrorInfo)) {
+		return true
 	}
 	return native.IsAuthError(turnErrorText(e))
+}
+
+// errorCode returns the error code codexErrorInfo is, when it is a code
+// rather than error kinds with details.
+func errorCode(e *turnError) (string, bool) {
+	var code string
+	if json.Unmarshal(e.CodexErrorInfo, &code) != nil {
+		return "", false
+	}
+	return code, true
+}
+
+// unauthorizedKind reports whether any of the error kinds in info has
+// HTTP status 401.
+func unauthorizedKind(info json.RawMessage) bool {
+	var kinds map[string]struct {
+		HTTPStatusCode *int `json:"httpStatusCode"`
+	}
+	if json.Unmarshal(info, &kinds) != nil {
+		return false
+	}
+	for _, kind := range kinds {
+		if kind.HTTPStatusCode != nil && *kind.HTTPStatusCode == 401 {
+			return true
+		}
+	}
+	return false
 }
 
 // reportLogin tells the sink the login is gone, once per turn.

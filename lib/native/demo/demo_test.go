@@ -433,3 +433,14 @@ func TestCrash(t *testing.T) {
 	assert.True(t, c.Idle())
 	assert.NotEqual(t, ref, c.SessionRef(), "a new session")
 }
+
+// An adapter compacts only between Start and Close, as it takes turns.
+func TestCompactNeedsAStartedAdapter(t *testing.T) {
+	adapter, err := demo.Factory(demo.Options{Step: time.Millisecond})(native.Resume{})
+	require.NoError(t, err)
+	compacter, ok := adapter.(native.Compacter)
+	require.True(t, ok)
+	assert.ErrorIs(t, compacter.Compact(context.Background()), native.ErrNotStarted)
+	require.NoError(t, adapter.Close())
+	assert.ErrorIs(t, compacter.Compact(context.Background()), native.ErrNotStarted)
+}

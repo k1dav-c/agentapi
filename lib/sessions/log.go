@@ -20,7 +20,8 @@ type sessionLog struct {
 	// subagent says the log is a subagent's: its calls are read, and no
 	// summary.
 	subagent bool
-	codex    bool
+	// codex says the log is a Codex thread's (source.threads).
+	codex bool
 
 	// lines counts the lines read, skipped those before the header; headed
 	// says the header was read.
@@ -64,7 +65,7 @@ type sessionLog struct {
 func (s *Store) newSessionLog(subagent bool) *sessionLog {
 	drift := agentlog.NewDrift(s.src.format)
 	l := &sessionLog{
-		store: s, src: &s.src, subagent: subagent, codex: s.agent == "codex",
+		store: s, src: &s.src, subagent: subagent, codex: s.src.threads,
 		calls: s.src.format.NewCalls(drift), drift: drift, reader: s.readers.Add(1),
 	}
 	if s.src.namesInLog {

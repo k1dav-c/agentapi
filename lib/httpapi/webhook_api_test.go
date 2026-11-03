@@ -124,7 +124,6 @@ func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
 	response, err = server.updateWebhookConfig(t.Context(), request)
 	require.NoError(t, err)
 	assert.Empty(t, response.Body.URL)
-
 }
 
 // PUT /webhook takes a public URL with placeholders (agentapi hub join

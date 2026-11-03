@@ -508,7 +508,7 @@ func TestExitWhileRequestPending(t *testing.T) {
 	assert.Contains(t, err.Error(), "out of memory")
 
 	select {
-	case <-h.a.loopDone:
+	case <-h.a.host.LoopDone():
 	case <-time.After(5 * time.Second):
 		t.Fatal("the event loop didn't stop")
 	}

@@ -123,7 +123,8 @@ func TestWebhookSend(t *testing.T) {
 	}
 	body, err := json.Marshal(event)
 	require.NoError(t, err)
-	require.NoError(t, dispatcher.sendWithConfig(t.Context(), dispatcher.config, &http.Client{}, event, body))
+	_, err = dispatcher.send(t.Context(), dispatcher.config, &http.Client{}, event, body)
+	require.NoError(t, err)
 
 	assert.JSONEq(t, string(body), string(receivedBody))
 	assert.Equal(t, "application/json", receivedHeader.Get("Content-Type"))
@@ -150,7 +151,7 @@ func TestWebhookSendRejectsNonSuccessfulResponse(t *testing.T) {
 	)
 	require.NoError(t, err)
 	event := WebhookEvent{ID: "delivery-1", CreatedAt: time.Now()}
-	err = dispatcher.sendWithConfig(t.Context(), dispatcher.config, &http.Client{}, event, []byte(`{}`))
+	_, err = dispatcher.send(t.Context(), dispatcher.config, &http.Client{}, event, []byte(`{}`))
 	require.ErrorContains(t, err, "503 Service Unavailable")
 }
 
@@ -190,7 +191,8 @@ func TestWebhookCustomPayloadTemplate(t *testing.T) {
 	}
 	body, err := dispatcher.renderBody(event)
 	require.NoError(t, err)
-	require.NoError(t, dispatcher.sendWithConfig(t.Context(), dispatcher.config, &http.Client{}, event, body))
+	_, err = dispatcher.send(t.Context(), dispatcher.config, &http.Client{}, event, body)
+	require.NoError(t, err)
 
 	assert.JSONEq(t, `{"event":"run.status_changed","status":"stable","prev":"running","agent":"claude"}`, string(receivedBody))
 }

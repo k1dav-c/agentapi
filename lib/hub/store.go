@@ -343,6 +343,11 @@ func (s *store) sortedLocked() []*Instance {
 func (s *store) list() []Instance {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.listLocked()
+}
+
+// listLocked is list. Caller holds s.mu.
+func (s *store) listLocked() []Instance {
 	list := make([]Instance, 0, len(s.instances))
 	for _, i := range s.sortedLocked() {
 		list = append(list, *i)
@@ -366,12 +371,12 @@ const pinLast = math.MaxInt
 
 // update changes the instance id with change, or adds it when create is
 // set, and reports whether it did. The file is written (soon after) when
-// what it keeps changed; when the instance was last seen isn't worth a write of its own
-// and goes with the next one. ChangedAt moves when the change is one its
-// row shows of what it does (activityKey), and for a new instance. A
-// change of its Pin numbers the pinned ones again. A span of work starts or
-// ends when the instance starts or stops working (workLog.track); its
-// ChangedAt doesn't move for that.
+// what it keeps changed; when the instance was last seen isn't worth a
+// write of its own and goes with the next one. ChangedAt moves when the
+// change is one its row shows of what it does (activityKey), and for a new
+// instance. A change of its Pin numbers the pinned ones again. A span of
+// work starts or ends when the instance starts or stops working
+// (workLog.track); its ChangedAt doesn't move for that.
 func (s *store) update(id string, create bool, change func(*Instance)) (Instance, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -533,13 +538,9 @@ func (s *store) refreshWork() {
 func (s *store) subscribe() ([]Instance, chan storeEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	list := make([]Instance, 0, len(s.instances))
-	for _, i := range s.sortedLocked() {
-		list = append(list, *i)
-	}
 	ch := make(chan storeEvent, 256)
 	s.subs[ch] = struct{}{}
-	return list, ch
+	return s.listLocked(), ch
 }
 
 func (s *store) unsubscribe(ch chan storeEvent) {

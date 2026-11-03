@@ -72,11 +72,8 @@ func (s *Store) Subagents(sessionID string) ([]Subagent, error) {
 		subs []Subagent
 		err  error
 	)
-	switch s.agent {
-	case "claude":
-		subs, err = s.claudeSubagents(sessionID)
-	case "codex":
-		subs, err = s.codexSubagents(sessionID)
+	if s.src.subagents != nil {
+		subs, err = s.src.subagents(s, sessionID)
 	}
 	slices.SortStableFunc(subs, func(a, b Subagent) int { return a.StartedAt.Compare(b.StartedAt) })
 	return subs, err
@@ -197,24 +194,8 @@ func (s Subagent) parser() (agentlog.LineParser, agentlog.SessionEventParser, fu
 // the subagent's, so they can't be taken for the agent's own.
 func (s Subagent) run() SubagentRun {
 	parser, _, prompt := s.parser()
-	var (
-		run    SubagentRun
-		order  []string
-		latest = make(map[string]transcript.RichMessage)
-	)
-	add := func(msgs []transcript.RichMessage) {
-		for _, m := range msgs {
-			if m.MessageID == "" || (m.Role == "user" && !hasToolResult(m)) {
-				continue
-			}
-			m.MessageID = "subagent-" + s.ID + "-" + m.MessageID
-			key := m.MessageID + "\x00" + m.Role
-			if _, seen := latest[key]; !seen {
-				order = append(order, key)
-			}
-			latest[key] = m
-		}
-	}
+	var run SubagentRun
+	rich := newRichLog("subagent-" + s.ID + "-")
 	s.lines(func(line []byte) bool {
 		if run.Prompt == "" {
 			if text, _, ok := prompt(line); ok {
@@ -222,14 +203,12 @@ func (s Subagent) run() SubagentRun {
 			}
 		}
 		if msgs, err := parser.ParseLine(line); err == nil {
-			add(msgs)
+			rich.add(msgs)
 		}
 		return true
 	})
-	add(parser.Flush())
-	for _, key := range order {
-		run.Messages = append(run.Messages, latest[key])
-	}
+	rich.add(parser.Flush())
+	run.Messages = rich.messages()
 	return run
 }
 

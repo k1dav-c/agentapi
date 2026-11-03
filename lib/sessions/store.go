@@ -146,11 +146,7 @@ type logReader interface {
 // read, through r (s.logs or a pass over it), and returns what was read of
 // it, with its calls if withCalls.
 func (s *Store) readLog(r logReader, path string, withCalls bool) (logSnapshot, error) {
-	var snap logSnapshot
-	err := r.Read(path, func(l *sessionLog, info agentlog.FileInfo) {
-		l.reportDrift(path)
-		snap = l.snapshot(path, info, withCalls)
-	})
+	snap, err := s.readSubagentLog(r, path, withCalls)
 	if err != nil {
 		return logSnapshot{}, err
 	}
@@ -170,7 +166,7 @@ func (s *Store) readLog(r logReader, path string, withCalls bool) (logSnapshot, 
 }
 
 // readSubagentLog is readLog for a subagent's log, through s.subs or a
-// pass over it.
+// pass over it: it records no session's path.
 func (s *Store) readSubagentLog(r logReader, path string, withCalls bool) (logSnapshot, error) {
 	var snap logSnapshot
 	err := r.Read(path, func(l *sessionLog, info agentlog.FileInfo) {
@@ -190,7 +186,7 @@ func (s *Store) summaries() ([]SessionSummary, error) {
 	for _, path := range files {
 		snap, err := s.readLog(s.logs, path, false)
 		if err == nil && snap.session {
-			if s.agent == "codex" {
+			if !s.src.namesInLog {
 				snap.summary.Title = s.threadName(snap.summary.ID)
 			}
 			list = append(list, snap.summary)

@@ -528,20 +528,26 @@ func (d *Dispatcher) enqueue(eventType string, data any, done chan struct{}) boo
 	if !d.wants(eventType) {
 		return false
 	}
-	instance := d.Instance()
-	event := queuedEvent{WebhookEvent: WebhookEvent{
-		ID:        randomWebhookID(),
-		Type:      eventType,
-		CreatedAt: d.clock.Now().UTC(),
-		Instance:  &instance,
-		Data:      data,
-	}, done: done}
+	event := queuedEvent{WebhookEvent: d.newEvent(eventType, data), done: done}
 	select {
 	case d.queue <- event:
 		return true
 	default:
 		d.logger.Warn("Webhook queue is full; dropping event", "event_id", event.ID, "event_type", event.Type)
 		return false
+	}
+}
+
+// newEvent returns a new event of type eventType with data, from this
+// instance now.
+func (d *Dispatcher) newEvent(eventType string, data any) WebhookEvent {
+	instance := d.Instance()
+	return WebhookEvent{
+		ID:        randomWebhookID(),
+		Type:      eventType,
+		CreatedAt: d.clock.Now().UTC(),
+		Instance:  &instance,
+		Data:      data,
 	}
 }
 
@@ -676,7 +682,7 @@ func (d *Dispatcher) deliver(ctx context.Context, event queuedEvent) {
 	config := d.Config()
 	client := webhookClient(config.Timeout)
 	for attempt := 1; attempt <= config.MaxAttempts; attempt++ {
-		err := d.sendWithConfig(ctx, config, client, event.WebhookEvent, body)
+		_, err := d.send(ctx, config, client, event.WebhookEvent, body)
 		if err == nil {
 			return
 		}
@@ -712,11 +718,6 @@ type permanentWebhookError struct{ status string }
 
 func (e *permanentWebhookError) Error() string {
 	return fmt.Sprintf("unexpected HTTP status %s", e.status)
-}
-
-func (d *Dispatcher) sendWithConfig(ctx context.Context, config Config, client *http.Client, event WebhookEvent, body []byte) error {
-	_, err := d.send(ctx, config, client, event, body)
-	return err
 }
 
 // send POSTs one delivery of event and returns the receiver's status.
@@ -766,14 +767,7 @@ func (d *Dispatcher) Test(ctx context.Context) (status string, err error) {
 	if config.URL == "" {
 		return "", errors.New("no webhook URL is set")
 	}
-	instance := d.Instance()
-	event := WebhookEvent{
-		ID:        randomWebhookID(),
-		Type:      webhookEventTest,
-		CreatedAt: d.clock.Now().UTC(),
-		Instance:  &instance,
-		Data:      map[string]string{"message": "A test event from AgentAPI"},
-	}
+	event := d.newEvent(webhookEventTest, map[string]string{"message": "A test event from AgentAPI"})
 	body, err := d.renderBody(event)
 	if err != nil {
 		return "", err

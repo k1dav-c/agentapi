@@ -1,8 +1,9 @@
 // Package procutil starts and stops the agent processes the native adapters
 // drive. Each process runs in its own process group, so stopping it also
 // stops what it started (MCP servers, the commands its tools run), and so
-// does its exit, however it came; the adapter owns the pipes; stderr is logged and its end kept for error
-// messages; and Stop shuts the process down politely before it kills it.
+// does its exit, however it came. The adapter owns the pipes; stderr is
+// logged and its end kept for error messages; and Stop shuts the process
+// down politely before it kills it.
 package procutil
 
 import (

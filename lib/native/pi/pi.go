@@ -133,10 +133,9 @@ type Adapter struct {
 	// fork opens a copy of resumeRef's session under a new ID.
 	fork bool
 
-	// The timeouts and limits of the constants above, and the clock of
-	// the snapshot, dialog and interrupt timers; tests change them.
+	// The timeouts of the constants above, which tests change, and the
+	// clock of the snapshot, dialog and interrupt timers.
 	interruptTimeout time.Duration
-	interval         time.Duration
 	settleGrace      time.Duration
 	clock            quartz.Clock
 	// lineHandled, if set, is called after each stdout record is handled.
@@ -178,9 +177,6 @@ type Adapter struct {
 	// contextWindow is the context window of the session's model.
 	contextWindow int64
 
-	// loopDone is closed when the event loop has stopped.
-	loopDone <-chan struct{}
-
 	// Loop state; only the event loop goroutine touches it.
 	loop loopState
 }
@@ -211,7 +207,6 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 		drift:            agentio.NewDrift("Pi", log),
 		resumeRef:        resumeRef,
 		interruptTimeout: interruptTimeout,
-		interval:         snapshotInterval,
 		settleGrace:      settleGrace,
 		writer:           agentio.NewWriter("pi"),
 		clock:            cfg.Clock,
@@ -226,7 +221,6 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 		Start:  cfg.StartProcess,
 		Writer: a.writer,
 	})
-	a.loopDone = a.host.LoopDone()
 	return a
 }
 
@@ -260,15 +254,12 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		return err
 	}
 
-	res, err := a.request(ctx, cmdQuery, simpleCommand{Type: "get_state"})
-	if err == nil {
-		err = res.err
-	}
+	res, err := a.query(ctx, simpleCommand{Type: "get_state"})
 	if err != nil {
 		return a.startError(err)
 	}
 	var state sessionState
-	if err := a.drift.Decode("get_state response", res.data, &state); err != nil {
+	if err := a.drift.Decode("get_state response", res, &state); err != nil {
 		// Not ours to judge: the session opens without what it says.
 		a.log.Warn("Malformed Pi session state", "error", err)
 	} else if !state.hasModel() {
@@ -416,8 +407,8 @@ func (a *Adapter) Steer(ctx context.Context, input native.Input) error {
 
 // Interrupt sends abort. The turn ends once Pi has settled; the loop then
 // reports it with StopReason "interrupted". If Pi doesn't end the turn
-// within interruptTimeout (an extension command that doesn't stop), the
-// adapter ends it.
+// within interruptTimeout (an extension command that doesn't stop, or an
+// abort whose write Pi didn't confirm), the adapter ends it.
 func (a *Adapter) Interrupt(ctx context.Context) error {
 	if err := a.ready(); err != nil {
 		return err
@@ -434,10 +425,14 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 	// Nobody waits for the response, which the loop handles.
 	id, _, err := a.register(cmdAbort)
 	if err == nil {
-		err = a.send(ctx, simpleCommand{ID: id, Type: "abort"})
-		if err != nil {
-			a.forget(id)
-		}
+		err = a.sendAbort(ctx, id)
+	}
+	if errors.Is(err, native.ErrUnconfirmed) {
+		// Pi may yet get the abort: its response still cancels a
+		// command's dialogs, and the deadline ends the turn if it
+		// doesn't.
+		a.log.Warn("Pi didn't confirm the abort; the turn ends by the deadline if Pi doesn't end it", "error", err)
+		err = nil
 	}
 	if err != nil {
 		a.mu.Lock()
@@ -491,8 +486,9 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 	return err
 }
 
-// Capabilities reports steer, interrupt, resume and images. Images are
-// left out when Pi says its model doesn't take them.
+// Capabilities reports steer, interrupt, resume, images, settings and
+// compaction. Images are left out when Pi says its model doesn't take
+// them.
 func (a *Adapter) Capabilities() native.Capabilities {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -535,14 +531,24 @@ func (a *Adapter) abortForClose(ctx context.Context) <-chan struct{} {
 	// stdin makes the write fail.
 	go func() {
 		defer close(answered)
-		if err := a.send(ctx, simpleCommand{ID: id, Type: "abort"}); err != nil {
-			a.forget(id)
+		if a.sendAbort(ctx, id) != nil {
 			return
 		}
 		// The answer, or errExited once Pi's output ended.
 		_, _ = call.Wait(ctx)
 	}()
 	return answered
+}
+
+// sendAbort sends the abort registered as id, which is forgotten if the
+// write fails before it went out. One that went out unconfirmed is kept,
+// as request keeps a command: the loop handles a late response.
+func (a *Adapter) sendAbort(ctx context.Context, id string) error {
+	err := a.send(ctx, simpleCommand{ID: id, Type: "abort"})
+	if err != nil && !errors.Is(err, native.ErrUnconfirmed) {
+		a.forget(id)
+	}
+	return err
 }
 
 // ready returns an error until Start has completed, and after Pi exited.

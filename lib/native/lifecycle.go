@@ -79,6 +79,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error
 	settings := c.applyChosen(ctx, gen, adapter, caps)
 	var prompt Input
 	if c.cfg.InitialPrompt != "" {
+		// Before the lock: it looks for the files the prompt names.
 		prompt = InputFromText(c.cfg.InitialPrompt)
 	}
 
@@ -87,39 +88,55 @@ func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error
 		c.mu.Unlock()
 		return nil
 	}
+	c.markStartedLocked(caps, settings)
+	// The prompt's turn begins before the lock is released, so no other
+	// message can start a turn first.
+	turn := c.beginInitialPromptLocked(prompt)
+	c.cfg.Emitter.EmitStatus(c.statusLocked())
+	c.mu.Unlock()
+
+	if turn != nil {
+		c.sendInitialPrompt(ctx, *turn)
+	}
+	return nil
+}
+
+// markStartedLocked records that the agent started, with caps and
+// settings: it accepts turns, and no start waits for a login any more.
+func (c *Conversation) markStartedLocked(caps Capabilities, settings Settings) {
 	c.started = true
 	c.ran = true
 	c.caps = caps
 	c.setSettingsLocked(settings)
 	c.loginWaiting = false
 	c.startErrors = nil
-	if c.login != nil {
-		c.login = nil
-		c.cfg.Observer.LoginRequired(nil)
-	}
+	c.clearLoginLocked()
 	c.cfg.Observer.Started(caps)
-	// The prompt's turn begins before the lock is released, so no other
-	// message can start a turn first.
-	var turn *pendingTurn
-	if c.cfg.InitialPrompt != "" && !c.promptSent {
-		c.promptSent = true
-		if t, err := c.beginTurnLocked(prompt); err != nil {
-			c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), conv.ErrorLevelError)
-		} else {
-			turn = &t
-		}
-	}
-	c.cfg.Emitter.EmitStatus(c.statusLocked())
-	c.mu.Unlock()
+}
 
-	if turn != nil {
-		sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
-		defer cancel()
-		if err := c.deliverTurn(sendCtx, *turn); err != nil {
-			c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), conv.ErrorLevelError)
-		}
+// beginInitialPromptLocked begins the turn of the initial prompt, read as
+// prompt, unless there is none or it was sent already. It returns the turn
+// to send, or nil.
+func (c *Conversation) beginInitialPromptLocked(prompt Input) *pendingTurn {
+	if c.cfg.InitialPrompt == "" || c.promptSent {
+		return nil
 	}
-	return nil
+	c.promptSent = true
+	t, err := c.beginTurnLocked(prompt)
+	if err != nil {
+		c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), conv.ErrorLevelError)
+		return nil
+	}
+	return &t
+}
+
+// sendInitialPrompt sends the initial prompt's turn.
+func (c *Conversation) sendInitialPrompt(ctx context.Context, turn pendingTurn) {
+	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
+	if err := c.deliverTurn(sendCtx, turn); err != nil {
+		c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), conv.ErrorLevelError)
+	}
 }
 
 // applyChosen gives the new adapter of generation gen the settings chosen
@@ -276,10 +293,7 @@ func (c *Conversation) startAgainLocked(what string, err error) {
 		c.cfg.Logger.Error("The agent is gone; not starting it again", "error", err, "attempts", c.restarts)
 		c.cfg.Emitter.EmitError(what+" "+gaveUpText(c.restarts), conv.ErrorLevelError)
 		// Nothing waits for a login now.
-		if c.login != nil {
-			c.login = nil
-			c.cfg.Observer.LoginRequired(nil)
-		}
+		c.clearLoginLocked()
 		c.cfg.Observer.AgentExited(AgentExit{Err: err})
 		return
 	}
@@ -534,20 +548,19 @@ func (c *Conversation) Close() error {
 // on, its requests can't be answered any more, and a wait to start the agent
 // again (for a login, after an exit) ends.
 func (c *Conversation) retireAdapterLocked() Adapter {
-	c.generation++
 	old := c.adapter
-	c.adapter = nil
-	c.started = false
-	c.turnActive = false
-	c.unconfirmedTurn = false
-	c.compacting = false
 	c.loginWaiting = false
 	c.startErrors = nil
+	c.wakeRelaunchLocked()
+	c.downLocked()
+	return old
+}
+
+// wakeRelaunchLocked cuts short the wait before the agent is started
+// again, if one runs (see relaunchLocked).
+func (c *Conversation) wakeRelaunchLocked() {
 	if c.relaunchWake != nil {
 		close(c.relaunchWake)
 		c.relaunchWake = nil
 	}
-	c.expireRequestsLocked(true)
-	c.messages.forgetRich()
-	return old
 }

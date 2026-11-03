@@ -85,15 +85,7 @@ func runEchoAgent(scriptPath string) {
 
 		// Handle initial/follow-up messages (empty ExpectMessage)
 		if expectedMsg == "" {
-			// Show thinking state if there's a delay
-			if entry.ThinkDurationMS > 0 {
-				redrawTerminal(messages, true)
-				spinnerCtx, spinnerCancel := context.WithCancel(ctx)
-				spinnerDone := runSpinner(spinnerCtx)
-				time.Sleep(time.Duration(entry.ThinkDurationMS) * time.Millisecond)
-				spinnerCancel()
-				<-spinnerDone
-			}
+			think(ctx, messages, entry.ThinkDurationMS)
 
 			messages = append(messages, conv.Message{
 				Role:    conv.RoleAgent,
@@ -128,15 +120,7 @@ func runEchoAgent(scriptPath string) {
 		})
 		redrawTerminal(messages, false)
 
-		// Show thinking state if there's a delay
-		if entry.ThinkDurationMS > 0 {
-			redrawTerminal(messages, true)
-			spinnerCtx, spinnerCancel := context.WithCancel(ctx)
-			spinnerDone := runSpinner(spinnerCtx)
-			time.Sleep(time.Duration(entry.ThinkDurationMS) * time.Millisecond)
-			spinnerCancel()
-			<-spinnerDone
-		}
+		think(ctx, messages, entry.ThinkDurationMS)
 
 		messages = append(messages, conv.Message{
 			Role:    conv.RoleAgent,
@@ -149,6 +133,20 @@ func runEchoAgent(scriptPath string) {
 
 	// Now just do nothing.
 	<-make(chan struct{})
+}
+
+// think shows the thinking state with a spinner for ms milliseconds, if
+// any.
+func think(ctx context.Context, messages []conv.Message, ms int64) {
+	if ms <= 0 {
+		return
+	}
+	redrawTerminal(messages, true)
+	spinnerCtx, spinnerCancel := context.WithCancel(ctx)
+	spinnerDone := runSpinner(spinnerCtx)
+	time.Sleep(time.Duration(ms) * time.Millisecond)
+	spinnerCancel()
+	<-spinnerDone
 }
 
 func redrawTerminal(messages []conv.Message, thinking bool) {
@@ -170,16 +168,19 @@ func redrawTerminal(messages []conv.Message, thinking bool) {
 	}
 }
 
+var (
+	bracketedPasteRe = regexp.MustCompile(`\x1b\[\d+~`)
+	backspaceRe      = regexp.MustCompile(`.\x08`)
+)
+
 func cleanTerminalInput(input string) string {
 	// Strip ANSI escape sequences
 	input = stripansi.Strip(input)
 
 	// Remove bracketed paste mode sequences (^[[200~ and ^[[201~)
-	bracketedPasteRe := regexp.MustCompile(`\x1b\[\d+~`)
 	input = bracketedPasteRe.ReplaceAllString(input, "")
 
 	// Remove backspace sequences (character followed by ^H)
-	backspaceRe := regexp.MustCompile(`.\x08`)
 	input = backspaceRe.ReplaceAllString(input, "")
 
 	// Remove other common control characters
