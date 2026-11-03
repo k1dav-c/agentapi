@@ -1062,7 +1062,9 @@ try {
       await elementShot(page, page.locator('aside'), 'hub-list.png');
       // What the agents spent: the overview's card.
       await elementShot(page, page.locator('section[aria-labelledby="hub-spend"]'), 'hub-spend.png');
-      // How long they worked: the card below it.
+      // The tokens of the same calls: the card below it.
+      await elementShot(page, page.locator('section[aria-labelledby="hub-tokens"]'), 'hub-tokens.png');
+      // How long they worked: the card below that.
       await elementShot(page, page.locator('section[aria-labelledby="hub-work"]'), 'hub-work.png');
       // The AgentAPI versions they run: the overview's last card.
       await elementShot(page, page.locator('section[aria-labelledby="hub-versions"]'), 'hub-versions.png');
