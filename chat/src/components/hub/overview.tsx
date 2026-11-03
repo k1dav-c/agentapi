@@ -13,6 +13,7 @@ import {
   formatTokens,
   formatUSD,
   formatWork,
+  groupSubtotals,
   instanceState,
   instanceVersion,
   parseVersion,
@@ -25,6 +26,7 @@ import {
   workSeconds,
   workTitle,
   workTotals,
+  type GroupSubtotal,
   type HubFilter,
   type HubInstance,
   type InstanceState,
@@ -194,6 +196,139 @@ const stats: {filter: HubFilter; label: string; tone: string; tint: string; glyp
   {filter: "offline", label: "Offline", tone: "text-state-fault", tint: "bg-state-fault/5 border-state-fault/25", glyph: "unreachable"},
 ];
 
+// CardHeading is a card's title, with a note on what it counts.
+function CardHeading({id, title, children}: {id: string; title: string; children: React.ReactNode}) {
+  return (
+    <h3 id={id} className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+      {title}
+      <span className="font-normal tracking-normal normal-case text-muted-foreground/70">{children}</span>
+    </h3>
+  );
+}
+
+// Figure is a card's total, large; title says it in full.
+function Figure({label, value, title}: {label: string; value: string; title?: string}) {
+  return (
+    <div title={title}>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="text-3xl font-semibold tracking-tight tabular-nums">{value}</dd>
+    </div>
+  );
+}
+
+// PeriodCard is a card of figures of the last 24 hours and 7 days: the
+// totals and who counts on the left, its tables on the right.
+function PeriodCard({
+  id,
+  title,
+  note,
+  day,
+  week,
+  counted,
+  children,
+}: {
+  id: string;
+  title: string;
+  note: string;
+  day: React.ReactNode;
+  week: React.ReactNode;
+  counted: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mt-10" aria-labelledby={id}>
+      <CardHeading id={id} title={title}>
+        {note}
+      </CardHeading>
+      <div className="mt-3 grid gap-6 rounded-2xl border bg-card p-5 shadow-xs md:grid-cols-[auto_minmax(0,1fr)]">
+        <div className="flex flex-wrap items-end gap-x-8 gap-y-3 md:flex-col md:items-start md:border-r md:pr-8">
+          <dl className="flex gap-8 md:flex-col md:gap-4">
+            {day}
+            {week}
+          </dl>
+          <p className="text-xs text-muted-foreground">{counted}</p>
+        </div>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+// PeriodTable is a table of the last 24 hours and 7 days, its first column
+// headed first.
+function PeriodTable({first, children}: {first: string; children: React.ReactNode}) {
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="text-left text-xs text-muted-foreground">
+          <th className="pb-2 font-normal">{first}</th>
+          <th className="pb-2 text-right font-normal">24 hours</th>
+          <th className="pb-2 text-right font-normal">7 days</th>
+        </tr>
+      </thead>
+      <tbody>{children}</tbody>
+    </table>
+  );
+}
+
+// PeriodRow is a row of a PeriodTable: what it counts (cell, its first
+// cell) and its figures; title says them in full.
+function PeriodRow({cell, day, week, title}: {cell: React.ReactNode; day: string; week: string; title: string}) {
+  return (
+    <tr className="border-t" title={title}>
+      {cell}
+      <td className="py-2 text-right tabular-nums">{day}</td>
+      <td className="py-2 pl-4 text-right tabular-nums">{week}</td>
+    </tr>
+  );
+}
+
+// InstanceCell names an instance in a PeriodRow, a button that opens it.
+function InstanceCell({instance, onOpen}: {instance: HubInstance; onOpen: (id: string) => void}) {
+  return (
+    <td className="max-w-0 py-2 pr-3">
+      <button
+        type="button"
+        onClick={() => onOpen(instance.id)}
+        className="flex w-full min-w-0 items-center gap-2 rounded text-left outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      >
+        {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3.5 shrink-0" />}
+        <span className="truncate font-medium">{displayName(instance)}</span>
+      </button>
+    </td>
+  );
+}
+
+// A row of the By group table, its figures formatted.
+interface GroupRow {
+  name: string;
+  day: string;
+  week: string;
+  title: string;
+}
+
+function groupRows(groups: GroupSubtotal[], format: (n: number) => string, title: (day: number, week: number) => string): GroupRow[] {
+  return groups.map((group) => ({name: group.name, day: format(group.day), week: format(group.week), title: title(group.day, group.week)}));
+}
+
+// GroupTable is the By group table; none without groups.
+function GroupTable({groups}: {groups: GroupRow[]}) {
+  if (groups.length === 0) return null;
+  return (
+    <PeriodTable first="By group">
+      {groups.map((group) => (
+        <PeriodRow
+          key={group.name}
+          cell={<td className={cn("max-w-0 truncate py-2 pr-3", group.name ? "font-medium" : "text-muted-foreground")}>{group.name || "Ungrouped"}</td>}
+          day={group.day}
+          week={group.week}
+          title={group.title}
+        />
+      ))}
+    </PeriodTable>
+  );
+}
+
 // SpendCard is what the instances spent in the last 24 hours and 7 days,
 // all of them and the ones that spent the most this week.
 function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: string) => void}) {
@@ -205,56 +340,30 @@ function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: 
     .sort((a, b) => b.spend.week_usd - a.spend.week_usd)
     .slice(0, 5);
   return (
-    <section className="mt-10" aria-labelledby="hub-spend">
-      <h3 id="hub-spend" className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-        Spend
-        <span className="font-normal tracking-normal normal-case text-muted-foreground/70">API-equivalent, at list prices; a subscription doesn&apos;t charge it</span>
-      </h3>
-      <div className="mt-3 grid gap-6 rounded-2xl border bg-card p-5 shadow-xs md:grid-cols-[auto_minmax(0,1fr)]">
-        <div className="flex flex-wrap items-end gap-x-8 gap-y-3 md:flex-col md:items-start md:border-r md:pr-8">
-          <dl className="flex gap-8 md:flex-col md:gap-4">
-            <div>
-              <dt className="text-xs text-muted-foreground">Last 24 hours</dt>
-              <dd className="text-3xl font-semibold tracking-tight tabular-nums">{formatUSD(totals.day)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Last 7 days</dt>
-              <dd className="text-3xl font-semibold tracking-tight tabular-nums">{formatUSD(totals.week)}</dd>
-            </div>
-          </dl>
-          <p className="text-xs text-muted-foreground">
-            {totals.counted} of {instances.length} agents report it
-          </p>
-        </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-muted-foreground">
-              <th className="pb-2 font-normal">Spent the most this week</th>
-              <th className="pb-2 text-right font-normal">24 hours</th>
-              <th className="pb-2 text-right font-normal">7 days</th>
-            </tr>
-          </thead>
-          <tbody>
-            {top.map(({instance, spend}) => (
-              <tr key={instance.id} className="border-t" title={spendTitle(spend.day_usd, spend.week_usd)}>
-                <td className="max-w-0 py-2 pr-3">
-                  <button
-                    type="button"
-                    onClick={() => onOpen(instance.id)}
-                    className="flex w-full min-w-0 items-center gap-2 rounded text-left outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                  >
-                    {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3.5 shrink-0" />}
-                    <span className="truncate font-medium">{displayName(instance)}</span>
-                  </button>
-                </td>
-                <td className="py-2 text-right tabular-nums">{formatUSD(spend.day_usd)}</td>
-                <td className="py-2 pl-4 text-right tabular-nums">{formatUSD(spend.week_usd)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
+    <PeriodCard
+      id="hub-spend"
+      title="Spend"
+      note="API-equivalent, at list prices; a subscription doesn't charge it"
+      day={<Figure label="Last 24 hours" value={formatUSD(totals.day)} />}
+      week={<Figure label="Last 7 days" value={formatUSD(totals.week)} />}
+      counted={
+        <>
+          {totals.counted} of {instances.length} agents report it
+        </>
+      }
+    >
+      <PeriodTable first="Spent the most this week">
+        {top.map(({instance, spend}) => (
+          <PeriodRow
+            key={instance.id}
+            cell={<InstanceCell instance={instance} onOpen={onOpen} />}
+            day={formatUSD(spend.day_usd)}
+            week={formatUSD(spend.week_usd)}
+            title={spendTitle(spend.day_usd, spend.week_usd)}
+          />
+        ))}
+      </PeriodTable>
+    </PeriodCard>
   );
 }
 
@@ -270,101 +379,46 @@ export function TokensCard({instances, onOpen}: {instances: HubInstance[]; onOpe
     .filter(({week}) => week.total > 0)
     .sort((a, b) => b.week.total - a.week.total)
     .slice(0, 5);
-  const byGroup = new Map<string, {day: number; week: number}>();
-  for (const {instance, day, week} of counted) {
-    const name = instance.group?.trim() ?? "";
-    const group = byGroup.get(name) ?? {day: 0, week: 0};
-    group.day += day.total;
-    group.week += week.total;
-    byGroup.set(name, group);
-  }
-  // Subtotals only when some agents are in a group, named ones first.
-  const groups =
-    byGroup.size > 1 || !byGroup.has("")
-      ? [...byGroup.entries()].filter(([, group]) => group.week > 0).sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)))
-      : [];
-  const header = (first: string) => (
-    <thead>
-      <tr className="text-left text-xs text-muted-foreground">
-        <th className="pb-2 font-normal">{first}</th>
-        <th className="pb-2 text-right font-normal">24 hours</th>
-        <th className="pb-2 text-right font-normal">7 days</th>
-      </tr>
-    </thead>
-  );
+  const groups = groupSubtotals(counted.map(({instance, day, week}) => ({instance, day: day.total, week: week.total})));
   return (
-    <section className="mt-10" aria-labelledby="hub-tokens">
-      <h3 id="hub-tokens" className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-        Tokens
-        <span className="font-normal tracking-normal normal-case text-muted-foreground/70">The calls the spend adds up, models without a price included</span>
-      </h3>
-      <div className="mt-3 grid gap-6 rounded-2xl border bg-card p-5 shadow-xs md:grid-cols-[auto_minmax(0,1fr)]">
-        <div className="flex flex-wrap items-end gap-x-8 gap-y-3 md:flex-col md:items-start md:border-r md:pr-8">
-          <dl className="flex gap-8 md:flex-col md:gap-4">
-            <div title={`${totals.day.total.toLocaleString()} tokens`}>
-              <dt className="text-xs text-muted-foreground">Last 24 hours</dt>
-              <dd className="text-3xl font-semibold tracking-tight tabular-nums">{formatTokens(totals.day.total)}</dd>
-            </div>
-            <div title={`${totals.week.total.toLocaleString()} tokens`}>
-              <dt className="text-xs text-muted-foreground">Last 7 days</dt>
-              <dd className="text-3xl font-semibold tracking-tight tabular-nums">{formatTokens(totals.week.total)}</dd>
-            </div>
-          </dl>
-          <p className="text-xs text-muted-foreground">
-            {totals.counted} of {instances.length} agents report it
-          </p>
-        </div>
-        <div className="min-w-0 space-y-5">
-          <table className="w-full text-sm">
-            {header("By kind")}
-            <tbody>
-              {tokenKinds.map(({key, label}) => (
-                <tr key={key} className="border-t" title={tokensTitle(totals.day[key], totals.week[key])}>
-                  <td className="py-2 pr-3">{label}</td>
-                  <td className="py-2 text-right tabular-nums">{formatTokens(totals.day[key])}</td>
-                  <td className="py-2 pl-4 text-right tabular-nums">{formatTokens(totals.week[key])}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <table className="w-full text-sm">
-            {header("Used the most this week")}
-            <tbody>
-              {top.map(({instance, day, week}) => (
-                <tr key={instance.id} className="border-t" title={tokensTitle(day.total, week.total)}>
-                  <td className="max-w-0 py-2 pr-3">
-                    <button
-                      type="button"
-                      onClick={() => onOpen(instance.id)}
-                      className="flex w-full min-w-0 items-center gap-2 rounded text-left outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                    >
-                      {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3.5 shrink-0" />}
-                      <span className="truncate font-medium">{displayName(instance)}</span>
-                    </button>
-                  </td>
-                  <td className="py-2 text-right tabular-nums">{formatTokens(day.total)}</td>
-                  <td className="py-2 pl-4 text-right tabular-nums">{formatTokens(week.total)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {groups.length > 0 && (
-            <table className="w-full text-sm">
-              {header("By group")}
-              <tbody>
-                {groups.map(([name, group]) => (
-                  <tr key={name} className="border-t" title={tokensTitle(group.day, group.week)}>
-                    <td className={cn("max-w-0 truncate py-2 pr-3", name ? "font-medium" : "text-muted-foreground")}>{name || "Ungrouped"}</td>
-                    <td className="py-2 text-right tabular-nums">{formatTokens(group.day)}</td>
-                    <td className="py-2 pl-4 text-right tabular-nums">{formatTokens(group.week)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+    <PeriodCard
+      id="hub-tokens"
+      title="Tokens"
+      note="The calls the spend adds up, models without a price included"
+      day={<Figure label="Last 24 hours" value={formatTokens(totals.day.total)} title={`${totals.day.total.toLocaleString()} tokens`} />}
+      week={<Figure label="Last 7 days" value={formatTokens(totals.week.total)} title={`${totals.week.total.toLocaleString()} tokens`} />}
+      counted={
+        <>
+          {totals.counted} of {instances.length} agents report it
+        </>
+      }
+    >
+      <div className="min-w-0 space-y-5">
+        <PeriodTable first="By kind">
+          {tokenKinds.map(({key, label}) => (
+            <PeriodRow
+              key={key}
+              cell={<td className="py-2 pr-3">{label}</td>}
+              day={formatTokens(totals.day[key])}
+              week={formatTokens(totals.week[key])}
+              title={tokensTitle(totals.day[key], totals.week[key])}
+            />
+          ))}
+        </PeriodTable>
+        <PeriodTable first="Used the most this week">
+          {top.map(({instance, day, week}) => (
+            <PeriodRow
+              key={instance.id}
+              cell={<InstanceCell instance={instance} onOpen={onOpen} />}
+              day={formatTokens(day.total)}
+              week={formatTokens(week.total)}
+              title={tokensTitle(day.total, week.total)}
+            />
+          ))}
+        </PeriodTable>
+        <GroupTable groups={groupRows(groups, formatTokens, tokensTitle)} />
       </div>
-    </section>
+    </PeriodCard>
   );
 }
 
@@ -375,34 +429,19 @@ interface WorkView {
   week: string;
   counted: number;
   top: {id: string; day: string; week: string; title: string}[];
-  groups: {name: string; day: string; week: string; title: string}[];
+  groups: GroupRow[];
 }
 
 function workView(instances: HubInstance[], now: number): WorkView | undefined {
   const totals = workTotals(instances, now);
   if (totals.week <= 0) return undefined;
-  const each = instances.map((instance) => ({instance, seconds: workSeconds(instance, now)}));
+  const each = instances.map((instance) => ({instance, ...workSeconds(instance, now)}));
   const top = each
-    .filter(({seconds}) => seconds.week > 0)
-    .sort((a, b) => b.seconds.week - a.seconds.week)
+    .filter(({week}) => week > 0)
+    .sort((a, b) => b.week - a.week)
     .slice(0, 5)
-    .map(({instance, seconds}) => ({id: instance.id, day: formatWork(seconds.day), week: formatWork(seconds.week), title: workTitle(seconds.day, seconds.week)}));
-  const byGroup = new Map<string, {day: number; week: number}>();
-  for (const {instance, seconds} of each) {
-    const name = instance.group?.trim() ?? "";
-    const group = byGroup.get(name) ?? {day: 0, week: 0};
-    group.day += seconds.day;
-    group.week += seconds.week;
-    byGroup.set(name, group);
-  }
-  // Subtotals only when some agents are in a group, named ones first.
-  const groups = byGroup.size > 1 || !byGroup.has("")
-    ? [...byGroup.entries()]
-        .filter(([, group]) => group.week > 0)
-        .sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)))
-        .map(([name, group]) => ({name, day: formatWork(group.day), week: formatWork(group.week), title: workTitle(group.day, group.week)}))
-    : [];
-  return {day: formatWork(totals.day), week: formatWork(totals.week), counted: totals.counted, top, groups};
+    .map(({instance, day, week}) => ({id: instance.id, day: formatWork(day), week: formatWork(week), title: workTitle(day, week)}));
+  return {day: formatWork(totals.day), week: formatWork(totals.week), counted: totals.counted, top, groups: groupRows(groupSubtotals(each), formatWork, workTitle)};
 }
 
 const sameView = (a: WorkView | undefined, b: WorkView | undefined) => JSON.stringify(a) === JSON.stringify(b);
@@ -415,82 +454,37 @@ export function WorkCard({instances, onOpen}: {instances: HubInstance[]; onOpen:
   if (!view) return null;
   const byID = new Map(instances.map((instance) => [instance.id, instance]));
   return (
-    <section className="mt-10" aria-labelledby="hub-work">
-      <h3 id="hub-work" className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-        Work time
-        <span className="font-normal tracking-normal normal-case text-muted-foreground/70">How long the agents worked, as the hub saw it</span>
-      </h3>
-      <div className="mt-3 grid gap-6 rounded-2xl border bg-card p-5 shadow-xs md:grid-cols-[auto_minmax(0,1fr)]">
-        <div className="flex flex-wrap items-end gap-x-8 gap-y-3 md:flex-col md:items-start md:border-r md:pr-8">
-          <dl className="flex gap-8 md:flex-col md:gap-4">
-            <div>
-              <dt className="text-xs text-muted-foreground">Last 24 hours</dt>
-              <dd className="text-3xl font-semibold tracking-tight tabular-nums">{view.day}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Last 7 days</dt>
-              <dd className="text-3xl font-semibold tracking-tight tabular-nums">{view.week}</dd>
-            </div>
-          </dl>
-          <p className="text-xs text-muted-foreground">
-            {view.counted} of {instances.length} agents worked this week
-          </p>
-        </div>
-        <div className="min-w-0 space-y-5">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-muted-foreground">
-                <th className="pb-2 font-normal">Worked the most this week</th>
-                <th className="pb-2 text-right font-normal">24 hours</th>
-                <th className="pb-2 text-right font-normal">7 days</th>
-              </tr>
-            </thead>
-            <tbody>
-              {view.top.map((row) => {
-                const instance = byID.get(row.id);
-                if (!instance) return null;
-                return (
-                  <tr key={row.id} className="border-t" title={row.title}>
-                    <td className="max-w-0 py-2 pr-3">
-                      <button
-                        type="button"
-                        onClick={() => onOpen(row.id)}
-                        className="flex w-full min-w-0 items-center gap-2 rounded text-left outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                      >
-                        {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3.5 shrink-0" />}
-                        <span className="truncate font-medium">{displayName(instance)}</span>
-                      </button>
-                    </td>
-                    <td className="py-2 text-right tabular-nums">{row.day}</td>
-                    <td className="py-2 pl-4 text-right tabular-nums">{row.week}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {view.groups.length > 0 && (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-muted-foreground">
-                  <th className="pb-2 font-normal">By group</th>
-                  <th className="pb-2 text-right font-normal">24 hours</th>
-                  <th className="pb-2 text-right font-normal">7 days</th>
-                </tr>
-              </thead>
-              <tbody>
-                {view.groups.map((group) => (
-                  <tr key={group.name} className="border-t" title={group.title}>
-                    <td className={cn("max-w-0 truncate py-2 pr-3", group.name ? "font-medium" : "text-muted-foreground")}>{group.name || "Ungrouped"}</td>
-                    <td className="py-2 text-right tabular-nums">{group.day}</td>
-                    <td className="py-2 pl-4 text-right tabular-nums">{group.week}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+    <PeriodCard
+      id="hub-work"
+      title="Work time"
+      note="How long the agents worked, as the hub saw it"
+      day={<Figure label="Last 24 hours" value={view.day} />}
+      week={<Figure label="Last 7 days" value={view.week} />}
+      counted={
+        <>
+          {view.counted} of {instances.length} agents worked this week
+        </>
+      }
+    >
+      <div className="min-w-0 space-y-5">
+        <PeriodTable first="Worked the most this week">
+          {view.top.map((row) => {
+            const instance = byID.get(row.id);
+            if (!instance) return null;
+            return (
+              <PeriodRow
+                key={row.id}
+                cell={<InstanceCell instance={instance} onOpen={onOpen} />}
+                day={row.day}
+                week={row.week}
+                title={row.title}
+              />
+            );
+          })}
+        </PeriodTable>
+        <GroupTable groups={view.groups} />
       </div>
-    </section>
+    </PeriodCard>
   );
 }
 
@@ -514,12 +508,9 @@ export function VersionsCard({root, instances, hubVersion}: {root: string; insta
   const byHand = older.blocked.length + older.off.length + older.unsupported.length;
   return (
     <section className="mt-10" aria-labelledby="hub-versions">
-      <h3 id="hub-versions" className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-        Versions
-        <span className="font-normal tracking-normal normal-case text-muted-foreground/70">
-          {release ? `The AgentAPI version of each agent; the hub runs v${hubVersion}` : "The hub is a development build, so no version counts as older"}
-        </span>
-      </h3>
+      <CardHeading id="hub-versions" title="Versions">
+        {release ? `The AgentAPI version of each agent; the hub runs v${hubVersion}` : "The hub is a development build, so no version counts as older"}
+      </CardHeading>
       <div className={cn("mt-3 grid gap-6 rounded-2xl border bg-card p-5 shadow-xs", release && "md:grid-cols-[auto_minmax(0,1fr)]")}>
         {release && (
           <div className="flex flex-wrap items-end gap-x-8 gap-y-3 md:flex-col md:items-start md:border-r md:pr-8">
@@ -618,14 +609,14 @@ export function Overview({
   }
   const headline =
     needs.length > 0
-        ? `${needs.length} ${needs.length === 1 ? "agent needs" : "agents need"} you`
-        : working.length > 0
-          ? "Everything's running"
-          : "All quiet";
+      ? `${needs.length} ${needs.length === 1 ? "agent needs" : "agents need"} you`
+      : working.length > 0
+        ? "Everything's running"
+        : "All quiet";
   const sub = [
-          working.length && `${working.length} working`,
-          unread.length && `${unread.length} finished since you looked`,
-          counts.offline && `${counts.offline} offline`,
+    working.length && `${working.length} working`,
+    unread.length && `${unread.length} finished since you looked`,
+    counts.offline && `${counts.offline} offline`,
     `${instances.length} in all`,
   ]
     .filter(Boolean)
@@ -699,7 +690,6 @@ export function Overview({
     </div>
   );
 }
-
 
 // Onboarding shows how to connect the first agents: once per machine.
 export function Onboarding({root, onAdd, compact = false}: {root: string; onAdd: () => void; compact?: boolean}) {

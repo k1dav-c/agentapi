@@ -204,8 +204,37 @@ export function groupInstances(instances: Iterable<HubInstance>): HubGroup[] {
     byName.set(name, [...(byName.get(name) ?? []), instance]);
   }
   return [...byName.entries()]
-    .sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)))
+    .sort(([a], [b]) => groupOrder(a, b))
     .map(([name, rows]) => ({name, instances: rows, needsYou: needsYou(rows)}));
+}
+
+// groupOrder orders group names by name, with "" (no group) last.
+function groupOrder(a: string, b: string): number {
+  return a === "" ? 1 : b === "" ? -1 : a.localeCompare(b);
+}
+
+// A group's figures in the last 24 hours and 7 days: name is "" for the
+// instances in no group.
+export interface GroupSubtotal {
+  name: string;
+  day: number;
+  week: number;
+}
+
+// groupSubtotals adds up each instance's figures by its group, in
+// groupInstances order, leaving out the groups with none this week. It is
+// empty while no instance is in a group: the subtotal would be the total.
+export function groupSubtotals(rows: Iterable<{instance: HubInstance; day: number; week: number}>): GroupSubtotal[] {
+  const byName = new Map<string, GroupSubtotal>();
+  for (const {instance, day, week} of rows) {
+    const name = instance.group?.trim() ?? "";
+    const group = byName.get(name) ?? {name, day: 0, week: 0};
+    group.day += day;
+    group.week += week;
+    byName.set(name, group);
+  }
+  if (byName.size === 1 && byName.has("")) return [];
+  return [...byName.values()].filter((group) => group.week > 0).sort((a, b) => groupOrder(a.name, b.name));
 }
 
 // groupNames lists the groups in use, by name.
