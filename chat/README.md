@@ -84,7 +84,7 @@ Its settings can change from the composer's menus or slash commands: models Swif
 needs approval; in plan mode every turn ends with a plan, whose approval switches back to
 bypass. Every turn reports simulated context and rate-limit usage that grows with each turn, and
 `/compact` empties the context. The terminal button opens a real shell in the working directory, as
-for any native agent.
+for any agent.
 
 Steering appends to the reply, and Stop ends the turn as interrupted. The adapter lives in
 `lib/native/demo`.
@@ -107,8 +107,8 @@ agent replies and tool results are simulated.
 
 ![Native desktop chat with structured tool activity and session controls](../docs/screenshots/chat-desktop.png)
 
-The task groups the prompt, tool activity, and reply. Native session controls appear in the
-composer, and wide screens show thinking alongside the transcript.
+The task groups the prompt, tool activity, and reply. Session controls appear in the composer,
+and wide screens show thinking alongside the transcript.
 
 ![Expanded tool call with its command input and full result](../docs/screenshots/tool-call.png)
 

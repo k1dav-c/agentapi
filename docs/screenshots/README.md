@@ -81,6 +81,7 @@ device scale factor of 1.
 | [hub-phone-menu.png](hub-phone-menu.png) | A row's menu on a phone: Pin to top, its group, a new one, and Forget |
 | [hub-muted.png](hub-muted.png) | The list on a phone with an agent's login wait muted |
 | [hub-spend.png](hub-spend.png) | The overview's Spend card: the last 24 hours and 7 days, and the agents that spent the most |
+| [hub-tokens.png](hub-tokens.png) | The overview's Tokens card: the last 24 hours and 7 days, by kind, the agents that used the most, and each group |
 | [hub-work.png](hub-work.png) | The overview's Work time card: the last 24 hours and 7 days, the agents that worked the most, and each group |
 | [hub-versions.png](hub-versions.png) | The overview's Versions card: how many agents run each AgentAPI version, on which machines, and how to update the older ones |
 | [hub-phone-chat.png](hub-phone-chat.png) | An instance open from the hub on a phone, with the way back to the list |
