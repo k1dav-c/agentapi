@@ -90,7 +90,7 @@ func (h *Hub) follow(ctx context.Context, id string) {
 			return
 		}
 		connected := false
-		err := h.readSummaries(ctx, instance, func(summary instanceapi.SummaryBody) {
+		heard, err := h.readSummaries(ctx, instance, func(summary instanceapi.SummaryBody) {
 			connected = true
 			failing = time.Time{}
 			wait = watchRetryMin
@@ -115,6 +115,9 @@ func (h *Hub) follow(ctx context.Context, id string) {
 			if ctx.Err() != nil || i.Connection == ConnectionStopped {
 				return
 			}
+			// What the hub saw of the instance working ends with what
+			// the stream last said.
+			i.heard = heard
 			if !grace && i.Source == SourceWebhook && i.HeartbeatSeconds > 0 &&
 				now.Sub(i.LastSeen) >= stoppedAfter*time.Duration(i.HeartbeatSeconds)*time.Second {
 				// Killed without instance.stopped, such as with its
@@ -208,13 +211,14 @@ func (e *otherInstanceError) Error() string {
 
 // readSummaries opens GET /events?only=summary of instance and calls got
 // with every summary until the stream ends, or until one comes from
-// another instance.
-func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(instanceapi.SummaryBody)) error {
+// another instance. It returns when the stream last said anything (a
+// summary or a heartbeat), zero if it never opened.
+func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(instanceapi.SummaryBody)) (heard time.Time, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, instance.URL+"/events?only=summary", nil)
 	if err != nil {
-		return err
+		return heard, err
 	}
 	if token := h.tokenFor(instance); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -222,16 +226,16 @@ func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(ins
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := h.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("unreachable: %w", err)
+		return heard, fmt.Errorf("unreachable: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized:
-		return errors.New("the instance needs an API token (--instance-token)")
+		return heard, errors.New("the instance needs an API token (--instance-token)")
 	case resp.StatusCode != http.StatusOK:
-		return fmt.Errorf("GET /events?only=summary: %s", resp.Status)
+		return heard, fmt.Errorf("GET /events?only=summary: %s", resp.Status)
 	case !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream"):
-		return errors.New("not an event stream: is it AgentAPI 1.1 or later?")
+		return heard, errors.New("not an event stream: is it AgentAPI 1.1 or later?")
 	}
 
 	// A stream that stays silent past its heartbeats is dead.
@@ -242,11 +246,12 @@ func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(ins
 		event, err := events.Next()
 		if err != nil {
 			if !errors.Is(err, io.EOF) && ctx.Err() == nil {
-				return err
+				return heard, err
 			}
 			break
 		}
 		idle.Reset(watchIdle, "hub", "idle")
+		heard = h.clock.Now()
 		if event.Type != "summary_update" {
 			continue
 		}
@@ -257,12 +262,12 @@ func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(ins
 		if summary.Instance.ID != "" && summary.Instance.ID != instance.ID {
 			// Its address went to another machine, or two machines have
 			// the same name.
-			return &otherInstanceError{id: summary.Instance.ID}
+			return heard, &otherInstanceError{id: summary.Instance.ID}
 		}
 		got(summary)
 	}
 	if ctx.Err() != nil && h.ctx.Err() == nil {
-		return errors.New("the event stream went silent")
+		return heard, errors.New("the event stream went silent")
 	}
-	return nil
+	return heard, nil
 }
